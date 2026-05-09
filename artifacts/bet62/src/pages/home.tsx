@@ -1,10 +1,10 @@
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { toast } from "sonner";
 import {
   Menu, X, Trophy, Activity, Gift, Dribbble, Target, Gamepad2,
-  LogOut, User, History, Loader2, Zap, TrendingUp, ChevronRight,
-  AlertCircle
+  LogOut, User, History, Loader2, Zap, TrendingUp, TrendingDown,
+  ChevronRight, AlertCircle
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -28,8 +28,30 @@ import brentfordBanner from "@assets/file_1778342479214_1778342557288.jpeg";
 import brightonBanner from "@assets/file_1778342485511_1778342557288.jpeg";
 import chelseaBanner from "@assets/file_1778342492556_1778342557288.jpeg";
 import evertonBanner from "@assets/file_1778342400663_1778342557288.jpeg";
+import realMadridBanner from "@assets/file_1778117934450_1778345179339.jpeg";
+import barcelonaBanner from "@assets/file_1778117940012_1778345179339.jpeg";
+import atleticoMadridBanner from "@assets/file_1778118038595_1778345179339.jpeg";
+import athleticClubBanner from "@assets/file_1778118048280_1778345179339.jpeg";
+import realSociedadBanner from "@assets/file_1778118054377_1778345179339.jpeg";
+import sevillaBanner from "@assets/file_1778118059955_1778345179339.jpeg";
+import valenciaBanner from "@assets/file_1778118068126_1778345179339.jpeg";
+import villarrealBanner from "@assets/file_1778118074042_1778345179339.jpeg";
+import realBetisBanner from "@assets/file_1778118081746_1778345179339.jpeg";
+import gironaBanner from "@assets/file_1778118089289_1778345179339.jpeg";
 
 const TEAM_BANNERS: Record<string, string> = {
+  "Real Madrid": realMadridBanner,
+  "Barcelona": barcelonaBanner,
+  "Atlético de Madrid": atleticoMadridBanner,
+  "Atletico Madrid": atleticoMadridBanner,
+  "Athletic Club": athleticClubBanner,
+  "Athletic Bilbao": athleticClubBanner,
+  "Real Sociedad": realSociedadBanner,
+  "Sevilla": sevillaBanner,
+  "Valencia": valenciaBanner,
+  "Villarreal": villarrealBanner,
+  "Real Betis": realBetisBanner,
+  "Girona": gironaBanner,
   "Arsenal": arsenalBanner,
   "Manchester City": manCityBanner,
   "Manchester United": manUnitedBanner,
@@ -144,6 +166,7 @@ export default function Home() {
   // Live matches
   const [liveMatches, setLiveMatches] = useState<Match[]>([]);
   const [liveLoading, setLiveLoading] = useState(false);
+  const prevLiveOdds = useRef<Record<string, Odds>>({});
 
   // Upcoming matches
   const [upcomingMatches, setUpcomingMatches] = useState<Match[]>([]);
@@ -176,9 +199,9 @@ export default function Home() {
       .finally(() => setUpcomingLoading(false));
   }, []);
 
-  // Fetch live matches when tab opens — load once, no polling
-  const fetchLive = useCallback(async () => {
-    setLiveLoading(true);
+  // Fetch live matches — polls every 30s while on live tab
+  const fetchLive = useCallback(async (showSpinner = false) => {
+    if (showSpinner) setLiveLoading(true);
     try {
       const res = await fetch("/api/matches/live");
       if (res.ok) {
@@ -189,19 +212,28 @@ export default function Home() {
           odds: Odds; markets?: AdvancedMarkets;
           events?: Array<{ type: string; team: string; minute: number; player: string }>;
         }>;
-        setLiveMatches(matches.map(m => ({ ...m, isLive: true })));
+        // Save current odds as previous before updating
+        setLiveMatches(prev => {
+          const newPrev: Record<string, Odds> = {};
+          for (const m of prev) newPrev[String(m.id)] = m.odds;
+          prevLiveOdds.current = newPrev;
+          return matches.map(m => ({ ...m, isLive: true }));
+        });
       }
     } catch {
       /* keep stale */
     } finally {
-      setLiveLoading(false);
+      if (showSpinner) setLiveLoading(false);
     }
   }, []);
 
   useEffect(() => {
     if (activeTab === "live") {
-      fetchLive();
+      fetchLive(true);
+      const interval = setInterval(() => fetchLive(false), 30000);
+      return () => clearInterval(interval);
     }
+    return undefined;
   }, [activeTab, fetchLive]);
 
   const fetchMyBets = useCallback(async () => {
@@ -344,13 +376,20 @@ export default function Home() {
     match: Match; selection: string; odd: number; market?: string; label: string;
   }) => {
     const isSelected = !!bets.find(b => b.matchId === match.id && b.market === market && b.selection === selection);
+    const prevOdd = match.isLive ? prevLiveOdds.current[String(match.id)]?.[selection as keyof Odds] : undefined;
+    const oddsUp = prevOdd !== undefined && odd > prevOdd;
+    const oddsDown = prevOdd !== undefined && odd < prevOdd;
     return (
       <button
         onClick={() => toggleBet(match, selection, odd, market, label)}
-        className={`flex flex-col items-center p-2 rounded-md transition-all text-xs ${isSelected ? "bg-red-600 text-white" : "bg-zinc-800 hover:bg-zinc-700 text-zinc-300"}`}
+        className={`relative flex flex-col items-center p-2 rounded-md transition-all text-xs ${isSelected ? "bg-red-600 text-white" : "bg-zinc-800 hover:bg-zinc-700 text-zinc-300"}`}
       >
         <span className="mb-0.5 text-[10px] text-zinc-400 leading-tight">{label}</span>
-        <span className="font-bold">{odd.toFixed(2)}</span>
+        <span className="font-bold flex items-center gap-0.5">
+          {odd.toFixed(2)}
+          {oddsUp && <TrendingUp size={10} className="text-green-400 shrink-0" />}
+          {oddsDown && <TrendingDown size={10} className="text-red-400 shrink-0" />}
+        </span>
       </button>
     );
   };
@@ -752,7 +791,7 @@ export default function Home() {
                 <div className="mb-8">
                   <h4 className="text-xs font-bold text-zinc-500 uppercase tracking-wider mb-4">Principais Ligas</h4>
                   <ul className="space-y-2">
-                    {["Brasileirão", "Premier League", "La Liga", "Serie A", "Bundesliga", "Ligue 1"].map(league => (
+                    {["La Liga", "Premier League", "Champions League", "Serie A", "Bundesliga", "Ligue 1"].map(league => (
                       <li key={league}>
                         <button className="flex items-center gap-3 w-full p-2 rounded-md hover:bg-zinc-900 text-sm text-zinc-300 hover:text-white transition-colors">
                           <div className="w-5 h-5 rounded bg-zinc-800 border border-zinc-700 flex items-center justify-center text-[10px]">⚽</div>
@@ -805,7 +844,7 @@ export default function Home() {
                     <span className="text-white">BET</span><span className="text-red-600">62</span>
                   </h1>
                   <p className="text-lg lg:text-xl text-zinc-400 mb-8 max-w-xl">
-                    Onde cada jogo é uma oportunidade. As melhores odds do Brasil, ao vivo ou pré-jogo.
+                    Onde cada jogo é uma oportunidade. As melhores odds da Europa, ao vivo ou pré-jogo.
                   </p>
 
                   {/* Real stats from API */}
@@ -882,7 +921,7 @@ export default function Home() {
                     )}
                   </h2>
                   <button
-                    onClick={fetchLive}
+                    onClick={() => fetchLive(true)}
                     disabled={liveLoading}
                     className="text-xs text-zinc-500 hover:text-white transition-colors border border-zinc-800 hover:border-zinc-600 px-3 py-1.5 rounded-md flex items-center gap-1.5"
                   >

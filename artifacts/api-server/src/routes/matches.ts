@@ -61,18 +61,20 @@ type StatpalLeague = {
 };
 
 const PRIORITY_LEAGUES = [
-  "brazil: serie a",
-  "england: premier league",
-  "germany: bundesliga",
-  "spain: laliga",
-  "italy: serie a",
-  "france: ligue 1",
-  "brazil: copa do brasil",
   "uefa champions league",
   "uefa europa league",
-  "brazil: serie b",
-  "germany: 2. bundesliga",
+  "uefa conference league",
+  "spain: laliga",
+  "england: premier league",
+  "germany: bundesliga",
+  "italy: serie a",
+  "france: ligue 1",
   "spain: laliga2",
+  "germany: 2. bundesliga",
+  "italy: serie b",
+  "england: championship",
+  "portugal: liga portugal",
+  "netherlands: eredivisie",
 ];
 
 function makeOdds(seed: number): { home: number; draw: number; away: number } {
