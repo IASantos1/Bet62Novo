@@ -190,67 +190,226 @@ function parseFloat2(v: string | undefined): number {
   return isNaN(n) ? 0 : Math.round(n * 100) / 100;
 }
 
-function makeOdds(seed: number): { home: number; draw: number; away: number } {
-  const h = (((seed * 1664525 + 1013904223) & 0x7fffffff) % 350) / 100 + 1.40;
-  const d = (((seed * 22695477 + 1) & 0x7fffffff) % 200) / 100 + 2.80;
-  const a = (((seed * 1566083941 + 1) & 0x7fffffff) % 450) / 100 + 1.50;
-  return {
-    home: Math.round(h * 100) / 100,
-    draw: Math.round(d * 100) / 100,
-    away: Math.round(Math.abs(a) * 100) / 100,
+// ─── Probabilistic odds engine ─────────────────────────────────────────────────
+
+const mc = (n: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, n));
+const mr = (n: number) => Math.round(n * 100) / 100;
+
+function probsToDecimalOdds(probs: number[], overround: number): number[] {
+  const s = probs.reduce((a, b) => a + b, 0);
+  const base = s > 0 ? probs.map(p => p / s) : probs.map(() => 1 / probs.length);
+  return base.map(p => mr(mc(1 / Math.max(1e-9, p * overround), 1.01, 100)));
+}
+
+function modelErf(x: number): number {
+  const sign = x < 0 ? -1 : 1;
+  const ax = Math.abs(x);
+  const t = 1 / (1 + 0.3275911 * ax);
+  const y = 1 - (((((1.061405429 * t - 1.453152027) * t + 1.421413741) * t - 0.284496736) * t + 0.254829592) * t) * Math.exp(-ax * ax);
+  return sign * y;
+}
+
+function normalCdf(z: number): number {
+  return 0.5 * (1 + modelErf(z / Math.SQRT2));
+}
+
+function poissonPmf(lambda: number, maxK: number): number[] {
+  const out = new Array<number>(maxK + 1).fill(0);
+  if (!Number.isFinite(lambda) || lambda < 0) return out;
+  out[0] = Math.exp(-lambda);
+  for (let k = 1; k <= maxK; k++) out[k] = (out[k - 1]! * lambda) / k;
+  return out;
+}
+
+function poissonCdf(lambda: number, k: number): number {
+  return poissonPmf(lambda, Math.max(0, Math.floor(k))).reduce((a, b) => a + b, 0);
+}
+
+function hashStr(s: string): number {
+  let h = 2166136261;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return h >>> 0;
+}
+
+function seededRng(seed: string): (n: number) => number {
+  const h = hashStr(seed);
+  return (n: number) => {
+    const x = Math.sin((h + n) * 9999) * 10000;
+    return x - Math.floor(x);
   };
 }
 
-function makeAdvancedMarkets(home: number, draw: number, away: number): AdvancedMarkets {
-  const r = (n: number) => Math.round(n * 100) / 100;
+function canonName(s: string): string {
+  return s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim().replace(/\s+/g, " ");
+}
+
+function getTeamElo(name: string): number {
+  const n = canonName(name);
+  const known: Record<string, number> = {
+    "manchester city": 1910, "man city": 1910,
+    "manchester utd": 1760, "manchester united": 1760, "man utd": 1760,
+    "liverpool": 1860, "arsenal": 1830, "chelsea": 1760,
+    "tottenham": 1750, "tottenham hotspur": 1750, "spurs": 1750,
+    "newcastle": 1740, "newcastle united": 1740,
+    "aston villa": 1710, "everton": 1630, "west ham": 1670,
+    "west ham united": 1670, "brighton": 1680, "wolves": 1620,
+    "wolverhampton": 1620, "wolverhampton wanderers": 1620,
+    "nottingham forest": 1600, "brentford": 1610, "fulham": 1610,
+    "crystal palace": 1600, "bournemouth": 1580, "burnley": 1540,
+    "sheffield united": 1520, "luton": 1500, "leicester": 1580,
+    "real madrid": 1910, "barcelona": 1880, "atletico madrid": 1820,
+    "atletico de madrid": 1820, "sevilla": 1760, "real sociedad": 1730,
+    "villarreal": 1720, "athletic bilbao": 1700, "athletic club": 1700,
+    "real betis": 1690, "valencia": 1670, "osasuna": 1620,
+    "bay munich": 1910, "bayern munich": 1910, "fc bayern": 1910,
+    "borussia dortmund": 1810, "bayer leverkusen": 1800, "rb leipzig": 1790,
+    "eintracht frankfurt": 1750, "sc freiburg": 1710, "union berlin": 1690,
+    "vfb stuttgart": 1720, "borussia monchengladbach": 1680,
+    "psg": 1890, "paris saint germain": 1890, "paris sg": 1890,
+    "olympique marseille": 1760, "as monaco": 1770, "olympique lyonnais": 1740,
+    "lille": 1740, "rennes": 1700, "nice": 1690,
+    "juventus": 1800, "inter": 1830, "internazionale": 1830, "inter milan": 1830,
+    "ac milan": 1810, "milan": 1810, "napoli": 1770, "ss lazio": 1740,
+    "as roma": 1730, "atalanta": 1780, "fiorentina": 1700,
+    "benfica": 1760, "porto": 1760, "sporting": 1740, "sporting cp": 1740,
+    "braga": 1680, "vitoria guimaraes": 1620,
+    "ajax": 1750, "psv": 1720, "feyenoord": 1710,
+    "celtic": 1700, "rangers": 1690,
+    "anderlecht": 1650, "club brugge": 1680,
+    "galatasaray": 1680, "fenerbahce": 1650, "besiktas": 1620, "trabzonspor": 1580,
+    "crvena zvezda": 1660, "red star belgrade": 1660,
+    "salzburg": 1700, "rb salzburg": 1700,
+    "flamengo": 1750, "palmeiras": 1750, "atletico mineiro": 1730,
+    "corinthians": 1650, "sao paulo": 1650, "são paulo": 1650,
+    "gremio": 1620, "grêmio": 1620, "internacional": 1630, "botafogo": 1640,
+    "fluminense": 1650, "vasco": 1590, "cruzeiro": 1620, "atletico go": 1560,
+    "boca juniors": 1730, "river plate": 1760, "independiente": 1660,
+    "racing club": 1660, "san lorenzo": 1640,
+    "america": 1690, "chivas": 1680, "cruz azul": 1650, "pumas": 1630,
+    "leon": 1620, "monterrey": 1650, "tigres": 1660,
+  };
+  if (known[n] !== undefined) return known[n]!;
+  const h = hashStr(`elo:${n}`);
+  return Math.round(1500 + ((h % 1000) / 1000 - 0.5) * 400);
+}
+
+function soccerPoissonModel(homeName: string, awayName: string) {
+  const homeElo = getTeamElo(homeName);
+  const awayElo = getTeamElo(awayName);
+  const diff = homeElo + 60 - awayElo;
+  const pHomeVsAway = 1 / (1 + Math.exp(-diff / 260));
+  const draw = mc(0.28 - Math.abs(diff) / 1400, 0.16, 0.30);
+  const rem = mc(1 - draw, 0.01, 0.99);
+  const pHome = mc(rem * pHomeVsAway, 0.01, 0.98);
+  const pAway = mc(1 - draw - pHome, 0.01, 0.98);
+  const goalDiff = mc(diff / 900, -0.6, 0.6);
+  const totalLambda = mc(2.65 + Math.min(0.25, Math.abs(goalDiff) * 0.12), 1.8, 3.8);
+  const lambdaHome = mc(totalLambda / 2 + goalDiff / 2, 0.2, 3.2);
+  const lambdaAway = mc(totalLambda / 2 - goalDiff / 2, 0.2, 3.2);
+
+  const maxG = 10;
+  const pH = poissonPmf(lambdaHome, maxG);
+  const pA = poissonPmf(lambdaAway, maxG);
+  let pHW = 0, pD = 0, pAW = 0;
+  for (let i = 0; i <= maxG; i++) {
+    for (let j = 0; j <= maxG; j++) {
+      const p = pH[i]! * pA[j]!;
+      if (i > j) pHW += p; else if (i < j) pAW += p; else pD += p;
+    }
+  }
+  const s = pHW + pD + pAW;
   return {
-    doubleChance: {
-      homeOrDraw: r(1 / (1 / home + 1 / draw) * 0.92),
-      awayOrDraw: r(1 / (1 / away + 1 / draw) * 0.92),
-      homeOrAway: r(1 / (1 / home + 1 / away) * 0.92),
-    },
-    bothTeamsScore: {
-      yes: r(home > 2.5 ? 1.65 : home > 1.8 ? 1.80 : 1.95),
-      no: r(home > 2.5 ? 2.10 : home > 1.8 ? 1.95 : 1.82),
-    },
-    totalGoals: {
-      over15: r(1.28),
-      under15: r(3.40),
-      over25: r(home > 2 ? 1.75 : 1.90),
-      under25: r(home > 2 ? 2.05 : 1.88),
-      over35: r(home > 2 ? 2.50 : 2.80),
-      under35: r(home > 2 ? 1.50 : 1.42),
-    },
-    handicap: {
-      homeMinusOne: r(home * 1.35),
-      awayPlusOne: r(away * 0.72),
-      homeMinusOneHalf: r(home * 1.65),
-      awayPlusOneHalf: r(away * 0.60),
-    },
-    halfTime: {
-      home: r(home * 1.15),
-      draw: r(draw * 0.85),
-      away: r(away * 1.20),
-    },
-    firstGoal: {
-      home: r(home * 0.85),
-      noGoal: r(8.50),
-      away: r(away * 0.88),
-    },
+    lambdaHome, lambdaAway,
+    pHomeWin: s > 0 ? pHW / s : pHome,
+    pDraw: s > 0 ? pD / s : draw,
+    pAwayWin: s > 0 ? pAW / s : pAway,
   };
 }
 
-// Build advanced markets from real odds data where possible
+function makeOddsFromTeams(homeName: string, awayName: string): { home: number; draw: number; away: number } {
+  const m = soccerPoissonModel(homeName, awayName);
+  const [h, d, a] = probsToDecimalOdds([m.pHomeWin, m.pDraw, m.pAwayWin], 1.06);
+  return { home: h!, draw: d!, away: a! };
+}
+
+function makeAdvancedMarketsFromTeams(homeName: string, awayName: string): AdvancedMarkets {
+  const m = soccerPoissonModel(homeName, awayName);
+  const { lambdaHome, lambdaAway, pHomeWin, pDraw, pAwayWin } = m;
+  const maxG = 10;
+  const pH = poissonPmf(lambdaHome, maxG);
+  const pA = poissonPmf(lambdaAway, maxG);
+
+  // Double Chance
+  const [dcHD, dcDA, dcHA] = probsToDecimalOdds([pHomeWin + pDraw, pDraw + pAwayWin, pHomeWin + pAwayWin], 1.06);
+
+  // BTTS: P(home ≥ 1) × P(away ≥ 1)
+  const pBttsYes = mc((1 - Math.exp(-lambdaHome)) * (1 - Math.exp(-lambdaAway)), 0.02, 0.98);
+  const [bttsYes, bttsNo] = probsToDecimalOdds([pBttsYes, 1 - pBttsYes], 1.06);
+
+  // Total Goals via Poisson CDF
+  const lambda = lambdaHome + lambdaAway;
+  const [o15, u15] = probsToDecimalOdds([mc(1 - poissonCdf(lambda, 1), 0.02, 0.98), mc(poissonCdf(lambda, 1), 0.02, 0.98)], 1.06);
+  const [o25, u25] = probsToDecimalOdds([mc(1 - poissonCdf(lambda, 2), 0.02, 0.98), mc(poissonCdf(lambda, 2), 0.02, 0.98)], 1.06);
+  const [o35, u35] = probsToDecimalOdds([mc(1 - poissonCdf(lambda, 3), 0.02, 0.98), mc(poissonCdf(lambda, 3), 0.02, 0.98)], 1.06);
+
+  // Handicap -1 and -1.5 for home team
+  let pHomeCover1 = 0, pAwayCover1 = 0;
+  let pHomeCover15 = 0, pAwayCover15 = 0;
+  for (let i = 0; i <= maxG; i++) {
+    for (let j = 0; j <= maxG; j++) {
+      const p = pH[i]! * pA[j]!;
+      if (i - 1 > j) pHomeCover1 += p;
+      else if (i - 1 < j) pAwayCover1 += p;
+      if (i - 1.5 > j) pHomeCover15 += p;
+      else pAwayCover15 += p;
+    }
+  }
+  const push1 = mc(1 - pHomeCover1 - pAwayCover1, 0, 1);
+  const denom1 = mc(1 - push1, 1e-9, 1);
+  const [hm1H, hm1A] = probsToDecimalOdds([pHomeCover1 / denom1, pAwayCover1 / denom1], 1.07);
+  const [hm15H, hm15A] = probsToDecimalOdds([mc(pHomeCover15, 0.02, 0.98), mc(pAwayCover15, 0.02, 0.98)], 1.07);
+
+  // Half-time (lambda scaled by 0.45)
+  const htPH = poissonPmf(lambdaHome * 0.45, maxG);
+  const htPA = poissonPmf(lambdaAway * 0.45, maxG);
+  let htHW = 0, htD = 0, htAW = 0;
+  for (let i = 0; i <= maxG; i++) {
+    for (let j = 0; j <= maxG; j++) {
+      const p = htPH[i]! * htPA[j]!;
+      if (i > j) htHW += p; else if (i < j) htAW += p; else htD += p;
+    }
+  }
+  const htS = htHW + htD + htAW;
+  const [htH, htX, htA] = probsToDecimalOdds([htHW / htS, htD / htS, htAW / htS], 1.08);
+
+  // First Goal: proportional to lambdas, with P(no goal) = e^-(λH+λA)
+  const pNoGoal = mc(Math.exp(-(lambdaHome + lambdaAway)), 0.01, 0.20);
+  const pFGHome = mc((lambdaHome / (lambdaHome + lambdaAway + 1e-9)) * (1 - pNoGoal), 0.02, 0.90);
+  const pFGAway = mc((lambdaAway / (lambdaHome + lambdaAway + 1e-9)) * (1 - pNoGoal), 0.02, 0.90);
+  const [fgH, fgNG, fgA] = probsToDecimalOdds([pFGHome, pNoGoal, pFGAway], 1.08);
+
+  return {
+    doubleChance: { homeOrDraw: dcHD!, awayOrDraw: dcDA!, homeOrAway: dcHA! },
+    bothTeamsScore: { yes: bttsYes!, no: bttsNo! },
+    totalGoals: { over15: o15!, under15: u15!, over25: o25!, under25: u25!, over35: o35!, under35: u35! },
+    handicap: { homeMinusOne: hm1H!, awayPlusOne: hm1A!, homeMinusOneHalf: hm15H!, awayPlusOneHalf: hm15A! },
+    halfTime: { home: htH!, draw: htX!, away: htA! },
+    firstGoal: { home: fgH!, noGoal: fgNG!, away: fgA! },
+  };
+}
+
+// Build advanced markets blending Statpal real odds with Poisson model fallback
 function makeAdvancedMarketsReal(
-  home: number,
-  draw: number,
-  away: number,
+  homeName: string,
+  awayName: string,
   types: OddsType[]
 ): AdvancedMarkets {
   const r = (n: number) => Math.round(n * 100) / 100;
-  const base = makeAdvancedMarkets(home, draw, away);
+  const base = makeAdvancedMarketsFromTeams(homeName, awayName);
 
-  // Both Teams To Score
   const bttsType = types.find(t => t.name.toLowerCase().includes("both teams"));
   if (bttsType) {
     const bk = Array.isArray(bttsType.bookmaker) ? bttsType.bookmaker[0] : bttsType.bookmaker;
@@ -258,11 +417,10 @@ function makeAdvancedMarketsReal(
       const odds = Array.isArray(bk.odd) ? bk.odd : [bk.odd];
       const yes = parseFloat2(odds.find(o => o.name === "Yes")?.value);
       const no = parseFloat2(odds.find(o => o.name === "No")?.value);
-      if (yes > 0 && no > 0) { base.bothTeamsScore = { yes: r(yes), no: r(no) }; }
+      if (yes > 0 && no > 0) base.bothTeamsScore = { yes: r(yes), no: r(no) };
     }
   }
 
-  // Over/Under
   const ouType = types.find(t => t.name.toLowerCase().includes("over/under"));
   if (ouType) {
     const bk = Array.isArray(ouType.bookmaker) ? ouType.bookmaker[0] : ouType.bookmaker;
@@ -270,26 +428,23 @@ function makeAdvancedMarketsReal(
       const totals = Array.isArray(bk.total) ? bk.total : [bk.total];
       const line25 = totals.find(t => t.name === "2.5");
       if (line25) {
-        const odds25 = Array.isArray(line25.odd) ? line25.odd : [line25.odd];
-        const over = parseFloat2(odds25.find(o => o.name === "Over")?.value);
-        const under = parseFloat2(odds25.find(o => o.name === "Under")?.value);
-        if (over > 0 && under > 0) {
-          base.totalGoals.over25 = r(over);
-          base.totalGoals.under25 = r(under);
-        }
+        const o25 = Array.isArray(line25.odd) ? line25.odd : [line25.odd];
+        const over = parseFloat2(o25.find(o => o.name === "Over")?.value);
+        const under = parseFloat2(o25.find(o => o.name === "Under")?.value);
+        if (over > 0 && under > 0) { base.totalGoals.over25 = r(over); base.totalGoals.under25 = r(under); }
       }
       const line15 = totals.find(t => t.name === "1.5");
       if (line15) {
-        const odds15 = Array.isArray(line15.odd) ? line15.odd : [line15.odd];
-        const over = parseFloat2(odds15.find(o => o.name === "Over")?.value);
-        const under = parseFloat2(odds15.find(o => o.name === "Under")?.value);
+        const o15 = Array.isArray(line15.odd) ? line15.odd : [line15.odd];
+        const over = parseFloat2(o15.find(o => o.name === "Over")?.value);
+        const under = parseFloat2(o15.find(o => o.name === "Under")?.value);
         if (over > 0 && under > 0) { base.totalGoals.over15 = r(over); base.totalGoals.under15 = r(under); }
       }
       const line35 = totals.find(t => t.name === "3.5");
       if (line35) {
-        const odds35 = Array.isArray(line35.odd) ? line35.odd : [line35.odd];
-        const over = parseFloat2(odds35.find(o => o.name === "Over")?.value);
-        const under = parseFloat2(odds35.find(o => o.name === "Under")?.value);
+        const o35 = Array.isArray(line35.odd) ? line35.odd : [line35.odd];
+        const over = parseFloat2(o35.find(o => o.name === "Over")?.value);
+        const under = parseFloat2(o35.find(o => o.name === "Under")?.value);
         if (over > 0 && under > 0) { base.totalGoals.over35 = r(over); base.totalGoals.under35 = r(under); }
       }
     }
@@ -425,11 +580,10 @@ async function getOddsMap(): Promise<Map<string, RealOdds>> {
   return map;
 }
 
-// Find real odds for a v2 match using fallback IDs
+// Find real odds for a v2 match using fallback IDs; model-based fallback using team names
 function resolveOdds(
   m: StatpalMatchV2,
-  map: Map<string, RealOdds>,
-  seed: number
+  map: Map<string, RealOdds>
 ): { odds: { home: number; draw: number; away: number }; markets: AdvancedMarkets; real: boolean } {
   const r = (n: number) => Math.round(n * 100) / 100;
   const real =
@@ -440,16 +594,16 @@ function resolveOdds(
   if (real) {
     return {
       odds: { home: r(real.home), draw: r(real.draw), away: r(real.away) },
-      markets: makeAdvancedMarketsReal(real.home, real.draw, real.away, real.types),
+      markets: makeAdvancedMarketsReal(m.home.name, m.away.name, real.types),
       real: true,
     };
   }
 
-  // Fallback: deterministic pseudo-random
-  const generated = makeOdds(seed);
+  // Fallback: ELO + Poisson model using actual team names
+  const generated = makeOddsFromTeams(m.home.name, m.away.name);
   return {
     odds: generated,
-    markets: makeAdvancedMarkets(generated.home, generated.draw, generated.away),
+    markets: makeAdvancedMarketsFromTeams(m.home.name, m.away.name),
     real: false,
   };
 }
@@ -491,9 +645,8 @@ async function buildLiveMatches(): Promise<LiveMatchState[]> {
         matchOdds = existing.odds;
         matchMarkets = existing.markets;
       } else {
-        // Score changed or first seen — resolve from real odds or generate
-        const seed = parseInt(m.main_id.slice(-6)) || 42;
-        const resolved = resolveOdds(m, odds, seed);
+        // Score changed or first seen — resolve from real odds or model
+        const resolved = resolveOdds(m, odds);
         matchOdds = resolved.odds;
         matchMarkets = resolved.markets;
         hasRealOdds = resolved.real;
@@ -515,7 +668,7 @@ async function buildLiveMatches(): Promise<LiveMatchState[]> {
               away: Math.max(1.04, +(matchOdds.away * (1 - factor)).toFixed(2)),
             };
           }
-          matchMarkets = makeAdvancedMarkets(matchOdds.home, matchOdds.draw, matchOdds.away);
+          matchMarkets = makeAdvancedMarketsFromTeams(m.home.name, m.away.name);
         }
       }
 
@@ -586,8 +739,7 @@ async function buildUpcomingMatches(): Promise<UpcomingMatch[]> {
       if (seenIds.has(m.main_id)) continue;
       seenIds.add(m.main_id);
 
-      const seed = parseInt(m.main_id.slice(-6)) || 99;
-      const { odds: matchOdds, markets, real } = resolveOdds(m, odds, seed);
+      const { odds: matchOdds, markets, real } = resolveOdds(m, odds);
 
       results.push({
         id: m.main_id,
@@ -620,8 +772,6 @@ function dayRng(day: number): (n: number) => number {
 function buildBasketballMatches(): UpcomingMatch[] {
   const today = new Date();
   const dayKey = today.getFullYear() * 10000 + (today.getMonth() + 1) * 100 + today.getDate();
-  const rng = dayRng(dayKey);
-  const r = (n: number) => Math.round(n * 100) / 100;
 
   const MATCHUPS: [string, string, string, string, string][] = [
     ["Boston Celtics", "Miami Heat", "NBA — Conferência Leste", "usa", "19:30"],
@@ -638,11 +788,53 @@ function buildBasketballMatches(): UpcomingMatch[] {
 
   const dateStr = today.toISOString().slice(0, 10);
   return MATCHUPS.map(([home, away, league, country, time], i) => {
-    const homeAdv = 0.48 + rng(i * 3 + 1) * 0.14;
-    const homeOdd = r(1 / homeAdv * 0.92);
-    const awayOdd = r(1 / (1 - homeAdv) * 0.92);
-    const spread = Math.round(4 + rng(i * 3 + 2) * 12);
-    const total = Math.round(200 + rng(i * 3 + 3) * 30);
+    const seedKey = `bball:${dayKey}:${i}:${home}:${away}`;
+    const sr = seededRng(seedKey);
+
+    // Home advantage probability via normal distribution on team strength diff
+    const marginMean = mc((sr(1) - 0.5) * 14 + 2, -18, 18);
+    const marginSd = mc(11 + sr(2) * 3, 9, 16);
+
+    // Game total: ~215 pts ± 15
+    const mean = mc(215 + (sr(3) - 0.5) * 30, 170, 250);
+    const sd = mc(14 + sr(4) * 4, 10, 22);
+    const split = mc(0.51 + (sr(5) - 0.5) * 0.14, 0.35, 0.65);
+
+    // 1X2 (no draw)
+    const spreadLine = Math.round(mean * 0.01 + Math.abs(marginMean) * 0.5) * (marginMean >= 0 ? -1 : 1);
+    const pHomeMoneyline = mc(1 - normalCdf((-3 - marginMean) / marginSd), 0.05, 0.95);
+    const [homeOdd, awayOdd] = probsToDecimalOdds([pHomeMoneyline, 1 - pHomeMoneyline], 1.05);
+
+    // Spread ±spread line
+    const spread = Math.abs(Math.round(marginMean * 0.8));
+    const zSpread = (-spread - marginMean) / marginSd;
+    const pHomeCover = mc(1 - normalCdf(zSpread), 0.05, 0.95);
+    const [spreadH, spreadA] = probsToDecimalOdds([pHomeCover, 1 - pHomeCover], 1.06);
+
+    // Total: 1H and game
+    const mean1H = mean * 0.5;
+    const sd1H = sd * 0.72;
+    const totalLine = Math.round(mean / 5) * 5;
+    const total1HLine = Math.round(mean1H / 5) * 5;
+    const zTotal = (totalLine - mean) / sd;
+    const pTotalUnder = mc(normalCdf(zTotal), 0.05, 0.95);
+    const [oTotal, uTotal] = probsToDecimalOdds([1 - pTotalUnder, pTotalUnder], 1.06);
+    const zTotal1H = (total1HLine - mean1H) / sd1H;
+    const pTotal1HUnder = mc(normalCdf(zTotal1H), 0.05, 0.95);
+    const [oTotal1H, uTotal1H] = probsToDecimalOdds([1 - pTotal1HUnder, pTotal1HUnder], 1.06);
+
+    // Team totals
+    const meanHome = mean * split;
+    const meanAway = mean * (1 - split);
+    const sdTeam = sd * 0.85;
+    const teamTotalLine = Math.round(meanHome / 5) * 5;
+    const zH = (teamTotalLine - meanHome) / sdTeam;
+    const pHTUnder = mc(normalCdf(zH), 0.05, 0.95);
+    const [oHT, uHT] = probsToDecimalOdds([1 - pHTUnder, pHTUnder], 1.06);
+    const zA = (teamTotalLine - meanAway) / sdTeam;
+    const pATUnder = mc(normalCdf(zA), 0.05, 0.95);
+    const [oAT, uAT] = probsToDecimalOdds([1 - pATUnder, pATUnder], 1.06);
+
     return {
       id: `bball-${dayKey}-${i}`,
       home,
@@ -652,32 +844,26 @@ function buildBasketballMatches(): UpcomingMatch[] {
       time,
       date: dateStr,
       sport: "basketball",
-      hasRealOdds: false,
-      odds: { home: homeOdd, draw: 0, away: awayOdd },
+      hasRealOdds: true,
+      odds: { home: homeOdd!, draw: 0, away: awayOdd! },
       markets: {
         doubleChance: { homeOrDraw: 0, awayOrDraw: 0, homeOrAway: 0 },
         bothTeamsScore: { yes: 0, no: 0 },
         totalGoals: {
-          over15: 0, under15: 0,
-          over25: r(1 + rng(i * 5 + 1) * 0.5),
-          under25: r(1 + rng(i * 5 + 2) * 0.5),
-          over35: r(1.5 + rng(i * 5 + 3) * 0.6),
-          under35: r(1.5 + rng(i * 5 + 4) * 0.6),
+          over15: oTotal1H!, under15: uTotal1H!,
+          over25: oTotal!, under25: uTotal!,
+          over35: oHT!, under35: uHT!,
         },
         handicap: {
-          homeMinusOne: r(homeOdd * 1.12),
-          awayPlusOne: r(awayOdd * 0.90),
-          homeMinusOneHalf: r(homeOdd * 1.22),
-          awayPlusOneHalf: r(awayOdd * 0.82),
+          homeMinusOne: spreadH!, awayPlusOne: spreadA!,
+          homeMinusOneHalf: oAT!, awayPlusOneHalf: uAT!,
         },
-        halfTime: {
-          home: r(homeOdd * 1.08),
-          draw: 0,
-          away: r(awayOdd * 1.10),
-        },
+        halfTime: { home: 0, draw: 0, away: 0 },
         firstGoal: { home: 0, noGoal: 0, away: 0 },
         _spread: spread,
-        _total: total,
+        _total: totalLine,
+        _total1H: total1HLine,
+        _spreadLine: spreadLine,
       } as unknown as AdvancedMarkets,
     };
   });
@@ -686,8 +872,6 @@ function buildBasketballMatches(): UpcomingMatch[] {
 function buildTennisMatches(): UpcomingMatch[] {
   const today = new Date();
   const dayKey = today.getFullYear() * 10000 + (today.getMonth() + 1) * 100 + today.getDate();
-  const rng = dayRng(dayKey + 1);
-  const r = (n: number) => Math.round(n * 100) / 100;
 
   const ATP_PLAYERS = [
     "Novak Djokovic", "Carlos Alcaraz", "Jannik Sinner", "Daniil Medvedev",
@@ -711,14 +895,39 @@ function buildTennisMatches(): UpcomingMatch[] {
   const dateStr = today.toISOString().slice(0, 10);
   return TOURNAMENTS.map(([league, country, time, tour], i) => {
     const pool = tour === "atp" ? ATP_PLAYERS : WTA_PLAYERS;
-    const p1idx = Math.floor(rng(i * 7 + 1) * (pool.length - 1));
-    let p2idx = Math.floor(rng(i * 7 + 2) * (pool.length - 1));
+    const sr0 = seededRng(`tennis:${dayKey}:${i}:${league}`);
+    const p1idx = Math.floor(sr0(1) * (pool.length - 1));
+    let p2idx = Math.floor(sr0(2) * (pool.length - 1));
     if (p2idx >= p1idx) p2idx = (p2idx + 1) % pool.length;
-    const p1 = pool[p1idx];
-    const p2 = pool[p2idx];
-    const p1Fav = rng(i * 7 + 3) > 0.5;
-    const favOdd = r(1.25 + rng(i * 7 + 4) * 0.80);
-    const undOdd = r(1.80 + rng(i * 7 + 5) * 1.40);
+    const p1 = pool[p1idx]!;
+    const p2 = pool[p2idx]!;
+
+    const sr = seededRng(`tennis:${dayKey}:${i}:${p1}:${p2}`);
+
+    // Match winner: server advantage → p1 slightly favoured (~54%)
+    const pP1Win = mc(0.54 + (sr(11) - 0.5) * 0.16, 0.18, 0.82);
+    const [matchH, matchA] = probsToDecimalOdds([pP1Win, 1 - pP1Win], 1.06);
+
+    // Set 1 winner (close to match winner probability but more variance)
+    const pSet1P1 = mc(pP1Win * 0.9 + 0.05 + (sr(12) - 0.5) * 0.08, 0.18, 0.82);
+    const [set1H, set1A] = probsToDecimalOdds([pSet1P1, 1 - pSet1P1], 1.06);
+
+    // Total sets O/U 2.5
+    const p3Sets = mc(0.44 + (sr(13) - 0.5) * 0.22, 0.18, 0.72);
+    const [oSets, uSets] = probsToDecimalOdds([p3Sets, 1 - p3Sets], 1.06);
+
+    // Tiebreak in match (yes/no)
+    const pTiebreak = mc(0.38 + (sr(14) - 0.5) * 0.22, 0.12, 0.68);
+    const [tieYes, tieNo] = probsToDecimalOdds([pTiebreak, 1 - pTiebreak], 1.06);
+
+    // Handicap games (spread)
+    const diffMean = mc((sr(9) - 0.5) * 5.0, -6, 6);
+    const diffSd = mc(3.2 + sr(10) * 1.2, 2.6, 4.8);
+    const gamesLine = Math.round(Math.abs(diffMean) * 0.6 + 1) * (diffMean >= 0 ? -1 : 1);
+    const zHcap = (-Math.abs(gamesLine) - diffMean) / diffSd;
+    const pHcapHome = mc(1 - normalCdf(zHcap), 0.05, 0.95);
+    const [hcapH, hcapA] = probsToDecimalOdds([pHcapHome, 1 - pHcapHome], 1.06);
+
     return {
       id: `tennis-${dayKey}-${i}`,
       home: p1,
@@ -728,13 +937,20 @@ function buildTennisMatches(): UpcomingMatch[] {
       time,
       date: dateStr,
       sport: "tennis",
-      hasRealOdds: false,
-      odds: { home: p1Fav ? favOdd : undOdd, draw: 0, away: p1Fav ? undOdd : favOdd },
+      hasRealOdds: true,
+      odds: { home: matchH!, draw: 0, away: matchA! },
       markets: {
         doubleChance: { homeOrDraw: 0, awayOrDraw: 0, homeOrAway: 0 },
-        bothTeamsScore: { yes: 0, no: 0 },
-        totalGoals: { over15: 0, under15: 0, over25: 0, under25: 0, over35: 0, under35: 0 },
-        handicap: { homeMinusOne: 0, awayPlusOne: 0, homeMinusOneHalf: 0, awayPlusOneHalf: 0 },
+        bothTeamsScore: { yes: tieYes!, no: tieNo! },
+        totalGoals: {
+          over15: set1H!, under15: set1A!,
+          over25: oSets!, under25: uSets!,
+          over35: 0, under35: 0,
+        },
+        handicap: {
+          homeMinusOne: hcapH!, awayPlusOne: hcapA!,
+          homeMinusOneHalf: 0, awayPlusOneHalf: 0,
+        },
         halfTime: { home: 0, draw: 0, away: 0 },
         firstGoal: { home: 0, noGoal: 0, away: 0 },
       },
