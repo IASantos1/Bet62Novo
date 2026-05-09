@@ -95,6 +95,54 @@ const TEAM_BANNERS: Record<string, string> = {
   "Talleres Córdoba": talleresBanner,
 };
 
+const LEAGUE_FLAGS: Record<string, string> = {
+  "La Liga": "🇪🇸", "Laliga": "🇪🇸", "Laliga2": "🇪🇸", "Segunda": "🇪🇸",
+  "Premier League": "🏴󠁧󠁢󠁥󠁮󠁧󠁿", "Championship": "🏴󠁧󠁢󠁥󠁮󠁧󠁿", "League One": "🏴󠁧󠁢󠁥󠁮󠁧󠁿",
+  "Champions League": "⭐", "UEFA Champions League": "⭐", "Europa League": "🌟",
+  "Serie A": "🇮🇹", "Serie B": "🇮🇹",
+  "Bundesliga": "🇩🇪", "2. Bundesliga": "🇩🇪",
+  "Ligue 1": "🇫🇷", "Ligue 2": "🇫🇷",
+  "Liga Portugal": "🇵🇹", "Primeira Liga": "🇵🇹", "Segunda Liga": "🇵🇹",
+  "Eredivisie": "🇳🇱",
+  "Brasileirao": "🇧🇷", "Serie A Brasil": "🇧🇷", "Brasileirão": "🇧🇷",
+  "Liga Argentina": "🇦🇷", "Primera Division": "🇦🇷",
+  "MLS": "🇺🇸",
+};
+
+const TEAM_COUNTRY: Record<string, string> = {
+  "Real Madrid": "spain", "Barcelona": "spain", "Atlético de Madrid": "spain",
+  "Atletico Madrid": "spain", "Athletic Club": "spain", "Athletic Bilbao": "spain",
+  "Ath Bilbao": "spain", "Real Sociedad": "spain", "Sevilla": "spain",
+  "Valencia": "spain", "Villarreal": "spain", "Real Betis": "spain",
+  "Betis": "spain", "Girona": "spain", "Mallorca": "spain", "Getafe": "spain",
+  "Oviedo": "spain", "Leganes": "spain", "Andorra": "spain", "Osasuna": "spain",
+  "Celta Vigo": "spain", "Deportivo Alaves": "spain", "Las Palmas": "spain",
+  "Rayo Vallecano": "spain", "Espanyol": "spain", "Valladolid": "spain",
+  "Arsenal": "england", "Man City": "england", "Manchester City": "england",
+  "Man Utd": "england", "Manchester United": "england", "Liverpool": "england",
+  "Aston Villa": "england", "Bournemouth": "england", "Brentford": "england",
+  "Brighton": "england", "Chelsea": "england", "Everton": "england",
+  "Tottenham": "england", "Newcastle": "england", "West Ham": "england",
+  "Wolves": "england", "Crystal Palace": "england", "Fulham": "england",
+  "Nottingham Forest": "england", "Burnley": "england", "Sheffield Utd": "england",
+  "Luton": "england", "Leicester": "england", "Ipswich": "england",
+  "River Plate": "argentina", "Boca Juniors": "argentina", "Racing Club": "argentina",
+  "Independiente": "argentina", "San Lorenzo": "argentina",
+  "Vélez Sarsfield": "argentina", "Velez Sarsfield": "argentina",
+  "Vélez": "argentina", "Velez": "argentina", "Estudiantes": "argentina",
+  "Estudiantes LP": "argentina", "Rosario Central": "argentina",
+  "Lanús": "argentina", "Lanus": "argentina", "Talleres": "argentina",
+  "Talleres Córdoba": "argentina",
+};
+
+function getTeamBanner(teamName: string, country?: string): string | undefined {
+  const banner = TEAM_BANNERS[teamName];
+  if (!banner) return undefined;
+  const expectedCountry = TEAM_COUNTRY[teamName];
+  if (!expectedCountry || !country) return banner;
+  return expectedCountry === country.toLowerCase() ? banner : undefined;
+}
+
 const COUNTRY_FLAGS: Record<string, string> = {
   england: "🏴󠁧󠁢󠁥󠁮󠁧󠁿", scotland: "🏴󠁧󠁢󠁳󠁣󠁴󠁿", wales: "🏴󠁧󠁢󠁷󠁬󠁳󠁿",
   spain: "🇪🇸", germany: "🇩🇪", italy: "🇮🇹", france: "🇫🇷",
@@ -245,6 +293,163 @@ function cpfMask(value: string) {
     .replace(/(-\d{2})\d+?$/, "$1");
 }
 
+const TennisBallIcon = ({ size = 16 }: { size?: number }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <circle cx="12" cy="12" r="11" fill="#C8E600" />
+    <path d="M3.5 8.5C6.5 8.5 8.5 6.5 8.5 3.5" stroke="white" strokeWidth="1.8" strokeLinecap="round" fill="none"/>
+    <path d="M20.5 8.5C17.5 8.5 15.5 6.5 15.5 3.5" stroke="white" strokeWidth="1.8" strokeLinecap="round" fill="none"/>
+    <path d="M3.5 15.5C6.5 15.5 8.5 17.5 8.5 20.5" stroke="white" strokeWidth="1.8" strokeLinecap="round" fill="none"/>
+    <path d="M20.5 15.5C17.5 15.5 15.5 17.5 15.5 20.5" stroke="white" strokeWidth="1.8" strokeLinecap="round" fill="none"/>
+  </svg>
+);
+
+function seededRng(seed: number) {
+  return (n: number) => {
+    const x = Math.sin(seed * 9301 + n * 49297 + 233) * 10000;
+    return x - Math.floor(x);
+  };
+}
+
+function MomentumChart({ match }: { match: { id: string | number; home: string; away: string; homeScore?: number; awayScore?: number; minute?: number; events?: Array<{ type: string; team: string; minute: number; player: string }> } }) {
+  const minute = match.minute ?? 0;
+  const [tick, setTick] = useState(0);
+
+  useEffect(() => {
+    const interval = setInterval(() => setTick(t => t + 1), 1800);
+    return () => clearInterval(interval);
+  }, []);
+
+  const seedNum = parseInt(String(match.id).replace(/\D/g, "").slice(0, 7) || "1234567", 10);
+  const rng = seededRng(seedNum);
+
+  const totalBars = Math.max(4, Math.ceil((minute || 1) / 2));
+  const bars = Array.from({ length: totalBars }, (_, i) => {
+    const t = (i + 1) * 2;
+    const isHalf = t >= 44 && t <= 46;
+    const homeScore = match.homeScore ?? 0;
+    const awayScore = match.awayScore ?? 0;
+    const scoreBias = (homeScore - awayScore) * 0.06;
+    const homeBase = rng(i * 4) * 0.7 + 0.15 + scoreBias;
+    const awayBase = rng(i * 4 + 1) * 0.7 + 0.15 - scoreBias;
+    const isLast = i === totalBars - 1;
+    const pulse = isLast && tick % 3 === 0 ? 0.75 : 1;
+    return {
+      t,
+      isHalf,
+      home: isHalf ? 0.08 : Math.min(0.95, Math.max(0.08, homeBase)) * pulse,
+      away: isHalf ? 0.08 : Math.min(0.95, Math.max(0.08, awayBase)) * pulse,
+    };
+  });
+
+  const isHT = minute === 45;
+  const events = match.events ?? [];
+
+  const eventIcon = (type: string) =>
+    type === "goal" ? "⚽" : type === "yellow_card" ? "🟨" : type === "red_card" ? "🟥" : "⚡";
+
+  return (
+    <div className="space-y-4">
+      <div className="text-[10px] font-black text-red-500 uppercase tracking-widest">Pressão em Tempo Real</div>
+
+      {/* Legend */}
+      <div className="flex justify-between text-xs font-bold">
+        <span className="text-red-400">{match.home}</span>
+        <span className="text-[10px] text-zinc-600 font-normal">{minute}'</span>
+        <span className="text-green-400">{match.away}</span>
+      </div>
+
+      {/* Chart */}
+      <div className="relative h-36">
+        {/* Center axis */}
+        <div className="absolute left-0 right-0 top-1/2 h-px bg-zinc-700" />
+        {/* Phase labels */}
+        <div className="absolute left-0 top-1/2 -translate-y-3 text-[9px] text-zinc-600">1º Tempo</div>
+        {minute > 46 && (
+          <div className="absolute right-0 top-1/2 -translate-y-3 text-[9px] text-zinc-600">2º Tempo</div>
+        )}
+
+        <div className="flex h-full items-stretch gap-px overflow-hidden">
+          {bars.map((bar, i) => (
+            <div key={i} className="flex-1 flex flex-col items-center min-w-0">
+              {/* Home bar (top half) */}
+              <div className="flex-1 flex items-end justify-center w-full pb-px">
+                <motion.div
+                  animate={{ height: `${Math.round(bar.home * 100)}%` }}
+                  transition={{ duration: 0.6, ease: "easeOut" }}
+                  style={{ width: "70%" }}
+                  className={`rounded-t-sm ${bar.isHalf ? "bg-zinc-700/50" : "bg-red-500"}`}
+                />
+              </div>
+              {/* Away bar (bottom half) */}
+              <div className="flex-1 flex items-start justify-center w-full pt-px">
+                <motion.div
+                  animate={{ height: `${Math.round(bar.away * 100)}%` }}
+                  transition={{ duration: 0.6, ease: "easeOut" }}
+                  style={{ width: "70%" }}
+                  className={`rounded-b-sm ${bar.isHalf ? "bg-zinc-700/50" : "bg-green-500"}`}
+                />
+              </div>
+            </div>
+          ))}
+        </div>
+
+        {/* HT overlay */}
+        {isHT && (
+          <div className="absolute inset-0 flex items-center justify-center">
+            <span className="text-yellow-400 text-sm font-black animate-pulse bg-zinc-900/90 px-3 py-1 rounded border border-yellow-500/30">
+              ● INTERVALO
+            </span>
+          </div>
+        )}
+      </div>
+
+      {/* Timeline */}
+      <div className="flex justify-between text-[10px] text-zinc-600 -mt-2">
+        <span>0'</span>
+        {minute > 45 && <span className="text-zinc-500 font-bold">HT</span>}
+        <span>{minute > 0 ? `${minute}'` : "90'"}</span>
+      </div>
+
+      {/* Legend colors */}
+      <div className="flex gap-4 text-[11px]">
+        <div className="flex items-center gap-1.5">
+          <div className="w-3 h-2.5 bg-red-500 rounded-sm" />
+          <span className="text-zinc-400">Ataque {match.home.split(" ")[0]}</span>
+        </div>
+        <div className="flex items-center gap-1.5">
+          <div className="w-3 h-2.5 bg-green-500 rounded-sm" />
+          <span className="text-zinc-400">Ataque {match.away.split(" ")[0]}</span>
+        </div>
+      </div>
+
+      {/* Events */}
+      {events.length > 0 && (
+        <div className="border-t border-zinc-800 pt-3">
+          <div className="text-[10px] font-black text-zinc-500 uppercase tracking-widest mb-2">Eventos da Partida</div>
+          <div className="space-y-1.5">
+            {events.map((ev, i) => (
+              <div key={i} className="flex items-center gap-2.5 text-xs">
+                <span className="text-base leading-none shrink-0">{eventIcon(ev.type)}</span>
+                <span className="text-zinc-500 shrink-0 w-7 text-right font-mono">{ev.minute}'</span>
+                <span className={`font-bold shrink-0 text-[11px] ${ev.team === "home" ? "text-red-400" : "text-green-400"}`}>
+                  {ev.team === "home" ? match.home.split(" ")[0] : match.away.split(" ")[0]}
+                </span>
+                <span className="text-zinc-400 truncate">{ev.player}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {events.length === 0 && (
+        <div className="text-center text-zinc-600 text-xs py-1">
+          Nenhum evento registado neste momento.
+        </div>
+      )}
+    </div>
+  );
+}
+
 function phoneMask(value: string) {
   return value
     .replace(/\D/g, "")
@@ -294,8 +499,8 @@ export default function Home() {
   // Platform stats for hero
   const [platformStats, setPlatformStats] = useState<PlatformStats | null>(null);
 
-  // Match detail view tab: "markets" | "stats" | "standings"
-  const [matchViewTab, setMatchViewTab] = useState<"markets" | "stats" | "standings">("markets");
+  // Match detail view tab: "markets" | "stats" | "standings" | "live"
+  const [matchViewTab, setMatchViewTab] = useState<"markets" | "stats" | "standings" | "live">("markets");
   const [matchStats, setMatchStats] = useState<MatchStatsData | null>(null);
   const [matchStatsLoading, setMatchStatsLoading] = useState(false);
   const [standings, setStandings] = useState<StandingRow[] | null>(null);
@@ -622,7 +827,7 @@ export default function Home() {
     const progress = Math.min(100, (minute / 90) * 100);
     const flag = COUNTRY_FLAGS[match.country?.toLowerCase() ?? ""] ?? "⚽";
     const dateStr = match.date ? formatMatchDate(match.date) : "";
-    const bannerImg = TEAM_BANNERS[match.home];
+    const bannerImg = getTeamBanner(match.home, match.country);
     const liveBadge = (
       <div className="flex items-center gap-1.5">
         <span className="relative flex h-1.5 w-1.5">
@@ -711,7 +916,7 @@ export default function Home() {
   const MatchCard = ({ match }: { match: Match }) => {
     const flag = COUNTRY_FLAGS[match.country?.toLowerCase() ?? ""] ?? "⚽";
     const dateStr = match.date ? formatMatchDate(match.date) : "";
-    const bannerImg = TEAM_BANNERS[match.home];
+    const bannerImg = getTeamBanner(match.home, match.country);
     const rivalry = RIVALRY_TAGS[`${match.home}|${match.away}`];
 
     if (bannerImg) {
@@ -1068,7 +1273,9 @@ export default function Home() {
                     {["La Liga", "Premier League", "Champions League", "Serie A", "Bundesliga", "Ligue 1"].map(league => (
                       <li key={league}>
                         <button className="flex items-center gap-3 w-full p-2 rounded-md hover:bg-zinc-900 text-sm text-zinc-300 hover:text-white transition-colors">
-                          <div className="w-5 h-5 rounded bg-zinc-800 border border-zinc-700 flex items-center justify-center text-[10px]">⚽</div>
+                          <div className="w-6 h-6 rounded-full bg-zinc-800 border border-zinc-700 flex items-center justify-center text-sm leading-none shrink-0">
+                            {LEAGUE_FLAGS[league] ?? "⚽"}
+                          </div>
                           {league}
                         </button>
                       </li>
@@ -1078,7 +1285,7 @@ export default function Home() {
                 <div>
                   <h4 className="text-xs font-bold text-zinc-500 uppercase tracking-wider mb-4">Esportes</h4>
                   <ul className="space-y-2">
-                    {[{ icon: <span className="text-base leading-none">⚽</span>, label: "Futebol" }, { icon: <span className="text-base leading-none">🏀</span>, label: "Basquete" }, { icon: <span className="text-base leading-none">🎾</span>, label: "Tênis" }, { icon: <span className="text-base leading-none">🏒</span>, label: "Hóquei" }, { icon: <span className="text-base leading-none">🏐</span>, label: "Voleibol" }].map(sport => (
+                    {[{ icon: <span className="text-base leading-none">⚽</span>, label: "Futebol" }, { icon: <span className="text-base leading-none">🏀</span>, label: "Basquete" }, { icon: <TennisBallIcon size={18} />, label: "Tênis" }, { icon: <span className="text-base leading-none">🏒</span>, label: "Hóquei" }, { icon: <span className="text-base leading-none">🏐</span>, label: "Voleibol" }].map(sport => (
                       <li key={sport.label}>
                         <button className="flex items-center gap-3 w-full p-2 rounded-md hover:bg-zinc-900 text-sm text-zinc-300 hover:text-white transition-colors">
                           <div className="text-red-500">{sport.icon}</div>
@@ -1106,7 +1313,9 @@ export default function Home() {
                 {["La Liga", "Premier League", "Champions League", "Serie A", "Bundesliga", "Ligue 1", "Liga Portugal", "Eredivisie"].map(league => (
                   <li key={league}>
                     <button className="flex items-center gap-2.5 w-full px-2 py-2 rounded-md hover:bg-zinc-900 text-sm text-zinc-400 hover:text-white transition-colors">
-                      <span className="text-base">⚽</span>
+                      <span className="w-6 h-6 rounded-full bg-zinc-800 border border-zinc-800 flex items-center justify-center text-sm leading-none shrink-0">
+                        {LEAGUE_FLAGS[league] ?? "⚽"}
+                      </span>
                       <span className="truncate text-[13px]">{league}</span>
                     </button>
                   </li>
@@ -1119,7 +1328,7 @@ export default function Home() {
                 {[
                   { icon: <span className="text-sm leading-none">⚽</span>, label: "Futebol" },
                   { icon: <span className="text-sm leading-none">🏀</span>, label: "Basquete" },
-                  { icon: <span className="text-sm leading-none">🎾</span>, label: "Tênis" },
+                  { icon: <TennisBallIcon size={15} />, label: "Tênis" },
                   { icon: <span className="text-sm leading-none">🏒</span>, label: "Hóquei" },
                   { icon: <span className="text-sm leading-none">🏐</span>, label: "Voleibol" },
                 ].map(sport => (
@@ -1228,43 +1437,64 @@ export default function Home() {
                     ) : undefined
                   } />
                   {expandedMatch.isLive ? (
-                    <div className="text-center py-4">
-                      <div className="flex items-center justify-center gap-6">
-                        <span className="text-sm font-bold text-white truncate max-w-[120px]">{expandedMatch.home}</span>
-                        <span className="text-4xl font-black text-white tabular-nums shrink-0">
-                          {expandedMatch.homeScore ?? 0}<span className="text-zinc-500 mx-1">-</span>{expandedMatch.awayScore ?? 0}
+                    <div className="px-4 pt-3 pb-2">
+                      <div className="flex items-center gap-2 min-w-0 mb-2">
+                        <span className="font-bold text-white text-sm truncate flex-1 text-right">{expandedMatch.home}</span>
+                        <div className="flex items-center gap-1 shrink-0">
+                          <button
+                            onClick={() => setMatchViewTab(matchViewTab === "stats" || matchViewTab === "standings" ? "markets" : "stats")}
+                            className={`flex items-center gap-1 px-2 py-1.5 rounded-lg border text-[11px] font-bold transition-all ${matchViewTab === "stats" || matchViewTab === "standings" ? "border-blue-500 bg-blue-500/10 text-blue-400" : "border-zinc-700 bg-zinc-800 text-zinc-400 hover:text-white hover:border-zinc-600"}`}
+                            title="Estatísticas"
+                          >
+                            <BarChart2 size={12} />
+                          </button>
+                          <button
+                            onClick={() => setMatchViewTab(matchViewTab === "live" ? "markets" : "live")}
+                            className={`flex items-center gap-1 px-2 py-1.5 rounded-lg border text-[11px] font-bold transition-all ${matchViewTab === "live" ? "border-red-500 bg-red-500/10 text-red-400" : "border-zinc-700 bg-zinc-800 text-zinc-400 hover:text-white hover:border-zinc-600"}`}
+                            title="Visualização Ao Vivo"
+                          >
+                            <Activity size={12} />
+                          </button>
+                        </div>
+                        <span className="font-bold text-white text-sm truncate flex-1">{expandedMatch.away}</span>
+                      </div>
+                      <div className="text-center">
+                        <span className="text-3xl font-black text-white tabular-nums">
+                          {expandedMatch.homeScore ?? 0}<span className="text-zinc-500 mx-1.5">-</span>{expandedMatch.awayScore ?? 0}
                         </span>
-                        <span className="text-sm font-bold text-white truncate max-w-[120px]">{expandedMatch.away}</span>
                       </div>
                     </div>
                   ) : (
-                    <div className="px-4 py-3 flex items-center justify-between gap-3">
-                      <div className="flex items-center gap-3 min-w-0 flex-1">
-                        <span className="text-base font-bold text-white truncate">{expandedMatch.home}</span>
-                        <span className="text-zinc-600 text-xs shrink-0 font-medium">vs</span>
-                        <span className="text-base font-bold text-white truncate">{expandedMatch.away}</span>
+                    <div className="px-4 py-3">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span className="font-bold text-white text-base truncate flex-1 text-right">{expandedMatch.home}</span>
+                        <button
+                          onClick={() => setMatchViewTab(matchViewTab === "markets" ? "stats" : "markets")}
+                          className={`shrink-0 flex items-center gap-1 px-2 py-1.5 rounded-lg border text-[11px] font-bold transition-all ${matchViewTab !== "markets" ? "border-blue-500 bg-blue-500/10 text-blue-400" : "border-zinc-700 bg-zinc-800 text-zinc-400 hover:text-white hover:border-zinc-600"}`}
+                          title="Estatísticas"
+                        >
+                          <BarChart2 size={12} />
+                          <span className="hidden sm:inline">Stats</span>
+                        </button>
+                        <span className="text-zinc-600 text-[11px] shrink-0 font-medium">vs</span>
+                        <span className="font-bold text-white text-base truncate flex-1">{expandedMatch.away}</span>
                       </div>
-                      <button
-                        onClick={() => setMatchViewTab(matchViewTab === "markets" ? "stats" : "markets")}
-                        className={`shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-bold transition-all ${matchViewTab !== "markets" ? "border-blue-500 bg-blue-500/10 text-blue-400" : "border-zinc-700 bg-zinc-800 text-zinc-400 hover:text-white hover:border-zinc-600"}`}
-                        title="Estatísticas"
-                      >
-                        <BarChart2 size={14} />
-                        <span className="hidden sm:inline">Estatísticas</span>
-                      </button>
                     </div>
                   )}
 
-                  {/* Stats/Standings sub-tabs */}
+                  {/* Stats/Standings/Live sub-tabs */}
                   {matchViewTab !== "markets" && (
                     <div className="flex border-t border-zinc-800">
-                      {(["stats", "standings"] as const).map(tab => (
+                      {(expandedMatch.isLive
+                        ? (["stats", "standings", "live"] as const)
+                        : (["stats", "standings"] as const)
+                      ).map(tab => (
                         <button
                           key={tab}
                           onClick={() => setMatchViewTab(tab)}
-                          className={`flex-1 py-2 text-xs font-bold transition-colors ${matchViewTab === tab ? "text-blue-400 border-b-2 border-blue-500" : "text-zinc-500 hover:text-white"}`}
+                          className={`flex-1 py-2 text-xs font-bold transition-colors ${matchViewTab === tab ? (tab === "live" ? "text-red-400 border-b-2 border-red-500" : "text-blue-400 border-b-2 border-blue-500") : "text-zinc-500 hover:text-white"}`}
                         >
-                          {tab === "stats" ? "Estatísticas" : "Classificação"}
+                          {tab === "stats" ? "Estatísticas" : tab === "standings" ? "Classificação" : "⚡ Ao Vivo"}
                         </button>
                       ))}
                     </div>
@@ -1427,6 +1657,13 @@ export default function Home() {
                         </div>
                       </div>
                     )}
+                  </div>
+                )}
+
+                {/* Live momentum/pressure chart */}
+                {matchViewTab === "live" && expandedMatch.isLive && (
+                  <div className="bg-zinc-900 rounded-xl border border-zinc-800 p-4 mb-2 animate-in fade-in duration-200">
+                    <MomentumChart match={expandedMatch} />
                   </div>
                 )}
 
