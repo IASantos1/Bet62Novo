@@ -6,6 +6,7 @@ import {
   LogOut, User, History, Loader2, Zap, TrendingUp,
   ChevronRight, AlertCircle, BarChart2, Wallet, ArrowDownCircle, ArrowUpCircle, Plus,
 } from "lucide-react";
+import ProfileTab from "@/components/ProfileTab";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -671,7 +672,7 @@ function phoneMask(value: string) {
 
 export default function Home() {
   const auth = useAuth();
-  const [activeTab, setActiveTab] = useState<"sports" | "live" | "promos" | "mybets" | "wallet">("sports");
+  const [activeTab, setActiveTab] = useState<"sports" | "live" | "promos" | "mybets" | "wallet" | "profile">("sports");
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [bets, setBets] = useState<BetSelection[]>([]);
   const [authModalOpen, setAuthModalOpen] = useState(false);
@@ -1923,6 +1924,9 @@ export default function Home() {
                       <div className="text-green-400 font-bold mt-1">€ {parseFloat(auth.user.balance).toFixed(2)}</div>
                     </div>
                     <DropdownMenuSeparator className="bg-zinc-700" />
+                    <DropdownMenuItem className="hover:bg-zinc-800 cursor-pointer" onClick={() => setActiveTab("profile")}>
+                      <User size={14} className="mr-2" /> Perfil
+                    </DropdownMenuItem>
                     <DropdownMenuItem className="hover:bg-zinc-800 cursor-pointer" onClick={() => { setActiveTab("wallet"); fetchMyBets(); }}>
                       <Wallet size={14} className="mr-2" /> Carteira
                     </DropdownMenuItem>
@@ -1982,6 +1986,15 @@ export default function Home() {
             >
               <History size={16} />
               MINHAS APOSTAS
+            </button>
+          )}
+          {auth.user && (
+            <button
+              onClick={() => setActiveTab("profile")}
+              className={`py-3 font-semibold text-sm transition-colors border-b-2 whitespace-nowrap flex items-center gap-2 ${activeTab === "profile" ? "border-red-600 text-white" : "border-transparent text-zinc-500 hover:text-zinc-300"}`}
+            >
+              <User size={16} />
+              PERFIL
             </button>
           )}
         </div>
@@ -2463,6 +2476,10 @@ export default function Home() {
                   </div>
                 </div>
               </div>
+            )}
+
+            {activeTab === "profile" && auth.user && (
+              <ProfileTab myBets={myBets} myBetsLoading={myBetsLoading} fetchMyBets={fetchMyBets} />
             )}
 
             {activeTab === "wallet" && auth.user && (

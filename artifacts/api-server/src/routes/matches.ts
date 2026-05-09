@@ -715,6 +715,82 @@ async function getOddsMap(): Promise<Map<string, RealOdds>> {
   return map;
 }
 
+// ────────────────────────────────────────────────────────────────────────────
+// LIVE PROBABILITY ENGINE  — sportsbook-grade 1x2 calculation
+// Ref: Probability → Normalise → Apply margin (6%) → Odds
+// ────────────────────────────────────────────────────────────────────────────
+const LIVE_MARGIN = 0.06; // 6% house margin (vig)
+
+function calculateLive1x2(state: {
+  minute: number;
+  homeGoals: number;
+  awayGoals: number;
+  redCardsHome: number;
+  redCardsAway: number;
+  baseHome: number; // starting odds for this match (model/real)
+  baseAway: number;
+}): { home: number; draw: number; away: number } {
+  const r = (n: number) => Math.round(n * 100) / 100;
+
+  // Derive base probabilities from pre-match odds (already margin-free)
+  const vigFactor = 1 - LIVE_MARGIN;
+  const fairHome = 1 / (state.baseHome / vigFactor);
+  const fairAway = 1 / (state.baseAway / vigFactor);
+  const baseDraw = Math.max(0.02, 1 - fairHome - fairAway);
+
+  let homeProb = fairHome;
+  let drawProb = baseDraw;
+  let awayProb = fairAway;
+
+  const diff = state.homeGoals - state.awayGoals;
+
+  // Score advantage — each goal shifts probability significantly
+  if (diff > 0) {
+    const boost = 0.20 * Math.min(diff, 2);
+    homeProb += boost;
+    awayProb -= boost * 0.5;
+    drawProb -= boost * 0.5;
+  } else if (diff < 0) {
+    const boost = 0.20 * Math.min(-diff, 2);
+    awayProb += boost;
+    homeProb -= boost * 0.5;
+    drawProb -= boost * 0.5;
+  }
+
+  // Time pressure — after 70' the leading team becomes a stronger favourite
+  if (state.minute > 70) {
+    const pressure = (state.minute - 70) / 20 * 0.08;
+    if (diff > 0) { homeProb += pressure; drawProb -= pressure * 0.6; awayProb -= pressure * 0.4; }
+    else if (diff < 0) { awayProb += pressure; drawProb -= pressure * 0.6; homeProb -= pressure * 0.4; }
+    else { drawProb += pressure * 0.5; } // draw more likely to stay a draw late
+  }
+
+  // Red cards
+  if (state.redCardsAway > 0) { homeProb += 0.07 * state.redCardsAway; awayProb -= 0.05 * state.redCardsAway; }
+  if (state.redCardsHome > 0) { awayProb += 0.07 * state.redCardsHome; homeProb -= 0.05 * state.redCardsHome; }
+
+  // Clamp and normalise
+  homeProb = Math.max(0.02, homeProb);
+  drawProb = Math.max(0.02, drawProb);
+  awayProb = Math.max(0.02, awayProb);
+  const total = homeProb + drawProb + awayProb;
+  homeProb /= total;
+  drawProb /= total;
+  awayProb /= total;
+
+  // Apply margin → final odds
+  return {
+    home: Math.max(1.04, r((1 / homeProb) * vigFactor)),
+    draw: Math.max(2.00, r((1 / drawProb) * vigFactor)),
+    away: Math.max(1.04, r((1 / awayProb) * vigFactor)),
+  };
+}
+
+// Count red cards from events array
+function countRedCards(events: Array<{ type: string; team: string }>, team: "home" | "away"): number {
+  return events.filter(e => e.type?.toLowerCase().includes("red") && e.team === team).length;
+}
+
 // Find real odds for a v2 match using fallback IDs; model-based fallback using team names
 function resolveOdds(
   m: StatpalMatchV2,
@@ -880,29 +956,28 @@ async function buildLiveMatches(): Promise<LiveMatchState[]> {
         count++;
         continue;
       } else {
-        // Score changed or first seen — resolve from real odds or model
+        // Score changed or first seen — build base odds from pre-match model/real data
         const resolved = resolveOdds(m, odds);
-        matchOdds = resolved.odds;
         matchMarkets = resolved.markets;
         hasRealOdds = true;
 
-        // Adjust based on live score differential
-        const diff = homeScore - awayScore;
-        if (diff !== 0) {
-          const factor = Math.min(0.35, Math.abs(diff) * 0.12);
-          if (diff > 0) {
-            matchOdds = {
-              home: Math.max(1.04, +(matchOdds.home * (1 - factor)).toFixed(2)),
-              draw: matchOdds.draw,
-              away: Math.min(15, +(matchOdds.away * (1 + factor)).toFixed(2)),
-            };
-          } else {
-            matchOdds = {
-              home: Math.min(15, +(matchOdds.home * (1 + factor)).toFixed(2)),
-              draw: matchOdds.draw,
-              away: Math.max(1.04, +(matchOdds.away * (1 - factor)).toFixed(2)),
-            };
-          }
+        // Collect red cards from events (before they are parsed below)
+        const rawEvents = m.events?.event ? (Array.isArray(m.events.event) ? m.events.event : [m.events.event]) : [];
+        const rcHome = countRedCards(rawEvents.map(e => ({ type: e.type ?? "", team: e.team ?? "" })), "home");
+        const rcAway = countRedCards(rawEvents.map(e => ({ type: e.type ?? "", team: e.team ?? "" })), "away");
+
+        // Use sportsbook probability engine when score or game state changed
+        matchOdds = calculateLive1x2({
+          minute,
+          homeGoals: homeScore,
+          awayGoals: awayScore,
+          redCardsHome: rcHome,
+          redCardsAway: rcAway,
+          baseHome: resolved.odds.home,
+          baseAway: resolved.odds.away,
+        });
+
+        if (homeScore !== awayScore) {
           matchMarkets = makeAdvancedMarketsFromTeams(m.home.name, m.away.name);
         }
       }

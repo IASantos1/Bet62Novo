@@ -1,0 +1,259 @@
+Calcular odds ao vivo é basicamente transformar a probabilidade atual do evento em odd, enquanto o jogo muda a cada segundo.
+
+A fórmula central é:
+
+Odd Decimal=
+Probabilidade
+1
+	​
+
+
+⚙️ COMO SPORTSBOOKS CALCULAM ODDS AO VIVO
+
+A lógica profissional é:
+
+EVENTOS DO JOGO
+      ↓
+GAME STATE
+      ↓
+PROBABILIDADE
+      ↓
+MARGEM DA CASA
+      ↓
+ODD FINAL
+🧠 1. CRIAR O GAME STATE
+
+Você precisa do estado atual do jogo:
+
+{
+  "minute": 63,
+  "home_goals": 1,
+  "away_goals": 0,
+  "home_xg": 1.8,
+  "away_xg": 0.7,
+  "red_cards_home": 0,
+  "red_cards_away": 1
+}
+⚽ 2. CALCULAR PROBABILIDADE
+Exemplo simples:
+
+Time da casa está ganhando:
+
+63'
+1x0
+adversário com vermelho
+
+Então:
+
+Casa: 68%
+Empate: 20%
+Fora: 12%
+⚙️ 3. TRANSFORMAR EM ODDS
+Fórmula:
+
+Odd=
+P
+1
+	​
+
+
+Exemplo:
+Casa
+
+0.68
+1
+	​
+
+≈1.47
+
+Empate
+
+0.20
+1
+	​
+
+=5.00
+
+Fora
+
+0.12
+1
+	​
+
+≈8.33
+
+💰 4. APLICAR MARGEM DA CASA
+
+Sportsbook nunca usa odd justa.
+
+Margem (vig)
+
+Exemplo:
+
+margem = 6%
+Fórmula:
+
+Odd Final=Odd Justa×(1−0.06)
+
+⚙️ 5. SCRIPT REAL (LIVE ODDS)
+⚽ Futebol
+function calculate1x2(state) {
+
+  let homeProb = 0.45;
+  let drawProb = 0.30;
+  let awayProb = 0.25;
+
+  // vantagem no placar
+  if (state.home_goals > state.away_goals) {
+    homeProb += 0.20;
+    awayProb -= 0.10;
+  }
+
+  // tempo do jogo
+  if (state.minute > 70) {
+    homeProb += 0.10;
+    drawProb -= 0.05;
+  }
+
+  // cartão vermelho
+  if (state.red_cards_away > 0) {
+    homeProb += 0.08;
+  }
+
+  // normalização
+  const total =
+    homeProb + drawProb + awayProb;
+
+  homeProb /= total;
+  drawProb /= total;
+  awayProb /= total;
+
+  // odds
+  return {
+
+    home:
+      ((1 / homeProb) * 0.94).toFixed(2),
+
+    draw:
+      ((1 / drawProb) * 0.94).toFixed(2),
+
+    away:
+      ((1 / awayProb) * 0.94).toFixed(2)
+  };
+}
+⚡ 6. OVER/UNDER AO VIVO
+
+Você usa expectativa de gols.
+
+Modelo:
+xG restante
++
+tempo restante
++
+ritmo ofensivo
+Fórmula Poisson
+
+P(X=k)=
+k!
+λ
+k
+e
+−λ
+	​
+
+
+⚽ Exemplo
+63'
+1x0
+xG total = 2.8
+
+Probabilidade de sair +2 gols:
+→ Over 2.5 cai.
+
+⚙️ Script simples
+function calculateOver25(state) {
+
+  const totalXG =
+    state.home_xg + state.away_xg;
+
+  let prob = totalXG / 3;
+
+  prob = Math.min(0.95, prob);
+
+  return {
+
+    over25:
+      ((1 / prob) * 0.94).toFixed(2),
+
+    under25:
+      ((1 / (1 - prob)) * 0.94).toFixed(2)
+  };
+}
+🔥 7. BTTS (AMBAS MARCAM)
+
+Você calcula chance dos dois marcarem.
+
+Fórmula simplificada
+
+P(BTTS)=P(Home Goal)×P(Away Goal)
+
+⚡ 8. HANDICAP AO VIVO
+
+Baseado em:
+
+diferença de gols
+xG
+posse
+cartões
+tempo
+Exemplo
+1x0
+75'
+xG = 2.1 vs 0.4
+
+Asian Handicap:
+
+-1.5
+-2.5
+🧠 9. O QUE REALMENTE MOVE ODDS AO VIVO
+⚽ Futebol
+gols
+cartões
+VAR
+xG
+posse
+pressão ofensiva
+🏀 NBA
+pace
+runs
+foul trouble
+🎾 Tênis
+breaks
+service hold %
+⚡ 10. MODELO PROFISSIONAL
+
+Sportsbooks usam:
+
+Poisson
+Markov
+Monte Carlo
+ML Models
+Bayesian Updating
+🚀 11. ARQUITETURA PROFISSIONAL
+LIVE FEED
+    ↓
+GAME STATE
+    ↓
+PROBABILITY ENGINE
+    ↓
+MARGIN ENGINE
+    ↓
+LIVE ODDS
+🔥 12. O QUE VOCÊ DEVE TER NO SEU ENGINE
+✔ Probabilidade
+✔ Margem
+✔ Delay
+✔ Suspensão
+✔ Auto-line generation
+✔ Risk validation
+✔ Reopen logic
