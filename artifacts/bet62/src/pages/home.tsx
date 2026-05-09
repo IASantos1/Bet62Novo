@@ -894,7 +894,7 @@ export default function Home() {
     };
   }, []);
 
-  // Fetch live matches — polls every 30s while on live tab
+  // Fetch live matches — polls every 15s as fallback (WebSocket is primary at 5s)
   const fetchLive = useCallback(async (showSpinner = false) => {
     if (showSpinner) setLiveLoading(true);
     try {
@@ -930,7 +930,7 @@ export default function Home() {
   useEffect(() => {
     if (activeTab === "live") {
       fetchLive(true);
-      const interval = setInterval(() => fetchLive(false), 30000);
+      const interval = setInterval(() => fetchLive(false), 15000);
       return () => clearInterval(interval);
     }
     return undefined;

@@ -3,6 +3,7 @@ import { WebSocketServer, type WebSocket } from "ws";
 import app from "./app";
 import { logger } from "./lib/logger";
 import { buildLiveMatches } from "./routes/matches";
+import { CONFIG } from "./lib/config";
 
 const rawPort = process.env["PORT"];
 
@@ -46,7 +47,7 @@ wss.on("connection", (ws: WebSocket) => {
   ws.on("close", () => logger.info("WebSocket client disconnected"));
 });
 
-setInterval(broadcastLive, 30000);
+setInterval(broadcastLive, CONFIG.LIVE_UPDATE_INTERVAL);
 
 server.listen(port, (err?: Error) => {
   if (err) {

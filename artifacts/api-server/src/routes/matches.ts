@@ -45,6 +45,10 @@ export type LiveMatchState = {
   odds: { home: number; draw: number; away: number };
   markets: AdvancedMarkets;
   events: Array<{ type: string; team: string; minute: number; player: string }>;
+  // Internal tracking for live odds drift engine
+  _baseOdds?: { home: number; draw: number; away: number };
+  _oddsUpdatedAt?: number;
+  _driftPhase?: number;
 };
 
 export type UpcomingMatch = {
@@ -843,15 +847,44 @@ async function buildLiveMatches(): Promise<LiveMatchState[]> {
       let hasRealOdds = true; // Always show odds — use model when real unavailable
 
       if (existing && existing.homeScore === homeScore && existing.awayScore === awayScore) {
-        // Score unchanged — reuse odds to avoid drift
-        matchOdds = existing.odds;
+        // Score unchanged — apply live odds drift (simulate market movement)
+        const base = existing._baseOdds ?? existing.odds;
+        const now = Date.now();
+        const phase = (existing._driftPhase ?? 0) + 1;
+
+        // Time-based micro-drift: oscillates odds naturally
+        // Uses two sine waves at different frequencies to create organic movement
+        const t = now / 1000;
+        const driftH = Math.sin(t * 0.31 + phase * 0.7) * 0.018 + Math.cos(t * 0.17) * 0.009;
+        const driftD = Math.cos(t * 0.23 + phase * 0.5) * 0.014 + Math.sin(t * 0.11) * 0.007;
+        const driftA = Math.sin(t * 0.27 + phase * 0.9) * 0.018 + Math.cos(t * 0.19) * 0.009;
+
+        // Minute pressure: after 60' odds compress toward extremes
+        const timePressure = Math.max(0, (minute - 55) / 60) * 0.04;
+        const diff = homeScore - awayScore;
+
+        const r = (n: number) => Math.round(n * 100) / 100;
+        matchOdds = {
+          home: Math.max(1.04, Math.min(25, r(base.home * (1 + driftH - (diff > 0 ? timePressure * 0.4 : timePressure * 0.6))))),
+          draw: base.draw > 0 ? Math.max(2.2, Math.min(8, r(base.draw * (1 + driftD + timePressure * 0.3)))) : 0,
+          away: Math.max(1.04, Math.min(25, r(base.away * (1 + driftA + (diff > 0 ? timePressure * 0.6 : timePressure * 0.4))))),
+        };
+
+        // Keep markets from existing state
         matchMarkets = existing.markets;
+
+        // Store drift phase for next cycle
+        const updatedState = { ...existing, odds: matchOdds, minute, _driftPhase: phase };
+        liveMatchState.set(m.main_id, updatedState);
+        result.push({ ...updatedState, events: existing.events });
+        count++;
+        continue;
       } else {
         // Score changed or first seen — resolve from real odds or model
         const resolved = resolveOdds(m, odds);
         matchOdds = resolved.odds;
         matchMarkets = resolved.markets;
-        hasRealOdds = true; // Always true — we always have computed odds
+        hasRealOdds = true;
 
         // Adjust based on live score differential
         const diff = homeScore - awayScore;
@@ -901,6 +934,9 @@ async function buildLiveMatches(): Promise<LiveMatchState[]> {
         odds: matchOdds,
         markets: matchMarkets,
         events,
+        _baseOdds: matchOdds,
+        _oddsUpdatedAt: Date.now(),
+        _driftPhase: 0,
       };
 
       liveMatchState.set(m.main_id, state);
