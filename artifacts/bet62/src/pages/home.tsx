@@ -402,12 +402,13 @@ export default function Home() {
         layout
         initial={{ opacity: 0, y: 10 }}
         animate={{ opacity: 1, y: 0 }}
-        className="bg-zinc-900 rounded-xl border border-zinc-800 hover:border-red-500/40 transition-colors cursor-pointer overflow-hidden"
+        className="bg-zinc-900 rounded-lg border border-zinc-800 hover:border-red-500/30 transition-colors cursor-pointer overflow-hidden"
         onClick={() => setSelectedMatch(match)}
       >
+        {/* Top: league + live badge */}
         <div className="flex items-center justify-between px-4 py-2 bg-zinc-950/60 border-b border-zinc-800">
-          <span className="text-xs text-zinc-400 truncate max-w-[60%]">{match.league}</span>
-          <div className="flex items-center gap-2">
+          <span className="text-xs text-zinc-400 truncate max-w-[55%]">{match.league}</span>
+          <div className="flex items-center gap-2 shrink-0">
             <span className="relative flex h-2 w-2">
               <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-500 opacity-75"></span>
               <span className="relative inline-flex rounded-full h-2 w-2 bg-red-500"></span>
@@ -419,78 +420,76 @@ export default function Home() {
           </div>
         </div>
 
-        <div className="px-4 py-4" onClick={e => e.stopPropagation()}>
-          <div className="flex items-center justify-between mb-3">
-            <div className="flex-1">
-              <div className="font-bold text-white text-sm truncate">{match.home}</div>
-            </div>
-            <div className="px-4 text-center">
-              <div className="text-2xl font-black text-white tabular-nums">
-                {match.homeScore ?? 0} <span className="text-zinc-600">-</span> {match.awayScore ?? 0}
-              </div>
-            </div>
-            <div className="flex-1 text-right">
-              <div className="font-bold text-white text-sm truncate">{match.away}</div>
-            </div>
-          </div>
+        {/* Progress bar */}
+        <div className="w-full h-0.5 bg-zinc-800 overflow-hidden">
+          <motion.div
+            className="h-full bg-gradient-to-r from-red-600 to-red-400"
+            initial={{ width: 0 }}
+            animate={{ width: `${progress}%` }}
+            transition={{ duration: 1 }}
+          />
+        </div>
 
-          <div className="w-full h-1 bg-zinc-800 rounded-full mb-3 overflow-hidden">
-            <motion.div
-              className="h-full bg-gradient-to-r from-red-600 to-red-400 rounded-full"
-              initial={{ width: 0 }}
-              animate={{ width: `${progress}%` }}
-              transition={{ duration: 1 }}
-            />
+        {/* Teams + score + odds row */}
+        <div className="flex items-center gap-3 px-4 py-3" onClick={e => e.stopPropagation()}>
+          {/* Score */}
+          <div className="text-2xl font-black text-white tabular-nums shrink-0 w-14 text-center">
+            {match.homeScore ?? 0}<span className="text-zinc-600 text-lg">-</span>{match.awayScore ?? 0}
           </div>
-
-          <div className="grid grid-cols-3 gap-2">
+          {/* Teams */}
+          <div className="flex-1 min-w-0">
+            <div className="font-bold text-white text-sm truncate">{match.home}</div>
+            <div className="text-[11px] text-zinc-600 my-0.5">vs</div>
+            <div className="font-bold text-white text-sm truncate">{match.away}</div>
+          </div>
+          {/* Odds */}
+          <div className="flex gap-1.5 shrink-0">
             <OddsButton match={match} selection="home" odd={match.odds.home} market="result" label="Casa" />
-            <OddsButton match={match} selection="draw" odd={match.odds.draw} market="result" label="Empate" />
+            <OddsButton match={match} selection="draw" odd={match.odds.draw} market="result" label="Emp." />
             <OddsButton match={match} selection="away" odd={match.odds.away} market="result" label="Fora" />
           </div>
+          <button
+            onClick={e => { e.stopPropagation(); setSelectedMatch(match); }}
+            className="text-zinc-600 hover:text-zinc-300 transition-colors shrink-0"
+          >
+            <ChevronRight size={16} />
+          </button>
         </div>
       </motion.div>
     );
   };
 
   const MatchCard = ({ match }: { match: Match }) => {
-    const bannerImg = TEAM_BANNERS[match.home];
     return (
-      <motion.div
-        whileHover={{ y: -4 }}
-        className="bg-zinc-900 rounded-lg border border-zinc-800 hover:border-red-500/50 transition-colors cursor-pointer flex flex-col overflow-hidden"
+      <div
+        className="bg-zinc-900 rounded-lg border border-zinc-800 hover:border-red-500/30 transition-colors cursor-pointer"
         onClick={() => setSelectedMatch(match)}
       >
-        {bannerImg ? (
-          <div className="relative w-full aspect-[3/1]">
-            <img src={bannerImg} alt={`${match.home} banner`} className="absolute inset-0 w-full h-full object-cover" />
-            <div className="absolute inset-0 bg-gradient-to-t from-zinc-900 via-zinc-900/60 to-transparent"></div>
-            <div className="absolute bottom-2 left-4 right-4 flex justify-between items-center text-xs font-semibold text-zinc-300 z-10">
-              <span>{match.league}</span>
-              <span className="text-zinc-300">{match.time}</span>
-            </div>
+        {/* League + time row */}
+        <div className="flex items-center justify-between px-4 pt-3 pb-1 text-xs text-zinc-500">
+          <span className="truncate max-w-[60%]">{match.league}</span>
+          <span className="shrink-0 ml-2">{match.time}</span>
+        </div>
+        {/* Teams + odds row */}
+        <div className="flex items-center gap-3 px-4 pb-3 pt-1" onClick={e => e.stopPropagation()}>
+          <div className="flex-1 min-w-0">
+            <div className="font-bold text-white text-sm truncate">{match.home}</div>
+            <div className="text-[11px] text-zinc-600 my-0.5">vs</div>
+            <div className="font-bold text-white text-sm truncate">{match.away}</div>
           </div>
-        ) : (
-          <div className="p-4 pb-0">
-            <div className="flex justify-between items-center mb-4 text-xs font-semibold text-zinc-400">
-              <span>{match.league}</span>
-              <span>{match.time}</span>
-            </div>
-          </div>
-        )}
-        <div className="p-4 flex-1 flex flex-col">
-          <div className={`flex-1 flex flex-col justify-center ${bannerImg ? "mb-4 mt-1" : "mb-6"}`}>
-            <div className="text-lg font-bold text-white">{match.home}</div>
-            <div className="text-sm text-zinc-500 my-1">vs</div>
-            <div className="text-lg font-bold text-white">{match.away}</div>
-          </div>
-          <div className="grid grid-cols-3 gap-2" onClick={e => e.stopPropagation()}>
+          <div className="flex gap-1.5 shrink-0">
             <OddsButton match={match} selection="home" odd={match.odds.home} market="result" label="Casa" />
-            <OddsButton match={match} selection="draw" odd={match.odds.draw} market="result" label="Empate" />
+            <OddsButton match={match} selection="draw" odd={match.odds.draw} market="result" label="Emp." />
             <OddsButton match={match} selection="away" odd={match.odds.away} market="result" label="Fora" />
           </div>
+          <button
+            onClick={e => { e.stopPropagation(); setSelectedMatch(match); }}
+            className="text-zinc-600 hover:text-zinc-300 transition-colors shrink-0"
+          >
+            <ChevronRight size={16} />
+          </button>
         </div>
-      </motion.div>
+      </div>
     );
   };
 
@@ -694,7 +693,7 @@ export default function Home() {
       <header className="sticky top-0 z-40 bg-zinc-950 border-b border-zinc-900">
         <div className="flex items-center justify-between px-4 h-16 max-w-[1600px] mx-auto">
           <div className="flex items-center gap-4">
-            <button className="p-2 -ml-2 text-zinc-400 hover:text-white transition-colors" onClick={() => setSidebarOpen(true)}>
+            <button className="lg:hidden p-2 -ml-2 text-zinc-400 hover:text-white transition-colors" onClick={() => setSidebarOpen(true)}>
               <Menu size={24} />
             </button>
             <div className="font-black text-2xl tracking-tighter italic">
@@ -777,12 +776,12 @@ export default function Home() {
         </div>
       </header>
 
-      {/* SIDEBAR */}
+      {/* MOBILE SIDEBAR OVERLAY */}
       <AnimatePresence>
         {sidebarOpen && (
           <>
-            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 bg-black/80 z-50 backdrop-blur-sm" onClick={() => setSidebarOpen(false)} />
-            <motion.div initial={{ x: "-100%" }} animate={{ x: 0 }} exit={{ x: "-100%" }} transition={{ type: "spring", bounce: 0, duration: 0.4 }} className="fixed top-0 left-0 bottom-0 w-72 bg-zinc-950 border-r border-zinc-800 z-50 flex flex-col">
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 bg-black/80 z-50 backdrop-blur-sm lg:hidden" onClick={() => setSidebarOpen(false)} />
+            <motion.div initial={{ x: "-100%" }} animate={{ x: 0 }} exit={{ x: "-100%" }} transition={{ type: "spring", bounce: 0, duration: 0.4 }} className="fixed top-0 left-0 bottom-0 w-72 bg-zinc-950 border-r border-zinc-800 z-50 flex flex-col lg:hidden">
               <div className="flex items-center justify-between p-4 border-b border-zinc-800">
                 <div className="font-black text-xl tracking-tighter italic"><span className="text-white">BET</span><span className="text-red-600">62</span></div>
                 <button onClick={() => setSidebarOpen(false)} className="text-zinc-400 hover:text-white"><X size={20} /></button>
@@ -820,9 +819,47 @@ export default function Home() {
         )}
       </AnimatePresence>
 
-      {/* MAIN */}
+      {/* MAIN — 3-column desktop layout */}
       <div className="flex-1 flex max-w-[1600px] w-full mx-auto">
-        <main className="flex-1 pb-32 lg:pb-8 overflow-hidden">
+
+        {/* DESKTOP LEFT SIDEBAR — always visible on lg+ */}
+        <aside className="hidden lg:flex flex-col w-56 shrink-0 border-r border-zinc-900 bg-zinc-950 sticky top-16 h-[calc(100vh-4rem)] overflow-y-auto">
+          <div className="p-4">
+            <div className="mb-6">
+              <h4 className="text-[11px] font-bold text-zinc-500 uppercase tracking-wider mb-3">Principais Ligas</h4>
+              <ul className="space-y-0.5">
+                {["La Liga", "Premier League", "Champions League", "Serie A", "Bundesliga", "Ligue 1", "Liga Portugal", "Eredivisie"].map(league => (
+                  <li key={league}>
+                    <button className="flex items-center gap-2.5 w-full px-2 py-2 rounded-md hover:bg-zinc-900 text-sm text-zinc-400 hover:text-white transition-colors">
+                      <span className="text-base">⚽</span>
+                      <span className="truncate text-[13px]">{league}</span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+            <div>
+              <h4 className="text-[11px] font-bold text-zinc-500 uppercase tracking-wider mb-3">Esportes</h4>
+              <ul className="space-y-0.5">
+                {[
+                  { icon: <Target size={15} />, label: "Futebol" },
+                  { icon: <Dribbble size={15} />, label: "Basquete" },
+                  { icon: <Trophy size={15} />, label: "Tênis" },
+                  { icon: <Gamepad2 size={15} />, label: "E-Sports" },
+                ].map(sport => (
+                  <li key={sport.label}>
+                    <button className="flex items-center gap-2.5 w-full px-2 py-2 rounded-md hover:bg-zinc-900 text-[13px] text-zinc-400 hover:text-white transition-colors">
+                      <span className="text-red-500">{sport.icon}</span>
+                      {sport.label}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </div>
+        </aside>
+
+        <main className="flex-1 pb-32 lg:pb-8 overflow-hidden min-w-0">
 
           {/* HERO — sports tab only */}
           {activeTab === "sports" && (
@@ -904,7 +941,7 @@ export default function Home() {
                     <p className="font-medium">Nenhum evento programado no momento.</p>
                   </div>
                 ) : (
-                  <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+                  <div className="space-y-2">
                     {upcomingMatches.map(match => <MatchCard key={match.id} match={match} />)}
                   </div>
                 )}
@@ -941,7 +978,7 @@ export default function Home() {
                     <p className="text-sm mt-1">Volte em breve para acompanhar as partidas em tempo real.</p>
                   </div>
                 ) : (
-                  <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+                  <div className="space-y-2">
                     {liveMatches.map(match => <LiveMatchCard key={match.id} match={match} />)}
                   </div>
                 )}
