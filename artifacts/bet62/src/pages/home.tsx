@@ -2,9 +2,9 @@ import { useState, useCallback, useEffect, useRef, type ReactNode } from "react"
 import { motion, AnimatePresence } from "framer-motion";
 import { toast } from "sonner";
 import {
-  Menu, X, Trophy, Activity, Gift, Dribbble, Target, Gamepad2,
+  Menu, X, Trophy, Activity, Gift,
   LogOut, User, History, Loader2, Zap, TrendingUp, TrendingDown,
-  ChevronRight, AlertCircle
+  ChevronRight, AlertCircle, BarChart2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -221,6 +221,21 @@ type PlatformStats = {
   totalPaidOut: number;
 };
 
+type FormEntry = { result: "W" | "D" | "L"; score: string; opponent: string; home: boolean };
+type MatchStatsData = {
+  winProb: { home: number; draw: number; away: number };
+  h2h: { homeWins: number; draws: number; awayWins: number };
+  avgStats: {
+    goalsScored: number; leagueGoals: number;
+    over15: number; leagueOver15: number;
+    over25: number; leagueOver25: number;
+    cards: number; corners: number; btts: number; leagueBtts: number;
+  };
+  homeForm: FormEntry[];
+  awayForm: FormEntry[];
+};
+type StandingRow = { pos: number; name: string; played: number; won: number; drawn: number; lost: number; gf: number; ga: number; pts: number };
+
 function cpfMask(value: string) {
   return value
     .replace(/\D/g, "")
@@ -278,6 +293,58 @@ export default function Home() {
 
   // Platform stats for hero
   const [platformStats, setPlatformStats] = useState<PlatformStats | null>(null);
+
+  // Match detail view tab: "markets" | "stats" | "standings"
+  const [matchViewTab, setMatchViewTab] = useState<"markets" | "stats" | "standings">("markets");
+  const [matchStats, setMatchStats] = useState<MatchStatsData | null>(null);
+  const [matchStatsLoading, setMatchStatsLoading] = useState(false);
+  const [standings, setStandings] = useState<StandingRow[] | null>(null);
+  const [standingsLoading, setStandingsLoading] = useState(false);
+  const [standingsLeague, setStandingsLeague] = useState("");
+
+  // Reset match view state when expanded match changes
+  useEffect(() => {
+    setMatchViewTab("markets");
+    setMatchStats(null);
+    setStandings(null);
+    setStandingsLeague("");
+  }, [expandedMatch?.id]);
+
+  // Fetch match stats when stats tab is active
+  useEffect(() => {
+    if (matchViewTab !== "stats" || !expandedMatch || matchStats) return;
+    setMatchStatsLoading(true);
+    const p = new URLSearchParams({
+      home: expandedMatch.home,
+      away: expandedMatch.away,
+      homeOdd: String(expandedMatch.odds.home),
+      drawOdd: String(expandedMatch.odds.draw),
+      awayOdd: String(expandedMatch.odds.away),
+    });
+    fetch(`/api/matches/stats?${p}`)
+      .then(r => r.ok ? r.json() : null)
+      .then(d => { if (d) setMatchStats(d as MatchStatsData); })
+      .catch(() => {})
+      .finally(() => setMatchStatsLoading(false));
+  }, [matchViewTab, expandedMatch?.id]);
+
+  // Fetch standings when standings tab is active
+  useEffect(() => {
+    if (matchViewTab !== "standings" || !expandedMatch || standings) return;
+    setStandingsLoading(true);
+    const league = expandedMatch.league ?? "";
+    setStandingsLeague(league);
+    fetch(`/api/matches/standings?league=${encodeURIComponent(league)}`)
+      .then(r => r.ok ? r.json() : null)
+      .then(d => {
+        if (d && Array.isArray(d.teams)) {
+          setStandingsLeague(d.league ?? league);
+          setStandings(d.teams as StandingRow[]);
+        }
+      })
+      .catch(() => {})
+      .finally(() => setStandingsLoading(false));
+  }, [matchViewTab, expandedMatch?.id]);
 
   // Fetch platform stats on mount
   useEffect(() => {
@@ -778,11 +845,31 @@ export default function Home() {
     </div>
   );
 
+  const MarketOddsBtn = ({ match, sel, odd, market, label }: { match: Match; sel: string; odd: number; market: string; label: string }) => {
+    const active = !!bets.find(b => b.matchId === match.id && b.market === market && b.selection === sel);
+    return (
+      <button
+        onClick={() => toggleBet(match, sel, odd, market, label)}
+        className={`flex-1 flex flex-col items-center py-2.5 px-1 rounded-lg border transition-all min-w-0 ${active ? "border-red-600 bg-red-600/15 ring-1 ring-red-500/40" : "border-zinc-800 bg-zinc-900/80 hover:border-red-500/40 hover:bg-zinc-800"}`}
+      >
+        <span className="text-[11px] text-zinc-400 mb-1 leading-tight text-center truncate w-full px-0.5">{label}</span>
+        <span className={`font-bold text-base tabular-nums ${active ? "text-red-400" : "text-white"}`}>{odd.toFixed(2)}</span>
+      </button>
+    );
+  };
+
+  const MarketGroup = ({ title, children }: { title: string; children: ReactNode }) => (
+    <div className="mb-4 last:mb-0">
+      <div className="text-[10px] font-black text-zinc-500 uppercase tracking-widest mb-2 px-0.5">{title}</div>
+      <div className="flex gap-2">{children}</div>
+    </div>
+  );
+
   const MatchModalMarkets = ({ match }: { match: Match }) => {
     const [modalTab, setModalTab] = useState("resultado");
     const m = match.markets;
     return (
-      <div className="mt-4">
+      <div className="mt-2">
         <div className="flex gap-1 overflow-x-auto no-scrollbar mb-4 pb-1 border-b border-zinc-800">
           {["resultado", "dupla", "gols", "handicap", "1tempo"].map(t => (
             <button
@@ -796,91 +883,69 @@ export default function Home() {
         </div>
 
         {modalTab === "resultado" && (
-          <div className="grid grid-cols-3 gap-2">
-            {[
-              { sel: "home", label: "Casa", odd: match.odds.home },
-              { sel: "draw", label: "Empate", odd: match.odds.draw },
-              { sel: "away", label: "Fora", odd: match.odds.away },
-            ].map(item => (
-              <button key={item.sel} onClick={() => toggleBet(match, item.sel, item.odd, "result", item.label)}
-                className={`flex flex-col items-center p-3 rounded-lg border transition-all ${bets.find(b => b.matchId === match.id && b.market === "result" && b.selection === item.sel) ? "border-red-600 bg-red-600/10" : "border-zinc-800 bg-zinc-900 hover:border-red-500/50"}`}>
-                <span className="text-xs text-zinc-400 mb-1">{item.label}</span>
-                <span className="font-bold text-lg text-white">{item.odd.toFixed(2)}</span>
-              </button>
-            ))}
-          </div>
+          <MarketGroup title="Resultado Final">
+            <MarketOddsBtn match={match} sel="home" odd={match.odds.home} market="result" label={match.home} />
+            <MarketOddsBtn match={match} sel="draw" odd={match.odds.draw} market="result" label="Empate" />
+            <MarketOddsBtn match={match} sel="away" odd={match.odds.away} market="result" label={match.away} />
+          </MarketGroup>
         )}
 
         {modalTab === "dupla" && m && (
-          <div className="space-y-2">
-            {[
-              { sel: "homeOrDraw", label: `${match.home} ou Empate`, odd: m.doubleChance.homeOrDraw },
-              { sel: "awayOrDraw", label: `${match.away} ou Empate`, odd: m.doubleChance.awayOrDraw },
-              { sel: "homeOrAway", label: `${match.home} ou ${match.away}`, odd: m.doubleChance.homeOrAway },
-              { sel: "bts-yes", label: "Ambas marcam: Sim", odd: m.bothTeamsScore.yes },
-              { sel: "bts-no", label: "Ambas marcam: Não", odd: m.bothTeamsScore.no },
-            ].map(item => (
-              <button key={item.sel} onClick={() => toggleBet(match, item.sel, item.odd, "dupla", item.label)}
-                className={`w-full flex justify-between items-center p-3 rounded-lg border transition-all ${bets.find(b => b.matchId === match.id && b.market === "dupla" && b.selection === item.sel) ? "border-red-600 bg-red-600/10" : "border-zinc-800 bg-zinc-900 hover:border-red-500/50"}`}>
-                <span className="text-sm text-zinc-300">{item.label}</span>
-                <span className="font-bold text-white">{item.odd.toFixed(2)}</span>
-              </button>
-            ))}
+          <div>
+            <MarketGroup title="Dupla Chance">
+              <MarketOddsBtn match={match} sel="homeOrDraw" odd={m.doubleChance.homeOrDraw} market="dupla" label={`${match.home} ou X`} />
+              <MarketOddsBtn match={match} sel="awayOrDraw" odd={m.doubleChance.awayOrDraw} market="dupla" label={`${match.away} ou X`} />
+              <MarketOddsBtn match={match} sel="homeOrAway" odd={m.doubleChance.homeOrAway} market="dupla" label="1 ou 2" />
+            </MarketGroup>
+            <MarketGroup title="Ambas as Equipas Marcam">
+              <MarketOddsBtn match={match} sel="bts-yes" odd={m.bothTeamsScore.yes} market="dupla" label="Sim" />
+              <MarketOddsBtn match={match} sel="bts-no" odd={m.bothTeamsScore.no} market="dupla" label="Não" />
+            </MarketGroup>
           </div>
         )}
 
         {modalTab === "gols" && m && (
-          <div className="space-y-2">
-            {[
-              { sel: "o15", label: "Mais de 1.5 gols", odd: m.totalGoals.over15 },
-              { sel: "u15", label: "Menos de 1.5 gols", odd: m.totalGoals.under15 },
-              { sel: "o25", label: "Mais de 2.5 gols", odd: m.totalGoals.over25 },
-              { sel: "u25", label: "Menos de 2.5 gols", odd: m.totalGoals.under25 },
-              { sel: "o35", label: "Mais de 3.5 gols", odd: m.totalGoals.over35 },
-              { sel: "u35", label: "Menos de 3.5 gols", odd: m.totalGoals.under35 },
-            ].map(item => (
-              <button key={item.sel} onClick={() => toggleBet(match, item.sel, item.odd, "gols", item.label)}
-                className={`w-full flex justify-between items-center p-3 rounded-lg border transition-all ${bets.find(b => b.matchId === match.id && b.market === "gols" && b.selection === item.sel) ? "border-red-600 bg-red-600/10" : "border-zinc-800 bg-zinc-900 hover:border-red-500/50"}`}>
-                <span className="text-sm text-zinc-300">{item.label}</span>
-                <span className="font-bold text-white">{item.odd.toFixed(2)}</span>
-              </button>
-            ))}
+          <div>
+            <MarketGroup title="Total de Gols — 1.5">
+              <MarketOddsBtn match={match} sel="o15" odd={m.totalGoals.over15} market="gols" label="Mais de 1.5" />
+              <MarketOddsBtn match={match} sel="u15" odd={m.totalGoals.under15} market="gols" label="Menos de 1.5" />
+            </MarketGroup>
+            <MarketGroup title="Total de Gols — 2.5">
+              <MarketOddsBtn match={match} sel="o25" odd={m.totalGoals.over25} market="gols" label="Mais de 2.5" />
+              <MarketOddsBtn match={match} sel="u25" odd={m.totalGoals.under25} market="gols" label="Menos de 2.5" />
+            </MarketGroup>
+            <MarketGroup title="Total de Gols — 3.5">
+              <MarketOddsBtn match={match} sel="o35" odd={m.totalGoals.over35} market="gols" label="Mais de 3.5" />
+              <MarketOddsBtn match={match} sel="u35" odd={m.totalGoals.under35} market="gols" label="Menos de 3.5" />
+            </MarketGroup>
           </div>
         )}
 
         {modalTab === "handicap" && m && (
-          <div className="space-y-2">
-            {[
-              { sel: "hm1", label: `${match.home} -1`, odd: m.handicap.homeMinusOne },
-              { sel: "ap1", label: `${match.away} +1`, odd: m.handicap.awayPlusOne },
-              { sel: "hm1h", label: `${match.home} -1.5`, odd: m.handicap.homeMinusOneHalf },
-              { sel: "ap1h", label: `${match.away} +1.5`, odd: m.handicap.awayPlusOneHalf },
-            ].map(item => (
-              <button key={item.sel} onClick={() => toggleBet(match, item.sel, item.odd, "handicap", item.label)}
-                className={`w-full flex justify-between items-center p-3 rounded-lg border transition-all ${bets.find(b => b.matchId === match.id && b.market === "handicap" && b.selection === item.sel) ? "border-red-600 bg-red-600/10" : "border-zinc-800 bg-zinc-900 hover:border-red-500/50"}`}>
-                <span className="text-sm text-zinc-300">{item.label}</span>
-                <span className="font-bold text-white">{item.odd.toFixed(2)}</span>
-              </button>
-            ))}
+          <div>
+            <MarketGroup title={`Handicap Europeu — ${match.home}`}>
+              <MarketOddsBtn match={match} sel="hm1" odd={m.handicap.homeMinusOne} market="handicap" label={`${match.home} −1`} />
+              <MarketOddsBtn match={match} sel="hm1h" odd={m.handicap.homeMinusOneHalf} market="handicap" label={`${match.home} −1.5`} />
+            </MarketGroup>
+            <MarketGroup title={`Handicap Europeu — ${match.away}`}>
+              <MarketOddsBtn match={match} sel="ap1" odd={m.handicap.awayPlusOne} market="handicap" label={`${match.away} +1`} />
+              <MarketOddsBtn match={match} sel="ap1h" odd={m.handicap.awayPlusOneHalf} market="handicap" label={`${match.away} +1.5`} />
+            </MarketGroup>
           </div>
         )}
 
         {modalTab === "1tempo" && m && (
-          <div className="space-y-2">
-            {[
-              { sel: "ht-home", label: `1º Tempo: ${match.home}`, odd: m.halfTime.home },
-              { sel: "ht-draw", label: "1º Tempo: Empate", odd: m.halfTime.draw },
-              { sel: "ht-away", label: `1º Tempo: ${match.away}`, odd: m.halfTime.away },
-              { sel: "fg-home", label: `1º Gol: ${match.home}`, odd: m.firstGoal.home },
-              { sel: "fg-none", label: "Sem Gols no 1º Tempo", odd: m.firstGoal.noGoal },
-              { sel: "fg-away", label: `1º Gol: ${match.away}`, odd: m.firstGoal.away },
-            ].map(item => (
-              <button key={item.sel} onClick={() => toggleBet(match, item.sel, item.odd, "1tempo", item.label)}
-                className={`w-full flex justify-between items-center p-3 rounded-lg border transition-all ${bets.find(b => b.matchId === match.id && b.market === "1tempo" && b.selection === item.sel) ? "border-red-600 bg-red-600/10" : "border-zinc-800 bg-zinc-900 hover:border-red-500/50"}`}>
-                <span className="text-sm text-zinc-300">{item.label}</span>
-                <span className="font-bold text-white">{item.odd.toFixed(2)}</span>
-              </button>
-            ))}
+          <div>
+            <MarketGroup title="Resultado — 1º Tempo">
+              <MarketOddsBtn match={match} sel="ht-home" odd={m.halfTime.home} market="1tempo" label={match.home} />
+              <MarketOddsBtn match={match} sel="ht-draw" odd={m.halfTime.draw} market="1tempo" label="Empate" />
+              <MarketOddsBtn match={match} sel="ht-away" odd={m.halfTime.away} market="1tempo" label={match.away} />
+            </MarketGroup>
+            <MarketGroup title="1º Gol">
+              <MarketOddsBtn match={match} sel="fg-home" odd={m.firstGoal.home} market="1tempo" label={match.home} />
+              <MarketOddsBtn match={match} sel="fg-none" odd={m.firstGoal.noGoal} market="1tempo" label="Sem Gols" />
+              <MarketOddsBtn match={match} sel="fg-away" odd={m.firstGoal.away} market="1tempo" label={match.away} />
+            </MarketGroup>
           </div>
         )}
 
@@ -1013,7 +1078,7 @@ export default function Home() {
                 <div>
                   <h4 className="text-xs font-bold text-zinc-500 uppercase tracking-wider mb-4">Esportes</h4>
                   <ul className="space-y-2">
-                    {[{ icon: <Target size={16} />, label: "Futebol" }, { icon: <Dribbble size={16} />, label: "Basquete" }, { icon: <Trophy size={16} />, label: "Tênis" }, { icon: <span className="text-base leading-none">🏒</span>, label: "Hóquei" }, { icon: <span className="text-base leading-none">🏐</span>, label: "Voleibol" }].map(sport => (
+                    {[{ icon: <span className="text-base leading-none">⚽</span>, label: "Futebol" }, { icon: <span className="text-base leading-none">🏀</span>, label: "Basquete" }, { icon: <span className="text-base leading-none">🎾</span>, label: "Tênis" }, { icon: <span className="text-base leading-none">🏒</span>, label: "Hóquei" }, { icon: <span className="text-base leading-none">🏐</span>, label: "Voleibol" }].map(sport => (
                       <li key={sport.label}>
                         <button className="flex items-center gap-3 w-full p-2 rounded-md hover:bg-zinc-900 text-sm text-zinc-300 hover:text-white transition-colors">
                           <div className="text-red-500">{sport.icon}</div>
@@ -1052,9 +1117,9 @@ export default function Home() {
               <h4 className="text-[11px] font-bold text-zinc-500 uppercase tracking-wider mb-3">Esportes</h4>
               <ul className="space-y-0.5">
                 {[
-                  { icon: <Target size={15} />, label: "Futebol" },
-                  { icon: <Dribbble size={15} />, label: "Basquete" },
-                  { icon: <Trophy size={15} />, label: "Tênis" },
+                  { icon: <span className="text-sm leading-none">⚽</span>, label: "Futebol" },
+                  { icon: <span className="text-sm leading-none">🏀</span>, label: "Basquete" },
+                  { icon: <span className="text-sm leading-none">🎾</span>, label: "Tênis" },
                   { icon: <span className="text-sm leading-none">🏒</span>, label: "Hóquei" },
                   { icon: <span className="text-sm leading-none">🏐</span>, label: "Voleibol" },
                 ].map(sport => (
@@ -1072,8 +1137,8 @@ export default function Home() {
 
         <main className="flex-1 pb-32 lg:pb-8 overflow-hidden min-w-0">
 
-          {/* HERO — sports tab only */}
-          {activeTab === "sports" && (
+          {/* HERO — sports tab only, hidden when a match is expanded */}
+          {activeTab === "sports" && !expandedMatch && (
             <div className="relative overflow-hidden bg-gradient-to-br from-zinc-900 via-zinc-950 to-black border-b border-zinc-900">
               <div className="absolute inset-0 pointer-events-none">
                 <div className="absolute -top-20 -left-20 w-96 h-96 bg-red-600/10 rounded-full blur-3xl" />
@@ -1150,7 +1215,7 @@ export default function Home() {
                 </button>
 
                 {/* Match header */}
-                <div className="bg-zinc-900 rounded-xl border border-zinc-800 overflow-hidden mb-1">
+                <div className="bg-zinc-900 rounded-xl border border-zinc-800 overflow-hidden mb-2">
                   <CompactLeagueRow match={expandedMatch} rightSlot={
                     expandedMatch.isLive ? (
                       <div className="flex items-center gap-1.5">
@@ -1165,25 +1230,212 @@ export default function Home() {
                   {expandedMatch.isLive ? (
                     <div className="text-center py-4">
                       <div className="flex items-center justify-center gap-6">
-                        <span className="text-sm font-bold text-white">{expandedMatch.home}</span>
-                        <span className="text-4xl font-black text-white tabular-nums">
+                        <span className="text-sm font-bold text-white truncate max-w-[120px]">{expandedMatch.home}</span>
+                        <span className="text-4xl font-black text-white tabular-nums shrink-0">
                           {expandedMatch.homeScore ?? 0}<span className="text-zinc-500 mx-1">-</span>{expandedMatch.awayScore ?? 0}
                         </span>
-                        <span className="text-sm font-bold text-white">{expandedMatch.away}</span>
+                        <span className="text-sm font-bold text-white truncate max-w-[120px]">{expandedMatch.away}</span>
                       </div>
                     </div>
                   ) : (
-                    <div className="px-4 py-4 text-center">
-                      <span className="text-lg font-bold text-white">{expandedMatch.home}</span>
-                      <span className="text-zinc-500 text-sm mx-3">vs</span>
-                      <span className="text-lg font-bold text-white">{expandedMatch.away}</span>
+                    <div className="px-4 py-3 flex items-center justify-between gap-3">
+                      <div className="flex items-center gap-3 min-w-0 flex-1">
+                        <span className="text-base font-bold text-white truncate">{expandedMatch.home}</span>
+                        <span className="text-zinc-600 text-xs shrink-0 font-medium">vs</span>
+                        <span className="text-base font-bold text-white truncate">{expandedMatch.away}</span>
+                      </div>
+                      <button
+                        onClick={() => setMatchViewTab(matchViewTab === "markets" ? "stats" : "markets")}
+                        className={`shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-bold transition-all ${matchViewTab !== "markets" ? "border-blue-500 bg-blue-500/10 text-blue-400" : "border-zinc-700 bg-zinc-800 text-zinc-400 hover:text-white hover:border-zinc-600"}`}
+                        title="Estatísticas"
+                      >
+                        <BarChart2 size={14} />
+                        <span className="hidden sm:inline">Estatísticas</span>
+                      </button>
+                    </div>
+                  )}
+
+                  {/* Stats/Standings sub-tabs */}
+                  {matchViewTab !== "markets" && (
+                    <div className="flex border-t border-zinc-800">
+                      {(["stats", "standings"] as const).map(tab => (
+                        <button
+                          key={tab}
+                          onClick={() => setMatchViewTab(tab)}
+                          className={`flex-1 py-2 text-xs font-bold transition-colors ${matchViewTab === tab ? "text-blue-400 border-b-2 border-blue-500" : "text-zinc-500 hover:text-white"}`}
+                        >
+                          {tab === "stats" ? "Estatísticas" : "Classificação"}
+                        </button>
+                      ))}
                     </div>
                   )}
                 </div>
-                {/* Market tabs inline */}
-                <div className="bg-zinc-900 rounded-xl border border-zinc-800 p-4">
-                  <MatchModalMarkets match={expandedMatch} />
-                </div>
+
+                {/* Stats panel */}
+                {matchViewTab === "stats" && (
+                  <div className="bg-zinc-900 rounded-xl border border-zinc-800 p-4 mb-2 animate-in fade-in duration-200">
+                    {matchStatsLoading || !matchStats ? (
+                      <div className="flex items-center justify-center py-12">
+                        <Loader2 className="animate-spin text-blue-400" size={28} />
+                      </div>
+                    ) : (
+                      <div className="space-y-4">
+                        {/* Grid: H2H stats + Win Probability */}
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                          {/* H2H & Avg Stats */}
+                          <div className="bg-zinc-950/60 rounded-lg border border-zinc-800 p-4">
+                            <div className="text-[10px] font-black text-red-500 uppercase tracking-widest mb-3">
+                              Frente a Frente — Média
+                            </div>
+                            <div className="grid grid-cols-2 gap-y-3 gap-x-4">
+                              {[
+                                { label: "Golos Marcados", val: matchStats.avgStats.goalsScored.toFixed(2), sub: `Liga: ${matchStats.avgStats.leagueGoals.toFixed(2)}` },
+                                { label: "AEM", val: `${matchStats.avgStats.btts}%`, sub: `Liga: ${matchStats.avgStats.leagueBtts}%` },
+                                { label: "Mais de 1.5", val: `${matchStats.avgStats.over15}%`, sub: `Liga: ${matchStats.avgStats.leagueOver15}%` },
+                                { label: "Mais de 2.5", val: `${matchStats.avgStats.over25}%`, sub: `Liga: ${matchStats.avgStats.leagueOver25}%` },
+                                { label: "Total Cartões", val: matchStats.avgStats.cards.toFixed(2), sub: "" },
+                                { label: "Cantos", val: matchStats.avgStats.corners.toFixed(2), sub: "" },
+                              ].map(s => (
+                                <div key={s.label}>
+                                  <div className="text-[11px] text-zinc-400">{s.label}</div>
+                                  <div className="font-black text-white text-lg leading-tight">{s.val}</div>
+                                  {s.sub && <div className="text-[10px] text-zinc-600">{s.sub}</div>}
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+
+                          {/* Win Probability */}
+                          <div className="bg-zinc-950/60 rounded-lg border border-zinc-800 p-4">
+                            <div className="text-[10px] font-black text-red-500 uppercase tracking-widest mb-3">
+                              Probabilidade de Vitória
+                            </div>
+                            <div className="space-y-2.5 mb-4">
+                              {[
+                                { label: expandedMatch.home, pct: matchStats.winProb.home, color: "bg-blue-500" },
+                                { label: "Empate", pct: matchStats.winProb.draw, color: "bg-yellow-400" },
+                                { label: expandedMatch.away, pct: matchStats.winProb.away, color: "bg-red-500" },
+                              ].map(row => (
+                                <div key={row.label}>
+                                  <div className="flex justify-between text-xs mb-1">
+                                    <span className="text-zinc-300 truncate max-w-[120px]">{row.label}</span>
+                                    <span className="font-bold text-white shrink-0">{row.pct}%</span>
+                                  </div>
+                                  <div className="h-2 bg-zinc-800 rounded-full overflow-hidden">
+                                    <motion.div
+                                      initial={{ width: 0 }}
+                                      animate={{ width: `${row.pct}%` }}
+                                      transition={{ duration: 0.7, ease: "easeOut" }}
+                                      className={`h-full rounded-full ${row.color}`}
+                                    />
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                            <div className="grid grid-cols-3 gap-1 pt-3 border-t border-zinc-800 text-center">
+                              <div>
+                                <div className="text-xl font-black text-blue-400">{matchStats.h2h.homeWins}</div>
+                                <div className="text-[10px] text-zinc-500">Vitórias {expandedMatch.home.split(" ")[0]}</div>
+                              </div>
+                              <div>
+                                <div className="text-xl font-black text-yellow-400">{matchStats.h2h.draws}</div>
+                                <div className="text-[10px] text-zinc-500">Empates</div>
+                              </div>
+                              <div>
+                                <div className="text-xl font-black text-red-400">{matchStats.h2h.awayWins}</div>
+                                <div className="text-[10px] text-zinc-500">Vitórias {expandedMatch.away.split(" ")[0]}</div>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Recent Form */}
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                          {[
+                            { title: `Últimos Jogos — ${expandedMatch.home}`, form: matchStats.homeForm },
+                            { title: `Últimos Jogos — ${expandedMatch.away}`, form: matchStats.awayForm },
+                          ].map(block => (
+                            <div key={block.title} className="bg-zinc-950/60 rounded-lg border border-zinc-800 p-4">
+                              <div className="text-[10px] font-black text-red-500 uppercase tracking-widest mb-3">{block.title}</div>
+                              <div className="space-y-2">
+                                {block.form.map((f, i) => (
+                                  <div key={i} className="flex items-center gap-3">
+                                    <span className={`w-5 h-5 rounded text-[11px] font-black flex items-center justify-center shrink-0 ${f.result === "W" ? "bg-green-600 text-white" : f.result === "D" ? "bg-yellow-500 text-black" : "bg-red-600 text-white"}`}>
+                                      {f.result}
+                                    </span>
+                                    <span className="font-mono text-sm font-bold text-white shrink-0">{f.score}</span>
+                                    <span className="text-xs text-zinc-400 truncate">{f.home ? "vs" : "@"} {f.opponent}</span>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Standings panel */}
+                {matchViewTab === "standings" && (
+                  <div className="bg-zinc-900 rounded-xl border border-zinc-800 p-4 mb-2 animate-in fade-in duration-200">
+                    {standingsLoading || !standings ? (
+                      <div className="flex items-center justify-center py-12">
+                        <Loader2 className="animate-spin text-blue-400" size={28} />
+                        {!standings && !standingsLoading && <p className="text-zinc-500 ml-3 text-sm">Classificação indisponível</p>}
+                      </div>
+                    ) : standings.length === 0 ? (
+                      <div className="text-center text-zinc-500 py-8 text-sm">Classificação indisponível para esta liga.</div>
+                    ) : (
+                      <div>
+                        <div className="text-[10px] font-black text-red-500 uppercase tracking-widest mb-3">{standingsLeague}</div>
+                        <div className="overflow-x-auto">
+                          <table className="w-full text-xs">
+                            <thead>
+                              <tr className="text-zinc-500 border-b border-zinc-800">
+                                <th className="text-left py-1.5 pr-2 font-bold w-6">#</th>
+                                <th className="text-left py-1.5 font-bold">Equipa</th>
+                                <th className="text-center py-1.5 px-1 font-bold">J</th>
+                                <th className="text-center py-1.5 px-1 font-bold">V</th>
+                                <th className="text-center py-1.5 px-1 font-bold">E</th>
+                                <th className="text-center py-1.5 px-1 font-bold">D</th>
+                                <th className="text-center py-1.5 px-1 font-bold">GF</th>
+                                <th className="text-center py-1.5 px-1 font-bold">GC</th>
+                                <th className="text-center py-1.5 px-1 font-bold text-white">Pts</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {standings.map(row => {
+                                const isHome = row.name.toLowerCase().includes(expandedMatch.home.toLowerCase().slice(0, 5));
+                                const isAway = row.name.toLowerCase().includes(expandedMatch.away.toLowerCase().slice(0, 5));
+                                return (
+                                  <tr key={row.pos} className={`border-b border-zinc-800/50 ${isHome ? "bg-blue-500/10" : isAway ? "bg-red-500/10" : ""}`}>
+                                    <td className="py-2 pr-2 text-zinc-500">{row.pos}</td>
+                                    <td className={`py-2 font-semibold truncate max-w-[120px] ${isHome || isAway ? "text-white" : "text-zinc-300"}`}>{row.name}</td>
+                                    <td className="py-2 text-center text-zinc-400">{row.played}</td>
+                                    <td className="py-2 text-center text-green-400">{row.won}</td>
+                                    <td className="py-2 text-center text-yellow-400">{row.drawn}</td>
+                                    <td className="py-2 text-center text-red-400">{row.lost}</td>
+                                    <td className="py-2 text-center text-zinc-400">{row.gf}</td>
+                                    <td className="py-2 text-center text-zinc-400">{row.ga}</td>
+                                    <td className="py-2 text-center font-black text-white">{row.pts}</td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Market tabs inline — only visible in markets view */}
+                {matchViewTab === "markets" && (
+                  <div className="bg-zinc-900 rounded-xl border border-zinc-800 p-4">
+                    <MatchModalMarkets match={expandedMatch} />
+                  </div>
+                )}
               </div>
             )}
 
