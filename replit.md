@@ -1,15 +1,14 @@
-# [Project name]
+# Bet62 — Plataforma Brasileira de Apostas Esportivas
 
-_Replace the heading above with the project's name, and this line with one sentence describing what this app does for users._
+Bet62 é uma plataforma completa de apostas esportivas com dados ao vivo via Statpal API, sistema de Cash Out, odds avançadas, e painel administrativo.
 
 ## Run & Operate
 
 - `pnpm --filter @workspace/api-server run dev` — run the API server (port 5000)
 - `pnpm run typecheck` — full typecheck across all packages
 - `pnpm run build` — typecheck + build all packages
-- `pnpm --filter @workspace/api-spec run codegen` — regenerate API hooks and Zod schemas from the OpenAPI spec
 - `pnpm --filter @workspace/db run push` — push DB schema changes (dev only)
-- Required env: `DATABASE_URL` — Postgres connection string
+- Required env: `DATABASE_URL`, `SESSION_SECRET`, `STATSPAL_API_KEY`
 
 ## Stack
 
@@ -17,28 +16,58 @@ _Replace the heading above with the project's name, and this line with one sente
 - API: Express 5
 - DB: PostgreSQL + Drizzle ORM
 - Validation: Zod (`zod/v4`), `drizzle-zod`
-- API codegen: Orval (from OpenAPI spec)
+- Frontend: React + Vite, Framer Motion, shadcn/ui, Tailwind CSS, Wouter
 - Build: esbuild (CJS bundle)
 
 ## Where things live
 
-_Populate as you build — short repo map plus pointers to the source-of-truth file for DB schema, API contracts, theme files, etc._
+- `artifacts/bet62/src/pages/home.tsx` — main betting UI (hero, match cards, bet slip, live section, auth modal)
+- `artifacts/bet62/src/pages/admin.tsx` — admin dashboard (login, stats, users, bets)
+- `artifacts/bet62/src/App.tsx` — router (/ = home, /admin = admin panel)
+- `artifacts/bet62/src/hooks/use-auth.tsx` — JWT auth context for regular users
+- `artifacts/api-server/src/routes/matches.ts` — Statpal live + upcoming match engine
+- `artifacts/api-server/src/routes/bets.ts` — bet placement, history, cash out
+- `artifacts/api-server/src/routes/auth.ts` — register/login/me for regular users
+- `artifacts/api-server/src/routes/admin.ts` — admin login, stats, user/bet management
+- `artifacts/api-server/src/middlewares/auth.ts` — JWT middleware for users
+- `artifacts/api-server/src/middlewares/adminAuth.ts` — JWT middleware for admins
+- `lib/db/src/schema/users.ts` — users DB schema
+- `lib/db/src/schema/bets.ts` — bets DB schema
+
+## Admin Access
+
+- URL: `/admin`
+- Default username: `admin`
+- Default password: `bet62admin2026`
+- Override via env vars: `ADMIN_USERNAME`, `ADMIN_PASSWORD`
+- Admin JWT lasts 8 hours; stored in sessionStorage (clears on tab close)
 
 ## Architecture decisions
 
-_Populate as you build — non-obvious choices a reader couldn't infer from the code (3-5 bullets)._
+- Admin auth is separate from user auth — same SESSION_SECRET but JWT payload has `isAdmin: true`; no DB table needed for admin
+- Statpal live data is cached server-side for 15s to avoid rate limits; upcoming matches are static with computed advanced markets
+- Cash out value = (stake × originalOdds) / currentOdds × 0.92 (8% house margin)
+- Admin bet settlement: marking a bet as "won" atomically credits the user's balance with potentialWin
+- Regular user balance starts at R$ 1.000 on registration
 
 ## Product
 
-_Describe the high-level user-facing capabilities of this app once they exist._
+- Betting platform with live scores (Statpal API), multiple odds markets, bet slip, and cash out
+- Admin dashboard at /admin: stats overview, user management with balance adjustments, bet settlement
+- Registration with CPF, phone, date of birth (18+ validation), terms acceptance
 
 ## User preferences
 
-_Populate as you build — explicit user instructions worth remembering across sessions._
+- Language: Portuguese (Brazilian) throughout the UI
+- Dark theme (zinc/red color scheme)
+- Always use `zod/v4` imports, never `zod`
 
 ## Gotchas
 
-_Populate as you build — sharp edges, "always run X before Y" rules._
+- Always run `pnpm run typecheck:libs` before `api-server typecheck` (lib must be built first)
+- Statpal API base URL is `statpal.io` (not `statspal.io`) with `?access_key=` query param
+- Admin credentials default to `admin` / `bet62admin2026` if env vars not set — change in production
+- `req.params.id` must be cast with `String(req.params["id"])` in Express 5 (TS union type)
 
 ## Pointers
 
