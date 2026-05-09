@@ -387,7 +387,7 @@ type Odds = { home: number; draw: number; away: number };
 type AdvancedMarkets = {
   doubleChance: { homeOrDraw: number; awayOrDraw: number; homeOrAway: number };
   bothTeamsScore: { yes: number; no: number };
-  totalGoals: { over15: number; under15: number; over25: number; under25: number; over35: number; under35: number };
+  totalGoals: { over05: number; under05: number; over15: number; under15: number; over25: number; under25: number; over35: number; under35: number; over45: number; under45: number; over55: number; under55: number };
   handicap: { homeMinusOne: number; awayPlusOne: number; homeMinusOneHalf: number; awayPlusOneHalf: number };
   halfTime: { home: number; draw: number; away: number };
   firstGoal: { home: number; noGoal: number; away: number };
@@ -649,6 +649,8 @@ export default function Home() {
   const [expandedMatch, setExpandedMatch] = useState<Match | null>(null);
   const [betSlipOpenMobile, setBetSlipOpenMobile] = useState(false);
   const [isPlacingBet, setIsPlacingBet] = useState(false);
+  const [betMode, setBetMode] = useState<"simples" | "multipla">("multipla");
+  const [selectedLeague, setSelectedLeague] = useState<string | null>(null);
 
   // Auth form state
   const [loginEmail, setLoginEmail] = useState("");
@@ -920,14 +922,15 @@ export default function Home() {
 
   const toggleBet = (match: Match, selection: string, odd: number, market = "result", label?: string) => {
     setBets(prev => {
-      const existing = prev.find(b => b.matchId === match.id && b.market === market && b.selection === selection);
-      if (existing) {
+      const isSelected = prev.find(b => b.matchId === match.id && b.market === market && b.selection === selection);
+      if (isSelected) {
         return prev.filter(b => !(b.matchId === match.id && b.market === market && b.selection === selection));
       }
-      const filtered = market === "result"
-        ? prev.filter(b => !(b.matchId === match.id && b.market === "result"))
-        : prev;
-      return [...filtered, {
+      const hasFromSameMatch = prev.some(b => b.matchId === match.id && !(b.market === market && b.selection === selection));
+      if (hasFromSameMatch) {
+        setBetMode("simples");
+      }
+      return [...prev, {
         matchId: match.id,
         matchTitle: `${match.home} vs ${match.away}`,
         selection,
@@ -942,8 +945,11 @@ export default function Home() {
     setBets(prev => prev.filter(b => !(b.matchId === matchId && b.market === market && b.selection === selection)));
   };
 
+  const hasDuplicateMatches = bets.length > 1 && new Set(bets.map(b => String(b.matchId))).size < bets.length;
+  const effectiveBetMode: "simples" | "multipla" = hasDuplicateMatches ? "simples" : betMode;
   const totalOdds = bets.reduce((acc, bet) => acc * bet.odd, 1).toFixed(2);
   const [stake, setStake] = useState<string>("");
+  const simplesPotential = bets.reduce((sum, bet) => sum + bet.odd * parseFloat(stake || "0"), 0).toFixed(2);
 
   const handleLoginSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -985,31 +991,60 @@ export default function Home() {
     if (!stake) { toast.error("Insira um valor para apostar"); return; }
     if (!auth.user) { setAuthModalOpen(true); return; }
     const stakeNum = parseFloat(stake);
-    if (stakeNum > parseFloat(auth.user.balance)) { toast.error("Saldo insuficiente"); return; }
+    const totalCost = effectiveBetMode === "simples" ? stakeNum * bets.length : stakeNum;
+    if (totalCost > parseFloat(auth.user.balance)) { toast.error("Saldo insuficiente"); return; }
     setIsPlacingBet(true);
     try {
-      const matchId = bets.map(b => b.matchId).join("-");
-      const matchTitle = bets.map(b => b.matchTitle).join(" + ");
-      const potentialWin = (stakeNum * parseFloat(totalOdds)).toFixed(2);
-      const res = await fetch("/api/bets/place", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${auth.token}` },
-        body: JSON.stringify({
-          matchId,
-          matchTitle,
-          selections: bets.map(b => ({ matchTitle: b.matchTitle, selection: b.selection, odd: b.odd, market: b.market })),
-          stake: stakeNum.toFixed(2),
-          potentialWin,
-          totalOdds,
-        })
-      });
-      const data = await res.json();
-      if (!res.ok) { toast.error(data.error || "Erro ao realizar aposta"); return; }
-      toast.success(`Aposta realizada! Potencial de ganho: R$ ${potentialWin}`);
-      setBets([]);
-      setStake("");
-      setBetSlipOpenMobile(false);
-      auth.refreshUser();
+      if (effectiveBetMode === "simples") {
+        let allOk = true;
+        for (const bet of bets) {
+          const potentialWin = (stakeNum * bet.odd).toFixed(2);
+          const res = await fetch("/api/bets/place", {
+            method: "POST",
+            headers: { "Content-Type": "application/json", Authorization: `Bearer ${auth.token}` },
+            body: JSON.stringify({
+              matchId: String(bet.matchId),
+              matchTitle: bet.matchTitle,
+              selections: [{ matchTitle: bet.matchTitle, selection: bet.selection, odd: bet.odd, market: bet.market }],
+              stake: stakeNum.toFixed(2),
+              potentialWin,
+              totalOdds: bet.odd.toFixed(2),
+            })
+          });
+          const data = await res.json();
+          if (!res.ok) { toast.error(data.error || "Erro ao realizar aposta"); allOk = false; break; }
+        }
+        if (allOk) {
+          toast.success(`${bets.length} aposta${bets.length > 1 ? "s" : ""} realizada${bets.length > 1 ? "s" : ""}! Total: R$ ${totalCost.toFixed(2)}`);
+          setBets([]);
+          setStake("");
+          setBetSlipOpenMobile(false);
+          auth.refreshUser();
+        }
+      } else {
+        const matchId = bets.map(b => b.matchId).join("-");
+        const matchTitle = bets.map(b => b.matchTitle).join(" + ");
+        const potentialWin = (stakeNum * parseFloat(totalOdds)).toFixed(2);
+        const res = await fetch("/api/bets/place", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${auth.token}` },
+          body: JSON.stringify({
+            matchId,
+            matchTitle,
+            selections: bets.map(b => ({ matchTitle: b.matchTitle, selection: b.selection, odd: b.odd, market: b.market })),
+            stake: stakeNum.toFixed(2),
+            potentialWin,
+            totalOdds,
+          })
+        });
+        const data = await res.json();
+        if (!res.ok) { toast.error(data.error || "Erro ao realizar aposta"); return; }
+        toast.success(`Aposta múltipla realizada! Potencial de ganho: R$ ${potentialWin}`);
+        setBets([]);
+        setStake("");
+        setBetSlipOpenMobile(false);
+        auth.refreshUser();
+      }
     } catch {
       toast.error("Erro ao realizar aposta");
     } finally {
@@ -1230,80 +1265,123 @@ export default function Home() {
     );
   };
 
-  const BetSlipContent = () => (
-    <div className="flex flex-col h-full bg-zinc-950/50">
-      <div className="p-4 border-b border-zinc-800 bg-zinc-900 flex justify-between items-center">
-        <h3 className="font-bold text-lg text-white">Boletim de Apostas</h3>
-        <span className="bg-red-600 text-white text-xs font-bold px-2 py-1 rounded-full">{bets.length}</span>
-      </div>
+  const BetSlipContent = () => {
+    const canSwitchMode = !hasDuplicateMatches && bets.length > 1;
+    const stakeNum = parseFloat(stake || "0");
+    const totalCost = effectiveBetMode === "simples" ? stakeNum * bets.length : stakeNum;
+    const multipotential = (stakeNum * parseFloat(totalOdds)).toFixed(2);
 
-      <div className="flex-1 overflow-y-auto p-4 space-y-3">
-        {bets.length === 0 ? (
-          <div className="text-center text-zinc-500 py-10">
-            <Trophy className="mx-auto h-12 w-12 opacity-20 mb-3" />
-            <p>Seu boletim está vazio.</p>
-            <p className="text-sm mt-1">Adicione seleções para apostar.</p>
+    return (
+      <div className="flex flex-col h-full bg-zinc-950/50">
+        <div className="p-4 border-b border-zinc-800 bg-zinc-900 flex justify-between items-center">
+          <h3 className="font-bold text-lg text-white">Boletim de Apostas</h3>
+          <span className="bg-red-600 text-white text-xs font-bold px-2 py-1 rounded-full">{bets.length}</span>
+        </div>
+
+        {bets.length > 0 && (
+          <div className="flex mx-4 mt-3 rounded-lg overflow-hidden border border-zinc-800">
+            <button
+              onClick={() => { if (!hasDuplicateMatches) setBetMode("simples"); }}
+              className={`flex-1 py-2 text-xs font-bold transition-colors ${effectiveBetMode === "simples" ? "bg-red-600 text-white" : "bg-zinc-900 text-zinc-400 hover:text-white"} ${hasDuplicateMatches ? "cursor-default" : ""}`}
+            >
+              Simples
+            </button>
+            <button
+              onClick={() => { if (!hasDuplicateMatches) setBetMode("multipla"); }}
+              disabled={hasDuplicateMatches}
+              className={`flex-1 py-2 text-xs font-bold transition-colors ${effectiveBetMode === "multipla" ? "bg-red-600 text-white" : "bg-zinc-900 text-zinc-400 hover:text-white"} ${hasDuplicateMatches ? "opacity-40 cursor-not-allowed" : ""}`}
+            >
+              Múltipla
+            </button>
           </div>
-        ) : (
-          <AnimatePresence>
-            {bets.map(bet => (
-              <motion.div
-                key={`${bet.matchId}-${bet.market}-${bet.selection}`}
-                initial={{ opacity: 0, scale: 0.95 }}
-                animate={{ opacity: 1, scale: 1 }}
-                exit={{ opacity: 0, scale: 0.95 }}
-                className="bg-zinc-900 p-3 rounded-lg border border-zinc-800 relative"
-              >
-                <button
-                  onClick={() => removeBet(bet.matchId, bet.market || "result", bet.selection)}
-                  className="absolute top-2 right-2 text-zinc-500 hover:text-red-500 transition-colors"
+        )}
+        {bets.length > 0 && hasDuplicateMatches && (
+          <div className="mx-4 mt-1 text-[10px] text-zinc-500">Duas seleções do mesmo evento — modo Simples obrigatório.</div>
+        )}
+        {bets.length > 0 && !canSwitchMode && !hasDuplicateMatches && (
+          <div className="mx-4 mt-1 text-[10px] text-zinc-500">Adicione seleções de eventos diferentes para ativar Múltipla.</div>
+        )}
+
+        <div className="flex-1 overflow-y-auto p-4 space-y-3">
+          {bets.length === 0 ? (
+            <div className="text-center text-zinc-500 py-10">
+              <Trophy className="mx-auto h-12 w-12 opacity-20 mb-3" />
+              <p>Seu boletim está vazio.</p>
+              <p className="text-sm mt-1">Adicione seleções para apostar.</p>
+            </div>
+          ) : (
+            <AnimatePresence>
+              {bets.map(bet => (
+                <motion.div
+                  key={`${bet.matchId}-${bet.market}-${bet.selection}`}
+                  initial={{ opacity: 0, scale: 0.95 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  exit={{ opacity: 0, scale: 0.95 }}
+                  className="bg-zinc-900 p-3 rounded-lg border border-zinc-800 relative"
                 >
-                  <X size={16} />
-                </button>
-                <div className="text-xs text-zinc-400 mb-1">{bet.matchTitle}</div>
-                <div className="font-bold text-white text-sm">{bet.label}</div>
-                <div className="text-red-500 font-bold mt-1">{bet.odd.toFixed(2)}</div>
-              </motion.div>
-            ))}
-          </AnimatePresence>
+                  <button
+                    onClick={() => removeBet(bet.matchId, bet.market || "result", bet.selection)}
+                    className="absolute top-2 right-2 text-zinc-500 hover:text-red-500 transition-colors"
+                  >
+                    <X size={16} />
+                  </button>
+                  <div className="text-xs text-zinc-400 mb-1 pr-4 truncate">{bet.matchTitle}</div>
+                  <div className="font-bold text-white text-sm pr-6">{bet.label}</div>
+                  <div className="flex items-center justify-between mt-1">
+                    <span className="text-red-500 font-bold">{bet.odd.toFixed(2)}</span>
+                    {effectiveBetMode === "simples" && stakeNum > 0 && (
+                      <span className="text-[11px] text-green-400">R$ {(stakeNum * bet.odd).toFixed(2)}</span>
+                    )}
+                  </div>
+                </motion.div>
+              ))}
+            </AnimatePresence>
+          )}
+        </div>
+
+        {bets.length > 0 && (
+          <div className="p-4 bg-zinc-900 border-t border-zinc-800 space-y-3">
+            {effectiveBetMode === "multipla" && (
+              <div className="flex justify-between items-center text-sm">
+                <span className="text-zinc-400">Odds Combinadas</span>
+                <span className="font-bold text-lg text-white">{totalOdds}x</span>
+              </div>
+            )}
+            <div className="space-y-2">
+              <Label htmlFor="stake" className="text-zinc-400 text-xs">
+                {effectiveBetMode === "simples" ? `Valor por Aposta (R$) — Total: R$ ${totalCost > 0 ? totalCost.toFixed(2) : "0.00"}` : "Valor da Aposta (R$)"}
+              </Label>
+              <Input
+                id="stake"
+                type="number"
+                placeholder="0.00"
+                value={stake}
+                onChange={e => setStake(e.target.value)}
+                className="bg-zinc-950 border-zinc-800 text-white font-mono"
+              />
+            </div>
+            <div className="flex justify-between items-center text-sm">
+              <span className="text-zinc-400">Ganhos Potenciais</span>
+              <span className="font-bold text-green-500">
+                R$ {effectiveBetMode === "simples" ? simplesPotential : multipotential}
+              </span>
+            </div>
+            {effectiveBetMode === "simples" && bets.length > 1 && (
+              <div className="text-[10px] text-zinc-500 text-right">{bets.length} apostas independentes</div>
+            )}
+            <Button
+              className="w-full bg-red-600 hover:bg-red-700 text-white font-bold h-12"
+              onClick={handlePlaceBet}
+              disabled={isPlacingBet}
+            >
+              {isPlacingBet ? <Loader2 className="animate-spin mr-2" size={16} /> : null}
+              {auth.user ? "APOSTAR AGORA" : "ENTRAR PARA APOSTAR"}
+            </Button>
+          </div>
         )}
       </div>
-
-      {bets.length > 0 && (
-        <div className="p-4 bg-zinc-900 border-t border-zinc-800 space-y-4">
-          <div className="flex justify-between items-center text-sm">
-            <span className="text-zinc-400">Odds Totais</span>
-            <span className="font-bold text-lg text-white">{totalOdds}</span>
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="stake" className="text-zinc-400 text-xs">Valor da Aposta (R$)</Label>
-            <Input
-              id="stake"
-              type="number"
-              placeholder="0.00"
-              value={stake}
-              onChange={e => setStake(e.target.value)}
-              className="bg-zinc-950 border-zinc-800 text-white font-mono"
-            />
-          </div>
-          <div className="flex justify-between items-center text-sm">
-            <span className="text-zinc-400">Ganhos Potenciais</span>
-            <span className="font-bold text-green-500">
-              R$ {(parseFloat(stake || "0") * parseFloat(totalOdds)).toFixed(2)}
-            </span>
-          </div>
-          <Button
-            className="w-full bg-red-600 hover:bg-red-700 text-white font-bold h-12"
-            onClick={handlePlaceBet}
-            disabled={isPlacingBet}
-          >
-            {isPlacingBet ? <Loader2 className="animate-spin mr-2" size={16} /> : null}
-            {auth.user ? "APOSTAR AGORA" : "ENTRAR PARA APOSTAR"}
-          </Button>
-        </div>
-      )}
-    </div>
-  );
+    );
+  };
 
   const MarketOddsBtn = ({ match, sel, odd, market, label }: { match: Match; sel: string; odd: number; market: string; label: string }) => {
     const active = !!bets.find(b => b.matchId === match.id && b.market === market && b.selection === sel);
@@ -1432,6 +1510,12 @@ export default function Home() {
         {/* ── FUTEBOL: GOLS ── */}
         {isFootball && modalTab === "gols" && m && m.totalGoals.over25 > 0 && (
           <div>
+            {m.totalGoals.over05 > 0 && (
+              <MarketGroup title="Total de Gols — 0.5">
+                <MarketOddsBtn match={match} sel="o05" odd={m.totalGoals.over05} market="gols" label="Mais de 0.5" />
+                <MarketOddsBtn match={match} sel="u05" odd={m.totalGoals.under05} market="gols" label="Menos de 0.5" />
+              </MarketGroup>
+            )}
             {m.totalGoals.over15 > 0 && (
               <MarketGroup title="Total de Gols — 1.5">
                 <MarketOddsBtn match={match} sel="o15" odd={m.totalGoals.over15} market="gols" label="Mais de 1.5" />
@@ -1446,6 +1530,18 @@ export default function Home() {
               <MarketGroup title="Total de Gols — 3.5">
                 <MarketOddsBtn match={match} sel="o35" odd={m.totalGoals.over35} market="gols" label="Mais de 3.5" />
                 <MarketOddsBtn match={match} sel="u35" odd={m.totalGoals.under35} market="gols" label="Menos de 3.5" />
+              </MarketGroup>
+            )}
+            {m.totalGoals.over45 > 0 && (
+              <MarketGroup title="Total de Gols — 4.5">
+                <MarketOddsBtn match={match} sel="o45" odd={m.totalGoals.over45} market="gols" label="Mais de 4.5" />
+                <MarketOddsBtn match={match} sel="u45" odd={m.totalGoals.under45} market="gols" label="Menos de 4.5" />
+              </MarketGroup>
+            )}
+            {m.totalGoals.over55 > 0 && m.totalGoals.over45 > 0 && m.totalGoals.over45 < 3.0 && (
+              <MarketGroup title="Total de Gols — 5.5">
+                <MarketOddsBtn match={match} sel="o55" odd={m.totalGoals.over55} market="gols" label="Mais de 5.5" />
+                <MarketOddsBtn match={match} sel="u55" odd={m.totalGoals.under55} market="gols" label="Menos de 5.5" />
               </MarketGroup>
             )}
           </div>
@@ -2249,27 +2345,76 @@ export default function Home() {
               </div>
             )}
 
-            {!expandedMatch && activeTab === "sports" && (
-              <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
-                <h2 className="text-2xl font-black italic uppercase tracking-tight mb-4 flex items-center gap-2">
-                  <Trophy className="text-red-600" /> Próximos Eventos
-                </h2>
-                {upcomingLoading ? (
-                  <div className="flex items-center justify-center py-20">
-                    <Loader2 className="animate-spin text-red-600" size={32} />
-                  </div>
-                ) : upcomingMatches.length === 0 ? (
-                  <div className="py-20 text-center text-zinc-500 bg-zinc-900/50 rounded-xl border border-zinc-800">
-                    <Trophy className="mx-auto mb-4 opacity-20" size={48} />
-                    <p className="font-medium">Nenhum evento programado no momento.</p>
-                  </div>
-                ) : (
-                  <div className="space-y-2">
-                    {upcomingMatches.map(match => <MatchCard key={match.id} match={match} />)}
-                  </div>
-                )}
-              </div>
-            )}
+            {!expandedMatch && activeTab === "sports" && (() => {
+              const PRIORITY_LEAGUES = [
+                "UEFA Champions League", "Champions League",
+                "Premier League", "La Liga", "Bundesliga", "Serie A",
+                "Ligue 1", "Liga Portugal", "Eredivisie",
+                "Copa do Brasil", "Brasileirão", "Serie B",
+                "Copa del Rey", "DFB-Pokal", "FA Cup",
+                "Europa League", "UEFA Europa League",
+                "Conference League", "Liga MX",
+              ];
+
+              type LeagueEntry = { league: string; country: string; sport: string };
+              const leagueMap = new Map<string, LeagueEntry>();
+              [...liveMatches, ...upcomingMatches].forEach(m => {
+                if (!leagueMap.has(m.league)) {
+                  leagueMap.set(m.league, { league: m.league, country: m.country || "", sport: m.sport || "football" });
+                }
+              });
+              const available = Array.from(leagueMap.values());
+              const priority = available.filter(l => PRIORITY_LEAGUES.some(p => l.league.toLowerCase().includes(p.toLowerCase())));
+              const toShow = (priority.length > 0 ? priority : available).slice(0, 6);
+
+              const filteredUpcoming = selectedLeague
+                ? upcomingMatches.filter(m => m.league === selectedLeague)
+                : upcomingMatches;
+
+              return (
+                <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
+                  {toShow.length > 0 && (
+                    <div className="mb-5">
+                      <div className="text-[10px] font-black text-zinc-500 uppercase tracking-widest mb-2">Top Competições</div>
+                      <div className="flex gap-2 overflow-x-auto no-scrollbar pb-1">
+                        {toShow.map(l => {
+                          const flag = COUNTRY_FLAGS[l.country?.toLowerCase() ?? ""] ?? (l.sport === "basketball" ? "🏀" : l.sport === "tennis" ? "🎾" : l.sport === "hockey" ? "🏒" : l.sport === "volleyball" ? "🏐" : "⚽");
+                          const active = selectedLeague === l.league;
+                          return (
+                            <button
+                              key={l.league}
+                              onClick={() => setSelectedLeague(active ? null : l.league)}
+                              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold whitespace-nowrap border transition-all shrink-0 ${active ? "bg-red-600 border-red-600 text-white" : "bg-zinc-900 border-zinc-800 text-zinc-300 hover:border-red-500/40"}`}
+                            >
+                              <span>{flag}</span>
+                              <span className="max-w-[120px] truncate">{l.league}</span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+
+                  <h2 className="text-2xl font-black italic uppercase tracking-tight mb-4 flex items-center gap-2">
+                    <Trophy className="text-red-600" /> {selectedLeague ? selectedLeague : "Próximos Eventos"}
+                  </h2>
+                  {upcomingLoading ? (
+                    <div className="flex items-center justify-center py-20">
+                      <Loader2 className="animate-spin text-red-600" size={32} />
+                    </div>
+                  ) : filteredUpcoming.length === 0 ? (
+                    <div className="py-20 text-center text-zinc-500 bg-zinc-900/50 rounded-xl border border-zinc-800">
+                      <Trophy className="mx-auto mb-4 opacity-20" size={48} />
+                      <p className="font-medium">{selectedLeague ? "Nenhum evento para esta liga." : "Nenhum evento programado no momento."}</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      {filteredUpcoming.map(match => <MatchCard key={match.id} match={match} />)}
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
 
             {!expandedMatch && activeTab === "live" && (
               <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">

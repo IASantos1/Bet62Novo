@@ -11,7 +11,7 @@ const BASE_V1 = "https://statpal.io/api/v1";
 type AdvancedMarkets = {
   doubleChance: { homeOrDraw: number; awayOrDraw: number; homeOrAway: number };
   bothTeamsScore: { yes: number; no: number };
-  totalGoals: { over15: number; under15: number; over25: number; under25: number; over35: number; under35: number };
+  totalGoals: { over05: number; under05: number; over15: number; under15: number; over25: number; under25: number; over35: number; under35: number; over45: number; under45: number; over55: number; under55: number };
   handicap: { homeMinusOne: number; awayPlusOne: number; homeMinusOneHalf: number; awayPlusOneHalf: number };
   halfTime: { home: number; draw: number; away: number };
   firstGoal: { home: number; noGoal: number; away: number };
@@ -506,7 +506,7 @@ function makeAdvancedMarketsFromTeams(homeName: string, awayName: string): Advan
   return {
     doubleChance: { homeOrDraw: dcHD!, awayOrDraw: dcDA!, homeOrAway: dcHA! },
     bothTeamsScore: { yes: bttsYes!, no: bttsNo! },
-    totalGoals: { over15: o15!, under15: u15!, over25: o25!, under25: u25!, over35: o35!, under35: u35! },
+    totalGoals: { over05: o05!, under05: u05!, over15: o15!, under15: u15!, over25: o25!, under25: u25!, over35: o35!, under35: u35!, over45: o45!, under45: u45!, over55: o55!, under55: u55! },
     handicap: { homeMinusOne: hm1H!, awayPlusOne: hm1A!, homeMinusOneHalf: hm15H!, awayPlusOneHalf: hm15A! },
     halfTime: { home: htH!, draw: htX!, away: htA! },
     firstGoal: { home: fgH!, noGoal: fgNG!, away: fgA! },
@@ -969,9 +969,11 @@ function buildBasketballMatches(): UpcomingMatch[] {
         doubleChance: { homeOrDraw: 0, awayOrDraw: 0, homeOrAway: 0 },
         bothTeamsScore: { yes: 0, no: 0 },
         totalGoals: {
+          over05: 0, under05: 0,
           over15: oTotal1H!, under15: uTotal1H!,
           over25: oTotal!, under25: uTotal!,
           over35: oHT!, under35: uHT!,
+          over45: 0, under45: 0, over55: 0, under55: 0,
         },
         handicap: {
           homeMinusOne: spreadH!, awayPlusOne: spreadA!,
@@ -1062,9 +1064,11 @@ function buildTennisMatches(): UpcomingMatch[] {
         doubleChance: { homeOrDraw: 0, awayOrDraw: 0, homeOrAway: 0 },
         bothTeamsScore: { yes: tieYes!, no: tieNo! },
         totalGoals: {
+          over05: 0, under05: 0,
           over15: set1H!, under15: set1A!,
           over25: oSets!, under25: uSets!,
           over35: 0, under35: 0,
+          over45: 0, under45: 0, over55: 0, under55: 0,
         },
         handicap: {
           homeMinusOne: hcapH!, awayPlusOne: hcapA!,
@@ -1163,9 +1167,11 @@ function buildHockeyMatches(): UpcomingMatch[] {
         doubleChance: { homeOrDraw: 0, awayOrDraw: 0, homeOrAway: 0 },
         bothTeamsScore: { yes: 0, no: 0 },
         totalGoals: {
+          over05: 0, under05: 0,
           over15: oAlt1!, under15: uAlt1!,
           over25: oTotal!, under25: uTotal!,
           over35: oAlt2!, under35: uAlt2!,
+          over45: 0, under45: 0, over55: 0, under55: 0,
         },
         handicap: { homeMinusOne: plH!, awayPlusOne: plA!, homeMinusOneHalf: 0, awayPlusOneHalf: 0 },
         halfTime: { home: per1H!, draw: per1D!, away: per1A! },
@@ -1248,9 +1254,11 @@ function buildVolleyballMatches(): UpcomingMatch[] {
         doubleChance: { homeOrDraw: 0, awayOrDraw: 0, homeOrAway: 0 },
         bothTeamsScore: { yes: oPts!, no: uPts! },
         totalGoals: {
+          over05: 0, under05: 0,
           over15: oSets25!, under15: uSets25!,
           over25: oSets35!, under25: uSets35!,
           over35: hcapH!, under35: hcapA!,
+          over45: 0, under45: 0, over55: 0, under55: 0,
         },
         handicap: { homeMinusOne: hcapH!, awayPlusOne: hcapA!, homeMinusOneHalf: 0, awayPlusOneHalf: 0 },
         halfTime: { home: 0, draw: 0, away: 0 },
