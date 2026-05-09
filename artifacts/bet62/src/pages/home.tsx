@@ -121,6 +121,51 @@ function formatMatchDate(dateStr: string): string {
   return d.toLocaleDateString("pt-BR", { weekday: "short", day: "2-digit", month: "2-digit" });
 }
 
+const RIVALRY_TAGS: Record<string, string> = {
+  "Barcelona|Real Madrid": "⚡ El Clásico",
+  "Real Madrid|Barcelona": "⚡ El Clásico",
+  "Atletico Madrid|Real Madrid": "🔥 Derby de Madrid",
+  "Real Madrid|Atletico Madrid": "🔥 Derby de Madrid",
+  "Atletico Madrid|Barcelona": "🔥 Clásico Español",
+  "Barcelona|Atletico Madrid": "🔥 Clásico Español",
+  "Real Betis|Sevilla": "🔥 Derbi Sevillano",
+  "Sevilla|Real Betis": "🔥 Derbi Sevillano",
+  "Betis|Sevilla": "🔥 Derbi Sevillano",
+  "Sevilla|Betis": "🔥 Derbi Sevillano",
+  "Ath Bilbao|Real Sociedad": "🔥 Derbi Vasco",
+  "Real Sociedad|Ath Bilbao": "🔥 Derbi Vasco",
+  "Athletic Club|Real Sociedad": "🔥 Derbi Vasco",
+  "Real Sociedad|Athletic Club": "🔥 Derbi Vasco",
+  "Manchester City|Manchester United": "🔥 Manchester Derby",
+  "Manchester United|Manchester City": "🔥 Manchester Derby",
+  "Man City|Man Utd": "🔥 Manchester Derby",
+  "Man Utd|Man City": "🔥 Manchester Derby",
+  "Liverpool|Everton": "🔥 Merseyside Derby",
+  "Everton|Liverpool": "🔥 Merseyside Derby",
+  "Arsenal|Chelsea": "🔥 London Derby",
+  "Chelsea|Arsenal": "🔥 London Derby",
+  "Arsenal|Tottenham": "⚡ North London Derby",
+  "Tottenham|Arsenal": "⚡ North London Derby",
+  "Chelsea|Tottenham": "🔥 London Derby",
+  "Tottenham|Chelsea": "🔥 London Derby",
+  "Boca Juniors|River Plate": "⚡ Superclásico",
+  "River Plate|Boca Juniors": "⚡ Superclásico",
+  "AC Milan|Internazionale": "⚡ Derby della Madonnina",
+  "Internazionale|AC Milan": "⚡ Derby della Madonnina",
+  "Roma|Lazio": "⚡ Derby della Capitale",
+  "Lazio|Roma": "⚡ Derby della Capitale",
+  "Bayern Munich|Dortmund": "⚡ Der Klassiker",
+  "Dortmund|Bayern Munich": "⚡ Der Klassiker",
+  "PSG|Marseille": "⚡ Le Classique",
+  "Marseille|PSG": "⚡ Le Classique",
+  "Ajax|PSV": "🔥 De Topper",
+  "PSV|Ajax": "🔥 De Topper",
+  "Benfica|Porto": "⚡ O Clássico",
+  "Porto|Benfica": "⚡ O Clássico",
+  "Benfica|Sporting CP": "🔥 Derby de Lisboa",
+  "Sporting CP|Benfica": "🔥 Derby de Lisboa",
+};
+
 // --- Types ---
 type Odds = { home: number; draw: number; away: number };
 type AdvancedMarkets = {
@@ -256,6 +301,37 @@ export default function Home() {
       })
       .catch(() => { /* keep empty */ })
       .finally(() => setUpcomingLoading(false));
+  }, []);
+
+  // WebSocket — real-time live match updates
+  useEffect(() => {
+    const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
+    let ws: WebSocket | null = null;
+    let retryTimeout: ReturnType<typeof setTimeout>;
+
+    const connect = () => {
+      try {
+        ws = new WebSocket(`${proto}//${window.location.host}/api/ws`);
+        ws.onmessage = (event) => {
+          try {
+            const data = JSON.parse(event.data as string);
+            if (data.type === "live" && Array.isArray(data.matches)) {
+              prevLiveOdds.current = {};
+              setLiveMatches(data.matches.map((m: Record<string, unknown>) => ({ ...m, isLive: true })));
+            }
+          } catch { /* ignore parse errors */ }
+        };
+        ws.onclose = () => {
+          retryTimeout = setTimeout(connect, 10000);
+        };
+      } catch { /* ignore connection errors */ }
+    };
+
+    connect();
+    return () => {
+      clearTimeout(retryTimeout);
+      ws?.close();
+    };
   }, []);
 
   // Fetch live matches — polls every 30s while on live tab
@@ -431,8 +507,8 @@ export default function Home() {
 
   // --- UI Components ---
 
-  const OddsButton = ({ match, selection, odd, market = "result", label }: {
-    match: Match; selection: string; odd: number; market?: string; label: string;
+  const OddsButton = ({ match, selection, odd, market = "result", label, grow }: {
+    match: Match; selection: string; odd: number; market?: string; label: string; grow?: boolean;
   }) => {
     const isSelected = !!bets.find(b => b.matchId === match.id && b.market === market && b.selection === selection);
     const prevOdd = match.isLive ? prevLiveOdds.current[String(match.id)]?.[selection as keyof Odds] : undefined;
@@ -441,10 +517,10 @@ export default function Home() {
     return (
       <button
         onClick={() => toggleBet(match, selection, odd, market, label)}
-        className={`relative flex flex-col items-center p-2 rounded-md transition-all text-xs ${isSelected ? "bg-red-600 text-white" : "bg-zinc-800 hover:bg-zinc-700 text-zinc-300"}`}
+        className={`relative flex flex-col items-center py-2.5 px-2 rounded-md transition-all text-xs ${grow ? "flex-1" : ""} ${isSelected ? "bg-red-600 text-white" : "bg-zinc-800 hover:bg-zinc-700 text-zinc-300"}`}
       >
-        <span className="mb-0.5 text-[10px] text-zinc-400 leading-tight">{label}</span>
-        <span className="font-bold flex items-center gap-0.5">
+        <span className="mb-0.5 text-[10px] leading-tight opacity-70">{label}</span>
+        <span className="font-bold text-sm flex items-center gap-0.5">
           {odd.toFixed(2)}
           {oddsUp && <TrendingUp size={10} className="text-green-400 shrink-0" />}
           {oddsDown && <TrendingDown size={10} className="text-red-400 shrink-0" />}
@@ -492,6 +568,8 @@ export default function Home() {
       </div>
     );
 
+    const rivalry = RIVALRY_TAGS[`${match.home}|${match.away}`];
+
     if (bannerImg) {
       return (
         <motion.div
@@ -499,38 +577,36 @@ export default function Home() {
           className="relative aspect-video rounded-xl border border-zinc-800 hover:border-red-500/40 transition-colors cursor-pointer overflow-hidden"
           onClick={() => setExpandedMatch(match)}
         >
-          <img src={bannerImg} alt="" className="absolute inset-0 w-full h-full object-cover opacity-55" />
-          <div className="absolute inset-0 bg-gradient-to-t from-black/95 via-black/40 to-black/20" />
-          {/* Progress bar */}
+          <img src={bannerImg} alt="" className="absolute inset-0 w-full h-full object-cover opacity-60" />
+          <div className="absolute inset-0 bg-gradient-to-t from-black via-black/50 to-black/10" />
           <div className="absolute top-0 left-0 right-0 h-0.5 bg-white/10 overflow-hidden">
             <motion.div className="h-full bg-gradient-to-r from-red-600 to-red-400" initial={{ width: 0 }} animate={{ width: `${progress}%` }} transition={{ duration: 1 }} />
           </div>
-          {/* Top: league + live */}
+          {/* Top: league + live badge */}
           <div className="absolute top-0 left-0 right-0 flex items-center justify-between px-4 pt-3">
             <div className="flex items-center gap-2">
               <span className="text-sm leading-none">{flag}</span>
               <span className="text-xs text-white/80 font-medium drop-shadow">{match.league}</span>
             </div>
-            <div className="flex items-center gap-2">
-              {liveBadge}
-              <span className="text-xs text-white/70">{dateStr}</span>
-            </div>
+            <div className="flex items-center gap-2">{liveBadge}<span className="text-xs text-white/60">{dateStr}</span></div>
           </div>
-          {/* Bottom: score + teams + odds */}
+          {/* Bottom: score + teams horizontal + rivalry + odds */}
           <div className="absolute bottom-0 left-0 right-0 px-4 pb-4" onClick={e => e.stopPropagation()}>
-            <div className="flex items-end justify-between gap-3 mb-3">
-              <div className="flex-1 min-w-0">
-                <div className="font-black text-white text-base leading-tight drop-shadow truncate">{match.home}</div>
-                <div className="font-black text-white text-base leading-tight drop-shadow truncate">{match.away}</div>
+            {rivalry && <div className="text-[11px] font-black text-red-400 uppercase tracking-widest mb-1 drop-shadow">{rivalry}</div>}
+            <div className="flex items-center gap-3 mb-3">
+              <div className="flex items-baseline gap-2 flex-1 min-w-0">
+                <span className="font-black text-white text-base leading-tight drop-shadow truncate">{match.home}</span>
+                <span className="text-white/40 text-xs shrink-0">vs</span>
+                <span className="font-black text-white text-base leading-tight drop-shadow truncate">{match.away}</span>
               </div>
-              <div className="text-4xl font-black text-white tabular-nums shrink-0 drop-shadow-lg">
-                {match.homeScore ?? 0}<span className="text-white/40 text-2xl mx-1">-</span>{match.awayScore ?? 0}
+              <div className="text-3xl font-black text-white tabular-nums shrink-0 drop-shadow-lg">
+                {match.homeScore ?? 0}<span className="text-white/40 text-xl mx-0.5">-</span>{match.awayScore ?? 0}
               </div>
             </div>
-            <div className="flex gap-2">
-              <OddsButton match={match} selection="home" odd={match.odds.home} market="result" label="Casa" />
-              <OddsButton match={match} selection="draw" odd={match.odds.draw} market="result" label="Emp." />
-              <OddsButton match={match} selection="away" odd={match.odds.away} market="result" label="Fora" />
+            <div className="flex gap-2 w-full">
+              <OddsButton match={match} selection="home" odd={match.odds.home} market="result" label="Casa" grow />
+              <OddsButton match={match} selection="draw" odd={match.odds.draw} market="result" label="Emp." grow />
+              <OddsButton match={match} selection="away" odd={match.odds.away} market="result" label="Fora" grow />
             </div>
           </div>
         </motion.div>
@@ -555,10 +631,10 @@ export default function Home() {
             </div>
             <span className="font-bold text-white text-sm truncate flex-1">{match.away}</span>
           </div>
-          <div className="flex gap-1.5">
-            <OddsButton match={match} selection="home" odd={match.odds.home} market="result" label="Casa" />
-            <OddsButton match={match} selection="draw" odd={match.odds.draw} market="result" label="Emp." />
-            <OddsButton match={match} selection="away" odd={match.odds.away} market="result" label="Fora" />
+          <div className="flex gap-2 w-full">
+            <OddsButton match={match} selection="home" odd={match.odds.home} market="result" label="Casa" grow />
+            <OddsButton match={match} selection="draw" odd={match.odds.draw} market="result" label="Emp." grow />
+            <OddsButton match={match} selection="away" odd={match.odds.away} market="result" label="Fora" grow />
           </div>
         </div>
       </motion.div>
@@ -569,6 +645,7 @@ export default function Home() {
     const flag = COUNTRY_FLAGS[match.country?.toLowerCase() ?? ""] ?? "⚽";
     const dateStr = match.date ? formatMatchDate(match.date) : "";
     const bannerImg = TEAM_BANNERS[match.home];
+    const rivalry = RIVALRY_TAGS[`${match.home}|${match.away}`];
 
     if (bannerImg) {
       return (
@@ -576,27 +653,28 @@ export default function Home() {
           className="relative aspect-video rounded-xl border border-zinc-800 hover:border-red-500/40 transition-colors cursor-pointer overflow-hidden"
           onClick={() => setExpandedMatch(match)}
         >
-          <img src={bannerImg} alt="" className="absolute inset-0 w-full h-full object-cover opacity-55" />
-          <div className="absolute inset-0 bg-gradient-to-t from-black/95 via-black/35 to-black/15" />
+          <img src={bannerImg} alt="" className="absolute inset-0 w-full h-full object-cover opacity-60" />
+          <div className="absolute inset-0 bg-gradient-to-t from-black via-black/50 to-black/10" />
           {/* Top: league + date */}
           <div className="absolute top-0 left-0 right-0 flex items-center justify-between px-4 pt-3">
             <div className="flex items-center gap-2">
               <span className="text-sm leading-none">{flag}</span>
               <span className="text-xs text-white/80 font-medium drop-shadow">{match.league}</span>
             </div>
-            <span className="text-xs text-white/70">{dateStr}{match.time ? ` • ${match.time}` : ""}</span>
+            <span className="text-xs text-white/60">{dateStr}{match.time ? ` • ${match.time}` : ""}</span>
           </div>
-          {/* Bottom: teams + odds */}
+          {/* Bottom: teams horizontal + rivalry + odds full-width */}
           <div className="absolute bottom-0 left-0 right-0 px-4 pb-4" onClick={e => e.stopPropagation()}>
-            <div className="mb-3">
-              <div className="font-black text-white text-lg leading-tight drop-shadow truncate">{match.home}</div>
-              <div className="text-white/50 text-xs my-0.5 font-medium">vs</div>
-              <div className="font-black text-white text-lg leading-tight drop-shadow truncate">{match.away}</div>
+            {rivalry && <div className="text-[11px] font-black text-red-400 uppercase tracking-widest mb-1 drop-shadow">{rivalry}</div>}
+            <div className="flex items-baseline gap-2 mb-3 min-w-0">
+              <span className="font-black text-white text-xl leading-tight drop-shadow truncate">{match.home}</span>
+              <span className="text-white/40 text-sm shrink-0">vs</span>
+              <span className="font-black text-white text-xl leading-tight drop-shadow truncate">{match.away}</span>
             </div>
-            <div className="flex gap-2">
-              <OddsButton match={match} selection="home" odd={match.odds.home} market="result" label="Casa" />
-              <OddsButton match={match} selection="draw" odd={match.odds.draw} market="result" label="Emp." />
-              <OddsButton match={match} selection="away" odd={match.odds.away} market="result" label="Fora" />
+            <div className="flex gap-2 w-full">
+              <OddsButton match={match} selection="home" odd={match.odds.home} market="result" label="Casa" grow />
+              <OddsButton match={match} selection="draw" odd={match.odds.draw} market="result" label="Emp." grow />
+              <OddsButton match={match} selection="away" odd={match.odds.away} market="result" label="Fora" grow />
             </div>
           </div>
         </div>
@@ -610,17 +688,15 @@ export default function Home() {
       >
         <CompactLeagueRow match={match} />
         <div className="px-3 pb-3 pt-1" onClick={e => e.stopPropagation()}>
-          <div className="flex flex-col sm:flex-row sm:items-center sm:gap-3">
-            <div className="flex items-center gap-1.5 flex-1 min-w-0 mb-2 sm:mb-0">
-              <span className="font-bold text-white text-sm truncate">{match.home}</span>
-              <span className="text-zinc-600 text-xs shrink-0">vs</span>
-              <span className="font-bold text-white text-sm truncate">{match.away}</span>
-            </div>
-            <div className="flex gap-1.5 shrink-0">
-              <OddsButton match={match} selection="home" odd={match.odds.home} market="result" label="Casa" />
-              <OddsButton match={match} selection="draw" odd={match.odds.draw} market="result" label="Emp." />
-              <OddsButton match={match} selection="away" odd={match.odds.away} market="result" label="Fora" />
-            </div>
+          <div className="flex items-baseline gap-1.5 mb-2 min-w-0">
+            <span className="font-bold text-white text-sm truncate">{match.home}</span>
+            <span className="text-zinc-600 text-xs shrink-0">vs</span>
+            <span className="font-bold text-white text-sm truncate">{match.away}</span>
+          </div>
+          <div className="flex gap-2 w-full">
+            <OddsButton match={match} selection="home" odd={match.odds.home} market="result" label="Casa" grow />
+            <OddsButton match={match} selection="draw" odd={match.odds.draw} market="result" label="Emp." grow />
+            <OddsButton match={match} selection="away" odd={match.odds.away} market="result" label="Fora" grow />
           </div>
         </div>
       </div>
@@ -937,7 +1013,7 @@ export default function Home() {
                 <div>
                   <h4 className="text-xs font-bold text-zinc-500 uppercase tracking-wider mb-4">Esportes</h4>
                   <ul className="space-y-2">
-                    {[{ icon: <Target size={16} />, label: "Futebol" }, { icon: <Dribbble size={16} />, label: "Basquete" }, { icon: <Trophy size={16} />, label: "Tênis" }, { icon: <Gamepad2 size={16} />, label: "E-Sports" }].map(sport => (
+                    {[{ icon: <Target size={16} />, label: "Futebol" }, { icon: <Dribbble size={16} />, label: "Basquete" }, { icon: <Trophy size={16} />, label: "Tênis" }, { icon: <span className="text-base leading-none">🏒</span>, label: "Hóquei" }, { icon: <span className="text-base leading-none">🏐</span>, label: "Voleibol" }].map(sport => (
                       <li key={sport.label}>
                         <button className="flex items-center gap-3 w-full p-2 rounded-md hover:bg-zinc-900 text-sm text-zinc-300 hover:text-white transition-colors">
                           <div className="text-red-500">{sport.icon}</div>
@@ -979,7 +1055,8 @@ export default function Home() {
                   { icon: <Target size={15} />, label: "Futebol" },
                   { icon: <Dribbble size={15} />, label: "Basquete" },
                   { icon: <Trophy size={15} />, label: "Tênis" },
-                  { icon: <Gamepad2 size={15} />, label: "E-Sports" },
+                  { icon: <span className="text-sm leading-none">🏒</span>, label: "Hóquei" },
+                  { icon: <span className="text-sm leading-none">🏐</span>, label: "Voleibol" },
                 ].map(sport => (
                   <li key={sport.label}>
                     <button className="flex items-center gap-2.5 w-full px-2 py-2 rounded-md hover:bg-zinc-900 text-[13px] text-zinc-400 hover:text-white transition-colors">

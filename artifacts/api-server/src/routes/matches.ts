@@ -594,6 +594,8 @@ async function buildUpcomingMatches(): Promise<UpcomingMatch[]> {
   return results;
 }
 
+export { buildLiveMatches, buildUpcomingMatches };
+
 // ─── Routes ───────────────────────────────────────────────────────────────────
 
 router.get("/live", async (_req, res) => {
