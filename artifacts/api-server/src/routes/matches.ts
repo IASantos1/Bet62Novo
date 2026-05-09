@@ -1,4 +1,5 @@
 import { Router, type IRouter } from "express";
+import { CONFIG } from "../lib/config";
 
 const router: IRouter = Router();
 
@@ -598,7 +599,7 @@ export const liveMatchState = new Map<string, LiveMatchState>();
 
 async function getLiveLeagues(): Promise<StatpalLeagueV2[]> {
   const now = Date.now();
-  if (liveCache && now - liveFetchedAt < 30_000) return liveCache;
+  if (liveCache && now - liveFetchedAt < CONFIG.LIVE_CACHE_TTL) return liveCache;
   const resp = await fetch(`${BASE_V2}/soccer/matches/live?access_key=${STATSPAL_KEY}`, {
     signal: AbortSignal.timeout(9000),
   });
@@ -611,7 +612,7 @@ async function getLiveLeagues(): Promise<StatpalLeagueV2[]> {
 
 async function getDailyLeagues(): Promise<StatpalLeagueV2[]> {
   const now = Date.now();
-  if (dailyCache && now - dailyFetchedAt < 300_000) return dailyCache;
+  if (dailyCache && now - dailyFetchedAt < CONFIG.DAILY_CACHE_TTL) return dailyCache;
   const resp = await fetch(`${BASE_V2}/soccer/matches/daily?offset=0&access_key=${STATSPAL_KEY}`, {
     signal: AbortSignal.timeout(9000),
   });
@@ -625,7 +626,7 @@ async function getDailyLeagues(): Promise<StatpalLeagueV2[]> {
 
 async function getTomorrowLeagues(): Promise<StatpalLeagueV2[]> {
   const now = Date.now();
-  if (dailyTomorrowCache && now - dailyTomorrowFetchedAt < 1_800_000) return dailyTomorrowCache;
+  if (dailyTomorrowCache && now - dailyTomorrowFetchedAt < CONFIG.TOMORROW_CACHE_TTL) return dailyTomorrowCache;
   try {
     const resp = await fetch(`${BASE_V2}/soccer/matches/daily?offset=1&access_key=${STATSPAL_KEY}`, {
       signal: AbortSignal.timeout(9000),
@@ -644,7 +645,7 @@ async function getTomorrowLeagues(): Promise<StatpalLeagueV2[]> {
 // Fetch real odds for major European countries in parallel
 async function getOddsMap(): Promise<Map<string, RealOdds>> {
   const now = Date.now();
-  if (oddsMap && now - oddsFetchedAt < 600_000) return oddsMap;
+  if (oddsMap && now - oddsFetchedAt < CONFIG.ODDS_CACHE_TTL) return oddsMap;
 
   const COUNTRIES = ["england", "spain", "germany", "italy", "france", "portugal", "netherlands"];
   const map = new Map<string, RealOdds>();

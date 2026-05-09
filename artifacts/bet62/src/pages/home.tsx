@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { toast } from "sonner";
 import {
   Menu, X, Trophy, Activity, Gift,
-  LogOut, User, History, Loader2, Zap, TrendingUp, TrendingDown,
+  LogOut, User, History, Loader2, Zap, TrendingUp,
   ChevronRight, AlertCircle, BarChart2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -263,6 +263,8 @@ const OTHER_SPORTS: { key: string; label: string; icon: string; leagues: string[
   { key: "volleyball", label: "Voleibol", icon: "🏐", leagues: ["Volleyball Nations League", "Superlega — Itália", "Superliga — Rússia", "Superliga — Brasil"] },
 ];
 
+type TopLeagueEntry = { league: string; country: string; sport: string };
+
 type SidebarTreeContentProps = {
   selectedSport: string;
   setSelectedSport: (s: string) => void;
@@ -273,11 +275,15 @@ type SidebarTreeContentProps = {
   expandedCountry: string | null;
   setExpandedCountry: (c: string | null) => void;
   compact?: boolean;
+  topLeagues?: TopLeagueEntry[];
+  selectedLeague?: string | null;
+  setSelectedLeague?: (l: string | null) => void;
 };
 
 function SidebarTreeContent({
   selectedSport, setSelectedSport, setActiveTab, onClose,
   expandedSport, setExpandedSport, expandedCountry, setExpandedCountry, compact,
+  topLeagues, selectedLeague, setSelectedLeague,
 }: SidebarTreeContentProps) {
   const py = compact ? "py-1.5" : "py-2";
   const textSize = compact ? "text-[12px]" : "text-[13px]";
@@ -300,10 +306,35 @@ function SidebarTreeContent({
 
   return (
     <div className="space-y-0.5">
+      {/* Top Competições */}
+      {topLeagues && topLeagues.length > 0 && setSelectedLeague && (
+        <div className="mb-3">
+          <div className="text-[9px] font-black text-zinc-600 uppercase tracking-widest px-2 mb-1.5">Top Competições</div>
+          <div className="space-y-0.5">
+            {topLeagues.map(l => {
+              const flag = COUNTRY_FLAGS[l.country?.toLowerCase() ?? ""] ?? (l.sport === "basketball" ? "🏀" : l.sport === "tennis" ? "🎾" : l.sport === "hockey" ? "🏒" : l.sport === "volleyball" ? "🏐" : "⚽");
+              const active = selectedLeague === l.league;
+              return (
+                <button
+                  key={l.league}
+                  onClick={() => { setSelectedLeague(active ? null : l.league); setActiveTab("sports"); onClose?.(); }}
+                  className={`flex items-center gap-2 w-full px-2 ${py} rounded-md ${textSize} transition-colors ${active ? "bg-red-600/20 text-red-400 border border-red-500/30" : "hover:bg-zinc-900 text-zinc-400 hover:text-white"}`}
+                >
+                  <span className="text-xs leading-none shrink-0">{flag}</span>
+                  <span className="truncate text-left flex-1">{l.league}</span>
+                </button>
+              );
+            })}
+          </div>
+          <div className="h-px bg-zinc-800 mx-2 mt-2 mb-2" />
+          <div className="text-[9px] font-black text-zinc-600 uppercase tracking-widest px-2 mb-1.5">Esportes</div>
+        </div>
+      )}
+
       {/* Todos */}
       <button
-        onClick={() => go("all")}
-        className={`flex items-center gap-2.5 w-full px-2 ${py} rounded-md ${textSize} transition-colors ${selectedSport === "all" ? "bg-red-600/20 text-red-400 border border-red-500/30" : "hover:bg-zinc-900 text-zinc-400 hover:text-white"}`}
+        onClick={() => { go("all"); setSelectedLeague?.(null); }}
+        className={`flex items-center gap-2.5 w-full px-2 ${py} rounded-md ${textSize} transition-colors ${selectedSport === "all" && !selectedLeague ? "bg-red-600/20 text-red-400 border border-red-500/30" : "hover:bg-zinc-900 text-zinc-400 hover:text-white"}`}
       >
         <span className="text-sm leading-none text-red-500">🏆</span>
         <span>Todos</span>
@@ -690,6 +721,28 @@ export default function Home() {
   const [sidebarExpandedSport, setSidebarExpandedSport] = useState<string | null>(null);
   const [sidebarExpandedCountry, setSidebarExpandedCountry] = useState<string | null>(null);
 
+  // Top Competições — computed from live + upcoming matches
+  const PRIORITY_LEAGUES = [
+    "UEFA Champions League", "Champions League",
+    "Premier League", "La Liga", "Bundesliga", "Serie A",
+    "Ligue 1", "Liga Portugal", "Eredivisie",
+    "Copa do Brasil", "Brasileirão", "Serie B",
+    "Copa del Rey", "DFB-Pokal", "FA Cup",
+    "Europa League", "UEFA Europa League",
+    "Conference League", "Liga MX",
+  ];
+  const sidebarTopLeagues = (() => {
+    const leagueMap = new Map<string, TopLeagueEntry>();
+    [...liveMatches, ...upcomingMatches].forEach(m => {
+      if (!leagueMap.has(m.league)) {
+        leagueMap.set(m.league, { league: m.league, country: m.country || "", sport: m.sport || "football" });
+      }
+    });
+    const available = Array.from(leagueMap.values());
+    const priority = available.filter(l => PRIORITY_LEAGUES.some(p => l.league.toLowerCase().includes(p.toLowerCase())));
+    return (priority.length > 0 ? priority : available).slice(0, 8);
+  })();
+
   // Platform stats for hero
   const [platformStats, setPlatformStats] = useState<PlatformStats | null>(null);
 
@@ -1069,8 +1122,8 @@ export default function Home() {
         <span className="mb-0.5 text-[10px] leading-tight opacity-70">{label}</span>
         <span className="font-bold text-sm flex items-center gap-0.5">
           {odd.toFixed(2)}
-          {oddsUp && <TrendingUp size={10} className="text-green-400 shrink-0" />}
-          {oddsDown && <TrendingDown size={10} className="text-red-400 shrink-0" />}
+          {oddsUp && <span className="text-green-400 text-[9px] font-black leading-none shrink-0">▲</span>}
+          {oddsDown && <span className="text-red-400 text-[9px] font-black leading-none shrink-0">▼</span>}
         </span>
       </button>
     );
@@ -1987,6 +2040,9 @@ export default function Home() {
                   setExpandedSport={setSidebarExpandedSport}
                   expandedCountry={sidebarExpandedCountry}
                   setExpandedCountry={setSidebarExpandedCountry}
+                  topLeagues={sidebarTopLeagues}
+                  selectedLeague={selectedLeague}
+                  setSelectedLeague={setSelectedLeague}
                 />
               </div>
             </motion.div>
@@ -2009,6 +2065,9 @@ export default function Home() {
               expandedCountry={sidebarExpandedCountry}
               setExpandedCountry={setSidebarExpandedCountry}
               compact
+              topLeagues={sidebarTopLeagues}
+              selectedLeague={selectedLeague}
+              setSelectedLeague={setSelectedLeague}
             />
           </div>
         </aside>
@@ -2346,55 +2405,12 @@ export default function Home() {
             )}
 
             {!expandedMatch && activeTab === "sports" && (() => {
-              const PRIORITY_LEAGUES = [
-                "UEFA Champions League", "Champions League",
-                "Premier League", "La Liga", "Bundesliga", "Serie A",
-                "Ligue 1", "Liga Portugal", "Eredivisie",
-                "Copa do Brasil", "Brasileirão", "Serie B",
-                "Copa del Rey", "DFB-Pokal", "FA Cup",
-                "Europa League", "UEFA Europa League",
-                "Conference League", "Liga MX",
-              ];
-
-              type LeagueEntry = { league: string; country: string; sport: string };
-              const leagueMap = new Map<string, LeagueEntry>();
-              [...liveMatches, ...upcomingMatches].forEach(m => {
-                if (!leagueMap.has(m.league)) {
-                  leagueMap.set(m.league, { league: m.league, country: m.country || "", sport: m.sport || "football" });
-                }
-              });
-              const available = Array.from(leagueMap.values());
-              const priority = available.filter(l => PRIORITY_LEAGUES.some(p => l.league.toLowerCase().includes(p.toLowerCase())));
-              const toShow = (priority.length > 0 ? priority : available).slice(0, 6);
-
               const filteredUpcoming = selectedLeague
                 ? upcomingMatches.filter(m => m.league === selectedLeague)
                 : upcomingMatches;
 
               return (
                 <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
-                  {toShow.length > 0 && (
-                    <div className="mb-5">
-                      <div className="text-[10px] font-black text-zinc-500 uppercase tracking-widest mb-2">Top Competições</div>
-                      <div className="flex gap-2 overflow-x-auto no-scrollbar pb-1">
-                        {toShow.map(l => {
-                          const flag = COUNTRY_FLAGS[l.country?.toLowerCase() ?? ""] ?? (l.sport === "basketball" ? "🏀" : l.sport === "tennis" ? "🎾" : l.sport === "hockey" ? "🏒" : l.sport === "volleyball" ? "🏐" : "⚽");
-                          const active = selectedLeague === l.league;
-                          return (
-                            <button
-                              key={l.league}
-                              onClick={() => setSelectedLeague(active ? null : l.league)}
-                              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold whitespace-nowrap border transition-all shrink-0 ${active ? "bg-red-600 border-red-600 text-white" : "bg-zinc-900 border-zinc-800 text-zinc-300 hover:border-red-500/40"}`}
-                            >
-                              <span>{flag}</span>
-                              <span className="max-w-[120px] truncate">{l.league}</span>
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  )}
-
                   <h2 className="text-2xl font-black italic uppercase tracking-tight mb-4 flex items-center gap-2">
                     <Trophy className="text-red-600" /> {selectedLeague ? selectedLeague : "Próximos Eventos"}
                   </h2>
