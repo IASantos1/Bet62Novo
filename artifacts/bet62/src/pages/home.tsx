@@ -38,6 +38,16 @@ import valenciaBanner from "@assets/file_1778118068126_1778345179339.jpeg";
 import villarrealBanner from "@assets/file_1778118074042_1778345179339.jpeg";
 import realBetisBanner from "@assets/file_1778118081746_1778345179339.jpeg";
 import gironaBanner from "@assets/file_1778118089289_1778345179339.jpeg";
+import riverPlateBanner from "@assets/Create_a_photorealistic_169_football_banner_with_-177836112512_1778361261646.png";
+import bocaJuniorsBanner from "@assets/Create_a_photorealistic_169_football_banner_with_-177836113093_1778361261646.png";
+import racingClubBanner from "@assets/Create_a_photorealistic_169_football_banner_with_-177836113846_1778361261645.png";
+import independienteBanner from "@assets/Create_a_photorealistic_169_football_banner_with_-177836114382_1778361261639.png";
+import sanLorenzoBanner from "@assets/Create_a_photorealistic_169_football_banner_with_-177836115074_1778361261636.png";
+import velezBanner from "@assets/Create_a_photorealistic_169_football_banner_with_-177836115686_1778361261636.png";
+import estudiantesBanner from "@assets/Create_a_photorealistic_169_football_banner_with_-177836116232_1778361261635.png";
+import rosarioCentralBanner from "@assets/Create_a_photorealistic_169_football_banner_with_-177836116875_1778361261635.png";
+import talleresBanner from "@assets/Create_a_photorealistic_169_football_banner_with_-177836117521_1778361261634.png";
+import lanusBanner from "@assets/Create_a_photorealistic_169_football_banner_with_-177836119764_1778361261633.png";
 
 const TEAM_BANNERS: Record<string, string> = {
   "Real Madrid": realMadridBanner,
@@ -66,6 +76,23 @@ const TEAM_BANNERS: Record<string, string> = {
   "Brighton": brightonBanner,
   "Chelsea": chelseaBanner,
   "Everton": evertonBanner,
+  "River Plate": riverPlateBanner,
+  "Boca Juniors": bocaJuniorsBanner,
+  "Racing Club": racingClubBanner,
+  "Racing": racingClubBanner,
+  "Independiente": independienteBanner,
+  "San Lorenzo": sanLorenzoBanner,
+  "Vélez Sarsfield": velezBanner,
+  "Velez Sarsfield": velezBanner,
+  "Vélez": velezBanner,
+  "Velez": velezBanner,
+  "Estudiantes": estudiantesBanner,
+  "Estudiantes LP": estudiantesBanner,
+  "Rosario Central": rosarioCentralBanner,
+  "Lanús": lanusBanner,
+  "Lanus": lanusBanner,
+  "Talleres": talleresBanner,
+  "Talleres Córdoba": talleresBanner,
 };
 
 const COUNTRY_FLAGS: Record<string, string> = {
@@ -426,32 +453,10 @@ export default function Home() {
     );
   };
 
-  // Shared league header used in both card types
-  const LeagueHeader = ({ match, rightSlot }: { match: Match; rightSlot?: ReactNode }) => {
+  // Compact league/meta row (no banner)
+  const CompactLeagueRow = ({ match, rightSlot }: { match: Match; rightSlot?: ReactNode }) => {
     const flag = COUNTRY_FLAGS[match.country?.toLowerCase() ?? ""] ?? "⚽";
     const dateStr = match.date ? formatMatchDate(match.date) : "";
-    const bannerImg = TEAM_BANNERS[match.home];
-    if (bannerImg) {
-      return (
-        <div className="relative h-14 overflow-hidden">
-          <img src={bannerImg} alt="" className="absolute inset-0 w-full h-full object-cover opacity-20" />
-          <div className="absolute inset-0 bg-gradient-to-r from-zinc-900 via-zinc-900/80 to-zinc-900/50" />
-          <div className="absolute inset-0 flex items-center justify-between px-3">
-            <div className="flex items-center gap-2 min-w-0">
-              <div className="relative shrink-0 w-7 h-7 flex items-center justify-center">
-                <span className="text-lg leading-none">{flag}</span>
-                <span className="absolute -bottom-0.5 -right-1 bg-zinc-950 rounded-full text-[9px] w-4 h-4 flex items-center justify-center border border-zinc-800">⚽</span>
-              </div>
-              <span className="text-xs text-zinc-200 font-medium truncate">{match.league}</span>
-            </div>
-            <div className="flex items-center gap-2 shrink-0 ml-2">
-              {rightSlot}
-              <span className="text-xs text-zinc-300">{dateStr}{match.time ? ` • ${match.time}` : ""}</span>
-            </div>
-          </div>
-        </div>
-      );
-    }
     return (
       <div className="flex items-center justify-between px-3 pt-2.5 pb-1.5">
         <div className="flex items-center gap-2 min-w-0">
@@ -472,6 +477,9 @@ export default function Home() {
   const LiveMatchCard = ({ match }: { match: Match }) => {
     const minute = match.minute ?? 0;
     const progress = Math.min(100, (minute / 90) * 100);
+    const flag = COUNTRY_FLAGS[match.country?.toLowerCase() ?? ""] ?? "⚽";
+    const dateStr = match.date ? formatMatchDate(match.date) : "";
+    const bannerImg = TEAM_BANNERS[match.home];
     const liveBadge = (
       <div className="flex items-center gap-1.5">
         <span className="relative flex h-1.5 w-1.5">
@@ -483,19 +491,63 @@ export default function Home() {
         </span>
       </div>
     );
+
+    if (bannerImg) {
+      return (
+        <motion.div
+          layout initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
+          className="relative aspect-video rounded-xl border border-zinc-800 hover:border-red-500/40 transition-colors cursor-pointer overflow-hidden"
+          onClick={() => setExpandedMatch(match)}
+        >
+          <img src={bannerImg} alt="" className="absolute inset-0 w-full h-full object-cover opacity-55" />
+          <div className="absolute inset-0 bg-gradient-to-t from-black/95 via-black/40 to-black/20" />
+          {/* Progress bar */}
+          <div className="absolute top-0 left-0 right-0 h-0.5 bg-white/10 overflow-hidden">
+            <motion.div className="h-full bg-gradient-to-r from-red-600 to-red-400" initial={{ width: 0 }} animate={{ width: `${progress}%` }} transition={{ duration: 1 }} />
+          </div>
+          {/* Top: league + live */}
+          <div className="absolute top-0 left-0 right-0 flex items-center justify-between px-4 pt-3">
+            <div className="flex items-center gap-2">
+              <span className="text-sm leading-none">{flag}</span>
+              <span className="text-xs text-white/80 font-medium drop-shadow">{match.league}</span>
+            </div>
+            <div className="flex items-center gap-2">
+              {liveBadge}
+              <span className="text-xs text-white/70">{dateStr}</span>
+            </div>
+          </div>
+          {/* Bottom: score + teams + odds */}
+          <div className="absolute bottom-0 left-0 right-0 px-4 pb-4" onClick={e => e.stopPropagation()}>
+            <div className="flex items-end justify-between gap-3 mb-3">
+              <div className="flex-1 min-w-0">
+                <div className="font-black text-white text-base leading-tight drop-shadow truncate">{match.home}</div>
+                <div className="font-black text-white text-base leading-tight drop-shadow truncate">{match.away}</div>
+              </div>
+              <div className="text-4xl font-black text-white tabular-nums shrink-0 drop-shadow-lg">
+                {match.homeScore ?? 0}<span className="text-white/40 text-2xl mx-1">-</span>{match.awayScore ?? 0}
+              </div>
+            </div>
+            <div className="flex gap-2">
+              <OddsButton match={match} selection="home" odd={match.odds.home} market="result" label="Casa" />
+              <OddsButton match={match} selection="draw" odd={match.odds.draw} market="result" label="Emp." />
+              <OddsButton match={match} selection="away" odd={match.odds.away} market="result" label="Fora" />
+            </div>
+          </div>
+        </motion.div>
+      );
+    }
+
     return (
       <motion.div
         layout initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
         className="bg-zinc-900 rounded-lg border border-zinc-800 hover:border-red-500/30 transition-colors cursor-pointer overflow-hidden"
         onClick={() => setExpandedMatch(match)}
       >
-        <LeagueHeader match={match} rightSlot={liveBadge} />
+        <CompactLeagueRow match={match} rightSlot={liveBadge} />
         <div className="w-full h-0.5 bg-zinc-800 overflow-hidden">
           <motion.div className="h-full bg-gradient-to-r from-red-600 to-red-400" initial={{ width: 0 }} animate={{ width: `${progress}%` }} transition={{ duration: 1 }} />
         </div>
-        {/* Teams + score + odds */}
         <div className="px-3 py-2.5" onClick={e => e.stopPropagation()}>
-          {/* Teams: always horizontal — score in center */}
           <div className="flex items-center gap-2 mb-2.5">
             <span className="font-bold text-white text-sm truncate flex-1 text-right">{match.home}</span>
             <div className="text-xl font-black text-white tabular-nums shrink-0 px-2 text-center">
@@ -503,7 +555,6 @@ export default function Home() {
             </div>
             <span className="font-bold text-white text-sm truncate flex-1">{match.away}</span>
           </div>
-          {/* Odds row */}
           <div className="flex gap-1.5">
             <OddsButton match={match} selection="home" odd={match.odds.home} market="result" label="Casa" />
             <OddsButton match={match} selection="draw" odd={match.odds.draw} market="result" label="Emp." />
@@ -515,23 +566,56 @@ export default function Home() {
   };
 
   const MatchCard = ({ match }: { match: Match }) => {
+    const flag = COUNTRY_FLAGS[match.country?.toLowerCase() ?? ""] ?? "⚽";
+    const dateStr = match.date ? formatMatchDate(match.date) : "";
+    const bannerImg = TEAM_BANNERS[match.home];
+
+    if (bannerImg) {
+      return (
+        <div
+          className="relative aspect-video rounded-xl border border-zinc-800 hover:border-red-500/40 transition-colors cursor-pointer overflow-hidden"
+          onClick={() => setExpandedMatch(match)}
+        >
+          <img src={bannerImg} alt="" className="absolute inset-0 w-full h-full object-cover opacity-55" />
+          <div className="absolute inset-0 bg-gradient-to-t from-black/95 via-black/35 to-black/15" />
+          {/* Top: league + date */}
+          <div className="absolute top-0 left-0 right-0 flex items-center justify-between px-4 pt-3">
+            <div className="flex items-center gap-2">
+              <span className="text-sm leading-none">{flag}</span>
+              <span className="text-xs text-white/80 font-medium drop-shadow">{match.league}</span>
+            </div>
+            <span className="text-xs text-white/70">{dateStr}{match.time ? ` • ${match.time}` : ""}</span>
+          </div>
+          {/* Bottom: teams + odds */}
+          <div className="absolute bottom-0 left-0 right-0 px-4 pb-4" onClick={e => e.stopPropagation()}>
+            <div className="mb-3">
+              <div className="font-black text-white text-lg leading-tight drop-shadow truncate">{match.home}</div>
+              <div className="text-white/50 text-xs my-0.5 font-medium">vs</div>
+              <div className="font-black text-white text-lg leading-tight drop-shadow truncate">{match.away}</div>
+            </div>
+            <div className="flex gap-2">
+              <OddsButton match={match} selection="home" odd={match.odds.home} market="result" label="Casa" />
+              <OddsButton match={match} selection="draw" odd={match.odds.draw} market="result" label="Emp." />
+              <OddsButton match={match} selection="away" odd={match.odds.away} market="result" label="Fora" />
+            </div>
+          </div>
+        </div>
+      );
+    }
+
     return (
       <div
         className="bg-zinc-900 rounded-lg border border-zinc-800 hover:border-red-500/30 transition-colors cursor-pointer overflow-hidden"
         onClick={() => setExpandedMatch(match)}
       >
-        <LeagueHeader match={match} />
-        {/* Teams + odds */}
+        <CompactLeagueRow match={match} />
         <div className="px-3 pb-3 pt-1" onClick={e => e.stopPropagation()}>
-          {/* Mobile: teams horizontal, odds below. Desktop: teams + odds in same row */}
           <div className="flex flex-col sm:flex-row sm:items-center sm:gap-3">
-            {/* Teams: Home | vs | Away always horizontal */}
             <div className="flex items-center gap-1.5 flex-1 min-w-0 mb-2 sm:mb-0">
               <span className="font-bold text-white text-sm truncate">{match.home}</span>
               <span className="text-zinc-600 text-xs shrink-0">vs</span>
               <span className="font-bold text-white text-sm truncate">{match.away}</span>
             </div>
-            {/* Odds buttons */}
             <div className="flex gap-1.5 shrink-0">
               <OddsButton match={match} selection="home" odd={match.odds.home} market="result" label="Casa" />
               <OddsButton match={match} selection="draw" odd={match.odds.draw} market="result" label="Emp." />
@@ -990,7 +1074,7 @@ export default function Home() {
 
                 {/* Match header */}
                 <div className="bg-zinc-900 rounded-xl border border-zinc-800 overflow-hidden mb-1">
-                  <LeagueHeader match={expandedMatch} rightSlot={
+                  <CompactLeagueRow match={expandedMatch} rightSlot={
                     expandedMatch.isLive ? (
                       <div className="flex items-center gap-1.5">
                         <span className="relative flex h-1.5 w-1.5">
