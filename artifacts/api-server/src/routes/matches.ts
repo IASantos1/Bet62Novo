@@ -40,6 +40,7 @@ export type UpcomingMatch = {
   country: string;
   time: string;
   date: string;
+  sport: string;
   odds: { home: number; draw: number; away: number };
   markets: AdvancedMarkets;
 };
@@ -585,6 +586,7 @@ async function buildUpcomingMatches(): Promise<UpcomingMatch[]> {
         country: league.country,
         time: m.status,
         date: m.date,
+        sport: "football",
         odds: matchOdds,
         markets,
       });
@@ -594,7 +596,139 @@ async function buildUpcomingMatches(): Promise<UpcomingMatch[]> {
   return results;
 }
 
-export { buildLiveMatches, buildUpcomingMatches };
+// ─── Other sports generators (deterministic per calendar day) ─────────────────
+
+function dayRng(day: number): (n: number) => number {
+  return (n: number) => {
+    const x = Math.sin(day * 31 + n * 7919) * 2654435761;
+    return (x - Math.floor(x));
+  };
+}
+
+function buildBasketballMatches(): UpcomingMatch[] {
+  const today = new Date();
+  const dayKey = today.getFullYear() * 10000 + (today.getMonth() + 1) * 100 + today.getDate();
+  const rng = dayRng(dayKey);
+  const r = (n: number) => Math.round(n * 100) / 100;
+
+  const MATCHUPS: [string, string, string, string, string][] = [
+    ["Boston Celtics", "Miami Heat", "NBA — Conferência Leste", "usa", "19:30"],
+    ["Milwaukee Bucks", "Philadelphia 76ers", "NBA — Conferência Leste", "usa", "21:00"],
+    ["Los Angeles Lakers", "Golden State Warriors", "NBA — Conferência Oeste", "usa", "22:30"],
+    ["Phoenix Suns", "Denver Nuggets", "NBA — Conferência Oeste", "usa", "21:00"],
+    ["Memphis Grizzlies", "Dallas Mavericks", "NBA — Conferência Oeste", "usa", "20:00"],
+    ["New York Knicks", "Chicago Bulls", "NBA — Conferência Leste", "usa", "19:00"],
+    ["Real Madrid", "Barcelona", "EuroLeague", "spain", "20:30"],
+    ["Olimpia Milan", "Fenerbahçe Beko", "EuroLeague", "italy", "19:00"],
+    ["Anadolu Efes", "Panathinaikos", "EuroLeague", "turkey", "18:00"],
+    ["Flamengo", "Corinthians", "NBB — Brasil", "brazil", "20:00"],
+  ];
+
+  const dateStr = today.toISOString().slice(0, 10);
+  return MATCHUPS.map(([home, away, league, country, time], i) => {
+    const homeAdv = 0.48 + rng(i * 3 + 1) * 0.14;
+    const homeOdd = r(1 / homeAdv * 0.92);
+    const awayOdd = r(1 / (1 - homeAdv) * 0.92);
+    const spread = Math.round(4 + rng(i * 3 + 2) * 12);
+    const total = Math.round(200 + rng(i * 3 + 3) * 30);
+    return {
+      id: `bball-${dayKey}-${i}`,
+      home,
+      away,
+      league,
+      country,
+      time,
+      date: dateStr,
+      sport: "basketball",
+      odds: { home: homeOdd, draw: 0, away: awayOdd },
+      markets: {
+        doubleChance: { homeOrDraw: 0, awayOrDraw: 0, homeOrAway: 0 },
+        bothTeamsScore: { yes: 0, no: 0 },
+        totalGoals: {
+          over15: 0, under15: 0,
+          over25: r(1 + rng(i * 5 + 1) * 0.5),
+          under25: r(1 + rng(i * 5 + 2) * 0.5),
+          over35: r(1.5 + rng(i * 5 + 3) * 0.6),
+          under35: r(1.5 + rng(i * 5 + 4) * 0.6),
+        },
+        handicap: {
+          homeMinusOne: r(homeOdd * 1.12),
+          awayPlusOne: r(awayOdd * 0.90),
+          homeMinusOneHalf: r(homeOdd * 1.22),
+          awayPlusOneHalf: r(awayOdd * 0.82),
+        },
+        halfTime: {
+          home: r(homeOdd * 1.08),
+          draw: 0,
+          away: r(awayOdd * 1.10),
+        },
+        firstGoal: { home: 0, noGoal: 0, away: 0 },
+        _spread: spread,
+        _total: total,
+      } as unknown as AdvancedMarkets,
+    };
+  });
+}
+
+function buildTennisMatches(): UpcomingMatch[] {
+  const today = new Date();
+  const dayKey = today.getFullYear() * 10000 + (today.getMonth() + 1) * 100 + today.getDate();
+  const rng = dayRng(dayKey + 1);
+  const r = (n: number) => Math.round(n * 100) / 100;
+
+  const ATP_PLAYERS = [
+    "Novak Djokovic", "Carlos Alcaraz", "Jannik Sinner", "Daniil Medvedev",
+    "Alexander Zverev", "Andrey Rublev", "Casper Ruud", "Taylor Fritz",
+    "Grigor Dimitrov", "Hubert Hurkacz",
+  ];
+  const WTA_PLAYERS = [
+    "Aryna Sabalenka", "Iga Swiatek", "Coco Gauff", "Elena Rybakina",
+    "Qinwen Zheng", "Jasmine Paolini", "Daria Kasatkina", "Emma Navarro",
+  ];
+
+  const TOURNAMENTS: [string, string, string, string][] = [
+    ["ATP 500 — Roma", "italy", "14:00", "atp"],
+    ["ATP 250 — Hamburgo", "germany", "15:30", "atp"],
+    ["WTA 1000 — Roma", "italy", "13:00", "wta"],
+    ["WTA 250 — Estrasburgo", "france", "14:30", "wta"],
+    ["Roland Garros — Qualificação", "france", "11:00", "atp"],
+    ["Roland Garros — Qualificação", "france", "12:30", "wta"],
+  ];
+
+  const dateStr = today.toISOString().slice(0, 10);
+  return TOURNAMENTS.map(([league, country, time, tour], i) => {
+    const pool = tour === "atp" ? ATP_PLAYERS : WTA_PLAYERS;
+    const p1idx = Math.floor(rng(i * 7 + 1) * (pool.length - 1));
+    let p2idx = Math.floor(rng(i * 7 + 2) * (pool.length - 1));
+    if (p2idx >= p1idx) p2idx = (p2idx + 1) % pool.length;
+    const p1 = pool[p1idx];
+    const p2 = pool[p2idx];
+    const p1Fav = rng(i * 7 + 3) > 0.5;
+    const favOdd = r(1.25 + rng(i * 7 + 4) * 0.80);
+    const undOdd = r(1.80 + rng(i * 7 + 5) * 1.40);
+    return {
+      id: `tennis-${dayKey}-${i}`,
+      home: p1,
+      away: p2,
+      league,
+      country,
+      time,
+      date: dateStr,
+      sport: "tennis",
+      odds: { home: p1Fav ? favOdd : undOdd, draw: 0, away: p1Fav ? undOdd : favOdd },
+      markets: {
+        doubleChance: { homeOrDraw: 0, awayOrDraw: 0, homeOrAway: 0 },
+        bothTeamsScore: { yes: 0, no: 0 },
+        totalGoals: { over15: 0, under15: 0, over25: 0, under25: 0, over35: 0, under35: 0 },
+        handicap: { homeMinusOne: 0, awayPlusOne: 0, homeMinusOneHalf: 0, awayPlusOneHalf: 0 },
+        halfTime: { home: 0, draw: 0, away: 0 },
+        firstGoal: { home: 0, noGoal: 0, away: 0 },
+      },
+    };
+  });
+}
+
+export { buildLiveMatches, buildUpcomingMatches, buildBasketballMatches, buildTennisMatches };
 
 // ─── Routes ───────────────────────────────────────────────────────────────────
 
@@ -607,9 +741,19 @@ router.get("/live", async (_req, res) => {
   }
 });
 
-router.get("/upcoming", async (_req, res) => {
+router.get("/upcoming", async (req, res) => {
   try {
-    const matches = await buildUpcomingMatches();
+    const sport = String(req.query["sport"] ?? "all");
+    const [football, basketball, tennis] = await Promise.all([
+      buildUpcomingMatches(),
+      Promise.resolve(buildBasketballMatches()),
+      Promise.resolve(buildTennisMatches()),
+    ]);
+    let matches: UpcomingMatch[];
+    if (sport === "football") matches = football;
+    else if (sport === "basketball") matches = basketball;
+    else if (sport === "tennis") matches = tennis;
+    else matches = [...football, ...basketball, ...tennis];
     res.json({ matches });
   } catch (err) {
     res.status(500).json({ error: "Erro ao buscar próximas partidas" });

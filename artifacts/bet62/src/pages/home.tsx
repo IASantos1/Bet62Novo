@@ -233,6 +233,7 @@ type Match = {
   country?: string;
   time?: string;
   date?: string;
+  sport?: string;
   odds: Odds;
   isLive?: boolean;
   homeScore?: number;
@@ -491,10 +492,16 @@ export default function Home() {
   const [liveMatches, setLiveMatches] = useState<Match[]>([]);
   const [liveLoading, setLiveLoading] = useState(false);
   const prevLiveOdds = useRef<Record<string, Odds>>({});
+  // Live minute ticker — interpolates clock between API refreshes
+  const liveDataFetchedAt = useRef(0);
+  const apiMinutesRef = useRef<Record<string, number>>({});
+  const seenMatchIds = useRef(new Set<string>());
+  const [, setMinuteTick] = useState(0);
 
   // Upcoming matches
   const [upcomingMatches, setUpcomingMatches] = useState<Match[]>([]);
   const [upcomingLoading, setUpcomingLoading] = useState(true);
+  const [selectedSport, setSelectedSport] = useState<string>("all");
 
   // Platform stats for hero
   const [platformStats, setPlatformStats] = useState<PlatformStats | null>(null);
@@ -506,6 +513,35 @@ export default function Home() {
   const [standings, setStandings] = useState<StandingRow[] | null>(null);
   const [standingsLoading, setStandingsLoading] = useState(false);
   const [standingsLeague, setStandingsLeague] = useState("");
+
+  // Minute ticker — ticks every 30s so displayed clock interpolates between API calls
+  useEffect(() => {
+    const interval = setInterval(() => setMinuteTick(t => t + 1), 30000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // Compute displayed minute for a live match (local interpolation between API refreshes)
+  const getDisplayMinute = (match: Match): number => {
+    const apiMin = apiMinutesRef.current[String(match.id)] ?? match.minute ?? 0;
+    const fetchedAt = liveDataFetchedAt.current;
+    if (fetchedAt === 0 || apiMin === 45 || apiMin === 90) return apiMin;
+    const elapsed = Math.floor((Date.now() - fetchedAt) / 60000);
+    const computed = apiMin + elapsed;
+    if (apiMin < 45) return Math.min(45, computed);
+    return Math.min(90, computed);
+  };
+
+  // Sync expandedMatch with live data silently (score/odds update without closing panel)
+  useEffect(() => {
+    if (!expandedMatch?.isLive) return;
+    const updated = liveMatches.find(m => String(m.id) === String(expandedMatch.id));
+    if (updated) setExpandedMatch({ ...updated });
+  }, [liveMatches]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Clear seenMatchIds when leaving live tab so new entries animate on return
+  useEffect(() => {
+    if (activeTab !== "live") seenMatchIds.current.clear();
+  }, [activeTab]);
 
   // Reset match view state when expanded match changes
   useEffect(() => {
@@ -559,21 +595,22 @@ export default function Home() {
       .catch(() => { /* non-critical */ });
   }, []);
 
-  // Fetch upcoming matches on mount
+  // Fetch upcoming matches when sport changes
   useEffect(() => {
     setUpcomingLoading(true);
-    fetch("/api/matches/upcoming")
+    const param = selectedSport === "all" ? "" : `?sport=${selectedSport}`;
+    fetch(`/api/matches/upcoming${param}`)
       .then(r => r.ok ? r.json() : { matches: [] })
       .then(data => {
         const matches = (data.matches || []) as Array<{
           id: string; home: string; away: string; league: string; country?: string;
-          time?: string; date?: string; odds: Odds; markets?: AdvancedMarkets;
+          time?: string; date?: string; sport?: string; odds: Odds; markets?: AdvancedMarkets;
         }>;
         setUpcomingMatches(matches.map(m => ({ ...m, isLive: false })));
       })
       .catch(() => { /* keep empty */ })
       .finally(() => setUpcomingLoading(false));
-  }, []);
+  }, [selectedSport]);
 
   // WebSocket — real-time live match updates
   useEffect(() => {
@@ -588,8 +625,20 @@ export default function Home() {
           try {
             const data = JSON.parse(event.data as string);
             if (data.type === "live" && Array.isArray(data.matches)) {
-              prevLiveOdds.current = {};
-              setLiveMatches(data.matches.map((m: Record<string, unknown>) => ({ ...m, isLive: true })));
+              // Record API minutes for local ticker interpolation
+              const newMins: Record<string, number> = {};
+              for (const m of data.matches as Record<string, unknown>[]) {
+                newMins[String(m["id"])] = (m["minute"] as number) ?? 0;
+              }
+              apiMinutesRef.current = newMins;
+              liveDataFetchedAt.current = Date.now();
+              // Merge silently — preserve prevLiveOdds for trend arrows
+              setLiveMatches(prev => {
+                const newPrev: Record<string, Odds> = {};
+                for (const m of prev) newPrev[String(m.id)] = m.odds;
+                prevLiveOdds.current = newPrev;
+                return (data.matches as Record<string, unknown>[]).map(m => ({ ...m, isLive: true } as unknown as Match));
+              });
             }
           } catch { /* ignore parse errors */ }
         };
@@ -619,7 +668,12 @@ export default function Home() {
           odds: Odds; markets?: AdvancedMarkets;
           events?: Array<{ type: string; team: string; minute: number; player: string }>;
         }>;
-        // Save current odds as previous before updating
+        // Record API minutes for local ticker interpolation
+        const newMins: Record<string, number> = {};
+        for (const m of matches) newMins[String(m.id)] = m.minute;
+        apiMinutesRef.current = newMins;
+        liveDataFetchedAt.current = Date.now();
+        // Merge silently — preserve prevLiveOdds for trend arrows
         setLiveMatches(prev => {
           const newPrev: Record<string, Odds> = {};
           for (const m of prev) newPrev[String(m.id)] = m.odds;
@@ -804,7 +858,11 @@ export default function Home() {
   // Compact league/meta row (no banner)
   const CompactLeagueRow = ({ match, rightSlot }: { match: Match; rightSlot?: ReactNode }) => {
     const flag = COUNTRY_FLAGS[match.country?.toLowerCase() ?? ""] ?? "⚽";
-    const dateStr = match.date ? formatMatchDate(match.date) : "";
+    // For live matches: never show scheduled time — live badge already carries minute info
+    const timeStr = match.isLive ? "" : [
+      match.date ? formatMatchDate(match.date) : "",
+      match.time ? match.time : "",
+    ].filter(Boolean).join(" • ");
     return (
       <div className="flex items-center justify-between px-3 pt-2.5 pb-1.5">
         <div className="flex items-center gap-2 min-w-0">
@@ -816,18 +874,22 @@ export default function Home() {
         </div>
         <div className="flex items-center gap-2 shrink-0 ml-2">
           {rightSlot}
-          <span className="text-[11px] text-zinc-500">{dateStr}{match.time ? ` • ${match.time}` : ""}</span>
+          {timeStr && <span className="text-[11px] text-zinc-500">{timeStr}</span>}
         </div>
       </div>
     );
   };
 
   const LiveMatchCard = ({ match }: { match: Match }) => {
-    const minute = match.minute ?? 0;
+    // Use locally interpolated minute — ticks between API refreshes
+    const minute = getDisplayMinute(match);
     const progress = Math.min(100, (minute / 90) * 100);
     const flag = COUNTRY_FLAGS[match.country?.toLowerCase() ?? ""] ?? "⚽";
-    const dateStr = match.date ? formatMatchDate(match.date) : "";
     const bannerImg = getTeamBanner(match.home, match.country);
+    // Suppress fade-in animation for already-seen matches (silent background update)
+    const matchKey = String(match.id);
+    const isNew = !seenMatchIds.current.has(matchKey);
+    if (isNew) seenMatchIds.current.add(matchKey);
     const liveBadge = (
       <div className="flex items-center gap-1.5">
         <span className="relative flex h-1.5 w-1.5">
@@ -841,11 +903,14 @@ export default function Home() {
     );
 
     const rivalry = RIVALRY_TAGS[`${match.home}|${match.away}`];
+    const motionProps = isNew
+      ? { layout: true as const, initial: { opacity: 0, y: 10 }, animate: { opacity: 1, y: 0 } }
+      : { layout: true as const };
 
     if (bannerImg) {
       return (
         <motion.div
-          layout initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
+          {...motionProps}
           className="relative aspect-video rounded-xl border border-zinc-800 hover:border-red-500/40 transition-colors cursor-pointer overflow-hidden"
           onClick={() => setExpandedMatch(match)}
         >
@@ -860,7 +925,7 @@ export default function Home() {
               <span className="text-sm leading-none">{flag}</span>
               <span className="text-xs text-white/80 font-medium drop-shadow">{match.league}</span>
             </div>
-            <div className="flex items-center gap-2">{liveBadge}<span className="text-xs text-white/60">{dateStr}</span></div>
+            <div className="flex items-center gap-2">{liveBadge}</div>
           </div>
           {/* Bottom: score + teams horizontal + rivalry + odds */}
           <div className="absolute bottom-0 left-0 right-0 px-4 pb-4" onClick={e => e.stopPropagation()}>
@@ -887,7 +952,7 @@ export default function Home() {
 
     return (
       <motion.div
-        layout initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
+        {...motionProps}
         className="bg-zinc-900 rounded-lg border border-zinc-800 hover:border-red-500/30 transition-colors cursor-pointer overflow-hidden"
         onClick={() => setExpandedMatch(match)}
       >
@@ -914,10 +979,20 @@ export default function Home() {
   };
 
   const MatchCard = ({ match }: { match: Match }) => {
-    const flag = COUNTRY_FLAGS[match.country?.toLowerCase() ?? ""] ?? "⚽";
+    const flag = COUNTRY_FLAGS[match.country?.toLowerCase() ?? ""] ?? (match.sport === "basketball" ? "🏀" : match.sport === "tennis" ? "🎾" : "⚽");
     const dateStr = match.date ? formatMatchDate(match.date) : "";
     const bannerImg = getTeamBanner(match.home, match.country);
     const rivalry = RIVALRY_TAGS[`${match.home}|${match.away}`];
+    const hasDraw = match.odds.draw > 0;
+    const sportIcon = match.sport === "basketball" ? "🏀" : match.sport === "tennis" ? "🎾" : null;
+
+    const OddsRow = () => (
+      <div className="flex gap-2 w-full">
+        <OddsButton match={match} selection="home" odd={match.odds.home} market="result" label={hasDraw ? "Casa" : match.home.split(" ").slice(-1)[0]} grow />
+        {hasDraw && <OddsButton match={match} selection="draw" odd={match.odds.draw} market="result" label="Emp." grow />}
+        <OddsButton match={match} selection="away" odd={match.odds.away} market="result" label={hasDraw ? "Fora" : match.away.split(" ").slice(-1)[0]} grow />
+      </div>
+    );
 
     if (bannerImg) {
       return (
@@ -927,15 +1002,13 @@ export default function Home() {
         >
           <img src={bannerImg} alt="" className="absolute inset-0 w-full h-full object-cover opacity-60" />
           <div className="absolute inset-0 bg-gradient-to-t from-black via-black/50 to-black/10" />
-          {/* Top: league + date */}
           <div className="absolute top-0 left-0 right-0 flex items-center justify-between px-4 pt-3">
             <div className="flex items-center gap-2">
-              <span className="text-sm leading-none">{flag}</span>
+              <span className="text-sm leading-none">{sportIcon ?? flag}</span>
               <span className="text-xs text-white/80 font-medium drop-shadow">{match.league}</span>
             </div>
             <span className="text-xs text-white/60">{dateStr}{match.time ? ` • ${match.time}` : ""}</span>
           </div>
-          {/* Bottom: teams horizontal + rivalry + odds full-width */}
           <div className="absolute bottom-0 left-0 right-0 px-4 pb-4" onClick={e => e.stopPropagation()}>
             {rivalry && <div className="text-[11px] font-black text-red-400 uppercase tracking-widest mb-1 drop-shadow">{rivalry}</div>}
             <div className="flex items-baseline gap-2 mb-3 min-w-0">
@@ -943,11 +1016,7 @@ export default function Home() {
               <span className="text-white/40 text-sm shrink-0">vs</span>
               <span className="font-black text-white text-xl leading-tight drop-shadow truncate">{match.away}</span>
             </div>
-            <div className="flex gap-2 w-full">
-              <OddsButton match={match} selection="home" odd={match.odds.home} market="result" label="Casa" grow />
-              <OddsButton match={match} selection="draw" odd={match.odds.draw} market="result" label="Emp." grow />
-              <OddsButton match={match} selection="away" odd={match.odds.away} market="result" label="Fora" grow />
-            </div>
+            <OddsRow />
           </div>
         </div>
       );
@@ -965,11 +1034,7 @@ export default function Home() {
             <span className="text-zinc-600 text-xs shrink-0">vs</span>
             <span className="font-bold text-white text-sm truncate">{match.away}</span>
           </div>
-          <div className="flex gap-2 w-full">
-            <OddsButton match={match} selection="home" odd={match.odds.home} market="result" label="Casa" grow />
-            <OddsButton match={match} selection="draw" odd={match.odds.draw} market="result" label="Emp." grow />
-            <OddsButton match={match} selection="away" odd={match.odds.away} market="result" label="Fora" grow />
-          </div>
+          <OddsRow />
         </div>
       </div>
     );
@@ -1285,10 +1350,18 @@ export default function Home() {
                 <div>
                   <h4 className="text-xs font-bold text-zinc-500 uppercase tracking-wider mb-4">Esportes</h4>
                   <ul className="space-y-2">
-                    {[{ icon: <span className="text-base leading-none">⚽</span>, label: "Futebol" }, { icon: <span className="text-base leading-none">🏀</span>, label: "Basquete" }, { icon: <TennisBallIcon size={18} />, label: "Tênis" }, { icon: <span className="text-base leading-none">🏒</span>, label: "Hóquei" }, { icon: <span className="text-base leading-none">🏐</span>, label: "Voleibol" }].map(sport => (
-                      <li key={sport.label}>
-                        <button className="flex items-center gap-3 w-full p-2 rounded-md hover:bg-zinc-900 text-sm text-zinc-300 hover:text-white transition-colors">
-                          <div className="text-red-500">{sport.icon}</div>
+                    {[
+                      { icon: <span className="text-base leading-none">🏆</span>, label: "Todos", key: "all" },
+                      { icon: <span className="text-base leading-none">⚽</span>, label: "Futebol", key: "football" },
+                      { icon: <span className="text-base leading-none">🏀</span>, label: "Basquete", key: "basketball" },
+                      { icon: <TennisBallIcon size={18} />, label: "Tênis", key: "tennis" },
+                    ].map(sport => (
+                      <li key={sport.key}>
+                        <button
+                          onClick={() => { setSelectedSport(sport.key); setActiveTab("sports"); setSidebarOpen(false); }}
+                          className={`flex items-center gap-3 w-full p-2 rounded-md text-sm transition-colors ${selectedSport === sport.key ? "bg-red-600/20 text-red-400 border border-red-500/30" : "hover:bg-zinc-900 text-zinc-300 hover:text-white"}`}
+                        >
+                          <div className={selectedSport === sport.key ? "text-red-400" : "text-red-500"}>{sport.icon}</div>
                           {sport.label}
                         </button>
                       </li>
@@ -1326,15 +1399,17 @@ export default function Home() {
               <h4 className="text-[11px] font-bold text-zinc-500 uppercase tracking-wider mb-3">Esportes</h4>
               <ul className="space-y-0.5">
                 {[
-                  { icon: <span className="text-sm leading-none">⚽</span>, label: "Futebol" },
-                  { icon: <span className="text-sm leading-none">🏀</span>, label: "Basquete" },
-                  { icon: <TennisBallIcon size={15} />, label: "Tênis" },
-                  { icon: <span className="text-sm leading-none">🏒</span>, label: "Hóquei" },
-                  { icon: <span className="text-sm leading-none">🏐</span>, label: "Voleibol" },
+                  { icon: <span className="text-sm leading-none">🏆</span>, label: "Todos", key: "all" },
+                  { icon: <span className="text-sm leading-none">⚽</span>, label: "Futebol", key: "football" },
+                  { icon: <span className="text-sm leading-none">🏀</span>, label: "Basquete", key: "basketball" },
+                  { icon: <TennisBallIcon size={15} />, label: "Tênis", key: "tennis" },
                 ].map(sport => (
-                  <li key={sport.label}>
-                    <button className="flex items-center gap-2.5 w-full px-2 py-2 rounded-md hover:bg-zinc-900 text-[13px] text-zinc-400 hover:text-white transition-colors">
-                      <span className="text-red-500">{sport.icon}</span>
+                  <li key={sport.key}>
+                    <button
+                      onClick={() => { setSelectedSport(sport.key); setActiveTab("sports"); }}
+                      className={`flex items-center gap-2.5 w-full px-2 py-2 rounded-md text-[13px] transition-colors ${selectedSport === sport.key ? "bg-red-600/20 text-red-400 border border-red-500/30" : "hover:bg-zinc-900 text-zinc-400 hover:text-white"}`}
+                    >
+                      <span className={selectedSport === sport.key ? "text-red-400" : "text-red-500"}>{sport.icon}</span>
                       {sport.label}
                     </button>
                   </li>
@@ -1432,7 +1507,7 @@ export default function Home() {
                           <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-500 opacity-75"></span>
                           <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-red-500"></span>
                         </span>
-                        <span className="text-[10px] font-bold text-red-500">AO VIVO {expandedMatch.minute}'</span>
+                        <span className="text-[10px] font-bold text-red-500">AO VIVO {getDisplayMinute(expandedMatch)}'</span>
                       </div>
                     ) : undefined
                   } />
