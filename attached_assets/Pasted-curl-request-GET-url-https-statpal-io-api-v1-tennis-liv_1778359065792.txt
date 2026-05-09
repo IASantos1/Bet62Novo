@@ -1,0 +1,580 @@
+curl --request GET \
+  --url 'https://statpal.io/api/v1/tennis/livescores?access_key=b5b07a3f-b019-4a18-8969-6045169feda9' \
+  --header 'Accept: application/json'
+{
+  "livescores": {
+    "sport": "tennis",
+    "tournament": [
+      {
+        "id": "17741",
+        "name": "Wta - Singles: Australian Open (Australia), Hard",
+        "match": {
+          "date": "25.01.2025",
+          "id": "2476379",
+          "status": "Finished",
+          "tb": "False",
+          "time": "08:45",
+          "player": [
+            {
+              "game_score": "",
+              "id": "35576",
+              "name": "A. Sabalenka",
+              "s1": "3",
+              "s2": "6",
+              "s3": "5",
+              "s4": "",
+              "s5": "",
+              "serve": "False",
+              "totalscore": "1",
+              "winner": "False"
+            },
+            {
+              "game_score": "",
+              "id": "6377",
+              "name": "M. Keys",
+              "s1": "6",
+              "s2": "2",
+              "s3": "7",
+              "s4": "",
+              "s5": "",
+              "serve": "False",
+              "totalscore": "2",
+              "winner": "True"
+            }
+          ]
+        }
+      },
+      {
+        "id": "17531",
+        "name": "Wta - Singles: Singapore (Singapore) - Qualification, Hard (Indoor)",
+        "match": [
+          {
+            "date": "25.01.2025",
+            "id": "2476509",
+            "status": "Finished",
+            "tb": "False",
+            "time": "02:10",
+            "player": [
+              {
+                "game_score": "",
+                "id": "171497",
+                "name": "M. Joint",
+                "s1": "7",
+                "s2": "6",
+                "s3": "",
+                "s4": "",
+                "s5": "",
+                "serve": "False",
+                "totalscore": "2",
+                "winner": "True"
+              },
+              {
+                "game_score": "",
+                "id": "35954",
+                "name": "M. Hontama",
+                "s1": "5",
+                "s2": "2",
+                "s3": "",
+                "s4": "",
+                "s5": "",
+                "serve": "False",
+                "totalscore": "0",
+                "winner": "False"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "17742",
+        "name": "Atp - Doubles: Australian Open (Australia), Hard",
+        "match": {
+          "date": "25.01.2025",
+          "id": "2476337",
+          "status": "Finished",
+          "tb": "False",
+          "time": "11:40",
+          "player": [
+            {
+              "dp1": "1744",
+              "dp2": "26279",
+              "game_score": "",
+              "id": "117869",
+              "name": "Bolelli/ Vavassori",
+              "s1": "7.18",
+              "s2": "6.5",
+              "s3": "3",
+              "s4": "",
+              "s5": "",
+              "serve": "False",
+              "totalscore": "1",
+              "winner": "False"
+            },
+            {
+              "dp1": "3182",
+              "dp2": "85385",
+              "game_score": "",
+              "id": "254558",
+              "name": "Heliovaara/ Patten",
+              "s1": "6.16",
+              "s2": "7.7",
+              "s3": "6",
+              "s4": "",
+              "s5": "",
+              "serve": "False",
+              "totalscore": "2",
+              "winner": "True"
+            }
+          ]
+        }
+      }
+    ]
+  }
+}
+curl --request GET \
+  --url 'https://statpal.io/api/v1/tennis/livestats?access_key=b5b07a3f-b019-4a18-8969-6045169feda9' \
+  --header 'Accept: application/json'
+{
+  "livestats": {
+    "sport": "tennis",
+    "tournament": [
+      {
+        "id": "17741",
+        "name": "Wta - Singles: Australian Open (Australia), Hard",
+        "match": {
+          "date": "25.01.2025",
+          "id": "2476379",
+          "time": "08:45",
+          "player": [
+            {
+              "id": "35576",
+              "name": "A. Sabalenka",
+              "stats": {
+                "period": [
+                  {
+                    "name": "match",
+                    "type": [
+                      {
+                        "name": "Service",
+                        "stat": [
+                          {
+                            "name": "Aces",
+                            "total": "",
+                            "value": "3",
+                            "won": ""
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            },
+            {
+              "id": "6377",
+              "name": "M. Keys",
+              "stats": {
+                "period": [
+                  {
+                    "name": "match",
+                    "type": [
+                      {
+                        "name": "Service",
+                        "stat": [
+                          {
+                            "name": "Aces",
+                            "total": "",
+                            "value": "6",
+                            "won": ""
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            }
+          ],
+          "match_duration": {
+            "set": [
+              {
+                "duration": "0:36",
+                "value": "1"
+              },
+              {
+                "duration": "0:45",
+                "value": "2"
+              },
+              {
+                "duration": "0:43",
+                "value": "3"
+              }
+            ],
+            "match": {
+              "duration": "2:04"
+            }
+          }
+        }
+      }
+    ]
+  }
+}
+curl --request GET \
+  --url 'https://statpal.io/api/v1/tennis/daily/d-1?access_key=b5b07a3f-b019-4a18-8969-6045169feda9' \
+  --header 'Accept: application/json'
+{
+  "scores": {
+    "sport": "tennis",
+    "tournament": [
+      {
+        "id": "17740",
+        "name": "Atp - Singles: Australian Open (Australia), Hard",
+        "match": [
+          {
+            "date": "24.01.2025",
+            "id": "2476014",
+            "status": "Retired",
+            "time": "03:45",
+            "player": [
+              {
+                "game_score": "0",
+                "id": "3444",
+                "name": "N. Djokovic",
+                "s1": "6",
+                "s2": "",
+                "s3": "",
+                "s4": "",
+                "s5": "",
+                "serve": "False",
+                "totalscore": "0",
+                "winner": "False"
+              },
+              {
+                "game_score": "0",
+                "id": "9495",
+                "name": "A. Zverev",
+                "s1": "7",
+                "s2": "",
+                "s3": "",
+                "s4": "",
+                "s5": "",
+                "serve": "False",
+                "totalscore": "1",
+                "winner": "True"
+              }
+            ]
+          },
+          {
+            "date": "24.01.2025",
+            "id": "2476182",
+            "status": "Finished",
+            "time": "08:45",
+            "player": [
+              {
+                "game_score": "",
+                "id": "58323",
+                "name": "J. Sinner",
+                "s1": "7",
+                "s2": "6",
+                "s3": "6",
+                "s4": "",
+                "s5": "",
+                "serve": "False",
+                "totalscore": "3",
+                "winner": "True"
+              },
+              {
+                "game_score": "",
+                "id": "97382",
+                "name": "B. Shelton",
+                "s1": "6",
+                "s2": "2",
+                "s3": "2",
+                "s4": "",
+                "s5": "",
+                "serve": "False",
+                "totalscore": "0",
+                "winner": "False"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "17705",
+        "name": "Wta - Doubles: Australian Open (Australia), Hard",
+        "match": [
+          {
+            "date": "24.01.2025",
+            "id": "2476155",
+            "status": "Finished",
+            "time": "01:10",
+            "player": [
+              {
+                "dp1": "4806",
+                "dp2": "11261",
+                "game_score": "",
+                "id": "260923",
+                "name": "Siniakova/ Townsend",
+                "s1": "6",
+                "s2": "6",
+                "s3": "6",
+                "s4": "",
+                "s5": "",
+                "serve": "False",
+                "totalscore": "2",
+                "winner": "True"
+              },
+              {
+                "dp1": "127589",
+                "dp2": "68056",
+                "game_score": "",
+                "id": "276043",
+                "name": "Andreeva/ Shnaider",
+                "s1": "7",
+                "s2": "4",
+                "s3": "3",
+                "s4": "",
+                "s5": "",
+                "serve": "False",
+                "totalscore": "1",
+                "winner": "False"
+              }
+            ]
+          },
+          {
+            "date": "24.01.2025",
+            "id": "2475959",
+            "status": "Finished",
+            "time": "03:50",
+            "player": [
+              {
+                "dp1": "1058",
+                "dp2": "10577",
+                "game_score": "",
+                "id": "296722",
+                "name": "Hsieh S-/Ostapenko",
+                "s1": "7",
+                "s2": "3",
+                "s3": "6",
+                "s4": "",
+                "s5": "",
+                "serve": "False",
+                "totalscore": "2",
+                "winner": "True"
+              },
+              {
+                "dp1": "6453",
+                "dp2": "6460",
+                "game_score": "",
+                "id": "216943",
+                "name": "Dabrowski/ Routliffe",
+                "s1": "6",
+                "s2": "6",
+                "s3": "3",
+                "s4": "",
+                "s5": "",
+                "serve": "False",
+                "totalscore": "1",
+                "winner": "False"
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}
+curl --request GET \
+  --url 'https://statpal.io/api/v1/tennis/tournament-list/atp?access_key=b5b07a3f-b019-4a18-8969-6045169feda9' \
+  --header 'Accept: application/json'
+{
+  "tournaments": {
+    "sport": "tennis",
+    "tournament": [
+      {
+        "category": "ATP",
+        "date_start": "27.12.2024",
+        "date_end": "05.01.2025",
+        "doubles_id": "",
+        "id": "49679",
+        "location": "Perth-Sydney, Australia",
+        "name": "United Cup",
+        "surface": "Hard",
+        "prize_money": "$5,000,000"
+      },
+      {
+        "category": "ATP 250",
+        "date_start": "29.12.2024",
+        "date_end": "05.01.2025",
+        "doubles_id": "17582",
+        "id": "20870",
+        "location": "Brisbane, Australia",
+        "name": "Brisbane International presented by Evie",
+        "surface": "Hard",
+        "prize_money": "$0"
+      }
+    ]
+  }
+}
+curl --request GET \
+  --url 'https://statpal.io/api/v1/tennis/tournament/{tournament_id}?access_key=b5b07a3f-b019-4a18-8969-6045169feda9' \
+  --header 'Accept: application/json'
+{
+  "scores": {
+    "category": "atp-singles",
+    "sport": "tennis",
+    "tournament": {
+      "id": "22697",
+      "league": "Barcelona",
+      "season": "2025",
+      "week": [
+        {
+          "number": "Barcelona - Semi-finals",
+          "qualification": "True",
+          "match": [
+            {
+              "court": "Pista 2",
+              "date": "12.04.2025",
+              "id": "2495173",
+              "status": "Retired",
+              "tb": "False",
+              "time": "08:05",
+              "player": [
+                {
+                  "game_score": "0",
+                  "id": "5635",
+                  "name": "F. Coria",
+                  "s1": "5",
+                  "s2": "0",
+                  "s3": "",
+                  "s4": "",
+                  "s5": "",
+                  "serve": "False",
+                  "totalscore": "0",
+                  "winner": "False"
+                },
+                {
+                  "game_score": "30",
+                  "id": "16262",
+                  "name": "L. Djere",
+                  "s1": "7",
+                  "s2": "0",
+                  "s3": "",
+                  "s4": "",
+                  "s5": "",
+                  "serve": "False",
+                  "totalscore": "1",
+                  "winner": "True"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  }
+}
+curl --request GET \
+  --url 'https://statpal.io/api/v1/tennis/standings/atp?access_key=b5b07a3f-b019-4a18-8969-6045169feda9' \
+  --header 'Accept: application/json'
+{
+  "standings": {
+    "sport": "tennis",
+    "player": [
+      {
+        "id": "87658",
+        "name": "Carlos Alcaraz",
+        "country": "Spain",
+        "rank": "1",
+        "points": "12050",
+        "movement": "same"
+      },
+      {
+        "id": "58323",
+        "name": "Jannik Sinner",
+        "country": "Italy",
+        "rank": "2",
+        "points": "11500",
+        "movement": "same"
+      }
+    ]
+  }
+}
+curl --request GET \
+  --url 'https://statpal.io/api/v1/tennis/odds?access_key=b5b07a3f-b019-4a18-8969-6045169feda9' \
+  --header 'Accept: application/json'
+{
+  "odds": {
+    "sport": "tennis",
+    "tournament": [
+      {
+        "gid": "17740",
+        "id": "17740",
+        "name": "Atp - Singles: Australian Open (Australia), Hard",
+        "matches": {
+          "match": {
+            "date": "26.01.2025",
+            "id": "2476527",
+            "status": "1",
+            "time": "08:30",
+            "player": [
+              {
+                "id": "58323",
+                "name": "J. Sinner",
+                "s1": "",
+                "s2": "",
+                "s3": "",
+                "s4": "",
+                "s5": "",
+                "totalscore": "",
+                "winner": ""
+              },
+              {
+                "id": "9495",
+                "name": "A. Zverev",
+                "s1": "",
+                "s2": "",
+                "s3": "",
+                "s4": "",
+                "s5": "",
+                "totalscore": "",
+                "winner": ""
+              }
+            ],
+            "odds": {
+              "ts": "1737809514",
+              "type": [
+                {
+                  "id": "1501",
+                  "stop": "False",
+                  "value": "Home/Away",
+                  "bookmaker": [
+                    {
+                      "id": "1501",
+                      "name": "bwin",
+                      "stop": "False",
+                      "ts": "1737792305",
+                      "odd": [
+                        {
+                          "id": "82305122215671567",
+                          "name": "Home",
+                          "value": "1.36"
+                        },
+                        {
+                          "id": "82305122215701570",
+                          "name": "Away",
+                          "value": "3.25"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      }
+    ]
+  }
+}
