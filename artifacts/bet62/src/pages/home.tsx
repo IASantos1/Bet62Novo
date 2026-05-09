@@ -96,17 +96,32 @@ const TEAM_BANNERS: Record<string, string> = {
 };
 
 const LEAGUE_FLAGS: Record<string, string> = {
-  "La Liga": "🇪🇸", "Laliga": "🇪🇸", "Laliga2": "🇪🇸", "Segunda": "🇪🇸",
-  "Premier League": "🏴󠁧󠁢󠁥󠁮󠁧󠁿", "Championship": "🏴󠁧󠁢󠁥󠁮󠁧󠁿", "League One": "🏴󠁧󠁢󠁥󠁮󠁧󠁿",
-  "Champions League": "⭐", "UEFA Champions League": "⭐", "Europa League": "🌟",
-  "Serie A": "🇮🇹", "Serie B": "🇮🇹",
-  "Bundesliga": "🇩🇪", "2. Bundesliga": "🇩🇪",
-  "Ligue 1": "🇫🇷", "Ligue 2": "🇫🇷",
-  "Liga Portugal": "🇵🇹", "Primeira Liga": "🇵🇹", "Segunda Liga": "🇵🇹",
-  "Eredivisie": "🇳🇱",
-  "Brasileirao": "🇧🇷", "Serie A Brasil": "🇧🇷", "Brasileirão": "🇧🇷",
-  "Liga Argentina": "🇦🇷", "Primera Division": "🇦🇷",
-  "MLS": "🇺🇸",
+  "La Liga": "🇪🇸", "Laliga": "🇪🇸", "Laliga2": "🇪🇸", "Segunda": "🇪🇸", "LaLiga Hypermotion": "🇪🇸", "Copa del Rey": "🇪🇸",
+  "Premier League": "🏴󠁧󠁢󠁥󠁮󠁧󠁿", "EFL Championship": "🏴󠁧󠁢󠁥󠁮󠁧󠁿", "Championship": "🏴󠁧󠁢󠁥󠁮󠁧󠁿", "League One": "🏴󠁧󠁢󠁥󠁮󠁧󠁿", "FA Cup": "🏴󠁧󠁢󠁥󠁮󠁧󠁿",
+  "Champions League": "⭐", "UEFA Champions League": "⭐", "Europa League": "🌟", "Conference League": "🟢",
+  "Serie A": "🇮🇹", "Serie B": "🇮🇹", "Coppa Italia": "🇮🇹",
+  "Bundesliga": "🇩🇪", "2. Bundesliga": "🇩🇪", "DFB-Pokal": "🇩🇪",
+  "Ligue 1": "🇫🇷", "Ligue 2": "🇫🇷", "Coupe de France": "🇫🇷",
+  "Liga Portugal": "🇵🇹", "Primeira Liga": "🇵🇹", "Segunda Liga": "🇵🇹", "Liga Portugal 2": "🇵🇹", "Taça de Portugal": "🇵🇹",
+  "Eredivisie": "🇳🇱", "Eerste Divisie": "🇳🇱", "KNVB Cup": "🇳🇱",
+  "Belgian Pro League": "🇧🇪", "Pro League": "🇧🇪", "Belgian Cup": "🇧🇪", "Jupiler Pro League": "🇧🇪",
+  "Süper Lig": "🇹🇷", "Super Lig": "🇹🇷", "TFF First League": "🇹🇷", "Turkish Cup": "🇹🇷",
+  "Super League Greece": "🇬🇷", "Super League 2": "🇬🇷", "Greek Cup": "🇬🇷",
+  "Austrian Bundesliga": "🇦🇹", "Austrian Cup": "🇦🇹",
+  "Scottish Premiership": "🏴󠁧󠁢󠁳󠁣󠁴󠁿", "Scottish Championship": "🏴󠁧󠁢󠁳󠁣󠁴󠁿", "Scottish Cup": "🏴󠁧󠁢󠁳󠁣󠁴󠁿",
+  "Swiss Super League": "🇨🇭", "Challenge League": "🇨🇭",
+  "Danish Superliga": "🇩🇰", "Danish 1st Division": "🇩🇰",
+  "Eliteserien": "🇳🇴", "Norwegian Cup": "🇳🇴",
+  "Allsvenskan": "🇸🇪", "Superettan": "🇸🇪",
+  "HNL": "🇭🇷", "Croatian Football Cup": "🇭🇷",
+  "Serbian SuperLiga": "🇷🇸", "Serbian Cup": "🇷🇸",
+  "Brasileirao": "🇧🇷", "Brasileirão": "🇧🇷", "Série A Brasil": "🇧🇷", "Campeonato Brasileiro": "🇧🇷", "Copa do Brasil": "🇧🇷", "Campeonato Paulista": "🇧🇷", "Campeonato Carioca": "🇧🇷",
+  "Primera División": "🇦🇷", "Primera Division": "🇦🇷", "Liga Argentina": "🇦🇷", "Copa Argentina": "🇦🇷",
+  "MLS": "🇺🇸", "NBA": "🇺🇸", "NHL": "🇺🇸",
+  "EuroLeague": "⭐", "NBB — Brasil": "🇧🇷",
+  "ATP 500": "🎾", "ATP 250": "🎾", "WTA 1000": "🎾", "WTA 250": "🎾", "Roland Garros": "🇫🇷",
+  "NHL — Playoffs": "🏒", "KHL — Playoff": "🏒",
+  "Volleyball Nations League": "🏐", "Superlega — Itália": "🏐", "Superliga — Rússia": "🏐", "Superliga — Brasil": "🏐",
 };
 
 const TEAM_COUNTRY: Record<string, string> = {
@@ -227,6 +242,14 @@ type AdvancedMarkets = {
   _total?: number;
   _total1H?: number;
   _spreadLine?: number;
+  // Extended football markets
+  drawNoBet?: { home: number; away: number };
+  asianHandicap?: { line: number; home: number; away: number };
+  asianTotals?: { o05: number; u05: number; o45: number; u45: number; o55: number; u55: number; o225: number; u225: number; o275: number; u275: number };
+  htft?: { hh: number; hd: number; ha: number; dh: number; dd: number; da: number; ah: number; ad: number; aa: number };
+  correctScore?: Record<string, number>;
+  corners?: { o85: number; u85: number; o95: number; u95: number; o105: number; u105: number };
+  cards?: { o35: number; u35: number; o45: number; u45: number };
 };
 
 type Match = {
@@ -1148,7 +1171,9 @@ export default function Home() {
     const sport = match.sport ?? "football";
     const isBasketball = sport === "basketball";
     const isTennis = sport === "tennis";
-    const isFootball = !isBasketball && !isTennis;
+    const isHockey = sport === "hockey";
+    const isVolleyball = sport === "volleyball";
+    const isFootball = !isBasketball && !isTennis && !isHockey && !isVolleyball;
 
     const tabs = isBasketball
       ? [
@@ -1163,13 +1188,31 @@ export default function Home() {
             { key: "sets", label: "Sets" },
             { key: "handicap", label: "Handicap" },
           ]
-        : [
-            { key: "resultado", label: "Resultado" },
-            { key: "dupla", label: "Dupla Chance" },
-            { key: "gols", label: "Gols" },
-            { key: "handicap", label: "Handicap" },
-            { key: "1tempo", label: "1º Tempo" },
-          ];
+        : isHockey
+          ? [
+              { key: "resultado", label: "Vencedor" },
+              { key: "totais", label: "Totais" },
+              { key: "puckline", label: "Puck Line" },
+              { key: "1periodo", label: "1º Período" },
+            ]
+          : isVolleyball
+            ? [
+                { key: "resultado", label: "Vencedor" },
+                { key: "sets", label: "Sets" },
+                { key: "handicap", label: "Handicap" },
+              ]
+            : [
+                { key: "resultado", label: "Resultado" },
+                { key: "dupla", label: "Dupla Chance" },
+                { key: "gols", label: "Gols" },
+                { key: "handicap", label: "Handicap" },
+                { key: "1tempo", label: "1º Tempo" },
+                { key: "htft", label: "HT/FT" },
+                { key: "placar", label: "Placar Exato" },
+                { key: "escanteios", label: "Escanteios" },
+                { key: "cartoes", label: "Cartões" },
+                { key: "asiatico", label: "Asiático" },
+              ];
 
     const defaultTab = tabs[0]!.key;
     const [modalTab, setModalTab] = useState(defaultTab);
@@ -1356,7 +1399,7 @@ export default function Home() {
               {m.halfTime.draw > 0 && <MarketOddsBtn match={match} sel="ht-draw" odd={m.halfTime.draw} market="1tempo" label="Empate" />}
               <MarketOddsBtn match={match} sel="ht-away" odd={m.halfTime.away} market="1tempo" label={match.away} />
             </MarketGroup>
-            {m.firstGoal.home > 0 && (
+            {m.firstGoal && m.firstGoal.home > 0 && (
               <MarketGroup title="1º Gol">
                 <MarketOddsBtn match={match} sel="fg-home" odd={m.firstGoal.home} market="1tempo" label={match.home} />
                 <MarketOddsBtn match={match} sel="fg-none" odd={m.firstGoal.noGoal} market="1tempo" label="Sem Gols" />
@@ -1367,6 +1410,205 @@ export default function Home() {
         )}
         {isFootball && modalTab === "1tempo" && m && m.halfTime.home === 0 && (
           <div className="text-center text-zinc-600 py-6 text-sm">Mercado não disponível para esta partida.</div>
+        )}
+
+        {/* ── FUTEBOL: HT/FT ── */}
+        {isFootball && modalTab === "htft" && m && m.htft && (
+          <div>
+            <MarketGroup title={`Intervalo / Final — ${match.home} vence`}>
+              <MarketOddsBtn match={match} sel="htft-hh" odd={m.htft.hh} market="htft" label="1 / 1" />
+              <MarketOddsBtn match={match} sel="htft-hd" odd={m.htft.hd} market="htft" label="1 / X" />
+              <MarketOddsBtn match={match} sel="htft-ha" odd={m.htft.ha} market="htft" label="1 / 2" />
+            </MarketGroup>
+            <MarketGroup title="Empate ao Intervalo">
+              <MarketOddsBtn match={match} sel="htft-dh" odd={m.htft.dh} market="htft" label="X / 1" />
+              <MarketOddsBtn match={match} sel="htft-dd" odd={m.htft.dd} market="htft" label="X / X" />
+              <MarketOddsBtn match={match} sel="htft-da" odd={m.htft.da} market="htft" label="X / 2" />
+            </MarketGroup>
+            <MarketGroup title={`Intervalo / Final — ${match.away} vence`}>
+              <MarketOddsBtn match={match} sel="htft-ah" odd={m.htft.ah} market="htft" label="2 / 1" />
+              <MarketOddsBtn match={match} sel="htft-ad" odd={m.htft.ad} market="htft" label="2 / X" />
+              <MarketOddsBtn match={match} sel="htft-aa" odd={m.htft.aa} market="htft" label="2 / 2" />
+            </MarketGroup>
+          </div>
+        )}
+        {isFootball && modalTab === "htft" && m && !m.htft && (
+          <div className="text-center text-zinc-600 py-6 text-sm">Mercado não disponível para esta partida.</div>
+        )}
+
+        {/* ── FUTEBOL: PLACAR EXATO ── */}
+        {isFootball && modalTab === "placar" && m && m.correctScore && (
+          <div>
+            <p className="text-xs text-zinc-500 mb-3">Selecione o marcador exato ao final da partida.</p>
+            <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
+              {Object.entries(m.correctScore).map(([score, odd]) => (
+                <MarketOddsBtn key={score} match={match} sel={`cs-${score}`} odd={odd} market="placar" label={score} />
+              ))}
+            </div>
+          </div>
+        )}
+        {isFootball && modalTab === "placar" && m && !m.correctScore && (
+          <div className="text-center text-zinc-600 py-6 text-sm">Mercado não disponível para esta partida.</div>
+        )}
+
+        {/* ── FUTEBOL: ESCANTEIOS ── */}
+        {isFootball && modalTab === "escanteios" && m && m.corners && (
+          <div>
+            <MarketGroup title="Total de Escanteios — 8.5">
+              <MarketOddsBtn match={match} sel="oc85" odd={m.corners.o85} market="escanteios" label="Acima de 8.5" />
+              <MarketOddsBtn match={match} sel="uc85" odd={m.corners.u85} market="escanteios" label="Abaixo de 8.5" />
+            </MarketGroup>
+            <MarketGroup title="Total de Escanteios — 9.5">
+              <MarketOddsBtn match={match} sel="oc95" odd={m.corners.o95} market="escanteios" label="Acima de 9.5" />
+              <MarketOddsBtn match={match} sel="uc95" odd={m.corners.u95} market="escanteios" label="Abaixo de 9.5" />
+            </MarketGroup>
+            <MarketGroup title="Total de Escanteios — 10.5">
+              <MarketOddsBtn match={match} sel="oc105" odd={m.corners.o105} market="escanteios" label="Acima de 10.5" />
+              <MarketOddsBtn match={match} sel="uc105" odd={m.corners.u105} market="escanteios" label="Abaixo de 10.5" />
+            </MarketGroup>
+          </div>
+        )}
+        {isFootball && modalTab === "escanteios" && m && !m.corners && (
+          <div className="text-center text-zinc-600 py-6 text-sm">Mercado não disponível para esta partida.</div>
+        )}
+
+        {/* ── FUTEBOL: CARTÕES ── */}
+        {isFootball && modalTab === "cartoes" && m && m.cards && (
+          <div>
+            <MarketGroup title="Total de Cartões — 3.5">
+              <MarketOddsBtn match={match} sel="ocard35" odd={m.cards.o35} market="cartoes" label="Acima de 3.5 cartões" />
+              <MarketOddsBtn match={match} sel="ucard35" odd={m.cards.u35} market="cartoes" label="Abaixo de 3.5 cartões" />
+            </MarketGroup>
+            <MarketGroup title="Total de Cartões — 4.5">
+              <MarketOddsBtn match={match} sel="ocard45" odd={m.cards.o45} market="cartoes" label="Acima de 4.5 cartões" />
+              <MarketOddsBtn match={match} sel="ucard45" odd={m.cards.u45} market="cartoes" label="Abaixo de 4.5 cartões" />
+            </MarketGroup>
+          </div>
+        )}
+        {isFootball && modalTab === "cartoes" && m && !m.cards && (
+          <div className="text-center text-zinc-600 py-6 text-sm">Mercado não disponível para esta partida.</div>
+        )}
+
+        {/* ── FUTEBOL: ASIÁTICO ── */}
+        {isFootball && modalTab === "asiatico" && m && (
+          <div>
+            {m.drawNoBet && m.drawNoBet.home > 0 && (
+              <MarketGroup title="Draw No Bet (Empate Anulado)">
+                <MarketOddsBtn match={match} sel="dnb-home" odd={m.drawNoBet.home} market="asiatico" label={match.home} />
+                <MarketOddsBtn match={match} sel="dnb-away" odd={m.drawNoBet.away} market="asiatico" label={match.away} />
+              </MarketGroup>
+            )}
+            {m.asianHandicap && m.asianHandicap.home > 0 && (
+              <MarketGroup title={`Handicap Asiático — Linha ${m.asianHandicap.line > 0 ? "+" : ""}${m.asianHandicap.line}`}>
+                <MarketOddsBtn match={match} sel="ah-home" odd={m.asianHandicap.home} market="asiatico" label={`${match.home} ${m.asianHandicap.line > 0 ? "+" : ""}${m.asianHandicap.line}`} />
+                <MarketOddsBtn match={match} sel="ah-away" odd={m.asianHandicap.away} market="asiatico" label={`${match.away} ${m.asianHandicap.line > 0 ? `-${m.asianHandicap.line}` : `+${Math.abs(m.asianHandicap.line)}`}`} />
+              </MarketGroup>
+            )}
+            {m.asianTotals && m.asianTotals.o225 > 0 && (
+              <>
+                <MarketGroup title="Total Asiático — 0.5">
+                  <MarketOddsBtn match={match} sel="at-o05" odd={m.asianTotals.o05} market="asiatico" label="Mais de 0.5" />
+                  <MarketOddsBtn match={match} sel="at-u05" odd={m.asianTotals.u05} market="asiatico" label="Menos de 0.5" />
+                </MarketGroup>
+                <MarketGroup title="Total Asiático — 2.25">
+                  <MarketOddsBtn match={match} sel="at-o225" odd={m.asianTotals.o225} market="asiatico" label="Mais de 2.25" />
+                  <MarketOddsBtn match={match} sel="at-u225" odd={m.asianTotals.u225} market="asiatico" label="Menos de 2.25" />
+                </MarketGroup>
+                <MarketGroup title="Total Asiático — 2.75">
+                  <MarketOddsBtn match={match} sel="at-o275" odd={m.asianTotals.o275} market="asiatico" label="Mais de 2.75" />
+                  <MarketOddsBtn match={match} sel="at-u275" odd={m.asianTotals.u275} market="asiatico" label="Menos de 2.75" />
+                </MarketGroup>
+                <MarketGroup title="Total Asiático — 4.5">
+                  <MarketOddsBtn match={match} sel="at-o45" odd={m.asianTotals.o45} market="asiatico" label="Mais de 4.5" />
+                  <MarketOddsBtn match={match} sel="at-u45" odd={m.asianTotals.u45} market="asiatico" label="Menos de 4.5" />
+                </MarketGroup>
+                <MarketGroup title="Total Asiático — 5.5">
+                  <MarketOddsBtn match={match} sel="at-o55" odd={m.asianTotals.o55} market="asiatico" label="Mais de 5.5" />
+                  <MarketOddsBtn match={match} sel="at-u55" odd={m.asianTotals.u55} market="asiatico" label="Menos de 5.5" />
+                </MarketGroup>
+              </>
+            )}
+            {(!m.drawNoBet && !m.asianHandicap && !m.asianTotals) && (
+              <div className="text-center text-zinc-600 py-6 text-sm">Mercado não disponível para esta partida.</div>
+            )}
+          </div>
+        )}
+
+        {/* ── HÓQUEI: TOTAIS ── */}
+        {isHockey && modalTab === "totais" && m && (
+          <div>
+            <MarketGroup title={`Total de Golos — ${m._total ?? "—"}`}>
+              <MarketOddsBtn match={match} sel="o25" odd={m.totalGoals.over25} market="totais" label={`Mais de ${m._total ?? "—"}`} />
+              <MarketOddsBtn match={match} sel="u25" odd={m.totalGoals.under25} market="totais" label={`Menos de ${m._total ?? "—"}`} />
+            </MarketGroup>
+            {m.totalGoals.over15 > 0 && (
+              <MarketGroup title={`Total de Golos — ${m._total ? m._total - 0.5 : "—"}`}>
+                <MarketOddsBtn match={match} sel="o15" odd={m.totalGoals.over15} market="totais" label={`Mais de ${m._total ? m._total - 0.5 : "—"}`} />
+                <MarketOddsBtn match={match} sel="u15" odd={m.totalGoals.under15} market="totais" label={`Menos de ${m._total ? m._total - 0.5 : "—"}`} />
+              </MarketGroup>
+            )}
+            {m.totalGoals.over35 > 0 && (
+              <MarketGroup title={`Total de Golos — ${m._total ? m._total + 0.5 : "—"}`}>
+                <MarketOddsBtn match={match} sel="o35" odd={m.totalGoals.over35} market="totais" label={`Mais de ${m._total ? m._total + 0.5 : "—"}`} />
+                <MarketOddsBtn match={match} sel="u35" odd={m.totalGoals.under35} market="totais" label={`Menos de ${m._total ? m._total + 0.5 : "—"}`} />
+              </MarketGroup>
+            )}
+          </div>
+        )}
+
+        {/* ── HÓQUEI: PUCK LINE ── */}
+        {isHockey && modalTab === "puckline" && m && m.handicap.homeMinusOne > 0 && (
+          <div>
+            <MarketGroup title="Puck Line (±1.5)">
+              <MarketOddsBtn match={match} sel="pl-home" odd={m.handicap.homeMinusOne} market="puckline" label={`${match.home} −1.5`} />
+              <MarketOddsBtn match={match} sel="pl-away" odd={m.handicap.awayPlusOne} market="puckline" label={`${match.away} +1.5`} />
+            </MarketGroup>
+          </div>
+        )}
+
+        {/* ── HÓQUEI: 1º PERÍODO ── */}
+        {isHockey && modalTab === "1periodo" && m && m.halfTime.home > 0 && (
+          <div>
+            <MarketGroup title="Resultado — 1º Período">
+              <MarketOddsBtn match={match} sel="per1-home" odd={m.halfTime.home} market="1periodo" label={match.home} />
+              {m.halfTime.draw > 0 && <MarketOddsBtn match={match} sel="per1-draw" odd={m.halfTime.draw} market="1periodo" label="Empate" />}
+              <MarketOddsBtn match={match} sel="per1-away" odd={m.halfTime.away} market="1periodo" label={match.away} />
+            </MarketGroup>
+          </div>
+        )}
+
+        {/* ── VOLEIBOL: SETS ── */}
+        {isVolleyball && modalTab === "sets" && m && (
+          <div>
+            {m.totalGoals.over15 > 0 && (
+              <MarketGroup title="Total de Sets — O/U 2.5">
+                <MarketOddsBtn match={match} sel="osets25" odd={m.totalGoals.over15} market="sets" label="Mais de 2.5 sets" />
+                <MarketOddsBtn match={match} sel="usets25" odd={m.totalGoals.under15} market="sets" label="Menos de 2.5 sets" />
+              </MarketGroup>
+            )}
+            {m.totalGoals.over25 > 0 && (
+              <MarketGroup title="Total de Sets — O/U 3.5">
+                <MarketOddsBtn match={match} sel="osets35" odd={m.totalGoals.over25} market="sets" label="Mais de 3.5 sets" />
+                <MarketOddsBtn match={match} sel="usets35" odd={m.totalGoals.under25} market="sets" label="Menos de 3.5 sets" />
+              </MarketGroup>
+            )}
+            {m.bothTeamsScore && m.bothTeamsScore.yes > 0 && (
+              <MarketGroup title={`Total de Pontos — O/U ${m._total ?? "—"}`}>
+                <MarketOddsBtn match={match} sel="opts" odd={m.bothTeamsScore.yes} market="sets" label={`Mais de ${m._total ?? "—"} pts`} />
+                <MarketOddsBtn match={match} sel="upts" odd={m.bothTeamsScore.no} market="sets" label={`Menos de ${m._total ?? "—"} pts`} />
+              </MarketGroup>
+            )}
+          </div>
+        )}
+
+        {/* ── VOLEIBOL: HANDICAP (SETS) ── */}
+        {isVolleyball && modalTab === "handicap" && m && m.totalGoals.over35 > 0 && (
+          <div>
+            <MarketGroup title="Handicap de Sets — Casa −1.5">
+              <MarketOddsBtn match={match} sel="hcap-vb-home" odd={m.totalGoals.over35} market="handicap" label={`${match.home} −1.5 sets`} />
+              <MarketOddsBtn match={match} sel="hcap-vb-away" odd={m.totalGoals.under35} market="handicap" label={`${match.away} +1.5 sets`} />
+            </MarketGroup>
+          </div>
         )}
 
         {!m && <div className="text-center text-zinc-500 py-6 text-sm">Mercados adicionais indisponíveis para esta partida.</div>}
@@ -1482,12 +1724,35 @@ export default function Home() {
                 <button onClick={() => setSidebarOpen(false)} className="text-zinc-400 hover:text-white"><X size={20} /></button>
               </div>
               <div className="p-4 flex-1 overflow-y-auto">
-                <div className="mb-8">
-                  <h4 className="text-xs font-bold text-zinc-500 uppercase tracking-wider mb-4">Principais Ligas</h4>
-                  <ul className="space-y-2">
-                    {["La Liga", "Premier League", "Champions League", "Serie A", "Bundesliga", "Ligue 1"].map(league => (
+                <div className="mb-6">
+                  <h4 className="text-xs font-bold text-zinc-500 uppercase tracking-wider mb-3">Esportes</h4>
+                  <ul className="space-y-1.5">
+                    {[
+                      { icon: <span className="text-base leading-none">🏆</span>, label: "Todos", key: "all" },
+                      { icon: <span className="text-base leading-none">⚽</span>, label: "Futebol", key: "football" },
+                      { icon: <span className="text-base leading-none">🏀</span>, label: "Basquete", key: "basketball" },
+                      { icon: <TennisBallIcon size={18} />, label: "Tênis", key: "tennis" },
+                      { icon: <span className="text-base leading-none">🏒</span>, label: "Hóquei", key: "hockey" },
+                      { icon: <span className="text-base leading-none">🏐</span>, label: "Voleibol", key: "volleyball" },
+                    ].map(sport => (
+                      <li key={sport.key}>
+                        <button
+                          onClick={() => { setSelectedSport(sport.key); setActiveTab("sports"); setSidebarOpen(false); }}
+                          className={`flex items-center gap-3 w-full p-2 rounded-md text-sm transition-colors ${selectedSport === sport.key ? "bg-red-600/20 text-red-400 border border-red-500/30" : "hover:bg-zinc-900 text-zinc-300 hover:text-white"}`}
+                        >
+                          <div className={selectedSport === sport.key ? "text-red-400" : "text-red-500"}>{sport.icon}</div>
+                          {sport.label}
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+                <div className="mb-6">
+                  <h4 className="text-xs font-bold text-zinc-500 uppercase tracking-wider mb-3">Principais Ligas</h4>
+                  <ul className="space-y-1.5">
+                    {["Champions League", "Premier League", "La Liga", "Bundesliga", "Serie A", "Ligue 1", "Liga Portugal", "Eredivisie", "Belgian Pro League", "Süper Lig"].map(league => (
                       <li key={league}>
-                        <button className="flex items-center gap-3 w-full p-2 rounded-md hover:bg-zinc-900 text-sm text-zinc-300 hover:text-white transition-colors">
+                        <button onClick={() => { setSelectedSport("football"); setActiveTab("sports"); setSidebarOpen(false); }} className="flex items-center gap-3 w-full p-2 rounded-md hover:bg-zinc-900 text-sm text-zinc-300 hover:text-white transition-colors">
                           <div className="w-6 h-6 rounded-full bg-zinc-800 border border-zinc-700 flex items-center justify-center text-sm leading-none shrink-0">
                             {LEAGUE_FLAGS[league] ?? "⚽"}
                           </div>
@@ -1498,21 +1763,15 @@ export default function Home() {
                   </ul>
                 </div>
                 <div>
-                  <h4 className="text-xs font-bold text-zinc-500 uppercase tracking-wider mb-4">Esportes</h4>
-                  <ul className="space-y-2">
-                    {[
-                      { icon: <span className="text-base leading-none">🏆</span>, label: "Todos", key: "all" },
-                      { icon: <span className="text-base leading-none">⚽</span>, label: "Futebol", key: "football" },
-                      { icon: <span className="text-base leading-none">🏀</span>, label: "Basquete", key: "basketball" },
-                      { icon: <TennisBallIcon size={18} />, label: "Tênis", key: "tennis" },
-                    ].map(sport => (
-                      <li key={sport.key}>
-                        <button
-                          onClick={() => { setSelectedSport(sport.key); setActiveTab("sports"); setSidebarOpen(false); }}
-                          className={`flex items-center gap-3 w-full p-2 rounded-md text-sm transition-colors ${selectedSport === sport.key ? "bg-red-600/20 text-red-400 border border-red-500/30" : "hover:bg-zinc-900 text-zinc-300 hover:text-white"}`}
-                        >
-                          <div className={selectedSport === sport.key ? "text-red-400" : "text-red-500"}>{sport.icon}</div>
-                          {sport.label}
+                  <h4 className="text-xs font-bold text-zinc-500 uppercase tracking-wider mb-3">Outras Ligas</h4>
+                  <ul className="space-y-1.5">
+                    {["Super League Greece", "Scottish Premiership", "Swiss Super League", "Danish Superliga", "Eliteserien", "Allsvenskan", "Brasileirão", "Primera División"].map(league => (
+                      <li key={league}>
+                        <button onClick={() => { setSelectedSport("football"); setActiveTab("sports"); setSidebarOpen(false); }} className="flex items-center gap-3 w-full p-2 rounded-md hover:bg-zinc-900 text-sm text-zinc-300 hover:text-white transition-colors">
+                          <div className="w-6 h-6 rounded-full bg-zinc-800 border border-zinc-700 flex items-center justify-center text-sm leading-none shrink-0">
+                            {LEAGUE_FLAGS[league] ?? "⚽"}
+                          </div>
+                          {league}
                         </button>
                       </li>
                     ))}
@@ -1530,29 +1789,16 @@ export default function Home() {
         {/* DESKTOP LEFT SIDEBAR — always visible on lg+ */}
         <aside className="hidden lg:flex flex-col w-56 shrink-0 border-r border-zinc-900 bg-zinc-950 sticky top-16 h-[calc(100vh-4rem)] overflow-y-auto">
           <div className="p-4">
-            <div className="mb-6">
-              <h4 className="text-[11px] font-bold text-zinc-500 uppercase tracking-wider mb-3">Principais Ligas</h4>
-              <ul className="space-y-0.5">
-                {["La Liga", "Premier League", "Champions League", "Serie A", "Bundesliga", "Ligue 1", "Liga Portugal", "Eredivisie"].map(league => (
-                  <li key={league}>
-                    <button className="flex items-center gap-2.5 w-full px-2 py-2 rounded-md hover:bg-zinc-900 text-sm text-zinc-400 hover:text-white transition-colors">
-                      <span className="w-6 h-6 rounded-full bg-zinc-800 border border-zinc-800 flex items-center justify-center text-sm leading-none shrink-0">
-                        {LEAGUE_FLAGS[league] ?? "⚽"}
-                      </span>
-                      <span className="truncate text-[13px]">{league}</span>
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            </div>
-            <div>
-              <h4 className="text-[11px] font-bold text-zinc-500 uppercase tracking-wider mb-3">Esportes</h4>
+            <div className="mb-4">
+              <h4 className="text-[11px] font-bold text-zinc-500 uppercase tracking-wider mb-2">Esportes</h4>
               <ul className="space-y-0.5">
                 {[
                   { icon: <span className="text-sm leading-none">🏆</span>, label: "Todos", key: "all" },
                   { icon: <span className="text-sm leading-none">⚽</span>, label: "Futebol", key: "football" },
                   { icon: <span className="text-sm leading-none">🏀</span>, label: "Basquete", key: "basketball" },
                   { icon: <TennisBallIcon size={15} />, label: "Tênis", key: "tennis" },
+                  { icon: <span className="text-sm leading-none">🏒</span>, label: "Hóquei", key: "hockey" },
+                  { icon: <span className="text-sm leading-none">🏐</span>, label: "Voleibol", key: "volleyball" },
                 ].map(sport => (
                   <li key={sport.key}>
                     <button
@@ -1561,6 +1807,44 @@ export default function Home() {
                     >
                       <span className={selectedSport === sport.key ? "text-red-400" : "text-red-500"}>{sport.icon}</span>
                       {sport.label}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+            <div className="mb-4">
+              <h4 className="text-[11px] font-bold text-zinc-500 uppercase tracking-wider mb-2">Principais Ligas</h4>
+              <ul className="space-y-0.5">
+                {[
+                  "Champions League", "Premier League", "La Liga", "Bundesliga", "Serie A", "Ligue 1",
+                  "Liga Portugal", "Eredivisie", "Belgian Pro League", "Süper Lig",
+                ].map(league => (
+                  <li key={league}>
+                    <button onClick={() => { setSelectedSport("football"); setActiveTab("sports"); }} className="flex items-center gap-2.5 w-full px-2 py-2 rounded-md hover:bg-zinc-900 text-sm text-zinc-400 hover:text-white transition-colors">
+                      <span className="w-5 h-5 rounded-full bg-zinc-800 border border-zinc-800 flex items-center justify-center text-xs leading-none shrink-0">
+                        {LEAGUE_FLAGS[league] ?? "⚽"}
+                      </span>
+                      <span className="truncate text-[12px]">{league}</span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+            <div className="mb-4">
+              <h4 className="text-[11px] font-bold text-zinc-500 uppercase tracking-wider mb-2">Outras Ligas</h4>
+              <ul className="space-y-0.5">
+                {[
+                  "Super League Greece", "Austrian Bundesliga", "Scottish Premiership",
+                  "Swiss Super League", "Danish Superliga", "Eliteserien",
+                  "Allsvenskan", "HNL", "Serbian SuperLiga",
+                  "Brasileirão", "Primera División",
+                ].map(league => (
+                  <li key={league}>
+                    <button onClick={() => { setSelectedSport("football"); setActiveTab("sports"); }} className="flex items-center gap-2.5 w-full px-2 py-2 rounded-md hover:bg-zinc-900 text-sm text-zinc-400 hover:text-white transition-colors">
+                      <span className="w-5 h-5 rounded-full bg-zinc-800 border border-zinc-800 flex items-center justify-center text-xs leading-none shrink-0">
+                        {LEAGUE_FLAGS[league] ?? "⚽"}
+                      </span>
+                      <span className="truncate text-[12px]">{league}</span>
                     </button>
                   </li>
                 ))}

@@ -15,6 +15,19 @@ type AdvancedMarkets = {
   handicap: { homeMinusOne: number; awayPlusOne: number; homeMinusOneHalf: number; awayPlusOneHalf: number };
   halfTime: { home: number; draw: number; away: number };
   firstGoal: { home: number; noGoal: number; away: number };
+  // Extended football markets
+  drawNoBet?: { home: number; away: number };
+  asianHandicap?: { line: number; home: number; away: number };
+  asianTotals?: { o05: number; u05: number; o45: number; u45: number; o55: number; u55: number; o225: number; u225: number; o275: number; u275: number };
+  htft?: { hh: number; hd: number; ha: number; dh: number; dd: number; da: number; ah: number; ad: number; aa: number };
+  correctScore?: Record<string, number>;
+  corners?: { o85: number; u85: number; o95: number; u95: number; o105: number; u105: number };
+  cards?: { o35: number; u35: number; o45: number; u45: number };
+  // Sport-specific extras
+  _spread?: number;
+  _total?: number;
+  _total1H?: number;
+  _spreadLine?: number;
 };
 
 export type LiveMatchState = {
@@ -345,11 +358,11 @@ function makeAdvancedMarketsFromTeams(homeName: string, awayName: string): Advan
   // Double Chance
   const [dcHD, dcDA, dcHA] = probsToDecimalOdds([pHomeWin + pDraw, pDraw + pAwayWin, pHomeWin + pAwayWin], 1.06);
 
-  // BTTS: P(home ≥ 1) × P(away ≥ 1)
+  // BTTS
   const pBttsYes = mc((1 - Math.exp(-lambdaHome)) * (1 - Math.exp(-lambdaAway)), 0.02, 0.98);
   const [bttsYes, bttsNo] = probsToDecimalOdds([pBttsYes, 1 - pBttsYes], 1.06);
 
-  // Total Goals via Poisson CDF
+  // Total Goals
   const lambda = lambdaHome + lambdaAway;
   const [o15, u15] = probsToDecimalOdds([mc(1 - poissonCdf(lambda, 1), 0.02, 0.98), mc(poissonCdf(lambda, 1), 0.02, 0.98)], 1.06);
   const [o25, u25] = probsToDecimalOdds([mc(1 - poissonCdf(lambda, 2), 0.02, 0.98), mc(poissonCdf(lambda, 2), 0.02, 0.98)], 1.06);
@@ -385,11 +398,110 @@ function makeAdvancedMarketsFromTeams(homeName: string, awayName: string): Advan
   const htS = htHW + htD + htAW;
   const [htH, htX, htA] = probsToDecimalOdds([htHW / htS, htD / htS, htAW / htS], 1.08);
 
-  // First Goal: proportional to lambdas, with P(no goal) = e^-(λH+λA)
+  // First Goal
   const pNoGoal = mc(Math.exp(-(lambdaHome + lambdaAway)), 0.01, 0.20);
   const pFGHome = mc((lambdaHome / (lambdaHome + lambdaAway + 1e-9)) * (1 - pNoGoal), 0.02, 0.90);
   const pFGAway = mc((lambdaAway / (lambdaHome + lambdaAway + 1e-9)) * (1 - pNoGoal), 0.02, 0.90);
   const [fgH, fgNG, fgA] = probsToDecimalOdds([pFGHome, pNoGoal, pFGAway], 1.08);
+
+  // ── Extended markets ────────────────────────────────────────────────────────
+
+  // Draw No Bet
+  const pDnbH = pHomeWin / Math.max(1e-9, pHomeWin + pAwayWin);
+  const [dnbH, dnbA] = probsToDecimalOdds([pDnbH, 1 - pDnbH], 1.05);
+
+  // Asian Totals
+  const pmfTotal = poissonPmf(lambda, maxG);
+  const pEx2 = pmfTotal[2] ?? 0;
+  const pEx3 = pmfTotal[3] ?? 0;
+  const pO2 = mc(1 - poissonCdf(lambda, 2), 0.02, 0.98);
+  const pO3 = mc(1 - poissonCdf(lambda, 3), 0.02, 0.98);
+  const pA225 = mc(pO2 + 0.5 * pEx2, 0.02, 0.98);
+  const pA275 = mc(pO3 + 0.5 * pEx3, 0.02, 0.98);
+  const [o05, u05] = probsToDecimalOdds([mc(1 - poissonCdf(lambda, 0), 0.02, 0.98), mc(poissonCdf(lambda, 0), 0.02, 0.98)], 1.05);
+  const [o45, u45] = probsToDecimalOdds([mc(1 - poissonCdf(lambda, 4), 0.02, 0.98), mc(poissonCdf(lambda, 4), 0.02, 0.98)], 1.06);
+  const [o55, u55] = probsToDecimalOdds([mc(1 - poissonCdf(lambda, 5), 0.02, 0.98), mc(poissonCdf(lambda, 5), 0.02, 0.98)], 1.06);
+  const [o225, u225] = probsToDecimalOdds([pA225, 1 - pA225], 1.05);
+  const [o275, u275] = probsToDecimalOdds([pA275, 1 - pA275], 1.05);
+
+  // Asian Handicap — line based on Poisson expected goal difference
+  const goalDiff = lambdaHome - lambdaAway;
+  const ahLineRaw = Math.round(goalDiff * 2) / 2;
+  const ahLine = -ahLineRaw;
+  let pAHHome = 0;
+  for (let i = 0; i <= maxG; i++) {
+    for (let j = 0; j <= maxG; j++) {
+      const p = pH[i]! * pA[j]!;
+      if ((i - ahLine) > j) pAHHome += p;
+    }
+  }
+  const [ahH, ahA] = probsToDecimalOdds([mc(pAHHome, 0.05, 0.95), mc(1 - pAHHome, 0.05, 0.95)], 1.05);
+
+  // HT/FT — joint model via two independent halves
+  const h1PH = poissonPmf(lambdaHome * 0.45, 7);
+  const h1PA = poissonPmf(lambdaAway * 0.45, 7);
+  const h2PH = poissonPmf(lambdaHome * 0.55, 7);
+  const h2PA = poissonPmf(lambdaAway * 0.55, 7);
+  let hftHH = 0, hftHD = 0, hftHA = 0;
+  let hftDH = 0, hftDD = 0, hftDA = 0;
+  let hftAH = 0, hftAD = 0, hftAA = 0;
+  for (let i1 = 0; i1 <= 7; i1++) {
+    for (let j1 = 0; j1 <= 7; j1++) {
+      const pHT = (h1PH[i1] ?? 0) * (h1PA[j1] ?? 0);
+      const htR = i1 > j1 ? 1 : i1 < j1 ? -1 : 0;
+      for (let i2 = 0; i2 <= 7; i2++) {
+        for (let j2 = 0; j2 <= 7; j2++) {
+          const pFT = (h2PH[i2] ?? 0) * (h2PA[j2] ?? 0);
+          const pJoint = pHT * pFT;
+          const ftR = (i1 + i2) > (j1 + j2) ? 1 : (i1 + i2) < (j1 + j2) ? -1 : 0;
+          if (htR === 1 && ftR === 1) hftHH += pJoint;
+          else if (htR === 1 && ftR === 0) hftHD += pJoint;
+          else if (htR === 1 && ftR === -1) hftHA += pJoint;
+          else if (htR === 0 && ftR === 1) hftDH += pJoint;
+          else if (htR === 0 && ftR === 0) hftDD += pJoint;
+          else if (htR === 0 && ftR === -1) hftDA += pJoint;
+          else if (htR === -1 && ftR === 1) hftAH += pJoint;
+          else if (htR === -1 && ftR === 0) hftAD += pJoint;
+          else hftAA += pJoint;
+        }
+      }
+    }
+  }
+  const htftProbs = [hftHH, hftHD, hftHA, hftDH, hftDD, hftDA, hftAH, hftAD, hftAA];
+  const htftTotal = htftProbs.reduce((a, b) => a + b, 0);
+  const htftOdds = probsToDecimalOdds(htftProbs.map(p => mc(p / Math.max(1e-9, htftTotal), 0.005, 0.80)), 1.12);
+
+  // Correct Score — top 14 scorelines + Other
+  const scores: Array<[string, number]> = [];
+  let pOther = 0;
+  for (let i = 0; i <= 5; i++) {
+    for (let j = 0; j <= 5; j++) {
+      scores.push([`${i}-${j}`, (pH[i] ?? 0) * (pA[j] ?? 0)]);
+    }
+  }
+  for (let i = 0; i <= maxG; i++) {
+    for (let j = 0; j <= maxG; j++) {
+      if (i > 5 || j > 5) pOther += (pH[i] ?? 0) * (pA[j] ?? 0);
+    }
+  }
+  scores.sort((a, b) => b[1] - a[1]);
+  const topScores = scores.slice(0, 14);
+  const topTotal = topScores.reduce((a, b) => a + b[1], 0) + pOther;
+  const csOdds = probsToDecimalOdds(topScores.map(s => mc(s[1] / topTotal, 0.005, 0.60)), 1.18);
+  const correctScore: Record<string, number> = {};
+  topScores.forEach(([score], idx) => { correctScore[score] = csOdds[idx]!; });
+  correctScore["Outro"] = mr(mc(1 / mc(pOther / topTotal / 1.18, 0.005, 0.60), 1.01, 500));
+
+  // Corners — Poisson model: λ ≈ 9.5 + attacking proxy
+  const lambdaCorners = mc(9.5 + (lambdaHome + lambdaAway) * 0.85, 7, 14);
+  const [oc85, uc85] = probsToDecimalOdds([mc(1 - poissonCdf(lambdaCorners, 8), 0.02, 0.98), mc(poissonCdf(lambdaCorners, 8), 0.02, 0.98)], 1.06);
+  const [oc95, uc95] = probsToDecimalOdds([mc(1 - poissonCdf(lambdaCorners, 9), 0.02, 0.98), mc(poissonCdf(lambdaCorners, 9), 0.02, 0.98)], 1.06);
+  const [oc105, uc105] = probsToDecimalOdds([mc(1 - poissonCdf(lambdaCorners, 10), 0.02, 0.98), mc(poissonCdf(lambdaCorners, 10), 0.02, 0.98)], 1.06);
+
+  // Cards — Poisson model: λ ≈ 4.0 + competitive pressure
+  const lambdaCards = mc(4.0 + Math.abs(lambdaHome - lambdaAway) * 0.7, 2.5, 7);
+  const [ocard35, ucard35] = probsToDecimalOdds([mc(1 - poissonCdf(lambdaCards, 3), 0.02, 0.98), mc(poissonCdf(lambdaCards, 3), 0.02, 0.98)], 1.06);
+  const [ocard45, ucard45] = probsToDecimalOdds([mc(1 - poissonCdf(lambdaCards, 4), 0.02, 0.98), mc(poissonCdf(lambdaCards, 4), 0.02, 0.98)], 1.06);
 
   return {
     doubleChance: { homeOrDraw: dcHD!, awayOrDraw: dcDA!, homeOrAway: dcHA! },
@@ -398,6 +510,13 @@ function makeAdvancedMarketsFromTeams(homeName: string, awayName: string): Advan
     handicap: { homeMinusOne: hm1H!, awayPlusOne: hm1A!, homeMinusOneHalf: hm15H!, awayPlusOneHalf: hm15A! },
     halfTime: { home: htH!, draw: htX!, away: htA! },
     firstGoal: { home: fgH!, noGoal: fgNG!, away: fgA! },
+    drawNoBet: { home: dnbH!, away: dnbA! },
+    asianHandicap: { line: ahLine, home: ahH!, away: ahA! },
+    asianTotals: { o05: o05!, u05: u05!, o45: o45!, u45: u45!, o55: o55!, u55: u55!, o225: o225!, u225: u225!, o275: o275!, u275: u275! },
+    htft: { hh: htftOdds[0]!, hd: htftOdds[1]!, ha: htftOdds[2]!, dh: htftOdds[3]!, dd: htftOdds[4]!, da: htftOdds[5]!, ah: htftOdds[6]!, ad: htftOdds[7]!, aa: htftOdds[8]! },
+    correctScore,
+    corners: { o85: oc85!, u85: uc85!, o95: oc95!, u95: uc95!, o105: oc105!, u105: uc105! },
+    cards: { o35: ocard35!, u35: ucard35!, o45: ocard45!, u45: ucard45! },
   };
 }
 
@@ -958,7 +1077,183 @@ function buildTennisMatches(): UpcomingMatch[] {
   });
 }
 
-export { buildLiveMatches, buildUpcomingMatches, buildBasketballMatches, buildTennisMatches };
+// ─── Hockey generator (NHL/KHL — Poisson model) ──────────────────────────────
+
+function buildHockeyMatches(): UpcomingMatch[] {
+  const today = new Date();
+  const dayKey = today.getFullYear() * 10000 + (today.getMonth() + 1) * 100 + today.getDate();
+  const dateStr = today.toISOString().slice(0, 10);
+
+  const MATCHUPS: [string, string, string, string, string][] = [
+    ["Boston Bruins", "Tampa Bay Lightning", "NHL — Playoffs", "usa", "19:00"],
+    ["Colorado Avalanche", "Vegas Golden Knights", "NHL — Playoffs", "usa", "22:00"],
+    ["Toronto Maple Leafs", "Montreal Canadiens", "NHL — Playoffs", "canada", "19:30"],
+    ["New York Rangers", "Carolina Hurricanes", "NHL — Playoffs", "usa", "20:00"],
+    ["Edmonton Oilers", "Calgary Flames", "NHL — Playoffs", "canada", "22:30"],
+    ["Florida Panthers", "Dallas Stars", "NHL — Playoffs", "usa", "20:00"],
+    ["SKA Saint Petersburg", "CSKA Moscow", "KHL — Playoff", "russia", "17:00"],
+    ["Metallurg Magnitogorsk", "Ak Bars Kazan", "KHL — Playoff", "russia", "18:30"],
+  ];
+
+  return MATCHUPS.map(([home, away, league, country, time], i) => {
+    const sr = seededRng(`hockey:${dayKey}:${i}:${home}:${away}`);
+
+    // Goal model: NHL avg ~6 goals/game, KHL ~5.5
+    const isNHL = league.includes("NHL");
+    const meanTotal = mc((isNHL ? 6.1 : 5.6) + (sr(1) - 0.5) * 1.6, 4.5, 8.0);
+    const marginMean = mc((sr(2) - 0.5) * 2.2 + 0.15, -2.5, 2.5); // home advantage
+    const marginSd = mc(2.0 + sr(3) * 0.8, 1.6, 3.2);
+
+    // Puck Line (±1.5 standard)
+    const pHomePuckLine = mc(1 - normalCdf((-1.5 - marginMean) / marginSd), 0.05, 0.95);
+    const [plH, plA] = probsToDecimalOdds([pHomePuckLine, 1 - pHomePuckLine], 1.05);
+
+    // Moneyline
+    const pHomeML = mc(1 - normalCdf(-marginMean / marginSd), 0.08, 0.92);
+    const [mlH, mlA] = probsToDecimalOdds([pHomeML, 1 - pHomeML], 1.05);
+
+    // Total goals O/U
+    const totalLine = Math.round(meanTotal * 2) / 2; // nearest 0.5
+    const totalSd = mc(1.6 + sr(4) * 0.6, 1.2, 2.4);
+    const pTotalOver = mc(1 - normalCdf((totalLine - meanTotal) / totalSd), 0.05, 0.95);
+    const [oTotal, uTotal] = probsToDecimalOdds([pTotalOver, 1 - pTotalOver], 1.06);
+
+    // Alt total lines
+    const [oAlt1, uAlt1] = probsToDecimalOdds([
+      mc(1 - normalCdf((totalLine - 0.5 - meanTotal) / totalSd), 0.05, 0.95),
+      mc(normalCdf((totalLine - 0.5 - meanTotal) / totalSd), 0.05, 0.95),
+    ], 1.06);
+    const [oAlt2, uAlt2] = probsToDecimalOdds([
+      mc(1 - normalCdf((totalLine + 0.5 - meanTotal) / totalSd), 0.05, 0.95),
+      mc(normalCdf((totalLine + 0.5 - meanTotal) / totalSd), 0.05, 0.95),
+    ], 1.06);
+
+    // 1st period result
+    const mean1P = meanTotal / 3;
+    const lambdaH1P = mc(mean1P * 0.5 + marginMean * 0.35, 0.3, 2.5);
+    const lambdaA1P = mc(mean1P * 0.5 - marginMean * 0.35, 0.3, 2.5);
+    const p1H = poissonPmf(lambdaH1P, 5);
+    const p1A = poissonPmf(lambdaA1P, 5);
+    let p1PHW = 0, p1PD = 0, p1PAW = 0;
+    for (let gi = 0; gi <= 5; gi++) {
+      for (let gj = 0; gj <= 5; gj++) {
+        const p = (p1H[gi] ?? 0) * (p1A[gj] ?? 0);
+        if (gi > gj) p1PHW += p; else if (gi < gj) p1PAW += p; else p1PD += p;
+      }
+    }
+    const p1S = p1PHW + p1PD + p1PAW;
+    const [per1H, per1D, per1A] = probsToDecimalOdds([p1PHW / p1S, p1PD / p1S, p1PAW / p1S], 1.08);
+
+    return {
+      id: `hockey-${dayKey}-${i}`,
+      home, away, league, country, time,
+      date: dateStr,
+      sport: "hockey",
+      hasRealOdds: true,
+      odds: { home: mlH!, draw: 0, away: mlA! },
+      markets: {
+        doubleChance: { homeOrDraw: 0, awayOrDraw: 0, homeOrAway: 0 },
+        bothTeamsScore: { yes: 0, no: 0 },
+        totalGoals: {
+          over15: oAlt1!, under15: uAlt1!,
+          over25: oTotal!, under25: uTotal!,
+          over35: oAlt2!, under35: uAlt2!,
+        },
+        handicap: { homeMinusOne: plH!, awayPlusOne: plA!, homeMinusOneHalf: 0, awayPlusOneHalf: 0 },
+        halfTime: { home: per1H!, draw: per1D!, away: per1A! },
+        firstGoal: { home: 0, noGoal: 0, away: 0 },
+        _spread: 1.5,
+        _total: totalLine,
+      } as unknown as AdvancedMarkets,
+    };
+  });
+}
+
+// ─── Volleyball generator (probabilistic model) ──────────────────────────────
+
+function buildVolleyballMatches(): UpcomingMatch[] {
+  const today = new Date();
+  const dayKey = today.getFullYear() * 10000 + (today.getMonth() + 1) * 100 + today.getDate();
+  const dateStr = today.toISOString().slice(0, 10);
+
+  const MATCHUPS: [string, string, string, string, string][] = [
+    ["Brazil VB", "Italy VB", "Volleyball Nations League", "brazil", "16:00"],
+    ["Poland VB", "France VB", "Volleyball Nations League", "poland", "18:00"],
+    ["USA VB", "Japan VB", "Volleyball Nations League", "usa", "20:00"],
+    ["Trentino", "Lube Civitanova", "Superlega — Itália", "italy", "17:00"],
+    ["Zenit Kazan", "Dinamo Moscow", "Superliga — Rússia", "russia", "17:30"],
+    ["Cruzeiro VB", "Sesi Franca", "Superliga — Brasil", "brazil", "20:00"],
+    ["Sir Safety Perugia", "Modena VB", "Superlega — Itália", "italy", "19:00"],
+    ["Resovia Rzeszow", "Jastrzebski VB", "PlusLiga — Polônia", "poland", "18:30"],
+  ];
+
+  return MATCHUPS.map(([home, away, league, country, time], i) => {
+    const sr = seededRng(`vball:${dayKey}:${i}:${home}:${away}`);
+
+    // Match winner probability (5-set model)
+    const skillDiff = mc((sr(1) - 0.5) * 0.3 + 0.04, -0.35, 0.35); // home advantage
+    const pSetHomeWin = mc(0.52 + skillDiff, 0.18, 0.82);
+
+    // P(match win) via best-of-5 binomial
+    function pMatchWin(pSet: number): number {
+      const q = 1 - pSet;
+      return (
+        Math.pow(pSet, 3) +
+        3 * Math.pow(pSet, 3) * q +
+        6 * Math.pow(pSet, 3) * Math.pow(q, 2) * 0.5 // 5-set approx
+      );
+    }
+    const pMatchH = mc(pMatchWin(pSetHomeWin), 0.1, 0.9);
+    const [matchH, matchA] = probsToDecimalOdds([pMatchH, 1 - pMatchH], 1.05);
+
+    // Total sets O/U 2.5 (3-0 or 3-1 = under, 3-2 = over)
+    const p3sets = mc(Math.pow(pSetHomeWin, 3) + Math.pow(1 - pSetHomeWin, 3), 0.15, 0.65);
+    const p4sets = mc(
+      3 * Math.pow(pSetHomeWin, 3) * (1 - pSetHomeWin) +
+      3 * Math.pow(1 - pSetHomeWin, 3) * pSetHomeWin,
+      0.15, 0.55
+    );
+    const p5sets = mc(1 - p3sets - p4sets, 0.1, 0.5);
+    const pUnder25 = mc(p3sets + p4sets, 0.30, 0.90); // ≤4 sets total (3-0 or 3-1 = 3 or 4 total)
+    const [oSets25, uSets25] = probsToDecimalOdds([1 - pUnder25, pUnder25], 1.06);
+    const [oSets35, uSets35] = probsToDecimalOdds([mc(p5sets, 0.10, 0.60), mc(1 - p5sets, 0.40, 0.90)], 1.06);
+
+    // Set handicap — home −1.5 sets (home wins 3-0 or 3-1)
+    const pHomeHcap = mc(p3sets * (pSetHomeWin / (pSetHomeWin + (1 - pSetHomeWin))) + p4sets * (pSetHomeWin / (pSetHomeWin + (1 - pSetHomeWin))), 0.05, 0.85);
+    const [hcapH, hcapA] = probsToDecimalOdds([pHomeHcap, 1 - pHomeHcap], 1.06);
+
+    // Points O/U per set (avg ~25 pts/set)
+    const meanPts = mc(52 + (sr(5) - 0.5) * 8, 46, 60);
+    const sdPts = mc(6 + sr(6) * 2, 4, 10);
+    const ptsLine = Math.round(meanPts / 2) * 2;
+    const pPtsOver = mc(1 - normalCdf((ptsLine - meanPts) / sdPts), 0.05, 0.95);
+    const [oPts, uPts] = probsToDecimalOdds([pPtsOver, 1 - pPtsOver], 1.06);
+
+    return {
+      id: `vball-${dayKey}-${i}`,
+      home, away, league, country, time,
+      date: dateStr,
+      sport: "volleyball",
+      hasRealOdds: true,
+      odds: { home: matchH!, draw: 0, away: matchA! },
+      markets: {
+        doubleChance: { homeOrDraw: 0, awayOrDraw: 0, homeOrAway: 0 },
+        bothTeamsScore: { yes: oPts!, no: uPts! },
+        totalGoals: {
+          over15: oSets25!, under15: uSets25!,
+          over25: oSets35!, under25: uSets35!,
+          over35: hcapH!, under35: hcapA!,
+        },
+        handicap: { homeMinusOne: hcapH!, awayPlusOne: hcapA!, homeMinusOneHalf: 0, awayPlusOneHalf: 0 },
+        halfTime: { home: 0, draw: 0, away: 0 },
+        firstGoal: { home: 0, noGoal: 0, away: 0 },
+        _total: ptsLine,
+      } as unknown as AdvancedMarkets,
+    };
+  });
+}
+
+export { buildLiveMatches, buildUpcomingMatches, buildBasketballMatches, buildTennisMatches, buildHockeyMatches, buildVolleyballMatches };
 
 // ─── Routes ───────────────────────────────────────────────────────────────────
 
@@ -974,16 +1269,20 @@ router.get("/live", async (_req, res) => {
 router.get("/upcoming", async (req, res) => {
   try {
     const sport = String(req.query["sport"] ?? "all");
-    const [football, basketball, tennis] = await Promise.all([
+    const [football, basketball, tennis, hockey, volleyball] = await Promise.all([
       buildUpcomingMatches(),
       Promise.resolve(buildBasketballMatches()),
       Promise.resolve(buildTennisMatches()),
+      Promise.resolve(buildHockeyMatches()),
+      Promise.resolve(buildVolleyballMatches()),
     ]);
     let matches: UpcomingMatch[];
     if (sport === "football") matches = football;
     else if (sport === "basketball") matches = basketball;
     else if (sport === "tennis") matches = tennis;
-    else matches = [...football, ...basketball, ...tennis];
+    else if (sport === "hockey") matches = hockey;
+    else if (sport === "volleyball") matches = volleyball;
+    else matches = [...football, ...basketball, ...tennis, ...hockey, ...volleyball];
     res.json({ matches });
   } catch (err) {
     res.status(500).json({ error: "Erro ao buscar próximas partidas" });

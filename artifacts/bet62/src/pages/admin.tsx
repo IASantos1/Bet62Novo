@@ -241,7 +241,7 @@ export default function AdminPage() {
 
           <form onSubmit={handleLogin} className="bg-zinc-900 border border-zinc-800 rounded-2xl p-6 space-y-4">
             <div className="space-y-2">
-              <Label className="text-zinc-400 text-sm">Usuário Admin</Label>
+              <Label className="text-zinc-400 text-sm">E-mail / Usuário Admin</Label>
               <Input
                 type="text"
                 placeholder="admin"

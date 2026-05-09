@@ -34,3 +34,9 @@ externalPort = 3003
 [[ports]]
 localPort = 19983
 externalPort = 3000
+
+[userenv]
+
+[userenv.shared]
+ADMIN_USERNAME = "israel21naativa@gmail.com"
+ADMIN_PASSWORD = "@Israel2121"
