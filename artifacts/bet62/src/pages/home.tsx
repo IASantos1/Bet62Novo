@@ -1,13 +1,40 @@
-import { useState } from "react";
+import { useState, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { toast } from "sonner";
-import { Menu, X, Trophy, Activity, Gift, Dribbble, Target, Gamepad2 } from "lucide-react";
+import { Menu, X, Trophy, Activity, Gift, Dribbble, Target, Gamepad2, LogOut, User, History, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Drawer, DrawerContent, DrawerTrigger } from "@/components/ui/drawer";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { useAuth } from "@/hooks/use-auth";
+
+// Team Banners
+import arsenalBanner from "@assets/file_1778342439847_1778342557288.jpeg";
+import manCityBanner from "@assets/file_1778342444770_1778342557288.jpeg";
+import manUnitedBanner from "@assets/file_1778342451290_1778342557288.jpeg";
+import liverpoolBanner from "@assets/file_1778342461540_1778342557288.jpeg";
+import astonVillaBanner from "@assets/file_1778342467588_1778342557288.jpeg";
+import bournemouthBanner from "@assets/file_1778342474208_1778342557288.jpeg";
+import brentfordBanner from "@assets/file_1778342479214_1778342557288.jpeg";
+import brightonBanner from "@assets/file_1778342485511_1778342557288.jpeg";
+import chelseaBanner from "@assets/file_1778342492556_1778342557288.jpeg";
+import evertonBanner from "@assets/file_1778342400663_1778342557288.jpeg";
+
+const TEAM_BANNERS: Record<string, string> = {
+  "Arsenal": arsenalBanner,
+  "Manchester City": manCityBanner,
+  "Manchester United": manUnitedBanner,
+  "Liverpool": liverpoolBanner,
+  "Aston Villa": astonVillaBanner,
+  "Bournemouth": bournemouthBanner,
+  "Brentford": brentfordBanner,
+  "Brighton": brightonBanner,
+  "Chelsea": chelseaBanner,
+  "Everton": evertonBanner,
+};
 
 // --- Types ---
 type Odds = { home: number; draw: number; away: number };
@@ -32,19 +59,64 @@ type BetSelection = {
 const MATCHES: Match[] = [
   { id: 1, home: "Flamengo", away: "Palmeiras", league: "Brasileirão Série A", time: "19:30", odds: { home: 2.15, draw: 3.40, away: 3.25 }, isLive: false },
   { id: 2, home: "Real Madrid", away: "Barcelona", league: "La Liga", time: "22:00", odds: { home: 2.30, draw: 3.50, away: 3.10 }, isLive: false },
-  { id: 3, home: "Manchester City", away: "Liverpool", league: "Premier League", time: "17:00", odds: { home: 1.95, draw: 3.60, away: 3.80 }, isLive: false },
+  { id: 3, home: "Arsenal", away: "Chelsea", league: "Premier League", time: "17:00", odds: { home: 2.05, draw: 3.40, away: 3.60 }, isLive: false },
   { id: 4, home: "Corinthians", away: "São Paulo", league: "Brasileirão Série A", time: "21:00", odds: { home: 2.60, draw: 3.20, away: 2.80 }, isLive: true },
-  { id: 5, home: "Juventus", away: "Inter Milan", league: "Serie A", time: "18:45", odds: { home: 2.10, draw: 3.30, away: 3.50 }, isLive: true },
-  { id: 6, home: "PSG", away: "Olympique Lyon", league: "Ligue 1", time: "20:00", odds: { home: 1.55, draw: 4.00, away: 5.50 }, isLive: false },
+  { id: 5, home: "Manchester United", away: "Liverpool", league: "Premier League", time: "18:30", odds: { home: 2.80, draw: 3.50, away: 2.40 }, isLive: false },
+  { id: 6, home: "Manchester City", away: "Aston Villa", league: "Premier League", time: "20:00", odds: { home: 1.45, draw: 4.80, away: 7.00 }, isLive: false },
+  { id: 7, home: "Juventus", away: "Inter Milan", league: "Serie A", time: "18:45", odds: { home: 2.10, draw: 3.30, away: 3.50 }, isLive: true },
+  { id: 8, home: "PSG", away: "Olympique Lyon", league: "Ligue 1", time: "20:00", odds: { home: 1.55, draw: 4.00, away: 5.50 }, isLive: false },
 ];
 
+type UserBet = {
+  id: number;
+  matchTitle: string;
+  selections: unknown;
+  stake: string;
+  potentialWin: string;
+  totalOdds: string;
+  status: string;
+  createdAt: string;
+};
+
 export default function Home() {
-  const [activeTab, setActiveTab] = useState<"sports" | "live" | "promos">("sports");
+  const auth = useAuth();
+  const [activeTab, setActiveTab] = useState<"sports" | "live" | "promos" | "mybets">("sports");
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [bets, setBets] = useState<BetSelection[]>([]);
   const [authModalOpen, setAuthModalOpen] = useState(false);
   const [selectedMatch, setSelectedMatch] = useState<Match | null>(null);
   const [betSlipOpenMobile, setBetSlipOpenMobile] = useState(false);
+  const [isPlacingBet, setIsPlacingBet] = useState(false);
+
+  // Auth form state
+  const [loginEmail, setLoginEmail] = useState("");
+  const [loginPassword, setLoginPassword] = useState("");
+  const [regName, setRegName] = useState("");
+  const [regEmail, setRegEmail] = useState("");
+  const [regPassword, setRegPassword] = useState("");
+  const [authLoading, setAuthLoading] = useState(false);
+
+  // My bets state
+  const [myBets, setMyBets] = useState<UserBet[]>([]);
+  const [myBetsLoading, setMyBetsLoading] = useState(false);
+
+  const fetchMyBets = useCallback(async () => {
+    if (!auth.token) return;
+    setMyBetsLoading(true);
+    try {
+      const res = await fetch("/api/bets/my", {
+        headers: { Authorization: `Bearer ${auth.token}` }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setMyBets(data);
+      }
+    } catch {
+      toast.error("Erro ao carregar apostas");
+    } finally {
+      setMyBetsLoading(false);
+    }
+  }, [auth.token]);
 
   // --- Handlers ---
   const toggleBet = (match: Match, selection: "home" | "draw" | "away") => {
@@ -73,10 +145,76 @@ export default function Home() {
   const totalOdds = bets.reduce((acc, bet) => acc * bet.odd, 1).toFixed(2);
   const [stake, setStake] = useState<string>("");
 
-  const handleAuthSubmit = (e: React.FormEvent) => {
+  const handleLoginSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setAuthModalOpen(false);
-    toast.success("Login realizado com sucesso!");
+    setAuthLoading(true);
+    try {
+      await auth.login(loginEmail, loginPassword);
+      setAuthModalOpen(false);
+      toast.success("Bem-vindo de volta!");
+      setLoginEmail(""); setLoginPassword("");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Erro ao fazer login");
+    } finally {
+      setAuthLoading(false);
+    }
+  };
+
+  const handleRegisterSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setAuthLoading(true);
+    try {
+      await auth.register(regName, regEmail, regPassword);
+      setAuthModalOpen(false);
+      toast.success("Conta criada com sucesso! Bônus de R$ 1.000 adicionado!");
+      setRegName(""); setRegEmail(""); setRegPassword("");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Erro ao criar conta");
+    } finally {
+      setAuthLoading(false);
+    }
+  };
+
+  const handlePlaceBet = async () => {
+    if (!stake) { toast.error("Insira um valor para apostar"); return; }
+    if (!auth.user) { setAuthModalOpen(true); return; }
+    const stakeNum = parseFloat(stake);
+    if (stakeNum > parseFloat(auth.user.balance)) {
+      toast.error("Saldo insuficiente");
+      return;
+    }
+    setIsPlacingBet(true);
+    try {
+      const matchId = bets.map(b => b.matchId).join("-");
+      const matchTitle = bets.map(b => b.matchTitle).join(" + ");
+      const potentialWin = (stakeNum * parseFloat(totalOdds)).toFixed(2);
+      const res = await fetch("/api/bets/place", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${auth.token}`
+        },
+        body: JSON.stringify({
+          matchId,
+          matchTitle,
+          selections: bets.map(b => ({ matchTitle: b.matchTitle, selection: b.selection, odd: b.odd })),
+          stake: stakeNum.toFixed(2),
+          potentialWin,
+          totalOdds
+        })
+      });
+      const data = await res.json();
+      if (!res.ok) { toast.error(data.error || "Erro ao realizar aposta"); return; }
+      toast.success(`Aposta realizada! Potencial de ganho: R$ ${potentialWin}`);
+      setBets([]);
+      setStake("");
+      setBetSlipOpenMobile(false);
+      auth.refreshUser();
+    } catch {
+      toast.error("Erro ao realizar aposta");
+    } finally {
+      setIsPlacingBet(false);
+    }
   };
 
   // --- UI Components ---
@@ -85,53 +223,78 @@ export default function Home() {
     const drawSelected = bets.find(b => b.matchId === match.id && b.selection === "draw");
     const awaySelected = bets.find(b => b.matchId === match.id && b.selection === "away");
 
+    const bannerImg = TEAM_BANNERS[match.home];
+
     return (
       <motion.div
         whileHover={{ y: -4 }}
-        className="bg-zinc-900 rounded-lg p-4 border border-zinc-800 hover:border-red-500/50 transition-colors cursor-pointer flex flex-col"
+        className="bg-zinc-900 rounded-lg border border-zinc-800 hover:border-red-500/50 transition-colors cursor-pointer flex flex-col overflow-hidden"
         onClick={() => setSelectedMatch(match)}
       >
-        <div className="flex justify-between items-center mb-4 text-xs font-semibold text-zinc-400">
-          <span>{match.league}</span>
-          <div className="flex items-center gap-1.5">
-            {match.isLive && (
-              <span className="relative flex h-2 w-2">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-500 opacity-75"></span>
-                <span className="relative inline-flex rounded-full h-2 w-2 bg-red-500"></span>
-              </span>
-            )}
-            <span className={match.isLive ? "text-red-500" : ""}>{match.isLive ? "AO VIVO" : match.time}</span>
+        {bannerImg ? (
+          <div className="relative w-full aspect-[3/1]">
+            <img src={bannerImg} alt={`${match.home} banner`} className="absolute inset-0 w-full h-full object-cover" />
+            <div className="absolute inset-0 bg-gradient-to-t from-zinc-900 via-zinc-900/60 to-transparent"></div>
+            <div className="absolute bottom-2 left-4 right-4 flex justify-between items-center text-xs font-semibold text-zinc-300 z-10">
+              <span>{match.league}</span>
+              <div className="flex items-center gap-1.5">
+                {match.isLive && (
+                  <span className="relative flex h-2 w-2">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-500 opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-2 w-2 bg-red-500"></span>
+                  </span>
+                )}
+                <span className={match.isLive ? "text-red-500 font-bold" : "text-white"}>{match.isLive ? "AO VIVO" : match.time}</span>
+              </div>
+            </div>
           </div>
-        </div>
+        ) : (
+          <div className="p-4 pb-0">
+            <div className="flex justify-between items-center mb-4 text-xs font-semibold text-zinc-400">
+              <span>{match.league}</span>
+              <div className="flex items-center gap-1.5">
+                {match.isLive && (
+                  <span className="relative flex h-2 w-2">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-500 opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-2 w-2 bg-red-500"></span>
+                  </span>
+                )}
+                <span className={match.isLive ? "text-red-500 font-bold" : ""}>{match.isLive ? "AO VIVO" : match.time}</span>
+              </div>
+            </div>
+          </div>
+        )}
 
-        <div className="flex-1 flex flex-col justify-center mb-6">
-          <div className="text-lg font-bold text-white">{match.home}</div>
-          <div className="text-sm text-zinc-500 my-1">vs</div>
-          <div className="text-lg font-bold text-white">{match.away}</div>
-        </div>
+        <div className="p-4 flex-1 flex flex-col">
+          <div className={`flex-1 flex flex-col justify-center ${bannerImg ? 'mb-4 mt-1' : 'mb-6'}`}>
+            <div className="text-lg font-bold text-white">{match.home}</div>
+            <div className="text-sm text-zinc-500 my-1">vs</div>
+            <div className="text-lg font-bold text-white">{match.away}</div>
+          </div>
 
-        <div className="grid grid-cols-3 gap-2" onClick={e => e.stopPropagation()}>
-          <button
-            onClick={() => toggleBet(match, "home")}
-            className={`flex flex-col items-center p-2 rounded-md transition-all ${homeSelected ? "bg-red-600 text-white" : "bg-zinc-800 hover:bg-zinc-700 text-zinc-300"}`}
-          >
-            <span className="text-xs mb-1">Casa</span>
-            <span className="font-bold">{match.odds.home.toFixed(2)}</span>
-          </button>
-          <button
-            onClick={() => toggleBet(match, "draw")}
-            className={`flex flex-col items-center p-2 rounded-md transition-all ${drawSelected ? "bg-red-600 text-white" : "bg-zinc-800 hover:bg-zinc-700 text-zinc-300"}`}
-          >
-            <span className="text-xs mb-1">Empate</span>
-            <span className="font-bold">{match.odds.draw.toFixed(2)}</span>
-          </button>
-          <button
-            onClick={() => toggleBet(match, "away")}
-            className={`flex flex-col items-center p-2 rounded-md transition-all ${awaySelected ? "bg-red-600 text-white" : "bg-zinc-800 hover:bg-zinc-700 text-zinc-300"}`}
-          >
-            <span className="text-xs mb-1">Fora</span>
-            <span className="font-bold">{match.odds.away.toFixed(2)}</span>
-          </button>
+          <div className="grid grid-cols-3 gap-2" onClick={e => e.stopPropagation()}>
+            <button
+              onClick={() => toggleBet(match, "home")}
+              className={`flex flex-col items-center p-2 rounded-md transition-all ${homeSelected ? "bg-red-600 text-white" : "bg-zinc-800 hover:bg-zinc-700 text-zinc-300"}`}
+            >
+              <span className="text-xs mb-1">Casa</span>
+              <span className="font-bold">{match.odds.home.toFixed(2)}</span>
+            </button>
+            <button
+              onClick={() => toggleBet(match, "draw")}
+              className={`flex flex-col items-center p-2 rounded-md transition-all ${drawSelected ? "bg-red-600 text-white" : "bg-zinc-800 hover:bg-zinc-700 text-zinc-300"}`}
+            >
+              <span className="text-xs mb-1">Empate</span>
+              <span className="font-bold">{match.odds.draw.toFixed(2)}</span>
+            </button>
+            <button
+              onClick={() => toggleBet(match, "away")}
+              className={`flex flex-col items-center p-2 rounded-md transition-all ${awaySelected ? "bg-red-600 text-white" : "bg-zinc-800 hover:bg-zinc-700 text-zinc-300"}`}
+            >
+              <span className="text-xs mb-1">Fora</span>
+              <span className="font-bold">{match.odds.away.toFixed(2)}</span>
+            </button>
+          </div>
         </div>
       </motion.div>
     );
@@ -206,15 +369,11 @@ export default function Home() {
 
           <Button 
             className="w-full bg-red-600 hover:bg-red-700 text-white font-bold h-12"
-            onClick={() => {
-              if (!stake) return toast.error("Insira um valor para apostar");
-              toast.success("Aposta realizada com sucesso!");
-              setBets([]);
-              setStake("");
-              setBetSlipOpenMobile(false);
-            }}
+            onClick={handlePlaceBet}
+            disabled={isPlacingBet}
           >
-            APOSTAR AGORA
+            {isPlacingBet ? <Loader2 className="animate-spin mr-2" size={16} /> : null}
+            {auth.user ? "APOSTAR AGORA" : "ENTRAR PARA APOSTAR"}
           </Button>
         </div>
       )}
@@ -240,12 +399,46 @@ export default function Home() {
           </div>
 
           <div className="flex items-center gap-3">
-            <Button 
-              onClick={() => setAuthModalOpen(true)}
-              className="bg-red-600 hover:bg-red-700 text-white font-bold px-6"
-            >
-              ENTRAR
-            </Button>
+            {auth.user ? (
+              <div className="flex items-center gap-3">
+                <div className="hidden sm:flex flex-col items-end">
+                  <span className="text-xs text-zinc-400">Saldo</span>
+                  <span className="font-bold text-green-400 text-sm">R$ {parseFloat(auth.user.balance).toFixed(2)}</span>
+                </div>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <button className="flex items-center gap-2 bg-zinc-800 hover:bg-zinc-700 px-3 py-2 rounded-lg transition-colors">
+                      <div className="w-7 h-7 rounded-full bg-red-600 flex items-center justify-center text-xs font-bold">
+                        {auth.user.name.charAt(0).toUpperCase()}
+                      </div>
+                      <span className="hidden sm:block text-sm font-medium max-w-[100px] truncate">{auth.user.name}</span>
+                    </button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent className="bg-zinc-900 border-zinc-700 text-white" align="end">
+                    <div className="px-3 py-2 text-xs text-zinc-400">
+                      <div className="font-medium text-white truncate">{auth.user.name}</div>
+                      <div className="text-zinc-500 truncate">{auth.user.email}</div>
+                      <div className="text-green-400 font-bold mt-1">R$ {parseFloat(auth.user.balance).toFixed(2)}</div>
+                    </div>
+                    <DropdownMenuSeparator className="bg-zinc-700" />
+                    <DropdownMenuItem className="hover:bg-zinc-800 cursor-pointer" onClick={() => { setActiveTab("mybets"); fetchMyBets(); }}>
+                      <History size={14} className="mr-2" /> Minhas Apostas
+                    </DropdownMenuItem>
+                    <DropdownMenuSeparator className="bg-zinc-700" />
+                    <DropdownMenuItem className="hover:bg-zinc-800 cursor-pointer text-red-400" onClick={auth.logout}>
+                      <LogOut size={14} className="mr-2" /> Sair
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </div>
+            ) : (
+              <Button 
+                onClick={() => setAuthModalOpen(true)}
+                className="bg-red-600 hover:bg-red-700 text-white font-bold px-6"
+              >
+                ENTRAR
+              </Button>
+            )}
           </div>
         </div>
 
@@ -276,6 +469,15 @@ export default function Home() {
             <Gift size={16} />
             PROMOÇÕES
           </button>
+          {auth.user && (
+            <button 
+              onClick={() => { setActiveTab("mybets"); fetchMyBets(); }}
+              className={`py-3 font-semibold text-sm transition-colors border-b-2 whitespace-nowrap flex items-center gap-2 ${activeTab === "mybets" ? "border-red-600 text-white" : "border-transparent text-zinc-500 hover:text-zinc-300"}`}
+            >
+              <History size={16} />
+              MINHAS APOSTAS
+            </button>
+          )}
         </div>
       </header>
 
@@ -425,6 +627,52 @@ export default function Home() {
               </div>
             </div>
           )}
+          {activeTab === "mybets" && (
+            <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
+              <h2 className="text-2xl font-black italic uppercase tracking-tight mb-6 flex items-center gap-2">
+                <History className="text-red-600" /> Minhas Apostas
+              </h2>
+              {myBetsLoading ? (
+                <div className="flex items-center justify-center py-20">
+                  <Loader2 className="animate-spin text-red-600" size={32} />
+                </div>
+              ) : myBets.length === 0 ? (
+                <div className="col-span-full py-20 text-center text-zinc-500 bg-zinc-900/50 rounded-xl border border-zinc-800">
+                  <Trophy className="mx-auto mb-4 opacity-20" size={48} />
+                  <p className="font-medium">Nenhuma aposta realizada ainda.</p>
+                  <p className="text-sm mt-1">Escolha um jogo e faça sua primeira aposta!</p>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {myBets.map(bet => (
+                    <div key={bet.id} className="bg-zinc-900 border border-zinc-800 rounded-xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                      <div className="flex-1 min-w-0">
+                        <div className="font-semibold text-white truncate">{bet.matchTitle}</div>
+                        <div className="text-xs text-zinc-400 mt-1">{new Date(bet.createdAt).toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" })}</div>
+                      </div>
+                      <div className="flex gap-6 items-center shrink-0">
+                        <div className="text-center">
+                          <div className="text-xs text-zinc-500">Aposta</div>
+                          <div className="font-bold text-white">R$ {parseFloat(bet.stake).toFixed(2)}</div>
+                        </div>
+                        <div className="text-center">
+                          <div className="text-xs text-zinc-500">Odds</div>
+                          <div className="font-bold text-red-400">{parseFloat(bet.totalOdds).toFixed(2)}</div>
+                        </div>
+                        <div className="text-center">
+                          <div className="text-xs text-zinc-500">Potencial</div>
+                          <div className="font-bold text-green-400">R$ {parseFloat(bet.potentialWin).toFixed(2)}</div>
+                        </div>
+                        <div className={`px-3 py-1 rounded-full text-xs font-bold uppercase ${bet.status === "won" ? "bg-green-900 text-green-400" : bet.status === "lost" ? "bg-red-900/50 text-red-400" : "bg-zinc-800 text-zinc-400"}`}>
+                          {bet.status === "won" ? "Ganhou" : bet.status === "lost" ? "Perdeu" : "Pendente"}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
         </main>
 
         {/* DESKTOP BET SLIP */}
@@ -542,37 +790,40 @@ export default function Home() {
             
             <div className="p-6">
               <TabsContent value="login" className="mt-0 space-y-4">
-                <form onSubmit={handleAuthSubmit} className="space-y-4">
+                <form onSubmit={handleLoginSubmit} className="space-y-4">
                   <div className="space-y-2">
-                    <Label htmlFor="email">E-mail</Label>
-                    <Input id="email" type="email" placeholder="seu@email.com" className="bg-zinc-900 border-zinc-800 text-white" required />
+                    <Label htmlFor="login-email">E-mail</Label>
+                    <Input id="login-email" type="email" placeholder="seu@email.com" className="bg-zinc-900 border-zinc-800 text-white" required value={loginEmail} onChange={e => setLoginEmail(e.target.value)} />
                   </div>
                   <div className="space-y-2">
                     <div className="flex justify-between items-center">
-                      <Label htmlFor="password">Senha</Label>
-                      <a href="#" className="text-xs text-red-500 hover:text-red-400">Esqueceu a senha?</a>
+                      <Label htmlFor="login-password">Senha</Label>
                     </div>
-                    <Input id="password" type="password" placeholder="••••••••" className="bg-zinc-900 border-zinc-800 text-white" required />
+                    <Input id="login-password" type="password" placeholder="••••••••" className="bg-zinc-900 border-zinc-800 text-white" required value={loginPassword} onChange={e => setLoginPassword(e.target.value)} />
                   </div>
-                  <Button type="submit" className="w-full bg-red-600 hover:bg-red-700 text-white font-bold h-12 mt-2">ENTRAR</Button>
+                  <Button type="submit" className="w-full bg-red-600 hover:bg-red-700 text-white font-bold h-12 mt-2" disabled={authLoading}>
+                    {authLoading ? <Loader2 className="animate-spin mr-2" size={16} /> : null}ENTRAR
+                  </Button>
                 </form>
               </TabsContent>
               
               <TabsContent value="register" className="mt-0 space-y-4">
-                <form onSubmit={handleAuthSubmit} className="space-y-4">
+                <form onSubmit={handleRegisterSubmit} className="space-y-4">
                   <div className="space-y-2">
                     <Label htmlFor="reg-name">Nome Completo</Label>
-                    <Input id="reg-name" type="text" placeholder="Seu nome" className="bg-zinc-900 border-zinc-800 text-white" required />
+                    <Input id="reg-name" type="text" placeholder="Seu nome" className="bg-zinc-900 border-zinc-800 text-white" required value={regName} onChange={e => setRegName(e.target.value)} />
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="reg-email">E-mail</Label>
-                    <Input id="reg-email" type="email" placeholder="seu@email.com" className="bg-zinc-900 border-zinc-800 text-white" required />
+                    <Input id="reg-email" type="email" placeholder="seu@email.com" className="bg-zinc-900 border-zinc-800 text-white" required value={regEmail} onChange={e => setRegEmail(e.target.value)} />
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="reg-password">Senha</Label>
-                    <Input id="reg-password" type="password" placeholder="••••••••" className="bg-zinc-900 border-zinc-800 text-white" required />
+                    <Input id="reg-password" type="password" placeholder="••••••••" className="bg-zinc-900 border-zinc-800 text-white" required value={regPassword} onChange={e => setRegPassword(e.target.value)} />
                   </div>
-                  <Button type="submit" className="w-full bg-red-600 hover:bg-red-700 text-white font-bold h-12 mt-2">CRIAR CONTA</Button>
+                  <Button type="submit" className="w-full bg-red-600 hover:bg-red-700 text-white font-bold h-12 mt-2" disabled={authLoading}>
+                    {authLoading ? <Loader2 className="animate-spin mr-2" size={16} /> : null}CRIAR CONTA
+                  </Button>
                 </form>
               </TabsContent>
             </div>
