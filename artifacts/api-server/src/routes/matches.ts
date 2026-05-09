@@ -27,6 +27,7 @@ export type LiveMatchState = {
   awayScore: number;
   minute: number;
   status: string;
+  hasRealOdds: boolean;
   odds: { home: number; draw: number; away: number };
   markets: AdvancedMarkets;
   events: Array<{ type: string; team: string; minute: number; player: string }>;
@@ -41,6 +42,7 @@ export type UpcomingMatch = {
   time: string;
   date: string;
   sport: string;
+  hasRealOdds: boolean;
   odds: { home: number; draw: number; away: number };
   markets: AdvancedMarkets;
 };
@@ -428,7 +430,7 @@ function resolveOdds(
   m: StatpalMatchV2,
   map: Map<string, RealOdds>,
   seed: number
-): { odds: { home: number; draw: number; away: number }; markets: AdvancedMarkets } {
+): { odds: { home: number; draw: number; away: number }; markets: AdvancedMarkets; real: boolean } {
   const r = (n: number) => Math.round(n * 100) / 100;
   const real =
     map.get(m.fallback_id_1) ??
@@ -439,12 +441,17 @@ function resolveOdds(
     return {
       odds: { home: r(real.home), draw: r(real.draw), away: r(real.away) },
       markets: makeAdvancedMarketsReal(real.home, real.draw, real.away, real.types),
+      real: true,
     };
   }
 
   // Fallback: deterministic pseudo-random
   const generated = makeOdds(seed);
-  return { odds: generated, markets: makeAdvancedMarkets(generated.home, generated.draw, generated.away) };
+  return {
+    odds: generated,
+    markets: makeAdvancedMarkets(generated.home, generated.draw, generated.away),
+    real: false,
+  };
 }
 
 // ─── Match builders ────────────────────────────────────────────────────────────
@@ -477,6 +484,8 @@ async function buildLiveMatches(): Promise<LiveMatchState[]> {
       let matchOdds: { home: number; draw: number; away: number };
       let matchMarkets: AdvancedMarkets;
 
+      let hasRealOdds = existing?.hasRealOdds ?? false;
+
       if (existing && existing.homeScore === homeScore && existing.awayScore === awayScore) {
         // Score unchanged — reuse odds to avoid drift
         matchOdds = existing.odds;
@@ -487,6 +496,7 @@ async function buildLiveMatches(): Promise<LiveMatchState[]> {
         const resolved = resolveOdds(m, odds, seed);
         matchOdds = resolved.odds;
         matchMarkets = resolved.markets;
+        hasRealOdds = resolved.real;
 
         // Adjust based on live score differential
         const diff = homeScore - awayScore;
@@ -532,6 +542,7 @@ async function buildLiveMatches(): Promise<LiveMatchState[]> {
         awayScore,
         minute,
         status: m.status,
+        hasRealOdds,
         odds: matchOdds,
         markets: matchMarkets,
         events,
@@ -576,7 +587,7 @@ async function buildUpcomingMatches(): Promise<UpcomingMatch[]> {
       seenIds.add(m.main_id);
 
       const seed = parseInt(m.main_id.slice(-6)) || 99;
-      const { odds: matchOdds, markets } = resolveOdds(m, odds, seed);
+      const { odds: matchOdds, markets, real } = resolveOdds(m, odds, seed);
 
       results.push({
         id: m.main_id,
@@ -587,6 +598,7 @@ async function buildUpcomingMatches(): Promise<UpcomingMatch[]> {
         time: m.status,
         date: m.date,
         sport: "football",
+        hasRealOdds: real,
         odds: matchOdds,
         markets,
       });
@@ -640,6 +652,7 @@ function buildBasketballMatches(): UpcomingMatch[] {
       time,
       date: dateStr,
       sport: "basketball",
+      hasRealOdds: false,
       odds: { home: homeOdd, draw: 0, away: awayOdd },
       markets: {
         doubleChance: { homeOrDraw: 0, awayOrDraw: 0, homeOrAway: 0 },
@@ -715,6 +728,7 @@ function buildTennisMatches(): UpcomingMatch[] {
       time,
       date: dateStr,
       sport: "tennis",
+      hasRealOdds: false,
       odds: { home: p1Fav ? favOdd : undOdd, draw: 0, away: p1Fav ? undOdd : favOdd },
       markets: {
         doubleChance: { homeOrDraw: 0, awayOrDraw: 0, homeOrAway: 0 },
