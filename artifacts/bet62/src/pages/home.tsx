@@ -1,17 +1,23 @@
-import { useState, useCallback, useEffect, useRef } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { toast } from "sonner";
-import { Menu, X, Trophy, Activity, Gift, Dribbble, Target, Gamepad2, LogOut, User, History, Loader2, Zap, TrendingUp, Clock, ChevronRight, AlertCircle } from "lucide-react";
+import {
+  Menu, X, Trophy, Activity, Gift, Dribbble, Target, Gamepad2,
+  LogOut, User, History, Loader2, Zap, TrendingUp, ChevronRight,
+  AlertCircle
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Drawer, DrawerContent, DrawerTrigger } from "@/components/ui/drawer";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem,
+  DropdownMenuSeparator, DropdownMenuTrigger
+} from "@/components/ui/dropdown-menu";
 import { useAuth } from "@/hooks/use-auth";
 
-// Team Banners
 import arsenalBanner from "@assets/file_1778342439847_1778342557288.jpeg";
 import manCityBanner from "@assets/file_1778342444770_1778342557288.jpeg";
 import manUnitedBanner from "@assets/file_1778342451290_1778342557288.jpeg";
@@ -82,17 +88,12 @@ type UserBet = {
   createdAt: string;
 };
 
-// Ticker messages
-const TICKER_MESSAGES = [
-  "🏆 João S. ganhou R$ 4.200 no Arsenal vs Chelsea",
-  "⚽ Maria P. acertou o placar exato Real Madrid 2-1",
-  "🔥 Carlos M. ganhou R$ 12.500 na múltipla do fim de semana",
-  "💰 Ana R. converteu R$ 50 em R$ 1.840 no Brasileirão",
-  "🎯 Pedro L. acertou o Handicap Bayern München",
-  "⚡ Lucas T. ganhou R$ 7.300 com Over 2.5 gols",
-  "🏅 Fernanda K. faturou R$ 2.100 na dupla chance",
-  "🎉 Roberto A. venceu R$ 9.600 no acumulador da Champions",
-];
+type PlatformStats = {
+  totalUsers: number;
+  totalBets: number;
+  totalWon: number;
+  totalPaidOut: number;
+};
 
 function cpfMask(value: string) {
   return value
@@ -134,54 +135,50 @@ export default function Home() {
   const [regAge, setRegAge] = useState(false);
   const [authLoading, setAuthLoading] = useState(false);
 
-  // My bets state
+  // My bets
   const [myBets, setMyBets] = useState<UserBet[]>([]);
   const [myBetsLoading, setMyBetsLoading] = useState(false);
   const [cashingOut, setCashingOut] = useState<number | null>(null);
   const [cashoutConfirm, setCashoutConfirm] = useState<UserBet | null>(null);
 
-  // Live matches state
+  // Live matches
   const [liveMatches, setLiveMatches] = useState<Match[]>([]);
   const [liveLoading, setLiveLoading] = useState(false);
-  const [liveUpdatedAt, setLiveUpdatedAt] = useState<string | null>(null);
-  const prevLiveOdds = useRef<Record<string, Odds>>({});
 
-  // Upcoming matches state
+  // Upcoming matches
   const [upcomingMatches, setUpcomingMatches] = useState<Match[]>([]);
   const [upcomingLoading, setUpcomingLoading] = useState(true);
 
-  // Ticker
-  const [tickerIdx, setTickerIdx] = useState(0);
+  // Platform stats for hero
+  const [platformStats, setPlatformStats] = useState<PlatformStats | null>(null);
+
+  // Fetch platform stats on mount
   useEffect(() => {
-    const t = setInterval(() => setTickerIdx(i => (i + 1) % TICKER_MESSAGES.length), 3500);
-    return () => clearInterval(t);
+    fetch("/api/stats")
+      .then(r => r.ok ? r.json() : null)
+      .then(d => { if (d) setPlatformStats(d); })
+      .catch(() => { /* non-critical */ });
   }, []);
 
   // Fetch upcoming matches on mount
   useEffect(() => {
-    async function loadUpcoming() {
-      setUpcomingLoading(true);
-      try {
-        const res = await fetch("/api/matches/upcoming");
-        if (res.ok) {
-          const data = await res.json();
-          const matches = (data.matches || []) as Array<{
-            id: string; home: string; away: string; league: string; time?: string;
-            odds: Odds; markets?: AdvancedMarkets;
-          }>;
-          setUpcomingMatches(matches.map(m => ({ ...m, isLive: false })));
-        }
-      } catch {
-        // fall through
-      } finally {
-        setUpcomingLoading(false);
-      }
-    }
-    loadUpcoming();
+    setUpcomingLoading(true);
+    fetch("/api/matches/upcoming")
+      .then(r => r.ok ? r.json() : { matches: [] })
+      .then(data => {
+        const matches = (data.matches || []) as Array<{
+          id: string; home: string; away: string; league: string; time?: string;
+          odds: Odds; markets?: AdvancedMarkets;
+        }>;
+        setUpcomingMatches(matches.map(m => ({ ...m, isLive: false })));
+      })
+      .catch(() => { /* keep empty */ })
+      .finally(() => setUpcomingLoading(false));
   }, []);
 
-  // Fetch + poll live matches every 10s
+  // Fetch live matches when tab opens — load once, no polling
   const fetchLive = useCallback(async () => {
+    setLiveLoading(true);
     try {
       const res = await fetch("/api/matches/live");
       if (res.ok) {
@@ -192,30 +189,19 @@ export default function Home() {
           odds: Odds; markets?: AdvancedMarkets;
           events?: Array<{ type: string; team: string; minute: number; player: string }>;
         }>;
-        // store previous odds for animation
-        const newPrev: Record<string, Odds> = {};
-        setLiveMatches(prev => {
-          for (const m of prev) {
-            newPrev[String(m.id)] = m.odds;
-          }
-          return matches.map(m => ({ ...m, isLive: true }));
-        });
-        prevLiveOdds.current = newPrev;
-        setLiveUpdatedAt(data.updatedAt || new Date().toISOString());
+        setLiveMatches(matches.map(m => ({ ...m, isLive: true })));
       }
     } catch {
-      // keep stale
+      /* keep stale */
+    } finally {
+      setLiveLoading(false);
     }
   }, []);
 
   useEffect(() => {
     if (activeTab === "live") {
-      setLiveLoading(true);
-      fetchLive().finally(() => setLiveLoading(false));
-      const interval = setInterval(fetchLive, 10000);
-      return () => clearInterval(interval);
+      fetchLive();
     }
-    return undefined;
   }, [activeTab, fetchLive]);
 
   const fetchMyBets = useCallback(async () => {
@@ -225,10 +211,7 @@ export default function Home() {
       const res = await fetch("/api/bets/my", {
         headers: { Authorization: `Bearer ${auth.token}` }
       });
-      if (res.ok) {
-        const data = await res.json();
-        setMyBets(data);
-      }
+      if (res.ok) setMyBets(await res.json());
     } catch {
       toast.error("Erro ao carregar apostas");
     } finally {
@@ -256,15 +239,12 @@ export default function Home() {
     }
   };
 
-  // --- Handlers ---
   const toggleBet = (match: Match, selection: string, odd: number, market = "result", label?: string) => {
     setBets(prev => {
-      const key = `${match.id}-${market}-${selection}`;
       const existing = prev.find(b => b.matchId === match.id && b.market === market && b.selection === selection);
       if (existing) {
         return prev.filter(b => !(b.matchId === match.id && b.market === market && b.selection === selection));
       }
-      // Remove any previous selection for same match+market (only for result market)
       const filtered = market === "result"
         ? prev.filter(b => !(b.matchId === match.id && b.market === "result"))
         : prev;
@@ -303,19 +283,12 @@ export default function Home() {
 
   const handleRegisterSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    // Validate 18+
     if (regDob) {
       const dob = new Date(regDob);
       const age = (Date.now() - dob.getTime()) / (1000 * 60 * 60 * 24 * 365.25);
-      if (age < 18) {
-        toast.error("Você precisa ter pelo menos 18 anos para se cadastrar.");
-        return;
-      }
+      if (age < 18) { toast.error("Você precisa ter pelo menos 18 anos para se cadastrar."); return; }
     }
-    if (!regTerms || !regAge) {
-      toast.error("Você deve aceitar os termos e confirmar a sua idade.");
-      return;
-    }
+    if (!regTerms || !regAge) { toast.error("Você deve aceitar os termos e confirmar a sua idade."); return; }
     setAuthLoading(true);
     try {
       await auth.register(regName, regEmail, regPassword);
@@ -348,7 +321,7 @@ export default function Home() {
           selections: bets.map(b => ({ matchTitle: b.matchTitle, selection: b.selection, odd: b.odd, market: b.market })),
           stake: stakeNum.toFixed(2),
           potentialWin,
-          totalOdds
+          totalOdds,
         })
       });
       const data = await res.json();
@@ -371,30 +344,20 @@ export default function Home() {
     match: Match; selection: string; odd: number; market?: string; label: string;
   }) => {
     const isSelected = !!bets.find(b => b.matchId === match.id && b.market === market && b.selection === selection);
-    const prevOdd = prevLiveOdds.current[String(match.id)]?.[selection as keyof Odds];
-    const changed = prevOdd !== undefined && prevOdd !== odd;
-
     return (
-      <motion.button
-        key={`${odd}`}
-        animate={changed ? { scale: [1, 1.12, 1], backgroundColor: ["#22c55e33", "transparent"] } : {}}
-        transition={{ duration: 0.5 }}
+      <button
         onClick={() => toggleBet(match, selection, odd, market, label)}
         className={`flex flex-col items-center p-2 rounded-md transition-all text-xs ${isSelected ? "bg-red-600 text-white" : "bg-zinc-800 hover:bg-zinc-700 text-zinc-300"}`}
       >
         <span className="mb-0.5 text-[10px] text-zinc-400 leading-tight">{label}</span>
         <span className="font-bold">{odd.toFixed(2)}</span>
-      </motion.button>
+      </button>
     );
   };
 
   const LiveMatchCard = ({ match }: { match: Match }) => {
     const minute = match.minute ?? 0;
     const progress = Math.min(100, (minute / 90) * 100);
-    const homeSelected = bets.find(b => b.matchId === match.id && b.selection === "home" && b.market === "result");
-    const drawSelected = bets.find(b => b.matchId === match.id && b.selection === "draw" && b.market === "result");
-    const awaySelected = bets.find(b => b.matchId === match.id && b.selection === "away" && b.market === "result");
-
     return (
       <motion.div
         layout
@@ -403,7 +366,6 @@ export default function Home() {
         className="bg-zinc-900 rounded-xl border border-zinc-800 hover:border-red-500/40 transition-colors cursor-pointer overflow-hidden"
         onClick={() => setSelectedMatch(match)}
       >
-        {/* Header */}
         <div className="flex items-center justify-between px-4 py-2 bg-zinc-950/60 border-b border-zinc-800">
           <span className="text-xs text-zinc-400 truncate max-w-[60%]">{match.league}</span>
           <div className="flex items-center gap-2">
@@ -418,7 +380,6 @@ export default function Home() {
           </div>
         </div>
 
-        {/* Score */}
         <div className="px-4 py-4" onClick={e => e.stopPropagation()}>
           <div className="flex items-center justify-between mb-3">
             <div className="flex-1">
@@ -434,7 +395,6 @@ export default function Home() {
             </div>
           </div>
 
-          {/* Progress bar */}
           <div className="w-full h-1 bg-zinc-800 rounded-full mb-3 overflow-hidden">
             <motion.div
               className="h-full bg-gradient-to-r from-red-600 to-red-400 rounded-full"
@@ -444,7 +404,6 @@ export default function Home() {
             />
           </div>
 
-          {/* Odds */}
           <div className="grid grid-cols-3 gap-2">
             <OddsButton match={match} selection="home" odd={match.odds.home} market="result" label="Casa" />
             <OddsButton match={match} selection="draw" odd={match.odds.draw} market="result" label="Empate" />
@@ -457,7 +416,6 @@ export default function Home() {
 
   const MatchCard = ({ match }: { match: Match }) => {
     const bannerImg = TEAM_BANNERS[match.home];
-
     return (
       <motion.div
         whileHover={{ y: -4 }}
@@ -481,14 +439,12 @@ export default function Home() {
             </div>
           </div>
         )}
-
         <div className="p-4 flex-1 flex flex-col">
           <div className={`flex-1 flex flex-col justify-center ${bannerImg ? "mb-4 mt-1" : "mb-6"}`}>
             <div className="text-lg font-bold text-white">{match.home}</div>
             <div className="text-sm text-zinc-500 my-1">vs</div>
             <div className="text-lg font-bold text-white">{match.away}</div>
           </div>
-
           <div className="grid grid-cols-3 gap-2" onClick={e => e.stopPropagation()}>
             <OddsButton match={match} selection="home" odd={match.odds.home} market="result" label="Casa" />
             <OddsButton match={match} selection="draw" odd={match.odds.draw} market="result" label="Empate" />
@@ -544,7 +500,6 @@ export default function Home() {
             <span className="text-zinc-400">Odds Totais</span>
             <span className="font-bold text-lg text-white">{totalOdds}</span>
           </div>
-
           <div className="space-y-2">
             <Label htmlFor="stake" className="text-zinc-400 text-xs">Valor da Aposta (R$)</Label>
             <Input
@@ -552,18 +507,16 @@ export default function Home() {
               type="number"
               placeholder="0.00"
               value={stake}
-              onChange={(e) => setStake(e.target.value)}
+              onChange={e => setStake(e.target.value)}
               className="bg-zinc-950 border-zinc-800 text-white font-mono"
             />
           </div>
-
           <div className="flex justify-between items-center text-sm">
             <span className="text-zinc-400">Ganhos Potenciais</span>
             <span className="font-bold text-green-500">
               R$ {(parseFloat(stake || "0") * parseFloat(totalOdds)).toFixed(2)}
             </span>
           </div>
-
           <Button
             className="w-full bg-red-600 hover:bg-red-700 text-white font-bold h-12"
             onClick={handlePlaceBet}
@@ -580,7 +533,6 @@ export default function Home() {
   const MatchModalMarkets = ({ match }: { match: Match }) => {
     const [modalTab, setModalTab] = useState("resultado");
     const m = match.markets;
-
     return (
       <div className="mt-4">
         <div className="flex gap-1 overflow-x-auto no-scrollbar mb-4 pb-1 border-b border-zinc-800">
@@ -597,18 +549,17 @@ export default function Home() {
 
         {modalTab === "resultado" && (
           <div className="grid grid-cols-3 gap-2">
-            <button onClick={() => { toggleBet(match, "home", match.odds.home, "result", "Casa"); }} className={`flex flex-col items-center p-3 rounded-lg border transition-all ${bets.find(b=>b.matchId===match.id&&b.market==="result"&&b.selection==="home")?"border-red-600 bg-red-600/10":"border-zinc-800 bg-zinc-900 hover:border-red-500/50"}`}>
-              <span className="text-xs text-zinc-400 mb-1">Casa</span>
-              <span className="font-bold text-lg text-white">{match.odds.home.toFixed(2)}</span>
-            </button>
-            <button onClick={() => { toggleBet(match, "draw", match.odds.draw, "result", "Empate"); }} className={`flex flex-col items-center p-3 rounded-lg border transition-all ${bets.find(b=>b.matchId===match.id&&b.market==="result"&&b.selection==="draw")?"border-red-600 bg-red-600/10":"border-zinc-800 bg-zinc-900 hover:border-red-500/50"}`}>
-              <span className="text-xs text-zinc-400 mb-1">Empate</span>
-              <span className="font-bold text-lg text-white">{match.odds.draw.toFixed(2)}</span>
-            </button>
-            <button onClick={() => { toggleBet(match, "away", match.odds.away, "result", "Fora"); }} className={`flex flex-col items-center p-3 rounded-lg border transition-all ${bets.find(b=>b.matchId===match.id&&b.market==="result"&&b.selection==="away")?"border-red-600 bg-red-600/10":"border-zinc-800 bg-zinc-900 hover:border-red-500/50"}`}>
-              <span className="text-xs text-zinc-400 mb-1">Fora</span>
-              <span className="font-bold text-lg text-white">{match.odds.away.toFixed(2)}</span>
-            </button>
+            {[
+              { sel: "home", label: "Casa", odd: match.odds.home },
+              { sel: "draw", label: "Empate", odd: match.odds.draw },
+              { sel: "away", label: "Fora", odd: match.odds.away },
+            ].map(item => (
+              <button key={item.sel} onClick={() => toggleBet(match, item.sel, item.odd, "result", item.label)}
+                className={`flex flex-col items-center p-3 rounded-lg border transition-all ${bets.find(b => b.matchId === match.id && b.market === "result" && b.selection === item.sel) ? "border-red-600 bg-red-600/10" : "border-zinc-800 bg-zinc-900 hover:border-red-500/50"}`}>
+                <span className="text-xs text-zinc-400 mb-1">{item.label}</span>
+                <span className="font-bold text-lg text-white">{item.odd.toFixed(2)}</span>
+              </button>
+            ))}
           </div>
         )}
 
@@ -622,7 +573,7 @@ export default function Home() {
               { sel: "bts-no", label: "Ambas marcam: Não", odd: m.bothTeamsScore.no },
             ].map(item => (
               <button key={item.sel} onClick={() => toggleBet(match, item.sel, item.odd, "dupla", item.label)}
-                className={`w-full flex justify-between items-center p-3 rounded-lg border transition-all ${bets.find(b=>b.matchId===match.id&&b.market==="dupla"&&b.selection===item.sel)?"border-red-600 bg-red-600/10":"border-zinc-800 bg-zinc-900 hover:border-red-500/50"}`}>
+                className={`w-full flex justify-between items-center p-3 rounded-lg border transition-all ${bets.find(b => b.matchId === match.id && b.market === "dupla" && b.selection === item.sel) ? "border-red-600 bg-red-600/10" : "border-zinc-800 bg-zinc-900 hover:border-red-500/50"}`}>
                 <span className="text-sm text-zinc-300">{item.label}</span>
                 <span className="font-bold text-white">{item.odd.toFixed(2)}</span>
               </button>
@@ -641,7 +592,7 @@ export default function Home() {
               { sel: "u35", label: "Menos de 3.5 gols", odd: m.totalGoals.under35 },
             ].map(item => (
               <button key={item.sel} onClick={() => toggleBet(match, item.sel, item.odd, "gols", item.label)}
-                className={`w-full flex justify-between items-center p-3 rounded-lg border transition-all ${bets.find(b=>b.matchId===match.id&&b.market==="gols"&&b.selection===item.sel)?"border-red-600 bg-red-600/10":"border-zinc-800 bg-zinc-900 hover:border-red-500/50"}`}>
+                className={`w-full flex justify-between items-center p-3 rounded-lg border transition-all ${bets.find(b => b.matchId === match.id && b.market === "gols" && b.selection === item.sel) ? "border-red-600 bg-red-600/10" : "border-zinc-800 bg-zinc-900 hover:border-red-500/50"}`}>
                 <span className="text-sm text-zinc-300">{item.label}</span>
                 <span className="font-bold text-white">{item.odd.toFixed(2)}</span>
               </button>
@@ -658,7 +609,7 @@ export default function Home() {
               { sel: "ap1h", label: `${match.away} +1.5`, odd: m.handicap.awayPlusOneHalf },
             ].map(item => (
               <button key={item.sel} onClick={() => toggleBet(match, item.sel, item.odd, "handicap", item.label)}
-                className={`w-full flex justify-between items-center p-3 rounded-lg border transition-all ${bets.find(b=>b.matchId===match.id&&b.market==="handicap"&&b.selection===item.sel)?"border-red-600 bg-red-600/10":"border-zinc-800 bg-zinc-900 hover:border-red-500/50"}`}>
+                className={`w-full flex justify-between items-center p-3 rounded-lg border transition-all ${bets.find(b => b.matchId === match.id && b.market === "handicap" && b.selection === item.sel) ? "border-red-600 bg-red-600/10" : "border-zinc-800 bg-zinc-900 hover:border-red-500/50"}`}>
                 <span className="text-sm text-zinc-300">{item.label}</span>
                 <span className="font-bold text-white">{item.odd.toFixed(2)}</span>
               </button>
@@ -677,7 +628,7 @@ export default function Home() {
               { sel: "fg-away", label: `1º Gol: ${match.away}`, odd: m.firstGoal.away },
             ].map(item => (
               <button key={item.sel} onClick={() => toggleBet(match, item.sel, item.odd, "1tempo", item.label)}
-                className={`w-full flex justify-between items-center p-3 rounded-lg border transition-all ${bets.find(b=>b.matchId===match.id&&b.market==="1tempo"&&b.selection===item.sel)?"border-red-600 bg-red-600/10":"border-zinc-800 bg-zinc-900 hover:border-red-500/50"}`}>
+                className={`w-full flex justify-between items-center p-3 rounded-lg border transition-all ${bets.find(b => b.matchId === match.id && b.market === "1tempo" && b.selection === item.sel) ? "border-red-600 bg-red-600/10" : "border-zinc-800 bg-zinc-900 hover:border-red-500/50"}`}>
                 <span className="text-sm text-zinc-300">{item.label}</span>
                 <span className="font-bold text-white">{item.odd.toFixed(2)}</span>
               </button>
@@ -685,19 +636,16 @@ export default function Home() {
           </div>
         )}
 
-        {!m && (
-          <div className="text-center text-zinc-500 py-6 text-sm">Mercados adicionais indisponíveis para esta partida.</div>
-        )}
+        {!m && <div className="text-center text-zinc-500 py-6 text-sm">Mercados adicionais indisponíveis para esta partida.</div>}
       </div>
     );
   };
 
-  // Compute cashout estimate for display
   const cashoutEstimate = (bet: UserBet) => {
-    const stake = parseFloat(bet.stake);
+    const s = parseFloat(bet.stake);
     const originalOdds = parseFloat(bet.totalOdds);
-    const currentOdds = originalOdds * (1 + 0.1); // simulate 10% drift
-    return Math.max(0, (stake * originalOdds) / currentOdds * 0.92).toFixed(2);
+    const currentOdds = originalOdds * 1.1;
+    return Math.max(0, (s * originalOdds) / currentOdds * 0.92).toFixed(2);
   };
 
   return (
@@ -707,10 +655,7 @@ export default function Home() {
       <header className="sticky top-0 z-40 bg-zinc-950 border-b border-zinc-900">
         <div className="flex items-center justify-between px-4 h-16 max-w-[1600px] mx-auto">
           <div className="flex items-center gap-4">
-            <button
-              className="p-2 -ml-2 text-zinc-400 hover:text-white transition-colors"
-              onClick={() => setSidebarOpen(true)}
-            >
+            <button className="p-2 -ml-2 text-zinc-400 hover:text-white transition-colors" onClick={() => setSidebarOpen(true)}>
               <Menu size={24} />
             </button>
             <div className="font-black text-2xl tracking-tighter italic">
@@ -793,7 +738,7 @@ export default function Home() {
         </div>
       </header>
 
-      {/* SIDEBAR OVERLAY */}
+      {/* SIDEBAR */}
       <AnimatePresence>
         {sidebarOpen && (
           <>
@@ -836,20 +781,19 @@ export default function Home() {
         )}
       </AnimatePresence>
 
-      {/* MAIN CONTENT AREA */}
+      {/* MAIN */}
       <div className="flex-1 flex max-w-[1600px] w-full mx-auto">
         <main className="flex-1 pb-32 lg:pb-8 overflow-hidden">
 
-          {/* HERO SECTION — only on sports tab */}
+          {/* HERO — sports tab only */}
           {activeTab === "sports" && (
             <div className="relative overflow-hidden bg-gradient-to-br from-zinc-900 via-zinc-950 to-black border-b border-zinc-900">
-              {/* Background glow */}
               <div className="absolute inset-0 pointer-events-none">
                 <div className="absolute -top-20 -left-20 w-96 h-96 bg-red-600/10 rounded-full blur-3xl" />
                 <div className="absolute -bottom-20 -right-20 w-96 h-96 bg-red-900/10 rounded-full blur-3xl" />
               </div>
 
-              <div className="relative z-10 px-4 lg:px-8 pt-10 pb-6 max-w-4xl">
+              <div className="relative z-10 px-4 lg:px-8 pt-10 pb-10 max-w-4xl">
                 <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.6 }}>
                   <div className="flex items-center gap-2 mb-3">
                     <span className="inline-flex items-center gap-1.5 bg-red-600/20 border border-red-500/30 text-red-400 text-xs font-bold px-3 py-1 rounded-full">
@@ -864,19 +808,25 @@ export default function Home() {
                     Onde cada jogo é uma oportunidade. As melhores odds do Brasil, ao vivo ou pré-jogo.
                   </p>
 
-                  {/* Stats row */}
-                  <div className="flex flex-wrap gap-6 mb-8">
-                    {[
-                      { icon: <User size={14} />, label: "12.847 apostadores online" },
-                      { icon: <TrendingUp size={14} />, label: "R$ 847K pagos hoje" },
-                      { icon: <Zap size={14} />, label: "98.2% pagamentos no prazo" },
-                    ].map(stat => (
-                      <div key={stat.label} className="flex items-center gap-2 text-sm text-zinc-300">
-                        <span className="text-red-500">{stat.icon}</span>
-                        <span>{stat.label}</span>
+                  {/* Real stats from API */}
+                  {platformStats && (
+                    <div className="flex flex-wrap gap-6 mb-8">
+                      <div className="flex items-center gap-2 text-sm text-zinc-300">
+                        <User size={14} className="text-red-500" />
+                        <span>{platformStats.totalUsers.toLocaleString("pt-BR")} usuários cadastrados</span>
                       </div>
-                    ))}
-                  </div>
+                      <div className="flex items-center gap-2 text-sm text-zinc-300">
+                        <TrendingUp size={14} className="text-red-500" />
+                        <span>{platformStats.totalBets.toLocaleString("pt-BR")} apostas realizadas</span>
+                      </div>
+                      {platformStats.totalPaidOut > 0 && (
+                        <div className="flex items-center gap-2 text-sm text-zinc-300">
+                          <Zap size={14} className="text-red-500" />
+                          <span>R$ {platformStats.totalPaidOut.toLocaleString("pt-BR", { minimumFractionDigits: 2 })} em prêmios pagos</span>
+                        </div>
+                      )}
+                    </div>
+                  )}
 
                   <div className="flex flex-wrap gap-3">
                     {auth.user ? (
@@ -896,27 +846,6 @@ export default function Home() {
                   </div>
                 </motion.div>
               </div>
-
-              {/* Live ticker strip */}
-              <div className="relative z-10 border-t border-zinc-800 bg-zinc-950/60 px-4 py-2.5 overflow-hidden">
-                <div className="flex items-center gap-3">
-                  <span className="shrink-0 text-xs font-bold text-red-500 uppercase tracking-wider">GANHOS AO VIVO</span>
-                  <div className="flex-1 overflow-hidden">
-                    <AnimatePresence mode="wait">
-                      <motion.p
-                        key={tickerIdx}
-                        initial={{ opacity: 0, y: 8 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        exit={{ opacity: 0, y: -8 }}
-                        transition={{ duration: 0.4 }}
-                        className="text-sm text-zinc-300 truncate"
-                      >
-                        {TICKER_MESSAGES[tickerIdx]}
-                      </motion.p>
-                    </AnimatePresence>
-                  </div>
-                </div>
-              </div>
             </div>
           )}
 
@@ -929,6 +858,11 @@ export default function Home() {
                 {upcomingLoading ? (
                   <div className="flex items-center justify-center py-20">
                     <Loader2 className="animate-spin text-red-600" size={32} />
+                  </div>
+                ) : upcomingMatches.length === 0 ? (
+                  <div className="py-20 text-center text-zinc-500 bg-zinc-900/50 rounded-xl border border-zinc-800">
+                    <Trophy className="mx-auto mb-4 opacity-20" size={48} />
+                    <p className="font-medium">Nenhum evento programado no momento.</p>
                   </div>
                 ) : (
                   <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
@@ -947,12 +881,14 @@ export default function Home() {
                       <span className="text-sm font-normal text-zinc-400 ml-1">({liveMatches.length} jogos)</span>
                     )}
                   </h2>
-                  {liveUpdatedAt && (
-                    <div className="flex items-center gap-1.5 text-xs text-zinc-500">
-                      <Clock size={12} />
-                      Atualizado {new Date(liveUpdatedAt).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
-                    </div>
-                  )}
+                  <button
+                    onClick={fetchLive}
+                    disabled={liveLoading}
+                    className="text-xs text-zinc-500 hover:text-white transition-colors border border-zinc-800 hover:border-zinc-600 px-3 py-1.5 rounded-md flex items-center gap-1.5"
+                  >
+                    {liveLoading ? <Loader2 size={12} className="animate-spin" /> : <Activity size={12} />}
+                    Atualizar
+                  </button>
                 </div>
 
                 {liveLoading && liveMatches.length === 0 ? (
@@ -960,7 +896,7 @@ export default function Home() {
                     <Loader2 className="animate-spin text-red-600" size={32} />
                   </div>
                 ) : liveMatches.length === 0 ? (
-                  <div className="col-span-full py-20 text-center text-zinc-500 bg-zinc-900/50 rounded-xl border border-zinc-800">
+                  <div className="py-20 text-center text-zinc-500 bg-zinc-900/50 rounded-xl border border-zinc-800">
                     <Activity className="mx-auto mb-4 opacity-20" size={48} />
                     <p className="font-medium">Nenhum jogo ao vivo no momento.</p>
                     <p className="text-sm mt-1">Volte em breve para acompanhar as partidas em tempo real.</p>
@@ -1010,7 +946,7 @@ export default function Home() {
                 {myBetsLoading ? (
                   <div className="flex items-center justify-center py-20"><Loader2 className="animate-spin text-red-600" size={32} /></div>
                 ) : myBets.length === 0 ? (
-                  <div className="col-span-full py-20 text-center text-zinc-500 bg-zinc-900/50 rounded-xl border border-zinc-800">
+                  <div className="py-20 text-center text-zinc-500 bg-zinc-900/50 rounded-xl border border-zinc-800">
                     <Trophy className="mx-auto mb-4 opacity-20" size={48} />
                     <p className="font-medium">Nenhuma aposta realizada ainda.</p>
                     <p className="text-sm mt-1">Escolha um jogo e faça sua primeira aposta!</p>
@@ -1043,7 +979,6 @@ export default function Home() {
                           </div>
                         </div>
 
-                        {/* Cash Out Button */}
                         {bet.status === "pending" && (
                           <div className="mt-3 pt-3 border-t border-zinc-800 flex items-center justify-between gap-3">
                             <div className="text-xs text-zinc-400 flex items-center gap-1">
@@ -1083,7 +1018,7 @@ export default function Home() {
         </aside>
       </div>
 
-      {/* MOBILE BET SLIP DRAWER */}
+      {/* MOBILE BET SLIP */}
       <div className="lg:hidden fixed bottom-6 left-1/2 -translate-x-1/2 z-40">
         {bets.length > 0 && (
           <Drawer open={betSlipOpenMobile} onOpenChange={setBetSlipOpenMobile}>
@@ -1155,7 +1090,7 @@ export default function Home() {
         </DialogContent>
       </Dialog>
 
-      {/* CASH OUT CONFIRM DIALOG */}
+      {/* CASH OUT CONFIRM */}
       <Dialog open={!!cashoutConfirm} onOpenChange={(open) => !open && setCashoutConfirm(null)}>
         <DialogContent className="bg-zinc-950 border-zinc-800 text-white sm:max-w-sm">
           <DialogHeader>
@@ -1231,7 +1166,6 @@ export default function Home() {
                     <Label htmlFor="reg-name" className="text-sm">Nome Completo</Label>
                     <Input id="reg-name" type="text" placeholder="Seu nome completo" className="bg-zinc-900 border-zinc-800 text-white" required value={regName} onChange={e => setRegName(e.target.value)} />
                   </div>
-
                   <div className="grid grid-cols-2 gap-3">
                     <div className="space-y-1.5">
                       <Label htmlFor="reg-cpf" className="text-sm">CPF</Label>
@@ -1242,12 +1176,10 @@ export default function Home() {
                       <Input id="reg-phone" type="tel" placeholder="(11) 99999-9999" className="bg-zinc-900 border-zinc-800 text-white" required maxLength={15} value={regPhone} onChange={e => setRegPhone(phoneMask(e.target.value))} />
                     </div>
                   </div>
-
                   <div className="space-y-1.5">
                     <Label htmlFor="reg-email" className="text-sm">E-mail</Label>
                     <Input id="reg-email" type="email" placeholder="seu@email.com" className="bg-zinc-900 border-zinc-800 text-white" required value={regEmail} onChange={e => setRegEmail(e.target.value)} />
                   </div>
-
                   <div className="grid grid-cols-2 gap-3">
                     <div className="space-y-1.5">
                       <Label htmlFor="reg-dob" className="text-sm">Data de Nascimento</Label>
@@ -1258,7 +1190,6 @@ export default function Home() {
                       <Input id="reg-password" type="password" placeholder="••••••••" className="bg-zinc-900 border-zinc-800 text-white" required value={regPassword} onChange={e => setRegPassword(e.target.value)} />
                     </div>
                   </div>
-
                   <div className="space-y-2 pt-1">
                     <label className="flex items-start gap-2.5 cursor-pointer">
                       <input type="checkbox" className="mt-0.5 accent-red-600" checked={regTerms} onChange={e => setRegTerms(e.target.checked)} required />
@@ -1271,7 +1202,6 @@ export default function Home() {
                       <span className="text-xs text-zinc-400">Confirmo que tenho 18 anos ou mais</span>
                     </label>
                   </div>
-
                   <Button type="submit" className="w-full bg-red-600 hover:bg-red-700 text-white font-bold h-12 mt-1" disabled={authLoading}>
                     {authLoading ? <Loader2 className="animate-spin mr-2" size={16} /> : null}CRIAR CONTA
                   </Button>

@@ -14,6 +14,79 @@ type AdvancedMarkets = {
   firstGoal: { home: number; noGoal: number; away: number };
 };
 
+export type LiveMatchState = {
+  id: string;
+  home: string;
+  away: string;
+  league: string;
+  country: string;
+  homeScore: number;
+  awayScore: number;
+  minute: number;
+  status: string;
+  odds: { home: number; draw: number; away: number };
+  markets: AdvancedMarkets;
+  events: Array<{ type: string; team: string; minute: number; player: string }>;
+};
+
+export type UpcomingMatch = {
+  id: string;
+  home: string;
+  away: string;
+  league: string;
+  country: string;
+  time: string;
+  date: string;
+  odds: { home: number; draw: number; away: number };
+  markets: AdvancedMarkets;
+};
+
+type StatpalMatch = {
+  main_id: string;
+  status: string;
+  date: string;
+  time: string;
+  home: { id: string; name: string; goals: string };
+  away: { id: string; name: string; goals: string };
+  events: null | { event: Array<{ type: string; team: string; minute: string; player: string }> | { type: string; team: string; minute: string; player: string } };
+  inplay_odds_running: string;
+};
+
+type StatpalLeague = {
+  id: string;
+  name: string;
+  country: string;
+  cup: string;
+  match: StatpalMatch | StatpalMatch[];
+};
+
+const PRIORITY_LEAGUES = [
+  "brazil: serie a",
+  "england: premier league",
+  "germany: bundesliga",
+  "spain: laliga",
+  "italy: serie a",
+  "france: ligue 1",
+  "brazil: copa do brasil",
+  "uefa champions league",
+  "uefa europa league",
+  "brazil: serie b",
+  "germany: 2. bundesliga",
+  "spain: laliga2",
+];
+
+function makeOdds(seed: number): { home: number; draw: number; away: number } {
+  // Deterministic pseudo-random odds based on match ID seed
+  const h = (((seed * 1664525 + 1013904223) & 0x7fffffff) % 350) / 100 + 1.40;
+  const d = (((seed * 22695477 + 1) & 0x7fffffff) % 200) / 100 + 2.80;
+  const a = (((seed * 1566083941 + 1) & 0x7fffffff) % 450) / 100 + 1.50;
+  return {
+    home: Math.round(h * 100) / 100,
+    draw: Math.round(d * 100) / 100,
+    away: Math.round(Math.abs(a) * 100) / 100,
+  };
+}
+
 function makeAdvancedMarkets(home: number, draw: number, away: number): AdvancedMarkets {
   const r = (n: number) => Math.round(n * 100) / 100;
   return {
@@ -53,199 +126,155 @@ function makeAdvancedMarkets(home: number, draw: number, away: number): Advanced
   };
 }
 
-type LiveMatchState = {
-  id: string;
-  home: string;
-  away: string;
-  league: string;
-  country: string;
-  homeScore: number;
-  awayScore: number;
-  minute: number;
-  odds: { home: number; draw: number; away: number };
-  markets: AdvancedMarkets;
-  statpalId?: string;
-  events: Array<{ type: string; team: string; minute: number; player: string }>;
-};
+// Shared Statpal cache — fetched once per 15s
+let statpalCache: StatpalLeague[] | null = null;
+let statpalFetchedAt = 0;
 
-const liveMatchState = new Map<string, LiveMatchState>();
-let lastStatpalFetch = 0;
-let upcomingCache: unknown[] = [];
-let upcomingLastFetch = 0;
-
-const PRIORITY_LEAGUES = [
-  "Brazil: Serie A Betano",
-  "England: Premier League",
-  "Germany: Bundesliga",
-  "Spain: Laliga",
-  "Italy: Serie A",
-  "France: Ligue 1",
-  "Brazil: Serie B",
-  "Germany: 2. Bundesliga",
-  "Brazil: Copa Do Brasil",
-  "UEFA Champions League",
-  "UEFA Europa League",
-];
-
-type StatpalMatch = {
-  main_id: string;
-  status: string;
-  date: string;
-  time: string;
-  home: { id: string; name: string; goals: string };
-  away: { id: string; name: string; goals: string };
-  events: null | { event: Array<{ type: string; team: string; minute: string; player: string }> };
-  inplay_odds_running: string;
-};
-
-type StatpalLeague = {
-  id: string;
-  name: string;
-  country: string;
-  cup: string;
-  match: StatpalMatch | StatpalMatch[];
-};
-
-async function fetchStatpalLive(): Promise<LiveMatchState[]> {
+async function getStatpalLeagues(): Promise<StatpalLeague[]> {
   const now = Date.now();
-  if (now - lastStatpalFetch < 15000) {
-    return Array.from(liveMatchState.values());
-  }
-  lastStatpalFetch = now;
+  if (statpalCache && now - statpalFetchedAt < 15000) return statpalCache;
 
-  try {
-    const resp = await fetch(`${STATSPAL_BASE}/soccer/matches/live?access_key=${STATSPAL_KEY}`, {
-      signal: AbortSignal.timeout(8000),
-    });
-    if (!resp.ok) throw new Error(`Statpal ${resp.status}`);
-    const data = (await resp.json()) as { live_matches: { league: StatpalLeague[] } };
-    const leagues: StatpalLeague[] = data?.live_matches?.league ?? [];
+  const resp = await fetch(
+    `${STATSPAL_BASE}/soccer/matches/live?access_key=${STATSPAL_KEY}`,
+    { signal: AbortSignal.timeout(9000) }
+  );
+  if (!resp.ok) throw new Error(`Statpal HTTP ${resp.status}`);
 
-    const prioritized = [
-      ...leagues.filter(l => PRIORITY_LEAGUES.some(p => l.name?.toLowerCase().includes(p.toLowerCase()))),
-      ...leagues.filter(l => !PRIORITY_LEAGUES.some(p => l.name?.toLowerCase().includes(p.toLowerCase()))),
-    ];
-
-    let count = 0;
-    for (const league of prioritized) {
-      if (count >= 12) break;
-      const matches = Array.isArray(league.match) ? league.match : [league.match];
-      for (const m of matches) {
-        if (count >= 12) break;
-        const minute = parseInt(m.status);
-        if (isNaN(minute) && m.status !== "HT" && m.status !== "ET") continue;
-
-        const homeGoals = m.home.goals === "?" ? 0 : parseInt(m.home.goals) || 0;
-        const awayGoals = m.away.goals === "?" ? 0 : parseInt(m.away.goals) || 0;
-        const matchMinute = m.status === "HT" ? 45 : m.status === "ET" ? 105 : (minute || 1);
-
-        const existing = liveMatchState.get(m.main_id);
-        let odds: { home: number; draw: number; away: number };
-
-        if (existing) {
-          const scoreDiff = homeGoals - awayGoals;
-          const minuteProgress = matchMinute / 90;
-          const base = existing.odds;
-          const drift = (Math.random() - 0.5) * 0.08;
-          const homeFactor = scoreDiff > 0 ? 0.88 : scoreDiff < 0 ? 1.15 : 1.0;
-          odds = {
-            home: Math.max(1.05, Math.round((base.home * homeFactor + drift) * 100) / 100),
-            draw: Math.max(1.10, Math.round((base.draw * (1 - minuteProgress * 0.3) + drift) * 100) / 100),
-            away: Math.max(1.05, Math.round((base.away / homeFactor + drift) * 100) / 100),
-          };
-        } else {
-          const r = () => 1.5 + Math.random() * 3;
-          odds = { home: r(), draw: r(), away: r() };
-          odds.home = Math.round(odds.home * 100) / 100;
-          odds.draw = Math.round(odds.draw * 100) / 100;
-          odds.away = Math.round(odds.away * 100) / 100;
-        }
-
-        const events: LiveMatchState["events"] = [];
-        if (m.events?.event) {
-          for (const ev of m.events.event) {
-            events.push({ type: ev.type, team: ev.team, minute: parseInt(ev.minute) || 0, player: ev.player || "" });
-          }
-        }
-
-        liveMatchState.set(m.main_id, {
-          id: m.main_id,
-          home: m.home.name,
-          away: m.away.name,
-          league: league.name,
-          country: league.country,
-          homeScore: homeGoals,
-          awayScore: awayGoals,
-          minute: matchMinute,
-          odds,
-          markets: makeAdvancedMarkets(odds.home, odds.draw, odds.away),
-          statpalId: m.main_id,
-          events,
-        });
-        count++;
-      }
-    }
-  } catch {
-    // keep stale data
-  }
-
-  return Array.from(liveMatchState.values());
+  const data = (await resp.json()) as { live_matches: { league: StatpalLeague[] } };
+  statpalCache = data?.live_matches?.league ?? [];
+  statpalFetchedAt = now;
+  return statpalCache;
 }
 
-async function fetchUpcoming(): Promise<unknown[]> {
-  const now = Date.now();
-  if (now - upcomingLastFetch < 300000 && upcomingCache.length > 0) {
-    return upcomingCache;
-  }
-  upcomingLastFetch = now;
+// Keep live odds stable between requests (no random drift per request)
+export const liveMatchState = new Map<string, LiveMatchState>();
 
-  const UPCOMING_MATCHES = [
-    { id: "up-1", home: "Arsenal", away: "Chelsea", league: "Premier League", country: "england", time: "19:45", odds: { home: 2.05, draw: 3.40, away: 3.60 } },
-    { id: "up-2", home: "Manchester United", away: "Liverpool", league: "Premier League", country: "england", time: "18:30", odds: { home: 2.80, draw: 3.50, away: 2.40 } },
-    { id: "up-3", home: "Manchester City", away: "Aston Villa", league: "Premier League", country: "england", time: "20:00", odds: { home: 1.45, draw: 4.80, away: 7.00 } },
-    { id: "up-4", home: "Flamengo", away: "Palmeiras", league: "Brasileirão Série A", country: "brazil", time: "19:30", odds: { home: 2.15, draw: 3.40, away: 3.25 } },
-    { id: "up-5", home: "Corinthians", away: "São Paulo", league: "Brasileirão Série A", country: "brazil", time: "21:00", odds: { home: 2.60, draw: 3.20, away: 2.80 } },
-    { id: "up-6", home: "Real Madrid", away: "Barcelona", league: "La Liga", country: "spain", time: "22:00", odds: { home: 2.30, draw: 3.50, away: 3.10 } },
-    { id: "up-7", home: "Juventus", away: "Inter Milan", league: "Serie A", country: "italy", time: "18:45", odds: { home: 2.10, draw: 3.30, away: 3.50 } },
-    { id: "up-8", home: "PSG", away: "Olympique Lyon", league: "Ligue 1", country: "france", time: "20:00", odds: { home: 1.55, draw: 4.00, away: 5.50 } },
-    { id: "up-9", home: "Bayern München", away: "Borussia Dortmund", league: "Bundesliga", country: "germany", time: "17:30", odds: { home: 1.70, draw: 4.00, away: 4.50 } },
-    { id: "up-10", home: "Atlético Mineiro", away: "Botafogo", league: "Brasileirão Série A", country: "brazil", time: "20:30", odds: { home: 2.00, draw: 3.30, away: 3.80 } },
+async function buildLiveMatches(): Promise<LiveMatchState[]> {
+  const leagues = await getStatpalLeagues();
+
+  const prioritized = [
+    ...leagues.filter(l => PRIORITY_LEAGUES.some(p => l.name?.toLowerCase().includes(p))),
+    ...leagues.filter(l => !PRIORITY_LEAGUES.some(p => l.name?.toLowerCase().includes(p))),
   ];
 
-  upcomingCache = UPCOMING_MATCHES.map(m => ({
-    ...m,
-    markets: makeAdvancedMarkets(m.odds.home, m.odds.draw, m.odds.away),
-  }));
+  let count = 0;
+  for (const league of prioritized) {
+    if (count >= 15) break;
+    const matches: StatpalMatch[] = Array.isArray(league.match) ? league.match : [league.match];
+    for (const m of matches) {
+      if (count >= 15) break;
+      const isLiveMinute = /^\d{1,3}$/.test(m.status);
+      const isHT = m.status === "HT";
+      const isET = m.status === "ET";
+      if (!isLiveMinute && !isHT && !isET) continue;
 
-  return upcomingCache;
+      const homeScore = m.home.goals === "?" ? 0 : parseInt(m.home.goals) || 0;
+      const awayScore = m.away.goals === "?" ? 0 : parseInt(m.away.goals) || 0;
+      const minute = isHT ? 45 : isET ? 105 : parseInt(m.status) || 1;
+
+      // Keep existing odds stable; compute new ones if first seen
+      let odds = liveMatchState.get(m.main_id)?.odds;
+      if (!odds) {
+        const seed = parseInt(m.main_id.slice(-6)) || 42;
+        odds = makeOdds(seed);
+        // Adjust based on live score
+        const scoreDiff = homeScore - awayScore;
+        if (scoreDiff > 0) { odds.home = Math.max(1.05, +(odds.home * 0.80).toFixed(2)); odds.away = Math.max(1.05, +(odds.away * 1.25).toFixed(2)); }
+        if (scoreDiff < 0) { odds.away = Math.max(1.05, +(odds.away * 0.80).toFixed(2)); odds.home = Math.max(1.05, +(odds.home * 1.25).toFixed(2)); }
+      }
+
+      const events: LiveMatchState["events"] = [];
+      if (m.events?.event) {
+        const evArr = Array.isArray(m.events.event) ? m.events.event : [m.events.event];
+        for (const ev of evArr) {
+          events.push({ type: ev.type, team: ev.team, minute: parseInt(ev.minute) || 0, player: ev.player || "" });
+        }
+      }
+
+      const state: LiveMatchState = {
+        id: m.main_id,
+        home: m.home.name,
+        away: m.away.name,
+        league: league.name,
+        country: league.country,
+        homeScore,
+        awayScore,
+        minute,
+        status: m.status,
+        odds,
+        markets: makeAdvancedMarkets(odds.home, odds.draw, odds.away),
+        events,
+      };
+      liveMatchState.set(m.main_id, state);
+      count++;
+    }
+  }
+
+  return Array.from(liveMatchState.values()).slice(0, 15);
+}
+
+async function buildUpcomingMatches(): Promise<UpcomingMatch[]> {
+  const leagues = await getStatpalLeagues();
+
+  const prioritized = [
+    ...leagues.filter(l => PRIORITY_LEAGUES.some(p => l.name?.toLowerCase().includes(p))),
+    ...leagues.filter(l => !PRIORITY_LEAGUES.some(p => l.name?.toLowerCase().includes(p))),
+  ];
+
+  const results: UpcomingMatch[] = [];
+  for (const league of prioritized) {
+    if (results.length >= 20) break;
+    const matches: StatpalMatch[] = Array.isArray(league.match) ? league.match : [league.match];
+    for (const m of matches) {
+      if (results.length >= 20) break;
+      // Only scheduled matches: status looks like "HH:MM" and goals = "?"
+      if (!/^\d{2}:\d{2}$/.test(m.status)) continue;
+      if (m.home.goals !== "?" || m.away.goals !== "?") continue;
+
+      const seed = parseInt(m.main_id.slice(-6)) || 99;
+      const odds = makeOdds(seed);
+
+      results.push({
+        id: m.main_id,
+        home: m.home.name,
+        away: m.away.name,
+        league: league.name,
+        country: league.country,
+        time: m.status,
+        date: m.date,
+        odds,
+        markets: makeAdvancedMarkets(odds.home, odds.draw, odds.away),
+      });
+    }
+  }
+  return results;
 }
 
 router.get("/live", async (_req, res) => {
   try {
-    const matches = await fetchStatpalLive();
-    res.json({ matches, updatedAt: new Date().toISOString() });
-  } catch {
-    res.status(500).json({ error: "Failed to fetch live matches" });
+    const matches = await buildLiveMatches();
+    res.json({ matches });
+  } catch (err) {
+    res.status(500).json({ error: "Erro ao buscar partidas ao vivo" });
   }
 });
 
 router.get("/upcoming", async (_req, res) => {
   try {
-    const matches = await fetchUpcoming();
+    const matches = await buildUpcomingMatches();
     res.json({ matches });
-  } catch {
-    res.status(500).json({ error: "Failed to fetch upcoming matches" });
+  } catch (err) {
+    res.status(500).json({ error: "Erro ao buscar próximas partidas" });
   }
 });
 
 router.get("/", async (_req, res) => {
   try {
-    const [live, upcoming] = await Promise.all([fetchStatpalLive(), fetchUpcoming()]);
+    const [live, upcoming] = await Promise.all([buildLiveMatches(), buildUpcomingMatches()]);
     res.json({ live, upcoming });
-  } catch {
-    res.status(500).json({ error: "Failed to fetch matches" });
+  } catch (err) {
+    res.status(500).json({ error: "Erro ao buscar partidas" });
   }
 });
 
-export { liveMatchState };
 export default router;
