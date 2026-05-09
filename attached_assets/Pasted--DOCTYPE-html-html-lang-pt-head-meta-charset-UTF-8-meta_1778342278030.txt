@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bet62 - Apostas Esportivas</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.6.0/css/all.min.css">
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+        body { font-family: 'Inter', system-ui, sans-serif; }
+        
+        .match-card {
+            transition: all 0.3s;
+        }
+        .match-card:hover {
+            transform: translateY(-6px);
+            border-color: #ef4444;
+        }
+        .odds-btn {
+            transition: all 0.2s;
+        }
+        .odds-btn:hover {
+            transform: scale(1.05);
+            background-color: #ef4444;
+            color: white;
+        }
+        .live-dot { animation: pulse 2s infinite; }
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+        
+        .bet-slip-mobile {
+            position: fixed; bottom: 0; left: 0; right: 0;
+            background: #18181b;
+            border-top-left-radius: 24px;
+            border-top-right-radius: 24px;
+            z-index: 100;
+            max-height: 85vh;
+            overflow-y: auto;
+            transform: translateY(100%);
+            transition: transform 0.4s ease;
+        }
+        .bet-slip-mobile.open { transform: translateY(0); }
+
+        .sidebar {
+            position: fixed;
+            left: -320px;
+            top: 0;
+            bottom: 0;
+            width: 320px;
+            background: #18181b;
+            transition: all 0.4s ease;
+            z-index: 200;
+            overflow-y: auto;
+        }
+        .sidebar.open { left: 0; }
+    </style>
+</head>
+<body class="bg-zinc-950 text-white">
+
+    <!-- HEADER -->
+    <header class="bg-black border-b border-zinc-800 sticky top-0 z-50">
+        <div class="max-w-7xl mx-auto px-4 py-4 flex items-center justify-between">
+            <div class="flex items-center gap-4">
+                <div class="font-black text-4xl tracking-tighter">BET<span class="text-red-500">62</span></div>
+                <button onclick="toggleSidebar()" class="text-3xl text-zinc-400 hover:text-white">⋮</button>
+            </div>
+            <button onclick="showAuthModal()" class="bg-red-600 hover:bg-red-700 px-8 py-3 rounded-2xl font-bold text-lg">ENTRAR</button>
+        </div>
+
+        <div class="bg-zinc-900 border-t border-zinc-800 px-4 py-3">
+            <div class="max-w-7xl mx-auto flex gap-6 text-sm font-medium overflow-x-auto">
+                <a href="#" onclick="showSection('sports')" class="hover:text-red-400 active">ESPORTES</a>
+                <a href="#" onclick="showSection('live')" class="hover:text-red-400 flex items-center gap-1">
+                    <i class="fas fa-circle text-red-500 live-dot"></i> AO VIVO
+                </a>
+                <a href="#" onclick="showSection('promotions')" class="hover:text-red-400">PROMOÇÕES</a>
+            </div>
+        </div>
+    </header>
+
+    <!-- SIDEBAR MENU -->
+    <div id="sidebar" class="sidebar">
+        <div class="p-6">
+            <div class="flex justify-between items-center mb-6">
+                <h2 class="font-bold text-xl">Menu</h2>
+                <button onclick="toggleSidebar()" class="text-3xl">✕</button>
+            </div>
+            
+            <div class="mb-8">
+                <h3 class="text-xs uppercase text-zinc-500 mb-3">Principais Ligas</h3>
+                <div class="space-y-3">
+                    <div class="flex items-center gap-3 p-3 hover:bg-zinc-800 rounded-xl cursor-pointer">
+                        <img src="https://flagcdn.com/w40/br.png" class="w-6 h-4 rounded"> Brasileirão Série A
+                    </div>
+                    <div class="flex items-center gap-3 p-3 hover:bg-zinc-800 rounded-xl cursor-pointer">
+                        <img src="https://flagcdn.com/w40/gb-eng.png" class="w-6 h-4 rounded"> Premier League
+                    </div>
+                    <div class="flex items-center gap-3 p-3 hover:bg-zinc-800 rounded-xl cursor-pointer">
+                        <img src="https://flagcdn.com/w40/es.png" class="w-6 h-4 rounded"> La Liga
+                    </div>
+                    <div class="flex items-center gap-3 p-3 hover:bg-zinc-800 rounded-xl cursor-pointer">
+                        <img src="https://flagcdn.com/w40/it.png" class="w-6 h-4 rounded"> Serie A
+                    </div>
+                </div>
+            </div>
+
+            <div>
+                <h3 class="text-xs uppercase text-zinc-500 mb-3">Esportes</h3>
+                <div class="space-y-3 text-sm">
+                    <div class="flex items-center gap-3 p-3 hover:bg-zinc-800 rounded-xl cursor-pointer"><i class="fas fa-futbol"></i> Futebol</div>
+                    <div class="flex items-center gap-3 p-3 hover:bg-zinc-800 rounded-xl cursor-pointer"><i class="fas fa-basketball-ball"></i> Basquete</div>
+                    <div class="flex items-center gap-3 p-3 hover:bg-zinc-800 rounded-xl cursor-pointer"><i class="fas fa-table-tennis"></i> Tênis</div>
+                    <div class="flex items-center gap-3 p-3 hover:bg-zinc-800 rounded-xl cursor-pointer"><i class="fas fa-gamepad"></i> E-Sports</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="max-w-7xl mx-auto flex">
+        <div class="flex-1 p-4 lg:p-6">
+            <div id="sports-section">
+                <h1 class="text-3xl font-bold mb-6">Próximos Eventos</h1>
+                <div id="matches-grid" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6"></div>
+            </div>
+
+            <div id="promotions-section" class="hidden">
+                <h1 class="text-3xl font-bold mb-6">Promoções Bet62</h1>
+                <div class="bg-gradient-to-br from-red-600 to-red-700 rounded-3xl p-10 text-center">
+                    <h2 class="text-4xl font-black">BÔNUS DE ATÉ R$ 500</h2>
+                    <p class="text-xl mt-4">100% no primeiro depósito</p>
+                    <button onclick="claimBonus()" class="mt-8 bg-white text-red-600 px-10 py-4 rounded-2xl font-bold">ATIVAR BÔNUS</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Desktop Bet Slip -->
+        <div class="hidden lg:block w-96 bg-zinc-900 border-l border-zinc-800 p-6">
+            <h3 class="font-bold text-xl mb-4">Boletim de Apostas</h3>
+            <div id="bet-slip-desktop" class="bg-zinc-800 rounded-3xl p-6 min-h-[500px]"></div>
+        </div>
+    </div>
+
+    <!-- Mobile Bet Slip -->
+    <div id="bet-slip-mobile" class="bet-slip-mobile lg:hidden">
+        <div class="p-6">
+            <div class="flex justify-between mb-6">
+                <h3 class="font-bold text-xl">Boletim de Apostas</h3>
+                <button onclick="toggleMobileSlip()" class="text-3xl">✕</button>
+            </div>
+            <div id="bet-slip-mobile-content"></div>
+        </div>
+    </div>
+
+    <!-- MATCH MODAL -->
+    <div id="match-modal" class="hidden fixed inset-0 bg-black/90 flex items-center justify-center z-[200]">
+        <div class="bg-zinc-900 w-full max-w-2xl mx-4 rounded-3xl overflow-hidden">
+            <div class="p-6 border-b border-zinc-700 flex justify-between">
+                <div>
+                    <div id="modal-league" class="text-zinc-400"></div>
+                    <div id="modal-teams" class="text-2xl font-bold mt-1"></div>
+                </div>
+                <button onclick="closeModal()" class="text-4xl text-zinc-400">✕</button>
+            </div>
+            <div class="p-6 overflow-y-auto max-h-[70vh]" id="modal-markets"></div>
+        </div>
+    </div>
+
+    <!-- FOOTER -->
+    <footer class="bg-black py-8 text-center text-sm text-zinc-500 border-t border-zinc-800">
+        <div class="max-w-7xl mx-auto px-4">
+            <div class="flex flex-wrap justify-center gap-6 mb-4">
+                <a href="#" class="hover:text-white">Termos e Condições</a>
+                <a href="#" class="hover:text-white">Política de Privacidade</a>
+                <a href="#" class="hover:text-white">Jogo Responsável</a>
+            </div>
+            <p>© 2026 Bet62 • 18+ | Apostas Responsáveis</p>
+        </div>
+    </footer>
+
+    <script>
+        let currentBets = [];
+
+        const matchesData = [
+            { id: 1, home: "Flamengo", away: "Palmeiras", league: "Brasileirão Série A", time: "19:30", odds: { home: 2.15, draw: 3.40, away: 3.25 } },
+            { id: 2, home: "Real Madrid", away: "Barcelona", league: "La Liga", time: "22:00", odds: { home: 2.30, draw: 3.50, away: 3.10 } },
+            { id: 3, home: "Manchester City", away: "Liverpool", league: "Premier League", time: "17:00", odds: { home: 1.95, draw: 3.60, away: 3.80 } },
+        ];
+
+        function renderMatches() {
+            const container = document.getElementById('matches-grid');
+            container.innerHTML = '';
+
+            matchesData.forEach(match => {
+                const card = document.createElement('div');
+                card.className = "match-card bg-zinc-900 border border-zinc-800 rounded-3xl p-6 cursor-pointer";
+                
+                card.innerHTML = `
+                    <div class="flex justify-between text-xs text-zinc-400 mb-4">
+                        <span>${match.league}</span>
+                        <span>${match.time}</span>
+                    </div>
+                    <div class="flex justify-between items-center font-semibold text-lg mb-6">
+                        <div>${match.home}</div>
+                        <div class="text-red-500 text-xl">VS</div>
+                        <div class="text-right">${match.away}</div>
+                    </div>
+                    
+                    <div class="grid grid-cols-3 gap-3 text-center">
+                        <div onclick="addBet('${match.home}', ${match.odds.home}); event.stopImmediatePropagation()" 
+                             class="odds-btn bg-zinc-800 p-4 rounded-2xl cursor-pointer">
+                            <div class="text-xs text-zinc-400">Casa</div>
+                            <div class="font-bold text-xl">${match.odds.home}</div>
+                        </div>
+                        <div onclick="addBet('Empate', ${match.odds.draw}); event.stopImmediatePropagation()" 
+                             class="odds-btn bg-zinc-800 p-4 rounded-2xl cursor-pointer">
+                            <div class="text-xs text-zinc-400">Empate</div>
+                            <div class="font-bold text-xl">${match.odds.draw}</div>
+                        </div>
+                        <div onclick="addBet('${match.away}', ${match.odds.away}); event.stopImmediatePropagation()" 
+                             class="odds-btn bg-zinc-800 p-4 rounded-2xl cursor-pointer">
+                            <div class="text-xs text-zinc-400">Fora</div>
+                            <div class="font-bold text-xl">${match.odds.away}</div>
+                        </div>
+                    </div>
+                `;
+
+                // Clique em qualquer lugar do cartão (exceto odds) abre o modal
+                card.addEventListener('click', (e) => {
+                    if (!e.target.closest('.odds-btn')) {
+                        openMatchModal(match);
+                    }
+                });
+
+                container.appendChild(card);
+            });
+        }
+
+        function openMatchModal(match) {
+            document.getElementById('modal-league').textContent = `${match.league} • ${match.time}`;
+            document.getElementById('modal-teams').innerHTML = `${match.home} <span class="text-red-500">VS</span> ${match.away}`;
+
+            const marketsHTML = `
+                <div class="space-y-8">
+                    <div>
+                        <h4 class="font-bold text-lg mb-4">Mais Mercados</h4>
+                        <div class="grid grid-cols-2 gap-4">
+                            <div onclick="addBet('Over 2.5', 1.85)" class="odds-btn bg-zinc-800 p-5 rounded-2xl cursor-pointer text-center">Over 2.5<br><span class="font-bold">1.85</span></div>
+                            <div onclick="addBet('Under 2.5', 1.95)" class="odds-btn bg-zinc-800 p-5 rounded-2xl cursor-pointer text-center">Under 2.5<br><span class="font-bold">1.95</span></div>
+                            <div onclick="addBet('Ambas Marcam - Sim', 1.90)" class="odds-btn bg-zinc-800 p-5 rounded-2xl cursor-pointer text-center">Ambas Marcam<br><span class="font-bold">1.90</span></div>
+                        </div>
+                    </div>
+                </div>
+            `;
+
+            document.getElementById('modal-markets').innerHTML = marketsHTML;
+            document.getElementById('match-modal').classList.remove('hidden');
+        }
+
+        function closeModal() {
+            document.getElementById('match-modal').classList.add('hidden');
+        }
+
+        function addBet(selection, odd) {
+            currentBets.push({ selection, odd });
+            renderBetSlip();
+            if (window.innerWidth < 1024) toggleMobileSlip(true);
+        }
+
+        function renderBetSlip() {
+            const html = currentBets.map((bet, i) => `
+                <div class="bg-zinc-950 rounded-2xl p-4 mb-3 flex justify-between items-center">
+                    <div>
+                        <div class="font-medium">${bet.selection}</div>
+                        <div class="text-red-400 font-bold">${bet.odd}</div>
+                    </div>
+                    <button onclick="removeBet(${i}); event.stopImmediatePropagation()" class="text-red-400"><i class="fas fa-trash"></i></button>
+                </div>
+            `).join('');
+
+            document.getElementById('bet-slip-desktop').innerHTML = html || `<div class="text-center py-20 text-zinc-400">Boletim vazio</div>`;
+            document.getElementById('bet-slip-mobile-content').innerHTML = html || `<div class="text-center py-20 text-zinc-400">Boletim vazio</div>`;
+        }
+
+        function removeBet(i) {
+            currentBets.splice(i, 1);
+            renderBetSlip();
+        }
+
+        function toggleMobileSlip(open = null) {
+            const slip = document.getElementById('bet-slip-mobile');
+            open === null ? slip.classList.toggle('open') : open ? slip.classList.add('open') : slip.classList.remove('open');
+        }
+
+        function toggleSidebar() {
+            document.getElementById('sidebar').classList.toggle('open');
+        }
+
+        function showSection(section) {
+            document.getElementById('sports-section').classList.toggle('hidden', section !== 'sports');
+            document.getElementById('promotions-section').classList.toggle('hidden', section !== 'promotions');
+        }
+
+        function showAuthModal() {
+            alert("🔐 Login / Registro");
+        }
+
+        function claimBonus() {
+            alert("🎉 Bônus ativado com sucesso!");
+        }
+
+        window.onload = renderMatches;
+    </script>
+</body>
+</html>
