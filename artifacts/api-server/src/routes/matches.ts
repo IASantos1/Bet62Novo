@@ -592,6 +592,17 @@ type RealOdds = { home: number; draw: number; away: number; types: OddsType[] };
 let oddsMap: Map<string, RealOdds> | null = null;
 let oddsFetchedAt = 0;
 
+// NHL livescores cache (30s)
+type NHLMatch = {
+  id: string; fix_id: string; status: string; time: string; timer: string;
+  home: { id: string; name: string; totalscore: string };
+  away: { id: string; name: string; totalscore: string };
+  events?: Record<string, { score?: string; event?: unknown }>;
+};
+type NHLTournament = { country: string; gid: string; id: string; league: string; match: NHLMatch | NHLMatch[] };
+let nhlLiveCache: NHLTournament[] | null = null;
+let nhlLiveFetchedAt = 0;
+
 // Live state: stable odds across refreshes
 export const liveMatchState = new Map<string, LiveMatchState>();
 
@@ -726,6 +737,77 @@ function resolveOdds(
     markets: makeAdvancedMarketsFromTeams(m.home.name, m.away.name),
     real: false,
   };
+}
+
+async function getNHLLive(): Promise<NHLTournament[]> {
+  const now = Date.now();
+  if (nhlLiveCache && now - nhlLiveFetchedAt < CONFIG.LIVE_CACHE_TTL) return nhlLiveCache;
+  try {
+    const resp = await fetch(`${BASE_V1}/nhl/livescores?access_key=${STATSPAL_KEY}`, {
+      signal: AbortSignal.timeout(8000),
+    });
+    if (!resp.ok) return nhlLiveCache ?? [];
+    const data = (await resp.json()) as { livescores?: { tournament?: NHLTournament | NHLTournament[] } };
+    const raw = data?.livescores?.tournament;
+    if (!raw) return nhlLiveCache ?? [];
+    nhlLiveCache = Array.isArray(raw) ? raw : [raw];
+    nhlLiveFetchedAt = now;
+    return nhlLiveCache;
+  } catch {
+    return nhlLiveCache ?? [];
+  }
+}
+
+function buildNHLLiveMatches(tournaments: NHLTournament[]): LiveMatchState[] {
+  const NHL_LIVE_STATUSES = new Set(["1P", "2P", "3P", "OT", "SO", "INT", "Break"]);
+  const result: LiveMatchState[] = [];
+
+  for (const t of tournaments) {
+    const matches = Array.isArray(t.match) ? t.match : [t.match];
+    for (const m of matches) {
+      const isLive = NHL_LIVE_STATUSES.has(m.status);
+      if (!isLive) continue;
+
+      const homeScore = parseInt(m.home.totalscore) || 0;
+      const awayScore = parseInt(m.away.totalscore) || 0;
+
+      // Convert period to equivalent minute for display
+      const periodMinutes: Record<string, number> = { "1P": 10, "2P": 30, "3P": 50, "OT": 65, "SO": 68, "INT": 20, "Break": 20 };
+      const minute = periodMinutes[m.status] ?? 10;
+
+      const odds = makeOddsFromTeams(m.home.name, m.away.name);
+      // Adjust for live score
+      const diff = homeScore - awayScore;
+      let liveOdds = { ...odds };
+      if (diff !== 0) {
+        const factor = Math.min(0.40, Math.abs(diff) * 0.15);
+        if (diff > 0) {
+          liveOdds = { home: Math.max(1.04, +(odds.home * (1 - factor)).toFixed(2)), draw: odds.draw, away: Math.min(12, +(odds.away * (1 + factor)).toFixed(2)) };
+        } else {
+          liveOdds = { home: Math.min(12, +(odds.home * (1 + factor)).toFixed(2)), draw: odds.draw, away: Math.max(1.04, +(odds.away * (1 - factor)).toFixed(2)) };
+        }
+      }
+      // No draw in hockey
+      liveOdds.draw = 0;
+
+      result.push({
+        id: `nhl-${m.id}`,
+        home: m.home.name,
+        away: m.away.name,
+        league: t.league,
+        country: t.country,
+        homeScore,
+        awayScore,
+        minute,
+        status: m.status,
+        hasRealOdds: false,
+        odds: liveOdds,
+        markets: makeAdvancedMarketsFromTeams(m.home.name, m.away.name),
+        events: [],
+      });
+    }
+  }
+  return result;
 }
 
 // ─── Match builders ────────────────────────────────────────────────────────────
@@ -1276,7 +1358,12 @@ export { buildLiveMatches, buildUpcomingMatches, buildBasketballMatches, buildTe
 
 router.get("/live", async (_req, res) => {
   try {
-    const matches = await buildLiveMatches();
+    const [soccerMatches, nhlTournaments] = await Promise.all([
+      buildLiveMatches(),
+      getNHLLive(),
+    ]);
+    const nhlMatches = buildNHLLiveMatches(nhlTournaments);
+    const matches = [...soccerMatches, ...nhlMatches];
     res.json({ matches });
   } catch (err) {
     res.status(500).json({ error: "Erro ao buscar partidas ao vivo" });

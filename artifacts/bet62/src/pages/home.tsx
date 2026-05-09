@@ -497,13 +497,12 @@ type MatchStatsData = {
 };
 type StandingRow = { pos: number; name: string; played: number; won: number; drawn: number; lost: number; gf: number; ga: number; pts: number };
 
-function cpfMask(value: string) {
+function nifMask(value: string) {
   return value
     .replace(/\D/g, "")
-    .replace(/(\d{3})(\d)/, "$1.$2")
-    .replace(/(\d{3})(\d)/, "$1.$2")
-    .replace(/(\d{3})(\d{1,2})/, "$1-$2")
-    .replace(/(-\d{2})\d+?$/, "$1");
+    .slice(0, 9)
+    .replace(/(\d{3})(\d)/, "$1 $2")
+    .replace(/(\d{3})(\d)/, "$1 $2");
 }
 
 const TennisBallIcon = ({ size = 16 }: { size?: number }) => (
@@ -664,11 +663,10 @@ function MomentumChart({ match }: { match: { id: string | number; home: string; 
 }
 
 function phoneMask(value: string) {
-  return value
-    .replace(/\D/g, "")
-    .replace(/^(\d{2})(\d)/, "($1) $2")
-    .replace(/(\d{5})(\d)/, "$1-$2")
-    .replace(/(-\d{4})\d+?$/, "$1");
+  const digits = value.replace(/\D/g, "").slice(0, 9);
+  if (digits.length <= 3) return digits;
+  if (digits.length <= 6) return `${digits.slice(0, 3)} ${digits.slice(3)}`;
+  return `${digits.slice(0, 3)} ${digits.slice(3, 6)} ${digits.slice(6)}`;
 }
 
 export default function Home() {
@@ -689,7 +687,7 @@ export default function Home() {
   const [regName, setRegName] = useState("");
   const [regEmail, setRegEmail] = useState("");
   const [regPassword, setRegPassword] = useState("");
-  const [regCpf, setRegCpf] = useState("");
+  const [regNif, setRegNif] = useState("");
   const [regPhone, setRegPhone] = useState("");
   const [regDob, setRegDob] = useState("");
   const [regTerms, setRegTerms] = useState(false);
@@ -1032,7 +1030,7 @@ export default function Home() {
       await auth.register(regName, regEmail, regPassword);
       setAuthModalOpen(false);
       toast.success("Conta criada com sucesso! Bônus de R$ 1.000 adicionado!");
-      setRegName(""); setRegEmail(""); setRegPassword(""); setRegCpf(""); setRegPhone(""); setRegDob(""); setRegTerms(false); setRegAge(false);
+      setRegName(""); setRegEmail(""); setRegPassword(""); setRegNif(""); setRegPhone(""); setRegDob(""); setRegTerms(false); setRegAge(false);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Erro ao criar conta");
     } finally {
@@ -2688,12 +2686,15 @@ export default function Home() {
                   </div>
                   <div className="grid grid-cols-2 gap-3">
                     <div className="space-y-1.5">
-                      <Label htmlFor="reg-cpf" className="text-sm">CPF</Label>
-                      <Input id="reg-cpf" type="text" placeholder="000.000.000-00" className="bg-zinc-900 border-zinc-800 text-white" required maxLength={14} value={regCpf} onChange={e => setRegCpf(cpfMask(e.target.value))} />
+                      <Label htmlFor="reg-nif" className="text-sm">NIF</Label>
+                      <Input id="reg-nif" type="text" placeholder="999 999 999" className="bg-zinc-900 border-zinc-800 text-white" required maxLength={11} value={regNif} onChange={e => setRegNif(nifMask(e.target.value))} />
                     </div>
                     <div className="space-y-1.5">
-                      <Label htmlFor="reg-phone" className="text-sm">Celular</Label>
-                      <Input id="reg-phone" type="tel" placeholder="(11) 99999-9999" className="bg-zinc-900 border-zinc-800 text-white" required maxLength={15} value={regPhone} onChange={e => setRegPhone(phoneMask(e.target.value))} />
+                      <Label htmlFor="reg-phone" className="text-sm">Telemóvel</Label>
+                      <div className="flex">
+                        <span className="inline-flex items-center px-2.5 rounded-l-md border border-r-0 border-zinc-800 bg-zinc-800 text-zinc-400 text-xs font-bold select-none">🇵🇹 +351</span>
+                        <Input id="reg-phone" type="tel" placeholder="9XX XXX XXX" className="bg-zinc-900 border-zinc-800 text-white rounded-l-none" required maxLength={11} value={regPhone} onChange={e => setRegPhone(phoneMask(e.target.value))} />
+                      </div>
                     </div>
                   </div>
                   <div className="space-y-1.5">
