@@ -252,6 +252,26 @@ async function buildUpcomingMatches(): Promise<UpcomingMatch[]> {
   return results;
 }
 
+router.get("/raw-debug", async (req, res) => {
+  try {
+    const resp = await fetch(
+      `${STATSPAL_BASE}/soccer/matches/live?access_key=${STATSPAL_KEY}`,
+      { signal: AbortSignal.timeout(9000) }
+    );
+    const raw = await resp.json();
+    const leagues: StatpalLeague[] = raw?.live_matches?.league ?? [];
+    // Return first league's first match fully
+    const sample = leagues.slice(0, 3).map(l => ({
+      league: l.name,
+      country: l.country,
+      match: Array.isArray(l.match) ? l.match[0] : l.match,
+    }));
+    res.json({ sample, totalLeagues: leagues.length });
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
 router.get("/live", async (_req, res) => {
   try {
     const matches = await buildLiveMatches();
