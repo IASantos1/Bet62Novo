@@ -229,6 +229,159 @@ const RIVALRY_TAGS: Record<string, string> = {
   "Sporting CP|Benfica": "🔥 Derby de Lisboa",
 };
 
+// ─── Sidebar tree data ────────────────────────────────────────────────────────
+
+const FOOTBALL_COUNTRIES: { name: string; flag: string; leagues: string[] }[] = [
+  { name: "Europa", flag: "⭐", leagues: ["Champions League", "Europa League", "Conference League"] },
+  { name: "Inglaterra", flag: "🏴󠁧󠁢󠁥󠁮󠁧󠁿", leagues: ["Premier League", "EFL Championship", "League One", "FA Cup"] },
+  { name: "Espanha", flag: "🇪🇸", leagues: ["La Liga", "LaLiga Hypermotion", "Copa del Rey"] },
+  { name: "Alemanha", flag: "🇩🇪", leagues: ["Bundesliga", "2. Bundesliga", "DFB-Pokal"] },
+  { name: "Itália", flag: "🇮🇹", leagues: ["Serie A", "Serie B", "Coppa Italia"] },
+  { name: "França", flag: "🇫🇷", leagues: ["Ligue 1", "Ligue 2", "Coupe de France"] },
+  { name: "Portugal", flag: "🇵🇹", leagues: ["Liga Portugal", "Liga Portugal 2", "Taça de Portugal"] },
+  { name: "Holanda", flag: "🇳🇱", leagues: ["Eredivisie", "Eerste Divisie"] },
+  { name: "Bélgica", flag: "🇧🇪", leagues: ["Jupiler Pro League", "Belgian Cup"] },
+  { name: "Turquia", flag: "🇹🇷", leagues: ["Süper Lig", "TFF First League", "Turkish Cup"] },
+  { name: "Grécia", flag: "🇬🇷", leagues: ["Super League Greece", "Super League 2", "Greek Cup"] },
+  { name: "Áustria", flag: "🇦🇹", leagues: ["Austrian Bundesliga", "Austrian Cup"] },
+  { name: "Escócia", flag: "🏴󠁧󠁢󠁳󠁣󠁴󠁿", leagues: ["Scottish Premiership", "Scottish Championship", "Scottish Cup"] },
+  { name: "Suíça", flag: "🇨🇭", leagues: ["Swiss Super League", "Challenge League"] },
+  { name: "Dinamarca", flag: "🇩🇰", leagues: ["Danish Superliga", "Danish 1st Division"] },
+  { name: "Noruega", flag: "🇳🇴", leagues: ["Eliteserien", "Norwegian Cup"] },
+  { name: "Suécia", flag: "🇸🇪", leagues: ["Allsvenskan", "Superettan"] },
+  { name: "Croácia", flag: "🇭🇷", leagues: ["HNL", "Croatian Football Cup"] },
+  { name: "Sérvia", flag: "🇷🇸", leagues: ["Serbian SuperLiga", "Serbian Cup"] },
+  { name: "Brasil", flag: "🇧🇷", leagues: ["Brasileirão", "Copa do Brasil", "Campeonato Paulista", "Campeonato Carioca"] },
+  { name: "Argentina", flag: "🇦🇷", leagues: ["Primera División", "Copa Argentina"] },
+  { name: "EUA", flag: "🇺🇸", leagues: ["MLS"] },
+];
+
+const OTHER_SPORTS: { key: string; label: string; icon: string; leagues: string[] }[] = [
+  { key: "basketball", label: "Basquete", icon: "🏀", leagues: ["NBA", "EuroLeague", "NBB — Brasil"] },
+  { key: "tennis", label: "Tênis", icon: "🎾", leagues: ["Roland Garros", "ATP 500", "ATP 250", "WTA 1000", "WTA 250"] },
+  { key: "hockey", label: "Hóquei", icon: "🏒", leagues: ["NHL — Playoffs", "KHL — Playoff"] },
+  { key: "volleyball", label: "Voleibol", icon: "🏐", leagues: ["Volleyball Nations League", "Superlega — Itália", "Superliga — Rússia", "Superliga — Brasil"] },
+];
+
+type SidebarTreeContentProps = {
+  selectedSport: string;
+  setSelectedSport: (s: string) => void;
+  setActiveTab: (tab: "sports" | "live" | "promos" | "mybets") => void;
+  onClose?: () => void;
+  expandedSport: string | null;
+  setExpandedSport: (s: string | null) => void;
+  expandedCountry: string | null;
+  setExpandedCountry: (c: string | null) => void;
+  compact?: boolean;
+};
+
+function SidebarTreeContent({
+  selectedSport, setSelectedSport, setActiveTab, onClose,
+  expandedSport, setExpandedSport, expandedCountry, setExpandedCountry, compact,
+}: SidebarTreeContentProps) {
+  const py = compact ? "py-1.5" : "py-2";
+  const textSize = compact ? "text-[12px]" : "text-[13px]";
+
+  function go(sport: string) {
+    setSelectedSport(sport);
+    setActiveTab("sports");
+    onClose?.();
+  }
+
+  function toggleSport(key: string) {
+    if (expandedSport === key) {
+      setExpandedSport(null);
+      setExpandedCountry(null);
+    } else {
+      setExpandedSport(key);
+      setExpandedCountry(null);
+    }
+  }
+
+  return (
+    <div className="space-y-0.5">
+      {/* Todos */}
+      <button
+        onClick={() => go("all")}
+        className={`flex items-center gap-2.5 w-full px-2 ${py} rounded-md ${textSize} transition-colors ${selectedSport === "all" ? "bg-red-600/20 text-red-400 border border-red-500/30" : "hover:bg-zinc-900 text-zinc-400 hover:text-white"}`}
+      >
+        <span className="text-sm leading-none text-red-500">🏆</span>
+        <span>Todos</span>
+      </button>
+
+      {/* Futebol */}
+      <div>
+        <button
+          onClick={() => toggleSport("football")}
+          className={`flex items-center gap-2.5 w-full px-2 ${py} rounded-md ${textSize} transition-colors ${expandedSport === "football" ? "bg-zinc-800 text-white" : selectedSport === "football" ? "bg-red-600/20 text-red-400 border border-red-500/30" : "hover:bg-zinc-900 text-zinc-400 hover:text-white"}`}
+        >
+          <span className="text-sm leading-none text-red-500">⚽</span>
+          <span className="flex-1 text-left">Futebol</span>
+          <ChevronRight size={12} className={`transition-transform ${expandedSport === "football" ? "rotate-90 text-red-400" : "text-zinc-600"}`} />
+        </button>
+        {expandedSport === "football" && (
+          <div className="ml-2 mt-0.5 space-y-0.5 border-l border-zinc-800 pl-2">
+            {FOOTBALL_COUNTRIES.map(({ name, flag, leagues }) => (
+              <div key={name}>
+                <button
+                  onClick={() => setExpandedCountry(expandedCountry === name ? null : name)}
+                  className={`flex items-center gap-1.5 w-full px-2 py-1.5 rounded-md text-[12px] transition-colors ${expandedCountry === name ? "bg-zinc-800 text-white" : "hover:bg-zinc-900 text-zinc-400 hover:text-white"}`}
+                >
+                  <span className="text-xs leading-none shrink-0">{flag}</span>
+                  <span className="flex-1 text-left truncate">{name}</span>
+                  <ChevronRight size={10} className={`transition-transform shrink-0 ${expandedCountry === name ? "rotate-90 text-red-400" : "text-zinc-600"}`} />
+                </button>
+                {expandedCountry === name && (
+                  <div className="ml-2 mt-0.5 space-y-0.5 border-l border-zinc-800 pl-2">
+                    {leagues.map(league => (
+                      <button
+                        key={league}
+                        onClick={() => go("football")}
+                        className="flex items-center gap-1.5 w-full px-2 py-1 rounded-md text-[11px] text-zinc-500 hover:text-white hover:bg-zinc-900 transition-colors"
+                      >
+                        <span className="text-xs leading-none shrink-0">{LEAGUE_FLAGS[league] ?? "⚽"}</span>
+                        <span className="truncate">{league}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Other sports */}
+      {OTHER_SPORTS.map(({ key, label, icon, leagues }) => (
+        <div key={key}>
+          <button
+            onClick={() => toggleSport(key)}
+            className={`flex items-center gap-2.5 w-full px-2 ${py} rounded-md ${textSize} transition-colors ${expandedSport === key ? "bg-zinc-800 text-white" : selectedSport === key ? "bg-red-600/20 text-red-400 border border-red-500/30" : "hover:bg-zinc-900 text-zinc-400 hover:text-white"}`}
+          >
+            <span className="text-sm leading-none text-red-500">{icon}</span>
+            <span className="flex-1 text-left">{label}</span>
+            <ChevronRight size={12} className={`transition-transform ${expandedSport === key ? "rotate-90 text-red-400" : "text-zinc-600"}`} />
+          </button>
+          {expandedSport === key && (
+            <div className="ml-2 mt-0.5 space-y-0.5 border-l border-zinc-800 pl-2">
+              {leagues.map(league => (
+                <button
+                  key={league}
+                  onClick={() => go(key)}
+                  className="flex items-center gap-1.5 w-full px-2 py-1.5 rounded-md text-[12px] text-zinc-400 hover:text-white hover:bg-zinc-900 transition-colors"
+                >
+                  <span className="text-xs leading-none shrink-0">{LEAGUE_FLAGS[league] ?? "🏆"}</span>
+                  <span className="truncate">{league}</span>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 // --- Types ---
 type Odds = { home: number; draw: number; away: number };
 type AdvancedMarkets = {
@@ -531,6 +684,10 @@ export default function Home() {
   const [upcomingLoading, setUpcomingLoading] = useState(true);
   const [selectedSport, setSelectedSport] = useState<string>("all");
 
+  // Sidebar tree state
+  const [sidebarExpandedSport, setSidebarExpandedSport] = useState<string | null>(null);
+  const [sidebarExpandedCountry, setSidebarExpandedCountry] = useState<string | null>(null);
+
   // Platform stats for hero
   const [platformStats, setPlatformStats] = useState<PlatformStats | null>(null);
 
@@ -589,6 +746,7 @@ export default function Home() {
       homeOdd: String(expandedMatch.odds.home),
       drawOdd: String(expandedMatch.odds.draw),
       awayOdd: String(expandedMatch.odds.away),
+      sport: expandedMatch.sport ?? "football",
     });
     fetch(`/api/matches/stats?${p}`)
       .then(r => r.ok ? r.json() : null)
@@ -1011,12 +1169,12 @@ export default function Home() {
   };
 
   const MatchCard = ({ match }: { match: Match }) => {
-    const flag = COUNTRY_FLAGS[match.country?.toLowerCase() ?? ""] ?? (match.sport === "basketball" ? "🏀" : match.sport === "tennis" ? "🎾" : "⚽");
+    const flag = COUNTRY_FLAGS[match.country?.toLowerCase() ?? ""] ?? (match.sport === "basketball" ? "🏀" : match.sport === "tennis" ? "🎾" : match.sport === "hockey" ? "🏒" : match.sport === "volleyball" ? "🏐" : "⚽");
     const dateStr = match.date ? formatMatchDate(match.date) : "";
     const bannerImg = getTeamBanner(match.home, match.country);
     const rivalry = RIVALRY_TAGS[`${match.home}|${match.away}`];
     const hasDraw = match.odds.draw > 0;
-    const sportIcon = match.sport === "basketball" ? "🏀" : match.sport === "tennis" ? "🎾" : null;
+    const sportIcon = match.sport === "basketball" ? "🏀" : match.sport === "tennis" ? "🎾" : match.sport === "hockey" ? "🏒" : match.sport === "volleyball" ? "🏐" : null;
 
     const OddsRow = () => match.hasRealOdds ? (
       <div className="flex gap-2 w-full">
@@ -1723,60 +1881,17 @@ export default function Home() {
                 <div className="font-black text-xl tracking-tighter italic"><span className="text-white">BET</span><span className="text-red-600">62</span></div>
                 <button onClick={() => setSidebarOpen(false)} className="text-zinc-400 hover:text-white"><X size={20} /></button>
               </div>
-              <div className="p-4 flex-1 overflow-y-auto">
-                <div className="mb-6">
-                  <h4 className="text-xs font-bold text-zinc-500 uppercase tracking-wider mb-3">Esportes</h4>
-                  <ul className="space-y-1.5">
-                    {[
-                      { icon: <span className="text-base leading-none">🏆</span>, label: "Todos", key: "all" },
-                      { icon: <span className="text-base leading-none">⚽</span>, label: "Futebol", key: "football" },
-                      { icon: <span className="text-base leading-none">🏀</span>, label: "Basquete", key: "basketball" },
-                      { icon: <TennisBallIcon size={18} />, label: "Tênis", key: "tennis" },
-                      { icon: <span className="text-base leading-none">🏒</span>, label: "Hóquei", key: "hockey" },
-                      { icon: <span className="text-base leading-none">🏐</span>, label: "Voleibol", key: "volleyball" },
-                    ].map(sport => (
-                      <li key={sport.key}>
-                        <button
-                          onClick={() => { setSelectedSport(sport.key); setActiveTab("sports"); setSidebarOpen(false); }}
-                          className={`flex items-center gap-3 w-full p-2 rounded-md text-sm transition-colors ${selectedSport === sport.key ? "bg-red-600/20 text-red-400 border border-red-500/30" : "hover:bg-zinc-900 text-zinc-300 hover:text-white"}`}
-                        >
-                          <div className={selectedSport === sport.key ? "text-red-400" : "text-red-500"}>{sport.icon}</div>
-                          {sport.label}
-                        </button>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-                <div className="mb-6">
-                  <h4 className="text-xs font-bold text-zinc-500 uppercase tracking-wider mb-3">Principais Ligas</h4>
-                  <ul className="space-y-1.5">
-                    {["Champions League", "Premier League", "La Liga", "Bundesliga", "Serie A", "Ligue 1", "Liga Portugal", "Eredivisie", "Belgian Pro League", "Süper Lig"].map(league => (
-                      <li key={league}>
-                        <button onClick={() => { setSelectedSport("football"); setActiveTab("sports"); setSidebarOpen(false); }} className="flex items-center gap-3 w-full p-2 rounded-md hover:bg-zinc-900 text-sm text-zinc-300 hover:text-white transition-colors">
-                          <div className="w-6 h-6 rounded-full bg-zinc-800 border border-zinc-700 flex items-center justify-center text-sm leading-none shrink-0">
-                            {LEAGUE_FLAGS[league] ?? "⚽"}
-                          </div>
-                          {league}
-                        </button>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-                <div>
-                  <h4 className="text-xs font-bold text-zinc-500 uppercase tracking-wider mb-3">Outras Ligas</h4>
-                  <ul className="space-y-1.5">
-                    {["Super League Greece", "Scottish Premiership", "Swiss Super League", "Danish Superliga", "Eliteserien", "Allsvenskan", "Brasileirão", "Primera División"].map(league => (
-                      <li key={league}>
-                        <button onClick={() => { setSelectedSport("football"); setActiveTab("sports"); setSidebarOpen(false); }} className="flex items-center gap-3 w-full p-2 rounded-md hover:bg-zinc-900 text-sm text-zinc-300 hover:text-white transition-colors">
-                          <div className="w-6 h-6 rounded-full bg-zinc-800 border border-zinc-700 flex items-center justify-center text-sm leading-none shrink-0">
-                            {LEAGUE_FLAGS[league] ?? "⚽"}
-                          </div>
-                          {league}
-                        </button>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
+              <div className="p-3 flex-1 overflow-y-auto">
+                <SidebarTreeContent
+                  selectedSport={selectedSport}
+                  setSelectedSport={setSelectedSport}
+                  setActiveTab={setActiveTab}
+                  onClose={() => setSidebarOpen(false)}
+                  expandedSport={sidebarExpandedSport}
+                  setExpandedSport={setSidebarExpandedSport}
+                  expandedCountry={sidebarExpandedCountry}
+                  setExpandedCountry={setSidebarExpandedCountry}
+                />
               </div>
             </motion.div>
           </>
@@ -1788,68 +1903,17 @@ export default function Home() {
 
         {/* DESKTOP LEFT SIDEBAR — always visible on lg+ */}
         <aside className="hidden lg:flex flex-col w-56 shrink-0 border-r border-zinc-900 bg-zinc-950 sticky top-16 h-[calc(100vh-4rem)] overflow-y-auto">
-          <div className="p-4">
-            <div className="mb-4">
-              <h4 className="text-[11px] font-bold text-zinc-500 uppercase tracking-wider mb-2">Esportes</h4>
-              <ul className="space-y-0.5">
-                {[
-                  { icon: <span className="text-sm leading-none">🏆</span>, label: "Todos", key: "all" },
-                  { icon: <span className="text-sm leading-none">⚽</span>, label: "Futebol", key: "football" },
-                  { icon: <span className="text-sm leading-none">🏀</span>, label: "Basquete", key: "basketball" },
-                  { icon: <TennisBallIcon size={15} />, label: "Tênis", key: "tennis" },
-                  { icon: <span className="text-sm leading-none">🏒</span>, label: "Hóquei", key: "hockey" },
-                  { icon: <span className="text-sm leading-none">🏐</span>, label: "Voleibol", key: "volleyball" },
-                ].map(sport => (
-                  <li key={sport.key}>
-                    <button
-                      onClick={() => { setSelectedSport(sport.key); setActiveTab("sports"); }}
-                      className={`flex items-center gap-2.5 w-full px-2 py-2 rounded-md text-[13px] transition-colors ${selectedSport === sport.key ? "bg-red-600/20 text-red-400 border border-red-500/30" : "hover:bg-zinc-900 text-zinc-400 hover:text-white"}`}
-                    >
-                      <span className={selectedSport === sport.key ? "text-red-400" : "text-red-500"}>{sport.icon}</span>
-                      {sport.label}
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            </div>
-            <div className="mb-4">
-              <h4 className="text-[11px] font-bold text-zinc-500 uppercase tracking-wider mb-2">Principais Ligas</h4>
-              <ul className="space-y-0.5">
-                {[
-                  "Champions League", "Premier League", "La Liga", "Bundesliga", "Serie A", "Ligue 1",
-                  "Liga Portugal", "Eredivisie", "Belgian Pro League", "Süper Lig",
-                ].map(league => (
-                  <li key={league}>
-                    <button onClick={() => { setSelectedSport("football"); setActiveTab("sports"); }} className="flex items-center gap-2.5 w-full px-2 py-2 rounded-md hover:bg-zinc-900 text-sm text-zinc-400 hover:text-white transition-colors">
-                      <span className="w-5 h-5 rounded-full bg-zinc-800 border border-zinc-800 flex items-center justify-center text-xs leading-none shrink-0">
-                        {LEAGUE_FLAGS[league] ?? "⚽"}
-                      </span>
-                      <span className="truncate text-[12px]">{league}</span>
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            </div>
-            <div className="mb-4">
-              <h4 className="text-[11px] font-bold text-zinc-500 uppercase tracking-wider mb-2">Outras Ligas</h4>
-              <ul className="space-y-0.5">
-                {[
-                  "Super League Greece", "Austrian Bundesliga", "Scottish Premiership",
-                  "Swiss Super League", "Danish Superliga", "Eliteserien",
-                  "Allsvenskan", "HNL", "Serbian SuperLiga",
-                  "Brasileirão", "Primera División",
-                ].map(league => (
-                  <li key={league}>
-                    <button onClick={() => { setSelectedSport("football"); setActiveTab("sports"); }} className="flex items-center gap-2.5 w-full px-2 py-2 rounded-md hover:bg-zinc-900 text-sm text-zinc-400 hover:text-white transition-colors">
-                      <span className="w-5 h-5 rounded-full bg-zinc-800 border border-zinc-800 flex items-center justify-center text-xs leading-none shrink-0">
-                        {LEAGUE_FLAGS[league] ?? "⚽"}
-                      </span>
-                      <span className="truncate text-[12px]">{league}</span>
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            </div>
+          <div className="p-3">
+            <SidebarTreeContent
+              selectedSport={selectedSport}
+              setSelectedSport={setSelectedSport}
+              setActiveTab={setActiveTab}
+              expandedSport={sidebarExpandedSport}
+              setExpandedSport={setSidebarExpandedSport}
+              expandedCountry={sidebarExpandedCountry}
+              setExpandedCountry={setSidebarExpandedCountry}
+              compact
+            />
           </div>
         </aside>
 

@@ -757,7 +757,7 @@ async function buildLiveMatches(): Promise<LiveMatchState[]> {
       let matchOdds: { home: number; draw: number; away: number };
       let matchMarkets: AdvancedMarkets;
 
-      let hasRealOdds = existing?.hasRealOdds ?? false;
+      let hasRealOdds = true; // Always show odds — use model when real unavailable
 
       if (existing && existing.homeScore === homeScore && existing.awayScore === awayScore) {
         // Score unchanged — reuse odds to avoid drift
@@ -768,7 +768,7 @@ async function buildLiveMatches(): Promise<LiveMatchState[]> {
         const resolved = resolveOdds(m, odds);
         matchOdds = resolved.odds;
         matchMarkets = resolved.markets;
-        hasRealOdds = resolved.real;
+        hasRealOdds = true; // Always true — we always have computed odds
 
         // Adjust based on live score differential
         const diff = homeScore - awayScore;
@@ -890,7 +890,7 @@ function dayRng(day: number): (n: number) => number {
 
 function buildBasketballMatches(): UpcomingMatch[] {
   const today = new Date();
-  const dayKey = today.getFullYear() * 10000 + (today.getMonth() + 1) * 100 + today.getDate();
+  const dayKey = today.getUTCFullYear() * 10000 + (today.getUTCMonth() + 1) * 100 + today.getUTCDate();
 
   const MATCHUPS: [string, string, string, string, string][] = [
     ["Boston Celtics", "Miami Heat", "NBA — Conferência Leste", "usa", "19:30"],
@@ -905,9 +905,9 @@ function buildBasketballMatches(): UpcomingMatch[] {
     ["Flamengo", "Corinthians", "NBB — Brasil", "brazil", "20:00"],
   ];
 
-  const dateStr = today.toISOString().slice(0, 10);
   return MATCHUPS.map(([home, away, league, country, time], i) => {
     const seedKey = `bball:${dayKey}:${i}:${home}:${away}`;
+    const dateStr = futureDateStr(Math.floor(i / 3));
     const sr = seededRng(seedKey);
 
     // Home advantage probability via normal distribution on team strength diff
@@ -990,7 +990,7 @@ function buildBasketballMatches(): UpcomingMatch[] {
 
 function buildTennisMatches(): UpcomingMatch[] {
   const today = new Date();
-  const dayKey = today.getFullYear() * 10000 + (today.getMonth() + 1) * 100 + today.getDate();
+  const dayKey = today.getUTCFullYear() * 10000 + (today.getUTCMonth() + 1) * 100 + today.getUTCDate();
 
   const ATP_PLAYERS = [
     "Novak Djokovic", "Carlos Alcaraz", "Jannik Sinner", "Daniil Medvedev",
@@ -1011,8 +1011,8 @@ function buildTennisMatches(): UpcomingMatch[] {
     ["Roland Garros — Qualificação", "france", "12:30", "wta"],
   ];
 
-  const dateStr = today.toISOString().slice(0, 10);
   return TOURNAMENTS.map(([league, country, time, tour], i) => {
+    const dateStr = futureDateStr(Math.floor(i / 2));
     const pool = tour === "atp" ? ATP_PLAYERS : WTA_PLAYERS;
     const sr0 = seededRng(`tennis:${dayKey}:${i}:${league}`);
     const p1idx = Math.floor(sr0(1) * (pool.length - 1));
@@ -1077,12 +1077,19 @@ function buildTennisMatches(): UpcomingMatch[] {
   });
 }
 
+// ─── Date helper for upcoming generators ─────────────────────────────────────
+
+function futureDateStr(daysAhead: number): string {
+  const d = new Date();
+  d.setDate(d.getDate() + daysAhead);
+  return `${String(d.getDate()).padStart(2, "0")}.${String(d.getMonth() + 1).padStart(2, "0")}.${d.getFullYear()}`;
+}
+
 // ─── Hockey generator (NHL/KHL — Poisson model) ──────────────────────────────
 
 function buildHockeyMatches(): UpcomingMatch[] {
   const today = new Date();
-  const dayKey = today.getFullYear() * 10000 + (today.getMonth() + 1) * 100 + today.getDate();
-  const dateStr = today.toISOString().slice(0, 10);
+  const dayKey = today.getUTCFullYear() * 10000 + (today.getUTCMonth() + 1) * 100 + today.getUTCDate();
 
   const MATCHUPS: [string, string, string, string, string][] = [
     ["Boston Bruins", "Tampa Bay Lightning", "NHL — Playoffs", "usa", "19:00"],
@@ -1096,6 +1103,7 @@ function buildHockeyMatches(): UpcomingMatch[] {
   ];
 
   return MATCHUPS.map(([home, away, league, country, time], i) => {
+    const dateStr = futureDateStr(Math.floor(i / 3));
     const sr = seededRng(`hockey:${dayKey}:${i}:${home}:${away}`);
 
     // Goal model: NHL avg ~6 goals/game, KHL ~5.5
@@ -1173,8 +1181,7 @@ function buildHockeyMatches(): UpcomingMatch[] {
 
 function buildVolleyballMatches(): UpcomingMatch[] {
   const today = new Date();
-  const dayKey = today.getFullYear() * 10000 + (today.getMonth() + 1) * 100 + today.getDate();
-  const dateStr = today.toISOString().slice(0, 10);
+  const dayKey = today.getUTCFullYear() * 10000 + (today.getUTCMonth() + 1) * 100 + today.getUTCDate();
 
   const MATCHUPS: [string, string, string, string, string][] = [
     ["Brazil VB", "Italy VB", "Volleyball Nations League", "brazil", "16:00"],
@@ -1188,6 +1195,7 @@ function buildVolleyballMatches(): UpcomingMatch[] {
   ];
 
   return MATCHUPS.map(([home, away, league, country, time], i) => {
+    const dateStr = futureDateStr(Math.floor(i / 3));
     const sr = seededRng(`vball:${dayKey}:${i}:${home}:${away}`);
 
     // Match winner probability (5-set model)
@@ -1305,6 +1313,7 @@ type FormEntry = { result: "W" | "D" | "L"; score: string; opponent: string; hom
 router.get("/stats", async (req, res) => {
   const home = String(req.query["home"] ?? "");
   const away = String(req.query["away"] ?? "");
+  const sport = String(req.query["sport"] ?? "football");
   const homeOdd = parseFloat(String(req.query["homeOdd"] ?? "2")) || 2;
   const drawOdd = parseFloat(String(req.query["drawOdd"] ?? "3.5")) || 3.5;
   const awayOdd = parseFloat(String(req.query["awayOdd"] ?? "3")) || 3;
@@ -1324,8 +1333,75 @@ router.get("/stats", async (req, res) => {
   };
   const ri = (min: number, max: number, s: number) => Math.floor(rng(min, max + 1, s));
 
+  // Sport-specific fallback pools
+  type FormEntry = { result: "W" | "D" | "L"; score: string; opponent: string; home: boolean };
+
+  interface SportConfig {
+    opponents: string[];
+    pool: Array<{ result: "W" | "D" | "L"; score: string }>;
+    hasDraw: boolean;
+    avgGoalsLabel?: number;
+  }
+
+  const sportConfigs: Record<string, SportConfig> = {
+    basketball: {
+      opponents: ["Lakers","Celtics","Warriors","Heat","Bucks","Nuggets","Suns","Nets","76ers","Clippers","Raptors","Mavericks","Cavaliers","Bulls","Spurs"],
+      pool: [
+        { result: "W", score: "112-104" }, { result: "W", score: "98-87" }, { result: "W", score: "125-110" },
+        { result: "W", score: "103-99" }, { result: "L", score: "95-107" }, { result: "L", score: "88-102" },
+        { result: "L", score: "101-115" }, { result: "W", score: "118-109" }, { result: "L", score: "97-110" },
+        { result: "W", score: "108-96" }, { result: "L", score: "84-91" },
+      ],
+      hasDraw: false,
+      avgGoalsLabel: 108,
+    },
+    tennis: {
+      opponents: ["Djokovic","Alcaraz","Sinner","Medvedev","Zverev","Rublev","Ruud","Fritz","Swiatek","Sabalenka","Gauff","Rybakina","Paolini","Kasatkina","Navarro"],
+      pool: [
+        { result: "W", score: "2-0" }, { result: "W", score: "2-1" }, { result: "W", score: "2-0" },
+        { result: "L", score: "0-2" }, { result: "L", score: "1-2" }, { result: "W", score: "2-1" },
+        { result: "L", score: "0-2" }, { result: "W", score: "2-0" }, { result: "L", score: "1-2" },
+        { result: "W", score: "2-1" }, { result: "L", score: "0-2" },
+      ],
+      hasDraw: false,
+    },
+    hockey: {
+      opponents: ["Bruins","Lightning","Avalanche","Golden Knights","Maple Leafs","Canadiens","Rangers","Hurricanes","Oilers","Flames","Panthers","Stars","SKA","CSKA","Metallurg"],
+      pool: [
+        { result: "W", score: "4-2" }, { result: "W", score: "3-1" }, { result: "W", score: "5-3" },
+        { result: "W", score: "2-1" }, { result: "D", score: "2-2 (OT)" }, { result: "L", score: "1-3" },
+        { result: "L", score: "2-4" }, { result: "W", score: "3-2 (OT)" }, { result: "L", score: "0-2" },
+        { result: "L", score: "1-4" }, { result: "W", score: "4-1" },
+      ],
+      hasDraw: true,
+      avgGoalsLabel: 5.8,
+    },
+    volleyball: {
+      opponents: ["Brazil VB","Italy VB","Poland VB","France VB","USA VB","Japan VB","Trentino","Lube","Zenit Kazan","Dinamo Moscow","Cruzeiro","Sesi Franca","Perugia","Modena","Resovia"],
+      pool: [
+        { result: "W", score: "3-0" }, { result: "W", score: "3-1" }, { result: "W", score: "3-2" },
+        { result: "L", score: "0-3" }, { result: "L", score: "1-3" }, { result: "W", score: "3-1" },
+        { result: "L", score: "2-3" }, { result: "W", score: "3-0" }, { result: "L", score: "1-3" },
+        { result: "W", score: "3-2" }, { result: "L", score: "0-3" },
+      ],
+      hasDraw: false,
+    },
+  };
+
+  const cfg = sportConfigs[sport] ?? {
+    opponents: ["Arsenal","Chelsea","Liverpool","Man City","Tottenham","Newcastle","Brighton","Juventus","Bayern","Roma","PSG","Inter","Dortmund","Sevilla","Benfica"],
+    pool: [
+      { result: "W" as const, score: "2-0" }, { result: "W" as const, score: "1-0" }, { result: "W" as const, score: "3-1" },
+      { result: "W" as const, score: "2-1" }, { result: "D" as const, score: "1-1" }, { result: "D" as const, score: "0-0" },
+      { result: "D" as const, score: "2-2" }, { result: "L" as const, score: "0-1" }, { result: "L" as const, score: "1-2" },
+      { result: "L" as const, score: "0-2" }, { result: "W" as const, score: "4-0" },
+    ],
+    hasDraw: true,
+    avgGoalsLabel: undefined as number | undefined,
+  };
+
   const homeWins = ri(3, 11, 1.1);
-  const draws    = ri(2,  6, 2.3);
+  const draws    = cfg.hasDraw ? ri(2, 6, 2.3) : 0;
   const awayWins = ri(2,  9, 3.7);
   const avgGoals = rng(2.1, 3.2, 4.1);
   const over15   = Math.min(94, Math.max(66, ri(68, 92, 5.3)));
@@ -1334,65 +1410,60 @@ router.get("/stats", async (req, res) => {
   const corners  = rng(9.5, 12.5, 8.4);
   const btts     = ri(40, 62, 12.1);
 
-  const fakeOpponents = ["Arsenal","Chelsea","Liverpool","Man City","Tottenham","Newcastle","Brighton","Juventus","Bayern","Roma","PSG","Inter","Dortmund","Sevilla","Benfica"];
-  const formPool: Array<{ result: "W"|"D"|"L"; score: string }> = [
-    { result: "W", score: "2-0" }, { result: "W", score: "1-0" }, { result: "W", score: "3-1" },
-    { result: "W", score: "2-1" }, { result: "D", score: "1-1" }, { result: "D", score: "0-0" },
-    { result: "D", score: "2-2" }, { result: "L", score: "0-1" }, { result: "L", score: "1-2" },
-    { result: "L", score: "0-2" }, { result: "W", score: "4-0" },
-  ];
-
   let homeForm: FormEntry[] = [];
   let awayForm: FormEntry[] = [];
 
-  try {
-    const resp = await fetch(`${BASE_V2}/soccer/matches/results?access_key=${STATSPAL_KEY}`, {
-      signal: AbortSignal.timeout(5000),
-    });
-    if (resp.ok) {
-      const data = (await resp.json()) as Record<string, unknown>;
-      const leagueArr = ((data?.["results"] ?? data?.["yesterday_results"]) as Record<string, unknown> | undefined)?.["league"];
-      const leagues: unknown[] = Array.isArray(leagueArr) ? leagueArr : [];
-      for (const league of leagues) {
-        if (homeForm.length >= 5 && awayForm.length >= 5) break;
-        const lObj = league as Record<string, unknown>;
-        const ms: unknown[] = Array.isArray(lObj["match"]) ? (lObj["match"] as unknown[]) : lObj["match"] ? [lObj["match"]] : [];
-        for (const m of ms) {
-          const mo = m as Record<string, unknown>;
-          const mh = mo["home"] as Record<string, unknown> | undefined;
-          const ma = mo["away"] as Record<string, unknown> | undefined;
-          const hg = parseInt(String(mh?.["goals"] ?? "x"));
-          const ag = parseInt(String(ma?.["goals"] ?? "x"));
-          if (isNaN(hg) || isNaN(ag)) continue;
-          const mhName = String(mh?.["name"] ?? "");
-          const maName = String(ma?.["name"] ?? "");
-          const homeSlug = home.toLowerCase().slice(0, 5);
-          const awaySlug = away.toLowerCase().slice(0, 5);
-          if (mhName.toLowerCase().includes(homeSlug) && homeForm.length < 5) {
-            homeForm.push({ result: hg > ag ? "W" : hg === ag ? "D" : "L", score: `${hg}-${ag}`, opponent: maName, home: true });
-          } else if (maName.toLowerCase().includes(homeSlug) && homeForm.length < 5) {
-            homeForm.push({ result: ag > hg ? "W" : ag === hg ? "D" : "L", score: `${ag}-${hg}`, opponent: mhName, home: false });
-          }
-          if (mhName.toLowerCase().includes(awaySlug) && awayForm.length < 5) {
-            awayForm.push({ result: hg > ag ? "W" : hg === ag ? "D" : "L", score: `${hg}-${ag}`, opponent: maName, home: true });
-          } else if (maName.toLowerCase().includes(awaySlug) && awayForm.length < 5) {
-            awayForm.push({ result: ag > hg ? "W" : ag === hg ? "D" : "L", score: `${ag}-${hg}`, opponent: mhName, home: false });
+  // Only attempt Statpal API for football
+  if (sport === "football") {
+    try {
+      const resp = await fetch(`${BASE_V2}/soccer/matches/results?access_key=${STATSPAL_KEY}`, {
+        signal: AbortSignal.timeout(5000),
+      });
+      if (resp.ok) {
+        const data = (await resp.json()) as Record<string, unknown>;
+        const leagueArr = ((data?.["results"] ?? data?.["yesterday_results"]) as Record<string, unknown> | undefined)?.["league"];
+        const leagues: unknown[] = Array.isArray(leagueArr) ? leagueArr : [];
+        for (const league of leagues) {
+          if (homeForm.length >= 5 && awayForm.length >= 5) break;
+          const lObj = league as Record<string, unknown>;
+          const ms: unknown[] = Array.isArray(lObj["match"]) ? (lObj["match"] as unknown[]) : lObj["match"] ? [lObj["match"]] : [];
+          for (const m of ms) {
+            const mo = m as Record<string, unknown>;
+            const mh = mo["home"] as Record<string, unknown> | undefined;
+            const ma = mo["away"] as Record<string, unknown> | undefined;
+            const hg = parseInt(String(mh?.["goals"] ?? "x"));
+            const ag = parseInt(String(ma?.["goals"] ?? "x"));
+            if (isNaN(hg) || isNaN(ag)) continue;
+            const mhName = String(mh?.["name"] ?? "");
+            const maName = String(ma?.["name"] ?? "");
+            const homeSlug = home.toLowerCase().slice(0, 5);
+            const awaySlug = away.toLowerCase().slice(0, 5);
+            if (mhName.toLowerCase().includes(homeSlug) && homeForm.length < 5) {
+              homeForm.push({ result: hg > ag ? "W" : hg === ag ? "D" : "L", score: `${hg}-${ag}`, opponent: maName, home: true });
+            } else if (maName.toLowerCase().includes(homeSlug) && homeForm.length < 5) {
+              homeForm.push({ result: ag > hg ? "W" : ag === hg ? "D" : "L", score: `${ag}-${hg}`, opponent: mhName, home: false });
+            }
+            if (mhName.toLowerCase().includes(awaySlug) && awayForm.length < 5) {
+              awayForm.push({ result: hg > ag ? "W" : hg === ag ? "D" : "L", score: `${hg}-${ag}`, opponent: maName, home: true });
+            } else if (maName.toLowerCase().includes(awaySlug) && awayForm.length < 5) {
+              awayForm.push({ result: ag > hg ? "W" : ag === hg ? "D" : "L", score: `${ag}-${hg}`, opponent: mhName, home: false });
+            }
           }
         }
       }
-    }
-  } catch { /* use computed fallback */ }
+    } catch { /* use computed fallback */ }
+  }
 
   if (homeForm.length < 5) {
     homeForm = Array.from({ length: 5 }, (_, i) => {
-      const fp = formPool[ri(0, formPool.length - 1, i + 1.13)];
-      return { ...fp, opponent: fakeOpponents[ri(0, fakeOpponents.length - 1, i + 2.27)], home: i % 2 === 0 };
+      const fp = cfg.pool[ri(0, cfg.pool.length - 1, i + 1.13)]!;
+      return { result: fp.result, score: fp.score, opponent: cfg.opponents[ri(0, cfg.opponents.length - 1, i + 2.27)]!, home: i % 2 === 0 };
     });
   }
   if (awayForm.length < 5) {
     awayForm = Array.from({ length: 5 }, (_, i) => {
-      const fp = formPool[ri(0, formPool.length - 1, i + 4.31)];
-      return { ...fp, opponent: fakeOpponents[ri(0, fakeOpponents.length - 1, i + 5.47)], home: i % 2 === 1 };
+      const fp = cfg.pool[ri(0, cfg.pool.length - 1, i + 4.31)]!;
+      return { result: fp.result, score: fp.score, opponent: cfg.opponents[ri(0, cfg.opponents.length - 1, i + 5.47)]!, home: i % 2 === 1 };
     });
   }
 
