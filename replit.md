@@ -59,6 +59,7 @@ Bet62 é uma plataforma completa de apostas esportivas com dados ao vivo via Sta
 - Admin login accepts username (`admin`) OR email (`admin@bet62.com`) — configurable via env vars
 - Statpal live data is cached server-side for 30s to avoid rate limits; upcoming matches are static with computed advanced markets
 - Real live endpoints: football v2/live, NHL v1/nhl/livescores, tennis v1/tennis/livescores, volleyball v1/volleyball/livescores
+- Tennis extras: v1/tennis/livestats (match stats: aces/DF/1stServe/winners), v1/tennis/daily/d-1 (yesterday's results), v1/tennis/tournament-list/atp|wta (active tournaments)
 - Basketball has no Statpal endpoint — simulated with persistent state; tennis/volleyball fall back to simulation when no live matches
 - Simulated live state persists in module-level Maps (_bballMap, _tennisMap, _volleyMap, _hockeyMap) — scores advance incrementally, never jump
 - Cash out value = (stake × originalOdds) / currentOdds × 0.92 (8% house margin)

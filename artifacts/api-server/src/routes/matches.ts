@@ -735,6 +735,17 @@ let tennisResultsCache: TennisDailyResult[] | null = null;
 let tennisResultsFetchedAt = 0;
 const RESULTS_CACHE_TTL = 5 * 60 * 1000; // 5 min
 
+// Tennis tournament list (ATP + WTA) — active tournaments today
+type TournamentRaw = {
+  id: string; name: string; category: string;
+  surface: string; location: string;
+  date_start: string; date_end: string; prize_money: string;
+};
+type ActiveTournament = TournamentRaw & { tour: "atp" | "wta" };
+let tourListCache: ActiveTournament[] | null = null;
+let tourListFetchedAt = 0;
+const TOUR_CACHE_TTL = 30 * 60 * 1000; // 30 min
+
 // Live state: stable odds across refreshes
 export const liveMatchState = new Map<string, LiveMatchState>();
 
@@ -2681,6 +2692,40 @@ function buildLeagueStandings(leagueName: string): { league: string; teams: Arra
   };
 }
 
+async function getActiveTournaments(): Promise<ActiveTournament[]> {
+  const now = Date.now();
+  if (tourListCache && now - tourListFetchedAt < TOUR_CACHE_TTL) return tourListCache;
+  const parseDate = (s: string): Date => {
+    const [dd, mm, yy] = s.split(".");
+    return new Date(+yy!, +mm! - 1, +dd!);
+  };
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const results: ActiveTournament[] = [];
+  for (const tour of ["atp", "wta"] as const) {
+    try {
+      const resp = await fetch(`${BASE_V1}/tennis/tournament-list/${tour}?access_key=${STATSPAL_KEY}`, {
+        signal: AbortSignal.timeout(8000),
+      });
+      if (!resp.ok) continue;
+      const data = (await resp.json()) as { tournaments?: { tournament?: TournamentRaw | TournamentRaw[] } };
+      const raw = data?.tournaments?.tournament;
+      if (!raw) continue;
+      const arr = Array.isArray(raw) ? raw : [raw];
+      for (const t of arr) {
+        try {
+          const start = parseDate(t.date_start);
+          const end   = parseDate(t.date_end);
+          if (start <= today && end >= today) results.push({ ...t, tour });
+        } catch { /* skip malformed dates */ }
+      }
+    } catch { /* skip failed tour */ }
+  }
+  tourListCache = results;
+  tourListFetchedAt = now;
+  return results;
+}
+
 async function getTennisDailyResults(): Promise<TennisDailyResult[]> {
   const now = Date.now();
   if (tennisResultsCache && now - tennisResultsFetchedAt < RESULTS_CACHE_TTL) return tennisResultsCache;
@@ -2721,6 +2766,15 @@ async function getTennisDailyResults(): Promise<TennisDailyResult[]> {
     return tennisResultsCache ?? [];
   }
 }
+
+router.get("/tournaments", async (_req, res) => {
+  try {
+    const tournaments = await getActiveTournaments();
+    res.json({ tournaments });
+  } catch {
+    res.status(500).json({ error: "Torneios indisponíveis" });
+  }
+});
 
 router.get("/results", async (_req, res) => {
   try {

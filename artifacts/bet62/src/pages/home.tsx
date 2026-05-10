@@ -780,6 +780,14 @@ export default function Home() {
   const [recentResults, setRecentResults] = useState<TennisResult[]>([]);
   const [resultsOpen, setResultsOpen] = useState(true);
 
+  // Active tennis tournaments
+  type ActiveTournament = {
+    id: string; name: string; category: string; surface: string;
+    location: string; date_start: string; date_end: string;
+    prize_money: string; tour: "atp" | "wta";
+  };
+  const [activeTournaments, setActiveTournaments] = useState<ActiveTournament[]>([]);
+
   // Sidebar tree state
   const [sidebarExpandedSport, setSidebarExpandedSport] = useState<string | null>(null);
   const [sidebarExpandedCountry, setSidebarExpandedCountry] = useState<string | null>(null);
@@ -899,11 +907,15 @@ export default function Home() {
       .catch(() => { /* non-critical */ });
   }, []);
 
-  // Fetch yesterday's tennis results on mount
+  // Fetch yesterday's tennis results + active tournaments on mount
   useEffect(() => {
     fetch("/api/matches/results")
       .then(r => r.ok ? r.json() : { results: [] })
       .then(d => setRecentResults(d.results ?? []))
+      .catch(() => { /* non-critical */ });
+    fetch("/api/matches/tournaments")
+      .then(r => r.ok ? r.json() : { tournaments: [] })
+      .then(d => setActiveTournaments(d.tournaments ?? []))
       .catch(() => { /* non-critical */ });
   }, []);
 
@@ -3110,6 +3122,78 @@ export default function Home() {
               return (
                 <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
                   {!selectedLeague && <PopularBanners />}
+
+                  {/* ─── Torneios em Curso ──────────────────────────────────── */}
+                  {(selectedSport === "all" || selectedSport === "tennis") && activeTournaments.length > 0 && !selectedLeague && (() => {
+                    const surfaceColor = (s: string) => {
+                      const sl = s.toLowerCase();
+                      if (sl.includes("clay"))  return { bar: "bg-orange-500",   text: "text-orange-400",  bg: "bg-orange-500/10",  label: "Argila" };
+                      if (sl.includes("grass")) return { bar: "bg-green-500",    text: "text-green-400",   bg: "bg-green-500/10",   label: "Relva" };
+                      if (sl.includes("indoor"))return { bar: "bg-violet-500",   text: "text-violet-400",  bg: "bg-violet-500/10",  label: "Indoor" };
+                      return                           { bar: "bg-sky-500",       text: "text-sky-400",     bg: "bg-sky-500/10",     label: "Duro" };
+                    };
+                    const categoryStyle = (cat: string) => {
+                      const c = cat.toUpperCase();
+                      if (c.includes("GRAND SLAM"))          return "bg-purple-600/20 text-purple-300 border-purple-600/30";
+                      if (c.includes("1000") || c.includes("1500")) return "bg-amber-600/20 text-amber-300 border-amber-600/30";
+                      if (c.includes("500"))                 return "bg-blue-600/20 text-blue-300 border-blue-600/30";
+                      return                                        "bg-zinc-700/40 text-zinc-400 border-zinc-600/30";
+                    };
+                    const formatDate = (d: string) => {
+                      const [dd, mm] = d.split(".");
+                      const months = ["jan","fev","mar","abr","mai","jun","jul","ago","set","out","nov","dez"];
+                      return `${dd} ${months[parseInt(mm ?? "1") - 1] ?? ""}`;
+                    };
+                    const formatPrize = (p: string) => {
+                      if (!p || p === "$0" || p === "€0") return null;
+                      return p.replace(/,\d{3},\d{3}$/, "M").replace(/,\d{3}$/, "k");
+                    };
+                    return (
+                      <div className="mb-5">
+                        <div className="flex items-center gap-2 mb-2.5">
+                          <span className="text-[10px] font-black text-zinc-500 uppercase tracking-widest">Torneios em Curso</span>
+                        </div>
+                        <div className="flex gap-2.5 overflow-x-auto no-scrollbar pb-1">
+                          {activeTournaments.map(t => {
+                            const sc = surfaceColor(t.surface);
+                            const prize = formatPrize(t.prize_money);
+                            return (
+                              <div key={`${t.tour}-${t.id}`} className={`shrink-0 rounded-xl border border-zinc-800 overflow-hidden w-44 ${sc.bg}`}>
+                                {/* Surface bar */}
+                                <div className={`h-0.5 w-full ${sc.bar}`} />
+                                <div className="p-2.5">
+                                  {/* Tour + Category row */}
+                                  <div className="flex items-center gap-1.5 mb-1.5">
+                                    <span className={`text-[9px] font-black uppercase tracking-wide px-1 py-0.5 rounded border ${t.tour === "atp" ? "bg-zinc-800 text-zinc-300 border-zinc-700" : "bg-zinc-800 text-pink-300 border-pink-800/40"}`}>
+                                      {t.tour.toUpperCase()}
+                                    </span>
+                                    <span className={`text-[9px] font-black uppercase tracking-wide px-1 py-0.5 rounded border ${categoryStyle(t.category)}`}>
+                                      {t.category.replace(/^(ATP|WTA)\s+/i, "")}
+                                    </span>
+                                  </div>
+                                  {/* Name */}
+                                  <div className="text-xs font-bold text-white leading-snug line-clamp-2 mb-1" title={t.name}>
+                                    {t.name}
+                                  </div>
+                                  {/* Location */}
+                                  <div className="text-[10px] text-zinc-500 truncate">{t.location.split(",")[0]}</div>
+                                  {/* Dates + surface */}
+                                  <div className="flex items-center justify-between mt-1.5">
+                                    <span className="text-[9px] text-zinc-600">{formatDate(t.date_start)} → {formatDate(t.date_end)}</span>
+                                    <span className={`text-[9px] font-bold ${sc.text}`}>{sc.label}</span>
+                                  </div>
+                                  {/* Prize */}
+                                  {prize && (
+                                    <div className="text-[9px] text-zinc-600 mt-0.5">{prize}</div>
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    );
+                  })()}
 
                   {/* ─── Resultados Recentes de Ténis ──────────────────────── */}
                   {(selectedSport === "all" || selectedSport === "tennis") && recentResults.length > 0 && !selectedLeague && (
