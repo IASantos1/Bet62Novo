@@ -1041,6 +1041,7 @@ function buildNHLLiveMatches(tournaments: NHLTournament[]): LiveMatchState[] {
   for (const t of tournaments) {
     const matches = Array.isArray(t.match) ? t.match : [t.match];
     for (const m of matches) {
+      if (!m?.status) continue;
       const isLive = NHL_LIVE_STATUSES.has(m.status);
       if (!isLive) continue;
 
@@ -1240,45 +1241,71 @@ function buildVolleyballLiveMatches(tournaments: VolleyTournament[]): LiveMatchS
   const VSET_LIVE = new Set(["Set 1", "Set 2", "Set 3", "Set 4", "Set 5"]);
   const result: LiveMatchState[] = [];
 
+  // Today's date in DD.MM.YYYY for filtering non-live matches
+  const now = new Date();
+  const todayStr = `${String(now.getDate()).padStart(2, "0")}.${String(now.getMonth() + 1).padStart(2, "0")}.${now.getFullYear()}`;
+
   for (const t of tournaments) {
     const matches = Array.isArray(t.match) ? t.match : [t.match];
     for (const m of matches) {
-      if (!VSET_LIVE.has(m.status)) continue;
       const home = m.home; const away = m.away;
       if (!home?.name || !away?.name) continue;
 
-      const setNum    = parseInt(m.status.split(" ")[1]!) || 1;
+      const isLive       = VSET_LIVE.has(m.status);
+      const isNotStarted = m.status === "Not Started";
+      const isFinished   = m.status === "Finished";
+
+      if (!isLive && !isNotStarted && !isFinished) continue;
+      // Non-live matches: only include today's fixtures to avoid stale historical data
+      if (!isLive && m.date !== todayStr) continue;
+
       const homeScore = parseInt(home.totalscore) || 0;
       const awayScore = parseInt(away.totalscore) || 0;
 
-      // Build completed sets (all but last)
       const vollSets: Array<[number, number]> = [];
       let ptH = 0, ptA = 0;
       const sfs = ["s1", "s2", "s3", "s4", "s5"] as const;
-      for (let i = 0; i < sfs.length; i++) {
-        const h = home[sfs[i]!]; const a = away[sfs[i]!];
-        if (!h || !a) break;
-        if (i < setNum - 1) vollSets.push([parseInt(h) || 0, parseInt(a) || 0]);
-        else { ptH = parseInt(h) || 0; ptA = parseInt(a) || 0; }
+
+      if (isLive) {
+        // Build completed sets and current-set points
+        const setNum = parseInt(m.status.split(" ")[1]!) || 1;
+        for (let i = 0; i < sfs.length; i++) {
+          const h = home[sfs[i]!]; const a = away[sfs[i]!];
+          if (!h || !a) break;
+          if (i < setNum - 1) vollSets.push([parseInt(h) || 0, parseInt(a) || 0]);
+          else { ptH = parseInt(h) || 0; ptA = parseInt(a) || 0; }
+        }
+      } else if (isFinished) {
+        // All sets completed — include every scored set
+        for (const sf of sfs) {
+          const h = home[sf]; const a = away[sf];
+          if (!h || !a) break;
+          vollSets.push([parseInt(h) || 0, parseInt(a) || 0]);
+        }
       }
 
-      const baseOdds = makeOddsFromTeams(home.name, away.name);
+      const setNum      = isLive ? (parseInt(m.status.split(" ")[1]!) || 1) : 0;
+      const statusLabel = isNotStarted ? `Hoje ${m.time}` : isFinished ? "Encerrado" : m.status;
+      const baseOdds    = makeOddsFromTeams(home.name, away.name);
+
       result.push({
         id:          `volley-live-${m.id}`,
         home:        home.name,
         away:        away.name,
-        league:      `${t.league} — ${t.country}`,
+        league:      t.league,
         country:     t.country,
         sport:       "volleyball",
         homeScore,
         awayScore,
         minute:      setNum,
-        status:      m.status,
+        status:      statusLabel,
         hasRealOdds: false,
-        odds:        { home: baseOdds.home, draw: 0, away: baseOdds.away },
+        odds:        isFinished
+          ? { home: 0, draw: 0, away: 0 }
+          : { home: baseOdds.home, draw: 0, away: baseOdds.away },
         markets:     makeAdvancedMarketsFromTeams(home.name, away.name),
         events:      [],
-        _liveExtra:  { vollSets, currentPts: [ptH, ptA] },
+        _liveExtra:  { vollSets, ...(isLive ? { currentPts: [ptH, ptA] as [number, number] } : {}) },
       });
     }
   }

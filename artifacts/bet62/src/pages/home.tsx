@@ -1320,7 +1320,16 @@ export default function Home() {
       return minute === 45 ? "HT" : minute === 105 ? "ET" : `${minute}'`;
     })();
 
-    const liveBadge = (
+    // Non-live volleyball states get a muted badge (no pulse)
+    const isVolleyNonLive = sport === "volleyball" &&
+      (match.status === "Encerrado" || (match.status ?? "").startsWith("Hoje"));
+    const liveBadge = isVolleyNonLive ? (
+      <div className="flex items-center gap-1.5">
+        <span className="text-[10px] font-bold text-zinc-400 tabular-nums">
+          {match.status === "Encerrado" ? "FIN" : liveBadgeLabel}
+        </span>
+      </div>
+    ) : (
       <div className="flex items-center gap-1.5">
         <span className="relative flex h-1.5 w-1.5">
           <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-500 opacity-75"></span>
