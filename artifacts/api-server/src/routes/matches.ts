@@ -827,6 +827,46 @@ function countRedCards(events: Array<{ type: string; team: string }>, team: "hom
   return events.filter(e => e.type?.toLowerCase().includes("red") && e.team === team).length;
 }
 
+// Remove/zero out market lines that are already settled or impossible given the current live score
+function filterLiveMarkets(markets: AdvancedMarkets, homeScore: number, awayScore: number): AdvancedMarkets {
+  const m: AdvancedMarkets = { ...markets, totalGoals: { ...markets.totalGoals } };
+  const totalGoals = homeScore + awayScore;
+
+  // Correct Score: only keep scorelines that are still achievable (both sides >= current score)
+  if (m.correctScore) {
+    const filtered: Record<string, number> = {};
+    for (const [score, odd] of Object.entries(m.correctScore)) {
+      if (score === "Outro") { filtered[score] = odd; continue; }
+      const [hs, as_] = score.split("-").map(Number);
+      if (hs !== undefined && as_ !== undefined && hs >= homeScore && as_ >= awayScore) {
+        filtered[score] = odd;
+      }
+    }
+    m.correctScore = Object.keys(filtered).length > 0 ? filtered : undefined;
+  }
+
+  // Total Goals: zero out lines already settled by the current goal tally
+  const tg = m.totalGoals;
+  if (totalGoals >= 1) { tg.over05 = 0; tg.under05 = 0; }
+  if (totalGoals >= 2) { tg.over15 = 0; tg.under15 = 0; }
+  if (totalGoals >= 3) { tg.over25 = 0; tg.under25 = 0; }
+  if (totalGoals >= 4) { tg.over35 = 0; tg.under35 = 0; }
+  if (totalGoals >= 5) { tg.over45 = 0; tg.under45 = 0; }
+  if (totalGoals >= 6) { tg.over55 = 0; tg.under55 = 0; }
+
+  // First Goal: settled once any goal has been scored
+  if (totalGoals > 0) {
+    m.firstGoal = { home: 0, noGoal: 0, away: 0 };
+  }
+
+  // Both Teams Score: settled when both have scored already
+  if (homeScore > 0 && awayScore > 0) {
+    m.bothTeamsScore = { yes: 0, no: 0 };
+  }
+
+  return m;
+}
+
 // Find real odds for a v2 match using fallback IDs; model-based fallback using team names
 function resolveOdds(
   m: StatpalMatchV2,
@@ -1007,8 +1047,8 @@ async function buildLiveMatches(): Promise<LiveMatchState[]> {
           away: Math.max(1.04, Math.min(25, r(base.away * (1 + driftA + (diff > 0 ? timePressure * 0.6 : timePressure * 0.4))))),
         };
 
-        // Keep markets from existing state
-        matchMarkets = existing.markets;
+        // Keep markets from existing state (already filtered for live score)
+        matchMarkets = filterLiveMarkets(existing.markets, homeScore, awayScore);
 
         // Store drift phase for next cycle
         const updatedState = { ...existing, odds: matchOdds, minute, _driftPhase: phase, marketSuspension: matchMarketSuspension, _suspensionReason: matchMarketSuspension ? existing._suspensionReason : undefined };
@@ -1047,21 +1087,8 @@ async function buildLiveMatches(): Promise<LiveMatchState[]> {
           baseAway: resolved.odds.away,
         });
 
-        // Score-based odds boost: 1-0 → +0.5; 1-1 / 2-0 → +1.5; each extra goal +1.0 more
-        const totalGoals = homeScore + awayScore;
-        if (totalGoals > 0) {
-          const scoreBonus = 0.5 + (totalGoals - 1) * 1.0;
-          const r2 = (n: number) => Math.round(n * 100) / 100;
-          matchOdds = {
-            home: Math.min(25, r2(matchOdds.home + scoreBonus)),
-            draw: matchOdds.draw > 0 ? Math.min(20, r2(matchOdds.draw + scoreBonus)) : 0,
-            away: Math.min(25, r2(matchOdds.away + scoreBonus)),
-          };
-        }
-
-        if (homeScore !== awayScore) {
-          matchMarkets = makeAdvancedMarketsFromTeams(m.home.name, m.away.name);
-        }
+        // Filter markets for live score (remove impossible/settled lines)
+        matchMarkets = filterLiveMarkets(matchMarkets, homeScore, awayScore);
       }
 
       const events: LiveMatchState["events"] = [];
