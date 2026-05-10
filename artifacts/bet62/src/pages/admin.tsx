@@ -171,7 +171,7 @@ export default function AdminPage() {
       });
       const data = await res.json();
       if (!res.ok) { toast.error(data.error); return; }
-      toast.success(`Saldo atualizado: R$ ${parseFloat(data.balance).toFixed(2)}`);
+      toast.success(`Saldo atualizado: € ${parseFloat(data.balance).toFixed(2)}`);
       setBalanceModal(null);
       setBalanceAmount("");
       fetchUsers();
@@ -368,7 +368,7 @@ export default function AdminPage() {
                     <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
                       <StatCard icon={<Users size={20} />} label="Total de Usuários" value={stats.users.total} color="blue" />
                       <StatCard icon={<ListChecks size={20} />} label="Total de Apostas" value={stats.bets.total} sub={`${stats.bets.pending} pendentes`} color="yellow" />
-                      <StatCard icon={<DollarSign size={20} />} label="Volume Apostado" value={`R$ ${stats.financial.totalStaked.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}`} color="green" />
+                      <StatCard icon={<DollarSign size={20} />} label="Volume Apostado" value={`€ ${stats.financial.totalStaked.toLocaleString("pt-PT", { minimumFractionDigits: 2 })}`} color="green" />
                       <StatCard icon={<TrendingUp size={20} />} label="Margem da Casa" value={`${stats.financial.margin}%`} sub="sobre volume apostado" color="red" />
                     </div>
 
@@ -377,7 +377,7 @@ export default function AdminPage() {
                       <StatCard icon={<CheckCircle size={20} />} label="Apostas Ganhas" value={stats.bets.won} color="green" />
                       <StatCard icon={<XCircle size={20} />} label="Apostas Perdidas" value={stats.bets.lost} color="red" />
                       <StatCard icon={<Zap size={20} />} label="Cash Outs" value={stats.bets.cashedOut} color="yellow" />
-                      <StatCard icon={<Activity size={20} />} label="Saldo Total Usuários" value={`R$ ${stats.financial.totalUserBalance.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}`} color="blue" />
+                      <StatCard icon={<Activity size={20} />} label="Saldo Total Utilizadores" value={`€ ${stats.financial.totalUserBalance.toLocaleString("pt-PT", { minimumFractionDigits: 2 })}`} color="blue" />
                     </div>
 
                     {/* Recent activity chart */}
@@ -402,7 +402,7 @@ export default function AdminPage() {
                                   />
                                 </div>
                                 <span className="text-zinc-400 text-xs w-24 text-right shrink-0">
-                                  {row.bets} apostas • R$ {parseFloat(row.volume || "0").toFixed(0)}
+                                  {row.bets} apostas • € {parseFloat(row.volume || "0").toFixed(0)}
                                 </span>
                               </div>
                             );
@@ -495,7 +495,7 @@ export default function AdminPage() {
                               <td className="px-4 py-3 font-medium text-white whitespace-nowrap">{user.name}</td>
                               <td className="px-4 py-3 text-zinc-400 text-xs">{user.email}</td>
                               <td className="px-4 py-3">
-                                <span className="font-bold text-green-400">R$ {parseFloat(user.balance).toFixed(2)}</span>
+                                <span className="font-bold text-green-400">€ {parseFloat(user.balance).toFixed(2)}</span>
                               </td>
                               <td className="px-4 py-3 text-zinc-400">{user.betCount}</td>
                               <td className="px-4 py-3 text-zinc-500 text-xs whitespace-nowrap">
@@ -565,9 +565,9 @@ export default function AdminPage() {
                                 <div className="text-zinc-600 text-[10px]">{bet.userEmail}</div>
                               </td>
                               <td className="px-4 py-3 text-zinc-300 text-xs max-w-[160px] truncate">{bet.matchTitle}</td>
-                              <td className="px-4 py-3 font-bold text-white">R$ {parseFloat(bet.stake).toFixed(2)}</td>
+                              <td className="px-4 py-3 font-bold text-white">€ {parseFloat(bet.stake).toFixed(2)}</td>
                               <td className="px-4 py-3 text-red-400 font-bold">{parseFloat(bet.totalOdds).toFixed(2)}</td>
-                              <td className="px-4 py-3 text-green-400 font-bold">R$ {parseFloat(bet.potentialWin).toFixed(2)}</td>
+                              <td className="px-4 py-3 text-green-400 font-bold">€ {parseFloat(bet.potentialWin).toFixed(2)}</td>
                               <td className="px-4 py-3">
                                 <span className={`px-2 py-1 rounded-full text-[10px] font-bold uppercase ${STATUS_CONFIG[bet.status]?.cls || "bg-zinc-800 text-zinc-400"}`}>
                                   {STATUS_CONFIG[bet.status]?.label || bet.status}
@@ -651,7 +651,7 @@ export default function AdminPage() {
             >
               <div className="bg-zinc-900 border border-zinc-700 rounded-2xl p-6 w-full max-w-sm" onClick={e => e.stopPropagation()}>
                 <h3 className="font-bold text-lg text-white mb-1">Ajustar Saldo</h3>
-                <p className="text-sm text-zinc-400 mb-4 truncate">{balanceModal.name} — <span className="text-green-400 font-bold">R$ {parseFloat(balanceModal.balance).toFixed(2)}</span></p>
+                <p className="text-sm text-zinc-400 mb-4 truncate">{balanceModal.name} — <span className="text-green-400 font-bold">€ {parseFloat(balanceModal.balance).toFixed(2)}</span></p>
 
                 <div className="space-y-4">
                   <div className="grid grid-cols-3 gap-2">
@@ -668,7 +668,7 @@ export default function AdminPage() {
 
                   <div className="space-y-2">
                     <Label className="text-zinc-400 text-sm">
-                      {balanceOp === "add" ? "Valor a adicionar (R$)" : balanceOp === "subtract" ? "Valor a remover (R$)" : "Novo saldo (R$)"}
+                      {balanceOp === "add" ? "Valor a adicionar (€)" : balanceOp === "subtract" ? "Valor a remover (€)" : "Novo saldo (€)"}
                     </Label>
                     <Input
                       type="number"

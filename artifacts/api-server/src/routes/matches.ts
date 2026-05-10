@@ -1043,6 +1043,18 @@ async function buildLiveMatches(): Promise<LiveMatchState[]> {
           baseAway: resolved.odds.away,
         });
 
+        // Score-based odds boost: 1-0 → +0.5; 1-1 / 2-0 → +1.5; each extra goal +1.0 more
+        const totalGoals = homeScore + awayScore;
+        if (totalGoals > 0) {
+          const scoreBonus = 0.5 + (totalGoals - 1) * 1.0;
+          const r2 = (n: number) => Math.round(n * 100) / 100;
+          matchOdds = {
+            home: Math.min(25, r2(matchOdds.home + scoreBonus)),
+            draw: matchOdds.draw > 0 ? Math.min(20, r2(matchOdds.draw + scoreBonus)) : 0,
+            away: Math.min(25, r2(matchOdds.away + scoreBonus)),
+          };
+        }
+
         if (homeScore !== awayScore) {
           matchMarkets = makeAdvancedMarketsFromTeams(m.home.name, m.away.name);
         }
@@ -1059,6 +1071,27 @@ async function buildLiveMatches(): Promise<LiveMatchState[]> {
             player: ev.player || "",
           });
         }
+      }
+
+      // VAR review / penalty / big-chance detection → suspend all markets
+      // Triggered on dangerous events in the most recent 2 minutes of play
+      const VAR_DANGER_TOKENS = ["penalty", "var", "missed", "bigchance", "big_chance", "suspension", "expelled"];
+      const recentThreshold = Math.max(1, minute - 2);
+      const isGoalEvent = existing != null && (homeScore > (existing.homeScore ?? -1) || awayScore > (existing.awayScore ?? -1));
+      const hasDangerEvent = !isGoalEvent && events.some(e => {
+        const t = e.type.toLowerCase().replace(/[\s_-]/g, "");
+        return e.minute >= recentThreshold && VAR_DANGER_TOKENS.some(token => t.includes(token.replace("_", "")));
+      });
+      if (hasDangerEvent && !matchMarketSuspension) {
+        const now = Date.now();
+        const VAR_SUSPENSION_MS: Record<string, number> = {
+          result: 20000, doubleChance: 18000, totalGoals: 22000, handicap: 22000,
+          halfTime: 15000, correctScore: 30000, asianHandicap: 25000, asianTotals: 25000,
+          drawNoBet: 20000, firstGoal: 20000, htft: 30000,
+        };
+        matchMarketSuspension = Object.fromEntries(
+          Object.entries(VAR_SUSPENSION_MS).map(([k, delay]) => [k, now + delay])
+        );
       }
 
       const state: LiveMatchState = {

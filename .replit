@@ -39,7 +39,8 @@ externalPort = 3000
 
 [userenv.shared]
 ADMIN_USERNAME = "israel21naativa@gmail.com"
-ADMIN_PASSWORD = "@Israel2121"
+ADMIN_PASSWORD = "@Admin123"
+ADMIN_EMAIL = "israel21naativa@gmail.com"
 
 [nix]
 channel = "stable-25_05"

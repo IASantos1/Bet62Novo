@@ -999,7 +999,9 @@ export default function Home() {
   const effectiveBetMode: "simples" | "multipla" = hasDuplicateMatches ? "simples" : betMode;
   const totalOdds = bets.reduce((acc, bet) => acc * bet.odd, 1).toFixed(2);
   const [stake, setStake] = useState<string>("");
-  const simplesPotential = bets.reduce((sum, bet) => sum + bet.odd * parseFloat(stake || "0"), 0).toFixed(2);
+  const [betStakes, setBetStakes] = useState<Record<string, string>>({});
+  const betKey = (b: BetSelection) => `${b.matchId}-${b.market}-${b.selection}`;
+  const simplesPotential = bets.reduce((sum, b) => sum + b.odd * parseFloat(betStakes[betKey(b)] || "0"), 0).toFixed(2);
 
   const handleLoginSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -1028,7 +1030,7 @@ export default function Home() {
     try {
       await auth.register(regName, regEmail, regPassword);
       setAuthModalOpen(false);
-      toast.success("Conta criada com sucesso! Saldo de € 1.000 adicionado!");
+      toast.success("Conta criada com sucesso! Bem-vindo à Bet62!");
       setRegName(""); setRegEmail(""); setRegPassword(""); setRegNif(""); setRegPhone(""); setRegDob(""); setRegTerms(false); setRegAge(false);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Erro ao criar conta");
@@ -1038,17 +1040,19 @@ export default function Home() {
   };
 
   const handlePlaceBet = async () => {
-    if (!stake) { toast.error("Insira um valor para apostar"); return; }
     if (!auth.user) { setAuthModalOpen(true); return; }
-    const stakeNum = parseFloat(stake);
-    const totalCost = effectiveBetMode === "simples" ? stakeNum * bets.length : stakeNum;
-    if (totalCost > parseFloat(auth.user.balance)) { toast.error("Saldo insuficiente"); return; }
-    setIsPlacingBet(true);
-    try {
-      if (effectiveBetMode === "simples") {
+
+    if (effectiveBetMode === "simples") {
+      const missing = bets.some(b => !betStakes[betKey(b)] || parseFloat(betStakes[betKey(b)] || "0") <= 0);
+      if (missing) { toast.error("Insira o valor para cada aposta no boletim"); return; }
+      const totalCost = bets.reduce((s, b) => s + parseFloat(betStakes[betKey(b)] || "0"), 0);
+      if (totalCost > parseFloat(auth.user.balance)) { toast.error("Saldo insuficiente"); return; }
+      setIsPlacingBet(true);
+      try {
         let allOk = true;
         for (const bet of bets) {
-          const potentialWin = (stakeNum * bet.odd).toFixed(2);
+          const sNum = parseFloat(betStakes[betKey(bet)] || "0");
+          const potentialWin = (sNum * bet.odd).toFixed(2);
           const res = await fetch("/api/bets/place", {
             method: "POST",
             headers: { "Content-Type": "application/json", Authorization: `Bearer ${auth.token}` },
@@ -1056,7 +1060,7 @@ export default function Home() {
               matchId: String(bet.matchId),
               matchTitle: bet.matchTitle,
               selections: [{ matchTitle: bet.matchTitle, selection: bet.selection, odd: bet.odd, market: bet.market }],
-              stake: stakeNum.toFixed(2),
+              stake: sNum.toFixed(2),
               potentialWin,
               totalOdds: bet.odd.toFixed(2),
             })
@@ -1066,40 +1070,38 @@ export default function Home() {
         }
         if (allOk) {
           toast.success(`${bets.length} aposta${bets.length > 1 ? "s" : ""} realizada${bets.length > 1 ? "s" : ""}! Total: € ${totalCost.toFixed(2)}`);
-          setBets([]);
-          setStake("");
-          setBetSlipOpenMobile(false);
-          auth.refreshUser();
+          setBets([]); setBetStakes({}); setStake(""); setBetSlipOpenMobile(false); auth.refreshUser();
         }
-      } else {
-        const matchId = bets.map(b => b.matchId).join("-");
-        const matchTitle = bets.map(b => b.matchTitle).join(" + ");
-        const potentialWin = (stakeNum * parseFloat(totalOdds)).toFixed(2);
-        const res = await fetch("/api/bets/place", {
-          method: "POST",
-          headers: { "Content-Type": "application/json", Authorization: `Bearer ${auth.token}` },
-          body: JSON.stringify({
-            matchId,
-            matchTitle,
-            selections: bets.map(b => ({ matchTitle: b.matchTitle, selection: b.selection, odd: b.odd, market: b.market })),
-            stake: stakeNum.toFixed(2),
-            potentialWin,
-            totalOdds,
-          })
-        });
-        const data = await res.json();
-        if (!res.ok) { toast.error(data.error || "Erro ao realizar aposta"); return; }
-        toast.success(`Aposta múltipla realizada! Potencial de ganho: € ${potentialWin}`);
-        setBets([]);
-        setStake("");
-        setBetSlipOpenMobile(false);
-        auth.refreshUser();
-      }
-    } catch {
-      toast.error("Erro ao realizar aposta");
-    } finally {
-      setIsPlacingBet(false);
+      } catch { toast.error("Erro ao realizar aposta"); } finally { setIsPlacingBet(false); }
+      return;
     }
+
+    // Múltipla mode
+    if (!stake) { toast.error("Insira um valor para apostar"); return; }
+    const stakeNum = parseFloat(stake);
+    if (stakeNum > parseFloat(auth.user.balance)) { toast.error("Saldo insuficiente"); return; }
+    setIsPlacingBet(true);
+    try {
+      const matchId = bets.map(b => b.matchId).join("-");
+      const matchTitle = bets.map(b => b.matchTitle).join(" + ");
+      const potentialWin = (stakeNum * parseFloat(totalOdds)).toFixed(2);
+      const res = await fetch("/api/bets/place", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${auth.token}` },
+        body: JSON.stringify({
+          matchId,
+          matchTitle,
+          selections: bets.map(b => ({ matchTitle: b.matchTitle, selection: b.selection, odd: b.odd, market: b.market })),
+          stake: stakeNum.toFixed(2),
+          potentialWin,
+          totalOdds,
+        })
+      });
+      const data = await res.json();
+      if (!res.ok) { toast.error(data.error || "Erro ao realizar aposta"); return; }
+      toast.success(`Aposta múltipla realizada! Potencial de ganho: € ${potentialWin}`);
+      setBets([]); setBetStakes({}); setStake(""); setBetSlipOpenMobile(false); auth.refreshUser();
+    } catch { toast.error("Erro ao realizar aposta"); } finally { setIsPlacingBet(false); }
   };
 
   // --- UI Components ---
@@ -1345,7 +1347,6 @@ export default function Home() {
   const BetSlipContent = () => {
     const canSwitchMode = !hasDuplicateMatches && bets.length > 1;
     const stakeNum = parseFloat(stake || "0");
-    const totalCost = effectiveBetMode === "simples" ? stakeNum * bets.length : stakeNum;
     const multipotential = (stakeNum * parseFloat(totalOdds)).toFixed(2);
 
     return (
@@ -1402,14 +1403,32 @@ export default function Home() {
                   >
                     <X size={16} />
                   </button>
-                  <div className="text-xs text-zinc-400 mb-1 pr-4 truncate">{bet.matchTitle}</div>
+                  <div className="text-xs text-zinc-400 mb-1 pr-6 truncate">{bet.matchTitle}</div>
                   <div className="font-bold text-white text-sm pr-6">{bet.label}</div>
                   <div className="flex items-center justify-between mt-1">
                     <span className="text-red-500 font-bold">{bet.odd.toFixed(2)}</span>
-                    {effectiveBetMode === "simples" && stakeNum > 0 && (
+                    {effectiveBetMode !== "simples" && stakeNum > 0 && (
                       <span className="text-[11px] text-green-400">€ {(stakeNum * bet.odd).toFixed(2)}</span>
                     )}
                   </div>
+                  {effectiveBetMode === "simples" && (
+                    <div className="mt-2 flex items-center gap-2">
+                      <Input
+                        type="number"
+                        placeholder="€ Valor"
+                        min="0.50"
+                        step="0.50"
+                        value={betStakes[betKey(bet)] || ""}
+                        onChange={e => setBetStakes(prev => ({ ...prev, [betKey(bet)]: e.target.value }))}
+                        className="bg-zinc-950 border-zinc-700 text-white font-mono text-xs h-8 flex-1"
+                      />
+                      {parseFloat(betStakes[betKey(bet)] || "0") > 0 && (
+                        <span className="text-xs text-green-400 shrink-0 font-mono">
+                          → € {(parseFloat(betStakes[betKey(bet)] || "0") * bet.odd).toFixed(2)}
+                        </span>
+                      )}
+                    </div>
+                  )}
                 </motion.div>
               ))}
             </AnimatePresence>
@@ -1424,23 +1443,31 @@ export default function Home() {
                 <span className="font-bold text-lg text-white">{totalOdds}x</span>
               </div>
             )}
-            <div className="space-y-2">
-              <Label htmlFor="stake" className="text-zinc-400 text-xs">
-                {effectiveBetMode === "simples" ? `Valor por Aposta (€) — Total: € ${totalCost > 0 ? totalCost.toFixed(2) : "0.00"}` : "Valor da Aposta (€)"}
-              </Label>
-              <Input
-                id="stake"
-                type="number"
-                placeholder="0.00"
-                value={stake}
-                onChange={e => setStake(e.target.value)}
-                className="bg-zinc-950 border-zinc-800 text-white font-mono"
-              />
-            </div>
+            {effectiveBetMode === "simples" && (
+              <div className="flex justify-between items-center text-sm">
+                <span className="text-zinc-400">Total em jogo</span>
+                <span className="font-bold text-white">
+                  € {bets.reduce((s, b) => s + parseFloat(betStakes[betKey(b)] || "0"), 0).toFixed(2)}
+                </span>
+              </div>
+            )}
+            {effectiveBetMode === "multipla" && (
+              <div className="space-y-2">
+                <Label htmlFor="stake" className="text-zinc-400 text-xs">Valor da Aposta (€)</Label>
+                <Input
+                  id="stake"
+                  type="number"
+                  placeholder="0.00"
+                  value={stake}
+                  onChange={e => setStake(e.target.value)}
+                  className="bg-zinc-950 border-zinc-800 text-white font-mono"
+                />
+              </div>
+            )}
             <div className="flex justify-between items-center text-sm">
               <span className="text-zinc-400">Ganhos Potenciais</span>
               <span className="font-bold text-green-500">
-                R$ {effectiveBetMode === "simples" ? simplesPotential : multipotential}
+                € {effectiveBetMode === "simples" ? simplesPotential : multipotential}
               </span>
             </div>
             {effectiveBetMode === "simples" && bets.length > 1 && (
@@ -2968,15 +2995,15 @@ export default function Home() {
                 <div className="text-sm text-zinc-400 mb-1 truncate">{cashoutConfirm.matchTitle}</div>
                 <div className="flex justify-between items-center mt-2">
                   <span className="text-xs text-zinc-500">Valor apostado</span>
-                  <span className="font-bold text-white">R$ {parseFloat(cashoutConfirm.stake).toFixed(2)}</span>
+                  <span className="font-bold text-white">€ {parseFloat(cashoutConfirm.stake).toFixed(2)}</span>
                 </div>
                 <div className="flex justify-between items-center mt-1">
                   <span className="text-xs text-zinc-500">Potencial de ganho</span>
-                  <span className="font-bold text-zinc-300">R$ {parseFloat(cashoutConfirm.potentialWin).toFixed(2)}</span>
+                  <span className="font-bold text-zinc-300">€ {parseFloat(cashoutConfirm.potentialWin).toFixed(2)}</span>
                 </div>
                 <div className="flex justify-between items-center mt-2 pt-2 border-t border-zinc-800">
                   <span className="text-sm font-bold text-zinc-300">Cash Out estimado</span>
-                  <span className="font-black text-green-400 text-lg">R$ {cashoutEstimate(cashoutConfirm)}</span>
+                  <span className="font-black text-green-400 text-lg">€ {cashoutEstimate(cashoutConfirm)}</span>
                 </div>
               </div>
               <div className="flex gap-3">
