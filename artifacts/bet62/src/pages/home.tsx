@@ -454,6 +454,8 @@ type Match = {
   minute?: number;
   markets?: AdvancedMarkets;
   events?: Array<{ type: string; team: string; minute: number; player: string }>;
+  // market key → reopen timestamp (ms); if in future, market is suspended
+  marketSuspension?: Record<string, number>;
 };
 
 type BetSelection = {
@@ -681,6 +683,14 @@ function cardMask(value: string) {
   return value.replace(/\D/g, "").slice(0, 16).replace(/(.{4})/g, "$1 ").trim();
 }
 
+function sportEmoji(sport?: string): string {
+  if (sport === "basketball") return "🏀";
+  if (sport === "tennis") return "🎾";
+  if (sport === "hockey") return "🏒";
+  if (sport === "volleyball") return "🏐";
+  return "⚽";
+}
+
 export default function Home() {
   const auth = useAuth();
   const [activeTab, setActiveTab] = useState<"sports" | "live" | "promos" | "mybets" | "wallet" | "profile">("sports");
@@ -881,9 +891,11 @@ export default function Home() {
         const data = await res.json();
         const matches = (data.matches || []) as Array<{
           id: string; home: string; away: string; league: string;
+          country?: string; sport?: string;
           homeScore: number; awayScore: number; minute: number;
           hasRealOdds?: boolean; odds: Odds; markets?: AdvancedMarkets;
           events?: Array<{ type: string; team: string; minute: number; player: string }>;
+          marketSuspension?: Record<string, number>;
         }>;
         // Record API minutes for local ticker interpolation
         const newMins: Record<string, number> = {};
@@ -1129,10 +1141,23 @@ export default function Home() {
   const OddsButton = ({ match, selection, odd, market = "result", label, grow }: {
     match: Match; selection: string; odd: number; market?: string; label: string; grow?: boolean;
   }) => {
+    const now = Date.now();
+    const suspendedUntil = match.marketSuspension?.[market];
+    const isSuspended = suspendedUntil !== undefined && suspendedUntil > now;
     const isSelected = !!bets.find(b => b.matchId === match.id && b.market === market && b.selection === selection);
     const prevOdd = match.isLive ? prevLiveOdds.current[String(match.id)]?.[selection as keyof Odds] : undefined;
-    const oddsUp = prevOdd !== undefined && odd > prevOdd;
-    const oddsDown = prevOdd !== undefined && odd < prevOdd;
+    const oddsUp = !isSuspended && prevOdd !== undefined && odd > prevOdd;
+    const oddsDown = !isSuspended && prevOdd !== undefined && odd < prevOdd;
+
+    if (isSuspended) {
+      return (
+        <button disabled className={`relative flex flex-col items-center py-2.5 px-2 rounded-md text-xs cursor-not-allowed ${grow ? "flex-1" : ""} bg-zinc-800/40 text-zinc-600`}>
+          <span className="mb-0.5 text-[10px] leading-tight opacity-50">{label}</span>
+          <span className="font-bold text-sm">🔒</span>
+        </button>
+      );
+    }
+
     return (
       <button
         onClick={() => toggleBet(match, selection, odd, market, label)}
@@ -1161,7 +1186,7 @@ export default function Home() {
         <div className="flex items-center gap-2 min-w-0">
           <div className="relative shrink-0 w-6 h-6 flex items-center justify-center rounded-full bg-zinc-800 text-sm leading-none">
             {flag}
-            <span className="absolute -bottom-0.5 -right-1 bg-zinc-950 rounded-full text-[9px] w-3.5 h-3.5 flex items-center justify-center border border-zinc-800">⚽</span>
+            <span className="absolute -bottom-0.5 -right-1 bg-zinc-950 rounded-full text-[9px] w-3.5 h-3.5 flex items-center justify-center border border-zinc-800">{sportEmoji(match.sport)}</span>
           </div>
           <span className="text-[11px] text-zinc-500 truncate">{match.league}</span>
         </div>
@@ -1177,7 +1202,7 @@ export default function Home() {
     // Use locally interpolated minute — ticks between API refreshes
     const minute = getDisplayMinute(match);
     const progress = Math.min(100, (minute / 90) * 100);
-    const flag = COUNTRY_FLAGS[match.country?.toLowerCase() ?? ""] ?? "⚽";
+    const flag = COUNTRY_FLAGS[match.country?.toLowerCase() ?? ""] ?? sportEmoji(match.sport);
     const bannerImg = getTeamBanner(match.home, match.country);
     // Suppress fade-in animation for already-seen matches (silent background update)
     const matchKey = String(match.id);
@@ -1215,7 +1240,10 @@ export default function Home() {
           {/* Top: league + live badge */}
           <div className="absolute top-0 left-0 right-0 flex items-center justify-between px-4 pt-3">
             <div className="flex items-center gap-2">
-              <span className="text-sm leading-none">{flag}</span>
+              <div className="relative w-5 h-5 flex items-center justify-center leading-none text-sm">
+                {flag}
+                <span className="absolute -bottom-0.5 -right-1.5 bg-black/60 rounded-full text-[8px] w-3 h-3 flex items-center justify-center">{sportEmoji(match.sport)}</span>
+              </div>
               <span className="text-xs text-white/80 font-medium drop-shadow">{match.league}</span>
             </div>
             <div className="flex items-center gap-2">{liveBadge}</div>
@@ -1276,12 +1304,11 @@ export default function Home() {
   };
 
   const MatchCard = ({ match }: { match: Match }) => {
-    const flag = COUNTRY_FLAGS[match.country?.toLowerCase() ?? ""] ?? (match.sport === "basketball" ? "🏀" : match.sport === "tennis" ? "🎾" : match.sport === "hockey" ? "🏒" : match.sport === "volleyball" ? "🏐" : "⚽");
+    const flag = COUNTRY_FLAGS[match.country?.toLowerCase() ?? ""] ?? sportEmoji(match.sport);
     const dateStr = match.date ? formatMatchDate(match.date) : "";
     const bannerImg = getTeamBanner(match.home, match.country);
     const rivalry = RIVALRY_TAGS[`${match.home}|${match.away}`];
     const hasDraw = match.odds.draw > 0;
-    const sportIcon = match.sport === "basketball" ? "🏀" : match.sport === "tennis" ? "🎾" : match.sport === "hockey" ? "🏒" : match.sport === "volleyball" ? "🏐" : null;
 
     const OddsRow = () => match.hasRealOdds ? (
       <div className="flex gap-2 w-full">
@@ -1301,7 +1328,10 @@ export default function Home() {
           <div className="absolute inset-0 bg-gradient-to-t from-black via-black/50 to-black/10" />
           <div className="absolute top-0 left-0 right-0 flex items-center justify-between px-4 pt-3">
             <div className="flex items-center gap-2">
-              <span className="text-sm leading-none">{sportIcon ?? flag}</span>
+              <div className="relative w-5 h-5 flex items-center justify-center leading-none text-sm">
+                {flag}
+                <span className="absolute -bottom-0.5 -right-1.5 bg-black/60 rounded-full text-[8px] w-3 h-3 flex items-center justify-center">{sportEmoji(match.sport)}</span>
+              </div>
               <span className="text-xs text-white/80 font-medium drop-shadow">{match.league}</span>
             </div>
             <span className="text-xs text-white/60">{dateStr}{match.time ? ` • ${match.time}` : ""}</span>

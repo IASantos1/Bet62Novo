@@ -37,6 +37,7 @@ export type LiveMatchState = {
   away: string;
   league: string;
   country: string;
+  sport: string;
   homeScore: number;
   awayScore: number;
   minute: number;
@@ -45,6 +46,8 @@ export type LiveMatchState = {
   odds: { home: number; draw: number; away: number };
   markets: AdvancedMarkets;
   events: Array<{ type: string; team: string; minute: number; player: string }>;
+  // market key → timestamp (ms) when it reopens; absent or past = open
+  marketSuspension?: Record<string, number>;
   // Internal tracking for live odds drift engine
   _baseOdds?: { home: number; draw: number; away: number };
   _oddsUpdatedAt?: number;
@@ -876,6 +879,7 @@ function buildNHLLiveMatches(tournaments: NHLTournament[]): LiveMatchState[] {
         away: m.away.name,
         league: t.league,
         country: t.country,
+        sport: "hockey",
         homeScore,
         awayScore,
         minute,
@@ -915,10 +919,26 @@ async function buildLiveMatches(): Promise<LiveMatchState[]> {
       const awayScore = m.away.goals === "?" ? 0 : parseInt(m.away.goals) || 0;
       const minute = isHT ? 45 : isET ? 105 : parseInt(m.status) || 1;
 
+      // Market suspension delays on goal (ms per market key)
+      const GOAL_SUSPENSION_MS: Record<string, number> = {
+        result: 8000,
+        doubleChance: 7000,
+        totalGoals: 10000,
+        handicap: 10000,
+        halfTime: 6000,
+        htft: 12000,
+        correctScore: 15000,
+        asianHandicap: 12000,
+        asianTotals: 12000,
+        drawNoBet: 8000,
+        firstGoal: 8000,
+      };
+
       // Stable odds: once assigned, keep unless score changes significantly
       const existing = liveMatchState.get(m.main_id);
       let matchOdds: { home: number; draw: number; away: number };
       let matchMarkets: AdvancedMarkets;
+      let matchMarketSuspension: Record<string, number> | undefined;
 
       let hasRealOdds = true; // Always show odds — use model when real unavailable
 
@@ -927,6 +947,13 @@ async function buildLiveMatches(): Promise<LiveMatchState[]> {
         const base = existing._baseOdds ?? existing.odds;
         const now = Date.now();
         const phase = (existing._driftPhase ?? 0) + 1;
+        // Clean expired suspensions
+        if (existing.marketSuspension) {
+          const active = Object.fromEntries(
+            Object.entries(existing.marketSuspension).filter(([, ts]) => ts > now)
+          );
+          matchMarketSuspension = Object.keys(active).length > 0 ? active : undefined;
+        }
 
         // Time-based micro-drift: oscillates odds naturally
         // Uses two sine waves at different frequencies to create organic movement
@@ -950,13 +977,21 @@ async function buildLiveMatches(): Promise<LiveMatchState[]> {
         matchMarkets = existing.markets;
 
         // Store drift phase for next cycle
-        const updatedState = { ...existing, odds: matchOdds, minute, _driftPhase: phase };
+        const updatedState = { ...existing, odds: matchOdds, minute, _driftPhase: phase, marketSuspension: matchMarketSuspension };
         liveMatchState.set(m.main_id, updatedState);
         result.push({ ...updatedState, events: existing.events });
         count++;
         continue;
       } else {
         // Score changed or first seen — build base odds from pre-match model/real data
+        // Detect goal: score increased vs previous state
+        const isGoal = existing != null && (homeScore > existing.homeScore || awayScore > existing.awayScore);
+        if (isGoal) {
+          const now = Date.now();
+          matchMarketSuspension = Object.fromEntries(
+            Object.entries(GOAL_SUSPENSION_MS).map(([k, delay]) => [k, now + delay])
+          );
+        }
         const resolved = resolveOdds(m, odds);
         matchMarkets = resolved.markets;
         hasRealOdds = true;
@@ -1001,6 +1036,7 @@ async function buildLiveMatches(): Promise<LiveMatchState[]> {
         away: m.away.name,
         league: league.name,
         country: league.country,
+        sport: "football",
         homeScore,
         awayScore,
         minute,
@@ -1009,6 +1045,7 @@ async function buildLiveMatches(): Promise<LiveMatchState[]> {
         odds: matchOdds,
         markets: matchMarkets,
         events,
+        marketSuspension: matchMarketSuspension,
         _baseOdds: matchOdds,
         _oddsUpdatedAt: Date.now(),
         _driftPhase: 0,
