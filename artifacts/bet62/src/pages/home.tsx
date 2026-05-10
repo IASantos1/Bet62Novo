@@ -825,6 +825,16 @@ export default function Home() {
   };
   const [tennisOddsMatches, setTennisOddsMatches] = useState<TennisOddsEntry[]>([]);
 
+  // Volleyball pre-match odds
+  type VolleyOddsEntry = {
+    matchId: string; date: string; time: string; league: string;
+    homeTeam: { id: string; name: string }; awayTeam: { id: string; name: string };
+    homeOdds: number; awayOdds: number;
+    overUnder: { line: string; over: number; under: number } | null;
+  };
+  const [volleyOddsMatches, setVolleyOddsMatches] = useState<VolleyOddsEntry[]>([]);
+  const [volleyOddsOpen, setVolleyOddsOpen] = useState(true);
+
   // Volleyball leagues + schedule
   type VolleyLeague = { id: string; gid: string; league: string; country: string };
   type VolleyScheduleEntry = {
@@ -1002,6 +1012,10 @@ export default function Home() {
     fetch("/api/matches/tennis-odds")
       .then(r => r.ok ? r.json() : null)
       .then(d => { if (d?.odds) setTennisOddsMatches(d.odds); })
+      .catch(() => { /* non-critical */ });
+    fetch("/api/matches/volleyball-odds")
+      .then(r => r.ok ? r.json() : null)
+      .then(d => { if (d?.odds) setVolleyOddsMatches(d.odds); })
       .catch(() => { /* non-critical */ });
   }, []);
 
@@ -3690,6 +3704,123 @@ export default function Home() {
                       )}
                     </div>
                   )}
+
+                  {/* ─── Odds Pré-Jogo de Voleibol ───────────────────────────── */}
+                  {(selectedSport === "all" || selectedSport === "volleyball") && volleyOddsMatches.length > 0 && !selectedLeague && (() => {
+                    const today = new Date();
+                    const todayStr = `${String(today.getDate()).padStart(2,"0")}.${String(today.getMonth()+1).padStart(2,"0")}.${today.getFullYear()}`;
+                    const tomorrow = new Date(today); tomorrow.setDate(tomorrow.getDate()+1);
+                    const tomorrowStr = `${String(tomorrow.getDate()).padStart(2,"0")}.${String(tomorrow.getMonth()+1).padStart(2,"0")}.${tomorrow.getFullYear()}`;
+                    const formatDate = (d: string) => d === todayStr ? "Hoje" : d === tomorrowStr ? "Amanhã" : d.split(".").slice(0,2).join("/");
+
+                    // Group by league
+                    const byLeague = volleyOddsMatches.reduce<Record<string, VolleyOddsEntry[]>>((acc, m) => {
+                      (acc[m.league] ??= []).push(m); return acc;
+                    }, {});
+
+                    return (
+                      <div className="mb-6">
+                        <button
+                          onClick={() => setVolleyOddsOpen(o => !o)}
+                          className="w-full flex items-center justify-between mb-3 group"
+                        >
+                          <div className="flex items-center gap-2">
+                            <span className="text-base font-black italic uppercase tracking-tight text-zinc-400 group-hover:text-white transition-colors">
+                              🏐 Odds Pré-Jogo
+                            </span>
+                            <span className="text-[10px] font-bold bg-zinc-800 text-zinc-500 rounded px-1.5 py-0.5">
+                              {volleyOddsMatches.length}
+                            </span>
+                          </div>
+                          <ChevronDown size={14} className={`text-zinc-600 transition-transform duration-200 ${volleyOddsOpen ? "" : "-rotate-90"}`} />
+                        </button>
+
+                        {volleyOddsOpen && (
+                          <div className="space-y-3">
+                            {Object.entries(byLeague).map(([league, matches]) => (
+                              <div key={league} className="rounded-2xl border border-zinc-800 bg-zinc-900/60 overflow-hidden">
+                                {/* league header */}
+                                <div className="px-3 py-2 border-b border-zinc-800 flex items-center gap-2">
+                                  <span className="text-[9px] font-black uppercase tracking-widest text-zinc-500">{league}</span>
+                                </div>
+                                {/* match rows */}
+                                <div className="divide-y divide-zinc-800/60">
+                                  {matches.map(m => {
+                                    const fakeId = `volley-odds-${m.matchId}`;
+                                    const makeMatch = (home: string, away: string) => ({
+                                      id: fakeId, home, away, league: m.league,
+                                      odds: { home: 0, draw: 0, away: 0 },
+                                    } as unknown as Match);
+                                    const OddBtn = ({ sel, odd, label, market }: { sel: "home" | "away"; odd: number; label: string; market: string }) => {
+                                      const selected = !!bets.find(b => b.matchId === fakeId && b.market === market && b.selection === sel);
+                                      return (
+                                        <button
+                                          onClick={() => toggleBet(makeMatch(m.homeTeam.name, m.awayTeam.name), sel, odd, market, label)}
+                                          className={`text-[10px] font-black px-2 py-1 rounded tabular-nums transition-colors border ${selected ? "bg-red-600 border-red-500 text-white" : "bg-zinc-800 border-zinc-700 text-zinc-300 hover:border-zinc-500 hover:text-white"}`}
+                                        >
+                                          {odd.toFixed(2)}
+                                        </button>
+                                      );
+                                    };
+                                    return (
+                                      <div key={m.matchId} className="px-3 py-2.5">
+                                        {/* date + time header for this match */}
+                                        <div className="flex items-center gap-1.5 mb-2">
+                                          <span className="text-[9px] font-bold text-emerald-500">{formatDate(m.date)}</span>
+                                          <span className="text-[9px] text-zinc-600 tabular-nums">{m.time}</span>
+                                        </div>
+                                        {/* teams + H/A odds */}
+                                        <div className="flex items-center gap-2 mb-1.5">
+                                          <div className="flex-1 min-w-0">
+                                            <div className="text-xs font-bold text-white truncate">{m.homeTeam.name}</div>
+                                            <div className="text-xs text-zinc-500 truncate">{m.awayTeam.name}</div>
+                                          </div>
+                                          <div className="flex flex-col gap-1 items-end shrink-0">
+                                            <div className="flex items-center gap-1">
+                                              <span className="text-[9px] text-zinc-600">1</span>
+                                              <OddBtn sel="home" odd={m.homeOdds} label={m.homeTeam.name} market="Resultado" />
+                                            </div>
+                                            <div className="flex items-center gap-1">
+                                              <span className="text-[9px] text-zinc-600">2</span>
+                                              <OddBtn sel="away" odd={m.awayOdds} label={m.awayTeam.name} market="Resultado" />
+                                            </div>
+                                          </div>
+                                        </div>
+                                        {/* Over/Under line */}
+                                        {m.overUnder && (() => {
+                                          const ouId = `volley-odds-ou-${m.matchId}`;
+                                          const ouMatch = { ...makeMatch(m.homeTeam.name, m.awayTeam.name), id: ouId };
+                                          const selO = !!bets.find(b => b.matchId === ouId && b.selection === "home");
+                                          const selU = !!bets.find(b => b.matchId === ouId && b.selection === "away");
+                                          return (
+                                            <div className="flex items-center gap-1.5 pt-1 border-t border-zinc-800/60 mt-1">
+                                              <span className="text-[9px] text-zinc-600 shrink-0">O/U {m.overUnder.line} sets</span>
+                                              <button
+                                                onClick={() => toggleBet(ouMatch, "home", m.overUnder!.over, "Over/Under", `Over ${m.overUnder!.line}`)}
+                                                className={`text-[10px] font-black px-2 py-0.5 rounded tabular-nums transition-colors border ${selO ? "bg-red-600 border-red-500 text-white" : "bg-zinc-800 border-zinc-700 text-zinc-300 hover:border-zinc-500"}`}
+                                              >
+                                                O {m.overUnder.over.toFixed(2)}
+                                              </button>
+                                              <button
+                                                onClick={() => toggleBet(ouMatch, "away", m.overUnder!.under, "Over/Under", `Under ${m.overUnder!.line}`)}
+                                                className={`text-[10px] font-black px-2 py-0.5 rounded tabular-nums transition-colors border ${selU ? "bg-red-600 border-red-500 text-white" : "bg-zinc-800 border-zinc-700 text-zinc-300 hover:border-zinc-500"}`}
+                                              >
+                                                U {m.overUnder.under.toFixed(2)}
+                                              </button>
+                                            </div>
+                                          );
+                                        })()}
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
 
                   {/* ─── Ligas de Voleibol ───────────────────────────────────── */}
                   {(selectedSport === "all" || selectedSport === "volleyball") && volleyLeagues.length > 0 && !selectedLeague && (

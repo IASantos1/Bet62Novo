@@ -3196,6 +3196,118 @@ let tennisOddsCache: TennisOddsEntry[] | null = null;
 let tennisOddsFetchedAt = 0;
 const TENNIS_ODDS_TTL = 60 * 1000; // 1 min — odds fluctuate
 
+// ─── Volleyball pre-match odds ────────────────────────────────────────────────
+type VolleyOddsOdd = { id?: string; name?: string; value?: string };
+type VolleyOddsTotal = { name?: string; stop?: string; odd?: VolleyOddsOdd | VolleyOddsOdd[] };
+type VolleyOddsBk = { id?: string; name?: string; stop?: string; ts?: string; odd?: VolleyOddsOdd | VolleyOddsOdd[]; total?: VolleyOddsTotal | VolleyOddsTotal[] };
+type VolleyOddsType = { id?: string; stop?: string; value?: string; bookmaker?: VolleyOddsBk | VolleyOddsBk[] };
+type VolleyOddsTeam = { id?: string; name?: string };
+type VolleyOddsMatch = { id?: string; date?: string; time?: string; status?: string; home?: VolleyOddsTeam; away?: VolleyOddsTeam; odds?: { ts?: string; type?: VolleyOddsType | VolleyOddsType[] } };
+type VolleyOddsTour = { gid?: string; id?: string; league?: string; matches?: { match?: VolleyOddsMatch | VolleyOddsMatch[] } };
+export type VolleyOddsEntry = {
+  matchId: string; date: string; time: string; league: string;
+  homeTeam: { id: string; name: string }; awayTeam: { id: string; name: string };
+  homeOdds: number; awayOdds: number;
+  overUnder: { line: string; over: number; under: number } | null;
+};
+let volleyOddsCache: VolleyOddsEntry[] | null = null;
+let volleyOddsFetchedAt = 0;
+const VOLLEY_ODDS_TTL = 5 * 60 * 1000;
+
+async function getVolleyballOdds(): Promise<VolleyOddsEntry[]> {
+  const now = Date.now();
+  if (volleyOddsCache && now - volleyOddsFetchedAt < VOLLEY_ODDS_TTL) return volleyOddsCache;
+  const resp = await fetch(`${BASE_V1}/volleyball/odds?access_key=${STATSPAL_KEY}`, { signal: AbortSignal.timeout(9000) });
+  if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+  const data = (await resp.json()) as { odds?: { tournament?: unknown } };
+  const rawTours = data?.odds?.tournament;
+  if (!rawTours) return [];
+  const tours = (Array.isArray(rawTours) ? rawTours : [rawTours]) as VolleyOddsTour[];
+
+  // Average decimal odds across bookmakers then apply 2.5% house margin
+  const avgOdd = (bks: VolleyOddsBk[], nameFilter: "Home" | "Away"): number => {
+    const vals: number[] = [];
+    for (const bk of bks) {
+      if (bk.stop === "True") continue;
+      const odds = Array.isArray(bk.odd) ? bk.odd : (bk.odd ? [bk.odd] : []);
+      const o = odds.find(o => o.name === nameFilter);
+      const v = parseFloat(o?.value ?? "0");
+      if (v > 1) vals.push(v);
+    }
+    if (!vals.length) return 0;
+    const avg = vals.reduce((a, b) => a + b, 0) / vals.length;
+    return Math.max(1.01, Math.round(avg * 0.975 * 100) / 100);
+  };
+
+  const results: VolleyOddsEntry[] = [];
+  const seen = new Set<string>();
+
+  for (const t of tours) {
+    const rawMatches = t.matches?.match;
+    if (!rawMatches) continue;
+    const matches = Array.isArray(rawMatches) ? rawMatches : [rawMatches];
+    for (const m of matches) {
+      if (!m.id || seen.has(m.id)) continue;
+      if (m.status !== "Not Started") continue;
+      seen.add(m.id);
+      const rawTypes = m.odds?.type;
+      const types: VolleyOddsType[] = !rawTypes ? [] : Array.isArray(rawTypes) ? rawTypes : [rawTypes];
+
+      // Home/Away odds
+      const haType = types.find(tp => tp.value === "Home/Away");
+      if (!haType) continue;
+      const haBks = (Array.isArray(haType.bookmaker) ? haType.bookmaker : haType.bookmaker ? [haType.bookmaker] : []) as VolleyOddsBk[];
+      const h = avgOdd(haBks, "Home");
+      const a = avgOdd(haBks, "Away");
+      if (!h || !a) continue;
+
+      // Over/Under line 3.5 (match goes 4+ sets)
+      let overUnder: VolleyOddsEntry["overUnder"] = null;
+      const ouType = types.find(tp => tp.value === "Over/Under");
+      if (ouType) {
+        const ouBks = (Array.isArray(ouType.bookmaker) ? ouType.bookmaker : ouType.bookmaker ? [ouType.bookmaker] : []) as VolleyOddsBk[];
+        for (const bk of ouBks) {
+          const totals = (Array.isArray(bk.total) ? bk.total : bk.total ? [bk.total] : []) as VolleyOddsTotal[];
+          const t35 = totals.find(t => t.name === "3.5");
+          if (t35) {
+            const odds35 = Array.isArray(t35.odd) ? t35.odd : (t35.odd ? [t35.odd] : []);
+            const over = odds35.find(o => o.name === "Over");
+            const under = odds35.find(o => o.name === "Under");
+            if (over?.value && under?.value) {
+              overUnder = {
+                line: "3.5",
+                over: Math.max(1.01, Math.round(parseFloat(over.value) * 0.975 * 100) / 100),
+                under: Math.max(1.01, Math.round(parseFloat(under.value) * 0.975 * 100) / 100),
+              };
+              break;
+            }
+          }
+        }
+      }
+
+      results.push({
+        matchId: m.id, date: m.date ?? "", time: m.time ?? "",
+        league: t.league ?? "",
+        homeTeam: { id: m.home?.id ?? "", name: m.home?.name ?? "" },
+        awayTeam: { id: m.away?.id ?? "", name: m.away?.name ?? "" },
+        homeOdds: h, awayOdds: a, overUnder,
+      });
+    }
+  }
+  volleyOddsCache = results;
+  volleyOddsFetchedAt = now;
+  return results;
+}
+
+router.get("/volleyball-odds", async (_req, res) => {
+  try {
+    const odds = await getVolleyballOdds();
+    res.json({ odds });
+  } catch {
+    res.status(500).json({ error: "Odds de voleibol indisponíveis" });
+  }
+});
+
 async function getTennisOdds(): Promise<TennisOddsEntry[]> {
   const now = Date.now();
   if (tennisOddsCache && now - tennisOddsFetchedAt < TENNIS_ODDS_TTL) return tennisOddsCache;

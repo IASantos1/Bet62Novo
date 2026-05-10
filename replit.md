@@ -34,6 +34,8 @@ Bet62 é uma plataforma completa de apostas esportivas com dados ao vivo via Sta
 - `GET /api/matches/volleyball-results` — yesterday's volleyball results (`v1/volleyball/daily/d-1`), 5 min cache; `{ results: VolleyDailyResult[] }` with set-by-set scores and homeWon flag
 - `GET /api/matches/volleyball-leagues` — active volleyball leagues from today's livescores; `{ leagues: VolleyLeague[] }` with id/gid/league/country; 30s cache (via getVolleyballLive)
 - `GET /api/matches/volleyball-schedule/:id` — full season schedule for a league (id = tournament id from livescores); 5 min cache; `{ league, season, country, recentWeeks[], nextWeek }` — recentWeeks = last 3 finished rounds, nextWeek = first round with upcoming matches
+- `GET /api/matches/volleyball-standings/:id` — league standings table; 5 min cache; `{ id, name, season, country, teams[] }` — teams = [] for play-off phases (API returns no data); pos/w/l/pts/points_for/points_against/recent_form/description
+- `GET /api/matches/volleyball-odds` — pre-match odds for all upcoming volleyball matches (`v1/volleyball/odds`); 5 min cache; `{ odds: VolleyOddsEntry[] }` — averaged across bookmakers with 2.5% house margin; includes Home/Away + Over/Under 3.5 sets line
 - `artifacts/api-server/src/middlewares/auth.ts` — JWT middleware for users
 - `artifacts/api-server/src/middlewares/adminAuth.ts` — JWT middleware for admins
 - `lib/db/src/schema/users.ts` — users DB schema
