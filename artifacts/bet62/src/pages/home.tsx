@@ -1389,8 +1389,24 @@ export default function Home() {
       { title: "EM",        subtitle: "DESTAQUE",  bonus: "+10%",   label: "🏆 FAVORITOS DO DIA",     count: "80+ apostas"  },
     ];
 
+    // Interleave matches from different leagues/countries so each banner has variety
+    const byLeague = new Map<string, Match[]>();
+    for (const m of upcomingMatches) {
+      const key = `${m.country ?? ""}|${m.league ?? ""}`;
+      if (!byLeague.has(key)) byLeague.set(key, []);
+      byLeague.get(key)!.push(m);
+    }
+    const leagueGroups = Array.from(byLeague.values());
+    const interleaved: Match[] = [];
+    const maxLen = leagueGroups.reduce((a, b) => Math.max(a, b.length), 0);
+    for (let i = 0; i < maxLen; i++) {
+      for (const grp of leagueGroups) {
+        if (i < grp.length) interleaved.push(grp[i]);
+      }
+    }
+
     const chunks: Match[][] = BANNER_CONFIGS.map((_, i) =>
-      upcomingMatches.slice(i * 5, i * 5 + 5)
+      interleaved.slice(i * 5, i * 5 + 5)
     ).filter(c => c.length > 0);
 
     if (chunks.length === 0) return null;
@@ -1407,7 +1423,7 @@ export default function Home() {
 
     return (
       <div className="mb-6">
-        <div className="flex gap-4 overflow-x-auto pb-2 snap-x snap-mandatory scrollbar-none" style={{ scrollbarWidth: "none" }}>
+        <div className="flex gap-3 overflow-x-auto pb-2 snap-x snap-mandatory scrollbar-none" style={{ scrollbarWidth: "none" }}>
           {chunks.map((events, bi) => {
             const cfg = BANNER_CONFIGS[bi];
             const totalOddsVal = events
@@ -1417,40 +1433,40 @@ export default function Home() {
             return (
               <div
                 key={bi}
-                className="snap-center shrink-0 w-[340px] rounded-[28px] p-6 flex flex-col"
+                className="snap-center shrink-0 w-[268px] rounded-[22px] p-4 flex flex-col"
                 style={{
                   background: "linear-gradient(180deg,#1c0a0a,#0a0a0a)",
                   border: "1px solid rgba(220,38,38,0.2)",
-                  boxShadow: "0 0 30px rgba(220,38,38,0.12)",
+                  boxShadow: "0 0 24px rgba(220,38,38,0.1)",
                 }}
               >
                 {/* Header */}
-                <div className="flex justify-between items-start mb-5">
-                  <div className="leading-none">
-                    <div className="font-black italic text-4xl text-white tracking-wide uppercase">{cfg.title}</div>
-                    <div className="font-black italic text-4xl text-red-500 tracking-wide uppercase">{cfg.subtitle}</div>
+                <div className="flex justify-between items-start mb-3">
+                  <div className="leading-[1.1]">
+                    <div className="font-black italic text-[26px] text-white tracking-wide uppercase">{cfg.title}</div>
+                    <div className="font-black italic text-[26px] text-red-500 tracking-wide uppercase">{cfg.subtitle}</div>
                   </div>
                   <div
-                    className="rounded-[18px] px-4 py-3 text-center"
+                    className="rounded-[14px] px-3 py-2 text-center"
                     style={{
                       background: "#0b0b0b",
                       border: "2px solid #dc2626",
-                      boxShadow: "0 0 20px rgba(220,38,38,0.35)",
+                      boxShadow: "0 0 14px rgba(220,38,38,0.3)",
                     }}
                   >
-                    <span className="block text-white font-bold text-xl leading-none">BET+</span>
-                    <span className="block text-red-500 font-bold text-xl leading-none mt-0.5">{cfg.bonus}</span>
+                    <span className="block text-white font-bold text-[15px] leading-none">BET+</span>
+                    <span className="block text-red-500 font-bold text-[15px] leading-none mt-0.5">{cfg.bonus}</span>
                   </div>
                 </div>
 
                 {/* Info row */}
-                <div className="flex justify-between mb-4 text-red-500 font-semibold text-[13px]">
+                <div className="flex justify-between mb-3 text-red-500 font-semibold text-[11px]">
                   <span>{cfg.label}</span>
                   <span>{cfg.count}</span>
                 </div>
 
                 {/* Event rows */}
-                <div className="flex flex-col gap-3 flex-1">
+                <div className="flex flex-col gap-2 flex-1">
                   {events.map((m, ei) => {
                     const flag = COUNTRY_FLAGS[m.country?.toLowerCase() ?? ""] ?? sportEmoji(m.sport);
                     const timeStr = m.date ? formatMatchDate(m.date) : (m.time ?? "");
@@ -1458,39 +1474,38 @@ export default function Home() {
                     return (
                       <div
                         key={ei}
-                        className="rounded-[18px] p-4 flex justify-between items-center"
+                        className="rounded-[14px] p-2.5 flex justify-between items-center"
                         style={{
                           background: isSelected ? "rgba(220,38,38,0.12)" : "#0d0d0d",
                           border: isSelected ? "1px solid rgba(220,38,38,0.5)" : "1px solid rgba(220,38,38,0.1)",
-                          boxShadow: "0 0 10px rgba(220,38,38,0.06)",
                         }}
                       >
-                        <div className="flex gap-3 min-w-0">
+                        <div className="flex gap-2 min-w-0">
                           {/* Team logo circles */}
-                          <div className="flex flex-col gap-1.5 shrink-0">
+                          <div className="flex flex-col gap-1 shrink-0">
                             <div
-                              className="w-9 h-9 rounded-full flex items-center justify-center text-[15px]"
-                              style={{ background: "#1a1a1a", border: "2px solid #dc2626" }}
+                              className="w-6 h-6 rounded-full flex items-center justify-center text-[10px]"
+                              style={{ background: "#1a1a1a", border: "1.5px solid #dc2626" }}
                             >
                               {flag}
                             </div>
                             <div
-                              className="w-9 h-9 rounded-full flex items-center justify-center text-[15px]"
-                              style={{ background: "#1a1a1a", border: "2px solid #dc2626" }}
+                              className="w-6 h-6 rounded-full flex items-center justify-center text-[10px]"
+                              style={{ background: "#1a1a1a", border: "1.5px solid #dc2626" }}
                             >
                               {flag}
                             </div>
                           </div>
                           {/* Text */}
                           <div className="min-w-0">
-                            <div className="text-white font-bold text-[15px] truncate leading-tight">{m.home}</div>
-                            <div className="text-zinc-400 text-[12px] truncate">Vencedor</div>
-                            <div className="text-zinc-500 text-[11px] truncate">{m.home} vs {m.away}</div>
-                            <div className="text-zinc-600 text-[11px] mt-0.5">🕒 {timeStr}</div>
+                            <div className="text-white font-bold text-[12px] truncate leading-tight">{m.home}</div>
+                            <div className="text-zinc-400 text-[10px] truncate">Vencedor</div>
+                            <div className="text-zinc-500 text-[10px] truncate">{m.away}</div>
+                            <div className="text-zinc-600 text-[10px]">🕒 {timeStr}</div>
                           </div>
                         </div>
                         {/* Odds */}
-                        <div className="text-red-500 font-bold text-[28px] leading-none shrink-0 ml-2">
+                        <div className="text-red-500 font-bold text-[20px] leading-none shrink-0 ml-1.5">
                           {m.odds.home > 0 ? m.odds.home.toFixed(2) : "—"}
                         </div>
                       </div>
@@ -1499,20 +1514,20 @@ export default function Home() {
                 </div>
 
                 {/* Footer */}
-                <div className="flex gap-3 mt-5">
+                <div className="flex gap-2 mt-3">
                   <div
-                    className="rounded-[18px] px-4 py-3"
+                    className="rounded-[14px] px-3 py-2"
                     style={{ background: "#0b0b0b", border: "1px solid #dc2626" }}
                   >
-                    <div className="text-zinc-500 text-[12px] leading-none mb-1">ODD TOTAL</div>
-                    <div className="text-red-500 font-black text-3xl leading-none">{totalOddsVal}</div>
+                    <div className="text-zinc-500 text-[10px] leading-none mb-0.5">ODD TOTAL</div>
+                    <div className="text-red-500 font-black text-[22px] leading-none">{totalOddsVal}</div>
                   </div>
                   <button
                     onClick={() => addAllToBetSlip(events)}
-                    className="flex-1 rounded-[18px] font-bold text-[14px] text-white transition-opacity hover:opacity-90 active:scale-95"
+                    className="flex-1 rounded-[14px] font-bold text-[12px] text-white transition-opacity hover:opacity-90 active:scale-95"
                     style={{
                       background: "linear-gradient(135deg,#dc2626,#991b1b)",
-                      boxShadow: "0 0 20px rgba(220,38,38,0.45)",
+                      boxShadow: "0 0 16px rgba(220,38,38,0.4)",
                     }}
                   >
                     ADICIONAR<br />AO BOLETIM
@@ -1520,9 +1535,9 @@ export default function Home() {
                 </div>
 
                 {/* Bottom disclaimer */}
-                <div className="flex justify-between mt-4 text-[11px]">
+                <div className="flex justify-between mt-2.5 text-[9px]">
                   <span className="text-zinc-700">JOGUE COM RESPONSABILIDADE</span>
-                  <span className="text-red-700 font-semibold">AS MELHORES ODDS</span>
+                  <span className="text-red-800 font-semibold">AS MELHORES ODDS</span>
                 </div>
               </div>
             );
