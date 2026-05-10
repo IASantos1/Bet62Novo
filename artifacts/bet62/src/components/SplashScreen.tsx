@@ -35,15 +35,42 @@ export default function SplashScreen({ onDone }: { onDone: () => void }) {
             transition={{ duration: 0.55, delay: 0.2, ease: "easeOut" }}
             className="flex flex-col items-center gap-5"
           >
-            {/* Icon */}
+            {/* Icon — soccer ball */}
             <motion.div
               initial={{ scale: 0.7, rotate: -8 }}
               animate={{ scale: 1, rotate: 0 }}
               transition={{ duration: 0.5, delay: 0.25, type: "spring", stiffness: 200 }}
-              className="w-20 h-20 rounded-2xl bg-red-600 flex items-center justify-center shadow-2xl shadow-red-900/60"
+              className="w-24 h-24 rounded-[28px] bg-zinc-950 flex items-center justify-center shadow-2xl shadow-red-900/50 border border-red-600/30"
             >
-              <svg viewBox="0 0 80 80" width="56" height="56" fill="none">
-                <path d="M28 56V24h16c5 0 8.5 3 8.5 7.5 0 2.8-1.4 5-3.6 6.2 2.8 1.2 4.6 3.7 4.6 6.8C53.5 50.2 49.5 56 43 56H28zm8-19h7c2.5 0 4-1.4 4-3.5S45.5 30 43 30h-7v7zm0 12h7.5c2.8 0 4.5-1.5 4.5-3.8S46.3 43 43.5 43H36v6z" fill="white"/>
+              <svg viewBox="0 0 192 192" width="88" height="88">
+                <defs>
+                  <radialGradient id="sg" cx="38%" cy="32%" r="68%">
+                    <stop offset="0%" stopColor="#ffffff"/>
+                    <stop offset="100%" stopColor="#d0d0d0"/>
+                  </radialGradient>
+                  <clipPath id="sc">
+                    <circle cx="96" cy="88" r="63"/>
+                  </clipPath>
+                </defs>
+                {/* Red accent ring */}
+                <circle cx="96" cy="88" r="68" fill="none" stroke="#dc2626" strokeWidth="3" opacity="0.35"/>
+                {/* Ball */}
+                <circle cx="96" cy="88" r="63" fill="url(#sg)"/>
+                {/* Soccer patches */}
+                <g clipPath="url(#sc)" fill="#888" opacity="0.7">
+                  <polygon points="96,30 114,44 108,63 84,63 78,44"/>
+                  <polygon points="32,70 48,56 78,56 84,73 66,83 37,80"/>
+                  <polygon points="160,70 144,56 114,56 108,73 126,83 155,80"/>
+                  <polygon points="34,112 37,88 62,85 68,103 52,118"/>
+                  <polygon points="158,112 155,88 130,85 124,103 140,118"/>
+                  <polygon points="96,152 75,133 82,114 110,114 117,133"/>
+                </g>
+                {/* Shine */}
+                <ellipse cx="78" cy="69" rx="17" ry="11" fill="white" opacity="0.3" transform="rotate(-28 78 69)"/>
+                {/* BET62 centered on ball */}
+                <text x="96" y="104" fontFamily="Arial Black, Arial, sans-serif" fontWeight="900" fontSize="40" textAnchor="middle" fontStyle="italic" letterSpacing="-1.5">
+                  <tspan fill="#111111">BET</tspan><tspan fill="#dc2626">62</tspan>
+                </text>
               </svg>
             </motion.div>
 
