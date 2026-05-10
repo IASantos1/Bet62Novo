@@ -898,7 +898,7 @@ export default function Home() {
   const [platformStats, setPlatformStats] = useState<PlatformStats | null>(null);
 
   // Match detail view tab: "markets" | "stats" | "standings" | "live"
-  const [matchViewTab, setMatchViewTab] = useState<"markets" | "stats" | "standings" | "live">("markets");
+  const [matchViewTab, setMatchViewTab] = useState<"markets" | "stats" | "standings" | "live" | "yesterday" | "ranking">("markets");
   const [matchStats, setMatchStats] = useState<MatchStatsData | null>(null);
   const [matchStatsLoading, setMatchStatsLoading] = useState(false);
   const [standings, setStandings] = useState<StandingRow[] | null>(null);
@@ -3051,19 +3051,41 @@ export default function Home() {
 
                   {/* Stats/Standings/Live sub-tabs */}
                   {matchViewTab !== "markets" && (
-                    <div className="flex border-t border-zinc-800">
-                      {(expandedMatch.isLive
-                        ? (["stats", "standings", "live"] as const)
-                        : (["stats", "standings"] as const)
-                      ).map(tab => (
-                        <button
-                          key={tab}
-                          onClick={() => setMatchViewTab(tab)}
-                          className={`flex-1 py-2 text-xs font-bold transition-colors ${matchViewTab === tab ? (tab === "live" ? "text-red-400 border-b-2 border-red-500" : "text-blue-400 border-b-2 border-blue-500") : "text-zinc-500 hover:text-white"}`}
-                        >
-                          {tab === "stats" ? "Estatísticas" : tab === "standings" ? "Classificação" : "⚡ Ao Vivo"}
-                        </button>
-                      ))}
+                    <div className="flex border-t border-zinc-800 overflow-x-auto no-scrollbar">
+                      {expandedMatch.sport === "tennis" ? (
+                        <>
+                          {(["stats", "yesterday", "ranking"] as const).map(tab => (
+                            <button
+                              key={tab}
+                              onClick={() => setMatchViewTab(tab)}
+                              className={`flex-1 py-2 text-xs font-bold transition-colors whitespace-nowrap px-2 ${matchViewTab === tab ? "text-blue-400 border-b-2 border-blue-500" : "text-zinc-500 hover:text-white"}`}
+                            >
+                              {tab === "stats" ? "Estatísticas" : tab === "yesterday" ? "Resultado Ontem" : "Ranking"}
+                            </button>
+                          ))}
+                          {expandedMatch.isLive && (
+                            <button
+                              onClick={() => setMatchViewTab("live")}
+                              className={`flex-1 py-2 text-xs font-bold transition-colors whitespace-nowrap px-2 ${matchViewTab === "live" ? "text-red-400 border-b-2 border-red-500" : "text-zinc-500 hover:text-white"}`}
+                            >
+                              ⚡ Ao Vivo
+                            </button>
+                          )}
+                        </>
+                      ) : (
+                        (expandedMatch.isLive
+                          ? (["stats", "standings", "live"] as const)
+                          : (["stats", "standings"] as const)
+                        ).map(tab => (
+                          <button
+                            key={tab}
+                            onClick={() => setMatchViewTab(tab)}
+                            className={`flex-1 py-2 text-xs font-bold transition-colors ${matchViewTab === tab ? (tab === "live" ? "text-red-400 border-b-2 border-red-500" : "text-blue-400 border-b-2 border-blue-500") : "text-zinc-500 hover:text-white"}`}
+                          >
+                            {tab === "stats" ? "Estatísticas" : tab === "standings" ? "Classificação" : "⚡ Ao Vivo"}
+                          </button>
+                        ))
+                      )}
                     </div>
                   )}
                 </div>
@@ -3227,6 +3249,104 @@ export default function Home() {
                   </div>
                 )}
 
+                {/* Yesterday results panel (tennis) */}
+                {matchViewTab === "yesterday" && (
+                  <div className="bg-zinc-900 rounded-xl border border-zinc-800 p-4 mb-2 animate-in fade-in duration-200">
+                    <div className="text-[10px] font-black text-red-500 uppercase tracking-widest mb-3">🎾 Resultados de Ontem</div>
+                    {recentResults.length === 0 ? (
+                      <div className="text-center text-zinc-500 py-6 text-sm">Sem resultados disponíveis.</div>
+                    ) : (
+                      <div className="space-y-1.5">
+                        {recentResults.map(r => {
+                          const winner = r.homeWon ? r.home : r.away;
+                          const loser  = r.homeWon ? r.away : r.home;
+                          const wSets  = r.homeWon ? r.sets.map(([h]: [number,number]) => h)   : r.sets.map(([,a]: [number,number]) => a);
+                          const lSets  = r.homeWon ? r.sets.map(([,a]: [number,number]) => a)  : r.sets.map(([h]: [number,number]) => h);
+                          return (
+                            <div key={r.id} className="bg-zinc-950/60 border border-zinc-800 rounded-lg px-3 py-2 flex items-center gap-3">
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-center gap-1.5">
+                                  <span className="w-3 h-3 rounded-full bg-green-600/20 flex items-center justify-center shrink-0">
+                                    <span className="text-[8px] text-green-400 font-black">✓</span>
+                                  </span>
+                                  <span className="text-xs font-bold text-white truncate">{winner}</span>
+                                </div>
+                                <div className="flex items-center gap-1.5 mt-0.5">
+                                  <span className="w-3 h-3 shrink-0" />
+                                  <span className="text-xs text-zinc-500 truncate">{loser}</span>
+                                </div>
+                              </div>
+                              <div className="flex items-center gap-1 font-mono tabular-nums shrink-0">
+                                {wSets.map((ws: number, i: number) => (
+                                  <div key={i} className="text-center w-4">
+                                    <div className={`text-[11px] font-black leading-tight ${ws > lSets[i]! ? "text-white" : "text-zinc-600"}`}>{ws}</div>
+                                    <div className={`text-[11px] font-black leading-tight ${lSets[i]! > ws ? "text-zinc-400" : "text-zinc-600"}`}>{lSets[i]}</div>
+                                  </div>
+                                ))}
+                              </div>
+                              {r.status === "Retired" && <span className="text-[9px] text-yellow-500/80 font-bold border border-yellow-700/40 rounded px-1 py-0.5 shrink-0">RET</span>}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Ranking panel (tennis) — reuses rankingsTour state */}
+                {matchViewTab === "ranking" && (() => {
+                  const FLAG: Record<string, string> = {
+                    "Spain":"🇪🇸","Italy":"🇮🇹","Serbia":"🇷🇸","Russia":"🇷🇺","Germany":"🇩🇪",
+                    "Norway":"🇳🇴","Greece":"🇬🇷","France":"🇫🇷","United States":"🇺🇸","USA":"🇺🇸",
+                    "Australia":"🇦🇺","Canada":"🇨🇦","United Kingdom":"🇬🇧","Great Britain":"🇬🇧",
+                    "Argentina":"🇦🇷","Denmark":"🇩🇰","Poland":"🇵🇱","Bulgaria":"🇧🇬",
+                    "Czech Republic":"🇨🇿","Slovakia":"🇸🇰","Croatia":"🇭🇷","Hungary":"🇭🇺",
+                    "Belgium":"🇧🇪","Netherlands":"🇳🇱","Switzerland":"🇨🇭","Austria":"🇦🇹",
+                    "Portugal":"🇵🇹","Japan":"🇯🇵","China":"🇨🇳","Kazakhstan":"🇰🇿",
+                    "Ukraine":"🇺🇦","Belarus":"🇧🇾","Romania":"🇷🇴","Brazil":"🇧🇷",
+                    "Chile":"🇨🇱","Colombia":"🇨🇴","Mexico":"🇲🇽","Taiwan":"🇹🇼",
+                    "South Korea":"🇰🇷","Tunisia":"🇹🇳","Latvia":"🇱🇻","Estonia":"🇪🇪",
+                    "Finland":"🇫🇮","Sweden":"🇸🇪","Turkey":"🇹🇷","Israel":"🇮🇱",
+                    "Philippines":"🇵🇭","Georgia":"🇬🇪","Albania":"🇦🇱",
+                  };
+                  const movIcon = (m: string) =>
+                    m === "up" ? <span className="text-emerald-500 text-[9px]">↑</span>
+                    : m === "down" ? <span className="text-red-500 text-[9px]">↓</span>
+                    : <span className="text-zinc-700 text-[9px]">−</span>;
+                  const list = rankingsTour === "atp" ? tennisStandings?.atp : tennisStandings?.wta;
+                  return (
+                    <div className="bg-zinc-900 rounded-xl border border-zinc-800 p-4 mb-2 animate-in fade-in duration-200">
+                      <div className="flex items-center justify-between mb-3">
+                        <div className="text-[10px] font-black text-red-500 uppercase tracking-widest">Ranking</div>
+                        <div className="flex rounded overflow-hidden border border-zinc-700">
+                          {(["atp","wta"] as const).map(t => (
+                            <button key={t} onClick={() => setRankingsTour(t)}
+                              className={`text-[9px] font-black px-2 py-0.5 transition-colors ${rankingsTour === t ? (t === "wta" ? "bg-pink-900/60 text-pink-300" : "bg-zinc-700 text-white") : "text-zinc-600 hover:text-zinc-400"}`}
+                            >
+                              {t.toUpperCase()}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                      {!list ? (
+                        <div className="text-center text-zinc-500 py-6 text-sm">Ranking indisponível.</div>
+                      ) : (
+                        <div className="rounded-lg border border-zinc-800 overflow-hidden">
+                          {list.slice(0, 20).map((p, i) => (
+                            <div key={p.id} className={`flex items-center gap-2 px-3 py-1.5 ${i < list.slice(0,20).length-1 ? "border-b border-zinc-800/60" : ""}`}>
+                              <span className={`text-[11px] font-black tabular-nums w-5 text-right shrink-0 ${i < 3 ? "text-amber-400" : "text-zinc-600"}`}>{p.rank}</span>
+                              <span className="w-3 shrink-0 text-center">{movIcon(p.movement)}</span>
+                              <span className="text-sm shrink-0">{FLAG[p.country] ?? "🏴"}</span>
+                              <span className={`text-[11px] font-semibold flex-1 truncate ${i < 3 ? "text-white" : "text-zinc-300"}`}>{p.name}</span>
+                              <span className="text-[10px] text-zinc-600 tabular-nums shrink-0">{Number(p.points).toLocaleString("pt-PT")}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
+
                 {/* Live momentum/pressure chart */}
                 {matchViewTab === "live" && expandedMatch.isLive && (
                   <div className="bg-zinc-900 rounded-xl border border-zinc-800 p-4 mb-2 animate-in fade-in duration-200">
@@ -3244,9 +3364,25 @@ export default function Home() {
             )}
 
             {!expandedMatch && activeTab === "sports" && (() => {
+              // Convert real tennis odds to MatchCard-compatible Match objects
+              const tennisOddsAsMatches: Match[] = (!selectedLeague && (selectedSport === "tennis" || selectedSport === "all"))
+                ? tennisOddsMatches.map(o => ({
+                    id: `tennis-odds-${o.matchId}`,
+                    home: o.players[0].name,
+                    away: o.players[1].name,
+                    league: o.tournamentName,
+                    sport: "tennis",
+                    time: o.time,
+                    hasRealOdds: true,
+                    odds: { home: o.matchOdds[0], draw: 0, away: o.matchOdds[1] },
+                  } as Match))
+                : [];
+
               const filteredUpcoming = selectedLeague
                 ? upcomingMatches.filter(m => m.league === selectedLeague)
-                : upcomingMatches;
+                : [...tennisOddsAsMatches, ...upcomingMatches.filter(m =>
+                    !tennisOddsAsMatches.some(t => t.home === m.home && t.away === m.away)
+                  )];
 
               // Derive tournament display label from raw API name
               const tournamentLabel = (raw: string) =>
@@ -3256,8 +3392,8 @@ export default function Home() {
                 <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
                   {!selectedLeague && <PopularBanners />}
 
-                  {/* ─── Torneios em Curso ──────────────────────────────────── */}
-                  {(selectedSport === "all" || selectedSport === "tennis") && activeTournaments.length > 0 && !selectedLeague && (() => {
+                  {/* ─── Torneios em Curso (oculto) ─────────────────────────── */}
+                  {false && (selectedSport === "all" || selectedSport === "tennis") && activeTournaments.length > 0 && !selectedLeague && (() => {
                     const surfaceColor = (s: string) => {
                       const sl = s.toLowerCase();
                       if (sl.includes("clay"))  return { bar: "bg-orange-500",   text: "text-orange-400",  bg: "bg-orange-500/10",  label: "Argila" };
@@ -3351,7 +3487,7 @@ export default function Home() {
                         {/* ── Expanded tournament panel ── */}
                         {expandedTournamentId && (() => {
                           const expandedT = activeTournaments.find(t => t.id === expandedTournamentId);
-                          const sc = expandedT ? surfaceColor(expandedT.surface) : { bar: "bg-zinc-500", text: "text-zinc-400", bg: "bg-zinc-800/30" };
+                          const sc = expandedT ? surfaceColor(expandedT!.surface) : { bar: "bg-zinc-500", text: "text-zinc-400", bg: "bg-zinc-800/30", label: "" };
                           const ROUND_PT: Record<string, string> = {
                             "1/64-finals": "1ª Fase", "1/32-finals": "2ª Fase",
                             "1/16-finals": "3ª Fase", "1/8-finals": "Quartos de Final",
