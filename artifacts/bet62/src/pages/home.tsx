@@ -51,6 +51,27 @@ import talleresBanner from "@assets/Create_a_photorealistic_169_football_banner_
 import lanusBanner from "@assets/Create_a_photorealistic_169_football_banner_with_-177836119764_1778361261633.png";
 
 const TEAM_BANNERS: Record<string, string> = {
+  // ── Serie A ──
+  "Inter": "/banners/inter.jpg",
+  "Inter Milan": "/banners/inter.jpg",
+  "Internazionale": "/banners/inter.jpg",
+  "Milan": "/banners/milan.jpg",
+  "AC Milan": "/banners/milan.jpg",
+  "Juventus": "/banners/juventus.jpg",
+  "Napoli": "/banners/napoli.jpg",
+  "Roma": "/banners/roma.jpg",
+  "AS Roma": "/banners/roma.jpg",
+  "Lazio": "/banners/lazio.jpg",
+  "SS Lazio": "/banners/lazio.jpg",
+  "Atalanta": "/banners/atalanta.jpg",
+  "Fiorentina": "/banners/fiorentina.jpg",
+  "Bologna": "/banners/bologna.jpg",
+  "Torino": "/banners/torino.jpg",
+  "Como": "/banners/como.jpg",
+  "Como 1907": "/banners/como.jpg",
+  "Parma": "/banners/parma.jpg",
+  "Parma Calcio": "/banners/parma.jpg",
+  // ── La Liga ──
   "Real Madrid": realMadridBanner,
   "Barcelona": barcelonaBanner,
   "Atlético de Madrid": atleticoMadridBanner,
@@ -126,6 +147,14 @@ const LEAGUE_FLAGS: Record<string, string> = {
 };
 
 const TEAM_COUNTRY: Record<string, string> = {
+  // Serie A
+  "Inter": "italy", "Inter Milan": "italy", "Internazionale": "italy",
+  "Milan": "italy", "AC Milan": "italy", "Juventus": "italy",
+  "Napoli": "italy", "Roma": "italy", "AS Roma": "italy",
+  "Lazio": "italy", "SS Lazio": "italy", "Atalanta": "italy",
+  "Fiorentina": "italy", "Bologna": "italy", "Torino": "italy",
+  "Como": "italy", "Como 1907": "italy", "Parma": "italy", "Parma Calcio": "italy",
+  // La Liga
   "Real Madrid": "spain", "Barcelona": "spain", "Atlético de Madrid": "spain",
   "Atletico Madrid": "spain", "Athletic Club": "spain", "Athletic Bilbao": "spain",
   "Ath Bilbao": "spain", "Real Sociedad": "spain", "Sevilla": "spain",
