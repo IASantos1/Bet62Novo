@@ -191,6 +191,10 @@ const DOMESTIC_PRIORITY: Array<[string, number]> = [
   ["france: ligue 2", 33],
   ["germany: 3. liga", 34],
   ["italy: serie c", 35],
+  ["spain: primera rfef", 990],
+  ["spain: segunda rfef", 991],
+  ["spain: tercera rfef", 992],
+  ["spain: rfef", 993],
   ["spain: segunda", 36],
   ["netherlands: keuken", 37],
   ["portugal: liga bwin", 38],
@@ -1011,7 +1015,9 @@ function buildNHLLiveMatches(tournaments: NHLTournament[]): LiveMatchState[] {
 async function buildLiveMatches(): Promise<LiveMatchState[]> {
   const [leagues, odds] = await Promise.all([getLiveLeagues(), getOddsMap()]);
 
-  const sorted = [...leagues].sort((a, b) => leaguePriority(a.name, a.country) - leaguePriority(b.name, b.country));
+  const sorted = [...leagues]
+    .sort((a, b) => leaguePriority(a.name, a.country) - leaguePriority(b.name, b.country))
+    .filter(l => leaguePriority(l.name, l.country) < 100);
 
   let count = 0;
   const result: LiveMatchState[] = [];
@@ -1989,7 +1995,8 @@ router.get("/live", async (_req, res) => {
       getNHLLive(),
     ]);
     const nhlMatches = buildNHLLiveMatches(nhlTournaments);
-    const matches    = [...soccerMatches, ...nhlMatches];
+    const otherLive  = buildSimulatedLiveOtherSports();
+    const matches    = [...soccerMatches, ...nhlMatches, ...otherLive];
     res.json({ matches });
   } catch (err) {
     console.error("[live route] unexpected error:", err);
@@ -2126,9 +2133,13 @@ router.get("/stats", async (req, res) => {
     avgGoalsLabel: undefined as number | undefined,
   };
 
-  const homeWins = ri(3, 11, 1.1);
-  const draws    = cfg.hasDraw ? ri(2, 6, 2.3) : 0;
-  const awayWins = ri(2,  9, 3.7);
+  // h2h proportional to implied probability from odds
+  const totalH2H = ri(16, 28, 99.1);
+  const rawHomeWins = Math.round(totalH2H * (homeProb / 100) + (ri(0, 3, 1.1) - 1.5));
+  const rawAwayWins = Math.round(totalH2H * (awayProb / 100) + (ri(0, 3, 3.7) - 1.5));
+  const homeWins = Math.max(1, rawHomeWins);
+  const awayWins = Math.max(1, rawAwayWins);
+  const draws    = cfg.hasDraw ? Math.max(0, totalH2H - homeWins - awayWins) : 0;
   const avgGoals = rng(2.1, 3.2, 4.1);
   const over15   = Math.min(94, Math.max(66, ri(68, 92, 5.3)));
   const over25   = Math.min(74, Math.max(36, ri(42, 70, 6.1)));
@@ -2213,48 +2224,64 @@ router.get("/stats", async (req, res) => {
   });
 });
 
-// ─── Standings endpoint ───────────────────────────────────────────────────────
+// ─── Standings endpoint + league data ────────────────────────────────────────
+
+// ─── Known league team lists (for standings generation) ───────────────────────
+const LEAGUE_TEAMS: Array<{ patterns: string[]; name: string; teams: string[] }> = [
+  { patterns: ["premier league", "england"], name: "Premier League", teams: ["Manchester City","Arsenal","Liverpool","Aston Villa","Tottenham","Chelsea","Newcastle","Manchester Utd","West Ham","Brighton","Wolves","Brentford","Fulham","Everton","Crystal Palace","Nottingham Forest","Bournemouth","Burnley","Luton","Sheffield Utd"] },
+  { patterns: ["laliga", "la liga", "primera division", "spain:"], name: "LaLiga", teams: ["Real Madrid","Barcelona","Atletico Madrid","Athletic Club","Real Sociedad","Villarreal","Real Betis","Valencia","Osasuna","Sevilla","Getafe","Rayo Vallecano","Alaves","Celta Vigo","Mallorca","Las Palmas","Girona","Cadiz","Granada","Almeria"] },
+  { patterns: ["bundesliga", "germany:"], name: "Bundesliga", teams: ["Bayern Munich","Bayer Leverkusen","RB Leipzig","Borussia Dortmund","VfB Stuttgart","Eintracht Frankfurt","SC Freiburg","B. Monchengladbach","Union Berlin","Hoffenheim","Augsburg","Wolfsburg","Mainz","Bochum","Koln","Werder Bremen","Heidenheim","Darmstadt"] },
+  { patterns: ["serie a", "italy:"], name: "Serie A", teams: ["Inter","AC Milan","Juventus","Napoli","Atalanta","AS Roma","SS Lazio","Fiorentina","Bologna","Torino","Monza","Genoa","Lecce","Hellas Verona","Cagliari","Empoli","Frosinone","Udinese","Salernitana","Sassuolo"] },
+  { patterns: ["ligue 1", "france:"], name: "Ligue 1", teams: ["PSG","Monaco","Lille","Marseille","Lyon","Nice","Rennes","Lens","Reims","Strasbourg","Toulouse","Montpellier","Brest","Nantes","Metz","Le Havre","Lorient","Clermont","Auxerre","Troyes"] },
+  { patterns: ["liga portugal", "portugal:"], name: "Liga Portugal", teams: ["Benfica","Sporting CP","Porto","Braga","Vitoria Guimaraes","Famalicao","Casa Pia","Moreirense","Estoril","Arouca","Vizela","Rio Ave","Boavista","Chaves","Estrela Amadora","Portimonense"] },
+  { patterns: ["eredivisie", "netherlands:"], name: "Eredivisie", teams: ["PSV","Feyenoord","Ajax","AZ Alkmaar","FC Twente","Utrecht","Groningen","Heerenveen","Sparta Rotterdam","NEC Nijmegen","Go Ahead Eagles","Heracles","Almere City","RKC Waalwijk","Fortuna Sittard","Excelsior","SC Cambuur","FC Volendam"] },
+  { patterns: ["süper lig", "super lig", "turkey:"], name: "Süper Lig", teams: ["Galatasaray","Fenerbahce","Besiktas","Trabzonspor","Basaksehir","Sivasspor","Konyaspor","Antalyaspor","Kasimpasa","Adana Demirspor","Ankaragücü","Gaziantep FK","Kayserispor","Rizespor","Alanyaspor","Samsunspor","Pendikspor","Hatayspor"] },
+  { patterns: ["premiership", "scotland:"], name: "Scottish Premiership", teams: ["Celtic","Rangers","Hearts","Hibernian","Aberdeen","Motherwell","St Mirren","Dundee United","Livingston","Ross County","Kilmarnock","St Johnstone"] },
+  { patterns: ["super league", "china:"], name: "Super League", teams: ["Shanghai Port","Shandong Taishan","Beijing Guoan","Wuhan Three Towns","Guangzhou FC","Shanghai Shenhua","Tianjin Jinmen Tiger","Shenzhen FC","Zhejiang FC","Changchun Yatai","Qingdao West Coast","Dalian Pro","Meizhou Hakka","Nantong Zhiyun","Henan FC","Chengdu Rongcheng"] },
+  { patterns: ["liga 1", "indonesia:"], name: "Liga 1 Indonésia", teams: ["Persib Bandung","Persija Jakarta","Bali United","PSM Makassar","Arema FC","Persebaya Surabaya","Borneo FC","Bhayangkara FC","PSIS Semarang","Persikabo","Barito Putera","Madura United","Dewa United","RANS Nusantara","PSS Sleman","Persita Tangerang"] },
+  { patterns: ["jupiler", "belgium:"], name: "Jupiler Pro League", teams: ["Club Brugge","Anderlecht","Union SG","Gent","Antwerp","Standard Liege","Charleroi","Westerlo","OH Leuven","Mechelen","Cercle Brugge","Genk","Sint-Truiden","Eupen","Kortrijk","Zulte Waregem"] },
+  { patterns: ["ekstraklasa", "poland:"], name: "Ekstraklasa", teams: ["Legia Warsaw","Rakow Czestochowa","Lech Poznan","Piast Gliwice","Wisla Krakow","Cracovia","Gornik Zabrze","Zagłebie Lubin","Jagiellonia","Slask Wroclaw","Stal Mielec","Korona Kielce","Warta Poznan","Ruch Chorzow","Puszcza Niepolomice","GKS Katowice"] },
+  { patterns: ["super league", "greece:"], name: "Super League Grécia", teams: ["Olympiakos","Panathinaikos","PAOK","AEK Athens","Aris","Atromitos","Volos","OFI Crete","Lamia","Panserraikos","Levadiakos","Asteras Tripolis","Giannina","Ionikos"] },
+];
+
+function buildLeagueStandings(leagueName: string): { league: string; teams: Array<{ pos: number; name: string; played: number; won: number; drawn: number; lost: number; gf: number; ga: number; pts: number }> } {
+  const slug = leagueName.toLowerCase();
+  const found = LEAGUE_TEAMS.find(l => l.patterns.some(p => slug.includes(p))) ?? LEAGUE_TEAMS[0]!;
+  const seed = [...found.name].reduce((a, c) => a + c.charCodeAt(0), 0);
+  const rng = (s: number) => { const x = Math.sin(seed * 1234 + s * 7919) * 2654435761; return x - Math.floor(x); };
+
+  const teams = found.teams.map((name, i) => {
+    const elo = getTeamElo(name);
+    const strength = (elo - 1400) / 600;
+    const played = 34 + Math.floor(rng(i * 13 + 1) * 4);
+    const winRate = Math.max(0.05, Math.min(0.85, 0.45 + strength * 0.35 + (rng(i * 7 + 2) - 0.5) * 0.15));
+    const drawRate = Math.max(0.05, Math.min(0.35, 0.26 - Math.abs(strength) * 0.06 + (rng(i * 5 + 3) - 0.5) * 0.08));
+    const won  = Math.round(played * winRate);
+    const drawn = Math.round(played * drawRate);
+    const lost = Math.max(0, played - won - drawn);
+    const avgGF = Math.max(0.5, 1.4 + strength * 0.6 + (rng(i * 11 + 4) - 0.5) * 0.4);
+    const avgGA = Math.max(0.4, 1.2 - strength * 0.4 + (rng(i * 9 + 5) - 0.5) * 0.4);
+    const gf = Math.round(played * avgGF);
+    const ga = Math.round(played * avgGA);
+    const pts = won * 3 + drawn;
+    return { name, elo, played, won, drawn, lost, gf, ga, pts };
+  });
+
+  teams.sort((a, b) => b.pts - a.pts || (b.gf - b.ga) - (a.gf - a.ga) || b.gf - a.gf);
+
+  return {
+    league: found.name,
+    teams: teams.map(({ name, played, won, drawn, lost, gf, ga, pts }, i) => ({
+      pos: i + 1, name, played, won, drawn, lost, gf, ga, pts,
+    })),
+  };
+}
 
 router.get("/standings", async (req, res) => {
   const league = String(req.query["league"] ?? "");
   try {
-    const resp = await fetch(`${BASE_V2}/soccer/tables?access_key=${STATSPAL_KEY}`, {
-      signal: AbortSignal.timeout(6000),
-    });
-    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-    const data = (await resp.json()) as Record<string, unknown>;
-    const leagueArr = (data?.["tables"] as Record<string, unknown> | undefined)?.["league"];
-    const leagues: unknown[] = Array.isArray(leagueArr) ? leagueArr : leagueArr ? [leagueArr] : [];
-    const leagueSlug = league.toLowerCase();
-    let found: unknown = null;
-    for (const l of leagues) {
-      const lo = l as Record<string, unknown>;
-      if (String(lo["name"] ?? "").toLowerCase().includes(leagueSlug) || leagueSlug === "") {
-        found = lo;
-        break;
-      }
-    }
-    if (!found && leagues.length > 0) found = leagues[0];
-    const lo = found as Record<string, unknown> | null;
-    const teamArr = (lo?.["teams"] as Record<string, unknown> | undefined)?.["team"];
-    const teams: unknown[] = Array.isArray(teamArr) ? teamArr : teamArr ? [teamArr] : [];
-    res.json({
-      league: String(lo?.["name"] ?? league),
-      teams: teams.slice(0, 20).map((t, i) => {
-        const to = t as Record<string, unknown>;
-        return {
-          pos: i + 1,
-          name: String(to["name"] ?? ""),
-          played: Number(to["played"] ?? 0),
-          won: Number(to["won"] ?? 0),
-          drawn: Number(to["drawn"] ?? 0),
-          lost: Number(to["lost"] ?? 0),
-          gf: Number(to["goals_for"] ?? 0),
-          ga: Number(to["goals_against"] ?? 0),
-          pts: Number(to["points"] ?? 0),
-        };
-      }),
-    });
+    const standing = buildLeagueStandings(league);
+    res.json(standing);
   } catch {
     res.status(500).json({ error: "Classificação indisponível" });
   }

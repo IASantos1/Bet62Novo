@@ -520,6 +520,8 @@ type MatchStatsData = {
 };
 type StandingRow = { pos: number; name: string; played: number; won: number; drawn: number; lost: number; gf: number; ga: number; pts: number };
 
+const MarketTabCtx = createContext<string>("");
+
 function nifMask(value: string) {
   return value
     .replace(/\D/g, "")
@@ -1795,8 +1797,6 @@ export default function Home() {
       </button>
     );
   };
-
-  const MarketTabCtx = createContext<string>("");
 
   const MarketGroup = ({ title, children }: { title: string; children: ReactNode }) => {
     const tab = useContext(MarketTabCtx);
