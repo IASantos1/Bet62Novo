@@ -1216,6 +1216,18 @@ function buildBasketballMatches(): UpcomingMatch[] {
     const pATUnder = mc(normalCdf(zA), 0.05, 0.95);
     const [oAT, uAT] = probsToDecimalOdds([1 - pATUnder, pATUnder], 1.06);
 
+    // Away team total line (based on meanAway)
+    const awayTotalLine = Math.round(meanAway / 5) * 5;
+    const zAwayT = (awayTotalLine - meanAway) / sdTeam;
+    const pAwayTUnder = mc(normalCdf(zAwayT), 0.05, 0.95);
+    const [oAwayT, uAwayT] = probsToDecimalOdds([1 - pAwayTUnder, pAwayTUnder], 1.06);
+
+    // Quarter winners — moneyline probability regressed toward 50/50 per quarter
+    const [q1H, q1A] = probsToDecimalOdds([mc(0.5 + (pHomeMoneyline - 0.5) * 0.55, 0.25, 0.75), mc(0.5 - (pHomeMoneyline - 0.5) * 0.55, 0.25, 0.75)], 1.07);
+    const [q2H, q2A] = probsToDecimalOdds([mc(0.5 + (pHomeMoneyline - 0.5) * 0.50, 0.25, 0.75), mc(0.5 - (pHomeMoneyline - 0.5) * 0.50, 0.25, 0.75)], 1.07);
+    const [q3H, q3A] = probsToDecimalOdds([mc(0.5 + (pHomeMoneyline - 0.5) * 0.48, 0.25, 0.75), mc(0.5 - (pHomeMoneyline - 0.5) * 0.48, 0.25, 0.75)], 1.07);
+    const [q4H, q4A] = probsToDecimalOdds([mc(0.5 + (pHomeMoneyline - 0.5) * 0.52, 0.25, 0.75), mc(0.5 - (pHomeMoneyline - 0.5) * 0.52, 0.25, 0.75)], 1.07);
+
     return {
       id: `bball-${dayKey}-${i}`,
       home,
@@ -1247,6 +1259,14 @@ function buildBasketballMatches(): UpcomingMatch[] {
         _total: totalLine,
         _total1H: total1HLine,
         _spreadLine: spreadLine,
+        basketballExtra: {
+          q1: { home: q1H!, away: q1A! },
+          q2: { home: q2H!, away: q2A! },
+          q3: { home: q3H!, away: q3A! },
+          q4: { home: q4H!, away: q4A! },
+          teamTotalHome: { line: teamTotalLine, over: oHT!, under: uHT! },
+          teamTotalAway: { line: awayTotalLine, over: oAwayT!, under: uAwayT! },
+        },
       } as unknown as AdvancedMarkets,
     };
   });
@@ -1311,6 +1331,24 @@ function buildTennisMatches(): UpcomingMatch[] {
     const pHcapHome = mc(1 - normalCdf(zHcap), 0.05, 0.95);
     const [hcapH, hcapA] = probsToDecimalOdds([pHcapHome, 1 - pHcapHome], 1.06);
 
+    // Set 2 winner (slightly more variance, different seed)
+    const pSet2P1 = mc(pP1Win * 0.85 + 0.075 + (sr(15) - 0.5) * 0.10, 0.18, 0.82);
+    const [set2H, set2A] = probsToDecimalOdds([pSet2P1, 1 - pSet2P1], 1.06);
+
+    // Exact sets: P(h20)+P(h21)=pP1Win, P(a02)+P(a12)=1-pP1Win
+    const ph20 = mc(pP1Win * (1 - p3Sets), 0.02, 0.70);
+    const ph21 = mc(pP1Win * p3Sets, 0.02, 0.55);
+    const pa02 = mc((1 - pP1Win) * (1 - p3Sets), 0.02, 0.70);
+    const pa12 = mc((1 - pP1Win) * p3Sets, 0.02, 0.55);
+    const [xh20, xh21, xa02, xa12] = probsToDecimalOdds([ph20, ph21, pa02, pa12], 1.08);
+
+    // Total games O/U (avg ~22 for best-of-3)
+    const meanGames = mc(22 + (sr(16) - 0.5) * 6, 18, 30);
+    const sdGames = mc(4.0 + sr(17) * 1.5, 3.0, 6.0);
+    const gamesLineRound = Math.floor(meanGames) + 0.5;
+    const pGamesOver = mc(1 - normalCdf((gamesLineRound - meanGames) / sdGames), 0.05, 0.95);
+    const [oGames, uGames] = probsToDecimalOdds([pGamesOver, 1 - pGamesOver], 1.06);
+
     return {
       id: `tennis-${dayKey}-${i}`,
       home: p1,
@@ -1338,7 +1376,13 @@ function buildTennisMatches(): UpcomingMatch[] {
         },
         halfTime: { home: 0, draw: 0, away: 0 },
         firstGoal: { home: 0, noGoal: 0, away: 0 },
-      },
+        tennisExtra: {
+          set2: { home: set2H!, away: set2A! },
+          exactSets: { h20: xh20!, h21: xh21!, a02: xa02!, a12: xa12! },
+          totalGames: { line: gamesLineRound, over: oGames!, under: uGames! },
+          gameHandicap: { line: gamesLine, home: hcapH!, away: hcapA! },
+        },
+      } as unknown as AdvancedMarkets,
     };
   });
 }
@@ -1418,6 +1462,52 @@ function buildHockeyMatches(): UpcomingMatch[] {
     const p1S = p1PHW + p1PD + p1PAW;
     const [per1H, per1D, per1A] = probsToDecimalOdds([p1PHW / p1S, p1PD / p1S, p1PAW / p1S], 1.08);
 
+    // Period 2 result (less home advantage)
+    const lambdaH2P = mc(mean1P * 0.5 + marginMean * 0.20, 0.3, 2.5);
+    const lambdaA2P = mc(mean1P * 0.5 - marginMean * 0.20, 0.3, 2.5);
+    const p2Hd = poissonPmf(lambdaH2P, 5);
+    const p2Ad = poissonPmf(lambdaA2P, 5);
+    let p2PHW = 0, p2PD = 0, p2PAW = 0;
+    for (let gi = 0; gi <= 5; gi++) {
+      for (let gj = 0; gj <= 5; gj++) {
+        const p = (p2Hd[gi] ?? 0) * (p2Ad[gj] ?? 0);
+        if (gi > gj) p2PHW += p; else if (gi < gj) p2PAW += p; else p2PD += p;
+      }
+    }
+    const p2S = p2PHW + p2PD + p2PAW;
+    const [per2H, per2D, per2A] = probsToDecimalOdds([p2PHW / p2S, p2PD / p2S, p2PAW / p2S], 1.08);
+
+    // Period 3 result (most random)
+    const lambdaH3P = mc(mean1P * 0.5 + marginMean * 0.10, 0.3, 2.5);
+    const lambdaA3P = mc(mean1P * 0.5 - marginMean * 0.10, 0.3, 2.5);
+    const p3Hd = poissonPmf(lambdaH3P, 5);
+    const p3Ad = poissonPmf(lambdaA3P, 5);
+    let p3PHW = 0, p3PD = 0, p3PAW = 0;
+    for (let gi = 0; gi <= 5; gi++) {
+      for (let gj = 0; gj <= 5; gj++) {
+        const p = (p3Hd[gi] ?? 0) * (p3Ad[gj] ?? 0);
+        if (gi > gj) p3PHW += p; else if (gi < gj) p3PAW += p; else p3PD += p;
+      }
+    }
+    const p3S = p3PHW + p3PD + p3PAW;
+    const [per3H, per3D, per3A] = probsToDecimalOdds([p3PHW / p3S, p3PD / p3S, p3PAW / p3S], 1.08);
+
+    // Period 1 total O/U
+    const per1TotalLine = Math.round(mean1P * 2) / 2;
+    const per1TotalSd = mc(0.9 + sr(15) * 0.4, 0.6, 1.5);
+    const pPer1TotalOver = mc(1 - normalCdf((per1TotalLine - mean1P) / per1TotalSd), 0.05, 0.95);
+    const [oPer1T, uPer1T] = probsToDecimalOdds([pPer1TotalOver, 1 - pPer1TotalOver], 1.06);
+
+    // Both teams score in game (very common in hockey ~72%)
+    const pBTS = mc(0.70 + (sr(16) - 0.5) * 0.18, 0.45, 0.92);
+    const [btsYes, btsNo] = probsToDecimalOdds([pBTS, 1 - pBTS], 1.06);
+
+    // Shots on goal O/U (NHL avg ~60 combined, KHL ~55)
+    const isNHLCheck = league.includes("NHL");
+    const shotsLine = mc((isNHLCheck ? 60.5 : 55.5) + (sr(17) - 0.5) * 8, 48.5, 72.5);
+    const pShotsOver = mc(0.5 + (sr(18) - 0.5) * 0.12, 0.38, 0.62);
+    const [oShots, uShots] = probsToDecimalOdds([pShotsOver, 1 - pShotsOver], 1.06);
+
     return {
       id: `hockey-${dayKey}-${i}`,
       home, away, league, country, time,
@@ -1440,6 +1530,13 @@ function buildHockeyMatches(): UpcomingMatch[] {
         firstGoal: { home: 0, noGoal: 0, away: 0 },
         _spread: 1.5,
         _total: totalLine,
+        hockeyExtra: {
+          period2: { home: per2H!, draw: per2D!, away: per2A! },
+          period3: { home: per3H!, draw: per3D!, away: per3A! },
+          period1Total: { line: per1TotalLine, over: oPer1T!, under: uPer1T! },
+          bothTeamsScoreGame: { yes: btsYes!, no: btsNo! },
+          shotsOnGoal: { line: shotsLine, over: oShots!, under: uShots! },
+        },
       } as unknown as AdvancedMarkets,
     };
   });
@@ -1505,6 +1602,21 @@ function buildVolleyballMatches(): UpcomingMatch[] {
     const pPtsOver = mc(1 - normalCdf((ptsLine - meanPts) / sdPts), 0.05, 0.95);
     const [oPts, uPts] = probsToDecimalOdds([pPtsOver, 1 - pPtsOver], 1.06);
 
+    // Per-set winner markets (individual sets)
+    const pS1H = mc(pSetHomeWin + (sr(7) - 0.5) * 0.08, 0.15, 0.85);
+    const pS2H = mc(pSetHomeWin + (sr(8) - 0.5) * 0.09, 0.15, 0.85);
+    const pS3H = mc(0.5 + (pSetHomeWin - 0.5) * 0.55 + (sr(9) - 0.5) * 0.10, 0.15, 0.85);
+    const [vs1H, vs1A] = probsToDecimalOdds([pS1H, 1 - pS1H], 1.06);
+    const [vs2H, vs2A] = probsToDecimalOdds([pS2H, 1 - pS2H], 1.06);
+    const [vs3H, vs3A] = probsToDecimalOdds([pS3H, 1 - pS3H], 1.06);
+
+    // Points handicap (based on team strength difference)
+    const ptsDiffMean = mc((pSetHomeWin - 0.5) * 14, -10, 10);
+    const ptsDiffLine = Math.round(Math.abs(ptsDiffMean) * 0.5 + 1.5) * (ptsDiffMean >= 0 ? -1 : 1);
+    const ptsDiffSd = mc(4 + sr(10) * 2, 3, 7);
+    const pPtsHcapHome = mc(1 - normalCdf((-Math.abs(ptsDiffLine) - ptsDiffMean) / ptsDiffSd), 0.05, 0.95);
+    const [ptsHcapH, ptsHcapA] = probsToDecimalOdds([pPtsHcapHome, 1 - pPtsHcapHome], 1.06);
+
     return {
       id: `vball-${dayKey}-${i}`,
       home, away, league, country, time,
@@ -1526,6 +1638,12 @@ function buildVolleyballMatches(): UpcomingMatch[] {
         halfTime: { home: 0, draw: 0, away: 0 },
         firstGoal: { home: 0, noGoal: 0, away: 0 },
         _total: ptsLine,
+        volleyballExtra: {
+          set1: { home: vs1H!, away: vs1A! },
+          set2: { home: vs2H!, away: vs2A! },
+          set3: { home: vs3H!, away: vs3A! },
+          handicapPoints: { line: ptsDiffLine, home: ptsHcapH!, away: ptsHcapA! },
+        },
       } as unknown as AdvancedMarkets,
     };
   });

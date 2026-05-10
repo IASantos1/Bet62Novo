@@ -1158,6 +1158,15 @@ export default function Home() {
       );
     }
 
+    if (match.isLive && market === "result" && odd <= 1.01) {
+      return (
+        <div className={`relative flex flex-col items-center py-2.5 px-2 rounded-md text-xs ${grow ? "flex-1" : ""} bg-amber-900/20 border border-amber-600/30`}>
+          <span className="mb-0.5 text-[10px] leading-tight opacity-50">{label}</span>
+          <span className="font-bold text-[9px] text-amber-400 uppercase tracking-wider">Aposta Já</span>
+        </div>
+      );
+    }
+
     return (
       <button
         onClick={() => toggleBet(match, selection, odd, market, label)}
@@ -1486,6 +1495,7 @@ export default function Home() {
   };
 
   const MarketOddsBtn = ({ match, sel, odd, market, label }: { match: Match; sel: string; odd: number; market: string; label: string }) => {
+    if (market === "result" && odd <= 1.01) return null;
     const active = !!bets.find(b => b.matchId === match.id && b.market === market && b.selection === sel);
     return (
       <button
@@ -1518,26 +1528,34 @@ export default function Home() {
           { key: "resultado", label: "Vencedor" },
           { key: "totais", label: "Totais" },
           { key: "spread", label: "Spread" },
-          { key: "1tempo", label: "1º Quarto" },
+          { key: "quartos", label: "Quartos" },
+          { key: "times", label: "Times" },
         ]
       : isTennis
         ? [
             { key: "resultado", label: "Vencedor" },
             { key: "sets", label: "Sets" },
             { key: "handicap", label: "Handicap" },
+            { key: "jogos", label: "Jogos" },
+            { key: "placar", label: "Placar Exato" },
           ]
         : isHockey
           ? [
               { key: "resultado", label: "Vencedor" },
               { key: "totais", label: "Totais" },
               { key: "puckline", label: "Puck Line" },
-              { key: "1periodo", label: "1º Período" },
+              { key: "1periodo", label: "1º Per." },
+              { key: "2periodo", label: "2º Per." },
+              { key: "3periodo", label: "3º Per." },
+              { key: "especiais", label: "Especiais" },
             ]
           : isVolleyball
             ? [
                 { key: "resultado", label: "Vencedor" },
                 { key: "sets", label: "Sets" },
                 { key: "handicap", label: "Handicap" },
+                { key: "perset", label: "Por Set" },
+                { key: "pontos", label: "Pontos" },
               ]
             : [
                 { key: "resultado", label: "Resultado" },
@@ -1967,6 +1985,165 @@ export default function Home() {
           </div>
         )}
 
+        {/* ── VOLEIBOL: POR SET ── */}
+        {isVolleyball && modalTab === "perset" && m && (m as any).volleyballExtra && (
+          <div>
+            {((m as any).volleyballExtra as { set1: { home: number; away: number }; set2: { home: number; away: number }; set3: { home: number; away: number } }).set1.home > 0 && (
+              <MarketGroup title="Vencedor do 1º Set">
+                <MarketOddsBtn match={match} sel="vs1h" odd={((m as any).volleyballExtra as any).set1.home} market="perset" label={match.home} />
+                <MarketOddsBtn match={match} sel="vs1a" odd={((m as any).volleyballExtra as any).set1.away} market="perset" label={match.away} />
+              </MarketGroup>
+            )}
+            {((m as any).volleyballExtra as any).set2.home > 0 && (
+              <MarketGroup title="Vencedor do 2º Set">
+                <MarketOddsBtn match={match} sel="vs2h" odd={((m as any).volleyballExtra as any).set2.home} market="perset" label={match.home} />
+                <MarketOddsBtn match={match} sel="vs2a" odd={((m as any).volleyballExtra as any).set2.away} market="perset" label={match.away} />
+              </MarketGroup>
+            )}
+            {((m as any).volleyballExtra as any).set3.home > 0 && (
+              <MarketGroup title="Vencedor do 3º Set (se disputado)">
+                <MarketOddsBtn match={match} sel="vs3h" odd={((m as any).volleyballExtra as any).set3.home} market="perset" label={match.home} />
+                <MarketOddsBtn match={match} sel="vs3a" odd={((m as any).volleyballExtra as any).set3.away} market="perset" label={match.away} />
+              </MarketGroup>
+            )}
+          </div>
+        )}
+
+        {/* ── VOLEIBOL: PONTOS ── */}
+        {isVolleyball && modalTab === "pontos" && m && (m as any).volleyballExtra && (
+          <div>
+            {m.bothTeamsScore.yes > 0 && (
+              <MarketGroup title={`Total de Pontos — O/U ${m._total ?? "—"}`}>
+                <MarketOddsBtn match={match} sel="opts" odd={m.bothTeamsScore.yes} market="pontos" label={`Mais de ${m._total ?? "—"} pts`} />
+                <MarketOddsBtn match={match} sel="upts" odd={m.bothTeamsScore.no} market="pontos" label={`Menos de ${m._total ?? "—"} pts`} />
+              </MarketGroup>
+            )}
+            {((m as any).volleyballExtra as any).handicapPoints.home > 0 && (
+              <MarketGroup title={`Handicap de Pontos — ${((m as any).volleyballExtra as any).handicapPoints.line > 0 ? `Casa −${((m as any).volleyballExtra as any).handicapPoints.line}` : `Casa +${Math.abs(((m as any).volleyballExtra as any).handicapPoints.line)}`}`}>
+                <MarketOddsBtn match={match} sel="pth" odd={((m as any).volleyballExtra as any).handicapPoints.home} market="pontos" label={match.home} />
+                <MarketOddsBtn match={match} sel="pta" odd={((m as any).volleyballExtra as any).handicapPoints.away} market="pontos" label={match.away} />
+              </MarketGroup>
+            )}
+          </div>
+        )}
+
+        {/* ── BASQUETE: QUARTOS ── */}
+        {isBasketball && modalTab === "quartos" && m && (m as any).basketballExtra && (
+          <div>
+            {(["q1","q2","q3","q4"] as const).map((q, qi) => {
+              const ex = (m as any).basketballExtra as any;
+              const labels = ["1º Quarto","2º Quarto","3º Quarto","4º Quarto"];
+              return ex[q].home > 0 ? (
+                <MarketGroup key={q} title={`Vencedor — ${labels[qi]}`}>
+                  <MarketOddsBtn match={match} sel={`${q}-home`} odd={ex[q].home} market="quartos" label={match.home} />
+                  <MarketOddsBtn match={match} sel={`${q}-away`} odd={ex[q].away} market="quartos" label={match.away} />
+                </MarketGroup>
+              ) : null;
+            })}
+          </div>
+        )}
+
+        {/* ── BASQUETE: TOTAIS POR TIME ── */}
+        {isBasketball && modalTab === "times" && m && (m as any).basketballExtra && (
+          <div>
+            {((m as any).basketballExtra as any).teamTotalHome.over > 0 && (
+              <MarketGroup title={`Total ${match.home} — O/U ${((m as any).basketballExtra as any).teamTotalHome.line}`}>
+                <MarketOddsBtn match={match} sel="tth-o" odd={((m as any).basketballExtra as any).teamTotalHome.over} market="times" label={`Mais de ${((m as any).basketballExtra as any).teamTotalHome.line}`} />
+                <MarketOddsBtn match={match} sel="tth-u" odd={((m as any).basketballExtra as any).teamTotalHome.under} market="times" label={`Menos de ${((m as any).basketballExtra as any).teamTotalHome.line}`} />
+              </MarketGroup>
+            )}
+            {((m as any).basketballExtra as any).teamTotalAway.over > 0 && (
+              <MarketGroup title={`Total ${match.away} — O/U ${((m as any).basketballExtra as any).teamTotalAway.line}`}>
+                <MarketOddsBtn match={match} sel="tta-o" odd={((m as any).basketballExtra as any).teamTotalAway.over} market="times" label={`Mais de ${((m as any).basketballExtra as any).teamTotalAway.line}`} />
+                <MarketOddsBtn match={match} sel="tta-u" odd={((m as any).basketballExtra as any).teamTotalAway.under} market="times" label={`Menos de ${((m as any).basketballExtra as any).teamTotalAway.line}`} />
+              </MarketGroup>
+            )}
+          </div>
+        )}
+
+        {/* ── TÉNIS: TOTAL DE JOGOS ── */}
+        {isTennis && modalTab === "jogos" && m && (m as any).tennisExtra && (
+          <div>
+            {((m as any).tennisExtra as any).totalGames.over > 0 && (
+              <MarketGroup title={`Total de Games — O/U ${((m as any).tennisExtra as any).totalGames.line}`}>
+                <MarketOddsBtn match={match} sel="tg-o" odd={((m as any).tennisExtra as any).totalGames.over} market="jogos" label={`Mais de ${((m as any).tennisExtra as any).totalGames.line}`} />
+                <MarketOddsBtn match={match} sel="tg-u" odd={((m as any).tennisExtra as any).totalGames.under} market="jogos" label={`Menos de ${((m as any).tennisExtra as any).totalGames.line}`} />
+              </MarketGroup>
+            )}
+            {((m as any).tennisExtra as any).set2.home > 0 && (
+              <MarketGroup title="Vencedor do 2º Set">
+                <MarketOddsBtn match={match} sel="s2h" odd={((m as any).tennisExtra as any).set2.home} market="jogos" label={match.home} />
+                <MarketOddsBtn match={match} sel="s2a" odd={((m as any).tennisExtra as any).set2.away} market="jogos" label={match.away} />
+              </MarketGroup>
+            )}
+            {((m as any).tennisExtra as any).gameHandicap.home > 0 && (
+              <MarketGroup title={`Handicap de Games — ${((m as any).tennisExtra as any).gameHandicap.line > 0 ? `Casa −${((m as any).tennisExtra as any).gameHandicap.line}` : `Casa +${Math.abs(((m as any).tennisExtra as any).gameHandicap.line)}`}`}>
+                <MarketOddsBtn match={match} sel="gh-home" odd={((m as any).tennisExtra as any).gameHandicap.home} market="jogos" label={match.home} />
+                <MarketOddsBtn match={match} sel="gh-away" odd={((m as any).tennisExtra as any).gameHandicap.away} market="jogos" label={match.away} />
+              </MarketGroup>
+            )}
+          </div>
+        )}
+
+        {/* ── TÉNIS: PLACAR EXATO (SETS) ── */}
+        {isTennis && modalTab === "placar" && m && (m as any).tennisExtra && (
+          <div>
+            <p className="text-xs text-zinc-500 mb-3">Resultado final em sets.</p>
+            <div className="grid grid-cols-2 gap-2">
+              {((m as any).tennisExtra as any).exactSets.h20 > 0 && <MarketOddsBtn match={match} sel="es-h20" odd={((m as any).tennisExtra as any).exactSets.h20} market="placar" label={`${match.home} 2-0`} />}
+              {((m as any).tennisExtra as any).exactSets.h21 > 0 && <MarketOddsBtn match={match} sel="es-h21" odd={((m as any).tennisExtra as any).exactSets.h21} market="placar" label={`${match.home} 2-1`} />}
+              {((m as any).tennisExtra as any).exactSets.a02 > 0 && <MarketOddsBtn match={match} sel="es-a02" odd={((m as any).tennisExtra as any).exactSets.a02} market="placar" label={`${match.away} 2-0`} />}
+              {((m as any).tennisExtra as any).exactSets.a12 > 0 && <MarketOddsBtn match={match} sel="es-a12" odd={((m as any).tennisExtra as any).exactSets.a12} market="placar" label={`${match.away} 2-1`} />}
+            </div>
+          </div>
+        )}
+
+        {/* ── HÓQUEI: 2º PERÍODO ── */}
+        {isHockey && modalTab === "2periodo" && m && (m as any).hockeyExtra && (
+          <div>
+            <MarketGroup title="Resultado — 2º Período">
+              <MarketOddsBtn match={match} sel="per2-home" odd={((m as any).hockeyExtra as any).period2.home} market="2periodo" label={match.home} />
+              <MarketOddsBtn match={match} sel="per2-draw" odd={((m as any).hockeyExtra as any).period2.draw} market="2periodo" label="Empate" />
+              <MarketOddsBtn match={match} sel="per2-away" odd={((m as any).hockeyExtra as any).period2.away} market="2periodo" label={match.away} />
+            </MarketGroup>
+          </div>
+        )}
+
+        {/* ── HÓQUEI: 3º PERÍODO ── */}
+        {isHockey && modalTab === "3periodo" && m && (m as any).hockeyExtra && (
+          <div>
+            <MarketGroup title="Resultado — 3º Período">
+              <MarketOddsBtn match={match} sel="per3-home" odd={((m as any).hockeyExtra as any).period3.home} market="3periodo" label={match.home} />
+              <MarketOddsBtn match={match} sel="per3-draw" odd={((m as any).hockeyExtra as any).period3.draw} market="3periodo" label="Empate" />
+              <MarketOddsBtn match={match} sel="per3-away" odd={((m as any).hockeyExtra as any).period3.away} market="3periodo" label={match.away} />
+            </MarketGroup>
+          </div>
+        )}
+
+        {/* ── HÓQUEI: ESPECIAIS ── */}
+        {isHockey && modalTab === "especiais" && m && (m as any).hockeyExtra && (
+          <div>
+            {((m as any).hockeyExtra as any).period1Total.over > 0 && (
+              <MarketGroup title={`Total 1º Período — O/U ${((m as any).hockeyExtra as any).period1Total.line}`}>
+                <MarketOddsBtn match={match} sel="p1t-o" odd={((m as any).hockeyExtra as any).period1Total.over} market="especiais" label={`Mais de ${((m as any).hockeyExtra as any).period1Total.line}`} />
+                <MarketOddsBtn match={match} sel="p1t-u" odd={((m as any).hockeyExtra as any).period1Total.under} market="especiais" label={`Menos de ${((m as any).hockeyExtra as any).period1Total.line}`} />
+              </MarketGroup>
+            )}
+            {((m as any).hockeyExtra as any).bothTeamsScoreGame.yes > 0 && (
+              <MarketGroup title="Ambas as Equipas Marcam">
+                <MarketOddsBtn match={match} sel="bts-yes" odd={((m as any).hockeyExtra as any).bothTeamsScoreGame.yes} market="especiais" label="Sim" />
+                <MarketOddsBtn match={match} sel="bts-no" odd={((m as any).hockeyExtra as any).bothTeamsScoreGame.no} market="especiais" label="Não" />
+              </MarketGroup>
+            )}
+            {((m as any).hockeyExtra as any).shotsOnGoal.over > 0 && (
+              <MarketGroup title={`Remates à Baliza — O/U ${((m as any).hockeyExtra as any).shotsOnGoal.line.toFixed(1)}`}>
+                <MarketOddsBtn match={match} sel="sog-o" odd={((m as any).hockeyExtra as any).shotsOnGoal.over} market="especiais" label={`Mais de ${((m as any).hockeyExtra as any).shotsOnGoal.line.toFixed(1)}`} />
+                <MarketOddsBtn match={match} sel="sog-u" odd={((m as any).hockeyExtra as any).shotsOnGoal.under} market="especiais" label={`Menos de ${((m as any).hockeyExtra as any).shotsOnGoal.line.toFixed(1)}`} />
+              </MarketGroup>
+            )}
+          </div>
+        )}
+
         {!m && <div className="text-center text-zinc-500 py-6 text-sm">Mercados adicionais indisponíveis para esta partida.</div>}
       </div>
     );
@@ -1999,9 +2176,8 @@ export default function Home() {
               <>
                 {/* Free Bet balance pill — always visible */}
                 <div
-                  className="hidden sm:flex items-center gap-1.5 bg-violet-900/60 border border-violet-500/40 hover:border-violet-400/70 rounded-lg px-2.5 py-1.5 cursor-pointer transition-colors"
+                  className="hidden sm:flex items-center gap-1.5 bg-violet-900/60 border border-violet-500/40 rounded-lg px-2.5 py-1.5"
                   title="Saldo de Free Bets"
-                  onClick={() => { setActiveTab("wallet"); fetchMyBets(); }}
                 >
                   <span className="text-[10px] font-black text-violet-300 tracking-widest">FB</span>
                   <span className="text-xs font-bold text-violet-200">€ {parseFloat(auth.user.freebetBalance ?? "0").toFixed(2)}</span>
@@ -2009,9 +2185,8 @@ export default function Home() {
 
                 {/* Real balance pill */}
                 <div
-                  className="flex items-center gap-1.5 bg-zinc-800 border border-zinc-700 hover:border-green-500/50 rounded-lg px-2.5 py-1.5 cursor-pointer transition-colors"
+                  className="flex items-center gap-1.5 bg-zinc-800 border border-zinc-700 rounded-lg px-2.5 py-1.5"
                   title="Saldo disponível"
-                  onClick={() => { setActiveTab("wallet"); fetchMyBets(); }}
                 >
                   <span className="text-xs font-black text-green-400">€</span>
                   <span className="text-xs font-bold text-white">{parseFloat(auth.user.balance).toFixed(2)}</span>
@@ -3197,7 +3372,7 @@ function PromosPage({
 }
 
 // ─── DEPOSIT / WITHDRAW MODAL ────────────────────────────────────────────────
-type PayMethod = "multibanco" | "mbway" | "card" | "withdraw";
+type PayMethod = "multibanco" | "mbway" | "card";
 
 function DepositWithdrawModal({
   open, onClose, onDeposit, depositAmount, setDepositAmount, depositLoading, balance,
@@ -3216,8 +3391,6 @@ function DepositWithdrawModal({
   const [cardExpiry, setCardExpiry] = useState("");
   const [cardCvc, setCardCvc] = useState("");
   const [cardName, setCardName] = useState("");
-  const [withdrawAmount, setWithdrawAmount] = useState("");
-  const [withdrawIban, setWithdrawIban] = useState("");
   const [mbwayStep, setMbwayStep] = useState<"form" | "confirm">("form");
 
   const amount = parseFloat(depositAmount.replace(",", "."));
@@ -3227,7 +3400,6 @@ function DepositWithdrawModal({
     { id: "multibanco", label: "Multibanco", icon: "🏧" },
     { id: "mbway", label: "MB WAY", icon: "📱" },
     { id: "card", label: "Cartão", icon: "💳" },
-    { id: "withdraw", label: "Levantar", icon: "↩️" },
   ];
 
   // Generate deterministic Multibanco reference from amount (demo)
@@ -3254,7 +3426,7 @@ function DepositWithdrawModal({
         </div>
 
         {/* Method tabs */}
-        <div className="grid grid-cols-4 border-b border-zinc-800">
+        <div className="grid grid-cols-3 border-b border-zinc-800">
           {METHODS.map(m => (
             <button
               key={m.id}
@@ -3268,41 +3440,37 @@ function DepositWithdrawModal({
         </div>
 
         <div className="p-5 space-y-4">
-          {/* Amount selector — shown for all deposit methods */}
-          {payMethod !== "withdraw" && (
-            <>
-              <div>
-                <p className="text-xs text-zinc-400 mb-2 font-semibold uppercase tracking-widest">Valor</p>
-                <div className="grid grid-cols-5 gap-1.5 mb-3">
-                  {[5, 10, 20, 50, 100].map(v => (
-                    <button
-                      key={v}
-                      onClick={() => setDepositAmount(String(v))}
-                      className={`py-2 rounded-lg border font-bold text-xs transition-colors ${depositAmount === String(v) ? "border-emerald-500 bg-emerald-500/10 text-emerald-400" : "border-zinc-700 hover:border-zinc-500 text-zinc-300"}`}
-                    >
-                      €{v}
-                    </button>
-                  ))}
-                </div>
-                <div className="relative">
-                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400 font-bold text-sm">€</span>
-                  <Input
-                    type="number" min={5} max={5000} placeholder="0,00"
-                    className="pl-8 bg-zinc-900 border-zinc-700 text-white font-bold text-lg h-11"
-                    value={depositAmount}
-                    onChange={e => setDepositAmount(e.target.value)}
-                  />
-                </div>
-              </div>
-              {promoHint && (
-                <div className="bg-emerald-900/30 border border-emerald-600/30 rounded-xl p-2.5 flex items-center gap-2.5 text-xs">
-                  <span className="text-lg">🎁</span>
-                  <span className="text-emerald-300 font-semibold">
-                    {amount >= 100 ? "Qualifica para 100% Bónus de Boas-Vindas!" : "Qualifica para €10 em Free Bets!"}
-                  </span>
-                </div>
-              )}
-            </>
+          {/* Amount selector */}
+          <div>
+            <p className="text-xs text-zinc-400 mb-2 font-semibold uppercase tracking-widest">Valor</p>
+            <div className="grid grid-cols-5 gap-1.5 mb-3">
+              {[5, 10, 20, 50, 100].map(v => (
+                <button
+                  key={v}
+                  onClick={() => setDepositAmount(String(v))}
+                  className={`py-2 rounded-lg border font-bold text-xs transition-colors ${depositAmount === String(v) ? "border-emerald-500 bg-emerald-500/10 text-emerald-400" : "border-zinc-700 hover:border-zinc-500 text-zinc-300"}`}
+                >
+                  €{v}
+                </button>
+              ))}
+            </div>
+            <div className="relative">
+              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400 font-bold text-sm">€</span>
+              <Input
+                type="number" min={5} max={5000} placeholder="0,00"
+                className="pl-8 bg-zinc-900 border-zinc-700 text-white font-bold text-lg h-11"
+                value={depositAmount}
+                onChange={e => setDepositAmount(e.target.value)}
+              />
+            </div>
+          </div>
+          {promoHint && (
+            <div className="bg-emerald-900/30 border border-emerald-600/30 rounded-xl p-2.5 flex items-center gap-2.5 text-xs">
+              <span className="text-lg">🎁</span>
+              <span className="text-emerald-300 font-semibold">
+                {amount >= 100 ? "Qualifica para 100% Bónus de Boas-Vindas!" : "Qualifica para €10 em Free Bets!"}
+              </span>
+            </div>
           )}
 
           {/* MULTIBANCO */}
@@ -3447,44 +3615,6 @@ function DepositWithdrawModal({
             </div>
           )}
 
-          {/* LEVANTAMENTO */}
-          {payMethod === "withdraw" && (
-            <div className="space-y-3">
-              <div className="bg-zinc-900 border border-zinc-700 rounded-xl p-3 flex items-center justify-between">
-                <span className="text-xs text-zinc-400">Saldo disponível para levantar</span>
-                <span className="text-green-400 font-black">€ {balance.toFixed(2)}</span>
-              </div>
-              <div className="space-y-1.5">
-                <Label className="text-xs text-zinc-400 font-semibold uppercase tracking-widest">Valor a levantar</Label>
-                <div className="relative">
-                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400 font-bold text-sm">€</span>
-                  <Input
-                    type="number" min={10} max={balance} placeholder="0,00"
-                    className="pl-8 bg-zinc-900 border-zinc-700 text-white font-bold text-lg h-11"
-                    value={withdrawAmount}
-                    onChange={e => setWithdrawAmount(e.target.value)}
-                  />
-                </div>
-              </div>
-              <div className="space-y-1.5">
-                <Label className="text-xs text-zinc-400 font-semibold uppercase tracking-widest">IBAN</Label>
-                <Input
-                  placeholder="PT50 0000 0000 0000 0000 0000 0"
-                  className="bg-zinc-900 border-zinc-700 text-white font-mono text-sm h-11"
-                  value={withdrawIban}
-                  onChange={e => setWithdrawIban(e.target.value.toUpperCase())}
-                />
-              </div>
-              <Button
-                onClick={() => { toast.info("Pedido de levantamento submetido. Processado em 1-3 dias úteis."); onClose(); }}
-                disabled={!withdrawAmount || parseFloat(withdrawAmount) < 10 || parseFloat(withdrawAmount) > balance || withdrawIban.length < 15}
-                className="w-full bg-zinc-700 hover:bg-zinc-600 text-white font-black h-11"
-              >
-                ↩️ Solicitar Levantamento
-              </Button>
-              <p className="text-[10px] text-zinc-600 text-center">Processamento em 1–3 dias úteis por transferência bancária.</p>
-            </div>
-          )}
         </div>
       </DialogContent>
     </Dialog>
