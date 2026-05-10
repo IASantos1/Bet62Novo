@@ -12,7 +12,7 @@ const BASE_V1 = "https://statpal.io/api/v1";
 type AdvancedMarkets = {
   doubleChance: { homeOrDraw: number; awayOrDraw: number; homeOrAway: number };
   bothTeamsScore: { yes: number; no: number };
-  totalGoals: { over05: number; under05: number; over15: number; under15: number; over25: number; under25: number; over35: number; under35: number; over45: number; under45: number; over55: number; under55: number };
+  totalGoals: { over05: number; under05: number; over15: number; under15: number; over25: number; under25: number; over35: number; under35: number; over45: number; under45: number; over55: number; under55: number; over65: number; under65: number };
   handicap: { homeMinusOne: number; awayPlusOne: number; homeMinusOneHalf: number; awayPlusOneHalf: number };
   halfTime: { home: number; draw: number; away: number };
   firstGoal: { home: number; noGoal: number; away: number };
@@ -91,6 +91,7 @@ export type LiveMatchState = {
     sets?: Array<[number, number]>;      // tennis: [[6,3],[4,2]] last entry is in-progress
     currentPoints?: [number, number];    // tennis: current game points [30, 15]
     currentPts?: [number, number];       // volleyball: current set points [18, 16]
+    vollSets?: Array<[number, number]>;  // volleyball: completed set scores [[25,18],[22,25]]
   };
 };
 
@@ -488,6 +489,7 @@ function makeAdvancedMarketsFromTeams(homeName: string, awayName: string): Advan
   const [o05, u05] = probsToDecimalOdds([mc(1 - poissonCdf(lambda, 0), 0.02, 0.98), mc(poissonCdf(lambda, 0), 0.02, 0.98)], 1.05);
   const [o45, u45] = probsToDecimalOdds([mc(1 - poissonCdf(lambda, 4), 0.02, 0.98), mc(poissonCdf(lambda, 4), 0.02, 0.98)], 1.06);
   const [o55, u55] = probsToDecimalOdds([mc(1 - poissonCdf(lambda, 5), 0.02, 0.98), mc(poissonCdf(lambda, 5), 0.02, 0.98)], 1.06);
+  const [o65, u65] = probsToDecimalOdds([mc(1 - poissonCdf(lambda, 6), 0.02, 0.98), mc(poissonCdf(lambda, 6), 0.02, 0.98)], 1.06);
   const [o225, u225] = probsToDecimalOdds([pA225, 1 - pA225], 1.05);
   const [o275, u275] = probsToDecimalOdds([pA275, 1 - pA275], 1.05);
 
@@ -573,7 +575,7 @@ function makeAdvancedMarketsFromTeams(homeName: string, awayName: string): Advan
   return {
     doubleChance: { homeOrDraw: dcHD!, awayOrDraw: dcDA!, homeOrAway: dcHA! },
     bothTeamsScore: { yes: bttsYes!, no: bttsNo! },
-    totalGoals: { over05: o05!, under05: u05!, over15: o15!, under15: u15!, over25: o25!, under25: u25!, over35: o35!, under35: u35!, over45: o45!, under45: u45!, over55: o55!, under55: u55! },
+    totalGoals: { over05: o05!, under05: u05!, over15: o15!, under15: u15!, over25: o25!, under25: u25!, over35: o35!, under35: u35!, over45: o45!, under45: u45!, over55: o55!, under55: u55!, over65: o65!, under65: u65! },
     handicap: { homeMinusOne: hm1H!, awayPlusOne: hm1A!, homeMinusOneHalf: hm15H!, awayPlusOneHalf: hm15A! },
     halfTime: { home: htH!, draw: htX!, away: htA! },
     firstGoal: { home: fgH!, noGoal: fgNG!, away: fgA! },
@@ -1414,7 +1416,7 @@ function buildBasketballMatches(): UpcomingMatch[] {
           over15: oTotal1H!, under15: uTotal1H!,
           over25: oTotal!, under25: uTotal!,
           over35: oHT!, under35: uHT!,
-          over45: 0, under45: 0, over55: 0, under55: 0,
+          over45: 0, under45: 0, over55: 0, under55: 0, over65: 0, under65: 0,
         },
         handicap: {
           homeMinusOne: spreadH!, awayPlusOne: spreadA!,
@@ -1547,7 +1549,7 @@ function buildTennisMatches(): UpcomingMatch[] {
           over15: set1H!, under15: set1A!,
           over25: oSets!, under25: uSets!,
           over35: 0, under35: 0,
-          over45: 0, under45: 0, over55: 0, under55: 0,
+          over45: 0, under45: 0, over55: 0, under55: 0, over65: 0, under65: 0,
         },
         handicap: {
           homeMinusOne: hcapH!, awayPlusOne: hcapA!,
@@ -1702,7 +1704,7 @@ function buildHockeyMatches(): UpcomingMatch[] {
           over15: oAlt1!, under15: uAlt1!,
           over25: oTotal!, under25: uTotal!,
           over35: oAlt2!, under35: uAlt2!,
-          over45: 0, under45: 0, over55: 0, under55: 0,
+          over45: 0, under45: 0, over55: 0, under55: 0, over65: 0, under65: 0,
         },
         handicap: { homeMinusOne: plH!, awayPlusOne: plA!, homeMinusOneHalf: 0, awayPlusOneHalf: 0 },
         halfTime: { home: per1H!, draw: per1D!, away: per1A! },
@@ -1811,7 +1813,7 @@ function buildVolleyballMatches(): UpcomingMatch[] {
           over15: oSets25!, under15: uSets25!,
           over25: oSets35!, under25: uSets35!,
           over35: hcapH!, under35: hcapA!,
-          over45: 0, under45: 0, over55: 0, under55: 0,
+          over45: 0, under45: 0, over55: 0, under55: 0, over65: 0, under65: 0,
         },
         handicap: { homeMinusOne: hcapH!, awayPlusOne: hcapA!, homeMinusOneHalf: 0, awayPlusOneHalf: 0 },
         halfTime: { home: 0, draw: 0, away: 0 },
@@ -1845,11 +1847,13 @@ function buildSimulatedLiveOtherSports(): LiveMatchState[] {
   const win30s  = Math.floor(Date.now() / 30_000);   // game state: every 30 s
   const win15s  = Math.floor(Date.now() / 15_000);   // odds drift: every 15 s
 
+  // Tennis: pick 1 ATP500 (idx 0), 1 ATP250 (idx 1), 1 WTA1000 (idx 7), 1 WTA250 (idx 8)
+  const tennisPicks = [tennis[0], tennis[1], tennis[7], tennis[8]].filter((t): t is UpcomingMatch => t != null);
   const picks: Array<{ m: UpcomingMatch; si: number }> = [
     ...basketball.slice(0, 3).map((m, i) => ({ m, si: i })),
-    ...tennis.slice(0, 2).map((m, i) => ({ m, si: i + 3 })),
-    ...hockey.slice(0, 2).map((m, i) => ({ m, si: i + 5 })),
-    ...volleyball.slice(0, 2).map((m, i) => ({ m, si: i + 7 })),
+    ...tennisPicks.map((m, i) => ({ m, si: i + 3 })),
+    ...hockey.slice(0, 2).map((m, i) => ({ m, si: i + 7 })),
+    ...volleyball.slice(0, 2).map((m, i) => ({ m, si: i + 9 })),
   ];
 
   const TENNIS_PTS = [0, 15, 30, 40] as const;
@@ -1930,20 +1934,29 @@ function buildSimulatedLiveOtherSports(): LiveMatchState[] {
       // Volleyball — best-of-5
       const totalSetsFrame = 1 + Math.floor(rngId(1) * 4);
       let hSets = 0, aSets = 0;
+      const vollSets: Array<[number, number]> = [];
       for (let s = 0; s < totalSetsFrame - 1; s++) {
         if (hSets === 3 || aSets === 3) break;
-        if (rngId(10 + s) > 0.5) hSets++; else aSets++;
+        const isFifthSet = (hSets + aSets) === 4;
+        const target = isFifthSet ? 15 : 25;
+        const homeWinsSet = rngId(10 + s) > 0.5;
+        // Loser gets 0–(target-2), never tied at target
+        const loserPts = Math.floor(rngId(11 + s) * (target - 2));
+        vollSets.push(homeWinsSet ? [target, loserPts] : [loserPts, target]);
+        if (homeWinsSet) hSets++; else aSets++;
       }
       homeScore = hSets;
       awayScore = aSets;
       const currentSet = Math.min(hSets + aSets + 1, 5);
+      const isCurrFifth = (hSets + aSets) === 4;
+      const maxPts = isCurrFifth ? 14 : 24; // can be 0-24 before winning
       status  = `Set ${currentSet}`;
       minute  = currentSet;
-      // Points within current set: rallies add up to ~50 total, split randomly
-      const totalRally = 6 + Math.floor(rng(5) * 44);
-      const homePts    = Math.round(totalRally * (0.38 + rng(6) * 0.24));
-      const awayPts    = totalRally - homePts;
-      _liveExtra = { currentPts: [Math.min(homePts, 24), Math.min(awayPts, 24)] };
+      // Running points in current set (0 to maxPts each)
+      const totalRally = 4 + Math.floor(rng(5) * (maxPts * 2 - 2));
+      const homePts = Math.round(totalRally * (0.38 + rng(6) * 0.24));
+      const awayPts = totalRally - homePts;
+      _liveExtra = { vollSets, currentPts: [Math.min(homePts, maxPts), Math.min(awayPts, maxPts)] };
     }
 
     // ── Live odds drift (15-s window) ────────────────────────────────────────

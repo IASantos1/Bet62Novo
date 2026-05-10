@@ -429,7 +429,7 @@ type Odds = { home: number; draw: number; away: number };
 type AdvancedMarkets = {
   doubleChance: { homeOrDraw: number; awayOrDraw: number; homeOrAway: number };
   bothTeamsScore: { yes: number; no: number };
-  totalGoals: { over05: number; under05: number; over15: number; under15: number; over25: number; under25: number; over35: number; under35: number; over45: number; under45: number; over55: number; under55: number };
+  totalGoals: { over05: number; under05: number; over15: number; under15: number; over25: number; under25: number; over35: number; under35: number; over45: number; under45: number; over55: number; under55: number; over65: number; under65: number };
   handicap: { homeMinusOne: number; awayPlusOne: number; homeMinusOneHalf: number; awayPlusOneHalf: number };
   halfTime: { home: number; draw: number; away: number };
   firstGoal: { home: number; noGoal: number; away: number };
@@ -475,6 +475,7 @@ type Match = {
     sets?: Array<[number, number]>;
     currentPoints?: [number, number];
     currentPts?: [number, number];
+    vollSets?: Array<[number, number]>;
   };
 };
 
@@ -1292,24 +1293,38 @@ export default function Home() {
       );
     };
 
-    // Volleyball: team names + SETS x-x + PONTOS x-x
-    const VolleyScore = () => (
-      <div className="w-full">
-        <div className="flex items-center gap-2 mb-1.5">
-          <span className="font-bold text-white text-xs truncate flex-1 text-right">{match.home}</span>
-          <div className="text-xl font-black text-white tabular-nums shrink-0 px-1 text-center">
-            {match.homeScore ?? 0}<span className="text-zinc-600 mx-0.5">-</span>{match.awayScore ?? 0}
+    // Volleyball: table like tennis — S1 | S2 | S3 | current pts
+    const VolleyScore = () => {
+      const vSets = extra?.vollSets ?? [];
+      const pts   = extra?.currentPts;
+      const totalCols = vSets.length + (pts ? 1 : 0);
+      const colW = totalCols > 3 ? "w-6" : "w-8";
+      return (
+        <div className="w-full text-xs font-mono tabular-nums">
+          <div className="flex items-center mb-0.5">
+            <div className="flex-1" />
+            {vSets.map((_, i) => (
+              <div key={i} className={`${colW} text-center text-zinc-500 text-[10px] font-bold`}>S{i + 1}</div>
+            ))}
+            {pts && <div className={`${colW} text-center text-yellow-500 text-[10px] font-bold`}>S{vSets.length + 1}</div>}
           </div>
-          <span className="font-bold text-white text-xs truncate flex-1">{match.away}</span>
+          <div className="flex items-center">
+            <div className="flex-1 font-bold text-white text-xs truncate">{match.home}</div>
+            {vSets.map(([h, a], i) => (
+              <div key={i} className={`${colW} text-center font-black ${h > a ? "text-white" : "text-zinc-500"}`}>{h}</div>
+            ))}
+            {pts && <div className={`${colW} text-center font-black text-yellow-400`}>{pts[0]}</div>}
+          </div>
+          <div className="flex items-center">
+            <div className="flex-1 font-bold text-white text-xs truncate">{match.away}</div>
+            {vSets.map(([h, a], i) => (
+              <div key={i} className={`${colW} text-center font-black ${a > h ? "text-white" : "text-zinc-500"}`}>{a}</div>
+            ))}
+            {pts && <div className={`${colW} text-center font-black text-yellow-400`}>{pts[1]}</div>}
+          </div>
         </div>
-        {extra?.currentPts && (
-          <div className="flex items-center justify-center gap-1 text-[10px] text-zinc-400 font-medium">
-            <span className="text-zinc-500">PONTOS</span>
-            <span className="font-black text-zinc-300 tabular-nums">{extra.currentPts[0]} – {extra.currentPts[1]}</span>
-          </div>
-        )}
-      </div>
-    );
+      );
+    };
 
     // Basketball / Hockey / Football: standard home vs away score
     const SimpleScore = ({ big }: { big?: boolean }) => (
@@ -1986,10 +2001,16 @@ export default function Home() {
                 <MarketOddsBtn match={match} sel="u45" odd={m.totalGoals.under45} market="gols" label="Menos de 4.5" />
               </MarketGroup>
             )}
-            {m.totalGoals.over55 > 0 && m.totalGoals.over45 > 0 && m.totalGoals.over45 < 3.0 && (
+            {m.totalGoals.over55 > 0 && (
               <MarketGroup title="Total de Gols — 5.5">
                 <MarketOddsBtn match={match} sel="o55" odd={m.totalGoals.over55} market="gols" label="Mais de 5.5" />
                 <MarketOddsBtn match={match} sel="u55" odd={m.totalGoals.under55} market="gols" label="Menos de 5.5" />
+              </MarketGroup>
+            )}
+            {m.totalGoals.over65 > 0 && (
+              <MarketGroup title="Total de Gols — 6.5">
+                <MarketOddsBtn match={match} sel="o65" odd={m.totalGoals.over65} market="gols" label="Mais de 6.5" />
+                <MarketOddsBtn match={match} sel="u65" odd={m.totalGoals.under65} market="gols" label="Menos de 6.5" />
               </MarketGroup>
             )}
           </div>
