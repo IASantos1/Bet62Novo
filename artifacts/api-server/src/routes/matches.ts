@@ -40,9 +40,14 @@ type AdvancedMarkets = {
   };
   // Tennis extended markets
   tennisExtra?: {
+    firstSet: { home: number; away: number };
     set2: { home: number; away: number };
+    set3: { home: number; away: number };
     exactSets: { h20: number; h21: number; a02: number; a12: number };
+    setHandicap: { home: number; away: number };
     totalGames: { line: number; over: number; under: number };
+    totalGamesLines: Array<{ line: number; over: number; under: number }>;
+    set1Games: { line: number; over: number; under: number };
     gameHandicap: { line: number; home: number; away: number };
   };
   // Hockey extended markets
@@ -58,6 +63,9 @@ type AdvancedMarkets = {
     set1: { home: number; away: number };
     set2: { home: number; away: number };
     set3: { home: number; away: number };
+    exactScore: { s30: number; s31: number; s32: number; s03: number; s13: number; s23: number };
+    setHandicap: { home: number; away: number };
+    pointsLines: Array<{ line: number; over: number; under: number }>;
     handicapPoints: { line: number; home: number; away: number };
   };
 };
@@ -587,6 +595,112 @@ function makeAdvancedMarketsFromTeams(homeName: string, awayName: string): Advan
     correctScore,
     corners: { o85: oc85!, u85: uc85!, o95: oc95!, u95: uc95!, o105: oc105!, u105: uc105! },
     cards: { o35: ocard35!, u35: ucard35!, o45: ocard45!, u45: ucard45! },
+  };
+}
+
+// ─── Tennis extras helper ─────────────────────────────────────────────────────
+function computeTennisExtras(p: number, overrides?: {
+  set1H?: number; set1A?: number; oSets?: number; uSets?: number;
+  set2H?: number; set2A?: number; xh20?: number; xh21?: number; xa02?: number; xa12?: number;
+  gamesLine?: number; gamesLineRound?: number; oGames?: number; uGames?: number;
+  hcapH?: number; hcapA?: number;
+}) {
+  p = Math.min(0.92, Math.max(0.08, p));
+  const sp = Math.min(0.88, Math.max(0.12, 0.5 + (p - 0.5) * 1.25));
+  const sp3 = Math.min(0.82, Math.max(0.18, 0.5 + (p - 0.5) * 0.75));
+
+  const raw20 = sp * sp;
+  const raw21 = Math.max(0.005, p - raw20);
+  const raw02 = (1 - sp) * (1 - sp);
+  const raw12 = Math.max(0.005, (1 - p) - raw02);
+  const pThreeSets = raw21 + raw12;
+
+  const ssTotal = raw20 + raw21 + raw02 + raw12;
+  const [es20, es21, es02, es12] = probsToDecimalOdds(
+    [raw20 / ssTotal, raw21 / ssTotal, raw02 / ssTotal, raw12 / ssTotal], 1.10
+  );
+
+  const [fsh, fsa] = probsToDecimalOdds([mc(sp, 0.05, 0.95), mc(1 - sp, 0.05, 0.95)], 1.06);
+  const [s2h, s2a] = probsToDecimalOdds([mc(sp, 0.05, 0.95), mc(1 - sp, 0.05, 0.95)], 1.07);
+  const [s3h, s3a] = probsToDecimalOdds([mc(sp3, 0.08, 0.92), mc(1 - sp3, 0.08, 0.92)], 1.09);
+  const [shhm15, shaw15] = probsToDecimalOdds([mc(raw20, 0.02, 0.98), mc(1 - raw20, 0.02, 0.98)], 1.06);
+
+  const expGames = 21 * (1 - pThreeSets) + 32 * pThreeSets;
+  const logCdfG = (x: number) => 1 / (1 + Math.exp(-(x - expGames) / 4.5));
+  const gLines = [19.5, 20.5, 21.5, 22.5, 23.5];
+  const totalGamesLines = gLines.map(line => {
+    const pU = logCdfG(line);
+    const [o, u] = probsToDecimalOdds([mc(1 - pU, 0.02, 0.98), mc(pU, 0.02, 0.98)], 1.07);
+    return { line, over: o!, under: u! };
+  });
+  const mainGamesLine = totalGamesLines[2]!;
+
+  const set1LineApprox = Math.round((9.5 + (1 - Math.abs(sp - 0.5) * 2) * 2) * 2) / 2;
+  const pS1Over = mc(0.35 + (0.5 - Math.abs(sp - 0.5)) * 0.3, 0.10, 0.90);
+  const [s1go, s1gu] = probsToDecimalOdds([pS1Over, 1 - pS1Over], 1.07);
+
+  const gameDiff = (sp - 0.5) * 8;
+  const ghLine = Math.round(gameDiff * 2) / 2;
+  const pGHHome = mc(0.5 + (sp - 0.5) * 0.3, 0.05, 0.95);
+  const [ghH, ghA] = probsToDecimalOdds([pGHHome, 1 - pGHHome], 1.06);
+
+  return {
+    firstSet:        { home: overrides?.set1H ?? fsh!, away: overrides?.set1A ?? fsa! },
+    set2:            { home: overrides?.set2H ?? s2h!, away: overrides?.set2A ?? s2a! },
+    set3:            { home: s3h!, away: s3a! },
+    exactSets:       { h20: overrides?.xh20 ?? es20!, h21: overrides?.xh21 ?? es21!, a02: overrides?.xa02 ?? es02!, a12: overrides?.xa12 ?? es12! },
+    setHandicap:     { home: shhm15!, away: shaw15! },
+    totalGames:      { line: overrides?.gamesLineRound ?? mainGamesLine.line, over: overrides?.oGames ?? mainGamesLine.over, under: overrides?.uGames ?? mainGamesLine.under },
+    totalGamesLines,
+    set1Games:       { line: set1LineApprox, over: s1go!, under: s1gu! },
+    gameHandicap:    { line: overrides?.gamesLine ?? ghLine, home: overrides?.hcapH ?? ghH!, away: overrides?.hcapA ?? ghA! },
+  };
+}
+
+// ─── Volleyball extras helper ─────────────────────────────────────────────────
+function computeVolleyballExtras(pSetHomeWin: number, overrides?: {
+  vs1H?: number; vs1A?: number; vs2H?: number; vs2A?: number; vs3H?: number; vs3A?: number;
+  ptsDiffLine?: number; ptsHcapH?: number; ptsHcapA?: number;
+}) {
+  const sp = Math.min(0.86, Math.max(0.14, pSetHomeWin));
+  const raw30 = sp ** 3;
+  const raw31 = 3 * sp ** 3 * (1 - sp);
+  const raw32 = 6 * sp ** 3 * (1 - sp) ** 2;
+  const raw03 = (1 - sp) ** 3;
+  const raw13 = 3 * (1 - sp) ** 3 * sp;
+  const raw23 = 6 * (1 - sp) ** 3 * sp ** 2;
+  const esTotal = raw30 + raw31 + raw32 + raw03 + raw13 + raw23;
+  const [vs30, vs31, vs32, vs03, vs13, vs23] = probsToDecimalOdds(
+    [raw30 / esTotal, raw31 / esTotal, raw32 / esTotal, raw03 / esTotal, raw13 / esTotal, raw23 / esTotal],
+    1.12
+  );
+
+  const pHomeMinus15 = mc(raw30 + raw31, 0.02, 0.98);
+  const [shh, sha] = probsToDecimalOdds([pHomeMinus15, 1 - pHomeMinus15], 1.06);
+
+  const [s1h, s1a] = probsToDecimalOdds([mc(sp, 0.05, 0.95), mc(1 - sp, 0.05, 0.95)], 1.06);
+  const [s2h, s2a] = probsToDecimalOdds([mc(sp, 0.05, 0.95), mc(1 - sp, 0.05, 0.95)], 1.07);
+  const sp3 = Math.min(0.82, Math.max(0.18, 0.5 + (sp - 0.5) * 0.9));
+  const [s3h, s3a] = probsToDecimalOdds([mc(sp3, 0.08, 0.92), mc(1 - sp3, 0.08, 0.92)], 1.08);
+
+  const expSets = 3 * (raw30 + raw03) + 4 * (raw31 + raw13) + 5 * (raw32 + raw23);
+  const expPts = expSets * 50;
+  const logCdfP = (x: number) => 1 / (1 + Math.exp(-(x - expPts) / 15));
+  const ptLineNums = [145.5, 150.5, 155.5, 160.5, 165.5];
+  const pointsLines = ptLineNums.map(line => {
+    const pU = logCdfP(line);
+    const [o, u] = probsToDecimalOdds([mc(1 - pU, 0.02, 0.98), mc(pU, 0.02, 0.98)], 1.07);
+    return { line, over: o!, under: u! };
+  });
+
+  return {
+    set1:         { home: overrides?.vs1H ?? s1h!, away: overrides?.vs1A ?? s1a! },
+    set2:         { home: overrides?.vs2H ?? s2h!, away: overrides?.vs2A ?? s2a! },
+    set3:         { home: overrides?.vs3H ?? s3h!, away: overrides?.vs3A ?? s3a! },
+    exactScore:   { s30: vs30!, s31: vs31!, s32: vs32!, s03: vs03!, s13: vs13!, s23: vs23! },
+    setHandicap:  { home: shh!, away: sha! },
+    pointsLines,
+    handicapPoints: { line: overrides?.ptsDiffLine ?? 0, home: overrides?.ptsHcapH ?? s1h!, away: overrides?.ptsHcapA ?? s1a! },
   };
 }
 
@@ -1261,6 +1375,9 @@ function buildTennisLiveMatches(
           ? { home: Math.max(1.04, +(baseOdds.home * (1 - factor)).toFixed(2)), draw: 0, away: Math.min(15, +(baseOdds.away * (1 + factor)).toFixed(2)) }
           : { home: Math.min(15, +(baseOdds.home * (1 + factor)).toFixed(2)), draw: 0, away: Math.max(1.04, +(baseOdds.away * (1 - factor)).toFixed(2)) };
 
+      const liveHomeP = liveOdds.home > 0 && liveOdds.away > 0
+        ? (1 / liveOdds.home) / (1 / liveOdds.home + 1 / liveOdds.away)
+        : 0.5;
       result.push({
         id:          `tennis-live-${m.id}`,
         home:        p0.name,
@@ -1274,7 +1391,7 @@ function buildTennisLiveMatches(
         status:      m.status,
         hasRealOdds: true,
         odds:        liveOdds,
-        markets:     makeAdvancedMarketsFromTeams(p0.name, p1.name),
+        markets:     { ...makeAdvancedMarketsFromTeams(p0.name, p1.name), tennisExtra: computeTennisExtras(liveHomeP) } as unknown as AdvancedMarkets,
         events:      [],
         _liveExtra:  { sets, currentPoints: [hPt, aPt], tennisStats: statsMap.get(m.id) },
       });
@@ -1903,12 +2020,13 @@ function buildTennisMatches(): UpcomingMatch[] {
         },
         halfTime: { home: 0, draw: 0, away: 0 },
         firstGoal: { home: 0, noGoal: 0, away: 0 },
-        tennisExtra: {
-          set2: { home: set2H!, away: set2A! },
-          exactSets: { h20: xh20!, h21: xh21!, a02: xa02!, a12: xa12! },
-          totalGames: { line: gamesLineRound, over: oGames!, under: uGames! },
-          gameHandicap: { line: gamesLine, home: hcapH!, away: hcapA! },
-        },
+        tennisExtra: computeTennisExtras(pP1Win, {
+          set1H: set1H!, set1A: set1A!,
+          set2H: set2H!, set2A: set2A!,
+          xh20: xh20!, xh21: xh21!, xa02: xa02!, xa12: xa12!,
+          gamesLine, gamesLineRound, oGames: oGames!, uGames: uGames!,
+          hcapH: hcapH!, hcapA: hcapA!,
+        }),
       } as unknown as AdvancedMarkets,
     };
   });
@@ -2165,12 +2283,10 @@ function buildVolleyballMatches(): UpcomingMatch[] {
         halfTime: { home: 0, draw: 0, away: 0 },
         firstGoal: { home: 0, noGoal: 0, away: 0 },
         _total: ptsLine,
-        volleyballExtra: {
-          set1: { home: vs1H!, away: vs1A! },
-          set2: { home: vs2H!, away: vs2A! },
-          set3: { home: vs3H!, away: vs3A! },
-          handicapPoints: { line: ptsDiffLine, home: ptsHcapH!, away: ptsHcapA! },
-        },
+        volleyballExtra: computeVolleyballExtras(pSetHomeWin, {
+          vs1H: vs1H!, vs1A: vs1A!, vs2H: vs2H!, vs2A: vs2A!, vs3H: vs3H!, vs3A: vs3A!,
+          ptsDiffLine, ptsHcapH: ptsHcapH!, ptsHcapA: ptsHcapA!,
+        }),
       } as unknown as AdvancedMarkets,
     };
   });
