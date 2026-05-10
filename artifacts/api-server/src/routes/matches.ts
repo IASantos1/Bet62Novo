@@ -1830,11 +1830,185 @@ function buildVolleyballMatches(): UpcomingMatch[] {
   });
 }
 
+// ─── Persistent Simulated Live State Manager ─────────────────────────────────
+// Module-level Maps keep state stable between cache refreshes.
+// Each match initialises once per calendar day (from a deterministic daily seed)
+// and then advances incrementally on every call, so scores never jump.
+
+const _dayRng = (seed: number) => (n: number) => {
+  const x = Math.sin(seed + n * 7919) * 2654435761;
+  return x - Math.floor(x);
+};
+const _tickRng = (seed: number, n: number) => {
+  const x = Math.sin(seed + n * 6271) * 1610612741;
+  return x - Math.floor(x);
+};
+const _fmtClock = (s: number) =>
+  `${String(Math.floor(s / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
+const _getDay = () => {
+  const d = new Date();
+  return d.getUTCFullYear() * 10000 + (d.getUTCMonth() + 1) * 100 + d.getUTCDate();
+};
+
+interface _BballSt  { dk: number; q: number; clk: number; home: number; away: number; lms: number }
+interface _TennisSt { dk: number; sets: Array<[number,number]>; hS: number; aS: number; inH: number; inA: number; ptH: number; ptA: number; srv: 0|1; lms: number }
+interface _VolleySt { dk: number; vollSets: Array<[number,number]>; hS: number; aS: number; ptH: number; ptA: number; lms: number }
+interface _HockeySt { dk: number; period: number; clk: number; home: number; away: number; lms: number }
+
+const _bballMap  = new Map<number, _BballSt>();
+const _tennisMap = new Map<number, _TennisSt>();
+const _volleyMap = new Map<number, _VolleySt>();
+const _hockeyMap = new Map<number, _HockeySt>();
+
+function _getBball(si: number): _BballSt {
+  const dk = _getDay();
+  let s = _bballMap.get(si);
+  if (!s || s.dk !== dk) {
+    const r = _dayRng(dk * 100 + si);
+    const q   = 1 + Math.floor(r(1) * 4);
+    const clk = Math.floor(r(2) * 720);
+    const played = ((q - 1) * 720 + (720 - clk));
+    const rate   = 50 / (4 * 720);
+    const home = Math.round(played * rate * (0.9 + r(3) * 0.2));
+    const away = Math.round(played * rate * (0.9 + r(4) * 0.2));
+    s = { dk, q, clk, home, away, lms: Date.now() };
+    _bballMap.set(si, s);
+  }
+  const realSec = (Date.now() - s.lms) / 1000;
+  if (realSec < 2) return s;
+  const gameSec = Math.min(Math.round(realSec), 90);
+  const ts = Math.floor(s.lms / 1000);
+  s.home += Math.round(gameSec * (50 / 2880) * (0.85 + _tickRng(ts, 1) * 0.3));
+  s.away += Math.round(gameSec * (50 / 2880) * (0.85 + _tickRng(ts, 2) * 0.3));
+  s.clk  -= gameSec;
+  while (s.clk <= 0 && s.q < 4) { s.q++; s.clk += 720; }
+  if (s.clk < 0) s.clk = 0;
+  s.lms = Date.now();
+  return s;
+}
+
+function _getTennis(si: number): _TennisSt {
+  const dk = _getDay();
+  let s = _tennisMap.get(si);
+  if (!s || s.dk !== dk) {
+    const r   = _dayRng(dk * 100 + si);
+    const frame = 1 + Math.floor(r(1) * 3);
+    const sets: Array<[number,number]> = [];
+    let hS = 0, aS = 0;
+    for (let i = 0; i < frame - 1; i++) {
+      if (hS === 2 || aS === 2) break;
+      const hw = r(10 + i) > 0.5;
+      const lg = Math.floor(r(11 + i) * 7);
+      const wg = lg >= 5 ? 7 : 6;
+      sets.push(hw ? [wg, lg] : [lg, wg]);
+      if (hw) hS++; else aS++;
+    }
+    s = { dk, sets, hS, aS, inH: Math.floor(r(20) * 6), inA: Math.floor(r(21) * 5), ptH: 0, ptA: 0, srv: r(22) > 0.5 ? 1 : 0, lms: Date.now() };
+    _tennisMap.set(si, s);
+  }
+  const realSec = (Date.now() - s.lms) / 1000;
+  const nPts = Math.min(Math.round(realSec / 12), 8);
+  if (nPts < 1) return s;
+  const ts = Math.floor(s.lms / 1000);
+  for (let p = 0; p < nPts; p++) {
+    if (s.hS >= 2 || s.aS >= 2) break;
+    const srvWin = _tickRng(ts + p, 3) < 0.58;
+    const hw     = s.srv === 0 ? srvWin : !srvWin;
+    if (hw) s.ptH++; else s.ptA++;
+    const inDeuce = s.ptH >= 3 && s.ptA >= 3;
+    const hWon = inDeuce ? s.ptH - s.ptA >= 2 : s.ptH >= 4;
+    const aWon = inDeuce ? s.ptA - s.ptH >= 2 : s.ptA >= 4;
+    if (hWon || aWon) {
+      s.ptH = 0; s.ptA = 0;
+      s.srv = s.srv === 0 ? 1 : 0;
+      if (hWon) s.inH++; else s.inA++;
+      const setOver = (s.inH >= 6 && s.inH - s.inA >= 2) || (s.inA >= 6 && s.inA - s.inH >= 2)
+                   || (s.inH === 7 && s.inA === 6) || (s.inH === 6 && s.inA === 7);
+      if (setOver) {
+        s.sets.push([s.inH, s.inA]);
+        if (s.inH > s.inA) s.hS++; else s.aS++;
+        s.inH = 0; s.inA = 0;
+      }
+    }
+  }
+  s.lms = Date.now();
+  return s;
+}
+
+function _getVolley(si: number): _VolleySt {
+  const dk = _getDay();
+  let s = _volleyMap.get(si);
+  if (!s || s.dk !== dk) {
+    const r   = _dayRng(dk * 100 + si);
+    const frame = 1 + Math.floor(r(1) * 4);
+    const vollSets: Array<[number,number]> = [];
+    let hS = 0, aS = 0;
+    for (let i = 0; i < frame - 1; i++) {
+      if (hS === 3 || aS === 3) break;
+      const isFifth = (hS + aS) === 4;
+      const tgt = isFifth ? 15 : 25;
+      const hw  = r(10 + i) > 0.5;
+      const lp  = Math.floor(r(11 + i) * (tgt - 2));
+      vollSets.push(hw ? [tgt, lp] : [lp, tgt]);
+      if (hw) hS++; else aS++;
+    }
+    s = { dk, vollSets, hS, aS, ptH: Math.floor(r(20) * 18), ptA: Math.floor(r(21) * 18), lms: Date.now() };
+    _volleyMap.set(si, s);
+  }
+  const realSec = (Date.now() - s.lms) / 1000;
+  const nRallies = Math.min(Math.round(realSec / 8), 12);
+  if (nRallies < 1) return s;
+  const ts  = Math.floor(s.lms / 1000);
+  const tgt = () => (s!.hS + s!.aS) === 4 ? 15 : 25;
+  for (let r = 0; r < nRallies; r++) {
+    if (s.hS >= 3 || s.aS >= 3) break;
+    const hw = _tickRng(ts + r, 7) < 0.5;
+    if (hw) s.ptH++; else s.ptA++;
+    const t  = tgt();
+    const hW = s.ptH >= t && s.ptH - s.ptA >= 2;
+    const aW = s.ptA >= t && s.ptA - s.ptH >= 2;
+    if (hW || aW) {
+      s.vollSets.push([s.ptH, s.ptA]);
+      if (hW) s.hS++; else s.aS++;
+      s.ptH = 0; s.ptA = 0;
+    }
+  }
+  s.lms = Date.now();
+  return s;
+}
+
+function _getHockey(si: number): _HockeySt {
+  const dk = _getDay();
+  let s = _hockeyMap.get(si);
+  if (!s || s.dk !== dk) {
+    const r   = _dayRng(dk * 100 + si);
+    const period = 1 + Math.floor(r(1) * 3);
+    const clk    = Math.floor(r(2) * 1200);
+    const played = ((period - 1) * 1200 + (1200 - clk));
+    const gr     = 3 / 3600;
+    const home   = Math.round(played * gr * (0.7 + r(3) * 0.6));
+    const away   = Math.round(played * gr * (0.7 + r(4) * 0.6));
+    s = { dk, period, clk, home, away, lms: Date.now() };
+    _hockeyMap.set(si, s);
+  }
+  const realSec = (Date.now() - s.lms) / 1000;
+  const gameSec = Math.min(Math.round(realSec * 0.5), 60);
+  if (gameSec < 1) return s;
+  const ts = Math.floor(s.lms / 1000);
+  const gr = 3 / 3600;
+  if (_tickRng(ts, 8) < gr * gameSec) s.home++;
+  if (_tickRng(ts, 9) < gr * gameSec) s.away++;
+  s.clk -= gameSec;
+  while (s.clk <= 0 && s.period < 3) { s.period++; s.clk += 1200; }
+  if (s.clk < 0) s.clk = 0;
+  s.lms = Date.now();
+  return s;
+}
+
 // ─── Simulated live for other sports ─────────────────────────────────────────
-// Three independent time seeds:
-//   rngId    — daily stable (match identity, which quarter/set frame)
-//   rng      — 30-second window (game state: score, period/set, clock)
-//   rngOdds  — 15-second window (live odds drift ± noise)
+// Game state persists in module-level Maps (_bballMap, _tennisMap, etc.) and
+// advances incrementally — scores are stable and never jump between refreshes.
+// Live odds still drift on a 15-s window for a realistic betting experience.
 
 function buildSimulatedLiveOtherSports(): LiveMatchState[] {
   const basketball = buildBasketballMatches();
@@ -1842,12 +2016,8 @@ function buildSimulatedLiveOtherSports(): LiveMatchState[] {
   const hockey     = buildHockeyMatches();
   const volleyball = buildVolleyballMatches();
 
-  const today   = new Date();
-  const dayKey  = today.getUTCFullYear() * 10000 + (today.getUTCMonth() + 1) * 100 + today.getUTCDate();
-  const win30s  = Math.floor(Date.now() / 30_000);   // game state: every 30 s
-  const win15s  = Math.floor(Date.now() / 15_000);   // odds drift: every 15 s
+  const win15s = Math.floor(Date.now() / 15_000);
 
-  // Tennis: pick 1 ATP500 (idx 0), 1 ATP250 (idx 1), 1 WTA1000 (idx 7), 1 WTA250 (idx 8)
   const tennisPicks = [tennis[0], tennis[1], tennis[7], tennis[8]].filter((t): t is UpcomingMatch => t != null);
   const picks: Array<{ m: UpcomingMatch; si: number }> = [
     ...basketball.slice(0, 3).map((m, i) => ({ m, si: i })),
@@ -1856,133 +2026,71 @@ function buildSimulatedLiveOtherSports(): LiveMatchState[] {
     ...volleyball.slice(0, 2).map((m, i) => ({ m, si: i + 9 })),
   ];
 
-  const TENNIS_PTS = [0, 15, 30, 40] as const;
-  const fmtClock  = (secs: number) =>
-    `${Math.floor(secs / 60).toString().padStart(2, "0")}:${(secs % 60).toString().padStart(2, "0")}`;
-
-  const mkRng = (seed: number) => (n: number) => {
+  const TENNIS_SEQ = [0, 15, 30, 40] as const;
+  const mkOddsRng  = (seed: number) => (n: number) => {
     const x = Math.sin(seed + n * 7919) * 2654435761;
     return x - Math.floor(x);
   };
 
   return picks.map(({ m, si }) => {
-    const rngId   = mkRng(dayKey * 100 + si);          // stable all day
-    const rng     = mkRng(win30s  * 97  + si * 31);    // 30-s game state
-    const rngOdds = mkRng(win15s  * 53  + si * 41);    // 15-s odds drift
-
+    const rngOdds = mkOddsRng(win15s * 53 + si * 41);
     let homeScore = 0, awayScore = 0, minute = 0, status = "";
     let _liveExtra: LiveMatchState["_liveExtra"] = undefined;
 
     if (m.sport === "basketball") {
-      const quarter  = 1 + Math.floor(rngId(1) * 4);   // stable quarter choice
-      const progress = rng(2);                          // 30-s progress 0–1
-      const baseH    = 18 + Math.floor(rngId(3) * 42); // stable base score
-      const baseA    = 18 + Math.floor(rngId(4) * 42);
-      homeScore = baseH + Math.floor(quarter * 7 * progress);
-      awayScore = baseA + Math.floor(quarter * 7 * progress * (0.78 + rng(5) * 0.44));
-      minute    = (quarter - 1) * 12 + Math.floor(progress * 12);
-      status    = `Q${quarter}`;
-      _liveExtra = { clockStr: fmtClock(Math.floor(rng(6) * 720)) };
+      const st  = _getBball(si);
+      homeScore = st.home;
+      awayScore = st.away;
+      minute    = (st.q - 1) * 12 + Math.floor((720 - st.clk) / 60);
+      status    = `Q${st.q}`;
+      _liveExtra = { clockStr: _fmtClock(st.clk) };
 
     } else if (m.sport === "tennis") {
-      // ── Best-of-3: valid set progression only ──────────────────────────────
-      const totalSetsFrame = 1 + Math.floor(rngId(1) * 3); // 1, 2, or 3 sets
-      const sets: Array<[number, number]> = [];
-      let hSets = 0, aSets = 0;
-
-      // Build completed sets, stop if someone already won 2
-      for (let s = 0; s < totalSetsFrame - 1; s++) {
-        if (hSets === 2 || aSets === 2) break;
-        const homeWins    = rngId(10 + s) > 0.5;
-        const loserGames  = [0, 1, 2, 3, 4, 5, 6][Math.floor(rngId(11 + s) * 7)]!;
-        // 7-5 when loser=5, 7-6 tiebreak when loser=6, else 6-x
-        const winnerGames = loserGames >= 5 ? 7 : 6;
-        if (homeWins) { sets.push([winnerGames, loserGames]); hSets++; }
-        else           { sets.push([loserGames, winnerGames]); aSets++; }
-      }
-
-      // Add in-progress set only if match isn't over
-      if (hSets < 2 && aSets < 2) {
-        let inH = Math.floor(rng(20) * 6); // 0–5 games
-        let inA = Math.floor(rng(21) * 6); // 0–5 games
-        // At 5-5 one side pushes to 6 (heading to 7-5 / tiebreak)
-        if (inH === 5 && inA === 5) {
-          if (rng(25) > 0.5) inH = 6; else inA = 6;
-        }
-        sets.push([inH, inA]);
-      }
-
-      homeScore = hSets;
-      awayScore = aSets;
+      const st   = _getTennis(si);
+      const sets: Array<[number,number]> = [...st.sets, [st.inH, st.inA]];
+      homeScore  = st.hS;
+      awayScore  = st.aS;
       const currentSet = sets.length;
       status  = `Set ${currentSet}`;
       minute  = currentSet;
-      // ── Tennis point system: 0 15 30 40 Deuce Advantage ──────────────────────
-      // 6 possible raw states (0-5): 0,15,30,40,AD-home,AD-away; deuce if both ≥3
-      const rawH = Math.floor(rng(22) * 6);
-      const rawA = Math.floor(rng(23) * 6);
+      const inDeuce = st.ptH >= 3 && st.ptA >= 3;
       let hPt: number | string, aPt: number | string;
-      if (rawH >= 3 && rawA >= 3) {
-        // Deuce zone
-        if (rawH === 4 && rawA < 4)       { hPt = "AD"; aPt = 40; }  // home advantage
-        else if (rawA === 4 && rawH < 4)  { hPt = 40;   aPt = "AD"; } // away advantage
-        else                              { hPt = "D";   aPt = "D"; }  // deuce
+      if (inDeuce) {
+        if (st.ptH === st.ptA)    { hPt = "D";   aPt = "D"; }
+        else if (st.ptH > st.ptA) { hPt = "AD";  aPt = 40; }
+        else                       { hPt = 40;    aPt = "AD"; }
       } else {
-        hPt = TENNIS_PTS[Math.min(rawH, 3)]!;
-        aPt = TENNIS_PTS[Math.min(rawA, 3)]!;
+        hPt = TENNIS_SEQ[Math.min(st.ptH, 3)]!;
+        aPt = TENNIS_SEQ[Math.min(st.ptA, 3)]!;
       }
       _liveExtra = { sets, currentPoints: [hPt, aPt] };
 
     } else if (m.sport === "hockey") {
-      const period   = 1 + Math.floor(rngId(1) * 3);
-      const progress = rng(2);
-      homeScore = Math.floor(rng(3) * 5);
-      awayScore = Math.floor(rng(4) * 5);
-      minute    = (period - 1) * 20 + Math.floor(progress * 20);
-      status    = `P${period}`;
-      _liveExtra = { clockStr: fmtClock(Math.floor(progress * 1200)) };
+      const st  = _getHockey(si);
+      homeScore = st.home;
+      awayScore = st.away;
+      minute    = (st.period - 1) * 20 + Math.floor((1200 - st.clk) / 60);
+      status    = `P${st.period}`;
+      _liveExtra = { clockStr: _fmtClock(st.clk) };
 
     } else {
-      // Volleyball — best-of-5
-      const totalSetsFrame = 1 + Math.floor(rngId(1) * 4);
-      let hSets = 0, aSets = 0;
-      const vollSets: Array<[number, number]> = [];
-      for (let s = 0; s < totalSetsFrame - 1; s++) {
-        if (hSets === 3 || aSets === 3) break;
-        const isFifthSet = (hSets + aSets) === 4;
-        const target = isFifthSet ? 15 : 25;
-        const homeWinsSet = rngId(10 + s) > 0.5;
-        // Loser gets 0–(target-2), never tied at target
-        const loserPts = Math.floor(rngId(11 + s) * (target - 2));
-        vollSets.push(homeWinsSet ? [target, loserPts] : [loserPts, target]);
-        if (homeWinsSet) hSets++; else aSets++;
-      }
-      homeScore = hSets;
-      awayScore = aSets;
-      const currentSet = Math.min(hSets + aSets + 1, 5);
-      const isCurrFifth = (hSets + aSets) === 4;
-      const maxPts = isCurrFifth ? 14 : 24; // can be 0-24 before winning
+      const st  = _getVolley(si);
+      homeScore = st.hS;
+      awayScore = st.aS;
+      const currentSet = Math.min(st.hS + st.aS + 1, 5);
       status  = `Set ${currentSet}`;
       minute  = currentSet;
-      // Running points in current set (0 to maxPts each)
-      const totalRally = 4 + Math.floor(rng(5) * (maxPts * 2 - 2));
-      const homePts = Math.round(totalRally * (0.38 + rng(6) * 0.24));
-      const awayPts = totalRally - homePts;
-      _liveExtra = { vollSets, currentPts: [Math.min(homePts, maxPts), Math.min(awayPts, maxPts)] };
+      _liveExtra = { vollSets: st.vollSets, currentPts: [st.ptH, st.ptA] };
     }
 
-    // ── Live odds drift (15-s window) ────────────────────────────────────────
-    // Leading team's odds shorten; trailing team's lengthen.
-    // White noise ±4 % on top, clamped to ±25 % of base.
-    const scoreDiff  = homeScore - awayScore;
-    const pressure   = m.sport === "tennis" || m.sport === "volleyball" ? 0.05 : 0.03;
-    const noiseH     = (rngOdds(1) - 0.5) * 0.08;
-    const noiseA     = (rngOdds(2) - 0.5) * 0.08;
-    const noiseD     = (rngOdds(3) - 0.5) * 0.06;
-
+    // ── Live odds drift (15-s window) ─────────────────────────────────────────
+    const scoreDiff = homeScore - awayScore;
+    const pressure  = m.sport === "tennis" || m.sport === "volleyball" ? 0.05 : 0.03;
+    const noiseH    = (rngOdds(1) - 0.5) * 0.08;
+    const noiseA    = (rngOdds(2) - 0.5) * 0.08;
+    const noiseD    = (rngOdds(3) - 0.5) * 0.06;
     const drift = (base: number, shift: number) =>
       Math.round(Math.max(1.01, Math.min(base * 1.30, base * (1 + shift))) * 100) / 100;
-
     const liveOdds = {
       home: drift(m.odds.home, noiseH - scoreDiff * pressure),
       draw: m.odds.draw > 0 ? drift(m.odds.draw, noiseD) : 0,
