@@ -476,6 +476,10 @@ type Match = {
     currentPoints?: [number | string, number | string];
     currentPts?: [number, number];
     vollSets?: Array<[number, number]>;
+    tennisStats?: [
+      { aces: number; doubleFaults: number; firstServePct: string; winners: number; unforcedErrors: number },
+      { aces: number; doubleFaults: number; firstServePct: string; winners: number; unforcedErrors: number },
+    ];
   };
 };
 
@@ -924,6 +928,10 @@ export default function Home() {
             currentPoints?: [number | string, number | string];
             currentPts?: [number, number];
             vollSets?: Array<[number, number]>;
+            tennisStats?: [
+              { aces: number; doubleFaults: number; firstServePct: string; winners: number; unforcedErrors: number },
+              { aces: number; doubleFaults: number; firstServePct: string; winners: number; unforcedErrors: number },
+            ];
           };
         }>;
         // Record API minutes for local ticker interpolation
@@ -1259,14 +1267,16 @@ export default function Home() {
     );
 
     // ── Score area per sport ──────────────────────────────────────────────────
-    // Tennis: set table S1 | S2 | PTS (with Deuce/AD support)
+    // Tennis: set table S1 | S2 | PTS (with Deuce/AD support + real match stats)
     const TennisScore = () => {
       const sets = extra?.sets ?? [];
       const pts  = extra?.currentPoints;
+      const st   = extra?.tennisStats;
       const colW = sets.length > 1 ? "w-7" : "w-8";
       const isDeuce = pts?.[0] === "D" && pts?.[1] === "D";
       const hPtColor = pts?.[0] === "AD" ? "text-yellow-400" : isDeuce ? "text-orange-400" : "text-white";
       const aPtColor = pts?.[1] === "AD" ? "text-yellow-400" : isDeuce ? "text-orange-400" : "text-white";
+      const lastName = (name: string) => name.split(" ").slice(-1)[0] ?? name;
       return (
         <div className="w-full text-xs font-mono tabular-nums">
           {/* Header */}
@@ -1293,6 +1303,31 @@ export default function Home() {
             ))}
             {pts && <div className={`w-8 text-center font-black ${aPtColor}`}>{isDeuce ? "D" : pts[1]}</div>}
           </div>
+          {/* Live match stats (only when real API data available) */}
+          {st && (
+            <div className="mt-1.5 pt-1.5 border-t border-zinc-700/60">
+              <div className="grid grid-cols-5 text-[9px] font-bold text-zinc-500 mb-0.5">
+                <div />
+                <div className="text-center">ACE</div>
+                <div className="text-center">DF</div>
+                <div className="text-center">1ªSrv</div>
+                <div className="text-center">WIN</div>
+              </div>
+              {[0, 1].map(idx => {
+                const s = st[idx]!;
+                const name = idx === 0 ? match.home : match.away;
+                return (
+                  <div key={idx} className="grid grid-cols-5 text-[9px]">
+                    <div className="text-zinc-400 truncate font-semibold">{lastName(name)}</div>
+                    <div className="text-center text-white font-bold">{s.aces}</div>
+                    <div className="text-center text-zinc-400">{s.doubleFaults}</div>
+                    <div className="text-center text-zinc-300">{s.firstServePct}</div>
+                    <div className="text-center text-zinc-300">{s.winners}</div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
       );
     };

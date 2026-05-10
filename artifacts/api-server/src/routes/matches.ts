@@ -92,6 +92,7 @@ export type LiveMatchState = {
     currentPoints?: [number | string, number | string]; // tennis: [30, 15] or ["D","D"] or ["AD",40]
     currentPts?: [number, number];       // volleyball: current set points [18, 16]
     vollSets?: Array<[number, number]>;  // volleyball: completed set scores [[25,18],[22,25]]
+    tennisStats?: [TennisStatData, TennisStatData]; // home / away match stats
   };
 };
 
@@ -686,6 +687,31 @@ type TennisTournament = { id: string; name: string; match: TennisMatch | TennisM
 let tennisLiveCache: TennisTournament[] | null = null;
 let tennisLiveFetchedAt = 0;
 
+// Tennis match stats (parsed from livestats endpoint)
+type TennisStatData = {
+  aces: number;
+  doubleFaults: number;
+  firstServePct: string;   // e.g. "66%"
+  winners: number;
+  unforcedErrors: number;
+};
+type TennisStatsPlayerRaw = {
+  id: string; name: string;
+  stats?: {
+    period?: Array<{
+      name: string;
+      type?: Array<{ name: string; stat?: Array<{ name: string; value: string }> }>;
+    }>;
+  };
+};
+type TennisStatsTournament = {
+  id: string; name: string;
+  match: { id: string; player: TennisStatsPlayerRaw | TennisStatsPlayerRaw[] }
+       | Array<{ id: string; player: TennisStatsPlayerRaw | TennisStatsPlayerRaw[] }>;
+};
+let tennisStatsCache: Map<string, [TennisStatData, TennisStatData]> | null = null;
+let tennisStatsFetchedAt = 0;
+
 // Volleyball livescores cache (30s)
 type VolleyTeam = { id: string; name: string; s1: string; s2: string; s3: string; s4: string; s5: string; totalscore: string };
 type VolleyMatch = { id: string; status: string; time: string; date: string; home: VolleyTeam; away: VolleyTeam };
@@ -1034,6 +1060,46 @@ function buildNHLLiveMatches(tournaments: NHLTournament[]): LiveMatchState[] {
   return result;
 }
 
+function _parseTennisStat(raw: TennisStatsPlayerRaw | undefined): TennisStatData {
+  const matchPeriod = raw?.stats?.period?.find(p => p.name === "match");
+  const get = (typeName: string, statName: string) =>
+    matchPeriod?.type?.find(t => t.name === typeName)?.stat?.find(s => s.name === statName)?.value ?? "";
+  return {
+    aces:            parseInt(get("Service", "Aces"))          || 0,
+    doubleFaults:    parseInt(get("Service", "Double Faults")) || 0,
+    firstServePct:   get("Service", "1st serve percentage")    || "—",
+    winners:         parseInt(get("Points", "Winners"))         || 0,
+    unforcedErrors:  parseInt(get("Points", "Unforced errors")) || 0,
+  };
+}
+
+async function getTennisStatsMap(): Promise<Map<string, [TennisStatData, TennisStatData]>> {
+  const now = Date.now();
+  if (tennisStatsCache && now - tennisStatsFetchedAt < CONFIG.LIVE_CACHE_TTL) return tennisStatsCache;
+  try {
+    const resp = await fetch(`${BASE_V1}/tennis/livestats?access_key=${STATSPAL_KEY}`, { signal: AbortSignal.timeout(8000) });
+    if (!resp.ok) return tennisStatsCache ?? new Map();
+    const data = (await resp.json()) as { livestats?: { tournament?: TennisStatsTournament | TennisStatsTournament[] } };
+    const raw = data?.livestats?.tournament;
+    if (!raw) return tennisStatsCache ?? new Map();
+    const arr = Array.isArray(raw) ? raw : [raw];
+    const map = new Map<string, [TennisStatData, TennisStatData]>();
+    for (const t of arr) {
+      const matches = Array.isArray(t.match) ? t.match : [t.match];
+      for (const m of matches) {
+        if (!m?.id) continue;
+        const players = Array.isArray(m.player) ? m.player : [m.player];
+        map.set(String(m.id), [_parseTennisStat(players[0]), _parseTennisStat(players[1])]);
+      }
+    }
+    tennisStatsCache = map;
+    tennisStatsFetchedAt = now;
+    return map;
+  } catch {
+    return tennisStatsCache ?? new Map();
+  }
+}
+
 async function getTennisLive(): Promise<TennisTournament[]> {
   const now = Date.now();
   if (tennisLiveCache && now - tennisLiveFetchedAt < CONFIG.LIVE_CACHE_TTL) return tennisLiveCache;
@@ -1070,7 +1136,10 @@ async function getVolleyballLive(): Promise<VolleyTournament[]> {
 
 const TENNIS_LIVE_STATUSES = new Set(["Set 1", "Set 2", "Set 3", "Set 4", "Set 5"]);
 
-function buildTennisLiveMatches(tournaments: TennisTournament[]): LiveMatchState[] {
+function buildTennisLiveMatches(
+  tournaments: TennisTournament[],
+  statsMap: Map<string, [TennisStatData, TennisStatData]>,
+): LiveMatchState[] {
   const result: LiveMatchState[] = [];
   const parsePt = (gs: string): number | string => {
     if (!gs || gs === "0") return 0;
@@ -1133,7 +1202,7 @@ function buildTennisLiveMatches(tournaments: TennisTournament[]): LiveMatchState
         odds:        liveOdds,
         markets:     makeAdvancedMarketsFromTeams(p0.name, p1.name),
         events:      [],
-        _liveExtra:  { sets, currentPoints: [hPt, aPt] },
+        _liveExtra:  { sets, currentPoints: [hPt, aPt], tennisStats: statsMap.get(m.id) },
       });
     }
   }
@@ -2301,14 +2370,15 @@ export { buildLiveMatches, buildUpcomingMatches, buildBasketballMatches, buildTe
 
 router.get("/live", async (_req, res) => {
   try {
-    const [soccerMatches, nhlTournaments, tennisTournaments, volleyTournaments] = await Promise.all([
+    const [soccerMatches, nhlTournaments, tennisTournaments, volleyTournaments, tennisStatsMap] = await Promise.all([
       buildLiveMatches(),
       getNHLLive(),
       getTennisLive(),
       getVolleyballLive(),
+      getTennisStatsMap(),
     ]);
     const nhlMatches    = buildNHLLiveMatches(nhlTournaments);
-    const tennisMatches = buildTennisLiveMatches(tennisTournaments);
+    const tennisMatches = buildTennisLiveMatches(tennisTournaments, tennisStatsMap);
     const volleyMatches = buildVolleyballLiveMatches(volleyTournaments);
     const simulated     = buildSimulatedLiveOtherSports({
       skipTennis: tennisMatches.length > 0,
