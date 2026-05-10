@@ -806,6 +806,15 @@ export default function Home() {
   const [rankingsTour, setRankingsTour] = useState<"atp" | "wta">("atp");
   const [rankingsOpen, setRankingsOpen] = useState(false);
 
+  // Tennis pre-match odds (real bookmaker odds)
+  type TennisOddsEntry = {
+    matchId: string; date: string; time: string; tournamentName: string;
+    players: [{ id: string; name: string }, { id: string; name: string }];
+    matchOdds: [number, number];
+    set1Odds: [number, number] | null;
+  };
+  const [tennisOddsMatches, setTennisOddsMatches] = useState<TennisOddsEntry[]>([]);
+
   // Sidebar tree state
   const [sidebarExpandedSport, setSidebarExpandedSport] = useState<string | null>(null);
   const [sidebarExpandedCountry, setSidebarExpandedCountry] = useState<string | null>(null);
@@ -938,6 +947,10 @@ export default function Home() {
     fetch("/api/matches/standings")
       .then(r => r.ok ? r.json() : null)
       .then(d => { if (d) setTennisStandings(d); })
+      .catch(() => { /* non-critical */ });
+    fetch("/api/matches/tennis-odds")
+      .then(r => r.ok ? r.json() : null)
+      .then(d => { if (d?.odds) setTennisOddsMatches(d.odds); })
       .catch(() => { /* non-critical */ });
   }, []);
 
@@ -3299,6 +3312,21 @@ export default function Home() {
                             return surnameToRank.get(surname) ?? null;
                           };
 
+                          // Build date+surname-pair → TennisOddsEntry map
+                          // strips ALL leading initials: "T. A. Tirante" → "tirante", "A. De Minaur" → "de minaur"
+                          const extractSurname = (n: string) => n.replace(/^([A-Z]\.\s*)+/, "").trim().toLowerCase();
+                          const tennisOddsMap = (() => {
+                            const map = new Map<string, TennisOddsEntry>();
+                            tennisOddsMatches.forEach(o => {
+                              const s0 = extractSurname(o.players[0].name);
+                              const s1 = extractSurname(o.players[1].name);
+                              const k1 = `${o.date}-${s0}-${s1}`;
+                              const k2 = `${o.date}-${s1}-${s0}`;
+                              map.set(k1, o); map.set(k2, { ...o, matchOdds: [o.matchOdds[1], o.matchOdds[0]], set1Odds: o.set1Odds ? [o.set1Odds[1], o.set1Odds[0]] : null, players: [o.players[1], o.players[0]] });
+                            });
+                            return map;
+                          })();
+
                           const MatchRow = ({ m }: { m: TournamentMatch }) => {
                             const p0 = m.players[0];
                             const p1 = m.players[1];
@@ -3306,6 +3334,33 @@ export default function Home() {
                             const isNotStarted = m.status === "Not Started";
                             const r0 = playerRank(p0.name);
                             const r1 = playerRank(p1.name);
+
+                            // Look up real odds for this match
+                            const oddsKey = `${m.date}-${extractSurname(p0.name)}-${extractSurname(p1.name)}`;
+                            const matchOdds = isNotStarted ? tennisOddsMap.get(oddsKey) : undefined;
+
+                            const makeTennisMatch = (oddsEntry: TennisOddsEntry) => ({
+                              id: `tennis-odds-${oddsEntry.matchId}`,
+                              home: p0.name, away: p1.name,
+                              league: tournamentDetail?.league ?? "Ténis",
+                              odds: { home: 0, draw: 0, away: 0 },
+                            } as unknown as Match);
+
+                            const OddBtn = ({ idx, market, odd, label }: { idx: 0 | 1; market: string; odd: number; label: string }) => {
+                              if (!matchOdds) return null;
+                              const fakeMatch = makeTennisMatch(matchOdds);
+                              const sel = idx === 0 ? "home" : "away";
+                              const selected = !!bets.find(b => b.matchId === fakeMatch.id && b.market === market && b.selection === sel);
+                              return (
+                                <button
+                                  onClick={() => toggleBet(fakeMatch, sel, odd, market, label)}
+                                  className={`text-[9px] font-black px-1 py-0.5 rounded tabular-nums transition-colors border ${selected ? "bg-red-600 border-red-500 text-white" : "bg-zinc-800 border-zinc-700 text-zinc-300 hover:border-zinc-500 hover:text-white"}`}
+                                >
+                                  {odd.toFixed(2)}
+                                </button>
+                              );
+                            };
+
                             return (
                               <div className="flex items-center gap-2 py-1.5 border-b border-zinc-800/50 last:border-0">
                                 {/* Time / score column */}
@@ -3331,8 +3386,25 @@ export default function Home() {
                                     {p1.winner && <span className="ml-1 text-emerald-400 text-[9px]">✓</span>}
                                   </div>
                                 </div>
-                                {/* Status badge */}
-                                <StatusBadge status={m.status} />
+                                {/* Odds buttons (if available) or status badge */}
+                                {matchOdds ? (
+                                  <div className="shrink-0 flex flex-col gap-0.5 items-end">
+                                    <div className="flex items-center gap-1">
+                                      <span className="text-[8px] text-zinc-600">W</span>
+                                      <OddBtn idx={0} market="tenis-vencedor" odd={matchOdds.matchOdds[0]} label={p0.name} />
+                                      <OddBtn idx={1} market="tenis-vencedor" odd={matchOdds.matchOdds[1]} label={p1.name} />
+                                    </div>
+                                    {matchOdds.set1Odds && (
+                                      <div className="flex items-center gap-1">
+                                        <span className="text-[8px] text-zinc-600">S1</span>
+                                        <OddBtn idx={0} market="tenis-1set" odd={matchOdds.set1Odds[0]} label={`${p0.name} — 1º Set`} />
+                                        <OddBtn idx={1} market="tenis-1set" odd={matchOdds.set1Odds[1]} label={`${p1.name} — 1º Set`} />
+                                      </div>
+                                    )}
+                                  </div>
+                                ) : (
+                                  <StatusBadge status={m.status} />
+                                )}
                               </div>
                             );
                           };

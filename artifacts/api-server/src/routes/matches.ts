@@ -2933,6 +2933,101 @@ router.get("/results", async (_req, res) => {
   }
 });
 
+// ─── Tennis pre-match odds ────────────────────────────────────────────────────
+type TennisOddsPlayer = { id: string; name: string };
+type TennisOddsEntry = {
+  matchId: string; date: string; time: string; tournamentName: string;
+  players: [TennisOddsPlayer, TennisOddsPlayer];
+  matchOdds: [number, number];
+  set1Odds: [number, number] | null;
+};
+let tennisOddsCache: TennisOddsEntry[] | null = null;
+let tennisOddsFetchedAt = 0;
+const TENNIS_ODDS_TTL = 60 * 1000; // 1 min — odds fluctuate
+
+async function getTennisOdds(): Promise<TennisOddsEntry[]> {
+  const now = Date.now();
+  if (tennisOddsCache && now - tennisOddsFetchedAt < TENNIS_ODDS_TTL) return tennisOddsCache;
+  const resp = await fetch(`${BASE_V1}/tennis/odds?access_key=${STATSPAL_KEY}`, { signal: AbortSignal.timeout(9000) });
+  if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+  const data = (await resp.json()) as { odds?: { tournament?: unknown } };
+  const rawTours = data?.odds?.tournament;
+  if (!rawTours) return [];
+  const tours = Array.isArray(rawTours) ? rawTours : [rawTours];
+
+  type RawBk  = { stop?: string; odd?: Array<{ name?: string; value?: string }> };
+  type RawType = { value?: string; bookmaker?: RawBk | RawBk[] };
+  type RawMatch = {
+    id?: string; date?: string; time?: string; status?: string;
+    player?: Array<{ id?: string; name?: string }>;
+    odds?: { type?: RawType | RawType[] };
+  };
+  type RawTour = { name?: string; matches?: { match?: RawMatch | RawMatch[] } };
+
+  const avgOdd = (bks: RawBk[], idx: 0 | 1): number => {
+    const vals: number[] = [];
+    for (const bk of bks) {
+      if (bk.stop === "True") continue;
+      const v = parseFloat(bk.odd?.[idx]?.value ?? "0");
+      if (v > 1) vals.push(v);
+    }
+    if (!vals.length) return 0;
+    const avg = vals.reduce((a, b) => a + b, 0) / vals.length;
+    const margined = Math.round(avg * 0.975 * 100) / 100; // 2.5% house margin
+    return Math.max(1.01, margined); // floor at 1.01 — odds below 1 are impossible
+  };
+
+  const results: TennisOddsEntry[] = [];
+  const seen = new Set<string>();
+
+  for (const rawTour of tours as RawTour[]) {
+    const rawMatches = rawTour.matches?.match;
+    if (!rawMatches) continue;
+    const matches = Array.isArray(rawMatches) ? rawMatches : [rawMatches];
+    for (const m of matches) {
+      if (!m.id || seen.has(m.id)) continue;
+      if (m.status !== "1" && m.status !== "0") continue;
+      seen.add(m.id);
+      const rawTypes = m.odds?.type;
+      const types: RawType[] = !rawTypes ? [] : Array.isArray(rawTypes) ? rawTypes : [rawTypes];
+      const matchType = types.find(t => t.value === "Home/Away");
+      if (!matchType) continue;
+      const bks = (Array.isArray(matchType.bookmaker) ? matchType.bookmaker : matchType.bookmaker ? [matchType.bookmaker] : []) as RawBk[];
+      const h = avgOdd(bks, 0); const a = avgOdd(bks, 1);
+      if (!h || !a) continue;
+
+      const set1Type = types.find(t => t.value === "Home/Away (1st Set)");
+      let set1Odds: [number, number] | null = null;
+      if (set1Type) {
+        const s1bks = (Array.isArray(set1Type.bookmaker) ? set1Type.bookmaker : set1Type.bookmaker ? [set1Type.bookmaker] : []) as RawBk[];
+        const s1h = avgOdd(s1bks, 0); const s1a = avgOdd(s1bks, 1);
+        if (s1h && s1a) set1Odds = [s1h, s1a];
+      }
+
+      const p = m.player ?? [];
+      results.push({
+        matchId: m.id,
+        date: m.date ?? "", time: m.time ?? "",
+        tournamentName: rawTour.name ?? "",
+        players: [{ id: p[0]?.id ?? "", name: p[0]?.name ?? "" }, { id: p[1]?.id ?? "", name: p[1]?.name ?? "" }],
+        matchOdds: [h, a], set1Odds,
+      });
+    }
+  }
+  tennisOddsCache = results;
+  tennisOddsFetchedAt = now;
+  return results;
+}
+
+router.get("/tennis-odds", async (_req, res) => {
+  try {
+    const odds = await getTennisOdds();
+    res.json({ odds });
+  } catch {
+    res.status(500).json({ error: "Odds de ténis indisponíveis" });
+  }
+});
+
 router.get("/standings", async (req, res) => {
   const league = String(req.query["league"] ?? "");
   try {
