@@ -57,7 +57,10 @@ Bet62 é uma plataforma completa de apostas esportivas com dados ao vivo via Sta
 
 - Admin auth is separate from user auth — same SESSION_SECRET but JWT payload has `isAdmin: true`; no DB table needed for admin
 - Admin login accepts username (`admin`) OR email (`admin@bet62.com`) — configurable via env vars
-- Statpal live data is cached server-side for 15s to avoid rate limits; upcoming matches are static with computed advanced markets
+- Statpal live data is cached server-side for 30s to avoid rate limits; upcoming matches are static with computed advanced markets
+- Real live endpoints: football v2/live, NHL v1/nhl/livescores, tennis v1/tennis/livescores, volleyball v1/volleyball/livescores
+- Basketball has no Statpal endpoint — simulated with persistent state; tennis/volleyball fall back to simulation when no live matches
+- Simulated live state persists in module-level Maps (_bballMap, _tennisMap, _volleyMap, _hockeyMap) — scores advance incrementally, never jump
 - Cash out value = (stake × originalOdds) / currentOdds × 0.92 (8% house margin)
 - Admin bet settlement: marking a bet as "won" atomically credits the user's balance with potentialWin
 - New user balance starts at €0.00 on registration

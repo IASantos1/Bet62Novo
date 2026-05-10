@@ -671,6 +671,28 @@ type NHLTournament = { country: string; gid: string; id: string; league: string;
 let nhlLiveCache: NHLTournament[] | null = null;
 let nhlLiveFetchedAt = 0;
 
+// Tennis livescores cache (30s)
+type TennisPlayer = {
+  id: string; name: string;
+  s1: string; s2: string; s3: string; s4: string; s5: string;
+  game_score: string;   // "0" | "15" | "30" | "40" | "AD" | ""
+  serve: string;        // "True" | "False"
+  totalscore: string;   // sets won
+  winner: string;
+  dp1?: string; dp2?: string;
+};
+type TennisMatch = { id: string; status: string; time: string; date: string; tb: string; player: TennisPlayer | TennisPlayer[] };
+type TennisTournament = { id: string; name: string; match: TennisMatch | TennisMatch[] };
+let tennisLiveCache: TennisTournament[] | null = null;
+let tennisLiveFetchedAt = 0;
+
+// Volleyball livescores cache (30s)
+type VolleyTeam = { id: string; name: string; s1: string; s2: string; s3: string; s4: string; s5: string; totalscore: string };
+type VolleyMatch = { id: string; status: string; time: string; date: string; home: VolleyTeam; away: VolleyTeam };
+type VolleyTournament = { id: string; gid: string; country: string; league: string; match: VolleyMatch | VolleyMatch[] };
+let volleyLiveCache: VolleyTournament[] | null = null;
+let volleyLiveFetchedAt = 0;
+
 // Live state: stable odds across refreshes
 export const liveMatchState = new Map<string, LiveMatchState>();
 
@@ -1006,6 +1028,161 @@ function buildNHLLiveMatches(tournaments: NHLTournament[]): LiveMatchState[] {
         odds: liveOdds,
         markets: makeAdvancedMarketsFromTeams(m.home.name, m.away.name),
         events: [],
+      });
+    }
+  }
+  return result;
+}
+
+async function getTennisLive(): Promise<TennisTournament[]> {
+  const now = Date.now();
+  if (tennisLiveCache && now - tennisLiveFetchedAt < CONFIG.LIVE_CACHE_TTL) return tennisLiveCache;
+  try {
+    const resp = await fetch(`${BASE_V1}/tennis/livescores?access_key=${STATSPAL_KEY}`, { signal: AbortSignal.timeout(8000) });
+    if (!resp.ok) return tennisLiveCache ?? [];
+    const data = (await resp.json()) as { livescores?: { tournament?: TennisTournament | TennisTournament[] } };
+    const raw = data?.livescores?.tournament;
+    if (!raw) return tennisLiveCache ?? [];
+    tennisLiveCache = Array.isArray(raw) ? raw : [raw];
+    tennisLiveFetchedAt = now;
+    return tennisLiveCache;
+  } catch {
+    return tennisLiveCache ?? [];
+  }
+}
+
+async function getVolleyballLive(): Promise<VolleyTournament[]> {
+  const now = Date.now();
+  if (volleyLiveCache && now - volleyLiveFetchedAt < CONFIG.LIVE_CACHE_TTL) return volleyLiveCache;
+  try {
+    const resp = await fetch(`${BASE_V1}/volleyball/livescores?access_key=${STATSPAL_KEY}`, { signal: AbortSignal.timeout(8000) });
+    if (!resp.ok) return volleyLiveCache ?? [];
+    const data = (await resp.json()) as { livescores?: { tournament?: VolleyTournament | VolleyTournament[] } };
+    const raw = data?.livescores?.tournament;
+    if (!raw) return volleyLiveCache ?? [];
+    volleyLiveCache = Array.isArray(raw) ? raw : [raw];
+    volleyLiveFetchedAt = now;
+    return volleyLiveCache;
+  } catch {
+    return volleyLiveCache ?? [];
+  }
+}
+
+const TENNIS_LIVE_STATUSES = new Set(["Set 1", "Set 2", "Set 3", "Set 4", "Set 5"]);
+
+function buildTennisLiveMatches(tournaments: TennisTournament[]): LiveMatchState[] {
+  const result: LiveMatchState[] = [];
+  const parsePt = (gs: string): number | string => {
+    if (!gs || gs === "0") return 0;
+    if (gs === "15" || gs === "30" || gs === "40") return parseInt(gs);
+    if (gs === "AD") return "AD";
+    return 0;
+  };
+
+  for (const t of tournaments) {
+    const matches = Array.isArray(t.match) ? t.match : [t.match];
+    for (const m of matches) {
+      if (!TENNIS_LIVE_STATUSES.has(m.status)) continue;
+      const players = Array.isArray(m.player) ? m.player : [m.player];
+      if (players.length < 2) continue;
+      const p0 = players[0]!;
+      const p1 = players[1]!;
+      // Skip doubles (player name contains "/")
+      if (p0.name.includes("/") || p0.dp1) continue;
+
+      // Build sets array (all sets incl in-progress)
+      const sets: Array<[number, number]> = [];
+      for (const sf of ["s1", "s2", "s3", "s4", "s5"] as const) {
+        const h = p0[sf]; const a = p1[sf];
+        if (h !== "" && a !== "") sets.push([parseFloat(h) || 0, parseFloat(a) || 0]);
+      }
+
+      const homeScore = parseInt(p0.totalscore) || 0;
+      const awayScore = parseInt(p1.totalscore) || 0;
+      const setNum    = parseInt(m.status.split(" ")[1]!) || 1;
+
+      // Current game points
+      const hGs = parsePt(p0.game_score);
+      const aGs = parsePt(p1.game_score);
+      let hPt: number | string, aPt: number | string;
+      if (hGs === 40 && aGs === 40)      { hPt = "D";  aPt = "D"; }
+      else if (hGs === "AD")              { hPt = "AD"; aPt = 40; }
+      else if (aGs === "AD")              { hPt = 40;   aPt = "AD"; }
+      else                                { hPt = hGs;  aPt = aGs; }
+
+      const diff = homeScore - awayScore;
+      const baseOdds = makeOddsFromTeams(p0.name, p1.name);
+      const factor   = Math.min(0.35, Math.abs(diff) * 0.12);
+      const liveOdds = diff === 0 ? { home: baseOdds.home, draw: 0, away: baseOdds.away }
+        : diff > 0
+          ? { home: Math.max(1.04, +(baseOdds.home * (1 - factor)).toFixed(2)), draw: 0, away: Math.min(15, +(baseOdds.away * (1 + factor)).toFixed(2)) }
+          : { home: Math.min(15, +(baseOdds.home * (1 + factor)).toFixed(2)), draw: 0, away: Math.max(1.04, +(baseOdds.away * (1 - factor)).toFixed(2)) };
+
+      result.push({
+        id:          `tennis-live-${m.id}`,
+        home:        p0.name,
+        away:        p1.name,
+        league:      t.name,
+        country:     "tennis",
+        sport:       "tennis",
+        homeScore,
+        awayScore,
+        minute:      setNum,
+        status:      m.status,
+        hasRealOdds: false,
+        odds:        liveOdds,
+        markets:     makeAdvancedMarketsFromTeams(p0.name, p1.name),
+        events:      [],
+        _liveExtra:  { sets, currentPoints: [hPt, aPt] },
+      });
+    }
+  }
+  return result;
+}
+
+function buildVolleyballLiveMatches(tournaments: VolleyTournament[]): LiveMatchState[] {
+  const VSET_LIVE = new Set(["Set 1", "Set 2", "Set 3", "Set 4", "Set 5"]);
+  const result: LiveMatchState[] = [];
+
+  for (const t of tournaments) {
+    const matches = Array.isArray(t.match) ? t.match : [t.match];
+    for (const m of matches) {
+      if (!VSET_LIVE.has(m.status)) continue;
+      const home = m.home; const away = m.away;
+      if (!home?.name || !away?.name) continue;
+
+      const setNum    = parseInt(m.status.split(" ")[1]!) || 1;
+      const homeScore = parseInt(home.totalscore) || 0;
+      const awayScore = parseInt(away.totalscore) || 0;
+
+      // Build completed sets (all but last)
+      const vollSets: Array<[number, number]> = [];
+      let ptH = 0, ptA = 0;
+      const sfs = ["s1", "s2", "s3", "s4", "s5"] as const;
+      for (let i = 0; i < sfs.length; i++) {
+        const h = home[sfs[i]!]; const a = away[sfs[i]!];
+        if (!h || !a) break;
+        if (i < setNum - 1) vollSets.push([parseInt(h) || 0, parseInt(a) || 0]);
+        else { ptH = parseInt(h) || 0; ptA = parseInt(a) || 0; }
+      }
+
+      const baseOdds = makeOddsFromTeams(home.name, away.name);
+      result.push({
+        id:          `volley-live-${m.id}`,
+        home:        home.name,
+        away:        away.name,
+        league:      `${t.league} — ${t.country}`,
+        country:     t.country,
+        sport:       "volleyball",
+        homeScore,
+        awayScore,
+        minute:      setNum,
+        status:      m.status,
+        hasRealOdds: false,
+        odds:        { home: baseOdds.home, draw: 0, away: baseOdds.away },
+        markets:     makeAdvancedMarketsFromTeams(home.name, away.name),
+        events:      [],
+        _liveExtra:  { vollSets, currentPts: [ptH, ptA] },
       });
     }
   }
@@ -2010,20 +2187,21 @@ function _getHockey(si: number): _HockeySt {
 // advances incrementally — scores are stable and never jump between refreshes.
 // Live odds still drift on a 15-s window for a realistic betting experience.
 
-function buildSimulatedLiveOtherSports(): LiveMatchState[] {
+function buildSimulatedLiveOtherSports(opts: { skipTennis: boolean; skipVolley: boolean }): LiveMatchState[] {
   const basketball = buildBasketballMatches();
-  const tennis     = buildTennisMatches();
+  const tennis     = opts.skipTennis ? [] : buildTennisMatches();
   const hockey     = buildHockeyMatches();
-  const volleyball = buildVolleyballMatches();
+  const volleyball = opts.skipVolley ? [] : buildVolleyballMatches();
 
   const win15s = Math.floor(Date.now() / 15_000);
 
-  const tennisPicks = [tennis[0], tennis[1], tennis[7], tennis[8]].filter((t): t is UpcomingMatch => t != null);
+  const tennisPicks = opts.skipTennis ? [] :
+    [tennis[0], tennis[1], tennis[7], tennis[8]].filter((t): t is UpcomingMatch => t != null);
   const picks: Array<{ m: UpcomingMatch; si: number }> = [
     ...basketball.slice(0, 3).map((m, i) => ({ m, si: i })),
     ...tennisPicks.map((m, i) => ({ m, si: i + 3 })),
     ...hockey.slice(0, 2).map((m, i) => ({ m, si: i + 7 })),
-    ...volleyball.slice(0, 2).map((m, i) => ({ m, si: i + 9 })),
+    ...(opts.skipVolley ? [] : volleyball.slice(0, 2).map((m, i) => ({ m, si: i + 9 }))),
   ];
 
   const TENNIS_SEQ = [0, 15, 30, 40] as const;
@@ -2123,13 +2301,20 @@ export { buildLiveMatches, buildUpcomingMatches, buildBasketballMatches, buildTe
 
 router.get("/live", async (_req, res) => {
   try {
-    const [soccerMatches, nhlTournaments] = await Promise.all([
+    const [soccerMatches, nhlTournaments, tennisTournaments, volleyTournaments] = await Promise.all([
       buildLiveMatches(),
       getNHLLive(),
+      getTennisLive(),
+      getVolleyballLive(),
     ]);
-    const nhlMatches = buildNHLLiveMatches(nhlTournaments);
-    const otherLive  = buildSimulatedLiveOtherSports();
-    const matches    = [...soccerMatches, ...nhlMatches, ...otherLive];
+    const nhlMatches    = buildNHLLiveMatches(nhlTournaments);
+    const tennisMatches = buildTennisLiveMatches(tennisTournaments);
+    const volleyMatches = buildVolleyballLiveMatches(volleyTournaments);
+    const simulated     = buildSimulatedLiveOtherSports({
+      skipTennis: tennisMatches.length > 0,
+      skipVolley: volleyMatches.length > 0,
+    });
+    const matches = [...soccerMatches, ...nhlMatches, ...tennisMatches, ...volleyMatches, ...simulated];
     res.json({ matches });
   } catch (err) {
     console.error("[live route] unexpected error:", err);
