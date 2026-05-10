@@ -1359,8 +1359,8 @@ export default function Home() {
   // Compact league/meta row (no banner)
   const CompactLeagueRow = ({ match, rightSlot }: { match: Match; rightSlot?: ReactNode }) => {
     const flag = COUNTRY_FLAGS[match.country?.toLowerCase() ?? ""] ?? "⚽";
-    // For live matches: never show scheduled time — live badge already carries minute info
-    const timeStr = match.isLive ? "" : [
+    // For live "Not Started" matches (tennis/volleyball): show scheduled time
+    const timeStr = (match.isLive && match.status !== "Not Started") ? "" : [
       match.date ? formatMatchDate(match.date) : "",
       match.time ? match.time : "",
     ].filter(Boolean).join(" • ");
@@ -3347,10 +3347,75 @@ export default function Home() {
                   );
                 })()}
 
-                {/* Live momentum/pressure chart */}
+                {/* Live momentum/pressure chart + tennis stats */}
                 {matchViewTab === "live" && expandedMatch.isLive && (
                   <div className="bg-zinc-900 rounded-xl border border-zinc-800 p-4 mb-2 animate-in fade-in duration-200">
                     <MomentumChart match={expandedMatch} />
+                    {/* Tennis live match stats below chart */}
+                    {expandedMatch.sport === "tennis" && expandedMatch._liveExtra?.tennisStats && (() => {
+                      const st = expandedMatch._liveExtra.tennisStats;
+                      const lastName = (name: string) => name.split(" ").slice(-1)[0] ?? name;
+                      return (
+                        <div className="mt-4 pt-4 border-t border-zinc-700/60">
+                          <div className="text-[10px] font-black text-red-500 uppercase tracking-widest mb-3">Estatísticas do Jogo</div>
+                          <div className="grid grid-cols-5 text-[9px] font-bold text-zinc-500 mb-1">
+                            <div />
+                            <div className="text-center">ACES</div>
+                            <div className="text-center">DF</div>
+                            <div className="text-center">1ªSRV</div>
+                            <div className="text-center">WIN</div>
+                          </div>
+                          {[0, 1].map(idx => {
+                            const s = st[idx]!;
+                            const name = idx === 0 ? expandedMatch.home : expandedMatch.away;
+                            return (
+                              <div key={idx} className={`grid grid-cols-5 text-[10px] py-1.5 ${idx === 0 ? "border-b border-zinc-800" : ""}`}>
+                                <div className="text-zinc-300 truncate font-bold">{lastName(name)}</div>
+                                <div className="text-center text-white font-black">{s.aces}</div>
+                                <div className="text-center text-zinc-400">{s.doubleFaults}</div>
+                                <div className="text-center text-zinc-300">{s.firstServePct}</div>
+                                <div className="text-center text-zinc-300">{s.winners}</div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      );
+                    })()}
+                    {/* Volleyball live stats below chart */}
+                    {expandedMatch.sport === "volleyball" && expandedMatch._liveExtra?.vollSets && expandedMatch._liveExtra.vollSets.length > 0 && (() => {
+                      const sets = expandedMatch._liveExtra.vollSets;
+                      const pts = expandedMatch._liveExtra.currentPts;
+                      const homeWins = sets.filter(([h, a]) => h > a).length;
+                      const awayWins = sets.filter(([h, a]) => a > h).length;
+                      return (
+                        <div className="mt-4 pt-4 border-t border-zinc-700/60">
+                          <div className="text-[10px] font-black text-red-500 uppercase tracking-widest mb-3">Placar por Set</div>
+                          <div className="grid grid-cols-[1fr_repeat(5,2rem)] gap-x-1 text-[9px] font-bold text-zinc-500 mb-1">
+                            <div />
+                            {sets.map((_, i) => <div key={i} className="text-center">S{i+1}</div>)}
+                            {pts && <div className="text-center text-yellow-500">S{sets.length+1}</div>}
+                          </div>
+                          {[0, 1].map(idx => {
+                            const name = idx === 0 ? expandedMatch.home : expandedMatch.away;
+                            return (
+                              <div key={idx} className={`grid grid-cols-[1fr_repeat(5,2rem)] gap-x-1 text-[10px] py-1.5 ${idx === 0 ? "border-b border-zinc-800" : ""}`}>
+                                <div className="text-zinc-300 font-bold truncate">{name.split(" ").slice(-1)[0]}</div>
+                                {sets.map(([h, a], i) => (
+                                  <div key={i} className={`text-center font-black tabular-nums ${(idx === 0 ? h > a : a > h) ? "text-white" : "text-zinc-600"}`}>
+                                    {idx === 0 ? h : a}
+                                  </div>
+                                ))}
+                                {pts && <div className="text-center font-black text-yellow-400 tabular-nums">{pts[idx]}</div>}
+                              </div>
+                            );
+                          })}
+                          <div className="mt-2 flex gap-4 text-[10px]">
+                            <span className="text-zinc-500">Sets: <span className="text-white font-black">{homeWins}–{awayWins}</span></span>
+                            {pts && <span className="text-zinc-500">Em jogo: <span className="text-yellow-400 font-black">Set {sets.length+1}</span></span>}
+                          </div>
+                        </div>
+                      );
+                    })()}
                   </div>
                 )}
 
@@ -3364,25 +3429,88 @@ export default function Home() {
             )}
 
             {!expandedMatch && activeTab === "sports" && (() => {
-              // Convert real tennis odds to MatchCard-compatible Match objects
+              // Convert real tennis odds to MatchCard-compatible Match objects (with set1Odds in markets)
+              const _emptyMkt = (): AdvancedMarkets => ({
+                doubleChance: { homeOrDraw: 0, awayOrDraw: 0, homeOrAway: 0 },
+                bothTeamsScore: { yes: 0, no: 0 },
+                totalGoals: { over05: 0, under05: 0, over15: 0, under15: 0, over25: 0, under25: 0, over35: 0, under35: 0, over45: 0, under45: 0, over55: 0, under55: 0, over65: 0, under65: 0 },
+                handicap: { homeMinusOne: 0, awayPlusOne: 0, homeMinusOneHalf: 0, awayPlusOneHalf: 0 },
+                halfTime: { home: 0, draw: 0, away: 0 },
+                firstGoal: { home: 0, noGoal: 0, away: 0 },
+              });
+
               const tennisOddsAsMatches: Match[] = (!selectedLeague && (selectedSport === "tennis" || selectedSport === "all"))
-                ? tennisOddsMatches.map(o => ({
-                    id: `tennis-odds-${o.matchId}`,
-                    home: o.players[0].name,
-                    away: o.players[1].name,
-                    league: o.tournamentName,
-                    sport: "tennis",
-                    time: o.time,
-                    hasRealOdds: true,
-                    odds: { home: o.matchOdds[0], draw: 0, away: o.matchOdds[1] },
-                  } as Match))
+                ? tennisOddsMatches.map(o => {
+                    const mkt = _emptyMkt();
+                    if (o.set1Odds) {
+                      mkt.totalGoals.over15 = o.set1Odds[0];
+                      mkt.totalGoals.under15 = o.set1Odds[1];
+                    }
+                    return {
+                      id: `tennis-odds-${o.matchId}`,
+                      home: o.players[0].name,
+                      away: o.players[1].name,
+                      league: o.tournamentName,
+                      sport: "tennis",
+                      time: o.time,
+                      hasRealOdds: true,
+                      odds: { home: o.matchOdds[0], draw: 0, away: o.matchOdds[1] },
+                      markets: mkt,
+                    } as Match;
+                  })
                 : [];
 
-              const filteredUpcoming = selectedLeague
+              // Convert real volleyball odds to MatchCard-compatible Match objects (O/U 3.5 sets in markets)
+              const volleyOddsAsMatches: Match[] = (!selectedLeague && (selectedSport === "volleyball" || selectedSport === "all"))
+                ? volleyOddsMatches.map(o => {
+                    const mkt = _emptyMkt();
+                    if (o.overUnder) {
+                      mkt.totalGoals.over25 = o.overUnder.over;
+                      mkt.totalGoals.under25 = o.overUnder.under;
+                      (mkt as any)._total = o.overUnder.line;
+                    }
+                    return {
+                      id: `volley-odds-${o.matchId}`,
+                      home: o.homeTeam.name,
+                      away: o.awayTeam.name,
+                      league: o.league,
+                      sport: "volleyball",
+                      time: o.time,
+                      date: o.date,
+                      hasRealOdds: true,
+                      odds: { home: o.homeOdds, draw: 0, away: o.awayOdds },
+                      markets: mkt,
+                    } as Match;
+                  })
+                : [];
+
+              // All upcoming: tennis odds + volleyball odds + generic (deduped)
+              const allUpcoming = selectedLeague
                 ? upcomingMatches.filter(m => m.league === selectedLeague)
-                : [...tennisOddsAsMatches, ...upcomingMatches.filter(m =>
-                    !tennisOddsAsMatches.some(t => t.home === m.home && t.away === m.away)
-                  )];
+                : [
+                    ...tennisOddsAsMatches,
+                    ...volleyOddsAsMatches,
+                    ...upcomingMatches.filter(m =>
+                      !tennisOddsAsMatches.some(t => t.home === m.home && t.away === m.away) &&
+                      !volleyOddsAsMatches.some(v => v.home === m.home && v.away === m.away)
+                    ),
+                  ];
+
+              const filteredUpcoming = (selectedSport === "all")
+                ? allUpcoming
+                : allUpcoming.filter(m => (m.sport ?? "football") === selectedSport);
+
+              // Sport grouping for display
+              const SPORT_GROUPS = [
+                { key: "football",   emoji: "⚽", label: "Futebol" },
+                { key: "tennis",     emoji: "🎾", label: "Ténis" },
+                { key: "basketball", emoji: "🏀", label: "Basquete" },
+                { key: "hockey",     emoji: "🏒", label: "Hóquei" },
+                { key: "volleyball", emoji: "🏐", label: "Voleibol" },
+              ] as const;
+              const sportGroups = SPORT_GROUPS
+                .map(g => ({ ...g, matches: filteredUpcoming.filter(m => (m.sport ?? "football") === g.key) }))
+                .filter(g => g.matches.length > 0);
 
               // Derive tournament display label from raw API name
               const tournamentLabel = (raw: string) =>
@@ -3701,7 +3829,7 @@ export default function Home() {
                   })()}
 
                   {/* ─── Ranking ATP / WTA ──────────────────────────────────── */}
-                  {(selectedSport === "all" || selectedSport === "tennis") && tennisStandings && !selectedLeague && (() => {
+                  {false && (selectedSport === "all" || selectedSport === "tennis") && tennisStandings && !selectedLeague && (() => {
                     const FLAG: Record<string, string> = {
                       "Spain":"🇪🇸","Italy":"🇮🇹","Serbia":"🇷🇸","Russia":"🇷🇺","Germany":"🇩🇪",
                       "Norway":"🇳🇴","Greece":"🇬🇷","France":"🇫🇷","United States":"🇺🇸","USA":"🇺🇸",
@@ -3721,7 +3849,7 @@ export default function Home() {
                       : m === "down" ? <span className="text-red-500 text-[9px]">↓</span>
                       : <span className="text-zinc-700 text-[9px]">−</span>;
                     const fmtPts = (pts: string) => Number(pts).toLocaleString("pt-PT");
-                    const list = rankingsTour === "atp" ? tennisStandings.atp : tennisStandings.wta;
+                    const list = rankingsTour === "atp" ? tennisStandings!.atp : tennisStandings!.wta;
                     return (
                       <div className="mb-5">
                         <div
@@ -3774,7 +3902,7 @@ export default function Home() {
                   })()}
 
                   {/* ─── Resultados Recentes de Ténis ──────────────────────── */}
-                  {(selectedSport === "all" || selectedSport === "tennis") && recentResults.length > 0 && !selectedLeague && (
+                  {false && (selectedSport === "all" || selectedSport === "tennis") && recentResults.length > 0 && !selectedLeague && (
                     <div className="mb-6">
                       <button
                         onClick={() => setResultsOpen(o => !o)}
@@ -3842,7 +3970,7 @@ export default function Home() {
                   )}
 
                   {/* ─── Odds Pré-Jogo de Voleibol ───────────────────────────── */}
-                  {(selectedSport === "all" || selectedSport === "volleyball") && volleyOddsMatches.length > 0 && !selectedLeague && (() => {
+                  {false && (selectedSport === "all" || selectedSport === "volleyball") && volleyOddsMatches.length > 0 && !selectedLeague && (() => {
                     const today = new Date();
                     const todayStr = `${String(today.getDate()).padStart(2,"0")}.${String(today.getMonth()+1).padStart(2,"0")}.${today.getFullYear()}`;
                     const tomorrow = new Date(today); tomorrow.setDate(tomorrow.getDate()+1);
@@ -4230,9 +4358,28 @@ export default function Home() {
                       <Trophy className="mx-auto mb-4 opacity-20" size={48} />
                       <p className="font-medium">{selectedLeague ? "Nenhum evento para esta liga." : "Nenhum evento programado no momento."}</p>
                     </div>
-                  ) : (
+                  ) : selectedLeague ? (
                     <div className="space-y-2">
                       {filteredUpcoming.map(match => <MatchCard key={match.id} match={match} />)}
+                    </div>
+                  ) : (
+                    <div className="space-y-6">
+                      {sportGroups.map(group => (
+                        <div key={group.key}>
+                          <div className="flex items-center gap-2 mb-3">
+                            <span className="text-[13px] font-black italic uppercase tracking-tight text-zinc-400">
+                              {group.emoji} {group.label}
+                            </span>
+                            <span className="text-[10px] font-bold bg-zinc-800 text-zinc-500 rounded px-1.5 py-0.5 tabular-nums">
+                              {group.matches.length}
+                            </span>
+                            <div className="flex-1 h-px bg-zinc-800 ml-1" />
+                          </div>
+                          <div className="space-y-2">
+                            {group.matches.map(match => <MatchCard key={match.id} match={match} />)}
+                          </div>
+                        </div>
+                      ))}
                     </div>
                   )}
                 </div>
