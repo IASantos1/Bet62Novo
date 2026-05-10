@@ -735,6 +735,17 @@ let tennisResultsCache: TennisDailyResult[] | null = null;
 let tennisResultsFetchedAt = 0;
 const RESULTS_CACHE_TTL = 5 * 60 * 1000; // 5 min
 
+// Volleyball yesterday results
+type VolleyDailyResult = {
+  id: string; home: string; away: string;
+  homeSets: number; awaySets: number;
+  sets: Array<[number, number]>;
+  homeWon: boolean;
+  league: string; country: string; date: string; time: string;
+};
+let volleyResultsCache: VolleyDailyResult[] | null = null;
+let volleyResultsFetchedAt = 0;
+
 // Tennis tournament list (ATP + WTA) — active tournaments today
 type TournamentRaw = {
   id: string; name: string; category: string;
@@ -2753,6 +2764,47 @@ async function getActiveTournaments(): Promise<ActiveTournament[]> {
   return results;
 }
 
+async function getVolleyballDailyResults(): Promise<VolleyDailyResult[]> {
+  const now = Date.now();
+  if (volleyResultsCache && now - volleyResultsFetchedAt < RESULTS_CACHE_TTL) return volleyResultsCache;
+  try {
+    const resp = await fetch(`${BASE_V1}/volleyball/daily/d-1?access_key=${STATSPAL_KEY}`, { signal: AbortSignal.timeout(9000) });
+    if (!resp.ok) return volleyResultsCache ?? [];
+    const data = (await resp.json()) as { livescores?: { tournament?: unknown } };
+    const raw = data?.livescores?.tournament;
+    if (!raw) return volleyResultsCache ?? [];
+    const arr = Array.isArray(raw) ? raw : [raw];
+    const results: VolleyDailyResult[] = [];
+    for (const t of arr as Array<{ id: string; league: string; country: string; match: unknown }>) {
+      const matches = Array.isArray(t.match) ? t.match : [t.match];
+      for (const m of matches as Array<{ id: string; status: string; time: string; date: string; home: VolleyTeam; away: VolleyTeam }>) {
+        if (!m?.status || m.status !== "Finished") continue;
+        if (!m.home?.name || !m.away?.name) continue;
+        const sfs = ["s1", "s2", "s3", "s4", "s5"] as const;
+        const sets: Array<[number, number]> = [];
+        for (const sf of sfs) {
+          const h = m.home[sf]; const a = m.away[sf];
+          if (!h || !a) break;
+          sets.push([parseInt(h) || 0, parseInt(a) || 0]);
+        }
+        const homeSets = parseInt(m.home.totalscore) || 0;
+        const awaySets = parseInt(m.away.totalscore) || 0;
+        results.push({
+          id: m.id, home: m.home.name, away: m.away.name,
+          homeSets, awaySets, sets, homeWon: homeSets > awaySets,
+          league: t.league, country: t.country ?? "",
+          date: m.date, time: m.time,
+        });
+      }
+    }
+    volleyResultsCache = results;
+    volleyResultsFetchedAt = now;
+    return results;
+  } catch {
+    return volleyResultsCache ?? [];
+  }
+}
+
 async function getTennisDailyResults(): Promise<TennisDailyResult[]> {
   const now = Date.now();
   if (tennisResultsCache && now - tennisResultsFetchedAt < RESULTS_CACHE_TTL) return tennisResultsCache;
@@ -2954,6 +3006,15 @@ router.get("/tournaments/:id", async (req, res) => {
 router.get("/results", async (_req, res) => {
   try {
     const results = await getTennisDailyResults();
+    res.json({ results });
+  } catch {
+    res.status(500).json({ error: "Resultados indisponíveis" });
+  }
+});
+
+router.get("/volleyball-results", async (_req, res) => {
+  try {
+    const results = await getVolleyballDailyResults();
     res.json({ results });
   } catch {
     res.status(500).json({ error: "Resultados indisponíveis" });

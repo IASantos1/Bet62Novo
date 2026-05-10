@@ -780,6 +780,16 @@ export default function Home() {
   const [recentResults, setRecentResults] = useState<TennisResult[]>([]);
   const [resultsOpen, setResultsOpen] = useState(true);
 
+  type VolleyResult = {
+    id: string; home: string; away: string;
+    homeSets: number; awaySets: number;
+    sets: Array<[number, number]>;
+    homeWon: boolean;
+    league: string; country: string; date: string; time: string;
+  };
+  const [volleyResults, setVolleyResults] = useState<VolleyResult[]>([]);
+  const [volleyResultsOpen, setVolleyResultsOpen] = useState(true);
+
   // Active tennis tournaments
   type ActiveTournament = {
     id: string; name: string; category: string; surface: string;
@@ -939,6 +949,10 @@ export default function Home() {
     fetch("/api/matches/results")
       .then(r => r.ok ? r.json() : { results: [] })
       .then(d => setRecentResults(d.results ?? []))
+      .catch(() => { /* non-critical */ });
+    fetch("/api/matches/volleyball-results")
+      .then(r => r.ok ? r.json() : { results: [] })
+      .then(d => setVolleyResults(d.results ?? []))
       .catch(() => { /* non-critical */ });
     fetch("/api/matches/tournaments")
       .then(r => r.ok ? r.json() : { tournaments: [] })
@@ -3499,9 +3513,12 @@ export default function Home() {
                     const list = rankingsTour === "atp" ? tennisStandings.atp : tennisStandings.wta;
                     return (
                       <div className="mb-5">
-                        <button
+                        <div
+                          role="button"
+                          tabIndex={0}
                           onClick={() => setRankingsOpen(o => !o)}
-                          className="w-full flex items-center justify-between mb-2.5 group"
+                          onKeyDown={e => e.key === "Enter" && setRankingsOpen(o => !o)}
+                          className="w-full flex items-center justify-between mb-2.5 group cursor-pointer"
                         >
                           <div className="flex items-center gap-2">
                             <span className="text-[10px] font-black text-zinc-500 uppercase tracking-widest group-hover:text-zinc-300 transition-colors">
@@ -3520,7 +3537,7 @@ export default function Home() {
                             </div>
                           </div>
                           <ChevronDown size={12} className={`text-zinc-600 transition-transform duration-200 ${rankingsOpen ? "" : "-rotate-90"}`} />
-                        </button>
+                        </div>
 
                         {rankingsOpen && (
                           <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 overflow-hidden">
@@ -3605,6 +3622,72 @@ export default function Home() {
                                 {r.status === "Retired" && (
                                   <span className="text-[9px] text-yellow-500/80 font-bold shrink-0 border border-yellow-700/40 rounded px-1 py-0.5">RET</span>
                                 )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* ─── Resultados Recentes de Voleibol ─────────────────────── */}
+                  {(selectedSport === "all" || selectedSport === "volleyball") && volleyResults.length > 0 && !selectedLeague && (
+                    <div className="mb-6">
+                      <button
+                        onClick={() => setVolleyResultsOpen(o => !o)}
+                        className="w-full flex items-center justify-between mb-3 group"
+                      >
+                        <div className="flex items-center gap-2">
+                          <span className="text-base font-black italic uppercase tracking-tight text-zinc-400 group-hover:text-white transition-colors">
+                            🏐 Resultados de Ontem
+                          </span>
+                          <span className="text-[10px] font-bold bg-zinc-800 text-zinc-500 rounded px-1.5 py-0.5">
+                            {volleyResults.length}
+                          </span>
+                        </div>
+                        <ChevronDown
+                          size={14}
+                          className={`text-zinc-600 transition-transform duration-200 ${volleyResultsOpen ? "" : "-rotate-90"}`}
+                        />
+                      </button>
+
+                      {volleyResultsOpen && (
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+                          {volleyResults.map(r => {
+                            const winner = r.homeWon ? r.home : r.away;
+                            const loser  = r.homeWon ? r.away : r.home;
+                            const wSets  = r.homeWon ? r.sets.map(([h]) => h)   : r.sets.map(([, a]) => a);
+                            const lSets  = r.homeWon ? r.sets.map(([, a]) => a) : r.sets.map(([h]) => h);
+                            const wTotal = r.homeWon ? r.homeSets : r.awaySets;
+                            const lTotal = r.homeWon ? r.awaySets : r.homeSets;
+                            return (
+                              <div key={r.id} className="bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 flex items-center gap-3 hover:border-zinc-700 transition-colors">
+                                <div className="flex-1 min-w-0">
+                                  <div className="flex items-center gap-1.5">
+                                    <span className="w-3.5 h-3.5 rounded-full bg-green-600/20 flex items-center justify-center shrink-0">
+                                      <span className="text-[9px] text-green-400 font-black leading-none">✓</span>
+                                    </span>
+                                    <span className="text-xs font-bold text-white truncate">{winner}</span>
+                                  </div>
+                                  <div className="flex items-center gap-1.5 mt-0.5">
+                                    <span className="w-3.5 h-3.5 shrink-0" />
+                                    <span className="text-xs text-zinc-500 truncate">{loser}</span>
+                                  </div>
+                                  <div className="text-[10px] text-zinc-600 mt-0.5 truncate">{r.league}</div>
+                                </div>
+                                <div className="flex items-center gap-2 shrink-0">
+                                  <div className="text-sm font-black tabular-nums text-white">
+                                    {wTotal}<span className="text-zinc-600 mx-0.5">–</span>{lTotal}
+                                  </div>
+                                  <div className="flex items-center gap-0.5 font-mono tabular-nums">
+                                    {wSets.map((ws, i) => (
+                                      <div key={i} className="text-center w-5">
+                                        <div className={`text-[11px] font-black leading-tight ${ws > (lSets[i] ?? 0) ? "text-white" : "text-zinc-600"}`}>{ws}</div>
+                                        <div className={`text-[11px] font-black leading-tight ${(lSets[i] ?? 0) > ws ? "text-zinc-400" : "text-zinc-600"}`}>{lSets[i]}</div>
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
                               </div>
                             );
                           })}
