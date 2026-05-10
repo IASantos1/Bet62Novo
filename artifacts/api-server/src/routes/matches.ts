@@ -1409,8 +1409,9 @@ function buildVolleyballLiveMatches(tournaments: VolleyTournament[]): LiveMatchS
   const todayStr = `${String(now.getDate()).padStart(2, "0")}.${String(now.getMonth() + 1).padStart(2, "0")}.${now.getFullYear()}`;
 
   for (const t of tournaments) {
-    const matches = Array.isArray(t.match) ? t.match : [t.match];
+    const matches = Array.isArray(t.match) ? t.match : t.match ? [t.match] : [];
     for (const m of matches) {
+      if (!m) continue;
       const home = m.home; const away = m.away;
       if (!home?.name || !away?.name) continue;
 
