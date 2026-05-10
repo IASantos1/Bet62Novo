@@ -89,7 +89,7 @@ export type LiveMatchState = {
   _liveExtra?: {
     clockStr?: string;                   // basketball/hockey: "06:44"
     sets?: Array<[number, number]>;      // tennis: [[6,3],[4,2]] last entry is in-progress
-    currentPoints?: [number, number];    // tennis: current game points [30, 15]
+    currentPoints?: [number | string, number | string]; // tennis: [30, 15] or ["D","D"] or ["AD",40]
     currentPts?: [number, number];       // volleyball: current set points [18, 16]
     vollSets?: Array<[number, number]>;  // volleyball: completed set scores [[25,18],[22,25]]
   };
@@ -1917,9 +1917,21 @@ function buildSimulatedLiveOtherSports(): LiveMatchState[] {
       const currentSet = sets.length;
       status  = `Set ${currentSet}`;
       minute  = currentSet;
-      const homePtIdx = Math.floor(rng(22) * 4);
-      const awayPtIdx = Math.floor(rng(23) * 4);
-      _liveExtra = { sets, currentPoints: [TENNIS_PTS[homePtIdx]!, TENNIS_PTS[awayPtIdx]!] };
+      // ── Tennis point system: 0 15 30 40 Deuce Advantage ──────────────────────
+      // 6 possible raw states (0-5): 0,15,30,40,AD-home,AD-away; deuce if both ≥3
+      const rawH = Math.floor(rng(22) * 6);
+      const rawA = Math.floor(rng(23) * 6);
+      let hPt: number | string, aPt: number | string;
+      if (rawH >= 3 && rawA >= 3) {
+        // Deuce zone
+        if (rawH === 4 && rawA < 4)       { hPt = "AD"; aPt = 40; }  // home advantage
+        else if (rawA === 4 && rawH < 4)  { hPt = 40;   aPt = "AD"; } // away advantage
+        else                              { hPt = "D";   aPt = "D"; }  // deuce
+      } else {
+        hPt = TENNIS_PTS[Math.min(rawH, 3)]!;
+        aPt = TENNIS_PTS[Math.min(rawA, 3)]!;
+      }
+      _liveExtra = { sets, currentPoints: [hPt, aPt] };
 
     } else if (m.sport === "hockey") {
       const period   = 1 + Math.floor(rngId(1) * 3);

@@ -473,7 +473,7 @@ type Match = {
   _liveExtra?: {
     clockStr?: string;
     sets?: Array<[number, number]>;
-    currentPoints?: [number, number];
+    currentPoints?: [number | string, number | string];
     currentPts?: [number, number];
     vollSets?: Array<[number, number]>;
   };
@@ -921,8 +921,9 @@ export default function Home() {
           _liveExtra?: {
             clockStr?: string;
             sets?: Array<[number, number]>;
-            currentPoints?: [number, number];
+            currentPoints?: [number | string, number | string];
             currentPts?: [number, number];
+            vollSets?: Array<[number, number]>;
           };
         }>;
         // Record API minutes for local ticker interpolation
@@ -1258,11 +1259,14 @@ export default function Home() {
     );
 
     // ── Score area per sport ──────────────────────────────────────────────────
-    // Tennis: set table S1 | S2 | PTS
+    // Tennis: set table S1 | S2 | PTS (with Deuce/AD support)
     const TennisScore = () => {
       const sets = extra?.sets ?? [];
       const pts  = extra?.currentPoints;
       const colW = sets.length > 1 ? "w-7" : "w-8";
+      const isDeuce = pts?.[0] === "D" && pts?.[1] === "D";
+      const hPtColor = pts?.[0] === "AD" ? "text-yellow-400" : isDeuce ? "text-orange-400" : "text-white";
+      const aPtColor = pts?.[1] === "AD" ? "text-yellow-400" : isDeuce ? "text-orange-400" : "text-white";
       return (
         <div className="w-full text-xs font-mono tabular-nums">
           {/* Header */}
@@ -1271,7 +1275,7 @@ export default function Home() {
             {sets.map((_, i) => (
               <div key={i} className={`${colW} text-center text-zinc-500 text-[10px] font-bold`}>S{i + 1}</div>
             ))}
-            {pts && <div className="w-8 text-center text-zinc-500 text-[10px] font-bold">PTS</div>}
+            {pts && <div className="w-8 text-center text-zinc-500 text-[10px] font-bold">{isDeuce ? "DUE" : "PTS"}</div>}
           </div>
           {/* Home row */}
           <div className="flex items-center">
@@ -1279,7 +1283,7 @@ export default function Home() {
             {sets.map(([h], i) => (
               <div key={i} className={`${colW} text-center font-black ${h > (sets[i]?.[1] ?? 0) ? "text-white" : "text-zinc-500"}`}>{h}</div>
             ))}
-            {pts && <div className="w-8 text-center font-black text-white">{pts[0]}</div>}
+            {pts && <div className={`w-8 text-center font-black ${hPtColor}`}>{isDeuce ? "D" : pts[0]}</div>}
           </div>
           {/* Away row */}
           <div className="flex items-center">
@@ -1287,7 +1291,7 @@ export default function Home() {
             {sets.map(([, a], i) => (
               <div key={i} className={`${colW} text-center font-black ${a > (sets[i]?.[0] ?? 0) ? "text-white" : "text-zinc-500"}`}>{a}</div>
             ))}
-            {pts && <div className="w-8 text-center font-black text-white">{pts[1]}</div>}
+            {pts && <div className={`w-8 text-center font-black ${aPtColor}`}>{isDeuce ? "D" : pts[1]}</div>}
           </div>
         </div>
       );
