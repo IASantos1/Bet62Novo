@@ -29,6 +29,37 @@ type AdvancedMarkets = {
   _total?: number;
   _total1H?: number;
   _spreadLine?: number;
+  // Basketball extended markets
+  basketballExtra?: {
+    q1: { home: number; away: number };
+    q2: { home: number; away: number };
+    q3: { home: number; away: number };
+    q4: { home: number; away: number };
+    teamTotalHome: { line: number; over: number; under: number };
+    teamTotalAway: { line: number; over: number; under: number };
+  };
+  // Tennis extended markets
+  tennisExtra?: {
+    set2: { home: number; away: number };
+    exactSets: { h20: number; h21: number; a02: number; a12: number };
+    totalGames: { line: number; over: number; under: number };
+    gameHandicap: { line: number; home: number; away: number };
+  };
+  // Hockey extended markets
+  hockeyExtra?: {
+    period2: { home: number; draw: number; away: number };
+    period3: { home: number; draw: number; away: number };
+    period1Total: { line: number; over: number; under: number };
+    bothTeamsScoreGame: { yes: number; no: number };
+    shotsOnGoal: { line: number; over: number; under: number };
+  };
+  // Volleyball extended markets
+  volleyballExtra?: {
+    set1: { home: number; away: number };
+    set2: { home: number; away: number };
+    set3: { home: number; away: number };
+    handicapPoints: { line: number; home: number; away: number };
+  };
 };
 
 export type LiveMatchState = {
