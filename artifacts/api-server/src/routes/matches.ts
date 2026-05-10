@@ -1199,6 +1199,9 @@ async function buildUpcomingMatches(): Promise<UpcomingMatch[]> {
 
       const { odds: matchOdds, markets, real } = resolveOdds(m, odds);
 
+      // Skip matches without real Statpal odds — don't send odds-less events to the frontend
+      if (!real) continue;
+
       results.push({
         id: m.main_id,
         home: m.home.name,
@@ -1208,7 +1211,7 @@ async function buildUpcomingMatches(): Promise<UpcomingMatch[]> {
         time: m.status,
         date: m.date,
         sport: "football",
-        hasRealOdds: real,
+        hasRealOdds: true,
         odds: matchOdds,
         markets,
       });

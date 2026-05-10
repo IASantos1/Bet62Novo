@@ -4,7 +4,7 @@ import { toast } from "sonner";
 import {
   Menu, X, Trophy, Activity, Gift,
   LogOut, User, History, Loader2, Zap, TrendingUp,
-  ChevronRight, AlertCircle, BarChart2, Wallet, ArrowDownCircle, ArrowUpCircle, Plus,
+  ChevronRight, ChevronLeft, AlertCircle, BarChart2, Wallet, ArrowDownCircle, ArrowUpCircle, Plus,
 } from "lucide-react";
 import ProfileTab from "@/components/ProfileTab";
 import { Button } from "@/components/ui/button";
@@ -157,6 +157,16 @@ function getTeamBanner(teamName: string, country?: string): string | undefined {
   const expectedCountry = TEAM_COUNTRY[teamName];
   if (!expectedCountry || !country) return banner;
   return expectedCountry === country.toLowerCase() ? banner : undefined;
+}
+
+const ARENA_BANNER = "/arena-banner.png";
+
+function getMatchBanner(match: { home: string; country?: string; sport?: string }): string | undefined {
+  // Only use football team banners for football matches — never show football stadium for basketball/tennis/hockey
+  if (!match.sport || match.sport === "football") {
+    return getTeamBanner(match.home, match.country);
+  }
+  return ARENA_BANNER;
 }
 
 const COUNTRY_FLAGS: Record<string, string> = {
@@ -1194,7 +1204,7 @@ export default function Home() {
     const minute = getDisplayMinute(match);
     const progress = Math.min(100, (minute / 90) * 100);
     const flag = COUNTRY_FLAGS[match.country?.toLowerCase() ?? ""] ?? sportEmoji(match.sport);
-    const bannerImg = getTeamBanner(match.home, match.country);
+    const bannerImg = getMatchBanner(match);
     // Suppress fade-in animation for already-seen matches (silent background update)
     const matchKey = String(match.id);
     const isNew = !seenMatchIds.current.has(matchKey);
@@ -1303,7 +1313,7 @@ export default function Home() {
   const MatchCard = ({ match }: { match: Match }) => {
     const flag = COUNTRY_FLAGS[match.country?.toLowerCase() ?? ""] ?? sportEmoji(match.sport);
     const dateStr = match.date ? formatMatchDate(match.date) : "";
-    const bannerImg = getTeamBanner(match.home, match.country);
+    const bannerImg = getMatchBanner(match);
     const rivalry = RIVALRY_TAGS[`${match.home}|${match.away}`];
     const hasDraw = match.odds.draw > 0;
 
@@ -1364,6 +1374,139 @@ export default function Home() {
           </div>
           <OddsRow />
         </div>
+      </div>
+    );
+  };
+
+  // ─── Hero Carousel ────────────────────────────────────────────────
+  const HeroCarousel = () => {
+    const slides = upcomingMatches.slice(0, 4);
+    const [idx, setIdx] = useState(0);
+    const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+    const restart = useCallback(() => {
+      if (timerRef.current) clearInterval(timerRef.current);
+      timerRef.current = setInterval(() => setIdx(i => (i + 1) % Math.max(1, slides.length)), 5000);
+    }, [slides.length]);
+
+    useEffect(() => {
+      if (slides.length === 0) return;
+      restart();
+      return () => { if (timerRef.current) clearInterval(timerRef.current); };
+    }, [slides.length, restart]);
+
+    const go = (dir: 1 | -1) => {
+      setIdx(i => (i + dir + slides.length) % slides.length);
+      restart();
+    };
+
+    if (slides.length === 0) return null;
+
+    const slide = slides[idx];
+    const banner = getMatchBanner(slide);
+    const flag = COUNTRY_FLAGS[slide.country?.toLowerCase() ?? ""] ?? sportEmoji(slide.sport);
+    const dateStr = slide.date ? formatMatchDate(slide.date) : "";
+
+    return (
+      <div className="relative w-full rounded-2xl overflow-hidden mb-6 select-none" style={{ height: 200 }}>
+        <AnimatePresence mode="wait">
+          <motion.div
+            key={idx}
+            initial={{ opacity: 0, x: 40 }}
+            animate={{ opacity: 1, x: 0 }}
+            exit={{ opacity: 0, x: -40 }}
+            transition={{ duration: 0.35, ease: "easeInOut" }}
+            className="absolute inset-0"
+          >
+            {/* background */}
+            {banner ? (
+              <img src={banner} alt="" className="absolute inset-0 w-full h-full object-cover object-center" />
+            ) : (
+              <img src={ARENA_BANNER} alt="" className="absolute inset-0 w-full h-full object-cover object-center" />
+            )}
+            {/* dark gradient overlay */}
+            <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/50 to-black/10" />
+            {/* red accent glow */}
+            <div className="absolute inset-0 bg-gradient-to-r from-red-900/30 to-transparent" />
+
+            {/* content */}
+            <div className="absolute inset-0 flex flex-col justify-end p-4">
+              {/* league badge */}
+              <div className="flex items-center gap-1.5 mb-2">
+                <span className="text-xs">{flag}</span>
+                <span className="text-[10px] uppercase font-bold text-zinc-300 tracking-widest">{slide.league || slide.country || "Liga"}</span>
+                {slide.isLive && (
+                  <span className="ml-1 px-1.5 py-0.5 rounded text-[9px] font-black bg-red-600 text-white uppercase tracking-wide animate-pulse">AO VIVO</span>
+                )}
+              </div>
+              {/* teams */}
+              <div className="text-white font-black text-xl leading-tight mb-1 truncate drop-shadow">
+                {slide.home} <span className="text-red-400 font-light text-base">vs</span> {slide.away}
+              </div>
+              {/* date + quick odds */}
+              <div className="flex items-center justify-between">
+                <span className="text-zinc-400 text-[11px]">{dateStr}</span>
+                <div className="flex gap-1.5">
+                  {slide.odds.home > 0 && (
+                    <button
+                      onClick={() => setExpandedMatch(slide)}
+                      className="px-2.5 py-1 rounded-lg bg-zinc-800/80 hover:bg-red-600 transition-colors text-white text-xs font-bold border border-zinc-700"
+                    >
+                      {slide.odds.home.toFixed(2)}
+                    </button>
+                  )}
+                  {slide.odds.draw > 0 && (
+                    <button
+                      onClick={() => setExpandedMatch(slide)}
+                      className="px-2.5 py-1 rounded-lg bg-zinc-800/80 hover:bg-red-600 transition-colors text-white text-xs font-bold border border-zinc-700"
+                    >
+                      {slide.odds.draw.toFixed(2)}
+                    </button>
+                  )}
+                  {slide.odds.away > 0 && (
+                    <button
+                      onClick={() => setExpandedMatch(slide)}
+                      className="px-2.5 py-1 rounded-lg bg-zinc-800/80 hover:bg-red-600 transition-colors text-white text-xs font-bold border border-zinc-700"
+                    >
+                      {slide.odds.away.toFixed(2)}
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
+          </motion.div>
+        </AnimatePresence>
+
+        {/* prev / next arrows */}
+        {slides.length > 1 && (
+          <>
+            <button
+              onClick={() => go(-1)}
+              className="absolute left-2 top-1/2 -translate-y-1/2 p-1.5 rounded-full bg-black/50 hover:bg-red-600/80 transition-colors text-white z-10"
+            >
+              <ChevronLeft size={16} />
+            </button>
+            <button
+              onClick={() => go(1)}
+              className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 rounded-full bg-black/50 hover:bg-red-600/80 transition-colors text-white z-10"
+            >
+              <ChevronRight size={16} />
+            </button>
+          </>
+        )}
+
+        {/* dots */}
+        {slides.length > 1 && (
+          <div className="absolute bottom-2 left-1/2 -translate-x-1/2 flex gap-1.5 z-10">
+            {slides.map((_, i) => (
+              <button
+                key={i}
+                onClick={() => { setIdx(i); restart(); }}
+                className={`rounded-full transition-all ${i === idx ? "w-4 h-1.5 bg-red-500" : "w-1.5 h-1.5 bg-zinc-600 hover:bg-zinc-400"}`}
+              />
+            ))}
+          </div>
+        )}
       </div>
     );
   };
@@ -2725,6 +2868,7 @@ export default function Home() {
 
               return (
                 <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
+                  {!selectedLeague && <HeroCarousel />}
                   <h2 className="text-2xl font-black italic uppercase tracking-tight mb-4 flex items-center gap-2">
                     <Trophy className="text-red-600" /> {selectedLeague ? selectedLeague : "Próximos Eventos"}
                   </h2>
