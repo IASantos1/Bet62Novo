@@ -670,6 +670,17 @@ function phoneMask(value: string) {
   return `${digits.slice(0, 3)} ${digits.slice(3, 6)} ${digits.slice(6)}`;
 }
 
+const USER_EMOJIS = ["🦁","🐯","🦊","🐺","🦅","🦋","🐉","🦄","🐬","🦈","🦝","🐻","🦸","🧙","🏆","⚡","🔥","💎","🎯","🚀"];
+function userEmoji(name: string): string {
+  let hash = 0;
+  for (let i = 0; i < name.length; i++) hash = (hash * 31 + name.charCodeAt(i)) >>> 0;
+  return USER_EMOJIS[hash % USER_EMOJIS.length]!;
+}
+
+function cardMask(value: string) {
+  return value.replace(/\D/g, "").slice(0, 16).replace(/(.{4})/g, "$1 ").trim();
+}
+
 export default function Home() {
   const auth = useAuth();
   const [activeTab, setActiveTab] = useState<"sports" | "live" | "promos" | "mybets" | "wallet" | "profile">("sports");
@@ -1953,27 +1964,67 @@ export default function Home() {
             </div>
           </div>
 
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2">
             {auth.user ? (
-              <div className="flex items-center gap-3">
-                <div className="hidden sm:flex flex-col items-end">
-                  <span className="text-xs text-zinc-400">Saldo</span>
-                  <span className="font-bold text-green-400 text-sm">€ {parseFloat(auth.user.balance).toFixed(2)}</span>
+              <>
+                {/* Free Bet balance pill — always visible */}
+                <div
+                  className="hidden sm:flex items-center gap-1.5 bg-violet-900/60 border border-violet-500/40 hover:border-violet-400/70 rounded-lg px-2.5 py-1.5 cursor-pointer transition-colors"
+                  title="Saldo de Free Bets"
+                  onClick={() => { setActiveTab("wallet"); fetchMyBets(); }}
+                >
+                  <span className="text-[10px] font-black text-violet-300 tracking-widest">FB</span>
+                  <span className="text-xs font-bold text-violet-200">€ {parseFloat(auth.user.freebetBalance ?? "0").toFixed(2)}</span>
                 </div>
+
+                {/* Real balance pill */}
+                <div
+                  className="flex items-center gap-1.5 bg-zinc-800 border border-zinc-700 hover:border-green-500/50 rounded-lg px-2.5 py-1.5 cursor-pointer transition-colors"
+                  title="Saldo disponível"
+                  onClick={() => { setActiveTab("wallet"); fetchMyBets(); }}
+                >
+                  <span className="text-xs font-black text-green-400">€</span>
+                  <span className="text-xs font-bold text-white">{parseFloat(auth.user.balance).toFixed(2)}</span>
+                </div>
+
+                {/* Deposit / Withdraw button */}
+                <button
+                  onClick={() => setDepositModalOpen(true)}
+                  className="w-8 h-8 rounded-lg bg-emerald-600 hover:bg-emerald-500 flex items-center justify-center transition-colors shadow-lg shadow-emerald-900/40 shrink-0"
+                  title="Depositar / Levantar"
+                >
+                  <Plus size={16} className="text-white" strokeWidth={3} />
+                </button>
+
+                {/* Avatar emoji dropdown */}
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
-                    <button className="flex items-center gap-2 bg-zinc-800 hover:bg-zinc-700 px-3 py-2 rounded-lg transition-colors">
-                      <div className="w-7 h-7 rounded-full bg-red-600 flex items-center justify-center text-xs font-bold">
-                        {auth.user.name.charAt(0).toUpperCase()}
-                      </div>
-                      <span className="hidden sm:block text-sm font-medium max-w-[100px] truncate">{auth.user.name}</span>
+                    <button
+                      className="w-9 h-9 rounded-xl bg-zinc-800 border border-zinc-700 hover:border-zinc-500 flex items-center justify-center text-lg transition-colors shrink-0"
+                      title="Minha conta"
+                    >
+                      {userEmoji(auth.user.name)}
                     </button>
                   </DropdownMenuTrigger>
-                  <DropdownMenuContent className="bg-zinc-900 border-zinc-700 text-white" align="end">
-                    <div className="px-3 py-2 text-xs text-zinc-400">
-                      <div className="font-medium text-white truncate">{auth.user.name}</div>
-                      <div className="text-zinc-500 truncate">{auth.user.email}</div>
-                      <div className="text-green-400 font-bold mt-1">€ {parseFloat(auth.user.balance).toFixed(2)}</div>
+                  <DropdownMenuContent className="bg-zinc-900 border-zinc-700 text-white w-52" align="end">
+                    <div className="px-3 py-2.5">
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className="text-xl">{userEmoji(auth.user.name)}</span>
+                        <div className="min-w-0">
+                          <div className="font-semibold text-white text-sm truncate">{auth.user.name}</div>
+                          <div className="text-zinc-500 text-xs truncate">{auth.user.email}</div>
+                        </div>
+                      </div>
+                      <div className="flex gap-2 mt-2">
+                        <div className="flex-1 bg-zinc-800 rounded-lg px-2 py-1.5 text-center">
+                          <div className="text-[10px] text-zinc-500">Saldo</div>
+                          <div className="text-green-400 font-bold text-xs">€ {parseFloat(auth.user.balance).toFixed(2)}</div>
+                        </div>
+                        <div className="flex-1 bg-violet-900/40 rounded-lg px-2 py-1.5 text-center">
+                          <div className="text-[10px] text-zinc-500">Free Bets</div>
+                          <div className="text-violet-300 font-bold text-xs">€ {parseFloat(auth.user.freebetBalance ?? "0").toFixed(2)}</div>
+                        </div>
+                      </div>
                     </div>
                     <DropdownMenuSeparator className="bg-zinc-700" />
                     <DropdownMenuItem className="hover:bg-zinc-800 cursor-pointer" onClick={() => setActiveTab("profile")}>
@@ -1983,7 +2034,7 @@ export default function Home() {
                       <Wallet size={14} className="mr-2" /> Carteira
                     </DropdownMenuItem>
                     <DropdownMenuItem className="hover:bg-zinc-800 cursor-pointer" onClick={() => { setActiveTab("mybets"); fetchMyBets(); }}>
-                      <History size={14} className="mr-2" /> Minhas Apostas
+                      <History size={14} className="mr-2" /> Apostas
                     </DropdownMenuItem>
                     <DropdownMenuSeparator className="bg-zinc-700" />
                     <DropdownMenuItem className="hover:bg-zinc-800 cursor-pointer text-red-400" onClick={auth.logout}>
@@ -1991,7 +2042,7 @@ export default function Home() {
                     </DropdownMenuItem>
                   </DropdownMenuContent>
                 </DropdownMenu>
-              </div>
+              </>
             ) : (
               <Button onClick={() => setAuthModalOpen(true)} className="bg-red-600 hover:bg-red-700 text-white font-bold px-6">
                 ENTRAR
@@ -2856,72 +2907,16 @@ export default function Home() {
         </DialogContent>
       </Dialog>
 
-      {/* ── DEPOSIT MODAL ─────────────────────────────────────── */}
-      <Dialog open={depositModalOpen} onOpenChange={setDepositModalOpen}>
-        <DialogContent className="bg-zinc-950 border-zinc-800 text-white max-w-md">
-          <DialogHeader>
-            <DialogTitle className="text-xl font-black italic flex items-center gap-2">
-              <Plus className="text-red-500" size={20} /> Realizar Depósito
-            </DialogTitle>
-          </DialogHeader>
-          <div className="space-y-5 pt-2">
-            <div>
-              <p className="text-xs text-zinc-400 mb-3 font-semibold uppercase tracking-widest">Valor rápido</p>
-              <div className="grid grid-cols-4 gap-2">
-                {[10, 20, 50, 100].map(v => (
-                  <button
-                    key={v}
-                    onClick={() => setDepositAmount(String(v))}
-                    className={`py-2 rounded-lg border font-bold text-sm transition-colors ${depositAmount === String(v) ? "border-red-600 bg-red-600/10 text-red-400" : "border-zinc-700 hover:border-zinc-500 text-zinc-300"}`}
-                  >
-                    € {v}
-                  </button>
-                ))}
-              </div>
-            </div>
-            <div className="space-y-1.5">
-              <Label className="text-sm text-zinc-300">Outro valor (€ 10 – 5000)</Label>
-              <div className="relative">
-                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400 font-bold text-sm">€</span>
-                <Input
-                  type="number"
-                  min={10}
-                  max={5000}
-                  placeholder="0,00"
-                  className="pl-8 bg-zinc-900 border-zinc-700 text-white font-bold text-lg h-12"
-                  value={depositAmount}
-                  onChange={e => setDepositAmount(e.target.value)}
-                  onKeyDown={e => e.key === "Enter" && handleDeposit()}
-                />
-              </div>
-            </div>
-            {parseFloat(depositAmount) >= 20 && (
-              <div className="bg-emerald-900/30 border border-emerald-500/30 rounded-xl p-3 flex items-start gap-3">
-                <span className="text-2xl">🎁</span>
-                <div>
-                  <div className="text-emerald-400 font-bold text-sm">Promoção ativada!</div>
-                  <div className="text-zinc-300 text-xs mt-0.5">
-                    {parseFloat(depositAmount) >= 100
-                      ? "Qualifica para 100% de Bónus de Boas-Vindas até €500."
-                      : "Qualifica para receber €10 em Free Bets após 4 apostas qualificadas."}
-                  </div>
-                </div>
-              </div>
-            )}
-            <Button
-              onClick={handleDeposit}
-              disabled={depositLoading || !depositAmount || parseFloat(depositAmount) < 10}
-              className="w-full bg-red-600 hover:bg-red-700 text-white font-bold h-12 text-base"
-            >
-              {depositLoading ? <Loader2 className="animate-spin mr-2" size={18} /> : null}
-              {depositLoading ? "A processar..." : `Depositar € ${parseFloat(depositAmount || "0").toFixed(2)}`}
-            </Button>
-            <p className="text-[11px] text-zinc-600 text-center leading-relaxed">
-              Depósito simulado para fins de demonstração. Processado instantaneamente.
-            </p>
-          </div>
-        </DialogContent>
-      </Dialog>
+      {/* ── DEPOSIT / WITHDRAW MODAL ──────────────────────────── */}
+      <DepositWithdrawModal
+        open={depositModalOpen}
+        onClose={() => setDepositModalOpen(false)}
+        onDeposit={handleDeposit}
+        depositAmount={depositAmount}
+        setDepositAmount={setDepositAmount}
+        depositLoading={depositLoading}
+        balance={auth.user ? parseFloat(auth.user.balance) : 0}
+      />
 
       {/* ── PROMOTION NOTIFICATION ─────────────────────────────── */}
       <AnimatePresence>
@@ -3168,5 +3163,300 @@ function PromosPage({
         </div>
       </div>
     </div>
+  );
+}
+
+// ─── DEPOSIT / WITHDRAW MODAL ────────────────────────────────────────────────
+type PayMethod = "multibanco" | "mbway" | "card" | "withdraw";
+
+function DepositWithdrawModal({
+  open, onClose, onDeposit, depositAmount, setDepositAmount, depositLoading, balance,
+}: {
+  open: boolean;
+  onClose: () => void;
+  onDeposit: () => void;
+  depositAmount: string;
+  setDepositAmount: (v: string) => void;
+  depositLoading: boolean;
+  balance: number;
+}) {
+  const [payMethod, setPayMethod] = useState<PayMethod>("multibanco");
+  const [mbwayPhone, setMbwayPhone] = useState("");
+  const [cardNum, setCardNum] = useState("");
+  const [cardExpiry, setCardExpiry] = useState("");
+  const [cardCvc, setCardCvc] = useState("");
+  const [cardName, setCardName] = useState("");
+  const [withdrawAmount, setWithdrawAmount] = useState("");
+  const [withdrawIban, setWithdrawIban] = useState("");
+  const [mbwayStep, setMbwayStep] = useState<"form" | "confirm">("form");
+
+  const amount = parseFloat(depositAmount.replace(",", "."));
+  const promoHint = !isNaN(amount) && amount >= 20;
+
+  const METHODS: { id: PayMethod; label: string; icon: string }[] = [
+    { id: "multibanco", label: "Multibanco", icon: "🏧" },
+    { id: "mbway", label: "MB WAY", icon: "📱" },
+    { id: "card", label: "Cartão", icon: "💳" },
+    { id: "withdraw", label: "Levantar", icon: "↩️" },
+  ];
+
+  // Generate deterministic Multibanco reference from amount (demo)
+  const mbRef = !isNaN(amount) && amount >= 5
+    ? { entity: "21904", ref: `${Math.floor(amount * 100 + 11847).toString().padStart(9, "0")}`, amount: amount.toFixed(2) }
+    : null;
+
+  return (
+    <Dialog open={open} onOpenChange={v => { if (!v) onClose(); }}>
+      <DialogContent className="bg-zinc-950 border-zinc-800 text-white max-w-md p-0 overflow-hidden">
+        {/* Header */}
+        <div className="bg-gradient-to-r from-zinc-900 to-zinc-800 px-5 py-4 border-b border-zinc-700 flex items-center gap-3">
+          <div className="w-8 h-8 rounded-lg bg-emerald-600 flex items-center justify-center shrink-0">
+            <Plus size={18} strokeWidth={3} />
+          </div>
+          <div>
+            <div className="font-black text-base">Depósito & Levantamento</div>
+            <div className="text-xs text-zinc-400">Processado por <span className="text-white font-semibold">ifthenpay</span></div>
+          </div>
+          <div className="ml-auto text-right">
+            <div className="text-[10px] text-zinc-500">Saldo actual</div>
+            <div className="text-green-400 font-black text-sm">€ {balance.toFixed(2)}</div>
+          </div>
+        </div>
+
+        {/* Method tabs */}
+        <div className="grid grid-cols-4 border-b border-zinc-800">
+          {METHODS.map(m => (
+            <button
+              key={m.id}
+              onClick={() => setPayMethod(m.id)}
+              className={`flex flex-col items-center gap-1 py-3 text-xs font-bold transition-colors border-b-2 ${payMethod === m.id ? "border-emerald-500 text-white bg-zinc-900" : "border-transparent text-zinc-500 hover:text-zinc-300"}`}
+            >
+              <span className="text-lg">{m.icon}</span>
+              {m.label}
+            </button>
+          ))}
+        </div>
+
+        <div className="p-5 space-y-4">
+          {/* Amount selector — shown for all deposit methods */}
+          {payMethod !== "withdraw" && (
+            <>
+              <div>
+                <p className="text-xs text-zinc-400 mb-2 font-semibold uppercase tracking-widest">Valor</p>
+                <div className="grid grid-cols-5 gap-1.5 mb-3">
+                  {[5, 10, 20, 50, 100].map(v => (
+                    <button
+                      key={v}
+                      onClick={() => setDepositAmount(String(v))}
+                      className={`py-2 rounded-lg border font-bold text-xs transition-colors ${depositAmount === String(v) ? "border-emerald-500 bg-emerald-500/10 text-emerald-400" : "border-zinc-700 hover:border-zinc-500 text-zinc-300"}`}
+                    >
+                      €{v}
+                    </button>
+                  ))}
+                </div>
+                <div className="relative">
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400 font-bold text-sm">€</span>
+                  <Input
+                    type="number" min={5} max={5000} placeholder="0,00"
+                    className="pl-8 bg-zinc-900 border-zinc-700 text-white font-bold text-lg h-11"
+                    value={depositAmount}
+                    onChange={e => setDepositAmount(e.target.value)}
+                  />
+                </div>
+              </div>
+              {promoHint && (
+                <div className="bg-emerald-900/30 border border-emerald-600/30 rounded-xl p-2.5 flex items-center gap-2.5 text-xs">
+                  <span className="text-lg">🎁</span>
+                  <span className="text-emerald-300 font-semibold">
+                    {amount >= 100 ? "Qualifica para 100% Bónus de Boas-Vindas!" : "Qualifica para €10 em Free Bets!"}
+                  </span>
+                </div>
+              )}
+            </>
+          )}
+
+          {/* MULTIBANCO */}
+          {payMethod === "multibanco" && (
+            <div className="space-y-3">
+              {mbRef ? (
+                <div className="bg-zinc-900 border border-zinc-700 rounded-2xl p-4 space-y-3">
+                  <div className="text-xs text-zinc-400 font-semibold uppercase tracking-widest">Referência Multibanco</div>
+                  <div className="grid grid-cols-3 gap-2 text-center">
+                    <div className="bg-zinc-800 rounded-xl py-3">
+                      <div className="text-[10px] text-zinc-500 mb-1">Entidade</div>
+                      <div className="font-black text-white text-lg tracking-widest">{mbRef.entity}</div>
+                    </div>
+                    <div className="bg-zinc-800 rounded-xl py-3 col-span-1">
+                      <div className="text-[10px] text-zinc-500 mb-1">Referência</div>
+                      <div className="font-black text-white text-sm tracking-widest">{mbRef.ref}</div>
+                    </div>
+                    <div className="bg-zinc-800 rounded-xl py-3">
+                      <div className="text-[10px] text-zinc-500 mb-1">Valor</div>
+                      <div className="font-black text-emerald-400 text-lg">€{mbRef.amount}</div>
+                    </div>
+                  </div>
+                  <div className="text-xs text-zinc-500 text-center leading-relaxed">
+                    Pague em qualquer ATM, HomeBanking ou App de banco.<br />
+                    Referência válida por <span className="text-zinc-300 font-semibold">24 horas</span>.
+                  </div>
+                  <Button onClick={onDeposit} disabled={depositLoading} className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-black h-11">
+                    {depositLoading ? <Loader2 className="animate-spin mr-2" size={16} /> : "🏧"} Confirmar Pagamento Multibanco
+                  </Button>
+                </div>
+              ) : (
+                <div className="text-center text-zinc-500 py-4 text-sm">Introduza um valor para gerar a referência.</div>
+              )}
+            </div>
+          )}
+
+          {/* MB WAY */}
+          {payMethod === "mbway" && (
+            <div className="space-y-3">
+              {mbwayStep === "form" ? (
+                <>
+                  <div className="space-y-1.5">
+                    <Label className="text-xs text-zinc-400 font-semibold uppercase tracking-widest">Número MB WAY</Label>
+                    <div className="flex">
+                      <span className="inline-flex items-center px-3 rounded-l-lg border border-r-0 border-zinc-700 bg-zinc-800 text-zinc-400 text-xs font-bold">🇵🇹 +351</span>
+                      <Input
+                        type="tel" placeholder="9XX XXX XXX"
+                        className="bg-zinc-900 border-zinc-700 text-white font-bold rounded-l-none h-11"
+                        value={mbwayPhone}
+                        onChange={e => setMbwayPhone(phoneMask(e.target.value))}
+                        maxLength={11}
+                      />
+                    </div>
+                  </div>
+                  <Button
+                    onClick={() => { if (mbwayPhone.replace(/\s/g,"").length === 9) setMbwayStep("confirm"); }}
+                    disabled={mbwayPhone.replace(/\s/g,"").length !== 9 || isNaN(amount) || amount < 5}
+                    className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-black h-11"
+                  >
+                    📱 Enviar Pedido MB WAY — €{isNaN(amount) ? "0.00" : amount.toFixed(2)}
+                  </Button>
+                </>
+              ) : (
+                <div className="bg-zinc-900 border border-emerald-600/30 rounded-2xl p-4 text-center space-y-3">
+                  <div className="text-4xl animate-pulse">📱</div>
+                  <div className="font-black text-white text-base">Pedido enviado!</div>
+                  <div className="text-sm text-zinc-400">
+                    Verifique a App MB WAY no número<br />
+                    <span className="text-white font-bold">+351 {mbwayPhone}</span>
+                  </div>
+                  <div className="text-xs text-zinc-500">Tem 4 minutos para aceitar. Valor: <span className="text-emerald-400 font-bold">€{amount.toFixed(2)}</span></div>
+                  <div className="flex gap-2">
+                    <Button variant="outline" className="flex-1 border-zinc-700 text-zinc-300 h-10" onClick={() => setMbwayStep("form")}>Cancelar</Button>
+                    <Button className="flex-1 bg-emerald-600 hover:bg-emerald-500 font-black h-10" onClick={onDeposit} disabled={depositLoading}>
+                      {depositLoading ? <Loader2 className="animate-spin" size={16} /> : "✓ Confirmar"}
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* CARTÃO */}
+          {payMethod === "card" && (
+            <div className="space-y-3">
+              <div className="bg-gradient-to-br from-zinc-800 to-zinc-700 rounded-2xl p-4 space-y-3">
+                <div className="flex justify-between items-center mb-1">
+                  <span className="text-xs text-zinc-400 font-semibold uppercase tracking-widest">Cartão de Pagamento</span>
+                  <div className="flex gap-1.5 items-center">
+                    <span className="text-base">💳</span>
+                    <span className="text-[10px] font-black text-zinc-400">VISA / MC</span>
+                  </div>
+                </div>
+                <div className="space-y-1.5">
+                  <Input
+                    placeholder="Número do cartão"
+                    className="bg-zinc-900 border-zinc-600 text-white font-mono tracking-widest h-11"
+                    value={cardNum}
+                    onChange={e => setCardNum(cardMask(e.target.value))}
+                    maxLength={19}
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Input
+                    placeholder="Nome no cartão"
+                    className="bg-zinc-900 border-zinc-600 text-white uppercase h-11"
+                    value={cardName}
+                    onChange={e => setCardName(e.target.value.toUpperCase())}
+                  />
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <Input
+                    placeholder="MM/AA"
+                    className="bg-zinc-900 border-zinc-600 text-white font-mono h-11"
+                    value={cardExpiry}
+                    onChange={e => {
+                      const v = e.target.value.replace(/\D/g,"").slice(0,4);
+                      setCardExpiry(v.length > 2 ? `${v.slice(0,2)}/${v.slice(2)}` : v);
+                    }}
+                    maxLength={5}
+                  />
+                  <Input
+                    placeholder="CVC"
+                    className="bg-zinc-900 border-zinc-600 text-white font-mono h-11"
+                    value={cardCvc}
+                    onChange={e => setCardCvc(e.target.value.replace(/\D/g,"").slice(0,4))}
+                    maxLength={4}
+                    type="password"
+                  />
+                </div>
+              </div>
+              <Button
+                onClick={onDeposit}
+                disabled={depositLoading || cardNum.replace(/\s/g,"").length < 13 || !cardName || cardExpiry.length < 5 || cardCvc.length < 3 || isNaN(amount) || amount < 5}
+                className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-black h-11"
+              >
+                {depositLoading ? <Loader2 className="animate-spin mr-2" size={16} /> : "💳"} Pagar €{isNaN(amount) ? "0.00" : amount.toFixed(2)}
+              </Button>
+              <div className="flex items-center justify-center gap-2 text-[10px] text-zinc-600">
+                <span>🔒</span> Pagamento seguro 3D Secure · ifthenpay
+              </div>
+            </div>
+          )}
+
+          {/* LEVANTAMENTO */}
+          {payMethod === "withdraw" && (
+            <div className="space-y-3">
+              <div className="bg-zinc-900 border border-zinc-700 rounded-xl p-3 flex items-center justify-between">
+                <span className="text-xs text-zinc-400">Saldo disponível para levantar</span>
+                <span className="text-green-400 font-black">€ {balance.toFixed(2)}</span>
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-xs text-zinc-400 font-semibold uppercase tracking-widest">Valor a levantar</Label>
+                <div className="relative">
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400 font-bold text-sm">€</span>
+                  <Input
+                    type="number" min={10} max={balance} placeholder="0,00"
+                    className="pl-8 bg-zinc-900 border-zinc-700 text-white font-bold text-lg h-11"
+                    value={withdrawAmount}
+                    onChange={e => setWithdrawAmount(e.target.value)}
+                  />
+                </div>
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-xs text-zinc-400 font-semibold uppercase tracking-widest">IBAN</Label>
+                <Input
+                  placeholder="PT50 0000 0000 0000 0000 0000 0"
+                  className="bg-zinc-900 border-zinc-700 text-white font-mono text-sm h-11"
+                  value={withdrawIban}
+                  onChange={e => setWithdrawIban(e.target.value.toUpperCase())}
+                />
+              </div>
+              <Button
+                onClick={() => { toast.info("Pedido de levantamento submetido. Processado em 1-3 dias úteis."); onClose(); }}
+                disabled={!withdrawAmount || parseFloat(withdrawAmount) < 10 || parseFloat(withdrawAmount) > balance || withdrawIban.length < 15}
+                className="w-full bg-zinc-700 hover:bg-zinc-600 text-white font-black h-11"
+              >
+                ↩️ Solicitar Levantamento
+              </Button>
+              <p className="text-[10px] text-zinc-600 text-center">Processamento em 1–3 dias úteis por transferência bancária.</p>
+            </div>
+          )}
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 }

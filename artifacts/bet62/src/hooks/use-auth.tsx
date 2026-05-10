@@ -6,6 +6,7 @@ type User = {
   name: string;
   email: string;
   balance: string;
+  freebetBalance: string;
 };
 
 type AuthContextType = {

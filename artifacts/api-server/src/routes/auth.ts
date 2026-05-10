@@ -28,7 +28,8 @@ router.post("/register", async (req, res): Promise<void> => {
       name,
       email,
       passwordHash,
-      balance: "1000.00", // Start with some balance for testing
+      balance: "0.00",
+      freebetBalance: "0.00",
     }).returning();
 
     const token = jwt.sign({ id: user.id, email: user.email }, SESSION_SECRET, { expiresIn: "7d" });
@@ -40,6 +41,7 @@ router.post("/register", async (req, res): Promise<void> => {
         name: user.name,
         email: user.email,
         balance: user.balance,
+        freebetBalance: user.freebetBalance,
       }
     });
   } catch (err) {
@@ -78,6 +80,7 @@ router.post("/login", async (req, res): Promise<void> => {
         name: user.name,
         email: user.email,
         balance: user.balance,
+        freebetBalance: user.freebetBalance,
       }
     });
   } catch (err) {
@@ -157,6 +160,7 @@ router.get("/me", authMiddleware, async (req: AuthRequest, res: Response): Promi
         name: user.name,
         email: user.email,
         balance: user.balance,
+        freebetBalance: user.freebetBalance,
       }
     });
   } catch (err) {
