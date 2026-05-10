@@ -2767,12 +2767,124 @@ async function getTennisDailyResults(): Promise<TennisDailyResult[]> {
   }
 }
 
+// ─── Tournament detail cache ──────────────────────────────────────────────────
+type TournamentMatchPlayer = {
+  id: string; name: string;
+  totalscore: string;
+  s1: string; s2: string; s3: string; s4: string; s5: string;
+  winner: boolean; serve: boolean;
+};
+type TournamentMatch = {
+  id: string; status: string; date: string; time: string; court: string;
+  round: string; roundOrder: number;
+  players: TournamentMatchPlayer[];
+};
+type TournamentDetail = { id: string; league: string; season: string; matches: TournamentMatch[] };
+const tourDetailCache = new Map<string, { data: TournamentDetail; at: number }>();
+const TOUR_DETAIL_TTL = 5 * 60 * 1000; // 5 min
+
+const ROUND_ORDER: Record<string, number> = {
+  "1/64-finals": 1, "1/32-finals": 2, "1/16-finals": 3,
+  "1/8-finals": 4, "quarter-finals": 5, "semi-finals": 6, "final": 7,
+};
+
+async function getTournamentDetail(id: string): Promise<TournamentDetail> {
+  const cached = tourDetailCache.get(id);
+  if (cached && Date.now() - cached.at < TOUR_DETAIL_TTL) return cached.data;
+
+  const resp = await fetch(`${BASE_V1}/tennis/tournament/${id}?access_key=${STATSPAL_KEY}`, {
+    signal: AbortSignal.timeout(9000),
+  });
+  if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+  const data = (await resp.json()) as {
+    scores?: {
+      tournament?: {
+        id?: string; league?: string; season?: string;
+        week?: Array<{
+          number?: string; qualification?: string;
+          match?: Array<{
+            id?: string; status?: string; date?: string; time?: string; court?: string;
+            player?: Array<{ id?: string; name?: string; totalscore?: string;
+              s1?: string; s2?: string; s3?: string; s4?: string; s5?: string;
+              winner?: string; serve?: string; }>;
+          }> | {
+            id?: string; status?: string; date?: string; time?: string; court?: string;
+            player?: Array<{ id?: string; name?: string; totalscore?: string;
+              s1?: string; s2?: string; s3?: string; s4?: string; s5?: string;
+              winner?: string; serve?: string; }>;
+          };
+        }> | {
+          number?: string; qualification?: string;
+          match?: unknown;
+        };
+      };
+    };
+  };
+
+  const t = data?.scores?.tournament;
+  const leagueVal = t?.league ?? "";
+  const seasonVal = t?.season ?? "";
+  const rawWeeks = t?.week;
+  const weeks = !rawWeeks ? [] : Array.isArray(rawWeeks) ? rawWeeks : [rawWeeks];
+
+  const seen = new Set<string>();
+  const matches: TournamentMatch[] = [];
+
+  for (const week of weeks) {
+    if (week.qualification === "True") continue; // skip qualifying
+    const rawRound = week.number ?? "";
+    const roundName = rawRound.includes(" - ") ? rawRound.split(" - ").slice(1).join(" - ").toLowerCase() : rawRound.toLowerCase();
+    const roundOrder = ROUND_ORDER[roundName] ?? 99;
+    const rawMatches = week.match;
+    if (!rawMatches) continue;
+    const matchArr = Array.isArray(rawMatches) ? rawMatches : [rawMatches];
+    for (const m of matchArr) {
+      if (!m.id || seen.has(m.id)) continue;
+      seen.add(m.id);
+      const rawPlayers: Array<{ id?: string; name?: string; totalscore?: string; s1?: string; s2?: string; s3?: string; s4?: string; s5?: string; winner?: string; serve?: string; }> = (m.player as typeof rawPlayers | undefined) ?? [];
+      const players: TournamentMatchPlayer[] = rawPlayers.map(p => ({
+        id: p.id ?? "", name: p.name ?? "",
+        totalscore: p.totalscore ?? "",
+        s1: p.s1 ?? "", s2: p.s2 ?? "", s3: p.s3 ?? "", s4: p.s4 ?? "", s5: p.s5 ?? "",
+        winner: p.winner === "True",
+        serve: p.serve === "True",
+      }));
+      matches.push({
+        id: m.id, status: m.status ?? "", date: m.date ?? "", time: m.time ?? "", court: m.court ?? "",
+        round: roundName, roundOrder, players,
+      });
+    }
+  }
+
+  // Sort by round order, then date+time
+  matches.sort((a, b) => {
+    if (a.roundOrder !== b.roundOrder) return a.roundOrder - b.roundOrder;
+    const da = a.date.split(".").reverse().join("") + a.time;
+    const db = b.date.split(".").reverse().join("") + b.time;
+    return da.localeCompare(db);
+  });
+
+  const detail: TournamentDetail = { id, league: leagueVal, season: seasonVal, matches };
+  tourDetailCache.set(id, { data: detail, at: Date.now() });
+  return detail;
+}
+
 router.get("/tournaments", async (_req, res) => {
   try {
     const tournaments = await getActiveTournaments();
     res.json({ tournaments });
   } catch {
     res.status(500).json({ error: "Torneios indisponíveis" });
+  }
+});
+
+router.get("/tournaments/:id", async (req, res) => {
+  const id = String(req.params["id"]);
+  try {
+    const detail = await getTournamentDetail(id);
+    res.json(detail);
+  } catch {
+    res.status(500).json({ error: "Detalhe de torneio indisponível" });
   }
 });
 

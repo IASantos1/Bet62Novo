@@ -787,6 +787,18 @@ export default function Home() {
     prize_money: string; tour: "atp" | "wta";
   };
   const [activeTournaments, setActiveTournaments] = useState<ActiveTournament[]>([]);
+  type TournamentMatchPlayer = {
+    id: string; name: string; totalscore: string;
+    s1: string; s2: string; s3: string; s4: string; s5: string;
+    winner: boolean; serve: boolean;
+  };
+  type TournamentMatch = {
+    id: string; status: string; date: string; time: string; court: string;
+    round: string; roundOrder: number; players: TournamentMatchPlayer[];
+  };
+  const [expandedTournamentId, setExpandedTournamentId] = useState<string | null>(null);
+  const [tournamentDetail, setTournamentDetail] = useState<{ id: string; league: string; matches: TournamentMatch[] } | null>(null);
+  const [tournamentDetailLoading, setTournamentDetailLoading] = useState(false);
 
   // Sidebar tree state
   const [sidebarExpandedSport, setSidebarExpandedSport] = useState<string | null>(null);
@@ -3157,8 +3169,27 @@ export default function Home() {
                           {activeTournaments.map(t => {
                             const sc = surfaceColor(t.surface);
                             const prize = formatPrize(t.prize_money);
+                            const isExpanded = expandedTournamentId === t.id;
                             return (
-                              <div key={`${t.tour}-${t.id}`} className={`shrink-0 rounded-xl border border-zinc-800 overflow-hidden w-44 ${sc.bg}`}>
+                              <button
+                                key={`${t.tour}-${t.id}`}
+                                onClick={() => {
+                                  if (isExpanded) {
+                                    setExpandedTournamentId(null);
+                                    setTournamentDetail(null);
+                                  } else {
+                                    setExpandedTournamentId(t.id);
+                                    setTournamentDetail(null);
+                                    setTournamentDetailLoading(true);
+                                    fetch(`/api/matches/tournaments/${t.id}`)
+                                      .then(r => r.ok ? r.json() : null)
+                                      .then(d => { if (d) setTournamentDetail(d); })
+                                      .catch(() => {})
+                                      .finally(() => setTournamentDetailLoading(false));
+                                  }
+                                }}
+                                className={`shrink-0 rounded-xl border overflow-hidden w-44 text-left transition-all duration-150 ${isExpanded ? `border-${sc.bar.replace("bg-","")}/60 ring-1 ring-${sc.bar.replace("bg-","")}/30` : "border-zinc-800 hover:border-zinc-600"} ${sc.bg}`}
+                              >
                                 {/* Surface bar */}
                                 <div className={`h-0.5 w-full ${sc.bar}`} />
                                 <div className="p-2.5">
@@ -3186,11 +3217,150 @@ export default function Home() {
                                   {prize && (
                                     <div className="text-[9px] text-zinc-600 mt-0.5">{prize}</div>
                                   )}
+                                  {/* Expand indicator */}
+                                  <div className={`mt-1.5 text-[9px] font-semibold ${isExpanded ? sc.text : "text-zinc-600"}`}>
+                                    {isExpanded ? "▲ Fechar" : "▼ Ver quadro"}
+                                  </div>
                                 </div>
-                              </div>
+                              </button>
                             );
                           })}
                         </div>
+
+                        {/* ── Expanded tournament panel ── */}
+                        {expandedTournamentId && (() => {
+                          const expandedT = activeTournaments.find(t => t.id === expandedTournamentId);
+                          const sc = expandedT ? surfaceColor(expandedT.surface) : { bar: "bg-zinc-500", text: "text-zinc-400", bg: "bg-zinc-800/30" };
+                          const ROUND_PT: Record<string, string> = {
+                            "1/64-finals": "1ª Fase", "1/32-finals": "2ª Fase",
+                            "1/16-finals": "3ª Fase", "1/8-finals": "Quartos de Final",
+                            "quarter-finals": "Quartos de Final", "semi-finals": "Meias-Finais", "final": "Final",
+                          };
+                          const todayStr = (() => {
+                            const n = new Date();
+                            const dd = String(n.getDate()).padStart(2,"0");
+                            const mm = String(n.getMonth()+1).padStart(2,"0");
+                            const yy = n.getFullYear();
+                            return `${dd}.${mm}.${yy}`;
+                          })();
+                          const tomorrowStr = (() => {
+                            const n = new Date(); n.setDate(n.getDate()+1);
+                            const dd = String(n.getDate()).padStart(2,"0");
+                            const mm = String(n.getMonth()+1).padStart(2,"0");
+                            const yy = n.getFullYear();
+                            return `${dd}.${mm}.${yy}`;
+                          })();
+
+                          const upcoming = tournamentDetail?.matches.filter(m =>
+                            m.status === "Not Started" && (m.date === todayStr || m.date === tomorrowStr)
+                          ) ?? [];
+                          const finished = tournamentDetail?.matches.filter(m =>
+                            m.status === "Finished" || m.status === "Retired" || m.status === "Walk Over"
+                          ).slice().reverse() ?? [];
+
+                          const StatusBadge = ({ status }: { status: string }) => {
+                            if (status === "Retired") return <span className="text-[8px] font-black bg-red-900/40 text-red-400 border border-red-800/30 rounded px-1">RET</span>;
+                            if (status === "Walk Over") return <span className="text-[8px] font-black bg-zinc-800 text-zinc-500 border border-zinc-700 rounded px-1">W/O</span>;
+                            return null;
+                          };
+
+                          const ScoreSet = ({ p0, p1, set }: { p0: TournamentMatch["players"][0]; p1: TournamentMatch["players"][0]; set: "s1"|"s2"|"s3"|"s4"|"s5" }) => {
+                            if (!p0[set] && !p1[set]) return null;
+                            return (
+                              <span className="inline-flex flex-col items-center min-w-[12px]">
+                                <span className={`text-[10px] leading-none font-bold ${p0.winner ? "text-white" : "text-zinc-500"}`}>{p0[set]}</span>
+                                <span className={`text-[10px] leading-none font-bold ${p1.winner ? "text-white" : "text-zinc-500"}`}>{p1[set]}</span>
+                              </span>
+                            );
+                          };
+
+                          const MatchRow = ({ m }: { m: TournamentMatch }) => {
+                            const p0 = m.players[0];
+                            const p1 = m.players[1];
+                            if (!p0 || !p1) return null;
+                            const isNotStarted = m.status === "Not Started";
+                            return (
+                              <div className="flex items-center gap-2 py-1.5 border-b border-zinc-800/50 last:border-0">
+                                {/* Time / score column */}
+                                {isNotStarted ? (
+                                  <span className="text-[10px] font-bold text-emerald-400 w-10 shrink-0 tabular-nums">{m.time}</span>
+                                ) : (
+                                  <div className="flex gap-0.5 w-10 shrink-0">
+                                    {(["s1","s2","s3","s4","s5"] as const).map(s => <ScoreSet key={s} p0={p0} p1={p1} set={s} />)}
+                                  </div>
+                                )}
+                                {/* Players */}
+                                <div className="flex-1 min-w-0">
+                                  <div className={`text-[11px] leading-none font-semibold truncate ${p0.winner ? "text-white" : "text-zinc-400"}`}>
+                                    {p0.serve && <span className="text-yellow-400 mr-0.5">●</span>}
+                                    {p0.name}
+                                    {p0.winner && <span className="ml-1 text-emerald-400 text-[9px]">✓</span>}
+                                  </div>
+                                  <div className={`text-[11px] leading-none mt-0.5 font-semibold truncate ${p1.winner ? "text-white" : "text-zinc-400"}`}>
+                                    {p1.serve && <span className="text-yellow-400 mr-0.5">●</span>}
+                                    {p1.name}
+                                    {p1.winner && <span className="ml-1 text-emerald-400 text-[9px]">✓</span>}
+                                  </div>
+                                </div>
+                                {/* Status badge */}
+                                <StatusBadge status={m.status} />
+                              </div>
+                            );
+                          };
+
+                          // Group upcoming by round
+                          const upcomingByRound = upcoming.reduce<Record<string, TournamentMatch[]>>((acc, m) => {
+                            (acc[m.round] = acc[m.round] ?? []).push(m); return acc;
+                          }, {});
+                          const upcomingRounds = Object.keys(upcomingByRound).sort((a,b) => {
+                            const ord: Record<string,number> = {
+                              "1/64-finals":1,"1/32-finals":2,"1/16-finals":3,
+                              "1/8-finals":4,"quarter-finals":5,"semi-finals":6,"final":7,
+                            };
+                            return (ord[a]??99) - (ord[b]??99);
+                          });
+
+                          return (
+                            <div className="mt-3 rounded-xl border border-zinc-800 bg-zinc-900/80 overflow-hidden">
+                              <div className={`h-0.5 w-full ${sc.bar}`} />
+                              <div className="p-3">
+                                {tournamentDetailLoading && (
+                                  <div className="text-center text-zinc-600 text-xs py-4">A carregar quadro...</div>
+                                )}
+                                {!tournamentDetailLoading && tournamentDetail && (
+                                  <>
+                                    {/* Upcoming today/tomorrow */}
+                                    {upcoming.length > 0 && (
+                                      <div className="mb-4">
+                                        <div className="text-[10px] font-black uppercase tracking-widest text-zinc-500 mb-2">Programa — Hoje / Amanhã</div>
+                                        {upcomingRounds.map(round => (
+                                          <div key={round} className="mb-3">
+                                            <div className={`text-[9px] font-black uppercase tracking-wide mb-1.5 ${sc.text}`}>
+                                              {ROUND_PT[round] ?? round}
+                                            </div>
+                                            {upcomingByRound[round]!.map(m => <MatchRow key={m.id} m={m} />)}
+                                          </div>
+                                        ))}
+                                      </div>
+                                    )}
+
+                                    {/* Recent results */}
+                                    {finished.length > 0 && (
+                                      <div>
+                                        <div className="text-[10px] font-black uppercase tracking-widest text-zinc-500 mb-2">Resultados Recentes</div>
+                                        {finished.slice(0, 12).map(m => <MatchRow key={m.id} m={m} />)}
+                                      </div>
+                                    )}
+
+                                    {upcoming.length === 0 && finished.length === 0 && (
+                                      <div className="text-center text-zinc-600 text-xs py-3">Sem partidas disponíveis</div>
+                                    )}
+                                  </>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })()}
                       </div>
                     );
                   })()}
