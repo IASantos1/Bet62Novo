@@ -1,10 +1,10 @@
-import { useState, useCallback, useEffect, useRef, type ReactNode } from "react";
+import { useState, useCallback, useEffect, useRef, createContext, useContext, type ReactNode } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { toast } from "sonner";
 import {
   Menu, X, Trophy, Activity, Gift,
   LogOut, User, History, Loader2, Zap, TrendingUp,
-  ChevronRight, ChevronLeft, AlertCircle, BarChart2, Wallet, ArrowDownCircle, ArrowUpCircle, Plus,
+  ChevronRight, ChevronLeft, ChevronDown, AlertCircle, BarChart2, Wallet, ArrowDownCircle, ArrowUpCircle, Plus,
 } from "lucide-react";
 import ProfileTab from "@/components/ProfileTab";
 import { Button } from "@/components/ui/button";
@@ -1793,12 +1793,39 @@ export default function Home() {
     );
   };
 
-  const MarketGroup = ({ title, children }: { title: string; children: ReactNode }) => (
-    <div className="mb-4 last:mb-0">
-      <div className="text-[10px] font-black text-zinc-500 uppercase tracking-widest mb-2 px-0.5">{title}</div>
-      <div className="flex gap-2">{children}</div>
-    </div>
-  );
+  const MarketTabCtx = createContext<string>("");
+
+  const MarketGroup = ({ title, children }: { title: string; children: ReactNode }) => {
+    const tab = useContext(MarketTabCtx);
+    const collapsible = tab === "todos";
+    const [open, setOpen] = useState(true);
+
+    if (!collapsible) {
+      return (
+        <div className="mb-4 last:mb-0">
+          <div className="text-[10px] font-black text-zinc-500 uppercase tracking-widest mb-2 px-0.5">{title}</div>
+          <div className="flex gap-2">{children}</div>
+        </div>
+      );
+    }
+
+    return (
+      <div className="mb-1.5 last:mb-0 border border-zinc-800 rounded-lg overflow-hidden">
+        <button
+          className="w-full flex items-center justify-between px-3 py-2.5 text-left bg-zinc-800/60 hover:bg-zinc-800 active:bg-zinc-700 transition-colors"
+          onClick={() => setOpen(o => !o)}
+        >
+          <span className="text-[10px] font-black text-zinc-300 uppercase tracking-widest">{title}</span>
+          <ChevronDown size={14} className={`text-zinc-500 transition-transform duration-200 ${open ? "rotate-180" : ""}`} />
+        </button>
+        {open && (
+          <div className="px-3 py-3">
+            <div className="flex flex-wrap gap-2">{children}</div>
+          </div>
+        )}
+      </div>
+    );
+  };
 
   const MatchModalMarkets = ({ match }: { match: Match }) => {
     const sport = match.sport ?? "football";
@@ -1875,6 +1902,7 @@ export default function Home() {
     }
 
     return (
+      <MarketTabCtx.Provider value={modalTab}>
       <div className="mt-2">
         <div className="flex gap-1 overflow-x-auto no-scrollbar mb-4 pb-1 border-b border-zinc-800">
           {tabs.map(t => (
@@ -2443,6 +2471,7 @@ export default function Home() {
 
         {!m && <div className="text-center text-zinc-500 py-6 text-sm">Mercados adicionais indisponíveis para esta partida.</div>}
       </div>
+      </MarketTabCtx.Provider>
     );
   };
 
