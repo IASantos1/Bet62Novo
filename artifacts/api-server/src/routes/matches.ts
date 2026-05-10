@@ -673,28 +673,45 @@ export const liveMatchState = new Map<string, LiveMatchState>();
 async function getLiveLeagues(): Promise<StatpalLeagueV2[]> {
   const now = Date.now();
   if (liveCache && now - liveFetchedAt < CONFIG.LIVE_CACHE_TTL) return liveCache;
-  const resp = await fetch(`${BASE_V2}/soccer/matches/live?access_key=${STATSPAL_KEY}`, {
-    signal: AbortSignal.timeout(9000),
-  });
-  if (!resp.ok) throw new Error(`Statpal live HTTP ${resp.status}`);
-  const data = (await resp.json()) as { live_matches: { league: StatpalLeagueV2[] } };
-  liveCache = data?.live_matches?.league ?? [];
-  liveFetchedAt = now;
-  return liveCache;
+  try {
+    const resp = await fetch(`${BASE_V2}/soccer/matches/live?access_key=${STATSPAL_KEY}`, {
+      signal: AbortSignal.timeout(9000),
+    });
+    if (!resp.ok) {
+      console.warn(`[live] Statpal HTTP ${resp.status} — using cache or empty`);
+      return liveCache ?? [];
+    }
+    const data = (await resp.json()) as { live_matches?: { league?: StatpalLeagueV2 | StatpalLeagueV2[] } };
+    const raw = data?.live_matches?.league;
+    liveCache = raw == null ? [] : Array.isArray(raw) ? raw : [raw];
+    liveFetchedAt = now;
+    return liveCache;
+  } catch (err) {
+    console.warn(`[live] Statpal fetch error — using cache or empty:`, err);
+    return liveCache ?? [];
+  }
 }
 
 async function getDailyLeagues(): Promise<StatpalLeagueV2[]> {
   const now = Date.now();
   if (dailyCache && now - dailyFetchedAt < CONFIG.DAILY_CACHE_TTL) return dailyCache;
-  const resp = await fetch(`${BASE_V2}/soccer/matches/daily?offset=0&access_key=${STATSPAL_KEY}`, {
-    signal: AbortSignal.timeout(9000),
-  });
-  if (!resp.ok) throw new Error(`Statpal daily HTTP ${resp.status}`);
-  const raw = (await resp.json()) as Record<string, { league: StatpalLeagueV2[] }>;
-  const dayData = Object.values(raw)[0];
-  dailyCache = dayData?.league ?? [];
-  dailyFetchedAt = now;
-  return dailyCache;
+  try {
+    const resp = await fetch(`${BASE_V2}/soccer/matches/daily?offset=0&access_key=${STATSPAL_KEY}`, {
+      signal: AbortSignal.timeout(9000),
+    });
+    if (!resp.ok) {
+      console.warn(`[daily] Statpal HTTP ${resp.status} — using cache or empty`);
+      return dailyCache ?? [];
+    }
+    const raw = (await resp.json()) as Record<string, { league: StatpalLeagueV2[] }>;
+    const dayData = Object.values(raw)[0];
+    dailyCache = dayData?.league ?? [];
+    dailyFetchedAt = now;
+    return dailyCache;
+  } catch (err) {
+    console.warn(`[daily] Statpal fetch error — using cache or empty:`, err);
+    return dailyCache ?? [];
+  }
 }
 
 async function getTomorrowLeagues(): Promise<StatpalLeagueV2[]> {
@@ -1972,11 +1989,11 @@ router.get("/live", async (_req, res) => {
       getNHLLive(),
     ]);
     const nhlMatches = buildNHLLiveMatches(nhlTournaments);
-    const otherLive  = buildSimulatedLiveOtherSports();
-    const matches    = [...soccerMatches, ...nhlMatches, ...otherLive];
+    const matches    = [...soccerMatches, ...nhlMatches];
     res.json({ matches });
   } catch (err) {
-    res.status(500).json({ error: "Erro ao buscar partidas ao vivo" });
+    console.error("[live route] unexpected error:", err);
+    res.json({ matches: [] });
   }
 });
 
