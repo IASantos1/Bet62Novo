@@ -724,8 +724,6 @@ export default function Home() {
 
   // Deposit modal
   const [depositModalOpen, setDepositModalOpen] = useState(false);
-  const [depositAmount, setDepositAmount] = useState("");
-  const [depositLoading, setDepositLoading] = useState(false);
   const [promoNotif, setPromoNotif] = useState<null | { type: "freebets20" | "bonus100" | "cashback"; amount?: number }>(null);
 
   // Cashback state
@@ -971,38 +969,6 @@ export default function Home() {
     } catch { /* non-critical */ }
   }, [auth.user]);
 
-  const handleDeposit = async () => {
-    const amount = parseFloat(depositAmount.replace(",", "."));
-    if (isNaN(amount) || amount < 10 || amount > 5000) {
-      toast.error("Valor inválido. Mínimo €10, máximo €5000.");
-      return;
-    }
-    setDepositLoading(true);
-    try {
-      const token = localStorage.getItem("bet62_token");
-      const r = await fetch("/api/auth/deposit", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ amount }),
-      });
-      const data = await r.json() as { balance?: string; promotions?: string[]; error?: string };
-      if (!r.ok) { toast.error(data.error ?? "Erro ao processar depósito"); return; }
-      auth.refreshUser();
-      setDepositModalOpen(false);
-      setDepositAmount("");
-      toast.success(`Depósito de € ${amount.toFixed(2)} realizado com sucesso!`);
-      // Show promotion notification
-      if (data.promotions?.includes("freebets20")) {
-        setPromoNotif({ type: "freebets20" });
-      } else if (data.promotions?.includes("bonus100")) {
-        setPromoNotif({ type: "bonus100" });
-      }
-    } catch {
-      toast.error("Erro de ligação. Tente novamente.");
-    } finally {
-      setDepositLoading(false);
-    }
-  };
 
   const toggleBet = (match: Match, selection: string, odd: number, market = "result", label?: string) => {
     setBets(prev => {
@@ -3116,11 +3082,9 @@ export default function Home() {
       <DepositWithdrawModal
         open={depositModalOpen}
         onClose={() => setDepositModalOpen(false)}
-        onDeposit={handleDeposit}
-        depositAmount={depositAmount}
-        setDepositAmount={setDepositAmount}
-        depositLoading={depositLoading}
+        onSuccess={() => { auth.refreshUser(); }}
         balance={auth.user ? parseFloat(auth.user.balance) : 0}
+        token={auth.token}
       />
 
       {/* ── PROMOTION NOTIFICATION ─────────────────────────────── */}
@@ -3371,30 +3335,32 @@ function PromosPage({
   );
 }
 
-// ─── DEPOSIT / WITHDRAW MODAL ────────────────────────────────────────────────
+// ─── DEPOSIT MODAL ────────────────────────────────────────────────────────────
 type PayMethod = "multibanco" | "mbway" | "card";
 
+type MbRef = { entity: string; reference: string; amount: string; expiresAt: string; orderId: string };
+
 function DepositWithdrawModal({
-  open, onClose, onDeposit, depositAmount, setDepositAmount, depositLoading, balance,
+  open, onClose, onSuccess, balance, token,
 }: {
   open: boolean;
   onClose: () => void;
-  onDeposit: () => void;
-  depositAmount: string;
-  setDepositAmount: (v: string) => void;
-  depositLoading: boolean;
+  onSuccess: () => void;
   balance: number;
+  token: string | null;
 }) {
   const [payMethod, setPayMethod] = useState<PayMethod>("multibanco");
+  const [depositAmount, setDepositAmount] = useState("");
   const [mbwayPhone, setMbwayPhone] = useState("");
-  const [cardNum, setCardNum] = useState("");
-  const [cardExpiry, setCardExpiry] = useState("");
-  const [cardCvc, setCardCvc] = useState("");
-  const [cardName, setCardName] = useState("");
-  const [mbwayStep, setMbwayStep] = useState<"form" | "confirm">("form");
+  const [loading, setLoading] = useState(false);
+
+  // Per-method result states
+  const [mbRef, setMbRef] = useState<MbRef | null>(null);
+  const [mbwayDone, setMbwayDone] = useState(false);
 
   const amount = parseFloat(depositAmount.replace(",", "."));
-  const promoHint = !isNaN(amount) && amount >= 20;
+  const amountValid = !isNaN(amount) && amount >= 5 && amount <= 5000;
+  const promoHint = amountValid && amount >= 20;
 
   const METHODS: { id: PayMethod; label: string; icon: string }[] = [
     { id: "multibanco", label: "Multibanco", icon: "🏧" },
@@ -3402,10 +3368,68 @@ function DepositWithdrawModal({
     { id: "card", label: "Cartão", icon: "💳" },
   ];
 
-  // Generate deterministic Multibanco reference from amount (demo)
-  const mbRef = !isNaN(amount) && amount >= 5
-    ? { entity: "21904", ref: `${Math.floor(amount * 100 + 11847).toString().padStart(9, "0")}`, amount: amount.toFixed(2) }
-    : null;
+  function resetMethod(m: PayMethod) {
+    setPayMethod(m);
+    setMbRef(null);
+    setMbwayDone(false);
+  }
+
+  async function handleMultibanco() {
+    if (!amountValid) { toast.error("Valor inválido. Mínimo €5."); return; }
+    setLoading(true);
+    try {
+      const r = await fetch("/api/payments/multibanco", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ amount }),
+      });
+      const data = await r.json() as { entity?: string; reference?: string; amount?: string; expiresAt?: string; orderId?: string; error?: string };
+      if (!r.ok) { toast.error(data.error ?? "Erro ao gerar referência."); return; }
+      setMbRef({ entity: data.entity!, reference: data.reference!, amount: data.amount!, expiresAt: data.expiresAt!, orderId: data.orderId! });
+      toast.success("Referência Multibanco gerada! Pague em qualquer ATM.");
+      onSuccess();
+    } catch { toast.error("Erro de ligação. Tente novamente."); }
+    finally { setLoading(false); }
+  }
+
+  async function handleMbway() {
+    if (!amountValid) { toast.error("Valor inválido. Mínimo €5."); return; }
+    const phoneClean = mbwayPhone.replace(/\s/g, "");
+    if (phoneClean.length !== 9) { toast.error("Número de telemóvel inválido."); return; }
+    setLoading(true);
+    try {
+      const r = await fetch("/api/payments/mbway", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ amount, phone: phoneClean }),
+      });
+      const data = await r.json() as { orderId?: string; requestId?: string; error?: string };
+      if (!r.ok) { toast.error(data.error ?? "Erro ao enviar pedido MB WAY."); return; }
+      setMbwayDone(true);
+      toast.success("Pedido MB WAY enviado! Aceite na App MB WAY.");
+      onSuccess();
+    } catch { toast.error("Erro de ligação. Tente novamente."); }
+    finally { setLoading(false); }
+  }
+
+  async function handleCard() {
+    if (!amountValid) { toast.error("Valor inválido. Mínimo €5."); return; }
+    setLoading(true);
+    try {
+      const r = await fetch("/api/payments/card", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ amount }),
+      });
+      const data = await r.json() as { paymentUrl?: string; error?: string };
+      if (!r.ok || !data.paymentUrl) { toast.error(data.error ?? "Erro ao iniciar pagamento por cartão."); return; }
+      toast.info("A redirecionar para pagamento seguro...");
+      window.open(data.paymentUrl, "_blank");
+      onSuccess();
+      onClose();
+    } catch { toast.error("Erro de ligação. Tente novamente."); }
+    finally { setLoading(false); }
+  }
 
   return (
     <Dialog open={open} onOpenChange={v => { if (!v) onClose(); }}>
@@ -3416,7 +3440,7 @@ function DepositWithdrawModal({
             <Plus size={18} strokeWidth={3} />
           </div>
           <div>
-            <div className="font-black text-base">Depósito & Levantamento</div>
+            <div className="font-black text-base">Depósito</div>
             <div className="text-xs text-zinc-400">Processado por <span className="text-white font-semibold">ifthenpay</span></div>
           </div>
           <div className="ml-auto text-right">
@@ -3430,7 +3454,7 @@ function DepositWithdrawModal({
           {METHODS.map(m => (
             <button
               key={m.id}
-              onClick={() => setPayMethod(m.id)}
+              onClick={() => resetMethod(m.id)}
               className={`flex flex-col items-center gap-1 py-3 text-xs font-bold transition-colors border-b-2 ${payMethod === m.id ? "border-emerald-500 text-white bg-zinc-900" : "border-transparent text-zinc-500 hover:text-zinc-300"}`}
             >
               <span className="text-lg">{m.icon}</span>
@@ -3447,7 +3471,7 @@ function DepositWithdrawModal({
               {[5, 10, 20, 50, 100].map(v => (
                 <button
                   key={v}
-                  onClick={() => setDepositAmount(String(v))}
+                  onClick={() => { setDepositAmount(String(v)); setMbRef(null); setMbwayDone(false); }}
                   className={`py-2 rounded-lg border font-bold text-xs transition-colors ${depositAmount === String(v) ? "border-emerald-500 bg-emerald-500/10 text-emerald-400" : "border-zinc-700 hover:border-zinc-500 text-zinc-300"}`}
                 >
                   €{v}
@@ -3460,7 +3484,7 @@ function DepositWithdrawModal({
                 type="number" min={5} max={5000} placeholder="0,00"
                 className="pl-8 bg-zinc-900 border-zinc-700 text-white font-bold text-lg h-11"
                 value={depositAmount}
-                onChange={e => setDepositAmount(e.target.value)}
+                onChange={e => { setDepositAmount(e.target.value); setMbRef(null); setMbwayDone(false); }}
               />
             </div>
           </div>
@@ -3473,20 +3497,36 @@ function DepositWithdrawModal({
             </div>
           )}
 
-          {/* MULTIBANCO */}
+          {/* ── MULTIBANCO ── */}
           {payMethod === "multibanco" && (
             <div className="space-y-3">
-              {mbRef ? (
-                <div className="bg-zinc-900 border border-zinc-700 rounded-2xl p-4 space-y-3">
-                  <div className="text-xs text-zinc-400 font-semibold uppercase tracking-widest">Referência Multibanco</div>
+              {!mbRef ? (
+                <>
+                  <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-3 text-xs text-zinc-400 leading-relaxed">
+                    Gera uma referência Multibanco e paga em qualquer <strong className="text-zinc-200">ATM, HomeBanking ou App de banco</strong>. O saldo é creditado automaticamente após confirmação de pagamento.
+                  </div>
+                  <Button
+                    onClick={handleMultibanco}
+                    disabled={loading || !amountValid}
+                    className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-black h-11"
+                  >
+                    {loading ? <Loader2 className="animate-spin mr-2" size={16} /> : "🏧"} Gerar Referência Multibanco
+                  </Button>
+                </>
+              ) : (
+                <div className="bg-zinc-900 border border-emerald-600/30 rounded-2xl p-4 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div className="text-xs text-zinc-400 font-semibold uppercase tracking-widest">Referência Multibanco</div>
+                    <span className="text-[10px] bg-emerald-900/40 text-emerald-400 border border-emerald-600/30 px-2 py-0.5 rounded-full font-bold">Aguardando pagamento</span>
+                  </div>
                   <div className="grid grid-cols-3 gap-2 text-center">
                     <div className="bg-zinc-800 rounded-xl py-3">
                       <div className="text-[10px] text-zinc-500 mb-1">Entidade</div>
                       <div className="font-black text-white text-lg tracking-widest">{mbRef.entity}</div>
                     </div>
-                    <div className="bg-zinc-800 rounded-xl py-3 col-span-1">
+                    <div className="bg-zinc-800 rounded-xl py-3">
                       <div className="text-[10px] text-zinc-500 mb-1">Referência</div>
-                      <div className="font-black text-white text-sm tracking-widest">{mbRef.ref}</div>
+                      <div className="font-black text-white text-sm tracking-widest">{mbRef.reference}</div>
                     </div>
                     <div className="bg-zinc-800 rounded-xl py-3">
                       <div className="text-[10px] text-zinc-500 mb-1">Valor</div>
@@ -3494,23 +3534,21 @@ function DepositWithdrawModal({
                     </div>
                   </div>
                   <div className="text-xs text-zinc-500 text-center leading-relaxed">
-                    Pague em qualquer ATM, HomeBanking ou App de banco.<br />
-                    Referência válida por <span className="text-zinc-300 font-semibold">24 horas</span>.
+                    Referência válida por <span className="text-zinc-300 font-semibold">24 horas</span>.<br />
+                    O saldo é creditado automaticamente após pagamento.
                   </div>
-                  <Button onClick={onDeposit} disabled={depositLoading} className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-black h-11">
-                    {depositLoading ? <Loader2 className="animate-spin mr-2" size={16} /> : "🏧"} Confirmar Pagamento Multibanco
+                  <Button variant="outline" className="w-full border-zinc-700 text-zinc-400 h-9 text-xs" onClick={() => setMbRef(null)}>
+                    Gerar nova referência
                   </Button>
                 </div>
-              ) : (
-                <div className="text-center text-zinc-500 py-4 text-sm">Introduza um valor para gerar a referência.</div>
               )}
             </div>
           )}
 
-          {/* MB WAY */}
+          {/* ── MB WAY ── */}
           {payMethod === "mbway" && (
             <div className="space-y-3">
-              {mbwayStep === "form" ? (
+              {!mbwayDone ? (
                 <>
                   <div className="space-y-1.5">
                     <Label className="text-xs text-zinc-400 font-semibold uppercase tracking-widest">Número MB WAY</Label>
@@ -3526,11 +3564,11 @@ function DepositWithdrawModal({
                     </div>
                   </div>
                   <Button
-                    onClick={() => { if (mbwayPhone.replace(/\s/g,"").length === 9) setMbwayStep("confirm"); }}
-                    disabled={mbwayPhone.replace(/\s/g,"").length !== 9 || isNaN(amount) || amount < 5}
+                    onClick={handleMbway}
+                    disabled={loading || mbwayPhone.replace(/\s/g,"").length !== 9 || !amountValid}
                     className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-black h-11"
                   >
-                    📱 Enviar Pedido MB WAY — €{isNaN(amount) ? "0.00" : amount.toFixed(2)}
+                    {loading ? <Loader2 className="animate-spin mr-2" size={16} /> : "📱"} Enviar Pedido MB WAY — €{amountValid ? amount.toFixed(2) : "0.00"}
                   </Button>
                 </>
               ) : (
@@ -3542,72 +3580,27 @@ function DepositWithdrawModal({
                     <span className="text-white font-bold">+351 {mbwayPhone}</span>
                   </div>
                   <div className="text-xs text-zinc-500">Tem 4 minutos para aceitar. Valor: <span className="text-emerald-400 font-bold">€{amount.toFixed(2)}</span></div>
-                  <div className="flex gap-2">
-                    <Button variant="outline" className="flex-1 border-zinc-700 text-zinc-300 h-10" onClick={() => setMbwayStep("form")}>Cancelar</Button>
-                    <Button className="flex-1 bg-emerald-600 hover:bg-emerald-500 font-black h-10" onClick={onDeposit} disabled={depositLoading}>
-                      {depositLoading ? <Loader2 className="animate-spin" size={16} /> : "✓ Confirmar"}
-                    </Button>
-                  </div>
+                  <div className="text-xs text-zinc-600 mt-2">O saldo é creditado automaticamente após confirmação.</div>
+                  <Button variant="outline" className="w-full border-zinc-700 text-zinc-400 h-9 text-xs" onClick={() => setMbwayDone(false)}>
+                    Enviar novo pedido
+                  </Button>
                 </div>
               )}
             </div>
           )}
 
-          {/* CARTÃO */}
+          {/* ── CARTÃO ── */}
           {payMethod === "card" && (
             <div className="space-y-3">
-              <div className="bg-gradient-to-br from-zinc-800 to-zinc-700 rounded-2xl p-4 space-y-3">
-                <div className="flex justify-between items-center mb-1">
-                  <span className="text-xs text-zinc-400 font-semibold uppercase tracking-widest">Cartão de Pagamento</span>
-                  <div className="flex gap-1.5 items-center">
-                    <span className="text-base">💳</span>
-                    <span className="text-[10px] font-black text-zinc-400">VISA / MC</span>
-                  </div>
-                </div>
-                <div className="space-y-1.5">
-                  <Input
-                    placeholder="Número do cartão"
-                    className="bg-zinc-900 border-zinc-600 text-white font-mono tracking-widest h-11"
-                    value={cardNum}
-                    onChange={e => setCardNum(cardMask(e.target.value))}
-                    maxLength={19}
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <Input
-                    placeholder="Nome no cartão"
-                    className="bg-zinc-900 border-zinc-600 text-white uppercase h-11"
-                    value={cardName}
-                    onChange={e => setCardName(e.target.value.toUpperCase())}
-                  />
-                </div>
-                <div className="grid grid-cols-2 gap-2">
-                  <Input
-                    placeholder="MM/AA"
-                    className="bg-zinc-900 border-zinc-600 text-white font-mono h-11"
-                    value={cardExpiry}
-                    onChange={e => {
-                      const v = e.target.value.replace(/\D/g,"").slice(0,4);
-                      setCardExpiry(v.length > 2 ? `${v.slice(0,2)}/${v.slice(2)}` : v);
-                    }}
-                    maxLength={5}
-                  />
-                  <Input
-                    placeholder="CVC"
-                    className="bg-zinc-900 border-zinc-600 text-white font-mono h-11"
-                    value={cardCvc}
-                    onChange={e => setCardCvc(e.target.value.replace(/\D/g,"").slice(0,4))}
-                    maxLength={4}
-                    type="password"
-                  />
-                </div>
+              <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-3 text-xs text-zinc-400 leading-relaxed">
+                Serás redireccionado para a página de pagamento seguro da <strong className="text-zinc-200">ifthenpay</strong> (3D Secure). O saldo é creditado após confirmação.
               </div>
               <Button
-                onClick={onDeposit}
-                disabled={depositLoading || cardNum.replace(/\s/g,"").length < 13 || !cardName || cardExpiry.length < 5 || cardCvc.length < 3 || isNaN(amount) || amount < 5}
+                onClick={handleCard}
+                disabled={loading || !amountValid}
                 className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-black h-11"
               >
-                {depositLoading ? <Loader2 className="animate-spin mr-2" size={16} /> : "💳"} Pagar €{isNaN(amount) ? "0.00" : amount.toFixed(2)}
+                {loading ? <Loader2 className="animate-spin mr-2" size={16} /> : "💳"} Pagar €{amountValid ? amount.toFixed(2) : "0.00"} com Cartão
               </Button>
               <div className="flex items-center justify-center gap-2 text-[10px] text-zinc-600">
                 <span>🔒</span> Pagamento seguro 3D Secure · ifthenpay

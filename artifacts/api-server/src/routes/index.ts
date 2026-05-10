@@ -5,6 +5,7 @@ import betsRouter from "./bets";
 import matchesRouter from "./matches";
 import adminRouter from "./admin";
 import statsRouter from "./stats";
+import paymentsRouter from "./payments";
 
 const router: IRouter = Router();
 
@@ -14,5 +15,6 @@ router.use("/bets", betsRouter);
 router.use("/matches", matchesRouter);
 router.use("/admin", adminRouter);
 router.use("/stats", statsRouter);
+router.use("/payments", paymentsRouter);
 
 export default router;

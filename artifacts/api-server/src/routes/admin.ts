@@ -10,23 +10,28 @@ const router: IRouter = Router();
 const SESSION_SECRET = process.env.SESSION_SECRET || "default_secret";
 const ADMIN_USERNAME = process.env.ADMIN_USERNAME || "admin";
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "bet62admin2026";
+const ADMIN_EMAIL = process.env.ADMIN_EMAIL || "admin@bet62.com";
 
-// POST /api/admin/login
+// POST /api/admin/login  (aceita username OU email)
 router.post("/login", (req: Request, res: Response): void => {
-  const { username, password } = req.body;
+  const { username, email, password } = req.body as { username?: string; email?: string; password?: string };
+  const loginId = username || email;
 
-  if (!username || !password) {
-    res.status(400).json({ error: "Usuário e senha são obrigatórios" });
+  if (!loginId || !password) {
+    res.status(400).json({ error: "Utilizador/email e senha são obrigatórios" });
     return;
   }
 
-  if (username !== ADMIN_USERNAME || password !== ADMIN_PASSWORD) {
+  const usernameMatch = loginId === ADMIN_USERNAME;
+  const emailMatch = loginId === ADMIN_EMAIL;
+
+  if ((!usernameMatch && !emailMatch) || password !== ADMIN_PASSWORD) {
     res.status(401).json({ error: "Credenciais inválidas" });
     return;
   }
 
-  const token = jwt.sign({ username, isAdmin: true }, SESSION_SECRET, { expiresIn: "8h" });
-  res.json({ token, username });
+  const token = jwt.sign({ username: ADMIN_USERNAME, email: ADMIN_EMAIL, isAdmin: true }, SESSION_SECRET, { expiresIn: "8h" });
+  res.json({ token, username: ADMIN_USERNAME, email: ADMIN_EMAIL });
 });
 
 // GET /api/admin/stats
