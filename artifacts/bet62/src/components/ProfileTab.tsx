@@ -6,7 +6,7 @@ import {
   MessageSquare, Eye, Globe, Lock, AlertTriangle, CheckCircle,
   Clock, HelpCircle, Settings, Download, Trash2, ChevronRight,
   ChevronDown, Activity, Loader2, Smartphone, LogOut,
-  FileText, ToggleLeft, ToggleRight, Zap, BarChart2,
+  FileText, ToggleLeft, ToggleRight, Zap, BarChart2, ArrowUpCircle,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -34,9 +34,9 @@ const SECTIONS = [
   { id: "verificacao",  icon: ShieldCheck,    label: "Verificação de Identidade" },
   { id: "seguranca",    icon: Key,            label: "Definições de Segurança" },
   { id: "preferencias", icon: Settings,       label: "Preferências de Conta" },
-  { id: "limites",      icon: AlertTriangle,  label: "Limites de Utilização" },
+  { id: "limites",      icon: AlertTriangle,  label: "Limites e Autoexclusão" },
   { id: "atividade",    icon: Activity,       label: "Histórico de Atividade" },
-  { id: "pagamento",    icon: CreditCard,     label: "Métodos de Pagamento" },
+  { id: "pagamento",    icon: CreditCard,     label: "Dados Bancários" },
   { id: "notificacoes", icon: Bell,           label: "Notificações" },
   { id: "sessoes",      icon: Smartphone,     label: "Sessões Ativas" },
   { id: "suporte",      icon: HelpCircle,     label: "Suporte e Assistência" },
@@ -67,8 +67,8 @@ function SectionCard({ title, description, children }: { title: string; descript
 
 function VerifyBadge({ label, status }: { label: string; status: "verified" | "pending" | "unverified" }) {
   const cfg = {
-    verified:   { icon: <CheckCircle size={14} />, text: "Verificado",    cls: "bg-green-900/40 text-green-400 border-green-800" },
-    pending:    { icon: <Clock size={14} />,        text: "Pendente",     cls: "bg-yellow-900/40 text-yellow-400 border-yellow-800" },
+    verified:   { icon: <CheckCircle size={14} />, text: "Verificado",     cls: "bg-green-900/40 text-green-400 border-green-800" },
+    pending:    { icon: <Clock size={14} />,        text: "Pendente",      cls: "bg-yellow-900/40 text-yellow-400 border-yellow-800" },
     unverified: { icon: <AlertTriangle size={14} />,text: "Não verificado",cls: "bg-zinc-800 text-zinc-400 border-zinc-700" },
   }[status];
   return (
@@ -102,6 +102,7 @@ export default function ProfileTab({ myBets, myBetsLoading, fetchMyBets }: Profi
   const [limitDep, setLimitDep] = useState("");
   const [limitBet, setLimitBet] = useState("");
   const [limitLoss, setLimitLoss] = useState("");
+  const [excludingFor, setExcludingFor] = useState<string | null>(null);
 
   const [notifEmailResults, setNotifEmailResults] = useState(true);
   const [notifEmailPromos, setNotifEmailPromos] = useState(false);
@@ -111,6 +112,11 @@ export default function ProfileTab({ myBets, myBetsLoading, fetchMyBets }: Profi
   const [cookieAnalytics, setCookieAnalytics] = useState(true);
   const [cookieMarketing, setCookieMarketing] = useState(false);
   const [dataShare, setDataShare] = useState(false);
+
+  const [iban, setIban] = useState(auth.user?.withdrawalIban ?? "");
+  const [ibanName, setIbanName] = useState(auth.user?.withdrawalName ?? "");
+  const [nif, setNif] = useState(auth.user?.nif ?? "");
+  const [savingBanking, setSavingBanking] = useState(false);
 
   const wonBets = myBets.filter(b => b.status === "won");
   const totalWagered = myBets.reduce((s, b) => s + parseFloat(b.stake), 0);
@@ -125,7 +131,7 @@ export default function ProfileTab({ myBets, myBetsLoading, fetchMyBets }: Profi
     toast.success("Perfil atualizado com sucesso.");
   };
 
-  const handleChangePassword = async () => {
+  const handleChangePassword = () => {
     if (!currentPw || !newPw || !confirmPw) { toast.error("Preencha todos os campos."); return; }
     if (newPw !== confirmPw) { toast.error("As passwords não coincidem."); return; }
     if (newPw.length < 8) { toast.error("A password deve ter no mínimo 8 caracteres."); return; }
@@ -133,8 +139,54 @@ export default function ProfileTab({ myBets, myBetsLoading, fetchMyBets }: Profi
     setCurrentPw(""); setNewPw(""); setConfirmPw("");
   };
 
+  const handleSaveBanking = async () => {
+    const cleanIban = iban.replace(/\s/g, "").toUpperCase();
+    if (iban && !/^[A-Z]{2}\d{2}[A-Z0-9]{1,30}$/.test(cleanIban)) { toast.error("IBAN inválido."); return; }
+    if (nif && !/^\d{9}$/.test(nif)) { toast.error("NIF deve ter 9 dígitos."); return; }
+    setSavingBanking(true);
+    try {
+      const r = await fetch("/api/profile", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${auth.token}` },
+        body: JSON.stringify({ nif: nif || undefined, withdrawalIban: cleanIban || undefined, withdrawalName: ibanName || undefined }),
+      });
+      if (r.ok) {
+        await auth.refreshUser();
+        toast.success("Dados bancários guardados com sucesso.");
+      } else {
+        const d = await r.json() as { error?: string };
+        toast.error(d.error ?? "Erro ao guardar.");
+      }
+    } catch { toast.error("Erro de ligação."); }
+    finally { setSavingBanking(false); }
+  };
+
+  const handleSelfExclude = async (period: string, label: string) => {
+    if (!confirm(`Tem a certeza que quer ativar a autoexclusão por ${label}? Esta ação não pode ser revertida imediatamente.`)) return;
+    setExcludingFor(period);
+    try {
+      const r = await fetch("/api/profile/self-exclude", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${auth.token}` },
+        body: JSON.stringify({ period }),
+      });
+      if (r.ok) {
+        await auth.refreshUser();
+        toast.success(`Autoexclusão ativada por ${label}.`);
+      } else {
+        const d = await r.json() as { error?: string };
+        toast.error(d.error ?? "Erro ao ativar autoexclusão.");
+      }
+    } catch { toast.error("Erro de ligação."); }
+    finally { setExcludingFor(null); }
+  };
+
   const user = auth.user;
   if (!user) return null;
+
+  const kycStatus = user.kycStatus ?? "not_submitted";
+  const selfExcludedUntil = user.selfExcludedUntil ? new Date(user.selfExcludedUntil) : null;
+  const isExcluded = selfExcludedUntil ? selfExcludedUntil > new Date() : false;
 
   const memberId = `BET62-${String(user.id).padStart(6, "0")}`;
   const joinedDate = new Date().toLocaleDateString("pt-PT", { day: "2-digit", month: "long", year: "numeric" });
@@ -177,27 +229,59 @@ export default function ProfileTab({ myBets, myBetsLoading, fetchMyBets }: Profi
       case "verificacao":
         return (
           <SectionCard
-            title="Verificação de Identidade"
-            description="Secção dedicada à validação da identidade do utilizador, assegurando a integridade da conta e o cumprimento das normas regulamentares."
+            title="Verificação de Identidade (KYC)"
+            description="Complete a verificação para desbloquear levantamentos e limites mais elevados. O processo demora até 48 horas úteis."
           >
             <div className="space-y-2">
               <VerifyBadge label="Email" status="verified" />
-              <VerifyBadge label="NIF / Número de Identificação Fiscal" status="pending" />
-              <VerifyBadge label="Telemóvel" status="unverified" />
-              <VerifyBadge label="Comprovativo de Morada" status="unverified" />
-              <VerifyBadge label="Documento de Identificação (CC / Passaporte)" status="unverified" />
+              <VerifyBadge label="NIF / Número de Identificação Fiscal" status={user.nif ? "verified" : "unverified"} />
+              <VerifyBadge
+                label="Documento de Identificação (CC / Passaporte)"
+                status={kycStatus === "verified" ? "verified" : kycStatus === "pending" ? "pending" : "unverified"}
+              />
+              <VerifyBadge label="Comprovativo de Morada" status={kycStatus === "verified" ? "verified" : "unverified"} />
             </div>
-            <div className="mt-4 p-4 bg-yellow-900/20 border border-yellow-800/50 rounded-xl">
-              <div className="flex items-start gap-3">
-                <AlertTriangle className="text-yellow-400 shrink-0 mt-0.5" size={16} />
-                <div className="text-sm text-yellow-200/80">
-                  Para ativar levantamentos e aumentar o seu limite de depósito, complete a verificação de identidade. O processo demora até 48 horas úteis.
+
+            {kycStatus === "not_submitted" && (
+              <div className="mt-4 p-4 bg-yellow-900/20 border border-yellow-800/50 rounded-xl">
+                <div className="flex items-start gap-3">
+                  <AlertTriangle className="text-yellow-400 shrink-0 mt-0.5" size={16} />
+                  <div className="text-sm text-yellow-200/80">
+                    Para ativar levantamentos, submeta os seus documentos de identificação.
+                  </div>
                 </div>
               </div>
+            )}
+
+            {kycStatus === "pending" && (
+              <div className="mt-4 p-4 bg-blue-900/20 border border-blue-800/50 rounded-xl">
+                <div className="flex items-start gap-3">
+                  <Clock className="text-blue-400 shrink-0 mt-0.5" size={16} />
+                  <div className="text-sm text-blue-200/80">
+                    Os seus documentos estão em análise. Será notificado por email em até 48 horas úteis.
+                  </div>
+                </div>
+              </div>
+            )}
+
+            <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-4 space-y-3">
+              <h4 className="font-semibold text-sm text-white flex items-center gap-2">
+                <FileText size={14} className="text-red-500" /> Como submeter documentos
+              </h4>
+              <ol className="text-xs text-zinc-400 space-y-2 list-decimal list-inside leading-relaxed">
+                <li>Envie um email para <span className="text-white font-semibold">kyc@bet62.pt</span></li>
+                <li>Inclua o seu ID de membro: <span className="text-red-400 font-mono font-bold">{memberId}</span></li>
+                <li>Anexe: Cartão de Cidadão ou Passaporte (frente e verso)</li>
+                <li>Anexe: Comprovativo de morada recente (fatura, extrato)</li>
+              </ol>
+              <Button
+                onClick={() => { navigator.clipboard.writeText("kyc@bet62.pt"); toast.success("Email copiado!"); }}
+                size="sm"
+                className="bg-red-600 hover:bg-red-700 text-white text-xs"
+              >
+                <Mail size={12} className="mr-1" /> Copiar email KYC
+              </Button>
             </div>
-            <Button onClick={() => toast.info("Upload de documentos disponível em breve.")} className="bg-zinc-700 hover:bg-zinc-600 text-white">
-              <FileText size={14} className="mr-2" /> Submeter Documentos
-            </Button>
           </SectionCard>
         );
 
@@ -226,7 +310,6 @@ export default function ProfileTab({ myBets, myBetsLoading, fetchMyBets }: Profi
                   <Button onClick={handleChangePassword} className="bg-red-600 hover:bg-red-700 text-white w-full">Atualizar Password</Button>
                 </div>
               </div>
-
               <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-5 space-y-4">
                 <h4 className="font-semibold text-sm text-white flex items-center gap-2"><Shield size={14} className="text-red-500" /> Autenticação de Dois Fatores</h4>
                 <div className="flex items-center justify-between">
@@ -293,10 +376,10 @@ export default function ProfileTab({ myBets, myBetsLoading, fetchMyBets }: Profi
       case "limites":
         return (
           <SectionCard
-            title="Limites de Utilização"
-            description="Área destinada à definição e gestão de limites pessoais relacionados com a utilização da conta, promovendo uma experiência controlada e responsável."
+            title="Limites e Autoexclusão"
+            description="Defina limites pessoais e opções de autoexclusão para uma experiência de jogo responsável."
           >
-            <div className="space-y-4">
+            <div className="space-y-5">
               <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-5 space-y-4">
                 <h4 className="font-semibold text-sm text-white flex items-center gap-2"><Lock size={14} className="text-red-500" /> Limites Financeiros</h4>
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
@@ -315,12 +398,57 @@ export default function ProfileTab({ myBets, myBetsLoading, fetchMyBets }: Profi
                 </div>
                 <Button onClick={() => toast.success("Limites guardados.")} className="bg-red-600 hover:bg-red-700 text-white">Guardar Limites</Button>
               </div>
-              <div className="bg-red-950/40 border border-red-800/50 rounded-xl p-5">
-                <h4 className="font-semibold text-sm text-red-400 mb-2 flex items-center gap-2"><AlertTriangle size={14} /> Auto-exclusão</h4>
-                <p className="text-xs text-zinc-400 mb-4">Ao ativar a auto-exclusão, a sua conta será temporariamente suspensa. Esta ação não é reversível imediatamente.</p>
-                <Button variant="outline" onClick={() => toast.error("Entre em contacto com o suporte para ativar a auto-exclusão.")} className="border-red-800 text-red-400 hover:bg-red-900/30">
-                  Solicitar Auto-exclusão
-                </Button>
+
+              <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-5 space-y-4">
+                <h4 className="font-semibold text-sm text-white flex items-center gap-2">
+                  <AlertTriangle size={14} className="text-orange-400" /> Autoexclusão
+                </h4>
+
+                {isExcluded ? (
+                  <div className="bg-orange-900/20 border border-orange-700/40 rounded-xl p-4">
+                    <div className="flex items-start gap-3">
+                      <AlertTriangle className="text-orange-400 shrink-0 mt-0.5" size={16} />
+                      <div>
+                        <div className="text-sm font-semibold text-white">Autoexclusão ativa</div>
+                        <div className="text-xs text-orange-300 mt-1">
+                          Excluído até: <strong>{selfExcludedUntil?.toLocaleDateString("pt-PT", { day: "2-digit", month: "long", year: "numeric" })}</strong>
+                        </div>
+                        <div className="text-xs text-zinc-500 mt-1">
+                          Para cancelar, contacte: suporte@bet62.pt
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <>
+                    <p className="text-xs text-zinc-400 leading-relaxed">
+                      A autoexclusão impede o acesso à sua conta por um período definido. Esta ação é imediata e não pode ser revertida antes do prazo terminar.
+                    </p>
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                      {[
+                        { period: "1d", label: "1 dia" },
+                        { period: "7d", label: "1 semana" },
+                        { period: "30d", label: "1 mês" },
+                        { period: "180d", label: "6 meses" },
+                        { period: "permanent", label: "Permanente" },
+                      ].map(({ period, label }) => (
+                        <Button
+                          key={period}
+                          onClick={() => handleSelfExclude(period, label)}
+                          disabled={!!excludingFor}
+                          variant="outline"
+                          className="border-orange-800/60 text-orange-300 hover:bg-orange-900/20 text-xs"
+                        >
+                          {excludingFor === period ? <Loader2 className="animate-spin mr-1" size={12} /> : null}
+                          {label}
+                        </Button>
+                      ))}
+                    </div>
+                    <div className="text-xs text-zinc-600 bg-zinc-800/50 rounded-lg p-3">
+                      Ajuda com problemas de jogo: <span className="text-zinc-400 font-semibold">808 200 999</span> (linha gratuita)
+                    </div>
+                  </>
+                )}
               </div>
             </div>
           </SectionCard>
@@ -330,50 +458,25 @@ export default function ProfileTab({ myBets, myBetsLoading, fetchMyBets }: Profi
         return (
           <SectionCard
             title="Histórico de Atividade"
-            description="Registo detalhado das atividades associadas à conta do utilizador, para fins de acompanhamento e consulta."
+            description="Resumo da sua atividade na plataforma, incluindo apostas realizadas e resultados obtidos."
           >
             {myBetsLoading ? (
-              <div className="flex items-center justify-center py-12"><Loader2 className="animate-spin text-red-600" size={28} /></div>
+              <div className="flex items-center justify-center py-8"><Loader2 className="animate-spin text-red-600" size={24} /></div>
             ) : (
-              <>
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
-                  {[
-                    { label: "Total de apostas", value: myBets.length.toString(), color: "text-white" },
-                    { label: "Apostas ganhas", value: wonBets.length.toString(), color: "text-green-400" },
-                    { label: "Taxa de sucesso", value: `${winRate}%`, color: winRate >= 50 ? "text-green-400" : "text-red-400" },
-                    { label: "Maior ganho", value: biggestWin > 0 ? `€ ${biggestWin.toFixed(2)}` : "—", color: "text-yellow-400" },
-                  ].map(s => (
-                    <div key={s.label} className="bg-zinc-900 border border-zinc-800 rounded-xl p-4">
-                      <div className={`text-2xl font-black ${s.color}`}>{s.value}</div>
-                      <div className="text-xs text-zinc-500 mt-1">{s.label}</div>
-                    </div>
-                  ))}
-                </div>
-                <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-4 space-y-3">
-                  <div className="flex items-center justify-between text-sm">
-                    <span className="text-zinc-400">Total apostado</span>
-                    <span className="font-bold text-white">€ {totalWagered.toFixed(2)}</span>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                {[
+                  { label: "Total apostado", value: `€ ${totalWagered.toFixed(2)}`, icon: <Zap size={16} className="text-red-500" /> },
+                  { label: "Total ganho", value: `€ ${totalWon.toFixed(2)}`, icon: <CheckCircle size={16} className="text-green-500" /> },
+                  { label: "Maior ganho", value: `€ ${biggestWin.toFixed(2)}`, icon: <BarChart2 size={16} className="text-yellow-500" /> },
+                  { label: "Taxa de vitória", value: `${winRate}%`, icon: <Activity size={16} className="text-blue-400" /> },
+                ].map(card => (
+                  <div key={card.label} className="bg-zinc-900 border border-zinc-800 rounded-xl p-4 text-center">
+                    <div className="flex justify-center mb-2">{card.icon}</div>
+                    <div className="text-lg font-black text-white">{card.value}</div>
+                    <div className="text-[10px] text-zinc-500 mt-1">{card.label}</div>
                   </div>
-                  <div className="flex items-center justify-between text-sm">
-                    <span className="text-zinc-400">Total ganho</span>
-                    <span className="font-bold text-green-400">€ {totalWon.toFixed(2)}</span>
-                  </div>
-                  <div className="flex items-center justify-between text-sm">
-                    <span className="text-zinc-400">Resultado líquido</span>
-                    <span className={`font-bold ${totalWon - totalWagered >= 0 ? "text-green-400" : "text-red-400"}`}>
-                      {totalWon - totalWagered >= 0 ? "+ " : ""}€ {(totalWon - totalWagered).toFixed(2)}
-                    </span>
-                  </div>
-                  <div className="pt-2 border-t border-zinc-800 flex items-center justify-between text-sm">
-                    <span className="text-zinc-400">Última atividade</span>
-                    <span className="text-zinc-300 text-xs">
-                      {myBets.length > 0
-                        ? new Date(myBets[0].createdAt).toLocaleDateString("pt-PT", { day: "2-digit", month: "long", year: "numeric", hour: "2-digit", minute: "2-digit" })
-                        : "—"}
-                    </span>
-                  </div>
-                </div>
-              </>
+                ))}
+              </div>
             )}
           </SectionCard>
         );
@@ -381,36 +484,54 @@ export default function ProfileTab({ myBets, myBetsLoading, fetchMyBets }: Profi
       case "pagamento":
         return (
           <SectionCard
-            title="Métodos de Pagamento"
-            description="Secção para gestão dos métodos financeiros associados à conta, incluindo adição, remoção e atualização de dados."
+            title="Dados Bancários para Levantamento"
+            description="Guarde os seus dados bancários para facilitar futuros pedidos de levantamento. Os dados são encriptados e seguros."
           >
-            <div className="space-y-3">
-              <div className="flex items-center justify-between bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-4">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-7 bg-blue-700 rounded flex items-center justify-center text-white text-xs font-black">VISA</div>
-                  <div>
-                    <div className="text-sm font-medium text-white">•••• •••• •••• 4242</div>
-                    <div className="text-xs text-zinc-500">Expira 12/27</div>
-                  </div>
+            <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-5 space-y-4">
+              <h4 className="font-semibold text-sm text-white flex items-center gap-2">
+                <ArrowUpCircle size={14} className="text-orange-400" /> Conta Bancária
+              </h4>
+              <div className="space-y-3">
+                <div className="space-y-1.5">
+                  <Label className="text-zinc-400 text-xs">IBAN</Label>
+                  <Input
+                    placeholder="PT50 0000 0000 0000 0000 0000 0"
+                    value={iban}
+                    onChange={e => setIban(e.target.value)}
+                    className="bg-zinc-800 border-zinc-700 text-white font-mono"
+                  />
                 </div>
-                <span className="text-xs text-green-400 font-semibold bg-green-900/30 border border-green-800 px-2 py-0.5 rounded-full">Principal</span>
-              </div>
-              <div className="flex items-center justify-between bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-4">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-7 bg-zinc-700 rounded flex items-center justify-center">
-                    <span className="text-white font-black text-[10px] leading-tight text-center">MB<br/>WAY</span>
-                  </div>
-                  <div>
-                    <div className="text-sm font-medium text-white">+351 9XX XXX XXX</div>
-                    <div className="text-xs text-zinc-500">MBWay associado</div>
-                  </div>
+                <div className="space-y-1.5">
+                  <Label className="text-zinc-400 text-xs">Nome do Titular</Label>
+                  <Input
+                    placeholder="Nome completo como no banco"
+                    value={ibanName}
+                    onChange={e => setIbanName(e.target.value)}
+                    className="bg-zinc-800 border-zinc-700 text-white"
+                  />
                 </div>
-                <button onClick={() => toast.info("Gestão de MBWay disponível em breve.")} className="text-xs text-red-400 hover:text-red-300 transition-colors">Remover</button>
+                <div className="space-y-1.5">
+                  <Label className="text-zinc-400 text-xs">NIF</Label>
+                  <Input
+                    placeholder="123456789"
+                    maxLength={9}
+                    value={nif}
+                    onChange={e => setNif(e.target.value.replace(/\D/g, ""))}
+                    className="bg-zinc-800 border-zinc-700 text-white font-mono"
+                  />
+                </div>
+                <Button onClick={handleSaveBanking} disabled={savingBanking} className="bg-red-600 hover:bg-red-700 text-white w-full">
+                  {savingBanking ? <Loader2 className="animate-spin mr-2" size={14} /> : null}
+                  Guardar Dados Bancários
+                </Button>
               </div>
-              <Button onClick={() => toast.info("Adição de métodos de pagamento disponível em breve.")} variant="outline" className="w-full border-dashed border-zinc-700 text-zinc-400 hover:bg-zinc-900">
-                + Adicionar método de pagamento
-              </Button>
             </div>
+            {(user.withdrawalIban || user.nif) && (
+              <div className="bg-green-900/20 border border-green-800/40 rounded-xl p-3 text-xs text-green-300 flex items-center gap-2">
+                <CheckCircle size={14} />
+                Dados bancários guardados — serão pré-preenchidos nos seus levantamentos.
+              </div>
+            )}
           </SectionCard>
         );
 
@@ -418,14 +539,14 @@ export default function ProfileTab({ myBets, myBetsLoading, fetchMyBets }: Profi
         return (
           <SectionCard
             title="Notificações"
-            description="Configuração das preferências de comunicação e alertas relacionados com a conta do utilizador."
+            description="Gerencie as preferências de comunicação e alertas da sua conta."
           >
             <div className="space-y-2">
               {[
-                { label: "Email — Resultados de apostas", sub: "Receba um email quando uma aposta for resolvida", val: notifEmailResults, set: setNotifEmailResults },
-                { label: "Email — Promoções e ofertas", sub: "Ofertas exclusivas, bónus e novidades", val: notifEmailPromos, set: setNotifEmailPromos },
-                { label: "SMS — Resultados de apostas", sub: "Notificação por SMS para apostas resolvidas", val: notifSMS, set: setNotifSMS },
-                { label: "Push — Alertas de saldo e segurança", sub: "Movimentos de saldo, novos acessos e alertas", val: notifPush, set: setNotifPush },
+                { label: "Resultados de apostas (email)", sub: "Notificação quando uma aposta é resolvida", val: notifEmailResults, set: setNotifEmailResults },
+                { label: "Promoções e ofertas (email)", sub: "Novidades, bónus e promoções especiais", val: notifEmailPromos, set: setNotifEmailPromos },
+                { label: "SMS", sub: "Alertas por mensagem de texto", val: notifSMS, set: setNotifSMS },
+                { label: "Notificações push", sub: "Alertas no navegador", val: notifPush, set: setNotifPush },
               ].map(item => (
                 <div key={item.label} className="flex items-center justify-between bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-3.5">
                   <div>
@@ -436,9 +557,6 @@ export default function ProfileTab({ myBets, myBetsLoading, fetchMyBets }: Profi
                 </div>
               ))}
             </div>
-            <Button onClick={() => toast.success("Preferências de notificação guardadas.")} className="bg-red-600 hover:bg-red-700 text-white mt-2">
-              Guardar Preferências
-            </Button>
           </SectionCard>
         );
 
@@ -446,22 +564,18 @@ export default function ProfileTab({ myBets, myBetsLoading, fetchMyBets }: Profi
         return (
           <SectionCard
             title="Sessões Ativas"
-            description="Visualização e controlo das sessões atualmente iniciadas, permitindo ao utilizador encerrar acessos não reconhecidos."
+            description="Gerencie os dispositivos e sessões atualmente com acesso à sua conta."
           >
-            <div className="space-y-3">
-              <div className="flex items-center justify-between bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-4">
-                <div className="flex items-center gap-3">
-                  <div className="w-8 h-8 rounded-full bg-red-600/20 border border-red-600/30 flex items-center justify-center shrink-0">
-                    <Smartphone size={14} className="text-red-400" />
+            <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-4">
+              <div className="flex items-start gap-3">
+                <Smartphone size={18} className="text-red-400 shrink-0 mt-1" />
+                <div>
+                  <div className="text-sm font-medium text-white flex items-center gap-2">
+                    {navigator.userAgent.includes("Mobile") ? "Dispositivo Móvel" : "Navegador Web"}
+                    <span className="text-[10px] bg-green-900/50 text-green-400 border border-green-800 px-1.5 py-0.5 rounded-full font-bold">ATIVA AGORA</span>
                   </div>
-                  <div>
-                    <div className="text-sm font-medium text-white flex items-center gap-2">
-                      {navigator.userAgent.includes("Mobile") ? "Dispositivo Móvel" : "Navegador Web"}
-                      <span className="text-[10px] bg-green-900/50 text-green-400 border border-green-800 px-1.5 py-0.5 rounded-full font-bold">ATIVA AGORA</span>
-                    </div>
-                    <div className="text-xs text-zinc-500">IP: 85.241.{Math.floor(Math.random()*255)}.{Math.floor(Math.random()*255)} · Lisboa, Portugal</div>
-                    <div className="text-xs text-zinc-600">Iniciada há menos de 1 hora</div>
-                  </div>
+                  <div className="text-xs text-zinc-500">Sessão atual</div>
+                  <div className="text-xs text-zinc-600">Iniciada recentemente</div>
                 </div>
               </div>
             </div>
@@ -501,7 +615,7 @@ export default function ProfileTab({ myBets, myBetsLoading, fetchMyBets }: Profi
             </div>
             <div className="flex gap-3 mt-2 flex-wrap">
               <Button onClick={() => toast.info("Chat ao vivo disponível em breve.")} className="bg-red-600 hover:bg-red-700 text-white">
-                <MessageSquare size={14} className="mr-2" /> Iniciar Chat ao Vivo
+                <MessageSquare size={14} className="mr-2" /> Chat ao Vivo
               </Button>
               <Button variant="outline" onClick={() => toast.info("Centro de ajuda disponível em breve.")} className="border-zinc-700 text-zinc-300 hover:bg-zinc-800">
                 <HelpCircle size={14} className="mr-2" /> Centro de Ajuda / FAQ
@@ -532,18 +646,10 @@ export default function ProfileTab({ myBets, myBetsLoading, fetchMyBets }: Profi
               ))}
             </div>
             <div className="flex gap-3 mt-4 flex-wrap">
-              <Button
-                variant="outline"
-                onClick={() => toast.info("Download de dados disponível em breve.")}
-                className="border-zinc-700 text-zinc-300 hover:bg-zinc-800"
-              >
+              <Button variant="outline" onClick={() => toast.info("Download de dados disponível em breve.")} className="border-zinc-700 text-zinc-300 hover:bg-zinc-800">
                 <Download size={14} className="mr-2" /> Descarregar os Meus Dados
               </Button>
-              <Button
-                variant="outline"
-                onClick={() => toast.error("Para eliminar a conta contacte o suporte.")}
-                className="border-red-800 text-red-400 hover:bg-red-900/20"
-              >
+              <Button variant="outline" onClick={() => toast.error("Para eliminar a conta contacte o suporte.")} className="border-red-800 text-red-400 hover:bg-red-900/20">
                 <Trash2 size={14} className="mr-2" /> Eliminar Conta
               </Button>
             </div>
@@ -570,12 +676,14 @@ export default function ProfileTab({ myBets, myBetsLoading, fetchMyBets }: Profi
         <div className="ml-auto text-right shrink-0 hidden sm:block">
           <div className="text-xs text-zinc-500">Saldo disponível</div>
           <div className="text-xl font-black text-green-400">€ {parseFloat(user.balance).toFixed(2)}</div>
+          {isExcluded && (
+            <div className="text-[10px] text-orange-400 mt-1">Autoexcluído até {selfExcludedUntil?.toLocaleDateString("pt-PT")}</div>
+          )}
         </div>
       </div>
 
-      {/* Desktop layout: sidebar + content */}
+      {/* Desktop: sidebar + content */}
       <div className="flex gap-6">
-        {/* Desktop sidebar */}
         <aside className="hidden md:block w-64 shrink-0">
           <nav className="space-y-1">
             {SECTIONS.map(s => {
@@ -588,17 +696,15 @@ export default function ProfileTab({ myBets, myBetsLoading, fetchMyBets }: Profi
                   className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-colors text-left ${active ? "bg-red-600 text-white" : "text-zinc-400 hover:text-white hover:bg-zinc-800"}`}
                 >
                   <Icon size={15} className={active ? "text-white" : "text-zinc-500"} />
-                  {s.label}
-                  {active && <ChevronRight size={14} className="ml-auto" />}
+                  <span className="flex-1">{s.label}</span>
+                  {active && <ChevronRight size={14} />}
                 </button>
               );
             })}
           </nav>
         </aside>
 
-        {/* Content area */}
         <div className="flex-1 min-w-0">
-          {/* Desktop content */}
           <div className="hidden md:block">
             <AnimatePresence mode="wait">
               <motion.div

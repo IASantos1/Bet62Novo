@@ -6,6 +6,8 @@ import matchesRouter from "./matches";
 import adminRouter from "./admin";
 import statsRouter from "./stats";
 import paymentsRouter from "./payments";
+import profileRouter from "./profile";
+import withdrawalsRouter from "./withdrawals";
 
 const router: IRouter = Router();
 
@@ -16,5 +18,7 @@ router.use("/matches", matchesRouter);
 router.use("/admin", adminRouter);
 router.use("/stats", statsRouter);
 router.use("/payments", paymentsRouter);
+router.use("/profile", profileRouter);
+router.use("/withdrawals", withdrawalsRouter);
 
 export default router;

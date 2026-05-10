@@ -161,6 +161,11 @@ router.get("/me", authMiddleware, async (req: AuthRequest, res: Response): Promi
         email: user.email,
         balance: user.balance,
         freebetBalance: user.freebetBalance,
+        nif: user.nif,
+        withdrawalIban: user.withdrawalIban,
+        withdrawalName: user.withdrawalName,
+        selfExcludedUntil: user.selfExcludedUntil,
+        kycStatus: user.kycStatus,
       }
     });
   } catch (err) {

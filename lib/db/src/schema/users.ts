@@ -9,6 +9,11 @@ export const usersTable = pgTable("users", {
   passwordHash: text("password_hash").notNull(),
   balance: decimal("balance", { precision: 10, scale: 2 }).notNull().default("0.00"),
   freebetBalance: decimal("freebet_balance", { precision: 10, scale: 2 }).notNull().default("0.00"),
+  nif: text("nif"),
+  withdrawalIban: text("withdrawal_iban"),
+  withdrawalName: text("withdrawal_name"),
+  selfExcludedUntil: timestamp("self_excluded_until", { withTimezone: true }),
+  kycStatus: text("kyc_status").default("not_submitted"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 

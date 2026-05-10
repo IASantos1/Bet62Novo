@@ -5,7 +5,7 @@ import {
   LayoutDashboard, Users, ListChecks, LogOut, Loader2,
   TrendingUp, DollarSign, Activity, Trophy, Search,
   ChevronUp, ChevronDown, CheckCircle, XCircle, Clock,
-  Zap, RefreshCw, Eye, EyeOff, ShieldCheck
+  Zap, RefreshCw, Eye, EyeOff, ShieldCheck, ArrowUpCircle, Ban
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -42,6 +42,20 @@ type AdminBet = {
   userEmail: string | null;
 };
 
+type AdminWithdrawal = {
+  id: number;
+  userId: number;
+  amount: string;
+  iban: string;
+  holderName: string;
+  nif: string;
+  status: string;
+  notes: string | null;
+  createdAt: string;
+  userName: string | null;
+  userEmail: string | null;
+};
+
 const STATUS_CONFIG: Record<string, { label: string; cls: string }> = {
   pending:    { label: "Pendente",  cls: "bg-zinc-800 text-zinc-400" },
   won:        { label: "Ganhou",    cls: "bg-green-900/60 text-green-400" },
@@ -68,7 +82,7 @@ function StatCard({ icon, label, value, sub, color = "red" }: {
 export default function AdminPage() {
   const [token, setToken] = useState<string | null>(() => sessionStorage.getItem("admin_token"));
   const [username, setUsername] = useState<string>(() => sessionStorage.getItem("admin_username") || "");
-  const [activeTab, setActiveTab] = useState<"dashboard" | "users" | "bets">("dashboard");
+  const [activeTab, setActiveTab] = useState<"dashboard" | "users" | "bets" | "withdrawals">("dashboard");
 
   // Login form
   const [loginUser, setLoginUser] = useState("");
@@ -80,6 +94,7 @@ export default function AdminPage() {
   const [stats, setStats] = useState<AdminStats | null>(null);
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [bets, setBets] = useState<AdminBet[]>([]);
+  const [withdrawals, setWithdrawals] = useState<AdminWithdrawal[]>([]);
   const [loading, setLoading] = useState(false);
 
   // UI
@@ -153,11 +168,23 @@ export default function AdminPage() {
     finally { setLoading(false); }
   }, [token]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  const fetchWithdrawals = useCallback(async () => {
+    if (!token) return;
+    setLoading(true);
+    try {
+      const res = await fetch("/api/withdrawals/admin/all", { headers: authHeader });
+      if (res.ok) setWithdrawals(await res.json());
+      else if (res.status === 401) handleLogout();
+    } catch { /* ignore */ }
+    finally { setLoading(false); }
+  }, [token]); // eslint-disable-line react-hooks/exhaustive-deps
+
   useEffect(() => {
     if (!token) return;
     fetchStats();
     if (activeTab === "users") fetchUsers();
     if (activeTab === "bets") fetchBets();
+    if (activeTab === "withdrawals") fetchWithdrawals();
   }, [token, activeTab]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleUpdateBalance = async () => {
@@ -283,9 +310,11 @@ export default function AdminPage() {
             </Button>
           </form>
 
-          <p className="text-center text-xs text-zinc-700 mt-4">
-            Área restrita • Bet62 Admin v1.0
-          </p>
+          <div className="mt-4 bg-zinc-900/60 border border-zinc-800 rounded-xl p-3 text-center">
+            <p className="text-xs text-zinc-600 mb-1">Credenciais de acesso</p>
+            <p className="text-xs text-zinc-500 font-mono">Utilizador: <span className="text-zinc-400">admin</span></p>
+            <p className="text-xs text-zinc-500 font-mono">E-mail: <span className="text-zinc-400">israel21naativa@gmail.com</span></p>
+          </div>
         </motion.div>
       </div>
     );
@@ -312,6 +341,7 @@ export default function AdminPage() {
             { id: "dashboard", icon: <LayoutDashboard size={18} />, label: "Dashboard" },
             { id: "users", icon: <Users size={18} />, label: "Usuários" },
             { id: "bets", icon: <ListChecks size={18} />, label: "Apostas" },
+            { id: "withdrawals", icon: <ArrowUpCircle size={18} />, label: "Levantamentos" },
           ].map(tab => (
             <button
               key={tab.id}
@@ -342,10 +372,10 @@ export default function AdminPage() {
         {/* TOP BAR */}
         <div className="sticky top-0 z-10 bg-zinc-950/90 backdrop-blur border-b border-zinc-800 px-6 py-4 flex items-center justify-between">
           <h1 className="font-bold text-lg text-white">
-            {activeTab === "dashboard" ? "Visão Geral" : activeTab === "users" ? "Gerenciar Usuários" : "Gerenciar Apostas"}
+            {activeTab === "dashboard" ? "Visão Geral" : activeTab === "users" ? "Gerenciar Usuários" : activeTab === "bets" ? "Gerenciar Apostas" : "Levantamentos"}
           </h1>
           <button
-            onClick={() => { fetchStats(); if (activeTab === "users") fetchUsers(); if (activeTab === "bets") fetchBets(); }}
+            onClick={() => { fetchStats(); if (activeTab === "users") fetchUsers(); if (activeTab === "bets") fetchBets(); if (activeTab === "withdrawals") fetchWithdrawals(); }}
             className="flex items-center gap-2 text-xs text-zinc-500 hover:text-white transition-colors"
           >
             <RefreshCw size={14} />
@@ -623,6 +653,90 @@ export default function AdminPage() {
                           ))}
                           {filteredBets.length === 0 && (
                             <tr><td colSpan={9} className="px-4 py-12 text-center text-zinc-600">Nenhuma aposta encontrada</td></tr>
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+              </motion.div>
+            )}
+
+            {/* WITHDRAWALS TAB */}
+            {activeTab === "withdrawals" && (
+              <motion.div key="withdrawals" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} className="space-y-4">
+                {loading ? (
+                  <div className="flex items-center justify-center py-20"><Loader2 className="animate-spin text-red-600" size={32} /></div>
+                ) : (
+                  <div className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden">
+                    <div className="px-4 py-3 border-b border-zinc-800 flex items-center justify-between">
+                      <div className="flex items-center gap-2 text-sm font-semibold text-zinc-300">
+                        <ArrowUpCircle size={16} className="text-orange-400" /> Pedidos de Levantamento
+                      </div>
+                      <span className="text-xs text-zinc-500">{withdrawals.filter(w => w.status === "pending").length} pendentes</span>
+                    </div>
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-sm">
+                        <thead>
+                          <tr className="border-b border-zinc-800 bg-zinc-950/50">
+                            <th className="text-left px-4 py-3 text-zinc-500 font-medium">ID</th>
+                            <th className="text-left px-4 py-3 text-zinc-500 font-medium">Utilizador</th>
+                            <th className="text-left px-4 py-3 text-zinc-500 font-medium">Valor</th>
+                            <th className="text-left px-4 py-3 text-zinc-500 font-medium">IBAN</th>
+                            <th className="text-left px-4 py-3 text-zinc-500 font-medium">Titular / NIF</th>
+                            <th className="text-left px-4 py-3 text-zinc-500 font-medium">Estado</th>
+                            <th className="text-left px-4 py-3 text-zinc-500 font-medium">Data</th>
+                            <th className="text-right px-4 py-3 text-zinc-500 font-medium">Ações</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {withdrawals.map(w => (
+                            <tr key={w.id} className="border-b border-zinc-800/50 hover:bg-zinc-800/30 transition-colors">
+                              <td className="px-4 py-3 text-zinc-600 font-mono text-xs">#{w.id}</td>
+                              <td className="px-4 py-3">
+                                <div className="text-white text-xs font-medium">{w.userName}</div>
+                                <div className="text-zinc-600 text-[10px]">{w.userEmail}</div>
+                              </td>
+                              <td className="px-4 py-3 font-black text-orange-400">€ {parseFloat(w.amount).toFixed(2)}</td>
+                              <td className="px-4 py-3 text-zinc-400 text-xs font-mono">{w.iban}</td>
+                              <td className="px-4 py-3">
+                                <div className="text-zinc-300 text-xs">{w.holderName}</div>
+                                <div className="text-zinc-600 text-[10px]">NIF: {w.nif}</div>
+                              </td>
+                              <td className="px-4 py-3">
+                                <span className={`px-2 py-1 rounded-full text-[10px] font-bold uppercase ${w.status === "pending" ? "bg-zinc-800 text-zinc-400" : w.status === "approved" ? "bg-green-900/60 text-green-400" : "bg-red-900/40 text-red-400"}`}>
+                                  {w.status === "pending" ? "Pendente" : w.status === "approved" ? "Aprovado" : "Rejeitado"}
+                                </span>
+                              </td>
+                              <td className="px-4 py-3 text-zinc-500 text-xs whitespace-nowrap">
+                                {new Date(w.createdAt).toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}
+                              </td>
+                              <td className="px-4 py-3">
+                                {w.status === "pending" ? (
+                                  <div className="flex items-center gap-1.5 justify-end">
+                                    <button
+                                      onClick={async () => {
+                                        const r = await fetch(`/api/withdrawals/admin/${w.id}`, { method: "PUT", headers: { "Content-Type": "application/json", ...authHeader }, body: JSON.stringify({ status: "approved" }) });
+                                        if (r.ok) { toast.success("Levantamento aprovado."); fetchWithdrawals(); } else toast.error("Erro ao aprovar.");
+                                      }}
+                                      title="Aprovar" className="p-1.5 rounded bg-green-900/50 hover:bg-green-800 text-green-400 transition-colors"
+                                    ><CheckCircle size={14} /></button>
+                                    <button
+                                      onClick={async () => {
+                                        const r = await fetch(`/api/withdrawals/admin/${w.id}`, { method: "PUT", headers: { "Content-Type": "application/json", ...authHeader }, body: JSON.stringify({ status: "rejected" }) });
+                                        if (r.ok) { toast.success("Levantamento rejeitado. Saldo reembolsado."); fetchWithdrawals(); } else toast.error("Erro ao rejeitar.");
+                                      }}
+                                      title="Rejeitar" className="p-1.5 rounded bg-red-900/30 hover:bg-red-900 text-red-400 transition-colors"
+                                    ><Ban size={14} /></button>
+                                  </div>
+                                ) : (
+                                  <span className="text-zinc-700 text-xs text-right block">—</span>
+                                )}
+                              </td>
+                            </tr>
+                          ))}
+                          {withdrawals.length === 0 && (
+                            <tr><td colSpan={8} className="px-4 py-12 text-center text-zinc-600">Sem pedidos de levantamento</td></tr>
                           )}
                         </tbody>
                       </table>

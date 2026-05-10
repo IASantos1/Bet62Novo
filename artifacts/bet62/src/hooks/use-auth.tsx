@@ -7,6 +7,11 @@ type User = {
   email: string;
   balance: string;
   freebetBalance: string;
+  nif?: string | null;
+  withdrawalIban?: string | null;
+  withdrawalName?: string | null;
+  selfExcludedUntil?: string | null;
+  kycStatus?: string | null;
 };
 
 type AuthContextType = {

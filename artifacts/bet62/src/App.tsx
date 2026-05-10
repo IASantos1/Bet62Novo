@@ -22,7 +22,8 @@ function Router() {
 }
 
 function App() {
-  const [splashDone, setSplashDone] = useState(false);
+  const isAdmin = window.location.pathname.replace(/\/$/, "").endsWith("/admin");
+  const [splashDone, setSplashDone] = useState(isAdmin);
 
   return (
     <>

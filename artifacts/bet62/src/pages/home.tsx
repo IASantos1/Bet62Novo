@@ -2827,7 +2827,7 @@ export default function Home() {
                       <Plus size={16} /> Depositar
                     </button>
                     <button
-                      onClick={() => toast.info("Levantamento disponível em breve.")}
+                      onClick={() => setDepositModalOpen(true)}
                       className="flex items-center gap-2 bg-zinc-700 hover:bg-zinc-600 text-white font-semibold px-5 py-2.5 rounded-xl transition-colors text-sm"
                     >
                       <ArrowUpCircle size={16} /> Levantar
@@ -3418,8 +3418,18 @@ function DepositWithdrawModal({
   const [mbRef, setMbRef] = useState<MbRef | null>(null);
   const [mbwayDone, setMbwayDone] = useState(false);
 
+  // Main tab: deposit vs withdraw
+  const [mainTab, setMainTab] = useState<"deposit" | "withdraw">("deposit");
+
+  // Withdrawal form
+  const [wAmount, setWAmount] = useState("");
+  const [wIban, setWIban] = useState("");
+  const [wName, setWName] = useState("");
+  const [wNif, setWNif] = useState("");
+  const [wDone, setWDone] = useState(false);
+
   const amount = parseFloat(depositAmount.replace(",", "."));
-  const amountValid = !isNaN(amount) && amount >= 5 && amount <= 5000;
+  const amountValid = !isNaN(amount) && amount >= 10 && amount <= 5000;
   const promoHint = amountValid && amount >= 20;
 
   const METHODS: { id: PayMethod; label: string; icon: string }[] = [
@@ -3434,8 +3444,32 @@ function DepositWithdrawModal({
     setMbwayDone(false);
   }
 
+  async function handleWithdraw() {
+    const wAmountNum = parseFloat(wAmount.replace(",", "."));
+    if (isNaN(wAmountNum) || wAmountNum < 20) { toast.error("Valor mínimo de levantamento: €20."); return; }
+    if (wAmountNum > balance) { toast.error("Saldo insuficiente."); return; }
+    const cleanIban = wIban.replace(/\s/g, "").toUpperCase();
+    if (!/^[A-Z]{2}\d{2}[A-Z0-9]{1,30}$/.test(cleanIban)) { toast.error("IBAN inválido."); return; }
+    if (!wName.trim() || wName.trim().length < 3) { toast.error("Nome do titular inválido."); return; }
+    if (!/^\d{9}$/.test(wNif)) { toast.error("NIF inválido. Deve ter 9 dígitos."); return; }
+    setLoading(true);
+    try {
+      const r = await fetch("/api/withdrawals", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ amount: wAmountNum, iban: cleanIban, holderName: wName.trim(), nif: wNif }),
+      });
+      const data = await r.json() as { withdrawal?: { id: number }; error?: string };
+      if (!r.ok) { toast.error(data.error ?? "Erro ao submeter pedido."); return; }
+      setWDone(true);
+      onSuccess();
+      toast.success("Pedido de levantamento submetido! Processado em 2-5 dias úteis.");
+    } catch { toast.error("Erro de ligação. Tente novamente."); }
+    finally { setLoading(false); }
+  }
+
   async function handleMultibanco() {
-    if (!amountValid) { toast.error("Valor inválido. Mínimo €5."); return; }
+    if (!amountValid) { toast.error("Valor inválido. Mínimo €10."); return; }
     setLoading(true);
     try {
       const r = await fetch("/api/payments/multibanco", {
@@ -3453,7 +3487,7 @@ function DepositWithdrawModal({
   }
 
   async function handleMbway() {
-    if (!amountValid) { toast.error("Valor inválido. Mínimo €5."); return; }
+    if (!amountValid) { toast.error("Valor inválido. Mínimo €10."); return; }
     const phoneClean = mbwayPhone.replace(/\s/g, "");
     if (phoneClean.length !== 9) { toast.error("Número de telemóvel inválido."); return; }
     setLoading(true);
@@ -3473,7 +3507,7 @@ function DepositWithdrawModal({
   }
 
   async function handleCard() {
-    if (!amountValid) { toast.error("Valor inválido. Mínimo €5."); return; }
+    if (!amountValid) { toast.error("Valor inválido. Mínimo €10."); return; }
     setLoading(true);
     try {
       const r = await fetch("/api/payments/card", {
@@ -3496,12 +3530,12 @@ function DepositWithdrawModal({
       <DialogContent className="bg-zinc-950 border-zinc-800 text-white max-w-md p-0 overflow-hidden">
         {/* Header */}
         <div className="bg-gradient-to-r from-zinc-900 to-zinc-800 px-5 py-4 border-b border-zinc-700 flex items-center gap-3">
-          <div className="w-8 h-8 rounded-lg bg-emerald-600 flex items-center justify-center shrink-0">
-            <Plus size={18} strokeWidth={3} />
+          <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${mainTab === "deposit" ? "bg-emerald-600" : "bg-orange-600"}`}>
+            {mainTab === "deposit" ? <Plus size={18} strokeWidth={3} /> : <ArrowUpCircle size={18} />}
           </div>
           <div>
-            <div className="font-black text-base">Depósito</div>
-            <div className="text-xs text-zinc-400">Processado por <span className="text-white font-semibold">ifthenpay</span></div>
+            <div className="font-black text-base">{mainTab === "deposit" ? "Depósito" : "Levantamento"}</div>
+            <div className="text-xs text-zinc-400">{mainTab === "deposit" ? <>Processado por <span className="text-white font-semibold">ifthenpay</span></> : "Transferência bancária · IBAN"}</div>
           </div>
           <div className="ml-auto text-right">
             <div className="text-[10px] text-zinc-500">Saldo actual</div>
@@ -3509,7 +3543,83 @@ function DepositWithdrawModal({
           </div>
         </div>
 
-        {/* Method tabs */}
+        {/* Main tab: Deposit vs Withdraw */}
+        <div className="grid grid-cols-2 border-b border-zinc-800">
+          <button
+            onClick={() => { setMainTab("deposit"); setWDone(false); }}
+            className={`flex items-center justify-center gap-2 py-3 text-xs font-bold transition-colors border-b-2 ${mainTab === "deposit" ? "border-emerald-500 text-white bg-zinc-900" : "border-transparent text-zinc-500 hover:text-zinc-300"}`}
+          >
+            <Plus size={14} /> DEPOSITAR
+          </button>
+          <button
+            onClick={() => { setMainTab("withdraw"); setWDone(false); }}
+            className={`flex items-center justify-center gap-2 py-3 text-xs font-bold transition-colors border-b-2 ${mainTab === "withdraw" ? "border-orange-500 text-white bg-zinc-900" : "border-transparent text-zinc-500 hover:text-zinc-300"}`}
+          >
+            <ArrowUpCircle size={14} /> LEVANTAR
+          </button>
+        </div>
+
+        {/* Withdrawal form */}
+        {mainTab === "withdraw" && (
+          <div className="p-5 space-y-4">
+            {wDone ? (
+              <div className="text-center py-8 space-y-3">
+                <div className="text-5xl">✅</div>
+                <div className="font-black text-white text-lg">Pedido submetido!</div>
+                <div className="text-sm text-zinc-400 leading-relaxed">O seu pedido de levantamento está em processamento.<br />Prazo estimado: <strong className="text-white">2 a 5 dias úteis</strong>.</div>
+                <Button onClick={() => { setWDone(false); setWAmount(""); }} variant="outline" className="border-zinc-700 text-zinc-400 mt-2">Novo pedido</Button>
+              </div>
+            ) : (
+              <>
+                <div className="bg-orange-900/20 border border-orange-800/40 rounded-xl px-4 py-3 text-xs text-orange-300 leading-relaxed">
+                  Mínimo de levantamento: <strong className="text-white">€20</strong>. Processado por transferência bancária em 2–5 dias úteis.
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-xs text-zinc-400 font-semibold uppercase tracking-wider">Valor (€)</label>
+                  <div className="relative">
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400 font-bold text-sm">€</span>
+                    <Input type="number" min={20} max={50000} placeholder="0,00"
+                      className="pl-8 bg-zinc-900 border-zinc-700 text-white font-bold text-lg h-11"
+                      value={wAmount} onChange={e => setWAmount(e.target.value)} />
+                  </div>
+                  <div className="flex gap-1.5">
+                    {[20, 50, 100, 250].map(v => (
+                      <button key={v} onClick={() => setWAmount(String(v))}
+                        className={`flex-1 py-1.5 rounded-lg border text-xs font-bold transition-colors ${wAmount === String(v) ? "border-orange-500 bg-orange-500/10 text-orange-400" : "border-zinc-700 hover:border-zinc-500 text-zinc-400"}`}>
+                        €{v}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-xs text-zinc-400 font-semibold uppercase tracking-wider">IBAN</label>
+                  <Input placeholder="PT50 0000 0000 0000 0000 0000 0" className="bg-zinc-900 border-zinc-700 text-white font-mono"
+                    value={wIban} onChange={e => setWIban(e.target.value)} />
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1.5">
+                    <label className="text-xs text-zinc-400 font-semibold uppercase tracking-wider">Nome Titular</label>
+                    <Input placeholder="Nome completo" className="bg-zinc-900 border-zinc-700 text-white"
+                      value={wName} onChange={e => setWName(e.target.value)} />
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="text-xs text-zinc-400 font-semibold uppercase tracking-wider">NIF</label>
+                    <Input placeholder="123456789" maxLength={9} className="bg-zinc-900 border-zinc-700 text-white font-mono"
+                      value={wNif} onChange={e => setWNif(e.target.value.replace(/\D/g, ""))} />
+                  </div>
+                </div>
+                <Button onClick={handleWithdraw} disabled={loading}
+                  className="w-full bg-orange-600 hover:bg-orange-500 text-white font-black h-11">
+                  {loading ? <Loader2 className="animate-spin mr-2" size={16} /> : <ArrowUpCircle size={16} className="mr-2" />}
+                  Solicitar Levantamento
+                </Button>
+              </>
+            )}
+          </div>
+        )}
+
+        {/* Deposit content */}
+        {mainTab === "deposit" && (<>
         <div className="grid grid-cols-3 border-b border-zinc-800">
           {METHODS.map(m => (
             <button
@@ -3528,7 +3638,7 @@ function DepositWithdrawModal({
           <div>
             <p className="text-xs text-zinc-400 mb-2 font-semibold uppercase tracking-widest">Valor</p>
             <div className="grid grid-cols-5 gap-1.5 mb-3">
-              {[5, 10, 20, 50, 100].map(v => (
+              {[10, 20, 50, 100, 200].map(v => (
                 <button
                   key={v}
                   onClick={() => { setDepositAmount(String(v)); setMbRef(null); setMbwayDone(false); }}
@@ -3541,7 +3651,7 @@ function DepositWithdrawModal({
             <div className="relative">
               <span className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400 font-bold text-sm">€</span>
               <Input
-                type="number" min={5} max={5000} placeholder="0,00"
+                type="number" min={10} max={5000} placeholder="0,00"
                 className="pl-8 bg-zinc-900 border-zinc-700 text-white font-bold text-lg h-11"
                 value={depositAmount}
                 onChange={e => { setDepositAmount(e.target.value); setMbRef(null); setMbwayDone(false); }}
@@ -3669,6 +3779,7 @@ function DepositWithdrawModal({
           )}
 
         </div>
+        </>)}
       </DialogContent>
     </Dialog>
   );
