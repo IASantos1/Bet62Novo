@@ -208,6 +208,10 @@ const DOMESTIC_PRIORITY: Array<[string, number]> = [
   ["italy: serie d", 50],
   ["france: national", 51],
   ["germany: bundesliga women", 52],
+  ["china: super league", 60],
+  ["china: chinese super league", 60],
+  ["indonesia: liga 1", 65],
+  ["indonesia: bri liga 1", 65],
 ];
 
 const EUROPEAN_COUNTRIES = new Set([
@@ -341,6 +345,17 @@ function getTeamElo(name: string): number {
     "celtic": 1700, "rangers": 1690,
     "anderlecht": 1650, "club brugge": 1680,
     "galatasaray": 1680, "fenerbahce": 1650, "besiktas": 1620, "trabzonspor": 1580,
+    "başakşehir": 1610, "istanbul basaksehir": 1610, "adana demirspor": 1540,
+    "konyaspor": 1530, "sivasspor": 1520, "antalyaspor": 1510,
+    "kasimpasa": 1500, "gaziantep fk": 1490, "ankaragücü": 1490,
+    "hearts": 1640, "heart of midlothian": 1640, "hibernian": 1620,
+    "aberdeen": 1600, "dundee united": 1560, "motherwell": 1540, "st mirren": 1520,
+    "beijing guoan": 1640, "shanghai port": 1660, "shandong taishan": 1650,
+    "guangzhou fc": 1580, "wuhan three towns": 1600, "shenzhen fc": 1550,
+    "shanghai shenhua": 1590, "tianjin jinmen tiger": 1540,
+    "persija jakarta": 1600, "persebaya surabaya": 1590, "psm makassar": 1580,
+    "bali united": 1570, "persib bandung": 1610, "arema fc": 1560,
+    "borneo fc": 1550, "bhayangkara fc": 1540,
     "crvena zvezda": 1660, "red star belgrade": 1660,
     "salzburg": 1700, "rb salzburg": 1700,
     "flamengo": 1750, "palmeiras": 1750, "atletico mineiro": 1730,
@@ -1228,6 +1243,48 @@ async function buildUpcomingMatches(): Promise<UpcomingMatch[]> {
   return results;
 }
 
+// ─── Simulated football for extra leagues (Turkey, Scotland, China, Indonesia) ─
+
+function buildSimulatedFootballMatches(): UpcomingMatch[] {
+  const today = new Date();
+  const dayKey = today.getUTCFullYear() * 10000 + (today.getUTCMonth() + 1) * 100 + today.getUTCDate();
+
+  const MATCHUPS: [string, string, string, string, string][] = [
+    // Turkey — Süper Lig
+    ["Galatasaray", "Fenerbahçe", "Süper Lig — Turquia", "turkey", "18:00"],
+    ["Beşiktaş", "Trabzonspor", "Süper Lig — Turquia", "turkey", "19:00"],
+    ["Başakşehir", "Adana Demirspor", "Süper Lig — Turquia", "turkey", "16:00"],
+    ["Konyaspor", "Gaziantep FK", "Süper Lig — Turquia", "turkey", "14:00"],
+    ["Sivasspor", "Antalyaspor", "Süper Lig — Turquia", "turkey", "15:30"],
+    ["Kasımpaşa", "Ankaragücü", "Süper Lig — Turquia", "turkey", "17:00"],
+    // Scotland — Premiership
+    ["Celtic", "Rangers", "Premiership — Escócia", "scotland", "12:30"],
+    ["Hearts", "Hibernian", "Premiership — Escócia", "scotland", "15:00"],
+    ["Aberdeen", "Dundee United", "Premiership — Escócia", "scotland", "15:00"],
+    ["Motherwell", "St Mirren", "Premiership — Escócia", "scotland", "15:00"],
+    // China — Super League
+    ["Beijing Guoan", "Shanghai Port", "Super League — China", "china", "13:35"],
+    ["Shandong Taishan", "Guangzhou FC", "Super League — China", "china", "15:05"],
+    ["Wuhan Three Towns", "Shenzhen FC", "Super League — China", "china", "16:35"],
+    ["Shanghai Shenhua", "Tianjin Jinmen Tiger", "Super League — China", "china", "14:05"],
+    // Indonesia — Liga 1
+    ["Persija Jakarta", "Persebaya Surabaya", "Liga 1 — Indonésia", "indonesia", "15:30"],
+    ["PSM Makassar", "Bali United", "Liga 1 — Indonésia", "indonesia", "19:00"],
+    ["Persib Bandung", "Arema FC", "Liga 1 — Indonésia", "indonesia", "18:30"],
+    ["Borneo FC", "Bhayangkara FC", "Liga 1 — Indonésia", "indonesia", "20:00"],
+  ];
+
+  return MATCHUPS.map(([home, away, league, country, time], i) => ({
+    id: `sfball-${dayKey}-${i}`,
+    home, away, league, country, time,
+    date: futureDateStr(Math.floor(i / 6)),
+    sport: "football",
+    hasRealOdds: true,
+    odds: makeOddsFromTeams(home, away),
+    markets: makeAdvancedMarketsFromTeams(home, away),
+  }));
+}
+
 // ─── Other sports generators (deterministic per calendar day) ─────────────────
 
 function dayRng(day: number): (n: number) => number {
@@ -1366,18 +1423,30 @@ function buildTennisMatches(): UpcomingMatch[] {
   const ATP_PLAYERS = [
     "Novak Djokovic", "Carlos Alcaraz", "Jannik Sinner", "Daniil Medvedev",
     "Alexander Zverev", "Andrey Rublev", "Casper Ruud", "Taylor Fritz",
-    "Grigor Dimitrov", "Hubert Hurkacz",
+    "Grigor Dimitrov", "Hubert Hurkacz", "Holger Rune", "Tommy Paul",
+    "Ben Shelton", "Lorenzo Musetti", "Arthur Fils", "Ugo Humbert",
+    "Sebastian Baez", "Nicolas Jarry", "Jack Draper", "Zhizhen Zhang",
   ];
   const WTA_PLAYERS = [
     "Aryna Sabalenka", "Iga Swiatek", "Coco Gauff", "Elena Rybakina",
     "Qinwen Zheng", "Jasmine Paolini", "Daria Kasatkina", "Emma Navarro",
+    "Madison Keys", "Mirra Andreeva", "Marketa Vondrousova", "Anna Kalinskaya",
+    "Xinyu Wang", "Beatriz Haddad Maia",
   ];
 
   const TOURNAMENTS: [string, string, string, string][] = [
     ["ATP 500 — Roma", "italy", "14:00", "atp"],
     ["ATP 250 — Hamburgo", "germany", "15:30", "atp"],
+    ["ATP 250 — Genebra", "switzerland", "14:00", "atp"],
+    ["ATP 250 — Lyon", "france", "15:00", "atp"],
+    ["ATP 500 — Halle", "germany", "13:00", "atp"],
+    ["ATP Challenger — Turim", "italy", "11:30", "atp"],
+    ["ATP Challenger — Praga", "czechia", "12:00", "atp"],
     ["WTA 1000 — Roma", "italy", "13:00", "wta"],
     ["WTA 250 — Estrasburgo", "france", "14:30", "wta"],
+    ["WTA 500 — Berlim", "germany", "15:00", "wta"],
+    ["WTA 250 — Rabat", "morocco", "12:30", "wta"],
+    ["WTA 250 — Hertogenbosch", "netherlands", "13:00", "wta"],
     ["Roland Garros — Qualificação", "france", "11:00", "atp"],
     ["Roland Garros — Qualificação", "france", "12:30", "wta"],
   ];
@@ -1914,13 +1983,16 @@ router.get("/live", async (_req, res) => {
 router.get("/upcoming", async (req, res) => {
   try {
     const sport = String(req.query["sport"] ?? "all");
-    const [football, basketball, tennis, hockey, volleyball] = await Promise.all([
+    const [realFootball, basketball, tennis, hockey, volleyball] = await Promise.all([
       buildUpcomingMatches(),
       Promise.resolve(buildBasketballMatches()),
       Promise.resolve(buildTennisMatches()),
       Promise.resolve(buildHockeyMatches()),
       Promise.resolve(buildVolleyballMatches()),
     ]);
+    const simFootball = buildSimulatedFootballMatches();
+    const seenKeys = new Set(realFootball.map(m => `${m.home}|${m.away}`));
+    const football = [...realFootball, ...simFootball.filter(m => !seenKeys.has(`${m.home}|${m.away}`))];
     let matches: UpcomingMatch[];
     if (sport === "football") matches = football;
     else if (sport === "basketball") matches = basketball;
