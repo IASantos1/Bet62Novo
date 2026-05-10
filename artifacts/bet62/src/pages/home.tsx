@@ -4245,47 +4245,6 @@ export default function Home() {
                                   </div>
                                 )}
 
-                                {schedule.recentWeeks.length > 0 && (
-                                  <div>
-                                    <div className="text-[10px] font-black uppercase tracking-widest text-zinc-500 mb-2">Resultados Recentes</div>
-                                    {schedule.recentWeeks.slice().reverse().map((week: any) => (
-                                      <div key={week.number} className="mb-3">
-                                        <div className="text-[10px] font-bold text-zinc-600 mb-1.5">{week.number}</div>
-                                        <div className="space-y-1">
-                                          {week.matches.map((m: any) => {
-                                            const winner = m.homeWon ? m.home : m.away;
-                                            const loser  = m.homeWon ? m.away : m.home;
-                                            const wTotal = m.homeWon ? m.homeSets : m.awaySets;
-                                            const lTotal = m.homeWon ? m.awaySets : m.homeSets;
-                                            const wSets  = m.homeWon ? m.sets.map(([h]: [number, number]) => h)    : m.sets.map(([, a]: [number, number]) => a);
-                                            const lSets  = m.homeWon ? m.sets.map(([, a]: [number, number]) => a)  : m.sets.map(([h]: [number, number]) => h);
-                                            return (
-                                              <div key={m.id} className="flex items-center gap-3 bg-zinc-800/40 rounded-lg px-3 py-1.5">
-                                                <div className="flex-1 min-w-0">
-                                                  <div className="text-xs font-bold text-white truncate">{winner}</div>
-                                                  <div className="text-xs text-zinc-500 truncate">{loser}</div>
-                                                </div>
-                                                <div className="flex items-center gap-2 shrink-0">
-                                                  <div className="text-xs font-black text-white tabular-nums">
-                                                    {wTotal}<span className="text-zinc-600 mx-0.5">–</span>{lTotal}
-                                                  </div>
-                                                  <div className="flex gap-0.5">
-                                                    {wSets.map((ws: number, i: number) => (
-                                                      <div key={i} className="w-5 text-center">
-                                                        <div className={`text-[10px] font-black leading-tight ${ws > (lSets[i] ?? 0) ? "text-white" : "text-zinc-600"}`}>{ws}</div>
-                                                        <div className={`text-[10px] font-black leading-tight ${(lSets[i] ?? 0) > ws ? "text-zinc-400" : "text-zinc-600"}`}>{lSets[i]}</div>
-                                                      </div>
-                                                    ))}
-                                                  </div>
-                                                </div>
-                                              </div>
-                                            );
-                                          })}
-                                        </div>
-                                      </div>
-                                    ))}
-                                  </div>
-                                )}
                               </>
                             )}
 
