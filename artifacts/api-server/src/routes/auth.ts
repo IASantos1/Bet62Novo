@@ -88,6 +88,60 @@ router.post("/login", async (req, res): Promise<void> => {
 
 import { authMiddleware, type AuthRequest } from "../middlewares/auth";
 import { type Response } from "express";
+import { sql } from "drizzle-orm";
+
+// ─── DEPOSIT ────────────────────────────────────────────────────────────────
+router.post("/deposit", authMiddleware, async (req: AuthRequest, res: Response): Promise<void> => {
+  const { amount } = req.body as { amount?: number };
+  if (!amount || typeof amount !== "number" || amount < 10 || amount > 5000) {
+    res.status(400).json({ error: "Valor inválido. Mínimo €10, máximo €5000." });
+    return;
+  }
+  try {
+    const [user] = await db
+      .update(usersTable)
+      .set({ balance: sql`${usersTable.balance} + ${amount.toFixed(2)}` })
+      .where(eq(usersTable.id, req.user!.id))
+      .returning();
+
+    // Determine which promotions are triggered
+    const promotions: string[] = [];
+    const newBalance = parseFloat(user.balance);
+    const isFirstDeposit = newBalance - amount <= 1000; // started at 1000
+    if (isFirstDeposit && amount >= 20) promotions.push("freebets20");
+    if (isFirstDeposit && amount >= 100) promotions.push("bonus100");
+
+    res.json({
+      balance: user.balance,
+      promotions,
+    });
+  } catch (err) {
+    logger.error({ err }, "Deposit error");
+    res.status(500).json({ error: "Erro ao processar depósito" });
+  }
+});
+
+// ─── WEEKLY CASHBACK CHECK ───────────────────────────────────────────────────
+router.get("/cashback", authMiddleware, async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const userId = req.user!.id;
+    // Sum all bets lost in the last 7 days
+    const { betsTable } = await import("@workspace/db");
+    const oneWeekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+    const lostBets = await db
+      .select()
+      .from(betsTable)
+      .where(
+        sql`${betsTable.userId} = ${userId} AND ${betsTable.status} = 'lost' AND ${betsTable.createdAt} >= ${oneWeekAgo}`
+      );
+    const totalLost = lostBets.reduce((sum, b) => sum + parseFloat(b.stake), 0);
+    const cashback = Math.min(100, +(totalLost * 0.10).toFixed(2));
+    res.json({ totalLost: +totalLost.toFixed(2), cashback, bets: lostBets.length });
+  } catch (err) {
+    logger.error({ err }, "Cashback check error");
+    res.status(500).json({ error: "Erro ao calcular cashback" });
+  }
+});
 
 router.get("/me", authMiddleware, async (req: AuthRequest, res: Response): Promise<void> => {
   try {

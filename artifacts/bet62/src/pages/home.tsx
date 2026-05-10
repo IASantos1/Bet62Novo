@@ -701,6 +701,15 @@ export default function Home() {
   const [cashingOut, setCashingOut] = useState<number | null>(null);
   const [cashoutConfirm, setCashoutConfirm] = useState<UserBet | null>(null);
 
+  // Deposit modal
+  const [depositModalOpen, setDepositModalOpen] = useState(false);
+  const [depositAmount, setDepositAmount] = useState("");
+  const [depositLoading, setDepositLoading] = useState(false);
+  const [promoNotif, setPromoNotif] = useState<null | { type: "freebets20" | "bonus100" | "cashback"; amount?: number }>(null);
+
+  // Cashback state
+  const [cashbackData, setCashbackData] = useState<{ totalLost: number; cashback: number; bets: number } | null>(null);
+
   // Live matches
   const [liveMatches, setLiveMatches] = useState<Match[]>([]);
   const [liveLoading, setLiveLoading] = useState(false);
@@ -926,6 +935,49 @@ export default function Home() {
     } finally {
       setCashingOut(null);
       setCashoutConfirm(null);
+    }
+  };
+
+  // Fetch cashback when opening promos tab
+  const fetchCashback = useCallback(async () => {
+    if (!auth.user) return;
+    try {
+      const token = localStorage.getItem("bet62_token");
+      const r = await fetch("/api/auth/cashback", { headers: { Authorization: `Bearer ${token}` } });
+      if (r.ok) setCashbackData(await r.json());
+    } catch { /* non-critical */ }
+  }, [auth.user]);
+
+  const handleDeposit = async () => {
+    const amount = parseFloat(depositAmount.replace(",", "."));
+    if (isNaN(amount) || amount < 10 || amount > 5000) {
+      toast.error("Valor inválido. Mínimo €10, máximo €5000.");
+      return;
+    }
+    setDepositLoading(true);
+    try {
+      const token = localStorage.getItem("bet62_token");
+      const r = await fetch("/api/auth/deposit", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ amount }),
+      });
+      const data = await r.json() as { balance?: string; promotions?: string[]; error?: string };
+      if (!r.ok) { toast.error(data.error ?? "Erro ao processar depósito"); return; }
+      auth.refreshUser();
+      setDepositModalOpen(false);
+      setDepositAmount("");
+      toast.success(`Depósito de € ${amount.toFixed(2)} realizado com sucesso!`);
+      // Show promotion notification
+      if (data.promotions?.includes("freebets20")) {
+        setPromoNotif({ type: "freebets20" });
+      } else if (data.promotions?.includes("bonus100")) {
+        setPromoNotif({ type: "bonus100" });
+      }
+    } catch {
+      toast.error("Erro de ligação. Tente novamente.");
+    } finally {
+      setDepositLoading(false);
     }
   };
 
@@ -1953,11 +2005,11 @@ export default function Home() {
           {[
             { id: "sports", icon: <Trophy size={16} />, label: "ESPORTES" },
             { id: "live", icon: <Activity size={16} />, label: "AO VIVO", badge: true },
-            { id: "promos", icon: <Gift size={16} />, label: "PROMOÇÕES" },
+            { id: "promos", icon: <Gift size={16} />, label: "PROMOÇÕES", onSelect: fetchCashback },
           ].map(tab => (
             <button
               key={tab.id}
-              onClick={() => setActiveTab(tab.id as typeof activeTab)}
+              onClick={() => { setActiveTab(tab.id as typeof activeTab); (tab as { onSelect?: () => void }).onSelect?.(); }}
               className={`py-3 font-semibold text-sm transition-colors border-b-2 whitespace-nowrap flex items-center gap-2 ${activeTab === tab.id ? "border-red-600 text-white" : "border-transparent text-zinc-500 hover:text-zinc-300"}`}
             >
               {tab.icon}
@@ -2450,31 +2502,21 @@ export default function Home() {
             )}
 
             {activeTab === "promos" && (
-              <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
-                <h2 className="text-2xl font-black italic uppercase tracking-tight mb-6 flex items-center gap-2">
-                  <Gift className="text-red-600" /> Promoções Bet62
-                </h2>
-                <div className="space-y-6">
-                  <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-red-900 to-zinc-900 border border-red-500/30 p-8 lg:p-12">
-                    <div className="absolute top-0 right-0 p-12 opacity-10 transform translate-x-1/4 -translate-y-1/4"><Trophy size={200} /></div>
-                    <div className="relative z-10 max-w-2xl">
-                      <div className="inline-block bg-red-600 text-white text-xs font-bold px-3 py-1 rounded-full mb-4">NOVO CLIENTE</div>
-                      <h3 className="text-4xl lg:text-5xl font-black italic tracking-tighter mb-4">BÔNUS DE ATÉ <span className="text-red-500">€ 500</span></h3>
-                      <p className="text-lg text-zinc-300 mb-8 max-w-xl">100% no primeiro depósito. Registe-se, deposite e dobre o seu saldo instantaneamente.</p>
-                      <Button size="lg" className="bg-red-600 hover:bg-red-700 text-white font-bold text-lg px-8 h-14" onClick={() => toast.success("Bônus ativado com sucesso!")}>ATIVAR BÔNUS</Button>
-                    </div>
-                  </div>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div className="bg-zinc-900 p-6 rounded-xl border border-zinc-800 flex flex-col justify-between">
-                      <div><h4 className="text-xl font-bold italic mb-2">Cashback de Sexta</h4><p className="text-zinc-400 text-sm mb-6">Receba 10% de volta em todas as suas apostas perdidas durante a sexta-feira.</p></div>
-                      <Button variant="outline" className="w-full border-zinc-700 text-white hover:bg-zinc-800">Saber Mais</Button>
-                    </div>
-                    <div className="bg-zinc-900 p-6 rounded-xl border border-zinc-800 flex flex-col justify-between">
-                      <div><h4 className="text-xl font-bold italic mb-2">Múltipla Turbinada</h4><p className="text-zinc-400 text-sm mb-6">Aumente seus ganhos em até 50% fazendo apostas múltiplas com 4+ seleções.</p></div>
-                      <Button variant="outline" className="w-full border-zinc-700 text-white hover:bg-zinc-800">Saber Mais</Button>
-                    </div>
-                  </div>
-                </div>
+              <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 -mx-4 sm:-mx-6 lg:-mx-8 px-0">
+                <PromosPage
+                  isLoggedIn={!!auth.user}
+                  cashbackData={cashbackData}
+                  onDeposit={() => { setDepositModalOpen(true); setActiveTab("wallet"); }}
+                  onFetchCashback={fetchCashback}
+                  onClaimCashback={() => {
+                    if (cashbackData && cashbackData.cashback > 0) {
+                      setPromoNotif({ type: "cashback", amount: cashbackData.cashback });
+                      setCashbackData(null);
+                    } else {
+                      toast.info("Ainda não há cashback disponível esta semana.");
+                    }
+                  }}
+                />
               </div>
             )}
 
@@ -2497,7 +2539,7 @@ export default function Home() {
                   </div>
                   <div className="flex gap-3">
                     <button
-                      onClick={() => toast.info("Depósito disponível em breve.")}
+                      onClick={() => setDepositModalOpen(true)}
                       className="flex items-center gap-2 bg-red-600 hover:bg-red-700 text-white font-bold px-5 py-2.5 rounded-xl transition-colors text-sm"
                     >
                       <Plus size={16} /> Depositar
@@ -2814,6 +2856,317 @@ export default function Home() {
         </DialogContent>
       </Dialog>
 
+      {/* ── DEPOSIT MODAL ─────────────────────────────────────── */}
+      <Dialog open={depositModalOpen} onOpenChange={setDepositModalOpen}>
+        <DialogContent className="bg-zinc-950 border-zinc-800 text-white max-w-md">
+          <DialogHeader>
+            <DialogTitle className="text-xl font-black italic flex items-center gap-2">
+              <Plus className="text-red-500" size={20} /> Realizar Depósito
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-5 pt-2">
+            <div>
+              <p className="text-xs text-zinc-400 mb-3 font-semibold uppercase tracking-widest">Valor rápido</p>
+              <div className="grid grid-cols-4 gap-2">
+                {[10, 20, 50, 100].map(v => (
+                  <button
+                    key={v}
+                    onClick={() => setDepositAmount(String(v))}
+                    className={`py-2 rounded-lg border font-bold text-sm transition-colors ${depositAmount === String(v) ? "border-red-600 bg-red-600/10 text-red-400" : "border-zinc-700 hover:border-zinc-500 text-zinc-300"}`}
+                  >
+                    € {v}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-sm text-zinc-300">Outro valor (€ 10 – 5000)</Label>
+              <div className="relative">
+                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400 font-bold text-sm">€</span>
+                <Input
+                  type="number"
+                  min={10}
+                  max={5000}
+                  placeholder="0,00"
+                  className="pl-8 bg-zinc-900 border-zinc-700 text-white font-bold text-lg h-12"
+                  value={depositAmount}
+                  onChange={e => setDepositAmount(e.target.value)}
+                  onKeyDown={e => e.key === "Enter" && handleDeposit()}
+                />
+              </div>
+            </div>
+            {parseFloat(depositAmount) >= 20 && (
+              <div className="bg-emerald-900/30 border border-emerald-500/30 rounded-xl p-3 flex items-start gap-3">
+                <span className="text-2xl">🎁</span>
+                <div>
+                  <div className="text-emerald-400 font-bold text-sm">Promoção ativada!</div>
+                  <div className="text-zinc-300 text-xs mt-0.5">
+                    {parseFloat(depositAmount) >= 100
+                      ? "Qualifica para 100% de Bónus de Boas-Vindas até €500."
+                      : "Qualifica para receber €10 em Free Bets após 4 apostas qualificadas."}
+                  </div>
+                </div>
+              </div>
+            )}
+            <Button
+              onClick={handleDeposit}
+              disabled={depositLoading || !depositAmount || parseFloat(depositAmount) < 10}
+              className="w-full bg-red-600 hover:bg-red-700 text-white font-bold h-12 text-base"
+            >
+              {depositLoading ? <Loader2 className="animate-spin mr-2" size={18} /> : null}
+              {depositLoading ? "A processar..." : `Depositar € ${parseFloat(depositAmount || "0").toFixed(2)}`}
+            </Button>
+            <p className="text-[11px] text-zinc-600 text-center leading-relaxed">
+              Depósito simulado para fins de demonstração. Processado instantaneamente.
+            </p>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── PROMOTION NOTIFICATION ─────────────────────────────── */}
+      <AnimatePresence>
+        {promoNotif && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[200] flex items-center justify-center bg-black/75 backdrop-blur-sm px-4"
+            onClick={() => setPromoNotif(null)}
+          >
+            <motion.div
+              initial={{ scale: 0.85, y: 40 }}
+              animate={{ scale: 1, y: 0 }}
+              exit={{ scale: 0.85, y: 40 }}
+              className="relative overflow-hidden rounded-3xl max-w-md w-full border border-white/15 shadow-2xl"
+              onClick={e => e.stopPropagation()}
+            >
+              {promoNotif.type === "freebets20" && (
+                <>
+                  <img src="https://images.unsplash.com/photo-1521412644187-c49fa049e84d?q=80&w=800&auto=format&fit=crop" className="absolute inset-0 w-full h-full object-cover scale-105" alt="" />
+                  <div className="absolute inset-0 bg-gradient-to-br from-emerald-600/85 to-black/95" />
+                  <div className="relative z-10 p-8 text-center">
+                    <div className="text-5xl mb-3">🎉</div>
+                    <div className="inline-block px-3 py-1 rounded-full bg-white/15 text-xs font-black tracking-widest text-white mb-4">FREE BET ATIVADA</div>
+                    <h2 className="text-3xl font-black text-white leading-tight mb-2">Parabéns!</h2>
+                    <p className="text-white/90 text-base mb-1">Está a participar na promoção</p>
+                    <p className="text-emerald-300 font-black text-xl mb-4">DEPOSITE €20 → GANHE €10</p>
+                    <p className="text-white/70 text-sm leading-relaxed mb-6">Complete 4 apostas qualificadas com odds ≥ 1.80 para receber os seus €10 em free bets.</p>
+                    <div className="grid grid-cols-4 gap-2 mb-6">
+                      {[1,2,3,4].map(n => (
+                        <div key={n} className="rounded-xl bg-white/10 border border-white/20 py-3 flex flex-col items-center gap-1">
+                          <span className="text-lg">⚽</span>
+                          <span className="text-[10px] text-white/60 font-bold">Aposta {n}</span>
+                          <span className="text-[10px] text-yellow-400">Pendente</span>
+                        </div>
+                      ))}
+                    </div>
+                    <Button onClick={() => setPromoNotif(null)} className="w-full bg-emerald-500 hover:bg-emerald-600 text-black font-black h-12">COMEÇAR A APOSTAR</Button>
+                  </div>
+                </>
+              )}
+              {promoNotif.type === "bonus100" && (
+                <>
+                  <img src="https://images.unsplash.com/photo-1517466787929-bc90951d0974?q=80&w=800&auto=format&fit=crop" className="absolute inset-0 w-full h-full object-cover scale-105" alt="" />
+                  <div className="absolute inset-0 bg-gradient-to-br from-yellow-700/85 to-black/95" />
+                  <div className="relative z-10 p-8 text-center">
+                    <div className="text-5xl mb-3">🏆</div>
+                    <div className="inline-block px-3 py-1 rounded-full bg-white/15 text-xs font-black tracking-widest text-white mb-4">BÓNUS BOAS-VINDAS</div>
+                    <h2 className="text-3xl font-black text-white leading-tight mb-2">100% Ativo!</h2>
+                    <p className="text-yellow-300 font-black text-xl mb-4">O SEU DEPÓSITO FOI DUPLICADO</p>
+                    <p className="text-white/70 text-sm leading-relaxed mb-6">Faça apostas com rollover 5× sobre depósito + bónus em odds ≥ 1.5 para desbloquear o saldo.</p>
+                    <Button onClick={() => setPromoNotif(null)} className="w-full bg-yellow-500 hover:bg-yellow-600 text-black font-black h-12">COMEÇAR A APOSTAR</Button>
+                  </div>
+                </>
+              )}
+              {promoNotif.type === "cashback" && (
+                <>
+                  <img src="https://images.unsplash.com/photo-1546519638-68e109498ffc?q=80&w=800&auto=format&fit=crop" className="absolute inset-0 w-full h-full object-cover scale-105" alt="" />
+                  <div className="absolute inset-0 bg-gradient-to-br from-cyan-700/85 to-black/95" />
+                  <div className="relative z-10 p-8 text-center">
+                    <div className="text-5xl mb-3">💰</div>
+                    <div className="inline-block px-3 py-1 rounded-full bg-white/15 text-xs font-black tracking-widest text-white mb-4">CASHBACK SEMANAL</div>
+                    <h2 className="text-3xl font-black text-white leading-tight mb-2">Recuperou € {(promoNotif.amount ?? 0).toFixed(2)}!</h2>
+                    <p className="text-cyan-300 font-black text-xl mb-4">10% DAS SUAS PERDAS DEVOLVIDO</p>
+                    <p className="text-white/70 text-sm leading-relaxed mb-6">O cashback foi creditado em saldo bónus. Necessita de 1× rollover para levantar.</p>
+                    <Button onClick={() => setPromoNotif(null)} className="w-full bg-cyan-500 hover:bg-cyan-600 text-black font-black h-12">USAR O MEU CASHBACK</Button>
+                  </div>
+                </>
+              )}
+              <button onClick={() => setPromoNotif(null)} className="absolute top-4 right-4 text-white/60 hover:text-white bg-black/40 rounded-full p-1.5 z-20">
+                <X size={18} />
+              </button>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+    </div>
+  );
+}
+
+// ─── PROMOS PAGE ─────────────────────────────────────────────────────────────
+function PromosPage({
+  isLoggedIn,
+  cashbackData,
+  onDeposit,
+  onFetchCashback,
+  onClaimCashback,
+}: {
+  isLoggedIn: boolean;
+  cashbackData: { totalLost: number; cashback: number; bets: number } | null;
+  onDeposit: () => void;
+  onFetchCashback: () => void;
+  onClaimCashback: () => void;
+}) {
+  useEffect(() => { onFetchCashback(); }, []);
+
+  const promos = [
+    {
+      id: "bonus100",
+      title: "100% BÓNUS DE BOAS‑VINDAS",
+      subtitle: "ATÉ €500 · ROLLOVER 5×",
+      description: "Receba 100% no primeiro depósito e desbloqueie o saldo com rollover progressivo de 5× em apostas qualificadas.",
+      badge: "SPORTSBOOK",
+      image: "https://images.unsplash.com/photo-1517466787929-bc90951d0974?q=80&w=1400&auto=format&fit=crop",
+      gradient: "from-yellow-400/60 to-orange-600/60",
+      highlight: "+100%",
+      highlightLabel: "no 1.º depósito",
+      terms: ["Bónus válido apenas no 1.º depósito.", "Rollover total de 5× sobre depósito + bónus.", "Odds mínimas qualificadas: 1.5.", "Prazo de utilização: 30 dias."],
+      cta: "ATIVAR BÓNUS",
+      action: onDeposit,
+    },
+    {
+      id: "freebets20",
+      title: "DEPOSITE €20 E GANHE €10",
+      subtitle: "FREE BETS EXCLUSIVAS",
+      description: "Faça o seu primeiro depósito de €20 e conclua 4 apostas qualificadas para receber €10 em free bets.",
+      badge: "FREE BET",
+      image: "https://images.unsplash.com/photo-1521412644187-c49fa049e84d?q=80&w=1400&auto=format&fit=crop",
+      gradient: "from-emerald-400/60 to-green-700/60",
+      highlight: "€10",
+      highlightLabel: "em free bets",
+      terms: ["Depósito mínimo de €20.", "4 apostas qualificadas obrigatórias.", "Odds mínimas de 1.80.", "Free bets válidas por 7 dias."],
+      cta: "DEPOSITAR €20",
+      action: onDeposit,
+    },
+    {
+      id: "cashback",
+      title: "CASHBACK SEMANAL",
+      subtitle: "10% EM FREE BETS",
+      description: "Recupere parte das perdas líquidas em apostas esportivas toda semana. Máximo de €100 por utilizador.",
+      badge: "HOT",
+      image: "https://images.unsplash.com/photo-1546519638-68e109498ffc?q=80&w=1400&auto=format&fit=crop",
+      gradient: "from-cyan-400/60 to-blue-700/60",
+      highlight: "10%",
+      highlightLabel: cashbackData ? `≈ €${cashbackData.cashback.toFixed(2)} disp.` : "das perdas",
+      terms: ["Cashback calculado semanalmente.", "Máximo de €100 por utilizador.", "Pago em saldo bónus.", "Necessário 1× rollover para saque."],
+      cta: cashbackData && cashbackData.cashback > 0 ? `RESGATAR €${cashbackData.cashback.toFixed(2)}` : "VER DETALHES",
+      action: onClaimCashback,
+    },
+    {
+      id: "superodds",
+      title: "SUPER ODDS",
+      subtitle: "BOOSTS ESPORTIVOS DIÁRIOS",
+      description: "Odds turbinadas diariamente nos principais jogos e campeonatos. Maximize os seus ganhos nos eventos em destaque.",
+      badge: "BOOST",
+      image: "https://images.unsplash.com/photo-1505250469679-203ad9ced0cb?q=80&w=1400&auto=format&fit=crop",
+      gradient: "from-red-500/60 to-rose-700/60",
+      highlight: "+25%",
+      highlightLabel: "nas odds",
+      terms: ["Disponível apenas em eventos selecionados.", "Stake máxima promocional: €50.", "Mercados limitados por evento.", "Boosts atualizam às 10h diariamente."],
+      cta: "VER JOGOS COM BOOST",
+      action: () => {},
+    },
+  ];
+
+  return (
+    <div className="bg-[#050816] px-4 sm:px-6 py-8 min-h-[60vh]">
+      <div className="max-w-5xl mx-auto space-y-6">
+        {promos.map((promo) => (
+          <div
+            key={promo.id}
+            className="relative overflow-hidden rounded-[28px] min-h-[300px] group border border-white/10 shadow-[0_20px_60px_rgba(0,0,0,0.45)]"
+          >
+            <img
+              src={promo.image}
+              alt={promo.title}
+              className="absolute inset-0 w-full h-full object-cover scale-105 group-hover:scale-110 transition-all duration-700"
+            />
+            <div className={`absolute inset-0 bg-gradient-to-r ${promo.gradient}`} />
+            <div className="absolute inset-0 bg-black/55" />
+
+            <div className="relative z-10 h-full flex items-center justify-between p-6 sm:p-8 gap-6">
+              <div className="max-w-2xl flex-1">
+                <div className="flex items-center gap-3 mb-4">
+                  <span className="px-3 py-1.5 rounded-full bg-white/15 backdrop-blur-xl text-xs font-black tracking-[0.18em] border border-white/20 text-white">
+                    {promo.badge}
+                  </span>
+                  {promo.id === "cashback" && cashbackData && cashbackData.cashback > 0 && (
+                    <span className="px-3 py-1.5 rounded-full bg-cyan-500/20 text-xs font-black tracking-wider border border-cyan-400/30 text-cyan-300">
+                      💰 DISPONÍVEL
+                    </span>
+                  )}
+                </div>
+                <h2 className="text-3xl sm:text-4xl font-black text-white leading-tight tracking-tight drop-shadow-2xl">
+                  {promo.title}
+                </h2>
+                <h3 className="text-base sm:text-lg font-bold text-white/85 mt-2 tracking-wide">
+                  {promo.subtitle}
+                </h3>
+                <p className="mt-3 text-sm sm:text-base text-white/75 max-w-xl leading-relaxed">
+                  {promo.description}
+                </p>
+                <div className="mt-4 flex flex-wrap gap-2">
+                  {promo.terms.map((term, i) => (
+                    <div key={i} className="px-3 py-1.5 rounded-2xl bg-white/10 backdrop-blur-xl border border-white/10 text-xs text-white/75">
+                      {term}
+                    </div>
+                  ))}
+                </div>
+                <button
+                  onClick={isLoggedIn || promo.id === "superodds" ? promo.action : () => {}}
+                  className="mt-5 px-6 py-3 rounded-2xl bg-white text-black font-black text-sm tracking-wide hover:bg-white/90 transition-all active:scale-95 shadow-lg"
+                >
+                  {!isLoggedIn && promo.id !== "superodds" ? "ENTRAR PARA ATIVAR" : promo.cta}
+                </button>
+              </div>
+
+              <div className="hidden lg:flex flex-col items-center shrink-0">
+                <div className="bg-white/10 backdrop-blur-2xl border border-white/15 rounded-[24px] px-7 py-5 group-hover:scale-105 transition-all duration-500 text-center min-w-[140px]">
+                  <div className="text-white/50 text-[10px] font-bold mb-1 uppercase tracking-widest">Promoção Ativa</div>
+                  <div className="text-5xl font-black text-white leading-none">{promo.highlight}</div>
+                  <div className="mt-2 text-emerald-300 font-semibold text-xs">{promo.highlightLabel}</div>
+                </div>
+              </div>
+            </div>
+
+            <div className="absolute bottom-0 left-0 right-0 h-[2px] bg-gradient-to-r from-transparent via-white/60 to-transparent" />
+          </div>
+        ))}
+      </div>
+
+      <div className="max-w-5xl mx-auto mt-10">
+        <div className="relative overflow-hidden rounded-[24px] border border-white/10 bg-white/5 backdrop-blur-2xl px-6 py-6">
+          <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(52,211,153,0.10),transparent_40%)]" />
+          <div className="relative z-10">
+            <h4 className="text-lg font-black text-white tracking-wide mb-4">TERMOS & CONDIÇÕES DAS PROMOÇÕES</h4>
+            <div className="grid md:grid-cols-2 gap-4 text-white/65 text-sm leading-relaxed">
+              <div className="space-y-2">
+                <p>• Promoções válidas apenas para utilizadores registados na plataforma.</p>
+                <p>• Apenas apostas esportivas qualificadas contam para rollover e missões.</p>
+                <p>• Odds mínimas exigidas podem variar conforme a promoção ativa.</p>
+                <p>• Free bets não possuem valor de stake retornável.</p>
+              </div>
+              <div className="space-y-2">
+                <p>• A plataforma reserva-se o direito de alterar ou cancelar promoções em caso de abuso.</p>
+                <p>• Contas duplicadas ou atividades suspeitas invalidam automaticamente os bónus.</p>
+                <p>• Todas as promoções estão sujeitas à política de jogo responsável.</p>
+                <p>• Última atualização: 07 Maio 2026.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
