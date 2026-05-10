@@ -767,6 +767,20 @@ type VolleyScheduleData = {
 const volleyScheduleCache = new Map<string, { data: VolleyScheduleData; at: number }>();
 const VOLLEY_SCHEDULE_TTL = 5 * 60 * 1000;
 
+// Volleyball standings
+type VolleyStandingTeam = {
+  id: string; name: string; pos: string; gp: string;
+  w: string; l: string; pts: string;
+  points_for: string; points_against: string;
+  recent_form: string;
+  description?: { value: string } | string;
+};
+type VolleyStandingsData = {
+  id: string; name: string; season: string; country: string;
+  teams: VolleyStandingTeam[];
+};
+const volleyStandingsCache = new Map<string, { data: VolleyStandingsData; at: number }>();
+
 // Tennis tournament list (ATP + WTA) — active tournaments today
 type TournamentRaw = {
   id: string; name: string; category: string;
@@ -2826,6 +2840,36 @@ async function getVolleyballDailyResults(): Promise<VolleyDailyResult[]> {
   }
 }
 
+async function getVolleyballStandings(leagueId: string): Promise<VolleyStandingsData | null> {
+  const cached = volleyStandingsCache.get(leagueId);
+  if (cached && Date.now() - cached.at < VOLLEY_SCHEDULE_TTL) return cached.data;
+  try {
+    const resp = await fetch(`${BASE_V1}/volleyball/standings/${leagueId}?access_key=${STATSPAL_KEY}`, { signal: AbortSignal.timeout(9000) });
+    if (!resp.ok) return null;
+    const raw = (await resp.json()) as {
+      standings?: {
+        country?: string;
+        category?: {
+          id?: string; name?: string; season?: string;
+          league?: { team?: VolleyStandingTeam | VolleyStandingTeam[] };
+        };
+      };
+    };
+    const country = raw?.standings?.country ?? "";
+    const cat = raw?.standings?.category;
+    const teamsRaw = cat?.league?.team;
+    const teams = Array.isArray(teamsRaw) ? teamsRaw : (teamsRaw ? [teamsRaw] : []);
+    const data: VolleyStandingsData = {
+      id: leagueId, name: cat?.name ?? "", season: cat?.season ?? "",
+      country, teams,
+    };
+    volleyStandingsCache.set(leagueId, { data, at: Date.now() });
+    return data;
+  } catch {
+    return null;
+  }
+}
+
 async function getVolleyballActiveLeagues(): Promise<VolleyLeague[]> {
   const tours = await getVolleyballLive();
   const seen = new Set<string>();
@@ -3106,6 +3150,17 @@ router.get("/volleyball-results", async (_req, res) => {
     res.json({ results });
   } catch {
     res.status(500).json({ error: "Resultados indisponíveis" });
+  }
+});
+
+router.get("/volleyball-standings/:id", async (req, res) => {
+  try {
+    const id = String(req.params["id"]);
+    const data = await getVolleyballStandings(id);
+    // Return empty-teams payload if the standings don't exist for this phase (e.g. play-offs)
+    res.json(data ?? { id, name: "", season: "", country: "", teams: [] });
+  } catch {
+    res.status(500).json({ error: "Classificação indisponível" });
   }
 });
 

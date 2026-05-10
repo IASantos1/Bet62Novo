@@ -843,6 +843,21 @@ export default function Home() {
   const [volleyScheduleMap, setVolleyScheduleMap] = useState<Record<string, VolleySchedule>>({});
   const [volleyScheduleLoading, setVolleyScheduleLoading] = useState(false);
 
+  // Volleyball standings
+  type VolleyStandingTeam = {
+    id: string; name: string; pos: string; gp: string;
+    w: string; l: string; pts: string;
+    points_for: string; points_against: string;
+    recent_form: string;
+    description?: { value: string } | string;
+  };
+  type VolleyStandings = {
+    id: string; name: string; season: string; country: string;
+    teams: VolleyStandingTeam[];
+  };
+  const [volleyStandingsMap, setVolleyStandingsMap] = useState<Record<string, VolleyStandings>>({});
+  const [volleyLeagueTab, setVolleyLeagueTab] = useState<"schedule" | "standings">("schedule");
+
   // Sidebar tree state
   const [sidebarExpandedSport, setSidebarExpandedSport] = useState<string | null>(null);
   const [sidebarExpandedCountry, setSidebarExpandedCountry] = useState<string | null>(null);
@@ -1081,6 +1096,7 @@ export default function Home() {
   const handleVolleyLeagueClick = (id: string) => {
     if (expandedVolleyLeagueId === id) { setExpandedVolleyLeagueId(null); return; }
     setExpandedVolleyLeagueId(id);
+    setVolleyLeagueTab("schedule");
     if (!volleyScheduleMap[id]) {
       setVolleyScheduleLoading(true);
       fetch(`/api/matches/volleyball-schedule/${id}`)
@@ -1088,6 +1104,16 @@ export default function Home() {
         .then(d => { if (d) setVolleyScheduleMap(prev => ({ ...prev, [id]: d })); })
         .catch(() => {})
         .finally(() => setVolleyScheduleLoading(false));
+    }
+  };
+
+  const handleVolleyStandingsTab = (id: string) => {
+    setVolleyLeagueTab("standings");
+    if (!(id in volleyStandingsMap)) {
+      fetch(`/api/matches/volleyball-standings/${id}`)
+        .then(r => r.ok ? r.json() : null)
+        .then(d => { setVolleyStandingsMap(prev => ({ ...prev, [id]: d })); })
+        .catch(() => { setVolleyStandingsMap(prev => ({ ...prev, [id]: null as unknown as VolleyStandings })); });
     }
   };
 
@@ -3696,85 +3722,162 @@ export default function Home() {
                         })}
                       </div>
 
-                      {/* expanded schedule panel */}
+                      {/* expanded panel with tabs */}
                       {expandedVolleyLeagueId && (() => {
                         const schedule = volleyScheduleMap[expandedVolleyLeagueId];
-                        if (!schedule && volleyScheduleLoading) {
-                          return <div className="text-xs text-zinc-600 text-center py-4">A carregar calendário...</div>;
+                        const standings = volleyStandingsMap[expandedVolleyLeagueId];
+                        const loading = !schedule && volleyScheduleLoading;
+                        if (loading) {
+                          return <div className="text-xs text-zinc-600 text-center py-4">A carregar...</div>;
                         }
                         if (!schedule) return null;
+
                         return (
                           <div className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4">
-                            <div className="flex items-center justify-between mb-4">
-                              <div>
-                                <div className="text-sm font-black text-white">{schedule.league}</div>
-                                <div className="text-[10px] text-zinc-500 capitalize">{schedule.country} · {schedule.season}</div>
-                              </div>
+                            {/* header */}
+                            <div className="mb-3">
+                              <div className="text-sm font-black text-white">{schedule.league}</div>
+                              <div className="text-[10px] text-zinc-500 capitalize">{schedule.country} · {schedule.season}</div>
                             </div>
 
-                            {/* next round */}
-                            {schedule.nextWeek && (
-                              <div className="mb-4">
-                                <div className="text-[10px] font-black uppercase tracking-widest text-red-500 mb-2">
-                                  {schedule.nextWeek.number}
-                                </div>
-                                <div className="space-y-1.5">
-                                  {schedule.nextWeek.matches.map(m => (
-                                    <div key={m.id} className="flex items-center bg-zinc-800/60 rounded-lg px-3 py-2 gap-2">
-                                      <span className="text-[10px] text-zinc-500 tabular-nums shrink-0">{m.time}</span>
-                                      <span className="text-xs font-bold text-white flex-1 truncate">{m.home}</span>
-                                      <span className="text-[10px] text-zinc-600 shrink-0">vs</span>
-                                      <span className="text-xs font-bold text-white flex-1 text-right truncate">{m.away}</span>
-                                      <span className="text-[10px] text-zinc-500 tabular-nums shrink-0">
-                                        {m.date.split(".").slice(0, 2).join("/")}
-                                      </span>
+                            {/* tab bar */}
+                            <div className="flex gap-1 mb-4 bg-zinc-800/50 rounded-lg p-1">
+                              <button
+                                onClick={() => setVolleyLeagueTab("schedule")}
+                                className={`flex-1 text-xs font-bold rounded-md px-3 py-1.5 transition-all ${volleyLeagueTab === "schedule" ? "bg-zinc-700 text-white" : "text-zinc-500 hover:text-zinc-300"}`}
+                              >
+                                Calendário
+                              </button>
+                              <button
+                                onClick={() => handleVolleyStandingsTab(expandedVolleyLeagueId)}
+                                className={`flex-1 text-xs font-bold rounded-md px-3 py-1.5 transition-all ${volleyLeagueTab === "standings" ? "bg-zinc-700 text-white" : "text-zinc-500 hover:text-zinc-300"}`}
+                              >
+                                Classificação
+                              </button>
+                            </div>
+
+                            {/* ── Calendário tab ── */}
+                            {volleyLeagueTab === "schedule" && (
+                              <>
+                                {schedule.nextWeek && (
+                                  <div className="mb-4">
+                                    <div className="text-[10px] font-black uppercase tracking-widest text-red-500 mb-2">
+                                      {schedule.nextWeek.number}
                                     </div>
-                                  ))}
-                                </div>
-                              </div>
+                                    <div className="space-y-1.5">
+                                      {schedule.nextWeek.matches.map(m => (
+                                        <div key={m.id} className="flex items-center bg-zinc-800/60 rounded-lg px-3 py-2 gap-2">
+                                          <span className="text-[10px] text-zinc-500 tabular-nums shrink-0">{m.time}</span>
+                                          <span className="text-xs font-bold text-white flex-1 truncate">{m.home}</span>
+                                          <span className="text-[10px] text-zinc-600 shrink-0">vs</span>
+                                          <span className="text-xs font-bold text-white flex-1 text-right truncate">{m.away}</span>
+                                          <span className="text-[10px] text-zinc-500 tabular-nums shrink-0">
+                                            {m.date.split(".").slice(0, 2).join("/")}
+                                          </span>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  </div>
+                                )}
+
+                                {schedule.recentWeeks.length > 0 && (
+                                  <div>
+                                    <div className="text-[10px] font-black uppercase tracking-widest text-zinc-500 mb-2">Resultados Recentes</div>
+                                    {schedule.recentWeeks.slice().reverse().map(week => (
+                                      <div key={week.number} className="mb-3">
+                                        <div className="text-[10px] font-bold text-zinc-600 mb-1.5">{week.number}</div>
+                                        <div className="space-y-1">
+                                          {week.matches.map(m => {
+                                            const winner = m.homeWon ? m.home : m.away;
+                                            const loser  = m.homeWon ? m.away : m.home;
+                                            const wTotal = m.homeWon ? m.homeSets : m.awaySets;
+                                            const lTotal = m.homeWon ? m.awaySets : m.homeSets;
+                                            const wSets  = m.homeWon ? m.sets.map(([h]) => h)    : m.sets.map(([, a]) => a);
+                                            const lSets  = m.homeWon ? m.sets.map(([, a]) => a)  : m.sets.map(([h]) => h);
+                                            return (
+                                              <div key={m.id} className="flex items-center gap-3 bg-zinc-800/40 rounded-lg px-3 py-1.5">
+                                                <div className="flex-1 min-w-0">
+                                                  <div className="text-xs font-bold text-white truncate">{winner}</div>
+                                                  <div className="text-xs text-zinc-500 truncate">{loser}</div>
+                                                </div>
+                                                <div className="flex items-center gap-2 shrink-0">
+                                                  <div className="text-xs font-black text-white tabular-nums">
+                                                    {wTotal}<span className="text-zinc-600 mx-0.5">–</span>{lTotal}
+                                                  </div>
+                                                  <div className="flex gap-0.5">
+                                                    {wSets.map((ws, i) => (
+                                                      <div key={i} className="w-5 text-center">
+                                                        <div className={`text-[10px] font-black leading-tight ${ws > (lSets[i] ?? 0) ? "text-white" : "text-zinc-600"}`}>{ws}</div>
+                                                        <div className={`text-[10px] font-black leading-tight ${(lSets[i] ?? 0) > ws ? "text-zinc-400" : "text-zinc-600"}`}>{lSets[i]}</div>
+                                                      </div>
+                                                    ))}
+                                                  </div>
+                                                </div>
+                                              </div>
+                                            );
+                                          })}
+                                        </div>
+                                      </div>
+                                    ))}
+                                  </div>
+                                )}
+                              </>
                             )}
 
-                            {/* recent results */}
-                            {schedule.recentWeeks.length > 0 && (
-                              <div>
-                                <div className="text-[10px] font-black uppercase tracking-widest text-zinc-500 mb-2">Resultados Recentes</div>
-                                {schedule.recentWeeks.slice().reverse().map(week => (
-                                  <div key={week.number} className="mb-3">
-                                    <div className="text-[10px] font-bold text-zinc-600 mb-1.5">{week.number}</div>
-                                    <div className="space-y-1">
-                                      {week.matches.map(m => {
-                                        const winner = m.homeWon ? m.home : m.away;
-                                        const loser  = m.homeWon ? m.away : m.home;
-                                        const wTotal = m.homeWon ? m.homeSets : m.awaySets;
-                                        const lTotal = m.homeWon ? m.awaySets : m.homeSets;
-                                        const wSets  = m.homeWon ? m.sets.map(([h]) => h)    : m.sets.map(([, a]) => a);
-                                        const lSets  = m.homeWon ? m.sets.map(([, a]) => a)  : m.sets.map(([h]) => h);
+                            {/* ── Classificação tab ── */}
+                            {volleyLeagueTab === "standings" && (
+                              <>
+                                {!(expandedVolleyLeagueId in volleyStandingsMap) && (
+                                  <div className="text-xs text-zinc-600 text-center py-4">A carregar classificação...</div>
+                                )}
+                                {expandedVolleyLeagueId in volleyStandingsMap && (!standings || standings.teams.length === 0) && (
+                                  <div className="text-center py-6">
+                                    <div className="text-2xl mb-2">📊</div>
+                                    <div className="text-xs font-bold text-zinc-500">Classificação disponível apenas na fase regular</div>
+                                    <div className="text-[10px] text-zinc-600 mt-1">Esta liga encontra-se em fase de play-offs</div>
+                                  </div>
+                                )}
+                                {standings && standings.teams.length > 0 && (
+                                  <>
+                                    {standings.name && <div className="text-[10px] font-black uppercase tracking-widest text-zinc-500 mb-2">{standings.name}</div>}
+                                    {/* table header */}
+                                    <div className="grid grid-cols-[1.5rem_1fr_2rem_2rem_2rem_3.5rem_3rem] gap-x-1 px-2 mb-1">
+                                      <span className="text-[9px] text-zinc-600">#</span>
+                                      <span className="text-[9px] text-zinc-600">Equipa</span>
+                                      <span className="text-[9px] text-zinc-600 text-center">V</span>
+                                      <span className="text-[9px] text-zinc-600 text-center">D</span>
+                                      <span className="text-[9px] text-zinc-600 text-center">Pts</span>
+                                      <span className="text-[9px] text-zinc-600 text-center">Sets</span>
+                                      <span className="text-[9px] text-zinc-600 text-center">Forma</span>
+                                    </div>
+                                    <div className="space-y-0.5">
+                                      {standings.teams.map((t, idx) => {
+                                        const desc = typeof t.description === "object" ? t.description?.value : t.description;
+                                        const isPromo = desc?.toLowerCase().includes("play off") || desc?.toLowerCase().includes("quarter") || desc?.toLowerCase().includes("final") || desc?.toLowerCase().includes("semi");
+                                        const form = (t.recent_form ?? "").split("");
                                         return (
-                                          <div key={m.id} className="flex items-center gap-3 bg-zinc-800/40 rounded-lg px-3 py-1.5">
-                                            <div className="flex-1 min-w-0">
-                                              <div className="text-xs font-bold text-white truncate">{winner}</div>
-                                              <div className="text-xs text-zinc-500 truncate">{loser}</div>
-                                            </div>
-                                            <div className="flex items-center gap-2 shrink-0">
-                                              <div className="text-xs font-black text-white tabular-nums">
-                                                {wTotal}<span className="text-zinc-600 mx-0.5">–</span>{lTotal}
-                                              </div>
-                                              <div className="flex gap-0.5">
-                                                {wSets.map((ws, i) => (
-                                                  <div key={i} className="w-5 text-center">
-                                                    <div className={`text-[10px] font-black leading-tight ${ws > (lSets[i] ?? 0) ? "text-white" : "text-zinc-600"}`}>{ws}</div>
-                                                    <div className={`text-[10px] font-black leading-tight ${(lSets[i] ?? 0) > ws ? "text-zinc-400" : "text-zinc-600"}`}>{lSets[i]}</div>
-                                                  </div>
-                                                ))}
-                                              </div>
+                                          <div
+                                            key={t.id}
+                                            className={`grid grid-cols-[1.5rem_1fr_2rem_2rem_2rem_3.5rem_3rem] gap-x-1 items-center rounded-lg px-2 py-1.5 ${idx % 2 === 0 ? "bg-zinc-800/30" : ""}`}
+                                          >
+                                            <span className={`text-[10px] font-black tabular-nums ${isPromo ? "text-red-400" : "text-zinc-500"}`}>{t.pos}</span>
+                                            <span className="text-xs font-bold text-white truncate">{t.name}</span>
+                                            <span className="text-[10px] text-zinc-300 text-center tabular-nums">{t.w}</span>
+                                            <span className="text-[10px] text-zinc-500 text-center tabular-nums">{t.l}</span>
+                                            <span className="text-[10px] font-black text-white text-center tabular-nums">{t.pts}</span>
+                                            <span className="text-[10px] text-zinc-500 text-center tabular-nums">{t.points_for}/{t.points_against}</span>
+                                            <div className="flex gap-0.5 justify-center">
+                                              {form.slice(-5).map((ch, i) => (
+                                                <span key={i} className={`text-[8px] font-black w-3 h-3 rounded-sm flex items-center justify-center ${ch === "W" ? "bg-green-500/20 text-green-400" : "bg-red-500/20 text-red-400"}`}>{ch}</span>
+                                              ))}
                                             </div>
                                           </div>
                                         );
                                       })}
                                     </div>
-                                  </div>
-                                ))}
-                              </div>
+                                  </>
+                                )}
+                              </>
                             )}
                           </div>
                         );
