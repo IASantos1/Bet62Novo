@@ -162,11 +162,11 @@ function getTeamBanner(teamName: string, country?: string): string | undefined {
 const ARENA_BANNER = "/arena-banner.png";
 
 function getMatchBanner(match: { home: string; country?: string; sport?: string }): string | undefined {
-  // Only use football team banners for football matches — never show football stadium for basketball/tennis/hockey
+  // Only use football team banners for football — no image for basketball/tennis/hockey/volleyball
   if (!match.sport || match.sport === "football") {
     return getTeamBanner(match.home, match.country);
   }
-  return ARENA_BANNER;
+  return undefined;
 }
 
 const COUNTRY_FLAGS: Record<string, string> = {
@@ -2362,7 +2362,7 @@ export default function Home() {
   };
 
   return (
-    <div className="min-h-[100dvh] w-full bg-zinc-950 text-white flex flex-col dark font-sans">
+    <div className="min-h-[100dvh] w-full bg-background text-foreground flex flex-col font-sans transition-colors duration-500">
 
       {/* HEADER */}
       <header className="sticky top-0 z-40 bg-zinc-950 border-b border-zinc-900">
