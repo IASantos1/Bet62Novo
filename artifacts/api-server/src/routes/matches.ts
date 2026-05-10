@@ -2878,6 +2878,42 @@ router.get("/tournaments", async (_req, res) => {
   }
 });
 
+// ─── Tennis standings (ATP + WTA) ──────────────────────────────────────────
+type StandingPlayer = { id: string; name: string; country: string; rank: string; points: string; movement: string; };
+type StandingsTour = { atp: StandingPlayer[]; wta: StandingPlayer[] };
+let standingsCache: StandingsTour | null = null;
+let standingsFetchedAt = 0;
+const STANDINGS_CACHE_TTL = 30 * 60 * 1000;
+
+async function getTennisStandings(): Promise<StandingsTour> {
+  const now = Date.now();
+  if (standingsCache && now - standingsFetchedAt < STANDINGS_CACHE_TTL) return standingsCache;
+  const fetchTour = async (tour: "atp" | "wta"): Promise<StandingPlayer[]> => {
+    try {
+      const resp = await fetch(`${BASE_V1}/tennis/standings/${tour}?access_key=${STATSPAL_KEY}`, { signal: AbortSignal.timeout(8000) });
+      if (!resp.ok) return [];
+      const data = (await resp.json()) as { standings?: { player?: StandingPlayer | StandingPlayer[] } };
+      const raw = data?.standings?.player;
+      if (!raw) return [];
+      const arr = Array.isArray(raw) ? raw : [raw];
+      return arr.slice(0, 100); // top 100 per tour
+    } catch { return []; }
+  };
+  const [atp, wta] = await Promise.all([fetchTour("atp"), fetchTour("wta")]);
+  standingsCache = { atp, wta };
+  standingsFetchedAt = now;
+  return standingsCache;
+}
+
+router.get("/standings", async (_req, res) => {
+  try {
+    const standings = await getTennisStandings();
+    res.json(standings);
+  } catch {
+    res.status(500).json({ error: "Rankings indisponíveis" });
+  }
+});
+
 router.get("/tournaments/:id", async (req, res) => {
   const id = String(req.params["id"]);
   try {

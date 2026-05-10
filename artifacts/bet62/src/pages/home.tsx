@@ -800,6 +800,12 @@ export default function Home() {
   const [tournamentDetail, setTournamentDetail] = useState<{ id: string; league: string; matches: TournamentMatch[] } | null>(null);
   const [tournamentDetailLoading, setTournamentDetailLoading] = useState(false);
 
+  // Tennis ATP/WTA standings
+  type StandingPlayer = { id: string; name: string; country: string; rank: string; points: string; movement: string; };
+  const [tennisStandings, setTennisStandings] = useState<{ atp: StandingPlayer[]; wta: StandingPlayer[] } | null>(null);
+  const [rankingsTour, setRankingsTour] = useState<"atp" | "wta">("atp");
+  const [rankingsOpen, setRankingsOpen] = useState(false);
+
   // Sidebar tree state
   const [sidebarExpandedSport, setSidebarExpandedSport] = useState<string | null>(null);
   const [sidebarExpandedCountry, setSidebarExpandedCountry] = useState<string | null>(null);
@@ -928,6 +934,10 @@ export default function Home() {
     fetch("/api/matches/tournaments")
       .then(r => r.ok ? r.json() : { tournaments: [] })
       .then(d => setActiveTournaments(d.tournaments ?? []))
+      .catch(() => { /* non-critical */ });
+    fetch("/api/matches/standings")
+      .then(r => r.ok ? r.json() : null)
+      .then(d => { if (d) setTennisStandings(d); })
       .catch(() => { /* non-critical */ });
   }, []);
 
@@ -3274,11 +3284,28 @@ export default function Home() {
                             );
                           };
 
+                          // Build surname→rank map from standings (for the expanded tour)
+                          const surnameToRank = (() => {
+                            const map = new Map<string, string>();
+                            const list = expandedT?.tour === "wta" ? tennisStandings?.wta : tennisStandings?.atp;
+                            list?.forEach(p => {
+                              const parts = p.name.split(" ");
+                              if (parts.length > 1) map.set(parts.slice(1).join(" ").toLowerCase(), p.rank);
+                            });
+                            return map;
+                          })();
+                          const playerRank = (shortName: string) => {
+                            const surname = shortName.replace(/^[A-Z]\.\s*/, "").trim().toLowerCase();
+                            return surnameToRank.get(surname) ?? null;
+                          };
+
                           const MatchRow = ({ m }: { m: TournamentMatch }) => {
                             const p0 = m.players[0];
                             const p1 = m.players[1];
                             if (!p0 || !p1) return null;
                             const isNotStarted = m.status === "Not Started";
+                            const r0 = playerRank(p0.name);
+                            const r1 = playerRank(p1.name);
                             return (
                               <div className="flex items-center gap-2 py-1.5 border-b border-zinc-800/50 last:border-0">
                                 {/* Time / score column */}
@@ -3293,11 +3320,13 @@ export default function Home() {
                                 <div className="flex-1 min-w-0">
                                   <div className={`text-[11px] leading-none font-semibold truncate ${p0.winner ? "text-white" : "text-zinc-400"}`}>
                                     {p0.serve && <span className="text-yellow-400 mr-0.5">●</span>}
+                                    {r0 && <span className="text-[8px] font-black text-zinc-600 mr-1">#{r0}</span>}
                                     {p0.name}
                                     {p0.winner && <span className="ml-1 text-emerald-400 text-[9px]">✓</span>}
                                   </div>
                                   <div className={`text-[11px] leading-none mt-0.5 font-semibold truncate ${p1.winner ? "text-white" : "text-zinc-400"}`}>
                                     {p1.serve && <span className="text-yellow-400 mr-0.5">●</span>}
+                                    {r1 && <span className="text-[8px] font-black text-zinc-600 mr-1">#{r1}</span>}
                                     {p1.name}
                                     {p1.winner && <span className="ml-1 text-emerald-400 text-[9px]">✓</span>}
                                   </div>
@@ -3361,6 +3390,76 @@ export default function Home() {
                             </div>
                           );
                         })()}
+                      </div>
+                    );
+                  })()}
+
+                  {/* ─── Ranking ATP / WTA ──────────────────────────────────── */}
+                  {(selectedSport === "all" || selectedSport === "tennis") && tennisStandings && !selectedLeague && (() => {
+                    const FLAG: Record<string, string> = {
+                      "Spain":"🇪🇸","Italy":"🇮🇹","Serbia":"🇷🇸","Russia":"🇷🇺","Germany":"🇩🇪",
+                      "Norway":"🇳🇴","Greece":"🇬🇷","France":"🇫🇷","United States":"🇺🇸","USA":"🇺🇸",
+                      "Australia":"🇦🇺","Canada":"🇨🇦","United Kingdom":"🇬🇧","Great Britain":"🇬🇧",
+                      "Argentina":"🇦🇷","Denmark":"🇩🇰","Poland":"🇵🇱","Bulgaria":"🇧🇬",
+                      "Czech Republic":"🇨🇿","Slovakia":"🇸🇰","Croatia":"🇭🇷","Hungary":"🇭🇺",
+                      "Belgium":"🇧🇪","Netherlands":"🇳🇱","Switzerland":"🇨🇭","Austria":"🇦🇹",
+                      "Portugal":"🇵🇹","Japan":"🇯🇵","China":"🇨🇳","Kazakhstan":"🇰🇿",
+                      "Ukraine":"🇺🇦","Belarus":"🇧🇾","Romania":"🇷🇴","Brazil":"🇧🇷",
+                      "Chile":"🇨🇱","Colombia":"🇨🇴","Mexico":"🇲🇽","Taiwan":"🇹🇼",
+                      "South Korea":"🇰🇷","Tunisia":"🇹🇳","Latvia":"🇱🇻","Estonia":"🇪🇪",
+                      "Finland":"🇫🇮","Sweden":"🇸🇪","Turkey":"🇹🇷","Israel":"🇮🇱",
+                      "Philippines":"🇵🇭","Georgia":"🇬🇪","Albania":"🇦🇱",
+                    };
+                    const movIcon = (m: string) =>
+                      m === "up" ? <span className="text-emerald-500 text-[9px]">↑</span>
+                      : m === "down" ? <span className="text-red-500 text-[9px]">↓</span>
+                      : <span className="text-zinc-700 text-[9px]">−</span>;
+                    const fmtPts = (pts: string) => Number(pts).toLocaleString("pt-PT");
+                    const list = rankingsTour === "atp" ? tennisStandings.atp : tennisStandings.wta;
+                    return (
+                      <div className="mb-5">
+                        <button
+                          onClick={() => setRankingsOpen(o => !o)}
+                          className="w-full flex items-center justify-between mb-2.5 group"
+                        >
+                          <div className="flex items-center gap-2">
+                            <span className="text-[10px] font-black text-zinc-500 uppercase tracking-widest group-hover:text-zinc-300 transition-colors">
+                              Ranking
+                            </span>
+                            <div className="flex rounded overflow-hidden border border-zinc-700">
+                              {(["atp","wta"] as const).map(tour => (
+                                <button
+                                  key={tour}
+                                  onClick={e => { e.stopPropagation(); setRankingsTour(tour); setRankingsOpen(true); }}
+                                  className={`text-[9px] font-black px-1.5 py-0.5 transition-colors ${rankingsTour === tour ? (tour === "wta" ? "bg-pink-900/60 text-pink-300" : "bg-zinc-700 text-white") : "text-zinc-600 hover:text-zinc-400"}`}
+                                >
+                                  {tour.toUpperCase()}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                          <ChevronDown size={12} className={`text-zinc-600 transition-transform duration-200 ${rankingsOpen ? "" : "-rotate-90"}`} />
+                        </button>
+
+                        {rankingsOpen && (
+                          <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 overflow-hidden">
+                            {list.slice(0, 20).map((p, i) => (
+                              <div key={p.id} className={`flex items-center gap-2 px-3 py-1.5 ${i < list.slice(0,20).length - 1 ? "border-b border-zinc-800/60" : ""}`}>
+                                {/* Rank */}
+                                <span className={`text-[11px] font-black tabular-nums w-5 text-right shrink-0 ${i < 3 ? "text-amber-400" : "text-zinc-600"}`}>
+                                  {p.rank}
+                                </span>
+                                {/* Movement */}
+                                <span className="w-3 shrink-0 text-center">{movIcon(p.movement)}</span>
+                                {/* Flag + Name */}
+                                <span className="text-sm shrink-0">{FLAG[p.country] ?? "🏴"}</span>
+                                <span className={`text-[11px] font-semibold flex-1 truncate ${i < 3 ? "text-white" : "text-zinc-300"}`}>{p.name}</span>
+                                {/* Points */}
+                                <span className="text-[10px] text-zinc-600 tabular-nums shrink-0">{fmtPts(p.points)}</span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
                       </div>
                     );
                   })()}
