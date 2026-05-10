@@ -746,6 +746,27 @@ type VolleyDailyResult = {
 let volleyResultsCache: VolleyDailyResult[] | null = null;
 let volleyResultsFetchedAt = 0;
 
+// Volleyball season schedule
+type VolleyScheduleMatch = {
+  id: string; status: string; date: string; time: string;
+  home: VolleyTeam; away: VolleyTeam;
+};
+type VolleyScheduleWeek = { number: string; match: VolleyScheduleMatch | VolleyScheduleMatch[] };
+type VolleyLeague = { id: string; gid: string; league: string; country: string };
+type VolleyScheduleEntry = {
+  id: string; home: string; away: string;
+  homeSets: number; awaySets: number;
+  sets: Array<[number, number]>;
+  homeWon: boolean; date: string; time: string;
+};
+type VolleyScheduleData = {
+  id: string; league: string; season: string; country: string;
+  recentWeeks: Array<{ number: string; matches: VolleyScheduleEntry[] }>;
+  nextWeek: { number: string; matches: Array<{ id: string; home: string; away: string; date: string; time: string }> } | null;
+};
+const volleyScheduleCache = new Map<string, { data: VolleyScheduleData; at: number }>();
+const VOLLEY_SCHEDULE_TTL = 5 * 60 * 1000;
+
 // Tennis tournament list (ATP + WTA) — active tournaments today
 type TournamentRaw = {
   id: string; name: string; category: string;
@@ -2805,6 +2826,73 @@ async function getVolleyballDailyResults(): Promise<VolleyDailyResult[]> {
   }
 }
 
+async function getVolleyballActiveLeagues(): Promise<VolleyLeague[]> {
+  const tours = await getVolleyballLive();
+  const seen = new Set<string>();
+  return tours.filter(t => { if (seen.has(t.id)) return false; seen.add(t.id); return true; })
+    .map(t => ({ id: t.id, gid: t.gid, league: t.league, country: t.country }));
+}
+
+async function getVolleyballSchedule(leagueId: string): Promise<VolleyScheduleData | null> {
+  const cached = volleyScheduleCache.get(leagueId);
+  if (cached && Date.now() - cached.at < VOLLEY_SCHEDULE_TTL) return cached.data;
+  try {
+    const resp = await fetch(`${BASE_V1}/volleyball/season-schedule/${leagueId}?access_key=${STATSPAL_KEY}`, { signal: AbortSignal.timeout(9000) });
+    if (!resp.ok) return null;
+    const raw = (await resp.json()) as {
+      scores?: {
+        country?: string;
+        tournament?: { id?: string; league?: string; season?: string; week?: VolleyScheduleWeek | VolleyScheduleWeek[] };
+      };
+    };
+    const t = raw?.scores?.tournament;
+    const country = raw?.scores?.country ?? "";
+    if (!t) return null;
+
+    const weeksArr = Array.isArray(t.week) ? t.week : (t.week ? [t.week] : []);
+    const sfs = ["s1", "s2", "s3", "s4", "s5"] as const;
+
+    const parseFinished = (m: VolleyScheduleMatch): VolleyScheduleEntry => {
+      const sets: Array<[number, number]> = [];
+      for (const sf of sfs) {
+        const h = m.home[sf]; const a = m.away[sf];
+        if (!h || !a) break;
+        sets.push([parseInt(h) || 0, parseInt(a) || 0]);
+      }
+      const homeSets = parseInt(m.home.totalscore) || 0;
+      const awaySets = parseInt(m.away.totalscore) || 0;
+      return { id: m.id, home: m.home.name, away: m.away.name, homeSets, awaySets, sets, homeWon: homeSets > awaySets, date: m.date, time: m.time };
+    };
+
+    const recentWeeks: VolleyScheduleData["recentWeeks"] = [];
+    let nextWeek: VolleyScheduleData["nextWeek"] = null;
+
+    for (const w of weeksArr) {
+      const matches = Array.isArray(w.match) ? w.match : (w.match ? [w.match] : []);
+      const allFinished = matches.length > 0 && matches.every(m => m.status === "Finished");
+      const hasUpcoming = matches.some(m => m.status === "Not Started");
+      if (allFinished) {
+        recentWeeks.push({ number: w.number, matches: matches.map(parseFinished) });
+      } else if (hasUpcoming && !nextWeek) {
+        nextWeek = {
+          number: w.number,
+          matches: matches.filter(m => m.status === "Not Started")
+            .map(m => ({ id: m.id, home: m.home.name, away: m.away.name, date: m.date, time: m.time })),
+        };
+      }
+    }
+
+    const data: VolleyScheduleData = {
+      id: leagueId, league: t.league ?? "", season: t.season ?? "", country,
+      recentWeeks: recentWeeks.slice(-3), nextWeek,
+    };
+    volleyScheduleCache.set(leagueId, { data, at: Date.now() });
+    return data;
+  } catch {
+    return null;
+  }
+}
+
 async function getTennisDailyResults(): Promise<TennisDailyResult[]> {
   const now = Date.now();
   if (tennisResultsCache && now - tennisResultsFetchedAt < RESULTS_CACHE_TTL) return tennisResultsCache;
@@ -3018,6 +3106,26 @@ router.get("/volleyball-results", async (_req, res) => {
     res.json({ results });
   } catch {
     res.status(500).json({ error: "Resultados indisponíveis" });
+  }
+});
+
+router.get("/volleyball-leagues", async (_req, res) => {
+  try {
+    const leagues = await getVolleyballActiveLeagues();
+    res.json({ leagues });
+  } catch {
+    res.status(500).json({ error: "Ligas indisponíveis" });
+  }
+});
+
+router.get("/volleyball-schedule/:id", async (req, res) => {
+  try {
+    const id = String(req.params["id"]);
+    const data = await getVolleyballSchedule(id);
+    if (!data) { res.status(404).json({ error: "Calendário não encontrado" }); return; }
+    res.json(data);
+  } catch {
+    res.status(500).json({ error: "Calendário indisponível" });
   }
 });
 

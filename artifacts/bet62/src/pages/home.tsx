@@ -825,6 +825,24 @@ export default function Home() {
   };
   const [tennisOddsMatches, setTennisOddsMatches] = useState<TennisOddsEntry[]>([]);
 
+  // Volleyball leagues + schedule
+  type VolleyLeague = { id: string; gid: string; league: string; country: string };
+  type VolleyScheduleEntry = {
+    id: string; home: string; away: string;
+    homeSets: number; awaySets: number;
+    sets: Array<[number, number]>;
+    homeWon: boolean; date: string; time: string;
+  };
+  type VolleySchedule = {
+    id: string; league: string; season: string; country: string;
+    recentWeeks: Array<{ number: string; matches: VolleyScheduleEntry[] }>;
+    nextWeek: { number: string; matches: Array<{ id: string; home: string; away: string; date: string; time: string }> } | null;
+  };
+  const [volleyLeagues, setVolleyLeagues] = useState<VolleyLeague[]>([]);
+  const [expandedVolleyLeagueId, setExpandedVolleyLeagueId] = useState<string | null>(null);
+  const [volleyScheduleMap, setVolleyScheduleMap] = useState<Record<string, VolleySchedule>>({});
+  const [volleyScheduleLoading, setVolleyScheduleLoading] = useState(false);
+
   // Sidebar tree state
   const [sidebarExpandedSport, setSidebarExpandedSport] = useState<string | null>(null);
   const [sidebarExpandedCountry, setSidebarExpandedCountry] = useState<string | null>(null);
@@ -954,6 +972,10 @@ export default function Home() {
       .then(r => r.ok ? r.json() : { results: [] })
       .then(d => setVolleyResults(d.results ?? []))
       .catch(() => { /* non-critical */ });
+    fetch("/api/matches/volleyball-leagues")
+      .then(r => r.ok ? r.json() : { leagues: [] })
+      .then(d => setVolleyLeagues(d.leagues ?? []))
+      .catch(() => { /* non-critical */ });
     fetch("/api/matches/tournaments")
       .then(r => r.ok ? r.json() : { tournaments: [] })
       .then(d => setActiveTournaments(d.tournaments ?? []))
@@ -1055,6 +1077,19 @@ export default function Home() {
       setMyBetsLoading(false);
     }
   }, [auth.token]);
+
+  const handleVolleyLeagueClick = (id: string) => {
+    if (expandedVolleyLeagueId === id) { setExpandedVolleyLeagueId(null); return; }
+    setExpandedVolleyLeagueId(id);
+    if (!volleyScheduleMap[id]) {
+      setVolleyScheduleLoading(true);
+      fetch(`/api/matches/volleyball-schedule/${id}`)
+        .then(r => r.ok ? r.json() : null)
+        .then(d => { if (d) setVolleyScheduleMap(prev => ({ ...prev, [id]: d })); })
+        .catch(() => {})
+        .finally(() => setVolleyScheduleLoading(false));
+    }
+  };
 
   const handleCashout = async (bet: UserBet) => {
     setCashingOut(bet.id);
@@ -3627,6 +3662,123 @@ export default function Home() {
                           })}
                         </div>
                       )}
+                    </div>
+                  )}
+
+                  {/* ─── Ligas de Voleibol ───────────────────────────────────── */}
+                  {(selectedSport === "all" || selectedSport === "volleyball") && volleyLeagues.length > 0 && !selectedLeague && (
+                    <div className="mb-6">
+                      <div className="flex items-center gap-2 mb-3">
+                        <span className="text-base font-black italic uppercase tracking-tight text-zinc-400">🏐 Ligas de Voleibol</span>
+                        <span className="text-[10px] font-bold bg-zinc-800 text-zinc-500 rounded px-1.5 py-0.5">{volleyLeagues.length}</span>
+                      </div>
+
+                      {/* league card strip */}
+                      <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-none mb-3">
+                        {volleyLeagues.map(lg => {
+                          const isExp = expandedVolleyLeagueId === lg.id;
+                          const flag = COUNTRY_FLAGS[lg.country.toLowerCase()] ?? "🏐";
+                          return (
+                            <button
+                              key={lg.id}
+                              onClick={() => handleVolleyLeagueClick(lg.id)}
+                              className={`flex-shrink-0 rounded-xl border px-3 py-2 text-left transition-all ${isExp ? "border-zinc-500 bg-zinc-800" : "border-zinc-800 bg-zinc-900/60 hover:border-zinc-700"}`}
+                            >
+                              <div className="flex items-center gap-1.5">
+                                <span className="text-sm">{flag}</span>
+                                <span className="text-xs font-bold text-white whitespace-nowrap">
+                                  {lg.league.includes(":") ? lg.league.split(":").slice(1).join(":").trim() : lg.league}
+                                </span>
+                              </div>
+                              <div className="text-[10px] text-zinc-500 mt-0.5 capitalize">{lg.country}</div>
+                            </button>
+                          );
+                        })}
+                      </div>
+
+                      {/* expanded schedule panel */}
+                      {expandedVolleyLeagueId && (() => {
+                        const schedule = volleyScheduleMap[expandedVolleyLeagueId];
+                        if (!schedule && volleyScheduleLoading) {
+                          return <div className="text-xs text-zinc-600 text-center py-4">A carregar calendário...</div>;
+                        }
+                        if (!schedule) return null;
+                        return (
+                          <div className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4">
+                            <div className="flex items-center justify-between mb-4">
+                              <div>
+                                <div className="text-sm font-black text-white">{schedule.league}</div>
+                                <div className="text-[10px] text-zinc-500 capitalize">{schedule.country} · {schedule.season}</div>
+                              </div>
+                            </div>
+
+                            {/* next round */}
+                            {schedule.nextWeek && (
+                              <div className="mb-4">
+                                <div className="text-[10px] font-black uppercase tracking-widest text-red-500 mb-2">
+                                  {schedule.nextWeek.number}
+                                </div>
+                                <div className="space-y-1.5">
+                                  {schedule.nextWeek.matches.map(m => (
+                                    <div key={m.id} className="flex items-center bg-zinc-800/60 rounded-lg px-3 py-2 gap-2">
+                                      <span className="text-[10px] text-zinc-500 tabular-nums shrink-0">{m.time}</span>
+                                      <span className="text-xs font-bold text-white flex-1 truncate">{m.home}</span>
+                                      <span className="text-[10px] text-zinc-600 shrink-0">vs</span>
+                                      <span className="text-xs font-bold text-white flex-1 text-right truncate">{m.away}</span>
+                                      <span className="text-[10px] text-zinc-500 tabular-nums shrink-0">
+                                        {m.date.split(".").slice(0, 2).join("/")}
+                                      </span>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+
+                            {/* recent results */}
+                            {schedule.recentWeeks.length > 0 && (
+                              <div>
+                                <div className="text-[10px] font-black uppercase tracking-widest text-zinc-500 mb-2">Resultados Recentes</div>
+                                {schedule.recentWeeks.slice().reverse().map(week => (
+                                  <div key={week.number} className="mb-3">
+                                    <div className="text-[10px] font-bold text-zinc-600 mb-1.5">{week.number}</div>
+                                    <div className="space-y-1">
+                                      {week.matches.map(m => {
+                                        const winner = m.homeWon ? m.home : m.away;
+                                        const loser  = m.homeWon ? m.away : m.home;
+                                        const wTotal = m.homeWon ? m.homeSets : m.awaySets;
+                                        const lTotal = m.homeWon ? m.awaySets : m.homeSets;
+                                        const wSets  = m.homeWon ? m.sets.map(([h]) => h)    : m.sets.map(([, a]) => a);
+                                        const lSets  = m.homeWon ? m.sets.map(([, a]) => a)  : m.sets.map(([h]) => h);
+                                        return (
+                                          <div key={m.id} className="flex items-center gap-3 bg-zinc-800/40 rounded-lg px-3 py-1.5">
+                                            <div className="flex-1 min-w-0">
+                                              <div className="text-xs font-bold text-white truncate">{winner}</div>
+                                              <div className="text-xs text-zinc-500 truncate">{loser}</div>
+                                            </div>
+                                            <div className="flex items-center gap-2 shrink-0">
+                                              <div className="text-xs font-black text-white tabular-nums">
+                                                {wTotal}<span className="text-zinc-600 mx-0.5">–</span>{lTotal}
+                                              </div>
+                                              <div className="flex gap-0.5">
+                                                {wSets.map((ws, i) => (
+                                                  <div key={i} className="w-5 text-center">
+                                                    <div className={`text-[10px] font-black leading-tight ${ws > (lSets[i] ?? 0) ? "text-white" : "text-zinc-600"}`}>{ws}</div>
+                                                    <div className={`text-[10px] font-black leading-tight ${(lSets[i] ?? 0) > ws ? "text-zinc-400" : "text-zinc-600"}`}>{lSets[i]}</div>
+                                                  </div>
+                                                ))}
+                                              </div>
+                                            </div>
+                                          </div>
+                                        );
+                                      })}
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })()}
                     </div>
                   )}
 
