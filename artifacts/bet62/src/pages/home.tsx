@@ -1157,16 +1157,19 @@ export default function Home() {
       );
     }
 
+    const flashClass = !isSelected && oddsUp ? "odds-flash-up" : !isSelected && oddsDown ? "odds-flash-down" : "";
+
     return (
       <button
+        key={odd.toFixed(2)}
         onClick={() => toggleBet(match, selection, odd, market, label)}
-        className={`relative flex flex-col items-center py-2.5 px-2 rounded-md transition-all text-xs ${grow ? "flex-1" : ""} ${isSelected ? "bg-red-600 text-white" : "bg-zinc-800 hover:bg-zinc-700 text-zinc-300"}`}
+        className={`relative flex flex-col items-center py-2.5 px-2 rounded-md transition-colors text-xs ${grow ? "flex-1" : ""} ${isSelected ? "bg-red-600 text-white" : "bg-zinc-800 hover:bg-zinc-700 text-zinc-300"} ${flashClass}`}
       >
         <span className="mb-0.5 text-[10px] leading-tight opacity-70">{label}</span>
         <span className="font-bold text-sm flex items-center gap-0.5">
           {odd.toFixed(2)}
-          {oddsUp && <span className="text-green-400 text-[9px] font-black leading-none shrink-0">▲</span>}
-          {oddsDown && <span className="text-red-400 text-[9px] font-black leading-none shrink-0">▼</span>}
+          {oddsUp   && <span className="text-green-400 text-[9px] font-black leading-none shrink-0">▲</span>}
+          {oddsDown && <span className="text-red-400  text-[9px] font-black leading-none shrink-0">▼</span>}
         </span>
       </button>
     );

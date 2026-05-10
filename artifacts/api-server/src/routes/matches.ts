@@ -1736,7 +1736,11 @@ function buildVolleyballMatches(): UpcomingMatch[] {
   });
 }
 
-// ─── Simulated live for other sports (deterministic per 8-min window) ─────────
+// ─── Simulated live for other sports ─────────────────────────────────────────
+// Three independent time seeds:
+//   rngId    — daily stable (match identity, which quarter/set frame)
+//   rng      — 30-second window (game state: score, period/set, clock)
+//   rngOdds  — 15-second window (live odds drift ± noise)
 
 function buildSimulatedLiveOtherSports(): LiveMatchState[] {
   const basketball = buildBasketballMatches();
@@ -1744,8 +1748,10 @@ function buildSimulatedLiveOtherSports(): LiveMatchState[] {
   const hockey     = buildHockeyMatches();
   const volleyball = buildVolleyballMatches();
 
-  // 8-minute window — stable across polls, changes realistically
-  const window8 = Math.floor(Date.now() / (8 * 60 * 1000));
+  const today   = new Date();
+  const dayKey  = today.getUTCFullYear() * 10000 + (today.getUTCMonth() + 1) * 100 + today.getUTCDate();
+  const win30s  = Math.floor(Date.now() / 30_000);   // game state: every 30 s
+  const win15s  = Math.floor(Date.now() / 15_000);   // odds drift: every 15 s
 
   const picks: Array<{ m: UpcomingMatch; si: number }> = [
     ...basketball.slice(0, 3).map((m, i) => ({ m, si: i })),
@@ -1754,96 +1760,133 @@ function buildSimulatedLiveOtherSports(): LiveMatchState[] {
     ...volleyball.slice(0, 2).map((m, i) => ({ m, si: i + 7 })),
   ];
 
+  const TENNIS_PTS = [0, 15, 30, 40] as const;
+  const fmtClock  = (secs: number) =>
+    `${Math.floor(secs / 60).toString().padStart(2, "0")}:${(secs % 60).toString().padStart(2, "0")}`;
+
+  const mkRng = (seed: number) => (n: number) => {
+    const x = Math.sin(seed + n * 7919) * 2654435761;
+    return x - Math.floor(x);
+  };
+
   return picks.map(({ m, si }) => {
-    const seed = window8 * 97 + si * 31;
-    const rng = (n: number) => {
-      const x = Math.sin(seed + n * 7919) * 2654435761;
-      return x - Math.floor(x);
-    };
+    const rngId   = mkRng(dayKey * 100 + si);          // stable all day
+    const rng     = mkRng(win30s  * 97  + si * 31);    // 30-s game state
+    const rngOdds = mkRng(win15s  * 53  + si * 41);    // 15-s odds drift
 
     let homeScore = 0, awayScore = 0, minute = 0, status = "";
     let _liveExtra: LiveMatchState["_liveExtra"] = undefined;
 
-    const TENNIS_PTS = [0, 15, 30, 40] as const;
-    const fmtClock = (secs: number) =>
-      `${Math.floor(secs / 60).toString().padStart(2, "0")}:${(secs % 60).toString().padStart(2, "0")}`;
-
     if (m.sport === "basketball") {
-      const quarter = 1 + Math.floor(rng(1) * 4);
-      homeScore = 20 + Math.floor(rng(3) * 65);
-      awayScore = 20 + Math.floor(rng(4) * 65);
-      minute    = (quarter - 1) * 12 + Math.floor(rng(2) * 12);
+      const quarter  = 1 + Math.floor(rngId(1) * 4);   // stable quarter choice
+      const progress = rng(2);                          // 30-s progress 0–1
+      const baseH    = 18 + Math.floor(rngId(3) * 42); // stable base score
+      const baseA    = 18 + Math.floor(rngId(4) * 42);
+      homeScore = baseH + Math.floor(quarter * 7 * progress);
+      awayScore = baseA + Math.floor(quarter * 7 * progress * (0.78 + rng(5) * 0.44));
+      minute    = (quarter - 1) * 12 + Math.floor(progress * 12);
       status    = `Q${quarter}`;
-      // Countdown clock within the 12-min quarter
-      const secsLeft = Math.floor(rng(5) * 720);
-      _liveExtra = { clockStr: fmtClock(secsLeft) };
+      _liveExtra = { clockStr: fmtClock(Math.floor(rng(6) * 720)) };
 
     } else if (m.sport === "tennis") {
-      const setNo = 1 + Math.floor(rng(1) * 3);
-      minute    = setNo;
-      status    = `Set ${setNo}`;
-      // Build completed sets + in-progress set
+      // ── Best-of-3: valid set progression only ──────────────────────────────
+      const totalSetsFrame = 1 + Math.floor(rngId(1) * 3); // 1, 2, or 3 sets
       const sets: Array<[number, number]> = [];
       let hSets = 0, aSets = 0;
-      for (let s = 0; s < setNo - 1; s++) {
-        const homeWins = rng(10 + s) > 0.5;
-        const loserGames = Math.floor(rng(11 + s) * 5);
-        if (homeWins) { sets.push([6, loserGames]); hSets++; }
-        else           { sets.push([loserGames, 6]); aSets++; }
+
+      // Build completed sets, stop if someone already won 2
+      for (let s = 0; s < totalSetsFrame - 1; s++) {
+        if (hSets === 2 || aSets === 2) break;
+        const homeWins    = rngId(10 + s) > 0.5;
+        const loserGames  = [0, 1, 2, 3, 4, 5, 6][Math.floor(rngId(11 + s) * 7)]!;
+        // 7-5 when loser=5, 7-6 tiebreak when loser=6, else 6-x
+        const winnerGames = loserGames >= 5 ? 7 : 6;
+        if (homeWins) { sets.push([winnerGames, loserGames]); hSets++; }
+        else           { sets.push([loserGames, winnerGames]); aSets++; }
       }
-      // In-progress set
-      const inH = Math.floor(rng(20) * 6);
-      const inA = Math.floor(rng(21) * 6);
-      sets.push([inH, inA]);
+
+      // Add in-progress set only if match isn't over
+      if (hSets < 2 && aSets < 2) {
+        let inH = Math.floor(rng(20) * 6); // 0–5 games
+        let inA = Math.floor(rng(21) * 6); // 0–5 games
+        // At 5-5 one side pushes to 6 (heading to 7-5 / tiebreak)
+        if (inH === 5 && inA === 5) {
+          if (rng(25) > 0.5) inH = 6; else inA = 6;
+        }
+        sets.push([inH, inA]);
+      }
+
       homeScore = hSets;
       awayScore = aSets;
+      const currentSet = sets.length;
+      status  = `Set ${currentSet}`;
+      minute  = currentSet;
       const homePtIdx = Math.floor(rng(22) * 4);
       const awayPtIdx = Math.floor(rng(23) * 4);
       _liveExtra = { sets, currentPoints: [TENNIS_PTS[homePtIdx]!, TENNIS_PTS[awayPtIdx]!] };
 
     } else if (m.sport === "hockey") {
-      const period = 1 + Math.floor(rng(1) * 3);
-      homeScore = Math.floor(rng(3) * 4);
-      awayScore = Math.floor(rng(4) * 4);
-      minute    = (period - 1) * 20 + Math.floor(rng(2) * 20);
+      const period   = 1 + Math.floor(rngId(1) * 3);
+      const progress = rng(2);
+      homeScore = Math.floor(rng(3) * 5);
+      awayScore = Math.floor(rng(4) * 5);
+      minute    = (period - 1) * 20 + Math.floor(progress * 20);
       status    = `P${period}`;
-      // Elapsed clock within the 20-min period
-      const secsElapsed = Math.floor(rng(5) * 1200);
-      _liveExtra = { clockStr: fmtClock(secsElapsed) };
+      _liveExtra = { clockStr: fmtClock(Math.floor(progress * 1200)) };
 
     } else {
-      // volleyball
-      const setNo = 1 + Math.floor(rng(1) * 4);
-      minute    = setNo;
-      status    = `Set ${setNo}`;
-      // Count sets won so far
+      // Volleyball — best-of-5
+      const totalSetsFrame = 1 + Math.floor(rngId(1) * 4);
       let hSets = 0, aSets = 0;
-      for (let s = 0; s < setNo - 1; s++) {
-        if (rng(10 + s) > 0.5) hSets++; else aSets++;
+      for (let s = 0; s < totalSetsFrame - 1; s++) {
+        if (hSets === 3 || aSets === 3) break;
+        if (rngId(10 + s) > 0.5) hSets++; else aSets++;
       }
       homeScore = hSets;
       awayScore = aSets;
-      // Current set points (typical rally to 25)
-      const homePts = 5 + Math.floor(rng(5) * 20);
-      const awayPts = Math.max(0, homePts - 6 + Math.floor(rng(6) * 10));
-      _liveExtra = { currentPts: [homePts, awayPts] };
+      const currentSet = Math.min(hSets + aSets + 1, 5);
+      status  = `Set ${currentSet}`;
+      minute  = currentSet;
+      // Points within current set: rallies add up to ~50 total, split randomly
+      const totalRally = 6 + Math.floor(rng(5) * 44);
+      const homePts    = Math.round(totalRally * (0.38 + rng(6) * 0.24));
+      const awayPts    = totalRally - homePts;
+      _liveExtra = { currentPts: [Math.min(homePts, 24), Math.min(awayPts, 24)] };
     }
 
+    // ── Live odds drift (15-s window) ────────────────────────────────────────
+    // Leading team's odds shorten; trailing team's lengthen.
+    // White noise ±4 % on top, clamped to ±25 % of base.
+    const scoreDiff  = homeScore - awayScore;
+    const pressure   = m.sport === "tennis" || m.sport === "volleyball" ? 0.05 : 0.03;
+    const noiseH     = (rngOdds(1) - 0.5) * 0.08;
+    const noiseA     = (rngOdds(2) - 0.5) * 0.08;
+    const noiseD     = (rngOdds(3) - 0.5) * 0.06;
+
+    const drift = (base: number, shift: number) =>
+      Math.round(Math.max(1.01, Math.min(base * 1.30, base * (1 + shift))) * 100) / 100;
+
+    const liveOdds = {
+      home: drift(m.odds.home, noiseH - scoreDiff * pressure),
+      draw: m.odds.draw > 0 ? drift(m.odds.draw, noiseD) : 0,
+      away: drift(m.odds.away, noiseA + scoreDiff * pressure),
+    };
+
     return {
-      id:           m.id,
-      home:         m.home,
-      away:         m.away,
-      league:       m.league,
-      country:      m.country,
-      sport:        m.sport,
+      id:          m.id,
+      home:        m.home,
+      away:        m.away,
+      league:      m.league,
+      country:     m.country,
+      sport:       m.sport,
       homeScore,
       awayScore,
       minute,
       status,
-      hasRealOdds:  m.hasRealOdds,
-      odds:         m.odds,
-      markets:      m.markets,
-      events:       [],
+      hasRealOdds: m.hasRealOdds,
+      odds:        liveOdds,
+      markets:     m.markets,
+      events:      [],
       _liveExtra,
     } satisfies LiveMatchState;
   });
