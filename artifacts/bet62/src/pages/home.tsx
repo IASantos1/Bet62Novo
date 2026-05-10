@@ -462,12 +462,20 @@ type Match = {
   homeScore?: number;
   awayScore?: number;
   minute?: number;
+  status?: string;
   markets?: AdvancedMarkets;
   events?: Array<{ type: string; team: string; minute: number; player: string }>;
   // market key → reopen timestamp (ms); if in future, market is suspended
   marketSuspension?: Record<string, number>;
   // reason for current suspension (GOLO!, PENÁLTI, REVISÃO AO VAR, etc.)
   _suspensionReason?: string;
+  // sport-specific live display
+  _liveExtra?: {
+    clockStr?: string;
+    sets?: Array<[number, number]>;
+    currentPoints?: [number, number];
+    currentPts?: [number, number];
+  };
 };
 
 type BetSelection = {
@@ -901,12 +909,18 @@ export default function Home() {
         const data = await res.json();
         const matches = (data.matches || []) as Array<{
           id: string; home: string; away: string; league: string;
-          country?: string; sport?: string;
+          country?: string; sport?: string; status?: string;
           homeScore: number; awayScore: number; minute: number;
           hasRealOdds?: boolean; odds: Odds; markets?: AdvancedMarkets;
           events?: Array<{ type: string; team: string; minute: number; player: string }>;
           marketSuspension?: Record<string, number>;
           _suspensionReason?: string;
+          _liveExtra?: {
+            clockStr?: string;
+            sets?: Array<[number, number]>;
+            currentPoints?: [number, number];
+            currentPts?: [number, number];
+          };
         }>;
         // Record API minutes for local ticker interpolation
         const newMins: Record<string, number> = {};
@@ -1200,24 +1214,106 @@ export default function Home() {
   };
 
   const LiveMatchCard = ({ match }: { match: Match }) => {
-    // Use locally interpolated minute — ticks between API refreshes
     const minute = getDisplayMinute(match);
-    const progress = Math.min(100, (minute / 90) * 100);
-    const flag = COUNTRY_FLAGS[match.country?.toLowerCase() ?? ""] ?? sportEmoji(match.sport);
+    const sport  = match.sport ?? "football";
+    const extra  = match._liveExtra;
+    const flag   = COUNTRY_FLAGS[match.country?.toLowerCase() ?? ""] ?? sportEmoji(match.sport);
     const bannerImg = getMatchBanner(match);
-    // Suppress fade-in animation for already-seen matches (silent background update)
-    const matchKey = String(match.id);
-    const isNew = !seenMatchIds.current.has(matchKey);
+    const matchKey  = String(match.id);
+    const isNew     = !seenMatchIds.current.has(matchKey);
     if (isNew) seenMatchIds.current.add(matchKey);
+
+    // ── Progress bar width per sport ──────────────────────────────────────────
+    const progress = (() => {
+      if (sport === "basketball") return Math.min(100, (minute / 48) * 100);
+      if (sport === "hockey")     return Math.min(100, (minute / 60) * 100);
+      if (sport === "tennis")     return Math.min(100, (minute / 5) * 100);
+      if (sport === "volleyball") return Math.min(100, (minute / 5) * 100);
+      return Math.min(100, (minute / 90) * 100);
+    })();
+
+    // ── Live badge label per sport ────────────────────────────────────────────
+    const liveBadgeLabel = (() => {
+      if (sport === "basketball" && match.status) return `${match.status}${extra?.clockStr ? ` · ${extra.clockStr}` : ""}`;
+      if (sport === "hockey"     && match.status) return `${match.status}${extra?.clockStr ? ` · ${extra.clockStr}` : ""}`;
+      if (sport === "tennis"     && match.status) return match.status;
+      if (sport === "volleyball" && match.status) return match.status;
+      return minute === 45 ? "HT" : minute === 105 ? "ET" : `${minute}'`;
+    })();
+
     const liveBadge = (
       <div className="flex items-center gap-1.5">
         <span className="relative flex h-1.5 w-1.5">
           <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-500 opacity-75"></span>
           <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-red-500"></span>
         </span>
-        <span className="text-[10px] font-bold text-red-500">
-          {minute === 45 ? "HT" : minute === 105 ? "ET" : `${minute}'`}
-        </span>
+        <span className="text-[10px] font-bold text-red-500 tabular-nums">{liveBadgeLabel}</span>
+      </div>
+    );
+
+    // ── Score area per sport ──────────────────────────────────────────────────
+    // Tennis: set table S1 | S2 | PTS
+    const TennisScore = () => {
+      const sets = extra?.sets ?? [];
+      const pts  = extra?.currentPoints;
+      const colW = sets.length > 1 ? "w-7" : "w-8";
+      return (
+        <div className="w-full text-xs font-mono tabular-nums">
+          {/* Header */}
+          <div className="flex items-center mb-0.5">
+            <div className="flex-1" />
+            {sets.map((_, i) => (
+              <div key={i} className={`${colW} text-center text-zinc-500 text-[10px] font-bold`}>S{i + 1}</div>
+            ))}
+            {pts && <div className="w-8 text-center text-zinc-500 text-[10px] font-bold">PTS</div>}
+          </div>
+          {/* Home row */}
+          <div className="flex items-center">
+            <div className="flex-1 font-bold text-white text-xs truncate">{match.home}</div>
+            {sets.map(([h], i) => (
+              <div key={i} className={`${colW} text-center font-black ${h > (sets[i]?.[1] ?? 0) ? "text-white" : "text-zinc-500"}`}>{h}</div>
+            ))}
+            {pts && <div className="w-8 text-center font-black text-white">{pts[0]}</div>}
+          </div>
+          {/* Away row */}
+          <div className="flex items-center">
+            <div className="flex-1 font-bold text-white text-xs truncate">{match.away}</div>
+            {sets.map(([, a], i) => (
+              <div key={i} className={`${colW} text-center font-black ${a > (sets[i]?.[0] ?? 0) ? "text-white" : "text-zinc-500"}`}>{a}</div>
+            ))}
+            {pts && <div className="w-8 text-center font-black text-white">{pts[1]}</div>}
+          </div>
+        </div>
+      );
+    };
+
+    // Volleyball: team names + SETS x-x + PONTOS x-x
+    const VolleyScore = () => (
+      <div className="w-full">
+        <div className="flex items-center gap-2 mb-1.5">
+          <span className="font-bold text-white text-xs truncate flex-1 text-right">{match.home}</span>
+          <div className="text-xl font-black text-white tabular-nums shrink-0 px-1 text-center">
+            {match.homeScore ?? 0}<span className="text-zinc-600 mx-0.5">-</span>{match.awayScore ?? 0}
+          </div>
+          <span className="font-bold text-white text-xs truncate flex-1">{match.away}</span>
+        </div>
+        {extra?.currentPts && (
+          <div className="flex items-center justify-center gap-1 text-[10px] text-zinc-400 font-medium">
+            <span className="text-zinc-500">PONTOS</span>
+            <span className="font-black text-zinc-300 tabular-nums">{extra.currentPts[0]} – {extra.currentPts[1]}</span>
+          </div>
+        )}
+      </div>
+    );
+
+    // Basketball / Hockey / Football: standard home vs away score
+    const SimpleScore = ({ big }: { big?: boolean }) => (
+      <div className={`flex items-center gap-2 w-full`}>
+        <span className={`font-bold text-white ${big ? "text-base" : "text-sm"} truncate flex-1 text-right`}>{match.home}</span>
+        <div className={`${big ? "text-3xl" : "text-xl"} font-black text-white tabular-nums shrink-0 ${big ? "px-2" : "px-1"} text-center`}>
+          {match.homeScore ?? 0}<span className={`${big ? "text-white/40 text-xl mx-0.5" : "text-zinc-600 mx-0.5"}`}>-</span>{match.awayScore ?? 0}
+        </div>
+        <span className={`font-bold text-white ${big ? "text-base" : "text-sm"} truncate flex-1`}>{match.away}</span>
       </div>
     );
 
@@ -1225,6 +1321,17 @@ export default function Home() {
     const motionProps = isNew
       ? { layout: true as const, initial: { opacity: 0, y: 10 }, animate: { opacity: 1, y: 0 } }
       : { layout: true as const };
+
+    const oddsRow = match.hasRealOdds ? (
+      <div className="flex gap-2 w-full mt-2.5">
+        <SuspensionBanner match={match} />
+        {!match.marketSuspension || !Object.values(match.marketSuspension).some(ts => ts > Date.now()) ? (<>
+          <OddsButton match={match} selection="home" odd={match.odds.home} market="result" label="Casa" grow />
+          {match.odds.draw > 0 && <OddsButton match={match} selection="draw" odd={match.odds.draw} market="result" label="Emp." grow />}
+          <OddsButton match={match} selection="away" odd={match.odds.away} market="result" label="Fora" grow />
+        </>) : null}
+      </div>
+    ) : null;
 
     if (bannerImg) {
       return (
@@ -1238,7 +1345,6 @@ export default function Home() {
           <div className="absolute top-0 left-0 right-0 h-0.5 bg-white/10 overflow-hidden">
             <motion.div className="h-full bg-gradient-to-r from-red-600 to-red-400" initial={{ width: 0 }} animate={{ width: `${progress}%` }} transition={{ duration: 1 }} />
           </div>
-          {/* Top: league + live badge */}
           <div className="absolute top-0 left-0 right-0 flex items-center justify-between px-4 pt-3">
             <div className="flex items-center gap-2">
               <div className="relative w-5 h-5 flex items-center justify-center leading-none text-sm">
@@ -1249,25 +1355,19 @@ export default function Home() {
             </div>
             <div className="flex items-center gap-2">{liveBadge}</div>
           </div>
-          {/* Bottom: score + teams horizontal + rivalry + odds */}
           <div className="absolute bottom-0 left-0 right-0 px-4 pb-4" onClick={e => e.stopPropagation()}>
             {rivalry && <div className="text-[11px] font-black text-red-400 uppercase tracking-widest mb-1 drop-shadow">{rivalry}</div>}
-            <div className="flex items-center gap-3 mb-3">
-              <div className="flex items-baseline gap-2 flex-1 min-w-0">
-                <span className="font-black text-white text-base leading-tight drop-shadow truncate">{match.home}</span>
-                <span className="text-white/40 text-xs shrink-0">vs</span>
-                <span className="font-black text-white text-base leading-tight drop-shadow truncate">{match.away}</span>
-              </div>
-              <div className="text-3xl font-black text-white tabular-nums shrink-0 drop-shadow-lg">
-                {match.homeScore ?? 0}<span className="text-white/40 text-xl mx-0.5">-</span>{match.awayScore ?? 0}
-              </div>
+            <div className="mb-3">
+              {sport === "tennis"     ? <TennisScore /> :
+               sport === "volleyball" ? <VolleyScore /> :
+               <SimpleScore big />}
             </div>
             {match.hasRealOdds && (
               <div className="flex gap-2 w-full">
                 <SuspensionBanner match={match} />
                 {!match.marketSuspension || !Object.values(match.marketSuspension).some(ts => ts > Date.now()) ? (<>
                   <OddsButton match={match} selection="home" odd={match.odds.home} market="result" label="Casa" grow />
-                  <OddsButton match={match} selection="draw" odd={match.odds.draw} market="result" label="Emp." grow />
+                  {match.odds.draw > 0 && <OddsButton match={match} selection="draw" odd={match.odds.draw} market="result" label="Emp." grow />}
                   <OddsButton match={match} selection="away" odd={match.odds.away} market="result" label="Fora" grow />
                 </>) : null}
               </div>
@@ -1288,23 +1388,10 @@ export default function Home() {
           <motion.div className="h-full bg-gradient-to-r from-red-600 to-red-400" initial={{ width: 0 }} animate={{ width: `${progress}%` }} transition={{ duration: 1 }} />
         </div>
         <div className="px-3 py-2.5" onClick={e => e.stopPropagation()}>
-          <div className="flex items-center gap-2 mb-2.5">
-            <span className="font-bold text-white text-sm truncate flex-1 text-right">{match.home}</span>
-            <div className="text-xl font-black text-white tabular-nums shrink-0 px-2 text-center">
-              {match.homeScore ?? 0}<span className="text-zinc-600 mx-0.5">-</span>{match.awayScore ?? 0}
-            </div>
-            <span className="font-bold text-white text-sm truncate flex-1">{match.away}</span>
-          </div>
-          {match.hasRealOdds && (
-            <div className="flex gap-2 w-full">
-              <SuspensionBanner match={match} />
-              {!match.marketSuspension || !Object.values(match.marketSuspension).some(ts => ts > Date.now()) ? (<>
-                <OddsButton match={match} selection="home" odd={match.odds.home} market="result" label="Casa" grow />
-                <OddsButton match={match} selection="draw" odd={match.odds.draw} market="result" label="Emp." grow />
-                <OddsButton match={match} selection="away" odd={match.odds.away} market="result" label="Fora" grow />
-              </>) : null}
-            </div>
-          )}
+          {sport === "tennis"     ? <TennisScore /> :
+           sport === "volleyball" ? <VolleyScore /> :
+           <SimpleScore />}
+          {oddsRow}
         </div>
       </motion.div>
     );

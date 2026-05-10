@@ -85,6 +85,13 @@ export type LiveMatchState = {
   _baseOdds?: { home: number; draw: number; away: number };
   _oddsUpdatedAt?: number;
   _driftPhase?: number;
+  // Sport-specific live display data
+  _liveExtra?: {
+    clockStr?: string;                   // basketball/hockey: "06:44"
+    sets?: Array<[number, number]>;      // tennis: [[6,3],[4,2]] last entry is in-progress
+    currentPoints?: [number, number];    // tennis: current game points [30, 15]
+    currentPts?: [number, number];       // volleyball: current set points [18, 16]
+  };
 };
 
 export type UpcomingMatch = {
@@ -1755,6 +1762,11 @@ function buildSimulatedLiveOtherSports(): LiveMatchState[] {
     };
 
     let homeScore = 0, awayScore = 0, minute = 0, status = "";
+    let _liveExtra: LiveMatchState["_liveExtra"] = undefined;
+
+    const TENNIS_PTS = [0, 15, 30, 40] as const;
+    const fmtClock = (secs: number) =>
+      `${Math.floor(secs / 60).toString().padStart(2, "0")}:${(secs % 60).toString().padStart(2, "0")}`;
 
     if (m.sport === "basketball") {
       const quarter = 1 + Math.floor(rng(1) * 4);
@@ -1762,25 +1774,59 @@ function buildSimulatedLiveOtherSports(): LiveMatchState[] {
       awayScore = 20 + Math.floor(rng(4) * 65);
       minute    = (quarter - 1) * 12 + Math.floor(rng(2) * 12);
       status    = `Q${quarter}`;
+      // Countdown clock within the 12-min quarter
+      const secsLeft = Math.floor(rng(5) * 720);
+      _liveExtra = { clockStr: fmtClock(secsLeft) };
+
     } else if (m.sport === "tennis") {
       const setNo = 1 + Math.floor(rng(1) * 3);
-      homeScore = Math.floor(rng(2) * 2);
-      awayScore = Math.floor(rng(3) * 2);
       minute    = setNo;
       status    = `Set ${setNo}`;
+      // Build completed sets + in-progress set
+      const sets: Array<[number, number]> = [];
+      let hSets = 0, aSets = 0;
+      for (let s = 0; s < setNo - 1; s++) {
+        const homeWins = rng(10 + s) > 0.5;
+        const loserGames = Math.floor(rng(11 + s) * 5);
+        if (homeWins) { sets.push([6, loserGames]); hSets++; }
+        else           { sets.push([loserGames, 6]); aSets++; }
+      }
+      // In-progress set
+      const inH = Math.floor(rng(20) * 6);
+      const inA = Math.floor(rng(21) * 6);
+      sets.push([inH, inA]);
+      homeScore = hSets;
+      awayScore = aSets;
+      const homePtIdx = Math.floor(rng(22) * 4);
+      const awayPtIdx = Math.floor(rng(23) * 4);
+      _liveExtra = { sets, currentPoints: [TENNIS_PTS[homePtIdx]!, TENNIS_PTS[awayPtIdx]!] };
+
     } else if (m.sport === "hockey") {
       const period = 1 + Math.floor(rng(1) * 3);
       homeScore = Math.floor(rng(3) * 4);
       awayScore = Math.floor(rng(4) * 4);
       minute    = (period - 1) * 20 + Math.floor(rng(2) * 20);
       status    = `P${period}`;
+      // Elapsed clock within the 20-min period
+      const secsElapsed = Math.floor(rng(5) * 1200);
+      _liveExtra = { clockStr: fmtClock(secsElapsed) };
+
     } else {
       // volleyball
       const setNo = 1 + Math.floor(rng(1) * 4);
-      homeScore = Math.floor(rng(2) * 2);
-      awayScore = Math.floor(rng(3) * 2);
       minute    = setNo;
       status    = `Set ${setNo}`;
+      // Count sets won so far
+      let hSets = 0, aSets = 0;
+      for (let s = 0; s < setNo - 1; s++) {
+        if (rng(10 + s) > 0.5) hSets++; else aSets++;
+      }
+      homeScore = hSets;
+      awayScore = aSets;
+      // Current set points (typical rally to 25)
+      const homePts = 5 + Math.floor(rng(5) * 20);
+      const awayPts = Math.max(0, homePts - 6 + Math.floor(rng(6) * 10));
+      _liveExtra = { currentPts: [homePts, awayPts] };
     }
 
     return {
@@ -1798,6 +1844,7 @@ function buildSimulatedLiveOtherSports(): LiveMatchState[] {
       odds:         m.odds,
       markets:      m.markets,
       events:       [],
+      _liveExtra,
     } satisfies LiveMatchState;
   });
 }
