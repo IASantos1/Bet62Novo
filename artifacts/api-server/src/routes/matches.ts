@@ -1272,7 +1272,7 @@ function buildTennisLiveMatches(
         awayScore,
         minute:      setNum,
         status:      m.status,
-        hasRealOdds: false,
+        hasRealOdds: true,
         odds:        liveOdds,
         markets:     makeAdvancedMarketsFromTeams(p0.name, p1.name),
         events:      [],
@@ -1345,7 +1345,7 @@ function buildVolleyballLiveMatches(tournaments: VolleyTournament[]): LiveMatchS
         awayScore,
         minute:      setNum,
         status:      statusLabel,
-        hasRealOdds: false,
+        hasRealOdds: !isFinished,
         odds:        isFinished
           ? { home: 0, draw: 0, away: 0 }
           : { home: baseOdds.home, draw: 0, away: baseOdds.away },

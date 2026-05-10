@@ -1465,31 +1465,6 @@ export default function Home() {
             ))}
             {pts && <div className={`w-8 text-center font-black ${aPtColor}`}>{isDeuce ? "D" : pts[1]}</div>}
           </div>
-          {/* Live match stats (only when real API data available) */}
-          {st && (
-            <div className="mt-1.5 pt-1.5 border-t border-zinc-700/60">
-              <div className="grid grid-cols-5 text-[9px] font-bold text-zinc-500 mb-0.5">
-                <div />
-                <div className="text-center">ACE</div>
-                <div className="text-center">DF</div>
-                <div className="text-center">1ªSrv</div>
-                <div className="text-center">WIN</div>
-              </div>
-              {[0, 1].map(idx => {
-                const s = st[idx]!;
-                const name = idx === 0 ? match.home : match.away;
-                return (
-                  <div key={idx} className="grid grid-cols-5 text-[9px]">
-                    <div className="text-zinc-400 truncate font-semibold">{lastName(name)}</div>
-                    <div className="text-center text-white font-bold">{s.aces}</div>
-                    <div className="text-center text-zinc-400">{s.doubleFaults}</div>
-                    <div className="text-center text-zinc-300">{s.firstServePct}</div>
-                    <div className="text-center text-zinc-300">{s.winners}</div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
         </div>
       );
     };
@@ -4087,7 +4062,7 @@ export default function Home() {
                   })()}
 
                   {/* ─── Ligas de Voleibol ───────────────────────────────────── */}
-                  {(selectedSport === "all" || selectedSport === "volleyball") && volleyLeagues.length > 0 && !selectedLeague && (
+                  {false && (selectedSport === "all" || selectedSport === "volleyball") && volleyLeagues.length > 0 && !selectedLeague && (
                     <div className="mb-6">
                       <div className="flex items-center gap-2 mb-3">
                         <span className="text-base font-black italic uppercase tracking-tight text-zinc-400">🏐 Ligas de Voleibol</span>
@@ -4119,8 +4094,8 @@ export default function Home() {
 
                       {/* expanded panel with tabs */}
                       {expandedVolleyLeagueId && (() => {
-                        const schedule = volleyScheduleMap[expandedVolleyLeagueId];
-                        const standings = volleyStandingsMap[expandedVolleyLeagueId];
+                        const schedule = volleyScheduleMap[expandedVolleyLeagueId!];
+                        const standings = volleyStandingsMap[expandedVolleyLeagueId!];
                         const loading = !schedule && volleyScheduleLoading;
                         if (loading) {
                           return <div className="text-xs text-zinc-600 text-center py-4">A carregar...</div>;
@@ -4144,7 +4119,7 @@ export default function Home() {
                                 Calendário
                               </button>
                               <button
-                                onClick={() => handleVolleyStandingsTab(expandedVolleyLeagueId)}
+                                onClick={() => handleVolleyStandingsTab(expandedVolleyLeagueId!)}
                                 className={`flex-1 text-xs font-bold rounded-md px-3 py-1.5 transition-all ${volleyLeagueTab === "standings" ? "bg-zinc-700 text-white" : "text-zinc-500 hover:text-zinc-300"}`}
                               >
                                 Classificação
@@ -4157,10 +4132,10 @@ export default function Home() {
                                 {schedule.nextWeek && (
                                   <div className="mb-4">
                                     <div className="text-[10px] font-black uppercase tracking-widest text-red-500 mb-2">
-                                      {schedule.nextWeek.number}
+                                      {schedule.nextWeek!.number}
                                     </div>
                                     <div className="space-y-1.5">
-                                      {schedule.nextWeek.matches.map(m => (
+                                      {schedule.nextWeek!.matches.map((m: any) => (
                                         <div key={m.id} className="flex items-center bg-zinc-800/60 rounded-lg px-3 py-2 gap-2">
                                           <span className="text-[10px] text-zinc-500 tabular-nums shrink-0">{m.time}</span>
                                           <span className="text-xs font-bold text-white flex-1 truncate">{m.home}</span>
@@ -4178,17 +4153,17 @@ export default function Home() {
                                 {schedule.recentWeeks.length > 0 && (
                                   <div>
                                     <div className="text-[10px] font-black uppercase tracking-widest text-zinc-500 mb-2">Resultados Recentes</div>
-                                    {schedule.recentWeeks.slice().reverse().map(week => (
+                                    {schedule.recentWeeks.slice().reverse().map((week: any) => (
                                       <div key={week.number} className="mb-3">
                                         <div className="text-[10px] font-bold text-zinc-600 mb-1.5">{week.number}</div>
                                         <div className="space-y-1">
-                                          {week.matches.map(m => {
+                                          {week.matches.map((m: any) => {
                                             const winner = m.homeWon ? m.home : m.away;
                                             const loser  = m.homeWon ? m.away : m.home;
                                             const wTotal = m.homeWon ? m.homeSets : m.awaySets;
                                             const lTotal = m.homeWon ? m.awaySets : m.homeSets;
-                                            const wSets  = m.homeWon ? m.sets.map(([h]) => h)    : m.sets.map(([, a]) => a);
-                                            const lSets  = m.homeWon ? m.sets.map(([, a]) => a)  : m.sets.map(([h]) => h);
+                                            const wSets  = m.homeWon ? m.sets.map(([h]: [number, number]) => h)    : m.sets.map(([, a]: [number, number]) => a);
+                                            const lSets  = m.homeWon ? m.sets.map(([, a]: [number, number]) => a)  : m.sets.map(([h]: [number, number]) => h);
                                             return (
                                               <div key={m.id} className="flex items-center gap-3 bg-zinc-800/40 rounded-lg px-3 py-1.5">
                                                 <div className="flex-1 min-w-0">
@@ -4200,7 +4175,7 @@ export default function Home() {
                                                     {wTotal}<span className="text-zinc-600 mx-0.5">–</span>{lTotal}
                                                   </div>
                                                   <div className="flex gap-0.5">
-                                                    {wSets.map((ws, i) => (
+                                                    {wSets.map((ws: number, i: number) => (
                                                       <div key={i} className="w-5 text-center">
                                                         <div className={`text-[10px] font-black leading-tight ${ws > (lSets[i] ?? 0) ? "text-white" : "text-zinc-600"}`}>{ws}</div>
                                                         <div className={`text-[10px] font-black leading-tight ${(lSets[i] ?? 0) > ws ? "text-zinc-400" : "text-zinc-600"}`}>{lSets[i]}</div>
@@ -4222,10 +4197,10 @@ export default function Home() {
                             {/* ── Classificação tab ── */}
                             {volleyLeagueTab === "standings" && (
                               <>
-                                {!(expandedVolleyLeagueId in volleyStandingsMap) && (
+                                {!(expandedVolleyLeagueId! in volleyStandingsMap) && (
                                   <div className="text-xs text-zinc-600 text-center py-4">A carregar classificação...</div>
                                 )}
-                                {expandedVolleyLeagueId in volleyStandingsMap && (!standings || standings.teams.length === 0) && (
+                                {expandedVolleyLeagueId! in volleyStandingsMap && (!standings || standings.teams.length === 0) && (
                                   <div className="text-center py-6">
                                     <div className="text-2xl mb-2">📊</div>
                                     <div className="text-xs font-bold text-zinc-500">Classificação disponível apenas na fase regular</div>
@@ -4246,7 +4221,7 @@ export default function Home() {
                                       <span className="text-[9px] text-zinc-600 text-center">Forma</span>
                                     </div>
                                     <div className="space-y-0.5">
-                                      {standings.teams.map((t, idx) => {
+                                      {standings.teams.map((t: any, idx: number) => {
                                         const desc = typeof t.description === "object" ? t.description?.value : t.description;
                                         const isPromo = desc?.toLowerCase().includes("play off") || desc?.toLowerCase().includes("quarter") || desc?.toLowerCase().includes("final") || desc?.toLowerCase().includes("semi");
                                         const form = (t.recent_form ?? "").split("");
@@ -4262,7 +4237,7 @@ export default function Home() {
                                             <span className="text-[10px] font-black text-white text-center tabular-nums">{t.pts}</span>
                                             <span className="text-[10px] text-zinc-500 text-center tabular-nums">{t.points_for}/{t.points_against}</span>
                                             <div className="flex gap-0.5 justify-center">
-                                              {form.slice(-5).map((ch, i) => (
+                                              {form.slice(-5).map((ch: string, i: number) => (
                                                 <span key={i} className={`text-[8px] font-black w-3 h-3 rounded-sm flex items-center justify-center ${ch === "W" ? "bg-green-500/20 text-green-400" : "bg-red-500/20 text-red-400"}`}>{ch}</span>
                                               ))}
                                             </div>
