@@ -771,6 +771,15 @@ export default function Home() {
   const [upcomingLoading, setUpcomingLoading] = useState(true);
   const [selectedSport, setSelectedSport] = useState<string>("all");
 
+  // Recent tennis results (yesterday)
+  type TennisResult = {
+    id: string; home: string; away: string;
+    sets: Array<[number, number]>; homeWon: boolean;
+    status: string; tournament: string; date: string; time: string;
+  };
+  const [recentResults, setRecentResults] = useState<TennisResult[]>([]);
+  const [resultsOpen, setResultsOpen] = useState(true);
+
   // Sidebar tree state
   const [sidebarExpandedSport, setSidebarExpandedSport] = useState<string | null>(null);
   const [sidebarExpandedCountry, setSidebarExpandedCountry] = useState<string | null>(null);
@@ -887,6 +896,14 @@ export default function Home() {
     fetch("/api/stats")
       .then(r => r.ok ? r.json() : null)
       .then(d => { if (d) setPlatformStats(d); })
+      .catch(() => { /* non-critical */ });
+  }, []);
+
+  // Fetch yesterday's tennis results on mount
+  useEffect(() => {
+    fetch("/api/matches/results")
+      .then(r => r.ok ? r.json() : { results: [] })
+      .then(d => setRecentResults(d.results ?? []))
       .catch(() => { /* non-critical */ });
   }, []);
 
@@ -3086,9 +3103,82 @@ export default function Home() {
                 ? upcomingMatches.filter(m => m.league === selectedLeague)
                 : upcomingMatches;
 
+              // Derive tournament display label from raw API name
+              const tournamentLabel = (raw: string) =>
+                raw.replace(/^(Atp|Wta)\s*-\s*Singles:\s*/i, "").replace(/\s*\([^)]*\)/g, "").trim();
+
               return (
                 <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
                   {!selectedLeague && <PopularBanners />}
+
+                  {/* ─── Resultados Recentes de Ténis ──────────────────────── */}
+                  {(selectedSport === "all" || selectedSport === "tennis") && recentResults.length > 0 && !selectedLeague && (
+                    <div className="mb-6">
+                      <button
+                        onClick={() => setResultsOpen(o => !o)}
+                        className="w-full flex items-center justify-between mb-3 group"
+                      >
+                        <div className="flex items-center gap-2">
+                          <span className="text-base font-black italic uppercase tracking-tight text-zinc-400 group-hover:text-white transition-colors">
+                            🎾 Resultados de Ontem
+                          </span>
+                          {recentResults[0] && (
+                            <span className="text-[10px] font-semibold text-zinc-600 normal-case italic hidden sm:block">
+                              — {tournamentLabel(recentResults[0].tournament)}
+                            </span>
+                          )}
+                          <span className="text-[10px] font-bold bg-zinc-800 text-zinc-500 rounded px-1.5 py-0.5">
+                            {recentResults.length}
+                          </span>
+                        </div>
+                        <ChevronDown
+                          size={14}
+                          className={`text-zinc-600 transition-transform duration-200 ${resultsOpen ? "" : "-rotate-90"}`}
+                        />
+                      </button>
+
+                      {resultsOpen && (
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+                          {recentResults.map(r => {
+                            const winner = r.homeWon ? r.home : r.away;
+                            const loser  = r.homeWon ? r.away : r.home;
+                            const wSets  = r.homeWon ? r.sets.map(([h]) => h)    : r.sets.map(([, a]) => a);
+                            const lSets  = r.homeWon ? r.sets.map(([, a]) => a)  : r.sets.map(([h]) => h);
+                            return (
+                              <div key={r.id} className="bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 flex items-center gap-3 hover:border-zinc-700 transition-colors">
+                                {/* Names */}
+                                <div className="flex-1 min-w-0">
+                                  <div className="flex items-center gap-1.5">
+                                    <span className="w-3.5 h-3.5 rounded-full bg-green-600/20 flex items-center justify-center shrink-0">
+                                      <span className="text-[9px] text-green-400 font-black leading-none">✓</span>
+                                    </span>
+                                    <span className="text-xs font-bold text-white truncate">{winner}</span>
+                                  </div>
+                                  <div className="flex items-center gap-1.5 mt-0.5">
+                                    <span className="w-3.5 h-3.5 shrink-0" />
+                                    <span className="text-xs text-zinc-500 truncate">{loser}</span>
+                                  </div>
+                                </div>
+                                {/* Set scores */}
+                                <div className="flex items-center gap-1.5 font-mono tabular-nums shrink-0">
+                                  {wSets.map((ws, i) => (
+                                    <div key={i} className="text-center w-4">
+                                      <div className={`text-xs font-black leading-tight ${ws > lSets[i]! ? "text-white" : "text-zinc-600"}`}>{ws}</div>
+                                      <div className={`text-xs font-black leading-tight ${lSets[i]! > ws ? "text-zinc-400" : "text-zinc-600"}`}>{lSets[i]}</div>
+                                    </div>
+                                  ))}
+                                </div>
+                                {r.status === "Retired" && (
+                                  <span className="text-[9px] text-yellow-500/80 font-bold shrink-0 border border-yellow-700/40 rounded px-1 py-0.5">RET</span>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
                   <h2 className="text-2xl font-black italic uppercase tracking-tight mb-4 flex items-center gap-2">
                     <Trophy className="text-red-600" /> {selectedLeague ? selectedLeague : "Próximos Eventos"}
                   </h2>

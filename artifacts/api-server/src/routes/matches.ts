@@ -719,6 +719,22 @@ type VolleyTournament = { id: string; gid: string; country: string; league: stri
 let volleyLiveCache: VolleyTournament[] | null = null;
 let volleyLiveFetchedAt = 0;
 
+// Tennis daily results (d-1 = yesterday) — longer TTL (yesterday won't change)
+type TennisDailyResult = {
+  id: string;
+  home: string;
+  away: string;
+  sets: Array<[number, number]>;
+  homeWon: boolean;
+  status: string;   // "Finished" | "Retired" | "Walkover"
+  tournament: string;
+  date: string;
+  time: string;
+};
+let tennisResultsCache: TennisDailyResult[] | null = null;
+let tennisResultsFetchedAt = 0;
+const RESULTS_CACHE_TTL = 5 * 60 * 1000; // 5 min
+
 // Live state: stable odds across refreshes
 export const liveMatchState = new Map<string, LiveMatchState>();
 
@@ -2664,6 +2680,56 @@ function buildLeagueStandings(leagueName: string): { league: string; teams: Arra
     })),
   };
 }
+
+async function getTennisDailyResults(): Promise<TennisDailyResult[]> {
+  const now = Date.now();
+  if (tennisResultsCache && now - tennisResultsFetchedAt < RESULTS_CACHE_TTL) return tennisResultsCache;
+  try {
+    const resp = await fetch(`${BASE_V1}/tennis/daily/d-1?access_key=${STATSPAL_KEY}`, { signal: AbortSignal.timeout(9000) });
+    if (!resp.ok) return tennisResultsCache ?? [];
+    const data = (await resp.json()) as { scores?: { tournament?: unknown } };
+    const raw = data?.scores?.tournament;
+    if (!raw) return tennisResultsCache ?? [];
+    const arr = Array.isArray(raw) ? raw : [raw];
+    const DONE = new Set(["Finished", "Retired", "Walkover"]);
+    const results: TennisDailyResult[] = [];
+    for (const t of arr as Array<{ id: string; name: string; match: unknown }>) {
+      const matches = Array.isArray(t.match) ? t.match : [t.match];
+      for (const m of matches as Array<{ id: string; status: string; time: string; date: string; player: unknown }>) {
+        if (!m || !DONE.has(m.status)) continue;
+        const players = Array.isArray(m.player) ? m.player : [m.player];
+        if (players.length < 2) continue;
+        const p0 = players[0] as { name: string; s1: string; s2: string; s3: string; s4: string; s5: string; winner: string; dp1?: string };
+        const p1 = players[1] as typeof p0;
+        if (!p0 || !p1) continue;
+        if (p0.name.includes("/") || p0.dp1) continue; // skip doubles
+        const sets: Array<[number, number]> = [];
+        for (const sf of ["s1", "s2", "s3", "s4", "s5"] as const) {
+          if (p0[sf] !== "" && p1[sf] !== "") sets.push([parseInt(p0[sf]) || 0, parseInt(p1[sf]) || 0]);
+        }
+        results.push({
+          id: m.id, home: p0.name, away: p1.name, sets,
+          homeWon: p0.winner === "True", status: m.status,
+          tournament: t.name, date: m.date, time: m.time,
+        });
+      }
+    }
+    tennisResultsCache = results;
+    tennisResultsFetchedAt = now;
+    return results;
+  } catch {
+    return tennisResultsCache ?? [];
+  }
+}
+
+router.get("/results", async (_req, res) => {
+  try {
+    const results = await getTennisDailyResults();
+    res.json({ results });
+  } catch {
+    res.status(500).json({ error: "Resultados indisponíveis" });
+  }
+});
 
 router.get("/standings", async (req, res) => {
   const league = String(req.query["league"] ?? "");
