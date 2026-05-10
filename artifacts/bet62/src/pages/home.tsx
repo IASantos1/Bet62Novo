@@ -456,6 +456,8 @@ type Match = {
   events?: Array<{ type: string; team: string; minute: number; player: string }>;
   // market key → reopen timestamp (ms); if in future, market is suspended
   marketSuspension?: Record<string, number>;
+  // reason for current suspension (GOLO!, PENÁLTI, REVISÃO AO VAR, etc.)
+  _suspensionReason?: string;
 };
 
 type BetSelection = {
@@ -894,6 +896,7 @@ export default function Home() {
           hasRealOdds?: boolean; odds: Odds; markets?: AdvancedMarkets;
           events?: Array<{ type: string; team: string; minute: number; player: string }>;
           marketSuspension?: Record<string, number>;
+          _suspensionReason?: string;
         }>;
         // Record API minutes for local ticker interpolation
         const newMins: Record<string, number> = {};
@@ -1118,12 +1121,7 @@ export default function Home() {
     const oddsDown = !isSuspended && prevOdd !== undefined && odd < prevOdd;
 
     if (isSuspended) {
-      return (
-        <button disabled className={`relative flex flex-col items-center py-2.5 px-2 rounded-md text-xs cursor-not-allowed ${grow ? "flex-1" : ""} bg-zinc-800/40 text-zinc-600`}>
-          <span className="mb-0.5 text-[10px] leading-tight opacity-50">{label}</span>
-          <span className="font-bold text-sm">🔒</span>
-        </button>
-      );
+      return null;
     }
 
     if (match.isLive && market === "result" && odd <= 1.01) {
@@ -1146,6 +1144,22 @@ export default function Home() {
           {oddsUp && <span className="text-green-400 text-[9px] font-black leading-none shrink-0">▲</span>}
           {oddsDown && <span className="text-red-400 text-[9px] font-black leading-none shrink-0">▼</span>}
         </span>
+      </button>
+    );
+  };
+
+  // Returns a single wide red button when match markets are suspended, null otherwise
+  const SuspensionBanner = ({ match }: { match: Match }) => {
+    const now = Date.now();
+    const isActive = match.marketSuspension && Object.values(match.marketSuspension).some(ts => ts > now);
+    if (!isActive) return null;
+    const reason = match._suspensionReason ?? "SUSPENSO";
+    return (
+      <button
+        disabled
+        className="w-full py-2.5 px-3 rounded-md bg-red-950 border border-red-800/60 text-red-200 font-bold text-sm tracking-widest cursor-not-allowed select-none"
+      >
+        {reason}
       </button>
     );
   };
@@ -1240,9 +1254,12 @@ export default function Home() {
             </div>
             {match.hasRealOdds && (
               <div className="flex gap-2 w-full">
-                <OddsButton match={match} selection="home" odd={match.odds.home} market="result" label="Casa" grow />
-                <OddsButton match={match} selection="draw" odd={match.odds.draw} market="result" label="Emp." grow />
-                <OddsButton match={match} selection="away" odd={match.odds.away} market="result" label="Fora" grow />
+                <SuspensionBanner match={match} />
+                {!match.marketSuspension || !Object.values(match.marketSuspension).some(ts => ts > Date.now()) ? (<>
+                  <OddsButton match={match} selection="home" odd={match.odds.home} market="result" label="Casa" grow />
+                  <OddsButton match={match} selection="draw" odd={match.odds.draw} market="result" label="Emp." grow />
+                  <OddsButton match={match} selection="away" odd={match.odds.away} market="result" label="Fora" grow />
+                </>) : null}
               </div>
             )}
           </div>
@@ -1270,9 +1287,12 @@ export default function Home() {
           </div>
           {match.hasRealOdds && (
             <div className="flex gap-2 w-full">
-              <OddsButton match={match} selection="home" odd={match.odds.home} market="result" label="Casa" grow />
-              <OddsButton match={match} selection="draw" odd={match.odds.draw} market="result" label="Emp." grow />
-              <OddsButton match={match} selection="away" odd={match.odds.away} market="result" label="Fora" grow />
+              <SuspensionBanner match={match} />
+              {!match.marketSuspension || !Object.values(match.marketSuspension).some(ts => ts > Date.now()) ? (<>
+                <OddsButton match={match} selection="home" odd={match.odds.home} market="result" label="Casa" grow />
+                <OddsButton match={match} selection="draw" odd={match.odds.draw} market="result" label="Emp." grow />
+                <OddsButton match={match} selection="away" odd={match.odds.away} market="result" label="Fora" grow />
+              </>) : null}
             </div>
           )}
         </div>
@@ -1287,11 +1307,15 @@ export default function Home() {
     const rivalry = RIVALRY_TAGS[`${match.home}|${match.away}`];
     const hasDraw = match.odds.draw > 0;
 
+    const isSuspendedMatch = !!match.marketSuspension && Object.values(match.marketSuspension).some(ts => ts > Date.now());
     const OddsRow = () => match.hasRealOdds ? (
       <div className="flex gap-2 w-full">
-        <OddsButton match={match} selection="home" odd={match.odds.home} market="result" label={hasDraw ? "Casa" : match.home.split(" ").slice(-1)[0]} grow />
-        {hasDraw && <OddsButton match={match} selection="draw" odd={match.odds.draw} market="result" label="Emp." grow />}
-        <OddsButton match={match} selection="away" odd={match.odds.away} market="result" label={hasDraw ? "Fora" : match.away.split(" ").slice(-1)[0]} grow />
+        <SuspensionBanner match={match} />
+        {!isSuspendedMatch && (<>
+          <OddsButton match={match} selection="home" odd={match.odds.home} market="result" label={hasDraw ? "Casa" : match.home.split(" ").slice(-1)[0]} grow />
+          {hasDraw && <OddsButton match={match} selection="draw" odd={match.odds.draw} market="result" label="Emp." grow />}
+          <OddsButton match={match} selection="away" odd={match.odds.away} market="result" label={hasDraw ? "Fora" : match.away.split(" ").slice(-1)[0]} grow />
+        </>)}
       </div>
     ) : null;
 
@@ -1489,6 +1513,8 @@ export default function Home() {
 
   const MarketOddsBtn = ({ match, sel, odd, market, label }: { match: Match; sel: string; odd: number; market: string; label: string }) => {
     if (market === "result" && odd <= 1.01) return null;
+    const isSusp = !!match.marketSuspension && Object.values(match.marketSuspension).some(ts => ts > Date.now());
+    if (isSusp) return null;
     const active = !!bets.find(b => b.matchId === match.id && b.market === market && b.selection === sel);
     return (
       <button
@@ -1590,6 +1616,13 @@ export default function Home() {
             </button>
           ))}
         </div>
+
+        {/* ── SUSPENSION BANNER (modal) ── */}
+        {match.marketSuspension && Object.values(match.marketSuspension).some(ts => ts > Date.now()) && (
+          <div className="mb-4">
+            <SuspensionBanner match={match} />
+          </div>
+        )}
 
         {/* ── RESULTADO / VENCEDOR ── */}
         {modalTab === "resultado" && (

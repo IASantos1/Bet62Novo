@@ -79,6 +79,8 @@ export type LiveMatchState = {
   events: Array<{ type: string; team: string; minute: number; player: string }>;
   // market key → timestamp (ms) when it reopens; absent or past = open
   marketSuspension?: Record<string, number>;
+  // Reason for current suspension (displayed in UI)
+  _suspensionReason?: string;
   // Internal tracking for live odds drift engine
   _baseOdds?: { home: number; draw: number; away: number };
   _oddsUpdatedAt?: number;
@@ -970,6 +972,7 @@ async function buildLiveMatches(): Promise<LiveMatchState[]> {
       let matchOdds: { home: number; draw: number; away: number };
       let matchMarkets: AdvancedMarkets;
       let matchMarketSuspension: Record<string, number> | undefined;
+      let matchSuspensionReason: string | undefined;
 
       let hasRealOdds = true; // Always show odds — use model when real unavailable
 
@@ -1008,7 +1011,7 @@ async function buildLiveMatches(): Promise<LiveMatchState[]> {
         matchMarkets = existing.markets;
 
         // Store drift phase for next cycle
-        const updatedState = { ...existing, odds: matchOdds, minute, _driftPhase: phase, marketSuspension: matchMarketSuspension };
+        const updatedState = { ...existing, odds: matchOdds, minute, _driftPhase: phase, marketSuspension: matchMarketSuspension, _suspensionReason: matchMarketSuspension ? existing._suspensionReason : undefined };
         liveMatchState.set(m.main_id, updatedState);
         result.push({ ...updatedState, events: existing.events });
         count++;
@@ -1022,6 +1025,7 @@ async function buildLiveMatches(): Promise<LiveMatchState[]> {
           matchMarketSuspension = Object.fromEntries(
             Object.entries(GOAL_SUSPENSION_MS).map(([k, delay]) => [k, now + delay])
           );
+          matchSuspensionReason = "GOLO!";
         }
         const resolved = resolveOdds(m, odds);
         matchMarkets = resolved.markets;
@@ -1076,13 +1080,22 @@ async function buildLiveMatches(): Promise<LiveMatchState[]> {
       // VAR review / penalty / big-chance detection → suspend all markets
       // Triggered on dangerous events in the most recent 2 minutes of play
       const VAR_DANGER_TOKENS = ["penalty", "var", "missed", "bigchance", "big_chance", "suspension", "expelled"];
+      const VAR_REASON_MAP: Record<string, string> = {
+        penalty: "PENÁLTI",
+        var: "REVISÃO AO VAR",
+        bigchance: "GRANDE CHANCE",
+        big_chance: "GRANDE CHANCE",
+        missed: "GRANDE CHANCE",
+        suspension: "SUSPENSO",
+        expelled: "SUSPENSO",
+      };
       const recentThreshold = Math.max(1, minute - 2);
       const isGoalEvent = existing != null && (homeScore > (existing.homeScore ?? -1) || awayScore > (existing.awayScore ?? -1));
-      const hasDangerEvent = !isGoalEvent && events.some(e => {
+      const dangerEvent = !isGoalEvent ? events.find(e => {
         const t = e.type.toLowerCase().replace(/[\s_-]/g, "");
         return e.minute >= recentThreshold && VAR_DANGER_TOKENS.some(token => t.includes(token.replace("_", "")));
-      });
-      if (hasDangerEvent && !matchMarketSuspension) {
+      }) : undefined;
+      if (dangerEvent && !matchMarketSuspension) {
         const now = Date.now();
         const VAR_SUSPENSION_MS: Record<string, number> = {
           result: 20000, doubleChance: 18000, totalGoals: 22000, handicap: 22000,
@@ -1092,6 +1105,9 @@ async function buildLiveMatches(): Promise<LiveMatchState[]> {
         matchMarketSuspension = Object.fromEntries(
           Object.entries(VAR_SUSPENSION_MS).map(([k, delay]) => [k, now + delay])
         );
+        const evType = dangerEvent.type.toLowerCase().replace(/[\s_-]/g, "");
+        const reasonKey = Object.keys(VAR_REASON_MAP).find(k => evType.includes(k));
+        matchSuspensionReason = reasonKey ? VAR_REASON_MAP[reasonKey] : "SUSPENSO";
       }
 
       const state: LiveMatchState = {
@@ -1110,6 +1126,7 @@ async function buildLiveMatches(): Promise<LiveMatchState[]> {
         markets: matchMarkets,
         events,
         marketSuspension: matchMarketSuspension,
+        _suspensionReason: matchSuspensionReason,
         _baseOdds: matchOdds,
         _oddsUpdatedAt: Date.now(),
         _driftPhase: 0,
