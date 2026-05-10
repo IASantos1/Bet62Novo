@@ -1723,6 +1723,7 @@ export default function Home() {
 
     const tabs = isBasketball
       ? [
+          { key: "todos", label: "Todos" },
           { key: "resultado", label: "Vencedor" },
           { key: "totais", label: "Totais" },
           { key: "spread", label: "Spread" },
@@ -1731,6 +1732,7 @@ export default function Home() {
         ]
       : isTennis
         ? [
+            { key: "todos", label: "Todos" },
             { key: "resultado", label: "Vencedor" },
             { key: "sets", label: "Sets" },
             { key: "handicap", label: "Handicap" },
@@ -1739,6 +1741,7 @@ export default function Home() {
           ]
         : isHockey
           ? [
+              { key: "todos", label: "Todos" },
               { key: "resultado", label: "Vencedor" },
               { key: "totais", label: "Totais" },
               { key: "puckline", label: "Puck Line" },
@@ -1749,6 +1752,7 @@ export default function Home() {
             ]
           : isVolleyball
             ? [
+                { key: "todos", label: "Todos" },
                 { key: "resultado", label: "Vencedor" },
                 { key: "sets", label: "Sets" },
                 { key: "handicap", label: "Handicap" },
@@ -1756,6 +1760,7 @@ export default function Home() {
                 { key: "pontos", label: "Pontos" },
               ]
             : [
+                { key: "todos", label: "Todos" },
                 { key: "resultado", label: "Resultado" },
                 { key: "dupla", label: "Dupla Chance" },
                 { key: "gols", label: "Gols" },
@@ -1804,7 +1809,7 @@ export default function Home() {
         )}
 
         {/* ── RESULTADO / VENCEDOR ── */}
-        {modalTab === "resultado" && (
+        {(modalTab === "resultado" || modalTab === "todos") && (
           <MarketGroup title={isBasketball ? "Vencedor da Partida" : isTennis ? "Vencedor do Jogo" : "Resultado Final"}>
             <MarketOddsBtn match={match} sel="home" odd={match.odds.home} market="result" label={match.home} />
             {match.odds.draw > 0 && <MarketOddsBtn match={match} sel="draw" odd={match.odds.draw} market="result" label="Empate" />}
@@ -1813,7 +1818,7 @@ export default function Home() {
         )}
 
         {/* ── FUTEBOL: DUPLA CHANCE ── */}
-        {isFootball && modalTab === "dupla" && m && m.doubleChance.homeOrDraw > 0 && (
+        {isFootball && (modalTab === "dupla" || modalTab === "todos") && m && m.doubleChance.homeOrDraw > 0 && (
           <div>
             <MarketGroup title="Dupla Chance">
               <MarketOddsBtn match={match} sel="homeOrDraw" odd={m.doubleChance.homeOrDraw} market="dupla" label={`${match.home} ou X`} />
@@ -1833,7 +1838,7 @@ export default function Home() {
         )}
 
         {/* ── FUTEBOL: GOLS ── */}
-        {isFootball && modalTab === "gols" && m && m.totalGoals.over25 > 0 && (
+        {isFootball && (modalTab === "gols" || modalTab === "todos") && m && m.totalGoals.over25 > 0 && (
           <div>
             {m.totalGoals.over05 > 0 && (
               <MarketGroup title="Total de Gols — 0.5">
@@ -1876,7 +1881,7 @@ export default function Home() {
         )}
 
         {/* ── BASQUETE: TOTAIS ── */}
-        {isBasketball && modalTab === "totais" && m && (
+        {isBasketball && (modalTab === "totais" || modalTab === "todos") && m && (
           <div>
             {m._total && m.totalGoals.over25 > 0 && (
               <MarketGroup title={`Total Jogo — ${m._total}`}>
@@ -1898,7 +1903,7 @@ export default function Home() {
             )}
           </div>
         )}
-        {isBasketball && modalTab === "1tempo" && m && m.totalGoals.over15 > 0 && (
+        {isBasketball && (modalTab === "1tempo" || modalTab === "todos") && m && m.totalGoals.over15 > 0 && (
           <MarketGroup title={`Total 1º Quarto — ${m._total1H ? Math.round((m._total1H as number) / 2) : "—"}`}>
             <MarketOddsBtn match={match} sel="o15" odd={m.totalGoals.over15} market="1tempo" label="Acima" />
             <MarketOddsBtn match={match} sel="u15" odd={m.totalGoals.under15} market="1tempo" label="Abaixo" />
@@ -1906,7 +1911,7 @@ export default function Home() {
         )}
 
         {/* ── BASQUETE: SPREAD ── */}
-        {isBasketball && modalTab === "spread" && m && m.handicap.homeMinusOne > 0 && (
+        {isBasketball && (modalTab === "spread" || modalTab === "todos") && m && m.handicap.homeMinusOne > 0 && (
           <div>
             {m._spread !== undefined && (
               <MarketGroup title={`Spread — ${match.home} ${m._spread > 0 ? `−${m._spread}` : `+${Math.abs(m._spread)}`}`}>
@@ -1921,7 +1926,7 @@ export default function Home() {
         )}
 
         {/* ── TÉNIS: SETS ── */}
-        {isTennis && modalTab === "sets" && m && (
+        {isTennis && (modalTab === "sets" || modalTab === "todos") && m && (
           <div>
             {m.totalGoals.over15 > 0 && (
               <MarketGroup title="Vencedor do 1º Set">
@@ -1945,7 +1950,7 @@ export default function Home() {
         )}
 
         {/* ── HANDICAP (futebol + ténis) ── */}
-        {!isBasketball && modalTab === "handicap" && m && m.handicap.homeMinusOne > 0 && (
+        {!isBasketball && (modalTab === "handicap" || modalTab === "todos") && m && m.handicap.homeMinusOne > 0 && (
           <div>
             {isFootball ? (
               <>
@@ -1971,7 +1976,7 @@ export default function Home() {
         )}
 
         {/* ── FUTEBOL: 1º TEMPO ── */}
-        {isFootball && modalTab === "1tempo" && m && m.halfTime.home > 0 && (
+        {isFootball && (modalTab === "1tempo" || modalTab === "todos") && m && m.halfTime.home > 0 && (
           <div>
             <MarketGroup title="Resultado — 1º Tempo">
               <MarketOddsBtn match={match} sel="ht-home" odd={m.halfTime.home} market="1tempo" label={match.home} />
@@ -1992,7 +1997,7 @@ export default function Home() {
         )}
 
         {/* ── FUTEBOL: HT/FT ── */}
-        {isFootball && modalTab === "htft" && m && m.htft && (
+        {isFootball && (modalTab === "htft" || modalTab === "todos") && m && m.htft && (
           <div>
             <MarketGroup title={`Intervalo / Final — ${match.home} vence`}>
               <MarketOddsBtn match={match} sel="htft-hh" odd={m.htft.hh} market="htft" label="1 / 1" />
@@ -2016,7 +2021,7 @@ export default function Home() {
         )}
 
         {/* ── FUTEBOL: PLACAR EXATO ── */}
-        {isFootball && modalTab === "placar" && m && m.correctScore && (
+        {isFootball && (modalTab === "placar" || modalTab === "todos") && m && m.correctScore && (
           <div>
             <p className="text-xs text-zinc-500 mb-3">Selecione o marcador exato ao final da partida.</p>
             <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
@@ -2031,7 +2036,7 @@ export default function Home() {
         )}
 
         {/* ── FUTEBOL: ESCANTEIOS ── */}
-        {isFootball && modalTab === "escanteios" && m && m.corners && (
+        {isFootball && (modalTab === "escanteios" || modalTab === "todos") && m && m.corners && (
           <div>
             <MarketGroup title="Total de Escanteios — 8.5">
               <MarketOddsBtn match={match} sel="oc85" odd={m.corners.o85} market="escanteios" label="Acima de 8.5" />
@@ -2052,7 +2057,7 @@ export default function Home() {
         )}
 
         {/* ── FUTEBOL: CARTÕES ── */}
-        {isFootball && modalTab === "cartoes" && m && m.cards && (
+        {isFootball && (modalTab === "cartoes" || modalTab === "todos") && m && m.cards && (
           <div>
             <MarketGroup title="Total de Cartões — 3.5">
               <MarketOddsBtn match={match} sel="ocard35" odd={m.cards.o35} market="cartoes" label="Acima de 3.5 cartões" />
@@ -2069,7 +2074,7 @@ export default function Home() {
         )}
 
         {/* ── FUTEBOL: ASIÁTICO ── */}
-        {isFootball && modalTab === "asiatico" && m && (
+        {isFootball && (modalTab === "asiatico" || modalTab === "todos") && m && (
           <div>
             {m.drawNoBet && m.drawNoBet.home > 0 && (
               <MarketGroup title="Draw No Bet (Empate Anulado)">
@@ -2114,7 +2119,7 @@ export default function Home() {
         )}
 
         {/* ── HÓQUEI: TOTAIS ── */}
-        {isHockey && modalTab === "totais" && m && (
+        {isHockey && (modalTab === "totais" || modalTab === "todos") && m && (
           <div>
             <MarketGroup title={`Total de Golos — ${m._total ?? "—"}`}>
               <MarketOddsBtn match={match} sel="o25" odd={m.totalGoals.over25} market="totais" label={`Mais de ${m._total ?? "—"}`} />
@@ -2136,7 +2141,7 @@ export default function Home() {
         )}
 
         {/* ── HÓQUEI: PUCK LINE ── */}
-        {isHockey && modalTab === "puckline" && m && m.handicap.homeMinusOne > 0 && (
+        {isHockey && (modalTab === "puckline" || modalTab === "todos") && m && m.handicap.homeMinusOne > 0 && (
           <div>
             <MarketGroup title="Puck Line (±1.5)">
               <MarketOddsBtn match={match} sel="pl-home" odd={m.handicap.homeMinusOne} market="puckline" label={`${match.home} −1.5`} />
@@ -2146,7 +2151,7 @@ export default function Home() {
         )}
 
         {/* ── HÓQUEI: 1º PERÍODO ── */}
-        {isHockey && modalTab === "1periodo" && m && m.halfTime.home > 0 && (
+        {isHockey && (modalTab === "1periodo" || modalTab === "todos") && m && m.halfTime.home > 0 && (
           <div>
             <MarketGroup title="Resultado — 1º Período">
               <MarketOddsBtn match={match} sel="per1-home" odd={m.halfTime.home} market="1periodo" label={match.home} />
@@ -2157,7 +2162,7 @@ export default function Home() {
         )}
 
         {/* ── VOLEIBOL: SETS ── */}
-        {isVolleyball && modalTab === "sets" && m && (
+        {isVolleyball && (modalTab === "sets" || modalTab === "todos") && m && (
           <div>
             {m.totalGoals.over15 > 0 && (
               <MarketGroup title="Total de Sets — O/U 2.5">
@@ -2181,7 +2186,7 @@ export default function Home() {
         )}
 
         {/* ── VOLEIBOL: HANDICAP (SETS) ── */}
-        {isVolleyball && modalTab === "handicap" && m && m.totalGoals.over35 > 0 && (
+        {isVolleyball && (modalTab === "handicap" || modalTab === "todos") && m && m.totalGoals.over35 > 0 && (
           <div>
             <MarketGroup title="Handicap de Sets — Casa −1.5">
               <MarketOddsBtn match={match} sel="hcap-vb-home" odd={m.totalGoals.over35} market="handicap" label={`${match.home} −1.5 sets`} />
@@ -2191,7 +2196,7 @@ export default function Home() {
         )}
 
         {/* ── VOLEIBOL: POR SET ── */}
-        {isVolleyball && modalTab === "perset" && m && (m as any).volleyballExtra && (
+        {isVolleyball && (modalTab === "perset" || modalTab === "todos") && m && (m as any).volleyballExtra && (
           <div>
             {((m as any).volleyballExtra as { set1: { home: number; away: number }; set2: { home: number; away: number }; set3: { home: number; away: number } }).set1.home > 0 && (
               <MarketGroup title="Vencedor do 1º Set">
@@ -2215,7 +2220,7 @@ export default function Home() {
         )}
 
         {/* ── VOLEIBOL: PONTOS ── */}
-        {isVolleyball && modalTab === "pontos" && m && (m as any).volleyballExtra && (
+        {isVolleyball && (modalTab === "pontos" || modalTab === "todos") && m && (m as any).volleyballExtra && (
           <div>
             {m.bothTeamsScore.yes > 0 && (
               <MarketGroup title={`Total de Pontos — O/U ${m._total ?? "—"}`}>
@@ -2233,7 +2238,7 @@ export default function Home() {
         )}
 
         {/* ── BASQUETE: QUARTOS ── */}
-        {isBasketball && modalTab === "quartos" && m && (m as any).basketballExtra && (
+        {isBasketball && (modalTab === "quartos" || modalTab === "todos") && m && (m as any).basketballExtra && (
           <div>
             {(["q1","q2","q3","q4"] as const).map((q, qi) => {
               const ex = (m as any).basketballExtra as any;
@@ -2249,7 +2254,7 @@ export default function Home() {
         )}
 
         {/* ── BASQUETE: TOTAIS POR TIME ── */}
-        {isBasketball && modalTab === "times" && m && (m as any).basketballExtra && (
+        {isBasketball && (modalTab === "times" || modalTab === "todos") && m && (m as any).basketballExtra && (
           <div>
             {((m as any).basketballExtra as any).teamTotalHome.over > 0 && (
               <MarketGroup title={`Total ${match.home} — O/U ${((m as any).basketballExtra as any).teamTotalHome.line}`}>
@@ -2267,7 +2272,7 @@ export default function Home() {
         )}
 
         {/* ── TÉNIS: TOTAL DE JOGOS ── */}
-        {isTennis && modalTab === "jogos" && m && (m as any).tennisExtra && (
+        {isTennis && (modalTab === "jogos" || modalTab === "todos") && m && (m as any).tennisExtra && (
           <div>
             {((m as any).tennisExtra as any).totalGames.over > 0 && (
               <MarketGroup title={`Total de Games — O/U ${((m as any).tennisExtra as any).totalGames.line}`}>
@@ -2291,7 +2296,7 @@ export default function Home() {
         )}
 
         {/* ── TÉNIS: PLACAR EXATO (SETS) ── */}
-        {isTennis && modalTab === "placar" && m && (m as any).tennisExtra && (
+        {isTennis && (modalTab === "placar" || modalTab === "todos") && m && (m as any).tennisExtra && (
           <div>
             <p className="text-xs text-zinc-500 mb-3">Resultado final em sets.</p>
             <div className="grid grid-cols-2 gap-2">
@@ -2304,7 +2309,7 @@ export default function Home() {
         )}
 
         {/* ── HÓQUEI: 2º PERÍODO ── */}
-        {isHockey && modalTab === "2periodo" && m && (m as any).hockeyExtra && (
+        {isHockey && (modalTab === "2periodo" || modalTab === "todos") && m && (m as any).hockeyExtra && (
           <div>
             <MarketGroup title="Resultado — 2º Período">
               <MarketOddsBtn match={match} sel="per2-home" odd={((m as any).hockeyExtra as any).period2.home} market="2periodo" label={match.home} />
@@ -2315,7 +2320,7 @@ export default function Home() {
         )}
 
         {/* ── HÓQUEI: 3º PERÍODO ── */}
-        {isHockey && modalTab === "3periodo" && m && (m as any).hockeyExtra && (
+        {isHockey && (modalTab === "3periodo" || modalTab === "todos") && m && (m as any).hockeyExtra && (
           <div>
             <MarketGroup title="Resultado — 3º Período">
               <MarketOddsBtn match={match} sel="per3-home" odd={((m as any).hockeyExtra as any).period3.home} market="3periodo" label={match.home} />
@@ -2326,7 +2331,7 @@ export default function Home() {
         )}
 
         {/* ── HÓQUEI: ESPECIAIS ── */}
-        {isHockey && modalTab === "especiais" && m && (m as any).hockeyExtra && (
+        {isHockey && (modalTab === "especiais" || modalTab === "todos") && m && (m as any).hockeyExtra && (
           <div>
             {((m as any).hockeyExtra as any).period1Total.over > 0 && (
               <MarketGroup title={`Total 1º Período — O/U ${((m as any).hockeyExtra as any).period1Total.line}`}>

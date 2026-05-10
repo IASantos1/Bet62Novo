@@ -1729,6 +1729,79 @@ function buildVolleyballMatches(): UpcomingMatch[] {
   });
 }
 
+// ─── Simulated live for other sports (deterministic per 8-min window) ─────────
+
+function buildSimulatedLiveOtherSports(): LiveMatchState[] {
+  const basketball = buildBasketballMatches();
+  const tennis     = buildTennisMatches();
+  const hockey     = buildHockeyMatches();
+  const volleyball = buildVolleyballMatches();
+
+  // 8-minute window — stable across polls, changes realistically
+  const window8 = Math.floor(Date.now() / (8 * 60 * 1000));
+
+  const picks: Array<{ m: UpcomingMatch; si: number }> = [
+    ...basketball.slice(0, 3).map((m, i) => ({ m, si: i })),
+    ...tennis.slice(0, 2).map((m, i) => ({ m, si: i + 3 })),
+    ...hockey.slice(0, 2).map((m, i) => ({ m, si: i + 5 })),
+    ...volleyball.slice(0, 2).map((m, i) => ({ m, si: i + 7 })),
+  ];
+
+  return picks.map(({ m, si }) => {
+    const seed = window8 * 97 + si * 31;
+    const rng = (n: number) => {
+      const x = Math.sin(seed + n * 7919) * 2654435761;
+      return x - Math.floor(x);
+    };
+
+    let homeScore = 0, awayScore = 0, minute = 0, status = "";
+
+    if (m.sport === "basketball") {
+      const quarter = 1 + Math.floor(rng(1) * 4);
+      homeScore = 20 + Math.floor(rng(3) * 65);
+      awayScore = 20 + Math.floor(rng(4) * 65);
+      minute    = (quarter - 1) * 12 + Math.floor(rng(2) * 12);
+      status    = `Q${quarter}`;
+    } else if (m.sport === "tennis") {
+      const setNo = 1 + Math.floor(rng(1) * 3);
+      homeScore = Math.floor(rng(2) * 2);
+      awayScore = Math.floor(rng(3) * 2);
+      minute    = setNo;
+      status    = `Set ${setNo}`;
+    } else if (m.sport === "hockey") {
+      const period = 1 + Math.floor(rng(1) * 3);
+      homeScore = Math.floor(rng(3) * 4);
+      awayScore = Math.floor(rng(4) * 4);
+      minute    = (period - 1) * 20 + Math.floor(rng(2) * 20);
+      status    = `P${period}`;
+    } else {
+      // volleyball
+      const setNo = 1 + Math.floor(rng(1) * 4);
+      homeScore = Math.floor(rng(2) * 2);
+      awayScore = Math.floor(rng(3) * 2);
+      minute    = setNo;
+      status    = `Set ${setNo}`;
+    }
+
+    return {
+      id:           m.id,
+      home:         m.home,
+      away:         m.away,
+      league:       m.league,
+      country:      m.country,
+      sport:        m.sport,
+      homeScore,
+      awayScore,
+      minute,
+      status,
+      hasRealOdds:  m.hasRealOdds,
+      odds:         m.odds,
+      markets:      m.markets,
+      events:       [],
+    } satisfies LiveMatchState;
+  });
+}
+
 export { buildLiveMatches, buildUpcomingMatches, buildBasketballMatches, buildTennisMatches, buildHockeyMatches, buildVolleyballMatches };
 
 // ─── Routes ───────────────────────────────────────────────────────────────────
@@ -1740,7 +1813,8 @@ router.get("/live", async (_req, res) => {
       getNHLLive(),
     ]);
     const nhlMatches = buildNHLLiveMatches(nhlTournaments);
-    const matches = [...soccerMatches, ...nhlMatches];
+    const otherLive  = buildSimulatedLiveOtherSports();
+    const matches    = [...soccerMatches, ...nhlMatches, ...otherLive];
     res.json({ matches });
   } catch (err) {
     res.status(500).json({ error: "Erro ao buscar partidas ao vivo" });
