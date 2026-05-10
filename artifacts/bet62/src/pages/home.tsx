@@ -1378,135 +1378,156 @@ export default function Home() {
     );
   };
 
-  // ─── Hero Carousel ────────────────────────────────────────────────
-  const HeroCarousel = () => {
-    const slides = upcomingMatches.slice(0, 4);
-    const [idx, setIdx] = useState(0);
-    const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // ─── Múltiplas Populares Banners ──────────────────────────────────
+  const PopularBanners = () => {
+    if (upcomingMatches.length === 0) return null;
 
-    const restart = useCallback(() => {
-      if (timerRef.current) clearInterval(timerRef.current);
-      timerRef.current = setInterval(() => setIdx(i => (i + 1) % Math.max(1, slides.length)), 5000);
-    }, [slides.length]);
+    const BANNER_CONFIGS = [
+      { title: "MÚLTIPLAS", subtitle: "POPULARES", bonus: "+8.5%",  label: "🔥 COMBOS POPULARES",   count: "200+ apostas" },
+      { title: "TOP",       subtitle: "APOSTAS",   bonus: "+12.5%", label: "⭐ MAIS APOSTADOS",      count: "150+ apostas" },
+      { title: "ALTA",      subtitle: "RETORNO",   bonus: "+15%",   label: "💰 ALTO RETORNO",         count: "100+ apostas" },
+      { title: "EM",        subtitle: "DESTAQUE",  bonus: "+10%",   label: "🏆 FAVORITOS DO DIA",     count: "80+ apostas"  },
+    ];
 
-    useEffect(() => {
-      if (slides.length === 0) return;
-      restart();
-      return () => { if (timerRef.current) clearInterval(timerRef.current); };
-    }, [slides.length, restart]);
+    const chunks: Match[][] = BANNER_CONFIGS.map((_, i) =>
+      upcomingMatches.slice(i * 5, i * 5 + 5)
+    ).filter(c => c.length > 0);
 
-    const go = (dir: 1 | -1) => {
-      setIdx(i => (i + dir + slides.length) % slides.length);
-      restart();
+    if (chunks.length === 0) return null;
+
+    const addAllToBetSlip = (events: Match[]) => {
+      events.forEach(m => {
+        if (m.odds.home > 0) {
+          const alreadyIn = bets.find(b => b.matchId === m.id && b.market === "result" && b.selection === "home");
+          if (!alreadyIn) toggleBet(m, "home", m.odds.home, "result", m.home);
+        }
+      });
+      setBetSlipOpenMobile(true);
     };
 
-    if (slides.length === 0) return null;
-
-    const slide = slides[idx];
-    const banner = getMatchBanner(slide);
-    const flag = COUNTRY_FLAGS[slide.country?.toLowerCase() ?? ""] ?? sportEmoji(slide.sport);
-    const dateStr = slide.date ? formatMatchDate(slide.date) : "";
-
     return (
-      <div className="relative w-full rounded-2xl overflow-hidden mb-6 select-none" style={{ height: 200 }}>
-        <AnimatePresence mode="wait">
-          <motion.div
-            key={idx}
-            initial={{ opacity: 0, x: 40 }}
-            animate={{ opacity: 1, x: 0 }}
-            exit={{ opacity: 0, x: -40 }}
-            transition={{ duration: 0.35, ease: "easeInOut" }}
-            className="absolute inset-0"
-          >
-            {/* background */}
-            {banner ? (
-              <img src={banner} alt="" className="absolute inset-0 w-full h-full object-cover object-center" />
-            ) : (
-              <img src={ARENA_BANNER} alt="" className="absolute inset-0 w-full h-full object-cover object-center" />
-            )}
-            {/* dark gradient overlay */}
-            <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/50 to-black/10" />
-            {/* red accent glow */}
-            <div className="absolute inset-0 bg-gradient-to-r from-red-900/30 to-transparent" />
+      <div className="mb-6">
+        <div className="flex gap-4 overflow-x-auto pb-2 snap-x snap-mandatory scrollbar-none" style={{ scrollbarWidth: "none" }}>
+          {chunks.map((events, bi) => {
+            const cfg = BANNER_CONFIGS[bi];
+            const totalOddsVal = events
+              .reduce((acc, m) => acc * (m.odds.home > 0 ? m.odds.home : 1), 1)
+              .toFixed(2);
 
-            {/* content */}
-            <div className="absolute inset-0 flex flex-col justify-end p-4">
-              {/* league badge */}
-              <div className="flex items-center gap-1.5 mb-2">
-                <span className="text-xs">{flag}</span>
-                <span className="text-[10px] uppercase font-bold text-zinc-300 tracking-widest">{slide.league || slide.country || "Liga"}</span>
-                {slide.isLive && (
-                  <span className="ml-1 px-1.5 py-0.5 rounded text-[9px] font-black bg-red-600 text-white uppercase tracking-wide animate-pulse">AO VIVO</span>
-                )}
-              </div>
-              {/* teams */}
-              <div className="text-white font-black text-xl leading-tight mb-1 truncate drop-shadow">
-                {slide.home} <span className="text-red-400 font-light text-base">vs</span> {slide.away}
-              </div>
-              {/* date + quick odds */}
-              <div className="flex items-center justify-between">
-                <span className="text-zinc-400 text-[11px]">{dateStr}</span>
-                <div className="flex gap-1.5">
-                  {slide.odds.home > 0 && (
-                    <button
-                      onClick={() => setExpandedMatch(slide)}
-                      className="px-2.5 py-1 rounded-lg bg-zinc-800/80 hover:bg-red-600 transition-colors text-white text-xs font-bold border border-zinc-700"
-                    >
-                      {slide.odds.home.toFixed(2)}
-                    </button>
-                  )}
-                  {slide.odds.draw > 0 && (
-                    <button
-                      onClick={() => setExpandedMatch(slide)}
-                      className="px-2.5 py-1 rounded-lg bg-zinc-800/80 hover:bg-red-600 transition-colors text-white text-xs font-bold border border-zinc-700"
-                    >
-                      {slide.odds.draw.toFixed(2)}
-                    </button>
-                  )}
-                  {slide.odds.away > 0 && (
-                    <button
-                      onClick={() => setExpandedMatch(slide)}
-                      className="px-2.5 py-1 rounded-lg bg-zinc-800/80 hover:bg-red-600 transition-colors text-white text-xs font-bold border border-zinc-700"
-                    >
-                      {slide.odds.away.toFixed(2)}
-                    </button>
-                  )}
+            return (
+              <div
+                key={bi}
+                className="snap-center shrink-0 w-[340px] rounded-[28px] p-6 flex flex-col"
+                style={{
+                  background: "linear-gradient(180deg,#1c0a0a,#0a0a0a)",
+                  border: "1px solid rgba(220,38,38,0.2)",
+                  boxShadow: "0 0 30px rgba(220,38,38,0.12)",
+                }}
+              >
+                {/* Header */}
+                <div className="flex justify-between items-start mb-5">
+                  <div className="leading-none">
+                    <div className="font-black italic text-4xl text-white tracking-wide uppercase">{cfg.title}</div>
+                    <div className="font-black italic text-4xl text-red-500 tracking-wide uppercase">{cfg.subtitle}</div>
+                  </div>
+                  <div
+                    className="rounded-[18px] px-4 py-3 text-center"
+                    style={{
+                      background: "#0b0b0b",
+                      border: "2px solid #dc2626",
+                      boxShadow: "0 0 20px rgba(220,38,38,0.35)",
+                    }}
+                  >
+                    <span className="block text-white font-bold text-xl leading-none">BET+</span>
+                    <span className="block text-red-500 font-bold text-xl leading-none mt-0.5">{cfg.bonus}</span>
+                  </div>
+                </div>
+
+                {/* Info row */}
+                <div className="flex justify-between mb-4 text-red-500 font-semibold text-[13px]">
+                  <span>{cfg.label}</span>
+                  <span>{cfg.count}</span>
+                </div>
+
+                {/* Event rows */}
+                <div className="flex flex-col gap-3 flex-1">
+                  {events.map((m, ei) => {
+                    const flag = COUNTRY_FLAGS[m.country?.toLowerCase() ?? ""] ?? sportEmoji(m.sport);
+                    const timeStr = m.date ? formatMatchDate(m.date) : (m.time ?? "");
+                    const isSelected = !!bets.find(b => b.matchId === m.id && b.market === "result" && b.selection === "home");
+                    return (
+                      <div
+                        key={ei}
+                        className="rounded-[18px] p-4 flex justify-between items-center"
+                        style={{
+                          background: isSelected ? "rgba(220,38,38,0.12)" : "#0d0d0d",
+                          border: isSelected ? "1px solid rgba(220,38,38,0.5)" : "1px solid rgba(220,38,38,0.1)",
+                          boxShadow: "0 0 10px rgba(220,38,38,0.06)",
+                        }}
+                      >
+                        <div className="flex gap-3 min-w-0">
+                          {/* Team logo circles */}
+                          <div className="flex flex-col gap-1.5 shrink-0">
+                            <div
+                              className="w-9 h-9 rounded-full flex items-center justify-center text-[15px]"
+                              style={{ background: "#1a1a1a", border: "2px solid #dc2626" }}
+                            >
+                              {flag}
+                            </div>
+                            <div
+                              className="w-9 h-9 rounded-full flex items-center justify-center text-[15px]"
+                              style={{ background: "#1a1a1a", border: "2px solid #dc2626" }}
+                            >
+                              {flag}
+                            </div>
+                          </div>
+                          {/* Text */}
+                          <div className="min-w-0">
+                            <div className="text-white font-bold text-[15px] truncate leading-tight">{m.home}</div>
+                            <div className="text-zinc-400 text-[12px] truncate">Vencedor</div>
+                            <div className="text-zinc-500 text-[11px] truncate">{m.home} vs {m.away}</div>
+                            <div className="text-zinc-600 text-[11px] mt-0.5">🕒 {timeStr}</div>
+                          </div>
+                        </div>
+                        {/* Odds */}
+                        <div className="text-red-500 font-bold text-[28px] leading-none shrink-0 ml-2">
+                          {m.odds.home > 0 ? m.odds.home.toFixed(2) : "—"}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* Footer */}
+                <div className="flex gap-3 mt-5">
+                  <div
+                    className="rounded-[18px] px-4 py-3"
+                    style={{ background: "#0b0b0b", border: "1px solid #dc2626" }}
+                  >
+                    <div className="text-zinc-500 text-[12px] leading-none mb-1">ODD TOTAL</div>
+                    <div className="text-red-500 font-black text-3xl leading-none">{totalOddsVal}</div>
+                  </div>
+                  <button
+                    onClick={() => addAllToBetSlip(events)}
+                    className="flex-1 rounded-[18px] font-bold text-[14px] text-white transition-opacity hover:opacity-90 active:scale-95"
+                    style={{
+                      background: "linear-gradient(135deg,#dc2626,#991b1b)",
+                      boxShadow: "0 0 20px rgba(220,38,38,0.45)",
+                    }}
+                  >
+                    ADICIONAR<br />AO BOLETIM
+                  </button>
+                </div>
+
+                {/* Bottom disclaimer */}
+                <div className="flex justify-between mt-4 text-[11px]">
+                  <span className="text-zinc-700">JOGUE COM RESPONSABILIDADE</span>
+                  <span className="text-red-700 font-semibold">AS MELHORES ODDS</span>
                 </div>
               </div>
-            </div>
-          </motion.div>
-        </AnimatePresence>
-
-        {/* prev / next arrows */}
-        {slides.length > 1 && (
-          <>
-            <button
-              onClick={() => go(-1)}
-              className="absolute left-2 top-1/2 -translate-y-1/2 p-1.5 rounded-full bg-black/50 hover:bg-red-600/80 transition-colors text-white z-10"
-            >
-              <ChevronLeft size={16} />
-            </button>
-            <button
-              onClick={() => go(1)}
-              className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 rounded-full bg-black/50 hover:bg-red-600/80 transition-colors text-white z-10"
-            >
-              <ChevronRight size={16} />
-            </button>
-          </>
-        )}
-
-        {/* dots */}
-        {slides.length > 1 && (
-          <div className="absolute bottom-2 left-1/2 -translate-x-1/2 flex gap-1.5 z-10">
-            {slides.map((_, i) => (
-              <button
-                key={i}
-                onClick={() => { setIdx(i); restart(); }}
-                className={`rounded-full transition-all ${i === idx ? "w-4 h-1.5 bg-red-500" : "w-1.5 h-1.5 bg-zinc-600 hover:bg-zinc-400"}`}
-              />
-            ))}
-          </div>
-        )}
+            );
+          })}
+        </div>
       </div>
     );
   };
@@ -2868,7 +2889,7 @@ export default function Home() {
 
               return (
                 <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
-                  {!selectedLeague && <HeroCarousel />}
+                  {!selectedLeague && <PopularBanners />}
                   <h2 className="text-2xl font-black italic uppercase tracking-tight mb-4 flex items-center gap-2">
                     <Trophy className="text-red-600" /> {selectedLeague ? selectedLeague : "Próximos Eventos"}
                   </h2>
