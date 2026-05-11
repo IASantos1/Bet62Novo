@@ -2030,7 +2030,7 @@ function buildTennisMatches(): UpcomingMatch[] {
         }),
       } as unknown as AdvancedMarkets,
     };
-  });
+  }).filter(m => !isMatchTimePast(m.date ?? "", m.time ?? ""));
 }
 
 // ─── Date helper for upcoming generators ─────────────────────────────────────
@@ -2039,6 +2039,30 @@ function futureDateStr(daysAhead: number): string {
   const d = new Date();
   d.setDate(d.getDate() + daysAhead);
   return `${String(d.getDate()).padStart(2, "0")}.${String(d.getMonth() + 1).padStart(2, "0")}.${d.getFullYear()}`;
+}
+
+/**
+ * Returns true if the match's scheduled date+time is already in the past.
+ * Handles both DD.MM.YYYY and YYYY-MM-DD date formats.
+ * A match is considered past as soon as its scheduled minute begins.
+ */
+function isMatchTimePast(dateStr: string, timeStr: string): boolean {
+  if (!dateStr || !timeStr) return false;
+  try {
+    let isoDate: string;
+    if (/^\d{2}\.\d{2}\.\d{4}$/.test(dateStr)) {
+      const [dd, mm, yyyy] = dateStr.split(".");
+      isoDate = `${yyyy}-${mm}-${dd}`;
+    } else if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
+      isoDate = dateStr;
+    } else {
+      return false;
+    }
+    const scheduledMs = new Date(`${isoDate}T${timeStr}:00`).getTime();
+    return Date.now() >= scheduledMs;
+  } catch {
+    return false;
+  }
 }
 
 // ─── Hockey generator (NHL/KHL — Poisson model) ──────────────────────────────
@@ -3411,9 +3435,10 @@ async function getVolleyballOdds(): Promise<VolleyOddsEntry[]> {
       });
     }
   }
-  volleyOddsCache = results;
+  const fresh = results.filter(r => !isMatchTimePast(r.date, r.time));
+  volleyOddsCache = fresh;
   volleyOddsFetchedAt = now;
-  return results;
+  return fresh;
 }
 
 router.get("/volleyball-odds", async (_req, res) => {
@@ -3494,9 +3519,10 @@ async function getTennisOdds(): Promise<TennisOddsEntry[]> {
       });
     }
   }
-  tennisOddsCache = results;
+  const fresh = results.filter(r => !isMatchTimePast(r.date, r.time));
+  tennisOddsCache = fresh;
   tennisOddsFetchedAt = now;
-  return results;
+  return fresh;
 }
 
 router.get("/tennis-odds", async (_req, res) => {
