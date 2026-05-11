@@ -6891,4 +6891,116 @@ router.get("/football-live-match-states", async (_req, res) => {
   }
 });
 
+// ─── Football Livescores (v1) ──────────────────────────────────────────────────
+// v1/soccer/livescores — separate from v2/soccer/matches/live used by /live route.
+// v1 is simpler (no inplay_odds_running, no et/penalties) but has different fields:
+//   • root: livescore.league[] (not live_matches.league)
+//   • match id field: id + alternate_id + static_id (not main_id)
+//   • home/away.agg: "true"/"false" string (won on aggregate)
+//   • commentary: "True"/"False" string
+//   • events.event: single object or array; fields use no-underscore names (playerid, assistid)
+//   • ht.score / ft.score: "[0-2]" string (not pre-parsed numbers)
+
+type V1SoccerEvent = {
+  id: string; type: string; team: string; minute: string; extra_min: string;
+  player: string; playerid: string;
+  assist: string; assistid: string;
+  result: string;   // "[0 - 1]"
+};
+type V1SoccerTeam = { id: string; name: string; goals: string; agg: string };
+type V1SoccerMatch = {
+  id: string; alternate_id: string; alternate_id_2: string; static_id: string;
+  status: string; date: string; time: string; venue: string; commentary: string;
+  inj_minute: string; inj_time: string;
+  home: V1SoccerTeam; away: V1SoccerTeam;
+  events?: { event?: V1SoccerEvent | V1SoccerEvent[] };
+  ht?: { score: string };   // "[0-2]"
+  ft?: { score: string };   // "[0-4]"
+};
+type V1SoccerLeague = {
+  id: string; name: string; country: string; cup: string; sub_id: string;
+  match: V1SoccerMatch | V1SoccerMatch[];
+};
+type V1SoccerLivescoresRaw = {
+  livescore?: {
+    updated?: string; sport?: string;
+    league?: V1SoccerLeague | V1SoccerLeague[];
+  };
+};
+
+// Parse "[0-2]" or "[0 - 2]" → { home: 0, away: 2 }
+function parseScoreStr(s: string | undefined): { home: number; away: number } | null {
+  if (!s) return null;
+  const m = s.replace(/[\[\] ]/g, "").split("-");
+  if (m.length < 2) return null;
+  const h = parseInt(m[0] ?? "");
+  const a = parseInt(m[1] ?? "");
+  return isNaN(h) || isNaN(a) ? null : { home: h, away: a };
+}
+
+let footballV1LiveCache: object[] | null = null;
+let footballV1LiveFetchedAt = 0;
+const FOOTBALL_V1_LIVE_TTL = 30 * 1000;
+
+router.get("/football-livescores", async (_req, res) => {
+  const now = Date.now();
+  if (footballV1LiveCache && now - footballV1LiveFetchedAt < FOOTBALL_V1_LIVE_TTL) {
+    res.json({ leagues: footballV1LiveCache });
+    return;
+  }
+  try {
+    const resp = await fetch(`${BASE_V1}/soccer/livescores?access_key=${STATSPAL_KEY}`, { signal: AbortSignal.timeout(9000) });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const data = (await resp.json()) as V1SoccerLivescoresRaw;
+    const rawLeagues = data?.livescore?.league;
+    const leagues: V1SoccerLeague[] = !rawLeagues ? [] : Array.isArray(rawLeagues) ? rawLeagues : [rawLeagues];
+
+    const out = leagues.map(lg => {
+      const rawMatches = lg.match;
+      const matches: V1SoccerMatch[] = !rawMatches ? [] : Array.isArray(rawMatches) ? rawMatches : [rawMatches];
+      return {
+        id: lg.id,
+        name: lg.name,
+        country: lg.country,
+        cup: lg.cup === "True",
+        subId: lg.sub_id,
+        matches: matches.map(m => {
+          const rawEvents = m.events?.event;
+          const events: V1SoccerEvent[] = !rawEvents ? [] : Array.isArray(rawEvents) ? rawEvents : [rawEvents];
+          return {
+            id: m.id,
+            alternateId: m.alternate_id,
+            alternateId2: m.alternate_id_2,
+            staticId: m.static_id,
+            status: m.status,
+            date: m.date,
+            time: m.time,
+            venue: m.venue || null,
+            commentary: m.commentary === "True",
+            injMinute: m.inj_minute || null,
+            injTime: m.inj_time || null,
+            homeTeam: { id: m.home.id, name: m.home.name, goals: parseInt(m.home.goals) || 0, wonOnAgg: m.home.agg === "true" },
+            awayTeam: { id: m.away.id, name: m.away.name, goals: parseInt(m.away.goals) || 0, wonOnAgg: m.away.agg === "true" },
+            ht: parseScoreStr(m.ht?.score),
+            ft: parseScoreStr(m.ft?.score),
+            events: events.map(e => ({
+              id: e.id, type: e.type, team: e.team,
+              minute: e.minute, extraMin: e.extra_min || null,
+              player: e.player, playerId: e.playerid,
+              assist: e.assist || null, assistId: e.assistid || null,
+              result: e.result,
+            })),
+          };
+        }),
+      };
+    });
+
+    footballV1LiveCache = out;
+    footballV1LiveFetchedAt = now;
+    res.json({ leagues: out });
+  } catch {
+    res.status(500).json({ error: "Livescores indisponíveis" });
+  }
+});
+
 export default router;
