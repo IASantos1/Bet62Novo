@@ -7619,4 +7619,63 @@ router.get("/football-standings-country/:country", async (req, res) => {
   }
 });
 
+// ─── Football Scoring Leaders by country ──────────────────────────────────────
+// v1/soccer/scoring-leaders/{country} — top scorers per league per country.
+// Root: "scorers" (7th distinct root key in football v1 endpoints).
+// League has player[] directly (not match[]/team[]). All numeric fields are strings.
+// Fields: pos (rank), goals, penalty_goals, team name + team_id.
+
+type V1ScorerPlayer = {
+  id: string; name: string; pos: string;
+  goals: string; penalty_goals: string;
+  team: string; team_id: string;
+};
+type V1ScorerLeague = {
+  id: string; name: string; country: string; sub_id: string;
+  player: V1ScorerPlayer | V1ScorerPlayer[];
+};
+type V1ScorersRaw = {
+  scorers?: {
+    updated?: string; sport?: string; country?: string;
+    league?: V1ScorerLeague | V1ScorerLeague[];
+  };
+};
+
+const footballScorersCache = new Map<string, { data: object[]; fetchedAt: number }>();
+const FOOTBALL_SCORERS_TTL = 30 * 60 * 1000; // 30 min — changes at most daily
+
+router.get("/football-scoring-leaders/:country", async (req, res) => {
+  const country = String(req.params["country"]).toLowerCase().replace(/[^a-z0-9-]/g, "");
+  if (!country) { res.status(400).json({ error: "País inválido" }); return; }
+  const now = Date.now();
+  const cached = footballScorersCache.get(country);
+  if (cached && now - cached.fetchedAt < FOOTBALL_SCORERS_TTL) {
+    res.json({ leagues: cached.data });
+    return;
+  }
+  try {
+    const resp = await fetch(`${BASE_V1}/soccer/scoring-leaders/${encodeURIComponent(country)}?access_key=${STATSPAL_KEY}`, { signal: AbortSignal.timeout(9000) });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const data = (await resp.json()) as V1ScorersRaw;
+    const rawLeagues = data?.scorers?.league;
+    const leagues: V1ScorerLeague[] = toArr(rawLeagues);
+
+    const out = leagues.map(lg => ({
+      id: lg.id, name: lg.name, country: lg.country, subId: lg.sub_id,
+      players: toArr(lg.player).map(p => ({
+        id: p.id, name: p.name,
+        rank:         parseInt(p.pos)           || 0,
+        goals:        parseInt(p.goals)         || 0,
+        penaltyGoals: parseInt(p.penalty_goals) || 0,
+        team: p.team, teamId: p.team_id,
+      })),
+    }));
+
+    footballScorersCache.set(country, { data: out, fetchedAt: now });
+    res.json({ leagues: out });
+  } catch {
+    res.status(500).json({ error: "Marcadores indisponíveis" });
+  }
+});
+
 export default router;
