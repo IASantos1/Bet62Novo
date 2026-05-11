@@ -6864,4 +6864,31 @@ router.get("/football-live-markets", async (_req, res) => {
   }
 });
 
+// ─── Football Live Match States catalogue ─────────────────────────────────────
+// v2/soccer/odds/live/match-states — bare array root, same shape as live/markets
+// Provides human-readable labels for state_code values in football-live-odds.
+
+let footballLiveStatesCache: { id: number; name: string }[] | null = null;
+let footballLiveStatesFetchedAt = 0;
+const FOOTBALL_LIVE_STATES_TTL = 60 * 60 * 1000; // 1h — static catalogue
+
+router.get("/football-live-match-states", async (_req, res) => {
+  const now = Date.now();
+  if (footballLiveStatesCache && now - footballLiveStatesFetchedAt < FOOTBALL_LIVE_STATES_TTL) {
+    res.json({ states: footballLiveStatesCache });
+    return;
+  }
+  try {
+    const resp = await fetch(`${BASE_V2}/soccer/odds/live/match-states?access_key=${STATSPAL_KEY}`, { signal: AbortSignal.timeout(8000) });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const data = (await resp.json()) as { id: number; name: string }[];
+    const states = Array.isArray(data) ? data.map(s => ({ id: s.id, name: s.name })) : [];
+    footballLiveStatesCache = states;
+    footballLiveStatesFetchedAt = now;
+    res.json({ states });
+  } catch {
+    res.status(500).json({ error: "Estados de jogo indisponíveis" });
+  }
+});
+
 export default router;
