@@ -51,6 +51,27 @@ import talleresBanner from "@assets/Create_a_photorealistic_169_football_banner_
 import lanusBanner from "@assets/Create_a_photorealistic_169_football_banner_with_-177836119764_1778361261633.png";
 
 const TEAM_BANNERS: Record<string, string> = {
+  // ── Liga Portugal ──
+  "FC Porto": "/banners/porto.jpg",
+  "Porto": "/banners/porto.jpg",
+  "Benfica": "/banners/benfica.jpg",
+  "SL Benfica": "/banners/benfica.jpg",
+  "Sporting CP": "/banners/sporting.jpg",
+  "Sporting": "/banners/sporting.jpg",
+  "Braga": "/banners/braga.jpg",
+  "SC Braga": "/banners/braga.jpg",
+  "Famalicão": "/banners/famalicao.jpg",
+  "Famalicao": "/banners/famalicao.jpg",
+  "FC Famalicão": "/banners/famalicao.jpg",
+  "Gil Vicente": "/banners/gil-vicente.jpg",
+  "Moreirense": "/banners/moreirense.jpg",
+  "Vitória SC": "/banners/vitoria-sc.jpg",
+  "Vitoria SC": "/banners/vitoria-sc.jpg",
+  "Vitória de Guimarães": "/banners/vitoria-sc.jpg",
+  "Estoril Praia": "/banners/estoril.jpg",
+  "Estoril": "/banners/estoril.jpg",
+  "Alverca": "/banners/alverca.jpg",
+  "FC Alverca": "/banners/alverca.jpg",
   // ── Serie A ──
   "Inter": "/banners/inter.jpg",
   "Inter Milan": "/banners/inter.jpg",
@@ -147,6 +168,16 @@ const LEAGUE_FLAGS: Record<string, string> = {
 };
 
 const TEAM_COUNTRY: Record<string, string> = {
+  // Liga Portugal
+  "FC Porto": "portugal", "Porto": "portugal",
+  "Benfica": "portugal", "SL Benfica": "portugal",
+  "Sporting CP": "portugal", "Sporting": "portugal",
+  "Braga": "portugal", "SC Braga": "portugal",
+  "Famalicão": "portugal", "Famalicao": "portugal", "FC Famalicão": "portugal",
+  "Gil Vicente": "portugal", "Moreirense": "portugal",
+  "Vitória SC": "portugal", "Vitoria SC": "portugal", "Vitória de Guimarães": "portugal",
+  "Estoril Praia": "portugal", "Estoril": "portugal",
+  "Alverca": "portugal", "FC Alverca": "portugal",
   // Serie A
   "Inter": "italy", "Inter Milan": "italy", "Internazionale": "italy",
   "Milan": "italy", "AC Milan": "italy", "Juventus": "italy",
@@ -1562,15 +1593,15 @@ export default function Home() {
           className="relative aspect-video rounded-xl border border-zinc-800 hover:border-red-500/40 transition-colors cursor-pointer overflow-hidden"
           onClick={() => setExpandedMatch(match)}
         >
-          <img src={bannerImg} alt="" className="absolute inset-0 w-full h-full object-cover opacity-60" />
-          <div className="absolute inset-0 bg-gradient-to-t from-black via-black/50 to-black/10" />
+          <img src={bannerImg} alt="" className="absolute inset-0 w-full h-full object-cover opacity-95" />
+          <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/30 to-black/10" />
           <div className="absolute top-0 left-0 right-0 flex items-center justify-between px-4 pt-3">
             <div className="flex items-center gap-2">
               <div className="relative w-5 h-5 flex items-center justify-center leading-none text-sm">
                 {flag}
                 <span className="absolute -bottom-0.5 -right-1.5 bg-black/60 rounded-full text-[8px] w-3 h-3 flex items-center justify-center">{sportEmoji(match.sport)}</span>
               </div>
-              <span className="text-xs text-white/80 font-medium drop-shadow">{match.league}</span>
+              <span className="text-xs text-white/90 font-medium drop-shadow">{match.league}</span>
             </div>
             <div className="flex items-center gap-2">{liveBadge}</div>
           </div>
@@ -1638,17 +1669,17 @@ export default function Home() {
           className="relative aspect-video rounded-xl border border-zinc-800 hover:border-red-500/40 transition-colors cursor-pointer overflow-hidden"
           onClick={() => setExpandedMatch(match)}
         >
-          <img src={bannerImg} alt="" className="absolute inset-0 w-full h-full object-cover opacity-60" />
-          <div className="absolute inset-0 bg-gradient-to-t from-black via-black/50 to-black/10" />
+          <img src={bannerImg} alt="" className="absolute inset-0 w-full h-full object-cover opacity-95" />
+          <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/30 to-black/10" />
           <div className="absolute top-0 left-0 right-0 flex items-center justify-between px-4 pt-3">
             <div className="flex items-center gap-2">
               <div className="relative w-5 h-5 flex items-center justify-center leading-none text-sm">
                 {flag}
                 <span className="absolute -bottom-0.5 -right-1.5 bg-black/60 rounded-full text-[8px] w-3 h-3 flex items-center justify-center">{sportEmoji(match.sport)}</span>
               </div>
-              <span className="text-xs text-white/80 font-medium drop-shadow">{match.league}</span>
+              <span className="text-xs text-white/90 font-medium drop-shadow">{match.league}</span>
             </div>
-            <span className="text-xs text-white/60">{dateStr}{match.time ? ` • ${match.time}` : ""}</span>
+            <span className="text-xs text-white/70">{dateStr}{match.time ? ` • ${match.time}` : ""}</span>
           </div>
           <div className="absolute bottom-0 left-0 right-0 px-4 pb-4" onClick={e => e.stopPropagation()}>
             {rivalry && <div className="text-[11px] font-black text-red-400 uppercase tracking-widest mb-1 drop-shadow">{rivalry}</div>}
