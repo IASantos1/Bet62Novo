@@ -7383,4 +7383,153 @@ router.get("/football-results-country/:country", async (req, res) => {
   }
 });
 
+// ─── Football Live Match Stats / Commentary ────────────────────────────────────
+// v1/soccer/live-match-stats/{league_slug} — richest single-match detail endpoint.
+// Root: "commentaries" (5th distinct root key in football v1 endpoints).
+// UNIQUE: league and match are single objects (never arrays).
+// League slug is a string like "afc_champleague", "epl", not a numeric ID.
+// home/away: goals + ht_score + ft_score directly on team (not nested ht/ft objects).
+// matchinfo: stadium, attendance, addedtime, referee (includes nationality string).
+// summary.home/away: goals/yellowcards/redcards/var — each .player: single or array.
+// Boolean-like strings: "True"/"False" for owngoal/penalty/var_cancelled/var_decision.
+
+type V1LiveStatsSummaryGoal = {
+  id: string; name: string; minute: string; extra_min: string;
+  assist_id: string; assist_name: string;
+  owngoal: string; penalty: string; penalty_missed: string; var_cancelled: string;
+};
+type V1LiveStatsCard = {
+  id: string; name: string; minute: string; extra_min: string; comment: string;
+};
+type V1LiveStatsVar = {
+  id: string; name: string; minute: string; extra_min: string;
+  event_type: string; ref_decision: string; var_decision: string;
+};
+type V1LiveStatsSummaryTeam = {
+  goals?:       null | { player?: V1LiveStatsSummaryGoal | V1LiveStatsSummaryGoal[] };
+  yellowcards?: null | { player?: V1LiveStatsCard | V1LiveStatsCard[] };
+  redcards?:    null | { player?: V1LiveStatsCard | V1LiveStatsCard[] };
+  var?:         null | { player?: V1LiveStatsVar  | V1LiveStatsVar[] };
+};
+type V1LiveStatsTeam = {
+  id: string; name: string;
+  goals: string; ft_score: string; ht_score: string; et_score: string; pen_score: string;
+};
+type V1LiveStatsMatch = {
+  id: string; alternate_id: string; alternate_id_2: string; static_id: string;
+  status: string; date: string; time: string; timer: string;
+  home: V1LiveStatsTeam; away: V1LiveStatsTeam;
+  matchinfo?: {
+    stadium?:    { name?: string };
+    attendance?: { name?: string };
+    time?:       { name?: string; addedtime_period1?: string; addedtime_period2?: string };
+    referee?:    { name?: string };
+  };
+  summary?: {
+    home?: V1LiveStatsSummaryTeam;
+    away?: V1LiveStatsSummaryTeam;
+  };
+};
+type V1LiveStatsLeague = {
+  id: string; name: string; country: string; sub_id: string;
+  match: V1LiveStatsMatch;   // always single object
+};
+type V1LiveStatsRaw = {
+  commentaries?: {
+    updated?: string; sport?: string; country?: string;
+    league?: V1LiveStatsLeague;   // always single object
+  };
+};
+
+function parseBool(s: string | undefined): boolean { return s === "True"; }
+
+function mapSummaryGoals(raw: V1LiveStatsSummaryTeam["goals"]): object[] {
+  return toArr(raw?.player).map(g => ({
+    id: g.id, name: g.name, minute: g.minute, extraMin: g.extra_min || null,
+    assistId: g.assist_id || null, assistName: g.assist_name || null,
+    ownGoal: parseBool(g.owngoal), penalty: parseBool(g.penalty),
+    penaltyMissed: parseBool(g.penalty_missed), varCancelled: parseBool(g.var_cancelled),
+  }));
+}
+function mapCards(raw: V1LiveStatsSummaryTeam["yellowcards"]): object[] {
+  return toArr(raw?.player).map(c => ({
+    id: c.id, name: c.name, minute: c.minute, extraMin: c.extra_min || null, comment: c.comment || null,
+  }));
+}
+function mapVar(raw: V1LiveStatsSummaryTeam["var"]): object[] {
+  return toArr(raw?.player).map(v => ({
+    id: v.id, name: v.name, minute: v.minute, extraMin: v.extra_min || null,
+    eventType: v.event_type, refDecision: v.ref_decision, varDecision: parseBool(v.var_decision),
+  }));
+}
+
+const footballLiveStatsCache = new Map<string, { data: object; fetchedAt: number }>();
+const FOOTBALL_LIVE_STATS_TTL = 30 * 1000; // 30s — live data
+
+router.get("/football-live-match-stats/:leagueSlug", async (req, res) => {
+  const slug = String(req.params["leagueSlug"]).toLowerCase().replace(/[^a-z0-9_-]/g, "");
+  if (!slug) { res.status(400).json({ error: "Slug inválido" }); return; }
+  const now = Date.now();
+  const cached = footballLiveStatsCache.get(slug);
+  if (cached && now - cached.fetchedAt < FOOTBALL_LIVE_STATS_TTL) {
+    res.json(cached.data);
+    return;
+  }
+  try {
+    const resp = await fetch(`${BASE_V1}/soccer/live-match-stats/${encodeURIComponent(slug)}?access_key=${STATSPAL_KEY}`, { signal: AbortSignal.timeout(9000) });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const data = (await resp.json()) as V1LiveStatsRaw;
+    const comm = data?.commentaries;
+    const lg = comm?.league;
+    if (!lg) { res.status(404).json({ error: "Liga não encontrada" }); return; }
+    const m = lg.match;
+    const mi = m.matchinfo;
+
+    const mapTeam = (t: V1LiveStatsTeam) => ({
+      id: t.id, name: t.name,
+      goals: parseInt(t.goals) || 0,
+      htScore: parseExtScore(t.ht_score),
+      ftScore: parseExtScore(t.ft_score),
+      etScore: parseExtScore(t.et_score),
+      penScore: parseExtScore(t.pen_score),
+    });
+
+    const out = {
+      league: { id: lg.id, name: lg.name, country: lg.country },
+      match: {
+        id: m.id, alternateId: m.alternate_id, alternateId2: m.alternate_id_2, staticId: m.static_id,
+        status: m.status, date: m.date, time: m.time, timer: m.timer || null,
+        homeTeam: mapTeam(m.home), awayTeam: mapTeam(m.away),
+        matchInfo: mi ? {
+          stadium:    mi.stadium?.name    || null,
+          attendance: mi.attendance?.name ? (parseInt(mi.attendance.name) || null) : null,
+          startTime:  mi.time?.name       || null,
+          addedTimeP1: parseInt(mi.time?.addedtime_period1 ?? "") || null,
+          addedTimeP2: parseInt(mi.time?.addedtime_period2 ?? "") || null,
+          referee:    mi.referee?.name    || null,
+        } : null,
+        summary: {
+          home: {
+            goals:       mapSummaryGoals(m.summary?.home?.goals),
+            yellowCards: mapCards(m.summary?.home?.yellowcards),
+            redCards:    mapCards(m.summary?.home?.redcards),
+            var:         mapVar(m.summary?.home?.var),
+          },
+          away: {
+            goals:       mapSummaryGoals(m.summary?.away?.goals),
+            yellowCards: mapCards(m.summary?.away?.yellowcards),
+            redCards:    mapCards(m.summary?.away?.redcards),
+            var:         mapVar(m.summary?.away?.var),
+          },
+        },
+      },
+    };
+
+    footballLiveStatsCache.set(slug, { data: out, fetchedAt: now });
+    res.json(out);
+  } catch {
+    res.status(500).json({ error: "Estatísticas ao vivo indisponíveis" });
+  }
+});
+
 export default router;
