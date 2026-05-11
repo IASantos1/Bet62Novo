@@ -1040,6 +1040,13 @@ export default function Home() {
   };
   const [hockeyOddsMatches, setHockeyOddsMatches] = useState<HockeyOddsEntry[]>([]);
 
+  type NBAOddsEntry = {
+    matchId: string; date: string; time: string;
+    homeTeam: { id: string; name: string }; awayTeam: { id: string; name: string };
+    homeOdds: number; awayOdds: number;
+  };
+  const [basketballOddsMatches, setBasketballOddsMatches] = useState<NBAOddsEntry[]>([]);
+
   // Volleyball leagues + schedule
   type VolleyLeague = { id: string; gid: string; league: string; country: string };
   type VolleyScheduleEntry = {
@@ -1220,6 +1227,10 @@ export default function Home() {
     fetch("/api/matches/basketball-schedule")
       .then(r => r.ok ? r.json() : null)
       .then(d => { if (d) setBasketballSchedule(d); })
+      .catch(() => { /* non-critical */ });
+    fetch("/api/matches/basketball-odds")
+      .then(r => r.ok ? r.json() : null)
+      .then(d => { if (d?.odds) setBasketballOddsMatches(d.odds); })
       .catch(() => { /* non-critical */ });
     fetch("/api/matches/basketball-results")
       .then(r => r.ok ? r.json() : { results: [] })
@@ -4822,15 +4833,35 @@ export default function Home() {
                       if (dt.getTime() === tomorrow.getTime()) return "Amanhã";
                       return dt.toLocaleDateString("pt-PT", { day: "2-digit", month: "short" });
                     };
+                    const normTeam = (n: string) => n.toLowerCase().replace(/[^a-z0-9]/g, "");
+                    const nbaOddsMap = new Map<string, NBAOddsEntry>();
+                    basketballOddsMatches.forEach(o => {
+                      const h = normTeam(o.homeTeam.name);
+                      const a = normTeam(o.awayTeam.name);
+                      nbaOddsMap.set(`${o.date}-${h}-${a}`, o);
+                      nbaOddsMap.set(`${o.date}-${a}-${h}`, { ...o, homeTeam: o.awayTeam, awayTeam: o.homeTeam, homeOdds: o.awayOdds, awayOdds: o.homeOdds });
+                    });
                     const byDate = upcoming.reduce<Record<string, typeof upcoming>>((acc, m) => {
                       (acc[m.date] ??= []).push(m); return acc;
                     }, {});
+                    const OddBtn = ({ matchId, sel, odd, label, market }: { matchId: string; sel: "home" | "away"; odd: number; label: string; market: string }) => {
+                      const fakeMatch = { id: `nba-odds-${matchId}`, home: label, away: "", league: "NBA", odds: { home: 0, draw: 0, away: 0 } } as unknown as Match;
+                      const selected = !!bets.find(b => b.matchId === fakeMatch.id && b.market === market && b.selection === sel);
+                      return (
+                        <button onClick={() => toggleBet(fakeMatch, sel, odd, market, label)}
+                          className={`flex-1 flex flex-col items-center px-1 py-1 rounded text-[9px] font-black tabular-nums border transition-colors ${selected ? "bg-red-600 border-red-500 text-white" : "bg-zinc-800 border-zinc-700 text-zinc-300 hover:border-zinc-500 hover:text-white"}`}>
+                          <span className="text-[7px] font-bold text-zinc-500 uppercase leading-none mb-0.5">{sel === "home" ? "1" : "2"}</span>
+                          <span>{odd.toFixed(2)}</span>
+                        </button>
+                      );
+                    };
                     return (
                       <div className="mb-6">
                         <div className="flex items-center gap-2 mb-3">
                           <span className="text-base font-black italic uppercase tracking-tight text-zinc-400">📅 Calendário NBA</span>
                           <span className="text-[10px] font-semibold text-zinc-600 normal-case italic hidden sm:block">— {basketballSchedule!.season}</span>
                           <span className="text-[10px] font-bold bg-zinc-800 text-zinc-500 rounded px-1.5 py-0.5">{upcoming.length}</span>
+                          {basketballOddsMatches.length > 0 && <span className="text-[9px] font-bold text-green-600/80 bg-green-500/10 border border-green-500/20 rounded px-1.5 py-0.5">{basketballOddsMatches.length} com odds</span>}
                         </div>
                         <div className="space-y-3">
                           {Object.entries(byDate).slice(0, 7).map(([date, games]) => (
@@ -4841,20 +4872,30 @@ export default function Home() {
                                 <span>{date.split(".").slice(0,2).join("/")}</span>
                               </div>
                               <div className="grid grid-cols-1 sm:grid-cols-2 gap-1">
-                                {games.map(g => (
-                                  <div key={g.id} className="bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 hover:border-zinc-700 transition-colors">
-                                    <div className="flex items-center gap-2">
-                                      <div className="flex-1 min-w-0">
-                                        <div className="text-xs font-bold text-zinc-300 truncate">🏀 {g.home}</div>
-                                        <div className="text-xs text-zinc-600 truncate">{g.away}</div>
+                                {games.map(g => {
+                                  const oddsKey = `${g.date}-${normTeam(g.home)}-${normTeam(g.away)}`;
+                                  const go = nbaOddsMap.get(oddsKey);
+                                  return (
+                                    <div key={g.id} className="bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 hover:border-zinc-700 transition-colors">
+                                      <div className="flex items-center gap-2">
+                                        <div className="flex-1 min-w-0">
+                                          <div className="text-xs font-bold text-zinc-300 truncate">🏀 {g.home}</div>
+                                          <div className="text-xs text-zinc-600 truncate">{g.away}</div>
+                                        </div>
+                                        <div className="text-right shrink-0">
+                                          <div className="text-[10px] font-black text-zinc-400 tabular-nums">{g.time.slice(0,5)}</div>
+                                          {g.venue && <div className="text-[9px] text-zinc-700 truncate max-w-[80px]">{g.venue.split(" ").slice(0,2).join(" ")}</div>}
+                                        </div>
                                       </div>
-                                      <div className="text-right shrink-0">
-                                        <div className="text-[10px] font-black text-zinc-400 tabular-nums">{g.time.slice(0,5)}</div>
-                                        {g.venue && <div className="text-[9px] text-zinc-700 truncate max-w-[80px]">{g.venue.split(" ").slice(0,2).join(" ")}</div>}
-                                      </div>
+                                      {go && (
+                                        <div className="flex gap-1 mt-2">
+                                          <OddBtn matchId={go.matchId} sel="home" odd={go.homeOdds} label={g.home} market="Resultado" />
+                                          <OddBtn matchId={go.matchId} sel="away" odd={go.awayOdds} label={g.away} market="Resultado" />
+                                        </div>
+                                      )}
                                     </div>
-                                  </div>
-                                ))}
+                                  );
+                                })}
                               </div>
                             </div>
                           ))}

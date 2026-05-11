@@ -4660,6 +4660,84 @@ router.get("/volleyball-odds", async (_req, res) => {
   }
 });
 
+// NBA pre-match odds
+type NBAOddsOdd = { name?: string; value?: string };
+type NBAOddsBk = { id?: string; name?: string; stop?: string; odd?: NBAOddsOdd | NBAOddsOdd[] };
+type NBAOddsType = { id?: string; stop?: string; value?: string; bookmaker?: NBAOddsBk | NBAOddsBk[] };
+type NBAOddsMatch = {
+  id?: string; date?: string; time?: string; status?: string;
+  home?: { id?: string; name?: string }; away?: { id?: string; name?: string };
+  odds?: { ts?: string; type?: NBAOddsType | NBAOddsType[] };
+};
+export type NBAOddsEntry = {
+  matchId: string; date: string; time: string;
+  homeTeam: { id: string; name: string }; awayTeam: { id: string; name: string };
+  homeOdds: number; awayOdds: number;
+};
+let nbaOddsCache: NBAOddsEntry[] | null = null;
+let nbaOddsFetchedAt = 0;
+const NBA_ODDS_TTL = 5 * 60 * 1000;
+
+async function getBasketballOdds(): Promise<NBAOddsEntry[]> {
+  const now = Date.now();
+  if (nbaOddsCache && now - nbaOddsFetchedAt < NBA_ODDS_TTL) return nbaOddsCache;
+  const resp = await fetch(`${BASE_V1}/nba/odds?access_key=${STATSPAL_KEY}`, { signal: AbortSignal.timeout(9000) });
+  if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+  const data = (await resp.json()) as { odds?: { category?: { matches?: { match?: NBAOddsMatch | NBAOddsMatch[] } } } };
+  const rawMatches = data?.odds?.category?.matches?.match;
+  if (!rawMatches) return [];
+  const matches = Array.isArray(rawMatches) ? rawMatches : [rawMatches];
+
+  const avgOdd = (bks: NBAOddsBk[], name: "Home" | "Away"): number => {
+    const vals: number[] = [];
+    for (const bk of bks) {
+      if (bk.stop === "True") continue;
+      const odds = Array.isArray(bk.odd) ? bk.odd : (bk.odd ? [bk.odd] : []);
+      const o = odds.find(o => o.name === name);
+      const v = parseFloat(o?.value ?? "0");
+      if (v > 1) vals.push(v);
+    }
+    if (!vals.length) return 0;
+    const avg = vals.reduce((a, b) => a + b, 0) / vals.length;
+    return Math.max(1.01, Math.round(avg * 0.975 * 100) / 100);
+  };
+
+  const results: NBAOddsEntry[] = [];
+  const seen = new Set<string>();
+  for (const m of matches) {
+    if (!m.id || seen.has(m.id)) continue;
+    if (m.status !== "Not Started") continue;
+    seen.add(m.id);
+    const rawTypes = m.odds?.type;
+    const types: NBAOddsType[] = !rawTypes ? [] : Array.isArray(rawTypes) ? rawTypes : [rawTypes];
+    const threeWay = types.find(tp => tp.value === "3Way Result");
+    if (!threeWay) continue;
+    const bks = (Array.isArray(threeWay.bookmaker) ? threeWay.bookmaker : threeWay.bookmaker ? [threeWay.bookmaker] : []) as NBAOddsBk[];
+    const h = avgOdd(bks, "Home");
+    const a = avgOdd(bks, "Away");
+    if (!h || !a) continue;
+    results.push({
+      matchId: m.id, date: m.date ?? "", time: m.time ?? "",
+      homeTeam: { id: m.home?.id ?? "", name: m.home?.name ?? "" },
+      awayTeam: { id: m.away?.id ?? "", name: m.away?.name ?? "" },
+      homeOdds: h, awayOdds: a,
+    });
+  }
+  const fresh = results.filter(r => !isMatchTimePast(r.date, r.time));
+  nbaOddsCache = fresh;
+  nbaOddsFetchedAt = now;
+  return fresh;
+}
+
+router.get("/basketball-odds", async (_req, res) => {
+  try {
+    const odds = await getBasketballOdds();
+    res.json({ odds });
+  } catch {
+    res.status(500).json({ error: "Odds de basquetebol indisponíveis" });
+  }
+});
+
 // NHL pre-match odds
 type HockeyOddsOdd = { name?: string; value?: string };
 type HockeyOddsBk = { id?: string; name?: string; stop?: string; odd?: HockeyOddsOdd | HockeyOddsOdd[] };
