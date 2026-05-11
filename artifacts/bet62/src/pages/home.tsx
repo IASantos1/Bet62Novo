@@ -864,6 +864,26 @@ export default function Home() {
   };
   const [hockeyResults, setHockeyResults] = useState<HockeyResult[]>([]);
 
+  type NHLTeamStats = {
+    shotsOnGoal: number; savesPct: number;
+    ppGoals: number; ppPct: number;
+    penKillPct: number; faceoffPct: number; penaltyMinutes: number;
+  };
+  type HockeyScheduleMatch = {
+    id: string; date: string; time: string; status: string; venue?: string;
+    home: string; away: string;
+    homeScore: number; awayScore: number;
+    periods: Array<[number, number]>;
+    homeWon?: boolean;
+    teamStats?: { home: NHLTeamStats; away: NHLTeamStats };
+  };
+  type HockeyScheduleData = {
+    league: string; season: string;
+    upcomingMatches: HockeyScheduleMatch[];
+    recentMatches: HockeyScheduleMatch[];
+  };
+  const [hockeySchedule, setHockeySchedule] = useState<HockeyScheduleData | null>(null);
+
   // Active tennis tournaments
   type ActiveTournament = {
     id: string; name: string; category: string; surface: string;
@@ -1089,6 +1109,10 @@ export default function Home() {
     fetch("/api/matches/hockey-results")
       .then(r => r.ok ? r.json() : { results: [] })
       .then(d => setHockeyResults(d.results ?? []))
+      .catch(() => { /* non-critical */ });
+    fetch("/api/matches/hockey-schedule")
+      .then(r => r.ok ? r.json() : null)
+      .then(d => { if (d) setHockeySchedule(d); })
       .catch(() => { /* non-critical */ });
     fetch("/api/matches/volleyball-odds")
       .then(r => r.ok ? r.json() : null)
@@ -3439,52 +3463,96 @@ export default function Home() {
                 )}
 
                 {/* Yesterday results panel (hockey) */}
-                {matchViewTab === "yesterday" && expandedMatch.sport === "hockey" && (
-                  <div className="bg-zinc-900 rounded-xl border border-zinc-800 p-4 mb-2 animate-in fade-in duration-200">
-                    <div className="text-[10px] font-black text-red-500 uppercase tracking-widest mb-3">🏒 Resultados de Ontem — NHL</div>
-                    {hockeyResults.length === 0 ? (
-                      <div className="text-center text-zinc-500 py-6 text-sm">Sem resultados disponíveis.</div>
-                    ) : (
-                      <div className="space-y-1.5">
-                        {hockeyResults.map(r => {
-                          const PERIOD_LABELS = ["P1", "P2", "P3", "OT", "SO"];
-                          return (
-                            <div key={r.id} className="bg-zinc-950/60 border border-zinc-800 rounded-lg px-3 py-2 flex items-center gap-3 font-mono tabular-nums">
-                              <div className="flex-1 min-w-0 space-y-0.5">
-                                <div className="flex items-center gap-1.5">
-                                  <span className={`w-3 h-3 rounded-full flex items-center justify-center shrink-0 ${r.homeWon ? "bg-green-600/20" : ""}`}>
-                                    {r.homeWon && <span className="text-[8px] text-green-400 font-black">✓</span>}
-                                  </span>
-                                  <span className={`text-xs font-bold truncate ${r.homeWon ? "text-white" : "text-zinc-500"}`}>{r.home}</span>
-                                </div>
-                                <div className="flex items-center gap-1.5">
-                                  <span className={`w-3 h-3 rounded-full flex items-center justify-center shrink-0 ${!r.homeWon ? "bg-green-600/20" : ""}`}>
-                                    {!r.homeWon && <span className="text-[8px] text-green-400 font-black">✓</span>}
-                                  </span>
-                                  <span className={`text-xs font-bold truncate ${!r.homeWon ? "text-white" : "text-zinc-500"}`}>{r.away}</span>
-                                </div>
-                              </div>
-                              <div className="flex items-stretch gap-1 shrink-0">
-                                {r.periods.map(([h, a]: [number, number], i: number) => (
-                                  <div key={i} className="flex flex-col items-center min-w-[1.25rem]">
-                                    <div className="text-[8px] text-zinc-600 font-bold leading-tight mb-0.5">{PERIOD_LABELS[i] ?? `P${i+1}`}</div>
-                                    <div className={`text-[11px] font-black leading-tight ${h > a ? "text-white" : "text-zinc-600"}`}>{h}</div>
-                                    <div className={`text-[11px] font-black leading-tight ${a > h ? "text-zinc-400" : "text-zinc-600"}`}>{a}</div>
-                                  </div>
-                                ))}
-                                <div className="flex flex-col items-center min-w-[1.5rem] border-l border-zinc-700 pl-1">
-                                  <div className="text-[8px] text-zinc-500 font-black leading-tight mb-0.5">TOT</div>
-                                  <div className={`text-[11px] font-black leading-tight ${r.homeWon ? "text-white" : "text-zinc-500"}`}>{r.homeScore}</div>
-                                  <div className={`text-[11px] font-black leading-tight ${!r.homeWon ? "text-zinc-400" : "text-zinc-500"}`}>{r.awayScore}</div>
-                                </div>
-                              </div>
-                            </div>
-                          );
-                        })}
+                {matchViewTab === "yesterday" && expandedMatch.sport === "hockey" && (() => {
+                  const allResults = [
+                    ...(hockeySchedule?.recentMatches ?? []),
+                    ...hockeyResults.map(r => ({ ...r, teamStats: undefined as undefined })),
+                  ];
+                  // deduplicate by home+away
+                  const seen = new Set<string>();
+                  const deduped = allResults.filter(r => {
+                    const k = `${r.home}|${r.away}`;
+                    if (seen.has(k)) return false;
+                    seen.add(k); return true;
+                  });
+                  const PERIOD_LABELS = ["P1", "P2", "P3", "OT", "SO"];
+                  const StatBar = ({ label, home, away, pct }: { label: string; home: string | number; away: string | number; pct?: boolean }) => {
+                    const h = parseFloat(String(home)) || 0;
+                    const a = parseFloat(String(away)) || 0;
+                    const total = h + a || 1;
+                    const hPct = Math.round((h / total) * 100);
+                    return (
+                      <div className="space-y-0.5">
+                        <div className="flex justify-between text-[9px] font-bold text-zinc-400">
+                          <span>{pct ? `${h}%` : h}</span>
+                          <span className="text-zinc-600 font-normal">{label}</span>
+                          <span>{pct ? `${a}%` : a}</span>
+                        </div>
+                        <div className="flex h-1 rounded-full overflow-hidden bg-zinc-800">
+                          <div className="bg-blue-500 rounded-full" style={{ width: `${hPct}%` }} />
+                          <div className="flex-1 bg-red-500/60 rounded-full" />
+                        </div>
                       </div>
-                    )}
-                  </div>
-                )}
+                    );
+                  };
+                  return (
+                    <div className="bg-zinc-900 rounded-xl border border-zinc-800 p-4 mb-2 animate-in fade-in duration-200">
+                      <div className="text-[10px] font-black text-red-500 uppercase tracking-widest mb-3">🏒 Resultados Recentes — NHL</div>
+                      {deduped.length === 0 ? (
+                        <div className="text-center text-zinc-500 py-6 text-sm">Sem resultados disponíveis.</div>
+                      ) : (
+                        <div className="space-y-3">
+                          {deduped.map(r => (
+                            <div key={r.id} className="bg-zinc-950/60 border border-zinc-800 rounded-lg px-3 py-2.5 space-y-2">
+                              {/* Score row */}
+                              <div className="flex items-center gap-2 font-mono tabular-nums">
+                                <div className="flex-1 min-w-0 space-y-0.5">
+                                  {[{ name: r.home, won: r.homeWon, score: r.homeScore }, { name: r.away, won: !r.homeWon, score: r.awayScore }].map((team, ti) => (
+                                    <div key={ti} className="flex items-center gap-1.5">
+                                      <span className={`w-3 h-3 rounded-full flex items-center justify-center shrink-0 ${team.won ? "bg-green-600/20" : ""}`}>
+                                        {team.won && <span className="text-[8px] text-green-400 font-black">✓</span>}
+                                      </span>
+                                      <span className={`text-xs font-bold truncate ${team.won ? "text-white" : "text-zinc-500"}`}>{team.name}</span>
+                                    </div>
+                                  ))}
+                                </div>
+                                <div className="flex items-stretch gap-0.5 shrink-0">
+                                  {r.periods.map(([h, a]: [number, number], i: number) => (
+                                    <div key={i} className="flex flex-col items-center min-w-[1.25rem]">
+                                      <div className="text-[8px] text-zinc-600 font-bold leading-tight mb-0.5">{PERIOD_LABELS[i] ?? `P${i+1}`}</div>
+                                      <div className={`text-[11px] font-black leading-tight ${h > a ? "text-white" : "text-zinc-600"}`}>{h}</div>
+                                      <div className={`text-[11px] font-black leading-tight ${a > h ? "text-zinc-400" : "text-zinc-600"}`}>{a}</div>
+                                    </div>
+                                  ))}
+                                  <div className="flex flex-col items-center min-w-[1.5rem] border-l border-zinc-700 pl-1">
+                                    <div className="text-[8px] text-zinc-500 font-black leading-tight mb-0.5">TOT</div>
+                                    <div className={`text-[11px] font-black leading-tight ${r.homeWon ? "text-white" : "text-zinc-500"}`}>{r.homeScore}</div>
+                                    <div className={`text-[11px] font-black leading-tight ${!r.homeWon ? "text-zinc-400" : "text-zinc-500"}`}>{r.awayScore}</div>
+                                  </div>
+                                </div>
+                              </div>
+                              {/* Team stats if available */}
+                              {r.teamStats && (
+                                <div className="border-t border-zinc-800 pt-2 space-y-1.5">
+                                  <div className="flex justify-between text-[9px] font-black text-zinc-600 uppercase tracking-wide mb-1">
+                                    <span>{r.home.split(" ").slice(-1)[0]}</span>
+                                    <span>Estatísticas</span>
+                                    <span>{r.away.split(" ").slice(-1)[0]}</span>
+                                  </div>
+                                  <StatBar label="Remates" home={r.teamStats.home.shotsOnGoal} away={r.teamStats.away.shotsOnGoal} />
+                                  <StatBar label="Saves %" home={r.teamStats.home.savesPct} away={r.teamStats.away.savesPct} pct />
+                                  <StatBar label="PP Goals" home={r.teamStats.home.ppGoals} away={r.teamStats.away.ppGoals} />
+                                  <StatBar label="PP %" home={r.teamStats.home.ppPct} away={r.teamStats.away.ppPct} pct />
+                                  <StatBar label="Faceoffs %" home={r.teamStats.home.faceoffPct} away={r.teamStats.away.faceoffPct} pct />
+                                </div>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
 
                 {/* Yesterday results panel (tennis) */}
                 {matchViewTab === "yesterday" && expandedMatch.sport !== "hockey" && (
@@ -4332,6 +4400,58 @@ export default function Home() {
                       </div>
                     </div>
                   )}
+
+                  {/* ─── Calendário NHL — Próximos Jogos ───────────────────── */}
+                  {(selectedSport === "all" || selectedSport === "hockey") && (hockeySchedule?.upcomingMatches.length ?? 0) > 0 && !selectedLeague && (() => {
+                    const upcoming = hockeySchedule!.upcomingMatches;
+                    const today = new Date(); today.setHours(0, 0, 0, 0);
+                    const tomorrow = new Date(today); tomorrow.setDate(tomorrow.getDate() + 1);
+                    const fmtDate = (s: string) => {
+                      const [d, m, y] = s.split(".");
+                      const dt = new Date(parseInt(y!), parseInt(m!) - 1, parseInt(d!));
+                      if (dt.getTime() === today.getTime()) return "Hoje";
+                      if (dt.getTime() === tomorrow.getTime()) return "Amanhã";
+                      return dt.toLocaleDateString("pt-PT", { day: "2-digit", month: "short" });
+                    };
+                    // Group by date
+                    const byDate = upcoming.reduce<Record<string, typeof upcoming>>((acc, m) => {
+                      (acc[m.date] ??= []).push(m); return acc;
+                    }, {});
+                    return (
+                      <div className="mb-6">
+                        <div className="flex items-center gap-2 mb-3">
+                          <span className="text-base font-black italic uppercase tracking-tight text-zinc-400">📅 Calendário NHL</span>
+                          <span className="text-[10px] font-semibold text-zinc-600 normal-case italic hidden sm:block">— {hockeySchedule!.season}</span>
+                          <span className="text-[10px] font-bold bg-zinc-800 text-zinc-500 rounded px-1.5 py-0.5">{upcoming.length}</span>
+                        </div>
+                        <div className="space-y-3">
+                          {Object.entries(byDate).slice(0, 7).map(([date, games]) => (
+                            <div key={date}>
+                              <div className="text-[10px] font-black text-zinc-500 uppercase tracking-widest mb-1.5 flex items-center gap-2">
+                                <span>{fmtDate(date)}</span>
+                                <span className="flex-1 h-px bg-zinc-800" />
+                                <span>{date.split(".").slice(0,2).join("/")}</span>
+                              </div>
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-1">
+                                {games.map(g => (
+                                  <div key={g.id} className="bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 flex items-center gap-2 hover:border-zinc-700 transition-colors">
+                                    <div className="flex-1 min-w-0">
+                                      <div className="text-xs font-bold text-zinc-300 truncate">{g.home}</div>
+                                      <div className="text-xs text-zinc-600 truncate">{g.away}</div>
+                                    </div>
+                                    <div className="text-right shrink-0">
+                                      <div className="text-[10px] font-black text-zinc-400 tabular-nums">{g.time.slice(0,5)}</div>
+                                      {g.venue && <div className="text-[9px] text-zinc-700 truncate max-w-[80px]">{g.venue.split(" ").slice(0,2).join(" ")}</div>}
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  })()}
 
                   {/* ─── Odds Pré-Jogo de Voleibol ───────────────────────────── */}
                   {false && (selectedSport === "all" || selectedSport === "volleyball") && volleyOddsMatches.length > 0 && !selectedLeague && (() => {

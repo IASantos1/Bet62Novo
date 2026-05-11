@@ -873,6 +873,29 @@ type VolleyDailyResult = {
 let volleyResultsCache: VolleyDailyResult[] | null = null;
 let volleyResultsFetchedAt = 0;
 
+// NHL season schedule
+type NHLTeamStats = {
+  shotsOnGoal: number; savesPct: number;
+  ppGoals: number; ppPct: number;
+  penKillPct: number; faceoffPct: number; penaltyMinutes: number;
+};
+type HockeyScheduleMatch = {
+  id: string; date: string; time: string; status: string; venue?: string;
+  home: string; away: string;
+  homeScore: number; awayScore: number;
+  periods: Array<[number, number]>;
+  homeWon?: boolean;
+  teamStats?: { home: NHLTeamStats; away: NHLTeamStats };
+};
+type HockeyScheduleData = {
+  league: string; season: string;
+  upcomingMatches: HockeyScheduleMatch[];
+  recentMatches: HockeyScheduleMatch[];
+};
+let hockeyScheduleCache: HockeyScheduleData | null = null;
+let hockeyScheduleFetchedAt = 0;
+const HOCKEY_SCHEDULE_TTL = 30 * 60 * 1000;
+
 // NHL yesterday results
 type HockeyDailyResult = {
   id: string; home: string; away: string;
@@ -3243,6 +3266,113 @@ async function getHockeyDailyResults(): Promise<HockeyDailyResult[]> {
   }
 }
 
+async function getHockeySchedule(): Promise<HockeyScheduleData> {
+  const now = Date.now();
+  if (hockeyScheduleCache && now - hockeyScheduleFetchedAt < HOCKEY_SCHEDULE_TTL) return hockeyScheduleCache;
+  try {
+    const resp = await fetch(`${BASE_V1}/nhl/season-schedule?access_key=${STATSPAL_KEY}`, { signal: AbortSignal.timeout(12000) });
+    if (!resp.ok) return hockeyScheduleCache ?? { league: "NHL", season: "", upcomingMatches: [], recentMatches: [] };
+    const data = (await resp.json()) as { scores?: { tournament?: { league?: string; season?: string; match: unknown } } };
+    const t = data?.scores?.tournament;
+    if (!t) return hockeyScheduleCache ?? { league: "NHL", season: "", upcomingMatches: [], recentMatches: [] };
+
+    const league = t.league ?? "NHL";
+    const season = t.season ?? "";
+    const rawMatches = Array.isArray(t.match) ? t.match : (t.match ? [t.match] : []);
+
+    // Date helpers: "DD.MM.YYYY" → Date
+    const parseDateStr = (s: string): Date => {
+      const [d, m, y] = s.split(".");
+      return new Date(parseInt(y!), parseInt(m!) - 1, parseInt(d!));
+    };
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    const inDays = (d: Date, n: number) => { const t = new Date(today); t.setDate(t.getDate() + n); return d <= t; };
+
+    const parseScore = (s: string | undefined): [number, number] | null => {
+      if (!s || s.trim() === "") return null;
+      const parts = s.split("-").map(p => parseInt(p.trim()));
+      if (parts.length < 2 || isNaN(parts[0]!) || isNaN(parts[1]!)) return null;
+      return [parts[0]!, parts[1]!];
+    };
+
+    const parseTeamStats = (raw: Record<string, unknown> | undefined | null): NHLTeamStats | null => {
+      if (!raw) return null;
+      const shots = raw["shots"] as Record<string, string> | undefined;
+      const saves = raw["saves"] as Record<string, string> | undefined;
+      const goals = raw["goals"] as Record<string, string> | undefined;
+      const faceoffs = raw["faceoffs"] as Record<string, string> | undefined;
+      const penalties = raw["penalties"] as Record<string, string> | undefined;
+      return {
+        shotsOnGoal: parseInt(shots?.["ongoal"] ?? "0") || 0,
+        savesPct: parseInt(saves?.["saves_pct"] ?? "0") || 0,
+        ppGoals: parseInt(goals?.["pp_goals"] ?? "0") || 0,
+        ppPct: parseInt(goals?.["pp_pct"] ?? "0") || 0,
+        penKillPct: parseInt(goals?.["pen_kill_pct"] ?? "0") || 0,
+        faceoffPct: parseInt(faceoffs?.["pct"] ?? "0") || 0,
+        penaltyMinutes: parseInt(penalties?.["minutes"] ?? "0") || 0,
+      };
+    };
+
+    const FINISHED = new Set(["Finished", "After Penalties", "After Overtime", "Awarded"]);
+    const upcomingMatches: HockeyScheduleMatch[] = [];
+    const recentMatches: HockeyScheduleMatch[] = [];
+
+    for (const m of rawMatches as Array<{
+      id: string; date: string; time: string; status: string; venue?: string;
+      home: { name: string; totalscore: string };
+      away: { name: string; totalscore: string };
+      events?: {
+        firstperiod?:  { score?: string };
+        secondperiod?: { score?: string };
+        thirdperiod?:  { score?: string };
+        overtime?:     { score?: string };
+        penalties?:    { score?: string };
+      };
+      team_stats?: { home?: unknown; away?: unknown };
+    }>) {
+      if (!m?.date || !m.home?.name || !m.away?.name) continue;
+      const matchDate = parseDateStr(m.date);
+      const homeScore = parseInt(m.home.totalscore) || 0;
+      const awayScore = parseInt(m.away.totalscore) || 0;
+      const periods: Array<[number, number]> = [];
+      for (const key of ["firstperiod", "secondperiod", "thirdperiod", "overtime", "penalties"] as const) {
+        const p = parseScore(m.events?.[key]?.score);
+        if (p) periods.push(p);
+      }
+
+      if (m.status === "Not Started" && matchDate >= today && inDays(matchDate, 21)) {
+        upcomingMatches.push({
+          id: m.id, date: m.date, time: m.time, status: m.status, venue: m.venue,
+          home: m.home.name, away: m.away.name, homeScore: 0, awayScore: 0, periods: [],
+        });
+      } else if (FINISHED.has(m.status)) {
+        const daysAgo = (today.getTime() - matchDate.getTime()) / 86400000;
+        if (daysAgo <= 14 && daysAgo >= 0) {
+          const homeStats = parseTeamStats(m.team_stats?.home as Record<string, unknown> | null);
+          const awayStats = parseTeamStats(m.team_stats?.away as Record<string, unknown> | null);
+          recentMatches.push({
+            id: m.id, date: m.date, time: m.time, status: m.status, venue: m.venue,
+            home: m.home.name, away: m.away.name, homeScore, awayScore, periods,
+            homeWon: homeScore > awayScore,
+            ...(homeStats && awayStats ? { teamStats: { home: homeStats, away: awayStats } } : {}),
+          });
+        }
+      }
+    }
+
+    // Sort upcoming by date asc, recent by date desc
+    const dateKey = (s: string) => { const [d, mo, y] = s.split("."); return `${y}${mo}${d}`; };
+    upcomingMatches.sort((a, b) => dateKey(a.date).localeCompare(dateKey(b.date)) || a.time.localeCompare(b.time));
+    recentMatches.sort((a, b) => dateKey(b.date).localeCompare(dateKey(a.date)));
+
+    hockeyScheduleCache = { league, season, upcomingMatches: upcomingMatches.slice(0, 30), recentMatches: recentMatches.slice(0, 15) };
+    hockeyScheduleFetchedAt = now;
+    return hockeyScheduleCache;
+  } catch {
+    return hockeyScheduleCache ?? { league: "NHL", season: "", upcomingMatches: [], recentMatches: [] };
+  }
+}
+
 // ─── Tournament detail cache ──────────────────────────────────────────────────
 type TournamentMatchPlayer = {
   id: string; name: string;
@@ -3424,6 +3554,15 @@ router.get("/hockey-results", async (_req, res) => {
     res.json({ results });
   } catch {
     res.status(500).json({ error: "Resultados indisponíveis" });
+  }
+});
+
+router.get("/hockey-schedule", async (_req, res) => {
+  try {
+    const data = await getHockeySchedule();
+    res.json(data);
+  } catch {
+    res.status(500).json({ error: "Calendário indisponível" });
   }
 });
 
