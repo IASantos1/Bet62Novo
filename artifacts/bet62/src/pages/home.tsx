@@ -4407,60 +4407,6 @@ export default function Home() {
                     </div>
                   )}
 
-                  {/* ─── Resultados de Ontem — NHL ───────────────────────────── */}
-                  {(selectedSport === "all" || selectedSport === "hockey") && hockeyResults.length > 0 && !selectedLeague && (
-                    <div className="mb-6">
-                      <div className="flex items-center gap-2 mb-3">
-                        <span className="text-base font-black italic uppercase tracking-tight text-zinc-400">
-                          🏒 Resultados de Ontem
-                        </span>
-                        <span className="text-[10px] font-semibold text-zinc-600 normal-case italic hidden sm:block">— NHL</span>
-                        <span className="text-[10px] font-bold bg-zinc-800 text-zinc-500 rounded px-1.5 py-0.5">{hockeyResults.length}</span>
-                      </div>
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
-                        {hockeyResults.map(r => {
-                          const PERIOD_LABELS = ["P1", "P2", "P3", "OT", "SO"];
-                          return (
-                            <div key={r.id} className="bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2.5 hover:border-zinc-700 transition-colors">
-                              {/* Score row */}
-                              <div className="flex items-center gap-2 font-mono tabular-nums">
-                                {/* Names */}
-                                <div className="flex-1 min-w-0 space-y-0.5">
-                                  <div className="flex items-center gap-1.5">
-                                    {r.homeWon && <span className="w-3.5 h-3.5 rounded-full bg-green-600/20 flex items-center justify-center shrink-0"><span className="text-[9px] text-green-400 font-black leading-none">✓</span></span>}
-                                    {!r.homeWon && <span className="w-3.5 h-3.5 shrink-0" />}
-                                    <span className={`text-xs font-bold truncate ${r.homeWon ? "text-white" : "text-zinc-500"}`}>{r.home}</span>
-                                  </div>
-                                  <div className="flex items-center gap-1.5">
-                                    {!r.homeWon && <span className="w-3.5 h-3.5 rounded-full bg-green-600/20 flex items-center justify-center shrink-0"><span className="text-[9px] text-green-400 font-black leading-none">✓</span></span>}
-                                    {r.homeWon && <span className="w-3.5 h-3.5 shrink-0" />}
-                                    <span className={`text-xs font-bold truncate ${!r.homeWon ? "text-white" : "text-zinc-500"}`}>{r.away}</span>
-                                  </div>
-                                </div>
-                                {/* Period columns */}
-                                <div className="flex items-stretch gap-1 shrink-0">
-                                  {r.periods.map(([h, a]: [number, number], i: number) => (
-                                    <div key={i} className="flex flex-col items-center min-w-[1.5rem]">
-                                      <div className="text-[9px] text-zinc-600 font-bold leading-tight mb-0.5">{PERIOD_LABELS[i] ?? `P${i+1}`}</div>
-                                      <div className={`text-[11px] font-black leading-tight ${h > a ? "text-white" : "text-zinc-600"}`}>{h}</div>
-                                      <div className={`text-[11px] font-black leading-tight ${a > h ? "text-zinc-400" : "text-zinc-600"}`}>{a}</div>
-                                    </div>
-                                  ))}
-                                  {/* Total */}
-                                  <div className="flex flex-col items-center min-w-[1.75rem] border-l border-zinc-700 pl-1">
-                                    <div className="text-[9px] text-zinc-500 font-black leading-tight mb-0.5">TOT</div>
-                                    <div className={`text-[11px] font-black leading-tight ${r.homeWon ? "text-white" : "text-zinc-500"}`}>{r.homeScore}</div>
-                                    <div className={`text-[11px] font-black leading-tight ${!r.homeWon ? "text-zinc-400" : "text-zinc-500"}`}>{r.awayScore}</div>
-                                  </div>
-                                </div>
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  )}
-
                   {/* ─── Calendário NHL — Próximos Jogos ───────────────────── */}
                   {(selectedSport === "all" || selectedSport === "hockey") && (hockeySchedule?.upcomingMatches.length ?? 0) > 0 && !selectedLeague && (() => {
                     const upcoming = hockeySchedule!.upcomingMatches;
@@ -4550,9 +4496,39 @@ export default function Home() {
                   {/* ─── Classificação NHL ────────────────────────────────────── */}
                   {(selectedSport === "all" || selectedSport === "hockey") && hockeyStandings && hockeyStandings.conferences.length > 0 && !selectedLeague && (() => {
                     const streakColor = (s: string) => s.startsWith("W") ? "text-green-400" : s.startsWith("L") ? "text-red-400" : "text-zinc-400";
+                    const openTeamPanel = (abbr: string, tab: "roster" | "stats" | "injuries") => {
+                      if (selectedRosterAbbr === abbr && rosterPanelTab === tab) { setSelectedRosterAbbr(null); return; }
+                      setSelectedRosterAbbr(abbr);
+                      setRosterPanelTab(tab);
+                      if (tab === "stats" && !hockeyTeamStats[abbr]) {
+                        setTeamStatsLoading(true);
+                        fetch(`/api/matches/hockey-team-stats/${abbr}`)
+                          .then(r => r.ok ? r.json() : null)
+                          .then(d => { if (d) setHockeyTeamStats(prev => ({ ...prev, [abbr]: d })); })
+                          .catch(() => {})
+                          .finally(() => setTeamStatsLoading(false));
+                      }
+                      if (tab === "injuries" && !hockeyInjuries[abbr]) {
+                        setInjuriesLoading(true);
+                        fetch(`/api/matches/hockey-injuries/${abbr}`)
+                          .then(r => r.ok ? r.json() : null)
+                          .then(d => { if (d) setHockeyInjuries(prev => ({ ...prev, [abbr]: d })); })
+                          .catch(() => {})
+                          .finally(() => setInjuriesLoading(false));
+                      }
+                      if (tab === "roster" && !hockeyRosters[abbr]) {
+                        setRosterLoading(true);
+                        fetch(`/api/matches/hockey-roster/${abbr}`)
+                          .then(r => r.ok ? r.json() : null)
+                          .then(d => { if (d) setHockeyRosters(prev => ({ ...prev, [abbr]: d })); })
+                          .catch(() => {})
+                          .finally(() => setRosterLoading(false));
+                      }
+                    };
                     const handleTeamClick = (abbr: string) => {
                       if (selectedRosterAbbr === abbr) { setSelectedRosterAbbr(null); return; }
                       setSelectedRosterAbbr(abbr);
+                      setRosterPanelTab("roster");
                       if (hockeyRosters[abbr]) return;
                       setRosterLoading(true);
                       fetch(`/api/matches/hockey-roster/${abbr}`)
@@ -4601,10 +4577,9 @@ export default function Home() {
                                         </thead>
                                         <tbody>
                                           {div.teams.map((team, idx) => (
-                                            <tr key={team.id} className={`border-b border-zinc-800/40 transition-colors cursor-pointer ${selectedRosterAbbr === team.abbr ? "bg-zinc-800/60" : "hover:bg-zinc-800/30"} ${idx < 3 ? "border-l-2 border-l-green-600/40" : idx === 3 ? "border-l-2 border-l-yellow-500/40" : ""}`}
-                                              onClick={() => handleTeamClick(team.abbr)}>
+                                            <tr key={team.id} className={`border-b border-zinc-800/40 transition-colors ${selectedRosterAbbr === team.abbr ? "bg-zinc-800/60" : "hover:bg-zinc-800/20"} ${idx < 3 ? "border-l-2 border-l-green-600/40" : idx === 3 ? "border-l-2 border-l-yellow-500/40" : ""}`}>
                                               <td className="py-1.5 px-2 text-zinc-600 text-center">{team.position}</td>
-                                              <td className="py-1.5 px-2 font-semibold truncate max-w-[130px]">
+                                              <td className="py-1.5 px-2 font-semibold truncate max-w-[130px] cursor-pointer" onClick={() => handleTeamClick(team.abbr)}>
                                                 <span className={selectedRosterAbbr === team.abbr ? "text-white" : "text-zinc-200"}>{team.name}</span>
                                               </td>
                                               <td className="py-1.5 px-1 text-center text-zinc-400">{team.gp}</td>
@@ -4617,8 +4592,15 @@ export default function Home() {
                                               <td className={`py-1.5 px-1 text-center hidden sm:table-cell font-bold ${team.diff.startsWith("+") ? "text-green-400" : team.diff.startsWith("-") ? "text-red-400" : "text-zinc-500"}`}>{team.diff}</td>
                                               <td className={`py-1.5 px-2 text-center hidden md:table-cell font-black ${streakColor(team.streak)}`}>{team.streak}</td>
                                               <td className="py-1.5 px-2 text-center text-zinc-600 hidden md:table-cell text-[9px]">{team.lastTen.split(",")[0]}</td>
-                                              <td className="py-1.5 px-2 text-center text-zinc-600 text-[9px]">
-                                                {selectedRosterAbbr === team.abbr ? "▲" : "▼"}
+                                              <td className="py-1 px-1">
+                                                <div className="flex items-center gap-0.5 justify-end">
+                                                  <button title="Plantel" onClick={() => openTeamPanel(team.abbr, "roster")}
+                                                    className={`text-[11px] px-1 py-0.5 rounded transition-colors ${selectedRosterAbbr === team.abbr && rosterPanelTab === "roster" ? "bg-red-600/20 text-red-400" : "text-zinc-600 hover:text-zinc-300"}`}>👥</button>
+                                                  <button title="Estatísticas" onClick={() => openTeamPanel(team.abbr, "stats")}
+                                                    className={`text-[11px] px-1 py-0.5 rounded transition-colors ${selectedRosterAbbr === team.abbr && rosterPanelTab === "stats" ? "bg-red-600/20 text-red-400" : "text-zinc-600 hover:text-zinc-300"}`}>📊</button>
+                                                  <button title="Lesões" onClick={() => openTeamPanel(team.abbr, "injuries")}
+                                                    className={`text-[11px] px-1 py-0.5 rounded transition-colors ${selectedRosterAbbr === team.abbr && rosterPanelTab === "injuries" ? "bg-red-600/20 text-red-400" : "text-zinc-600 hover:text-zinc-300"}`}>🏥</button>
+                                                </div>
                                               </td>
                                             </tr>
                                           ))}
@@ -4628,7 +4610,7 @@ export default function Home() {
                                     <div className="px-3 py-1.5 flex gap-3 text-[8px] text-zinc-700">
                                       <span className="flex items-center gap-1"><span className="w-2 h-2 border-l-2 border-green-600/60 inline-block" />Playoff</span>
                                       <span className="flex items-center gap-1"><span className="w-2 h-2 border-l-2 border-yellow-500/60 inline-block" />Wild Card</span>
-                                      <span className="text-zinc-800 ml-auto">Clique numa equipa para ver o roster</span>
+                                      <span className="text-zinc-800 ml-auto">👥 Plantel · 📊 Estatísticas · 🏥 Lesões</span>
                                     </div>
                                   </div>
                                 ))}
