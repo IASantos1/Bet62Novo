@@ -4336,12 +4336,59 @@ export default function Home() {
                   })
                 : [];
 
-              // All upcoming: tennis odds + volleyball odds + generic (deduped)
+              // Convert real NBA schedule → Match objects (with odds when available)
+              const _normT = (n: string) => n.toLowerCase().replace(/[^a-z0-9]/g, "");
+              const basketballAsMatches: Match[] = (!selectedLeague && (selectedSport === "all" || selectedSport === "basketball"))
+                ? (basketballSchedule?.upcomingMatches ?? []).map(g => {
+                    const gh = _normT(g.home); const ga = _normT(g.away);
+                    const o = basketballOddsMatches.find(o => {
+                      const oh = _normT(o.homeTeam.name); const oa = _normT(o.awayTeam.name);
+                      return (gh === oh && ga === oa) || (gh === oa && ga === oh);
+                    });
+                    const flipped = o && _normT(o.homeTeam.name) !== gh;
+                    const odds = o
+                      ? { home: flipped ? o.awayOdds : o.homeOdds, draw: 0, away: flipped ? o.homeOdds : o.awayOdds }
+                      : { home: 0, draw: 0, away: 0 };
+                    return {
+                      id: `nba-sched-${g.id}`,
+                      home: g.home, away: g.away,
+                      league: "NBA", country: "USA",
+                      time: g.time.slice(0, 5), date: g.date,
+                      sport: "basketball", hasRealOdds: !!o, odds,
+                    } as Match;
+                  })
+                : [];
+
+              // Convert real NHL schedule → Match objects (with odds when available)
+              const hockeyAsMatches: Match[] = (!selectedLeague && (selectedSport === "all" || selectedSport === "hockey"))
+                ? (hockeySchedule?.upcomingMatches ?? []).map(g => {
+                    const gh = _normT(g.home); const ga = _normT(g.away);
+                    const o = hockeyOddsMatches.find(o => {
+                      const oh = _normT(o.homeTeam.name); const oa = _normT(o.awayTeam.name);
+                      return (gh === oh && ga === oa) || (gh === oa && ga === oh);
+                    });
+                    const flipped = o && _normT(o.homeTeam.name) !== gh;
+                    const odds = o
+                      ? { home: flipped ? o.awayOdds : o.homeOdds, draw: o.drawOdds ?? 0, away: flipped ? o.homeOdds : o.awayOdds }
+                      : { home: 0, draw: 0, away: 0 };
+                    return {
+                      id: `nhl-sched-${g.id}`,
+                      home: g.home, away: g.away,
+                      league: "NHL", country: "USA",
+                      time: g.time.slice(0, 5), date: g.date,
+                      sport: "hockey", hasRealOdds: !!o, odds,
+                    } as Match;
+                  })
+                : [];
+
+              // All upcoming: tennis odds + volleyball odds + football + real basketball + real hockey
               const allUpcoming = selectedLeague
                 ? upcomingMatches.filter(m => m.league === selectedLeague)
                 : [
                     ...tennisOddsAsMatches,
                     ...volleyOddsAsMatches,
+                    ...basketballAsMatches,
+                    ...hockeyAsMatches,
                     ...upcomingMatches.filter(m =>
                       (m.sport ?? "football") === "football" &&
                       !tennisOddsAsMatches.some(t => t.home === m.home && t.away === m.away) &&
