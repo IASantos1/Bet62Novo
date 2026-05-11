@@ -3852,6 +3852,59 @@ router.get("/hockey-team-stats/:team", async (req, res) => {
   }
 });
 
+// NHL injuries
+type NHLInjuryReport = { playerName: string; playerId: string; status: string; description: string; date: string };
+type NHLInjuriesData = { teamName: string; report: NHLInjuryReport[] };
+const hockeyInjuriesCache = new Map<string, NHLInjuriesData>();
+const hockeyInjuriesFetchedAt = new Map<string, number>();
+const HOCKEY_INJURIES_TTL = 15 * 60 * 1000; // 15 min — injuries change more often
+
+async function getHockeyInjuries(abbr: string): Promise<NHLInjuriesData | null> {
+  const now = Date.now();
+  const cached = hockeyInjuriesCache.get(abbr);
+  const fetchedAt = hockeyInjuriesFetchedAt.get(abbr) ?? 0;
+  if (cached && now - fetchedAt < HOCKEY_INJURIES_TTL) return cached;
+  try {
+    const resp = await fetch(`${BASE_V1}/nhl/injuries/${abbr}?access_key=${STATSPAL_KEY}`);
+    if (!resp.ok) return cached ?? null;
+    const json = (await resp.json()) as {
+      team?: {
+        id?: string; name?: string;
+        report?: Array<{ player_name?: string; player_id?: string; status?: string; description?: string; date?: string }> | { player_name?: string; player_id?: string; status?: string; description?: string; date?: string };
+      };
+    };
+    const t = json.team;
+    if (!t) return cached ?? null;
+    const raw = Array.isArray(t.report) ? t.report : t.report ? [t.report] : [];
+    const data: NHLInjuriesData = {
+      teamName: t.name ?? abbr,
+      report: raw.map(r => ({
+        playerName: r.player_name ?? "",
+        playerId: r.player_id ?? "",
+        status: r.status ?? "",
+        description: r.description ?? "",
+        date: r.date ?? "",
+      })),
+    };
+    hockeyInjuriesCache.set(abbr, data);
+    hockeyInjuriesFetchedAt.set(abbr, now);
+    return data;
+  } catch {
+    return cached ?? null;
+  }
+}
+
+router.get("/hockey-injuries/:team", async (req, res) => {
+  const abbr = String(req.params["team"]).toLowerCase();
+  try {
+    const data = await getHockeyInjuries(abbr);
+    if (!data) { res.status(404).json({ error: "Lesões indisponíveis" }); return; }
+    res.json(data);
+  } catch {
+    res.status(500).json({ error: "Lesões indisponíveis" });
+  }
+});
+
 router.get("/volleyball-standings/:id", async (req, res) => {
   try {
     const id = String(req.params["id"]);

@@ -904,7 +904,12 @@ export default function Home() {
   const [hockeyRosters, setHockeyRosters] = useState<Record<string, NHLRosterData>>({});
   const [selectedRosterAbbr, setSelectedRosterAbbr] = useState<string | null>(null);
   const [rosterLoading, setRosterLoading] = useState(false);
-  const [rosterPanelTab, setRosterPanelTab] = useState<"roster" | "stats">("roster");
+  const [rosterPanelTab, setRosterPanelTab] = useState<"roster" | "stats" | "injuries">("roster");
+
+  type NHLInjuryReport = { playerName: string; playerId: string; status: string; description: string; date: string };
+  type NHLInjuriesData = { teamName: string; report: NHLInjuryReport[] };
+  const [hockeyInjuries, setHockeyInjuries] = useState<Record<string, NHLInjuriesData>>({});
+  const [injuriesLoading, setInjuriesLoading] = useState(false);
 
   type NHLSkaterStat = {
     id: string; rank: number; name: string; pos: string;
@@ -4589,7 +4594,7 @@ export default function Home() {
                         {selectedRosterAbbr && (() => {
                           const activeStats = hockeyTeamStats[selectedRosterAbbr];
                           const teamDisplayName = activeRoster?.teamName ?? activeStats?.teamName ?? selectedRosterAbbr.toUpperCase();
-                          const handleTabChange = (tab: "roster" | "stats") => {
+                          const handleTabChange = (tab: "roster" | "stats" | "injuries") => {
                             setRosterPanelTab(tab);
                             if (tab === "stats" && !hockeyTeamStats[selectedRosterAbbr]) {
                               setTeamStatsLoading(true);
@@ -4598,6 +4603,14 @@ export default function Home() {
                                 .then(d => { if (d) setHockeyTeamStats(prev => ({ ...prev, [selectedRosterAbbr]: d })); })
                                 .catch(() => {})
                                 .finally(() => setTeamStatsLoading(false));
+                            }
+                            if (tab === "injuries" && !hockeyInjuries[selectedRosterAbbr]) {
+                              setInjuriesLoading(true);
+                              fetch(`/api/matches/hockey-injuries/${selectedRosterAbbr}`)
+                                .then(r => r.ok ? r.json() : null)
+                                .then(d => { if (d) setHockeyInjuries(prev => ({ ...prev, [selectedRosterAbbr]: d })); })
+                                .catch(() => {})
+                                .finally(() => setInjuriesLoading(false));
                             }
                           };
                           return (
@@ -4613,10 +4626,10 @@ export default function Home() {
                               </div>
                               {/* Tabs */}
                               <div className="flex border-b border-zinc-800">
-                                {(["roster", "stats"] as const).map(tab => (
+                                {(["roster", "stats", "injuries"] as const).map(tab => (
                                   <button key={tab} onClick={() => handleTabChange(tab)}
                                     className={`flex-1 py-2 text-[10px] font-black uppercase tracking-widest transition-colors ${rosterPanelTab === tab ? "text-white border-b-2 border-red-500 bg-zinc-800/40" : "text-zinc-600 hover:text-zinc-400"}`}>
-                                    {tab === "roster" ? "👥 Plantel" : "📊 Estatísticas"}
+                                    {tab === "roster" ? "👥 Plantel" : tab === "stats" ? "📊 Estatísticas" : "🏥 Lesões"}
                                   </button>
                                 ))}
                               </div>
@@ -4749,6 +4762,40 @@ export default function Home() {
                                   <div className="text-center text-zinc-600 py-6 text-sm">Estatísticas não disponíveis.</div>
                                 )
                               )}
+                              {/* Injuries Tab */}
+                              {rosterPanelTab === "injuries" && (() => {
+                                const activeInjuries = hockeyInjuries[selectedRosterAbbr];
+                                if (injuriesLoading && !activeInjuries) return <div className="text-center text-zinc-600 py-6 text-sm animate-pulse">A carregar lesões...</div>;
+                                if (!activeInjuries) return <div className="text-center text-zinc-600 py-6 text-sm">Lesões não disponíveis.</div>;
+                                if (activeInjuries.report.length === 0) return (
+                                  <div className="flex flex-col items-center gap-2 py-8">
+                                    <span className="text-2xl">✅</span>
+                                    <span className="text-sm font-bold text-green-500">Sem lesões reportadas</span>
+                                    <span className="text-[10px] text-zinc-600">Todos os jogadores disponíveis</span>
+                                  </div>
+                                );
+                                const statusColors: Record<string, string> = {
+                                  "Sidelined": "text-red-400 bg-red-500/10 border-red-500/30",
+                                  "I.L.": "text-amber-400 bg-amber-500/10 border-amber-500/30",
+                                  "Day-to-Day": "text-yellow-400 bg-yellow-500/10 border-yellow-500/30",
+                                };
+                                const statusDefault = "text-zinc-400 bg-zinc-700/30 border-zinc-600/30";
+                                return (
+                                  <div className="p-3 space-y-2">
+                                    <div className="text-[9px] font-black text-zinc-600 uppercase tracking-widest mb-3">{activeInjuries.report.length} jogador{activeInjuries.report.length !== 1 ? "es" : ""} no relatório</div>
+                                    {activeInjuries.report.map((r, i) => (
+                                      <div key={i} className="bg-zinc-950/70 border border-zinc-800 rounded-lg px-3 py-2 flex items-start gap-3">
+                                        <span className={`mt-0.5 text-[9px] font-black px-1.5 py-0.5 rounded border shrink-0 ${statusColors[r.status] ?? statusDefault}`}>{r.status}</span>
+                                        <div className="flex-1 min-w-0">
+                                          <div className="text-[11px] font-bold text-zinc-200">{r.playerName}</div>
+                                          <div className="text-[10px] text-zinc-500 mt-0.5">{r.description}</div>
+                                        </div>
+                                        {r.date && <span className="text-[9px] text-zinc-700 shrink-0 mt-0.5">{r.date}</span>}
+                                      </div>
+                                    ))}
+                                  </div>
+                                );
+                              })()}
                             </div>
                           );
                         })()}
