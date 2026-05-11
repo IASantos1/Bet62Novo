@@ -1042,6 +1042,7 @@ export default function Home() {
     p1Odds?: { home: number; draw: number; away: number };
     p2Odds?: { home: number; draw: number; away: number };
     p3Odds?: { home: number; draw: number; away: number };
+    markets?: any;
   };
   const [hockeyOddsMatches, setHockeyOddsMatches] = useState<HockeyOddsEntry[]>([]);
 
@@ -1054,6 +1055,7 @@ export default function Home() {
     q2Odds?: { home: number; away: number };
     q3Odds?: { home: number; away: number };
     q4Odds?: { home: number; away: number };
+    markets?: any;
   };
   const [basketballOddsMatches, setBasketballOddsMatches] = useState<NBAOddsEntry[]>([]);
 
@@ -4365,53 +4367,28 @@ export default function Home() {
 
               // Convert real NBA odds → Match objects with all available markets
               const basketballAsMatches: Match[] = (!selectedLeague && (selectedSport === "all" || selectedSport === "basketball"))
-                ? basketballOddsMatches.map(o => {
-                    const mkt = _emptyMkt();
-                    if (o.halfOdds) mkt.halfTime = { home: o.halfOdds.home, draw: 0, away: o.halfOdds.away };
-                    (mkt as any).basketballExtra = {
-                      q1: o.q1Odds ?? { home: 0, draw: 0, away: 0 },
-                      q2: o.q2Odds ?? { home: 0, draw: 0, away: 0 },
-                      q3: o.q3Odds ?? { home: 0, draw: 0, away: 0 },
-                      q4: o.q4Odds ?? { home: 0, draw: 0, away: 0 },
-                      teamTotalHome: { over: 0, under: 0, line: 0 },
-                      teamTotalAway: { over: 0, under: 0, line: 0 },
-                    };
-                    return {
-                      id: `nba-odds-${o.matchId}`,
-                      home: o.homeTeam.name, away: o.awayTeam.name,
-                      league: "NBA", country: "USA",
-                      time: o.time, date: o.date,
-                      sport: "basketball", hasRealOdds: true,
-                      odds: { home: o.homeOdds, draw: 0, away: o.awayOdds },
-                      markets: mkt,
-                    } as Match;
-                  })
+                ? basketballOddsMatches.map(o => ({
+                    id: `nba-odds-${o.matchId}`,
+                    home: o.homeTeam.name, away: o.awayTeam.name,
+                    league: "NBA", country: "USA",
+                    time: o.time, date: o.date,
+                    sport: "basketball", hasRealOdds: true,
+                    odds: { home: o.homeOdds, draw: 0, away: o.awayOdds },
+                    markets: o.markets ?? _emptyMkt(),
+                  } as Match))
                 : [];
 
               // Convert real NHL odds → Match objects with all available markets
               const hockeyAsMatches: Match[] = (!selectedLeague && (selectedSport === "all" || selectedSport === "hockey"))
-                ? hockeyOddsMatches.map(o => {
-                    const mkt = _emptyMkt();
-                    if (o.p1Odds) mkt.halfTime = { home: o.p1Odds.home, draw: o.p1Odds.draw, away: o.p1Odds.away };
-                    if (o.btts) mkt.bothTeamsScore = { yes: o.btts.yes, no: o.btts.no };
-                    if (o.doubleChance) mkt.doubleChance = { homeOrDraw: o.doubleChance.homeOrDraw, awayOrDraw: o.doubleChance.drawOrAway, homeOrAway: o.doubleChance.homeOrAway };
-                    (mkt as any).hockeyExtra = {
-                      period1Total: { over: 0, under: 0, line: 0 },
-                      bothTeamsScoreGame: { yes: o.btts?.yes ?? 0, no: o.btts?.no ?? 0 },
-                      shotsOnGoal: { over: 0, under: 0, line: 0 },
-                      period2: o.p2Odds ?? { home: 0, draw: 0, away: 0 },
-                      period3: o.p3Odds ?? { home: 0, draw: 0, away: 0 },
-                    };
-                    return {
-                      id: `nhl-odds-${o.matchId}`,
-                      home: o.homeTeam.name, away: o.awayTeam.name,
-                      league: "NHL", country: "USA",
-                      time: o.time, date: o.date,
-                      sport: "hockey", hasRealOdds: true,
-                      odds: { home: o.homeOdds, draw: o.drawOdds ?? 0, away: o.awayOdds },
-                      markets: mkt,
-                    } as Match;
-                  })
+                ? hockeyOddsMatches.map(o => ({
+                    id: `nhl-odds-${o.matchId}`,
+                    home: o.homeTeam.name, away: o.awayTeam.name,
+                    league: "NHL", country: "USA",
+                    time: o.time, date: o.date,
+                    sport: "hockey", hasRealOdds: true,
+                    odds: { home: o.homeOdds, draw: o.drawOdds ?? 0, away: o.awayOdds },
+                    markets: o.markets ?? _emptyMkt(),
+                  } as Match))
                 : [];
 
               // All upcoming: tennis odds + volleyball odds + football + real basketball + real hockey

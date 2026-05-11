@@ -4883,6 +4883,7 @@ export type NBAOddsEntry = {
   q2Odds?: { home: number; away: number };
   q3Odds?: { home: number; away: number };
   q4Odds?: { home: number; away: number };
+  markets?: unknown;
 };
 let nbaOddsCache: NBAOddsEntry[] | null = null;
 let nbaOddsFetchedAt = 0;
@@ -4933,16 +4934,29 @@ async function getBasketballOdds(): Promise<NBAOddsEntry[]> {
     const h = avgOdd(bks, "Home");
     const a = avgOdd(bks, "Away");
     if (!h || !a) continue;
+    const halfOdds = getHA(types, "Home/Away - 1st Half");
+    const q1Odds   = getHA(types, "Home/Away - 1st Qtr");
+    const q2Odds   = getHA(types, "Home/Away - 2nd Qtr");
+    const q3Odds   = getHA(types, "Home/Away - 3rd Qtr");
+    const q4Odds   = getHA(types, "Home/Away - 4th Qtr");
+    const homeName = m.home?.name ?? "";
+    const awayName = m.away?.name ?? "";
+    const mkt = makeBasketballMarketsFromTeams(homeName, awayName) as Record<string, unknown>;
+    mkt["odds"] = { home: h, draw: 0, away: a };
+    if (halfOdds) mkt["halfTime"] = { home: halfOdds.home, draw: 0, away: halfOdds.away };
+    const bExtra = (mkt["basketballExtra"] as Record<string, unknown>) ?? {};
+    if (q1Odds) bExtra["q1"] = { home: q1Odds.home, away: q1Odds.away };
+    if (q2Odds) bExtra["q2"] = { home: q2Odds.home, away: q2Odds.away };
+    if (q3Odds) bExtra["q3"] = { home: q3Odds.home, away: q3Odds.away };
+    if (q4Odds) bExtra["q4"] = { home: q4Odds.home, away: q4Odds.away };
+    mkt["basketballExtra"] = bExtra;
     results.push({
       matchId: m.id, date: m.date ?? "", time: m.time ?? "",
-      homeTeam: { id: m.home?.id ?? "", name: m.home?.name ?? "" },
-      awayTeam: { id: m.away?.id ?? "", name: m.away?.name ?? "" },
+      homeTeam: { id: m.home?.id ?? "", name: homeName },
+      awayTeam: { id: m.away?.id ?? "", name: awayName },
       homeOdds: h, awayOdds: a,
-      halfOdds: getHA(types, "Home/Away - 1st Half"),
-      q1Odds: getHA(types, "Home/Away - 1st Qtr"),
-      q2Odds: getHA(types, "Home/Away - 2nd Qtr"),
-      q3Odds: getHA(types, "Home/Away - 3rd Qtr"),
-      q4Odds: getHA(types, "Home/Away - 4th Qtr"),
+      halfOdds, q1Odds, q2Odds, q3Odds, q4Odds,
+      markets: mkt,
     });
   }
   const fresh = results.filter(r => !isMatchTimePast(r.date, r.time));
@@ -4978,6 +4992,7 @@ export type HockeyOddsEntry = {
   p1Odds?: { home: number; draw: number; away: number };
   p2Odds?: { home: number; draw: number; away: number };
   p3Odds?: { home: number; draw: number; away: number };
+  markets?: unknown;
 };
 let hockeyOddsCache: HockeyOddsEntry[] | null = null;
 let hockeyOddsFetchedAt = 0;
@@ -5040,15 +5055,28 @@ async function getHockeyOdds(): Promise<HockeyOddsEntry[]> {
     const dcBks = getBks(types, "Double Chance");
     const dcHD = avgOdd(dcBks, "Home/Draw"); const dcHA = avgOdd(dcBks, "Home/Away"); const dcDA = avgOdd(dcBks, "Draw/Away");
     const doubleChance = (dcHD && dcHA && dcDA) ? { homeOrDraw: dcHD, homeOrAway: dcHA, drawOrAway: dcDA } : undefined;
+    const p1Odds = getHDA(types, "1x2 (1st Period)");
+    const p2Odds = getHDA(types, "3Way Result (2st Period)");
+    const p3Odds = getHDA(types, "3Way Result 3rdPeriod)");
+    const homeName = m.home?.name ?? "";
+    const awayName = m.away?.name ?? "";
+    const mkt = makeHockeyMarketsFromTeams(homeName, awayName) as Record<string, unknown>;
+    mkt["odds"] = { home: h, draw: d || 0, away: a };
+    if (p1Odds) mkt["halfTime"] = p1Odds;
+    if (btts) mkt["bothTeamsScore"] = btts;
+    if (doubleChance) mkt["doubleChance"] = { homeOrDraw: doubleChance.homeOrDraw, awayOrDraw: doubleChance.drawOrAway, homeOrAway: doubleChance.homeOrAway };
+    const hExtra = (mkt["hockeyExtra"] as Record<string, unknown>) ?? {};
+    if (p2Odds) hExtra["period2"] = p2Odds;
+    if (p3Odds) hExtra["period3"] = p3Odds;
+    if (btts) hExtra["bothTeamsScoreGame"] = btts;
+    mkt["hockeyExtra"] = hExtra;
     results.push({
       matchId: m.id, date: m.date ?? "", time: m.time ?? "",
-      homeTeam: { id: m.home?.id ?? "", name: m.home?.name ?? "" },
-      awayTeam: { id: m.away?.id ?? "", name: m.away?.name ?? "" },
+      homeTeam: { id: m.home?.id ?? "", name: homeName },
+      awayTeam: { id: m.away?.id ?? "", name: awayName },
       homeOdds: h, drawOdds: d || 0, awayOdds: a,
-      btts, doubleChance,
-      p1Odds: getHDA(types, "1x2 (1st Period)"),
-      p2Odds: getHDA(types, "3Way Result (2st Period)"),
-      p3Odds: getHDA(types, "3Way Result 3rdPeriod)"),
+      btts, doubleChance, p1Odds, p2Odds, p3Odds,
+      markets: mkt,
     });
   }
   const fresh = results.filter(r => !isMatchTimePast(r.date, r.time));
