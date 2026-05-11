@@ -7069,4 +7069,76 @@ router.get("/football-daily/:offset", async (req, res) => {
   }
 });
 
+// ─── Football Upcoming Schedule by country/region ─────────────────────────────
+// v1/soccer/upcoming-schedule/{country} — fixtures for a country or region.
+// New root key: "fixtures" (not "livescore"). No cup/goals/agg/events/ht/ft.
+// New field: tv_stations.tv[] — broadcast channel names (single obj or array).
+// Match status = kickoff time string ("19:45"), not a result code.
+
+type V1UpcomingTV = { name: string };
+type V1UpcomingMatch = {
+  id: string; alternate_id: string; alternate_id_2: string; static_id: string;
+  status: string; date: string; time: string; venue: string;
+  home: { id: string; name: string };
+  away: { id: string; name: string };
+  tv_stations?: { tv?: V1UpcomingTV | V1UpcomingTV[] };
+};
+type V1UpcomingLeague = {
+  id: string; name: string; country: string; sub_id: string;
+  // no "cup" field in upcoming-schedule
+  match: V1UpcomingMatch | V1UpcomingMatch[];
+};
+type V1UpcomingScheduleRaw = {
+  fixtures?: {
+    updated?: string; sport?: string; country?: string;
+    league?: V1UpcomingLeague | V1UpcomingLeague[];
+  };
+};
+
+const footballUpcomingCache = new Map<string, { data: object[]; fetchedAt: number }>();
+const FOOTBALL_UPCOMING_TTL = 30 * 60 * 1000; // 30 min — fixtures rarely change
+
+router.get("/football-upcoming/:country", async (req, res) => {
+  const country = String(req.params["country"]).toLowerCase().replace(/[^a-z0-9-]/g, "");
+  if (!country) { res.status(400).json({ error: "País inválido" }); return; }
+  const now = Date.now();
+  const cached = footballUpcomingCache.get(country);
+  if (cached && now - cached.fetchedAt < FOOTBALL_UPCOMING_TTL) {
+    res.json({ leagues: cached.data });
+    return;
+  }
+  try {
+    const resp = await fetch(`${BASE_V1}/soccer/upcoming-schedule/${encodeURIComponent(country)}?access_key=${STATSPAL_KEY}`, { signal: AbortSignal.timeout(9000) });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const data = (await resp.json()) as V1UpcomingScheduleRaw;
+    const rawLeagues = data?.fixtures?.league;
+    const leagues: V1UpcomingLeague[] = !rawLeagues ? [] : Array.isArray(rawLeagues) ? rawLeagues : [rawLeagues];
+
+    const out = leagues.map(lg => {
+      const rawMatches = lg.match;
+      const matches: V1UpcomingMatch[] = !rawMatches ? [] : Array.isArray(rawMatches) ? rawMatches : [rawMatches];
+      return {
+        id: lg.id, name: lg.name, country: lg.country, subId: lg.sub_id,
+        matches: matches.map(m => {
+          const rawTv = m.tv_stations?.tv;
+          const tvChannels: string[] = !rawTv ? [] : (Array.isArray(rawTv) ? rawTv : [rawTv]).map(t => t.name);
+          return {
+            id: m.id, alternateId: m.alternate_id, alternateId2: m.alternate_id_2, staticId: m.static_id,
+            status: m.status, date: m.date, time: m.time,
+            venue: m.venue || null,
+            homeTeam: { id: m.home.id, name: m.home.name },
+            awayTeam: { id: m.away.id, name: m.away.name },
+            tvChannels,
+          };
+        }),
+      };
+    });
+
+    footballUpcomingCache.set(country, { data: out, fetchedAt: now });
+    res.json({ leagues: out });
+  } catch {
+    res.status(500).json({ error: "Calendário indisponível" });
+  }
+});
+
 export default router;
