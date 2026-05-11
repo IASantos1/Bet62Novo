@@ -6731,4 +6731,109 @@ router.get("/football-odds/:leagueId", async (req, res) => {
   }
 });
 
+// ─── Football Live Odds (in-play) ─────────────────────────────────────────────
+// v2/soccer/odds/live — completely different structure from all other endpoints:
+//   • updated_ts in milliseconds (not seconds)
+//   • score as "1:1" string
+//   • stats keyed by numeric strings "0","1",...
+//   • status.stopped/blocked/finished as "0"/"1" strings
+//   • kit_color as comma-separated hex list
+
+type FootballLiveOddsMatchRaw = {
+  match_info?: {
+    name: string; main_id: string;
+    fallback_id_1?: string; fallback_id_2?: string; fallback_id_3?: string;
+    league_id: string; league: string;
+    start_date: string; start_time: string; start_ts: number; start_ts_utc: number;
+    score: string;       // "1:1"
+    period: string;      // "2nd Half"
+    minute: string;      // "67"
+    seconds: string;     // "67:23"
+    state_code?: string; state_name?: string; state_details?: string;
+    ball_pos?: string;   // "0.38,0.25"
+  };
+  status?: {
+    stopped: string; blocked: string; finished: string;
+    updated: string; updated_ts: string;  // milliseconds as string
+  };
+  team_info?: {
+    home?: { name: string; id: string; score: string; kit_color?: string };
+    away?: { name: string; id: string; score: string; kit_color?: string };
+  };
+  stats?: Record<string, { name: string; home: string; away: string }>;
+  match_events?: unknown[];
+  odds?: unknown[];
+};
+
+type FootballLiveOddsRaw = {
+  updated?: string;
+  updated_ts?: number;   // milliseconds
+  live_matches?: FootballLiveOddsMatchRaw[];
+};
+
+let footballLiveOddsCache: object[] | null = null;
+let footballLiveOddsFetchedAt = 0;
+const FOOTBALL_LIVE_ODDS_TTL = 10 * 1000; // 10s — in-play data, very fresh
+
+async function getFootballLiveOdds(): Promise<object[]> {
+  const now = Date.now();
+  if (footballLiveOddsCache && now - footballLiveOddsFetchedAt < FOOTBALL_LIVE_ODDS_TTL) return footballLiveOddsCache;
+  const resp = await fetch(`${BASE_V2}/soccer/odds/live?access_key=${STATSPAL_KEY}`, { signal: AbortSignal.timeout(8000) });
+  if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+  const data = (await resp.json()) as FootballLiveOddsRaw;
+  const matches = data?.live_matches ?? [];
+
+  const out = matches.map(m => {
+    const info = m.match_info;
+    const home = m.team_info?.home;
+    const away = m.team_info?.away;
+    // Parse "1:1" score
+    const [homeScore, awayScore] = (info?.score ?? "0:0").split(":").map(s => parseInt(s) || 0);
+    // stats object → array sorted by numeric key
+    const statsArr = Object.entries(m.stats ?? {})
+      .sort(([a], [b]) => parseInt(a) - parseInt(b))
+      .map(([, v]) => ({ name: v.name, home: v.home, away: v.away }));
+    const status = m.status;
+    return {
+      matchId: info?.main_id ?? "",
+      name: info?.name ?? "",
+      leagueId: info?.league_id ?? "",
+      league: info?.league ?? "",
+      startDate: info?.start_date ?? "",
+      startTime: info?.start_time ?? "",
+      startTs: info?.start_ts ?? 0,
+      score: { home: homeScore, away: awayScore },
+      period: info?.period ?? "",
+      minute: parseInt(info?.minute ?? "0") || 0,
+      ballPos: info?.ball_pos ?? null,
+      stateName: info?.state_name ?? null,
+      stateDetails: info?.state_details ?? null,
+      status: status ? {
+        stopped:  status.stopped  === "1",
+        blocked:  status.blocked  === "1",
+        finished: status.finished === "1",
+        updatedTs: parseInt(status.updated_ts) || 0,   // ms
+      } : null,
+      homeTeam: home ? { id: home.id, name: home.name, score: parseInt(home.score) || 0, kitColor: home.kit_color ?? null } : null,
+      awayTeam: away ? { id: away.id, name: away.name, score: parseInt(away.score) || 0, kitColor: away.kit_color ?? null } : null,
+      stats: statsArr,
+      hasEvents: (m.match_events?.length ?? 0) > 0,
+      hasOdds:   (m.odds?.length ?? 0) > 0,
+    };
+  });
+
+  footballLiveOddsCache = out;
+  footballLiveOddsFetchedAt = now;
+  return out;
+}
+
+router.get("/football-live-odds", async (_req, res) => {
+  try {
+    const matches = await getFootballLiveOdds();
+    res.json({ matches });
+  } catch {
+    res.status(500).json({ error: "Odds ao vivo indisponíveis" });
+  }
+});
+
 export default router;
