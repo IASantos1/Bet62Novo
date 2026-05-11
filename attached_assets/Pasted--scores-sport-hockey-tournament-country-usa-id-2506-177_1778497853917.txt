@@ -1,0 +1,199 @@
+{
+  "scores": {
+    "sport": "hockey",
+    "tournament": {
+      "country": "usa",
+      "id": "2506",
+      "league": "NHL",
+      "season": "2025/2026",
+      "match": [
+        {
+          "date": "20.09.2025",
+          "id": "615674",
+          "stats_id": "66885",
+          "status": "After Penalties",
+          "time": "23:00",
+          "venue": "American Airlines Center",
+          "home": {
+            "id": "2645",
+            "name": "Dallas Stars",
+            "totalscore": "2"
+          },
+          "away": {
+            "id": "2787",
+            "name": "St. Louis Blues",
+            "totalscore": "1"
+          },
+          "events": {
+            "firstperiod": {
+              "score": "0 - 0",
+              "event": [
+                {
+                  "assist": "",
+                  "assistid": "",
+                  "comment": "Fighting",
+                  "min": "04",
+                  "player": "J. Hryckowian",
+                  "playerid": "99052",
+                  "result": "",
+                  "team": "localteam",
+                  "type": "penalty"
+                },
+                {
+                  "assist": "",
+                  "assistid": "",
+                  "comment": "Fighting",
+                  "min": "04",
+                  "player": "N. Walker",
+                  "playerid": "97717",
+                  "result": "",
+                  "team": "visitorteam",
+                  "type": "penalty"
+                }
+              ]
+            },
+            "secondperiod": {
+              "score": "1 - 1",
+              "event": [
+                {
+                  "assist": "L. Mailloux,D. Holloway",
+                  "assistid": "98668,98392",
+                  "comment": "Power-play",
+                  "min": "00",
+                  "player": "J. Carbonneau",
+                  "playerid": "83146",
+                  "result": "[0 - 1]",
+                  "team": "visitorteam",
+                  "type": "goal"
+                }
+              ]
+            },
+            "thirdperiod": {
+              "score": "0 - 0",
+              "event": {
+                "assist": "",
+                "assistid": "",
+                "comment": "High sticking",
+                "min": "14",
+                "player": "J. Hryckowian",
+                "playerid": "99052",
+                "result": "",
+                "team": "localteam",
+                "type": "penalty"
+              }
+            },
+            "overtime": {
+              "score": "0 - 0",
+              "event": {
+                "assist": "",
+                "assistid": "",
+                "comment": "Tripping",
+                "min": "01",
+                "player": "J. Carbonneau",
+                "playerid": "83146",
+                "result": "",
+                "team": "visitorteam",
+                "type": "penalty"
+              }
+            },
+            "penalties": {
+              "score": "1 - 0"
+            }
+          },
+          "team_stats": {
+            "home": {
+              "shots": {
+                "bocked_shots": "18",
+                "offgoal": "",
+                "ongoal": "34",
+                "shots_pct": "2"
+              },
+              "saves": {
+                "saves_pct": "93",
+                "total": "14"
+              },
+              "penalties": {
+                "minutes": "9",
+                "penalties": "3"
+              },
+              "goals": {
+                "empty_net_goals": "0",
+                "pen_kill_pct": "66",
+                "pp_goals": "0",
+                "pp_pct": "0",
+                "sh_goals": "0"
+              },
+              "faceoffs": {
+                "pct": "31",
+                "won": "31"
+              }
+            },
+            "away": {
+              "shots": {
+                "bocked_shots": "11",
+                "offgoal": "",
+                "ongoal": "15",
+                "shots_pct": "6"
+              },
+              "saves": {
+                "saves_pct": "97",
+                "total": "33"
+              },
+              "penalties": {
+                "minutes": "9",
+                "penalties": "3"
+              },
+              "goals": {
+                "empty_net_goals": "0",
+                "pen_kill_pct": "100",
+                "pp_goals": "1",
+                "pp_pct": "33",
+                "sh_goals": "0"
+              },
+              "faceoffs": {
+                "pct": "15",
+                "won": "15"
+              }
+            }
+          },
+          "player_stats": {
+            "home": null,
+            "away": null
+          },
+          "goalkeeper_stats": {
+            "home": {
+              "player": [
+                {
+                  "credit": "W",
+                  "goals_against": "1",
+                  "id": "100614",
+                  "name": "R. Poirier",
+                  "penalty_minutes": "",
+                  "saves": "11",
+                  "saves_pct": "91.66%",
+                  "shots_against": "11-",
+                  "time_on_ice": "35:19"
+                }
+              ]
+            },
+            "away": {
+              "player": [
+                {
+                  "credit": "",
+                  "goals_against": "2",
+                  "id": "99670",
+                  "name": "J. Binnington",
+                  "penalty_minutes": "",
+                  "saves": "20",
+                  "saves_pct": "95.23%",
+                  "shots_against": "20-",
+                  "time_on_ice": "36:23"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    }
+  }
+}

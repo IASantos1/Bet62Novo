@@ -546,6 +546,7 @@ type Match = {
       { aces: number; doubleFaults: number; firstServePct: string; winners: number; unforcedErrors: number },
       { aces: number; doubleFaults: number; firstServePct: string; winners: number; unforcedErrors: number },
     ];
+    periods?: Array<[number, number]>;
   };
 };
 
@@ -1124,6 +1125,7 @@ export default function Home() {
               { aces: number; doubleFaults: number; firstServePct: string; winners: number; unforcedErrors: number },
               { aces: number; doubleFaults: number; firstServePct: string; winners: number; unforcedErrors: number },
             ];
+            periods?: Array<[number, number]>;
           };
         }>;
         // Record API minutes for local ticker interpolation
@@ -1565,6 +1567,38 @@ export default function Home() {
       );
     };
 
+    // Hockey: period-by-period table (P1 / P2 / P3 / OT) when period data exists
+    const HockeyScore = ({ big }: { big?: boolean }) => {
+      const periods = extra?.periods ?? [];
+      const PERIOD_LABELS = ["P1", "P2", "P3", "OT", "SO"];
+      if (periods.length === 0) return <SimpleScore big={big} />;
+      return (
+        <div className="w-full text-xs font-mono tabular-nums">
+          <div className="flex items-center mb-0.5">
+            <div className="flex-1" />
+            {periods.map((_, i) => (
+              <div key={i} className="w-7 text-center text-zinc-500 text-[10px] font-bold">{PERIOD_LABELS[i] ?? `P${i + 1}`}</div>
+            ))}
+            <div className="w-8 text-center text-zinc-500 text-[10px] font-bold">TOT</div>
+          </div>
+          <div className="flex items-center">
+            <div className="flex-1 font-bold text-white text-xs truncate">{match.home}</div>
+            {periods.map(([h, a]: [number, number], i: number) => (
+              <div key={i} className={`w-7 text-center font-black ${h > a ? "text-white" : "text-zinc-500"}`}>{h}</div>
+            ))}
+            <div className="w-8 text-center font-black text-white">{match.homeScore ?? 0}</div>
+          </div>
+          <div className="flex items-center">
+            <div className="flex-1 font-bold text-white text-xs truncate">{match.away}</div>
+            {periods.map(([h, a]: [number, number], i: number) => (
+              <div key={i} className={`w-7 text-center font-black ${a > h ? "text-white" : "text-zinc-500"}`}>{a}</div>
+            ))}
+            <div className="w-8 text-center font-black text-white">{match.awayScore ?? 0}</div>
+          </div>
+        </div>
+      );
+    };
+
     // Basketball / Hockey / Football: standard home vs away score
     const SimpleScore = ({ big }: { big?: boolean }) => (
       <div className={`flex items-center gap-2 w-full`}>
@@ -1616,6 +1650,7 @@ export default function Home() {
             <div className="mb-3">
               {sport === "tennis"     ? <TennisScore /> :
                sport === "volleyball" ? <VolleyScore /> :
+               sport === "hockey"     ? <HockeyScore big /> :
                <SimpleScore big />}
             </div>
             {match.hasRealOdds && (
@@ -1643,6 +1678,7 @@ export default function Home() {
         <div className="px-3 py-2.5" onClick={e => e.stopPropagation()}>
           {sport === "tennis"     ? <TennisScore /> :
            sport === "volleyball" ? <VolleyScore /> :
+           sport === "hockey"     ? <HockeyScore /> :
            <SimpleScore />}
           {oddsRow}
         </div>
@@ -3506,6 +3542,78 @@ export default function Home() {
                         </div>
                       );
                     })()}
+                    {/* Hockey period scores + goal events below chart */}
+                    {expandedMatch.sport === "hockey" && (() => {
+                      const periods = expandedMatch._liveExtra?.periods ?? [];
+                      const goalEvents = expandedMatch.events?.filter(e => e.type === "goal") ?? [];
+                      const penEvents  = expandedMatch.events?.filter(e => e.type === "penalty") ?? [];
+                      const PERIOD_LABELS = ["1º Período", "2º Período", "3º Período", "Overtime", "Shootout"];
+                      if (periods.length === 0 && goalEvents.length === 0) return null;
+                      return (
+                        <div className="mt-4 pt-4 border-t border-zinc-700/60 space-y-4">
+                          {periods.length > 0 && (
+                            <div>
+                              <div className="text-[10px] font-black text-red-500 uppercase tracking-widest mb-2">Placar por Período</div>
+                              <div className="rounded-lg border border-zinc-800 overflow-hidden">
+                                <div className="grid text-[9px] font-bold text-zinc-500 px-3 py-1.5 border-b border-zinc-800" style={{ gridTemplateColumns: `1fr repeat(${periods.length + 1}, 2rem)` }}>
+                                  <div />
+                                  {periods.map((_: [number, number], i: number) => <div key={i} className="text-center">{i < 3 ? `P${i+1}` : i === 3 ? "OT" : "SO"}</div>)}
+                                  <div className="text-center">TOT</div>
+                                </div>
+                                {[0, 1].map(idx => {
+                                  const name = idx === 0 ? expandedMatch.home : expandedMatch.away;
+                                  const total = idx === 0 ? expandedMatch.homeScore : expandedMatch.awayScore;
+                                  return (
+                                    <div key={idx} className={`grid text-[10px] px-3 py-1.5 ${idx === 0 ? "border-b border-zinc-800/60" : ""}`} style={{ gridTemplateColumns: `1fr repeat(${periods.length + 1}, 2rem)` }}>
+                                      <div className="text-zinc-300 font-bold truncate">{name.split(" ").slice(-1)[0]}</div>
+                                      {periods.map(([h, a]: [number, number], i: number) => (
+                                        <div key={i} className={`text-center font-black tabular-nums ${(idx === 0 ? h > a : a > h) ? "text-white" : "text-zinc-600"}`}>{idx === 0 ? h : a}</div>
+                                      ))}
+                                      <div className="text-center font-black text-white tabular-nums">{total ?? 0}</div>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          )}
+                          {goalEvents.length > 0 && (
+                            <div>
+                              <div className="text-[10px] font-black text-red-500 uppercase tracking-widest mb-2">Golos</div>
+                              <div className="space-y-1">
+                                {goalEvents.map((ev, i) => (
+                                  <div key={i} className="flex items-center gap-2 text-[11px]">
+                                    <span className="text-zinc-500 tabular-nums w-5 text-right shrink-0">{ev.minute}'</span>
+                                    <span className="text-blue-400 text-[9px] font-black shrink-0">🏒</span>
+                                    <span className="font-bold text-white truncate flex-1">{ev.player}</span>
+                                    <span className={`text-[9px] font-black px-1.5 py-0.5 rounded shrink-0 ${ev.team === "home" ? "bg-blue-900/40 text-blue-400" : "bg-red-900/40 text-red-400"}`}>
+                                      {ev.team === "home" ? expandedMatch.home.split(" ").slice(-1)[0] : expandedMatch.away.split(" ").slice(-1)[0]}
+                                    </span>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                          {penEvents.length > 0 && (
+                            <div>
+                              <div className="text-[10px] font-black text-zinc-500 uppercase tracking-widest mb-2">Penalidades</div>
+                              <div className="space-y-1">
+                                {penEvents.map((ev, i) => (
+                                  <div key={i} className="flex items-center gap-2 text-[11px]">
+                                    <span className="text-zinc-500 tabular-nums w-5 text-right shrink-0">{ev.minute}'</span>
+                                    <span className="text-yellow-500 text-[9px] shrink-0">⚠️</span>
+                                    <span className="font-semibold text-zinc-300 truncate flex-1">{ev.player}</span>
+                                    <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded shrink-0 ${ev.team === "home" ? "bg-zinc-800 text-zinc-400" : "bg-zinc-800 text-zinc-400"}`}>
+                                      {ev.team === "home" ? expandedMatch.home.split(" ").slice(-1)[0] : expandedMatch.away.split(" ").slice(-1)[0]}
+                                    </span>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })()}
+
                     {/* Volleyball live stats below chart */}
                     {expandedMatch.sport === "volleyball" && expandedMatch._liveExtra?.vollSets && expandedMatch._liveExtra.vollSets.length > 0 && (() => {
                       const sets = expandedMatch._liveExtra.vollSets;

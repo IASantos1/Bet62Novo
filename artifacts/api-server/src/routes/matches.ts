@@ -101,6 +101,7 @@ export type LiveMatchState = {
     currentPts?: [number, number];       // volleyball: current set points [18, 16]
     vollSets?: Array<[number, number]>;  // volleyball: completed set scores [[25,18],[22,25]]
     tennisStats?: [TennisStatData, TennisStatData]; // home / away match stats
+    periods?: Array<[number, number]>;   // hockey: [[P1h,P1a],[P2h,P2a],[P3h,P3a],[OTh,OTa]]
   };
 };
 
@@ -776,11 +777,23 @@ let oddsMap: Map<string, RealOdds> | null = null;
 let oddsFetchedAt = 0;
 
 // NHL livescores cache (30s)
+type NHLGoalEvent = {
+  min: string; player: string; playerid: string;
+  result: string; team: string; type: string;
+  assist: string; comment: string;
+};
+type NHLPeriodData = { score?: string; event?: NHLGoalEvent | NHLGoalEvent[] };
 type NHLMatch = {
-  id: string; fix_id: string; status: string; time: string; timer: string;
+  id: string; fix_id: string; status: string; time: string; timer: string; date?: string;
   home: { id: string; name: string; totalscore: string };
   away: { id: string; name: string; totalscore: string };
-  events?: Record<string, { score?: string; event?: unknown }>;
+  events?: {
+    firstperiod?: NHLPeriodData;
+    secondperiod?: NHLPeriodData;
+    thirdperiod?: NHLPeriodData;
+    overtime?: NHLPeriodData;
+    penalties?: NHLPeriodData;
+  };
 };
 type NHLTournament = { country: string; gid: string; id: string; league: string; match: NHLMatch | NHLMatch[] };
 let nhlLiveCache: NHLTournament[] | null = null;
@@ -1198,33 +1211,73 @@ function buildNHLLiveMatches(tournaments: NHLTournament[]): LiveMatchState[] {
   const NHL_LIVE_STATUSES = new Set(["1P", "2P", "3P", "OT", "SO", "INT", "Break"]);
   const result: LiveMatchState[] = [];
 
+  const today = new Date();
+  const todayStr = `${String(today.getDate()).padStart(2, "0")}.${String(today.getMonth() + 1).padStart(2, "0")}.${today.getFullYear()}`;
+
+  const parseScore = (s?: string): [number, number] | null => {
+    if (!s || !s.trim()) return null;
+    const parts = s.split(" - ");
+    if (parts.length !== 2) return null;
+    const h = parseInt(parts[0]!); const a = parseInt(parts[1]!);
+    if (isNaN(h) || isNaN(a)) return null;
+    return [h, a];
+  };
+
   for (const t of tournaments) {
     const matches = Array.isArray(t.match) ? t.match : [t.match];
     for (const m of matches) {
       if (!m?.status) continue;
       const isLive = NHL_LIVE_STATUSES.has(m.status);
-      if (!isLive) continue;
+      const isNotStarted = m.status === "Not Started";
+      if (!isLive && !isNotStarted) continue;
+      // For not-started: only show today's games
+      if (isNotStarted && m.date && m.date !== todayStr) continue;
 
       const homeScore = parseInt(m.home.totalscore) || 0;
       const awayScore = parseInt(m.away.totalscore) || 0;
 
-      // Convert period to equivalent minute for display
-      const periodMinutes: Record<string, number> = { "1P": 10, "2P": 30, "3P": 50, "OT": 65, "SO": 68, "INT": 20, "Break": 20 };
-      const minute = periodMinutes[m.status] ?? 10;
+      // Parse period-by-period scores
+      const periods: Array<[number, number]> = [];
+      const periodSources: Array<NHLPeriodData | undefined> = [
+        m.events?.firstperiod,
+        m.events?.secondperiod,
+        m.events?.thirdperiod,
+        m.events?.overtime,
+        m.events?.penalties,
+      ];
+      for (const pd of periodSources) {
+        const sc = parseScore(pd?.score);
+        if (sc) periods.push(sc);
+      }
 
-      const odds = makeOddsFromTeams(m.home.name, m.away.name);
-      // Adjust for live score
-      const diff = homeScore - awayScore;
-      let liveOdds = { ...odds };
-      if (diff !== 0) {
-        const factor = Math.min(0.40, Math.abs(diff) * 0.15);
-        if (diff > 0) {
-          liveOdds = { home: Math.max(1.04, +(odds.home * (1 - factor)).toFixed(2)), draw: odds.draw, away: Math.min(12, +(odds.away * (1 + factor)).toFixed(2)) };
-        } else {
-          liveOdds = { home: Math.min(12, +(odds.home * (1 + factor)).toFixed(2)), draw: odds.draw, away: Math.max(1.04, +(odds.away * (1 - factor)).toFixed(2)) };
+      // Parse real goal/penalty events
+      const events: LiveMatchState["events"] = [];
+      for (const pd of periodSources) {
+        if (!pd?.event) continue;
+        const evArr = Array.isArray(pd.event) ? pd.event : [pd.event];
+        for (const ev of evArr) {
+          if (ev.type !== "goal" && ev.type !== "penalty") continue;
+          events.push({
+            type: ev.type,
+            team: ev.team === "localteam" ? "home" : "away",
+            minute: parseInt(ev.min) || 0,
+            player: ev.player || "",
+          });
         }
       }
-      // No draw in hockey
+
+      const periodMinutes: Record<string, number> = { "1P": 10, "2P": 30, "3P": 50, "OT": 65, "SO": 68, "INT": 20, "Break": 20 };
+      const minute = isNotStarted ? 0 : (periodMinutes[m.status] ?? 10);
+
+      const odds = makeOddsFromTeams(m.home.name, m.away.name);
+      const diff = homeScore - awayScore;
+      let liveOdds = { ...odds };
+      if (diff !== 0 && isLive) {
+        const factor = Math.min(0.40, Math.abs(diff) * 0.15);
+        liveOdds = diff > 0
+          ? { home: Math.max(1.04, +(odds.home * (1 - factor)).toFixed(2)), draw: 0, away: Math.min(12, +(odds.away * (1 + factor)).toFixed(2)) }
+          : { home: Math.min(12, +(odds.home * (1 + factor)).toFixed(2)), draw: 0, away: Math.max(1.04, +(odds.away * (1 - factor)).toFixed(2)) };
+      }
       liveOdds.draw = 0;
 
       result.push({
@@ -1237,11 +1290,12 @@ function buildNHLLiveMatches(tournaments: NHLTournament[]): LiveMatchState[] {
         homeScore,
         awayScore,
         minute,
-        status: m.status,
+        status: isNotStarted ? "Not Started" : m.status,
         hasRealOdds: false,
         odds: liveOdds,
         markets: makeAdvancedMarketsFromTeams(m.home.name, m.away.name),
-        events: [],
+        events,
+        _liveExtra: periods.length > 0 ? { periods } : undefined,
       });
     }
   }
@@ -2497,10 +2551,10 @@ function _getHockey(si: number): _HockeySt {
 // advances incrementally — scores are stable and never jump between refreshes.
 // Live odds still drift on a 15-s window for a realistic betting experience.
 
-function buildSimulatedLiveOtherSports(opts: { skipTennis: boolean; skipVolley: boolean }): LiveMatchState[] {
+function buildSimulatedLiveOtherSports(opts: { skipTennis: boolean; skipVolley: boolean; skipHockey?: boolean }): LiveMatchState[] {
   const basketball = buildBasketballMatches();
   const tennis     = opts.skipTennis ? [] : buildTennisMatches();
-  const hockey     = buildHockeyMatches();
+  const hockey     = opts.skipHockey ? [] : buildHockeyMatches();
   const volleyball = opts.skipVolley ? [] : buildVolleyballMatches();
 
   const win15s = Math.floor(Date.now() / 15_000);
@@ -2510,7 +2564,7 @@ function buildSimulatedLiveOtherSports(opts: { skipTennis: boolean; skipVolley: 
   const picks: Array<{ m: UpcomingMatch; si: number }> = [
     ...basketball.slice(0, 3).map((m, i) => ({ m, si: i })),
     ...tennisPicks.map((m, i) => ({ m, si: i + 3 })),
-    ...hockey.slice(0, 2).map((m, i) => ({ m, si: i + 7 })),
+    ...(opts.skipHockey ? [] : hockey.slice(0, 2).map((m, i) => ({ m, si: i + 7 }))),
     ...(opts.skipVolley ? [] : volleyball.slice(0, 2).map((m, i) => ({ m, si: i + 9 }))),
   ];
 
@@ -2624,6 +2678,7 @@ router.get("/live", async (_req, res) => {
     const simulated     = buildSimulatedLiveOtherSports({
       skipTennis: tennisMatches.length > 0,
       skipVolley: volleyMatches.length > 0,
+      skipHockey: nhlMatches.filter(m => m.status !== "Not Started").length > 0,
     });
     const matches = [...soccerMatches, ...nhlMatches, ...tennisMatches, ...volleyMatches, ...simulated];
     res.json({ matches });
