@@ -1,0 +1,90 @@
+{
+  "scores": {
+    "sport": "basketball",
+    "tournament": {
+      "country": "usa",
+      "id": "2545",
+      "league": "Usa: Nba",
+      "match": [
+        {
+          "date": "09.12.2025",
+          "id": "987036",
+          "status": "Finished",
+          "time": "00:00",
+          "home": {
+            "id": "2718",
+            "name": "Indiana Pacers",
+            "ot": "",
+            "q1": "35",
+            "q2": "31",
+            "q3": "26",
+            "q4": "24",
+            "totalscore": "116"
+          },
+          "away": {
+            "id": "2724",
+            "name": "Sacramento Kings",
+            "ot": "",
+            "q1": "23",
+            "q2": "28",
+            "q3": "37",
+            "q4": "17",
+            "totalscore": "105"
+          }
+        },
+        {
+          "date": "09.12.2025",
+          "id": "987037",
+          "status": "Finished",
+          "time": "00:30",
+          "home": {
+            "id": "2701",
+            "name": "Minnesota Timberwolves",
+            "ot": "",
+            "q1": "23",
+            "q2": "34",
+            "q3": "27",
+            "q4": "21",
+            "totalscore": "105"
+          },
+          "away": {
+            "id": "2620",
+            "name": "Phoenix Suns",
+            "ot": "",
+            "q1": "29",
+            "q2": "32",
+            "q3": "23",
+            "q4": "24",
+            "totalscore": "108"
+          }
+        },
+        {
+          "date": "09.12.2025",
+          "id": "987038",
+          "status": "Finished",
+          "time": "01:00",
+          "home": {
+            "id": "2693",
+            "name": "New Orleans Pelicans",
+            "ot": "",
+            "q1": "25",
+            "q2": "32",
+            "q3": "45",
+            "q4": "30",
+            "totalscore": "132"
+          },
+          "away": {
+            "id": "2689",
+            "name": "San Antonio Spurs",
+            "ot": "",
+            "q1": "35",
+            "q2": "42",
+            "q3": "23",
+            "q4": "35",
+            "totalscore": "135"
+          }
+        }
+      ]
+    }
+  }
+}

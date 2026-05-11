@@ -102,6 +102,7 @@ export type LiveMatchState = {
     vollSets?: Array<[number, number]>;  // volleyball: completed set scores [[25,18],[22,25]]
     tennisStats?: [TennisStatData, TennisStatData]; // home / away match stats
     periods?: Array<[number, number]>;   // hockey: [[P1h,P1a],[P2h,P2a],[P3h,P3a],[OTh,OTa]]
+    quarters?: Array<[number, number]>;  // basketball: [[Q1h,Q1a],[Q2h,Q2a],[Q3h,Q3a],[Q4h,Q4a],[OTh,OTa]]
   };
 };
 
@@ -799,6 +800,15 @@ type NHLTournament = { country: string; gid: string; id: string; league: string;
 let nhlLiveCache: NHLTournament[] | null = null;
 let nhlLiveFetchedAt = 0;
 
+type NBAMatch = {
+  id: string; stats_id?: string; status: string; time: string; timer: string; date?: string;
+  home: { id: string; name: string; ot?: string; q1?: string; q2?: string; q3?: string; q4?: string; totalscore: string };
+  away: { id: string; name: string; ot?: string; q1?: string; q2?: string; q3?: string; q4?: string; totalscore: string };
+};
+type NBATournament = { country: string; gid: string; id: string; league: string; match: NBAMatch | NBAMatch[] };
+let nbaLiveCache: NBATournament[] | null = null;
+let nbaLiveFetchedAt = 0;
+
 // Tennis livescores cache (30s)
 type TennisPlayer = {
   id: string; name: string;
@@ -1370,6 +1380,97 @@ function buildNHLLiveMatches(tournaments: NHLTournament[]): LiveMatchState[] {
         markets: makeAdvancedMarketsFromTeams(m.home.name, m.away.name),
         events,
         _liveExtra: periods.length > 0 ? { periods } : undefined,
+      });
+    }
+  }
+  return result;
+}
+
+async function getNBALive(): Promise<NBATournament[]> {
+  const now = Date.now();
+  if (nbaLiveCache && now - nbaLiveFetchedAt < CONFIG.LIVE_CACHE_TTL) return nbaLiveCache;
+  try {
+    const resp = await fetch(`${BASE_V1}/nba/livescores?access_key=${STATSPAL_KEY}`, {
+      signal: AbortSignal.timeout(8000),
+    });
+    if (!resp.ok) return nbaLiveCache ?? [];
+    const data = (await resp.json()) as { livescores?: { tournament?: NBATournament | NBATournament[] } };
+    const raw = data?.livescores?.tournament;
+    if (!raw) return nbaLiveCache ?? [];
+    nbaLiveCache = Array.isArray(raw) ? raw : [raw];
+    nbaLiveFetchedAt = now;
+    return nbaLiveCache;
+  } catch {
+    return nbaLiveCache ?? [];
+  }
+}
+
+function buildNBALiveMatches(tournaments: NBATournament[]): LiveMatchState[] {
+  const NBA_LIVE_STATUSES = new Set(["Q1", "Q2", "Q3", "Q4", "HT", "OT", "1st Quarter", "2nd Quarter", "3rd Quarter", "4th Quarter", "Halftime", "In Progress"]);
+  const result: LiveMatchState[] = [];
+
+  const today = new Date();
+  const todayStr = `${String(today.getDate()).padStart(2, "0")}.${String(today.getMonth() + 1).padStart(2, "0")}.${today.getFullYear()}`;
+
+  for (const t of tournaments) {
+    const matches = Array.isArray(t.match) ? t.match : [t.match];
+    for (const m of matches) {
+      if (!m?.status) continue;
+      const st = m.status;
+      const isLive = NBA_LIVE_STATUSES.has(st) || (st !== "Finished" && st !== "Not Started" && st !== "Postponed" && st !== "Cancelled");
+      const isNotStarted = st === "Not Started";
+      const isFinished = st === "Finished";
+      if (!isLive && !isNotStarted && !isFinished) continue;
+      if ((isNotStarted || isFinished) && m.date && m.date !== todayStr) continue;
+
+      const homeScore = parseInt(m.home.totalscore) || 0;
+      const awayScore = parseInt(m.away.totalscore) || 0;
+
+      const q1 = [parseInt(m.home.q1 ?? "0") || 0, parseInt(m.away.q1 ?? "0") || 0] as [number, number];
+      const q2 = [parseInt(m.home.q2 ?? "0") || 0, parseInt(m.away.q2 ?? "0") || 0] as [number, number];
+      const q3 = [parseInt(m.home.q3 ?? "0") || 0, parseInt(m.away.q3 ?? "0") || 0] as [number, number];
+      const q4 = [parseInt(m.home.q4 ?? "0") || 0, parseInt(m.away.q4 ?? "0") || 0] as [number, number];
+      const ot = [parseInt(m.home.ot ?? "0") || 0, parseInt(m.away.ot ?? "0") || 0] as [number, number];
+
+      const quarters: Array<[number, number]> = [];
+      if (q1[0] > 0 || q1[1] > 0) quarters.push(q1);
+      if (q2[0] > 0 || q2[1] > 0) quarters.push(q2);
+      if (q3[0] > 0 || q3[1] > 0) quarters.push(q3);
+      if (q4[0] > 0 || q4[1] > 0) quarters.push(q4);
+      if (ot[0] > 0 || ot[1] > 0) quarters.push(ot);
+
+      const qNum = st.includes("1") || st === "Q1" ? 1 : st.includes("2") || st === "Q2" || st === "HT" || st === "Halftime" ? 2 : st.includes("3") || st === "Q3" ? 3 : st.includes("4") || st === "Q4" ? 4 : st === "OT" ? 5 : isFinished ? 4 : 1;
+      const statusLabel = isNotStarted ? "Not Started" : isFinished ? "Finished" : st.startsWith("Q") ? st : st === "HT" || st === "Halftime" ? "HT" : st === "OT" ? "OT" : `Q${qNum}`;
+      const minute = isNotStarted ? 0 : isFinished ? 48 : (qNum - 1) * 12 + 6;
+
+      const odds = makeOddsFromTeams(m.home.name, m.away.name);
+      const diff = homeScore - awayScore;
+      let liveOdds = { ...odds, draw: 0 };
+      if (diff !== 0 && isLive) {
+        const factor = Math.min(0.40, Math.abs(diff) * 0.03);
+        liveOdds = diff > 0
+          ? { home: Math.max(1.04, +(odds.home * (1 - factor)).toFixed(2)), draw: 0, away: Math.min(12, +(odds.away * (1 + factor)).toFixed(2)) }
+          : { home: Math.min(12, +(odds.home * (1 + factor)).toFixed(2)), draw: 0, away: Math.max(1.04, +(odds.away * (1 - factor)).toFixed(2)) };
+      }
+
+      const leagueName = t.league.includes("Nba") || t.league.includes("NBA") ? "NBA" : t.league;
+
+      result.push({
+        id: `nba-${m.id}`,
+        home: m.home.name,
+        away: m.away.name,
+        league: leagueName,
+        country: t.country,
+        sport: "basketball",
+        homeScore,
+        awayScore,
+        minute,
+        status: statusLabel,
+        hasRealOdds: false,
+        odds: liveOdds,
+        markets: makeAdvancedMarketsFromTeams(m.home.name, m.away.name),
+        events: [],
+        _liveExtra: quarters.length > 0 ? { quarters } : undefined,
       });
     }
   }
@@ -2625,8 +2726,8 @@ function _getHockey(si: number): _HockeySt {
 // advances incrementally — scores are stable and never jump between refreshes.
 // Live odds still drift on a 15-s window for a realistic betting experience.
 
-function buildSimulatedLiveOtherSports(opts: { skipTennis: boolean; skipVolley: boolean; skipHockey?: boolean }): LiveMatchState[] {
-  const basketball = buildBasketballMatches();
+function buildSimulatedLiveOtherSports(opts: { skipTennis: boolean; skipVolley: boolean; skipHockey?: boolean; skipBasketball?: boolean }): LiveMatchState[] {
+  const basketball = opts.skipBasketball ? [] : buildBasketballMatches();
   const tennis     = opts.skipTennis ? [] : buildTennisMatches();
   const hockey     = opts.skipHockey ? [] : buildHockeyMatches();
   const volleyball = opts.skipVolley ? [] : buildVolleyballMatches();
@@ -2636,7 +2737,7 @@ function buildSimulatedLiveOtherSports(opts: { skipTennis: boolean; skipVolley: 
   const tennisPicks = opts.skipTennis ? [] :
     [tennis[0], tennis[1], tennis[7], tennis[8]].filter((t): t is UpcomingMatch => t != null);
   const picks: Array<{ m: UpcomingMatch; si: number }> = [
-    ...basketball.slice(0, 3).map((m, i) => ({ m, si: i })),
+    ...(opts.skipBasketball ? [] : basketball.slice(0, 3).map((m, i) => ({ m, si: i }))),
     ...tennisPicks.map((m, i) => ({ m, si: i + 3 })),
     ...(opts.skipHockey ? [] : hockey.slice(0, 2).map((m, i) => ({ m, si: i + 7 }))),
     ...(opts.skipVolley ? [] : volleyball.slice(0, 2).map((m, i) => ({ m, si: i + 9 }))),
@@ -2739,22 +2840,25 @@ export { buildLiveMatches, buildUpcomingMatches, buildBasketballMatches, buildTe
 
 router.get("/live", async (_req, res) => {
   try {
-    const [soccerMatches, nhlTournaments, tennisTournaments, volleyTournaments, tennisStatsMap] = await Promise.all([
+    const [soccerMatches, nhlTournaments, nbaTournaments, tennisTournaments, volleyTournaments, tennisStatsMap] = await Promise.all([
       buildLiveMatches(),
       getNHLLive(),
+      getNBALive(),
       getTennisLive(),
       getVolleyballLive(),
       getTennisStatsMap(),
     ]);
     const nhlMatches    = buildNHLLiveMatches(nhlTournaments);
+    const nbaMatches    = buildNBALiveMatches(nbaTournaments);
     const tennisMatches = buildTennisLiveMatches(tennisTournaments, tennisStatsMap);
     const volleyMatches = buildVolleyballLiveMatches(volleyTournaments);
     const simulated     = buildSimulatedLiveOtherSports({
-      skipTennis: tennisMatches.length > 0,
-      skipVolley: volleyMatches.length > 0,
-      skipHockey: nhlMatches.filter(m => m.status !== "Not Started").length > 0,
+      skipTennis:     tennisMatches.length > 0,
+      skipVolley:     volleyMatches.length > 0,
+      skipHockey:     nhlMatches.filter(m => m.status !== "Not Started").length > 0,
+      skipBasketball: nbaMatches.length > 0,
     });
-    const matches = [...soccerMatches, ...nhlMatches, ...tennisMatches, ...volleyMatches, ...simulated];
+    const matches = [...soccerMatches, ...nhlMatches, ...nbaMatches, ...tennisMatches, ...volleyMatches, ...simulated];
     res.json({ matches });
   } catch (err) {
     console.error("[live route] unexpected error:", err);

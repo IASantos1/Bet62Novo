@@ -547,6 +547,7 @@ type Match = {
       { aces: number; doubleFaults: number; firstServePct: string; winners: number; unforcedErrors: number },
     ];
     periods?: Array<[number, number]>;
+    quarters?: Array<[number, number]>;
   };
 };
 
@@ -1223,6 +1224,7 @@ export default function Home() {
               { aces: number; doubleFaults: number; firstServePct: string; winners: number; unforcedErrors: number },
             ];
             periods?: Array<[number, number]>;
+            quarters?: Array<[number, number]>;
           };
         }>;
         // Record API minutes for local ticker interpolation
@@ -3718,6 +3720,37 @@ export default function Home() {
                         </div>
                       );
                     })()}
+                    {/* Basketball quarter scores below chart */}
+                    {expandedMatch.sport === "basketball" && expandedMatch._liveExtra?.quarters && expandedMatch._liveExtra.quarters.length > 0 && (() => {
+                      const quarters = expandedMatch._liveExtra.quarters;
+                      const QUARTER_LABELS = ["Q1", "Q2", "Q3", "Q4", "OT"];
+                      return (
+                        <div className="mt-4 pt-4 border-t border-zinc-700/60">
+                          <div className="text-[10px] font-black text-red-500 uppercase tracking-widest mb-2">Placar por Quarto</div>
+                          <div className="rounded-lg border border-zinc-800 overflow-hidden">
+                            <div className="grid text-[9px] font-bold text-zinc-500 px-3 py-1.5 border-b border-zinc-800" style={{ gridTemplateColumns: `1fr repeat(${quarters.length + 1}, 2.5rem)` }}>
+                              <div />
+                              {quarters.map((_: [number, number], i: number) => <div key={i} className="text-center">{QUARTER_LABELS[i] ?? `Q${i+1}`}</div>)}
+                              <div className="text-center">TOT</div>
+                            </div>
+                            {[0, 1].map(idx => {
+                              const name = idx === 0 ? expandedMatch.home : expandedMatch.away;
+                              const total = idx === 0 ? expandedMatch.homeScore : expandedMatch.awayScore;
+                              return (
+                                <div key={idx} className={`grid text-[10px] px-3 py-1.5 ${idx === 0 ? "border-b border-zinc-800/60" : ""}`} style={{ gridTemplateColumns: `1fr repeat(${quarters.length + 1}, 2.5rem)` }}>
+                                  <div className="text-zinc-300 font-bold truncate">{name.split(" ").slice(-1)[0]}</div>
+                                  {quarters.map(([h, a]: [number, number], i: number) => (
+                                    <div key={i} className={`text-center font-black tabular-nums ${(idx === 0 ? h > a : a > h) ? "text-white" : "text-zinc-600"}`}>{idx === 0 ? h : a}</div>
+                                  ))}
+                                  <div className="text-center font-black text-white tabular-nums">{total ?? 0}</div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      );
+                    })()}
+
                     {/* Hockey period scores + goal events below chart */}
                     {expandedMatch.sport === "hockey" && (() => {
                       const periods = expandedMatch._liveExtra?.periods ?? [];
