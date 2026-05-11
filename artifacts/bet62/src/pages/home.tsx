@@ -846,6 +846,15 @@ export default function Home() {
     status: string; tournament: string; date: string; time: string;
   };
   const [recentResults, setRecentResults] = useState<TennisResult[]>([]);
+
+  // NBA results yesterday
+  type BasketballResult = {
+    id: string; home: string; away: string;
+    homeScore: number; awayScore: number;
+    quarters: Array<[number, number]>; homeWon: boolean;
+    league: string; country: string; date: string; time: string;
+  };
+  const [basketballResults, setBasketballResults] = useState<BasketballResult[]>([]);
   const [resultsOpen, setResultsOpen] = useState(true);
 
   type VolleyResult = {
@@ -1158,6 +1167,10 @@ export default function Home() {
     fetch("/api/matches/tennis-odds")
       .then(r => r.ok ? r.json() : null)
       .then(d => { if (d?.odds) setTennisOddsMatches(d.odds); })
+      .catch(() => { /* non-critical */ });
+    fetch("/api/matches/basketball-results")
+      .then(r => r.ok ? r.json() : { results: [] })
+      .then(d => setBasketballResults(d.results ?? []))
       .catch(() => { /* non-critical */ });
     fetch("/api/matches/hockey-results")
       .then(r => r.ok ? r.json() : { results: [] })
@@ -3347,6 +3360,21 @@ export default function Home() {
                             </button>
                           ))}
                         </>
+                      ) : expandedMatch.sport === "basketball" ? (
+                        <>
+                          {(expandedMatch.isLive
+                            ? (["stats", "yesterday", "live"] as const)
+                            : (["stats", "yesterday"] as const)
+                          ).map(tab => (
+                            <button
+                              key={tab}
+                              onClick={() => setMatchViewTab(tab)}
+                              className={`flex-1 py-2 text-xs font-bold transition-colors whitespace-nowrap px-2 ${matchViewTab === tab ? (tab === "live" ? "text-red-400 border-b-2 border-red-500" : "text-blue-400 border-b-2 border-blue-500") : "text-zinc-500 hover:text-white"}`}
+                            >
+                              {tab === "stats" ? "Estatísticas" : tab === "yesterday" ? "📅 Ontem" : "⚡ Ao Vivo"}
+                            </button>
+                          ))}
+                        </>
                       ) : (
                         (expandedMatch.isLive
                           ? (["stats", "standings", "live"] as const)
@@ -3524,6 +3552,45 @@ export default function Home() {
                   </div>
                 )}
 
+                {/* Yesterday results panel (basketball) */}
+                {matchViewTab === "yesterday" && expandedMatch.sport === "basketball" && (
+                  <div className="bg-zinc-900 rounded-xl border border-zinc-800 p-3 mb-2 animate-in fade-in duration-200">
+                    <div className="text-[10px] font-black text-red-500 uppercase tracking-widest mb-3">🏀 Resultados NBA — Ontem</div>
+                    {basketballResults.length === 0 ? (
+                      <div className="text-center text-zinc-500 py-6 text-sm">Sem resultados disponíveis.</div>
+                    ) : (
+                      <div className="space-y-2">
+                        {basketballResults.map(r => {
+                          const QLABELS = ["Q1", "Q2", "Q3", "Q4", "OT"];
+                          return (
+                            <div key={r.id} className="bg-zinc-950/60 border border-zinc-800 rounded-lg overflow-hidden">
+                              <div className="grid text-[9px] font-bold text-zinc-600 px-3 py-1 border-b border-zinc-800/60" style={{ gridTemplateColumns: `1fr repeat(${r.quarters.length + 1}, 2.5rem)` }}>
+                                <div />
+                                {r.quarters.map((_: [number, number], i: number) => <div key={i} className="text-center">{QLABELS[i] ?? `Q${i+1}`}</div>)}
+                                <div className="text-center">TOT</div>
+                              </div>
+                              {[{ name: r.home, score: r.homeScore, won: r.homeWon, qi: 0 }, { name: r.away, score: r.awayScore, won: !r.homeWon, qi: 1 }].map((side, idx) => (
+                                <div key={idx} className={`grid px-3 py-1.5 ${idx === 0 ? "border-b border-zinc-800/40" : ""}`} style={{ gridTemplateColumns: `1fr repeat(${r.quarters.length + 1}, 2.5rem)` }}>
+                                  <div className="flex items-center gap-1.5 min-w-0">
+                                    {side.won && <span className="text-[8px] text-green-400 font-black shrink-0">✓</span>}
+                                    <span className={`text-[11px] font-bold truncate ${side.won ? "text-white" : "text-zinc-500"}`}>{side.name.split(" ").slice(-1)[0]}</span>
+                                  </div>
+                                  {r.quarters.map(([h, a]: [number, number], i: number) => {
+                                    const val = side.qi === 0 ? h : a;
+                                    const opp = side.qi === 0 ? a : h;
+                                    return <div key={i} className={`text-center text-[10px] font-black tabular-nums ${val > opp ? "text-white" : "text-zinc-600"}`}>{val}</div>;
+                                  })}
+                                  <div className={`text-center text-[11px] font-black tabular-nums ${side.won ? "text-white" : "text-zinc-500"}`}>{side.score}</div>
+                                </div>
+                              ))}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                )}
+
                 {/* Yesterday results panel (hockey) */}
                 {matchViewTab === "yesterday" && expandedMatch.sport === "hockey" && (
                   <div className="bg-zinc-900 rounded-xl border border-zinc-800 p-3 mb-2 animate-in fade-in duration-200">
@@ -3589,7 +3656,7 @@ export default function Home() {
                 )}
 
                 {/* Yesterday results panel (tennis) */}
-                {matchViewTab === "yesterday" && expandedMatch.sport !== "hockey" && (
+                {matchViewTab === "yesterday" && expandedMatch.sport === "tennis" && (
                   <div className="bg-zinc-900 rounded-xl border border-zinc-800 p-4 mb-2 animate-in fade-in duration-200">
                     <div className="text-[10px] font-black text-red-500 uppercase tracking-widest mb-3">🎾 Resultados de Ontem</div>
                     {recentResults.length === 0 ? (

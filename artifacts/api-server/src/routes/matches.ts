@@ -917,6 +917,16 @@ type HockeyDailyResult = {
 let hockeyResultsCache: HockeyDailyResult[] | null = null;
 let hockeyResultsFetchedAt = 0;
 
+type BasketballDailyResult = {
+  id: string; home: string; away: string;
+  homeScore: number; awayScore: number;
+  quarters: Array<[number, number]>; // Q1, Q2, Q3, Q4, [OT]
+  homeWon: boolean;
+  league: string; country: string; date: string; time: string;
+};
+let basketballResultsCache: BasketballDailyResult[] | null = null;
+let basketballResultsFetchedAt = 0;
+
 // NHL standings
 type NHLStandingsTeam = {
   id: string; name: string; abbr: string; position: number;
@@ -3410,6 +3420,59 @@ async function getHockeyDailyResults(): Promise<HockeyDailyResult[]> {
   }
 }
 
+async function getBasketballDailyResults(): Promise<BasketballDailyResult[]> {
+  const now = Date.now();
+  if (basketballResultsCache && now - basketballResultsFetchedAt < RESULTS_CACHE_TTL) return basketballResultsCache;
+  try {
+    const resp = await fetch(`${BASE_V1}/nba/daily/d-1?access_key=${STATSPAL_KEY}`, { signal: AbortSignal.timeout(9000) });
+    if (!resp.ok) return basketballResultsCache ?? [];
+    const data = (await resp.json()) as { scores?: { tournament?: unknown } };
+    const raw = data?.scores?.tournament;
+    if (!raw) return basketballResultsCache ?? [];
+    const arr = Array.isArray(raw) ? raw : [raw];
+    const results: BasketballDailyResult[] = [];
+    for (const t of arr as Array<{ id: string; league: string; country: string; match: unknown }>) {
+      const matches = Array.isArray(t.match) ? t.match : (t.match ? [t.match] : []);
+      for (const m of matches as Array<{
+        id: string; status: string; date: string; time: string;
+        home: { id: string; name: string; ot?: string; q1?: string; q2?: string; q3?: string; q4?: string; totalscore: string };
+        away: { id: string; name: string; ot?: string; q1?: string; q2?: string; q3?: string; q4?: string; totalscore: string };
+      }>) {
+        if (!m?.status || m.status !== "Finished") continue;
+        if (!m.home?.name || !m.away?.name) continue;
+        const qi = (h: string | undefined, a: string | undefined): [number, number] | null => {
+          const hv = parseInt(h ?? "") || 0; const av = parseInt(a ?? "") || 0;
+          return (hv > 0 || av > 0) ? [hv, av] : null;
+        };
+        const quarters: Array<[number, number]> = [];
+        for (const [hf, af] of [
+          [m.home.q1, m.away.q1], [m.home.q2, m.away.q2],
+          [m.home.q3, m.away.q3], [m.home.q4, m.away.q4],
+          [m.home.ot, m.away.ot],
+        ] as [string | undefined, string | undefined][]) {
+          const q = qi(hf, af);
+          if (q) quarters.push(q);
+        }
+        const homeScore = parseInt(m.home.totalscore) || 0;
+        const awayScore = parseInt(m.away.totalscore) || 0;
+        const leagueName = t.league.includes("Nba") || t.league.includes("NBA") ? "NBA" : t.league;
+        results.push({
+          id: m.id, home: m.home.name, away: m.away.name,
+          homeScore, awayScore, quarters,
+          homeWon: homeScore > awayScore,
+          league: leagueName, country: t.country ?? "",
+          date: m.date, time: m.time,
+        });
+      }
+    }
+    basketballResultsCache = results;
+    basketballResultsFetchedAt = now;
+    return results;
+  } catch {
+    return basketballResultsCache ?? [];
+  }
+}
+
 async function getHockeySchedule(): Promise<HockeyScheduleData> {
   const now = Date.now();
   if (hockeyScheduleCache && now - hockeyScheduleFetchedAt < HOCKEY_SCHEDULE_TTL) return hockeyScheduleCache;
@@ -3695,6 +3758,15 @@ router.get("/volleyball-results", async (_req, res) => {
 router.get("/hockey-results", async (_req, res) => {
   try {
     const results = await getHockeyDailyResults();
+    res.json({ results });
+  } catch {
+    res.status(500).json({ error: "Resultados indisponíveis" });
+  }
+});
+
+router.get("/basketball-results", async (_req, res) => {
+  try {
+    const results = await getBasketballDailyResults();
     res.json({ results });
   } catch {
     res.status(500).json({ error: "Resultados indisponíveis" });
