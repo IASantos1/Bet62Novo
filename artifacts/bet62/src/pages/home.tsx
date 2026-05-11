@@ -926,6 +926,8 @@ export default function Home() {
 
   // Match detail view tab: "markets" | "stats" | "standings" | "live"
   const [matchViewTab, setMatchViewTab] = useState<"markets" | "stats" | "standings" | "live" | "yesterday" | "ranking">("markets");
+  // Market sub-tab — lifted here so live refreshes don't unmount MatchModalMarkets and reset the selection
+  const [modalTab, setModalTab] = useState("todos");
   const [matchStats, setMatchStats] = useState<MatchStatsData | null>(null);
   const [matchStatsLoading, setMatchStatsLoading] = useState(false);
   const [standings, setStandings] = useState<StandingRow[] | null>(null);
@@ -964,6 +966,7 @@ export default function Home() {
   // Reset match view state when expanded match changes
   useEffect(() => {
     setMatchViewTab("markets");
+    setModalTab("todos");
     setMatchStats(null);
     setStandings(null);
     setStandingsLeague("");
@@ -1561,9 +1564,6 @@ export default function Home() {
         >
           <img src={bannerImg} alt="" className="absolute inset-0 w-full h-full object-cover opacity-60" />
           <div className="absolute inset-0 bg-gradient-to-t from-black via-black/50 to-black/10" />
-          <div className="absolute top-0 left-0 right-0 h-0.5 bg-white/10 overflow-hidden">
-            <motion.div className="h-full bg-gradient-to-r from-red-600 to-red-400" initial={{ width: 0 }} animate={{ width: `${progress}%` }} transition={{ duration: 1 }} />
-          </div>
           <div className="absolute top-0 left-0 right-0 flex items-center justify-between px-4 pt-3">
             <div className="flex items-center gap-2">
               <div className="relative w-5 h-5 flex items-center justify-center leading-none text-sm">
@@ -1603,9 +1603,6 @@ export default function Home() {
         onClick={() => setExpandedMatch(match)}
       >
         <CompactLeagueRow match={match} rightSlot={liveBadge} />
-        <div className="w-full h-0.5 bg-zinc-800 overflow-hidden">
-          <motion.div className="h-full bg-gradient-to-r from-red-600 to-red-400" initial={{ width: 0 }} animate={{ width: `${progress}%` }} transition={{ duration: 1 }} />
-        </div>
         <div className="px-3 py-2.5" onClick={e => e.stopPropagation()}>
           {sport === "tennis"     ? <TennisScore /> :
            sport === "volleyball" ? <VolleyScore /> :
@@ -2104,8 +2101,6 @@ export default function Home() {
                 { key: "asiatico", label: "Asiático" },
               ];
 
-    const defaultTab = tabs[0]!.key;
-    const [modalTab, setModalTab] = useState(defaultTab);
     const m = match.markets;
 
     if (!match.hasRealOdds) {
