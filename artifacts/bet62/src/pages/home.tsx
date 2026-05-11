@@ -879,6 +879,20 @@ export default function Home() {
     ppGoals: number; ppPct: number;
     penKillPct: number; faceoffPct: number; penaltyMinutes: number;
   };
+  type BasketballScheduleMatch = {
+    id: string; date: string; time: string; status: string; venue?: string;
+    home: string; away: string;
+    homeScore: number; awayScore: number;
+    quarters: Array<[number, number]>;
+    homeWon?: boolean;
+  };
+  type BasketballScheduleData = {
+    league: string; season: string;
+    upcomingMatches: BasketballScheduleMatch[];
+    recentMatches: BasketballScheduleMatch[];
+  };
+  const [basketballSchedule, setBasketballSchedule] = useState<BasketballScheduleData | null>(null);
+
   type HockeyScheduleMatch = {
     id: string; date: string; time: string; status: string; venue?: string;
     home: string; away: string;
@@ -1167,6 +1181,10 @@ export default function Home() {
     fetch("/api/matches/tennis-odds")
       .then(r => r.ok ? r.json() : null)
       .then(d => { if (d?.odds) setTennisOddsMatches(d.odds); })
+      .catch(() => { /* non-critical */ });
+    fetch("/api/matches/basketball-schedule")
+      .then(r => r.ok ? r.json() : null)
+      .then(d => { if (d) setBasketballSchedule(d); })
       .catch(() => { /* non-critical */ });
     fetch("/api/matches/basketball-results")
       .then(r => r.ok ? r.json() : { results: [] })
@@ -4478,6 +4496,59 @@ export default function Home() {
                       )}
                     </div>
                   )}
+
+                  {/* ─── Calendário NBA — Próximos Jogos ───────────────────── */}
+                  {(selectedSport === "all" || selectedSport === "basketball") && (basketballSchedule?.upcomingMatches.length ?? 0) > 0 && !selectedLeague && (() => {
+                    const upcoming = basketballSchedule!.upcomingMatches;
+                    const today = new Date(); today.setHours(0, 0, 0, 0);
+                    const tomorrow = new Date(today); tomorrow.setDate(tomorrow.getDate() + 1);
+                    const fmtDate = (s: string) => {
+                      const [d, m, y] = s.split(".");
+                      const dt = new Date(parseInt(y!), parseInt(m!) - 1, parseInt(d!));
+                      if (dt.getTime() === today.getTime()) return "Hoje";
+                      if (dt.getTime() === tomorrow.getTime()) return "Amanhã";
+                      return dt.toLocaleDateString("pt-PT", { day: "2-digit", month: "short" });
+                    };
+                    const byDate = upcoming.reduce<Record<string, typeof upcoming>>((acc, m) => {
+                      (acc[m.date] ??= []).push(m); return acc;
+                    }, {});
+                    return (
+                      <div className="mb-6">
+                        <div className="flex items-center gap-2 mb-3">
+                          <span className="text-base font-black italic uppercase tracking-tight text-zinc-400">📅 Calendário NBA</span>
+                          <span className="text-[10px] font-semibold text-zinc-600 normal-case italic hidden sm:block">— {basketballSchedule!.season}</span>
+                          <span className="text-[10px] font-bold bg-zinc-800 text-zinc-500 rounded px-1.5 py-0.5">{upcoming.length}</span>
+                        </div>
+                        <div className="space-y-3">
+                          {Object.entries(byDate).slice(0, 7).map(([date, games]) => (
+                            <div key={date}>
+                              <div className="text-[10px] font-black text-zinc-500 uppercase tracking-widest mb-1.5 flex items-center gap-2">
+                                <span>{fmtDate(date)}</span>
+                                <span className="flex-1 h-px bg-zinc-800" />
+                                <span>{date.split(".").slice(0,2).join("/")}</span>
+                              </div>
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-1">
+                                {games.map(g => (
+                                  <div key={g.id} className="bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 hover:border-zinc-700 transition-colors">
+                                    <div className="flex items-center gap-2">
+                                      <div className="flex-1 min-w-0">
+                                        <div className="text-xs font-bold text-zinc-300 truncate">🏀 {g.home}</div>
+                                        <div className="text-xs text-zinc-600 truncate">{g.away}</div>
+                                      </div>
+                                      <div className="text-right shrink-0">
+                                        <div className="text-[10px] font-black text-zinc-400 tabular-nums">{g.time.slice(0,5)}</div>
+                                        {g.venue && <div className="text-[9px] text-zinc-700 truncate max-w-[80px]">{g.venue.split(" ").slice(0,2).join(" ")}</div>}
+                                      </div>
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  })()}
 
                   {/* ─── Calendário NHL — Próximos Jogos ───────────────────── */}
                   {(selectedSport === "all" || selectedSport === "hockey") && (hockeySchedule?.upcomingMatches.length ?? 0) > 0 && !selectedLeague && (() => {

@@ -906,6 +906,22 @@ let hockeyScheduleCache: HockeyScheduleData | null = null;
 let hockeyScheduleFetchedAt = 0;
 const HOCKEY_SCHEDULE_TTL = 30 * 60 * 1000;
 
+type BasketballScheduleMatch = {
+  id: string; date: string; time: string; status: string; venue?: string;
+  home: string; away: string;
+  homeScore: number; awayScore: number;
+  quarters: Array<[number, number]>;
+  homeWon?: boolean;
+};
+type BasketballScheduleData = {
+  league: string; season: string;
+  upcomingMatches: BasketballScheduleMatch[];
+  recentMatches: BasketballScheduleMatch[];
+};
+let basketballScheduleCache: BasketballScheduleData | null = null;
+let basketballScheduleFetchedAt = 0;
+const BBALL_SCHEDULE_TTL = 30 * 60 * 1000;
+
 // NHL yesterday results
 type HockeyDailyResult = {
   id: string; home: string; away: string;
@@ -3420,6 +3436,83 @@ async function getHockeyDailyResults(): Promise<HockeyDailyResult[]> {
   }
 }
 
+async function getBasketballSchedule(): Promise<BasketballScheduleData> {
+  const now = Date.now();
+  if (basketballScheduleCache && now - basketballScheduleFetchedAt < BBALL_SCHEDULE_TTL) return basketballScheduleCache;
+  try {
+    const resp = await fetch(`${BASE_V1}/nba/season-schedule?access_key=${STATSPAL_KEY}`, { signal: AbortSignal.timeout(12000) });
+    if (!resp.ok) return basketballScheduleCache ?? { league: "NBA", season: "", upcomingMatches: [], recentMatches: [] };
+    const data = (await resp.json()) as { scores?: { tournament?: { league?: string; season?: string; match: unknown } } };
+    const t = data?.scores?.tournament;
+    if (!t) return basketballScheduleCache ?? { league: "NBA", season: "", upcomingMatches: [], recentMatches: [] };
+
+    const league = t.league ?? "NBA";
+    const season = t.season ?? "";
+    const rawMatches = Array.isArray(t.match) ? t.match : (t.match ? [t.match] : []);
+
+    const parseDateStr = (s: string): Date => {
+      const [d, m, y] = s.split(".");
+      return new Date(parseInt(y!), parseInt(m!) - 1, parseInt(d!));
+    };
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    const inDays = (d: Date, n: number) => { const t2 = new Date(today); t2.setDate(t2.getDate() + n); return d <= t2; };
+
+    const FINISHED = new Set(["Finished", "After Over Time", "After Overtime", "After OT", "Awarded"]);
+    const upcomingMatches: BasketballScheduleMatch[] = [];
+    const recentMatches: BasketballScheduleMatch[] = [];
+
+    for (const m of rawMatches as Array<{
+      id: string; date: string; time: string; status: string; venue?: string;
+      home: { name: string; ot?: string; q1?: string; q2?: string; q3?: string; q4?: string; totalscore: string };
+      away: { name: string; ot?: string; q1?: string; q2?: string; q3?: string; q4?: string; totalscore: string };
+    }>) {
+      if (!m?.date || !m.home?.name || !m.away?.name) continue;
+      const matchDate = parseDateStr(m.date);
+      const homeScore = parseInt(m.home.totalscore) || 0;
+      const awayScore = parseInt(m.away.totalscore) || 0;
+
+      const qi = (h: string | undefined, a: string | undefined): [number, number] | null => {
+        const hv = parseInt(h ?? "") || 0; const av = parseInt(a ?? "") || 0;
+        return (hv > 0 || av > 0) ? [hv, av] : null;
+      };
+      const quarters: Array<[number, number]> = [];
+      for (const [hf, af] of [
+        [m.home.q1, m.away.q1], [m.home.q2, m.away.q2],
+        [m.home.q3, m.away.q3], [m.home.q4, m.away.q4],
+        [m.home.ot, m.away.ot],
+      ] as [string | undefined, string | undefined][]) {
+        const q = qi(hf, af); if (q) quarters.push(q);
+      }
+
+      if (m.status === "Not Started" && matchDate >= today && inDays(matchDate, 21)) {
+        upcomingMatches.push({
+          id: m.id, date: m.date, time: m.time, status: m.status, venue: m.venue,
+          home: m.home.name, away: m.away.name, homeScore: 0, awayScore: 0, quarters: [],
+        });
+      } else if (FINISHED.has(m.status)) {
+        const daysAgo = (today.getTime() - matchDate.getTime()) / 86400000;
+        if (daysAgo <= 14 && daysAgo >= 0) {
+          recentMatches.push({
+            id: m.id, date: m.date, time: m.time, status: m.status, venue: m.venue,
+            home: m.home.name, away: m.away.name, homeScore, awayScore, quarters,
+            homeWon: homeScore > awayScore,
+          });
+        }
+      }
+    }
+
+    const dateKey = (s: string) => { const [d, mo, y] = s.split("."); return `${y}${mo}${d}`; };
+    upcomingMatches.sort((a, b) => dateKey(a.date).localeCompare(dateKey(b.date)) || a.time.localeCompare(b.time));
+    recentMatches.sort((a, b) => dateKey(b.date).localeCompare(dateKey(a.date)));
+
+    basketballScheduleCache = { league, season, upcomingMatches: upcomingMatches.slice(0, 40), recentMatches: recentMatches.slice(0, 15) };
+    basketballScheduleFetchedAt = now;
+    return basketballScheduleCache;
+  } catch {
+    return basketballScheduleCache ?? { league: "NBA", season: "", upcomingMatches: [], recentMatches: [] };
+  }
+}
+
 async function getBasketballDailyResults(): Promise<BasketballDailyResult[]> {
   const now = Date.now();
   if (basketballResultsCache && now - basketballResultsFetchedAt < RESULTS_CACHE_TTL) return basketballResultsCache;
@@ -3770,6 +3863,15 @@ router.get("/basketball-results", async (_req, res) => {
     res.json({ results });
   } catch {
     res.status(500).json({ error: "Resultados indisponíveis" });
+  }
+});
+
+router.get("/basketball-schedule", async (_req, res) => {
+  try {
+    const data = await getBasketballSchedule();
+    res.json(data);
+  } catch {
+    res.status(500).json({ error: "Calendário indisponível" });
   }
 });
 
