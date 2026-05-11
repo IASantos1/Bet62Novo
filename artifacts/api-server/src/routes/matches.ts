@@ -4748,6 +4748,11 @@ export type NBAOddsEntry = {
   matchId: string; date: string; time: string;
   homeTeam: { id: string; name: string }; awayTeam: { id: string; name: string };
   homeOdds: number; awayOdds: number;
+  halfOdds?: { home: number; away: number };
+  q1Odds?: { home: number; away: number };
+  q2Odds?: { home: number; away: number };
+  q3Odds?: { home: number; away: number };
+  q4Odds?: { home: number; away: number };
 };
 let nbaOddsCache: NBAOddsEntry[] | null = null;
 let nbaOddsFetchedAt = 0;
@@ -4763,7 +4768,7 @@ async function getBasketballOdds(): Promise<NBAOddsEntry[]> {
   if (!rawMatches) return [];
   const matches = Array.isArray(rawMatches) ? rawMatches : [rawMatches];
 
-  const avgOdd = (bks: NBAOddsBk[], name: "Home" | "Away"): number => {
+  const avgOdd = (bks: NBAOddsBk[], name: string): number => {
     const vals: number[] = [];
     for (const bk of bks) {
       if (bk.stop === "True") continue;
@@ -4775,6 +4780,13 @@ async function getBasketballOdds(): Promise<NBAOddsEntry[]> {
     if (!vals.length) return 0;
     const avg = vals.reduce((a, b) => a + b, 0) / vals.length;
     return Math.max(1.01, Math.round(avg * 0.975 * 100) / 100);
+  };
+  const getHA = (types: NBAOddsType[], typeValue: string): { home: number; away: number } | undefined => {
+    const t = types.find(tp => tp.value === typeValue);
+    if (!t) return undefined;
+    const bks = (Array.isArray(t.bookmaker) ? t.bookmaker : t.bookmaker ? [t.bookmaker] : []) as NBAOddsBk[];
+    const h = avgOdd(bks, "Home"); const a = avgOdd(bks, "Away");
+    return (h && a) ? { home: h, away: a } : undefined;
   };
 
   const results: NBAOddsEntry[] = [];
@@ -4796,6 +4808,11 @@ async function getBasketballOdds(): Promise<NBAOddsEntry[]> {
       homeTeam: { id: m.home?.id ?? "", name: m.home?.name ?? "" },
       awayTeam: { id: m.away?.id ?? "", name: m.away?.name ?? "" },
       homeOdds: h, awayOdds: a,
+      halfOdds: getHA(types, "Home/Away - 1st Half"),
+      q1Odds: getHA(types, "Home/Away - 1st Qtr"),
+      q2Odds: getHA(types, "Home/Away - 2nd Qtr"),
+      q3Odds: getHA(types, "Home/Away - 3rd Qtr"),
+      q4Odds: getHA(types, "Home/Away - 4th Qtr"),
     });
   }
   const fresh = results.filter(r => !isMatchTimePast(r.date, r.time));
@@ -4826,6 +4843,11 @@ export type HockeyOddsEntry = {
   matchId: string; date: string; time: string;
   homeTeam: { id: string; name: string }; awayTeam: { id: string; name: string };
   homeOdds: number; drawOdds: number; awayOdds: number;
+  btts?: { yes: number; no: number };
+  doubleChance?: { homeOrDraw: number; homeOrAway: number; drawOrAway: number };
+  p1Odds?: { home: number; draw: number; away: number };
+  p2Odds?: { home: number; draw: number; away: number };
+  p3Odds?: { home: number; draw: number; away: number };
 };
 let hockeyOddsCache: HockeyOddsEntry[] | null = null;
 let hockeyOddsFetchedAt = 0;
@@ -4841,7 +4863,7 @@ async function getHockeyOdds(): Promise<HockeyOddsEntry[]> {
   if (!rawMatches) return [];
   const matches = Array.isArray(rawMatches) ? rawMatches : [rawMatches];
 
-  const avgOdd = (bks: HockeyOddsBk[], name: "Home" | "Draw" | "Away"): number => {
+  const avgOdd = (bks: HockeyOddsBk[], name: string): number => {
     const vals: number[] = [];
     for (const bk of bks) {
       if (bk.stop === "True") continue;
@@ -4853,6 +4875,16 @@ async function getHockeyOdds(): Promise<HockeyOddsEntry[]> {
     if (!vals.length) return 0;
     const avg = vals.reduce((a, b) => a + b, 0) / vals.length;
     return Math.max(1.01, Math.round(avg * 0.975 * 100) / 100);
+  };
+  const getBks = (types: HockeyOddsType[], typeValue: string): HockeyOddsBk[] => {
+    const t = types.find(tp => tp.value === typeValue);
+    if (!t) return [];
+    return (Array.isArray(t.bookmaker) ? t.bookmaker : t.bookmaker ? [t.bookmaker] : []) as HockeyOddsBk[];
+  };
+  const getHDA = (types: HockeyOddsType[], typeValue: string): { home: number; draw: number; away: number } | undefined => {
+    const bks = getBks(types, typeValue);
+    const h = avgOdd(bks, "Home"); const d = avgOdd(bks, "Draw"); const a = avgOdd(bks, "Away");
+    return (h && a) ? { home: h, draw: d || 0, away: a } : undefined;
   };
 
   const results: HockeyOddsEntry[] = [];
@@ -4870,11 +4902,23 @@ async function getHockeyOdds(): Promise<HockeyOddsEntry[]> {
     const d = avgOdd(bks, "Draw");
     const a = avgOdd(bks, "Away");
     if (!h || !a) continue;
+    // BTTS
+    const bttsBks = getBks(types, "Both Teams To Score");
+    const bttsYes = avgOdd(bttsBks, "Yes"); const bttsNo = avgOdd(bttsBks, "No");
+    const btts = (bttsYes && bttsNo) ? { yes: bttsYes, no: bttsNo } : undefined;
+    // Double Chance
+    const dcBks = getBks(types, "Double Chance");
+    const dcHD = avgOdd(dcBks, "Home/Draw"); const dcHA = avgOdd(dcBks, "Home/Away"); const dcDA = avgOdd(dcBks, "Draw/Away");
+    const doubleChance = (dcHD && dcHA && dcDA) ? { homeOrDraw: dcHD, homeOrAway: dcHA, drawOrAway: dcDA } : undefined;
     results.push({
       matchId: m.id, date: m.date ?? "", time: m.time ?? "",
       homeTeam: { id: m.home?.id ?? "", name: m.home?.name ?? "" },
       awayTeam: { id: m.away?.id ?? "", name: m.away?.name ?? "" },
       homeOdds: h, drawOdds: d || 0, awayOdds: a,
+      btts, doubleChance,
+      p1Odds: getHDA(types, "1x2 (1st Period)"),
+      p2Odds: getHDA(types, "3Way Result (2st Period)"),
+      p3Odds: getHDA(types, "3Way Result 3rdPeriod)"),
     });
   }
   const fresh = results.filter(r => !isMatchTimePast(r.date, r.time));
@@ -4985,5 +5029,6 @@ router.get("/standings", async (req, res) => {
     res.status(500).json({ error: "Classificação indisponível" });
   }
 });
+
 
 export default router;

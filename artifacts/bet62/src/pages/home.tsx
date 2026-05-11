@@ -1037,6 +1037,11 @@ export default function Home() {
     matchId: string; date: string; time: string;
     homeTeam: { id: string; name: string }; awayTeam: { id: string; name: string };
     homeOdds: number; drawOdds: number; awayOdds: number;
+    btts?: { yes: number; no: number };
+    doubleChance?: { homeOrDraw: number; homeOrAway: number; drawOrAway: number };
+    p1Odds?: { home: number; draw: number; away: number };
+    p2Odds?: { home: number; draw: number; away: number };
+    p3Odds?: { home: number; draw: number; away: number };
   };
   const [hockeyOddsMatches, setHockeyOddsMatches] = useState<HockeyOddsEntry[]>([]);
 
@@ -1044,6 +1049,11 @@ export default function Home() {
     matchId: string; date: string; time: string;
     homeTeam: { id: string; name: string }; awayTeam: { id: string; name: string };
     homeOdds: number; awayOdds: number;
+    halfOdds?: { home: number; away: number };
+    q1Odds?: { home: number; away: number };
+    q2Odds?: { home: number; away: number };
+    q3Odds?: { home: number; away: number };
+    q4Odds?: { home: number; away: number };
   };
   const [basketballOddsMatches, setBasketballOddsMatches] = useState<NBAOddsEntry[]>([]);
 
@@ -2909,9 +2919,15 @@ export default function Home() {
         )}
 
         {/* ── BASQUETE: QUARTOS ── */}
-        {isBasketball && (modalTab === "quartos" || modalTab === "todos") && m && (m as any).basketballExtra && (
+        {isBasketball && (modalTab === "quartos" || modalTab === "todos") && m && (
           <div>
-            {(["q1","q2","q3","q4"] as const).map((q, qi) => {
+            {m.halfTime.home > 0 && (
+              <MarketGroup title="Vencedor — 1ª Metade">
+                <MarketOddsBtn match={match} sel="h1-home" odd={m.halfTime.home} market="quartos" label={match.home} />
+                <MarketOddsBtn match={match} sel="h1-away" odd={m.halfTime.away} market="quartos" label={match.away} />
+              </MarketGroup>
+            )}
+            {(m as any).basketballExtra && (["q1","q2","q3","q4"] as const).map((q, qi) => {
               const ex = (m as any).basketballExtra as any;
               const labels = ["1º Quarto","2º Quarto","3º Quarto","4º Quarto"];
               return ex[q].home > 0 ? (
@@ -3012,25 +3028,36 @@ export default function Home() {
         )}
 
         {/* ── HÓQUEI: ESPECIAIS ── */}
-        {isHockey && (modalTab === "especiais" || modalTab === "todos") && m && (m as any).hockeyExtra && (
+        {isHockey && (modalTab === "especiais" || modalTab === "todos") && m && (
           <div>
-            {((m as any).hockeyExtra as any).period1Total.over > 0 && (
-              <MarketGroup title={`Total 1º Período — O/U ${((m as any).hockeyExtra as any).period1Total.line}`}>
-                <MarketOddsBtn match={match} sel="p1t-o" odd={((m as any).hockeyExtra as any).period1Total.over} market="especiais" label={`Mais de ${((m as any).hockeyExtra as any).period1Total.line}`} />
-                <MarketOddsBtn match={match} sel="p1t-u" odd={((m as any).hockeyExtra as any).period1Total.under} market="especiais" label={`Menos de ${((m as any).hockeyExtra as any).period1Total.line}`} />
+            {m.doubleChance.homeOrDraw > 0 && (
+              <MarketGroup title="Dupla Hipótese">
+                <MarketOddsBtn match={match} sel="dc-hd" odd={m.doubleChance.homeOrDraw} market="especiais" label={`${match.home} ou Emp.`} />
+                <MarketOddsBtn match={match} sel="dc-ha" odd={m.doubleChance.homeOrAway} market="especiais" label="1 ou 2" />
+                <MarketOddsBtn match={match} sel="dc-da" odd={m.doubleChance.awayOrDraw} market="especiais" label={`${match.away} ou Emp.`} />
               </MarketGroup>
             )}
-            {((m as any).hockeyExtra as any).bothTeamsScoreGame.yes > 0 && (
+            {m.bothTeamsScore.yes > 0 && (
               <MarketGroup title="Ambas as Equipas Marcam">
-                <MarketOddsBtn match={match} sel="bts-yes" odd={((m as any).hockeyExtra as any).bothTeamsScoreGame.yes} market="especiais" label="Sim" />
-                <MarketOddsBtn match={match} sel="bts-no" odd={((m as any).hockeyExtra as any).bothTeamsScoreGame.no} market="especiais" label="Não" />
+                <MarketOddsBtn match={match} sel="bts-yes" odd={m.bothTeamsScore.yes} market="especiais" label="Sim" />
+                <MarketOddsBtn match={match} sel="bts-no" odd={m.bothTeamsScore.no} market="especiais" label="Não" />
               </MarketGroup>
             )}
-            {((m as any).hockeyExtra as any).shotsOnGoal.over > 0 && (
-              <MarketGroup title={`Remates à Baliza — O/U ${((m as any).hockeyExtra as any).shotsOnGoal.line.toFixed(1)}`}>
-                <MarketOddsBtn match={match} sel="sog-o" odd={((m as any).hockeyExtra as any).shotsOnGoal.over} market="especiais" label={`Mais de ${((m as any).hockeyExtra as any).shotsOnGoal.line.toFixed(1)}`} />
-                <MarketOddsBtn match={match} sel="sog-u" odd={((m as any).hockeyExtra as any).shotsOnGoal.under} market="especiais" label={`Menos de ${((m as any).hockeyExtra as any).shotsOnGoal.line.toFixed(1)}`} />
-              </MarketGroup>
+            {(m as any).hockeyExtra && (
+              <>
+                {((m as any).hockeyExtra as any).period1Total.over > 0 && (
+                  <MarketGroup title={`Total 1º Período — O/U ${((m as any).hockeyExtra as any).period1Total.line}`}>
+                    <MarketOddsBtn match={match} sel="p1t-o" odd={((m as any).hockeyExtra as any).period1Total.over} market="especiais" label={`Mais de ${((m as any).hockeyExtra as any).period1Total.line}`} />
+                    <MarketOddsBtn match={match} sel="p1t-u" odd={((m as any).hockeyExtra as any).period1Total.under} market="especiais" label={`Menos de ${((m as any).hockeyExtra as any).period1Total.line}`} />
+                  </MarketGroup>
+                )}
+                {((m as any).hockeyExtra as any).shotsOnGoal.over > 0 && (
+                  <MarketGroup title={`Remates à Baliza — O/U ${((m as any).hockeyExtra as any).shotsOnGoal.line.toFixed(1)}`}>
+                    <MarketOddsBtn match={match} sel="sog-o" odd={((m as any).hockeyExtra as any).shotsOnGoal.over} market="especiais" label={`Mais de ${((m as any).hockeyExtra as any).shotsOnGoal.line.toFixed(1)}`} />
+                    <MarketOddsBtn match={match} sel="sog-u" odd={((m as any).hockeyExtra as any).shotsOnGoal.under} market="especiais" label={`Menos de ${((m as any).hockeyExtra as any).shotsOnGoal.line.toFixed(1)}`} />
+                  </MarketGroup>
+                )}
+              </>
             )}
           </div>
         )}
@@ -4336,47 +4363,53 @@ export default function Home() {
                   })
                 : [];
 
-              // Convert real NBA schedule → Match objects (with odds when available)
-              const _normT = (n: string) => n.toLowerCase().replace(/[^a-z0-9]/g, "");
+              // Convert real NBA odds → Match objects with all available markets
               const basketballAsMatches: Match[] = (!selectedLeague && (selectedSport === "all" || selectedSport === "basketball"))
-                ? (basketballSchedule?.upcomingMatches ?? []).map(g => {
-                    const gh = _normT(g.home); const ga = _normT(g.away);
-                    const o = basketballOddsMatches.find(o => {
-                      const oh = _normT(o.homeTeam.name); const oa = _normT(o.awayTeam.name);
-                      return (gh === oh && ga === oa) || (gh === oa && ga === oh);
-                    });
-                    const flipped = o && _normT(o.homeTeam.name) !== gh;
-                    const odds = o
-                      ? { home: flipped ? o.awayOdds : o.homeOdds, draw: 0, away: flipped ? o.homeOdds : o.awayOdds }
-                      : { home: 0, draw: 0, away: 0 };
+                ? basketballOddsMatches.map(o => {
+                    const mkt = _emptyMkt();
+                    if (o.halfOdds) mkt.halfTime = { home: o.halfOdds.home, draw: 0, away: o.halfOdds.away };
+                    (mkt as any).basketballExtra = {
+                      q1: o.q1Odds ?? { home: 0, draw: 0, away: 0 },
+                      q2: o.q2Odds ?? { home: 0, draw: 0, away: 0 },
+                      q3: o.q3Odds ?? { home: 0, draw: 0, away: 0 },
+                      q4: o.q4Odds ?? { home: 0, draw: 0, away: 0 },
+                      teamTotalHome: { over: 0, under: 0, line: 0 },
+                      teamTotalAway: { over: 0, under: 0, line: 0 },
+                    };
                     return {
-                      id: `nba-sched-${g.id}`,
-                      home: g.home, away: g.away,
+                      id: `nba-odds-${o.matchId}`,
+                      home: o.homeTeam.name, away: o.awayTeam.name,
                       league: "NBA", country: "USA",
-                      time: g.time.slice(0, 5), date: g.date,
-                      sport: "basketball", hasRealOdds: !!o, odds,
+                      time: o.time, date: o.date,
+                      sport: "basketball", hasRealOdds: true,
+                      odds: { home: o.homeOdds, draw: 0, away: o.awayOdds },
+                      markets: mkt,
                     } as Match;
                   })
                 : [];
 
-              // Convert real NHL schedule → Match objects (with odds when available)
+              // Convert real NHL odds → Match objects with all available markets
               const hockeyAsMatches: Match[] = (!selectedLeague && (selectedSport === "all" || selectedSport === "hockey"))
-                ? (hockeySchedule?.upcomingMatches ?? []).map(g => {
-                    const gh = _normT(g.home); const ga = _normT(g.away);
-                    const o = hockeyOddsMatches.find(o => {
-                      const oh = _normT(o.homeTeam.name); const oa = _normT(o.awayTeam.name);
-                      return (gh === oh && ga === oa) || (gh === oa && ga === oh);
-                    });
-                    const flipped = o && _normT(o.homeTeam.name) !== gh;
-                    const odds = o
-                      ? { home: flipped ? o.awayOdds : o.homeOdds, draw: o.drawOdds ?? 0, away: flipped ? o.homeOdds : o.awayOdds }
-                      : { home: 0, draw: 0, away: 0 };
+                ? hockeyOddsMatches.map(o => {
+                    const mkt = _emptyMkt();
+                    if (o.p1Odds) mkt.halfTime = { home: o.p1Odds.home, draw: o.p1Odds.draw, away: o.p1Odds.away };
+                    if (o.btts) mkt.bothTeamsScore = { yes: o.btts.yes, no: o.btts.no };
+                    if (o.doubleChance) mkt.doubleChance = { homeOrDraw: o.doubleChance.homeOrDraw, awayOrDraw: o.doubleChance.drawOrAway, homeOrAway: o.doubleChance.homeOrAway };
+                    (mkt as any).hockeyExtra = {
+                      period1Total: { over: 0, under: 0, line: 0 },
+                      bothTeamsScoreGame: { yes: o.btts?.yes ?? 0, no: o.btts?.no ?? 0 },
+                      shotsOnGoal: { over: 0, under: 0, line: 0 },
+                      period2: o.p2Odds ?? { home: 0, draw: 0, away: 0 },
+                      period3: o.p3Odds ?? { home: 0, draw: 0, away: 0 },
+                    };
                     return {
-                      id: `nhl-sched-${g.id}`,
-                      home: g.home, away: g.away,
+                      id: `nhl-odds-${o.matchId}`,
+                      home: o.homeTeam.name, away: o.awayTeam.name,
                       league: "NHL", country: "USA",
-                      time: g.time.slice(0, 5), date: g.date,
-                      sport: "hockey", hasRealOdds: !!o, odds,
+                      time: o.time, date: o.date,
+                      sport: "hockey", hasRealOdds: true,
+                      odds: { home: o.homeOdds, draw: o.drawOdds ?? 0, away: o.awayOdds },
+                      markets: mkt,
                     } as Match;
                   })
                 : [];
@@ -5179,7 +5212,7 @@ export default function Home() {
                   )}
 
                   {/* ─── Calendário NBA — Próximos Jogos ───────────────────── */}
-                  {(selectedSport === "all" || selectedSport === "basketball") && (basketballSchedule?.upcomingMatches.length ?? 0) > 0 && !selectedLeague && (() => {
+                  {false && (selectedSport === "all" || selectedSport === "basketball") && (basketballSchedule?.upcomingMatches.length ?? 0) > 0 && !selectedLeague && (() => {
                     const upcoming = basketballSchedule!.upcomingMatches;
                     const today = new Date(); today.setHours(0, 0, 0, 0);
                     const tomorrow = new Date(today); tomorrow.setDate(tomorrow.getDate() + 1);
@@ -5262,7 +5295,7 @@ export default function Home() {
                   })()}
 
                   {/* ─── Calendário NHL — Próximos Jogos ───────────────────── */}
-                  {(selectedSport === "all" || selectedSport === "hockey") && (hockeySchedule?.upcomingMatches.length ?? 0) > 0 && !selectedLeague && (() => {
+                  {false && (selectedSport === "all" || selectedSport === "hockey") && (hockeySchedule?.upcomingMatches.length ?? 0) > 0 && !selectedLeague && (() => {
                     const upcoming = hockeySchedule!.upcomingMatches;
                     const today = new Date(); today.setHours(0, 0, 0, 0);
                     const tomorrow = new Date(today); tomorrow.setDate(tomorrow.getDate() + 1);
