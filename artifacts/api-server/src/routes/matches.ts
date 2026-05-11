@@ -957,6 +957,19 @@ let hockeyStandingsCache: NHLStandingsData | null = null;
 let hockeyStandingsFetchedAt = 0;
 const HOCKEY_STANDINGS_TTL = 30 * 60 * 1000;
 
+type NBAStandingsTeam = {
+  id: string; name: string; position: number;
+  won: number; lost: number; pct: string; gb: string;
+  streak: string; lastTen: string; homeRecord: string; roadRecord: string;
+  ppg: string; papg: string; diff: string;
+};
+type NBAStandingsDivision = { name: string; teams: NBAStandingsTeam[] };
+type NBAStandingsConference = { name: string; divisions: NBAStandingsDivision[] };
+type NBAStandingsData = { season: string; conferences: NBAStandingsConference[] };
+let nbaStandingsCache: NBAStandingsData | null = null;
+let nbaStandingsFetchedAt = 0;
+const NBA_STANDINGS_TTL = 30 * 60 * 1000;
+
 // NHL rosters
 // Abbreviations as accepted by the Statpal roster endpoint (empirically verified)
 const NHL_ABBR: Record<string, string> = {
@@ -3953,6 +3966,80 @@ async function getHockeyStandings(): Promise<NHLStandingsData> {
 router.get("/hockey-standings", async (_req, res) => {
   try {
     const data = await getHockeyStandings();
+    res.json(data);
+  } catch {
+    res.status(500).json({ error: "Classificação indisponível" });
+  }
+});
+
+async function getNBAStandings(): Promise<NBAStandingsData> {
+  const now = Date.now();
+  if (nbaStandingsCache && now - nbaStandingsFetchedAt < NBA_STANDINGS_TTL) return nbaStandingsCache;
+  try {
+    const resp = await fetch(`${BASE_V1}/nba/standings?access_key=${STATSPAL_KEY}`);
+    if (!resp.ok) return nbaStandingsCache ?? { season: "", conferences: [] };
+    const json = (await resp.json()) as {
+      standings?: {
+        tournament?: {
+          season?: string;
+          league?: Array<{
+            name: string;
+            division?: Array<{
+              name: string;
+              team?: Array<{
+                id: string; name: string; position: string;
+                won: string; lost: string; percentage: string; gb: string;
+                streak: string; last_10: string;
+                home_record: string; road_record: string;
+                average_points_for: string; average_points_agains: string;
+                difference: string;
+              }>;
+            }>;
+          }>;
+        };
+      };
+    };
+    const t = json.standings?.tournament;
+    if (!t) return nbaStandingsCache ?? { season: "", conferences: [] };
+    const season = t.season ?? "";
+    const leagues = Array.isArray(t.league) ? t.league : t.league ? [t.league] : [];
+    const conferences: NBAStandingsConference[] = leagues.map(conf => {
+      const divs = Array.isArray(conf.division) ? conf.division : conf.division ? [conf.division] : [];
+      const divisions: NBAStandingsDivision[] = divs.map(div => {
+        const teams = Array.isArray(div.team) ? div.team : div.team ? [div.team] : [];
+        return {
+          name: div.name,
+          teams: teams.map(t2 => ({
+            id: t2.id,
+            name: t2.name,
+            position: parseInt(t2.position) || 0,
+            won: parseInt(t2.won) || 0,
+            lost: parseInt(t2.lost) || 0,
+            pct: t2.percentage ?? ".000",
+            gb: t2.gb ?? "-",
+            streak: t2.streak ?? "",
+            lastTen: t2.last_10 ?? "",
+            homeRecord: t2.home_record ?? "",
+            roadRecord: t2.road_record ?? "",
+            ppg: parseFloat(t2.average_points_for || "0").toFixed(1),
+            papg: parseFloat(t2.average_points_agains || "0").toFixed(1),
+            diff: t2.difference ?? "0",
+          })).sort((a, b) => a.position - b.position),
+        };
+      });
+      return { name: conf.name, divisions };
+    });
+    nbaStandingsCache = { season, conferences };
+    nbaStandingsFetchedAt = now;
+    return nbaStandingsCache;
+  } catch {
+    return nbaStandingsCache ?? { season: "", conferences: [] };
+  }
+}
+
+router.get("/basketball-standings", async (_req, res) => {
+  try {
+    const data = await getNBAStandings();
     res.json(data);
   } catch {
     res.status(500).json({ error: "Classificação indisponível" });

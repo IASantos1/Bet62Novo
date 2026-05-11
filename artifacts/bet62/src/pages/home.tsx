@@ -893,6 +893,17 @@ export default function Home() {
   };
   const [basketballSchedule, setBasketballSchedule] = useState<BasketballScheduleData | null>(null);
 
+  type NBAStandingsTeam = {
+    id: string; name: string; position: number;
+    won: number; lost: number; pct: string; gb: string;
+    streak: string; lastTen: string; homeRecord: string; roadRecord: string;
+    ppg: string; papg: string; diff: string;
+  };
+  type NBAStandingsDivision = { name: string; teams: NBAStandingsTeam[] };
+  type NBAStandingsConference = { name: string; divisions: NBAStandingsDivision[] };
+  type NBAStandingsData = { season: string; conferences: NBAStandingsConference[] };
+  const [basketballStandings, setBasketballStandings] = useState<NBAStandingsData | null>(null);
+
   type HockeyScheduleMatch = {
     id: string; date: string; time: string; status: string; venue?: string;
     home: string; away: string;
@@ -1197,6 +1208,10 @@ export default function Home() {
     fetch("/api/matches/hockey-schedule")
       .then(r => r.ok ? r.json() : null)
       .then(d => { if (d) setHockeySchedule(d); })
+      .catch(() => { /* non-critical */ });
+    fetch("/api/matches/basketball-standings")
+      .then(r => r.ok ? r.json() : null)
+      .then(d => { if (d) setBasketballStandings(d); })
       .catch(() => { /* non-critical */ });
     fetch("/api/matches/hockey-standings")
       .then(r => r.ok ? r.json() : null)
@@ -3381,15 +3396,15 @@ export default function Home() {
                       ) : expandedMatch.sport === "basketball" ? (
                         <>
                           {(expandedMatch.isLive
-                            ? (["stats", "yesterday", "live"] as const)
-                            : (["stats", "yesterday"] as const)
+                            ? (["stats", "standings", "yesterday", "live"] as const)
+                            : (["stats", "standings", "yesterday"] as const)
                           ).map(tab => (
                             <button
                               key={tab}
                               onClick={() => setMatchViewTab(tab)}
                               className={`flex-1 py-2 text-xs font-bold transition-colors whitespace-nowrap px-2 ${matchViewTab === tab ? (tab === "live" ? "text-red-400 border-b-2 border-red-500" : "text-blue-400 border-b-2 border-blue-500") : "text-zinc-500 hover:text-white"}`}
                             >
-                              {tab === "stats" ? "Estatísticas" : tab === "yesterday" ? "📅 Ontem" : "⚡ Ao Vivo"}
+                              {tab === "stats" ? "Estatísticas" : tab === "standings" ? "🏆 Classificação" : tab === "yesterday" ? "📅 Ontem" : "⚡ Ao Vivo"}
                             </button>
                           ))}
                         </>
@@ -3565,6 +3580,70 @@ export default function Home() {
                             </tbody>
                           </table>
                         </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Standings panel (basketball) */}
+                {matchViewTab === "standings" && expandedMatch.sport === "basketball" && (
+                  <div className="bg-zinc-900 rounded-xl border border-zinc-800 p-3 mb-2 animate-in fade-in duration-200">
+                    <div className="flex items-center gap-2 mb-3">
+                      <span className="text-[10px] font-black text-red-500 uppercase tracking-widest">🏆 Classificação NBA</span>
+                      {basketballStandings && <span className="text-[9px] text-zinc-600">— {basketballStandings.season}</span>}
+                    </div>
+                    {!basketballStandings ? (
+                      <div className="text-center text-zinc-500 py-4 text-sm animate-pulse">A carregar...</div>
+                    ) : (
+                      <div className="space-y-4">
+                        {basketballStandings.conferences.map(conf => (
+                          <div key={conf.name}>
+                            <div className="text-[9px] font-black text-zinc-500 uppercase tracking-widest mb-2">{conf.name}</div>
+                            <div className="space-y-2">
+                              {conf.divisions.map(div => (
+                                <div key={div.name} className="bg-zinc-950/60 border border-zinc-800 rounded-lg overflow-hidden">
+                                  <div className="bg-zinc-800/50 px-2.5 py-1 text-[8px] font-black text-zinc-500 uppercase tracking-wider">{div.name}</div>
+                                  <div className="overflow-x-auto">
+                                    <table className="w-full text-[10px] font-mono tabular-nums">
+                                      <thead>
+                                        <tr className="border-b border-zinc-800 text-[8px] font-black text-zinc-600 uppercase">
+                                          <th className="text-left py-1 px-2 w-4">#</th>
+                                          <th className="text-left py-1 px-2 min-w-[110px]">Equipa</th>
+                                          <th className="py-1 px-1 text-center text-green-500">V</th>
+                                          <th className="py-1 px-1 text-center text-red-400">D</th>
+                                          <th className="py-1 px-1 text-center font-black text-white">PCT</th>
+                                          <th className="py-1 px-1 text-center hidden sm:table-cell">GB</th>
+                                          <th className="py-1 px-1 text-center hidden sm:table-cell">PPG</th>
+                                          <th className="py-1 px-1 text-center hidden sm:table-cell">PAPG</th>
+                                          <th className="py-1 px-1 text-center hidden sm:table-cell">SÉRIE</th>
+                                          <th className="py-1 px-1 text-center">ÚLT10</th>
+                                        </tr>
+                                      </thead>
+                                      <tbody>
+                                        {div.teams.map((team, idx) => (
+                                          <tr key={team.id} className={`border-b border-zinc-800/40 last:border-0 ${idx < 6 ? "" : "opacity-60"}`}>
+                                            <td className="py-1.5 px-2 text-zinc-600 text-[9px] font-black">{team.position}</td>
+                                            <td className="py-1.5 px-2">
+                                              <span className={`text-[10px] font-bold truncate ${idx < 6 ? "text-zinc-200" : "text-zinc-500"}`}>{team.name.split(" ").slice(-1)[0]}</span>
+                                            </td>
+                                            <td className="py-1.5 px-1 text-center text-green-400 font-bold">{team.won}</td>
+                                            <td className="py-1.5 px-1 text-center text-red-400 font-bold">{team.lost}</td>
+                                            <td className="py-1.5 px-1 text-center text-white font-black">{team.pct}</td>
+                                            <td className="py-1.5 px-1 text-center text-zinc-500 hidden sm:table-cell">{team.gb}</td>
+                                            <td className="py-1.5 px-1 text-center text-zinc-400 hidden sm:table-cell">{team.ppg}</td>
+                                            <td className="py-1.5 px-1 text-center text-zinc-600 hidden sm:table-cell">{team.papg}</td>
+                                            <td className={`py-1.5 px-1 text-center text-[9px] font-black hidden sm:table-cell ${team.streak.startsWith("W") ? "text-green-400" : "text-red-400"}`}>{team.streak}</td>
+                                            <td className="py-1.5 px-1 text-center text-zinc-500 text-[9px]">{team.lastTen}</td>
+                                          </tr>
+                                        ))}
+                                      </tbody>
+                                    </table>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        ))}
                       </div>
                     )}
                   </div>
