@@ -6124,4 +6124,97 @@ router.get("/football-h2h", async (req, res) => {
   }
 });
 
+// ─── Football Injuries & Suspensions ──────────────────────────────────────────
+
+type FootballInjuryPlayerRaw = { id: string; name: string; status: string };
+type FootballInjurySidelinedRaw = {
+  to_miss?:    { player: FootballInjuryPlayerRaw | FootballInjuryPlayerRaw[] };
+  questionable?: { player: FootballInjuryPlayerRaw | FootballInjuryPlayerRaw[] };
+};
+type FootballInjuryTeamRaw = {
+  id: string; name: string;
+  sidelined?: FootballInjurySidelinedRaw;
+};
+type FootballInjuryMatchRaw = {
+  main_id: string; fallback_id_1?: string; fallback_id_2?: string; fallback_id_3?: string;
+  date: string; time: string;
+  home: FootballInjuryTeamRaw;
+  away: FootballInjuryTeamRaw;
+};
+type FootballInjuryLeagueRaw = {
+  id: string; name: string; sub_id?: string;
+  match: FootballInjuryMatchRaw | FootballInjuryMatchRaw[];
+};
+type FootballInjuriesRaw = {
+  injuries_suspensions?: {
+    updated?: string;
+    updated_ts?: number;
+    league: FootballInjuryLeagueRaw | FootballInjuryLeagueRaw[];
+  };
+};
+
+type FootballInjuryPlayer = { id: string; name: string; status: string };
+type FootballInjuryTeam = {
+  id: string; name: string;
+  toMiss: FootballInjuryPlayer[];
+  questionable: FootballInjuryPlayer[];
+};
+type FootballInjuryMatch = {
+  id: string; date: string; time: string;
+  home: FootballInjuryTeam;
+  away: FootballInjuryTeam;
+};
+type FootballInjuryLeague = {
+  id: string; name: string;
+  matches: FootballInjuryMatch[];
+};
+
+let footballInjuriesCache: FootballInjuryLeague[] | null = null;
+let footballInjuriesFetchedAt = 0;
+const FOOTBALL_INJURIES_TTL = 15 * 60 * 1000; // 15 min
+
+function parseInjuryPlayers(raw: FootballInjuryPlayerRaw | FootballInjuryPlayerRaw[] | undefined): FootballInjuryPlayer[] {
+  if (!raw) return [];
+  return (Array.isArray(raw) ? raw : [raw]).map(p => ({ id: p.id, name: p.name, status: p.status }));
+}
+
+function parseInjuryTeam(t: FootballInjuryTeamRaw): FootballInjuryTeam {
+  return {
+    id: t.id, name: t.name,
+    toMiss:      parseInjuryPlayers(t.sidelined?.to_miss?.player),
+    questionable: parseInjuryPlayers(t.sidelined?.questionable?.player),
+  };
+}
+
+async function getFootballInjuries(): Promise<FootballInjuryLeague[]> {
+  const now = Date.now();
+  if (footballInjuriesCache && now - footballInjuriesFetchedAt < FOOTBALL_INJURIES_TTL) return footballInjuriesCache;
+  const resp = await fetch(`${BASE_V2}/soccer/injuries-suspensions?access_key=${STATSPAL_KEY}`, { signal: AbortSignal.timeout(10000) });
+  if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+  const data = (await resp.json()) as FootballInjuriesRaw;
+  const rawLeagues = data?.injuries_suspensions?.league;
+  if (!rawLeagues) { footballInjuriesCache = []; footballInjuriesFetchedAt = now; return []; }
+  const leagues: FootballInjuryLeagueRaw[] = Array.isArray(rawLeagues) ? rawLeagues : [rawLeagues];
+  const out: FootballInjuryLeague[] = leagues.map(l => {
+    const rawMatches = l.match;
+    const matches: FootballInjuryMatchRaw[] = !rawMatches ? [] : Array.isArray(rawMatches) ? rawMatches : [rawMatches];
+    return {
+      id: l.id, name: l.name,
+      matches: matches.map(m => ({ id: m.main_id, date: m.date, time: m.time, home: parseInjuryTeam(m.home), away: parseInjuryTeam(m.away) })),
+    };
+  });
+  footballInjuriesCache = out;
+  footballInjuriesFetchedAt = now;
+  return out;
+}
+
+router.get("/football-injuries", async (_req, res) => {
+  try {
+    const leagues = await getFootballInjuries();
+    res.json({ leagues });
+  } catch {
+    res.status(500).json({ error: "Lesões de futebol indisponíveis" });
+  }
+});
+
 export default router;
