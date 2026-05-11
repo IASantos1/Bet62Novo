@@ -873,6 +873,17 @@ type VolleyDailyResult = {
 let volleyResultsCache: VolleyDailyResult[] | null = null;
 let volleyResultsFetchedAt = 0;
 
+// NHL yesterday results
+type HockeyDailyResult = {
+  id: string; home: string; away: string;
+  homeScore: number; awayScore: number;
+  periods: Array<[number, number]>; // P1, P2, P3, [OT], [SO]
+  homeWon: boolean;
+  league: string; country: string; date: string; time: string;
+};
+let hockeyResultsCache: HockeyDailyResult[] | null = null;
+let hockeyResultsFetchedAt = 0;
+
 // Volleyball season schedule
 type VolleyScheduleMatch = {
   id: string; status: string; date: string; time: string;
@@ -3174,6 +3185,64 @@ async function getTennisDailyResults(): Promise<TennisDailyResult[]> {
   }
 }
 
+async function getHockeyDailyResults(): Promise<HockeyDailyResult[]> {
+  const now = Date.now();
+  if (hockeyResultsCache && now - hockeyResultsFetchedAt < RESULTS_CACHE_TTL) return hockeyResultsCache;
+  try {
+    const resp = await fetch(`${BASE_V1}/nhl/daily/d-1?access_key=${STATSPAL_KEY}`, { signal: AbortSignal.timeout(9000) });
+    if (!resp.ok) return hockeyResultsCache ?? [];
+    const data = (await resp.json()) as { scores?: { tournament?: unknown } };
+    const raw = data?.scores?.tournament;
+    if (!raw) return hockeyResultsCache ?? [];
+    // tournament is a single object for NHL (not an array)
+    const arr = Array.isArray(raw) ? raw : [raw];
+    const results: HockeyDailyResult[] = [];
+    for (const t of arr as Array<{ id: string; league: string; country: string; match: unknown }>) {
+      const matches = Array.isArray(t.match) ? t.match : (t.match ? [t.match] : []);
+      for (const m of matches as Array<{
+        id: string; status: string; date: string; time: string;
+        home: { id: string; name: string; totalscore: string };
+        away: { id: string; name: string; totalscore: string };
+        events?: {
+          firstperiod?:  { score?: string };
+          secondperiod?: { score?: string };
+          thirdperiod?:  { score?: string };
+          overtime?:     { score?: string };
+          penalties?:    { score?: string };
+        };
+      }>) {
+        if (!m?.status || m.status !== "Finished") continue;
+        if (!m.home?.name || !m.away?.name) continue;
+        const parseScore = (s: string | undefined): [number, number] | null => {
+          if (!s || s.trim() === "") return null;
+          const parts = s.split("-").map(p => parseInt(p.trim()) || 0);
+          if (parts.length < 2) return null;
+          return [parts[0]!, parts[1]!];
+        };
+        const periods: Array<[number, number]> = [];
+        for (const key of ["firstperiod", "secondperiod", "thirdperiod", "overtime", "penalties"] as const) {
+          const p = parseScore(m.events?.[key]?.score);
+          if (p) periods.push(p);
+        }
+        const homeScore = parseInt(m.home.totalscore) || 0;
+        const awayScore = parseInt(m.away.totalscore) || 0;
+        results.push({
+          id: m.id, home: m.home.name, away: m.away.name,
+          homeScore, awayScore, periods,
+          homeWon: homeScore > awayScore,
+          league: t.league, country: t.country ?? "",
+          date: m.date, time: m.time,
+        });
+      }
+    }
+    hockeyResultsCache = results;
+    hockeyResultsFetchedAt = now;
+    return results;
+  } catch {
+    return hockeyResultsCache ?? [];
+  }
+}
+
 // ─── Tournament detail cache ──────────────────────────────────────────────────
 type TournamentMatchPlayer = {
   id: string; name: string;
@@ -3343,6 +3412,15 @@ router.get("/results", async (_req, res) => {
 router.get("/volleyball-results", async (_req, res) => {
   try {
     const results = await getVolleyballDailyResults();
+    res.json({ results });
+  } catch {
+    res.status(500).json({ error: "Resultados indisponíveis" });
+  }
+});
+
+router.get("/hockey-results", async (_req, res) => {
+  try {
+    const results = await getHockeyDailyResults();
     res.json({ results });
   } catch {
     res.status(500).json({ error: "Resultados indisponíveis" });
