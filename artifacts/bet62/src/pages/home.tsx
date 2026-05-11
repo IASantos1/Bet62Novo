@@ -3523,96 +3523,68 @@ export default function Home() {
                 )}
 
                 {/* Yesterday results panel (hockey) */}
-                {matchViewTab === "yesterday" && expandedMatch.sport === "hockey" && (() => {
-                  const allResults = [
-                    ...(hockeySchedule?.recentMatches ?? []),
-                    ...hockeyResults.map(r => ({ ...r, teamStats: undefined as undefined })),
-                  ];
-                  // deduplicate by home+away
-                  const seen = new Set<string>();
-                  const deduped = allResults.filter(r => {
-                    const k = `${r.home}|${r.away}`;
-                    if (seen.has(k)) return false;
-                    seen.add(k); return true;
-                  });
-                  const PERIOD_LABELS = ["P1", "P2", "P3", "OT", "SO"];
-                  const StatBar = ({ label, home, away, pct }: { label: string; home: string | number; away: string | number; pct?: boolean }) => {
-                    const h = parseFloat(String(home)) || 0;
-                    const a = parseFloat(String(away)) || 0;
-                    const total = h + a || 1;
-                    const hPct = Math.round((h / total) * 100);
-                    return (
-                      <div className="space-y-0.5">
-                        <div className="flex justify-between text-[9px] font-bold text-zinc-400">
-                          <span>{pct ? `${h}%` : h}</span>
-                          <span className="text-zinc-600 font-normal">{label}</span>
-                          <span>{pct ? `${a}%` : a}</span>
-                        </div>
-                        <div className="flex h-1 rounded-full overflow-hidden bg-zinc-800">
-                          <div className="bg-blue-500 rounded-full" style={{ width: `${hPct}%` }} />
-                          <div className="flex-1 bg-red-500/60 rounded-full" />
+                {matchViewTab === "yesterday" && expandedMatch.sport === "hockey" && (
+                  <div className="bg-zinc-900 rounded-xl border border-zinc-800 p-3 mb-2 animate-in fade-in duration-200">
+                    <div className="flex items-center gap-2 mb-3">
+                      <span className="text-[10px] font-black text-red-500 uppercase tracking-widest">🏆 Classificação NHL</span>
+                      {hockeyStandings && <span className="text-[9px] text-zinc-600">— {hockeyStandings.season}</span>}
+                    </div>
+                    {!hockeyStandings ? (
+                      <div className="text-center text-zinc-500 py-4 text-sm animate-pulse">A carregar...</div>
+                    ) : (
+                      <div className="space-y-4">
+                        {hockeyStandings.conferences.map(conf => (
+                          <div key={conf.name}>
+                            <div className="text-[9px] font-black text-zinc-500 uppercase tracking-widest mb-2">{conf.name}</div>
+                            <div className="space-y-2">
+                              {conf.divisions.map(div => (
+                                <div key={div.name} className="bg-zinc-950/60 border border-zinc-800 rounded-lg overflow-hidden">
+                                  <div className="bg-zinc-800/50 px-2.5 py-1 text-[8px] font-black text-zinc-500 uppercase tracking-wider">{div.name}</div>
+                                  <div className="overflow-x-auto">
+                                    <table className="w-full text-[10px] font-mono tabular-nums">
+                                      <thead>
+                                        <tr className="border-b border-zinc-800 text-[8px] font-black text-zinc-600 uppercase">
+                                          <th className="text-left py-1 px-2 w-4">#</th>
+                                          <th className="text-left py-1 px-2 min-w-[100px]">Equipa</th>
+                                          <th className="py-1 px-1 text-center">PJ</th>
+                                          <th className="py-1 px-1 text-center text-green-500">V</th>
+                                          <th className="py-1 px-1 text-center text-red-400">D</th>
+                                          <th className="py-1 px-1 text-center">DO</th>
+                                          <th className="py-1 px-1 text-center font-black text-white">PTS</th>
+                                          <th className="py-1 px-1 text-center hidden sm:table-cell">DIF</th>
+                                          <th className="py-1 px-1 text-center hidden sm:table-cell">SÉRIE</th>
+                                        </tr>
+                                      </thead>
+                                      <tbody>
+                                        {div.teams.map((team, idx) => (
+                                          <tr key={team.id} className={`border-b border-zinc-800/30 ${idx < 3 ? "border-l-2 border-l-green-600/40" : idx === 3 ? "border-l-2 border-l-yellow-500/40" : ""}`}>
+                                            <td className="py-1 px-2 text-zinc-600">{team.position}</td>
+                                            <td className="py-1 px-2 font-semibold text-zinc-200 truncate max-w-[100px]">{team.name}</td>
+                                            <td className="py-1 px-1 text-center text-zinc-500">{team.gp}</td>
+                                            <td className="py-1 px-1 text-center text-green-400">{team.won}</td>
+                                            <td className="py-1 px-1 text-center text-red-400">{team.lost}</td>
+                                            <td className="py-1 px-1 text-center text-zinc-500">{team.otLosses}</td>
+                                            <td className="py-1 px-1 text-center font-black text-white">{team.points}</td>
+                                            <td className={`py-1 px-1 text-center hidden sm:table-cell font-bold ${team.diff.startsWith("+") ? "text-green-400" : team.diff.startsWith("-") ? "text-red-400" : "text-zinc-500"}`}>{team.diff}</td>
+                                            <td className={`py-1 px-1 text-center hidden sm:table-cell font-black ${team.streak.startsWith("W") ? "text-green-400" : team.streak.startsWith("L") ? "text-red-400" : "text-zinc-400"}`}>{team.streak}</td>
+                                          </tr>
+                                        ))}
+                                      </tbody>
+                                    </table>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        ))}
+                        <div className="flex gap-3 text-[8px] text-zinc-700 px-1">
+                          <span className="flex items-center gap-1"><span className="w-2 h-2 border-l-2 border-green-600/60 inline-block" />Playoff</span>
+                          <span className="flex items-center gap-1"><span className="w-2 h-2 border-l-2 border-yellow-500/60 inline-block" />Wild Card</span>
                         </div>
                       </div>
-                    );
-                  };
-                  return (
-                    <div className="bg-zinc-900 rounded-xl border border-zinc-800 p-4 mb-2 animate-in fade-in duration-200">
-                      <div className="text-[10px] font-black text-red-500 uppercase tracking-widest mb-3">🏒 Resultados Recentes — NHL</div>
-                      {deduped.length === 0 ? (
-                        <div className="text-center text-zinc-500 py-6 text-sm">Sem resultados disponíveis.</div>
-                      ) : (
-                        <div className="space-y-3">
-                          {deduped.map(r => (
-                            <div key={r.id} className="bg-zinc-950/60 border border-zinc-800 rounded-lg px-3 py-2.5 space-y-2">
-                              {/* Score row */}
-                              <div className="flex items-center gap-2 font-mono tabular-nums">
-                                <div className="flex-1 min-w-0 space-y-0.5">
-                                  {[{ name: r.home, won: r.homeWon, score: r.homeScore }, { name: r.away, won: !r.homeWon, score: r.awayScore }].map((team, ti) => (
-                                    <div key={ti} className="flex items-center gap-1.5">
-                                      <span className={`w-3 h-3 rounded-full flex items-center justify-center shrink-0 ${team.won ? "bg-green-600/20" : ""}`}>
-                                        {team.won && <span className="text-[8px] text-green-400 font-black">✓</span>}
-                                      </span>
-                                      <span className={`text-xs font-bold truncate ${team.won ? "text-white" : "text-zinc-500"}`}>{team.name}</span>
-                                    </div>
-                                  ))}
-                                </div>
-                                <div className="flex items-stretch gap-0.5 shrink-0">
-                                  {r.periods.map(([h, a]: [number, number], i: number) => (
-                                    <div key={i} className="flex flex-col items-center min-w-[1.25rem]">
-                                      <div className="text-[8px] text-zinc-600 font-bold leading-tight mb-0.5">{PERIOD_LABELS[i] ?? `P${i+1}`}</div>
-                                      <div className={`text-[11px] font-black leading-tight ${h > a ? "text-white" : "text-zinc-600"}`}>{h}</div>
-                                      <div className={`text-[11px] font-black leading-tight ${a > h ? "text-zinc-400" : "text-zinc-600"}`}>{a}</div>
-                                    </div>
-                                  ))}
-                                  <div className="flex flex-col items-center min-w-[1.5rem] border-l border-zinc-700 pl-1">
-                                    <div className="text-[8px] text-zinc-500 font-black leading-tight mb-0.5">TOT</div>
-                                    <div className={`text-[11px] font-black leading-tight ${r.homeWon ? "text-white" : "text-zinc-500"}`}>{r.homeScore}</div>
-                                    <div className={`text-[11px] font-black leading-tight ${!r.homeWon ? "text-zinc-400" : "text-zinc-500"}`}>{r.awayScore}</div>
-                                  </div>
-                                </div>
-                              </div>
-                              {/* Team stats if available */}
-                              {r.teamStats && (
-                                <div className="border-t border-zinc-800 pt-2 space-y-1.5">
-                                  <div className="flex justify-between text-[9px] font-black text-zinc-600 uppercase tracking-wide mb-1">
-                                    <span>{r.home.split(" ").slice(-1)[0]}</span>
-                                    <span>Estatísticas</span>
-                                    <span>{r.away.split(" ").slice(-1)[0]}</span>
-                                  </div>
-                                  <StatBar label="Remates" home={r.teamStats.home.shotsOnGoal} away={r.teamStats.away.shotsOnGoal} />
-                                  <StatBar label="Saves %" home={r.teamStats.home.savesPct} away={r.teamStats.away.savesPct} pct />
-                                  <StatBar label="PP Goals" home={r.teamStats.home.ppGoals} away={r.teamStats.away.ppGoals} />
-                                  <StatBar label="PP %" home={r.teamStats.home.ppPct} away={r.teamStats.away.ppPct} pct />
-                                  <StatBar label="Faceoffs %" home={r.teamStats.home.faceoffPct} away={r.teamStats.away.faceoffPct} pct />
-                                </div>
-                              )}
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  );
-                })()}
+                    )}
+                  </div>
+                )}
 
                 {/* Yesterday results panel (tennis) */}
                 {matchViewTab === "yesterday" && expandedMatch.sport !== "hockey" && (
@@ -4493,343 +4465,6 @@ export default function Home() {
                     );
                   })()}
 
-                  {/* ─── Classificação NHL ────────────────────────────────────── */}
-                  {(selectedSport === "all" || selectedSport === "hockey") && hockeyStandings && hockeyStandings.conferences.length > 0 && !selectedLeague && (() => {
-                    const streakColor = (s: string) => s.startsWith("W") ? "text-green-400" : s.startsWith("L") ? "text-red-400" : "text-zinc-400";
-                    const openTeamPanel = (abbr: string, tab: "roster" | "stats" | "injuries") => {
-                      if (selectedRosterAbbr === abbr && rosterPanelTab === tab) { setSelectedRosterAbbr(null); return; }
-                      setSelectedRosterAbbr(abbr);
-                      setRosterPanelTab(tab);
-                      if (tab === "stats" && !hockeyTeamStats[abbr]) {
-                        setTeamStatsLoading(true);
-                        fetch(`/api/matches/hockey-team-stats/${abbr}`)
-                          .then(r => r.ok ? r.json() : null)
-                          .then(d => { if (d) setHockeyTeamStats(prev => ({ ...prev, [abbr]: d })); })
-                          .catch(() => {})
-                          .finally(() => setTeamStatsLoading(false));
-                      }
-                      if (tab === "injuries" && !hockeyInjuries[abbr]) {
-                        setInjuriesLoading(true);
-                        fetch(`/api/matches/hockey-injuries/${abbr}`)
-                          .then(r => r.ok ? r.json() : null)
-                          .then(d => { if (d) setHockeyInjuries(prev => ({ ...prev, [abbr]: d })); })
-                          .catch(() => {})
-                          .finally(() => setInjuriesLoading(false));
-                      }
-                      if (tab === "roster" && !hockeyRosters[abbr]) {
-                        setRosterLoading(true);
-                        fetch(`/api/matches/hockey-roster/${abbr}`)
-                          .then(r => r.ok ? r.json() : null)
-                          .then(d => { if (d) setHockeyRosters(prev => ({ ...prev, [abbr]: d })); })
-                          .catch(() => {})
-                          .finally(() => setRosterLoading(false));
-                      }
-                    };
-                    const handleTeamClick = (abbr: string) => {
-                      if (selectedRosterAbbr === abbr) { setSelectedRosterAbbr(null); return; }
-                      setSelectedRosterAbbr(abbr);
-                      setRosterPanelTab("roster");
-                      if (hockeyRosters[abbr]) return;
-                      setRosterLoading(true);
-                      fetch(`/api/matches/hockey-roster/${abbr}`)
-                        .then(r => r.ok ? r.json() : null)
-                        .then(d => { if (d) setHockeyRosters(prev => ({ ...prev, [abbr]: d })); })
-                        .catch(() => {})
-                        .finally(() => setRosterLoading(false));
-                    };
-                    const activeRoster = selectedRosterAbbr ? hockeyRosters[selectedRosterAbbr] : null;
-                    const POS_ICON: Record<string, string> = {
-                      "Centers": "C", "Left Wings": "LW", "Right Wings": "RW",
-                      "Defensemen": "D", "Goaltenders": "G",
-                    };
-                    return (
-                      <div className="mb-6">
-                        <div className="flex items-center gap-2 mb-3">
-                          <span className="text-base font-black italic uppercase tracking-tight text-zinc-400">🏆 Classificação NHL</span>
-                          <span className="text-[10px] font-semibold text-zinc-600 normal-case italic hidden sm:block">— {hockeyStandings.season}</span>
-                        </div>
-                        <div className="space-y-4">
-                          {hockeyStandings.conferences.map(conf => (
-                            <div key={conf.name}>
-                              <div className="text-[10px] font-black text-red-500 uppercase tracking-widest mb-2">{conf.name}</div>
-                              <div className="space-y-3">
-                                {conf.divisions.map(div => (
-                                  <div key={div.name} className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden">
-                                    <div className="bg-zinc-800/60 px-3 py-1.5 text-[9px] font-black text-zinc-500 uppercase tracking-widest">{div.name}</div>
-                                    <div className="overflow-x-auto">
-                                      <table className="w-full text-[11px] font-mono tabular-nums">
-                                        <thead>
-                                          <tr className="border-b border-zinc-800 text-[9px] font-black text-zinc-600 uppercase">
-                                            <th className="text-left py-1.5 px-2 w-5">#</th>
-                                            <th className="text-left py-1.5 px-2 min-w-[120px]">Equipa</th>
-                                            <th className="py-1.5 px-1 text-center">PJ</th>
-                                            <th className="py-1.5 px-1 text-center">V</th>
-                                            <th className="py-1.5 px-1 text-center">D</th>
-                                            <th className="py-1.5 px-1 text-center">DO</th>
-                                            <th className="py-1.5 px-1 text-center font-black text-white">PTS</th>
-                                            <th className="py-1.5 px-1 text-center hidden sm:table-cell">GF</th>
-                                            <th className="py-1.5 px-1 text-center hidden sm:table-cell">GC</th>
-                                            <th className="py-1.5 px-1 text-center hidden sm:table-cell">DIF</th>
-                                            <th className="py-1.5 px-2 text-center hidden md:table-cell">SÉRIE</th>
-                                            <th className="py-1.5 px-2 text-center hidden md:table-cell">ÚLT 10</th>
-                                            <th className="py-1.5 px-2 w-6" />
-                                          </tr>
-                                        </thead>
-                                        <tbody>
-                                          {div.teams.map((team, idx) => (
-                                            <tr key={team.id} className={`border-b border-zinc-800/40 transition-colors ${selectedRosterAbbr === team.abbr ? "bg-zinc-800/60" : "hover:bg-zinc-800/20"} ${idx < 3 ? "border-l-2 border-l-green-600/40" : idx === 3 ? "border-l-2 border-l-yellow-500/40" : ""}`}>
-                                              <td className="py-1.5 px-2 text-zinc-600 text-center">{team.position}</td>
-                                              <td className="py-1.5 px-2 font-semibold truncate max-w-[130px] cursor-pointer" onClick={() => handleTeamClick(team.abbr)}>
-                                                <span className={selectedRosterAbbr === team.abbr ? "text-white" : "text-zinc-200"}>{team.name}</span>
-                                              </td>
-                                              <td className="py-1.5 px-1 text-center text-zinc-400">{team.gp}</td>
-                                              <td className="py-1.5 px-1 text-center text-green-400">{team.won}</td>
-                                              <td className="py-1.5 px-1 text-center text-red-400">{team.lost}</td>
-                                              <td className="py-1.5 px-1 text-center text-zinc-500">{team.otLosses}</td>
-                                              <td className="py-1.5 px-1 text-center font-black text-white">{team.points}</td>
-                                              <td className="py-1.5 px-1 text-center text-zinc-400 hidden sm:table-cell">{team.gf}</td>
-                                              <td className="py-1.5 px-1 text-center text-zinc-400 hidden sm:table-cell">{team.ga}</td>
-                                              <td className={`py-1.5 px-1 text-center hidden sm:table-cell font-bold ${team.diff.startsWith("+") ? "text-green-400" : team.diff.startsWith("-") ? "text-red-400" : "text-zinc-500"}`}>{team.diff}</td>
-                                              <td className={`py-1.5 px-2 text-center hidden md:table-cell font-black ${streakColor(team.streak)}`}>{team.streak}</td>
-                                              <td className="py-1.5 px-2 text-center text-zinc-600 hidden md:table-cell text-[9px]">{team.lastTen.split(",")[0]}</td>
-                                              <td className="py-1 px-1">
-                                                <div className="flex items-center gap-0.5 justify-end">
-                                                  <button title="Plantel" onClick={() => openTeamPanel(team.abbr, "roster")}
-                                                    className={`text-[11px] px-1 py-0.5 rounded transition-colors ${selectedRosterAbbr === team.abbr && rosterPanelTab === "roster" ? "bg-red-600/20 text-red-400" : "text-zinc-600 hover:text-zinc-300"}`}>👥</button>
-                                                  <button title="Estatísticas" onClick={() => openTeamPanel(team.abbr, "stats")}
-                                                    className={`text-[11px] px-1 py-0.5 rounded transition-colors ${selectedRosterAbbr === team.abbr && rosterPanelTab === "stats" ? "bg-red-600/20 text-red-400" : "text-zinc-600 hover:text-zinc-300"}`}>📊</button>
-                                                  <button title="Lesões" onClick={() => openTeamPanel(team.abbr, "injuries")}
-                                                    className={`text-[11px] px-1 py-0.5 rounded transition-colors ${selectedRosterAbbr === team.abbr && rosterPanelTab === "injuries" ? "bg-red-600/20 text-red-400" : "text-zinc-600 hover:text-zinc-300"}`}>🏥</button>
-                                                </div>
-                                              </td>
-                                            </tr>
-                                          ))}
-                                        </tbody>
-                                      </table>
-                                    </div>
-                                    <div className="px-3 py-1.5 flex gap-3 text-[8px] text-zinc-700">
-                                      <span className="flex items-center gap-1"><span className="w-2 h-2 border-l-2 border-green-600/60 inline-block" />Playoff</span>
-                                      <span className="flex items-center gap-1"><span className="w-2 h-2 border-l-2 border-yellow-500/60 inline-block" />Wild Card</span>
-                                      <span className="text-zinc-800 ml-auto">👥 Plantel · 📊 Estatísticas · 🏥 Lesões</span>
-                                    </div>
-                                  </div>
-                                ))}
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                        {/* ── Roster / Stats Panel ── */}
-                        {selectedRosterAbbr && (() => {
-                          const activeStats = hockeyTeamStats[selectedRosterAbbr];
-                          const teamDisplayName = activeRoster?.teamName ?? activeStats?.teamName ?? selectedRosterAbbr.toUpperCase();
-                          const handleTabChange = (tab: "roster" | "stats" | "injuries") => {
-                            setRosterPanelTab(tab);
-                            if (tab === "stats" && !hockeyTeamStats[selectedRosterAbbr]) {
-                              setTeamStatsLoading(true);
-                              fetch(`/api/matches/hockey-team-stats/${selectedRosterAbbr}`)
-                                .then(r => r.ok ? r.json() : null)
-                                .then(d => { if (d) setHockeyTeamStats(prev => ({ ...prev, [selectedRosterAbbr]: d })); })
-                                .catch(() => {})
-                                .finally(() => setTeamStatsLoading(false));
-                            }
-                            if (tab === "injuries" && !hockeyInjuries[selectedRosterAbbr]) {
-                              setInjuriesLoading(true);
-                              fetch(`/api/matches/hockey-injuries/${selectedRosterAbbr}`)
-                                .then(r => r.ok ? r.json() : null)
-                                .then(d => { if (d) setHockeyInjuries(prev => ({ ...prev, [selectedRosterAbbr]: d })); })
-                                .catch(() => {})
-                                .finally(() => setInjuriesLoading(false));
-                            }
-                          };
-                          return (
-                            <div className="mt-4 bg-zinc-900 border border-zinc-700 rounded-xl overflow-hidden animate-in fade-in slide-in-from-top-2 duration-200">
-                              {/* Header */}
-                              <div className="bg-zinc-800 px-4 py-2.5 flex items-center justify-between">
-                                <div className="flex items-center gap-2 min-w-0">
-                                  <span className="text-sm font-black text-white truncate">{teamDisplayName}</span>
-                                  {activeRoster && <span className="text-[9px] bg-zinc-700 text-zinc-400 rounded px-1.5 py-0.5 font-bold shrink-0">{activeRoster.abbreviation}</span>}
-                                  <span className="text-[9px] text-zinc-600 shrink-0">{(activeRoster ?? activeStats)?.season}</span>
-                                </div>
-                                <button onClick={() => setSelectedRosterAbbr(null)} className="text-zinc-600 hover:text-zinc-300 transition-colors text-lg leading-none ml-2 shrink-0">×</button>
-                              </div>
-                              {/* Tabs */}
-                              <div className="flex border-b border-zinc-800">
-                                {(["roster", "stats", "injuries"] as const).map(tab => (
-                                  <button key={tab} onClick={() => handleTabChange(tab)}
-                                    className={`flex-1 py-2 text-[10px] font-black uppercase tracking-widest transition-colors ${rosterPanelTab === tab ? "text-white border-b-2 border-red-500 bg-zinc-800/40" : "text-zinc-600 hover:text-zinc-400"}`}>
-                                    {tab === "roster" ? "👥 Plantel" : tab === "stats" ? "📊 Estatísticas" : "🏥 Lesões"}
-                                  </button>
-                                ))}
-                              </div>
-                              {/* Roster Tab */}
-                              {rosterPanelTab === "roster" && (
-                                activeRoster ? (
-                                  <div className="p-3 space-y-4">
-                                    {activeRoster.positions.map(pos => (
-                                      <div key={pos.name}>
-                                        <div className="flex items-center gap-2 mb-2">
-                                          <span className="text-[9px] font-black bg-red-600/20 text-red-400 rounded px-1.5 py-0.5 uppercase tracking-wider">{POS_ICON[pos.name] ?? pos.name.slice(0,2).toUpperCase()}</span>
-                                          <span className="text-[9px] font-black text-zinc-500 uppercase tracking-widest">{pos.name}</span>
-                                          <span className="text-[8px] text-zinc-700">{pos.players.length} jogadores</span>
-                                        </div>
-                                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-1">
-                                          {pos.players.map(p => (
-                                            <div key={p.id} className="bg-zinc-950/70 border border-zinc-800 rounded-lg px-2.5 py-1.5 flex items-center gap-2">
-                                              <span className="text-[10px] font-black text-zinc-600 w-5 text-center shrink-0">#{p.number || "–"}</span>
-                                              <div className="flex-1 min-w-0">
-                                                <div className="text-[11px] font-bold text-zinc-200 truncate">{p.name}</div>
-                                                <div className="text-[9px] text-zinc-600 flex gap-2 flex-wrap">
-                                                  {p.age > 0 && <span>{p.age} anos</span>}
-                                                  {p.height && <span>{p.height}</span>}
-                                                  {p.weight && <span>{p.weight}</span>}
-                                                  {p.shot && <span>Remate: {p.shot}</span>}
-                                                </div>
-                                              </div>
-                                              {p.salary && <span className="text-[9px] font-bold text-green-600/80 shrink-0">{p.salary}</span>}
-                                            </div>
-                                          ))}
-                                        </div>
-                                      </div>
-                                    ))}
-                                  </div>
-                                ) : rosterLoading ? (
-                                  <div className="text-center text-zinc-600 py-6 text-sm animate-pulse">A carregar plantel...</div>
-                                ) : (
-                                  <div className="text-center text-zinc-600 py-6 text-sm">Plantel não disponível.</div>
-                                )
-                              )}
-                              {/* Stats Tab */}
-                              {rosterPanelTab === "stats" && (
-                                activeStats ? (
-                                  <div className="p-3 space-y-4">
-                                    {/* Skaters table */}
-                                    <div>
-                                      <div className="text-[9px] font-black text-zinc-500 uppercase tracking-widest mb-2">Patinadores</div>
-                                      <div className="overflow-x-auto">
-                                        <table className="w-full text-[10px] font-mono tabular-nums">
-                                          <thead>
-                                            <tr className="border-b border-zinc-800 text-[8px] font-black text-zinc-600 uppercase">
-                                              <th className="text-left py-1 px-1 w-4">#</th>
-                                              <th className="text-left py-1 px-1 min-w-[110px]">Jogador</th>
-                                              <th className="py-1 px-1 text-center w-6">PJ</th>
-                                              <th className="py-1 px-1 text-center w-6 text-yellow-500">G</th>
-                                              <th className="py-1 px-1 text-center w-6 text-blue-400">A</th>
-                                              <th className="py-1 px-1 text-center w-7 font-black text-white">PTS</th>
-                                              <th className="py-1 px-1 text-center w-7 hidden sm:table-cell">+/-</th>
-                                              <th className="py-1 px-1 text-center w-6 hidden sm:table-cell">PPG</th>
-                                              <th className="py-1 px-1 text-center w-7 hidden sm:table-cell">REM</th>
-                                              <th className="py-1 px-1 text-center w-10 hidden md:table-cell">TOI/J</th>
-                                            </tr>
-                                          </thead>
-                                          <tbody>
-                                            {activeStats.skaters.map(p => (
-                                              <tr key={p.id} className="border-b border-zinc-800/40 hover:bg-zinc-800/20">
-                                                <td className="py-1 px-1 text-zinc-700">{p.rank}</td>
-                                                <td className="py-1 px-1">
-                                                  <div className="flex items-center gap-1.5">
-                                                    <span className="text-[8px] font-black bg-zinc-800 text-zinc-500 rounded px-1">{p.pos}</span>
-                                                    <span className="text-zinc-200 font-semibold truncate max-w-[90px]">{p.name}</span>
-                                                  </div>
-                                                </td>
-                                                <td className="py-1 px-1 text-center text-zinc-500">{p.gp}</td>
-                                                <td className="py-1 px-1 text-center text-yellow-400 font-bold">{p.goals}</td>
-                                                <td className="py-1 px-1 text-center text-blue-400">{p.assists}</td>
-                                                <td className="py-1 px-1 text-center font-black text-white">{p.points}</td>
-                                                <td className={`py-1 px-1 text-center hidden sm:table-cell font-bold ${p.plusMinus > 0 ? "text-green-400" : p.plusMinus < 0 ? "text-red-400" : "text-zinc-600"}`}>{p.plusMinus > 0 ? `+${p.plusMinus}` : p.plusMinus}</td>
-                                                <td className="py-1 px-1 text-center text-zinc-400 hidden sm:table-cell">{p.ppg}</td>
-                                                <td className="py-1 px-1 text-center text-zinc-400 hidden sm:table-cell">{p.shots}</td>
-                                                <td className="py-1 px-1 text-center text-zinc-600 hidden md:table-cell">{p.toiPerGame}</td>
-                                              </tr>
-                                            ))}
-                                          </tbody>
-                                        </table>
-                                      </div>
-                                    </div>
-                                    {/* Goalies table */}
-                                    {activeStats.goalies.length > 0 && (
-                                      <div>
-                                        <div className="text-[9px] font-black text-zinc-500 uppercase tracking-widest mb-2">Guarda-Redes</div>
-                                        <div className="overflow-x-auto">
-                                          <table className="w-full text-[10px] font-mono tabular-nums">
-                                            <thead>
-                                              <tr className="border-b border-zinc-800 text-[8px] font-black text-zinc-600 uppercase">
-                                                <th className="text-left py-1 px-1 min-w-[110px]">Jogador</th>
-                                                <th className="py-1 px-1 text-center">PJ</th>
-                                                <th className="py-1 px-1 text-center text-green-400">V</th>
-                                                <th className="py-1 px-1 text-center text-red-400">D</th>
-                                                <th className="py-1 px-1 text-center">DO</th>
-                                                <th className="py-1 px-1 text-center font-black text-white">S%</th>
-                                                <th className="py-1 px-1 text-center hidden sm:table-cell">Saves</th>
-                                                <th className="py-1 px-1 text-center hidden sm:table-cell">GA</th>
-                                                <th className="py-1 px-1 text-center hidden sm:table-cell">SO</th>
-                                              </tr>
-                                            </thead>
-                                            <tbody>
-                                              {activeStats.goalies.map(g => (
-                                                <tr key={g.id} className="border-b border-zinc-800/40 hover:bg-zinc-800/20">
-                                                  <td className="py-1 px-1 text-zinc-200 font-semibold truncate max-w-[110px]">{g.name}</td>
-                                                  <td className="py-1 px-1 text-center text-zinc-500">{g.gp}</td>
-                                                  <td className="py-1 px-1 text-center text-green-400 font-bold">{g.wins}</td>
-                                                  <td className="py-1 px-1 text-center text-red-400">{g.losses}</td>
-                                                  <td className="py-1 px-1 text-center text-zinc-500">{g.otLosses}</td>
-                                                  <td className="py-1 px-1 text-center font-black text-white">{g.savesPct}</td>
-                                                  <td className="py-1 px-1 text-center text-zinc-400 hidden sm:table-cell">{g.saves}</td>
-                                                  <td className="py-1 px-1 text-center text-zinc-400 hidden sm:table-cell">{g.goalsAgainst}</td>
-                                                  <td className="py-1 px-1 text-center text-zinc-400 hidden sm:table-cell">{g.shutouts || "–"}</td>
-                                                </tr>
-                                              ))}
-                                            </tbody>
-                                          </table>
-                                        </div>
-                                      </div>
-                                    )}
-                                  </div>
-                                ) : teamStatsLoading ? (
-                                  <div className="text-center text-zinc-600 py-6 text-sm animate-pulse">A carregar estatísticas...</div>
-                                ) : (
-                                  <div className="text-center text-zinc-600 py-6 text-sm">Estatísticas não disponíveis.</div>
-                                )
-                              )}
-                              {/* Injuries Tab */}
-                              {rosterPanelTab === "injuries" && (() => {
-                                const activeInjuries = hockeyInjuries[selectedRosterAbbr];
-                                if (injuriesLoading && !activeInjuries) return <div className="text-center text-zinc-600 py-6 text-sm animate-pulse">A carregar lesões...</div>;
-                                if (!activeInjuries) return <div className="text-center text-zinc-600 py-6 text-sm">Lesões não disponíveis.</div>;
-                                if (activeInjuries.report.length === 0) return (
-                                  <div className="flex flex-col items-center gap-2 py-8">
-                                    <span className="text-2xl">✅</span>
-                                    <span className="text-sm font-bold text-green-500">Sem lesões reportadas</span>
-                                    <span className="text-[10px] text-zinc-600">Todos os jogadores disponíveis</span>
-                                  </div>
-                                );
-                                const statusColors: Record<string, string> = {
-                                  "Sidelined": "text-red-400 bg-red-500/10 border-red-500/30",
-                                  "I.L.": "text-amber-400 bg-amber-500/10 border-amber-500/30",
-                                  "Day-to-Day": "text-yellow-400 bg-yellow-500/10 border-yellow-500/30",
-                                };
-                                const statusDefault = "text-zinc-400 bg-zinc-700/30 border-zinc-600/30";
-                                return (
-                                  <div className="p-3 space-y-2">
-                                    <div className="text-[9px] font-black text-zinc-600 uppercase tracking-widest mb-3">{activeInjuries.report.length} jogador{activeInjuries.report.length !== 1 ? "es" : ""} no relatório</div>
-                                    {activeInjuries.report.map((r, i) => (
-                                      <div key={i} className="bg-zinc-950/70 border border-zinc-800 rounded-lg px-3 py-2 flex items-start gap-3">
-                                        <span className={`mt-0.5 text-[9px] font-black px-1.5 py-0.5 rounded border shrink-0 ${statusColors[r.status] ?? statusDefault}`}>{r.status}</span>
-                                        <div className="flex-1 min-w-0">
-                                          <div className="text-[11px] font-bold text-zinc-200">{r.playerName}</div>
-                                          <div className="text-[10px] text-zinc-500 mt-0.5">{r.description}</div>
-                                        </div>
-                                        {r.date && <span className="text-[9px] text-zinc-700 shrink-0 mt-0.5">{r.date}</span>}
-                                      </div>
-                                    ))}
-                                  </div>
-                                );
-                              })()}
-                            </div>
-                          );
-                        })()}
-                      </div>
-                    );
-                  })()}
 
                   {/* ─── Odds Pré-Jogo de Voleibol ───────────────────────────── */}
                   {false && (selectedSport === "all" || selectedSport === "volleyball") && volleyOddsMatches.length > 0 && !selectedLeague && (() => {
