@@ -1019,6 +1019,7 @@ export default function Home() {
     players: [{ id: string; name: string }, { id: string; name: string }];
     matchOdds: [number, number];
     set1Odds: [number, number] | null;
+    markets?: any;
   };
   const [tennisOddsMatches, setTennisOddsMatches] = useState<TennisOddsEntry[]>([]);
 
@@ -2331,6 +2332,7 @@ export default function Home() {
             { key: "handicap", label: "Handicap" },
             { key: "jogos", label: "Jogos" },
             { key: "placar", label: "Placar Exato" },
+            { key: "especiais", label: "Especiais" },
           ]
         : isHockey
           ? [
@@ -2569,6 +2571,15 @@ export default function Home() {
               <MarketGroup title="Tie-Break no Jogo">
                 <MarketOddsBtn match={match} sel="tie-yes" odd={m.bothTeamsScore.yes} market="sets" label="Sim" />
                 <MarketOddsBtn match={match} sel="tie-no" odd={m.bothTeamsScore.no} market="sets" label="Não" />
+              </MarketGroup>
+            )}
+            {/* Set / Match combo */}
+            {((m as any).tennisExtra?.setMatch?.h11 > 0) && (
+              <MarketGroup title="Set + Resultado Final">
+                {((m as any).tennisExtra.setMatch.h11 > 0) && <MarketOddsBtn match={match} sel="sm-11" odd={(m as any).tennisExtra.setMatch.h11} market="sets" label={`${match.home} ganhar 1º Set + Jogo`} />}
+                {((m as any).tennisExtra.setMatch.h12 > 0) && <MarketOddsBtn match={match} sel="sm-12" odd={(m as any).tennisExtra.setMatch.h12} market="sets" label={`${match.home} ganhar 1º Set / ${match.away} Jogo`} />}
+                {((m as any).tennisExtra.setMatch.a21 > 0) && <MarketOddsBtn match={match} sel="sm-21" odd={(m as any).tennisExtra.setMatch.a21} market="sets" label={`${match.away} ganhar 1º Set / ${match.home} Jogo`} />}
+                {((m as any).tennisExtra.setMatch.a22 > 0) && <MarketOddsBtn match={match} sel="sm-22" odd={(m as any).tennisExtra.setMatch.a22} market="sets" label={`${match.away} ganhar 1º Set + Jogo`} />}
               </MarketGroup>
             )}
           </div>
@@ -2991,19 +3002,112 @@ export default function Home() {
                 <MarketOddsBtn match={match} sel="gh-away" odd={((m as any).tennisExtra as any).gameHandicap.away} market="jogos" label={match.away} />
               </MarketGroup>
             )}
+            {/* 2nd set games O/U */}
+            {((m as any).tennisExtra as any).set2Games?.over > 0 && (
+              <MarketGroup title={`Games do 2º Set — O/U ${((m as any).tennisExtra as any).set2Games.line}`}>
+                <MarketOddsBtn match={match} sel="s2g-o" odd={((m as any).tennisExtra as any).set2Games.over} market="jogos" label={`Mais de ${((m as any).tennisExtra as any).set2Games.line} games`} />
+                <MarketOddsBtn match={match} sel="s2g-u" odd={((m as any).tennisExtra as any).set2Games.under} market="jogos" label={`Menos de ${((m as any).tennisExtra as any).set2Games.line} games`} />
+              </MarketGroup>
+            )}
+            {/* Home player total games */}
+            {((m as any).tennisExtra as any).homePlayerGames?.over > 0 && (
+              <MarketGroup title={`Total Games de ${match.home} — O/U ${((m as any).tennisExtra as any).homePlayerGames.line}`}>
+                <MarketOddsBtn match={match} sel="hpg-o" odd={((m as any).tennisExtra as any).homePlayerGames.over} market="jogos" label={`Mais de ${((m as any).tennisExtra as any).homePlayerGames.line}`} />
+                <MarketOddsBtn match={match} sel="hpg-u" odd={((m as any).tennisExtra as any).homePlayerGames.under} market="jogos" label={`Menos de ${((m as any).tennisExtra as any).homePlayerGames.line}`} />
+              </MarketGroup>
+            )}
+            {/* Away player total games */}
+            {((m as any).tennisExtra as any).awayPlayerGames?.over > 0 && (
+              <MarketGroup title={`Total Games de ${match.away} — O/U ${((m as any).tennisExtra as any).awayPlayerGames.line}`}>
+                <MarketOddsBtn match={match} sel="apg-o" odd={((m as any).tennisExtra as any).awayPlayerGames.over} market="jogos" label={`Mais de ${((m as any).tennisExtra as any).awayPlayerGames.line}`} />
+                <MarketOddsBtn match={match} sel="apg-u" odd={((m as any).tennisExtra as any).awayPlayerGames.under} market="jogos" label={`Menos de ${((m as any).tennisExtra as any).awayPlayerGames.line}`} />
+              </MarketGroup>
+            )}
           </div>
         )}
 
         {/* ── TÉNIS: PLACAR EXATO (SETS) ── */}
         {isTennis && (modalTab === "placar" || modalTab === "todos") && m && (m as any).tennisExtra && (
           <div>
-            <p className="text-xs text-zinc-500 mb-3">Resultado final em sets.</p>
-            <div className="grid grid-cols-2 gap-2">
-              {((m as any).tennisExtra as any).exactSets.h20 > 0 && <MarketOddsBtn match={match} sel="es-h20" odd={((m as any).tennisExtra as any).exactSets.h20} market="placar" label={`${match.home} 2-0`} />}
-              {((m as any).tennisExtra as any).exactSets.h21 > 0 && <MarketOddsBtn match={match} sel="es-h21" odd={((m as any).tennisExtra as any).exactSets.h21} market="placar" label={`${match.home} 2-1`} />}
-              {((m as any).tennisExtra as any).exactSets.a02 > 0 && <MarketOddsBtn match={match} sel="es-a02" odd={((m as any).tennisExtra as any).exactSets.a02} market="placar" label={`${match.away} 2-0`} />}
-              {((m as any).tennisExtra as any).exactSets.a12 > 0 && <MarketOddsBtn match={match} sel="es-a12" odd={((m as any).tennisExtra as any).exactSets.a12} market="placar" label={`${match.away} 2-1`} />}
-            </div>
+            {/* Exact sets (Set Betting) */}
+            {(((m as any).tennisExtra as any).exactSets?.h20 > 0 || ((m as any).tennisExtra as any).exactSets?.a02 > 0) && (
+              <MarketGroup title="Resultado Exacto em Sets">
+                {((m as any).tennisExtra as any).exactSets.h20 > 0 && <MarketOddsBtn match={match} sel="es-h20" odd={((m as any).tennisExtra as any).exactSets.h20} market="placar" label={`${match.home} 2-0`} />}
+                {((m as any).tennisExtra as any).exactSets.h21 > 0 && <MarketOddsBtn match={match} sel="es-h21" odd={((m as any).tennisExtra as any).exactSets.h21} market="placar" label={`${match.home} 2-1`} />}
+                {((m as any).tennisExtra as any).exactSets.a02 > 0 && <MarketOddsBtn match={match} sel="es-a02" odd={((m as any).tennisExtra as any).exactSets.a02} market="placar" label={`${match.away} 2-0`} />}
+                {((m as any).tennisExtra as any).exactSets.a12 > 0 && <MarketOddsBtn match={match} sel="es-a12" odd={((m as any).tennisExtra as any).exactSets.a12} market="placar" label={`${match.away} 2-1`} />}
+              </MarketGroup>
+            )}
+            {/* Correct Score 1st Set (top 8 most likely game scores) */}
+            {((m as any).tennisExtra as any).score1st?.length > 0 && (
+              <MarketGroup title="Placar Exacto — 1º Set (Games)">
+                <div className="grid grid-cols-2 gap-1 w-full col-span-full">
+                  {((m as any).tennisExtra as any).score1st.map((sc: { label: string; odds: number }) => (
+                    <MarketOddsBtn key={`sc1-${sc.label}`} match={match} sel={`sc1-${sc.label}`} odd={sc.odds} market="placar" label={sc.label} />
+                  ))}
+                </div>
+              </MarketGroup>
+            )}
+            {/* Correct Score 2nd Set */}
+            {((m as any).tennisExtra as any).score2nd?.length > 0 && (
+              <MarketGroup title="Placar Exacto — 2º Set (Games)">
+                <div className="grid grid-cols-2 gap-1 w-full col-span-full">
+                  {((m as any).tennisExtra as any).score2nd.map((sc: { label: string; odds: number }) => (
+                    <MarketOddsBtn key={`sc2-${sc.label}`} match={match} sel={`sc2-${sc.label}`} odd={sc.odds} market="placar" label={sc.label} />
+                  ))}
+                </div>
+              </MarketGroup>
+            )}
+          </div>
+        )}
+
+        {/* ── TÉNIS: ESPECIAIS ── */}
+        {isTennis && (modalTab === "especiais" || modalTab === "todos") && m && (m as any).tennisExtra && (
+          <div>
+            {/* Odd/Even — total games */}
+            {((m as any).tennisExtra as any).oddEvenGames?.odd > 0 && (
+              <MarketGroup title="Total de Games — Par ou Ímpar">
+                <MarketOddsBtn match={match} sel="oe-odd" odd={((m as any).tennisExtra as any).oddEvenGames.odd} market="especiais" label="Ímpar" />
+                <MarketOddsBtn match={match} sel="oe-even" odd={((m as any).tennisExtra as any).oddEvenGames.even} market="especiais" label="Par" />
+              </MarketGroup>
+            )}
+            {/* Odd/Even — 1st set games */}
+            {((m as any).tennisExtra as any).oddEven1st?.odd > 0 && (
+              <MarketGroup title="Games do 1º Set — Par ou Ímpar">
+                <MarketOddsBtn match={match} sel="oe1-odd" odd={((m as any).tennisExtra as any).oddEven1st.odd} market="especiais" label="Ímpar" />
+                <MarketOddsBtn match={match} sel="oe1-even" odd={((m as any).tennisExtra as any).oddEven1st.even} market="especiais" label="Par" />
+              </MarketGroup>
+            )}
+            {/* Odd/Even — 2nd set games */}
+            {((m as any).tennisExtra as any).oddEven2nd?.odd > 0 && (
+              <MarketGroup title="Games do 2º Set — Par ou Ímpar">
+                <MarketOddsBtn match={match} sel="oe2-odd" odd={((m as any).tennisExtra as any).oddEven2nd.odd} market="especiais" label="Ímpar" />
+                <MarketOddsBtn match={match} sel="oe2-even" odd={((m as any).tennisExtra as any).oddEven2nd.even} market="especiais" label="Par" />
+              </MarketGroup>
+            )}
+            {/* Win at least one set — Player 1 */}
+            {((m as any).tennisExtra as any).winAtLeast1P1?.yes > 0 && (
+              <MarketGroup title={`${match.home} ganha pelo menos 1 Set`}>
+                <MarketOddsBtn match={match} sel="wal1-yes" odd={((m as any).tennisExtra as any).winAtLeast1P1.yes} market="especiais" label="Sim" />
+                <MarketOddsBtn match={match} sel="wal1-no" odd={((m as any).tennisExtra as any).winAtLeast1P1.no} market="especiais" label="Não" />
+              </MarketGroup>
+            )}
+            {/* Win at least one set — Player 2 */}
+            {((m as any).tennisExtra as any).winAtLeast1P2?.yes > 0 && (
+              <MarketGroup title={`${match.away} ganha pelo menos 1 Set`}>
+                <MarketOddsBtn match={match} sel="wal2-yes" odd={((m as any).tennisExtra as any).winAtLeast1P2.yes} market="especiais" label="Sim" />
+                <MarketOddsBtn match={match} sel="wal2-no" odd={((m as any).tennisExtra as any).winAtLeast1P2.no} market="especiais" label="Não" />
+              </MarketGroup>
+            )}
+            {/* Set/Match combo (also shown here for quick access) */}
+            {((m as any).tennisExtra?.setMatch?.h11 > 0) && (
+              <MarketGroup title="Set + Resultado Final">
+                {((m as any).tennisExtra.setMatch.h11 > 0) && <MarketOddsBtn match={match} sel="sm2-11" odd={(m as any).tennisExtra.setMatch.h11} market="especiais" label={`${match.home} 1º Set + Jogo`} />}
+                {((m as any).tennisExtra.setMatch.h12 > 0) && <MarketOddsBtn match={match} sel="sm2-12" odd={(m as any).tennisExtra.setMatch.h12} market="especiais" label={`${match.home} 1º Set / ${match.away} Jogo`} />}
+                {((m as any).tennisExtra.setMatch.a21 > 0) && <MarketOddsBtn match={match} sel="sm2-21" odd={(m as any).tennisExtra.setMatch.a21} market="especiais" label={`${match.away} 1º Set / ${match.home} Jogo`} />}
+                {((m as any).tennisExtra.setMatch.a22 > 0) && <MarketOddsBtn match={match} sel="sm2-22" odd={(m as any).tennisExtra.setMatch.a22} market="especiais" label={`${match.away} 1º Set + Jogo`} />}
+              </MarketGroup>
+            )}
           </div>
         )}
 
@@ -4320,25 +4424,18 @@ export default function Home() {
               });
 
               const tennisOddsAsMatches: Match[] = (!selectedLeague && (selectedSport === "tennis" || selectedSport === "all"))
-                ? tennisOddsMatches.map(o => {
-                    const mkt = _emptyMkt();
-                    if (o.set1Odds) {
-                      mkt.totalGoals.over15 = o.set1Odds[0];
-                      mkt.totalGoals.under15 = o.set1Odds[1];
-                    }
-                    return {
-                      id: `tennis-odds-${o.matchId}`,
-                      home: o.players[0].name,
-                      away: o.players[1].name,
-                      league: o.tournamentName,
-                      sport: "tennis",
-                      time: o.time,
-                      date: o.date,
-                      hasRealOdds: true,
-                      odds: { home: o.matchOdds[0], draw: 0, away: o.matchOdds[1] },
-                      markets: mkt,
-                    } as Match;
-                  })
+                ? tennisOddsMatches.map(o => ({
+                    id: `tennis-odds-${o.matchId}`,
+                    home: o.players[0].name,
+                    away: o.players[1].name,
+                    league: o.tournamentName,
+                    sport: "tennis",
+                    time: o.time,
+                    date: o.date,
+                    hasRealOdds: true,
+                    odds: { home: o.matchOdds[0], draw: 0, away: o.matchOdds[1] },
+                    markets: o.markets ?? _emptyMkt(),
+                  } as Match))
                 : [];
 
               // Convert real volleyball odds to MatchCard-compatible Match objects (O/U 3.5 sets in markets)

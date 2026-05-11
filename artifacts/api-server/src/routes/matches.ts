@@ -49,6 +49,18 @@ type AdvancedMarkets = {
     totalGamesLines: Array<{ line: number; over: number; under: number }>;
     set1Games: { line: number; over: number; under: number };
     gameHandicap: { line: number; home: number; away: number };
+    // Extended pre-match odds fields
+    set2Games?: { line: number; over: number; under: number };
+    homePlayerGames?: { line: number; over: number; under: number };
+    awayPlayerGames?: { line: number; over: number; under: number };
+    oddEvenGames?: { odd: number; even: number };
+    oddEven1st?: { odd: number; even: number };
+    oddEven2nd?: { odd: number; even: number };
+    winAtLeast1P1?: { yes: number; no: number };
+    winAtLeast1P2?: { yes: number; no: number };
+    setMatch?: { h11: number; h12: number; a21: number; a22: number };
+    score1st?: Array<{ label: string; odds: number }>;
+    score2nd?: Array<{ label: string; odds: number }>;
   };
   // Hockey extended markets
   hockeyExtra?: {
@@ -4747,6 +4759,7 @@ type TennisOddsEntry = {
   players: [TennisOddsPlayer, TennisOddsPlayer];
   matchOdds: [number, number];
   set1Odds: [number, number] | null;
+  markets?: unknown;
 };
 let tennisOddsCache: TennisOddsEntry[] | null = null;
 let tennisOddsFetchedAt = 0;
@@ -5104,27 +5117,86 @@ async function getTennisOdds(): Promise<TennisOddsEntry[]> {
   if (!rawTours) return [];
   const tours = Array.isArray(rawTours) ? rawTours : [rawTours];
 
-  type RawBk  = { stop?: string; odd?: Array<{ name?: string; value?: string }> };
-  type RawType = { value?: string; bookmaker?: RawBk | RawBk[] };
-  type RawMatch = {
-    id?: string; date?: string; time?: string; status?: string;
-    player?: Array<{ id?: string; name?: string }>;
-    odds?: { type?: RawType | RawType[] };
-  };
-  type RawTour = { name?: string; matches?: { match?: RawMatch | RawMatch[] } };
+  type RawOdd   = { name?: string; value?: string };
+  type RawTotal = { name?: string; stop?: string; odd?: RawOdd | RawOdd[] };
+  type RawBk    = { stop?: string; odd?: RawOdd | RawOdd[]; total?: RawTotal | RawTotal[] };
+  type RawType  = { value?: string; bookmaker?: RawBk | RawBk[] };
+  type RawMatch = { id?: string; date?: string; time?: string; status?: string; player?: Array<{ id?: string; name?: string }>; odds?: { type?: RawType | RawType[] } };
+  type RawTour  = { name?: string; matches?: { match?: RawMatch | RawMatch[] } };
 
-  const avgOdd = (bks: RawBk[], idx: 0 | 1): number => {
+  const getBks = (types: RawType[], typeValue: string): RawBk[] => {
+    const t = types.find(tp => tp.value === typeValue);
+    if (!t) return [];
+    return (Array.isArray(t.bookmaker) ? t.bookmaker : t.bookmaker ? [t.bookmaker] : []) as RawBk[];
+  };
+  const margin = (v: number) => Math.max(1.01, Math.round(v * 0.975 * 100) / 100);
+  const avgArr = (vals: number[]) => vals.length ? margin(vals.reduce((a, b) => a + b, 0) / vals.length) : 0;
+
+  // Average odds by array index (Home=0, Away=1) — for simple 2-way markets
+  const avgIdx = (bks: RawBk[], idx: 0 | 1): number => {
     const vals: number[] = [];
     for (const bk of bks) {
       if (bk.stop === "True") continue;
-      const v = parseFloat(bk.odd?.[idx]?.value ?? "0");
+      const odds = Array.isArray(bk.odd) ? bk.odd : (bk.odd ? [bk.odd] : []);
+      const v = parseFloat(odds[idx]?.value ?? "0");
       if (v > 1) vals.push(v);
     }
-    if (!vals.length) return 0;
-    const avg = vals.reduce((a, b) => a + b, 0) / vals.length;
-    const margined = Math.round(avg * 0.975 * 100) / 100; // 2.5% house margin
-    return Math.max(1.01, margined); // floor at 1.01 — odds below 1 are impossible
+    return avgArr(vals);
   };
+  // Average odds by name (for Home/Away (2nd Set), Odd/Even, Set Betting, etc.)
+  const avgName = (types: RawType[], typeValue: string, oddName: string): number => {
+    const vals: number[] = [];
+    for (const bk of getBks(types, typeValue)) {
+      if (bk.stop === "True") continue;
+      const odds = Array.isArray(bk.odd) ? bk.odd : (bk.odd ? [bk.odd] : []);
+      const o = odds.find(o => o.name === oddName);
+      const v = parseFloat(o?.value ?? "0");
+      if (v > 1) vals.push(v);
+    }
+    return avgArr(vals);
+  };
+  // Parse Over/Under market with totals — picks the most represented line
+  const parseTotal = (types: RawType[], typeValue: string, overName = "Over", underName = "Under"): { line: number; over: number; under: number } | undefined => {
+    const lineMap = new Map<number, { overs: number[]; unders: number[] }>();
+    for (const bk of getBks(types, typeValue)) {
+      if (bk.stop === "True") continue;
+      const totals = Array.isArray(bk.total) ? bk.total : (bk.total ? [bk.total] : []);
+      for (const tot of totals) {
+        if (tot.stop === "True") continue;
+        const line = parseFloat(tot.name ?? "0");
+        if (!line) continue;
+        const odds = Array.isArray(tot.odd) ? tot.odd : (tot.odd ? [tot.odd] : []);
+        const o = odds.find(o => o.name === overName);  const u = odds.find(o => o.name === underName);
+        const ov = parseFloat(o?.value ?? "0"); const uv = parseFloat(u?.value ?? "0");
+        if (ov > 1 && uv > 1) {
+          if (!lineMap.has(line)) lineMap.set(line, { overs: [], unders: [] });
+          lineMap.get(line)!.overs.push(ov); lineMap.get(line)!.unders.push(uv);
+        }
+      }
+    }
+    if (!lineMap.size) return undefined;
+    let bestLine = 0, bestCount = 0;
+    for (const [line, { overs }] of lineMap) { if (overs.length > bestCount) { bestCount = overs.length; bestLine = line; } }
+    const { overs, unders } = lineMap.get(bestLine)!;
+    return { line: bestLine, over: avgArr(overs), under: avgArr(unders) };
+  };
+  // Collect all named odds averaged across bookmakers (for Set Betting, Set/Match, Correct Score)
+  const allNames = (types: RawType[], typeValue: string): Record<string, number> => {
+    const nameMap = new Map<string, number[]>();
+    for (const bk of getBks(types, typeValue)) {
+      if (bk.stop === "True") continue;
+      const odds = Array.isArray(bk.odd) ? bk.odd : (bk.odd ? [bk.odd] : []);
+      for (const o of odds) {
+        const v = parseFloat(o?.value ?? "0");
+        if (v > 1 && o.name) { if (!nameMap.has(o.name)) nameMap.set(o.name, []); nameMap.get(o.name)!.push(v); }
+      }
+    }
+    const res: Record<string, number> = {};
+    for (const [name, vals] of nameMap) res[name] = avgArr(vals);
+    return res;
+  };
+  const topScores = (types: RawType[], typeValue: string, n = 8): Array<{ label: string; odds: number }> =>
+    Object.entries(allNames(types, typeValue)).map(([label, odds]) => ({ label, odds })).sort((a, b) => a.odds - b.odds).slice(0, n);
 
   const results: TennisOddsEntry[] = [];
   const seen = new Set<string>();
@@ -5139,19 +5211,69 @@ async function getTennisOdds(): Promise<TennisOddsEntry[]> {
       seen.add(m.id);
       const rawTypes = m.odds?.type;
       const types: RawType[] = !rawTypes ? [] : Array.isArray(rawTypes) ? rawTypes : [rawTypes];
-      const matchType = types.find(t => t.value === "Home/Away");
-      if (!matchType) continue;
-      const bks = (Array.isArray(matchType.bookmaker) ? matchType.bookmaker : matchType.bookmaker ? [matchType.bookmaker] : []) as RawBk[];
-      const h = avgOdd(bks, 0); const a = avgOdd(bks, 1);
+
+      // Match winner
+      const hwBks = getBks(types, "Home/Away");
+      const h = avgIdx(hwBks, 0); const a = avgIdx(hwBks, 1);
       if (!h || !a) continue;
 
-      const set1Type = types.find(t => t.value === "Home/Away (1st Set)");
-      let set1Odds: [number, number] | null = null;
-      if (set1Type) {
-        const s1bks = (Array.isArray(set1Type.bookmaker) ? set1Type.bookmaker : set1Type.bookmaker ? [set1Type.bookmaker] : []) as RawBk[];
-        const s1h = avgOdd(s1bks, 0); const s1a = avgOdd(s1bks, 1);
-        if (s1h && s1a) set1Odds = [s1h, s1a];
-      }
+      // 1st set winner
+      const s1Bks = getBks(types, "Home/Away (1st Set)");
+      const s1h = avgIdx(s1Bks, 0); const s1a = avgIdx(s1Bks, 1);
+      const set1Odds: [number, number] | null = (s1h && s1a) ? [s1h, s1a] : null;
+
+      // 2nd set winner
+      const s2h = avgName(types, "Home/Away (2nd Set)", "Home"); const s2a = avgName(types, "Home/Away (2nd Set)", "Away");
+
+      // Odd/Even
+      const oeOdd = avgName(types, "Odd/Even", "Odd");         const oeEven = avgName(types, "Odd/Even", "Even");
+      const oe1Odd = avgName(types, "Odd/Even (1st Set)", "Odd"); const oe1Even = avgName(types, "Odd/Even (1st Set)", "Even");
+      const oe2Odd = avgName(types, "Odd/Even (2nd Set)", "Odd"); const oe2Even = avgName(types, "Odd/Even (2nd Set)", "Even");
+
+      // Win at least one set
+      const wal1Yes = avgName(types, "Win at least one set (Player 1)", "Yes"); const wal1No = avgName(types, "Win at least one set (Player 1)", "No");
+      const wal2Yes = avgName(types, "Win at least one set (Player 2)", "Yes"); const wal2No = avgName(types, "Win at least one set (Player 2)", "No");
+
+      // Set Betting (exact sets)
+      const sb = allNames(types, "Set Betting");
+      // Set/Match combo
+      const smAll = allNames(types, "Set / Match");
+
+      // Total games O/U
+      const totalGamesOdds = parseTotal(types, "Over/Under by Games in Match");
+      const set1GamesOdds  = parseTotal(types, "Over/Under (1st Set)");
+      const set2GamesOdds  = parseTotal(types, "Over/Under by Games (2nd Set)");
+      const homePlayerOdds = parseTotal(types, "Total - Home");
+      const awayPlayerOdds = parseTotal(types, "Total - Away");
+      const setsOU         = parseTotal(types, "Over/Under");  // Sets O/U (line 2.5)
+
+      // Correct Score 1st / 2nd set (top 8)
+      const sc1 = topScores(types, "Correct Score 1st Half");
+      const sc2 = topScores(types, "Correct Score 2nd Half");
+
+      // Build tennisExtra
+      const tExtra = {
+        firstSet: set1Odds ? { home: set1Odds[0], away: set1Odds[1] } : { home: 0, away: 0 },
+        set2: (s2h && s2a) ? { home: s2h, away: s2a } : { home: 0, away: 0 },
+        set3: { home: 0, away: 0 },
+        exactSets: { h20: sb["2:0"] ?? 0, h21: sb["2:1"] ?? 0, a02: sb["0:2"] ?? 0, a12: sb["1:2"] ?? 0 },
+        setHandicap: { home: 0, away: 0 },
+        totalGames: totalGamesOdds ?? { line: 0, over: 0, under: 0 },
+        totalGamesLines: totalGamesOdds ? [totalGamesOdds] : [],
+        set1Games: set1GamesOdds ?? { line: 0, over: 0, under: 0 },
+        gameHandicap: { line: 0, home: 0, away: 0 },
+        set2Games: set2GamesOdds,
+        homePlayerGames: homePlayerOdds,
+        awayPlayerGames: awayPlayerOdds,
+        oddEvenGames: (oeOdd && oeEven) ? { odd: oeOdd, even: oeEven } : undefined,
+        oddEven1st:   (oe1Odd && oe1Even) ? { odd: oe1Odd, even: oe1Even } : undefined,
+        oddEven2nd:   (oe2Odd && oe2Even) ? { odd: oe2Odd, even: oe2Even } : undefined,
+        winAtLeast1P1: (wal1Yes && wal1No) ? { yes: wal1Yes, no: wal1No } : undefined,
+        winAtLeast1P2: (wal2Yes && wal2No) ? { yes: wal2Yes, no: wal2No } : undefined,
+        setMatch: Object.keys(smAll).length ? { h11: smAll["1/1"] ?? 0, h12: smAll["1/2"] ?? 0, a21: smAll["2/1"] ?? 0, a22: smAll["2/2"] ?? 0 } : undefined,
+        score1st: sc1.length ? sc1 : undefined,
+        score2nd: sc2.length ? sc2 : undefined,
+      };
 
       const p = m.player ?? [];
       results.push({
@@ -5160,6 +5282,20 @@ async function getTennisOdds(): Promise<TennisOddsEntry[]> {
         tournamentName: rawTour.name ?? "",
         players: [{ id: p[0]?.id ?? "", name: p[0]?.name ?? "" }, { id: p[1]?.id ?? "", name: p[1]?.name ?? "" }],
         matchOdds: [h, a], set1Odds,
+        markets: {
+          doubleChance: { homeOrDraw: 0, awayOrDraw: 0, homeOrAway: 0 },
+          bothTeamsScore: { yes: 0, no: 0 },
+          totalGoals: {
+            over05: 0, under05: 0,
+            over15: set1Odds ? set1Odds[0] : 0, under15: set1Odds ? set1Odds[1] : 0,
+            over25: setsOU?.over ?? 0, under25: setsOU?.under ?? 0,
+            over35: 0, under35: 0, over45: 0, under45: 0, over55: 0, under55: 0, over65: 0, under65: 0,
+          },
+          handicap: { homeMinusOne: 0, awayPlusOne: 0, homeMinusOneHalf: 0, awayPlusOneHalf: 0 },
+          halfTime: { home: 0, draw: 0, away: 0 },
+          firstGoal: { home: 0, noGoal: 0, away: 0 },
+          tennisExtra: tExtra,
+        },
       });
     }
   }
