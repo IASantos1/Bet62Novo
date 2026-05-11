@@ -115,6 +115,10 @@ export type LiveMatchState = {
     tennisStats?: [TennisStatData, TennisStatData]; // home / away match stats
     periods?: Array<[number, number]>;   // hockey: [[P1h,P1a],[P2h,P2a],[P3h,P3a],[OTh,OTa]]
     quarters?: Array<[number, number]>;  // basketball: [[Q1h,Q1a],[Q2h,Q2a],[Q3h,Q3a],[Q4h,Q4a],[OTh,OTa]]
+    // Football extras from Statpal v2
+    htScore?: [number, number];          // football: half-time score [homeHT, awayHT]
+    etScore?: [number, number];          // football: extra-time score [homeET, awayET]
+    penScore?: [number, number];         // football: penalty shootout [homePen, awayPen]
   };
 };
 
@@ -132,6 +136,29 @@ export type UpcomingMatch = {
   markets: AdvancedMarkets;
 };
 
+type StatpalMatchV2Event = {
+  id?: string;
+  type: string;
+  team: string;
+  minute: string;
+  extra_min: string;
+  player: string;
+  player_id: string;
+  assist_player?: string;
+  assist_id?: string;
+  result?: string;    // score at time of event e.g. "[1 - 0]"
+};
+
+type StatpalPenaltyEvent = {
+  id: string;
+  penalty_num: string;
+  team: string;
+  player: string;
+  player_id: string;
+  type: string;       // "goal" | "miss"
+  result: string;
+};
+
 type StatpalMatchV2 = {
   main_id: string;
   fallback_id_1: string;
@@ -142,13 +169,21 @@ type StatpalMatchV2 = {
   time: string;
   inj_time: string;
   inj_minute: string;
-  home: { id: string; name: string; goals: string };
-  away: { id: string; name: string; goals: string };
+  venue?: string;
+  home: { id: string; name: string; goals: string; win_on_agg?: string };
+  away: { id: string; name: string; goals: string; win_on_agg?: string };
   events: null | {
-    event:
-      | Array<{ type: string; team: string; minute: string; extra_min: string; player: string; player_id: string }>
-      | { type: string; team: string; minute: string; extra_min: string; player: string; player_id: string };
+    event: StatpalMatchV2Event | StatpalMatchV2Event[];
   };
+  ht?: { home_goals: number; away_goals: number };
+  ft?: { home_goals: number; away_goals: number };
+  et?: null | { home_goals: number; away_goals: number };
+  penalties?: null | {
+    home_pen: number;
+    away_pen: number;
+    penalty_events: StatpalPenaltyEvent | StatpalPenaltyEvent[];
+  };
+  has_live_stats?: string;    // "True" | "False"
   inplay_odds_running: string;
 };
 
@@ -2074,6 +2109,11 @@ async function buildLiveMatches(): Promise<LiveMatchState[]> {
         matchSuspensionReason = reasonKey ? VAR_REASON_MAP[reasonKey] : "SUSPENSO";
       }
 
+      const footballExtra: LiveMatchState["_liveExtra"] = {};
+      if (m.ht) footballExtra.htScore = [m.ht.home_goals, m.ht.away_goals];
+      if (m.et) footballExtra.etScore = [m.et.home_goals, m.et.away_goals];
+      if (m.penalties) footballExtra.penScore = [m.penalties.home_pen, m.penalties.away_pen];
+
       const state: LiveMatchState = {
         id: m.main_id,
         home: m.home.name,
@@ -2094,6 +2134,7 @@ async function buildLiveMatches(): Promise<LiveMatchState[]> {
         _baseOdds: matchOdds,
         _oddsUpdatedAt: Date.now(),
         _driftPhase: 0,
+        _liveExtra: Object.keys(footballExtra).length > 0 ? footballExtra : undefined,
       };
 
       liveMatchState.set(m.main_id, state);
