@@ -2059,7 +2059,7 @@ export default function Home() {
           {chunks.map((events, bi) => {
             const cfg = BANNER_CONFIGS[bi];
             const totalOddsVal = events
-              .reduce((acc, m) => acc * (m.odds.home > 0 ? m.odds.home : 1), 1)
+              .reduce((acc, m) => acc + (m.odds.home > 0 ? m.odds.home : 0), 0)
               .toFixed(2);
 
             return (
