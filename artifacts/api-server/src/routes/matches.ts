@@ -6003,4 +6003,125 @@ router.get("/football-league-stats/:id", async (req, res) => {
   }
 });
 
+// ─── Football Head-to-Head ─────────────────────────────────────────────────────
+
+type H2HMatchRaw = {
+  main_id: string; fallback_id_1?: string;
+  country: string; league: string; league_id: string; date: string;
+  team1_name: string; team2_name: string;
+  team1_id: string; team2_id: string;
+  team1_score: string; team2_score: string;
+};
+
+type FootballH2HRaw = {
+  "head-to-head"?: {
+    team1_id: string; team2_id: string;
+    recent_meetings?: { match: H2HMatchRaw | H2HMatchRaw[] };
+    overall_record?: {
+      total?: { total: Record<string, string>[] };
+      home?: { team1: Record<string, string>[]; team2: Record<string, string>[] };
+      away?: { team1: Record<string, string>[]; team2: Record<string, string>[] };
+    };
+    leagues?: { league: H2HLeagueRaw | H2HLeagueRaw[] };
+    goals?: {
+      total?: { total: Record<string, string>[] };
+      home?: { home: Record<string, string>[] };
+      away?: { away: Record<string, string>[] };
+    };
+    biggest_victory?: { team1?: { match: H2HMatchRaw }; team2?: { match: H2HMatchRaw } };
+    biggest_defeat?:  { team1?: { match: H2HMatchRaw }; team2?: { match: H2HMatchRaw } };
+    last5_home?: { team1?: { match: H2HMatchRaw | H2HMatchRaw[] }; team2?: { match: H2HMatchRaw | H2HMatchRaw[] } };
+    last5_away?: { team1?: { match: H2HMatchRaw | H2HMatchRaw[] }; team2?: { match: H2HMatchRaw | H2HMatchRaw[] } };
+  };
+};
+
+type H2HLeagueRaw = { name: string; id: string; games: string; team1_won: string; team2_won: string; draw: string };
+
+// Merge array of single-key objects into one flat object: [{games:"180"},{team1_won:"83"}] → {games:180, team1_won:83}
+function mergeH2HArray(arr: Record<string, string>[]): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const item of arr) {
+    for (const [k, v] of Object.entries(item)) out[k] = parseInt(v) || 0;
+  }
+  return out;
+}
+
+function normaliseH2HMatch(m: H2HMatchRaw) {
+  return {
+    id: m.main_id, country: m.country, league: m.league, leagueId: m.league_id, date: m.date,
+    team1: { id: m.team1_id, name: m.team1_name, score: parseInt(m.team1_score) || 0 },
+    team2: { id: m.team2_id, name: m.team2_name, score: parseInt(m.team2_score) || 0 },
+  };
+}
+
+const footballH2HCache = new Map<string, { data: object; fetchedAt: number }>();
+const FOOTBALL_H2H_TTL = 10 * 60 * 1000; // 10 min
+
+async function getFootballH2H(team1: string, team2: string): Promise<object> {
+  const key = `${team1}-${team2}`;
+  const now = Date.now();
+  const cached = footballH2HCache.get(key);
+  if (cached && now - cached.fetchedAt < FOOTBALL_H2H_TTL) return cached.data;
+  const url = `${BASE_V2}/soccer/head-to-head?team1=${encodeURIComponent(team1)}&team2=${encodeURIComponent(team2)}&access_key=${STATSPAL_KEY}`;
+  const resp = await fetch(url, { signal: AbortSignal.timeout(10000) });
+  if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+  const data = (await resp.json()) as FootballH2HRaw;
+  const h2h = data["head-to-head"];
+  if (!h2h) throw new Error("H2H não encontrado");
+
+  const toMatches = (raw: H2HMatchRaw | H2HMatchRaw[] | undefined) =>
+    !raw ? [] : (Array.isArray(raw) ? raw : [raw]).map(normaliseH2HMatch);
+
+  const overallTotal = mergeH2HArray(h2h.overall_record?.total?.total ?? []);
+  const overallHomeT1 = mergeH2HArray(h2h.overall_record?.home?.team1 ?? []);
+  const overallHomeT2 = mergeH2HArray(h2h.overall_record?.home?.team2 ?? []);
+  const overallAwayT1 = mergeH2HArray(h2h.overall_record?.away?.team1 ?? []);
+  const overallAwayT2 = mergeH2HArray(h2h.overall_record?.away?.team2 ?? []);
+  const goalsTotal = mergeH2HArray(h2h.goals?.total?.total ?? []);
+  const goalsHome  = mergeH2HArray(h2h.goals?.home?.home  ?? []);
+  const goalsAway  = mergeH2HArray(h2h.goals?.away?.away  ?? []);
+
+  const rawLeagues = h2h.leagues?.league;
+  const leagues = !rawLeagues ? [] : (Array.isArray(rawLeagues) ? rawLeagues : [rawLeagues]).map(l => ({
+    name: l.name, id: l.id,
+    games: parseInt(l.games) || 0, team1Won: parseInt(l.team1_won) || 0, team2Won: parseInt(l.team2_won) || 0, draws: parseInt(l.draw) || 0,
+  }));
+
+  const result = {
+    team1Id: h2h.team1_id, team2Id: h2h.team2_id,
+    recentMeetings: toMatches(h2h.recent_meetings?.match),
+    overallRecord: {
+      total:   { games: overallTotal["games"] ?? 0, team1Won: overallTotal["team1_won"] ?? 0, team2Won: overallTotal["team2_won"] ?? 0, draws: overallTotal["draws"] ?? 0 },
+      homeTeam1: { games: overallHomeT1["games"] ?? 0, won: overallHomeT1["won"] ?? 0, lost: overallHomeT1["lost"] ?? 0, draws: overallHomeT1["draws"] ?? 0 },
+      homeTeam2: { games: overallHomeT2["games"] ?? 0, won: overallHomeT2["won"] ?? 0, lost: overallHomeT2["lost"] ?? 0, draws: overallHomeT2["draws"] ?? 0 },
+      awayTeam1: { games: overallAwayT1["games"] ?? 0, won: overallAwayT1["won"] ?? 0, lost: overallAwayT1["lost"] ?? 0, draws: overallAwayT1["draws"] ?? 0 },
+      awayTeam2: { games: overallAwayT2["games"] ?? 0, won: overallAwayT2["won"] ?? 0, lost: overallAwayT2["lost"] ?? 0, draws: overallAwayT2["draws"] ?? 0 },
+    },
+    goals: {
+      total:  { team1Scored: goalsTotal["team1_scored"] ?? 0, team1Conceded: goalsTotal["team1_conceded"] ?? 0, team2Scored: goalsTotal["team2_scored"] ?? 0, team2Conceded: goalsTotal["team2_conceded"] ?? 0 },
+      home:   { team1Scored: goalsHome["team1_scored"]  ?? 0, team1Conceded: goalsHome["team1_conceded"]  ?? 0, team2Scored: goalsHome["team2_scored"]  ?? 0, team2Conceded: goalsHome["team2_conceded"]  ?? 0 },
+      away:   { team1Scored: goalsAway["team1_scored"]  ?? 0, team1Conceded: goalsAway["team1_conceded"]  ?? 0, team2Scored: goalsAway["team2_scored"]  ?? 0, team2Conceded: goalsAway["team2_conceded"]  ?? 0 },
+    },
+    leagues,
+    biggestVictory: { team1: h2h.biggest_victory?.team1?.match ? normaliseH2HMatch(h2h.biggest_victory.team1.match) : null, team2: h2h.biggest_victory?.team2?.match ? normaliseH2HMatch(h2h.biggest_victory.team2.match) : null },
+    biggestDefeat:  { team1: h2h.biggest_defeat?.team1?.match  ? normaliseH2HMatch(h2h.biggest_defeat.team1.match)  : null, team2: h2h.biggest_defeat?.team2?.match  ? normaliseH2HMatch(h2h.biggest_defeat.team2.match)  : null },
+    last5Home: { team1: toMatches(h2h.last5_home?.team1?.match), team2: toMatches(h2h.last5_home?.team2?.match) },
+    last5Away: { team1: toMatches(h2h.last5_away?.team1?.match), team2: toMatches(h2h.last5_away?.team2?.match) },
+  };
+  footballH2HCache.set(key, { data: result, fetchedAt: now });
+  return result;
+}
+
+router.get("/football-h2h", async (req, res) => {
+  const team1 = String(req.query["team1"] ?? "");
+  const team2 = String(req.query["team2"] ?? "");
+  if (!team1 || !team2) { res.status(400).json({ error: "Parâmetros team1 e team2 são obrigatórios" }); return; }
+  try {
+    const data = await getFootballH2H(team1, team2);
+    res.json(data);
+  } catch {
+    res.status(500).json({ error: "Dados H2H indisponíveis" });
+  }
+});
+
 export default router;
