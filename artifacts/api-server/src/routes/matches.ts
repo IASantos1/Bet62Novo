@@ -758,6 +758,137 @@ function makeAdvancedMarketsReal(
   return base;
 }
 
+// ─── Sport-specific market builders for live matches ─────────────────────────
+
+function makeBasketballMarketsFromTeams(home: string, away: string): AdvancedMarkets {
+  const sr = seededRng(`bball-live:${home}:${away}`);
+  const marginMean = mc((sr(1) - 0.5) * 14 + 2, -18, 18);
+  const marginSd   = mc(11 + sr(2) * 3, 9, 16);
+  const mean  = mc(215 + (sr(3) - 0.5) * 30, 170, 250);
+  const sd    = mc(14 + sr(4) * 4, 10, 22);
+  const split = mc(0.51 + (sr(5) - 0.5) * 0.14, 0.35, 0.65);
+
+  const pHomeML   = mc(1 - normalCdf(-marginMean / marginSd), 0.05, 0.95);
+  const mean1H    = mean * 0.5;
+  const sd1H      = sd * 0.72;
+  const totalLine = Math.round(mean / 5) * 5;
+  const total1HLine = Math.round(mean1H / 5) * 5;
+  const spreadLine = Math.round(mean * 0.01 + Math.abs(marginMean) * 0.5) * (marginMean >= 0 ? -1 : 1);
+  const spread = Math.abs(Math.round(marginMean * 0.8));
+
+  const [oTotal,   uTotal  ] = probsToDecimalOdds([mc(1 - normalCdf((totalLine  - mean)   / sd),   0.05, 0.95), mc(normalCdf((totalLine  - mean)   / sd),   0.05, 0.95)], 1.06);
+  const [oTotal1H, uTotal1H] = probsToDecimalOdds([mc(1 - normalCdf((total1HLine - mean1H) / sd1H), 0.05, 0.95), mc(normalCdf((total1HLine - mean1H) / sd1H), 0.05, 0.95)], 1.06);
+
+  const meanHome = mean * split;
+  const meanAway = mean * (1 - split);
+  const sdTeam   = sd * 0.85;
+  const teamTotalLine = Math.round(meanHome / 5) * 5;
+  const awayTotalLine = Math.round(meanAway / 5) * 5;
+  const [oHT, uHT]     = probsToDecimalOdds([mc(1 - normalCdf((teamTotalLine - meanHome) / sdTeam), 0.05, 0.95), mc(normalCdf((teamTotalLine - meanHome) / sdTeam), 0.05, 0.95)], 1.06);
+  const [oAT, uAT]     = probsToDecimalOdds([mc(1 - normalCdf((awayTotalLine - meanAway) / sdTeam), 0.05, 0.95), mc(normalCdf((awayTotalLine - meanAway) / sdTeam), 0.05, 0.95)], 1.06);
+  const [spreadH, spreadA] = probsToDecimalOdds([mc(1 - normalCdf((-spread - marginMean) / marginSd), 0.05, 0.95), mc(normalCdf((-spread - marginMean) / marginSd), 0.05, 0.95)], 1.06);
+
+  const pHalfHome = mc(0.5 + (pHomeML - 0.5) * 0.75, 0.15, 0.85);
+  const [halfH, halfA] = probsToDecimalOdds([pHalfHome, 1 - pHalfHome], 1.06);
+  const [q1H, q1A] = probsToDecimalOdds([mc(0.5 + (pHomeML - 0.5) * 0.55, 0.25, 0.75), mc(0.5 - (pHomeML - 0.5) * 0.55, 0.25, 0.75)], 1.07);
+  const [q2H, q2A] = probsToDecimalOdds([mc(0.5 + (pHomeML - 0.5) * 0.50, 0.25, 0.75), mc(0.5 - (pHomeML - 0.5) * 0.50, 0.25, 0.75)], 1.07);
+  const [q3H, q3A] = probsToDecimalOdds([mc(0.5 + (pHomeML - 0.5) * 0.48, 0.25, 0.75), mc(0.5 - (pHomeML - 0.5) * 0.48, 0.25, 0.75)], 1.07);
+  const [q4H, q4A] = probsToDecimalOdds([mc(0.5 + (pHomeML - 0.5) * 0.52, 0.25, 0.75), mc(0.5 - (pHomeML - 0.5) * 0.52, 0.25, 0.75)], 1.07);
+
+  return {
+    doubleChance:  { homeOrDraw: 0, awayOrDraw: 0, homeOrAway: 0 },
+    bothTeamsScore: { yes: 0, no: 0 },
+    totalGoals: {
+      over05: 0, under05: 0, over15: 0, under15: 0,
+      over25: oTotal!, under25: uTotal!,
+      over35: 0, under35: 0, over45: 0, under45: 0, over55: 0, under55: 0, over65: 0, under65: 0,
+    },
+    handicap: { homeMinusOne: spreadH!, awayPlusOne: spreadA!, homeMinusOneHalf: oHT!, awayPlusOneHalf: uHT! },
+    halfTime: { home: halfH!, draw: 0, away: halfA! },
+    firstGoal: { home: 0, noGoal: 0, away: 0 },
+    _spread:    spread,
+    _total:     totalLine,
+    _total1H:   total1HLine,
+    _spreadLine: spreadLine,
+    basketballExtra: {
+      q1: { home: q1H!, away: q1A! },
+      q2: { home: q2H!, away: q2A! },
+      q3: { home: q3H!, away: q3A! },
+      q4: { home: q4H!, away: q4A! },
+      teamTotalHome: { line: teamTotalLine, over: oHT!, under: uHT! },
+      teamTotalAway: { line: awayTotalLine, over: oAT!, under: uAT! },
+    },
+    _extraUsed: { oTotal1H, uTotal1H, oAT, uAT },
+  } as unknown as AdvancedMarkets;
+}
+
+function makeHockeyMarketsFromTeams(home: string, away: string): AdvancedMarkets {
+  const sr = seededRng(`hockey-live:${home}:${away}`);
+  const isNHL      = !["Moscow", "Kazan", "SKA", "Metallurg", "Dynamo", "CSKA", "Ak Bars"].some(k => home.includes(k) || away.includes(k));
+  const meanTotal  = mc((isNHL ? 6.1 : 5.6) + (sr(1) - 0.5) * 1.6, 4.5, 8.0);
+  const marginMean = mc((sr(2) - 0.5) * 2.2 + 0.15, -2.5, 2.5);
+  const marginSd   = mc(2.0 + sr(3) * 0.8, 1.6, 3.2);
+  const pHomeML    = mc(1 - normalCdf(-marginMean / marginSd), 0.08, 0.92);
+  const [plH, plA] = probsToDecimalOdds([pHomeML, 1 - pHomeML], 1.05);
+
+  const totalLine = Math.round(meanTotal * 2) / 2;
+  const totalSd   = mc(1.6 + sr(4) * 0.6, 1.2, 2.4);
+  const [oTotal, uTotal] = probsToDecimalOdds([mc(1 - normalCdf((totalLine - meanTotal) / totalSd), 0.05, 0.95), mc(normalCdf((totalLine - meanTotal) / totalSd), 0.05, 0.95)], 1.06);
+  const [oAlt1,  uAlt1 ] = probsToDecimalOdds([mc(1 - normalCdf((totalLine - 0.5 - meanTotal) / totalSd), 0.05, 0.95), mc(normalCdf((totalLine - 0.5 - meanTotal) / totalSd), 0.05, 0.95)], 1.06);
+  const [oAlt2,  uAlt2 ] = probsToDecimalOdds([mc(1 - normalCdf((totalLine + 0.5 - meanTotal) / totalSd), 0.05, 0.95), mc(normalCdf((totalLine + 0.5 - meanTotal) / totalSd), 0.05, 0.95)], 1.06);
+
+  const mean1P = meanTotal / 3;
+  const mkPeriod = (hMult: number, aMult: number, si: number) => {
+    const lH = mc(mean1P * 0.5 + marginMean * hMult, 0.3, 2.5);
+    const lA = mc(mean1P * 0.5 - marginMean * aMult, 0.3, 2.5);
+    const pH = poissonPmf(lH, 5); const pA = poissonPmf(lA, 5);
+    let hw = 0, d = 0, aw = 0;
+    for (let gi = 0; gi <= 5; gi++) for (let gj = 0; gj <= 5; gj++) {
+      const p = (pH[gi] ?? 0) * (pA[gj] ?? 0);
+      if (gi > gj) hw += p; else if (gi < gj) aw += p; else d += p;
+    }
+    const s = hw + d + aw;
+    const [h, dx, a] = probsToDecimalOdds([hw / s, d / s, aw / s], 1.08);
+    return { home: h!, draw: dx!, away: a!, _si: si };
+  };
+  const p1 = mkPeriod(0.35, 0.35, 5);
+  const p2 = mkPeriod(0.20, 0.20, 6);
+  const p3 = mkPeriod(0.10, 0.10, 7);
+
+  const per1TotalLine = Math.round(mean1P * 2) / 2;
+  const per1TotalSd   = mc(0.9 + sr(15) * 0.4, 0.6, 1.5);
+  const [oPer1T, uPer1T] = probsToDecimalOdds([mc(1 - normalCdf((per1TotalLine - mean1P) / per1TotalSd), 0.05, 0.95), mc(normalCdf((per1TotalLine - mean1P) / per1TotalSd), 0.05, 0.95)], 1.06);
+
+  const pBTS = mc(0.70 + (sr(16) - 0.5) * 0.18, 0.45, 0.92);
+  const [btsYes, btsNo] = probsToDecimalOdds([pBTS, 1 - pBTS], 1.06);
+  const shotsLine = mc((isNHL ? 60.5 : 55.5) + (sr(17) - 0.5) * 8, 48.5, 72.5);
+  const [oShots, uShots] = probsToDecimalOdds([mc(0.5 + (sr(18) - 0.5) * 0.12, 0.38, 0.62), mc(0.5 - (sr(18) - 0.5) * 0.12, 0.38, 0.62)], 1.06);
+
+  return {
+    doubleChance:  { homeOrDraw: 0, awayOrDraw: 0, homeOrAway: 0 },
+    bothTeamsScore: { yes: btsYes!, no: btsNo! },
+    totalGoals: {
+      over05: 0, under05: 0,
+      over15: oAlt1!, under15: uAlt1!,
+      over25: oTotal!, under25: uTotal!,
+      over35: oAlt2!, under35: uAlt2!,
+      over45: 0, under45: 0, over55: 0, under55: 0, over65: 0, under65: 0,
+    },
+    handicap: { homeMinusOne: plH!, awayPlusOne: plA!, homeMinusOneHalf: 0, awayPlusOneHalf: 0 },
+    halfTime: { home: p1.home, draw: p1.draw, away: p1.away },
+    firstGoal: { home: 0, noGoal: 0, away: 0 },
+    _spread: 1.5,
+    _total: totalLine,
+    hockeyExtra: {
+      period2: { home: p2.home, draw: p2.draw, away: p2.away },
+      period3: { home: p3.home, draw: p3.draw, away: p3.away },
+      period1Total: { line: per1TotalLine, over: oPer1T!, under: uPer1T! },
+      bothTeamsScoreGame: { yes: btsYes!, no: btsNo! },
+      shotsOnGoal: { line: shotsLine, over: oShots!, under: uShots! },
+    },
+  } as unknown as AdvancedMarkets;
+}
+
 // ─── Caches ───────────────────────────────────────────────────────────────────
 
 // v2/live: cache 30s
@@ -1429,9 +1560,9 @@ function buildNHLLiveMatches(tournaments: NHLTournament[]): LiveMatchState[] {
         awayScore,
         minute,
         status: isNotStarted ? "Not Started" : m.status,
-        hasRealOdds: false,
+        hasRealOdds: true,
         odds: liveOdds,
-        markets: makeAdvancedMarketsFromTeams(m.home.name, m.away.name),
+        markets: makeHockeyMarketsFromTeams(m.home.name, m.away.name),
         events,
         _liveExtra: periods.length > 0 ? { periods } : undefined,
       });
@@ -1520,9 +1651,9 @@ function buildNBALiveMatches(tournaments: NBATournament[]): LiveMatchState[] {
         awayScore,
         minute,
         status: statusLabel,
-        hasRealOdds: false,
+        hasRealOdds: true,
         odds: liveOdds,
-        markets: makeAdvancedMarketsFromTeams(m.home.name, m.away.name),
+        markets: makeBasketballMarketsFromTeams(m.home.name, m.away.name),
         events: [],
         _liveExtra: quarters.length > 0 ? { quarters } : undefined,
       });
