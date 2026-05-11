@@ -7003,4 +7003,70 @@ router.get("/football-livescores", async (_req, res) => {
   }
 });
 
+// ─── Football Daily Results (v1) ──────────────────────────────────────────────
+// v1/soccer/daily/{d-N} — identical structure to v1/soccer/livescores.
+// Offset format: "d-1" = yesterday, "d-7" = 7 days ago (accepts integer 1–7).
+// Distinct from football-results which uses v2/soccer/matches/daily?offset=-1.
+// Cache: 5 min for d-1 (may still be updating), 30 min for d-2+ (fully settled).
+
+const footballDailyCache = new Map<string, { data: object[]; fetchedAt: number }>();
+
+router.get("/football-daily/:offset", async (req, res) => {
+  const raw = String(req.params["offset"]);
+  const n = parseInt(raw);
+  if (isNaN(n) || n < 0 || n > 7) {
+    res.status(400).json({ error: "Offset inválido (0–7)" });
+    return;
+  }
+  const key = `d-${n}`;
+  const ttl = n <= 1 ? 5 * 60 * 1000 : 30 * 60 * 1000;
+  const now = Date.now();
+  const cached = footballDailyCache.get(key);
+  if (cached && now - cached.fetchedAt < ttl) {
+    res.json({ leagues: cached.data });
+    return;
+  }
+  try {
+    const resp = await fetch(`${BASE_V1}/soccer/daily/${key}?access_key=${STATSPAL_KEY}`, { signal: AbortSignal.timeout(9000) });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const data = (await resp.json()) as V1SoccerLivescoresRaw;
+    const rawLeagues = data?.livescore?.league;
+    const leagues: V1SoccerLeague[] = !rawLeagues ? [] : Array.isArray(rawLeagues) ? rawLeagues : [rawLeagues];
+
+    const out = leagues.map(lg => {
+      const rawMatches = lg.match;
+      const matches: V1SoccerMatch[] = !rawMatches ? [] : Array.isArray(rawMatches) ? rawMatches : [rawMatches];
+      return {
+        id: lg.id, name: lg.name, country: lg.country,
+        cup: lg.cup === "True", subId: lg.sub_id,
+        matches: matches.map(m => {
+          const rawEvents = m.events?.event;
+          const events: V1SoccerEvent[] = !rawEvents ? [] : Array.isArray(rawEvents) ? rawEvents : [rawEvents];
+          return {
+            id: m.id, alternateId: m.alternate_id, alternateId2: m.alternate_id_2, staticId: m.static_id,
+            status: m.status, date: m.date, time: m.time,
+            venue: m.venue || null, commentary: m.commentary === "True",
+            homeTeam: { id: m.home.id, name: m.home.name, goals: parseInt(m.home.goals) || 0, wonOnAgg: m.home.agg === "true" },
+            awayTeam: { id: m.away.id, name: m.away.name, goals: parseInt(m.away.goals) || 0, wonOnAgg: m.away.agg === "true" },
+            ht: parseScoreStr(m.ht?.score),
+            ft: parseScoreStr(m.ft?.score),
+            events: events.map(e => ({
+              id: e.id, type: e.type, team: e.team,
+              minute: e.minute, extraMin: e.extra_min || null,
+              player: e.player, playerId: e.playerid,
+              assist: e.assist || null, assistId: e.assistid || null,
+              result: e.result,
+            })),
+          };
+        }),
+      };
+    });
+
+    footballDailyCache.set(key, { data: out, fetchedAt: now });
+    res.json({ leagues: out });
+  } catch {
+    res.status(500).json({ error: "Resultados diários indisponíveis" });
+  }
+});
+
 export default router;
