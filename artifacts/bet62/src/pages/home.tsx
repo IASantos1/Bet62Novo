@@ -251,7 +251,13 @@ const COUNTRY_FLAGS: Record<string, string> = {
 function formatMatchDate(dateStr: string): string {
   const parts = dateStr.split(".");
   if (parts.length !== 3) return dateStr;
-  const d = new Date(parseInt(parts[2]), parseInt(parts[1]) - 1, parseInt(parts[0]));
+  const today = new Date();
+  const todayKey = `${String(today.getDate()).padStart(2,"0")}.${String(today.getMonth()+1).padStart(2,"0")}.${today.getFullYear()}`;
+  const tomorrow = new Date(today); tomorrow.setDate(today.getDate() + 1);
+  const tomorrowKey = `${String(tomorrow.getDate()).padStart(2,"0")}.${String(tomorrow.getMonth()+1).padStart(2,"0")}.${tomorrow.getFullYear()}`;
+  if (dateStr === todayKey) return "Hoje";
+  if (dateStr === tomorrowKey) return "Amanhã";
+  const d = new Date(parseInt(parts[2]!), parseInt(parts[1]!) - 1, parseInt(parts[0]!));
   return d.toLocaleDateString("pt-BR", { weekday: "short", day: "2-digit", month: "2-digit" });
 }
 
@@ -3572,6 +3578,7 @@ export default function Home() {
                       league: o.tournamentName,
                       sport: "tennis",
                       time: o.time,
+                      date: o.date,
                       hasRealOdds: true,
                       odds: { home: o.matchOdds[0], draw: 0, away: o.matchOdds[1] },
                       markets: mkt,

@@ -1,0 +1,98 @@
+{
+  "livescores": {
+    "sport": "hockey",
+    "tournament": {
+      "country": "usa",
+      "gid": "2506",
+      "id": "2506",
+      "league": "Usa: Nhl",
+      "match": [
+        {
+          "date": "10.12.2025",
+          "fix_id": "915351",
+          "id": "626422",
+          "status": "Finished",
+          "time": "00:00",
+          "timer": "",
+          "home": {
+            "id": "2614",
+            "name": "Montreal Canadiens",
+            "totalscore": "1"
+          },
+          "away": {
+            "id": "2656",
+            "name": "Tampa Bay Lightning",
+            "totalscore": "6"
+          },
+          "events": {
+            "firstperiod": {
+              "score": "0 - 3",
+              "event": [
+                {
+                  "assist": "J. Guentzel,O. Bjorkstrand",
+                  "assistid": "16569,5415",
+                  "comment": "",
+                  "min": "02",
+                  "player": "B. Point",
+                  "playerid": "7998",
+                  "result": "[0 - 1]",
+                  "team": "visitorteam",
+                  "type": "goal"
+                },
+                {
+                  "assist": "",
+                  "assistid": "",
+                  "comment": "Roughing",
+                  "min": "03",
+                  "player": "B. Gallagher",
+                  "playerid": "10918",
+                  "result": "",
+                  "team": "localteam",
+                  "type": "penalty"
+                }
+              ]
+            },
+            "secondperiod": {
+              "score": "1 - 1",
+              "event": [
+                {
+                  "assist": "N. Kucherov",
+                  "assistid": "2895",
+                  "comment": "",
+                  "min": "02",
+                  "player": "C. D'Astous",
+                  "playerid": "65686",
+                  "result": "[0 - 4]",
+                  "team": "visitorteam",
+                  "type": "goal"
+                }
+              ]
+            },
+            "thirdperiod": {
+              "score": "0 - 2",
+              "event": [
+                {
+                  "assist": "A. Cirelli",
+                  "assistid": "2844",
+                  "comment": "",
+                  "min": "01",
+                  "player": "D. Raddysh",
+                  "playerid": "5416",
+                  "result": "[1 - 5]",
+                  "team": "visitorteam",
+                  "type": "goal"
+                }
+              ]
+            },
+            "overtime": {
+              "score": ""
+            },
+            "penalties": {
+              "score": ""
+            }
+          }
+        }
+      ]
+    }
+  }
+}
