@@ -6593,4 +6593,43 @@ router.get("/football-coach/:id", async (req, res) => {
   }
 });
 
+// ─── Football Images (binary PNG proxy) ────────────────────────────────────────
+// GET /api/matches/football-image?type=team|player|league&id={id}
+// Fetches binary PNG from Statpal and proxies it directly.
+// Cache-Control: 7 days — images rarely change.
+
+const imageCache = new Map<string, { buf: Buffer; fetchedAt: number }>();
+const IMAGE_TTL = 7 * 24 * 60 * 60 * 1000; // 7 days
+
+router.get("/football-image", async (req, res) => {
+  const type = String(req.query["type"] ?? "");
+  const id   = String(req.query["id"]   ?? "");
+  if (!type || !id) { res.status(400).json({ error: "Parâmetros 'type' e 'id' são obrigatórios" }); return; }
+
+  const cacheKey = `${type}-${id}`;
+  const now = Date.now();
+  const cached = imageCache.get(cacheKey);
+  if (cached && now - cached.fetchedAt < IMAGE_TTL) {
+    res.set("Content-Type", "image/png");
+    res.set("Cache-Control", "public, max-age=604800");
+    res.send(cached.buf);
+    return;
+  }
+
+  try {
+    const url = `${BASE_V2}/soccer/images?type=${encodeURIComponent(type)}&id=${encodeURIComponent(id)}&access_key=${STATSPAL_KEY}`;
+    const imgResp = await fetch(url, { signal: AbortSignal.timeout(8000) });
+    if (!imgResp.ok) { res.status(imgResp.status).json({ error: "Imagem não encontrada" }); return; }
+    const contentType = imgResp.headers.get("content-type") ?? "image/png";
+    const arrayBuf = await imgResp.arrayBuffer();
+    const buf = Buffer.from(arrayBuf);
+    imageCache.set(cacheKey, { buf, fetchedAt: now });
+    res.set("Content-Type", contentType);
+    res.set("Cache-Control", "public, max-age=604800");
+    res.send(buf);
+  } catch {
+    res.status(500).json({ error: "Imagem indisponível" });
+  }
+});
+
 export default router;
