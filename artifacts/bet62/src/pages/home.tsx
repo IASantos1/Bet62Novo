@@ -1357,6 +1357,18 @@ export default function Home() {
     return undefined;
   }, [activeTab, fetchLive]);
 
+  // Poll tennis odds every 60s to keep home/away odds current
+  useEffect(() => {
+    const poll = () => {
+      fetch("/api/matches/tennis-odds")
+        .then(r => r.ok ? r.json() : null)
+        .then(d => { if (d?.odds) setTennisOddsMatches(d.odds); })
+        .catch(() => { /* non-critical */ });
+    };
+    const id = setInterval(poll, 60000);
+    return () => clearInterval(id);
+  }, []);
+
   const fetchMyBets = useCallback(async () => {
     if (!auth.token) return;
     setMyBetsLoading(true);
@@ -1960,10 +1972,10 @@ export default function Home() {
     if (upcomingMatches.length === 0) return null;
 
     const BANNER_CONFIGS = [
-      { title: "MÚLTIPLAS", subtitle: "POPULARES", bonus: "+8.5%",  label: "🔥 COMBOS POPULARES",   count: "200+ apostas" },
-      { title: "TOP",       subtitle: "APOSTAS",   bonus: "+12.5%", label: "⭐ MAIS APOSTADOS",      count: "150+ apostas" },
-      { title: "ALTA",      subtitle: "RETORNO",   bonus: "+15%",   label: "💰 ALTO RETORNO",         count: "100+ apostas" },
-      { title: "EM",        subtitle: "DESTAQUE",  bonus: "+10%",   label: "🏆 FAVORITOS DO DIA",     count: "80+ apostas"  },
+      { title: "MÚLTIPLAS", subtitle: "POPULARES", label: "🔥 COMBOS POPULARES",   count: "200+ apostas" },
+      { title: "TOP",       subtitle: "APOSTAS",   label: "⭐ MAIS APOSTADOS",      count: "150+ apostas" },
+      { title: "ALTA",      subtitle: "RETORNO",   label: "💰 ALTO RETORNO",         count: "100+ apostas" },
+      { title: "EM",        subtitle: "DESTAQUE",  label: "🏆 FAVORITOS DO DIA",     count: "80+ apostas"  },
     ];
 
     // Interleave matches from different leagues/countries so each banner has variety
@@ -2031,8 +2043,8 @@ export default function Home() {
                       boxShadow: "0 0 14px rgba(220,38,38,0.3)",
                     }}
                   >
-                    <span className="block text-white font-bold text-[15px] leading-none">BET+</span>
-                    <span className="block text-red-500 font-bold text-[15px] leading-none mt-0.5">{cfg.bonus}</span>
+                    <span className="block text-white font-black text-[14px] italic leading-none tracking-tight">BET</span>
+                    <span className="block text-red-500 font-black text-[14px] italic leading-none tracking-tight">62</span>
                   </div>
                 </div>
 
