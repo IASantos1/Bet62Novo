@@ -3474,7 +3474,7 @@ async function getBasketballSchedule(): Promise<BasketballScheduleData> {
     const t = data?.scores?.tournament;
     if (!t) return basketballScheduleCache ?? { league: "NBA", season: "", upcomingMatches: [], recentMatches: [] };
 
-    const league = t.league ?? "NBA";
+    let league = t.league ?? "NBA";
     const season = t.season ?? "";
     const rawMatches = Array.isArray(t.match) ? t.match : (t.match ? [t.match] : []);
 
@@ -3485,7 +3485,7 @@ async function getBasketballSchedule(): Promise<BasketballScheduleData> {
     const today = new Date(); today.setHours(0, 0, 0, 0);
     const inDays = (d: Date, n: number) => { const t2 = new Date(today); t2.setDate(t2.getDate() + n); return d <= t2; };
 
-    const FINISHED = new Set(["Finished", "After Over Time", "After Overtime", "After OT", "Awarded"]);
+    const FINISHED = new Set(["Finished", "After Over Time", "After Overtime", "After OT", "Awarded", "Final"]);
     const upcomingMatches: BasketballScheduleMatch[] = [];
     const recentMatches: BasketballScheduleMatch[] = [];
 
@@ -3532,6 +3532,42 @@ async function getBasketballSchedule(): Promise<BasketballScheduleData> {
     const dateKey = (s: string) => { const [d, mo, y] = s.split("."); return `${y}${mo}${d}`; };
     upcomingMatches.sort((a, b) => dateKey(a.date).localeCompare(dateKey(b.date)) || a.time.localeCompare(b.time));
     recentMatches.sort((a, b) => dateKey(b.date).localeCompare(dateKey(a.date)));
+
+    // Fallback: if season-schedule is empty (e.g. playoffs), pull from livescores
+    if (upcomingMatches.length === 0) {
+      try {
+        const lr = await fetch(`${BASE_V1}/nba/livescores?access_key=${STATSPAL_KEY}`, { signal: AbortSignal.timeout(9000) });
+        if (lr.ok) {
+          const ld = (await lr.json()) as { livescores?: { tournament?: { league?: string; match?: unknown } } };
+          const lt = ld?.livescores?.tournament;
+          if (lt) {
+            if ((lt as { league?: string }).league) league = (lt as { league?: string }).league!;
+            const lm = (lt as { match?: unknown }).match;
+            const lms = Array.isArray(lm) ? lm : (lm ? [lm] : []);
+            const seenIds = new Set(upcomingMatches.map(x => x.id).concat(recentMatches.map(x => x.id)));
+            for (const m of lms as Array<{ id: string; date: string; time: string; status: string; home: { name: string; q1?: string; q2?: string; q3?: string; q4?: string; ot?: string; totalscore: string }; away: { name: string; q1?: string; q2?: string; q3?: string; q4?: string; ot?: string; totalscore: string } }>) {
+              if (!m?.id || !m.date || !m.home?.name || seenIds.has(m.id)) continue;
+              seenIds.add(m.id);
+              const matchDate = parseDateStr(m.date);
+              if (m.status === "Not Started" && matchDate >= today && inDays(matchDate, 21)) {
+                upcomingMatches.push({ id: m.id, date: m.date, time: m.time, status: m.status, home: m.home.name, away: m.away.name, homeScore: 0, awayScore: 0, quarters: [] });
+              } else if (FINISHED.has(m.status)) {
+                const daysAgo = (today.getTime() - matchDate.getTime()) / 86400000;
+                if (daysAgo <= 14 && daysAgo >= 0) {
+                  const hs = parseInt(m.home.totalscore) || 0; const as_ = parseInt(m.away.totalscore) || 0;
+                  const qi = (h: string | undefined, a: string | undefined): [number, number] | null => { const hv = parseInt(h ?? "") || 0; const av = parseInt(a ?? "") || 0; return (hv > 0 || av > 0) ? [hv, av] : null; };
+                  const qs: Array<[number, number]> = [];
+                  for (const [hf, af] of [[m.home.q1, m.away.q1],[m.home.q2, m.away.q2],[m.home.q3, m.away.q3],[m.home.q4, m.away.q4],[m.home.ot, m.away.ot]] as [string|undefined,string|undefined][]) { const q = qi(hf,af); if(q) qs.push(q); }
+                  recentMatches.push({ id: m.id, date: m.date, time: m.time, status: m.status, home: m.home.name, away: m.away.name, homeScore: hs, awayScore: as_, quarters: qs, homeWon: hs > as_ });
+                }
+              }
+            }
+            upcomingMatches.sort((a, b) => dateKey(a.date).localeCompare(dateKey(b.date)) || a.time.localeCompare(b.time));
+            recentMatches.sort((a, b) => dateKey(b.date).localeCompare(dateKey(a.date)));
+          }
+        }
+      } catch { /* non-critical */ }
+    }
 
     basketballScheduleCache = { league, season, upcomingMatches: upcomingMatches.slice(0, 40), recentMatches: recentMatches.slice(0, 15) };
     basketballScheduleFetchedAt = now;
@@ -3604,7 +3640,7 @@ async function getHockeySchedule(): Promise<HockeyScheduleData> {
     const t = data?.scores?.tournament;
     if (!t) return hockeyScheduleCache ?? { league: "NHL", season: "", upcomingMatches: [], recentMatches: [] };
 
-    const league = t.league ?? "NHL";
+    let league = t.league ?? "NHL";
     const season = t.season ?? "";
     const rawMatches = Array.isArray(t.match) ? t.match : (t.match ? [t.match] : []);
 
@@ -3692,6 +3728,45 @@ async function getHockeySchedule(): Promise<HockeyScheduleData> {
     const dateKey = (s: string) => { const [d, mo, y] = s.split("."); return `${y}${mo}${d}`; };
     upcomingMatches.sort((a, b) => dateKey(a.date).localeCompare(dateKey(b.date)) || a.time.localeCompare(b.time));
     recentMatches.sort((a, b) => dateKey(b.date).localeCompare(dateKey(a.date)));
+
+    // Fallback: if season-schedule is empty (e.g. playoffs), pull from livescores
+    if (upcomingMatches.length === 0) {
+      try {
+        const lr = await fetch(`${BASE_V1}/nhl/livescores?access_key=${STATSPAL_KEY}`, { signal: AbortSignal.timeout(9000) });
+        if (lr.ok) {
+          const ld = (await lr.json()) as { livescores?: { tournament?: { league?: string; match?: unknown } } };
+          const lt = ld?.livescores?.tournament;
+          if (lt) {
+            if ((lt as { league?: string }).league) league = (lt as { league?: string }).league!;
+            const lm = (lt as { match?: unknown }).match;
+            const lms = Array.isArray(lm) ? lm : (lm ? [lm] : []);
+            const seenIds = new Set(upcomingMatches.map(x => x.id).concat(recentMatches.map(x => x.id)));
+            const LIVE_FIN = new Set(["Finished", "After Penalties", "After Overtime"]);
+            for (const m of lms as Array<{ id: string; fix_id?: string; date: string; time: string; status: string; home: { name: string; totalscore: string }; away: { name: string; totalscore: string }; events?: { firstperiod?: { score?: string }; secondperiod?: { score?: string }; thirdperiod?: { score?: string }; overtime?: { score?: string }; penalties?: { score?: string } } }>) {
+              if (!m?.id || !m.date || !m.home?.name || seenIds.has(m.id)) continue;
+              seenIds.add(m.id);
+              const matchDate = parseDateStr(m.date);
+              if (m.status === "Not Started" && matchDate >= today && inDays(matchDate, 21)) {
+                upcomingMatches.push({ id: m.id, date: m.date, time: m.time, status: m.status, home: m.home.name, away: m.away.name, homeScore: 0, awayScore: 0, periods: [] });
+              } else if (LIVE_FIN.has(m.status)) {
+                const daysAgo = (today.getTime() - matchDate.getTime()) / 86400000;
+                if (daysAgo <= 14 && daysAgo >= 0) {
+                  const hs = parseInt(m.home.totalscore) || 0; const as_ = parseInt(m.away.totalscore) || 0;
+                  const periods: Array<[number, number]> = [];
+                  for (const key of ["firstperiod", "secondperiod", "thirdperiod", "overtime", "penalties"] as const) {
+                    const sc = m.events?.[key]?.score; if (!sc) continue;
+                    const ps = sc.split("-").map((p: string) => parseInt(p.trim())); if (ps.length >= 2 && !isNaN(ps[0]!) && !isNaN(ps[1]!)) periods.push([ps[0]!, ps[1]!]);
+                  }
+                  recentMatches.push({ id: m.id, date: m.date, time: m.time, status: m.status, home: m.home.name, away: m.away.name, homeScore: hs, awayScore: as_, periods, homeWon: hs > as_ });
+                }
+              }
+            }
+            upcomingMatches.sort((a, b) => dateKey(a.date).localeCompare(dateKey(b.date)) || a.time.localeCompare(b.time));
+            recentMatches.sort((a, b) => dateKey(b.date).localeCompare(dateKey(a.date)));
+          }
+        }
+      } catch { /* non-critical */ }
+    }
 
     hockeyScheduleCache = { league, season, upcomingMatches: upcomingMatches.slice(0, 30), recentMatches: recentMatches.slice(0, 15) };
     hockeyScheduleFetchedAt = now;
