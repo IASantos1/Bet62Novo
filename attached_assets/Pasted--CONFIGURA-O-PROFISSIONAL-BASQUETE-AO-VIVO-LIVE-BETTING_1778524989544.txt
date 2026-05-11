@@ -1,0 +1,278 @@
+🏀 CONFIGURAÇÃO PROFISSIONAL — BASQUETE AO VIVO (LIVE BETTING ENGINE)
+
+Agora vamos estruturar o funcionamento correto do basquete ao vivo, igual sportsbooks profissionais.
+
+Você quer:
+
+⚡ atualização de odds em tempo real
+🔒 bloqueio automático de odds
+🧠 suspensão de mercados em eventos críticos
+❌ ocultar mercados encerrados
+🔁 abrir novos mercados dinamicamente
+📊 atualização por posse/pontos
+⏱ transição automática entre quartos
+⚙️ ARQUITETURA DO BASQUETE AO VIVO
+LIVE FEED
+   ↓
+POSSESSION EVENT
+   ↓
+GAME STATE
+   ↓
+MARKET SUSPEND
+   ↓
+ODDS RECALCULATION
+   ↓
+QUARTER VALIDATION
+   ↓
+MARKET CLOSE / OPEN
+   ↓
+WEBSOCKET PUSH
+🧠 1. MATCH STATE (ESTADO DO JOGO)
+
+Você precisa armazenar:
+
+{
+  "match_id": "nba_001",
+
+  "quarter": 2,
+
+  "clock": "06:42",
+
+  "score": {
+    "home": 54,
+    "away": 49
+  },
+
+  "timeouts": {
+    "home": 3,
+    "away": 4
+  },
+
+  "possession": "home"
+}
+⚡ 2. EVENTOS QUE ALTERAM ODDS
+
+No basquete:
+
+praticamente toda posse altera odds.
+
+Eventos críticos
+Evento	Suspende
+Basket	✔
+3PT Made	✔
+Timeout	✔
+Foul Trouble	✔
+Free Throws	✔
+Quarter End	✔
+OT Start	✔
+🔒 3. BLOQUEIO DE ODDS
+Fluxo:
+BASKET
+   ↓
+LOCK MARKETS
+   ↓
+UPDATE SCORE
+   ↓
+RECALCULATE ODDS
+   ↓
+REOPEN
+⚙️ SCRIPT
+function onBasket(match) {
+
+  suspendMarkets(match.id);
+
+  updateScore(match);
+
+  const odds =
+    calculateBasketballOdds(match);
+
+  setTimeout(() => {
+
+    reopenMarkets(match.id, odds);
+
+  }, 1500);
+}
+🧠 4. CONFIGURAÇÃO DOS MERCADOS
+🏀 Moneyline
+{
+  "market": "moneyline",
+
+  "suspend_on_score": true,
+
+  "recalculate_every_possession": true,
+
+  "delay": 1500
+}
+🏀 Spread
+{
+  "market": "spread",
+
+  "dynamic_lines": true,
+
+  "recalculate_every_score": true
+}
+🏀 Totals
+{
+  "market": "totals",
+
+  "hide_completed_lines": true,
+
+  "auto_generate_new_lines": true
+}
+🏀 Quarter Markets
+{
+  "market": "quarter",
+
+  "close_after_quarter_end": true,
+
+  "open_next_quarter_markets": true
+}
+🏀 Player Props
+{
+  "market": "player_points",
+
+  "recalculate_every_score": true,
+
+  "suspend_on_substitution": true
+}
+⚡ 5. FINAL DE QUARTO
+
+Você perguntou algo equivalente ao tênis:
+
+“quando acabar o período, os mercados somem”
+
+Exatamente.
+
+Fluxo:
+QUARTER END
+    ↓
+CLOSE Q1 MARKETS
+    ↓
+REMOVE OLD MARKETS
+    ↓
+OPEN Q2 MARKETS
+    ↓
+RECALCULATE ODDS
+⚙️ SCRIPT
+function onQuarterEnd(match) {
+
+  closeMarkets(match.id, `Q${match.quarter}`);
+
+  match.quarter += 1;
+
+  openMarkets(
+    match.id,
+    `Q${match.quarter}`
+  );
+
+  recalculateAllOdds(match);
+}
+❌ 6. OCULTAR MERCADOS ENCERRADOS
+Exemplo
+
+Antes:
+
+1Q Winner
+1Q Totals
+1Q Spread
+Após fim do 1Q
+❌ 1Q Winner removido
+❌ 1Q Totals removido
+
+✔ 2Q Winner aberto
+✔ 2Q Totals aberto
+✔ 2Q Spread aberto
+⚡ 7. LINHAS DINÂMICAS
+Totais
+
+Antes:
+
+Over 189.5
+Over 194.5
+Over 199.5
+Jogo acelera
+❌ Over 189.5 removido
+
+✔ Over 204.5
+✔ Over 209.5
+⚙️ SCRIPT
+function updateTotalLines(match) {
+
+  const totalPoints =
+    match.score.home +
+    match.score.away;
+
+  match.markets.totals.lines =
+    match.markets.totals.lines
+      .filter(line => line.value > totalPoints);
+
+  const nextLines = [
+
+    totalPoints + 5.5,
+    totalPoints + 10.5
+
+  ];
+
+  nextLines.forEach(line => {
+
+    addLineIfMissing(match, line);
+
+  });
+}
+🔒 8. DELAYS PROFISSIONAIS
+Evento	Delay
+Basket	1.5s
+3PT	2s
+Timeout	3s
+Quarter End	5s
+OT Start	8s
+⚡ 9. WEBSOCKET AO VIVO
+Backend
+io.emit("nba_update", {
+
+  matchId: match.id,
+
+  markets: match.markets
+
+});
+Frontend
+socket.on("nba_update", data => {
+
+  renderMarkets(data.markets);
+
+});
+🧠 10. MERCADOS QUE SOMEM
+✔ 1Q Winner
+✔ 1Q Totals
+✔ 1Q Spread
+✔ Props já decididos
+✔ Linhas atingidas
+⚡ 11. MERCADOS QUE CONTINUAM
+✔ Moneyline
+✔ Full Game Totals
+✔ Live Spread
+✔ Player Props ativos
+🧠 12. EVENTOS DE ALTA PRIORIDADE
+🔴 Hard Suspend
+buzzer beater review
+technical foul
+ejection
+overtime
+🟡 Soft Suspend
+timeout
+substitution
+free throws
+⚙️ 13. ENGINE FINAL
+SCORE EVENT
+    ↓
+SUSPEND
+    ↓
+UPDATE GAME STATE
+    ↓
+RECALCULATE ODDS
+    ↓
+REMOVE INVALID MARKETS
+    ↓
+OPEN NEW QUARTER MARKETS
+    ↓
+WEBSOCKET PUSH
