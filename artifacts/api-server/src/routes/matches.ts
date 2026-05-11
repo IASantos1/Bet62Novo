@@ -7678,4 +7678,77 @@ router.get("/football-scoring-leaders/:country", async (req, res) => {
   }
 });
 
+// ─── Football Injuries/Suspensions (v1) ───────────────────────────────────────
+// v1/soccer/injuries — global (no country param), same root "injuries_suspensions"
+// and same sidelined structure as v2/soccer/injuries-suspensions (used by
+// /football-injuries). Differences in match object:
+//   v2: main_id (not id), no goals/status/alternate_id/static_id
+//   v1: id + alternate_id + alternate_id_2 + static_id + goals:"?" + status (time)
+// Reuses FootballInjuryPlayerRaw, FootballInjurySidelinedRaw, parseInjuryPlayers,
+// parseInjuryTeam helpers already defined above.
+
+type V1InjuryTeamRaw = {
+  id: string; name: string; goals: string;   // "?" when upcoming
+  sidelined?: FootballInjurySidelinedRaw;
+};
+type V1InjuryMatchRaw = {
+  id: string; alternate_id: string; alternate_id_2: string; static_id: string;
+  date: string; time: string; status: string;  // kickoff time e.g. "06:00"
+  home: V1InjuryTeamRaw; away: V1InjuryTeamRaw;
+};
+type V1InjuryLeagueRaw = {
+  id: string; name: string; sub_id: string;
+  // no "country" field at league level in v1
+  match: V1InjuryMatchRaw | V1InjuryMatchRaw[];
+};
+type V1InjuriesRaw = {
+  injuries_suspensions?: {
+    updated?: string; sport?: string;
+    league?: V1InjuryLeagueRaw | V1InjuryLeagueRaw[];
+  };
+};
+
+let footballInjuriesV1Cache: object[] | null = null;
+let footballInjuriesV1FetchedAt = 0;
+const FOOTBALL_INJURIES_V1_TTL = 15 * 60 * 1000; // 15 min — same as v2
+
+router.get("/football-injuries-v1", async (_req, res) => {
+  const now = Date.now();
+  if (footballInjuriesV1Cache && now - footballInjuriesV1FetchedAt < FOOTBALL_INJURIES_V1_TTL) {
+    res.json({ leagues: footballInjuriesV1Cache });
+    return;
+  }
+  try {
+    const resp = await fetch(`${BASE_V1}/soccer/injuries?access_key=${STATSPAL_KEY}`, { signal: AbortSignal.timeout(10000) });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const data = (await resp.json()) as V1InjuriesRaw;
+    const rawLeagues = data?.injuries_suspensions?.league;
+    const leagues: V1InjuryLeagueRaw[] = toArr(rawLeagues);
+
+    const out = leagues.map(lg => ({
+      id: lg.id, name: lg.name, subId: lg.sub_id,
+      matches: toArr(lg.match).map(m => ({
+        id: m.id, alternateId: m.alternate_id, alternateId2: m.alternate_id_2, staticId: m.static_id,
+        date: m.date, time: m.time, status: m.status,
+        homeTeam: {
+          id: m.home.id, name: m.home.name,
+          toMiss:       parseInjuryPlayers(m.home.sidelined?.to_miss?.player),
+          questionable: parseInjuryPlayers(m.home.sidelined?.questionable?.player),
+        },
+        awayTeam: {
+          id: m.away.id, name: m.away.name,
+          toMiss:       parseInjuryPlayers(m.away.sidelined?.to_miss?.player),
+          questionable: parseInjuryPlayers(m.away.sidelined?.questionable?.player),
+        },
+      })),
+    }));
+
+    footballInjuriesV1Cache = out;
+    footballInjuriesV1FetchedAt = now;
+    res.json({ leagues: out });
+  } catch {
+    res.status(500).json({ error: "Lesões indisponíveis" });
+  }
+});
+
 export default router;

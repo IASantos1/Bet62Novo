@@ -1,0 +1,156 @@
+{
+  "example": {
+    "odds_feed": {
+      "updated": "22.01.2025 13:47:47",
+      "sport": "soccer",
+      "league": [
+        {
+          "country": "england",
+          "gid": "1204",
+          "id": "3037",
+          "name": "England: Premier League",
+          "sub_id": "30370",
+          "match": [
+            {
+              "alternate_id": "6346836",
+              "alternate_id_2": "8210697",
+              "date": "25.01.2025",
+              "id": "5839528",
+              "static_id": "25012523408862341130",
+              "status": "15:00",
+              "time": "15:00",
+              "venue": "",
+              "home": {
+                "alternate_id": "5363803836",
+                "id": "2340886",
+                "name": "Bournemouth"
+              },
+              "away": {
+                "alternate_id": "5363803837",
+                "id": "2341130",
+                "name": "Nottingham"
+              },
+              "odds": {
+                "type": [
+                  {
+                    "name": "1x2",
+                    "bookmaker": [
+                      {
+                        "id": "767",
+                        "name": "bwin",
+                        "odd": [
+                          {
+                            "name": "Home",
+                            "value": "2.05"
+                          },
+                          {
+                            "name": "Draw",
+                            "value": "3.60"
+                          },
+                          {
+                            "name": "Away",
+                            "value": "3.40"
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "name": "Asian Handicap",
+                    "bookmaker": [
+                      {
+                        "id": "777",
+                        "name": "NordicBet",
+                        "handicap": [
+                          {
+                            "ismain": "True",
+                            "name": "-0.75",
+                            "stop": "False",
+                            "odd": [
+                              {
+                                "name": "Home",
+                                "value": "2.43"
+                              },
+                              {
+                                "name": "Away",
+                                "value": "1.59"
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "name": "Over/Under",
+                    "bookmaker": [
+                      {
+                        "id": "781",
+                        "name": "bet365",
+                        "total": [
+                          {
+                            "ismain": "True",
+                            "name": "2.5",
+                            "stop": "False",
+                            "odd": [
+                              {
+                                "name": "Over",
+                                "value": "1.77"
+                              },
+                              {
+                                "name": "Under",
+                                "value": "1.93"
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "name": "Correct Score",
+                    "bookmaker": [
+                      {
+                        "id": "780",
+                        "name": "WilliamHill",
+                        "odd": [
+                          {
+                            "name": "1:0",
+                            "value": "8.00"
+                          },
+                          {
+                            "name": "2:1",
+                            "value": "8.50"
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "name": "Both Teams To Score",
+                    "bookmaker": [
+                      {
+                        "id": "836",
+                        "name": "Fonbet",
+                        "odd": [
+                          {
+                            "name": "Yes",
+                            "value": "1.68"
+                          },
+                          {
+                            "name": "No",
+                            "value": "2.12"
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  }
+}
