@@ -7532,4 +7532,91 @@ router.get("/football-live-match-stats/:leagueSlug", async (req, res) => {
   }
 });
 
+// ─── Football Standings by country/region (v1) ────────────────────────────────
+// v1/soccer/standings/{country} — multiple leagues per country, each with team[].
+// Root: "standings" (6th distinct root key in football v1 endpoints).
+// Distinct from /football-standings/:id which uses v2/soccer/leagues/{id}/standings.
+// New fields: is_current ("True"/"False"), status ("same"/"up"/"down"),
+//   overall/home/away splits, totals.goal_difference/points, special.name (zone label).
+// home/away have an undocumented "p" field (ignored in output).
+
+type V1StandingsRecord = {
+  draw: string; goals_allowed: string; goals_scored: string;
+  lose: string; played: string; win: string; p?: string;
+};
+type V1StandingsTeam = {
+  id: string; name: string; position: string;
+  recent_form: string; status: string;
+  overall: V1StandingsRecord;
+  home: V1StandingsRecord;
+  away: V1StandingsRecord;
+  totals: { goal_difference: string; points: string };
+  special?: { name?: string };
+};
+type V1StandingsLeague = {
+  id: string; name: string; country: string; season: string; sub_id: string;
+  is_current: string;   // "True"/"False"
+  team: V1StandingsTeam | V1StandingsTeam[];
+};
+type V1StandingsRaw = {
+  standings?: {
+    country?: string; updated?: string; sport?: string;
+    league?: V1StandingsLeague | V1StandingsLeague[];
+  };
+};
+
+function mapRecord(r: V1StandingsRecord) {
+  return {
+    played:       parseInt(r.played)       || 0,
+    win:          parseInt(r.win)          || 0,
+    draw:         parseInt(r.draw)         || 0,
+    lose:         parseInt(r.lose)         || 0,
+    goalsScored:  parseInt(r.goals_scored) || 0,
+    goalsAllowed: parseInt(r.goals_allowed)|| 0,
+  };
+}
+
+const footballStandingsCountryCache = new Map<string, { data: object[]; fetchedAt: number }>();
+const FOOTBALL_STANDINGS_COUNTRY_TTL = 30 * 60 * 1000; // 30 min
+
+router.get("/football-standings-country/:country", async (req, res) => {
+  const country = String(req.params["country"]).toLowerCase().replace(/[^a-z0-9-]/g, "");
+  if (!country) { res.status(400).json({ error: "País inválido" }); return; }
+  const now = Date.now();
+  const cached = footballStandingsCountryCache.get(country);
+  if (cached && now - cached.fetchedAt < FOOTBALL_STANDINGS_COUNTRY_TTL) {
+    res.json({ leagues: cached.data });
+    return;
+  }
+  try {
+    const resp = await fetch(`${BASE_V1}/soccer/standings/${encodeURIComponent(country)}?access_key=${STATSPAL_KEY}`, { signal: AbortSignal.timeout(9000) });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const data = (await resp.json()) as V1StandingsRaw;
+    const rawLeagues = data?.standings?.league;
+    const leagues: V1StandingsLeague[] = toArr(rawLeagues);
+
+    const out = leagues.map(lg => ({
+      id: lg.id, name: lg.name, country: lg.country, season: lg.season, subId: lg.sub_id,
+      isCurrent: lg.is_current === "True",
+      teams: toArr(lg.team).map(t => ({
+        id: t.id, name: t.name,
+        position: parseInt(t.position) || 0,
+        recentForm: t.recent_form,          // "WWWLW" — W/D/L chars
+        positionStatus: t.status,           // "same" | "up" | "down"
+        overall: mapRecord(t.overall),
+        home:    mapRecord(t.home),
+        away:    mapRecord(t.away),
+        points:         parseInt(t.totals.points)          || 0,
+        goalDifference: parseInt(t.totals.goal_difference) || 0,
+        zone: t.special?.name || null,      // "Promotion - League One" etc.
+      })),
+    }));
+
+    footballStandingsCountryCache.set(country, { data: out, fetchedAt: now });
+    res.json({ leagues: out });
+  } catch {
+    res.status(500).json({ error: "Classificações indisponíveis" });
+  }
+});
+
 export default router;
