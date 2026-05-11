@@ -907,6 +907,20 @@ type HockeyDailyResult = {
 let hockeyResultsCache: HockeyDailyResult[] | null = null;
 let hockeyResultsFetchedAt = 0;
 
+// NHL standings
+type NHLStandingsTeam = {
+  id: string; name: string; position: number;
+  gp: number; won: number; lost: number; otLosses: number;
+  points: number; gf: number; ga: number; diff: string;
+  streak: string; lastTen: string; homeRecord: string; roadRecord: string;
+};
+type NHLStandingsDivision = { name: string; teams: NHLStandingsTeam[] };
+type NHLStandingsConference = { name: string; divisions: NHLStandingsDivision[] };
+type NHLStandingsData = { season: string; conferences: NHLStandingsConference[] };
+let hockeyStandingsCache: NHLStandingsData | null = null;
+let hockeyStandingsFetchedAt = 0;
+const HOCKEY_STANDINGS_TTL = 30 * 60 * 1000;
+
 // Volleyball season schedule
 type VolleyScheduleMatch = {
   id: string; status: string; date: string; time: string;
@@ -3563,6 +3577,80 @@ router.get("/hockey-schedule", async (_req, res) => {
     res.json(data);
   } catch {
     res.status(500).json({ error: "Calendário indisponível" });
+  }
+});
+
+async function getHockeyStandings(): Promise<NHLStandingsData> {
+  const now = Date.now();
+  if (hockeyStandingsCache && now - hockeyStandingsFetchedAt < HOCKEY_STANDINGS_TTL) return hockeyStandingsCache;
+  try {
+    const resp = await fetch(`${BASE_V1}/nhl/standings?access_key=${STATSPAL_KEY}`);
+    if (!resp.ok) return hockeyStandingsCache ?? { season: "", conferences: [] };
+    const json = (await resp.json()) as {
+      standings?: {
+        tournament?: {
+          season?: string;
+          league?: Array<{
+            name: string;
+            division?: Array<{
+              name: string;
+              team?: Array<{
+                id: string; name: string; position: string;
+                games_played: string; won: string; lost: string; ot_losses: string;
+                points: string; goals_for: string; goals_against: string;
+                difference: string; streak: string; last_ten: string;
+                home_record: string; road_record: string;
+              }>;
+            }>;
+          }>;
+        };
+      };
+    };
+    const t = json.standings?.tournament;
+    if (!t) return hockeyStandingsCache ?? { season: "", conferences: [] };
+    const season = t.season ?? "";
+    const leagues = Array.isArray(t.league) ? t.league : t.league ? [t.league] : [];
+    const conferences: NHLStandingsConference[] = leagues.map(conf => {
+      const divs = Array.isArray(conf.division) ? conf.division : conf.division ? [conf.division] : [];
+      const divisions: NHLStandingsDivision[] = divs.map(div => {
+        const teams = Array.isArray(div.team) ? div.team : div.team ? [div.team] : [];
+        return {
+          name: div.name,
+          teams: teams.map(t2 => ({
+            id: t2.id,
+            name: t2.name,
+            position: parseInt(t2.position) || 0,
+            gp: parseInt(t2.games_played) || 0,
+            won: parseInt(t2.won) || 0,
+            lost: parseInt(t2.lost) || 0,
+            otLosses: parseInt(t2.ot_losses) || 0,
+            points: parseInt(t2.points) || 0,
+            gf: parseInt(t2.goals_for) || 0,
+            ga: parseInt(t2.goals_against) || 0,
+            diff: t2.difference ?? "0",
+            streak: t2.streak ?? "",
+            lastTen: t2.last_ten ?? "",
+            homeRecord: t2.home_record ?? "",
+            roadRecord: t2.road_record ?? "",
+          })).sort((a, b) => a.position - b.position),
+        };
+      });
+      return { name: conf.name, divisions };
+    });
+    hockeyStandingsCache = { season, conferences };
+    hockeyStandingsFetchedAt = now;
+    return hockeyStandingsCache;
+  } catch {
+    return hockeyStandingsCache ?? { season: "", conferences: [] };
+  }
+}
+
+router.get("/hockey-standings", async (_req, res) => {
+  try {
+    const data = await getHockeyStandings();
+    res.json(data);
+  } catch {
+    res.status(500).json({ error: "Classificação indisponível" });
   }
 });
 

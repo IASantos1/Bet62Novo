@@ -884,6 +884,17 @@ export default function Home() {
   };
   const [hockeySchedule, setHockeySchedule] = useState<HockeyScheduleData | null>(null);
 
+  type NHLStandingsTeam = {
+    id: string; name: string; position: number;
+    gp: number; won: number; lost: number; otLosses: number;
+    points: number; gf: number; ga: number; diff: string;
+    streak: string; lastTen: string; homeRecord: string; roadRecord: string;
+  };
+  type NHLStandingsDivision = { name: string; teams: NHLStandingsTeam[] };
+  type NHLStandingsConference = { name: string; divisions: NHLStandingsDivision[] };
+  type NHLStandingsData = { season: string; conferences: NHLStandingsConference[] };
+  const [hockeyStandings, setHockeyStandings] = useState<NHLStandingsData | null>(null);
+
   // Active tennis tournaments
   type ActiveTournament = {
     id: string; name: string; category: string; surface: string;
@@ -1113,6 +1124,10 @@ export default function Home() {
     fetch("/api/matches/hockey-schedule")
       .then(r => r.ok ? r.json() : null)
       .then(d => { if (d) setHockeySchedule(d); })
+      .catch(() => { /* non-critical */ });
+    fetch("/api/matches/hockey-standings")
+      .then(r => r.ok ? r.json() : null)
+      .then(d => { if (d) setHockeyStandings(d); })
       .catch(() => { /* non-critical */ });
     fetch("/api/matches/volleyball-odds")
       .then(r => r.ok ? r.json() : null)
@@ -4442,6 +4457,75 @@ export default function Home() {
                                     <div className="text-right shrink-0">
                                       <div className="text-[10px] font-black text-zinc-400 tabular-nums">{g.time.slice(0,5)}</div>
                                       {g.venue && <div className="text-[9px] text-zinc-700 truncate max-w-[80px]">{g.venue.split(" ").slice(0,2).join(" ")}</div>}
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  })()}
+
+                  {/* ─── Classificação NHL ────────────────────────────────────── */}
+                  {(selectedSport === "all" || selectedSport === "hockey") && hockeyStandings && hockeyStandings.conferences.length > 0 && !selectedLeague && (() => {
+                    const streakColor = (s: string) => s.startsWith("W") ? "text-green-400" : s.startsWith("L") ? "text-red-400" : "text-zinc-400";
+                    return (
+                      <div className="mb-6">
+                        <div className="flex items-center gap-2 mb-3">
+                          <span className="text-base font-black italic uppercase tracking-tight text-zinc-400">🏆 Classificação NHL</span>
+                          <span className="text-[10px] font-semibold text-zinc-600 normal-case italic hidden sm:block">— {hockeyStandings.season}</span>
+                        </div>
+                        <div className="space-y-4">
+                          {hockeyStandings.conferences.map(conf => (
+                            <div key={conf.name}>
+                              <div className="text-[10px] font-black text-red-500 uppercase tracking-widest mb-2">{conf.name}</div>
+                              <div className="space-y-3">
+                                {conf.divisions.map(div => (
+                                  <div key={div.name} className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden">
+                                    <div className="bg-zinc-800/60 px-3 py-1.5 text-[9px] font-black text-zinc-500 uppercase tracking-widest">{div.name}</div>
+                                    <div className="overflow-x-auto">
+                                      <table className="w-full text-[11px] font-mono tabular-nums">
+                                        <thead>
+                                          <tr className="border-b border-zinc-800 text-[9px] font-black text-zinc-600 uppercase">
+                                            <th className="text-left py-1.5 px-2 w-5">#</th>
+                                            <th className="text-left py-1.5 px-2 min-w-[120px]">Equipa</th>
+                                            <th className="py-1.5 px-1 text-center">PJ</th>
+                                            <th className="py-1.5 px-1 text-center">V</th>
+                                            <th className="py-1.5 px-1 text-center">D</th>
+                                            <th className="py-1.5 px-1 text-center">DO</th>
+                                            <th className="py-1.5 px-1 text-center font-black text-white">PTS</th>
+                                            <th className="py-1.5 px-1 text-center hidden sm:table-cell">GF</th>
+                                            <th className="py-1.5 px-1 text-center hidden sm:table-cell">GC</th>
+                                            <th className="py-1.5 px-1 text-center hidden sm:table-cell">DIF</th>
+                                            <th className="py-1.5 px-2 text-center hidden md:table-cell">SÉRIE</th>
+                                            <th className="py-1.5 px-2 text-center hidden md:table-cell">ÚLT 10</th>
+                                          </tr>
+                                        </thead>
+                                        <tbody>
+                                          {div.teams.map((team, idx) => (
+                                            <tr key={team.id} className={`border-b border-zinc-800/40 hover:bg-zinc-800/30 transition-colors ${idx < 3 ? "border-l-2 border-l-green-600/40" : idx === 3 ? "border-l-2 border-l-yellow-500/40" : ""}`}>
+                                              <td className="py-1.5 px-2 text-zinc-600 text-center">{team.position}</td>
+                                              <td className="py-1.5 px-2 text-zinc-200 font-semibold truncate max-w-[130px]">{team.name}</td>
+                                              <td className="py-1.5 px-1 text-center text-zinc-400">{team.gp}</td>
+                                              <td className="py-1.5 px-1 text-center text-green-400">{team.won}</td>
+                                              <td className="py-1.5 px-1 text-center text-red-400">{team.lost}</td>
+                                              <td className="py-1.5 px-1 text-center text-zinc-500">{team.otLosses}</td>
+                                              <td className="py-1.5 px-1 text-center font-black text-white">{team.points}</td>
+                                              <td className="py-1.5 px-1 text-center text-zinc-400 hidden sm:table-cell">{team.gf}</td>
+                                              <td className="py-1.5 px-1 text-center text-zinc-400 hidden sm:table-cell">{team.ga}</td>
+                                              <td className={`py-1.5 px-1 text-center hidden sm:table-cell font-bold ${team.diff.startsWith("+") ? "text-green-400" : team.diff.startsWith("-") ? "text-red-400" : "text-zinc-500"}`}>{team.diff}</td>
+                                              <td className={`py-1.5 px-2 text-center hidden md:table-cell font-black ${streakColor(team.streak)}`}>{team.streak}</td>
+                                              <td className="py-1.5 px-2 text-center text-zinc-600 hidden md:table-cell text-[9px]">{team.lastTen.split(",")[0]}</td>
+                                            </tr>
+                                          ))}
+                                        </tbody>
+                                      </table>
+                                    </div>
+                                    <div className="px-3 py-1.5 flex gap-3 text-[8px] text-zinc-700">
+                                      <span className="flex items-center gap-1"><span className="w-2 h-2 border-l-2 border-green-600/60 inline-block" />Playoff</span>
+                                      <span className="flex items-center gap-1"><span className="w-2 h-2 border-l-2 border-yellow-500/60 inline-block" />Wild Card</span>
                                     </div>
                                   </div>
                                 ))}
