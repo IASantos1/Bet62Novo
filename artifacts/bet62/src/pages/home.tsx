@@ -1898,6 +1898,80 @@ export default function Home() {
       </div>
     ) : null;
 
+    const SecondaryMarkets = () => {
+      const m = match.markets;
+      if (!m || !match.hasRealOdds || isSuspendedMatch) return null;
+      const sport = match.sport ?? "football";
+
+      if (sport === "football") {
+        return (
+          <>
+            {m.totalGoals.over25 > 0 && (
+              <div className="flex gap-2 w-full mt-1.5">
+                <OddsButton match={match} selection="o25" odd={m.totalGoals.over25} market="gols" label="Mais 2.5 gols" grow />
+                <OddsButton match={match} selection="u25" odd={m.totalGoals.under25} market="gols" label="Menos 2.5 gols" grow />
+              </div>
+            )}
+            {m.bothTeamsScore.yes > 0 && (
+              <div className="flex gap-2 w-full mt-1.5">
+                <OddsButton match={match} selection="bts-yes" odd={m.bothTeamsScore.yes} market="dupla" label="Ambas Marcam" grow />
+                <OddsButton match={match} selection="bts-no" odd={m.bothTeamsScore.no} market="dupla" label="Não Ambas" grow />
+              </div>
+            )}
+          </>
+        );
+      }
+
+      if (sport === "tennis") {
+        const te = (m as any).tennisExtra;
+        if (te?.firstSet?.home > 0) {
+          const h = match.home.split(" ").slice(-1)[0];
+          const a = match.away.split(" ").slice(-1)[0];
+          return (
+            <div className="flex gap-2 w-full mt-1.5">
+              <OddsButton match={match} selection="set1-home" odd={te.firstSet.home} market="sets" label={`1º Set ${h}`} grow />
+              <OddsButton match={match} selection="set1-away" odd={te.firstSet.away} market="sets" label={`1º Set ${a}`} grow />
+            </div>
+          );
+        }
+        if (m.totalGoals.over25 > 0) return (
+          <div className="flex gap-2 w-full mt-1.5">
+            <OddsButton match={match} selection="osets" odd={m.totalGoals.over25} market="sets" label="Mais 2.5 sets" grow />
+            <OddsButton match={match} selection="usets" odd={m.totalGoals.under25} market="sets" label="Menos 2.5 sets" grow />
+          </div>
+        );
+      }
+
+      if (sport === "basketball" && (m as any)._total && m.totalGoals.over25 > 0) {
+        const total = (m as any)._total;
+        return (
+          <div className="flex gap-2 w-full mt-1.5">
+            <OddsButton match={match} selection="o25" odd={m.totalGoals.over25} market="totais" label={`Mais ${total} pts`} grow />
+            <OddsButton match={match} selection="u25" odd={m.totalGoals.under25} market="totais" label={`Menos ${total} pts`} grow />
+          </div>
+        );
+      }
+
+      if (sport === "hockey" && (m as any)._total && m.totalGoals.over25 > 0) {
+        const total = (m as any)._total;
+        return (
+          <div className="flex gap-2 w-full mt-1.5">
+            <OddsButton match={match} selection="o25" odd={m.totalGoals.over25} market="totais" label={`Mais ${total} gols`} grow />
+            <OddsButton match={match} selection="u25" odd={m.totalGoals.under25} market="totais" label={`Menos ${total} gols`} grow />
+          </div>
+        );
+      }
+
+      if (sport === "volleyball" && m.totalGoals.over25 > 0) return (
+        <div className="flex gap-2 w-full mt-1.5">
+          <OddsButton match={match} selection="osets" odd={m.totalGoals.over25} market="sets" label="Mais 3.5 sets" grow />
+          <OddsButton match={match} selection="usets" odd={m.totalGoals.under25} market="sets" label="Menos 3.5 sets" grow />
+        </div>
+      );
+
+      return null;
+    };
+
     if (bannerImg) {
       return (
         <div
@@ -1924,6 +1998,7 @@ export default function Home() {
               <span className="font-black text-white text-xl leading-tight drop-shadow truncate">{match.away}</span>
             </div>
             <OddsRow />
+            <SecondaryMarkets />
           </div>
         </div>
       );
@@ -1942,6 +2017,7 @@ export default function Home() {
             <span className="font-bold text-white text-sm truncate">{match.away}</span>
           </div>
           <OddsRow />
+          <SecondaryMarkets />
         </div>
       </div>
     );
