@@ -5588,4 +5588,195 @@ router.get("/football-schedule/:id", async (req, res) => {
 });
 
 
+// ─── Football Match Stats ──────────────────────────────────────────────────────
+
+type FootballMatchStatsPlayer = {
+  id: string; name: string; number: string; pos: string;
+  formation_pos?: string;
+  // player_stats fields (optional — only in player_stats section)
+  acc_crosses?: string; aerials_won?: string; assists?: string;
+};
+type FootballMatchStatsSub = {
+  minute: string;
+  player_on: string; player_on_id: string;
+  player_off: string; player_off_id: string;
+  injury: string;
+};
+type FootballMatchStatsTeamColors = {
+  player: { primary: { color: string }; number: { color: string }; border: { color: string } };
+  goalkeeper: { primary: { color: string }; number: { color: string }; border: { color: string } };
+};
+type FootballMatchStatsEventGoal = {
+  minute: string; extra_min: string;
+  player_id: string; player_name: string;
+  assist_player_id: string; assist_player_name: string;
+  own_goal: string; penalty: string; penalty_missed: string; var_cancelled: string;
+};
+type FootballMatchStatsEventCard = { minute: string; extra_min: string; comment?: string; player_id: string; player_name: string };
+type FootballMatchStatsEventVar  = { minute: string; extra_min: string; player_id: string; player_name: string; event_type: string; ref_decision: string; var_decision: string };
+
+type FootballMatchStatsRaw = {
+  "match-stats"?: {
+    updated?: string;
+    updated_ts?: number;
+    tournament?: {
+      id: string;
+      name: string;
+      matches?: {
+        main_id: string;
+        fallback_id_1?: string;
+        fallback_id_2?: string;
+        date: string;
+        time: string;
+        status: string;
+        match_info?: {
+          stadium?: { name: string };
+          time?: { name: string; added_time_period_1: string; added_time_period_2: string };
+          referee?: { name: string };
+        };
+        home: { id: string; name: string; goals: string };
+        away: { id: string; name: string; goals: string };
+        ht?: { home_goals: string; away_goals: string } | null;
+        ft?: { home_goals: string; away_goals: string } | null;
+        et?: { home_goals: string; away_goals: string } | null;
+        penalties?: { home_pen: string; away_pen: string } | null;
+        lineups?: {
+          home?: { formation: string; player: FootballMatchStatsPlayer | FootballMatchStatsPlayer[] };
+          away?: { formation: string; player: FootballMatchStatsPlayer | FootballMatchStatsPlayer[] };
+        };
+        bench?: {
+          home?: { player: FootballMatchStatsPlayer | FootballMatchStatsPlayer[] };
+          away?: { player: FootballMatchStatsPlayer | FootballMatchStatsPlayer[] };
+        };
+        substitutions?: {
+          home?: { substitution: FootballMatchStatsSub | FootballMatchStatsSub[] };
+          away?: { substitution: FootballMatchStatsSub | FootballMatchStatsSub[] };
+        };
+        team_colors?: { home: FootballMatchStatsTeamColors; away: FootballMatchStatsTeamColors };
+        team_stats?: {
+          home?: { corners?: { total: string; total_h1: string; total_h2: string }; expected_goals?: { total: string; total_h1: string; total_h2: string }; fouls?: { total: string } };
+          away?: { corners?: { total: string; total_h1: string; total_h2: string }; expected_goals?: { total: string; total_h1: string; total_h2: string }; fouls?: { total: string } };
+        };
+        player_stats?: {
+          home?: { player: FootballMatchStatsPlayer | FootballMatchStatsPlayer[] };
+          away?: { player: FootballMatchStatsPlayer | FootballMatchStatsPlayer[] };
+        };
+        event_summary?: {
+          home?: {
+            goals?: { event: FootballMatchStatsEventGoal | FootballMatchStatsEventGoal[] };
+            yellowcards?: { event: FootballMatchStatsEventCard | FootballMatchStatsEventCard[] };
+            redcards?: { event: FootballMatchStatsEventCard | FootballMatchStatsEventCard[] } | string;
+            var?: { event: FootballMatchStatsEventVar | FootballMatchStatsEventVar[] } | string;
+          };
+          away?: {
+            goals?: { event: FootballMatchStatsEventGoal | FootballMatchStatsEventGoal[] };
+            yellowcards?: { event: FootballMatchStatsEventCard | FootballMatchStatsEventCard[] };
+            redcards?: { event: FootballMatchStatsEventCard | FootballMatchStatsEventCard[] } | string;
+            var?: { event: FootballMatchStatsEventVar | FootballMatchStatsEventVar[] } | string;
+          };
+        };
+      };
+    };
+  };
+};
+
+const footballMatchStatsCache = new Map<string, { data: unknown; fetchedAt: number }>();
+const FOOTBALL_MATCH_STATS_TTL = 5 * 60 * 1000;
+
+function normMatchStatsList<T>(raw: T | T[] | undefined | null): T[] {
+  if (!raw) return [];
+  return Array.isArray(raw) ? raw : [raw];
+}
+
+async function getFootballMatchStats(leagueId: string): Promise<object> {
+  const now = Date.now();
+  const cached = footballMatchStatsCache.get(leagueId);
+  if (cached && now - cached.fetchedAt < FOOTBALL_MATCH_STATS_TTL) return cached.data as object;
+  const resp = await fetch(`${BASE_V2}/soccer/leagues/${encodeURIComponent(leagueId)}/matches/stats?access_key=${STATSPAL_KEY}`, { signal: AbortSignal.timeout(12000) });
+  if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+  const raw = (await resp.json()) as FootballMatchStatsRaw;
+  const ms = raw["match-stats"];
+  const tour = ms?.tournament;
+  const m = tour?.matches;
+  if (!m) throw new Error("Estatísticas não encontradas");
+
+  const toPlayers = (raw2: FootballMatchStatsPlayer | FootballMatchStatsPlayer[] | undefined) => normMatchStatsList(raw2);
+  const toGoals   = (raw2: FootballMatchStatsEventGoal | FootballMatchStatsEventGoal[] | undefined) => normMatchStatsList(raw2);
+  const toCards   = (raw2: FootballMatchStatsEventCard | FootballMatchStatsEventCard[] | undefined) => normMatchStatsList(raw2);
+  const toVar     = (raw2: FootballMatchStatsEventVar  | FootballMatchStatsEventVar[]  | undefined) => normMatchStatsList(raw2);
+  const toSubs    = (raw2: FootballMatchStatsSub | FootballMatchStatsSub[] | undefined) => normMatchStatsList(raw2);
+
+  const parseHalfStat = (s?: { total: string; total_h1: string; total_h2: string }) =>
+    s ? { total: parseFloat(s.total) || 0, h1: parseFloat(s.total_h1) || 0, h2: parseFloat(s.total_h2) || 0 } : null;
+
+  type EventSide = {
+    goals?: { event: FootballMatchStatsEventGoal | FootballMatchStatsEventGoal[] };
+    yellowcards?: { event: FootballMatchStatsEventCard | FootballMatchStatsEventCard[] };
+    redcards?: { event: FootballMatchStatsEventCard | FootballMatchStatsEventCard[] } | string;
+    var?: { event: FootballMatchStatsEventVar | FootballMatchStatsEventVar[] } | string;
+  } | undefined;
+  const parseGoalEvents = (side: EventSide) => {
+    const goals = typeof side?.goals === "object" ? toGoals(side.goals?.event) : [];
+    const yellows = typeof side?.yellowcards === "object" ? toCards((side.yellowcards as { event?: FootballMatchStatsEventCard | FootballMatchStatsEventCard[] })?.event) : [];
+    const reds = side?.redcards && typeof side.redcards === "object" ? toCards((side.redcards as { event?: FootballMatchStatsEventCard | FootballMatchStatsEventCard[] })?.event) : [];
+    const varEvents = side?.var && typeof side.var === "object" ? toVar((side.var as { event?: FootballMatchStatsEventVar | FootballMatchStatsEventVar[] })?.event) : [];
+    return { goals, yellowCards: yellows, redCards: reds, varEvents };
+  };
+
+  const result = {
+    matchId: m.main_id,
+    date: m.date,
+    time: m.time,
+    status: m.status,
+    tournament: { id: tour?.id ?? "", name: tour?.name ?? "" },
+    stadium: m.match_info?.stadium?.name ?? null,
+    referee: m.match_info?.referee?.name ?? null,
+    addedTime: m.match_info?.time ? { p1: m.match_info.time.added_time_period_1, p2: m.match_info.time.added_time_period_2 } : null,
+    homeTeam: { id: m.home.id, name: m.home.name, goals: parseInt(m.home.goals) || 0 },
+    awayTeam: { id: m.away.id, name: m.away.name, goals: parseInt(m.away.goals) || 0 },
+    htScore: m.ht ? { home: parseInt(m.ht.home_goals) || 0, away: parseInt(m.ht.away_goals) || 0 } : null,
+    ftScore: m.ft ? { home: parseInt(m.ft.home_goals) || 0, away: parseInt(m.ft.away_goals) || 0 } : null,
+    etScore: m.et ? { home: parseInt(m.et.home_goals) || 0, away: parseInt(m.et.away_goals) || 0 } : null,
+    penScore: m.penalties ? { home: parseInt(m.penalties.home_pen) || 0, away: parseInt(m.penalties.away_pen) || 0 } : null,
+    lineups: {
+      home: { formation: m.lineups?.home?.formation ?? "", players: toPlayers(m.lineups?.home?.player) },
+      away: { formation: m.lineups?.away?.formation ?? "", players: toPlayers(m.lineups?.away?.player) },
+    },
+    bench: {
+      home: toPlayers(m.bench?.home?.player),
+      away: toPlayers(m.bench?.away?.player),
+    },
+    substitutions: {
+      home: toSubs(m.substitutions?.home?.substitution),
+      away: toSubs(m.substitutions?.away?.substitution),
+    },
+    teamColors: m.team_colors ?? null,
+    teamStats: {
+      home: { corners: parseHalfStat(m.team_stats?.home?.corners), xg: parseHalfStat(m.team_stats?.home?.expected_goals), fouls: parseInt(m.team_stats?.home?.fouls?.total ?? "0") || 0 },
+      away: { corners: parseHalfStat(m.team_stats?.away?.corners), xg: parseHalfStat(m.team_stats?.away?.expected_goals), fouls: parseInt(m.team_stats?.away?.fouls?.total ?? "0") || 0 },
+    },
+    playerStats: {
+      home: toPlayers(m.player_stats?.home?.player),
+      away: toPlayers(m.player_stats?.away?.player),
+    },
+    events: {
+      home: parseGoalEvents(m.event_summary?.home),
+      away: parseGoalEvents(m.event_summary?.away),
+    },
+  };
+
+  footballMatchStatsCache.set(leagueId, { data: result, fetchedAt: now });
+  return result;
+}
+
+router.get("/football-match-stats/:leagueId", async (req, res) => {
+  const leagueId = String(req.params["leagueId"]);
+  try {
+    const stats = await getFootballMatchStats(leagueId);
+    res.json(stats);
+  } catch {
+    res.status(500).json({ error: "Estatísticas do jogo indisponíveis" });
+  }
+});
+
 export default router;
