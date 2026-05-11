@@ -1049,6 +1049,7 @@ type TennisMatch = { id: string; status: string; time: string; date: string; tb:
 type TennisTournament = { id: string; name: string; match: TennisMatch | TennisMatch[] };
 let tennisLiveCache: TennisTournament[] | null = null;
 let tennisLiveFetchedAt = 0;
+const TENNIS_LIVE_CACHE_TTL = 10_000; // 10s — tennis points change every few seconds
 
 // Tennis match stats (parsed from livestats endpoint)
 type TennisStatData = {
@@ -1784,7 +1785,7 @@ function _parseTennisStat(raw: TennisStatsPlayerRaw | undefined): TennisStatData
 
 async function getTennisStatsMap(): Promise<Map<string, [TennisStatData, TennisStatData]>> {
   const now = Date.now();
-  if (tennisStatsCache && now - tennisStatsFetchedAt < CONFIG.LIVE_CACHE_TTL) return tennisStatsCache;
+  if (tennisStatsCache && now - tennisStatsFetchedAt < TENNIS_LIVE_CACHE_TTL) return tennisStatsCache;
   try {
     const resp = await fetch(`${BASE_V1}/tennis/livestats?access_key=${STATSPAL_KEY}`, { signal: AbortSignal.timeout(8000) });
     if (!resp.ok) return tennisStatsCache ?? new Map();
@@ -1811,7 +1812,7 @@ async function getTennisStatsMap(): Promise<Map<string, [TennisStatData, TennisS
 
 async function getTennisLive(): Promise<TennisTournament[]> {
   const now = Date.now();
-  if (tennisLiveCache && now - tennisLiveFetchedAt < CONFIG.LIVE_CACHE_TTL) return tennisLiveCache;
+  if (tennisLiveCache && now - tennisLiveFetchedAt < TENNIS_LIVE_CACHE_TTL) return tennisLiveCache;
   try {
     const resp = await fetch(`${BASE_V1}/tennis/livescores?access_key=${STATSPAL_KEY}`, { signal: AbortSignal.timeout(8000) });
     if (!resp.ok) return tennisLiveCache ?? [];
