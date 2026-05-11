@@ -3341,7 +3341,7 @@ export default function Home() {
                               onClick={() => setMatchViewTab(tab)}
                               className={`flex-1 py-2 text-xs font-bold transition-colors whitespace-nowrap px-2 ${matchViewTab === tab ? (tab === "live" ? "text-red-400 border-b-2 border-red-500" : "text-blue-400 border-b-2 border-blue-500") : "text-zinc-500 hover:text-white"}`}
                             >
-                              {tab === "stats" ? "Estatísticas" : tab === "yesterday" ? "Resultado Ontem" : "⚡ Ao Vivo"}
+                              {tab === "stats" ? "Estatísticas" : tab === "yesterday" ? "🏆 Classificação" : "⚡ Ao Vivo"}
                             </button>
                           ))}
                         </>
