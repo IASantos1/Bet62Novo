@@ -7260,4 +7260,127 @@ router.get("/football-extended-schedule/:country", async (req, res) => {
   }
 });
 
+// ─── Football Results by country/region ───────────────────────────────────────
+// v1/soccer/results/{country} — same week[] structure as extended-schedule but
+// lineups/goals/substitutions are populated (not null) for finished matches.
+// Root: "results" (4th distinct root key in football v1 endpoints).
+// halftime.score: "0 - 0" (spaces, no brackets) — parseScoreStr handles both formats.
+// goals.goal / lineups.*.player / substitutions.*.substitution: single obj or array.
+
+type V1ResultsGoal = {
+  minute: string; player: string; playerid: string;
+  assist: string; score: string; team: string;
+};
+type V1ResultsLineupPlayer = {
+  id: string; name: string; number: string; booking: string;
+};
+type V1ResultsSubstitution = {
+  minute: string;
+  player_in_id: string; player_in_name: string; player_in_number: string; player_in_booking: string;
+  player_out_id: string; player_out_name: string;
+};
+type V1ResultsMatch = {
+  id: string; alternate_id: string; alternate_id_2: string; static_id: string;
+  status: string; date: string; time: string;
+  venue: string; venue_city: string; venue_id: string; attendance: string;
+  home: V1ExtTeamScore; away: V1ExtTeamScore;
+  halftime?: { score: string };
+  goals?: null | { goal?: V1ResultsGoal | V1ResultsGoal[] };
+  lineups?: null | {
+    home?: { player?: V1ResultsLineupPlayer | V1ResultsLineupPlayer[] };
+    away?: { player?: V1ResultsLineupPlayer | V1ResultsLineupPlayer[] };
+  };
+  substitutions?: null | {
+    home?: { substitution?: V1ResultsSubstitution | V1ResultsSubstitution[] };
+    away?: { substitution?: V1ResultsSubstitution | V1ResultsSubstitution[] };
+  };
+  coaches?: { home?: { coach?: V1ExtCoach }; away?: { coach?: V1ExtCoach } };
+  referee?: { id: string; name: string };
+};
+type V1ResultsWeek = { number: string; match: V1ResultsMatch | V1ResultsMatch[] };
+type V1ResultsLeague = {
+  id: string; name: string; season: string; sub_id: string;
+  week: V1ResultsWeek | V1ResultsWeek[];
+};
+type V1ResultsRaw = {
+  results?: {
+    updated?: string; sport?: string; country?: string;
+    league?: V1ResultsLeague | V1ResultsLeague[];
+  };
+};
+
+const footballResultsCountryCache = new Map<string, { data: object[]; fetchedAt: number }>();
+const FOOTBALL_RESULTS_COUNTRY_TTL = 30 * 60 * 1000; // 30 min — historical results
+
+function toArr<T>(v: T | T[] | null | undefined): T[] {
+  return !v ? [] : Array.isArray(v) ? v : [v];
+}
+
+router.get("/football-results-country/:country", async (req, res) => {
+  const country = String(req.params["country"]).toLowerCase().replace(/[^a-z0-9-]/g, "");
+  if (!country) { res.status(400).json({ error: "País inválido" }); return; }
+  const now = Date.now();
+  const cached = footballResultsCountryCache.get(country);
+  if (cached && now - cached.fetchedAt < FOOTBALL_RESULTS_COUNTRY_TTL) {
+    res.json({ leagues: cached.data });
+    return;
+  }
+  try {
+    const resp = await fetch(`${BASE_V1}/soccer/results/${encodeURIComponent(country)}?access_key=${STATSPAL_KEY}`, { signal: AbortSignal.timeout(9000) });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const data = (await resp.json()) as V1ResultsRaw;
+    const rawLeagues = data?.results?.league;
+    const leagues: V1ResultsLeague[] = toArr(rawLeagues);
+
+    const out = leagues.map(lg => ({
+      id: lg.id, name: lg.name, season: lg.season, subId: lg.sub_id,
+      weeks: toArr(lg.week).map(w => ({
+        weekNumber: parseInt(w.number) || 0,
+        matches: toArr(w.match).map(m => {
+          const goals = toArr(m.goals?.goal).map(g => ({
+            minute: g.minute, player: g.player, playerId: g.playerid,
+            assist: g.assist || null, score: g.score, team: g.team,
+          }));
+          const homePlayers = toArr(m.lineups?.home?.player).map(p => ({
+            id: p.id, name: p.name, number: p.number, booking: p.booking || null,
+          }));
+          const awayPlayers = toArr(m.lineups?.away?.player).map(p => ({
+            id: p.id, name: p.name, number: p.number, booking: p.booking || null,
+          }));
+          const homeSubs = toArr(m.substitutions?.home?.substitution).map(s => ({
+            minute: s.minute,
+            playerIn:  { id: s.player_in_id,  name: s.player_in_name,  number: s.player_in_number,  booking: s.player_in_booking || null },
+            playerOut: { id: s.player_out_id, name: s.player_out_name },
+          }));
+          const awaySubs = toArr(m.substitutions?.away?.substitution).map(s => ({
+            minute: s.minute,
+            playerIn:  { id: s.player_in_id,  name: s.player_in_name,  number: s.player_in_number,  booking: s.player_in_booking || null },
+            playerOut: { id: s.player_out_id, name: s.player_out_name },
+          }));
+          return {
+            id: m.id, alternateId: m.alternate_id, alternateId2: m.alternate_id_2, staticId: m.static_id,
+            status: m.status, date: m.date, time: m.time,
+            venue: m.venue || null, venueCity: m.venue_city || null, venueId: m.venue_id || null,
+            attendance: parseInt(m.attendance) || null,
+            homeTeam: { id: m.home.id, name: m.home.name, score: parseExtScore(m.home.score), ftScore: parseExtScore(m.home.ft_score), etScore: parseExtScore(m.home.et_score), penScore: parseExtScore(m.home.pen_score) },
+            awayTeam: { id: m.away.id, name: m.away.name, score: parseExtScore(m.away.score), ftScore: parseExtScore(m.away.ft_score), etScore: parseExtScore(m.away.et_score), penScore: parseExtScore(m.away.pen_score) },
+            halftimeScore: parseScoreStr(m.halftime?.score),
+            goals,
+            lineups: { home: homePlayers, away: awayPlayers },
+            substitutions: { home: homeSubs, away: awaySubs },
+            homeCoach: m.coaches?.home?.coach?.name ? { id: m.coaches.home.coach.id, name: m.coaches.home.coach.name } : null,
+            awayCoach: m.coaches?.away?.coach?.name ? { id: m.coaches.away.coach.id, name: m.coaches.away.coach.name } : null,
+            referee: m.referee?.name ? { id: m.referee.id, name: m.referee.name } : null,
+          };
+        }),
+      })),
+    }));
+
+    footballResultsCountryCache.set(country, { data: out, fetchedAt: now });
+    res.json({ leagues: out });
+  } catch {
+    res.status(500).json({ error: "Resultados indisponíveis" });
+  }
+});
+
 export default router;
