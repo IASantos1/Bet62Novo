@@ -6217,4 +6217,172 @@ router.get("/football-injuries", async (_req, res) => {
   }
 });
 
+// ─── Football Team Profile ─────────────────────────────────────────────────────
+
+type FootballTeamPlayerRaw = {
+  id: string; name: string; number: string; age: string; position: string;
+  is_captain: string; injured: string;
+  minutes_played: string; starting_lineups: string; substitute_in: string; substitute_out: string; on_bench: string;
+  appearences: string; assists: string; goals: string; rating: string;
+  yellowcards: string; yellowred: string; redcards: string;
+  saves: string; goals_conceded: string; inside_box_saves: string; pen_saved: string;
+  shots_total: string; shots_on_target: string; shots_woodwork: string;
+  pass_attempts: string; pass_success: string; key_passes: string;
+  dribble_attempts: string; dribble_success: string; dispossesed: string;
+  duels_total: string; duels_won: string;
+  fouls_committed: string; fouls_drawn: string;
+  tackles: string; blocks: string; clearances: string; interceptions: string;
+  crosses_total: string; crosses_accurate: string;
+  pen_scored: string; pen_missed: string; pen_committed: string; pen_won: string;
+};
+
+type FootballTeamTransferPlayerRaw = {
+  id: string; name: string; date: string; age?: string; position?: string;
+  from?: string; to?: string; team_id?: string; type: string; price?: string;
+};
+
+type FootballTeamTrophyRaw = {
+  country: string; league: string; status: string; count: string; seasons: string;
+};
+
+type FootballTeamPeriodRaw = { min: string; pct: string; count: string };
+
+type FootballTeamLeagueStatRaw = {
+  name: string; id: string; season: string;
+  fulltime?:   { win: { total: string; home: string; away: string }; lost: { total: string; home: string; away: string }; draw: { total: string; home: string; away: string } };
+  firsthalf?:  { win: { total: string; home: string; away: string }; lost: { total: string; home: string; away: string }; draw: { total: string; home: string; away: string } };
+  secondhalf?: { win: { total: string; home: string; away: string }; lost: { total: string; home: string; away: string }; draw: { total: string; home: string; away: string } };
+  scoring_minutes?:         { period: FootballTeamPeriodRaw | FootballTeamPeriodRaw[] };
+  goals_conceded_minutes?:  { period: FootballTeamPeriodRaw | FootballTeamPeriodRaw[] };
+  yellowcard_minutes?:      { period: FootballTeamPeriodRaw | FootballTeamPeriodRaw[] };
+  redcard_minutes?:         { period: FootballTeamPeriodRaw | FootballTeamPeriodRaw[] };
+};
+
+type FootballTeamProfileRaw = {
+  updated?: string; updated_ts?: number;
+  team?: {
+    id: string; name: string; country: string; founded: string;
+    is_national_team: string; is_women: string;
+    leagues?: { league_id: string | string[] };
+    venue_name?: string; venue_id?: string; venue_surface?: string;
+    venue_capacity?: string; venue_address?: string; venue_city?: string;
+    coach?: { name: string; id: string };
+    squad?: { player: FootballTeamPlayerRaw | FootballTeamPlayerRaw[] };
+    transfers?: {
+      in?:  { player: FootballTeamTransferPlayerRaw | FootballTeamTransferPlayerRaw[] };
+      out?: { player: FootballTeamTransferPlayerRaw | FootballTeamTransferPlayerRaw[] };
+    };
+    trophies?: { trophy: FootballTeamTrophyRaw | FootballTeamTrophyRaw[] };
+    league_stats?: { league: FootballTeamLeagueStatRaw | FootballTeamLeagueStatRaw[] };
+  };
+};
+
+const footballTeamCache = new Map<string, { data: object; fetchedAt: number }>();
+const FOOTBALL_TEAM_TTL = 30 * 60 * 1000; // 30 min
+
+function parseTeamHalfRecord(half: FootballTeamLeagueStatRaw["fulltime"]) {
+  if (!half) return null;
+  const pi = (s: string) => parseInt(s) || 0;
+  return {
+    win:  { total: pi(half.win.total),  home: pi(half.win.home),  away: pi(half.win.away) },
+    lost: { total: pi(half.lost.total), home: pi(half.lost.home), away: pi(half.lost.away) },
+    draw: { total: pi(half.draw.total), home: pi(half.draw.home), away: pi(half.draw.away) },
+  };
+}
+
+function parseTeamPeriods(raw: FootballTeamPeriodRaw | FootballTeamPeriodRaw[] | undefined) {
+  if (!raw) return [];
+  return (Array.isArray(raw) ? raw : [raw]).map(p => ({ min: p.min, pct: p.pct, count: parseInt(p.count) || 0 }));
+}
+
+async function getFootballTeam(teamId: string): Promise<object> {
+  const now = Date.now();
+  const cached = footballTeamCache.get(teamId);
+  if (cached && now - cached.fetchedAt < FOOTBALL_TEAM_TTL) return cached.data;
+  const resp = await fetch(`${BASE_V2}/soccer/teams/${encodeURIComponent(teamId)}?access_key=${STATSPAL_KEY}`, { signal: AbortSignal.timeout(12000) });
+  if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+  const data = (await resp.json()) as FootballTeamProfileRaw;
+  const t = data?.team;
+  if (!t) throw new Error("Equipa não encontrada");
+
+  const pi = (s: string | undefined) => parseInt(s ?? "") || 0;
+  const pf = (s: string | undefined) => parseFloat(s ?? "") || 0;
+
+  const rawPlayers = t.squad?.player;
+  const players = (rawPlayers ? (Array.isArray(rawPlayers) ? rawPlayers : [rawPlayers]) : []).map(p => ({
+    id: p.id, name: p.name, number: p.number, age: pi(p.age), position: p.position,
+    isCaptain: p.is_captain === "True", injured: p.injured === "True",
+    minutesPlayed: pi(p.minutes_played), startingLineups: pi(p.starting_lineups),
+    subIn: pi(p.substitute_in), onBench: pi(p.on_bench),
+    appearances: pi(p.appearences),  // API typo — intentional
+    goals: pi(p.goals), assists: pi(p.assists), rating: pf(p.rating),
+    yellowCards: pi(p.yellowcards), yellowRed: pi(p.yellowred), redCards: pi(p.redcards),
+    saves: pi(p.saves), goalsConceded: pi(p.goals_conceded), insideBoxSaves: pi(p.inside_box_saves), penSaved: pi(p.pen_saved),
+    shotsTotal: pi(p.shots_total), shotsOnTarget: pi(p.shots_on_target), shotsWoodwork: pi(p.shots_woodwork),
+    passAttempts: pi(p.pass_attempts), passSuccess: pi(p.pass_success), keyPasses: pi(p.key_passes),
+    dribbleAttempts: pi(p.dribble_attempts), dribbleSuccess: pi(p.dribble_success),
+    duelsTotal: pi(p.duels_total), duelsWon: pi(p.duels_won),
+    foulsCommitted: pi(p.fouls_committed), foulsDrawn: pi(p.fouls_drawn),
+    tackles: pi(p.tackles), blocks: pi(p.blocks), clearances: pi(p.clearances), interceptions: pi(p.interceptions),
+    crossesTotal: pi(p.crosses_total), crossesAccurate: pi(p.crosses_accurate),
+    penScored: pi(p.pen_scored), penMissed: pi(p.pen_missed),
+  }));
+
+  const toTransfers = (raw: FootballTeamTransferPlayerRaw | FootballTeamTransferPlayerRaw[] | undefined) =>
+    !raw ? [] : (Array.isArray(raw) ? raw : [raw]).map(p => ({
+      id: p.id, name: p.name, date: p.date, position: p.position ?? "",
+      from: p.from ?? "", to: p.to ?? "", teamId: p.team_id ?? "", type: p.type, price: p.price ?? "",
+    }));
+
+  const rawTrophies = t.trophies?.trophy;
+  const trophies = !rawTrophies ? [] : (Array.isArray(rawTrophies) ? rawTrophies : [rawTrophies]).map(tr => ({
+    country: tr.country, league: tr.league, status: tr.status, count: parseInt(tr.count) || 0, seasons: tr.seasons,
+  }));
+
+  const rawLeagueStats = t.league_stats?.league;
+  const leagueStats = !rawLeagueStats ? [] : (Array.isArray(rawLeagueStats) ? rawLeagueStats : [rawLeagueStats]).map(ls => ({
+    name: ls.name, id: ls.id, season: ls.season,
+    fulltime:   parseTeamHalfRecord(ls.fulltime),
+    firsthalf:  parseTeamHalfRecord(ls.firsthalf),
+    secondhalf: parseTeamHalfRecord(ls.secondhalf),
+    scoringMinutes:        parseTeamPeriods(ls.scoring_minutes?.period),
+    goalsConcededMinutes:  parseTeamPeriods(ls.goals_conceded_minutes?.period),
+    yellowCardMinutes:     parseTeamPeriods(ls.yellowcard_minutes?.period),
+    redCardMinutes:        parseTeamPeriods(ls.redcard_minutes?.period),
+  }));
+
+  const rawLeagueIds = t.leagues?.league_id;
+  const leagueIds = !rawLeagueIds ? [] : Array.isArray(rawLeagueIds) ? rawLeagueIds : [rawLeagueIds];
+
+  const result = {
+    id: t.id, name: t.name, country: t.country,
+    founded: parseInt(t.founded) || null,
+    isNationalTeam: t.is_national_team === "True",
+    isWomen: t.is_women === "True",
+    leagueIds,
+    venue: t.venue_name ? {
+      id: t.venue_id ?? "", name: t.venue_name, surface: t.venue_surface ?? "",
+      capacity: parseInt(t.venue_capacity ?? "") || null,
+      address: t.venue_address ?? "", city: t.venue_city ?? "",
+    } : null,
+    coach: t.coach ? { id: t.coach.id, name: t.coach.name } : null,
+    squad: players,
+    transfers: { in: toTransfers(t.transfers?.in?.player), out: toTransfers(t.transfers?.out?.player) },
+    trophies,
+    leagueStats,
+  };
+  footballTeamCache.set(teamId, { data: result, fetchedAt: now });
+  return result;
+}
+
+router.get("/football-team/:id", async (req, res) => {
+  const id = String(req.params["id"]);
+  try {
+    const team = await getFootballTeam(id);
+    res.json(team);
+  } catch {
+    res.status(500).json({ error: "Perfil de equipa indisponível" });
+  }
+});
+
 export default router;
