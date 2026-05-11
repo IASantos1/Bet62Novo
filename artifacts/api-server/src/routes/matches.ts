@@ -932,6 +932,58 @@ function makeHockeyMarketsFromTeams(home: string, away: string): AdvancedMarkets
   } as unknown as AdvancedMarkets;
 }
 
+// ─── Volleyball market builder (seeded model — mirrors buildVolleyballMatches logic) ─
+function makeVolleyballMarketsFromTeams(home: string, away: string): AdvancedMarkets {
+  const sr = seededRng(`vball-mkt:${home}:${away}`);
+  const skillDiff = mc((sr(1) - 0.5) * 0.3 + 0.04, -0.35, 0.35);
+  const pSetH = mc(0.52 + skillDiff, 0.18, 0.82);
+  const p3s = Math.pow(pSetH, 3) + Math.pow(1 - pSetH, 3);
+  const p4s = 3 * Math.pow(pSetH, 3) * (1 - pSetH) + 3 * Math.pow(1 - pSetH, 3) * pSetH;
+  const p5s = Math.max(0, 1 - p3s - p4s);
+  const pMatchH = mc(Math.pow(pSetH, 3) + 3 * Math.pow(pSetH, 3) * (1 - pSetH) + 6 * Math.pow(pSetH, 3) * Math.pow(1 - pSetH, 2) * 0.5, 0.1, 0.9);
+  const [matchH, matchA] = probsToDecimalOdds([pMatchH, 1 - pMatchH], 1.05);
+  const pUnder25 = mc(p3s + p4s, 0.3, 0.9);
+  const [oSets25, uSets25] = probsToDecimalOdds([1 - pUnder25, pUnder25], 1.06);
+  const [oSets35, uSets35] = probsToDecimalOdds([mc(p5s, 0.1, 0.6), mc(1 - p5s, 0.4, 0.9)], 1.06);
+  const pS1H = mc(pSetH + (sr(7) - 0.5) * 0.08, 0.15, 0.85);
+  const pS2H = mc(pSetH + (sr(8) - 0.5) * 0.09, 0.15, 0.85);
+  const pS3H = mc(0.5 + (pSetH - 0.5) * 0.55 + (sr(9) - 0.5) * 0.10, 0.15, 0.85);
+  const [vs1H, vs1A] = probsToDecimalOdds([pS1H, 1 - pS1H], 1.06);
+  const [vs2H, vs2A] = probsToDecimalOdds([pS2H, 1 - pS2H], 1.06);
+  const [vs3H, vs3A] = probsToDecimalOdds([pS3H, 1 - pS3H], 1.06);
+  const [hcapH, hcapA] = probsToDecimalOdds([mc(p3s * (pSetH / (pSetH + (1 - pSetH))), 0.05, 0.85), mc(1 - p3s * (pSetH / (pSetH + (1 - pSetH))), 0.15, 0.95)], 1.06);
+  const meanPts = mc(52 + (sr(5) - 0.5) * 8, 46, 60);
+  const sdPts = mc(6 + sr(6) * 2, 4, 10);
+  const ptsLine = Math.round(meanPts / 2) * 2;
+  const pPtsOver = mc(1 - normalCdf((ptsLine - meanPts) / sdPts), 0.05, 0.95);
+  const [oPts, uPts] = probsToDecimalOdds([pPtsOver, 1 - pPtsOver], 1.06);
+  const ptsDiffMean = mc((pSetH - 0.5) * 14, -10, 10);
+  const ptsDiffLine = Math.round(Math.abs(ptsDiffMean) * 0.5 + 1.5) * (ptsDiffMean >= 0 ? -1 : 1);
+  const ptsDiffSd = mc(4 + sr(10) * 2, 3, 7);
+  const pPtsHcapHome = mc(1 - normalCdf((-Math.abs(ptsDiffLine) - ptsDiffMean) / ptsDiffSd), 0.05, 0.95);
+  const [ptsHcapH, ptsHcapA] = probsToDecimalOdds([pPtsHcapHome, 1 - pPtsHcapHome], 1.06);
+  return {
+    doubleChance: { homeOrDraw: 0, awayOrDraw: 0, homeOrAway: 0 },
+    bothTeamsScore: { yes: oPts!, no: uPts! },
+    totalGoals: {
+      over05: 0, under05: 0,
+      over15: oSets25!, under15: uSets25!,
+      over25: oSets35!, under25: uSets35!,
+      over35: hcapH!, under35: hcapA!,
+      over45: 0, under45: 0, over55: 0, under55: 0, over65: 0, under65: 0,
+    },
+    handicap: { homeMinusOne: hcapH!, awayPlusOne: hcapA!, homeMinusOneHalf: 0, awayPlusOneHalf: 0 },
+    halfTime: { home: 0, draw: 0, away: 0 },
+    firstGoal: { home: 0, noGoal: 0, away: 0 },
+    _total: ptsLine,
+    _spread: matchH!,
+    volleyballExtra: computeVolleyballExtras(pSetH, {
+      vs1H: vs1H!, vs1A: vs1A!, vs2H: vs2H!, vs2A: vs2A!, vs3H: vs3H!, vs3A: vs3A!,
+      ptsDiffLine, ptsHcapH: ptsHcapH!, ptsHcapA: ptsHcapA!,
+    }),
+  } as unknown as AdvancedMarkets;
+}
+
 // ─── Caches ───────────────────────────────────────────────────────────────────
 
 // v2/live: cache 30s
@@ -2183,6 +2235,9 @@ async function buildUpcomingMatches(): Promise<UpcomingMatch[]> {
       if (seenIds.has(m.main_id)) continue;
       seenIds.add(m.main_id);
 
+      // Skip matches whose scheduled time has already passed
+      if (isMatchTimePast(m.date ?? "", m.status)) continue;
+
       const { odds: matchOdds, markets, real } = resolveOdds(m, odds);
 
       // Skip matches without real Statpal odds — don't send odds-less events to the frontend
@@ -2194,7 +2249,7 @@ async function buildUpcomingMatches(): Promise<UpcomingMatch[]> {
         away: m.away.name,
         league: league.name,
         country: league.country,
-        time: m.status,
+        time: addOneHour(m.status),
         date: m.date,
         sport: "football",
         hasRealOdds: true,
@@ -2542,6 +2597,14 @@ function isMatchTimePast(dateStr: string, timeStr: string): boolean {
   } catch {
     return false;
   }
+}
+
+/** Adds 1 hour to a "HH:MM" string (UTC → Portugal UTC+1). Wraps at midnight. */
+function addOneHour(timeStr: string): string {
+  if (!/^\d{2}:\d{2}$/.test(timeStr)) return timeStr;
+  const [hStr, mStr] = timeStr.split(":");
+  const h = (parseInt(hStr!) + 1) % 24;
+  return `${String(h).padStart(2, "0")}:${mStr}`;
 }
 
 // ─── Hockey generator (NHL/KHL — Poisson model) ──────────────────────────────
@@ -3158,21 +3221,239 @@ router.get("/live", async (_req, res) => {
   }
 });
 
+// ─── Real upcoming builders (from live API data) ──────────────────────────────
+
+async function buildTennisUpcoming(): Promise<UpcomingMatch[]> {
+  try {
+    const odds = await getTennisOdds();
+    return odds
+      .filter(e => e.players[0]?.name && e.players[1]?.name)
+      .filter(e => !e.players[0]!.name.includes("/") && !e.players[1]!.name.includes("/"))
+      .map(e => ({
+        id: `tennis-${e.matchId}`,
+        home: e.players[0]!.name,
+        away: e.players[1]!.name,
+        league: e.tournamentName,
+        country: "",
+        time: addOneHour(e.time),
+        date: e.date,
+        sport: "tennis" as const,
+        hasRealOdds: true,
+        odds: { home: e.matchOdds[0], draw: 0, away: e.matchOdds[1] },
+        markets: e.markets as AdvancedMarkets,
+      }));
+  } catch {
+    return [];
+  }
+}
+
+async function buildBasketballUpcoming(): Promise<UpcomingMatch[]> {
+  try {
+    const [schedule, oddsArr] = await Promise.all([
+      getBasketballSchedule(),
+      getBasketballOdds(),
+    ]);
+    const results: UpcomingMatch[] = [];
+    const seen = new Set<string>();
+
+    const oddsMap = new Map<string, NBAOddsEntry>();
+    for (const o of oddsArr) {
+      if (o.homeTeam.name && o.awayTeam.name) {
+        oddsMap.set(`${o.homeTeam.name}|${o.awayTeam.name}`, o);
+      }
+    }
+
+    for (const m of schedule.upcomingMatches) {
+      const key = `${m.home}|${m.away}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      if (isMatchTimePast(m.date, m.time)) continue;
+      const realOdds = oddsMap.get(key);
+      results.push({
+        id: `nba-${m.id}`,
+        home: m.home,
+        away: m.away,
+        league: schedule.league || "NBA",
+        country: "usa",
+        time: addOneHour(m.time),
+        date: m.date,
+        sport: "basketball",
+        hasRealOdds: true,
+        odds: realOdds
+          ? { home: realOdds.homeOdds, draw: 0, away: realOdds.awayOdds }
+          : makeBasketballMarketsFromTeams(m.home, m.away).handicap && { home: 1.9, draw: 0, away: 1.9 } || { home: 1.9, draw: 0, away: 1.9 },
+        markets: (realOdds?.markets as AdvancedMarkets) ?? makeBasketballMarketsFromTeams(m.home, m.away),
+      });
+    }
+
+    for (const o of oddsArr) {
+      if (!o.homeTeam.name || !o.awayTeam.name) continue;
+      const key = `${o.homeTeam.name}|${o.awayTeam.name}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      results.push({
+        id: `nba-odds-${o.matchId}`,
+        home: o.homeTeam.name,
+        away: o.awayTeam.name,
+        league: "NBA",
+        country: "usa",
+        time: addOneHour(o.time),
+        date: o.date,
+        sport: "basketball",
+        hasRealOdds: true,
+        odds: { home: o.homeOdds, draw: 0, away: o.awayOdds },
+        markets: (o.markets as AdvancedMarkets) ?? makeBasketballMarketsFromTeams(o.homeTeam.name, o.awayTeam.name),
+      });
+    }
+
+    return results;
+  } catch {
+    return [];
+  }
+}
+
+async function buildHockeyUpcoming(): Promise<UpcomingMatch[]> {
+  try {
+    const [schedule, liveData, oddsArr] = await Promise.all([
+      getHockeySchedule(),
+      getNHLLive(),
+      getHockeyOdds(),
+    ]);
+    const results: UpcomingMatch[] = [];
+    const seen = new Set<string>();
+
+    const oddsMap = new Map<string, HockeyOddsEntry>();
+    for (const o of oddsArr) {
+      if (o.homeTeam.name && o.awayTeam.name) {
+        oddsMap.set(`${o.homeTeam.name}|${o.awayTeam.name}`, o);
+      }
+    }
+
+    for (const m of schedule.upcomingMatches) {
+      const key = `${m.home}|${m.away}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      if (isMatchTimePast(m.date, m.time)) continue;
+      const realOdds = oddsMap.get(key);
+      results.push({
+        id: `nhl-${m.id}`,
+        home: m.home,
+        away: m.away,
+        league: schedule.league || "NHL",
+        country: "usa",
+        time: addOneHour(m.time),
+        date: m.date,
+        sport: "hockey",
+        hasRealOdds: true,
+        odds: realOdds
+          ? { home: realOdds.homeOdds, draw: realOdds.drawOdds, away: realOdds.awayOdds }
+          : { home: 2.1, draw: 3.8, away: 2.1 },
+        markets: (realOdds?.markets as AdvancedMarkets) ?? makeHockeyMarketsFromTeams(m.home, m.away),
+      });
+    }
+
+    const todayD = new Date();
+    const tomorrowD = new Date(todayD); tomorrowD.setDate(todayD.getDate() + 1);
+    const fmtDate = (d: Date) =>
+      `${String(d.getDate()).padStart(2, "0")}.${String(d.getMonth() + 1).padStart(2, "0")}.${d.getFullYear()}`;
+    const todayStr = fmtDate(todayD);
+    const tomorrowStr = fmtDate(tomorrowD);
+
+    for (const t of liveData) {
+      const tMatches = Array.isArray(t.match) ? t.match : [t.match];
+      for (const m of tMatches) {
+        if (m.status !== "Not Started") continue;
+        if (m.date !== todayStr && m.date !== tomorrowStr) continue;
+        const key = `${m.home.name}|${m.away.name}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        if (!m.date || isMatchTimePast(m.date, m.time ?? "")) continue;
+        const realOdds = oddsMap.get(key);
+        results.push({
+          id: `nhl-live-${m.id}`,
+          home: m.home.name,
+          away: m.away.name,
+          league: t.league,
+          country: t.country,
+          time: addOneHour(m.time ?? "00:00"),
+          date: m.date,
+          sport: "hockey",
+          hasRealOdds: true,
+          odds: realOdds
+            ? { home: realOdds.homeOdds, draw: realOdds.drawOdds, away: realOdds.awayOdds }
+            : { home: 2.1, draw: 3.8, away: 2.1 },
+          markets: (realOdds?.markets as AdvancedMarkets) ?? makeHockeyMarketsFromTeams(m.home.name, m.away.name),
+        });
+      }
+    }
+
+    for (const o of oddsArr) {
+      if (!o.homeTeam.name || !o.awayTeam.name) continue;
+      const key = `${o.homeTeam.name}|${o.awayTeam.name}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      results.push({
+        id: `nhl-odds-${o.matchId}`,
+        home: o.homeTeam.name,
+        away: o.awayTeam.name,
+        league: "NHL",
+        country: "usa",
+        time: addOneHour(o.time),
+        date: o.date,
+        sport: "hockey",
+        hasRealOdds: true,
+        odds: { home: o.homeOdds, draw: o.drawOdds, away: o.awayOdds },
+        markets: (o.markets as AdvancedMarkets) ?? makeHockeyMarketsFromTeams(o.homeTeam.name, o.awayTeam.name),
+      });
+    }
+
+    return results;
+  } catch {
+    return [];
+  }
+}
+
+async function buildVolleyballUpcoming(): Promise<UpcomingMatch[]> {
+  try {
+    const odds = await getVolleyballOdds();
+    return odds
+      .filter(e => e.homeTeam.name && e.awayTeam.name)
+      .filter(e => !isMatchTimePast(e.date, e.time))
+      .map(e => ({
+        id: `volley-odds-${e.matchId}`,
+        home: e.homeTeam.name,
+        away: e.awayTeam.name,
+        league: e.league,
+        country: "",
+        time: addOneHour(e.time),
+        date: e.date,
+        sport: "volleyball" as const,
+        hasRealOdds: true,
+        odds: { home: e.homeOdds, draw: 0, away: e.awayOdds },
+        markets: makeVolleyballMarketsFromTeams(e.homeTeam.name, e.awayTeam.name),
+      }));
+  } catch {
+    return [];
+  }
+}
+
 router.get("/upcoming", async (req, res) => {
   try {
     const sport = String(req.query["sport"] ?? "all");
-    const [realFootball, tennis] = await Promise.all([
+    const [football, tennis, basketball, hockey, volleyball] = await Promise.all([
       buildUpcomingMatches(),
-      Promise.resolve(buildTennisMatches()),
+      buildTennisUpcoming(),
+      buildBasketballUpcoming(),
+      buildHockeyUpcoming(),
+      buildVolleyballUpcoming(),
     ]);
-    const simFootball = buildSimulatedFootballMatches();
-    const seenKeys = new Set(realFootball.map(m => `${m.home}|${m.away}`));
-    const football = [...realFootball, ...simFootball.filter(m => !seenKeys.has(`${m.home}|${m.away}`))];
     let matches: UpcomingMatch[];
     if (sport === "football") matches = football;
     else if (sport === "tennis") matches = tennis;
-    else if (sport === "basketball" || sport === "hockey" || sport === "volleyball") matches = [];
-    else matches = [...football, ...tennis];
+    else if (sport === "basketball") matches = basketball;
+    else if (sport === "hockey") matches = hockey;
+    else if (sport === "volleyball") matches = volleyball;
+    else matches = [...football, ...tennis, ...basketball, ...hockey, ...volleyball];
     res.json({ matches });
   } catch (err) {
     res.status(500).json({ error: "Erro ao buscar próximas partidas" });
