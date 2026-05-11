@@ -5878,4 +5878,129 @@ router.get("/football-standings/:id", async (req, res) => {
   }
 });
 
+// ─── Football League Stats (per-player, all teams) ────────────────────────────
+
+type FootballLeagueStatsPlayerRaw = {
+  id: string; name: string; number: string; age: string; position: string;
+  injured: string; is_captain: string;
+  appearences: string;       // API typo (double 'e') — intentional
+  lineups: string; minutes_played: string; substitute_in: string; substitute_out?: string; substitutes_on_bench?: string;
+  goals: string; assists: string; rating: string;
+  yellowcards: string; yellowred: string; redcards: string;
+  saves: string; goals_conceded: string; inside_box_saves: string; penalties_saved: string;
+  shots_total: string; shots_on: string; shots_woodwork: string;
+  pass_attempts: string; pass_success: string; key_passes: string;
+  dribble_attempts: string; dribble_success: string; dispossesed: string;
+  duels_total: string; duels_won: string;
+  fouls_committed: string; fouls_drawn: string;
+  tackles: string; blocks: string; clearances: string; interceptions: string;
+  crosses_total: string; crosses_accurate: string;
+  aerials_won?: string;
+  penalties_scored: string; penalties_missed: string; penalties_committed: string; penalties_won: string;
+};
+
+type FootballLeagueStatsTeamRaw = {
+  id: string; name: string;
+  venue?: { id: string; name: string };
+  coach?: { id: string; name: string };
+  squad?: { player: FootballLeagueStatsPlayerRaw | FootballLeagueStatsPlayerRaw[] };
+};
+
+type FootballLeagueStatsRaw = {
+  league_stats?: {
+    updated?: string;
+    updated_ts?: string;   // string in this endpoint (unlike others)
+    league?: {
+      id: string; name: string; country: string;
+      team: FootballLeagueStatsTeamRaw | FootballLeagueStatsTeamRaw[];
+    };
+  };
+};
+
+type FootballLeagueStatsPlayer = {
+  id: string; name: string; number: string; age: number; position: string;
+  injured: boolean; isCaptain: boolean;
+  appearances: number; lineups: number; minutesPlayed: number;
+  subIn: number;
+  goals: number; assists: number; rating: number;
+  yellowCards: number; yellowRed: number; redCards: number;
+  saves: number; goalsConceded: number; insideBoxSaves: number; penaltiesSaved: number;
+  shotsTotal: number; shotsOn: number; shotsWoodwork: number;
+  passAttempts: number; passSuccess: number; keyPasses: number;
+  dribbleAttempts: number; dribbleSuccess: number;
+  duelsTotal: number; duelsWon: number;
+  foulsCommitted: number; foulsDrawn: number;
+  tackles: number; blocks: number; clearances: number; interceptions: number;
+  crossesTotal: number; crossesAccurate: number;
+  penaltiesScored: number; penaltiesMissed: number;
+};
+
+type FootballLeagueStatsTeam = {
+  id: string; name: string;
+  venue: { id: string; name: string } | null;
+  coach: { id: string; name: string } | null;
+  players: FootballLeagueStatsPlayer[];
+};
+
+const footballLeagueStatsCache = new Map<string, { data: FootballLeagueStatsTeam[]; meta: { id: string; name: string; country: string }; fetchedAt: number }>();
+const FOOTBALL_LEAGUE_STATS_TTL = 30 * 60 * 1000; // 30 min — changes infrequently
+
+function parseFootballStatsPlayer(p: FootballLeagueStatsPlayerRaw): FootballLeagueStatsPlayer {
+  const pi = (s: string | undefined) => parseInt(s ?? "") || 0;
+  const pf = (s: string | undefined) => parseFloat(s ?? "") || 0;
+  return {
+    id: p.id, name: p.name, number: p.number, age: pi(p.age), position: p.position,
+    injured: p.injured === "True", isCaptain: p.is_captain === "True",
+    appearances: pi(p.appearences),  // map API typo to correct spelling
+    lineups: pi(p.lineups), minutesPlayed: pi(p.minutes_played), subIn: pi(p.substitute_in),
+    goals: pi(p.goals), assists: pi(p.assists), rating: pf(p.rating),
+    yellowCards: pi(p.yellowcards), yellowRed: pi(p.yellowred), redCards: pi(p.redcards),
+    saves: pi(p.saves), goalsConceded: pi(p.goals_conceded), insideBoxSaves: pi(p.inside_box_saves), penaltiesSaved: pi(p.penalties_saved),
+    shotsTotal: pi(p.shots_total), shotsOn: pi(p.shots_on), shotsWoodwork: pi(p.shots_woodwork),
+    passAttempts: pi(p.pass_attempts), passSuccess: pi(p.pass_success), keyPasses: pi(p.key_passes),
+    dribbleAttempts: pi(p.dribble_attempts), dribbleSuccess: pi(p.dribble_success),
+    duelsTotal: pi(p.duels_total), duelsWon: pi(p.duels_won),
+    foulsCommitted: pi(p.fouls_committed), foulsDrawn: pi(p.fouls_drawn),
+    tackles: pi(p.tackles), blocks: pi(p.blocks), clearances: pi(p.clearances), interceptions: pi(p.interceptions),
+    crossesTotal: pi(p.crosses_total), crossesAccurate: pi(p.crosses_accurate),
+    penaltiesScored: pi(p.penalties_scored), penaltiesMissed: pi(p.penalties_missed),
+  };
+}
+
+async function getFootballLeagueStats(leagueId: string): Promise<{ teams: FootballLeagueStatsTeam[]; meta: { id: string; name: string; country: string } }> {
+  const now = Date.now();
+  const cached = footballLeagueStatsCache.get(leagueId);
+  if (cached && now - cached.fetchedAt < FOOTBALL_LEAGUE_STATS_TTL) return { teams: cached.data, meta: cached.meta };
+  const resp = await fetch(`${BASE_V2}/soccer/leagues/${encodeURIComponent(leagueId)}/stats?access_key=${STATSPAL_KEY}`, { signal: AbortSignal.timeout(15000) });
+  if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+  const data = (await resp.json()) as FootballLeagueStatsRaw;
+  const league = data?.league_stats?.league;
+  if (!league) throw new Error("Estatísticas não encontradas");
+  const meta = { id: league.id, name: league.name, country: league.country };
+  const rawTeams = league.team;
+  const teams: FootballLeagueStatsTeamRaw[] = !rawTeams ? [] : Array.isArray(rawTeams) ? rawTeams : [rawTeams];
+  const out: FootballLeagueStatsTeam[] = teams.map(t => {
+    const rawPlayers = t.squad?.player;
+    const players: FootballLeagueStatsPlayerRaw[] = !rawPlayers ? [] : Array.isArray(rawPlayers) ? rawPlayers : [rawPlayers];
+    return {
+      id: t.id, name: t.name,
+      venue: t.venue ? { id: t.venue.id, name: t.venue.name } : null,
+      coach: t.coach ? { id: t.coach.id, name: t.coach.name } : null,
+      players: players.map(parseFootballStatsPlayer),
+    };
+  });
+  footballLeagueStatsCache.set(leagueId, { data: out, meta, fetchedAt: now });
+  return { teams: out, meta };
+}
+
+router.get("/football-league-stats/:id", async (req, res) => {
+  const id = String(req.params["id"]);
+  try {
+    const { teams, meta } = await getFootballLeagueStats(id);
+    res.json({ ...meta, teams });
+  } catch {
+    res.status(500).json({ error: "Estatísticas da liga de futebol indisponíveis" });
+  }
+});
+
 export default router;
