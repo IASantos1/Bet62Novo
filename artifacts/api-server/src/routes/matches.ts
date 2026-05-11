@@ -2138,6 +2138,10 @@ function buildBasketballMatches(): UpcomingMatch[] {
     const pAwayTUnder = mc(normalCdf(zAwayT), 0.05, 0.95);
     const [oAwayT, uAwayT] = probsToDecimalOdds([1 - pAwayTUnder, pAwayTUnder], 1.06);
 
+    // 1st half winner (moneyline regressed toward 50/50)
+    const pHalfHome = mc(0.5 + (pHomeMoneyline - 0.5) * 0.75, 0.15, 0.85);
+    const [halfH, halfA] = probsToDecimalOdds([pHalfHome, 1 - pHalfHome], 1.06);
+
     // Quarter winners — moneyline probability regressed toward 50/50 per quarter
     const [q1H, q1A] = probsToDecimalOdds([mc(0.5 + (pHomeMoneyline - 0.5) * 0.55, 0.25, 0.75), mc(0.5 - (pHomeMoneyline - 0.5) * 0.55, 0.25, 0.75)], 1.07);
     const [q2H, q2A] = probsToDecimalOdds([mc(0.5 + (pHomeMoneyline - 0.5) * 0.50, 0.25, 0.75), mc(0.5 - (pHomeMoneyline - 0.5) * 0.50, 0.25, 0.75)], 1.07);
@@ -2169,7 +2173,7 @@ function buildBasketballMatches(): UpcomingMatch[] {
           homeMinusOne: spreadH!, awayPlusOne: spreadA!,
           homeMinusOneHalf: oAT!, awayPlusOneHalf: uAT!,
         },
-        halfTime: { home: 0, draw: 0, away: 0 },
+        halfTime: { home: halfH!, draw: 0, away: halfA! },
         firstGoal: { home: 0, noGoal: 0, away: 0 },
         _spread: spread,
         _total: totalLine,
@@ -2470,7 +2474,7 @@ function buildHockeyMatches(): UpcomingMatch[] {
       odds: { home: mlH!, draw: 0, away: mlA! },
       markets: {
         doubleChance: { homeOrDraw: 0, awayOrDraw: 0, homeOrAway: 0 },
-        bothTeamsScore: { yes: 0, no: 0 },
+        bothTeamsScore: { yes: btsYes!, no: btsNo! },
         totalGoals: {
           over05: 0, under05: 0,
           over15: oAlt1!, under15: uAlt1!,
