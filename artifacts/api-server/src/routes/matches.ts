@@ -3252,12 +3252,13 @@ router.get("/stats", async (req, res) => {
   // Only attempt Statpal API for football
   if (sport === "football") {
     try {
-      const resp = await fetch(`${BASE_V2}/soccer/matches/results?access_key=${STATSPAL_KEY}`, {
+      const resp = await fetch(`${BASE_V2}/soccer/matches/daily?offset=-1&access_key=${STATSPAL_KEY}`, {
         signal: AbortSignal.timeout(5000),
       });
       if (resp.ok) {
-        const data = (await resp.json()) as Record<string, unknown>;
-        const leagueArr = ((data?.["results"] ?? data?.["yesterday_results"]) as Record<string, unknown> | undefined)?.["league"];
+        // Response is date-keyed: { "matches_DD_MM_YYYY": { league: [...] } }
+        const data = (await resp.json()) as Record<string, { league?: unknown[] }>;
+        const leagueArr = (Object.values(data)[0])?.league;
         const leagues: unknown[] = Array.isArray(leagueArr) ? leagueArr : [];
         for (const league of leagues) {
           if (homeForm.length >= 5 && awayForm.length >= 5) break;
