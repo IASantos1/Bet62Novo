@@ -909,6 +909,19 @@ export default function Home() {
   const [basketballRosters, setBasketballRosters] = useState<Record<string, NBATeamRoster>>({});
   const [selectedBballRoster, setSelectedBballRoster] = useState<string | null>(null);
   const [bballRosterLoading, setBballRosterLoading] = useState(false);
+  const [bballPanelTab, setBballPanelTab] = useState<"roster" | "stats">("roster");
+
+  type NBAPlayerStat = {
+    id: string; rank: number; name: string;
+    gp: number; gs: number; min: string;
+    ppg: string; apg: string; rpg: string; orpg: string; drpg: string;
+    bpg: string; spg: string; topg: string; fpg: string;
+    fgPct: string; fg3Pct: string; ftPct: string;
+    fgm: string; fga: string; fg3m: string; fg3a: string; ftm: string; fta: string;
+  };
+  type NBATeamStatsData = { teamName: string; players: NBAPlayerStat[] };
+  const [bballTeamStats, setBballTeamStats] = useState<Record<string, NBATeamStatsData>>({});
+  const [bballStatsLoading, setBballStatsLoading] = useState(false);
 
   type HockeyScheduleMatch = {
     id: string; date: string; time: string; status: string; venue?: string;
@@ -3667,60 +3680,142 @@ export default function Home() {
 
                         {/* Roster panel */}
                         {selectedBballRoster && (() => {
-                          const roster = basketballRosters[selectedBballRoster];
+                          const abbr = selectedBballRoster;
+                          const roster = basketballRosters[abbr];
+                          const teamStats = bballTeamStats[abbr];
                           const POS_LABEL: Record<string, string> = { G: "Guards", "G-F": "Guard-Forwards", "F-G": "Forward-Guards", F: "Forwards", "F-C": "Forward-Centers", "C-F": "Center-Forwards", C: "Centers" };
                           const grouped = roster?.players.reduce<Record<string, NBAPlayer[]>>((acc, p) => { (acc[p.position] ??= []).push(p); return acc; }, {}) ?? {};
+                          const displayName = roster?.teamName ?? teamStats?.teamName ?? abbr.toUpperCase();
                           return (
                             <div className="mt-3 bg-zinc-950/80 border border-blue-500/20 rounded-xl overflow-hidden animate-in fade-in duration-200">
+                              {/* Header */}
                               <div className="flex items-center justify-between px-3 py-2 bg-zinc-900 border-b border-zinc-800">
                                 <div className="flex items-center gap-2">
-                                  <span className="text-[10px] font-black text-blue-400 uppercase tracking-widest">🏀 Plantel</span>
-                                  {roster && <span className="text-[9px] text-zinc-500">{roster.teamName}</span>}
-                                  {bballRosterLoading && <span className="text-[9px] text-zinc-600 animate-pulse">A carregar...</span>}
+                                  <span className="text-[10px] font-black text-blue-400 uppercase tracking-widest">🏀</span>
+                                  <span className="text-[9px] text-zinc-400 font-bold">{displayName}</span>
+                                  {(bballRosterLoading || bballStatsLoading) && <span className="text-[9px] text-zinc-600 animate-pulse">A carregar...</span>}
                                 </div>
                                 <button onClick={() => setSelectedBballRoster(null)} className="text-zinc-600 hover:text-zinc-400 text-xs">✕</button>
                               </div>
-                              {!roster && !bballRosterLoading && (
-                                <div className="text-center text-zinc-600 py-4 text-xs">Plantel não disponível para esta equipa.</div>
-                              )}
-                              {roster && (
-                                <div className="overflow-x-auto">
-                                  <table className="w-full text-[10px] font-mono tabular-nums">
-                                    <thead>
-                                      <tr className="border-b border-zinc-800 text-[8px] font-black text-zinc-600 uppercase">
-                                        <th className="text-left py-1 px-2 w-5">#</th>
-                                        <th className="text-left py-1 px-2 min-w-[130px]">Nome</th>
-                                        <th className="py-1 px-1 text-center">Pos</th>
-                                        <th className="py-1 px-1 text-center">Idade</th>
-                                        <th className="py-1 px-1 text-center hidden sm:table-cell">Alt</th>
-                                        <th className="py-1 px-1 text-center hidden sm:table-cell">Peso</th>
-                                        <th className="py-1 px-1 text-left hidden sm:table-cell">Faculdade</th>
-                                        <th className="py-1 px-1 text-right">Salário</th>
-                                      </tr>
-                                    </thead>
-                                    <tbody>
-                                      {Object.entries(grouped).map(([pos, players]) => (
-                                        <>
-                                          <tr key={`hdr-${pos}`} className="bg-zinc-900/60 border-b border-zinc-800/40">
-                                            <td colSpan={8} className="py-0.5 px-2 text-[8px] font-black text-zinc-600 uppercase tracking-wider">{POS_LABEL[pos] ?? pos}</td>
+                              {/* Tabs */}
+                              <div className="flex border-b border-zinc-800">
+                                {(["roster", "stats"] as const).map(tab => (
+                                  <button
+                                    key={tab}
+                                    onClick={() => {
+                                      setBballPanelTab(tab);
+                                      if (tab === "stats" && !bballTeamStats[abbr]) {
+                                        setBballStatsLoading(true);
+                                        fetch(`/api/matches/basketball-team-stats/${abbr}`)
+                                          .then(r => r.ok ? r.json() : null)
+                                          .then(d => { if (d) setBballTeamStats(prev => ({ ...prev, [abbr]: d })); })
+                                          .catch(() => {})
+                                          .finally(() => setBballStatsLoading(false));
+                                      }
+                                    }}
+                                    className={`flex-1 py-1.5 text-[10px] font-bold transition-colors ${bballPanelTab === tab ? "text-blue-400 border-b-2 border-blue-500 bg-blue-500/5" : "text-zinc-600 hover:text-zinc-400"}`}
+                                  >
+                                    {tab === "roster" ? "Plantel" : "Estatísticas"}
+                                  </button>
+                                ))}
+                              </div>
+                              {/* Roster tab */}
+                              {bballPanelTab === "roster" && (
+                                <>
+                                  {!roster && !bballRosterLoading && (
+                                    <div className="text-center text-zinc-600 py-4 text-xs">Plantel não disponível para esta equipa.</div>
+                                  )}
+                                  {roster && (
+                                    <div className="overflow-x-auto">
+                                      <table className="w-full text-[10px] font-mono tabular-nums">
+                                        <thead>
+                                          <tr className="border-b border-zinc-800 text-[8px] font-black text-zinc-600 uppercase">
+                                            <th className="text-left py-1 px-2 w-5">#</th>
+                                            <th className="text-left py-1 px-2 min-w-[130px]">Nome</th>
+                                            <th className="py-1 px-1 text-center">Pos</th>
+                                            <th className="py-1 px-1 text-center">Idade</th>
+                                            <th className="py-1 px-1 text-center hidden sm:table-cell">Alt</th>
+                                            <th className="py-1 px-1 text-center hidden sm:table-cell">Peso</th>
+                                            <th className="py-1 px-1 text-left hidden sm:table-cell">Faculdade</th>
+                                            <th className="py-1 px-1 text-right">Salário</th>
                                           </tr>
-                                          {players.map(p => (
-                                            <tr key={p.id} className="border-b border-zinc-800/30 last:border-0 hover:bg-zinc-800/20">
-                                              <td className="py-1 px-2 text-zinc-600 font-bold">{p.number}</td>
-                                              <td className="py-1 px-2 font-semibold text-zinc-200 truncate max-w-[130px]">{p.name}</td>
-                                              <td className="py-1 px-1 text-center text-blue-400 font-black">{p.position}</td>
-                                              <td className="py-1 px-1 text-center text-zinc-400">{p.age}</td>
-                                              <td className="py-1 px-1 text-center text-zinc-500 hidden sm:table-cell">{p.height}</td>
-                                              <td className="py-1 px-1 text-center text-zinc-500 hidden sm:table-cell">{p.weight}</td>
-                                              <td className="py-1 px-1 text-zinc-600 hidden sm:table-cell truncate max-w-[80px]">{p.college === "--" ? "—" : p.college}</td>
-                                              <td className="py-1 px-2 text-right text-zinc-500 text-[9px]">{p.salary}</td>
+                                        </thead>
+                                        <tbody>
+                                          {Object.entries(grouped).map(([pos, players]) => (
+                                            <>
+                                              <tr key={`hdr-${pos}`} className="bg-zinc-900/60 border-b border-zinc-800/40">
+                                                <td colSpan={8} className="py-0.5 px-2 text-[8px] font-black text-zinc-600 uppercase tracking-wider">{POS_LABEL[pos] ?? pos}</td>
+                                              </tr>
+                                              {players.map(p => (
+                                                <tr key={p.id} className="border-b border-zinc-800/30 last:border-0 hover:bg-zinc-800/20">
+                                                  <td className="py-1 px-2 text-zinc-600 font-bold">{p.number}</td>
+                                                  <td className="py-1 px-2 font-semibold text-zinc-200 truncate max-w-[130px]">{p.name}</td>
+                                                  <td className="py-1 px-1 text-center text-blue-400 font-black">{p.position}</td>
+                                                  <td className="py-1 px-1 text-center text-zinc-400">{p.age}</td>
+                                                  <td className="py-1 px-1 text-center text-zinc-500 hidden sm:table-cell">{p.height}</td>
+                                                  <td className="py-1 px-1 text-center text-zinc-500 hidden sm:table-cell">{p.weight}</td>
+                                                  <td className="py-1 px-1 text-zinc-600 hidden sm:table-cell truncate max-w-[80px]">{p.college === "--" ? "—" : p.college}</td>
+                                                  <td className="py-1 px-2 text-right text-zinc-500 text-[9px]">{p.salary}</td>
+                                                </tr>
+                                              ))}
+                                            </>
+                                          ))}
+                                        </tbody>
+                                      </table>
+                                    </div>
+                                  )}
+                                </>
+                              )}
+                              {/* Stats tab */}
+                              {bballPanelTab === "stats" && (
+                                <>
+                                  {!teamStats && !bballStatsLoading && (
+                                    <div className="text-center text-zinc-600 py-4 text-xs">Estatísticas não disponíveis para esta equipa.</div>
+                                  )}
+                                  {bballStatsLoading && !teamStats && (
+                                    <div className="text-center text-zinc-600 py-4 text-xs animate-pulse">A carregar...</div>
+                                  )}
+                                  {teamStats && (
+                                    <div className="overflow-x-auto">
+                                      <table className="w-full text-[10px] font-mono tabular-nums">
+                                        <thead>
+                                          <tr className="border-b border-zinc-800 text-[8px] font-black text-zinc-600 uppercase">
+                                            <th className="text-left py-1 px-2 min-w-[120px]">Jogador</th>
+                                            <th className="py-1 px-1 text-center">PJ</th>
+                                            <th className="py-1 px-1 text-center">MIN</th>
+                                            <th className="py-1 px-1 text-center font-black text-orange-400">PPG</th>
+                                            <th className="py-1 px-1 text-center text-green-400">RPG</th>
+                                            <th className="py-1 px-1 text-center text-blue-400">APG</th>
+                                            <th className="py-1 px-1 text-center hidden sm:table-cell text-red-400">BPG</th>
+                                            <th className="py-1 px-1 text-center hidden sm:table-cell">SPG</th>
+                                            <th className="py-1 px-1 text-center hidden sm:table-cell">TO</th>
+                                            <th className="py-1 px-1 text-center hidden md:table-cell">FG%</th>
+                                            <th className="py-1 px-1 text-center hidden md:table-cell">3P%</th>
+                                            <th className="py-1 px-1 text-center hidden md:table-cell">FT%</th>
+                                          </tr>
+                                        </thead>
+                                        <tbody>
+                                          {teamStats.players.map((p, idx) => (
+                                            <tr key={p.id} className={`border-b border-zinc-800/30 last:border-0 hover:bg-zinc-800/20 ${idx === 0 ? "bg-orange-500/5" : ""}`}>
+                                              <td className="py-1 px-2 font-semibold text-zinc-200 truncate max-w-[120px]">{p.name}</td>
+                                              <td className="py-1 px-1 text-center text-zinc-600">{p.gp}</td>
+                                              <td className="py-1 px-1 text-center text-zinc-500">{p.min}</td>
+                                              <td className="py-1 px-1 text-center font-black text-orange-400">{p.ppg}</td>
+                                              <td className="py-1 px-1 text-center text-green-400 font-bold">{p.rpg}</td>
+                                              <td className="py-1 px-1 text-center text-blue-400 font-bold">{p.apg}</td>
+                                              <td className="py-1 px-1 text-center text-red-400 hidden sm:table-cell">{p.bpg}</td>
+                                              <td className="py-1 px-1 text-center text-zinc-400 hidden sm:table-cell">{p.spg}</td>
+                                              <td className="py-1 px-1 text-center text-zinc-600 hidden sm:table-cell">{p.topg}</td>
+                                              <td className="py-1 px-1 text-center text-zinc-500 hidden md:table-cell">{p.fgPct}%</td>
+                                              <td className="py-1 px-1 text-center text-zinc-500 hidden md:table-cell">{p.fg3Pct}%</td>
+                                              <td className="py-1 px-1 text-center text-zinc-500 hidden md:table-cell">{p.ftPct}%</td>
                                             </tr>
                                           ))}
-                                        </>
-                                      ))}
-                                    </tbody>
-                                  </table>
-                                </div>
+                                        </tbody>
+                                      </table>
+                                    </div>
+                                  )}
+                                </>
                               )}
                             </div>
                           );

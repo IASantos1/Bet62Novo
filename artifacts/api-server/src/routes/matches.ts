@@ -4135,6 +4135,97 @@ router.get("/basketball-roster/:team", async (req, res) => {
   }
 });
 
+// NBA team stats
+type NBAPlayerStat = {
+  id: string; rank: number; name: string;
+  gp: number; gs: number; min: string;
+  ppg: string; apg: string; rpg: string; orpg: string; drpg: string;
+  bpg: string; spg: string; topg: string; fpg: string;
+  fgPct: string; fg3Pct: string; ftPct: string;
+  fgm: string; fga: string; fg3m: string; fg3a: string; ftm: string; fta: string;
+};
+type NBATeamStatsData = { teamName: string; players: NBAPlayerStat[] };
+const nbaTeamStatsCache = new Map<string, NBATeamStatsData>();
+const nbaTeamStatsFetchedAt = new Map<string, number>();
+const NBA_TEAM_STATS_TTL = 30 * 60 * 1000;
+
+async function getBasketballTeamStats(abbr: string): Promise<NBATeamStatsData | null> {
+  const now = Date.now();
+  const cached = nbaTeamStatsCache.get(abbr);
+  const fetchedAt = nbaTeamStatsFetchedAt.get(abbr) ?? 0;
+  if (cached && now - fetchedAt < NBA_TEAM_STATS_TTL) return cached;
+  try {
+    const resp = await fetch(`${BASE_V1}/nba/team-stats/${abbr}?access_key=${STATSPAL_KEY}`);
+    if (!resp.ok) return cached ?? null;
+    const json = (await resp.json()) as {
+      statistics?: {
+        team?: string; id?: string;
+        category?: Array<{ name: string; player?: unknown[] | unknown }>;
+      };
+    };
+    const stats = json.statistics;
+    if (!stats) return cached ?? null;
+    const teamName = stats.team ?? abbr.toUpperCase();
+    const categories = Array.isArray(stats.category) ? stats.category : stats.category ? [stats.category] : [];
+
+    // index by player id for merging
+    const byId = new Map<string, Record<string, string>>();
+    for (const cat of categories) {
+      const rawPlayers = Array.isArray(cat.player) ? cat.player : cat.player ? [cat.player] : [];
+      for (const p of rawPlayers as Record<string, string>[]) {
+        const pid = p["id"] ?? "";
+        if (!byId.has(pid)) byId.set(pid, {});
+        Object.assign(byId.get(pid)!, p);
+      }
+    }
+
+    const players: NBAPlayerStat[] = [...byId.values()].map(p => ({
+      id: p["id"] ?? "",
+      rank: parseInt(p["rank"] ?? "0") || 0,
+      name: p["name"] ?? "",
+      gp: parseInt(p["games_played"] ?? "0") || 0,
+      gs: parseInt(p["games_started"] ?? "0") || 0,
+      min: parseFloat(p["minutes"] ?? "0").toFixed(1),
+      ppg: parseFloat(p["points_per_game"] ?? "0").toFixed(1),
+      apg: parseFloat(p["assists_per_game"] ?? "0").toFixed(1),
+      rpg: parseFloat(p["rebounds_per_game"] ?? "0").toFixed(1),
+      orpg: parseFloat(p["offensive_rebounds_per_game"] ?? "0").toFixed(1),
+      drpg: parseFloat(p["defensive_rebounds_per_game"] ?? "0").toFixed(1),
+      bpg: parseFloat(p["blocks_per_game"] ?? "0").toFixed(1),
+      spg: parseFloat(p["steals_per_game"] ?? "0").toFixed(1),
+      topg: parseFloat(p["turnovers_per_game"] ?? "0").toFixed(1),
+      fpg: parseFloat(p["fouls_per_game"] ?? "0").toFixed(1),
+      fgPct: p["fg_pct"] ? (parseFloat(p["fg_pct"]) * 100).toFixed(1) : "—",
+      fg3Pct: p["three_point_pct"] ? (parseFloat(p["three_point_pct"]) * 100).toFixed(1) : "—",
+      ftPct: p["free_throws_pct"] ? (parseFloat(p["free_throws_pct"]) * 100).toFixed(1) : "—",
+      fgm: parseFloat(p["fg_made_per_game"] ?? "0").toFixed(1),
+      fga: parseFloat(p["fg_attempts_per_game"] ?? "0").toFixed(1),
+      fg3m: parseFloat(p["three_point_made_per_game"] ?? "0").toFixed(1),
+      fg3a: parseFloat(p["three_point_attempts_per_game"] ?? "0").toFixed(1),
+      ftm: parseFloat(p["free_throws_made_per_game"] ?? "0").toFixed(1),
+      fta: parseFloat(p["free_throws_attempts_per_game"] ?? "0").toFixed(1),
+    })).sort((a, b) => parseFloat(b.ppg) - parseFloat(a.ppg));
+
+    const data: NBATeamStatsData = { teamName, players };
+    nbaTeamStatsCache.set(abbr, data);
+    nbaTeamStatsFetchedAt.set(abbr, now);
+    return data;
+  } catch {
+    return cached ?? null;
+  }
+}
+
+router.get("/basketball-team-stats/:team", async (req, res) => {
+  const abbr = String(req.params["team"]).toLowerCase();
+  try {
+    const data = await getBasketballTeamStats(abbr);
+    if (!data) { res.status(404).json({ error: "Estatísticas indisponíveis" }); return; }
+    res.json(data);
+  } catch {
+    res.status(500).json({ error: "Estatísticas indisponíveis" });
+  }
+});
+
 async function getHockeyRoster(abbr: string): Promise<NHLRosterData | null> {
   const now = Date.now();
   const cached = hockeyRosterCache.get(abbr);
