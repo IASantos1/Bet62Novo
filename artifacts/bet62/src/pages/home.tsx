@@ -909,7 +909,12 @@ export default function Home() {
   const [basketballRosters, setBasketballRosters] = useState<Record<string, NBATeamRoster>>({});
   const [selectedBballRoster, setSelectedBballRoster] = useState<string | null>(null);
   const [bballRosterLoading, setBballRosterLoading] = useState(false);
-  const [bballPanelTab, setBballPanelTab] = useState<"roster" | "stats">("roster");
+  const [bballPanelTab, setBballPanelTab] = useState<"roster" | "stats" | "injuries">("roster");
+
+  type NBAInjuryReport = { playerName: string; playerId: string; status: string; description: string; date: string };
+  type NBAInjuriesData = { teamName: string; report: NBAInjuryReport[] };
+  const [bballInjuries, setBballInjuries] = useState<Record<string, NBAInjuriesData>>({});
+  const [bballInjuriesLoading, setBballInjuriesLoading] = useState(false);
 
   type NBAPlayerStat = {
     id: string; rank: number; name: string;
@@ -3693,13 +3698,13 @@ export default function Home() {
                                 <div className="flex items-center gap-2">
                                   <span className="text-[10px] font-black text-blue-400 uppercase tracking-widest">🏀</span>
                                   <span className="text-[9px] text-zinc-400 font-bold">{displayName}</span>
-                                  {(bballRosterLoading || bballStatsLoading) && <span className="text-[9px] text-zinc-600 animate-pulse">A carregar...</span>}
+                                  {(bballRosterLoading || bballStatsLoading || bballInjuriesLoading) && <span className="text-[9px] text-zinc-600 animate-pulse">A carregar...</span>}
                                 </div>
                                 <button onClick={() => setSelectedBballRoster(null)} className="text-zinc-600 hover:text-zinc-400 text-xs">✕</button>
                               </div>
                               {/* Tabs */}
                               <div className="flex border-b border-zinc-800">
-                                {(["roster", "stats"] as const).map(tab => (
+                                {(["roster", "stats", "injuries"] as const).map(tab => (
                                   <button
                                     key={tab}
                                     onClick={() => {
@@ -3712,10 +3717,18 @@ export default function Home() {
                                           .catch(() => {})
                                           .finally(() => setBballStatsLoading(false));
                                       }
+                                      if (tab === "injuries" && !bballInjuries[abbr]) {
+                                        setBballInjuriesLoading(true);
+                                        fetch(`/api/matches/basketball-injuries/${abbr}`)
+                                          .then(r => r.ok ? r.json() : null)
+                                          .then(d => { if (d) setBballInjuries(prev => ({ ...prev, [abbr]: d })); })
+                                          .catch(() => {})
+                                          .finally(() => setBballInjuriesLoading(false));
+                                      }
                                     }}
-                                    className={`flex-1 py-1.5 text-[10px] font-bold transition-colors ${bballPanelTab === tab ? "text-blue-400 border-b-2 border-blue-500 bg-blue-500/5" : "text-zinc-600 hover:text-zinc-400"}`}
+                                    className={`flex-1 py-1.5 text-[10px] font-bold transition-colors ${bballPanelTab === tab ? (tab === "injuries" ? "text-red-400 border-b-2 border-red-500 bg-red-500/5" : "text-blue-400 border-b-2 border-blue-500 bg-blue-500/5") : "text-zinc-600 hover:text-zinc-400"}`}
                                   >
-                                    {tab === "roster" ? "Plantel" : "Estatísticas"}
+                                    {tab === "roster" ? "Plantel" : tab === "stats" ? "Estatísticas" : "🩹 Lesões"}
                                   </button>
                                 ))}
                               </div>
@@ -3817,6 +3830,51 @@ export default function Home() {
                                   )}
                                 </>
                               )}
+                              {/* Injuries tab */}
+                              {bballPanelTab === "injuries" && (() => {
+                                const injData = bballInjuries[abbr];
+                                const injColor = (r: NBAInjuryReport) => {
+                                  if (r.status === "Sidelined" || r.description.toLowerCase().includes("out for the season")) return { badge: "bg-red-500/20 text-red-400 border-red-700/40", dot: "bg-red-500" };
+                                  if (r.description.toLowerCase().includes("game time decision")) return { badge: "bg-yellow-500/20 text-yellow-400 border-yellow-700/40", dot: "bg-yellow-500" };
+                                  return { badge: "bg-amber-500/20 text-amber-400 border-amber-700/40", dot: "bg-amber-500" };
+                                };
+                                return (
+                                  <>
+                                    {!injData && !bballInjuriesLoading && (
+                                      <div className="text-center text-zinc-600 py-4 text-xs">Sem lesões disponíveis.</div>
+                                    )}
+                                    {bballInjuriesLoading && !injData && (
+                                      <div className="text-center text-zinc-600 py-4 text-xs animate-pulse">A carregar...</div>
+                                    )}
+                                    {injData && injData.report.length === 0 && (
+                                      <div className="flex items-center gap-2 px-3 py-4 text-xs text-green-400">
+                                        <span className="w-2 h-2 rounded-full bg-green-500 shrink-0" />
+                                        Equipa sem lesões reportadas.
+                                      </div>
+                                    )}
+                                    {injData && injData.report.length > 0 && (
+                                      <div className="divide-y divide-zinc-800/50">
+                                        {injData.report.map(r => {
+                                          const { badge, dot } = injColor(r);
+                                          return (
+                                            <div key={r.playerId} className="flex items-start gap-3 px-3 py-2.5 hover:bg-zinc-800/20 transition-colors">
+                                              <span className={`mt-1 w-1.5 h-1.5 rounded-full shrink-0 ${dot}`} />
+                                              <div className="flex-1 min-w-0">
+                                                <div className="flex items-center gap-2 flex-wrap">
+                                                  <span className="text-[11px] font-bold text-zinc-200">{r.playerName}</span>
+                                                  <span className={`text-[9px] font-black border rounded px-1 py-0.5 ${badge}`}>{r.status}</span>
+                                                </div>
+                                                <div className="text-[10px] text-zinc-500 mt-0.5">{r.description}</div>
+                                              </div>
+                                              <div className="text-[9px] text-zinc-700 shrink-0 tabular-nums">{r.date.split(".").slice(0,2).join("/")}</div>
+                                            </div>
+                                          );
+                                        })}
+                                      </div>
+                                    )}
+                                  </>
+                                );
+                              })()}
                             </div>
                           );
                         })()}

@@ -4450,6 +4450,60 @@ router.get("/hockey-injuries/:team", async (req, res) => {
   }
 });
 
+// NBA injuries
+type NBAInjuryReport = { playerName: string; playerId: string; status: string; description: string; date: string };
+type NBAInjuriesData = { teamName: string; report: NBAInjuryReport[] };
+const nbaInjuriesCache = new Map<string, NBAInjuriesData>();
+const nbaInjuriesFetchedAt = new Map<string, number>();
+const NBA_INJURIES_TTL = 15 * 60 * 1000;
+
+async function getBasketballInjuries(abbr: string): Promise<NBAInjuriesData | null> {
+  const now = Date.now();
+  const cached = nbaInjuriesCache.get(abbr);
+  const fetchedAt = nbaInjuriesFetchedAt.get(abbr) ?? 0;
+  if (cached && now - fetchedAt < NBA_INJURIES_TTL) return cached;
+  try {
+    const resp = await fetch(`${BASE_V1}/nba/injuries/${abbr}?access_key=${STATSPAL_KEY}`);
+    if (!resp.ok) return cached ?? null;
+    const json = (await resp.json()) as {
+      team?: {
+        id?: string; name?: string;
+        report?: Array<{ player_name?: string; player_id?: string; status?: string; description?: string; date?: string }>
+                | { player_name?: string; player_id?: string; status?: string; description?: string; date?: string };
+      };
+    };
+    const t = json.team;
+    if (!t) return cached ?? null;
+    const raw = Array.isArray(t.report) ? t.report : t.report ? [t.report] : [];
+    const data: NBAInjuriesData = {
+      teamName: t.name ?? abbr,
+      report: raw.map(r => ({
+        playerName: r.player_name ?? "",
+        playerId: r.player_id ?? "",
+        status: r.status ?? "",
+        description: r.description ?? "",
+        date: r.date ?? "",
+      })),
+    };
+    nbaInjuriesCache.set(abbr, data);
+    nbaInjuriesFetchedAt.set(abbr, now);
+    return data;
+  } catch {
+    return cached ?? null;
+  }
+}
+
+router.get("/basketball-injuries/:team", async (req, res) => {
+  const abbr = String(req.params["team"]).toLowerCase();
+  try {
+    const data = await getBasketballInjuries(abbr);
+    if (!data) { res.status(404).json({ error: "Lesões indisponíveis" }); return; }
+    res.json(data);
+  } catch {
+    res.status(500).json({ error: "Lesões indisponíveis" });
+  }
+});
+
 router.get("/volleyball-standings/:id", async (req, res) => {
   try {
     const id = String(req.params["id"]);
