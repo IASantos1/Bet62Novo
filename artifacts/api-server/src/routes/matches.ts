@@ -2912,9 +2912,9 @@ router.get("/live", async (_req, res) => {
     const volleyMatches = buildVolleyballLiveMatches(volleyTournaments);
     const simulated     = buildSimulatedLiveOtherSports({
       skipTennis:     tennisMatches.length > 0,
-      skipVolley:     volleyMatches.length > 0,
-      skipHockey:     nhlMatches.filter(m => m.status !== "Not Started").length > 0,
-      skipBasketball: nbaMatches.length > 0,
+      skipVolley:     true,
+      skipHockey:     true,
+      skipBasketball: true,
     });
     const matches = [...soccerMatches, ...nhlMatches, ...nbaMatches, ...tennisMatches, ...volleyMatches, ...simulated];
     res.json({ matches });
@@ -2927,23 +2927,18 @@ router.get("/live", async (_req, res) => {
 router.get("/upcoming", async (req, res) => {
   try {
     const sport = String(req.query["sport"] ?? "all");
-    const [realFootball, basketball, tennis, hockey, volleyball] = await Promise.all([
+    const [realFootball, tennis] = await Promise.all([
       buildUpcomingMatches(),
-      Promise.resolve(buildBasketballMatches()),
       Promise.resolve(buildTennisMatches()),
-      Promise.resolve(buildHockeyMatches()),
-      Promise.resolve(buildVolleyballMatches()),
     ]);
     const simFootball = buildSimulatedFootballMatches();
     const seenKeys = new Set(realFootball.map(m => `${m.home}|${m.away}`));
     const football = [...realFootball, ...simFootball.filter(m => !seenKeys.has(`${m.home}|${m.away}`))];
     let matches: UpcomingMatch[];
     if (sport === "football") matches = football;
-    else if (sport === "basketball") matches = basketball;
     else if (sport === "tennis") matches = tennis;
-    else if (sport === "hockey") matches = hockey;
-    else if (sport === "volleyball") matches = volleyball;
-    else matches = [...football, ...basketball, ...tennis, ...hockey, ...volleyball];
+    else if (sport === "basketball" || sport === "hockey" || sport === "volleyball") matches = [];
+    else matches = [...football, ...tennis];
     res.json({ matches });
   } catch (err) {
     res.status(500).json({ error: "Erro ao buscar próximas partidas" });
