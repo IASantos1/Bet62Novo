@@ -6529,4 +6529,68 @@ router.get("/football-player/:id", async (req, res) => {
   }
 });
 
+// ─── Football Coach Profile ────────────────────────────────────────────────────
+
+type FootballCoachProfileRaw = {
+  updated?: string; updated_ts?: number;
+  coach?: {
+    id: string; name: string; firstname: string; lastname: string;
+    team: string; team_id: string;
+    nationality: string; birthdate: string; age: string;
+    birthcountry: string; birthplace: string;
+    height: string;  // "180 cm" — includes unit
+    weight: string;  // "70 kg"  — includes unit
+    trophies?: { trophy: FootballTeamTrophyRaw | FootballTeamTrophyRaw[] };
+    career_stats?: { team: { name: string; id: string; from: string; to: string } | { name: string; id: string; from: string; to: string }[] };
+  };
+};
+
+const footballCoachCache = new Map<string, { data: object; fetchedAt: number }>();
+const FOOTBALL_COACH_TTL = 30 * 60 * 1000;
+
+async function getFootballCoach(coachId: string): Promise<object> {
+  const now = Date.now();
+  const cached = footballCoachCache.get(coachId);
+  if (cached && now - cached.fetchedAt < FOOTBALL_COACH_TTL) return cached.data;
+  const resp = await fetch(`${BASE_V2}/soccer/coaches/${encodeURIComponent(coachId)}?access_key=${STATSPAL_KEY}`, { signal: AbortSignal.timeout(10000) });
+  if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+  const data = (await resp.json()) as FootballCoachProfileRaw;
+  const c = data?.coach;
+  if (!c) throw new Error("Treinador não encontrado");
+
+  const rawTrophies = c.trophies?.trophy;
+  const trophies = !rawTrophies ? [] : (Array.isArray(rawTrophies) ? rawTrophies : [rawTrophies]).map(t => ({
+    country: t.country, league: t.league, status: t.status, count: parseInt(t.count) || 0, seasons: t.seasons,
+  }));
+
+  const rawCareer = c.career_stats?.team;
+  const career = !rawCareer ? [] : (Array.isArray(rawCareer) ? rawCareer : [rawCareer]).map(t => ({
+    id: t.id, name: t.name, from: t.from, to: t.to || null,
+  }));
+
+  const result = {
+    id: c.id, name: c.name, firstName: c.firstname, lastName: c.lastname,
+    currentTeam: { id: c.team_id, name: c.team },
+    nationality: c.nationality, birthdate: c.birthdate, age: parseInt(c.age) || null,
+    birthcountry: c.birthcountry, birthplace: c.birthplace,
+    // Strip units: "180 cm" → 180, "70 kg" → 70
+    height: parseInt(c.height) || null,
+    weight: parseInt(c.weight) || null,
+    trophies,
+    career,
+  };
+  footballCoachCache.set(coachId, { data: result, fetchedAt: now });
+  return result;
+}
+
+router.get("/football-coach/:id", async (req, res) => {
+  const id = String(req.params["id"]);
+  try {
+    const coach = await getFootballCoach(id);
+    res.json(coach);
+  } catch {
+    res.status(500).json({ error: "Perfil de treinador indisponível" });
+  }
+});
+
 export default router;
