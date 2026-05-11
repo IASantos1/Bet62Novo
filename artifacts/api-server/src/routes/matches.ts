@@ -196,32 +196,28 @@ type StatpalLeagueV2 = {
 };
 
 // v1 odds types
+// Root double-wrapper: response is { example: { odds_feed: {...} } } OR { odds_feed: {...} }
+// getOddsMap() already handles both via: raw?.example?.odds_feed ?? raw?.odds_feed
 type OddsOdd = { name: string; value: string };
-type OddsTotal = { name: string; stop?: string; ismain?: string; odd: OddsOdd[] };
+type OddsTotal    = { name: string; stop?: string; ismain?: string; odd: OddsOdd | OddsOdd[] };
+type OddsHandicap = { name: string; stop?: string; ismain?: string; odd: OddsOdd | OddsOdd[] };
 type OddsBookmaker = {
-  id: string;
-  name: string;
-  stop?: string;
-  ts?: string;
-  odd?: OddsOdd[];
-  total?: OddsTotal | OddsTotal[];
-  handicap?: unknown[];
+  id: string; name: string; stop?: string; ts?: string;
+  odd?:      OddsOdd | OddsOdd[];       // 1x2, Correct Score, BTTS, Double Chance
+  total?:    OddsTotal    | OddsTotal[];    // Over/Under lines
+  handicap?: OddsHandicap | OddsHandicap[]; // Asian Handicap lines (was unknown[])
 };
 type OddsType = { name: string; stop?: string; bookmaker: OddsBookmaker | OddsBookmaker[] };
 type OddsMatch = {
   id: string;
-  alternate_id: string;
-  alternate_id_2?: string;
-  status: string;
-  home: { id: string; name: string };
-  away: { id: string; name: string };
+  alternate_id: string; alternate_id_2?: string; static_id?: string;
+  date?: string; time?: string; status: string; venue?: string;
+  home: { id: string; name: string; alternate_id?: string };
+  away: { id: string; name: string; alternate_id?: string };
   odds?: { type: OddsType | OddsType[] };
 };
 type OddsLeague = {
-  id: string;
-  gid?: string;
-  name: string;
-  country: string;
+  id: string; gid?: string; name: string; country: string; sub_id?: string;
   match: OddsMatch | OddsMatch[];
 };
 
@@ -1331,15 +1327,27 @@ async function getOddsMap(): Promise<Map<string, RealOdds>> {
             if (!m?.odds?.type) continue;
             const types = Array.isArray(m.odds.type) ? m.odds.type : [m.odds.type];
 
-            // Find 1x2 odds
+            // Find 1x2 odds — average across ALL active bookmakers with 2.5% house margin
+            // (was: bookmaker[0] only — inconsistent with hockey/basketball/volleyball/tennis)
             const wx2 = types.find(t => t.name === "1x2" || t.name === "3Way Result");
             if (!wx2) continue;
-            const bk = Array.isArray(wx2.bookmaker) ? wx2.bookmaker[0] : wx2.bookmaker;
-            if (!bk?.odd) continue;
-            const odds = Array.isArray(bk.odd) ? bk.odd : [bk.odd];
-            const homeVal = parseFloat2(odds.find(o => o.name === "Home")?.value);
-            const drawVal = parseFloat2(odds.find(o => o.name === "Draw")?.value);
-            const awayVal = parseFloat2(odds.find(o => o.name === "Away")?.value);
+            const bks: OddsBookmaker[] = Array.isArray(wx2.bookmaker) ? wx2.bookmaker : [wx2.bookmaker];
+            const avgSide = (side: "Home" | "Draw" | "Away"): number => {
+              const vals: number[] = [];
+              for (const bk of bks) {
+                if (bk.stop === "True") continue;
+                const odds = bk.odd ? (Array.isArray(bk.odd) ? bk.odd : [bk.odd]) : [];
+                const o = odds.find(o => o.name === side);
+                const v = parseFloat(o?.value ?? "0");
+                if (v > 1) vals.push(v);
+              }
+              if (!vals.length) return 0;
+              const avg = vals.reduce((a, b) => a + b, 0) / vals.length;
+              return Math.max(1.01, Math.round(avg * 0.975 * 100) / 100);
+            };
+            const homeVal = avgSide("Home");
+            const drawVal = avgSide("Draw");
+            const awayVal = avgSide("Away");
             if (homeVal <= 0 || drawVal <= 0 || awayVal <= 0) continue;
 
             const entry: RealOdds = { home: homeVal, draw: drawVal, away: awayVal, types };
@@ -7748,6 +7756,156 @@ router.get("/football-injuries-v1", async (_req, res) => {
     res.json({ leagues: out });
   } catch {
     res.status(500).json({ error: "Lesões indisponíveis" });
+  }
+});
+
+// ─── Football Odds by country (v1) — public multi-market route ────────────────
+// v1/soccer/odds/{country} — exposes all 5 market types with proper averaging.
+// Already used internally by getOddsMap() for live card bet slip odds.
+// This public route adds per-match market exposure: 1x2, Asian Handicap,
+// Over/Under, Correct Score, Both Teams To Score — averaged with 2.5% margin.
+// Root double-wrapper handled: example?.odds_feed ?? odds_feed.
+// team.alternate_id now included (team-level ID, distinct from match alternate_id).
+
+const footballOddsCountryCache = new Map<string, { data: object[]; fetchedAt: number }>();
+const FOOTBALL_ODDS_COUNTRY_TTL = 10 * 60 * 1000; // 10 min
+
+function avgOddsByName(bks: OddsBookmaker[], name: string): number {
+  const vals: number[] = [];
+  for (const bk of bks) {
+    if (bk.stop === "True") continue;
+    const odds = bk.odd ? (Array.isArray(bk.odd) ? bk.odd : [bk.odd]) : [];
+    const o = odds.find(o => o.name === name);
+    const v = parseFloat(o?.value ?? "0");
+    if (v > 1) vals.push(v);
+  }
+  if (!vals.length) return 0;
+  const avg = vals.reduce((a, b) => a + b, 0) / vals.length;
+  return Math.max(1.01, Math.round(avg * 0.975 * 100) / 100);
+}
+
+function processOddsType(t: OddsType): object | null {
+  const bks: OddsBookmaker[] = Array.isArray(t.bookmaker) ? t.bookmaker : [t.bookmaker];
+  const activeBks = bks.filter(b => b.stop !== "True");
+  if (!activeBks.length) return null;
+
+  switch (t.name) {
+    case "1x2":
+    case "3Way Result": {
+      const h = avgOddsByName(activeBks, "Home");
+      const d = avgOddsByName(activeBks, "Draw");
+      const a = avgOddsByName(activeBks, "Away");
+      if (!h || !d || !a) return null;
+      return { market: "1x2", homeOdds: h, drawOdds: d, awayOdds: a };
+    }
+    case "Over/Under": {
+      // Use main line (ismain:"True") averaged across bookmakers
+      const allLines = activeBks.flatMap(bk => {
+        const tots = bk.total ? (Array.isArray(bk.total) ? bk.total : [bk.total]) : [];
+        return tots.filter(tot => tot.ismain === "True" || tots.length === 1);
+      });
+      if (!allLines.length) return null;
+      const mainLine = allLines[0]?.name ?? "";
+      const overVals: number[] = [], underVals: number[] = [];
+      for (const line of allLines) {
+        const odds = line.odd ? (Array.isArray(line.odd) ? line.odd : [line.odd]) : [];
+        const ov = parseFloat(odds.find(o => o.name === "Over")?.value  ?? "0");
+        const uv = parseFloat(odds.find(o => o.name === "Under")?.value ?? "0");
+        if (ov > 1) overVals.push(ov);
+        if (uv > 1) underVals.push(uv);
+      }
+      const avg = (arr: number[]) => arr.length ? Math.max(1.01, Math.round((arr.reduce((a,b)=>a+b,0)/arr.length)*0.975*100)/100) : 0;
+      const over = avg(overVals); const under = avg(underVals);
+      if (!over || !under) return null;
+      return { market: "Over/Under", line: mainLine, overOdds: over, underOdds: under };
+    }
+    case "Asian Handicap": {
+      const allLines = activeBks.flatMap(bk => {
+        const hcps = bk.handicap ? (Array.isArray(bk.handicap) ? bk.handicap : [bk.handicap]) : [];
+        return hcps.filter(h => h.ismain === "True" || hcps.length === 1);
+      });
+      if (!allLines.length) return null;
+      const mainLine = allLines[0]?.name ?? "";
+      const homeVals: number[] = [], awayVals: number[] = [];
+      for (const line of allLines) {
+        const odds = line.odd ? (Array.isArray(line.odd) ? line.odd : [line.odd]) : [];
+        const hv = parseFloat(odds.find(o => o.name === "Home")?.value ?? "0");
+        const av = parseFloat(odds.find(o => o.name === "Away")?.value ?? "0");
+        if (hv > 1) homeVals.push(hv);
+        if (av > 1) awayVals.push(av);
+      }
+      const avg = (arr: number[]) => arr.length ? Math.max(1.01, Math.round((arr.reduce((a,b)=>a+b,0)/arr.length)*0.975*100)/100) : 0;
+      const h = avg(homeVals); const a = avg(awayVals);
+      if (!h || !a) return null;
+      return { market: "Asian Handicap", line: mainLine, homeOdds: h, awayOdds: a };
+    }
+    case "Both Teams To Score": {
+      const yes = avgOddsByName(activeBks, "Yes");
+      const no  = avgOddsByName(activeBks, "No");
+      if (!yes || !no) return null;
+      return { market: "Both Teams To Score", yesOdds: yes, noOdds: no };
+    }
+    case "Correct Score": {
+      // Collect unique score names and average across bookmakers
+      const scoreMap = new Map<string, number[]>();
+      for (const bk of activeBks) {
+        const odds = bk.odd ? (Array.isArray(bk.odd) ? bk.odd : [bk.odd]) : [];
+        for (const o of odds) {
+          const v = parseFloat(o.value ?? "0");
+          if (v > 1) { const arr = scoreMap.get(o.name) ?? []; arr.push(v); scoreMap.set(o.name, arr); }
+        }
+      }
+      const scores = Array.from(scoreMap.entries()).map(([score, vals]) => ({
+        score, odds: Math.max(1.01, Math.round((vals.reduce((a,b)=>a+b,0)/vals.length)*0.975*100)/100),
+      })).sort((a, b) => a.odds - b.odds);
+      if (!scores.length) return null;
+      return { market: "Correct Score", scores };
+    }
+    default:
+      return null;
+  }
+}
+
+router.get("/football-odds-country/:country", async (req, res) => {
+  const country = String(req.params["country"]).toLowerCase().replace(/[^a-z0-9-]/g, "");
+  if (!country) { res.status(400).json({ error: "País inválido" }); return; }
+  const now = Date.now();
+  const cached = footballOddsCountryCache.get(country);
+  if (cached && now - cached.fetchedAt < FOOTBALL_ODDS_COUNTRY_TTL) {
+    res.json({ leagues: cached.data });
+    return;
+  }
+  try {
+    const resp = await fetch(`${BASE_V1}/soccer/odds/${encodeURIComponent(country)}?access_key=${STATSPAL_KEY}`, { signal: AbortSignal.timeout(10000) });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const raw = (await resp.json()) as {
+      example?: { odds_feed?: { league?: OddsLeague | OddsLeague[] } };
+      odds_feed?: { league?: OddsLeague | OddsLeague[] };
+    };
+    const feed = raw?.example?.odds_feed ?? raw?.odds_feed;
+    const rawLeagues = feed?.league;
+    const leagues: OddsLeague[] = toArr(rawLeagues);
+
+    const out = leagues.map(lg => ({
+      id: lg.id, gid: lg.gid ?? null, name: lg.name, country: lg.country, subId: lg.sub_id ?? null,
+      matches: toArr(lg.match).map(m => {
+        const types: OddsType[] = m.odds?.type ? (Array.isArray(m.odds.type) ? m.odds.type : [m.odds.type]) : [];
+        const markets = types.map(t => processOddsType(t)).filter((x): x is object => x !== null);
+        return {
+          id: m.id, alternateId: m.alternate_id, alternateId2: m.alternate_id_2 ?? null, staticId: m.static_id ?? null,
+          date: m.date ?? null, time: m.time ?? null, status: m.status,
+          venue: m.venue || null,
+          homeTeam: { id: m.home.id, name: m.home.name, alternateId: m.home.alternate_id ?? null },
+          awayTeam: { id: m.away.id, name: m.away.name, alternateId: m.away.alternate_id ?? null },
+          markets,
+        };
+      }),
+    }));
+
+    footballOddsCountryCache.set(country, { data: out, fetchedAt: now });
+    res.json({ leagues: out });
+  } catch {
+    res.status(500).json({ error: "Odds indisponíveis" });
   }
 });
 
