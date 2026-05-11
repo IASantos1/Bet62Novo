@@ -894,7 +894,7 @@ export default function Home() {
   const [basketballSchedule, setBasketballSchedule] = useState<BasketballScheduleData | null>(null);
 
   type NBAStandingsTeam = {
-    id: string; name: string; position: number;
+    id: string; name: string; abbr: string; position: number;
     won: number; lost: number; pct: string; gb: string;
     streak: string; lastTen: string; homeRecord: string; roadRecord: string;
     ppg: string; papg: string; diff: string;
@@ -903,6 +903,12 @@ export default function Home() {
   type NBAStandingsConference = { name: string; divisions: NBAStandingsDivision[] };
   type NBAStandingsData = { season: string; conferences: NBAStandingsConference[] };
   const [basketballStandings, setBasketballStandings] = useState<NBAStandingsData | null>(null);
+
+  type NBAPlayer = { id: string; name: string; number: string; age: number; position: string; college: string; height: string; weight: string; salary: string };
+  type NBATeamRoster = { teamName: string; abbreviation: string; season: string; players: NBAPlayer[] };
+  const [basketballRosters, setBasketballRosters] = useState<Record<string, NBATeamRoster>>({});
+  const [selectedBballRoster, setSelectedBballRoster] = useState<string | null>(null);
+  const [bballRosterLoading, setBballRosterLoading] = useState(false);
 
   type HockeyScheduleMatch = {
     id: string; date: string; time: string; status: string; venue?: string;
@@ -3621,10 +3627,24 @@ export default function Home() {
                                       </thead>
                                       <tbody>
                                         {div.teams.map((team, idx) => (
-                                          <tr key={team.id} className={`border-b border-zinc-800/40 last:border-0 ${idx < 6 ? "" : "opacity-60"}`}>
+                                          <tr
+                                            key={team.id}
+                                            className={`border-b border-zinc-800/40 last:border-0 cursor-pointer transition-colors ${selectedBballRoster === team.abbr ? "bg-blue-500/10" : "hover:bg-zinc-800/30"} ${idx < 6 ? "" : "opacity-60"}`}
+                                            onClick={() => {
+                                              if (selectedBballRoster === team.abbr) { setSelectedBballRoster(null); return; }
+                                              setSelectedBballRoster(team.abbr);
+                                              if (basketballRosters[team.abbr]) return;
+                                              setBballRosterLoading(true);
+                                              fetch(`/api/matches/basketball-roster/${team.abbr}`)
+                                                .then(r => r.ok ? r.json() : null)
+                                                .then(d => { if (d) setBasketballRosters(prev => ({ ...prev, [team.abbr]: d })); })
+                                                .catch(() => {})
+                                                .finally(() => setBballRosterLoading(false));
+                                            }}
+                                          >
                                             <td className="py-1.5 px-2 text-zinc-600 text-[9px] font-black">{team.position}</td>
                                             <td className="py-1.5 px-2">
-                                              <span className={`text-[10px] font-bold truncate ${idx < 6 ? "text-zinc-200" : "text-zinc-500"}`}>{team.name.split(" ").slice(-1)[0]}</span>
+                                              <span className={`text-[10px] font-bold truncate ${selectedBballRoster === team.abbr ? "text-blue-400" : idx < 6 ? "text-zinc-200" : "text-zinc-500"}`}>{team.name.split(" ").slice(-1)[0]}</span>
                                             </td>
                                             <td className="py-1.5 px-1 text-center text-green-400 font-bold">{team.won}</td>
                                             <td className="py-1.5 px-1 text-center text-red-400 font-bold">{team.lost}</td>
@@ -3644,6 +3664,67 @@ export default function Home() {
                             </div>
                           </div>
                         ))}
+
+                        {/* Roster panel */}
+                        {selectedBballRoster && (() => {
+                          const roster = basketballRosters[selectedBballRoster];
+                          const POS_LABEL: Record<string, string> = { G: "Guards", "G-F": "Guard-Forwards", "F-G": "Forward-Guards", F: "Forwards", "F-C": "Forward-Centers", "C-F": "Center-Forwards", C: "Centers" };
+                          const grouped = roster?.players.reduce<Record<string, NBAPlayer[]>>((acc, p) => { (acc[p.position] ??= []).push(p); return acc; }, {}) ?? {};
+                          return (
+                            <div className="mt-3 bg-zinc-950/80 border border-blue-500/20 rounded-xl overflow-hidden animate-in fade-in duration-200">
+                              <div className="flex items-center justify-between px-3 py-2 bg-zinc-900 border-b border-zinc-800">
+                                <div className="flex items-center gap-2">
+                                  <span className="text-[10px] font-black text-blue-400 uppercase tracking-widest">🏀 Plantel</span>
+                                  {roster && <span className="text-[9px] text-zinc-500">{roster.teamName}</span>}
+                                  {bballRosterLoading && <span className="text-[9px] text-zinc-600 animate-pulse">A carregar...</span>}
+                                </div>
+                                <button onClick={() => setSelectedBballRoster(null)} className="text-zinc-600 hover:text-zinc-400 text-xs">✕</button>
+                              </div>
+                              {!roster && !bballRosterLoading && (
+                                <div className="text-center text-zinc-600 py-4 text-xs">Plantel não disponível para esta equipa.</div>
+                              )}
+                              {roster && (
+                                <div className="overflow-x-auto">
+                                  <table className="w-full text-[10px] font-mono tabular-nums">
+                                    <thead>
+                                      <tr className="border-b border-zinc-800 text-[8px] font-black text-zinc-600 uppercase">
+                                        <th className="text-left py-1 px-2 w-5">#</th>
+                                        <th className="text-left py-1 px-2 min-w-[130px]">Nome</th>
+                                        <th className="py-1 px-1 text-center">Pos</th>
+                                        <th className="py-1 px-1 text-center">Idade</th>
+                                        <th className="py-1 px-1 text-center hidden sm:table-cell">Alt</th>
+                                        <th className="py-1 px-1 text-center hidden sm:table-cell">Peso</th>
+                                        <th className="py-1 px-1 text-left hidden sm:table-cell">Faculdade</th>
+                                        <th className="py-1 px-1 text-right">Salário</th>
+                                      </tr>
+                                    </thead>
+                                    <tbody>
+                                      {Object.entries(grouped).map(([pos, players]) => (
+                                        <>
+                                          <tr key={`hdr-${pos}`} className="bg-zinc-900/60 border-b border-zinc-800/40">
+                                            <td colSpan={8} className="py-0.5 px-2 text-[8px] font-black text-zinc-600 uppercase tracking-wider">{POS_LABEL[pos] ?? pos}</td>
+                                          </tr>
+                                          {players.map(p => (
+                                            <tr key={p.id} className="border-b border-zinc-800/30 last:border-0 hover:bg-zinc-800/20">
+                                              <td className="py-1 px-2 text-zinc-600 font-bold">{p.number}</td>
+                                              <td className="py-1 px-2 font-semibold text-zinc-200 truncate max-w-[130px]">{p.name}</td>
+                                              <td className="py-1 px-1 text-center text-blue-400 font-black">{p.position}</td>
+                                              <td className="py-1 px-1 text-center text-zinc-400">{p.age}</td>
+                                              <td className="py-1 px-1 text-center text-zinc-500 hidden sm:table-cell">{p.height}</td>
+                                              <td className="py-1 px-1 text-center text-zinc-500 hidden sm:table-cell">{p.weight}</td>
+                                              <td className="py-1 px-1 text-zinc-600 hidden sm:table-cell truncate max-w-[80px]">{p.college === "--" ? "—" : p.college}</td>
+                                              <td className="py-1 px-2 text-right text-zinc-500 text-[9px]">{p.salary}</td>
+                                            </tr>
+                                          ))}
+                                        </>
+                                      ))}
+                                    </tbody>
+                                  </table>
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })()}
                       </div>
                     )}
                   </div>

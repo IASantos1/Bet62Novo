@@ -957,8 +957,23 @@ let hockeyStandingsCache: NHLStandingsData | null = null;
 let hockeyStandingsFetchedAt = 0;
 const HOCKEY_STANDINGS_TTL = 30 * 60 * 1000;
 
+// NBA roster abbreviations (empirically matching Statpal's URL parameter)
+// Standard NBA 3-letter codes (lowercase) — some may differ from Statpal's actual routing
+const NBA_ABBR: Record<string, string> = {
+  "Atlanta Hawks": "atl", "Boston Celtics": "bos", "Brooklyn Nets": "bkn",
+  "Charlotte Hornets": "cha", "Chicago Bulls": "chi", "Cleveland Cavaliers": "cle",
+  "Dallas Mavericks": "dal", "Denver Nuggets": "den", "Detroit Pistons": "det",
+  "Golden State Warriors": "gsw", "Houston Rockets": "hou", "Indiana Pacers": "ind",
+  "Los Angeles Clippers": "lac", "Los Angeles Lakers": "lal", "Memphis Grizzlies": "mem",
+  "Miami Heat": "mia", "Milwaukee Bucks": "mil", "Minnesota Timberwolves": "min",
+  "New Orleans Pelicans": "nop", "New York Knicks": "nyk", "Oklahoma City Thunder": "okc",
+  "Orlando Magic": "orl", "Philadelphia 76ers": "phi", "Phoenix Suns": "phx",
+  "Portland Trail Blazers": "por", "Sacramento Kings": "sac", "San Antonio Spurs": "sas",
+  "Toronto Raptors": "tor", "Utah Jazz": "uta", "Washington Wizards": "was",
+};
+
 type NBAStandingsTeam = {
-  id: string; name: string; position: number;
+  id: string; name: string; abbr: string; position: number;
   won: number; lost: number; pct: string; gb: string;
   streak: string; lastTen: string; homeRecord: string; roadRecord: string;
   ppg: string; papg: string; diff: string;
@@ -4012,6 +4027,7 @@ async function getNBAStandings(): Promise<NBAStandingsData> {
           teams: teams.map(t2 => ({
             id: t2.id,
             name: t2.name,
+            abbr: NBA_ABBR[t2.name] ?? t2.name.toLowerCase().replace(/\s+/g, "").slice(0, 3),
             position: parseInt(t2.position) || 0,
             won: parseInt(t2.won) || 0,
             lost: parseInt(t2.lost) || 0,
@@ -4043,6 +4059,79 @@ router.get("/basketball-standings", async (_req, res) => {
     res.json(data);
   } catch {
     res.status(500).json({ error: "Classificação indisponível" });
+  }
+});
+
+// NBA roster
+type NBAPlayer = {
+  id: string; name: string; number: string; age: number;
+  position: string; college: string; height: string; weight: string; salary: string;
+};
+type NBATeamRoster = { teamName: string; abbreviation: string; season: string; players: NBAPlayer[] };
+const nbaRosterCache = new Map<string, NBATeamRoster>();
+const nbaRosterFetchedAt = new Map<string, number>();
+const NBA_ROSTER_TTL = 60 * 60 * 1000;
+
+async function getBasketballRoster(abbr: string): Promise<NBATeamRoster | null> {
+  const now = Date.now();
+  const cached = nbaRosterCache.get(abbr);
+  const fetchedAt = nbaRosterFetchedAt.get(abbr) ?? 0;
+  if (cached && now - fetchedAt < NBA_ROSTER_TTL) return cached;
+  try {
+    const resp = await fetch(`${BASE_V1}/nba/rosters/${abbr}?access_key=${STATSPAL_KEY}`);
+    if (!resp.ok) return cached ?? null;
+    const json = (await resp.json()) as {
+      team?: {
+        name?: string; abbreviation?: string; season?: string;
+        player?: Array<{
+          id: string; name: string; number?: string; age?: string;
+          position?: string; college?: string;
+          heigth?: string; weigth?: string; salary?: string;
+        }> | {
+          id: string; name: string; number?: string; age?: string;
+          position?: string; college?: string;
+          heigth?: string; weigth?: string; salary?: string;
+        };
+      };
+    };
+    const t = json.team;
+    if (!t) return cached ?? null;
+    const rawPlayers = Array.isArray(t.player) ? t.player : t.player ? [t.player] : [];
+    const data: NBATeamRoster = {
+      teamName: t.name ?? abbr,
+      abbreviation: t.abbreviation ?? abbr.toUpperCase(),
+      season: t.season ?? "",
+      players: rawPlayers.map(p => ({
+        id: p.id,
+        name: p.name,
+        number: p.number ?? "",
+        age: parseInt(p.age ?? "0") || 0,
+        position: p.position ?? "",
+        college: p.college ?? "",
+        height: p.heigth ?? "",
+        weight: p.weigth ?? "",
+        salary: p.salary ?? "",
+      })).sort((a, b) => {
+        const ORDER: Record<string, number> = { G: 0, "G-F": 1, "F-G": 2, F: 3, "F-C": 4, "C-F": 5, C: 6 };
+        return (ORDER[a.position] ?? 7) - (ORDER[b.position] ?? 7) || a.name.localeCompare(b.name);
+      }),
+    };
+    nbaRosterCache.set(abbr, data);
+    nbaRosterFetchedAt.set(abbr, now);
+    return data;
+  } catch {
+    return cached ?? null;
+  }
+}
+
+router.get("/basketball-roster/:team", async (req, res) => {
+  const abbr = String(req.params["team"]).toLowerCase();
+  try {
+    const data = await getBasketballRoster(abbr);
+    if (!data) { res.status(404).json({ error: "Roster não encontrado" }); return; }
+    res.json(data);
+  } catch {
+    res.status(500).json({ error: "Roster indisponível" });
   }
 });
 
