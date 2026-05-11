@@ -5779,4 +5779,103 @@ router.get("/football-match-stats/:leagueId", async (req, res) => {
   }
 });
 
+// ─── Football Standings ────────────────────────────────────────────────────────
+
+type FootballStandingsTeamRaw = {
+  position: string; name: string; id: string; status: string; recent_form: string;
+  overall?: { games_played: string; wins: string; draws: string; losses: string; goals_scored: string; goals_allowed: string };
+  home?:    { games_played: string; wins: string; draws: string; losses: string; goals_scored: string; goals_allowed: string };
+  away?:    { games_played: string; wins: string; draws: string; losses: string; goals_scored: string; goals_allowed: string };
+  total?:   { goal_difference: string; points: string };
+  description?: { value: string };
+};
+
+type FootballStandingsRaw = {
+  standings?: {
+    updated?: string;
+    updated_ts?: number;
+    country?: string;
+    tournament?: {
+      id: string;
+      league: string;
+      season: string;
+      stage_id?: string;
+      is_current?: string;
+      team: FootballStandingsTeamRaw | FootballStandingsTeamRaw[];
+    };
+  };
+};
+
+type FootballStandingsTeam = {
+  position: number; name: string; id: string;
+  status: string; recentForm: string;
+  gp: number; wins: number; draws: number; losses: number;
+  goalsFor: number; goalsAgainst: number; goalDiff: number; points: number;
+  home: { gp: number; wins: number; draws: number; losses: number; goalsFor: number; goalsAgainst: number };
+  away: { gp: number; wins: number; draws: number; losses: number; goalsFor: number; goalsAgainst: number };
+  description: string;
+};
+
+const footballStandingsCache = new Map<string, { data: FootballStandingsTeam[]; meta: { id: string; league: string; season: string; country: string }; fetchedAt: number }>();
+const FOOTBALL_STANDINGS_TTL = 5 * 60 * 1000;
+
+async function getFootballStandings(leagueId: string): Promise<{ teams: FootballStandingsTeam[]; meta: { id: string; league: string; season: string; country: string } }> {
+  const now = Date.now();
+  const cached = footballStandingsCache.get(leagueId);
+  if (cached && now - cached.fetchedAt < FOOTBALL_STANDINGS_TTL) return { teams: cached.data, meta: cached.meta };
+  const resp = await fetch(`${BASE_V2}/soccer/leagues/${encodeURIComponent(leagueId)}/standings?access_key=${STATSPAL_KEY}`, { signal: AbortSignal.timeout(9000) });
+  if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+  const data = (await resp.json()) as FootballStandingsRaw;
+  const tour = data?.standings?.tournament;
+  if (!tour) throw new Error("Classificação não encontrada");
+  const meta = { id: tour.id, league: tour.league, season: tour.season, country: data.standings?.country ?? "" };
+  const rawTeams = tour.team;
+  const teams: FootballStandingsTeamRaw[] = !rawTeams ? [] : Array.isArray(rawTeams) ? rawTeams : [rawTeams];
+  const pi = (s: string | undefined) => parseInt(s ?? "0") || 0;
+  const out: FootballStandingsTeam[] = teams.map(t => ({
+    position:    pi(t.position),
+    name:        t.name,
+    id:          t.id,
+    status:      t.status,
+    recentForm:  t.recent_form,
+    gp:          pi(t.overall?.games_played),
+    wins:        pi(t.overall?.wins),
+    draws:       pi(t.overall?.draws),
+    losses:      pi(t.overall?.losses),
+    goalsFor:    pi(t.overall?.goals_scored),
+    goalsAgainst:pi(t.overall?.goals_allowed),
+    goalDiff:    pi(t.total?.goal_difference),
+    points:      pi(t.total?.points),
+    home: {
+      gp:          pi(t.home?.games_played),
+      wins:        pi(t.home?.wins),
+      draws:       pi(t.home?.draws),
+      losses:      pi(t.home?.losses),
+      goalsFor:    pi(t.home?.goals_scored),
+      goalsAgainst:pi(t.home?.goals_allowed),
+    },
+    away: {
+      gp:          pi(t.away?.games_played),
+      wins:        pi(t.away?.wins),
+      draws:       pi(t.away?.draws),
+      losses:      pi(t.away?.losses),
+      goalsFor:    pi(t.away?.goals_scored),
+      goalsAgainst:pi(t.away?.goals_allowed),
+    },
+    description: t.description?.value ?? "",
+  }));
+  footballStandingsCache.set(leagueId, { data: out, meta, fetchedAt: now });
+  return { teams: out, meta };
+}
+
+router.get("/football-standings/:id", async (req, res) => {
+  const id = String(req.params["id"]);
+  try {
+    const { teams, meta } = await getFootballStandings(id);
+    res.json({ ...meta, teams });
+  } catch {
+    res.status(500).json({ error: "Classificação de futebol indisponível" });
+  }
+});
+
 export default router;
