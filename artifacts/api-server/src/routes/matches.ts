@@ -6632,4 +6632,103 @@ router.get("/football-image", async (req, res) => {
   }
 });
 
+// ─── Football Pre-match Odds (per league, v2) ──────────────────────────────────
+// v2/soccer/leagues/{id}/odds/prematch — market "1x2" with bookmaker array
+// Distinct from getOddsMap() which uses v1/soccer/odds/{country} for live cards.
+
+type FootballOddsBookmakerRaw = {
+  id: string; name: string; timestamp: string; stop?: string;
+  odd: { name: string; value: string }[];
+};
+type FootballOddsMarketRaw = {
+  id: string; name: string; stop: string;
+  bookmaker: FootballOddsBookmakerRaw | FootballOddsBookmakerRaw[];
+};
+type FootballOddsMatchRaw = {
+  main_id: string; fallback_id_1?: string; fallback_id_2?: string; fallback_id_3?: string;
+  date: string; time: string;
+  home: { id: string; name: string };
+  away: { id: string; name: string };
+  odds: FootballOddsMarketRaw | FootballOddsMarketRaw[];
+};
+type FootballPrematchOddsRaw = {
+  prematch_odds?: {
+    updated?: string; updated_ts?: number;
+    league?: {
+      id: string; name: string; country: string;
+      match: FootballOddsMatchRaw | FootballOddsMatchRaw[];
+    };
+  };
+};
+
+type FootballOddsEntry = {
+  matchId: string;
+  date: string; time: string;
+  homeTeam: { id: string; name: string };
+  awayTeam: { id: string; name: string };
+  homeOdds: number; drawOdds: number; awayOdds: number;
+};
+
+const footballOddsCache = new Map<string, { data: FootballOddsEntry[]; meta: { id: string; name: string; country: string }; fetchedAt: number }>();
+const FOOTBALL_ODDS_TTL = 5 * 60 * 1000;
+
+async function getFootballLeagueOdds(leagueId: string): Promise<{ odds: FootballOddsEntry[]; meta: { id: string; name: string; country: string } }> {
+  const now = Date.now();
+  const cached = footballOddsCache.get(leagueId);
+  if (cached && now - cached.fetchedAt < FOOTBALL_ODDS_TTL) return { odds: cached.data, meta: cached.meta };
+
+  const resp = await fetch(`${BASE_V2}/soccer/leagues/${encodeURIComponent(leagueId)}/odds/prematch?access_key=${STATSPAL_KEY}`, { signal: AbortSignal.timeout(10000) });
+  if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+  const data = (await resp.json()) as FootballPrematchOddsRaw;
+  const league = data?.prematch_odds?.league;
+  if (!league) throw new Error("Odds não encontradas");
+  const meta = { id: league.id, name: league.name, country: league.country };
+
+  const rawMatches = league.match;
+  const matches: FootballOddsMatchRaw[] = !rawMatches ? [] : Array.isArray(rawMatches) ? rawMatches : [rawMatches];
+
+  // Average odds across all active bookmakers then apply 2.5% house margin
+  const avgOdd = (bks: FootballOddsBookmakerRaw[], side: "Home" | "Draw" | "Away"): number => {
+    const vals: number[] = [];
+    for (const bk of bks) {
+      if (bk.stop === "True") continue;
+      const odds = Array.isArray(bk.odd) ? bk.odd : (bk.odd ? [bk.odd] : []);
+      const o = odds.find(o => o.name === side);
+      const v = parseFloat(o?.value ?? "0");
+      if (v > 1) vals.push(v);
+    }
+    if (!vals.length) return 0;
+    const avg = vals.reduce((a, b) => a + b, 0) / vals.length;
+    return Math.max(1.01, Math.round(avg * 0.975 * 100) / 100);
+  };
+
+  const results: FootballOddsEntry[] = [];
+  for (const m of matches) {
+    const rawMarkets = m.odds;
+    const markets: FootballOddsMarketRaw[] = !rawMarkets ? [] : Array.isArray(rawMarkets) ? rawMarkets : [rawMarkets];
+    // Find 1x2 market
+    const market1x2 = markets.find(mk => mk.name === "1x2" || mk.name === "3Way Result");
+    if (!market1x2 || market1x2.stop === "True") continue;
+    const bks: FootballOddsBookmakerRaw[] = !market1x2.bookmaker ? [] : Array.isArray(market1x2.bookmaker) ? market1x2.bookmaker : [market1x2.bookmaker];
+    const h = avgOdd(bks, "Home");
+    const d = avgOdd(bks, "Draw");
+    const a = avgOdd(bks, "Away");
+    if (!h || !d || !a) continue;
+    results.push({ matchId: m.main_id, date: m.date, time: m.time, homeTeam: m.home, awayTeam: m.away, homeOdds: h, drawOdds: d, awayOdds: a });
+  }
+
+  footballOddsCache.set(leagueId, { data: results, meta, fetchedAt: now });
+  return { odds: results, meta };
+}
+
+router.get("/football-odds/:leagueId", async (req, res) => {
+  const leagueId = String(req.params["leagueId"]);
+  try {
+    const { odds, meta } = await getFootballLeagueOdds(leagueId);
+    res.json({ ...meta, odds });
+  } catch {
+    res.status(500).json({ error: "Odds de futebol indisponíveis" });
+  }
+});
+
 export default router;
