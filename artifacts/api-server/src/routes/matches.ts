@@ -7141,4 +7141,123 @@ router.get("/football-upcoming/:country", async (req, res) => {
   }
 });
 
+// ─── Football Extended Schedule by country/region ─────────────────────────────
+// v1/soccer/extended-schedule/{country} — richest fixture endpoint.
+// Unique characteristics vs all other v1 soccer endpoints:
+//   • root: "extended_fixtures" (not "livescore" or "fixtures")
+//   • league has "season" field instead of "cup"/"country"
+//   • matches grouped under week[].match[] (not flat match[] on league)
+//   • home/away: score/ft_score/et_score/pen_score (empty strings when upcoming)
+//   • per-match: attendance, venue_city, venue_id, coaches (home+away), referee
+//   • lineups/substitutions/goals are null when upcoming, populated after kickoff
+
+type V1ExtCoach = { id: string; name: string };
+type V1ExtTeamScore = {
+  id: string; name: string;
+  score: string; ft_score: string; et_score: string; pen_score: string;
+};
+type V1ExtMatch = {
+  id: string; alternate_id: string; alternate_id_2: string; static_id: string;
+  status: string; date: string; time: string;
+  venue: string; venue_city: string; venue_id: string;
+  attendance: string;
+  home: V1ExtTeamScore; away: V1ExtTeamScore;
+  halftime?: { score: string };
+  lineups: null | unknown;
+  substitutions: null | unknown;
+  goals: null | unknown;
+  coaches?: {
+    home?: { coach?: V1ExtCoach };
+    away?: { coach?: V1ExtCoach };
+  };
+  referee?: { id: string; name: string };
+};
+type V1ExtWeek = { number: string; match: V1ExtMatch | V1ExtMatch[] };
+type V1ExtLeague = {
+  id: string; name: string; season: string; sub_id: string;
+  // no "country" or "cup" at league level
+  week: V1ExtWeek | V1ExtWeek[];
+};
+type V1ExtScheduleRaw = {
+  extended_fixtures?: {
+    updated?: string; sport?: string; country?: string;
+    league?: V1ExtLeague | V1ExtLeague[];
+  };
+};
+
+const footballExtCache = new Map<string, { data: object[]; fetchedAt: number }>();
+const FOOTBALL_EXT_TTL = 30 * 60 * 1000; // 30 min
+
+// Parse score string — empty string → null, otherwise number
+function parseExtScore(s: string | undefined): number | null {
+  if (!s) return null;
+  const n = parseInt(s);
+  return isNaN(n) ? null : n;
+}
+
+router.get("/football-extended-schedule/:country", async (req, res) => {
+  const country = String(req.params["country"]).toLowerCase().replace(/[^a-z0-9-]/g, "");
+  if (!country) { res.status(400).json({ error: "País inválido" }); return; }
+  const now = Date.now();
+  const cached = footballExtCache.get(country);
+  if (cached && now - cached.fetchedAt < FOOTBALL_EXT_TTL) {
+    res.json({ leagues: cached.data });
+    return;
+  }
+  try {
+    const resp = await fetch(`${BASE_V1}/soccer/extended-schedule/${encodeURIComponent(country)}?access_key=${STATSPAL_KEY}`, { signal: AbortSignal.timeout(9000) });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const data = (await resp.json()) as V1ExtScheduleRaw;
+    const rawLeagues = data?.extended_fixtures?.league;
+    const leagues: V1ExtLeague[] = !rawLeagues ? [] : Array.isArray(rawLeagues) ? rawLeagues : [rawLeagues];
+
+    const out = leagues.map(lg => {
+      const rawWeeks = lg.week;
+      const weeks: V1ExtWeek[] = !rawWeeks ? [] : Array.isArray(rawWeeks) ? rawWeeks : [rawWeeks];
+      return {
+        id: lg.id, name: lg.name, season: lg.season, subId: lg.sub_id,
+        weeks: weeks.map(w => {
+          const rawMatches = w.match;
+          const matches: V1ExtMatch[] = !rawMatches ? [] : Array.isArray(rawMatches) ? rawMatches : [rawMatches];
+          return {
+            weekNumber: parseInt(w.number) || 0,
+            matches: matches.map(m => ({
+              id: m.id, alternateId: m.alternate_id, alternateId2: m.alternate_id_2, staticId: m.static_id,
+              status: m.status, date: m.date, time: m.time,
+              venue: m.venue || null, venueCity: m.venue_city || null, venueId: m.venue_id || null,
+              attendance: parseInt(m.attendance) || null,
+              homeTeam: {
+                id: m.home.id, name: m.home.name,
+                score:    parseExtScore(m.home.score),
+                ftScore:  parseExtScore(m.home.ft_score),
+                etScore:  parseExtScore(m.home.et_score),
+                penScore: parseExtScore(m.home.pen_score),
+              },
+              awayTeam: {
+                id: m.away.id, name: m.away.name,
+                score:    parseExtScore(m.away.score),
+                ftScore:  parseExtScore(m.away.ft_score),
+                etScore:  parseExtScore(m.away.et_score),
+                penScore: parseExtScore(m.away.pen_score),
+              },
+              halftimeScore: parseScoreStr(m.halftime?.score),
+              hasLineups:      m.lineups !== null,
+              hasSubstitutions: m.substitutions !== null,
+              hasGoals:        m.goals !== null,
+              homeCoach: m.coaches?.home?.coach ? { id: m.coaches.home.coach.id, name: m.coaches.home.coach.name } : null,
+              awayCoach: m.coaches?.away?.coach ? { id: m.coaches.away.coach.id, name: m.coaches.away.coach.name } : null,
+              referee: (m.referee?.name) ? { id: m.referee.id, name: m.referee.name } : null,
+            })),
+          };
+        }),
+      };
+    });
+
+    footballExtCache.set(country, { data: out, fetchedAt: now });
+    res.json({ leagues: out });
+  } catch {
+    res.status(500).json({ error: "Calendário extendido indisponível" });
+  }
+});
+
 export default router;
