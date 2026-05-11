@@ -1,0 +1,79 @@
+{
+  "odds": {
+    "sport": "hockey",
+    "category": {
+      "gid": "2506",
+      "id": "2506",
+      "name": "Usa: Nhl",
+      "matches": {
+        "match": [
+          {
+            "date": "11.12.2025",
+            "fix_id": "244816",
+            "id": "626431",
+            "status": "Not Started",
+            "time": "00:30",
+            "home": {
+              "id": "2527",
+              "name": "Chicago Blackhawks",
+              "totalscore": ""
+            },
+            "away": {
+              "id": "2671",
+              "name": "New York Rangers",
+              "totalscore": ""
+            },
+            "events": {
+              "firstperiod": {
+                "score": ""
+              },
+              "secondperiod": {
+                "score": ""
+              },
+              "thirdperiod": {
+                "score": ""
+              },
+              "overtime": {
+                "score": ""
+              },
+              "penalties": {
+                "score": ""
+              }
+            },
+            "odds": {
+              "ts": 1765352239,
+              "type": [
+                {
+                  "id": "1500",
+                  "stop": "False",
+                  "value": "3Way Result",
+                  "bookmaker": [
+                    {
+                      "id": "1513",
+                      "name": "10Bet",
+                      "ts": 1765345535,
+                      "odd": [
+                        {
+                          "name": "Home",
+                          "value": "2.70"
+                        },
+                        {
+                          "name": "Draw",
+                          "value": "3.90"
+                        },
+                        {
+                          "name": "Away",
+                          "value": "2.10"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        ]
+      }
+    }
+  }
+}

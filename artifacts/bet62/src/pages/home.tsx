@@ -904,6 +904,24 @@ export default function Home() {
   const [hockeyRosters, setHockeyRosters] = useState<Record<string, NHLRosterData>>({});
   const [selectedRosterAbbr, setSelectedRosterAbbr] = useState<string | null>(null);
   const [rosterLoading, setRosterLoading] = useState(false);
+  const [rosterPanelTab, setRosterPanelTab] = useState<"roster" | "stats">("roster");
+
+  type NHLSkaterStat = {
+    id: string; rank: number; name: string; pos: string;
+    gp: number; goals: number; assists: number; points: number;
+    plusMinus: number; pim: number; ppg: number; ppa: number;
+    shg: number; sha: number; shots: number; gwg: number;
+    toiPerGame: string; faceoffPct: string;
+  };
+  type NHLGoalieStat = {
+    id: string; rank: number; name: string;
+    gp: number; wins: number; losses: number; otLosses: number;
+    saves: number; savesPct: string; gaa: string;
+    shotsAgainst: number; goalsAgainst: number; shutouts: number; toi: string;
+  };
+  type NHLTeamStatsData = { teamName: string; season: string; skaters: NHLSkaterStat[]; goalies: NHLGoalieStat[] };
+  const [hockeyTeamStats, setHockeyTeamStats] = useState<Record<string, NHLTeamStatsData>>({});
+  const [teamStatsLoading, setTeamStatsLoading] = useState(false);
 
   // Active tennis tournaments
   type ActiveTournament = {
@@ -4567,59 +4585,173 @@ export default function Home() {
                             </div>
                           ))}
                         </div>
-                        {/* ── Roster Panel ── */}
-                        {selectedRosterAbbr && (
-                          <div className="mt-4 bg-zinc-900 border border-zinc-700 rounded-xl overflow-hidden animate-in fade-in slide-in-from-top-2 duration-200">
-                            <div className="bg-zinc-800 px-4 py-2.5 flex items-center justify-between">
-                              <div className="flex items-center gap-2">
-                                <span className="text-[10px] font-black text-zinc-500 uppercase tracking-widest">👥 Roster</span>
-                                {activeRoster && (
-                                  <>
-                                    <span className="text-sm font-black text-white">{activeRoster.teamName}</span>
-                                    <span className="text-[9px] bg-zinc-700 text-zinc-400 rounded px-1.5 py-0.5 font-bold">{activeRoster.abbreviation}</span>
-                                    <span className="text-[9px] text-zinc-600">{activeRoster.season}</span>
-                                  </>
-                                )}
-                                {rosterLoading && !activeRoster && <span className="text-[10px] text-zinc-500 animate-pulse">A carregar...</span>}
+                        {/* ── Roster / Stats Panel ── */}
+                        {selectedRosterAbbr && (() => {
+                          const activeStats = hockeyTeamStats[selectedRosterAbbr];
+                          const teamDisplayName = activeRoster?.teamName ?? activeStats?.teamName ?? selectedRosterAbbr.toUpperCase();
+                          const handleTabChange = (tab: "roster" | "stats") => {
+                            setRosterPanelTab(tab);
+                            if (tab === "stats" && !hockeyTeamStats[selectedRosterAbbr]) {
+                              setTeamStatsLoading(true);
+                              fetch(`/api/matches/hockey-team-stats/${selectedRosterAbbr}`)
+                                .then(r => r.ok ? r.json() : null)
+                                .then(d => { if (d) setHockeyTeamStats(prev => ({ ...prev, [selectedRosterAbbr]: d })); })
+                                .catch(() => {})
+                                .finally(() => setTeamStatsLoading(false));
+                            }
+                          };
+                          return (
+                            <div className="mt-4 bg-zinc-900 border border-zinc-700 rounded-xl overflow-hidden animate-in fade-in slide-in-from-top-2 duration-200">
+                              {/* Header */}
+                              <div className="bg-zinc-800 px-4 py-2.5 flex items-center justify-between">
+                                <div className="flex items-center gap-2 min-w-0">
+                                  <span className="text-sm font-black text-white truncate">{teamDisplayName}</span>
+                                  {activeRoster && <span className="text-[9px] bg-zinc-700 text-zinc-400 rounded px-1.5 py-0.5 font-bold shrink-0">{activeRoster.abbreviation}</span>}
+                                  <span className="text-[9px] text-zinc-600 shrink-0">{(activeRoster ?? activeStats)?.season}</span>
+                                </div>
+                                <button onClick={() => setSelectedRosterAbbr(null)} className="text-zinc-600 hover:text-zinc-300 transition-colors text-lg leading-none ml-2 shrink-0">×</button>
                               </div>
-                              <button onClick={() => setSelectedRosterAbbr(null)} className="text-zinc-600 hover:text-zinc-300 transition-colors text-lg leading-none">×</button>
-                            </div>
-                            {activeRoster ? (
-                              <div className="p-3 space-y-4">
-                                {activeRoster.positions.map(pos => (
-                                  <div key={pos.name}>
-                                    <div className="flex items-center gap-2 mb-2">
-                                      <span className="text-[9px] font-black bg-red-600/20 text-red-400 rounded px-1.5 py-0.5 uppercase tracking-wider">{POS_ICON[pos.name] ?? pos.name.slice(0,2).toUpperCase()}</span>
-                                      <span className="text-[9px] font-black text-zinc-500 uppercase tracking-widest">{pos.name}</span>
-                                      <span className="text-[8px] text-zinc-700">{pos.players.length} jogadores</span>
-                                    </div>
-                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-1">
-                                      {pos.players.map(p => (
-                                        <div key={p.id} className="bg-zinc-950/70 border border-zinc-800 rounded-lg px-2.5 py-1.5 flex items-center gap-2">
-                                          <span className="text-[10px] font-black text-zinc-600 w-5 text-center shrink-0">#{p.number || "–"}</span>
-                                          <div className="flex-1 min-w-0">
-                                            <div className="text-[11px] font-bold text-zinc-200 truncate">{p.name}</div>
-                                            <div className="text-[9px] text-zinc-600 flex gap-2 flex-wrap">
-                                              {p.age > 0 && <span>{p.age} anos</span>}
-                                              {p.height && <span>{p.height}</span>}
-                                              {p.weight && <span>{p.weight}</span>}
-                                              {p.shot && <span>Remate: {p.shot}</span>}
-                                            </div>
-                                          </div>
-                                          {p.salary && <span className="text-[9px] font-bold text-green-600/80 shrink-0">{p.salary}</span>}
-                                        </div>
-                                      ))}
-                                    </div>
-                                  </div>
+                              {/* Tabs */}
+                              <div className="flex border-b border-zinc-800">
+                                {(["roster", "stats"] as const).map(tab => (
+                                  <button key={tab} onClick={() => handleTabChange(tab)}
+                                    className={`flex-1 py-2 text-[10px] font-black uppercase tracking-widest transition-colors ${rosterPanelTab === tab ? "text-white border-b-2 border-red-500 bg-zinc-800/40" : "text-zinc-600 hover:text-zinc-400"}`}>
+                                    {tab === "roster" ? "👥 Plantel" : "📊 Estatísticas"}
+                                  </button>
                                 ))}
                               </div>
-                            ) : !rosterLoading ? (
-                              <div className="text-center text-zinc-600 py-6 text-sm">Roster não disponível.</div>
-                            ) : (
-                              <div className="text-center text-zinc-600 py-6 text-sm animate-pulse">A carregar roster...</div>
-                            )}
-                          </div>
-                        )}
+                              {/* Roster Tab */}
+                              {rosterPanelTab === "roster" && (
+                                activeRoster ? (
+                                  <div className="p-3 space-y-4">
+                                    {activeRoster.positions.map(pos => (
+                                      <div key={pos.name}>
+                                        <div className="flex items-center gap-2 mb-2">
+                                          <span className="text-[9px] font-black bg-red-600/20 text-red-400 rounded px-1.5 py-0.5 uppercase tracking-wider">{POS_ICON[pos.name] ?? pos.name.slice(0,2).toUpperCase()}</span>
+                                          <span className="text-[9px] font-black text-zinc-500 uppercase tracking-widest">{pos.name}</span>
+                                          <span className="text-[8px] text-zinc-700">{pos.players.length} jogadores</span>
+                                        </div>
+                                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-1">
+                                          {pos.players.map(p => (
+                                            <div key={p.id} className="bg-zinc-950/70 border border-zinc-800 rounded-lg px-2.5 py-1.5 flex items-center gap-2">
+                                              <span className="text-[10px] font-black text-zinc-600 w-5 text-center shrink-0">#{p.number || "–"}</span>
+                                              <div className="flex-1 min-w-0">
+                                                <div className="text-[11px] font-bold text-zinc-200 truncate">{p.name}</div>
+                                                <div className="text-[9px] text-zinc-600 flex gap-2 flex-wrap">
+                                                  {p.age > 0 && <span>{p.age} anos</span>}
+                                                  {p.height && <span>{p.height}</span>}
+                                                  {p.weight && <span>{p.weight}</span>}
+                                                  {p.shot && <span>Remate: {p.shot}</span>}
+                                                </div>
+                                              </div>
+                                              {p.salary && <span className="text-[9px] font-bold text-green-600/80 shrink-0">{p.salary}</span>}
+                                            </div>
+                                          ))}
+                                        </div>
+                                      </div>
+                                    ))}
+                                  </div>
+                                ) : rosterLoading ? (
+                                  <div className="text-center text-zinc-600 py-6 text-sm animate-pulse">A carregar plantel...</div>
+                                ) : (
+                                  <div className="text-center text-zinc-600 py-6 text-sm">Plantel não disponível.</div>
+                                )
+                              )}
+                              {/* Stats Tab */}
+                              {rosterPanelTab === "stats" && (
+                                activeStats ? (
+                                  <div className="p-3 space-y-4">
+                                    {/* Skaters table */}
+                                    <div>
+                                      <div className="text-[9px] font-black text-zinc-500 uppercase tracking-widest mb-2">Patinadores</div>
+                                      <div className="overflow-x-auto">
+                                        <table className="w-full text-[10px] font-mono tabular-nums">
+                                          <thead>
+                                            <tr className="border-b border-zinc-800 text-[8px] font-black text-zinc-600 uppercase">
+                                              <th className="text-left py-1 px-1 w-4">#</th>
+                                              <th className="text-left py-1 px-1 min-w-[110px]">Jogador</th>
+                                              <th className="py-1 px-1 text-center w-6">PJ</th>
+                                              <th className="py-1 px-1 text-center w-6 text-yellow-500">G</th>
+                                              <th className="py-1 px-1 text-center w-6 text-blue-400">A</th>
+                                              <th className="py-1 px-1 text-center w-7 font-black text-white">PTS</th>
+                                              <th className="py-1 px-1 text-center w-7 hidden sm:table-cell">+/-</th>
+                                              <th className="py-1 px-1 text-center w-6 hidden sm:table-cell">PPG</th>
+                                              <th className="py-1 px-1 text-center w-7 hidden sm:table-cell">REM</th>
+                                              <th className="py-1 px-1 text-center w-10 hidden md:table-cell">TOI/J</th>
+                                            </tr>
+                                          </thead>
+                                          <tbody>
+                                            {activeStats.skaters.map(p => (
+                                              <tr key={p.id} className="border-b border-zinc-800/40 hover:bg-zinc-800/20">
+                                                <td className="py-1 px-1 text-zinc-700">{p.rank}</td>
+                                                <td className="py-1 px-1">
+                                                  <div className="flex items-center gap-1.5">
+                                                    <span className="text-[8px] font-black bg-zinc-800 text-zinc-500 rounded px-1">{p.pos}</span>
+                                                    <span className="text-zinc-200 font-semibold truncate max-w-[90px]">{p.name}</span>
+                                                  </div>
+                                                </td>
+                                                <td className="py-1 px-1 text-center text-zinc-500">{p.gp}</td>
+                                                <td className="py-1 px-1 text-center text-yellow-400 font-bold">{p.goals}</td>
+                                                <td className="py-1 px-1 text-center text-blue-400">{p.assists}</td>
+                                                <td className="py-1 px-1 text-center font-black text-white">{p.points}</td>
+                                                <td className={`py-1 px-1 text-center hidden sm:table-cell font-bold ${p.plusMinus > 0 ? "text-green-400" : p.plusMinus < 0 ? "text-red-400" : "text-zinc-600"}`}>{p.plusMinus > 0 ? `+${p.plusMinus}` : p.plusMinus}</td>
+                                                <td className="py-1 px-1 text-center text-zinc-400 hidden sm:table-cell">{p.ppg}</td>
+                                                <td className="py-1 px-1 text-center text-zinc-400 hidden sm:table-cell">{p.shots}</td>
+                                                <td className="py-1 px-1 text-center text-zinc-600 hidden md:table-cell">{p.toiPerGame}</td>
+                                              </tr>
+                                            ))}
+                                          </tbody>
+                                        </table>
+                                      </div>
+                                    </div>
+                                    {/* Goalies table */}
+                                    {activeStats.goalies.length > 0 && (
+                                      <div>
+                                        <div className="text-[9px] font-black text-zinc-500 uppercase tracking-widest mb-2">Guarda-Redes</div>
+                                        <div className="overflow-x-auto">
+                                          <table className="w-full text-[10px] font-mono tabular-nums">
+                                            <thead>
+                                              <tr className="border-b border-zinc-800 text-[8px] font-black text-zinc-600 uppercase">
+                                                <th className="text-left py-1 px-1 min-w-[110px]">Jogador</th>
+                                                <th className="py-1 px-1 text-center">PJ</th>
+                                                <th className="py-1 px-1 text-center text-green-400">V</th>
+                                                <th className="py-1 px-1 text-center text-red-400">D</th>
+                                                <th className="py-1 px-1 text-center">DO</th>
+                                                <th className="py-1 px-1 text-center font-black text-white">S%</th>
+                                                <th className="py-1 px-1 text-center hidden sm:table-cell">Saves</th>
+                                                <th className="py-1 px-1 text-center hidden sm:table-cell">GA</th>
+                                                <th className="py-1 px-1 text-center hidden sm:table-cell">SO</th>
+                                              </tr>
+                                            </thead>
+                                            <tbody>
+                                              {activeStats.goalies.map(g => (
+                                                <tr key={g.id} className="border-b border-zinc-800/40 hover:bg-zinc-800/20">
+                                                  <td className="py-1 px-1 text-zinc-200 font-semibold truncate max-w-[110px]">{g.name}</td>
+                                                  <td className="py-1 px-1 text-center text-zinc-500">{g.gp}</td>
+                                                  <td className="py-1 px-1 text-center text-green-400 font-bold">{g.wins}</td>
+                                                  <td className="py-1 px-1 text-center text-red-400">{g.losses}</td>
+                                                  <td className="py-1 px-1 text-center text-zinc-500">{g.otLosses}</td>
+                                                  <td className="py-1 px-1 text-center font-black text-white">{g.savesPct}</td>
+                                                  <td className="py-1 px-1 text-center text-zinc-400 hidden sm:table-cell">{g.saves}</td>
+                                                  <td className="py-1 px-1 text-center text-zinc-400 hidden sm:table-cell">{g.goalsAgainst}</td>
+                                                  <td className="py-1 px-1 text-center text-zinc-400 hidden sm:table-cell">{g.shutouts || "–"}</td>
+                                                </tr>
+                                              ))}
+                                            </tbody>
+                                          </table>
+                                        </div>
+                                      </div>
+                                    )}
+                                  </div>
+                                ) : teamStatsLoading ? (
+                                  <div className="text-center text-zinc-600 py-6 text-sm animate-pulse">A carregar estatísticas...</div>
+                                ) : (
+                                  <div className="text-center text-zinc-600 py-6 text-sm">Estatísticas não disponíveis.</div>
+                                )
+                              )}
+                            </div>
+                          );
+                        })()}
                       </div>
                     );
                   })()}

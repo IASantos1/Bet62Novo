@@ -3743,6 +3743,115 @@ router.get("/hockey-roster/:team", async (req, res) => {
   }
 });
 
+// NHL team stats (per-player season statistics)
+type NHLSkaterStat = {
+  id: string; rank: number; name: string; pos: string;
+  gp: number; goals: number; assists: number; points: number;
+  plusMinus: number; pim: number; ppg: number; ppa: number;
+  shg: number; sha: number; shots: number; gwg: number;
+  toiPerGame: string; faceoffPct: string;
+};
+type NHLGoalieStat = {
+  id: string; rank: number; name: string;
+  gp: number; wins: number; losses: number; otLosses: number;
+  saves: number; savesPct: string; gaa: string;
+  shotsAgainst: number; goalsAgainst: number; shutouts: number; toi: string;
+};
+type NHLTeamStatsData = { teamName: string; season: string; skaters: NHLSkaterStat[]; goalies: NHLGoalieStat[] };
+const hockeyTeamStatsCache = new Map<string, NHLTeamStatsData>();
+const hockeyTeamStatsFetchedAt = new Map<string, number>();
+const HOCKEY_TEAM_STATS_TTL = 30 * 60 * 1000;
+
+async function getHockeyTeamStats(abbr: string): Promise<NHLTeamStatsData | null> {
+  const now = Date.now();
+  const cached = hockeyTeamStatsCache.get(abbr);
+  const fetchedAt = hockeyTeamStatsFetchedAt.get(abbr) ?? 0;
+  if (cached && now - fetchedAt < HOCKEY_TEAM_STATS_TTL) return cached;
+  try {
+    const resp = await fetch(`${BASE_V1}/nhl/team-stats/${abbr}?access_key=${STATSPAL_KEY}`);
+    if (!resp.ok) return cached ?? null;
+    const json = (await resp.json()) as {
+      statistics?: {
+        season?: string;
+        team?: [string, { player?: unknown[] }] | unknown[];
+        goalkeepers?: { player?: unknown[] } | { player?: unknown };
+      };
+    };
+    const stats = json.statistics;
+    if (!stats) return cached ?? null;
+
+    const teamArr = Array.isArray(stats.team) ? stats.team : [];
+    const teamName = typeof teamArr[0] === "string" ? teamArr[0] : abbr.toUpperCase();
+    const skaterObj = teamArr[1] as { player?: unknown[] } | undefined;
+    const rawSkaters = Array.isArray(skaterObj?.player) ? skaterObj.player : [];
+
+    const skaters: NHLSkaterStat[] = (rawSkaters as Record<string, string>[]).map(p => ({
+      id: p["id"] ?? "",
+      rank: parseInt(p["rank"] ?? "0") || 0,
+      name: p["name"] ?? "",
+      pos: p["pos"] ?? "",
+      gp: parseInt(p["games_played"] ?? "0") || 0,
+      goals: parseInt(p["goals"] ?? "0") || 0,
+      assists: parseInt(p["assists"] ?? "0") || 0,
+      points: parseInt(p["points"] ?? "0") || 0,
+      plusMinus: parseInt(p["plus_minus"] ?? "0") || 0,
+      pim: parseInt(p["penalty_minutes"] ?? "0") || 0,
+      ppg: parseInt(p["pp_goals"] ?? "0") || 0,
+      ppa: parseInt(p["pp_assists"] ?? "0") || 0,
+      shg: parseInt(p["sh_goals"] ?? "0") || 0,
+      sha: parseInt(p["sh_assists"] ?? "0") || 0,
+      shots: parseInt(p["shots"] ?? "0") || 0,
+      gwg: parseInt(p["game_winning_goals"] ?? "0") || 0,
+      toiPerGame: p["toi_per_game"] ?? "",
+      faceoffPct: p["faceoffs_pct"] ?? "",
+    })).sort((a, b) => a.rank - b.rank);
+
+    const gkObj = stats.goalkeepers;
+    const rawGoalies = gkObj
+      ? Array.isArray((gkObj as { player?: unknown[] }).player)
+        ? (gkObj as { player: unknown[] }).player
+        : (gkObj as { player?: unknown }).player
+          ? [(gkObj as { player: unknown }).player]
+          : []
+      : [];
+
+    const goalies: NHLGoalieStat[] = (rawGoalies as Record<string, string>[]).map(g => ({
+      id: g["id"] ?? "",
+      rank: parseInt(g["rank"] ?? "0") || 0,
+      name: g["name"] ?? "",
+      gp: parseInt(g["games_played"] ?? "0") || 0,
+      wins: parseInt(g["wins"] ?? "0") || 0,
+      losses: parseInt(g["losses"] ?? "0") || 0,
+      otLosses: parseInt(g["ot_losses"] ?? "0") || 0,
+      saves: parseInt(g["saves"] ?? "0") || 0,
+      savesPct: g["saves_pct"] ?? "",
+      gaa: g["goals_against_diff"] ?? "",
+      shotsAgainst: parseInt(g["total_shots_against"] ?? "0") || 0,
+      goalsAgainst: parseInt(g["total_goals_against"] ?? "0") || 0,
+      shutouts: parseInt(g["shutouts"] ?? "0") || 0,
+      toi: g["time_on_ice"] ?? "",
+    })).sort((a, b) => a.rank - b.rank);
+
+    const data: NHLTeamStatsData = { teamName, season: stats.season ?? "", skaters, goalies };
+    hockeyTeamStatsCache.set(abbr, data);
+    hockeyTeamStatsFetchedAt.set(abbr, now);
+    return data;
+  } catch {
+    return cached ?? null;
+  }
+}
+
+router.get("/hockey-team-stats/:team", async (req, res) => {
+  const abbr = String(req.params["team"]).toLowerCase();
+  try {
+    const data = await getHockeyTeamStats(abbr);
+    if (!data) { res.status(404).json({ error: "Estatísticas indisponíveis" }); return; }
+    res.json(data);
+  } catch {
+    res.status(500).json({ error: "Estatísticas indisponíveis" });
+  }
+});
+
 router.get("/volleyball-standings/:id", async (req, res) => {
   try {
     const id = String(req.params["id"]);
