@@ -6836,4 +6836,32 @@ router.get("/football-live-odds", async (_req, res) => {
   }
 });
 
+// ─── Football Live Odds Markets catalogue ─────────────────────────────────────
+// v2/soccer/odds/live/markets — root is a bare array (no wrapper object)
+// Returns available in-play betting market types with id and name.
+
+let footballLiveMarketsCache: { id: number; name: string }[] | null = null;
+let footballLiveMarketsFetchedAt = 0;
+const FOOTBALL_LIVE_MARKETS_TTL = 60 * 60 * 1000; // 1h — catalogue rarely changes
+
+router.get("/football-live-markets", async (_req, res) => {
+  const now = Date.now();
+  if (footballLiveMarketsCache && now - footballLiveMarketsFetchedAt < FOOTBALL_LIVE_MARKETS_TTL) {
+    res.json({ markets: footballLiveMarketsCache });
+    return;
+  }
+  try {
+    const resp = await fetch(`${BASE_V2}/soccer/odds/live/markets?access_key=${STATSPAL_KEY}`, { signal: AbortSignal.timeout(8000) });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    // Response is a bare array: [{id: number, name: string}, ...]
+    const data = (await resp.json()) as { id: number; name: string }[];
+    const markets = Array.isArray(data) ? data.map(m => ({ id: m.id, name: m.name })) : [];
+    footballLiveMarketsCache = markets;
+    footballLiveMarketsFetchedAt = now;
+    res.json({ markets });
+  } catch {
+    res.status(500).json({ error: "Mercados de odds ao vivo indisponíveis" });
+  }
+});
+
 export default router;
