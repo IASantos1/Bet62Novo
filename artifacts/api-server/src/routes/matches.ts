@@ -4061,6 +4061,85 @@ router.get("/volleyball-odds", async (_req, res) => {
   }
 });
 
+// NHL pre-match odds
+type HockeyOddsOdd = { name?: string; value?: string };
+type HockeyOddsBk = { id?: string; name?: string; stop?: string; odd?: HockeyOddsOdd | HockeyOddsOdd[] };
+type HockeyOddsType = { id?: string; stop?: string; value?: string; bookmaker?: HockeyOddsBk | HockeyOddsBk[] };
+type HockeyOddsMatch = {
+  id?: string; fix_id?: string; date?: string; time?: string; status?: string;
+  home?: { id?: string; name?: string }; away?: { id?: string; name?: string };
+  odds?: { ts?: number; type?: HockeyOddsType | HockeyOddsType[] };
+};
+export type HockeyOddsEntry = {
+  matchId: string; date: string; time: string;
+  homeTeam: { id: string; name: string }; awayTeam: { id: string; name: string };
+  homeOdds: number; drawOdds: number; awayOdds: number;
+};
+let hockeyOddsCache: HockeyOddsEntry[] | null = null;
+let hockeyOddsFetchedAt = 0;
+const HOCKEY_ODDS_TTL = 5 * 60 * 1000;
+
+async function getHockeyOdds(): Promise<HockeyOddsEntry[]> {
+  const now = Date.now();
+  if (hockeyOddsCache && now - hockeyOddsFetchedAt < HOCKEY_ODDS_TTL) return hockeyOddsCache;
+  const resp = await fetch(`${BASE_V1}/nhl/odds?access_key=${STATSPAL_KEY}`, { signal: AbortSignal.timeout(9000) });
+  if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+  const data = (await resp.json()) as { odds?: { category?: { matches?: { match?: HockeyOddsMatch | HockeyOddsMatch[] } } } };
+  const rawMatches = data?.odds?.category?.matches?.match;
+  if (!rawMatches) return [];
+  const matches = Array.isArray(rawMatches) ? rawMatches : [rawMatches];
+
+  const avgOdd = (bks: HockeyOddsBk[], name: "Home" | "Draw" | "Away"): number => {
+    const vals: number[] = [];
+    for (const bk of bks) {
+      if (bk.stop === "True") continue;
+      const odds = Array.isArray(bk.odd) ? bk.odd : (bk.odd ? [bk.odd] : []);
+      const o = odds.find(o => o.name === name);
+      const v = parseFloat(o?.value ?? "0");
+      if (v > 1) vals.push(v);
+    }
+    if (!vals.length) return 0;
+    const avg = vals.reduce((a, b) => a + b, 0) / vals.length;
+    return Math.max(1.01, Math.round(avg * 0.975 * 100) / 100);
+  };
+
+  const results: HockeyOddsEntry[] = [];
+  const seen = new Set<string>();
+  for (const m of matches) {
+    if (!m.id || seen.has(m.id)) continue;
+    if (m.status !== "Not Started") continue;
+    seen.add(m.id);
+    const rawTypes = m.odds?.type;
+    const types: HockeyOddsType[] = !rawTypes ? [] : Array.isArray(rawTypes) ? rawTypes : [rawTypes];
+    const threeWay = types.find(tp => tp.value === "3Way Result");
+    if (!threeWay) continue;
+    const bks = (Array.isArray(threeWay.bookmaker) ? threeWay.bookmaker : threeWay.bookmaker ? [threeWay.bookmaker] : []) as HockeyOddsBk[];
+    const h = avgOdd(bks, "Home");
+    const d = avgOdd(bks, "Draw");
+    const a = avgOdd(bks, "Away");
+    if (!h || !a) continue;
+    results.push({
+      matchId: m.id, date: m.date ?? "", time: m.time ?? "",
+      homeTeam: { id: m.home?.id ?? "", name: m.home?.name ?? "" },
+      awayTeam: { id: m.away?.id ?? "", name: m.away?.name ?? "" },
+      homeOdds: h, drawOdds: d || 0, awayOdds: a,
+    });
+  }
+  const fresh = results.filter(r => !isMatchTimePast(r.date, r.time));
+  hockeyOddsCache = fresh;
+  hockeyOddsFetchedAt = now;
+  return fresh;
+}
+
+router.get("/hockey-odds", async (_req, res) => {
+  try {
+    const odds = await getHockeyOdds();
+    res.json({ odds });
+  } catch {
+    res.status(500).json({ error: "Odds de hockey indisponíveis" });
+  }
+});
+
 async function getTennisOdds(): Promise<TennisOddsEntry[]> {
   const now = Date.now();
   if (tennisOddsCache && now - tennisOddsFetchedAt < TENNIS_ODDS_TTL) return tennisOddsCache;
