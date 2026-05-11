@@ -503,6 +503,8 @@ type AdvancedMarkets = {
   totalGoals: { over05: number; under05: number; over15: number; under15: number; over25: number; under25: number; over35: number; under35: number; over45: number; under45: number; over55: number; under55: number; over65: number; under65: number };
   handicap: { homeMinusOne: number; awayPlusOne: number; homeMinusOneHalf: number; awayPlusOneHalf: number };
   halfTime: { home: number; draw: number; away: number };
+  period2?: { home: number; draw: number; away: number };
+  period3?: { home: number; draw: number; away: number };
   firstGoal: { home: number; noGoal: number; away: number };
   _spread?: number;
   _total?: number;
@@ -2321,6 +2323,14 @@ export default function Home() {
     const isVolleyball = sport === "volleyball";
     const isFootball = !isBasketball && !isTennis && !isHockey && !isVolleyball;
 
+    // Parse current live period/set/quarter from status (0 = upcoming/unknown → show all markets)
+    const currentSet = (isTennis || isVolleyball) && (match as any).status?.startsWith("Set")
+      ? (parseInt(((match as any).status as string).replace("Set ", "")) || 0) : 0;
+    const currentQ = isBasketball && (match as any).status?.startsWith("Q")
+      ? (parseInt(((match as any).status as string).replace("Q", "")) || 0) : 0;
+    const currentP = isHockey && (match as any).status?.startsWith("P")
+      ? (parseInt(((match as any).status as string).replace("P", "")) || 0) : 0;
+
     const tabs = isBasketball
       ? [
           { key: "todos", label: "Todos" },
@@ -2346,8 +2356,8 @@ export default function Home() {
               { key: "resultado", label: "Vencedor" },
               { key: "totais", label: "Totais" },
               { key: "puckline", label: "Puck Line" },
-              { key: "1periodo", label: "1º Per." },
-              { key: "2periodo", label: "2º Per." },
+              ...(currentP <= 1 ? [{ key: "1periodo", label: "1º Per." }] : []),
+              ...(currentP <= 2 ? [{ key: "2periodo", label: "2º Per." }] : []),
               { key: "3periodo", label: "3º Per." },
               { key: "especiais", label: "Especiais" },
             ]
@@ -2534,8 +2544,8 @@ export default function Home() {
         {/* ── TÉNIS: SETS ── */}
         {isTennis && (modalTab === "sets" || modalTab === "todos") && m && (
           <div>
-            {/* 1st Set winner — prefer tennisExtra.firstSet if available */}
-            {(m as any).tennisExtra?.firstSet?.home > 0 ? (
+            {/* 1st Set winner — hidden when match has advanced past Set 1 */}
+            {currentSet <= 1 && ((m as any).tennisExtra?.firstSet?.home > 0 ? (
               <MarketGroup title="Vencedor do 1º Set">
                 <MarketOddsBtn match={match} sel="set1-home" odd={(m as any).tennisExtra.firstSet.home} market="sets" label={match.home} />
                 <MarketOddsBtn match={match} sel="set1-away" odd={(m as any).tennisExtra.firstSet.away} market="sets" label={match.away} />
@@ -2545,9 +2555,9 @@ export default function Home() {
                 <MarketOddsBtn match={match} sel="set1-home" odd={m.totalGoals.over15} market="sets" label={match.home} />
                 <MarketOddsBtn match={match} sel="set1-away" odd={m.totalGoals.under15} market="sets" label={match.away} />
               </MarketGroup>
-            )}
-            {/* 2nd Set winner */}
-            {(m as any).tennisExtra?.set2?.home > 0 && (
+            ))}
+            {/* 2nd Set winner — hidden when match has advanced past Set 2 */}
+            {currentSet <= 2 && (m as any).tennisExtra?.set2?.home > 0 && (
               <MarketGroup title="Vencedor do 2º Set">
                 <MarketOddsBtn match={match} sel="set2-home" odd={(m as any).tennisExtra.set2.home} market="sets" label={match.home} />
                 <MarketOddsBtn match={match} sel="set2-away" odd={(m as any).tennisExtra.set2.away} market="sets" label={match.away} />
@@ -2813,13 +2823,35 @@ export default function Home() {
           </div>
         )}
 
-        {/* ── HÓQUEI: 1º PERÍODO ── */}
-        {isHockey && (modalTab === "1periodo" || modalTab === "todos") && m && m.halfTime.home > 0 && (
+        {/* ── HÓQUEI: 1º PERÍODO — hide when already past P1 ── */}
+        {isHockey && currentP <= 1 && (modalTab === "1periodo" || modalTab === "todos") && m && m.halfTime.home > 0 && (
           <div>
             <MarketGroup title="Resultado — 1º Período">
               <MarketOddsBtn match={match} sel="per1-home" odd={m.halfTime.home} market="1periodo" label={match.home} />
               {m.halfTime.draw > 0 && <MarketOddsBtn match={match} sel="per1-draw" odd={m.halfTime.draw} market="1periodo" label="Empate" />}
               <MarketOddsBtn match={match} sel="per1-away" odd={m.halfTime.away} market="1periodo" label={match.away} />
+            </MarketGroup>
+          </div>
+        )}
+
+        {/* ── HÓQUEI: 2º PERÍODO ── */}
+        {isHockey && currentP <= 2 && (modalTab === "2periodo" || modalTab === "todos") && m && m.period2 && m.period2.home > 0 && (
+          <div>
+            <MarketGroup title="Resultado — 2º Período">
+              <MarketOddsBtn match={match} sel="per2-home" odd={m.period2.home} market="2periodo" label={match.home} />
+              {m.period2.draw > 0 && <MarketOddsBtn match={match} sel="per2-draw" odd={m.period2.draw} market="2periodo" label="Empate" />}
+              <MarketOddsBtn match={match} sel="per2-away" odd={m.period2.away} market="2periodo" label={match.away} />
+            </MarketGroup>
+          </div>
+        )}
+
+        {/* ── HÓQUEI: 3º PERÍODO ── */}
+        {isHockey && (modalTab === "3periodo" || modalTab === "todos") && m && m.period3 && m.period3.home > 0 && (
+          <div>
+            <MarketGroup title="Resultado — 3º Período">
+              <MarketOddsBtn match={match} sel="per3-home" odd={m.period3.home} market="3periodo" label={match.home} />
+              {m.period3.draw > 0 && <MarketOddsBtn match={match} sel="per3-draw" odd={m.period3.draw} market="3periodo" label="Empate" />}
+              <MarketOddsBtn match={match} sel="per3-away" odd={m.period3.away} market="3periodo" label={match.away} />
             </MarketGroup>
           </div>
         )}
@@ -2890,18 +2922,21 @@ export default function Home() {
         {/* ── VOLEIBOL: POR SET ── */}
         {isVolleyball && (modalTab === "perset" || modalTab === "todos") && m && (m as any).volleyballExtra && (
           <div>
-            {((m as any).volleyballExtra as { set1: { home: number; away: number }; set2: { home: number; away: number }; set3: { home: number; away: number } }).set1.home > 0 && (
+            {/* Set 1: hidden when match has advanced past Set 1 */}
+            {currentSet <= 1 && ((m as any).volleyballExtra as { set1: { home: number; away: number }; set2: { home: number; away: number }; set3: { home: number; away: number } }).set1.home > 0 && (
               <MarketGroup title="Vencedor do 1º Set">
                 <MarketOddsBtn match={match} sel="vs1h" odd={((m as any).volleyballExtra as any).set1.home} market="perset" label={match.home} />
                 <MarketOddsBtn match={match} sel="vs1a" odd={((m as any).volleyballExtra as any).set1.away} market="perset" label={match.away} />
               </MarketGroup>
             )}
-            {((m as any).volleyballExtra as any).set2.home > 0 && (
+            {/* Set 2: hidden when match has advanced past Set 2 */}
+            {currentSet <= 2 && ((m as any).volleyballExtra as any).set2.home > 0 && (
               <MarketGroup title="Vencedor do 2º Set">
                 <MarketOddsBtn match={match} sel="vs2h" odd={((m as any).volleyballExtra as any).set2.home} market="perset" label={match.home} />
                 <MarketOddsBtn match={match} sel="vs2a" odd={((m as any).volleyballExtra as any).set2.away} market="perset" label={match.away} />
               </MarketGroup>
             )}
+            {/* Set 3: always show (upcoming or current) */}
             {((m as any).volleyballExtra as any).set3.home > 0 && (
               <MarketGroup title="Vencedor do 3º Set (se disputado)">
                 <MarketOddsBtn match={match} sel="vs3h" odd={((m as any).volleyballExtra as any).set3.home} market="perset" label={match.home} />
@@ -2949,6 +2984,8 @@ export default function Home() {
             {(m as any).basketballExtra && (["q1","q2","q3","q4"] as const).map((q, qi) => {
               const ex = (m as any).basketballExtra as any;
               const labels = ["1º Quarto","2º Quarto","3º Quarto","4º Quarto"];
+              // Hide past quarter markets: qi+1 is quarter number; skip if live and already past
+              if (currentQ > 0 && (qi + 1) < currentQ) return null;
               return ex[q].home > 0 ? (
                 <MarketGroup key={q} title={`Vencedor — ${labels[qi]}`}>
                   <MarketOddsBtn match={match} sel={`${q}-home`} odd={ex[q].home} market="quartos" label={match.home} />

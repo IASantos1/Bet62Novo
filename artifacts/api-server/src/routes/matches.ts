@@ -2816,10 +2816,12 @@ const _getDay = () => {
   return d.getUTCFullYear() * 10000 + (d.getUTCMonth() + 1) * 100 + d.getUTCDate();
 };
 
-interface _BballSt  { dk: number; q: number; clk: number; home: number; away: number; lms: number }
-interface _TennisSt { dk: number; sets: Array<[number,number]>; hS: number; aS: number; inH: number; inA: number; ptH: number; ptA: number; srv: 0|1; lms: number }
-interface _VolleySt { dk: number; vollSets: Array<[number,number]>; hS: number; aS: number; ptH: number; ptA: number; lms: number }
-interface _HockeySt { dk: number; period: number; clk: number; home: number; away: number; lms: number }
+// suspUntil = ms timestamp until which markets are suspended (0 = open)
+// suspReason = human-readable PT label shown in suspension banner
+interface _BballSt  { dk: number; q: number; clk: number; home: number; away: number; lms: number; suspUntil: number; suspReason: string }
+interface _TennisSt { dk: number; sets: Array<[number,number]>; hS: number; aS: number; inH: number; inA: number; ptH: number; ptA: number; srv: 0|1; lms: number; suspUntil: number; suspReason: string }
+interface _VolleySt { dk: number; vollSets: Array<[number,number]>; hS: number; aS: number; ptH: number; ptA: number; lms: number; suspUntil: number; suspReason: string }
+interface _HockeySt { dk: number; period: number; clk: number; home: number; away: number; lms: number; suspUntil: number; suspReason: string }
 
 const _bballMap  = new Map<number, _BballSt>();
 const _tennisMap = new Map<number, _TennisSt>();
@@ -2837,19 +2839,25 @@ function _getBball(si: number): _BballSt {
     const rate   = 50 / (4 * 720);
     const home = Math.round(played * rate * (0.9 + r(3) * 0.2));
     const away = Math.round(played * rate * (0.9 + r(4) * 0.2));
-    s = { dk, q, clk, home, away, lms: Date.now() };
+    s = { dk, q, clk, home, away, lms: Date.now(), suspUntil: 0, suspReason: "" };
     _bballMap.set(si, s);
   }
   const realSec = (Date.now() - s.lms) / 1000;
   if (realSec < 2) return s;
   const gameSec = Math.min(Math.round(realSec), 90);
   const ts = Math.floor(s.lms / 1000);
+  // ── Snapshot before advance (for event detection) ────────────────────────
+  const prevHome = s.home, prevAway = s.away, prevQ = s.q;
   s.home += Math.round(gameSec * (50 / 2880) * (0.85 + _tickRng(ts, 1) * 0.3));
   s.away += Math.round(gameSec * (50 / 2880) * (0.85 + _tickRng(ts, 2) * 0.3));
   s.clk  -= gameSec;
   while (s.clk <= 0 && s.q < 4) { s.q++; s.clk += 720; }
   if (s.clk < 0) s.clk = 0;
   s.lms = Date.now();
+  // ── Suspension detection (Bet365-style delays per document spec) ──────────
+  // Quarter transition: 5s hard suspend. Basket: 1.5s soft suspend.
+  if (s.q > prevQ)                              { s.suspUntil = Date.now() + 5000; s.suspReason = "FIM DE QUARTO"; }
+  else if (s.home > prevHome || s.away > prevAway) { s.suspUntil = Date.now() + 1500; s.suspReason = "PLACAR ATUALIZADO"; }
   return s;
 }
 
@@ -2869,28 +2877,33 @@ function _getTennis(si: number): _TennisSt {
       sets.push(hw ? [wg, lg] : [lg, wg]);
       if (hw) hS++; else aS++;
     }
-    s = { dk, sets, hS, aS, inH: Math.floor(r(20) * 6), inA: Math.floor(r(21) * 5), ptH: 0, ptA: 0, srv: r(22) > 0.5 ? 1 : 0, lms: Date.now() };
+    s = { dk, sets, hS, aS, inH: Math.floor(r(20) * 6), inA: Math.floor(r(21) * 5), ptH: 0, ptA: 0, srv: r(22) > 0.5 ? 1 : 0, lms: Date.now(), suspUntil: 0, suspReason: "" };
     _tennisMap.set(si, s);
   }
   const realSec = (Date.now() - s.lms) / 1000;
   const nPts = Math.min(Math.round(realSec / 12), 8);
   if (nPts < 1) return s;
   const ts = Math.floor(s.lms / 1000);
+  // ── Suspension event tracking: most significant event wins ───────────────
+  let evSetEnded = false, evGameWon = false, evPoint = false;
   for (let p = 0; p < nPts; p++) {
     if (s.hS >= 2 || s.aS >= 2) break;
     const srvWin = _tickRng(ts + p, 3) < 0.58;
     const hw     = s.srv === 0 ? srvWin : !srvWin;
     if (hw) s.ptH++; else s.ptA++;
+    evPoint = true;
     const inDeuce = s.ptH >= 3 && s.ptA >= 3;
     const hWon = inDeuce ? s.ptH - s.ptA >= 2 : s.ptH >= 4;
     const aWon = inDeuce ? s.ptA - s.ptH >= 2 : s.ptA >= 4;
     if (hWon || aWon) {
+      evGameWon = true;
       s.ptH = 0; s.ptA = 0;
       s.srv = s.srv === 0 ? 1 : 0;
       if (hWon) s.inH++; else s.inA++;
       const setOver = (s.inH >= 6 && s.inH - s.inA >= 2) || (s.inA >= 6 && s.inA - s.inH >= 2)
                    || (s.inH === 7 && s.inA === 6) || (s.inH === 6 && s.inA === 7);
       if (setOver) {
+        evSetEnded = true;
         s.sets.push([s.inH, s.inA]);
         if (s.inH > s.inA) s.hS++; else s.aS++;
         s.inH = 0; s.inA = 0;
@@ -2898,6 +2911,10 @@ function _getTennis(si: number): _TennisSt {
     }
   }
   s.lms = Date.now();
+  // ── Suspension: set=8s, game=3s, point=2s (per live betting spec) ────────
+  if (evSetEnded)     { s.suspUntil = Date.now() + 8000; s.suspReason = "SET ENCERRADO"; }
+  else if (evGameWon) { s.suspUntil = Date.now() + 3000; s.suspReason = "GAME ENCERRADO"; }
+  else if (evPoint)   { s.suspUntil = Date.now() + 2000; s.suspReason = "PONTO DISPUTADO"; }
   return s;
 }
 
@@ -2918,7 +2935,7 @@ function _getVolley(si: number): _VolleySt {
       vollSets.push(hw ? [tgt, lp] : [lp, tgt]);
       if (hw) hS++; else aS++;
     }
-    s = { dk, vollSets, hS, aS, ptH: Math.floor(r(20) * 18), ptA: Math.floor(r(21) * 18), lms: Date.now() };
+    s = { dk, vollSets, hS, aS, ptH: Math.floor(r(20) * 18), ptA: Math.floor(r(21) * 18), lms: Date.now(), suspUntil: 0, suspReason: "" };
     _volleyMap.set(si, s);
   }
   const realSec = (Date.now() - s.lms) / 1000;
@@ -2926,20 +2943,27 @@ function _getVolley(si: number): _VolleySt {
   if (nRallies < 1) return s;
   const ts  = Math.floor(s.lms / 1000);
   const tgt = () => (s!.hS + s!.aS) === 4 ? 15 : 25;
+  // ── Suspension event tracking ─────────────────────────────────────────────
+  let evSetEnded = false, evPoint = false;
   for (let r = 0; r < nRallies; r++) {
     if (s.hS >= 3 || s.aS >= 3) break;
     const hw = _tickRng(ts + r, 7) < 0.5;
     if (hw) s.ptH++; else s.ptA++;
+    evPoint = true;
     const t  = tgt();
     const hW = s.ptH >= t && s.ptH - s.ptA >= 2;
     const aW = s.ptA >= t && s.ptA - s.ptH >= 2;
     if (hW || aW) {
+      evSetEnded = true;
       s.vollSets.push([s.ptH, s.ptA]);
       if (hW) s.hS++; else s.aS++;
       s.ptH = 0; s.ptA = 0;
     }
   }
   s.lms = Date.now();
+  // ── Suspension: set=6s, rally=1.5s (per live betting spec) ───────────────
+  if (evSetEnded)   { s.suspUntil = Date.now() + 6000; s.suspReason = "SET ENCERRADO"; }
+  else if (evPoint) { s.suspUntil = Date.now() + 1500; s.suspReason = "PONTO DISPUTADO"; }
   return s;
 }
 
@@ -2954,7 +2978,7 @@ function _getHockey(si: number): _HockeySt {
     const gr     = 3 / 3600;
     const home   = Math.round(played * gr * (0.7 + r(3) * 0.6));
     const away   = Math.round(played * gr * (0.7 + r(4) * 0.6));
-    s = { dk, period, clk, home, away, lms: Date.now() };
+    s = { dk, period, clk, home, away, lms: Date.now(), suspUntil: 0, suspReason: "" };
     _hockeyMap.set(si, s);
   }
   const realSec = (Date.now() - s.lms) / 1000;
@@ -2962,12 +2986,17 @@ function _getHockey(si: number): _HockeySt {
   if (gameSec < 1) return s;
   const ts = Math.floor(s.lms / 1000);
   const gr = 3 / 3600;
+  // ── Snapshot before advance ───────────────────────────────────────────────
+  const prevHome = s.home, prevAway = s.away, prevPeriod = s.period;
   if (_tickRng(ts, 8) < gr * gameSec) s.home++;
   if (_tickRng(ts, 9) < gr * gameSec) s.away++;
   s.clk -= gameSec;
   while (s.clk <= 0 && s.period < 3) { s.period++; s.clk += 1200; }
   if (s.clk < 0) s.clk = 0;
   s.lms = Date.now();
+  // ── Suspension: period=5s, goal=4s (per live betting spec) ───────────────
+  if (s.period > prevPeriod)                              { s.suspUntil = Date.now() + 5000; s.suspReason = "FIM DE PERÍODO"; }
+  else if (s.home > prevHome || s.away > prevAway) { s.suspUntil = Date.now() + 4000; s.suspReason = "GOL MARCADO"; }
   return s;
 }
 
@@ -3003,6 +3032,8 @@ function buildSimulatedLiveOtherSports(opts: { skipTennis: boolean; skipVolley: 
     const rngOdds = mkOddsRng(win15s * 53 + si * 41);
     let homeScore = 0, awayScore = 0, minute = 0, status = "";
     let _liveExtra: LiveMatchState["_liveExtra"] = undefined;
+    // ── Suspension vars extracted from whichever sport state is active ────────
+    let stSuspUntil = 0, stSuspReason = "";
 
     if (m.sport === "basketball") {
       const st  = _getBball(si);
@@ -3011,6 +3042,7 @@ function buildSimulatedLiveOtherSports(opts: { skipTennis: boolean; skipVolley: 
       minute    = (st.q - 1) * 12 + Math.floor((720 - st.clk) / 60);
       status    = `Q${st.q}`;
       _liveExtra = { clockStr: _fmtClock(st.clk) };
+      stSuspUntil = st.suspUntil; stSuspReason = st.suspReason;
 
     } else if (m.sport === "tennis") {
       const st   = _getTennis(si);
@@ -3031,6 +3063,7 @@ function buildSimulatedLiveOtherSports(opts: { skipTennis: boolean; skipVolley: 
         aPt = TENNIS_SEQ[Math.min(st.ptA, 3)]!;
       }
       _liveExtra = { sets, currentPoints: [hPt, aPt] };
+      stSuspUntil = st.suspUntil; stSuspReason = st.suspReason;
 
     } else if (m.sport === "hockey") {
       const st  = _getHockey(si);
@@ -3039,6 +3072,7 @@ function buildSimulatedLiveOtherSports(opts: { skipTennis: boolean; skipVolley: 
       minute    = (st.period - 1) * 20 + Math.floor((1200 - st.clk) / 60);
       status    = `P${st.period}`;
       _liveExtra = { clockStr: _fmtClock(st.clk) };
+      stSuspUntil = st.suspUntil; stSuspReason = st.suspReason;
 
     } else {
       const st  = _getVolley(si);
@@ -3048,7 +3082,13 @@ function buildSimulatedLiveOtherSports(opts: { skipTennis: boolean; skipVolley: 
       status  = `Set ${currentSet}`;
       minute  = currentSet;
       _liveExtra = { vollSets: st.vollSets, currentPts: [st.ptH, st.ptA] };
+      stSuspUntil = st.suspUntil; stSuspReason = st.suspReason;
     }
+
+    // ── Market suspension — active when suspUntil is in the future ────────────
+    const nowMs = Date.now();
+    const marketSuspension = stSuspUntil > nowMs ? { all: stSuspUntil } : undefined;
+    const _suspensionReason = stSuspUntil > nowMs ? stSuspReason : undefined;
 
     // ── Live odds drift (15-s window) ─────────────────────────────────────────
     const scoreDiff = homeScore - awayScore;
@@ -3076,6 +3116,8 @@ function buildSimulatedLiveOtherSports(opts: { skipTennis: boolean; skipVolley: 
       minute,
       status,
       hasRealOdds: m.hasRealOdds,
+      marketSuspension,
+      _suspensionReason,
       odds:        liveOdds,
       markets:     m.markets,
       events:      [],
