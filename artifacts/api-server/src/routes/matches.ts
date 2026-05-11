@@ -6385,4 +6385,148 @@ router.get("/football-team/:id", async (req, res) => {
   }
 });
 
+// ─── Football Player Profile ───────────────────────────────────────────────────
+
+// Per-club/season stat block (uses `pen_*`, `shots_on_target`, `appearances` — correct spelling)
+type FootballPlayerClubStatRaw = {
+  team_id: string; team_name: string; league_id: string; league: string; season: string;
+  is_captain: string; minutes_played: string; appearances: string; starting_lineups: string;
+  substitute_in: string; substitute_out?: string; on_bench?: string;
+  assists: string; blocks: string; clearances: string;
+  crosses_accurate: string; crosses_total: string; dispossesed: string;
+  dribble_attempts: string; dribble_success: string;
+  duels_total: string; duels_won: string;
+  fouls_committed: string; fouls_drawn: string;
+  goals: string; goals_conceded: string; inside_box_saves: string; interceptions: string;
+  key_passes: string; pass_attempts: string; pass_success: string;
+  pen_committed?: string; pen_missed: string; pen_saved?: string; pen_scored: string; pen_won?: string;
+  rating: string; redcards: string; saves: string;
+  shots_on_target: string; shots_total: string; shots_woodwork: string;
+  tackles: string; yellowcards: string; yellowred: string;
+};
+
+// Career totals block — no `goals` field
+type FootballPlayerOverallStatRaw = {
+  minutes_played: string; appearances?: string; starting_lineups: string; substitute_in: string;
+  assists: string; blocks: string; clearances: string;
+  crosses_accurate: string; crosses_total: string; dispossesed: string;
+  dribble_attempts: string; dribble_success: string;
+  duels_total: string; duels_won: string;
+  fouls_committed: string; fouls_drawn: string;
+  goals_conceded: string; inside_box_saves?: string; interceptions: string;
+  key_passes: string; pass_attempts: string; pass_success: string;
+  pen_committed?: string; pen_missed: string; pen_saved?: string; pen_scored: string; pen_won?: string;
+  rating: string; saves?: string;
+  shots_on_target: string; shots_total: string; shots_woodwork: string;
+  tackles: string;
+};
+
+type FootballPlayerProfileRaw = {
+  updated?: string; updated_ts?: number;
+  player?: {
+    id: string; name: string; firstname: string; lastname: string;
+    age: string; birthdate: string; nationality: string;
+    birthplace: string; birthcountry: string;
+    position: string; height: string; weight: string; preferred_foot: string;
+    team: string; team_id: string; national_team_id?: string;
+    market_value_eur?: string;
+    club_league_statistics?: { club: FootballPlayerClubStatRaw | FootballPlayerClubStatRaw[] };
+    club_domestic_cup_statistics?: { club: FootballPlayerClubStatRaw | FootballPlayerClubStatRaw[] };
+    club_intl_cup_statistics?: { club: FootballPlayerClubStatRaw | FootballPlayerClubStatRaw[] };
+    overall_club_statistics?: FootballPlayerOverallStatRaw;
+    national_team_statistics?: unknown;
+    transfers?: unknown;
+    trophies?: unknown;
+    sidelined_history?: unknown;
+  };
+};
+
+const footballPlayerCache = new Map<string, { data: object; fetchedAt: number }>();
+const FOOTBALL_PLAYER_TTL = 30 * 60 * 1000;
+
+function parsePlayerClubStat(c: FootballPlayerClubStatRaw) {
+  const pi = (s: string | undefined) => parseInt(s ?? "") || 0;
+  const pf = (s: string | undefined) => parseFloat(s ?? "") || 0;
+  return {
+    teamId: c.team_id, teamName: c.team_name, leagueId: c.league_id, league: c.league, season: c.season,
+    isCaptain: c.is_captain === "1" || c.is_captain === "True",
+    minutesPlayed: pi(c.minutes_played), appearances: pi(c.appearances),
+    startingLineups: pi(c.starting_lineups), subIn: pi(c.substitute_in), onBench: pi(c.on_bench),
+    goals: pi(c.goals), assists: pi(c.assists), rating: pf(c.rating),
+    yellowCards: pi(c.yellowcards), yellowRed: pi(c.yellowred), redCards: pi(c.redcards),
+    saves: pi(c.saves), goalsConceded: pi(c.goals_conceded), insideBoxSaves: pi(c.inside_box_saves),
+    penScored: pi(c.pen_scored), penMissed: pi(c.pen_missed), penSaved: pi(c.pen_saved),
+    shotsTotal: pi(c.shots_total), shotsOnTarget: pi(c.shots_on_target), shotsWoodwork: pi(c.shots_woodwork),
+    passAttempts: pi(c.pass_attempts), passSuccess: pi(c.pass_success), keyPasses: pi(c.key_passes),
+    dribbleAttempts: pi(c.dribble_attempts), dribbleSuccess: pi(c.dribble_success),
+    duelsTotal: pi(c.duels_total), duelsWon: pi(c.duels_won),
+    foulsCommitted: pi(c.fouls_committed), foulsDrawn: pi(c.fouls_drawn),
+    tackles: pi(c.tackles), blocks: pi(c.blocks), clearances: pi(c.clearances), interceptions: pi(c.interceptions),
+    crossesTotal: pi(c.crosses_total), crossesAccurate: pi(c.crosses_accurate),
+  };
+}
+
+function parsePlayerOverall(o: FootballPlayerOverallStatRaw) {
+  const pi = (s: string | undefined) => parseInt(s ?? "") || 0;
+  const pf = (s: string | undefined) => parseFloat(s ?? "") || 0;
+  return {
+    minutesPlayed: pi(o.minutes_played), appearances: pi(o.appearances),
+    startingLineups: pi(o.starting_lineups), subIn: pi(o.substitute_in),
+    assists: pi(o.assists), rating: pf(o.rating),
+    penScored: pi(o.pen_scored), penMissed: pi(o.pen_missed),
+    shotsTotal: pi(o.shots_total), shotsOnTarget: pi(o.shots_on_target), shotsWoodwork: pi(o.shots_woodwork),
+    passAttempts: pi(o.pass_attempts), passSuccess: pi(o.pass_success), keyPasses: pi(o.key_passes),
+    dribbleAttempts: pi(o.dribble_attempts), dribbleSuccess: pi(o.dribble_success),
+    duelsTotal: pi(o.duels_total), duelsWon: pi(o.duels_won),
+    foulsCommitted: pi(o.fouls_committed), foulsDrawn: pi(o.fouls_drawn),
+    tackles: pi(o.tackles), blocks: pi(o.blocks), clearances: pi(o.clearances), interceptions: pi(o.interceptions),
+    crossesTotal: pi(o.crosses_total), crossesAccurate: pi(o.crosses_accurate),
+  };
+}
+
+function toClubStats(raw: FootballPlayerClubStatRaw | FootballPlayerClubStatRaw[] | undefined) {
+  if (!raw) return [];
+  const arr = Array.isArray(raw) ? raw : [raw];
+  return arr.map(parsePlayerClubStat);
+}
+
+async function getFootballPlayer(playerId: string): Promise<object> {
+  const now = Date.now();
+  const cached = footballPlayerCache.get(playerId);
+  if (cached && now - cached.fetchedAt < FOOTBALL_PLAYER_TTL) return cached.data;
+  const resp = await fetch(`${BASE_V2}/soccer/players/${encodeURIComponent(playerId)}?access_key=${STATSPAL_KEY}`, { signal: AbortSignal.timeout(10000) });
+  if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+  const data = (await resp.json()) as FootballPlayerProfileRaw;
+  const p = data?.player;
+  if (!p) throw new Error("Jogador não encontrado");
+
+  const result = {
+    id: p.id, name: p.name, firstName: p.firstname, lastName: p.lastname,
+    age: parseInt(p.age) || null, birthdate: p.birthdate,
+    nationality: p.nationality, birthplace: p.birthplace, birthcountry: p.birthcountry,
+    position: p.position,
+    height: parseInt(p.height) || null, weight: parseInt(p.weight) || null,
+    preferredFoot: p.preferred_foot,
+    currentTeam: { id: p.team_id, name: p.team },
+    nationalTeamId: p.national_team_id ?? null,
+    marketValueEur: p.market_value_eur ? parseInt(p.market_value_eur) || null : null,
+    leagueStats:     toClubStats(p.club_league_statistics?.club),
+    domesticCupStats: toClubStats(p.club_domestic_cup_statistics?.club),
+    intlCupStats:    toClubStats(p.club_intl_cup_statistics?.club),
+    overallStats:    p.overall_club_statistics ? parsePlayerOverall(p.overall_club_statistics) : null,
+  };
+  footballPlayerCache.set(playerId, { data: result, fetchedAt: now });
+  return result;
+}
+
+router.get("/football-player/:id", async (req, res) => {
+  const id = String(req.params["id"]);
+  try {
+    const player = await getFootballPlayer(id);
+    res.json(player);
+  } catch {
+    res.status(500).json({ error: "Perfil de jogador indisponível" });
+  }
+});
+
 export default router;
