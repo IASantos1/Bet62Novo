@@ -909,7 +909,7 @@ let hockeyResultsFetchedAt = 0;
 
 // NHL standings
 type NHLStandingsTeam = {
-  id: string; name: string; position: number;
+  id: string; name: string; abbr: string; position: number;
   gp: number; won: number; lost: number; otLosses: number;
   points: number; gf: number; ga: number; diff: string;
   streak: string; lastTen: string; homeRecord: string; roadRecord: string;
@@ -920,6 +920,32 @@ type NHLStandingsData = { season: string; conferences: NHLStandingsConference[] 
 let hockeyStandingsCache: NHLStandingsData | null = null;
 let hockeyStandingsFetchedAt = 0;
 const HOCKEY_STANDINGS_TTL = 30 * 60 * 1000;
+
+// NHL rosters
+// Abbreviations as accepted by the Statpal roster endpoint (empirically verified)
+const NHL_ABBR: Record<string, string> = {
+  "Anaheim Ducks": "ana", "Boston Bruins": "bos", "Buffalo Sabres": "buf",
+  "Calgary Flames": "cgy", "Carolina Hurricanes": "car", "Chicago Blackhawks": "chi",
+  "Colorado Avalanche": "col", "Columbus Blue Jackets": "cbj", "Dallas Stars": "dal",
+  "Detroit Red Wings": "det", "Edmonton Oilers": "edm", "Florida Panthers": "fla",
+  "Los Angeles Kings": "la", "Minnesota Wild": "min", "Montreal Canadiens": "mtl",
+  "Nashville Predators": "nsh", "New Jersey Devils": "nj", "New York Islanders": "nyi",
+  "New York Rangers": "nyr", "Ottawa Senators": "ott", "Philadelphia Flyers": "phi",
+  "Pittsburgh Penguins": "pit", "San Jose Sharks": "sj", "St. Louis Blues": "stl",
+  "Tampa Bay Lightning": "tb", "Toronto Maple Leafs": "tor", "Vancouver Canucks": "van",
+  "Washington Capitals": "wsh", "Winnipeg Jets": "wpg",
+  // Teams without working roster endpoints on Statpal:
+  // Vegas Golden Knights, Seattle Kraken, Arizona Coyotes, Utah Hockey Club
+};
+type NHLRosterPlayer = {
+  id: string; name: string; number: string; age: number;
+  birthPlace: string; height: string; weight: string; shot: string; salary: string;
+};
+type NHLRosterPosition = { name: string; players: NHLRosterPlayer[] };
+type NHLRosterData = { teamName: string; abbreviation: string; season: string; positions: NHLRosterPosition[] };
+const hockeyRosterCache = new Map<string, NHLRosterData>();
+const hockeyRosterFetchedAt = new Map<string, number>();
+const HOCKEY_ROSTER_TTL = 60 * 60 * 1000;
 
 // Volleyball season schedule
 type VolleyScheduleMatch = {
@@ -3619,6 +3645,7 @@ async function getHockeyStandings(): Promise<NHLStandingsData> {
           teams: teams.map(t2 => ({
             id: t2.id,
             name: t2.name,
+            abbr: NHL_ABBR[t2.name] ?? t2.name.toLowerCase().replace(/\s+/g, "").slice(0, 3),
             position: parseInt(t2.position) || 0,
             gp: parseInt(t2.games_played) || 0,
             won: parseInt(t2.won) || 0,
@@ -3651,6 +3678,68 @@ router.get("/hockey-standings", async (_req, res) => {
     res.json(data);
   } catch {
     res.status(500).json({ error: "Classificação indisponível" });
+  }
+});
+
+async function getHockeyRoster(abbr: string): Promise<NHLRosterData | null> {
+  const now = Date.now();
+  const cached = hockeyRosterCache.get(abbr);
+  const fetchedAt = hockeyRosterFetchedAt.get(abbr) ?? 0;
+  if (cached && now - fetchedAt < HOCKEY_ROSTER_TTL) return cached;
+  try {
+    const resp = await fetch(`${BASE_V1}/nhl/rosters/${abbr}?access_key=${STATSPAL_KEY}`);
+    if (!resp.ok) return cached ?? null;
+    const json = (await resp.json()) as {
+      team?: {
+        name?: string; abbreviation?: string; season?: string;
+        position?: Array<{ name: string; player?: Array<{
+          id: string; name: string; number?: string; age?: string;
+          birth_place?: string; height?: string; weight?: string;
+          shot?: string; salarycap?: string;
+        }> | { id: string; name: string; number?: string; age?: string; birth_place?: string; height?: string; weight?: string; shot?: string; salarycap?: string; } }>;
+      };
+    };
+    const t = json.team;
+    if (!t) return cached ?? null;
+    const positions = Array.isArray(t.position) ? t.position : t.position ? [t.position] : [];
+    const data: NHLRosterData = {
+      teamName: t.name ?? abbr,
+      abbreviation: t.abbreviation ?? abbr.toUpperCase(),
+      season: t.season ?? "",
+      positions: positions.map(p => {
+        const rawPlayers = Array.isArray(p.player) ? p.player : p.player ? [p.player] : [];
+        return {
+          name: p.name,
+          players: rawPlayers.map(pl => ({
+            id: pl.id,
+            name: pl.name,
+            number: pl.number ?? "",
+            age: parseInt(pl.age ?? "0") || 0,
+            birthPlace: pl.birth_place ?? "",
+            height: pl.height ?? "",
+            weight: pl.weight ?? "",
+            shot: pl.shot ?? "",
+            salary: pl.salarycap ?? "",
+          })),
+        };
+      }),
+    };
+    hockeyRosterCache.set(abbr, data);
+    hockeyRosterFetchedAt.set(abbr, now);
+    return data;
+  } catch {
+    return cached ?? null;
+  }
+}
+
+router.get("/hockey-roster/:team", async (req, res) => {
+  const abbr = String(req.params["team"]).toLowerCase();
+  try {
+    const data = await getHockeyRoster(abbr);
+    if (!data) { res.status(404).json({ error: "Roster não encontrado" }); return; }
+    res.json(data);
+  } catch {
+    res.status(500).json({ error: "Roster indisponível" });
   }
 });
 

@@ -885,7 +885,7 @@ export default function Home() {
   const [hockeySchedule, setHockeySchedule] = useState<HockeyScheduleData | null>(null);
 
   type NHLStandingsTeam = {
-    id: string; name: string; position: number;
+    id: string; name: string; abbr: string; position: number;
     gp: number; won: number; lost: number; otLosses: number;
     points: number; gf: number; ga: number; diff: string;
     streak: string; lastTen: string; homeRecord: string; roadRecord: string;
@@ -894,6 +894,16 @@ export default function Home() {
   type NHLStandingsConference = { name: string; divisions: NHLStandingsDivision[] };
   type NHLStandingsData = { season: string; conferences: NHLStandingsConference[] };
   const [hockeyStandings, setHockeyStandings] = useState<NHLStandingsData | null>(null);
+
+  type NHLRosterPlayer = {
+    id: string; name: string; number: string; age: number;
+    birthPlace: string; height: string; weight: string; shot: string; salary: string;
+  };
+  type NHLRosterPosition = { name: string; players: NHLRosterPlayer[] };
+  type NHLRosterData = { teamName: string; abbreviation: string; season: string; positions: NHLRosterPosition[] };
+  const [hockeyRosters, setHockeyRosters] = useState<Record<string, NHLRosterData>>({});
+  const [selectedRosterAbbr, setSelectedRosterAbbr] = useState<string | null>(null);
+  const [rosterLoading, setRosterLoading] = useState(false);
 
   // Active tennis tournaments
   type ActiveTournament = {
@@ -4471,6 +4481,22 @@ export default function Home() {
                   {/* ─── Classificação NHL ────────────────────────────────────── */}
                   {(selectedSport === "all" || selectedSport === "hockey") && hockeyStandings && hockeyStandings.conferences.length > 0 && !selectedLeague && (() => {
                     const streakColor = (s: string) => s.startsWith("W") ? "text-green-400" : s.startsWith("L") ? "text-red-400" : "text-zinc-400";
+                    const handleTeamClick = (abbr: string) => {
+                      if (selectedRosterAbbr === abbr) { setSelectedRosterAbbr(null); return; }
+                      setSelectedRosterAbbr(abbr);
+                      if (hockeyRosters[abbr]) return;
+                      setRosterLoading(true);
+                      fetch(`/api/matches/hockey-roster/${abbr}`)
+                        .then(r => r.ok ? r.json() : null)
+                        .then(d => { if (d) setHockeyRosters(prev => ({ ...prev, [abbr]: d })); })
+                        .catch(() => {})
+                        .finally(() => setRosterLoading(false));
+                    };
+                    const activeRoster = selectedRosterAbbr ? hockeyRosters[selectedRosterAbbr] : null;
+                    const POS_ICON: Record<string, string> = {
+                      "Centers": "C", "Left Wings": "LW", "Right Wings": "RW",
+                      "Defensemen": "D", "Goaltenders": "G",
+                    };
                     return (
                       <div className="mb-6">
                         <div className="flex items-center gap-2 mb-3">
@@ -4501,13 +4527,17 @@ export default function Home() {
                                             <th className="py-1.5 px-1 text-center hidden sm:table-cell">DIF</th>
                                             <th className="py-1.5 px-2 text-center hidden md:table-cell">SÉRIE</th>
                                             <th className="py-1.5 px-2 text-center hidden md:table-cell">ÚLT 10</th>
+                                            <th className="py-1.5 px-2 w-6" />
                                           </tr>
                                         </thead>
                                         <tbody>
                                           {div.teams.map((team, idx) => (
-                                            <tr key={team.id} className={`border-b border-zinc-800/40 hover:bg-zinc-800/30 transition-colors ${idx < 3 ? "border-l-2 border-l-green-600/40" : idx === 3 ? "border-l-2 border-l-yellow-500/40" : ""}`}>
+                                            <tr key={team.id} className={`border-b border-zinc-800/40 transition-colors cursor-pointer ${selectedRosterAbbr === team.abbr ? "bg-zinc-800/60" : "hover:bg-zinc-800/30"} ${idx < 3 ? "border-l-2 border-l-green-600/40" : idx === 3 ? "border-l-2 border-l-yellow-500/40" : ""}`}
+                                              onClick={() => handleTeamClick(team.abbr)}>
                                               <td className="py-1.5 px-2 text-zinc-600 text-center">{team.position}</td>
-                                              <td className="py-1.5 px-2 text-zinc-200 font-semibold truncate max-w-[130px]">{team.name}</td>
+                                              <td className="py-1.5 px-2 font-semibold truncate max-w-[130px]">
+                                                <span className={selectedRosterAbbr === team.abbr ? "text-white" : "text-zinc-200"}>{team.name}</span>
+                                              </td>
                                               <td className="py-1.5 px-1 text-center text-zinc-400">{team.gp}</td>
                                               <td className="py-1.5 px-1 text-center text-green-400">{team.won}</td>
                                               <td className="py-1.5 px-1 text-center text-red-400">{team.lost}</td>
@@ -4518,6 +4548,9 @@ export default function Home() {
                                               <td className={`py-1.5 px-1 text-center hidden sm:table-cell font-bold ${team.diff.startsWith("+") ? "text-green-400" : team.diff.startsWith("-") ? "text-red-400" : "text-zinc-500"}`}>{team.diff}</td>
                                               <td className={`py-1.5 px-2 text-center hidden md:table-cell font-black ${streakColor(team.streak)}`}>{team.streak}</td>
                                               <td className="py-1.5 px-2 text-center text-zinc-600 hidden md:table-cell text-[9px]">{team.lastTen.split(",")[0]}</td>
+                                              <td className="py-1.5 px-2 text-center text-zinc-600 text-[9px]">
+                                                {selectedRosterAbbr === team.abbr ? "▲" : "▼"}
+                                              </td>
                                             </tr>
                                           ))}
                                         </tbody>
@@ -4526,6 +4559,7 @@ export default function Home() {
                                     <div className="px-3 py-1.5 flex gap-3 text-[8px] text-zinc-700">
                                       <span className="flex items-center gap-1"><span className="w-2 h-2 border-l-2 border-green-600/60 inline-block" />Playoff</span>
                                       <span className="flex items-center gap-1"><span className="w-2 h-2 border-l-2 border-yellow-500/60 inline-block" />Wild Card</span>
+                                      <span className="text-zinc-800 ml-auto">Clique numa equipa para ver o roster</span>
                                     </div>
                                   </div>
                                 ))}
@@ -4533,6 +4567,59 @@ export default function Home() {
                             </div>
                           ))}
                         </div>
+                        {/* ── Roster Panel ── */}
+                        {selectedRosterAbbr && (
+                          <div className="mt-4 bg-zinc-900 border border-zinc-700 rounded-xl overflow-hidden animate-in fade-in slide-in-from-top-2 duration-200">
+                            <div className="bg-zinc-800 px-4 py-2.5 flex items-center justify-between">
+                              <div className="flex items-center gap-2">
+                                <span className="text-[10px] font-black text-zinc-500 uppercase tracking-widest">👥 Roster</span>
+                                {activeRoster && (
+                                  <>
+                                    <span className="text-sm font-black text-white">{activeRoster.teamName}</span>
+                                    <span className="text-[9px] bg-zinc-700 text-zinc-400 rounded px-1.5 py-0.5 font-bold">{activeRoster.abbreviation}</span>
+                                    <span className="text-[9px] text-zinc-600">{activeRoster.season}</span>
+                                  </>
+                                )}
+                                {rosterLoading && !activeRoster && <span className="text-[10px] text-zinc-500 animate-pulse">A carregar...</span>}
+                              </div>
+                              <button onClick={() => setSelectedRosterAbbr(null)} className="text-zinc-600 hover:text-zinc-300 transition-colors text-lg leading-none">×</button>
+                            </div>
+                            {activeRoster ? (
+                              <div className="p-3 space-y-4">
+                                {activeRoster.positions.map(pos => (
+                                  <div key={pos.name}>
+                                    <div className="flex items-center gap-2 mb-2">
+                                      <span className="text-[9px] font-black bg-red-600/20 text-red-400 rounded px-1.5 py-0.5 uppercase tracking-wider">{POS_ICON[pos.name] ?? pos.name.slice(0,2).toUpperCase()}</span>
+                                      <span className="text-[9px] font-black text-zinc-500 uppercase tracking-widest">{pos.name}</span>
+                                      <span className="text-[8px] text-zinc-700">{pos.players.length} jogadores</span>
+                                    </div>
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-1">
+                                      {pos.players.map(p => (
+                                        <div key={p.id} className="bg-zinc-950/70 border border-zinc-800 rounded-lg px-2.5 py-1.5 flex items-center gap-2">
+                                          <span className="text-[10px] font-black text-zinc-600 w-5 text-center shrink-0">#{p.number || "–"}</span>
+                                          <div className="flex-1 min-w-0">
+                                            <div className="text-[11px] font-bold text-zinc-200 truncate">{p.name}</div>
+                                            <div className="text-[9px] text-zinc-600 flex gap-2 flex-wrap">
+                                              {p.age > 0 && <span>{p.age} anos</span>}
+                                              {p.height && <span>{p.height}</span>}
+                                              {p.weight && <span>{p.weight}</span>}
+                                              {p.shot && <span>Remate: {p.shot}</span>}
+                                            </div>
+                                          </div>
+                                          {p.salary && <span className="text-[9px] font-bold text-green-600/80 shrink-0">{p.salary}</span>}
+                                        </div>
+                                      ))}
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            ) : !rosterLoading ? (
+                              <div className="text-center text-zinc-600 py-6 text-sm">Roster não disponível.</div>
+                            ) : (
+                              <div className="text-center text-zinc-600 py-6 text-sm animate-pulse">A carregar roster...</div>
+                            )}
+                          </div>
+                        )}
                       </div>
                     );
                   })()}
