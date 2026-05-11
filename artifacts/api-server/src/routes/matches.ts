@@ -5366,5 +5366,226 @@ router.get("/standings", async (req, res) => {
   }
 });
 
+// ─── Football Leagues & Schedule ───────────────────────────────────────────────
+
+type FootballLeague = {
+  id: string;
+  name: string;
+  country: string;
+  season: string;
+  isCurrent: boolean;
+};
+
+let footballLeaguesCache: FootballLeague[] | null = null;
+let footballLeaguesFetchedAt = 0;
+const FOOTBALL_LEAGUES_TTL = 5 * 60 * 1000;
+
+async function getFootballLeagues(): Promise<FootballLeague[]> {
+  const now = Date.now();
+  if (footballLeaguesCache && now - footballLeaguesFetchedAt < FOOTBALL_LEAGUES_TTL) return footballLeaguesCache;
+  const resp = await fetch(`${BASE_V2}/soccer/leagues/seasons?access_key=${STATSPAL_KEY}`, { signal: AbortSignal.timeout(9000) });
+  if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+  const data = (await resp.json()) as { league?: unknown };
+  const rawLeagues = data?.league;
+  if (!rawLeagues) return [];
+  const leagues = Array.isArray(rawLeagues) ? rawLeagues : [rawLeagues];
+  const results: FootballLeague[] = [];
+  for (const l of leagues) {
+    const lo = l as Record<string, unknown>;
+    const id = String(lo["id"] ?? "");
+    const name = String(lo["name"] ?? "");
+    const country = String(lo["country"] ?? "");
+    const season = String(lo["season"] ?? "");
+    const isCurrent = String(lo["is_current"] ?? "False") === "True";
+    if (id && name) results.push({ id, name, country, season, isCurrent });
+  }
+  footballLeaguesCache = results;
+  footballLeaguesFetchedAt = now;
+  return results;
+}
+
+router.get("/football-leagues", async (_req, res) => {
+  try {
+    const leagues = await getFootballLeagues();
+    res.json({ leagues });
+  } catch {
+    res.status(500).json({ error: "Ligas de futebol indisponíveis" });
+  }
+});
+
+// Football schedule types (v2/soccer/leagues/{id}/matches)
+type FootballSchedulePlayer = { number: string; id: string; name: string; booking: string };
+type FootballScheduleSubstitution = {
+  player_in_number: string; player_in_name: string; player_in_booking: string; player_in_id: string;
+  player_out_name: string; player_out_id: string; minute: string;
+};
+type FootballScheduleGoal = {
+  team: string; minute: string; player: string; score: string; playerid: string; assist: string; assistid: string;
+};
+type FootballScheduleMatch = {
+  main_id: string;
+  fallback_id_1?: string;
+  fallback_id_2?: string;
+  status: string;
+  date: string;
+  time: string;
+  venue?: string;
+  venue_id?: string;
+  venue_city?: string;
+  attendance?: string;
+  home: { id: string; name: string; score: string };
+  away: { id: string; name: string; score: string };
+  coaches?: {
+    home?: { coach?: { id: string; name: string } };
+    away?: { coach?: { id: string; name: string } };
+  };
+  referee?: { id: string; name: string };
+  lineups?: {
+    home?: { formation: string; player: FootballSchedulePlayer | FootballSchedulePlayer[] };
+    away?: { formation: string; player: FootballSchedulePlayer | FootballSchedulePlayer[] };
+  };
+  substitutions?: {
+    home?: { substitution: FootballScheduleSubstitution | FootballScheduleSubstitution[] };
+    away?: { substitution: FootballScheduleSubstitution | FootballScheduleSubstitution[] };
+  };
+  goals?: { goal: FootballScheduleGoal | FootballScheduleGoal[] };
+  ht: { home_goals: number; away_goals: number } | null;
+  ft: { home_goals: number; away_goals: number } | null;
+  et: { home_goals: number; away_goals: number } | null;
+  penalties: { home_pen: number; away_pen: number } | null;
+};
+type FootballScheduleWeek = { number: string; match: FootballScheduleMatch | FootballScheduleMatch[] };
+type FootballScheduleRaw = {
+  matches?: {
+    updated?: string;
+    country?: string;
+    tournament?: {
+      id: string;
+      league: string;
+      season: string;
+      stage_id?: string;
+      is_current?: string;
+      week?: FootballScheduleWeek | FootballScheduleWeek[];
+    };
+  };
+};
+
+type FootballScheduleMatchOut = {
+  id: string;
+  status: string;
+  date: string;
+  time: string;
+  venue?: string;
+  venueCity?: string;
+  attendance?: string;
+  homeTeam: { id: string; name: string };
+  awayTeam: { id: string; name: string };
+  homeScore: number | null;
+  awayScore: number | null;
+  htScore: { home: number; away: number } | null;
+  ftScore: { home: number; away: number } | null;
+  etScore: { home: number; away: number } | null;
+  penScore: { home: number; away: number } | null;
+  homeCoach?: string;
+  awayCoach?: string;
+  referee?: string;
+  homeFormation?: string;
+  awayFormation?: string;
+  homePlayers?: { number: string; id: string; name: string; booking: string }[];
+  awayPlayers?: { number: string; id: string; name: string; booking: string }[];
+  goals?: { team: string; minute: string; player: string; score: string; assist: string }[];
+};
+
+type FootballScheduleWeekOut = {
+  number: number;
+  matches: FootballScheduleMatchOut[];
+};
+
+const footballScheduleCache = new Map<string, { data: FootballScheduleWeekOut[]; meta: { league: string; season: string; country: string }; fetchedAt: number }>();
+const FOOTBALL_SCHEDULE_TTL = 5 * 60 * 1000;
+
+function parseFootballMatch(m: FootballScheduleMatch): FootballScheduleMatchOut {
+  const toPlayers = (raw: FootballSchedulePlayer | FootballSchedulePlayer[] | undefined) =>
+    raw ? (Array.isArray(raw) ? raw : [raw]) : [];
+  const toSubs = (raw: FootballScheduleSubstitution | FootballScheduleSubstitution[] | undefined) =>
+    raw ? (Array.isArray(raw) ? raw : [raw]) : [];
+  const rawGoals = m.goals?.goal;
+  const goals = rawGoals ? (Array.isArray(rawGoals) ? rawGoals : [rawGoals]) : [];
+  const hScore = parseInt(m.home.score);
+  const aScore = parseInt(m.away.score);
+
+  const homeSubs = toSubs(m.substitutions?.home?.substitution);
+  const awaySubs = toSubs(m.substitutions?.away?.substitution);
+  void homeSubs; void awaySubs; // available if needed
+
+  return {
+    id: m.main_id,
+    status: m.status,
+    date: m.date,
+    time: m.time,
+    venue: m.venue || undefined,
+    venueCity: m.venue_city || undefined,
+    attendance: m.attendance || undefined,
+    homeTeam: { id: m.home.id, name: m.home.name },
+    awayTeam: { id: m.away.id, name: m.away.name },
+    homeScore: isNaN(hScore) ? null : hScore,
+    awayScore: isNaN(aScore) ? null : aScore,
+    htScore: m.ht ? { home: m.ht.home_goals, away: m.ht.away_goals } : null,
+    ftScore: m.ft ? { home: m.ft.home_goals, away: m.ft.away_goals } : null,
+    etScore: m.et ? { home: m.et.home_goals, away: m.et.away_goals } : null,
+    penScore: m.penalties ? { home: m.penalties.home_pen, away: m.penalties.away_pen } : null,
+    homeCoach: m.coaches?.home?.coach?.name || undefined,
+    awayCoach: m.coaches?.away?.coach?.name || undefined,
+    referee: m.referee?.name || undefined,
+    homeFormation: m.lineups?.home?.formation || undefined,
+    awayFormation: m.lineups?.away?.formation || undefined,
+    homePlayers: toPlayers(m.lineups?.home?.player),
+    awayPlayers: toPlayers(m.lineups?.away?.player),
+    goals: goals.map(g => ({ team: g.team, minute: g.minute, player: g.player, score: g.score, assist: g.assist })),
+  };
+}
+
+async function getFootballSchedule(id: string): Promise<{ weeks: FootballScheduleWeekOut[]; meta: { league: string; season: string; country: string } }> {
+  const now = Date.now();
+  const cached = footballScheduleCache.get(id);
+  if (cached && now - cached.fetchedAt < FOOTBALL_SCHEDULE_TTL) return { weeks: cached.data, meta: cached.meta };
+  const resp = await fetch(`${BASE_V2}/soccer/leagues/${encodeURIComponent(id)}/matches?access_key=${STATSPAL_KEY}`, { signal: AbortSignal.timeout(12000) });
+  if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+  const data = (await resp.json()) as FootballScheduleRaw;
+  const tour = data?.matches?.tournament;
+  if (!tour) throw new Error("Calendário não encontrado");
+  const meta = { league: tour.league ?? "", season: tour.season ?? "", country: data.matches?.country ?? "" };
+  const rawWeeks = tour.week;
+  const weeks: FootballScheduleWeek[] = !rawWeeks ? [] : Array.isArray(rawWeeks) ? rawWeeks : [rawWeeks];
+  const weeksOut: FootballScheduleWeekOut[] = weeks.map(w => {
+    const rawMatches = w.match;
+    const matches: FootballScheduleMatch[] = !rawMatches ? [] : Array.isArray(rawMatches) ? rawMatches : [rawMatches];
+    return { number: parseInt(w.number) || 0, matches: matches.map(parseFootballMatch) };
+  });
+  footballScheduleCache.set(id, { data: weeksOut, meta, fetchedAt: now });
+  return { weeks: weeksOut, meta };
+}
+
+router.get("/football-schedule/:id", async (req, res) => {
+  const id = String(req.params["id"]);
+  try {
+    const { weeks, meta } = await getFootballSchedule(id);
+    // Split into recent (finished rounds) and upcoming (future rounds)
+    const today = new Date().toISOString().slice(0, 10);
+    const parseDate = (d: string) => {
+      // "15.08.2025" → "2025-08-15"
+      const [day, month, year] = d.split(".");
+      return `${year}-${month}-${day}`;
+    };
+    const recentWeeks = weeks
+      .filter(w => w.matches.length > 0 && w.matches.every(m => parseDate(m.date) <= today && m.status !== "Not Started"))
+      .slice(-3);
+    const nextWeek = weeks.find(w => w.matches.some(m => m.status === "Not Started" || parseDate(m.date) >= today)) ?? null;
+    res.json({ ...meta, recentWeeks, nextWeek });
+  } catch {
+    res.status(500).json({ error: "Calendário de futebol indisponível" });
+  }
+});
+
 
 export default router;
