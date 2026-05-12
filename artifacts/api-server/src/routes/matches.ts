@@ -2242,8 +2242,9 @@ async function buildLiveMatches(): Promise<LiveMatchState[]> {
 }
 
 async function buildUpcomingMatches(): Promise<UpcomingMatch[]> {
+  // Use getDailyLeagues (today's schedule) not getLiveLeagues (already in-progress matches)
   const [todayLeagues, tomorrowLeagues, odds] = await Promise.all([
-    getLiveLeagues().catch(() => [] as StatpalLeagueV2[]),
+    getDailyLeagues().catch(() => [] as StatpalLeagueV2[]),
     getTomorrowLeagues().catch(() => [] as StatpalLeagueV2[]),
     getOddsMap().catch(() => new Map<string, RealOdds>()),
   ]);
@@ -5732,7 +5733,9 @@ async function getTennisOdds(): Promise<TennisOddsEntry[]> {
     const matches = Array.isArray(rawMatches) ? rawMatches : [rawMatches];
     for (const m of matches) {
       if (!m.id || seen.has(m.id)) continue;
-      if (m.status !== "1" && m.status !== "0") continue;
+      // Include upcoming/scheduled matches: "Not Started", "0" (pre-match), "1" (scheduled)
+      const UPCOMING_STATUSES = new Set(["Not Started", "0", "1"]);
+      if (!UPCOMING_STATUSES.has(m.status ?? "")) continue;
       seen.add(m.id);
       const rawTypes = m.odds?.type;
       const types: RawType[] = !rawTypes ? [] : Array.isArray(rawTypes) ? rawTypes : [rawTypes];
