@@ -3368,16 +3368,26 @@ router.get("/live", async (_req, res) => {
 async function buildTennisUpcoming(): Promise<UpcomingMatch[]> {
   try {
     const [odds, liveData] = await Promise.all([getTennisOdds(), getTennisLive()]);
-    const seen = new Set<string>();
-    const results: UpcomingMatch[] = [];
 
-    // First: matches with real pre-match odds
+    // Build odds lookup keyed by normalised surname pair so name format differences
+    // (e.g. "Andrey Rublev" vs "A. Rublev", "Coco Gauff" vs "C. Gauff") are handled.
+    const oddsMapByNorm = new Map<string, typeof odds[0]>();
     for (const e of odds) {
       if (!e.players[0]?.name || !e.players[1]?.name) continue;
       if (e.players[0].name.includes("/") || e.players[1].name.includes("/")) continue;
-      const key = `${e.players[0].name}|${e.players[1].name}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
+      oddsMapByNorm.set(_tennisPairKey(e.players[0].name, e.players[1].name), e);
+    }
+
+    const seenNorm = new Set<string>(); // normalised dedup across both loops
+    const results: UpcomingMatch[] = [];
+
+    // First: matches that have real pre-match odds
+    for (const e of odds) {
+      if (!e.players[0]?.name || !e.players[1]?.name) continue;
+      if (e.players[0].name.includes("/") || e.players[1].name.includes("/")) continue;
+      const normKey = _tennisPairKey(e.players[0].name, e.players[1].name);
+      if (seenNorm.has(normKey)) continue;
+      seenNorm.add(normKey);
       results.push({
         id:          `tennis-${e.matchId}`,
         home:        e.players[0].name,
@@ -3393,22 +3403,26 @@ async function buildTennisUpcoming(): Promise<UpcomingMatch[]> {
       });
     }
 
-    // Second: "Not Started" matches from livescores (no odds yet but scheduled)
+    // Second: "Not Started" matches from livescores — cross-reference odds by surname
     for (const tournament of liveData) {
       const matches: TennisMatch[] = Array.isArray(tournament.match)
         ? tournament.match
-        : [tournament.match];
+        : (tournament.match ? [tournament.match] : []);
       for (const m of matches) {
         if (m.status !== "Not Started") continue;
-        const players: TennisPlayer[] = Array.isArray(m.player) ? m.player : [m.player];
+        const players: TennisPlayer[] = Array.isArray(m.player)
+          ? m.player
+          : (m.player ? [m.player] : []);
         const p0 = players[0];
         const p1 = players[1];
         if (!p0?.name || !p1?.name) continue;
-        // Skip doubles (names contain "/" like "Nys/ Roger-Vasselin")
+        // Skip doubles (e.g. "Nys/ Roger-Vasselin")
         if (p0.name.includes("/") || p1.name.includes("/")) continue;
-        const key = `${p0.name}|${p1.name}`;
-        if (seen.has(key)) continue;
-        seen.add(key);
+        const normKey = _tennisPairKey(p0.name, p1.name);
+        if (seenNorm.has(normKey)) continue;
+        seenNorm.add(normKey);
+        // Try to find real odds using surname-normalised key
+        const oddsEntry = oddsMapByNorm.get(normKey);
         results.push({
           id:          `tennis-ls-${m.id}`,
           home:        p0.name,
@@ -3418,9 +3432,11 @@ async function buildTennisUpcoming(): Promise<UpcomingMatch[]> {
           time:        addOneHour(m.time),
           date:        m.date,
           sport:       "tennis" as const,
-          hasRealOdds: false,
-          odds:        { home: 1.85, draw: 0, away: 1.85 },
-          markets:     {} as AdvancedMarkets,
+          hasRealOdds: !!oddsEntry,
+          odds:        oddsEntry
+            ? { home: oddsEntry.matchOdds[0], draw: 0, away: oddsEntry.matchOdds[1] }
+            : { home: 0, draw: 0, away: 0 },
+          markets:     oddsEntry ? (oddsEntry.markets as AdvancedMarkets) : ({} as AdvancedMarkets),
         });
       }
     }
