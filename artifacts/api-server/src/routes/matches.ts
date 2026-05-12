@@ -2260,11 +2260,11 @@ async function buildUpcomingMatches(): Promise<UpcomingMatch[]> {
   const results: UpcomingMatch[] = [];
 
   for (const league of sorted) {
-    if (results.length >= 40) break;
+    if (results.length >= 25) break;
     const matches: StatpalMatchV2[] = Array.isArray(league.match) ? league.match : [league.match];
 
     for (const m of matches) {
-      if (results.length >= 40) break;
+      if (results.length >= 25) break;
       if (!/^\d{2}:\d{2}$/.test(m.status)) continue;
       if (m.home.goals !== "?" || m.away.goals !== "?") continue;
       if (seenIds.has(m.main_id)) continue;
@@ -3303,7 +3303,9 @@ router.get("/live", async (_req, res) => {
         const si = matchStartsInMinutes(m.date, m.time);
         return isFinite(si) && si >= -10 && si <= 2160 && !liveIds.has(String(m.id));
       })
-      .slice(0, 40)
+      // Sort by soonest start first so all sports share slots fairly
+      .sort((a, b) => matchStartsInMinutes(a.date, a.time) - matchStartsInMinutes(b.date, b.time))
+      .slice(0, 50)
       .map(m => ({
         id:            m.id,
         home:          m.home,
