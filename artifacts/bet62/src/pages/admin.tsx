@@ -157,10 +157,21 @@ function Badge({ cls, label }: { cls: string; label: string }) {
 
 type TabId = "dashboard" | "users" | "bets" | "payments" | "withdrawals" | "risk" | "analytics" | "events" | "settings";
 
+const ADMIN_VERSION = "v2.1";
+
 export default function AdminPage() {
   const [token, setToken] = useState<string | null>(() => sessionStorage.getItem("admin_token"));
   const [username, setUsername] = useState<string>(() => sessionStorage.getItem("admin_username") || "");
   const [activeTab, setActiveTab] = useState<TabId>("dashboard");
+
+  // Force full reload when browser has stale cached JS
+  useEffect(() => {
+    const stored = sessionStorage.getItem("admin_version");
+    sessionStorage.setItem("admin_version", ADMIN_VERSION);
+    if (stored !== null && stored !== ADMIN_VERSION) {
+      window.location.reload();
+    }
+  }, []);
 
   const [loginUser, setLoginUser] = useState("");
   const [loginPass, setLoginPass] = useState("");
@@ -604,6 +615,7 @@ export default function AdminPage() {
           <div className="font-black text-xl tracking-tighter italic">
             <span className="text-white">BET</span><span className="text-red-600">62</span>
             <span className="text-xs font-normal text-zinc-500 ml-2 not-italic">Admin</span>
+            <span className="text-[10px] font-bold text-red-500 ml-1 not-italic bg-red-900/30 px-1 rounded">{ADMIN_VERSION}</span>
           </div>
         </div>
 
