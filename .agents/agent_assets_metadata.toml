@@ -36,3 +36,21 @@ id = "4VcokkV2ouoH1nDd5npke"
 uri = "file://artifacts/bet62/public/mbway_new2.png"
 type = "image"
 title = "MB WAY — vectorseek RGBA (transparente) ✅"
+
+[[outputs]]
+id = "zL_CHOHtZf3JP1lEp_7b0"
+uri = "file://artifacts/bet62/public/mb_candidate1.png"
+type = "image"
+title = "Multibanco — bootflare (tRNS transparent)"
+
+[[outputs]]
+id = "EVaJbp8zZTTW6-_imrrOK"
+uri = "file://artifacts/bet62/public/mb_candidate2.png"
+type = "image"
+title = "Multibanco — seeklogo 95904 (tRNS transparent)"
+
+[[outputs]]
+id = "AqMbMOY_iyoaGZmiLDEPs"
+uri = "file://artifacts/bet62/public/mb_rembg.png"
+type = "image"
+title = "Multibanco — fundo removido por IA ✨"
