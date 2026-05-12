@@ -4,7 +4,7 @@ import { toast } from "sonner";
 import {
   Menu, X, Trophy, Activity, Gift,
   LogOut, User, History, Loader2, Zap, TrendingUp,
-  ChevronRight, ChevronLeft, ChevronDown, AlertCircle, BarChart2, Wallet, ArrowDownCircle, ArrowUpCircle, Plus,
+  ChevronRight, ChevronLeft, ChevronDown, AlertCircle, BarChart2, Wallet, ArrowDownCircle, ArrowUpCircle, Plus, Clock,
 } from "lucide-react";
 import ProfileTab from "@/components/ProfileTab";
 import { Button } from "@/components/ui/button";
@@ -599,6 +599,12 @@ type Match = {
     periods?: Array<[number, number]>;
     quarters?: Array<[number, number]>;
   };
+  // Minutes until match starts (only present for "Em Breve" pre-match entries)
+  startsIn?: number;
+  // Scheduled kickoff time (HH:MM, Portugal UTC+1) for "Em Breve" entries
+  scheduledTime?: string;
+  // Scheduled date (DD.MM.YYYY) for "Em Breve" entries
+  scheduledDate?: string;
 };
 
 type BetSelection = {
@@ -1747,10 +1753,42 @@ export default function Home() {
       return minute === 45 ? "HT" : minute === 105 ? "ET" : `${minute}'`;
     })();
 
+    // "Em Breve" — upcoming real match, not yet started
+    const isEmBreve = match.startsIn !== undefined;
+    const countdownLabel = (() => {
+      if (!isEmBreve) return "";
+      const si = match.startsIn!;
+      if (si < 60) return `Em ${si}min`;
+      const h = Math.floor(si / 60);
+      const m = si % 60;
+      return m > 0 ? `Em ${h}h${m}m` : `Em ${h}h`;
+    })();
+
     // Non-live volleyball states get a muted badge (no pulse)
-    const isVolleyNonLive = sport === "volleyball" &&
+    const isVolleyNonLive = !isEmBreve && sport === "volleyball" &&
       (match.status === "Encerrado" || (match.status ?? "").startsWith("Hoje"));
-    const liveBadge = isVolleyNonLive ? (
+    const scheduledDisplay = (() => {
+      if (!isEmBreve || !match.scheduledTime) return null;
+      const time = match.scheduledTime;
+      if (!match.scheduledDate) return time;
+      // Check if it's today or tomorrow
+      const today = new Date();
+      const todayStr = `${String(today.getDate()).padStart(2,"0")}.${String(today.getMonth()+1).padStart(2,"0")}.${today.getFullYear()}`;
+      const tomorrow = new Date(today); tomorrow.setDate(tomorrow.getDate()+1);
+      const tomorrowStr = `${String(tomorrow.getDate()).padStart(2,"0")}.${String(tomorrow.getMonth()+1).padStart(2,"0")}.${tomorrow.getFullYear()}`;
+      if (match.scheduledDate === todayStr) return `Hoje ${time}`;
+      if (match.scheduledDate === tomorrowStr) return `Amanhã ${time}`;
+      return `${match.scheduledDate} ${time}`;
+    })();
+
+    const liveBadge = isEmBreve ? (
+      <div className="flex items-center gap-1.5">
+        <Clock size={10} className="text-amber-400 shrink-0" />
+        <span className="text-[10px] font-bold text-amber-400 tabular-nums">
+          {scheduledDisplay ?? countdownLabel}
+        </span>
+      </div>
+    ) : isVolleyNonLive ? (
       <div className="flex items-center gap-1.5">
         <span className="text-[10px] font-bold text-zinc-400 tabular-nums">
           {match.status === "Encerrado" ? "FIN" : liveBadgeLabel}
@@ -1873,7 +1911,15 @@ export default function Home() {
     };
 
     // Basketball / Hockey / Football: standard home vs away score
-    const SimpleScore = ({ big }: { big?: boolean }) => (
+    const SimpleScore = ({ big }: { big?: boolean }) => isEmBreve ? (
+      <div className={`flex items-center gap-2 w-full`}>
+        <span className={`font-bold text-zinc-400 ${big ? "text-base" : "text-sm"} truncate flex-1 text-right`}>{match.home}</span>
+        <div className={`${big ? "text-3xl" : "text-xl"} font-black text-zinc-600 tabular-nums shrink-0 ${big ? "px-2" : "px-1"} text-center`}>
+          –<span className={`${big ? "text-zinc-700 mx-1" : "text-zinc-700 mx-0.5"}`}>:</span>–
+        </div>
+        <span className={`font-bold text-zinc-400 ${big ? "text-base" : "text-sm"} truncate flex-1`}>{match.away}</span>
+      </div>
+    ) : (
       <div className={`flex items-center gap-2 w-full`}>
         <span className={`font-bold text-white ${big ? "text-base" : "text-sm"} truncate flex-1 text-right`}>{match.home}</span>
         <div className={`${big ? "text-3xl" : "text-xl"} font-black text-white tabular-nums shrink-0 ${big ? "px-2" : "px-1"} text-center`}>
@@ -5576,9 +5622,17 @@ export default function Home() {
                 <div className="flex items-center justify-between mb-4">
                   <h2 className="text-2xl font-black italic uppercase tracking-tight flex items-center gap-2">
                     <Activity className="text-red-600" /> Ao Vivo
-                    {liveMatches.length > 0 && (
-                      <span className="text-sm font-normal text-zinc-400 ml-1">({liveMatches.length} jogos)</span>
-                    )}
+                    {liveMatches.length > 0 && (() => {
+                      const nLive = liveMatches.filter(m => m.startsIn === undefined).length;
+                      const nSoon = liveMatches.filter(m => m.startsIn !== undefined).length;
+                      return (
+                        <span className="text-sm font-normal text-zinc-400 ml-1">
+                          ({nLive > 0 ? `${nLive} ao vivo` : ""}
+                          {nLive > 0 && nSoon > 0 ? " · " : ""}
+                          {nSoon > 0 ? `${nSoon} em breve` : ""})
+                        </span>
+                      );
+                    })()}
                   </h2>
                   <button
                     onClick={() => fetchLive(true)}
@@ -5590,21 +5644,53 @@ export default function Home() {
                   </button>
                 </div>
 
-                {liveLoading && liveMatches.length === 0 ? (
-                  <div className="flex items-center justify-center py-20">
-                    <Loader2 className="animate-spin text-red-600" size={32} />
-                  </div>
-                ) : liveMatches.length === 0 ? (
-                  <div className="py-20 text-center text-zinc-500 bg-zinc-900/50 rounded-xl border border-zinc-800">
-                    <Activity className="mx-auto mb-4 opacity-20" size={48} />
-                    <p className="font-medium">Nenhum jogo ao vivo no momento.</p>
-                    <p className="text-sm mt-1">Volte em breve para acompanhar as partidas em tempo real.</p>
-                  </div>
-                ) : (
-                  <div className="space-y-2">
-                    {liveMatches.map(match => <LiveMatchCard key={match.id} match={match} />)}
-                  </div>
-                )}
+                {(() => {
+                  const actualLive = liveMatches.filter(m => m.startsIn === undefined);
+                  const emBreve = liveMatches.filter(m => m.startsIn !== undefined);
+                  if (liveLoading && liveMatches.length === 0) {
+                    return (
+                      <div className="flex items-center justify-center py-20">
+                        <Loader2 className="animate-spin text-red-600" size={32} />
+                      </div>
+                    );
+                  }
+                  if (liveMatches.length === 0) {
+                    return (
+                      <div className="py-20 text-center text-zinc-500 bg-zinc-900/50 rounded-xl border border-zinc-800">
+                        <Activity className="mx-auto mb-4 opacity-20" size={48} />
+                        <p className="font-medium">Nenhum jogo ao vivo no momento.</p>
+                        <p className="text-sm mt-1">Volte em breve para acompanhar as partidas em tempo real.</p>
+                      </div>
+                    );
+                  }
+                  return (
+                    <div className="space-y-5">
+                      {actualLive.length > 0 && (
+                        <div className="space-y-2">
+                          <div className="flex items-center gap-2 mb-3">
+                            <span className="relative flex h-2 w-2">
+                              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-500 opacity-75"></span>
+                              <span className="relative inline-flex rounded-full h-2 w-2 bg-red-500"></span>
+                            </span>
+                            <span className="text-xs font-bold text-red-500 uppercase tracking-wider">Ao Vivo Agora</span>
+                            <span className="text-xs text-zinc-600">({actualLive.length})</span>
+                          </div>
+                          {actualLive.map(match => <LiveMatchCard key={match.id} match={match} />)}
+                        </div>
+                      )}
+                      {emBreve.length > 0 && (
+                        <div className="space-y-2">
+                          <div className="flex items-center gap-2 mb-3">
+                            <Clock size={12} className="text-amber-400" />
+                            <span className="text-xs font-bold text-amber-400 uppercase tracking-wider">Em Breve</span>
+                            <span className="text-xs text-zinc-600">({emBreve.length})</span>
+                          </div>
+                          {emBreve.map(match => <LiveMatchCard key={match.id} match={match} />)}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
               </div>
             )}
 

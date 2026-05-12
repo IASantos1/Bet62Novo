@@ -101,6 +101,12 @@ export type LiveMatchState = {
   marketSuspension?: Record<string, number>;
   // Reason for current suspension (displayed in UI)
   _suspensionReason?: string;
+  // Minutes until match starts (only present for "Em Breve" pre-match entries)
+  startsIn?: number;
+  // Scheduled kickoff time (HH:MM, Portugal UTC+1) for "Em Breve" entries
+  scheduledTime?: string;
+  // Scheduled date (DD.MM.YYYY) for "Em Breve" entries
+  scheduledDate?: string;
   // Internal tracking for live odds drift engine
   _baseOdds?: { home: number; draw: number; away: number };
   _oddsUpdatedAt?: number;
@@ -2622,6 +2628,33 @@ function isMatchTimePast(dateStr: string, timeStr: string): boolean {
   }
 }
 
+/**
+ * Returns minutes until match starts (negative = already started).
+ * `displayTimeStr` is UTC+1 (Portugal) — already addOneHour'd from raw Statpal UTC.
+ */
+function matchStartsInMinutes(dateStr: string, displayTimeStr: string): number {
+  try {
+    let isoDate: string;
+    if (/^\d{2}\.\d{2}\.\d{4}$/.test(dateStr)) {
+      const [dd, mm, yyyy] = dateStr.split(".");
+      isoDate = `${yyyy}-${mm}-${dd}`;
+    } else if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
+      isoDate = dateStr;
+    } else {
+      return Infinity;
+    }
+    if (!/^\d{2}:\d{2}$/.test(displayTimeStr)) return Infinity;
+    // displayTimeStr is UTC+1; subtract 1 hour to compare against Date.now() (UTC)
+    const [hStr, mStr] = displayTimeStr.split(":");
+    const hUtc = ((parseInt(hStr) - 1) + 24) % 24;
+    const utcTime = `${String(hUtc).padStart(2, "0")}:${mStr}`;
+    const matchMs = new Date(`${isoDate}T${utcTime}:00`).getTime();
+    return (matchMs - Date.now()) / 60000;
+  } catch {
+    return Infinity;
+  }
+}
+
 /** Adds 1 hour to a "HH:MM" string (UTC → Portugal UTC+1). Wraps at midnight. */
 function addOneHour(timeStr: string): string {
   if (!/^\d{2}:\d{2}$/.test(timeStr)) return timeStr;
@@ -3226,13 +3259,23 @@ export { buildLiveMatches, buildUpcomingMatches, buildBasketballMatches, buildTe
 
 router.get("/live", async (_req, res) => {
   try {
-    const [soccerMatches, nhlTournaments, nbaTournaments, tennisTournaments, volleyTournaments, tennisStatsMap] = await Promise.all([
+    const empty: UpcomingMatch[] = [];
+    const [
+      soccerMatches, nhlTournaments, nbaTournaments,
+      tennisTournaments, volleyTournaments, tennisStatsMap,
+      upFootball, upTennis, upBasketball, upHockey, upVolleyball,
+    ] = await Promise.all([
       buildLiveMatches(),
       getNHLLive(),
       getNBALive(),
       getTennisLive(),
       getVolleyballLive(),
       getTennisStatsMap(),
+      buildUpcomingMatches().catch(() => empty),
+      buildTennisUpcoming().catch(() => empty),
+      buildBasketballUpcoming().catch(() => empty),
+      buildHockeyUpcoming().catch(() => empty),
+      buildVolleyballUpcoming().catch(() => empty),
     ]);
     const nhlMatches    = buildNHLLiveMatches(nhlTournaments);
     const nbaMatches    = buildNBALiveMatches(nbaTournaments);
@@ -3240,11 +3283,42 @@ router.get("/live", async (_req, res) => {
     const volleyMatches = buildVolleyballLiveMatches(volleyTournaments);
     const simulated     = buildSimulatedLiveOtherSports({
       skipTennis:     tennisMatches.length > 0,
-      skipVolley:     volleyMatches.length > 0,
-      skipHockey:     nhlMatches.length > 0,
-      skipBasketball: nbaMatches.length > 0,
+      skipVolley:     true,
+      skipHockey:     true,
+      skipBasketball: true,
     });
-    const matches = [...soccerMatches, ...nhlMatches, ...nbaMatches, ...tennisMatches, ...volleyMatches, ...simulated];
+    const livePart = [...soccerMatches, ...nhlMatches, ...nbaMatches, ...tennisMatches, ...volleyMatches, ...simulated];
+
+    // "Em Breve" — real upcoming matches starting within the next 36 hours
+    const liveIds = new Set(livePart.map(m => String(m.id)));
+    const allUpcoming = [...upFootball, ...upTennis, ...upBasketball, ...upHockey, ...upVolleyball];
+    const startingSoon: LiveMatchState[] = allUpcoming
+      .filter(m => {
+        const si = matchStartsInMinutes(m.date, m.time);
+        return isFinite(si) && si >= -10 && si <= 2160 && !liveIds.has(String(m.id));
+      })
+      .slice(0, 40)
+      .map(m => ({
+        id:            m.id,
+        home:          m.home,
+        away:          m.away,
+        league:        m.league,
+        country:       m.country,
+        sport:         m.sport,
+        homeScore:     0,
+        awayScore:     0,
+        minute:        0,
+        status:        "Em Breve",
+        hasRealOdds:   m.hasRealOdds,
+        odds:          m.odds,
+        markets:       m.markets,
+        events:        [],
+        startsIn:      Math.max(0, Math.round(matchStartsInMinutes(m.date, m.time))),
+        scheduledTime: m.time,
+        scheduledDate: m.date,
+      } satisfies LiveMatchState));
+
+    const matches = [...livePart, ...startingSoon];
     res.json({ matches });
   } catch (err) {
     console.error("[live route] unexpected error:", err);
