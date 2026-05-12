@@ -2226,11 +2226,11 @@ async function buildUpcomingMatches(): Promise<UpcomingMatch[]> {
   const results: UpcomingMatch[] = [];
 
   for (const league of sorted) {
-    if (results.length >= 25) break;
+    if (results.length >= 20) break;
     const matches: StatpalMatchV2[] = Array.isArray(league.match) ? league.match : [league.match];
 
     for (const m of matches) {
-      if (results.length >= 25) break;
+      if (results.length >= 20) break;
       if (!/^\d{2}:\d{2}$/.test(m.status)) continue;
       if (m.home.goals !== "?" || m.away.goals !== "?") continue;
       if (seenIds.has(m.main_id)) continue;
@@ -3230,6 +3230,7 @@ async function buildTennisUpcoming(): Promise<UpcomingMatch[]> {
     return odds
       .filter(e => e.players[0]?.name && e.players[1]?.name)
       .filter(e => !e.players[0]!.name.includes("/") && !e.players[1]!.name.includes("/"))
+      .slice(0, 10)
       .map(e => ({
         id: `tennis-${e.matchId}`,
         home: e.players[0]!.name,
@@ -3307,7 +3308,7 @@ async function buildBasketballUpcoming(): Promise<UpcomingMatch[]> {
       });
     }
 
-    return results;
+    return results.slice(0, 10);
   } catch {
     return [];
   }
@@ -3408,7 +3409,7 @@ async function buildHockeyUpcoming(): Promise<UpcomingMatch[]> {
       });
     }
 
-    return results;
+    return results.slice(0, 8);
   } catch {
     return [];
   }

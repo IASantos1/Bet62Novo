@@ -1325,9 +1325,9 @@ export default function Home() {
       .catch(() => { /* non-critical */ });
   }, []);
 
-  // Fetch upcoming matches when sport changes
-  useEffect(() => {
-    setUpcomingLoading(true);
+  // Fetch upcoming matches — polls every 30s so new games appear automatically
+  const fetchUpcoming = useCallback((showSpinner = false) => {
+    if (showSpinner) setUpcomingLoading(true);
     const param = selectedSport === "all" ? "" : `?sport=${selectedSport}`;
     fetch(`/api/matches/upcoming${param}`)
       .then(r => r.ok ? r.json() : { matches: [] })
@@ -1339,8 +1339,14 @@ export default function Home() {
         setUpcomingMatches(matches.map(m => ({ ...m, isLive: false })));
       })
       .catch(() => { /* keep empty */ })
-      .finally(() => setUpcomingLoading(false));
+      .finally(() => { if (showSpinner) setUpcomingLoading(false); });
   }, [selectedSport]);
+
+  useEffect(() => {
+    fetchUpcoming(true);
+    const id = setInterval(() => fetchUpcoming(false), 30_000);
+    return () => clearInterval(id);
+  }, [fetchUpcoming]);
 
   // Fetch live matches — polls every 5s
   const fetchLive = useCallback(async (showSpinner = false) => {
@@ -1400,12 +1406,24 @@ export default function Home() {
     return undefined;
   }, [activeTab, fetchLive]);
 
-  // Poll tennis odds every 60s to keep home/away odds current
+  // Poll tennis, basketball, hockey, volleyball odds every 60s
   useEffect(() => {
     const poll = () => {
       fetch("/api/matches/tennis-odds")
         .then(r => r.ok ? r.json() : null)
         .then(d => { if (d?.odds) setTennisOddsMatches(d.odds); })
+        .catch(() => { /* non-critical */ });
+      fetch("/api/matches/basketball-odds")
+        .then(r => r.ok ? r.json() : null)
+        .then(d => { if (d?.odds) setBasketballOddsMatches(d.odds); })
+        .catch(() => { /* non-critical */ });
+      fetch("/api/matches/hockey-odds")
+        .then(r => r.ok ? r.json() : null)
+        .then(d => { if (d?.odds) setHockeyOddsMatches(d.odds); })
+        .catch(() => { /* non-critical */ });
+      fetch("/api/matches/volleyball-odds")
+        .then(r => r.ok ? r.json() : null)
+        .then(d => { if (d?.odds) setVolleyOddsMatches(d.odds); })
         .catch(() => { /* non-critical */ });
     };
     const id = setInterval(poll, 60000);
