@@ -1089,6 +1089,16 @@ type VolleyTournament = { id: string; gid: string; country: string; league: stri
 let volleyLiveCache: VolleyTournament[] | null = null;
 let volleyLiveFetchedAt = 0;
 
+// Esports livescores cache (30s) — CS GO, DOTA 2, League of Legends
+type EsportTeam = { id: string; name: string; score: string };
+type EsportMatch = {
+  id: string; date: string; time: string; status: string; timer: string;
+  league: string; league_id: string; round: string; type: string;
+  home: EsportTeam; away: EsportTeam;
+};
+let esportsLiveCache: EsportMatch[] | null = null;
+let esportsLiveFetchedAt = 0;
+
 // Tennis daily results (d-1 = yesterday) — longer TTL (yesterday won't change)
 type TennisDailyResult = {
   id: string;
@@ -1362,7 +1372,11 @@ async function getOddsMap(): Promise<Map<string, RealOdds>> {
   const now = Date.now();
   if (oddsMap && now - oddsFetchedAt < CONFIG.ODDS_CACHE_TTL) return oddsMap;
 
-  const COUNTRIES = ["england", "spain", "germany", "italy", "france", "portugal", "netherlands"];
+  const COUNTRIES = [
+    "england", "spain", "germany", "italy", "france", "portugal", "netherlands",
+    "korea", "japan", "australia", "brazil", "usa", "mexico", "turkey",
+    "argentina", "scotland", "greece", "russia", "china",
+  ];
   const map = new Map<string, RealOdds>();
 
   await Promise.allSettled(
@@ -1788,6 +1802,82 @@ function _parseTennisStat(raw: TennisStatsPlayerRaw | undefined): TennisStatData
     winners:         parseInt(get("Points", "Winners"))         || 0,
     unforcedErrors:  parseInt(get("Points", "Unforced errors")) || 0,
   };
+}
+
+// ─── Esports live (CS GO, DOTA 2, League of Legends) ────────────────────────
+
+async function getEsportsLive(): Promise<EsportMatch[]> {
+  const now = Date.now();
+  if (esportsLiveCache && now - esportsLiveFetchedAt < CONFIG.LIVE_CACHE_TTL) return esportsLiveCache;
+  try {
+    const resp = await fetch(`${BASE_V1}/esports/livescores?access_key=${STATSPAL_KEY}`, {
+      signal: AbortSignal.timeout(8000),
+    });
+    if (!resp.ok) return esportsLiveCache ?? [];
+    const data = (await resp.json()) as { scores?: { match?: EsportMatch | EsportMatch[] } };
+    const raw = data?.scores?.match;
+    if (!raw) return esportsLiveCache ?? [];
+    esportsLiveCache = Array.isArray(raw) ? raw : [raw];
+    esportsLiveFetchedAt = now;
+    return esportsLiveCache;
+  } catch {
+    return esportsLiveCache ?? [];
+  }
+}
+
+function buildEsportsLiveMatches(matches: EsportMatch[]): LiveMatchState[] {
+  const LIVE_STATUSES = new Set(["Started", "Pause", "In Progress", "Live"]);
+  return matches
+    .filter(m => LIVE_STATUSES.has(m.status) && m.home?.name && m.away?.name)
+    .map(m => {
+      const homeScore = parseInt(m.home.score) || 0;
+      const awayScore = parseInt(m.away.score) || 0;
+      // Dynamic odds based on map score
+      const odds = homeScore === awayScore
+        ? { home: 1.85, draw: 0, away: 1.85 }
+        : homeScore > awayScore
+          ? { home: 1.35, draw: 0, away: 2.75 }
+          : { home: 2.75, draw: 0, away: 1.35 };
+      const gameType = m.type === "League Of Legends" ? "LoL" : m.type ?? "Esports";
+      return {
+        id:          `esports-${m.id}`,
+        home:        m.home.name,
+        away:        m.away.name,
+        league:      `${gameType}: ${m.league}`,
+        country:     "esports",
+        sport:       "esports",
+        homeScore,
+        awayScore,
+        minute:      0,
+        status:      m.round ?? "AO VIVO",
+        hasRealOdds: false,
+        odds,
+        markets:     {} as AdvancedMarkets,
+        events:      [],
+      } satisfies LiveMatchState;
+    });
+}
+
+function buildEsportsUpcoming(matches: EsportMatch[]): UpcomingMatch[] {
+  return matches
+    .filter(m => m.status === "Not Started" && m.home?.name && m.away?.name)
+    .slice(0, 15)
+    .map(m => {
+      const gameType = m.type === "League Of Legends" ? "LoL" : m.type ?? "Esports";
+      return {
+        id:          `esports-${m.id}`,
+        home:        m.home.name,
+        away:        m.away.name,
+        league:      `${gameType}: ${m.league}`,
+        country:     "esports",
+        sport:       "esports",
+        time:        addOneHour(m.time),
+        date:        m.date,
+        hasRealOdds: false,
+        odds:        { home: 1.85, draw: 0, away: 1.85 },
+        markets:     {} as AdvancedMarkets,
+      };
+    });
 }
 
 async function getTennisStatsMap(): Promise<Map<string, [TennisStatData, TennisStatData]>> {
@@ -2254,11 +2344,11 @@ async function buildUpcomingMatches(): Promise<UpcomingMatch[]> {
   const results: UpcomingMatch[] = [];
 
   for (const league of sorted) {
-    if (results.length >= 20) break;
+    if (results.length >= 40) break;
     const matches: StatpalMatchV2[] = Array.isArray(league.match) ? league.match : [league.match];
 
     for (const m of matches) {
-      if (results.length >= 20) break;
+      if (results.length >= 40) break;
       if (!/^\d{2}:\d{2}$/.test(m.status)) continue;
       if (m.home.goals !== "?" || m.away.goals !== "?") continue;
       if (seenIds.has(m.main_id)) continue;
@@ -3264,6 +3354,7 @@ router.get("/live", async (_req, res) => {
       soccerMatches, nhlTournaments, nbaTournaments,
       tennisTournaments, volleyTournaments, tennisStatsMap,
       upFootball, upTennis, upBasketball, upHockey, upVolleyball,
+      esportsMatchesRaw,
     ] = await Promise.all([
       buildLiveMatches(),
       getNHLLive(),
@@ -3276,22 +3367,25 @@ router.get("/live", async (_req, res) => {
       buildBasketballUpcoming().catch(() => empty),
       buildHockeyUpcoming().catch(() => empty),
       buildVolleyballUpcoming().catch(() => empty),
+      getEsportsLive().catch(() => [] as EsportMatch[]),
     ]);
-    const nhlMatches    = buildNHLLiveMatches(nhlTournaments);
-    const nbaMatches    = buildNBALiveMatches(nbaTournaments);
-    const tennisMatches = buildTennisLiveMatches(tennisTournaments, tennisStatsMap);
-    const volleyMatches = buildVolleyballLiveMatches(volleyTournaments);
-    const simulated     = buildSimulatedLiveOtherSports({
+    const nhlMatches     = buildNHLLiveMatches(nhlTournaments);
+    const nbaMatches     = buildNBALiveMatches(nbaTournaments);
+    const tennisMatches  = buildTennisLiveMatches(tennisTournaments, tennisStatsMap);
+    const volleyMatches  = buildVolleyballLiveMatches(volleyTournaments);
+    const esportsMatches = buildEsportsLiveMatches(esportsMatchesRaw);
+    const simulated      = buildSimulatedLiveOtherSports({
       skipTennis:     tennisMatches.length > 0,
       skipVolley:     true,
       skipHockey:     true,
       skipBasketball: true,
     });
-    const livePart = [...soccerMatches, ...nhlMatches, ...nbaMatches, ...tennisMatches, ...volleyMatches, ...simulated];
+    const livePart = [...soccerMatches, ...nhlMatches, ...nbaMatches, ...tennisMatches, ...volleyMatches, ...esportsMatches, ...simulated];
 
     // "Em Breve" — real upcoming matches starting within the next 36 hours
+    const upEsports = buildEsportsUpcoming(esportsMatchesRaw);
     const liveIds = new Set(livePart.map(m => String(m.id)));
-    const allUpcoming = [...upFootball, ...upTennis, ...upBasketball, ...upHockey, ...upVolleyball];
+    const allUpcoming = [...upFootball, ...upTennis, ...upBasketball, ...upHockey, ...upVolleyball, ...upEsports];
     const startingSoon: LiveMatchState[] = allUpcoming
       .filter(m => {
         const si = matchStartsInMinutes(m.date, m.time);
