@@ -3375,6 +3375,8 @@ async function buildTennisUpcoming(): Promise<UpcomingMatch[]> {
         const p0 = players[0];
         const p1 = players[1];
         if (!p0?.name || !p1?.name) continue;
+        // Skip doubles (names contain "/" like "Nys/ Roger-Vasselin")
+        if (p0.name.includes("/") || p1.name.includes("/")) continue;
         const key = `${p0.name}|${p1.name}`;
         if (seen.has(key)) continue;
         seen.add(key);

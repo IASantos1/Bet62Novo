@@ -4652,7 +4652,7 @@ export default function Home() {
                   } as Match))
                 : [];
 
-              // All upcoming: tennis odds + volleyball odds + football + real basketball + real hockey
+              // All upcoming: odds-based + all sports from /upcoming (deduped)
               const allUpcoming = selectedLeague
                 ? upcomingMatches.filter(m => m.league === selectedLeague)
                 : [
@@ -4660,11 +4660,19 @@ export default function Home() {
                     ...volleyOddsAsMatches,
                     ...basketballAsMatches,
                     ...hockeyAsMatches,
-                    ...upcomingMatches.filter(m =>
-                      (m.sport ?? "football") === "football" &&
-                      !tennisOddsAsMatches.some(t => t.home === m.home && t.away === m.away) &&
-                      !volleyOddsAsMatches.some(v => v.home === m.home && v.away === m.away)
-                    ),
+                    ...upcomingMatches.filter(m => {
+                      const sport = m.sport ?? "football";
+                      if (sport === "football") {
+                        return !tennisOddsAsMatches.some(t => t.home === m.home && t.away === m.away) &&
+                               !volleyOddsAsMatches.some(v => v.home === m.home && v.away === m.away);
+                      }
+                      // Include other sports from /upcoming if not already covered by odds arrays
+                      if (sport === "tennis")     return !tennisOddsAsMatches.some(t => t.home === m.home && t.away === m.away);
+                      if (sport === "volleyball") return !volleyOddsAsMatches.some(v => v.home === m.home && v.away === m.away);
+                      if (sport === "basketball") return !basketballAsMatches.some(b => b.home === m.home && b.away === m.away);
+                      if (sport === "hockey")     return !hockeyAsMatches.some(h => h.home === m.home && h.away === m.away);
+                      return false;
+                    }),
                   ];
 
               const filteredUpcoming = (selectedSport === "all")
