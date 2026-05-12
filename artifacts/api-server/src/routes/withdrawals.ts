@@ -5,6 +5,7 @@ import { sql } from "drizzle-orm";
 import { authMiddleware, type AuthRequest } from "../middlewares/auth";
 import { adminMiddleware, type AdminRequest } from "../middlewares/adminAuth";
 import { logger } from "../lib/logger";
+import { sendWithdrawalApproved, sendWithdrawalRejected } from "../lib/mailer";
 
 const router: IRouter = Router();
 
@@ -124,6 +125,12 @@ router.put("/admin/:id", adminMiddleware, async (req: Request, res: Response): P
     if (!existing) { res.status(404).json({ error: "Levantamento não encontrado" }); return; }
     if (existing.status !== "pending") { res.status(400).json({ error: "Este levantamento já foi processado." }); return; }
 
+    const [user] = await db
+      .select({ email: usersTable.email, name: usersTable.name })
+      .from(usersTable)
+      .where(eq(usersTable.id, existing.userId))
+      .limit(1);
+
     const [updated] = await db.transaction(async (tx) => {
       if (status === "rejected") {
         await tx
@@ -139,8 +146,21 @@ router.put("/admin/:id", adminMiddleware, async (req: Request, res: Response): P
         .returning();
     });
 
+    if (user) {
+      if (status === "approved") {
+        sendWithdrawalApproved(user.email, user.name, existing.amount).catch((err: unknown) => {
+          logger.error({ err, withdrawalId: id }, "Failed to send withdrawal approved email");
+        });
+      } else {
+        sendWithdrawalRejected(user.email, user.name, existing.amount, notes).catch((err: unknown) => {
+          logger.error({ err, withdrawalId: id }, "Failed to send withdrawal rejected email");
+        });
+      }
+    }
+
     res.json(updated);
-  } catch {
+  } catch (err) {
+    logger.error({ err }, "Withdrawal update error");
     res.status(500).json({ error: "Erro interno" });
   }
 });

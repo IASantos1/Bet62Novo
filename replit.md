@@ -10,6 +10,7 @@ Bet62 é uma plataforma completa de apostas esportivas com dados ao vivo via Sta
 - `pnpm --filter @workspace/db run push` — push DB schema changes (dev only)
 - Required env: `DATABASE_URL`, `SESSION_SECRET`, `STATSPAL_API_KEY`
 - Ifthenpay env: `IFTHENPAY_MBWAY_KEY`, `IFTHENPAY_MULTIBANCO_KEY`, `IFTHENPAY_CARD_KEY`, `IFTHENPAY_BACKOFFICE_KEY`
+- SMTP env (optional): `SMTP_HOST`, `SMTP_PORT` (default 587), `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM` (default noreply@bet62.com)
 
 ## Stack
 
