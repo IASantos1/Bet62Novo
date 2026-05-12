@@ -1049,7 +1049,7 @@ type TennisMatch = { id: string; status: string; time: string; date: string; tb:
 type TennisTournament = { id: string; name: string; match: TennisMatch | TennisMatch[] };
 let tennisLiveCache: TennisTournament[] | null = null;
 let tennisLiveFetchedAt = 0;
-const TENNIS_LIVE_CACHE_TTL = 10_000; // 10s — tennis points change every few seconds
+const TENNIS_LIVE_CACHE_TTL = 4_000; // 4s — real-time tennis points
 
 // Tennis match stats (parsed from livestats endpoint)
 type TennisStatData = {
@@ -5140,7 +5140,7 @@ type TennisOddsEntry = {
 };
 let tennisOddsCache: TennisOddsEntry[] | null = null;
 let tennisOddsFetchedAt = 0;
-const TENNIS_ODDS_TTL = 60 * 1000; // 1 min — odds fluctuate
+const TENNIS_ODDS_TTL = 20 * 1000; // 20s — odds fluctuate rapidly
 
 // ─── Volleyball pre-match odds ────────────────────────────────────────────────
 type VolleyOddsOdd = { id?: string; name?: string; value?: string };
@@ -5158,7 +5158,7 @@ export type VolleyOddsEntry = {
 };
 let volleyOddsCache: VolleyOddsEntry[] | null = null;
 let volleyOddsFetchedAt = 0;
-const VOLLEY_ODDS_TTL = 5 * 60 * 1000;
+const VOLLEY_ODDS_TTL = 60 * 1000;
 
 async function getVolleyballOdds(): Promise<VolleyOddsEntry[]> {
   const now = Date.now();
@@ -5277,7 +5277,7 @@ export type NBAOddsEntry = {
 };
 let nbaOddsCache: NBAOddsEntry[] | null = null;
 let nbaOddsFetchedAt = 0;
-const NBA_ODDS_TTL = 5 * 60 * 1000;
+const NBA_ODDS_TTL = 60 * 1000;
 
 async function getBasketballOdds(): Promise<NBAOddsEntry[]> {
   const now = Date.now();
@@ -5386,7 +5386,7 @@ export type HockeyOddsEntry = {
 };
 let hockeyOddsCache: HockeyOddsEntry[] | null = null;
 let hockeyOddsFetchedAt = 0;
-const HOCKEY_ODDS_TTL = 5 * 60 * 1000;
+const HOCKEY_ODDS_TTL = 60 * 1000;
 
 async function getHockeyOdds(): Promise<HockeyOddsEntry[]> {
   const now = Date.now();

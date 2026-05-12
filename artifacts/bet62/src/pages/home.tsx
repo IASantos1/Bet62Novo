@@ -1400,7 +1400,7 @@ export default function Home() {
   useEffect(() => {
     if (activeTab === "live") {
       fetchLive(true);
-      const interval = setInterval(() => fetchLive(false), 5000);
+      const interval = setInterval(() => fetchLive(false), 4000);
       return () => clearInterval(interval);
     }
     return undefined;
