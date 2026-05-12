@@ -3309,7 +3309,7 @@ function buildSimulatedLiveOtherSports(opts: { skipTennis: boolean; skipVolley: 
   });
 }
 
-export { buildLiveMatches, buildUpcomingMatches, buildBasketballMatches, buildTennisMatches, buildHockeyMatches, buildVolleyballMatches };
+export { buildLiveMatches, buildUpcomingMatches, buildBasketballMatches, buildTennisMatches, buildHockeyMatches, buildVolleyballMatches, getUpcomingAll };
 
 // ─── Routes ───────────────────────────────────────────────────────────────────
 
@@ -3426,6 +3426,7 @@ async function buildTennisUpcoming(): Promise<UpcomingMatch[]> {
     }
 
     // Second: "Not Started" matches from livescores — cross-reference odds by surname
+    // Only include if real odds are found (no zeros in upcoming list)
     for (const tournament of liveData) {
       const matches: TennisMatch[] = Array.isArray(tournament.match)
         ? tournament.match
@@ -3442,9 +3443,10 @@ async function buildTennisUpcoming(): Promise<UpcomingMatch[]> {
         if (p0.name.includes("/") || p1.name.includes("/")) continue;
         const normKey = _tennisPairKey(p0.name, p1.name);
         if (seenNorm.has(normKey)) continue;
-        seenNorm.add(normKey);
-        // Try to find real odds using surname-normalised key
+        // Only include if real odds matched — skip odds-less entries
         const oddsEntry = oddsMapByNorm.get(normKey);
+        if (!oddsEntry) continue;
+        seenNorm.add(normKey);
         results.push({
           id:          `tennis-ls-${m.id}`,
           home:        p0.name,
@@ -3453,11 +3455,9 @@ async function buildTennisUpcoming(): Promise<UpcomingMatch[]> {
           country:     "",
           ...shiftHour(m.date, m.time),
           sport:       "tennis" as const,
-          hasRealOdds: !!oddsEntry,
-          odds:        oddsEntry
-            ? { home: oddsEntry.matchOdds[0], draw: 0, away: oddsEntry.matchOdds[1] }
-            : { home: 0, draw: 0, away: 0 },
-          markets:     oddsEntry ? (oddsEntry.markets as AdvancedMarkets) : ({} as AdvancedMarkets),
+          hasRealOdds: true,
+          odds:        { home: oddsEntry.matchOdds[0], draw: 0, away: oddsEntry.matchOdds[1] },
+          markets:     oddsEntry.markets as AdvancedMarkets,
         });
       }
     }
@@ -3660,47 +3660,25 @@ async function buildVolleyballUpcoming(): Promise<UpcomingMatch[]> {
       });
     }
 
-    // Fallback: "Not Started" matches from livescores (when no odds today)
-    const todayD = new Date();
-    const tomorrowD = new Date(todayD); tomorrowD.setDate(todayD.getDate() + 1);
-    const fmtD = (d: Date) =>
-      `${String(d.getDate()).padStart(2, "0")}.${String(d.getMonth() + 1).padStart(2, "0")}.${d.getFullYear()}`;
-    const todayStr = fmtD(todayD);
-    const tomorrowStr = fmtD(tomorrowD);
-
-    for (const t of liveData) {
-      const tMatches = Array.isArray(t.match) ? t.match : (t.match ? [t.match] : []);
-      for (const m of tMatches) {
-        if (!m || m.status !== "Not Started") continue;
-        if (m.date !== todayStr && m.date !== tomorrowStr) continue;
-        if (!m.home?.name || !m.away?.name) continue;
-        if (isMatchTimePast(m.date, m.time)) continue;
-        const key = `${m.home.name}|${m.away.name}`;
-        if (seen.has(key)) continue;
-        seen.add(key);
-        results.push({
-          id: `volley-live-${m.id}`,
-          home: m.home.name,
-          away: m.away.name,
-          league: t.league,
-          country: t.country,
-          ...shiftHour(m.date, m.time),
-          sport: "volleyball" as const,
-          hasRealOdds: false,
-          odds: { home: 0, draw: 0, away: 0 },
-          markets: makeVolleyballMarketsFromTeams(m.home.name, m.away.name),
-        });
-      }
-    }
-
+    // No fallback without odds — only show volleyball matches with real odds
     return results;
   } catch {
     return [];
   }
 }
 
-router.get("/upcoming", async (req, res) => {
-  const sport = String(req.query["sport"] ?? "all");
+// ─── Top-level upcoming cache — 60s TTL so repeated 30s polls are instant ─────
+type UpcomingTopCache = {
+  football: UpcomingMatch[]; tennis: UpcomingMatch[];
+  basketball: UpcomingMatch[]; hockey: UpcomingMatch[];
+  volleyball: UpcomingMatch[]; fetchedAt: number;
+};
+let upcomingTopCache: UpcomingTopCache | null = null;
+const UPCOMING_TOP_TTL = 60_000;
+
+async function getUpcomingAll(): Promise<UpcomingTopCache> {
+  const now = Date.now();
+  if (upcomingTopCache && now - upcomingTopCache.fetchedAt < UPCOMING_TOP_TTL) return upcomingTopCache;
   const empty: UpcomingMatch[] = [];
   const [football, tennis, basketball, hockey, volleyball] = await Promise.all([
     buildUpcomingMatches().catch(() => empty),
@@ -3709,13 +3687,20 @@ router.get("/upcoming", async (req, res) => {
     buildHockeyUpcoming().catch(() => empty),
     buildVolleyballUpcoming().catch(() => empty),
   ]);
+  upcomingTopCache = { football, tennis, basketball, hockey, volleyball, fetchedAt: Date.now() };
+  return upcomingTopCache;
+}
+
+router.get("/upcoming", async (req, res) => {
+  const sport = String(req.query["sport"] ?? "all");
+  const cache = await getUpcomingAll();
   let matches: UpcomingMatch[];
-  if (sport === "football") matches = football;
-  else if (sport === "tennis") matches = tennis;
-  else if (sport === "basketball") matches = basketball;
-  else if (sport === "hockey") matches = hockey;
-  else if (sport === "volleyball") matches = volleyball;
-  else matches = [...football, ...tennis, ...basketball, ...hockey, ...volleyball];
+  if (sport === "football") matches = cache.football;
+  else if (sport === "tennis") matches = cache.tennis;
+  else if (sport === "basketball") matches = cache.basketball;
+  else if (sport === "hockey") matches = cache.hockey;
+  else if (sport === "volleyball") matches = cache.volleyball;
+  else matches = [...cache.football, ...cache.tennis, ...cache.basketball, ...cache.hockey, ...cache.volleyball];
   res.json({ matches });
 });
 
