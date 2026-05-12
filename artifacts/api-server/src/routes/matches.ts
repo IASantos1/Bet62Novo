@@ -111,6 +111,9 @@ export type LiveMatchState = {
   _baseOdds?: { home: number; draw: number; away: number };
   _oddsUpdatedAt?: number;
   _driftPhase?: number;
+  // Timestamps for stale-match expiry
+  _firstSeenAt?: number;   // ms — when this match first appeared in live feed
+  _htStartedAt?: number;   // ms — when status first became "HT" (resets on 2H kick-off)
   // Sport-specific live display data
   _liveExtra?: {
     clockStr?: string;                   // basketball/hockey: "06:44"
@@ -2052,6 +2055,16 @@ function buildVolleyballLiveMatches(tournaments: VolleyTournament[]): LiveMatchS
 
 // ─── Match builders ────────────────────────────────────────────────────────────
 
+// Max time a football match may stay in live: 210 min (90 + 30 ET + 15 pen shoot + buffer)
+const MATCH_MAX_LIVE_MS  = 210 * 60 * 1000;
+// Max time a match may sit in "HT" status: 22 min (real HT is ≤15 min)
+const HT_MAX_DURATION_MS = 22 * 60 * 1000;
+// Additional FINISHED statuses Statpal may return when slow to update
+const STATPAL_FINISHED_STATUSES = new Set([
+  "FT", "AET", "AP", "Pen", "Full Time", "After ET", "After Pens",
+  "Finished", "Ended", "Abandoned", "Postponed", "Cancelled", "Susp",
+]);
+
 async function buildLiveMatches(): Promise<LiveMatchState[]> {
   const [leagues, odds] = await Promise.all([getLiveLeagues(), getOddsMap()]);
 
@@ -2059,6 +2072,17 @@ async function buildLiveMatches(): Promise<LiveMatchState[]> {
     .sort((a, b) => leaguePriority(a.name, a.country) - leaguePriority(b.name, b.country))
     .filter(l => leaguePriority(l.name, l.country) < 100);
 
+  // ── Garbage-collect liveMatchState for IDs no longer in the Statpal response ──
+  const currentMatchIds = new Set<string>();
+  for (const league of sorted) {
+    const ms: StatpalMatchV2[] = Array.isArray(league.match) ? league.match : [league.match];
+    for (const m of ms) currentMatchIds.add(m.main_id);
+  }
+  for (const id of liveMatchState.keys()) {
+    if (!currentMatchIds.has(id)) liveMatchState.delete(id);
+  }
+
+  const now = Date.now();
   let count = 0;
   const result: LiveMatchState[] = [];
 
@@ -2068,10 +2092,33 @@ async function buildLiveMatches(): Promise<LiveMatchState[]> {
 
     for (const m of matches) {
       if (count >= 20) break;
+
+      // ── Guard 0: explicitly finished statuses Statpal is slow to remove ───────
+      if (STATPAL_FINISHED_STATUSES.has(m.status)) continue;
+
       const isLiveMinute = /^\d{1,3}$/.test(m.status);
       const isHT = m.status === "HT";
       const isET = m.status === "ET";
       if (!isLiveMinute && !isHT && !isET) continue;
+
+      const existing = liveMatchState.get(m.main_id);
+
+      // ── Guard 1: discard match that has been live longer than MATCH_MAX_LIVE_MS ─
+      const firstSeenAt = existing?._firstSeenAt ?? now;
+      if (now - firstSeenAt > MATCH_MAX_LIVE_MS) {
+        liveMatchState.delete(m.main_id);
+        continue;
+      }
+
+      // ── Guard 2: discard match stuck in "HT" for more than HT_MAX_DURATION_MS ──
+      // Reset htStartedAt when match leaves HT (progresses to 2nd half)
+      const htStartedAt = isHT
+        ? (existing?._htStartedAt ?? (existing?.status === "HT" ? existing._htStartedAt : now))
+        : undefined;
+      if (isHT && htStartedAt !== undefined && now - htStartedAt > HT_MAX_DURATION_MS) {
+        liveMatchState.delete(m.main_id);
+        continue;
+      }
 
       const homeScore = m.home.goals === "?" ? 0 : parseInt(m.home.goals) || 0;
       const awayScore = m.away.goals === "?" ? 0 : parseInt(m.away.goals) || 0;
@@ -2093,7 +2140,6 @@ async function buildLiveMatches(): Promise<LiveMatchState[]> {
       };
 
       // Stable odds: once assigned, keep unless score changes significantly
-      const existing = liveMatchState.get(m.main_id);
       let matchOdds: { home: number; draw: number; away: number };
       let matchMarkets: AdvancedMarkets;
       let matchMarketSuspension: Record<string, number> | undefined;
@@ -2135,8 +2181,17 @@ async function buildLiveMatches(): Promise<LiveMatchState[]> {
         // Keep markets from existing state (already filtered for live score)
         matchMarkets = filterLiveMarkets(existing.markets, homeScore, awayScore);
 
-        // Store drift phase for next cycle
-        const updatedState = { ...existing, odds: matchOdds, minute, _driftPhase: phase, marketSuspension: matchMarketSuspension, _suspensionReason: matchMarketSuspension ? existing._suspensionReason : undefined };
+        // Store drift phase for next cycle; propagate expiry timestamps
+        const updatedState = {
+          ...existing,
+          odds: matchOdds,
+          minute,
+          _driftPhase: phase,
+          marketSuspension: matchMarketSuspension,
+          _suspensionReason: matchMarketSuspension ? existing._suspensionReason : undefined,
+          _firstSeenAt: firstSeenAt,
+          _htStartedAt: isHT ? htStartedAt : undefined,
+        };
         liveMatchState.set(m.main_id, updatedState);
         result.push({ ...updatedState, events: existing.events });
         count++;
@@ -2248,6 +2303,8 @@ async function buildLiveMatches(): Promise<LiveMatchState[]> {
         _oddsUpdatedAt: Date.now(),
         _driftPhase: 0,
         _liveExtra: Object.keys(footballExtra).length > 0 ? footballExtra : undefined,
+        _firstSeenAt: firstSeenAt,
+        _htStartedAt: isHT ? htStartedAt : undefined,
       };
 
       liveMatchState.set(m.main_id, state);
