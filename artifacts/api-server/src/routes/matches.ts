@@ -1872,9 +1872,9 @@ function buildTennisLiveMatches(
   };
 
   for (const t of tournaments) {
-    const matches = Array.isArray(t.match) ? t.match : [t.match];
+    const matches = Array.isArray(t.match) ? t.match : (t.match ? [t.match] : []);
     for (const m of matches) {
-      if (!TENNIS_LIVE_STATUSES.has(m.status)) continue;
+      if (!m || !TENNIS_LIVE_STATUSES.has(m.status)) continue;
       const players = Array.isArray(m.player) ? m.player : [m.player];
       if (players.length < 2) continue;
       const p0 = players[0]!;
@@ -2688,6 +2688,29 @@ function addOneHour(timeStr: string): string {
   return `${String(h).padStart(2, "0")}:${mStr}`;
 }
 
+/**
+ * Like addOneHour but also rolls the date forward when time crosses midnight
+ * (e.g. 23:00 UTC → 00:00 PT on the next calendar day).
+ * Returns spread-compatible { date, time } so callers can do: ...shiftHour(d, t)
+ */
+function shiftHour(dateStr: string, timeStr: string): { date: string; time: string } {
+  if (!/^\d{2}:\d{2}$/.test(timeStr)) return { date: dateStr, time: timeStr };
+  const [hStr, mStr] = timeStr.split(":");
+  const h = parseInt(hStr!);
+  const newH = (h + 1) % 24;
+  const newTime = `${String(newH).padStart(2, "0")}:${mStr}`;
+  if (h !== 23) return { date: dateStr, time: newTime };
+  // Midnight rollover — advance date by 1 calendar day
+  if (/^\d{2}\.\d{2}\.\d{4}$/.test(dateStr)) {
+    const [dd, mm, yyyy] = dateStr.split(".");
+    const d = new Date(parseInt(yyyy!), parseInt(mm!) - 1, parseInt(dd!));
+    d.setDate(d.getDate() + 1);
+    const nd = `${String(d.getDate()).padStart(2, "0")}.${String(d.getMonth() + 1).padStart(2, "0")}.${d.getFullYear()}`;
+    return { date: nd, time: newTime };
+  }
+  return { date: dateStr, time: newTime };
+}
+
 // ─── Hockey generator (NHL/KHL — Poisson model) ──────────────────────────────
 
 function buildHockeyMatches(): UpcomingMatch[] {
@@ -3394,8 +3417,7 @@ async function buildTennisUpcoming(): Promise<UpcomingMatch[]> {
         away:        e.players[1].name,
         league:      e.tournamentName,
         country:     "",
-        time:        addOneHour(e.time),
-        date:        e.date,
+        ...shiftHour(e.date, e.time),
         sport:       "tennis" as const,
         hasRealOdds: true,
         odds:        { home: e.matchOdds[0], draw: 0, away: e.matchOdds[1] },
@@ -3429,8 +3451,7 @@ async function buildTennisUpcoming(): Promise<UpcomingMatch[]> {
           away:        p1.name,
           league:      tournament.name ?? "Ténis",
           country:     "",
-          time:        addOneHour(m.time),
-          date:        m.date,
+          ...shiftHour(m.date, m.time),
           sport:       "tennis" as const,
           hasRealOdds: !!oddsEntry,
           odds:        oddsEntry
@@ -3475,8 +3496,7 @@ async function buildBasketballUpcoming(): Promise<UpcomingMatch[]> {
         away: m.away,
         league: schedule.league || "NBA",
         country: "usa",
-        time: addOneHour(m.time),
-        date: m.date,
+        ...shiftHour(m.date, m.time),
         sport: "basketball",
         hasRealOdds: true,
         odds: realOdds
@@ -3497,8 +3517,7 @@ async function buildBasketballUpcoming(): Promise<UpcomingMatch[]> {
         away: o.awayTeam.name,
         league: "NBA",
         country: "usa",
-        time: addOneHour(o.time),
-        date: o.date,
+        ...shiftHour(o.date, o.time),
         sport: "basketball",
         hasRealOdds: true,
         odds: { home: o.homeOdds, draw: 0, away: o.awayOdds },
@@ -3541,8 +3560,7 @@ async function buildHockeyUpcoming(): Promise<UpcomingMatch[]> {
         away: m.away,
         league: schedule.league || "NHL",
         country: "usa",
-        time: addOneHour(m.time),
-        date: m.date,
+        ...shiftHour(m.date, m.time),
         sport: "hockey",
         hasRealOdds: true,
         odds: realOdds
@@ -3575,8 +3593,7 @@ async function buildHockeyUpcoming(): Promise<UpcomingMatch[]> {
           away: m.away.name,
           league: t.league,
           country: t.country,
-          time: addOneHour(m.time ?? "00:00"),
-          date: m.date,
+          ...shiftHour(m.date, m.time ?? "00:00"),
           sport: "hockey",
           hasRealOdds: true,
           odds: realOdds
@@ -3598,8 +3615,7 @@ async function buildHockeyUpcoming(): Promise<UpcomingMatch[]> {
         away: o.awayTeam.name,
         league: "NHL",
         country: "usa",
-        time: addOneHour(o.time),
-        date: o.date,
+        ...shiftHour(o.date, o.time),
         sport: "hockey",
         hasRealOdds: true,
         odds: { home: o.homeOdds, draw: o.drawOdds, away: o.awayOdds },
@@ -3615,23 +3631,69 @@ async function buildHockeyUpcoming(): Promise<UpcomingMatch[]> {
 
 async function buildVolleyballUpcoming(): Promise<UpcomingMatch[]> {
   try {
-    const odds = await getVolleyballOdds();
-    return odds
-      .filter(e => e.homeTeam.name && e.awayTeam.name)
-      .filter(e => !isMatchTimePast(e.date, e.time))
-      .map(e => ({
+    const [odds, liveData] = await Promise.all([
+      getVolleyballOdds(),
+      getVolleyballLive(),
+    ]);
+
+    const seen = new Set<string>();
+    const results: UpcomingMatch[] = [];
+
+    // Primary: pre-match odds entries
+    for (const e of odds) {
+      if (!e.homeTeam.name || !e.awayTeam.name) continue;
+      if (isMatchTimePast(e.date, e.time)) continue;
+      const key = `${e.homeTeam.name}|${e.awayTeam.name}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      results.push({
         id: `volley-odds-${e.matchId}`,
         home: e.homeTeam.name,
         away: e.awayTeam.name,
         league: e.league,
         country: "",
-        time: addOneHour(e.time),
-        date: e.date,
+        ...shiftHour(e.date, e.time),
         sport: "volleyball" as const,
         hasRealOdds: true,
         odds: { home: e.homeOdds, draw: 0, away: e.awayOdds },
         markets: makeVolleyballMarketsFromTeams(e.homeTeam.name, e.awayTeam.name),
-      }));
+      });
+    }
+
+    // Fallback: "Not Started" matches from livescores (when no odds today)
+    const todayD = new Date();
+    const tomorrowD = new Date(todayD); tomorrowD.setDate(todayD.getDate() + 1);
+    const fmtD = (d: Date) =>
+      `${String(d.getDate()).padStart(2, "0")}.${String(d.getMonth() + 1).padStart(2, "0")}.${d.getFullYear()}`;
+    const todayStr = fmtD(todayD);
+    const tomorrowStr = fmtD(tomorrowD);
+
+    for (const t of liveData) {
+      const tMatches = Array.isArray(t.match) ? t.match : (t.match ? [t.match] : []);
+      for (const m of tMatches) {
+        if (!m || m.status !== "Not Started") continue;
+        if (m.date !== todayStr && m.date !== tomorrowStr) continue;
+        if (!m.home?.name || !m.away?.name) continue;
+        if (isMatchTimePast(m.date, m.time)) continue;
+        const key = `${m.home.name}|${m.away.name}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        results.push({
+          id: `volley-live-${m.id}`,
+          home: m.home.name,
+          away: m.away.name,
+          league: t.league,
+          country: t.country,
+          ...shiftHour(m.date, m.time),
+          sport: "volleyball" as const,
+          hasRealOdds: false,
+          odds: { home: 0, draw: 0, away: 0 },
+          markets: makeVolleyballMarketsFromTeams(m.home.name, m.away.name),
+        });
+      }
+    }
+
+    return results;
   } catch {
     return [];
   }
@@ -5356,8 +5418,13 @@ const VOLLEY_ODDS_TTL = 60 * 1000;
 async function getVolleyballOdds(): Promise<VolleyOddsEntry[]> {
   const now = Date.now();
   if (volleyOddsCache && now - volleyOddsFetchedAt < VOLLEY_ODDS_TTL) return volleyOddsCache;
-  const resp = await fetch(`${BASE_V1}/volleyball/odds?access_key=${STATSPAL_KEY}`, { signal: AbortSignal.timeout(9000) });
-  if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+  let resp: Response;
+  try {
+    resp = await fetch(`${BASE_V1}/volleyball/odds?access_key=${STATSPAL_KEY}`, { signal: AbortSignal.timeout(9000) });
+  } catch {
+    return volleyOddsCache ?? [];
+  }
+  if (!resp.ok) return volleyOddsCache ?? [];
   const data = (await resp.json()) as { odds?: { tournament?: unknown } };
   const rawTours = data?.odds?.tournament;
   if (!rawTours) return [];
