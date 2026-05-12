@@ -4,10 +4,13 @@ import { toast } from "sonner";
 import {
   LayoutDashboard, Users, ListChecks, LogOut, Loader2,
   TrendingUp, DollarSign, Activity, Trophy, Search,
-  ChevronUp, ChevronDown, CheckCircle, XCircle, Clock,
-  Zap, RefreshCw, Eye, EyeOff, ShieldCheck, ArrowUpCircle,
-  Ban, Gift, CreditCard, AlertCircle, ChevronRight, X,
-  Wallet, BadgeCheck, FileText, UserX, UserCheck, Download
+  ChevronUp, ChevronDown, CheckCircle, XCircle,
+  RefreshCw, Eye, EyeOff, ShieldCheck, ArrowUpCircle,
+  Gift, CreditCard, AlertCircle, ChevronRight, X,
+  Wallet, FileText, UserX, UserCheck, Download,
+  BarChart2, ShieldAlert, Zap, Settings, Calendar,
+  Ban, AlertTriangle, WifiOff, Wifi, Clock, Lock, Unlock,
+  PlusCircle, Trash2, Radio
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -51,6 +54,35 @@ type UserDetail = {
   withdrawals: AdminWithdrawal[];
 };
 
+type RiskData = {
+  summary: { pendingBets: number; totalPendingStake: number; totalLiability: number; highExposureCount: number };
+  exposureByMatch: Array<{ match_title: string; match_id: string; bet_count: string; total_staked: string; total_liability: string }>;
+  bigBets: Array<{ id: number; matchTitle: string; stake: string; potentialWin: string; totalOdds: string; status: string; createdAt: string; userName: string | null; userEmail: string | null }>;
+  sharpBettors: Array<{ id: number; name: string; email: string; settled: string; won: string; total_staked: string; total_won: string }>;
+};
+
+type AnalyticsData = {
+  kpis: { turnover: number; ggr: number; ngr: number; hold: string; totalDeposited: number; bonusCost: number; activeUsers7d: number };
+  daily: Array<{ day: string; bets: string; turnover: string; paid_out: string; ggr: string }>;
+  byStatus: Array<{ status: string; count: string; volume: string }>;
+  topDepositors: Array<{ name: string; email: string; deposits: string; total: string }>;
+};
+
+type SuspendedMatch = {
+  id: number; matchId: string; matchTitle: string; sport: string; reason: string | null; createdAt: string;
+};
+
+type AuditLog = {
+  id: number; action: string; adminUser: string; targetType: string | null; targetId: string | null;
+  details: unknown; ip: string | null; createdAt: string;
+};
+
+type FeedStatus = {
+  overall: "ok" | "degraded";
+  endpoints: Array<{ name: string; status: string; statusCode: number; latency: number }>;
+  checkedAt: string;
+};
+
 const STATUS_BET: Record<string, { label: string; cls: string }> = {
   pending:    { label: "Pendente",  cls: "bg-zinc-800 text-zinc-400" },
   won:        { label: "Ganhou",    cls: "bg-green-900/60 text-green-400" },
@@ -81,11 +113,31 @@ const METHOD_LABEL: Record<string, string> = {
   multibanco: "Multibanco", mbway: "MB WAY", card: "Cartão"
 };
 
+const SPORT_LABEL: Record<string, string> = {
+  football: "Futebol", basketball: "Basquete", tennis: "Ténis", hockey: "Hóquei", volleyball: "Voleibol"
+};
+
+const SETTING_META: Record<string, { label: string; desc: string; type: "number" | "text" | "boolean"; unit?: string }> = {
+  max_bet:            { label: "Aposta Máxima",       desc: "Valor máximo por aposta",             type: "number", unit: "€" },
+  min_bet:            { label: "Aposta Mínima",        desc: "Valor mínimo por aposta",             type: "number", unit: "€" },
+  max_odds:           { label: "Odds Máximas",          desc: "Odd máxima aceite em aposta",         type: "number" },
+  live_delay:         { label: "Atraso Live (s)",       desc: "Segundos de atraso no feed ao vivo",  type: "number", unit: "s" },
+  default_margin:     { label: "Margem Padrão",         desc: "Margem da casa (0.06 = 6%)",          type: "number" },
+  bet_limits_enabled: { label: "Limites Ativos",        desc: "Ativar/desativar limites de aposta",  type: "boolean" },
+  sports_enabled:     { label: "Desportos Ativos",      desc: "Lista separada por vírgulas",         type: "text" },
+};
+
+const AUDIT_ACTION_LABEL: Record<string, string> = {
+  settings_update: "Configuração alterada",
+  suspend_match:   "Evento suspenso",
+  unsuspend_match: "Evento reativado",
+};
+
 function StatCard({ icon, label, value, sub, color = "red", alert }: {
   icon: React.ReactNode; label: string; value: string | number; sub?: string;
-  color?: "red" | "green" | "blue" | "yellow" | "purple"; alert?: boolean;
+  color?: "red" | "green" | "blue" | "yellow" | "purple" | "orange"; alert?: boolean;
 }) {
-  const colors = { red: "text-red-500", green: "text-green-500", blue: "text-blue-400", yellow: "text-yellow-400", purple: "text-purple-400" };
+  const colors = { red: "text-red-500", green: "text-green-500", blue: "text-blue-400", yellow: "text-yellow-400", purple: "text-purple-400", orange: "text-orange-400" };
   return (
     <div className={`bg-zinc-900 border rounded-xl p-5 ${alert ? "border-yellow-500/40" : "border-zinc-800"}`}>
       <div className="flex items-start justify-between mb-3">
@@ -103,16 +155,19 @@ function Badge({ cls, label }: { cls: string; label: string }) {
   return <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${cls}`}>{label}</span>;
 }
 
+type TabId = "dashboard" | "users" | "bets" | "payments" | "withdrawals" | "risk" | "analytics" | "events" | "settings";
+
 export default function AdminPage() {
   const [token, setToken] = useState<string | null>(() => sessionStorage.getItem("admin_token"));
   const [username, setUsername] = useState<string>(() => sessionStorage.getItem("admin_username") || "");
-  const [activeTab, setActiveTab] = useState<"dashboard" | "users" | "bets" | "payments" | "withdrawals">("dashboard");
+  const [activeTab, setActiveTab] = useState<TabId>("dashboard");
 
   const [loginUser, setLoginUser] = useState("");
   const [loginPass, setLoginPass] = useState("");
   const [showPass, setShowPass] = useState(false);
   const [loginLoading, setLoginLoading] = useState(false);
 
+  // Core data
   const [stats, setStats] = useState<AdminStats | null>(null);
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [bets, setBets] = useState<AdminBet[]>([]);
@@ -120,6 +175,21 @@ export default function AdminPage() {
   const [withdrawals, setWithdrawals] = useState<AdminWithdrawal[]>([]);
   const [loading, setLoading] = useState(false);
 
+  // Pro data
+  const [riskData, setRiskData] = useState<RiskData | null>(null);
+  const [analyticsData, setAnalyticsData] = useState<AnalyticsData | null>(null);
+  const [suspendedMatches, setSuspendedMatches] = useState<SuspendedMatch[]>([]);
+  const [settings, setSettings] = useState<Record<string, string>>({});
+  const [settingsDraft, setSettingsDraft] = useState<Record<string, string>>({});
+  const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
+  const [feedStatus, setFeedStatus] = useState<FeedStatus | null>(null);
+  const [feedLoading, setFeedLoading] = useState(false);
+  const [suspendForm, setSuspendForm] = useState({ matchId: "", matchTitle: "", sport: "football", reason: "" });
+  const [suspending, setSuspending] = useState(false);
+  const [unsuspending, setUnsuspending] = useState<string | null>(null);
+  const [savingSetting, setSavingSetting] = useState<string | null>(null);
+
+  // Filters/UI
   const [userSearch, setUserSearch] = useState("");
   const [betSearch, setBetSearch] = useState("");
   const [betStatusFilter, setBetStatusFilter] = useState("all");
@@ -209,13 +279,56 @@ export default function AdminPage() {
     catch { /* ignore */ } finally { setLoading(false); }
   }, [token]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  const fetchRisk = useCallback(async () => {
+    if (!token) return; setLoading(true);
+    try { const res = await fetch("/api/admin/risk", { headers: authHeader }); if (res.ok) setRiskData(await res.json()); }
+    catch { /* ignore */ } finally { setLoading(false); }
+  }, [token]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const fetchAnalytics = useCallback(async () => {
+    if (!token) return; setLoading(true);
+    try { const res = await fetch("/api/admin/analytics", { headers: authHeader }); if (res.ok) setAnalyticsData(await res.json()); }
+    catch { /* ignore */ } finally { setLoading(false); }
+  }, [token]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const fetchSuspended = useCallback(async () => {
+    if (!token) return;
+    try { const res = await fetch("/api/admin/events/suspended", { headers: authHeader }); if (res.ok) setSuspendedMatches(await res.json()); }
+    catch { /* ignore */ }
+  }, [token]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const fetchSettings = useCallback(async () => {
+    if (!token) return;
+    try {
+      const res = await fetch("/api/admin/settings", { headers: authHeader });
+      if (res.ok) { const d = await res.json(); setSettings(d); setSettingsDraft(d); }
+    }
+    catch { /* ignore */ }
+  }, [token]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const fetchAuditLogs = useCallback(async () => {
+    if (!token) return;
+    try { const res = await fetch("/api/admin/audit", { headers: authHeader }); if (res.ok) setAuditLogs(await res.json()); }
+    catch { /* ignore */ }
+  }, [token]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const fetchFeed = useCallback(async () => {
+    if (!token) return; setFeedLoading(true);
+    try { const res = await fetch("/api/admin/feed", { headers: authHeader }); if (res.ok) setFeedStatus(await res.json()); }
+    catch { /* ignore */ } finally { setFeedLoading(false); }
+  }, [token]); // eslint-disable-line react-hooks/exhaustive-deps
+
   useEffect(() => {
     if (!token) return;
     fetchStats();
     if (activeTab === "users") fetchUsers();
-    if (activeTab === "bets") fetchBets();
-    if (activeTab === "payments") fetchPayments();
-    if (activeTab === "withdrawals") fetchWithdrawals();
+    else if (activeTab === "bets") fetchBets();
+    else if (activeTab === "payments") fetchPayments();
+    else if (activeTab === "withdrawals") fetchWithdrawals();
+    else if (activeTab === "risk") fetchRisk();
+    else if (activeTab === "analytics") fetchAnalytics();
+    else if (activeTab === "events") { fetchSuspended(); fetchFeed(); }
+    else if (activeTab === "settings") { fetchSettings(); fetchAuditLogs(); }
   }, [token, activeTab]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => { if (activeTab === "bets") fetchBets(); }, [betStatusFilter]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -341,6 +454,51 @@ export default function AdminPage() {
     finally { setExporting(false); }
   };
 
+  const handleSuspendMatch = async () => {
+    if (!suspendForm.matchId || !suspendForm.matchTitle) { toast.error("ID e nome do evento são obrigatórios"); return; }
+    setSuspending(true);
+    try {
+      const res = await fetch("/api/admin/events/suspend", {
+        method: "POST", headers: { "Content-Type": "application/json", ...authHeader },
+        body: JSON.stringify(suspendForm),
+      });
+      const data = await res.json();
+      if (!res.ok) { toast.error(data.error); return; }
+      toast.success("Evento suspenso com sucesso");
+      setSuspendForm({ matchId: "", matchTitle: "", sport: "football", reason: "" });
+      fetchSuspended();
+    } catch { toast.error("Erro ao suspender evento"); }
+    finally { setSuspending(false); }
+  };
+
+  const handleUnsuspend = async (matchId: string) => {
+    setUnsuspending(matchId);
+    try {
+      const res = await fetch(`/api/admin/events/suspend/${encodeURIComponent(matchId)}`, { method: "DELETE", headers: authHeader });
+      if (!res.ok) { toast.error("Erro ao reativar evento"); return; }
+      toast.success("Evento reativado");
+      fetchSuspended();
+    } catch { toast.error("Erro ao reativar evento"); }
+    finally { setUnsuspending(null); }
+  };
+
+  const handleSaveSetting = async (key: string) => {
+    const value = settingsDraft[key];
+    if (value === undefined) return;
+    setSavingSetting(key);
+    try {
+      const res = await fetch(`/api/admin/settings/${key}`, {
+        method: "PUT", headers: { "Content-Type": "application/json", ...authHeader },
+        body: JSON.stringify({ value }),
+      });
+      if (!res.ok) { toast.error("Erro ao guardar configuração"); return; }
+      toast.success("Configuração guardada");
+      setSettings(prev => ({ ...prev, [key]: value }));
+      fetchAuditLogs();
+    } catch { toast.error("Erro ao guardar configuração"); }
+    finally { setSavingSetting(null); }
+  };
+
   const toggleSort = (key: keyof AdminUser) =>
     setSortUsers(prev => prev.key === key ? { key, dir: prev.dir === "asc" ? "desc" : "asc" } : { key, dir: "desc" });
 
@@ -365,6 +523,18 @@ export default function AdminPage() {
 
   const fmtDate = (d: string) => new Date(d).toLocaleString("pt-PT", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
   const fmtEur = (v: string | number) => `€ ${parseFloat(String(v)).toFixed(2)}`;
+
+  const refreshCurrentTab = () => {
+    fetchStats();
+    if (activeTab === "users") fetchUsers();
+    else if (activeTab === "bets") fetchBets();
+    else if (activeTab === "payments") fetchPayments();
+    else if (activeTab === "withdrawals") fetchWithdrawals();
+    else if (activeTab === "risk") fetchRisk();
+    else if (activeTab === "analytics") fetchAnalytics();
+    else if (activeTab === "events") { fetchSuspended(); fetchFeed(); }
+    else if (activeTab === "settings") { fetchSettings(); fetchAuditLogs(); }
+  };
 
   // --- LOGIN ---
   if (!token) {
@@ -407,21 +577,29 @@ export default function AdminPage() {
     );
   }
 
-  const tabs = [
-    { id: "dashboard",   icon: <LayoutDashboard size={18} />, label: "Dashboard",      badge: null },
-    { id: "users",       icon: <Users size={18} />,           label: "Utilizadores",   badge: null },
-    { id: "bets",        icon: <ListChecks size={18} />,      label: "Apostas",        badge: stats?.bets.pending || null },
-    { id: "payments",    icon: <CreditCard size={18} />,      label: "Depósitos",      badge: null },
-    { id: "withdrawals", icon: <ArrowUpCircle size={18} />,   label: "Levantamentos",  badge: stats?.withdrawals.pendingCount || null },
+  const tabs: Array<{ id: TabId; icon: React.ReactNode; label: string; badge?: number | null; section?: string }> = [
+    { id: "dashboard",   icon: <LayoutDashboard size={18} />, label: "Dashboard",      section: "core" },
+    { id: "users",       icon: <Users size={18} />,           label: "Utilizadores",   section: "core" },
+    { id: "bets",        icon: <ListChecks size={18} />,      label: "Apostas",        badge: stats?.bets.pending || null, section: "core" },
+    { id: "payments",    icon: <CreditCard size={18} />,      label: "Depósitos",      section: "core" },
+    { id: "withdrawals", icon: <ArrowUpCircle size={18} />,   label: "Levantamentos",  badge: stats?.withdrawals.pendingCount || null, section: "core" },
+    { id: "risk",        icon: <ShieldAlert size={18} />,     label: "Risco",          section: "pro" },
+    { id: "analytics",   icon: <BarChart2 size={18} />,       label: "Analytics",      section: "pro" },
+    { id: "events",      icon: <Zap size={18} />,             label: "Eventos",        section: "pro" },
+    { id: "settings",    icon: <Settings size={18} />,        label: "Configurações",  section: "pro" },
   ];
 
-  const tabLabel: Record<string, string> = { dashboard: "Visão Geral", users: "Utilizadores", bets: "Apostas", payments: "Depósitos", withdrawals: "Levantamentos" };
+  const tabLabel: Record<TabId, string> = {
+    dashboard: "Visão Geral", users: "Utilizadores", bets: "Apostas",
+    payments: "Depósitos", withdrawals: "Levantamentos",
+    risk: "Gestão de Risco", analytics: "Analytics", events: "Controlo de Eventos", settings: "Configurações",
+  };
 
   return (
     <div className="min-h-screen bg-zinc-950 text-white dark flex">
 
       {/* SIDEBAR */}
-      <aside className="w-16 lg:w-56 bg-zinc-900 border-r border-zinc-800 flex flex-col shrink-0 sticky top-0 h-screen">
+      <aside className="w-16 lg:w-56 bg-zinc-900 border-r border-zinc-800 flex flex-col shrink-0 sticky top-0 h-screen overflow-y-auto">
         <div className="p-4 border-b border-zinc-800">
           <div className="font-black text-xl tracking-tighter italic hidden lg:block">
             <span className="text-white">BET</span><span className="text-red-600">62</span>
@@ -430,15 +608,24 @@ export default function AdminPage() {
           <div className="lg:hidden flex justify-center"><ShieldCheck className="text-red-500" size={22} /></div>
         </div>
 
-        <nav className="flex-1 p-2 space-y-1">
-          {tabs.map(tab => (
-            <button key={tab.id} onClick={() => setActiveTab(tab.id as typeof activeTab)}
+        <nav className="flex-1 p-2 space-y-0.5">
+          <div className="hidden lg:block text-xs text-zinc-600 px-3 pt-2 pb-1 font-semibold uppercase tracking-wider">Operações</div>
+          {tabs.filter(t => t.section === "core").map(tab => (
+            <button key={tab.id} onClick={() => setActiveTab(tab.id)}
               className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${activeTab === tab.id ? "bg-red-600/20 text-red-400 border border-red-500/30" : "text-zinc-400 hover:bg-zinc-800 hover:text-white"}`}>
               {tab.icon}
               <span className="hidden lg:block flex-1 text-left">{tab.label}</span>
               {tab.badge ? (
                 <span className="hidden lg:flex items-center justify-center min-w-5 h-5 px-1 rounded-full bg-red-600 text-white text-xs font-bold">{tab.badge}</span>
               ) : null}
+            </button>
+          ))}
+          <div className="hidden lg:block text-xs text-zinc-600 px-3 pt-3 pb-1 font-semibold uppercase tracking-wider">Avançado</div>
+          {tabs.filter(t => t.section === "pro").map(tab => (
+            <button key={tab.id} onClick={() => setActiveTab(tab.id)}
+              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${activeTab === tab.id ? "bg-red-600/20 text-red-400 border border-red-500/30" : "text-zinc-400 hover:bg-zinc-800 hover:text-white"}`}>
+              {tab.icon}
+              <span className="hidden lg:block flex-1 text-left">{tab.label}</span>
             </button>
           ))}
         </nav>
@@ -456,8 +643,7 @@ export default function AdminPage() {
       <main className="flex-1 overflow-auto">
         <div className="sticky top-0 z-10 bg-zinc-950/90 backdrop-blur border-b border-zinc-800 px-6 py-4 flex items-center justify-between">
           <h1 className="font-bold text-lg text-white">{tabLabel[activeTab]}</h1>
-          <button onClick={() => { fetchStats(); if (activeTab === "users") fetchUsers(); if (activeTab === "bets") fetchBets(); if (activeTab === "payments") fetchPayments(); if (activeTab === "withdrawals") fetchWithdrawals(); }}
-            className="flex items-center gap-2 text-xs text-zinc-500 hover:text-white transition-colors">
+          <button onClick={refreshCurrentTab} className="flex items-center gap-2 text-xs text-zinc-500 hover:text-white transition-colors">
             <RefreshCw size={14} /><span className="hidden sm:block">Atualizar</span>
           </button>
         </div>
@@ -518,65 +704,67 @@ export default function AdminPage() {
                       </div>
                     )}
 
-                    <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-5">
-                      <h3 className="font-bold text-sm text-zinc-300 mb-4 flex items-center gap-2">
-                        <Trophy size={16} className="text-red-500" /> Distribuição de Apostas
-                      </h3>
-                      <div className="space-y-3">
-                        {[
-                          { label: "Pendentes", value: stats.bets.pending, total: stats.bets.total, cls: "bg-zinc-500" },
-                          { label: "Ganhas", value: stats.bets.won, total: stats.bets.total, cls: "bg-green-600" },
-                          { label: "Perdidas", value: stats.bets.lost, total: stats.bets.total, cls: "bg-red-700" },
-                          { label: "Cash Out", value: stats.bets.cashedOut, total: stats.bets.total, cls: "bg-yellow-600" },
-                        ].map(row => (
-                          <div key={row.label} className="flex items-center gap-3 text-sm">
-                            <span className="text-zinc-400 w-20 text-xs shrink-0">{row.label}</span>
-                            <div className="flex-1 h-3 bg-zinc-800 rounded overflow-hidden">
-                              <motion.div initial={{ width: 0 }} animate={{ width: `${row.total > 0 ? (row.value / row.total) * 100 : 0}%` }} transition={{ duration: 0.8 }}
-                                className={`h-full ${row.cls} rounded`} />
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                      <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-5">
+                        <h3 className="font-bold text-sm text-zinc-300 mb-4 flex items-center gap-2">
+                          <Trophy size={16} className="text-red-500" /> Distribuição de Apostas
+                        </h3>
+                        <div className="space-y-3">
+                          {[
+                            { label: "Pendentes", value: stats.bets.pending, total: stats.bets.total, cls: "bg-zinc-500" },
+                            { label: "Ganhas", value: stats.bets.won, total: stats.bets.total, cls: "bg-green-600" },
+                            { label: "Perdidas", value: stats.bets.lost, total: stats.bets.total, cls: "bg-red-700" },
+                            { label: "Cash Out", value: stats.bets.cashedOut, total: stats.bets.total, cls: "bg-yellow-600" },
+                          ].map(row => (
+                            <div key={row.label} className="flex items-center gap-3 text-sm">
+                              <span className="text-zinc-400 w-20 text-xs shrink-0">{row.label}</span>
+                              <div className="flex-1 h-3 bg-zinc-800 rounded overflow-hidden">
+                                <motion.div initial={{ width: 0 }} animate={{ width: `${row.total > 0 ? (row.value / row.total) * 100 : 0}%` }} transition={{ duration: 0.8 }}
+                                  className={`h-full ${row.cls} rounded`} />
+                              </div>
+                              <span className="text-zinc-400 text-xs w-12 text-right">{row.value}</span>
                             </div>
-                            <span className="text-zinc-400 text-xs w-12 text-right">{row.value}</span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-
-                    <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-5">
-                      <h3 className="font-bold text-sm text-zinc-300 mb-4 flex items-center gap-2">
-                        <Download size={16} className="text-red-500" /> Exportar Relatório CSV
-                      </h3>
-                      <div className="flex flex-col sm:flex-row gap-3 items-end">
-                        <div className="flex gap-1">
-                          {([
-                            { value: "bets", label: "Apostas" },
-                            { value: "deposits", label: "Depósitos" },
-                            { value: "withdrawals", label: "Levantamentos" },
-                          ] as const).map(opt => (
-                            <button key={opt.value} onClick={() => setExportType(opt.value)}
-                              className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${exportType === opt.value ? "bg-red-600 text-white" : "bg-zinc-800 text-zinc-400 hover:bg-zinc-700"}`}>
-                              {opt.label}
-                            </button>
                           ))}
                         </div>
-                        <div className="flex gap-2 flex-1">
-                          <div className="flex-1 min-w-0">
-                            <Label className="text-zinc-500 text-xs mb-1 block">De</Label>
-                            <Input type="date" value={exportFrom} onChange={e => setExportFrom(e.target.value)}
-                              className="bg-zinc-800 border-zinc-700 text-white text-xs h-8 w-full" />
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <Label className="text-zinc-500 text-xs mb-1 block">Até</Label>
-                            <Input type="date" value={exportTo} onChange={e => setExportTo(e.target.value)}
-                              className="bg-zinc-800 border-zinc-700 text-white text-xs h-8 w-full" />
-                          </div>
-                        </div>
-                        <Button onClick={handleExport} disabled={exporting}
-                          className="bg-red-600 hover:bg-red-700 text-white font-bold h-8 px-4 text-xs shrink-0">
-                          {exporting ? <Loader2 size={14} className="animate-spin mr-1" /> : <Download size={14} className="mr-1" />}
-                          Exportar CSV
-                        </Button>
                       </div>
-                      <p className="text-xs text-zinc-600 mt-2">Sem datas definidas exporta todos os registos. O ficheiro inclui BOM UTF-8 para compatibilidade com Excel.</p>
+
+                      <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-5">
+                        <h3 className="font-bold text-sm text-zinc-300 mb-4 flex items-center gap-2">
+                          <Download size={16} className="text-red-500" /> Exportar Relatório CSV
+                        </h3>
+                        <div className="flex flex-col gap-3">
+                          <div className="flex gap-1">
+                            {([
+                              { value: "bets", label: "Apostas" },
+                              { value: "deposits", label: "Depósitos" },
+                              { value: "withdrawals", label: "Levantamentos" },
+                            ] as const).map(opt => (
+                              <button key={opt.value} onClick={() => setExportType(opt.value)}
+                                className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${exportType === opt.value ? "bg-red-600 text-white" : "bg-zinc-800 text-zinc-400 hover:bg-zinc-700"}`}>
+                                {opt.label}
+                              </button>
+                            ))}
+                          </div>
+                          <div className="flex gap-2">
+                            <div className="flex-1">
+                              <Label className="text-zinc-500 text-xs mb-1 block">De</Label>
+                              <Input type="date" value={exportFrom} onChange={e => setExportFrom(e.target.value)}
+                                className="bg-zinc-800 border-zinc-700 text-white text-xs h-8 w-full" />
+                            </div>
+                            <div className="flex-1">
+                              <Label className="text-zinc-500 text-xs mb-1 block">Até</Label>
+                              <Input type="date" value={exportTo} onChange={e => setExportTo(e.target.value)}
+                                className="bg-zinc-800 border-zinc-700 text-white text-xs h-8 w-full" />
+                            </div>
+                          </div>
+                          <Button onClick={handleExport} disabled={exporting}
+                            className="bg-red-600 hover:bg-red-700 text-white font-bold h-8 px-4 text-xs">
+                            {exporting ? <Loader2 size={14} className="animate-spin mr-1" /> : <Download size={14} className="mr-1" />}
+                            Exportar CSV
+                          </Button>
+                        </div>
+                        <p className="text-xs text-zinc-600 mt-2">Sem datas exporta todos os registos. Inclui BOM UTF-8 para Excel.</p>
+                      </div>
                     </div>
                   </>
                 )}
@@ -680,7 +868,7 @@ export default function AdminPage() {
                     <Input placeholder="Buscar por jogo ou utilizador..." value={betSearch} onChange={e => setBetSearch(e.target.value)}
                       className="bg-zinc-900 border-zinc-700 text-white pl-9" />
                   </div>
-                  <div className="flex gap-1">
+                  <div className="flex gap-1 flex-wrap">
                     {["all", "pending", "won", "lost", "cashed_out"].map(s => (
                       <button key={s} onClick={() => setBetStatusFilter(s)}
                         className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${betStatusFilter === s ? "bg-red-600 text-white" : "bg-zinc-800 text-zinc-400 hover:bg-zinc-700"}`}>
@@ -689,7 +877,6 @@ export default function AdminPage() {
                     ))}
                   </div>
                 </div>
-
                 {loading ? (
                   <div className="flex items-center justify-center py-20"><Loader2 className="animate-spin text-red-600" size={32} /></div>
                 ) : (
@@ -873,6 +1060,438 @@ export default function AdminPage() {
               </motion.div>
             )}
 
+            {/* ── RISCO ── */}
+            {activeTab === "risk" && (
+              <motion.div key="risk" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} className="space-y-6">
+                {loading || !riskData ? (
+                  <div className="flex items-center justify-center py-20"><Loader2 className="animate-spin text-red-600" size={32} /></div>
+                ) : (
+                  <>
+                    <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                      <StatCard icon={<ListChecks size={20} />} label="Apostas Pendentes" value={riskData.summary.pendingBets} color="yellow" />
+                      <StatCard icon={<DollarSign size={20} />} label="Volume em Risco" value={fmtEur(riskData.summary.totalPendingStake)} color="blue" />
+                      <StatCard icon={<TrendingUp size={20} />} label="Passivo Total" value={fmtEur(riskData.summary.totalLiability)} color="red" alert={riskData.summary.totalLiability > 5000} />
+                      <StatCard icon={<AlertTriangle size={20} />} label="Eventos Críticos" value={riskData.summary.highExposureCount} sub="passivo > € 500" color="orange" alert={riskData.summary.highExposureCount > 0} />
+                    </div>
+
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                      <div className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden">
+                        <div className="px-5 py-4 border-b border-zinc-800 flex items-center gap-2">
+                          <ShieldAlert size={16} className="text-red-500" />
+                          <span className="font-bold text-sm text-zinc-300">Exposição por Evento</span>
+                          <span className="ml-auto text-xs text-zinc-600">Top 20</span>
+                        </div>
+                        <div className="overflow-x-auto">
+                          <table className="w-full text-xs">
+                            <thead>
+                              <tr className="border-b border-zinc-800 bg-zinc-950/30">
+                                <th className="text-left px-4 py-2 text-zinc-500">Evento</th>
+                                <th className="text-right px-4 py-2 text-zinc-500">Apostas</th>
+                                <th className="text-right px-4 py-2 text-zinc-500">Volume</th>
+                                <th className="text-right px-4 py-2 text-zinc-500">Passivo</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {riskData.exposureByMatch.length === 0 ? (
+                                <tr><td colSpan={4} className="px-4 py-8 text-center text-zinc-600">Sem apostas pendentes</td></tr>
+                              ) : riskData.exposureByMatch.map((row, i) => {
+                                const liability = parseFloat(row.total_liability || "0");
+                                const isHigh = liability > 500;
+                                return (
+                                  <tr key={i} className={`border-b border-zinc-800/40 hover:bg-zinc-800/20 ${isHigh ? "bg-red-900/10" : ""}`}>
+                                    <td className="px-4 py-2.5">
+                                      <div className="flex items-center gap-1.5">
+                                        {isHigh && <AlertTriangle size={11} className="text-red-500 shrink-0" />}
+                                        <span className="text-zinc-300 line-clamp-1">{row.match_title}</span>
+                                      </div>
+                                    </td>
+                                    <td className="px-4 py-2.5 text-right text-zinc-400">{row.bet_count}</td>
+                                    <td className="px-4 py-2.5 text-right text-zinc-400">{fmtEur(row.total_staked)}</td>
+                                    <td className={`px-4 py-2.5 text-right font-bold ${isHigh ? "text-red-400" : "text-zinc-300"}`}>{fmtEur(row.total_liability)}</td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+
+                      <div className="space-y-4">
+                        <div className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden">
+                          <div className="px-5 py-4 border-b border-zinc-800 flex items-center gap-2">
+                            <DollarSign size={16} className="text-yellow-500" />
+                            <span className="font-bold text-sm text-zinc-300">Maiores Apostas</span>
+                          </div>
+                          <div className="divide-y divide-zinc-800">
+                            {riskData.bigBets.slice(0, 8).map(bet => (
+                              <div key={bet.id} className="px-4 py-3 flex items-center gap-3">
+                                <div className="flex-1 min-w-0">
+                                  <div className="text-xs text-zinc-300 line-clamp-1">{bet.matchTitle}</div>
+                                  <div className="text-xs text-zinc-600">{bet.userName || "—"}</div>
+                                </div>
+                                <div className="text-right shrink-0">
+                                  <div className="font-bold text-white text-sm">{fmtEur(bet.stake)}</div>
+                                  <div className="text-xs text-green-400">→ {fmtEur(bet.potentialWin)}</div>
+                                </div>
+                                <Badge cls={STATUS_BET[bet.status]?.cls || "bg-zinc-800 text-zinc-400"} label={STATUS_BET[bet.status]?.label || bet.status} />
+                              </div>
+                            ))}
+                            {riskData.bigBets.length === 0 && <div className="px-4 py-8 text-center text-zinc-600 text-xs">Sem apostas</div>}
+                          </div>
+                        </div>
+
+                        <div className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden">
+                          <div className="px-5 py-4 border-b border-zinc-800 flex items-center gap-2">
+                            <Trophy size={16} className="text-orange-400" />
+                            <span className="font-bold text-sm text-zinc-300">Apostadores Sharp</span>
+                            <span className="ml-auto text-xs text-zinc-600">&gt;55% win rate</span>
+                          </div>
+                          <div className="divide-y divide-zinc-800">
+                            {riskData.sharpBettors.length === 0 ? (
+                              <div className="px-4 py-8 text-center text-zinc-600 text-xs">Nenhum apostador sharp identificado</div>
+                            ) : riskData.sharpBettors.map((b, i) => {
+                              const winRate = parseInt(b.settled) > 0 ? Math.round((parseInt(b.won) / parseInt(b.settled)) * 100) : 0;
+                              return (
+                                <div key={i} className="px-4 py-3 flex items-center gap-3">
+                                  <div className="flex-1 min-w-0">
+                                    <div className="text-xs text-zinc-300 font-medium">{b.name}</div>
+                                    <div className="text-xs text-zinc-600">{b.email}</div>
+                                  </div>
+                                  <div className="text-right shrink-0">
+                                    <div className="text-sm font-bold text-orange-400">{winRate}%</div>
+                                    <div className="text-xs text-zinc-500">{b.won}/{b.settled} ganhas</div>
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </>
+                )}
+              </motion.div>
+            )}
+
+            {/* ── ANALYTICS ── */}
+            {activeTab === "analytics" && (
+              <motion.div key="analytics" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} className="space-y-6">
+                {loading || !analyticsData ? (
+                  <div className="flex items-center justify-center py-20"><Loader2 className="animate-spin text-red-600" size={32} /></div>
+                ) : (
+                  <>
+                    <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                      <StatCard icon={<DollarSign size={20} />} label="Turnover Total" value={fmtEur(analyticsData.kpis.turnover)} color="blue" />
+                      <StatCard icon={<TrendingUp size={20} />} label="GGR (Receita Bruta)" value={fmtEur(analyticsData.kpis.ggr)} color={analyticsData.kpis.ggr >= 0 ? "green" : "red"} sub={`${analyticsData.kpis.hold}% hold`} />
+                      <StatCard icon={<BarChart2 size={20} />} label="NGR (Receita Líquida)" value={fmtEur(analyticsData.kpis.ngr)} color={analyticsData.kpis.ngr >= 0 ? "green" : "red"} />
+                      <StatCard icon={<Users size={20} />} label="Utilizadores Ativos 7d" value={analyticsData.kpis.activeUsers7d} color="purple" />
+                    </div>
+
+                    <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                      <StatCard icon={<CreditCard size={20} />} label="Total Depositado" value={fmtEur(analyticsData.kpis.totalDeposited)} color="blue" />
+                      <StatCard icon={<Gift size={20} />} label="Custo em Freebets" value={fmtEur(analyticsData.kpis.bonusCost)} color="purple" />
+                      <div className="col-span-2 bg-zinc-900 border border-zinc-800 rounded-xl p-5">
+                        <div className="text-xs text-zinc-500 mb-2">Distribuição por Status</div>
+                        <div className="space-y-2">
+                          {analyticsData.byStatus.map(row => {
+                            const total = analyticsData.byStatus.reduce((s, r) => s + parseInt(r.count), 0);
+                            const pct = total > 0 ? (parseInt(row.count) / total) * 100 : 0;
+                            return (
+                              <div key={row.status} className="flex items-center gap-2 text-xs">
+                                <span className="text-zinc-400 w-20 shrink-0">{STATUS_BET[row.status]?.label || row.status}</span>
+                                <div className="flex-1 h-2.5 bg-zinc-800 rounded overflow-hidden">
+                                  <div className={`h-full rounded ${STATUS_BET[row.status]?.cls.split(" ")[0] || "bg-zinc-600"}`} style={{ width: `${pct}%` }} />
+                                </div>
+                                <span className="text-zinc-500 w-8 text-right">{row.count}</span>
+                                <span className="text-zinc-600 w-16 text-right">{fmtEur(row.volume || "0")}</span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-5">
+                      <h3 className="font-bold text-sm text-zinc-300 mb-4 flex items-center gap-2">
+                        <BarChart2 size={16} className="text-red-500" /> GGR Diário — últimos 30 dias
+                      </h3>
+                      {analyticsData.daily.length === 0 ? (
+                        <div className="py-8 text-center text-zinc-600 text-sm">Sem dados suficientes</div>
+                      ) : (
+                        <div className="space-y-1.5">
+                          {analyticsData.daily.map(row => {
+                            const ggr = parseFloat(row.ggr || "0");
+                            const maxGgr = Math.max(...analyticsData.daily.map(r => Math.abs(parseFloat(r.ggr || "0"))));
+                            const pct = maxGgr > 0 ? (Math.abs(ggr) / maxGgr) * 100 : 0;
+                            const isPos = ggr >= 0;
+                            return (
+                              <div key={row.day} className="flex items-center gap-3 text-xs">
+                                <span className="text-zinc-600 w-20 shrink-0">{row.day}</span>
+                                <div className="flex-1 flex items-center h-4">
+                                  <div className="flex-1 h-4 bg-zinc-800 rounded overflow-hidden">
+                                    <motion.div initial={{ width: 0 }} animate={{ width: `${pct}%` }} transition={{ duration: 0.5 }}
+                                      className={`h-full rounded ${isPos ? "bg-green-700" : "bg-red-800"}`} />
+                                  </div>
+                                </div>
+                                <span className={`w-20 text-right font-medium ${isPos ? "text-green-400" : "text-red-400"}`}>{fmtEur(ggr)}</span>
+                                <span className="text-zinc-600 w-16 text-right">{row.bets} apostas</span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden">
+                      <div className="px-5 py-4 border-b border-zinc-800 flex items-center gap-2">
+                        <Trophy size={16} className="text-yellow-500" />
+                        <span className="font-bold text-sm text-zinc-300">Maiores Depositantes</span>
+                      </div>
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-xs">
+                          <thead>
+                            <tr className="border-b border-zinc-800 bg-zinc-950/30">
+                              <th className="text-left px-4 py-2 text-zinc-500">Utilizador</th>
+                              <th className="text-right px-4 py-2 text-zinc-500">Depósitos</th>
+                              <th className="text-right px-4 py-2 text-zinc-500">Total</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {analyticsData.topDepositors.map((d, i) => (
+                              <tr key={i} className="border-b border-zinc-800/40 hover:bg-zinc-800/20">
+                                <td className="px-4 py-2.5">
+                                  <div className="text-zinc-300 font-medium">{d.name}</div>
+                                  <div className="text-zinc-600">{d.email}</div>
+                                </td>
+                                <td className="px-4 py-2.5 text-right text-zinc-400">{d.deposits}</td>
+                                <td className="px-4 py-2.5 text-right font-bold text-green-400">{fmtEur(d.total)}</td>
+                              </tr>
+                            ))}
+                            {analyticsData.topDepositors.length === 0 && (
+                              <tr><td colSpan={3} className="px-4 py-8 text-center text-zinc-600">Sem depósitos completados</td></tr>
+                            )}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  </>
+                )}
+              </motion.div>
+            )}
+
+            {/* ── EVENTOS ── */}
+            {activeTab === "events" && (
+              <motion.div key="events" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} className="space-y-6">
+
+                {/* Feed de Dados */}
+                <div className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden">
+                  <div className="px-5 py-4 border-b border-zinc-800 flex items-center gap-2">
+                    <Radio size={16} className={feedStatus?.overall === "ok" ? "text-green-500" : "text-red-500"} />
+                    <span className="font-bold text-sm text-zinc-300">Estado do Feed de Dados (Statpal)</span>
+                    {feedStatus && (
+                      <Badge cls={feedStatus.overall === "ok" ? "bg-green-900/50 text-green-400" : "bg-red-900/50 text-red-400"}
+                        label={feedStatus.overall === "ok" ? "Operacional" : "Degradado"} />
+                    )}
+                    <Button size="sm" onClick={fetchFeed} disabled={feedLoading}
+                      className="ml-auto h-7 px-3 text-xs bg-zinc-800 hover:bg-zinc-700 text-zinc-300">
+                      {feedLoading ? <Loader2 size={12} className="animate-spin mr-1" /> : <RefreshCw size={12} className="mr-1" />}
+                      Verificar
+                    </Button>
+                  </div>
+                  {feedLoading && !feedStatus ? (
+                    <div className="p-6 text-center"><Loader2 className="animate-spin text-red-600 mx-auto" size={24} /></div>
+                  ) : feedStatus ? (
+                    <div className="divide-y divide-zinc-800">
+                      {feedStatus.endpoints.map((ep, i) => (
+                        <div key={i} className="px-5 py-3 flex items-center gap-3">
+                          {ep.status === "ok"
+                            ? <Wifi size={16} className="text-green-500 shrink-0" />
+                            : <WifiOff size={16} className="text-red-500 shrink-0" />}
+                          <span className="text-sm text-zinc-300 flex-1">{ep.name}</span>
+                          <span className={`text-xs font-mono ${ep.latency < 500 ? "text-green-400" : ep.latency < 1500 ? "text-yellow-400" : "text-red-400"}`}>
+                            {ep.latency}ms
+                          </span>
+                          <Badge cls={ep.status === "ok" ? "bg-green-900/40 text-green-400" : "bg-red-900/40 text-red-400"}
+                            label={ep.status === "ok" ? "OK" : `Erro ${ep.statusCode}`} />
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="p-6 text-center text-zinc-600 text-sm">Clique em "Verificar" para testar o feed</div>
+                  )}
+                  {feedStatus && <div className="px-5 py-2 border-t border-zinc-800 text-xs text-zinc-600">Última verificação: {fmtDate(feedStatus.checkedAt)}</div>}
+                </div>
+
+                {/* Suspender Evento */}
+                <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-5">
+                  <h3 className="font-bold text-sm text-zinc-300 mb-4 flex items-center gap-2">
+                    <Ban size={16} className="text-red-500" /> Suspender Evento
+                  </h3>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                    <div>
+                      <Label className="text-zinc-500 text-xs mb-1 block">ID do Evento *</Label>
+                      <Input placeholder="ex: match_12345" value={suspendForm.matchId} onChange={e => setSuspendForm(p => ({ ...p, matchId: e.target.value }))}
+                        className="bg-zinc-800 border-zinc-700 text-white text-sm h-9" />
+                    </div>
+                    <div>
+                      <Label className="text-zinc-500 text-xs mb-1 block">Nome do Evento *</Label>
+                      <Input placeholder="ex: Porto vs Benfica" value={suspendForm.matchTitle} onChange={e => setSuspendForm(p => ({ ...p, matchTitle: e.target.value }))}
+                        className="bg-zinc-800 border-zinc-700 text-white text-sm h-9" />
+                    </div>
+                    <div>
+                      <Label className="text-zinc-500 text-xs mb-1 block">Desporto</Label>
+                      <select value={suspendForm.sport} onChange={e => setSuspendForm(p => ({ ...p, sport: e.target.value }))}
+                        className="w-full h-9 bg-zinc-800 border border-zinc-700 rounded-md text-white text-sm px-3 focus:outline-none">
+                        {Object.entries(SPORT_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <Label className="text-zinc-500 text-xs mb-1 block">Motivo (opcional)</Label>
+                      <Input placeholder="ex: odds suspeitas" value={suspendForm.reason} onChange={e => setSuspendForm(p => ({ ...p, reason: e.target.value }))}
+                        className="bg-zinc-800 border-zinc-700 text-white text-sm h-9" />
+                    </div>
+                  </div>
+                  <Button onClick={handleSuspendMatch} disabled={suspending || !suspendForm.matchId || !suspendForm.matchTitle}
+                    className="mt-3 bg-red-600 hover:bg-red-700 text-white font-bold h-9 px-5 text-sm">
+                    {suspending ? <Loader2 size={14} className="animate-spin mr-2" /> : <Ban size={14} className="mr-2" />}
+                    Suspender Evento
+                  </Button>
+                </div>
+
+                {/* Lista de Eventos Suspensos */}
+                <div className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden">
+                  <div className="px-5 py-4 border-b border-zinc-800 flex items-center gap-2">
+                    <Lock size={16} className="text-red-500" />
+                    <span className="font-bold text-sm text-zinc-300">Eventos Suspensos</span>
+                    <span className="ml-auto text-xs text-zinc-600">{suspendedMatches.length} evento(s)</span>
+                  </div>
+                  {suspendedMatches.length === 0 ? (
+                    <div className="px-5 py-10 text-center text-zinc-600 text-sm">
+                      <Unlock size={24} className="mx-auto mb-2 text-zinc-700" />
+                      Nenhum evento suspenso — todos os eventos estão ativos
+                    </div>
+                  ) : (
+                    <div className="divide-y divide-zinc-800">
+                      {suspendedMatches.map(m => (
+                        <div key={m.id} className="px-5 py-4 flex items-center gap-3">
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className="font-medium text-white text-sm">{m.matchTitle}</span>
+                              <Badge cls="bg-zinc-800 text-zinc-400" label={SPORT_LABEL[m.sport] || m.sport} />
+                            </div>
+                            <div className="flex items-center gap-3 mt-1">
+                              <span className="text-xs text-zinc-600 font-mono">{m.matchId}</span>
+                              {m.reason && <span className="text-xs text-zinc-500 italic">"{m.reason}"</span>}
+                              <span className="text-xs text-zinc-700">{fmtDate(m.createdAt)}</span>
+                            </div>
+                          </div>
+                          <Button size="sm" disabled={unsuspending === m.matchId} onClick={() => handleUnsuspend(m.matchId)}
+                            className="h-7 px-3 text-xs bg-green-700 hover:bg-green-600 text-white shrink-0">
+                            {unsuspending === m.matchId ? <Loader2 size={12} className="animate-spin mr-1" /> : <Unlock size={12} className="mr-1" />}
+                            Reativar
+                          </Button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </motion.div>
+            )}
+
+            {/* ── CONFIGURAÇÕES ── */}
+            {activeTab === "settings" && (
+              <motion.div key="settings" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} className="space-y-6">
+
+                {/* Configurações da Plataforma */}
+                <div className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden">
+                  <div className="px-5 py-4 border-b border-zinc-800 flex items-center gap-2">
+                    <Settings size={16} className="text-red-500" />
+                    <span className="font-bold text-sm text-zinc-300">Parâmetros da Plataforma</span>
+                  </div>
+                  <div className="divide-y divide-zinc-800">
+                    {Object.entries(SETTING_META).map(([key, meta]) => {
+                      const isDirty = settingsDraft[key] !== settings[key];
+                      return (
+                        <div key={key} className="px-5 py-4 flex flex-col sm:flex-row sm:items-center gap-3">
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2">
+                              <span className="font-medium text-white text-sm">{meta.label}</span>
+                              {isDirty && <span className="text-xs text-yellow-400 font-medium">• não guardado</span>}
+                            </div>
+                            <div className="text-xs text-zinc-500 mt-0.5">{meta.desc}</div>
+                          </div>
+                          <div className="flex items-center gap-2 sm:w-64">
+                            {meta.type === "boolean" ? (
+                              <div className="flex gap-2">
+                                {["true", "false"].map(v => (
+                                  <button key={v} onClick={() => setSettingsDraft(p => ({ ...p, [key]: v }))}
+                                    className={`px-4 py-1.5 rounded-lg text-xs font-medium transition-colors ${settingsDraft[key] === v ? (v === "true" ? "bg-green-700 text-white" : "bg-red-700 text-white") : "bg-zinc-800 text-zinc-400 hover:bg-zinc-700"}`}>
+                                    {v === "true" ? "Ativo" : "Inativo"}
+                                  </button>
+                                ))}
+                              </div>
+                            ) : (
+                              <div className="flex items-center gap-1.5 flex-1">
+                                <Input type={meta.type === "number" ? "number" : "text"}
+                                  value={settingsDraft[key] || ""}
+                                  onChange={e => setSettingsDraft(p => ({ ...p, [key]: e.target.value }))}
+                                  className="bg-zinc-800 border-zinc-700 text-white text-sm h-8 flex-1"
+                                  step={key === "default_margin" ? "0.01" : "1"} />
+                                {meta.unit && <span className="text-zinc-500 text-xs">{meta.unit}</span>}
+                              </div>
+                            )}
+                            <Button size="sm" disabled={!isDirty || savingSetting === key} onClick={() => handleSaveSetting(key)}
+                              className={`h-8 px-3 text-xs shrink-0 ${isDirty ? "bg-red-600 hover:bg-red-700 text-white" : "bg-zinc-800 text-zinc-600 cursor-default"}`}>
+                              {savingSetting === key ? <Loader2 size={12} className="animate-spin" /> : "Guardar"}
+                            </Button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Log de Auditoria */}
+                <div className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden">
+                  <div className="px-5 py-4 border-b border-zinc-800 flex items-center gap-2">
+                    <FileText size={16} className="text-blue-400" />
+                    <span className="font-bold text-sm text-zinc-300">Log de Auditoria</span>
+                    <span className="ml-auto text-xs text-zinc-600">{auditLogs.length} registos</span>
+                  </div>
+                  {auditLogs.length === 0 ? (
+                    <div className="px-5 py-10 text-center text-zinc-600 text-sm">
+                      <Clock size={24} className="mx-auto mb-2 text-zinc-700" />
+                      Nenhuma ação registada ainda
+                    </div>
+                  ) : (
+                    <div className="divide-y divide-zinc-800 max-h-96 overflow-y-auto">
+                      {auditLogs.map(log => (
+                        <div key={log.id} className="px-5 py-3 flex items-start gap-3">
+                          <div className="shrink-0 mt-0.5">
+                            {log.action === "suspend_match" && <Ban size={14} className="text-red-500" />}
+                            {log.action === "unsuspend_match" && <Unlock size={14} className="text-green-500" />}
+                            {log.action === "settings_update" && <Settings size={14} className="text-blue-400" />}
+                            {!["suspend_match", "unsuspend_match", "settings_update"].includes(log.action) && <Activity size={14} className="text-zinc-500" />}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className="text-sm text-zinc-300 font-medium">{AUDIT_ACTION_LABEL[log.action] || log.action}</span>
+                              {log.targetId && <span className="text-xs text-zinc-600 font-mono">{log.targetId}</span>}
+                            </div>
+                            <div className="flex items-center gap-3 mt-0.5">
+                              <span className="text-xs text-zinc-600">por <span className="text-zinc-500">{log.adminUser}</span></span>
+                              {log.ip && <span className="text-xs text-zinc-700 font-mono">{log.ip}</span>}
+                              <span className="text-xs text-zinc-700">{fmtDate(log.createdAt)}</span>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </motion.div>
+            )}
+
           </AnimatePresence>
         </div>
       </main>
@@ -981,11 +1600,11 @@ export default function AdminPage() {
                     </div>
                   </div>
 
-                  <div className="flex gap-1 px-5 pt-4 shrink-0">
+                  <div className="flex border-b border-zinc-800 shrink-0">
                     {(["bets", "payments", "withdrawals"] as const).map(t => (
                       <button key={t} onClick={() => setDetailTab(t)}
-                        className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${detailTab === t ? "bg-red-600 text-white" : "bg-zinc-800 text-zinc-400 hover:bg-zinc-700"}`}>
-                        {t === "bets" ? `Apostas (${detailModal.bets.length})` : t === "payments" ? `Depósitos (${detailModal.payments.length})` : `Levantamentos (${detailModal.withdrawals.length})`}
+                        className={`flex-1 py-3 text-sm font-medium transition-colors ${detailTab === t ? "text-red-400 border-b-2 border-red-500" : "text-zinc-500 hover:text-zinc-300"}`}>
+                        {t === "bets" ? "Apostas" : t === "payments" ? "Depósitos" : "Levantamentos"}
                       </button>
                     ))}
                   </div>
@@ -993,43 +1612,50 @@ export default function AdminPage() {
                   <div className="flex-1 overflow-auto p-5">
                     {detailTab === "bets" && (
                       <div className="space-y-2">
-                        {detailModal.bets.map(b => (
-                          <div key={b.id} className="flex items-center gap-3 bg-zinc-800 rounded-lg px-4 py-3 text-sm">
-                            <Badge cls={STATUS_BET[b.status]?.cls || "bg-zinc-700 text-zinc-400"} label={STATUS_BET[b.status]?.label || b.status} />
-                            <span className="flex-1 text-zinc-300 text-xs line-clamp-1">{b.matchTitle}</span>
-                            <span className="font-bold text-white shrink-0">{fmtEur(b.stake)}</span>
-                            <span className="text-green-400 shrink-0">{fmtEur(b.potentialWin)}</span>
-                            <span className="text-zinc-600 text-xs shrink-0">{fmtDate(b.createdAt)}</span>
-                          </div>
-                        ))}
-                        {detailModal.bets.length === 0 && <div className="text-center text-zinc-600 py-8">Sem apostas</div>}
+                        {detailModal.bets.length === 0 ? <div className="text-center text-zinc-600 py-8">Nenhuma aposta</div> :
+                          detailModal.bets.map(b => (
+                            <div key={b.id} className="bg-zinc-800 rounded-lg p-3 flex items-center gap-3">
+                              <div className="flex-1 min-w-0">
+                                <div className="text-sm text-zinc-300 line-clamp-1">{b.matchTitle}</div>
+                                <div className="text-xs text-zinc-600 mt-0.5">{fmtDate(b.createdAt)}</div>
+                              </div>
+                              <div className="text-right shrink-0">
+                                <div className="font-bold text-white text-sm">{fmtEur(b.stake)}</div>
+                                <div className="text-xs text-zinc-500">odds {parseFloat(b.totalOdds).toFixed(2)}</div>
+                              </div>
+                              <Badge cls={STATUS_BET[b.status]?.cls || "bg-zinc-800 text-zinc-400"} label={STATUS_BET[b.status]?.label || b.status} />
+                            </div>
+                          ))}
                       </div>
                     )}
                     {detailTab === "payments" && (
                       <div className="space-y-2">
-                        {detailModal.payments.map(p => (
-                          <div key={p.id} className="flex items-center gap-3 bg-zinc-800 rounded-lg px-4 py-3 text-sm">
-                            <Badge cls={STATUS_PAYMENT[p.status]?.cls || "bg-zinc-700 text-zinc-400"} label={STATUS_PAYMENT[p.status]?.label || p.status} />
-                            <Badge cls="bg-zinc-700 text-zinc-300" label={METHOD_LABEL[p.method] || p.method} />
-                            <span className="flex-1 text-zinc-500 text-xs font-mono">{p.reference ? `Ref: ${p.reference}` : p.orderId.slice(0, 20)}</span>
-                            <span className="font-bold text-green-400 shrink-0">{fmtEur(p.amount)}</span>
-                            <span className="text-zinc-600 text-xs shrink-0">{fmtDate(p.createdAt)}</span>
-                          </div>
-                        ))}
-                        {detailModal.payments.length === 0 && <div className="text-center text-zinc-600 py-8">Sem depósitos</div>}
+                        {detailModal.payments.length === 0 ? <div className="text-center text-zinc-600 py-8">Nenhum depósito</div> :
+                          detailModal.payments.map(p => (
+                            <div key={p.id} className="bg-zinc-800 rounded-lg p-3 flex items-center gap-3">
+                              <div className="flex-1 min-w-0">
+                                <div className="text-sm text-zinc-300">{METHOD_LABEL[p.method] || p.method}</div>
+                                <div className="text-xs text-zinc-600 mt-0.5">{fmtDate(p.createdAt)}</div>
+                              </div>
+                              <div className="font-bold text-green-400">{fmtEur(p.amount)}</div>
+                              <Badge cls={STATUS_PAYMENT[p.status]?.cls || "bg-zinc-800 text-zinc-400"} label={STATUS_PAYMENT[p.status]?.label || p.status} />
+                            </div>
+                          ))}
                       </div>
                     )}
                     {detailTab === "withdrawals" && (
                       <div className="space-y-2">
-                        {detailModal.withdrawals.map(w => (
-                          <div key={w.id} className="flex items-center gap-3 bg-zinc-800 rounded-lg px-4 py-3 text-sm">
-                            <Badge cls={STATUS_WITHDRAWAL[w.status]?.cls || "bg-zinc-700 text-zinc-400"} label={STATUS_WITHDRAWAL[w.status]?.label || w.status} />
-                            <span className="flex-1 text-zinc-500 text-xs font-mono">{w.iban}</span>
-                            <span className="font-bold text-white shrink-0">{fmtEur(w.amount)}</span>
-                            <span className="text-zinc-600 text-xs shrink-0">{fmtDate(w.createdAt)}</span>
-                          </div>
-                        ))}
-                        {detailModal.withdrawals.length === 0 && <div className="text-center text-zinc-600 py-8">Sem levantamentos</div>}
+                        {detailModal.withdrawals.length === 0 ? <div className="text-center text-zinc-600 py-8">Nenhum levantamento</div> :
+                          detailModal.withdrawals.map(w => (
+                            <div key={w.id} className="bg-zinc-800 rounded-lg p-3 flex items-center gap-3">
+                              <div className="flex-1 min-w-0">
+                                <div className="text-sm text-zinc-300 font-mono">{w.iban}</div>
+                                <div className="text-xs text-zinc-600 mt-0.5">{fmtDate(w.createdAt)}</div>
+                              </div>
+                              <div className="font-bold text-white">{fmtEur(w.amount)}</div>
+                              <Badge cls={STATUS_WITHDRAWAL[w.status]?.cls || "bg-zinc-800 text-zinc-400"} label={STATUS_WITHDRAWAL[w.status]?.label || w.status} />
+                            </div>
+                          ))}
                       </div>
                     )}
                   </div>
