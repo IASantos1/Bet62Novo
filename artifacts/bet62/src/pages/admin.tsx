@@ -351,9 +351,9 @@ export default function AdminPage() {
           </div>
           <form onSubmit={handleLogin} className="bg-zinc-900 border border-zinc-800 rounded-2xl p-6 space-y-4">
             <div className="space-y-2">
-              <Label className="text-zinc-400 text-sm">E-mail / Usuário Admin</Label>
+              <Label className="text-zinc-400 text-sm">Utilizador</Label>
               <Input type="text" placeholder="admin" value={loginUser} onChange={e => setLoginUser(e.target.value)}
-                className="bg-zinc-950 border-zinc-700 text-white" required autoComplete="username" />
+                className="bg-zinc-950 border-zinc-700 text-white" required autoComplete="off" />
             </div>
             <div className="space-y-2">
               <Label className="text-zinc-400 text-sm">Senha</Label>
