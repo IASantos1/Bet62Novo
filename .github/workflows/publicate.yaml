@@ -1,0 +1,14 @@
+name: Make Repository Public
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  make-public:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Update Repository to Public
+        uses: peterjgrainger/action-make-public@v1.0.0
+        with:
+          ghToken: ${{ secrets.GITHUB_TOKEN }}
