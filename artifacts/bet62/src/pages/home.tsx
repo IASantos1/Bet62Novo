@@ -839,7 +839,7 @@ function sportEmoji(sport?: string): string {
   if (sport === "tennis") return "🎾";
   if (sport === "hockey") return "🏒";
   if (sport === "volleyball") return "🏐";
-  if (sport === "esports") return "🎮";
+
   return "⚽";
 }
 
@@ -1751,7 +1751,7 @@ export default function Home() {
       if (sport === "hockey"     && match.status) return `${match.status}${extra?.clockStr ? ` · ${extra.clockStr}` : ""}`;
       if (sport === "tennis"     && match.status) return match.status;
       if (sport === "volleyball" && match.status) return match.status;
-      if (sport === "esports"    && match.status) return match.status; // e.g. "BO3"
+
       return minute === 45 ? "HT" : minute === 105 ? "ET" : `${minute}'`;
     })();
 
