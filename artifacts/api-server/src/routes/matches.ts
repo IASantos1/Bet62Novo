@@ -1923,16 +1923,34 @@ function buildTennisLiveMatches(
       const advantage = setsDiff * 0.22 + gamesDiff * 0.042 + ptDiff * 0.012 + servingBonus * 0.008;
       const factor    = Math.min(0.55, Math.abs(advantage));
 
-      const baseOdds = makeOddsFromTeams(p0.name, p1.name);
+      // Use real pre-match odds from cache (populated by getTennisOdds) as base.
+      // Fall back to a balanced model only if we have no cached data yet.
+      const cached = _tennisPreMatchOdds.get(_tennisPairKey(p0.name, p1.name));
+      const baseOdds = cached
+        ? { home: cached.home, draw: 0, away: cached.away }
+        : makeOddsFromTeams(p0.name, p1.name);
+
       const liveOdds = advantage === 0
         ? { home: baseOdds.home, draw: 0, away: baseOdds.away }
         : advantage > 0
-          ? { home: Math.max(1.04, +(baseOdds.home * (1 - factor)).toFixed(2)), draw: 0, away: Math.min(18, +(baseOdds.away * (1 + factor)).toFixed(2)) }
-          : { home: Math.min(18, +(baseOdds.home * (1 + factor)).toFixed(2)), draw: 0, away: Math.max(1.04, +(baseOdds.away * (1 - factor)).toFixed(2)) };
+          ? { home: Math.max(1.01, +(baseOdds.home * (1 - factor)).toFixed(2)), draw: 0, away: Math.min(50, +(baseOdds.away * (1 + factor)).toFixed(2)) }
+          : { home: Math.min(50, +(baseOdds.home * (1 + factor)).toFixed(2)), draw: 0, away: Math.max(1.01, +(baseOdds.away * (1 - factor)).toFixed(2)) };
 
       const liveHomeP = liveOdds.home > 0 && liveOdds.away > 0
         ? (1 / liveOdds.home) / (1 / liveOdds.home + 1 / liveOdds.away)
         : 0.5;
+
+      // Only tennis-relevant markets — no football goals/corners/cards
+      const tennisOnlyMarkets = {
+        doubleChance:    { homeOrDraw: 0, awayOrDraw: 0, homeOrAway: 0 },
+        bothTeamsScore:  { yes: 0, no: 0 },
+        totalGoals:      { over05: 0, under05: 0, over15: 0, under15: 0, over25: 0, under25: 0, over35: 0, under35: 0, over45: 0, under45: 0, over55: 0, under55: 0, over65: 0, under65: 0 },
+        handicap:        { homeMinusOne: 0, awayPlusOne: 0, homeMinusOneHalf: 0, awayPlusOneHalf: 0 },
+        halfTime:        { home: 0, draw: 0, away: 0 },
+        firstGoal:       { home: 0, noGoal: 0, away: 0 },
+        tennisExtra:     computeTennisExtras(liveHomeP),
+      } as unknown as AdvancedMarkets;
+
       result.push({
         id:          `tennis-live-${m.id}`,
         home:        p0.name,
@@ -1944,9 +1962,9 @@ function buildTennisLiveMatches(
         awayScore,
         minute:      setNum,
         status:      m.status,
-        hasRealOdds: true,
+        hasRealOdds: !!cached,
         odds:        liveOdds,
-        markets:     { ...makeAdvancedMarketsFromTeams(p0.name, p1.name), tennisExtra: computeTennisExtras(liveHomeP) } as unknown as AdvancedMarkets,
+        markets:     tennisOnlyMarkets,
         events:      [],
         _liveExtra:  { sets, currentPoints: [hPt, aPt], tennisStats: statsMap.get(m.id) },
       });
@@ -2954,6 +2972,14 @@ const _tennisMap = new Map<number, _TennisSt>();
 const _volleyMap = new Map<number, _VolleySt>();
 const _hockeyMap = new Map<number, _HockeySt>();
 
+// Pre-match tennis odds cache: keyed by sorted-surname pair so live matches
+// can use the last known real odds even after status changes to "Set 1" etc.
+const _tennisPreMatchOdds = new Map<string, { home: number; away: number }>();
+function _tennisPairKey(n0: string, n1: string): string {
+  const sur = (n: string) => n.replace(/^([A-Z]\.\s*)+/, "").trim().toLowerCase();
+  return [sur(n0), sur(n1)].sort().join("|");
+}
+
 function _getBball(si: number): _BballSt {
   const dk = _getDay();
   let s = _bballMap.get(si);
@@ -3283,6 +3309,8 @@ router.get("/live", async (_req, res) => {
       buildBasketballUpcoming().catch(() => empty),
       buildHockeyUpcoming().catch(() => empty),
       buildVolleyballUpcoming().catch(() => empty),
+      // Populate _tennisPreMatchOdds cache so buildTennisLiveMatches uses real base odds
+      getTennisOdds().catch(() => []),
     ]);
     const nhlMatches    = buildNHLLiveMatches(nhlTournaments);
     const nbaMatches    = buildNBALiveMatches(nbaTournaments);
@@ -5740,9 +5768,9 @@ async function getTennisOdds(): Promise<TennisOddsEntry[]> {
     const matches = Array.isArray(rawMatches) ? rawMatches : [rawMatches];
     for (const m of matches) {
       if (!m.id || seen.has(m.id)) continue;
-      // Include upcoming/scheduled matches: "Not Started", "0" (pre-match), "1" (scheduled)
-      const UPCOMING_STATUSES = new Set(["Not Started", "0", "1"]);
-      if (!UPCOMING_STATUSES.has(m.status ?? "")) continue;
+      // Include upcoming AND in-play matches; exclude only Finished/retired/unknown
+      const EXCLUDE_STATUSES = new Set(["Finished", "9", "Retired", "Walkover", "Cancelled"]);
+      if (EXCLUDE_STATUSES.has(m.status ?? "")) continue;
       seen.add(m.id);
       const rawTypes = m.odds?.type;
       const types: RawType[] = !rawTypes ? [] : Array.isArray(rawTypes) ? rawTypes : [rawTypes];
@@ -5811,6 +5839,10 @@ async function getTennisOdds(): Promise<TennisOddsEntry[]> {
       };
 
       const p = m.player ?? [];
+      // Cache pre-match/in-play odds by player pair so buildTennisLiveMatches can use them
+      if (p[0]?.name && p[1]?.name) {
+        _tennisPreMatchOdds.set(_tennisPairKey(p[0].name, p[1].name), { home: h, away: a });
+      }
       results.push({
         matchId: m.id,
         date: m.date ?? "", time: m.time ?? "",
