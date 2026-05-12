@@ -1890,13 +1890,33 @@ function buildTennisLiveMatches(
       else if (aGs === "AD")              { hPt = 40;   aPt = "AD"; }
       else                                { hPt = hGs;  aPt = aGs; }
 
-      const diff = homeScore - awayScore;
+      // ── Live odds: react to sets + games within set + current game points ──
+      const setsDiff  = homeScore - awayScore; // sets won difference
+
+      // Games in current set (last entry of sets array = set in progress)
+      const curSetH   = sets.length > 0 ? (sets[sets.length - 1]?.[0] ?? 0) : 0;
+      const curSetA   = sets.length > 0 ? (sets[sets.length - 1]?.[1] ?? 0) : 0;
+      const gamesDiff = curSetH - curSetA;
+
+      // Current game point values: 0→0, 15→1, 30→2, 40→3, AD→4
+      const PT: Record<string, number> = { "": 0, "0": 0, "15": 1, "30": 2, "40": 3, "AD": 4 };
+      const hPtN  = PT[p0.game_score] ?? 0;
+      const aPtN  = PT[p1.game_score] ?? 0;
+      const ptDiff = hPtN - aPtN;
+
+      // Serving advantage: server has a slight edge (~1 pt weight)
+      const servingBonus = p0.serve === "True" ? 0.5 : p1.serve === "True" ? -0.5 : 0;
+
+      // Weighted composite: 1 set ≈ 6 games ≈ 24 pts; scale accordingly
+      const advantage = setsDiff * 0.22 + gamesDiff * 0.042 + ptDiff * 0.012 + servingBonus * 0.008;
+      const factor    = Math.min(0.55, Math.abs(advantage));
+
       const baseOdds = makeOddsFromTeams(p0.name, p1.name);
-      const factor   = Math.min(0.35, Math.abs(diff) * 0.12);
-      const liveOdds = diff === 0 ? { home: baseOdds.home, draw: 0, away: baseOdds.away }
-        : diff > 0
-          ? { home: Math.max(1.04, +(baseOdds.home * (1 - factor)).toFixed(2)), draw: 0, away: Math.min(15, +(baseOdds.away * (1 + factor)).toFixed(2)) }
-          : { home: Math.min(15, +(baseOdds.home * (1 + factor)).toFixed(2)), draw: 0, away: Math.max(1.04, +(baseOdds.away * (1 - factor)).toFixed(2)) };
+      const liveOdds = advantage === 0
+        ? { home: baseOdds.home, draw: 0, away: baseOdds.away }
+        : advantage > 0
+          ? { home: Math.max(1.04, +(baseOdds.home * (1 - factor)).toFixed(2)), draw: 0, away: Math.min(18, +(baseOdds.away * (1 + factor)).toFixed(2)) }
+          : { home: Math.min(18, +(baseOdds.home * (1 + factor)).toFixed(2)), draw: 0, away: Math.max(1.04, +(baseOdds.away * (1 - factor)).toFixed(2)) };
 
       const liveHomeP = liveOdds.home > 0 && liveOdds.away > 0
         ? (1 / liveOdds.home) / (1 / liveOdds.home + 1 / liveOdds.away)
