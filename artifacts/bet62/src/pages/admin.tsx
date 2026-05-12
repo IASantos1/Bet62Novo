@@ -7,7 +7,7 @@ import {
   ChevronUp, ChevronDown, CheckCircle, XCircle, Clock,
   Zap, RefreshCw, Eye, EyeOff, ShieldCheck, ArrowUpCircle,
   Ban, Gift, CreditCard, AlertCircle, ChevronRight, X,
-  Wallet, BadgeCheck, FileText, UserX, UserCheck
+  Wallet, BadgeCheck, FileText, UserX, UserCheck, Download
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -143,6 +143,11 @@ export default function AdminPage() {
   const [updatingWithdrawal, setUpdatingWithdrawal] = useState<number | null>(null);
   const [updatingBet, setUpdatingBet] = useState<number | null>(null);
   const [creditingPayment, setCreditingPayment] = useState<number | null>(null);
+
+  const [exportType, setExportType] = useState<"bets" | "deposits" | "withdrawals">("bets");
+  const [exportFrom, setExportFrom] = useState("");
+  const [exportTo, setExportTo] = useState("");
+  const [exporting, setExporting] = useState(false);
 
   const authHeader = { Authorization: `Bearer ${token}` };
 
@@ -308,6 +313,32 @@ export default function AdminPage() {
       fetchPayments(); fetchStats();
     } catch { toast.error("Erro ao creditar pagamento"); }
     finally { setCreditingPayment(null); }
+  };
+
+  const handleExport = async () => {
+    setExporting(true);
+    try {
+      const params = new URLSearchParams({ type: exportType });
+      if (exportFrom) params.set("from", exportFrom);
+      if (exportTo) params.set("to", exportTo);
+      const res = await fetch(`/api/admin/export?${params.toString()}`, { headers: authHeader });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        toast.error((err as { error?: string }).error || "Erro ao exportar");
+        return;
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      const disposition = res.headers.get("Content-Disposition") || "";
+      const match = disposition.match(/filename="([^"]+)"/);
+      a.download = match ? match[1] : `bet62_${exportType}.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+      toast.success("Relatório CSV exportado com sucesso!");
+    } catch { toast.error("Erro ao exportar relatório"); }
+    finally { setExporting(false); }
   };
 
   const toggleSort = (key: keyof AdminUser) =>
@@ -508,6 +539,44 @@ export default function AdminPage() {
                           </div>
                         ))}
                       </div>
+                    </div>
+
+                    <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-5">
+                      <h3 className="font-bold text-sm text-zinc-300 mb-4 flex items-center gap-2">
+                        <Download size={16} className="text-red-500" /> Exportar Relatório CSV
+                      </h3>
+                      <div className="flex flex-col sm:flex-row gap-3 items-end">
+                        <div className="flex gap-1">
+                          {([
+                            { value: "bets", label: "Apostas" },
+                            { value: "deposits", label: "Depósitos" },
+                            { value: "withdrawals", label: "Levantamentos" },
+                          ] as const).map(opt => (
+                            <button key={opt.value} onClick={() => setExportType(opt.value)}
+                              className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${exportType === opt.value ? "bg-red-600 text-white" : "bg-zinc-800 text-zinc-400 hover:bg-zinc-700"}`}>
+                              {opt.label}
+                            </button>
+                          ))}
+                        </div>
+                        <div className="flex gap-2 flex-1">
+                          <div className="flex-1 min-w-0">
+                            <Label className="text-zinc-500 text-xs mb-1 block">De</Label>
+                            <Input type="date" value={exportFrom} onChange={e => setExportFrom(e.target.value)}
+                              className="bg-zinc-800 border-zinc-700 text-white text-xs h-8 w-full" />
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <Label className="text-zinc-500 text-xs mb-1 block">Até</Label>
+                            <Input type="date" value={exportTo} onChange={e => setExportTo(e.target.value)}
+                              className="bg-zinc-800 border-zinc-700 text-white text-xs h-8 w-full" />
+                          </div>
+                        </div>
+                        <Button onClick={handleExport} disabled={exporting}
+                          className="bg-red-600 hover:bg-red-700 text-white font-bold h-8 px-4 text-xs shrink-0">
+                          {exporting ? <Loader2 size={14} className="animate-spin mr-1" /> : <Download size={14} className="mr-1" />}
+                          Exportar CSV
+                        </Button>
+                      </div>
+                      <p className="text-xs text-zinc-600 mt-2">Sem datas definidas exporta todos os registos. O ficheiro inclui BOM UTF-8 para compatibilidade com Excel.</p>
                     </div>
                   </>
                 )}

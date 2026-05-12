@@ -1,9 +1,26 @@
 import { Router, type IRouter, type Response, type Request } from "express";
 import jwt from "jsonwebtoken";
 import { db, usersTable, betsTable, paymentsTable, withdrawalsTable } from "@workspace/db";
-import { eq, desc, count, sum, sql } from "drizzle-orm";
+import { eq, desc, count, sum, sql, gte, lte, and } from "drizzle-orm";
 import { adminMiddleware, type AdminRequest } from "../middlewares/adminAuth";
 import { logger } from "../lib/logger";
+
+function escapeCsv(val: unknown): string {
+  if (val === null || val === undefined) return "";
+  let s = String(val);
+  // Neutralize potential formula injection (=, +, -, @, tab, CR at start)
+  if (/^[=+\-@\t\r]/.test(s)) {
+    s = "'" + s;
+  }
+  if (s.includes(",") || s.includes('"') || s.includes("\n") || s.startsWith("'")) {
+    return `"${s.replace(/"/g, '""')}"`;
+  }
+  return s;
+}
+
+function buildCsvRow(fields: unknown[]): string {
+  return fields.map(escapeCsv).join(",");
+}
 
 const router: IRouter = Router();
 
@@ -357,6 +374,144 @@ router.post("/payments/:id/credit", adminMiddleware, async (req: AdminRequest, r
   } catch (err) {
     logger.error({ err }, "Admin payment credit error");
     res.status(500).json({ error: "Erro ao creditar pagamento" });
+  }
+});
+
+// GET /api/admin/export?type=bets|deposits|withdrawals&from=YYYY-MM-DD&to=YYYY-MM-DD
+router.get("/export", adminMiddleware, async (req: AdminRequest, res: Response): Promise<void> => {
+  const type = String(req.query["type"] || "bets");
+  const fromStr = String(req.query["from"] || "");
+  const toStr = String(req.query["to"] || "");
+
+  const validTypes = ["bets", "deposits", "withdrawals"];
+  if (!validTypes.includes(type)) {
+    res.status(400).json({ error: "Tipo inválido. Use: bets, deposits ou withdrawals" });
+    return;
+  }
+
+  const fromDate = fromStr ? new Date(`${fromStr}T00:00:00Z`) : null;
+  const toDate = toStr ? new Date(`${toStr}T23:59:59Z`) : null;
+
+  if (fromDate && isNaN(fromDate.getTime())) { res.status(400).json({ error: "Data 'from' inválida" }); return; }
+  if (toDate && isNaN(toDate.getTime())) { res.status(400).json({ error: "Data 'to' inválida" }); return; }
+  if (fromDate && toDate && fromDate > toDate) { res.status(400).json({ error: "Data 'from' não pode ser posterior a 'to'" }); return; }
+
+  try {
+    let csvLines: string[] = [];
+    const filename = `bet62_${type}_${fromStr || "all"}_${toStr || "all"}.csv`;
+
+    if (type === "bets") {
+      const conditions = [];
+      if (fromDate) conditions.push(gte(betsTable.createdAt, fromDate));
+      if (toDate) conditions.push(lte(betsTable.createdAt, toDate));
+
+      const rows = await db
+        .select({
+          id: betsTable.id,
+          userId: betsTable.userId,
+          userName: usersTable.name,
+          userEmail: usersTable.email,
+          matchTitle: betsTable.matchTitle,
+          stake: betsTable.stake,
+          potentialWin: betsTable.potentialWin,
+          totalOdds: betsTable.totalOdds,
+          status: betsTable.status,
+          createdAt: betsTable.createdAt,
+        })
+        .from(betsTable)
+        .leftJoin(usersTable, eq(betsTable.userId, usersTable.id))
+        .where(conditions.length > 0 ? and(...conditions) : undefined)
+        .orderBy(desc(betsTable.createdAt));
+
+      csvLines.push(buildCsvRow(["ID", "ID Utilizador", "Nome", "Email", "Aposta", "Valor (€)", "Ganho Potencial (€)", "Odds", "Status", "Data"]));
+      for (const r of rows) {
+        csvLines.push(buildCsvRow([
+          r.id, r.userId, r.userName, r.userEmail,
+          r.matchTitle,
+          parseFloat(r.stake).toFixed(2),
+          parseFloat(r.potentialWin).toFixed(2),
+          parseFloat(r.totalOdds).toFixed(2),
+          r.status,
+          new Date(r.createdAt).toISOString(),
+        ]));
+      }
+    } else if (type === "deposits") {
+      const conditions = [];
+      if (fromDate) conditions.push(gte(paymentsTable.createdAt, fromDate));
+      if (toDate) conditions.push(lte(paymentsTable.createdAt, toDate));
+
+      const rows = await db
+        .select({
+          id: paymentsTable.id,
+          orderId: paymentsTable.orderId,
+          userId: paymentsTable.userId,
+          userName: usersTable.name,
+          userEmail: usersTable.email,
+          amount: paymentsTable.amount,
+          method: paymentsTable.method,
+          status: paymentsTable.status,
+          entity: paymentsTable.entity,
+          reference: paymentsTable.reference,
+          createdAt: paymentsTable.createdAt,
+        })
+        .from(paymentsTable)
+        .leftJoin(usersTable, eq(paymentsTable.userId, usersTable.id))
+        .where(conditions.length > 0 ? and(...conditions) : undefined)
+        .orderBy(desc(paymentsTable.createdAt));
+
+      csvLines.push(buildCsvRow(["ID", "Order ID", "ID Utilizador", "Nome", "Email", "Valor (€)", "Método", "Status", "Entidade", "Referência", "Data"]));
+      for (const r of rows) {
+        csvLines.push(buildCsvRow([
+          r.id, r.orderId, r.userId, r.userName, r.userEmail,
+          parseFloat(r.amount).toFixed(2),
+          r.method, r.status,
+          r.entity, r.reference,
+          new Date(r.createdAt).toISOString(),
+        ]));
+      }
+    } else if (type === "withdrawals") {
+      const conditions = [];
+      if (fromDate) conditions.push(gte(withdrawalsTable.createdAt, fromDate));
+      if (toDate) conditions.push(lte(withdrawalsTable.createdAt, toDate));
+
+      const rows = await db
+        .select({
+          id: withdrawalsTable.id,
+          userId: withdrawalsTable.userId,
+          userName: usersTable.name,
+          userEmail: usersTable.email,
+          amount: withdrawalsTable.amount,
+          iban: withdrawalsTable.iban,
+          holderName: withdrawalsTable.holderName,
+          nif: withdrawalsTable.nif,
+          status: withdrawalsTable.status,
+          notes: withdrawalsTable.notes,
+          createdAt: withdrawalsTable.createdAt,
+        })
+        .from(withdrawalsTable)
+        .leftJoin(usersTable, eq(withdrawalsTable.userId, usersTable.id))
+        .where(conditions.length > 0 ? and(...conditions) : undefined)
+        .orderBy(desc(withdrawalsTable.createdAt));
+
+      csvLines.push(buildCsvRow(["ID", "ID Utilizador", "Nome", "Email", "Valor (€)", "IBAN", "Titular", "NIF", "Status", "Notas", "Data"]));
+      for (const r of rows) {
+        csvLines.push(buildCsvRow([
+          r.id, r.userId, r.userName, r.userEmail,
+          parseFloat(r.amount).toFixed(2),
+          r.iban, r.holderName, r.nif,
+          r.status, r.notes,
+          new Date(r.createdAt).toISOString(),
+        ]));
+      }
+    }
+
+    const csv = csvLines.join("\r\n");
+    res.setHeader("Content-Type", "text/csv; charset=utf-8");
+    res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+    res.send("\uFEFF" + csv);
+  } catch (err) {
+    logger.error({ err }, "Admin export error");
+    res.status(500).json({ error: "Erro ao gerar relatório" });
   }
 });
 
