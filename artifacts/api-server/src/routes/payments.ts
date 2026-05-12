@@ -3,6 +3,7 @@ import { db, usersTable, paymentsTable } from "@workspace/db";
 import { eq, sql } from "drizzle-orm";
 import { authMiddleware, type AuthRequest } from "../middlewares/auth";
 import { logger } from "../lib/logger";
+import { sendDepositConfirmed } from "../lib/mailer";
 import { randomUUID } from "crypto";
 
 const router: IRouter = Router();
@@ -245,6 +246,19 @@ router.get("/callback", async (req: Request, res: Response): Promise<void> => {
     });
 
     logger.info({ orderId, userId: payment.userId, amount: payment.amount }, "Payment confirmed and balance credited");
+
+    // Fire-and-forget deposit confirmation email
+    db.select({ email: usersTable.email, name: usersTable.name })
+      .from(usersTable)
+      .where(eq(usersTable.id, payment.userId))
+      .limit(1)
+      .then(([user]) => {
+        if (user) {
+          sendDepositConfirmed(user.email, user.name, payment.amount, payment.method).catch(() => {});
+        }
+      })
+      .catch((err) => { logger.error({ err, userId: payment.userId }, "Failed to look up user for deposit email"); });
+
     res.send("OK");
   } catch (err) {
     logger.error({ err, orderId }, "Callback processing error");
@@ -267,6 +281,18 @@ router.get("/card-return", async (req: Request, res: Response): Promise<void> =>
             balance: sql`${usersTable.balance} + ${payment.amount}`,
           }).where(eq(usersTable.id, payment.userId));
         });
+
+        // Fire-and-forget deposit confirmation email
+        db.select({ email: usersTable.email, name: usersTable.name })
+          .from(usersTable)
+          .where(eq(usersTable.id, payment.userId))
+          .limit(1)
+          .then(([user]) => {
+            if (user) {
+              sendDepositConfirmed(user.email, user.name, payment.amount, payment.method).catch(() => {});
+            }
+          })
+          .catch((err) => { logger.error({ err, userId: payment.userId }, "Failed to look up user for deposit email"); });
       }
     } catch (err) {
       logger.error({ err, orderId }, "Card return processing error");

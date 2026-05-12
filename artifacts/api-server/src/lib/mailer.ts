@@ -78,6 +78,49 @@ function baseTemplate(content: string): string {
 </html>`;
 }
 
+export async function sendDepositConfirmed(
+  email: string,
+  name: string,
+  amount: string,
+  method: string,
+): Promise<void> {
+  const transporter = createTransporter();
+  if (!transporter) {
+    logger.warn("SMTP not configured — skipping deposit confirmed email");
+    return;
+  }
+
+  const methodLabel: Record<string, string> = {
+    multibanco: "Multibanco",
+    mbway: "MB WAY",
+    card: "Cartão de Crédito/Débito",
+  };
+  const methodDisplay = methodLabel[method] ?? method;
+
+  const html = baseTemplate(`
+    <p>Olá <strong>${escapeHtml(name)}</strong>,</p>
+    <p>O seu depósito foi <span class="status-approved">confirmado</span> e o saldo foi creditado na sua conta BET62.</p>
+    <div class="amount-box">
+      <div class="label">Valor depositado</div>
+      <div class="value">€${formatAmount(amount)}</div>
+    </div>
+    <p><strong>Método de pagamento:</strong> ${escapeHtml(methodDisplay)}</p>
+    <p>O saldo já está disponível para utilizar nas suas apostas. Boas apostas!</p>
+  `);
+
+  try {
+    await transporter.sendMail({
+      from: FROM,
+      to: email,
+      subject: `✅ Depósito de €${formatAmount(amount)} confirmado — BET62`,
+      html,
+    });
+    logger.info({ email, amount, method }, "Deposit confirmed email sent");
+  } catch (err) {
+    logger.error({ err, email }, "Failed to send deposit confirmed email");
+  }
+}
+
 export async function sendWithdrawalApproved(
   email: string,
   name: string,
