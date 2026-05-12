@@ -4,7 +4,7 @@ import { toast } from "sonner";
 import {
   Menu, X, Trophy, Activity, Gift,
   LogOut, User, History, Loader2, Zap, TrendingUp,
-  ChevronRight, ChevronLeft, ChevronDown, AlertCircle, BarChart2, Wallet, ArrowDownCircle, ArrowUpCircle, Plus, Clock,
+  ChevronRight, ChevronLeft, ChevronDown, AlertCircle, BarChart2, Wallet, ArrowDownCircle, ArrowUpCircle, Plus, Clock, Smartphone,
 } from "lucide-react";
 import ProfileTab from "@/components/ProfileTab";
 import { Button } from "@/components/ui/button";
@@ -875,6 +875,9 @@ export default function Home() {
   const [isPlacingBet, setIsPlacingBet] = useState(false);
   const [betMode, setBetMode] = useState<"simples" | "multipla">("multipla");
   const [selectedLeague, setSelectedLeague] = useState<string | null>(null);
+  const [showAppBanner, setShowAppBanner] = useState(() => {
+    try { return !localStorage.getItem("bet62_app_banner_dismissed"); } catch { return true; }
+  });
 
   // Auth form state
   const [loginEmail, setLoginEmail] = useState("");
@@ -5948,6 +5951,58 @@ export default function Home() {
           </Drawer>
         )}
       </div>
+
+      {/* MOBILE APP DOWNLOAD BANNER */}
+      <AnimatePresence>
+        {showAppBanner && (
+          <motion.div
+            initial={{ y: 80, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            exit={{ y: 80, opacity: 0 }}
+            transition={{ type: "spring", bounce: 0.2, duration: 0.5 }}
+            className="fixed bottom-0 left-0 right-0 z-50 px-4 pb-4 pt-2 pointer-events-none"
+          >
+            <div className="pointer-events-auto max-w-lg mx-auto bg-zinc-900 border border-zinc-700 rounded-2xl shadow-2xl shadow-black/60 p-4 flex items-center gap-3">
+              <div className="flex-shrink-0 w-11 h-11 bg-red-600 rounded-xl flex items-center justify-center shadow-lg shadow-red-900/40">
+                <Smartphone size={22} className="text-white" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-bold text-white leading-tight">Bet62 na tua bolso</p>
+                <p className="text-xs text-zinc-400 mt-0.5 leading-tight">Apostas ao vivo, notificações e muito mais — disponível para iOS e Android.</p>
+              </div>
+              <div className="flex items-center gap-2 flex-shrink-0">
+                <a
+                  href="https://apps.apple.com"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  onClick={() => { localStorage.setItem("bet62_app_banner_dismissed", "1"); setShowAppBanner(false); }}
+                  className="flex flex-col items-center justify-center bg-zinc-800 hover:bg-zinc-700 border border-zinc-600 rounded-lg px-2.5 py-1.5 transition-colors"
+                >
+                  <span className="text-[9px] text-zinc-400 leading-none">Disponível na</span>
+                  <span className="text-[11px] font-bold text-white leading-tight">App Store</span>
+                </a>
+                <a
+                  href="https://play.google.com"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  onClick={() => { localStorage.setItem("bet62_app_banner_dismissed", "1"); setShowAppBanner(false); }}
+                  className="flex flex-col items-center justify-center bg-zinc-800 hover:bg-zinc-700 border border-zinc-600 rounded-lg px-2.5 py-1.5 transition-colors"
+                >
+                  <span className="text-[9px] text-zinc-400 leading-none">Obtém no</span>
+                  <span className="text-[11px] font-bold text-white leading-tight">Google Play</span>
+                </a>
+                <button
+                  onClick={() => { localStorage.setItem("bet62_app_banner_dismissed", "1"); setShowAppBanner(false); }}
+                  className="w-7 h-7 rounded-full bg-zinc-800 hover:bg-zinc-700 flex items-center justify-center text-zinc-400 hover:text-white transition-colors ml-1"
+                  aria-label="Fechar"
+                >
+                  <X size={14} />
+                </button>
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* FOOTER */}
       <footer className="border-t border-zinc-900 bg-zinc-950 py-12 mt-auto">
