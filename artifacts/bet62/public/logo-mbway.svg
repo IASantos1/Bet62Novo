@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 44" role="img" aria-label="MB WAY">
+  <!-- Red background -->
+  <rect width="120" height="44" rx="8" fill="#E30613"/>
+  <!-- "mb" italic bold text -->
+  <text x="9" y="30" font-family="Arial Black,Arial,sans-serif" font-size="22" font-weight="900" font-style="italic" fill="#FFFFFF" letter-spacing="-0.5">mb</text>
+  <!-- Divider -->
+  <rect x="53" y="9" width="1.5" height="26" rx="0.75" fill="rgba(255,255,255,0.35)"/>
+  <!-- "WAY" bold text -->
+  <text x="59" y="29" font-family="Arial Black,Arial,sans-serif" font-size="17" font-weight="900" fill="#FFFFFF" letter-spacing="1.5">WAY</text>
+</svg>

@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 44" role="img" aria-label="Visa Mastercard">
+  <!-- Dark background -->
+  <rect width="120" height="44" rx="8" fill="#1C1C2E"/>
+  <!-- VISA text (left) -->
+  <text x="8" y="29" font-family="Arial,sans-serif" font-size="18" font-weight="900" font-style="italic" fill="#1A1FE6" letter-spacing="-0.5">VISA</text>
+  <!-- Mastercard: red circle -->
+  <circle cx="87" cy="22" r="11" fill="#EB001B"/>
+  <!-- Mastercard: amber circle -->
+  <circle cx="102" cy="22" r="11" fill="#F79E1B"/>
+  <!-- Overlap area (blend colour) -->
+  <clipPath id="rc"><circle cx="87" cy="22" r="11"/></clipPath>
+  <circle cx="102" cy="22" r="11" fill="#FF5F00" clip-path="url(#rc)"/>
+</svg>
