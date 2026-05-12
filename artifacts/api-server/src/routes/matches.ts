@@ -3544,14 +3544,14 @@ async function buildHockeyUpcoming(): Promise<UpcomingMatch[]> {
     const tomorrowStr = fmtDate(tomorrowD);
 
     for (const t of liveData) {
-      const tMatches = Array.isArray(t.match) ? t.match : [t.match];
+      const tMatches = Array.isArray(t.match) ? t.match : (t.match ? [t.match] : []);
       for (const m of tMatches) {
-        if (m.status !== "Not Started") continue;
+        if (!m || m.status !== "Not Started") continue;
         if (m.date !== todayStr && m.date !== tomorrowStr) continue;
+        if (!m.date || isMatchTimePast(m.date, m.time ?? "")) continue;
         const key = `${m.home.name}|${m.away.name}`;
         if (seen.has(key)) continue;
         seen.add(key);
-        if (!m.date || isMatchTimePast(m.date, m.time ?? "")) continue;
         const realOdds = oddsMap.get(key);
         results.push({
           id: `nhl-live-${m.id}`,
