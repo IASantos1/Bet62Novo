@@ -1710,11 +1710,12 @@ function buildNBALiveMatches(tournaments: NBATournament[]): LiveMatchState[] {
     for (const m of matches) {
       if (!m?.status) continue;
       const st = m.status;
-      const isLive = NBA_LIVE_STATUSES.has(st) || (st !== "Finished" && st !== "Not Started" && st !== "Postponed" && st !== "Cancelled");
+      const isFinished = st === "Finished" || st === "Ended" || st === "Closed";
+      if (isFinished) continue; // never show finished games in live section
       const isNotStarted = st === "Not Started";
-      const isFinished = st === "Finished";
-      if (!isLive && !isNotStarted && !isFinished) continue;
-      if ((isNotStarted || isFinished) && m.date && m.date !== todayStr) continue;
+      const isLive = NBA_LIVE_STATUSES.has(st) || (!isNotStarted && st !== "Postponed" && st !== "Cancelled");
+      if (!isLive && !isNotStarted) continue;
+      if (isNotStarted && m.date && m.date !== todayStr) continue;
 
       const homeScore = parseInt(m.home.totalscore) || 0;
       const awayScore = parseInt(m.away.totalscore) || 0;
@@ -1941,9 +1942,10 @@ function buildVolleyballLiveMatches(tournaments: VolleyTournament[]): LiveMatchS
       const isNotStarted = m.status === "Not Started";
       const isFinished   = m.status === "Finished";
 
-      if (!isLive && !isNotStarted && !isFinished) continue;
-      // Non-live matches: only include today's fixtures to avoid stale historical data
-      if (!isLive && m.date !== todayStr) continue;
+      if (isFinished) continue; // never show finished games in live section
+      if (!isLive && !isNotStarted) continue;
+      // Non-live: only today's fixtures
+      if (isNotStarted && m.date !== todayStr) continue;
 
       const homeScore = parseInt(home.totalscore) || 0;
       const awayScore = parseInt(away.totalscore) || 0;
