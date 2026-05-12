@@ -166,6 +166,27 @@ const TEAM_BANNERS: Record<string, string> = {
   "Konyaspor": "/banners/konyaspor.jpg",
   "Atiker Konyaspor": "/banners/konyaspor.jpg",
   "Kocaelispor": "/banners/kocaelispor.jpg",
+  // ── EFL Championship ──
+  "Birmingham City": "/banners/birmingham.jpg",
+  "Birmingham": "/banners/birmingham.jpg",
+  "Southampton": "/banners/southampton.jpg",
+  "Ipswich Town": "/banners/ipswich.jpg",
+  "Ipswich": "/banners/ipswich.jpg",
+  "Wrexham": "/banners/wrexham.jpg",
+  "Wrexham AFC": "/banners/wrexham.jpg",
+  "Coventry City": "/banners/coventry.jpg",
+  "Coventry": "/banners/coventry.jpg",
+  "Sheffield United": "/banners/sheffield-utd.jpg",
+  "Sheffield Utd": "/banners/sheffield-utd.jpg",
+  "Sheff Utd": "/banners/sheffield-utd.jpg",
+  "Middlesbrough": "/banners/middlesbrough.jpg",
+  "Boro": "/banners/middlesbrough.jpg",
+  "Leicester City": "/banners/leicester.jpg",
+  "Leicester": "/banners/leicester.jpg",
+  "Derby County": "/banners/derby.jpg",
+  "Derby": "/banners/derby.jpg",
+  "Hull City": "/banners/hull.jpg",
+  "Hull": "/banners/hull.jpg",
 };
 
 const LEAGUE_FLAGS: Record<string, string> = {
