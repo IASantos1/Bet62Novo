@@ -377,36 +377,111 @@ const RIVALRY_TAGS: Record<string, string> = {
 
 // ─── Sidebar tree data ────────────────────────────────────────────────────────
 
+/** Flexible league name matching — handles "Country: League" API prefixes and substring containment */
+function leagueMatchesFilter(matchLeague: string, filterLeague: string): boolean {
+  if (!filterLeague) return true;
+  const ml = matchLeague.toLowerCase().trim();
+  const fl = filterLeague.toLowerCase().trim();
+  if (ml === fl) return true;
+  if (ml.includes(fl)) return true;
+  const mlClean = ml.replace(/^[^:]+:\s*/, "").trim();
+  return mlClean === fl || mlClean.includes(fl);
+}
+
 const FOOTBALL_COUNTRIES: { name: string; flag: string; leagues: string[] }[] = [
-  { name: "Europa", flag: "⭐", leagues: ["Champions League", "Europa League", "Conference League"] },
-  { name: "Inglaterra", flag: "🏴󠁧󠁢󠁥󠁮󠁧󠁿", leagues: ["Premier League", "EFL Championship", "League One", "FA Cup"] },
-  { name: "Espanha", flag: "🇪🇸", leagues: ["La Liga", "LaLiga Hypermotion", "Copa del Rey"] },
-  { name: "Alemanha", flag: "🇩🇪", leagues: ["Bundesliga", "2. Bundesliga", "DFB-Pokal"] },
-  { name: "Itália", flag: "🇮🇹", leagues: ["Serie A", "Serie B", "Coppa Italia"] },
-  { name: "França", flag: "🇫🇷", leagues: ["Ligue 1", "Ligue 2", "Coupe de France"] },
-  { name: "Portugal", flag: "🇵🇹", leagues: ["Liga Portugal", "Liga Portugal 2", "Taça de Portugal"] },
-  { name: "Holanda", flag: "🇳🇱", leagues: ["Eredivisie", "Eerste Divisie"] },
-  { name: "Bélgica", flag: "🇧🇪", leagues: ["Jupiler Pro League", "Belgian Cup"] },
-  { name: "Turquia", flag: "🇹🇷", leagues: ["Süper Lig", "TFF First League", "Turkish Cup"] },
-  { name: "Grécia", flag: "🇬🇷", leagues: ["Super League Greece", "Super League 2", "Greek Cup"] },
-  { name: "Áustria", flag: "🇦🇹", leagues: ["Austrian Bundesliga", "Austrian Cup"] },
-  { name: "Escócia", flag: "🏴󠁧󠁢󠁳󠁣󠁴󠁿", leagues: ["Scottish Premiership", "Scottish Championship", "Scottish Cup"] },
-  { name: "Suíça", flag: "🇨🇭", leagues: ["Swiss Super League", "Challenge League"] },
-  { name: "Dinamarca", flag: "🇩🇰", leagues: ["Danish Superliga", "Danish 1st Division"] },
-  { name: "Noruega", flag: "🇳🇴", leagues: ["Eliteserien", "Norwegian Cup"] },
-  { name: "Suécia", flag: "🇸🇪", leagues: ["Allsvenskan", "Superettan"] },
+  { name: "Europa", flag: "⭐", leagues: ["Champions League", "Europa League", "Conference League", "UEFA Super Cup"] },
+  { name: "Inglaterra", flag: "🏴󠁧󠁢󠁥󠁮󠁧󠁿", leagues: ["Premier League", "EFL Championship", "League One", "League Two", "FA Cup", "EFL Cup", "Community Shield"] },
+  { name: "Espanha", flag: "🇪🇸", leagues: ["La Liga", "LaLiga Hypermotion", "Copa del Rey", "Supercopa de España"] },
+  { name: "Alemanha", flag: "🇩🇪", leagues: ["Bundesliga", "2. Bundesliga", "3. Liga", "DFB-Pokal", "DFL-Supercup"] },
+  { name: "Itália", flag: "🇮🇹", leagues: ["Serie A", "Serie B", "Serie C", "Coppa Italia", "Supercoppa Italiana"] },
+  { name: "França", flag: "🇫🇷", leagues: ["Ligue 1", "Ligue 2", "National", "Coupe de France", "Trophée des Champions"] },
+  { name: "Portugal", flag: "🇵🇹", leagues: ["Liga Portugal", "Liga Portugal 2", "Taça de Portugal", "Supertaça Cândido de Oliveira"] },
+  { name: "Holanda", flag: "🇳🇱", leagues: ["Eredivisie", "Eerste Divisie", "KNVB Cup", "Johan Cruijff Schaal"] },
+  { name: "Bélgica", flag: "🇧🇪", leagues: ["Jupiler Pro League", "Belgian First Amateur", "Belgian Cup", "Belgian Super Cup"] },
+  { name: "Turquia", flag: "🇹🇷", leagues: ["Süper Lig", "TFF First League", "TFF Second League", "Turkish Cup", "Turkish Super Cup"] },
+  { name: "Grécia", flag: "🇬🇷", leagues: ["Super League Greece", "Super League 2", "Greek Cup", "Greek Super Cup"] },
+  { name: "Áustria", flag: "🇦🇹", leagues: ["Austrian Bundesliga", "Austrian Football Second League", "Austrian Cup"] },
+  { name: "Escócia", flag: "🏴󠁧󠁢󠁳󠁣󠁴󠁿", leagues: ["Scottish Premiership", "Scottish Championship", "Scottish League One", "Scottish Cup"] },
+  { name: "Suíça", flag: "🇨🇭", leagues: ["Swiss Super League", "Challenge League", "Swiss Cup"] },
+  { name: "Dinamarca", flag: "🇩🇰", leagues: ["Danish Superliga", "Danish 1st Division", "DBU Pokalen"] },
+  { name: "Noruega", flag: "🇳🇴", leagues: ["Eliteserien", "Norwegian 1st Division", "Norwegian Cup"] },
+  { name: "Suécia", flag: "🇸🇪", leagues: ["Allsvenskan", "Superettan", "Svenska Cupen"] },
   { name: "Croácia", flag: "🇭🇷", leagues: ["HNL", "Croatian Football Cup"] },
   { name: "Sérvia", flag: "🇷🇸", leagues: ["Serbian SuperLiga", "Serbian Cup"] },
-  { name: "Brasil", flag: "🇧🇷", leagues: ["Brasileirão", "Copa do Brasil", "Campeonato Paulista", "Campeonato Carioca"] },
-  { name: "Argentina", flag: "🇦🇷", leagues: ["Primera División", "Copa Argentina"] },
-  { name: "EUA", flag: "🇺🇸", leagues: ["MLS"] },
+  { name: "Polónia", flag: "🇵🇱", leagues: ["Ekstraklasa", "I liga", "Polish Cup"] },
+  { name: "Rep. Checa", flag: "🇨🇿", leagues: ["Czech First League", "FNL", "Czech Cup"] },
+  { name: "Rússia", flag: "🇷🇺", leagues: ["Russian Premier League", "Russian National League", "Russian Cup"] },
+  { name: "Ucrânia", flag: "🇺🇦", leagues: ["Ukrainian Premier League", "Ukrainian Cup"] },
+  { name: "Hungria", flag: "🇭🇺", leagues: ["OTP Bank Liga", "Merkantil Bank Liga"] },
+  { name: "Roménia", flag: "🇷🇴", leagues: ["Romanian Liga I", "Romanian Liga II"] },
+  { name: "Bulgária", flag: "🇧🇬", leagues: ["Parva liga", "Vtora liga"] },
+  { name: "Israel", flag: "🇮🇱", leagues: ["Israeli Premier League", "Israeli National League", "State Cup"] },
+  { name: "Brasil", flag: "🇧🇷", leagues: ["Brasileirão", "Brasileirão Série B", "Copa do Brasil", "Recopa Sudamericana", "Campeonato Paulista", "Campeonato Carioca", "Copa Sul-Americana"] },
+  { name: "Argentina", flag: "🇦🇷", leagues: ["Primera División", "Primera Nacional", "Copa Argentina", "Copa de la Liga Profesional"] },
+  { name: "México", flag: "🇲🇽", leagues: ["Liga MX", "Ascenso MX", "Copa MX", "Leagues Cup"] },
+  { name: "Chile", flag: "🇨🇱", leagues: ["Primera División — Chile", "Primera B — Chile"] },
+  { name: "Colômbia", flag: "🇨🇴", leagues: ["Categoría Primera A", "Categoría Primera B"] },
+  { name: "EUA", flag: "🇺🇸", leagues: ["MLS", "USL Championship", "US Open Cup"] },
+  { name: "Arábia Saudita", flag: "🇸🇦", leagues: ["Saudi Pro League", "First Division League", "King Cup"] },
+  { name: "Japão", flag: "🇯🇵", leagues: ["J1 League", "J2 League", "J3 League", "Emperor's Cup"] },
+  { name: "Coreia do Sul", flag: "🇰🇷", leagues: ["K League 1", "K League 2", "Korean FA Cup"] },
+  { name: "Tailândia", flag: "🇹🇭", leagues: ["Thai League 1", "Thai League 2"] },
+  { name: "Índia", flag: "🇮🇳", leagues: ["Indian Super League", "I-League"] },
 ];
 
 const OTHER_SPORTS: { key: string; label: string; icon: string; leagues: string[] }[] = [
-  { key: "basketball", label: "Basquete", icon: "🏀", leagues: ["NBA", "EuroLeague", "NBB — Brasil"] },
-  { key: "tennis", label: "Tênis", icon: "🎾", leagues: ["Roland Garros", "ATP 500", "ATP 250", "WTA 1000", "WTA 250"] },
-  { key: "hockey", label: "Hóquei", icon: "🏒", leagues: ["NHL — Playoffs", "KHL — Playoff"] },
-  { key: "volleyball", label: "Voleibol", icon: "🏐", leagues: ["Volleyball Nations League", "Superlega — Itália", "Superliga — Rússia", "Superliga — Brasil"] },
+  { key: "basketball", label: "Basquete", icon: "🏀", leagues: [
+    "NBA", "NBA Cup", "G League",
+    "EuroLeague", "EuroCup",
+    "Liga ACB", "LEB Oro", "Copa del Rey ACB", "Supercopa ACB",
+    "Basketbol Süper Ligi", "TBL", "Turkish Basketball Cup",
+    "Greek Basket League", "Greek Basketball Cup",
+    "Lega Basket Serie A", "Serie A2 Basket",
+    "LNB Pro A", "Pro B Basket",
+    "Basketball Bundesliga",
+    "Elite League", "Liga Betclic",
+    "NBB", "Liga Nacional",
+    "B.League", "B2 League",
+    "KBL", "CBA", "LNBP",
+  ]},
+  { key: "tennis", label: "Ténis", icon: "🎾", leagues: [
+    "Australian Open", "Roland Garros", "Wimbledon", "US Open",
+    "ATP Finals", "WTA Finals", "Davis Cup", "Billie Jean King Cup",
+    "Indian Wells", "Miami Open", "Madrid Open", "Rome Masters", "Paris Masters", "Canadian Open", "Cincinnati", "Shanghai",
+    "Halle Open", "Queen's Club", "Barcelona Open", "Estoril Open", "Dubai", "Rotterdam",
+    "ATP 500", "ATP 250", "WTA 1000", "WTA 500", "WTA 250",
+    "ATP Challenger", "WTA 125", "ITF",
+  ]},
+  { key: "hockey", label: "Hóquei no Gelo", icon: "🏒", leagues: [
+    "NHL", "AHL", "ECHL",
+    "KHL", "VHL",
+    "SHL", "HockeyAllsvenskan",
+    "Liiga", "Mestis",
+    "National League", "Swiss League",
+    "Extraliga", "Chance Liga",
+    "DEL", "DEL2",
+    "ICE Hockey League", "Alps Hockey League",
+    "Fjordkraft Ligaen",
+    "Metal Ligaen",
+    "Slovak Extraliga",
+    "Ligue Magnus",
+    "Champions Hockey League",
+  ]},
+  { key: "volleyball", label: "Voleibol", icon: "🏐", leagues: [
+    "SuperLega", "Serie A2 Volley", "Coppa Italia Volley",
+    "Superliga Série A", "Superliga Série B", "Copa Brasil Vôlei",
+    "PlusLiga", "Tauron 1 Liga", "Polski Puchar Siatkówki",
+    "Russian Volleyball Super League",
+    "Efeler Ligi", "Turkish Volleyball Cup",
+    "SV.League", "V.League 2",
+    "Ligue A", "Ligue B Volley",
+    "Volleyball Bundesliga",
+    "Liga Una Seguros",
+    "V-League",
+    "Chinese Volleyball League",
+    "Liga de Voleibol Argentina",
+    "Volleyball Nations League",
+  ]},
 ];
 
 type TopLeagueEntry = { league: string; country: string; sport: string };
@@ -510,16 +585,19 @@ function SidebarTreeContent({
                 </button>
                 {expandedCountry === name && (
                   <div className="ml-2 mt-0.5 space-y-0.5 border-l border-zinc-800 pl-2">
-                    {leagues.map(league => (
-                      <button
-                        key={league}
-                        onClick={() => go("football")}
-                        className="flex items-center gap-1.5 w-full px-2 py-1 rounded-md text-[11px] text-zinc-500 hover:text-white hover:bg-zinc-900 transition-colors"
-                      >
-                        <span className="text-xs leading-none shrink-0">{LEAGUE_FLAGS[league] ?? "⚽"}</span>
-                        <span className="truncate">{league}</span>
-                      </button>
-                    ))}
+                    {leagues.map(league => {
+                      const active = selectedLeague === league;
+                      return (
+                        <button
+                          key={league}
+                          onClick={() => { setSelectedLeague?.(active ? null : league); setSelectedSport("football"); setActiveTab("sports"); onClose?.(); }}
+                          className={`flex items-center gap-1.5 w-full px-2 py-1 rounded-md text-[11px] transition-colors ${active ? "bg-red-600/20 text-red-400 border border-red-500/30" : "text-zinc-500 hover:text-white hover:bg-zinc-900"}`}
+                        >
+                          <span className="text-xs leading-none shrink-0">{LEAGUE_FLAGS[league] ?? "⚽"}</span>
+                          <span className="truncate">{league}</span>
+                        </button>
+                      );
+                    })}
                   </div>
                 )}
               </div>
@@ -541,16 +619,19 @@ function SidebarTreeContent({
           </button>
           {expandedSport === key && (
             <div className="ml-2 mt-0.5 space-y-0.5 border-l border-zinc-800 pl-2">
-              {leagues.map(league => (
-                <button
-                  key={league}
-                  onClick={() => go(key)}
-                  className="flex items-center gap-1.5 w-full px-2 py-1.5 rounded-md text-[12px] text-zinc-400 hover:text-white hover:bg-zinc-900 transition-colors"
-                >
-                  <span className="text-xs leading-none shrink-0">{LEAGUE_FLAGS[league] ?? "🏆"}</span>
-                  <span className="truncate">{league}</span>
-                </button>
-              ))}
+              {leagues.map(league => {
+                const active = selectedLeague === league;
+                return (
+                  <button
+                    key={league}
+                    onClick={() => { setSelectedLeague?.(active ? null : league); setSelectedSport(key); setActiveTab("sports"); onClose?.(); }}
+                    className={`flex items-center gap-1.5 w-full px-2 py-1.5 rounded-md text-[12px] transition-colors ${active ? "bg-red-600/20 text-red-400 border border-red-500/30" : "text-zinc-400 hover:text-white hover:bg-zinc-900"}`}
+                  >
+                    <span className="text-xs leading-none shrink-0">{LEAGUE_FLAGS[league] ?? "🏆"}</span>
+                    <span className="truncate">{league}</span>
+                  </button>
+                );
+              })}
             </div>
           )}
         </div>
@@ -4621,7 +4702,7 @@ export default function Home() {
                 firstGoal: { home: 0, noGoal: 0, away: 0 },
               });
 
-              const tennisOddsAsMatches: Match[] = (!selectedLeague && (selectedSport === "tennis" || selectedSport === "all"))
+              const tennisOddsAsMatches: Match[] = (selectedSport === "tennis" || selectedSport === "all")
                 ? tennisOddsMatches.map(o => ({
                     id: `tennis-odds-${o.matchId}`,
                     home: o.players[0].name,
@@ -4637,7 +4718,7 @@ export default function Home() {
                 : [];
 
               // Convert real volleyball odds to MatchCard-compatible Match objects (O/U 3.5 sets in markets)
-              const volleyOddsAsMatches: Match[] = (!selectedLeague && (selectedSport === "volleyball" || selectedSport === "all"))
+              const volleyOddsAsMatches: Match[] = (selectedSport === "volleyball" || selectedSport === "all")
                 ? volleyOddsMatches.map(o => {
                     const mkt = _emptyMkt();
                     if (o.overUnder) {
@@ -4661,7 +4742,7 @@ export default function Home() {
                 : [];
 
               // Convert real NBA odds → Match objects with all available markets
-              const basketballAsMatches: Match[] = (!selectedLeague && (selectedSport === "all" || selectedSport === "basketball"))
+              const basketballAsMatches: Match[] = (selectedSport === "all" || selectedSport === "basketball")
                 ? basketballOddsMatches.map(o => ({
                     id: `nba-odds-${o.matchId}`,
                     home: o.homeTeam.name, away: o.awayTeam.name,
@@ -4674,7 +4755,7 @@ export default function Home() {
                 : [];
 
               // Convert real NHL odds → Match objects with all available markets
-              const hockeyAsMatches: Match[] = (!selectedLeague && (selectedSport === "all" || selectedSport === "hockey"))
+              const hockeyAsMatches: Match[] = (selectedSport === "all" || selectedSport === "hockey")
                 ? hockeyOddsMatches.map(o => ({
                     id: `nhl-odds-${o.matchId}`,
                     home: o.homeTeam.name, away: o.awayTeam.name,
@@ -4686,28 +4767,29 @@ export default function Home() {
                   } as Match))
                 : [];
 
-              // All upcoming: odds-based + all sports from /upcoming (deduped)
-              const allUpcoming = selectedLeague
-                ? upcomingMatches.filter(m => m.league === selectedLeague)
-                : [
-                    ...tennisOddsAsMatches,
-                    ...volleyOddsAsMatches,
-                    ...basketballAsMatches,
-                    ...hockeyAsMatches,
-                    ...upcomingMatches.filter(m => {
-                      const sport = m.sport ?? "football";
-                      if (sport === "football") {
-                        return !tennisOddsAsMatches.some(t => t.home === m.home && t.away === m.away) &&
-                               !volleyOddsAsMatches.some(v => v.home === m.home && v.away === m.away);
-                      }
-                      // Include other sports from /upcoming if not already covered by odds arrays
-                      if (sport === "tennis")     return !tennisOddsAsMatches.some(t => t.home === m.home && t.away === m.away);
-                      if (sport === "volleyball") return !volleyOddsAsMatches.some(v => v.home === m.home && v.away === m.away);
-                      if (sport === "basketball") return !basketballAsMatches.some(b => b.home === m.home && b.away === m.away);
-                      if (sport === "hockey")     return !hockeyAsMatches.some(h => h.home === m.home && h.away === m.away);
-                      return false;
-                    }),
-                  ];
+              // All upcoming: odds-based + all sports from /upcoming (deduped), filtered by league if active
+              const allUpcoming = (() => {
+                const combined = [
+                  ...tennisOddsAsMatches,
+                  ...volleyOddsAsMatches,
+                  ...basketballAsMatches,
+                  ...hockeyAsMatches,
+                  ...upcomingMatches.filter(m => {
+                    const sport = m.sport ?? "football";
+                    if (sport === "tennis")     return !tennisOddsAsMatches.some(t => t.home === m.home && t.away === m.away);
+                    if (sport === "volleyball") return !volleyOddsAsMatches.some(v => v.home === m.home && v.away === m.away);
+                    if (sport === "basketball") return !basketballAsMatches.some(b => b.home === m.home && b.away === m.away);
+                    if (sport === "hockey")     return !hockeyAsMatches.some(h => h.home === m.home && h.away === m.away);
+                    return true; // football always included
+                  }),
+                ];
+                if (!selectedLeague) return combined;
+                // Filter by selected league using flexible matching (handles "Country: League" API prefixes)
+                const seen = new Set<string>();
+                return combined
+                  .filter(m => leagueMatchesFilter(m.league, selectedLeague))
+                  .filter(m => { const k = String(m.id); if (seen.has(k)) return false; seen.add(k); return true; });
+              })();
 
               const filteredUpcoming = (selectedSport === "all")
                 ? allUpcoming
