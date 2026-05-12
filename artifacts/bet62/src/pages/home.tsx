@@ -6257,10 +6257,10 @@ function DepositWithdrawModal({
   const amountValid = !isNaN(amount) && amount >= 10 && amount <= 5000;
   const promoHint = amountValid && amount >= 20;
 
-  const METHODS: { id: PayMethod; label: string; logo: string }[] = [
-    { id: "multibanco", label: "Multibanco", logo: "/logo-multibanco.svg" },
-    { id: "mbway",      label: "MB WAY",     logo: "/logo-mbway.svg"      },
-    { id: "card",       label: "Cartão",     logo: "/logo-card.svg"       },
+  const METHODS: { id: PayMethod; label: string; logo: string; logo2?: string }[] = [
+    { id: "multibanco", label: "Multibanco", logo: "/logo-multibanco.png" },
+    { id: "mbway",      label: "MB WAY",     logo: "/logo-mbway.png"      },
+    { id: "card",       label: "Cartão",     logo: "/logo-visa.png", logo2: "/logo-mastercard.png" },
   ];
 
   function resetMethod(m: PayMethod) {
@@ -6452,7 +6452,14 @@ function DepositWithdrawModal({
               onClick={() => resetMethod(m.id)}
               className={`flex flex-col items-center gap-1.5 py-3 text-[10px] font-bold transition-colors border-b-2 ${payMethod === m.id ? "border-emerald-500 text-white bg-zinc-900" : "border-transparent text-zinc-500 hover:text-zinc-300"}`}
             >
-              <img src={m.logo} alt={m.label} className="h-6 w-auto max-w-[64px] object-contain" draggable={false} />
+              {m.logo2 ? (
+                <div className="flex items-center gap-1">
+                  <img src={m.logo} alt="Visa" className="h-5 w-auto object-contain" draggable={false} />
+                  <img src={m.logo2} alt="Mastercard" className="h-5 w-auto object-contain" draggable={false} />
+                </div>
+              ) : (
+                <img src={m.logo} alt={m.label} className="h-6 w-auto max-w-[64px] object-contain" draggable={false} />
+              )}
               {m.label}
             </button>
           ))}
@@ -6505,14 +6512,14 @@ function DepositWithdrawModal({
                     disabled={loading || !amountValid}
                     className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-black h-11 gap-2"
                   >
-                    {loading ? <Loader2 className="animate-spin" size={16} /> : <img src="/logo-multibanco.svg" alt="Multibanco" className="h-5 w-auto object-contain" />}
+                    {loading ? <Loader2 className="animate-spin" size={16} /> : <img src="/logo-multibanco.png" alt="Multibanco" className="h-5 w-auto object-contain" />}
                     Gerar Referência Multibanco
                   </Button>
                 </>
               ) : (
                 <div className="bg-zinc-900 border border-emerald-600/30 rounded-2xl p-4 space-y-3">
                   <div className="flex items-center justify-between">
-                    <img src="/logo-multibanco.svg" alt="Multibanco" className="h-7 w-auto object-contain" />
+                    <img src="/logo-multibanco.png" alt="Multibanco" className="h-7 w-auto object-contain" />
                     <span className="text-[10px] bg-emerald-900/40 text-emerald-400 border border-emerald-600/30 px-2 py-0.5 rounded-full font-bold">Aguardando pagamento</span>
                   </div>
                   <div className="grid grid-cols-3 gap-2 text-center">
@@ -6564,14 +6571,14 @@ function DepositWithdrawModal({
                     disabled={loading || mbwayPhone.replace(/\s/g,"").length !== 9 || !amountValid}
                     className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-black h-11 gap-2"
                   >
-                    {loading ? <Loader2 className="animate-spin" size={16} /> : <img src="/logo-mbway.svg" alt="MB WAY" className="h-5 w-auto object-contain" />}
+                    {loading ? <Loader2 className="animate-spin" size={16} /> : <img src="/logo-mbway.png" alt="MB WAY" className="h-5 w-auto object-contain" />}
                     Enviar Pedido — €{amountValid ? amount.toFixed(2) : "0.00"}
                   </Button>
                 </>
               ) : (
                 <div className="bg-zinc-900 border border-emerald-600/30 rounded-2xl p-4 text-center space-y-3">
                   <div className="flex justify-center">
-                    <img src="/logo-mbway.svg" alt="MB WAY" className="h-10 w-auto object-contain animate-pulse" />
+                    <img src="/logo-mbway.png" alt="MB WAY" className="h-10 w-auto object-contain animate-pulse" />
                   </div>
                   <div className="font-black text-white text-base">Pedido enviado!</div>
                   <div className="text-sm text-zinc-400">
@@ -6599,11 +6606,17 @@ function DepositWithdrawModal({
                 disabled={loading || !amountValid}
                 className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-black h-11 gap-2"
               >
-                {loading ? <Loader2 className="animate-spin" size={16} /> : <img src="/logo-card.svg" alt="Cartão" className="h-5 w-auto object-contain" />}
+                {loading ? <Loader2 className="animate-spin" size={16} /> : (
+                  <div className="flex items-center gap-1">
+                    <img src="/logo-visa.png" alt="Visa" className="h-4 w-auto object-contain" />
+                    <img src="/logo-mastercard.png" alt="Mastercard" className="h-4 w-auto object-contain" />
+                  </div>
+                )}
                 Pagar €{amountValid ? amount.toFixed(2) : "0.00"} com Cartão
               </Button>
               <div className="flex items-center justify-center gap-3 mt-1">
-                <img src="/logo-card.svg" alt="Visa / Mastercard" className="h-5 w-auto object-contain opacity-60" />
+                <img src="/logo-visa.png" alt="Visa" className="h-4 w-auto object-contain opacity-60" />
+                <img src="/logo-mastercard.png" alt="Mastercard" className="h-4 w-auto object-contain opacity-60" />
                 <span className="text-[10px] text-zinc-600">🔒 Pagamento seguro 3D Secure · ifthenpay</span>
               </div>
             </div>
@@ -6616,9 +6629,10 @@ function DepositWithdrawModal({
           <div className="border-t border-zinc-800 px-5 py-3 flex items-center justify-between">
             <span className="text-[10px] text-zinc-600 uppercase tracking-widest font-semibold">Métodos aceites</span>
             <div className="flex items-center gap-2">
-              <img src="/logo-multibanco.svg" alt="Multibanco" className="h-5 w-auto object-contain opacity-70 hover:opacity-100 transition-opacity" />
-              <img src="/logo-mbway.svg"      alt="MB WAY"     className="h-5 w-auto object-contain opacity-70 hover:opacity-100 transition-opacity" />
-              <img src="/logo-card.svg"       alt="Visa/Mastercard" className="h-5 w-auto object-contain opacity-70 hover:opacity-100 transition-opacity" />
+              <img src="/logo-multibanco.png" alt="Multibanco" className="h-5 w-auto object-contain opacity-70 hover:opacity-100 transition-opacity" />
+              <img src="/logo-mbway.png"     alt="MB WAY"     className="h-5 w-auto object-contain opacity-70 hover:opacity-100 transition-opacity" />
+              <img src="/logo-visa.png"       alt="Visa"       className="h-4 w-auto object-contain opacity-70 hover:opacity-100 transition-opacity" />
+              <img src="/logo-mastercard.png" alt="Mastercard" className="h-4 w-auto object-contain opacity-70 hover:opacity-100 transition-opacity" />
             </div>
           </div>
         )}

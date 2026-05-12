@@ -1,0 +1,26 @@
+uploads = []
+generated = []
+
+[[outputs]]
+id = "pNEo_KfCiDD03NczIhRBq"
+uri = "file://artifacts/bet62/public/logo-mbway.png"
+type = "image"
+title = "MB WAY — logo oficial"
+
+[[outputs]]
+id = "fvzrjVNdrnR1nZvF2-rjm"
+uri = "file://artifacts/bet62/public/logo-multibanco.png"
+type = "image"
+title = "Multibanco — logo oficial"
+
+[[outputs]]
+id = "ZStH8RWNp3uLc6gz2zYNI"
+uri = "file://artifacts/bet62/public/logo-visa.png"
+type = "image"
+title = "Visa — logo oficial"
+
+[[outputs]]
+id = "TwE1j6jrrpcu-vDCgvoea"
+uri = "file://artifacts/bet62/public/logo-mastercard.png"
+type = "image"
+title = "Mastercard — logo oficial"
