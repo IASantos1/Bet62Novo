@@ -1679,6 +1679,16 @@ export default function Home() {
       return null;
     }
 
+    // Heavy favourite (odds < 1.15): show "--" — too low to offer a meaningful bet
+    if (odd < 1.15 && market === "result") {
+      return (
+        <div className={`relative flex flex-col items-center py-2.5 px-2 rounded-md text-xs ${grow ? "flex-1" : ""} bg-zinc-800/40 border border-zinc-700/30`}>
+          <span className="mb-0.5 text-[10px] leading-tight opacity-40">{label}</span>
+          <span className="font-bold text-base text-zinc-600 tabular-nums">--</span>
+        </div>
+      );
+    }
+
     if (match.isLive && market === "result" && odd <= 1.01) {
       return (
         <div className={`relative flex flex-col items-center py-2.5 px-2 rounded-md text-xs ${grow ? "flex-1" : ""} bg-amber-900/20 border border-amber-600/30`}>
