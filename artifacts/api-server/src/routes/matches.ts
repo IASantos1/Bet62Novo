@@ -3317,7 +3317,7 @@ router.get("/live", async (_req, res) => {
     const tennisMatches = buildTennisLiveMatches(tennisTournaments, tennisStatsMap);
     const volleyMatches = buildVolleyballLiveMatches(volleyTournaments);
     const simulated     = buildSimulatedLiveOtherSports({
-      skipTennis:     tennisMatches.length > 0,
+      skipTennis:     true,  // always use real Statpal data; never show simulated tennis
       skipVolley:     true,
       skipHockey:     true,
       skipBasketball: true,
