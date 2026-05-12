@@ -599,42 +599,41 @@ export default function AdminPage() {
     <div className="min-h-screen bg-zinc-950 text-white dark flex">
 
       {/* SIDEBAR */}
-      <aside className="w-16 lg:w-56 bg-zinc-900 border-r border-zinc-800 flex flex-col shrink-0 sticky top-0 h-screen overflow-y-auto">
+      <aside className="w-56 bg-zinc-900 border-r border-zinc-800 flex flex-col shrink-0 sticky top-0 h-screen overflow-y-auto">
         <div className="p-4 border-b border-zinc-800">
-          <div className="font-black text-xl tracking-tighter italic hidden lg:block">
+          <div className="font-black text-xl tracking-tighter italic">
             <span className="text-white">BET</span><span className="text-red-600">62</span>
             <span className="text-xs font-normal text-zinc-500 ml-2 not-italic">Admin</span>
           </div>
-          <div className="lg:hidden flex justify-center"><ShieldCheck className="text-red-500" size={22} /></div>
         </div>
 
         <nav className="flex-1 p-2 space-y-0.5">
-          <div className="hidden lg:block text-xs text-zinc-600 px-3 pt-2 pb-1 font-semibold uppercase tracking-wider">Operações</div>
+          <div className="text-xs text-zinc-600 px-3 pt-2 pb-1 font-semibold uppercase tracking-wider">Operações</div>
           {tabs.filter(t => t.section === "core").map(tab => (
             <button key={tab.id} onClick={() => setActiveTab(tab.id)}
               className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${activeTab === tab.id ? "bg-red-600/20 text-red-400 border border-red-500/30" : "text-zinc-400 hover:bg-zinc-800 hover:text-white"}`}>
               {tab.icon}
-              <span className="hidden lg:block flex-1 text-left">{tab.label}</span>
+              <span className="flex-1 text-left">{tab.label}</span>
               {tab.badge ? (
-                <span className="hidden lg:flex items-center justify-center min-w-5 h-5 px-1 rounded-full bg-red-600 text-white text-xs font-bold">{tab.badge}</span>
+                <span className="flex items-center justify-center min-w-5 h-5 px-1 rounded-full bg-red-600 text-white text-xs font-bold">{tab.badge}</span>
               ) : null}
             </button>
           ))}
-          <div className="hidden lg:block text-xs text-zinc-600 px-3 pt-3 pb-1 font-semibold uppercase tracking-wider">Avançado</div>
+          <div className="text-xs text-zinc-600 px-3 pt-3 pb-1 font-semibold uppercase tracking-wider border-t border-zinc-800/60 mt-1">Avançado</div>
           {tabs.filter(t => t.section === "pro").map(tab => (
             <button key={tab.id} onClick={() => setActiveTab(tab.id)}
               className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${activeTab === tab.id ? "bg-red-600/20 text-red-400 border border-red-500/30" : "text-zinc-400 hover:bg-zinc-800 hover:text-white"}`}>
               {tab.icon}
-              <span className="hidden lg:block flex-1 text-left">{tab.label}</span>
+              <span className="flex-1 text-left">{tab.label}</span>
             </button>
           ))}
         </nav>
 
         <div className="p-3 border-t border-zinc-800">
-          <div className="hidden lg:block text-xs text-zinc-600 px-2 mb-2 truncate">{username}</div>
+          <div className="text-xs text-zinc-600 px-2 mb-2 truncate">{username}</div>
           <button onClick={handleLogout} className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm text-zinc-500 hover:text-red-400 hover:bg-red-900/20 transition-colors">
             <LogOut size={18} />
-            <span className="hidden lg:block">Sair</span>
+            <span>Sair</span>
           </button>
         </div>
       </aside>
