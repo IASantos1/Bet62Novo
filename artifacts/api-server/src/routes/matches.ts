@@ -3099,13 +3099,21 @@ function buildSimulatedLiveOtherSports(opts: { skipTennis: boolean; skipVolley: 
 
   const win15s = Math.floor(Date.now() / 15_000);
 
+  // Pick 8 simulated tennis matches: 4 ATP (indices 0-3) + 4 WTA (indices 7-10)
+  // si range: 8-15 (fixed, never overlaps with basketball 0-7 or hockey 16-21 or volley 22-27)
   const tennisPicks = opts.skipTennis ? [] :
-    [tennis[0], tennis[1], tennis[7], tennis[8]].filter((t): t is UpcomingMatch => t != null);
+    [tennis[0], tennis[1], tennis[2], tennis[3], tennis[7], tennis[8], tennis[9], tennis[10]]
+      .filter((t): t is UpcomingMatch => t != null);
+
   const picks: Array<{ m: UpcomingMatch; si: number }> = [
-    ...(opts.skipBasketball ? [] : basketball.slice(0, 3).map((m, i) => ({ m, si: i }))),
-    ...tennisPicks.map((m, i) => ({ m, si: i + 3 })),
-    ...(opts.skipHockey ? [] : hockey.slice(0, 2).map((m, i) => ({ m, si: i + 7 }))),
-    ...(opts.skipVolley ? [] : volleyball.slice(0, 2).map((m, i) => ({ m, si: i + 9 }))),
+    // basketball: si 0-7
+    ...(opts.skipBasketball ? [] : basketball.slice(0, 8).map((m, i) => ({ m, si: i }))),
+    // tennis sim: si 8-15
+    ...tennisPicks.map((m, i) => ({ m, si: i + 8 })),
+    // hockey: si 16-21
+    ...(opts.skipHockey ? [] : hockey.slice(0, 6).map((m, i) => ({ m, si: i + 16 }))),
+    // volleyball: si 22-27
+    ...(opts.skipVolley ? [] : volleyball.slice(0, 6).map((m, i) => ({ m, si: i + 22 }))),
   ];
 
   const TENNIS_SEQ = [0, 15, 30, 40] as const;
@@ -3232,9 +3240,9 @@ router.get("/live", async (_req, res) => {
     const volleyMatches = buildVolleyballLiveMatches(volleyTournaments);
     const simulated     = buildSimulatedLiveOtherSports({
       skipTennis:     tennisMatches.length > 0,
-      skipVolley:     true,
-      skipHockey:     true,
-      skipBasketball: true,
+      skipVolley:     volleyMatches.length > 0,
+      skipHockey:     nhlMatches.length > 0,
+      skipBasketball: nbaMatches.length > 0,
     });
     const matches = [...soccerMatches, ...nhlMatches, ...nbaMatches, ...tennisMatches, ...volleyMatches, ...simulated];
     res.json({ matches });
