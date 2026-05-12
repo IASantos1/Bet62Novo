@@ -454,6 +454,240 @@ function leaguePriority(name: string, country?: string): number {
   return 999;
 }
 
+// ─── Basketball league priority ────────────────────────────────────────────────
+// ORDERING RULE: more-specific patterns before less-specific ("nba cup" before "nba", "del2" before "del")
+const BASKETBALL_PRIORITY: Array<[string, number]> = [
+  // International club competitions
+  ["euroleague",               2],
+  ["eurocup",                  3],
+  ["fiba",                     4],
+  // ── BIG LEAGUES — USA ────────────────────────────────────────────────────────
+  ["nba cup",                  3],   // ⚠ BEFORE "nba"
+  ["all-star",                 4],
+  ["nba",                      1],
+  ["g league",                 5],
+  // ── BIG LEAGUES — Spain ──────────────────────────────────────────────────────
+  ["liga acb",                10],
+  ["leb oro",                 11],
+  ["copa del rey",            12],
+  ["supercopa acb",           13],
+  // ── BIG LEAGUES — Turkey ─────────────────────────────────────────────────────
+  ["basketbol süper ligi",    15],
+  ["basketbol super ligi",    15],
+  ["tbl",                     16],
+  ["turkish cup",             17],
+  ["presidential cup",        18],
+  // ── BIG LEAGUES — Greece ─────────────────────────────────────────────────────
+  ["greek basket league",     20],
+  ["elite league",            21],
+  ["greek cup",               22],
+  // ── BIG LEAGUES — Italy ──────────────────────────────────────────────────────
+  ["lega basket serie a",     25],
+  ["serie a2",                26],
+  ["coppa italia",            27],
+  ["supercoppa italiana",     28],
+  // ── BIG LEAGUES — France ─────────────────────────────────────────────────────
+  ["lnb pro a",               30],
+  ["pro b",                   31],
+  ["leaders cup",             32],
+  ["coupe de france",         33],
+  // ── BIG LEAGUES — Germany ────────────────────────────────────────────────────
+  ["basketball bundesliga",   35],
+  ["proa",                    36],
+  ["bbl-pokal",               37],
+  // ── MEDIUM LEAGUES — Portugal ────────────────────────────────────────────────
+  ["liga betclic",            50],
+  ["proliga",                 51],
+  ["taça de portugal",        52],
+  ["taca de portugal",        52],
+  // ── MEDIUM LEAGUES — Brazil ──────────────────────────────────────────────────
+  ["nbb",                     55],
+  ["liga ouro",               56],
+  ["copa super 8",            57],
+  // ── MEDIUM LEAGUES — Argentina ───────────────────────────────────────────────
+  ["liga nacional",           60],
+  ["liga argentina",          61],
+  // ── MEDIUM LEAGUES — Japan ───────────────────────────────────────────────────
+  ["b.league",                65],
+  ["b2 league",               66],
+  ["emperor",                 67],
+  // ── MEDIUM LEAGUES — South Korea ─────────────────────────────────────────────
+  ["kbl d-league",            71],   // ⚠ BEFORE "kbl"
+  ["kbl",                     70],
+  // ── MEDIUM LEAGUES — China ───────────────────────────────────────────────────
+  ["cba",                     75],
+  ["nbl",                     76],
+  // ── MEDIUM LEAGUES — Mexico ──────────────────────────────────────────────────
+  ["lnbp",                    80],
+];
+
+function basketballLeaguePriority(league: string): number {
+  const lower = league.toLowerCase();
+  for (const [pattern, rank] of BASKETBALL_PRIORITY) {
+    if (lower.includes(pattern)) return rank;
+  }
+  return 999;
+}
+
+// ─── Tennis tournament priority ────────────────────────────────────────────────
+// Tennis has no divisions — ranked by tier: Grand Slams > Masters > ATP Finals > 500 > 250 > Challenger > ITF
+const TENNIS_PRIORITY: Array<[string, number]> = [
+  // Grand Slams
+  ["australian open",      1],
+  ["roland garros",        2],
+  ["wimbledon",            3],
+  ["us open",              4],
+  // ATP / WTA Finals
+  ["atp finals",           5],
+  ["wta finals",           6],
+  // Davis Cup / Billie Jean King Cup
+  ["davis cup",            8],
+  ["billie jean",          9],
+  ["bjk cup",              9],
+  // Masters 1000 / WTA 1000 by location
+  ["indian wells",        10],
+  ["miami open",          11],
+  ["madrid open",         12],
+  ["paris masters",       13],   // ⚠ BEFORE "paris"
+  ["rome",                14],
+  ["toronto",             15],
+  ["montreal",            15],
+  ["cincinnati",          16],
+  ["shanghai",            17],
+  ["paris",               18],
+  ["masters 1000",        19],
+  ["wta 1000",            19],
+  // ATP 500 / WTA 500 tournaments
+  ["halle",               25],
+  ["queen's",             26],
+  ["queens",              26],
+  ["barcelona",           27],
+  ["dubai",               28],
+  ["acapulco",            29],
+  ["rotterdam",           30],
+  ["tokyo",               31],
+  ["estoril",             32],
+  ["atp 500",             33],
+  ["wta 500",             34],
+  // ATP 250 / WTA 250 / WTA 125
+  ["atp 250",             40],
+  ["wta 250",             41],
+  ["wta 125",             42],
+  // Challengers
+  ["challenger",          60],
+  // ITF
+  ["itf",                 80],
+];
+
+function tennisLeaguePriority(name: string): number {
+  const lower = name.toLowerCase();
+  for (const [pattern, rank] of TENNIS_PRIORITY) {
+    if (lower.includes(pattern)) return rank;
+  }
+  return 500; // unknown tennis tournament — still show (tennis always has real data)
+}
+
+// ─── Hockey league priority ─────────────────────────────────────────────────────
+// ⚠ "del2" BEFORE "del"; "hockeyallsvenskan" BEFORE "allsvenskan"
+const HOCKEY_PRIORITY: Array<[string, number]> = [
+  // ── BIG LEAGUES — North America ──────────────────────────────────────────────
+  ["nhl",                  1],
+  ["ahl",                  5],
+  ["echl",                10],
+  ["stanley cup",          2],
+  // ── BIG LEAGUES — Russia ─────────────────────────────────────────────────────
+  ["khl",                 15],
+  ["vhl",                 16],
+  ["gagarin cup",          4],
+  // ── BIG LEAGUES — Sweden ─────────────────────────────────────────────────────
+  ["hockeyallsvenskan",   22],   // ⚠ BEFORE generic "allsvenskan" if it ever appears
+  ["shl",                 20],
+  // ── BIG LEAGUES — Finland ────────────────────────────────────────────────────
+  ["liiga",               25],
+  ["mestis",              26],
+  // ── BIG LEAGUES — Switzerland ────────────────────────────────────────────────
+  ["national league",     30],
+  ["swiss league",        31],
+  // ── BIG LEAGUES — Czech Republic ─────────────────────────────────────────────
+  ["extraliga",           35],
+  ["chance liga",         36],
+  // ── International ────────────────────────────────────────────────────────────
+  ["champions hockey",    40],
+  // ── MEDIUM LEAGUES — Germany ─────────────────────────────────────────────────
+  ["del2",                51],   // ⚠ BEFORE "del"
+  ["del",                 50],
+  // ── MEDIUM LEAGUES — Austria ─────────────────────────────────────────────────
+  ["ice hockey league",   55],
+  ["alps hockey",         56],
+  // ── MEDIUM LEAGUES — Norway ──────────────────────────────────────────────────
+  ["fjordkraft",          60],
+  ["eliteserien",         61],
+  // ── MEDIUM LEAGUES — Denmark ─────────────────────────────────────────────────
+  ["metal ligaen",        65],
+  // ── MEDIUM LEAGUES — Slovakia ────────────────────────────────────────────────
+  ["slovak extraliga",    70],
+  // ── MEDIUM LEAGUES — France ──────────────────────────────────────────────────
+  ["ligue magnus",        75],
+];
+
+function hockeyLeaguePriority(league: string): number {
+  const lower = league.toLowerCase();
+  for (const [pattern, rank] of HOCKEY_PRIORITY) {
+    if (lower.includes(pattern)) return rank;
+  }
+  return 999;
+}
+
+// ─── Volleyball league priority ─────────────────────────────────────────────────
+// ⚠ "volleyball bundesliga" BEFORE "bundesliga"; more-specific league names first
+const VOLLEYBALL_PRIORITY: Array<[string, number]> = [
+  // ── BIG LEAGUES — 1st division ───────────────────────────────────────────────
+  ["superlega",                1],   // Italy 1st div
+  ["plusliga",                 3],   // Poland 1st div
+  ["efeler ligi",              5],   // Turkey 1st div
+  ["sv.league",                6],   // Japan 1st div
+  ["russian volleyball super", 7],   // Russia 1st div
+  ["superliga",                2],   // Brazil / Russia (broad — after more specific Russia)
+  // ── BIG LEAGUES — 2nd division ───────────────────────────────────────────────
+  ["serie a2",                10],   // Italy 2nd div (⚠ before "serie a" if it appears)
+  ["tauron 1 liga",           12],   // Poland 2nd div
+  ["higher league",           14],   // Russia 2nd div
+  ["v.league 2",              15],   // Japan 2nd div (⚠ before "v.league")
+  ["v.league",                16],   // Japan 1st (catch-all after more specific)
+  ["1. lig",                  13],   // Turkey 2nd div
+  // ── BIG LEAGUES — Cups & Super Cups ──────────────────────────────────────────
+  ["coppa italia",            20],
+  ["copa brasil",             21],
+  ["polish cup",              22],
+  ["turkish cup",             23],
+  ["super cup",               24],
+  ["russian cup",             25],
+  ["emperor",                 26],   // Japan Emperor's Cup
+  ["supercoppa",              27],
+  // ── MEDIUM LEAGUES — 1st division ────────────────────────────────────────────
+  ["ligue a",                 40],   // France 1st div (⚠ before "ligue b")
+  ["volleyball bundesliga",   41],   // Germany 1st div (⚠ BEFORE generic "bundesliga")
+  ["liga de voleibol",        45],   // Argentina
+  ["liga una",                50],   // Portugal
+  ["v-league",                55],   // South Korea
+  ["chinese volleyball",      60],   // China
+  // ── MEDIUM LEAGUES — 2nd division ────────────────────────────────────────────
+  ["ligue b",                 70],   // France 2nd div
+  ["bundesliga",              71],   // Germany 2nd div
+  ["ii divisão",              75],   // Portugal 2nd div
+  ["ii divisao",              75],
+  // ── MEDIUM LEAGUES — Cups ────────────────────────────────────────────────────
+  ["coupe de france",         80],
+];
+
+function volleyballLeaguePriority(league: string): number {
+  const lower = league.toLowerCase();
+  for (const [pattern, rank] of VOLLEYBALL_PRIORITY) {
+    if (lower.includes(pattern)) return rank;
+  }
+  return 999;
+}
+
 // ─── Odds helpers ──────────────────────────────────────────────────────────────
 
 function parseFloat2(v: string | undefined): number {
@@ -1740,6 +1974,9 @@ function buildNHLLiveMatches(tournaments: NHLTournament[]): LiveMatchState[] {
   const NHL_LIVE_STATUSES = new Set(["1P", "2P", "3P", "OT", "SO", "INT", "Break"]);
   const result: LiveMatchState[] = [];
 
+  // Sort by league priority so top-tier competitions appear first
+  const sorted = [...tournaments].sort((a, b) => hockeyLeaguePriority(a.league) - hockeyLeaguePriority(b.league));
+
   const today = new Date();
   const todayStr = `${String(today.getDate()).padStart(2, "0")}.${String(today.getMonth() + 1).padStart(2, "0")}.${today.getFullYear()}`;
 
@@ -1752,7 +1989,7 @@ function buildNHLLiveMatches(tournaments: NHLTournament[]): LiveMatchState[] {
     return [h, a];
   };
 
-  for (const t of tournaments) {
+  for (const t of sorted) {
     const matches = Array.isArray(t.match) ? t.match : [t.match];
     for (const m of matches) {
       if (!m?.status) continue;
@@ -1854,10 +2091,13 @@ function buildNBALiveMatches(tournaments: NBATournament[]): LiveMatchState[] {
   const NBA_LIVE_STATUSES = new Set(["Q1", "Q2", "Q3", "Q4", "HT", "OT", "1st Quarter", "2nd Quarter", "3rd Quarter", "4th Quarter", "Halftime", "In Progress"]);
   const result: LiveMatchState[] = [];
 
+  // Sort by league priority so NBA Cup / EuroLeague appear before G League etc.
+  const sorted = [...tournaments].sort((a, b) => basketballLeaguePriority(a.league) - basketballLeaguePriority(b.league));
+
   const today = new Date();
   const todayStr = `${String(today.getDate()).padStart(2, "0")}.${String(today.getMonth() + 1).padStart(2, "0")}.${today.getFullYear()}`;
 
-  for (const t of tournaments) {
+  for (const t of sorted) {
     const matches = Array.isArray(t.match) ? t.match : [t.match];
     for (const m of matches) {
       if (!m?.status) continue;
@@ -2012,7 +2252,10 @@ function buildTennisLiveMatches(
     return 0;
   };
 
-  for (const t of tournaments) {
+  // Sort by tournament priority: Grand Slams → Masters → ATP 500 → ATP 250 → Challenger → ITF
+  const sorted = [...tournaments].sort((a, b) => tennisLeaguePriority(a.name) - tennisLeaguePriority(b.name));
+
+  for (const t of sorted) {
     const matches = Array.isArray(t.match) ? t.match : (t.match ? [t.match] : []);
     for (const m of matches) {
       if (!m || !TENNIS_LIVE_STATUSES.has(m.status)) continue;
@@ -2118,11 +2361,14 @@ function buildVolleyballLiveMatches(tournaments: VolleyTournament[]): LiveMatchS
   const VSET_LIVE = new Set(["Set 1", "Set 2", "Set 3", "Set 4", "Set 5"]);
   const result: LiveMatchState[] = [];
 
+  // Sort by league priority: SuperLega / Superliga / PlusLiga → medium leagues
+  const sorted = [...tournaments].sort((a, b) => volleyballLeaguePriority(a.league) - volleyballLeaguePriority(b.league));
+
   // Today's date in DD.MM.YYYY for filtering non-live matches
   const now = new Date();
   const todayStr = `${String(now.getDate()).padStart(2, "0")}.${String(now.getMonth() + 1).padStart(2, "0")}.${now.getFullYear()}`;
 
-  for (const t of tournaments) {
+  for (const t of sorted) {
     const matches = Array.isArray(t.match) ? t.match : t.match ? [t.match] : [];
     for (const m of matches) {
       if (!m) continue;
