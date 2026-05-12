@@ -231,58 +231,192 @@ type OddsLeague = {
 };
 
 // ─── Priority leagues ─────────────────────────────────────────────────────────
+// ORDERING RULE: more-specific patterns MUST come before less-specific ones
+// within the same country (e.g. "laliga2" before "laliga", "2. bundesliga"
+// before "bundesliga") because matching uses String.includes().
 
-// International tournaments (UEFA etc.): matched only when country is NOT a domestic country
-// Domestic leagues: matched by "Country: LeagueName" prefix patterns
-const UEFA_TOURNAMENTS = ["champions league", "europa league", "conference league", "nations league"];
-
-const DOMESTIC_PRIORITY: Array<[string, number]> = [
-  ["spain: laliga", 10],
-  ["england: premier league", 11],
-  ["germany: bundesliga", 12],
-  ["italy: serie a", 13],
-  ["france: ligue 1", 14],
-  ["spain: laliga2", 20],
-  ["germany: 2. bundesliga", 21],
-  ["italy: serie b", 22],
-  ["england: championship", 23],
-  ["portugal: liga portugal", 24],
-  ["netherlands: eredivisie", 25],
-  ["belgium: jupiler pro league", 30],
-  ["turkey: super lig", 31],
-  ["turkey: süper lig", 31],
-  ["scotland: premiership", 32],
-  ["france: ligue 2", 33],
-  ["germany: 3. liga", 34],
-  ["italy: serie c", 35],
-  ["spain: primera rfef", 990],
-  ["spain: segunda rfef", 991],
-  ["spain: tercera rfef", 992],
-  ["spain: rfef", 993],
-  ["spain: segunda", 36],
-  ["netherlands: keuken", 37],
-  ["portugal: liga bwin", 38],
-  ["russia: premier league", 39],
-  ["ukraine: premier league", 40],
-  ["greece: super league", 41],
-  ["poland: ekstraklasa", 42],
-  ["sweden: allsvenskan", 43],
-  ["denmark: superliga", 44],
-  ["austria: bundesliga", 45],
-  ["switzerland: super league", 46],
-  ["scotland: championship", 47],
-  ["england: league one", 48],
-  ["england: league two", 49],
-  ["italy: serie d", 50],
-  ["france: national", 51],
-  ["germany: bundesliga women", 52],
-  ["china: super league", 60],
-  ["china: chinese super league", 60],
-  ["indonesia: liga 1", 65],
-  ["indonesia: bri liga 1", 65],
+// International tournaments shown regardless of country
+const INTL_TOURNAMENTS = [
+  "champions league",
+  "europa league",
+  "conference league",
+  "nations league",
+  "copa libertadores",
+  "copa sudamericana",
+  "copa america",
+  "world cup",
 ];
 
-const EUROPEAN_COUNTRIES = new Set([
+// DOMESTIC_PRIORITY: [pattern, priority]
+// priority < 100 → shown; ≥ 100 → filtered out
+const DOMESTIC_PRIORITY: Array<[string, number]> = [
+
+  // ── BIG LEAGUES — 1st division ─────────────────────────────────────────────
+  // ⚠ More-specific patterns FIRST within each country — see ordering rules above
+  ["england: premier league",                1],
+  ["spain: laliga2",                        11],   // ⚠ BEFORE "laliga" ("laliga2" ⊃ "laliga")
+  ["spain: laliga",                          2],
+  ["germany: 3. liga",                     999],   // ⚠ BEFORE "bundesliga"
+  ["germany: 2. bundesliga",               12],    // ⚠ BEFORE "bundesliga"
+  ["germany: bundesliga",                    3],
+  ["italy: serie a",                         4],
+  ["france: ligue 1",                        5],
+  ["brazil: série b",                       15],   // ⚠ BEFORE "brasileiro" catch-all
+  ["brazil: serie b",                       15],
+  ["brazil: brasileirão série b",           15],
+  ["brazil: brasileirao serie b",           15],
+  ["brazil: série a",                        6],
+  ["brazil: serie a",                        6],
+  ["brazil: brasileirão série a",            6],
+  ["brazil: brasileirao serie a",            6],
+  ["brazil: brasileiro",                     6],   // catch-all for other Brasileirão variants
+  ["argentina: liga profesional",            7],
+  ["argentina: primera división",            7],
+  ["argentina: primera division",            7],
+
+  // ── BIG LEAGUES — 2nd division ─────────────────────────────────────────────
+  ["england: championship",                 10],
+  ["spain: segunda división",              11],
+  ["spain: segunda division",              11],
+  ["italy: serie b",                        13],
+  ["france: ligue 2",                       14],
+  ["argentina: primera nacional",           16],
+
+  // ── BIG LEAGUES — Cups & Super Cups ───────────────────────────────────────
+  ["england: fa cup",                       20],
+  ["england: carabao cup",                  21],
+  ["england: efl cup",                      21],
+  ["england: league cup",                   21],
+  ["england: community shield",             22],
+  ["spain: copa del rey",                   23],
+  ["spain: supercopa",                      24],
+  ["germany: dfb-pokal",                    25],
+  ["germany: dfb pokal",                    25],
+  ["germany: supercup",                     26],
+  ["italy: coppa italia",                   27],
+  ["italy: supercoppa",                     28],
+  ["france: coupe de france",               29],
+  ["france: trophée des champions",         30],
+  ["france: trophee des champions",         30],
+  ["brazil: copa do brasil",                31],
+  ["brazil: supercopa",                     32],
+  ["brazil: paulist",                       33],   // Paulistão / Paulista
+  ["brazil: carioca",                       34],
+  ["brazil: mineiro",                       35],
+  ["brazil: gaúcho",                        36],
+  ["brazil: gaucho",                        36],
+  ["argentina: copa argentina",             37],
+  ["argentina: supercopa",                  38],
+
+  // ── MEDIUM LEAGUES — 1st division ─────────────────────────────────────────
+  ["portugal: liga portugal 2",             50],   // ⚠ BEFORE "liga portugal" ("liga portugal 2" ⊃ "liga portugal")
+  ["portugal: segunda liga",                50],
+  ["portugal: liga portugal",               40],
+  ["portugal: primeira liga",               40],
+  ["portugal: liga bwin",                   40],
+  ["netherlands: eredivisie",               41],
+  ["belgium: pro league",                   42],
+  ["belgium: jupiler",                      42],
+  ["turkey: süper lig",                     43],
+  ["turkey: super lig",                     43],
+  ["mexico: liga mx",                       44],
+  ["usa: mls",                              45],
+  ["usa: major league soccer",              45],
+  ["japan: j1 league",                      46],
+  ["japan: j.league",                       46],
+  ["south korea: k league 1",              47],
+  ["korea: k league 1",                    47],
+
+  // ── MEDIUM LEAGUES — 2nd division ─────────────────────────────────────────
+  ["netherlands: eerste divisie",           51],
+  ["netherlands: keuken",                   51],
+  ["belgium: challenger",                   52],
+  ["turkey: 1. lig",                        53],
+  ["turkey: tff 1. lig",                    53],
+  ["mexico: liga de expansión",            54],
+  ["mexico: liga de expansion",            54],
+  ["mexico: ascenso",                       54],
+  ["usa: usl championship",                 55],
+  ["japan: j2 league",                      56],
+  ["south korea: k league 2",              57],
+  ["korea: k league 2",                    57],
+
+  // ── MEDIUM LEAGUES — Cups & Super Cups ────────────────────────────────────
+  ["portugal: taça de portugal",            60],
+  ["portugal: taca de portugal",            60],
+  ["portugal: supertaça",                   61],
+  ["portugal: supertaca",                   61],
+  ["netherlands: knvb",                     62],
+  ["netherlands: johan cruyff",             63],
+  ["netherlands: super cup",                63],
+  ["belgium: belgian cup",                  64],
+  ["belgium: super cup",                    65],
+  ["turkey: turkish cup",                   66],
+  ["turkey: türkiye kupası",               66],
+  ["turkey: super cup",                     67],
+  ["mexico: copa mx",                       68],
+  ["mexico: campeón de campeones",         69],
+  ["mexico: campeon de campeones",         69],
+  ["usa: u.s. open cup",                    70],
+  ["usa: us open cup",                      70],
+  ["usa: open cup",                         70],
+  ["japan: emperor",                        71],   // Emperor's Cup
+  ["japan: super cup",                      72],
+  ["south korea: korean fa cup",           73],
+  ["south korea: fa cup",                  73],
+  ["korea: korean fa cup",                 73],
+  ["korea: fa cup",                        73],
+
+  // ── SMALL LEAGUES — 1st division only ─────────────────────────────────────
+  ["croatia: hnl",                          75],
+  ["croatia: supersport",                   75],
+  ["serbia: superliga",                     76],
+  ["sweden: allsvenskan",                   77],
+  ["norway: eliteserien",                   78],
+  ["denmark: superliga",                    79],
+  ["chile: primera división",              80],
+  ["chile: primera division",              80],
+  ["colombia: categoría primera a",        81],
+  ["colombia: categoria primera a",        81],
+  ["colombia: primera a",                  81],
+  ["saudi arabia: saudi pro league",        82],
+  ["saudi arabia: pro league",              82],
+  ["thailand: thai league 1",               83],
+  ["thailand: thai league",                 83],
+  ["india: indian super league",            84],
+  ["india: isl",                            84],
+
+  // ── Other notable European leagues (still shown) ──────────────────────────
+  ["scotland: premiership",                 85],
+  ["russia: premier league",                86],
+  ["ukraine: premier league",               87],
+  ["greece: super league",                  88],
+  ["austria: bundesliga",                   89],   // ⚠ before generic "bundesliga" — safe (prefixed by "austria:")
+  ["switzerland: super league",             90],
+  ["poland: ekstraklasa",                   91],
+  ["romania: superliga",                    92],
+
+  // ── Block lower divisions / amateur / regional ─────────────────────────────
+  ["spain: primera rfef",                  999],
+  ["spain: segunda rfef",                  999],
+  ["spain: tercera rfef",                  999],
+  ["spain: rfef",                          999],
+  ["england: league one",                  999],
+  ["england: league two",                  999],
+  ["england: national league",             999],
+  ["italy: serie c",                       999],
+  ["italy: serie d",                       999],
+  ["france: national",                     999],
+  ["germany: bundesliga women",            999],
+  ["china: super league",                  999],
+  ["china: chinese super league",          999],
+  ["indonesia: liga 1",                    999],
+  ["indonesia: bri liga 1",               999],
+];
+
+// All countries with explicit domestic league entries (used to detect intl tournaments)
+const ALL_DOMESTIC_COUNTRIES = new Set([
+  // Europe
   "england", "spain", "germany", "italy", "france", "portugal", "netherlands",
   "scotland", "belgium", "turkey", "greece", "austria", "switzerland", "russia",
   "ukraine", "poland", "czechia", "denmark", "sweden", "norway", "croatia",
@@ -291,6 +425,10 @@ const EUROPEAN_COUNTRIES = new Set([
   "wales", "luxembourg", "latvia", "estonia", "lithuania", "bosnia",
   "montenegro", "north macedonia", "kosovo", "iceland", "malta", "georgia",
   "armenia", "azerbaijan", "faroe islands",
+  // Americas
+  "brazil", "argentina", "mexico", "usa", "chile", "colombia",
+  // Asia / Middle East
+  "japan", "south korea", "korea", "saudi arabia", "thailand", "india",
 ]);
 
 function leaguePriority(name: string, country?: string): number {
@@ -300,19 +438,19 @@ function leaguePriority(name: string, country?: string): number {
   // Main part of league name (before first " - "), lowercased
   const mainPart = lower.split(" - ")[0];
 
-  // UEFA/international tournaments: only when country is NOT domestic European
-  if (!EUROPEAN_COUNTRIES.has(lowerCountry)) {
-    for (let i = 0; i < UEFA_TOURNAMENTS.length; i++) {
-      if (mainPart.includes(UEFA_TOURNAMENTS[i])) return i;
+  // International tournaments: only when the country is not a known domestic one
+  if (!ALL_DOMESTIC_COUNTRIES.has(lowerCountry)) {
+    for (let i = 0; i < INTL_TOURNAMENTS.length; i++) {
+      if (mainPart.includes(INTL_TOURNAMENTS[i])) return i;
     }
   }
 
-  // Domestic top leagues by exact prefix
+  // Domestic leagues — first match wins (order matters for specificity)
   for (const [pattern, rank] of DOMESTIC_PRIORITY) {
     if (mainPart.includes(pattern)) return rank;
   }
 
-  if (EUROPEAN_COUNTRIES.has(lowerCountry)) return 200;
+  // Unknown league → filter out
   return 999;
 }
 
