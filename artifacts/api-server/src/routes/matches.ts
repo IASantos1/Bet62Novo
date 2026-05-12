@@ -5658,13 +5658,20 @@ async function getTennisOdds(): Promise<TennisOddsEntry[]> {
   const margin = (v: number) => Math.max(1.01, Math.round(v * 0.975 * 100) / 100);
   const avgArr = (vals: number[]) => vals.length ? margin(vals.reduce((a, b) => a + b, 0) / vals.length) : 0;
 
-  // Average odds by array index (Home=0, Away=1) — for simple 2-way markets
+  // Average odds by name then index (Home=0, Away=1) — for simple 2-way markets
+  // Some bookmakers provide a single-odd object (e.g. only the underdog "Away" value).
+  // We prefer name-based lookup so a single "Away" odd never pollutes the home average.
   const avgIdx = (bks: RawBk[], idx: 0 | 1): number => {
     const vals: number[] = [];
+    const idxName = idx === 0 ? "Home" : "Away";
     for (const bk of bks) {
       if (bk.stop === "True") continue;
-      const odds = Array.isArray(bk.odd) ? bk.odd : (bk.odd ? [bk.odd] : []);
-      const v = parseFloat(odds[idx]?.value ?? "0");
+      const isArr = Array.isArray(bk.odd);
+      const odds: RawOdd[] = isArr ? (bk.odd as RawOdd[]) : (bk.odd ? [bk.odd as RawOdd] : []);
+      // Prefer lookup by name; fall back to positional index only for un-named array odds
+      const byName = odds.find(o => o.name === idxName);
+      const o = byName ?? (isArr ? odds[idx] : undefined);
+      const v = parseFloat(o?.value ?? "0");
       if (v > 1) vals.push(v);
     }
     return avgArr(vals);
