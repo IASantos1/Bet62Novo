@@ -9,7 +9,7 @@ export const CONFIG = {
   LIVE_CACHE_TTL: 4_000,
   DAILY_CACHE_TTL: 300_000,
   TOMORROW_CACHE_TTL: 1_800_000,
-  ODDS_CACHE_TTL: 60_000,
+  ODDS_CACHE_TTL: 300_000,
 } as const;
 
 export const CRITICAL_EVENTS = ["goal", "var", "red_card", "penalty", "touchdown"] as const;

@@ -2211,9 +2211,9 @@ async function buildLiveMatches(): Promise<LiveMatchState[]> {
 
 async function buildUpcomingMatches(): Promise<UpcomingMatch[]> {
   const [todayLeagues, tomorrowLeagues, odds] = await Promise.all([
-    getLiveLeagues(),
-    getTomorrowLeagues(),
-    getOddsMap(),
+    getLiveLeagues().catch(() => [] as StatpalLeagueV2[]),
+    getTomorrowLeagues().catch(() => [] as StatpalLeagueV2[]),
+    getOddsMap().catch(() => new Map<string, RealOdds>()),
   ]);
 
   // Tag tomorrow matches so we can label them; merge into one pool
@@ -3442,26 +3442,23 @@ async function buildVolleyballUpcoming(): Promise<UpcomingMatch[]> {
 }
 
 router.get("/upcoming", async (req, res) => {
-  try {
-    const sport = String(req.query["sport"] ?? "all");
-    const [football, tennis, basketball, hockey, volleyball] = await Promise.all([
-      buildUpcomingMatches(),
-      buildTennisUpcoming(),
-      buildBasketballUpcoming(),
-      buildHockeyUpcoming(),
-      buildVolleyballUpcoming(),
-    ]);
-    let matches: UpcomingMatch[];
-    if (sport === "football") matches = football;
-    else if (sport === "tennis") matches = tennis;
-    else if (sport === "basketball") matches = basketball;
-    else if (sport === "hockey") matches = hockey;
-    else if (sport === "volleyball") matches = volleyball;
-    else matches = [...football, ...tennis, ...basketball, ...hockey, ...volleyball];
-    res.json({ matches });
-  } catch (err) {
-    res.status(500).json({ error: "Erro ao buscar próximas partidas" });
-  }
+  const sport = String(req.query["sport"] ?? "all");
+  const empty: UpcomingMatch[] = [];
+  const [football, tennis, basketball, hockey, volleyball] = await Promise.all([
+    buildUpcomingMatches().catch(() => empty),
+    buildTennisUpcoming().catch(() => empty),
+    buildBasketballUpcoming().catch(() => empty),
+    buildHockeyUpcoming().catch(() => empty),
+    buildVolleyballUpcoming().catch(() => empty),
+  ]);
+  let matches: UpcomingMatch[];
+  if (sport === "football") matches = football;
+  else if (sport === "tennis") matches = tennis;
+  else if (sport === "basketball") matches = basketball;
+  else if (sport === "hockey") matches = hockey;
+  else if (sport === "volleyball") matches = volleyball;
+  else matches = [...football, ...tennis, ...basketball, ...hockey, ...volleyball];
+  res.json({ matches });
 });
 
 router.get("/", async (_req, res) => {
