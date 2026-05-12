@@ -24,3 +24,15 @@ id = "TwE1j6jrrpcu-vDCgvoea"
 uri = "file://artifacts/bet62/public/logo-mastercard.png"
 type = "image"
 title = "Mastercard — logo oficial"
+
+[[outputs]]
+id = "LLkp3dfZPJGH2ucHFhF03"
+uri = "file://artifacts/bet62/public/mbway_new1.png"
+type = "image"
+title = "MB WAY — seeklogo recente (pode ter fundo)"
+
+[[outputs]]
+id = "4VcokkV2ouoH1nDd5npke"
+uri = "file://artifacts/bet62/public/mbway_new2.png"
+type = "image"
+title = "MB WAY — vectorseek RGBA (transparente) ✅"
