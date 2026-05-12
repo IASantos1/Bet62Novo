@@ -1,5 +1,10 @@
 uploads = []
-generated = []
+
+[[generated]]
+id = "5kkKyiu94290TVurBDBtA"
+uri = "file://artifacts/bet62-mobile/assets/images/icon.png"
+type = "image"
+title = "bet62 app icon"
 
 [[outputs]]
 id = "pNEo_KfCiDD03NczIhRBq"
