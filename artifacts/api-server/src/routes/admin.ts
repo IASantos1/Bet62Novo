@@ -1,6 +1,6 @@
 import { Router, type IRouter, type Response, type Request } from "express";
 import jwt from "jsonwebtoken";
-import { db, usersTable, betsTable } from "@workspace/db";
+import { db, usersTable, betsTable, paymentsTable, withdrawalsTable } from "@workspace/db";
 import { eq, desc, count, sum, sql } from "drizzle-orm";
 import { adminMiddleware, type AdminRequest } from "../middlewares/adminAuth";
 import { logger } from "../lib/logger";
@@ -12,7 +12,7 @@ const ADMIN_USERNAME = process.env.ADMIN_USERNAME || "admin";
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "bet62admin2026";
 const ADMIN_EMAIL = process.env.ADMIN_EMAIL || "admin@bet62.com";
 
-// POST /api/admin/login  (aceita username OU email)
+// POST /api/admin/login
 router.post("/login", (req: Request, res: Response): void => {
   const { username, email, password } = req.body as { username?: string; email?: string; password?: string };
   const loginId = username || email;
@@ -46,8 +46,9 @@ router.get("/stats", adminMiddleware, async (_req: AdminRequest, res: Response):
     const [totalStaked] = await db.select({ total: sum(betsTable.stake) }).from(betsTable);
     const [totalPaidOut] = await db.select({ total: sum(betsTable.potentialWin) }).from(betsTable).where(eq(betsTable.status, "won"));
     const [totalBalance] = await db.select({ total: sum(usersTable.balance) }).from(usersTable);
+    const [totalDeposited] = await db.select({ total: sum(paymentsTable.amount) }).from(paymentsTable).where(eq(paymentsTable.status, "completed"));
+    const [pendingWithdrawals] = await db.select({ count: count(), total: sum(withdrawalsTable.amount) }).from(withdrawalsTable).where(eq(withdrawalsTable.status, "pending"));
 
-    // Last 7 days bets per day
     const last7Days = await db.execute(sql`
       SELECT DATE(created_at AT TIME ZONE 'UTC') as day, COUNT(*) as bets, SUM(stake::numeric) as volume
       FROM bets
@@ -68,9 +69,14 @@ router.get("/stats", adminMiddleware, async (_req: AdminRequest, res: Response):
         totalStaked: parseFloat(totalStaked.total || "0"),
         totalPaidOut: parseFloat(totalPaidOut.total || "0"),
         totalUserBalance: parseFloat(totalBalance.total || "0"),
+        totalDeposited: parseFloat(totalDeposited.total || "0"),
         margin: totalStaked.total
           ? (((parseFloat(totalStaked.total) - parseFloat(totalPaidOut.total || "0")) / parseFloat(totalStaked.total)) * 100).toFixed(1)
           : "0.0",
+      },
+      withdrawals: {
+        pendingCount: Number(pendingWithdrawals.count),
+        pendingTotal: parseFloat(pendingWithdrawals.total || "0"),
       },
       chart: last7Days.rows,
     });
@@ -88,10 +94,12 @@ router.get("/users", adminMiddleware, async (_req: AdminRequest, res: Response):
       name: usersTable.name,
       email: usersTable.email,
       balance: usersTable.balance,
+      freebetBalance: usersTable.freebetBalance,
+      kycStatus: usersTable.kycStatus,
+      selfExcludedUntil: usersTable.selfExcludedUntil,
       createdAt: usersTable.createdAt,
     }).from(usersTable).orderBy(desc(usersTable.createdAt));
 
-    // For each user, get bet count
     const betCounts = await db.select({
       userId: betsTable.userId,
       count: count(),
@@ -104,6 +112,7 @@ router.get("/users", adminMiddleware, async (_req: AdminRequest, res: Response):
       ...u,
       betCount: Number(betMap.get(u.id)?.count || 0),
       totalStaked: parseFloat(betMap.get(u.id)?.totalStaked || "0"),
+      banned: u.selfExcludedUntil ? new Date(u.selfExcludedUntil) > new Date() : false,
     }));
 
     res.json(result);
@@ -113,22 +122,36 @@ router.get("/users", adminMiddleware, async (_req: AdminRequest, res: Response):
   }
 });
 
+// GET /api/admin/users/:id/detail
+router.get("/users/:id/detail", adminMiddleware, async (req: AdminRequest, res: Response): Promise<void> => {
+  const userId = parseInt(String(req.params["id"]), 10);
+  if (isNaN(userId)) { res.status(400).json({ error: "ID inválido" }); return; }
+
+  try {
+    const [user] = await db.select().from(usersTable).where(eq(usersTable.id, userId)).limit(1);
+    if (!user) { res.status(404).json({ error: "Utilizador não encontrado" }); return; }
+
+    const bets = await db.select().from(betsTable).where(eq(betsTable.userId, userId)).orderBy(desc(betsTable.createdAt)).limit(50);
+    const payments = await db.select().from(paymentsTable).where(eq(paymentsTable.userId, userId)).orderBy(desc(paymentsTable.createdAt)).limit(50);
+    const withdrawals = await db.select().from(withdrawalsTable).where(eq(withdrawalsTable.userId, userId)).orderBy(desc(withdrawalsTable.createdAt)).limit(50);
+
+    res.json({ user, bets, payments, withdrawals });
+  } catch (err) {
+    logger.error({ err }, "Admin user detail error");
+    res.status(500).json({ error: "Erro ao carregar detalhes" });
+  }
+});
+
 // PUT /api/admin/users/:id/balance
 router.put("/users/:id/balance", adminMiddleware, async (req: AdminRequest, res: Response): Promise<void> => {
   const userId = parseInt(String(req.params["id"]), 10);
   const { balance, operation, amount } = req.body;
 
-  if (isNaN(userId)) {
-    res.status(400).json({ error: "ID inválido" });
-    return;
-  }
+  if (isNaN(userId)) { res.status(400).json({ error: "ID inválido" }); return; }
 
   try {
     const [user] = await db.select().from(usersTable).where(eq(usersTable.id, userId)).limit(1);
-    if (!user) {
-      res.status(404).json({ error: "Usuário não encontrado" });
-      return;
-    }
+    if (!user) { res.status(404).json({ error: "Usuário não encontrado" }); return; }
 
     let newBalance: string;
     if (operation === "add") {
@@ -138,8 +161,7 @@ router.put("/users/:id/balance", adminMiddleware, async (req: AdminRequest, res:
     } else if (balance !== undefined) {
       newBalance = parseFloat(balance).toFixed(2);
     } else {
-      res.status(400).json({ error: "Operação inválida" });
-      return;
+      res.status(400).json({ error: "Operação inválida" }); return;
     }
 
     const [updated] = await db.update(usersTable).set({ balance: newBalance }).where(eq(usersTable.id, userId)).returning();
@@ -150,14 +172,75 @@ router.put("/users/:id/balance", adminMiddleware, async (req: AdminRequest, res:
   }
 });
 
+// PUT /api/admin/users/:id/freebet
+router.put("/users/:id/freebet", adminMiddleware, async (req: AdminRequest, res: Response): Promise<void> => {
+  const userId = parseInt(String(req.params["id"]), 10);
+  const { amount } = req.body as { amount?: string };
+
+  if (isNaN(userId) || !amount || isNaN(parseFloat(amount)) || parseFloat(amount) <= 0) {
+    res.status(400).json({ error: "Valor de freebet inválido" }); return;
+  }
+
+  try {
+    const [user] = await db.select().from(usersTable).where(eq(usersTable.id, userId)).limit(1);
+    if (!user) { res.status(404).json({ error: "Utilizador não encontrado" }); return; }
+
+    const newFreebet = (parseFloat(user.freebetBalance) + parseFloat(amount)).toFixed(2);
+    const [updated] = await db.update(usersTable).set({ freebetBalance: newFreebet }).where(eq(usersTable.id, userId)).returning();
+    res.json({ id: updated.id, freebetBalance: updated.freebetBalance });
+  } catch (err) {
+    logger.error({ err }, "Admin freebet error");
+    res.status(500).json({ error: "Erro ao atribuir freebet" });
+  }
+});
+
+// PUT /api/admin/users/:id/ban
+router.put("/users/:id/ban", adminMiddleware, async (req: AdminRequest, res: Response): Promise<void> => {
+  const userId = parseInt(String(req.params["id"]), 10);
+  const { banned } = req.body as { banned?: boolean };
+
+  if (isNaN(userId)) { res.status(400).json({ error: "ID inválido" }); return; }
+
+  try {
+    const [user] = await db.select().from(usersTable).where(eq(usersTable.id, userId)).limit(1);
+    if (!user) { res.status(404).json({ error: "Utilizador não encontrado" }); return; }
+
+    const selfExcludedUntil = banned ? new Date("2099-12-31T23:59:59Z") : null;
+    const [updated] = await db.update(usersTable).set({ selfExcludedUntil }).where(eq(usersTable.id, userId)).returning();
+    res.json({ id: updated.id, banned: updated.selfExcludedUntil ? new Date(updated.selfExcludedUntil) > new Date() : false });
+  } catch (err) {
+    logger.error({ err }, "Admin ban error");
+    res.status(500).json({ error: "Erro ao banir utilizador" });
+  }
+});
+
+// PUT /api/admin/users/:id/kyc
+router.put("/users/:id/kyc", adminMiddleware, async (req: AdminRequest, res: Response): Promise<void> => {
+  const userId = parseInt(String(req.params["id"]), 10);
+  const { kycStatus } = req.body as { kycStatus?: string };
+  const valid = ["not_submitted", "pending", "approved", "rejected"];
+  if (isNaN(userId) || !kycStatus || !valid.includes(kycStatus)) {
+    res.status(400).json({ error: "Status KYC inválido" }); return;
+  }
+  try {
+    const [updated] = await db.update(usersTable).set({ kycStatus }).where(eq(usersTable.id, userId)).returning();
+    res.json({ id: updated.id, kycStatus: updated.kycStatus });
+  } catch (err) {
+    logger.error({ err }, "Admin KYC error");
+    res.status(500).json({ error: "Erro ao atualizar KYC" });
+  }
+});
+
 // GET /api/admin/bets
 router.get("/bets", adminMiddleware, async (req: AdminRequest, res: Response): Promise<void> => {
   try {
     const page = parseInt(String(req.query["page"] || "1"), 10);
+    const status = String(req.query["status"] || "all");
     const limit = 50;
     const offset = (page - 1) * limit;
 
-    const bets = await db
+    const validStatuses = ["pending", "won", "lost", "cashed_out"];
+    const query = db
       .select({
         id: betsTable.id,
         userId: betsTable.userId,
@@ -176,6 +259,10 @@ router.get("/bets", adminMiddleware, async (req: AdminRequest, res: Response): P
       .limit(limit)
       .offset(offset);
 
+    const bets = validStatuses.includes(status)
+      ? await query.where(eq(betsTable.status, status))
+      : await query;
+
     res.json(bets);
   } catch (err) {
     logger.error({ err }, "Admin bets error");
@@ -190,19 +277,14 @@ router.put("/bets/:id/status", adminMiddleware, async (req: AdminRequest, res: R
 
   const validStatuses = ["pending", "won", "lost", "cashed_out"];
   if (!validStatuses.includes(status)) {
-    res.status(400).json({ error: "Status inválido" });
-    return;
+    res.status(400).json({ error: "Status inválido" }); return;
   }
 
   try {
     const [bet] = await db.select().from(betsTable).where(eq(betsTable.id, betId)).limit(1);
-    if (!bet) {
-      res.status(404).json({ error: "Aposta não encontrada" });
-      return;
-    }
+    if (!bet) { res.status(404).json({ error: "Aposta não encontrada" }); return; }
 
     if (status === "won" && bet.status !== "won") {
-      // Credit user with potential win
       await db.transaction(async (tx) => {
         await tx.update(betsTable).set({ status }).where(eq(betsTable.id, betId));
         const [user] = await tx.select().from(usersTable).where(eq(usersTable.id, bet.userId)).limit(1);
@@ -217,6 +299,64 @@ router.put("/bets/:id/status", adminMiddleware, async (req: AdminRequest, res: R
   } catch (err) {
     logger.error({ err }, "Admin bet status update error");
     res.status(500).json({ error: "Erro ao atualizar status" });
+  }
+});
+
+// GET /api/admin/payments
+router.get("/payments", adminMiddleware, async (req: AdminRequest, res: Response): Promise<void> => {
+  try {
+    const page = parseInt(String(req.query["page"] || "1"), 10);
+    const limit = 50;
+    const offset = (page - 1) * limit;
+
+    const payments = await db
+      .select({
+        id: paymentsTable.id,
+        orderId: paymentsTable.orderId,
+        userId: paymentsTable.userId,
+        amount: paymentsTable.amount,
+        method: paymentsTable.method,
+        status: paymentsTable.status,
+        entity: paymentsTable.entity,
+        reference: paymentsTable.reference,
+        createdAt: paymentsTable.createdAt,
+        userName: usersTable.name,
+        userEmail: usersTable.email,
+      })
+      .from(paymentsTable)
+      .leftJoin(usersTable, eq(paymentsTable.userId, usersTable.id))
+      .orderBy(desc(paymentsTable.createdAt))
+      .limit(limit)
+      .offset(offset);
+
+    res.json(payments);
+  } catch (err) {
+    logger.error({ err }, "Admin payments error");
+    res.status(500).json({ error: "Erro ao carregar pagamentos" });
+  }
+});
+
+// POST /api/admin/payments/:id/credit  — manually credit a payment
+router.post("/payments/:id/credit", adminMiddleware, async (req: AdminRequest, res: Response): Promise<void> => {
+  const paymentId = parseInt(String(req.params["id"]), 10);
+  if (isNaN(paymentId)) { res.status(400).json({ error: "ID inválido" }); return; }
+
+  try {
+    const [payment] = await db.select().from(paymentsTable).where(eq(paymentsTable.id, paymentId)).limit(1);
+    if (!payment) { res.status(404).json({ error: "Pagamento não encontrado" }); return; }
+    if (payment.status === "completed") { res.status(400).json({ error: "Pagamento já foi creditado" }); return; }
+
+    await db.transaction(async (tx) => {
+      await tx.update(paymentsTable).set({ status: "completed" }).where(eq(paymentsTable.id, paymentId));
+      await tx.update(usersTable)
+        .set({ balance: sql`${usersTable.balance} + ${payment.amount}` })
+        .where(eq(usersTable.id, payment.userId));
+    });
+
+    res.json({ id: paymentId, status: "completed" });
+  } catch (err) {
+    logger.error({ err }, "Admin payment credit error");
+    res.status(500).json({ error: "Erro ao creditar pagamento" });
   }
 });
 
