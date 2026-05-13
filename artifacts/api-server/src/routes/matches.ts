@@ -101,6 +101,9 @@ export type LiveMatchState = {
   marketSuspension?: Record<string, number>;
   // Reason for current suspension (displayed in UI)
   _suspensionReason?: string;
+  // Red cards per team (football only; 0 = none)
+  redCardsHome?: number;
+  redCardsAway?: number;
   // Minutes until match starts (only present for "Em Breve" pre-match entries)
   startsIn?: number;
   // Scheduled kickoff time (HH:MM, Portugal UTC+1) for "Em Breve" entries
@@ -2959,6 +2962,9 @@ async function buildLiveMatches(): Promise<LiveMatchState[]> {
           });
         }
       }
+      // Red card counts derived from the fully-parsed events (available in both branches)
+      const stateRcHome = countRedCards(events, "home");
+      const stateRcAway = countRedCards(events, "away");
 
       // VAR review / penalty / big-chance detection → suspend all markets
       // Triggered on dangerous events in the most recent 2 minutes of play
@@ -3022,6 +3028,8 @@ async function buildLiveMatches(): Promise<LiveMatchState[]> {
         _liveExtra: Object.keys(footballExtra).length > 0 ? footballExtra : undefined,
         _firstSeenAt: firstSeenAt,
         _htStartedAt: isHT ? htStartedAt : undefined,
+        redCardsHome: stateRcHome > 0 ? stateRcHome : undefined,
+        redCardsAway: stateRcAway > 0 ? stateRcAway : undefined,
       };
 
       liveMatchState.set(m.main_id, state);

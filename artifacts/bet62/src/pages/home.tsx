@@ -721,6 +721,9 @@ type Match = {
     periods?: Array<[number, number]>;
     quarters?: Array<[number, number]>;
   };
+  // Red cards per team (football only)
+  redCardsHome?: number;
+  redCardsAway?: number;
   // Minutes until match starts (only present for "Em Breve" pre-match entries)
   startsIn?: number;
   // Scheduled kickoff time (HH:MM, Portugal UTC+1) for "Em Breve" entries
@@ -2135,6 +2138,14 @@ export default function Home() {
     };
 
     // Basketball / Hockey / Football: standard home vs away score
+    const rcH = match.redCardsHome ?? 0;
+    const rcA = match.redCardsAway ?? 0;
+    const RcBadge = ({ count, big: b }: { count: number; big?: boolean }) => count <= 0 ? null : (
+      <span className={`inline-flex items-center justify-center shrink-0 bg-red-600 rounded-[2px] font-black text-white shadow leading-none select-none ${b ? "w-4 h-[22px] text-[10px]" : "w-3.5 h-[18px] text-[9px]"}`}>
+        {count}
+      </span>
+    );
+
     const SimpleScore = ({ big }: { big?: boolean }) => isEmBreve ? (
       <div className={`flex items-center gap-2 w-full`}>
         <span className={`font-bold text-zinc-400 ${big ? "text-base" : "text-sm"} truncate flex-1 text-right`}>{match.home}</span>
@@ -2145,11 +2156,17 @@ export default function Home() {
       </div>
     ) : (
       <div className={`flex items-center gap-2 w-full`}>
-        <span className={`font-bold text-white ${big ? "text-base" : "text-sm"} truncate flex-1 text-right`}>{match.home}</span>
+        <div className={`flex items-center justify-end gap-1 flex-1 min-w-0`}>
+          <span className={`font-bold text-white ${big ? "text-base" : "text-sm"} truncate`}>{match.home}</span>
+          <RcBadge count={rcH} big={big} />
+        </div>
         <div className={`${big ? "text-3xl" : "text-xl"} font-black text-white tabular-nums shrink-0 ${big ? "px-2" : "px-1"} text-center`}>
           {match.homeScore ?? 0}<span className={`${big ? "text-white/40 text-xl mx-0.5" : "text-zinc-600 mx-0.5"}`}>-</span>{match.awayScore ?? 0}
         </div>
-        <span className={`font-bold text-white ${big ? "text-base" : "text-sm"} truncate flex-1`}>{match.away}</span>
+        <div className={`flex items-center gap-1 flex-1 min-w-0`}>
+          <RcBadge count={rcA} big={big} />
+          <span className={`font-bold text-white ${big ? "text-base" : "text-sm"} truncate`}>{match.away}</span>
+        </div>
       </div>
     );
 
