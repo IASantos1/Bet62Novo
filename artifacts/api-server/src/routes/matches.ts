@@ -380,6 +380,35 @@ const DOMESTIC_PRIORITY: Array<[string, number]> = [
   ["colombia: categoría primera a",        81],
   ["colombia: categoria primera a",        81],
   ["colombia: primera a",                  81],
+  ["colombia: categoría primera b",        96],   // 2nd division
+  ["colombia: categoria primera b",        96],
+  ["colombia: primera b",                  96],
+  ["ecuador: liga pro",                    82],
+  ["ecuador: liga betcris",                82],
+  ["ecuador: segunda categoría",           999],  // 2nd div — skip
+  ["ecuador: segunda categoria",           999],
+  ["ecuador: copa",                        83],
+  ["bolivia: división de honor",           93],
+  ["bolivia: division de honor",           93],
+  ["bolivia: división profesional",        93],
+  ["bolivia: division profesional",        93],
+  ["bolivia: liga boliviana",              93],
+  ["peru: liga 1",                         91],
+  ["peru: primera liga",                   91],
+  ["peru: apertura",                       91],
+  ["peru: copa",                           92],
+  ["uruguay: primera división",            92],
+  ["uruguay: primera division",            92],
+  ["uruguay: serie a",                     92],
+  ["uruguay: apertura",                    92],
+  ["uruguay: copa",                        93],
+  ["paraguay: primera división",           94],
+  ["paraguay: primera division",           94],
+  ["paraguay: apertura",                   94],
+  ["venezuela: liga futve",                95],
+  ["venezuela: primera división",          95],
+  ["venezuela: primera division",          95],
+  ["venezuela: apertura",                  95],
   ["saudi arabia: saudi pro league",        82],
   ["saudi arabia: pro league",              82],
   ["thailand: thai league 1",               83],
@@ -428,6 +457,7 @@ const ALL_DOMESTIC_COUNTRIES = new Set([
   "armenia", "azerbaijan", "faroe islands",
   // Americas
   "brazil", "argentina", "mexico", "usa", "chile", "colombia",
+  "ecuador", "bolivia", "peru", "uruguay", "paraguay", "venezuela",
   // Asia / Middle East
   "japan", "south korea", "korea", "saudi arabia", "thailand", "india",
 ]);
@@ -435,6 +465,18 @@ const ALL_DOMESTIC_COUNTRIES = new Set([
 function leaguePriority(name: string, country?: string): number {
   const lower = name.toLowerCase();
   const lowerCountry = (country ?? "").toLowerCase();
+
+  // ── Block youth / women / reserve / amateur / futsal leagues universally ──────
+  // These keywords in the league name ALWAYS indicate a non-main competition.
+  // Pattern must precede parent-league match (e.g. "liga mx u21" ⊃ "liga mx").
+  if (/\bu(1[0-9]|2[0-3])\b/.test(lower)) return 999;           // U17, U20, U21, U23…
+  if (/\b(under[ -]?\d{2})\b/.test(lower)) return 999;          // Under-21, Under 23…
+  if (/\b(women|woman|feminine|femenin[ao]|feminino|feminina|ladies|dames|femmes)\b/.test(lower)) return 999;
+  if (/\b(reserv[ae]s?|b-team|youth|juniores?|juvenil|amateur|futsal|beach|indoor|sala)\b/.test(lower)) return 999;
+  // Specific leagues that slip through keyword checks
+  if (lower.includes("next pro"))          return 999;   // MLS Next Pro (development)
+  if (lower.includes("premier league cup")) return 999;  // England U21 PL Cup
+  if (lower.includes("league cup") && lower.includes("play offs") && !lower.includes("carabao") && !lower.includes("efl")) return 999;
 
   // Main part of league name (before first " - "), lowercased
   const mainPart = lower.split(" - ")[0];
@@ -2601,11 +2643,11 @@ async function buildLiveMatches(): Promise<LiveMatchState[]> {
   const result: LiveMatchState[] = [];
 
   for (const league of sorted) {
-    if (count >= 20) break;
+    if (count >= 30) break;
     const matches: StatpalMatchV2[] = Array.isArray(league.match) ? league.match : [league.match];
 
     for (const m of matches) {
-      if (count >= 20) break;
+      if (count >= 30) break;
 
       // ── Guard 0: explicitly finished statuses Statpal is slow to remove ───────
       if (STATPAL_FINISHED_STATUSES.has(m.status)) continue;
@@ -2867,16 +2909,18 @@ async function buildUpcomingMatches(): Promise<UpcomingMatch[]> {
     ...tomorrowLeagues.map(l => ({ ...l, isTomorrow: true })),
   ];
 
-  const sorted = allLeagues.sort((a, b) => leaguePriority(a.name, a.country) - leaguePriority(b.name, b.country));
+  const sorted = allLeagues
+    .filter(l => leaguePriority(l.name, l.country) < 100)
+    .sort((a, b) => leaguePriority(a.name, a.country) - leaguePriority(b.name, b.country));
 
   const results: UpcomingMatch[] = [];
 
   for (const league of sorted) {
-    if (results.length >= 25) break;
+    if (results.length >= 40) break;
     const matches: StatpalMatchV2[] = Array.isArray(league.match) ? league.match : [league.match];
 
     for (const m of matches) {
-      if (results.length >= 25) break;
+      if (results.length >= 40) break;
       if (!/^\d{2}:\d{2}$/.test(m.status)) continue;
       if (m.home.goals !== "?" || m.away.goals !== "?") continue;
       if (seenIds.has(m.main_id)) continue;
