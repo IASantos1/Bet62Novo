@@ -2931,8 +2931,14 @@ async function buildUpcomingMatches(): Promise<UpcomingMatch[]> {
 
       const { odds: matchOdds, markets, real } = resolveOdds(m, odds);
 
-      // Skip matches without real Statpal odds — don't send odds-less events to the frontend
-      if (!real) continue;
+      // Skip matches without real Statpal odds UNLESS the league is high-priority
+      // (priority < 50 = Copa do Brasil, Liga Profesional, Copa Libertadores, etc.)
+      // — they are real competitions that should always be shown with simulated odds
+      const leaguePri = leaguePriority(
+        league.name ?? "",
+        league.country ?? ""
+      );
+      if (!real && leaguePri >= 50) continue;
 
       results.push({
         id: m.main_id,
