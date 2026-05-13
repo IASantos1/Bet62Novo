@@ -2140,8 +2140,9 @@ export default function Home() {
     // Basketball / Hockey / Football: standard home vs away score
     const rcH = match.redCardsHome ?? 0;
     const rcA = match.redCardsAway ?? 0;
-    const RcBadge = ({ count, big: b }: { count: number; big?: boolean }) => count <= 0 ? null : (
-      <span className={`inline-flex items-center justify-center shrink-0 bg-red-600 rounded-[2px] font-black text-white shadow leading-none select-none ${b ? "w-4 h-[22px] text-[10px]" : "w-3.5 h-[18px] text-[9px]"}`}>
+    // Small red card icon above team name; count shown inside
+    const RcBadge = ({ count }: { count: number }) => count <= 0 ? null : (
+      <span className="inline-flex items-center justify-center w-2.5 h-3.5 bg-red-600 rounded-[2px] text-white font-black text-[7px] leading-none select-none shadow mb-0.5">
         {count}
       </span>
     );
@@ -2156,15 +2157,17 @@ export default function Home() {
       </div>
     ) : (
       <div className={`flex items-center gap-2 w-full`}>
-        <div className={`flex items-center justify-end gap-1 flex-1 min-w-0`}>
+        {/* Home team: badge above name, right-aligned */}
+        <div className="flex flex-col items-end flex-1 min-w-0">
+          <RcBadge count={rcH} />
           <span className={`font-bold text-white ${big ? "text-base" : "text-sm"} truncate`}>{match.home}</span>
-          <RcBadge count={rcH} big={big} />
         </div>
         <div className={`${big ? "text-3xl" : "text-xl"} font-black text-white tabular-nums shrink-0 ${big ? "px-2" : "px-1"} text-center`}>
           {match.homeScore ?? 0}<span className={`${big ? "text-white/40 text-xl mx-0.5" : "text-zinc-600 mx-0.5"}`}>-</span>{match.awayScore ?? 0}
         </div>
-        <div className={`flex items-center gap-1 flex-1 min-w-0`}>
-          <RcBadge count={rcA} big={big} />
+        {/* Away team: badge above name, left-aligned */}
+        <div className="flex flex-col items-start flex-1 min-w-0">
+          <RcBadge count={rcA} />
           <span className={`font-bold text-white ${big ? "text-base" : "text-sm"} truncate`}>{match.away}</span>
         </div>
       </div>
