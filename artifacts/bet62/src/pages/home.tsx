@@ -2156,19 +2156,26 @@ export default function Home() {
         <span className={`font-bold text-zinc-400 ${big ? "text-base" : "text-sm"} truncate flex-1`}>{match.away}</span>
       </div>
     ) : (
-      <div className={`flex items-center gap-2 w-full`}>
-        {/* Home team: badge above name, right-aligned */}
-        <div className="flex flex-col items-end flex-1 min-w-0">
-          <RcBadge count={rcH} />
-          <span className={`font-bold text-white ${big ? "text-base" : "text-sm"} truncate`}>{match.home}</span>
-        </div>
-        <div className={`${big ? "text-3xl" : "text-xl"} font-black text-white tabular-nums shrink-0 ${big ? "px-2" : "px-1"} text-center`}>
-          {match.homeScore ?? 0}<span className={`${big ? "text-white/40 text-xl mx-0.5" : "text-zinc-600 mx-0.5"}`}>-</span>{match.awayScore ?? 0}
-        </div>
-        {/* Away team: badge above name, left-aligned */}
-        <div className="flex flex-col items-start flex-1 min-w-0">
-          <RcBadge count={rcA} />
-          <span className={`font-bold text-white ${big ? "text-base" : "text-sm"} truncate`}>{match.away}</span>
+      <div className="w-full">
+        {/* Badge row — only shown when at least one team has a red card; keeps names aligned */}
+        {(rcH > 0 || rcA > 0) && (
+          <div className={`flex items-center gap-2 mb-0.5`}>
+            <div className="flex-1 flex justify-end">
+              <RcBadge count={rcH} />
+            </div>
+            <div className={`shrink-0 ${big ? "px-2" : "px-1"} opacity-0 text-xl font-black tabular-nums`}>0-0</div>
+            <div className="flex-1 flex justify-start">
+              <RcBadge count={rcA} />
+            </div>
+          </div>
+        )}
+        {/* Name + score row — always on same baseline */}
+        <div className={`flex items-center gap-2 w-full`}>
+          <span className={`font-bold text-white ${big ? "text-base" : "text-sm"} truncate flex-1 text-right`}>{match.home}</span>
+          <div className={`${big ? "text-3xl" : "text-xl"} font-black text-white tabular-nums shrink-0 ${big ? "px-2" : "px-1"} text-center`}>
+            {match.homeScore ?? 0}<span className={`${big ? "text-white/40 text-xl mx-0.5" : "text-zinc-600 mx-0.5"}`}>-</span>{match.awayScore ?? 0}
+          </div>
+          <span className={`font-bold text-white ${big ? "text-base" : "text-sm"} truncate flex-1`}>{match.away}</span>
         </div>
       </div>
     );
