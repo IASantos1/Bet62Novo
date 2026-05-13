@@ -1540,9 +1540,9 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
-    if (activeTab === "live") {
-      fetchLive(true);
-      const interval = setInterval(() => fetchLive(false), 4000);
+    if (activeTab === "live" || activeTab === "mybets") {
+      fetchLive(activeTab === "live");
+      const interval = setInterval(() => fetchLive(false), 5000);
       return () => clearInterval(interval);
     }
     return undefined;
@@ -1586,6 +1586,13 @@ export default function Home() {
       setMyBetsLoading(false);
     }
   }, [auth.token]);
+
+  // Auto-refresh bets every 30s when on mybets tab (to catch settlements)
+  useEffect(() => {
+    if (activeTab !== "mybets" || !auth.token) return;
+    const id = setInterval(() => fetchMyBets(), 30000);
+    return () => clearInterval(id);
+  }, [activeTab, auth.token, fetchMyBets]);
 
   const handleVolleyLeagueClick = (id: string) => {
     if (expandedVolleyLeagueId === id) { setExpandedVolleyLeagueId(null); return; }
@@ -3483,11 +3490,53 @@ export default function Home() {
     );
   };
 
+  // Normalize team name for fuzzy matching against live data
+  const normTeam = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
+
+  // Find the live match (if any) corresponding to a stored selection
+  const findLiveMatchForSel = (sel: StoredSelection): Match | null => {
+    const [h = "", a = ""] = sel.matchTitle.split(" vs ");
+    const nh = normTeam(h); const na = normTeam(a);
+    if (!nh) return null;
+    return liveMatches.find(m => {
+      const mh = normTeam(m.home); const ma = normTeam(m.away);
+      const homeMatch = mh === nh || (nh.length >= 4 && (mh.includes(nh.slice(0, 6)) || nh.includes(mh.slice(0, 6))));
+      const awayMatch = ma === na || (na.length >= 4 && (ma.includes(na.slice(0, 6)) || na.includes(ma.slice(0, 6))));
+      return homeMatch && awayMatch;
+    }) ?? null;
+  };
+
+  // Get live odd for a specific selection from a live match
+  const getLiveOddForSel = (sel: StoredSelection, lm: Match): number => {
+    const s = sel.selection;
+    if (s === "away") return lm.odds.away;
+    if (s === "draw") return lm.odds.draw > 0 ? lm.odds.draw : sel.odd;
+    if (s === "home") return lm.odds.home;
+    // For advanced markets, use scale factor relative to how odds moved
+    const baseOdd = sel.odd;
+    const baseMain = (lm.odds.home + lm.odds.away) / 2;
+    return Math.max(1.01, baseOdd * (baseMain / baseMain)); // keep same for non-1X2
+  };
+
   const cashoutEstimate = (bet: UserBet) => {
     const s = parseFloat(bet.stake);
     const originalOdds = parseFloat(bet.totalOdds);
-    const currentOdds = originalOdds * 1.1;
-    return Math.max(0, (s * originalOdds) / currentOdds * 0.92).toFixed(2);
+    const sels = getBetSelections(bet);
+    // Use live odds when available for a more accurate estimate
+    let currentOddsProduct = 1;
+    let hasAnyLive = false;
+    for (const sel of sels) {
+      const lm = findLiveMatchForSel(sel);
+      if (lm) {
+        hasAnyLive = true;
+        currentOddsProduct *= Math.max(1.01, getLiveOddForSel(sel, lm));
+      } else {
+        currentOddsProduct *= Math.max(1.01, sel.odd);
+      }
+    }
+    // If no live data, fall back to modest markup
+    if (!hasAnyLive) currentOddsProduct = originalOdds * 1.1;
+    return Math.max(0, (s * originalOdds) / currentOddsProduct * 0.92).toFixed(2);
   };
 
   const MARKET_LABEL: Record<string, string> = {
@@ -6117,19 +6166,46 @@ export default function Home() {
                             {/* Selections */}
                             {!isCollapsed && (
                               <div className="divide-y divide-zinc-800/60 border-t border-zinc-800">
-                                {sels.map((sel, i) => (
+                                {sels.map((sel, i) => {
+                                  const lm = isPending ? findLiveMatchForSel(sel) : null;
+                                  const liveOdd = lm ? getLiveOddForSel(sel, lm) : null;
+                                  const isHT = lm?.status === "HT";
+                                  const displayMin = lm ? (isHT ? "HT" : `${lm.minute ?? 0}'`) : null;
+                                  return (
                                   <div key={i} className="px-4 py-3 flex items-start gap-3">
-                                    <div className="w-6 h-6 rounded-full bg-red-600 flex items-center justify-center shrink-0 text-xs font-black text-white mt-0.5 leading-none">
+                                    <div className={`w-6 h-6 rounded-full flex items-center justify-center shrink-0 text-xs font-black text-white mt-0.5 leading-none ${lm ? "bg-red-700" : "bg-red-600"}`}>
                                       {i + 1}
                                     </div>
                                     <div className="flex-1 min-w-0">
                                       <div className="font-bold text-white text-sm leading-snug">{getSelLabel(sel)}</div>
                                       <div className="text-xs text-zinc-500 mt-0.5">{MARKET_LABEL[sel.market ?? "result"] ?? "Mercado"}</div>
                                       <div className="text-xs text-zinc-600 mt-0.5 truncate">{sel.matchTitle}</div>
+                                      {lm && (
+                                        <div className="flex items-center gap-2 mt-1.5 flex-wrap">
+                                          <span className="flex items-center gap-1 text-[10px] font-black text-red-400 uppercase tracking-wide">
+                                            <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse inline-block" />
+                                            Ao Vivo
+                                          </span>
+                                          <span className="text-xs font-black text-white tabular-nums">
+                                            {lm.homeScore} – {lm.awayScore}
+                                          </span>
+                                          {displayMin && (
+                                            <span className="text-[10px] text-zinc-400 font-mono bg-zinc-800 px-1.5 py-0.5 rounded">
+                                              {displayMin}
+                                            </span>
+                                          )}
+                                          {liveOdd !== null && Math.abs(liveOdd - sel.odd) > 0.01 && (
+                                            <span className={`text-[10px] font-bold ${liveOdd < sel.odd ? "text-green-400" : "text-red-400"}`}>
+                                              {liveOdd < sel.odd ? "▼" : "▲"} {liveOdd.toFixed(2)}
+                                            </span>
+                                          )}
+                                        </div>
+                                      )}
                                     </div>
                                     <div className="font-bold text-white text-sm shrink-0 pt-0.5">{Number(sel.odd).toFixed(2)}</div>
                                   </div>
-                                ))}
+                                  );
+                                })}
                               </div>
                             )}
 
