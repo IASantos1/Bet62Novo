@@ -163,6 +163,7 @@ export default function AdminPage() {
   const [token, setToken] = useState<string | null>(() => sessionStorage.getItem("admin_token"));
   const [username, setUsername] = useState<string>(() => sessionStorage.getItem("admin_username") || "");
   const [activeTab, setActiveTab] = useState<TabId>("dashboard");
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
 
   // Force full reload when browser has stale cached JS
   useEffect(() => {
@@ -606,60 +607,117 @@ export default function AdminPage() {
     risk: "Gestão de Risco", analytics: "Analytics", events: "Controlo de Eventos", settings: "Configurações",
   };
 
+  const switchTab = (tab: TabId) => { setActiveTab(tab); setMobileSidebarOpen(false); };
+
+  const SidebarContent = () => (
+    <>
+      <div className="p-4 border-b border-zinc-800 flex items-center justify-between">
+        <div className="font-black text-xl tracking-tighter italic">
+          <span className="text-white">BET</span><span className="text-red-600">62</span>
+          <span className="text-xs font-normal text-zinc-500 ml-2 not-italic">Admin</span>
+          <span className="text-[10px] font-bold text-red-500 ml-1 not-italic bg-red-900/30 px-1 rounded">{ADMIN_VERSION}</span>
+        </div>
+        <button onClick={() => setMobileSidebarOpen(false)} className="md:hidden text-zinc-500 hover:text-white p-1"><X size={18} /></button>
+      </div>
+      <nav className="flex-1 p-2 space-y-0.5 overflow-y-auto">
+        <div className="text-xs text-zinc-600 px-3 pt-2 pb-1 font-semibold uppercase tracking-wider">Operações</div>
+        {tabs.filter(t => t.section === "core").map(tab => (
+          <button key={tab.id} onClick={() => switchTab(tab.id)}
+            className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${activeTab === tab.id ? "bg-red-600/20 text-red-400 border border-red-500/30" : "text-zinc-400 hover:bg-zinc-800 hover:text-white"}`}>
+            {tab.icon}
+            <span className="flex-1 text-left">{tab.label}</span>
+            {tab.badge ? (
+              <span className="flex items-center justify-center min-w-5 h-5 px-1 rounded-full bg-red-600 text-white text-xs font-bold">{tab.badge}</span>
+            ) : null}
+          </button>
+        ))}
+        <div className="text-xs text-zinc-600 px-3 pt-3 pb-1 font-semibold uppercase tracking-wider border-t border-zinc-800/60 mt-1">Avançado</div>
+        {tabs.filter(t => t.section === "pro").map(tab => (
+          <button key={tab.id} onClick={() => switchTab(tab.id)}
+            className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${activeTab === tab.id ? "bg-red-600/20 text-red-400 border border-red-500/30" : "text-zinc-400 hover:bg-zinc-800 hover:text-white"}`}>
+            {tab.icon}
+            <span className="flex-1 text-left">{tab.label}</span>
+          </button>
+        ))}
+      </nav>
+      <div className="p-3 border-t border-zinc-800">
+        <div className="text-xs text-zinc-600 px-2 mb-2 truncate">{username}</div>
+        <button onClick={handleLogout} className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm text-zinc-500 hover:text-red-400 hover:bg-red-900/20 transition-colors">
+          <LogOut size={18} />
+          <span>Sair</span>
+        </button>
+      </div>
+    </>
+  );
+
   return (
     <div className="min-h-screen bg-zinc-950 text-white dark flex">
 
-      {/* SIDEBAR */}
-      <aside className="w-56 bg-zinc-900 border-r border-zinc-800 flex flex-col shrink-0 sticky top-0 h-screen overflow-y-auto">
-        <div className="p-4 border-b border-zinc-800">
-          <div className="font-black text-xl tracking-tighter italic">
-            <span className="text-white">BET</span><span className="text-red-600">62</span>
-            <span className="text-xs font-normal text-zinc-500 ml-2 not-italic">Admin</span>
-            <span className="text-[10px] font-bold text-red-500 ml-1 not-italic bg-red-900/30 px-1 rounded">{ADMIN_VERSION}</span>
-          </div>
-        </div>
+      {/* MOBILE DRAWER OVERLAY */}
+      <AnimatePresence>
+        {mobileSidebarOpen && (
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            className="fixed inset-0 z-40 bg-black/70 md:hidden" onClick={() => setMobileSidebarOpen(false)} />
+        )}
+      </AnimatePresence>
 
-        <nav className="flex-1 p-2 space-y-0.5">
-          <div className="text-xs text-zinc-600 px-3 pt-2 pb-1 font-semibold uppercase tracking-wider">Operações</div>
-          {tabs.filter(t => t.section === "core").map(tab => (
-            <button key={tab.id} onClick={() => setActiveTab(tab.id)}
-              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${activeTab === tab.id ? "bg-red-600/20 text-red-400 border border-red-500/30" : "text-zinc-400 hover:bg-zinc-800 hover:text-white"}`}>
-              {tab.icon}
-              <span className="flex-1 text-left">{tab.label}</span>
-              {tab.badge ? (
-                <span className="flex items-center justify-center min-w-5 h-5 px-1 rounded-full bg-red-600 text-white text-xs font-bold">{tab.badge}</span>
-              ) : null}
-            </button>
-          ))}
-          <div className="text-xs text-zinc-600 px-3 pt-3 pb-1 font-semibold uppercase tracking-wider border-t border-zinc-800/60 mt-1">Avançado</div>
-          {tabs.filter(t => t.section === "pro").map(tab => (
-            <button key={tab.id} onClick={() => setActiveTab(tab.id)}
-              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${activeTab === tab.id ? "bg-red-600/20 text-red-400 border border-red-500/30" : "text-zinc-400 hover:bg-zinc-800 hover:text-white"}`}>
-              {tab.icon}
-              <span className="flex-1 text-left">{tab.label}</span>
-            </button>
-          ))}
-        </nav>
+      {/* MOBILE DRAWER */}
+      <AnimatePresence>
+        {mobileSidebarOpen && (
+          <motion.aside initial={{ x: -256 }} animate={{ x: 0 }} exit={{ x: -256 }} transition={{ type: "spring", stiffness: 300, damping: 30 }}
+            className="fixed left-0 top-0 bottom-0 z-50 w-64 bg-zinc-900 border-r border-zinc-800 flex flex-col md:hidden">
+            <SidebarContent />
+          </motion.aside>
+        )}
+      </AnimatePresence>
 
-        <div className="p-3 border-t border-zinc-800">
-          <div className="text-xs text-zinc-600 px-2 mb-2 truncate">{username}</div>
-          <button onClick={handleLogout} className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm text-zinc-500 hover:text-red-400 hover:bg-red-900/20 transition-colors">
-            <LogOut size={18} />
-            <span>Sair</span>
-          </button>
-        </div>
+      {/* DESKTOP SIDEBAR */}
+      <aside className="hidden md:flex w-56 bg-zinc-900 border-r border-zinc-800 flex-col shrink-0 sticky top-0 h-screen overflow-y-auto">
+        <SidebarContent />
       </aside>
 
       {/* MAIN */}
-      <main className="flex-1 overflow-auto">
-        <div className="sticky top-0 z-10 bg-zinc-950/90 backdrop-blur border-b border-zinc-800 px-6 py-4 flex items-center justify-between">
-          <h1 className="font-bold text-lg text-white">{tabLabel[activeTab]}</h1>
-          <button onClick={refreshCurrentTab} className="flex items-center gap-2 text-xs text-zinc-500 hover:text-white transition-colors">
+      <main className="flex-1 overflow-auto pb-16 md:pb-0">
+        <div className="sticky top-0 z-10 bg-zinc-950/90 backdrop-blur border-b border-zinc-800 px-3 sm:px-6 py-3 sm:py-4 flex items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <button onClick={() => setMobileSidebarOpen(true)} className="md:hidden text-zinc-400 hover:text-white p-1 -ml-1">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <line x1="3" y1="6" x2="21" y2="6" /><line x1="3" y1="12" x2="21" y2="12" /><line x1="3" y1="18" x2="21" y2="18" />
+              </svg>
+            </button>
+            <h1 className="font-bold text-base sm:text-lg text-white truncate">{tabLabel[activeTab]}</h1>
+          </div>
+          <button onClick={refreshCurrentTab} className="flex items-center gap-2 text-xs text-zinc-500 hover:text-white transition-colors shrink-0">
             <RefreshCw size={14} /><span className="hidden sm:block">Atualizar</span>
           </button>
         </div>
 
-        <div className="p-6">
+        {/* MOBILE BOTTOM NAV */}
+        <nav className="fixed bottom-0 left-0 right-0 z-30 bg-zinc-900 border-t border-zinc-800 flex md:hidden">
+          {[
+            { id: "dashboard" as TabId, icon: <LayoutDashboard size={20} />, label: "Início" },
+            { id: "users" as TabId, icon: <Users size={20} />, label: "Users" },
+            { id: "bets" as TabId, icon: <ListChecks size={20} />, label: "Apostas", badge: stats?.bets.pending },
+            { id: "payments" as TabId, icon: <CreditCard size={20} />, label: "Depósitos" },
+            { id: "withdrawals" as TabId, icon: <ArrowUpCircle size={20} />, label: "Levant.", badge: stats?.withdrawals.pendingCount },
+          ].map(item => (
+            <button key={item.id} onClick={() => switchTab(item.id)}
+              className={`relative flex-1 flex flex-col items-center justify-center py-2 gap-0.5 text-[10px] font-medium transition-colors ${activeTab === item.id ? "text-red-400" : "text-zinc-500"}`}>
+              {item.badge ? (
+                <span className="absolute top-1.5 right-[calc(50%-8px)] flex items-center justify-center min-w-[14px] h-[14px] px-0.5 rounded-full bg-red-600 text-white text-[9px] font-bold">{item.badge}</span>
+              ) : null}
+              {item.icon}
+              <span>{item.label}</span>
+            </button>
+          ))}
+          <button onClick={() => setMobileSidebarOpen(true)}
+            className="flex-1 flex flex-col items-center justify-center py-2 gap-0.5 text-[10px] font-medium text-zinc-500">
+            <Settings size={20} />
+            <span>Mais</span>
+          </button>
+        </nav>
+
+        <div className="p-3 sm:p-6">
           <AnimatePresence mode="wait">
 
             {/* ── DASHBOARD ── */}
@@ -701,13 +759,15 @@ export default function AdminPage() {
                             const maxVol = Math.max(...stats.chart.map(r => parseFloat(r.volume || "0")));
                             const pct = maxVol > 0 ? (parseFloat(row.volume || "0") / maxVol) * 100 : 0;
                             return (
-                              <div key={row.day} className="flex items-center gap-3 text-sm">
-                                <span className="text-zinc-500 w-24 shrink-0 text-xs">{row.day}</span>
-                                <div className="flex-1 h-5 bg-zinc-800 rounded overflow-hidden">
+                              <div key={row.day} className="flex items-center gap-2 text-sm">
+                                <span className="text-zinc-500 w-16 sm:w-24 shrink-0 text-xs truncate">{row.day}</span>
+                                <div className="flex-1 h-5 bg-zinc-800 rounded overflow-hidden min-w-0">
                                   <motion.div initial={{ width: 0 }} animate={{ width: `${pct}%` }} transition={{ duration: 0.8, delay: 0.1 }}
                                     className="h-full bg-gradient-to-r from-red-700 to-red-500 rounded" />
                                 </div>
-                                <span className="text-zinc-400 text-xs w-28 text-right shrink-0">{row.bets} apostas • € {parseFloat(row.volume || "0").toFixed(0)}</span>
+                                <span className="text-zinc-400 text-xs shrink-0 text-right">
+                                  <span className="hidden sm:inline">{row.bets} apostas • </span>€ {parseFloat(row.volume || "0").toFixed(0)}
+                                </span>
                               </div>
                             );
                           })}
@@ -798,52 +858,64 @@ export default function AdminPage() {
                       <table className="w-full text-sm">
                         <thead>
                           <tr className="border-b border-zinc-800 bg-zinc-950/50">
-                            {[
-                              { key: "id", label: "ID" }, { key: "name", label: "Nome" },
-                              { key: "email", label: "E-mail" }, { key: "balance", label: "Saldo" },
-                              { key: "freebetBalance", label: "Freebet" }, { key: "kycStatus", label: "KYC" },
-                              { key: "betCount", label: "Apostas" }, { key: "createdAt", label: "Cadastro" },
-                            ].map(col => (
-                              <th key={col.key} onClick={() => toggleSort(col.key as keyof AdminUser)}
-                                className="text-left px-4 py-3 text-zinc-500 font-medium cursor-pointer hover:text-white transition-colors whitespace-nowrap">
-                                <span className="flex items-center gap-1">{col.label}
-                                  {sortUsers.key === col.key ? sortUsers.dir === "asc" ? <ChevronUp size={12} /> : <ChevronDown size={12} /> : null}
-                                </span>
-                              </th>
-                            ))}
-                            <th className="px-4 py-3 text-zinc-500 font-medium text-right">Ações</th>
+                            <th onClick={() => toggleSort("id")} className="text-left px-3 sm:px-4 py-3 text-zinc-500 font-medium cursor-pointer hover:text-white whitespace-nowrap hidden sm:table-cell">
+                              <span className="flex items-center gap-1">ID {sortUsers.key === "id" ? sortUsers.dir === "asc" ? <ChevronUp size={12} /> : <ChevronDown size={12} /> : null}</span>
+                            </th>
+                            <th onClick={() => toggleSort("name")} className="text-left px-3 sm:px-4 py-3 text-zinc-500 font-medium cursor-pointer hover:text-white whitespace-nowrap">
+                              <span className="flex items-center gap-1">Nome {sortUsers.key === "name" ? sortUsers.dir === "asc" ? <ChevronUp size={12} /> : <ChevronDown size={12} /> : null}</span>
+                            </th>
+                            <th onClick={() => toggleSort("email")} className="text-left px-3 sm:px-4 py-3 text-zinc-500 font-medium cursor-pointer hover:text-white whitespace-nowrap hidden md:table-cell">
+                              <span className="flex items-center gap-1">E-mail {sortUsers.key === "email" ? sortUsers.dir === "asc" ? <ChevronUp size={12} /> : <ChevronDown size={12} /> : null}</span>
+                            </th>
+                            <th onClick={() => toggleSort("balance")} className="text-left px-3 sm:px-4 py-3 text-zinc-500 font-medium cursor-pointer hover:text-white whitespace-nowrap">
+                              <span className="flex items-center gap-1">Saldo {sortUsers.key === "balance" ? sortUsers.dir === "asc" ? <ChevronUp size={12} /> : <ChevronDown size={12} /> : null}</span>
+                            </th>
+                            <th onClick={() => toggleSort("freebetBalance")} className="text-left px-3 sm:px-4 py-3 text-zinc-500 font-medium cursor-pointer hover:text-white whitespace-nowrap hidden lg:table-cell">
+                              <span className="flex items-center gap-1">Freebet {sortUsers.key === "freebetBalance" ? sortUsers.dir === "asc" ? <ChevronUp size={12} /> : <ChevronDown size={12} /> : null}</span>
+                            </th>
+                            <th onClick={() => toggleSort("kycStatus")} className="text-left px-3 sm:px-4 py-3 text-zinc-500 font-medium cursor-pointer hover:text-white whitespace-nowrap hidden sm:table-cell">
+                              <span className="flex items-center gap-1">KYC {sortUsers.key === "kycStatus" ? sortUsers.dir === "asc" ? <ChevronUp size={12} /> : <ChevronDown size={12} /> : null}</span>
+                            </th>
+                            <th onClick={() => toggleSort("betCount")} className="text-left px-3 sm:px-4 py-3 text-zinc-500 font-medium cursor-pointer hover:text-white whitespace-nowrap hidden md:table-cell">
+                              <span className="flex items-center gap-1">Apostas {sortUsers.key === "betCount" ? sortUsers.dir === "asc" ? <ChevronUp size={12} /> : <ChevronDown size={12} /> : null}</span>
+                            </th>
+                            <th onClick={() => toggleSort("createdAt")} className="text-left px-3 sm:px-4 py-3 text-zinc-500 font-medium cursor-pointer hover:text-white whitespace-nowrap hidden lg:table-cell">
+                              <span className="flex items-center gap-1">Cadastro {sortUsers.key === "createdAt" ? sortUsers.dir === "asc" ? <ChevronUp size={12} /> : <ChevronDown size={12} /> : null}</span>
+                            </th>
+                            <th className="px-3 sm:px-4 py-3 text-zinc-500 font-medium text-right">Ações</th>
                           </tr>
                         </thead>
                         <tbody>
                           {sortedUsers.map(user => (
                             <tr key={user.id} className={`border-b border-zinc-800/50 hover:bg-zinc-800/30 transition-colors ${user.banned ? "opacity-60" : ""}`}>
-                              <td className="px-4 py-3 text-zinc-600 font-mono text-xs">#{user.id}</td>
-                              <td className="px-4 py-3">
-                                <div className="flex items-center gap-2">
+                              <td className="px-3 sm:px-4 py-3 text-zinc-600 font-mono text-xs hidden sm:table-cell">#{user.id}</td>
+                              <td className="px-3 sm:px-4 py-3">
+                                <div className="flex items-center gap-2 flex-wrap">
                                   <button onClick={() => openUserDetail(user)} className="font-medium text-white hover:text-red-400 transition-colors flex items-center gap-1">
                                     {user.name} <ChevronRight size={12} className="text-zinc-600" />
                                   </button>
                                   {user.banned && <Badge cls="bg-red-900/50 text-red-400" label="Banido" />}
+                                  <span className="text-xs text-zinc-500 md:hidden">{user.email}</span>
                                 </div>
                               </td>
-                              <td className="px-4 py-3 text-zinc-400 text-xs">{user.email}</td>
-                              <td className="px-4 py-3"><span className="font-bold text-green-400">{fmtEur(user.balance)}</span></td>
-                              <td className="px-4 py-3"><span className="font-medium text-purple-400">{fmtEur(user.freebetBalance)}</span></td>
-                              <td className="px-4 py-3">
+                              <td className="px-3 sm:px-4 py-3 text-zinc-400 text-xs hidden md:table-cell">{user.email}</td>
+                              <td className="px-3 sm:px-4 py-3"><span className="font-bold text-green-400">{fmtEur(user.balance)}</span></td>
+                              <td className="px-3 sm:px-4 py-3 hidden lg:table-cell"><span className="font-medium text-purple-400">{fmtEur(user.freebetBalance)}</span></td>
+                              <td className="px-3 sm:px-4 py-3 hidden sm:table-cell">
                                 <span className={`text-xs font-medium ${KYC_LABELS[user.kycStatus || "not_submitted"]?.cls}`}>
                                   {KYC_LABELS[user.kycStatus || "not_submitted"]?.label}
                                 </span>
                               </td>
-                              <td className="px-4 py-3 text-zinc-400">{user.betCount}</td>
-                              <td className="px-4 py-3 text-zinc-500 text-xs whitespace-nowrap">{new Date(user.createdAt).toLocaleDateString("pt-PT")}</td>
-                              <td className="px-4 py-3">
+                              <td className="px-3 sm:px-4 py-3 text-zinc-400 hidden md:table-cell">{user.betCount}</td>
+                              <td className="px-3 sm:px-4 py-3 text-zinc-500 text-xs whitespace-nowrap hidden lg:table-cell">{new Date(user.createdAt).toLocaleDateString("pt-PT")}</td>
+                              <td className="px-3 sm:px-4 py-3">
                                 <div className="flex items-center justify-end gap-1">
                                   <Button size="sm" variant="outline" onClick={() => { setBalanceModal(user); setBalanceAmount(""); setBalanceOp("add"); }}
                                     className="text-xs border-zinc-700 hover:bg-zinc-700 text-zinc-300 h-7 px-2" title="Ajustar saldo">
                                     <Wallet size={13} />
                                   </Button>
                                   <Button size="sm" variant="outline" onClick={() => { setFreebetModal(user); setFreebetAmount(""); }}
-                                    className="text-xs border-purple-800 hover:bg-purple-900/40 text-purple-400 h-7 px-2" title="Atribuir freebet">
+                                    className="text-xs border-purple-800 hover:bg-purple-900/40 text-purple-400 h-7 px-2" title="Freebet">
                                     <Gift size={13} />
                                   </Button>
                                   <Button size="sm" variant="outline" onClick={() => handleBan(user)}
@@ -896,34 +968,35 @@ export default function AdminPage() {
                       <table className="w-full text-sm">
                         <thead>
                           <tr className="border-b border-zinc-800 bg-zinc-950/50">
-                            <th className="text-left px-4 py-3 text-zinc-500 font-medium">ID</th>
-                            <th className="text-left px-4 py-3 text-zinc-500 font-medium">Utilizador</th>
-                            <th className="text-left px-4 py-3 text-zinc-500 font-medium">Aposta</th>
-                            <th className="text-left px-4 py-3 text-zinc-500 font-medium">Valor</th>
-                            <th className="text-left px-4 py-3 text-zinc-500 font-medium">Ganho Pot.</th>
-                            <th className="text-left px-4 py-3 text-zinc-500 font-medium">Odds</th>
-                            <th className="text-left px-4 py-3 text-zinc-500 font-medium">Status</th>
-                            <th className="text-left px-4 py-3 text-zinc-500 font-medium">Data</th>
-                            <th className="text-right px-4 py-3 text-zinc-500 font-medium">Ações</th>
+                            <th className="text-left px-3 sm:px-4 py-3 text-zinc-500 font-medium hidden sm:table-cell">ID</th>
+                            <th className="text-left px-3 sm:px-4 py-3 text-zinc-500 font-medium hidden sm:table-cell">Utilizador</th>
+                            <th className="text-left px-3 sm:px-4 py-3 text-zinc-500 font-medium">Aposta</th>
+                            <th className="text-left px-3 sm:px-4 py-3 text-zinc-500 font-medium">Valor</th>
+                            <th className="text-left px-3 sm:px-4 py-3 text-zinc-500 font-medium hidden md:table-cell">Ganho Pot.</th>
+                            <th className="text-left px-3 sm:px-4 py-3 text-zinc-500 font-medium hidden md:table-cell">Odds</th>
+                            <th className="text-left px-3 sm:px-4 py-3 text-zinc-500 font-medium">Status</th>
+                            <th className="text-left px-3 sm:px-4 py-3 text-zinc-500 font-medium hidden lg:table-cell">Data</th>
+                            <th className="text-right px-3 sm:px-4 py-3 text-zinc-500 font-medium">Ações</th>
                           </tr>
                         </thead>
                         <tbody>
                           {filteredBets.map(bet => (
                             <tr key={bet.id} className="border-b border-zinc-800/50 hover:bg-zinc-800/30 transition-colors">
-                              <td className="px-4 py-3 text-zinc-600 font-mono text-xs">#{bet.id}</td>
-                              <td className="px-4 py-3">
+                              <td className="px-3 sm:px-4 py-3 text-zinc-600 font-mono text-xs hidden sm:table-cell">#{bet.id}</td>
+                              <td className="px-3 sm:px-4 py-3 hidden sm:table-cell">
                                 <div className="text-white text-xs font-medium">{bet.userName || "—"}</div>
                                 <div className="text-zinc-600 text-xs">{bet.userEmail || ""}</div>
                               </td>
-                              <td className="px-4 py-3 max-w-48">
+                              <td className="px-3 sm:px-4 py-3 max-w-[160px] sm:max-w-48">
                                 <div className="text-zinc-300 text-xs leading-tight line-clamp-2">{bet.matchTitle}</div>
+                                <div className="text-zinc-600 text-xs mt-0.5 sm:hidden">{bet.userName || "—"}</div>
                               </td>
-                              <td className="px-4 py-3 font-bold text-white">{fmtEur(bet.stake)}</td>
-                              <td className="px-4 py-3 font-bold text-green-400">{fmtEur(bet.potentialWin)}</td>
-                              <td className="px-4 py-3 text-zinc-400">{parseFloat(bet.totalOdds).toFixed(2)}</td>
-                              <td className="px-4 py-3"><Badge cls={STATUS_BET[bet.status]?.cls || "bg-zinc-800 text-zinc-400"} label={STATUS_BET[bet.status]?.label || bet.status} /></td>
-                              <td className="px-4 py-3 text-zinc-500 text-xs whitespace-nowrap">{fmtDate(bet.createdAt)}</td>
-                              <td className="px-4 py-3">
+                              <td className="px-3 sm:px-4 py-3 font-bold text-white">{fmtEur(bet.stake)}</td>
+                              <td className="px-3 sm:px-4 py-3 font-bold text-green-400 hidden md:table-cell">{fmtEur(bet.potentialWin)}</td>
+                              <td className="px-3 sm:px-4 py-3 text-zinc-400 hidden md:table-cell">{parseFloat(bet.totalOdds).toFixed(2)}</td>
+                              <td className="px-3 sm:px-4 py-3"><Badge cls={STATUS_BET[bet.status]?.cls || "bg-zinc-800 text-zinc-400"} label={STATUS_BET[bet.status]?.label || bet.status} /></td>
+                              <td className="px-3 sm:px-4 py-3 text-zinc-500 text-xs whitespace-nowrap hidden lg:table-cell">{fmtDate(bet.createdAt)}</td>
+                              <td className="px-3 sm:px-4 py-3">
                                 {bet.status === "pending" && (
                                   <div className="flex items-center justify-end gap-1">
                                     <Button size="sm" disabled={updatingBet === bet.id} onClick={() => handleUpdateBetStatus(bet.id, "won")}
@@ -966,39 +1039,40 @@ export default function AdminPage() {
                       <table className="w-full text-sm">
                         <thead>
                           <tr className="border-b border-zinc-800 bg-zinc-950/50">
-                            <th className="text-left px-4 py-3 text-zinc-500 font-medium">ID</th>
-                            <th className="text-left px-4 py-3 text-zinc-500 font-medium">Utilizador</th>
-                            <th className="text-left px-4 py-3 text-zinc-500 font-medium">Método</th>
-                            <th className="text-left px-4 py-3 text-zinc-500 font-medium">Valor</th>
-                            <th className="text-left px-4 py-3 text-zinc-500 font-medium">Referência</th>
-                            <th className="text-left px-4 py-3 text-zinc-500 font-medium">Status</th>
-                            <th className="text-left px-4 py-3 text-zinc-500 font-medium">Data</th>
-                            <th className="text-right px-4 py-3 text-zinc-500 font-medium">Ações</th>
+                            <th className="text-left px-3 sm:px-4 py-3 text-zinc-500 font-medium hidden sm:table-cell">ID</th>
+                            <th className="text-left px-3 sm:px-4 py-3 text-zinc-500 font-medium">Utilizador</th>
+                            <th className="text-left px-3 sm:px-4 py-3 text-zinc-500 font-medium hidden sm:table-cell">Método</th>
+                            <th className="text-left px-3 sm:px-4 py-3 text-zinc-500 font-medium">Valor</th>
+                            <th className="text-left px-3 sm:px-4 py-3 text-zinc-500 font-medium hidden lg:table-cell">Referência</th>
+                            <th className="text-left px-3 sm:px-4 py-3 text-zinc-500 font-medium">Status</th>
+                            <th className="text-left px-3 sm:px-4 py-3 text-zinc-500 font-medium hidden md:table-cell">Data</th>
+                            <th className="text-right px-3 sm:px-4 py-3 text-zinc-500 font-medium">Ações</th>
                           </tr>
                         </thead>
                         <tbody>
                           {filteredPayments.map(p => (
                             <tr key={p.id} className="border-b border-zinc-800/50 hover:bg-zinc-800/30 transition-colors">
-                              <td className="px-4 py-3 text-zinc-600 font-mono text-xs">#{p.id}</td>
-                              <td className="px-4 py-3">
+                              <td className="px-3 sm:px-4 py-3 text-zinc-600 font-mono text-xs hidden sm:table-cell">#{p.id}</td>
+                              <td className="px-3 sm:px-4 py-3">
                                 <div className="text-white text-xs font-medium">{p.userName || "—"}</div>
                                 <div className="text-zinc-600 text-xs">{p.userEmail}</div>
+                                <div className="mt-0.5 sm:hidden"><Badge cls="bg-zinc-800 text-zinc-300" label={METHOD_LABEL[p.method] || p.method} /></div>
                               </td>
-                              <td className="px-4 py-3">
+                              <td className="px-3 sm:px-4 py-3 hidden sm:table-cell">
                                 <Badge cls="bg-zinc-800 text-zinc-300" label={METHOD_LABEL[p.method] || p.method} />
                               </td>
-                              <td className="px-4 py-3 font-bold text-green-400">{fmtEur(p.amount)}</td>
-                              <td className="px-4 py-3 text-zinc-500 text-xs font-mono">
+                              <td className="px-3 sm:px-4 py-3 font-bold text-green-400">{fmtEur(p.amount)}</td>
+                              <td className="px-3 sm:px-4 py-3 text-zinc-500 text-xs font-mono hidden lg:table-cell">
                                 {p.entity && p.reference ? `${p.entity} / ${p.reference}` : p.orderId.slice(0, 16) + "…"}
                               </td>
-                              <td className="px-4 py-3"><Badge cls={STATUS_PAYMENT[p.status]?.cls || "bg-zinc-800 text-zinc-400"} label={STATUS_PAYMENT[p.status]?.label || p.status} /></td>
-                              <td className="px-4 py-3 text-zinc-500 text-xs whitespace-nowrap">{fmtDate(p.createdAt)}</td>
-                              <td className="px-4 py-3 text-right">
+                              <td className="px-3 sm:px-4 py-3"><Badge cls={STATUS_PAYMENT[p.status]?.cls || "bg-zinc-800 text-zinc-400"} label={STATUS_PAYMENT[p.status]?.label || p.status} /></td>
+                              <td className="px-3 sm:px-4 py-3 text-zinc-500 text-xs whitespace-nowrap hidden md:table-cell">{fmtDate(p.createdAt)}</td>
+                              <td className="px-3 sm:px-4 py-3 text-right">
                                 {p.status === "pending" && (
                                   <Button size="sm" disabled={creditingPayment === p.id} onClick={() => handleCreditPayment(p.id)}
                                     className="h-7 px-2 text-xs bg-green-700 hover:bg-green-600 text-white">
                                     {creditingPayment === p.id ? <Loader2 size={12} className="animate-spin mr-1" /> : <CheckCircle size={12} className="mr-1" />}
-                                    Creditar
+                                    <span className="hidden sm:inline">Creditar</span>
                                   </Button>
                                 )}
                               </td>
