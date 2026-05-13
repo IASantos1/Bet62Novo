@@ -187,6 +187,25 @@ const TEAM_BANNERS: Record<string, string> = {
   "Derby": "/banners/derby.jpg",
   "Hull City": "/banners/hull.jpg",
   "Hull": "/banners/hull.jpg",
+  // ── MLS ──
+  "Inter Miami": "/banners/inter-miami.jpg",
+  "Inter Miami CF": "/banners/inter-miami.jpg",
+  "LA Galaxy": "/banners/la-galaxy.jpg",
+  "Los Angeles Galaxy": "/banners/la-galaxy.jpg",
+  "LAFC": "/banners/lafc.jpg",
+  "Los Angeles FC": "/banners/lafc.jpg",
+  "LA FC": "/banners/lafc.jpg",
+  "Atlanta United": "/banners/atlanta-united.jpg",
+  "Atlanta United FC": "/banners/atlanta-united.jpg",
+  "Seattle Sounders": "/banners/seattle-sounders.jpg",
+  "Seattle Sounders FC": "/banners/seattle-sounders.jpg",
+  "New York City FC": "/banners/nycfc.jpg",
+  "NYCFC": "/banners/nycfc.jpg",
+  "NYC FC": "/banners/nycfc.jpg",
+  "Portland Timbers": "/banners/portland-timbers.jpg",
+  "Austin FC": "/banners/austin-fc.jpg",
+  "FC Cincinnati": "/banners/fc-cincinnati.jpg",
+  "Columbus Crew": "/banners/columbus-crew.jpg",
 };
 
 const LEAGUE_FLAGS: Record<string, string> = {
