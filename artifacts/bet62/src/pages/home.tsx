@@ -2184,7 +2184,7 @@ export default function Home() {
     );
 
     const SimpleScore = ({ big }: { big?: boolean }) => isEmBreve ? (
-      <div className={`flex items-center gap-2 w-full`}>
+      <div className="flex items-center gap-2 w-full">
         <span className={`font-bold text-zinc-400 ${big ? "text-base" : "text-sm"} truncate flex-1 text-right`}>{match.home}</span>
         <div className={`${big ? "text-3xl" : "text-xl"} font-black text-zinc-600 tabular-nums shrink-0 ${big ? "px-2" : "px-1"} text-center`}>
           –<span className={`${big ? "text-zinc-700 mx-1" : "text-zinc-700 mx-0.5"}`}>:</span>–
@@ -2192,26 +2192,19 @@ export default function Home() {
         <span className={`font-bold text-zinc-400 ${big ? "text-base" : "text-sm"} truncate flex-1`}>{match.away}</span>
       </div>
     ) : (
-      <div className="w-full">
-        {/* Badge row — only shown when at least one team has a red card; keeps names aligned */}
-        {(rcH > 0 || rcA > 0) && (
-          <div className={`flex items-center gap-2 mb-0.5`}>
-            <div className="flex-1 flex justify-end">
-              <RcBadge count={rcH} />
-            </div>
-            <div className={`shrink-0 ${big ? "px-2" : "px-1"} opacity-0 text-xl font-black tabular-nums`}>0-0</div>
-            <div className="flex-1 flex justify-start">
-              <RcBadge count={rcA} />
-            </div>
-          </div>
-        )}
-        {/* Name + score row — always on same baseline */}
-        <div className={`flex items-center gap-2 w-full`}>
-          <span className={`font-bold text-white ${big ? "text-base" : "text-sm"} truncate flex-1 text-right`}>{match.home}</span>
-          <div className={`${big ? "text-3xl" : "text-xl"} font-black text-white tabular-nums shrink-0 ${big ? "px-2" : "px-1"} text-center`}>
-            {match.homeScore ?? 0}<span className={`${big ? "text-white/40 text-xl mx-0.5" : "text-zinc-600 mx-0.5"}`}>-</span>{match.awayScore ?? 0}
-          </div>
-          <span className={`font-bold text-white ${big ? "text-base" : "text-sm"} truncate flex-1`}>{match.away}</span>
+      <div className="flex items-center gap-2 w-full">
+        {/* Home: name + badge inline, right-aligned toward score */}
+        <div className="flex items-center justify-end gap-1 flex-1 min-w-0">
+          <span className={`font-bold text-white ${big ? "text-base" : "text-sm"} truncate`}>{match.home}</span>
+          <RcBadge count={rcH} />
+        </div>
+        <div className={`${big ? "text-3xl" : "text-xl"} font-black text-white tabular-nums shrink-0 ${big ? "px-2" : "px-1"} text-center`}>
+          {match.homeScore ?? 0}<span className={`${big ? "text-white/40 text-xl mx-0.5" : "text-zinc-600 mx-0.5"}`}>-</span>{match.awayScore ?? 0}
+        </div>
+        {/* Away: badge + name inline, left-aligned from score */}
+        <div className="flex items-center justify-start gap-1 flex-1 min-w-0">
+          <RcBadge count={rcA} />
+          <span className={`font-bold text-white ${big ? "text-base" : "text-sm"} truncate`}>{match.away}</span>
         </div>
       </div>
     );
