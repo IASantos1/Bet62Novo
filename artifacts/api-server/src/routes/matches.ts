@@ -1888,6 +1888,33 @@ function countRedCards(events: Array<{ type: string; team: string }>, team: "hom
   return events.filter(e => e.type?.toLowerCase().includes("red") && e.team === team).length;
 }
 
+// Scale all non-zero advanced market odds by a proportional factor (for live drift)
+function scaleAdvancedMarkets(m: AdvancedMarkets, factor: number): AdvancedMarkets {
+  const s = (n: number) => n <= 0 ? n : Math.round(Math.max(1.01, n * factor) * 100) / 100;
+  return {
+    ...m,
+    doubleChance: { homeOrDraw: s(m.doubleChance.homeOrDraw), awayOrDraw: s(m.doubleChance.awayOrDraw), homeOrAway: s(m.doubleChance.homeOrAway) },
+    bothTeamsScore: { yes: s(m.bothTeamsScore.yes), no: s(m.bothTeamsScore.no) },
+    totalGoals: {
+      over05: s(m.totalGoals.over05), under05: s(m.totalGoals.under05),
+      over15: s(m.totalGoals.over15), under15: s(m.totalGoals.under15),
+      over25: s(m.totalGoals.over25), under25: s(m.totalGoals.under25),
+      over35: s(m.totalGoals.over35), under35: s(m.totalGoals.under35),
+      over45: s(m.totalGoals.over45), under45: s(m.totalGoals.under45),
+      over55: s(m.totalGoals.over55), under55: s(m.totalGoals.under55),
+      over65: s(m.totalGoals.over65), under65: s(m.totalGoals.under65),
+    },
+    handicap: { homeMinusOne: s(m.handicap.homeMinusOne), awayPlusOne: s(m.handicap.awayPlusOne), homeMinusOneHalf: s(m.handicap.homeMinusOneHalf), awayPlusOneHalf: s(m.handicap.awayPlusOneHalf) },
+    halfTime: m.halfTime ? { home: s(m.halfTime.home), draw: s(m.halfTime.draw), away: s(m.halfTime.away) } : m.halfTime,
+    firstGoal: m.firstGoal ? { home: s(m.firstGoal.home), noGoal: s(m.firstGoal.noGoal), away: s(m.firstGoal.away) } : m.firstGoal,
+    drawNoBet: m.drawNoBet ? { home: s(m.drawNoBet.home), away: s(m.drawNoBet.away) } : undefined,
+    asianHandicap: m.asianHandicap ? { line: m.asianHandicap.line, home: s(m.asianHandicap.home), away: s(m.asianHandicap.away) } : undefined,
+    correctScore: m.correctScore ? Object.fromEntries(Object.entries(m.correctScore).map(([k, v]) => [k, s(v)])) : undefined,
+    corners: m.corners ? { o85: s(m.corners.o85), u85: s(m.corners.u85), o95: s(m.corners.o95), u95: s(m.corners.u95), o105: s(m.corners.o105), u105: s(m.corners.u105) } : undefined,
+    cards: m.cards ? { o35: s(m.cards.o35), u35: s(m.cards.u35), o45: s(m.cards.o45), u45: s(m.cards.u45) } : undefined,
+  };
+}
+
 // Remove/zero out market lines that are already settled or impossible given the current live score
 function filterLiveMarkets(markets: AdvancedMarkets, homeScore: number, awayScore: number): AdvancedMarkets {
   const m: AdvancedMarkets = { ...markets, totalGoals: { ...markets.totalGoals } };
@@ -2586,8 +2613,11 @@ async function buildLiveMatches(): Promise<LiveMatchState[]> {
           away: Math.max(1.04, Math.min(25, r(base.away * (1 + driftA + (diff > 0 ? timePressure * 0.6 : timePressure * 0.4))))),
         };
 
-        // Keep markets from existing state (already filtered for live score)
-        matchMarkets = filterLiveMarkets(existing.markets, homeScore, awayScore);
+        // Drift advanced markets proportionally to the main odds movement
+        const baseHome = base.home > 0 ? base.home : 1;
+        const baseAway = base.away > 0 ? base.away : 1;
+        const scaleFactor = (matchOdds.home / baseHome + matchOdds.away / baseAway) / 2;
+        matchMarkets = scaleAdvancedMarkets(filterLiveMarkets(existing.markets, homeScore, awayScore), scaleFactor);
 
         // Store drift phase for next cycle; propagate expiry timestamps
         const updatedState = {

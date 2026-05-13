@@ -4,7 +4,8 @@ import { toast } from "sonner";
 import {
   Menu, X, Trophy, Activity, Gift,
   LogOut, User, History, Loader2, Zap, TrendingUp,
-  ChevronRight, ChevronLeft, ChevronDown, AlertCircle, BarChart2, Wallet, ArrowDownCircle, ArrowUpCircle, Plus, Clock, Smartphone,
+  ChevronRight, ChevronLeft, ChevronDown, ChevronUp, AlertCircle, BarChart2, Wallet, ArrowDownCircle, ArrowUpCircle, Plus, Clock, Smartphone,
+  Copy, Share2, CircleDollarSign,
 } from "lucide-react";
 import ProfileTab from "@/components/ProfileTab";
 import { Button } from "@/components/ui/button";
@@ -737,10 +738,18 @@ type BetSelection = {
   label?: string;
 };
 
+type StoredSelection = {
+  matchTitle: string;
+  selection: string;
+  odd: number;
+  market?: string;
+  label?: string;
+};
+
 type UserBet = {
   id: number;
   matchTitle: string;
-  selections: unknown;
+  selections: StoredSelection[] | unknown;
   stake: string;
   potentialWin: string;
   totalOdds: string;
@@ -997,6 +1006,8 @@ export default function Home() {
   const [myBetsLoading, setMyBetsLoading] = useState(false);
   const [cashingOut, setCashingOut] = useState<number | null>(null);
   const [cashoutConfirm, setCashoutConfirm] = useState<UserBet | null>(null);
+  const [betFilterTab, setBetFilterTab] = useState<"abertas" | "resolvidas" | "cashout">("abertas");
+  const [collapsedBets, setCollapsedBets] = useState<Set<number>>(new Set());
 
   // Deposit modal
   const [depositModalOpen, setDepositModalOpen] = useState(false);
@@ -1720,7 +1731,7 @@ export default function Home() {
             body: JSON.stringify({
               matchId: String(bet.matchId),
               matchTitle: bet.matchTitle,
-              selections: [{ matchTitle: bet.matchTitle, selection: bet.selection, odd: bet.odd, market: bet.market }],
+              selections: [{ matchTitle: bet.matchTitle, selection: bet.selection, odd: bet.odd, market: bet.market, label: bet.label || bet.selection }],
               stake: sNum.toFixed(2),
               potentialWin,
               totalOdds: bet.odd.toFixed(2),
@@ -1752,7 +1763,7 @@ export default function Home() {
         body: JSON.stringify({
           matchId,
           matchTitle,
-          selections: bets.map(b => ({ matchTitle: b.matchTitle, selection: b.selection, odd: b.odd, market: b.market })),
+          selections: bets.map(b => ({ matchTitle: b.matchTitle, selection: b.selection, odd: b.odd, market: b.market, label: b.label || b.selection })),
           stake: stakeNum.toFixed(2),
           potentialWin,
           totalOdds,
@@ -3477,6 +3488,57 @@ export default function Home() {
     const originalOdds = parseFloat(bet.totalOdds);
     const currentOdds = originalOdds * 1.1;
     return Math.max(0, (s * originalOdds) / currentOdds * 0.92).toFixed(2);
+  };
+
+  const MARKET_LABEL: Record<string, string> = {
+    result: "Resultado Final",
+    dupla: "Dupla Chance",
+    gols: "Total de Gols",
+    handicap: "Handicap",
+    halfTime: "Intervalo",
+    sets: "Por Set",
+    pontos: "Total de Pontos",
+    totais: "Total de Pontos",
+    periodos: "Por Período",
+    quartos: "Por Quarto",
+    especiais: "Especiais",
+    asianHandicap: "Handicap Asiático",
+    correctScore: "Resultado Exacto",
+    corners: "Cantos",
+    cards: "Cartões",
+    htft: "Intervalo/Final",
+    firstGoal: "1.º Golo",
+  };
+
+  const getSelLabel = (sel: StoredSelection): string => {
+    if (sel.label && sel.label !== sel.selection) return sel.label;
+    const [home = "", away = ""] = sel.matchTitle.split(" vs ");
+    const map: Record<string, string> = {
+      home, away, draw: "Empate",
+      homeOrDraw: `${home} ou X`, awayOrDraw: `${away} ou X`, homeOrAway: "1 ou 2",
+      "bts-yes": "Ambas Marcam — Sim", "bts-no": "Ambas Marcam — Não",
+      o05: "Mais de 0.5", u05: "Menos de 0.5",
+      o15: "Mais de 1.5", u15: "Menos de 1.5",
+      o25: "Mais de 2.5", u25: "Menos de 2.5",
+      o35: "Mais de 3.5", u35: "Menos de 3.5",
+      o45: "Mais de 4.5", u45: "Menos de 4.5",
+      o55: "Mais de 5.5", u55: "Menos de 5.5",
+      o65: "Mais de 6.5", u65: "Menos de 6.5",
+    };
+    return map[sel.selection] ?? sel.selection;
+  };
+
+  const getBetSelections = (bet: UserBet): StoredSelection[] => {
+    if (Array.isArray(bet.selections)) return bet.selections as StoredSelection[];
+    return [{ matchTitle: bet.matchTitle, selection: "home", odd: parseFloat(bet.totalOdds), market: "result" }];
+  };
+
+  const toggleBetCollapse = (id: number) => {
+    setCollapsedBets(prev => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
   };
 
   return (
@@ -5959,73 +6021,153 @@ export default function Home() {
 
             {activeTab === "mybets" && (
               <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
-                <h2 className="text-2xl font-black italic uppercase tracking-tight mb-6 flex items-center gap-2">
+                <h2 className="text-2xl font-black italic uppercase tracking-tight mb-5 flex items-center gap-2">
                   <History className="text-red-600" /> Minhas Apostas
                 </h2>
+
+                {/* Tabs */}
+                <div className="flex border-b border-zinc-800 mb-5">
+                  {(["abertas", "resolvidas", "cashout"] as const).map((t) => {
+                    const cnt = t === "abertas" ? myBets.filter(b => b.status === "pending").length
+                      : t === "cashout" ? myBets.filter(b => b.status === "pending").length
+                      : myBets.filter(b => b.status !== "pending").length;
+                    const lbl = t === "abertas" ? "Abertas" : t === "cashout" ? "Cash Out" : "Resolvidas";
+                    return (
+                      <button key={t} onClick={() => setBetFilterTab(t)}
+                        className={`px-4 py-2.5 text-sm font-bold flex items-center gap-2 border-b-2 transition-colors ${betFilterTab === t ? "border-red-500 text-white" : "border-transparent text-zinc-500 hover:text-zinc-300"}`}>
+                        {lbl}
+                        {cnt > 0 && <span className="bg-red-600 text-white text-xs rounded-full w-5 h-5 flex items-center justify-center font-black leading-none">{cnt}</span>}
+                      </button>
+                    );
+                  })}
+                </div>
+
                 {myBetsLoading ? (
                   <div className="flex items-center justify-center py-20"><Loader2 className="animate-spin text-red-600" size={32} /></div>
-                ) : myBets.length === 0 ? (
-                  <div className="py-20 text-center text-zinc-500 bg-zinc-900/50 rounded-xl border border-zinc-800">
-                    <Trophy className="mx-auto mb-4 opacity-20" size={48} />
-                    <p className="font-medium">Nenhuma aposta realizada ainda.</p>
-                    <p className="text-sm mt-1">Escolha um jogo e faça sua primeira aposta!</p>
-                  </div>
-                ) : (
-                  <div className="space-y-3">
-                    {myBets.map(bet => (
-                      <div key={bet.id} className="bg-zinc-900 border border-zinc-800 rounded-xl p-4">
-                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                          <div className="flex-1 min-w-0">
-                            <div className="font-semibold text-white truncate">{bet.matchTitle}</div>
-                            <div className="text-xs text-zinc-400 mt-1">{new Date(bet.createdAt).toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" })}</div>
-                          </div>
-                          <div className="flex gap-6 items-center shrink-0 flex-wrap">
-                            <div className="text-center">
-                              <div className="text-xs text-zinc-500">Aposta</div>
-                              <div className="font-bold text-white">€ {parseFloat(bet.stake).toFixed(2)}</div>
-                            </div>
-                            <div className="text-center">
-                              <div className="text-xs text-zinc-500">Odds</div>
-                              <div className="font-bold text-red-400">{parseFloat(bet.totalOdds).toFixed(2)}</div>
-                            </div>
-                            <div className="text-center">
-                              <div className="text-xs text-zinc-500">Potencial</div>
-                              <div className="font-bold text-green-400">€ {parseFloat(bet.potentialWin).toFixed(2)}</div>
-                            </div>
-                            <div className={`px-3 py-1 rounded-full text-xs font-bold uppercase ${bet.status === "won" ? "bg-green-900 text-green-400" : bet.status === "lost" ? "bg-red-900/50 text-red-400" : bet.status === "cashed_out" ? "bg-yellow-900/50 text-yellow-400" : "bg-zinc-800 text-zinc-400"}`}>
-                              {bet.status === "won" ? "Ganhou" : bet.status === "lost" ? "Perdeu" : bet.status === "cashed_out" ? "Cash Out" : "Pendente"}
-                            </div>
-                          </div>
-                        </div>
+                ) : (() => {
+                  const filtered = myBets.filter(b =>
+                    betFilterTab === "resolvidas" ? b.status !== "pending"
+                      : b.status === "pending"
+                  );
+                  if (filtered.length === 0) return (
+                    <div className="py-20 text-center text-zinc-500 bg-zinc-900/50 rounded-xl border border-zinc-800">
+                      <Trophy className="mx-auto mb-4 opacity-20" size={48} />
+                      <p className="font-medium">
+                        {betFilterTab === "resolvidas" ? "Sem apostas resolvidas." : "Sem apostas abertas."}
+                      </p>
+                      {betFilterTab !== "resolvidas" && <p className="text-sm mt-1">Escolha um jogo e faça sua primeira aposta!</p>}
+                    </div>
+                  );
+                  return (
+                    <div className="space-y-3">
+                      {filtered.map(bet => {
+                        const sels = getBetSelections(bet);
+                        const isMultiple = sels.length > 1;
+                        const betTypeLabel = isMultiple ? `Múltipla de ${sels.length}` : "Simples";
+                        const isCollapsed = collapsedBets.has(bet.id);
+                        const isPending = bet.status === "pending";
+                        const statusCls = isPending ? "bg-zinc-700 text-zinc-300"
+                          : bet.status === "won" ? "bg-green-800 text-green-300"
+                          : bet.status === "lost" ? "bg-red-900/60 text-red-400"
+                          : "bg-yellow-900/50 text-yellow-400";
+                        const statusLbl = isPending ? "ABERTA"
+                          : bet.status === "won" ? "GANHA"
+                          : bet.status === "lost" ? "PERDIDA"
+                          : "CASH OUT";
 
-                        {bet.status === "pending" && (
-                          <div className="mt-3 pt-3 border-t border-zinc-800 flex items-center justify-between gap-3">
-                            <div className="text-xs text-zinc-400 flex items-center gap-1">
-                              <Zap size={12} className="text-green-500" />
-                              Valor estimado de Cash Out:
-                              <span className="font-bold text-green-400 ml-1">€ {cashoutEstimate(bet)}</span>
+                        return (
+                          <div key={bet.id} className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden">
+                            {/* Header */}
+                            <div className="px-4 pt-4 pb-3 flex items-center justify-between gap-2">
+                              <div className="flex items-center gap-2 min-w-0">
+                                <span className="font-black text-white text-sm">{betTypeLabel}</span>
+                                <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${statusCls}`}>{statusLbl}</span>
+                              </div>
+                              <div className="flex items-center gap-2 text-zinc-500 shrink-0">
+                                <span className="text-xs font-mono">ID: {bet.id}</span>
+                                <button
+                                  onClick={() => { navigator.clipboard.writeText(String(bet.id)); toast.success("ID copiado!"); }}
+                                  className="hover:text-zinc-200 transition-colors p-0.5" title="Copiar ID">
+                                  <Copy size={12} />
+                                </button>
+                                <button onClick={() => toggleBetCollapse(bet.id)} className="hover:text-zinc-200 transition-colors p-0.5">
+                                  {isCollapsed ? <ChevronDown size={16} /> : <ChevronUp size={16} />}
+                                </button>
+                              </div>
                             </div>
-                            <motion.button
-                              animate={{ boxShadow: ["0 0 0px #22c55e00", "0 0 12px #22c55e55", "0 0 0px #22c55e00"] }}
-                              transition={{ duration: 2, repeat: Infinity }}
-                              onClick={() => setCashoutConfirm(bet)}
-                              disabled={cashingOut === bet.id}
-                              className="shrink-0 bg-green-600 hover:bg-green-500 text-white text-xs font-black px-4 py-2 rounded-lg transition-colors disabled:opacity-50"
-                            >
-                              {cashingOut === bet.id ? <Loader2 className="animate-spin" size={14} /> : "CASH OUT"}
-                            </motion.button>
+
+                            {/* Stats row */}
+                            <div className="grid grid-cols-3 border-t border-zinc-800">
+                              <div className="px-4 py-2.5">
+                                <div className="text-xs text-zinc-500 mb-0.5">Cota Total</div>
+                                <div className="font-black text-white text-sm">{parseFloat(bet.totalOdds).toFixed(2)}</div>
+                              </div>
+                              <div className="px-4 py-2.5 border-x border-zinc-800">
+                                <div className="text-xs text-zinc-500 mb-0.5">Valor da Aposta</div>
+                                <div className="font-black text-white text-sm">€ {parseFloat(bet.stake).toFixed(2)}</div>
+                              </div>
+                              <div className="px-4 py-2.5">
+                                <div className="text-xs text-zinc-500 mb-0.5">Possível Retorno</div>
+                                <div className={`font-black text-sm ${isPending ? "text-red-400" : bet.status === "won" ? "text-green-400" : "text-zinc-500"}`}>
+                                  € {parseFloat(bet.potentialWin).toFixed(2)}
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* Selections */}
+                            {!isCollapsed && (
+                              <div className="divide-y divide-zinc-800/60 border-t border-zinc-800">
+                                {sels.map((sel, i) => (
+                                  <div key={i} className="px-4 py-3 flex items-start gap-3">
+                                    <div className="w-6 h-6 rounded-full bg-red-600 flex items-center justify-center shrink-0 text-xs font-black text-white mt-0.5 leading-none">
+                                      {i + 1}
+                                    </div>
+                                    <div className="flex-1 min-w-0">
+                                      <div className="font-bold text-white text-sm leading-snug">{getSelLabel(sel)}</div>
+                                      <div className="text-xs text-zinc-500 mt-0.5">{MARKET_LABEL[sel.market ?? "result"] ?? "Mercado"}</div>
+                                      <div className="text-xs text-zinc-600 mt-0.5 truncate">{sel.matchTitle}</div>
+                                    </div>
+                                    <div className="font-bold text-white text-sm shrink-0 pt-0.5">{Number(sel.odd).toFixed(2)}</div>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+
+                            {/* Cash Out row */}
+                            {isPending && !isCollapsed && (
+                              <button
+                                onClick={() => setCashoutConfirm(bet)}
+                                disabled={cashingOut === bet.id}
+                                className="w-full px-4 py-3 flex items-center gap-3 border-t border-zinc-800 bg-zinc-800/40 hover:bg-zinc-800/70 transition-colors disabled:opacity-50">
+                                <CircleDollarSign size={18} className="text-zinc-400 shrink-0" />
+                                <span className="flex-1 text-left font-bold text-sm text-white">Cash Out</span>
+                                {cashingOut === bet.id
+                                  ? <Loader2 size={14} className="animate-spin text-zinc-400" />
+                                  : <>
+                                    <span className="font-black text-red-400 text-sm">€ {cashoutEstimate(bet)}</span>
+                                    <ChevronRight size={16} className="text-zinc-500" />
+                                  </>}
+                              </button>
+                            )}
+
+                            {/* Footer */}
+                            <div className="px-4 py-2.5 border-t border-zinc-800 flex items-center justify-between text-xs text-zinc-600">
+                              <span className="flex items-center gap-1.5">
+                                <Clock size={11} />
+                                Criada em {new Date(bet.createdAt).toLocaleDateString("pt-PT", { day: "2-digit", month: "2-digit", year: "numeric" })}, {new Date(bet.createdAt).toLocaleTimeString("pt-PT", { hour: "2-digit", minute: "2-digit" })}
+                              </span>
+                              <button
+                                onClick={() => { navigator.clipboard.writeText(`Bet62 — ID ${bet.id} | Odds ${parseFloat(bet.totalOdds).toFixed(2)} | € ${parseFloat(bet.stake).toFixed(2)}`); toast.success("Aposta copiada!"); }}
+                                className="flex items-center gap-1 hover:text-zinc-400 transition-colors">
+                                <Share2 size={11} /> Partilhar
+                              </button>
+                            </div>
                           </div>
-                        )}
-                        {(bet.status === "won" || bet.status === "lost") && (
-                          <div className="mt-3 pt-3 border-t border-zinc-800 flex items-center gap-2 text-xs text-zinc-600">
-                            <AlertCircle size={12} />
-                            Cash Out indisponível — aposta encerrada
-                          </div>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                )}
+                        );
+                      })}
+                    </div>
+                  );
+                })()}
               </div>
             )}
           </div>
