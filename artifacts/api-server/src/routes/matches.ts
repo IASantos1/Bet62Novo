@@ -2737,6 +2737,33 @@ async function buildLiveMatches(): Promise<LiveMatchState[]> {
 
         // Filter markets for live score (remove impossible/settled lines)
         matchMarkets = filterLiveMarkets(matchMarkets, homeScore, awayScore);
+
+        // Recalculate Double Chance and Draw No Bet from the ACTUAL live 1X2 odds.
+        // The base model computes these from internal ELO probs which diverge from the
+        // live 1X2 after score changes (e.g. Home=1.06 but DC homeOrDraw shows 2.89).
+        {
+          const inv = (o: number) => (o > 1 ? 1 / o : 0);
+          const pH = inv(matchOdds.home);
+          const pD = inv(matchOdds.draw);
+          const pA = inv(matchOdds.away);
+          const sum = pH + pD + pA;
+          if (sum > 0 && matchOdds.draw > 0) {
+            const nH = pH / sum, nD = pD / sum, nA = pA / sum;
+            const dc = (p: number) => mr(mc(1 / Math.max(1e-9, p * 1.04), 1.01, 100));
+            matchMarkets = {
+              ...matchMarkets,
+              doubleChance: {
+                homeOrDraw: dc(nH + nD),
+                awayOrDraw: dc(nA + nD),
+                homeOrAway: dc(nH + nA),
+              },
+              drawNoBet: matchMarkets.drawNoBet ? {
+                home: mr(mc(1 / Math.max(1e-9, (nH / Math.max(1e-9, nH + nA)) * 1.04), 1.01, 100)),
+                away: mr(mc(1 / Math.max(1e-9, (nA / Math.max(1e-9, nH + nA)) * 1.04), 1.01, 100)),
+              } : undefined,
+            };
+          }
+        }
       }
 
       const events: LiveMatchState["events"] = [];

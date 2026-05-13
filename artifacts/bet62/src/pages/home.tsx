@@ -1020,6 +1020,8 @@ export default function Home() {
   const [liveMatches, setLiveMatches] = useState<Match[]>([]);
   const [liveLoading, setLiveLoading] = useState(false);
   const prevLiveOdds = useRef<Record<string, Odds>>({});
+  // Flat map of "market:sel" → previous odd value, for arrows in MarketOddsBtn
+  const prevLiveMarkets = useRef<Record<string, Record<string, number>>>({});
   // Live minute ticker — interpolates clock between API refreshes
   const liveDataFetchedAt = useRef(0);
   const apiMinutesRef = useRef<Record<string, number>>({});
@@ -1547,11 +1549,17 @@ export default function Home() {
         for (const m of matches) newMins[String(m.id)] = m.minute;
         apiMinutesRef.current = newMins;
         liveDataFetchedAt.current = Date.now();
-        // Merge silently — preserve prevLiveOdds for trend arrows
+        // Merge silently — preserve prevLiveOdds + prevLiveMarkets for trend arrows
         setLiveMatches(prev => {
           const newPrev: Record<string, Odds> = {};
-          for (const m of prev) newPrev[String(m.id)] = m.odds;
+          const newPrevMkts: Record<string, Record<string, number>> = {};
+          for (const m of prev) {
+            const id = String(m.id);
+            newPrev[id] = m.odds;
+            newPrevMkts[id] = flattenMatchMarketsForArrows(m);
+          }
           prevLiveOdds.current = newPrev;
+          prevLiveMarkets.current = newPrevMkts;
           return matches.map(m => ({ ...m, isLive: true }));
         });
       }
@@ -2568,18 +2576,101 @@ export default function Home() {
     );
   };
 
+  // Build a flat "market:sel" → odd map from a Match's current markets + odds.
+  // Used to capture snapshot of all market values before the next live poll,
+  // so MarketOddsBtn can show ▲/▼ arrows based on previous vs current value.
+  function flattenMatchMarketsForArrows(match: Match): Record<string, number> {
+    const f: Record<string, number> = {};
+    const m = match.markets;
+    if (!m) return f;
+    // 1X2
+    f["result:home"] = match.odds.home; f["result:draw"] = match.odds.draw; f["result:away"] = match.odds.away;
+    // Dupla Chance + BTTS
+    f["dupla:homeOrDraw"] = m.doubleChance.homeOrDraw; f["dupla:awayOrDraw"] = m.doubleChance.awayOrDraw; f["dupla:homeOrAway"] = m.doubleChance.homeOrAway;
+    f["dupla:bts-yes"] = m.bothTeamsScore.yes; f["dupla:bts-no"] = m.bothTeamsScore.no;
+    f["especiais:bts-yes"] = m.bothTeamsScore.yes; f["especiais:bts-no"] = m.bothTeamsScore.no;
+    f["especiais:dc-hd"] = m.doubleChance.homeOrDraw; f["especiais:dc-ha"] = m.doubleChance.homeOrAway; f["especiais:dc-da"] = m.doubleChance.awayOrDraw;
+    // Total de Golos (gols / totais / 1tempo tabs)
+    const tg = m.totalGoals;
+    const tgMap: Array<[string, number]> = [["o05",tg.over05],["u05",tg.under05],["o15",tg.over15],["u15",tg.under15],["o25",tg.over25],["u25",tg.under25],["o35",tg.over35],["u35",tg.under35],["o45",tg.over45],["u45",tg.under45],["o55",tg.over55],["u55",tg.under55],["o65",tg.over65],["u65",tg.under65]];
+    for (const [k, v] of tgMap) { f[`gols:${k}`] = v; f[`totais:${k}`] = v; f[`1tempo:${k}`] = v; }
+    // Sets (volleyball / tennis reuse totalGoals)
+    f["sets:osets"] = tg.over25; f["sets:usets"] = tg.under25;
+    f["sets:osets25"] = tg.over15; f["sets:usets25"] = tg.under15;
+    f["sets:osets35"] = tg.over25; f["sets:usets35"] = tg.under25;
+    f["sets:tie-yes"] = m.bothTeamsScore.yes; f["sets:tie-no"] = m.bothTeamsScore.no;
+    // Handicap
+    const hc = m.handicap;
+    f["handicap:hm1"] = hc.homeMinusOne; f["handicap:hm1h"] = hc.homeMinusOneHalf;
+    f["handicap:ap1"] = hc.awayPlusOne; f["handicap:ap1h"] = hc.awayPlusOneHalf;
+    f["handicap:hcap-home"] = hc.homeMinusOne; f["handicap:hcap-away"] = hc.awayPlusOne;
+    f["spread:hm1"] = hc.homeMinusOne; f["spread:ap1"] = hc.awayPlusOne;
+    f["puckline:pl-home"] = hc.homeMinusOne; f["puckline:pl-away"] = hc.awayPlusOne;
+    // Intervalo / HalfTime / Period 1
+    if (m.halfTime) {
+      f["1tempo:ht-home"] = m.halfTime.home; f["1tempo:ht-draw"] = m.halfTime.draw; f["1tempo:ht-away"] = m.halfTime.away;
+      f["1periodo:per1-home"] = m.halfTime.home; f["1periodo:per1-draw"] = m.halfTime.draw; f["1periodo:per1-away"] = m.halfTime.away;
+      f["quartos:h1-home"] = m.halfTime.home; f["quartos:h1-away"] = m.halfTime.away;
+    }
+    // Primeiro Golo
+    if (m.firstGoal) {
+      f["1tempo:fg-home"] = m.firstGoal.home; f["1tempo:fg-none"] = m.firstGoal.noGoal; f["1tempo:fg-away"] = m.firstGoal.away;
+    }
+    // HT/FT
+    if (m.htft) {
+      const h = m.htft;
+      f["htft:htft-hh"] = h.hh; f["htft:htft-hd"] = h.hd; f["htft:htft-ha"] = h.ha;
+      f["htft:htft-dh"] = h.dh; f["htft:htft-dd"] = h.dd; f["htft:htft-da"] = h.da;
+      f["htft:htft-ah"] = h.ah; f["htft:htft-ad"] = h.ad; f["htft:htft-aa"] = h.aa;
+    }
+    // Placar Correto
+    if (m.correctScore) {
+      for (const [k, v] of Object.entries(m.correctScore)) f[`placar:cs-${k}`] = v;
+    }
+    // Escanteios
+    if (m.corners) {
+      f["escanteios:oc85"] = m.corners.o85; f["escanteios:uc85"] = m.corners.u85;
+      f["escanteios:oc95"] = m.corners.o95; f["escanteios:uc95"] = m.corners.u95;
+      f["escanteios:oc105"] = m.corners.o105; f["escanteios:uc105"] = m.corners.u105;
+    }
+    // Cartões
+    if (m.cards) {
+      f["cartoes:ocard35"] = m.cards.o35; f["cartoes:ucard35"] = m.cards.u35;
+      f["cartoes:ocard45"] = m.cards.o45; f["cartoes:ucard45"] = m.cards.u45;
+    }
+    // Asiático (Draw No Bet + Asian Handicap + Asian Totals)
+    if (m.drawNoBet) { f["asiatico:dnb-home"] = m.drawNoBet.home; f["asiatico:dnb-away"] = m.drawNoBet.away; }
+    if (m.asianHandicap) { f["asiatico:ah-home"] = m.asianHandicap.home; f["asiatico:ah-away"] = m.asianHandicap.away; }
+    if (m.asianTotals) {
+      f["asiatico:at-o05"] = m.asianTotals.o05; f["asiatico:at-u05"] = m.asianTotals.u05;
+      f["asiatico:at-o225"] = m.asianTotals.o225; f["asiatico:at-u225"] = m.asianTotals.u225;
+      f["asiatico:at-o275"] = m.asianTotals.o275; f["asiatico:at-u275"] = m.asianTotals.u275;
+      f["asiatico:at-o45"] = m.asianTotals.o45; f["asiatico:at-u45"] = m.asianTotals.u45;
+      f["asiatico:at-o55"] = m.asianTotals.o55; f["asiatico:at-u55"] = m.asianTotals.u55;
+    }
+    return f;
+  }
+
   const MarketOddsBtn = ({ match, sel, odd, market, label }: { match: Match; sel: string; odd: number; market: string; label: string }) => {
     if (market === "result" && odd <= 1.01) return null;
     const isSusp = !!match.marketSuspension && Object.values(match.marketSuspension).some(ts => ts > Date.now());
     if (isSusp) return null;
     const active = !!bets.find(b => b.matchId === match.id && b.market === market && b.selection === sel);
+    const prevOdd = match.isLive ? prevLiveMarkets.current[String(match.id)]?.[`${market}:${sel}`] : undefined;
+    const oddUp   = prevOdd !== undefined && odd > prevOdd;
+    const oddDown = prevOdd !== undefined && odd < prevOdd;
+    const flashClass = !active && oddUp ? "odds-flash-up" : !active && oddDown ? "odds-flash-down" : "";
     return (
       <button
         onClick={() => toggleBet(match, sel, odd, market, label)}
-        className={`flex-1 flex flex-col items-center py-2.5 px-1 rounded-lg border transition-all min-w-0 ${active ? "border-red-600 bg-red-600/15 ring-1 ring-red-500/40" : "border-zinc-800 bg-zinc-900/80 hover:border-red-500/40 hover:bg-zinc-800"}`}
+        className={`flex-1 flex flex-col items-center py-2.5 px-1 rounded-lg border transition-all min-w-0 ${active ? "border-red-600 bg-red-600/15 ring-1 ring-red-500/40" : "border-zinc-800 bg-zinc-900/80 hover:border-red-500/40 hover:bg-zinc-800"} ${flashClass}`}
       >
         <span className="text-[11px] text-zinc-400 mb-1 leading-tight text-center truncate w-full px-0.5">{label}</span>
-        <span className={`font-bold text-base tabular-nums ${active ? "text-red-400" : "text-white"}`}>{odd.toFixed(2)}</span>
+        <span className={`font-bold text-base tabular-nums flex items-center gap-0.5 ${active ? "text-red-400" : "text-white"}`}>
+          {odd.toFixed(2)}
+          {oddUp   && <span className="text-green-400 text-[9px] font-black leading-none shrink-0">▲</span>}
+          {oddDown && <span className="text-red-400  text-[9px] font-black leading-none shrink-0">▼</span>}
+        </span>
       </button>
     );
   };
