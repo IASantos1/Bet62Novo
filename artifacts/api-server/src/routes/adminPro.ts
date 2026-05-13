@@ -304,21 +304,26 @@ router.get("/audit", adminMiddleware, async (req: AdminRequest, res: Response): 
 
 // ── FEED HEALTH ───────────────────────────────────────────────────────────────
 // GET /api/admin/feed
+// Tests our own internal API routes — these reflect what users actually see,
+// regardless of which Statpal plan/key is active (fallback/simulation included).
 router.get("/feed", adminMiddleware, async (_req: AdminRequest, res: Response): Promise<void> => {
-  const STATSPAL_KEY = process.env.STATSPAL_API_KEY || "";
+  const base = "http://localhost:" + (process.env.PORT ?? "8080");
   const endpoints = [
-    { name: "Football Live", url: `https://statpal.io/api/v2/live?access_key=${STATSPAL_KEY}` },
-    { name: "NBA Livescores", url: `https://statpal.io/api/v1/nba/livescores?access_key=${STATSPAL_KEY}` },
-    { name: "NHL Livescores", url: `https://statpal.io/api/v1/nhl/livescores?access_key=${STATSPAL_KEY}` },
-    { name: "Tennis Livescores", url: `https://statpal.io/api/v1/tennis/livescores?access_key=${STATSPAL_KEY}` },
-    { name: "Volleyball Livescores", url: `https://statpal.io/api/v1/volleyball/livescores?access_key=${STATSPAL_KEY}` },
+    { name: "Football — Próximos Jogos", url: `${base}/api/matches/upcoming` },
+    { name: "Football — Ao Vivo",        url: `${base}/api/matches/live` },
+    { name: "NBA — Calendário",          url: `${base}/api/matches/basketball-schedule` },
+    { name: "NBA — Odds",                url: `${base}/api/matches/basketball-odds` },
+    { name: "NHL — Calendário",          url: `${base}/api/matches/hockey-schedule` },
+    { name: "NHL — Odds",                url: `${base}/api/matches/hockey-odds` },
+    { name: "Ténis — Odds",              url: `${base}/api/matches/tennis-odds` },
+    { name: "Voleibol — Odds",           url: `${base}/api/matches/volleyball-odds` },
   ];
 
   const results = await Promise.all(
     endpoints.map(async (ep) => {
       const start = Date.now();
       try {
-        const r = await fetch(ep.url, { signal: AbortSignal.timeout(5000) });
+        const r = await fetch(ep.url, { signal: AbortSignal.timeout(8000) });
         const latency = Date.now() - start;
         return { name: ep.name, status: r.ok ? "ok" : "error", statusCode: r.status, latency };
       } catch {
