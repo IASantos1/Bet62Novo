@@ -4941,7 +4941,7 @@ router.get("/volleyball-leagues", async (_req, res) => {
     const leagues = await getVolleyballActiveLeagues();
     res.json({ leagues });
   } catch {
-    res.status(500).json({ error: "Ligas indisponíveis" });
+    res.json({ leagues: [] });
   }
 });
 
@@ -5114,8 +5114,13 @@ const NBA_ODDS_TTL = 60 * 1000;
 async function getBasketballOdds(): Promise<NBAOddsEntry[]> {
   const now = Date.now();
   if (nbaOddsCache && now - nbaOddsFetchedAt < NBA_ODDS_TTL) return nbaOddsCache;
-  const resp = await fetch(`${BASE_V1}/nba/odds?access_key=${STATSPAL_KEY}`, { signal: AbortSignal.timeout(9000) });
-  if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+  let resp: Response;
+  try {
+    resp = await fetch(`${BASE_V1}/nba/odds?access_key=${STATSPAL_KEY}`, { signal: AbortSignal.timeout(9000) });
+  } catch {
+    return nbaOddsCache ?? [];
+  }
+  if (!resp.ok) return nbaOddsCache ?? [];
   const data = (await resp.json()) as { odds?: { category?: { matches?: { match?: NBAOddsMatch | NBAOddsMatch[] } } } };
   const rawMatches = data?.odds?.category?.matches?.match;
   if (!rawMatches) return [];
@@ -5223,8 +5228,13 @@ const HOCKEY_ODDS_TTL = 60 * 1000;
 async function getHockeyOdds(): Promise<HockeyOddsEntry[]> {
   const now = Date.now();
   if (hockeyOddsCache && now - hockeyOddsFetchedAt < HOCKEY_ODDS_TTL) return hockeyOddsCache;
-  const resp = await fetch(`${BASE_V1}/nhl/odds?access_key=${STATSPAL_KEY}`, { signal: AbortSignal.timeout(9000) });
-  if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+  let resp: Response;
+  try {
+    resp = await fetch(`${BASE_V1}/nhl/odds?access_key=${STATSPAL_KEY}`, { signal: AbortSignal.timeout(9000) });
+  } catch {
+    return hockeyOddsCache ?? [];
+  }
+  if (!resp.ok) return hockeyOddsCache ?? [];
   const data = (await resp.json()) as { odds?: { category?: { matches?: { match?: HockeyOddsMatch | HockeyOddsMatch[] } } } };
   const rawMatches = data?.odds?.category?.matches?.match;
   if (!rawMatches) return [];
@@ -5319,8 +5329,13 @@ router.get("/hockey-odds", async (_req, res) => {
 async function getTennisOdds(): Promise<TennisOddsEntry[]> {
   const now = Date.now();
   if (tennisOddsCache && now - tennisOddsFetchedAt < TENNIS_ODDS_TTL) return tennisOddsCache;
-  const resp = await fetch(`${BASE_V1}/tennis/odds?access_key=${STATSPAL_KEY}`, { signal: AbortSignal.timeout(9000) });
-  if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+  let resp: Response;
+  try {
+    resp = await fetch(`${BASE_V1}/tennis/odds?access_key=${STATSPAL_KEY}`, { signal: AbortSignal.timeout(9000) });
+  } catch {
+    return tennisOddsCache ?? [];
+  }
+  if (!resp.ok) return tennisOddsCache ?? [];
   const data = (await resp.json()) as { odds?: { tournament?: unknown } };
   const rawTours = data?.odds?.tournament;
   if (!rawTours) return [];
