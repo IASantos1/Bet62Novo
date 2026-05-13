@@ -1,11 +1,12 @@
 import { useState, useCallback, useEffect, useRef, createContext, useContext, type ReactNode } from "react";
+import { useIdle } from "@/hooks/use-idle";
 import { motion, AnimatePresence } from "framer-motion";
 import { toast } from "sonner";
 import {
   Menu, X, Trophy, Activity, Gift,
   LogOut, User, History, Loader2, Zap, TrendingUp,
   ChevronRight, ChevronLeft, ChevronDown, ChevronUp, AlertCircle, BarChart2, Wallet, ArrowDownCircle, ArrowUpCircle, Plus, Clock, Smartphone,
-  Copy, Share2, CircleDollarSign,
+  Copy, Share2, CircleDollarSign, Lock,
 } from "lucide-react";
 import ProfileTab from "@/components/ProfileTab";
 import { Button } from "@/components/ui/button";
@@ -1015,6 +1016,10 @@ function sportEmoji(sport?: string): string {
 
 export default function Home() {
   const auth = useAuth();
+  const { isIdle, resetIdle } = useIdle(60_000);
+  const isIdleRef = useRef(false);
+  useEffect(() => { isIdleRef.current = isIdle; }, [isIdle]);
+
   const [activeTab, setActiveTab] = useState<"sports" | "live" | "promos" | "mybets" | "wallet" | "profile">("sports");
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [bets, setBets] = useState<BetSelection[]>([]);
@@ -1537,6 +1542,7 @@ export default function Home() {
 
   // Fetch upcoming matches — polls every 30s so new games appear automatically
   const fetchUpcoming = useCallback((showSpinner = false) => {
+    if (isIdleRef.current) return;
     if (showSpinner) setUpcomingLoading(true);
     const param = selectedSport === "all" ? "" : `?sport=${selectedSport}`;
     fetch(`/api/matches/upcoming${param}`)
@@ -1560,6 +1566,7 @@ export default function Home() {
 
   // Fetch live matches — polls every 5s
   const fetchLive = useCallback(async (showSpinner = false) => {
+    if (isIdleRef.current) return;
     if (showSpinner) setLiveLoading(true);
     try {
       const res = await fetch("/api/matches/live");
@@ -3843,6 +3850,47 @@ export default function Home() {
 
   return (
     <div className="min-h-[100dvh] w-full bg-background text-foreground flex flex-col font-sans transition-colors duration-500">
+
+      {/* ── IDLE OVERLAY ── */}
+      <AnimatePresence>
+        {isIdle && (
+          <motion.div
+            key="idle-overlay"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.4 }}
+            className="fixed inset-0 z-[9999] flex flex-col items-center justify-center cursor-pointer select-none"
+            style={{ background: "rgba(5,8,22,0.92)", backdropFilter: "blur(12px)" }}
+            onClick={resetIdle}
+            onKeyDown={resetIdle}
+          >
+            <motion.div
+              initial={{ scale: 0.85, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              transition={{ delay: 0.1, type: "spring", stiffness: 260, damping: 20 }}
+              className="flex flex-col items-center gap-5 text-center px-8"
+            >
+              <div className="w-20 h-20 rounded-full bg-zinc-800/80 border border-zinc-700 flex items-center justify-center shadow-xl">
+                <Lock size={36} className="text-red-500" />
+              </div>
+              <div>
+                <p className="text-white font-black text-xl tracking-tight mb-1">Sessão pausada</p>
+                <p className="text-zinc-400 text-sm">Sem atividade detectada. As actualizações ao vivo foram suspensas.</p>
+              </div>
+              <button
+                onClick={resetIdle}
+                className="mt-2 px-8 py-3 rounded-full bg-red-600 hover:bg-red-500 active:bg-red-700 text-white font-bold text-sm tracking-wide transition-colors shadow-lg shadow-red-900/40"
+              >
+                Clique para retomar
+              </button>
+              <p className="text-zinc-600 text-xs">
+                <span className="text-white font-black text-lg italic">BET</span><span className="text-red-600 font-black text-lg italic">62</span>
+              </p>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* HEADER */}
       <header className="sticky top-0 z-40 bg-zinc-950 border-b border-zinc-900">
