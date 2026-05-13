@@ -112,6 +112,9 @@ export type LiveMatchState = {
   _baseMarkets?: AdvancedMarkets; // anchor for market drift — prevents exponential compounding
   _oddsUpdatedAt?: number;
   _driftPhase?: number;
+  // Per-market independent update schedule: key → next allowed update time (ms)
+  // Ensures each market group updates at its own cadence, never all at once
+  _marketNextUpdate?: Record<string, number>;
   // Timestamps for stale-match expiry
   _firstSeenAt?: number;   // ms — when this match first appeared in live feed
   _htStartedAt?: number;   // ms — when status first became "HT" (resets on 2H kick-off)
@@ -1971,7 +1974,6 @@ function scaleAdvancedMarkets(m: AdvancedMarkets, factor: number): AdvancedMarke
 function applyTieredMarketDrift(state: LiveMatchState, now: number): LiveMatchState {
   const { minute = 0, homeScore = 0, awayScore = 0 } = state;
   const baseOdds = state._baseOdds ?? state.odds;
-  // Anchor for market drift — always oscillate around this, never compound
   const bm = state._baseMarkets ?? state.markets;
   const phase = (state._driftPhase ?? 0) + 1;
   const t = now / 1000;
@@ -1979,39 +1981,86 @@ function applyTieredMarketDrift(state: LiveMatchState, now: number): LiveMatchSt
   const timePressure = Math.max(0, (minute - 55) / 60) * 0.04;
   const r = (n: number) => Math.round(n * 100) / 100;
 
-  // --- Main 1X2 drift (anchored to _baseOdds) ---
-  const driftH = Math.sin(t * 0.31 + phase * 0.7) * 0.018 + Math.cos(t * 0.17) * 0.009;
-  const driftD = Math.cos(t * 0.23 + phase * 0.5) * 0.014 + Math.sin(t * 0.11) * 0.007;
-  const driftA = Math.sin(t * 0.27 + phase * 0.9) * 0.018 + Math.cos(t * 0.19) * 0.009;
-  const newOdds = {
-    home: Math.max(1.04, Math.min(25, r(baseOdds.home * (1 + driftH - (diff > 0 ? timePressure * 0.4 : timePressure * 0.6))))),
-    draw: baseOdds.draw > 0 ? Math.max(2.2, Math.min(8, r(baseOdds.draw * (1 + driftD + timePressure * 0.3)))) : 0,
-    away: Math.max(1.04, Math.min(25, r(baseOdds.away * (1 + driftA + (diff > 0 ? timePressure * 0.6 : timePressure * 0.4))))),
+  // ── Per-market independent update schedule ──────────────────────────────────
+  // Each market group has its own timer so they NEVER all change at the same time.
+  // Match-ID hash gives every match a unique phase offset (0-29 000ms) so even
+  // the same market on different matches updates at slightly different moments.
+  const idHash = parseInt(state.id.replace(/\D/g, "").slice(-5) || "12345", 10) % 30_000;
+  const sched = state._marketNextUpdate ?? {};
+  const newSched: Record<string, number> = { ...sched };
+
+  // Returns true and schedules next window only when this market is due for refresh.
+  // minMs/maxMs define the random window between updates.
+  const due = (key: string, minMs: number, maxMs: number): boolean => {
+    if (!sched[key]) {
+      // First-time init: spread initial firings across the first minMs window
+      // using match-hash + key-hash so no two markets fire simultaneously
+      const keyOff = (key.charCodeAt(0) + key.charCodeAt(key.length - 1)) % 10;
+      newSched[key] = now + (idHash % minMs) + keyOff * 1_500;
+      return false; // don't fire on very first cycle
+    }
+    if (now >= sched[key]) {
+      newSched[key] = now + minMs + Math.random() * (maxMs - minMs);
+      return true;
+    }
+    return false;
   };
 
-  // Pure oscillations only — no directional bias (avoids exponential compounding)
-  // Each function reads from the BASE market value (bm), never from current state.markets
-  const tier1 = Math.sin(t * 0.29 + phase * 0.8) * 0.013 + Math.cos(t * 0.13 + phase * 0.4) * 0.006;
-  const tier2 = Math.sin(t * 0.11 + phase * 0.35) * 0.007 + Math.cos(t * 0.07 + phase * 0.2) * 0.003;
-  const tier3 = Math.sin(t * 0.04 + phase * 0.15) * 0.003 + Math.cos(t * 0.025 + phase * 0.1) * 0.0015;
+  // ── Main 1X2 odds (highest priority, 45–90s cadence) ───────────────────────
+  const oddsOscH = Math.sin(t * 0.31 + phase * 0.7) * 0.018 + Math.cos(t * 0.17) * 0.009;
+  const oddsOscD = Math.cos(t * 0.23 + phase * 0.5) * 0.014 + Math.sin(t * 0.11) * 0.007;
+  const oddsOscA = Math.sin(t * 0.27 + phase * 0.9) * 0.018 + Math.cos(t * 0.19) * 0.009;
+  const newOdds = due("odds", 45_000, 90_000) ? {
+    home: Math.max(1.04, Math.min(25, r(baseOdds.home * (1 + oddsOscH - (diff > 0 ? timePressure * 0.4 : timePressure * 0.6))))),
+    draw: baseOdds.draw > 0 ? Math.max(2.2, Math.min(8, r(baseOdds.draw * (1 + oddsOscD + timePressure * 0.3)))) : 0,
+    away: Math.max(1.04, Math.min(25, r(baseOdds.away * (1 + oddsOscA + (diff > 0 ? timePressure * 0.6 : timePressure * 0.4))))),
+  } : state.odds; // not due yet → unchanged (no arrow on frontend)
 
-  // s1/s2/s3 drift from BASE value, not from current value
-  const s1 = (n: number) => n <= 0 ? n : r(Math.max(1.01, n * (1 + tier1)));
-  const s2 = (n: number) => n <= 0 ? n : r(Math.max(1.01, n * (1 + tier2)));
-  const s3 = (n: number) => n <= 0 ? n : r(Math.max(1.01, n * (1 + tier3)));
+  // ── Oscillator values — computed fresh each cycle but only APPLIED when due ─
+  const osc1 = Math.sin(t * 0.29 + phase * 0.8) * 0.013 + Math.cos(t * 0.13 + phase * 0.4) * 0.006;
+  const osc2 = Math.sin(t * 0.11 + phase * 0.35) * 0.007 + Math.cos(t * 0.07 + phase * 0.2) * 0.003;
+  const osc3 = Math.sin(t * 0.04 + phase * 0.15) * 0.003 + Math.cos(t * 0.025 + phase * 0.1) * 0.0015;
 
-  // Carry through already-settled zeros from state.markets (filterLiveMarkets output)
-  // For each field: if current state has 0 (settled), keep 0; otherwise drift the base value
+  const s1 = (n: number) => n <= 0 ? n : r(Math.max(1.01, n * (1 + osc1)));
+  const s2 = (n: number) => n <= 0 ? n : r(Math.max(1.01, n * (1 + osc2)));
+  const s3 = (n: number) => n <= 0 ? n : r(Math.max(1.01, n * (1 + osc3)));
+
+  // Carry through already-settled zeros (filterLiveMarkets output)
   const keep0 = (cur: number, base: number, fn: (n: number) => number) => cur <= 0 ? 0 : fn(base);
-  const tg = state.markets.totalGoals;
+  const tg  = state.markets.totalGoals;
   const btg = bm.totalGoals;
 
+  // ── Tier 1 markets — each on its own 50–110s schedule ──────────────────────
+  const dcDue  = due("doubleChance",   50_000, 110_000);
+  const btsDue = due("bothTeamsScore", 55_000, 115_000);
+  const tgDue  = due("totalGoals",     60_000, 120_000);
+  const hcDue  = due("handicap",       65_000, 125_000);
+  const dnbDue = due("drawNoBet",      70_000, 130_000);
+  const atDue  = due("asianTotals",    75_000, 135_000);
+
+  // ── Tier 2 markets — 85–180s ───────────────────────────────────────────────
+  const htDue  = due("halfTime",       85_000, 160_000);
+  const fgDue  = due("firstGoal",      90_000, 170_000);
+  const ahDue  = due("asianHandicap",  95_000, 180_000);
+  const htftDue = due("htft",         100_000, 190_000);
+  const csDue  = due("correctScore",  105_000, 200_000);
+
+  // ── Tier 3 markets — 120–260s ──────────────────────────────────────────────
+  const cornDue = due("corners", 120_000, 250_000);
+  const cardDue = due("cards",   130_000, 260_000);
+
   const newMarkets: AdvancedMarkets = {
-    ...state.markets,
-    // Tier 1 — fast
-    doubleChance:  { homeOrDraw: s1(bm.doubleChance.homeOrDraw), awayOrDraw: s1(bm.doubleChance.awayOrDraw), homeOrAway: s1(bm.doubleChance.homeOrAway) },
-    bothTeamsScore:{ yes: s1(bm.bothTeamsScore.yes), no: s1(bm.bothTeamsScore.no) },
-    totalGoals: {
+    ...state.markets, // default: keep ALL current values (no change = no arrow)
+
+    doubleChance: dcDue
+      ? { homeOrDraw: s1(bm.doubleChance.homeOrDraw), awayOrDraw: s1(bm.doubleChance.awayOrDraw), homeOrAway: s1(bm.doubleChance.homeOrAway) }
+      : state.markets.doubleChance,
+
+    bothTeamsScore: btsDue
+      ? { yes: s1(bm.bothTeamsScore.yes), no: s1(bm.bothTeamsScore.no) }
+      : state.markets.bothTeamsScore,
+
+    totalGoals: tgDue ? {
       over05:  keep0(tg.over05,  btg.over05,  s1), under05: keep0(tg.under05, btg.under05, s1),
       over15:  keep0(tg.over15,  btg.over15,  s1), under15: keep0(tg.under15, btg.under15, s1),
       over25:  keep0(tg.over25,  btg.over25,  s1), under25: keep0(tg.under25, btg.under25, s1),
@@ -2019,40 +2068,62 @@ function applyTieredMarketDrift(state: LiveMatchState, now: number): LiveMatchSt
       over45:  keep0(tg.over45,  btg.over45,  s1), under45: keep0(tg.under45, btg.under45, s1),
       over55:  keep0(tg.over55,  btg.over55,  s1), under55: keep0(tg.under55, btg.under55, s1),
       over65:  keep0(tg.over65,  btg.over65,  s1), under65: keep0(tg.under65, btg.under65, s1),
-    },
-    handicap: {
+    } : state.markets.totalGoals,
+
+    handicap: hcDue ? {
       homeMinusOne:     s1(bm.handicap.homeMinusOne),
       awayPlusOne:      s1(bm.handicap.awayPlusOne),
       homeMinusOneHalf: s1(bm.handicap.homeMinusOneHalf),
       awayPlusOneHalf:  s1(bm.handicap.awayPlusOneHalf),
-    },
-    drawNoBet:    bm.drawNoBet    ? { home: s1(bm.drawNoBet.home),    away: s1(bm.drawNoBet.away) }    : undefined,
-    asianTotals:  bm.asianTotals  ? {
+    } : state.markets.handicap,
+
+    drawNoBet: dnbDue && bm.drawNoBet
+      ? { home: s1(bm.drawNoBet.home), away: s1(bm.drawNoBet.away) }
+      : state.markets.drawNoBet,
+
+    asianTotals: atDue && bm.asianTotals ? {
       o05:  s1(bm.asianTotals.o05),  u05:  s1(bm.asianTotals.u05),
       o45:  s1(bm.asianTotals.o45),  u45:  s1(bm.asianTotals.u45),
       o55:  s1(bm.asianTotals.o55),  u55:  s1(bm.asianTotals.u55),
       o225: s1(bm.asianTotals.o225), u225: s1(bm.asianTotals.u225),
       o275: s1(bm.asianTotals.o275), u275: s1(bm.asianTotals.u275),
-    } : undefined,
-    // Tier 2 — medium
-    halfTime:     bm.halfTime     ? { home: s2(bm.halfTime.home), draw: s2(bm.halfTime.draw), away: s2(bm.halfTime.away) } : bm.halfTime,
-    firstGoal:    state.markets.firstGoal && state.markets.firstGoal.home > 0
-                  ? { home: s2(bm.firstGoal!.home), noGoal: s2(bm.firstGoal!.noGoal), away: s2(bm.firstGoal!.away) }
-                  : state.markets.firstGoal,
-    htft:         bm.htft         ? { hh: s2(bm.htft.hh), hd: s2(bm.htft.hd), ha: s2(bm.htft.ha), dh: s2(bm.htft.dh), dd: s2(bm.htft.dd), da: s2(bm.htft.da), ah: s2(bm.htft.ah), ad: s2(bm.htft.ad), aa: s2(bm.htft.aa) } : undefined,
-    correctScore: bm.correctScore
-                  ? Object.fromEntries(Object.entries(bm.correctScore).map(([k, v]) => {
-                      const cur = state.markets.correctScore?.[k] ?? 0;
-                      return [k, keep0(cur, v, s2)];
-                    }))
-                  : undefined,
-    asianHandicap:bm.asianHandicap? { ...bm.asianHandicap, home: s2(bm.asianHandicap.home), away: s2(bm.asianHandicap.away) } : undefined,
-    // Tier 3 — slow
-    corners:      bm.corners      ? { o85: s3(bm.corners.o85), u85: s3(bm.corners.u85), o95: s3(bm.corners.o95), u95: s3(bm.corners.u95), o105: s3(bm.corners.o105), u105: s3(bm.corners.u105) } : undefined,
-    cards:        bm.cards        ? { o35: s3(bm.cards.o35), u35: s3(bm.cards.u35), o45: s3(bm.cards.o45), u45: s3(bm.cards.u45) } : undefined,
+    } : state.markets.asianTotals,
+
+    halfTime: htDue && bm.halfTime
+      ? { home: s2(bm.halfTime.home), draw: s2(bm.halfTime.draw), away: s2(bm.halfTime.away) }
+      : state.markets.halfTime,
+
+    firstGoal: fgDue
+      ? (state.markets.firstGoal && state.markets.firstGoal.home > 0
+          ? { home: s2(bm.firstGoal!.home), noGoal: s2(bm.firstGoal!.noGoal), away: s2(bm.firstGoal!.away) }
+          : state.markets.firstGoal)
+      : state.markets.firstGoal,
+
+    asianHandicap: ahDue && bm.asianHandicap
+      ? { ...bm.asianHandicap, home: s2(bm.asianHandicap.home), away: s2(bm.asianHandicap.away) }
+      : state.markets.asianHandicap,
+
+    htft: htftDue && bm.htft
+      ? { hh: s2(bm.htft.hh), hd: s2(bm.htft.hd), ha: s2(bm.htft.ha), dh: s2(bm.htft.dh), dd: s2(bm.htft.dd), da: s2(bm.htft.da), ah: s2(bm.htft.ah), ad: s2(bm.htft.ad), aa: s2(bm.htft.aa) }
+      : state.markets.htft,
+
+    correctScore: csDue && bm.correctScore
+      ? Object.fromEntries(Object.entries(bm.correctScore).map(([k, v]) => {
+          const cur = state.markets.correctScore?.[k] ?? 0;
+          return [k, keep0(cur, v, s2)];
+        }))
+      : state.markets.correctScore,
+
+    corners: cornDue && bm.corners
+      ? { o85: s3(bm.corners.o85), u85: s3(bm.corners.u85), o95: s3(bm.corners.o95), u95: s3(bm.corners.u95), o105: s3(bm.corners.o105), u105: s3(bm.corners.u105) }
+      : state.markets.corners,
+
+    cards: cardDue && bm.cards
+      ? { o35: s3(bm.cards.o35), u35: s3(bm.cards.u35), o45: s3(bm.cards.o45), u45: s3(bm.cards.u45) }
+      : state.markets.cards,
   };
 
-  return { ...state, odds: newOdds, markets: newMarkets, _driftPhase: phase };
+  return { ...state, odds: newOdds, markets: newMarkets, _driftPhase: phase, _marketNextUpdate: newSched };
 }
 
 // Remove/zero out market lines that are already settled or impossible given the current live score

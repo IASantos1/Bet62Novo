@@ -1853,44 +1853,26 @@ export default function Home() {
 
   // --- UI Components ---
 
-  // Minimum change required to show an animation arrow (prevents microflicker)
+  // Minimum change (vs previous API poll) required to show ▲/▼ arrow and flash.
+  // Filters out micro-oscillations — server controls the real update cadence.
   const ODDS_ANIM_THRESHOLD = 0.02;
-  // Stagger delay per position so odds don't all jump at the same frame
-  const selectionStaggerMs = (sel: string) =>
-    sel === "draw" ? 150 : sel === "away" ? 300 : 0;
 
   const OddsButton = ({ match, selection, odd, market = "result", label, grow }: {
     match: Match; selection: string; odd: number; market?: string; label: string; grow?: boolean;
   }) => {
-    // Staggered display value — updates with a small delay based on position
-    const staggerMs = selectionStaggerMs(selection);
-    const [displayOdd, setDisplayOdd] = useState(odd);
-    const prevDisplayRef = useRef(odd);
-    useEffect(() => {
-      if (odd === prevDisplayRef.current) return;
-      const t = setTimeout(() => {
-        prevDisplayRef.current = odd;
-        setDisplayOdd(odd);
-      }, staggerMs);
-      return () => clearTimeout(t);
-    }, [odd, staggerMs]);
-
     const now = Date.now();
     const suspendedUntil = match.marketSuspension?.[market];
     const isSuspended = suspendedUntil !== undefined && suspendedUntil > now;
     const isSelected = !!bets.find(b => b.matchId === match.id && b.market === market && b.selection === selection);
     const prevOdd = match.isLive ? prevLiveOdds.current[String(match.id)]?.[selection as keyof Odds] : undefined;
-    // Only animate when change exceeds threshold (avoids noise from micro-oscillations)
-    const delta = prevOdd !== undefined ? displayOdd - prevOdd : 0;
-    const oddsUp   = !isSuspended && Math.abs(delta) >= ODDS_ANIM_THRESHOLD && delta > 0;
-    const oddsDown = !isSuspended && Math.abs(delta) >= ODDS_ANIM_THRESHOLD && delta < 0;
+    // Arrow only when actual API value changed enough — server now controls cadence
+    const delta = prevOdd !== undefined ? odd - prevOdd : 0;
+    const oddsUp   = !isSuspended && delta >= ODDS_ANIM_THRESHOLD;
+    const oddsDown = !isSuspended && delta <= -ODDS_ANIM_THRESHOLD;
 
-    if (isSuspended) {
-      return null;
-    }
+    if (isSuspended) return null;
 
-    // Heavy favourite (odds < 1.15): show "--" — too low to offer a meaningful bet
-    if (displayOdd < 1.15 && market === "result") {
+    if (odd < 1.15 && market === "result") {
       return (
         <div className={`relative flex flex-col items-center py-2.5 px-2 rounded-md text-xs ${grow ? "flex-1" : ""} bg-zinc-800/40 border border-zinc-700/30`}>
           <span className="mb-0.5 text-[10px] leading-tight opacity-40">{label}</span>
@@ -1899,7 +1881,7 @@ export default function Home() {
       );
     }
 
-    if (match.isLive && market === "result" && displayOdd <= 1.01) {
+    if (match.isLive && market === "result" && odd <= 1.01) {
       return (
         <div className={`relative flex flex-col items-center py-2.5 px-2 rounded-md text-xs ${grow ? "flex-1" : ""} bg-amber-900/20 border border-amber-600/30`}>
           <span className="mb-0.5 text-[10px] leading-tight opacity-50">{label}</span>
@@ -1912,12 +1894,12 @@ export default function Home() {
 
     return (
       <button
-        onClick={() => toggleBet(match, selection, displayOdd, market, label)}
+        onClick={() => toggleBet(match, selection, odd, market, label)}
         className={`relative flex flex-col items-center py-2.5 px-2 rounded-md transition-colors text-xs ${grow ? "flex-1" : ""} ${isSelected ? "bg-red-600 text-white" : "bg-zinc-800 hover:bg-zinc-700 text-zinc-300"} ${flashClass}`}
       >
         <span className="mb-0.5 text-[10px] leading-tight opacity-70">{label}</span>
         <span className="font-bold text-sm flex items-center gap-0.5">
-          <span key={displayOdd.toFixed(2)} className="odds-tick-in tabular-nums">{displayOdd.toFixed(2)}</span>
+          <span key={odd.toFixed(2)} className="odds-tick-in tabular-nums">{odd.toFixed(2)}</span>
           {oddsUp   && <span className="text-green-400 text-[9px] font-black leading-none shrink-0">▲</span>}
           {oddsDown && <span className="text-red-400  text-[9px] font-black leading-none shrink-0">▼</span>}
         </span>
@@ -2704,33 +2686,24 @@ export default function Home() {
   }
 
   const MarketOddsBtn = ({ match, sel, odd, market, label }: { match: Match; sel: string; odd: number; market: string; label: string }) => {
-    // Staggered display: home=0ms, draw=150ms, away=300ms
-    const staggerMs = selectionStaggerMs(sel);
-    const [displayOdd, setDisplayOdd] = useState(odd);
-    const prevRef = useRef(odd);
-    useEffect(() => {
-      if (odd === prevRef.current) return;
-      const t = setTimeout(() => { prevRef.current = odd; setDisplayOdd(odd); }, staggerMs);
-      return () => clearTimeout(t);
-    }, [odd, staggerMs]);
-
-    if (market === "result" && displayOdd <= 1.01) return null;
+    if (market === "result" && odd <= 1.01) return null;
     const isSusp = !!match.marketSuspension && Object.values(match.marketSuspension).some(ts => ts > Date.now());
     if (isSusp) return null;
     const active = !!bets.find(b => b.matchId === match.id && b.market === market && b.selection === sel);
     const prevOdd = match.isLive ? prevLiveMarkets.current[String(match.id)]?.[`${market}:${sel}`] : undefined;
-    const delta = prevOdd !== undefined ? displayOdd - prevOdd : 0;
-    const oddUp   = !active && Math.abs(delta) >= ODDS_ANIM_THRESHOLD && delta > 0;
-    const oddDown = !active && Math.abs(delta) >= ODDS_ANIM_THRESHOLD && delta < 0;
+    // Server controls update cadence — only animate when actual data changed >= threshold
+    const delta = prevOdd !== undefined ? odd - prevOdd : 0;
+    const oddUp   = !active && delta >= ODDS_ANIM_THRESHOLD;
+    const oddDown = !active && delta <= -ODDS_ANIM_THRESHOLD;
     const flashClass = oddUp ? "odds-flash-up" : oddDown ? "odds-flash-down" : "";
     return (
       <button
-        onClick={() => toggleBet(match, sel, displayOdd, market, label)}
+        onClick={() => toggleBet(match, sel, odd, market, label)}
         className={`flex-1 flex flex-col items-center py-2.5 px-1 rounded-lg border transition-all min-w-0 ${active ? "border-red-600 bg-red-600/15 ring-1 ring-red-500/40" : "border-zinc-800 bg-zinc-900/80 hover:border-red-500/40 hover:bg-zinc-800"} ${flashClass}`}
       >
         <span className="text-[11px] text-zinc-400 mb-1 leading-tight text-center truncate w-full px-0.5">{label}</span>
         <span className={`font-bold text-base tabular-nums flex items-center gap-0.5 ${active ? "text-red-400" : "text-white"}`}>
-          <span key={displayOdd.toFixed(2)} className="odds-tick-in">{displayOdd.toFixed(2)}</span>
+          <span key={odd.toFixed(2)} className="odds-tick-in">{odd.toFixed(2)}</span>
           {oddUp   && <span className="text-green-400 text-[9px] font-black leading-none shrink-0">▲</span>}
           {oddDown && <span className="text-red-400  text-[9px] font-black leading-none shrink-0">▼</span>}
         </span>
