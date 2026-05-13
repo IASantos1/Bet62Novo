@@ -2060,15 +2060,26 @@ function applyTieredMarketDrift(state: LiveMatchState, now: number): LiveMatchSt
       ? { yes: s1(bm.bothTeamsScore.yes), no: s1(bm.bothTeamsScore.no) }
       : state.markets.bothTeamsScore,
 
-    totalGoals: tgDue ? {
-      over05:  keep0(tg.over05,  btg.over05,  s1), under05: keep0(tg.under05, btg.under05, s1),
-      over15:  keep0(tg.over15,  btg.over15,  s1), under15: keep0(tg.under15, btg.under15, s1),
-      over25:  keep0(tg.over25,  btg.over25,  s1), under25: keep0(tg.under25, btg.under25, s1),
-      over35:  keep0(tg.over35,  btg.over35,  s1), under35: keep0(tg.under35, btg.under35, s1),
-      over45:  keep0(tg.over45,  btg.over45,  s1), under45: keep0(tg.under45, btg.under45, s1),
-      over55:  keep0(tg.over55,  btg.over55,  s1), under55: keep0(tg.under55, btg.under55, s1),
-      over65:  keep0(tg.over65,  btg.over65,  s1), under65: keep0(tg.under65, btg.under65, s1),
-    } : state.markets.totalGoals,
+    totalGoals: tgDue
+      ? (() => {
+          // Recalculate from current game state (remaining time + score), then apply a tiny oscillation
+          const live = recalcLiveTotalGoals(
+            state.home, state.away,
+            (state.homeScore ?? 0) + (state.awayScore ?? 0),
+            state.minute ?? 0, state.status,
+            state.markets.totalGoals
+          );
+          return {
+            over05:  live.over05  > 0 ? s1(live.over05)  : 0, under05: live.under05  > 0 ? s1(live.under05)  : 0,
+            over15:  live.over15  > 0 ? s1(live.over15)  : 0, under15: live.under15  > 0 ? s1(live.under15)  : 0,
+            over25:  live.over25  > 0 ? s1(live.over25)  : 0, under25: live.under25  > 0 ? s1(live.under25)  : 0,
+            over35:  live.over35  > 0 ? s1(live.over35)  : 0, under35: live.under35  > 0 ? s1(live.under35)  : 0,
+            over45:  live.over45  > 0 ? s1(live.over45)  : 0, under45: live.under45  > 0 ? s1(live.under45)  : 0,
+            over55:  live.over55  > 0 ? s1(live.over55)  : 0, under55: live.under55  > 0 ? s1(live.under55)  : 0,
+            over65:  live.over65  > 0 ? s1(live.over65)  : 0, under65: live.under65  > 0 ? s1(live.under65)  : 0,
+          };
+        })()
+      : state.markets.totalGoals,
 
     handicap: hcDue ? {
       homeMinusOne:     s1(bm.handicap.homeMinusOne),
@@ -2124,6 +2135,53 @@ function applyTieredMarketDrift(state: LiveMatchState, now: number): LiveMatchSt
   };
 
   return { ...state, odds: newOdds, markets: newMarkets, _driftPhase: phase, _marketNextUpdate: newSched };
+}
+
+// Recalculate open (non-settled) total goals lines using live-adjusted expected goals.
+// λ_remaining = λ_total × (remainingMins / 90); each open line is repriced from remaining need.
+function recalcLiveTotalGoals(
+  home: string,
+  away: string,
+  currentGoals: number,
+  minute: number,
+  status: string,
+  settled: AdvancedMarkets["totalGoals"]
+): AdvancedMarkets["totalGoals"] {
+  const { lambdaHome, lambdaAway } = soccerPoissonModel(home, away);
+  const lambdaTotal = lambdaHome + lambdaAway;
+  const isHT = status === "HT";
+  // Remaining minutes: HT → 45 still to play; otherwise 90 − minute, floor at 1
+  const remainingMins = isHT ? 45 : Math.max(1, 90 - Math.min(90, minute));
+  const lambdaRem = lambdaTotal * (remainingMins / 90);
+
+  // For a given line (e.g. 2.5), needed = goals still required to win Over
+  // If already settled (cur ≤ 0 from filterLiveMarkets) → keep 0
+  const recalcLine = (cur: number, targetTotal: number): [number, number] => {
+    if (cur <= 0) return [0, 0];
+    const needed = Math.max(1, targetTotal - currentGoals);
+    const pOver = mc(1 - poissonCdf(lambdaRem, needed - 1), 0.01, 0.99);
+    const pUnder = mc(1 - pOver, 0.01, 0.99);
+    const [oOdds, uOdds] = probsToDecimalOdds([pOver, pUnder], 1.06);
+    return [oOdds!, uOdds!];
+  };
+
+  const [o05, u05] = recalcLine(settled.over05, 1);
+  const [o15, u15] = recalcLine(settled.over15, 2);
+  const [o25, u25] = recalcLine(settled.over25, 3);
+  const [o35, u35] = recalcLine(settled.over35, 4);
+  const [o45, u45] = recalcLine(settled.over45, 5);
+  const [o55, u55] = recalcLine(settled.over55, 6);
+  const [o65, u65] = recalcLine(settled.over65, 7);
+
+  return {
+    over05: o05, under05: u05,
+    over15: o15, under15: u15,
+    over25: o25, under25: u25,
+    over35: o35, under35: u35,
+    over45: o45, under45: u45,
+    over55: o55, under55: u55,
+    over65: o65, under65: u65,
+  };
 }
 
 // Remove/zero out market lines that are already settled or impossible given the current live score
@@ -2850,6 +2908,16 @@ async function buildLiveMatches(): Promise<LiveMatchState[]> {
 
         // Filter markets for live score (remove impossible/settled lines)
         matchMarkets = filterLiveMarkets(matchMarkets, homeScore, awayScore);
+
+        // Recalculate total goals using live-adjusted lambda (remaining time + current score)
+        matchMarkets = {
+          ...matchMarkets,
+          totalGoals: recalcLiveTotalGoals(
+            m.home.name, m.away.name,
+            homeScore + awayScore, minute, m.status,
+            matchMarkets.totalGoals
+          ),
+        };
 
         // Recalculate Double Chance and Draw No Bet from the ACTUAL live 1X2 odds.
         // The base model computes these from internal ELO probs which diverge from the
