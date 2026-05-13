@@ -2750,10 +2750,22 @@ export default function Home() {
     // Parse current live period/set/quarter from status (0 = upcoming/unknown → show all markets)
     const currentSet = (isTennis || isVolleyball) && (match as any).status?.startsWith("Set")
       ? (parseInt(((match as any).status as string).replace("Set ", "")) || 0) : 0;
-    const currentQ = isBasketball && (match as any).status?.startsWith("Q")
-      ? (parseInt(((match as any).status as string).replace("Q", "")) || 0) : 0;
+    // Basketball: "HT" = NBA halftime (between Q2 and Q3 → quartersDone = 2)
+    const currentQ = isBasketball
+      ? ((match as any).status?.startsWith("Q")
+          ? (parseInt(((match as any).status as string).replace("Q", "")) || 0)
+          : (match as any).status === "HT" ? 2 : 0)
+      : 0;
     const currentP = isHockey && (match as any).status?.startsWith("P")
       ? (parseInt(((match as any).status as string).replace("P", "")) || 0) : 0;
+    // Football half lifecycle: null=pre-match (show all), 1=1st half, 0=HT break, 2=2nd half
+    const liveHalf = isFootball && match.isLive
+      ? ((match as any).status === "HT" ? 0 : (match.minute ?? 0) > 45 ? 2 : 1)
+      : null;
+    // show1tempo: show "1º Tempo" markets (pre-match OR during 1st half)
+    const show1tempo = liveHalf === null || liveHalf === 1;
+    // show2tempo: show "2º Tempo" markets (at HT break OR during 2nd half)
+    const show2tempo = liveHalf === 0 || liveHalf === 2;
 
     const tabs = isBasketball
       ? [
@@ -2800,7 +2812,8 @@ export default function Home() {
                 { key: "dupla", label: "Dupla Chance" },
                 { key: "gols", label: "Gols" },
                 { key: "handicap", label: "Handicap" },
-                { key: "1tempo", label: "1º Tempo" },
+                ...(show1tempo ? [{ key: "1tempo", label: "1º Tempo" }] : []),
+                ...(show2tempo ? [{ key: "2tempo", label: "2º Tempo" }] : []),
                 { key: "htft", label: "HT/FT" },
                 { key: "placar", label: "Placar Exato" },
                 { key: "escanteios", label: "Escanteios" },
@@ -3072,8 +3085,8 @@ export default function Home() {
           <div className="text-center text-zinc-600 py-6 text-sm">Mercado não disponível para esta partida.</div>
         )}
 
-        {/* ── FUTEBOL: 1º TEMPO ── */}
-        {isFootball && (modalTab === "1tempo" || modalTab === "todos") && m && m.halfTime.home > 0 && (
+        {/* ── FUTEBOL: 1º TEMPO — hidden in 2nd half ── */}
+        {isFootball && show1tempo && (modalTab === "1tempo" || modalTab === "todos") && m && m.halfTime.home > 0 && (
           <div>
             <MarketGroup title="Resultado — 1º Tempo">
               <MarketOddsBtn match={match} sel="ht-home" odd={m.halfTime.home} market="1tempo" label={match.home} />
@@ -3089,7 +3102,33 @@ export default function Home() {
             )}
           </div>
         )}
-        {isFootball && modalTab === "1tempo" && m && m.halfTime.home === 0 && (
+        {isFootball && show1tempo && modalTab === "1tempo" && m && m.halfTime.home === 0 && (
+          <div className="text-center text-zinc-600 py-6 text-sm">Mercado não disponível para esta partida.</div>
+        )}
+
+        {/* ── FUTEBOL: 2º TEMPO — shown at HT and during 2nd half ── */}
+        {isFootball && show2tempo && (modalTab === "2tempo" || modalTab === "todos") && (
+          <div>
+            <MarketGroup title="Resultado — 2º Tempo">
+              <MarketOddsBtn match={match} sel="2h-home" odd={match.odds.home} market="2tempo" label={match.home} />
+              {match.odds.draw > 0 && <MarketOddsBtn match={match} sel="2h-draw" odd={match.odds.draw} market="2tempo" label="Empate" />}
+              <MarketOddsBtn match={match} sel="2h-away" odd={match.odds.away} market="2tempo" label={match.away} />
+            </MarketGroup>
+            {m && m.totalGoals.over05 > 0 && (
+              <MarketGroup title="Golos no 2º Tempo — 0.5">
+                <MarketOddsBtn match={match} sel="2h-o05g" odd={m.totalGoals.over05} market="2tempo" label="Mais de 0.5" />
+                <MarketOddsBtn match={match} sel="2h-u05g" odd={m.totalGoals.under05} market="2tempo" label="Menos de 0.5" />
+              </MarketGroup>
+            )}
+            {m && m.totalGoals.over15 > 0 && (
+              <MarketGroup title="Golos no 2º Tempo — 1.5">
+                <MarketOddsBtn match={match} sel="2h-o15g" odd={m.totalGoals.over15} market="2tempo" label="Mais de 1.5" />
+                <MarketOddsBtn match={match} sel="2h-u15g" odd={m.totalGoals.under15} market="2tempo" label="Menos de 1.5" />
+              </MarketGroup>
+            )}
+          </div>
+        )}
+        {isFootball && show2tempo && modalTab === "2tempo" && (!match.odds.home || match.odds.home <= 1) && (
           <div className="text-center text-zinc-600 py-6 text-sm">Mercado não disponível para esta partida.</div>
         )}
 
@@ -3399,7 +3438,8 @@ export default function Home() {
         {/* ── BASQUETE: QUARTOS ── */}
         {isBasketball && (modalTab === "quartos" || modalTab === "todos") && m && (
           <div>
-            {m.halfTime.home > 0 && (
+            {/* 1ª Metade = Q1+Q2; hide when already in Q3 or Q4 */}
+            {m.halfTime.home > 0 && (currentQ === 0 || currentQ <= 2) && (
               <MarketGroup title="Vencedor — 1ª Metade">
                 <MarketOddsBtn match={match} sel="h1-home" odd={m.halfTime.home} market="quartos" label={match.home} />
                 <MarketOddsBtn match={match} sel="h1-away" odd={m.halfTime.away} market="quartos" label={match.away} />
