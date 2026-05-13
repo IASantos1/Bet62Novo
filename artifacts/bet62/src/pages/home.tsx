@@ -720,6 +720,16 @@ type AdvancedMarkets = {
   correctScore?: Record<string, number>;
   corners?: { o85: number; u85: number; o95: number; u95: number; o105: number; u105: number };
   cards?: { o35: number; u35: number; o45: number; u45: number };
+  // Football extra-time markets
+  etExtra?: {
+    result: { home: number; draw: number; away: number };
+    totalGoals: { o05: number; u05: number; o15: number; u15: number; o25: number; u25: number };
+    bothTeamsScore: { yes: number; no: number };
+  };
+  // Football penalty-shootout markets
+  penExtra?: {
+    winner: { home: number; away: number };
+  };
 };
 
 type Match = {
@@ -757,6 +767,8 @@ type Match = {
     ];
     periods?: Array<[number, number]>;
     quarters?: Array<[number, number]>;
+    etScore?: [number, number];
+    penScore?: [number, number];
   };
   // Red cards per team (football only)
   redCardsHome?: number;
@@ -2833,6 +2845,10 @@ export default function Home() {
     const show1tempo = liveHalf === null || liveHalf === 1;
     // show2tempo: show "2º Tempo" markets (at HT break OR during 2nd half)
     const show2tempo = liveHalf === 0 || liveHalf === 2;
+    // showET: show Prolongamento markets (match in extra time)
+    const showET = isFootball && match.isLive && !!match.markets?.etExtra;
+    // showPen: show Penáltis markets (match in penalty shootout)
+    const showPen = isFootball && match.isLive && !!match.markets?.penExtra;
 
     const tabs = isBasketball
       ? [
@@ -2886,6 +2902,8 @@ export default function Home() {
                 { key: "escanteios", label: "Escanteios" },
                 { key: "cartoes", label: "Cartões" },
                 { key: "asiatico", label: "Asiático" },
+                ...(showET  ? [{ key: "prolongamento", label: "🔴 Prolongamento" }] : []),
+                ...(showPen ? [{ key: "penaltis",      label: "🎯 Penáltis" }]      : []),
               ];
 
     const m = match.markets;
@@ -3318,6 +3336,57 @@ export default function Home() {
             {(!m.drawNoBet && !m.asianHandicap && !m.asianTotals) && (
               <div className="text-center text-zinc-600 py-6 text-sm">Mercado não disponível para esta partida.</div>
             )}
+          </div>
+        )}
+
+        {/* ── PROLONGAMENTO ── */}
+        {isFootball && showET && m?.etExtra && (modalTab === "prolongamento" || modalTab === "todos") && (
+          <div>
+            <div className="flex items-center gap-2 mb-3 px-1">
+              <span className="text-[10px] font-black uppercase tracking-widest text-red-500 bg-red-950/40 border border-red-800/40 rounded px-2 py-0.5">⏱ Prolongamento em curso</span>
+            </div>
+            <MarketGroup title="Vencedor do Prolongamento">
+              <MarketOddsBtn match={match} sel="et-home" odd={m.etExtra.result.home} market="prolongamento" label={match.home} />
+              <MarketOddsBtn match={match} sel="et-draw" odd={m.etExtra.result.draw} market="prolongamento" label="Empate (Penáltis)" />
+              <MarketOddsBtn match={match} sel="et-away" odd={m.etExtra.result.away} market="prolongamento" label={match.away} />
+            </MarketGroup>
+            {m.etExtra.totalGoals.o05 > 0 && (
+              <MarketGroup title="Golos no Prolongamento — 0.5">
+                <MarketOddsBtn match={match} sel="et-o05" odd={m.etExtra.totalGoals.o05} market="prolongamento" label="Mais de 0.5" />
+                <MarketOddsBtn match={match} sel="et-u05" odd={m.etExtra.totalGoals.u05} market="prolongamento" label="Menos de 0.5" />
+              </MarketGroup>
+            )}
+            {m.etExtra.totalGoals.o15 > 0 && (
+              <MarketGroup title="Golos no Prolongamento — 1.5">
+                <MarketOddsBtn match={match} sel="et-o15" odd={m.etExtra.totalGoals.o15} market="prolongamento" label="Mais de 1.5" />
+                <MarketOddsBtn match={match} sel="et-u15" odd={m.etExtra.totalGoals.u15} market="prolongamento" label="Menos de 1.5" />
+              </MarketGroup>
+            )}
+            {m.etExtra.totalGoals.o25 > 0 && (
+              <MarketGroup title="Golos no Prolongamento — 2.5">
+                <MarketOddsBtn match={match} sel="et-o25" odd={m.etExtra.totalGoals.o25} market="prolongamento" label="Mais de 2.5" />
+                <MarketOddsBtn match={match} sel="et-u25" odd={m.etExtra.totalGoals.u25} market="prolongamento" label="Menos de 2.5" />
+              </MarketGroup>
+            )}
+            {m.etExtra.bothTeamsScore.yes > 0 && (
+              <MarketGroup title="Ambas Marcam no Prolongamento">
+                <MarketOddsBtn match={match} sel="et-bts-yes" odd={m.etExtra.bothTeamsScore.yes} market="prolongamento" label="Sim" />
+                <MarketOddsBtn match={match} sel="et-bts-no"  odd={m.etExtra.bothTeamsScore.no}  market="prolongamento" label="Não" />
+              </MarketGroup>
+            )}
+          </div>
+        )}
+
+        {/* ── PENÁLTIS ── */}
+        {isFootball && showPen && m?.penExtra && (modalTab === "penaltis" || modalTab === "todos") && (
+          <div>
+            <div className="flex items-center gap-2 mb-3 px-1">
+              <span className="text-[10px] font-black uppercase tracking-widest text-yellow-400 bg-yellow-950/40 border border-yellow-700/40 rounded px-2 py-0.5">🎯 Penáltis em curso</span>
+            </div>
+            <MarketGroup title="Vencedor nos Penáltis">
+              <MarketOddsBtn match={match} sel="pen-home" odd={m.penExtra.winner.home} market="penaltis" label={match.home} />
+              <MarketOddsBtn match={match} sel="pen-away" odd={m.penExtra.winner.away} market="penaltis" label={match.away} />
+            </MarketGroup>
           </div>
         )}
 
