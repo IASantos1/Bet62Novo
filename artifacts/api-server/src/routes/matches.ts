@@ -1370,6 +1370,8 @@ function makeVolleyballMarketsFromTeams(home: string, away: string): AdvancedMar
 // v2/live: cache 30s
 let liveCache: StatpalLeagueV2[] | null = null;
 let liveFetchedAt = 0;
+// Track Statpal's own updated_ts so we can detect a frozen feed
+let liveFeedUpdatedTs = 0;
 
 // v2/daily today: cache 5min
 let dailyCache: StatpalLeagueV2[] | null = null;
@@ -1682,8 +1684,11 @@ async function getLiveLeagues(): Promise<StatpalLeagueV2[]> {
       console.warn(`[live] Statpal HTTP ${resp.status} — using cache or empty`);
       return liveCache ?? [];
     }
-    const data = (await resp.json()) as { live_matches?: { league?: StatpalLeagueV2 | StatpalLeagueV2[] } };
+    const data = (await resp.json()) as { live_matches?: { league?: StatpalLeagueV2 | StatpalLeagueV2[]; updated_ts?: number } };
     const raw = data?.live_matches?.league;
+    // Track Statpal's own feed timestamp (seconds) — used to detect frozen feed
+    const feedTs = data?.live_matches?.updated_ts;
+    if (feedTs && feedTs > liveFeedUpdatedTs) liveFeedUpdatedTs = feedTs;
     liveCache = raw == null ? [] : Array.isArray(raw) ? raw : [raw];
     liveFetchedAt = now;
     return liveCache;
@@ -2484,6 +2489,25 @@ async function buildLiveMatches(): Promise<LiveMatchState[]> {
       const isHT = m.status === "HT";
       const isET = m.status === "ET";
       if (!isLiveMinute && !isHT && !isET) continue;
+
+      // ── Guard 0b: frozen feed detection ─────────────────────────────────────
+      // If Statpal's own updated_ts hasn't moved in >15min, the feed is frozen.
+      // In that case, drop any match whose scheduled kickoff + 130 min has passed
+      // (it's almost certainly over even if Statpal still shows it as in-progress).
+      if (liveFeedUpdatedTs > 0) {
+        const feedAgeMs = now - liveFeedUpdatedTs * 1000;
+        const FROZEN_THRESHOLD_MS = 15 * 60 * 1000; // 15 minutes
+        if (feedAgeMs > FROZEN_THRESHOLD_MS && m.date && m.time) {
+          // Parse "DD.MM.YYYY" + "HH:MM" into UTC ms
+          const [d, mo, y] = m.date.split(".").map(Number);
+          const [h, mi] = m.time.split(":").map(Number);
+          if (!isNaN(d) && !isNaN(h)) {
+            const kickoffMs = Date.UTC(y, mo - 1, d, h, mi);
+            const MAX_MATCH_DURATION_MS = 130 * 60 * 1000; // 130 min (90 + ET + buffer)
+            if (now - kickoffMs > MAX_MATCH_DURATION_MS) continue; // match is over
+          }
+        }
+      }
 
       const existing = liveMatchState.get(m.main_id);
 
