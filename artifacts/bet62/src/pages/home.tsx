@@ -1898,8 +1898,8 @@ export default function Home() {
         className={`relative flex flex-col items-center py-2.5 px-2 rounded-md transition-colors text-xs ${grow ? "flex-1" : ""} ${isSelected ? "bg-red-600 text-white" : "bg-zinc-800 hover:bg-zinc-700 text-zinc-300"} ${flashClass}`}
       >
         <span className="mb-0.5 text-[10px] leading-tight opacity-70">{label}</span>
-        <span className="font-bold text-sm flex items-center gap-0.5">
-          <span key={odd.toFixed(2)} className="odds-tick-in tabular-nums">{odd.toFixed(2)}</span>
+        <span className="font-bold text-sm tabular-nums flex items-center gap-0.5">
+          {odd.toFixed(2)}
           {oddsUp   && <span className="text-green-400 text-[9px] font-black leading-none shrink-0">▲</span>}
           {oddsDown && <span className="text-red-400  text-[9px] font-black leading-none shrink-0">▼</span>}
         </span>
@@ -2703,7 +2703,7 @@ export default function Home() {
       >
         <span className="text-[11px] text-zinc-400 mb-1 leading-tight text-center truncate w-full px-0.5">{label}</span>
         <span className={`font-bold text-base tabular-nums flex items-center gap-0.5 ${active ? "text-red-400" : "text-white"}`}>
-          <span key={odd.toFixed(2)} className="odds-tick-in">{odd.toFixed(2)}</span>
+          {odd.toFixed(2)}
           {oddUp   && <span className="text-green-400 text-[9px] font-black leading-none shrink-0">▲</span>}
           {oddDown && <span className="text-red-400  text-[9px] font-black leading-none shrink-0">▼</span>}
         </span>
