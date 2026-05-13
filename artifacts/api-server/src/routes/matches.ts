@@ -3581,6 +3581,9 @@ router.get("/stats", async (req, res) => {
     } catch { /* use computed fallback */ }
   }
 
+  const realHomeCount = homeForm.length;
+  const realAwayCount = awayForm.length;
+
   if (homeForm.length < 5) {
     homeForm = Array.from({ length: 5 }, (_, i) => {
       const fp = cfg.pool[ri(0, cfg.pool.length - 1, i + 1.13)]!;
@@ -3594,7 +3597,11 @@ router.get("/stats", async (req, res) => {
     });
   }
 
+  // Only expose form when BOTH sides came from the real Statpal API
+  const formIsReal = realHomeCount >= 5 && realAwayCount >= 5;
+
   res.json({
+    formIsReal,
     winProb: { home: homeProb, draw: drawProb, away: awayProb },
     h2h: { homeWins, draws, awayWins },
     avgStats: {

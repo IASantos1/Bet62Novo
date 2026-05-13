@@ -776,6 +776,7 @@ type MatchStatsData = {
   };
   homeForm: FormEntry[];
   awayForm: FormEntry[];
+  formIsReal?: boolean;
 };
 type StandingRow = { pos: number; name: string; played: number; won: number; drawn: number; lost: number; gf: number; ga: number; pts: number };
 
@@ -1008,6 +1009,9 @@ export default function Home() {
   const [cashoutConfirm, setCashoutConfirm] = useState<UserBet | null>(null);
   const [betFilterTab, setBetFilterTab] = useState<"abertas" | "resolvidas" | "cashout">("abertas");
   const [collapsedBets, setCollapsedBets] = useState<Set<number>>(new Set());
+  const [winAnim, setWinAnim] = useState<{ amount: number; title: string } | null>(null);
+  const [cashoutAnim, setCashoutAnim] = useState<{ amount: number } | null>(null);
+  const prevWonBetIds = useRef<Set<number> | null>(null);
 
   // Deposit modal
   const [depositModalOpen, setDepositModalOpen] = useState(false);
@@ -1615,7 +1619,21 @@ export default function Home() {
       const res = await fetch("/api/bets/my", {
         headers: { Authorization: `Bearer ${auth.token}` }
       });
-      if (res.ok) setMyBets(await res.json());
+      if (res.ok) {
+        const bets: UserBet[] = await res.json();
+        setMyBets(bets);
+        const currentWonIds = new Set(bets.filter(b => b.status === "won").map(b => b.id));
+        if (prevWonBetIds.current !== null) {
+          const newWon = bets.filter(b => b.status === "won" && !prevWonBetIds.current!.has(b.id));
+          if (newWon.length > 0) {
+            const biggest = newWon.reduce((a, b) =>
+              parseFloat(a.potentialWin) >= parseFloat(b.potentialWin) ? a : b
+            );
+            setWinAnim({ amount: parseFloat(biggest.potentialWin), title: biggest.matchTitle ?? "Aposta" });
+          }
+        }
+        prevWonBetIds.current = currentWonIds;
+      }
     } catch {
       toast.error("Erro ao carregar apostas");
     } finally {
@@ -1629,6 +1647,20 @@ export default function Home() {
     const id = setInterval(() => fetchMyBets(), 30000);
     return () => clearInterval(id);
   }, [activeTab, auth.token, fetchMyBets]);
+
+  // Auto-dismiss win animation after 5s
+  useEffect(() => {
+    if (!winAnim) return;
+    const t = setTimeout(() => setWinAnim(null), 5000);
+    return () => clearTimeout(t);
+  }, [winAnim]);
+
+  // Auto-dismiss cashout animation after 3s
+  useEffect(() => {
+    if (!cashoutAnim) return;
+    const t = setTimeout(() => setCashoutAnim(null), 3000);
+    return () => clearTimeout(t);
+  }, [cashoutAnim]);
 
   const handleVolleyLeagueClick = (id: string) => {
     if (expandedVolleyLeagueId === id) { setExpandedVolleyLeagueId(null); return; }
@@ -1663,7 +1695,7 @@ export default function Home() {
       });
       const data = await res.json();
       if (!res.ok) { toast.error(data.error || "Erro ao fazer cash out"); return; }
-      toast.success(`Cash Out realizado! € ${parseFloat(data.cashoutValue).toFixed(2)} adicionado ao seu saldo.`);
+      setCashoutAnim({ amount: parseFloat(data.cashoutValue) });
       auth.refreshUser();
       fetchMyBets();
     } catch {
@@ -4201,27 +4233,35 @@ export default function Home() {
                         </div>
 
                         {/* Recent Form */}
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                          {[
-                            { title: `Últimos Jogos — ${expandedMatch.home}`, form: matchStats.homeForm },
-                            { title: `Últimos Jogos — ${expandedMatch.away}`, form: matchStats.awayForm },
-                          ].map(block => (
-                            <div key={block.title} className="bg-zinc-950/60 rounded-lg border border-zinc-800 p-4">
-                              <div className="text-[10px] font-black text-red-500 uppercase tracking-widest mb-3">{block.title}</div>
-                              <div className="space-y-2">
-                                {block.form.map((f, i) => (
-                                  <div key={i} className="flex items-center gap-3">
-                                    <span className={`w-5 h-5 rounded text-[11px] font-black flex items-center justify-center shrink-0 ${f.result === "W" ? "bg-green-600 text-white" : f.result === "D" ? "bg-yellow-500 text-black" : "bg-red-600 text-white"}`}>
-                                      {f.result}
-                                    </span>
-                                    <span className="font-mono text-sm font-bold text-white shrink-0">{f.score}</span>
-                                    <span className="text-xs text-zinc-400 truncate">{f.home ? "vs" : "@"} {f.opponent}</span>
-                                  </div>
-                                ))}
+                        {matchStats.formIsReal ? (
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                            {[
+                              { title: `Últimos Jogos — ${expandedMatch.home}`, form: matchStats.homeForm },
+                              { title: `Últimos Jogos — ${expandedMatch.away}`, form: matchStats.awayForm },
+                            ].map(block => (
+                              <div key={block.title} className="bg-zinc-950/60 rounded-lg border border-zinc-800 p-4">
+                                <div className="text-[10px] font-black text-red-500 uppercase tracking-widest mb-3">{block.title}</div>
+                                <div className="space-y-2">
+                                  {block.form.map((f, i) => (
+                                    <div key={i} className="flex items-center gap-3">
+                                      <span className={`w-5 h-5 rounded text-[11px] font-black flex items-center justify-center shrink-0 ${f.result === "W" ? "bg-green-600 text-white" : f.result === "D" ? "bg-yellow-500 text-black" : "bg-red-600 text-white"}`}>
+                                        {f.result}
+                                      </span>
+                                      <span className="font-mono text-sm font-bold text-white shrink-0">{f.score}</span>
+                                      <span className="text-xs text-zinc-400 truncate">{f.home ? "vs" : "@"} {f.opponent}</span>
+                                    </div>
+                                  ))}
+                                </div>
                               </div>
-                            </div>
-                          ))}
-                        </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <div className="bg-zinc-950/60 rounded-lg border border-zinc-800 p-5 text-center">
+                            <div className="text-zinc-600 text-2xl mb-2">📋</div>
+                            <div className="text-zinc-500 text-sm font-medium">Histórico de jogos não disponível</div>
+                            <div className="text-zinc-600 text-xs mt-1">Dados de forma indisponíveis para este jogo</div>
+                          </div>
+                        )}
                       </div>
                     )}
                   </div>
@@ -6625,7 +6665,7 @@ export default function Home() {
                       <div className="text-4xl font-black text-violet-300 mb-1">€5</div>
                       <div className="text-sm text-white/70">em Free Bets creditados na sua conta</div>
                     </div>
-                    <p className="text-white/60 text-xs leading-relaxed mb-6">Complete apostas qualificadas com odds ≥ 1.50 para utilizar as suas free bets.</p>
+                    <p className="text-white/60 text-xs leading-relaxed mb-6">Complete apostas qualificadas com odds ≥ 2.50 para utilizar as suas free bets.</p>
                     <Button onClick={() => setPromoNotif(null)} className="w-full bg-violet-500 hover:bg-violet-600 text-white font-black h-12">COMEÇAR A APOSTAR</Button>
                   </div>
                 </>
@@ -6640,7 +6680,7 @@ export default function Home() {
                     <h2 className="text-3xl font-black text-white leading-tight mb-2">Parabéns!</h2>
                     <p className="text-white/90 text-base mb-1">Está a participar na promoção</p>
                     <p className="text-emerald-300 font-black text-xl mb-4">DEPOSITE €20 → GANHE €10</p>
-                    <p className="text-white/70 text-sm leading-relaxed mb-6">Complete 4 apostas qualificadas com odds ≥ 1.80 para receber os seus €10 em free bets.</p>
+                    <p className="text-white/70 text-sm leading-relaxed mb-6">Complete 4 apostas qualificadas com odds ≥ 2.00 e stake mínima de €2 para receber os seus €10 em free bets.</p>
                     <div className="grid grid-cols-4 gap-2 mb-6">
                       {[1,2,3,4].map(n => (
                         <div key={n} className="rounded-xl bg-white/10 border border-white/20 py-3 flex flex-col items-center gap-1">
@@ -6690,6 +6730,115 @@ export default function Home() {
         )}
       </AnimatePresence>
 
+      {/* ─── WIN ANIMATION ─────────────────────────────────────────── */}
+      <AnimatePresence>
+        {winAnim && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[300] flex items-center justify-center"
+            style={{ background: "radial-gradient(ellipse at center, rgba(0,0,0,0.85) 0%, rgba(0,0,0,0.97) 100%)" }}
+            onClick={() => setWinAnim(null)}
+          >
+            {/* confetti pieces */}
+            {Array.from({ length: 36 }).map((_, i) => {
+              const colors = ["#ef4444","#f59e0b","#22c55e","#3b82f6","#a855f7","#ec4899","#06b6d4","#f97316"];
+              const color = colors[i % colors.length]!;
+              const left = `${5 + (i * 97 % 90)}%`;
+              const delay = (i * 0.07) % 0.9;
+              const size = 6 + (i % 5) * 3;
+              return (
+                <motion.div
+                  key={i}
+                  className="absolute rounded-sm"
+                  style={{ left, top: "-10px", width: size, height: size, background: color, originX: "50%", originY: "50%" }}
+                  animate={{ y: ["0vh", "105vh"], rotate: [0, 360 + i * 30], opacity: [1, 0.7, 0] }}
+                  transition={{ duration: 2.2 + (i % 5) * 0.3, delay, ease: "easeIn", repeat: 1, repeatDelay: 0.5 }}
+                />
+              );
+            })}
+
+            {/* central card */}
+            <motion.div
+              initial={{ scale: 0.4, y: 80, opacity: 0 }}
+              animate={{ scale: 1, y: 0, opacity: 1 }}
+              exit={{ scale: 0.7, opacity: 0 }}
+              transition={{ type: "spring", stiffness: 380, damping: 22 }}
+              className="relative z-10 rounded-3xl border border-white/20 shadow-[0_0_80px_rgba(34,197,94,0.45)] overflow-hidden max-w-sm w-full mx-4"
+              style={{ background: "linear-gradient(135deg, #0a2a0a 0%, #052010 50%, #0a1a0a 100%)" }}
+              onClick={e => e.stopPropagation()}
+            >
+              <div className="absolute inset-0 opacity-20" style={{ background: "radial-gradient(circle at 50% 0%, #22c55e 0%, transparent 70%)" }} />
+              <div className="relative z-10 p-8 text-center">
+                <motion.div
+                  animate={{ scale: [1, 1.2, 1], rotate: [0, -8, 8, -4, 0] }}
+                  transition={{ duration: 0.7, delay: 0.3 }}
+                  className="text-7xl mb-4 select-none"
+                >🏆</motion.div>
+                <div className="inline-block px-3 py-1 rounded-full bg-green-500/20 border border-green-500/40 text-green-400 text-xs font-black tracking-widest mb-4">APOSTA GANHA</div>
+                <h2 className="text-4xl font-black text-white mb-1">Parabéns!</h2>
+                <p className="text-zinc-400 text-sm mb-5 truncate px-2">{winAnim.title}</p>
+                <motion.div
+                  initial={{ scale: 0.5, opacity: 0 }}
+                  animate={{ scale: 1, opacity: 1 }}
+                  transition={{ delay: 0.4, type: "spring", stiffness: 400 }}
+                  className="rounded-2xl border border-green-500/30 bg-green-500/10 p-5 mb-6"
+                >
+                  <div className="text-5xl font-black text-green-400 mb-1">€ {winAnim.amount.toFixed(2)}</div>
+                  <div className="text-green-600 text-sm font-bold">creditado na sua conta</div>
+                </motion.div>
+                <Button onClick={() => setWinAnim(null)} className="w-full bg-green-600 hover:bg-green-500 text-white font-black h-12 text-base rounded-xl">
+                  CONTINUAR A APOSTAR
+                </Button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* ─── CASHOUT ANIMATION ─────────────────────────────────────── */}
+      <AnimatePresence>
+        {cashoutAnim && (
+          <motion.div
+            initial={{ opacity: 0, y: 80 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 60 }}
+            transition={{ type: "spring", stiffness: 320, damping: 26 }}
+            className="fixed bottom-6 left-1/2 z-[300] w-[340px] max-w-[calc(100vw-2rem)]"
+            style={{ translateX: "-50%" }}
+            onClick={() => setCashoutAnim(null)}
+          >
+            <div
+              className="rounded-2xl border border-emerald-500/40 shadow-[0_8px_40px_rgba(16,185,129,0.35)] overflow-hidden"
+              style={{ background: "linear-gradient(135deg, #052018 0%, #041510 100%)" }}
+            >
+              <motion.div
+                className="h-1 bg-emerald-500 origin-left"
+                initial={{ scaleX: 1 }}
+                animate={{ scaleX: 0 }}
+                transition={{ duration: 3, ease: "linear" }}
+              />
+              <div className="flex items-center gap-4 px-5 py-4">
+                <motion.div
+                  animate={{ rotate: [0, -10, 10, -5, 5, 0] }}
+                  transition={{ duration: 0.5, delay: 0.1 }}
+                  className="text-3xl shrink-0 select-none"
+                >💰</motion.div>
+                <div className="flex-1 min-w-0">
+                  <div className="text-xs font-black tracking-widest text-emerald-400 uppercase mb-0.5">Cash Out Realizado</div>
+                  <div className="text-2xl font-black text-white">€ {cashoutAnim.amount.toFixed(2)}</div>
+                  <div className="text-xs text-zinc-500 mt-0.5">adicionado ao seu saldo</div>
+                </div>
+                <button onClick={() => setCashoutAnim(null)} className="text-zinc-600 hover:text-white shrink-0 p-1">
+                  <X size={16} />
+                </button>
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
     </div>
   );
 }
@@ -6735,7 +6884,7 @@ function PromosPage({
       gradient: "from-violet-500/60 to-purple-800/60",
       highlight: "€5",
       highlightLabel: "em free bets",
-      terms: ["Depósito mínimo de €10.", "Free bets creditadas automaticamente.", "Odds mínimas qualificadas: 1.50.", "Free bets válidas por 7 dias."],
+      terms: ["Depósito mínimo de €10.", "Free bets creditadas automaticamente.", "Odds mínimas qualificadas: 2.50.", "Free bets válidas por 7 dias."],
       cta: "DEPOSITAR €10",
       action: onDeposit,
     },
@@ -6749,7 +6898,7 @@ function PromosPage({
       gradient: "from-emerald-400/60 to-green-700/60",
       highlight: "€10",
       highlightLabel: "em free bets",
-      terms: ["Depósito mínimo de €20.", "4 apostas qualificadas obrigatórias.", "Odds mínimas de 1.80.", "Free bets válidas por 7 dias."],
+      terms: ["Depósito mínimo de €20.", "4 apostas qualificadas obrigatórias.", "Odds mínimas de 2.00.", "Stake mínima de €2 por aposta.", "Free bets válidas por 7 dias."],
       cta: "DEPOSITAR €20",
       action: onDeposit,
     },
