@@ -981,7 +981,7 @@ export default function Home() {
 
   // Deposit modal
   const [depositModalOpen, setDepositModalOpen] = useState(false);
-  const [promoNotif, setPromoNotif] = useState<null | { type: "freebets20" | "bonus100" | "cashback"; amount?: number }>(null);
+  const [promoNotif, setPromoNotif] = useState<null | { type: "freebets10" | "freebets20" | "bonus100" | "cashback"; amount?: number }>(null);
 
   // Cashback state
   const [cashbackData, setCashbackData] = useState<{ totalLost: number; cashback: number; bets: number } | null>(null);
@@ -6232,8 +6232,10 @@ export default function Home() {
         open={depositModalOpen}
         onClose={() => setDepositModalOpen(false)}
         onSuccess={() => { auth.refreshUser(); }}
+        onPromoNotif={(type) => { setDepositModalOpen(false); setTimeout(() => setPromoNotif({ type }), 350); }}
         balance={auth.user ? parseFloat(auth.user.balance) : 0}
         token={auth.token}
+        kycStatus={auth.user?.kycStatus ?? "not_submitted"}
       />
 
       {/* ── PROMOTION NOTIFICATION ─────────────────────────────── */}
@@ -6253,6 +6255,25 @@ export default function Home() {
               className="relative overflow-hidden rounded-3xl max-w-md w-full border border-white/15 shadow-2xl"
               onClick={e => e.stopPropagation()}
             >
+              {promoNotif.type === "freebets10" && (
+                <>
+                  <img src="https://images.unsplash.com/photo-1553481187-be93c21490a9?q=80&w=800&auto=format&fit=crop" className="absolute inset-0 w-full h-full object-cover scale-105" alt="" />
+                  <div className="absolute inset-0 bg-gradient-to-br from-violet-600/85 to-black/95" />
+                  <div className="relative z-10 p-8 text-center">
+                    <div className="text-5xl mb-3">🎁</div>
+                    <div className="inline-block px-3 py-1 rounded-full bg-white/15 text-xs font-black tracking-widest text-white mb-4">FREE BET ATIVADA</div>
+                    <h2 className="text-3xl font-black text-white leading-tight mb-2">Parabéns!</h2>
+                    <p className="text-white/90 text-base mb-1">Está a participar na promoção</p>
+                    <p className="text-violet-300 font-black text-xl mb-4">DEPOSITE €10 → GANHE €5</p>
+                    <div className="bg-white/10 border border-white/20 rounded-2xl p-4 mb-6">
+                      <div className="text-4xl font-black text-violet-300 mb-1">€5</div>
+                      <div className="text-sm text-white/70">em Free Bets creditados na sua conta</div>
+                    </div>
+                    <p className="text-white/60 text-xs leading-relaxed mb-6">Complete apostas qualificadas com odds ≥ 1.50 para utilizar as suas free bets.</p>
+                    <Button onClick={() => setPromoNotif(null)} className="w-full bg-violet-500 hover:bg-violet-600 text-white font-black h-12">COMEÇAR A APOSTAR</Button>
+                  </div>
+                </>
+              )}
               {promoNotif.type === "freebets20" && (
                 <>
                   <img src="https://images.unsplash.com/photo-1521412644187-c49fa049e84d?q=80&w=800&auto=format&fit=crop" className="absolute inset-0 w-full h-full object-cover scale-105" alt="" />
@@ -6346,6 +6367,20 @@ function PromosPage({
       highlightLabel: "no 1.º depósito",
       terms: ["Bónus válido apenas no 1.º depósito.", "Rollover total de 5× sobre depósito + bónus.", "Odds mínimas qualificadas: 1.5.", "Prazo de utilização: 30 dias."],
       cta: "ATIVAR BÓNUS",
+      action: onDeposit,
+    },
+    {
+      id: "freebets10",
+      title: "DEPOSITE €10 E GANHE €5",
+      subtitle: "FREE BETS PARA COMEÇAR",
+      description: "Deposite apenas €10 e receba €5 em free bets para explorar as melhores apostas da plataforma.",
+      badge: "FREE BET",
+      image: "https://images.unsplash.com/photo-1553481187-be93c21490a9?q=80&w=1400&auto=format&fit=crop",
+      gradient: "from-violet-500/60 to-purple-800/60",
+      highlight: "€5",
+      highlightLabel: "em free bets",
+      terms: ["Depósito mínimo de €10.", "Free bets creditadas automaticamente.", "Odds mínimas qualificadas: 1.50.", "Free bets válidas por 7 dias."],
+      cta: "DEPOSITAR €10",
       action: onDeposit,
     },
     {
@@ -6490,13 +6525,15 @@ type PayMethod = "multibanco" | "mbway" | "card";
 type MbRef = { entity: string; reference: string; amount: string; expiresAt: string; orderId: string };
 
 function DepositWithdrawModal({
-  open, onClose, onSuccess, balance, token,
+  open, onClose, onSuccess, onPromoNotif, balance, token, kycStatus,
 }: {
   open: boolean;
   onClose: () => void;
   onSuccess: () => void;
+  onPromoNotif: (type: "freebets10" | "freebets20") => void;
   balance: number;
   token: string | null;
+  kycStatus: string;
 }) {
   const [payMethod, setPayMethod] = useState<PayMethod>("multibanco");
   const [depositAmount, setDepositAmount] = useState("");
@@ -6517,6 +6554,13 @@ function DepositWithdrawModal({
   const [wNif, setWNif] = useState("");
   const [wDone, setWDone] = useState(false);
 
+  // KYC form (shown before withdrawal when not submitted)
+  const [kycDocType, setKycDocType] = useState<"cc" | "passport">("cc");
+  const [kycDocNumber, setKycDocNumber] = useState("");
+  const [kycNif, setKycNif] = useState("");
+  const [kycDone, setKycDone] = useState(false);
+  const needsKyc = kycStatus === "not_submitted" && !kycDone;
+
   const amount = parseFloat(depositAmount.replace(",", "."));
   const amountValid = !isNaN(amount) && amount >= 10 && amount <= 5000;
   const promoHint = amountValid && amount >= 20;
@@ -6531,6 +6575,25 @@ function DepositWithdrawModal({
     setPayMethod(m);
     setMbRef(null);
     setMbwayDone(false);
+  }
+
+  async function handleKycSubmit() {
+    if (!kycDocNumber.trim() || kycDocNumber.trim().length < 5) { toast.error("Número de documento inválido."); return; }
+    if (kycNif && !/^\d{9}$/.test(kycNif)) { toast.error("NIF inválido. Deve ter 9 dígitos."); return; }
+    setLoading(true);
+    try {
+      const r = await fetch("/api/profile/kyc/submit", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ documentType: kycDocType, documentNumber: kycDocNumber.trim(), nif: kycNif }),
+      });
+      const data = await r.json() as { kycStatus?: string; error?: string };
+      if (!r.ok) { toast.error(data.error ?? "Erro ao submeter documentos."); return; }
+      setKycDone(true);
+      onSuccess();
+      toast.success("Documentos submetidos! A verificação será feita em 1-2 dias úteis.");
+    } catch { toast.error("Erro de ligação. Tente novamente."); }
+    finally { setLoading(false); }
   }
 
   async function handleWithdraw() {
@@ -6548,13 +6611,21 @@ function DepositWithdrawModal({
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify({ amount: wAmountNum, iban: cleanIban, holderName: wName.trim(), nif: wNif }),
       });
-      const data = await r.json() as { withdrawal?: { id: number }; error?: string };
-      if (!r.ok) { toast.error(data.error ?? "Erro ao submeter pedido."); return; }
+      const data = await r.json() as { withdrawal?: { id: number }; error?: string; code?: string };
+      if (!r.ok) {
+        toast.error(data.error ?? "Erro ao submeter pedido.");
+        return;
+      }
       setWDone(true);
       onSuccess();
       toast.success("Pedido de levantamento submetido! Processado em 2-5 dias úteis.");
     } catch { toast.error("Erro de ligação. Tente novamente."); }
     finally { setLoading(false); }
+  }
+
+  function triggerPromoNotif(depositAmount: number) {
+    if (depositAmount >= 20) onPromoNotif("freebets20");
+    else if (depositAmount >= 10) onPromoNotif("freebets10");
   }
 
   async function handleMultibanco() {
@@ -6571,6 +6642,7 @@ function DepositWithdrawModal({
       setMbRef({ entity: data.entity!, reference: data.reference!, amount: data.amount!, expiresAt: data.expiresAt!, orderId: data.orderId! });
       toast.success("Referência Multibanco gerada! Pague em qualquer ATM.");
       onSuccess();
+      triggerPromoNotif(amount);
     } catch { toast.error("Erro de ligação. Tente novamente."); }
     finally { setLoading(false); }
   }
@@ -6591,6 +6663,7 @@ function DepositWithdrawModal({
       setMbwayDone(true);
       toast.success("Pedido MB WAY enviado! Aceite na App MB WAY.");
       onSuccess();
+      triggerPromoNotif(amount);
     } catch { toast.error("Erro de ligação. Tente novamente."); }
     finally { setLoading(false); }
   }
@@ -6609,6 +6682,7 @@ function DepositWithdrawModal({
       toast.info("A redirecionar para pagamento seguro...");
       window.open(data.paymentUrl, "_blank");
       onSuccess();
+      triggerPromoNotif(amount);
       onClose();
     } catch { toast.error("Erro de ligação. Tente novamente."); }
     finally { setLoading(false); }
@@ -6657,6 +6731,69 @@ function DepositWithdrawModal({
                 <div className="font-black text-white text-lg">Pedido submetido!</div>
                 <div className="text-sm text-zinc-400 leading-relaxed">O seu pedido de levantamento está em processamento.<br />Prazo estimado: <strong className="text-white">2 a 5 dias úteis</strong>.</div>
                 <Button onClick={() => { setWDone(false); setWAmount(""); }} variant="outline" className="border-zinc-700 text-zinc-400 mt-2">Novo pedido</Button>
+              </div>
+            ) : needsKyc ? (
+              /* ── KYC VERIFICATION FORM ── */
+              <div className="space-y-4">
+                <div className="bg-amber-900/20 border border-amber-600/40 rounded-xl px-4 py-3 flex gap-3 items-start">
+                  <span className="text-xl mt-0.5">🪪</span>
+                  <div>
+                    <div className="text-sm font-bold text-amber-300 mb-1">Verificação de Identidade Necessária</div>
+                    <div className="text-xs text-amber-200/70 leading-relaxed">Para efectuar levantamentos é necessário verificar a sua identidade. Preencha os dados abaixo — serão analisados pela nossa equipa em 1–2 dias úteis.</div>
+                  </div>
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-xs text-zinc-400 font-semibold uppercase tracking-wider">Tipo de Documento</label>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      onClick={() => setKycDocType("cc")}
+                      className={`py-2.5 rounded-xl border text-xs font-bold transition-colors ${kycDocType === "cc" ? "border-red-500 bg-red-500/10 text-red-400" : "border-zinc-700 text-zinc-400"}`}
+                    >
+                      🪪 Cartão de Cidadão
+                    </button>
+                    <button
+                      onClick={() => setKycDocType("passport")}
+                      className={`py-2.5 rounded-xl border text-xs font-bold transition-colors ${kycDocType === "passport" ? "border-red-500 bg-red-500/10 text-red-400" : "border-zinc-700 text-zinc-400"}`}
+                    >
+                      📗 Passaporte
+                    </button>
+                  </div>
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-xs text-zinc-400 font-semibold uppercase tracking-wider">Número do Documento</label>
+                  <Input
+                    placeholder={kycDocType === "cc" ? "Ex: 12345678 9 ZX0" : "Ex: AB123456"}
+                    className="bg-zinc-900 border-zinc-700 text-white font-mono"
+                    value={kycDocNumber}
+                    onChange={e => setKycDocNumber(e.target.value)}
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-xs text-zinc-400 font-semibold uppercase tracking-wider">NIF (Número de Contribuinte)</label>
+                  <Input
+                    placeholder="123456789"
+                    maxLength={9}
+                    className="bg-zinc-900 border-zinc-700 text-white font-mono"
+                    value={kycNif}
+                    onChange={e => setKycNif(e.target.value.replace(/\D/g, ""))}
+                  />
+                </div>
+                <Button onClick={handleKycSubmit} disabled={loading} className="w-full bg-red-600 hover:bg-red-500 text-white font-black h-11">
+                  {loading ? <Loader2 className="animate-spin mr-2" size={16} /> : <span className="mr-2">🔒</span>}
+                  Submeter Documentos
+                </Button>
+              </div>
+            ) : kycStatus === "pending" && !kycDone ? (
+              /* ── KYC PENDING NOTICE ── */
+              <div className="space-y-4">
+                <div className="bg-yellow-900/20 border border-yellow-600/40 rounded-xl px-4 py-4 text-center space-y-2">
+                  <div className="text-3xl">⏳</div>
+                  <div className="text-sm font-bold text-yellow-300">Verificação em Análise</div>
+                  <div className="text-xs text-yellow-200/70 leading-relaxed">Os seus documentos estão a ser verificados pela nossa equipa. Poderá efectuar levantamentos assim que a verificação for concluída.</div>
+                </div>
+                <div className="bg-orange-900/20 border border-orange-800/40 rounded-xl px-4 py-3 text-xs text-orange-300 leading-relaxed">
+                  Mínimo de levantamento: <strong className="text-white">€20</strong>. Processado por transferência bancária em 2–5 dias úteis.
+                </div>
               </div>
             ) : (
               <>
@@ -6754,11 +6891,11 @@ function DepositWithdrawModal({
               />
             </div>
           </div>
-          {promoHint && (
-            <div className="bg-emerald-900/30 border border-emerald-600/30 rounded-xl p-2.5 flex items-center gap-2.5 text-xs">
+          {amountValid && amount >= 10 && (
+            <div className={`rounded-xl p-2.5 flex items-center gap-2.5 text-xs ${amount >= 20 ? "bg-emerald-900/30 border border-emerald-600/30" : "bg-violet-900/30 border border-violet-600/30"}`}>
               <span className="text-lg">🎁</span>
-              <span className="text-emerald-300 font-semibold">
-                {amount >= 100 ? "Qualifica para 100% Bónus de Boas-Vindas!" : "Qualifica para €10 em Free Bets!"}
+              <span className={`font-semibold ${amount >= 20 ? "text-emerald-300" : "text-violet-300"}`}>
+                {amount >= 100 ? "Qualifica para 100% Bónus de Boas-Vindas!" : amount >= 20 ? "Qualifica para €10 em Free Bets!" : "Qualifica para €5 em Free Bets!"}
               </span>
             </div>
           )}

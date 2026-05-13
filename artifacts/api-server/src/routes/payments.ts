@@ -1,6 +1,6 @@
 import { Router, type IRouter, type Request, type Response } from "express";
 import { db, usersTable, paymentsTable } from "@workspace/db";
-import { eq, sql } from "drizzle-orm";
+import { eq, sql, count } from "drizzle-orm";
 import { authMiddleware, type AuthRequest } from "../middlewares/auth";
 import { logger } from "../lib/logger";
 import { sendDepositConfirmed } from "../lib/mailer";
@@ -23,8 +23,8 @@ function getBaseUrl(req: Request): string {
 // ─── POST /api/payments/multibanco ──────────────────────────────────────────
 router.post("/multibanco", authMiddleware, async (req: AuthRequest, res: Response): Promise<void> => {
   const { amount } = req.body as { amount?: number };
-  if (!amount || typeof amount !== "number" || amount < 5 || amount > 5000) {
-    res.status(400).json({ error: "Valor inválido. Mínimo €5, máximo €5000." });
+  if (!amount || typeof amount !== "number" || amount < 10 || amount > 5000) {
+    res.status(400).json({ error: "Valor inválido. Mínimo €10, máximo €5000." });
     return;
   }
 
@@ -90,8 +90,8 @@ router.post("/multibanco", authMiddleware, async (req: AuthRequest, res: Respons
 // ─── POST /api/payments/mbway ────────────────────────────────────────────────
 router.post("/mbway", authMiddleware, async (req: AuthRequest, res: Response): Promise<void> => {
   const { amount, phone } = req.body as { amount?: number; phone?: string };
-  if (!amount || typeof amount !== "number" || amount < 5 || amount > 5000) {
-    res.status(400).json({ error: "Valor inválido. Mínimo €5, máximo €5000." });
+  if (!amount || typeof amount !== "number" || amount < 10 || amount > 5000) {
+    res.status(400).json({ error: "Valor inválido. Mínimo €10, máximo €5000." });
     return;
   }
   if (!phone || phone.replace(/\s/g, "").length < 9) {
@@ -139,7 +139,7 @@ router.post("/mbway", authMiddleware, async (req: AuthRequest, res: Response): P
       method: "mbway",
       status: "pending",
       requestId: data.RequestId,
-      expiresAt: new Date(Date.now() + 4 * 60 * 1000), // 4 minutes
+      expiresAt: new Date(Date.now() + 4 * 60 * 1000),
     });
 
     res.json({ orderId, requestId: data.RequestId, message: data.Message });
@@ -152,8 +152,8 @@ router.post("/mbway", authMiddleware, async (req: AuthRequest, res: Response): P
 // ─── POST /api/payments/card ─────────────────────────────────────────────────
 router.post("/card", authMiddleware, async (req: AuthRequest, res: Response): Promise<void> => {
   const { amount } = req.body as { amount?: number };
-  if (!amount || typeof amount !== "number" || amount < 5 || amount > 5000) {
-    res.status(400).json({ error: "Valor inválido. Mínimo €5, máximo €5000." });
+  if (!amount || typeof amount !== "number" || amount < 10 || amount > 5000) {
+    res.status(400).json({ error: "Valor inválido. Mínimo €10, máximo €5000." });
     return;
   }
 
@@ -206,6 +206,48 @@ router.post("/card", authMiddleware, async (req: AuthRequest, res: Response): Pr
   }
 });
 
+// ─── Freebet grant helper ────────────────────────────────────────────────────
+async function grantFirstDepositFreebet(userId: number, depositAmount: number): Promise<void> {
+  try {
+    const [user] = await db
+      .select({ firstDepositGranted: usersTable.firstDepositGranted })
+      .from(usersTable)
+      .where(eq(usersTable.id, userId))
+      .limit(1);
+
+    if (!user || user.firstDepositGranted !== "none") return;
+
+    const [{ completedCount }] = await db
+      .select({ completedCount: count() })
+      .from(paymentsTable)
+      .where(eq(paymentsTable.userId, userId));
+
+    if (Number(completedCount) !== 1) return;
+
+    let freebetAmount: string | null = null;
+    let grantedLevel: string | null = null;
+
+    if (depositAmount >= 20) {
+      freebetAmount = "10.00";
+      grantedLevel = "20";
+    } else if (depositAmount >= 10) {
+      freebetAmount = "5.00";
+      grantedLevel = "10";
+    }
+
+    if (!freebetAmount || !grantedLevel) return;
+
+    await db.update(usersTable).set({
+      freebetBalance: sql`${usersTable.freebetBalance} + ${freebetAmount}`,
+      firstDepositGranted: grantedLevel,
+    }).where(eq(usersTable.id, userId));
+
+    logger.info({ userId, freebetAmount, grantedLevel }, "First deposit freebet granted");
+  } catch (err) {
+    logger.error({ err, userId }, "Error granting first deposit freebet");
+  }
+}
+
 // ─── GET /api/payments/callback ──────────────────────────────────────────────
 // Called by ifthenpay when a payment is confirmed (Multibanco & MB WAY)
 router.get("/callback", async (req: Request, res: Response): Promise<void> => {
@@ -229,7 +271,6 @@ router.get("/callback", async (req: Request, res: Response): Promise<void> => {
       return;
     }
 
-    // Validate amount matches (± 0.01 tolerance)
     const paidAmount = parseFloat(amount || "0");
     const expectedAmount = parseFloat(payment.amount);
     if (Math.abs(paidAmount - expectedAmount) > 0.01) {
@@ -246,6 +287,9 @@ router.get("/callback", async (req: Request, res: Response): Promise<void> => {
     });
 
     logger.info({ orderId, userId: payment.userId, amount: payment.amount }, "Payment confirmed and balance credited");
+
+    // Grant freebet if this is the first deposit
+    void grantFirstDepositFreebet(payment.userId, parseFloat(payment.amount));
 
     // Fire-and-forget deposit confirmation email
     db.select({ email: usersTable.email, name: usersTable.name })
@@ -267,7 +311,6 @@ router.get("/callback", async (req: Request, res: Response): Promise<void> => {
 });
 
 // ─── GET /api/payments/card-return ───────────────────────────────────────────
-// Redirect target after card payment (success / error / cancel)
 router.get("/card-return", async (req: Request, res: Response): Promise<void> => {
   const { status, orderId } = req.query as Record<string, string>;
 
@@ -281,6 +324,9 @@ router.get("/card-return", async (req: Request, res: Response): Promise<void> =>
             balance: sql`${usersTable.balance} + ${payment.amount}`,
           }).where(eq(usersTable.id, payment.userId));
         });
+
+        // Grant freebet if this is the first deposit
+        void grantFirstDepositFreebet(payment.userId, parseFloat(payment.amount));
 
         // Fire-and-forget deposit confirmation email
         db.select({ email: usersTable.email, name: usersTable.name })
@@ -299,32 +345,9 @@ router.get("/card-return", async (req: Request, res: Response): Promise<void> =>
     }
   }
 
-  // Redirect back to the app
-  const base = process.env.REPLIT_DOMAINS
-    ? `https://${process.env.REPLIT_DOMAINS.split(",")[0]}`
-    : "/";
-  res.redirect(`${base}/?payment=${status}`);
-});
-
-// ─── GET /api/payments/status/:orderId ───────────────────────────────────────
-router.get("/status/:orderId", authMiddleware, async (req: AuthRequest, res: Response): Promise<void> => {
-  const orderId = String(req.params["orderId"]);
-  try {
-    const [payment] = await db.select({
-      status: paymentsTable.status,
-      amount: paymentsTable.amount,
-      method: paymentsTable.method,
-    }).from(paymentsTable).where(eq(paymentsTable.orderId, orderId)).limit(1);
-
-    if (!payment) {
-      res.status(404).json({ error: "Pagamento não encontrado" });
-      return;
-    }
-    res.json(payment);
-  } catch (err) {
-    logger.error({ err }, "Payment status check error");
-    res.status(500).json({ error: "Erro interno" });
-  }
+  const domains = process.env.REPLIT_DOMAINS;
+  const base = domains ? `https://${domains.split(",")[0]}` : "/";
+  res.redirect(`${base}/?payment=${status ?? "unknown"}`);
 });
 
 export default router;

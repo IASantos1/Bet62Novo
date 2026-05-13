@@ -28,6 +28,7 @@ type AdminUser = {
   id: number; name: string; email: string; balance: string; freebetBalance: string;
   kycStatus: string | null; selfExcludedUntil: string | null; banned: boolean;
   createdAt: string; betCount: number; totalStaked: number;
+  kycDocumentType?: string | null; kycDocumentNumber?: string | null; kycSubmittedAt?: string | null;
 };
 
 type AdminBet = {
@@ -1684,6 +1685,36 @@ export default function AdminPage() {
                       <div className="font-bold text-white">{detailModal.payments.filter(p => p.status === "completed").length}</div>
                     </div>
                   </div>
+
+                  {/* KYC Documents section */}
+                  {detailModal.user.kycDocumentType && (
+                    <div className="p-5 border-b border-zinc-800 shrink-0">
+                      <div className="flex items-center justify-between mb-3">
+                        <div className="text-xs font-bold text-zinc-400 uppercase tracking-wider flex items-center gap-2">
+                          <span>🪪</span> Documentos KYC
+                        </div>
+                        <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${KYC_LABELS[detailModal.user.kycStatus || "not_submitted"]?.cls}`}>
+                          {KYC_LABELS[detailModal.user.kycStatus || "not_submitted"]?.label}
+                        </span>
+                      </div>
+                      <div className="grid grid-cols-3 gap-3">
+                        <div className="bg-zinc-800 rounded-lg p-3">
+                          <div className="text-xs text-zinc-500 mb-1">Tipo</div>
+                          <div className="font-semibold text-white text-sm">
+                            {detailModal.user.kycDocumentType === "cc" ? "Cartão de Cidadão" : "Passaporte"}
+                          </div>
+                        </div>
+                        <div className="bg-zinc-800 rounded-lg p-3">
+                          <div className="text-xs text-zinc-500 mb-1">Nº Documento</div>
+                          <div className="font-mono font-semibold text-white text-sm">{detailModal.user.kycDocumentNumber || "—"}</div>
+                        </div>
+                        <div className="bg-zinc-800 rounded-lg p-3">
+                          <div className="text-xs text-zinc-500 mb-1">Submetido</div>
+                          <div className="font-semibold text-white text-xs">{detailModal.user.kycSubmittedAt ? fmtDate(detailModal.user.kycSubmittedAt) : "—"}</div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
 
                   <div className="flex border-b border-zinc-800 shrink-0">
                     {(["bets", "payments", "withdrawals"] as const).map(t => (
