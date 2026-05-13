@@ -1399,6 +1399,29 @@ export default function Home() {
       .finally(() => setStandingsLoading(false));
   }, [matchViewTab, expandedMatch?.id]);
 
+  // Handle ?payment= query param on return from card payment
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const paymentStatus = params.get("payment");
+    if (!paymentStatus) return;
+    window.history.replaceState({}, "", window.location.pathname);
+    if (paymentStatus === "success") {
+      auth.refreshUser();
+      toast.success("Depósito por cartão confirmado! O seu saldo foi actualizado.");
+    } else if (paymentStatus === "error") {
+      toast.error("Pagamento por cartão não foi concluído. Tente novamente.");
+    } else if (paymentStatus === "cancel") {
+      toast.info("Pagamento por cartão cancelado.");
+    }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Periodic balance refresh every 60s for logged-in users (catches server-side credits)
+  useEffect(() => {
+    if (!auth.token) return;
+    const id = setInterval(() => { auth.refreshUser(); }, 60000);
+    return () => clearInterval(id);
+  }, [auth.token]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // Fetch platform stats on mount
   useEffect(() => {
     fetch("/api/stats")
@@ -6780,6 +6803,8 @@ function DepositWithdrawModal({
   // Per-method result states
   const [mbRef, setMbRef] = useState<MbRef | null>(null);
   const [mbwayDone, setMbwayDone] = useState(false);
+  const [mbwayOrderId, setMbwayOrderId] = useState<string | null>(null);
+  const [mbwayConfirmed, setMbwayConfirmed] = useState(false);
 
   // Main tab: deposit vs withdraw
   const [mainTab, setMainTab] = useState<"deposit" | "withdraw">("deposit");
@@ -6808,10 +6833,57 @@ function DepositWithdrawModal({
     { id: "card",       label: "Cartão",     logo: "/logo-visa.png", logo2: "/logo-mastercard.png" },
   ];
 
+  // Poll MB WAY payment confirmation (every 5s, up to 4 minutes)
+  useEffect(() => {
+    if (!mbwayOrderId || mbwayConfirmed) return;
+    const poll = async () => {
+      try {
+        const r = await fetch(`/api/payments/status/${mbwayOrderId}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (!r.ok) return;
+        const data = await r.json() as { status: string; amount: string };
+        if (data.status === "completed") {
+          setMbwayConfirmed(true);
+          setMbwayOrderId(null);
+          toast.success(`Pagamento MB WAY confirmado! € ${parseFloat(data.amount).toFixed(2)} adicionado ao seu saldo.`);
+          onSuccess();
+        }
+      } catch { /* non-critical */ }
+    };
+    const id = setInterval(poll, 5000);
+    const timeout = setTimeout(() => clearInterval(id), 4 * 60 * 1000);
+    return () => { clearInterval(id); clearTimeout(timeout); };
+  }, [mbwayOrderId, mbwayConfirmed, token, onSuccess]);
+
+  // Poll Multibanco payment confirmation (every 15s while reference is displayed)
+  useEffect(() => {
+    if (!mbRef?.orderId) return;
+    const poll = async () => {
+      try {
+        const r = await fetch(`/api/payments/status/${mbRef.orderId}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (!r.ok) return;
+        const data = await r.json() as { status: string; amount: string };
+        if (data.status === "completed") {
+          toast.success(`Pagamento Multibanco confirmado! € ${parseFloat(data.amount).toFixed(2)} adicionado ao seu saldo.`);
+          onSuccess();
+          setMbRef(null);
+          onClose();
+        }
+      } catch { /* non-critical */ }
+    };
+    const id = setInterval(poll, 15000);
+    return () => clearInterval(id);
+  }, [mbRef?.orderId, token, onSuccess, onClose]);
+
   function resetMethod(m: PayMethod) {
     setPayMethod(m);
     setMbRef(null);
     setMbwayDone(false);
+    setMbwayOrderId(null);
+    setMbwayConfirmed(false);
   }
 
   async function handleKycSubmit() {
@@ -6898,8 +6970,8 @@ function DepositWithdrawModal({
       const data = await r.json() as { orderId?: string; requestId?: string; error?: string };
       if (!r.ok) { toast.error(data.error ?? "Erro ao enviar pedido MB WAY."); return; }
       setMbwayDone(true);
-      toast.success("Pedido MB WAY enviado! Aceite na App MB WAY.");
-      onSuccess();
+      if (data.orderId) setMbwayOrderId(data.orderId);
+      toast.success("Pedido MB WAY enviado! Aceite na App MB WAY. O saldo será actualizado automaticamente.");
       triggerPromoNotif(amount);
     } catch { toast.error("Erro de ligação. Tente novamente."); }
     finally { setLoading(false); }

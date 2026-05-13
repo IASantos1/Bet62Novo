@@ -248,6 +248,32 @@ async function grantFirstDepositFreebet(userId: number, depositAmount: number): 
   }
 }
 
+// ─── GET /api/payments/status/:orderId ───────────────────────────────────────
+// Frontend polls this to detect when payment is confirmed and balance was credited
+router.get("/status/:orderId", authMiddleware, async (req: AuthRequest, res: Response): Promise<void> => {
+  const orderId = String(req.params["orderId"]);
+  try {
+    const [payment] = await db
+      .select({
+        status: paymentsTable.status,
+        amount: paymentsTable.amount,
+        method: paymentsTable.method,
+        userId: paymentsTable.userId,
+      })
+      .from(paymentsTable)
+      .where(eq(paymentsTable.orderId, orderId))
+      .limit(1);
+
+    if (!payment) { res.status(404).json({ error: "Ordem não encontrada" }); return; }
+    if (payment.userId !== req.user!.id) { res.status(403).json({ error: "Proibido" }); return; }
+
+    res.json({ status: payment.status, amount: payment.amount, method: payment.method });
+  } catch (err) {
+    logger.error({ err, orderId }, "Payment status check error");
+    res.status(500).json({ error: "Erro interno" });
+  }
+});
+
 // ─── GET /api/payments/callback ──────────────────────────────────────────────
 // Called by ifthenpay when a payment is confirmed (Multibanco & MB WAY)
 router.get("/callback", async (req: Request, res: Response): Promise<void> => {

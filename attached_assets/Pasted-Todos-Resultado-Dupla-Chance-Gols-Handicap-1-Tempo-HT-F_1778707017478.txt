@@ -1,0 +1,279 @@
+Todos
+Resultado
+Dupla Chance
+Gols
+Handicap
+1º Tempo
+HT/FT
+Placar Exato
+Escanteios
+Cartões
+Asiático
+
+Resultado Final
+
+Alaves
+1.72
+
+Empate
+7.35
+
+Barcelona
+2.90
+
+Dupla Chance
+
+Alaves ou X
+3.19
+
+Barcelona ou X
+2.82
+
+1 ou 2
+2.55
+
+Ambas as Equipas Marcam
+
+Sim
+1.50
+
+Não
+2.50
+
+Total de Gols — 1.5
+
+Mais de 1.5
+1.18
+
+Menos de 1.5
+4.75
+
+Total de Gols — 2.5
+
+Mais de 2.5
+1.57
+
+Menos de 2.5
+2.35
+
+Total de Gols — 3.5
+
+Mais de 3.5
+2.40
+
+Menos de 3.5
+1.55
+
+Total de Gols — 4.5
+
+Mais de 4.5
+7.11
+
+Menos de 4.5
+1.09
+
+Total de Gols — 5.5
+
+Mais de 5.5
+17.35
+
+Menos de 5.5
+1.01
+
+Total de Gols — 6.5
+
+Mais de 6.5
+47.17
+
+Menos de 6.5
+1.01
+
+Handicap Europeu — Alaves
+
+Alaves −1
+5.34
+
+Alaves −1.5
+6.59
+
+Handicap Europeu — Barcelona
+
+Barcelona +1
+1.13
+
+Barcelona +1.5
+1.09
+
+Resultado — 1º Tempo
+
+Alaves
+3.47
+
+Empate
+2.21
+
+Barcelona
+2.94
+
+Intervalo / Final — Alaves vence
+
+1 / 1
+4.66
+
+1 / X
+17.32
+
+1 / 2
+38.16
+
+Empate ao Intervalo
+
+X / 1
+7.43
+
+X / X
+5.74
+
+X / 2
+6.24
+
+Intervalo / Final — Barcelona vence
+
+2 / 1
+44.72
+
+2 / X
+17.32
+
+2 / 2
+3.68
+Selecione o marcador exato ao final da partida.
+
+
+1-1
+6.03
+
+1-2
+8.50
+
+1-0
+8.55
+
+2-1
+9.64
+
+2-2
+13.58
+
+2-0
+13.67
+
+1-3
+17.97
+
+3-1
+23.11
+
+2-3
+28.72
+
+3-2
+32.57
+
+Outro
+197.52
+
+Total de Escanteios — 8.5
+
+Acima de 8.5
+1.14
+
+Abaixo de 8.5
+5.53
+
+Total de Escanteios — 9.5
+
+Acima de 9.5
+1.28
+
+Abaixo de 9.5
+3.59
+
+Total de Escanteios — 10.5
+
+Acima de 10.5
+1.50
+
+Abaixo de 10.5
+2.54
+
+Total de Cartões — 3.5
+
+Acima de 3.5 cartões
+1.60
+
+Abaixo de 3.5 cartões
+2.30
+
+Total de Cartões — 4.5
+
+Acima de 4.5 cartões
+2.39
+
+Abaixo de 4.5 cartões
+1.56
+
+Draw No Bet (Empate Anulado)
+
+Alaves
+2.13
+
+Barcelona
+1.72
+
+Handicap Asiático — Linha 0
+
+Alaves 0
+2.87
+
+Barcelona +0
+1.43
+
+Total Asiático — 0.5
+
+Mais de 0.5
+1.02
+
+Menos de 0.5
+13.75
+
+Total Asiático — 2.25
+
+Mais de 2.25
+1.53
+
+Menos de 2.25
+2.52
+
+Total Asiático — 2.75
+
+Mais de 2.75
+2.45
+
+Menos de 2.75
+1.56
+
+Total Asiático — 4.5
+
+Mais de 4.5
+7.11
+
+Menos de 4.5
+1.09
+
+Total Asiático — 5.5
+
+Mais de 5.5
+17.35
+
+Menos de 5.5
