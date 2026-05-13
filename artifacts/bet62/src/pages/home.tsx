@@ -207,6 +207,24 @@ const TEAM_BANNERS: Record<string, string> = {
   "Austin FC": "/banners/austin-fc.jpg",
   "FC Cincinnati": "/banners/fc-cincinnati.jpg",
   "Columbus Crew": "/banners/columbus-crew.jpg",
+  // ── Liga MX ──
+  "Cruz Azul": "/banners/file_1778704794042_1778715064131.jpeg",
+  "Club Cruz Azul": "/banners/file_1778704794042_1778715064131.jpeg",
+  "Guadalajara": "/banners/file_1778704789962_1778715064131.jpeg",
+  "Chivas": "/banners/file_1778704789962_1778715064131.jpeg",
+  "Club Guadalajara": "/banners/file_1778704789962_1778715064131.jpeg",
+  "Chivas Guadalajara": "/banners/file_1778704789962_1778715064131.jpeg",
+  "León": "/banners/file_1778704817279_1778715064131.jpeg",
+  "Leon": "/banners/file_1778704817279_1778715064131.jpeg",
+  "Club León": "/banners/file_1778704817279_1778715064131.jpeg",
+  "Club Leon": "/banners/file_1778704817279_1778715064131.jpeg",
+  "Tigres UANL": "/banners/file_1778704805773_1778715064131.jpeg",
+  "Tigres U.A.N.L.": "/banners/file_1778704805773_1778715064131.jpeg",
+  "Tigres": "/banners/file_1778704805773_1778715064131.jpeg",
+  "Pachuca": "/banners/file_1778704825793_1778715064131.jpeg",
+  "C.F. Pachuca": "/banners/file_1778704825793_1778715064131.jpeg",
+  "CF Pachuca": "/banners/file_1778704825793_1778715064131.jpeg",
+  "Tuzos": "/banners/file_1778704825793_1778715064131.jpeg",
 };
 
 const LEAGUE_FLAGS: Record<string, string> = {
@@ -298,6 +316,24 @@ const TEAM_COUNTRY: Record<string, string> = {
   "Antalyaspor": "turkey", "Alanyaspor": "turkey", "Gaziantep": "turkey",
   "Gaziantep FK": "turkey", "Ankaragücü": "turkey", "Ankaragucu": "turkey",
   "Bodrumspor": "turkey", "MKE Ankaragücü": "turkey",
+  // Liga MX
+  "Cruz Azul": "mexico", "Club Cruz Azul": "mexico",
+  "Guadalajara": "mexico", "Chivas": "mexico", "Club Guadalajara": "mexico", "Chivas Guadalajara": "mexico",
+  "León": "mexico", "Leon": "mexico", "Club León": "mexico", "Club Leon": "mexico",
+  "Tigres UANL": "mexico", "Tigres U.A.N.L.": "mexico", "Tigres": "mexico",
+  "Pachuca": "mexico", "C.F. Pachuca": "mexico", "CF Pachuca": "mexico", "Tuzos": "mexico",
+  "América": "mexico", "America": "mexico", "Club America": "mexico", "Club América": "mexico",
+  "Monterrey": "mexico", "C.F. Monterrey": "mexico", "CF Monterrey": "mexico", "Rayados": "mexico",
+  "Pumas UNAM": "mexico", "Pumas": "mexico", "Club Universidad Nacional": "mexico",
+  "Necaxa": "mexico", "Club Necaxa": "mexico",
+  "Atlas": "mexico", "Atlas FC": "mexico",
+  "Santos Laguna": "mexico", "Club Santos Laguna": "mexico",
+  "Toluca": "mexico", "Deportivo Toluca": "mexico",
+  "Tijuana": "mexico", "Club Tijuana": "mexico", "Xolos": "mexico",
+  "Puebla": "mexico", "Club Puebla": "mexico",
+  "Querétaro": "mexico", "Queretaro": "mexico", "FC Querétaro": "mexico",
+  "Juárez": "mexico", "Juarez": "mexico", "FC Juárez": "mexico",
+  "Mazatlán": "mexico", "Mazatlan": "mexico", "Mazatlán FC": "mexico",
 };
 
 function getTeamBanner(teamName: string, country?: string): string | undefined {
