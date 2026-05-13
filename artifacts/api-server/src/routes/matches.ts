@@ -1915,6 +1915,96 @@ function scaleAdvancedMarkets(m: AdvancedMarkets, factor: number): AdvancedMarke
   };
 }
 
+// ─── Tiered Market Drift Engine ─────────────────────────────────────────────
+// Professional sportsbooks update each market family at different speeds.
+// Tier 1 (1X2, Over/Under, Handicap)      : fast oscillation, score-sensitive
+// Tier 2 (HalfTime, HT/FT, CorrectScore)  : medium oscillation
+// Tier 3 (Corners, Cards)                 : slow independent drift
+function applyTieredMarketDrift(state: LiveMatchState, now: number): LiveMatchState {
+  const { minute = 0, homeScore = 0, awayScore = 0 } = state;
+  const base = state._baseOdds ?? state.odds;
+  const phase = (state._driftPhase ?? 0) + 1;
+  const t = now / 1000;
+  const diff = homeScore - awayScore;
+  const totalGoals = homeScore + awayScore;
+  const timePressure = Math.max(0, (minute - 55) / 60) * 0.04;
+  const r = (n: number) => Math.round(n * 100) / 100;
+
+  // --- Main 1X2 drift (anchored to _baseOdds so it doesn't drift unboundedly) ---
+  const driftH = Math.sin(t * 0.31 + phase * 0.7) * 0.018 + Math.cos(t * 0.17) * 0.009;
+  const driftD = Math.cos(t * 0.23 + phase * 0.5) * 0.014 + Math.sin(t * 0.11) * 0.007;
+  const driftA = Math.sin(t * 0.27 + phase * 0.9) * 0.018 + Math.cos(t * 0.19) * 0.009;
+  const newOdds = {
+    home: Math.max(1.04, Math.min(25, r(base.home * (1 + driftH - (diff > 0 ? timePressure * 0.4 : timePressure * 0.6))))),
+    draw: base.draw > 0 ? Math.max(2.2, Math.min(8, r(base.draw * (1 + driftD + timePressure * 0.3)))) : 0,
+    away: Math.max(1.04, Math.min(25, r(base.away * (1 + driftA + (diff > 0 ? timePressure * 0.6 : timePressure * 0.4))))),
+  };
+
+  // --- Tier 1: Fast oscillation — 1X2 followers + score-sensitive markets ---
+  const tier1 = Math.sin(t * 0.29 + phase * 0.8) * 0.013 + Math.cos(t * 0.13 + phase * 0.4) * 0.006;
+  const s1 = (n: number, extra = 0) => n <= 0 ? n : r(Math.max(1.01, n * (1 + tier1 + extra)));
+
+  // Over/Under: as goals pile up, Over odds drift down, Under drift up
+  const goalBias = totalGoals * 0.015;
+  const sOver  = (n: number, w = 1) => n <= 0 ? n : r(Math.max(1.01, n * (1 + (tier1 - goalBias * 0.4) * w)));
+  const sUnder = (n: number, w = 1) => n <= 0 ? n : r(Math.max(1.01, n * (1 + (tier1 + goalBias * 0.6) * w)));
+
+  // Handicap: favoured team's handicap drifts cheaper as they lead
+  const hcBias = diff * 0.004;
+  const sHcH = (n: number) => n <= 0 ? n : r(Math.max(1.01, n * (1 + tier1 - hcBias)));
+  const sHcA = (n: number) => n <= 0 ? n : r(Math.max(1.01, n * (1 + tier1 + hcBias)));
+
+  // --- Tier 2: Medium oscillation — half-time, HT/FT, correct score, Asian lines ---
+  const tier2 = Math.sin(t * 0.11 + phase * 0.35) * 0.007 + Math.cos(t * 0.07 + phase * 0.2) * 0.003;
+  const s2 = (n: number) => n <= 0 ? n : r(Math.max(1.01, n * (1 + tier2)));
+
+  // --- Tier 3: Very slow drift — corners, cards (independent of 1X2 result) ---
+  const tier3 = Math.sin(t * 0.04 + phase * 0.15) * 0.003 + Math.cos(t * 0.025 + phase * 0.1) * 0.0015;
+  const s3 = (n: number) => n <= 0 ? n : r(Math.max(1.01, n * (1 + tier3)));
+
+  const m = state.markets;
+  const newMarkets: AdvancedMarkets = {
+    ...m,
+    // Tier 1
+    doubleChance:  { homeOrDraw: s1(m.doubleChance.homeOrDraw), awayOrDraw: s1(m.doubleChance.awayOrDraw), homeOrAway: s1(m.doubleChance.homeOrAway) },
+    bothTeamsScore:{ yes: s1(m.bothTeamsScore.yes), no: s1(m.bothTeamsScore.no) },
+    totalGoals: {
+      over05: sOver(m.totalGoals.over05,  0.3), under05: sUnder(m.totalGoals.under05,  0.3),
+      over15: sOver(m.totalGoals.over15,  0.6), under15: sUnder(m.totalGoals.under15,  0.6),
+      over25: sOver(m.totalGoals.over25,  1.0), under25: sUnder(m.totalGoals.under25,  1.0),
+      over35: sOver(m.totalGoals.over35,  1.4), under35: sUnder(m.totalGoals.under35,  1.4),
+      over45: sOver(m.totalGoals.over45,  1.8), under45: sUnder(m.totalGoals.under45,  1.8),
+      over55: sOver(m.totalGoals.over55,  2.2), under55: sUnder(m.totalGoals.under55,  2.2),
+      over65: sOver(m.totalGoals.over65,  3.0), under65: sUnder(m.totalGoals.under65,  3.0),
+    },
+    handicap: {
+      homeMinusOne:     sHcH(m.handicap.homeMinusOne),
+      awayPlusOne:      sHcA(m.handicap.awayPlusOne),
+      homeMinusOneHalf: sHcH(m.handicap.homeMinusOneHalf),
+      awayPlusOneHalf:  sHcA(m.handicap.awayPlusOneHalf),
+    },
+    drawNoBet:    m.drawNoBet    ? { home: s1(m.drawNoBet.home),    away: s1(m.drawNoBet.away) }    : undefined,
+    asianTotals:  m.asianTotals  ? {
+      o05: sOver(m.asianTotals.o05, 0.3), u05: sUnder(m.asianTotals.u05, 0.3),
+      o45: sOver(m.asianTotals.o45, 1.8), u45: sUnder(m.asianTotals.u45, 1.8),
+      o55: sOver(m.asianTotals.o55, 2.2), u55: sUnder(m.asianTotals.u55, 2.2),
+      o225:sOver(m.asianTotals.o225,0.9), u225:sUnder(m.asianTotals.u225,0.9),
+      o275:sOver(m.asianTotals.o275,1.1), u275:sUnder(m.asianTotals.u275,1.1),
+    } : undefined,
+    // Tier 2
+    halfTime:     m.halfTime     ? { home: s2(m.halfTime.home), draw: s2(m.halfTime.draw), away: s2(m.halfTime.away) } : m.halfTime,
+    firstGoal:    m.firstGoal    ? { home: s2(m.firstGoal.home), noGoal: s2(m.firstGoal.noGoal), away: s2(m.firstGoal.away) } : m.firstGoal,
+    htft:         m.htft         ? { hh: s2(m.htft.hh), hd: s2(m.htft.hd), ha: s2(m.htft.ha), dh: s2(m.htft.dh), dd: s2(m.htft.dd), da: s2(m.htft.da), ah: s2(m.htft.ah), ad: s2(m.htft.ad), aa: s2(m.htft.aa) } : undefined,
+    correctScore: m.correctScore ? Object.fromEntries(Object.entries(m.correctScore).map(([k, v]) => [k, s2(v)])) : undefined,
+    asianHandicap:m.asianHandicap? { ...m.asianHandicap, home: s2(m.asianHandicap.home), away: s2(m.asianHandicap.away) } : undefined,
+    // Tier 3
+    corners:      m.corners      ? { o85: s3(m.corners.o85), u85: s3(m.corners.u85), o95: s3(m.corners.o95), u95: s3(m.corners.u95), o105: s3(m.corners.o105), u105: s3(m.corners.u105) } : undefined,
+    cards:        m.cards        ? { o35: s3(m.cards.o35), u35: s3(m.cards.u35), o45: s3(m.cards.o45), u45: s3(m.cards.u45) } : undefined,
+  };
+
+  return { ...state, odds: newOdds, markets: newMarkets, _driftPhase: phase };
+}
+
 // Remove/zero out market lines that are already settled or impossible given the current live score
 function filterLiveMarkets(markets: AdvancedMarkets, homeScore: number, awayScore: number): AdvancedMarkets {
   const m: AdvancedMarkets = { ...markets, totalGoals: { ...markets.totalGoals } };
@@ -2583,11 +2673,9 @@ async function buildLiveMatches(): Promise<LiveMatchState[]> {
       let hasRealOdds = true; // Always show odds — use model when real unavailable
 
       if (existing && existing.homeScore === homeScore && existing.awayScore === awayScore) {
-        // Score unchanged — apply live odds drift (simulate market movement)
-        const base = existing._baseOdds ?? existing.odds;
+        // Score unchanged — background drift timer handles market updates every 2s.
+        // Here we only update the minute and clean up expired suspensions.
         const now = Date.now();
-        const phase = (existing._driftPhase ?? 0) + 1;
-        // Clean expired suspensions
         if (existing.marketSuspension) {
           const active = Object.fromEntries(
             Object.entries(existing.marketSuspension).filter(([, ts]) => ts > now)
@@ -2595,36 +2683,10 @@ async function buildLiveMatches(): Promise<LiveMatchState[]> {
           matchMarketSuspension = Object.keys(active).length > 0 ? active : undefined;
         }
 
-        // Time-based micro-drift: oscillates odds naturally
-        // Uses two sine waves at different frequencies to create organic movement
-        const t = now / 1000;
-        const driftH = Math.sin(t * 0.31 + phase * 0.7) * 0.018 + Math.cos(t * 0.17) * 0.009;
-        const driftD = Math.cos(t * 0.23 + phase * 0.5) * 0.014 + Math.sin(t * 0.11) * 0.007;
-        const driftA = Math.sin(t * 0.27 + phase * 0.9) * 0.018 + Math.cos(t * 0.19) * 0.009;
-
-        // Minute pressure: after 60' odds compress toward extremes
-        const timePressure = Math.max(0, (minute - 55) / 60) * 0.04;
-        const diff = homeScore - awayScore;
-
-        const r = (n: number) => Math.round(n * 100) / 100;
-        matchOdds = {
-          home: Math.max(1.04, Math.min(25, r(base.home * (1 + driftH - (diff > 0 ? timePressure * 0.4 : timePressure * 0.6))))),
-          draw: base.draw > 0 ? Math.max(2.2, Math.min(8, r(base.draw * (1 + driftD + timePressure * 0.3)))) : 0,
-          away: Math.max(1.04, Math.min(25, r(base.away * (1 + driftA + (diff > 0 ? timePressure * 0.6 : timePressure * 0.4))))),
-        };
-
-        // Drift advanced markets proportionally to the main odds movement
-        const baseHome = base.home > 0 ? base.home : 1;
-        const baseAway = base.away > 0 ? base.away : 1;
-        const scaleFactor = (matchOdds.home / baseHome + matchOdds.away / baseAway) / 2;
-        matchMarkets = scaleAdvancedMarkets(filterLiveMarkets(existing.markets, homeScore, awayScore), scaleFactor);
-
-        // Store drift phase for next cycle; propagate expiry timestamps
+        // Read current state (already drifted by background timer); just update minute + suspensions
         const updatedState = {
           ...existing,
-          odds: matchOdds,
           minute,
-          _driftPhase: phase,
           marketSuspension: matchMarketSuspension,
           _suspensionReason: matchMarketSuspension ? existing._suspensionReason : undefined,
           _firstSeenAt: firstSeenAt,
@@ -8125,5 +8187,31 @@ router.get("/football-odds-country/:country", async (req, res) => {
     res.status(500).json({ error: "Odds indisponíveis" });
   }
 });
+
+// ─── Background Market Drift Engine ─────────────────────────────────────────
+// Runs every 2s independently of Statpal API polls so the frontend sees smooth
+// per-tier odds movement even between data-fetch cycles.
+// Tier 1 markets (Over/Under, Handicap) drift every 2s.
+// Tier 2 markets (HT/FT, Correct Score) drift every 2s at a much smaller rate.
+// Tier 3 markets (Corners, Cards) drift every 2s at a very gentle rate.
+setInterval(() => {
+  const now = Date.now();
+  for (const [id, state] of liveMatchState.entries()) {
+    if (state.sport !== "football") continue;
+    // Skip halftime, full-time, and pre-match entries
+    const skip = ["HT", "FT", "AET", "Em Breve", "Fin.", "Fin. (AET)"];
+    if (skip.includes(state.status)) continue;
+    // Skip if ALL core markets are suspended — don't drift while suspended
+    if (state.marketSuspension) {
+      const coreKeys = ["result", "totalGoals", "handicap"];
+      const allCoresSuspended = coreKeys.every(k => {
+        const ts = state.marketSuspension?.[k];
+        return ts !== undefined && ts > now;
+      });
+      if (allCoresSuspended) continue;
+    }
+    liveMatchState.set(id, applyTieredMarketDrift(state, now));
+  }
+}, 2000);
 
 export default router;

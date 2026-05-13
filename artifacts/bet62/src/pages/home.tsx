@@ -1562,14 +1562,19 @@ export default function Home() {
     }
   }, []);
 
+  // Poll faster (2s) when a live match detail panel is open so tier-1 market
+  // drift (driven by the 2s backend timer) reaches the UI promptly.
+  // Otherwise poll every 5s for the list view.
+  const liveMatchDetailOpen = !!(expandedMatch?.isLive);
   useEffect(() => {
     if (activeTab === "live" || activeTab === "mybets") {
       fetchLive(activeTab === "live");
-      const interval = setInterval(() => fetchLive(false), 5000);
+      const ms = liveMatchDetailOpen ? 2000 : 5000;
+      const interval = setInterval(() => fetchLive(false), ms);
       return () => clearInterval(interval);
     }
     return undefined;
-  }, [activeTab, fetchLive]);
+  }, [activeTab, fetchLive, liveMatchDetailOpen]);
 
   // Poll tennis, basketball, hockey, volleyball odds every 60s
   useEffect(() => {
