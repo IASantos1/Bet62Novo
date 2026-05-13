@@ -2960,8 +2960,9 @@ async function buildTennisUpcoming(): Promise<UpcomingMatch[]> {
       });
     }
 
-    // Second: "Not Started" matches from livescores — cross-reference odds by surname
-    // Only include if real odds are found (no zeros in upcoming list)
+    // Second: "Not Started" matches from livescores — cross-reference odds by surname.
+    // Matches with real odds get them; Challengers and other matches without real odds
+    // use computed odds so real API matches are never dropped.
     for (const tournament of liveData) {
       const matches: TennisMatch[] = Array.isArray(tournament.match)
         ? tournament.match
@@ -2978,22 +2979,49 @@ async function buildTennisUpcoming(): Promise<UpcomingMatch[]> {
         if (p0.name.includes("/") || p1.name.includes("/")) continue;
         const normKey = _tennisPairKey(p0.name, p1.name);
         if (seenNorm.has(normKey)) continue;
-        // Only include if real odds matched — skip odds-less entries
-        const oddsEntry = oddsMapByNorm.get(normKey);
-        if (!oddsEntry) continue;
         seenNorm.add(normKey);
-        results.push({
-          id:          `tennis-ls-${m.id}`,
-          home:        p0.name,
-          away:        p1.name,
-          league:      tournament.name ?? "Ténis",
-          country:     "",
-          ...shiftHour(m.date, m.time),
-          sport:       "tennis" as const,
-          hasRealOdds: true,
-          odds:        { home: oddsEntry.matchOdds[0], draw: 0, away: oddsEntry.matchOdds[1] },
-          markets:     oddsEntry.markets as AdvancedMarkets,
-        });
+        const oddsEntry = oddsMapByNorm.get(normKey);
+        if (oddsEntry) {
+          // Real odds available (main tour)
+          results.push({
+            id:          `tennis-ls-${m.id}`,
+            home:        p0.name,
+            away:        p1.name,
+            league:      tournament.name ?? "Ténis",
+            country:     "",
+            ...shiftHour(m.date, m.time),
+            sport:       "tennis" as const,
+            hasRealOdds: true,
+            odds:        { home: oddsEntry.matchOdds[0], draw: 0, away: oddsEntry.matchOdds[1] },
+            markets:     oddsEntry.markets as AdvancedMarkets,
+          });
+        } else {
+          // No real odds (Challengers, ITF, etc.) — compute fair odds from player names
+          const sr = seededRng(`tennis-ch:${p0.name}:${p1.name}`);
+          const pHome = mc(0.52 + (sr(1) - 0.5) * 0.20, 0.15, 0.85);
+          const [compH, compA] = probsToDecimalOdds([pHome, 1 - pHome], 1.06);
+          const tennisExtras = computeTennisExtras(pHome);
+          results.push({
+            id:          `tennis-ch-${m.id}`,
+            home:        p0.name,
+            away:        p1.name,
+            league:      tournament.name ?? "Challenger",
+            country:     "",
+            ...shiftHour(m.date, m.time),
+            sport:       "tennis" as const,
+            hasRealOdds: false,
+            odds:        { home: compH!, draw: 0, away: compA! },
+            markets: {
+              doubleChance: { homeOrDraw: 0, awayOrDraw: 0, homeOrAway: 0 },
+              bothTeamsScore: { yes: 0, no: 0 },
+              totalGoals: { over05:0, under05:0, over15:0, under15:0, over25:0, under25:0, over35:0, under35:0, over45:0, under45:0, over55:0, under55:0, over65:0, under65:0 },
+              handicap: { homeMinusOne: 0, awayPlusOne: 0, homeMinusOneHalf: 0, awayPlusOneHalf: 0 },
+              halfTime: { home: 0, draw: 0, away: 0 },
+              firstGoal: { home: 0, noGoal: 0, away: 0 },
+              tennisExtra: tennisExtras,
+            } as unknown as AdvancedMarkets,
+          });
+        }
       }
     }
 
