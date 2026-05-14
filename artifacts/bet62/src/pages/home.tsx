@@ -1457,23 +1457,29 @@ export default function Home() {
     }
   }, []);
 
-  // ── Tab scroll ref (keeps active market tab visible when tab changes) ────────
+  // ── Tab scroll ref ────────────────────────────────────────────────────────────
   const tabContainerRef = useRef<HTMLDivElement | null>(null);
+
+  // Scroll a tab button into the center of the tab container.
+  // Uses getBoundingClientRect for viewport-relative accuracy (works inside any
+  // nested scroll container or CSS transform). Called only on explicit click or
+  // programmatic tab switch — never from a polling-triggered re-render.
+  const scrollTabIntoView = useCallback((key: string, behavior: ScrollBehavior = "smooth") => {
+    const el = tabContainerRef.current;
+    if (!el) return;
+    const btn = el.querySelector(`[data-tab="${key}"]`) as HTMLElement | null;
+    if (!btn) return;
+    const elRect  = el.getBoundingClientRect();
+    const btnRect = btn.getBoundingClientRect();
+    const current = el.scrollLeft;
+    const target  = current + (btnRect.left - elRect.left) - elRect.width / 2 + btnRect.width / 2;
+    el.scrollTo({ left: Math.max(0, target), behavior });
+  }, []);
 
   // Match detail view tab: "markets" | "stats" | "standings" | "live"
   const [matchViewTab, setMatchViewTab] = useState<"markets" | "stats" | "standings" | "live" | "yesterday" | "ranking">("markets");
   // Market sub-tab — lifted here so live refreshes don't unmount MatchModalMarkets and reset the selection
   const [modalTab, setModalTab] = useState("todos");
-
-  // Scroll active market tab button into view whenever it changes
-  useEffect(() => {
-    const el = tabContainerRef.current;
-    if (!el) return;
-    const activeBtn = el.querySelector(`[data-tab="${modalTab}"]`) as HTMLElement | null;
-    if (!activeBtn) return;
-    const targetLeft = activeBtn.offsetLeft - el.clientWidth / 2 + activeBtn.offsetWidth / 2;
-    el.scrollTo({ left: Math.max(0, targetLeft), behavior: "smooth" });
-  }, [modalTab]);
   const [matchStats, setMatchStats] = useState<MatchStatsData | null>(null);
   const [matchStatsLoading, setMatchStatsLoading] = useState(false);
   const [standings, setStandings] = useState<StandingRow[] | null>(null);
@@ -1519,16 +1525,16 @@ export default function Home() {
     setStandings(null);
     setStandingsLeague("");
     // Auto-switch to ET/Pen tab if match is already in that phase
-    if (expandedMatch?.markets?.etExtra) setModalTab("prolongamento");
-    else if (expandedMatch?.markets?.penExtra) setModalTab("penaltis");
-    else setModalTab("todos");
-  }, [expandedMatch?.id]);
+    if (expandedMatch?.markets?.etExtra) { setModalTab("prolongamento"); setTimeout(() => scrollTabIntoView("prolongamento", "instant"), 0); }
+    else if (expandedMatch?.markets?.penExtra) { setModalTab("penaltis"); setTimeout(() => scrollTabIntoView("penaltis", "instant"), 0); }
+    else { setModalTab("todos"); setTimeout(() => scrollTabIntoView("todos", "instant"), 0); }
+  }, [expandedMatch?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Auto-switch to ET/Pen tab when a live match enters extra time / penalties
   useEffect(() => {
     if (!expandedMatch?.isLive) return;
-    if (expandedMatch.markets?.penExtra && modalTab !== "penaltis")  { setModalTab("penaltis"); return; }
-    if (expandedMatch.markets?.etExtra  && modalTab === "todos")     { setModalTab("prolongamento"); }
+    if (expandedMatch.markets?.penExtra && modalTab !== "penaltis")  { setModalTab("penaltis"); setTimeout(() => scrollTabIntoView("penaltis", "instant"), 0); return; }
+    if (expandedMatch.markets?.etExtra  && modalTab === "todos")     { setModalTab("prolongamento"); setTimeout(() => scrollTabIntoView("prolongamento", "instant"), 0); }
   }, [!!(expandedMatch as any)?.markets?.etExtra, !!(expandedMatch as any)?.markets?.penExtra]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Fetch match stats when stats tab is active
@@ -3299,12 +3305,12 @@ export default function Home() {
     return (
       <MarketTabCtx.Provider value={modalTab}>
       <div className="mt-2">
-        <div ref={tabContainerRef} className="flex gap-1 overflow-x-auto no-scrollbar mb-4 pb-1 border-b border-zinc-800" style={{ scrollbarWidth: "none" }}>
+        <div ref={tabContainerRef} className="flex gap-1 overflow-x-auto no-scrollbar mb-4 pb-1 border-b border-zinc-800" style={{ scrollbarWidth: "none", touchAction: "pan-x", WebkitOverflowScrolling: "touch" } as React.CSSProperties}>
           {tabs.map(t => (
             <button
               key={t.key}
               data-tab={t.key}
-              onClick={() => setModalTab(t.key)}
+              onClick={() => { setModalTab(t.key); scrollTabIntoView(t.key); }}
               className={`px-3 py-1.5 rounded-md text-xs font-bold whitespace-nowrap transition-colors flex-shrink-0 ${modalTab === t.key ? "bg-red-600 text-white" : "bg-zinc-800 text-zinc-400 hover:text-white"}`}
             >
               {t.label}
