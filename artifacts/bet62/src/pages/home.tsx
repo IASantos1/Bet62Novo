@@ -6,7 +6,7 @@ import {
   Menu, X, Trophy, Activity, Gift,
   LogOut, User, History, Loader2, Zap, TrendingUp,
   ChevronRight, ChevronLeft, ChevronDown, ChevronUp, AlertCircle, BarChart2, Wallet, ArrowDownCircle, ArrowUpCircle, Plus, Clock, Smartphone,
-  Copy, Share2, CircleDollarSign, Lock, Trash2, Check,
+  Copy, Share2, CircleDollarSign, Lock, Trash2, Check, Fingerprint, ScanFace, ShieldCheck,
 } from "lucide-react";
 import ProfileTab from "@/components/ProfileTab";
 import { Button } from "@/components/ui/button";
@@ -1424,10 +1424,56 @@ export default function Home() {
   // Platform stats for hero
   const [platformStats, setPlatformStats] = useState<PlatformStats | null>(null);
 
+  // ── Lock screen state ────────────────────────────────────────────────────────
+  const [isLocked, setIsLocked] = useState(false);
+  const isLockedRef = useRef(false);
+  const [lockPassword, setLockPassword] = useState("");
+  const [lockError, setLockError] = useState("");
+  const [lockLoading, setLockLoading] = useState(false);
+  const [biometricAvailable, setBiometricAvailable] = useState(false);
+  const [biometricCredentialId, setBiometricCredentialId] = useState<string | null>(null);
+  const [biometricLoading, setBiometricLoading] = useState(false);
+  const [showBiometricSetup, setShowBiometricSetup] = useState(false);
+
+  // Sync isLocked → ref (used in async callbacks)
+  useEffect(() => { isLockedRef.current = isLocked; }, [isLocked]);
+
+  // When idle timer fires → lock screen (requires explicit auth to dismiss)
+  useEffect(() => {
+    if (isIdle && !isLockedRef.current) setIsLocked(true);
+  }, [isIdle]);
+
+  // Check WebAuthn platform authenticator availability + stored credential
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      const stored = localStorage.getItem("bet62_biometric_credential");
+      if (stored) setBiometricCredentialId(stored);
+    } catch { /* private browsing */ }
+    if (window.PublicKeyCredential?.isUserVerifyingPlatformAuthenticatorAvailable) {
+      window.PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable()
+        .then(ok => setBiometricAvailable(ok))
+        .catch(() => setBiometricAvailable(false));
+    }
+  }, []);
+
+  // ── Tab scroll ref (keeps active market tab visible when tab changes) ────────
+  const tabContainerRef = useRef<HTMLDivElement | null>(null);
+
   // Match detail view tab: "markets" | "stats" | "standings" | "live"
   const [matchViewTab, setMatchViewTab] = useState<"markets" | "stats" | "standings" | "live" | "yesterday" | "ranking">("markets");
   // Market sub-tab — lifted here so live refreshes don't unmount MatchModalMarkets and reset the selection
   const [modalTab, setModalTab] = useState("todos");
+
+  // Scroll active market tab button into view whenever it changes
+  useEffect(() => {
+    const el = tabContainerRef.current;
+    if (!el) return;
+    const activeBtn = el.querySelector(`[data-tab="${modalTab}"]`) as HTMLElement | null;
+    if (!activeBtn) return;
+    const targetLeft = activeBtn.offsetLeft - el.clientWidth / 2 + activeBtn.offsetWidth / 2;
+    el.scrollTo({ left: Math.max(0, targetLeft), behavior: "smooth" });
+  }, [modalTab]);
   const [matchStats, setMatchStats] = useState<MatchStatsData | null>(null);
   const [matchStatsLoading, setMatchStatsLoading] = useState(false);
   const [standings, setStandings] = useState<StandingRow[] | null>(null);
@@ -1615,7 +1661,7 @@ export default function Home() {
 
   // Fetch upcoming matches — polls every 30s so new games appear automatically
   const fetchUpcoming = useCallback((showSpinner = false) => {
-    if (isIdleRef.current) return;
+    if (isIdleRef.current || isLockedRef.current) return;
     if (showSpinner) setUpcomingLoading(true);
     const param = selectedSport === "all" ? "" : `?sport=${selectedSport}`;
     fetch(`/api/matches/upcoming${param}`)
@@ -1925,6 +1971,99 @@ export default function Home() {
   const betKey = (b: BetSelection) => `${b.matchId}-${b.market}-${b.selection}`;
   const simplesPotential = bets.reduce((sum, b) => sum + b.odd * parseFloat(betStakes[betKey(b)] || "0"), 0).toFixed(2);
 
+  // ── Lock screen handlers ────────────────────────────────────────────────────
+  const handlePasswordUnlock = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!lockPassword || !auth.user) return;
+    setLockLoading(true);
+    setLockError("");
+    try {
+      const res = await fetch("/api/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: auth.user.email, password: lockPassword }),
+      });
+      if (res.ok) {
+        setIsLocked(false);
+        resetIdle();
+        window.location.reload();
+      } else {
+        const data = await res.json();
+        setLockError(data.error || "Password incorreta");
+      }
+    } catch {
+      setLockError("Erro de ligação. Tente novamente.");
+    } finally {
+      setLockLoading(false);
+    }
+  };
+
+  const handleBiometricUnlock = async () => {
+    if (!biometricCredentialId) return;
+    setBiometricLoading(true);
+    setLockError("");
+    try {
+      const challenge = crypto.getRandomValues(new Uint8Array(32));
+      const credIdBytes = Uint8Array.from(atob(biometricCredentialId), c => c.charCodeAt(0));
+      const assertion = await navigator.credentials.get({
+        publicKey: {
+          challenge,
+          rpId: window.location.hostname,
+          allowCredentials: [{ type: "public-key" as const, id: credIdBytes }],
+          userVerification: "required",
+          timeout: 60000,
+        },
+      });
+      if (assertion) {
+        setIsLocked(false);
+        resetIdle();
+        window.location.reload();
+      }
+    } catch {
+      setLockError("Verificação biométrica falhou. Use a sua password.");
+    } finally {
+      setBiometricLoading(false);
+    }
+  };
+
+  const handleRegisterBiometric = async () => {
+    if (!auth.user) return;
+    try {
+      const challenge = crypto.getRandomValues(new Uint8Array(32));
+      const credential = await navigator.credentials.create({
+        publicKey: {
+          challenge,
+          rp: { name: "Bet62", id: window.location.hostname },
+          user: {
+            id: new TextEncoder().encode(auth.user.id?.toString() ?? auth.user.email),
+            name: auth.user.email,
+            displayName: auth.user.name ?? auth.user.email,
+          },
+          pubKeyCredParams: [
+            { alg: -7, type: "public-key" as const },
+            { alg: -257, type: "public-key" as const },
+          ],
+          authenticatorSelection: {
+            authenticatorAttachment: "platform",
+            userVerification: "required",
+            residentKey: "preferred",
+          },
+          timeout: 60000,
+        },
+      }) as PublicKeyCredential | null;
+      if (credential) {
+        const credIdB64 = btoa(String.fromCharCode(...new Uint8Array(credential.rawId)));
+        try { localStorage.setItem("bet62_biometric_credential", credIdB64); } catch { /* private mode */ }
+        setBiometricCredentialId(credIdB64);
+        setShowBiometricSetup(false);
+        toast.success("Desbloqueio biométrico ativado!");
+      }
+    } catch {
+      toast.error("Não foi possível ativar o desbloqueio biométrico.");
+      setShowBiometricSetup(false);
+    }
+  };
+
   const handleLoginSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setAuthLoading(true);
@@ -1933,6 +2072,10 @@ export default function Home() {
       setAuthModalOpen(false);
       toast.success("Bem-vindo de volta!");
       setLoginEmail(""); setLoginPassword("");
+      // Offer biometric setup if available and not yet registered
+      if (biometricAvailable && !biometricCredentialId) {
+        setTimeout(() => setShowBiometricSetup(true), 800);
+      }
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Erro ao fazer login");
     } finally {
@@ -3156,12 +3299,13 @@ export default function Home() {
     return (
       <MarketTabCtx.Provider value={modalTab}>
       <div className="mt-2">
-        <div className="flex gap-1 overflow-x-auto no-scrollbar mb-4 pb-1 border-b border-zinc-800">
+        <div ref={tabContainerRef} className="flex gap-1 overflow-x-auto no-scrollbar mb-4 pb-1 border-b border-zinc-800" style={{ scrollbarWidth: "none" }}>
           {tabs.map(t => (
             <button
               key={t.key}
+              data-tab={t.key}
               onClick={() => setModalTab(t.key)}
-              className={`px-3 py-1.5 rounded-md text-xs font-bold whitespace-nowrap transition-colors ${modalTab === t.key ? "bg-red-600 text-white" : "bg-zinc-800 text-zinc-400 hover:text-white"}`}
+              className={`px-3 py-1.5 rounded-md text-xs font-bold whitespace-nowrap transition-colors flex-shrink-0 ${modalTab === t.key ? "bg-red-600 text-white" : "bg-zinc-800 text-zinc-400 hover:text-white"}`}
             >
               {t.label}
             </button>
@@ -4248,46 +4392,161 @@ export default function Home() {
   return (
     <div className="min-h-[100dvh] w-full bg-background text-foreground flex flex-col font-sans transition-colors duration-500">
 
-      {/* ── IDLE OVERLAY ── */}
+      {/* ── LOCK SCREEN — requires password or biometric to dismiss ── */}
       <AnimatePresence>
-        {isIdle && (
+        {isLocked && (
           <motion.div
-            key="idle-overlay"
+            key="lock-screen"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            transition={{ duration: 0.4 }}
-            className="fixed inset-0 z-[9999] flex flex-col items-center justify-center cursor-pointer select-none"
-            style={{ background: "rgba(5,8,22,0.92)", backdropFilter: "blur(12px)" }}
-            onClick={resetIdle}
-            onKeyDown={resetIdle}
+            transition={{ duration: 0.35 }}
+            className="fixed inset-0 z-[9999] flex flex-col items-center justify-center select-none"
+            style={{ background: "rgba(4,6,18,0.97)", backdropFilter: "blur(16px)" }}
           >
             <motion.div
-              initial={{ scale: 0.85, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              transition={{ delay: 0.1, type: "spring", stiffness: 260, damping: 20 }}
-              className="flex flex-col items-center gap-5 text-center px-8"
+              initial={{ scale: 0.88, opacity: 0, y: 20 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              transition={{ delay: 0.08, type: "spring", stiffness: 280, damping: 24 }}
+              className="w-full max-w-sm px-6 flex flex-col items-center gap-5"
             >
-              <div className="w-20 h-20 rounded-full bg-zinc-800/80 border border-zinc-700 flex items-center justify-center shadow-xl">
+              {/* Logo */}
+              <p className="text-zinc-600 text-xs mb-1">
+                <span className="text-white font-black text-2xl italic">BET</span><span className="text-red-600 font-black text-2xl italic">62</span>
+              </p>
+
+              {/* Lock icon */}
+              <div className="w-20 h-20 rounded-full bg-zinc-900 border border-zinc-700 flex items-center justify-center shadow-2xl">
                 <Lock size={36} className="text-red-500" />
               </div>
-              <div>
-                <p className="text-white font-black text-xl tracking-tight mb-1">Sessão pausada</p>
-                <p className="text-zinc-400 text-sm">Sem atividade detectada. As actualizações ao vivo foram suspensas.</p>
+
+              {/* Title + user */}
+              <div className="text-center">
+                <p className="text-white font-black text-xl tracking-tight">Sessão bloqueada</p>
+                {auth.user && (
+                  <p className="text-zinc-400 text-sm mt-1">{auth.user.email}</p>
+                )}
+                <p className="text-zinc-600 text-xs mt-1">60 segundos sem atividade detectada</p>
               </div>
-              <button
-                onClick={resetIdle}
-                className="mt-2 px-8 py-3 rounded-full bg-red-600 hover:bg-red-500 active:bg-red-700 text-white font-bold text-sm tracking-wide transition-colors shadow-lg shadow-red-900/40"
-              >
-                Clique para retomar
-              </button>
-              <p className="text-zinc-600 text-xs">
-                <span className="text-white font-black text-lg italic">BET</span><span className="text-red-600 font-black text-lg italic">62</span>
-              </p>
+
+              {/* Biometric button — only when registered */}
+              {biometricAvailable && biometricCredentialId && (
+                <button
+                  onClick={handleBiometricUnlock}
+                  disabled={biometricLoading}
+                  className="w-full flex items-center justify-center gap-3 py-3.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 hover:border-zinc-500 active:bg-zinc-900 transition-all text-white font-semibold text-sm disabled:opacity-60"
+                >
+                  {biometricLoading
+                    ? <Loader2 size={20} className="animate-spin text-zinc-400" />
+                    : <Fingerprint size={22} className="text-blue-400" />}
+                  <span>{biometricLoading ? "A verificar..." : "Desbloquear com Face ID / Impressão Digital"}</span>
+                </button>
+              )}
+
+              {/* Biometric available but not registered → offer setup */}
+              {biometricAvailable && !biometricCredentialId && auth.user && (
+                <button
+                  onClick={() => { setIsLocked(false); resetIdle(); setShowBiometricSetup(true); }}
+                  className="text-xs text-zinc-500 hover:text-zinc-300 underline underline-offset-2 transition-colors"
+                >
+                  Ativar desbloqueio biométrico
+                </button>
+              )}
+
+              {/* Divider */}
+              {biometricAvailable && biometricCredentialId && (
+                <div className="w-full flex items-center gap-3">
+                  <div className="flex-1 h-px bg-zinc-800" />
+                  <span className="text-zinc-600 text-xs">ou</span>
+                  <div className="flex-1 h-px bg-zinc-800" />
+                </div>
+              )}
+
+              {/* Password form */}
+              {auth.user ? (
+                <form onSubmit={handlePasswordUnlock} className="w-full space-y-3">
+                  <div>
+                    <Input
+                      type="password"
+                      placeholder="Introduza a sua password"
+                      value={lockPassword}
+                      onChange={e => { setLockPassword(e.target.value); setLockError(""); }}
+                      className="bg-zinc-900 border-zinc-700 text-white placeholder:text-zinc-500 h-12 text-sm focus:border-red-500"
+                      autoFocus
+                    />
+                    {lockError && (
+                      <p className="text-red-400 text-xs mt-1.5 flex items-center gap-1">
+                        <AlertCircle size={12} />{lockError}
+                      </p>
+                    )}
+                  </div>
+                  <Button
+                    type="submit"
+                    disabled={lockLoading || !lockPassword}
+                    className="w-full bg-red-600 hover:bg-red-500 text-white font-bold h-12"
+                  >
+                    {lockLoading ? <Loader2 size={16} className="animate-spin mr-2" /> : <ShieldCheck size={16} className="mr-2" />}
+                    Desbloquear
+                  </Button>
+                </form>
+              ) : (
+                <button
+                  onClick={() => { setIsLocked(false); resetIdle(); setAuthModalOpen(true); }}
+                  className="w-full py-3 rounded-xl bg-red-600 hover:bg-red-500 text-white font-bold text-sm transition-colors"
+                >
+                  Entrar na conta
+                </button>
+              )}
+
+              {/* Logout option */}
+              {auth.user && (
+                <button
+                  onClick={() => { auth.logout(); setIsLocked(false); resetIdle(); }}
+                  className="text-xs text-zinc-600 hover:text-zinc-400 transition-colors flex items-center gap-1.5"
+                >
+                  <LogOut size={12} />Terminar sessão
+                </button>
+              )}
             </motion.div>
           </motion.div>
         )}
       </AnimatePresence>
+
+      {/* ── BIOMETRIC SETUP DIALOG ── */}
+      <Dialog open={showBiometricSetup} onOpenChange={setShowBiometricSetup}>
+        <DialogContent className="bg-zinc-950 border-zinc-800 text-white max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-white">
+              <Fingerprint size={20} className="text-blue-400" />
+              Desbloqueio Biométrico
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 pt-2">
+            <p className="text-zinc-400 text-sm">
+              Ative o desbloqueio com <strong className="text-white">Face ID</strong> ou <strong className="text-white">Impressão Digital</strong> para desbloquear a sessão rapidamente após 60 segundos de inatividade.
+            </p>
+            <div className="flex items-center gap-2 p-3 bg-blue-950/30 border border-blue-500/20 rounded-lg">
+              <ScanFace size={18} className="text-blue-400 shrink-0" />
+              <p className="text-xs text-blue-300">O dispositivo irá solicitar a verificação biométrica. Nenhum dado biométrico é enviado para os nossos servidores.</p>
+            </div>
+            <div className="flex gap-2">
+              <Button
+                onClick={handleRegisterBiometric}
+                className="flex-1 bg-blue-600 hover:bg-blue-500 text-white font-bold"
+              >
+                <Fingerprint size={15} className="mr-1.5" />Ativar agora
+              </Button>
+              <Button
+                variant="outline"
+                onClick={() => setShowBiometricSetup(false)}
+                className="flex-1 border-zinc-700 text-zinc-300 hover:bg-zinc-800"
+              >
+                Agora não
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* HEADER */}
       <header className="sticky top-0 z-40 bg-zinc-950 border-b border-zinc-900">
