@@ -1,10 +1,11 @@
 import { Router, type IRouter, type Response, type Request } from "express";
-import { db, usersTable, withdrawalsTable } from "@workspace/db";
-import { eq, desc } from "drizzle-orm";
-import { sql } from "drizzle-orm";
+import { db, usersTable, withdrawalsTable, betsTable } from "@workspace/db";
+import { eq, desc, and, ne } from "drizzle-orm";
+import { sql, count } from "drizzle-orm";
 import { authMiddleware, type AuthRequest } from "../middlewares/auth";
 import { adminMiddleware, type AdminRequest } from "../middlewares/adminAuth";
 import { logger } from "../lib/logger";
+import { sendWithdrawalApproved, sendWithdrawalRejected } from "../lib/mailer";
 
 const router: IRouter = Router();
 
@@ -41,6 +42,29 @@ router.post("/", authMiddleware, async (req: AuthRequest, res: Response): Promis
   try {
     const [user] = await db.select().from(usersTable).where(eq(usersTable.id, req.user!.id)).limit(1);
     if (!user) { res.status(404).json({ error: "Utilizador não encontrado" }); return; }
+
+    // KYC check: must have submitted documents
+    if (user.kycStatus === "not_submitted") {
+      res.status(403).json({
+        error: "É necessário verificar a sua identidade antes de levantar fundos.",
+        code: "KYC_REQUIRED",
+      });
+      return;
+    }
+
+    // Bet requirement: user must have placed at least one settled bet
+    const [{ settledCount }] = await db
+      .select({ settledCount: count() })
+      .from(betsTable)
+      .where(and(eq(betsTable.userId, req.user!.id), ne(betsTable.status, "pending")));
+
+    if (Number(settledCount) === 0) {
+      res.status(403).json({
+        error: "Para efectuar um levantamento, é necessário ter pelo menos uma aposta liquidada.",
+        code: "BET_REQUIRED",
+      });
+      return;
+    }
 
     if (parseFloat(user.balance) < amount) {
       res.status(400).json({ error: "Saldo insuficiente." });
@@ -124,6 +148,12 @@ router.put("/admin/:id", adminMiddleware, async (req: Request, res: Response): P
     if (!existing) { res.status(404).json({ error: "Levantamento não encontrado" }); return; }
     if (existing.status !== "pending") { res.status(400).json({ error: "Este levantamento já foi processado." }); return; }
 
+    const [user] = await db
+      .select({ email: usersTable.email, name: usersTable.name })
+      .from(usersTable)
+      .where(eq(usersTable.id, existing.userId))
+      .limit(1);
+
     const [updated] = await db.transaction(async (tx) => {
       if (status === "rejected") {
         await tx
@@ -139,8 +169,21 @@ router.put("/admin/:id", adminMiddleware, async (req: Request, res: Response): P
         .returning();
     });
 
+    if (user) {
+      if (status === "approved") {
+        sendWithdrawalApproved(user.email, user.name, existing.amount).catch((err: unknown) => {
+          logger.error({ err, withdrawalId: id }, "Failed to send withdrawal approved email");
+        });
+      } else {
+        sendWithdrawalRejected(user.email, user.name, existing.amount, notes).catch((err: unknown) => {
+          logger.error({ err, withdrawalId: id }, "Failed to send withdrawal rejected email");
+        });
+      }
+    }
+
     res.json(updated);
-  } catch {
+  } catch (err) {
+    logger.error({ err }, "Withdrawal update error");
     res.status(500).json({ error: "Erro interno" });
   }
 });

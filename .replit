@@ -2,7 +2,7 @@ modules = ["nodejs-24", "postgresql-16"]
 
 [deployment]
 router = "application"
-deploymentTarget = "autoscale"
+deploymentTarget = "gce"
 
 [deployment.postBuild]
 args = ["pnpm", "store", "prune"]
@@ -30,6 +30,10 @@ externalPort = 80
 [[ports]]
 localPort = 8082
 externalPort = 3003
+
+[[ports]]
+localPort = 18411
+externalPort = 3001
 
 [[ports]]
 localPort = 19983

@@ -14,6 +14,10 @@ export const usersTable = pgTable("users", {
   withdrawalName: text("withdrawal_name"),
   selfExcludedUntil: timestamp("self_excluded_until", { withTimezone: true }),
   kycStatus: text("kyc_status").default("not_submitted"),
+  kycDocumentType: text("kyc_document_type"),
+  kycDocumentNumber: text("kyc_document_number"),
+  kycSubmittedAt: timestamp("kyc_submitted_at", { withTimezone: true }),
+  firstDepositGranted: text("first_deposit_granted").default("none"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 

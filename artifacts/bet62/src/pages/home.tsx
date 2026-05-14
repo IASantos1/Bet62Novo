@@ -1,10 +1,12 @@
 import { useState, useCallback, useEffect, useRef, createContext, useContext, type ReactNode } from "react";
+import { useIdle } from "@/hooks/use-idle";
 import { motion, AnimatePresence } from "framer-motion";
 import { toast } from "sonner";
 import {
   Menu, X, Trophy, Activity, Gift,
   LogOut, User, History, Loader2, Zap, TrendingUp,
-  ChevronRight, ChevronLeft, ChevronDown, AlertCircle, BarChart2, Wallet, ArrowDownCircle, ArrowUpCircle, Plus, Clock,
+  ChevronRight, ChevronLeft, ChevronDown, ChevronUp, AlertCircle, BarChart2, Wallet, ArrowDownCircle, ArrowUpCircle, Plus, Clock, Smartphone,
+  Copy, Share2, CircleDollarSign, Lock, Trash2,
 } from "lucide-react";
 import ProfileTab from "@/components/ProfileTab";
 import { Button } from "@/components/ui/button";
@@ -187,6 +189,43 @@ const TEAM_BANNERS: Record<string, string> = {
   "Derby": "/banners/derby.jpg",
   "Hull City": "/banners/hull.jpg",
   "Hull": "/banners/hull.jpg",
+  // ── MLS ──
+  "Inter Miami": "/banners/inter-miami.jpg",
+  "Inter Miami CF": "/banners/inter-miami.jpg",
+  "LA Galaxy": "/banners/la-galaxy.jpg",
+  "Los Angeles Galaxy": "/banners/la-galaxy.jpg",
+  "LAFC": "/banners/lafc.jpg",
+  "Los Angeles FC": "/banners/lafc.jpg",
+  "LA FC": "/banners/lafc.jpg",
+  "Atlanta United": "/banners/atlanta-united.jpg",
+  "Atlanta United FC": "/banners/atlanta-united.jpg",
+  "Seattle Sounders": "/banners/seattle-sounders.jpg",
+  "Seattle Sounders FC": "/banners/seattle-sounders.jpg",
+  "New York City FC": "/banners/nycfc.jpg",
+  "NYCFC": "/banners/nycfc.jpg",
+  "NYC FC": "/banners/nycfc.jpg",
+  "Portland Timbers": "/banners/portland-timbers.jpg",
+  "Austin FC": "/banners/austin-fc.jpg",
+  "FC Cincinnati": "/banners/fc-cincinnati.jpg",
+  "Columbus Crew": "/banners/columbus-crew.jpg",
+  // ── Liga MX ──
+  "Cruz Azul": "/banners/file_1778704794042_1778715064131.jpeg",
+  "Club Cruz Azul": "/banners/file_1778704794042_1778715064131.jpeg",
+  "Guadalajara": "/banners/file_1778704789962_1778715064131.jpeg",
+  "Chivas": "/banners/file_1778704789962_1778715064131.jpeg",
+  "Club Guadalajara": "/banners/file_1778704789962_1778715064131.jpeg",
+  "Chivas Guadalajara": "/banners/file_1778704789962_1778715064131.jpeg",
+  "León": "/banners/file_1778704817279_1778715064131.jpeg",
+  "Leon": "/banners/file_1778704817279_1778715064131.jpeg",
+  "Club León": "/banners/file_1778704817279_1778715064131.jpeg",
+  "Club Leon": "/banners/file_1778704817279_1778715064131.jpeg",
+  "Tigres UANL": "/banners/file_1778704805773_1778715064131.jpeg",
+  "Tigres U.A.N.L.": "/banners/file_1778704805773_1778715064131.jpeg",
+  "Tigres": "/banners/file_1778704805773_1778715064131.jpeg",
+  "Pachuca": "/banners/file_1778704825793_1778715064131.jpeg",
+  "C.F. Pachuca": "/banners/file_1778704825793_1778715064131.jpeg",
+  "CF Pachuca": "/banners/file_1778704825793_1778715064131.jpeg",
+  "Tuzos": "/banners/file_1778704825793_1778715064131.jpeg",
 };
 
 const LEAGUE_FLAGS: Record<string, string> = {
@@ -278,6 +317,24 @@ const TEAM_COUNTRY: Record<string, string> = {
   "Antalyaspor": "turkey", "Alanyaspor": "turkey", "Gaziantep": "turkey",
   "Gaziantep FK": "turkey", "Ankaragücü": "turkey", "Ankaragucu": "turkey",
   "Bodrumspor": "turkey", "MKE Ankaragücü": "turkey",
+  // Liga MX
+  "Cruz Azul": "mexico", "Club Cruz Azul": "mexico",
+  "Guadalajara": "mexico", "Chivas": "mexico", "Club Guadalajara": "mexico", "Chivas Guadalajara": "mexico",
+  "León": "mexico", "Leon": "mexico", "Club León": "mexico", "Club Leon": "mexico",
+  "Tigres UANL": "mexico", "Tigres U.A.N.L.": "mexico", "Tigres": "mexico",
+  "Pachuca": "mexico", "C.F. Pachuca": "mexico", "CF Pachuca": "mexico", "Tuzos": "mexico",
+  "América": "mexico", "America": "mexico", "Club America": "mexico", "Club América": "mexico",
+  "Monterrey": "mexico", "C.F. Monterrey": "mexico", "CF Monterrey": "mexico", "Rayados": "mexico",
+  "Pumas UNAM": "mexico", "Pumas": "mexico", "Club Universidad Nacional": "mexico",
+  "Necaxa": "mexico", "Club Necaxa": "mexico",
+  "Atlas": "mexico", "Atlas FC": "mexico",
+  "Santos Laguna": "mexico", "Club Santos Laguna": "mexico",
+  "Toluca": "mexico", "Deportivo Toluca": "mexico",
+  "Tijuana": "mexico", "Club Tijuana": "mexico", "Xolos": "mexico",
+  "Puebla": "mexico", "Club Puebla": "mexico",
+  "Querétaro": "mexico", "Queretaro": "mexico", "FC Querétaro": "mexico",
+  "Juárez": "mexico", "Juarez": "mexico", "FC Juárez": "mexico",
+  "Mazatlán": "mexico", "Mazatlan": "mexico", "Mazatlán FC": "mexico",
 };
 
 function getTeamBanner(teamName: string, country?: string): string | undefined {
@@ -377,36 +434,111 @@ const RIVALRY_TAGS: Record<string, string> = {
 
 // ─── Sidebar tree data ────────────────────────────────────────────────────────
 
+/** Flexible league name matching — handles "Country: League" API prefixes and substring containment */
+function leagueMatchesFilter(matchLeague: string, filterLeague: string): boolean {
+  if (!filterLeague) return true;
+  const ml = matchLeague.toLowerCase().trim();
+  const fl = filterLeague.toLowerCase().trim();
+  if (ml === fl) return true;
+  if (ml.includes(fl)) return true;
+  const mlClean = ml.replace(/^[^:]+:\s*/, "").trim();
+  return mlClean === fl || mlClean.includes(fl);
+}
+
 const FOOTBALL_COUNTRIES: { name: string; flag: string; leagues: string[] }[] = [
-  { name: "Europa", flag: "⭐", leagues: ["Champions League", "Europa League", "Conference League"] },
-  { name: "Inglaterra", flag: "🏴󠁧󠁢󠁥󠁮󠁧󠁿", leagues: ["Premier League", "EFL Championship", "League One", "FA Cup"] },
-  { name: "Espanha", flag: "🇪🇸", leagues: ["La Liga", "LaLiga Hypermotion", "Copa del Rey"] },
-  { name: "Alemanha", flag: "🇩🇪", leagues: ["Bundesliga", "2. Bundesliga", "DFB-Pokal"] },
-  { name: "Itália", flag: "🇮🇹", leagues: ["Serie A", "Serie B", "Coppa Italia"] },
-  { name: "França", flag: "🇫🇷", leagues: ["Ligue 1", "Ligue 2", "Coupe de France"] },
-  { name: "Portugal", flag: "🇵🇹", leagues: ["Liga Portugal", "Liga Portugal 2", "Taça de Portugal"] },
-  { name: "Holanda", flag: "🇳🇱", leagues: ["Eredivisie", "Eerste Divisie"] },
-  { name: "Bélgica", flag: "🇧🇪", leagues: ["Jupiler Pro League", "Belgian Cup"] },
-  { name: "Turquia", flag: "🇹🇷", leagues: ["Süper Lig", "TFF First League", "Turkish Cup"] },
-  { name: "Grécia", flag: "🇬🇷", leagues: ["Super League Greece", "Super League 2", "Greek Cup"] },
-  { name: "Áustria", flag: "🇦🇹", leagues: ["Austrian Bundesliga", "Austrian Cup"] },
-  { name: "Escócia", flag: "🏴󠁧󠁢󠁳󠁣󠁴󠁿", leagues: ["Scottish Premiership", "Scottish Championship", "Scottish Cup"] },
-  { name: "Suíça", flag: "🇨🇭", leagues: ["Swiss Super League", "Challenge League"] },
-  { name: "Dinamarca", flag: "🇩🇰", leagues: ["Danish Superliga", "Danish 1st Division"] },
-  { name: "Noruega", flag: "🇳🇴", leagues: ["Eliteserien", "Norwegian Cup"] },
-  { name: "Suécia", flag: "🇸🇪", leagues: ["Allsvenskan", "Superettan"] },
+  { name: "Europa", flag: "⭐", leagues: ["Champions League", "Europa League", "Conference League", "UEFA Super Cup"] },
+  { name: "Inglaterra", flag: "🏴󠁧󠁢󠁥󠁮󠁧󠁿", leagues: ["Premier League", "EFL Championship", "League One", "League Two", "FA Cup", "EFL Cup", "Community Shield"] },
+  { name: "Espanha", flag: "🇪🇸", leagues: ["La Liga", "LaLiga Hypermotion", "Copa del Rey", "Supercopa de España"] },
+  { name: "Alemanha", flag: "🇩🇪", leagues: ["Bundesliga", "2. Bundesliga", "3. Liga", "DFB-Pokal", "DFL-Supercup"] },
+  { name: "Itália", flag: "🇮🇹", leagues: ["Serie A", "Serie B", "Serie C", "Coppa Italia", "Supercoppa Italiana"] },
+  { name: "França", flag: "🇫🇷", leagues: ["Ligue 1", "Ligue 2", "National", "Coupe de France", "Trophée des Champions"] },
+  { name: "Portugal", flag: "🇵🇹", leagues: ["Liga Portugal", "Liga Portugal 2", "Taça de Portugal", "Supertaça Cândido de Oliveira"] },
+  { name: "Holanda", flag: "🇳🇱", leagues: ["Eredivisie", "Eerste Divisie", "KNVB Cup", "Johan Cruijff Schaal"] },
+  { name: "Bélgica", flag: "🇧🇪", leagues: ["Jupiler Pro League", "Belgian First Amateur", "Belgian Cup", "Belgian Super Cup"] },
+  { name: "Turquia", flag: "🇹🇷", leagues: ["Süper Lig", "TFF First League", "TFF Second League", "Turkish Cup", "Turkish Super Cup"] },
+  { name: "Grécia", flag: "🇬🇷", leagues: ["Super League Greece", "Super League 2", "Greek Cup", "Greek Super Cup"] },
+  { name: "Áustria", flag: "🇦🇹", leagues: ["Austrian Bundesliga", "Austrian Football Second League", "Austrian Cup"] },
+  { name: "Escócia", flag: "🏴󠁧󠁢󠁳󠁣󠁴󠁿", leagues: ["Scottish Premiership", "Scottish Championship", "Scottish League One", "Scottish Cup"] },
+  { name: "Suíça", flag: "🇨🇭", leagues: ["Swiss Super League", "Challenge League", "Swiss Cup"] },
+  { name: "Dinamarca", flag: "🇩🇰", leagues: ["Danish Superliga", "Danish 1st Division", "DBU Pokalen"] },
+  { name: "Noruega", flag: "🇳🇴", leagues: ["Eliteserien", "Norwegian 1st Division", "Norwegian Cup"] },
+  { name: "Suécia", flag: "🇸🇪", leagues: ["Allsvenskan", "Superettan", "Svenska Cupen"] },
   { name: "Croácia", flag: "🇭🇷", leagues: ["HNL", "Croatian Football Cup"] },
   { name: "Sérvia", flag: "🇷🇸", leagues: ["Serbian SuperLiga", "Serbian Cup"] },
-  { name: "Brasil", flag: "🇧🇷", leagues: ["Brasileirão", "Copa do Brasil", "Campeonato Paulista", "Campeonato Carioca"] },
-  { name: "Argentina", flag: "🇦🇷", leagues: ["Primera División", "Copa Argentina"] },
-  { name: "EUA", flag: "🇺🇸", leagues: ["MLS"] },
+  { name: "Polónia", flag: "🇵🇱", leagues: ["Ekstraklasa", "I liga", "Polish Cup"] },
+  { name: "Rep. Checa", flag: "🇨🇿", leagues: ["Czech First League", "FNL", "Czech Cup"] },
+  { name: "Rússia", flag: "🇷🇺", leagues: ["Russian Premier League", "Russian National League", "Russian Cup"] },
+  { name: "Ucrânia", flag: "🇺🇦", leagues: ["Ukrainian Premier League", "Ukrainian Cup"] },
+  { name: "Hungria", flag: "🇭🇺", leagues: ["OTP Bank Liga", "Merkantil Bank Liga"] },
+  { name: "Roménia", flag: "🇷🇴", leagues: ["Romanian Liga I", "Romanian Liga II"] },
+  { name: "Bulgária", flag: "🇧🇬", leagues: ["Parva liga", "Vtora liga"] },
+  { name: "Israel", flag: "🇮🇱", leagues: ["Israeli Premier League", "Israeli National League", "State Cup"] },
+  { name: "Brasil", flag: "🇧🇷", leagues: ["Brasileirão", "Brasileirão Série B", "Copa do Brasil", "Recopa Sudamericana", "Campeonato Paulista", "Campeonato Carioca", "Copa Sul-Americana"] },
+  { name: "Argentina", flag: "🇦🇷", leagues: ["Primera División", "Primera Nacional", "Copa Argentina", "Copa de la Liga Profesional"] },
+  { name: "México", flag: "🇲🇽", leagues: ["Liga MX", "Ascenso MX", "Copa MX", "Leagues Cup"] },
+  { name: "Chile", flag: "🇨🇱", leagues: ["Primera División — Chile", "Primera B — Chile"] },
+  { name: "Colômbia", flag: "🇨🇴", leagues: ["Categoría Primera A", "Categoría Primera B"] },
+  { name: "EUA", flag: "🇺🇸", leagues: ["MLS", "USL Championship", "US Open Cup"] },
+  { name: "Arábia Saudita", flag: "🇸🇦", leagues: ["Saudi Pro League", "First Division League", "King Cup"] },
+  { name: "Japão", flag: "🇯🇵", leagues: ["J1 League", "J2 League", "J3 League", "Emperor's Cup"] },
+  { name: "Coreia do Sul", flag: "🇰🇷", leagues: ["K League 1", "K League 2", "Korean FA Cup"] },
+  { name: "Tailândia", flag: "🇹🇭", leagues: ["Thai League 1", "Thai League 2"] },
+  { name: "Índia", flag: "🇮🇳", leagues: ["Indian Super League", "I-League"] },
 ];
 
 const OTHER_SPORTS: { key: string; label: string; icon: string; leagues: string[] }[] = [
-  { key: "basketball", label: "Basquete", icon: "🏀", leagues: ["NBA", "EuroLeague", "NBB — Brasil"] },
-  { key: "tennis", label: "Tênis", icon: "🎾", leagues: ["Roland Garros", "ATP 500", "ATP 250", "WTA 1000", "WTA 250"] },
-  { key: "hockey", label: "Hóquei", icon: "🏒", leagues: ["NHL — Playoffs", "KHL — Playoff"] },
-  { key: "volleyball", label: "Voleibol", icon: "🏐", leagues: ["Volleyball Nations League", "Superlega — Itália", "Superliga — Rússia", "Superliga — Brasil"] },
+  { key: "basketball", label: "Basquete", icon: "🏀", leagues: [
+    "NBA", "NBA Cup", "G League",
+    "EuroLeague", "EuroCup",
+    "Liga ACB", "LEB Oro", "Copa del Rey ACB", "Supercopa ACB",
+    "Basketbol Süper Ligi", "TBL", "Turkish Basketball Cup",
+    "Greek Basket League", "Greek Basketball Cup",
+    "Lega Basket Serie A", "Serie A2 Basket",
+    "LNB Pro A", "Pro B Basket",
+    "Basketball Bundesliga",
+    "Elite League", "Liga Betclic",
+    "NBB", "Liga Nacional",
+    "B.League", "B2 League",
+    "KBL", "CBA", "LNBP",
+  ]},
+  { key: "tennis", label: "Ténis", icon: "🎾", leagues: [
+    "Australian Open", "Roland Garros", "Wimbledon", "US Open",
+    "ATP Finals", "WTA Finals", "Davis Cup", "Billie Jean King Cup",
+    "Indian Wells", "Miami Open", "Madrid Open", "Rome Masters", "Paris Masters", "Canadian Open", "Cincinnati", "Shanghai",
+    "Halle Open", "Queen's Club", "Barcelona Open", "Estoril Open", "Dubai", "Rotterdam",
+    "ATP 500", "ATP 250", "WTA 1000", "WTA 500", "WTA 250",
+    "ATP Challenger", "WTA 125", "ITF",
+  ]},
+  { key: "hockey", label: "Hóquei no Gelo", icon: "🏒", leagues: [
+    "NHL", "AHL", "ECHL",
+    "KHL", "VHL",
+    "SHL", "HockeyAllsvenskan",
+    "Liiga", "Mestis",
+    "National League", "Swiss League",
+    "Extraliga", "Chance Liga",
+    "DEL", "DEL2",
+    "ICE Hockey League", "Alps Hockey League",
+    "Fjordkraft Ligaen",
+    "Metal Ligaen",
+    "Slovak Extraliga",
+    "Ligue Magnus",
+    "Champions Hockey League",
+  ]},
+  { key: "volleyball", label: "Voleibol", icon: "🏐", leagues: [
+    "SuperLega", "Serie A2 Volley", "Coppa Italia Volley",
+    "Superliga Série A", "Superliga Série B", "Copa Brasil Vôlei",
+    "PlusLiga", "Tauron 1 Liga", "Polski Puchar Siatkówki",
+    "Russian Volleyball Super League",
+    "Efeler Ligi", "Turkish Volleyball Cup",
+    "SV.League", "V.League 2",
+    "Ligue A", "Ligue B Volley",
+    "Volleyball Bundesliga",
+    "Liga Una Seguros",
+    "V-League",
+    "Chinese Volleyball League",
+    "Liga de Voleibol Argentina",
+    "Volleyball Nations League",
+  ]},
 ];
 
 type TopLeagueEntry = { league: string; country: string; sport: string };
@@ -510,16 +642,19 @@ function SidebarTreeContent({
                 </button>
                 {expandedCountry === name && (
                   <div className="ml-2 mt-0.5 space-y-0.5 border-l border-zinc-800 pl-2">
-                    {leagues.map(league => (
-                      <button
-                        key={league}
-                        onClick={() => go("football")}
-                        className="flex items-center gap-1.5 w-full px-2 py-1 rounded-md text-[11px] text-zinc-500 hover:text-white hover:bg-zinc-900 transition-colors"
-                      >
-                        <span className="text-xs leading-none shrink-0">{LEAGUE_FLAGS[league] ?? "⚽"}</span>
-                        <span className="truncate">{league}</span>
-                      </button>
-                    ))}
+                    {leagues.map(league => {
+                      const active = selectedLeague === league;
+                      return (
+                        <button
+                          key={league}
+                          onClick={() => { setSelectedLeague?.(active ? null : league); setSelectedSport("football"); setActiveTab("sports"); onClose?.(); }}
+                          className={`flex items-center gap-1.5 w-full px-2 py-1 rounded-md text-[11px] transition-colors ${active ? "bg-red-600/20 text-red-400 border border-red-500/30" : "text-zinc-500 hover:text-white hover:bg-zinc-900"}`}
+                        >
+                          <span className="text-xs leading-none shrink-0">{LEAGUE_FLAGS[league] ?? "⚽"}</span>
+                          <span className="truncate">{league}</span>
+                        </button>
+                      );
+                    })}
                   </div>
                 )}
               </div>
@@ -541,16 +676,19 @@ function SidebarTreeContent({
           </button>
           {expandedSport === key && (
             <div className="ml-2 mt-0.5 space-y-0.5 border-l border-zinc-800 pl-2">
-              {leagues.map(league => (
-                <button
-                  key={league}
-                  onClick={() => go(key)}
-                  className="flex items-center gap-1.5 w-full px-2 py-1.5 rounded-md text-[12px] text-zinc-400 hover:text-white hover:bg-zinc-900 transition-colors"
-                >
-                  <span className="text-xs leading-none shrink-0">{LEAGUE_FLAGS[league] ?? "🏆"}</span>
-                  <span className="truncate">{league}</span>
-                </button>
-              ))}
+              {leagues.map(league => {
+                const active = selectedLeague === league;
+                return (
+                  <button
+                    key={league}
+                    onClick={() => { setSelectedLeague?.(active ? null : league); setSelectedSport(key); setActiveTab("sports"); onClose?.(); }}
+                    className={`flex items-center gap-1.5 w-full px-2 py-1.5 rounded-md text-[12px] transition-colors ${active ? "bg-red-600/20 text-red-400 border border-red-500/30" : "text-zinc-400 hover:text-white hover:bg-zinc-900"}`}
+                  >
+                    <span className="text-xs leading-none shrink-0">{LEAGUE_FLAGS[league] ?? "🏆"}</span>
+                    <span className="truncate">{league}</span>
+                  </button>
+                );
+              })}
             </div>
           )}
         </div>
@@ -582,6 +720,19 @@ type AdvancedMarkets = {
   correctScore?: Record<string, number>;
   corners?: { o85: number; u85: number; o95: number; u95: number; o105: number; u105: number };
   cards?: { o35: number; u35: number; o45: number; u45: number };
+  // Second half result market (who wins just the 2nd half)
+  secondHalf?: { home: number; draw: number; away: number };
+  // Football extra-time markets
+  etExtra?: {
+    tieWinner: { home: number; away: number };              // who advances from the knockout tie (no draw)
+    etResult: { home: number; draw: number; away: number }; // ET period result (draw → penalties)
+    totalGoals: { o05: number; u05: number; o15: number; u15: number; o25: number; u25: number };
+    nextGoal: { home: number; away: number };               // which team scores next in ET
+  };
+  // Football penalty-shootout markets
+  penExtra?: {
+    winner: { home: number; away: number };
+  };
 };
 
 type Match = {
@@ -619,7 +770,12 @@ type Match = {
     ];
     periods?: Array<[number, number]>;
     quarters?: Array<[number, number]>;
+    etScore?: [number, number];
+    penScore?: [number, number];
   };
+  // Red cards per team (football only)
+  redCardsHome?: number;
+  redCardsAway?: number;
   // Minutes until match starts (only present for "Em Breve" pre-match entries)
   startsIn?: number;
   // Scheduled kickoff time (HH:MM, Portugal UTC+1) for "Em Breve" entries
@@ -637,10 +793,18 @@ type BetSelection = {
   label?: string;
 };
 
+type StoredSelection = {
+  matchTitle: string;
+  selection: string;
+  odd: number;
+  market?: string;
+  label?: string;
+};
+
 type UserBet = {
   id: number;
   matchTitle: string;
-  selections: unknown;
+  selections: StoredSelection[] | unknown;
   stake: string;
   potentialWin: string;
   totalOdds: string;
@@ -667,6 +831,7 @@ type MatchStatsData = {
   };
   homeForm: FormEntry[];
   awayForm: FormEntry[];
+  formIsReal?: boolean;
 };
 type StandingRow = { pos: number; name: string; played: number; won: number; drawn: number; lost: number; gf: number; ga: number; pts: number };
 
@@ -866,6 +1031,10 @@ function sportEmoji(sport?: string): string {
 
 export default function Home() {
   const auth = useAuth();
+  const { isIdle, resetIdle } = useIdle(60_000);
+  const isIdleRef = useRef(false);
+  useEffect(() => { isIdleRef.current = isIdle; }, [isIdle]);
+
   const [activeTab, setActiveTab] = useState<"sports" | "live" | "promos" | "mybets" | "wallet" | "profile">("sports");
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [bets, setBets] = useState<BetSelection[]>([]);
@@ -875,6 +1044,9 @@ export default function Home() {
   const [isPlacingBet, setIsPlacingBet] = useState(false);
   const [betMode, setBetMode] = useState<"simples" | "multipla">("multipla");
   const [selectedLeague, setSelectedLeague] = useState<string | null>(null);
+  const [showAppBanner, setShowAppBanner] = useState(() => {
+    try { return !localStorage.getItem("bet62_app_banner_dismissed"); } catch { return true; }
+  });
 
   // Auth form state
   const [loginEmail, setLoginEmail] = useState("");
@@ -894,10 +1066,16 @@ export default function Home() {
   const [myBetsLoading, setMyBetsLoading] = useState(false);
   const [cashingOut, setCashingOut] = useState<number | null>(null);
   const [cashoutConfirm, setCashoutConfirm] = useState<UserBet | null>(null);
+  const [betFilterTab, setBetFilterTab] = useState<"abertas" | "resolvidas" | "cashout">("abertas");
+  const [collapsedBets, setCollapsedBets] = useState<Set<number>>(new Set());
+  const [winAnim, setWinAnim] = useState<{ amount: number; title: string } | null>(null);
+  const [cashoutAnim, setCashoutAnim] = useState<{ amount: number } | null>(null);
+  const [betPlacedAnim, setBetPlacedAnim] = useState(false);
+  const prevWonBetIds = useRef<Set<number> | null>(null);
 
   // Deposit modal
   const [depositModalOpen, setDepositModalOpen] = useState(false);
-  const [promoNotif, setPromoNotif] = useState<null | { type: "freebets20" | "bonus100" | "cashback"; amount?: number }>(null);
+  const [promoNotif, setPromoNotif] = useState<null | { type: "freebets10" | "freebets20" | "bonus100" | "cashback"; amount?: number }>(null);
 
   // Cashback state
   const [cashbackData, setCashbackData] = useState<{ totalLost: number; cashback: number; bets: number } | null>(null);
@@ -906,6 +1084,8 @@ export default function Home() {
   const [liveMatches, setLiveMatches] = useState<Match[]>([]);
   const [liveLoading, setLiveLoading] = useState(false);
   const prevLiveOdds = useRef<Record<string, Odds>>({});
+  // Flat map of "market:sel" → previous odd value, for arrows in MarketOddsBtn
+  const prevLiveMarkets = useRef<Record<string, Record<string, number>>>({});
   // Live minute ticker — interpolates clock between API refreshes
   const liveDataFetchedAt = useRef(0);
   const apiMinutesRef = useRef<Record<string, number>>({});
@@ -1220,11 +1400,14 @@ export default function Home() {
   const getDisplayMinute = (match: Match): number => {
     const apiMin = apiMinutesRef.current[String(match.id)] ?? match.minute ?? 0;
     const fetchedAt = liveDataFetchedAt.current;
-    if (fetchedAt === 0 || apiMin === 45 || apiMin === 90) return apiMin;
+    if (fetchedAt === 0 || apiMin === 45 || apiMin === 90 || apiMin === 105) return apiMin;
     const elapsed = Math.floor((Date.now() - fetchedAt) / 60000);
     const computed = apiMin + elapsed;
     if (apiMin < 45) return Math.min(45, computed);
-    return Math.min(90, computed);
+    if (apiMin < 90) return Math.min(90, computed);
+    // Extra time: first half caps at 105, second half at 120
+    if (apiMin <= 105) return Math.min(105, computed);
+    return Math.min(120, computed);
   };
 
   // Sync expandedMatch with live data silently (score/odds update without closing panel)
@@ -1242,11 +1425,21 @@ export default function Home() {
   // Reset match view state when expanded match changes
   useEffect(() => {
     setMatchViewTab("markets");
-    setModalTab("todos");
     setMatchStats(null);
     setStandings(null);
     setStandingsLeague("");
+    // Auto-switch to ET/Pen tab if match is already in that phase
+    if (expandedMatch?.markets?.etExtra) setModalTab("prolongamento");
+    else if (expandedMatch?.markets?.penExtra) setModalTab("penaltis");
+    else setModalTab("todos");
   }, [expandedMatch?.id]);
+
+  // Auto-switch to ET/Pen tab when a live match enters extra time / penalties
+  useEffect(() => {
+    if (!expandedMatch?.isLive) return;
+    if (expandedMatch.markets?.penExtra && modalTab !== "penaltis")  { setModalTab("penaltis"); return; }
+    if (expandedMatch.markets?.etExtra  && modalTab === "todos")     { setModalTab("prolongamento"); }
+  }, [!!(expandedMatch as any)?.markets?.etExtra, !!(expandedMatch as any)?.markets?.penExtra]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Fetch match stats when stats tab is active
   useEffect(() => {
@@ -1284,6 +1477,29 @@ export default function Home() {
       .catch(() => {})
       .finally(() => setStandingsLoading(false));
   }, [matchViewTab, expandedMatch?.id]);
+
+  // Handle ?payment= query param on return from card payment
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const paymentStatus = params.get("payment");
+    if (!paymentStatus) return;
+    window.history.replaceState({}, "", window.location.pathname);
+    if (paymentStatus === "success") {
+      auth.refreshUser();
+      toast.success("Depósito por cartão confirmado! O seu saldo foi actualizado.");
+    } else if (paymentStatus === "error") {
+      toast.error("Pagamento por cartão não foi concluído. Tente novamente.");
+    } else if (paymentStatus === "cancel") {
+      toast.info("Pagamento por cartão cancelado.");
+    }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Periodic balance refresh every 60s for logged-in users (catches server-side credits)
+  useEffect(() => {
+    if (!auth.token) return;
+    const id = setInterval(() => { auth.refreshUser(); }, 60000);
+    return () => clearInterval(id);
+  }, [auth.token]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Fetch platform stats on mount
   useEffect(() => {
@@ -1355,6 +1571,7 @@ export default function Home() {
 
   // Fetch upcoming matches — polls every 30s so new games appear automatically
   const fetchUpcoming = useCallback((showSpinner = false) => {
+    if (isIdleRef.current) return;
     if (showSpinner) setUpcomingLoading(true);
     const param = selectedSport === "all" ? "" : `?sport=${selectedSport}`;
     fetch(`/api/matches/upcoming${param}`)
@@ -1378,6 +1595,7 @@ export default function Home() {
 
   // Fetch live matches — polls every 5s
   const fetchLive = useCallback(async (showSpinner = false) => {
+    if (isIdleRef.current) return;
     if (showSpinner) setLiveLoading(true);
     try {
       const res = await fetch("/api/matches/live");
@@ -1410,11 +1628,17 @@ export default function Home() {
         for (const m of matches) newMins[String(m.id)] = m.minute;
         apiMinutesRef.current = newMins;
         liveDataFetchedAt.current = Date.now();
-        // Merge silently — preserve prevLiveOdds for trend arrows
+        // Merge silently — preserve prevLiveOdds + prevLiveMarkets for trend arrows
         setLiveMatches(prev => {
           const newPrev: Record<string, Odds> = {};
-          for (const m of prev) newPrev[String(m.id)] = m.odds;
+          const newPrevMkts: Record<string, Record<string, number>> = {};
+          for (const m of prev) {
+            const id = String(m.id);
+            newPrev[id] = m.odds;
+            newPrevMkts[id] = flattenMatchMarketsForArrows(m);
+          }
           prevLiveOdds.current = newPrev;
+          prevLiveMarkets.current = newPrevMkts;
           return matches.map(m => ({ ...m, isLive: true }));
         });
       }
@@ -1425,14 +1649,19 @@ export default function Home() {
     }
   }, []);
 
+  // Poll faster (2s) when a live match detail panel is open so tier-1 market
+  // drift (driven by the 2s backend timer) reaches the UI promptly.
+  // Otherwise poll every 5s for the list view.
+  const liveMatchDetailOpen = !!(expandedMatch?.isLive);
   useEffect(() => {
-    if (activeTab === "live") {
-      fetchLive(true);
-      const interval = setInterval(() => fetchLive(false), 4000);
+    if (activeTab === "live" || activeTab === "mybets") {
+      fetchLive(activeTab === "live");
+      const ms = liveMatchDetailOpen ? 2000 : 5000;
+      const interval = setInterval(() => fetchLive(false), ms);
       return () => clearInterval(interval);
     }
     return undefined;
-  }, [activeTab, fetchLive]);
+  }, [activeTab, fetchLive, liveMatchDetailOpen]);
 
   // Poll tennis, basketball, hockey, volleyball odds every 60s
   useEffect(() => {
@@ -1465,13 +1694,55 @@ export default function Home() {
       const res = await fetch("/api/bets/my", {
         headers: { Authorization: `Bearer ${auth.token}` }
       });
-      if (res.ok) setMyBets(await res.json());
+      if (res.ok) {
+        const bets: UserBet[] = await res.json();
+        setMyBets(bets);
+        const currentWonIds = new Set(bets.filter(b => b.status === "won").map(b => b.id));
+        if (prevWonBetIds.current !== null) {
+          const newWon = bets.filter(b => b.status === "won" && !prevWonBetIds.current!.has(b.id));
+          if (newWon.length > 0) {
+            const biggest = newWon.reduce((a, b) =>
+              parseFloat(a.potentialWin) >= parseFloat(b.potentialWin) ? a : b
+            );
+            setWinAnim({ amount: parseFloat(biggest.potentialWin), title: biggest.matchTitle ?? "Aposta" });
+          }
+        }
+        prevWonBetIds.current = currentWonIds;
+      }
     } catch {
       toast.error("Erro ao carregar apostas");
     } finally {
       setMyBetsLoading(false);
     }
   }, [auth.token]);
+
+  // Auto-refresh bets every 30s when on mybets tab (to catch settlements)
+  useEffect(() => {
+    if (activeTab !== "mybets" || !auth.token) return;
+    const id = setInterval(() => fetchMyBets(), 30000);
+    return () => clearInterval(id);
+  }, [activeTab, auth.token, fetchMyBets]);
+
+  // Auto-dismiss win animation after 5s
+  useEffect(() => {
+    if (!winAnim) return;
+    const t = setTimeout(() => setWinAnim(null), 5000);
+    return () => clearTimeout(t);
+  }, [winAnim]);
+
+  // Auto-dismiss cashout animation after 3s
+  useEffect(() => {
+    if (!cashoutAnim) return;
+    const t = setTimeout(() => setCashoutAnim(null), 3000);
+    return () => clearTimeout(t);
+  }, [cashoutAnim]);
+
+  // Auto-dismiss bet placed animation after 2.5s
+  useEffect(() => {
+    if (!betPlacedAnim) return;
+    const t = setTimeout(() => setBetPlacedAnim(false), 2500);
+    return () => clearTimeout(t);
+  }, [betPlacedAnim]);
 
   const handleVolleyLeagueClick = (id: string) => {
     if (expandedVolleyLeagueId === id) { setExpandedVolleyLeagueId(null); return; }
@@ -1506,7 +1777,7 @@ export default function Home() {
       });
       const data = await res.json();
       if (!res.ok) { toast.error(data.error || "Erro ao fazer cash out"); return; }
-      toast.success(`Cash Out realizado! € ${parseFloat(data.cashoutValue).toFixed(2)} adicionado ao seu saldo.`);
+      setCashoutAnim({ amount: parseFloat(data.cashoutValue) });
       auth.refreshUser();
       fetchMyBets();
     } catch {
@@ -1617,7 +1888,7 @@ export default function Home() {
             body: JSON.stringify({
               matchId: String(bet.matchId),
               matchTitle: bet.matchTitle,
-              selections: [{ matchTitle: bet.matchTitle, selection: bet.selection, odd: bet.odd, market: bet.market }],
+              selections: [{ matchTitle: bet.matchTitle, selection: bet.selection, odd: bet.odd, market: bet.market, label: bet.label || bet.selection }],
               stake: sNum.toFixed(2),
               potentialWin,
               totalOdds: bet.odd.toFixed(2),
@@ -1628,6 +1899,7 @@ export default function Home() {
         }
         if (allOk) {
           toast.success(`${bets.length} aposta${bets.length > 1 ? "s" : ""} realizada${bets.length > 1 ? "s" : ""}! Total: € ${totalCost.toFixed(2)}`);
+          setBetPlacedAnim(true);
           setBets([]); setBetStakes({}); setStake(""); setBetSlipOpenMobile(false); auth.refreshUser();
         }
       } catch { toast.error("Erro ao realizar aposta"); } finally { setIsPlacingBet(false); }
@@ -1649,7 +1921,7 @@ export default function Home() {
         body: JSON.stringify({
           matchId,
           matchTitle,
-          selections: bets.map(b => ({ matchTitle: b.matchTitle, selection: b.selection, odd: b.odd, market: b.market })),
+          selections: bets.map(b => ({ matchTitle: b.matchTitle, selection: b.selection, odd: b.odd, market: b.market, label: b.label || b.selection })),
           stake: stakeNum.toFixed(2),
           potentialWin,
           totalOdds,
@@ -1658,11 +1930,16 @@ export default function Home() {
       const data = await res.json();
       if (!res.ok) { toast.error(data.error || "Erro ao realizar aposta"); return; }
       toast.success(`Aposta múltipla realizada! Potencial de ganho: € ${potentialWin}`);
+      setBetPlacedAnim(true);
       setBets([]); setBetStakes({}); setStake(""); setBetSlipOpenMobile(false); auth.refreshUser();
     } catch { toast.error("Erro ao realizar aposta"); } finally { setIsPlacingBet(false); }
   };
 
   // --- UI Components ---
+
+  // Minimum change (vs previous API poll) required to show ▲/▼ arrow and flash.
+  // Filters out micro-oscillations — server controls the real update cadence.
+  const ODDS_ANIM_THRESHOLD = 0.02;
 
   const OddsButton = ({ match, selection, odd, market = "result", label, grow }: {
     match: Match; selection: string; odd: number; market?: string; label: string; grow?: boolean;
@@ -1672,14 +1949,13 @@ export default function Home() {
     const isSuspended = suspendedUntil !== undefined && suspendedUntil > now;
     const isSelected = !!bets.find(b => b.matchId === match.id && b.market === market && b.selection === selection);
     const prevOdd = match.isLive ? prevLiveOdds.current[String(match.id)]?.[selection as keyof Odds] : undefined;
-    const oddsUp = !isSuspended && prevOdd !== undefined && odd > prevOdd;
-    const oddsDown = !isSuspended && prevOdd !== undefined && odd < prevOdd;
+    // Arrow only when actual API value changed enough — server now controls cadence
+    const delta = prevOdd !== undefined ? odd - prevOdd : 0;
+    const oddsUp   = !isSuspended && delta >= ODDS_ANIM_THRESHOLD;
+    const oddsDown = !isSuspended && delta <= -ODDS_ANIM_THRESHOLD;
 
-    if (isSuspended) {
-      return null;
-    }
+    if (isSuspended) return null;
 
-    // Heavy favourite (odds < 1.15): show "--" — too low to offer a meaningful bet
     if (odd < 1.15 && market === "result") {
       return (
         <div className={`relative flex flex-col items-center py-2.5 px-2 rounded-md text-xs ${grow ? "flex-1" : ""} bg-zinc-800/40 border border-zinc-700/30`}>
@@ -1689,7 +1965,15 @@ export default function Home() {
       );
     }
 
-    if (match.isLive && market === "result" && odd <= 1.01) {
+    const isObviousResult = match.isLive && market === "result" && (() => {
+      if (odd <= 1.05) return true;
+      const min = getDisplayMinute(match);
+      const diff = Math.abs((match.homeScore ?? 0) - (match.awayScore ?? 0));
+      if (min >= 80 && diff >= 2) return true;
+      if (min >= 85 && diff >= 1) return true;
+      return false;
+    })();
+    if (isObviousResult) {
       return (
         <div className={`relative flex flex-col items-center py-2.5 px-2 rounded-md text-xs ${grow ? "flex-1" : ""} bg-amber-900/20 border border-amber-600/30`}>
           <span className="mb-0.5 text-[10px] leading-tight opacity-50">{label}</span>
@@ -1702,12 +1986,11 @@ export default function Home() {
 
     return (
       <button
-        key={odd.toFixed(2)}
         onClick={() => toggleBet(match, selection, odd, market, label)}
         className={`relative flex flex-col items-center py-2.5 px-2 rounded-md transition-colors text-xs ${grow ? "flex-1" : ""} ${isSelected ? "bg-red-600 text-white" : "bg-zinc-800 hover:bg-zinc-700 text-zinc-300"} ${flashClass}`}
       >
         <span className="mb-0.5 text-[10px] leading-tight opacity-70">{label}</span>
-        <span className="font-bold text-sm flex items-center gap-0.5">
+        <span className="font-bold text-sm tabular-nums flex items-center gap-0.5">
           {odd.toFixed(2)}
           {oddsUp   && <span className="text-green-400 text-[9px] font-black leading-none shrink-0">▲</span>}
           {oddsDown && <span className="text-red-400  text-[9px] font-black leading-none shrink-0">▼</span>}
@@ -1783,7 +2066,10 @@ export default function Home() {
       if (sport === "tennis"     && match.status) return match.status;
       if (sport === "volleyball" && match.status) return match.status;
 
-      return minute === 45 ? "HT" : minute === 105 ? "ET" : `${minute}'`;
+      if (minute === 45) return "HT";
+      if (minute === 105) return "Int.P";
+      if (minute > 90) return `${minute > 105 ? "2P" : "1P"} ${minute}'`;
+      return `${minute}'`;
     })();
 
     // "Em Breve" — upcoming real match, not yet started
@@ -1944,8 +2230,17 @@ export default function Home() {
     };
 
     // Basketball / Hockey / Football: standard home vs away score
+    const rcH = match.redCardsHome ?? 0;
+    const rcA = match.redCardsAway ?? 0;
+    // Small red card icon above team name; count shown inside
+    const RcBadge = ({ count }: { count: number }) => count <= 0 ? null : (
+      <span className="inline-flex items-center justify-center w-2.5 h-3.5 bg-red-600 rounded-[2px] text-white font-black text-[7px] leading-none select-none shadow mb-0.5">
+        {count}
+      </span>
+    );
+
     const SimpleScore = ({ big }: { big?: boolean }) => isEmBreve ? (
-      <div className={`flex items-center gap-2 w-full`}>
+      <div className="flex items-center gap-2 w-full">
         <span className={`font-bold text-zinc-400 ${big ? "text-base" : "text-sm"} truncate flex-1 text-right`}>{match.home}</span>
         <div className={`${big ? "text-3xl" : "text-xl"} font-black text-zinc-600 tabular-nums shrink-0 ${big ? "px-2" : "px-1"} text-center`}>
           –<span className={`${big ? "text-zinc-700 mx-1" : "text-zinc-700 mx-0.5"}`}>:</span>–
@@ -1953,12 +2248,20 @@ export default function Home() {
         <span className={`font-bold text-zinc-400 ${big ? "text-base" : "text-sm"} truncate flex-1`}>{match.away}</span>
       </div>
     ) : (
-      <div className={`flex items-center gap-2 w-full`}>
-        <span className={`font-bold text-white ${big ? "text-base" : "text-sm"} truncate flex-1 text-right`}>{match.home}</span>
+      <div className="flex items-center gap-2 w-full">
+        {/* Home: name + badge inline, right-aligned toward score */}
+        <div className="flex items-center justify-end gap-1 flex-1 min-w-0">
+          <span className={`font-bold text-white ${big ? "text-base" : "text-sm"} truncate`}>{match.home}</span>
+          <RcBadge count={rcH} />
+        </div>
         <div className={`${big ? "text-3xl" : "text-xl"} font-black text-white tabular-nums shrink-0 ${big ? "px-2" : "px-1"} text-center`}>
           {match.homeScore ?? 0}<span className={`${big ? "text-white/40 text-xl mx-0.5" : "text-zinc-600 mx-0.5"}`}>-</span>{match.awayScore ?? 0}
         </div>
-        <span className={`font-bold text-white ${big ? "text-base" : "text-sm"} truncate flex-1`}>{match.away}</span>
+        {/* Away: badge + name inline, left-aligned from score */}
+        <div className="flex items-center justify-start gap-1 flex-1 min-w-0">
+          <RcBadge count={rcA} />
+          <span className={`font-bold text-white ${big ? "text-base" : "text-sm"} truncate`}>{match.away}</span>
+        </div>
       </div>
     );
 
@@ -1967,14 +2270,33 @@ export default function Home() {
       ? { layout: true as const, initial: { opacity: 0, y: 10 }, animate: { opacity: 1, y: 0 } }
       : { layout: true as const };
 
+    const isObviousLiveResult = match.isLive && (match.sport === "football" || !match.sport) && (() => {
+      const minOdd = Math.min(match.odds.home, match.odds.away);
+      if (minOdd <= 1.05) return true;
+      const min = getDisplayMinute(match);
+      const diff = Math.abs((match.homeScore ?? 0) - (match.awayScore ?? 0));
+      if (min >= 80 && diff >= 2) return true;
+      if (min >= 85 && diff >= 1) return true;
+      return false;
+    })();
+
     const oddsRow = match.hasRealOdds ? (
       <div className="flex gap-2 w-full mt-2.5">
         <SuspensionBanner match={match} />
-        {!match.marketSuspension || !Object.values(match.marketSuspension).some(ts => ts > Date.now()) ? (<>
-          <OddsButton match={match} selection="home" odd={match.odds.home} market="result" label="Casa" grow />
-          {match.odds.draw > 0 && <OddsButton match={match} selection="draw" odd={match.odds.draw} market="result" label="Emp." grow />}
-          <OddsButton match={match} selection="away" odd={match.odds.away} market="result" label="Fora" grow />
-        </>) : null}
+        {!match.marketSuspension || !Object.values(match.marketSuspension).some(ts => ts > Date.now()) ? (
+          isObviousLiveResult ? (
+            <button
+              className="flex-1 flex flex-col items-center py-2.5 px-2 rounded-md text-xs bg-amber-900/20 border border-amber-600/30"
+              onClick={() => setExpandedMatch(match)}
+            >
+              <span className="font-bold text-[11px] text-amber-400 uppercase tracking-wider">Aposta Já</span>
+            </button>
+          ) : (<>
+            <OddsButton match={match} selection="home" odd={match.odds.home} market="result" label="Casa" grow />
+            {match.odds.draw > 0 && <OddsButton match={match} selection="draw" odd={match.odds.draw} market="result" label="Emp." grow />}
+            <OddsButton match={match} selection="away" odd={match.odds.away} market="result" label="Fora" grow />
+          </>)
+        ) : null}
       </div>
     ) : null;
 
@@ -2008,11 +2330,20 @@ export default function Home() {
             {match.hasRealOdds && (
               <div className="flex gap-2 w-full">
                 <SuspensionBanner match={match} />
-                {!match.marketSuspension || !Object.values(match.marketSuspension).some(ts => ts > Date.now()) ? (<>
-                  <OddsButton match={match} selection="home" odd={match.odds.home} market="result" label="Casa" grow />
-                  {match.odds.draw > 0 && <OddsButton match={match} selection="draw" odd={match.odds.draw} market="result" label="Emp." grow />}
-                  <OddsButton match={match} selection="away" odd={match.odds.away} market="result" label="Fora" grow />
-                </>) : null}
+                {!match.marketSuspension || !Object.values(match.marketSuspension).some(ts => ts > Date.now()) ? (
+                  isObviousLiveResult ? (
+                    <button
+                      className="flex-1 flex flex-col items-center py-2.5 px-2 rounded-md text-xs bg-amber-900/20 border border-amber-600/30"
+                      onClick={() => setExpandedMatch(match)}
+                    >
+                      <span className="font-bold text-[11px] text-amber-400 uppercase tracking-wider">Aposta Já</span>
+                    </button>
+                  ) : (<>
+                    <OddsButton match={match} selection="home" odd={match.odds.home} market="result" label="Casa" grow />
+                    {match.odds.draw > 0 && <OddsButton match={match} selection="draw" odd={match.odds.draw} market="result" label="Emp." grow />}
+                    <OddsButton match={match} selection="away" odd={match.odds.away} market="result" label="Fora" grow />
+                  </>)
+                ) : null}
               </div>
             )}
           </div>
@@ -2156,7 +2487,7 @@ export default function Home() {
           {chunks.map((events, bi) => {
             const cfg = BANNER_CONFIGS[bi];
             const totalOddsVal = events
-              .reduce((acc, m) => acc + (m.odds.home > 0 ? m.odds.home : 0), 0)
+              .reduce((acc, m) => m.odds.home > 0 ? acc * m.odds.home : acc, 1)
               .toFixed(2);
 
             return (
@@ -2285,7 +2616,18 @@ export default function Home() {
       <div className="flex flex-col h-full bg-zinc-950/50">
         <div className="p-4 border-b border-zinc-800 bg-zinc-900 flex justify-between items-center">
           <h3 className="font-bold text-lg text-white">Boletim de Apostas</h3>
-          <span className="bg-red-600 text-white text-xs font-bold px-2 py-1 rounded-full">{bets.length}</span>
+          <div className="flex items-center gap-2">
+            {bets.length > 0 && (
+              <button
+                onClick={() => { setBets([]); setBetStakes({}); setStake(""); }}
+                className="text-zinc-500 hover:text-red-400 transition-colors p-1"
+                title="Limpar boletim"
+              >
+                <Trash2 size={16} />
+              </button>
+            )}
+            <span className="bg-red-600 text-white text-xs font-bold px-2 py-1 rounded-full">{bets.length}</span>
+          </div>
         </div>
 
         {bets.length > 0 && (
@@ -2419,18 +2761,103 @@ export default function Home() {
     );
   };
 
+  // Build a flat "market:sel" → odd map from a Match's current markets + odds.
+  // Used to capture snapshot of all market values before the next live poll,
+  // so MarketOddsBtn can show ▲/▼ arrows based on previous vs current value.
+  function flattenMatchMarketsForArrows(match: Match): Record<string, number> {
+    const f: Record<string, number> = {};
+    const m = match.markets;
+    if (!m) return f;
+    // 1X2
+    f["result:home"] = match.odds.home; f["result:draw"] = match.odds.draw; f["result:away"] = match.odds.away;
+    // Dupla Chance + BTTS
+    f["dupla:homeOrDraw"] = m.doubleChance.homeOrDraw; f["dupla:awayOrDraw"] = m.doubleChance.awayOrDraw; f["dupla:homeOrAway"] = m.doubleChance.homeOrAway;
+    f["dupla:bts-yes"] = m.bothTeamsScore.yes; f["dupla:bts-no"] = m.bothTeamsScore.no;
+    f["especiais:bts-yes"] = m.bothTeamsScore.yes; f["especiais:bts-no"] = m.bothTeamsScore.no;
+    f["especiais:dc-hd"] = m.doubleChance.homeOrDraw; f["especiais:dc-ha"] = m.doubleChance.homeOrAway; f["especiais:dc-da"] = m.doubleChance.awayOrDraw;
+    // Total de Golos (gols / totais / 1tempo tabs)
+    const tg = m.totalGoals;
+    const tgMap: Array<[string, number]> = [["o05",tg.over05],["u05",tg.under05],["o15",tg.over15],["u15",tg.under15],["o25",tg.over25],["u25",tg.under25],["o35",tg.over35],["u35",tg.under35],["o45",tg.over45],["u45",tg.under45],["o55",tg.over55],["u55",tg.under55],["o65",tg.over65],["u65",tg.under65]];
+    for (const [k, v] of tgMap) { f[`gols:${k}`] = v; f[`totais:${k}`] = v; f[`1tempo:${k}`] = v; }
+    // Sets (volleyball / tennis reuse totalGoals)
+    f["sets:osets"] = tg.over25; f["sets:usets"] = tg.under25;
+    f["sets:osets25"] = tg.over15; f["sets:usets25"] = tg.under15;
+    f["sets:osets35"] = tg.over25; f["sets:usets35"] = tg.under25;
+    f["sets:tie-yes"] = m.bothTeamsScore.yes; f["sets:tie-no"] = m.bothTeamsScore.no;
+    // Handicap
+    const hc = m.handicap;
+    f["handicap:hm1"] = hc.homeMinusOne; f["handicap:hm1h"] = hc.homeMinusOneHalf;
+    f["handicap:ap1"] = hc.awayPlusOne; f["handicap:ap1h"] = hc.awayPlusOneHalf;
+    f["handicap:hcap-home"] = hc.homeMinusOne; f["handicap:hcap-away"] = hc.awayPlusOne;
+    f["spread:hm1"] = hc.homeMinusOne; f["spread:ap1"] = hc.awayPlusOne;
+    f["puckline:pl-home"] = hc.homeMinusOne; f["puckline:pl-away"] = hc.awayPlusOne;
+    // Intervalo / HalfTime / Period 1
+    if (m.halfTime) {
+      f["1tempo:ht-home"] = m.halfTime.home; f["1tempo:ht-draw"] = m.halfTime.draw; f["1tempo:ht-away"] = m.halfTime.away;
+      f["1periodo:per1-home"] = m.halfTime.home; f["1periodo:per1-draw"] = m.halfTime.draw; f["1periodo:per1-away"] = m.halfTime.away;
+      f["quartos:h1-home"] = m.halfTime.home; f["quartos:h1-away"] = m.halfTime.away;
+    }
+    // Primeiro Golo
+    if (m.firstGoal) {
+      f["1tempo:fg-home"] = m.firstGoal.home; f["1tempo:fg-none"] = m.firstGoal.noGoal; f["1tempo:fg-away"] = m.firstGoal.away;
+    }
+    // HT/FT
+    if (m.htft) {
+      const h = m.htft;
+      f["htft:htft-hh"] = h.hh; f["htft:htft-hd"] = h.hd; f["htft:htft-ha"] = h.ha;
+      f["htft:htft-dh"] = h.dh; f["htft:htft-dd"] = h.dd; f["htft:htft-da"] = h.da;
+      f["htft:htft-ah"] = h.ah; f["htft:htft-ad"] = h.ad; f["htft:htft-aa"] = h.aa;
+    }
+    // Placar Correto
+    if (m.correctScore) {
+      for (const [k, v] of Object.entries(m.correctScore)) f[`placar:cs-${k}`] = v;
+    }
+    // Escanteios
+    if (m.corners) {
+      f["escanteios:oc85"] = m.corners.o85; f["escanteios:uc85"] = m.corners.u85;
+      f["escanteios:oc95"] = m.corners.o95; f["escanteios:uc95"] = m.corners.u95;
+      f["escanteios:oc105"] = m.corners.o105; f["escanteios:uc105"] = m.corners.u105;
+    }
+    // Cartões
+    if (m.cards) {
+      f["cartoes:ocard35"] = m.cards.o35; f["cartoes:ucard35"] = m.cards.u35;
+      f["cartoes:ocard45"] = m.cards.o45; f["cartoes:ucard45"] = m.cards.u45;
+    }
+    // Asiático (Draw No Bet + Asian Handicap + Asian Totals)
+    if (m.drawNoBet) { f["asiatico:dnb-home"] = m.drawNoBet.home; f["asiatico:dnb-away"] = m.drawNoBet.away; }
+    if (m.asianHandicap) { f["asiatico:ah-home"] = m.asianHandicap.home; f["asiatico:ah-away"] = m.asianHandicap.away; }
+    if (m.asianTotals) {
+      f["asiatico:at-o05"] = m.asianTotals.o05; f["asiatico:at-u05"] = m.asianTotals.u05;
+      f["asiatico:at-o225"] = m.asianTotals.o225; f["asiatico:at-u225"] = m.asianTotals.u225;
+      f["asiatico:at-o275"] = m.asianTotals.o275; f["asiatico:at-u275"] = m.asianTotals.u275;
+      f["asiatico:at-o45"] = m.asianTotals.o45; f["asiatico:at-u45"] = m.asianTotals.u45;
+      f["asiatico:at-o55"] = m.asianTotals.o55; f["asiatico:at-u55"] = m.asianTotals.u55;
+    }
+    return f;
+  }
+
   const MarketOddsBtn = ({ match, sel, odd, market, label }: { match: Match; sel: string; odd: number; market: string; label: string }) => {
     if (market === "result" && odd <= 1.01) return null;
     const isSusp = !!match.marketSuspension && Object.values(match.marketSuspension).some(ts => ts > Date.now());
     if (isSusp) return null;
     const active = !!bets.find(b => b.matchId === match.id && b.market === market && b.selection === sel);
+    const prevOdd = match.isLive ? prevLiveMarkets.current[String(match.id)]?.[`${market}:${sel}`] : undefined;
+    // Server controls update cadence — only animate when actual data changed >= threshold
+    const delta = prevOdd !== undefined ? odd - prevOdd : 0;
+    const oddUp   = !active && delta >= ODDS_ANIM_THRESHOLD;
+    const oddDown = !active && delta <= -ODDS_ANIM_THRESHOLD;
+    const flashClass = oddUp ? "odds-flash-up" : oddDown ? "odds-flash-down" : "";
     return (
       <button
         onClick={() => toggleBet(match, sel, odd, market, label)}
-        className={`flex-1 flex flex-col items-center py-2.5 px-1 rounded-lg border transition-all min-w-0 ${active ? "border-red-600 bg-red-600/15 ring-1 ring-red-500/40" : "border-zinc-800 bg-zinc-900/80 hover:border-red-500/40 hover:bg-zinc-800"}`}
+        className={`flex-1 flex flex-col items-center py-2.5 px-1 rounded-lg border transition-all min-w-0 ${active ? "border-red-600 bg-red-600/15 ring-1 ring-red-500/40" : "border-zinc-800 bg-zinc-900/80 hover:border-red-500/40 hover:bg-zinc-800"} ${flashClass}`}
       >
         <span className="text-[11px] text-zinc-400 mb-1 leading-tight text-center truncate w-full px-0.5">{label}</span>
-        <span className={`font-bold text-base tabular-nums ${active ? "text-red-400" : "text-white"}`}>{odd.toFixed(2)}</span>
+        <span className={`font-bold text-base tabular-nums flex items-center gap-0.5 ${active ? "text-red-400" : "text-white"}`}>
+          {odd.toFixed(2)}
+          {oddUp   && <span className="text-green-400 text-[9px] font-black leading-none shrink-0">▲</span>}
+          {oddDown && <span className="text-red-400  text-[9px] font-black leading-none shrink-0">▼</span>}
+        </span>
       </button>
     );
   };
@@ -2478,10 +2905,33 @@ export default function Home() {
     // Parse current live period/set/quarter from status (0 = upcoming/unknown → show all markets)
     const currentSet = (isTennis || isVolleyball) && (match as any).status?.startsWith("Set")
       ? (parseInt(((match as any).status as string).replace("Set ", "")) || 0) : 0;
-    const currentQ = isBasketball && (match as any).status?.startsWith("Q")
-      ? (parseInt(((match as any).status as string).replace("Q", "")) || 0) : 0;
+    // Basketball: "HT" = NBA halftime (between Q2 and Q3 → quartersDone = 2)
+    const currentQ = isBasketball
+      ? ((match as any).status?.startsWith("Q")
+          ? (parseInt(((match as any).status as string).replace("Q", "")) || 0)
+          : (match as any).status === "HT" ? 2 : 0)
+      : 0;
     const currentP = isHockey && (match as any).status?.startsWith("P")
       ? (parseInt(((match as any).status as string).replace("P", "")) || 0) : 0;
+    // showET: show Prolongamento markets (match in extra time)
+    const showET = isFootball && match.isLive && !!match.markets?.etExtra;
+    // showPen: show Penáltis markets (match in penalty shootout)
+    const showPen = isFootball && match.isLive && !!match.markets?.penExtra;
+    // Football half lifecycle: null=pre-match/ET/Pen (show all), 1=1st half, 0=HT break, 2=2nd half
+    // ET and Pen phases show all full-match markets too
+    const rawStat = (match as any).status as string | undefined;
+    const liveHalf = isFootball && match.isLive && !showET && !showPen
+      ? (rawStat === "HT" ? 0 : (match.minute ?? 0) > 45 ? 2 : 1)
+      : null;
+    // show1tempo: show "1º Tempo" markets (pre-match OR during 1st half)
+    const show1tempo = liveHalf === null || liveHalf === 1;
+    // show2tempo: show "2º Tempo" markets (at HT break OR during 2nd half)
+    const show2tempo = liveHalf === 0 || liveHalf === 2;
+    // isLateGame: live 2nd-half football ≥80' → hide low-traffic markets, smart-filter lines
+    const liveDisplayMin = isFootball && match.isLive ? getDisplayMinute(match) : 0;
+    const isLateGame = isFootball && match.isLive && liveHalf === 2 && liveDisplayMin >= 80 && !showET && !showPen;
+    // Which total-goals line is most relevant late game = next line above current total goals
+    const lateGameGoals = (match.homeScore ?? 0) + (match.awayScore ?? 0);
 
     const tabs = isBasketball
       ? [
@@ -2523,17 +2973,21 @@ export default function Home() {
                 { key: "pontos", label: "Pontos" },
               ]
             : [
-                { key: "todos", label: "Todos" },
+                { key: "todos",    label: "Todos" },
+                // ET/Pen tabs appear immediately after "Todos" so they're always visible
+                ...(showET  ? [{ key: "prolongamento", label: "⏱ Prorrogação" }] : []),
+                ...(showPen ? [{ key: "penaltis",      label: "🎯 Penáltis" }]   : []),
                 { key: "resultado", label: "Resultado" },
-                { key: "dupla", label: "Dupla Chance" },
-                { key: "gols", label: "Gols" },
-                { key: "handicap", label: "Handicap" },
-                { key: "1tempo", label: "1º Tempo" },
-                { key: "htft", label: "HT/FT" },
-                { key: "placar", label: "Placar Exato" },
+                { key: "dupla",     label: "Dupla Chance" },
+                { key: "gols",      label: "Gols" },
+                { key: "handicap",  label: "Handicap" },
+                ...(show1tempo ? [{ key: "1tempo", label: "1º Tempo" }] : []),
+                ...(show2tempo ? [{ key: "2tempo", label: "2º Tempo" }] : []),
+                { key: "htft",       label: "HT/FT" },
+                { key: "placar",     label: "Placar Exato" },
                 { key: "escanteios", label: "Escanteios" },
-                { key: "cartoes", label: "Cartões" },
-                { key: "asiatico", label: "Asiático" },
+                { key: "cartoes",    label: "Cartões" },
+                { key: "asiatico",   label: "Asiático" },
               ];
 
     const m = match.markets;
@@ -2570,17 +3024,82 @@ export default function Home() {
           </div>
         )}
 
-        {/* ── RESULTADO / VENCEDOR ── */}
-        {(modalTab === "resultado" || modalTab === "todos") && (
-          <MarketGroup title={isBasketball ? "Vencedor da Partida" : isTennis ? "Vencedor do Jogo" : "Resultado Final"}>
-            <MarketOddsBtn match={match} sel="home" odd={match.odds.home} market="result" label={match.home} />
-            {match.odds.draw > 0 && <MarketOddsBtn match={match} sel="draw" odd={match.odds.draw} market="result" label="Empate" />}
-            <MarketOddsBtn match={match} sel="away" odd={match.odds.away} market="result" label={match.away} />
-          </MarketGroup>
+        {/* ── PRORROGAÇÃO ── */}
+        {isFootball && showET && m?.etExtra && (modalTab === "prolongamento" || modalTab === "todos") && (
+          <div className="mb-2">
+            <div className="flex items-center gap-2 mb-3 px-1">
+              <span className="text-[10px] font-black uppercase tracking-widest text-red-500 bg-red-950/40 border border-red-800/40 rounded px-2 py-0.5">⏱ Prorrogação em curso</span>
+            </div>
+            <MarketGroup title="Vencedor da Eliminatória">
+              <MarketOddsBtn match={match} sel="et-tie-home" odd={m.etExtra.tieWinner.home} market="prolongamento" label={match.home} />
+              <MarketOddsBtn match={match} sel="et-tie-away" odd={m.etExtra.tieWinner.away} market="prolongamento" label={match.away} />
+            </MarketGroup>
+            {m.etExtra.totalGoals.o05 > 0 && (
+              <MarketGroup title="Golos na Prorrogação — 0.5">
+                <MarketOddsBtn match={match} sel="et-o05" odd={m.etExtra.totalGoals.o05} market="prolongamento" label="Mais de 0.5" />
+                <MarketOddsBtn match={match} sel="et-u05" odd={m.etExtra.totalGoals.u05} market="prolongamento" label="Menos de 0.5" />
+              </MarketGroup>
+            )}
+            {m.etExtra.totalGoals.o15 > 0 && (
+              <MarketGroup title="Golos na Prorrogação — 1.5">
+                <MarketOddsBtn match={match} sel="et-o15" odd={m.etExtra.totalGoals.o15} market="prolongamento" label="Mais de 1.5" />
+                <MarketOddsBtn match={match} sel="et-u15" odd={m.etExtra.totalGoals.u15} market="prolongamento" label="Menos de 1.5" />
+              </MarketGroup>
+            )}
+            {m.etExtra.totalGoals.o25 > 0 && (
+              <MarketGroup title="Golos na Prorrogação — 2.5">
+                <MarketOddsBtn match={match} sel="et-o25" odd={m.etExtra.totalGoals.o25} market="prolongamento" label="Mais de 2.5" />
+                <MarketOddsBtn match={match} sel="et-u25" odd={m.etExtra.totalGoals.u25} market="prolongamento" label="Menos de 2.5" />
+              </MarketGroup>
+            )}
+            <MarketGroup title="Resultado da Prorrogação">
+              <MarketOddsBtn match={match} sel="et-res-home" odd={m.etExtra.etResult.home} market="prolongamento" label={match.home} />
+              <MarketOddsBtn match={match} sel="et-res-draw" odd={m.etExtra.etResult.draw} market="prolongamento" label="Empate → Penáltis" />
+              <MarketOddsBtn match={match} sel="et-res-away" odd={m.etExtra.etResult.away} market="prolongamento" label={match.away} />
+            </MarketGroup>
+            <MarketGroup title="Equipa a Marcar na Prorrogação">
+              <MarketOddsBtn match={match} sel="et-ng-home" odd={m.etExtra.nextGoal.home} market="prolongamento" label={`Gol 1 — ${match.home}`} />
+              <MarketOddsBtn match={match} sel="et-ng-away" odd={m.etExtra.nextGoal.away} market="prolongamento" label={`Gol 2 — ${match.away}`} />
+            </MarketGroup>
+          </div>
         )}
 
+        {/* ── PENÁLTIS (SHOOTOUT) ── */}
+        {isFootball && showPen && m?.penExtra && (modalTab === "penaltis" || modalTab === "todos") && (
+          <div className="mb-2">
+            <div className="flex items-center gap-2 mb-3 px-1">
+              <span className="text-[10px] font-black uppercase tracking-widest text-yellow-400 bg-yellow-950/40 border border-yellow-700/40 rounded px-2 py-0.5">🎯 Penáltis em curso</span>
+            </div>
+            <MarketGroup title="Vencedor nos Penáltis">
+              <MarketOddsBtn match={match} sel="pen-home" odd={m.penExtra.winner.home} market="penaltis" label={match.home} />
+              <MarketOddsBtn match={match} sel="pen-away" odd={m.penExtra.winner.away} market="penaltis" label={match.away} />
+            </MarketGroup>
+          </div>
+        )}
+
+        {/* ── RESULTADO / VENCEDOR ── hide for live football when result is obvious ── */}
+        {(modalTab === "resultado" || modalTab === "todos") && (() => {
+          const hideResult = match.isLive && isFootball && (() => {
+            const minOdd = Math.min(match.odds.home, match.odds.away);
+            if (minOdd <= 1.05) return true;
+            const min = getDisplayMinute(match);
+            const diff = Math.abs((match.homeScore ?? 0) - (match.awayScore ?? 0));
+            if (min >= 80 && diff >= 2) return true;
+            if (min >= 85 && diff >= 1) return true;
+            return false;
+          })();
+          if (hideResult) return null;
+          return (
+            <MarketGroup title={isBasketball ? "Vencedor da Partida" : isTennis ? "Vencedor do Jogo" : "Resultado Final"}>
+              <MarketOddsBtn match={match} sel="home" odd={match.odds.home} market="result" label={match.home} />
+              {match.odds.draw > 0 && <MarketOddsBtn match={match} sel="draw" odd={match.odds.draw} market="result" label="Empate" />}
+              <MarketOddsBtn match={match} sel="away" odd={match.odds.away} market="result" label={match.away} />
+            </MarketGroup>
+          );
+        })()}
+
         {/* ── FUTEBOL: DUPLA CHANCE ── */}
-        {isFootball && (modalTab === "dupla" || modalTab === "todos") && m && m.doubleChance.homeOrDraw > 0 && (
+        {isFootball && !isLateGame && (modalTab === "dupla" || modalTab === "todos") && m && m.doubleChance.homeOrDraw > 0 && (
           <div>
             <MarketGroup title="Dupla Chance">
               <MarketOddsBtn match={match} sel="homeOrDraw" odd={m.doubleChance.homeOrDraw} market="dupla" label={`${match.home} ou X`} />
@@ -2595,52 +3114,75 @@ export default function Home() {
             )}
           </div>
         )}
-        {isFootball && modalTab === "dupla" && m && m.doubleChance.homeOrDraw === 0 && (
+        {isFootball && !isLateGame && modalTab === "dupla" && m && m.doubleChance.homeOrDraw === 0 && (
           <div className="text-center text-zinc-600 py-6 text-sm">Mercado não disponível para esta partida.</div>
         )}
 
         {/* ── FUTEBOL: GOLS ── */}
         {isFootball && (modalTab === "gols" || modalTab === "todos") && m && m.totalGoals.over25 > 0 && (
           <div>
-            {m.totalGoals.over05 > 0 && (
-              <MarketGroup title="Total de Gols — 0.5">
-                <MarketOddsBtn match={match} sel="o05" odd={m.totalGoals.over05} market="gols" label="Mais de 0.5" />
-                <MarketOddsBtn match={match} sel="u05" odd={m.totalGoals.under05} market="gols" label="Menos de 0.5" />
-              </MarketGroup>
-            )}
-            {m.totalGoals.over15 > 0 && (
-              <MarketGroup title="Total de Gols — 1.5">
-                <MarketOddsBtn match={match} sel="o15" odd={m.totalGoals.over15} market="gols" label="Mais de 1.5" />
-                <MarketOddsBtn match={match} sel="u15" odd={m.totalGoals.under15} market="gols" label="Menos de 1.5" />
-              </MarketGroup>
-            )}
-            <MarketGroup title="Total de Gols — 2.5">
-              <MarketOddsBtn match={match} sel="o25" odd={m.totalGoals.over25} market="gols" label="Mais de 2.5" />
-              <MarketOddsBtn match={match} sel="u25" odd={m.totalGoals.under25} market="gols" label="Menos de 2.5" />
-            </MarketGroup>
-            {m.totalGoals.over35 > 0 && (
-              <MarketGroup title="Total de Gols — 3.5">
-                <MarketOddsBtn match={match} sel="o35" odd={m.totalGoals.over35} market="gols" label="Mais de 3.5" />
-                <MarketOddsBtn match={match} sel="u35" odd={m.totalGoals.under35} market="gols" label="Menos de 3.5" />
-              </MarketGroup>
-            )}
-            {m.totalGoals.over45 > 0 && (
-              <MarketGroup title="Total de Gols — 4.5">
-                <MarketOddsBtn match={match} sel="o45" odd={m.totalGoals.over45} market="gols" label="Mais de 4.5" />
-                <MarketOddsBtn match={match} sel="u45" odd={m.totalGoals.under45} market="gols" label="Menos de 4.5" />
-              </MarketGroup>
-            )}
-            {m.totalGoals.over55 > 0 && (
-              <MarketGroup title="Total de Gols — 5.5">
-                <MarketOddsBtn match={match} sel="o55" odd={m.totalGoals.over55} market="gols" label="Mais de 5.5" />
-                <MarketOddsBtn match={match} sel="u55" odd={m.totalGoals.under55} market="gols" label="Menos de 5.5" />
-              </MarketGroup>
-            )}
-            {m.totalGoals.over65 > 0 && (
-              <MarketGroup title="Total de Gols — 6.5">
-                <MarketOddsBtn match={match} sel="o65" odd={m.totalGoals.over65} market="gols" label="Mais de 6.5" />
-                <MarketOddsBtn match={match} sel="u65" odd={m.totalGoals.under65} market="gols" label="Menos de 6.5" />
-              </MarketGroup>
+            {isLateGame ? (() => {
+              // Late game: show only the 1 most relevant open line (currentGoals + 0.5)
+              const tgMap = [
+                { label: "0.5", o: m.totalGoals.over05, u: m.totalGoals.under05, selO: "o05", selU: "u05" },
+                { label: "1.5", o: m.totalGoals.over15, u: m.totalGoals.under15, selO: "o15", selU: "u15" },
+                { label: "2.5", o: m.totalGoals.over25, u: m.totalGoals.under25, selO: "o25", selU: "u25" },
+                { label: "3.5", o: m.totalGoals.over35, u: m.totalGoals.under35, selO: "o35", selU: "u35" },
+                { label: "4.5", o: m.totalGoals.over45, u: m.totalGoals.under45, selO: "o45", selU: "u45" },
+                { label: "5.5", o: m.totalGoals.over55, u: m.totalGoals.under55, selO: "o55", selU: "u55" },
+                { label: "6.5", o: m.totalGoals.over65, u: m.totalGoals.under65, selO: "o65", selU: "u65" },
+              ];
+              const line = tgMap[Math.min(lateGameGoals, tgMap.length - 1)]!;
+              if (!line.o) return null;
+              return (
+                <MarketGroup title={`Total de Gols — ${line.label}`}>
+                  <MarketOddsBtn match={match} sel={line.selO} odd={line.o} market="gols" label={`Mais de ${line.label}`} />
+                  <MarketOddsBtn match={match} sel={line.selU} odd={line.u} market="gols" label={`Menos de ${line.label}`} />
+                </MarketGroup>
+              );
+            })() : (
+              <>
+                {m.totalGoals.over05 > 0 && (
+                  <MarketGroup title="Total de Gols — 0.5">
+                    <MarketOddsBtn match={match} sel="o05" odd={m.totalGoals.over05} market="gols" label="Mais de 0.5" />
+                    <MarketOddsBtn match={match} sel="u05" odd={m.totalGoals.under05} market="gols" label="Menos de 0.5" />
+                  </MarketGroup>
+                )}
+                {m.totalGoals.over15 > 0 && (
+                  <MarketGroup title="Total de Gols — 1.5">
+                    <MarketOddsBtn match={match} sel="o15" odd={m.totalGoals.over15} market="gols" label="Mais de 1.5" />
+                    <MarketOddsBtn match={match} sel="u15" odd={m.totalGoals.under15} market="gols" label="Menos de 1.5" />
+                  </MarketGroup>
+                )}
+                <MarketGroup title="Total de Gols — 2.5">
+                  <MarketOddsBtn match={match} sel="o25" odd={m.totalGoals.over25} market="gols" label="Mais de 2.5" />
+                  <MarketOddsBtn match={match} sel="u25" odd={m.totalGoals.under25} market="gols" label="Menos de 2.5" />
+                </MarketGroup>
+                {m.totalGoals.over35 > 0 && (
+                  <MarketGroup title="Total de Gols — 3.5">
+                    <MarketOddsBtn match={match} sel="o35" odd={m.totalGoals.over35} market="gols" label="Mais de 3.5" />
+                    <MarketOddsBtn match={match} sel="u35" odd={m.totalGoals.under35} market="gols" label="Menos de 3.5" />
+                  </MarketGroup>
+                )}
+                {m.totalGoals.over45 > 0 && (
+                  <MarketGroup title="Total de Gols — 4.5">
+                    <MarketOddsBtn match={match} sel="o45" odd={m.totalGoals.over45} market="gols" label="Mais de 4.5" />
+                    <MarketOddsBtn match={match} sel="u45" odd={m.totalGoals.under45} market="gols" label="Menos de 4.5" />
+                  </MarketGroup>
+                )}
+                {m.totalGoals.over55 > 0 && (
+                  <MarketGroup title="Total de Gols — 5.5">
+                    <MarketOddsBtn match={match} sel="o55" odd={m.totalGoals.over55} market="gols" label="Mais de 5.5" />
+                    <MarketOddsBtn match={match} sel="u55" odd={m.totalGoals.under55} market="gols" label="Menos de 5.5" />
+                  </MarketGroup>
+                )}
+                {m.totalGoals.over65 > 0 && (
+                  <MarketGroup title="Total de Gols — 6.5">
+                    <MarketOddsBtn match={match} sel="o65" odd={m.totalGoals.over65} market="gols" label="Mais de 6.5" />
+                    <MarketOddsBtn match={match} sel="u65" odd={m.totalGoals.under65} market="gols" label="Menos de 6.5" />
+                  </MarketGroup>
+                )}
+              </>
             )}
           </div>
         )}
@@ -2758,14 +3300,24 @@ export default function Home() {
           <div>
             {isFootball ? (
               <>
-                <MarketGroup title={`Handicap Europeu — ${match.home}`}>
-                  <MarketOddsBtn match={match} sel="hm1" odd={m.handicap.homeMinusOne} market="handicap" label={`${match.home} −1`} />
-                  <MarketOddsBtn match={match} sel="hm1h" odd={m.handicap.homeMinusOneHalf} market="handicap" label={`${match.home} −1.5`} />
-                </MarketGroup>
-                <MarketGroup title={`Handicap Europeu — ${match.away}`}>
-                  <MarketOddsBtn match={match} sel="ap1" odd={m.handicap.awayPlusOne} market="handicap" label={`${match.away} +1`} />
-                  <MarketOddsBtn match={match} sel="ap1h" odd={m.handicap.awayPlusOneHalf} market="handicap" label={`${match.away} +1.5`} />
-                </MarketGroup>
+                {isLateGame ? (
+                  /* Late game: single handicap group with the most relevant ±1 line */
+                  <MarketGroup title="Handicap Europeu">
+                    <MarketOddsBtn match={match} sel="hm1" odd={m.handicap.homeMinusOne} market="handicap" label={`${match.home} −1`} />
+                    <MarketOddsBtn match={match} sel="ap1" odd={m.handicap.awayPlusOne} market="handicap" label={`${match.away} +1`} />
+                  </MarketGroup>
+                ) : (
+                  <>
+                    <MarketGroup title={`Handicap Europeu — ${match.home}`}>
+                      <MarketOddsBtn match={match} sel="hm1" odd={m.handicap.homeMinusOne} market="handicap" label={`${match.home} −1`} />
+                      <MarketOddsBtn match={match} sel="hm1h" odd={m.handicap.homeMinusOneHalf} market="handicap" label={`${match.home} −1.5`} />
+                    </MarketGroup>
+                    <MarketGroup title={`Handicap Europeu — ${match.away}`}>
+                      <MarketOddsBtn match={match} sel="ap1" odd={m.handicap.awayPlusOne} market="handicap" label={`${match.away} +1`} />
+                      <MarketOddsBtn match={match} sel="ap1h" odd={m.handicap.awayPlusOneHalf} market="handicap" label={`${match.away} +1.5`} />
+                    </MarketGroup>
+                  </>
+                )}
               </>
             ) : isTennis ? (
               <>
@@ -2800,8 +3352,8 @@ export default function Home() {
           <div className="text-center text-zinc-600 py-6 text-sm">Mercado não disponível para esta partida.</div>
         )}
 
-        {/* ── FUTEBOL: 1º TEMPO ── */}
-        {isFootball && (modalTab === "1tempo" || modalTab === "todos") && m && m.halfTime.home > 0 && (
+        {/* ── FUTEBOL: 1º TEMPO — hidden in 2nd half ── */}
+        {isFootball && show1tempo && (modalTab === "1tempo" || modalTab === "todos") && m && m.halfTime.home > 0 && (
           <div>
             <MarketGroup title="Resultado — 1º Tempo">
               <MarketOddsBtn match={match} sel="ht-home" odd={m.halfTime.home} market="1tempo" label={match.home} />
@@ -2817,12 +3369,40 @@ export default function Home() {
             )}
           </div>
         )}
-        {isFootball && modalTab === "1tempo" && m && m.halfTime.home === 0 && (
+        {isFootball && show1tempo && modalTab === "1tempo" && m && m.halfTime.home === 0 && (
+          <div className="text-center text-zinc-600 py-6 text-sm">Mercado não disponível para esta partida.</div>
+        )}
+
+        {/* ── FUTEBOL: 2º TEMPO — shown at HT and during 2nd half; hidden in late game ── */}
+        {isFootball && show2tempo && !isLateGame && (modalTab === "2tempo" || modalTab === "todos") && (
+          <div>
+            {m?.secondHalf && m.secondHalf.home > 0 && (
+              <MarketGroup title="Resultado — 2º Tempo">
+                <MarketOddsBtn match={match} sel="2h-home" odd={m.secondHalf.home} market="2tempo" label={match.home} />
+                {m.secondHalf.draw > 0 && <MarketOddsBtn match={match} sel="2h-draw" odd={m.secondHalf.draw} market="2tempo" label="Empate" />}
+                <MarketOddsBtn match={match} sel="2h-away" odd={m.secondHalf.away} market="2tempo" label={match.away} />
+              </MarketGroup>
+            )}
+            {m && m.totalGoals.over05 > 0 && (
+              <MarketGroup title="Golos no 2º Tempo — 0.5">
+                <MarketOddsBtn match={match} sel="2h-o05g" odd={m.totalGoals.over05} market="2tempo" label="Mais de 0.5" />
+                <MarketOddsBtn match={match} sel="2h-u05g" odd={m.totalGoals.under05} market="2tempo" label="Menos de 0.5" />
+              </MarketGroup>
+            )}
+            {m && m.totalGoals.over15 > 0 && (
+              <MarketGroup title="Golos no 2º Tempo — 1.5">
+                <MarketOddsBtn match={match} sel="2h-o15g" odd={m.totalGoals.over15} market="2tempo" label="Mais de 1.5" />
+                <MarketOddsBtn match={match} sel="2h-u15g" odd={m.totalGoals.under15} market="2tempo" label="Menos de 1.5" />
+              </MarketGroup>
+            )}
+          </div>
+        )}
+        {isFootball && show2tempo && modalTab === "2tempo" && (!match.odds.home || match.odds.home <= 1) && (
           <div className="text-center text-zinc-600 py-6 text-sm">Mercado não disponível para esta partida.</div>
         )}
 
         {/* ── FUTEBOL: HT/FT ── */}
-        {isFootball && (modalTab === "htft" || modalTab === "todos") && m && m.htft && (
+        {isFootball && !isLateGame && (modalTab === "htft" || modalTab === "todos") && m && m.htft && (
           <div>
             <MarketGroup title={`Intervalo / Final — ${match.home} vence`}>
               <MarketOddsBtn match={match} sel="htft-hh" odd={m.htft.hh} market="htft" label="1 / 1" />
@@ -2841,12 +3421,12 @@ export default function Home() {
             </MarketGroup>
           </div>
         )}
-        {isFootball && modalTab === "htft" && m && !m.htft && (
+        {isFootball && !isLateGame && modalTab === "htft" && m && !m.htft && (
           <div className="text-center text-zinc-600 py-6 text-sm">Mercado não disponível para esta partida.</div>
         )}
 
         {/* ── FUTEBOL: PLACAR EXATO ── */}
-        {isFootball && (modalTab === "placar" || modalTab === "todos") && m && m.correctScore && (
+        {isFootball && !isLateGame && (modalTab === "placar" || modalTab === "todos") && m && m.correctScore && (
           <div>
             <p className="text-xs text-zinc-500 mb-3">Selecione o marcador exato ao final da partida.</p>
             <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
@@ -2856,25 +3436,35 @@ export default function Home() {
             </div>
           </div>
         )}
-        {isFootball && modalTab === "placar" && m && !m.correctScore && (
+        {isFootball && !isLateGame && modalTab === "placar" && m && !m.correctScore && (
           <div className="text-center text-zinc-600 py-6 text-sm">Mercado não disponível para esta partida.</div>
         )}
 
         {/* ── FUTEBOL: ESCANTEIOS ── */}
         {isFootball && (modalTab === "escanteios" || modalTab === "todos") && m && m.corners && (
           <div>
-            <MarketGroup title="Total de Escanteios — 8.5">
-              <MarketOddsBtn match={match} sel="oc85" odd={m.corners.o85} market="escanteios" label="Acima de 8.5" />
-              <MarketOddsBtn match={match} sel="uc85" odd={m.corners.u85} market="escanteios" label="Abaixo de 8.5" />
-            </MarketGroup>
-            <MarketGroup title="Total de Escanteios — 9.5">
-              <MarketOddsBtn match={match} sel="oc95" odd={m.corners.o95} market="escanteios" label="Acima de 9.5" />
-              <MarketOddsBtn match={match} sel="uc95" odd={m.corners.u95} market="escanteios" label="Abaixo de 9.5" />
-            </MarketGroup>
-            <MarketGroup title="Total de Escanteios — 10.5">
-              <MarketOddsBtn match={match} sel="oc105" odd={m.corners.o105} market="escanteios" label="Acima de 10.5" />
-              <MarketOddsBtn match={match} sel="uc105" odd={m.corners.u105} market="escanteios" label="Abaixo de 10.5" />
-            </MarketGroup>
+            {isLateGame ? (
+              /* Late game: only the most relevant line (9.5) */
+              <MarketGroup title="Total de Escanteios — 9.5">
+                <MarketOddsBtn match={match} sel="oc95" odd={m.corners.o95} market="escanteios" label="Acima de 9.5" />
+                <MarketOddsBtn match={match} sel="uc95" odd={m.corners.u95} market="escanteios" label="Abaixo de 9.5" />
+              </MarketGroup>
+            ) : (
+              <>
+                <MarketGroup title="Total de Escanteios — 8.5">
+                  <MarketOddsBtn match={match} sel="oc85" odd={m.corners.o85} market="escanteios" label="Acima de 8.5" />
+                  <MarketOddsBtn match={match} sel="uc85" odd={m.corners.u85} market="escanteios" label="Abaixo de 8.5" />
+                </MarketGroup>
+                <MarketGroup title="Total de Escanteios — 9.5">
+                  <MarketOddsBtn match={match} sel="oc95" odd={m.corners.o95} market="escanteios" label="Acima de 9.5" />
+                  <MarketOddsBtn match={match} sel="uc95" odd={m.corners.u95} market="escanteios" label="Abaixo de 9.5" />
+                </MarketGroup>
+                <MarketGroup title="Total de Escanteios — 10.5">
+                  <MarketOddsBtn match={match} sel="oc105" odd={m.corners.o105} market="escanteios" label="Acima de 10.5" />
+                  <MarketOddsBtn match={match} sel="uc105" odd={m.corners.u105} market="escanteios" label="Abaixo de 10.5" />
+                </MarketGroup>
+              </>
+            )}
           </div>
         )}
         {isFootball && modalTab === "escanteios" && m && !m.corners && (
@@ -2882,7 +3472,7 @@ export default function Home() {
         )}
 
         {/* ── FUTEBOL: CARTÕES ── */}
-        {isFootball && (modalTab === "cartoes" || modalTab === "todos") && m && m.cards && (
+        {isFootball && !isLateGame && (modalTab === "cartoes" || modalTab === "todos") && m && m.cards && (
           <div>
             <MarketGroup title="Total de Cartões — 3.5">
               <MarketOddsBtn match={match} sel="ocard35" odd={m.cards.o35} market="cartoes" label="Acima de 3.5 cartões" />
@@ -2894,7 +3484,7 @@ export default function Home() {
             </MarketGroup>
           </div>
         )}
-        {isFootball && modalTab === "cartoes" && m && !m.cards && (
+        {isFootball && !isLateGame && modalTab === "cartoes" && m && !m.cards && (
           <div className="text-center text-zinc-600 py-6 text-sm">Mercado não disponível para esta partida.</div>
         )}
 
@@ -2907,13 +3497,14 @@ export default function Home() {
                 <MarketOddsBtn match={match} sel="dnb-away" odd={m.drawNoBet.away} market="asiatico" label={match.away} />
               </MarketGroup>
             )}
-            {m.asianHandicap && m.asianHandicap.home > 0 && (
+            {/* Late game: hide complex asian markets; keep only Draw No Bet */}
+            {!isLateGame && m.asianHandicap && m.asianHandicap.home > 0 && (
               <MarketGroup title={`Handicap Asiático — Linha ${m.asianHandicap.line > 0 ? "+" : ""}${m.asianHandicap.line}`}>
                 <MarketOddsBtn match={match} sel="ah-home" odd={m.asianHandicap.home} market="asiatico" label={`${match.home} ${m.asianHandicap.line > 0 ? "+" : ""}${m.asianHandicap.line}`} />
                 <MarketOddsBtn match={match} sel="ah-away" odd={m.asianHandicap.away} market="asiatico" label={`${match.away} ${m.asianHandicap.line > 0 ? `-${m.asianHandicap.line}` : `+${Math.abs(m.asianHandicap.line)}`}`} />
               </MarketGroup>
             )}
-            {m.asianTotals && m.asianTotals.o225 > 0 && (
+            {!isLateGame && m.asianTotals && m.asianTotals.o225 > 0 && (
               <>
                 <MarketGroup title="Total Asiático — 0.5">
                   <MarketOddsBtn match={match} sel="at-o05" odd={m.asianTotals.o05} market="asiatico" label="Mais de 0.5" />
@@ -3127,7 +3718,8 @@ export default function Home() {
         {/* ── BASQUETE: QUARTOS ── */}
         {isBasketball && (modalTab === "quartos" || modalTab === "todos") && m && (
           <div>
-            {m.halfTime.home > 0 && (
+            {/* 1ª Metade = Q1+Q2; hide when already in Q3 or Q4 */}
+            {m.halfTime.home > 0 && (currentQ === 0 || currentQ <= 2) && (
               <MarketGroup title="Vencedor — 1ª Metade">
                 <MarketOddsBtn match={match} sel="h1-home" odd={m.halfTime.home} market="quartos" label={match.home} />
                 <MarketOddsBtn match={match} sel="h1-away" odd={m.halfTime.away} market="quartos" label={match.away} />
@@ -3369,15 +3961,149 @@ export default function Home() {
     );
   };
 
+  // Normalize team name for fuzzy matching against live data
+  const normTeam = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
+
+  // Find the live match (if any) corresponding to a stored selection
+  const findLiveMatchForSel = (sel: StoredSelection): Match | null => {
+    const [h = "", a = ""] = sel.matchTitle.split(" vs ");
+    const nh = normTeam(h); const na = normTeam(a);
+    if (!nh) return null;
+    return liveMatches.find(m => {
+      const mh = normTeam(m.home); const ma = normTeam(m.away);
+      const homeMatch = mh === nh || (nh.length >= 4 && (mh.includes(nh.slice(0, 6)) || nh.includes(mh.slice(0, 6))));
+      const awayMatch = ma === na || (na.length >= 4 && (ma.includes(na.slice(0, 6)) || na.includes(ma.slice(0, 6))));
+      return homeMatch && awayMatch;
+    }) ?? null;
+  };
+
+  // Get live odd for a specific selection from a live match
+  const getLiveOddForSel = (sel: StoredSelection, lm: Match): number => {
+    const s = sel.selection;
+    if (s === "away") return lm.odds.away;
+    if (s === "draw") return lm.odds.draw > 0 ? lm.odds.draw : sel.odd;
+    if (s === "home") return lm.odds.home;
+    // For advanced markets, use scale factor relative to how odds moved
+    const baseOdd = sel.odd;
+    const baseMain = (lm.odds.home + lm.odds.away) / 2;
+    return Math.max(1.01, baseOdd * (baseMain / baseMain)); // keep same for non-1X2
+  };
+
   const cashoutEstimate = (bet: UserBet) => {
     const s = parseFloat(bet.stake);
     const originalOdds = parseFloat(bet.totalOdds);
-    const currentOdds = originalOdds * 1.1;
-    return Math.max(0, (s * originalOdds) / currentOdds * 0.92).toFixed(2);
+    const sels = getBetSelections(bet);
+    // Use live odds when available for a more accurate estimate
+    let currentOddsProduct = 1;
+    let hasAnyLive = false;
+    for (const sel of sels) {
+      const lm = findLiveMatchForSel(sel);
+      if (lm) {
+        hasAnyLive = true;
+        currentOddsProduct *= Math.max(1.01, getLiveOddForSel(sel, lm));
+      } else {
+        currentOddsProduct *= Math.max(1.01, sel.odd);
+      }
+    }
+    // If no live data, fall back to modest markup
+    if (!hasAnyLive) currentOddsProduct = originalOdds * 1.1;
+    return Math.max(0, (s * originalOdds) / currentOddsProduct * 0.92).toFixed(2);
+  };
+
+  const MARKET_LABEL: Record<string, string> = {
+    result: "Resultado Final",
+    dupla: "Dupla Chance",
+    gols: "Total de Gols",
+    handicap: "Handicap",
+    halfTime: "Intervalo",
+    sets: "Por Set",
+    pontos: "Total de Pontos",
+    totais: "Total de Pontos",
+    periodos: "Por Período",
+    quartos: "Por Quarto",
+    especiais: "Especiais",
+    asianHandicap: "Handicap Asiático",
+    correctScore: "Resultado Exacto",
+    corners: "Cantos",
+    cards: "Cartões",
+    htft: "Intervalo/Final",
+    firstGoal: "1.º Golo",
+  };
+
+  const getSelLabel = (sel: StoredSelection): string => {
+    if (sel.label && sel.label !== sel.selection) return sel.label;
+    const [home = "", away = ""] = sel.matchTitle.split(" vs ");
+    const map: Record<string, string> = {
+      home, away, draw: "Empate",
+      homeOrDraw: `${home} ou X`, awayOrDraw: `${away} ou X`, homeOrAway: "1 ou 2",
+      "bts-yes": "Ambas Marcam — Sim", "bts-no": "Ambas Marcam — Não",
+      o05: "Mais de 0.5", u05: "Menos de 0.5",
+      o15: "Mais de 1.5", u15: "Menos de 1.5",
+      o25: "Mais de 2.5", u25: "Menos de 2.5",
+      o35: "Mais de 3.5", u35: "Menos de 3.5",
+      o45: "Mais de 4.5", u45: "Menos de 4.5",
+      o55: "Mais de 5.5", u55: "Menos de 5.5",
+      o65: "Mais de 6.5", u65: "Menos de 6.5",
+    };
+    return map[sel.selection] ?? sel.selection;
+  };
+
+  const getBetSelections = (bet: UserBet): StoredSelection[] => {
+    if (Array.isArray(bet.selections)) return bet.selections as StoredSelection[];
+    return [{ matchTitle: bet.matchTitle, selection: "home", odd: parseFloat(bet.totalOdds), market: "result" }];
+  };
+
+  const toggleBetCollapse = (id: number) => {
+    setCollapsedBets(prev => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
   };
 
   return (
     <div className="min-h-[100dvh] w-full bg-background text-foreground flex flex-col font-sans transition-colors duration-500">
+
+      {/* ── IDLE OVERLAY ── */}
+      <AnimatePresence>
+        {isIdle && (
+          <motion.div
+            key="idle-overlay"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.4 }}
+            className="fixed inset-0 z-[9999] flex flex-col items-center justify-center cursor-pointer select-none"
+            style={{ background: "rgba(5,8,22,0.92)", backdropFilter: "blur(12px)" }}
+            onClick={resetIdle}
+            onKeyDown={resetIdle}
+          >
+            <motion.div
+              initial={{ scale: 0.85, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              transition={{ delay: 0.1, type: "spring", stiffness: 260, damping: 20 }}
+              className="flex flex-col items-center gap-5 text-center px-8"
+            >
+              <div className="w-20 h-20 rounded-full bg-zinc-800/80 border border-zinc-700 flex items-center justify-center shadow-xl">
+                <Lock size={36} className="text-red-500" />
+              </div>
+              <div>
+                <p className="text-white font-black text-xl tracking-tight mb-1">Sessão pausada</p>
+                <p className="text-zinc-400 text-sm">Sem atividade detectada. As actualizações ao vivo foram suspensas.</p>
+              </div>
+              <button
+                onClick={resetIdle}
+                className="mt-2 px-8 py-3 rounded-full bg-red-600 hover:bg-red-500 active:bg-red-700 text-white font-bold text-sm tracking-wide transition-colors shadow-lg shadow-red-900/40"
+              >
+                Clique para retomar
+              </button>
+              <p className="text-zinc-600 text-xs">
+                <span className="text-white font-black text-lg italic">BET</span><span className="text-red-600 font-black text-lg italic">62</span>
+              </p>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* HEADER */}
       <header className="sticky top-0 z-40 bg-zinc-950 border-b border-zinc-900">
@@ -3868,27 +4594,35 @@ export default function Home() {
                         </div>
 
                         {/* Recent Form */}
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                          {[
-                            { title: `Últimos Jogos — ${expandedMatch.home}`, form: matchStats.homeForm },
-                            { title: `Últimos Jogos — ${expandedMatch.away}`, form: matchStats.awayForm },
-                          ].map(block => (
-                            <div key={block.title} className="bg-zinc-950/60 rounded-lg border border-zinc-800 p-4">
-                              <div className="text-[10px] font-black text-red-500 uppercase tracking-widest mb-3">{block.title}</div>
-                              <div className="space-y-2">
-                                {block.form.map((f, i) => (
-                                  <div key={i} className="flex items-center gap-3">
-                                    <span className={`w-5 h-5 rounded text-[11px] font-black flex items-center justify-center shrink-0 ${f.result === "W" ? "bg-green-600 text-white" : f.result === "D" ? "bg-yellow-500 text-black" : "bg-red-600 text-white"}`}>
-                                      {f.result}
-                                    </span>
-                                    <span className="font-mono text-sm font-bold text-white shrink-0">{f.score}</span>
-                                    <span className="text-xs text-zinc-400 truncate">{f.home ? "vs" : "@"} {f.opponent}</span>
-                                  </div>
-                                ))}
+                        {matchStats.formIsReal ? (
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                            {[
+                              { title: `Últimos Jogos — ${expandedMatch.home}`, form: matchStats.homeForm },
+                              { title: `Últimos Jogos — ${expandedMatch.away}`, form: matchStats.awayForm },
+                            ].map(block => (
+                              <div key={block.title} className="bg-zinc-950/60 rounded-lg border border-zinc-800 p-4">
+                                <div className="text-[10px] font-black text-red-500 uppercase tracking-widest mb-3">{block.title}</div>
+                                <div className="space-y-2">
+                                  {block.form.map((f, i) => (
+                                    <div key={i} className="flex items-center gap-3">
+                                      <span className={`w-5 h-5 rounded text-[11px] font-black flex items-center justify-center shrink-0 ${f.result === "W" ? "bg-green-600 text-white" : f.result === "D" ? "bg-yellow-500 text-black" : "bg-red-600 text-white"}`}>
+                                        {f.result}
+                                      </span>
+                                      <span className="font-mono text-sm font-bold text-white shrink-0">{f.score}</span>
+                                      <span className="text-xs text-zinc-400 truncate">{f.home ? "vs" : "@"} {f.opponent}</span>
+                                    </div>
+                                  ))}
+                                </div>
                               </div>
-                            </div>
-                          ))}
-                        </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <div className="bg-zinc-950/60 rounded-lg border border-zinc-800 p-5 text-center">
+                            <div className="text-zinc-600 text-2xl mb-2">📋</div>
+                            <div className="text-zinc-500 text-sm font-medium">Histórico de jogos não disponível</div>
+                            <div className="text-zinc-600 text-xs mt-1">Dados de forma indisponíveis para este jogo</div>
+                          </div>
+                        )}
                       </div>
                     )}
                   </div>
@@ -4618,7 +5352,7 @@ export default function Home() {
                 firstGoal: { home: 0, noGoal: 0, away: 0 },
               });
 
-              const tennisOddsAsMatches: Match[] = (!selectedLeague && (selectedSport === "tennis" || selectedSport === "all"))
+              const tennisOddsAsMatches: Match[] = (selectedSport === "tennis" || selectedSport === "all")
                 ? tennisOddsMatches.map(o => ({
                     id: `tennis-odds-${o.matchId}`,
                     home: o.players[0].name,
@@ -4634,7 +5368,7 @@ export default function Home() {
                 : [];
 
               // Convert real volleyball odds to MatchCard-compatible Match objects (O/U 3.5 sets in markets)
-              const volleyOddsAsMatches: Match[] = (!selectedLeague && (selectedSport === "volleyball" || selectedSport === "all"))
+              const volleyOddsAsMatches: Match[] = (selectedSport === "volleyball" || selectedSport === "all")
                 ? volleyOddsMatches.map(o => {
                     const mkt = _emptyMkt();
                     if (o.overUnder) {
@@ -4658,7 +5392,7 @@ export default function Home() {
                 : [];
 
               // Convert real NBA odds → Match objects with all available markets
-              const basketballAsMatches: Match[] = (!selectedLeague && (selectedSport === "all" || selectedSport === "basketball"))
+              const basketballAsMatches: Match[] = (selectedSport === "all" || selectedSport === "basketball")
                 ? basketballOddsMatches.map(o => ({
                     id: `nba-odds-${o.matchId}`,
                     home: o.homeTeam.name, away: o.awayTeam.name,
@@ -4671,7 +5405,7 @@ export default function Home() {
                 : [];
 
               // Convert real NHL odds → Match objects with all available markets
-              const hockeyAsMatches: Match[] = (!selectedLeague && (selectedSport === "all" || selectedSport === "hockey"))
+              const hockeyAsMatches: Match[] = (selectedSport === "all" || selectedSport === "hockey")
                 ? hockeyOddsMatches.map(o => ({
                     id: `nhl-odds-${o.matchId}`,
                     home: o.homeTeam.name, away: o.awayTeam.name,
@@ -4683,28 +5417,29 @@ export default function Home() {
                   } as Match))
                 : [];
 
-              // All upcoming: odds-based + all sports from /upcoming (deduped)
-              const allUpcoming = selectedLeague
-                ? upcomingMatches.filter(m => m.league === selectedLeague)
-                : [
-                    ...tennisOddsAsMatches,
-                    ...volleyOddsAsMatches,
-                    ...basketballAsMatches,
-                    ...hockeyAsMatches,
-                    ...upcomingMatches.filter(m => {
-                      const sport = m.sport ?? "football";
-                      if (sport === "football") {
-                        return !tennisOddsAsMatches.some(t => t.home === m.home && t.away === m.away) &&
-                               !volleyOddsAsMatches.some(v => v.home === m.home && v.away === m.away);
-                      }
-                      // Include other sports from /upcoming if not already covered by odds arrays
-                      if (sport === "tennis")     return !tennisOddsAsMatches.some(t => t.home === m.home && t.away === m.away);
-                      if (sport === "volleyball") return !volleyOddsAsMatches.some(v => v.home === m.home && v.away === m.away);
-                      if (sport === "basketball") return !basketballAsMatches.some(b => b.home === m.home && b.away === m.away);
-                      if (sport === "hockey")     return !hockeyAsMatches.some(h => h.home === m.home && h.away === m.away);
-                      return false;
-                    }),
-                  ];
+              // All upcoming: odds-based + all sports from /upcoming (deduped), filtered by league if active
+              const allUpcoming = (() => {
+                const combined = [
+                  ...tennisOddsAsMatches,
+                  ...volleyOddsAsMatches,
+                  ...basketballAsMatches,
+                  ...hockeyAsMatches,
+                  ...upcomingMatches.filter(m => {
+                    const sport = m.sport ?? "football";
+                    if (sport === "tennis")     return !tennisOddsAsMatches.some(t => t.home === m.home && t.away === m.away);
+                    if (sport === "volleyball") return !volleyOddsAsMatches.some(v => v.home === m.home && v.away === m.away);
+                    if (sport === "basketball") return !basketballAsMatches.some(b => b.home === m.home && b.away === m.away);
+                    if (sport === "hockey")     return !hockeyAsMatches.some(h => h.home === m.home && h.away === m.away);
+                    return true; // football always included
+                  }),
+                ];
+                if (!selectedLeague) return combined;
+                // Filter by selected league using flexible matching (handles "Country: League" API prefixes)
+                const seen = new Set<string>();
+                return combined
+                  .filter(m => leagueMatchesFilter(m.league, selectedLeague))
+                  .filter(m => { const k = String(m.id); if (seen.has(k)) return false; seen.add(k); return true; });
+              })();
 
               const filteredUpcoming = (selectedSport === "all")
                 ? allUpcoming
@@ -5855,73 +6590,180 @@ export default function Home() {
 
             {activeTab === "mybets" && (
               <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
-                <h2 className="text-2xl font-black italic uppercase tracking-tight mb-6 flex items-center gap-2">
+                <h2 className="text-2xl font-black italic uppercase tracking-tight mb-5 flex items-center gap-2">
                   <History className="text-red-600" /> Minhas Apostas
                 </h2>
+
+                {/* Tabs */}
+                <div className="flex border-b border-zinc-800 mb-5">
+                  {(["abertas", "resolvidas", "cashout"] as const).map((t) => {
+                    const cnt = t === "abertas" ? myBets.filter(b => b.status === "pending").length
+                      : t === "cashout" ? myBets.filter(b => b.status === "pending").length
+                      : myBets.filter(b => b.status !== "pending").length;
+                    const lbl = t === "abertas" ? "Abertas" : t === "cashout" ? "Cash Out" : "Resolvidas";
+                    return (
+                      <button key={t} onClick={() => setBetFilterTab(t)}
+                        className={`px-4 py-2.5 text-sm font-bold flex items-center gap-2 border-b-2 transition-colors ${betFilterTab === t ? "border-red-500 text-white" : "border-transparent text-zinc-500 hover:text-zinc-300"}`}>
+                        {lbl}
+                        {cnt > 0 && <span className="bg-red-600 text-white text-xs rounded-full w-5 h-5 flex items-center justify-center font-black leading-none">{cnt}</span>}
+                      </button>
+                    );
+                  })}
+                </div>
+
                 {myBetsLoading ? (
                   <div className="flex items-center justify-center py-20"><Loader2 className="animate-spin text-red-600" size={32} /></div>
-                ) : myBets.length === 0 ? (
-                  <div className="py-20 text-center text-zinc-500 bg-zinc-900/50 rounded-xl border border-zinc-800">
-                    <Trophy className="mx-auto mb-4 opacity-20" size={48} />
-                    <p className="font-medium">Nenhuma aposta realizada ainda.</p>
-                    <p className="text-sm mt-1">Escolha um jogo e faça sua primeira aposta!</p>
-                  </div>
-                ) : (
-                  <div className="space-y-3">
-                    {myBets.map(bet => (
-                      <div key={bet.id} className="bg-zinc-900 border border-zinc-800 rounded-xl p-4">
-                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                          <div className="flex-1 min-w-0">
-                            <div className="font-semibold text-white truncate">{bet.matchTitle}</div>
-                            <div className="text-xs text-zinc-400 mt-1">{new Date(bet.createdAt).toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" })}</div>
-                          </div>
-                          <div className="flex gap-6 items-center shrink-0 flex-wrap">
-                            <div className="text-center">
-                              <div className="text-xs text-zinc-500">Aposta</div>
-                              <div className="font-bold text-white">€ {parseFloat(bet.stake).toFixed(2)}</div>
-                            </div>
-                            <div className="text-center">
-                              <div className="text-xs text-zinc-500">Odds</div>
-                              <div className="font-bold text-red-400">{parseFloat(bet.totalOdds).toFixed(2)}</div>
-                            </div>
-                            <div className="text-center">
-                              <div className="text-xs text-zinc-500">Potencial</div>
-                              <div className="font-bold text-green-400">€ {parseFloat(bet.potentialWin).toFixed(2)}</div>
-                            </div>
-                            <div className={`px-3 py-1 rounded-full text-xs font-bold uppercase ${bet.status === "won" ? "bg-green-900 text-green-400" : bet.status === "lost" ? "bg-red-900/50 text-red-400" : bet.status === "cashed_out" ? "bg-yellow-900/50 text-yellow-400" : "bg-zinc-800 text-zinc-400"}`}>
-                              {bet.status === "won" ? "Ganhou" : bet.status === "lost" ? "Perdeu" : bet.status === "cashed_out" ? "Cash Out" : "Pendente"}
-                            </div>
-                          </div>
-                        </div>
+                ) : (() => {
+                  const filtered = myBets.filter(b =>
+                    betFilterTab === "resolvidas" ? b.status !== "pending"
+                      : b.status === "pending"
+                  );
+                  if (filtered.length === 0) return (
+                    <div className="py-20 text-center text-zinc-500 bg-zinc-900/50 rounded-xl border border-zinc-800">
+                      <Trophy className="mx-auto mb-4 opacity-20" size={48} />
+                      <p className="font-medium">
+                        {betFilterTab === "resolvidas" ? "Sem apostas resolvidas." : "Sem apostas abertas."}
+                      </p>
+                      {betFilterTab !== "resolvidas" && <p className="text-sm mt-1">Escolha um jogo e faça sua primeira aposta!</p>}
+                    </div>
+                  );
+                  return (
+                    <div className="space-y-3">
+                      {filtered.map(bet => {
+                        const sels = getBetSelections(bet);
+                        const isMultiple = sels.length > 1;
+                        const betTypeLabel = isMultiple ? `Múltipla de ${sels.length}` : "Simples";
+                        const isCollapsed = collapsedBets.has(bet.id);
+                        const isPending = bet.status === "pending";
+                        const statusCls = isPending ? "bg-zinc-700 text-zinc-300"
+                          : bet.status === "won" ? "bg-green-800 text-green-300"
+                          : bet.status === "lost" ? "bg-red-900/60 text-red-400"
+                          : "bg-yellow-900/50 text-yellow-400";
+                        const statusLbl = isPending ? "ABERTA"
+                          : bet.status === "won" ? "GANHA"
+                          : bet.status === "lost" ? "PERDIDA"
+                          : "CASH OUT";
 
-                        {bet.status === "pending" && (
-                          <div className="mt-3 pt-3 border-t border-zinc-800 flex items-center justify-between gap-3">
-                            <div className="text-xs text-zinc-400 flex items-center gap-1">
-                              <Zap size={12} className="text-green-500" />
-                              Valor estimado de Cash Out:
-                              <span className="font-bold text-green-400 ml-1">€ {cashoutEstimate(bet)}</span>
+                        return (
+                          <div key={bet.id} className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden">
+                            {/* Header */}
+                            <div className="px-4 pt-4 pb-3 flex items-center justify-between gap-2">
+                              <div className="flex items-center gap-2 min-w-0">
+                                <span className="font-black text-white text-sm">{betTypeLabel}</span>
+                                <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${statusCls}`}>{statusLbl}</span>
+                              </div>
+                              <div className="flex items-center gap-2 text-zinc-500 shrink-0">
+                                <span className="text-xs font-mono">ID: {bet.id}</span>
+                                <button
+                                  onClick={() => { navigator.clipboard.writeText(String(bet.id)); toast.success("ID copiado!"); }}
+                                  className="hover:text-zinc-200 transition-colors p-0.5" title="Copiar ID">
+                                  <Copy size={12} />
+                                </button>
+                                <button onClick={() => toggleBetCollapse(bet.id)} className="hover:text-zinc-200 transition-colors p-0.5">
+                                  {isCollapsed ? <ChevronDown size={16} /> : <ChevronUp size={16} />}
+                                </button>
+                              </div>
                             </div>
-                            <motion.button
-                              animate={{ boxShadow: ["0 0 0px #22c55e00", "0 0 12px #22c55e55", "0 0 0px #22c55e00"] }}
-                              transition={{ duration: 2, repeat: Infinity }}
-                              onClick={() => setCashoutConfirm(bet)}
-                              disabled={cashingOut === bet.id}
-                              className="shrink-0 bg-green-600 hover:bg-green-500 text-white text-xs font-black px-4 py-2 rounded-lg transition-colors disabled:opacity-50"
-                            >
-                              {cashingOut === bet.id ? <Loader2 className="animate-spin" size={14} /> : "CASH OUT"}
-                            </motion.button>
+
+                            {/* Stats row */}
+                            <div className="grid grid-cols-3 border-t border-zinc-800">
+                              <div className="px-4 py-2.5">
+                                <div className="text-xs text-zinc-500 mb-0.5">Cota Total</div>
+                                <div className="font-black text-white text-sm">{parseFloat(bet.totalOdds).toFixed(2)}</div>
+                              </div>
+                              <div className="px-4 py-2.5 border-x border-zinc-800">
+                                <div className="text-xs text-zinc-500 mb-0.5">Valor da Aposta</div>
+                                <div className="font-black text-white text-sm">€ {parseFloat(bet.stake).toFixed(2)}</div>
+                              </div>
+                              <div className="px-4 py-2.5">
+                                <div className="text-xs text-zinc-500 mb-0.5">Possível Retorno</div>
+                                <div className={`font-black text-sm ${isPending ? "text-red-400" : bet.status === "won" ? "text-green-400" : "text-zinc-500"}`}>
+                                  € {parseFloat(bet.potentialWin).toFixed(2)}
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* Selections */}
+                            {!isCollapsed && (
+                              <div className="divide-y divide-zinc-800/60 border-t border-zinc-800">
+                                {sels.map((sel, i) => {
+                                  const lm = isPending ? findLiveMatchForSel(sel) : null;
+                                  const liveOdd = lm ? getLiveOddForSel(sel, lm) : null;
+                                  const isHT = lm?.status === "HT";
+                                  const displayMin = lm ? (isHT ? "HT" : `${lm.minute ?? 0}'`) : null;
+                                  return (
+                                  <div key={i} className="px-4 py-3 flex items-start gap-3">
+                                    <div className={`w-6 h-6 rounded-full flex items-center justify-center shrink-0 text-xs font-black text-white mt-0.5 leading-none ${lm ? "bg-red-700" : "bg-red-600"}`}>
+                                      {i + 1}
+                                    </div>
+                                    <div className="flex-1 min-w-0">
+                                      <div className="font-bold text-white text-sm leading-snug">{getSelLabel(sel)}</div>
+                                      <div className="text-xs text-zinc-500 mt-0.5">{MARKET_LABEL[sel.market ?? "result"] ?? "Mercado"}</div>
+                                      <div className="text-xs text-zinc-600 mt-0.5 truncate">{sel.matchTitle}</div>
+                                      {lm && (
+                                        <div className="flex items-center gap-2 mt-1.5 flex-wrap">
+                                          <span className="flex items-center gap-1 text-[10px] font-black text-red-400 uppercase tracking-wide">
+                                            <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse inline-block" />
+                                            Ao Vivo
+                                          </span>
+                                          <span className="text-xs font-black text-white tabular-nums">
+                                            {lm.homeScore} – {lm.awayScore}
+                                          </span>
+                                          {displayMin && (
+                                            <span className="text-[10px] text-zinc-400 font-mono bg-zinc-800 px-1.5 py-0.5 rounded">
+                                              {displayMin}
+                                            </span>
+                                          )}
+                                          {liveOdd !== null && Math.abs(liveOdd - sel.odd) > 0.01 && (
+                                            <span className={`text-[10px] font-bold ${liveOdd < sel.odd ? "text-green-400" : "text-red-400"}`}>
+                                              {liveOdd < sel.odd ? "▼" : "▲"} {liveOdd.toFixed(2)}
+                                            </span>
+                                          )}
+                                        </div>
+                                      )}
+                                    </div>
+                                    <div className="font-bold text-white text-sm shrink-0 pt-0.5">{Number(sel.odd).toFixed(2)}</div>
+                                  </div>
+                                  );
+                                })}
+                              </div>
+                            )}
+
+                            {/* Cash Out row */}
+                            {isPending && !isCollapsed && (
+                              <button
+                                onClick={() => setCashoutConfirm(bet)}
+                                disabled={cashingOut === bet.id}
+                                className="w-full px-4 py-3 flex items-center gap-3 border-t border-zinc-800 bg-zinc-800/40 hover:bg-zinc-800/70 transition-colors disabled:opacity-50">
+                                <CircleDollarSign size={18} className="text-zinc-400 shrink-0" />
+                                <span className="flex-1 text-left font-bold text-sm text-white">Cash Out</span>
+                                {cashingOut === bet.id
+                                  ? <Loader2 size={14} className="animate-spin text-zinc-400" />
+                                  : <>
+                                    <span className="font-black text-red-400 text-sm">€ {cashoutEstimate(bet)}</span>
+                                    <ChevronRight size={16} className="text-zinc-500" />
+                                  </>}
+                              </button>
+                            )}
+
+                            {/* Footer */}
+                            <div className="px-4 py-2.5 border-t border-zinc-800 flex items-center justify-between text-xs text-zinc-600">
+                              <span className="flex items-center gap-1.5">
+                                <Clock size={11} />
+                                Criada em {new Date(bet.createdAt).toLocaleDateString("pt-PT", { day: "2-digit", month: "2-digit", year: "numeric" })}, {new Date(bet.createdAt).toLocaleTimeString("pt-PT", { hour: "2-digit", minute: "2-digit" })}
+                              </span>
+                              <button
+                                onClick={() => { navigator.clipboard.writeText(`Bet62 — ID ${bet.id} | Odds ${parseFloat(bet.totalOdds).toFixed(2)} | € ${parseFloat(bet.stake).toFixed(2)}`); toast.success("Aposta copiada!"); }}
+                                className="flex items-center gap-1 hover:text-zinc-400 transition-colors">
+                                <Share2 size={11} /> Partilhar
+                              </button>
+                            </div>
                           </div>
-                        )}
-                        {(bet.status === "won" || bet.status === "lost") && (
-                          <div className="mt-3 pt-3 border-t border-zinc-800 flex items-center gap-2 text-xs text-zinc-600">
-                            <AlertCircle size={12} />
-                            Cash Out indisponível — aposta encerrada
-                          </div>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                )}
+                        );
+                      })}
+                    </div>
+                  );
+                })()}
               </div>
             )}
           </div>
@@ -5929,7 +6771,7 @@ export default function Home() {
 
         {/* DESKTOP BET SLIP */}
         <aside className="hidden lg:block w-96 border-l border-zinc-900 bg-zinc-950 sticky top-16 h-[calc(100vh-4rem)]">
-          <BetSlipContent />
+          {BetSlipContent()}
         </aside>
       </div>
 
@@ -5943,11 +6785,63 @@ export default function Home() {
               </Button>
             </DrawerTrigger>
             <DrawerContent className="bg-zinc-950 border-zinc-800 text-white h-[85vh] p-0">
-              <BetSlipContent />
+              {BetSlipContent()}
             </DrawerContent>
           </Drawer>
         )}
       </div>
+
+      {/* MOBILE APP DOWNLOAD BANNER */}
+      <AnimatePresence>
+        {showAppBanner && (
+          <motion.div
+            initial={{ y: 80, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            exit={{ y: 80, opacity: 0 }}
+            transition={{ type: "spring", bounce: 0.2, duration: 0.5 }}
+            className="fixed bottom-0 left-0 right-0 z-50 px-4 pb-4 pt-2 pointer-events-none"
+          >
+            <div className="pointer-events-auto max-w-lg mx-auto bg-zinc-900 border border-zinc-700 rounded-2xl shadow-2xl shadow-black/60 p-4 flex items-center gap-3">
+              <div className="flex-shrink-0 w-11 h-11 bg-red-600 rounded-xl flex items-center justify-center shadow-lg shadow-red-900/40">
+                <Smartphone size={22} className="text-white" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-bold text-white leading-tight">Bet62 na tua bolso</p>
+                <p className="text-xs text-zinc-400 mt-0.5 leading-tight">Apostas ao vivo, notificações e muito mais — disponível para iOS e Android.</p>
+              </div>
+              <div className="flex items-center gap-2 flex-shrink-0">
+                <a
+                  href="https://apps.apple.com"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  onClick={() => { localStorage.setItem("bet62_app_banner_dismissed", "1"); setShowAppBanner(false); }}
+                  className="flex flex-col items-center justify-center bg-zinc-800 hover:bg-zinc-700 border border-zinc-600 rounded-lg px-2.5 py-1.5 transition-colors"
+                >
+                  <span className="text-[9px] text-zinc-400 leading-none">Disponível na</span>
+                  <span className="text-[11px] font-bold text-white leading-tight">App Store</span>
+                </a>
+                <a
+                  href="https://play.google.com"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  onClick={() => { localStorage.setItem("bet62_app_banner_dismissed", "1"); setShowAppBanner(false); }}
+                  className="flex flex-col items-center justify-center bg-zinc-800 hover:bg-zinc-700 border border-zinc-600 rounded-lg px-2.5 py-1.5 transition-colors"
+                >
+                  <span className="text-[9px] text-zinc-400 leading-none">Obtém no</span>
+                  <span className="text-[11px] font-bold text-white leading-tight">Google Play</span>
+                </a>
+                <button
+                  onClick={() => { localStorage.setItem("bet62_app_banner_dismissed", "1"); setShowAppBanner(false); }}
+                  className="w-7 h-7 rounded-full bg-zinc-800 hover:bg-zinc-700 flex items-center justify-center text-zinc-400 hover:text-white transition-colors ml-1"
+                  aria-label="Fechar"
+                >
+                  <X size={14} />
+                </button>
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* FOOTER */}
       <footer className="border-t border-zinc-900 bg-zinc-950 py-12 mt-auto">
@@ -6095,8 +6989,10 @@ export default function Home() {
         open={depositModalOpen}
         onClose={() => setDepositModalOpen(false)}
         onSuccess={() => { auth.refreshUser(); }}
+        onPromoNotif={(type) => { setDepositModalOpen(false); setTimeout(() => setPromoNotif({ type }), 350); }}
         balance={auth.user ? parseFloat(auth.user.balance) : 0}
         token={auth.token}
+        kycStatus={auth.user?.kycStatus ?? "not_submitted"}
       />
 
       {/* ── PROMOTION NOTIFICATION ─────────────────────────────── */}
@@ -6116,6 +7012,25 @@ export default function Home() {
               className="relative overflow-hidden rounded-3xl max-w-md w-full border border-white/15 shadow-2xl"
               onClick={e => e.stopPropagation()}
             >
+              {promoNotif.type === "freebets10" && (
+                <>
+                  <img src="https://images.unsplash.com/photo-1553481187-be93c21490a9?q=80&w=800&auto=format&fit=crop" className="absolute inset-0 w-full h-full object-cover scale-105" alt="" />
+                  <div className="absolute inset-0 bg-gradient-to-br from-violet-600/85 to-black/95" />
+                  <div className="relative z-10 p-8 text-center">
+                    <div className="text-5xl mb-3">🎁</div>
+                    <div className="inline-block px-3 py-1 rounded-full bg-white/15 text-xs font-black tracking-widest text-white mb-4">FREE BET ATIVADA</div>
+                    <h2 className="text-3xl font-black text-white leading-tight mb-2">Parabéns!</h2>
+                    <p className="text-white/90 text-base mb-1">Está a participar na promoção</p>
+                    <p className="text-violet-300 font-black text-xl mb-4">DEPOSITE €10 → GANHE €5</p>
+                    <div className="bg-white/10 border border-white/20 rounded-2xl p-4 mb-6">
+                      <div className="text-4xl font-black text-violet-300 mb-1">€5</div>
+                      <div className="text-sm text-white/70">em Free Bets creditados na sua conta</div>
+                    </div>
+                    <p className="text-white/60 text-xs leading-relaxed mb-6">Complete apostas qualificadas com odds ≥ 2.50 para utilizar as suas free bets.</p>
+                    <Button onClick={() => setPromoNotif(null)} className="w-full bg-violet-500 hover:bg-violet-600 text-white font-black h-12">COMEÇAR A APOSTAR</Button>
+                  </div>
+                </>
+              )}
               {promoNotif.type === "freebets20" && (
                 <>
                   <img src="https://images.unsplash.com/photo-1521412644187-c49fa049e84d?q=80&w=800&auto=format&fit=crop" className="absolute inset-0 w-full h-full object-cover scale-105" alt="" />
@@ -6126,7 +7041,7 @@ export default function Home() {
                     <h2 className="text-3xl font-black text-white leading-tight mb-2">Parabéns!</h2>
                     <p className="text-white/90 text-base mb-1">Está a participar na promoção</p>
                     <p className="text-emerald-300 font-black text-xl mb-4">DEPOSITE €20 → GANHE €10</p>
-                    <p className="text-white/70 text-sm leading-relaxed mb-6">Complete 4 apostas qualificadas com odds ≥ 1.80 para receber os seus €10 em free bets.</p>
+                    <p className="text-white/70 text-sm leading-relaxed mb-6">Complete 4 apostas qualificadas com odds ≥ 2.00 e stake mínima de €2 para receber os seus €10 em free bets.</p>
                     <div className="grid grid-cols-4 gap-2 mb-6">
                       {[1,2,3,4].map(n => (
                         <div key={n} className="rounded-xl bg-white/10 border border-white/20 py-3 flex flex-col items-center gap-1">
@@ -6176,6 +7091,155 @@ export default function Home() {
         )}
       </AnimatePresence>
 
+      {/* ─── WIN ANIMATION ─────────────────────────────────────────── */}
+      <AnimatePresence>
+        {winAnim && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[300] flex items-center justify-center"
+            style={{ background: "radial-gradient(ellipse at center, rgba(0,0,0,0.85) 0%, rgba(0,0,0,0.97) 100%)" }}
+            onClick={() => setWinAnim(null)}
+          >
+            {/* confetti pieces */}
+            {Array.from({ length: 36 }).map((_, i) => {
+              const colors = ["#ef4444","#f59e0b","#22c55e","#3b82f6","#a855f7","#ec4899","#06b6d4","#f97316"];
+              const color = colors[i % colors.length]!;
+              const left = `${5 + (i * 97 % 90)}%`;
+              const delay = (i * 0.07) % 0.9;
+              const size = 6 + (i % 5) * 3;
+              return (
+                <motion.div
+                  key={i}
+                  className="absolute rounded-sm"
+                  style={{ left, top: "-10px", width: size, height: size, background: color, originX: "50%", originY: "50%" }}
+                  animate={{ y: ["0vh", "105vh"], rotate: [0, 360 + i * 30], opacity: [1, 0.7, 0] }}
+                  transition={{ duration: 2.2 + (i % 5) * 0.3, delay, ease: "easeIn", repeat: 1, repeatDelay: 0.5 }}
+                />
+              );
+            })}
+
+            {/* central card */}
+            <motion.div
+              initial={{ scale: 0.4, y: 80, opacity: 0 }}
+              animate={{ scale: 1, y: 0, opacity: 1 }}
+              exit={{ scale: 0.7, opacity: 0 }}
+              transition={{ type: "spring", stiffness: 380, damping: 22 }}
+              className="relative z-10 rounded-3xl border border-white/20 shadow-[0_0_80px_rgba(34,197,94,0.45)] overflow-hidden max-w-sm w-full mx-4"
+              style={{ background: "linear-gradient(135deg, #0a2a0a 0%, #052010 50%, #0a1a0a 100%)" }}
+              onClick={e => e.stopPropagation()}
+            >
+              <div className="absolute inset-0 opacity-20" style={{ background: "radial-gradient(circle at 50% 0%, #22c55e 0%, transparent 70%)" }} />
+              <div className="relative z-10 p-8 text-center">
+                <motion.div
+                  animate={{ scale: [1, 1.2, 1], rotate: [0, -8, 8, -4, 0] }}
+                  transition={{ duration: 0.7, delay: 0.3 }}
+                  className="text-7xl mb-4 select-none"
+                >🏆</motion.div>
+                <div className="inline-block px-3 py-1 rounded-full bg-green-500/20 border border-green-500/40 text-green-400 text-xs font-black tracking-widest mb-4">APOSTA GANHA</div>
+                <h2 className="text-4xl font-black text-white mb-1">Parabéns!</h2>
+                <p className="text-zinc-400 text-sm mb-5 truncate px-2">{winAnim.title}</p>
+                <motion.div
+                  initial={{ scale: 0.5, opacity: 0 }}
+                  animate={{ scale: 1, opacity: 1 }}
+                  transition={{ delay: 0.4, type: "spring", stiffness: 400 }}
+                  className="rounded-2xl border border-green-500/30 bg-green-500/10 p-5 mb-6"
+                >
+                  <div className="text-5xl font-black text-green-400 mb-1">€ {winAnim.amount.toFixed(2)}</div>
+                  <div className="text-green-600 text-sm font-bold">creditado na sua conta</div>
+                </motion.div>
+                <Button onClick={() => setWinAnim(null)} className="w-full bg-green-600 hover:bg-green-500 text-white font-black h-12 text-base rounded-xl">
+                  CONTINUAR A APOSTAR
+                </Button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* ─── CASHOUT ANIMATION ─────────────────────────────────────── */}
+      <AnimatePresence>
+        {cashoutAnim && (
+          <motion.div
+            initial={{ opacity: 0, y: 80 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 60 }}
+            transition={{ type: "spring", stiffness: 320, damping: 26 }}
+            className="fixed bottom-6 left-1/2 z-[300] w-[340px] max-w-[calc(100vw-2rem)]"
+            style={{ translateX: "-50%" }}
+            onClick={() => setCashoutAnim(null)}
+          >
+            <div
+              className="rounded-2xl border border-emerald-500/40 shadow-[0_8px_40px_rgba(16,185,129,0.35)] overflow-hidden"
+              style={{ background: "linear-gradient(135deg, #052018 0%, #041510 100%)" }}
+            >
+              <motion.div
+                className="h-1 bg-emerald-500 origin-left"
+                initial={{ scaleX: 1 }}
+                animate={{ scaleX: 0 }}
+                transition={{ duration: 3, ease: "linear" }}
+              />
+              <div className="flex items-center gap-4 px-5 py-4">
+                <motion.div
+                  animate={{ rotate: [0, -10, 10, -5, 5, 0] }}
+                  transition={{ duration: 0.5, delay: 0.1 }}
+                  className="text-3xl shrink-0 select-none"
+                >💰</motion.div>
+                <div className="flex-1 min-w-0">
+                  <div className="text-xs font-black tracking-widest text-emerald-400 uppercase mb-0.5">Cash Out Realizado</div>
+                  <div className="text-2xl font-black text-white">€ {cashoutAnim.amount.toFixed(2)}</div>
+                  <div className="text-xs text-zinc-500 mt-0.5">adicionado ao seu saldo</div>
+                </div>
+                <button onClick={() => setCashoutAnim(null)} className="text-zinc-600 hover:text-white shrink-0 p-1">
+                  <X size={16} />
+                </button>
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* ─── BET PLACED ANIMATION ───────────────────────────────────────── */}
+      <AnimatePresence>
+        {betPlacedAnim && (
+          <motion.div
+            initial={{ opacity: 0, y: 60, scale: 0.85 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 40, scale: 0.9 }}
+            transition={{ type: "spring", stiffness: 400, damping: 28 }}
+            className="fixed bottom-24 left-1/2 z-[300] pointer-events-none"
+            style={{ translateX: "-50%" }}
+          >
+            <div
+              className="rounded-2xl border border-red-500/30 shadow-[0_8px_40px_rgba(220,38,38,0.25)] px-6 py-4 flex flex-col items-center gap-2 min-w-[200px]"
+              style={{ background: "linear-gradient(135deg, #1a0505 0%, #0d0d0d 100%)" }}
+            >
+              {/* progress bar draining */}
+              <motion.div
+                className="absolute bottom-0 left-0 right-0 h-0.5 bg-red-600 origin-left rounded-b-2xl"
+                initial={{ scaleX: 1 }}
+                animate={{ scaleX: 0 }}
+                transition={{ duration: 2.5, ease: "linear" }}
+              />
+              {/* swaying crossed-fingers emoji */}
+              <motion.div
+                className="text-5xl select-none"
+                animate={{
+                  rotate: [0, -18, 18, -14, 14, -8, 8, -4, 4, 0],
+                  y: [0, -6, 0, -4, 0, -2, 0],
+                }}
+                transition={{ duration: 1.4, ease: "easeInOut", times: [0, 0.1, 0.25, 0.38, 0.5, 0.63, 0.75, 0.85, 0.93, 1] }}
+              >
+                🤞
+              </motion.div>
+              <div className="text-sm font-black text-white tracking-wide">Boa sorte!</div>
+              <div className="text-xs text-zinc-500">Aposta registada com sucesso</div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
     </div>
   );
 }
@@ -6212,6 +7276,20 @@ function PromosPage({
       action: onDeposit,
     },
     {
+      id: "freebets10",
+      title: "DEPOSITE €10 E GANHE €5",
+      subtitle: "FREE BETS PARA COMEÇAR",
+      description: "Deposite apenas €10 e receba €5 em free bets para explorar as melhores apostas da plataforma.",
+      badge: "FREE BET",
+      image: "https://images.unsplash.com/photo-1553481187-be93c21490a9?q=80&w=1400&auto=format&fit=crop",
+      gradient: "from-violet-500/60 to-purple-800/60",
+      highlight: "€5",
+      highlightLabel: "em free bets",
+      terms: ["Depósito mínimo de €10.", "Free bets creditadas automaticamente.", "Odds mínimas qualificadas: 2.50.", "Free bets válidas por 7 dias."],
+      cta: "DEPOSITAR €10",
+      action: onDeposit,
+    },
+    {
       id: "freebets20",
       title: "DEPOSITE €20 E GANHE €10",
       subtitle: "FREE BETS EXCLUSIVAS",
@@ -6221,7 +7299,7 @@ function PromosPage({
       gradient: "from-emerald-400/60 to-green-700/60",
       highlight: "€10",
       highlightLabel: "em free bets",
-      terms: ["Depósito mínimo de €20.", "4 apostas qualificadas obrigatórias.", "Odds mínimas de 1.80.", "Free bets válidas por 7 dias."],
+      terms: ["Depósito mínimo de €20.", "4 apostas qualificadas obrigatórias.", "Odds mínimas de 2.00.", "Stake mínima de €2 por aposta.", "Free bets válidas por 7 dias."],
       cta: "DEPOSITAR €20",
       action: onDeposit,
     },
@@ -6353,13 +7431,15 @@ type PayMethod = "multibanco" | "mbway" | "card";
 type MbRef = { entity: string; reference: string; amount: string; expiresAt: string; orderId: string };
 
 function DepositWithdrawModal({
-  open, onClose, onSuccess, balance, token,
+  open, onClose, onSuccess, onPromoNotif, balance, token, kycStatus,
 }: {
   open: boolean;
   onClose: () => void;
   onSuccess: () => void;
+  onPromoNotif: (type: "freebets10" | "freebets20") => void;
   balance: number;
   token: string | null;
+  kycStatus: string;
 }) {
   const [payMethod, setPayMethod] = useState<PayMethod>("multibanco");
   const [depositAmount, setDepositAmount] = useState("");
@@ -6369,6 +7449,8 @@ function DepositWithdrawModal({
   // Per-method result states
   const [mbRef, setMbRef] = useState<MbRef | null>(null);
   const [mbwayDone, setMbwayDone] = useState(false);
+  const [mbwayOrderId, setMbwayOrderId] = useState<string | null>(null);
+  const [mbwayConfirmed, setMbwayConfirmed] = useState(false);
 
   // Main tab: deposit vs withdraw
   const [mainTab, setMainTab] = useState<"deposit" | "withdraw">("deposit");
@@ -6380,6 +7462,13 @@ function DepositWithdrawModal({
   const [wNif, setWNif] = useState("");
   const [wDone, setWDone] = useState(false);
 
+  // KYC form (shown before withdrawal when not submitted)
+  const [kycDocType, setKycDocType] = useState<"cc" | "passport">("cc");
+  const [kycDocNumber, setKycDocNumber] = useState("");
+  const [kycNif, setKycNif] = useState("");
+  const [kycDone, setKycDone] = useState(false);
+  const needsKyc = kycStatus === "not_submitted" && !kycDone;
+
   const amount = parseFloat(depositAmount.replace(",", "."));
   const amountValid = !isNaN(amount) && amount >= 10 && amount <= 5000;
   const promoHint = amountValid && amount >= 20;
@@ -6390,10 +7479,76 @@ function DepositWithdrawModal({
     { id: "card",       label: "Cartão",     logo: "/logo-visa.png", logo2: "/logo-mastercard.png" },
   ];
 
+  // Poll MB WAY payment confirmation (every 5s, up to 4 minutes)
+  useEffect(() => {
+    if (!mbwayOrderId || mbwayConfirmed) return;
+    const poll = async () => {
+      try {
+        const r = await fetch(`/api/payments/status/${mbwayOrderId}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (!r.ok) return;
+        const data = await r.json() as { status: string; amount: string };
+        if (data.status === "completed") {
+          setMbwayConfirmed(true);
+          setMbwayOrderId(null);
+          toast.success(`Pagamento MB WAY confirmado! € ${parseFloat(data.amount).toFixed(2)} adicionado ao seu saldo.`);
+          onSuccess();
+        }
+      } catch { /* non-critical */ }
+    };
+    const id = setInterval(poll, 5000);
+    const timeout = setTimeout(() => clearInterval(id), 4 * 60 * 1000);
+    return () => { clearInterval(id); clearTimeout(timeout); };
+  }, [mbwayOrderId, mbwayConfirmed, token, onSuccess]);
+
+  // Poll Multibanco payment confirmation (every 15s while reference is displayed)
+  useEffect(() => {
+    if (!mbRef?.orderId) return;
+    const poll = async () => {
+      try {
+        const r = await fetch(`/api/payments/status/${mbRef.orderId}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (!r.ok) return;
+        const data = await r.json() as { status: string; amount: string };
+        if (data.status === "completed") {
+          toast.success(`Pagamento Multibanco confirmado! € ${parseFloat(data.amount).toFixed(2)} adicionado ao seu saldo.`);
+          onSuccess();
+          setMbRef(null);
+          onClose();
+        }
+      } catch { /* non-critical */ }
+    };
+    const id = setInterval(poll, 15000);
+    return () => clearInterval(id);
+  }, [mbRef?.orderId, token, onSuccess, onClose]);
+
   function resetMethod(m: PayMethod) {
     setPayMethod(m);
     setMbRef(null);
     setMbwayDone(false);
+    setMbwayOrderId(null);
+    setMbwayConfirmed(false);
+  }
+
+  async function handleKycSubmit() {
+    if (!kycDocNumber.trim() || kycDocNumber.trim().length < 5) { toast.error("Número de documento inválido."); return; }
+    if (kycNif && !/^\d{9}$/.test(kycNif)) { toast.error("NIF inválido. Deve ter 9 dígitos."); return; }
+    setLoading(true);
+    try {
+      const r = await fetch("/api/profile/kyc/submit", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ documentType: kycDocType, documentNumber: kycDocNumber.trim(), nif: kycNif }),
+      });
+      const data = await r.json() as { kycStatus?: string; error?: string };
+      if (!r.ok) { toast.error(data.error ?? "Erro ao submeter documentos."); return; }
+      setKycDone(true);
+      onSuccess();
+      toast.success("Documentos submetidos! A verificação será feita em 1-2 dias úteis.");
+    } catch { toast.error("Erro de ligação. Tente novamente."); }
+    finally { setLoading(false); }
   }
 
   async function handleWithdraw() {
@@ -6411,13 +7566,21 @@ function DepositWithdrawModal({
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify({ amount: wAmountNum, iban: cleanIban, holderName: wName.trim(), nif: wNif }),
       });
-      const data = await r.json() as { withdrawal?: { id: number }; error?: string };
-      if (!r.ok) { toast.error(data.error ?? "Erro ao submeter pedido."); return; }
+      const data = await r.json() as { withdrawal?: { id: number }; error?: string; code?: string };
+      if (!r.ok) {
+        toast.error(data.error ?? "Erro ao submeter pedido.");
+        return;
+      }
       setWDone(true);
       onSuccess();
       toast.success("Pedido de levantamento submetido! Processado em 2-5 dias úteis.");
     } catch { toast.error("Erro de ligação. Tente novamente."); }
     finally { setLoading(false); }
+  }
+
+  function triggerPromoNotif(depositAmount: number) {
+    if (depositAmount >= 20) onPromoNotif("freebets20");
+    else if (depositAmount >= 10) onPromoNotif("freebets10");
   }
 
   async function handleMultibanco() {
@@ -6434,6 +7597,7 @@ function DepositWithdrawModal({
       setMbRef({ entity: data.entity!, reference: data.reference!, amount: data.amount!, expiresAt: data.expiresAt!, orderId: data.orderId! });
       toast.success("Referência Multibanco gerada! Pague em qualquer ATM.");
       onSuccess();
+      triggerPromoNotif(amount);
     } catch { toast.error("Erro de ligação. Tente novamente."); }
     finally { setLoading(false); }
   }
@@ -6452,8 +7616,9 @@ function DepositWithdrawModal({
       const data = await r.json() as { orderId?: string; requestId?: string; error?: string };
       if (!r.ok) { toast.error(data.error ?? "Erro ao enviar pedido MB WAY."); return; }
       setMbwayDone(true);
-      toast.success("Pedido MB WAY enviado! Aceite na App MB WAY.");
-      onSuccess();
+      if (data.orderId) setMbwayOrderId(data.orderId);
+      toast.success("Pedido MB WAY enviado! Aceite na App MB WAY. O saldo será actualizado automaticamente.");
+      triggerPromoNotif(amount);
     } catch { toast.error("Erro de ligação. Tente novamente."); }
     finally { setLoading(false); }
   }
@@ -6472,6 +7637,7 @@ function DepositWithdrawModal({
       toast.info("A redirecionar para pagamento seguro...");
       window.open(data.paymentUrl, "_blank");
       onSuccess();
+      triggerPromoNotif(amount);
       onClose();
     } catch { toast.error("Erro de ligação. Tente novamente."); }
     finally { setLoading(false); }
@@ -6520,6 +7686,69 @@ function DepositWithdrawModal({
                 <div className="font-black text-white text-lg">Pedido submetido!</div>
                 <div className="text-sm text-zinc-400 leading-relaxed">O seu pedido de levantamento está em processamento.<br />Prazo estimado: <strong className="text-white">2 a 5 dias úteis</strong>.</div>
                 <Button onClick={() => { setWDone(false); setWAmount(""); }} variant="outline" className="border-zinc-700 text-zinc-400 mt-2">Novo pedido</Button>
+              </div>
+            ) : needsKyc ? (
+              /* ── KYC VERIFICATION FORM ── */
+              <div className="space-y-4">
+                <div className="bg-amber-900/20 border border-amber-600/40 rounded-xl px-4 py-3 flex gap-3 items-start">
+                  <span className="text-xl mt-0.5">🪪</span>
+                  <div>
+                    <div className="text-sm font-bold text-amber-300 mb-1">Verificação de Identidade Necessária</div>
+                    <div className="text-xs text-amber-200/70 leading-relaxed">Para efectuar levantamentos é necessário verificar a sua identidade. Preencha os dados abaixo — serão analisados pela nossa equipa em 1–2 dias úteis.</div>
+                  </div>
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-xs text-zinc-400 font-semibold uppercase tracking-wider">Tipo de Documento</label>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      onClick={() => setKycDocType("cc")}
+                      className={`py-2.5 rounded-xl border text-xs font-bold transition-colors ${kycDocType === "cc" ? "border-red-500 bg-red-500/10 text-red-400" : "border-zinc-700 text-zinc-400"}`}
+                    >
+                      🪪 Cartão de Cidadão
+                    </button>
+                    <button
+                      onClick={() => setKycDocType("passport")}
+                      className={`py-2.5 rounded-xl border text-xs font-bold transition-colors ${kycDocType === "passport" ? "border-red-500 bg-red-500/10 text-red-400" : "border-zinc-700 text-zinc-400"}`}
+                    >
+                      📗 Passaporte
+                    </button>
+                  </div>
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-xs text-zinc-400 font-semibold uppercase tracking-wider">Número do Documento</label>
+                  <Input
+                    placeholder={kycDocType === "cc" ? "Ex: 12345678 9 ZX0" : "Ex: AB123456"}
+                    className="bg-zinc-900 border-zinc-700 text-white font-mono"
+                    value={kycDocNumber}
+                    onChange={e => setKycDocNumber(e.target.value)}
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-xs text-zinc-400 font-semibold uppercase tracking-wider">NIF (Número de Contribuinte)</label>
+                  <Input
+                    placeholder="123456789"
+                    maxLength={9}
+                    className="bg-zinc-900 border-zinc-700 text-white font-mono"
+                    value={kycNif}
+                    onChange={e => setKycNif(e.target.value.replace(/\D/g, ""))}
+                  />
+                </div>
+                <Button onClick={handleKycSubmit} disabled={loading} className="w-full bg-red-600 hover:bg-red-500 text-white font-black h-11">
+                  {loading ? <Loader2 className="animate-spin mr-2" size={16} /> : <span className="mr-2">🔒</span>}
+                  Submeter Documentos
+                </Button>
+              </div>
+            ) : kycStatus === "pending" && !kycDone ? (
+              /* ── KYC PENDING NOTICE ── */
+              <div className="space-y-4">
+                <div className="bg-yellow-900/20 border border-yellow-600/40 rounded-xl px-4 py-4 text-center space-y-2">
+                  <div className="text-3xl">⏳</div>
+                  <div className="text-sm font-bold text-yellow-300">Verificação em Análise</div>
+                  <div className="text-xs text-yellow-200/70 leading-relaxed">Os seus documentos estão a ser verificados pela nossa equipa. Poderá efectuar levantamentos assim que a verificação for concluída.</div>
+                </div>
+                <div className="bg-orange-900/20 border border-orange-800/40 rounded-xl px-4 py-3 text-xs text-orange-300 leading-relaxed">
+                  Mínimo de levantamento: <strong className="text-white">€20</strong>. Processado por transferência bancária em 2–5 dias úteis.
+                </div>
               </div>
             ) : (
               <>
@@ -6617,11 +7846,11 @@ function DepositWithdrawModal({
               />
             </div>
           </div>
-          {promoHint && (
-            <div className="bg-emerald-900/30 border border-emerald-600/30 rounded-xl p-2.5 flex items-center gap-2.5 text-xs">
+          {amountValid && amount >= 10 && (
+            <div className={`rounded-xl p-2.5 flex items-center gap-2.5 text-xs ${amount >= 20 ? "bg-emerald-900/30 border border-emerald-600/30" : "bg-violet-900/30 border border-violet-600/30"}`}>
               <span className="text-lg">🎁</span>
-              <span className="text-emerald-300 font-semibold">
-                {amount >= 100 ? "Qualifica para 100% Bónus de Boas-Vindas!" : "Qualifica para €10 em Free Bets!"}
+              <span className={`font-semibold ${amount >= 20 ? "text-emerald-300" : "text-violet-300"}`}>
+                {amount >= 100 ? "Qualifica para 100% Bónus de Boas-Vindas!" : amount >= 20 ? "Qualifica para €10 em Free Bets!" : "Qualifica para €5 em Free Bets!"}
               </span>
             </div>
           )}

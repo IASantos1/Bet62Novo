@@ -80,6 +80,19 @@ type AdvancedMarkets = {
     pointsLines: Array<{ line: number; over: number; under: number }>;
     handicapPoints: { line: number; home: number; away: number };
   };
+  // Second half result (who wins just the 2nd half period)
+  secondHalf?: { home: number; draw: number; away: number };
+  // Football extra-time markets (shown when match is in ET, minute > 90)
+  etExtra?: {
+    tieWinner: { home: number; away: number };              // who advances from the knockout tie (no draw)
+    etResult: { home: number; draw: number; away: number }; // ET period result (draw means → penalties)
+    totalGoals: { o05: number; u05: number; o15: number; u15: number; o25: number; u25: number };
+    nextGoal: { home: number; away: number };               // which team scores next in ET
+  };
+  // Football penalty-shootout markets (shown when m.penalties exists during live)
+  penExtra?: {
+    winner: { home: number; away: number };
+  };
 };
 
 export type LiveMatchState = {
@@ -101,6 +114,9 @@ export type LiveMatchState = {
   marketSuspension?: Record<string, number>;
   // Reason for current suspension (displayed in UI)
   _suspensionReason?: string;
+  // Red cards per team (football only; 0 = none)
+  redCardsHome?: number;
+  redCardsAway?: number;
   // Minutes until match starts (only present for "Em Breve" pre-match entries)
   startsIn?: number;
   // Scheduled kickoff time (HH:MM, Portugal UTC+1) for "Em Breve" entries
@@ -109,8 +125,15 @@ export type LiveMatchState = {
   scheduledDate?: string;
   // Internal tracking for live odds drift engine
   _baseOdds?: { home: number; draw: number; away: number };
+  _baseMarkets?: AdvancedMarkets; // anchor for market drift — prevents exponential compounding
   _oddsUpdatedAt?: number;
   _driftPhase?: number;
+  // Per-market independent update schedule: key → next allowed update time (ms)
+  // Ensures each market group updates at its own cadence, never all at once
+  _marketNextUpdate?: Record<string, number>;
+  // Timestamps for stale-match expiry
+  _firstSeenAt?: number;   // ms — when this match first appeared in live feed
+  _htStartedAt?: number;   // ms — when status first became "HT" (resets on 2H kick-off)
   // Sport-specific live display data
   _liveExtra?: {
     clockStr?: string;                   // basketball/hockey: "06:44"
@@ -228,58 +251,221 @@ type OddsLeague = {
 };
 
 // ─── Priority leagues ─────────────────────────────────────────────────────────
+// ORDERING RULE: more-specific patterns MUST come before less-specific ones
+// within the same country (e.g. "laliga2" before "laliga", "2. bundesliga"
+// before "bundesliga") because matching uses String.includes().
 
-// International tournaments (UEFA etc.): matched only when country is NOT a domestic country
-// Domestic leagues: matched by "Country: LeagueName" prefix patterns
-const UEFA_TOURNAMENTS = ["champions league", "europa league", "conference league", "nations league"];
-
-const DOMESTIC_PRIORITY: Array<[string, number]> = [
-  ["spain: laliga", 10],
-  ["england: premier league", 11],
-  ["germany: bundesliga", 12],
-  ["italy: serie a", 13],
-  ["france: ligue 1", 14],
-  ["spain: laliga2", 20],
-  ["germany: 2. bundesliga", 21],
-  ["italy: serie b", 22],
-  ["england: championship", 23],
-  ["portugal: liga portugal", 24],
-  ["netherlands: eredivisie", 25],
-  ["belgium: jupiler pro league", 30],
-  ["turkey: super lig", 31],
-  ["turkey: süper lig", 31],
-  ["scotland: premiership", 32],
-  ["france: ligue 2", 33],
-  ["germany: 3. liga", 34],
-  ["italy: serie c", 35],
-  ["spain: primera rfef", 990],
-  ["spain: segunda rfef", 991],
-  ["spain: tercera rfef", 992],
-  ["spain: rfef", 993],
-  ["spain: segunda", 36],
-  ["netherlands: keuken", 37],
-  ["portugal: liga bwin", 38],
-  ["russia: premier league", 39],
-  ["ukraine: premier league", 40],
-  ["greece: super league", 41],
-  ["poland: ekstraklasa", 42],
-  ["sweden: allsvenskan", 43],
-  ["denmark: superliga", 44],
-  ["austria: bundesliga", 45],
-  ["switzerland: super league", 46],
-  ["scotland: championship", 47],
-  ["england: league one", 48],
-  ["england: league two", 49],
-  ["italy: serie d", 50],
-  ["france: national", 51],
-  ["germany: bundesliga women", 52],
-  ["china: super league", 60],
-  ["china: chinese super league", 60],
-  ["indonesia: liga 1", 65],
-  ["indonesia: bri liga 1", 65],
+// International tournaments shown regardless of country
+const INTL_TOURNAMENTS = [
+  "champions league",
+  "europa league",
+  "conference league",
+  "nations league",
+  "copa libertadores",
+  "copa sudamericana",
+  "copa america",
+  "world cup",
 ];
 
-const EUROPEAN_COUNTRIES = new Set([
+// DOMESTIC_PRIORITY: [pattern, priority]
+// priority < 100 → shown; ≥ 100 → filtered out
+const DOMESTIC_PRIORITY: Array<[string, number]> = [
+
+  // ── BIG LEAGUES — 1st division ─────────────────────────────────────────────
+  // ⚠ More-specific patterns FIRST within each country — see ordering rules above
+  ["england: premier league",                1],
+  ["spain: laliga2",                        11],   // ⚠ BEFORE "laliga" ("laliga2" ⊃ "laliga")
+  ["spain: laliga",                          2],
+  ["germany: 3. liga",                     999],   // ⚠ BEFORE "bundesliga"
+  ["germany: 2. bundesliga",               12],    // ⚠ BEFORE "bundesliga"
+  ["germany: bundesliga",                    3],
+  ["italy: serie a",                         4],
+  ["france: ligue 1",                        5],
+  ["brazil: série b",                       15],   // ⚠ BEFORE "brasileiro" catch-all
+  ["brazil: serie b",                       15],
+  ["brazil: brasileirão série b",           15],
+  ["brazil: brasileirao serie b",           15],
+  ["brazil: série a",                        6],
+  ["brazil: serie a",                        6],
+  ["brazil: brasileirão série a",            6],
+  ["brazil: brasileirao serie a",            6],
+  ["brazil: brasileiro",                     6],   // catch-all for other Brasileirão variants
+  ["argentina: liga profesional",            7],
+  ["argentina: primera división",            7],
+  ["argentina: primera division",            7],
+
+  // ── BIG LEAGUES — 2nd division ─────────────────────────────────────────────
+  ["england: championship",                 10],
+  ["spain: segunda división",              11],
+  ["spain: segunda division",              11],
+  ["italy: serie b",                        13],
+  ["france: ligue 2",                       14],
+  ["argentina: primera nacional",           16],
+
+  // ── BIG LEAGUES — Cups & Super Cups ───────────────────────────────────────
+  ["england: fa cup",                       20],
+  ["england: carabao cup",                  21],
+  ["england: efl cup",                      21],
+  ["england: league cup",                   21],
+  ["england: community shield",             22],
+  ["spain: copa del rey",                   23],
+  ["spain: supercopa",                      24],
+  ["germany: dfb-pokal",                    25],
+  ["germany: dfb pokal",                    25],
+  ["germany: supercup",                     26],
+  ["italy: coppa italia",                   27],
+  ["italy: supercoppa",                     28],
+  ["france: coupe de france",               29],
+  ["france: trophée des champions",         30],
+  ["france: trophee des champions",         30],
+  ["brazil: copa do brasil",                31],
+  ["brazil: supercopa",                     32],
+  ["brazil: paulist",                       33],   // Paulistão / Paulista
+  ["brazil: carioca",                       34],
+  ["brazil: mineiro",                       35],
+  ["brazil: gaúcho",                        36],
+  ["brazil: gaucho",                        36],
+  ["argentina: copa argentina",             37],
+  ["argentina: supercopa",                  38],
+
+  // ── MEDIUM LEAGUES — 1st division ─────────────────────────────────────────
+  ["portugal: liga portugal 2",             50],   // ⚠ BEFORE "liga portugal" ("liga portugal 2" ⊃ "liga portugal")
+  ["portugal: segunda liga",                50],
+  ["portugal: liga portugal",               40],
+  ["portugal: primeira liga",               40],
+  ["portugal: liga bwin",                   40],
+  ["netherlands: eredivisie",               41],
+  ["belgium: pro league",                   42],
+  ["belgium: jupiler",                      42],
+  ["turkey: süper lig",                     43],
+  ["turkey: super lig",                     43],
+  ["mexico: liga mx",                       44],
+  ["usa: mls",                              45],
+  ["usa: major league soccer",              45],
+  ["japan: j1 league",                      46],
+  ["japan: j.league",                       46],
+  ["south korea: k league 1",              47],
+  ["korea: k league 1",                    47],
+
+  // ── MEDIUM LEAGUES — 2nd division ─────────────────────────────────────────
+  ["netherlands: eerste divisie",           51],
+  ["netherlands: keuken",                   51],
+  ["belgium: challenger",                   52],
+  ["turkey: 1. lig",                        53],
+  ["turkey: tff 1. lig",                    53],
+  ["mexico: liga de expansión",            54],
+  ["mexico: liga de expansion",            54],
+  ["mexico: ascenso",                       54],
+  ["usa: usl championship",                 55],
+  ["japan: j2 league",                      56],
+  ["south korea: k league 2",              57],
+  ["korea: k league 2",                    57],
+
+  // ── MEDIUM LEAGUES — Cups & Super Cups ────────────────────────────────────
+  ["portugal: taça de portugal",            60],
+  ["portugal: taca de portugal",            60],
+  ["portugal: supertaça",                   61],
+  ["portugal: supertaca",                   61],
+  ["netherlands: knvb",                     62],
+  ["netherlands: johan cruyff",             63],
+  ["netherlands: super cup",                63],
+  ["belgium: belgian cup",                  64],
+  ["belgium: super cup",                    65],
+  ["turkey: turkish cup",                   66],
+  ["turkey: türkiye kupası",               66],
+  ["turkey: super cup",                     67],
+  ["mexico: copa mx",                       68],
+  ["mexico: campeón de campeones",         69],
+  ["mexico: campeon de campeones",         69],
+  ["usa: u.s. open cup",                    70],
+  ["usa: us open cup",                      70],
+  ["usa: open cup",                         70],
+  ["japan: emperor",                        71],   // Emperor's Cup
+  ["japan: super cup",                      72],
+  ["south korea: korean fa cup",           73],
+  ["south korea: fa cup",                  73],
+  ["korea: korean fa cup",                 73],
+  ["korea: fa cup",                        73],
+
+  // ── SMALL LEAGUES — 1st division only ─────────────────────────────────────
+  ["croatia: hnl",                          75],
+  ["croatia: supersport",                   75],
+  ["serbia: superliga",                     76],
+  ["sweden: allsvenskan",                   77],
+  ["norway: eliteserien",                   78],
+  ["denmark: superliga",                    79],
+  ["chile: primera división",              80],
+  ["chile: primera division",              80],
+  ["colombia: categoría primera a",        81],
+  ["colombia: categoria primera a",        81],
+  ["colombia: primera a",                  81],
+  ["colombia: categoría primera b",        96],   // 2nd division
+  ["colombia: categoria primera b",        96],
+  ["colombia: primera b",                  96],
+  ["ecuador: liga pro",                    82],
+  ["ecuador: liga betcris",                82],
+  ["ecuador: segunda categoría",           999],  // 2nd div — skip
+  ["ecuador: segunda categoria",           999],
+  ["ecuador: copa",                        83],
+  ["bolivia: división de honor",           93],
+  ["bolivia: division de honor",           93],
+  ["bolivia: división profesional",        93],
+  ["bolivia: division profesional",        93],
+  ["bolivia: liga boliviana",              93],
+  ["peru: liga 1",                         91],
+  ["peru: primera liga",                   91],
+  ["peru: apertura",                       91],
+  ["peru: copa",                           92],
+  ["uruguay: primera división",            92],
+  ["uruguay: primera division",            92],
+  ["uruguay: serie a",                     92],
+  ["uruguay: apertura",                    92],
+  ["uruguay: copa",                        93],
+  ["paraguay: primera división",           94],
+  ["paraguay: primera division",           94],
+  ["paraguay: apertura",                   94],
+  ["venezuela: liga futve",                95],
+  ["venezuela: primera división",          95],
+  ["venezuela: primera division",          95],
+  ["venezuela: apertura",                  95],
+  ["saudi arabia: saudi pro league",        82],
+  ["saudi arabia: pro league",              82],
+  ["thailand: thai league 1",               83],
+  ["thailand: thai league",                 83],
+  ["india: indian super league",            84],
+  ["india: isl",                            84],
+
+  // ── Other notable European leagues (still shown) ──────────────────────────
+  ["scotland: premiership",                 85],
+  ["russia: premier league",                86],
+  ["ukraine: premier league",               87],
+  ["greece: super league",                  88],
+  ["austria: bundesliga",                   89],   // ⚠ before generic "bundesliga" — safe (prefixed by "austria:")
+  ["switzerland: super league",             90],
+  ["poland: ekstraklasa",                   91],
+  ["romania: superliga",                    92],
+
+  // ── Block lower divisions / amateur / regional ─────────────────────────────
+  ["spain: primera rfef",                  999],
+  ["spain: segunda rfef",                  999],
+  ["spain: tercera rfef",                  999],
+  ["spain: rfef",                          999],
+  ["england: league one",                  999],
+  ["england: league two",                  999],
+  ["england: national league",             999],
+  ["italy: serie c",                       999],
+  ["italy: serie d",                       999],
+  ["france: national",                     999],
+  ["germany: bundesliga women",            999],
+  ["china: super league",                  999],
+  ["china: chinese super league",          999],
+  ["indonesia: liga 1",                    999],
+  ["indonesia: bri liga 1",               999],
+];
+
+// All countries with explicit domestic league entries (used to detect intl tournaments)
+const ALL_DOMESTIC_COUNTRIES = new Set([
+  // Europe
   "england", "spain", "germany", "italy", "france", "portugal", "netherlands",
   "scotland", "belgium", "turkey", "greece", "austria", "switzerland", "russia",
   "ukraine", "poland", "czechia", "denmark", "sweden", "norway", "croatia",
@@ -288,28 +474,279 @@ const EUROPEAN_COUNTRIES = new Set([
   "wales", "luxembourg", "latvia", "estonia", "lithuania", "bosnia",
   "montenegro", "north macedonia", "kosovo", "iceland", "malta", "georgia",
   "armenia", "azerbaijan", "faroe islands",
+  // Americas
+  "brazil", "argentina", "mexico", "usa", "chile", "colombia",
+  "ecuador", "bolivia", "peru", "uruguay", "paraguay", "venezuela",
+  // Asia / Middle East
+  "japan", "south korea", "korea", "saudi arabia", "thailand", "india",
 ]);
 
 function leaguePriority(name: string, country?: string): number {
   const lower = name.toLowerCase();
   const lowerCountry = (country ?? "").toLowerCase();
 
+  // ── Block youth / women / reserve / amateur / futsal leagues universally ──────
+  // These keywords in the league name ALWAYS indicate a non-main competition.
+  // Pattern must precede parent-league match (e.g. "liga mx u21" ⊃ "liga mx").
+  if (/\bu(1[0-9]|2[0-3])\b/.test(lower)) return 999;           // U17, U20, U21, U23…
+  if (/\b(under[ -]?\d{2})\b/.test(lower)) return 999;          // Under-21, Under 23…
+  if (/\b(women|woman|feminine|femenin[ao]|feminino|feminina|ladies|dames|femmes)\b/.test(lower)) return 999;
+  if (/\b(reserv[ae]s?|b-team|youth|juniores?|juvenil|amateur|futsal|beach|indoor|sala)\b/.test(lower)) return 999;
+  // Specific leagues that slip through keyword checks
+  if (lower.includes("next pro"))          return 999;   // MLS Next Pro (development)
+  if (lower.includes("premier league cup")) return 999;  // England U21 PL Cup
+  if (lower.includes("league cup") && lower.includes("play offs") && !lower.includes("carabao") && !lower.includes("efl")) return 999;
+
   // Main part of league name (before first " - "), lowercased
   const mainPart = lower.split(" - ")[0];
 
-  // UEFA/international tournaments: only when country is NOT domestic European
-  if (!EUROPEAN_COUNTRIES.has(lowerCountry)) {
-    for (let i = 0; i < UEFA_TOURNAMENTS.length; i++) {
-      if (mainPart.includes(UEFA_TOURNAMENTS[i])) return i;
+  // International tournaments: only when the country is not a known domestic one
+  if (!ALL_DOMESTIC_COUNTRIES.has(lowerCountry)) {
+    for (let i = 0; i < INTL_TOURNAMENTS.length; i++) {
+      if (mainPart.includes(INTL_TOURNAMENTS[i])) return i;
     }
   }
 
-  // Domestic top leagues by exact prefix
+  // Domestic leagues — first match wins (order matters for specificity)
   for (const [pattern, rank] of DOMESTIC_PRIORITY) {
     if (mainPart.includes(pattern)) return rank;
   }
 
-  if (EUROPEAN_COUNTRIES.has(lowerCountry)) return 200;
+  // Unknown league → filter out
+  return 999;
+}
+
+// ─── Basketball league priority ────────────────────────────────────────────────
+// ORDERING RULE: more-specific patterns before less-specific ("nba cup" before "nba", "del2" before "del")
+const BASKETBALL_PRIORITY: Array<[string, number]> = [
+  // International club competitions
+  ["euroleague",               2],
+  ["eurocup",                  3],
+  ["fiba",                     4],
+  // ── BIG LEAGUES — USA ────────────────────────────────────────────────────────
+  ["nba cup",                  3],   // ⚠ BEFORE "nba"
+  ["all-star",                 4],
+  ["nba",                      1],
+  ["g league",                 5],
+  // ── BIG LEAGUES — Spain ──────────────────────────────────────────────────────
+  ["liga acb",                10],
+  ["leb oro",                 11],
+  ["copa del rey",            12],
+  ["supercopa acb",           13],
+  // ── BIG LEAGUES — Turkey ─────────────────────────────────────────────────────
+  ["basketbol süper ligi",    15],
+  ["basketbol super ligi",    15],
+  ["tbl",                     16],
+  ["turkish cup",             17],
+  ["presidential cup",        18],
+  // ── BIG LEAGUES — Greece ─────────────────────────────────────────────────────
+  ["greek basket league",     20],
+  ["elite league",            21],
+  ["greek cup",               22],
+  // ── BIG LEAGUES — Italy ──────────────────────────────────────────────────────
+  ["lega basket serie a",     25],
+  ["serie a2",                26],
+  ["coppa italia",            27],
+  ["supercoppa italiana",     28],
+  // ── BIG LEAGUES — France ─────────────────────────────────────────────────────
+  ["lnb pro a",               30],
+  ["pro b",                   31],
+  ["leaders cup",             32],
+  ["coupe de france",         33],
+  // ── BIG LEAGUES — Germany ────────────────────────────────────────────────────
+  ["basketball bundesliga",   35],
+  ["proa",                    36],
+  ["bbl-pokal",               37],
+  // ── MEDIUM LEAGUES — Portugal ────────────────────────────────────────────────
+  ["liga betclic",            50],
+  ["proliga",                 51],
+  ["taça de portugal",        52],
+  ["taca de portugal",        52],
+  // ── MEDIUM LEAGUES — Brazil ──────────────────────────────────────────────────
+  ["nbb",                     55],
+  ["liga ouro",               56],
+  ["copa super 8",            57],
+  // ── MEDIUM LEAGUES — Argentina ───────────────────────────────────────────────
+  ["liga nacional",           60],
+  ["liga argentina",          61],
+  // ── MEDIUM LEAGUES — Japan ───────────────────────────────────────────────────
+  ["b.league",                65],
+  ["b2 league",               66],
+  ["emperor",                 67],
+  // ── MEDIUM LEAGUES — South Korea ─────────────────────────────────────────────
+  ["kbl d-league",            71],   // ⚠ BEFORE "kbl"
+  ["kbl",                     70],
+  // ── MEDIUM LEAGUES — China ───────────────────────────────────────────────────
+  ["cba",                     75],
+  ["nbl",                     76],
+  // ── MEDIUM LEAGUES — Mexico ──────────────────────────────────────────────────
+  ["lnbp",                    80],
+];
+
+function basketballLeaguePriority(league: string): number {
+  const lower = league.toLowerCase();
+  for (const [pattern, rank] of BASKETBALL_PRIORITY) {
+    if (lower.includes(pattern)) return rank;
+  }
+  return 999;
+}
+
+// ─── Tennis tournament priority ────────────────────────────────────────────────
+// Tennis has no divisions — ranked by tier: Grand Slams > Masters > ATP Finals > 500 > 250 > Challenger > ITF
+const TENNIS_PRIORITY: Array<[string, number]> = [
+  // Grand Slams
+  ["australian open",      1],
+  ["roland garros",        2],
+  ["wimbledon",            3],
+  ["us open",              4],
+  // ATP / WTA Finals
+  ["atp finals",           5],
+  ["wta finals",           6],
+  // Davis Cup / Billie Jean King Cup
+  ["davis cup",            8],
+  ["billie jean",          9],
+  ["bjk cup",              9],
+  // Masters 1000 / WTA 1000 by location
+  ["indian wells",        10],
+  ["miami open",          11],
+  ["madrid open",         12],
+  ["paris masters",       13],   // ⚠ BEFORE "paris"
+  ["rome",                14],
+  ["toronto",             15],
+  ["montreal",            15],
+  ["cincinnati",          16],
+  ["shanghai",            17],
+  ["paris",               18],
+  ["masters 1000",        19],
+  ["wta 1000",            19],
+  // ATP 500 / WTA 500 tournaments
+  ["halle",               25],
+  ["queen's",             26],
+  ["queens",              26],
+  ["barcelona",           27],
+  ["dubai",               28],
+  ["acapulco",            29],
+  ["rotterdam",           30],
+  ["tokyo",               31],
+  ["estoril",             32],
+  ["atp 500",             33],
+  ["wta 500",             34],
+  // ATP 250 / WTA 250 / WTA 125
+  ["atp 250",             40],
+  ["wta 250",             41],
+  ["wta 125",             42],
+  // Challengers
+  ["challenger",          60],
+  // ITF
+  ["itf",                 80],
+];
+
+function tennisLeaguePriority(name: string): number {
+  const lower = name.toLowerCase();
+  for (const [pattern, rank] of TENNIS_PRIORITY) {
+    if (lower.includes(pattern)) return rank;
+  }
+  return 500; // unknown tennis tournament — still show (tennis always has real data)
+}
+
+// ─── Hockey league priority ─────────────────────────────────────────────────────
+// ⚠ "del2" BEFORE "del"; "hockeyallsvenskan" BEFORE "allsvenskan"
+const HOCKEY_PRIORITY: Array<[string, number]> = [
+  // ── BIG LEAGUES — North America ──────────────────────────────────────────────
+  ["nhl",                  1],
+  ["ahl",                  5],
+  ["echl",                10],
+  ["stanley cup",          2],
+  // ── BIG LEAGUES — Russia ─────────────────────────────────────────────────────
+  ["khl",                 15],
+  ["vhl",                 16],
+  ["gagarin cup",          4],
+  // ── BIG LEAGUES — Sweden ─────────────────────────────────────────────────────
+  ["hockeyallsvenskan",   22],   // ⚠ BEFORE generic "allsvenskan" if it ever appears
+  ["shl",                 20],
+  // ── BIG LEAGUES — Finland ────────────────────────────────────────────────────
+  ["liiga",               25],
+  ["mestis",              26],
+  // ── BIG LEAGUES — Switzerland ────────────────────────────────────────────────
+  ["national league",     30],
+  ["swiss league",        31],
+  // ── BIG LEAGUES — Czech Republic ─────────────────────────────────────────────
+  ["extraliga",           35],
+  ["chance liga",         36],
+  // ── International ────────────────────────────────────────────────────────────
+  ["champions hockey",    40],
+  // ── MEDIUM LEAGUES — Germany ─────────────────────────────────────────────────
+  ["del2",                51],   // ⚠ BEFORE "del"
+  ["del",                 50],
+  // ── MEDIUM LEAGUES — Austria ─────────────────────────────────────────────────
+  ["ice hockey league",   55],
+  ["alps hockey",         56],
+  // ── MEDIUM LEAGUES — Norway ──────────────────────────────────────────────────
+  ["fjordkraft",          60],
+  ["eliteserien",         61],
+  // ── MEDIUM LEAGUES — Denmark ─────────────────────────────────────────────────
+  ["metal ligaen",        65],
+  // ── MEDIUM LEAGUES — Slovakia ────────────────────────────────────────────────
+  ["slovak extraliga",    70],
+  // ── MEDIUM LEAGUES — France ──────────────────────────────────────────────────
+  ["ligue magnus",        75],
+];
+
+function hockeyLeaguePriority(league: string): number {
+  const lower = league.toLowerCase();
+  for (const [pattern, rank] of HOCKEY_PRIORITY) {
+    if (lower.includes(pattern)) return rank;
+  }
+  return 999;
+}
+
+// ─── Volleyball league priority ─────────────────────────────────────────────────
+// ⚠ "volleyball bundesliga" BEFORE "bundesliga"; more-specific league names first
+const VOLLEYBALL_PRIORITY: Array<[string, number]> = [
+  // ── BIG LEAGUES — 1st division ───────────────────────────────────────────────
+  ["superlega",                1],   // Italy 1st div
+  ["plusliga",                 3],   // Poland 1st div
+  ["efeler ligi",              5],   // Turkey 1st div
+  ["sv.league",                6],   // Japan 1st div
+  ["russian volleyball super", 7],   // Russia 1st div
+  ["superliga",                2],   // Brazil / Russia (broad — after more specific Russia)
+  // ── BIG LEAGUES — 2nd division ───────────────────────────────────────────────
+  ["serie a2",                10],   // Italy 2nd div (⚠ before "serie a" if it appears)
+  ["tauron 1 liga",           12],   // Poland 2nd div
+  ["higher league",           14],   // Russia 2nd div
+  ["v.league 2",              15],   // Japan 2nd div (⚠ before "v.league")
+  ["v.league",                16],   // Japan 1st (catch-all after more specific)
+  ["1. lig",                  13],   // Turkey 2nd div
+  // ── BIG LEAGUES — Cups & Super Cups ──────────────────────────────────────────
+  ["coppa italia",            20],
+  ["copa brasil",             21],
+  ["polish cup",              22],
+  ["turkish cup",             23],
+  ["super cup",               24],
+  ["russian cup",             25],
+  ["emperor",                 26],   // Japan Emperor's Cup
+  ["supercoppa",              27],
+  // ── MEDIUM LEAGUES — 1st division ────────────────────────────────────────────
+  ["ligue a",                 40],   // France 1st div (⚠ before "ligue b")
+  ["volleyball bundesliga",   41],   // Germany 1st div (⚠ BEFORE generic "bundesliga")
+  ["liga de voleibol",        45],   // Argentina
+  ["liga una",                50],   // Portugal
+  ["v-league",                55],   // South Korea
+  ["chinese volleyball",      60],   // China
+  // ── MEDIUM LEAGUES — 2nd division ────────────────────────────────────────────
+  ["ligue b",                 70],   // France 2nd div
+  ["bundesliga",              71],   // Germany 2nd div
+  ["ii divisão",              75],   // Portugal 2nd div
+  ["ii divisao",              75],
+  // ── MEDIUM LEAGUES — Cups ────────────────────────────────────────────────────
+  ["coupe de france",         80],
+];
+
+function volleyballLeaguePriority(league: string): number {
+  const lower = league.toLowerCase();
+  for (const [pattern, rank] of VOLLEYBALL_PRIORITY) {
+    if (lower.includes(pattern)) return rank;
+  }
   return 999;
 }
 
@@ -600,6 +1037,20 @@ function makeAdvancedMarketsFromTeams(homeName: string, awayName: string): Advan
   const htftTotal = htftProbs.reduce((a, b) => a + b, 0);
   const htftOdds = probsToDecimalOdds(htftProbs.map(p => mc(p / Math.max(1e-9, htftTotal), 0.005, 0.80)), 1.12);
 
+  // Second Half Result — marginalise over 2nd-half Poisson distributions (h2PH / h2PA)
+  let sh2H = 0, sh2X = 0, sh2A = 0;
+  for (let i = 0; i <= 7; i++) {
+    for (let j = 0; j <= 7; j++) {
+      const p = (h2PH[i] ?? 0) * (h2PA[j] ?? 0);
+      if (i > j) sh2H += p;
+      else if (i === j) sh2X += p;
+      else sh2A += p;
+    }
+  }
+  const [sh2OddsH, sh2OddsX, sh2OddsA] = probsToDecimalOdds(
+    [mc(sh2H, 0.02, 0.96), mc(sh2X, 0.02, 0.96), mc(sh2A, 0.02, 0.96)], 1.08
+  );
+
   // Correct Score — top 14 scorelines + Other
   const scores: Array<[string, number]> = [];
   let pOther = 0;
@@ -638,6 +1089,7 @@ function makeAdvancedMarketsFromTeams(homeName: string, awayName: string): Advan
     totalGoals: { over05: o05!, under05: u05!, over15: o15!, under15: u15!, over25: o25!, under25: u25!, over35: o35!, under35: u35!, over45: o45!, under45: u45!, over55: o55!, under55: u55!, over65: o65!, under65: u65! },
     handicap: { homeMinusOne: hm1H!, awayPlusOne: hm1A!, homeMinusOneHalf: hm15H!, awayPlusOneHalf: hm15A! },
     halfTime: { home: htH!, draw: htX!, away: htA! },
+    secondHalf: { home: sh2OddsH!, draw: sh2OddsX!, away: sh2OddsA! },
     firstGoal: { home: fgH!, noGoal: fgNG!, away: fgA! },
     drawNoBet: { home: dnbH!, away: dnbA! },
     asianHandicap: { line: ahLine, home: ahH!, away: ahA! },
@@ -938,7 +1390,7 @@ function makeHockeyMarketsFromTeams(home: string, away: string): AdvancedMarkets
   } as unknown as AdvancedMarkets;
 }
 
-// ─── Volleyball market builder (seeded model — mirrors buildVolleyballMatches logic) ─
+// ─── Volleyball market builder (probabilistic model for real upcoming matches) ─
 function makeVolleyballMarketsFromTeams(home: string, away: string): AdvancedMarkets {
   const sr = seededRng(`vball-mkt:${home}:${away}`);
   const skillDiff = mc((sr(1) - 0.5) * 0.3 + 0.04, -0.35, 0.35);
@@ -995,6 +1447,8 @@ function makeVolleyballMarketsFromTeams(home: string, away: string): AdvancedMar
 // v2/live: cache 30s
 let liveCache: StatpalLeagueV2[] | null = null;
 let liveFetchedAt = 0;
+// Track Statpal's own updated_ts so we can detect a frozen feed
+let liveFeedUpdatedTs = 0;
 
 // v2/daily today: cache 5min
 let dailyCache: StatpalLeagueV2[] | null = null;
@@ -1307,8 +1761,11 @@ async function getLiveLeagues(): Promise<StatpalLeagueV2[]> {
       console.warn(`[live] Statpal HTTP ${resp.status} — using cache or empty`);
       return liveCache ?? [];
     }
-    const data = (await resp.json()) as { live_matches?: { league?: StatpalLeagueV2 | StatpalLeagueV2[] } };
+    const data = (await resp.json()) as { live_matches?: { league?: StatpalLeagueV2 | StatpalLeagueV2[]; updated_ts?: number } };
     const raw = data?.live_matches?.league;
+    // Track Statpal's own feed timestamp (seconds) — used to detect frozen feed
+    const feedTs = data?.live_matches?.updated_ts;
+    if (feedTs && feedTs > liveFeedUpdatedTs) liveFeedUpdatedTs = feedTs;
     liveCache = raw == null ? [] : Array.isArray(raw) ? raw : [raw];
     liveFetchedAt = now;
     return liveCache;
@@ -1448,64 +1905,317 @@ function calculateLive1x2(state: {
   baseAway: number;
 }): { home: number; draw: number; away: number } {
   const r = (n: number) => Math.round(n * 100) / 100;
-
-  // Derive base probabilities from pre-match odds (already margin-free)
   const vigFactor = 1 - LIVE_MARGIN;
-  const fairHome = 1 / (state.baseHome / vigFactor);
-  const fairAway = 1 / (state.baseAway / vigFactor);
-  const baseDraw = Math.max(0.02, 1 - fairHome - fairAway);
 
-  let homeProb = fairHome;
-  let drawProb = baseDraw;
-  let awayProb = fairAway;
+  // 1. Fair pre-match probabilities from odds
+  const pHome0 = vigFactor / state.baseHome;
+  const pAway0 = vigFactor / state.baseAway;
+  const pDraw0 = Math.max(0.02, 1 - pHome0 - pAway0);
 
-  const diff = state.homeGoals - state.awayGoals;
+  // 2. Estimate pre-match lambdas via team-strength split
+  //    Total ~2.6 expected goals; each team's share proportional to (win + 45% draw) prob
+  const totalLambda = 2.6;
+  const homeStr = pHome0 + pDraw0 * 0.45;
+  const awayStr = pAway0 + pDraw0 * 0.45;
+  const lambdaHome = totalLambda * (homeStr / (homeStr + awayStr)) * 1.08; // slight home advantage
+  const lambdaAway = totalLambda * (awayStr / (homeStr + awayStr)) * 0.92;
 
-  // Score advantage — each goal shifts probability significantly
-  if (diff > 0) {
-    const boost = 0.20 * Math.min(diff, 2);
-    homeProb += boost;
-    awayProb -= boost * 0.5;
-    drawProb -= boost * 0.5;
-  } else if (diff < 0) {
-    const boost = 0.20 * Math.min(-diff, 2);
-    awayProb += boost;
-    homeProb -= boost * 0.5;
-    drawProb -= boost * 0.5;
+  // 3. Scale to remaining time
+  const remainingFrac = Math.max(0.01, (90 - Math.min(state.minute, 89)) / 90);
+
+  // 4. Red card adjustments (each RC: own attack −12%, opponent attack +4%)
+  const muH = lambdaHome * remainingFrac
+    * Math.max(0.4, 1 - 0.12 * state.redCardsHome + 0.04 * state.redCardsAway);
+  const muA = lambdaAway * remainingFrac
+    * Math.max(0.4, 1 - 0.12 * state.redCardsAway + 0.04 * state.redCardsHome);
+
+  // 5. Poisson convolution over remaining goals, conditioned on current score
+  //    This guarantees P(Draw) ≥ P(losing team wins) by construction — because
+  //    to draw from N goals down requires N net goals; to win requires N+1 net goals.
+  const MAX_G = 8;
+  const pH = poissonPmf(muH, MAX_G);
+  const pA = poissonPmf(muA, MAX_G);
+  const diff = state.homeGoals - state.awayGoals; // positive = home leading
+
+  let pHomeWin = 0, pDraw = 0, pAwayWin = 0;
+  for (let kH = 0; kH <= MAX_G; kH++) {
+    for (let kA = 0; kA <= MAX_G; kA++) {
+      const p = pH[kH]! * pA[kA]!;
+      const net = diff + kH - kA;
+      if (net > 0) pHomeWin += p;
+      else if (net === 0) pDraw += p;
+      else pAwayWin += p;
+    }
   }
 
-  // Time pressure — after 70' the leading team becomes a stronger favourite
-  if (state.minute > 70) {
-    const pressure = (state.minute - 70) / 20 * 0.08;
-    if (diff > 0) { homeProb += pressure; drawProb -= pressure * 0.6; awayProb -= pressure * 0.4; }
-    else if (diff < 0) { awayProb += pressure; drawProb -= pressure * 0.6; homeProb -= pressure * 0.4; }
-    else { drawProb += pressure * 0.5; } // draw more likely to stay a draw late
-  }
+  // 6. Normalise and apply margin
+  const total = pHomeWin + pDraw + pAwayWin;
+  pHomeWin /= total; pDraw /= total; pAwayWin /= total;
 
-  // Red cards
-  if (state.redCardsAway > 0) { homeProb += 0.07 * state.redCardsAway; awayProb -= 0.05 * state.redCardsAway; }
-  if (state.redCardsHome > 0) { awayProb += 0.07 * state.redCardsHome; homeProb -= 0.05 * state.redCardsHome; }
-
-  // Clamp and normalise
-  homeProb = Math.max(0.02, homeProb);
-  drawProb = Math.max(0.02, drawProb);
-  awayProb = Math.max(0.02, awayProb);
-  const total = homeProb + drawProb + awayProb;
-  homeProb /= total;
-  drawProb /= total;
-  awayProb /= total;
-
-  // Apply margin → final odds
   return {
-    home: Math.max(1.04, r((1 / homeProb) * vigFactor)),
-    draw: Math.max(2.00, r((1 / drawProb) * vigFactor)),
-    away: Math.max(1.04, r((1 / awayProb) * vigFactor)),
+    home: Math.max(1.04, r((1 / pHomeWin) * vigFactor)),
+    draw: pDraw > 0.005 ? Math.max(2.00, r((1 / pDraw) * vigFactor)) : 0,
+    away: Math.max(1.04, r((1 / pAwayWin) * vigFactor)),
   };
 }
 
 // Count red cards from events array
 function countRedCards(events: Array<{ type: string; team: string }>, team: "home" | "away"): number {
   return events.filter(e => e.type?.toLowerCase().includes("red") && e.team === team).length;
+}
+
+// Scale all non-zero advanced market odds by a proportional factor (for live drift)
+function scaleAdvancedMarkets(m: AdvancedMarkets, factor: number): AdvancedMarkets {
+  const s = (n: number) => n <= 0 ? n : Math.round(Math.max(1.01, n * factor) * 100) / 100;
+  return {
+    ...m,
+    doubleChance: { homeOrDraw: s(m.doubleChance.homeOrDraw), awayOrDraw: s(m.doubleChance.awayOrDraw), homeOrAway: s(m.doubleChance.homeOrAway) },
+    bothTeamsScore: { yes: s(m.bothTeamsScore.yes), no: s(m.bothTeamsScore.no) },
+    totalGoals: {
+      over05: s(m.totalGoals.over05), under05: s(m.totalGoals.under05),
+      over15: s(m.totalGoals.over15), under15: s(m.totalGoals.under15),
+      over25: s(m.totalGoals.over25), under25: s(m.totalGoals.under25),
+      over35: s(m.totalGoals.over35), under35: s(m.totalGoals.under35),
+      over45: s(m.totalGoals.over45), under45: s(m.totalGoals.under45),
+      over55: s(m.totalGoals.over55), under55: s(m.totalGoals.under55),
+      over65: s(m.totalGoals.over65), under65: s(m.totalGoals.under65),
+    },
+    handicap: { homeMinusOne: s(m.handicap.homeMinusOne), awayPlusOne: s(m.handicap.awayPlusOne), homeMinusOneHalf: s(m.handicap.homeMinusOneHalf), awayPlusOneHalf: s(m.handicap.awayPlusOneHalf) },
+    halfTime: m.halfTime ? { home: s(m.halfTime.home), draw: s(m.halfTime.draw), away: s(m.halfTime.away) } : m.halfTime,
+    firstGoal: m.firstGoal ? { home: s(m.firstGoal.home), noGoal: s(m.firstGoal.noGoal), away: s(m.firstGoal.away) } : m.firstGoal,
+    drawNoBet: m.drawNoBet ? { home: s(m.drawNoBet.home), away: s(m.drawNoBet.away) } : undefined,
+    asianHandicap: m.asianHandicap ? { line: m.asianHandicap.line, home: s(m.asianHandicap.home), away: s(m.asianHandicap.away) } : undefined,
+    correctScore: m.correctScore ? Object.fromEntries(Object.entries(m.correctScore).map(([k, v]) => [k, s(v)])) : undefined,
+    corners: m.corners ? { o85: s(m.corners.o85), u85: s(m.corners.u85), o95: s(m.corners.o95), u95: s(m.corners.u95), o105: s(m.corners.o105), u105: s(m.corners.u105) } : undefined,
+    cards: m.cards ? { o35: s(m.cards.o35), u35: s(m.cards.u35), o45: s(m.cards.o45), u45: s(m.cards.u45) } : undefined,
+  };
+}
+
+// ─── Tiered Market Drift Engine ─────────────────────────────────────────────
+// Professional sportsbooks update each market family at different speeds.
+// Tier 1 (1X2, Over/Under, Handicap)      : fast oscillation
+// Tier 2 (HalfTime, HT/FT, CorrectScore)  : medium oscillation
+// Tier 3 (Corners, Cards)                 : slow independent drift
+//
+// CRITICAL: all market odds are computed from _baseMarkets (the anchor set at
+// score-change time), NOT from state.markets. This prevents exponential
+// compounding — directional biases applied to the current value each 2s cycle
+// would cause Under 3.5 to reach 1000+ within minutes.
+function applyTieredMarketDrift(state: LiveMatchState, now: number): LiveMatchState {
+  const { minute = 0, homeScore = 0, awayScore = 0 } = state;
+  const baseOdds = state._baseOdds ?? state.odds;
+  const bm = state._baseMarkets ?? state.markets;
+  const phase = (state._driftPhase ?? 0) + 1;
+  const t = now / 1000;
+  const diff = homeScore - awayScore;
+  const timePressure = Math.max(0, (minute - 55) / 60) * 0.04;
+  const r = (n: number) => Math.round(n * 100) / 100;
+
+  // ── Per-market independent update schedule ──────────────────────────────────
+  // Each market group has its own timer so they NEVER all change at the same time.
+  // Match-ID hash gives every match a unique phase offset (0-29 000ms) so even
+  // the same market on different matches updates at slightly different moments.
+  const idHash = parseInt(state.id.replace(/\D/g, "").slice(-5) || "12345", 10) % 30_000;
+  const sched = state._marketNextUpdate ?? {};
+  const newSched: Record<string, number> = { ...sched };
+
+  // Returns true and schedules next window only when this market is due for refresh.
+  // minMs/maxMs define the random window between updates.
+  const due = (key: string, minMs: number, maxMs: number): boolean => {
+    if (!sched[key]) {
+      // First-time init: spread initial firings across the first minMs window
+      // using match-hash + key-hash so no two markets fire simultaneously
+      const keyOff = (key.charCodeAt(0) + key.charCodeAt(key.length - 1)) % 10;
+      newSched[key] = now + (idHash % minMs) + keyOff * 1_500;
+      return false; // don't fire on very first cycle
+    }
+    if (now >= sched[key]) {
+      newSched[key] = now + minMs + Math.random() * (maxMs - minMs);
+      return true;
+    }
+    return false;
+  };
+
+  // ── Main 1X2 odds (highest priority, 45–90s cadence) ───────────────────────
+  const oddsOscH = Math.sin(t * 0.31 + phase * 0.7) * 0.018 + Math.cos(t * 0.17) * 0.009;
+  const oddsOscD = Math.cos(t * 0.23 + phase * 0.5) * 0.014 + Math.sin(t * 0.11) * 0.007;
+  const oddsOscA = Math.sin(t * 0.27 + phase * 0.9) * 0.018 + Math.cos(t * 0.19) * 0.009;
+  const newOdds = due("odds", 45_000, 90_000) ? {
+    home: Math.max(1.04, Math.min(200, r(baseOdds.home * (1 + oddsOscH - (diff > 0 ? timePressure * 0.4 : timePressure * 0.6))))),
+    draw: baseOdds.draw > 0 ? Math.max(2.00, Math.min(200, r(baseOdds.draw * (1 + oddsOscD + timePressure * 0.3)))) : 0,
+    away: Math.max(1.04, Math.min(200, r(baseOdds.away * (1 + oddsOscA + (diff > 0 ? timePressure * 0.6 : timePressure * 0.4))))),
+  } : state.odds; // not due yet → unchanged (no arrow on frontend)
+
+  // ── Oscillator values — computed fresh each cycle but only APPLIED when due ─
+  const osc1 = Math.sin(t * 0.29 + phase * 0.8) * 0.013 + Math.cos(t * 0.13 + phase * 0.4) * 0.006;
+  const osc2 = Math.sin(t * 0.11 + phase * 0.35) * 0.007 + Math.cos(t * 0.07 + phase * 0.2) * 0.003;
+  const osc3 = Math.sin(t * 0.04 + phase * 0.15) * 0.003 + Math.cos(t * 0.025 + phase * 0.1) * 0.0015;
+
+  const s1 = (n: number) => n <= 0 ? n : r(Math.max(1.01, n * (1 + osc1)));
+  const s2 = (n: number) => n <= 0 ? n : r(Math.max(1.01, n * (1 + osc2)));
+  const s3 = (n: number) => n <= 0 ? n : r(Math.max(1.01, n * (1 + osc3)));
+
+  // Carry through already-settled zeros (filterLiveMarkets output)
+  const keep0 = (cur: number, base: number, fn: (n: number) => number) => cur <= 0 ? 0 : fn(base);
+  const tg  = state.markets.totalGoals;
+  const btg = bm.totalGoals;
+
+  // ── Tier 1 markets — each on its own 50–110s schedule ──────────────────────
+  const dcDue  = due("doubleChance",   50_000, 110_000);
+  const btsDue = due("bothTeamsScore", 55_000, 115_000);
+  const tgDue  = due("totalGoals",     60_000, 120_000);
+  const hcDue  = due("handicap",       65_000, 125_000);
+  const dnbDue = due("drawNoBet",      70_000, 130_000);
+  const atDue  = due("asianTotals",    75_000, 135_000);
+
+  // ── Tier 2 markets — 85–180s ───────────────────────────────────────────────
+  const htDue  = due("halfTime",       85_000, 160_000);
+  const fgDue  = due("firstGoal",      90_000, 170_000);
+  const ahDue  = due("asianHandicap",  95_000, 180_000);
+  const htftDue = due("htft",         100_000, 190_000);
+  const csDue  = due("correctScore",  105_000, 200_000);
+
+  // ── Tier 3 markets — 120–260s ──────────────────────────────────────────────
+  const cornDue = due("corners", 120_000, 250_000);
+  const cardDue = due("cards",   130_000, 260_000);
+
+  const newMarkets: AdvancedMarkets = {
+    ...state.markets, // default: keep ALL current values (no change = no arrow)
+
+    doubleChance: dcDue
+      ? { homeOrDraw: s1(bm.doubleChance.homeOrDraw), awayOrDraw: s1(bm.doubleChance.awayOrDraw), homeOrAway: s1(bm.doubleChance.homeOrAway) }
+      : state.markets.doubleChance,
+
+    bothTeamsScore: btsDue
+      ? { yes: s1(bm.bothTeamsScore.yes), no: s1(bm.bothTeamsScore.no) }
+      : state.markets.bothTeamsScore,
+
+    totalGoals: tgDue
+      ? (() => {
+          // Recalculate from current game state (remaining time + score), then apply a tiny oscillation
+          const live = recalcLiveTotalGoals(
+            state.home, state.away,
+            (state.homeScore ?? 0) + (state.awayScore ?? 0),
+            state.minute ?? 0, state.status,
+            state.markets.totalGoals
+          );
+          return {
+            over05:  live.over05  > 0 ? s1(live.over05)  : 0, under05: live.under05  > 0 ? s1(live.under05)  : 0,
+            over15:  live.over15  > 0 ? s1(live.over15)  : 0, under15: live.under15  > 0 ? s1(live.under15)  : 0,
+            over25:  live.over25  > 0 ? s1(live.over25)  : 0, under25: live.under25  > 0 ? s1(live.under25)  : 0,
+            over35:  live.over35  > 0 ? s1(live.over35)  : 0, under35: live.under35  > 0 ? s1(live.under35)  : 0,
+            over45:  live.over45  > 0 ? s1(live.over45)  : 0, under45: live.under45  > 0 ? s1(live.under45)  : 0,
+            over55:  live.over55  > 0 ? s1(live.over55)  : 0, under55: live.under55  > 0 ? s1(live.under55)  : 0,
+            over65:  live.over65  > 0 ? s1(live.over65)  : 0, under65: live.under65  > 0 ? s1(live.under65)  : 0,
+          };
+        })()
+      : state.markets.totalGoals,
+
+    handicap: hcDue ? {
+      homeMinusOne:     s1(bm.handicap.homeMinusOne),
+      awayPlusOne:      s1(bm.handicap.awayPlusOne),
+      homeMinusOneHalf: s1(bm.handicap.homeMinusOneHalf),
+      awayPlusOneHalf:  s1(bm.handicap.awayPlusOneHalf),
+    } : state.markets.handicap,
+
+    drawNoBet: dnbDue && bm.drawNoBet
+      ? { home: s1(bm.drawNoBet.home), away: s1(bm.drawNoBet.away) }
+      : state.markets.drawNoBet,
+
+    asianTotals: atDue && bm.asianTotals ? {
+      o05:  s1(bm.asianTotals.o05),  u05:  s1(bm.asianTotals.u05),
+      o45:  s1(bm.asianTotals.o45),  u45:  s1(bm.asianTotals.u45),
+      o55:  s1(bm.asianTotals.o55),  u55:  s1(bm.asianTotals.u55),
+      o225: s1(bm.asianTotals.o225), u225: s1(bm.asianTotals.u225),
+      o275: s1(bm.asianTotals.o275), u275: s1(bm.asianTotals.u275),
+    } : state.markets.asianTotals,
+
+    halfTime: htDue && bm.halfTime
+      ? { home: s2(bm.halfTime.home), draw: s2(bm.halfTime.draw), away: s2(bm.halfTime.away) }
+      : state.markets.halfTime,
+
+    secondHalf: htDue && bm.secondHalf
+      ? { home: s2(bm.secondHalf.home), draw: s2(bm.secondHalf.draw), away: s2(bm.secondHalf.away) }
+      : state.markets.secondHalf,
+
+    firstGoal: fgDue
+      ? (state.markets.firstGoal && state.markets.firstGoal.home > 0
+          ? { home: s2(bm.firstGoal!.home), noGoal: s2(bm.firstGoal!.noGoal), away: s2(bm.firstGoal!.away) }
+          : state.markets.firstGoal)
+      : state.markets.firstGoal,
+
+    asianHandicap: ahDue && bm.asianHandicap
+      ? { ...bm.asianHandicap, home: s2(bm.asianHandicap.home), away: s2(bm.asianHandicap.away) }
+      : state.markets.asianHandicap,
+
+    htft: htftDue && bm.htft
+      ? { hh: s2(bm.htft.hh), hd: s2(bm.htft.hd), ha: s2(bm.htft.ha), dh: s2(bm.htft.dh), dd: s2(bm.htft.dd), da: s2(bm.htft.da), ah: s2(bm.htft.ah), ad: s2(bm.htft.ad), aa: s2(bm.htft.aa) }
+      : state.markets.htft,
+
+    correctScore: csDue && bm.correctScore
+      ? Object.fromEntries(Object.entries(bm.correctScore).map(([k, v]) => {
+          const cur = state.markets.correctScore?.[k] ?? 0;
+          return [k, keep0(cur, v, s2)];
+        }))
+      : state.markets.correctScore,
+
+    corners: cornDue && bm.corners
+      ? { o85: s3(bm.corners.o85), u85: s3(bm.corners.u85), o95: s3(bm.corners.o95), u95: s3(bm.corners.u95), o105: s3(bm.corners.o105), u105: s3(bm.corners.u105) }
+      : state.markets.corners,
+
+    cards: cardDue && bm.cards
+      ? { o35: s3(bm.cards.o35), u35: s3(bm.cards.u35), o45: s3(bm.cards.o45), u45: s3(bm.cards.u45) }
+      : state.markets.cards,
+  };
+
+  return { ...state, odds: newOdds, markets: newMarkets, _driftPhase: phase, _marketNextUpdate: newSched };
+}
+
+// Recalculate open (non-settled) total goals lines using live-adjusted expected goals.
+// λ_remaining = λ_total × (remainingMins / 90); each open line is repriced from remaining need.
+function recalcLiveTotalGoals(
+  home: string,
+  away: string,
+  currentGoals: number,
+  minute: number,
+  status: string,
+  settled: AdvancedMarkets["totalGoals"]
+): AdvancedMarkets["totalGoals"] {
+  const { lambdaHome, lambdaAway } = soccerPoissonModel(home, away);
+  const lambdaTotal = lambdaHome + lambdaAway;
+  const isHT = status === "HT";
+  // Remaining minutes: HT → 45 still to play; otherwise 90 − minute, floor at 1
+  const remainingMins = isHT ? 45 : Math.max(1, 90 - Math.min(90, minute));
+  const lambdaRem = lambdaTotal * (remainingMins / 90);
+
+  // For a given line (e.g. 2.5), needed = goals still required to win Over
+  // If already settled (cur ≤ 0 from filterLiveMarkets) → keep 0
+  const recalcLine = (cur: number, targetTotal: number): [number, number] => {
+    if (cur <= 0) return [0, 0];
+    const needed = Math.max(1, targetTotal - currentGoals);
+    const pOver = mc(1 - poissonCdf(lambdaRem, needed - 1), 0.01, 0.99);
+    const pUnder = mc(1 - pOver, 0.01, 0.99);
+    const [oOdds, uOdds] = probsToDecimalOdds([pOver, pUnder], 1.06);
+    return [oOdds!, uOdds!];
+  };
+
+  const [o05, u05] = recalcLine(settled.over05, 1);
+  const [o15, u15] = recalcLine(settled.over15, 2);
+  const [o25, u25] = recalcLine(settled.over25, 3);
+  const [o35, u35] = recalcLine(settled.over35, 4);
+  const [o45, u45] = recalcLine(settled.over45, 5);
+  const [o55, u55] = recalcLine(settled.over55, 6);
+  const [o65, u65] = recalcLine(settled.over65, 7);
+
+  return {
+    over05: o05, under05: u05,
+    over15: o15, under15: u15,
+    over25: o25, under25: u25,
+    over35: o35, under35: u35,
+    over45: o45, under45: u45,
+    over55: o55, under55: u55,
+    over65: o65, under65: u65,
+  };
 }
 
 // Remove/zero out market lines that are already settled or impossible given the current live score
@@ -1599,6 +2309,9 @@ function buildNHLLiveMatches(tournaments: NHLTournament[]): LiveMatchState[] {
   const NHL_LIVE_STATUSES = new Set(["1P", "2P", "3P", "OT", "SO", "INT", "Break"]);
   const result: LiveMatchState[] = [];
 
+  // Sort by league priority so top-tier competitions appear first
+  const sorted = [...tournaments].sort((a, b) => hockeyLeaguePriority(a.league) - hockeyLeaguePriority(b.league));
+
   const today = new Date();
   const todayStr = `${String(today.getDate()).padStart(2, "0")}.${String(today.getMonth() + 1).padStart(2, "0")}.${today.getFullYear()}`;
 
@@ -1611,7 +2324,7 @@ function buildNHLLiveMatches(tournaments: NHLTournament[]): LiveMatchState[] {
     return [h, a];
   };
 
-  for (const t of tournaments) {
+  for (const t of sorted) {
     const matches = Array.isArray(t.match) ? t.match : [t.match];
     for (const m of matches) {
       if (!m?.status) continue;
@@ -1713,10 +2426,13 @@ function buildNBALiveMatches(tournaments: NBATournament[]): LiveMatchState[] {
   const NBA_LIVE_STATUSES = new Set(["Q1", "Q2", "Q3", "Q4", "HT", "OT", "1st Quarter", "2nd Quarter", "3rd Quarter", "4th Quarter", "Halftime", "In Progress"]);
   const result: LiveMatchState[] = [];
 
+  // Sort by league priority so NBA Cup / EuroLeague appear before G League etc.
+  const sorted = [...tournaments].sort((a, b) => basketballLeaguePriority(a.league) - basketballLeaguePriority(b.league));
+
   const today = new Date();
   const todayStr = `${String(today.getDate()).padStart(2, "0")}.${String(today.getMonth() + 1).padStart(2, "0")}.${today.getFullYear()}`;
 
-  for (const t of tournaments) {
+  for (const t of sorted) {
     const matches = Array.isArray(t.match) ? t.match : [t.match];
     for (const m of matches) {
       if (!m?.status) continue;
@@ -1871,7 +2587,10 @@ function buildTennisLiveMatches(
     return 0;
   };
 
-  for (const t of tournaments) {
+  // Sort by tournament priority: Grand Slams → Masters → ATP 500 → ATP 250 → Challenger → ITF
+  const sorted = [...tournaments].sort((a, b) => tennisLeaguePriority(a.name) - tennisLeaguePriority(b.name));
+
+  for (const t of sorted) {
     const matches = Array.isArray(t.match) ? t.match : (t.match ? [t.match] : []);
     for (const m of matches) {
       if (!m || !TENNIS_LIVE_STATUSES.has(m.status)) continue;
@@ -1977,11 +2696,14 @@ function buildVolleyballLiveMatches(tournaments: VolleyTournament[]): LiveMatchS
   const VSET_LIVE = new Set(["Set 1", "Set 2", "Set 3", "Set 4", "Set 5"]);
   const result: LiveMatchState[] = [];
 
+  // Sort by league priority: SuperLega / Superliga / PlusLiga → medium leagues
+  const sorted = [...tournaments].sort((a, b) => volleyballLeaguePriority(a.league) - volleyballLeaguePriority(b.league));
+
   // Today's date in DD.MM.YYYY for filtering non-live matches
   const now = new Date();
   const todayStr = `${String(now.getDate()).padStart(2, "0")}.${String(now.getMonth() + 1).padStart(2, "0")}.${now.getFullYear()}`;
 
-  for (const t of tournaments) {
+  for (const t of sorted) {
     const matches = Array.isArray(t.match) ? t.match : t.match ? [t.match] : [];
     for (const m of matches) {
       if (!m) continue;
@@ -2050,7 +2772,92 @@ function buildVolleyballLiveMatches(tournaments: VolleyTournament[]): LiveMatchS
   return result;
 }
 
+// ─── ET / Penalty market helpers ────────────────────────────────────────────────
+
+function makeETMarketsFromScore(
+  etHome: number, etAway: number,
+  totalHome: number, totalAway: number,
+): NonNullable<AdvancedMarkets["etExtra"]> {
+  const marg = 0.07;
+  const price = (p: number) => mr(mc(1 / Math.max(0.01, p) * (1 + marg), 1.01, 200));
+
+  // ET period result (1X2 — draw in ET means match goes to penalties)
+  const etDiff = etHome - etAway;
+  let pH: number, pD: number, pA: number;
+  if (etDiff === 0)       { pH = 0.37; pD = 0.28; pA = 0.35; }
+  else if (etDiff === 1)  { pH = 0.72; pD = 0.18; pA = 0.10; }
+  else if (etDiff === -1) { pH = 0.10; pD = 0.18; pA = 0.72; }
+  else if (etDiff >= 2)   { pH = 0.92; pD = 0.05; pA = 0.03; }
+  else                    { pH = 0.03; pD = 0.05; pA = 0.92; }
+
+  // Tie winner — who advances from the knockout (penalty shootout is 50/50 if ET ends level)
+  const totalDiff = totalHome - totalAway;
+  let pTH: number, pTA: number;
+  if (totalDiff >= 3)       { pTH = 0.98; pTA = 0.02; }
+  else if (totalDiff === 2) { pTH = 0.95; pTA = 0.05; }
+  else if (totalDiff === 1) { pTH = pH + pD * 0.5; pTA = pA + pD * 0.5; }
+  else if (totalDiff === 0) { pTH = pH + pD * 0.5; pTA = pA + pD * 0.5; }
+  else if (totalDiff === -1){ pTH = pA + pD * 0.5; pTA = pH + pD * 0.5; }
+  else if (totalDiff === -2){ pTH = 0.05; pTA = 0.95; }
+  else                      { pTH = 0.02; pTA = 0.98; }
+  // Normalise
+  const tSum = pTH + pTA;
+  pTH /= tSum; pTA /= tSum;
+
+  // Next goal scorer — trailing team is more desperate, slight advantage
+  let pNG_H: number, pNG_A: number;
+  if (totalDiff > 0)       { pNG_H = 0.45; pNG_A = 0.55; } // away trailing → more desperate
+  else if (totalDiff < 0)  { pNG_H = 0.55; pNG_A = 0.45; } // home trailing → more desperate
+  else                     { pNG_H = 0.50; pNG_A = 0.50; }
+
+  // Total goals (Poisson model for remaining ET time)
+  const totalGoalsET = etHome + etAway;
+  const λ = Math.max(0.05, 0.65 - totalGoalsET * 0.22);
+  const p0 = Math.exp(-λ);
+  const p1 = λ * p0;
+  const p2 = (λ * λ / 2) * p0;
+  const pO05 = Math.max(0.02, 1 - p0);
+  const pO15 = Math.max(0.01, 1 - p0 - p1);
+  const pO25 = Math.max(0.005, 1 - p0 - p1 - p2);
+
+  return {
+    tieWinner: { home: price(pTH), away: price(pTA) },
+    etResult:  { home: price(pH), draw: price(pD), away: price(pA) },
+    totalGoals: {
+      o05: price(pO05),  u05: price(1 - pO05),
+      o15: price(pO15),  u15: price(1 - pO15),
+      o25: price(pO25),  u25: price(1 - pO25),
+    },
+    nextGoal: { home: price(pNG_H), away: price(pNG_A) },
+  };
+}
+
+function makePenMarketsFromScore(penHome: number, penAway: number): NonNullable<AdvancedMarkets["penExtra"]> {
+  const marg = 0.07;
+  const price = (p: number) => mr(mc(1 / Math.max(0.01, p) * (1 + marg), 1.01, 50));
+
+  const diff = penHome - penAway;
+  let pHome: number, pAway: number;
+  if (diff === 0)       { pHome = 0.50; pAway = 0.50; }
+  else if (diff === 1)  { pHome = 0.68; pAway = 0.32; }
+  else if (diff === -1) { pHome = 0.32; pAway = 0.68; }
+  else if (diff >= 2)   { pHome = 0.88; pAway = 0.12; }
+  else                  { pHome = 0.12; pAway = 0.88; }
+
+  return { winner: { home: price(pHome), away: price(pAway) } };
+}
+
 // ─── Match builders ────────────────────────────────────────────────────────────
+
+// Max time a football match may stay in live: 210 min (90 + 30 ET + 15 pen shoot + buffer)
+const MATCH_MAX_LIVE_MS  = 210 * 60 * 1000;
+// Max time a match may sit in "HT" status: 22 min (real HT is ≤15 min)
+const HT_MAX_DURATION_MS = 22 * 60 * 1000;
+// Additional FINISHED statuses Statpal may return when slow to update
+const STATPAL_FINISHED_STATUSES = new Set([
+  "FT", "AET", "AP", "Pen", "Full Time", "After ET", "After Pens",
+  "Finished", "Ended", "Abandoned", "Postponed", "Cancelled", "Susp",
+]);
 
 async function buildLiveMatches(): Promise<LiveMatchState[]> {
   const [leagues, odds] = await Promise.all([getLiveLeagues(), getOddsMap()]);
@@ -2059,19 +2866,72 @@ async function buildLiveMatches(): Promise<LiveMatchState[]> {
     .sort((a, b) => leaguePriority(a.name, a.country) - leaguePriority(b.name, b.country))
     .filter(l => leaguePriority(l.name, l.country) < 100);
 
+  // ── Garbage-collect liveMatchState for IDs no longer in the Statpal response ──
+  const currentMatchIds = new Set<string>();
+  for (const league of sorted) {
+    const ms: StatpalMatchV2[] = Array.isArray(league.match) ? league.match : [league.match];
+    for (const m of ms) currentMatchIds.add(m.main_id);
+  }
+  for (const id of liveMatchState.keys()) {
+    if (!currentMatchIds.has(id)) liveMatchState.delete(id);
+  }
+
+  const now = Date.now();
   let count = 0;
   const result: LiveMatchState[] = [];
 
   for (const league of sorted) {
-    if (count >= 20) break;
+    if (count >= 30) break;
     const matches: StatpalMatchV2[] = Array.isArray(league.match) ? league.match : [league.match];
 
     for (const m of matches) {
-      if (count >= 20) break;
+      if (count >= 30) break;
+
+      // ── Guard 0: explicitly finished statuses Statpal is slow to remove ───────
+      if (STATPAL_FINISHED_STATUSES.has(m.status)) continue;
+
       const isLiveMinute = /^\d{1,3}$/.test(m.status);
       const isHT = m.status === "HT";
       const isET = m.status === "ET";
       if (!isLiveMinute && !isHT && !isET) continue;
+
+      // ── Guard 0b: frozen feed detection ─────────────────────────────────────
+      // If Statpal's own updated_ts hasn't moved in >15min, the feed is frozen.
+      // In that case, drop any match whose scheduled kickoff + 130 min has passed
+      // (it's almost certainly over even if Statpal still shows it as in-progress).
+      if (liveFeedUpdatedTs > 0) {
+        const feedAgeMs = now - liveFeedUpdatedTs * 1000;
+        const FROZEN_THRESHOLD_MS = 15 * 60 * 1000; // 15 minutes
+        if (feedAgeMs > FROZEN_THRESHOLD_MS && m.date && m.time) {
+          // Parse "DD.MM.YYYY" + "HH:MM" into UTC ms
+          const [d, mo, y] = m.date.split(".").map(Number);
+          const [h, mi] = m.time.split(":").map(Number);
+          if (!isNaN(d) && !isNaN(h)) {
+            const kickoffMs = Date.UTC(y, mo - 1, d, h, mi);
+            const MAX_MATCH_DURATION_MS = 130 * 60 * 1000; // 130 min (90 + ET + buffer)
+            if (now - kickoffMs > MAX_MATCH_DURATION_MS) continue; // match is over
+          }
+        }
+      }
+
+      const existing = liveMatchState.get(m.main_id);
+
+      // ── Guard 1: discard match that has been live longer than MATCH_MAX_LIVE_MS ─
+      const firstSeenAt = existing?._firstSeenAt ?? now;
+      if (now - firstSeenAt > MATCH_MAX_LIVE_MS) {
+        liveMatchState.delete(m.main_id);
+        continue;
+      }
+
+      // ── Guard 2: discard match stuck in "HT" for more than HT_MAX_DURATION_MS ──
+      // Reset htStartedAt when match leaves HT (progresses to 2nd half)
+      const htStartedAt = isHT
+        ? (existing?._htStartedAt ?? (existing?.status === "HT" ? existing._htStartedAt : now))
+        : undefined;
+      if (isHT && htStartedAt !== undefined && now - htStartedAt > HT_MAX_DURATION_MS) {
+        liveMatchState.delete(m.main_id);
+        continue;
+      }
 
       const homeScore = m.home.goals === "?" ? 0 : parseInt(m.home.goals) || 0;
       const awayScore = m.away.goals === "?" ? 0 : parseInt(m.away.goals) || 0;
@@ -2093,7 +2953,6 @@ async function buildLiveMatches(): Promise<LiveMatchState[]> {
       };
 
       // Stable odds: once assigned, keep unless score changes significantly
-      const existing = liveMatchState.get(m.main_id);
       let matchOdds: { home: number; draw: number; away: number };
       let matchMarkets: AdvancedMarkets;
       let matchMarketSuspension: Record<string, number> | undefined;
@@ -2102,11 +2961,9 @@ async function buildLiveMatches(): Promise<LiveMatchState[]> {
       let hasRealOdds = true; // Always show odds — use model when real unavailable
 
       if (existing && existing.homeScore === homeScore && existing.awayScore === awayScore) {
-        // Score unchanged — apply live odds drift (simulate market movement)
-        const base = existing._baseOdds ?? existing.odds;
+        // Score unchanged — background drift timer handles market updates every 2s.
+        // Here we only update the minute and clean up expired suspensions.
         const now = Date.now();
-        const phase = (existing._driftPhase ?? 0) + 1;
-        // Clean expired suspensions
         if (existing.marketSuspension) {
           const active = Object.fromEntries(
             Object.entries(existing.marketSuspension).filter(([, ts]) => ts > now)
@@ -2114,31 +2971,31 @@ async function buildLiveMatches(): Promise<LiveMatchState[]> {
           matchMarketSuspension = Object.keys(active).length > 0 ? active : undefined;
         }
 
-        // Time-based micro-drift: oscillates odds naturally
-        // Uses two sine waves at different frequencies to create organic movement
-        const t = now / 1000;
-        const driftH = Math.sin(t * 0.31 + phase * 0.7) * 0.018 + Math.cos(t * 0.17) * 0.009;
-        const driftD = Math.cos(t * 0.23 + phase * 0.5) * 0.014 + Math.sin(t * 0.11) * 0.007;
-        const driftA = Math.sin(t * 0.27 + phase * 0.9) * 0.018 + Math.cos(t * 0.19) * 0.009;
-
-        // Minute pressure: after 60' odds compress toward extremes
-        const timePressure = Math.max(0, (minute - 55) / 60) * 0.04;
-        const diff = homeScore - awayScore;
-
-        const r = (n: number) => Math.round(n * 100) / 100;
-        matchOdds = {
-          home: Math.max(1.04, Math.min(25, r(base.home * (1 + driftH - (diff > 0 ? timePressure * 0.4 : timePressure * 0.6))))),
-          draw: base.draw > 0 ? Math.max(2.2, Math.min(8, r(base.draw * (1 + driftD + timePressure * 0.3)))) : 0,
-          away: Math.max(1.04, Math.min(25, r(base.away * (1 + driftA + (diff > 0 ? timePressure * 0.6 : timePressure * 0.4))))),
+        // Read current state (already drifted by background timer); just update minute + suspensions
+        const updatedState = {
+          ...existing,
+          minute,
+          marketSuspension: matchMarketSuspension,
+          _suspensionReason: matchMarketSuspension ? existing._suspensionReason : undefined,
+          _firstSeenAt: firstSeenAt,
+          _htStartedAt: isHT ? htStartedAt : undefined,
         };
-
-        // Keep markets from existing state (already filtered for live score)
-        matchMarkets = filterLiveMarkets(existing.markets, homeScore, awayScore);
-
-        // Store drift phase for next cycle
-        const updatedState = { ...existing, odds: matchOdds, minute, _driftPhase: phase, marketSuspension: matchMarketSuspension, _suspensionReason: matchMarketSuspension ? existing._suspensionReason : undefined };
-        liveMatchState.set(m.main_id, updatedState);
-        result.push({ ...updatedState, events: existing.events });
+        // Inject ET/pen markets if match is in extra time / penalties (always refresh in ET)
+        {
+          const inETU = isET || minute > 90;
+          let mkt = updatedState.markets;
+          if (inETU) {
+            const etH = (m.et && m.et.home_goals != null) ? m.et.home_goals : 0;
+            const etA = (m.et && m.et.away_goals != null) ? m.et.away_goals : 0;
+            mkt = { ...mkt, etExtra: makeETMarketsFromScore(etH, etA, homeScore, awayScore) };
+          }
+          if (m.penalties && !mkt.penExtra) {
+            mkt = { ...mkt, penExtra: makePenMarketsFromScore(m.penalties.home_pen, m.penalties.away_pen) };
+          }
+          if (mkt !== updatedState.markets) (updatedState as LiveMatchState).markets = mkt;
+        }
+        liveMatchState.set(m.main_id, updatedState as LiveMatchState);
+        result.push({ ...updatedState as LiveMatchState, events: existing.events });
         count++;
         continue;
       } else {
@@ -2174,6 +3031,43 @@ async function buildLiveMatches(): Promise<LiveMatchState[]> {
 
         // Filter markets for live score (remove impossible/settled lines)
         matchMarkets = filterLiveMarkets(matchMarkets, homeScore, awayScore);
+
+        // Recalculate total goals using live-adjusted lambda (remaining time + current score)
+        matchMarkets = {
+          ...matchMarkets,
+          totalGoals: recalcLiveTotalGoals(
+            m.home.name, m.away.name,
+            homeScore + awayScore, minute, m.status,
+            matchMarkets.totalGoals
+          ),
+        };
+
+        // Recalculate Double Chance and Draw No Bet from the ACTUAL live 1X2 odds.
+        // The base model computes these from internal ELO probs which diverge from the
+        // live 1X2 after score changes (e.g. Home=1.06 but DC homeOrDraw shows 2.89).
+        {
+          const inv = (o: number) => (o > 1 ? 1 / o : 0);
+          const pH = inv(matchOdds.home);
+          const pD = inv(matchOdds.draw);
+          const pA = inv(matchOdds.away);
+          const sum = pH + pD + pA;
+          if (sum > 0 && matchOdds.draw > 0) {
+            const nH = pH / sum, nD = pD / sum, nA = pA / sum;
+            const dc = (p: number) => mr(mc(1 / Math.max(1e-9, p * 1.04), 1.01, 100));
+            matchMarkets = {
+              ...matchMarkets,
+              doubleChance: {
+                homeOrDraw: dc(nH + nD),
+                awayOrDraw: dc(nA + nD),
+                homeOrAway: dc(nH + nA),
+              },
+              drawNoBet: matchMarkets.drawNoBet ? {
+                home: mr(mc(1 / Math.max(1e-9, (nH / Math.max(1e-9, nH + nA)) * 1.04), 1.01, 100)),
+                away: mr(mc(1 / Math.max(1e-9, (nA / Math.max(1e-9, nH + nA)) * 1.04), 1.01, 100)),
+              } : undefined,
+            };
+          }
+        }
       }
 
       const events: LiveMatchState["events"] = [];
@@ -2188,6 +3082,9 @@ async function buildLiveMatches(): Promise<LiveMatchState[]> {
           });
         }
       }
+      // Red card counts derived from the fully-parsed events (available in both branches)
+      const stateRcHome = countRedCards(events, "home");
+      const stateRcAway = countRedCards(events, "away");
 
       // VAR review / penalty / big-chance detection → suspend all markets
       // Triggered on dangerous events in the most recent 2 minutes of play
@@ -2222,6 +3119,17 @@ async function buildLiveMatches(): Promise<LiveMatchState[]> {
         matchSuspensionReason = reasonKey ? VAR_REASON_MAP[reasonKey] : "SUSPENSO";
       }
 
+      // Inject ET markets when in extra time (minute > 90 or isET status)
+      if (isET || minute > 90) {
+        const etH = (m.et && m.et.home_goals != null) ? m.et.home_goals : 0;
+        const etA = (m.et && m.et.away_goals != null) ? m.et.away_goals : 0;
+        matchMarkets = { ...matchMarkets, etExtra: makeETMarketsFromScore(etH, etA, homeScore, awayScore) };
+      }
+      // Inject penalty markets when shootout is underway
+      if (m.penalties) {
+        matchMarkets = { ...matchMarkets, penExtra: makePenMarketsFromScore(m.penalties.home_pen, m.penalties.away_pen) };
+      }
+
       const footballExtra: LiveMatchState["_liveExtra"] = {};
       if (m.ht) footballExtra.htScore = [m.ht.home_goals, m.ht.away_goals];
       if (m.et) footballExtra.etScore = [m.et.home_goals, m.et.away_goals];
@@ -2245,9 +3153,14 @@ async function buildLiveMatches(): Promise<LiveMatchState[]> {
         marketSuspension: matchMarketSuspension,
         _suspensionReason: matchSuspensionReason,
         _baseOdds: matchOdds,
+        _baseMarkets: matchMarkets,
         _oddsUpdatedAt: Date.now(),
         _driftPhase: 0,
         _liveExtra: Object.keys(footballExtra).length > 0 ? footballExtra : undefined,
+        _firstSeenAt: firstSeenAt,
+        _htStartedAt: isHT ? htStartedAt : undefined,
+        redCardsHome: stateRcHome > 0 ? stateRcHome : undefined,
+        redCardsAway: stateRcAway > 0 ? stateRcAway : undefined,
       };
 
       liveMatchState.set(m.main_id, state);
@@ -2274,16 +3187,18 @@ async function buildUpcomingMatches(): Promise<UpcomingMatch[]> {
     ...tomorrowLeagues.map(l => ({ ...l, isTomorrow: true })),
   ];
 
-  const sorted = allLeagues.sort((a, b) => leaguePriority(a.name, a.country) - leaguePriority(b.name, b.country));
+  const sorted = allLeagues
+    .filter(l => leaguePriority(l.name, l.country) < 100)
+    .sort((a, b) => leaguePriority(a.name, a.country) - leaguePriority(b.name, b.country));
 
   const results: UpcomingMatch[] = [];
 
   for (const league of sorted) {
-    if (results.length >= 25) break;
+    if (results.length >= 40) break;
     const matches: StatpalMatchV2[] = Array.isArray(league.match) ? league.match : [league.match];
 
     for (const m of matches) {
-      if (results.length >= 25) break;
+      if (results.length >= 40) break;
       if (!/^\d{2}:\d{2}$/.test(m.status)) continue;
       if (m.home.goals !== "?" || m.away.goals !== "?") continue;
       if (seenIds.has(m.main_id)) continue;
@@ -2294,8 +3209,14 @@ async function buildUpcomingMatches(): Promise<UpcomingMatch[]> {
 
       const { odds: matchOdds, markets, real } = resolveOdds(m, odds);
 
-      // Skip matches without real Statpal odds — don't send odds-less events to the frontend
-      if (!real) continue;
+      // Skip matches without real Statpal odds UNLESS the league is high-priority
+      // (priority < 50 = Copa do Brasil, Liga Profesional, Copa Libertadores, etc.)
+      // — they are real competitions that should always be shown with simulated odds
+      const leaguePri = leaguePriority(
+        league.name ?? "",
+        league.country ?? ""
+      );
+      if (!real && leaguePri >= 50) continue;
 
       results.push({
         id: m.main_id,
@@ -2316,318 +3237,6 @@ async function buildUpcomingMatches(): Promise<UpcomingMatch[]> {
   return results;
 }
 
-// ─── Simulated football for extra leagues (Turkey, Scotland, China, Indonesia) ─
-
-function buildSimulatedFootballMatches(): UpcomingMatch[] {
-  const today = new Date();
-  const dayKey = today.getUTCFullYear() * 10000 + (today.getUTCMonth() + 1) * 100 + today.getUTCDate();
-
-  const MATCHUPS: [string, string, string, string, string][] = [
-    // Turkey — Süper Lig
-    ["Galatasaray", "Fenerbahçe", "Süper Lig — Turquia", "turkey", "18:00"],
-    ["Beşiktaş", "Trabzonspor", "Süper Lig — Turquia", "turkey", "19:00"],
-    ["Başakşehir", "Adana Demirspor", "Süper Lig — Turquia", "turkey", "16:00"],
-    ["Konyaspor", "Gaziantep FK", "Süper Lig — Turquia", "turkey", "14:00"],
-    ["Sivasspor", "Antalyaspor", "Süper Lig — Turquia", "turkey", "15:30"],
-    ["Kasımpaşa", "Ankaragücü", "Süper Lig — Turquia", "turkey", "17:00"],
-    // Scotland — Premiership
-    ["Celtic", "Rangers", "Premiership — Escócia", "scotland", "12:30"],
-    ["Hearts", "Hibernian", "Premiership — Escócia", "scotland", "15:00"],
-    ["Aberdeen", "Dundee United", "Premiership — Escócia", "scotland", "15:00"],
-    ["Motherwell", "St Mirren", "Premiership — Escócia", "scotland", "15:00"],
-    // China — Super League
-    ["Beijing Guoan", "Shanghai Port", "Super League — China", "china", "13:35"],
-    ["Shandong Taishan", "Guangzhou FC", "Super League — China", "china", "15:05"],
-    ["Wuhan Three Towns", "Shenzhen FC", "Super League — China", "china", "16:35"],
-    ["Shanghai Shenhua", "Tianjin Jinmen Tiger", "Super League — China", "china", "14:05"],
-    // Indonesia — Liga 1
-    ["Persija Jakarta", "Persebaya Surabaya", "Liga 1 — Indonésia", "indonesia", "15:30"],
-    ["PSM Makassar", "Bali United", "Liga 1 — Indonésia", "indonesia", "19:00"],
-    ["Persib Bandung", "Arema FC", "Liga 1 — Indonésia", "indonesia", "18:30"],
-    ["Borneo FC", "Bhayangkara FC", "Liga 1 — Indonésia", "indonesia", "20:00"],
-  ];
-
-  return MATCHUPS.map(([home, away, league, country, time], i) => ({
-    id: `sfball-${dayKey}-${i}`,
-    home, away, league, country, time,
-    date: futureDateStr(Math.floor(i / 6)),
-    sport: "football",
-    hasRealOdds: true,
-    odds: makeOddsFromTeams(home, away),
-    markets: makeAdvancedMarketsFromTeams(home, away),
-  }));
-}
-
-// ─── Other sports generators (deterministic per calendar day) ─────────────────
-
-function dayRng(day: number): (n: number) => number {
-  return (n: number) => {
-    const x = Math.sin(day * 31 + n * 7919) * 2654435761;
-    return (x - Math.floor(x));
-  };
-}
-
-function buildBasketballMatches(): UpcomingMatch[] {
-  const today = new Date();
-  const dayKey = today.getUTCFullYear() * 10000 + (today.getUTCMonth() + 1) * 100 + today.getUTCDate();
-
-  const MATCHUPS: [string, string, string, string, string][] = [
-    ["Boston Celtics", "Miami Heat", "NBA — Conferência Leste", "usa", "19:30"],
-    ["Milwaukee Bucks", "Philadelphia 76ers", "NBA — Conferência Leste", "usa", "21:00"],
-    ["Los Angeles Lakers", "Golden State Warriors", "NBA — Conferência Oeste", "usa", "22:30"],
-    ["Phoenix Suns", "Denver Nuggets", "NBA — Conferência Oeste", "usa", "21:00"],
-    ["Memphis Grizzlies", "Dallas Mavericks", "NBA — Conferência Oeste", "usa", "20:00"],
-    ["New York Knicks", "Chicago Bulls", "NBA — Conferência Leste", "usa", "19:00"],
-    ["Real Madrid", "Barcelona", "EuroLeague", "spain", "20:30"],
-    ["Olimpia Milan", "Fenerbahçe Beko", "EuroLeague", "italy", "19:00"],
-    ["Anadolu Efes", "Panathinaikos", "EuroLeague", "turkey", "18:00"],
-    ["Flamengo", "Corinthians", "NBB — Brasil", "brazil", "20:00"],
-  ];
-
-  return MATCHUPS.map(([home, away, league, country, time], i) => {
-    const seedKey = `bball:${dayKey}:${i}:${home}:${away}`;
-    const dateStr = futureDateStr(Math.floor(i / 3));
-    const sr = seededRng(seedKey);
-
-    // Home advantage probability via normal distribution on team strength diff
-    const marginMean = mc((sr(1) - 0.5) * 14 + 2, -18, 18);
-    const marginSd = mc(11 + sr(2) * 3, 9, 16);
-
-    // Game total: ~215 pts ± 15
-    const mean = mc(215 + (sr(3) - 0.5) * 30, 170, 250);
-    const sd = mc(14 + sr(4) * 4, 10, 22);
-    const split = mc(0.51 + (sr(5) - 0.5) * 0.14, 0.35, 0.65);
-
-    // 1X2 (no draw)
-    const spreadLine = Math.round(mean * 0.01 + Math.abs(marginMean) * 0.5) * (marginMean >= 0 ? -1 : 1);
-    const pHomeMoneyline = mc(1 - normalCdf((-3 - marginMean) / marginSd), 0.05, 0.95);
-    const [homeOdd, awayOdd] = probsToDecimalOdds([pHomeMoneyline, 1 - pHomeMoneyline], 1.05);
-
-    // Spread ±spread line
-    const spread = Math.abs(Math.round(marginMean * 0.8));
-    const zSpread = (-spread - marginMean) / marginSd;
-    const pHomeCover = mc(1 - normalCdf(zSpread), 0.05, 0.95);
-    const [spreadH, spreadA] = probsToDecimalOdds([pHomeCover, 1 - pHomeCover], 1.06);
-
-    // Total: 1H and game
-    const mean1H = mean * 0.5;
-    const sd1H = sd * 0.72;
-    const totalLine = Math.round(mean / 5) * 5;
-    const total1HLine = Math.round(mean1H / 5) * 5;
-    const zTotal = (totalLine - mean) / sd;
-    const pTotalUnder = mc(normalCdf(zTotal), 0.05, 0.95);
-    const [oTotal, uTotal] = probsToDecimalOdds([1 - pTotalUnder, pTotalUnder], 1.06);
-    const zTotal1H = (total1HLine - mean1H) / sd1H;
-    const pTotal1HUnder = mc(normalCdf(zTotal1H), 0.05, 0.95);
-    const [oTotal1H, uTotal1H] = probsToDecimalOdds([1 - pTotal1HUnder, pTotal1HUnder], 1.06);
-
-    // Team totals
-    const meanHome = mean * split;
-    const meanAway = mean * (1 - split);
-    const sdTeam = sd * 0.85;
-    const teamTotalLine = Math.round(meanHome / 5) * 5;
-    const zH = (teamTotalLine - meanHome) / sdTeam;
-    const pHTUnder = mc(normalCdf(zH), 0.05, 0.95);
-    const [oHT, uHT] = probsToDecimalOdds([1 - pHTUnder, pHTUnder], 1.06);
-    const zA = (teamTotalLine - meanAway) / sdTeam;
-    const pATUnder = mc(normalCdf(zA), 0.05, 0.95);
-    const [oAT, uAT] = probsToDecimalOdds([1 - pATUnder, pATUnder], 1.06);
-
-    // Away team total line (based on meanAway)
-    const awayTotalLine = Math.round(meanAway / 5) * 5;
-    const zAwayT = (awayTotalLine - meanAway) / sdTeam;
-    const pAwayTUnder = mc(normalCdf(zAwayT), 0.05, 0.95);
-    const [oAwayT, uAwayT] = probsToDecimalOdds([1 - pAwayTUnder, pAwayTUnder], 1.06);
-
-    // 1st half winner (moneyline regressed toward 50/50)
-    const pHalfHome = mc(0.5 + (pHomeMoneyline - 0.5) * 0.75, 0.15, 0.85);
-    const [halfH, halfA] = probsToDecimalOdds([pHalfHome, 1 - pHalfHome], 1.06);
-
-    // Quarter winners — moneyline probability regressed toward 50/50 per quarter
-    const [q1H, q1A] = probsToDecimalOdds([mc(0.5 + (pHomeMoneyline - 0.5) * 0.55, 0.25, 0.75), mc(0.5 - (pHomeMoneyline - 0.5) * 0.55, 0.25, 0.75)], 1.07);
-    const [q2H, q2A] = probsToDecimalOdds([mc(0.5 + (pHomeMoneyline - 0.5) * 0.50, 0.25, 0.75), mc(0.5 - (pHomeMoneyline - 0.5) * 0.50, 0.25, 0.75)], 1.07);
-    const [q3H, q3A] = probsToDecimalOdds([mc(0.5 + (pHomeMoneyline - 0.5) * 0.48, 0.25, 0.75), mc(0.5 - (pHomeMoneyline - 0.5) * 0.48, 0.25, 0.75)], 1.07);
-    const [q4H, q4A] = probsToDecimalOdds([mc(0.5 + (pHomeMoneyline - 0.5) * 0.52, 0.25, 0.75), mc(0.5 - (pHomeMoneyline - 0.5) * 0.52, 0.25, 0.75)], 1.07);
-
-    return {
-      id: `bball-${dayKey}-${i}`,
-      home,
-      away,
-      league,
-      country,
-      time,
-      date: dateStr,
-      sport: "basketball",
-      hasRealOdds: true,
-      odds: { home: homeOdd!, draw: 0, away: awayOdd! },
-      markets: {
-        doubleChance: { homeOrDraw: 0, awayOrDraw: 0, homeOrAway: 0 },
-        bothTeamsScore: { yes: 0, no: 0 },
-        totalGoals: {
-          over05: 0, under05: 0,
-          over15: oTotal1H!, under15: uTotal1H!,
-          over25: oTotal!, under25: uTotal!,
-          over35: oHT!, under35: uHT!,
-          over45: 0, under45: 0, over55: 0, under55: 0, over65: 0, under65: 0,
-        },
-        handicap: {
-          homeMinusOne: spreadH!, awayPlusOne: spreadA!,
-          homeMinusOneHalf: oAT!, awayPlusOneHalf: uAT!,
-        },
-        halfTime: { home: halfH!, draw: 0, away: halfA! },
-        firstGoal: { home: 0, noGoal: 0, away: 0 },
-        _spread: spread,
-        _total: totalLine,
-        _total1H: total1HLine,
-        _spreadLine: spreadLine,
-        basketballExtra: {
-          q1: { home: q1H!, away: q1A! },
-          q2: { home: q2H!, away: q2A! },
-          q3: { home: q3H!, away: q3A! },
-          q4: { home: q4H!, away: q4A! },
-          teamTotalHome: { line: teamTotalLine, over: oHT!, under: uHT! },
-          teamTotalAway: { line: awayTotalLine, over: oAwayT!, under: uAwayT! },
-        },
-      } as unknown as AdvancedMarkets,
-    };
-  });
-}
-
-function buildTennisMatches(): UpcomingMatch[] {
-  const today = new Date();
-  const dayKey = today.getUTCFullYear() * 10000 + (today.getUTCMonth() + 1) * 100 + today.getUTCDate();
-
-  const ATP_PLAYERS = [
-    "Novak Djokovic", "Carlos Alcaraz", "Jannik Sinner", "Daniil Medvedev",
-    "Alexander Zverev", "Andrey Rublev", "Casper Ruud", "Taylor Fritz",
-    "Grigor Dimitrov", "Hubert Hurkacz", "Holger Rune", "Tommy Paul",
-    "Ben Shelton", "Lorenzo Musetti", "Arthur Fils", "Ugo Humbert",
-    "Sebastian Baez", "Nicolas Jarry", "Jack Draper", "Zhizhen Zhang",
-  ];
-  const WTA_PLAYERS = [
-    "Aryna Sabalenka", "Iga Swiatek", "Coco Gauff", "Elena Rybakina",
-    "Qinwen Zheng", "Jasmine Paolini", "Daria Kasatkina", "Emma Navarro",
-    "Madison Keys", "Mirra Andreeva", "Marketa Vondrousova", "Anna Kalinskaya",
-    "Xinyu Wang", "Beatriz Haddad Maia",
-  ];
-
-  const TOURNAMENTS: [string, string, string, string][] = [
-    ["ATP 500 — Roma", "italy", "14:00", "atp"],
-    ["ATP 250 — Hamburgo", "germany", "15:30", "atp"],
-    ["ATP 250 — Genebra", "switzerland", "14:00", "atp"],
-    ["ATP 250 — Lyon", "france", "15:00", "atp"],
-    ["ATP 500 — Halle", "germany", "13:00", "atp"],
-    ["ATP Challenger — Turim", "italy", "11:30", "atp"],
-    ["ATP Challenger — Praga", "czechia", "12:00", "atp"],
-    ["WTA 1000 — Roma", "italy", "13:00", "wta"],
-    ["WTA 250 — Estrasburgo", "france", "14:30", "wta"],
-    ["WTA 500 — Berlim", "germany", "15:00", "wta"],
-    ["WTA 250 — Rabat", "morocco", "12:30", "wta"],
-    ["WTA 250 — Hertogenbosch", "netherlands", "13:00", "wta"],
-    ["Roland Garros — Qualificação", "france", "11:00", "atp"],
-    ["Roland Garros — Qualificação", "france", "12:30", "wta"],
-  ];
-
-  return TOURNAMENTS.map(([league, country, time, tour], i) => {
-    const dateStr = futureDateStr(Math.floor(i / 2));
-    const pool = tour === "atp" ? ATP_PLAYERS : WTA_PLAYERS;
-    const sr0 = seededRng(`tennis:${dayKey}:${i}:${league}`);
-    const p1idx = Math.floor(sr0(1) * (pool.length - 1));
-    let p2idx = Math.floor(sr0(2) * (pool.length - 1));
-    if (p2idx >= p1idx) p2idx = (p2idx + 1) % pool.length;
-    const p1 = pool[p1idx]!;
-    const p2 = pool[p2idx]!;
-
-    const sr = seededRng(`tennis:${dayKey}:${i}:${p1}:${p2}`);
-
-    // Match winner: server advantage → p1 slightly favoured (~54%)
-    const pP1Win = mc(0.54 + (sr(11) - 0.5) * 0.16, 0.18, 0.82);
-    const [matchH, matchA] = probsToDecimalOdds([pP1Win, 1 - pP1Win], 1.06);
-
-    // Set 1 winner (close to match winner probability but more variance)
-    const pSet1P1 = mc(pP1Win * 0.9 + 0.05 + (sr(12) - 0.5) * 0.08, 0.18, 0.82);
-    const [set1H, set1A] = probsToDecimalOdds([pSet1P1, 1 - pSet1P1], 1.06);
-
-    // Total sets O/U 2.5
-    const p3Sets = mc(0.44 + (sr(13) - 0.5) * 0.22, 0.18, 0.72);
-    const [oSets, uSets] = probsToDecimalOdds([p3Sets, 1 - p3Sets], 1.06);
-
-    // Tiebreak in match (yes/no)
-    const pTiebreak = mc(0.38 + (sr(14) - 0.5) * 0.22, 0.12, 0.68);
-    const [tieYes, tieNo] = probsToDecimalOdds([pTiebreak, 1 - pTiebreak], 1.06);
-
-    // Handicap games (spread)
-    const diffMean = mc((sr(9) - 0.5) * 5.0, -6, 6);
-    const diffSd = mc(3.2 + sr(10) * 1.2, 2.6, 4.8);
-    const gamesLine = Math.round(Math.abs(diffMean) * 0.6 + 1) * (diffMean >= 0 ? -1 : 1);
-    const zHcap = (-Math.abs(gamesLine) - diffMean) / diffSd;
-    const pHcapHome = mc(1 - normalCdf(zHcap), 0.05, 0.95);
-    const [hcapH, hcapA] = probsToDecimalOdds([pHcapHome, 1 - pHcapHome], 1.06);
-
-    // Set 2 winner (slightly more variance, different seed)
-    const pSet2P1 = mc(pP1Win * 0.85 + 0.075 + (sr(15) - 0.5) * 0.10, 0.18, 0.82);
-    const [set2H, set2A] = probsToDecimalOdds([pSet2P1, 1 - pSet2P1], 1.06);
-
-    // Exact sets: P(h20)+P(h21)=pP1Win, P(a02)+P(a12)=1-pP1Win
-    const ph20 = mc(pP1Win * (1 - p3Sets), 0.02, 0.70);
-    const ph21 = mc(pP1Win * p3Sets, 0.02, 0.55);
-    const pa02 = mc((1 - pP1Win) * (1 - p3Sets), 0.02, 0.70);
-    const pa12 = mc((1 - pP1Win) * p3Sets, 0.02, 0.55);
-    const [xh20, xh21, xa02, xa12] = probsToDecimalOdds([ph20, ph21, pa02, pa12], 1.08);
-
-    // Total games O/U (avg ~22 for best-of-3)
-    const meanGames = mc(22 + (sr(16) - 0.5) * 6, 18, 30);
-    const sdGames = mc(4.0 + sr(17) * 1.5, 3.0, 6.0);
-    const gamesLineRound = Math.floor(meanGames) + 0.5;
-    const pGamesOver = mc(1 - normalCdf((gamesLineRound - meanGames) / sdGames), 0.05, 0.95);
-    const [oGames, uGames] = probsToDecimalOdds([pGamesOver, 1 - pGamesOver], 1.06);
-
-    return {
-      id: `tennis-${dayKey}-${i}`,
-      home: p1,
-      away: p2,
-      league,
-      country,
-      time,
-      date: dateStr,
-      sport: "tennis",
-      hasRealOdds: true,
-      odds: { home: matchH!, draw: 0, away: matchA! },
-      markets: {
-        doubleChance: { homeOrDraw: 0, awayOrDraw: 0, homeOrAway: 0 },
-        bothTeamsScore: { yes: tieYes!, no: tieNo! },
-        totalGoals: {
-          over05: 0, under05: 0,
-          over15: set1H!, under15: set1A!,
-          over25: oSets!, under25: uSets!,
-          over35: 0, under35: 0,
-          over45: 0, under45: 0, over55: 0, under55: 0, over65: 0, under65: 0,
-        },
-        handicap: {
-          homeMinusOne: hcapH!, awayPlusOne: hcapA!,
-          homeMinusOneHalf: 0, awayPlusOneHalf: 0,
-        },
-        halfTime: { home: 0, draw: 0, away: 0 },
-        firstGoal: { home: 0, noGoal: 0, away: 0 },
-        tennisExtra: computeTennisExtras(pP1Win, {
-          set1H: set1H!, set1A: set1A!,
-          set2H: set2H!, set2A: set2A!,
-          xh20: xh20!, xh21: xh21!, xa02: xa02!, xa12: xa12!,
-          gamesLine, gamesLineRound, oGames: oGames!, uGames: uGames!,
-          hcapH: hcapH!, hcapA: hcapA!,
-        }),
-      } as unknown as AdvancedMarkets,
-    };
-  }).filter(m => !isMatchTimePast(m.date ?? "", m.time ?? ""));
-}
-
-// ─── Date helper for upcoming generators ─────────────────────────────────────
-
-function futureDateStr(daysAhead: number): string {
-  const d = new Date();
-  d.setDate(d.getDate() + daysAhead);
-  return `${String(d.getDate()).padStart(2, "0")}.${String(d.getMonth() + 1).padStart(2, "0")}.${d.getFullYear()}`;
-}
 
 /**
  * Returns true if the match's scheduled date+time is already in the past.
@@ -2711,289 +3320,6 @@ function shiftHour(dateStr: string, timeStr: string): { date: string; time: stri
   return { date: dateStr, time: newTime };
 }
 
-// ─── Hockey generator (NHL/KHL — Poisson model) ──────────────────────────────
-
-function buildHockeyMatches(): UpcomingMatch[] {
-  const today = new Date();
-  const dayKey = today.getUTCFullYear() * 10000 + (today.getUTCMonth() + 1) * 100 + today.getUTCDate();
-
-  const MATCHUPS: [string, string, string, string, string][] = [
-    ["Boston Bruins", "Tampa Bay Lightning", "NHL — Playoffs", "usa", "19:00"],
-    ["Colorado Avalanche", "Vegas Golden Knights", "NHL — Playoffs", "usa", "22:00"],
-    ["Toronto Maple Leafs", "Montreal Canadiens", "NHL — Playoffs", "canada", "19:30"],
-    ["New York Rangers", "Carolina Hurricanes", "NHL — Playoffs", "usa", "20:00"],
-    ["Edmonton Oilers", "Calgary Flames", "NHL — Playoffs", "canada", "22:30"],
-    ["Florida Panthers", "Dallas Stars", "NHL — Playoffs", "usa", "20:00"],
-    ["SKA Saint Petersburg", "CSKA Moscow", "KHL — Playoff", "russia", "17:00"],
-    ["Metallurg Magnitogorsk", "Ak Bars Kazan", "KHL — Playoff", "russia", "18:30"],
-  ];
-
-  return MATCHUPS.map(([home, away, league, country, time], i) => {
-    const dateStr = futureDateStr(Math.floor(i / 3));
-    const sr = seededRng(`hockey:${dayKey}:${i}:${home}:${away}`);
-
-    // Goal model: NHL avg ~6 goals/game, KHL ~5.5
-    const isNHL = league.includes("NHL");
-    const meanTotal = mc((isNHL ? 6.1 : 5.6) + (sr(1) - 0.5) * 1.6, 4.5, 8.0);
-    const marginMean = mc((sr(2) - 0.5) * 2.2 + 0.15, -2.5, 2.5); // home advantage
-    const marginSd = mc(2.0 + sr(3) * 0.8, 1.6, 3.2);
-
-    // Puck Line (±1.5 standard)
-    const pHomePuckLine = mc(1 - normalCdf((-1.5 - marginMean) / marginSd), 0.05, 0.95);
-    const [plH, plA] = probsToDecimalOdds([pHomePuckLine, 1 - pHomePuckLine], 1.05);
-
-    // Moneyline
-    const pHomeML = mc(1 - normalCdf(-marginMean / marginSd), 0.08, 0.92);
-    const [mlH, mlA] = probsToDecimalOdds([pHomeML, 1 - pHomeML], 1.05);
-
-    // Total goals O/U
-    const totalLine = Math.round(meanTotal * 2) / 2; // nearest 0.5
-    const totalSd = mc(1.6 + sr(4) * 0.6, 1.2, 2.4);
-    const pTotalOver = mc(1 - normalCdf((totalLine - meanTotal) / totalSd), 0.05, 0.95);
-    const [oTotal, uTotal] = probsToDecimalOdds([pTotalOver, 1 - pTotalOver], 1.06);
-
-    // Alt total lines
-    const [oAlt1, uAlt1] = probsToDecimalOdds([
-      mc(1 - normalCdf((totalLine - 0.5 - meanTotal) / totalSd), 0.05, 0.95),
-      mc(normalCdf((totalLine - 0.5 - meanTotal) / totalSd), 0.05, 0.95),
-    ], 1.06);
-    const [oAlt2, uAlt2] = probsToDecimalOdds([
-      mc(1 - normalCdf((totalLine + 0.5 - meanTotal) / totalSd), 0.05, 0.95),
-      mc(normalCdf((totalLine + 0.5 - meanTotal) / totalSd), 0.05, 0.95),
-    ], 1.06);
-
-    // 1st period result
-    const mean1P = meanTotal / 3;
-    const lambdaH1P = mc(mean1P * 0.5 + marginMean * 0.35, 0.3, 2.5);
-    const lambdaA1P = mc(mean1P * 0.5 - marginMean * 0.35, 0.3, 2.5);
-    const p1H = poissonPmf(lambdaH1P, 5);
-    const p1A = poissonPmf(lambdaA1P, 5);
-    let p1PHW = 0, p1PD = 0, p1PAW = 0;
-    for (let gi = 0; gi <= 5; gi++) {
-      for (let gj = 0; gj <= 5; gj++) {
-        const p = (p1H[gi] ?? 0) * (p1A[gj] ?? 0);
-        if (gi > gj) p1PHW += p; else if (gi < gj) p1PAW += p; else p1PD += p;
-      }
-    }
-    const p1S = p1PHW + p1PD + p1PAW;
-    const [per1H, per1D, per1A] = probsToDecimalOdds([p1PHW / p1S, p1PD / p1S, p1PAW / p1S], 1.08);
-
-    // Period 2 result (less home advantage)
-    const lambdaH2P = mc(mean1P * 0.5 + marginMean * 0.20, 0.3, 2.5);
-    const lambdaA2P = mc(mean1P * 0.5 - marginMean * 0.20, 0.3, 2.5);
-    const p2Hd = poissonPmf(lambdaH2P, 5);
-    const p2Ad = poissonPmf(lambdaA2P, 5);
-    let p2PHW = 0, p2PD = 0, p2PAW = 0;
-    for (let gi = 0; gi <= 5; gi++) {
-      for (let gj = 0; gj <= 5; gj++) {
-        const p = (p2Hd[gi] ?? 0) * (p2Ad[gj] ?? 0);
-        if (gi > gj) p2PHW += p; else if (gi < gj) p2PAW += p; else p2PD += p;
-      }
-    }
-    const p2S = p2PHW + p2PD + p2PAW;
-    const [per2H, per2D, per2A] = probsToDecimalOdds([p2PHW / p2S, p2PD / p2S, p2PAW / p2S], 1.08);
-
-    // Period 3 result (most random)
-    const lambdaH3P = mc(mean1P * 0.5 + marginMean * 0.10, 0.3, 2.5);
-    const lambdaA3P = mc(mean1P * 0.5 - marginMean * 0.10, 0.3, 2.5);
-    const p3Hd = poissonPmf(lambdaH3P, 5);
-    const p3Ad = poissonPmf(lambdaA3P, 5);
-    let p3PHW = 0, p3PD = 0, p3PAW = 0;
-    for (let gi = 0; gi <= 5; gi++) {
-      for (let gj = 0; gj <= 5; gj++) {
-        const p = (p3Hd[gi] ?? 0) * (p3Ad[gj] ?? 0);
-        if (gi > gj) p3PHW += p; else if (gi < gj) p3PAW += p; else p3PD += p;
-      }
-    }
-    const p3S = p3PHW + p3PD + p3PAW;
-    const [per3H, per3D, per3A] = probsToDecimalOdds([p3PHW / p3S, p3PD / p3S, p3PAW / p3S], 1.08);
-
-    // Period 1 total O/U
-    const per1TotalLine = Math.round(mean1P * 2) / 2;
-    const per1TotalSd = mc(0.9 + sr(15) * 0.4, 0.6, 1.5);
-    const pPer1TotalOver = mc(1 - normalCdf((per1TotalLine - mean1P) / per1TotalSd), 0.05, 0.95);
-    const [oPer1T, uPer1T] = probsToDecimalOdds([pPer1TotalOver, 1 - pPer1TotalOver], 1.06);
-
-    // Both teams score in game (very common in hockey ~72%)
-    const pBTS = mc(0.70 + (sr(16) - 0.5) * 0.18, 0.45, 0.92);
-    const [btsYes, btsNo] = probsToDecimalOdds([pBTS, 1 - pBTS], 1.06);
-
-    // Shots on goal O/U (NHL avg ~60 combined, KHL ~55)
-    const isNHLCheck = league.includes("NHL");
-    const shotsLine = mc((isNHLCheck ? 60.5 : 55.5) + (sr(17) - 0.5) * 8, 48.5, 72.5);
-    const pShotsOver = mc(0.5 + (sr(18) - 0.5) * 0.12, 0.38, 0.62);
-    const [oShots, uShots] = probsToDecimalOdds([pShotsOver, 1 - pShotsOver], 1.06);
-
-    return {
-      id: `hockey-${dayKey}-${i}`,
-      home, away, league, country, time,
-      date: dateStr,
-      sport: "hockey",
-      hasRealOdds: true,
-      odds: { home: mlH!, draw: 0, away: mlA! },
-      markets: {
-        doubleChance: { homeOrDraw: 0, awayOrDraw: 0, homeOrAway: 0 },
-        bothTeamsScore: { yes: btsYes!, no: btsNo! },
-        totalGoals: {
-          over05: 0, under05: 0,
-          over15: oAlt1!, under15: uAlt1!,
-          over25: oTotal!, under25: uTotal!,
-          over35: oAlt2!, under35: uAlt2!,
-          over45: 0, under45: 0, over55: 0, under55: 0, over65: 0, under65: 0,
-        },
-        handicap: { homeMinusOne: plH!, awayPlusOne: plA!, homeMinusOneHalf: 0, awayPlusOneHalf: 0 },
-        halfTime: { home: per1H!, draw: per1D!, away: per1A! },
-        firstGoal: { home: 0, noGoal: 0, away: 0 },
-        _spread: 1.5,
-        _total: totalLine,
-        hockeyExtra: {
-          period2: { home: per2H!, draw: per2D!, away: per2A! },
-          period3: { home: per3H!, draw: per3D!, away: per3A! },
-          period1Total: { line: per1TotalLine, over: oPer1T!, under: uPer1T! },
-          bothTeamsScoreGame: { yes: btsYes!, no: btsNo! },
-          shotsOnGoal: { line: shotsLine, over: oShots!, under: uShots! },
-        },
-      } as unknown as AdvancedMarkets,
-    };
-  });
-}
-
-// ─── Volleyball generator (probabilistic model) ──────────────────────────────
-
-function buildVolleyballMatches(): UpcomingMatch[] {
-  const today = new Date();
-  const dayKey = today.getUTCFullYear() * 10000 + (today.getUTCMonth() + 1) * 100 + today.getUTCDate();
-
-  const MATCHUPS: [string, string, string, string, string][] = [
-    ["Brazil VB", "Italy VB", "Volleyball Nations League", "brazil", "16:00"],
-    ["Poland VB", "France VB", "Volleyball Nations League", "poland", "18:00"],
-    ["USA VB", "Japan VB", "Volleyball Nations League", "usa", "20:00"],
-    ["Trentino", "Lube Civitanova", "Superlega — Itália", "italy", "17:00"],
-    ["Zenit Kazan", "Dinamo Moscow", "Superliga — Rússia", "russia", "17:30"],
-    ["Cruzeiro VB", "Sesi Franca", "Superliga — Brasil", "brazil", "20:00"],
-    ["Sir Safety Perugia", "Modena VB", "Superlega — Itália", "italy", "19:00"],
-    ["Resovia Rzeszow", "Jastrzebski VB", "PlusLiga — Polônia", "poland", "18:30"],
-  ];
-
-  return MATCHUPS.map(([home, away, league, country, time], i) => {
-    const dateStr = futureDateStr(Math.floor(i / 3));
-    const sr = seededRng(`vball:${dayKey}:${i}:${home}:${away}`);
-
-    // Match winner probability (5-set model)
-    const skillDiff = mc((sr(1) - 0.5) * 0.3 + 0.04, -0.35, 0.35); // home advantage
-    const pSetHomeWin = mc(0.52 + skillDiff, 0.18, 0.82);
-
-    // P(match win) via best-of-5 binomial
-    function pMatchWin(pSet: number): number {
-      const q = 1 - pSet;
-      return (
-        Math.pow(pSet, 3) +
-        3 * Math.pow(pSet, 3) * q +
-        6 * Math.pow(pSet, 3) * Math.pow(q, 2) * 0.5 // 5-set approx
-      );
-    }
-    const pMatchH = mc(pMatchWin(pSetHomeWin), 0.1, 0.9);
-    const [matchH, matchA] = probsToDecimalOdds([pMatchH, 1 - pMatchH], 1.05);
-
-    // Total sets O/U 2.5 (3-0 or 3-1 = under, 3-2 = over)
-    const p3sets = mc(Math.pow(pSetHomeWin, 3) + Math.pow(1 - pSetHomeWin, 3), 0.15, 0.65);
-    const p4sets = mc(
-      3 * Math.pow(pSetHomeWin, 3) * (1 - pSetHomeWin) +
-      3 * Math.pow(1 - pSetHomeWin, 3) * pSetHomeWin,
-      0.15, 0.55
-    );
-    const p5sets = mc(1 - p3sets - p4sets, 0.1, 0.5);
-    const pUnder25 = mc(p3sets + p4sets, 0.30, 0.90); // ≤4 sets total (3-0 or 3-1 = 3 or 4 total)
-    const [oSets25, uSets25] = probsToDecimalOdds([1 - pUnder25, pUnder25], 1.06);
-    const [oSets35, uSets35] = probsToDecimalOdds([mc(p5sets, 0.10, 0.60), mc(1 - p5sets, 0.40, 0.90)], 1.06);
-
-    // Set handicap — home −1.5 sets (home wins 3-0 or 3-1)
-    const pHomeHcap = mc(p3sets * (pSetHomeWin / (pSetHomeWin + (1 - pSetHomeWin))) + p4sets * (pSetHomeWin / (pSetHomeWin + (1 - pSetHomeWin))), 0.05, 0.85);
-    const [hcapH, hcapA] = probsToDecimalOdds([pHomeHcap, 1 - pHomeHcap], 1.06);
-
-    // Points O/U per set (avg ~25 pts/set)
-    const meanPts = mc(52 + (sr(5) - 0.5) * 8, 46, 60);
-    const sdPts = mc(6 + sr(6) * 2, 4, 10);
-    const ptsLine = Math.round(meanPts / 2) * 2;
-    const pPtsOver = mc(1 - normalCdf((ptsLine - meanPts) / sdPts), 0.05, 0.95);
-    const [oPts, uPts] = probsToDecimalOdds([pPtsOver, 1 - pPtsOver], 1.06);
-
-    // Per-set winner markets (individual sets)
-    const pS1H = mc(pSetHomeWin + (sr(7) - 0.5) * 0.08, 0.15, 0.85);
-    const pS2H = mc(pSetHomeWin + (sr(8) - 0.5) * 0.09, 0.15, 0.85);
-    const pS3H = mc(0.5 + (pSetHomeWin - 0.5) * 0.55 + (sr(9) - 0.5) * 0.10, 0.15, 0.85);
-    const [vs1H, vs1A] = probsToDecimalOdds([pS1H, 1 - pS1H], 1.06);
-    const [vs2H, vs2A] = probsToDecimalOdds([pS2H, 1 - pS2H], 1.06);
-    const [vs3H, vs3A] = probsToDecimalOdds([pS3H, 1 - pS3H], 1.06);
-
-    // Points handicap (based on team strength difference)
-    const ptsDiffMean = mc((pSetHomeWin - 0.5) * 14, -10, 10);
-    const ptsDiffLine = Math.round(Math.abs(ptsDiffMean) * 0.5 + 1.5) * (ptsDiffMean >= 0 ? -1 : 1);
-    const ptsDiffSd = mc(4 + sr(10) * 2, 3, 7);
-    const pPtsHcapHome = mc(1 - normalCdf((-Math.abs(ptsDiffLine) - ptsDiffMean) / ptsDiffSd), 0.05, 0.95);
-    const [ptsHcapH, ptsHcapA] = probsToDecimalOdds([pPtsHcapHome, 1 - pPtsHcapHome], 1.06);
-
-    return {
-      id: `vball-${dayKey}-${i}`,
-      home, away, league, country, time,
-      date: dateStr,
-      sport: "volleyball",
-      hasRealOdds: true,
-      odds: { home: matchH!, draw: 0, away: matchA! },
-      markets: {
-        doubleChance: { homeOrDraw: 0, awayOrDraw: 0, homeOrAway: 0 },
-        bothTeamsScore: { yes: oPts!, no: uPts! },
-        totalGoals: {
-          over05: 0, under05: 0,
-          over15: oSets25!, under15: uSets25!,
-          over25: oSets35!, under25: uSets35!,
-          over35: hcapH!, under35: hcapA!,
-          over45: 0, under45: 0, over55: 0, under55: 0, over65: 0, under65: 0,
-        },
-        handicap: { homeMinusOne: hcapH!, awayPlusOne: hcapA!, homeMinusOneHalf: 0, awayPlusOneHalf: 0 },
-        halfTime: { home: 0, draw: 0, away: 0 },
-        firstGoal: { home: 0, noGoal: 0, away: 0 },
-        _total: ptsLine,
-        volleyballExtra: computeVolleyballExtras(pSetHomeWin, {
-          vs1H: vs1H!, vs1A: vs1A!, vs2H: vs2H!, vs2A: vs2A!, vs3H: vs3H!, vs3A: vs3A!,
-          ptsDiffLine, ptsHcapH: ptsHcapH!, ptsHcapA: ptsHcapA!,
-        }),
-      } as unknown as AdvancedMarkets,
-    };
-  });
-}
-
-// ─── Persistent Simulated Live State Manager ─────────────────────────────────
-// Module-level Maps keep state stable between cache refreshes.
-// Each match initialises once per calendar day (from a deterministic daily seed)
-// and then advances incrementally on every call, so scores never jump.
-
-const _dayRng = (seed: number) => (n: number) => {
-  const x = Math.sin(seed + n * 7919) * 2654435761;
-  return x - Math.floor(x);
-};
-const _tickRng = (seed: number, n: number) => {
-  const x = Math.sin(seed + n * 6271) * 1610612741;
-  return x - Math.floor(x);
-};
-const _fmtClock = (s: number) =>
-  `${String(Math.floor(s / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
-const _getDay = () => {
-  const d = new Date();
-  return d.getUTCFullYear() * 10000 + (d.getUTCMonth() + 1) * 100 + d.getUTCDate();
-};
-
-// suspUntil = ms timestamp until which markets are suspended (0 = open)
-// suspReason = human-readable PT label shown in suspension banner
-interface _BballSt  { dk: number; q: number; clk: number; home: number; away: number; lms: number; suspUntil: number; suspReason: string }
-interface _TennisSt { dk: number; sets: Array<[number,number]>; hS: number; aS: number; inH: number; inA: number; ptH: number; ptA: number; srv: 0|1; lms: number; suspUntil: number; suspReason: string }
-interface _VolleySt { dk: number; vollSets: Array<[number,number]>; hS: number; aS: number; ptH: number; ptA: number; lms: number; suspUntil: number; suspReason: string }
-interface _HockeySt { dk: number; period: number; clk: number; home: number; away: number; lms: number; suspUntil: number; suspReason: string }
-
-const _bballMap  = new Map<number, _BballSt>();
-const _tennisMap = new Map<number, _TennisSt>();
-const _volleyMap = new Map<number, _VolleySt>();
-const _hockeyMap = new Map<number, _HockeySt>();
 
 // Pre-match tennis odds cache: keyed by sorted-surname pair so live matches
 // can use the last known real odds even after status changes to "Set 1" etc.
@@ -3003,313 +3329,8 @@ function _tennisPairKey(n0: string, n1: string): string {
   return [sur(n0), sur(n1)].sort().join("|");
 }
 
-function _getBball(si: number): _BballSt {
-  const dk = _getDay();
-  let s = _bballMap.get(si);
-  if (!s || s.dk !== dk) {
-    const r = _dayRng(dk * 100 + si);
-    const q   = 1 + Math.floor(r(1) * 4);
-    const clk = Math.floor(r(2) * 720);
-    const played = ((q - 1) * 720 + (720 - clk));
-    const rate   = 50 / (4 * 720);
-    const home = Math.round(played * rate * (0.9 + r(3) * 0.2));
-    const away = Math.round(played * rate * (0.9 + r(4) * 0.2));
-    s = { dk, q, clk, home, away, lms: Date.now(), suspUntil: 0, suspReason: "" };
-    _bballMap.set(si, s);
-  }
-  const realSec = (Date.now() - s.lms) / 1000;
-  if (realSec < 2) return s;
-  const gameSec = Math.min(Math.round(realSec), 90);
-  const ts = Math.floor(s.lms / 1000);
-  // ── Snapshot before advance (for event detection) ────────────────────────
-  const prevHome = s.home, prevAway = s.away, prevQ = s.q;
-  s.home += Math.round(gameSec * (50 / 2880) * (0.85 + _tickRng(ts, 1) * 0.3));
-  s.away += Math.round(gameSec * (50 / 2880) * (0.85 + _tickRng(ts, 2) * 0.3));
-  s.clk  -= gameSec;
-  while (s.clk <= 0 && s.q < 4) { s.q++; s.clk += 720; }
-  if (s.clk < 0) s.clk = 0;
-  s.lms = Date.now();
-  // ── Suspension detection (Bet365-style delays per document spec) ──────────
-  // Quarter transition: 5s hard suspend. Basket: 1.5s soft suspend.
-  if (s.q > prevQ)                              { s.suspUntil = Date.now() + 5000; s.suspReason = "FIM DE QUARTO"; }
-  else if (s.home > prevHome || s.away > prevAway) { s.suspUntil = Date.now() + 1500; s.suspReason = "PLACAR ATUALIZADO"; }
-  return s;
-}
 
-function _getTennis(si: number): _TennisSt {
-  const dk = _getDay();
-  let s = _tennisMap.get(si);
-  if (!s || s.dk !== dk) {
-    const r   = _dayRng(dk * 100 + si);
-    const frame = 1 + Math.floor(r(1) * 3);
-    const sets: Array<[number,number]> = [];
-    let hS = 0, aS = 0;
-    for (let i = 0; i < frame - 1; i++) {
-      if (hS === 2 || aS === 2) break;
-      const hw = r(10 + i) > 0.5;
-      const lg = Math.floor(r(11 + i) * 7);
-      const wg = lg >= 5 ? 7 : 6;
-      sets.push(hw ? [wg, lg] : [lg, wg]);
-      if (hw) hS++; else aS++;
-    }
-    s = { dk, sets, hS, aS, inH: Math.floor(r(20) * 6), inA: Math.floor(r(21) * 5), ptH: 0, ptA: 0, srv: r(22) > 0.5 ? 1 : 0, lms: Date.now(), suspUntil: 0, suspReason: "" };
-    _tennisMap.set(si, s);
-  }
-  const realSec = (Date.now() - s.lms) / 1000;
-  const nPts = Math.min(Math.round(realSec / 12), 8);
-  if (nPts < 1) return s;
-  const ts = Math.floor(s.lms / 1000);
-  // ── Suspension event tracking: most significant event wins ───────────────
-  let evSetEnded = false, evGameWon = false, evPoint = false;
-  for (let p = 0; p < nPts; p++) {
-    if (s.hS >= 2 || s.aS >= 2) break;
-    const srvWin = _tickRng(ts + p, 3) < 0.58;
-    const hw     = s.srv === 0 ? srvWin : !srvWin;
-    if (hw) s.ptH++; else s.ptA++;
-    evPoint = true;
-    const inDeuce = s.ptH >= 3 && s.ptA >= 3;
-    const hWon = inDeuce ? s.ptH - s.ptA >= 2 : s.ptH >= 4;
-    const aWon = inDeuce ? s.ptA - s.ptH >= 2 : s.ptA >= 4;
-    if (hWon || aWon) {
-      evGameWon = true;
-      s.ptH = 0; s.ptA = 0;
-      s.srv = s.srv === 0 ? 1 : 0;
-      if (hWon) s.inH++; else s.inA++;
-      const setOver = (s.inH >= 6 && s.inH - s.inA >= 2) || (s.inA >= 6 && s.inA - s.inH >= 2)
-                   || (s.inH === 7 && s.inA === 6) || (s.inH === 6 && s.inA === 7);
-      if (setOver) {
-        evSetEnded = true;
-        s.sets.push([s.inH, s.inA]);
-        if (s.inH > s.inA) s.hS++; else s.aS++;
-        s.inH = 0; s.inA = 0;
-      }
-    }
-  }
-  s.lms = Date.now();
-  // ── Suspension: set=8s, game=3s, point=2s (per live betting spec) ────────
-  if (evSetEnded)     { s.suspUntil = Date.now() + 8000; s.suspReason = "SET ENCERRADO"; }
-  else if (evGameWon) { s.suspUntil = Date.now() + 3000; s.suspReason = "GAME ENCERRADO"; }
-  else if (evPoint)   { s.suspUntil = Date.now() + 2000; s.suspReason = "PONTO DISPUTADO"; }
-  return s;
-}
-
-function _getVolley(si: number): _VolleySt {
-  const dk = _getDay();
-  let s = _volleyMap.get(si);
-  if (!s || s.dk !== dk) {
-    const r   = _dayRng(dk * 100 + si);
-    const frame = 1 + Math.floor(r(1) * 4);
-    const vollSets: Array<[number,number]> = [];
-    let hS = 0, aS = 0;
-    for (let i = 0; i < frame - 1; i++) {
-      if (hS === 3 || aS === 3) break;
-      const isFifth = (hS + aS) === 4;
-      const tgt = isFifth ? 15 : 25;
-      const hw  = r(10 + i) > 0.5;
-      const lp  = Math.floor(r(11 + i) * (tgt - 2));
-      vollSets.push(hw ? [tgt, lp] : [lp, tgt]);
-      if (hw) hS++; else aS++;
-    }
-    s = { dk, vollSets, hS, aS, ptH: Math.floor(r(20) * 18), ptA: Math.floor(r(21) * 18), lms: Date.now(), suspUntil: 0, suspReason: "" };
-    _volleyMap.set(si, s);
-  }
-  const realSec = (Date.now() - s.lms) / 1000;
-  const nRallies = Math.min(Math.round(realSec / 8), 12);
-  if (nRallies < 1) return s;
-  const ts  = Math.floor(s.lms / 1000);
-  const tgt = () => (s!.hS + s!.aS) === 4 ? 15 : 25;
-  // ── Suspension event tracking ─────────────────────────────────────────────
-  let evSetEnded = false, evPoint = false;
-  for (let r = 0; r < nRallies; r++) {
-    if (s.hS >= 3 || s.aS >= 3) break;
-    const hw = _tickRng(ts + r, 7) < 0.5;
-    if (hw) s.ptH++; else s.ptA++;
-    evPoint = true;
-    const t  = tgt();
-    const hW = s.ptH >= t && s.ptH - s.ptA >= 2;
-    const aW = s.ptA >= t && s.ptA - s.ptH >= 2;
-    if (hW || aW) {
-      evSetEnded = true;
-      s.vollSets.push([s.ptH, s.ptA]);
-      if (hW) s.hS++; else s.aS++;
-      s.ptH = 0; s.ptA = 0;
-    }
-  }
-  s.lms = Date.now();
-  // ── Suspension: set=6s, rally=1.5s (per live betting spec) ───────────────
-  if (evSetEnded)   { s.suspUntil = Date.now() + 6000; s.suspReason = "SET ENCERRADO"; }
-  else if (evPoint) { s.suspUntil = Date.now() + 1500; s.suspReason = "PONTO DISPUTADO"; }
-  return s;
-}
-
-function _getHockey(si: number): _HockeySt {
-  const dk = _getDay();
-  let s = _hockeyMap.get(si);
-  if (!s || s.dk !== dk) {
-    const r   = _dayRng(dk * 100 + si);
-    const period = 1 + Math.floor(r(1) * 3);
-    const clk    = Math.floor(r(2) * 1200);
-    const played = ((period - 1) * 1200 + (1200 - clk));
-    const gr     = 3 / 3600;
-    const home   = Math.round(played * gr * (0.7 + r(3) * 0.6));
-    const away   = Math.round(played * gr * (0.7 + r(4) * 0.6));
-    s = { dk, period, clk, home, away, lms: Date.now(), suspUntil: 0, suspReason: "" };
-    _hockeyMap.set(si, s);
-  }
-  const realSec = (Date.now() - s.lms) / 1000;
-  const gameSec = Math.min(Math.round(realSec * 0.5), 60);
-  if (gameSec < 1) return s;
-  const ts = Math.floor(s.lms / 1000);
-  const gr = 3 / 3600;
-  // ── Snapshot before advance ───────────────────────────────────────────────
-  const prevHome = s.home, prevAway = s.away, prevPeriod = s.period;
-  if (_tickRng(ts, 8) < gr * gameSec) s.home++;
-  if (_tickRng(ts, 9) < gr * gameSec) s.away++;
-  s.clk -= gameSec;
-  while (s.clk <= 0 && s.period < 3) { s.period++; s.clk += 1200; }
-  if (s.clk < 0) s.clk = 0;
-  s.lms = Date.now();
-  // ── Suspension: period=5s, goal=4s (per live betting spec) ───────────────
-  if (s.period > prevPeriod)                              { s.suspUntil = Date.now() + 5000; s.suspReason = "FIM DE PERÍODO"; }
-  else if (s.home > prevHome || s.away > prevAway) { s.suspUntil = Date.now() + 4000; s.suspReason = "GOL MARCADO"; }
-  return s;
-}
-
-// ─── Simulated live for other sports ─────────────────────────────────────────
-// Game state persists in module-level Maps (_bballMap, _tennisMap, etc.) and
-// advances incrementally — scores are stable and never jump between refreshes.
-// Live odds still drift on a 15-s window for a realistic betting experience.
-
-function buildSimulatedLiveOtherSports(opts: { skipTennis: boolean; skipVolley: boolean; skipHockey?: boolean; skipBasketball?: boolean }): LiveMatchState[] {
-  const basketball = opts.skipBasketball ? [] : buildBasketballMatches();
-  const tennis     = opts.skipTennis ? [] : buildTennisMatches();
-  const hockey     = opts.skipHockey ? [] : buildHockeyMatches();
-  const volleyball = opts.skipVolley ? [] : buildVolleyballMatches();
-
-  const win15s = Math.floor(Date.now() / 15_000);
-
-  // Pick 8 simulated tennis matches: 4 ATP (indices 0-3) + 4 WTA (indices 7-10)
-  // si range: 8-15 (fixed, never overlaps with basketball 0-7 or hockey 16-21 or volley 22-27)
-  const tennisPicks = opts.skipTennis ? [] :
-    [tennis[0], tennis[1], tennis[2], tennis[3], tennis[7], tennis[8], tennis[9], tennis[10]]
-      .filter((t): t is UpcomingMatch => t != null);
-
-  const picks: Array<{ m: UpcomingMatch; si: number }> = [
-    // basketball: si 0-7
-    ...(opts.skipBasketball ? [] : basketball.slice(0, 8).map((m, i) => ({ m, si: i }))),
-    // tennis sim: si 8-15
-    ...tennisPicks.map((m, i) => ({ m, si: i + 8 })),
-    // hockey: si 16-21
-    ...(opts.skipHockey ? [] : hockey.slice(0, 6).map((m, i) => ({ m, si: i + 16 }))),
-    // volleyball: si 22-27
-    ...(opts.skipVolley ? [] : volleyball.slice(0, 6).map((m, i) => ({ m, si: i + 22 }))),
-  ];
-
-  const TENNIS_SEQ = [0, 15, 30, 40] as const;
-  const mkOddsRng  = (seed: number) => (n: number) => {
-    const x = Math.sin(seed + n * 7919) * 2654435761;
-    return x - Math.floor(x);
-  };
-
-  return picks.map(({ m, si }) => {
-    const rngOdds = mkOddsRng(win15s * 53 + si * 41);
-    let homeScore = 0, awayScore = 0, minute = 0, status = "";
-    let _liveExtra: LiveMatchState["_liveExtra"] = undefined;
-    // ── Suspension vars extracted from whichever sport state is active ────────
-    let stSuspUntil = 0, stSuspReason = "";
-
-    if (m.sport === "basketball") {
-      const st  = _getBball(si);
-      homeScore = st.home;
-      awayScore = st.away;
-      minute    = (st.q - 1) * 12 + Math.floor((720 - st.clk) / 60);
-      status    = `Q${st.q}`;
-      _liveExtra = { clockStr: _fmtClock(st.clk) };
-      stSuspUntil = st.suspUntil; stSuspReason = st.suspReason;
-
-    } else if (m.sport === "tennis") {
-      const st   = _getTennis(si);
-      const sets: Array<[number,number]> = [...st.sets, [st.inH, st.inA]];
-      homeScore  = st.hS;
-      awayScore  = st.aS;
-      const currentSet = sets.length;
-      status  = `Set ${currentSet}`;
-      minute  = currentSet;
-      const inDeuce = st.ptH >= 3 && st.ptA >= 3;
-      let hPt: number | string, aPt: number | string;
-      if (inDeuce) {
-        if (st.ptH === st.ptA)    { hPt = "D";   aPt = "D"; }
-        else if (st.ptH > st.ptA) { hPt = "AD";  aPt = 40; }
-        else                       { hPt = 40;    aPt = "AD"; }
-      } else {
-        hPt = TENNIS_SEQ[Math.min(st.ptH, 3)]!;
-        aPt = TENNIS_SEQ[Math.min(st.ptA, 3)]!;
-      }
-      _liveExtra = { sets, currentPoints: [hPt, aPt] };
-      stSuspUntil = st.suspUntil; stSuspReason = st.suspReason;
-
-    } else if (m.sport === "hockey") {
-      const st  = _getHockey(si);
-      homeScore = st.home;
-      awayScore = st.away;
-      minute    = (st.period - 1) * 20 + Math.floor((1200 - st.clk) / 60);
-      status    = `P${st.period}`;
-      _liveExtra = { clockStr: _fmtClock(st.clk) };
-      stSuspUntil = st.suspUntil; stSuspReason = st.suspReason;
-
-    } else {
-      const st  = _getVolley(si);
-      homeScore = st.hS;
-      awayScore = st.aS;
-      const currentSet = Math.min(st.hS + st.aS + 1, 5);
-      status  = `Set ${currentSet}`;
-      minute  = currentSet;
-      _liveExtra = { vollSets: st.vollSets, currentPts: [st.ptH, st.ptA] };
-      stSuspUntil = st.suspUntil; stSuspReason = st.suspReason;
-    }
-
-    // ── Market suspension — active when suspUntil is in the future ────────────
-    const nowMs = Date.now();
-    const marketSuspension = stSuspUntil > nowMs ? { all: stSuspUntil } : undefined;
-    const _suspensionReason = stSuspUntil > nowMs ? stSuspReason : undefined;
-
-    // ── Live odds drift (15-s window) ─────────────────────────────────────────
-    const scoreDiff = homeScore - awayScore;
-    const pressure  = m.sport === "tennis" || m.sport === "volleyball" ? 0.05 : 0.03;
-    const noiseH    = (rngOdds(1) - 0.5) * 0.08;
-    const noiseA    = (rngOdds(2) - 0.5) * 0.08;
-    const noiseD    = (rngOdds(3) - 0.5) * 0.06;
-    const drift = (base: number, shift: number) =>
-      Math.round(Math.max(1.01, Math.min(base * 1.30, base * (1 + shift))) * 100) / 100;
-    const liveOdds = {
-      home: drift(m.odds.home, noiseH - scoreDiff * pressure),
-      draw: m.odds.draw > 0 ? drift(m.odds.draw, noiseD) : 0,
-      away: drift(m.odds.away, noiseA + scoreDiff * pressure),
-    };
-
-    return {
-      id:          m.id,
-      home:        m.home,
-      away:        m.away,
-      league:      m.league,
-      country:     m.country,
-      sport:       m.sport,
-      homeScore,
-      awayScore,
-      minute,
-      status,
-      hasRealOdds: m.hasRealOdds,
-      marketSuspension,
-      _suspensionReason,
-      odds:        liveOdds,
-      markets:     m.markets,
-      events:      [],
-      _liveExtra,
-    } satisfies LiveMatchState;
-  });
-}
-
-export { buildLiveMatches, buildUpcomingMatches, buildBasketballMatches, buildTennisMatches, buildHockeyMatches, buildVolleyballMatches };
+export { buildLiveMatches, buildUpcomingMatches, getUpcomingAll };
 
 // ─── Routes ───────────────────────────────────────────────────────────────────
 
@@ -3339,13 +3360,7 @@ router.get("/live", async (_req, res) => {
     const nbaMatches    = buildNBALiveMatches(nbaTournaments);
     const tennisMatches = buildTennisLiveMatches(tennisTournaments, tennisStatsMap);
     const volleyMatches = buildVolleyballLiveMatches(volleyTournaments);
-    const simulated     = buildSimulatedLiveOtherSports({
-      skipTennis:     true,  // always use real Statpal data; never show simulated tennis
-      skipVolley:     true,
-      skipHockey:     true,
-      skipBasketball: true,
-    });
-    const livePart = [...soccerMatches, ...nhlMatches, ...nbaMatches, ...tennisMatches, ...volleyMatches, ...simulated];
+    const livePart = [...soccerMatches, ...nhlMatches, ...nbaMatches, ...tennisMatches, ...volleyMatches];
 
     // "Em Breve" — real upcoming matches starting within the next 36 hours
     const liveIds = new Set(livePart.map(m => String(m.id)));
@@ -3425,7 +3440,9 @@ async function buildTennisUpcoming(): Promise<UpcomingMatch[]> {
       });
     }
 
-    // Second: "Not Started" matches from livescores — cross-reference odds by surname
+    // Second: "Not Started" matches from livescores — cross-reference odds by surname.
+    // Matches with real odds get them; Challengers and other matches without real odds
+    // use computed odds so real API matches are never dropped.
     for (const tournament of liveData) {
       const matches: TennisMatch[] = Array.isArray(tournament.match)
         ? tournament.match
@@ -3443,22 +3460,48 @@ async function buildTennisUpcoming(): Promise<UpcomingMatch[]> {
         const normKey = _tennisPairKey(p0.name, p1.name);
         if (seenNorm.has(normKey)) continue;
         seenNorm.add(normKey);
-        // Try to find real odds using surname-normalised key
         const oddsEntry = oddsMapByNorm.get(normKey);
-        results.push({
-          id:          `tennis-ls-${m.id}`,
-          home:        p0.name,
-          away:        p1.name,
-          league:      tournament.name ?? "Ténis",
-          country:     "",
-          ...shiftHour(m.date, m.time),
-          sport:       "tennis" as const,
-          hasRealOdds: !!oddsEntry,
-          odds:        oddsEntry
-            ? { home: oddsEntry.matchOdds[0], draw: 0, away: oddsEntry.matchOdds[1] }
-            : { home: 0, draw: 0, away: 0 },
-          markets:     oddsEntry ? (oddsEntry.markets as AdvancedMarkets) : ({} as AdvancedMarkets),
-        });
+        if (oddsEntry) {
+          // Real odds available (main tour)
+          results.push({
+            id:          `tennis-ls-${m.id}`,
+            home:        p0.name,
+            away:        p1.name,
+            league:      tournament.name ?? "Ténis",
+            country:     "",
+            ...shiftHour(m.date, m.time),
+            sport:       "tennis" as const,
+            hasRealOdds: true,
+            odds:        { home: oddsEntry.matchOdds[0], draw: 0, away: oddsEntry.matchOdds[1] },
+            markets:     oddsEntry.markets as AdvancedMarkets,
+          });
+        } else {
+          // No real odds (Challengers, ITF, etc.) — compute fair odds from player names
+          const sr = seededRng(`tennis-ch:${p0.name}:${p1.name}`);
+          const pHome = mc(0.52 + (sr(1) - 0.5) * 0.20, 0.15, 0.85);
+          const [compH, compA] = probsToDecimalOdds([pHome, 1 - pHome], 1.06);
+          const tennisExtras = computeTennisExtras(pHome);
+          results.push({
+            id:          `tennis-ch-${m.id}`,
+            home:        p0.name,
+            away:        p1.name,
+            league:      tournament.name ?? "Challenger",
+            country:     "",
+            ...shiftHour(m.date, m.time),
+            sport:       "tennis" as const,
+            hasRealOdds: false,
+            odds:        { home: compH!, draw: 0, away: compA! },
+            markets: {
+              doubleChance: { homeOrDraw: 0, awayOrDraw: 0, homeOrAway: 0 },
+              bothTeamsScore: { yes: 0, no: 0 },
+              totalGoals: { over05:0, under05:0, over15:0, under15:0, over25:0, under25:0, over35:0, under35:0, over45:0, under45:0, over55:0, under55:0, over65:0, under65:0 },
+              handicap: { homeMinusOne: 0, awayPlusOne: 0, homeMinusOneHalf: 0, awayPlusOneHalf: 0 },
+              halfTime: { home: 0, draw: 0, away: 0 },
+              firstGoal: { home: 0, noGoal: 0, away: 0 },
+              tennisExtra: tennisExtras,
+            } as unknown as AdvancedMarkets,
+          });
+        }
       }
     }
 
@@ -3660,47 +3703,25 @@ async function buildVolleyballUpcoming(): Promise<UpcomingMatch[]> {
       });
     }
 
-    // Fallback: "Not Started" matches from livescores (when no odds today)
-    const todayD = new Date();
-    const tomorrowD = new Date(todayD); tomorrowD.setDate(todayD.getDate() + 1);
-    const fmtD = (d: Date) =>
-      `${String(d.getDate()).padStart(2, "0")}.${String(d.getMonth() + 1).padStart(2, "0")}.${d.getFullYear()}`;
-    const todayStr = fmtD(todayD);
-    const tomorrowStr = fmtD(tomorrowD);
-
-    for (const t of liveData) {
-      const tMatches = Array.isArray(t.match) ? t.match : (t.match ? [t.match] : []);
-      for (const m of tMatches) {
-        if (!m || m.status !== "Not Started") continue;
-        if (m.date !== todayStr && m.date !== tomorrowStr) continue;
-        if (!m.home?.name || !m.away?.name) continue;
-        if (isMatchTimePast(m.date, m.time)) continue;
-        const key = `${m.home.name}|${m.away.name}`;
-        if (seen.has(key)) continue;
-        seen.add(key);
-        results.push({
-          id: `volley-live-${m.id}`,
-          home: m.home.name,
-          away: m.away.name,
-          league: t.league,
-          country: t.country,
-          ...shiftHour(m.date, m.time),
-          sport: "volleyball" as const,
-          hasRealOdds: false,
-          odds: { home: 0, draw: 0, away: 0 },
-          markets: makeVolleyballMarketsFromTeams(m.home.name, m.away.name),
-        });
-      }
-    }
-
+    // No fallback without odds — only show volleyball matches with real odds
     return results;
   } catch {
     return [];
   }
 }
 
-router.get("/upcoming", async (req, res) => {
-  const sport = String(req.query["sport"] ?? "all");
+// ─── Top-level upcoming cache — 60s TTL so repeated 30s polls are instant ─────
+type UpcomingTopCache = {
+  football: UpcomingMatch[]; tennis: UpcomingMatch[];
+  basketball: UpcomingMatch[]; hockey: UpcomingMatch[];
+  volleyball: UpcomingMatch[]; fetchedAt: number;
+};
+let upcomingTopCache: UpcomingTopCache | null = null;
+const UPCOMING_TOP_TTL = 60_000;
+
+async function getUpcomingAll(): Promise<UpcomingTopCache> {
+  const now = Date.now();
+  if (upcomingTopCache && now - upcomingTopCache.fetchedAt < UPCOMING_TOP_TTL) return upcomingTopCache;
   const empty: UpcomingMatch[] = [];
   const [football, tennis, basketball, hockey, volleyball] = await Promise.all([
     buildUpcomingMatches().catch(() => empty),
@@ -3709,13 +3730,20 @@ router.get("/upcoming", async (req, res) => {
     buildHockeyUpcoming().catch(() => empty),
     buildVolleyballUpcoming().catch(() => empty),
   ]);
+  upcomingTopCache = { football, tennis, basketball, hockey, volleyball, fetchedAt: Date.now() };
+  return upcomingTopCache;
+}
+
+router.get("/upcoming", async (req, res) => {
+  const sport = String(req.query["sport"] ?? "all");
+  const cache = await getUpcomingAll();
   let matches: UpcomingMatch[];
-  if (sport === "football") matches = football;
-  else if (sport === "tennis") matches = tennis;
-  else if (sport === "basketball") matches = basketball;
-  else if (sport === "hockey") matches = hockey;
-  else if (sport === "volleyball") matches = volleyball;
-  else matches = [...football, ...tennis, ...basketball, ...hockey, ...volleyball];
+  if (sport === "football") matches = cache.football;
+  else if (sport === "tennis") matches = cache.tennis;
+  else if (sport === "basketball") matches = cache.basketball;
+  else if (sport === "hockey") matches = cache.hockey;
+  else if (sport === "volleyball") matches = cache.volleyball;
+  else matches = [...cache.football, ...cache.tennis, ...cache.basketball, ...cache.hockey, ...cache.volleyball];
   res.json({ matches });
 });
 
@@ -3881,6 +3909,9 @@ router.get("/stats", async (req, res) => {
     } catch { /* use computed fallback */ }
   }
 
+  const realHomeCount = homeForm.length;
+  const realAwayCount = awayForm.length;
+
   if (homeForm.length < 5) {
     homeForm = Array.from({ length: 5 }, (_, i) => {
       const fp = cfg.pool[ri(0, cfg.pool.length - 1, i + 1.13)]!;
@@ -3894,7 +3925,11 @@ router.get("/stats", async (req, res) => {
     });
   }
 
+  // Only expose form when BOTH sides came from the real Statpal API
+  const formIsReal = realHomeCount >= 5 && realAwayCount >= 5;
+
   res.json({
+    formIsReal,
     winProb: { home: homeProb, draw: drawProb, away: awayProb },
     h2h: { homeWins, draws, awayWins },
     avgStats: {
@@ -5369,7 +5404,7 @@ router.get("/volleyball-leagues", async (_req, res) => {
     const leagues = await getVolleyballActiveLeagues();
     res.json({ leagues });
   } catch {
-    res.status(500).json({ error: "Ligas indisponíveis" });
+    res.json({ leagues: [] });
   }
 });
 
@@ -5542,8 +5577,13 @@ const NBA_ODDS_TTL = 60 * 1000;
 async function getBasketballOdds(): Promise<NBAOddsEntry[]> {
   const now = Date.now();
   if (nbaOddsCache && now - nbaOddsFetchedAt < NBA_ODDS_TTL) return nbaOddsCache;
-  const resp = await fetch(`${BASE_V1}/nba/odds?access_key=${STATSPAL_KEY}`, { signal: AbortSignal.timeout(9000) });
-  if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+  let resp: Response;
+  try {
+    resp = await fetch(`${BASE_V1}/nba/odds?access_key=${STATSPAL_KEY}`, { signal: AbortSignal.timeout(9000) });
+  } catch {
+    return nbaOddsCache ?? [];
+  }
+  if (!resp.ok) return nbaOddsCache ?? [];
   const data = (await resp.json()) as { odds?: { category?: { matches?: { match?: NBAOddsMatch | NBAOddsMatch[] } } } };
   const rawMatches = data?.odds?.category?.matches?.match;
   if (!rawMatches) return [];
@@ -5651,8 +5691,13 @@ const HOCKEY_ODDS_TTL = 60 * 1000;
 async function getHockeyOdds(): Promise<HockeyOddsEntry[]> {
   const now = Date.now();
   if (hockeyOddsCache && now - hockeyOddsFetchedAt < HOCKEY_ODDS_TTL) return hockeyOddsCache;
-  const resp = await fetch(`${BASE_V1}/nhl/odds?access_key=${STATSPAL_KEY}`, { signal: AbortSignal.timeout(9000) });
-  if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+  let resp: Response;
+  try {
+    resp = await fetch(`${BASE_V1}/nhl/odds?access_key=${STATSPAL_KEY}`, { signal: AbortSignal.timeout(9000) });
+  } catch {
+    return hockeyOddsCache ?? [];
+  }
+  if (!resp.ok) return hockeyOddsCache ?? [];
   const data = (await resp.json()) as { odds?: { category?: { matches?: { match?: HockeyOddsMatch | HockeyOddsMatch[] } } } };
   const rawMatches = data?.odds?.category?.matches?.match;
   if (!rawMatches) return [];
@@ -5747,8 +5792,13 @@ router.get("/hockey-odds", async (_req, res) => {
 async function getTennisOdds(): Promise<TennisOddsEntry[]> {
   const now = Date.now();
   if (tennisOddsCache && now - tennisOddsFetchedAt < TENNIS_ODDS_TTL) return tennisOddsCache;
-  const resp = await fetch(`${BASE_V1}/tennis/odds?access_key=${STATSPAL_KEY}`, { signal: AbortSignal.timeout(9000) });
-  if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+  let resp: Response;
+  try {
+    resp = await fetch(`${BASE_V1}/tennis/odds?access_key=${STATSPAL_KEY}`, { signal: AbortSignal.timeout(9000) });
+  } catch {
+    return tennisOddsCache ?? [];
+  }
+  if (!resp.ok) return tennisOddsCache ?? [];
   const data = (await resp.json()) as { odds?: { tournament?: unknown } };
   const rawTours = data?.odds?.tournament;
   if (!rawTours) return [];
@@ -8508,5 +8558,31 @@ router.get("/football-odds-country/:country", async (req, res) => {
     res.status(500).json({ error: "Odds indisponíveis" });
   }
 });
+
+// ─── Background Market Drift Engine ─────────────────────────────────────────
+// Runs every 2s independently of Statpal API polls so the frontend sees smooth
+// per-tier odds movement even between data-fetch cycles.
+// Tier 1 markets (Over/Under, Handicap) drift every 2s.
+// Tier 2 markets (HT/FT, Correct Score) drift every 2s at a much smaller rate.
+// Tier 3 markets (Corners, Cards) drift every 2s at a very gentle rate.
+setInterval(() => {
+  const now = Date.now();
+  for (const [id, state] of liveMatchState.entries()) {
+    if (state.sport !== "football") continue;
+    // Skip halftime, full-time, and pre-match entries
+    const skip = ["HT", "FT", "AET", "Em Breve", "Fin.", "Fin. (AET)"];
+    if (skip.includes(state.status)) continue;
+    // Skip if ALL core markets are suspended — don't drift while suspended
+    if (state.marketSuspension) {
+      const coreKeys = ["result", "totalGoals", "handicap"];
+      const allCoresSuspended = coreKeys.every(k => {
+        const ts = state.marketSuspension?.[k];
+        return ts !== undefined && ts > now;
+      });
+      if (allCoresSuspended) continue;
+    }
+    liveMatchState.set(id, applyTieredMarketDrift(state, now));
+  }
+}, 2000);
 
 export default router;

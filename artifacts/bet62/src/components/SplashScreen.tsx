@@ -1,14 +1,15 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 
 export default function SplashScreen({ onDone }: { onDone: () => void }) {
   const [visible, setVisible] = useState(true);
+  const onDoneRef = useRef(onDone);
 
   useEffect(() => {
     const t1 = setTimeout(() => setVisible(false), 2200);
-    const t2 = setTimeout(() => onDone(), 2700);
+    const t2 = setTimeout(() => onDoneRef.current(), 2700);
     return () => { clearTimeout(t1); clearTimeout(t2); };
-  }, [onDone]);
+  }, []);
 
   return (
     <AnimatePresence>
@@ -20,7 +21,6 @@ export default function SplashScreen({ onDone }: { onDone: () => void }) {
           transition={{ duration: 0.45 }}
           className="fixed inset-0 z-[9999] bg-zinc-950 flex flex-col items-center justify-center select-none"
         >
-          {/* Animated red stripe top */}
           <motion.div
             initial={{ scaleX: 0 }}
             animate={{ scaleX: 1 }}
@@ -28,14 +28,12 @@ export default function SplashScreen({ onDone }: { onDone: () => void }) {
             className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-red-700 via-red-500 to-red-700 origin-left"
           />
 
-          {/* Logo container */}
           <motion.div
             initial={{ opacity: 0, y: 24, scale: 0.92 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             transition={{ duration: 0.55, delay: 0.2, ease: "easeOut" }}
             className="flex flex-col items-center gap-5"
           >
-            {/* Icon — soccer ball */}
             <motion.div
               initial={{ scale: 0.7, rotate: -8 }}
               animate={{ scale: 1, rotate: 0 }}
@@ -52,11 +50,8 @@ export default function SplashScreen({ onDone }: { onDone: () => void }) {
                     <circle cx="96" cy="88" r="63"/>
                   </clipPath>
                 </defs>
-                {/* Red accent ring */}
                 <circle cx="96" cy="88" r="68" fill="none" stroke="#dc2626" strokeWidth="3" opacity="0.35"/>
-                {/* Ball */}
                 <circle cx="96" cy="88" r="63" fill="url(#sg)"/>
-                {/* Soccer patches */}
                 <g clipPath="url(#sc)" fill="#888" opacity="0.7">
                   <polygon points="96,30 114,44 108,63 84,63 78,44"/>
                   <polygon points="32,70 48,56 78,56 84,73 66,83 37,80"/>
@@ -65,16 +60,13 @@ export default function SplashScreen({ onDone }: { onDone: () => void }) {
                   <polygon points="158,112 155,88 130,85 124,103 140,118"/>
                   <polygon points="96,152 75,133 82,114 110,114 117,133"/>
                 </g>
-                {/* Shine */}
                 <ellipse cx="78" cy="69" rx="17" ry="11" fill="white" opacity="0.3" transform="rotate(-28 78 69)"/>
-                {/* BET62 centered on ball */}
                 <text x="96" y="104" fontFamily="Arial Black, Arial, sans-serif" fontWeight="900" fontSize="40" textAnchor="middle" fontStyle="italic" letterSpacing="-1.5">
                   <tspan fill="#111111">BET</tspan><tspan fill="#dc2626">62</tspan>
                 </text>
               </svg>
             </motion.div>
 
-            {/* BET62 text */}
             <div className="text-center">
               <motion.div
                 initial={{ opacity: 0, letterSpacing: "0.3em" }}
@@ -96,7 +88,6 @@ export default function SplashScreen({ onDone }: { onDone: () => void }) {
             </div>
           </motion.div>
 
-          {/* Loading bar */}
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
@@ -113,7 +104,6 @@ export default function SplashScreen({ onDone }: { onDone: () => void }) {
             </div>
           </motion.div>
 
-          {/* Red stripe bottom */}
           <motion.div
             initial={{ scaleX: 0 }}
             animate={{ scaleX: 1 }}

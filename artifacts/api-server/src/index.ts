@@ -1,6 +1,7 @@
 import { createServer } from "http";
 import app from "./app";
 import { logger } from "./lib/logger";
+import { getUpcomingAll } from "./routes/matches";
 
 const rawPort = process.env["PORT"];
 
@@ -22,4 +23,7 @@ server.listen(port, (err?: Error) => {
     process.exit(1);
   }
   logger.info({ port }, "Server listening");
+
+  // Pre-warm all upcoming caches so first user request is instant
+  getUpcomingAll().catch(() => {});
 });

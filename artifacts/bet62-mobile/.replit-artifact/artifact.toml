@@ -1,0 +1,27 @@
+kind = "mobile"
+previewPath = "/mobile/"
+title = "Bet62 Mobile"
+version = "1.0.0"
+id = "artifacts/bet62-mobile"
+router = "expo-domain"
+
+[[integratedSkills]]
+name = "expo"
+version = "1.0.0"
+
+[[services]]
+ensurePreviewReachable = "/status"
+name = "expo"
+paths = [ "/mobile/" ]
+localPort = 18411
+
+[services.development]
+run = "pnpm --filter @workspace/bet62-mobile run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/bet62-mobile", "run", "build" ]
+run = [ "pnpm", "--filter", "@workspace/bet62-mobile", "run", "serve" ]
+
+[services.env]
+PORT = "18411"
+BASE_PATH = "/mobile/"

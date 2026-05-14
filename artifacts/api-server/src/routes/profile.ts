@@ -20,6 +20,9 @@ router.get("/", authMiddleware, async (req: AuthRequest, res: Response): Promise
       withdrawalName: user.withdrawalName,
       selfExcludedUntil: user.selfExcludedUntil,
       kycStatus: user.kycStatus,
+      kycDocumentType: user.kycDocumentType,
+      kycSubmittedAt: user.kycSubmittedAt,
+      firstDepositGranted: user.firstDepositGranted,
     });
   } catch {
     res.status(500).json({ error: "Erro interno" });
@@ -61,6 +64,63 @@ router.put("/", authMiddleware, async (req: AuthRequest, res: Response): Promise
       nif: updated.nif,
       withdrawalIban: updated.withdrawalIban,
       withdrawalName: updated.withdrawalName,
+    });
+  } catch {
+    res.status(500).json({ error: "Erro interno" });
+  }
+});
+
+// ─── POST /api/profile/kyc/submit ────────────────────────────────────────────
+router.post("/kyc/submit", authMiddleware, async (req: AuthRequest, res: Response): Promise<void> => {
+  const { documentType, documentNumber, nif } = req.body as {
+    documentType?: string;
+    documentNumber?: string;
+    nif?: string;
+  };
+
+  if (!documentType || !["cc", "passport"].includes(documentType)) {
+    res.status(400).json({ error: "Tipo de documento inválido. Use 'cc' ou 'passport'." });
+    return;
+  }
+
+  if (!documentNumber || documentNumber.trim().length < 5) {
+    res.status(400).json({ error: "Número de documento inválido." });
+    return;
+  }
+
+  if (nif !== undefined && nif !== "" && !/^\d{9}$/.test(nif)) {
+    res.status(400).json({ error: "NIF inválido. Deve ter 9 dígitos." });
+    return;
+  }
+
+  try {
+    const [existing] = await db
+      .select({ kycStatus: usersTable.kycStatus })
+      .from(usersTable)
+      .where(eq(usersTable.id, req.user!.id))
+      .limit(1);
+
+    if (existing?.kycStatus === "approved") {
+      res.status(400).json({ error: "A sua identidade já foi verificada e aprovada." });
+      return;
+    }
+
+    const [updated] = await db
+      .update(usersTable)
+      .set({
+        kycDocumentType: documentType,
+        kycDocumentNumber: documentNumber.trim(),
+        kycStatus: "pending",
+        kycSubmittedAt: new Date(),
+        ...(nif && nif !== "" && { nif }),
+      })
+      .where(eq(usersTable.id, req.user!.id))
+      .returning();
+
+    res.json({
+      kycStatus: updated.kycStatus,
+      kycDocumentType: updated.kycDocumentType,
+      kycSubmittedAt: updated.kycSubmittedAt,
     });
   } catch {
     res.status(500).json({ error: "Erro interno" });
