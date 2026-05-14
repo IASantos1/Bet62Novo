@@ -1070,6 +1070,7 @@ export default function Home() {
   const [collapsedBets, setCollapsedBets] = useState<Set<number>>(new Set());
   const [winAnim, setWinAnim] = useState<{ amount: number; title: string } | null>(null);
   const [cashoutAnim, setCashoutAnim] = useState<{ amount: number } | null>(null);
+  const [betPlacedAnim, setBetPlacedAnim] = useState(false);
   const prevWonBetIds = useRef<Set<number> | null>(null);
 
   // Deposit modal
@@ -1736,6 +1737,13 @@ export default function Home() {
     return () => clearTimeout(t);
   }, [cashoutAnim]);
 
+  // Auto-dismiss bet placed animation after 2.5s
+  useEffect(() => {
+    if (!betPlacedAnim) return;
+    const t = setTimeout(() => setBetPlacedAnim(false), 2500);
+    return () => clearTimeout(t);
+  }, [betPlacedAnim]);
+
   const handleVolleyLeagueClick = (id: string) => {
     if (expandedVolleyLeagueId === id) { setExpandedVolleyLeagueId(null); return; }
     setExpandedVolleyLeagueId(id);
@@ -1891,6 +1899,7 @@ export default function Home() {
         }
         if (allOk) {
           toast.success(`${bets.length} aposta${bets.length > 1 ? "s" : ""} realizada${bets.length > 1 ? "s" : ""}! Total: € ${totalCost.toFixed(2)}`);
+          setBetPlacedAnim(true);
           setBets([]); setBetStakes({}); setStake(""); setBetSlipOpenMobile(false); auth.refreshUser();
         }
       } catch { toast.error("Erro ao realizar aposta"); } finally { setIsPlacingBet(false); }
@@ -1921,6 +1930,7 @@ export default function Home() {
       const data = await res.json();
       if (!res.ok) { toast.error(data.error || "Erro ao realizar aposta"); return; }
       toast.success(`Aposta múltipla realizada! Potencial de ganho: € ${potentialWin}`);
+      setBetPlacedAnim(true);
       setBets([]); setBetStakes({}); setStake(""); setBetSlipOpenMobile(false); auth.refreshUser();
     } catch { toast.error("Erro ao realizar aposta"); } finally { setIsPlacingBet(false); }
   };
@@ -7185,6 +7195,46 @@ export default function Home() {
                   <X size={16} />
                 </button>
               </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* ─── BET PLACED ANIMATION ───────────────────────────────────────── */}
+      <AnimatePresence>
+        {betPlacedAnim && (
+          <motion.div
+            initial={{ opacity: 0, y: 60, scale: 0.85 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 40, scale: 0.9 }}
+            transition={{ type: "spring", stiffness: 400, damping: 28 }}
+            className="fixed bottom-24 left-1/2 z-[300] pointer-events-none"
+            style={{ translateX: "-50%" }}
+          >
+            <div
+              className="rounded-2xl border border-red-500/30 shadow-[0_8px_40px_rgba(220,38,38,0.25)] px-6 py-4 flex flex-col items-center gap-2 min-w-[200px]"
+              style={{ background: "linear-gradient(135deg, #1a0505 0%, #0d0d0d 100%)" }}
+            >
+              {/* progress bar draining */}
+              <motion.div
+                className="absolute bottom-0 left-0 right-0 h-0.5 bg-red-600 origin-left rounded-b-2xl"
+                initial={{ scaleX: 1 }}
+                animate={{ scaleX: 0 }}
+                transition={{ duration: 2.5, ease: "linear" }}
+              />
+              {/* swaying crossed-fingers emoji */}
+              <motion.div
+                className="text-5xl select-none"
+                animate={{
+                  rotate: [0, -18, 18, -14, 14, -8, 8, -4, 4, 0],
+                  y: [0, -6, 0, -4, 0, -2, 0],
+                }}
+                transition={{ duration: 1.4, ease: "easeInOut", times: [0, 0.1, 0.25, 0.38, 0.5, 0.63, 0.75, 0.85, 0.93, 1] }}
+              >
+                🤞
+              </motion.div>
+              <div className="text-sm font-black text-white tracking-wide">Boa sorte!</div>
+              <div className="text-xs text-zinc-500">Aposta registada com sucesso</div>
             </div>
           </motion.div>
         )}
