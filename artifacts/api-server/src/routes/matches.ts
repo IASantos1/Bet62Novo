@@ -2450,10 +2450,10 @@ function buildNBALiveMatches(tournaments: NBATournament[]): LiveMatchState[] {
     for (const m of matches) {
       if (!m?.status) continue;
       const st = m.status;
-      const isFinished = st === "Finished" || st === "Ended" || st === "Closed";
+      const isFinished = ["Finished", "Ended", "Closed", "Final", "Complete", "After OT", "After SO", "FT", "AET", "AOT"].includes(st);
       if (isFinished) continue; // never show finished games in live section
       const isNotStarted = st === "Not Started";
-      const isLive = NBA_LIVE_STATUSES.has(st) || (!isNotStarted && st !== "Postponed" && st !== "Cancelled");
+      const isLive = NBA_LIVE_STATUSES.has(st); // strict: only known live statuses
       if (!isLive && !isNotStarted) continue;
       // Date guard: skip games not from today (or yesterday if before 10h — late-night NBA)
       if (m.date && m.date !== todayStr) {

@@ -6,7 +6,7 @@ import {
   Menu, X, Trophy, Activity, Gift,
   LogOut, User, History, Loader2, Zap, TrendingUp,
   ChevronRight, ChevronLeft, ChevronDown, ChevronUp, AlertCircle, BarChart2, Wallet, ArrowDownCircle, ArrowUpCircle, Plus, Clock, Smartphone,
-  Copy, Share2, CircleDollarSign, Lock, Trash2,
+  Copy, Share2, CircleDollarSign, Lock, Trash2, Check,
 } from "lucide-react";
 import ProfileTab from "@/components/ProfileTab";
 import { Button } from "@/components/ui/button";
@@ -1066,7 +1066,8 @@ export default function Home() {
   const [myBetsLoading, setMyBetsLoading] = useState(false);
   const [cashingOut, setCashingOut] = useState<number | null>(null);
   const [cashoutConfirm, setCashoutConfirm] = useState<UserBet | null>(null);
-  const [betFilterTab, setBetFilterTab] = useState<"abertas" | "resolvidas" | "cashout">("abertas");
+  const [betFilterTab, setBetFilterTab] = useState<"abertas" | "resolvidas">("abertas");
+  const myBetsInitialized = useRef(false);
   const [collapsedBets, setCollapsedBets] = useState<Set<number>>(new Set());
   const [winAnim, setWinAnim] = useState<{ amount: number; title: string } | null>(null);
   const [cashoutAnim, setCashoutAnim] = useState<{ amount: number } | null>(null);
@@ -1687,9 +1688,9 @@ export default function Home() {
     return () => clearInterval(id);
   }, []);
 
-  const fetchMyBets = useCallback(async () => {
+  const fetchMyBets = useCallback(async (silent = false) => {
     if (!auth.token) return;
-    setMyBetsLoading(true);
+    if (!silent) setMyBetsLoading(true);
     try {
       const res = await fetch("/api/bets/my", {
         headers: { Authorization: `Bearer ${auth.token}` }
@@ -1697,6 +1698,7 @@ export default function Home() {
       if (res.ok) {
         const bets: UserBet[] = await res.json();
         setMyBets(bets);
+        myBetsInitialized.current = true;
         const currentWonIds = new Set(bets.filter(b => b.status === "won").map(b => b.id));
         if (prevWonBetIds.current !== null) {
           const newWon = bets.filter(b => b.status === "won" && !prevWonBetIds.current!.has(b.id));
@@ -1710,16 +1712,16 @@ export default function Home() {
         prevWonBetIds.current = currentWonIds;
       }
     } catch {
-      toast.error("Erro ao carregar apostas");
+      if (!silent) toast.error("Erro ao carregar apostas");
     } finally {
-      setMyBetsLoading(false);
+      if (!silent) setMyBetsLoading(false);
     }
   }, [auth.token]);
 
-  // Auto-refresh bets every 30s when on mybets tab (to catch settlements)
+  // Auto-refresh bets every 30s when on mybets tab — silent (no spinner)
   useEffect(() => {
     if (activeTab !== "mybets" || !auth.token) return;
-    const id = setInterval(() => fetchMyBets(), 30000);
+    const id = setInterval(() => fetchMyBets(true), 30000);
     return () => clearInterval(id);
   }, [activeTab, auth.token, fetchMyBets]);
 
@@ -3983,10 +3985,43 @@ export default function Home() {
     if (s === "away") return lm.odds.away;
     if (s === "draw") return lm.odds.draw > 0 ? lm.odds.draw : sel.odd;
     if (s === "home") return lm.odds.home;
-    // For advanced markets, use scale factor relative to how odds moved
     const baseOdd = sel.odd;
     const baseMain = (lm.odds.home + lm.odds.away) / 2;
-    return Math.max(1.01, baseOdd * (baseMain / baseMain)); // keep same for non-1X2
+    return Math.max(1.01, baseOdd * (baseMain / baseMain));
+  };
+
+  // Determine per-selection outcome for resolved bets or live tentative state
+  type SelOutcome = "green" | "red" | "cashout" | "live-win" | "live-lose" | "pending";
+  const getSelOutcome = (sel: StoredSelection, betStatus: string): SelOutcome => {
+    if (betStatus === "won") return "green";
+    if (betStatus === "lost") return "red";
+    if (betStatus === "cashed_out") return "cashout";
+    // Pending: check live match for tentative state
+    const lm = findLiveMatchForSel(sel);
+    if (!lm) return "pending";
+    const s = sel.selection;
+    const homeScore = lm.homeScore ?? 0;
+    const awayScore = lm.awayScore ?? 0;
+    const total = homeScore + awayScore;
+    let winning: boolean | null = null;
+    if (s === "home") winning = homeScore > awayScore;
+    else if (s === "away") winning = awayScore > homeScore;
+    else if (s === "draw") winning = homeScore === awayScore;
+    else if (s === "homeOrDraw") winning = homeScore >= awayScore;
+    else if (s === "awayOrDraw") winning = awayScore >= homeScore;
+    else if (s === "homeOrAway") winning = homeScore !== awayScore;
+    else if (s === "bts-yes") winning = homeScore > 0 && awayScore > 0;
+    else if (s === "bts-no") winning = homeScore === 0 || awayScore === 0;
+    else {
+      const m = s.match(/^([ou])([\d.]+)$/);
+      if (m) {
+        const line = parseFloat(m[2]!);
+        if (m[1] === "o") winning = total > line ? true : null;
+        else winning = total >= line ? false : null;
+      }
+    }
+    if (winning === null) return "pending";
+    return winning ? "live-win" : "live-lose";
   };
 
   const cashoutEstimate = (bet: UserBet) => {
@@ -6596,11 +6631,11 @@ export default function Home() {
 
                 {/* Tabs */}
                 <div className="flex border-b border-zinc-800 mb-5">
-                  {(["abertas", "resolvidas", "cashout"] as const).map((t) => {
-                    const cnt = t === "abertas" ? myBets.filter(b => b.status === "pending").length
-                      : t === "cashout" ? myBets.filter(b => b.status === "pending").length
+                  {(["abertas", "resolvidas"] as const).map((t) => {
+                    const cnt = t === "abertas"
+                      ? myBets.filter(b => b.status === "pending").length
                       : myBets.filter(b => b.status !== "pending").length;
-                    const lbl = t === "abertas" ? "Abertas" : t === "cashout" ? "Cash Out" : "Resolvidas";
+                    const lbl = t === "abertas" ? "Abertas" : "Resolvidas";
                     return (
                       <button key={t} onClick={() => setBetFilterTab(t)}
                         className={`px-4 py-2.5 text-sm font-bold flex items-center gap-2 border-b-2 transition-colors ${betFilterTab === t ? "border-red-500 text-white" : "border-transparent text-zinc-500 hover:text-zinc-300"}`}>
@@ -6611,12 +6646,11 @@ export default function Home() {
                   })}
                 </div>
 
-                {myBetsLoading ? (
+                {myBetsLoading && !myBetsInitialized.current ? (
                   <div className="flex items-center justify-center py-20"><Loader2 className="animate-spin text-red-600" size={32} /></div>
                 ) : (() => {
                   const filtered = myBets.filter(b =>
-                    betFilterTab === "resolvidas" ? b.status !== "pending"
-                      : b.status === "pending"
+                    betFilterTab === "resolvidas" ? b.status !== "pending" : b.status === "pending"
                   );
                   if (filtered.length === 0) return (
                     <div className="py-20 text-center text-zinc-500 bg-zinc-900/50 rounded-xl border border-zinc-800">
@@ -6687,15 +6721,48 @@ export default function Home() {
                             {!isCollapsed && (
                               <div className="divide-y divide-zinc-800/60 border-t border-zinc-800">
                                 {sels.map((sel, i) => {
+                                  const outcome = getSelOutcome(sel, bet.status);
                                   const lm = isPending ? findLiveMatchForSel(sel) : null;
                                   const liveOdd = lm ? getLiveOddForSel(sel, lm) : null;
                                   const isHT = lm?.status === "HT";
                                   const displayMin = lm ? (isHT ? "HT" : `${lm.minute ?? 0}'`) : null;
+                                  // Left indicator icon
+                                  const SelIcon = () => {
+                                    if (outcome === "green") return (
+                                      <div className="w-6 h-6 rounded-full bg-green-600 flex items-center justify-center shrink-0 mt-0.5">
+                                        <Check size={13} className="text-white" strokeWidth={3} />
+                                      </div>
+                                    );
+                                    if (outcome === "red") return (
+                                      <div className="w-6 h-6 rounded-full bg-red-700 flex items-center justify-center shrink-0 mt-0.5">
+                                        <X size={13} className="text-white" strokeWidth={3} />
+                                      </div>
+                                    );
+                                    if (outcome === "cashout") return (
+                                      <div className="w-6 h-6 rounded-full bg-yellow-700/80 flex items-center justify-center shrink-0 mt-0.5">
+                                        <CircleDollarSign size={13} className="text-white" />
+                                      </div>
+                                    );
+                                    if (outcome === "live-win") return (
+                                      <div className="w-6 h-6 rounded-full bg-green-700/60 border border-green-500/40 flex items-center justify-center shrink-0 mt-0.5">
+                                        <Check size={12} className="text-green-300" strokeWidth={3} />
+                                      </div>
+                                    );
+                                    if (outcome === "live-lose") return (
+                                      <div className="w-6 h-6 rounded-full bg-red-900/60 border border-red-500/40 flex items-center justify-center shrink-0 mt-0.5">
+                                        <X size={12} className="text-red-400" strokeWidth={3} />
+                                      </div>
+                                    );
+                                    // pending: numbered circle
+                                    return (
+                                      <div className={`w-6 h-6 rounded-full flex items-center justify-center shrink-0 text-xs font-black text-white mt-0.5 leading-none ${lm ? "bg-red-700" : "bg-red-600"}`}>
+                                        {i + 1}
+                                      </div>
+                                    );
+                                  };
                                   return (
                                   <div key={i} className="px-4 py-3 flex items-start gap-3">
-                                    <div className={`w-6 h-6 rounded-full flex items-center justify-center shrink-0 text-xs font-black text-white mt-0.5 leading-none ${lm ? "bg-red-700" : "bg-red-600"}`}>
-                                      {i + 1}
-                                    </div>
+                                    <SelIcon />
                                     <div className="flex-1 min-w-0">
                                       <div className="font-bold text-white text-sm leading-snug">{getSelLabel(sel)}</div>
                                       <div className="text-xs text-zinc-500 mt-0.5">{MARKET_LABEL[sel.market ?? "result"] ?? "Mercado"}</div>
