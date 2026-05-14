@@ -1745,7 +1745,8 @@ export default function Home() {
   useEffect(() => {
     if (activeTab === "live" || activeTab === "mybets") {
       fetchLive(activeTab === "live");
-      const ms = liveMatchDetailOpen ? 2000 : 5000;
+      const hasLiveBetsInSlip = bets.some(b => liveMatches.some(m => String(m.id) === String(b.matchId)));
+      const ms = (liveMatchDetailOpen || hasLiveBetsInSlip) ? 2000 : 5000;
       const interval = setInterval(() => fetchLive(false), ms);
       return () => clearInterval(interval);
     }
@@ -1962,6 +1963,23 @@ export default function Home() {
 
   const handlePlaceBet = async () => {
     if (!auth.user) { setAuthModalOpen(true); return; }
+
+    // Guard: block placement if any live selection has an active market suspension
+    {
+      const now = Date.now();
+      const suspendedBet = bets.find(bet => {
+        const lm = liveMatches.find(m => String(m.id) === String(bet.matchId));
+        if (!lm?.marketSuspension) return false;
+        const mk = bet.market ?? "result";
+        return (lm.marketSuspension[mk] ?? 0) > now || (lm.marketSuspension["result"] ?? 0) > now;
+      });
+      if (suspendedBet) {
+        const lm = liveMatches.find(m => String(m.id) === String(suspendedBet.matchId));
+        const reason = lm?._suspensionReason ?? "SUSPENSO";
+        toast.error(`${reason} — Odds em atualização. Aguarde e tente novamente.`);
+        return;
+      }
+    }
 
     if (effectiveBetMode === "simples") {
       const missing = bets.some(b => !betStakes[betKey(b)] || parseFloat(betStakes[betKey(b)] || "0") <= 0);
@@ -2704,6 +2722,22 @@ export default function Home() {
     const stakeNum = parseFloat(stake || "0");
     const multipotential = (stakeNum * parseFloat(totalOdds)).toFixed(2);
 
+    // Suspension detection: map each bet to its live suspension status
+    const now = Date.now();
+    const betSuspended = bets.map(bet => {
+      const lm = liveMatches.find(m => String(m.id) === String(bet.matchId));
+      if (!lm?.marketSuspension) return false;
+      const mk = bet.market ?? "result";
+      return (lm.marketSuspension[mk] ?? 0) > now || (lm.marketSuspension["result"] ?? 0) > now;
+    });
+    const anySuspended = betSuspended.some(Boolean);
+    const suspensionReason = (() => {
+      const idx = betSuspended.findIndex(Boolean);
+      if (idx < 0) return "";
+      const lm = liveMatches.find(m => String(m.id) === String(bets[idx]!.matchId));
+      return lm?._suspensionReason ?? "SUSPENSO";
+    })();
+
     return (
       <div className="flex flex-col h-full bg-zinc-950/50">
         <div className="p-4 border-b border-zinc-800 bg-zinc-900 flex justify-between items-center">
@@ -2755,48 +2789,60 @@ export default function Home() {
             </div>
           ) : (
             <AnimatePresence>
-              {bets.map(bet => (
-                <motion.div
-                  key={`${bet.matchId}-${bet.market}-${bet.selection}`}
-                  initial={{ opacity: 0, scale: 0.95 }}
-                  animate={{ opacity: 1, scale: 1 }}
-                  exit={{ opacity: 0, scale: 0.95 }}
-                  className="bg-zinc-900 p-3 rounded-lg border border-zinc-800 relative"
-                >
-                  <button
-                    onClick={() => removeBet(bet.matchId, bet.market || "result", bet.selection)}
-                    className="absolute top-2 right-2 text-zinc-500 hover:text-red-500 transition-colors"
+              {bets.map((bet, betIdx) => {
+                const isSusp = betSuspended[betIdx] === true;
+                return (
+                  <motion.div
+                    key={`${bet.matchId}-${bet.market}-${bet.selection}`}
+                    initial={{ opacity: 0, scale: 0.95 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    exit={{ opacity: 0, scale: 0.95 }}
+                    className={`p-3 rounded-lg relative overflow-hidden transition-colors ${isSusp ? "bg-zinc-900 border border-amber-500/60" : "bg-zinc-900 border border-zinc-800"}`}
                   >
-                    <X size={16} />
-                  </button>
-                  <div className="text-xs text-zinc-400 mb-1 pr-6 truncate">{bet.matchTitle}</div>
-                  <div className="font-bold text-white text-sm pr-6">{bet.label}</div>
-                  <div className="flex items-center justify-between mt-1">
-                    <span className="text-red-500 font-bold">{bet.odd.toFixed(2)}</span>
-                    {effectiveBetMode !== "simples" && stakeNum > 0 && (
-                      <span className="text-[11px] text-green-400">€ {(stakeNum * bet.odd).toFixed(2)}</span>
+                    {/* Suspension overlay — covers the card when market is locked */}
+                    {isSusp && (
+                      <div className="absolute inset-0 bg-amber-950/50 flex items-center justify-center z-10 backdrop-blur-[1px] rounded-lg">
+                        <div className="flex items-center gap-1.5 bg-amber-500 text-black text-[11px] font-bold px-3 py-1 rounded-full animate-pulse select-none">
+                          <Lock size={11} />
+                          ODDS SUSPENSAS
+                        </div>
+                      </div>
                     )}
-                  </div>
-                  {effectiveBetMode === "simples" && (
-                    <div className="mt-2 flex items-center gap-2">
-                      <Input
-                        type="number"
-                        placeholder="€ Valor"
-                        min="0.50"
-                        step="0.50"
-                        value={betStakes[betKey(bet)] || ""}
-                        onChange={e => setBetStakes(prev => ({ ...prev, [betKey(bet)]: e.target.value }))}
-                        className="bg-zinc-950 border-zinc-700 text-white font-mono text-xs h-8 flex-1"
-                      />
-                      {parseFloat(betStakes[betKey(bet)] || "0") > 0 && (
-                        <span className="text-xs text-green-400 shrink-0 font-mono">
-                          → € {(parseFloat(betStakes[betKey(bet)] || "0") * bet.odd).toFixed(2)}
-                        </span>
+                    <button
+                      onClick={() => removeBet(bet.matchId, bet.market || "result", bet.selection)}
+                      className="absolute top-2 right-2 text-zinc-500 hover:text-red-500 transition-colors z-20"
+                    >
+                      <X size={16} />
+                    </button>
+                    <div className="text-xs text-zinc-400 mb-1 pr-6 truncate">{bet.matchTitle}</div>
+                    <div className="font-bold text-white text-sm pr-6">{bet.label}</div>
+                    <div className="flex items-center justify-between mt-1">
+                      <span className={`font-bold ${isSusp ? "text-amber-400" : "text-red-500"}`}>{bet.odd.toFixed(2)}</span>
+                      {effectiveBetMode !== "simples" && stakeNum > 0 && (
+                        <span className="text-[11px] text-green-400">€ {(stakeNum * bet.odd).toFixed(2)}</span>
                       )}
                     </div>
-                  )}
-                </motion.div>
-              ))}
+                    {effectiveBetMode === "simples" && (
+                      <div className="mt-2 flex items-center gap-2">
+                        <Input
+                          type="number"
+                          placeholder="€ Valor"
+                          min="0.50"
+                          step="0.50"
+                          value={betStakes[betKey(bet)] || ""}
+                          onChange={e => setBetStakes(prev => ({ ...prev, [betKey(bet)]: e.target.value }))}
+                          className="bg-zinc-950 border-zinc-700 text-white font-mono text-xs h-8 flex-1"
+                        />
+                        {parseFloat(betStakes[betKey(bet)] || "0") > 0 && (
+                          <span className="text-xs text-green-400 shrink-0 font-mono">
+                            → € {(parseFloat(betStakes[betKey(bet)] || "0") * bet.odd).toFixed(2)}
+                          </span>
+                        )}
+                      </div>
+                    )}
+                  </motion.div>
+                );
+              })}
             </AnimatePresence>
           )}
         </div>
@@ -2839,13 +2885,26 @@ export default function Home() {
             {effectiveBetMode === "simples" && bets.length > 1 && (
               <div className="text-[10px] text-zinc-500 text-right">{bets.length} apostas independentes</div>
             )}
+            {anySuspended && (
+              <div className="flex items-center gap-2 px-3 py-2 bg-amber-500/10 border border-amber-500/30 rounded-lg">
+                <Lock size={13} className="text-amber-400 shrink-0 animate-pulse" />
+                <p className="text-amber-400 text-xs font-medium leading-tight">
+                  {suspensionReason || "LANCE CRÍTICO"} — Odds a atualizar, aguarde...
+                </p>
+              </div>
+            )}
             <Button
-              className="w-full bg-red-600 hover:bg-red-700 text-white font-bold h-12"
+              className={`w-full font-bold h-12 text-white transition-colors ${anySuspended ? "bg-zinc-700 hover:bg-zinc-700 cursor-not-allowed" : "bg-red-600 hover:bg-red-700"}`}
               onClick={handlePlaceBet}
-              disabled={isPlacingBet}
+              disabled={isPlacingBet || anySuspended}
             >
-              {isPlacingBet ? <Loader2 className="animate-spin mr-2" size={16} /> : null}
-              {auth.user ? "APOSTAR AGORA" : "ENTRAR PARA APOSTAR"}
+              {anySuspended ? (
+                <><Lock size={15} className="mr-2 animate-pulse" />APOSTAS BLOQUEADAS</>
+              ) : isPlacingBet ? (
+                <><Loader2 className="animate-spin mr-2" size={16} />{auth.user ? "APOSTAR AGORA" : "ENTRAR PARA APOSTAR"}</>
+              ) : (
+                auth.user ? "APOSTAR AGORA" : "ENTRAR PARA APOSTAR"
+              )}
             </Button>
           </div>
         )}
