@@ -8,7 +8,7 @@ import { liveMatchState } from "./matches";
 const router: IRouter = Router();
 
 router.post("/place", authMiddleware, async (req: AuthRequest, res: Response): Promise<void> => {
-  const { matchId, matchTitle, selections, stake, potentialWin, totalOdds } = req.body;
+  const { matchId, matchTitle, selections, stake, potentialWin, totalOdds, isFreebet } = req.body;
 
   if (!matchId || !matchTitle || !selections || !stake || !potentialWin || !totalOdds) {
     res.status(400).json({ error: "Missing bet details" });
@@ -18,12 +18,21 @@ router.post("/place", authMiddleware, async (req: AuthRequest, res: Response): P
   try {
     const [user] = await db.select().from(usersTable).where(eq(usersTable.id, req.user!.id)).limit(1);
 
-    const userBalance = parseFloat(user.balance);
     const betStake = parseFloat(stake);
+    const useFreebets = isFreebet === true;
 
-    if (userBalance < betStake) {
-      res.status(400).json({ error: "Insufficient balance" });
-      return;
+    if (useFreebets) {
+      const fbBalance = parseFloat(user.freebetBalance ?? "0");
+      if (fbBalance < betStake) {
+        res.status(400).json({ error: "Saldo de freebets insuficiente" });
+        return;
+      }
+    } else {
+      const userBalance = parseFloat(user.balance);
+      if (userBalance < betStake) {
+        res.status(400).json({ error: "Saldo insuficiente" });
+        return;
+      }
     }
 
     const result = await db.transaction(async (tx) => {
@@ -38,10 +47,17 @@ router.post("/place", authMiddleware, async (req: AuthRequest, res: Response): P
         status: "pending",
       }).returning();
 
-      const newBalance = (userBalance - betStake).toFixed(2);
-      await tx.update(usersTable).set({ balance: newBalance }).where(eq(usersTable.id, req.user!.id));
-
-      return { bet, newBalance };
+      if (useFreebets) {
+        const fbBalance = parseFloat(user.freebetBalance ?? "0");
+        const newFbBalance = (fbBalance - betStake).toFixed(2);
+        await tx.update(usersTable).set({ freebetBalance: newFbBalance }).where(eq(usersTable.id, req.user!.id));
+        return { bet, newFbBalance };
+      } else {
+        const userBalance = parseFloat(user.balance);
+        const newBalance = (userBalance - betStake).toFixed(2);
+        await tx.update(usersTable).set({ balance: newBalance }).where(eq(usersTable.id, req.user!.id));
+        return { bet, newBalance };
+      }
     });
 
     res.status(201).json(result);

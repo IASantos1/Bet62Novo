@@ -3697,25 +3697,30 @@ export default function Home() {
         )}
 
         {/* ── FUTEBOL: HT/FT ── */}
-        {isFootball && !isLateGame && (modalTab === "htft" || modalTab === "todos") && m && m.htft && (
-          <div>
-            <MarketGroup title={`Intervalo / Final — ${match.home} vence`}>
-              <MarketOddsBtn match={match} sel="htft-hh" odd={m.htft.hh} market="htft" label="1 / 1" />
-              <MarketOddsBtn match={match} sel="htft-hd" odd={m.htft.hd} market="htft" label="1 / X" />
-              <MarketOddsBtn match={match} sel="htft-ha" odd={m.htft.ha} market="htft" label="1 / 2" />
-            </MarketGroup>
-            <MarketGroup title="Empate ao Intervalo">
-              <MarketOddsBtn match={match} sel="htft-dh" odd={m.htft.dh} market="htft" label="X / 1" />
-              <MarketOddsBtn match={match} sel="htft-dd" odd={m.htft.dd} market="htft" label="X / X" />
-              <MarketOddsBtn match={match} sel="htft-da" odd={m.htft.da} market="htft" label="X / 2" />
-            </MarketGroup>
-            <MarketGroup title={`Intervalo / Final — ${match.away} vence`}>
-              <MarketOddsBtn match={match} sel="htft-ah" odd={m.htft.ah} market="htft" label="2 / 1" />
-              <MarketOddsBtn match={match} sel="htft-ad" odd={m.htft.ad} market="htft" label="2 / X" />
-              <MarketOddsBtn match={match} sel="htft-aa" odd={m.htft.aa} market="htft" label="2 / 2" />
-            </MarketGroup>
-          </div>
-        )}
+        {isFootball && !isLateGame && (modalTab === "htft" || modalTab === "todos") && m && m.htft && (() => {
+          const isSecondHalf = match.isLive === true && (match.minute ?? 0) > 45;
+          const htGroupLabel = isSecondHalf ? "Empate / Final" : "Empate ao Intervalo";
+          const htPrefix1 = isSecondHalf ? "Final" : "Intervalo / Final";
+          return (
+            <div>
+              <MarketGroup title={`${htPrefix1} — ${match.home} vence`}>
+                <MarketOddsBtn match={match} sel="htft-hh" odd={m.htft.hh} market="htft" label="1 / 1" />
+                <MarketOddsBtn match={match} sel="htft-hd" odd={m.htft.hd} market="htft" label="1 / X" />
+                <MarketOddsBtn match={match} sel="htft-ha" odd={m.htft.ha} market="htft" label="1 / 2" />
+              </MarketGroup>
+              <MarketGroup title={htGroupLabel}>
+                <MarketOddsBtn match={match} sel="htft-dh" odd={m.htft.dh} market="htft" label="X / 1" />
+                <MarketOddsBtn match={match} sel="htft-dd" odd={m.htft.dd} market="htft" label="X / X" />
+                <MarketOddsBtn match={match} sel="htft-da" odd={m.htft.da} market="htft" label="X / 2" />
+              </MarketGroup>
+              <MarketGroup title={`${htPrefix1} — ${match.away} vence`}>
+                <MarketOddsBtn match={match} sel="htft-ah" odd={m.htft.ah} market="htft" label="2 / 1" />
+                <MarketOddsBtn match={match} sel="htft-ad" odd={m.htft.ad} market="htft" label="2 / X" />
+                <MarketOddsBtn match={match} sel="htft-aa" odd={m.htft.aa} market="htft" label="2 / 2" />
+              </MarketGroup>
+            </div>
+          );
+        })()}
         {isFootball && !isLateGame && modalTab === "htft" && m && !m.htft && (
           <div className="text-center text-zinc-600 py-6 text-sm">Mercado não disponível para esta partida.</div>
         )}
