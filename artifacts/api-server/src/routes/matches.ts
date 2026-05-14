@@ -1458,6 +1458,10 @@ let dailyFetchedAt = 0;
 let dailyTomorrowCache: StatpalLeagueV2[] | null = null;
 let dailyTomorrowFetchedAt = 0;
 
+// v2/daily offsets 2–6 (days 3–7 ahead): cache 10min per slot
+const dailyFutureCache = new Map<number, { data: StatpalLeagueV2[]; fetchedAt: number }>();
+const DAILY_FUTURE_TTL = 10 * 60_000;
+
 // v1 odds: map from match numeric ID → real odds; cache 10min
 type RealOdds = { home: number; draw: number; away: number; types: OddsType[] };
 let oddsMap: Map<string, RealOdds> | null = null;
@@ -1812,6 +1816,26 @@ async function getTomorrowLeagues(): Promise<StatpalLeagueV2[]> {
     return dailyTomorrowCache;
   } catch {
     return dailyTomorrowCache ?? [];
+  }
+}
+
+// Fetch daily football leagues for offset N (days ahead, 2–6 = days 3–7 from today)
+async function getDailyLeaguesForFutureOffset(offset: number): Promise<StatpalLeagueV2[]> {
+  const now = Date.now();
+  const cached = dailyFutureCache.get(offset);
+  if (cached && now - cached.fetchedAt < DAILY_FUTURE_TTL) return cached.data;
+  try {
+    const resp = await fetch(`${BASE_V2}/soccer/matches/daily?offset=${offset}&access_key=${STATSPAL_KEY}`, {
+      signal: AbortSignal.timeout(9000),
+    });
+    if (!resp.ok) return cached?.data ?? [];
+    const raw = (await resp.json()) as Record<string, { league: StatpalLeagueV2[] }>;
+    const dayData = Object.values(raw)[0];
+    const data = dayData?.league ?? [];
+    dailyFutureCache.set(offset, { data, fetchedAt: now });
+    return data;
+  } catch {
+    return cached?.data ?? [];
   }
 }
 
@@ -3190,32 +3214,49 @@ async function buildLiveMatches(): Promise<LiveMatchState[]> {
 }
 
 async function buildUpcomingMatches(): Promise<UpcomingMatch[]> {
-  // Use getDailyLeagues (today's schedule) not getLiveLeagues (already in-progress matches)
-  const [todayLeagues, tomorrowLeagues, odds] = await Promise.all([
+  // Fetch all 7 days (today + 6 ahead) plus odds in parallel
+  const [day0, day1, day2, day3, day4, day5, day6, odds] = await Promise.all([
     getDailyLeagues().catch(() => [] as StatpalLeagueV2[]),
     getTomorrowLeagues().catch(() => [] as StatpalLeagueV2[]),
+    getDailyLeaguesForFutureOffset(2).catch(() => [] as StatpalLeagueV2[]),
+    getDailyLeaguesForFutureOffset(3).catch(() => [] as StatpalLeagueV2[]),
+    getDailyLeaguesForFutureOffset(4).catch(() => [] as StatpalLeagueV2[]),
+    getDailyLeaguesForFutureOffset(5).catch(() => [] as StatpalLeagueV2[]),
+    getDailyLeaguesForFutureOffset(6).catch(() => [] as StatpalLeagueV2[]),
     getOddsMap().catch(() => new Map<string, RealOdds>()),
   ]);
 
-  // Tag tomorrow matches so we can label them; merge into one pool
+  // Merge all days, tagged with their day offset so we sort day-first, then priority
+  type TaggedLeague = StatpalLeagueV2 & { _dayOffset: number };
   const seenIds = new Set<string>();
-  const allLeagues: (StatpalLeagueV2 & { isTomorrow?: boolean })[] = [
-    ...todayLeagues.map(l => ({ ...l })),
-    ...tomorrowLeagues.map(l => ({ ...l, isTomorrow: true })),
+  const allLeagues: TaggedLeague[] = [
+    ...day0.map(l => ({ ...l, _dayOffset: 0 })),
+    ...day1.map(l => ({ ...l, _dayOffset: 1 })),
+    ...day2.map(l => ({ ...l, _dayOffset: 2 })),
+    ...day3.map(l => ({ ...l, _dayOffset: 3 })),
+    ...day4.map(l => ({ ...l, _dayOffset: 4 })),
+    ...day5.map(l => ({ ...l, _dayOffset: 5 })),
+    ...day6.map(l => ({ ...l, _dayOffset: 6 })),
   ];
 
+  // Sort: day offset first (so today's games appear before tomorrow's etc.),
+  // then by league priority within each day
   const sorted = allLeagues
     .filter(l => leaguePriority(l.name, l.country) < 100)
-    .sort((a, b) => leaguePriority(a.name, a.country) - leaguePriority(b.name, b.country));
+    .sort((a, b) =>
+      a._dayOffset !== b._dayOffset
+        ? a._dayOffset - b._dayOffset
+        : leaguePriority(a.name, a.country) - leaguePriority(b.name, b.country)
+    );
 
   const results: UpcomingMatch[] = [];
 
   for (const league of sorted) {
-    if (results.length >= 40) break;
+    if (results.length >= 600) break;
     const matches: StatpalMatchV2[] = Array.isArray(league.match) ? league.match : [league.match];
 
     for (const m of matches) {
-      if (results.length >= 40) break;
+      if (results.length >= 600) break;
       if (!/^\d{2}:\d{2}$/.test(m.status)) continue;
       if (m.home.goals !== "?" || m.away.goals !== "?") continue;
       if (seenIds.has(m.main_id)) continue;
@@ -3228,11 +3269,7 @@ async function buildUpcomingMatches(): Promise<UpcomingMatch[]> {
 
       // Skip matches without real Statpal odds UNLESS the league is high-priority
       // (priority < 50 = Copa do Brasil, Liga Profesional, Copa Libertadores, etc.)
-      // — they are real competitions that should always be shown with simulated odds
-      const leaguePri = leaguePriority(
-        league.name ?? "",
-        league.country ?? ""
-      );
+      const leaguePri = leaguePriority(league.name ?? "", league.country ?? "");
       if (!real && leaguePri >= 50) continue;
 
       results.push({
@@ -3585,7 +3622,7 @@ async function buildBasketballUpcoming(): Promise<UpcomingMatch[]> {
       });
     }
 
-    return results.slice(0, 10);
+    return results.slice(0, 30);
   } catch {
     return [];
   }
@@ -3683,7 +3720,7 @@ async function buildHockeyUpcoming(): Promise<UpcomingMatch[]> {
       });
     }
 
-    return results.slice(0, 8);
+    return results.slice(0, 30);
   } catch {
     return [];
   }

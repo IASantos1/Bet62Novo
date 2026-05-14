@@ -6275,9 +6275,66 @@ export default function Home() {
                       <p className="font-medium">{selectedCountry ? `Nenhum evento para ${selectedCountry}.` : selectedLeague ? "Nenhum evento para esta liga." : "Nenhum evento programado no momento."}</p>
                     </div>
                   ) : (selectedLeague || selectedCountry) ? (
-                    <div className="space-y-2">
-                      {filteredUpcoming.map(match => <MatchCard key={match.id} match={match} />)}
-                    </div>
+                    (() => {
+                      // Helpers for date sorting and display
+                      const dateSortKey = (d?: string): string => {
+                        if (!d) return "9999-99-99";
+                        if (/^\d{2}\.\d{2}\.\d{4}$/.test(d)) {
+                          const [dd, mm, yyyy] = d.split(".");
+                          return `${yyyy}-${mm}-${dd}`;
+                        }
+                        return d;
+                      };
+                      const formatDateHeader = (d?: string): string => {
+                        if (!d) return "Data desconhecida";
+                        let date: Date;
+                        if (/^\d{2}\.\d{2}\.\d{4}$/.test(d)) {
+                          const [dd, mm, yyyy] = d.split(".");
+                          date = new Date(parseInt(yyyy!), parseInt(mm!) - 1, parseInt(dd!));
+                        } else if (/^\d{4}-\d{2}-\d{2}$/.test(d)) {
+                          date = new Date(d);
+                        } else return d;
+                        const today = new Date(); today.setHours(0, 0, 0, 0);
+                        const tomorrow = new Date(today); tomorrow.setDate(today.getDate() + 1);
+                        date.setHours(0, 0, 0, 0);
+                        if (date.getTime() === today.getTime()) return "Hoje";
+                        if (date.getTime() === tomorrow.getTime()) return "Amanhã";
+                        return date.toLocaleDateString("pt-PT", { weekday: "long", day: "2-digit", month: "short" });
+                      };
+                      // Sort by date then time
+                      const sorted = [...filteredUpcoming].sort((a, b) => {
+                        const dk = dateSortKey(a.date).localeCompare(dateSortKey(b.date));
+                        if (dk !== 0) return dk;
+                        return (a.time ?? "").localeCompare(b.time ?? "");
+                      });
+                      // Group by date
+                      const groups = new Map<string, typeof sorted>();
+                      for (const m of sorted) {
+                        const dk = m.date ?? "sem-data";
+                        if (!groups.has(dk)) groups.set(dk, []);
+                        groups.get(dk)!.push(m);
+                      }
+                      return (
+                        <div className="space-y-6">
+                          {Array.from(groups.entries()).map(([dk, matches]) => (
+                            <div key={dk}>
+                              <div className="flex items-center gap-3 mb-3">
+                                <span className="text-sm font-black uppercase tracking-wide text-zinc-400 capitalize">
+                                  {formatDateHeader(dk)}
+                                </span>
+                                <span className="text-[10px] font-bold bg-zinc-800 text-zinc-500 rounded px-1.5 py-0.5 tabular-nums">
+                                  {matches.length}
+                                </span>
+                                <div className="flex-1 h-px bg-zinc-800" />
+                              </div>
+                              <div className="space-y-2">
+                                {matches.map(match => <MatchCard key={match.id} match={match} />)}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      );
+                    })()
                   ) : (
                     <div className="space-y-6">
                       {sportGroups.map(group => (
