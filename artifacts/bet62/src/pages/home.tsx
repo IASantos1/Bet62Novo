@@ -1538,10 +1538,10 @@ export default function Home() {
     }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Periodic balance refresh every 60s for logged-in users (catches server-side credits)
+  // Periodic balance refresh every 20s for logged-in users (catches server-side credits)
   useEffect(() => {
     if (!auth.token) return;
-    const id = setInterval(() => { auth.refreshUser(); }, 60000);
+    const id = setInterval(() => { auth.refreshUser(); }, 20000);
     return () => clearInterval(id);
   }, [auth.token]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -1795,6 +1795,8 @@ export default function Home() {
               parseFloat(a.potentialWin) >= parseFloat(b.potentialWin) ? a : b
             );
             setWinAnim({ amount: parseFloat(biggest.potentialWin), title: biggest.matchTitle ?? "Aposta" });
+            // Immediately refresh balance so the credited winnings appear straight away
+            void auth.refreshUser();
           }
         }
         prevWonBetIds.current = currentWonIds;
@@ -1806,12 +1808,12 @@ export default function Home() {
     }
   }, [auth.token]);
 
-  // Auto-refresh bets every 30s when on mybets tab — silent (no spinner)
+  // Auto-refresh bets every 30s for any logged-in user — detects settlements on any tab
   useEffect(() => {
-    if (activeTab !== "mybets" || !auth.token) return;
+    if (!auth.token) return;
     const id = setInterval(() => fetchMyBets(true), 30000);
     return () => clearInterval(id);
-  }, [activeTab, auth.token, fetchMyBets]);
+  }, [auth.token, fetchMyBets]);
 
   // Auto-dismiss win animation after 5s
   useEffect(() => {
