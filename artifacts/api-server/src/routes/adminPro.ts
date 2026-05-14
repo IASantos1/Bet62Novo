@@ -1,4 +1,4 @@
-import { Router, type IRouter, type Response } from "express";
+import { Router, type IRouter, type Request, type Response } from "express";
 import { db, usersTable, betsTable, paymentsTable, adminAuditLogTable, platformSettingsTable, suspendedMatchesTable } from "@workspace/db";
 import { eq, desc, count, sum, sql, ne } from "drizzle-orm";
 import { adminMiddleware, type AdminRequest } from "../middlewares/adminAuth";
@@ -307,7 +307,11 @@ router.get("/audit", adminMiddleware, async (req: AdminRequest, res: Response): 
 // Tests our own internal API routes — these reflect what users actually see,
 // regardless of which Statpal plan/key is active (fallback/simulation included).
 router.get("/feed", adminMiddleware, async (_req: AdminRequest, res: Response): Promise<void> => {
-  const base = "http://localhost:" + (process.env.PORT ?? "8080");
+  const req = _req as unknown as Request;
+  const forwardedProto = String(req.headers["x-forwarded-proto"] ?? "").split(",")[0]?.trim();
+  const proto = forwardedProto || "https";
+  const host = String(req.headers["x-forwarded-host"] ?? req.headers.host ?? "").split(",")[0]?.trim();
+  const base = host ? `${proto}://${host}` : "";
   const endpoints = [
     { name: "Football — Próximos Jogos", url: `${base}/api/matches/upcoming` },
     { name: "Football — Ao Vivo",        url: `${base}/api/matches/live` },

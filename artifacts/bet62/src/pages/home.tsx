@@ -21,36 +21,49 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { useAuth } from "@/hooks/use-auth";
 
-import arsenalBanner from "@assets/file_1778342439847_1778342557288.jpeg";
-import manCityBanner from "@assets/file_1778342444770_1778342557288.jpeg";
-import manUnitedBanner from "@assets/file_1778342451290_1778342557288.jpeg";
-import liverpoolBanner from "@assets/file_1778342461540_1778342557288.jpeg";
-import astonVillaBanner from "@assets/file_1778342467588_1778342557288.jpeg";
-import bournemouthBanner from "@assets/file_1778342474208_1778342557288.jpeg";
-import brentfordBanner from "@assets/file_1778342479214_1778342557288.jpeg";
-import brightonBanner from "@assets/file_1778342485511_1778342557288.jpeg";
-import chelseaBanner from "@assets/file_1778342492556_1778342557288.jpeg";
-import evertonBanner from "@assets/file_1778342400663_1778342557288.jpeg";
-import realMadridBanner from "@assets/file_1778117934450_1778345179339.jpeg";
-import barcelonaBanner from "@assets/file_1778117940012_1778345179339.jpeg";
-import atleticoMadridBanner from "@assets/file_1778118038595_1778345179339.jpeg";
-import athleticClubBanner from "@assets/file_1778118048280_1778345179339.jpeg";
-import realSociedadBanner from "@assets/file_1778118054377_1778345179339.jpeg";
-import sevillaBanner from "@assets/file_1778118059955_1778345179339.jpeg";
-import valenciaBanner from "@assets/file_1778118068126_1778345179339.jpeg";
-import villarrealBanner from "@assets/file_1778118074042_1778345179339.jpeg";
-import realBetisBanner from "@assets/file_1778118081746_1778345179339.jpeg";
-import gironaBanner from "@assets/file_1778118089289_1778345179339.jpeg";
-import riverPlateBanner from "@assets/Create_a_photorealistic_169_football_banner_with_-177836112512_1778361261646.png";
-import bocaJuniorsBanner from "@assets/Create_a_photorealistic_169_football_banner_with_-177836113093_1778361261646.png";
-import racingClubBanner from "@assets/Create_a_photorealistic_169_football_banner_with_-177836113846_1778361261645.png";
-import independienteBanner from "@assets/Create_a_photorealistic_169_football_banner_with_-177836114382_1778361261639.png";
-import sanLorenzoBanner from "@assets/Create_a_photorealistic_169_football_banner_with_-177836115074_1778361261636.png";
-import velezBanner from "@assets/Create_a_photorealistic_169_football_banner_with_-177836115686_1778361261636.png";
-import estudiantesBanner from "@assets/Create_a_photorealistic_169_football_banner_with_-177836116232_1778361261635.png";
-import rosarioCentralBanner from "@assets/Create_a_photorealistic_169_football_banner_with_-177836116875_1778361261635.png";
-import talleresBanner from "@assets/Create_a_photorealistic_169_football_banner_with_-177836117521_1778361261634.png";
-import lanusBanner from "@assets/Create_a_photorealistic_169_football_banner_with_-177836119764_1778361261633.png";
+const PLACEHOLDER_BANNER = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(
+  `<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="720" viewBox="0 0 1280 720">
+    <defs>
+      <linearGradient id="g" x1="0" y1="0" x2="1" y2="0">
+        <stop stop-color="#0b1220"/>
+        <stop offset="1" stop-color="#111827"/>
+      </linearGradient>
+    </defs>
+    <rect width="1280" height="720" fill="url(#g)"/>
+    <text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" fill="#94a3b8" font-family="Arial, sans-serif" font-size="52">BET62</text>
+  </svg>`
+)}`;
+
+const arsenalBanner = PLACEHOLDER_BANNER;
+const manCityBanner = PLACEHOLDER_BANNER;
+const manUnitedBanner = PLACEHOLDER_BANNER;
+const liverpoolBanner = PLACEHOLDER_BANNER;
+const astonVillaBanner = PLACEHOLDER_BANNER;
+const bournemouthBanner = PLACEHOLDER_BANNER;
+const brentfordBanner = PLACEHOLDER_BANNER;
+const brightonBanner = PLACEHOLDER_BANNER;
+const chelseaBanner = PLACEHOLDER_BANNER;
+const evertonBanner = PLACEHOLDER_BANNER;
+const realMadridBanner = PLACEHOLDER_BANNER;
+const barcelonaBanner = PLACEHOLDER_BANNER;
+const atleticoMadridBanner = PLACEHOLDER_BANNER;
+const athleticClubBanner = PLACEHOLDER_BANNER;
+const realSociedadBanner = PLACEHOLDER_BANNER;
+const sevillaBanner = PLACEHOLDER_BANNER;
+const valenciaBanner = PLACEHOLDER_BANNER;
+const villarrealBanner = PLACEHOLDER_BANNER;
+const realBetisBanner = PLACEHOLDER_BANNER;
+const gironaBanner = PLACEHOLDER_BANNER;
+const riverPlateBanner = PLACEHOLDER_BANNER;
+const bocaJuniorsBanner = PLACEHOLDER_BANNER;
+const racingClubBanner = PLACEHOLDER_BANNER;
+const independienteBanner = PLACEHOLDER_BANNER;
+const sanLorenzoBanner = PLACEHOLDER_BANNER;
+const velezBanner = PLACEHOLDER_BANNER;
+const estudiantesBanner = PLACEHOLDER_BANNER;
+const rosarioCentralBanner = PLACEHOLDER_BANNER;
+const talleresBanner = PLACEHOLDER_BANNER;
+const lanusBanner = PLACEHOLDER_BANNER;
 
 const TEAM_BANNERS: Record<string, string> = {
   // ── Liga Portugal ──

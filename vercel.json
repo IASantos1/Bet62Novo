@@ -1,0 +1,11 @@
+{
+  "framework": "vite",
+  "installCommand": "npx -y pnpm@9.15.4 install",
+  "buildCommand": "npx -y pnpm@9.15.4 --filter @workspace/bet62 build",
+  "outputDirectory": "artifacts/bet62/dist",
+  "routes": [
+    { "handle": "filesystem" },
+    { "src": "/.*", "dest": "/index.html" }
+  ]
+}
+
