@@ -720,6 +720,8 @@ type AdvancedMarkets = {
   correctScore?: Record<string, number>;
   corners?: { o85: number; u85: number; o95: number; u95: number; o105: number; u105: number };
   cards?: { o35: number; u35: number; o45: number; u45: number };
+  // Second half result market (who wins just the 2nd half)
+  secondHalf?: { home: number; draw: number; away: number };
   // Football extra-time markets
   etExtra?: {
     tieWinner: { home: number; away: number };              // who advances from the knockout tie (no draw)
@@ -3315,11 +3317,13 @@ export default function Home() {
         {/* ── FUTEBOL: 2º TEMPO — shown at HT and during 2nd half ── */}
         {isFootball && show2tempo && (modalTab === "2tempo" || modalTab === "todos") && (
           <div>
-            <MarketGroup title="Resultado — 2º Tempo">
-              <MarketOddsBtn match={match} sel="2h-home" odd={match.odds.home} market="2tempo" label={match.home} />
-              {match.odds.draw > 0 && <MarketOddsBtn match={match} sel="2h-draw" odd={match.odds.draw} market="2tempo" label="Empate" />}
-              <MarketOddsBtn match={match} sel="2h-away" odd={match.odds.away} market="2tempo" label={match.away} />
-            </MarketGroup>
+            {m?.secondHalf && m.secondHalf.home > 0 && (
+              <MarketGroup title="Resultado — 2º Tempo">
+                <MarketOddsBtn match={match} sel="2h-home" odd={m.secondHalf.home} market="2tempo" label={match.home} />
+                {m.secondHalf.draw > 0 && <MarketOddsBtn match={match} sel="2h-draw" odd={m.secondHalf.draw} market="2tempo" label="Empate" />}
+                <MarketOddsBtn match={match} sel="2h-away" odd={m.secondHalf.away} market="2tempo" label={match.away} />
+              </MarketGroup>
+            )}
             {m && m.totalGoals.over05 > 0 && (
               <MarketGroup title="Golos no 2º Tempo — 0.5">
                 <MarketOddsBtn match={match} sel="2h-o05g" odd={m.totalGoals.over05} market="2tempo" label="Mais de 0.5" />

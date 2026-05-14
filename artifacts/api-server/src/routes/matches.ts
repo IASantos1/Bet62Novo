@@ -80,6 +80,8 @@ type AdvancedMarkets = {
     pointsLines: Array<{ line: number; over: number; under: number }>;
     handicapPoints: { line: number; home: number; away: number };
   };
+  // Second half result (who wins just the 2nd half period)
+  secondHalf?: { home: number; draw: number; away: number };
   // Football extra-time markets (shown when match is in ET, minute > 90)
   etExtra?: {
     tieWinner: { home: number; away: number };              // who advances from the knockout tie (no draw)
@@ -1035,6 +1037,20 @@ function makeAdvancedMarketsFromTeams(homeName: string, awayName: string): Advan
   const htftTotal = htftProbs.reduce((a, b) => a + b, 0);
   const htftOdds = probsToDecimalOdds(htftProbs.map(p => mc(p / Math.max(1e-9, htftTotal), 0.005, 0.80)), 1.12);
 
+  // Second Half Result — marginalise over 2nd-half Poisson distributions (h2PH / h2PA)
+  let sh2H = 0, sh2X = 0, sh2A = 0;
+  for (let i = 0; i <= 7; i++) {
+    for (let j = 0; j <= 7; j++) {
+      const p = (h2PH[i] ?? 0) * (h2PA[j] ?? 0);
+      if (i > j) sh2H += p;
+      else if (i === j) sh2X += p;
+      else sh2A += p;
+    }
+  }
+  const [sh2OddsH, sh2OddsX, sh2OddsA] = probsToDecimalOdds(
+    [mc(sh2H, 0.02, 0.96), mc(sh2X, 0.02, 0.96), mc(sh2A, 0.02, 0.96)], 1.08
+  );
+
   // Correct Score — top 14 scorelines + Other
   const scores: Array<[string, number]> = [];
   let pOther = 0;
@@ -1073,6 +1089,7 @@ function makeAdvancedMarketsFromTeams(homeName: string, awayName: string): Advan
     totalGoals: { over05: o05!, under05: u05!, over15: o15!, under15: u15!, over25: o25!, under25: u25!, over35: o35!, under35: u35!, over45: o45!, under45: u45!, over55: o55!, under55: u55!, over65: o65!, under65: u65! },
     handicap: { homeMinusOne: hm1H!, awayPlusOne: hm1A!, homeMinusOneHalf: hm15H!, awayPlusOneHalf: hm15A! },
     halfTime: { home: htH!, draw: htX!, away: htA! },
+    secondHalf: { home: sh2OddsH!, draw: sh2OddsX!, away: sh2OddsA! },
     firstGoal: { home: fgH!, noGoal: fgNG!, away: fgA! },
     drawNoBet: { home: dnbH!, away: dnbA! },
     asianHandicap: { line: ahLine, home: ahH!, away: ahA! },
@@ -2117,6 +2134,10 @@ function applyTieredMarketDrift(state: LiveMatchState, now: number): LiveMatchSt
     halfTime: htDue && bm.halfTime
       ? { home: s2(bm.halfTime.home), draw: s2(bm.halfTime.draw), away: s2(bm.halfTime.away) }
       : state.markets.halfTime,
+
+    secondHalf: htDue && bm.secondHalf
+      ? { home: s2(bm.secondHalf.home), draw: s2(bm.secondHalf.draw), away: s2(bm.secondHalf.away) }
+      : state.markets.secondHalf,
 
     firstGoal: fgDue
       ? (state.markets.firstGoal && state.markets.firstGoal.home > 0
