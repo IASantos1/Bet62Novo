@@ -2268,12 +2268,23 @@ function applyTieredMarketDrift(state: LiveMatchState, now: number): LiveMatchSt
       o275: s1(bm.asianTotals.o275), u275: s1(bm.asianTotals.u275),
     } : state.markets.asianTotals,
 
-    halfTime: htDue && bm.halfTime
-      ? { home: s2(bm.halfTime.home), draw: s2(bm.halfTime.draw), away: s2(bm.halfTime.away) }
+    halfTime: htDue
+      ? recalcLiveHalfTime(
+          state.home, state.away,
+          state.homeScore ?? 0, state.awayScore ?? 0,
+          state.minute ?? 0, state.status,
+          state.markets.halfTime
+        )
       : state.markets.halfTime,
 
-    secondHalf: htDue && bm.secondHalf
-      ? { home: s2(bm.secondHalf.home), draw: s2(bm.secondHalf.draw), away: s2(bm.secondHalf.away) }
+    secondHalf: htDue
+      ? recalcLiveSecondHalf(
+          state.home, state.away,
+          state.homeScore ?? 0, state.awayScore ?? 0,
+          (state._liveExtra?.htScore ?? null) as [number, number] | null,
+          state.minute ?? 0, state.status,
+          state.markets.secondHalf
+        )
       : state.markets.secondHalf,
 
     firstGoal: fgDue
@@ -2354,6 +2365,118 @@ function recalcLiveTotalGoals(
     over55: o55, under55: u55,
     over65: o65, under65: u65,
   };
+}
+
+/**
+ * Recalculate the "Resultado 1º Tempo" market live.
+ * Remaining first-half goals are Poisson(λ * remainingMins/90).
+ * Score added to current 1st-half score to get final 1st-half outcome.
+ */
+function recalcLiveHalfTime(
+  home: string,
+  away: string,
+  homeScore: number,
+  awayScore: number,
+  minute: number,
+  status: string,
+  current: AdvancedMarkets["halfTime"]
+): AdvancedMarkets["halfTime"] {
+  if (!current) return current;
+  const isHT = status === "HT";
+  const inSecondHalf = !isHT && minute > 45;
+
+  // After HT, 1st half result is settled — show winner at near-certain odds, losers at 0
+  if (isHT || inSecondHalf) {
+    if (homeScore > awayScore) return { home: 1.01, draw: 0, away: 0 };
+    if (awayScore > homeScore) return { home: 0, draw: 0, away: 1.01 };
+    return { home: 0, draw: 1.01, away: 0 };
+  }
+
+  // 1st half in progress: remaining minutes until whistle
+  const remainingMins = Math.max(1, 45 - Math.min(45, minute));
+  const { lambdaHome, lambdaAway } = soccerPoissonModel(home, away);
+  const lambdaRemH = lambdaHome * (remainingMins / 90);
+  const lambdaRemA = lambdaAway * (remainingMins / 90);
+
+  const maxAdd = 6;
+  const pAddH = poissonPmf(lambdaRemH, maxAdd);
+  const pAddA = poissonPmf(lambdaRemA, maxAdd);
+
+  let pH = 0, pD = 0, pA = 0;
+  for (let addH = 0; addH <= maxAdd; addH++) {
+    for (let addA = 0; addA <= maxAdd; addA++) {
+      const p = (pAddH[addH] ?? 0) * (pAddA[addA] ?? 0);
+      const finalH = homeScore + addH;
+      const finalA = awayScore + addA;
+      if (finalH > finalA) pH += p;
+      else if (finalH === finalA) pD += p;
+      else pA += p;
+    }
+  }
+  const total = pH + pD + pA;
+  if (total < 1e-9) return current;
+  const [h, d, a] = probsToDecimalOdds(
+    [mc(pH / total, 0.01, 0.99), mc(pD / total, 0.01, 0.99), mc(pA / total, 0.01, 0.99)],
+    1.08
+  );
+  return { home: h!, draw: d!, away: a! };
+}
+
+/**
+ * Recalculate the "Resultado 2º Tempo" market live.
+ * Uses the 2nd-half partial score (total − HT score) + remaining Poisson goals.
+ * During 1st half / HT, the base pre-match odds are returned unchanged.
+ */
+function recalcLiveSecondHalf(
+  home: string,
+  away: string,
+  homeScoreTotal: number,
+  awayScoreTotal: number,
+  htScore: [number, number] | null,
+  minute: number,
+  status: string,
+  current: AdvancedMarkets["secondHalf"]
+): AdvancedMarkets["secondHalf"] {
+  if (!current) return current;
+  const isHT = status === "HT";
+  const inFirstHalf = !isHT && minute <= 45;
+
+  // 2nd half not yet started → keep pre-match distribution unchanged
+  if (inFirstHalf || isHT) return current;
+
+  // 2nd-half score = total match score minus half-time score
+  const htH = htScore ? htScore[0] : 0;
+  const htA = htScore ? htScore[1] : 0;
+  const h2H = Math.max(0, homeScoreTotal - htH);
+  const h2A = Math.max(0, awayScoreTotal - htA);
+
+  const remainingMins = Math.max(1, 90 - Math.min(90, minute));
+  const { lambdaHome, lambdaAway } = soccerPoissonModel(home, away);
+  const lambdaRemH = lambdaHome * (remainingMins / 90);
+  const lambdaRemA = lambdaAway * (remainingMins / 90);
+
+  const maxAdd = 6;
+  const pAddH = poissonPmf(lambdaRemH, maxAdd);
+  const pAddA = poissonPmf(lambdaRemA, maxAdd);
+
+  let pH = 0, pD = 0, pA = 0;
+  for (let addH = 0; addH <= maxAdd; addH++) {
+    for (let addA = 0; addA <= maxAdd; addA++) {
+      const p = (pAddH[addH] ?? 0) * (pAddA[addA] ?? 0);
+      const finalH = h2H + addH;
+      const finalA = h2A + addA;
+      if (finalH > finalA) pH += p;
+      else if (finalH === finalA) pD += p;
+      else pA += p;
+    }
+  }
+  const total = pH + pD + pA;
+  if (total < 1e-9) return current;
+  const [h, d, a] = probsToDecimalOdds(
+    [mc(pH / total, 0.01, 0.99), mc(pD / total, 0.01, 0.99), mc(pA / total, 0.01, 0.99)],
+    1.08
+  );
+  return { home: h!, draw: d!, away: a! };
 }
 
 // Remove/zero out market lines that are already settled or impossible given the current live score
@@ -3207,6 +3330,34 @@ async function buildLiveMatches(): Promise<LiveMatchState[]> {
             matchMarkets.totalGoals
           ),
         };
+
+        // Recalculate halfTime / secondHalf immediately on score change (Poisson-based)
+        {
+          const htScoreNow: [number, number] | null = m.ht
+            ? [m.ht.home_goals, m.ht.away_goals]
+            : null;
+          if (matchMarkets.halfTime) {
+            matchMarkets = {
+              ...matchMarkets,
+              halfTime: recalcLiveHalfTime(
+                m.home.name, m.away.name,
+                homeScore, awayScore, minute, m.status,
+                matchMarkets.halfTime
+              ),
+            };
+          }
+          if (matchMarkets.secondHalf) {
+            matchMarkets = {
+              ...matchMarkets,
+              secondHalf: recalcLiveSecondHalf(
+                m.home.name, m.away.name,
+                homeScore, awayScore, htScoreNow,
+                minute, m.status,
+                matchMarkets.secondHalf
+              ),
+            };
+          }
+        }
 
         // Recalculate Double Chance and Draw No Bet from the ACTUAL live 1X2 odds.
         // The base model computes these from internal ELO probs which diverge from the
