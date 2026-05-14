@@ -285,10 +285,15 @@ const DOMESTIC_PRIORITY: Array<[string, number]> = [
   ["brazil: serie b",                       15],
   ["brazil: brasileirão série b",           15],
   ["brazil: brasileirao serie b",           15],
+  ["brazil: betano - série b",             15],   // Statpal with Betano sponsor
+  ["brazil: betano - serie b",             15],
   ["brazil: série a",                        6],
   ["brazil: serie a",                        6],
   ["brazil: brasileirão série a",            6],
   ["brazil: brasileirao serie a",            6],
+  ["brazil: betano - série a",              6],   // Statpal with Betano sponsor
+  ["brazil: betano - serie a",              6],
+  ["brazil: betano",                         6],   // fallback for any "brazil: betano …" variant
   ["brazil: brasileiro",                     6],   // catch-all for other Brasileirão variants
   ["argentina: liga profesional",            7],
   ["argentina: primera división",            7],
@@ -514,6 +519,70 @@ function leaguePriority(name: string, country?: string): number {
 
   // Unknown league → filter out
   return 999;
+}
+
+// ─── League name normalisation ─────────────────────────────────────────────────
+// Strips sponsor/betting-company names and maps to canonical display names.
+// Statpal format: "Country: [Sponsor - ]LeagueName"
+
+// Sponsor words that must be removed globally (case-insensitive)
+const SPONSOR_STRIP_RE = /\b(betano|betcris|bet365|sportingbet|sportbet|betnacional|betul|bmóvel|bmovel|brb|neoenergia|binance|ebetul|betsson|pinnacle)\b/gi;
+
+// Canonical display names (matched against "country: rawname" in lower-case)
+// More-specific entries first.
+const CANONICAL_LEAGUES: Array<[RegExp, string]> = [
+  // ── Brazil ──────────────────────────────────────────────────────────────────
+  [/brazil:.*s[eé]rie\s*b|brazil:.*brasileir[aã]o.*s[eé]rie\s*b/i,     "Brasileirão Série B"],
+  [/brazil:.*s[eé]rie\s*a|brazil:.*brasileir[aã]o|brazil:.*betano/i,    "Brasileirão"],
+  [/brazil:.*copa\s*do\s*brasil/i,                                        "Copa do Brasil"],
+  [/brazil:.*supercopa/i,                                                 "Supercopa do Brasil"],
+  [/brazil:.*paulist/i,                                                   "Paulistão"],
+  [/brazil:.*carioca/i,                                                   "Carioca"],
+  [/brazil:.*mineiro/i,                                                   "Campeonato Mineiro"],
+  [/brazil:.*ga[uú]cho/i,                                                 "Gauchão"],
+  // ── Ecuador ─────────────────────────────────────────────────────────────────
+  [/ecuador:.*liga\s*(pro|betcris)/i,                                     "Liga Pro"],
+  // ── Colombia ────────────────────────────────────────────────────────────────
+  [/colombia:.*categor[ií]a\s*primera\s*a|colombia:.*primera\s*a/i,      "Categoría Primera A"],
+  // ── Portugal ────────────────────────────────────────────────────────────────
+  [/portugal:.*liga\s*portugal\s*2|portugal:.*segunda\s*liga/i,           "Liga Portugal 2"],
+  [/portugal:.*liga\s*portugal|portugal:.*primeira\s*liga|portugal:.*liga\s*bwin/i, "Liga Portugal"],
+  [/portugal:.*ta[cç]a\s*de\s*portugal/i,                                "Taça de Portugal"],
+  [/portugal:.*supertar[cç]a|portugal:.*supertaca/i,                     "Supertaça"],
+];
+
+/**
+ * Returns a clean display name for a football league, stripping sponsor names
+ * and mapping to canonical names where known.
+ * `rawName` is the Statpal league name (format: "Country: [Sponsor - ]LeagueName").
+ */
+function normalizeLeagueName(rawName: string, country?: string): string {
+  const combined = rawName.toLowerCase();
+
+  // 1. Try canonical map first (country-prefixed match)
+  for (const [pattern, canonical] of CANONICAL_LEAGUES) {
+    if (pattern.test(combined)) return canonical;
+  }
+
+  // 2. Strip "Country: " prefix from display name
+  let clean = rawName;
+  const colonIdx = rawName.indexOf(": ");
+  if (colonIdx !== -1 && country && rawName.slice(0, colonIdx).toLowerCase() === country.toLowerCase()) {
+    clean = rawName.slice(colonIdx + 2);
+  }
+
+  // 3. Remove sponsor words
+  clean = clean.replace(SPONSOR_STRIP_RE, "");
+
+  // 4. Clean up dash/whitespace artifacts left by removal
+  clean = clean
+    .replace(/\s*-\s*-+\s*/g, " ")   // "- - " → " "
+    .replace(/^\s*[-–]\s*/, "")       // leading " - "
+    .replace(/\s*[-–]\s*$/, "")       // trailing " - "
+    .replace(/\s{2,}/g, " ")
+    .trim();
+
+  return clean || rawName;
 }
 
 // ─── Basketball league priority ────────────────────────────────────────────────
@@ -3180,7 +3249,7 @@ async function buildLiveMatches(): Promise<LiveMatchState[]> {
         id: m.main_id,
         home: m.home.name,
         away: m.away.name,
-        league: league.name,
+        league: normalizeLeagueName(league.name, league.country),
         country: league.country,
         sport: "football",
         homeScore,
@@ -3276,7 +3345,7 @@ async function buildUpcomingMatches(): Promise<UpcomingMatch[]> {
         id: m.main_id,
         home: m.home.name,
         away: m.away.name,
-        league: league.name,
+        league: normalizeLeagueName(league.name, league.country),
         country: league.country,
         time: addOneHour(m.status),
         date: m.date,
