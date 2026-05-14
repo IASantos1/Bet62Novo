@@ -1955,7 +1955,7 @@ export default function Home() {
 
     const isObviousResult = match.isLive && market === "result" && (() => {
       if (odd <= 1.05) return true;
-      const min = match.minute ?? 0;
+      const min = getDisplayMinute(match);
       const diff = Math.abs((match.homeScore ?? 0) - (match.awayScore ?? 0));
       if (min >= 80 && diff >= 2) return true;
       if (min >= 85 && diff >= 1) return true;
@@ -2261,7 +2261,7 @@ export default function Home() {
     const isObviousLiveResult = match.isLive && (match.sport === "football" || !match.sport) && (() => {
       const minOdd = Math.min(match.odds.home, match.odds.away);
       if (minOdd <= 1.05) return true;
-      const min = match.minute ?? 0;
+      const min = getDisplayMinute(match);
       const diff = Math.abs((match.homeScore ?? 0) - (match.awayScore ?? 0));
       if (min >= 80 && diff >= 2) return true;
       if (min >= 85 && diff >= 1) return true;
@@ -3054,7 +3054,7 @@ export default function Home() {
           const hideResult = match.isLive && isFootball && (() => {
             const minOdd = Math.min(match.odds.home, match.odds.away);
             if (minOdd <= 1.05) return true;
-            const min = match.minute ?? 0;
+            const min = getDisplayMinute(match);
             const diff = Math.abs((match.homeScore ?? 0) - (match.awayScore ?? 0));
             if (min >= 80 && diff >= 2) return true;
             if (min >= 85 && diff >= 1) return true;
