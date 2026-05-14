@@ -3628,7 +3628,21 @@ async function buildTennisUpcoming(): Promise<UpcomingMatch[]> {
       }
     }
 
-    return results.slice(0, 25);
+    // Sort by date (DD.MM.YYYY → YYYY-MM-DD for lexicographic sort) then time
+    const dateSortKey = (d?: string): string => {
+      if (!d) return "9999-99-99";
+      if (/^\d{2}\.\d{2}\.\d{4}$/.test(d)) {
+        const [dd, mm, yyyy] = d.split(".");
+        return `${yyyy}-${mm}-${dd}`;
+      }
+      return d;
+    };
+    results.sort((a, b) => {
+      const dk = dateSortKey(a.date).localeCompare(dateSortKey(b.date));
+      return dk !== 0 ? dk : (a.time ?? "").localeCompare(b.time ?? "");
+    });
+
+    return results.slice(0, 300);
   } catch {
     return [];
   }
