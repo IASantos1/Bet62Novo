@@ -82,9 +82,10 @@ type AdvancedMarkets = {
   };
   // Football extra-time markets (shown when match is in ET, minute > 90)
   etExtra?: {
-    result: { home: number; draw: number; away: number };
+    tieWinner: { home: number; away: number };              // who advances from the knockout tie (no draw)
+    etResult: { home: number; draw: number; away: number }; // ET period result (draw means → penalties)
     totalGoals: { o05: number; u05: number; o15: number; u15: number; o25: number; u25: number };
-    bothTeamsScore: { yes: number; no: number };
+    nextGoal: { home: number; away: number };               // which team scores next in ET
   };
   // Football penalty-shootout markets (shown when m.penalties exists during live)
   penExtra?: {
@@ -2753,18 +2754,43 @@ function buildVolleyballLiveMatches(tournaments: VolleyTournament[]): LiveMatchS
 
 // ─── ET / Penalty market helpers ────────────────────────────────────────────────
 
-function makeETMarketsFromScore(etHome: number, etAway: number): NonNullable<AdvancedMarkets["etExtra"]> {
+function makeETMarketsFromScore(
+  etHome: number, etAway: number,
+  totalHome: number, totalAway: number,
+): NonNullable<AdvancedMarkets["etExtra"]> {
   const marg = 0.07;
   const price = (p: number) => mr(mc(1 / Math.max(0.01, p) * (1 + marg), 1.01, 200));
 
-  const diff = etHome - etAway;
+  // ET period result (1X2 — draw in ET means match goes to penalties)
+  const etDiff = etHome - etAway;
   let pH: number, pD: number, pA: number;
-  if (diff === 0)       { pH = 0.37; pD = 0.28; pA = 0.35; }
-  else if (diff === 1)  { pH = 0.72; pD = 0.18; pA = 0.10; }
-  else if (diff === -1) { pH = 0.10; pD = 0.18; pA = 0.72; }
-  else if (diff >= 2)   { pH = 0.92; pD = 0.05; pA = 0.03; }
-  else                  { pH = 0.03; pD = 0.05; pA = 0.92; }
+  if (etDiff === 0)       { pH = 0.37; pD = 0.28; pA = 0.35; }
+  else if (etDiff === 1)  { pH = 0.72; pD = 0.18; pA = 0.10; }
+  else if (etDiff === -1) { pH = 0.10; pD = 0.18; pA = 0.72; }
+  else if (etDiff >= 2)   { pH = 0.92; pD = 0.05; pA = 0.03; }
+  else                    { pH = 0.03; pD = 0.05; pA = 0.92; }
 
+  // Tie winner — who advances from the knockout (penalty shootout is 50/50 if ET ends level)
+  const totalDiff = totalHome - totalAway;
+  let pTH: number, pTA: number;
+  if (totalDiff >= 3)       { pTH = 0.98; pTA = 0.02; }
+  else if (totalDiff === 2) { pTH = 0.95; pTA = 0.05; }
+  else if (totalDiff === 1) { pTH = pH + pD * 0.5; pTA = pA + pD * 0.5; }
+  else if (totalDiff === 0) { pTH = pH + pD * 0.5; pTA = pA + pD * 0.5; }
+  else if (totalDiff === -1){ pTH = pA + pD * 0.5; pTA = pH + pD * 0.5; }
+  else if (totalDiff === -2){ pTH = 0.05; pTA = 0.95; }
+  else                      { pTH = 0.02; pTA = 0.98; }
+  // Normalise
+  const tSum = pTH + pTA;
+  pTH /= tSum; pTA /= tSum;
+
+  // Next goal scorer — trailing team is more desperate, slight advantage
+  let pNG_H: number, pNG_A: number;
+  if (totalDiff > 0)       { pNG_H = 0.45; pNG_A = 0.55; } // away trailing → more desperate
+  else if (totalDiff < 0)  { pNG_H = 0.55; pNG_A = 0.45; } // home trailing → more desperate
+  else                     { pNG_H = 0.50; pNG_A = 0.50; }
+
+  // Total goals (Poisson model for remaining ET time)
   const totalGoalsET = etHome + etAway;
   const λ = Math.max(0.05, 0.65 - totalGoalsET * 0.22);
   const p0 = Math.exp(-λ);
@@ -2774,19 +2800,15 @@ function makeETMarketsFromScore(etHome: number, etAway: number): NonNullable<Adv
   const pO15 = Math.max(0.01, 1 - p0 - p1);
   const pO25 = Math.max(0.005, 1 - p0 - p1 - p2);
 
-  let pBts: number;
-  if (etHome >= 1 && etAway >= 1) pBts = 0.98;
-  else if (totalGoalsET === 0) pBts = 0.14;
-  else pBts = 0.26;
-
   return {
-    result: { home: price(pH), draw: price(pD), away: price(pA) },
+    tieWinner: { home: price(pTH), away: price(pTA) },
+    etResult:  { home: price(pH), draw: price(pD), away: price(pA) },
     totalGoals: {
       o05: price(pO05),  u05: price(1 - pO05),
       o15: price(pO15),  u15: price(1 - pO15),
       o25: price(pO25),  u25: price(1 - pO25),
     },
-    bothTeamsScore: { yes: price(pBts), no: price(1 - pBts) },
+    nextGoal: { home: price(pNG_H), away: price(pNG_A) },
   };
 }
 
@@ -2938,14 +2960,14 @@ async function buildLiveMatches(): Promise<LiveMatchState[]> {
           _firstSeenAt: firstSeenAt,
           _htStartedAt: isHT ? htStartedAt : undefined,
         };
-        // Inject ET/pen markets if match has just entered extra time / penalties
+        // Inject ET/pen markets if match is in extra time / penalties (always refresh in ET)
         {
           const inETU = isET || minute > 90;
           let mkt = updatedState.markets;
-          if (inETU && !mkt.etExtra) {
-            const etH = (m.et && m.et.home_goals) ? m.et.home_goals : 0;
-            const etA = (m.et && m.et.away_goals) ? m.et.away_goals : 0;
-            mkt = { ...mkt, etExtra: makeETMarketsFromScore(etH, etA) };
+          if (inETU) {
+            const etH = (m.et && m.et.home_goals != null) ? m.et.home_goals : 0;
+            const etA = (m.et && m.et.away_goals != null) ? m.et.away_goals : 0;
+            mkt = { ...mkt, etExtra: makeETMarketsFromScore(etH, etA, homeScore, awayScore) };
           }
           if (m.penalties && !mkt.penExtra) {
             mkt = { ...mkt, penExtra: makePenMarketsFromScore(m.penalties.home_pen, m.penalties.away_pen) };
@@ -3081,7 +3103,7 @@ async function buildLiveMatches(): Promise<LiveMatchState[]> {
       if (isET || minute > 90) {
         const etH = (m.et && m.et.home_goals != null) ? m.et.home_goals : 0;
         const etA = (m.et && m.et.away_goals != null) ? m.et.away_goals : 0;
-        matchMarkets = { ...matchMarkets, etExtra: makeETMarketsFromScore(etH, etA) };
+        matchMarkets = { ...matchMarkets, etExtra: makeETMarketsFromScore(etH, etA, homeScore, awayScore) };
       }
       // Inject penalty markets when shootout is underway
       if (m.penalties) {

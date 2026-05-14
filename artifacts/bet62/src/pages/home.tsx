@@ -722,9 +722,10 @@ type AdvancedMarkets = {
   cards?: { o35: number; u35: number; o45: number; u45: number };
   // Football extra-time markets
   etExtra?: {
-    result: { home: number; draw: number; away: number };
+    tieWinner: { home: number; away: number };              // who advances from the knockout tie (no draw)
+    etResult: { home: number; draw: number; away: number }; // ET period result (draw → penalties)
     totalGoals: { o05: number; u05: number; o15: number; u15: number; o25: number; u25: number };
-    bothTeamsScore: { yes: number; no: number };
+    nextGoal: { home: number; away: number };               // which team scores next in ET
   };
   // Football penalty-shootout markets
   penExtra?: {
@@ -1396,11 +1397,14 @@ export default function Home() {
   const getDisplayMinute = (match: Match): number => {
     const apiMin = apiMinutesRef.current[String(match.id)] ?? match.minute ?? 0;
     const fetchedAt = liveDataFetchedAt.current;
-    if (fetchedAt === 0 || apiMin === 45 || apiMin === 90) return apiMin;
+    if (fetchedAt === 0 || apiMin === 45 || apiMin === 90 || apiMin === 105) return apiMin;
     const elapsed = Math.floor((Date.now() - fetchedAt) / 60000);
     const computed = apiMin + elapsed;
     if (apiMin < 45) return Math.min(45, computed);
-    return Math.min(90, computed);
+    if (apiMin < 90) return Math.min(90, computed);
+    // Extra time: first half caps at 105, second half at 120
+    if (apiMin <= 105) return Math.min(105, computed);
+    return Math.min(120, computed);
   };
 
   // Sync expandedMatch with live data silently (score/odds update without closing panel)
@@ -1949,7 +1953,15 @@ export default function Home() {
       );
     }
 
-    if (match.isLive && market === "result" && odd <= 1.01) {
+    const isObviousResult = match.isLive && market === "result" && (() => {
+      if (odd <= 1.05) return true;
+      const min = match.minute ?? 0;
+      const diff = Math.abs((match.homeScore ?? 0) - (match.awayScore ?? 0));
+      if (min >= 80 && diff >= 2) return true;
+      if (min >= 85 && diff >= 1) return true;
+      return false;
+    })();
+    if (isObviousResult) {
       return (
         <div className={`relative flex flex-col items-center py-2.5 px-2 rounded-md text-xs ${grow ? "flex-1" : ""} bg-amber-900/20 border border-amber-600/30`}>
           <span className="mb-0.5 text-[10px] leading-tight opacity-50">{label}</span>
@@ -2042,7 +2054,10 @@ export default function Home() {
       if (sport === "tennis"     && match.status) return match.status;
       if (sport === "volleyball" && match.status) return match.status;
 
-      return minute === 45 ? "HT" : minute === 105 ? "ET" : `${minute}'`;
+      if (minute === 45) return "HT";
+      if (minute === 105) return "Int.P";
+      if (minute > 90) return `${minute > 105 ? "2P" : "1P"} ${minute}'`;
+      return `${minute}'`;
     })();
 
     // "Em Breve" — upcoming real match, not yet started
@@ -2243,14 +2258,33 @@ export default function Home() {
       ? { layout: true as const, initial: { opacity: 0, y: 10 }, animate: { opacity: 1, y: 0 } }
       : { layout: true as const };
 
+    const isObviousLiveResult = match.isLive && (match.sport === "football" || !match.sport) && (() => {
+      const minOdd = Math.min(match.odds.home, match.odds.away);
+      if (minOdd <= 1.05) return true;
+      const min = match.minute ?? 0;
+      const diff = Math.abs((match.homeScore ?? 0) - (match.awayScore ?? 0));
+      if (min >= 80 && diff >= 2) return true;
+      if (min >= 85 && diff >= 1) return true;
+      return false;
+    })();
+
     const oddsRow = match.hasRealOdds ? (
       <div className="flex gap-2 w-full mt-2.5">
         <SuspensionBanner match={match} />
-        {!match.marketSuspension || !Object.values(match.marketSuspension).some(ts => ts > Date.now()) ? (<>
-          <OddsButton match={match} selection="home" odd={match.odds.home} market="result" label="Casa" grow />
-          {match.odds.draw > 0 && <OddsButton match={match} selection="draw" odd={match.odds.draw} market="result" label="Emp." grow />}
-          <OddsButton match={match} selection="away" odd={match.odds.away} market="result" label="Fora" grow />
-        </>) : null}
+        {!match.marketSuspension || !Object.values(match.marketSuspension).some(ts => ts > Date.now()) ? (
+          isObviousLiveResult ? (
+            <button
+              className="flex-1 flex flex-col items-center py-2.5 px-2 rounded-md text-xs bg-amber-900/20 border border-amber-600/30"
+              onClick={() => setExpandedMatch(match)}
+            >
+              <span className="font-bold text-[11px] text-amber-400 uppercase tracking-wider">Aposta Já</span>
+            </button>
+          ) : (<>
+            <OddsButton match={match} selection="home" odd={match.odds.home} market="result" label="Casa" grow />
+            {match.odds.draw > 0 && <OddsButton match={match} selection="draw" odd={match.odds.draw} market="result" label="Emp." grow />}
+            <OddsButton match={match} selection="away" odd={match.odds.away} market="result" label="Fora" grow />
+          </>)
+        ) : null}
       </div>
     ) : null;
 
@@ -2284,11 +2318,20 @@ export default function Home() {
             {match.hasRealOdds && (
               <div className="flex gap-2 w-full">
                 <SuspensionBanner match={match} />
-                {!match.marketSuspension || !Object.values(match.marketSuspension).some(ts => ts > Date.now()) ? (<>
-                  <OddsButton match={match} selection="home" odd={match.odds.home} market="result" label="Casa" grow />
-                  {match.odds.draw > 0 && <OddsButton match={match} selection="draw" odd={match.odds.draw} market="result" label="Emp." grow />}
-                  <OddsButton match={match} selection="away" odd={match.odds.away} market="result" label="Fora" grow />
-                </>) : null}
+                {!match.marketSuspension || !Object.values(match.marketSuspension).some(ts => ts > Date.now()) ? (
+                  isObviousLiveResult ? (
+                    <button
+                      className="flex-1 flex flex-col items-center py-2.5 px-2 rounded-md text-xs bg-amber-900/20 border border-amber-600/30"
+                      onClick={() => setExpandedMatch(match)}
+                    >
+                      <span className="font-bold text-[11px] text-amber-400 uppercase tracking-wider">Aposta Já</span>
+                    </button>
+                  ) : (<>
+                    <OddsButton match={match} selection="home" odd={match.odds.home} market="result" label="Casa" grow />
+                    {match.odds.draw > 0 && <OddsButton match={match} selection="draw" odd={match.odds.draw} market="result" label="Emp." grow />}
+                    <OddsButton match={match} selection="away" odd={match.odds.away} market="result" label="Fora" grow />
+                  </>)
+                ) : null}
               </div>
             )}
           </div>
@@ -2959,10 +3002,9 @@ export default function Home() {
             <div className="flex items-center gap-2 mb-3 px-1">
               <span className="text-[10px] font-black uppercase tracking-widest text-red-500 bg-red-950/40 border border-red-800/40 rounded px-2 py-0.5">⏱ Prorrogação em curso</span>
             </div>
-            <MarketGroup title="Vencedor da Prorrogação">
-              <MarketOddsBtn match={match} sel="et-home" odd={m.etExtra.result.home} market="prolongamento" label={match.home} />
-              <MarketOddsBtn match={match} sel="et-draw" odd={m.etExtra.result.draw} market="prolongamento" label="Empate → Penáltis" />
-              <MarketOddsBtn match={match} sel="et-away" odd={m.etExtra.result.away} market="prolongamento" label={match.away} />
+            <MarketGroup title="Vencedor da Eliminatória">
+              <MarketOddsBtn match={match} sel="et-tie-home" odd={m.etExtra.tieWinner.home} market="prolongamento" label={match.home} />
+              <MarketOddsBtn match={match} sel="et-tie-away" odd={m.etExtra.tieWinner.away} market="prolongamento" label={match.away} />
             </MarketGroup>
             {m.etExtra.totalGoals.o05 > 0 && (
               <MarketGroup title="Golos na Prorrogação — 0.5">
@@ -2982,12 +3024,15 @@ export default function Home() {
                 <MarketOddsBtn match={match} sel="et-u25" odd={m.etExtra.totalGoals.u25} market="prolongamento" label="Menos de 2.5" />
               </MarketGroup>
             )}
-            {m.etExtra.bothTeamsScore.yes > 0 && (
-              <MarketGroup title="Ambas Marcam na Prorrogação">
-                <MarketOddsBtn match={match} sel="et-bts-yes" odd={m.etExtra.bothTeamsScore.yes} market="prolongamento" label="Sim" />
-                <MarketOddsBtn match={match} sel="et-bts-no"  odd={m.etExtra.bothTeamsScore.no}  market="prolongamento" label="Não" />
-              </MarketGroup>
-            )}
+            <MarketGroup title="Resultado da Prorrogação">
+              <MarketOddsBtn match={match} sel="et-res-home" odd={m.etExtra.etResult.home} market="prolongamento" label={match.home} />
+              <MarketOddsBtn match={match} sel="et-res-draw" odd={m.etExtra.etResult.draw} market="prolongamento" label="Empate → Penáltis" />
+              <MarketOddsBtn match={match} sel="et-res-away" odd={m.etExtra.etResult.away} market="prolongamento" label={match.away} />
+            </MarketGroup>
+            <MarketGroup title="Equipa a Marcar na Prorrogação">
+              <MarketOddsBtn match={match} sel="et-ng-home" odd={m.etExtra.nextGoal.home} market="prolongamento" label={`Gol 1 — ${match.home}`} />
+              <MarketOddsBtn match={match} sel="et-ng-away" odd={m.etExtra.nextGoal.away} market="prolongamento" label={`Gol 2 — ${match.away}`} />
+            </MarketGroup>
           </div>
         )}
 
@@ -3004,14 +3049,26 @@ export default function Home() {
           </div>
         )}
 
-        {/* ── RESULTADO / VENCEDOR ── */}
-        {(modalTab === "resultado" || modalTab === "todos") && (
-          <MarketGroup title={isBasketball ? "Vencedor da Partida" : isTennis ? "Vencedor do Jogo" : "Resultado Final"}>
-            <MarketOddsBtn match={match} sel="home" odd={match.odds.home} market="result" label={match.home} />
-            {match.odds.draw > 0 && <MarketOddsBtn match={match} sel="draw" odd={match.odds.draw} market="result" label="Empate" />}
-            <MarketOddsBtn match={match} sel="away" odd={match.odds.away} market="result" label={match.away} />
-          </MarketGroup>
-        )}
+        {/* ── RESULTADO / VENCEDOR ── hide for live football when result is obvious ── */}
+        {(modalTab === "resultado" || modalTab === "todos") && (() => {
+          const hideResult = match.isLive && isFootball && (() => {
+            const minOdd = Math.min(match.odds.home, match.odds.away);
+            if (minOdd <= 1.05) return true;
+            const min = match.minute ?? 0;
+            const diff = Math.abs((match.homeScore ?? 0) - (match.awayScore ?? 0));
+            if (min >= 80 && diff >= 2) return true;
+            if (min >= 85 && diff >= 1) return true;
+            return false;
+          })();
+          if (hideResult) return null;
+          return (
+            <MarketGroup title={isBasketball ? "Vencedor da Partida" : isTennis ? "Vencedor do Jogo" : "Resultado Final"}>
+              <MarketOddsBtn match={match} sel="home" odd={match.odds.home} market="result" label={match.home} />
+              {match.odds.draw > 0 && <MarketOddsBtn match={match} sel="draw" odd={match.odds.draw} market="result" label="Empate" />}
+              <MarketOddsBtn match={match} sel="away" odd={match.odds.away} market="result" label={match.away} />
+            </MarketGroup>
+          );
+        })()}
 
         {/* ── FUTEBOL: DUPLA CHANCE ── */}
         {isFootball && (modalTab === "dupla" || modalTab === "todos") && m && m.doubleChance.homeOrDraw > 0 && (
