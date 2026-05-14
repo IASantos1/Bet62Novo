@@ -1980,7 +1980,7 @@ export default function Home() {
             body: JSON.stringify({
               matchId: String(bet.matchId),
               matchTitle: bet.matchTitle,
-              selections: [{ matchTitle: bet.matchTitle, selection: bet.selection, odd: bet.odd, market: bet.market, label: bet.label || bet.selection }],
+              selections: [{ matchId: String(bet.matchId), matchTitle: bet.matchTitle, selection: bet.selection, odd: bet.odd, market: bet.market, label: bet.label || bet.selection }],
               stake: sNum.toFixed(2),
               potentialWin,
               totalOdds: bet.odd.toFixed(2),
@@ -2013,7 +2013,7 @@ export default function Home() {
         body: JSON.stringify({
           matchId,
           matchTitle,
-          selections: bets.map(b => ({ matchTitle: b.matchTitle, selection: b.selection, odd: b.odd, market: b.market, label: b.label || b.selection })),
+          selections: bets.map(b => ({ matchId: String(b.matchId), matchTitle: b.matchTitle, selection: b.selection, odd: b.odd, market: b.market, label: b.label || b.selection })),
           stake: stakeNum.toFixed(2),
           potentialWin,
           totalOdds,

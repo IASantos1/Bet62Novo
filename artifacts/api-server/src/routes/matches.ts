@@ -1821,6 +1821,51 @@ const TOUR_CACHE_TTL = 30 * 60 * 1000; // 30 min
 // Live state: stable odds across refreshes
 export const liveMatchState = new Map<string, LiveMatchState>();
 
+// Finished football match results — populated when matches leave liveMatchState
+// and from the daily feed scan. Consumed by the bet auto-settlement worker.
+export const finishedMatchResults = new Map<string, {
+  home: number;
+  away: number;
+  homeTeam: string;
+  awayTeam: string;
+  finishedAt: number; // ms
+}>();
+
+function _pruneFinishedResults(): void {
+  const cutoff = Date.now() - 4 * 60 * 60 * 1000; // 4 h
+  for (const [id, r] of finishedMatchResults.entries()) {
+    if (r.finishedAt < cutoff) finishedMatchResults.delete(id);
+  }
+}
+
+/** Scan today's daily feed and add any finished matches to finishedMatchResults. */
+export async function scanDailyForFinished(): Promise<void> {
+  try {
+    const leagues = await getDailyLeagues();
+    for (const league of leagues) {
+      const raw = league.match;
+      if (!raw) continue;
+      const matches: StatpalMatchV2[] = Array.isArray(raw) ? raw : [raw];
+      for (const m of matches) {
+        if (!STATPAL_FINISHED_STATUSES.has(m.status)) continue;
+        if (finishedMatchResults.has(m.main_id)) continue;
+        const home = parseInt(m.home.goals) || 0;
+        const away = parseInt(m.away.goals) || 0;
+        finishedMatchResults.set(m.main_id, {
+          home,
+          away,
+          homeTeam: m.home.name,
+          awayTeam: m.away.name,
+          finishedAt: Date.now(),
+        });
+      }
+    }
+    _pruneFinishedResults();
+  } catch {
+    // non-critical — settlement will retry on next cycle
+  }
+}
+
 // ─── Fetch helpers ────────────────────────────────────────────────────────────
 
 async function getLiveLeagues(): Promise<StatpalLeagueV2[]> {
@@ -2983,7 +3028,18 @@ async function buildLiveMatches(): Promise<LiveMatchState[]> {
     for (const m of ms) currentMatchIds.add(m.main_id);
   }
   for (const id of liveMatchState.keys()) {
-    if (!currentMatchIds.has(id)) liveMatchState.delete(id);
+    if (!currentMatchIds.has(id)) {
+      const state = liveMatchState.get(id)!;
+      // Capture final result for bet auto-settlement before evicting
+      finishedMatchResults.set(id, {
+        home: state.homeScore,
+        away: state.awayScore,
+        homeTeam: state.home,
+        awayTeam: state.away,
+        finishedAt: Date.now(),
+      });
+      liveMatchState.delete(id);
+    }
   }
 
   const now = Date.now();
