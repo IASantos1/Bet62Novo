@@ -2314,6 +2314,11 @@ function buildNHLLiveMatches(tournaments: NHLTournament[]): LiveMatchState[] {
 
   const today = new Date();
   const todayStr = `${String(today.getDate()).padStart(2, "0")}.${String(today.getMonth() + 1).padStart(2, "0")}.${today.getFullYear()}`;
+  const yesterdayNHL = new Date(today);
+  yesterdayNHL.setDate(yesterdayNHL.getDate() - 1);
+  const yesterdayNHLStr = `${String(yesterdayNHL.getDate()).padStart(2, "0")}.${String(yesterdayNHL.getMonth() + 1).padStart(2, "0")}.${yesterdayNHL.getFullYear()}`;
+  // NHL games end typically by 05:00 Lisbon time — allow yesterday's games only before 10h
+  const allowYesterdayNHL = today.getHours() < 10;
 
   const parseScore = (s?: string): [number, number] | null => {
     if (!s || !s.trim()) return null;
@@ -2331,7 +2336,10 @@ function buildNHLLiveMatches(tournaments: NHLTournament[]): LiveMatchState[] {
       const isLive = NHL_LIVE_STATUSES.has(m.status);
       const isNotStarted = m.status === "Not Started";
       if (!isLive && !isNotStarted) continue;
-      // For not-started: only show today's games
+      // Date guard: skip stale live games from previous days
+      if (m.date && m.date !== todayStr) {
+        if (!allowYesterdayNHL || m.date !== yesterdayNHLStr) continue;
+      }
       if (isNotStarted && m.date && m.date !== todayStr) continue;
 
       const homeScore = parseInt(m.home.totalscore) || 0;
@@ -2431,6 +2439,11 @@ function buildNBALiveMatches(tournaments: NBATournament[]): LiveMatchState[] {
 
   const today = new Date();
   const todayStr = `${String(today.getDate()).padStart(2, "0")}.${String(today.getMonth() + 1).padStart(2, "0")}.${today.getFullYear()}`;
+  const yesterday = new Date(today);
+  yesterday.setDate(yesterday.getDate() - 1);
+  const yesterdayStr = `${String(yesterday.getDate()).padStart(2, "0")}.${String(yesterday.getMonth() + 1).padStart(2, "0")}.${yesterday.getFullYear()}`;
+  // NBA games end typically by 05:00 Lisbon time — allow yesterday's games only before 10h
+  const allowYesterdayLive = today.getHours() < 10;
 
   for (const t of sorted) {
     const matches = Array.isArray(t.match) ? t.match : [t.match];
@@ -2442,6 +2455,10 @@ function buildNBALiveMatches(tournaments: NBATournament[]): LiveMatchState[] {
       const isNotStarted = st === "Not Started";
       const isLive = NBA_LIVE_STATUSES.has(st) || (!isNotStarted && st !== "Postponed" && st !== "Cancelled");
       if (!isLive && !isNotStarted) continue;
+      // Date guard: skip games not from today (or yesterday if before 10h — late-night NBA)
+      if (m.date && m.date !== todayStr) {
+        if (!allowYesterdayLive || m.date !== yesterdayStr) continue;
+      }
       if (isNotStarted && m.date && m.date !== todayStr) continue;
 
       const homeScore = parseInt(m.home.totalscore) || 0;
