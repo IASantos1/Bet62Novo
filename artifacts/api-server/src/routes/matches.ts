@@ -1905,58 +1905,57 @@ function calculateLive1x2(state: {
   baseAway: number;
 }): { home: number; draw: number; away: number } {
   const r = (n: number) => Math.round(n * 100) / 100;
-
-  // Derive base probabilities from pre-match odds (already margin-free)
   const vigFactor = 1 - LIVE_MARGIN;
-  const fairHome = 1 / (state.baseHome / vigFactor);
-  const fairAway = 1 / (state.baseAway / vigFactor);
-  const baseDraw = Math.max(0.02, 1 - fairHome - fairAway);
 
-  let homeProb = fairHome;
-  let drawProb = baseDraw;
-  let awayProb = fairAway;
+  // 1. Fair pre-match probabilities from odds
+  const pHome0 = vigFactor / state.baseHome;
+  const pAway0 = vigFactor / state.baseAway;
+  const pDraw0 = Math.max(0.02, 1 - pHome0 - pAway0);
 
-  const diff = state.homeGoals - state.awayGoals;
+  // 2. Estimate pre-match lambdas via team-strength split
+  //    Total ~2.6 expected goals; each team's share proportional to (win + 45% draw) prob
+  const totalLambda = 2.6;
+  const homeStr = pHome0 + pDraw0 * 0.45;
+  const awayStr = pAway0 + pDraw0 * 0.45;
+  const lambdaHome = totalLambda * (homeStr / (homeStr + awayStr)) * 1.08; // slight home advantage
+  const lambdaAway = totalLambda * (awayStr / (homeStr + awayStr)) * 0.92;
 
-  // Score advantage — each goal shifts probability significantly
-  if (diff > 0) {
-    const boost = 0.20 * Math.min(diff, 2);
-    homeProb += boost;
-    awayProb -= boost * 0.5;
-    drawProb -= boost * 0.5;
-  } else if (diff < 0) {
-    const boost = 0.20 * Math.min(-diff, 2);
-    awayProb += boost;
-    homeProb -= boost * 0.5;
-    drawProb -= boost * 0.5;
+  // 3. Scale to remaining time
+  const remainingFrac = Math.max(0.01, (90 - Math.min(state.minute, 89)) / 90);
+
+  // 4. Red card adjustments (each RC: own attack −12%, opponent attack +4%)
+  const muH = lambdaHome * remainingFrac
+    * Math.max(0.4, 1 - 0.12 * state.redCardsHome + 0.04 * state.redCardsAway);
+  const muA = lambdaAway * remainingFrac
+    * Math.max(0.4, 1 - 0.12 * state.redCardsAway + 0.04 * state.redCardsHome);
+
+  // 5. Poisson convolution over remaining goals, conditioned on current score
+  //    This guarantees P(Draw) ≥ P(losing team wins) by construction — because
+  //    to draw from N goals down requires N net goals; to win requires N+1 net goals.
+  const MAX_G = 8;
+  const pH = poissonPmf(muH, MAX_G);
+  const pA = poissonPmf(muA, MAX_G);
+  const diff = state.homeGoals - state.awayGoals; // positive = home leading
+
+  let pHomeWin = 0, pDraw = 0, pAwayWin = 0;
+  for (let kH = 0; kH <= MAX_G; kH++) {
+    for (let kA = 0; kA <= MAX_G; kA++) {
+      const p = pH[kH]! * pA[kA]!;
+      const net = diff + kH - kA;
+      if (net > 0) pHomeWin += p;
+      else if (net === 0) pDraw += p;
+      else pAwayWin += p;
+    }
   }
 
-  // Time pressure — after 70' the leading team becomes a stronger favourite
-  if (state.minute > 70) {
-    const pressure = (state.minute - 70) / 20 * 0.08;
-    if (diff > 0) { homeProb += pressure; drawProb -= pressure * 0.6; awayProb -= pressure * 0.4; }
-    else if (diff < 0) { awayProb += pressure; drawProb -= pressure * 0.6; homeProb -= pressure * 0.4; }
-    else { drawProb += pressure * 0.5; } // draw more likely to stay a draw late
-  }
+  // 6. Normalise and apply margin
+  const total = pHomeWin + pDraw + pAwayWin;
+  pHomeWin /= total; pDraw /= total; pAwayWin /= total;
 
-  // Red cards
-  if (state.redCardsAway > 0) { homeProb += 0.07 * state.redCardsAway; awayProb -= 0.05 * state.redCardsAway; }
-  if (state.redCardsHome > 0) { awayProb += 0.07 * state.redCardsHome; homeProb -= 0.05 * state.redCardsHome; }
-
-  // Clamp and normalise
-  homeProb = Math.max(0.02, homeProb);
-  drawProb = Math.max(0.02, drawProb);
-  awayProb = Math.max(0.02, awayProb);
-  const total = homeProb + drawProb + awayProb;
-  homeProb /= total;
-  drawProb /= total;
-  awayProb /= total;
-
-  // Apply margin → final odds
   return {
-    home: Math.max(1.04, r((1 / homeProb) * vigFactor)),
-    draw: Math.max(2.00, r((1 / drawProb) * vigFactor)),
-    away: Math.max(1.04, r((1 / awayProb) * vigFactor)),
+    home: Math.max(1.04, r((1 / pHomeWin) * vigFactor)),
+    draw: pDraw > 0.005 ? Math.max(2.00, r((1 / pDraw) * vigFactor)) : 0,
+    away: Math.max(1.04, r((1 / pAwayWin) * vigFactor)),
   };
 }
 
@@ -2042,9 +2041,9 @@ function applyTieredMarketDrift(state: LiveMatchState, now: number): LiveMatchSt
   const oddsOscD = Math.cos(t * 0.23 + phase * 0.5) * 0.014 + Math.sin(t * 0.11) * 0.007;
   const oddsOscA = Math.sin(t * 0.27 + phase * 0.9) * 0.018 + Math.cos(t * 0.19) * 0.009;
   const newOdds = due("odds", 45_000, 90_000) ? {
-    home: Math.max(1.04, Math.min(25, r(baseOdds.home * (1 + oddsOscH - (diff > 0 ? timePressure * 0.4 : timePressure * 0.6))))),
-    draw: baseOdds.draw > 0 ? Math.max(2.2, Math.min(8, r(baseOdds.draw * (1 + oddsOscD + timePressure * 0.3)))) : 0,
-    away: Math.max(1.04, Math.min(25, r(baseOdds.away * (1 + oddsOscA + (diff > 0 ? timePressure * 0.6 : timePressure * 0.4))))),
+    home: Math.max(1.04, Math.min(200, r(baseOdds.home * (1 + oddsOscH - (diff > 0 ? timePressure * 0.4 : timePressure * 0.6))))),
+    draw: baseOdds.draw > 0 ? Math.max(2.00, Math.min(200, r(baseOdds.draw * (1 + oddsOscD + timePressure * 0.3)))) : 0,
+    away: Math.max(1.04, Math.min(200, r(baseOdds.away * (1 + oddsOscA + (diff > 0 ? timePressure * 0.6 : timePressure * 0.4))))),
   } : state.odds; // not due yet → unchanged (no arrow on frontend)
 
   // ── Oscillator values — computed fresh each cycle but only APPLIED when due ─
