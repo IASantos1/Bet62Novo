@@ -374,6 +374,34 @@ const COUNTRY_FLAGS: Record<string, string> = {
   world: "🌐",
 };
 
+// Pure helper — compute if a selection won/lost based on a known final score.
+// Returns null when the result is still undeterminable (e.g. over/under line not yet crossed).
+function scoreOutcomeForSel(
+  sel: { selection: string },
+  score: { home: number; away: number }
+): "won" | "lost" | null {
+  const s = sel.selection;
+  const { home, away } = score;
+  const total = home + away;
+  let winning: boolean | null = null;
+  if (s === "home")         winning = home > away;
+  else if (s === "away")    winning = away > home;
+  else if (s === "draw")    winning = home === away;
+  else if (s === "homeOrDraw") winning = home >= away;
+  else if (s === "awayOrDraw") winning = away >= home;
+  else if (s === "homeOrAway") winning = home !== away;
+  else if (s === "bts-yes") winning = home > 0 && away > 0;
+  else if (s === "bts-no")  winning = home === 0 || away === 0;
+  else {
+    const m = s.match(/^([ou])([\d.]+)$/);
+    if (m) {
+      const line = parseFloat(m[2]!);
+      winning = m[1] === "o" ? total > line : total < line;
+    }
+  }
+  return winning === null ? null : winning ? "won" : "lost";
+}
+
 function formatMatchDate(dateStr: string): string {
   const parts = dateStr.split(".");
   if (parts.length !== 3) return dateStr;
@@ -1085,6 +1113,8 @@ export default function Home() {
   const prevWonBetIds = useRef<Set<number> | null>(null);
   const prevLiveMatchesRef = useRef<Match[]>([]);
   const finishedMatchScores = useRef<Map<string, { home: number; away: number }>>(new Map());
+  // Locally-resolved bet outcomes (client-side, before admin settlement)
+  const [resolvedBetOutcomes, setResolvedBetOutcomes] = useState<Map<number, "won" | "lost">>(new Map());
 
   // Deposit modal
   const [depositModalOpen, setDepositModalOpen] = useState(false);
@@ -1663,19 +1693,50 @@ export default function Home() {
     }
   }, []);
 
-  // Track disappearing live matches to store final scores for resolved bet display
+  // Track disappearing live matches to store final scores + compute local bet outcomes
   useEffect(() => {
     const prev = prevLiveMatchesRef.current;
     const currentIds = new Set(liveMatches.map(m => m.id));
+    let anyNew = false;
     for (const m of prev) {
       if (!currentIds.has(m.id)) {
         const normT = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
         const key = `${normT(m.home)}-${normT(m.away)}`;
         finishedMatchScores.current.set(key, { home: m.homeScore ?? 0, away: m.awayScore ?? 0 });
+        anyNew = true;
       }
     }
     prevLiveMatchesRef.current = [...liveMatches];
-  }, [liveMatches]);
+
+    // When a match disappears, check all pending bets to see if any selections are now resolved
+    if (anyNew && myBets.length > 0) {
+      setResolvedBetOutcomes(prev => {
+        const updated = new Map(prev);
+        for (const bet of myBets) {
+          if (bet.status !== "pending") continue;
+          if (updated.has(bet.id)) continue;
+          const sels: Array<{ selection: string; matchTitle: string }> = Array.isArray(bet.selections)
+            ? (bet.selections as Array<{ selection: string; matchTitle: string }>)
+            : [{ matchTitle: bet.matchTitle, selection: "home" }];
+          const normT = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
+          let anyLost = false;
+          let allDetermined = sels.length > 0;
+          for (const sel of sels) {
+            const [th = "", ta = ""] = sel.matchTitle.split(" vs ");
+            const key = `${normT(th)}-${normT(ta)}`;
+            const fs = finishedMatchScores.current.get(key);
+            if (!fs) { allDetermined = false; continue; }
+            const outcome = scoreOutcomeForSel(sel, fs);
+            if (outcome === "lost") { anyLost = true; break; }
+            if (outcome === null) allDetermined = false;
+          }
+          if (anyLost) updated.set(bet.id, "lost");
+          else if (allDetermined) updated.set(bet.id, "won");
+        }
+        return updated;
+      });
+    }
+  }, [liveMatches, myBets]);
 
   // Poll faster (2s) when a live match detail panel is open so tier-1 market
   // drift (driven by the 2s backend timer) reaches the UI promptly.
@@ -6731,8 +6792,8 @@ export default function Home() {
                 <div className="flex border-b border-zinc-800 mb-5">
                   {(["abertas", "resolvidas"] as const).map((t) => {
                     const cnt = t === "abertas"
-                      ? myBets.filter(b => b.status === "pending").length
-                      : myBets.filter(b => b.status !== "pending").length;
+                      ? myBets.filter(b => b.status === "pending" && !resolvedBetOutcomes.has(b.id)).length
+                      : myBets.filter(b => b.status !== "pending" || resolvedBetOutcomes.has(b.id)).length;
                     const lbl = t === "abertas" ? "Abertas" : "Resolvidas";
                     return (
                       <button key={t} onClick={() => setBetFilterTab(t)}
@@ -6748,7 +6809,9 @@ export default function Home() {
                   <div className="flex items-center justify-center py-20"><Loader2 className="animate-spin text-red-600" size={32} /></div>
                 ) : (() => {
                   const filtered = myBets.filter(b =>
-                    betFilterTab === "resolvidas" ? b.status !== "pending" : b.status === "pending"
+                    betFilterTab === "resolvidas"
+                      ? b.status !== "pending" || resolvedBetOutcomes.has(b.id)
+                      : b.status === "pending" && !resolvedBetOutcomes.has(b.id)
                   );
                   if (filtered.length === 0) return (
                     <div className="py-20 text-center text-zinc-500 bg-zinc-900/50 rounded-xl border border-zinc-800">
@@ -6767,14 +6830,18 @@ export default function Home() {
                         const betTypeLabel = isMultiple ? `Múltipla de ${sels.length}` : "Simples";
                         const isCollapsed = collapsedBets.has(bet.id);
                         const isPending = bet.status === "pending";
-                        const statusCls = isPending ? "bg-zinc-700 text-zinc-300"
-                          : bet.status === "won" ? "bg-green-800 text-green-300"
-                          : bet.status === "lost" ? "bg-red-900/60 text-red-400"
-                          : "bg-yellow-900/50 text-yellow-400";
-                        const statusLbl = isPending ? "ABERTA"
-                          : bet.status === "won" ? "GANHA"
-                          : bet.status === "lost" ? "PERDIDA"
-                          : "CASH OUT";
+                        const localOutcome = resolvedBetOutcomes.get(bet.id);
+                        const effectiveStatus = localOutcome ?? bet.status;
+                        const statusCls = isPending && !localOutcome ? "bg-zinc-700 text-zinc-300"
+                          : effectiveStatus === "won" ? "bg-green-800 text-green-300"
+                          : effectiveStatus === "lost" ? "bg-red-900/60 text-red-400"
+                          : bet.status === "cashed_out" ? "bg-yellow-900/50 text-yellow-400"
+                          : "bg-zinc-700 text-zinc-300";
+                        const statusLbl = isPending && !localOutcome ? "ABERTA"
+                          : effectiveStatus === "won" ? "GANHA"
+                          : effectiveStatus === "lost" ? "PERDIDA"
+                          : bet.status === "cashed_out" ? "CASH OUT"
+                          : "ABERTA";
 
                         return (
                           <div key={bet.id} className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden">
@@ -6809,7 +6876,7 @@ export default function Home() {
                               </div>
                               <div className="px-4 py-2.5">
                                 <div className="text-xs text-zinc-500 mb-0.5">Possível Retorno</div>
-                                <div className={`font-black text-sm ${isPending ? "text-red-400" : bet.status === "won" ? "text-green-400" : "text-zinc-500"}`}>
+                                <div className={`font-black text-sm ${isPending && !localOutcome ? "text-red-400" : effectiveStatus === "won" ? "text-green-400" : "text-zinc-500"}`}>
                                   € {parseFloat(bet.potentialWin).toFixed(2)}
                                 </div>
                               </div>
@@ -6826,6 +6893,7 @@ export default function Home() {
                                   const displayMin = lm ? (isHT ? "HT" : `${lm.minute ?? 0}'`) : null;
                                   // Left indicator icon
                                   const SelIcon = () => {
+                                    // Server-settled outcomes
                                     if (outcome === "green") return (
                                       <div className="w-6 h-6 rounded-full bg-green-600 flex items-center justify-center shrink-0 mt-0.5">
                                         <Check size={13} className="text-white" strokeWidth={3} />
@@ -6841,19 +6909,33 @@ export default function Home() {
                                         <CircleDollarSign size={13} className="text-white" />
                                       </div>
                                     );
-                                    if (outcome === "live-win") return (
-                                      <div className="w-6 h-6 rounded-full bg-green-700/60 border border-green-500/40 flex items-center justify-center shrink-0 mt-0.5">
-                                        <Check size={12} className="text-green-300" strokeWidth={3} />
+                                    // While match is live: numbered circle only — no win/lose icons during play
+                                    if (lm) return (
+                                      <div className="w-6 h-6 rounded-full bg-red-700 flex items-center justify-center shrink-0 text-xs font-black text-white mt-0.5 leading-none">
+                                        {i + 1}
                                       </div>
                                     );
-                                    if (outcome === "live-lose") return (
-                                      <div className="w-6 h-6 rounded-full bg-red-900/60 border border-red-500/40 flex items-center justify-center shrink-0 mt-0.5">
-                                        <X size={12} className="text-red-400" strokeWidth={3} />
-                                      </div>
-                                    );
-                                    // pending: numbered circle
+                                    // Match finished: show outcome from final score if known
+                                    const normT2 = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
+                                    const [th2 = "", ta2 = ""] = sel.matchTitle.split(" vs ");
+                                    const fsKey = `${normT2(th2)}-${normT2(ta2)}`;
+                                    const fs = finishedMatchScores.current.get(fsKey);
+                                    if (fs) {
+                                      const finalOutcome = scoreOutcomeForSel(sel, fs);
+                                      if (finalOutcome === "won") return (
+                                        <div className="w-6 h-6 rounded-full bg-green-700/70 border border-green-500/40 flex items-center justify-center shrink-0 mt-0.5">
+                                          <Check size={12} className="text-green-300" strokeWidth={3} />
+                                        </div>
+                                      );
+                                      if (finalOutcome === "lost") return (
+                                        <div className="w-6 h-6 rounded-full bg-red-900/70 border border-red-500/40 flex items-center justify-center shrink-0 mt-0.5">
+                                          <X size={12} className="text-red-400" strokeWidth={3} />
+                                        </div>
+                                      );
+                                    }
+                                    // Still pending/unknown
                                     return (
-                                      <div className={`w-6 h-6 rounded-full flex items-center justify-center shrink-0 text-xs font-black text-white mt-0.5 leading-none ${lm ? "bg-red-700" : "bg-red-600"}`}>
+                                      <div className="w-6 h-6 rounded-full bg-red-600 flex items-center justify-center shrink-0 text-xs font-black text-white mt-0.5 leading-none">
                                         {i + 1}
                                       </div>
                                     );
@@ -6868,17 +6950,12 @@ export default function Home() {
                                       {lm && (
                                         <div className="flex items-center gap-2 mt-1.5 flex-wrap">
                                           <span className="flex items-center gap-1 text-[10px] font-black text-red-400 uppercase tracking-wide">
-                                            <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse inline-block" />
-                                            Ao Vivo
+                                            <Clock size={10} className="text-red-400 shrink-0" />
+                                            {displayMin ?? "Ao Vivo"}
                                           </span>
                                           <span className="text-xs font-black text-white tabular-nums">
                                             {lm.homeScore} – {lm.awayScore}
                                           </span>
-                                          {displayMin && (
-                                            <span className="text-[10px] text-zinc-400 font-mono bg-zinc-800 px-1.5 py-0.5 rounded">
-                                              {displayMin}
-                                            </span>
-                                          )}
                                           {liveOdd !== null && Math.abs(liveOdd - sel.odd) > 0.01 && (
                                             <span className={`text-[10px] font-bold ${liveOdd < sel.odd ? "text-green-400" : "text-red-400"}`}>
                                               {liveOdd < sel.odd ? "▼" : "▲"} {liveOdd.toFixed(2)}
