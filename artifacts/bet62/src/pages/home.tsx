@@ -3194,7 +3194,7 @@ export default function Home() {
     );
   };
 
-  const MatchModalMarkets = ({ match }: { match: Match }) => {
+  const renderMatchMarkets = (match: Match) => {
     const sport = match.sport ?? "football";
     const isBasketball = sport === "basketball";
     const isTennis = sport === "tennis";
@@ -5793,7 +5793,7 @@ export default function Home() {
                 {/* Market tabs inline — only visible in markets view */}
                 {matchViewTab === "markets" && (
                   <div className="bg-zinc-900 rounded-xl border border-zinc-800 p-4">
-                    <MatchModalMarkets match={expandedMatch} />
+                    {renderMatchMarkets(expandedMatch)}
                   </div>
                 )}
               </div>
