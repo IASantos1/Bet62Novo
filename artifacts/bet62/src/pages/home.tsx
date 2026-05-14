@@ -6,7 +6,7 @@ import {
   Menu, X, Trophy, Activity, Gift,
   LogOut, User, History, Loader2, Zap, TrendingUp,
   ChevronRight, ChevronLeft, ChevronDown, ChevronUp, AlertCircle, BarChart2, Wallet, ArrowDownCircle, ArrowUpCircle, Plus, Clock, Smartphone,
-  Copy, Share2, CircleDollarSign, Lock,
+  Copy, Share2, CircleDollarSign, Lock, Trash2,
 } from "lucide-react";
 import ProfileTab from "@/components/ProfileTab";
 import { Button } from "@/components/ui/button";
@@ -2477,7 +2477,7 @@ export default function Home() {
           {chunks.map((events, bi) => {
             const cfg = BANNER_CONFIGS[bi];
             const totalOddsVal = events
-              .reduce((acc, m) => acc + (m.odds.home > 0 ? m.odds.home : 0), 0)
+              .reduce((acc, m) => m.odds.home > 0 ? acc * m.odds.home : acc, 1)
               .toFixed(2);
 
             return (
@@ -2606,7 +2606,18 @@ export default function Home() {
       <div className="flex flex-col h-full bg-zinc-950/50">
         <div className="p-4 border-b border-zinc-800 bg-zinc-900 flex justify-between items-center">
           <h3 className="font-bold text-lg text-white">Boletim de Apostas</h3>
-          <span className="bg-red-600 text-white text-xs font-bold px-2 py-1 rounded-full">{bets.length}</span>
+          <div className="flex items-center gap-2">
+            {bets.length > 0 && (
+              <button
+                onClick={() => { setBets([]); setBetStakes({}); setStake(""); }}
+                className="text-zinc-500 hover:text-red-400 transition-colors p-1"
+                title="Limpar boletim"
+              >
+                <Trash2 size={16} />
+              </button>
+            )}
+            <span className="bg-red-600 text-white text-xs font-bold px-2 py-1 rounded-full">{bets.length}</span>
+          </div>
         </div>
 
         {bets.length > 0 && (
@@ -6750,7 +6761,7 @@ export default function Home() {
 
         {/* DESKTOP BET SLIP */}
         <aside className="hidden lg:block w-96 border-l border-zinc-900 bg-zinc-950 sticky top-16 h-[calc(100vh-4rem)]">
-          <BetSlipContent />
+          {BetSlipContent()}
         </aside>
       </div>
 
@@ -6764,7 +6775,7 @@ export default function Home() {
               </Button>
             </DrawerTrigger>
             <DrawerContent className="bg-zinc-950 border-zinc-800 text-white h-[85vh] p-0">
-              <BetSlipContent />
+              {BetSlipContent()}
             </DrawerContent>
           </Drawer>
         )}
