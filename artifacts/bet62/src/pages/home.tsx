@@ -556,12 +556,14 @@ type SidebarTreeContentProps = {
   topLeagues?: TopLeagueEntry[];
   selectedLeague?: string | null;
   setSelectedLeague?: (l: string | null) => void;
+  selectedCountry?: string | null;
+  setSelectedCountry?: (c: string | null) => void;
 };
 
 function SidebarTreeContent({
   selectedSport, setSelectedSport, setActiveTab, onClose,
   expandedSport, setExpandedSport, expandedCountry, setExpandedCountry, compact,
-  topLeagues, selectedLeague, setSelectedLeague,
+  topLeagues, selectedLeague, setSelectedLeague, selectedCountry, setSelectedCountry,
 }: SidebarTreeContentProps) {
   const py = compact ? "py-1.5" : "py-2";
   const textSize = compact ? "text-[12px]" : "text-[13px]";
@@ -611,8 +613,8 @@ function SidebarTreeContent({
 
       {/* Todos */}
       <button
-        onClick={() => { go("all"); setSelectedLeague?.(null); }}
-        className={`flex items-center gap-2.5 w-full px-2 ${py} rounded-md ${textSize} transition-colors ${selectedSport === "all" && !selectedLeague ? "bg-red-600/20 text-red-400 border border-red-500/30" : "hover:bg-zinc-900 text-zinc-400 hover:text-white"}`}
+        onClick={() => { go("all"); setSelectedLeague?.(null); setSelectedCountry?.(null); }}
+        className={`flex items-center gap-2.5 w-full px-2 ${py} rounded-md ${textSize} transition-colors ${selectedSport === "all" && !selectedLeague && !selectedCountry ? "bg-red-600/20 text-red-400 border border-red-500/30" : "hover:bg-zinc-900 text-zinc-400 hover:text-white"}`}
       >
         <span className="text-sm leading-none text-red-500">🏆</span>
         <span>Todos</span>
@@ -633,8 +635,16 @@ function SidebarTreeContent({
             {FOOTBALL_COUNTRIES.map(({ name, flag, leagues }) => (
               <div key={name}>
                 <button
-                  onClick={() => setExpandedCountry(expandedCountry === name ? null : name)}
-                  className={`flex items-center gap-1.5 w-full px-2 py-1.5 rounded-md text-[12px] transition-colors ${expandedCountry === name ? "bg-zinc-800 text-white" : "hover:bg-zinc-900 text-zinc-400 hover:text-white"}`}
+                  onClick={() => {
+                    const isActive = selectedCountry === name;
+                    setExpandedCountry(isActive ? null : name);
+                    setSelectedCountry?.(isActive ? null : name);
+                    setSelectedLeague?.(null);
+                    setSelectedSport("football");
+                    setActiveTab("sports");
+                    onClose?.();
+                  }}
+                  className={`flex items-center gap-1.5 w-full px-2 py-1.5 rounded-md text-[12px] transition-colors ${selectedCountry === name ? "bg-red-600/20 text-red-400 border border-red-500/30" : expandedCountry === name ? "bg-zinc-800 text-white" : "hover:bg-zinc-900 text-zinc-400 hover:text-white"}`}
                 >
                   <span className="text-xs leading-none shrink-0">{flag}</span>
                   <span className="flex-1 text-left truncate">{name}</span>
@@ -647,7 +657,7 @@ function SidebarTreeContent({
                       return (
                         <button
                           key={league}
-                          onClick={() => { setSelectedLeague?.(active ? null : league); setSelectedSport("football"); setActiveTab("sports"); onClose?.(); }}
+                          onClick={() => { setSelectedLeague?.(active ? null : league); setSelectedCountry?.(null); setSelectedSport("football"); setActiveTab("sports"); onClose?.(); }}
                           className={`flex items-center gap-1.5 w-full px-2 py-1 rounded-md text-[11px] transition-colors ${active ? "bg-red-600/20 text-red-400 border border-red-500/30" : "text-zinc-500 hover:text-white hover:bg-zinc-900"}`}
                         >
                           <span className="text-xs leading-none shrink-0">{LEAGUE_FLAGS[league] ?? "⚽"}</span>
@@ -1073,6 +1083,8 @@ export default function Home() {
   const [cashoutAnim, setCashoutAnim] = useState<{ amount: number } | null>(null);
   const [betPlacedAnim, setBetPlacedAnim] = useState(false);
   const prevWonBetIds = useRef<Set<number> | null>(null);
+  const prevLiveMatchesRef = useRef<Match[]>([]);
+  const finishedMatchScores = useRef<Map<string, { home: number; away: number }>>(new Map());
 
   // Deposit modal
   const [depositModalOpen, setDepositModalOpen] = useState(false);
@@ -1355,6 +1367,7 @@ export default function Home() {
   // Sidebar tree state
   const [sidebarExpandedSport, setSidebarExpandedSport] = useState<string | null>(null);
   const [sidebarExpandedCountry, setSidebarExpandedCountry] = useState<string | null>(null);
+  const [selectedCountry, setSelectedCountry] = useState<string | null>(null);
 
   // Top Competições — computed from live + upcoming matches
   const PRIORITY_LEAGUES = [
@@ -1649,6 +1662,20 @@ export default function Home() {
       if (showSpinner) setLiveLoading(false);
     }
   }, []);
+
+  // Track disappearing live matches to store final scores for resolved bet display
+  useEffect(() => {
+    const prev = prevLiveMatchesRef.current;
+    const currentIds = new Set(liveMatches.map(m => m.id));
+    for (const m of prev) {
+      if (!currentIds.has(m.id)) {
+        const normT = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
+        const key = `${normT(m.home)}-${normT(m.away)}`;
+        finishedMatchScores.current.set(key, { home: m.homeScore ?? 0, away: m.awayScore ?? 0 });
+      }
+    }
+    prevLiveMatchesRef.current = [...liveMatches];
+  }, [liveMatches]);
 
   // Poll faster (2s) when a live match detail panel is open so tier-1 market
   // drift (driven by the 2s backend timer) reaches the UI promptly.
@@ -4312,6 +4339,8 @@ export default function Home() {
                   topLeagues={sidebarTopLeagues}
                   selectedLeague={selectedLeague}
                   setSelectedLeague={setSelectedLeague}
+                  selectedCountry={selectedCountry}
+                  setSelectedCountry={setSelectedCountry}
                 />
               </div>
             </motion.div>
@@ -4337,6 +4366,8 @@ export default function Home() {
               topLeagues={sidebarTopLeagues}
               selectedLeague={selectedLeague}
               setSelectedLeague={setSelectedLeague}
+              selectedCountry={selectedCountry}
+              setSelectedCountry={setSelectedCountry}
             />
           </div>
         </aside>
@@ -5468,6 +5499,16 @@ export default function Home() {
                     return true; // football always included
                   }),
                 ];
+                // Filter by country (all leagues of that country)
+                if (selectedCountry) {
+                  const countryObj = FOOTBALL_COUNTRIES.find(c => c.name === selectedCountry);
+                  if (countryObj) {
+                    const seen2 = new Set<string>();
+                    return combined
+                      .filter(m => countryObj.leagues.some(l => leagueMatchesFilter(m.league, l)))
+                      .filter(m => { const k = String(m.id); if (seen2.has(k)) return false; seen2.add(k); return true; });
+                  }
+                }
                 if (!selectedLeague) return combined;
                 // Filter by selected league using flexible matching (handles "Country: League" API prefixes)
                 const seen = new Set<string>();
@@ -6222,7 +6263,7 @@ export default function Home() {
 
 
                   <h2 className="text-2xl font-black italic uppercase tracking-tight mb-4 flex items-center gap-2">
-                    <Trophy className="text-red-600" /> {selectedLeague ? selectedLeague : "Próximos Eventos"}
+                    <Trophy className="text-red-600" /> {selectedCountry ? `⚽ ${selectedCountry}` : selectedLeague ? selectedLeague : "Próximos Eventos"}
                   </h2>
                   {upcomingLoading ? (
                     <div className="flex items-center justify-center py-20">
@@ -6231,9 +6272,9 @@ export default function Home() {
                   ) : filteredUpcoming.length === 0 ? (
                     <div className="py-20 text-center text-zinc-500 bg-zinc-900/50 rounded-xl border border-zinc-800">
                       <Trophy className="mx-auto mb-4 opacity-20" size={48} />
-                      <p className="font-medium">{selectedLeague ? "Nenhum evento para esta liga." : "Nenhum evento programado no momento."}</p>
+                      <p className="font-medium">{selectedCountry ? `Nenhum evento para ${selectedCountry}.` : selectedLeague ? "Nenhum evento para esta liga." : "Nenhum evento programado no momento."}</p>
                     </div>
-                  ) : selectedLeague ? (
+                  ) : (selectedLeague || selectedCountry) ? (
                     <div className="space-y-2">
                       {filteredUpcoming.map(match => <MatchCard key={match.id} match={match} />)}
                     </div>
@@ -6788,6 +6829,21 @@ export default function Home() {
                                           )}
                                         </div>
                                       )}
+                                      {!lm && !isPending && (() => {
+                                        const normT = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
+                                        const [th = "", ta = ""] = sel.matchTitle.split(" vs ");
+                                        const key = `${normT(th)}-${normT(ta)}`;
+                                        const fs = finishedMatchScores.current.get(key);
+                                        if (!fs) return null;
+                                        return (
+                                          <div className="flex items-center gap-1.5 mt-1.5">
+                                            <span className="text-[10px] text-zinc-500 uppercase tracking-wide font-bold">Resultado Final</span>
+                                            <span className="text-xs font-black text-zinc-300 tabular-nums bg-zinc-800 px-2 py-0.5 rounded">
+                                              {fs.home} – {fs.away}
+                                            </span>
+                                          </div>
+                                        );
+                                      })()}
                                     </div>
                                     <div className="font-bold text-white text-sm shrink-0 pt-0.5">{Number(sel.odd).toFixed(2)}</div>
                                   </div>
@@ -6843,7 +6899,7 @@ export default function Home() {
       </div>
 
       {/* MOBILE BET SLIP */}
-      <div className="lg:hidden fixed bottom-6 left-1/2 -translate-x-1/2 z-40">
+      <div className={`lg:hidden fixed left-1/2 -translate-x-1/2 z-[55] transition-all duration-300 ${showAppBanner ? "bottom-32" : "bottom-6"}`}>
         {bets.length > 0 && (
           <Drawer open={betSlipOpenMobile} onOpenChange={setBetSlipOpenMobile}>
             <DrawerTrigger asChild>
