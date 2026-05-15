@@ -300,7 +300,7 @@ const LEAGUE_FLAGS: Record<string, string> = {
   "Serbian SuperLiga": "🇷🇸", "Serbian Cup": "🇷🇸",
   "Brasileirao": "🇧🇷", "Brasileirão": "🇧🇷", "Série A Brasil": "🇧🇷", "Campeonato Brasileiro": "🇧🇷", "Copa do Brasil": "🇧🇷", "Campeonato Paulista": "🇧🇷", "Campeonato Carioca": "🇧🇷",
   "Primera División": "🇦🇷", "Primera Division": "🇦🇷", "Liga Argentina": "🇦🇷", "Copa Argentina": "🇦🇷",
-  "MLS": "🇺🇸", "NBA": "🇺🇸", "NHL": "🇺🇸",
+  "MLS": "🇺🇸", "NBA": "🇺🇸", "NHL": "🇺🇸", "USA: MLB": "⚾", "MLB": "⚾",
   "EuroLeague": "⭐", "NBB — Brasil": "🇧🇷",
   "ATP 500": "🎾", "ATP 250": "🎾", "WTA 1000": "🎾", "WTA 250": "🎾", "Roland Garros": "🇫🇷",
   "NHL — Playoffs": "🏒", "KHL — Playoff": "🏒",
@@ -664,6 +664,9 @@ const OTHER_SPORTS: { key: string; label: string; icon: string; leagues: string[
     "Ligue Magnus",
     "Champions Hockey League",
   ]},
+  { key: "baseball", label: "Beisebol", icon: "⚾", leagues: [
+    "USA: MLB", "MLB",
+  ]},
   { key: "volleyball", label: "Voleibol", icon: "🏐", leagues: [
     "SuperLega", "Serie A2 Volley", "Coppa Italia Volley",
     "Superliga Série A", "Superliga Série B", "Copa Brasil Vôlei",
@@ -732,7 +735,7 @@ function SidebarTreeContent({
           <div className="text-[9px] font-black text-zinc-600 uppercase tracking-widest px-2 mb-1.5">Top Competições</div>
           <div className="space-y-0.5">
             {topLeagues.map(l => {
-              const flag = COUNTRY_FLAGS[l.country?.toLowerCase() ?? ""] ?? (l.sport === "basketball" ? "🏀" : l.sport === "tennis" ? "🎾" : l.sport === "hockey" ? "🏒" : l.sport === "volleyball" ? "🏐" : "⚽");
+              const flag = COUNTRY_FLAGS[l.country?.toLowerCase() ?? ""] ?? (l.sport === "basketball" ? "🏀" : l.sport === "tennis" ? "🎾" : l.sport === "hockey" ? "🏒" : l.sport === "volleyball" ? "🏐" : l.sport === "baseball" ? "⚾" : "⚽");
               const active = selectedLeague === l.league;
               return (
                 <button
@@ -920,6 +923,7 @@ type Match = {
     ];
     periods?: Array<[number, number]>;
     quarters?: Array<[number, number]>;
+    innings?: Array<[number, number]>;
     etScore?: [number, number];
     penScore?: [number, number];
   };
@@ -1177,6 +1181,7 @@ function sportEmoji(sport?: string): string {
   if (sport === "tennis") return "🎾";
   if (sport === "hockey") return "🏒";
   if (sport === "volleyball") return "🏐";
+  if (sport === "baseball") return "⚾";
 
   return "⚽";
 }
@@ -1857,6 +1862,7 @@ export default function Home() {
       ];
       periods?: Array<[number, number]>;
       quarters?: Array<[number, number]>;
+      innings?: Array<[number, number]>;
     };
   };
 
@@ -2472,6 +2478,7 @@ export default function Home() {
     const progress = (() => {
       if (sport === "basketball") return Math.min(100, (minute / 48) * 100);
       if (sport === "hockey")     return Math.min(100, (minute / 60) * 100);
+      if (sport === "baseball")   return Math.min(100, (minute / 9) * 100);
       if (sport === "tennis")     return Math.min(100, (minute / 5) * 100);
       if (sport === "volleyball") return Math.min(100, (minute / 5) * 100);
       return Math.min(100, (minute / 90) * 100);
@@ -2481,6 +2488,7 @@ export default function Home() {
     const liveBadgeLabel = (() => {
       if (sport === "basketball" && match.status) return `${match.status}${extra?.clockStr ? ` · ${extra.clockStr}` : ""}`;
       if (sport === "hockey"     && match.status) return `${match.status}${extra?.clockStr ? ` · ${extra.clockStr}` : ""}`;
+      if (sport === "baseball"   && match.status) return match.status.replace(" Inning", "ª Entrada");
       if (sport === "tennis"     && match.status) return match.status;
       if (sport === "volleyball" && match.status) return match.status;
 
@@ -2647,6 +2655,38 @@ export default function Home() {
       );
     };
 
+    // ── Baseball: inning-by-inning grid ──────────────────────────────────────
+    const BaseballScore = ({ big }: { big?: boolean }) => {
+      const innings = extra?.innings ?? [];
+      const INN_LABELS = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "E"];
+      if (innings.length === 0) return <SimpleScore big={big} />;
+      return (
+        <div className="w-full text-xs font-mono tabular-nums">
+          <div className="flex items-center mb-0.5">
+            <div className="flex-1" />
+            {innings.map((_: [number, number], i: number) => (
+              <div key={i} className="w-5 text-center text-zinc-500 text-[9px] font-bold">{INN_LABELS[i] ?? "E"}</div>
+            ))}
+            <div className="w-7 text-center text-zinc-500 text-[10px] font-bold">R</div>
+          </div>
+          <div className="flex items-center">
+            <div className="flex-1 font-bold text-white text-xs truncate">{match.home}</div>
+            {innings.map(([h, a]: [number, number], i: number) => (
+              <div key={i} className={`w-5 text-center font-black text-[11px] ${h > a ? "text-white" : "text-zinc-500"}`}>{h}</div>
+            ))}
+            <div className="w-7 text-center font-black text-white">{match.homeScore ?? 0}</div>
+          </div>
+          <div className="flex items-center">
+            <div className="flex-1 font-bold text-white text-xs truncate">{match.away}</div>
+            {innings.map(([h, a]: [number, number], i: number) => (
+              <div key={i} className={`w-5 text-center font-black text-[11px] ${a > h ? "text-white" : "text-zinc-500"}`}>{a}</div>
+            ))}
+            <div className="w-7 text-center font-black text-white">{match.awayScore ?? 0}</div>
+          </div>
+        </div>
+      );
+    };
+
     // Basketball / Hockey / Football: standard home vs away score
     const rcH = match.redCardsHome ?? 0;
     const rcA = match.redCardsAway ?? 0;
@@ -2743,6 +2783,7 @@ export default function Home() {
               {sport === "tennis"     ? <TennisScore /> :
                sport === "volleyball" ? <VolleyScore /> :
                sport === "hockey"     ? <HockeyScore big /> :
+               sport === "baseball"   ? <BaseballScore big /> :
                <SimpleScore big />}
             </div>
             {match.hasRealOdds && (
@@ -2780,6 +2821,7 @@ export default function Home() {
           {sport === "tennis"     ? <TennisScore /> :
            sport === "volleyball" ? <VolleyScore /> :
            sport === "hockey"     ? <HockeyScore /> :
+           sport === "baseball"   ? <BaseballScore /> :
            <SimpleScore />}
           {oddsRow}
         </div>

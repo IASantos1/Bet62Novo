@@ -146,6 +146,7 @@ export type LiveMatchState = {
     tennisStats?: [TennisStatData, TennisStatData]; // home / away match stats
     periods?: Array<[number, number]>;   // hockey: [[P1h,P1a],[P2h,P2a],[P3h,P3a],[OTh,OTa]]
     quarters?: Array<[number, number]>;  // basketball: [[Q1h,Q1a],[Q2h,Q2a],[Q3h,Q3a],[Q4h,Q4a],[OTh,OTa]]
+    innings?: Array<[number, number]>;   // baseball: [[I1h,I1a],[I2h,I2a],...,[I9h,I9a]]
     // Football extras from Statpal v2
     htScore?: [number, number];          // football: half-time score [homeHT, awayHT]
     etScore?: [number, number];          // football: extra-time score [homeET, awayET]
@@ -1462,6 +1463,37 @@ function makeHockeyMarketsFromTeams(home: string, away: string): AdvancedMarkets
   } as unknown as AdvancedMarkets;
 }
 
+// ─── MLB (Baseball) market builder ────────────────────────────────────────────
+function makeMLBMarketsFromTeams(home: string, away: string): AdvancedMarkets {
+  const sr = seededRng(`mlb-mkt:${home}:${away}`);
+  const meanTotal  = mc(8.5 + (sr(1) - 0.5) * 3.0, 6.5, 12.0);
+  const totalLine  = Math.round(meanTotal * 2) / 2;
+  const totalSd    = mc(2.5 + sr(2) * 1.0, 1.8, 3.5);
+  const [oTotal,  uTotal ] = probsToDecimalOdds([mc(1 - normalCdf((totalLine       - meanTotal) / totalSd), 0.05, 0.95), mc(normalCdf((totalLine       - meanTotal) / totalSd), 0.05, 0.95)], 1.06);
+  const [oAlt1,   uAlt1  ] = probsToDecimalOdds([mc(1 - normalCdf((totalLine - 0.5 - meanTotal) / totalSd), 0.05, 0.95), mc(normalCdf((totalLine - 0.5 - meanTotal) / totalSd), 0.05, 0.95)], 1.06);
+  const [oAlt2,   uAlt2  ] = probsToDecimalOdds([mc(1 - normalCdf((totalLine + 0.5 - meanTotal) / totalSd), 0.05, 0.95), mc(normalCdf((totalLine + 0.5 - meanTotal) / totalSd), 0.05, 0.95)], 1.06);
+  const marginMean = mc((sr(3) - 0.5) * 2.0, -2.0, 2.0);
+  const marginSd   = mc(2.8 + sr(4) * 0.8, 2.2, 4.0);
+  const pHomeRL    = mc(1 - normalCdf((-1.5 - marginMean) / marginSd), 0.05, 0.95);
+  const [rlH, rlA] = probsToDecimalOdds([pHomeRL, 1 - pHomeRL], 1.06);
+  return {
+    doubleChance:   { homeOrDraw: 0, awayOrDraw: 0, homeOrAway: 0 },
+    bothTeamsScore: { yes: 0, no: 0 },
+    totalGoals: {
+      over05: 0, under05: 0, over15: 0, under15: 0,
+      over25: oAlt1!, under25: uAlt1!,
+      over35: oTotal!, under35: uTotal!,
+      over45: oAlt2!, under45: uAlt2!,
+      over55: 0, under55: 0, over65: 0, under65: 0,
+    },
+    handicap:  { homeMinusOne: rlH!, awayPlusOne: rlA!, homeMinusOneHalf: 0, awayPlusOneHalf: 0 },
+    halfTime:  { home: 0, draw: 0, away: 0 },
+    firstGoal: { home: 0, noGoal: 0, away: 0 },
+    _spread: 1.5,
+    _total:  totalLine,
+  } as unknown as AdvancedMarkets;
+}
+
 // ─── Volleyball market builder (probabilistic model for real upcoming matches) ─
 /**
  * Given P(home wins match) in a best-of-5 series, return the per-set win
@@ -1593,6 +1625,25 @@ type NHLMatch = {
 type NHLTournament = { country: string; gid: string; id: string; league: string; match: NHLMatch | NHLMatch[] };
 let nhlLiveCache: NHLTournament[] | null = null;
 let nhlLiveFetchedAt = 0;
+
+// ─── MLB (Baseball) types ─────────────────────────────────────────────────────
+type MLBTeam = {
+  id: string; name: string; totalscore: string; r: string; hits: string; errors: string;
+  in1: string; in2: string; in3: string; in4: string; in5: string;
+  in6: string; in7: string; in8: string; in9: string;
+};
+type MLBMatch = {
+  id: string; status: string; time: string; date?: string; datetime_utc?: string;
+  venue_name?: string; outs?: string;
+  home: MLBTeam; away: MLBTeam;
+  starting_pitchers?: {
+    home?: { player?: { id: string; name: string } };
+    away?: { player?: { id: string; name: string } };
+  };
+};
+type MLBTournament = { country: string; id: string; league: string; match: MLBMatch | MLBMatch[] };
+let mlbLiveCache: MLBTournament[] | null = null;
+let mlbLiveFetchedAt = 0;
 
 type NBAMatch = {
   id: string; stats_id?: string; status: string; time: string; timer: string; date?: string;
@@ -2715,6 +2766,101 @@ function buildNHLLiveMatches(tournaments: NHLTournament[]): LiveMatchState[] {
   return result;
 }
 
+// ─── MLB live feed ────────────────────────────────────────────────────────────
+async function getMLBLive(): Promise<MLBTournament[]> {
+  const now = Date.now();
+  if (mlbLiveCache && now - mlbLiveFetchedAt < CONFIG.LIVE_CACHE_TTL) return mlbLiveCache;
+  try {
+    const resp = await fetch(`${BASE_V1}/mlb/livescores?access_key=${STATSPAL_KEY}`, {
+      signal: AbortSignal.timeout(8000),
+    });
+    if (!resp.ok) return mlbLiveCache ?? [];
+    const data = (await resp.json()) as { livescores?: { tournament?: MLBTournament | MLBTournament[] } };
+    const raw = data?.livescores?.tournament;
+    if (!raw) return mlbLiveCache ?? [];
+    mlbLiveCache = Array.isArray(raw) ? raw : [raw];
+    mlbLiveFetchedAt = now;
+    return mlbLiveCache;
+  } catch {
+    return mlbLiveCache ?? [];
+  }
+}
+
+function buildMLBLiveMatches(tournaments: MLBTournament[]): LiveMatchState[] {
+  const MLB_LIVE_STATUSES = new Set([
+    "1st Inning", "2nd Inning", "3rd Inning", "4th Inning", "5th Inning",
+    "6th Inning", "7th Inning", "8th Inning", "9th Inning", "Extra Inning", "In Progress",
+  ]);
+  const result: LiveMatchState[] = [];
+
+  const today = new Date();
+  const todayStr = `${String(today.getDate()).padStart(2, "0")}.${String(today.getMonth() + 1).padStart(2, "0")}.${today.getFullYear()}`;
+  // MLB games can end past midnight ET (≈5–6 AM Lisbon) — allow yesterday until 09:00
+  const allowYesterday = today.getHours() < 9;
+  const yest = new Date(today); yest.setDate(yest.getDate() - 1);
+  const yesterdayStr = `${String(yest.getDate()).padStart(2, "0")}.${String(yest.getMonth() + 1).padStart(2, "0")}.${yest.getFullYear()}`;
+
+  for (const t of tournaments) {
+    const matches = Array.isArray(t.match) ? t.match : [t.match];
+    for (const m of matches) {
+      if (!m?.status) continue;
+      const isLive       = MLB_LIVE_STATUSES.has(m.status);
+      const isNotStarted = m.status === "Not Started";
+      if (!isLive && !isNotStarted) continue;
+      if (m.date && m.date !== todayStr) {
+        if (!allowYesterday || m.date !== yesterdayStr) continue;
+      }
+      if (isNotStarted && m.date && m.date !== todayStr) continue;
+
+      const homeScore = parseInt(m.home.totalscore) || 0;
+      const awayScore = parseInt(m.away.totalscore) || 0;
+
+      // Parse inning-by-inning scores (skip "-" placeholders)
+      const innings: Array<[number, number]> = [];
+      const inKeys = ["in1", "in2", "in3", "in4", "in5", "in6", "in7", "in8", "in9"] as const;
+      for (const key of inKeys) {
+        const h = parseInt(m.home[key]); const a = parseInt(m.away[key]);
+        if (!isNaN(h) && !isNaN(a)) innings.push([h, a]);
+      }
+
+      const inningMinute: Record<string, number> = {
+        "1st Inning": 1, "2nd Inning": 2, "3rd Inning": 3, "4th Inning": 4,
+        "5th Inning": 5, "6th Inning": 6, "7th Inning": 7, "8th Inning": 8,
+        "9th Inning": 9, "Extra Inning": 10, "In Progress": 5,
+      };
+      const minute = isNotStarted ? 0 : (inningMinute[m.status] ?? 5);
+
+      const odds = makeOddsFromTeams(m.home.name, m.away.name);
+      const diff = homeScore - awayScore;
+      let liveOdds = { ...odds };
+      if (diff !== 0 && isLive) {
+        const factor = Math.min(0.40, Math.abs(diff) * 0.10);
+        liveOdds = diff > 0
+          ? { home: Math.max(1.04, +(odds.home * (1 - factor)).toFixed(2)), draw: 0, away: Math.min(12, +(odds.away * (1 + factor)).toFixed(2)) }
+          : { home: Math.min(12, +(odds.home * (1 + factor)).toFixed(2)), draw: 0, away: Math.max(1.04, +(odds.away * (1 - factor)).toFixed(2)) };
+      }
+      liveOdds.draw = 0; // no draws in baseball
+
+      result.push({
+        id: `mlb-${m.id}`,
+        home:      m.home.name,
+        away:      m.away.name,
+        league:    t.league || "USA: MLB",
+        country:   t.country || "usa",
+        sport:     "baseball",
+        homeScore, awayScore, minute,
+        status:    isNotStarted ? "Not Started" : m.status,
+        hasRealOdds: true,
+        odds:    liveOdds,
+        markets: makeMLBMarketsFromTeams(m.home.name, m.away.name),
+        events:  [],
+        _liveExtra: innings.length > 0 ? { innings } : undefined,
+      });
+    }
+  }
+  return result;
+}
+
 async function getNBALive(): Promise<NBATournament[]> {
   const now = Date.now();
   if (nbaLiveCache && now - nbaLiveFetchedAt < CONFIG.LIVE_CACHE_TTL) return nbaLiveCache;
@@ -3765,13 +3911,14 @@ export { buildLiveMatches, buildUpcomingMatches, getUpcomingAll };
 async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
   const empty: UpcomingMatch[] = [];
   const [
-    soccerMatches, nhlTournaments, nbaTournaments,
+    soccerMatches, nhlTournaments, nbaTournaments, mlbTournaments,
     tennisTournaments, volleyTournaments, tennisStatsMap,
     upFootball, upTennis, upBasketball, upHockey, upVolleyball,
   ] = await Promise.all([
     buildLiveMatches(),
     getNHLLive(),
     getNBALive(),
+    getMLBLive(),
     getTennisLive(),
     getVolleyballLive(),
     getTennisStatsMap(),
@@ -3784,9 +3931,10 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
   ]);
   const nhlMatches    = buildNHLLiveMatches(nhlTournaments);
   const nbaMatches    = buildNBALiveMatches(nbaTournaments);
+  const mlbMatches    = buildMLBLiveMatches(mlbTournaments);
   const tennisMatches = buildTennisLiveMatches(tennisTournaments, tennisStatsMap);
   const volleyMatches = buildVolleyballLiveMatches(volleyTournaments);
-  const livePart = [...soccerMatches, ...nhlMatches, ...nbaMatches, ...tennisMatches, ...volleyMatches];
+  const livePart = [...soccerMatches, ...nhlMatches, ...nbaMatches, ...mlbMatches, ...tennisMatches, ...volleyMatches];
 
   const liveIds = new Set(livePart.map(m => String(m.id)));
   // Deduplicate by team pair — prevents upcoming duplicating a match already in the live feed
