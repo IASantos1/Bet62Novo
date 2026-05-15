@@ -3042,7 +3042,12 @@ function buildVolleyballLiveMatches(tournaments: VolleyTournament[]): LiveMatchS
       // Non-live: only today's fixtures
       if (isNotStarted && m.date !== todayStr) continue;
       // Only show Not Started games within 90 min — avoids showing afternoon games in the morning
-      if (isNotStarted && matchStartsInMinutes(m.date ?? "", m.time ?? "") > 90) continue;
+      const minsUntilStart = isNotStarted ? matchStartsInMinutes(m.date ?? "", m.time ?? "") : 0;
+      if (isNotStarted && minsUntilStart > 90) continue;
+
+      // If Statpal still reports "Not Started" but the scheduled time has already passed,
+      // treat as in-progress (API lag) so the match shows as live rather than upcoming.
+      const apiLagging = isNotStarted && minsUntilStart < 0;
 
       const homeScore = parseInt(home.totalscore) || 0;
       const awayScore = parseInt(away.totalscore) || 0;
@@ -3069,8 +3074,10 @@ function buildVolleyballLiveMatches(tournaments: VolleyTournament[]): LiveMatchS
         }
       }
 
-      const setNum      = isLive ? (parseInt(m.status.split(" ")[1]!) || 1) : 0;
-      const statusLabel = isNotStarted ? `Hoje ${m.time}` : isFinished ? "Encerrado" : m.status;
+      const setNum      = isLive ? (parseInt(m.status.split(" ")[1]!) || 1) : (apiLagging ? 1 : 0);
+      const statusLabel = isNotStarted
+        ? (apiLagging ? "Em Jogo" : `Hoje ${m.time}`)
+        : isFinished ? "Encerrado" : m.status;
       const baseOdds    = makeOddsFromTeams(home.name, away.name);
 
       result.push({
