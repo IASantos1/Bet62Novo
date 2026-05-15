@@ -2884,7 +2884,7 @@ export default function Home() {
     }
 
     const chunks: Match[][] = BANNER_CONFIGS.map((_, i) =>
-      interleaved.slice(i * 5, i * 5 + 5)
+      interleaved.slice(i * 4, i * 4 + 4)
     ).filter(c => c.length > 0);
 
     if (chunks.length === 0) return null;
