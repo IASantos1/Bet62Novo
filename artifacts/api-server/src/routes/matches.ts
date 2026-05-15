@@ -1832,6 +1832,20 @@ let hockeyStandingsCache: NHLStandingsData | null = null;
 let hockeyStandingsFetchedAt = 0;
 const HOCKEY_STANDINGS_TTL = 30 * 60 * 1000;
 
+// MLB standings
+type MLBStandingsTeam = {
+  id: string; name: string; position: number;
+  won: number; lost: number; gamesBack: string;
+  streak: string; homeRecord: string; awayRecord: string;
+  runsScored: number; runsAllowed: number; runsDiff: string;
+};
+type MLBStandingsDivision = { name: string; teams: MLBStandingsTeam[] };
+type MLBStandingsLeague = { name: string; divisions: MLBStandingsDivision[] };
+type MLBStandingsData = { season: string; leagues: MLBStandingsLeague[] };
+let mlbStandingsCache: MLBStandingsData | null = null;
+let mlbStandingsFetchedAt = 0;
+const MLB_STANDINGS_TTL = 30 * 60 * 1000;
+
 // NBA roster abbreviations (empirically matching Statpal's URL parameter)
 // Standard NBA 3-letter codes (lowercase) — some may differ from Statpal's actual routing
 const NBA_ABBR: Record<string, string> = {
@@ -5710,6 +5724,75 @@ async function getHockeyStandings(): Promise<NHLStandingsData> {
     return hockeyStandingsCache ?? { season: "", conferences: [] };
   }
 }
+
+async function getMLBStandings(): Promise<MLBStandingsData> {
+  const now = Date.now();
+  if (mlbStandingsCache && now - mlbStandingsFetchedAt < MLB_STANDINGS_TTL) return mlbStandingsCache;
+  const empty: MLBStandingsData = { season: "", leagues: [] };
+  try {
+    const resp = await fetch(`${BASE_V1}/mlb/standings?access_key=${STATSPAL_KEY}`, { signal: AbortSignal.timeout(9000) });
+    if (!resp.ok) return mlbStandingsCache ?? empty;
+    const json = (await resp.json()) as {
+      standings?: {
+        category?: {
+          season?: string;
+          league?: Array<{
+            name: string;
+            division?: Array<{
+              name: string;
+              team?: Array<{
+                id: string; name: string; position: string;
+                won: string; lost: string; games_back: string;
+                current_streak: string; home_record: string; away_record: string;
+                runs_scored: string; runs_allowed: string; runs_diff: string;
+              }>;
+            }>;
+          }>;
+        };
+      };
+    };
+    const cat = json.standings?.category;
+    if (!cat) return mlbStandingsCache ?? empty;
+    const season = cat.season ?? "";
+    const rawLeagues = Array.isArray(cat.league) ? cat.league : cat.league ? [cat.league] : [];
+    const leagues: MLBStandingsLeague[] = rawLeagues.map(lg => {
+      const rawDivs = Array.isArray(lg.division) ? lg.division : lg.division ? [lg.division] : [];
+      const divisions: MLBStandingsDivision[] = rawDivs.map(div => {
+        const rawTeams = Array.isArray(div.team) ? div.team : div.team ? [div.team] : [];
+        return {
+          name: div.name,
+          teams: rawTeams.map(t => ({
+            id: t.id, name: t.name,
+            position: parseInt(t.position) || 0,
+            won: parseInt(t.won) || 0, lost: parseInt(t.lost) || 0,
+            gamesBack: t.games_back ?? "-",
+            streak: t.current_streak ?? "",
+            homeRecord: t.home_record ?? "",
+            awayRecord: t.away_record ?? "",
+            runsScored: parseInt(t.runs_scored) || 0,
+            runsAllowed: parseInt(t.runs_allowed) || 0,
+            runsDiff: t.runs_diff ?? "0",
+          })).sort((a, b) => a.position - b.position),
+        };
+      });
+      return { name: lg.name, divisions };
+    });
+    mlbStandingsCache = { season, leagues };
+    mlbStandingsFetchedAt = now;
+    return mlbStandingsCache;
+  } catch {
+    return mlbStandingsCache ?? empty;
+  }
+}
+
+router.get("/mlb-standings", async (_req, res) => {
+  try {
+    const data = await getMLBStandings();
+    res.json(data);
+  } catch {
+    res.status(500).json({ error: "Classificação indisponível" });
+  }
+});
 
 router.get("/hockey-standings", async (_req, res) => {
   try {

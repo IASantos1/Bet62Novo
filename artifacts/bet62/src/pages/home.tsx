@@ -1399,6 +1399,17 @@ export default function Home() {
   type NHLStandingsData = { season: string; conferences: NHLStandingsConference[] };
   const [hockeyStandings, setHockeyStandings] = useState<NHLStandingsData | null>(null);
 
+  type MLBStandingsTeam = {
+    id: string; name: string; position: number;
+    won: number; lost: number; gamesBack: string;
+    streak: string; homeRecord: string; awayRecord: string;
+    runsScored: number; runsAllowed: number; runsDiff: string;
+  };
+  type MLBStandingsDivision = { name: string; teams: MLBStandingsTeam[] };
+  type MLBStandingsLeague  = { name: string; divisions: MLBStandingsDivision[] };
+  type MLBStandingsData    = { season: string; leagues: MLBStandingsLeague[] };
+  const [mlbStandings, setMlbStandings] = useState<MLBStandingsData | null>(null);
+
   type NHLRosterPlayer = {
     id: string; name: string; number: string; age: number;
     birthPlace: string; height: string; weight: string; shot: string; salary: string;
@@ -1827,6 +1838,10 @@ export default function Home() {
     fetch("/api/matches/mlb-schedule")
       .then(r => r.ok ? r.json() : null)
       .then(d => { if (d) setMlbSchedule(d); })
+      .catch(() => { /* non-critical */ });
+    fetch("/api/matches/mlb-standings")
+      .then(r => r.ok ? r.json() : null)
+      .then(d => { if (d) setMlbStandings(d); })
       .catch(() => { /* non-critical */ });
     fetch("/api/matches/hockey-schedule")
       .then(r => r.ok ? r.json() : null)
@@ -6016,6 +6031,66 @@ export default function Home() {
                             </div>
                           );
                         })}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* MLB Standings panel (baseball "yesterday" tab) */}
+                {matchViewTab === "yesterday" && expandedMatch.sport === "baseball" && (
+                  <div className="bg-zinc-900 rounded-xl border border-zinc-800 p-3 mb-2 animate-in fade-in duration-200">
+                    <div className="flex items-center gap-2 mb-3">
+                      <span className="text-[10px] font-black text-red-500 uppercase tracking-widest">🏆 Classificação MLB</span>
+                      {mlbStandings && <span className="text-[9px] text-zinc-600">— {mlbStandings.season}</span>}
+                    </div>
+                    {!mlbStandings ? (
+                      <div className="text-center text-zinc-500 py-4 text-sm animate-pulse">A carregar...</div>
+                    ) : (
+                      <div className="space-y-5">
+                        {mlbStandings.leagues.map(lg => (
+                          <div key={lg.name}>
+                            <div className="text-[9px] font-black text-zinc-500 uppercase tracking-widest mb-2">{lg.name}</div>
+                            <div className="space-y-2">
+                              {lg.divisions.map(div => (
+                                <div key={div.name} className="bg-zinc-950/60 border border-zinc-800 rounded-lg overflow-hidden">
+                                  <div className="bg-zinc-800/50 px-2.5 py-1 text-[8px] font-black text-zinc-500 uppercase tracking-wider">{div.name}</div>
+                                  <div className="overflow-x-auto">
+                                    <table className="w-full text-[10px] font-mono tabular-nums">
+                                      <thead>
+                                        <tr className="border-b border-zinc-800 text-[8px] font-black text-zinc-600 uppercase">
+                                          <th className="text-left py-1 px-2 w-4">#</th>
+                                          <th className="text-left py-1 px-2 min-w-[90px]">Equipa</th>
+                                          <th className="py-1 px-1 text-center text-green-500">V</th>
+                                          <th className="py-1 px-1 text-center text-red-400">D</th>
+                                          <th className="py-1 px-1 text-center">GB</th>
+                                          <th className="py-1 px-1 text-center hidden sm:table-cell">PC</th>
+                                          <th className="py-1 px-1 text-center hidden sm:table-cell">PA</th>
+                                          <th className="py-1 px-1 text-center hidden sm:table-cell">DIF</th>
+                                          <th className="py-1 px-1 text-center">SÉRIE</th>
+                                        </tr>
+                                      </thead>
+                                      <tbody>
+                                        {div.teams.map((team, idx) => (
+                                          <tr key={team.id} className={`border-b border-zinc-800/30 ${idx === 0 ? "border-l-2 border-l-green-600/40" : ""}`}>
+                                            <td className="py-1 px-2 text-zinc-600">{team.position}</td>
+                                            <td className="py-1 px-2 font-semibold text-zinc-200 truncate max-w-[90px]">{team.name.split(" ").slice(-1)[0]}</td>
+                                            <td className="py-1 px-1 text-center text-green-400">{team.won}</td>
+                                            <td className="py-1 px-1 text-center text-red-400">{team.lost}</td>
+                                            <td className="py-1 px-1 text-center text-zinc-500">{team.gamesBack}</td>
+                                            <td className="py-1 px-1 text-center text-zinc-500 hidden sm:table-cell">{team.runsScored}</td>
+                                            <td className="py-1 px-1 text-center text-zinc-500 hidden sm:table-cell">{team.runsAllowed}</td>
+                                            <td className={`py-1 px-1 text-center hidden sm:table-cell font-bold ${team.runsDiff.startsWith("+") ? "text-green-400" : team.runsDiff.startsWith("-") ? "text-red-400" : "text-zinc-500"}`}>{team.runsDiff}</td>
+                                            <td className={`py-1 px-1 text-center font-black ${team.streak.startsWith("W") ? "text-green-400" : team.streak.startsWith("L") ? "text-red-400" : "text-zinc-400"}`}>{team.streak}</td>
+                                          </tr>
+                                        ))}
+                                      </tbody>
+                                    </table>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        ))}
                       </div>
                     )}
                   </div>
