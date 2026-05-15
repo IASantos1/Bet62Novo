@@ -7847,28 +7847,30 @@ export default function Home() {
                                 <span className="flex-1 h-px bg-zinc-800" />
                                 <span>{date.split(".").slice(0,2).join("/")}</span>
                               </div>
-                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-1">
+                              <div className="flex flex-col gap-1">
                                 {games.map(g => {
                                   const oddsKey = `${g.date}-${normTeam(g.home)}-${normTeam(g.away)}`;
                                   const go = mlbOddsMap.get(oddsKey);
                                   return (
-                                    <div key={g.id} className="bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 hover:border-zinc-700 transition-colors">
+                                    <div key={g.id} className="bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2">
                                       <div className="flex items-center gap-2">
                                         <div className="flex-1 min-w-0">
                                           <div className="text-xs font-bold text-zinc-300 truncate">{g.home}</div>
                                           <div className="text-xs text-zinc-600 truncate">{g.away}</div>
                                         </div>
-                                        <div className="text-right shrink-0">
-                                          <div className="text-[10px] font-black text-zinc-400 tabular-nums">{g.time.slice(0,5)}</div>
-                                          {g.venue && <div className="text-[9px] text-zinc-700 truncate max-w-[80px]">{g.venue.split(" ").slice(0,2).join(" ")}</div>}
+                                        <div className="flex items-center gap-2 shrink-0">
+                                          {go && (
+                                            <div className="flex gap-1">
+                                              <OddBtn matchId={go.matchId} sel="home" odd={go.homeOdds} label={g.home} market="1X2" />
+                                              <OddBtn matchId={go.matchId} sel="away" odd={go.awayOdds} label={g.away} market="1X2" />
+                                            </div>
+                                          )}
+                                          <div className="text-right">
+                                            <div className="text-[10px] font-black text-zinc-400 tabular-nums">{g.time.slice(0,5)}</div>
+                                            {g.venue && <div className="text-[9px] text-zinc-700 truncate max-w-[80px]">{g.venue.split(" ").slice(0,2).join(" ")}</div>}
+                                          </div>
                                         </div>
                                       </div>
-                                      {go && (
-                                        <div className="flex gap-1 mt-2">
-                                          <OddBtn matchId={go.matchId} sel="home" odd={go.homeOdds} label={g.home} market="1X2" />
-                                          <OddBtn matchId={go.matchId} sel="away" odd={go.awayOdds} label={g.away} market="1X2" />
-                                        </div>
-                                      )}
                                     </div>
                                   );
                                 })}
