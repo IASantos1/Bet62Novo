@@ -356,22 +356,60 @@ function getMatchBanner(match: { home: string; country?: string; sport?: string 
 }
 
 const COUNTRY_FLAGS: Record<string, string> = {
-  england: "🏴󠁧󠁢󠁥󠁮󠁧󠁿", scotland: "🏴󠁧󠁢󠁳󠁣󠁴󠁿", wales: "🏴󠁧󠁢󠁷󠁬󠁳󠁿",
+  // British Isles
+  england: "🏴󠁧󠁢󠁥󠁮󠁧󠁿", scotland: "🏴󠁧󠁢󠁳󠁣󠁴󠁿", wales: "🏴󠁧󠁢󠁷󠁬󠁳󠁿", "northern ireland": "🇬🇧",
+  // Western Europe
   spain: "🇪🇸", germany: "🇩🇪", italy: "🇮🇹", france: "🇫🇷",
-  portugal: "🇵🇹", netherlands: "🇳🇱", belgium: "🇧🇪", turkey: "🇹🇷",
-  greece: "🇬🇷", austria: "🇦🇹", switzerland: "🇨🇭", russia: "🇷🇺",
-  ukraine: "🇺🇦", poland: "🇵🇱", czechia: "🇨🇿", denmark: "🇩🇰",
-  sweden: "🇸🇪", norway: "🇳🇴", croatia: "🇭🇷", serbia: "🇷🇸",
-  romania: "🇷🇴", hungary: "🇭🇺", slovakia: "🇸🇰", bulgaria: "🇧🇬",
-  slovenia: "🇸🇮", finland: "🇫🇮", israel: "🇮🇱", cyprus: "🇨🇾",
-  albania: "🇦🇱", moldova: "🇲🇩", ireland: "🇮🇪", luxembourg: "🇱🇺",
-  latvia: "🇱🇻", estonia: "🇪🇪", lithuania: "🇱🇹", bosnia: "🇧🇦",
-  montenegro: "🇲🇪", kosovo: "🇽🇰", iceland: "🇮🇸", malta: "🇲🇹",
+  portugal: "🇵🇹", netherlands: "🇳🇱", holland: "🇳🇱", belgium: "🇧🇪",
+  austria: "🇦🇹", switzerland: "🇨🇭", luxembourg: "🇱🇺", andorra: "🇦🇩",
+  liechtenstein: "🇱🇮", monaco: "🇲🇨", ireland: "🇮🇪",
+  // Scandinavia
+  denmark: "🇩🇰", sweden: "🇸🇪", norway: "🇳🇴", finland: "🇫🇮",
+  iceland: "🇮🇸", "faroe islands": "🇫🇴",
+  // Eastern Europe
+  russia: "🇷🇺", ukraine: "🇺🇦", poland: "🇵🇱", czechia: "🇨🇿",
+  "czech republic": "🇨🇿", slovakia: "🇸🇰", hungary: "🇭🇺", romania: "🇷🇴",
+  bulgaria: "🇧🇬", "north macedonia": "🇲🇰", macedonia: "🇲🇰",
+  albania: "🇦🇱", croatia: "🇭🇷", serbia: "🇷🇸", slovenia: "🇸🇮",
+  "bosnia and herzegovina": "🇧🇦", bosnia: "🇧🇦", montenegro: "🇲🇪",
+  kosovo: "🇽🇰", moldova: "🇲🇩", belarus: "🇧🇾", belarussia: "🇧🇾",
+  latvia: "🇱🇻", estonia: "🇪🇪", lithuania: "🇱🇹",
+  greece: "🇬🇷", turkey: "🇹🇷", cyprus: "🇨🇾", malta: "🇲🇹", israel: "🇮🇱",
+  // Caucasus
   georgia: "🇬🇪", armenia: "🇦🇲", azerbaijan: "🇦🇿",
+  // Central Asia
+  kazakhstan: "🇰🇿", uzbekistan: "🇺🇿", kyrgyzstan: "🇰🇬",
+  tajikistan: "🇹🇯", turkmenistan: "🇹🇲",
+  // Middle East
+  iran: "🇮🇷", iraq: "🇮🇶", "saudi arabia": "🇸🇦",
+  uae: "🇦🇪", "united arab emirates": "🇦🇪",
+  qatar: "🇶🇦", kuwait: "🇰🇼", bahrain: "🇧🇭", oman: "🇴🇲",
+  jordan: "🇯🇴", lebanon: "🇱🇧", syria: "🇸🇾", palestine: "🇵🇸",
+  // Americas
+  usa: "🇺🇸", canada: "🇨🇦", mexico: "🇲🇽",
   brazil: "🇧🇷", argentina: "🇦🇷", chile: "🇨🇱", colombia: "🇨🇴",
-  uruguay: "🇺🇾", mexico: "🇲🇽", usa: "🇺🇸", japan: "🇯🇵",
-  china: "🇨🇳", australia: "🇦🇺", africa: "🌍", europe: "🌍",
-  world: "🌐",
+  peru: "🇵🇪", uruguay: "🇺🇾", venezuela: "🇻🇪", ecuador: "🇪🇨",
+  paraguay: "🇵🇾", bolivia: "🇧🇴",
+  "costa rica": "🇨🇷", panama: "🇵🇦", honduras: "🇭🇳",
+  "el salvador": "🇸🇻", guatemala: "🇬🇹", nicaragua: "🇳🇮",
+  cuba: "🇨🇺", "dominican republic": "🇩🇴",
+  // Asia
+  japan: "🇯🇵", china: "🇨🇳", "south korea": "🇰🇷", south_korea: "🇰🇷",
+  "north korea": "🇰🇵", "korea republic": "🇰🇷",
+  india: "🇮🇳", pakistan: "🇵🇰", "hong kong": "🇭🇰", taiwan: "🇹🇼",
+  thailand: "🇹🇭", vietnam: "🇻🇳", indonesia: "🇮🇩",
+  malaysia: "🇲🇾", philippines: "🇵🇭", singapore: "🇸🇬",
+  myanmar: "🇲🇲", cambodia: "🇰🇭", mongolia: "🇲🇳",
+  australia: "🇦🇺", "new zealand": "🇳🇿",
+  // Africa
+  "south africa": "🇿🇦", morocco: "🇲🇦", egypt: "🇪🇬",
+  nigeria: "🇳🇬", ghana: "🇬🇭", senegal: "🇸🇳",
+  cameroon: "🇨🇲", "ivory coast": "🇨🇮", "cote d'ivoire": "🇨🇮",
+  kenya: "🇰🇪", ethiopia: "🇪🇹", algeria: "🇩🇿", tunisia: "🇹🇳",
+  "san marino": "🇸🇲",
+  // Continental / special
+  europe: "🌍", africa: "🌍", southamerica: "🌎",
+  asia: "🌏", "north america": "🌎", international: "🌐", world: "🌐",
 };
 
 // Pure helper — compute if a selection won/lost based on a known final score.
