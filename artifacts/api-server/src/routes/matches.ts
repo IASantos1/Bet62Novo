@@ -9016,8 +9016,10 @@ type PlayerMarketEntry = {
 
 type TeamPlayerMarkets = {
   teamName: string; teamId: string;
-  scorers: PlayerMarketEntry[];
-  assisters: PlayerMarketEntry[];
+  anytimeScorers: PlayerMarketEntry[];
+  firstHalfScorers: PlayerMarketEntry[];
+  secondHalfScorers: PlayerMarketEntry[];
+  scoreAndAssist: PlayerMarketEntry[];
   bookings: PlayerMarketEntry[];
 };
 
@@ -9055,34 +9057,58 @@ function findMatchingTeam(teams: FootballLeagueStatsTeam[], targetName: string):
 
 function buildTeamMarkets(team: FootballLeagueStatsTeam): TeamPlayerMarkets {
   const byOdds = (a: PlayerMarketEntry, b: PlayerMarketEntry) => a.odds - b.odds;
-  const scorers: PlayerMarketEntry[] = [];
-  const assisters: PlayerMarketEntry[] = [];
-  const bookings: PlayerMarketEntry[] = [];
+  const anytimeScorers:    PlayerMarketEntry[] = [];
+  const firstHalfScorers:  PlayerMarketEntry[] = [];
+  const secondHalfScorers: PlayerMarketEntry[] = [];
+  const scoreAndAssist:    PlayerMarketEntry[] = [];
+  const bookings:          PlayerMarketEntry[] = [];
 
   for (const p of team.players) {
     const base = { id: p.id, name: p.name, team: team.name, teamId: team.id, appearances: p.appearances };
 
+    // Anytime scorer + derived half-time markets
     const gOdds = playerOdds(p.goals, p.appearances);
-    if (gOdds > 0) scorers.push({ ...base, stat: p.goals, odds: gOdds });
+    if (gOdds > 0) {
+      anytimeScorers.push({ ...base, stat: p.goals, odds: gOdds });
+      // ~42% of goals scored in 1H → fair odds ≈ anytime × 2.38
+      const fhOdds = Math.min(50, Math.round(gOdds * 2.38 * 100) / 100);
+      firstHalfScorers.push({ ...base, stat: p.goals, odds: fhOdds });
+      // ~58% of goals scored in 2H → fair odds ≈ anytime × 1.72
+      const shOdds = Math.min(50, Math.round(gOdds * 1.72 * 100) / 100);
+      secondHalfScorers.push({ ...base, stat: p.goals, odds: shOdds });
+    }
 
-    const aOdds = playerOdds(p.assists, p.appearances);
-    if (aOdds > 0) assisters.push({ ...base, stat: p.assists, odds: aOdds });
+    // Score AND Assist in same match — requires at least 1 goal and 1 assist
+    if (p.goals >= 1 && p.assists >= 1) {
+      const combinedStat = Math.min(p.goals, p.assists);
+      const saBase = playerOdds(combinedStat, p.appearances);
+      if (saBase > 0) {
+        // Combined event is harder — apply ×1.5 penalty on top of anytime odds
+        const saOdds = Math.min(60, Math.round(Math.max(gOdds * 2.0, saBase * 1.5) * 100) / 100);
+        scoreAndAssist.push({ ...base, stat: combinedStat, odds: saOdds });
+      }
+    }
 
-    const yc = p.yellowCards + p.yellowRed;
-    const bOdds = playerOdds(yc, p.appearances);
-    if (bOdds > 0) bookings.push({ ...base, stat: yc, odds: bOdds });
+    // Booked: any card (yellow, yellow-red, or straight red)
+    const cards = p.yellowCards + p.yellowRed + p.redCards;
+    const bOdds = playerOdds(cards, p.appearances);
+    if (bOdds > 0) bookings.push({ ...base, stat: cards, odds: bOdds });
   }
 
-  scorers.sort(byOdds);
-  assisters.sort(byOdds);
+  anytimeScorers.sort(byOdds);
+  firstHalfScorers.sort(byOdds);
+  secondHalfScorers.sort(byOdds);
+  scoreAndAssist.sort(byOdds);
   bookings.sort(byOdds);
 
   return {
     teamName: team.name,
     teamId: team.id,
-    scorers:   scorers.slice(0, 20),
-    assisters: assisters.slice(0, 15),
-    bookings:  bookings.slice(0, 15),
+    anytimeScorers:    anytimeScorers.slice(0, 20),
+    firstHalfScorers:  firstHalfScorers.slice(0, 15),
+    secondHalfScorers: secondHalfScorers.slice(0, 15),
+    scoreAndAssist:    scoreAndAssist.slice(0, 10),
+    bookings:          bookings.slice(0, 15),
   };
 }
 

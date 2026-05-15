@@ -1490,7 +1490,14 @@ export default function Home() {
 
   // Player markets (football "Jogadores" tab) — per-match, filtered to the two match teams
   type PlayerMarket = { id: string; name: string; team: string; teamId: string; appearances: number; stat: number; odds: number };
-  type TeamPlayerMarkets = { teamName: string; teamId: string; scorers: PlayerMarket[]; assisters: PlayerMarket[]; bookings: PlayerMarket[] };
+  type TeamPlayerMarkets = {
+    teamName: string; teamId: string;
+    anytimeScorers: PlayerMarket[];
+    firstHalfScorers: PlayerMarket[];
+    secondHalfScorers: PlayerMarket[];
+    scoreAndAssist: PlayerMarket[];
+    bookings: PlayerMarket[];
+  };
   type PlayerMarketsData = { leagueName: string; country: string; home: TeamPlayerMarkets | null; away: TeamPlayerMarkets | null };
   const [playerMarkets, setPlayerMarkets] = useState<PlayerMarketsData | null>(null);
   const [playerMarketsLoading, setPlayerMarketsLoading] = useState(false);
@@ -3900,71 +3907,47 @@ export default function Home() {
               <div className="text-center text-zinc-600 py-10 text-sm">Equipas não encontradas nas estatísticas desta liga.</div>
             )}
             {!playerMarketsLoading && playerMarkets && (playerMarkets.home || playerMarkets.away) && (() => {
+              type PMRow = { id: string; name: string; stat: number; appearances: number; odds: number };
+              const pmList = (rows: PMRow[], selPrefix: string, market: string, label: string, sublabel: (p: PMRow) => string) => rows.length === 0 ? null : (
+                <div className="mb-3">
+                  <div className={`text-xs font-semibold uppercase tracking-wider px-1 mb-1.5 ${
+                    selPrefix.startsWith("pm-gol")  ? "text-red-400"    :
+                    selPrefix.startsWith("pm-fh")   ? "text-orange-400" :
+                    selPrefix.startsWith("pm-sh")   ? "text-amber-400"  :
+                    selPrefix.startsWith("pm-sa")   ? "text-emerald-400":
+                    "text-yellow-500"
+                  }`}>{label}</div>
+                  <div className="bg-zinc-900/60 rounded-lg overflow-hidden">
+                    {rows.map(p => (
+                      <div key={p.id} className="flex items-center justify-between py-2 px-2 border-b border-zinc-800/60 last:border-0">
+                        <div className="min-w-0 flex-1 mr-3">
+                          <div className="text-sm font-medium text-white truncate">{p.name}</div>
+                          <div className="text-xs text-zinc-500 mt-0.5">{sublabel(p)}</div>
+                        </div>
+                        <MarketOddsBtn match={match} sel={`${selPrefix}-${p.id}`} odd={p.odds} market={market} label={`${p.name} — ${label}`} />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              );
+
               const renderTeamSection = (team: TeamPlayerMarkets, isHome: boolean) => (
-                <div key={team.teamId} className="mb-5">
-                  {/* Team header */}
-                  <div className={`flex items-center gap-2 px-1 mb-3 pb-2 border-b border-zinc-700`}>
+                <div key={team.teamId} className="mb-6">
+                  <div className="flex items-center gap-2 px-1 mb-3 pb-2 border-b border-zinc-700">
                     <span className={`text-xs font-bold px-2 py-0.5 rounded ${isHome ? "bg-red-900/60 text-red-300" : "bg-zinc-700 text-zinc-300"}`}>
                       {isHome ? "CASA" : "FORA"}
                     </span>
                     <span className="text-sm font-bold text-white">{team.teamName}</span>
                   </div>
 
-                  {/* Scorers */}
-                  {team.scorers.length > 0 && (
-                    <div className="mb-3">
-                      <div className="text-xs font-semibold text-red-400 uppercase tracking-wider px-1 mb-1.5">⚽ A Marcar</div>
-                      <div className="bg-zinc-900/60 rounded-lg overflow-hidden">
-                        {team.scorers.map(p => (
-                          <div key={p.id} className="flex items-center justify-between py-2 px-2 border-b border-zinc-800/60 last:border-0">
-                            <div className="min-w-0 flex-1 mr-3">
-                              <div className="text-sm font-medium text-white truncate">{p.name}</div>
-                              <div className="text-xs text-zinc-500 mt-0.5">{p.stat} gol(os) em {p.appearances} jogos</div>
-                            </div>
-                            <MarketOddsBtn match={match} sel={`pm-gol-${p.id}`} odd={p.odds} market="marcadores" label={`${p.name} — A Marcar (${team.teamName})`} />
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Assisters */}
-                  {team.assisters.length > 0 && (
-                    <div className="mb-3">
-                      <div className="text-xs font-semibold text-blue-400 uppercase tracking-wider px-1 mb-1.5">🎯 Assistência</div>
-                      <div className="bg-zinc-900/60 rounded-lg overflow-hidden">
-                        {team.assisters.map(p => (
-                          <div key={p.id} className="flex items-center justify-between py-2 px-2 border-b border-zinc-800/60 last:border-0">
-                            <div className="min-w-0 flex-1 mr-3">
-                              <div className="text-sm font-medium text-white truncate">{p.name}</div>
-                              <div className="text-xs text-zinc-500 mt-0.5">{p.stat} assist(s) em {p.appearances} jogos</div>
-                            </div>
-                            <MarketOddsBtn match={match} sel={`pm-ast-${p.id}`} odd={p.odds} market="assistencias" label={`${p.name} — Assistência (${team.teamName})`} />
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Bookings */}
-                  {team.bookings.length > 0 && (
-                    <div className="mb-3">
-                      <div className="text-xs font-semibold text-yellow-500 uppercase tracking-wider px-1 mb-1.5">🟨 Cartão Amarelo</div>
-                      <div className="bg-zinc-900/60 rounded-lg overflow-hidden">
-                        {team.bookings.map(p => (
-                          <div key={p.id} className="flex items-center justify-between py-2 px-2 border-b border-zinc-800/60 last:border-0">
-                            <div className="min-w-0 flex-1 mr-3">
-                              <div className="text-sm font-medium text-white truncate">{p.name}</div>
-                              <div className="text-xs text-zinc-500 mt-0.5">{p.stat} cartão(ões) em {p.appearances} jogos</div>
-                            </div>
-                            <MarketOddsBtn match={match} sel={`pm-yc-${p.id}`} odd={p.odds} market="cartao-jogador" label={`${p.name} — Cartão (${team.teamName})`} />
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
+                  {pmList(team.anytimeScorers,    "pm-gol", "marcadores",      "⚽ Marcador (Qualquer Momento)",  p => `${p.stat} gol(os) em ${p.appearances} jogos`)}
+                  {pmList(team.firstHalfScorers,  "pm-fh",  "marcador-1t",     "⚽ Marcador no 1.º Tempo",        p => `${p.stat} gol(os) em ${p.appearances} jogos`)}
+                  {pmList(team.secondHalfScorers, "pm-sh",  "marcador-2t",     "⚽ Marcador no 2.º Tempo",        p => `${p.stat} gol(os) em ${p.appearances} jogos`)}
+                  {pmList(team.scoreAndAssist,    "pm-sa",  "marcar-assistir", "🎯 Marcar e Dar Assistência",     p => `${p.stat} vez(es) em ${p.appearances} jogos`)}
+                  {pmList(team.bookings,          "pm-card","cartao-jogador",  "🟨🟥 Cartão (Amarelo ou Vermelho)", p => `${p.stat} cartão(ões) em ${p.appearances} jogos`)}
                 </div>
               );
+
               return (
                 <>
                   {playerMarkets.home && renderTeamSection(playerMarkets.home, true)}
