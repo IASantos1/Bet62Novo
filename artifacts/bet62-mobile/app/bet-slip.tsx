@@ -435,6 +435,8 @@ export default function BetSlipScreen() {
             contentContainerStyle={s.content}
             keyboardShouldPersistTaps="handled"
             showsVerticalScrollIndicator={false}
+            bounces={false}
+            overScrollMode="never"
           >
             {/* ── SELECTIONS ── */}
             <Text style={s.sectionLabel}>As tuas seleções</Text>
