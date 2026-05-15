@@ -1846,6 +1846,51 @@ let mlbStandingsCache: MLBStandingsData | null = null;
 let mlbStandingsFetchedAt = 0;
 const MLB_STANDINGS_TTL = 30 * 60 * 1000;
 
+// MLB roster
+type MLBRosterPlayer = {
+  id: string; name: string; number: string; age: number;
+  position: string; height: string; weight: string; bats: string; throws: string; salary: string;
+};
+type MLBRosterPosition = { name: string; players: MLBRosterPlayer[] };
+type MLBRosterData = { teamName: string; abbreviation: string; season: string; positions: MLBRosterPosition[] };
+const mlbRosterCache = new Map<string, MLBRosterData>();
+const mlbRosterFetchedAt = new Map<string, number>();
+const MLB_ROSTER_TTL = 60 * 60 * 1000;
+
+const MLB_ABBR: Record<string, string> = {
+  "Arizona Diamondbacks": "ari",
+  "Atlanta Braves": "atl",
+  "Baltimore Orioles": "bal",
+  "Boston Red Sox": "bos",
+  "Chicago Cubs": "chc",
+  "Chicago White Sox": "cws",
+  "Cincinnati Reds": "cin",
+  "Cleveland Guardians": "cle",
+  "Colorado Rockies": "col",
+  "Detroit Tigers": "det",
+  "Houston Astros": "hou",
+  "Kansas City Royals": "kc",
+  "Los Angeles Angels": "laa",
+  "Los Angeles Dodgers": "lad",
+  "Miami Marlins": "mia",
+  "Milwaukee Brewers": "mil",
+  "Minnesota Twins": "min",
+  "New York Mets": "nym",
+  "New York Yankees": "nyy",
+  "Oakland Athletics": "oak",
+  "Sacramento Athletics": "oak",
+  "Philadelphia Phillies": "phi",
+  "Pittsburgh Pirates": "pit",
+  "San Diego Padres": "sd",
+  "San Francisco Giants": "sf",
+  "Seattle Mariners": "sea",
+  "St. Louis Cardinals": "stl",
+  "Tampa Bay Rays": "tb",
+  "Texas Rangers": "tex",
+  "Toronto Blue Jays": "tor",
+  "Washington Nationals": "wsh",
+};
+
 // NBA roster abbreviations (empirically matching Statpal's URL parameter)
 // Standard NBA 3-letter codes (lowercase) — some may differ from Statpal's actual routing
 const NBA_ABBR: Record<string, string> = {
@@ -5800,6 +5845,68 @@ router.get("/hockey-standings", async (_req, res) => {
     res.json(data);
   } catch {
     res.status(500).json({ error: "Classificação indisponível" });
+  }
+});
+
+async function getMLBRoster(abbr: string): Promise<MLBRosterData | null> {
+  const now = Date.now();
+  const cached = mlbRosterCache.get(abbr);
+  const fetchedAt = mlbRosterFetchedAt.get(abbr) ?? 0;
+  if (cached && now - fetchedAt < MLB_ROSTER_TTL) return cached;
+  try {
+    const resp = await fetch(`${BASE_V1}/mlb/rosters/${abbr}?access_key=${STATSPAL_KEY}`, { signal: AbortSignal.timeout(9000) });
+    if (!resp.ok) return cached ?? null;
+    const json = (await resp.json()) as {
+      team?: {
+        name?: string; abbreviation?: string; season?: string;
+        position?: Array<{ name: string; player?: Array<{
+          id: string; name: string; number?: string; age?: string;
+          position?: string; height?: string; weight?: string;
+          bats?: string; throws?: string; salary?: string;
+        }> | { id: string; name: string; number?: string; age?: string; position?: string; height?: string; weight?: string; bats?: string; throws?: string; salary?: string; } }>;
+      };
+    };
+    const t = json.team;
+    if (!t) return cached ?? null;
+    const positions = Array.isArray(t.position) ? t.position : t.position ? [t.position] : [];
+    const data: MLBRosterData = {
+      teamName: t.name ?? abbr,
+      abbreviation: t.abbreviation ?? abbr.toUpperCase(),
+      season: t.season ?? "",
+      positions: positions.map(p => {
+        const rawPlayers = Array.isArray(p.player) ? p.player : p.player ? [p.player] : [];
+        return {
+          name: p.name,
+          players: rawPlayers.map(pl => ({
+            id: pl.id, name: pl.name,
+            number: pl.number ?? "",
+            age: parseInt(pl.age ?? "0") || 0,
+            position: pl.position ?? "",
+            height: pl.height ?? "",
+            weight: pl.weight ?? "",
+            bats: pl.bats ?? "",
+            throws: pl.throws ?? "",
+            salary: pl.salary ?? "",
+          })),
+        };
+      }),
+    };
+    mlbRosterCache.set(abbr, data);
+    mlbRosterFetchedAt.set(abbr, now);
+    return data;
+  } catch {
+    return cached ?? null;
+  }
+}
+
+router.get("/mlb-roster/:team", async (req, res) => {
+  const abbr = String(req.params["team"]).toLowerCase();
+  try {
+    const data = await getMLBRoster(abbr);
+    if (!data) { res.status(404).json({ error: "Roster não encontrado" }); return; }
+    res.json(data);
+  } catch {
+    res.status(500).json({ error: "Roster indisponível" });
   }
 });
 

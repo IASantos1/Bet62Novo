@@ -1410,6 +1410,30 @@ export default function Home() {
   type MLBStandingsData    = { season: string; leagues: MLBStandingsLeague[] };
   const [mlbStandings, setMlbStandings] = useState<MLBStandingsData | null>(null);
 
+  type MLBRosterPlayer = {
+    id: string; name: string; number: string; age: number;
+    position: string; height: string; weight: string; bats: string; throws: string; salary: string;
+  };
+  type MLBRosterPosition = { name: string; players: MLBRosterPlayer[] };
+  type MLBRosterData = { teamName: string; abbreviation: string; season: string; positions: MLBRosterPosition[] };
+  const [mlbRosters, setMlbRosters] = useState<Record<string, MLBRosterData>>({});
+  const [selectedMLBRoster, setSelectedMLBRoster] = useState<string | null>(null);
+  const [mlbRosterLoading, setMlbRosterLoading] = useState(false);
+
+  const MLB_ABBR: Record<string, string> = {
+    "Arizona Diamondbacks":"ari","Atlanta Braves":"atl","Baltimore Orioles":"bal",
+    "Boston Red Sox":"bos","Chicago Cubs":"chc","Chicago White Sox":"cws",
+    "Cincinnati Reds":"cin","Cleveland Guardians":"cle","Colorado Rockies":"col",
+    "Detroit Tigers":"det","Houston Astros":"hou","Kansas City Royals":"kc",
+    "Los Angeles Angels":"laa","Los Angeles Dodgers":"lad","Miami Marlins":"mia",
+    "Milwaukee Brewers":"mil","Minnesota Twins":"min","New York Mets":"nym",
+    "New York Yankees":"nyy","Oakland Athletics":"oak","Sacramento Athletics":"oak",
+    "Philadelphia Phillies":"phi","Pittsburgh Pirates":"pit","San Diego Padres":"sd",
+    "San Francisco Giants":"sf","Seattle Mariners":"sea","St. Louis Cardinals":"stl",
+    "Tampa Bay Rays":"tb","Texas Rangers":"tex","Toronto Blue Jays":"tor",
+    "Washington Nationals":"wsh",
+  };
+
   type NHLRosterPlayer = {
     id: string; name: string; number: string; age: number;
     birthPlace: string; height: string; weight: string; shot: string; salary: string;
@@ -6070,10 +6094,27 @@ export default function Home() {
                                         </tr>
                                       </thead>
                                       <tbody>
-                                        {div.teams.map((team, idx) => (
-                                          <tr key={team.id} className={`border-b border-zinc-800/30 ${idx === 0 ? "border-l-2 border-l-green-600/40" : ""}`}>
+                                        {div.teams.map((team, idx) => {
+                                          const abbr = MLB_ABBR[team.name];
+                                          const isSelected = selectedMLBRoster === abbr;
+                                          return (
+                                          <tr key={team.id}
+                                            className={`border-b border-zinc-800/30 transition-colors ${idx === 0 ? "border-l-2 border-l-green-600/40" : ""} ${abbr ? (isSelected ? "bg-red-500/10 cursor-pointer" : "cursor-pointer hover:bg-zinc-800/30") : ""}`}
+                                            onClick={() => {
+                                              if (!abbr) return;
+                                              if (isSelected) { setSelectedMLBRoster(null); return; }
+                                              setSelectedMLBRoster(abbr);
+                                              if (mlbRosters[abbr]) return;
+                                              setMlbRosterLoading(true);
+                                              fetch(`/api/matches/mlb-roster/${abbr}`)
+                                                .then(r => r.ok ? r.json() : null)
+                                                .then(d => { if (d) setMlbRosters(prev => ({ ...prev, [abbr]: d })); })
+                                                .catch(() => {})
+                                                .finally(() => setMlbRosterLoading(false));
+                                            }}
+                                          >
                                             <td className="py-1 px-2 text-zinc-600">{team.position}</td>
-                                            <td className="py-1 px-2 font-semibold text-zinc-200 truncate max-w-[90px]">{team.name.split(" ").slice(-1)[0]}</td>
+                                            <td className={`py-1 px-2 font-semibold truncate max-w-[90px] ${isSelected ? "text-red-300" : "text-zinc-200"}`}>{team.name.split(" ").slice(-1)[0]}</td>
                                             <td className="py-1 px-1 text-center text-green-400">{team.won}</td>
                                             <td className="py-1 px-1 text-center text-red-400">{team.lost}</td>
                                             <td className="py-1 px-1 text-center text-zinc-500">{team.gamesBack}</td>
@@ -6082,7 +6123,8 @@ export default function Home() {
                                             <td className={`py-1 px-1 text-center hidden sm:table-cell font-bold ${team.runsDiff.startsWith("+") ? "text-green-400" : team.runsDiff.startsWith("-") ? "text-red-400" : "text-zinc-500"}`}>{team.runsDiff}</td>
                                             <td className={`py-1 px-1 text-center font-black ${team.streak.startsWith("W") ? "text-green-400" : team.streak.startsWith("L") ? "text-red-400" : "text-zinc-400"}`}>{team.streak}</td>
                                           </tr>
-                                        ))}
+                                          );
+                                        })}
                                       </tbody>
                                     </table>
                                   </div>
@@ -6095,6 +6137,73 @@ export default function Home() {
                     )}
                   </div>
                 )}
+
+                {/* MLB Roster panel */}
+                {matchViewTab === "yesterday" && expandedMatch.sport === "baseball" && selectedMLBRoster && (() => {
+                  const abbr = selectedMLBRoster;
+                  const roster = mlbRosters[abbr];
+                  return (
+                    <div className="bg-zinc-900 rounded-xl border border-zinc-800 p-3 mb-2 animate-in fade-in duration-200">
+                      <div className="flex items-center justify-between mb-3">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <span className="text-[10px] font-black text-red-500 uppercase tracking-widest shrink-0">⚾ Plantel</span>
+                          {roster && <span className="text-[9px] text-zinc-400 font-semibold truncate">{roster.teamName}</span>}
+                          {mlbRosterLoading && <span className="text-[9px] text-zinc-600 animate-pulse shrink-0">A carregar...</span>}
+                        </div>
+                        <button onClick={() => setSelectedMLBRoster(null)} className="text-zinc-600 hover:text-zinc-400 text-xs shrink-0">✕</button>
+                      </div>
+                      {!roster && !mlbRosterLoading && (
+                        <div className="text-center text-zinc-600 py-4 text-xs">Plantel não disponível.</div>
+                      )}
+                      {roster && (
+                        <div className="space-y-3">
+                          {roster.positions.map(pos => (
+                            <div key={pos.name}>
+                              <div className="text-[8px] font-black text-zinc-600 uppercase tracking-widest mb-1.5 px-1">{pos.name}</div>
+                              <div className="bg-zinc-950/60 border border-zinc-800 rounded-lg overflow-hidden">
+                                <div className="overflow-x-auto">
+                                  <table className="w-full text-[10px]">
+                                    <thead>
+                                      <tr className="border-b border-zinc-800 text-[8px] font-black text-zinc-600 uppercase">
+                                        <th className="text-left py-1 px-2 w-5">#</th>
+                                        <th className="text-left py-1 px-2 min-w-[110px]">Nome</th>
+                                        <th className="py-1 px-1 text-center w-8">POS</th>
+                                        <th className="py-1 px-1 text-center w-8">I</th>
+                                        <th className="py-1 px-1 text-center hidden sm:table-cell">Alt</th>
+                                        <th className="py-1 px-1 text-center hidden sm:table-cell">Peso</th>
+                                        <th className="py-1 px-1 text-center w-8">Bat</th>
+                                        <th className="py-1 px-1 text-center w-8">Lan</th>
+                                      </tr>
+                                    </thead>
+                                    <tbody>
+                                      {pos.players.map((pl, i) => (
+                                        <tr key={pl.id} className="border-b border-zinc-800/30 last:border-0">
+                                          <td className="py-1 px-2 text-zinc-600 font-mono tabular-nums">{pl.number || "—"}</td>
+                                          <td className="py-1 px-2 font-semibold text-zinc-200 truncate max-w-[110px]">{pl.name}</td>
+                                          <td className="py-1 px-1 text-center text-zinc-500 font-mono">{pl.position || "—"}</td>
+                                          <td className="py-1 px-1 text-center text-zinc-500 tabular-nums">{pl.age || "—"}</td>
+                                          <td className="py-1 px-1 text-center text-zinc-600 hidden sm:table-cell">{pl.height || "—"}</td>
+                                          <td className="py-1 px-1 text-center text-zinc-600 hidden sm:table-cell">{pl.weight || "—"}</td>
+                                          <td className={`py-1 px-1 text-center font-bold ${pl.bats === "L" ? "text-blue-400" : pl.bats === "R" ? "text-orange-400" : pl.bats === "S" ? "text-purple-400" : "text-zinc-600"}`}>{pl.bats || "—"}</td>
+                                          <td className={`py-1 px-1 text-center font-bold ${pl.throws === "L" ? "text-blue-400" : pl.throws === "R" ? "text-orange-400" : "text-zinc-600"}`}>{pl.throws || "—"}</td>
+                                        </tr>
+                                      ))}
+                                    </tbody>
+                                  </table>
+                                </div>
+                              </div>
+                            </div>
+                          ))}
+                          <div className="flex gap-4 text-[8px] text-zinc-700 px-1 pt-1">
+                            <span><span className="text-blue-400 font-bold">L</span> — Esquerdo</span>
+                            <span><span className="text-orange-400 font-bold">R</span> — Direito</span>
+                            <span><span className="text-purple-400 font-bold">S</span> — Ambos (Switch)</span>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
 
                 {/* Yesterday results panel (tennis) */}
                 {matchViewTab === "yesterday" && expandedMatch.sport === "tennis" && (
