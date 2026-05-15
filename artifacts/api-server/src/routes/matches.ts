@@ -1463,10 +1463,36 @@ function makeHockeyMarketsFromTeams(home: string, away: string): AdvancedMarkets
 }
 
 // ─── Volleyball market builder (probabilistic model for real upcoming matches) ─
-function makeVolleyballMarketsFromTeams(home: string, away: string): AdvancedMarkets {
+/**
+ * Given P(home wins match) in a best-of-5 series, return the per-set win
+ * probability pSetH via binary search.
+ * P(home wins) = p^3 + 3p^3(1-p) + 6p^3(1-p)^2
+ */
+function impliedPSetH(pMatchH: number): number {
+  let lo = 0.10, hi = 0.95;
+  for (let i = 0; i < 60; i++) {
+    const p = (lo + hi) / 2;
+    const pw = p**3 + 3*p**3*(1-p) + 6*p**3*(1-p)**2;
+    if (pw < pMatchH) lo = p; else hi = p;
+  }
+  return (lo + hi) / 2;
+}
+
+function makeVolleyballMarketsFromTeams(home: string, away: string, realHomeOdds?: number, realAwayOdds?: number): AdvancedMarkets {
   const sr = seededRng(`vball-mkt:${home}:${away}`);
-  const skillDiff = mc((sr(1) - 0.5) * 0.3 + 0.04, -0.35, 0.35);
-  const pSetH = mc(0.52 + skillDiff, 0.18, 0.82);
+  let pSetH: number;
+  if (realHomeOdds && realAwayOdds && realHomeOdds > 1 && realAwayOdds > 1) {
+    // Derive pSetH from real pre-match odds so all set markets are consistent
+    const implH = 1 / realHomeOdds;
+    const implA = 1 / realAwayOdds;
+    const normH = implH / (implH + implA); // normalise for overround
+    // Add small seeded noise (±2%) so different matches don't look identical
+    const noise = (sr(1) - 0.5) * 0.04;
+    pSetH = mc(impliedPSetH(normH) + noise, 0.18, 0.82);
+  } else {
+    const skillDiff = mc((sr(1) - 0.5) * 0.3 + 0.04, -0.35, 0.35);
+    pSetH = mc(0.52 + skillDiff, 0.18, 0.82);
+  }
   const p3s = Math.pow(pSetH, 3) + Math.pow(1 - pSetH, 3);
   const p4s = 3 * Math.pow(pSetH, 3) * (1 - pSetH) + 3 * Math.pow(1 - pSetH, 3) * pSetH;
   const p5s = Math.max(0, 1 - p3s - p4s);
@@ -4114,7 +4140,7 @@ async function buildVolleyballUpcoming(): Promise<UpcomingMatch[]> {
         sport: "volleyball" as const,
         hasRealOdds: true,
         odds: { home: e.homeOdds, draw: 0, away: e.awayOdds },
-        markets: makeVolleyballMarketsFromTeams(e.homeTeam.name, e.awayTeam.name),
+        markets: makeVolleyballMarketsFromTeams(e.homeTeam.name, e.awayTeam.name, e.homeOdds, e.awayOdds),
       });
     }
 
@@ -5917,27 +5943,32 @@ async function getVolleyballOdds(): Promise<VolleyOddsEntry[]> {
       const a = avgOdd(haBks, "Away");
       if (!h || !a) continue;
 
-      // Over/Under line 3.5 (match goes 4+ sets)
+      // Over/Under line 3.5 (match goes 4+ sets) — average across all bookmakers
       let overUnder: VolleyOddsEntry["overUnder"] = null;
       const ouType = types.find(tp => tp.value === "Over/Under");
       if (ouType) {
         const ouBks = (Array.isArray(ouType.bookmaker) ? ouType.bookmaker : ouType.bookmaker ? [ouType.bookmaker] : []) as VolleyOddsBk[];
+        const overVals: number[] = [];
+        const underVals: number[] = [];
         for (const bk of ouBks) {
+          if (bk.stop === "True") continue;
           const totals = (Array.isArray(bk.total) ? bk.total : bk.total ? [bk.total] : []) as VolleyOddsTotal[];
           const t35 = totals.find(t => t.name === "3.5");
-          if (t35) {
-            const odds35 = Array.isArray(t35.odd) ? t35.odd : (t35.odd ? [t35.odd] : []);
-            const over = odds35.find(o => o.name === "Over");
-            const under = odds35.find(o => o.name === "Under");
-            if (over?.value && under?.value) {
-              overUnder = {
-                line: "3.5",
-                over: Math.max(1.01, Math.round(parseFloat(over.value) * 0.975 * 100) / 100),
-                under: Math.max(1.01, Math.round(parseFloat(under.value) * 0.975 * 100) / 100),
-              };
-              break;
-            }
-          }
+          if (!t35) continue;
+          const odds35 = Array.isArray(t35.odd) ? t35.odd : (t35.odd ? [t35.odd] : []);
+          const ov = parseFloat(odds35.find(o => o.name === "Over")?.value ?? "0");
+          const un = parseFloat(odds35.find(o => o.name === "Under")?.value ?? "0");
+          if (ov > 1) overVals.push(ov);
+          if (un > 1) underVals.push(un);
+        }
+        if (overVals.length && underVals.length) {
+          const avgOver  = overVals.reduce((a, b) => a + b, 0) / overVals.length;
+          const avgUnder = underVals.reduce((a, b) => a + b, 0) / underVals.length;
+          overUnder = {
+            line: "3.5",
+            over:  Math.max(1.01, Math.round(avgOver  * 0.975 * 100) / 100),
+            under: Math.max(1.01, Math.round(avgUnder * 0.975 * 100) / 100),
+          };
         }
       }
 
