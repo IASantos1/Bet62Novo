@@ -1519,6 +1519,10 @@ let liveFetchedAt = 0;
 // Track Statpal's own updated_ts so we can detect a frozen feed
 let liveFeedUpdatedTs = 0;
 
+// ─── SSE clients ──────────────────────────────────────────────────────────────
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const sseClients = new Set<any>();
+
 // v2/daily today: cache 5min
 let dailyCache: StatpalLeagueV2[] | null = null;
 let dailyFetchedAt = 0;
@@ -3664,71 +3668,115 @@ export { buildLiveMatches, buildUpcomingMatches, getUpcomingAll };
 
 // ─── Routes ───────────────────────────────────────────────────────────────────
 
+// Shared payload builder — used by both /live HTTP route and SSE broadcast
+async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
+  const empty: UpcomingMatch[] = [];
+  const [
+    soccerMatches, nhlTournaments, nbaTournaments,
+    tennisTournaments, volleyTournaments, tennisStatsMap,
+    upFootball, upTennis, upBasketball, upHockey, upVolleyball,
+  ] = await Promise.all([
+    buildLiveMatches(),
+    getNHLLive(),
+    getNBALive(),
+    getTennisLive(),
+    getVolleyballLive(),
+    getTennisStatsMap(),
+    buildUpcomingMatches().catch(() => empty),
+    buildTennisUpcoming().catch(() => empty),
+    buildBasketballUpcoming().catch(() => empty),
+    buildHockeyUpcoming().catch(() => empty),
+    buildVolleyballUpcoming().catch(() => empty),
+    getTennisOdds().catch(() => []),
+  ]);
+  const nhlMatches    = buildNHLLiveMatches(nhlTournaments);
+  const nbaMatches    = buildNBALiveMatches(nbaTournaments);
+  const tennisMatches = buildTennisLiveMatches(tennisTournaments, tennisStatsMap);
+  const volleyMatches = buildVolleyballLiveMatches(volleyTournaments);
+  const livePart = [...soccerMatches, ...nhlMatches, ...nbaMatches, ...tennisMatches, ...volleyMatches];
+
+  const liveIds = new Set(livePart.map(m => String(m.id)));
+  const allUpcoming = [...upFootball, ...upTennis, ...upBasketball, ...upHockey, ...upVolleyball];
+  const startingSoon: LiveMatchState[] = allUpcoming
+    .filter(m => {
+      const si = matchStartsInMinutes(m.date, m.time);
+      return isFinite(si) && si >= -10 && si <= 2160 && !liveIds.has(String(m.id));
+    })
+    .sort((a, b) => matchStartsInMinutes(a.date, a.time) - matchStartsInMinutes(b.date, b.time))
+    .slice(0, 50)
+    .map(m => ({
+      id:            m.id,
+      home:          m.home,
+      away:          m.away,
+      league:        m.league,
+      country:       m.country,
+      sport:         m.sport,
+      homeScore:     0,
+      awayScore:     0,
+      minute:        0,
+      status:        "Em Breve",
+      hasRealOdds:   m.hasRealOdds,
+      odds:          m.odds,
+      markets:       m.markets,
+      events:        [],
+      startsIn:      Math.max(0, Math.round(matchStartsInMinutes(m.date, m.time))),
+      scheduledTime: m.time,
+      scheduledDate: m.date,
+    } satisfies LiveMatchState));
+
+  return { matches: [...livePart, ...startingSoon] };
+}
+
+// Broadcast payload to all connected SSE clients; prune dead connections
+async function broadcastLive(): Promise<void> {
+  if (sseClients.size === 0) return;
+  try {
+    const payload = await buildLivePayload();
+    const chunk = `data: ${JSON.stringify(payload)}\n\n`;
+    for (const client of sseClients) {
+      try { client.write(chunk); } catch { sseClients.delete(client); }
+    }
+  } catch {
+    /* ignore — keep clients connected */
+  }
+}
+
 router.get("/live", async (_req, res) => {
   try {
-    const empty: UpcomingMatch[] = [];
-    const [
-      soccerMatches, nhlTournaments, nbaTournaments,
-      tennisTournaments, volleyTournaments, tennisStatsMap,
-      upFootball, upTennis, upBasketball, upHockey, upVolleyball,
-    ] = await Promise.all([
-      buildLiveMatches(),
-      getNHLLive(),
-      getNBALive(),
-      getTennisLive(),
-      getVolleyballLive(),
-      getTennisStatsMap(),
-      buildUpcomingMatches().catch(() => empty),
-      buildTennisUpcoming().catch(() => empty),
-      buildBasketballUpcoming().catch(() => empty),
-      buildHockeyUpcoming().catch(() => empty),
-      buildVolleyballUpcoming().catch(() => empty),
-      // Populate _tennisPreMatchOdds cache so buildTennisLiveMatches uses real base odds
-      getTennisOdds().catch(() => []),
-    ]);
-    const nhlMatches    = buildNHLLiveMatches(nhlTournaments);
-    const nbaMatches    = buildNBALiveMatches(nbaTournaments);
-    const tennisMatches = buildTennisLiveMatches(tennisTournaments, tennisStatsMap);
-    const volleyMatches = buildVolleyballLiveMatches(volleyTournaments);
-    const livePart = [...soccerMatches, ...nhlMatches, ...nbaMatches, ...tennisMatches, ...volleyMatches];
-
-    // "Em Breve" — real upcoming matches starting within the next 36 hours
-    const liveIds = new Set(livePart.map(m => String(m.id)));
-    const allUpcoming = [...upFootball, ...upTennis, ...upBasketball, ...upHockey, ...upVolleyball];
-    const startingSoon: LiveMatchState[] = allUpcoming
-      .filter(m => {
-        const si = matchStartsInMinutes(m.date, m.time);
-        return isFinite(si) && si >= -10 && si <= 2160 && !liveIds.has(String(m.id));
-      })
-      // Sort by soonest start first so all sports share slots fairly
-      .sort((a, b) => matchStartsInMinutes(a.date, a.time) - matchStartsInMinutes(b.date, b.time))
-      .slice(0, 50)
-      .map(m => ({
-        id:            m.id,
-        home:          m.home,
-        away:          m.away,
-        league:        m.league,
-        country:       m.country,
-        sport:         m.sport,
-        homeScore:     0,
-        awayScore:     0,
-        minute:        0,
-        status:        "Em Breve",
-        hasRealOdds:   m.hasRealOdds,
-        odds:          m.odds,
-        markets:       m.markets,
-        events:        [],
-        startsIn:      Math.max(0, Math.round(matchStartsInMinutes(m.date, m.time))),
-        scheduledTime: m.time,
-        scheduledDate: m.date,
-      } satisfies LiveMatchState));
-
-    const matches = [...livePart, ...startingSoon];
-    res.json({ matches });
+    const payload = await buildLivePayload();
+    res.json(payload);
   } catch (err) {
     console.error("[live route] unexpected error:", err);
     res.json({ matches: [] });
   }
+});
+
+// ─── SSE endpoint — pushes live data every 2 s (piggybacked on drift engine) ──
+router.get("/live-stream", (req, res) => {
+  res.setHeader("Content-Type", "text/event-stream");
+  res.setHeader("Cache-Control", "no-cache, no-transform");
+  res.setHeader("Connection", "keep-alive");
+  res.setHeader("X-Accel-Buffering", "no"); // disable nginx buffering
+
+  // Flush headers immediately so the browser sees an open stream
+  res.flushHeaders();
+
+  sseClients.add(res);
+
+  // Send an initial event right away so the client doesn't wait up to 2s
+  buildLivePayload()
+    .then(p => { try { res.write(`data: ${JSON.stringify(p)}\n\n`); } catch { /* ignore */ } })
+    .catch(() => { /* ignore */ });
+
+  // Keepalive comment every 20s so proxies don't close the connection
+  const keepAlive = setInterval(() => {
+    try { res.write(": keepalive\n\n"); } catch { /* ignore */ }
+  }, 20_000);
+
+  req.on("close", () => {
+    clearInterval(keepAlive);
+    sseClients.delete(res);
+  });
 });
 
 // ─── Real upcoming builders (from live API data) ──────────────────────────────
@@ -8913,10 +8961,8 @@ setInterval(() => {
   const now = Date.now();
   for (const [id, state] of liveMatchState.entries()) {
     if (state.sport !== "football") continue;
-    // Skip halftime, full-time, and pre-match entries
     const skip = ["HT", "FT", "AET", "Em Breve", "Fin.", "Fin. (AET)"];
     if (skip.includes(state.status)) continue;
-    // Skip if ALL core markets are suspended — don't drift while suspended
     if (state.marketSuspension) {
       const coreKeys = ["result", "totalGoals", "handicap"];
       const allCoresSuspended = coreKeys.every(k => {
@@ -8927,6 +8973,8 @@ setInterval(() => {
     }
     liveMatchState.set(id, applyTieredMarketDrift(state, now));
   }
+  // Push to SSE clients every 2s (same cadence as market drift)
+  broadcastLive().catch(() => { /* ignore */ });
 }, 2000);
 
 export default router;

@@ -1690,60 +1690,62 @@ export default function Home() {
   }, [fetchUpcoming]);
 
   // Fetch live matches — polls every 5s
+  type LiveMatchRaw = {
+    id: string; home: string; away: string; league: string;
+    country?: string; sport?: string; status?: string;
+    homeScore: number; awayScore: number; minute: number;
+    hasRealOdds?: boolean; odds: Odds; markets?: AdvancedMarkets;
+    events?: Array<{ type: string; team: string; minute: number; player: string }>;
+    marketSuspension?: Record<string, number>;
+    _suspensionReason?: string;
+    _liveExtra?: {
+      clockStr?: string;
+      sets?: Array<[number, number]>;
+      currentPoints?: [number | string, number | string];
+      currentPts?: [number, number];
+      vollSets?: Array<[number, number]>;
+      tennisStats?: [
+        { aces: number; doubleFaults: number; firstServePct: string; winners: number; unforcedErrors: number },
+        { aces: number; doubleFaults: number; firstServePct: string; winners: number; unforcedErrors: number },
+      ];
+      periods?: Array<[number, number]>;
+      quarters?: Array<[number, number]>;
+    };
+  };
+
+  // Shared processing — called both by fetchLive (HTTP fallback) and the SSE handler
+  const processLiveData = useCallback((data: { matches?: LiveMatchRaw[] }) => {
+    const matches = (data.matches || []) as LiveMatchRaw[];
+    const newMins: Record<string, number> = {};
+    for (const m of matches) newMins[String(m.id)] = m.minute;
+    apiMinutesRef.current = newMins;
+    liveDataFetchedAt.current = Date.now();
+    setLiveMatches(prev => {
+      const newPrev: Record<string, Odds> = {};
+      const newPrevMkts: Record<string, Record<string, number>> = {};
+      for (const m of prev) {
+        const id = String(m.id);
+        newPrev[id] = m.odds;
+        newPrevMkts[id] = flattenMatchMarketsForArrows(m);
+      }
+      prevLiveOdds.current = newPrev;
+      prevLiveMarkets.current = newPrevMkts;
+      return matches.map(m => ({ ...m, isLive: true }));
+    });
+  }, []);
+
   const fetchLive = useCallback(async (showSpinner = false) => {
     if (isIdleRef.current) return;
     if (showSpinner) setLiveLoading(true);
     try {
       const res = await fetch("/api/matches/live");
-      if (res.ok) {
-        const data = await res.json();
-        const matches = (data.matches || []) as Array<{
-          id: string; home: string; away: string; league: string;
-          country?: string; sport?: string; status?: string;
-          homeScore: number; awayScore: number; minute: number;
-          hasRealOdds?: boolean; odds: Odds; markets?: AdvancedMarkets;
-          events?: Array<{ type: string; team: string; minute: number; player: string }>;
-          marketSuspension?: Record<string, number>;
-          _suspensionReason?: string;
-          _liveExtra?: {
-            clockStr?: string;
-            sets?: Array<[number, number]>;
-            currentPoints?: [number | string, number | string];
-            currentPts?: [number, number];
-            vollSets?: Array<[number, number]>;
-            tennisStats?: [
-              { aces: number; doubleFaults: number; firstServePct: string; winners: number; unforcedErrors: number },
-              { aces: number; doubleFaults: number; firstServePct: string; winners: number; unforcedErrors: number },
-            ];
-            periods?: Array<[number, number]>;
-            quarters?: Array<[number, number]>;
-          };
-        }>;
-        // Record API minutes for local ticker interpolation
-        const newMins: Record<string, number> = {};
-        for (const m of matches) newMins[String(m.id)] = m.minute;
-        apiMinutesRef.current = newMins;
-        liveDataFetchedAt.current = Date.now();
-        // Merge silently — preserve prevLiveOdds + prevLiveMarkets for trend arrows
-        setLiveMatches(prev => {
-          const newPrev: Record<string, Odds> = {};
-          const newPrevMkts: Record<string, Record<string, number>> = {};
-          for (const m of prev) {
-            const id = String(m.id);
-            newPrev[id] = m.odds;
-            newPrevMkts[id] = flattenMatchMarketsForArrows(m);
-          }
-          prevLiveOdds.current = newPrev;
-          prevLiveMarkets.current = newPrevMkts;
-          return matches.map(m => ({ ...m, isLive: true }));
-        });
-      }
+      if (res.ok) processLiveData(await res.json());
     } catch {
       /* keep stale */
     } finally {
       if (showSpinner) setLiveLoading(false);
     }
-  }, []);
+  }, [processLiveData]);
 
   // Track disappearing live matches to store final scores + compute local bet outcomes
   useEffect(() => {
@@ -1790,20 +1792,28 @@ export default function Home() {
     }
   }, [liveMatches, myBets]);
 
-  // Poll faster (2s) when a live match detail panel is open so tier-1 market
-  // drift (driven by the 2s backend timer) reaches the UI promptly.
-  // Otherwise poll every 5s for the list view.
-  const liveMatchDetailOpen = !!(expandedMatch?.isLive);
+  // SSE live stream — replaces polling interval.
+  // The server pushes every 2s (piggybacked on the market drift engine).
+  // EventSource auto-reconnects on network blips.
+  // Falls back to one-off HTTP fetch on open so the UI never waits.
   useEffect(() => {
-    if (activeTab === "live" || activeTab === "mybets") {
-      fetchLive(activeTab === "live");
-      const hasLiveBetsInSlip = bets.some(b => liveMatches.some(m => String(m.id) === String(b.matchId)));
-      const ms = (liveMatchDetailOpen || hasLiveBetsInSlip) ? 2000 : 5000;
-      const interval = setInterval(() => fetchLive(false), ms);
-      return () => clearInterval(interval);
-    }
-    return undefined;
-  }, [activeTab, fetchLive, liveMatchDetailOpen]);
+    if (activeTab !== "live" && activeTab !== "mybets") return;
+
+    // Immediate HTTP fetch with loading spinner so data appears instantly
+    fetchLive(activeTab === "live");
+
+    const es = new EventSource("/api/matches/live-stream");
+
+    es.onmessage = (ev: MessageEvent) => {
+      if (isIdleRef.current) return;
+      try { processLiveData(JSON.parse(ev.data as string) as { matches?: LiveMatchRaw[] }); } catch { /* ignore malformed */ }
+    };
+
+    // onerror fires on reconnect attempts — EventSource handles reconnection
+    // automatically; nothing to do here.
+
+    return () => { es.close(); };
+  }, [activeTab, fetchLive, processLiveData]);
 
   // Poll tennis, basketball, hockey, volleyball odds every 60s
   useEffect(() => {
