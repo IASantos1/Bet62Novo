@@ -1667,6 +1667,10 @@ let mlbLiveCache: MLBTournament[] | null = null;
 let mlbLiveFetchedAt = 0;
 // Raw odds map (home|away → real odds) kept across cache refreshes — includes games already started
 const mlbRawOddsMap = new Map<string, { h: number; a: number }>();
+// Sticky live: once a game is seen as live, keep it in the feed for up to 4 min
+// even if the API temporarily returns a non-live status (between-inning transitions, API glitches)
+const mlbLiveStickyMap = new Map<string, { match: LiveMatchState; lastSeenMs: number }>();
+const MLB_STICKY_TTL_MS = 4 * 60 * 1_000; // 4 minutes grace period
 
 type NBAMatch = {
   id: string; stats_id?: string; status: string; time: string; timer: string; date?: string;
@@ -2900,6 +2904,9 @@ function buildMLBLiveMatches(tournaments: MLBTournament[]): LiveMatchState[] {
   const MLB_LIVE_STATUSES = new Set([
     "1st Inning", "2nd Inning", "3rd Inning", "4th Inning", "5th Inning",
     "6th Inning", "7th Inning", "8th Inning", "9th Inning", "Extra Inning", "In Progress",
+    // Between-inning and delay statuses Statpal may emit during transitions
+    "Break", "Mid Inning", "End of Inning", "Warmup",
+    "Delayed", "Rain Delay", "Delay", "Suspended",
   ]);
   const result: LiveMatchState[] = [];
 
@@ -2983,6 +2990,27 @@ function buildMLBLiveMatches(tournaments: MLBTournament[]): LiveMatchState[] {
       });
     }
   }
+
+  // ── Sticky live: keep games visible for up to 4 min after last confirmed live ──
+  // Statpal MLB API sometimes drops a game to "Not Started" between innings or
+  // during brief API inconsistencies. Without this, games flicker in/out of live.
+  const nowMs = Date.now();
+  const currentIds = new Set(result.map(m => String(m.id)));
+
+  // 1. Update sticky map for all currently live games
+  for (const m of result) {
+    mlbLiveStickyMap.set(String(m.id), { match: m, lastSeenMs: nowMs });
+  }
+
+  // 2. Re-inject games from sticky map that the API temporarily dropped
+  for (const [id, { match, lastSeenMs }] of mlbLiveStickyMap) {
+    if (nowMs - lastSeenMs >= MLB_STICKY_TTL_MS) {
+      mlbLiveStickyMap.delete(id); // expired — game is truly over
+    } else if (!currentIds.has(id)) {
+      result.push(match); // API dropped it temporarily — keep showing last known state
+    }
+  }
+
   return result;
 }
 
