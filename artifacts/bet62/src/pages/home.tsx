@@ -1419,7 +1419,12 @@ export default function Home() {
   const [mlbRosters, setMlbRosters] = useState<Record<string, MLBRosterData>>({});
   const [selectedMLBRoster, setSelectedMLBRoster] = useState<string | null>(null);
   const [mlbRosterLoading, setMlbRosterLoading] = useState(false);
-  const [mlbPanelTab, setMlbPanelTab] = useState<"roster" | "stats">("roster");
+  const [mlbPanelTab, setMlbPanelTab] = useState<"roster" | "stats" | "injuries">("roster");
+
+  type MLBInjuryReport = { playerName: string; playerId: string; status: string; description: string; date: string };
+  type MLBInjuriesData = { teamName: string; report: MLBInjuryReport[] };
+  const [mlbInjuries, setMlbInjuries] = useState<Record<string, MLBInjuriesData>>({});
+  const [mlbInjuriesLoading, setMlbInjuriesLoading] = useState(false);
 
   type MLBBatterStat = {
     id: string; rank: number; name: string; gp: number;
@@ -6172,7 +6177,7 @@ export default function Home() {
                       </div>
                       {/* Tabs */}
                       <div className="flex border-b border-zinc-800 mb-3">
-                        {(["roster", "stats"] as const).map(tab => (
+                        {(["roster", "stats", "injuries"] as const).map(tab => (
                           <button key={tab} onClick={() => {
                             setMlbPanelTab(tab);
                             if (tab === "stats" && !mlbTeamStats[abbr]) {
@@ -6183,10 +6188,18 @@ export default function Home() {
                                 .catch(() => {})
                                 .finally(() => setMlbStatsLoading(false));
                             }
+                            if (tab === "injuries" && !mlbInjuries[abbr]) {
+                              setMlbInjuriesLoading(true);
+                              fetch(`/api/matches/mlb-injuries/${abbr}`)
+                                .then(r => r.ok ? r.json() : null)
+                                .then(d => { if (d) setMlbInjuries(prev => ({ ...prev, [abbr]: d })); })
+                                .catch(() => {})
+                                .finally(() => setMlbInjuriesLoading(false));
+                            }
                           }}
-                            className={`flex-1 py-1.5 text-[10px] font-bold transition-colors ${mlbPanelTab === tab ? "text-red-400 border-b-2 border-red-500 bg-red-500/5" : "text-zinc-600 hover:text-zinc-400"}`}
+                            className={`flex-1 py-1.5 text-[10px] font-bold transition-colors ${mlbPanelTab === tab ? (tab === "injuries" ? "text-red-400 border-b-2 border-red-500 bg-red-500/5" : "text-red-400 border-b-2 border-red-500 bg-red-500/5") : "text-zinc-600 hover:text-zinc-400"}`}
                           >
-                            {tab === "roster" ? "Plantel" : "Estatísticas"}
+                            {tab === "roster" ? "Plantel" : tab === "stats" ? "Estatísticas" : "🩹 Lesões"}
                           </button>
                         ))}
                       </div>
@@ -6343,6 +6356,50 @@ export default function Home() {
                           )}
                         </>
                       )}
+
+                      {/* Injuries tab */}
+                      {mlbPanelTab === "injuries" && (() => {
+                        const injData = mlbInjuries[abbr];
+                        const injColor = (r: MLBInjuryReport) => {
+                          const s = r.status.toLowerCase();
+                          if (s.includes("60-day") || s === "sidelined") return { badge: "bg-red-500/20 text-red-400 border-red-700/40", dot: "bg-red-500" };
+                          if (s.includes("15-day") || s.includes("10-day")) return { badge: "bg-amber-500/20 text-amber-400 border-amber-700/40", dot: "bg-amber-500" };
+                          if (s.includes("7-day") || s.includes("day-to-day")) return { badge: "bg-yellow-500/20 text-yellow-400 border-yellow-700/40", dot: "bg-yellow-500" };
+                          return { badge: "bg-amber-500/20 text-amber-400 border-amber-700/40", dot: "bg-amber-500" };
+                        };
+                        return (
+                          <>
+                            {!injData && !mlbInjuriesLoading && <div className="text-center text-zinc-600 py-4 text-xs">Sem lesões disponíveis.</div>}
+                            {mlbInjuriesLoading && !injData && <div className="text-center text-zinc-600 py-4 text-xs animate-pulse">A carregar...</div>}
+                            {injData && injData.report.length === 0 && (
+                              <div className="flex items-center gap-2 px-3 py-4 text-xs text-green-400">
+                                <span className="w-2 h-2 rounded-full bg-green-500 shrink-0" />
+                                Equipa sem lesões reportadas.
+                              </div>
+                            )}
+                            {injData && injData.report.length > 0 && (
+                              <div className="divide-y divide-zinc-800/50">
+                                {injData.report.map(r => {
+                                  const { badge, dot } = injColor(r);
+                                  return (
+                                    <div key={r.playerId} className="flex items-start gap-3 px-3 py-2.5 hover:bg-zinc-800/20 transition-colors">
+                                      <span className={`mt-1 w-1.5 h-1.5 rounded-full shrink-0 ${dot}`} />
+                                      <div className="flex-1 min-w-0">
+                                        <div className="flex items-center gap-2 flex-wrap">
+                                          <span className="text-[11px] font-bold text-zinc-200">{r.playerName}</span>
+                                          <span className={`text-[9px] font-black border rounded px-1 py-0.5 ${badge}`}>{r.status}</span>
+                                        </div>
+                                        <div className="text-[10px] text-zinc-500 mt-0.5">{r.description}</div>
+                                      </div>
+                                      <div className="text-[9px] text-zinc-700 shrink-0 tabular-nums whitespace-nowrap">{r.date}</div>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            )}
+                          </>
+                        );
+                      })()}
                     </div>
                   );
                 })()}

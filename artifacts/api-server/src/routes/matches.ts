@@ -6020,6 +6020,59 @@ router.get("/mlb-team-stats/:team", async (req, res) => {
   }
 });
 
+// MLB injuries
+type MLBInjuryReport = { playerName: string; playerId: string; status: string; description: string; date: string };
+type MLBInjuriesData = { teamName: string; report: MLBInjuryReport[] };
+const mlbInjuriesCache = new Map<string, MLBInjuriesData>();
+const mlbInjuriesFetchedAt = new Map<string, number>();
+const MLB_INJURIES_TTL = 15 * 60 * 1000;
+
+async function getMLBInjuries(abbr: string): Promise<MLBInjuriesData | null> {
+  const now = Date.now();
+  const cached = mlbInjuriesCache.get(abbr);
+  const fetchedAt = mlbInjuriesFetchedAt.get(abbr) ?? 0;
+  if (cached && now - fetchedAt < MLB_INJURIES_TTL) return cached;
+  try {
+    const resp = await fetch(`${BASE_V1}/mlb/injuries/${abbr}?access_key=${STATSPAL_KEY}`, { signal: AbortSignal.timeout(9000) });
+    if (!resp.ok) return cached ?? null;
+    const json = (await resp.json()) as {
+      team?: {
+        id?: string; name?: string;
+        report?: Array<{ player_name?: string; player_id?: string; status?: string; description?: string; date?: string }> | { player_name?: string; player_id?: string; status?: string; description?: string; date?: string };
+      };
+    };
+    const t = json.team;
+    if (!t) return cached ?? null;
+    const raw = Array.isArray(t.report) ? t.report : t.report ? [t.report] : [];
+    const data: MLBInjuriesData = {
+      teamName: t.name ?? abbr,
+      report: raw.map(r => ({
+        playerName: r.player_name ?? "",
+        playerId: r.player_id ?? "",
+        status: r.status ?? "",
+        description: r.description ?? "",
+        date: r.date ?? "",
+      })),
+    };
+    mlbInjuriesCache.set(abbr, data);
+    mlbInjuriesFetchedAt.set(abbr, now);
+    return data;
+  } catch {
+    return cached ?? null;
+  }
+}
+
+router.get("/mlb-injuries/:team", async (req, res) => {
+  const abbr = String(req.params["team"]).toLowerCase();
+  try {
+    const data = await getMLBInjuries(abbr);
+    if (!data) { res.status(404).json({ error: "Lesões indisponíveis" }); return; }
+    res.json(data);
+  } catch {
+    res.status(500).json({ error: "Lesões indisponíveis" });
+  }
+});
+
 async function getNBAStandings(): Promise<NBAStandingsData> {
   const now = Date.now();
   if (nbaStandingsCache && now - nbaStandingsFetchedAt < NBA_STANDINGS_TTL) return nbaStandingsCache;
