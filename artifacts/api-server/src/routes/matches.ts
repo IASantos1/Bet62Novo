@@ -2892,12 +2892,10 @@ function buildMLBLiveMatches(tournaments: MLBTournament[]): LiveMatchState[] {
     for (const m of matches) {
       if (!m?.status) continue;
       const isLive       = MLB_LIVE_STATUSES.has(m.status);
-      const isNotStarted = m.status === "Not Started";
-      if (!isLive && !isNotStarted) continue;
+      if (!isLive) continue;
       if (m.date && m.date !== todayStr) {
         if (!allowYesterday || m.date !== yesterdayStr) continue;
       }
-      if (isNotStarted && m.date && m.date !== todayStr) continue;
 
       const homeScore = parseInt(m.home.totalscore) || 0;
       const awayScore = parseInt(m.away.totalscore) || 0;
@@ -2915,7 +2913,7 @@ function buildMLBLiveMatches(tournaments: MLBTournament[]): LiveMatchState[] {
         "5th Inning": 5, "6th Inning": 6, "7th Inning": 7, "8th Inning": 8,
         "9th Inning": 9, "Extra Inning": 10, "In Progress": 5,
       };
-      const minute = isNotStarted ? 0 : (inningMinute[m.status] ?? 5);
+      const minute = inningMinute[m.status] ?? 5;
 
       const odds = makeOddsFromTeams(m.home.name, m.away.name);
       const diff = homeScore - awayScore;
@@ -2936,7 +2934,7 @@ function buildMLBLiveMatches(tournaments: MLBTournament[]): LiveMatchState[] {
         country:   t.country || "usa",
         sport:     "baseball",
         homeScore, awayScore, minute,
-        status:    isNotStarted ? "Not Started" : m.status,
+        status:    m.status,
         hasRealOdds: true,
         odds:    liveOdds,
         markets: makeMLBMarketsFromTeams(m.home.name, m.away.name),
