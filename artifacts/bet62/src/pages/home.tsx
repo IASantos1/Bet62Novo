@@ -2323,7 +2323,7 @@ export default function Home() {
 
   // Compact league/meta row (no banner)
   const CompactLeagueRow = ({ match, rightSlot }: { match: Match; rightSlot?: ReactNode }) => {
-    const flag = COUNTRY_FLAGS[match.country?.toLowerCase() ?? ""] ?? "⚽";
+    const flag = COUNTRY_FLAGS[match.country?.toLowerCase() ?? ""] ?? sportEmoji(match.sport);
     // For live "Not Started" matches (tennis/volleyball): show scheduled time
     const timeStr = (match.isLive && match.status !== "Not Started") ? "" : [
       match.date ? formatMatchDate(match.date) : "",

@@ -3846,10 +3846,12 @@ async function buildTennisUpcoming(): Promise<UpcomingMatch[]> {
     const seenNorm = new Set<string>(); // normalised dedup across both loops
     const results: UpcomingMatch[] = [];
 
-    // First: matches that have real pre-match odds
+    // First: matches that have real pre-match odds (Not Started only — skip in-play)
     for (const e of odds) {
       if (!e.players[0]?.name || !e.players[1]?.name) continue;
       if (e.players[0].name.includes("/") || e.players[1].name.includes("/")) continue;
+      // Skip matches that are already in progress in the odds API (status like "1","2","3" = set number)
+      if (e.status && e.status !== "Not Started" && /^\d+$/.test(e.status)) continue;
       const normKey = _tennisPairKey(e.players[0].name, e.players[1].name);
       if (seenNorm.has(normKey)) continue;
       seenNorm.add(normKey);
@@ -5864,6 +5866,7 @@ router.get("/volleyball-schedule/:id", async (req, res) => {
 type TennisOddsPlayer = { id: string; name: string };
 type TennisOddsEntry = {
   matchId: string; date: string; time: string; tournamentName: string;
+  status?: string;
   players: [TennisOddsPlayer, TennisOddsPlayer];
   matchOdds: [number, number];
   set1Odds: [number, number] | null;
@@ -6426,6 +6429,7 @@ async function getTennisOdds(): Promise<TennisOddsEntry[]> {
         matchId: m.id,
         date: m.date ?? "", time: m.time ?? "",
         tournamentName: rawTour.name ?? "",
+        status: m.status ?? "",
         players: [{ id: p[0]?.id ?? "", name: p[0]?.name ?? "" }, { id: p[1]?.id ?? "", name: p[1]?.name ?? "" }],
         matchOdds: [h, a], set1Odds,
         markets: {
