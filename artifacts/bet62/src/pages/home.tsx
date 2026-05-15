@@ -1716,6 +1716,8 @@ export default function Home() {
   // Shared processing — called both by fetchLive (HTTP fallback) and the SSE handler
   const processLiveData = useCallback((data: { matches?: LiveMatchRaw[] }) => {
     const matches = (data.matches || []) as LiveMatchRaw[];
+    // Guard: never replace live state with an empty list — keep stale on API errors
+    if (matches.length === 0) return;
     const newMins: Record<string, number> = {};
     for (const m of matches) newMins[String(m.id)] = m.minute;
     apiMinutesRef.current = newMins;

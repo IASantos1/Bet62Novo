@@ -1516,12 +1516,14 @@ function makeVolleyballMarketsFromTeams(home: string, away: string): AdvancedMar
 // v2/live: cache 30s
 let liveCache: StatpalLeagueV2[] | null = null;
 let liveFetchedAt = 0;
+let liveIsFetching = false;
 // Track Statpal's own updated_ts so we can detect a frozen feed
 let liveFeedUpdatedTs = 0;
 
 // ─── SSE clients ──────────────────────────────────────────────────────────────
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const sseClients = new Set<any>();
+let broadcastInProgress = false;
 
 // v2/daily today: cache 5min
 let dailyCache: StatpalLeagueV2[] | null = null;
@@ -1875,12 +1877,16 @@ export async function scanDailyForFinished(): Promise<void> {
 async function getLiveLeagues(): Promise<StatpalLeagueV2[]> {
   const now = Date.now();
   if (liveCache && now - liveFetchedAt < CONFIG.LIVE_CACHE_TTL) return liveCache;
+  // Prevent concurrent fetches — return stale while a fetch is already in flight
+  if (liveIsFetching) return liveCache ?? [];
+  liveIsFetching = true;
   try {
     const resp = await fetch(`${BASE_V2}/soccer/matches/live?access_key=${STATSPAL_KEY}`, {
       signal: AbortSignal.timeout(9000),
     });
     if (!resp.ok) {
       console.warn(`[live] Statpal HTTP ${resp.status} — using cache or empty`);
+      liveFetchedAt = now; // back off — don't hammer the API on next call
       return liveCache ?? [];
     }
     const data = (await resp.json()) as { live_matches?: { league?: StatpalLeagueV2 | StatpalLeagueV2[]; updated_ts?: number } };
@@ -1893,7 +1899,11 @@ async function getLiveLeagues(): Promise<StatpalLeagueV2[]> {
     return liveCache;
   } catch (err) {
     console.warn(`[live] Statpal fetch error — using cache or empty:`, err);
+    // Back off: retry after full TTL, not immediately
+    liveFetchedAt = now;
     return liveCache ?? [];
+  } finally {
+    liveIsFetching = false;
   }
 }
 
@@ -3727,17 +3737,25 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
   return { matches: [...livePart, ...startingSoon] };
 }
 
-// Broadcast payload to all connected SSE clients; prune dead connections
+// Broadcast payload to all connected SSE clients; prune dead connections.
+// Guards: (1) skip if no clients, (2) skip if a broadcast is already in
+// progress (prevents pileup when Statpal is slow), (3) never send empty
+// matches — keep the last good state on clients instead.
 async function broadcastLive(): Promise<void> {
   if (sseClients.size === 0) return;
+  if (broadcastInProgress) return;
+  broadcastInProgress = true;
   try {
     const payload = await buildLivePayload();
+    if (payload.matches.length === 0) return; // keep last good state; don't wipe UI
     const chunk = `data: ${JSON.stringify(payload)}\n\n`;
     for (const client of sseClients) {
       try { client.write(chunk); } catch { sseClients.delete(client); }
     }
   } catch {
     /* ignore — keep clients connected */
+  } finally {
+    broadcastInProgress = false;
   }
 }
 
