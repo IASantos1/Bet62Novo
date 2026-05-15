@@ -147,6 +147,11 @@ export type LiveMatchState = {
     periods?: Array<[number, number]>;   // hockey: [[P1h,P1a],[P2h,P2a],[P3h,P3a],[OTh,OTa]]
     quarters?: Array<[number, number]>;  // basketball: [[Q1h,Q1a],[Q2h,Q2a],[Q3h,Q3a],[Q4h,Q4a],[OTh,OTa]]
     innings?: Array<[number, number]>;   // baseball: [[I1h,I1a],[I2h,I2a],...,[I9h,I9a]]
+    outs?: number;                        // baseball: current outs (0-2)
+    homeHits?: number;                   // baseball: home team hits
+    awayHits?: number;                   // baseball: away team hits
+    homeErrors?: number;                 // baseball: home team errors
+    awayErrors?: number;                 // baseball: away team errors
     // Football extras from Statpal v2
     htScore?: [number, number];          // football: half-time score [homeHT, awayHT]
     etScore?: [number, number];          // football: extra-time score [homeET, awayET]
@@ -1464,7 +1469,7 @@ function makeHockeyMarketsFromTeams(home: string, away: string): AdvancedMarkets
 }
 
 // ─── MLB (Baseball) market builder ────────────────────────────────────────────
-function makeMLBMarketsFromTeams(home: string, away: string): AdvancedMarkets {
+function makeMLBMarketsFromTeams(home: string, away: string, realHomeOdds?: number, realAwayOdds?: number): AdvancedMarkets {
   const sr = seededRng(`mlb-mkt:${home}:${away}`);
   const meanTotal  = mc(8.5 + (sr(1) - 0.5) * 3.0, 6.5, 12.0);
   const totalLine  = Math.round(meanTotal * 2) / 2;
@@ -1472,7 +1477,14 @@ function makeMLBMarketsFromTeams(home: string, away: string): AdvancedMarkets {
   const [oTotal,  uTotal ] = probsToDecimalOdds([mc(1 - normalCdf((totalLine       - meanTotal) / totalSd), 0.05, 0.95), mc(normalCdf((totalLine       - meanTotal) / totalSd), 0.05, 0.95)], 1.06);
   const [oAlt1,   uAlt1  ] = probsToDecimalOdds([mc(1 - normalCdf((totalLine - 0.5 - meanTotal) / totalSd), 0.05, 0.95), mc(normalCdf((totalLine - 0.5 - meanTotal) / totalSd), 0.05, 0.95)], 1.06);
   const [oAlt2,   uAlt2  ] = probsToDecimalOdds([mc(1 - normalCdf((totalLine + 0.5 - meanTotal) / totalSd), 0.05, 0.95), mc(normalCdf((totalLine + 0.5 - meanTotal) / totalSd), 0.05, 0.95)], 1.06);
-  const marginMean = mc((sr(3) - 0.5) * 2.0, -2.0, 2.0);
+  // Anchor run-line direction from real moneyline odds when available
+  let marginMean = mc((sr(3) - 0.5) * 2.0, -2.0, 2.0);
+  if (realHomeOdds && realAwayOdds && realHomeOdds > 1 && realAwayOdds > 1) {
+    const implH = 1 / realHomeOdds;
+    const implA = 1 / realAwayOdds;
+    const pHome = mc(implH / (implH + implA), 0.15, 0.85);
+    marginMean = mc((pHome - 0.5) * 5.0 + (sr(3) - 0.5) * 0.4, -3.0, 3.0);
+  }
   const marginSd   = mc(2.8 + sr(4) * 0.8, 2.2, 4.0);
   const pHomeRL    = mc(1 - normalCdf((-1.5 - marginMean) / marginSd), 0.05, 0.95);
   const [rlH, rlA] = probsToDecimalOdds([pHomeRL, 1 - pHomeRL], 1.06);
@@ -2939,7 +2951,14 @@ function buildMLBLiveMatches(tournaments: MLBTournament[]): LiveMatchState[] {
         odds:    liveOdds,
         markets: makeMLBMarketsFromTeams(m.home.name, m.away.name),
         events:  [],
-        _liveExtra: innings.length > 0 ? { innings } : undefined,
+        _liveExtra: innings.length > 0 ? {
+          innings,
+          outs: m.outs !== undefined && m.outs !== "" ? parseInt(m.outs) : undefined,
+          homeHits: parseInt(m.home.hits) > 0 ? parseInt(m.home.hits) : undefined,
+          awayHits: parseInt(m.away.hits) > 0 ? parseInt(m.away.hits) : undefined,
+          homeErrors: parseInt(m.home.errors) > 0 ? parseInt(m.home.errors) : undefined,
+          awayErrors: parseInt(m.away.errors) > 0 ? parseInt(m.away.errors) : undefined,
+        } : undefined,
       });
     }
   }
@@ -7069,6 +7088,7 @@ export type MLBOddsEntry = {
   matchId: string; date: string; time: string;
   homeTeam: { id: string; name: string }; awayTeam: { id: string; name: string };
   homeOdds: number; drawOdds: number; awayOdds: number;
+  markets?: AdvancedMarkets;
 };
 
 const MLB_ODDS_TTL = 5 * 60 * 1000;
@@ -7126,6 +7146,7 @@ async function getMLBOdds(): Promise<MLBOddsEntry[]> {
       homeTeam: { id: m.home?.id ?? "", name: m.home?.name ?? "" },
       awayTeam: { id: m.away?.id ?? "", name: m.away?.name ?? "" },
       homeOdds: h, drawOdds: d, awayOdds: a,
+      markets: makeMLBMarketsFromTeams(m.home?.name ?? "", m.away?.name ?? "", h, a),
     });
   }
   const fresh = results.filter(r => !isMatchTimePast(r.date, r.time));

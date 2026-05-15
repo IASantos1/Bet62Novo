@@ -924,6 +924,11 @@ type Match = {
     periods?: Array<[number, number]>;
     quarters?: Array<[number, number]>;
     innings?: Array<[number, number]>;
+    outs?: number;
+    homeHits?: number;
+    awayHits?: number;
+    homeErrors?: number;
+    awayErrors?: number;
     etScore?: [number, number];
     penScore?: [number, number];
   };
@@ -1563,6 +1568,7 @@ export default function Home() {
     matchId: string; date: string; time: string;
     homeTeam: { id: string; name: string }; awayTeam: { id: string; name: string };
     homeOdds: number; drawOdds: number; awayOdds: number;
+    markets?: AdvancedMarkets;
   };
   const [mlbOddsMatches, setMlbOddsMatches] = useState<MLBOddsEntry[]>([]);
 
@@ -1990,6 +1996,11 @@ export default function Home() {
       periods?: Array<[number, number]>;
       quarters?: Array<[number, number]>;
       innings?: Array<[number, number]>;
+      outs?: number;
+      homeHits?: number;
+      awayHits?: number;
+      homeErrors?: number;
+      awayErrors?: number;
     };
   };
 
@@ -2790,30 +2801,58 @@ export default function Home() {
     const BaseballScore = ({ big }: { big?: boolean }) => {
       const innings = extra?.innings ?? [];
       const INN_LABELS = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "E"];
+      const outs      = extra?.outs;
+      const homeHits  = extra?.homeHits;
+      const awayHits  = extra?.awayHits;
+      const homeErr   = extra?.homeErrors ?? 0;
+      const awayErr   = extra?.awayErrors ?? 0;
+      const hasHE     = homeHits !== undefined || awayHits !== undefined;
       if (innings.length === 0) return <SimpleScore big={big} />;
       return (
         <div className="w-full text-xs font-mono tabular-nums">
+          {/* Header */}
           <div className="flex items-center mb-0.5">
             <div className="flex-1" />
             {innings.map((_: [number, number], i: number) => (
               <div key={i} className="w-5 text-center text-zinc-500 text-[9px] font-bold">{INN_LABELS[i] ?? "E"}</div>
             ))}
-            <div className="w-7 text-center text-zinc-500 text-[10px] font-bold">R</div>
+            <div className="w-6 text-center text-zinc-500 text-[9px] font-bold">R</div>
+            {hasHE && <div className="w-5 text-center text-zinc-500 text-[9px] font-bold">H</div>}
+            {hasHE && <div className="w-5 text-center text-zinc-500 text-[9px] font-bold">E</div>}
           </div>
+          {/* Home row */}
           <div className="flex items-center">
             <div className="flex-1 font-bold text-white text-xs truncate">{match.home}</div>
             {innings.map(([h, a]: [number, number], i: number) => (
               <div key={i} className={`w-5 text-center font-black text-[11px] ${h > a ? "text-white" : "text-zinc-500"}`}>{h}</div>
             ))}
-            <div className="w-7 text-center font-black text-white">{match.homeScore ?? 0}</div>
+            <div className="w-6 text-center font-black text-white">{match.homeScore ?? 0}</div>
+            {hasHE && <div className="w-5 text-center font-bold text-zinc-400 text-[11px]">{homeHits ?? 0}</div>}
+            {hasHE && <div className="w-5 text-center font-bold text-zinc-600 text-[11px]">{homeErr}</div>}
           </div>
+          {/* Away row */}
           <div className="flex items-center">
             <div className="flex-1 font-bold text-white text-xs truncate">{match.away}</div>
             {innings.map(([h, a]: [number, number], i: number) => (
               <div key={i} className={`w-5 text-center font-black text-[11px] ${a > h ? "text-white" : "text-zinc-500"}`}>{a}</div>
             ))}
-            <div className="w-7 text-center font-black text-white">{match.awayScore ?? 0}</div>
+            <div className="w-6 text-center font-black text-white">{match.awayScore ?? 0}</div>
+            {hasHE && <div className="w-5 text-center font-bold text-zinc-400 text-[11px]">{awayHits ?? 0}</div>}
+            {hasHE && <div className="w-5 text-center font-bold text-zinc-600 text-[11px]">{awayErr}</div>}
           </div>
+          {/* Outs indicator */}
+          {outs !== undefined && (
+            <div className="flex items-center gap-1.5 mt-1.5">
+              <span className="text-[9px] font-bold text-zinc-500 uppercase tracking-wide">{match.status}</span>
+              <span className="text-zinc-700">·</span>
+              <div className="flex items-center gap-0.5">
+                {[0, 1, 2].map(i => (
+                  <div key={i} className={`w-2 h-2 rounded-full border ${i < outs ? "bg-amber-500 border-amber-400" : "bg-transparent border-zinc-700"}`} />
+                ))}
+              </div>
+              <span className="text-[9px] font-bold text-amber-500">{outs} {outs === 1 ? "out" : "outs"}</span>
+            </div>
+          )}
         </div>
       );
     };
@@ -7855,7 +7894,7 @@ export default function Home() {
                                     date: g.date,
                                     hasRealOdds: true,
                                     odds: { home: go.homeOdds, draw: 0, away: go.awayOdds },
-                                    markets: _emptyMkt(),
+                                    markets: go.markets ?? _emptyMkt(),
                                   } as unknown as Match;
                                   return <MatchCard key={g.id} match={fakeMatch} />;
                                 })}
