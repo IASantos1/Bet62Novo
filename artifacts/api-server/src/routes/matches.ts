@@ -5910,6 +5910,116 @@ router.get("/mlb-roster/:team", async (req, res) => {
   }
 });
 
+// MLB team stats (per-player season stats: Batting + Pitching)
+type MLBBatterStat = {
+  id: string; rank: number; name: string; gp: number;
+  ab: number; h: number; avg: string; obp: string; slg: string;
+  r: number; rbi: number; hr: number; doubles: number; triples: number;
+  sb: number; bb: number; so: number;
+};
+type MLBPitcherStat = {
+  id: string; rank: number; name: string; gp: number; gs: number;
+  era: string; w: number; l: number; ip: string;
+  so: number; bb: number; h: number; hr: number; whip: string; baa: string;
+};
+type MLBTeamStatsData = { teamName: string; season: string; batters: MLBBatterStat[]; pitchers: MLBPitcherStat[] };
+const mlbTeamStatsCache = new Map<string, MLBTeamStatsData>();
+const mlbTeamStatsFetchedAt = new Map<string, number>();
+const MLB_TEAM_STATS_TTL = 30 * 60 * 1000;
+
+async function getMLBTeamStats(abbr: string): Promise<MLBTeamStatsData | null> {
+  const now = Date.now();
+  const cached = mlbTeamStatsCache.get(abbr);
+  const fetchedAt = mlbTeamStatsFetchedAt.get(abbr) ?? 0;
+  if (cached && now - fetchedAt < MLB_TEAM_STATS_TTL) return cached;
+  try {
+    const resp = await fetch(`${BASE_V1}/mlb/team-stats/${abbr}?access_key=${STATSPAL_KEY}`, { signal: AbortSignal.timeout(9000) });
+    if (!resp.ok) return cached ?? null;
+    const json = (await resp.json()) as {
+      statistics?: {
+        id?: string; season?: string; team?: string;
+        category?: Array<{
+          name: string;
+          team?: { player?: Array<Record<string, string>> | Record<string, string> };
+        }>;
+      };
+    };
+    const stats = json.statistics;
+    if (!stats) return cached ?? null;
+    const teamName = stats.team ?? abbr.toUpperCase();
+    const season = stats.season ?? "";
+    const categories = Array.isArray(stats.category) ? stats.category : stats.category ? [stats.category] : [];
+
+    const batters: MLBBatterStat[] = [];
+    const pitchers: MLBPitcherStat[] = [];
+
+    for (const cat of categories) {
+      const rawPlayers = Array.isArray(cat.team?.player) ? cat.team!.player : cat.team?.player ? [cat.team!.player] : [];
+      const players = rawPlayers as Record<string, string>[];
+      if (cat.name === "Batting") {
+        for (const p of players) {
+          batters.push({
+            id: p["id"] ?? "", rank: parseInt(p["rank"] ?? "0") || 0, name: p["name"] ?? "",
+            gp: parseInt(p["games_played"] ?? "0") || 0,
+            ab: parseInt(p["at_bats"] ?? "0") || 0,
+            h: parseInt(p["hits"] ?? "0") || 0,
+            avg: p["batting_avg"] ?? ".000",
+            obp: p["on_base_percentage"] ?? ".000",
+            slg: p["slugging_percentage"] ?? ".000",
+            r: parseInt(p["runs"] ?? "0") || 0,
+            rbi: parseInt(p["runs_batted_in"] ?? "0") || 0,
+            hr: parseInt(p["home_runs"] ?? "0") || 0,
+            doubles: parseInt(p["doubles"] ?? "0") || 0,
+            triples: parseInt(p["triples"] ?? "0") || 0,
+            sb: parseInt(p["stolen_bases"] ?? "0") || 0,
+            bb: parseInt(p["walks"] ?? "0") || 0,
+            so: parseInt(p["strikeouts"] ?? "0") || 0,
+          });
+        }
+      } else if (cat.name === "Pitching") {
+        for (const p of players) {
+          pitchers.push({
+            id: p["id"] ?? "", rank: parseInt(p["rank"] ?? "0") || 0, name: p["name"] ?? "",
+            gp: parseInt(p["games_played"] ?? p["games"] ?? "0") || 0,
+            gs: parseInt(p["games_started"] ?? "0") || 0,
+            era: p["era"] ?? "0.00",
+            w: parseInt(p["wins"] ?? p["won"] ?? "0") || 0,
+            l: parseInt(p["losses"] ?? p["lost"] ?? "0") || 0,
+            ip: p["innings_pitched"] ?? "0.0",
+            so: parseInt(p["strikeouts"] ?? "0") || 0,
+            bb: parseInt(p["walks"] ?? "0") || 0,
+            h: parseInt(p["hits"] ?? "0") || 0,
+            hr: parseInt(p["home_runs"] ?? "0") || 0,
+            whip: p["whip"] ?? "0.00",
+            baa: p["batting_avg_against"] ?? p["batting_avg"] ?? ".000",
+          });
+        }
+      }
+    }
+
+    batters.sort((a, b) => parseFloat(b.avg.replace(",", ".")) - parseFloat(a.avg.replace(",", ".")));
+    pitchers.sort((a, b) => parseFloat(a.era.replace(",", ".")) - parseFloat(b.era.replace(",", ".")));
+
+    const data: MLBTeamStatsData = { teamName, season, batters, pitchers };
+    mlbTeamStatsCache.set(abbr, data);
+    mlbTeamStatsFetchedAt.set(abbr, now);
+    return data;
+  } catch {
+    return cached ?? null;
+  }
+}
+
+router.get("/mlb-team-stats/:team", async (req, res) => {
+  const abbr = String(req.params["team"]).toLowerCase();
+  try {
+    const data = await getMLBTeamStats(abbr);
+    if (!data) { res.status(404).json({ error: "Estatísticas indisponíveis" }); return; }
+    res.json(data);
+  } catch {
+    res.status(500).json({ error: "Estatísticas indisponíveis" });
+  }
+});
+
 async function getNBAStandings(): Promise<NBAStandingsData> {
   const now = Date.now();
   if (nbaStandingsCache && now - nbaStandingsFetchedAt < NBA_STANDINGS_TTL) return nbaStandingsCache;
