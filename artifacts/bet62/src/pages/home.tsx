@@ -2867,25 +2867,59 @@ export default function Home() {
       { title: "EM",        subtitle: "DESTAQUE",  label: "🏆 FAVORITOS DO DIA",     count: "80+ apostas"  },
     ];
 
-    // Interleave matches from different leagues/countries so each banner has variety
-    const byLeague = new Map<string, Match[]>();
-    for (const m of upcomingMatches) {
-      const key = `${m.country ?? ""}|${m.league ?? ""}`;
-      if (!byLeague.has(key)) byLeague.set(key, []);
-      byLeague.get(key)!.push(m);
-    }
-    const leagueGroups = Array.from(byLeague.values());
-    const interleaved: Match[] = [];
-    const maxLen = leagueGroups.reduce((a, b) => Math.max(a, b.length), 0);
-    for (let i = 0; i < maxLen; i++) {
-      for (const grp of leagueGroups) {
-        if (i < grp.length) interleaved.push(grp[i]);
+    // Filter by odds ranges for each banner type
+    const withOdds = upcomingMatches.filter(m => m.odds.home > 0);
+
+    // 1.20–1.49: short favourites (for the 3 "fav" banners)
+    const favPool = withOdds
+      .filter(m => m.odds.home >= 1.20 && m.odds.home < 1.50)
+      .sort((a, b) => a.odds.home - b.odds.home);
+
+    // 1.50–1.99: medium odds (for the 4th banner)
+    const medPool = withOdds
+      .filter(m => m.odds.home >= 1.50 && m.odds.home < 2.00)
+      .sort((a, b) => a.odds.home - b.odds.home);
+
+    // ~2.5 spike (2.00–2.99, sorted by closeness to 2.5)
+    const mid25Pool = withOdds
+      .filter(m => m.odds.home >= 2.00 && m.odds.home < 3.00)
+      .sort((a, b) => Math.abs(a.odds.home - 2.5) - Math.abs(b.odds.home - 2.5));
+
+    // ~3.10 spike (≥2.80, sorted by closeness to 3.10)
+    const high31Pool = withOdds
+      .filter(m => m.odds.home >= 2.80)
+      .sort((a, b) => Math.abs(a.odds.home - 3.10) - Math.abs(b.odds.home - 3.10));
+
+    const usedIds = new Set<string | number>();
+    const pickN = (pool: Match[], n: number): Match[] => {
+      const out: Match[] = [];
+      for (const m of pool) {
+        if (!usedIds.has(m.id)) {
+          out.push(m);
+          usedIds.add(m.id);
+          if (out.length === n) break;
+        }
       }
+      return out;
+    };
+
+    const chunks: Match[][] = [];
+
+    // 3 banners: 3 odds (1.20–1.49) + 1 odd (~2.5)
+    for (let i = 0; i < 3; i++) {
+      const favs  = pickN(favPool,   3);
+      const spike = pickN(mid25Pool, 1);
+      const chunk = [...favs, ...spike];
+      if (chunk.length > 0) chunks.push(chunk);
     }
 
-    const chunks: Match[][] = BANNER_CONFIGS.map((_, i) =>
-      interleaved.slice(i * 4, i * 4 + 4)
-    ).filter(c => c.length > 0);
+    // 1 banner: 3 odds (1.50–1.99) + 1 odd (~3.10)
+    {
+      const meds  = pickN(medPool,    3);
+      const spike = pickN(high31Pool, 1);
+      const chunk = [...meds, ...spike];
+      if (chunk.length > 0) chunks.push(chunk);
+    }
 
     if (chunks.length === 0) return null;
 
