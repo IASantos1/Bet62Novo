@@ -3709,7 +3709,8 @@ export default function Home() {
     const isTennis = sport === "tennis";
     const isHockey = sport === "hockey";
     const isVolleyball = sport === "volleyball";
-    const isFootball = !isBasketball && !isTennis && !isHockey && !isVolleyball;
+    const isBaseball = sport === "baseball";
+    const isFootball = !isBasketball && !isTennis && !isHockey && !isVolleyball && !isBaseball;
 
     // Parse current live period/set/quarter from status (0 = upcoming/unknown → show all markets)
     const currentSet = (isTennis || isVolleyball) && (match as any).status?.startsWith("Set")
@@ -3780,6 +3781,13 @@ export default function Home() {
                 { key: "handicap", label: "Handicap" },
                 { key: "perset", label: "Por Set" },
                 { key: "pontos", label: "Pontos" },
+              ]
+            : isBaseball
+            ? [
+                { key: "todos",     label: "Todos" },
+                { key: "resultado", label: "Resultado" },
+                { key: "gols",      label: "Corridas" },
+                { key: "handicap",  label: "Run Line" },
               ]
             : showPen
               // Penalty shootout — only penalty markets
@@ -4011,6 +4019,38 @@ export default function Home() {
           <div className="text-center text-zinc-600 py-6 text-sm">Mercado não disponível para esta partida.</div>
         )}
 
+        {/* ── BEISEBOL: TOTAL DE CORRIDAS ── */}
+        {isBaseball && (modalTab === "gols" || modalTab === "todos") && m && m.totalGoals.over35 > 0 && (() => {
+          const tot = m._total;
+          const lo  = tot ? tot - 0.5 : null;
+          const hi  = tot ? tot + 0.5 : null;
+          return (
+            <div>
+              {m.totalGoals.over25 > 0 && lo && (
+                <MarketGroup title={`Total de Corridas — ${lo}`}>
+                  <MarketOddsBtn match={match} sel="o25" odd={m.totalGoals.over25} market="gols" label={`Mais de ${lo}`} />
+                  <MarketOddsBtn match={match} sel="u25" odd={m.totalGoals.under25} market="gols" label={`Menos de ${lo}`} />
+                </MarketGroup>
+              )}
+              {m.totalGoals.over35 > 0 && tot && (
+                <MarketGroup title={`Total de Corridas — ${tot}`}>
+                  <MarketOddsBtn match={match} sel="o35" odd={m.totalGoals.over35} market="gols" label={`Mais de ${tot}`} />
+                  <MarketOddsBtn match={match} sel="u35" odd={m.totalGoals.under35} market="gols" label={`Menos de ${tot}`} />
+                </MarketGroup>
+              )}
+              {m.totalGoals.over45 > 0 && hi && (
+                <MarketGroup title={`Total de Corridas — ${hi}`}>
+                  <MarketOddsBtn match={match} sel="o45" odd={m.totalGoals.over45} market="gols" label={`Mais de ${hi}`} />
+                  <MarketOddsBtn match={match} sel="u45" odd={m.totalGoals.under45} market="gols" label={`Menos de ${hi}`} />
+                </MarketGroup>
+              )}
+            </div>
+          );
+        })()}
+        {isBaseball && modalTab === "gols" && m && m.totalGoals.over35 === 0 && (
+          <div className="text-center text-zinc-600 py-6 text-sm">Mercado não disponível para esta partida.</div>
+        )}
+
         {/* ── BASQUETE: TOTAIS ── */}
         {isBasketball && (modalTab === "totais" || modalTab === "todos") && m && (
           <div>
@@ -4161,6 +4201,11 @@ export default function Home() {
                   </MarketGroup>
                 )}
               </>
+            ) : isBaseball ? (
+              <MarketGroup title="Run Line">
+                <MarketOddsBtn match={match} sel="hm1" odd={m.handicap.homeMinusOne} market="handicap" label={`${match.home} −1.5`} />
+                <MarketOddsBtn match={match} sel="ap1" odd={m.handicap.awayPlusOne} market="handicap" label={`${match.away} +1.5`} />
+              </MarketGroup>
             ) : (
               <MarketGroup title="Handicap de Games">
                 <MarketOddsBtn match={match} sel="hcap-home" odd={m.handicap.homeMinusOne} market="handicap" label={`${match.home} cobre`} />
