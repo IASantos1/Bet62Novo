@@ -1780,6 +1780,19 @@ type HockeyDailyResult = {
 let hockeyResultsCache: HockeyDailyResult[] | null = null;
 let hockeyResultsFetchedAt = 0;
 
+type MLBDailyResult = {
+  id: string; home: string; away: string;
+  homeScore: number; awayScore: number;
+  homeHits: number; awayHits: number;
+  homeErrors: number; awayErrors: number;
+  innings: Array<[number | null, number | null]>; // null = inning not played (walk-off)
+  hasExtra: boolean;
+  homeWon: boolean;
+  league: string; country: string; date: string; time: string;
+};
+let mlbResultsCache: MLBDailyResult[] | null = null;
+let mlbResultsFetchedAt = 0;
+
 type BasketballDailyResult = {
   id: string; home: string; away: string;
   homeScore: number; awayScore: number;
@@ -4927,6 +4940,65 @@ async function getHockeyDailyResults(): Promise<HockeyDailyResult[]> {
   }
 }
 
+async function getMLBDailyResults(): Promise<MLBDailyResult[]> {
+  const now = Date.now();
+  if (mlbResultsCache && now - mlbResultsFetchedAt < RESULTS_CACHE_TTL) return mlbResultsCache;
+  try {
+    const resp = await fetch(`${BASE_V1}/mlb/daily/d-1?access_key=${STATSPAL_KEY}`, { signal: AbortSignal.timeout(9000) });
+    if (!resp.ok) return mlbResultsCache ?? [];
+    const data = (await resp.json()) as { scores?: { tournament?: unknown } };
+    const raw = data?.scores?.tournament;
+    if (!raw) return mlbResultsCache ?? [];
+    const arr = Array.isArray(raw) ? raw : [raw];
+    const results: MLBDailyResult[] = [];
+    for (const t of arr as Array<{ id: string; league: string; country: string; match: unknown }>) {
+      const matches = Array.isArray(t.match) ? t.match : (t.match ? [t.match] : []);
+      for (const m of matches as Array<{
+        id: string; status: string; date: string; time: string; extra_inn?: string;
+        home: { name: string; totalscore: string; hits: string; errors: string; in1: string; in2: string; in3: string; in4: string; in5: string; in6: string; in7: string; in8: string; in9: string; extra: string };
+        away: { name: string; totalscore: string; hits: string; errors: string; in1: string; in2: string; in3: string; in4: string; in5: string; in6: string; in7: string; in8: string; in9: string; extra: string };
+      }>) {
+        if (!m?.status || m.status !== "Finished") continue;
+        if (!m.home?.name || !m.away?.name) continue;
+        const inKeys = ["in1", "in2", "in3", "in4", "in5", "in6", "in7", "in8", "in9"] as const;
+        const innings: Array<[number | null, number | null]> = [];
+        for (const key of inKeys) {
+          const hStr = m.home[key]; const aStr = m.away[key];
+          // Both empty = inning not reached (home walk-off win)
+          if (hStr === "" && aStr === "") break;
+          const h = hStr === "" ? null : (parseInt(hStr) || 0);
+          const a = aStr === "" ? null : (parseInt(aStr) || 0);
+          innings.push([h, a]);
+        }
+        // Extra innings
+        const hasExtra = !!(m.home.extra && m.home.extra !== "") || !!(m.away.extra && m.away.extra !== "");
+        if (hasExtra) {
+          const h = m.home.extra && m.home.extra !== "" ? (parseInt(m.home.extra) || 0) : null;
+          const a = m.away.extra && m.away.extra !== "" ? (parseInt(m.away.extra) || 0) : null;
+          innings.push([h, a]);
+        }
+        const homeScore = parseInt(m.home.totalscore) || 0;
+        const awayScore = parseInt(m.away.totalscore) || 0;
+        results.push({
+          id: m.id, home: m.home.name, away: m.away.name,
+          homeScore, awayScore,
+          homeHits: parseInt(m.home.hits) || 0, awayHits: parseInt(m.away.hits) || 0,
+          homeErrors: parseInt(m.home.errors) || 0, awayErrors: parseInt(m.away.errors) || 0,
+          innings, hasExtra,
+          homeWon: homeScore > awayScore,
+          league: t.league, country: t.country ?? "",
+          date: m.date, time: m.time,
+        });
+      }
+    }
+    mlbResultsCache = results;
+    mlbResultsFetchedAt = now;
+    return results;
+  } catch {
+    return mlbResultsCache ?? [];
+  }
+}
+
 async function getBasketballSchedule(): Promise<BasketballScheduleData> {
   const now = Date.now();
   if (basketballScheduleCache && now - basketballScheduleFetchedAt < BBALL_SCHEDULE_TTL) return basketballScheduleCache;
@@ -5426,6 +5498,15 @@ router.get("/hockey-results", async (_req, res) => {
 router.get("/basketball-results", async (_req, res) => {
   try {
     const results = await getBasketballDailyResults();
+    res.json({ results });
+  } catch {
+    res.status(500).json({ error: "Resultados indisponíveis" });
+  }
+});
+
+router.get("/mlb-results", async (_req, res) => {
+  try {
+    const results = await getMLBDailyResults();
     res.json({ results });
   } catch {
     res.status(500).json({ error: "Resultados indisponíveis" });

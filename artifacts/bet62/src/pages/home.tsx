@@ -1294,6 +1294,18 @@ export default function Home() {
   };
   const [hockeyResults, setHockeyResults] = useState<HockeyResult[]>([]);
 
+  type MLBResult = {
+    id: string; home: string; away: string;
+    homeScore: number; awayScore: number;
+    homeHits: number; awayHits: number;
+    homeErrors: number; awayErrors: number;
+    innings: Array<[number | null, number | null]>;
+    hasExtra: boolean;
+    homeWon: boolean;
+    league: string; country: string; date: string; time: string;
+  };
+  const [mlbResults, setMlbResults] = useState<MLBResult[]>([]);
+
   type NHLTeamStats = {
     shotsOnGoal: number; savesPct: number;
     ppGoals: number; ppPct: number;
@@ -1794,6 +1806,10 @@ export default function Home() {
     fetch("/api/matches/hockey-results")
       .then(r => r.ok ? r.json() : { results: [] })
       .then(d => setHockeyResults(d.results ?? []))
+      .catch(() => { /* non-critical */ });
+    fetch("/api/matches/mlb-results")
+      .then(r => r.ok ? r.json() : { results: [] })
+      .then(d => setMlbResults(d.results ?? []))
       .catch(() => { /* non-critical */ });
     fetch("/api/matches/hockey-schedule")
       .then(r => r.ok ? r.json() : null)
@@ -5914,6 +5930,75 @@ export default function Home() {
                           <span className="flex items-center gap-1"><span className="w-2 h-2 border-l-2 border-green-600/60 inline-block" />Playoff</span>
                           <span className="flex items-center gap-1"><span className="w-2 h-2 border-l-2 border-yellow-500/60 inline-block" />Wild Card</span>
                         </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Yesterday results panel (baseball) */}
+                {matchViewTab === "yesterday" && expandedMatch.sport === "baseball" && (
+                  <div className="bg-zinc-900 rounded-xl border border-zinc-800 p-3 mb-2 animate-in fade-in duration-200">
+                    <div className="text-[10px] font-black text-red-500 uppercase tracking-widest mb-3">⚾ Resultados MLB — Ontem</div>
+                    {mlbResults.length === 0 ? (
+                      <div className="text-center text-zinc-500 py-6 text-sm">Sem resultados disponíveis.</div>
+                    ) : (
+                      <div className="space-y-2">
+                        {mlbResults.map(r => {
+                          const cols = r.innings.length + 1; // innings + R column
+                          const INN_LABELS = ["1","2","3","4","5","6","7","8","9","E"];
+                          const sides = [
+                            { name: r.away, score: r.homeScore, won: !r.homeWon, hits: r.awayHits, errors: r.awayErrors, isHome: false },
+                            { name: r.home, score: r.homeScore, won: r.homeWon,  hits: r.homeHits, errors: r.homeErrors, isHome: true  },
+                          ] as const;
+                          return (
+                            <div key={r.id} className="bg-zinc-950/60 border border-zinc-800 rounded-lg overflow-hidden">
+                              {/* Header row: inning labels + R H E */}
+                              <div
+                                className="grid text-[9px] font-bold text-zinc-600 px-2 py-1 border-b border-zinc-800/60"
+                                style={{ gridTemplateColumns: `1fr repeat(${r.innings.length}, 1.4rem) 1.8rem 1.8rem 1.8rem` }}
+                              >
+                                <div />
+                                {r.innings.map((_: [number | null, number | null], i: number) => (
+                                  <div key={i} className="text-center">{INN_LABELS[i] ?? "E"}</div>
+                                ))}
+                                <div className="text-center font-black text-zinc-400">R</div>
+                                <div className="text-center">H</div>
+                                <div className="text-center">E</div>
+                              </div>
+                              {/* Away row */}
+                              {[
+                                { name: r.away, score: r.awayScore, won: !r.homeWon, hits: r.awayHits, errors: r.awayErrors, idx: 1 },
+                                { name: r.home, score: r.homeScore, won: r.homeWon,  hits: r.homeHits, errors: r.homeErrors, idx: 0 },
+                              ].map((side, rowIdx) => (
+                                <div
+                                  key={side.name}
+                                  className={`grid px-2 py-1.5 ${rowIdx === 0 ? "border-b border-zinc-800/40" : ""}`}
+                                  style={{ gridTemplateColumns: `1fr repeat(${r.innings.length}, 1.4rem) 1.8rem 1.8rem 1.8rem` }}
+                                >
+                                  <div className="flex items-center gap-1 min-w-0">
+                                    {side.won && <span className="text-[8px] text-green-400 font-black shrink-0">✓</span>}
+                                    <span className={`text-[11px] font-bold truncate ${side.won ? "text-white" : "text-zinc-500"}`}>
+                                      {side.name.split(" ").slice(-1)[0]}
+                                    </span>
+                                  </div>
+                                  {r.innings.map(([h, a]: [number | null, number | null], i: number) => {
+                                    const val = side.idx === 0 ? h : a;
+                                    const opp = side.idx === 0 ? a : h;
+                                    const better = val !== null && opp !== null && val > opp;
+                                    return (
+                                      <div key={i} className={`text-center text-[10px] font-black tabular-nums ${val === null ? "text-zinc-800" : better ? "text-white" : "text-zinc-600"}`}>
+                                        {val === null ? "—" : val}
+                                      </div>
+                                    );
+                                  })}
+                                  <div className={`text-center text-[11px] font-black tabular-nums ${side.won ? "text-white" : "text-zinc-500"}`}>{side.score}</div>
+                                  <div className="text-center text-[10px] tabular-nums text-zinc-500">{side.hits}</div>
+                                  <div className={`text-center text-[10px] tabular-nums ${side.errors > 0 ? "text-red-400" : "text-zinc-700"}`}>{side.errors}</div>
+                                </div>
+                              ))}
+                            </div>
+                          );
+                        })}
                       </div>
                     )}
                   </div>
