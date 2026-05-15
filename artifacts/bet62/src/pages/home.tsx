@@ -4908,25 +4908,6 @@ export default function Home() {
                     Onde cada jogo é uma oportunidade. As melhores odds da Europa, ao vivo ou pré-jogo.
                   </p>
 
-                  {/* Real stats from API */}
-                  {platformStats && (
-                    <div className="flex flex-wrap gap-6 mb-8">
-                      <div className="flex items-center gap-2 text-sm text-zinc-300">
-                        <User size={14} className="text-red-500" />
-                        <span>{platformStats.totalUsers.toLocaleString("pt-BR")} usuários cadastrados</span>
-                      </div>
-                      <div className="flex items-center gap-2 text-sm text-zinc-300">
-                        <TrendingUp size={14} className="text-red-500" />
-                        <span>{platformStats.totalBets.toLocaleString("pt-BR")} apostas realizadas</span>
-                      </div>
-                      {platformStats.totalPaidOut > 0 && (
-                        <div className="flex items-center gap-2 text-sm text-zinc-300">
-                          <Zap size={14} className="text-red-500" />
-                          <span>€ {platformStats.totalPaidOut.toLocaleString("pt-PT", { minimumFractionDigits: 2 })} em prémios pagos</span>
-                        </div>
-                      )}
-                    </div>
-                  )}
 
                   <div className="flex flex-wrap gap-3">
                     {auth.user ? (
