@@ -3431,24 +3431,34 @@ export default function Home() {
                 { key: "perset", label: "Por Set" },
                 { key: "pontos", label: "Pontos" },
               ]
-            : [
-                { key: "todos",    label: "Todos" },
-                // ET/Pen tabs appear immediately after "Todos" so they're always visible
-                ...(showET  ? [{ key: "prolongamento", label: "⏱ Prorrogação" }] : []),
-                ...(showPen ? [{ key: "penaltis",      label: "🎯 Penáltis" }]   : []),
-                { key: "resultado", label: "Resultado" },
-                { key: "dupla",     label: "Dupla Chance" },
-                { key: "gols",      label: "Gols" },
-                { key: "handicap",  label: "Handicap" },
-                ...(show1tempo ? [{ key: "1tempo", label: "1º Tempo" }] : []),
-                ...(show2tempo ? [{ key: "2tempo", label: "2º Tempo" }] : []),
-                { key: "htft",       label: "HT/FT" },
-                { key: "placar",     label: "Placar Exato" },
-                { key: "escanteios", label: "Escanteios" },
-                { key: "cartoes",    label: "Cartões" },
-                { key: "asiatico",   label: "Asiático" },
-                ...(match.leagueId ? [{ key: "jogadores", label: "⚽ Jogadores" }] : []),
-              ];
+            : showPen
+              // Penalty shootout — only penalty markets
+              ? [
+                  { key: "todos",    label: "Todos" },
+                  { key: "penaltis", label: "🎯 Penáltis" },
+                ]
+              : showET
+              // Extra time — only ET markets
+              ? [
+                  { key: "todos",        label: "Todos" },
+                  { key: "prolongamento", label: "⏱ Prorrogação" },
+                ]
+              // Regular time — all markets
+              : [
+                  { key: "todos",    label: "Todos" },
+                  { key: "resultado", label: "Resultado" },
+                  { key: "dupla",     label: "Dupla Chance" },
+                  { key: "gols",      label: "Gols" },
+                  { key: "handicap",  label: "Handicap" },
+                  ...(show1tempo ? [{ key: "1tempo", label: "1º Tempo" }] : []),
+                  ...(show2tempo ? [{ key: "2tempo", label: "2º Tempo" }] : []),
+                  { key: "htft",       label: "HT/FT" },
+                  { key: "placar",     label: "Placar Exato" },
+                  { key: "escanteios", label: "Escanteios" },
+                  { key: "cartoes",    label: "Cartões" },
+                  { key: "asiatico",   label: "Asiático" },
+                  ...(match.leagueId ? [{ key: "jogadores", label: "⚽ Jogadores" }] : []),
+                ];
 
     const m = match.markets;
 
@@ -3486,7 +3496,7 @@ export default function Home() {
         )}
 
         {/* ── PRORROGAÇÃO ── */}
-        {isFootball && showET && m?.etExtra && (modalTab === "prolongamento" || modalTab === "todos") && (
+        {isFootball && showET && !showPen && m?.etExtra && (modalTab === "prolongamento" || modalTab === "todos") && (
           <div className="mb-2">
             <div className="flex items-center gap-2 mb-3 px-1">
               <span className="text-[10px] font-black uppercase tracking-widest text-red-500 bg-red-950/40 border border-red-800/40 rounded px-2 py-0.5">⏱ Prorrogação em curso</span>
@@ -3540,7 +3550,7 @@ export default function Home() {
 
         {/* ── RESULTADO / VENCEDOR ── hide for live football when result is obvious ── */}
         {(modalTab === "resultado" || modalTab === "todos") && (() => {
-          const hideResult = match.isLive && isFootball && (() => {
+          const hideResult = match.isLive && isFootball && ((showET || showPen) || (() => {
             const minOdd = Math.min(match.odds.home, match.odds.away);
             if (minOdd <= 1.05) return true;
             const min = getDisplayMinute(match);
@@ -3548,7 +3558,7 @@ export default function Home() {
             if (min >= 80 && diff >= 2) return true;
             if (min >= 85 && diff >= 1) return true;
             return false;
-          })();
+          })());
           if (hideResult) return null;
           return (
             <MarketGroup title={isBasketball ? "Vencedor da Partida" : isTennis ? "Vencedor do Jogo" : "Resultado Final"}>
@@ -3560,7 +3570,7 @@ export default function Home() {
         })()}
 
         {/* ── FUTEBOL: DUPLA CHANCE ── */}
-        {isFootball && !isLateGame && (modalTab === "dupla" || modalTab === "todos") && m && m.doubleChance.homeOrDraw > 0 && (
+        {isFootball && !showET && !showPen && !isLateGame && (modalTab === "dupla" || modalTab === "todos") && m && m.doubleChance.homeOrDraw > 0 && (
           <div>
             <MarketGroup title="Dupla Chance">
               <MarketOddsBtn match={match} sel="homeOrDraw" odd={m.doubleChance.homeOrDraw} market="dupla" label={`${match.home} ou X`} />
@@ -3575,12 +3585,12 @@ export default function Home() {
             )}
           </div>
         )}
-        {isFootball && !isLateGame && modalTab === "dupla" && m && m.doubleChance.homeOrDraw === 0 && (
+        {isFootball && !showET && !showPen && !isLateGame && modalTab === "dupla" && m && m.doubleChance.homeOrDraw === 0 && (
           <div className="text-center text-zinc-600 py-6 text-sm">Mercado não disponível para esta partida.</div>
         )}
 
         {/* ── FUTEBOL: GOLS ── */}
-        {isFootball && (modalTab === "gols" || modalTab === "todos") && m && m.totalGoals.over25 > 0 && (
+        {isFootball && !showET && !showPen && (modalTab === "gols" || modalTab === "todos") && m && m.totalGoals.over25 > 0 && (
           <div>
             {isLateGame ? (() => {
               // Late game: show only the 1 most relevant open line (currentGoals + 0.5)
@@ -3647,7 +3657,7 @@ export default function Home() {
             )}
           </div>
         )}
-        {isFootball && modalTab === "gols" && m && m.totalGoals.over25 === 0 && (
+        {isFootball && !showET && !showPen && modalTab === "gols" && m && m.totalGoals.over25 === 0 && (
           <div className="text-center text-zinc-600 py-6 text-sm">Mercado não disponível para esta partida.</div>
         )}
 
@@ -3757,7 +3767,7 @@ export default function Home() {
         )}
 
         {/* ── HANDICAP (futebol + ténis) ── */}
-        {!isBasketball && !isVolleyball && (modalTab === "handicap" || modalTab === "todos") && m && m.handicap.homeMinusOne > 0 && (
+        {!isBasketball && !isVolleyball && (!isFootball || (!showET && !showPen)) && (modalTab === "handicap" || modalTab === "todos") && m && m.handicap.homeMinusOne > 0 && (
           <div>
             {isFootball ? (
               <>
@@ -3809,12 +3819,12 @@ export default function Home() {
             )}
           </div>
         )}
-        {!isBasketball && !isVolleyball && modalTab === "handicap" && m && m.handicap.homeMinusOne === 0 && (
+        {!isBasketball && !isVolleyball && (!isFootball || (!showET && !showPen)) && modalTab === "handicap" && m && m.handicap.homeMinusOne === 0 && (
           <div className="text-center text-zinc-600 py-6 text-sm">Mercado não disponível para esta partida.</div>
         )}
 
         {/* ── FUTEBOL: 1º TEMPO — hidden in 2nd half ── */}
-        {isFootball && show1tempo && (modalTab === "1tempo" || modalTab === "todos") && m && m.halfTime.home > 0 && (
+        {isFootball && !showET && !showPen && show1tempo && (modalTab === "1tempo" || modalTab === "todos") && m && m.halfTime.home > 0 && (
           <div>
             <MarketGroup title="Resultado — 1º Tempo">
               <MarketOddsBtn match={match} sel="ht-home" odd={m.halfTime.home} market="1tempo" label={match.home} />
@@ -3830,12 +3840,12 @@ export default function Home() {
             )}
           </div>
         )}
-        {isFootball && show1tempo && modalTab === "1tempo" && m && m.halfTime.home === 0 && (
+        {isFootball && !showET && !showPen && show1tempo && modalTab === "1tempo" && m && m.halfTime.home === 0 && (
           <div className="text-center text-zinc-600 py-6 text-sm">Mercado não disponível para esta partida.</div>
         )}
 
         {/* ── FUTEBOL: 2º TEMPO — shown at HT and during 2nd half; hidden in late game ── */}
-        {isFootball && show2tempo && !isLateGame && (modalTab === "2tempo" || modalTab === "todos") && (
+        {isFootball && !showET && !showPen && show2tempo && !isLateGame && (modalTab === "2tempo" || modalTab === "todos") && (
           <div>
             {m?.secondHalf && m.secondHalf.home > 0 && (
               <MarketGroup title="Resultado — 2º Tempo">
@@ -3858,12 +3868,12 @@ export default function Home() {
             )}
           </div>
         )}
-        {isFootball && show2tempo && modalTab === "2tempo" && (!match.odds.home || match.odds.home <= 1) && (
+        {isFootball && !showET && !showPen && show2tempo && modalTab === "2tempo" && (!match.odds.home || match.odds.home <= 1) && (
           <div className="text-center text-zinc-600 py-6 text-sm">Mercado não disponível para esta partida.</div>
         )}
 
         {/* ── FUTEBOL: HT/FT ── */}
-        {isFootball && !isLateGame && (modalTab === "htft" || modalTab === "todos") && m && m.htft && (() => {
+        {isFootball && !showET && !showPen && !isLateGame && (modalTab === "htft" || modalTab === "todos") && m && m.htft && (() => {
           const isSecondHalf = match.isLive === true && (match.minute ?? 0) > 45;
           const htGroupLabel = isSecondHalf ? "Empate / Final" : "Empate ao Intervalo";
           const htPrefix1 = isSecondHalf ? "Final" : "Intervalo / Final";
@@ -3887,12 +3897,12 @@ export default function Home() {
             </div>
           );
         })()}
-        {isFootball && !isLateGame && modalTab === "htft" && m && !m.htft && (
+        {isFootball && !showET && !showPen && !isLateGame && modalTab === "htft" && m && !m.htft && (
           <div className="text-center text-zinc-600 py-6 text-sm">Mercado não disponível para esta partida.</div>
         )}
 
         {/* ── FUTEBOL: PLACAR EXATO ── */}
-        {isFootball && !isLateGame && (modalTab === "placar" || modalTab === "todos") && m && m.correctScore && (
+        {isFootball && !showET && !showPen && !isLateGame && (modalTab === "placar" || modalTab === "todos") && m && m.correctScore && (
           <div>
             <p className="text-xs text-zinc-500 mb-3">Selecione o marcador exato ao final da partida.</p>
             <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
@@ -3902,12 +3912,12 @@ export default function Home() {
             </div>
           </div>
         )}
-        {isFootball && !isLateGame && modalTab === "placar" && m && !m.correctScore && (
+        {isFootball && !showET && !showPen && !isLateGame && modalTab === "placar" && m && !m.correctScore && (
           <div className="text-center text-zinc-600 py-6 text-sm">Mercado não disponível para esta partida.</div>
         )}
 
         {/* ── FUTEBOL: ESCANTEIOS ── */}
-        {isFootball && (modalTab === "escanteios" || modalTab === "todos") && m && m.corners && (
+        {isFootball && !showET && !showPen && (modalTab === "escanteios" || modalTab === "todos") && m && m.corners && (
           <div>
             {isLateGame ? (
               /* Late game: only the most relevant line (9.5) */
@@ -3933,12 +3943,12 @@ export default function Home() {
             )}
           </div>
         )}
-        {isFootball && modalTab === "escanteios" && m && !m.corners && (
+        {isFootball && !showET && !showPen && modalTab === "escanteios" && m && !m.corners && (
           <div className="text-center text-zinc-600 py-6 text-sm">Mercado não disponível para esta partida.</div>
         )}
 
         {/* ── FUTEBOL: CARTÕES ── */}
-        {isFootball && !isLateGame && (modalTab === "cartoes" || modalTab === "todos") && m && m.cards && (
+        {isFootball && !showET && !showPen && !isLateGame && (modalTab === "cartoes" || modalTab === "todos") && m && m.cards && (
           <div>
             <MarketGroup title="Total de Cartões — 3.5">
               <MarketOddsBtn match={match} sel="ocard35" odd={m.cards.o35} market="cartoes" label="Acima de 3.5 cartões" />
@@ -3950,12 +3960,12 @@ export default function Home() {
             </MarketGroup>
           </div>
         )}
-        {isFootball && !isLateGame && modalTab === "cartoes" && m && !m.cards && (
+        {isFootball && !showET && !showPen && !isLateGame && modalTab === "cartoes" && m && !m.cards && (
           <div className="text-center text-zinc-600 py-6 text-sm">Mercado não disponível para esta partida.</div>
         )}
 
         {/* ── FUTEBOL: ASIÁTICO ── */}
-        {isFootball && (modalTab === "asiatico" || modalTab === "todos") && m && (
+        {isFootball && !showET && !showPen && (modalTab === "asiatico" || modalTab === "todos") && m && (
           <div>
             {m.drawNoBet && m.drawNoBet.home > 0 && (
               <MarketGroup title="Draw No Bet (Empate Anulado)">
