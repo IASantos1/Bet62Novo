@@ -1469,6 +1469,15 @@ function makeHockeyMarketsFromTeams(home: string, away: string): AdvancedMarkets
 }
 
 // ─── MLB (Baseball) market builder ────────────────────────────────────────────
+// Baseball-specific base odds using seeded RNG (NOT soccer Poisson — no draws in baseball)
+function makeBaseballBaseOdds(home: string, away: string): { home: number; draw: number; away: number } {
+  const sr = seededRng(`mlb-base:${home}:${away}`);
+  // MLB is very competitive; most games 1.65–2.50, slight home field advantage
+  const pHome = mc(0.52 + (sr(1) - 0.5) * 0.28, 0.32, 0.72);
+  const [h, , a] = probsToDecimalOdds([pHome, 0, 1 - pHome], 1.06);
+  return { home: h!, draw: 0, away: a! };
+}
+
 function makeMLBMarketsFromTeams(home: string, away: string, realHomeOdds?: number, realAwayOdds?: number): AdvancedMarkets {
   const sr = seededRng(`mlb-mkt:${home}:${away}`);
   const meanTotal  = mc(8.5 + (sr(1) - 0.5) * 3.0, 6.5, 12.0);
@@ -1656,6 +1665,8 @@ type MLBMatch = {
 type MLBTournament = { country: string; id: string; league: string; match: MLBMatch | MLBMatch[] };
 let mlbLiveCache: MLBTournament[] | null = null;
 let mlbLiveFetchedAt = 0;
+// Raw odds map (home|away → real odds) kept across cache refreshes — includes games already started
+const mlbRawOddsMap = new Map<string, { h: number; a: number }>();
 
 type NBAMatch = {
   id: string; stats_id?: string; status: string; time: string; timer: string; date?: string;
@@ -2927,16 +2938,26 @@ function buildMLBLiveMatches(tournaments: MLBTournament[]): LiveMatchState[] {
       };
       const minute = inningMinute[m.status] ?? 5;
 
-      const odds = makeOddsFromTeams(m.home.name, m.away.name);
+      // Look up real pre-match odds from the raw map (populated by getMLBOdds even for started games)
+      const normH = m.home.name.toLowerCase().trim();
+      const normA = m.away.name.toLowerCase().trim();
+      const realEntry = mlbRawOddsMap.get(`${normH}|${normA}`);
+      const baseOdds = realEntry && realEntry.h > 1 && realEntry.a > 1
+        ? { home: realEntry.h, draw: 0, away: realEntry.a }
+        : makeBaseballBaseOdds(m.home.name, m.away.name);
+
       const diff = homeScore - awayScore;
-      let liveOdds = { ...odds };
+      let liveOdds = { ...baseOdds };
       if (diff !== 0 && isLive) {
         const factor = Math.min(0.40, Math.abs(diff) * 0.10);
         liveOdds = diff > 0
-          ? { home: Math.max(1.04, +(odds.home * (1 - factor)).toFixed(2)), draw: 0, away: Math.min(12, +(odds.away * (1 + factor)).toFixed(2)) }
-          : { home: Math.min(12, +(odds.home * (1 + factor)).toFixed(2)), draw: 0, away: Math.max(1.04, +(odds.away * (1 - factor)).toFixed(2)) };
+          ? { home: Math.max(1.04, +(baseOdds.home * (1 - factor)).toFixed(2)), draw: 0, away: Math.min(12, +(baseOdds.away * (1 + factor)).toFixed(2)) }
+          : { home: Math.min(12, +(baseOdds.home * (1 + factor)).toFixed(2)), draw: 0, away: Math.max(1.04, +(baseOdds.away * (1 - factor)).toFixed(2)) };
       }
       liveOdds.draw = 0; // no draws in baseball
+
+      const realH = baseOdds.home > 1 ? baseOdds.home : undefined;
+      const realA = baseOdds.away > 1 ? baseOdds.away : undefined;
 
       result.push({
         id: `mlb-${m.id}`,
@@ -2949,7 +2970,7 @@ function buildMLBLiveMatches(tournaments: MLBTournament[]): LiveMatchState[] {
         status:    m.status,
         hasRealOdds: true,
         odds:    liveOdds,
-        markets: makeMLBMarketsFromTeams(m.home.name, m.away.name),
+        markets: makeMLBMarketsFromTeams(m.home.name, m.away.name, realH, realA),
         events:  [],
         _liveExtra: innings.length > 0 ? {
           innings,
@@ -4032,6 +4053,7 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
     buildHockeyUpcoming().catch(() => empty),
     buildVolleyballUpcoming().catch(() => empty),
     getTennisOdds().catch(() => []),
+    getMLBOdds().catch(() => []), // warms mlbRawOddsMap so live games get real base odds
   ]);
   const nhlMatches    = buildNHLLiveMatches(nhlTournaments);
   const nbaMatches    = buildNBALiveMatches(nbaTournaments);
@@ -7148,6 +7170,14 @@ async function getMLBOdds(): Promise<MLBOddsEntry[]> {
       homeOdds: h, drawOdds: d, awayOdds: a,
       markets: makeMLBMarketsFromTeams(m.home?.name ?? "", m.away?.name ?? "", h, a),
     });
+  }
+  // Populate raw odds map BEFORE filtering — so live games (already past start time)
+  // can still be looked up by buildMLBLiveMatches using real base odds
+  for (const r of results) {
+    const normH = r.homeTeam.name.toLowerCase().trim();
+    const normA = r.awayTeam.name.toLowerCase().trim();
+    mlbRawOddsMap.set(`${normH}|${normA}`, { h: r.homeOdds, a: r.awayOdds });
+    mlbRawOddsMap.set(`${normA}|${normH}`, { h: r.awayOdds, a: r.homeOdds }); // reversed key too
   }
   const fresh = results.filter(r => !isMatchTimePast(r.date, r.time));
   mlbOddsCache = fresh;
