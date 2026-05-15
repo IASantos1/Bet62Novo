@@ -2764,6 +2764,8 @@ function buildNBALiveMatches(tournaments: NBATournament[]): LiveMatchState[] {
         if (!allowYesterdayLive || m.date !== yesterdayStr) continue;
       }
       if (isNotStarted && m.date && m.date !== todayStr) continue;
+      // Only show Not Started games within 90 min — avoids showing night games all day
+      if (isNotStarted && matchStartsInMinutes(m.date ?? "", m.time) > 90) continue;
 
       const homeScore = parseInt(m.home.totalscore) || 0;
       const awayScore = parseInt(m.away.totalscore) || 0;
@@ -3039,6 +3041,8 @@ function buildVolleyballLiveMatches(tournaments: VolleyTournament[]): LiveMatchS
       if (!isLive && !isNotStarted) continue;
       // Non-live: only today's fixtures
       if (isNotStarted && m.date !== todayStr) continue;
+      // Only show Not Started games within 90 min — avoids showing afternoon games in the morning
+      if (isNotStarted && matchStartsInMinutes(m.date ?? "", m.time ?? "") > 90) continue;
 
       const homeScore = parseInt(home.totalscore) || 0;
       const awayScore = parseInt(away.totalscore) || 0;
@@ -3737,11 +3741,22 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
   const livePart = [...soccerMatches, ...nhlMatches, ...nbaMatches, ...tennisMatches, ...volleyMatches];
 
   const liveIds = new Set(livePart.map(m => String(m.id)));
+  // Deduplicate by team pair — prevents upcoming duplicating a match already in the live feed
+  const liveTeamPairs = new Set(livePart.map(m => `${m.home}|${m.away}`));
+  // Max minutes ahead a match can be to appear as "Em Breve", per sport
+  const SOON_WINDOW: Record<string, number> = {
+    football: 2160, soccer: 2160,   // football: up to 36 h (many fixtures spread over days)
+    basketball: 480, hockey: 480,    // NBA/NHL: up to 8 h (evening US games)
+  };
+  const DEFAULT_SOON_WINDOW = 240; // 4 h for tennis, volleyball, etc.
   const allUpcoming = [...upFootball, ...upTennis, ...upBasketball, ...upHockey, ...upVolleyball];
   const startingSoon: LiveMatchState[] = allUpcoming
     .filter(m => {
       const si = matchStartsInMinutes(m.date, m.time);
-      return isFinite(si) && si >= -10 && si <= 2160 && !liveIds.has(String(m.id));
+      const maxSi = SOON_WINDOW[m.sport] ?? DEFAULT_SOON_WINDOW;
+      return isFinite(si) && si >= -10 && si <= maxSi
+        && !liveIds.has(String(m.id))
+        && !liveTeamPairs.has(`${m.home}|${m.away}`);
     })
     .sort((a, b) => matchStartsInMinutes(a.date, a.time) - matchStartsInMinutes(b.date, b.time))
     .slice(0, 50)
