@@ -1753,6 +1753,21 @@ let hockeyScheduleCache: HockeyScheduleData | null = null;
 let hockeyScheduleFetchedAt = 0;
 const HOCKEY_SCHEDULE_TTL = 30 * 60 * 1000;
 
+type MLBScheduleMatch = {
+  id: string; date: string; time: string; status: string; venue?: string;
+  home: string; away: string;
+  homeScore: number; awayScore: number;
+  homeWon?: boolean;
+};
+type MLBScheduleData = {
+  league: string; season: string;
+  upcomingMatches: MLBScheduleMatch[];
+  recentMatches: MLBScheduleMatch[];
+};
+let mlbScheduleCache: MLBScheduleData | null = null;
+let mlbScheduleFetchedAt = 0;
+const MLB_SCHEDULE_TTL = 30 * 60 * 1000;
+
 type BasketballScheduleMatch = {
   id: string; date: string; time: string; status: string; venue?: string;
   home: string; away: string;
@@ -5311,6 +5326,96 @@ async function getHockeySchedule(): Promise<HockeyScheduleData> {
   }
 }
 
+async function getMLBSchedule(): Promise<MLBScheduleData> {
+  const now = Date.now();
+  if (mlbScheduleCache && now - mlbScheduleFetchedAt < MLB_SCHEDULE_TTL) return mlbScheduleCache;
+  const empty: MLBScheduleData = { league: "MLB", season: "", upcomingMatches: [], recentMatches: [] };
+  try {
+    const resp = await fetch(`${BASE_V1}/mlb/season-schedule?access_key=${STATSPAL_KEY}`, { signal: AbortSignal.timeout(12000) });
+    if (!resp.ok) return mlbScheduleCache ?? empty;
+    const data = (await resp.json()) as { scores?: { tournament?: { league?: string; season?: string; match: unknown } } };
+    const t = data?.scores?.tournament;
+    if (!t) return mlbScheduleCache ?? empty;
+
+    const league = t.league ?? "MLB";
+    const season = t.season ?? "";
+    const rawMatches = Array.isArray(t.match) ? t.match : (t.match ? [t.match] : []);
+
+    const parseDateStr = (s: string): Date => {
+      const [d, m, y] = s.split(".");
+      return new Date(parseInt(y!), parseInt(m!) - 1, parseInt(d!));
+    };
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    const dateKey = (s: string) => { const [d, mo, y] = s.split("."); return `${y}${mo}${d}`; };
+
+    const UPCOMING = new Set(["Scheduled", "Not Started"]);
+    const FINISHED  = new Set(["Finished"]);
+    const upcomingMatches: MLBScheduleMatch[] = [];
+    const recentMatches:   MLBScheduleMatch[] = [];
+
+    for (const m of rawMatches as Array<{
+      id: string; date: string; time: string; status: string; venue?: string;
+      home: { name: string; totalscore: string };
+      away: { name: string; totalscore: string };
+    }>) {
+      if (!m?.date || !m.home?.name || !m.away?.name) continue;
+      const matchDate = parseDateStr(m.date);
+      const homeScore = parseInt(m.home.totalscore) || 0;
+      const awayScore = parseInt(m.away.totalscore) || 0;
+
+      if (UPCOMING.has(m.status)) {
+        const daysAhead = (matchDate.getTime() - today.getTime()) / 86400000;
+        if (matchDate >= today && daysAhead <= 21) {
+          upcomingMatches.push({
+            id: m.id, date: m.date, time: m.time, status: m.status, venue: m.venue,
+            home: m.home.name, away: m.away.name, homeScore: 0, awayScore: 0,
+          });
+        }
+      } else if (FINISHED.has(m.status)) {
+        const daysAgo = (today.getTime() - matchDate.getTime()) / 86400000;
+        if (daysAgo >= 0 && daysAgo <= 14) {
+          recentMatches.push({
+            id: m.id, date: m.date, time: m.time, status: m.status, venue: m.venue,
+            home: m.home.name, away: m.away.name, homeScore, awayScore,
+            homeWon: homeScore > awayScore,
+          });
+        }
+      }
+    }
+
+    upcomingMatches.sort((a, b) => dateKey(a.date).localeCompare(dateKey(b.date)) || a.time.localeCompare(b.time));
+    recentMatches.sort((a, b) => dateKey(b.date).localeCompare(dateKey(a.date)));
+
+    // Fallback to livescores if season-schedule is empty
+    if (upcomingMatches.length === 0) {
+      try {
+        const lr = await fetch(`${BASE_V1}/mlb/livescores?access_key=${STATSPAL_KEY}`, { signal: AbortSignal.timeout(9000) });
+        if (lr.ok) {
+          const ld = (await lr.json()) as { livescores?: { tournament?: { match?: unknown } } };
+          const lms = ld?.livescores?.tournament?.match;
+          const arr = Array.isArray(lms) ? lms : (lms ? [lms] : []);
+          const seenIds = new Set(upcomingMatches.map(x => x.id));
+          for (const m of arr as Array<{ id: string; date: string; time: string; status: string; home: { name: string; totalscore: string }; away: { name: string; totalscore: string } }>) {
+            if (!m?.id || !m.date || !m.home?.name || seenIds.has(m.id)) continue;
+            seenIds.add(m.id);
+            const matchDate = parseDateStr(m.date);
+            if (UPCOMING.has(m.status) && matchDate >= today) {
+              upcomingMatches.push({ id: m.id, date: m.date, time: m.time, status: m.status, home: m.home.name, away: m.away.name, homeScore: 0, awayScore: 0 });
+            }
+          }
+          upcomingMatches.sort((a, b) => dateKey(a.date).localeCompare(dateKey(b.date)) || a.time.localeCompare(b.time));
+        }
+      } catch { /* non-critical */ }
+    }
+
+    mlbScheduleCache = { league, season, upcomingMatches: upcomingMatches.slice(0, 50), recentMatches: recentMatches.slice(0, 20) };
+    mlbScheduleFetchedAt = now;
+    return mlbScheduleCache;
+  } catch {
+    return mlbScheduleCache ?? empty;
+  }
+}
+
 // ─── Tournament detail cache ──────────────────────────────────────────────────
 type TournamentMatchPlayer = {
   id: string; name: string;
@@ -5525,6 +5630,15 @@ router.get("/basketball-schedule", async (_req, res) => {
 router.get("/hockey-schedule", async (_req, res) => {
   try {
     const data = await getHockeySchedule();
+    res.json(data);
+  } catch {
+    res.status(500).json({ error: "Calendário indisponível" });
+  }
+});
+
+router.get("/mlb-schedule", async (_req, res) => {
+  try {
+    const data = await getMLBSchedule();
     res.json(data);
   } catch {
     res.status(500).json({ error: "Calendário indisponível" });
