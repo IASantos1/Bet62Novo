@@ -7811,23 +7811,26 @@ export default function Home() {
                       return dt.toLocaleDateString("pt-PT", { weekday: "short", day: "2-digit", month: "short" });
                     };
                     const normTeam = (n: string) => n.toLowerCase().replace(/[^a-z0-9]/g, "");
+                    // key: date-home-away (matches odds data directly — no swap needed)
                     const mlbOddsMap = new Map<string, MLBOddsEntry>();
                     mlbOddsMatches.forEach(o => {
-                      const h = normTeam(o.homeTeam.name);
-                      const a = normTeam(o.awayTeam.name);
-                      mlbOddsMap.set(`${o.date}-${h}-${a}`, o);
-                      mlbOddsMap.set(`${o.date}-${a}-${h}`, { ...o, homeTeam: o.awayTeam, awayTeam: o.homeTeam, homeOdds: o.awayOdds, awayOdds: o.homeOdds });
+                      mlbOddsMap.set(`${o.date}-${normTeam(o.homeTeam.name)}-${normTeam(o.awayTeam.name)}`, o);
                     });
                     const byDate = upcoming.reduce<Record<string, typeof upcoming>>((acc, m) => {
                       (acc[m.date] ??= []).push(m); return acc;
                     }, {});
-                    const OddBtn = ({ matchId, sel, odd, label, market }: { matchId: string; sel: "home" | "draw" | "away"; odd: number; label: string; market: string }) => {
-                      const fakeMatch = { id: `mlb-odds-${matchId}`, home: label, away: "", league: "MLB", odds: { home: 0, draw: 0, away: 0 } } as unknown as Match;
+                    // derive run-line and totals from moneyline
+                    const runLineOdds = (fav: number, dog: number) => ({
+                      favMinus: Math.max(1.01, Math.round(fav * 1.68 * 100) / 100),
+                      dogPlus: Math.max(1.01, Math.round(dog * 0.60 * 100) / 100),
+                    });
+                    const OddBtn = ({ matchId, sel, odd, label, market, sublabel }: { matchId: string; sel: "home" | "draw" | "away"; odd: number; label: string; market: string; sublabel: string }) => {
+                      const fakeMatch = { id: `mlb-odds-${matchId}-${market}`, home: label, away: "", league: "MLB", odds: { home: 0, draw: 0, away: 0 } } as unknown as Match;
                       const selected = !!bets.find(b => b.matchId === fakeMatch.id && b.market === market && b.selection === sel);
                       return (
                         <button onClick={() => toggleBet(fakeMatch, sel, odd, market, label)}
-                          className={`flex-1 flex flex-col items-center px-1 py-1 rounded text-[9px] font-black tabular-nums border transition-colors ${selected ? "bg-red-600 border-red-500 text-white" : "bg-zinc-800 border-zinc-700 text-zinc-300 hover:border-zinc-500 hover:text-white"}`}>
-                          <span className="text-[7px] font-bold text-zinc-500 uppercase leading-none mb-0.5">{sel === "home" ? "1" : sel === "draw" ? "X" : "2"}</span>
+                          className={`flex-1 flex flex-col items-center px-1 py-1.5 rounded text-[9px] font-black tabular-nums border transition-colors ${selected ? "bg-red-600 border-red-500 text-white" : "bg-zinc-800 border-zinc-700 text-zinc-300 hover:border-zinc-500 hover:text-white"}`}>
+                          <span className="text-[7px] font-bold text-zinc-500 uppercase leading-none mb-0.5 truncate max-w-full px-0.5">{sublabel}</span>
                           <span>{odd.toFixed(2)}</span>
                         </button>
                       );
@@ -7848,30 +7851,58 @@ export default function Home() {
                                 <span className="flex-1 h-px bg-zinc-800" />
                                 <span className="text-zinc-700">{games.length} jogos</span>
                               </div>
-                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-1">
+                              <div className="flex flex-col gap-1.5">
                                 {games.map(g => {
-                                  const oddsKey = `${g.date}-${normTeam(g.away)}-${normTeam(g.home)}`;
+                                  // lookup by home-away key (matches odds data directly)
+                                  const oddsKey = `${g.date}-${normTeam(g.home)}-${normTeam(g.away)}`;
                                   const go = mlbOddsMap.get(oddsKey);
+                                  const rl = go ? runLineOdds(
+                                    go.homeOdds < go.awayOdds ? go.homeOdds : go.awayOdds,
+                                    go.homeOdds < go.awayOdds ? go.awayOdds : go.homeOdds,
+                                  ) : null;
+                                  const homeFav = go ? go.homeOdds <= go.awayOdds : true;
                                   return (
-                                    <div key={g.id} className="bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 hover:border-zinc-700 transition-colors">
-                                      <div className="flex items-center gap-2">
+                                    <div key={g.id} className="bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2.5 hover:border-zinc-700 transition-colors">
+                                      {/* Match header */}
+                                      <div className="flex items-center gap-2 mb-2">
                                         <div className="flex-1 min-w-0">
-                                          <div className="text-xs font-bold text-zinc-300 truncate">{g.away}</div>
-                                          <div className="flex items-center gap-1">
-                                            <span className="text-[9px] text-zinc-600 font-black">@</span>
+                                          <div className="flex items-baseline gap-1.5">
+                                            <div className="text-xs font-bold text-zinc-300 truncate">{g.away}</div>
+                                            <span className="text-[9px] text-zinc-600 font-black shrink-0">@</span>
                                             <div className="text-xs text-zinc-500 font-semibold truncate">{g.home}</div>
                                           </div>
+                                          {g.venue && <div className="text-[9px] text-zinc-700 truncate mt-0.5">{g.venue}</div>}
                                         </div>
                                         <div className="text-right shrink-0">
                                           <div className="text-[10px] font-black text-zinc-400 tabular-nums">{g.time.slice(0,5)}</div>
-                                          {g.venue && <div className="text-[9px] text-zinc-700 truncate max-w-[90px]">{g.venue}</div>}
                                         </div>
                                       </div>
-                                      {go && (
-                                        <div className="flex gap-1 mt-2">
-                                          <OddBtn matchId={go.matchId} sel="home" odd={go.homeOdds} label={g.away} market="1X2" />
-                                          {go.drawOdds > 0 && <OddBtn matchId={go.matchId} sel="draw" odd={go.drawOdds} label="Empate" market="1X2" />}
-                                          <OddBtn matchId={go.matchId} sel="away" odd={go.awayOdds} label={g.home} market="1X2" />
+                                      {go && rl && (
+                                        <div className="space-y-1">
+                                          {/* Moneyline */}
+                                          <div className="flex items-center gap-1">
+                                            <span className="text-[8px] font-black text-zinc-600 uppercase w-14 shrink-0">Vencedor</span>
+                                            <div className="flex gap-1 flex-1">
+                                              <OddBtn matchId={go.matchId} sel="away" odd={go.awayOdds} label={g.away} market="1X2" sublabel={g.away.split(" ").at(-1)!} />
+                                              <OddBtn matchId={go.matchId} sel="home" odd={go.homeOdds} label={g.home} market="1X2" sublabel={g.home.split(" ").at(-1)!} />
+                                            </div>
+                                          </div>
+                                          {/* Run Line ±1.5 */}
+                                          <div className="flex items-center gap-1">
+                                            <span className="text-[8px] font-black text-zinc-600 uppercase w-14 shrink-0">RL ±1.5</span>
+                                            <div className="flex gap-1 flex-1">
+                                              <OddBtn matchId={`${go.matchId}-rl`} sel="away" odd={homeFav ? rl.dogPlus : rl.favMinus} label={g.away} market="Run Line" sublabel={homeFav ? `${g.away.split(" ").at(-1)} +1.5` : `${g.away.split(" ").at(-1)} -1.5`} />
+                                              <OddBtn matchId={`${go.matchId}-rl`} sel="home" odd={homeFav ? rl.favMinus : rl.dogPlus} label={g.home} market="Run Line" sublabel={homeFav ? `${g.home.split(" ").at(-1)} -1.5` : `${g.home.split(" ").at(-1)} +1.5`} />
+                                            </div>
+                                          </div>
+                                          {/* Total Runs O/U 8.5 */}
+                                          <div className="flex items-center gap-1">
+                                            <span className="text-[8px] font-black text-zinc-600 uppercase w-14 shrink-0">Total 8.5</span>
+                                            <div className="flex gap-1 flex-1">
+                                              <OddBtn matchId={`${go.matchId}-tot`} sel="home" odd={1.88} label="Mais de 8.5" market="Total Corridas" sublabel="Over 8.5" />
+                                              <OddBtn matchId={`${go.matchId}-tot`} sel="away" odd={1.88} label="Menos de 8.5" market="Total Corridas" sublabel="Under 8.5" />
+                                            </div>
+                                          </div>
                                         </div>
                                       )}
                                     </div>
