@@ -7817,27 +7817,20 @@ export default function Home() {
                       mlbOddsMap.set(`${o.date}-${h}-${a}`, o);
                       mlbOddsMap.set(`${o.date}-${a}-${h}`, { ...o, homeTeam: o.awayTeam, awayTeam: o.homeTeam, homeOdds: o.awayOdds, awayOdds: o.homeOdds });
                     });
-                    const byDate = upcoming.reduce<Record<string, typeof upcoming>>((acc, m) => {
+                    // Only show games that have real API odds
+                    const upcomingWithOdds = upcoming.filter(g => {
+                      const k = `${g.date}-${normTeam(g.home)}-${normTeam(g.away)}`;
+                      return mlbOddsMap.has(k);
+                    });
+                    if (upcomingWithOdds.length === 0) return null;
+                    const byDate = upcomingWithOdds.reduce<Record<string, typeof upcoming>>((acc, m) => {
                       (acc[m.date] ??= []).push(m); return acc;
                     }, {});
-                    const OddBtn = ({ matchId, sel, odd, label, market }: { matchId: string; sel: "home" | "away"; odd: number; label: string; market: string }) => {
-                      const fakeMatch = { id: `mlb-odds-${matchId}`, home: label, away: "", league: "MLB", odds: { home: 0, draw: 0, away: 0 } } as unknown as Match;
-                      const selected = !!bets.find(b => b.matchId === fakeMatch.id && b.market === market && b.selection === sel);
-                      return (
-                        <button onClick={() => toggleBet(fakeMatch, sel, odd, market, label)}
-                          className={`flex-1 flex flex-col items-center px-1 py-1 rounded text-[9px] font-black tabular-nums border transition-colors ${selected ? "bg-red-600 border-red-500 text-white" : "bg-zinc-800 border-zinc-700 text-zinc-300 hover:border-zinc-500 hover:text-white"}`}>
-                          <span className="text-[7px] font-bold text-zinc-500 uppercase leading-none mb-0.5">{sel === "home" ? "1" : "2"}</span>
-                          <span>{odd.toFixed(2)}</span>
-                        </button>
-                      );
-                    };
                     return (
                       <div className="mb-6 mt-6">
                         <div className="flex items-center gap-2 mb-3">
-                          <span className="text-base font-black italic uppercase tracking-tight text-zinc-400">⚾ Calendário MLB</span>
-                          <span className="text-[10px] font-semibold text-zinc-600 normal-case italic hidden sm:block">— {mlbSchedule!.season || "2025"}</span>
-                          <span className="text-[10px] font-bold bg-zinc-800 text-zinc-500 rounded px-1.5 py-0.5">{upcoming.length}</span>
-                          {mlbOddsMatches.length > 0 && <span className="text-[9px] font-bold text-green-600/80 bg-green-500/10 border border-green-500/20 rounded px-1.5 py-0.5">{mlbOddsMatches.length} com odds</span>}
+                          <span className="text-base font-black italic uppercase tracking-tight text-zinc-400">⚾ Beisebol</span>
+                          <span className="text-[10px] font-bold bg-zinc-800 text-zinc-500 rounded px-1.5 py-0.5">{upcomingWithOdds.length}</span>
                         </div>
                         <div className="space-y-3">
                           {Object.entries(byDate).slice(0, 7).map(([date, games]) => (
@@ -7850,7 +7843,7 @@ export default function Home() {
                               <div className="flex flex-col gap-2">
                                 {games.map(g => {
                                   const oddsKey = `${g.date}-${normTeam(g.home)}-${normTeam(g.away)}`;
-                                  const go = mlbOddsMap.get(oddsKey);
+                                  const go = mlbOddsMap.get(oddsKey)!;
                                   const fakeMatch = {
                                     id: `mlb-cal-${g.id}`,
                                     home: g.home,
@@ -7860,8 +7853,8 @@ export default function Home() {
                                     sport: "baseball",
                                     time: g.time,
                                     date: g.date,
-                                    hasRealOdds: !!go,
-                                    odds: { home: go?.homeOdds ?? 0, draw: 0, away: go?.awayOdds ?? 0 },
+                                    hasRealOdds: true,
+                                    odds: { home: go.homeOdds, draw: 0, away: go.awayOdds },
                                     markets: _emptyMkt(),
                                   } as unknown as Match;
                                   return <MatchCard key={g.id} match={fakeMatch} />;
