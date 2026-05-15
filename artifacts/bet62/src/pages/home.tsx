@@ -1426,6 +1426,17 @@ export default function Home() {
   const [mlbInjuries, setMlbInjuries] = useState<Record<string, MLBInjuriesData>>({});
   const [mlbInjuriesLoading, setMlbInjuriesLoading] = useState(false);
 
+  type MLBLeaderBatter = {
+    rank: string; name: string; team: string; gp: string;
+    atBats: string; hits: string; doubles: string; triples: string;
+    homeRuns: string; runs: string; rbi: string; stolenBases: string;
+    walks: string; strikeouts: string; avg: string; obp: string; slg: string;
+  };
+  type MLBLeagueStatsData = { batters: MLBLeaderBatter[] };
+  const [mlbLeagueStats, setMlbLeagueStats] = useState<MLBLeagueStatsData | null>(null);
+  const [mlbLeagueStatsLoading, setMlbLeagueStatsLoading] = useState(false);
+  const [mlbLigaSubTab, setMlbLigaSubTab] = useState<"avg" | "hr" | "rbi" | "sb">("avg");
+
   type MLBBatterStat = {
     id: string; rank: number; name: string; gp: number;
     ab: number; h: number; avg: string; obp: string; slg: string;
@@ -1677,7 +1688,7 @@ export default function Home() {
   }, []);
 
   // Match detail view tab: "markets" | "stats" | "standings" | "live"
-  const [matchViewTab, setMatchViewTab] = useState<"markets" | "stats" | "standings" | "live" | "yesterday" | "ranking">("markets");
+  const [matchViewTab, setMatchViewTab] = useState<"markets" | "stats" | "standings" | "live" | "yesterday" | "ranking" | "liga">("markets");
   // Market sub-tab — lifted here so live refreshes don't unmount MatchModalMarkets and reset the selection
   const [modalTab, setModalTab] = useState("todos");
   const [matchStats, setMatchStats] = useState<MatchStatsData | null>(null);
@@ -1806,6 +1817,18 @@ export default function Home() {
       .catch(() => {})
       .finally(() => setPlayerMarketsLoading(false));
   }, [modalTab, expandedMatch?.id, expandedMatch?.leagueId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Lazy-load MLB league stats when "liga" tab is active
+  useEffect(() => {
+    if (matchViewTab !== "liga" || expandedMatch?.sport !== "baseball") return;
+    if (mlbLeagueStats || mlbLeagueStatsLoading) return;
+    setMlbLeagueStatsLoading(true);
+    fetch("/api/matches/mlb-league-stats")
+      .then(r => r.ok ? r.json() : null)
+      .then(d => { if (d) setMlbLeagueStats(d as MLBLeagueStatsData); })
+      .catch(() => {})
+      .finally(() => setMlbLeagueStatsLoading(false));
+  }, [matchViewTab, expandedMatch?.sport]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Handle ?payment= query param on return from card payment
   useEffect(() => {
@@ -5450,6 +5473,21 @@ export default function Home() {
                             </button>
                           ))}
                         </>
+                      ) : expandedMatch.sport === "baseball" ? (
+                        <>
+                          {(expandedMatch.isLive
+                            ? (["stats", "yesterday", "liga", "live"] as const)
+                            : (["stats", "yesterday", "liga"] as const)
+                          ).map(tab => (
+                            <button
+                              key={tab}
+                              onClick={() => setMatchViewTab(tab)}
+                              className={`flex-1 py-2 text-xs font-bold transition-colors whitespace-nowrap px-2 ${matchViewTab === tab ? (tab === "live" ? "text-red-400 border-b-2 border-red-500" : "text-blue-400 border-b-2 border-blue-500") : "text-zinc-500 hover:text-white"}`}
+                            >
+                              {tab === "stats" ? "Estatísticas" : tab === "yesterday" ? "🏆 Classificação" : tab === "liga" ? "⭐ Liga" : "⚡ Ao Vivo"}
+                            </button>
+                          ))}
+                        </>
                       ) : (
                         (expandedMatch.isLive
                           ? (["stats", "standings", "live"] as const)
@@ -6158,6 +6196,116 @@ export default function Home() {
                     )}
                   </div>
                 )}
+
+                {/* MLB Liga — league batting leaderboards */}
+                {matchViewTab === "liga" && expandedMatch.sport === "baseball" && (() => {
+                  const TABS: { key: "avg" | "hr" | "rbi" | "sb"; label: string; col: keyof MLBLeaderBatter; color: string; title: string } [] = [
+                    { key: "avg", label: "AVG",  col: "avg",       color: "text-yellow-400",  title: "Média (AVG)" },
+                    { key: "hr",  label: "HR",   col: "homeRuns",  color: "text-red-400",     title: "Home Runs" },
+                    { key: "rbi", label: "RBI",  col: "rbi",       color: "text-blue-400",    title: "RBI" },
+                    { key: "sb",  label: "SB",   col: "stolenBases", color: "text-emerald-400", title: "Bases Roubadas" },
+                  ];
+                  const active = TABS.find(t => t.key === mlbLigaSubTab) ?? TABS[0];
+                  const sorted = mlbLeagueStats
+                    ? [...mlbLeagueStats.batters].sort((a, b) => {
+                        const va = parseFloat(a[active.col] as string) || 0;
+                        const vb = parseFloat(b[active.col] as string) || 0;
+                        return vb - va;
+                      }).slice(0, 25)
+                    : [];
+                  return (
+                    <div className="bg-zinc-900 rounded-xl border border-zinc-800 p-4 mb-2 animate-in fade-in duration-200">
+                      <div className="flex items-center justify-between mb-3">
+                        <div className="text-[10px] font-black text-red-500 uppercase tracking-widest">⭐ Líderes MLB</div>
+                        <div className="flex rounded overflow-hidden border border-zinc-700">
+                          {TABS.map(t => (
+                            <button key={t.key} onClick={() => setMlbLigaSubTab(t.key)}
+                              className={`text-[9px] font-black px-2.5 py-1 transition-colors ${mlbLigaSubTab === t.key ? "bg-zinc-700 text-white" : "text-zinc-600 hover:text-zinc-400"}`}
+                            >
+                              {t.label}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                      <div className={`text-[9px] font-bold mb-2 ${active.color}`}>🏆 Top 25 — {active.title}</div>
+                      {mlbLeagueStatsLoading || !mlbLeagueStats ? (
+                        <div className="flex items-center justify-center py-10">
+                          <div className="text-zinc-600 text-xs animate-pulse">A carregar líderes...</div>
+                        </div>
+                      ) : (
+                        <div className="overflow-x-auto">
+                          <table className="w-full text-[10px] font-mono tabular-nums">
+                            <thead>
+                              <tr className="border-b border-zinc-800 text-[8px] font-black text-zinc-600 uppercase">
+                                <th className="text-left py-1 px-1 w-5">#</th>
+                                <th className="text-left py-1 px-2 min-w-[110px]">Jogador</th>
+                                <th className="text-left py-1 px-1 min-w-[65px] hidden sm:table-cell">Equipa</th>
+                                <th className="py-1 px-1 text-center">PJ</th>
+                                <th className={`py-1 px-1 text-center font-black ${active.color}`}>{active.label}</th>
+                                {active.key === "avg" && <>
+                                  <th className="py-1 px-1 text-center hidden sm:table-cell">OBP</th>
+                                  <th className="py-1 px-1 text-center hidden sm:table-cell">SLG</th>
+                                  <th className="py-1 px-1 text-center">HR</th>
+                                  <th className="py-1 px-1 text-center">RBI</th>
+                                </>}
+                                {active.key === "hr" && <>
+                                  <th className="py-1 px-1 text-center hidden sm:table-cell">AVG</th>
+                                  <th className="py-1 px-1 text-center">RBI</th>
+                                  <th className="py-1 px-1 text-center hidden sm:table-cell">R</th>
+                                </>}
+                                {active.key === "rbi" && <>
+                                  <th className="py-1 px-1 text-center hidden sm:table-cell">AVG</th>
+                                  <th className="py-1 px-1 text-center">HR</th>
+                                  <th className="py-1 px-1 text-center hidden sm:table-cell">H</th>
+                                </>}
+                                {active.key === "sb" && <>
+                                  <th className="py-1 px-1 text-center hidden sm:table-cell">AVG</th>
+                                  <th className="py-1 px-1 text-center hidden sm:table-cell">R</th>
+                                  <th className="py-1 px-1 text-center">H</th>
+                                </>}
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {sorted.map((b, i) => (
+                                <tr key={i} className="border-b border-zinc-800/30 hover:bg-zinc-800/20">
+                                  <td className="py-1 px-1 text-zinc-600">{i + 1}</td>
+                                  <td className="py-1 px-2 font-semibold text-zinc-200 truncate max-w-[110px]">{b.name}</td>
+                                  <td className="py-1 px-1 text-zinc-500 truncate max-w-[65px] hidden sm:table-cell">{b.team}</td>
+                                  <td className="py-1 px-1 text-center text-zinc-500">{b.gp}</td>
+                                  <td className={`py-1 px-1 text-center font-black ${active.color}`}>{b[active.col] as string}</td>
+                                  {active.key === "avg" && <>
+                                    <td className="py-1 px-1 text-center text-zinc-400 hidden sm:table-cell">{b.obp}</td>
+                                    <td className="py-1 px-1 text-center text-zinc-400 hidden sm:table-cell">{b.slg}</td>
+                                    <td className="py-1 px-1 text-center text-red-400">{b.homeRuns}</td>
+                                    <td className="py-1 px-1 text-center text-zinc-300">{b.rbi}</td>
+                                  </>}
+                                  {active.key === "hr" && <>
+                                    <td className="py-1 px-1 text-center text-zinc-400 hidden sm:table-cell">{b.avg}</td>
+                                    <td className="py-1 px-1 text-center text-zinc-300">{b.rbi}</td>
+                                    <td className="py-1 px-1 text-center text-zinc-500 hidden sm:table-cell">{b.runs}</td>
+                                  </>}
+                                  {active.key === "rbi" && <>
+                                    <td className="py-1 px-1 text-center text-zinc-400 hidden sm:table-cell">{b.avg}</td>
+                                    <td className="py-1 px-1 text-center text-red-400">{b.homeRuns}</td>
+                                    <td className="py-1 px-1 text-center text-zinc-500 hidden sm:table-cell">{b.hits}</td>
+                                  </>}
+                                  {active.key === "sb" && <>
+                                    <td className="py-1 px-1 text-center text-zinc-400 hidden sm:table-cell">{b.avg}</td>
+                                    <td className="py-1 px-1 text-center text-zinc-500 hidden sm:table-cell">{b.runs}</td>
+                                    <td className="py-1 px-1 text-center text-zinc-300">{b.hits}</td>
+                                  </>}
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                          {sorted.length === 0 && (
+                            <div className="text-center text-zinc-600 py-6 text-xs">Sem dados disponíveis.</div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
 
                 {/* MLB Roster/Stats panel */}
                 {matchViewTab === "yesterday" && expandedMatch.sport === "baseball" && selectedMLBRoster && (() => {

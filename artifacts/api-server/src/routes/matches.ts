@@ -6073,6 +6073,67 @@ router.get("/mlb-injuries/:team", async (req, res) => {
   }
 });
 
+// ─── MLB League Stats (batting + pitching leaders) ────────────────────────────
+type MLBLeaderBatter = {
+  rank: string; name: string; team: string; gp: string;
+  atBats: string; hits: string; doubles: string; triples: string;
+  homeRuns: string; runs: string; rbi: string; stolenBases: string;
+  walks: string; strikeouts: string; avg: string; obp: string; slg: string;
+};
+type MLBLeagueStatsData = { batters: MLBLeaderBatter[] };
+
+const MLB_LEAGUE_STATS_TTL = 30 * 60 * 1000;
+let mlbLeagueStatsCache: MLBLeagueStatsData | null = null;
+let mlbLeagueStatsFetchedAt = 0;
+
+async function getMLBLeagueStats(): Promise<MLBLeagueStatsData> {
+  const now = Date.now();
+  if (mlbLeagueStatsCache && now - mlbLeagueStatsFetchedAt < MLB_LEAGUE_STATS_TTL) return mlbLeagueStatsCache;
+
+  try {
+    const resp = await fetch(`${BASE_V1}/mlb/league-stats/mlb_player_batting?access_key=${STATSPAL_KEY}`, { signal: AbortSignal.timeout(8000) });
+    if (!resp.ok) return mlbLeagueStatsCache ?? { batters: [] };
+    const json = (await resp.json()) as { statistics?: { category?: { player?: unknown } } };
+    const raw = json?.statistics?.category?.player;
+    const rawArr = raw ? ((Array.isArray(raw) ? raw : [raw]) as Record<string, string>[]) : [];
+
+    const batters: MLBLeaderBatter[] = rawArr.slice(0, 50).map(p => ({
+      rank: p["rank"] ?? "",
+      name: p["name"] ?? "",
+      team: p["team"] ?? "",
+      gp: p["gp"] ?? "",
+      atBats: p["at_bats"] ?? "",
+      hits: p["hits"] ?? "",
+      doubles: p["doubles"] ?? "",
+      triples: p["triples"] ?? "",
+      homeRuns: p["home_runs"] ?? "",
+      runs: p["runs"] ?? "",
+      rbi: p["runs_batted_in"] ?? "",
+      stolenBases: p["stolen_bases"] ?? "",
+      walks: p["walks"] ?? "",
+      strikeouts: p["strikeouts"] ?? "",
+      avg: p["batting_avg"] ?? "",
+      obp: p["on_base_percentage"] ?? "",
+      slg: p["slugging_percentage"] ?? "",
+    }));
+
+    mlbLeagueStatsCache = { batters };
+    mlbLeagueStatsFetchedAt = now;
+    return mlbLeagueStatsCache;
+  } catch {
+    return mlbLeagueStatsCache ?? { batters: [] };
+  }
+}
+
+router.get("/mlb-league-stats", async (_req, res) => {
+  try {
+    const data = await getMLBLeagueStats();
+    res.json(data);
+  } catch {
+    res.status(500).json({ error: "Estatísticas da liga indisponíveis" });
+  }
+});
+
 async function getNBAStandings(): Promise<NBAStandingsData> {
   const now = Date.now();
   if (nbaStandingsCache && now - nbaStandingsFetchedAt < NBA_STANDINGS_TTL) return nbaStandingsCache;
