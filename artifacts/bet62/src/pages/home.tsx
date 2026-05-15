@@ -931,6 +931,7 @@ type Match = {
     awayErrors?: number;
     etScore?: [number, number];
     penScore?: [number, number];
+    htScore?: [number, number];
   };
   // Red cards per team (football only)
   redCardsHome?: number;
@@ -4270,25 +4271,38 @@ export default function Home() {
         {/* ── FUTEBOL: HT/FT ── */}
         {isFootball && !showET && !showPen && !isLateGame && (modalTab === "htft" || modalTab === "todos") && m && m.htft && (() => {
           const isSecondHalf = match.isLive === true && (match.minute ?? 0) > 45;
-          const htGroupLabel = isSecondHalf ? "Empate / Final" : "Empate ao Intervalo";
-          const htPrefix1 = isSecondHalf ? "Final" : "Intervalo / Final";
+          const isAtHT = match.status === "HT";
+          const htKnown = isSecondHalf || isAtHT;
+          const htGroupLabel = htKnown ? "Empate ao Intervalo" : "Empate ao Intervalo";
+          const htPrefix1 = htKnown ? "Intervalo / Final" : "Intervalo / Final";
+          const hf = m.htft;
+          // After backend zeroing: only one of these three groups will have non-zero odds
+          const showHome = hf.hh > 0 || hf.hd > 0 || hf.ha > 0;
+          const showDraw = hf.dh > 0 || hf.dd > 0 || hf.da > 0;
+          const showAway = hf.ah > 0 || hf.ad > 0 || hf.aa > 0;
           return (
             <div>
-              <MarketGroup title={`${htPrefix1} — ${match.home} vence`}>
-                <MarketOddsBtn match={match} sel="htft-hh" odd={m.htft.hh} market="htft" label="1 / 1" />
-                <MarketOddsBtn match={match} sel="htft-hd" odd={m.htft.hd} market="htft" label="1 / X" />
-                <MarketOddsBtn match={match} sel="htft-ha" odd={m.htft.ha} market="htft" label="1 / 2" />
-              </MarketGroup>
-              <MarketGroup title={htGroupLabel}>
-                <MarketOddsBtn match={match} sel="htft-dh" odd={m.htft.dh} market="htft" label="X / 1" />
-                <MarketOddsBtn match={match} sel="htft-dd" odd={m.htft.dd} market="htft" label="X / X" />
-                <MarketOddsBtn match={match} sel="htft-da" odd={m.htft.da} market="htft" label="X / 2" />
-              </MarketGroup>
-              <MarketGroup title={`${htPrefix1} — ${match.away} vence`}>
-                <MarketOddsBtn match={match} sel="htft-ah" odd={m.htft.ah} market="htft" label="2 / 1" />
-                <MarketOddsBtn match={match} sel="htft-ad" odd={m.htft.ad} market="htft" label="2 / X" />
-                <MarketOddsBtn match={match} sel="htft-aa" odd={m.htft.aa} market="htft" label="2 / 2" />
-              </MarketGroup>
+              {showHome && (
+                <MarketGroup title={`${htPrefix1} — ${match.home} vence`}>
+                  {hf.hh > 0 && <MarketOddsBtn match={match} sel="htft-hh" odd={hf.hh} market="htft" label="1 / 1" />}
+                  {hf.hd > 0 && <MarketOddsBtn match={match} sel="htft-hd" odd={hf.hd} market="htft" label="1 / X" />}
+                  {hf.ha > 0 && <MarketOddsBtn match={match} sel="htft-ha" odd={hf.ha} market="htft" label="1 / 2" />}
+                </MarketGroup>
+              )}
+              {showDraw && (
+                <MarketGroup title={htGroupLabel}>
+                  {hf.dh > 0 && <MarketOddsBtn match={match} sel="htft-dh" odd={hf.dh} market="htft" label="X / 1" />}
+                  {hf.dd > 0 && <MarketOddsBtn match={match} sel="htft-dd" odd={hf.dd} market="htft" label="X / X" />}
+                  {hf.da > 0 && <MarketOddsBtn match={match} sel="htft-da" odd={hf.da} market="htft" label="X / 2" />}
+                </MarketGroup>
+              )}
+              {showAway && (
+                <MarketGroup title={`${htPrefix1} — ${match.away} vence`}>
+                  {hf.ah > 0 && <MarketOddsBtn match={match} sel="htft-ah" odd={hf.ah} market="htft" label="2 / 1" />}
+                  {hf.ad > 0 && <MarketOddsBtn match={match} sel="htft-ad" odd={hf.ad} market="htft" label="2 / X" />}
+                  {hf.aa > 0 && <MarketOddsBtn match={match} sel="htft-aa" odd={hf.aa} market="htft" label="2 / 2" />}
+                </MarketGroup>
+              )}
             </div>
           );
         })()}

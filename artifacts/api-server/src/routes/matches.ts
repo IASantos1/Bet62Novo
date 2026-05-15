@@ -3723,6 +3723,41 @@ async function buildLiveMatches(): Promise<LiveMatchState[]> {
               ),
             };
           }
+
+          // ── HT/FT: zero out impossible outcomes when HT result is known ──────
+          // At HT break: homeScore/awayScore ARE the halftime scores.
+          // In 2nd half: use htScoreNow (from m.ht) to recover HT score.
+          if (matchMarkets.htft) {
+            const isAtHT = m.status === "HT";
+            const isIn2nd = !isAtHT && minute > 45;
+            let htH: number | null = null;
+            let htA: number | null = null;
+            if (isAtHT) { htH = homeScore; htA = awayScore; }
+            else if (isIn2nd && htScoreNow) { [htH, htA] = htScoreNow; }
+
+            if (htH !== null && htA !== null) {
+              const htR = htH > htA ? "h" : htH < htA ? "a" : "d";
+              const hf = matchMarkets.htft;
+              // Extract the 3 surviving implied probs and re-normalize
+              const raw3: [number, number, number] =
+                htR === "h" ? [hf.hh, hf.hd, hf.ha] :
+                htR === "d" ? [hf.dh, hf.dd, hf.da] :
+                              [hf.ah, hf.ad, hf.aa];
+              const ps = raw3.map(o => (o > 1 ? 1 / o : 0));
+              const sum3 = ps.reduce((a, b) => a + b, 0);
+              if (sum3 > 1e-9) {
+                const normed = ps.map(p => mc(p / sum3, 0.01, 0.99));
+                const [o1, o2, o3] = probsToDecimalOdds(normed, 1.10);
+                if (o1 !== undefined && o2 !== undefined && o3 !== undefined) {
+                  const nh = { hh: 0, hd: 0, ha: 0, dh: 0, dd: 0, da: 0, ah: 0, ad: 0, aa: 0 };
+                  if (htR === "h") { nh.hh = o1; nh.hd = o2; nh.ha = o3; }
+                  else if (htR === "d") { nh.dh = o1; nh.dd = o2; nh.da = o3; }
+                  else { nh.ah = o1; nh.ad = o2; nh.aa = o3; }
+                  matchMarkets = { ...matchMarkets, htft: nh };
+                }
+              }
+            }
+          }
         }
 
         // Recalculate Double Chance and Draw No Bet from the ACTUAL live 1X2 odds.
