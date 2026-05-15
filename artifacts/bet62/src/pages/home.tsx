@@ -51,6 +51,16 @@ import estudiantesBanner from "@assets/Create_a_photorealistic_169_football_bann
 import rosarioCentralBanner from "@assets/Create_a_photorealistic_169_football_banner_with_-177836116875_1778361261635.png";
 import talleresBanner from "@assets/Create_a_photorealistic_169_football_banner_with_-177836117521_1778361261634.png";
 import lanusBanner from "@assets/Create_a_photorealistic_169_football_banner_with_-177836119764_1778361261633.png";
+import palmirasBanner from "@assets/file_1778852798916_1778852957311.jpeg";
+import flamengoBanner from "@assets/file_1778852802911_1778852957311.jpeg";
+import saoPauloBanner from "@assets/file_1778852808010_1778852957311.jpeg";
+import fluminenseBanner from "@assets/file_1778852812218_1778852957312.jpeg";
+import bahiaBanner from "@assets/file_1778852816214_1778852957312.jpeg";
+import athleticoPRBanner from "@assets/file_1778852819823_1778852957312.jpeg";
+import coritibaBanner from "@assets/file_1778852828214_1778852957312.jpeg";
+import atleticoMGBanner from "@assets/file_1778852831734_1778852957312.jpeg";
+import bragantinoBanner from "@assets/file_1778852835656_1778852957312.jpeg";
+import vitoriaBanner from "@assets/file_1778852839664_1778852957312.jpeg";
 
 const TEAM_BANNERS: Record<string, string> = {
   // ── Liga Portugal ──
@@ -226,6 +236,46 @@ const TEAM_BANNERS: Record<string, string> = {
   "C.F. Pachuca": "/banners/file_1778704825793_1778715064131.jpeg",
   "CF Pachuca": "/banners/file_1778704825793_1778715064131.jpeg",
   "Tuzos": "/banners/file_1778704825793_1778715064131.jpeg",
+  // ── Brasileirão ──
+  "Palmeiras": palmirasBanner,
+  "SE Palmeiras": palmirasBanner,
+  "Sociedade Esportiva Palmeiras": palmirasBanner,
+  "Flamengo": flamengoBanner,
+  "CR Flamengo": flamengoBanner,
+  "Clube de Regatas do Flamengo": flamengoBanner,
+  "São Paulo": saoPauloBanner,
+  "Sao Paulo": saoPauloBanner,
+  "São Paulo FC": saoPauloBanner,
+  "Sao Paulo FC": saoPauloBanner,
+  "SPFC": saoPauloBanner,
+  "Fluminense": fluminenseBanner,
+  "Fluminense FC": fluminenseBanner,
+  "Bahia": bahiaBanner,
+  "EC Bahia": bahiaBanner,
+  "Esporte Clube Bahia": bahiaBanner,
+  "Athletico Paranaense": athleticoPRBanner,
+  "Athletico-PR": athleticoPRBanner,
+  "Club Athletico Paranaense": athleticoPRBanner,
+  "Athletico PR": athleticoPRBanner,
+  "CAP": athleticoPRBanner,
+  "Coritiba": coritibaBanner,
+  "Coritiba FC": coritibaBanner,
+  "Coritiba FBC": coritibaBanner,
+  "Atlético Mineiro": atleticoMGBanner,
+  "Atletico Mineiro": atleticoMGBanner,
+  "Atlético-MG": atleticoMGBanner,
+  "Atletico MG": atleticoMGBanner,
+  "Clube Atlético Mineiro": atleticoMGBanner,
+  "CAM": atleticoMGBanner,
+  "Red Bull Bragantino": bragantinoBanner,
+  "Bragantino": bragantinoBanner,
+  "RB Bragantino": bragantinoBanner,
+  "Red Bull Bragantino BR": bragantinoBanner,
+  "Vitória": vitoriaBanner,
+  "Vitoria": vitoriaBanner,
+  "EC Vitória": vitoriaBanner,
+  "EC Vitoria": vitoriaBanner,
+  "Esporte Clube Vitória": vitoriaBanner,
 };
 
 const LEAGUE_FLAGS: Record<string, string> = {
@@ -300,6 +350,30 @@ const TEAM_COUNTRY: Record<string, string> = {
   "Estudiantes LP": "argentina", "Rosario Central": "argentina",
   "Lanús": "argentina", "Lanus": "argentina", "Talleres": "argentina",
   "Talleres Córdoba": "argentina",
+  // Brasileirão
+  "Palmeiras": "brazil", "SE Palmeiras": "brazil",
+  "Flamengo": "brazil", "CR Flamengo": "brazil",
+  "São Paulo": "brazil", "Sao Paulo": "brazil", "São Paulo FC": "brazil", "Sao Paulo FC": "brazil", "SPFC": "brazil",
+  "Fluminense": "brazil", "Fluminense FC": "brazil",
+  "Bahia": "brazil", "EC Bahia": "brazil",
+  "Athletico Paranaense": "brazil", "Athletico-PR": "brazil", "Athletico PR": "brazil", "Club Athletico Paranaense": "brazil",
+  "Coritiba": "brazil", "Coritiba FC": "brazil", "Coritiba FBC": "brazil",
+  "Atlético Mineiro": "brazil", "Atletico Mineiro": "brazil", "Atlético-MG": "brazil", "Atletico MG": "brazil",
+  "Red Bull Bragantino": "brazil", "Bragantino": "brazil", "RB Bragantino": "brazil",
+  "Vitória": "brazil", "Vitoria": "brazil", "EC Vitória": "brazil", "EC Vitoria": "brazil",
+  "Corinthians": "brazil", "SC Corinthians": "brazil", "Sport Club Corinthians Paulista": "brazil",
+  "Santos": "brazil", "Santos FC": "brazil",
+  "Grêmio": "brazil", "Gremio": "brazil", "Grêmio FBPA": "brazil",
+  "Internacional": "brazil", "Sport Club Internacional": "brazil",
+  "Vasco da Gama": "brazil", "Vasco": "brazil", "CR Vasco da Gama": "brazil",
+  "Botafogo": "brazil", "Botafogo FR": "brazil", "Botafogo de Futebol e Regatas": "brazil",
+  "Cruzeiro": "brazil", "Cruzeiro EC": "brazil", "Cruzeiro Esporte Clube": "brazil",
+  "Fortaleza": "brazil", "Fortaleza EC": "brazil",
+  "Ceará": "brazil", "Ceara": "brazil", "Ceará SC": "brazil",
+  "Sport Recife": "brazil", "Sport Club Recife": "brazil",
+  "América Mineiro": "brazil", "America Mineiro": "brazil", "América-MG": "brazil",
+  "Goiás": "brazil", "Goias": "brazil", "Goiás EC": "brazil",
+  "Cuiabá": "brazil", "Cuiaba": "brazil", "Cuiabá EC": "brazil",
   // Süper Lig
   "Galatasaray": "turkey", "Galatasaray SK": "turkey",
   "Fenerbahce": "turkey", "Fenerbahçe": "turkey", "Fenerbahce SK": "turkey",
