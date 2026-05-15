@@ -9000,20 +9000,25 @@ setInterval(() => {
   broadcastLive().catch(() => { /* ignore */ });
 }, 2000);
 
-// ─── Football Player Markets (derived from league stats) ─────────────────────
-// GET /api/matches/football-player-markets/:leagueId
-// Uses getFootballLeagueStats() (cached 30 min) to compute per-player odds for:
-//   - Anytime Goalscorer (a marcar em qualquer momento)
-//   - To Provide Assist (assistência)
-//   - Yellow Card (cartão amarelo)
-// Odds formula: 1/rate * 0.975 (house margin), floor 1.10, cap 40.0.
-// Only players with ≥3 appearances and stat ≥ 1 are included.
+// ─── Football Player Markets (per-match, filtered to home + away team only) ───
+// GET /api/matches/football-player-markets/:leagueId?homeTeam=...&awayTeam=...
+// Returns players from ONLY the two teams in this match, organized per team.
+// Uses getFootballLeagueStats() (cached 30 min, v2/soccer/leagues/{id}/stats).
+// Odds: 1/rate * 0.975 house margin, floor 1.10, cap 40.0, ≥3 appearances + ≥1 stat.
+// Team matching: normalizes names (lowercase, strips FC/AFC/CF/SC suffixes, accents).
 
 type PlayerMarketEntry = {
   id: string; name: string;
   team: string; teamId: string;
   appearances: number; stat: number;
   odds: number;
+};
+
+type TeamPlayerMarkets = {
+  teamName: string; teamId: string;
+  scorers: PlayerMarketEntry[];
+  assisters: PlayerMarketEntry[];
+  bookings: PlayerMarketEntry[];
 };
 
 function playerOdds(stat: number, appearances: number): number {
@@ -9023,44 +9028,87 @@ function playerOdds(stat: number, appearances: number): number {
   return Math.min(40.0, Math.max(1.10, Math.round(fair * 0.975 * 100) / 100));
 }
 
+// Normalize a team name for fuzzy matching: lowercase, strip diacritics, strip
+// common suffixes (FC, AFC, SC, CF, SV, AC, etc.) and punctuation.
+function normalizeTeamName(name: string): string {
+  return name
+    .toLowerCase()
+    .normalize("NFD").replace(/[\u0300-\u036f]/g, "")   // strip accents
+    .replace(/\b(fc|afc|sc|cf|sv|ac|rsc|fk|sk|vfb|vfl|bsc|tsg|rb|cd|ud|sd|ca|ad|as|ss|us|ssc|sl|sfc|bfc|jfc|kfc|nk|gd|desportivo|futebol clube|clube)\b/g, "")
+    .replace(/[^a-z0-9 ]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function findMatchingTeam(teams: FootballLeagueStatsTeam[], targetName: string): FootballLeagueStatsTeam | undefined {
+  const norm = normalizeTeamName(targetName);
+  // Exact normalized match first
+  let found = teams.find(t => normalizeTeamName(t.name) === norm);
+  if (found) return found;
+  // Substring match: target contains team name OR team name contains target
+  found = teams.find(t => {
+    const tn = normalizeTeamName(t.name);
+    return tn.includes(norm) || norm.includes(tn);
+  });
+  return found;
+}
+
+function buildTeamMarkets(team: FootballLeagueStatsTeam): TeamPlayerMarkets {
+  const byOdds = (a: PlayerMarketEntry, b: PlayerMarketEntry) => a.odds - b.odds;
+  const scorers: PlayerMarketEntry[] = [];
+  const assisters: PlayerMarketEntry[] = [];
+  const bookings: PlayerMarketEntry[] = [];
+
+  for (const p of team.players) {
+    const base = { id: p.id, name: p.name, team: team.name, teamId: team.id, appearances: p.appearances };
+
+    const gOdds = playerOdds(p.goals, p.appearances);
+    if (gOdds > 0) scorers.push({ ...base, stat: p.goals, odds: gOdds });
+
+    const aOdds = playerOdds(p.assists, p.appearances);
+    if (aOdds > 0) assisters.push({ ...base, stat: p.assists, odds: aOdds });
+
+    const yc = p.yellowCards + p.yellowRed;
+    const bOdds = playerOdds(yc, p.appearances);
+    if (bOdds > 0) bookings.push({ ...base, stat: yc, odds: bOdds });
+  }
+
+  scorers.sort(byOdds);
+  assisters.sort(byOdds);
+  bookings.sort(byOdds);
+
+  return {
+    teamName: team.name,
+    teamId: team.id,
+    scorers:   scorers.slice(0, 20),
+    assisters: assisters.slice(0, 15),
+    bookings:  bookings.slice(0, 15),
+  };
+}
+
 router.get("/football-player-markets/:leagueId", async (req, res) => {
   const leagueId = String(req.params["leagueId"]);
+  const homeTeam = String(req.query["homeTeam"] ?? "").trim();
+  const awayTeam = String(req.query["awayTeam"] ?? "").trim();
+
   try {
     const { teams, meta } = await getFootballLeagueStats(leagueId);
 
-    const scorers:   PlayerMarketEntry[] = [];
-    const assisters: PlayerMarketEntry[] = [];
-    const bookings:  PlayerMarketEntry[] = [];
+    const homeData = homeTeam ? findMatchingTeam(teams, homeTeam) : undefined;
+    const awayData = awayTeam ? findMatchingTeam(teams, awayTeam) : undefined;
 
-    for (const team of teams) {
-      for (const p of team.players) {
-        const base = { id: p.id, name: p.name, team: team.name, teamId: team.id, appearances: p.appearances };
-
-        const gOdds = playerOdds(p.goals, p.appearances);
-        if (gOdds > 0) scorers.push({ ...base, stat: p.goals, odds: gOdds });
-
-        const aOdds = playerOdds(p.assists, p.appearances);
-        if (aOdds > 0) assisters.push({ ...base, stat: p.assists, odds: aOdds });
-
-        const yc = p.yellowCards + p.yellowRed;
-        const bOdds = playerOdds(yc, p.appearances);
-        if (bOdds > 0) bookings.push({ ...base, stat: yc, odds: bOdds });
-      }
+    if (!homeData && !awayData) {
+      // Neither team found — stats not available for this match yet
+      res.json({ leagueId: meta.id, leagueName: meta.name, country: meta.country, home: null, away: null });
+      return;
     }
-
-    // Sort ascending (lowest odds = most likely = favorites first), cap list size
-    const byOdds = (a: PlayerMarketEntry, b: PlayerMarketEntry) => a.odds - b.odds;
-    scorers.sort(byOdds);
-    assisters.sort(byOdds);
-    bookings.sort(byOdds);
 
     res.json({
       leagueId: meta.id,
       leagueName: meta.name,
       country: meta.country,
-      scorers:   scorers.slice(0, 30),
-      assisters: assisters.slice(0, 25),
-      bookings:  bookings.slice(0, 25),
+      home: homeData ? buildTeamMarkets(homeData) : null,
+      away: awayData ? buildTeamMarkets(awayData) : null,
     });
   } catch {
     res.status(500).json({ error: "Mercados de jogadores indisponíveis" });
