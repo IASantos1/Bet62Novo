@@ -114,6 +114,8 @@ export type LiveMatchState = {
   marketSuspension?: Record<string, number>;
   // Reason for current suspension (displayed in UI)
   _suspensionReason?: string;
+  // Statpal league ID — used for player markets (football only)
+  leagueId?: string;
   // Red cards per team (football only; 0 = none)
   redCardsHome?: number;
   redCardsAway?: number;
@@ -163,6 +165,7 @@ export type UpcomingMatch = {
   hasRealOdds: boolean;
   odds: { home: number; draw: number; away: number };
   markets: AdvancedMarkets;
+  leagueId?: string;
 };
 
 type StatpalMatchV2Event = {
@@ -3492,6 +3495,7 @@ async function buildLiveMatches(): Promise<LiveMatchState[]> {
         _htStartedAt: isHT ? htStartedAt : undefined,
         redCardsHome: stateRcHome > 0 ? stateRcHome : undefined,
         redCardsAway: stateRcAway > 0 ? stateRcAway : undefined,
+        leagueId: league.id,
       };
 
       liveMatchState.set(m.main_id, state);
@@ -3574,6 +3578,7 @@ async function buildUpcomingMatches(): Promise<UpcomingMatch[]> {
         hasRealOdds: true,
         odds: matchOdds,
         markets,
+        leagueId: league.id,
       });
     }
   }
@@ -8994,5 +8999,72 @@ setInterval(() => {
   // Push to SSE clients every 2s (same cadence as market drift)
   broadcastLive().catch(() => { /* ignore */ });
 }, 2000);
+
+// ─── Football Player Markets (derived from league stats) ─────────────────────
+// GET /api/matches/football-player-markets/:leagueId
+// Uses getFootballLeagueStats() (cached 30 min) to compute per-player odds for:
+//   - Anytime Goalscorer (a marcar em qualquer momento)
+//   - To Provide Assist (assistência)
+//   - Yellow Card (cartão amarelo)
+// Odds formula: 1/rate * 0.975 (house margin), floor 1.10, cap 40.0.
+// Only players with ≥3 appearances and stat ≥ 1 are included.
+
+type PlayerMarketEntry = {
+  id: string; name: string;
+  team: string; teamId: string;
+  appearances: number; stat: number;
+  odds: number;
+};
+
+function playerOdds(stat: number, appearances: number): number {
+  if (stat <= 0 || appearances < 3) return 0;
+  const rate = stat / appearances;
+  const fair = 1 / rate;
+  return Math.min(40.0, Math.max(1.10, Math.round(fair * 0.975 * 100) / 100));
+}
+
+router.get("/football-player-markets/:leagueId", async (req, res) => {
+  const leagueId = String(req.params["leagueId"]);
+  try {
+    const { teams, meta } = await getFootballLeagueStats(leagueId);
+
+    const scorers:   PlayerMarketEntry[] = [];
+    const assisters: PlayerMarketEntry[] = [];
+    const bookings:  PlayerMarketEntry[] = [];
+
+    for (const team of teams) {
+      for (const p of team.players) {
+        const base = { id: p.id, name: p.name, team: team.name, teamId: team.id, appearances: p.appearances };
+
+        const gOdds = playerOdds(p.goals, p.appearances);
+        if (gOdds > 0) scorers.push({ ...base, stat: p.goals, odds: gOdds });
+
+        const aOdds = playerOdds(p.assists, p.appearances);
+        if (aOdds > 0) assisters.push({ ...base, stat: p.assists, odds: aOdds });
+
+        const yc = p.yellowCards + p.yellowRed;
+        const bOdds = playerOdds(yc, p.appearances);
+        if (bOdds > 0) bookings.push({ ...base, stat: yc, odds: bOdds });
+      }
+    }
+
+    // Sort ascending (lowest odds = most likely = favorites first), cap list size
+    const byOdds = (a: PlayerMarketEntry, b: PlayerMarketEntry) => a.odds - b.odds;
+    scorers.sort(byOdds);
+    assisters.sort(byOdds);
+    bookings.sort(byOdds);
+
+    res.json({
+      leagueId: meta.id,
+      leagueName: meta.name,
+      country: meta.country,
+      scorers:   scorers.slice(0, 30),
+      assisters: assisters.slice(0, 25),
+      bookings:  bookings.slice(0, 25),
+    });
+  } catch {
+    res.status(500).json({ error: "Mercados de jogadores indisponíveis" });
+  }
+});
 
 export default router;

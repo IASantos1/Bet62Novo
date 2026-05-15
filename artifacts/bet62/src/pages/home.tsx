@@ -820,6 +820,8 @@ type Match = {
   scheduledTime?: string;
   // Scheduled date (DD.MM.YYYY) for "Em Breve" entries
   scheduledDate?: string;
+  // Statpal league ID — used to fetch player markets (football only)
+  leagueId?: string;
 };
 
 type BetSelection = {
@@ -1486,6 +1488,13 @@ export default function Home() {
   const [standingsLoading, setStandingsLoading] = useState(false);
   const [standingsLeague, setStandingsLeague] = useState("");
 
+  // Player markets (football "Jogadores" tab)
+  type PlayerMarket = { id: string; name: string; team: string; teamId: string; appearances: number; stat: number; odds: number };
+  type PlayerMarketsData = { leagueName: string; country: string; scorers: PlayerMarket[]; assisters: PlayerMarket[]; bookings: PlayerMarket[] };
+  const [playerMarkets, setPlayerMarkets] = useState<PlayerMarketsData | null>(null);
+  const [playerMarketsLoading, setPlayerMarketsLoading] = useState(false);
+  const [playerMarketsLeagueId, setPlayerMarketsLeagueId] = useState<string | null>(null);
+
   // Minute ticker — ticks every 30s so displayed clock interpolates between API calls
   useEffect(() => {
     const interval = setInterval(() => setMinuteTick(t => t + 1), 30000);
@@ -1524,6 +1533,8 @@ export default function Home() {
     setMatchStats(null);
     setStandings(null);
     setStandingsLeague("");
+    setPlayerMarkets(null);
+    setPlayerMarketsLeagueId(null);
     // Auto-switch to ET/Pen tab if match is already in that phase
     if (expandedMatch?.markets?.etExtra) { setModalTab("prolongamento"); setTimeout(() => scrollTabIntoView("prolongamento", "instant"), 0); }
     else if (expandedMatch?.markets?.penExtra) { setModalTab("penaltis"); setTimeout(() => scrollTabIntoView("penaltis", "instant"), 0); }
@@ -1573,6 +1584,20 @@ export default function Home() {
       .catch(() => {})
       .finally(() => setStandingsLoading(false));
   }, [matchViewTab, expandedMatch?.id]);
+
+  // Fetch player markets when "Jogadores" tab is active (football only)
+  useEffect(() => {
+    if (modalTab !== "jogadores" || !expandedMatch?.leagueId) return;
+    if (playerMarketsLeagueId === expandedMatch.leagueId) return; // already loaded
+    setPlayerMarketsLoading(true);
+    setPlayerMarkets(null);
+    setPlayerMarketsLeagueId(expandedMatch.leagueId);
+    fetch(`/api/matches/football-player-markets/${encodeURIComponent(expandedMatch.leagueId)}`)
+      .then(r => r.ok ? r.json() : null)
+      .then(d => { if (d) setPlayerMarkets(d as PlayerMarketsData); })
+      .catch(() => {})
+      .finally(() => setPlayerMarketsLoading(false));
+  }, [modalTab, expandedMatch?.id, expandedMatch?.leagueId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Handle ?payment= query param on return from card payment
   useEffect(() => {
@@ -3300,6 +3325,7 @@ export default function Home() {
                 { key: "escanteios", label: "Escanteios" },
                 { key: "cartoes",    label: "Cartões" },
                 { key: "asiatico",   label: "Asiático" },
+                ...(match.leagueId ? [{ key: "jogadores", label: "⚽ Jogadores" }] : []),
               ];
 
     const m = match.markets;
@@ -3848,6 +3874,92 @@ export default function Home() {
             )}
             {(!m.drawNoBet && !m.asianHandicap && !m.asianTotals) && (
               <div className="text-center text-zinc-600 py-6 text-sm">Mercado não disponível para esta partida.</div>
+            )}
+          </div>
+        )}
+
+        {/* ── FUTEBOL: JOGADORES ── */}
+        {isFootball && modalTab === "jogadores" && (
+          <div>
+            {playerMarketsLoading && (
+              <div className="flex items-center justify-center py-12 gap-3 text-zinc-400">
+                <svg className="animate-spin h-5 w-5" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                </svg>
+                <span className="text-sm">A carregar dados dos jogadores…</span>
+              </div>
+            )}
+            {!playerMarketsLoading && !playerMarkets && (
+              <div className="text-center text-zinc-600 py-10 text-sm">Dados de jogadores não disponíveis para esta liga.</div>
+            )}
+            {!playerMarketsLoading && playerMarkets && (
+              <>
+                {playerMarkets.scorers.length > 0 && (
+                  <div className="mb-4">
+                    <div className="text-xs font-bold text-red-500 uppercase tracking-wider px-1 mb-2">⚽ A Marcar (qualquer momento)</div>
+                    <div className="bg-zinc-900/60 rounded-lg overflow-hidden">
+                      {playerMarkets.scorers.map(p => (
+                        <div key={p.id} className="flex items-center justify-between py-2.5 px-1 border-b border-zinc-800/60 last:border-0">
+                          <div className="min-w-0 flex-1 mr-3">
+                            <div className="text-sm font-semibold text-white truncate">{p.name}</div>
+                            <div className="text-xs text-zinc-500 flex items-center gap-1.5 mt-0.5">
+                              <span className="truncate">{p.team}</span>
+                              <span className="text-zinc-700">·</span>
+                              <span className="shrink-0">{p.stat} gol(os) / {p.appearances} j.</span>
+                            </div>
+                          </div>
+                          <MarketOddsBtn match={match} sel={`pm-gol-${p.id}`} odd={p.odds} market="marcadores" label={`${p.name} (${p.team})`} />
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {playerMarkets.assisters.length > 0 && (
+                  <div className="mb-4">
+                    <div className="text-xs font-bold text-blue-400 uppercase tracking-wider px-1 mb-2">🎯 Assistência</div>
+                    <div className="bg-zinc-900/60 rounded-lg overflow-hidden">
+                      {playerMarkets.assisters.map(p => (
+                        <div key={p.id} className="flex items-center justify-between py-2.5 px-1 border-b border-zinc-800/60 last:border-0">
+                          <div className="min-w-0 flex-1 mr-3">
+                            <div className="text-sm font-semibold text-white truncate">{p.name}</div>
+                            <div className="text-xs text-zinc-500 flex items-center gap-1.5 mt-0.5">
+                              <span className="truncate">{p.team}</span>
+                              <span className="text-zinc-700">·</span>
+                              <span className="shrink-0">{p.stat} assist(s) / {p.appearances} j.</span>
+                            </div>
+                          </div>
+                          <MarketOddsBtn match={match} sel={`pm-ast-${p.id}`} odd={p.odds} market="assistencias" label={`${p.name} (${p.team})`} />
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {playerMarkets.bookings.length > 0 && (
+                  <div className="mb-4">
+                    <div className="text-xs font-bold text-yellow-500 uppercase tracking-wider px-1 mb-2">🟨 Cartão Amarelo</div>
+                    <div className="bg-zinc-900/60 rounded-lg overflow-hidden">
+                      {playerMarkets.bookings.map(p => (
+                        <div key={p.id} className="flex items-center justify-between py-2.5 px-1 border-b border-zinc-800/60 last:border-0">
+                          <div className="min-w-0 flex-1 mr-3">
+                            <div className="text-sm font-semibold text-white truncate">{p.name}</div>
+                            <div className="text-xs text-zinc-500 flex items-center gap-1.5 mt-0.5">
+                              <span className="truncate">{p.team}</span>
+                              <span className="text-zinc-700">·</span>
+                              <span className="shrink-0">{p.stat} cartão(ões) / {p.appearances} j.</span>
+                            </div>
+                          </div>
+                          <MarketOddsBtn match={match} sel={`pm-yc-${p.id}`} odd={p.odds} market="cartao-jogador" label={`${p.name} (${p.team})`} />
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {playerMarkets.scorers.length === 0 && playerMarkets.assisters.length === 0 && playerMarkets.bookings.length === 0 && (
+                  <div className="text-center text-zinc-600 py-10 text-sm">Sem dados suficientes para esta liga.</div>
+                )}
+                <div className="text-center text-zinc-700 text-xs pt-2 pb-1">Odds calculadas com base nas estatísticas da época</div>
+              </>
             )}
           </div>
         )}
