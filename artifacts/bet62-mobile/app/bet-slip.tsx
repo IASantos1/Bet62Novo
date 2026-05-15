@@ -5,6 +5,7 @@ import React, { useState } from "react";
 import {
   ActivityIndicator,
   Alert,
+  KeyboardAvoidingView,
   Platform,
   Pressable,
   ScrollView,
@@ -377,6 +378,10 @@ export default function BetSlipScreen() {
   });
 
   return (
+    <KeyboardAvoidingView
+      style={{ flex: 1 }}
+      behavior={Platform.OS === "ios" ? "padding" : "height"}
+    >
     <View style={s.container}>
       {/* ── HEADER ── */}
       <View style={s.header}>
@@ -631,5 +636,6 @@ export default function BetSlipScreen() {
         </>
       )}
     </View>
+    </KeyboardAvoidingView>
   );
 }

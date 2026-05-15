@@ -2901,12 +2901,25 @@ async function getMLBLive(): Promise<MLBTournament[]> {
 }
 
 function buildMLBLiveMatches(tournaments: MLBTournament[]): LiveMatchState[] {
+  // Statpal MLB uses "Top/Bottom/Middle/End Nth" format (not "Nth Inning")
   const MLB_LIVE_STATUSES = new Set([
-    "1st Inning", "2nd Inning", "3rd Inning", "4th Inning", "5th Inning",
-    "6th Inning", "7th Inning", "8th Inning", "9th Inning", "Extra Inning", "In Progress",
-    // Between-inning and delay statuses Statpal may emit during transitions
-    "Break", "Mid Inning", "End of Inning", "Warmup",
-    "Delayed", "Rain Delay", "Delay", "Suspended",
+    "Top 1st","Bottom 1st","Middle 1st","End 1st",
+    "Top 2nd","Bottom 2nd","Middle 2nd","End 2nd",
+    "Top 3rd","Bottom 3rd","Middle 3rd","End 3rd",
+    "Top 4th","Bottom 4th","Middle 4th","End 4th",
+    "Top 5th","Bottom 5th","Middle 5th","End 5th",
+    "Top 6th","Bottom 6th","Middle 6th","End 6th",
+    "Top 7th","Bottom 7th","Middle 7th","End 7th",
+    "Top 8th","Bottom 8th","Middle 8th","End 8th",
+    "Top 9th","Bottom 9th","Middle 9th","End 9th",
+    "Top 10th","Bottom 10th","Middle 10th","End 10th",
+    // Extra innings and generic live
+    "Extra Inning","In Progress",
+    // Legacy format (kept for safety)
+    "1st Inning","2nd Inning","3rd Inning","4th Inning","5th Inning",
+    "6th Inning","7th Inning","8th Inning","9th Inning",
+    // Between-half-inning/delay statuses
+    "Break","Warmup","Delayed","Rain Delay","Delay","Suspended",
   ]);
   const result: LiveMatchState[] = [];
 
@@ -2921,8 +2934,39 @@ function buildMLBLiveMatches(tournaments: MLBTournament[]): LiveMatchState[] {
     const matches = Array.isArray(t.match) ? t.match : [t.match];
     for (const m of matches) {
       if (!m?.status) continue;
-      const isLive       = MLB_LIVE_STATUSES.has(m.status);
-      if (!isLive) continue;
+      const isLive = MLB_LIVE_STATUSES.has(m.status);
+
+      // Statpal MLB API often takes 30–60+ min to flip "Not Started" → a live status.
+      // Detect this: game date is today (or allowed yesterday) AND scheduled UTC time
+      // has already elapsed by 0–240 min → treat as live despite the stale status.
+      let isStartedButUnupdated = false;
+      if (!isLive && m.status === "Not Started") {
+        const matchDate = m.date ?? todayStr;
+        const dateOk = matchDate === todayStr || (allowYesterday && matchDate === yesterdayStr);
+        if (dateOk) {
+          try {
+            let gameMs: number;
+            if (m.datetime_utc) {
+              // Statpal datetime_utc format: "DD.MM.YYYY HH:MM" (actual UTC)
+              const parts = m.datetime_utc.match(/^(\d{2})\.(\d{2})\.(\d{4})\s+(\d{2}):(\d{2})/);
+              if (parts) {
+                const [, dd, mon, yyyy, hh, min] = parts;
+                gameMs = new Date(`${yyyy}-${mon}-${dd}T${hh}:${min}:00Z`).getTime();
+              } else {
+                gameMs = new Date(m.datetime_utc).getTime(); // fallback
+              }
+            } else {
+              // m.time is raw ET from Statpal — use date + time as UTC estimate
+              const [dd, mm, yyyy] = matchDate.split(".");
+              gameMs = new Date(`${yyyy}-${mm}-${dd}T${m.time || "00:00"}:00Z`).getTime();
+            }
+            const minsElapsed = (Date.now() - gameMs) / 60_000;
+            isStartedButUnupdated = minsElapsed >= 0 && minsElapsed <= 240;
+          } catch { /* ignore parse errors */ }
+        }
+      }
+
+      if (!isLive && !isStartedButUnupdated) continue;
       if (m.date && m.date !== todayStr) {
         if (!allowYesterday || m.date !== yesterdayStr) continue;
       }
@@ -2938,12 +2982,19 @@ function buildMLBLiveMatches(tournaments: MLBTournament[]): LiveMatchState[] {
         if (!isNaN(h) && !isNaN(a)) innings.push([h, a]);
       }
 
-      const inningMinute: Record<string, number> = {
-        "1st Inning": 1, "2nd Inning": 2, "3rd Inning": 3, "4th Inning": 4,
-        "5th Inning": 5, "6th Inning": 6, "7th Inning": 7, "8th Inning": 8,
-        "9th Inning": 9, "Extra Inning": 10, "In Progress": 5,
+      // Extract inning number from Statpal status ("Top 3rd" → 3, "Bottom 9th" → 9)
+      const inningFromStatus = (s: string): number => {
+        const m2 = s.match(/\b(\d+)(st|nd|rd|th)\b/i);
+        if (m2) return parseInt(m2[1]);
+        const legacyMap: Record<string, number> = {
+          "1st Inning":1,"2nd Inning":2,"3rd Inning":3,"4th Inning":4,
+          "5th Inning":5,"6th Inning":6,"7th Inning":7,"8th Inning":8,
+          "9th Inning":9,"Extra Inning":10,"In Progress":5,
+        };
+        return legacyMap[s] ?? 1;
       };
-      const minute = inningMinute[m.status] ?? 5;
+      // Games Statpal hasn't updated yet show as minute 0 (start of game)
+      const minute = isStartedButUnupdated ? 0 : inningFromStatus(m.status);
 
       // Look up real pre-match odds from the raw map (populated by getMLBOdds even for started games)
       const normH = m.home.name.toLowerCase().trim();
