@@ -3064,7 +3064,7 @@ export default function Home() {
     const stakeNum = parseFloat(stake || "0");
     const multipotential = (stakeNum * parseFloat(totalOdds)).toFixed(2);
 
-    // Suspension detection: map each bet to its live suspension status
+    // Suspension detection
     const now = Date.now();
     const betSuspended = bets.map(bet => {
       const lm = liveMatches.find(m => String(m.id) === String(bet.matchId));
@@ -3080,54 +3080,87 @@ export default function Home() {
       return lm?._suspensionReason ?? "SUSPENSO";
     })();
 
+    const quickAmounts = [5, 10, 25, 50];
+
     return (
-      <div className="flex flex-col h-full bg-zinc-950/50">
-        <div className="p-4 border-b border-zinc-800 bg-zinc-900 flex justify-between items-center">
-          <h3 className="font-bold text-lg text-white">Boletim de Apostas</h3>
-          <div className="flex items-center gap-2">
-            {bets.length > 0 && (
-              <button
-                onClick={() => { setBets([]); setBetStakes({}); setStake(""); }}
-                className="text-zinc-500 hover:text-red-400 transition-colors p-1"
-                title="Limpar boletim"
-              >
-                <Trash2 size={16} />
-              </button>
-            )}
-            <span className="bg-red-600 text-white text-xs font-bold px-2 py-1 rounded-full">{bets.length}</span>
+      <div className="flex flex-col h-full" style={{ background: "#0a0a0a" }}>
+
+        {/* ── HEADER ── */}
+        <div className="relative px-5 pt-3 pb-4" style={{ background: "linear-gradient(160deg,#1a0505 0%,#0f0f0f 100%)", borderBottom: "1px solid rgba(220,38,38,0.15)" }}>
+          {/* drag handle */}
+          <div className="w-10 h-1 rounded-full mx-auto mb-4" style={{ background: "rgba(255,255,255,0.12)" }} />
+
+          <div className="flex items-start justify-between">
+            <div>
+              <div className="flex items-center gap-2 mb-0.5">
+                <div className="w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-black text-white" style={{ background: "#dc2626" }}>
+                  {bets.length}
+                </div>
+                <span className="text-white font-black text-[17px] tracking-tight">Boletim</span>
+              </div>
+              <span className="text-zinc-500 text-[11px]">
+                {bets.length === 0 ? "Nenhuma seleção" : bets.length === 1 ? "1 seleção" : `${bets.length} seleções`}
+              </span>
+            </div>
+
+            <div className="flex items-center gap-3">
+              {bets.length > 0 && effectiveBetMode === "multipla" && (
+                <div className="text-right">
+                  <div className="text-[10px] text-zinc-500 leading-none mb-0.5">ODDS COMBINADAS</div>
+                  <div className="text-white font-black text-[22px] leading-none" style={{ color: "#dc2626" }}>{totalOdds}<span className="text-xs text-zinc-500">×</span></div>
+                </div>
+              )}
+              {bets.length > 0 && (
+                <button
+                  onClick={() => { setBets([]); setBetStakes({}); setStake(""); }}
+                  className="w-8 h-8 rounded-full flex items-center justify-center transition-colors"
+                  style={{ background: "rgba(220,38,38,0.1)", border: "1px solid rgba(220,38,38,0.2)" }}
+                  title="Limpar boletim"
+                >
+                  <Trash2 size={14} className="text-red-500" />
+                </button>
+              )}
+            </div>
           </div>
+
+          {/* Simples / Múltipla toggle */}
+          {bets.length > 0 && (
+            <div className="flex mt-3 rounded-[10px] overflow-hidden p-0.5 gap-0.5" style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.06)" }}>
+              <button
+                onClick={() => { if (!hasDuplicateMatches) setBetMode("simples"); }}
+                className="flex-1 py-1.5 text-[12px] font-bold rounded-[8px] transition-all duration-200"
+                style={effectiveBetMode === "simples"
+                  ? { background: "linear-gradient(135deg,#dc2626,#991b1b)", color: "#fff", boxShadow: "0 2px 8px rgba(220,38,38,0.35)" }
+                  : { background: "transparent", color: "#71717a" }}
+              >
+                Simples
+              </button>
+              <button
+                onClick={() => { if (!hasDuplicateMatches) setBetMode("multipla"); }}
+                disabled={hasDuplicateMatches}
+                className="flex-1 py-1.5 text-[12px] font-bold rounded-[8px] transition-all duration-200"
+                style={effectiveBetMode === "multipla"
+                  ? { background: "linear-gradient(135deg,#dc2626,#991b1b)", color: "#fff", boxShadow: "0 2px 8px rgba(220,38,38,0.35)" }
+                  : { background: "transparent", color: hasDuplicateMatches ? "#3f3f46" : "#71717a" }}
+              >
+                Múltipla
+              </button>
+            </div>
+          )}
+          {bets.length > 0 && hasDuplicateMatches && (
+            <p className="text-[10px] text-zinc-600 mt-1.5 text-center">Duas seleções do mesmo evento — modo Simples obrigatório</p>
+          )}
         </div>
 
-        {bets.length > 0 && (
-          <div className="flex mx-4 mt-3 rounded-lg overflow-hidden border border-zinc-800">
-            <button
-              onClick={() => { if (!hasDuplicateMatches) setBetMode("simples"); }}
-              className={`flex-1 py-2 text-xs font-bold transition-colors ${effectiveBetMode === "simples" ? "bg-red-600 text-white" : "bg-zinc-900 text-zinc-400 hover:text-white"} ${hasDuplicateMatches ? "cursor-default" : ""}`}
-            >
-              Simples
-            </button>
-            <button
-              onClick={() => { if (!hasDuplicateMatches) setBetMode("multipla"); }}
-              disabled={hasDuplicateMatches}
-              className={`flex-1 py-2 text-xs font-bold transition-colors ${effectiveBetMode === "multipla" ? "bg-red-600 text-white" : "bg-zinc-900 text-zinc-400 hover:text-white"} ${hasDuplicateMatches ? "opacity-40 cursor-not-allowed" : ""}`}
-            >
-              Múltipla
-            </button>
-          </div>
-        )}
-        {bets.length > 0 && hasDuplicateMatches && (
-          <div className="mx-4 mt-1 text-[10px] text-zinc-500">Duas seleções do mesmo evento — modo Simples obrigatório.</div>
-        )}
-        {bets.length > 0 && !canSwitchMode && !hasDuplicateMatches && (
-          <div className="mx-4 mt-1 text-[10px] text-zinc-500">Adicione seleções de eventos diferentes para ativar Múltipla.</div>
-        )}
-
-        <div className="flex-1 overflow-y-auto p-4 space-y-3">
+        {/* ── BET CARDS ── */}
+        <div className="flex-1 overflow-y-auto px-4 py-3 space-y-2.5">
           {bets.length === 0 ? (
-            <div className="text-center text-zinc-500 py-10">
-              <Trophy className="mx-auto h-12 w-12 opacity-20 mb-3" />
-              <p>Seu boletim está vazio.</p>
-              <p className="text-sm mt-1">Adicione seleções para apostar.</p>
+            <div className="flex flex-col items-center justify-center h-full py-16 gap-3">
+              <div className="w-16 h-16 rounded-2xl flex items-center justify-center" style={{ background: "rgba(220,38,38,0.07)", border: "1px solid rgba(220,38,38,0.12)" }}>
+                <Trophy size={28} className="text-red-700" />
+              </div>
+              <p className="text-zinc-500 text-sm font-medium">Boletim vazio</p>
+              <p className="text-zinc-600 text-[12px] text-center">Seleciona um resultado para<br />começar a apostar</p>
             </div>
           ) : (
             <AnimatePresence>
@@ -3136,52 +3169,92 @@ export default function Home() {
                 return (
                   <motion.div
                     key={`${bet.matchId}-${bet.market}-${bet.selection}`}
-                    initial={{ opacity: 0, scale: 0.95 }}
-                    animate={{ opacity: 1, scale: 1 }}
-                    exit={{ opacity: 0, scale: 0.95 }}
-                    className={`p-3 rounded-lg relative overflow-hidden transition-colors ${isSusp ? "bg-zinc-900 border border-amber-500/60" : "bg-zinc-900 border border-zinc-800"}`}
+                    initial={{ opacity: 0, y: 12 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, x: -20, scale: 0.95 }}
+                    transition={{ duration: 0.2 }}
+                    className="relative overflow-hidden rounded-2xl"
+                    style={{
+                      background: isSusp ? "rgba(120,53,15,0.3)" : "rgba(255,255,255,0.035)",
+                      border: isSusp ? "1px solid rgba(245,158,11,0.4)" : "1px solid rgba(255,255,255,0.07)",
+                    }}
                   >
-                    {/* Suspension overlay — covers the card when market is locked */}
+                    {/* Suspension overlay */}
                     {isSusp && (
-                      <div className="absolute inset-0 bg-amber-950/50 flex items-center justify-center z-10 backdrop-blur-[1px] rounded-lg">
-                        <div className="flex items-center gap-1.5 bg-amber-500 text-black text-[11px] font-bold px-3 py-1 rounded-full animate-pulse select-none">
-                          <Lock size={11} />
-                          ODDS SUSPENSAS
+                      <div className="absolute inset-0 flex items-center justify-center z-10 backdrop-blur-[2px] rounded-2xl" style={{ background: "rgba(0,0,0,0.55)" }}>
+                        <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-black animate-pulse" style={{ background: "#f59e0b", color: "#000" }}>
+                          <Lock size={10} /> ODDS SUSPENSAS
                         </div>
                       </div>
                     )}
-                    <button
-                      onClick={() => removeBet(bet.matchId, bet.market || "result", bet.selection)}
-                      className="absolute top-2 right-2 text-zinc-500 hover:text-red-500 transition-colors z-20"
-                    >
-                      <X size={16} />
-                    </button>
-                    <div className="text-xs text-zinc-400 mb-1 pr-6 truncate">{bet.matchTitle}</div>
-                    <div className="font-bold text-white text-sm pr-6">{bet.label}</div>
-                    <div className="flex items-center justify-between mt-1">
-                      <span className={`font-bold ${isSusp ? "text-amber-400" : "text-red-500"}`}>{bet.odd.toFixed(2)}</span>
-                      {effectiveBetMode !== "simples" && stakeNum > 0 && (
-                        <span className="text-[11px] text-green-400">€ {(stakeNum * bet.odd).toFixed(2)}</span>
+
+                    <div className="p-3.5">
+                      {/* Top row: sport/league + remove */}
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-[10px] font-semibold uppercase tracking-wider truncate pr-2" style={{ color: "#dc2626" }}>
+                          {bet.matchTitle.split(" vs ")[0]?.trim() || bet.matchTitle}
+                        </span>
+                        <button
+                          onClick={() => removeBet(bet.matchId, bet.market || "result", bet.selection)}
+                          className="w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0 transition-colors z-20"
+                          style={{ background: "rgba(220,38,38,0.15)" }}
+                        >
+                          <X size={11} className="text-red-400" />
+                        </button>
+                      </div>
+
+                      {/* Match title */}
+                      <div className="text-[11px] text-zinc-400 truncate mb-1.5">{bet.matchTitle}</div>
+
+                      {/* Selection + odd */}
+                      <div className="flex items-center justify-between">
+                        <span className="text-white font-bold text-[13px] leading-tight flex-1 pr-3 truncate">{bet.label}</span>
+                        <span
+                          className="font-black text-[18px] leading-none flex-shrink-0"
+                          style={{ color: isSusp ? "#f59e0b" : "#dc2626" }}
+                        >
+                          {bet.odd.toFixed(2)}
+                        </span>
+                      </div>
+
+                      {/* Simples: individual stake input */}
+                      {effectiveBetMode === "simples" && (
+                        <div className="mt-3">
+                          <div className="flex gap-1.5 mb-1.5">
+                            {quickAmounts.map(amt => (
+                              <button
+                                key={amt}
+                                onClick={() => setBetStakes(prev => ({ ...prev, [betKey(bet)]: String(amt) }))}
+                                className="flex-1 py-1 rounded-lg text-[11px] font-bold transition-all"
+                                style={parseFloat(betStakes[betKey(bet)] || "0") === amt
+                                  ? { background: "#dc2626", color: "#fff" }
+                                  : { background: "rgba(255,255,255,0.05)", color: "#a1a1aa", border: "1px solid rgba(255,255,255,0.07)" }
+                                }
+                              >
+                                €{amt}
+                              </button>
+                            ))}
+                          </div>
+                          <div className="flex items-center rounded-xl overflow-hidden" style={{ background: "rgba(0,0,0,0.4)", border: "1px solid rgba(255,255,255,0.08)" }}>
+                            <span className="pl-3 text-zinc-500 text-sm font-bold">€</span>
+                            <input
+                              type="number"
+                              placeholder="Outro valor"
+                              min="0.50"
+                              step="0.50"
+                              value={betStakes[betKey(bet)] || ""}
+                              onChange={e => setBetStakes(prev => ({ ...prev, [betKey(bet)]: e.target.value }))}
+                              className="flex-1 bg-transparent text-white text-sm font-mono px-2 py-2 outline-none placeholder-zinc-600"
+                            />
+                            {parseFloat(betStakes[betKey(bet)] || "0") > 0 && (
+                              <span className="pr-3 text-[12px] font-bold" style={{ color: "#22c55e" }}>
+                                → €{(parseFloat(betStakes[betKey(bet)] || "0") * bet.odd).toFixed(2)}
+                              </span>
+                            )}
+                          </div>
+                        </div>
                       )}
                     </div>
-                    {effectiveBetMode === "simples" && (
-                      <div className="mt-2 flex items-center gap-2">
-                        <Input
-                          type="number"
-                          placeholder="€ Valor"
-                          min="0.50"
-                          step="0.50"
-                          value={betStakes[betKey(bet)] || ""}
-                          onChange={e => setBetStakes(prev => ({ ...prev, [betKey(bet)]: e.target.value }))}
-                          className="bg-zinc-950 border-zinc-700 text-white font-mono text-xs h-8 flex-1"
-                        />
-                        {parseFloat(betStakes[betKey(bet)] || "0") > 0 && (
-                          <span className="text-xs text-green-400 shrink-0 font-mono">
-                            → € {(parseFloat(betStakes[betKey(bet)] || "0") * bet.odd).toFixed(2)}
-                          </span>
-                        )}
-                      </div>
-                    )}
                   </motion.div>
                 );
               })}
@@ -3189,65 +3262,96 @@ export default function Home() {
           )}
         </div>
 
+        {/* ── FOOTER ── */}
         {bets.length > 0 && (
-          <div className="p-4 bg-zinc-900 border-t border-zinc-800 space-y-3">
+          <div className="px-4 pb-6 pt-3 space-y-3" style={{ background: "#0a0a0a", borderTop: "1px solid rgba(255,255,255,0.06)" }}>
+
+            {/* Múltipla stake input */}
             {effectiveBetMode === "multipla" && (
-              <div className="flex justify-between items-center text-sm">
-                <span className="text-zinc-400">Odds Combinadas</span>
-                <span className="font-bold text-lg text-white">{totalOdds}x</span>
+              <div>
+                <div className="flex gap-1.5 mb-2">
+                  {quickAmounts.map(amt => (
+                    <button
+                      key={amt}
+                      onClick={() => setStake(String(amt))}
+                      className="flex-1 py-1.5 rounded-xl text-[12px] font-bold transition-all"
+                      style={parseFloat(stake || "0") === amt
+                        ? { background: "linear-gradient(135deg,#dc2626,#991b1b)", color: "#fff", boxShadow: "0 2px 8px rgba(220,38,38,0.3)" }
+                        : { background: "rgba(255,255,255,0.05)", color: "#a1a1aa", border: "1px solid rgba(255,255,255,0.07)" }
+                      }
+                    >
+                      €{amt}
+                    </button>
+                  ))}
+                </div>
+                <div className="flex items-center rounded-xl overflow-hidden" style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }}>
+                  <span className="pl-3 text-zinc-500 font-bold">€</span>
+                  <input
+                    type="number"
+                    placeholder="Outro valor"
+                    min="0.50"
+                    step="0.50"
+                    value={stake}
+                    onChange={e => setStake(e.target.value)}
+                    className="flex-1 bg-transparent text-white font-mono px-2 py-2.5 outline-none placeholder-zinc-600 text-sm"
+                  />
+                </div>
               </div>
             )}
-            {effectiveBetMode === "simples" && (
-              <div className="flex justify-between items-center text-sm">
-                <span className="text-zinc-400">Total em jogo</span>
-                <span className="font-bold text-white">
-                  € {bets.reduce((s, b) => s + parseFloat(betStakes[betKey(b)] || "0"), 0).toFixed(2)}
-                </span>
+
+            {/* Summary row */}
+            <div className="rounded-2xl px-4 py-3 flex justify-between items-center" style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)" }}>
+              <div>
+                <div className="text-[10px] text-zinc-500 uppercase tracking-wider mb-0.5">
+                  {effectiveBetMode === "simples" ? "Total em jogo" : "Valor apostado"}
+                </div>
+                <div className="text-white font-black text-[15px]">
+                  € {effectiveBetMode === "simples"
+                    ? bets.reduce((s, b) => s + parseFloat(betStakes[betKey(b)] || "0"), 0).toFixed(2)
+                    : (stakeNum || 0).toFixed(2)}
+                </div>
               </div>
-            )}
-            {effectiveBetMode === "multipla" && (
-              <div className="space-y-2">
-                <Label htmlFor="stake" className="text-zinc-400 text-xs">Valor da Aposta (€)</Label>
-                <Input
-                  id="stake"
-                  type="number"
-                  placeholder="0.00"
-                  value={stake}
-                  onChange={e => setStake(e.target.value)}
-                  className="bg-zinc-950 border-zinc-800 text-white font-mono"
-                />
+              <div className="w-px h-8 self-center" style={{ background: "rgba(255,255,255,0.08)" }} />
+              <div className="text-right">
+                <div className="text-[10px] text-zinc-500 uppercase tracking-wider mb-0.5">Ganho potencial</div>
+                <div className="font-black text-[15px]" style={{ color: "#22c55e" }}>
+                  € {effectiveBetMode === "simples" ? simplesPotential : multipotential}
+                </div>
               </div>
-            )}
-            <div className="flex justify-between items-center text-sm">
-              <span className="text-zinc-400">Ganhos Potenciais</span>
-              <span className="font-bold text-green-500">
-                € {effectiveBetMode === "simples" ? simplesPotential : multipotential}
-              </span>
             </div>
+
             {effectiveBetMode === "simples" && bets.length > 1 && (
-              <div className="text-[10px] text-zinc-500 text-right">{bets.length} apostas independentes</div>
+              <p className="text-[10px] text-zinc-600 text-center">{bets.length} apostas independentes</p>
             )}
+
+            {/* Suspension warning */}
             {anySuspended && (
-              <div className="flex items-center gap-2 px-3 py-2 bg-amber-500/10 border border-amber-500/30 rounded-lg">
-                <Lock size={13} className="text-amber-400 shrink-0 animate-pulse" />
+              <div className="flex items-center gap-2 px-3 py-2.5 rounded-xl" style={{ background: "rgba(245,158,11,0.08)", border: "1px solid rgba(245,158,11,0.25)" }}>
+                <Lock size={13} className="text-amber-400 flex-shrink-0 animate-pulse" />
                 <p className="text-amber-400 text-xs font-medium leading-tight">
                   {suspensionReason || "LANCE CRÍTICO"} — Odds a atualizar, aguarde...
                 </p>
               </div>
             )}
-            <Button
-              className={`w-full font-bold h-12 text-white transition-colors ${anySuspended ? "bg-zinc-700 hover:bg-zinc-700 cursor-not-allowed" : "bg-red-600 hover:bg-red-700"}`}
+
+            {/* CTA */}
+            <button
               onClick={handlePlaceBet}
               disabled={isPlacingBet || anySuspended}
+              className="w-full h-13 rounded-2xl font-black text-[14px] text-white flex items-center justify-center gap-2 transition-all active:scale-[0.98]"
+              style={anySuspended
+                ? { background: "#27272a", cursor: "not-allowed" }
+                : { background: "linear-gradient(135deg,#dc2626 0%,#991b1b 100%)", boxShadow: "0 4px 20px rgba(220,38,38,0.4)" }
+              }
             >
               {anySuspended ? (
-                <><Lock size={15} className="mr-2 animate-pulse" />APOSTAS BLOQUEADAS</>
+                <><Lock size={15} className="animate-pulse" /> APOSTAS BLOQUEADAS</>
               ) : isPlacingBet ? (
-                <><Loader2 className="animate-spin mr-2" size={16} />{auth.user ? "APOSTAR AGORA" : "ENTRAR PARA APOSTAR"}</>
+                <><Loader2 className="animate-spin" size={16} /> A PROCESSAR...</>
               ) : (
                 auth.user ? "APOSTAR AGORA" : "ENTRAR PARA APOSTAR"
               )}
-            </Button>
+            </button>
           </div>
         )}
       </div>
@@ -7624,11 +7728,30 @@ export default function Home() {
         {bets.length > 0 && (
           <Drawer open={betSlipOpenMobile} onOpenChange={setBetSlipOpenMobile}>
             <DrawerTrigger asChild>
-              <Button className="bg-red-600 hover:bg-red-700 text-white rounded-full shadow-lg shadow-red-900/20 px-6 h-14 font-bold flex gap-3">
-                BOLETIM <span className="bg-white text-red-600 rounded-full w-6 h-6 flex items-center justify-center text-xs">{bets.length}</span>
-              </Button>
+              <button
+                className="flex items-center gap-0 rounded-2xl overflow-hidden text-white transition-all active:scale-[0.97]"
+                style={{
+                  boxShadow: "0 6px 28px rgba(220,38,38,0.45), 0 2px 8px rgba(0,0,0,0.6)",
+                  background: "linear-gradient(135deg,#dc2626 0%,#7f1d1d 100%)",
+                }}
+              >
+                {/* left: icon + label */}
+                <div className="flex items-center gap-2 pl-4 pr-3 py-3.5">
+                  <div className="w-5 h-5 rounded-full flex items-center justify-center font-black text-[11px]" style={{ background: "rgba(255,255,255,0.2)" }}>
+                    {bets.length}
+                  </div>
+                  <span className="font-black text-[13px] tracking-wide">BOLETIM</span>
+                </div>
+                {/* divider */}
+                <div className="w-px h-8 self-center" style={{ background: "rgba(255,255,255,0.2)" }} />
+                {/* right: odds or stake info */}
+                <div className="pl-3 pr-4 py-3.5 flex items-center gap-1">
+                  <span className="font-black text-[15px]">{totalOdds}</span>
+                  <span className="text-[11px] font-semibold opacity-70">×</span>
+                </div>
+              </button>
             </DrawerTrigger>
-            <DrawerContent className="bg-zinc-950 border-zinc-800 text-white h-[85vh] p-0">
+            <DrawerContent className="border-0 text-white h-[88vh] p-0" style={{ background: "#0a0a0a", borderRadius: "24px 24px 0 0" }}>
               {BetSlipContent()}
             </DrawerContent>
           </Drawer>
