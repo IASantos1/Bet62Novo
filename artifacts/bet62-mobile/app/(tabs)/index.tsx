@@ -1,6 +1,6 @@
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
-import { router } from "expo-router";
+import { router, usePathname } from "expo-router";
 import React, { type ComponentProps, useState } from "react";
 import {
   ActivityIndicator,
@@ -243,6 +243,8 @@ export default function MatchesScreen() {
   const insets = useSafeAreaInsets();
   const { user } = useAuth();
   const { count } = useBetSlip();
+  const pathname = usePathname();
+  const betSlipOpen = pathname.includes("bet-slip");
   const [selectedSport, setSelectedSport] = useState("all");
 
   const topPad = Platform.OS === "web" ? 67 : insets.top;
@@ -476,7 +478,7 @@ export default function MatchesScreen() {
         />
       )}
 
-      {count > 0 && (
+      {count > 0 && !betSlipOpen && (
         <Pressable
           style={({ pressed }) => [s.betSlipFab, { opacity: pressed ? 0.9 : 1 }]}
           onPress={() => {
