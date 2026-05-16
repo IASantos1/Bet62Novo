@@ -46,9 +46,10 @@ function RootLayoutNav() {
       <Stack.Screen
         name="bet-slip"
         options={{
-          presentation: "modal",
+          presentation: "fullScreenModal",
           headerShown: false,
           gestureEnabled: false,
+          animation: "slide_from_bottom",
         }}
       />
     </Stack>
