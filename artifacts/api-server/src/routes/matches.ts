@@ -104,6 +104,18 @@ type AdvancedMarkets = {
   btts1H?: { yes: number; no: number };
   toWinBothHalves?: { home: number; away: number };
   highestScoringHalf?: { first: number; second: number; equal: number };
+  // Half-time and 2nd-half exact score markets
+  htCorrectScore?: Record<string, number>;
+  h2CorrectScore?: Record<string, number>;
+  // Team goals O/U (each team individually)
+  teamGoals?: {
+    homeOver05: number; homeUnder05: number;
+    homeOver15: number; homeUnder15: number;
+    homeOver25: number; homeUnder25: number;
+    awayOver05: number; awayUnder05: number;
+    awayOver15: number; awayUnder15: number;
+    awayOver25: number; awayUnder25: number;
+  };
 };
 
 export type LiveMatchState = {
@@ -1236,6 +1248,57 @@ function makeAdvancedMarketsFromTeams(homeName: string, awayName: string): Advan
     [mc(pHSFirst/hsfTot, 0.05, 0.70), mc(pHSSecond/hsfTot, 0.05, 0.70), mc(pHSEqual/hsfTot, 0.05, 0.60)], 1.10
   );
 
+  // ── HT Correct Score ─────────────────────────────────────────────────────
+  // Uses htPH/htPA (λ*0.45): scores 0-0..3-3 + Other; top 9 + Other
+  const htCSScores: Array<[string, number]> = [];
+  let htCSOther = 0;
+  for (let i = 0; i <= maxG; i++) {
+    for (let j = 0; j <= maxG; j++) {
+      const p = (htPH[i] ?? 0) * (htPA[j] ?? 0);
+      if (i <= 3 && j <= 3) htCSScores.push([`${i}-${j}`, p]);
+      else htCSOther += p;
+    }
+  }
+  htCSScores.sort((a, b) => b[1] - a[1]);
+  const htCSTop = htCSScores.slice(0, 9);
+  const htCSTotal = Math.max(1e-9, htCSTop.reduce((s, x) => s + x[1], 0) + htCSOther);
+  const htCSodds = probsToDecimalOdds(htCSTop.map(s => mc(s[1] / htCSTotal, 0.005, 0.70)), 1.14);
+  const htCorrectScore: Record<string, number> = {};
+  htCSTop.forEach(([score], idx) => { htCorrectScore[score] = htCSodds[idx]!; });
+  htCorrectScore["Outro"] = mr(mc(1 / mc(htCSOther / htCSTotal / 1.14, 0.005, 0.60), 1.01, 500));
+
+  // ── 2nd Half Correct Score ────────────────────────────────────────────────
+  // Uses h2PH/h2PA (λ*0.55, size 8): scores 0-0..3-3 + Other
+  const h2CSScores: Array<[string, number]> = [];
+  let h2CSOther = 0;
+  for (let i = 0; i <= 7; i++) {
+    for (let j = 0; j <= 7; j++) {
+      const p = (h2PH[i] ?? 0) * (h2PA[j] ?? 0);
+      if (i <= 3 && j <= 3) h2CSScores.push([`${i}-${j}`, p]);
+      else h2CSOther += p;
+    }
+  }
+  h2CSScores.sort((a, b) => b[1] - a[1]);
+  const h2CSTop = h2CSScores.slice(0, 9);
+  const h2CSTotal = Math.max(1e-9, h2CSTop.reduce((s, x) => s + x[1], 0) + h2CSOther);
+  const h2CSodds = probsToDecimalOdds(h2CSTop.map(s => mc(s[1] / h2CSTotal, 0.005, 0.70)), 1.14);
+  const h2CorrectScore: Record<string, number> = {};
+  h2CSTop.forEach(([score], idx) => { h2CorrectScore[score] = h2CSodds[idx]!; });
+  h2CorrectScore["Outro"] = mr(mc(1 / mc(h2CSOther / h2CSTotal / 1.14, 0.005, 0.60), 1.01, 500));
+
+  // ── Team Goals O/U ────────────────────────────────────────────────────────
+  const tgPair = (pOver: number): [number, number] => {
+    const safe = mc(pOver, 0.02, 0.98);
+    const r = probsToDecimalOdds([safe, 1 - safe], 1.065);
+    return [r[0]!, r[1]!];
+  };
+  const [tgHo05, tgHu05] = tgPair(1 - Math.exp(-lambdaHome));
+  const [tgHo15, tgHu15] = tgPair(1 - poissonCdf(lambdaHome, 1));
+  const [tgHo25, tgHu25] = tgPair(1 - poissonCdf(lambdaHome, 2));
+  const [tgAo05, tgAu05] = tgPair(1 - Math.exp(-lambdaAway));
+  const [tgAo15, tgAu15] = tgPair(1 - poissonCdf(lambdaAway, 1));
+  const [tgAo25, tgAu25] = tgPair(1 - poissonCdf(lambdaAway, 2));
+
   return {
     doubleChance: { homeOrDraw: dcHD!, awayOrDraw: dcDA!, homeOrAway: dcHA! },
     bothTeamsScore: { yes: bttsYes!, no: bttsNo! },
@@ -1258,6 +1321,16 @@ function makeAdvancedMarketsFromTeams(homeName: string, awayName: string): Advan
     btts1H:             { yes: b1HYes!,     no: b1HNo! },
     toWinBothHalves:    { home: wbhHOdds,   away: wbhAOdds },
     highestScoringHalf: { first: hsfFirstO!, second: hsfSecondO!, equal: hsfEqualO! },
+    htCorrectScore,
+    h2CorrectScore,
+    teamGoals: {
+      homeOver05: tgHo05, homeUnder05: tgHu05,
+      homeOver15: tgHo15, homeUnder15: tgHu15,
+      homeOver25: tgHo25, homeUnder25: tgHu25,
+      awayOver05: tgAo05, awayUnder05: tgAu05,
+      awayOver15: tgAo15, awayUnder15: tgAu15,
+      awayOver25: tgAo25, awayUnder25: tgAu25,
+    },
   };
 }
 
@@ -2876,6 +2949,30 @@ function filterLiveMarkets(markets: AdvancedMarkets, homeScore: number, awayScor
     if (totalGoals > 4) m.exactGoals.g4 = 0;
   }
 
+  // HT Correct Score: filter out scorelines below current (during 1st half these ARE the HT scores)
+  if (m.htCorrectScore) {
+    const filtered: Record<string, number> = {};
+    for (const [score, odd] of Object.entries(m.htCorrectScore)) {
+      if (score === "Outro") { filtered[score] = odd; continue; }
+      const [hs, as_] = score.split("-").map(Number);
+      if (hs !== undefined && as_ !== undefined && hs >= homeScore && as_ >= awayScore) {
+        filtered[score] = odd;
+      }
+    }
+    m.htCorrectScore = Object.keys(filtered).length > 1 ? filtered : undefined;
+  }
+
+  // Team Goals: zero out settled lines when a team reaches the threshold
+  if (m.teamGoals) {
+    const tg = m.teamGoals;
+    if (homeScore >= 1) { tg.homeOver05 = 0; tg.homeUnder05 = 0; }
+    if (homeScore >= 2) { tg.homeOver15 = 0; tg.homeUnder15 = 0; }
+    if (homeScore >= 3) { tg.homeOver25 = 0; tg.homeUnder25 = 0; }
+    if (awayScore >= 1) { tg.awayOver05 = 0; tg.awayUnder05 = 0; }
+    if (awayScore >= 2) { tg.awayOver15 = 0; tg.awayUnder15 = 0; }
+    if (awayScore >= 3) { tg.awayOver25 = 0; tg.awayUnder25 = 0; }
+  }
+
   return m;
 }
 
@@ -3818,6 +3915,9 @@ async function buildLiveMatches(): Promise<LiveMatchState[]> {
         btts1H: 8000,
         toWinBothHalves: 10000,
         highestScoringHalf: 8000,
+        htCorrectScore: 15000,
+        h2CorrectScore: 15000,
+        teamGoals: 10000,
       };
 
       // Stable odds: once assigned, keep unless score changes significantly
@@ -4064,6 +4164,21 @@ async function buildLiveMatches(): Promise<LiveMatchState[]> {
         const egLiveOdds = egBucketTotal > 0
           ? Object.fromEntries(Object.entries(egBuckets).map(([k, p]) => [k, Math.max(1.01, +(1 / ((p / egBucketTotal) * 0.87)).toFixed(2))]))
           : {};
+        // Team Goals O/U live: P(team scores ≥ threshold more goals | still have remaining time)
+        const tgLive = (score: number, threshold: number, mu: number): [number, number] => {
+          if (score >= threshold) return [0, 0]; // already settled — won the Over
+          const need = threshold - score;
+          const pOver = mc(1 - poissonCdf(mu, need - 1), 0.02, 0.98);
+          const r = probsToDecimalOdds([pOver, 1 - pOver], 1.065);
+          return [r[0]!, r[1]!];
+        };
+        const [ho05, hu05] = tgLive(homeScore, 1, muH);
+        const [ho15, hu15] = tgLive(homeScore, 2, muH);
+        const [ho25, hu25] = tgLive(homeScore, 3, muH);
+        const [ao05, au05] = tgLive(awayScore, 1, muA);
+        const [ao15, au15] = tgLive(awayScore, 2, muA);
+        const [ao25, au25] = tgLive(awayScore, 3, muA);
+
         matchMarkets = {
           ...matchMarkets,
           winToNil:   { home: wtnHLive, away: wtnALive },
@@ -4076,7 +4191,59 @@ async function buildLiveMatches(): Promise<LiveMatchState[]> {
               g4: egLiveOdds["g4"] ?? 0, g5plus: egLiveOdds["g5plus"] ?? 0,
             }
           } : {}),
+          teamGoals: {
+            homeOver05: ho05, homeUnder05: hu05,
+            homeOver15: ho15, homeUnder15: hu15,
+            homeOver25: ho25, homeUnder25: hu25,
+            awayOver05: ao05, awayUnder05: au05,
+            awayOver15: ao15, awayUnder15: au15,
+            awayOver25: ao25, awayUnder25: au25,
+          },
         };
+      }
+
+      // Zero out htCorrectScore after 1st half (market settles at HT)
+      if ((isHT || (!isHT && !isET && minute >= 45)) && matchMarkets.htCorrectScore) {
+        matchMarkets = { ...matchMarkets, htCorrectScore: undefined };
+      }
+
+      // Live-recalculate h2CorrectScore during 2nd half from remaining λ
+      if (!isHT && !isET && !m.penalties && minute > 45 && minute < 90) {
+        const rem2HFrac = Math.max(0.01, (90 - Math.min(minute, 89)) / 45);
+        const pH0b = 0.95 / Math.max(1.01, matchOdds.home);
+        const pA0b = 0.95 / Math.max(1.01, matchOdds.away);
+        const pD0b = Math.max(0.02, 1 - pH0b - pA0b);
+        const hStrB = pH0b + pD0b * 0.45; const aStrB = pA0b + pD0b * 0.45;
+        const mu2HH = 2.6 * (hStrB / Math.max(1e-9, hStrB + aStrB)) * 1.08 * rem2HFrac
+          * Math.max(0.4, 1 - 0.12 * stateRcHome + 0.04 * stateRcAway);
+        const mu2HA = 2.6 * (aStrB / Math.max(1e-9, hStrB + aStrB)) * 0.92 * rem2HFrac
+          * Math.max(0.4, 1 - 0.12 * stateRcAway + 0.04 * stateRcHome);
+        // Infer 2H score from events (goals scored after minute 45 come from 2H)
+        const htGoalsH = events.filter(e => e.team === "home" && e.type.toLowerCase().includes("goal") && e.minute <= 45).length;
+        const htGoalsA = events.filter(e => e.team === "away" && e.type.toLowerCase().includes("goal") && e.minute <= 45).length;
+        const home2H = Math.max(0, homeScore - htGoalsH);
+        const away2H = Math.max(0, awayScore - htGoalsA);
+        const pmf2HH = poissonPmf(mu2HH, 7);
+        const pmf2HA = poissonPmf(mu2HA, 7);
+        const h2CSM: Record<string, number> = {};
+        let h2CSOtherL = 0;
+        for (let i = 0; i <= 7; i++) {
+          for (let j = 0; j <= 7; j++) {
+            const tot_i = home2H + i, tot_j = away2H + j;
+            const p = (pmf2HH[i] ?? 0) * (pmf2HA[j] ?? 0);
+            if (tot_i > 4 || tot_j > 4) { h2CSOtherL += p; continue; }
+            h2CSM[`${tot_i}-${tot_j}`] = (h2CSM[`${tot_i}-${tot_j}`] ?? 0) + p;
+          }
+        }
+        const h2CSArr = Object.entries(h2CSM).sort((a, b) => b[1] - a[1]);
+        const h2CSTotL = h2CSArr.reduce((s, [, p]) => s + p, 0) + h2CSOtherL;
+        if (h2CSTotL > 0) {
+          const h2CSO = probsToDecimalOdds(h2CSArr.map(([, p]) => mc(p / h2CSTotL, 0.005, 0.70)), 1.14);
+          const h2CSnew: Record<string, number> = {};
+          h2CSArr.forEach(([score], idx) => { h2CSnew[score] = h2CSO[idx]!; });
+          h2CSnew["Outro"] = mr(mc(1 / mc(h2CSOtherL / Math.max(1e-9, h2CSTotL) / 1.14, 0.005, 0.60), 1.01, 500));
+          matchMarkets = { ...matchMarkets, h2CorrectScore: h2CSnew };
+        }
       }
 
       // VAR review / penalty / big-chance detection → suspend all markets
@@ -4105,6 +4272,7 @@ async function buildLiveMatches(): Promise<LiveMatchState[]> {
           drawNoBet: 20000, firstGoal: 20000, htft: 30000,
           winToNil: 20000, cleanSheet: 20000, goalOddEven: 22000, exactGoals: 25000,
           btts1H: 15000, toWinBothHalves: 22000, highestScoringHalf: 15000,
+          htCorrectScore: 30000, h2CorrectScore: 30000, teamGoals: 22000,
         };
         matchMarketSuspension = Object.fromEntries(
           Object.entries(VAR_SUSPENSION_MS).map(([k, delay]) => [k, now + delay])
