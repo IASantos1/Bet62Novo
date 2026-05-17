@@ -1,6 +1,6 @@
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
-import { router, usePathname } from "expo-router";
+import { router } from "expo-router";
 import React, { type ComponentProps, useState } from "react";
 import {
   ActivityIndicator,
@@ -19,6 +19,7 @@ import { useAuth } from "@/context/AuthContext";
 import { useBetSlip } from "@/context/BetSlipContext";
 import { API_BASE } from "@/context/AuthContext";
 import { useLiveMatches, type LiveMatch } from "@/hooks/useLiveMatches";
+import { BetSlipModal } from "@/components/BetSlipModal";
 
 type MCIconName = ComponentProps<typeof MaterialCommunityIcons>["name"];
 
@@ -148,7 +149,7 @@ function MatchCard({ match, isLive }: { match: LiveMatch | UpcomingMatch; isLive
     : false;
   const suspensionReason = resultSuspended ? (liveMatch?.suspensionReason ?? "SUSPENSO") : null;
 
-  function handleOdds(market: string, label: string, value: number) {
+  function handleOdds(market: string, label: string, value: number, selKey?: string) {
     if (resultSuspended) return;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     if (hasSelection(match.id, market)) {
@@ -158,6 +159,7 @@ function MatchCard({ match, isLive }: { match: LiveMatch | UpcomingMatch; isLive
         matchId: match.id,
         matchTitle: `${match.home} vs ${match.away}`,
         market,
+        selection: selKey ?? market.replace(/^1x2-/, ""),
         label: `${match.home} vs ${match.away} — ${label}`,
         odds: value,
       });
@@ -279,8 +281,8 @@ export default function MatchesScreen() {
   const insets = useSafeAreaInsets();
   const { user } = useAuth();
   const { count } = useBetSlip();
-  const pathname = usePathname();
-  const betSlipOpen = pathname.includes("bet-slip");
+  const [slipVisible, setSlipVisible] = useState(false);
+  const betSlipOpen = slipVisible;
   const [selectedSport, setSelectedSport] = useState("all");
 
   const topPad = Platform.OS === "web" ? 67 : insets.top;
@@ -512,7 +514,7 @@ export default function MatchesScreen() {
           style={({ pressed }) => [s.betSlipFab, { opacity: pressed ? 0.9 : 1 }]}
           onPress={() => {
             Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-            router.push("/bet-slip");
+            setSlipVisible(true);
           }}
           testID="bet-slip-fab"
         >
@@ -523,6 +525,8 @@ export default function MatchesScreen() {
           </View>
         </Pressable>
       )}
+
+      <BetSlipModal visible={slipVisible} onClose={() => setSlipVisible(false)} />
     </View>
   );
 }

@@ -4,6 +4,8 @@ export interface BetSelection {
   matchId: string;
   matchTitle: string;
   market: string;
+  /** Settlement key sent to the API (e.g. "home", "draw", "away", "bts-yes") */
+  selection?: string;
   label: string;
   odds: number;
 }

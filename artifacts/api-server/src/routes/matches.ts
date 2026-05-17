@@ -2232,6 +2232,8 @@ export const liveMatchState = new Map<string, LiveMatchState>();
 export const finishedMatchResults = new Map<string, {
   home: number;
   away: number;
+  htHome?: number;   // half-time goals (home) — populated when available
+  htAway?: number;   // half-time goals (away)
   homeTeam: string;
   awayTeam: string;
   finishedAt: number; // ms
@@ -2260,6 +2262,8 @@ export async function scanDailyForFinished(): Promise<void> {
         finishedMatchResults.set(m.main_id, {
           home,
           away,
+          htHome: typeof m.ht?.home_goals === "number" ? m.ht.home_goals : undefined,
+          htAway: typeof m.ht?.away_goals === "number" ? m.ht.away_goals : undefined,
           homeTeam: m.home.name,
           awayTeam: m.away.name,
           finishedAt: Date.now(),
@@ -3826,6 +3830,8 @@ async function buildLiveMatches(): Promise<LiveMatchState[]> {
       finishedMatchResults.set(id, {
         home: state.homeScore,
         away: state.awayScore,
+        htHome: state._liveExtra?.htScore?.[0],
+        htAway: state._liveExtra?.htScore?.[1],
         homeTeam: state.home,
         awayTeam: state.away,
         finishedAt: Date.now(),

@@ -95,7 +95,13 @@ export default function BetSlipScreen() {
         body: JSON.stringify({
           matchId: selections.map((s) => s.matchId).join("+"),
           matchTitle: selections.map((s) => s.matchTitle).join(" / "),
-          selections: selections.map((s) => ({ label: s.label, odds: s.odds })),
+          selections: selections.map((s) => ({
+            matchId: s.matchId,
+            selection: s.selection ?? s.market,
+            market: s.market,
+            label: s.label,
+            odds: s.odds,
+          })),
           stake: stakeNum.toFixed(2),
           potentialWin: potentialWin.toFixed(2),
           totalOdds: totalOdds.toFixed(4),
