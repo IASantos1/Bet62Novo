@@ -1,4 +1,4 @@
-import { Ionicons } from "@expo/vector-icons";
+import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import React, { useEffect, useRef, useState } from "react";
 import {
@@ -10,6 +10,7 @@ import {
   Text,
   View,
 } from "react-native";
+import { LiveMatchSimulator } from "./LiveMatchSimulator";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useColors } from "@/hooks/useColors";
 import { useBetSlip } from "@/context/BetSlipContext";
@@ -156,9 +157,11 @@ export function ComprehensiveMarketsSheet({ visible, match, onClose }: Props) {
 
   const tabs = getTabsForSport(match.sport, isLive, show2tempo, showET, showPen);
   const [activeTab, setActiveTab] = useState<TabKey>("todos");
+  const [simulatorOpen, setSimulatorOpen] = useState(false);
 
   useEffect(() => {
     if (visible) setActiveTab("todos");
+    if (!visible) setSimulatorOpen(false);
   }, [visible, match.id]);
 
   const prevOddsRef = useRef<Record<string, number>>({});
@@ -542,6 +545,52 @@ export function ComprehensiveMarketsSheet({ visible, match, onClose }: Props) {
     const HALF = 52;
     return (
       <View style={{ paddingHorizontal: 14, paddingTop: 14 }}>
+        {/* Simulator launch button */}
+        <Pressable
+          style={({ pressed }) => ({
+            flexDirection: "row",
+            alignItems: "center",
+            gap: 10,
+            backgroundColor: pressed ? "#1a1a28" : "#14141e",
+            borderRadius: 12,
+            borderWidth: 1,
+            borderColor: "#2e2e3c",
+            paddingHorizontal: 14,
+            paddingVertical: 12,
+            marginBottom: 12,
+            opacity: pressed ? 0.85 : 1,
+          })}
+          onPress={() => {
+            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+            setSimulatorOpen(true);
+          }}
+        >
+          <View style={{ width: 40, height: 40, borderRadius: 10, backgroundColor: "#1e3a5f", alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: "#2a4f7a" }}>
+            <MaterialCommunityIcons
+              name={
+                match.sport === "basketball" ? "basketball" :
+                match.sport === "tennis" ? "tennis-ball" :
+                match.sport === "hockey" ? "hockey-puck" :
+                match.sport === "baseball" ? "baseball" :
+                match.sport === "volleyball" ? "volleyball" :
+                "soccer"
+              }
+              size={22}
+              color="#60a5fa"
+            />
+          </View>
+          <View style={{ flex: 1 }}>
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 5, marginBottom: 2 }}>
+              <Ionicons name="flash" size={12} color="#f59e0b" />
+              <Text style={{ fontSize: 12, fontFamily: "Inter_700Bold", color: "#f59e0b" }}>AO VIVO</Text>
+              <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: "#22c55e" }} />
+            </View>
+            <Text style={{ fontSize: 13, fontFamily: "Inter_600SemiBold", color: colors.foreground }}>Ver Simulação 3D</Text>
+            <Text style={{ fontSize: 11, fontFamily: "Inter_400Regular", color: colors.mutedForeground }}>Campo animado com dados em tempo real</Text>
+          </View>
+          <Ionicons name="chevron-forward" size={18} color={colors.mutedForeground} />
+        </Pressable>
+
         <View style={s.statCard}>
           <Text style={s.statSectionTitle}>Pressão em Tempo Real</Text>
           <View style={{ flexDirection: "row", justifyContent: "space-between", marginBottom: 8 }}>
@@ -1140,6 +1189,11 @@ export function ComprehensiveMarketsSheet({ visible, match, onClose }: Props) {
           </ScrollView>
         </View>
       </View>
+      <LiveMatchSimulator
+        visible={simulatorOpen}
+        match={match}
+        onClose={() => setSimulatorOpen(false)}
+      />
     </Modal>
   );
 }
