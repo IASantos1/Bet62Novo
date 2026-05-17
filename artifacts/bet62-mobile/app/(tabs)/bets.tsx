@@ -23,11 +23,12 @@ interface Bet {
   id: number;
   matchId: string;
   matchTitle: string;
-  selections: Array<{ label: string; odds: number }>;
+  selections: Array<{ label: string; odds: number; market?: string; matchTitle?: string }>;
   stake: string;
   potentialWin: string;
   totalOdds: string;
   status: "pending" | "won" | "lost" | "cashed_out";
+  cashoutValue?: string | null;
   createdAt: string;
 }
 
@@ -49,6 +50,18 @@ function statusLabel(status: Bet["status"]) {
   }
 }
 
+function parseSelectionLabel(raw: string): { match: string | null; pick: string } {
+  const sep = raw.indexOf("—");
+  if (sep > 0) {
+    return { match: raw.slice(0, sep).trim(), pick: raw.slice(sep + 1).trim() };
+  }
+  const dashSep = raw.indexOf(" - ");
+  if (dashSep > 0) {
+    return { match: raw.slice(0, dashSep).trim(), pick: raw.slice(dashSep + 3).trim() };
+  }
+  return { match: null, pick: raw };
+}
+
 function BetCard({ bet, token, onCashout }: { bet: Bet; token: string | null; onCashout: () => void }) {
   const colors = useColors();
   const [cashingOut, setCashingOut] = useState(false);
@@ -57,7 +70,8 @@ function BetCard({ bet, token, onCashout }: { bet: Bet; token: string | null; on
   const stake = parseFloat(bet.stake);
   const totalOdds = parseFloat(bet.totalOdds);
   const potentialWin = parseFloat(bet.potentialWin);
-  const estimatedCashout = (stake * 0.92).toFixed(2);
+  const estimatedCashout = (potentialWin * 0.92).toFixed(2);
+  const actualCashout = bet.cashoutValue ? parseFloat(bet.cashoutValue).toFixed(2) : null;
 
   async function executeCashout() {
     if (!token) { router.push("/(auth)/login"); return; }
@@ -95,6 +109,9 @@ function BetCard({ bet, token, onCashout }: { bet: Bet; token: string | null; on
     minute: "2-digit",
   });
 
+  const selections = Array.isArray(bet.selections) ? bet.selections : [];
+  const isMultiple = selections.length > 1;
+
   const s = StyleSheet.create({
     card: {
       backgroundColor: colors.card,
@@ -108,30 +125,38 @@ function BetCard({ bet, token, onCashout }: { bet: Bet; token: string | null; on
       overflow: "hidden",
     },
     inner: { padding: 14 },
-    header: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 10 },
-    title: { fontSize: 14, fontFamily: "Inter_600SemiBold", color: colors.foreground, flex: 1, marginRight: 8 },
-    badge: { borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3, backgroundColor: color + "22" },
-    badgeText: { fontSize: 12, fontFamily: "Inter_700Bold", color },
-    selections: { marginBottom: 10, gap: 4 },
-    selectionRow: { flexDirection: "row", alignItems: "center", gap: 6 },
-    selectionText: { fontSize: 13, fontFamily: "Inter_400Regular", color: colors.mutedForeground, flex: 1 },
-    selectionOdds: { fontSize: 13, fontFamily: "Inter_700Bold", color: colors.foreground },
-    statsRow: { flexDirection: "row", gap: 12, marginBottom: bet.status === "pending" ? 12 : 0 },
-    stat: { flex: 1 },
-    statLabel: { fontSize: 11, fontFamily: "Inter_500Medium", color: colors.mutedForeground, marginBottom: 2 },
+    header: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 10, gap: 8 },
+    titleWrap: { flex: 1 },
+    title: { fontSize: 13, fontFamily: "Inter_600SemiBold", color: colors.foreground, marginBottom: 2 },
+    multipleBadge: { alignSelf: "flex-start", backgroundColor: colors.primary + "22", borderRadius: 4, paddingHorizontal: 6, paddingVertical: 2, marginBottom: 6 },
+    multipleBadgeText: { fontSize: 10, fontFamily: "Inter_700Bold", color: colors.primary },
+    statusBadge: { borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3, backgroundColor: color + "22", flexShrink: 0 },
+    statusBadgeText: { fontSize: 12, fontFamily: "Inter_700Bold", color },
+    selections: { marginBottom: 10, gap: 3 },
+    selectionRow: { flexDirection: "row", alignItems: "flex-start", gap: 6, paddingVertical: 2 },
+    selectionDot: { width: 5, height: 5, borderRadius: 3, backgroundColor: colors.mutedForeground, marginTop: 5 },
+    selectionBody: { flex: 1 },
+    selectionMatch: { fontSize: 11, fontFamily: "Inter_400Regular", color: colors.mutedForeground, marginBottom: 1 },
+    selectionPick: { fontSize: 13, fontFamily: "Inter_600SemiBold", color: colors.foreground },
+    selectionOdds: { fontSize: 13, fontFamily: "Inter_700Bold", color: colors.primary, alignSelf: "flex-start", marginTop: 2 },
+    statsRow: { flexDirection: "row", gap: 0, marginBottom: bet.status === "pending" ? 12 : 8, backgroundColor: colors.muted, borderRadius: 8 },
+    stat: { flex: 1, alignItems: "center", paddingVertical: 8 },
+    statDivider: { width: 1, backgroundColor: colors.border, marginVertical: 6 },
+    statLabel: { fontSize: 10, fontFamily: "Inter_500Medium", color: colors.mutedForeground, marginBottom: 2 },
     statValue: { fontSize: 14, fontFamily: "Inter_700Bold", color: colors.foreground },
     cashoutBtn: {
-      backgroundColor: colors.warning ? colors.warning + "22" : "#f59e0b22",
+      backgroundColor: (colors.warning ?? "#f59e0b") + "18",
       borderRadius: 8,
       borderWidth: 1,
       borderColor: colors.warning ?? "#f59e0b",
-      padding: 10,
+      padding: 11,
       flexDirection: "row",
       alignItems: "center",
       justifyContent: "space-between",
     },
+    cashoutBtnLeft: { flexDirection: "row", alignItems: "center", gap: 6 },
     cashoutBtnText: { fontSize: 13, fontFamily: "Inter_600SemiBold", color: colors.warning ?? "#f59e0b" },
-    cashoutBtnValue: { fontSize: 13, fontFamily: "Inter_700Bold", color: colors.warning ?? "#f59e0b" },
+    cashoutBtnValue: { fontSize: 14, fontFamily: "Inter_700Bold", color: colors.warning ?? "#f59e0b" },
     expandedRow: {
       borderTopWidth: 1,
       borderTopColor: colors.border,
@@ -144,7 +169,7 @@ function BetCard({ bet, token, onCashout }: { bet: Bet; token: string | null; on
     },
     expandedLeft: { flex: 1 },
     expandedLabel: { fontSize: 11, fontFamily: "Inter_500Medium", color: colors.mutedForeground, marginBottom: 2 },
-    expandedValue: { fontSize: 18, fontFamily: "Inter_700Bold", color: "#22c55e" },
+    expandedValue: { fontSize: 20, fontFamily: "Inter_700Bold", color: "#22c55e" },
     cancelBtn: { paddingHorizontal: 10, paddingVertical: 8 },
     cancelBtnText: { fontSize: 12, fontFamily: "Inter_500Medium", color: colors.mutedForeground },
     confirmBtn: {
@@ -157,30 +182,45 @@ function BetCard({ bet, token, onCashout }: { bet: Bet; token: string | null; on
       minWidth: 96,
     },
     confirmBtnText: { fontSize: 13, fontFamily: "Inter_700Bold", color: "#ffffff" },
-    date: { fontSize: 11, fontFamily: "Inter_400Regular", color: colors.mutedForeground, marginTop: 8 },
+    footer: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginTop: 4 },
+    date: { fontSize: 11, fontFamily: "Inter_400Regular", color: colors.mutedForeground },
+    cashoutReceivedRow: { flexDirection: "row", alignItems: "center", gap: 4 },
+    cashoutReceivedLabel: { fontSize: 11, fontFamily: "Inter_400Regular", color: colors.mutedForeground },
+    cashoutReceivedValue: { fontSize: 13, fontFamily: "Inter_700Bold", color: colors.warning ?? "#f59e0b" },
   });
-
-  const selections = Array.isArray(bet.selections) ? bet.selections : [];
 
   return (
     <View style={s.card}>
       <View style={s.inner}>
         <View style={s.header}>
-          <Text style={s.title} numberOfLines={1}>{bet.matchTitle}</Text>
-          <View style={s.badge}>
-            <Text style={s.badgeText}>{statusLabel(bet.status)}</Text>
+          <View style={s.titleWrap}>
+            {isMultiple && (
+              <View style={s.multipleBadge}>
+                <Text style={s.multipleBadgeText}>MÚLTIPLA • {selections.length} seleções</Text>
+              </View>
+            )}
+            <Text style={s.title} numberOfLines={2}>{bet.matchTitle}</Text>
+          </View>
+          <View style={s.statusBadge}>
+            <Text style={s.statusBadgeText}>{statusLabel(bet.status)}</Text>
           </View>
         </View>
 
         {selections.length > 0 && (
           <View style={s.selections}>
-            {selections.map((sel, i) => (
-              <View key={i} style={s.selectionRow}>
-                <Ionicons name="chevron-forward" size={12} color={colors.mutedForeground} />
-                <Text style={s.selectionText} numberOfLines={1}>{sel.label}</Text>
-                <Text style={s.selectionOdds}>{sel.odds?.toFixed(2)}</Text>
-              </View>
-            ))}
+            {selections.map((sel, i) => {
+              const { match, pick } = parseSelectionLabel(sel.label ?? "");
+              return (
+                <View key={i} style={s.selectionRow}>
+                  <View style={s.selectionDot} />
+                  <View style={s.selectionBody}>
+                    {match && <Text style={s.selectionMatch} numberOfLines={1}>{match}</Text>}
+                    <Text style={s.selectionPick} numberOfLines={1}>{pick}</Text>
+                  </View>
+                  <Text style={s.selectionOdds}>{(sel.odds ?? 0).toFixed(2)}</Text>
+                </View>
+              );
+            })}
           </View>
         )}
 
@@ -189,12 +229,14 @@ function BetCard({ bet, token, onCashout }: { bet: Bet; token: string | null; on
             <Text style={s.statLabel}>Apostado</Text>
             <Text style={s.statValue}>€{stake.toFixed(2)}</Text>
           </View>
+          <View style={s.statDivider} />
           <View style={s.stat}>
             <Text style={s.statLabel}>Odds</Text>
             <Text style={s.statValue}>{totalOdds.toFixed(2)}</Text>
           </View>
+          <View style={s.statDivider} />
           <View style={s.stat}>
-            <Text style={s.statLabel}>{bet.status === "won" ? "Ganho" : "Ganho potencial"}</Text>
+            <Text style={s.statLabel}>{bet.status === "won" ? "Ganho" : "Potencial"}</Text>
             <Text style={[s.statValue, { color: bet.status === "won" ? (colors.success ?? "#22c55e") : colors.foreground }]}>
               €{potentialWin.toFixed(2)}
             </Text>
@@ -211,14 +253,26 @@ function BetCard({ bet, token, onCashout }: { bet: Bet; token: string | null; on
               <ActivityIndicator size="small" color={colors.warning ?? "#f59e0b"} />
             ) : (
               <>
-                <Text style={s.cashoutBtnText}>Cash Out</Text>
+                <View style={s.cashoutBtnLeft}>
+                  <Ionicons name="cash-outline" size={16} color={colors.warning ?? "#f59e0b"} />
+                  <Text style={s.cashoutBtnText}>Cash Out</Text>
+                </View>
                 <Text style={s.cashoutBtnValue}>€ {estimatedCashout}</Text>
               </>
             )}
           </Pressable>
         )}
 
-        <Text style={s.date}>{dateStr}</Text>
+        <View style={s.footer}>
+          <Text style={s.date}>{dateStr}</Text>
+          {bet.status === "cashed_out" && actualCashout && (
+            <View style={s.cashoutReceivedRow}>
+              <Ionicons name="checkmark-circle" size={13} color={colors.warning ?? "#f59e0b"} />
+              <Text style={s.cashoutReceivedLabel}>Recebido </Text>
+              <Text style={s.cashoutReceivedValue}>€{actualCashout}</Text>
+            </View>
+          )}
+        </View>
       </View>
 
       {bet.status === "pending" && expanded && (
@@ -269,7 +323,12 @@ export default function BetsScreen() {
       return res.json() as Promise<Bet[]>;
     },
     enabled: !!token,
+    refetchInterval: 30000,
   });
+
+  const bets = data ?? [];
+  const pending = bets.filter((b) => b.status === "pending").length;
+  const won = bets.filter((b) => b.status === "won").length;
 
   const s = StyleSheet.create({
     container: { flex: 1, backgroundColor: colors.background },
@@ -281,8 +340,12 @@ export default function BetsScreen() {
       borderBottomWidth: 1,
       borderBottomColor: colors.border,
     },
+    titleRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
     title: { fontSize: 22, fontFamily: "Inter_700Bold", color: colors.foreground },
     subtitle: { fontSize: 13, fontFamily: "Inter_400Regular", color: colors.mutedForeground, marginTop: 2 },
+    statsRow: { flexDirection: "row", gap: 10, marginTop: 12 },
+    statChip: { flexDirection: "row", alignItems: "center", gap: 5, backgroundColor: colors.card, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6, borderWidth: 1, borderColor: colors.border },
+    statChipText: { fontSize: 12, fontFamily: "Inter_600SemiBold", color: colors.foreground },
     emptyContainer: { flex: 1, alignItems: "center", justifyContent: "center", gap: 12, paddingTop: 80 },
     emptyText: { fontSize: 16, fontFamily: "Inter_600SemiBold", color: colors.mutedForeground },
     emptySubtext: { fontSize: 13, fontFamily: "Inter_400Regular", color: colors.mutedForeground },
@@ -293,8 +356,26 @@ export default function BetsScreen() {
   return (
     <View style={s.container}>
       <View style={s.header}>
-        <Text style={s.title}>Minhas Apostas</Text>
-        {user && <Text style={s.subtitle}>{data?.length ?? 0} apostas registadas</Text>}
+        <View style={s.titleRow}>
+          <Text style={s.title}>Minhas Apostas</Text>
+        </View>
+        {user && <Text style={s.subtitle}>{bets.length} apostas registadas</Text>}
+        {user && bets.length > 0 && (
+          <View style={s.statsRow}>
+            {pending > 0 && (
+              <View style={s.statChip}>
+                <Ionicons name="time-outline" size={13} color={colors.primary} />
+                <Text style={s.statChipText}>{pending} pendente{pending !== 1 ? "s" : ""}</Text>
+              </View>
+            )}
+            {won > 0 && (
+              <View style={s.statChip}>
+                <Ionicons name="trophy-outline" size={13} color={colors.success ?? "#22c55e"} />
+                <Text style={[s.statChipText, { color: colors.success ?? "#22c55e" }]}>{won} ganha{won !== 1 ? "s" : ""}</Text>
+              </View>
+            )}
+          </View>
+        )}
       </View>
 
       {!user ? (
@@ -311,10 +392,10 @@ export default function BetsScreen() {
         </View>
       ) : (
         <FlatList
-          data={data ?? []}
+          data={bets}
           keyExtractor={(b) => String(b.id)}
           contentContainerStyle={{ paddingTop: 8, paddingBottom: Platform.OS === "web" ? 100 : 120 }}
-          scrollEnabled={!!(data && data.length > 0)}
+          scrollEnabled={bets.length > 0}
           showsVerticalScrollIndicator={false}
           refreshControl={
             <RefreshControl refreshing={false} onRefresh={() => refetch()} tintColor={colors.primary} />

@@ -2,6 +2,22 @@ import { useEffect, useRef, useState } from "react";
 import EventSource from "react-native-sse";
 import { API_BASE } from "@/context/AuthContext";
 
+export interface LiveMatchMarkets {
+  totalGoals?: { over15: number; under15: number; over25: number; under25: number; over35: number; under35: number; over45: number; under45: number };
+  doubleChance?: { homeOrDraw: number; awayOrDraw: number; homeOrAway: number };
+  bothTeamsScore?: { yes: number; no: number };
+  halfTime?: { home: number; draw: number; away: number };
+  handicap?: { homeMinusOne: number; awayPlusOne: number; homeMinusOneHalf: number; awayPlusOneHalf: number };
+  tennisExtra?: {
+    firstSet: { home: number; away: number };
+    set2: { home: number; away: number };
+    totalSets: { over15: number; under15: number };
+    currentSetNum: number;
+  };
+  liveGoals?: { homeOver05: number; homeUnder05: number; awayOver05: number; awayUnder05: number };
+  htft?: Record<string, number>;
+}
+
 export interface LiveMatch {
   id: string;
   sport: string;
@@ -13,8 +29,16 @@ export interface LiveMatch {
   awayScore: number;
   odds: { home: number; draw: number; away: number };
   league?: string;
+  markets?: LiveMatchMarkets;
   marketSuspension?: Record<string, number>;
   suspensionReason?: string;
+  _liveExtra?: {
+    sets?: Array<[number, number]>;
+    currentPoints?: [number | string, number | string];
+    periods?: Array<[number, number]>;
+    quarters?: Array<[number, number]>;
+    innings?: Array<[number, number]>;
+  };
 }
 
 const RECONNECT_DELAY_MS = 3_000;
@@ -106,7 +130,6 @@ export function useLiveMatches(): {
 
   useEffect(() => {
     mountedRef.current = true;
-    // Fetch initial data immediately via HTTP before SSE connects
     fetch(`${API_BASE}/matches/live`)
       .then((r) => r.json())
       .then((d: { matches: LiveMatch[] }) => {
