@@ -32,6 +32,8 @@ interface LiveMatch {
   awayScore: number;
   odds: { home: number; draw: number; away: number };
   league?: string;
+  marketSuspension?: Record<string, number>; // market key → timestamp when suspension ends
+  suspensionReason?: string; // e.g. "PENÁLTI", "REVISÃO AO VAR", "GRANDE CHANCE"
 }
 
 interface UpcomingMatch {
@@ -70,11 +72,13 @@ function OddsButton({
   label,
   value,
   selected,
+  suspended,
   onPress,
 }: {
   label: string;
   value: number;
   selected: boolean;
+  suspended?: boolean;
   onPress: () => void;
 }) {
   const colors = useColors();
@@ -83,20 +87,35 @@ function OddsButton({
       style={({ pressed }) => [
         oddsStyles.btn,
         {
-          backgroundColor: selected ? colors.primary : colors.muted,
-          borderColor: selected ? colors.primary : colors.border,
-          opacity: pressed ? 0.85 : 1,
+          backgroundColor: suspended
+            ? colors.muted
+            : selected ? colors.primary : colors.muted,
+          borderColor: suspended
+            ? colors.border
+            : selected ? colors.primary : colors.border,
+          opacity: suspended ? 0.7 : pressed ? 0.85 : 1,
         },
       ]}
-      onPress={onPress}
+      onPress={suspended ? undefined : onPress}
       testID={`odds-${label}`}
     >
-      <Text style={[oddsStyles.label, { color: selected ? colors.primaryForeground : colors.mutedForeground }]}>
-        {label}
-      </Text>
-      <Text style={[oddsStyles.value, { color: selected ? colors.primaryForeground : colors.foreground }]}>
-        {value.toFixed(2)}
-      </Text>
+      {suspended ? (
+        <>
+          <Ionicons name="lock-closed" size={12} color={colors.mutedForeground} />
+          <Text style={[oddsStyles.value, { color: colors.mutedForeground, fontSize: 11 }]}>
+            SUSP.
+          </Text>
+        </>
+      ) : (
+        <>
+          <Text style={[oddsStyles.label, { color: selected ? colors.primaryForeground : colors.mutedForeground }]}>
+            {label}
+          </Text>
+          <Text style={[oddsStyles.value, { color: selected ? colors.primaryForeground : colors.foreground }]}>
+            {value.toFixed(2)}
+          </Text>
+        </>
+      )}
     </Pressable>
   );
 }
@@ -136,7 +155,15 @@ function MatchCard({ match, isLive }: { match: LiveMatch | UpcomingMatch; isLive
   const liveMatch = isLive ? (match as LiveMatch) : null;
   const upcomingMatch = !isLive ? (match as UpcomingMatch) : null;
 
+  // Check if the result (1X2) market is currently suspended
+  const now = Date.now();
+  const resultSuspended = isLive && liveMatch?.marketSuspension?.["result"] != null
+    ? (liveMatch.marketSuspension["result"]! > now)
+    : false;
+  const suspensionReason = resultSuspended ? (liveMatch?.suspensionReason ?? "SUSPENSO") : null;
+
   function handleOdds(market: string, label: string, value: number) {
+    if (resultSuspended) return;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     if (hasSelection(match.id, market)) {
       removeSelection(match.id, market);
@@ -212,11 +239,32 @@ function MatchCard({ match, isLive }: { match: LiveMatch | UpcomingMatch; isLive
         <Text style={[s.teamName, s.teamNameAway]} numberOfLines={1}>{match.away}</Text>
       </View>
 
+      {suspensionReason && (
+        <View style={{
+          flexDirection: "row",
+          alignItems: "center",
+          gap: 6,
+          backgroundColor: "#ef444420",
+          borderRadius: 6,
+          paddingHorizontal: 10,
+          paddingVertical: 5,
+          marginBottom: 8,
+          borderWidth: 1,
+          borderColor: "#ef444440",
+        }}>
+          <Ionicons name="warning" size={13} color="#ef4444" />
+          <Text style={{ fontSize: 11, fontFamily: "Inter_700Bold", color: "#ef4444", letterSpacing: 0.5 }}>
+            {suspensionReason} — MERCADOS SUSPENSOS
+          </Text>
+        </View>
+      )}
+
       <View style={s.oddsRow}>
         <OddsButton
           label="1"
           value={match.odds.home}
           selected={hasSelection(match.id, "1x2-home")}
+          suspended={resultSuspended}
           onPress={() => handleOdds("1x2-home", "1 (Casa)", match.odds.home)}
         />
         {match.odds.draw > 1.01 && (
@@ -224,6 +272,7 @@ function MatchCard({ match, isLive }: { match: LiveMatch | UpcomingMatch; isLive
             label="X"
             value={match.odds.draw}
             selected={hasSelection(match.id, "1x2-draw")}
+            suspended={resultSuspended}
             onPress={() => handleOdds("1x2-draw", "X (Empate)", match.odds.draw)}
           />
         )}
@@ -231,6 +280,7 @@ function MatchCard({ match, isLive }: { match: LiveMatch | UpcomingMatch; isLive
           label="2"
           value={match.odds.away}
           selected={hasSelection(match.id, "1x2-away")}
+          suspended={resultSuspended}
           onPress={() => handleOdds("1x2-away", "2 (Fora)", match.odds.away)}
         />
       </View>
@@ -256,7 +306,7 @@ export default function MatchesScreen() {
       if (!res.ok) throw new Error("Failed");
       return res.json() as Promise<{ matches: LiveMatch[] }>;
     },
-    refetchInterval: 30000,
+    refetchInterval: 5000,
   });
 
   const { data: upcomingData, isLoading: upcomingLoading, refetch: refetchUpcoming } = useQuery({
