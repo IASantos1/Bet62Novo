@@ -1,7 +1,8 @@
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
+import * as LocalAuthentication from "expo-local-authentication";
 import { router } from "expo-router";
-import React, { type ComponentProps, useState } from "react";
+import React, { type ComponentProps, useEffect, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -9,6 +10,7 @@ import {
   Pressable,
   ScrollView,
   StyleSheet,
+  Switch,
   Text,
   TextInput,
   View,
@@ -54,13 +56,22 @@ const statCardStyles = StyleSheet.create({
 export default function ProfileScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
-  const { user, token, logout, refreshUser } = useAuth();
+  const { user, token, logout, refreshUser, isBiometricEnabled, enableBiometric, disableBiometric } = useAuth();
   const topPad = Platform.OS === "web" ? 67 : insets.top;
   const bottomPad = Platform.OS === "web" ? 100 : 80 + insets.bottom;
 
   const [depositAmount, setDepositAmount] = useState("");
   const [depositLoading, setDepositLoading] = useState(false);
   const [showDeposit, setShowDeposit] = useState(false);
+  const [biometricAvailable, setBiometricAvailable] = useState(false);
+
+  useEffect(() => {
+    (async () => {
+      const hasHW = await LocalAuthentication.hasHardwareAsync();
+      const enrolled = await LocalAuthentication.isEnrolledAsync();
+      setBiometricAvailable(hasHW && enrolled);
+    })();
+  }, []);
 
   async function handleDeposit() {
     const amount = parseFloat(depositAmount);
@@ -288,11 +299,43 @@ export default function ProfileScreen() {
             <Text style={s.menuItemText}>Métodos de pagamento</Text>
             <Ionicons name="chevron-forward" size={18} color={colors.mutedForeground} />
           </Pressable>
-          <Pressable style={[s.menuItem, { borderBottomWidth: 0 }]}>
+          <Pressable style={s.menuItem}>
             <Ionicons name="shield-checkmark-outline" size={20} color={colors.mutedForeground} />
             <Text style={s.menuItemText}>Verificação KYC</Text>
             <Ionicons name="chevron-forward" size={18} color={colors.mutedForeground} />
           </Pressable>
+          {biometricAvailable && (
+            <View style={[s.menuItem, { borderBottomWidth: 0 }]}>
+              <Ionicons name="scan-outline" size={20} color={isBiometricEnabled ? colors.primary : colors.mutedForeground} />
+              <View style={{ flex: 1 }}>
+                <Text style={s.menuItemText}>Desbloqueio por Face</Text>
+                <Text style={{ fontSize: 11, fontFamily: "Inter_400Regular", color: colors.mutedForeground, marginTop: 1 }}>
+                  {isBiometricEnabled ? "Ativo — abre automaticamente" : "Desativado"}
+                </Text>
+              </View>
+              <Switch
+                value={isBiometricEnabled}
+                onValueChange={async (val) => {
+                  if (val) {
+                    const result = await LocalAuthentication.authenticateAsync({
+                      promptMessage: "Confirma a tua face para ativar",
+                      fallbackLabel: "Cancelar",
+                    });
+                    if (result.success) {
+                      await enableBiometric();
+                      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+                      Alert.alert("Face ativada", "O desbloqueio por face está ativo. Na próxima abertura da app, o teu rosto desbloqueia automaticamente.");
+                    }
+                  } else {
+                    await disableBiometric();
+                    await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                  }
+                }}
+                trackColor={{ false: colors.border, true: colors.primary + "60" }}
+                thumbColor={isBiometricEnabled ? colors.primary : colors.mutedForeground}
+              />
+            </View>
+          )}
         </View>
 
         <Pressable

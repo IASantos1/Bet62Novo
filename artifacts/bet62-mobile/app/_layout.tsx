@@ -11,6 +11,7 @@ import * as SplashScreen from "expo-splash-screen";
 import React, { useEffect } from "react";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaProvider } from "react-native-safe-area-context";
+import { BiometricGate } from "@/components/BiometricGate";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { AuthProvider } from "@/context/AuthContext";
 import { BetSlipProvider } from "@/context/BetSlipContext";
@@ -80,6 +81,7 @@ export default function RootLayout() {
             <AuthProvider>
               <BetSlipProvider>
                 <RootLayoutNav />
+                <BiometricGate />
               </BetSlipProvider>
             </AuthProvider>
           </GestureHandlerRootView>

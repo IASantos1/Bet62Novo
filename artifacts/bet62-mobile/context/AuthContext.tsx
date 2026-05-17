@@ -20,11 +20,17 @@ interface AuthContextType {
   user: User | null;
   token: string | null;
   isLoading: boolean;
+  isBiometricEnabled: boolean;
+  isBiometricLocked: boolean;
   login: (email: string, password: string) => Promise<void>;
   register: (name: string, email: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
   refreshUser: () => Promise<void>;
   setUser: (user: User) => void;
+  enableBiometric: () => Promise<void>;
+  disableBiometric: () => Promise<void>;
+  unlockBiometric: () => Promise<void>;
+  failBiometric: () => void;
 }
 
 const AuthContext = createContext<AuthContextType | null>(null);
@@ -33,6 +39,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [token, setToken] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [isBiometricEnabled, setIsBiometricEnabled] = useState(false);
+  const [isBiometricLocked, setIsBiometricLocked] = useState(false);
+  const [pendingToken, setPendingToken] = useState<string | null>(null);
 
   useEffect(() => {
     loadStoredAuth();
@@ -41,17 +50,28 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   async function loadStoredAuth() {
     try {
       const storedToken = await AsyncStorage.getItem("auth_token");
+      const bioEnabled = await AsyncStorage.getItem("biometric_enabled");
+
       if (storedToken) {
-        setToken(storedToken);
-        const res = await fetch(`${API_BASE}/auth/me`, {
-          headers: { Authorization: `Bearer ${storedToken}` },
-        });
-        if (res.ok) {
-          const data = await res.json();
-          setUser(data.user);
+        if (bioEnabled === "true") {
+          setIsBiometricEnabled(true);
+          setPendingToken(storedToken);
+          setIsBiometricLocked(true);
         } else {
-          await AsyncStorage.removeItem("auth_token");
+          setToken(storedToken);
+          const res = await fetch(`${API_BASE}/auth/me`, {
+            headers: { Authorization: `Bearer ${storedToken}` },
+          });
+          if (res.ok) {
+            const data = await res.json();
+            setUser(data.user);
+          } else {
+            await AsyncStorage.removeItem("auth_token");
+          }
         }
+      } else {
+        const bioFlag = await AsyncStorage.getItem("biometric_enabled");
+        if (bioFlag === "true") setIsBiometricEnabled(true);
       }
     } catch {
       // ignore
@@ -59,6 +79,36 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setIsLoading(false);
     }
   }
+
+  const unlockBiometric = useCallback(async () => {
+    if (!pendingToken) {
+      setIsBiometricLocked(false);
+      return;
+    }
+    try {
+      setToken(pendingToken);
+      const res = await fetch(`${API_BASE}/auth/me`, {
+        headers: { Authorization: `Bearer ${pendingToken}` },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setUser(data.user);
+      } else {
+        await AsyncStorage.removeItem("auth_token");
+        setPendingToken(null);
+        setToken(null);
+      }
+    } catch {
+      // ignore
+    } finally {
+      setIsBiometricLocked(false);
+    }
+  }, [pendingToken]);
+
+  const failBiometric = useCallback(() => {
+    setPendingToken(null);
+    setIsBiometricLocked(false);
+  }, []);
 
   const login = useCallback(async (email: string, password: string) => {
     const res = await fetch(`${API_BASE}/auth/login`, {
@@ -90,6 +140,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     await AsyncStorage.removeItem("auth_token");
     setToken(null);
     setUser(null);
+    setPendingToken(null);
   }, []);
 
   const refreshUser = useCallback(async () => {
@@ -107,8 +158,24 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }, [token]);
 
+  const enableBiometric = useCallback(async () => {
+    await AsyncStorage.setItem("biometric_enabled", "true");
+    setIsBiometricEnabled(true);
+  }, []);
+
+  const disableBiometric = useCallback(async () => {
+    await AsyncStorage.removeItem("biometric_enabled");
+    setIsBiometricEnabled(false);
+  }, []);
+
   return (
-    <AuthContext.Provider value={{ user, token, isLoading, login, register, logout, refreshUser, setUser }}>
+    <AuthContext.Provider value={{
+      user, token, isLoading,
+      isBiometricEnabled, isBiometricLocked,
+      login, register, logout, refreshUser, setUser,
+      enableBiometric, disableBiometric,
+      unlockBiometric, failBiometric,
+    }}>
       {children}
     </AuthContext.Provider>
   );
