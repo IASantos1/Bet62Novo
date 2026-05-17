@@ -1809,8 +1809,8 @@ let liveIsFetching = false;
 let liveFeedUpdatedTs = 0;
 
 // ─── SSE clients ──────────────────────────────────────────────────────────────
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const sseClients = new Set<any>();
+interface SSEClient { write: (chunk: string) => boolean; }
+const sseClients = new Set<SSEClient>();
 let broadcastInProgress = false;
 
 // v2/daily today: cache 5min
