@@ -2880,16 +2880,25 @@ export default function Home() {
       <div className="flex items-center gap-2 w-full">
         {/* Home: name + badge inline, right-aligned toward score */}
         <div className="flex items-center justify-end gap-1 flex-1 min-w-0">
-          <span className={`font-bold text-white ${big ? "text-base" : "text-sm"} truncate`}>{match.home}</span>
+          <span
+            className={`font-bold text-white ${big ? "text-base" : "text-sm"} truncate`}
+            style={big ? { textShadow: "0 1px 8px rgba(0,0,0,1), 0 2px 16px rgba(0,0,0,0.8)" } : undefined}
+          >{match.home}</span>
           <RcBadge count={rcH} />
         </div>
-        <div className={`${big ? "text-3xl" : "text-xl"} font-black text-white tabular-nums shrink-0 ${big ? "px-2" : "px-1"} text-center`}>
-          {match.homeScore ?? 0}<span className={`${big ? "text-white/40 text-xl mx-0.5" : "text-zinc-600 mx-0.5"}`}>-</span>{match.awayScore ?? 0}
+        <div
+          className={`${big ? "text-3xl" : "text-xl"} font-black text-white tabular-nums shrink-0 ${big ? "px-2" : "px-1"} text-center`}
+          style={big ? { textShadow: "0 1px 8px rgba(0,0,0,1), 0 2px 16px rgba(0,0,0,0.8)" } : undefined}
+        >
+          {match.homeScore ?? 0}<span className={`${big ? "text-white/60 text-xl mx-0.5" : "text-zinc-600 mx-0.5"}`}>-</span>{match.awayScore ?? 0}
         </div>
         {/* Away: badge + name inline, left-aligned from score */}
         <div className="flex items-center justify-start gap-1 flex-1 min-w-0">
           <RcBadge count={rcA} />
-          <span className={`font-bold text-white ${big ? "text-base" : "text-sm"} truncate`}>{match.away}</span>
+          <span
+            className={`font-bold text-white ${big ? "text-base" : "text-sm"} truncate`}
+            style={big ? { textShadow: "0 1px 8px rgba(0,0,0,1), 0 2px 16px rgba(0,0,0,0.8)" } : undefined}
+          >{match.away}</span>
         </div>
       </div>
     );
@@ -2937,19 +2946,19 @@ export default function Home() {
           onClick={() => setExpandedMatch(match)}
         >
           <img src={bannerImg} alt="" className="absolute inset-0 w-full h-full object-cover opacity-95" />
-          <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/30 to-black/10" />
+          <div className="absolute inset-0 bg-gradient-to-t from-black/95 via-black/70 to-black/30" />
           <div className="absolute top-0 left-0 right-0 flex items-center justify-between px-4 pt-3">
             <div className="flex items-center gap-2">
               <div className="relative w-5 h-5 flex items-center justify-center leading-none text-sm">
                 {flag}
                 <span className="absolute -bottom-0.5 -right-1.5 bg-black/60 rounded-full text-[8px] w-3 h-3 flex items-center justify-center">{sportEmoji(match.sport)}</span>
               </div>
-              <span className="text-xs text-white/90 font-medium drop-shadow">{match.league}</span>
+              <span className="text-xs text-white font-medium" style={{ textShadow: "0 1px 4px rgba(0,0,0,0.9)" }}>{match.league}</span>
             </div>
             <div className="flex items-center gap-2">{liveBadge}</div>
           </div>
           <div className="absolute bottom-0 left-0 right-0 px-4 pb-4" onClick={e => e.stopPropagation()}>
-            {rivalry && <div className="text-[11px] font-black text-red-400 uppercase tracking-widest mb-1 drop-shadow">{rivalry}</div>}
+            {rivalry && <div className="text-[11px] font-black text-red-400 uppercase tracking-widest mb-1" style={{ textShadow: "0 1px 4px rgba(0,0,0,0.9)" }}>{rivalry}</div>}
             <div className="mb-3">
               {sport === "tennis"     ? <TennisScore /> :
                sport === "volleyball" ? <VolleyScore /> :
@@ -3027,23 +3036,23 @@ export default function Home() {
           onClick={() => setExpandedMatch(match)}
         >
           <img src={bannerImg} alt="" className="absolute inset-0 w-full h-full object-cover opacity-95" />
-          <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/30 to-black/10" />
+          <div className="absolute inset-0 bg-gradient-to-t from-black/95 via-black/70 to-black/30" />
           <div className="absolute top-0 left-0 right-0 flex items-center justify-between px-4 pt-3">
             <div className="flex items-center gap-2">
               <div className="relative w-5 h-5 flex items-center justify-center leading-none text-sm">
                 {flag}
                 <span className="absolute -bottom-0.5 -right-1.5 bg-black/60 rounded-full text-[8px] w-3 h-3 flex items-center justify-center">{sportEmoji(match.sport)}</span>
               </div>
-              <span className="text-xs text-white/90 font-medium drop-shadow">{match.league}</span>
+              <span className="text-xs text-white font-medium" style={{ textShadow: "0 1px 4px rgba(0,0,0,0.9)" }}>{match.league}</span>
             </div>
-            <span className="text-xs text-white/70">{dateStr}{match.time ? ` • ${match.time}` : ""}</span>
+            <span className="text-xs text-white/90" style={{ textShadow: "0 1px 4px rgba(0,0,0,0.9)" }}>{dateStr}{match.time ? ` • ${match.time}` : ""}</span>
           </div>
           <div className="absolute bottom-0 left-0 right-0 px-4 pb-4" onClick={e => e.stopPropagation()}>
-            {rivalry && <div className="text-[11px] font-black text-red-400 uppercase tracking-widest mb-1 drop-shadow">{rivalry}</div>}
+            {rivalry && <div className="text-[11px] font-black text-red-400 uppercase tracking-widest mb-1" style={{ textShadow: "0 1px 4px rgba(0,0,0,0.9)" }}>{rivalry}</div>}
             <div className="flex items-baseline gap-2 mb-3 min-w-0">
-              <span className="font-black text-white text-xl leading-tight drop-shadow truncate">{match.home}</span>
-              <span className="text-white/40 text-sm shrink-0">vs</span>
-              <span className="font-black text-white text-xl leading-tight drop-shadow truncate">{match.away}</span>
+              <span className="font-black text-white text-xl leading-tight truncate" style={{ textShadow: "0 1px 8px rgba(0,0,0,1), 0 2px 16px rgba(0,0,0,0.8)" }}>{match.home}</span>
+              <span className="text-white/80 text-sm shrink-0" style={{ textShadow: "0 1px 4px rgba(0,0,0,0.9)" }}>vs</span>
+              <span className="font-black text-white text-xl leading-tight truncate" style={{ textShadow: "0 1px 8px rgba(0,0,0,1), 0 2px 16px rgba(0,0,0,0.8)" }}>{match.away}</span>
             </div>
             <OddsRow />
           </div>
