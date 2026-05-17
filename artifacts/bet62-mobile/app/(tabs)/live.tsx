@@ -1,6 +1,6 @@
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
-import React, { type ComponentProps, useState } from "react";
+import React, { type ComponentProps, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   FlatList,
@@ -103,6 +103,29 @@ function LiveMatchCard({ match }: { match: LiveMatch }) {
   const { addSelection, removeSelection, hasSelection } = useBetSlip();
   const [marketsOpen, setMarketsOpen] = useState(false);
 
+  const prevOddsRef = useRef<Record<string, number>>({});
+  const [oddsDir, setOddsDir] = useState<Record<string, "up" | "down">>({});
+  useEffect(() => {
+    const entries: Array<[string, number]> = [
+      ["home", match.odds.home], ["draw", match.odds.draw], ["away", match.odds.away],
+    ];
+    const dirs: Record<string, "up" | "down"> = {};
+    let changed = false;
+    for (const [k, v] of entries) {
+      const prev = prevOddsRef.current[k];
+      if (prev !== undefined && Math.abs(v - prev) >= 0.01) {
+        dirs[k] = v > prev ? "up" : "down";
+        changed = true;
+      }
+      prevOddsRef.current[k] = v;
+    }
+    if (changed) {
+      setOddsDir((d) => ({ ...d, ...dirs }));
+      const t = setTimeout(() => setOddsDir({}), 4000);
+      return () => clearTimeout(t);
+    }
+  }, [match.odds.home, match.odds.draw, match.odds.away]);
+
   const sportColor = SPORT_COLORS[match.sport] ?? colors.mutedForeground;
   const now = Date.now();
   const suspended = match.marketSuspension?.["result"] != null && match.marketSuspension["result"]! > now;
@@ -130,6 +153,10 @@ function LiveMatchCard({ match }: { match: LiveMatch }) {
 
   const OddsButton = ({ mkt, lbl, val }: { mkt: string; lbl: string; val: number }) => {
     const sel = hasSelection(match.id, mkt);
+    const dir = mkt === "1x2-home" ? oddsDir["home"]
+      : mkt === "1x2-draw" ? oddsDir["draw"]
+      : mkt === "1x2-away" ? oddsDir["away"]
+      : undefined;
     return (
       <Pressable
         style={({ pressed }) => ({
@@ -137,7 +164,7 @@ function LiveMatchCard({ match }: { match: LiveMatch }) {
           alignItems: "center" as const,
           backgroundColor: suspended ? "#18181f" : sel ? colors.primary : "#1c1c26",
           borderWidth: 1,
-          borderColor: suspended ? "#2a2a35" : sel ? colors.primary : "#2e2e3c",
+          borderColor: suspended ? "#2a2a35" : sel ? colors.primary : dir === "up" ? "#22c55e55" : dir === "down" ? "#ef444455" : "#2e2e3c",
           opacity: suspended ? 0.5 : pressed ? 0.78 : 1,
         })}
         onPress={(e) => { e.stopPropagation?.(); handleOdds(mkt, lbl, val); }}
@@ -145,7 +172,15 @@ function LiveMatchCard({ match }: { match: LiveMatch }) {
         <Text style={{ fontSize: 10, fontFamily: "Inter_500Medium", color: sel ? "#fff" : "#9ca3af", marginBottom: 2 }}>{lbl}</Text>
         {suspended
           ? <Ionicons name="lock-closed" size={11} color="#6b7280" />
-          : <Text style={{ fontSize: 14, fontFamily: "Inter_700Bold", color: "#ffffff" }}>{val.toFixed(2)}</Text>
+          : (
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 2 }}>
+              {dir === "up" && <Text style={{ fontSize: 10, fontFamily: "Inter_700Bold", color: "#22c55e", lineHeight: 14 }}>▲</Text>}
+              <Text style={{ fontSize: 14, fontFamily: "Inter_700Bold", color: dir === "up" ? "#22c55e" : dir === "down" ? "#f87171" : "#ffffff" }}>
+                {val.toFixed(2)}
+              </Text>
+              {dir === "down" && <Text style={{ fontSize: 10, fontFamily: "Inter_700Bold", color: "#f87171", lineHeight: 14 }}>▼</Text>}
+            </View>
+          )
         }
       </Pressable>
     );

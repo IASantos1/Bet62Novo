@@ -22,6 +22,7 @@ import { useBetSlip } from "@/context/BetSlipContext";
 import { API_BASE } from "@/context/AuthContext";
 import { ComprehensiveMarketsSheet } from "@/components/ComprehensiveMarketsSheet";
 import { BetSlipModal } from "@/components/BetSlipModal";
+import { DepositModal } from "@/components/DepositModal";
 import type { LiveMatchMarkets } from "@/hooks/useLiveMatches";
 import { getMatchBannerUrl, getLeagueFlag } from "@/utils/teamBanners";
 
@@ -194,6 +195,7 @@ export default function PreGameScreen() {
   const { count } = useBetSlip();
   const [slipVisible, setSlipVisible] = useState(false);
   const [selectedSport, setSelectedSport] = useState("all");
+  const [depositVisible, setDepositVisible] = useState(false);
 
   const topPad = Platform.OS === "web" ? 67 : insets.top;
 
@@ -250,9 +252,24 @@ export default function PreGameScreen() {
             <Text style={s.logo}>BET62</Text>
           </View>
           {user ? (
-            <View style={s.balancePill}>
-              <Ionicons name="wallet-outline" size={14} color={colors.foreground} />
-              <Text style={s.balanceText}>€{parseFloat(user.balance).toFixed(2)}</Text>
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 7 }}>
+              <View style={s.balancePill}>
+                <Ionicons name="wallet-outline" size={14} color={colors.foreground} />
+                <Text style={s.balanceText}>€{parseFloat(user.balance).toFixed(2)}</Text>
+              </View>
+              <Pressable
+                style={({ pressed }) => ({
+                  width: 32, height: 32, borderRadius: 16,
+                  backgroundColor: colors.primary,
+                  alignItems: "center" as const, justifyContent: "center" as const,
+                  opacity: pressed ? 0.8 : 1,
+                  elevation: 4, shadowColor: colors.primary, shadowOpacity: 0.35, shadowRadius: 6, shadowOffset: { width: 0, height: 2 },
+                })}
+                onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium); setDepositVisible(true); }}
+                hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+              >
+                <Ionicons name="add" size={20} color="#fff" />
+              </Pressable>
             </View>
           ) : (
             <Pressable
@@ -326,6 +343,7 @@ export default function PreGameScreen() {
       )}
 
       <BetSlipModal visible={slipVisible} onClose={() => setSlipVisible(false)} />
+      <DepositModal visible={depositVisible} onClose={() => setDepositVisible(false)} />
     </View>
   );
 }

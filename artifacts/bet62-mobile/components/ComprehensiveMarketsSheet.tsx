@@ -17,10 +17,11 @@ import type { LiveMatchMarkets } from "@/hooks/useLiveMatches";
 import { getLeagueFlag } from "@/utils/teamBanners";
 
 type TabKey =
+  | "stats" | "classificacao" | "aovivo"
   | "todos" | "resultado" | "dupla" | "gols" | "especiais" | "placar"
   | "handicap" | "1tempo" | "2tempo" | "htft" | "escanteios" | "cartoes"
   | "prolongamento" | "penaltis"
-  | "pontos" | "1periodo" | "sets" | "periodos" | "runline" | "stats";
+  | "pontos" | "1periodo" | "sets" | "periodos" | "runline";
 
 interface TabDef { key: TabKey; label: string }
 
@@ -58,7 +59,7 @@ interface Props {
 }
 
 function formatDateDisplay(date?: string, isLive?: boolean, minute?: number, time?: string): string {
-  if (isLive) return `${minute ?? 0}' • AO VIVO`;
+  if (isLive) return `AO VIVO ${minute ?? 0}'`;
   if (!date) return time ?? "";
   let kickoff: Date;
   if (date.includes(".")) {
@@ -81,40 +82,43 @@ function formatDateDisplay(date?: string, isLive?: boolean, minute?: number, tim
 function getTabsForSport(
   sport: string, isLive: boolean, show2tempo: boolean, showET: boolean, showPen: boolean
 ): TabDef[] {
-  const statsTab: TabDef = { key: "stats", label: "Estat." };
+  const ST: TabDef = { key: "stats", label: "Estatísticas" };
+  const CL: TabDef = { key: "classificacao", label: "Classificação" };
+  const AV: TabDef = { key: "aovivo", label: "⚡ Ao Vivo" };
+  const pre = [ST, CL];
+  const suf: TabDef[] = isLive ? [AV] : [];
 
   if (sport === "basketball") return [
+    ...pre,
     { key: "todos", label: "Todos" }, { key: "resultado", label: "Vencedor" },
     { key: "handicap", label: "Handicap" }, { key: "pontos", label: "Pontos" },
-    { key: "1periodo", label: "1º Período" }, ...(isLive ? [statsTab] : []),
+    { key: "1periodo", label: "1º Quarto" }, ...suf,
   ];
   if (sport === "tennis") return [
+    ...pre,
     { key: "todos", label: "Todos" }, { key: "resultado", label: "Vencedor" },
-    { key: "sets", label: "Sets" }, ...(isLive ? [statsTab] : []),
+    { key: "sets", label: "Sets" }, ...suf,
   ];
   if (sport === "hockey") return [
+    ...pre,
     { key: "todos", label: "Todos" }, { key: "resultado", label: "Resultado" },
     { key: "gols", label: "Golos" }, { key: "periodos", label: "Períodos" },
-    { key: "handicap", label: "Handicap" }, ...(isLive ? [statsTab] : []),
+    { key: "handicap", label: "Handicap" }, ...suf,
   ];
   if (sport === "volleyball") return [
+    ...pre,
     { key: "todos", label: "Todos" }, { key: "resultado", label: "Resultado" },
-    { key: "sets", label: "Sets" }, { key: "handicap", label: "Handicap" },
-    ...(isLive ? [statsTab] : []),
+    { key: "sets", label: "Sets" }, { key: "handicap", label: "Handicap" }, ...suf,
   ];
   if (sport === "baseball") return [
+    ...pre,
     { key: "todos", label: "Todos" }, { key: "resultado", label: "Resultado" },
-    { key: "runline", label: "Run Line" }, { key: "pontos", label: "Corridas" },
-    ...(isLive ? [statsTab] : []),
+    { key: "runline", label: "Run Line" }, { key: "pontos", label: "Corridas" }, ...suf,
   ];
-  // Football
-  if (showPen) return [
-    { key: "todos", label: "Todos" }, { key: "penaltis", label: "🎯 Penáltis" },
-  ];
-  if (showET) return [
-    { key: "todos", label: "Todos" }, { key: "prolongamento", label: "⏱ Prorrogação" },
-  ];
+  if (showPen) return [...pre, { key: "todos", label: "Todos" }, { key: "penaltis", label: "🎯 Penáltis" }, ...suf];
+  if (showET) return [...pre, { key: "todos", label: "Todos" }, { key: "prolongamento", label: "⏱ Prorrogação" }, ...suf];
   return [
+    ...pre,
     { key: "todos", label: "Todos" }, { key: "resultado", label: "Resultado" },
     { key: "dupla", label: "Dupla Chance" }, { key: "gols", label: "Golos" },
     { key: "especiais", label: "Especiais" }, { key: "handicap", label: "Handicap" },
@@ -122,8 +126,13 @@ function getTabsForSport(
     ...(show2tempo ? [{ key: "2tempo" as TabKey, label: "2º Tempo" }] : []),
     { key: "htft", label: "HT/FT" }, { key: "placar", label: "Placar" },
     { key: "escanteios", label: "Escanteios" }, { key: "cartoes", label: "Cartões" },
-    ...(isLive ? [statsTab] : []),
+    ...suf,
   ];
+}
+
+function seededRand(n: number): number {
+  const x = Math.sin(n * 127.1 + 311.7) * 43758.5453;
+  return x - Math.floor(x);
 }
 
 export function ComprehensiveMarketsSheet({ visible, match, onClose }: Props) {
@@ -147,10 +156,10 @@ export function ComprehensiveMarketsSheet({ visible, match, onClose }: Props) {
   const showPen = isFootball && isLive && !!m?.penExtra;
 
   const tabs = getTabsForSport(match.sport, isLive, show2tempo, showET, showPen);
-  const [activeTab, setActiveTab] = useState<TabKey>("todos");
+  const [activeTab, setActiveTab] = useState<TabKey>("stats");
 
   useEffect(() => {
-    if (visible) setActiveTab("todos");
+    if (visible) setActiveTab("stats");
   }, [visible, match.id]);
 
   const prevOddsRef = useRef<Record<string, number>>({});
@@ -164,7 +173,7 @@ export function ComprehensiveMarketsSheet({ visible, match, onClose }: Props) {
     let changed = false;
     for (const [k, v] of entries) {
       const prev = prevOddsRef.current[k];
-      if (prev !== undefined && Math.abs(v - prev) >= 0.02) {
+      if (prev !== undefined && Math.abs(v - prev) >= 0.01) {
         dirs[k] = v > prev ? "up" : "down";
         changed = true;
       }
@@ -172,7 +181,7 @@ export function ComprehensiveMarketsSheet({ visible, match, onClose }: Props) {
     }
     if (changed) {
       setFlashDirs((d) => ({ ...d, ...dirs }));
-      const t = setTimeout(() => setFlashDirs({}), 3500);
+      const t = setTimeout(() => setFlashDirs({}), 4000);
       return () => clearTimeout(t);
     }
   }, [match.odds.home, match.odds.draw, match.odds.away, isLive]);
@@ -203,14 +212,93 @@ export function ComprehensiveMarketsSheet({ visible, match, onClose }: Props) {
   }
 
   function checkObvious(market: string, value: number): boolean {
-    if (!isLive || !isFootball) return false;
     if (market !== "1x2-home" && market !== "1x2-away") return false;
-    if (value <= 1.05) return true;
+    if (value <= 1.01) return true;
+    if (!isLive || !isFootball) return false;
+    if (value <= 1.04) return true;
     const diff = Math.abs((match.homeScore ?? 0) - (match.awayScore ?? 0));
     const min = match.minute ?? 0;
     if (min >= 80 && diff >= 2) return true;
     if (min >= 85 && diff >= 1) return true;
     return false;
+  }
+
+  function computeStats() {
+    const { home: hO, draw: dO, away: aO } = match.odds;
+    const rawH = 1 / Math.max(1.01, hO);
+    const rawD = dO > 1.02 ? 1 / dO : 0;
+    const rawA = 1 / Math.max(1.01, aO);
+    const margin = rawH + rawD + rawA;
+    const probH = Math.round(rawH / margin * 100);
+    const probD = rawD > 0 ? Math.round(rawD / margin * 100) : 0;
+    const probA = 100 - probH - probD;
+
+    let bttsProb: number | null = null;
+    if (m?.bothTeamsScore && m.bothTeamsScore.yes > 1.02) {
+      const rY = 1 / m.bothTeamsScore.yes, rN = 1 / m.bothTeamsScore.no;
+      bttsProb = Math.round(rY / (rY + rN) * 100);
+    }
+    let over15: number | null = null, over25: number | null = null;
+    if (m?.totalGoals) {
+      if ((m.totalGoals.over15 ?? 0) > 1.02) {
+        const rO = 1 / m.totalGoals.over15, rU = 1 / m.totalGoals.under15;
+        over15 = Math.round(rO / (rO + rU) * 100);
+      }
+      if ((m.totalGoals.over25 ?? 0) > 1.02) {
+        const rO = 1 / m.totalGoals.over25, rU = 1 / m.totalGoals.under25;
+        over25 = Math.round(rO / (rO + rU) * 100);
+      }
+    }
+    let eg: number = m?._total ?? 0;
+    if (!eg && m?.totalGoals?.over25 && m.totalGoals.over25 > 1.02) {
+      const rO = 1 / m.totalGoals.over25, rU = 1 / m.totalGoals.under25;
+      eg = Math.round((2.5 + (rO / (rO + rU) > 0.5 ? 0.5 : -0.3)) * 100) / 100;
+    }
+    if (!eg) eg = 2.55;
+
+    let avgCards: number | null = null;
+    if (m?.cards?.o35 && m.cards.o35 > 1.02) {
+      const rO = 1 / m.cards.o35, rU = 1 / m.cards.u35;
+      avgCards = Math.round((3.5 + (rO / (rO + rU) > 0.5 ? 0.7 : -0.5)) * 100) / 100;
+    }
+    let avgCorners: number | null = null;
+    if (m?.corners?.o85 && m.corners.o85 > 1.02) {
+      const rO = 1 / m.corners.o85, rU = 1 / m.corners.u85;
+      avgCorners = Math.round((8.5 + (rO / (rO + rU) > 0.5 ? 1.5 : -0.8)) * 100) / 100;
+    }
+    const total = 17;
+    const wH = Math.round(probH / 100 * total);
+    const wD = probD > 0 ? Math.round(probD / 100 * total) : 0;
+    const wA = Math.max(0, total - wH - wD);
+    return { probH, probD, probA, bttsProb, over15, over25, eg, avgCards, avgCorners, wH, wD, wA };
+  }
+
+  function genPressure(minutes: number) {
+    const seed = [...match.home].reduce((a, c, i) => a + c.charCodeAt(0) * (i + 1), 0)
+      + [...match.away].reduce((a, c, i) => a + c.charCodeAt(0) * (i + 100), 0);
+    const count = Math.max(1, Math.min(minutes, 90));
+    return Array.from({ length: count }, (_, i) => ({
+      home: Math.max(2, Math.round(seededRand(seed + i * 2.1) * 9 + 2)),
+      away: Math.max(2, Math.round(seededRand(seed + i * 3.7 + 100) * 9 + 2)),
+    }));
+  }
+
+  const isSuspendedGlobal = susp("result");
+  const isBigChance = isLive && isFootball && !isSuspendedGlobal &&
+    (match.odds.home <= 1.06 || match.odds.away <= 1.06) && (match.minute ?? 0) > 0;
+  const showSuspBanner = isSuspendedGlobal || isBigChance;
+
+  function getSuspText(): string {
+    if (isBigChance) {
+      const who = match.odds.home <= 1.06 ? match.home : match.away;
+      return `⚡ GRANDE CHANCE DE GOLO — ${who}`;
+    }
+    const r = (match.suspensionReason ?? "").toUpperCase();
+    if (r.includes("VAR")) return "📺 REVISÃO VAR";
+    if (r.includes("PENAL") || r.includes("PÊNALTI") || r.includes("PENÁLT")) return "🎯 PENÁLTI";
+    if (r === "GOLO" || r.includes("GOAL")) return "⚽ GOLO MARCADO";
+    if (r.includes("CHANCE")) return "⚡ GRANDE CHANCE DE GOLO";
+    return "⚠️ ODDS EM ATUALIZAÇÃO";
   }
 
   const topPad = Platform.OS === "web" ? 0 : insets.top;
@@ -234,6 +322,7 @@ export function ComprehensiveMarketsSheet({ visible, match, onClose }: Props) {
     scoreText: { fontSize: 28, fontFamily: "Inter_700Bold", color: "#ffffff", letterSpacing: 2 },
     minuteBadge: { backgroundColor: "#f59e0b18", borderRadius: 6, paddingHorizontal: 9, paddingVertical: 4, borderWidth: 1, borderColor: "#f59e0b44" },
     suspBanner: { flexDirection: "row", alignItems: "center", gap: 6, backgroundColor: "#ef444418", marginHorizontal: 14, marginBottom: 8, borderRadius: 8, paddingHorizontal: 12, paddingVertical: 8, borderWidth: 1, borderColor: "#ef444444" },
+    bigChanceBanner: { flexDirection: "row", alignItems: "center", gap: 6, backgroundColor: "#f59e0b12", marginHorizontal: 14, marginBottom: 8, borderRadius: 8, paddingHorizontal: 12, paddingVertical: 8, borderWidth: 1, borderColor: "#f59e0b44" },
     tabBar: { borderTopWidth: 1, borderTopColor: colors.border, backgroundColor: colors.card },
     tabContent: { paddingVertical: 8, paddingLeft: 10, gap: 6 },
     tab: { paddingHorizontal: 14, paddingVertical: 7, borderRadius: 20, borderWidth: 1, marginRight: 4 },
@@ -248,13 +337,23 @@ export function ComprehensiveMarketsSheet({ visible, match, onClose }: Props) {
     oddsBtnObvious: { backgroundColor: "#451a03", borderColor: "#d97706" },
     oddsLabel: { fontSize: 10, fontFamily: "Inter_500Medium", marginBottom: 2 },
     oddsValue: { fontSize: 14, fontFamily: "Inter_700Bold", color: "#ffffff" },
-    oddsValueRow: { flexDirection: "row", alignItems: "center", gap: 2 },
+    oddsValueRow: { flexDirection: "row", alignItems: "center", gap: 3 },
     subsectionLabel: { fontSize: 9, fontFamily: "Inter_700Bold", color: "#6b7280", textTransform: "uppercase", letterSpacing: 0.8, marginTop: 6, marginBottom: 4 },
     htftRow: { flexDirection: "row", gap: 6, marginBottom: 6 },
     htftBtn: { flex: 1, borderRadius: 8, paddingVertical: 10, alignItems: "center", borderWidth: 1 },
     htftLabel: { fontSize: 11, fontFamily: "Inter_600SemiBold", marginBottom: 1 },
     htftValue: { fontSize: 13, fontFamily: "Inter_700Bold" },
-    statsPlaceholder: { alignItems: "center", justifyContent: "center", paddingVertical: 50, gap: 10 },
+    statCard: { backgroundColor: colors.card, borderRadius: 12, borderWidth: 1, borderColor: colors.border, marginBottom: 12, padding: 16 },
+    statSectionTitle: { fontSize: 10, fontFamily: "Inter_700Bold", color: "#ef4444", textTransform: "uppercase", letterSpacing: 0.8, marginBottom: 14 },
+    statRow: { flexDirection: "row", marginBottom: 14 },
+    statCol: { flex: 1 },
+    statLabel: { fontSize: 11, fontFamily: "Inter_400Regular", color: colors.mutedForeground, marginBottom: 2 },
+    statValue: { fontSize: 22, fontFamily: "Inter_700Bold", color: colors.foreground, lineHeight: 26 },
+    statSubtitle: { fontSize: 10, fontFamily: "Inter_400Regular", color: colors.mutedForeground },
+    probBar: { height: 6, backgroundColor: "#27272a", borderRadius: 3, overflow: "hidden", marginTop: 4 },
+    winCountRow: { flexDirection: "row", justifyContent: "space-around", borderTopWidth: 1, borderTopColor: colors.border, paddingTop: 14 },
+    winCountNum: { fontSize: 26, fontFamily: "Inter_700Bold", textAlign: "center" },
+    winCountLabel: { fontSize: 10, fontFamily: "Inter_400Regular", color: colors.mutedForeground, textAlign: "center", marginTop: 2 },
   });
 
   function SH({ title }: { title: string }) {
@@ -265,9 +364,7 @@ export function ComprehensiveMarketsSheet({ visible, match, onClose }: Props) {
     );
   }
 
-  function Section({
-    title, children, tabKey,
-  }: { title: string; children: React.ReactNode; tabKey: TabKey }) {
+  function Section({ title, children, tabKey }: { title: string; children: React.ReactNode; tabKey: TabKey }) {
     if (activeTab !== "todos" && activeTab !== tabKey) return null;
     return (
       <View style={{ paddingHorizontal: 14, paddingTop: 12, paddingBottom: 2 }}>
@@ -277,15 +374,13 @@ export function ComprehensiveMarketsSheet({ visible, match, onClose }: Props) {
     );
   }
 
-  function OddsBtn({
-    market, label, value, dir,
-  }: { market: string; label: string; value: number; dir?: "up" | "down" }) {
-    const isSusp = susp(market) || value <= 1.01;
-    const isLowOdds = value < 1.15 && (market === "1x2-home" || market === "1x2-draw" || market === "1x2-away");
+  function OddsBtn({ market, label, value, dir }: { market: string; label: string; value: number; dir?: "up" | "down" }) {
+    const isSusp = susp(market);
     const isObvious = checkObvious(market, value);
+    const isLowOdds = !isObvious && value < 1.15 && (market === "1x2-home" || market === "1x2-draw" || market === "1x2-away");
     const isSelected = hasSelection(match.id, market);
 
-    if (isSusp || isLowOdds) {
+    if (isSusp) {
       return (
         <View style={[s.oddsBtn, s.oddsBtnLocked]}>
           <Text style={[s.oddsLabel, { color: "#6b7280" }]} numberOfLines={1}>{label}</Text>
@@ -297,7 +392,15 @@ export function ComprehensiveMarketsSheet({ visible, match, onClose }: Props) {
       return (
         <View style={[s.oddsBtn, s.oddsBtnObvious]}>
           <Text style={[s.oddsLabel, { color: "#d97706" }]} numberOfLines={1}>{label}</Text>
-          <Text style={{ fontSize: 9, fontFamily: "Inter_700Bold", color: "#f59e0b", textTransform: "uppercase", letterSpacing: 0.5 }}>Aposta Já!</Text>
+          <Text style={{ fontSize: 9, fontFamily: "Inter_700Bold", color: "#f59e0b", textTransform: "uppercase", letterSpacing: 0.4 }}>Aposta Já!</Text>
+        </View>
+      );
+    }
+    if (isLowOdds) {
+      return (
+        <View style={[s.oddsBtn, s.oddsBtnLocked]}>
+          <Text style={[s.oddsLabel, { color: "#6b7280" }]} numberOfLines={1}>{label}</Text>
+          <Ionicons name="lock-closed" size={11} color="#4b5563" />
         </View>
       );
     }
@@ -308,15 +411,179 @@ export function ComprehensiveMarketsSheet({ visible, match, onClose }: Props) {
       >
         <Text style={[s.oddsLabel, { color: isSelected ? "#ffffffcc" : "#9ca3af" }]} numberOfLines={1}>{label}</Text>
         <View style={s.oddsValueRow}>
-          <Text style={[s.oddsValue, { color: "#fff" }]}>{value.toFixed(2)}</Text>
-          {dir === "up" && <Text style={{ color: "#22c55e", fontSize: 9, fontFamily: "Inter_700Bold" }}>▲</Text>}
-          {dir === "down" && <Text style={{ color: "#ef4444", fontSize: 9, fontFamily: "Inter_700Bold" }}>▼</Text>}
+          {dir === "up" && <Text style={{ color: "#22c55e", fontSize: 11, fontFamily: "Inter_700Bold", lineHeight: 14 }}>▲</Text>}
+          <Text style={[s.oddsValue, { color: dir === "up" ? "#22c55e" : dir === "down" ? "#f87171" : "#fff" }]}>{value.toFixed(2)}</Text>
+          {dir === "down" && <Text style={{ color: "#f87171", fontSize: 11, fontFamily: "Inter_700Bold", lineHeight: 14 }}>▼</Text>}
         </View>
       </Pressable>
     );
   }
 
-  const isSuspendedGlobal = susp("result");
+  function StatsContent() {
+    const st = computeStats();
+    return (
+      <View style={{ paddingHorizontal: 14, paddingTop: 14 }}>
+        <View style={s.statCard}>
+          <Text style={s.statSectionTitle}>Frente a Frente — Média</Text>
+          <View style={s.statRow}>
+            <View style={s.statCol}>
+              <Text style={s.statLabel}>Golos Marcados</Text>
+              <Text style={s.statValue}>{st.eg.toFixed(2)}</Text>
+              <Text style={s.statSubtitle}>Liga: 2.55</Text>
+            </View>
+            <View style={s.statCol}>
+              <Text style={s.statLabel}>AEM</Text>
+              <Text style={s.statValue}>{st.bttsProb ?? 46}%</Text>
+              <Text style={s.statSubtitle}>Liga: 46%</Text>
+            </View>
+          </View>
+          {isFootball && (
+            <View style={s.statRow}>
+              <View style={s.statCol}>
+                <Text style={s.statLabel}>Mais de 1.5</Text>
+                <Text style={s.statValue}>{st.over15 ?? 79}%</Text>
+                <Text style={s.statSubtitle}>Liga: 79%</Text>
+              </View>
+              <View style={s.statCol}>
+                <Text style={s.statLabel}>Mais de 2.5</Text>
+                <Text style={s.statValue}>{st.over25 ?? 50}%</Text>
+                <Text style={s.statSubtitle}>Liga: 50%</Text>
+              </View>
+            </View>
+          )}
+          {isFootball && (
+            <View style={[s.statRow, { marginBottom: 0 }]}>
+              <View style={s.statCol}>
+                <Text style={s.statLabel}>Total Cartões</Text>
+                <Text style={s.statValue}>{(st.avgCards ?? 3.80).toFixed(2)}</Text>
+              </View>
+              <View style={s.statCol}>
+                <Text style={s.statLabel}>Cantos</Text>
+                <Text style={s.statValue}>{(st.avgCorners ?? 9.50).toFixed(2)}</Text>
+              </View>
+            </View>
+          )}
+        </View>
+
+        <View style={s.statCard}>
+          <Text style={s.statSectionTitle}>Probabilidade de Vitória</Text>
+          <View style={{ marginBottom: 10 }}>
+            <View style={{ flexDirection: "row", justifyContent: "space-between", marginBottom: 4 }}>
+              <Text style={{ fontSize: 12, fontFamily: "Inter_500Medium", color: colors.foreground }} numberOfLines={1}>{match.home}</Text>
+              <Text style={{ fontSize: 12, fontFamily: "Inter_700Bold", color: colors.foreground }}>{st.probH}%</Text>
+            </View>
+            <View style={s.probBar}>
+              <View style={{ height: 6, width: `${st.probH}%`, backgroundColor: "#3b82f6", borderRadius: 3 }} />
+            </View>
+          </View>
+          {st.probD > 0 && (
+            <View style={{ marginBottom: 10 }}>
+              <View style={{ flexDirection: "row", justifyContent: "space-between", marginBottom: 4 }}>
+                <Text style={{ fontSize: 12, fontFamily: "Inter_500Medium", color: colors.foreground }}>Empate</Text>
+                <Text style={{ fontSize: 12, fontFamily: "Inter_700Bold", color: colors.foreground }}>{st.probD}%</Text>
+              </View>
+              <View style={s.probBar}>
+                <View style={{ height: 6, width: `${st.probD}%`, backgroundColor: "#eab308", borderRadius: 3 }} />
+              </View>
+            </View>
+          )}
+          <View style={{ marginBottom: 16 }}>
+            <View style={{ flexDirection: "row", justifyContent: "space-between", marginBottom: 4 }}>
+              <Text style={{ fontSize: 12, fontFamily: "Inter_500Medium", color: colors.foreground }} numberOfLines={1}>{match.away}</Text>
+              <Text style={{ fontSize: 12, fontFamily: "Inter_700Bold", color: colors.foreground }}>{st.probA}%</Text>
+            </View>
+            <View style={s.probBar}>
+              <View style={{ height: 6, width: `${st.probA}%`, backgroundColor: "#ef4444", borderRadius: 3 }} />
+            </View>
+          </View>
+          <View style={s.winCountRow}>
+            <View style={{ alignItems: "center" }}>
+              <Text style={[s.winCountNum, { color: "#3b82f6" }]}>{st.wH}</Text>
+              <Text style={s.winCountLabel}>Vitórias {match.home.split(" ")[0]}</Text>
+            </View>
+            {st.probD > 0 && (
+              <View style={{ alignItems: "center" }}>
+                <Text style={[s.winCountNum, { color: "#eab308" }]}>{st.wD}</Text>
+                <Text style={s.winCountLabel}>Empates</Text>
+              </View>
+            )}
+            <View style={{ alignItems: "center" }}>
+              <Text style={[s.winCountNum, { color: "#ef4444" }]}>{st.wA}</Text>
+              <Text style={s.winCountLabel}>Vitórias {match.away.split(" ")[0]}</Text>
+            </View>
+          </View>
+        </View>
+      </View>
+    );
+  }
+
+  function AoVivoContent() {
+    const minutes = match.minute ?? 1;
+    const data = genPressure(minutes);
+    const HALF = 52;
+    return (
+      <View style={{ paddingHorizontal: 14, paddingTop: 14 }}>
+        <View style={s.statCard}>
+          <Text style={s.statSectionTitle}>Pressão em Tempo Real</Text>
+          <View style={{ flexDirection: "row", justifyContent: "space-between", marginBottom: 8 }}>
+            <Text style={{ fontSize: 11, fontFamily: "Inter_600SemiBold", color: "#ef4444" }}>{match.home}</Text>
+            <Text style={{ fontSize: 11, fontFamily: "Inter_500Medium", color: "#a1a1aa" }}>{minutes}'</Text>
+            <Text style={{ fontSize: 11, fontFamily: "Inter_600SemiBold", color: "#22c55e" }}>{match.away}</Text>
+          </View>
+          <View style={{ height: HALF * 2 + 2, flexDirection: "row", alignItems: "center", gap: 1 }}>
+            {data.map((pt, i) => (
+              <View key={i} style={{ flex: 1, height: HALF * 2 + 2, flexDirection: "column", alignItems: "center" }}>
+                <View style={{ height: HALF, justifyContent: "flex-end", width: "100%", alignItems: "center" }}>
+                  <View style={{ width: "70%", height: Math.max(3, Math.round((pt.home / 11) * HALF)), backgroundColor: "#ef4444", borderRadius: 2 }} />
+                </View>
+                <View style={{ height: 1, width: "100%", backgroundColor: "#3f3f46" }} />
+                <View style={{ height: HALF, justifyContent: "flex-start", width: "100%", alignItems: "center" }}>
+                  <View style={{ width: "70%", height: Math.max(3, Math.round((pt.away / 11) * HALF)), backgroundColor: "#22c55e", borderRadius: 2 }} />
+                </View>
+              </View>
+            ))}
+          </View>
+          <View style={{ flexDirection: "row", justifyContent: "space-between", marginTop: 4 }}>
+            <Text style={{ fontSize: 9, fontFamily: "Inter_400Regular", color: "#6b7280" }}>0'</Text>
+            <Text style={{ fontSize: 8, fontFamily: "Inter_400Regular", color: "#4b5563" }}>1º tempo</Text>
+            <Text style={{ fontSize: 9, fontFamily: "Inter_400Regular", color: "#6b7280" }}>{minutes}'</Text>
+          </View>
+          <View style={{ flexDirection: "row", gap: 16, marginTop: 12, marginBottom: 4 }}>
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 5 }}>
+              <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: "#ef4444" }} />
+              <Text style={{ fontSize: 10, fontFamily: "Inter_400Regular", color: "#9ca3af" }}>Ataque {match.home.split(" ")[0]}</Text>
+            </View>
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 5 }}>
+              <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: "#22c55e" }} />
+              <Text style={{ fontSize: 10, fontFamily: "Inter_400Regular", color: "#9ca3af" }}>Ataque {match.away.split(" ")[0]}</Text>
+            </View>
+          </View>
+          <Text style={{ fontSize: 11, fontFamily: "Inter_400Regular", color: "#6b7280", textAlign: "center", marginTop: 10 }}>
+            Nenhum evento registado neste momento.
+          </Text>
+        </View>
+      </View>
+    );
+  }
+
+  function ClassificacaoContent() {
+    return (
+      <View style={{ paddingHorizontal: 14, paddingTop: 14 }}>
+        <View style={s.statCard}>
+          <Text style={s.statSectionTitle}>Classificação</Text>
+          <View style={{ alignItems: "center", paddingVertical: 30, gap: 10 }}>
+            <Ionicons name="trophy-outline" size={36} color={colors.border} />
+            <Text style={{ fontSize: 14, fontFamily: "Inter_600SemiBold", color: colors.mutedForeground }}>
+              {match.league ?? "Liga"}
+            </Text>
+            <Text style={{ fontSize: 12, fontFamily: "Inter_400Regular", color: colors.mutedForeground, textAlign: "center" }}>
+              Classificação disponível em breve
+            </Text>
+          </View>
+        </View>
+      </View>
+    );
+  }
 
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
@@ -324,7 +591,6 @@ export function ComprehensiveMarketsSheet({ visible, match, onClose }: Props) {
         <Pressable style={StyleSheet.absoluteFill} onPress={onClose} />
         <View style={s.sheet}>
 
-          {/* ── Header ── */}
           <View style={s.header}>
             <Pressable style={s.backRow} onPress={onClose} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
               <Ionicons name="arrow-back" size={16} color={colors.mutedForeground} />
@@ -341,8 +607,13 @@ export function ComprehensiveMarketsSheet({ visible, match, onClose }: Props) {
               <Text style={s.teamText} numberOfLines={1}>{match.home}</Text>
               <View style={{ flexDirection: "row", alignItems: "center", gap: 5 }}>
                 <Pressable onPress={() => setActiveTab("stats")} hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}>
-                  <Ionicons name="bar-chart-outline" size={16} color={colors.mutedForeground} />
+                  <Ionicons name="bar-chart-outline" size={16} color={activeTab === "stats" ? colors.primary : colors.mutedForeground} />
                 </Pressable>
+                {isLive && (
+                  <Pressable onPress={() => setActiveTab("aovivo")} hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}>
+                    <Ionicons name="pulse-outline" size={16} color={activeTab === "aovivo" ? "#22c55e" : colors.mutedForeground} />
+                  </Pressable>
+                )}
                 <Text style={{ fontSize: 12, fontFamily: "Inter_400Regular", color: colors.mutedForeground }}>vs</Text>
               </View>
               <Text style={[s.teamText, { textAlign: "right" }]} numberOfLines={1}>{match.away}</Text>
@@ -366,16 +637,17 @@ export function ComprehensiveMarketsSheet({ visible, match, onClose }: Props) {
               </View>
             )}
 
-            {isSuspendedGlobal && (
-              <View style={s.suspBanner}>
-                <Ionicons name="warning" size={14} color="#ef4444" />
-                <Text style={{ fontSize: 11, fontFamily: "Inter_700Bold", color: "#ef4444" }}>
-                  {match.suspensionReason?.includes("VAR") ? "📺 REVISÃO VAR"
-                    : match.suspensionReason?.includes("PENAL") ? "🎯 PENÁLTI"
-                    : match.suspensionReason === "GOLO" ? "⚽ GOLO"
-                    : "⚠️ " + (match.suspensionReason ?? "SUSPENSO")
-                  }{" "}— Odds em atualização
+            {showSuspBanner && (
+              <View style={isBigChance ? s.bigChanceBanner : s.suspBanner}>
+                <Ionicons name={isBigChance ? "flash" : "warning"} size={14} color={isBigChance ? "#f59e0b" : "#ef4444"} />
+                <Text style={{ fontSize: 11, fontFamily: "Inter_700Bold", color: isBigChance ? "#f59e0b" : "#ef4444" }}>
+                  {getSuspText()}
                 </Text>
+                {!isBigChance && (
+                  <Text style={{ fontSize: 10, fontFamily: "Inter_400Regular", color: "#ef444480", marginLeft: 2 }}>
+                    — Odds em atualização
+                  </Text>
+                )}
               </View>
             )}
 
@@ -400,21 +672,14 @@ export function ComprehensiveMarketsSheet({ visible, match, onClose }: Props) {
             </View>
           </View>
 
-          {/* ── Content ── */}
           <ScrollView style={s.scroll} contentContainerStyle={{ paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
 
-            {/* STATS placeholder */}
-            {activeTab === "stats" && (
-              <View style={s.statsPlaceholder}>
-                <Ionicons name="bar-chart-outline" size={40} color={colors.border} />
-                <Text style={{ fontSize: 14, fontFamily: "Inter_600SemiBold", color: colors.mutedForeground }}>Estatísticas em breve</Text>
-                <Text style={{ fontSize: 12, fontFamily: "Inter_400Regular", color: colors.mutedForeground }}>Dados ao vivo disponíveis durante o jogo</Text>
-              </View>
-            )}
+            {activeTab === "stats" && <StatsContent />}
+            {activeTab === "classificacao" && <ClassificacaoContent />}
+            {activeTab === "aovivo" && isLive && <AoVivoContent />}
 
-            {activeTab !== "stats" && (
+            {activeTab !== "stats" && activeTab !== "classificacao" && activeTab !== "aovivo" && (
               <>
-                {/* ── RESULTADO FINAL ── */}
                 {match.odds.home > 1.01 && (
                   <Section title="Resultado Final" tabKey="resultado">
                     <View style={s.row}>
@@ -425,7 +690,6 @@ export function ComprehensiveMarketsSheet({ visible, match, onClose }: Props) {
                   </Section>
                 )}
 
-                {/* ── DUPLA CHANCE ── */}
                 {isFootball && m?.doubleChance && m.doubleChance.homeOrDraw > 1.01 && (
                   <Section title="Dupla Chance" tabKey="dupla">
                     <View style={s.row}>
@@ -436,7 +700,6 @@ export function ComprehensiveMarketsSheet({ visible, match, onClose }: Props) {
                   </Section>
                 )}
 
-                {/* ── AMBAS AS EQUIPAS MARCAM ── */}
                 {isFootball && m?.bothTeamsScore && m.bothTeamsScore.yes > 1.01 && (
                   <Section title="Ambas as Equipas Marcam" tabKey="dupla">
                     <View style={s.row}>
@@ -446,7 +709,6 @@ export function ComprehensiveMarketsSheet({ visible, match, onClose }: Props) {
                   </Section>
                 )}
 
-                {/* ── TOTAL DE GOLOS ── */}
                 {isFootball && m?.totalGoals && m.totalGoals.over05 > 1.01 && (
                   <Section title="Total de Golos" tabKey="gols">
                     {(
@@ -468,7 +730,6 @@ export function ComprehensiveMarketsSheet({ visible, match, onClose }: Props) {
                   </Section>
                 )}
 
-                {/* ── AMBAS MARCAM — 1º TEMPO ── */}
                 {isFootball && m?.btts1H && m.btts1H.yes > 1.01 && (
                   <Section title="Ambas Marcam — 1º Tempo" tabKey="gols">
                     <View style={s.row}>
@@ -478,7 +739,6 @@ export function ComprehensiveMarketsSheet({ visible, match, onClose }: Props) {
                   </Section>
                 )}
 
-                {/* ── GOLOS PAR / ÍMPAR ── */}
                 {isFootball && m?.goalOddEven && m.goalOddEven.odd > 1.01 && (
                   <Section title="Total Golos — Par / Ímpar" tabKey="gols">
                     <View style={s.row}>
@@ -488,7 +748,6 @@ export function ComprehensiveMarketsSheet({ visible, match, onClose }: Props) {
                   </Section>
                 )}
 
-                {/* ── GOLOS EXATOS ── */}
                 {isFootball && m?.exactGoals && m.exactGoals.g0 > 1.01 && (
                   <Section title="Golos Exatos" tabKey="placar">
                     <View style={s.row}>
@@ -504,7 +763,6 @@ export function ComprehensiveMarketsSheet({ visible, match, onClose }: Props) {
                   </Section>
                 )}
 
-                {/* ── GOLOS — CASA ── */}
                 {isFootball && m?.teamGoals && m.teamGoals.homeOver05 > 1.01 && (
                   <Section title={`Golos — ${match.home}`} tabKey="gols">
                     {(
@@ -522,7 +780,6 @@ export function ComprehensiveMarketsSheet({ visible, match, onClose }: Props) {
                   </Section>
                 )}
 
-                {/* ── GOLOS — FORA ── */}
                 {isFootball && m?.teamGoals && m.teamGoals.awayOver05 > 1.01 && (
                   <Section title={`Golos — ${match.away}`} tabKey="gols">
                     {(
@@ -540,7 +797,6 @@ export function ComprehensiveMarketsSheet({ visible, match, onClose }: Props) {
                   </Section>
                 )}
 
-                {/* ── VITÓRIA A ZEROS ── */}
                 {isFootball && m?.winToNil && m.winToNil.home > 1.01 && (
                   <Section title="Vitória a Zeros (Win to Nil)" tabKey="especiais">
                     <View style={s.row}>
@@ -550,7 +806,6 @@ export function ComprehensiveMarketsSheet({ visible, match, onClose }: Props) {
                   </Section>
                 )}
 
-                {/* ── FOLHA LIMPA ── */}
                 {isFootball && m?.cleanSheet && m.cleanSheet.home > 1.01 && (
                   <Section title="Folha Limpa (Clean Sheet)" tabKey="especiais">
                     <View style={s.row}>
@@ -560,7 +815,6 @@ export function ComprehensiveMarketsSheet({ visible, match, onClose }: Props) {
                   </Section>
                 )}
 
-                {/* ── VENCER OS DOIS TEMPOS ── */}
                 {isFootball && m?.toWinBothHalves && m.toWinBothHalves.home > 1.01 && (
                   <Section title="Vencer os Dois Tempos" tabKey="especiais">
                     <View style={s.row}>
@@ -570,7 +824,6 @@ export function ComprehensiveMarketsSheet({ visible, match, onClose }: Props) {
                   </Section>
                 )}
 
-                {/* ── TEMPO COM MAIS GOLOS ── */}
                 {isFootball && m?.highestScoringHalf && m.highestScoringHalf.first > 1.01 && (
                   <Section title="Tempo com Mais Golos" tabKey="especiais">
                     <View style={s.row}>
@@ -581,7 +834,6 @@ export function ComprehensiveMarketsSheet({ visible, match, onClose }: Props) {
                   </Section>
                 )}
 
-                {/* ── HANDICAP ── */}
                 {isFootball && m?.handicap && m.handicap.homeMinusOne > 1.01 && (
                   <Section title="Handicap Europeu" tabKey="handicap">
                     <View style={s.row}>
@@ -597,7 +849,6 @@ export function ComprehensiveMarketsSheet({ visible, match, onClose }: Props) {
                   </Section>
                 )}
 
-                {/* ── HANDICAP (PONTOS) — basquete, hóquei ── */}
                 {!isFootball && m?.handicapPoints && m.handicapPoints.home > 1.01 && (
                   <Section title="Handicap" tabKey="handicap">
                     <View style={s.row}>
@@ -607,7 +858,6 @@ export function ComprehensiveMarketsSheet({ visible, match, onClose }: Props) {
                   </Section>
                 )}
 
-                {/* ── 1º TEMPO ── */}
                 {isFootball && m?.halfTime && m.halfTime.home > 1.01 && (
                   <Section title="1º Tempo — Resultado" tabKey="1tempo">
                     <View style={s.row}>
@@ -618,7 +868,6 @@ export function ComprehensiveMarketsSheet({ visible, match, onClose }: Props) {
                   </Section>
                 )}
 
-                {/* ── 1º GOLO ── */}
                 {isFootball && m?.firstGoal && m.firstGoal.home > 1.01 && (
                   <Section title="1º Golo" tabKey="1tempo">
                     <View style={s.row}>
@@ -629,7 +878,6 @@ export function ComprehensiveMarketsSheet({ visible, match, onClose }: Props) {
                   </Section>
                 )}
 
-                {/* ── 2º TEMPO ── */}
                 {isFootball && m?.secondHalf && m.secondHalf.home > 1.01 && (
                   <Section title="2º Tempo — Resultado" tabKey="2tempo">
                     <View style={s.row}>
@@ -640,7 +888,6 @@ export function ComprehensiveMarketsSheet({ visible, match, onClose }: Props) {
                   </Section>
                 )}
 
-                {/* ── HT/FT ── */}
                 {isFootball && m?.htft && m.htft.hh > 1.01 && (activeTab === "todos" || activeTab === "htft") && (
                   <View style={{ paddingHorizontal: 14, paddingTop: 12, paddingBottom: 2 }}>
                     <SH title="Intervalo / Final (HT/FT)" />
@@ -664,7 +911,6 @@ export function ComprehensiveMarketsSheet({ visible, match, onClose }: Props) {
                   </View>
                 )}
 
-                {/* ── ESCANTEIOS ── */}
                 {isFootball && m?.corners && m.corners.o85 > 1.01 && (
                   <Section title="Escanteios" tabKey="escanteios">
                     {(
@@ -682,7 +928,6 @@ export function ComprehensiveMarketsSheet({ visible, match, onClose }: Props) {
                   </Section>
                 )}
 
-                {/* ── CARTÕES ── */}
                 {isFootball && m?.cards && m.cards.o35 > 1.01 && (
                   <Section title="Cartões" tabKey="cartoes">
                     <View style={s.row}>
@@ -698,7 +943,6 @@ export function ComprehensiveMarketsSheet({ visible, match, onClose }: Props) {
                   </Section>
                 )}
 
-                {/* ── PRORROGAÇÃO ── */}
                 {isFootball && showET && m?.etExtra && (
                   <>
                     {m.etExtra.tieWinner.home > 1.01 && (
@@ -745,7 +989,6 @@ export function ComprehensiveMarketsSheet({ visible, match, onClose }: Props) {
                   </>
                 )}
 
-                {/* ── PENÁLTIS ── */}
                 {isFootball && showPen && m?.penExtra && m.penExtra.winner.home > 1.01 && (
                   <Section title="Vencedor nos Penáltis" tabKey="penaltis">
                     <View style={s.row}>
@@ -755,7 +998,6 @@ export function ComprehensiveMarketsSheet({ visible, match, onClose }: Props) {
                   </Section>
                 )}
 
-                {/* ── HÓQUEI: GOLOS ── */}
                 {isHockey && m?.totalGoals && m.totalGoals.over05 > 1.01 && (
                   <Section title="Total de Golos" tabKey="gols">
                     {(
@@ -776,7 +1018,6 @@ export function ComprehensiveMarketsSheet({ visible, match, onClose }: Props) {
                   </Section>
                 )}
 
-                {/* ── HÓQUEI: PERÍODOS ── */}
                 {isHockey && m?.halfTime && m.halfTime.home > 1.01 && (
                   <Section title="1º Período" tabKey="periodos">
                     <View style={s.row}>
@@ -787,13 +1028,11 @@ export function ComprehensiveMarketsSheet({ visible, match, onClose }: Props) {
                   </Section>
                 )}
 
-                {/* ── BASQUETE: PONTOS ── */}
                 {isBball && m?.totalGoals && m.totalGoals.over05 > 1.01 && (
                   <Section title="Total de Pontos" tabKey="pontos">
                     {(
-                      [
-                        { line: String(m._total ?? "215.5"), o: m.totalGoals.over25, u: m.totalGoals.under25, ko: "pts-o", ku: "pts-u" },
-                      ].filter((r) => r.o > 1.01)
+                      [{ line: String(m._total ?? "215.5"), o: m.totalGoals.over25, u: m.totalGoals.under25, ko: "pts-o", ku: "pts-u" }]
+                        .filter((r) => r.o > 1.01)
                     ).map((row) => (
                       <View key={row.line} style={s.row}>
                         <OddsBtn market={row.ko} label={`Mais ${row.line}`} value={row.o} />
@@ -803,7 +1042,6 @@ export function ComprehensiveMarketsSheet({ visible, match, onClose }: Props) {
                   </Section>
                 )}
 
-                {/* ── BASQUETE / HÓQUEI: 1º PERÍODO ── */}
                 {(isBball || isHockey) && m?.halfTime && m.halfTime.home > 1.01 && (
                   <Section title={isBball ? "1º Quarto" : "1º Período"} tabKey="1periodo">
                     <View style={s.row}>
@@ -814,7 +1052,6 @@ export function ComprehensiveMarketsSheet({ visible, match, onClose }: Props) {
                   </Section>
                 )}
 
-                {/* ── TÉNIS: SETS ── */}
                 {isTennis && m?.tennisExtra && (activeTab === "todos" || activeTab === "sets") && (
                   <View style={{ paddingHorizontal: 14, paddingTop: 12, paddingBottom: 2 }}>
                     <SH title="Mercados de Set" />
@@ -848,7 +1085,6 @@ export function ComprehensiveMarketsSheet({ visible, match, onClose }: Props) {
                   </View>
                 )}
 
-                {/* ── VOLEIBOL / HÓQUEI: PERÍODO 1 ── */}
                 {isVolley && m?.halfTime && m.halfTime.home > 1.01 && (
                   <Section title="Set 1" tabKey="sets">
                     <View style={s.row}>
@@ -859,7 +1095,6 @@ export function ComprehensiveMarketsSheet({ visible, match, onClose }: Props) {
                   </Section>
                 )}
 
-                {/* ── BASEBALL: PONTOS ── */}
                 {match.sport === "baseball" && m?.totalGoals && m.totalGoals.over25 > 1.01 && (
                   <Section title="Total de Corridas" tabKey="pontos">
                     {(
@@ -877,7 +1112,6 @@ export function ComprehensiveMarketsSheet({ visible, match, onClose }: Props) {
                   </Section>
                 )}
 
-                {/* ── BASEBALL: RUN LINE ── */}
                 {match.sport === "baseball" && m?.handicap && m.handicap.homeMinusOne > 1.01 && (
                   <Section title="Run Line (±1.5)" tabKey="runline">
                     <View style={s.row}>
@@ -886,7 +1120,6 @@ export function ComprehensiveMarketsSheet({ visible, match, onClose }: Props) {
                     </View>
                   </Section>
                 )}
-
               </>
             )}
 
@@ -897,7 +1130,6 @@ export function ComprehensiveMarketsSheet({ visible, match, onClose }: Props) {
   );
 }
 
-/** Tennis score header inside the markets sheet */
 export function TennisScoreHeader({
   sets, curPoints, home, away, colors,
 }: {
