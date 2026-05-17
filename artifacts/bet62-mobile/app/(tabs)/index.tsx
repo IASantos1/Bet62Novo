@@ -5,6 +5,7 @@ import React, { type ComponentProps, useState } from "react";
 import {
   ActivityIndicator,
   FlatList,
+  Image,
   Platform,
   Pressable,
   RefreshControl,
@@ -22,6 +23,7 @@ import { API_BASE } from "@/context/AuthContext";
 import { ComprehensiveMarketsSheet } from "@/components/ComprehensiveMarketsSheet";
 import { BetSlipModal } from "@/components/BetSlipModal";
 import type { LiveMatchMarkets } from "@/hooks/useLiveMatches";
+import { getTeamBannerUrl } from "@/utils/teamBanners";
 
 type MCIconName = ComponentProps<typeof MaterialCommunityIcons>["name"];
 
@@ -30,9 +32,11 @@ interface UpcomingMatch {
   sport: string;
   home: string;
   away: string;
-  kickoff: string;
+  date: string;
+  time: string;
   odds: { home: number; draw: number; away: number };
   league?: string;
+  country?: string;
   markets?: LiveMatchMarkets;
 }
 
@@ -64,6 +68,19 @@ const SPORT_ICONS: Record<string, MCIconName> = {
   baseball: "baseball",
 };
 
+function parseKickoff(date: string, time: string): Date {
+  const raw = date ?? "";
+  const timeParts = (time ?? "00:00").split(":").map(Number);
+  const [h = 0, mi = 0] = timeParts;
+  // Handle both "DD.MM.YYYY" and "YYYY-MM-DD"
+  if (raw.includes(".")) {
+    const [d = 1, mo = 1, y = 2025] = raw.split(".").map(Number);
+    return new Date(y, mo - 1, d, h, mi);
+  }
+  const [y = 2025, mo = 1, d = 1] = raw.split("-").map(Number);
+  return new Date(y, mo - 1, d, h, mi);
+}
+
 function UpcomingCard({ match }: { match: UpcomingMatch }) {
   const colors = useColors();
   const { addSelection, removeSelection, hasSelection } = useBetSlip();
@@ -72,7 +89,7 @@ function UpcomingCard({ match }: { match: UpcomingMatch }) {
   const sportCol = SPORT_COLORS[match.sport] ?? colors.mutedForeground;
   const hasDraw = match.odds.draw > 1.01;
 
-  const kickoffDate = new Date(match.kickoff);
+  const kickoffDate = parseKickoff(match.date, match.time);
   const today = new Date();
   const tomorrow = new Date(today);
   tomorrow.setDate(today.getDate() + 1);
@@ -82,6 +99,10 @@ function UpcomingCard({ match }: { match: UpcomingMatch }) {
     : isTomorrow ? "Amanhã"
     : kickoffDate.toLocaleDateString("pt-PT", { day: "2-digit", month: "short" });
   const timeStr = kickoffDate.toLocaleTimeString("pt-PT", { hour: "2-digit", minute: "2-digit" });
+
+  const homeBanner = getTeamBannerUrl(match.home);
+  const awayBanner = getTeamBannerUrl(match.away);
+  const hasBanner = !!(homeBanner || awayBanner);
 
   function handleOdds(market: string, label: string, value: number) {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -114,7 +135,26 @@ function UpcomingCard({ match }: { match: UpcomingMatch }) {
         style={({ pressed }) => [s.card, { opacity: pressed ? 0.97 : 1 }]}
         onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setMarketsOpen(true); }}
       >
-        <View style={s.stripe} />
+        {hasBanner ? (
+          <View style={{ height: 50, flexDirection: "row", overflow: "hidden" }}>
+            <View style={{ flex: 1, overflow: "hidden", backgroundColor: sportCol + "18" }}>
+              {homeBanner && <Image source={{ uri: homeBanner }} style={StyleSheet.absoluteFill} resizeMode="cover" />}
+            </View>
+            <View style={{ flex: 1, overflow: "hidden", backgroundColor: sportCol + "10" }}>
+              {awayBanner && <Image source={{ uri: awayBanner }} style={StyleSheet.absoluteFill} resizeMode="cover" />}
+            </View>
+            <View style={[StyleSheet.absoluteFill, { flexDirection: "row", alignItems: "center", backgroundColor: "#00000055", paddingHorizontal: 12, gap: 8 }]}>
+              <Text style={{ flex: 1, color: "#fff", fontSize: 12, fontFamily: "Inter_700Bold" }} numberOfLines={1}>{match.home}</Text>
+              <View style={{ backgroundColor: "#00000070", borderRadius: 4, paddingHorizontal: 8, paddingVertical: 3 }}>
+                <Text style={{ color: "#fff", fontSize: 10, fontFamily: "Inter_600SemiBold" }}>vs</Text>
+              </View>
+              <Text style={{ flex: 1, color: "#fff", fontSize: 12, fontFamily: "Inter_700Bold", textAlign: "right" as const }} numberOfLines={1}>{match.away}</Text>
+            </View>
+          </View>
+        ) : (
+          <View style={s.stripe} />
+        )}
+
         <View style={s.body}>
           <View style={s.topRow}>
             <MaterialCommunityIcons name={SPORT_ICONS[match.sport] ?? "trophy"} size={12} color={sportCol} />
@@ -123,11 +163,13 @@ function UpcomingCard({ match }: { match: UpcomingMatch }) {
             <Text style={s.date}>{dateStr}</Text>
           </View>
 
-          <View style={s.teamsRow}>
-            <Text style={s.team} numberOfLines={1}>{match.home}</Text>
-            <View style={s.vsBox}><Text style={s.vsText}>vs</Text></View>
-            <Text style={[s.team, s.teamAway]} numberOfLines={1}>{match.away}</Text>
-          </View>
+          {!hasBanner && (
+            <View style={s.teamsRow}>
+              <Text style={s.team} numberOfLines={1}>{match.home}</Text>
+              <View style={s.vsBox}><Text style={s.vsText}>vs</Text></View>
+              <Text style={[s.team, s.teamAway]} numberOfLines={1}>{match.away}</Text>
+            </View>
+          )}
 
           <View style={s.oddsRow}>
             {[
@@ -148,13 +190,12 @@ function UpcomingCard({ match }: { match: UpcomingMatch }) {
               );
             })}
           </View>
-
         </View>
       </Pressable>
 
       <ComprehensiveMarketsSheet
         visible={marketsOpen}
-        match={match}
+        match={{ ...match, isLive: false }}
         onClose={() => setMarketsOpen(false)}
       />
     </>
