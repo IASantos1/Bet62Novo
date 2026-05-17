@@ -1389,7 +1389,7 @@ export default function Home() {
   const [myBets, setMyBets] = useState<UserBet[]>([]);
   const [myBetsLoading, setMyBetsLoading] = useState(false);
   const [cashingOut, setCashingOut] = useState<number | null>(null);
-  const [cashoutConfirm, setCashoutConfirm] = useState<UserBet | null>(null);
+  const [cashoutExpandedId, setCashoutExpandedId] = useState<number | null>(null);
   const [betFilterTab, setBetFilterTab] = useState<"abertas" | "resolvidas">("abertas");
   const myBetsInitialized = useRef(false);
   const [collapsedBets, setCollapsedBets] = useState<Set<number>>(new Set());
@@ -2398,7 +2398,7 @@ export default function Home() {
       toast.error("Erro ao fazer cash out");
     } finally {
       setCashingOut(null);
-      setCashoutConfirm(null);
+      setCashoutExpandedId(null);
     }
   };
 
@@ -8871,19 +8871,39 @@ export default function Home() {
 
                             {/* Cash Out row */}
                             {isPending && !isCollapsed && (
-                              <button
-                                onClick={() => setCashoutConfirm(bet)}
-                                disabled={cashingOut === bet.id}
-                                className="w-full px-4 py-3 flex items-center gap-3 border-t border-zinc-800 bg-zinc-800/40 hover:bg-zinc-800/70 transition-colors disabled:opacity-50">
-                                <CircleDollarSign size={18} className="text-zinc-400 shrink-0" />
-                                <span className="flex-1 text-left font-bold text-sm text-white">Cash Out</span>
-                                {cashingOut === bet.id
-                                  ? <Loader2 size={14} className="animate-spin text-zinc-400" />
-                                  : <>
-                                    <span className="font-black text-red-400 text-sm">€ {cashoutEstimate(bet)}</span>
-                                    <ChevronRight size={16} className="text-zinc-500" />
-                                  </>}
-                              </button>
+                              cashoutExpandedId === bet.id ? (
+                                <div className="border-t border-zinc-800 bg-zinc-900/80 px-4 py-3 flex items-center gap-3">
+                                  <CircleDollarSign size={18} className="text-green-400 shrink-0" />
+                                  <div className="flex-1 min-w-0">
+                                    <span className="text-[11px] text-zinc-500 block leading-none mb-0.5">Cash Out estimado</span>
+                                    <span className="font-black text-green-400 text-base leading-none">€ {cashoutEstimate(bet)}</span>
+                                  </div>
+                                  <button
+                                    onClick={() => setCashoutExpandedId(null)}
+                                    disabled={cashingOut === bet.id}
+                                    className="text-zinc-500 hover:text-zinc-300 text-xs px-2 py-1 rounded transition-colors disabled:opacity-40">
+                                    Cancelar
+                                  </button>
+                                  <button
+                                    onClick={() => handleCashout(bet)}
+                                    disabled={cashingOut === bet.id}
+                                    className="bg-green-600 hover:bg-green-500 active:bg-green-700 text-white font-black text-sm px-4 py-2 rounded-lg transition-colors disabled:opacity-50 flex items-center gap-1.5">
+                                    {cashingOut === bet.id
+                                      ? <Loader2 size={13} className="animate-spin" />
+                                      : "CONFIRMAR"}
+                                  </button>
+                                </div>
+                              ) : (
+                                <button
+                                  onClick={() => setCashoutExpandedId(bet.id)}
+                                  disabled={cashingOut === bet.id}
+                                  className="w-full px-4 py-3 flex items-center gap-3 border-t border-zinc-800 bg-zinc-800/40 hover:bg-zinc-800/70 transition-colors disabled:opacity-50">
+                                  <CircleDollarSign size={18} className="text-zinc-400 shrink-0" />
+                                  <span className="flex-1 text-left font-bold text-sm text-white">Cash Out</span>
+                                  <span className="font-black text-red-400 text-sm">€ {cashoutEstimate(bet)}</span>
+                                  <ChevronRight size={16} className="text-zinc-500" />
+                                </button>
+                              )
                             )}
 
                             {/* Footer */}
@@ -9018,42 +9038,6 @@ export default function Home() {
         </div>
       </footer>
 
-      {/* CASH OUT CONFIRM */}
-      <Dialog open={!!cashoutConfirm} onOpenChange={(open) => !open && setCashoutConfirm(null)}>
-        <DialogContent className="bg-zinc-950 border-zinc-800 text-white sm:max-w-sm">
-          <DialogHeader>
-            <DialogTitle className="text-lg font-bold flex items-center gap-2">
-              <Zap className="text-green-500" size={20} /> Confirmar Cash Out
-            </DialogTitle>
-          </DialogHeader>
-          {cashoutConfirm && (
-            <div className="space-y-4">
-              <p className="text-zinc-400 text-sm">Tem certeza que deseja fazer o Cash Out desta aposta?</p>
-              <div className="bg-zinc-900 rounded-lg p-4 border border-zinc-800">
-                <div className="text-sm text-zinc-400 mb-1 truncate">{cashoutConfirm.matchTitle}</div>
-                <div className="flex justify-between items-center mt-2">
-                  <span className="text-xs text-zinc-500">Valor apostado</span>
-                  <span className="font-bold text-white">€ {parseFloat(cashoutConfirm.stake).toFixed(2)}</span>
-                </div>
-                <div className="flex justify-between items-center mt-1">
-                  <span className="text-xs text-zinc-500">Potencial de ganho</span>
-                  <span className="font-bold text-zinc-300">€ {parseFloat(cashoutConfirm.potentialWin).toFixed(2)}</span>
-                </div>
-                <div className="flex justify-between items-center mt-2 pt-2 border-t border-zinc-800">
-                  <span className="text-sm font-bold text-zinc-300">Cash Out estimado</span>
-                  <span className="font-black text-green-400 text-lg">€ {cashoutEstimate(cashoutConfirm)}</span>
-                </div>
-              </div>
-              <div className="flex gap-3">
-                <Button variant="outline" className="flex-1 border-zinc-700 text-zinc-300 hover:bg-zinc-800" onClick={() => setCashoutConfirm(null)}>Cancelar</Button>
-                <Button className="flex-1 bg-green-600 hover:bg-green-500 text-white font-bold" onClick={() => handleCashout(cashoutConfirm)} disabled={cashingOut === cashoutConfirm.id}>
-                  {cashingOut === cashoutConfirm.id ? <Loader2 className="animate-spin" size={16} /> : "CONFIRMAR"}
-                </Button>
-              </div>
-            </div>
-          )}
-        </DialogContent>
-      </Dialog>
 
       {/* AUTH MODAL */}
       <Dialog open={authModalOpen} onOpenChange={setAuthModalOpen}>

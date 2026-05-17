@@ -52,45 +52,42 @@ function statusLabel(status: Bet["status"]) {
 function BetCard({ bet, token, onCashout }: { bet: Bet; token: string | null; onCashout: () => void }) {
   const colors = useColors();
   const [cashingOut, setCashingOut] = useState(false);
+  const [expanded, setExpanded] = useState(false);
 
-  async function handleCashout() {
+  const stake = parseFloat(bet.stake);
+  const totalOdds = parseFloat(bet.totalOdds);
+  const potentialWin = parseFloat(bet.potentialWin);
+  const estimatedCashout = (stake * 0.92).toFixed(2);
+
+  async function executeCashout() {
     if (!token) { router.push("/(auth)/login"); return; }
-    Alert.alert(
-      "Cash Out",
-      `Confirmas o Cash Out desta aposta?\n\nAposta: €${parseFloat(bet.stake).toFixed(2)}`,
-      [
-        { text: "Cancelar", style: "cancel" },
-        {
-          text: "Confirmar",
-          style: "destructive",
-          onPress: async () => {
-            try {
-              setCashingOut(true);
-              const res = await fetch(`${API_BASE}/bets/${bet.id}/cashout`, {
-                method: "POST",
-                headers: { Authorization: `Bearer ${token}` },
-              });
-              const data = await res.json();
-              if (!res.ok) throw new Error(data.error);
-              await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-              Alert.alert("Cash Out", `Recebeste €${data.cashoutValue.toFixed(2)}`);
-              onCashout();
-            } catch (err: unknown) {
-              await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-              Alert.alert("Erro", err instanceof Error ? err.message : "Falha no cash out.");
-            } finally {
-              setCashingOut(false);
-            }
-          },
-        },
-      ]
-    );
+    try {
+      setCashingOut(true);
+      const res = await fetch(`${API_BASE}/bets/${bet.id}/cashout`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      setExpanded(false);
+      Alert.alert("Cash Out", `Recebeste €${parseFloat(data.cashoutValue).toFixed(2)}`);
+      onCashout();
+    } catch (err: unknown) {
+      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      Alert.alert("Erro", err instanceof Error ? err.message : "Falha no cash out.");
+    } finally {
+      setCashingOut(false);
+    }
+  }
+
+  function handleCashoutPress() {
+    if (!token) { router.push("/(auth)/login"); return; }
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    setExpanded(true);
   }
 
   const color = statusColor(bet.status, colors);
-  const totalOdds = parseFloat(bet.totalOdds);
-  const stake = parseFloat(bet.stake);
-  const potentialWin = parseFloat(bet.potentialWin);
   const dateStr = new Date(bet.createdAt).toLocaleDateString("pt-PT", {
     day: "2-digit",
     month: "short",
@@ -102,14 +99,15 @@ function BetCard({ bet, token, onCashout }: { bet: Bet; token: string | null; on
     card: {
       backgroundColor: colors.card,
       borderRadius: 12,
-      padding: 14,
       marginHorizontal: 16,
       marginBottom: 10,
       borderWidth: 1,
       borderColor: colors.border,
       borderLeftWidth: 3,
       borderLeftColor: color,
+      overflow: "hidden",
     },
+    inner: { padding: 14 },
     header: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 10 },
     title: { fontSize: 14, fontFamily: "Inter_600SemiBold", color: colors.foreground, flex: 1, marginRight: 8 },
     badge: { borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3, backgroundColor: color + "22" },
@@ -128,9 +126,37 @@ function BetCard({ bet, token, onCashout }: { bet: Bet; token: string | null; on
       borderWidth: 1,
       borderColor: colors.warning ?? "#f59e0b",
       padding: 10,
+      flexDirection: "row",
       alignItems: "center",
+      justifyContent: "space-between",
     },
     cashoutBtnText: { fontSize: 13, fontFamily: "Inter_600SemiBold", color: colors.warning ?? "#f59e0b" },
+    cashoutBtnValue: { fontSize: 13, fontFamily: "Inter_700Bold", color: colors.warning ?? "#f59e0b" },
+    expandedRow: {
+      borderTopWidth: 1,
+      borderTopColor: colors.border,
+      backgroundColor: colors.muted,
+      paddingHorizontal: 14,
+      paddingVertical: 12,
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 10,
+    },
+    expandedLeft: { flex: 1 },
+    expandedLabel: { fontSize: 11, fontFamily: "Inter_500Medium", color: colors.mutedForeground, marginBottom: 2 },
+    expandedValue: { fontSize: 18, fontFamily: "Inter_700Bold", color: "#22c55e" },
+    cancelBtn: { paddingHorizontal: 10, paddingVertical: 8 },
+    cancelBtnText: { fontSize: 12, fontFamily: "Inter_500Medium", color: colors.mutedForeground },
+    confirmBtn: {
+      backgroundColor: "#16a34a",
+      borderRadius: 8,
+      paddingHorizontal: 16,
+      paddingVertical: 10,
+      alignItems: "center",
+      justifyContent: "center",
+      minWidth: 96,
+    },
+    confirmBtnText: { fontSize: 13, fontFamily: "Inter_700Bold", color: "#ffffff" },
     date: { fontSize: 11, fontFamily: "Inter_400Regular", color: colors.mutedForeground, marginTop: 8 },
   });
 
@@ -138,57 +164,89 @@ function BetCard({ bet, token, onCashout }: { bet: Bet; token: string | null; on
 
   return (
     <View style={s.card}>
-      <View style={s.header}>
-        <Text style={s.title} numberOfLines={1}>{bet.matchTitle}</Text>
-        <View style={s.badge}>
-          <Text style={s.badgeText}>{statusLabel(bet.status)}</Text>
+      <View style={s.inner}>
+        <View style={s.header}>
+          <Text style={s.title} numberOfLines={1}>{bet.matchTitle}</Text>
+          <View style={s.badge}>
+            <Text style={s.badgeText}>{statusLabel(bet.status)}</Text>
+          </View>
         </View>
+
+        {selections.length > 0 && (
+          <View style={s.selections}>
+            {selections.map((sel, i) => (
+              <View key={i} style={s.selectionRow}>
+                <Ionicons name="chevron-forward" size={12} color={colors.mutedForeground} />
+                <Text style={s.selectionText} numberOfLines={1}>{sel.label}</Text>
+                <Text style={s.selectionOdds}>{sel.odds?.toFixed(2)}</Text>
+              </View>
+            ))}
+          </View>
+        )}
+
+        <View style={s.statsRow}>
+          <View style={s.stat}>
+            <Text style={s.statLabel}>Apostado</Text>
+            <Text style={s.statValue}>€{stake.toFixed(2)}</Text>
+          </View>
+          <View style={s.stat}>
+            <Text style={s.statLabel}>Odds</Text>
+            <Text style={s.statValue}>{totalOdds.toFixed(2)}</Text>
+          </View>
+          <View style={s.stat}>
+            <Text style={s.statLabel}>{bet.status === "won" ? "Ganho" : "Ganho potencial"}</Text>
+            <Text style={[s.statValue, { color: bet.status === "won" ? (colors.success ?? "#22c55e") : colors.foreground }]}>
+              €{potentialWin.toFixed(2)}
+            </Text>
+          </View>
+        </View>
+
+        {bet.status === "pending" && !expanded && (
+          <Pressable
+            style={({ pressed }) => [s.cashoutBtn, { opacity: pressed || cashingOut ? 0.8 : 1 }]}
+            onPress={handleCashoutPress}
+            disabled={cashingOut}
+          >
+            {cashingOut ? (
+              <ActivityIndicator size="small" color={colors.warning ?? "#f59e0b"} />
+            ) : (
+              <>
+                <Text style={s.cashoutBtnText}>Cash Out</Text>
+                <Text style={s.cashoutBtnValue}>€ {estimatedCashout}</Text>
+              </>
+            )}
+          </Pressable>
+        )}
+
+        <Text style={s.date}>{dateStr}</Text>
       </View>
 
-      {selections.length > 0 && (
-        <View style={s.selections}>
-          {selections.map((sel, i) => (
-            <View key={i} style={s.selectionRow}>
-              <Ionicons name="chevron-forward" size={12} color={colors.mutedForeground} />
-              <Text style={s.selectionText} numberOfLines={1}>{sel.label}</Text>
-              <Text style={s.selectionOdds}>{sel.odds?.toFixed(2)}</Text>
-            </View>
-          ))}
+      {bet.status === "pending" && expanded && (
+        <View style={s.expandedRow}>
+          <View style={s.expandedLeft}>
+            <Text style={s.expandedLabel}>Cash Out estimado</Text>
+            <Text style={s.expandedValue}>€ {estimatedCashout}</Text>
+          </View>
+          <Pressable
+            style={s.cancelBtn}
+            onPress={() => setExpanded(false)}
+            disabled={cashingOut}
+          >
+            <Text style={s.cancelBtnText}>Cancelar</Text>
+          </Pressable>
+          <Pressable
+            style={({ pressed }) => [s.confirmBtn, { opacity: pressed || cashingOut ? 0.75 : 1 }]}
+            onPress={executeCashout}
+            disabled={cashingOut}
+          >
+            {cashingOut ? (
+              <ActivityIndicator size="small" color="#ffffff" />
+            ) : (
+              <Text style={s.confirmBtnText}>CONFIRMAR</Text>
+            )}
+          </Pressable>
         </View>
       )}
-
-      <View style={s.statsRow}>
-        <View style={s.stat}>
-          <Text style={s.statLabel}>Apostado</Text>
-          <Text style={s.statValue}>€{stake.toFixed(2)}</Text>
-        </View>
-        <View style={s.stat}>
-          <Text style={s.statLabel}>Odds</Text>
-          <Text style={s.statValue}>{totalOdds.toFixed(2)}</Text>
-        </View>
-        <View style={s.stat}>
-          <Text style={s.statLabel}>{bet.status === "won" ? "Ganho" : "Ganho potencial"}</Text>
-          <Text style={[s.statValue, { color: bet.status === "won" ? (colors.success ?? "#22c55e") : colors.foreground }]}>
-            €{potentialWin.toFixed(2)}
-          </Text>
-        </View>
-      </View>
-
-      {bet.status === "pending" && (
-        <Pressable
-          style={({ pressed }) => [s.cashoutBtn, { opacity: pressed || cashingOut ? 0.8 : 1 }]}
-          onPress={handleCashout}
-          disabled={cashingOut}
-        >
-          {cashingOut ? (
-            <ActivityIndicator size="small" color={colors.warning ?? "#f59e0b"} />
-          ) : (
-            <Text style={s.cashoutBtnText}>Cash Out</Text>
-          )}
-        </Pressable>
-      )}
-
-      <Text style={s.date}>{dateStr}</Text>
     </View>
   );
 }
