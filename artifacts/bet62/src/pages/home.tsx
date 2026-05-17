@@ -2964,7 +2964,7 @@ export default function Home() {
       return (
         <motion.div
           {...motionProps}
-          className="relative aspect-video rounded-xl border border-zinc-800 hover:border-red-500/40 transition-colors cursor-pointer overflow-hidden"
+          className="banner-card relative aspect-video rounded-xl border border-zinc-800 hover:border-red-500/40 transition-colors cursor-pointer overflow-hidden"
           onClick={() => setExpandedMatch(match)}
         >
           <img src={bannerImg} alt="" className="absolute inset-0 w-full h-full object-cover opacity-90" />
@@ -2981,7 +2981,7 @@ export default function Home() {
           </div>
           <div className="absolute bottom-0 left-0 right-0 px-4 pb-4" onClick={e => e.stopPropagation()}>
             {rivalry && <div className="text-[11px] font-black uppercase tracking-widest mb-1" style={{ color: '#f87171', textShadow: "0 1px 4px rgba(0,0,0,1)" }}>{rivalry}</div>}
-            <div className="mb-3" style={{ color: '#fff' }}>
+            <div className="mb-3">
               {sport === "tennis"     ? <TennisScore /> :
                sport === "volleyball" ? <VolleyScore /> :
                sport === "hockey"     ? <HockeyScore big /> :
@@ -3019,7 +3019,7 @@ export default function Home() {
         onClick={() => setExpandedMatch(match)}
       >
         <CompactLeagueRow match={match} rightSlot={liveBadge} />
-        <div className="px-3 py-2.5" style={{ color: '#fff' }} onClick={e => e.stopPropagation()}>
+        <div className="px-3 py-2.5" onClick={e => e.stopPropagation()}>
           {sport === "tennis"     ? <TennisScore /> :
            sport === "volleyball" ? <VolleyScore /> :
            sport === "hockey"     ? <HockeyScore /> :
@@ -3054,7 +3054,7 @@ export default function Home() {
     if (bannerImg) {
       return (
         <div
-          className="relative aspect-video rounded-xl border border-zinc-800 hover:border-red-500/40 transition-colors cursor-pointer overflow-hidden"
+          className="banner-card relative aspect-video rounded-xl border border-zinc-800 hover:border-red-500/40 transition-colors cursor-pointer overflow-hidden"
           onClick={() => setExpandedMatch(match)}
         >
           <img src={bannerImg} alt="" className="absolute inset-0 w-full h-full object-cover opacity-90" />
@@ -3088,11 +3088,11 @@ export default function Home() {
         onClick={() => setExpandedMatch(match)}
       >
         <CompactLeagueRow match={match} />
-        <div className="px-3 pb-3 pt-1" style={{ color: '#fff' }} onClick={e => e.stopPropagation()}>
+        <div className="px-3 pb-3 pt-1" onClick={e => e.stopPropagation()}>
           <div className="flex items-baseline gap-1.5 mb-2 min-w-0">
-            <span className="font-bold text-sm truncate" style={{ color: '#ffffff' }}>{match.home}</span>
-            <span className="text-xs shrink-0" style={{ color: 'rgb(82 82 91)' }}>vs</span>
-            <span className="font-bold text-sm truncate" style={{ color: '#ffffff' }}>{match.away}</span>
+            <span className="font-bold text-sm truncate">{match.home}</span>
+            <span className="text-xs text-zinc-500 shrink-0">vs</span>
+            <span className="font-bold text-sm truncate">{match.away}</span>
           </div>
           <OddsRow />
         </div>
