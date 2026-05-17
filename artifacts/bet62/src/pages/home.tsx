@@ -79,6 +79,16 @@ import azBanner from "@assets/file_1779018625614_1779018681798.jpeg";
 import necBanner from "@assets/file_1779018658064_1779018681798.jpeg";
 import heerenveenBanner from "@assets/file_1779018648329_1779018681798.jpeg";
 import goAheadEaglesBanner from "@assets/file_1779018641867_1779018681798.jpeg";
+import psgBanner from "@assets/file_1779019403545_1779019658504.jpeg";
+import lyonBanner from "@assets/file_1779019418740_1779019658504.jpeg";
+import lensBanner from "@assets/file_1779019411265_1779019658504.jpeg";
+import strasbourgBanner from "@assets/file_1779019441070_1779019658504.jpeg";
+import monacoBanner from "@assets/file_1779019435638_1779019658504.jpeg";
+import marseilleBanner from "@assets/file_1779019427574_1779019658504.jpeg";
+import toulouseBanner from "@assets/file_1779019463945_1779019658504.jpeg";
+import parisFCBanner from "@assets/file_1779019459045_1779019658504.jpeg";
+import lorientBanner from "@assets/file_1779019450188_1779019658504.jpeg";
+import brestBanner from "@assets/file_1779019468348_1779019658504.jpeg";
 
 const TEAM_BANNERS: Record<string, string> = {
   // ── Liga Portugal ──
@@ -131,6 +141,7 @@ const TEAM_BANNERS: Record<string, string> = {
   "Atlético de Madrid": atleticoMadridBanner,
   "Atletico Madrid": atleticoMadridBanner,
   "Atletico de Madrid": atleticoMadridBanner,
+  "Atl. Madrid": atleticoMadridBanner,
   "Athletic Club": athleticClubBanner,
   "Athletic Bilbao": athleticClubBanner,
   "Ath Bilbao": athleticClubBanner,
@@ -318,6 +329,7 @@ const TEAM_BANNERS: Record<string, string> = {
   "EC Vitoria": vitoriaBanner,
   "Esporte Clube Vitória": vitoriaBanner,
   "Botafogo": botafogoBanner,
+  "Botafogo RJ": botafogoBanner,
   "Botafogo FR": botafogoBanner,
   "Botafogo de Futebol e Regatas": botafogoBanner,
   "Grêmio": gremioBanner,
@@ -339,10 +351,36 @@ const TEAM_BANNERS: Record<string, string> = {
   "Club do Remo": clubeRemoBanner,
   "Remo": clubeRemoBanner,
   "Chapecoense": chapecoenseBanner,
+  "Chapecoense-SC": chapecoenseBanner,
   "Associação Chapecoense de Futebol": chapecoenseBanner,
   "ACF Chapecoense": chapecoenseBanner,
   "Mirassol": mirassolBanner,
   "Mirassol FC": mirassolBanner,
+  // ── Ligue 1 (France) ──
+  "PSG": psgBanner,
+  "Paris Saint-Germain": psgBanner,
+  "Paris SG": psgBanner,
+  "Paris FC": parisFCBanner,
+  "Lyon": lyonBanner,
+  "Olympique Lyon": lyonBanner,
+  "Olympique Lyonnais": lyonBanner,
+  "Lens": lensBanner,
+  "RC Lens": lensBanner,
+  "Strasbourg": strasbourgBanner,
+  "RC Strasbourg": strasbourgBanner,
+  "RC Strasbourg Alsace": strasbourgBanner,
+  "Monaco": monacoBanner,
+  "AS Monaco": monacoBanner,
+  "Marseille": marseilleBanner,
+  "Olympique Marseille": marseilleBanner,
+  "Olympique de Marseille": marseilleBanner,
+  "Toulouse": toulouseBanner,
+  "Toulouse FC": toulouseBanner,
+  "Lorient": lorientBanner,
+  "FC Lorient": lorientBanner,
+  "Brest": brestBanner,
+  "Stade Brest": brestBanner,
+  "Stade Brestois 29": brestBanner,
   // ── Eredivisie (Netherlands) ──
   "Ajax": ajaxBanner,
   "AFC Ajax": ajaxBanner,
@@ -414,7 +452,7 @@ const TEAM_COUNTRY: Record<string, string> = {
   "Como": "italy", "Como 1907": "italy", "Parma": "italy", "Parma Calcio": "italy",
   // La Liga
   "Real Madrid": "spain", "Barcelona": "spain", "Atlético de Madrid": "spain",
-  "Atletico Madrid": "spain", "Atletico de Madrid": "spain", "Athletic Club": "spain", "Athletic Bilbao": "spain",
+  "Atletico Madrid": "spain", "Atletico de Madrid": "spain", "Atl. Madrid": "spain", "Athletic Club": "spain", "Athletic Bilbao": "spain",
   "Ath Bilbao": "spain", "Real Sociedad": "spain", "Sevilla": "spain",
   "Valencia": "spain", "Villarreal": "spain", "Real Betis": "spain",
   "Betis": "spain", "Girona": "spain", "Mallorca": "spain", "Getafe": "spain",
@@ -452,10 +490,10 @@ const TEAM_COUNTRY: Record<string, string> = {
   "Grêmio": "brazil", "Gremio": "brazil", "Grêmio FBPA": "brazil",
   "Internacional": "brazil", "Sport Club Internacional": "brazil",
   "Vasco da Gama": "brazil", "Vasco": "brazil", "CR Vasco da Gama": "brazil", "Club de Regatas Vasco da Gama": "brazil",
-  "Botafogo": "brazil", "Botafogo FR": "brazil", "Botafogo de Futebol e Regatas": "brazil",
+  "Botafogo": "brazil", "Botafogo RJ": "brazil", "Botafogo FR": "brazil", "Botafogo de Futebol e Regatas": "brazil",
   "Cruzeiro": "brazil", "Cruzeiro EC": "brazil", "Cruzeiro Esporte Clube": "brazil",
   "Clube do Remo": "brazil", "Club do Remo": "brazil", "Remo": "brazil",
-  "Chapecoense": "brazil", "Associação Chapecoense de Futebol": "brazil", "ACF Chapecoense": "brazil",
+  "Chapecoense": "brazil", "Chapecoense-SC": "brazil", "Associação Chapecoense de Futebol": "brazil", "ACF Chapecoense": "brazil",
   "Mirassol": "brazil", "Mirassol FC": "brazil",
   "Fortaleza": "brazil", "Fortaleza EC": "brazil",
   "Ceará": "brazil", "Ceara": "brazil", "Ceará SC": "brazil",
@@ -480,6 +518,30 @@ const TEAM_COUNTRY: Record<string, string> = {
   "Antalyaspor": "turkey", "Alanyaspor": "turkey", "Gaziantep": "turkey",
   "Gaziantep FK": "turkey", "Ankaragücü": "turkey", "Ankaragucu": "turkey",
   "Bodrumspor": "turkey", "MKE Ankaragücü": "turkey",
+  // Ligue 1 (France)
+  "PSG": "france", "Paris Saint-Germain": "france", "Paris SG": "france",
+  "Paris FC": "france",
+  "Lyon": "france", "Olympique Lyon": "france", "Olympique Lyonnais": "france",
+  "Lens": "france", "RC Lens": "france",
+  "Strasbourg": "france", "RC Strasbourg": "france", "RC Strasbourg Alsace": "france",
+  "Monaco": "france", "AS Monaco": "france",
+  "Marseille": "france", "Olympique Marseille": "france", "Olympique de Marseille": "france",
+  "Toulouse": "france", "Toulouse FC": "france",
+  "Lorient": "france", "FC Lorient": "france",
+  "Brest": "france", "Stade Brest": "france", "Stade Brestois 29": "france",
+  "Nice": "france", "OGC Nice": "france",
+  "Lille": "france", "LOSC Lille": "france",
+  "Rennes": "france", "Stade Rennais": "france",
+  "Nantes": "france", "FC Nantes": "france",
+  "Le Havre": "france", "HAC": "france",
+  "Angers": "france", "SCO Angers": "france",
+  "Auxerre": "france", "AJ Auxerre": "france",
+  "Metz": "france", "FC Metz": "france",
+  "Reims": "france", "Stade de Reims": "france",
+  "Clermont": "france", "Clermont Foot": "france",
+  "Montpellier": "france", "Montpellier HSC": "france",
+  "Saint-Etienne": "france", "Saint Etienne": "france",
+  "Caen": "france", "SM Caen": "france",
   // Eredivisie (Netherlands)
   "Ajax": "netherlands", "AFC Ajax": "netherlands", "Ajax Amsterdam": "netherlands",
   "PSV": "netherlands", "PSV Eindhoven": "netherlands",
