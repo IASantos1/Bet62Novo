@@ -134,6 +134,7 @@ function LiveMatchCard({ match }: { match: LiveMatch }) {
   const periods = match._liveExtra?.periods;
   const quarters = match._liveExtra?.quarters;
   const innings = match._liveExtra?.innings;
+  const isFootball = !match.sport || match.sport === "football";
   const isTennis = match.sport === "tennis";
   const isHockey = match.sport === "hockey";
   const isBball = match.sport === "basketball";
@@ -186,6 +187,53 @@ function LiveMatchCard({ match }: { match: LiveMatch }) {
     );
   };
 
+  const isObviousLiveResult = isFootball && !suspended && (() => {
+    const minOdd = Math.min(match.odds.home, match.odds.away);
+    if (minOdd <= 1.05) return true;
+    const min = match.minute ?? 0;
+    const diff = Math.abs((match.homeScore ?? 0) - (match.awayScore ?? 0));
+    if (min >= 80 && diff >= 2) return true;
+    if (min >= 85 && diff >= 1) return true;
+    return false;
+  })();
+
+  const suspText = (() => {
+    const r = (match.suspensionReason ?? "").toUpperCase();
+    if (r.includes("VAR")) return "📺 REVISÃO VAR";
+    if (r.includes("PENAL") || r.includes("PÊNALTI") || r.includes("PENÁLT")) return "🎯 PENÁLTI";
+    if (r.includes("GOLO") || r.includes("GOAL")) return "⚽ GOLO!";
+    if (r.includes("CHANCE")) return "⚡ GRANDE CHANCE";
+    return "⏸ SUSPENSO";
+  })();
+
+  const OddsRowContent = suspended ? (
+    <View style={{ borderRadius: 8, borderWidth: 1, backgroundColor: "#3b0000", borderColor: "#7f1d1d", paddingVertical: 14, alignItems: "center" as const }}>
+      <Text style={{ fontSize: 15, fontFamily: "Inter_700Bold", color: "#fca5a5", letterSpacing: 3, textTransform: "uppercase" as const }}>
+        {suspText}
+      </Text>
+    </View>
+  ) : isObviousLiveResult ? (
+    <Pressable
+      style={{ borderRadius: 8, borderWidth: 1, backgroundColor: "#2d1500", borderColor: "#92400e55", paddingVertical: 14, alignItems: "center" as const }}
+      onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setMarketsOpen(true); }}
+    >
+      <Text style={{ fontSize: 15, fontFamily: "Inter_700Bold", color: "#f59e0b", letterSpacing: 3, textTransform: "uppercase" as const }}>
+        APOSTA JÁ
+      </Text>
+    </Pressable>
+  ) : isTennis ? (
+    <View style={{ flexDirection: "row" as const, gap: 6 }}>
+      <OddsButton mkt="1x2-home" lbl={match.home.split(" ").pop() ?? match.home} val={match.odds.home} />
+      <OddsButton mkt="1x2-away" lbl={match.away.split(" ").pop() ?? match.away} val={match.odds.away} />
+    </View>
+  ) : (
+    <View style={{ flexDirection: "row" as const, gap: 6 }}>
+      <OddsButton mkt="1x2-home" lbl="Casa" val={match.odds.home} />
+      {hasDraw && <OddsButton mkt="1x2-draw" lbl="Emp." val={match.odds.draw} />}
+      <OddsButton mkt="1x2-away" lbl="Fora" val={match.odds.away} />
+    </View>
+  );
+
   return (
     <>
       <Pressable
@@ -234,31 +282,9 @@ function LiveMatchCard({ match }: { match: LiveMatch }) {
                   </View>
                 )}
               </View>
-              {suspended && (
-                <View style={{ position: "absolute" as const, top: 0, left: 0, right: 0, bottom: 0, backgroundColor: "#00000050", alignItems: "center", justifyContent: "center" }}>
-                  <View style={{ backgroundColor: "#ef444422", borderRadius: 8, paddingHorizontal: 14, paddingVertical: 7, borderWidth: 1, borderColor: "#ef444466", flexDirection: "row", alignItems: "center", gap: 6 }}>
-                    <Ionicons name="warning" size={14} color="#ef4444" />
-                    <Text style={{ fontSize: 11, fontFamily: "Inter_700Bold", color: "#ef4444" }}>
-                      {match.suspensionReason ?? "SUSPENSO"} — Odds em atualização
-                    </Text>
-                  </View>
-                </View>
-              )}
             </View>
             <View style={{ padding: 10 }}>
-              {!isTennis && (
-                <View style={{ flexDirection: "row", gap: 6 }}>
-                  <OddsButton mkt="1x2-home" lbl="Casa" val={match.odds.home} />
-                  {hasDraw && <OddsButton mkt="1x2-draw" lbl="Emp." val={match.odds.draw} />}
-                  <OddsButton mkt="1x2-away" lbl="Fora" val={match.odds.away} />
-                </View>
-              )}
-              {isTennis && (
-                <View style={{ flexDirection: "row", gap: 6 }}>
-                  <OddsButton mkt="1x2-home" lbl={match.home.split(" ").pop() ?? match.home} val={match.odds.home} />
-                  <OddsButton mkt="1x2-away" lbl={match.away.split(" ").pop() ?? match.away} val={match.odds.away} />
-                </View>
-              )}
+              {OddsRowContent}
             </View>
           </>
         ) : (
@@ -303,17 +329,7 @@ function LiveMatchCard({ match }: { match: LiveMatch }) {
                   <Text style={{ flex: 1, fontSize: 13, fontFamily: "Inter_600SemiBold", color: colors.foreground, textAlign: "right" as const }} numberOfLines={1}>{match.away}</Text>
                 </View>
               )}
-              {suspended && (
-                <View style={{ flexDirection: "row", alignItems: "center", gap: 5, backgroundColor: "#ef444415", borderRadius: 6, paddingHorizontal: 8, paddingVertical: 4, marginBottom: 8 }}>
-                  <Ionicons name="warning" size={12} color="#ef4444" />
-                  <Text style={{ fontSize: 10, fontFamily: "Inter_600SemiBold", color: "#ef4444" }}>{match.suspensionReason ?? "SUSPENSO"} — Odds em atualização</Text>
-                </View>
-              )}
-              <View style={{ flexDirection: "row", gap: 6 }}>
-                <OddsButton mkt="1x2-home" lbl={isTennis ? (match.home.split(" ").pop() ?? "1") : "Casa"} val={match.odds.home} />
-                {hasDraw && <OddsButton mkt="1x2-draw" lbl="X" val={match.odds.draw} />}
-                <OddsButton mkt="1x2-away" lbl={isTennis ? (match.away.split(" ").pop() ?? "2") : "Fora"} val={match.odds.away} />
-              </View>
+              {OddsRowContent}
             </View>
           </View>
         )}
