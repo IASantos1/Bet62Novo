@@ -3808,6 +3808,7 @@ export default function Home() {
                   { key: "resultado", label: "Resultado" },
                   { key: "dupla",     label: "Dupla Chance" },
                   { key: "gols",      label: "Gols" },
+                  { key: "especiais", label: "Especiais" },
                   { key: "handicap",  label: "Handicap" },
                   ...(show1tempo ? [{ key: "1tempo", label: "1º Tempo" }] : []),
                   ...(show2tempo ? [{ key: "2tempo", label: "2º Tempo" }] : []),
@@ -4018,6 +4019,68 @@ export default function Home() {
         )}
         {isFootball && !showET && !showPen && modalTab === "gols" && m && m.totalGoals.over25 === 0 && (
           <div className="text-center text-zinc-600 py-6 text-sm">Mercado não disponível para esta partida.</div>
+        )}
+
+        {/* ── FUTEBOL: BTTS 1º TEMPO / ÍMPAR-PAR / GOLS EXATOS ── */}
+        {isFootball && !showET && !showPen && !isLateGame && (modalTab === "gols" || modalTab === "todos") && m && (
+          <div>
+            {(m as any).btts1H?.yes > 0 && (
+              <MarketGroup title="Ambas Marcam — 1º Tempo">
+                <MarketOddsBtn match={match} sel="btts1h-y" odd={(m as any).btts1H.yes} market="gols" label="Sim" />
+                <MarketOddsBtn match={match} sel="btts1h-n" odd={(m as any).btts1H.no} market="gols" label="Não" />
+              </MarketGroup>
+            )}
+            {(m as any).goalOddEven?.odd > 0 && (
+              <MarketGroup title="Total de Gols — Ímpar / Par">
+                <MarketOddsBtn match={match} sel="goe-odd"  odd={(m as any).goalOddEven.odd}  market="gols" label="Ímpar" />
+                <MarketOddsBtn match={match} sel="goe-even" odd={(m as any).goalOddEven.even} market="gols" label="Par" />
+              </MarketGroup>
+            )}
+            {(m as any).exactGoals?.g2 > 0 && (
+              <MarketGroup title="Gols Exatos">
+                {(m as any).exactGoals.g0 > 0 && <MarketOddsBtn match={match} sel="eg-0"  odd={(m as any).exactGoals.g0}     market="gols" label="0 gols" />}
+                {(m as any).exactGoals.g1 > 0 && <MarketOddsBtn match={match} sel="eg-1"  odd={(m as any).exactGoals.g1}     market="gols" label="1 gol" />}
+                {(m as any).exactGoals.g2 > 0 && <MarketOddsBtn match={match} sel="eg-2"  odd={(m as any).exactGoals.g2}     market="gols" label="2 gols" />}
+                {(m as any).exactGoals.g3 > 0 && <MarketOddsBtn match={match} sel="eg-3"  odd={(m as any).exactGoals.g3}     market="gols" label="3 gols" />}
+                {(m as any).exactGoals.g4 > 0 && <MarketOddsBtn match={match} sel="eg-4"  odd={(m as any).exactGoals.g4}     market="gols" label="4 gols" />}
+                {(m as any).exactGoals.g5plus > 0 && <MarketOddsBtn match={match} sel="eg-5p" odd={(m as any).exactGoals.g5plus} market="gols" label="5+ gols" />}
+              </MarketGroup>
+            )}
+          </div>
+        )}
+
+        {/* ── FUTEBOL: ESPECIAIS ── */}
+        {isFootball && !showET && !showPen && !isLateGame && (modalTab === "especiais" || modalTab === "todos") && m && (
+          <div>
+            {((m as any).winToNil?.home > 0 || (m as any).winToNil?.away > 0) && (
+              <MarketGroup title="Vitória a Zeros">
+                {(m as any).winToNil?.home > 0 && <MarketOddsBtn match={match} sel="wtn-h" odd={(m as any).winToNil.home} market="especiais" label={`${match.home} a Zeros`} />}
+                {(m as any).winToNil?.away > 0 && <MarketOddsBtn match={match} sel="wtn-a" odd={(m as any).winToNil.away} market="especiais" label={`${match.away} a Zeros`} />}
+              </MarketGroup>
+            )}
+            {((m as any).cleanSheet?.home > 0 || (m as any).cleanSheet?.away > 0) && (
+              <MarketGroup title="Folha Limpa">
+                {(m as any).cleanSheet?.home > 0 && <MarketOddsBtn match={match} sel="cs-h" odd={(m as any).cleanSheet.home} market="especiais" label={`${match.home} sem sofrer`} />}
+                {(m as any).cleanSheet?.away > 0 && <MarketOddsBtn match={match} sel="cs-a" odd={(m as any).cleanSheet.away} market="especiais" label={`${match.away} sem sofrer`} />}
+              </MarketGroup>
+            )}
+            {(m as any).toWinBothHalves?.home > 0 && (
+              <MarketGroup title="Vencer os Dois Tempos">
+                <MarketOddsBtn match={match} sel="wbh-h" odd={(m as any).toWinBothHalves.home} market="especiais" label={match.home} />
+                <MarketOddsBtn match={match} sel="wbh-a" odd={(m as any).toWinBothHalves.away} market="especiais" label={match.away} />
+              </MarketGroup>
+            )}
+            {(m as any).highestScoringHalf?.first > 0 && (
+              <MarketGroup title="Tempo com Mais Gols">
+                <MarketOddsBtn match={match} sel="hsf-1" odd={(m as any).highestScoringHalf.first}  market="especiais" label="1º Tempo" />
+                <MarketOddsBtn match={match} sel="hsf-2" odd={(m as any).highestScoringHalf.second} market="especiais" label="2º Tempo" />
+                <MarketOddsBtn match={match} sel="hsf-e" odd={(m as any).highestScoringHalf.equal}  market="especiais" label="Igual" />
+              </MarketGroup>
+            )}
+            {!((m as any).winToNil?.home > 0) && !((m as any).cleanSheet?.home > 0) && !((m as any).toWinBothHalves?.home > 0) && !((m as any).highestScoringHalf?.first > 0) && modalTab === "especiais" && (
+              <div className="text-center text-zinc-600 py-6 text-sm">Mercados especiais não disponíveis para esta partida.</div>
+            )}
+          </div>
         )}
 
         {/* ── BEISEBOL: TOTAL DE CORRIDAS ── */}
@@ -4308,6 +4371,28 @@ export default function Home() {
         })()}
         {isFootball && !showET && !showPen && !isLateGame && modalTab === "htft" && m && !m.htft && (
           <div className="text-center text-zinc-600 py-6 text-sm">Mercado não disponível para esta partida.</div>
+        )}
+
+        {/* ── TÉNIS: PLACAR EXATO DO SET ── */}
+        {isTennis && (modalTab === "placar" || modalTab === "todos") && m && (m as any).tennisExtra?.setExactScore && Object.keys((m as any).tennisExtra.setExactScore as Record<string, number>).length > 0 && (
+          <div>
+            <MarketGroup title={`Placar Exato — ${(m as any).tennisExtra.currentSetNum ?? match.minute}º Set`}>
+              {(Object.entries((m as any).tennisExtra.setExactScore as Record<string, number>)
+                .sort(([a], [b]) => {
+                  const [ah, aa] = a.split("-").map(Number);
+                  const [bh, ba] = b.split("-").map(Number);
+                  const aHome = (ah ?? 0) > (aa ?? 0);
+                  const bHome = (bh ?? 0) > (ba ?? 0);
+                  if (aHome && !bHome) return -1;
+                  if (!aHome && bHome) return 1;
+                  if (aHome) return (bh ?? 0) - (ah ?? 0) || (aa ?? 0) - (ba ?? 0);
+                  return (ba ?? 0) - (aa ?? 0) || (ah ?? 0) - (bh ?? 0);
+                })
+                .map(([score, odd]) => (
+                  <MarketOddsBtn key={score} match={match} sel={`ses-${score}`} odd={odd} market="placar" label={score} />
+                )))}
+            </MarketGroup>
+          </div>
         )}
 
         {/* ── FUTEBOL: PLACAR EXATO ── */}

@@ -49,6 +49,9 @@ type AdvancedMarkets = {
     totalGamesLines: Array<{ line: number; over: number; under: number }>;
     set1Games: { line: number; over: number; under: number };
     gameHandicap: { line: number; home: number; away: number };
+    // Live: exact score market for the current set in progress
+    setExactScore?: Record<string, number>;
+    currentSetNum?: number;
     // Extended pre-match odds fields
     set2Games?: { line: number; over: number; under: number };
     homePlayerGames?: { line: number; over: number; under: number };
@@ -93,6 +96,14 @@ type AdvancedMarkets = {
   penExtra?: {
     winner: { home: number; away: number };
   };
+  // Football extra markets derived from Poisson model
+  winToNil?: { home: number; away: number };
+  cleanSheet?: { home: number; away: number };
+  goalOddEven?: { odd: number; even: number };
+  exactGoals?: { g0: number; g1: number; g2: number; g3: number; g4: number; g5plus: number };
+  btts1H?: { yes: number; no: number };
+  toWinBothHalves?: { home: number; away: number };
+  highestScoringHalf?: { first: number; second: number; equal: number };
 };
 
 export type LiveMatchState = {
@@ -1161,6 +1172,70 @@ function makeAdvancedMarketsFromTeams(homeName: string, awayName: string): Advan
   const [ocard35, ucard35] = probsToDecimalOdds([mc(1 - poissonCdf(lambdaCards, 3), 0.02, 0.98), mc(poissonCdf(lambdaCards, 3), 0.02, 0.98)], 1.06);
   const [ocard45, ucard45] = probsToDecimalOdds([mc(1 - poissonCdf(lambdaCards, 4), 0.02, 0.98), mc(poissonCdf(lambdaCards, 4), 0.02, 0.98)], 1.06);
 
+  // ── New football markets derived from existing Poisson λH/λA ─────────────
+  // Win to Nil: team wins AND opponent scores 0 at full time
+  const pWTNHome = mc((1 - Math.exp(-lambdaHome)) * Math.exp(-lambdaAway), 0.02, 0.75);
+  const pWTNAway = mc(Math.exp(-lambdaHome) * (1 - Math.exp(-lambdaAway)), 0.02, 0.75);
+  const wtnHOdds = mr(mc(1 / (pWTNHome * 0.935), 1.01, 50));
+  const wtnAOdds = mr(mc(1 / (pWTNAway * 0.935), 1.01, 50));
+
+  // Clean Sheet: team's goal tally for opponent is 0 at FT
+  const pCSHome = mc(Math.exp(-lambdaAway), 0.03, 0.97);
+  const pCSAway = mc(Math.exp(-lambdaHome), 0.03, 0.97);
+  const csHOdds = mr(mc(1 / (pCSHome * 0.935), 1.01, 20));
+  const csAOdds = mr(mc(1 / (pCSAway * 0.935), 1.01, 20));
+
+  // Odd/Even total goals
+  let pOddG = 0, pEvenG = 0;
+  for (let k = 0; k <= maxG; k++) {
+    if (k % 2 === 0) pEvenG += pmfTotal[k]!;
+    else pOddG += pmfTotal[k]!;
+  }
+  const [goalOddO, goalEvenO] = probsToDecimalOdds([mc(pOddG, 0.30, 0.70), mc(pEvenG, 0.30, 0.70)], 1.06);
+
+  // Exact Goals (0 / 1 / 2 / 3 / 4 / 5+)
+  const pG5plus = mc(1 - poissonCdf(lambda, 4), 0.005, 0.90);
+  const egProbs = [
+    mc(pmfTotal[0] ?? 0, 0.005, 0.80), mc(pmfTotal[1] ?? 0, 0.005, 0.80),
+    mc(pmfTotal[2] ?? 0, 0.005, 0.80), mc(pmfTotal[3] ?? 0, 0.005, 0.80),
+    mc(pmfTotal[4] ?? 0, 0.005, 0.80), pG5plus,
+  ];
+  const egOddsArr = probsToDecimalOdds(egProbs, 1.15);
+
+  // BTTS in 1st half
+  const pBtts1HYes = mc((1 - Math.exp(-lambdaHome * 0.45)) * (1 - Math.exp(-lambdaAway * 0.45)), 0.02, 0.85);
+  const [b1HYes, b1HNo] = probsToDecimalOdds([pBtts1HYes, 1 - pBtts1HYes], 1.07);
+
+  // Win Both Halves — team wins 1st half AND 2nd half (using h1/h2 PMFs above)
+  let pHWin1H = 0, pAWin1H = 0, pHWin2H = 0, pAWin2H = 0;
+  for (let i = 0; i <= 7; i++) {
+    for (let j = 0; j <= 7; j++) {
+      const p1 = (h1PH[i] ?? 0) * (h1PA[j] ?? 0);
+      if (i > j) pHWin1H += p1; else if (j > i) pAWin1H += p1;
+      const p2 = (h2PH[i] ?? 0) * (h2PA[j] ?? 0);
+      if (i > j) pHWin2H += p2; else if (j > i) pAWin2H += p2;
+    }
+  }
+  const pHomeBothH = mc(pHWin1H * pHWin2H, 0.01, 0.80);
+  const pAwayBothH = mc(pAWin1H * pAWin2H, 0.01, 0.80);
+  const wbhHOdds = mr(mc(1 / (pHomeBothH * 0.935), 1.01, 100));
+  const wbhAOdds = mr(mc(1 / (pAwayBothH * 0.935), 1.01, 100));
+
+  // Highest Scoring Half — independent Poisson for H1 and H2 total goals
+  const pmf1H = poissonPmf(lambda * 0.45, maxG);
+  const pmf2H = poissonPmf(lambda * 0.55, maxG);
+  let pHSFirst = 0, pHSSecond = 0, pHSEqual = 0;
+  for (let i = 0; i <= maxG; i++) {
+    for (let j = 0; j <= maxG; j++) {
+      const p = (pmf1H[i] ?? 0) * (pmf2H[j] ?? 0);
+      if (i > j) pHSFirst += p; else if (j > i) pHSSecond += p; else pHSEqual += p;
+    }
+  }
+  const hsfTot = Math.max(1e-9, pHSFirst + pHSSecond + pHSEqual);
+  const [hsfFirstO, hsfSecondO, hsfEqualO] = probsToDecimalOdds(
+    [mc(pHSFirst/hsfTot, 0.05, 0.70), mc(pHSSecond/hsfTot, 0.05, 0.70), mc(pHSEqual/hsfTot, 0.05, 0.60)], 1.10
+  );
+
   return {
     doubleChance: { homeOrDraw: dcHD!, awayOrDraw: dcDA!, homeOrAway: dcHA! },
     bothTeamsScore: { yes: bttsYes!, no: bttsNo! },
@@ -1176,6 +1251,13 @@ function makeAdvancedMarketsFromTeams(homeName: string, awayName: string): Advan
     correctScore,
     corners: { o85: oc85!, u85: uc85!, o95: oc95!, u95: uc95!, o105: oc105!, u105: uc105! },
     cards: { o35: ocard35!, u35: ucard35!, o45: ocard45!, u45: ucard45! },
+    winToNil:           { home: wtnHOdds,   away: wtnAOdds },
+    cleanSheet:         { home: csHOdds,    away: csAOdds },
+    goalOddEven:        { odd: goalOddO!,   even: goalEvenO! },
+    exactGoals:         { g0: egOddsArr[0]!, g1: egOddsArr[1]!, g2: egOddsArr[2]!, g3: egOddsArr[3]!, g4: egOddsArr[4]!, g5plus: egOddsArr[5]! },
+    btts1H:             { yes: b1HYes!,     no: b1HNo! },
+    toWinBothHalves:    { home: wbhHOdds,   away: wbhAOdds },
+    highestScoringHalf: { first: hsfFirstO!, second: hsfSecondO!, equal: hsfEqualO! },
   };
 }
 
@@ -1236,6 +1318,57 @@ function computeTennisExtras(p: number, overrides?: {
     set1Games:       { line: set1LineApprox, over: s1go!, under: s1gu! },
     gameHandicap:    { line: overrides?.gamesLine ?? ghLine, home: overrides?.hcapH ?? ghH!, away: overrides?.hcapA ?? ghA! },
   };
+}
+
+// ─── Tennis Set Exact Score helper ────────────────────────────────────────────
+// Computes exact-score odds for the CURRENT tennis set given the current game
+// score (hg home games won, ag away games won in this set).  Uses a negative-
+// binomial "race to win" model where each game is an independent Bernoulli
+// trial with P(home wins game) = pGame.  Scores already ruled out by the
+// current score are excluded and remaining probabilities are renormalised.
+function computeSetExactScoreOdds(
+  hg: number,
+  ag: number,
+  pGame: number,
+  margin = 0.065,
+): Record<string, number> {
+  const qGame = 1 - pGame;
+  const comb = (n: number, k: number): number => {
+    if (k < 0 || k > n) return 0;
+    if (k === 0 || k === n) return 1;
+    let r = 1;
+    for (let i = 0; i < k; i++) r = r * (n - i) / (i + 1);
+    return r;
+  };
+  const validScores: [number, number][] = [
+    [6,0],[6,1],[6,2],[6,3],[6,4],[7,5],[7,6],
+    [0,6],[1,6],[2,6],[3,6],[4,6],[5,7],[6,7],
+  ];
+  const probs: Record<string, number> = {};
+  let total = 0;
+  for (const [H, A] of validScores) {
+    if (H < hg || A < ag) continue;
+    const rh = H - hg;
+    const ra = A - ag;
+    let p: number;
+    if (H > A) {
+      if (rh === 0) continue;
+      p = comb(rh + ra - 1, ra) * Math.pow(pGame, rh) * Math.pow(qGame, ra);
+    } else {
+      if (ra === 0) continue;
+      p = comb(rh + ra - 1, rh) * Math.pow(pGame, rh) * Math.pow(qGame, ra);
+    }
+    if (p <= 0) continue;
+    probs[`${H}-${A}`] = p;
+    total += p;
+  }
+  if (total === 0) return {};
+  const result: Record<string, number> = {};
+  for (const [label, prob] of Object.entries(probs)) {
+    const fair = prob / total;
+    result[label] = Math.max(1.01, +(1 / (fair * (1 - margin))).toFixed(2));
+  }
+  return result;
 }
 
 // ─── Volleyball extras helper ─────────────────────────────────────────────────
@@ -2724,6 +2857,25 @@ function filterLiveMarkets(markets: AdvancedMarkets, homeScore: number, awayScor
     m.bothTeamsScore = { yes: 0, no: 0 };
   }
 
+  // Win to Nil / Clean Sheet: impossible once the opposing team has scored
+  if (awayScore > 0) {
+    m.winToNil   = { home: 0, away: m.winToNil?.away ?? 0 };
+    m.cleanSheet = { home: 0, away: m.cleanSheet?.away ?? 0 };
+  }
+  if (homeScore > 0) {
+    m.winToNil   = { home: m.winToNil?.home ?? 0, away: 0 };
+    m.cleanSheet = { home: m.cleanSheet?.home ?? 0, away: 0 };
+  }
+
+  // Exact Goals: zero out impossible totals below current score
+  if (m.exactGoals && totalGoals > 0) {
+    if (totalGoals > 0) m.exactGoals.g0 = 0;
+    if (totalGoals > 1) m.exactGoals.g1 = 0;
+    if (totalGoals > 2) m.exactGoals.g2 = 0;
+    if (totalGoals > 3) m.exactGoals.g3 = 0;
+    if (totalGoals > 4) m.exactGoals.g4 = 0;
+  }
+
   return m;
 }
 
@@ -3337,6 +3489,10 @@ function buildTennisLiveMatches(
         ? (1 / liveOdds.home) / (1 / liveOdds.home + 1 / liveOdds.away)
         : 0.5;
 
+      // Placar Exato do Set — negative-binomial model from current game score
+      const pGame = Math.min(0.85, Math.max(0.15, 0.5 + (liveHomeP - 0.5) * 0.8));
+      const setExactScore = computeSetExactScoreOdds(curSetH, curSetA, pGame);
+
       // Only tennis-relevant markets — no football goals/corners/cards
       const tennisOnlyMarkets = {
         doubleChance:    { homeOrDraw: 0, awayOrDraw: 0, homeOrAway: 0 },
@@ -3345,7 +3501,7 @@ function buildTennisLiveMatches(
         handicap:        { homeMinusOne: 0, awayPlusOne: 0, homeMinusOneHalf: 0, awayPlusOneHalf: 0 },
         halfTime:        { home: 0, draw: 0, away: 0 },
         firstGoal:       { home: 0, noGoal: 0, away: 0 },
-        tennisExtra:     computeTennisExtras(liveHomeP),
+        tennisExtra:     { ...computeTennisExtras(liveHomeP), setExactScore, currentSetNum: setNum },
       } as unknown as AdvancedMarkets;
 
       result.push({
@@ -3655,6 +3811,13 @@ async function buildLiveMatches(): Promise<LiveMatchState[]> {
         asianTotals: 12000,
         drawNoBet: 8000,
         firstGoal: 8000,
+        winToNil: 8000,
+        cleanSheet: 8000,
+        goalOddEven: 10000,
+        exactGoals: 12000,
+        btts1H: 8000,
+        toWinBothHalves: 10000,
+        highestScoringHalf: 8000,
       };
 
       // Stable odds: once assigned, keep unless score changes significantly
@@ -3854,6 +4017,68 @@ async function buildLiveMatches(): Promise<LiveMatchState[]> {
       const stateRcHome = countRedCards(events, "home");
       const stateRcAway = countRedCards(events, "away");
 
+      // ── Live-recalculate new football markets from remaining expected goals ──
+      if (!isET && !m.penalties && minute < 90) {
+        const remFrac = Math.max(0.01, (90 - Math.min(minute, 89)) / 90);
+        const pH0 = 0.95 / Math.max(1.01, matchOdds.home);
+        const pA0 = 0.95 / Math.max(1.01, matchOdds.away);
+        const pD0 = Math.max(0.02, 1 - pH0 - pA0);
+        const totL = 2.6;
+        const hStr = pH0 + pD0 * 0.45;
+        const aStr = pA0 + pD0 * 0.45;
+        const muH = totL * (hStr / Math.max(1e-9, hStr + aStr)) * 1.08 * remFrac
+          * Math.max(0.4, 1 - 0.12 * stateRcHome + 0.04 * stateRcAway);
+        const muA = totL * (aStr / Math.max(1e-9, hStr + aStr)) * 0.92 * remFrac
+          * Math.max(0.4, 1 - 0.12 * stateRcAway + 0.04 * stateRcHome);
+        const pHomeWin = pH0 / Math.max(1e-9, pH0 + pD0 + pA0);
+        const pAwayWin = pA0 / Math.max(1e-9, pH0 + pD0 + pA0);
+        const homeScore = m.home.goals === "?" ? 0 : parseInt(m.home.goals) || 0;
+        const awayScore = m.away.goals === "?" ? 0 : parseInt(m.away.goals) || 0;
+        const scored = homeScore + awayScore;
+        // Win to Nil & Clean Sheet — zeroed when opponent has already scored
+        const pWTNH = awayScore === 0 ? mc(pHomeWin * Math.exp(-muA), 0.01, 0.85) : 0;
+        const pWTNA = homeScore === 0 ? mc(pAwayWin * Math.exp(-muH), 0.01, 0.85) : 0;
+        const pCSH  = awayScore === 0 ? mc(Math.exp(-muA), 0.01, 0.99) : 0;
+        const pCSA  = homeScore === 0 ? mc(Math.exp(-muH), 0.01, 0.99) : 0;
+        const wtnHLive = pWTNH > 0 ? mr(mc(1 / (pWTNH * 0.935), 1.01, 50)) : 0;
+        const wtnALive = pWTNA > 0 ? mr(mc(1 / (pWTNA * 0.935), 1.01, 50)) : 0;
+        const csHLive  = pCSH  > 0 ? mr(mc(1 / (pCSH  * 0.935), 1.01, 20)) : 0;
+        const csALive  = pCSA  > 0 ? mr(mc(1 / (pCSA  * 0.935), 1.01, 20)) : 0;
+        // Odd/Even: parity of goals already scored + remaining
+        const muRem = muH + muA;
+        const pmfRem = poissonPmf(muRem, 10);
+        let pOddFin = 0, pEvenFin = 0;
+        for (let k = 0; k <= 10; k++) {
+          if ((scored + k) % 2 === 0) pEvenFin += pmfRem[k]!;
+          else pOddFin += pmfRem[k]!;
+        }
+        const [oeOddL, oeEvenL] = probsToDecimalOdds([mc(pOddFin, 0.20, 0.80), mc(pEvenFin, 0.20, 0.80)], 1.06);
+        // Exact Goals: accumulate remaining distribution into buckets
+        const egBuckets: Record<string, number> = {};
+        for (let add = 0; add <= 10; add++) {
+          const tot = scored + add;
+          const key = tot >= 5 ? "g5plus" : `g${tot}`;
+          egBuckets[key] = (egBuckets[key] ?? 0) + (pmfRem[add] ?? 0);
+        }
+        const egBucketTotal = Object.values(egBuckets).reduce((a, b) => a + b, 0);
+        const egLiveOdds = egBucketTotal > 0
+          ? Object.fromEntries(Object.entries(egBuckets).map(([k, p]) => [k, Math.max(1.01, +(1 / ((p / egBucketTotal) * 0.87)).toFixed(2))]))
+          : {};
+        matchMarkets = {
+          ...matchMarkets,
+          winToNil:   { home: wtnHLive, away: wtnALive },
+          cleanSheet: { home: csHLive,  away: csALive  },
+          ...(oeOddL && oeEvenL ? { goalOddEven: { odd: oeOddL, even: oeEvenL } } : {}),
+          ...(Object.keys(egLiveOdds).length > 0 ? {
+            exactGoals: {
+              g0: egLiveOdds["g0"] ?? 0, g1: egLiveOdds["g1"] ?? 0,
+              g2: egLiveOdds["g2"] ?? 0, g3: egLiveOdds["g3"] ?? 0,
+              g4: egLiveOdds["g4"] ?? 0, g5plus: egLiveOdds["g5plus"] ?? 0,
+            }
+          } : {}),
+        };
+      }
+
       // VAR review / penalty / big-chance detection → suspend all markets
       // Triggered on dangerous events in the most recent 2 minutes of play
       const VAR_DANGER_TOKENS = ["penalty", "var", "missed", "bigchance", "big_chance", "suspension", "expelled"];
@@ -3878,6 +4103,8 @@ async function buildLiveMatches(): Promise<LiveMatchState[]> {
           result: 20000, doubleChance: 18000, totalGoals: 22000, handicap: 22000,
           halfTime: 15000, correctScore: 30000, asianHandicap: 25000, asianTotals: 25000,
           drawNoBet: 20000, firstGoal: 20000, htft: 30000,
+          winToNil: 20000, cleanSheet: 20000, goalOddEven: 22000, exactGoals: 25000,
+          btts1H: 15000, toWinBothHalves: 22000, highestScoringHalf: 15000,
         };
         matchMarketSuspension = Object.fromEntries(
           Object.entries(VAR_SUSPENSION_MS).map(([k, delay]) => [k, now + delay])
