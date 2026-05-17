@@ -61,6 +61,24 @@ import coritibaBanner from "@assets/file_1778852828214_1778852957312.jpeg";
 import atleticoMGBanner from "@assets/file_1778852831734_1778852957312.jpeg";
 import bragantinoBanner from "@assets/file_1778852835656_1778852957312.jpeg";
 import vitoriaBanner from "@assets/file_1778852839664_1778852957312.jpeg";
+import botafogoBanner from "@assets/file_1779017405337_1779018435511.jpeg";
+import gremioBanner from "@assets/file_1779017412912_1779018435511.jpeg";
+import vascoGamaBanner from "@assets/file_1779017418125_1779018435511.jpeg";
+import santosBanner from "@assets/file_1779017475629_1779018435511.jpeg";
+import corinthiansBanner from "@assets/file_1779017485117_1779018435511.jpeg";
+import cruzeiroBanner from "@assets/file_1779017497416_1779018435511.jpeg";
+import clubeRemoBanner from "@assets/file_1779017508663_1779018435511.jpeg";
+import chapecoenseBanner from "@assets/file_1779017521787_1779018435511.jpeg";
+import mirassolBanner from "@assets/file_1779017533260_1779018435511.jpeg";
+import ajaxBanner from "@assets/file_1779018601650_1779018681798.jpeg";
+import psvBanner from "@assets/file_1779018614650_1779018681798.jpeg";
+import feyenoordBanner from "@assets/file_1779018620791_1779018681798.jpeg";
+import utrechtBanner from "@assets/file_1779018636577_1779018681798.jpeg";
+import twenteBanner from "@assets/file_1779018632973_1779018681798.jpeg";
+import azBanner from "@assets/file_1779018625614_1779018681798.jpeg";
+import necBanner from "@assets/file_1779018658064_1779018681798.jpeg";
+import heerenveenBanner from "@assets/file_1779018648329_1779018681798.jpeg";
+import goAheadEaglesBanner from "@assets/file_1779018641867_1779018681798.jpeg";
 
 const TEAM_BANNERS: Record<string, string> = {
   // ── Liga Portugal ──
@@ -112,6 +130,7 @@ const TEAM_BANNERS: Record<string, string> = {
   "Barcelona": barcelonaBanner,
   "Atlético de Madrid": atleticoMadridBanner,
   "Atletico Madrid": atleticoMadridBanner,
+  "Atletico de Madrid": atleticoMadridBanner,
   "Athletic Club": athleticClubBanner,
   "Athletic Bilbao": athleticClubBanner,
   "Ath Bilbao": athleticClubBanner,
@@ -298,6 +317,51 @@ const TEAM_BANNERS: Record<string, string> = {
   "EC Vitória": vitoriaBanner,
   "EC Vitoria": vitoriaBanner,
   "Esporte Clube Vitória": vitoriaBanner,
+  "Botafogo": botafogoBanner,
+  "Botafogo FR": botafogoBanner,
+  "Botafogo de Futebol e Regatas": botafogoBanner,
+  "Grêmio": gremioBanner,
+  "Gremio": gremioBanner,
+  "Grêmio FBPA": gremioBanner,
+  "Vasco da Gama": vascoGamaBanner,
+  "Vasco": vascoGamaBanner,
+  "CR Vasco da Gama": vascoGamaBanner,
+  "Club de Regatas Vasco da Gama": vascoGamaBanner,
+  "Santos": santosBanner,
+  "Santos FC": santosBanner,
+  "Corinthians": corinthiansBanner,
+  "SC Corinthians": corinthiansBanner,
+  "Sport Club Corinthians Paulista": corinthiansBanner,
+  "Cruzeiro": cruzeiroBanner,
+  "Cruzeiro EC": cruzeiroBanner,
+  "Cruzeiro Esporte Clube": cruzeiroBanner,
+  "Clube do Remo": clubeRemoBanner,
+  "Club do Remo": clubeRemoBanner,
+  "Remo": clubeRemoBanner,
+  "Chapecoense": chapecoenseBanner,
+  "Associação Chapecoense de Futebol": chapecoenseBanner,
+  "ACF Chapecoense": chapecoenseBanner,
+  "Mirassol": mirassolBanner,
+  "Mirassol FC": mirassolBanner,
+  // ── Eredivisie (Netherlands) ──
+  "Ajax": ajaxBanner,
+  "AFC Ajax": ajaxBanner,
+  "Ajax Amsterdam": ajaxBanner,
+  "PSV": psvBanner,
+  "PSV Eindhoven": psvBanner,
+  "Feyenoord": feyenoordBanner,
+  "Feyenoord Rotterdam": feyenoordBanner,
+  "FC Utrecht": utrechtBanner,
+  "Utrecht": utrechtBanner,
+  "FC Twente": twenteBanner,
+  "Twente": twenteBanner,
+  "AZ": azBanner,
+  "AZ Alkmaar": azBanner,
+  "NEC Nijmegen": necBanner,
+  "NEC": necBanner,
+  "SC Heerenveen": heerenveenBanner,
+  "Heerenveen": heerenveenBanner,
+  "Go Ahead Eagles": goAheadEaglesBanner,
 };
 
 const LEAGUE_FLAGS: Record<string, string> = {
@@ -350,7 +414,7 @@ const TEAM_COUNTRY: Record<string, string> = {
   "Como": "italy", "Como 1907": "italy", "Parma": "italy", "Parma Calcio": "italy",
   // La Liga
   "Real Madrid": "spain", "Barcelona": "spain", "Atlético de Madrid": "spain",
-  "Atletico Madrid": "spain", "Athletic Club": "spain", "Athletic Bilbao": "spain",
+  "Atletico Madrid": "spain", "Atletico de Madrid": "spain", "Athletic Club": "spain", "Athletic Bilbao": "spain",
   "Ath Bilbao": "spain", "Real Sociedad": "spain", "Sevilla": "spain",
   "Valencia": "spain", "Villarreal": "spain", "Real Betis": "spain",
   "Betis": "spain", "Girona": "spain", "Mallorca": "spain", "Getafe": "spain",
@@ -387,9 +451,12 @@ const TEAM_COUNTRY: Record<string, string> = {
   "Santos": "brazil", "Santos FC": "brazil",
   "Grêmio": "brazil", "Gremio": "brazil", "Grêmio FBPA": "brazil",
   "Internacional": "brazil", "Sport Club Internacional": "brazil",
-  "Vasco da Gama": "brazil", "Vasco": "brazil", "CR Vasco da Gama": "brazil",
+  "Vasco da Gama": "brazil", "Vasco": "brazil", "CR Vasco da Gama": "brazil", "Club de Regatas Vasco da Gama": "brazil",
   "Botafogo": "brazil", "Botafogo FR": "brazil", "Botafogo de Futebol e Regatas": "brazil",
   "Cruzeiro": "brazil", "Cruzeiro EC": "brazil", "Cruzeiro Esporte Clube": "brazil",
+  "Clube do Remo": "brazil", "Club do Remo": "brazil", "Remo": "brazil",
+  "Chapecoense": "brazil", "Associação Chapecoense de Futebol": "brazil", "ACF Chapecoense": "brazil",
+  "Mirassol": "brazil", "Mirassol FC": "brazil",
   "Fortaleza": "brazil", "Fortaleza EC": "brazil",
   "Ceará": "brazil", "Ceara": "brazil", "Ceará SC": "brazil",
   "Sport Recife": "brazil", "Sport Club Recife": "brazil",
@@ -413,6 +480,16 @@ const TEAM_COUNTRY: Record<string, string> = {
   "Antalyaspor": "turkey", "Alanyaspor": "turkey", "Gaziantep": "turkey",
   "Gaziantep FK": "turkey", "Ankaragücü": "turkey", "Ankaragucu": "turkey",
   "Bodrumspor": "turkey", "MKE Ankaragücü": "turkey",
+  // Eredivisie (Netherlands)
+  "Ajax": "netherlands", "AFC Ajax": "netherlands", "Ajax Amsterdam": "netherlands",
+  "PSV": "netherlands", "PSV Eindhoven": "netherlands",
+  "Feyenoord": "netherlands", "Feyenoord Rotterdam": "netherlands",
+  "FC Utrecht": "netherlands", "Utrecht": "netherlands",
+  "FC Twente": "netherlands", "Twente": "netherlands",
+  "AZ": "netherlands", "AZ Alkmaar": "netherlands",
+  "NEC Nijmegen": "netherlands", "NEC": "netherlands",
+  "SC Heerenveen": "netherlands", "Heerenveen": "netherlands",
+  "Go Ahead Eagles": "netherlands",
   // Liga MX
   "Cruz Azul": "mexico", "Club Cruz Azul": "mexico",
   "Guadalajara": "mexico", "Chivas": "mexico", "Club Guadalajara": "mexico", "Chivas Guadalajara": "mexico",
@@ -2892,11 +2969,11 @@ export default function Home() {
 
     const SimpleScore = ({ big }: { big?: boolean }) => isEmBreve ? (
       <div className="flex items-center gap-2 w-full">
-        <span className={`font-bold ${big ? "text-base" : "text-sm"} truncate flex-1 text-right`} style={{ color: '#ffffff' }}>{match.home}</span>
+        <span className={`font-bold ${big ? "text-base" : "text-sm"} truncate flex-1 text-right`} style={bannerImg ? { color: '#ffffff' } : undefined}>{match.home}</span>
         <div className={`${big ? "text-3xl" : "text-xl"} font-black tabular-nums shrink-0 ${big ? "px-2" : "px-1"} text-center`} style={{ color: 'rgb(63 63 70)' }}>
           –<span style={{ color: 'rgb(39 39 42)' }} className={big ? "mx-1" : "mx-0.5"}>:</span>–
         </div>
-        <span className={`font-bold ${big ? "text-base" : "text-sm"} truncate flex-1`} style={{ color: '#ffffff' }}>{match.away}</span>
+        <span className={`font-bold ${big ? "text-base" : "text-sm"} truncate flex-1`} style={bannerImg ? { color: '#ffffff' } : undefined}>{match.away}</span>
       </div>
     ) : (
       <div className="flex items-center gap-2 w-full">

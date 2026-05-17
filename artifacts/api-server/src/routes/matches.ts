@@ -3594,6 +3594,45 @@ function buildTennisLiveMatches(
       const pGame = Math.min(0.85, Math.max(0.15, 0.5 + (liveHomeP - 0.5) * 0.8));
       const setExactScore = computeSetExactScoreOdds(curSetH, curSetA, pGame);
 
+      // ── Per-set winner markets: live-adjust based on current game score ────
+      // numDoneSets = sets fully won by either side (homeScore + awayScore)
+      const numDoneSets = homeScore + awayScore;
+      const baseExtras   = computeTennisExtras(liveHomeP);
+      const set1Games    = sets[0] ?? ([0, 0] as [number, number]);
+      const set2Games    = sets.length >= 2 ? (sets[1] ?? ([0, 0] as [number, number])) : ([0, 0] as [number, number]);
+
+      // Live probability for who wins a set given current game score within it.
+      // Each game lead shifts win probability ~5.5 pp from the base match prob.
+      const liveSetWinProb = (hG: number, aG: number, base: number): number =>
+        Math.min(0.97, Math.max(0.03, 0.5 + (base - 0.5) * 0.55 + (hG - aG) * 0.055));
+
+      // Set 1: in-progress → live-adjust; done → keep base (will be suspended)
+      let firstSetOdds: { home: number; away: number };
+      if (numDoneSets === 0 && sets.length >= 1) {
+        const pS1 = liveSetWinProb(set1Games[0], set1Games[1], liveHomeP);
+        const [s1h, s1a] = probsToDecimalOdds([pS1, 1 - pS1], 1.06);
+        firstSetOdds = { home: s1h!, away: s1a! };
+      } else {
+        firstSetOdds = baseExtras.firstSet;
+      }
+
+      // Set 2: in-progress → live-adjust; done → keep base (will be suspended)
+      let set2Odds: { home: number; away: number };
+      if (numDoneSets === 1 && sets.length >= 2) {
+        const pS2 = liveSetWinProb(set2Games[0], set2Games[1], liveHomeP);
+        const [s2h, s2a] = probsToDecimalOdds([pS2, 1 - pS2], 1.07);
+        set2Odds = { home: s2h!, away: s2a! };
+      } else {
+        set2Odds = baseExtras.set2;
+      }
+
+      // Completed set markets are permanently settled — suspend them
+      const SETTLED = Date.now() + 30 * 24 * 60 * 60 * 1000;
+      const tennisSetSusp: Record<string, number> = {};
+      if (numDoneSets >= 1) tennisSetSusp['firstSet'] = SETTLED;
+      if (numDoneSets >= 2) tennisSetSusp['set2']     = SETTLED;
+      const tennisSuspension = Object.keys(tennisSetSusp).length > 0 ? tennisSetSusp : undefined;
+
       // Only tennis-relevant markets — no football goals/corners/cards
       const tennisOnlyMarkets = {
         doubleChance:    { homeOrDraw: 0, awayOrDraw: 0, homeOrAway: 0 },
@@ -3602,25 +3641,26 @@ function buildTennisLiveMatches(
         handicap:        { homeMinusOne: 0, awayPlusOne: 0, homeMinusOneHalf: 0, awayPlusOneHalf: 0 },
         halfTime:        { home: 0, draw: 0, away: 0 },
         firstGoal:       { home: 0, noGoal: 0, away: 0 },
-        tennisExtra:     { ...computeTennisExtras(liveHomeP), setExactScore, currentSetNum: setNum },
+        tennisExtra:     { ...baseExtras, firstSet: firstSetOdds, set2: set2Odds, setExactScore, currentSetNum: setNum },
       } as unknown as AdvancedMarkets;
 
       result.push({
-        id:          `tennis-live-${m.id}`,
-        home:        p0.name,
-        away:        p1.name,
-        league:      t.name,
-        country:     "tennis",
-        sport:       "tennis",
+        id:               `tennis-live-${m.id}`,
+        home:             p0.name,
+        away:             p1.name,
+        league:           t.name,
+        country:          "tennis",
+        sport:            "tennis",
         homeScore,
         awayScore,
-        minute:      setNum,
-        status:      m.status,
-        hasRealOdds: !!cached,
-        odds:        liveOdds,
-        markets:     tennisOnlyMarkets,
-        events:      [],
-        _liveExtra:  { sets, currentPoints: [hPt, aPt], tennisStats: statsMap.get(m.id) },
+        minute:           setNum,
+        status:           m.status,
+        hasRealOdds:      !!cached,
+        odds:             liveOdds,
+        markets:          tennisOnlyMarkets,
+        events:           [],
+        marketSuspension: tennisSuspension,
+        _liveExtra:       { sets, currentPoints: [hPt, aPt], tennisStats: statsMap.get(m.id) },
       });
     }
   }
