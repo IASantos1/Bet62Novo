@@ -3,19 +3,32 @@ import EventSource from "react-native-sse";
 import { API_BASE } from "@/context/AuthContext";
 
 export interface LiveMatchMarkets {
-  totalGoals?: { over15: number; under15: number; over25: number; under25: number; over35: number; under35: number; over45: number; under45: number };
+  totalGoals?: {
+    over05: number; under05: number;
+    over15: number; under15: number;
+    over25: number; under25: number;
+    over35: number; under35: number;
+    over45: number; under45: number;
+    over55: number; under55: number;
+    over65: number; under65: number;
+  };
   doubleChance?: { homeOrDraw: number; awayOrDraw: number; homeOrAway: number };
   bothTeamsScore?: { yes: number; no: number };
   halfTime?: { home: number; draw: number; away: number };
   handicap?: { homeMinusOne: number; awayPlusOne: number; homeMinusOneHalf: number; awayPlusOneHalf: number };
+  firstGoal?: { home: number; noGoal: number; away: number };
+  exactGoals?: { g0: number; g1: number; g2: number; g3: number; g4: number; g5plus: number };
+  htft?: { hh: number; hd: number; ha: number; dh: number; dd: number; da: number; ah: number; ad: number; aa: number };
+  corners?: { o85: number; u85: number; o95: number; u95: number; o105: number; u105: number };
+  cards?: { o35: number; u35: number; o45: number; u45: number };
   tennisExtra?: {
     firstSet: { home: number; away: number };
     set2: { home: number; away: number };
-    totalSets: { over15: number; under15: number };
+    totalSets?: { over15: number; under15: number };
     currentSetNum: number;
+    setExactScore?: Record<string, number>;
   };
-  liveGoals?: { homeOver05: number; homeUnder05: number; awayOver05: number; awayUnder05: number };
-  htft?: Record<string, number>;
+  handicapPoints?: { line: number; home: number; away: number };
 }
 
 export interface LiveMatch {
@@ -29,6 +42,7 @@ export interface LiveMatch {
   awayScore: number;
   odds: { home: number; draw: number; away: number };
   league?: string;
+  leagueId?: string;
   markets?: LiveMatchMarkets;
   marketSuspension?: Record<string, number>;
   suspensionReason?: string;
@@ -84,29 +98,22 @@ export function useLiveMatches(): {
   function connect() {
     if (!mountedRef.current) return;
     const streamUrl = `${API_BASE}/matches/live-stream`;
-
     try {
       const es = new EventSource(streamUrl);
       esRef.current = es;
-
       es.addEventListener("open", () => {
         if (!mountedRef.current) return;
         setConnected(true);
         reconnectDelayRef.current = RECONNECT_DELAY_MS;
         clearTimers();
       });
-
       es.addEventListener("message", (event) => {
         if (!mountedRef.current || !event.data) return;
         try {
           const data = JSON.parse(event.data) as { matches: LiveMatch[] };
-          if (data.matches) {
-            setMatches(data.matches);
-            setLastUpdated(Date.now());
-          }
-        } catch { /* ignore malformed JSON */ }
+          if (data.matches) { setMatches(data.matches); setLastUpdated(Date.now()); }
+        } catch { /* ignore */ }
       });
-
       es.addEventListener("error", () => {
         if (!mountedRef.current) return;
         setConnected(false);
@@ -115,10 +122,7 @@ export function useLiveMatches(): {
         startFallbackPolling();
         reconnectTimerRef.current = setTimeout(() => {
           clearTimers();
-          reconnectDelayRef.current = Math.min(
-            reconnectDelayRef.current * 2,
-            MAX_RECONNECT_DELAY_MS
-          );
+          reconnectDelayRef.current = Math.min(reconnectDelayRef.current * 2, MAX_RECONNECT_DELAY_MS);
           connect();
         }, reconnectDelayRef.current);
       });
@@ -133,14 +137,10 @@ export function useLiveMatches(): {
     fetch(`${API_BASE}/matches/live`)
       .then((r) => r.json())
       .then((d: { matches: LiveMatch[] }) => {
-        if (mountedRef.current && d.matches) {
-          setMatches(d.matches);
-          setLastUpdated(Date.now());
-        }
+        if (mountedRef.current && d.matches) { setMatches(d.matches); setLastUpdated(Date.now()); }
       })
       .catch(() => {});
     connect();
-
     return () => {
       mountedRef.current = false;
       clearTimers();
