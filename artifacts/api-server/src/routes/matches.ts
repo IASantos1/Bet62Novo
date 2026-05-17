@@ -3268,38 +3268,9 @@ function buildTennisLiveMatches(
     for (const m of matches) {
       if (!m) continue;
 
-      // API lag: match is still "Not Started" but its scheduled time has already passed
-      if (m.status === "Not Started") {
-        const minsLeft = matchStartsInMinutes(m.date ?? "", m.time ?? "");
-        if (minsLeft >= 0) continue; // genuinely upcoming — skip here, let buildTennisUpcoming handle it
-        // Time has passed — treat as in-progress
-        const lagPlayers = Array.isArray(m.player) ? m.player : (m.player ? [m.player] : []);
-        if (lagPlayers.length < 2) continue;
-        const lp0 = lagPlayers[0]!;
-        const lp1 = lagPlayers[1]!;
-        if (!lp0.name || !lp1.name) continue;
-        if (lp0.name.includes("/") || (lp0 as { dp1?: string }).dp1) continue; // skip doubles
-        const baseOdds = makeOddsFromTeams(lp0.name, lp1.name);
-        result.push({
-          id:          `tennis-live-lag-${m.id || lp0.name}`,
-          home:        lp0.name,
-          away:        lp1.name,
-          league:      t.name,
-          country:     "",
-          sport:       "tennis",
-          homeScore:   0,
-          awayScore:   0,
-          minute:      1,
-          status:      "Em Jogo",
-          hasRealOdds: true,
-          odds:        { home: baseOdds.home, draw: 0, away: baseOdds.away },
-          markets:     makeAdvancedMarketsFromTeams(lp0.name, lp1.name),
-          events:      [],
-          _liveExtra:  { sets: [], currentPts: [0, 0] as [number, number] },
-        });
-        continue;
-      }
-
+      // Skip any match not explicitly live according to Statpal.
+      // Tennis courts run late (previous match still in progress) — never
+      // infer "in progress" from time alone; only trust real API statuses.
       if (!TENNIS_LIVE_STATUSES.has(m.status)) continue;
       const players = Array.isArray(m.player) ? m.player : [m.player];
       if (players.length < 2) continue;
