@@ -2945,20 +2945,20 @@ export default function Home() {
           className="relative aspect-video rounded-xl border border-zinc-800 hover:border-red-500/40 transition-colors cursor-pointer overflow-hidden"
           onClick={() => setExpandedMatch(match)}
         >
-          <img src={bannerImg} alt="" className="absolute inset-0 w-full h-full object-cover opacity-95" />
-          <div className="absolute inset-0 bg-gradient-to-t from-black/95 via-black/70 to-black/30" />
+          <img src={bannerImg} alt="" className="absolute inset-0 w-full h-full object-cover opacity-90" />
+          <div className="absolute inset-0" style={{ background: "linear-gradient(to top, rgba(0,0,0,1) 0%, rgba(0,0,0,0.92) 35%, rgba(0,0,0,0.55) 65%, rgba(0,0,0,0.2) 100%)" }} />
           <div className="absolute top-0 left-0 right-0 flex items-center justify-between px-4 pt-3">
             <div className="flex items-center gap-2">
               <div className="relative w-5 h-5 flex items-center justify-center leading-none text-sm">
                 {flag}
                 <span className="absolute -bottom-0.5 -right-1.5 bg-black/60 rounded-full text-[8px] w-3 h-3 flex items-center justify-center">{sportEmoji(match.sport)}</span>
               </div>
-              <span className="text-xs text-white font-medium" style={{ textShadow: "0 1px 4px rgba(0,0,0,0.9)" }}>{match.league}</span>
+              <span className="text-xs font-medium" style={{ color: '#ffffff', textShadow: "0 1px 4px rgba(0,0,0,1)" }}>{match.league}</span>
             </div>
             <div className="flex items-center gap-2">{liveBadge}</div>
           </div>
           <div className="absolute bottom-0 left-0 right-0 px-4 pb-4" onClick={e => e.stopPropagation()}>
-            {rivalry && <div className="text-[11px] font-black text-red-400 uppercase tracking-widest mb-1" style={{ textShadow: "0 1px 4px rgba(0,0,0,0.9)" }}>{rivalry}</div>}
+            {rivalry && <div className="text-[11px] font-black uppercase tracking-widest mb-1" style={{ color: '#f87171', textShadow: "0 1px 4px rgba(0,0,0,1)" }}>{rivalry}</div>}
             <div className="mb-3">
               {sport === "tennis"     ? <TennisScore /> :
                sport === "volleyball" ? <VolleyScore /> :
@@ -3035,24 +3035,24 @@ export default function Home() {
           className="relative aspect-video rounded-xl border border-zinc-800 hover:border-red-500/40 transition-colors cursor-pointer overflow-hidden"
           onClick={() => setExpandedMatch(match)}
         >
-          <img src={bannerImg} alt="" className="absolute inset-0 w-full h-full object-cover opacity-95" />
-          <div className="absolute inset-0 bg-gradient-to-t from-black/95 via-black/70 to-black/30" />
+          <img src={bannerImg} alt="" className="absolute inset-0 w-full h-full object-cover opacity-90" />
+          <div className="absolute inset-0" style={{ background: "linear-gradient(to top, rgba(0,0,0,1) 0%, rgba(0,0,0,0.92) 35%, rgba(0,0,0,0.55) 65%, rgba(0,0,0,0.2) 100%)" }} />
           <div className="absolute top-0 left-0 right-0 flex items-center justify-between px-4 pt-3">
             <div className="flex items-center gap-2">
               <div className="relative w-5 h-5 flex items-center justify-center leading-none text-sm">
                 {flag}
                 <span className="absolute -bottom-0.5 -right-1.5 bg-black/60 rounded-full text-[8px] w-3 h-3 flex items-center justify-center">{sportEmoji(match.sport)}</span>
               </div>
-              <span className="text-xs text-white font-medium" style={{ textShadow: "0 1px 4px rgba(0,0,0,0.9)" }}>{match.league}</span>
+              <span className="text-xs font-medium" style={{ color: '#ffffff', textShadow: "0 1px 4px rgba(0,0,0,1)" }}>{match.league}</span>
             </div>
-            <span className="text-xs text-white/90" style={{ textShadow: "0 1px 4px rgba(0,0,0,0.9)" }}>{dateStr}{match.time ? ` • ${match.time}` : ""}</span>
+            <span className="text-xs" style={{ color: 'rgba(255,255,255,0.9)', textShadow: "0 1px 4px rgba(0,0,0,1)" }}>{dateStr}{match.time ? ` • ${match.time}` : ""}</span>
           </div>
           <div className="absolute bottom-0 left-0 right-0 px-4 pb-4" onClick={e => e.stopPropagation()}>
-            {rivalry && <div className="text-[11px] font-black text-red-400 uppercase tracking-widest mb-1" style={{ textShadow: "0 1px 4px rgba(0,0,0,0.9)" }}>{rivalry}</div>}
+            {rivalry && <div className="text-[11px] font-black uppercase tracking-widest mb-1" style={{ color: '#f87171', textShadow: "0 1px 4px rgba(0,0,0,1)" }}>{rivalry}</div>}
             <div className="flex items-baseline gap-2 mb-3 min-w-0">
-              <span className="font-black text-white text-xl leading-tight truncate" style={{ textShadow: "0 1px 8px rgba(0,0,0,1), 0 2px 16px rgba(0,0,0,0.8)" }}>{match.home}</span>
-              <span className="text-white/80 text-sm shrink-0" style={{ textShadow: "0 1px 4px rgba(0,0,0,0.9)" }}>vs</span>
-              <span className="font-black text-white text-xl leading-tight truncate" style={{ textShadow: "0 1px 8px rgba(0,0,0,1), 0 2px 16px rgba(0,0,0,0.8)" }}>{match.away}</span>
+              <span className="font-black text-xl leading-tight truncate" style={{ color: '#ffffff', textShadow: "0 2px 12px rgba(0,0,0,1), 0 1px 4px rgba(0,0,0,1)" }}>{match.home}</span>
+              <span className="text-sm shrink-0" style={{ color: 'rgba(255,255,255,0.9)', textShadow: "0 1px 4px rgba(0,0,0,1)" }}>vs</span>
+              <span className="font-black text-xl leading-tight truncate" style={{ color: '#ffffff', textShadow: "0 2px 12px rgba(0,0,0,1), 0 1px 4px rgba(0,0,0,1)" }}>{match.away}</span>
             </div>
             <OddsRow />
           </div>
@@ -3232,10 +3232,10 @@ export default function Home() {
                           </div>
                           {/* Text */}
                           <div className="min-w-0">
-                            <div className="text-white font-bold text-[12px] truncate leading-tight">{m.home}</div>
-                            <div className="text-zinc-400 text-[10px] truncate">Vencedor</div>
-                            <div className="text-white font-semibold text-[11px] truncate leading-tight">{m.away}</div>
-                            <div className="text-zinc-400 text-[10px]">🕒 {timeStr}</div>
+                            <div className="truncate leading-tight text-[12px]" style={{ color: '#ffffff', fontWeight: 700 }}>{m.home}</div>
+                            <div className="truncate text-[10px]" style={{ color: '#a1a1aa' }}>Vencedor</div>
+                            <div className="truncate leading-tight text-[11px]" style={{ color: '#ffffff', fontWeight: 600 }}>{m.away}</div>
+                            <div className="text-[10px]" style={{ color: '#a1a1aa' }}>🕒 {timeStr}</div>
                           </div>
                         </div>
                         {/* Odds */}
@@ -4476,8 +4476,8 @@ export default function Home() {
               </div>
               <div className="grid grid-cols-2 gap-x-3 gap-y-2 mt-2">
                 {Array.from({ length: maxRows }).flatMap((_, i) => [
-                  <div key={`hw-${i}`}>{homeWins[i] ? <MarketOddsBtn match={match} sel={`ses-${homeWins[i][0]}`} odd={homeWins[i][1]} market="placar" label={homeWins[i][0]} /> : <div />}</div>,
-                  <div key={`aw-${i}`}>{awayWins[i] ? <MarketOddsBtn match={match} sel={`ses-${awayWins[i][0]}`} odd={awayWins[i][1]} market="placar" label={awayWins[i][0]} /> : <div />}</div>,
+                  <div key={`hw-${i}`} className="flex">{homeWins[i] ? <MarketOddsBtn match={match} sel={`ses-${homeWins[i][0]}`} odd={homeWins[i][1]} market="placar" label={homeWins[i][0]} /> : <div className="flex-1" />}</div>,
+                  <div key={`aw-${i}`} className="flex">{awayWins[i] ? <MarketOddsBtn match={match} sel={`ses-${awayWins[i][0]}`} odd={awayWins[i][1]} market="placar" label={awayWins[i][0]} /> : <div className="flex-1" />}</div>,
                 ])}
               </div>
             </div>
