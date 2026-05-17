@@ -17,7 +17,7 @@
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { LinearGradient } from "expo-linear-gradient";
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Animated,
   Dimensions,
@@ -42,6 +42,7 @@ import Svg, {
   Text as SvgText,
 } from "react-native-svg";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { API_BASE } from "@/context/AuthContext";
 import type { MatchInfo } from "./ComprehensiveMarketsSheet";
 
 const { width: SW, height: SH } = Dimensions.get("window");
@@ -677,26 +678,66 @@ export function LiveMatchSimulator({ visible, match, onClose }: {
   const [eventReason, setEventReason] = useState("");
   const [eventKey, setEventKey] = useState(0);
   const [tick, setTick] = useState(0);
-  // Track current ball target for player facing direction
   const [ballTarget, setBallTarget] = useState<[number, number]>([FIELD_W / 2, FIELD_H / 2]);
 
-  const waypoints = getBallWaypoints(sport, match.suspensionReason ?? "", seed + tick, homeWinning);
+  // ── Real-time tracking from /api/tracking/:matchId ──────────────────────────
+  type TrackingPlayer = { id: number; team: "home" | "away"; x: number; y: number; isGK: boolean; num: number };
+  type TrackingFrame  = { ball: { x: number; y: number }; players: TrackingPlayer[] };
+  const [trackingFrame, setTrackingFrame] = useState<TrackingFrame | null>(null);
+  // Once API responds, stop local sim (use ref to avoid re-render)
+  const hasTracking = useRef(false);
 
+  // ── animateTo ────────────────────────────────────────────────────────────────
   const animateTo = useCallback((target: [number, number], dur: number) => {
     setBallTarget(target);
     Animated.parallel([
       Animated.timing(ballAnim, { toValue: { x: target[0], y: target[1] }, duration: dur, useNativeDriver: false, easing: Easing.inOut(Easing.quad) }),
       Animated.sequence([
-        Animated.timing(ballScale, { toValue: 0.7, duration: dur * 0.25, useNativeDriver: true }),
+        Animated.timing(ballScale, { toValue: 0.7,  duration: dur * 0.25, useNativeDriver: true }),
         Animated.timing(ballScale, { toValue: 1.35, duration: dur * 0.45, useNativeDriver: true }),
-        Animated.timing(ballScale, { toValue: 1, duration: dur * 0.3, useNativeDriver: true }),
+        Animated.timing(ballScale, { toValue: 1,    duration: dur * 0.30, useNativeDriver: true }),
       ]),
     ]).start();
   }, [ballAnim, ballScale]);
 
+  // ── Tracking API polling — updates ball + players every 2s ──────────────────
   useEffect(() => {
-    if (!visible) return;
+    if (!visible) {
+      setTrackingFrame(null);
+      hasTracking.current = false;
+      return;
+    }
+    let cancelled = false;
+    const poll = async () => {
+      try {
+        const params = new URLSearchParams({
+          sport:      match.sport,
+          homeScore:  String(match.homeScore ?? 0),
+          awayScore:  String(match.awayScore ?? 0),
+          minute:     String(match.minute    ?? 0),
+        });
+        const res = await fetch(
+          `${API_BASE}/tracking/${encodeURIComponent(match.id)}?${params.toString()}`,
+        );
+        if (!res.ok || cancelled) return;
+        const data = (await res.json()) as TrackingFrame;
+        hasTracking.current = true;
+        setTrackingFrame(data);
+        // Drive ball animation from server position
+        animateTo([data.ball.x * FIELD_W, data.ball.y * FIELD_H], 1850);
+      } catch { /* silently fall back to local simulation */ }
+    };
+    poll();
+    const t = setInterval(poll, 2000);
+    return () => { cancelled = true; clearInterval(t); };
+  }, [visible, match.id, match.homeScore, match.awayScore, match.minute]);
+
+  // ── Local fallback simulation (only when API unavailable) ───────────────────
+  const waypoints = getBallWaypoints(sport, match.suspensionReason ?? "", seed + tick, homeWinning);
+  useEffect(() => {
+    if (!visible || hasTracking.current) return;
     function go() {
+      if (hasTracking.current) return; // stop if API kicked in
       const idx = waypointRef.current % waypoints.length;
       const next = waypoints[idx]!;
       waypointRef.current++;
@@ -709,12 +750,14 @@ export function LiveMatchSimulator({ visible, match, onClose }: {
     return () => { if (tickRef.current) clearTimeout(tickRef.current); };
   }, [visible, sport, homeWinning, tick]);
 
+  // Local sim player wander tick
   useEffect(() => {
     if (!visible) return;
     const t = setInterval(() => setTick((v) => v + 1), 9000);
     return () => clearInterval(t);
   }, [visible]);
 
+  // ── Match events (goal, VAR, etc.) ──────────────────────────────────────────
   useEffect(() => {
     const r = (match.suspensionReason ?? "").toUpperCase();
     if (r && (r.includes("GOLO") || r.includes("GOAL") || r.includes("VAR") || r.includes("PENAL") || r.includes("CHANCE"))) {
@@ -729,27 +772,42 @@ export function LiveMatchSimulator({ visible, match, onClose }: {
     if (r.includes("GOLO") || r.includes("GOAL")) {
       Animated.loop(Animated.sequence([
         Animated.timing(pulseAnim, { toValue: 1.8, duration: 260, useNativeDriver: true }),
-        Animated.timing(pulseAnim, { toValue: 1, duration: 260, useNativeDriver: true }),
+        Animated.timing(pulseAnim, { toValue: 1,   duration: 260, useNativeDriver: true }),
       ]), { iterations: 6 }).start();
     }
   }, [match.suspensionReason]);
 
-  const homePlayers = getFormationPositions(sport, "home", seed);
-  const awayPlayers = getFormationPositions(sport, "away", seed + 1000);
+  // ── Player list — API data when available, local simulation otherwise ────────
+  const homeFallback = getFormationPositions(sport, "home", seed);
+  const awayFallback = getFormationPositions(sport, "away", seed + 1000);
 
-  const wander = (p: PlayerDot, i: number): PlayerDot => {
-    const w = sport === "football" ? 14 : sport === "hockey" ? 17 : sport === "basketball" ? 16 : 8;
-    return {
-      ...p,
-      x: p.x + (seededRand(seed + i * 7.3 + tick * 0.17) - 0.5) * w,
-      y: p.y + (seededRand(seed + i * 3.1 + tick * 0.23) - 0.5) * w,
+  const allPlayers = useMemo((): PlayerDot[] => {
+    if (trackingFrame) {
+      // Map normalized API coords → pixel coords, preserve visual attributes
+      return trackingFrame.players.map((tp) => ({
+        x:       tp.x * FIELD_W,
+        y:       tp.y * FIELD_H,
+        color:   tp.team === "home" ? "#dc2626" : "#1d4ed8",
+        isGK:    tp.isGK,
+        num:     tp.num,
+        skinIdx: Math.abs(tp.id * 3 + seed) % SKINS.length,
+        hairIdx: Math.abs(tp.id * 7 + seed) % HAIRS.length,
+      }));
+    }
+    // Local fallback with wander
+    const wander = (p: PlayerDot, i: number): PlayerDot => {
+      const w = sport === "football" ? 14 : sport === "hockey" ? 17 : sport === "basketball" ? 16 : 8;
+      return {
+        ...p,
+        x: p.x + (seededRand(seed + i * 7.3 + tick * 0.17) - 0.5) * w,
+        y: p.y + (seededRand(seed + i * 3.1 + tick * 0.23) - 0.5) * w,
+      };
     };
-  };
-
-  const allPlayers = [
-    ...homePlayers.map((p, i) => wander(p, i)),
-    ...awayPlayers.map((p, i) => wander(p, i + 100)),
-  ];
+    return [
+      ...homeFallback.map((p, i) => wander(p, i)),
+      ...awayFallback.map((p, i) => wander(p, i + 100)),
+    ];
+  }, [trackingFrame, tick, sport, seed]);
 
   const bgColors: [string, string] = sport === "hockey" ? ["#18263a", "#0c1520"]
     : sport === "basketball" ? ["#1a0d08", "#0c0804"]
