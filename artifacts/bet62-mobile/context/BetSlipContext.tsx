@@ -8,6 +8,8 @@ export interface BetSelection {
   selection?: string;
   label: string;
   odds: number;
+  date?: string;
+  time?: string;
 }
 
 interface BetSlipContextType {

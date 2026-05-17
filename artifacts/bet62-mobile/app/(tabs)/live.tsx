@@ -128,7 +128,12 @@ function LiveMatchCard({ match }: { match: LiveMatch }) {
 
   const sportColor = SPORT_COLORS[match.sport] ?? colors.mutedForeground;
   const now = Date.now();
-  const suspended = match.marketSuspension?.["result"] != null && match.marketSuspension["result"]! > now;
+  const hasBlockingEvent = (() => {
+    const r = (match.suspensionReason ?? "").toUpperCase();
+    return r.includes("VAR") || r.includes("PENAL") || r.includes("PÊNALTI") || r.includes("PENÁLT") ||
+      r === "GOLO" || r.includes("GOAL") || r.includes("CHANCE");
+  })();
+  const suspended = (match.marketSuspension?.["result"] != null && match.marketSuspension["result"]! > now) || hasBlockingEvent;
   const sets = match._liveExtra?.sets;
   const currentPoints = match._liveExtra?.currentPoints;
   const periods = match._liveExtra?.periods;
@@ -147,7 +152,7 @@ function LiveMatchCard({ match }: { match: LiveMatch }) {
     if (suspended) return;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     if (hasSelection(match.id, market)) removeSelection(match.id, market);
-    else addSelection({ matchId: match.id, matchTitle: `${match.home} vs ${match.away}`, market, selection: market, label: `${match.home} vs ${match.away} — ${label}`, odds: value });
+    else addSelection({ matchId: match.id, matchTitle: `${match.home} vs ${match.away}`, market, selection: market, label: `${match.home} vs ${match.away} — ${label}`, odds: value, date: match.date, time: match.time });
   }
 
   const minuteLabel = isTennis ? `S${match.minute ?? 1}` : `${match.minute ?? 0}'`;

@@ -83,7 +83,8 @@ function getTabsForSport(
   sport: string, isLive: boolean, show2tempo: boolean, showET: boolean, showPen: boolean
 ): TabDef[] {
   const AV: TabDef = { key: "aovivo", label: "⚡ Ao Vivo" };
-  const pre: TabDef[] = [];
+  const ST: TabDef = { key: "stats", label: "📊 Stats" };
+  const pre: TabDef[] = [ST];
   const suf: TabDef[] = isLive ? [AV] : [];
 
   if (sport === "basketball") return [
@@ -185,9 +186,17 @@ export function ComprehensiveMarketsSheet({ visible, match, onClose }: Props) {
   }, [match.odds.home, match.odds.draw, match.odds.away, isLive]);
 
   const now = Date.now();
+  function hasBlockingReason(): boolean {
+    if (!isLive) return false;
+    const r = (match.suspensionReason ?? "").toUpperCase();
+    return r.includes("VAR") || r.includes("PENAL") || r.includes("PÊNALTI") || r.includes("PENÁLT") ||
+      r === "GOLO" || r.includes("GOAL") || r.includes("CHANCE");
+  }
+
   function susp(market: string): boolean {
     const exp = match.marketSuspension?.[market];
-    return exp != null && exp > now;
+    if (exp != null && exp > now) return true;
+    return hasBlockingReason();
   }
 
   function handleOdds(market: string, label: string, value: number) {
@@ -199,6 +208,8 @@ export function ComprehensiveMarketsSheet({ visible, match, onClose }: Props) {
       market, selection: market,
       label: `${match.home} vs ${match.away} — ${label}`,
       odds: value,
+      date: match.date,
+      time: match.time,
     });
   }
 
@@ -281,8 +292,23 @@ export function ComprehensiveMarketsSheet({ visible, match, onClose }: Props) {
     }));
   }
 
+  const topPad = Platform.OS === "web" ? 0 : insets.top;
+  const leagueFlag = getLeagueFlag(match.league, match.country);
+  const dateStr = formatDateDisplay(match.date, isLive, match.minute, match.time);
+  const hasDraw = match.odds.draw > 1.01;
+
+  const isObviousLiveResult = isLive && isFootball && (() => {
+    const minOdd = Math.min(match.odds.home, match.odds.away);
+    if (minOdd <= 1.05) return true;
+    const min = match.minute ?? 0;
+    const diff = Math.abs((match.homeScore ?? 0) - (match.awayScore ?? 0));
+    if (min >= 80 && diff >= 2) return true;
+    if (min >= 85 && diff >= 1) return true;
+    return false;
+  })();
+
   const isSuspendedGlobal = susp("result");
-  const isBigChance = isLive && isFootball && !isSuspendedGlobal &&
+  const isBigChance = isLive && isFootball && !isSuspendedGlobal && !isObviousLiveResult &&
     (match.odds.home <= 1.06 || match.odds.away <= 1.06) && (match.minute ?? 0) > 0;
   const showSuspBanner = isSuspendedGlobal || isBigChance;
 
@@ -298,21 +324,6 @@ export function ComprehensiveMarketsSheet({ visible, match, onClose }: Props) {
     if (r.includes("CHANCE")) return "⚡ GRANDE CHANCE DE GOLO";
     return "⚠️ ODDS EM ATUALIZAÇÃO";
   }
-
-  const topPad = Platform.OS === "web" ? 0 : insets.top;
-  const leagueFlag = getLeagueFlag(match.league, match.country);
-  const dateStr = formatDateDisplay(match.date, isLive, match.minute, match.time);
-  const hasDraw = match.odds.draw > 1.01;
-
-  const isObviousLiveResult = isLive && isFootball && (() => {
-    const minOdd = Math.min(match.odds.home, match.odds.away);
-    if (minOdd <= 1.05) return true;
-    const min = match.minute ?? 0;
-    const diff = Math.abs((match.homeScore ?? 0) - (match.awayScore ?? 0));
-    if (min >= 80 && diff >= 2) return true;
-    if (min >= 85 && diff >= 1) return true;
-    return false;
-  })();
 
   const s = StyleSheet.create({
     overlay: { flex: 1, backgroundColor: "#00000080" },
@@ -614,7 +625,9 @@ export function ComprehensiveMarketsSheet({ visible, match, onClose }: Props) {
             <View style={s.teamsRow}>
               <Text style={s.teamText} numberOfLines={1}>{match.home}</Text>
               <View style={{ flexDirection: "row", alignItems: "center", gap: 5 }}>
-                <Ionicons name="bar-chart-outline" size={16} color={colors.mutedForeground} />
+                <Pressable onPress={() => setActiveTab("stats")} hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}>
+                  <Ionicons name="bar-chart-outline" size={16} color={activeTab === "stats" ? colors.primary : colors.mutedForeground} />
+                </Pressable>
                 {isLive && (
                   <Pressable onPress={() => setActiveTab("aovivo")} hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}>
                     <Ionicons name="pulse-outline" size={16} color={activeTab === "aovivo" ? "#22c55e" : colors.mutedForeground} />
@@ -677,7 +690,9 @@ export function ComprehensiveMarketsSheet({ visible, match, onClose }: Props) {
 
             {activeTab === "aovivo" && isLive && <AoVivoContent />}
 
-            {activeTab !== "aovivo" && (
+            {activeTab === "stats" && <StatsContent />}
+
+            {activeTab !== "aovivo" && activeTab !== "stats" && (
               <>
                 {match.odds.home > 1.01 && !isObviousLiveResult && (
                   <Section title="Resultado Final" tabKey="resultado">

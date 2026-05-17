@@ -23,7 +23,7 @@ interface Bet {
   id: number;
   matchId: string;
   matchTitle: string;
-  selections: Array<{ label: string; odds: number; market?: string; matchTitle?: string }>;
+  selections: Array<{ label: string; odds: number; market?: string; matchTitle?: string; date?: string; time?: string }>;
   stake: string;
   potentialWin: string;
   totalOdds: string;
@@ -70,7 +70,9 @@ function BetCard({ bet, token, onCashout }: { bet: Bet; token: string | null; on
   const stake = parseFloat(bet.stake);
   const totalOdds = parseFloat(bet.totalOdds);
   const potentialWin = parseFloat(bet.potentialWin);
-  const estimatedCashout = (potentialWin * 0.92).toFixed(2);
+  // Correct estimate: at minimum you recover stake × 0.92 (the 8% house margin when current ≈ original odds).
+  // potentialWin × 0.92 was wrong — that formula assumed you could cash out at near-full win.
+  const estimatedCashout = (stake * 0.92).toFixed(2);
   const actualCashout = bet.cashoutValue ? parseFloat(bet.cashoutValue).toFixed(2) : null;
 
   async function executeCashout() {
@@ -210,10 +212,18 @@ function BetCard({ bet, token, onCashout }: { bet: Bet; token: string | null; on
           <View style={s.selections}>
             {selections.map((sel, i) => {
               const { match, pick } = parseSelectionLabel(sel.label ?? "");
+              const matchDateLabel = sel.date
+                ? new Date(sel.date).toLocaleDateString("pt-PT", { weekday: "short", day: "2-digit", month: "2-digit" }) + (sel.time ? ` ${sel.time.slice(0, 5)}` : "")
+                : null;
               return (
                 <View key={i} style={s.selectionRow}>
                   <View style={s.selectionDot} />
                   <View style={s.selectionBody}>
+                    {matchDateLabel && (
+                      <Text style={[s.selectionMatch, { color: colors.primary + "bb", fontSize: 10 }]} numberOfLines={1}>
+                        🗓 {matchDateLabel}
+                      </Text>
+                    )}
                     {match && <Text style={s.selectionMatch} numberOfLines={1}>{match}</Text>}
                     <Text style={s.selectionPick} numberOfLines={1}>{pick}</Text>
                   </View>
