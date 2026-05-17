@@ -1132,6 +1132,7 @@ type UserBet = {
   potentialWin: string;
   totalOdds: string;
   status: string;
+  cashoutValue?: string | null;
   createdAt: string;
 };
 
@@ -3842,6 +3843,36 @@ export default function Home() {
     );
   };
 
+  const MarketGrid2Group = ({ title, children }: { title: string; children: ReactNode }) => {
+    const tab = useContext(MarketTabCtx);
+    const collapsible = tab === "todos";
+    const [open, setOpen] = useState(true);
+    if (!collapsible) {
+      return (
+        <div className="mb-4 last:mb-0">
+          <div className="text-[10px] font-black text-zinc-500 uppercase tracking-widest mb-2 px-0.5">{title}</div>
+          <div className="grid grid-cols-2 gap-2">{children}</div>
+        </div>
+      );
+    }
+    return (
+      <div className="mb-1.5 last:mb-0 border border-zinc-800 rounded-lg overflow-hidden">
+        <button
+          className="w-full flex items-center justify-between px-3 py-2.5 text-left bg-zinc-800/60 hover:bg-zinc-800 active:bg-zinc-700 transition-colors"
+          onClick={() => setOpen(o => !o)}
+        >
+          <span className="text-[10px] font-black text-zinc-300 uppercase tracking-widest">{title}</span>
+          <ChevronDown size={14} className={`text-zinc-500 transition-transform duration-200 ${open ? "rotate-180" : ""}`} />
+        </button>
+        {open && (
+          <div className="px-3 py-3">
+            <div className="grid grid-cols-2 gap-2">{children}</div>
+          </div>
+        )}
+      </div>
+    );
+  };
+
   const MarketGroup = ({ title, children }: { title: string; children: ReactNode }) => {
     const tab = useContext(MarketTabCtx);
     const collapsible = tab === "todos";
@@ -4207,14 +4238,14 @@ export default function Home() {
               </MarketGroup>
             )}
             {(m as any).exactGoals?.g2 > 0 && (
-              <MarketGroup title="Gols Exatos">
+              <MarketGrid2Group title="Gols Exatos">
                 {(m as any).exactGoals.g0 > 0 && <MarketOddsBtn match={match} sel="eg-0"  odd={(m as any).exactGoals.g0}     market="gols" label="0 gols" />}
                 {(m as any).exactGoals.g1 > 0 && <MarketOddsBtn match={match} sel="eg-1"  odd={(m as any).exactGoals.g1}     market="gols" label="1 gol" />}
                 {(m as any).exactGoals.g2 > 0 && <MarketOddsBtn match={match} sel="eg-2"  odd={(m as any).exactGoals.g2}     market="gols" label="2 gols" />}
                 {(m as any).exactGoals.g3 > 0 && <MarketOddsBtn match={match} sel="eg-3"  odd={(m as any).exactGoals.g3}     market="gols" label="3 gols" />}
                 {(m as any).exactGoals.g4 > 0 && <MarketOddsBtn match={match} sel="eg-4"  odd={(m as any).exactGoals.g4}     market="gols" label="4 gols" />}
                 {(m as any).exactGoals.g5plus > 0 && <MarketOddsBtn match={match} sel="eg-5p" odd={(m as any).exactGoals.g5plus} market="gols" label="5+ gols" />}
-              </MarketGroup>
+              </MarketGrid2Group>
             )}
           </div>
         )}
@@ -4222,22 +4253,22 @@ export default function Home() {
         {/* ── FUTEBOL: GOLS POR EQUIPA (FT) ── */}
         {isFootball && !showET && !showPen && (modalTab === "gols" || modalTab === "todos") && m && (m as any).teamGoals?.homeOver05 > 0 && (
           <div>
-            <MarketGroup title={`${match.home} — Golos`}>
+            <MarketGrid2Group title={`${match.home} — Golos`}>
               {(m as any).teamGoals.homeOver05 > 0 && <MarketOddsBtn match={match} sel="tgh-o05" odd={(m as any).teamGoals.homeOver05} market="gols" label="Mais 0.5" />}
               {(m as any).teamGoals.homeUnder05 > 0 && <MarketOddsBtn match={match} sel="tgh-u05" odd={(m as any).teamGoals.homeUnder05} market="gols" label="Menos 0.5" />}
               {(m as any).teamGoals.homeOver15 > 0 && <MarketOddsBtn match={match} sel="tgh-o15" odd={(m as any).teamGoals.homeOver15} market="gols" label="Mais 1.5" />}
               {(m as any).teamGoals.homeUnder15 > 0 && <MarketOddsBtn match={match} sel="tgh-u15" odd={(m as any).teamGoals.homeUnder15} market="gols" label="Menos 1.5" />}
               {(m as any).teamGoals.homeOver25 > 0 && <MarketOddsBtn match={match} sel="tgh-o25" odd={(m as any).teamGoals.homeOver25} market="gols" label="Mais 2.5" />}
               {(m as any).teamGoals.homeUnder25 > 0 && <MarketOddsBtn match={match} sel="tgh-u25" odd={(m as any).teamGoals.homeUnder25} market="gols" label="Menos 2.5" />}
-            </MarketGroup>
-            <MarketGroup title={`${match.away} — Golos`}>
+            </MarketGrid2Group>
+            <MarketGrid2Group title={`${match.away} — Golos`}>
               {(m as any).teamGoals.awayOver05 > 0 && <MarketOddsBtn match={match} sel="tga-o05" odd={(m as any).teamGoals.awayOver05} market="gols" label="Mais 0.5" />}
               {(m as any).teamGoals.awayUnder05 > 0 && <MarketOddsBtn match={match} sel="tga-u05" odd={(m as any).teamGoals.awayUnder05} market="gols" label="Menos 0.5" />}
               {(m as any).teamGoals.awayOver15 > 0 && <MarketOddsBtn match={match} sel="tga-o15" odd={(m as any).teamGoals.awayOver15} market="gols" label="Mais 1.5" />}
               {(m as any).teamGoals.awayUnder15 > 0 && <MarketOddsBtn match={match} sel="tga-u15" odd={(m as any).teamGoals.awayUnder15} market="gols" label="Menos 1.5" />}
               {(m as any).teamGoals.awayOver25 > 0 && <MarketOddsBtn match={match} sel="tga-o25" odd={(m as any).teamGoals.awayOver25} market="gols" label="Mais 2.5" />}
               {(m as any).teamGoals.awayUnder25 > 0 && <MarketOddsBtn match={match} sel="tga-u25" odd={(m as any).teamGoals.awayUnder25} market="gols" label="Menos 2.5" />}
-            </MarketGroup>
+            </MarketGrid2Group>
           </div>
         )}
 
@@ -8614,24 +8645,15 @@ export default function Home() {
                     </div>
                   ) : (
                     <div className="divide-y divide-zinc-800">
-                      {/* Initial deposit row */}
-                      <div className="flex items-center justify-between px-4 py-3">
-                        <div className="flex items-center gap-3">
-                          <div className="w-8 h-8 rounded-full bg-green-900/50 flex items-center justify-center shrink-0">
-                            <ArrowDownCircle size={16} className="text-green-400" />
-                          </div>
-                          <div>
-                            <div className="text-sm font-medium">Depósito inicial</div>
-                            <div className="text-xs text-zinc-500">Bónus de boas-vindas</div>
-                          </div>
-                        </div>
-                        <div className="text-green-400 font-bold text-sm">+ € 1.000,00</div>
-                      </div>
                       {[...myBets].reverse().map(bet => {
                         const isWon = bet.status === "won";
                         const isCO = bet.status === "cashed_out";
                         const isPending = bet.status === "pending";
-                        const credit = isWon ? parseFloat(bet.potentialWin) : isCO ? parseFloat(bet.potentialWin) * 0.92 : null;
+                        const credit = isWon
+                          ? parseFloat(bet.potentialWin)
+                          : isCO && bet.cashoutValue
+                          ? parseFloat(bet.cashoutValue)
+                          : null;
                         return (
                           <div key={bet.id} className="flex items-center justify-between px-4 py-3">
                             <div className="flex items-center gap-3 min-w-0">

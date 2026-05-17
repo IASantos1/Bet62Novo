@@ -12,7 +12,8 @@ export const betsTable = pgTable("bets", {
   stake: decimal("stake", { precision: 10, scale: 2 }).notNull(),
   potentialWin: decimal("potential_win", { precision: 10, scale: 2 }).notNull(),
   totalOdds: decimal("total_odds", { precision: 10, scale: 2 }).notNull(),
-  status: text("status").notNull().default("pending"), // pending, won, lost
+  status: text("status").notNull().default("pending"), // pending, won, lost, cashed_out
+  cashoutValue: decimal("cashout_value", { precision: 10, scale: 2 }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 

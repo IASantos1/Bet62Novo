@@ -274,13 +274,20 @@ export default function ProfileTab({ myBets, myBetsLoading, fetchMyBets }: Profi
                 <li>Anexe: Cartão de Cidadão ou Passaporte (frente e verso)</li>
                 <li>Anexe: Comprovativo de morada recente (fatura, extrato)</li>
               </ol>
-              <Button
-                onClick={() => { navigator.clipboard.writeText("kyc@bet62.pt"); toast.success("Email copiado!"); }}
-                size="sm"
-                className="bg-red-600 hover:bg-red-700 text-white text-xs"
-              >
-                <Mail size={12} className="mr-1" /> Copiar email KYC
-              </Button>
+              <div className="flex flex-col sm:flex-row gap-2">
+                <a
+                  href={`mailto:kyc@bet62.pt?subject=KYC Verificação — ${memberId}&body=Olá,%0A%0AEnvio os meus documentos para verificação de identidade.%0A%0AID de Membro: ${memberId}%0A%0ADocumentos em anexo:%0A- Cartão de Cidadão ou Passaporte (frente e verso)%0A- Comprovativo de morada recente (fatura ou extrato)%0A%0ACom os melhores cumprimentos`}
+                  className="inline-flex items-center justify-center gap-1.5 bg-red-600 hover:bg-red-700 text-white text-xs font-semibold px-3 py-2 rounded-md transition-colors"
+                >
+                  <Mail size={12} /> Enviar Documentos por Email
+                </a>
+                <button
+                  onClick={() => { navigator.clipboard.writeText("kyc@bet62.pt"); toast.success("Email copiado!"); }}
+                  className="inline-flex items-center justify-center gap-1.5 bg-zinc-700 hover:bg-zinc-600 text-zinc-300 text-xs font-semibold px-3 py-2 rounded-md transition-colors"
+                >
+                  <Mail size={12} /> Copiar email KYC
+                </button>
+              </div>
             </div>
           </SectionCard>
         );

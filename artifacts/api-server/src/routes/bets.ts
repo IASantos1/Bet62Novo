@@ -128,7 +128,7 @@ router.post("/:id/cashout", authMiddleware, async (req: AuthRequest, res: Respon
     const userBalance = parseFloat(user.balance);
 
     const result = await db.transaction(async (tx) => {
-      await tx.update(betsTable).set({ status: "cashed_out" }).where(eq(betsTable.id, betId));
+      await tx.update(betsTable).set({ status: "cashed_out", cashoutValue: String(cashoutValue) }).where(eq(betsTable.id, betId));
       const newBalance = (userBalance + cashoutValue).toFixed(2);
       await tx.update(usersTable).set({ balance: newBalance }).where(eq(usersTable.id, req.user!.id));
       return { cashoutValue, newBalance };
