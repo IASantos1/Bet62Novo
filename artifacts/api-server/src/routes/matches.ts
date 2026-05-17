@@ -1695,7 +1695,7 @@ type TennisMatch = { id: string; status: string; time: string; date: string; tb:
 type TennisTournament = { id: string; name: string; match: TennisMatch | TennisMatch[] };
 let tennisLiveCache: TennisTournament[] | null = null;
 let tennisLiveFetchedAt = 0;
-const TENNIS_LIVE_CACHE_TTL = 4_000; // 4s — real-time tennis points
+const TENNIS_LIVE_CACHE_TTL = 2_000; // 2s — real-time tennis points
 
 // Tennis match stats (parsed from livestats endpoint)
 type TennisStatData = {

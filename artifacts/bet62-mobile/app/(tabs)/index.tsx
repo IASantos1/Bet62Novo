@@ -18,23 +18,9 @@ import { useColors } from "@/hooks/useColors";
 import { useAuth } from "@/context/AuthContext";
 import { useBetSlip } from "@/context/BetSlipContext";
 import { API_BASE } from "@/context/AuthContext";
+import { useLiveMatches, type LiveMatch } from "@/hooks/useLiveMatches";
 
 type MCIconName = ComponentProps<typeof MaterialCommunityIcons>["name"];
-
-interface LiveMatch {
-  id: string;
-  sport: string;
-  status: string;
-  minute?: number;
-  home: string;
-  away: string;
-  homeScore: number;
-  awayScore: number;
-  odds: { home: number; draw: number; away: number };
-  league?: string;
-  marketSuspension?: Record<string, number>; // market key → timestamp when suspension ends
-  suspensionReason?: string; // e.g. "PENÁLTI", "REVISÃO AO VAR", "GRANDE CHANCE"
-}
 
 interface UpcomingMatch {
   id: string;
@@ -299,15 +285,9 @@ export default function MatchesScreen() {
 
   const topPad = Platform.OS === "web" ? 67 : insets.top;
 
-  const { data: liveData, isLoading: liveLoading, refetch: refetchLive } = useQuery({
-    queryKey: ["live-matches"],
-    queryFn: async () => {
-      const res = await fetch(`${API_BASE}/matches/live`);
-      if (!res.ok) throw new Error("Failed");
-      return res.json() as Promise<{ matches: LiveMatch[] }>;
-    },
-    refetchInterval: 5000,
-  });
+  // SSE real-time live matches (falls back to 5s HTTP polling on error)
+  const { matches: allLive, connected: liveConnected, lastUpdated } = useLiveMatches();
+  const liveLoaded = lastUpdated > 0;
 
   const { data: upcomingData, isLoading: upcomingLoading, refetch: refetchUpcoming } = useQuery({
     queryKey: ["upcoming-matches"],
@@ -319,13 +299,12 @@ export default function MatchesScreen() {
     refetchInterval: 60000,
   });
 
-  const allLive: LiveMatch[] = liveData?.matches ?? [];
   const allUpcoming: UpcomingMatch[] = upcomingData?.matches ?? [];
 
   const filteredLive = selectedSport === "all" ? allLive : allLive.filter((m) => m.sport === selectedSport);
   const filteredUpcoming = selectedSport === "all" ? allUpcoming : allUpcoming.filter((m) => m.sport === selectedSport);
 
-  const isLoading = liveLoading && upcomingLoading;
+  const isLoading = !liveLoaded && upcomingLoading;
 
   type Section =
     | { type: "section-header"; id: string; title: string; count: number }
@@ -496,7 +475,7 @@ export default function MatchesScreen() {
           refreshControl={
             <RefreshControl
               refreshing={false}
-              onRefresh={() => { refetchLive(); refetchUpcoming(); }}
+              onRefresh={() => { refetchUpcoming(); }}
               tintColor={colors.primary}
             />
           }
