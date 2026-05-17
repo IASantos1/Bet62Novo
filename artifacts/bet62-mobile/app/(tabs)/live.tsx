@@ -1,6 +1,5 @@
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
-import { router } from "expo-router";
 import React, { type ComponentProps, useState } from "react";
 import {
   ActivityIndicator,
@@ -15,7 +14,6 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useColors } from "@/hooks/useColors";
-import { useAuth } from "@/context/AuthContext";
 import { useBetSlip } from "@/context/BetSlipContext";
 import { useLiveMatches, type LiveMatch } from "@/hooks/useLiveMatches";
 import { ComprehensiveMarketsSheet } from "@/components/ComprehensiveMarketsSheet";
@@ -51,41 +49,69 @@ const SPORT_ICONS: Record<string, MCIconName> = {
   baseball: "baseball",
 };
 
-function TennisScore({ sets, currentPoints }: { sets?: Array<[number, number]>; currentPoints?: [number | string, number | string] }) {
-  const colors = useColors();
-  if (!sets || sets.length === 0) return null;
-  const done = sets.slice(0, -1);
-  const cur = sets[sets.length - 1];
+/** Tennis score — home row on top, away row on bottom; each column = one set */
+function TennisScore({
+  sets,
+  currentPoints,
+  colors,
+}: {
+  sets: Array<[number, number]>;
+  currentPoints?: [number | string, number | string];
+  colors: ReturnType<typeof useColors>;
+}) {
+  const currentIdx = sets.length - 1;
+
+  function SetCell({ value, isCurrent }: { value: number | string; isCurrent: boolean }) {
+    return (
+      <View style={{
+        width: 26, height: 24,
+        borderRadius: 5, alignItems: "center", justifyContent: "center",
+        backgroundColor: isCurrent ? colors.primary + "30" : "#ffffff12",
+        borderWidth: isCurrent ? 1 : 0,
+        borderColor: colors.primary + "70",
+      }}>
+        <Text style={{
+          fontSize: 13, fontFamily: "Inter_700Bold",
+          color: isCurrent ? colors.primary : colors.foreground,
+        }}>{String(value)}</Text>
+      </View>
+    );
+  }
+
+  function PtCell({ value }: { value: number | string }) {
+    return (
+      <View style={{
+        width: 32, height: 24,
+        borderRadius: 5, alignItems: "center", justifyContent: "center",
+        backgroundColor: "#f59e0b18",
+      }}>
+        <Text style={{ fontSize: 12, fontFamily: "Inter_700Bold", color: "#f59e0b" }}>{String(value)}</Text>
+      </View>
+    );
+  }
+
   return (
     <View style={{ alignItems: "center", gap: 3 }}>
+      {/* Home row */}
       <View style={{ flexDirection: "row", gap: 3 }}>
-        {done.map((s, i) => (
-          <View key={i} style={{ backgroundColor: "#ffffff10", borderRadius: 4, paddingHorizontal: 5, paddingVertical: 2 }}>
-            <Text style={{ fontSize: 11, fontFamily: "Inter_600SemiBold", color: colors.mutedForeground }}>{s[0]}-{s[1]}</Text>
-          </View>
-        ))}
-        {cur && (
-          <View style={{ backgroundColor: colors.primary + "30", borderRadius: 4, paddingHorizontal: 6, paddingVertical: 2, borderWidth: 1, borderColor: colors.primary + "50" }}>
-            <Text style={{ fontSize: 13, fontFamily: "Inter_700Bold", color: colors.foreground }}>{cur[0]}-{cur[1]}</Text>
-          </View>
-        )}
+        {sets.map((s, i) => <SetCell key={i} value={s[0]} isCurrent={i === currentIdx} />)}
+        {currentPoints && <PtCell value={currentPoints[0]} />}
       </View>
-      {currentPoints && (
-        <Text style={{ fontSize: 11, fontFamily: "Inter_600SemiBold", color: "#f59e0b" }}>
-          {String(currentPoints[0])} : {String(currentPoints[1])}
-        </Text>
-      )}
+      {/* Away row */}
+      <View style={{ flexDirection: "row", gap: 3 }}>
+        {sets.map((s, i) => <SetCell key={i} value={s[1]} isCurrent={i === currentIdx} />)}
+        {currentPoints && <PtCell value={currentPoints[1]} />}
+      </View>
     </View>
   );
 }
 
-function PeriodBreakdown({ periods }: { periods: Array<[number, number]> }) {
-  const colors = useColors();
+function PeriodBreakdown({ periods, colors }: { periods: Array<[number, number]>; colors: ReturnType<typeof useColors> }) {
   return (
-    <View style={{ flexDirection: "row", gap: 3, marginTop: 2 }}>
+    <View style={{ flexDirection: "row", gap: 3, marginTop: 3 }}>
       {periods.map((p, i) => (
         <View key={i} style={{ backgroundColor: "#ffffff10", borderRadius: 3, paddingHorizontal: 4, paddingVertical: 1 }}>
-          <Text style={{ fontSize: 9, fontFamily: "Inter_500Medium", color: colors.mutedForeground }}>{p[0]}-{p[1]}</Text>
+          <Text style={{ fontSize: 9, fontFamily: "Inter_500Medium", color: colors.mutedForeground }}>{p[0]}–{p[1]}</Text>
         </View>
       ))}
     </View>
@@ -99,7 +125,9 @@ function LiveMatchCard({ match }: { match: LiveMatch }) {
 
   const sportColor = SPORT_COLORS[match.sport] ?? colors.mutedForeground;
   const now = Date.now();
-  const suspended = match.marketSuspension?.["result"] != null && match.marketSuspension["result"]! > now;
+  const suspended =
+    match.marketSuspension?.["result"] != null &&
+    match.marketSuspension["result"]! > now;
 
   const sets = match._liveExtra?.sets;
   const currentPoints = match._liveExtra?.currentPoints;
@@ -116,11 +144,22 @@ function LiveMatchCard({ match }: { match: LiveMatch }) {
     if (suspended) return;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     if (hasSelection(match.id, market)) removeSelection(match.id, market);
-    else addSelection({ matchId: match.id, matchTitle: `${match.home} vs ${match.away}`, market, selection: market, label: `${match.home} vs ${match.away} — ${label}`, odds: value });
+    else
+      addSelection({
+        matchId: match.id,
+        matchTitle: `${match.home} vs ${match.away}`,
+        market, selection: market,
+        label: `${match.home} vs ${match.away} — ${label}`,
+        odds: value,
+      });
   }
 
   const s = StyleSheet.create({
-    card: { backgroundColor: colors.card, borderRadius: 12, marginHorizontal: 14, marginBottom: 10, borderWidth: 1, borderColor: colors.border, overflow: "hidden" },
+    card: {
+      backgroundColor: colors.card, borderRadius: 12,
+      marginHorizontal: 14, marginBottom: 10,
+      borderWidth: 1, borderColor: colors.border, overflow: "hidden",
+    },
     stripe: { height: 3, backgroundColor: sportColor },
     body: { padding: 12 },
     topRow: { flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 8 },
@@ -130,31 +169,43 @@ function LiveMatchCard({ match }: { match: LiveMatch }) {
     teamsRow: { flexDirection: "row", alignItems: "center", marginBottom: 10 },
     team: { flex: 1, fontSize: 13, fontFamily: "Inter_600SemiBold", color: colors.foreground },
     teamAway: { textAlign: "right" as const },
-    scoreBox: { backgroundColor: "#0c0c12", borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6, marginHorizontal: 6, borderWidth: 1, borderColor: colors.primary + "40", alignItems: "center" },
+    scoreBox: {
+      backgroundColor: "#0c0c12", borderRadius: 8,
+      paddingHorizontal: 10, paddingVertical: 6, marginHorizontal: 6,
+      borderWidth: 1, borderColor: colors.primary + "40", alignItems: "center",
+    },
     scoreText: { fontSize: 18, fontFamily: "Inter_700Bold", color: "#ffffff" },
     oddsRow: { flexDirection: "row", gap: 6 },
     oddsBtn: { flex: 1, borderRadius: 8, borderWidth: 1, paddingVertical: 8, alignItems: "center" },
     oddsLabel: { fontSize: 10, fontFamily: "Inter_500Medium", marginBottom: 1 },
     oddsValue: { fontSize: 13, fontFamily: "Inter_700Bold" },
-    marketsHint: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 4, marginTop: 8, paddingVertical: 5, borderRadius: 6, backgroundColor: colors.muted, borderWidth: 1, borderColor: colors.border },
-    marketsHintText: { fontSize: 11, fontFamily: "Inter_500Medium", color: colors.mutedForeground },
-    suspBanner: { flexDirection: "row", alignItems: "center", gap: 5, backgroundColor: "#ef444415", borderRadius: 6, paddingHorizontal: 8, paddingVertical: 4, marginBottom: 8 },
+    suspBanner: {
+      flexDirection: "row", alignItems: "center", gap: 5,
+      backgroundColor: "#ef444415", borderRadius: 6,
+      paddingHorizontal: 8, paddingVertical: 4, marginBottom: 8,
+    },
     suspText: { fontSize: 10, fontFamily: "Inter_600SemiBold", color: "#ef4444" },
   });
-
-  const hasMarkets = match.markets != null;
 
   return (
     <>
       <Pressable
         style={({ pressed }) => [s.card, { opacity: pressed ? 0.97 : 1 }]}
-        onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setMarketsOpen(true); }}
+        onPress={() => {
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+          setMarketsOpen(true);
+        }}
       >
         <View style={s.stripe} />
         <View style={s.body}>
+          {/* Top row: sport icon, league, minute */}
           <View style={s.topRow}>
             <View style={s.liveDot} />
-            <MaterialCommunityIcons name={SPORT_ICONS[match.sport] ?? "trophy"} size={12} color={sportColor} />
+            <MaterialCommunityIcons
+              name={SPORT_ICONS[match.sport] ?? "trophy"}
+              size={12}
+              color={sportColor}
+            />
             <Text style={s.league} numberOfLines={1}>{match.league ?? match.sport}</Text>
             {isTennis
               ? <Text style={[s.minute, { color: "#22c55e" }]}>Set {match.minute ?? 1}</Text>
@@ -162,33 +213,39 @@ function LiveMatchCard({ match }: { match: LiveMatch }) {
             }
           </View>
 
+          {/* Teams + Score */}
           <View style={s.teamsRow}>
             <Text style={s.team} numberOfLines={1}>{match.home}</Text>
+
             <View style={s.scoreBox}>
               {isTennis && sets && sets.length > 0 ? (
-                <TennisScore sets={sets} currentPoints={currentPoints} />
+                <TennisScore sets={sets} currentPoints={currentPoints} colors={colors} />
               ) : (isHockey && periods && periods.length > 0) ? (
                 <View style={{ alignItems: "center" }}>
                   <Text style={s.scoreText}>{match.homeScore} – {match.awayScore}</Text>
-                  <PeriodBreakdown periods={periods} />
+                  <PeriodBreakdown periods={periods} colors={colors} />
                 </View>
               ) : (isBball && quarters && quarters.length > 0) ? (
                 <View style={{ alignItems: "center" }}>
                   <Text style={s.scoreText}>{match.homeScore} – {match.awayScore}</Text>
-                  <PeriodBreakdown periods={quarters} />
+                  <PeriodBreakdown periods={quarters} colors={colors} />
                 </View>
               ) : (isBase && innings && innings.length > 0) ? (
                 <View style={{ alignItems: "center" }}>
                   <Text style={s.scoreText}>{match.homeScore} – {match.awayScore}</Text>
-                  <Text style={{ fontSize: 9, color: colors.mutedForeground, fontFamily: "Inter_400Regular" }}>{innings.length}ª ent.</Text>
+                  <Text style={{ fontSize: 9, color: colors.mutedForeground, fontFamily: "Inter_400Regular" }}>
+                    {innings.length}ª ent.
+                  </Text>
                 </View>
               ) : (
                 <Text style={s.scoreText}>{match.homeScore} – {match.awayScore}</Text>
               )}
             </View>
+
             <Text style={[s.team, s.teamAway]} numberOfLines={1}>{match.away}</Text>
           </View>
 
+          {/* Suspension banner */}
           {suspended && (
             <View style={s.suspBanner}>
               <Ionicons name="warning" size={12} color="#ef4444" />
@@ -196,17 +253,25 @@ function LiveMatchCard({ match }: { match: LiveMatch }) {
             </View>
           )}
 
+          {/* 1X2 odds */}
           <View style={s.oddsRow}>
             {(["1x2-home", "1x2-draw", "1x2-away"] as const).map((mkt, idx) => {
               const val = idx === 0 ? match.odds.home : idx === 1 ? match.odds.draw : match.odds.away;
               if (idx === 1 && !hasDraw) return null;
               const label = idx === 0 ? "1" : idx === 1 ? "X" : "2";
-              const sel = hasSelection(match.id, mkt);
               const labelFull = idx === 0 ? "1 (Casa)" : idx === 1 ? "X (Empate)" : "2 (Fora)";
+              const sel = hasSelection(match.id, mkt);
               return (
                 <Pressable
                   key={mkt}
-                  style={({ pressed }) => [s.oddsBtn, { backgroundColor: suspended ? colors.muted : sel ? colors.primary : colors.muted, borderColor: suspended ? colors.border : sel ? colors.primary : colors.border, opacity: suspended ? 0.55 : pressed ? 0.8 : 1 }]}
+                  style={({ pressed }) => [
+                    s.oddsBtn,
+                    {
+                      backgroundColor: suspended ? colors.muted : sel ? colors.primary : colors.muted,
+                      borderColor: suspended ? colors.border : sel ? colors.primary : colors.border,
+                      opacity: suspended ? 0.55 : pressed ? 0.8 : 1,
+                    },
+                  ]}
                   onPress={(e) => { e.stopPropagation?.(); handleOdds(mkt, labelFull, val); }}
                 >
                   <Text style={[s.oddsLabel, { color: sel ? colors.primaryForeground : colors.mutedForeground }]}>{label}</Text>
@@ -215,19 +280,27 @@ function LiveMatchCard({ match }: { match: LiveMatch }) {
               );
             })}
           </View>
-
-          {hasMarkets && (
-            <View style={s.marketsHint}>
-              <Ionicons name="options-outline" size={13} color={colors.mutedForeground} />
-              <Text style={s.marketsHintText}>Toca para ver todos os mercados</Text>
-            </View>
-          )}
         </View>
       </Pressable>
 
+      {/* Full-screen markets sheet */}
       <ComprehensiveMarketsSheet
         visible={marketsOpen}
-        match={match}
+        match={{
+          id: match.id,
+          sport: match.sport,
+          home: match.home,
+          away: match.away,
+          odds: match.odds,
+          markets: match.markets,
+          marketSuspension: match.marketSuspension,
+          homeScore: match.homeScore,
+          awayScore: match.awayScore,
+          isLive: true,
+          minute: match.minute,
+          status: match.status,
+          _liveExtra: match._liveExtra,
+        }}
         onClose={() => setMarketsOpen(false)}
       />
     </>
@@ -237,7 +310,6 @@ function LiveMatchCard({ match }: { match: LiveMatch }) {
 export default function LiveScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
-  const { user } = useAuth();
   const { count } = useBetSlip();
   const [slipVisible, setSlipVisible] = useState(false);
   const [selectedSport, setSelectedSport] = useState("all");
@@ -247,14 +319,24 @@ export default function LiveScreen() {
   const { matches: allLive, connected, lastUpdated } = useLiveMatches();
   const liveLoaded = lastUpdated > 0;
 
-  const filtered = selectedSport === "all" ? allLive : allLive.filter((m) => m.sport === selectedSport);
+  const filtered =
+    selectedSport === "all"
+      ? allLive
+      : allLive.filter((m) => m.sport === selectedSport);
 
   const s = StyleSheet.create({
     container: { flex: 1, backgroundColor: colors.background },
-    header: { paddingTop: topPad + 8, paddingHorizontal: 14, paddingBottom: 8, backgroundColor: colors.background, borderBottomWidth: 1, borderBottomColor: colors.border },
+    header: {
+      paddingTop: topPad + 8, paddingHorizontal: 14, paddingBottom: 8,
+      backgroundColor: colors.background,
+      borderBottomWidth: 1, borderBottomColor: colors.border,
+    },
     headerRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 10 },
-    titleRow: { flexDirection: "row", alignItems: "center", gap: 8 },
-    liveBadge: { flexDirection: "row", alignItems: "center", gap: 5, backgroundColor: colors.primary, borderRadius: 6, paddingHorizontal: 8, paddingVertical: 4 },
+    liveBadge: {
+      flexDirection: "row", alignItems: "center", gap: 5,
+      backgroundColor: colors.primary, borderRadius: 6,
+      paddingHorizontal: 8, paddingVertical: 4,
+    },
     liveDot: { width: 5, height: 5, borderRadius: 3, backgroundColor: colors.primaryForeground },
     liveText: { fontSize: 13, fontFamily: "Inter_700Bold", color: colors.primaryForeground },
     countText: { fontSize: 13, fontFamily: "Inter_600SemiBold", color: colors.mutedForeground },
@@ -263,7 +345,16 @@ export default function LiveScreen() {
     emptyWrap: { flex: 1, alignItems: "center", justifyContent: "center", gap: 12, paddingTop: 80 },
     emptyText: { fontSize: 16, fontFamily: "Inter_600SemiBold", color: colors.mutedForeground },
     emptySubtext: { fontSize: 13, fontFamily: "Inter_400Regular", color: colors.mutedForeground, textAlign: "center" as const, paddingHorizontal: 32 },
-    fab: { position: "absolute", bottom: (Platform.OS === "web" ? 84 : 90) + insets.bottom, right: 18, backgroundColor: colors.primary, borderRadius: 28, flexDirection: "row", alignItems: "center", paddingHorizontal: 18, paddingVertical: 13, gap: 8, elevation: 8, shadowColor: "#000", shadowOpacity: 0.3, shadowRadius: 8, shadowOffset: { width: 0, height: 4 } },
+    fab: {
+      position: "absolute",
+      bottom: (Platform.OS === "web" ? 84 : 90) + insets.bottom,
+      right: 18,
+      backgroundColor: colors.primary, borderRadius: 28,
+      flexDirection: "row", alignItems: "center",
+      paddingHorizontal: 18, paddingVertical: 13, gap: 8,
+      elevation: 8,
+      shadowColor: "#000", shadowOpacity: 0.3, shadowRadius: 8, shadowOffset: { width: 0, height: 4 },
+    },
     fabText: { fontSize: 14, fontFamily: "Inter_700Bold", color: colors.primaryForeground },
     badge: { backgroundColor: colors.primaryForeground, borderRadius: 10, width: 20, height: 20, alignItems: "center", justifyContent: "center" },
     badgeText: { fontSize: 11, fontFamily: "Inter_700Bold", color: colors.primary },
@@ -273,27 +364,44 @@ export default function LiveScreen() {
     <View style={s.container}>
       <View style={s.header}>
         <View style={s.headerRow}>
-          <View style={s.titleRow}>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
             <View style={s.liveBadge}>
               <View style={s.liveDot} />
               <Text style={s.liveText}>AO VIVO</Text>
             </View>
-            <Text style={s.countText}>{allLive.length} {allLive.length === 1 ? "jogo" : "jogos"}</Text>
+            <Text style={s.countText}>
+              {allLive.length} {allLive.length === 1 ? "jogo" : "jogos"}
+            </Text>
           </View>
           <View style={[s.connDot, { backgroundColor: connected ? "#22c55e" : "#f59e0b" }]} />
         </View>
 
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 2 }}>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={{ paddingBottom: 2 }}
+        >
           {SPORTS.map((sp) => {
             const active = selectedSport === sp.key;
             const col = SPORT_COLORS[sp.key] ?? colors.primary;
             return (
               <Pressable
                 key={sp.key}
-                style={[s.sportChip, { backgroundColor: active ? col : colors.muted, borderColor: active ? col : colors.border }]}
-                onPress={() => { setSelectedSport(sp.key); Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); }}
+                style={[
+                  s.sportChip,
+                  {
+                    backgroundColor: active ? col : colors.muted,
+                    borderColor: active ? col : colors.border,
+                  },
+                ]}
+                onPress={() => {
+                  setSelectedSport(sp.key);
+                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                }}
               >
-                <Text style={{ fontSize: 12, fontFamily: "Inter_600SemiBold", color: active ? "#ffffff" : colors.foreground }}>{sp.label}</Text>
+                <Text style={{ fontSize: 12, fontFamily: "Inter_600SemiBold", color: active ? "#ffffff" : colors.foreground }}>
+                  {sp.label}
+                </Text>
               </Pressable>
             );
           })}
@@ -316,7 +424,9 @@ export default function LiveScreen() {
               <Ionicons name="radio-outline" size={52} color={colors.border} />
               <Text style={s.emptyText}>Sem jogos ao vivo</Text>
               <Text style={s.emptySubtext}>
-                {selectedSport !== "all" ? "Tenta outro desporto ou volta mais tarde" : "Não há eventos ao vivo de momento"}
+                {selectedSport !== "all"
+                  ? "Tenta outro desporto ou volta mais tarde"
+                  : "Não há eventos ao vivo de momento"}
               </Text>
             </View>
           }
@@ -327,7 +437,10 @@ export default function LiveScreen() {
       {count > 0 && !slipVisible && (
         <Pressable
           style={({ pressed }) => [s.fab, { opacity: pressed ? 0.9 : 1 }]}
-          onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium); setSlipVisible(true); }}
+          onPress={() => {
+            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+            setSlipVisible(true);
+          }}
         >
           <Ionicons name="receipt-outline" size={20} color={colors.primaryForeground} />
           <Text style={s.fabText}>Aposta</Text>

@@ -106,8 +106,6 @@ function UpcomingCard({ match }: { match: UpcomingMatch }) {
     oddsBtn: { flex: 1, borderRadius: 8, borderWidth: 1, paddingVertical: 8, alignItems: "center" },
     oddsLabel: { fontSize: 10, fontFamily: "Inter_500Medium", marginBottom: 1 },
     oddsValue: { fontSize: 13, fontFamily: "Inter_700Bold" },
-    marketsHint: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 4, marginTop: 8, paddingVertical: 5, borderRadius: 6, backgroundColor: colors.muted, borderWidth: 1, borderColor: colors.border },
-    marketsHintText: { fontSize: 11, fontFamily: "Inter_500Medium", color: colors.mutedForeground },
   });
 
   return (
@@ -151,10 +149,6 @@ function UpcomingCard({ match }: { match: UpcomingMatch }) {
             })}
           </View>
 
-          <View style={s.marketsHint}>
-            <Ionicons name="options-outline" size={13} color={colors.mutedForeground} />
-            <Text style={s.marketsHintText}>Toca para ver todos os mercados</Text>
-          </View>
         </View>
       </Pressable>
 

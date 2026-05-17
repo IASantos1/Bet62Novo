@@ -47,7 +47,24 @@ function scoreOutcomeForSel(
   ft: FTScore,
   ht?: HTScore
 ): "won" | "lost" | null {
-  const s = sel.selection;
+  // ── Key normalisation (ComprehensiveMarketsSheet keys → canonical keys) ────
+  let s = sel.selection;
+  if      (s === "1x2-home")   s = "home";
+  else if (s === "1x2-draw")   s = "draw";
+  else if (s === "1x2-away")   s = "away";
+  else if (/^tg-([ou][\d]+)$/.test(s))  s = s.slice(3);   // tg-o25 → o25
+  else if (s === "dc-12")      s = "homeOrAway";
+  else if (s === "eg-0")       s = "eg-g0";
+  else if (s === "eg-1")       s = "eg-g1";
+  else if (s === "eg-2")       s = "eg-g2";
+  else if (s === "eg-3")       s = "eg-g3";
+  else if (s === "eg-4")       s = "eg-g4";
+  else if (s === "eg-5p")      s = "eg-g5plus";
+  // Period-1 winner (basketball/hockey): use HT-score branch
+  else if (s === "p1-home")    s = "ht-home";
+  else if (s === "p1-draw")    s = "ht-draw";
+  else if (s === "p1-away")    s = "ht-away";
+
   const { home, away } = ft;
   const total = home + away;
 
@@ -58,8 +75,22 @@ function scoreOutcomeForSel(
 
   let winning: boolean | null = null;
 
+  // ── Markets not resolvable from score alone — leave pending for admin ──────
+  if (
+    s.startsWith("oc") || s.startsWith("uc") ||          // corners
+    s.startsWith("cards-") ||                              // cards
+    s.startsWith("s1-")  || s.startsWith("s2-") ||        // tennis set winner
+    s.startsWith("ts-")  ||                                // tennis total sets
+    s.startsWith("hcp-") ||                                // hcap points (no line)
+    s === "fg-home" || s === "fg-away" || s === "fg-none"  // first goal
+  ) return null;
+
+  // ── Handicap ±1 / ±1.5  (hc-hm1, hc-ap1, hc-hm15, hc-ap15) ─────────────
+  if      (s === "hc-hm1"  || s === "hc-hm15") { winning = (home - away) >= 2; }
+  else if (s === "hc-ap1"  || s === "hc-ap15") { winning = (home - away) <= 1; }
+
   // ── 1X2 ───────────────────────────────────────────────────────────────────
-  if (s === "home")            winning = home > away;
+  else if (s === "home")            winning = home > away;
   else if (s === "away")       winning = away > home;
   else if (s === "draw")       winning = home === away;
 
