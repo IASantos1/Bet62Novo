@@ -3234,8 +3234,8 @@ export default function Home() {
                           <div className="min-w-0">
                             <div className="text-white font-bold text-[12px] truncate leading-tight">{m.home}</div>
                             <div className="text-zinc-400 text-[10px] truncate">Vencedor</div>
-                            <div className="text-zinc-500 text-[10px] truncate">{m.away}</div>
-                            <div className="text-zinc-600 text-[10px]">🕒 {timeStr}</div>
+                            <div className="text-white font-semibold text-[11px] truncate leading-tight">{m.away}</div>
+                            <div className="text-zinc-400 text-[10px]">🕒 {timeStr}</div>
                           </div>
                         </div>
                         {/* Odds */}
