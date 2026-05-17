@@ -122,6 +122,28 @@ const TEAM_BANNERS: Record<string, string> = {
   "Real Betis": realBetisBanner,
   "Betis": realBetisBanner,
   "Girona": gironaBanner,
+  "Osasuna": "/banners/file_1778704789962_1778715064131.jpeg",
+  "CA Osasuna": "/banners/file_1778704789962_1778715064131.jpeg",
+  "Mallorca": "/banners/file_1778704794042_1778715064131.jpeg",
+  "RCD Mallorca": "/banners/file_1778704794042_1778715064131.jpeg",
+  "Getafe": "/banners/file_1778704805773_1778715064131.jpeg",
+  "Getafe CF": "/banners/file_1778704805773_1778715064131.jpeg",
+  "Rayo Vallecano": "/banners/file_1778704817279_1778715064131.jpeg",
+  "Celta Vigo": "/banners/file_1778704825793_1778715064131.jpeg",
+  "RC Celta": "/banners/file_1778704825793_1778715064131.jpeg",
+  "Celta": "/banners/file_1778704825793_1778715064131.jpeg",
+  "Deportivo Alaves": "/banners/file_1778704789962_1778715064131.jpeg",
+  "Alavés": "/banners/file_1778704789962_1778715064131.jpeg",
+  "Alaves": "/banners/file_1778704789962_1778715064131.jpeg",
+  "Las Palmas": "/banners/file_1778704794042_1778715064131.jpeg",
+  "UD Las Palmas": "/banners/file_1778704794042_1778715064131.jpeg",
+  "Espanyol": "/banners/file_1778704805773_1778715064131.jpeg",
+  "RCD Espanyol": "/banners/file_1778704805773_1778715064131.jpeg",
+  "Valladolid": "/banners/file_1778704817279_1778715064131.jpeg",
+  "Real Valladolid": "/banners/file_1778704817279_1778715064131.jpeg",
+  "Leganes": "/banners/file_1778704825793_1778715064131.jpeg",
+  "CD Leganes": "/banners/file_1778704825793_1778715064131.jpeg",
+  "Leganés": "/banners/file_1778704825793_1778715064131.jpeg",
   "Arsenal": arsenalBanner,
   "Man City": manCityBanner,
   "Manchester City": manCityBanner,
@@ -2870,11 +2892,11 @@ export default function Home() {
 
     const SimpleScore = ({ big }: { big?: boolean }) => isEmBreve ? (
       <div className="flex items-center gap-2 w-full">
-        <span className={`font-bold text-zinc-400 ${big ? "text-base" : "text-sm"} truncate flex-1 text-right`}>{match.home}</span>
-        <div className={`${big ? "text-3xl" : "text-xl"} font-black text-zinc-600 tabular-nums shrink-0 ${big ? "px-2" : "px-1"} text-center`}>
-          –<span className={`${big ? "text-zinc-700 mx-1" : "text-zinc-700 mx-0.5"}`}>:</span>–
+        <span className={`font-bold ${big ? "text-base" : "text-sm"} truncate flex-1 text-right`} style={{ color: '#ffffff' }}>{match.home}</span>
+        <div className={`${big ? "text-3xl" : "text-xl"} font-black tabular-nums shrink-0 ${big ? "px-2" : "px-1"} text-center`} style={{ color: 'rgb(63 63 70)' }}>
+          –<span style={{ color: 'rgb(39 39 42)' }} className={big ? "mx-1" : "mx-0.5"}>:</span>–
         </div>
-        <span className={`font-bold text-zinc-400 ${big ? "text-base" : "text-sm"} truncate flex-1`}>{match.away}</span>
+        <span className={`font-bold ${big ? "text-base" : "text-sm"} truncate flex-1`} style={{ color: '#ffffff' }}>{match.away}</span>
       </div>
     ) : (
       <div className="flex items-center gap-2 w-full">
@@ -2959,7 +2981,7 @@ export default function Home() {
           </div>
           <div className="absolute bottom-0 left-0 right-0 px-4 pb-4" onClick={e => e.stopPropagation()}>
             {rivalry && <div className="text-[11px] font-black uppercase tracking-widest mb-1" style={{ color: '#f87171', textShadow: "0 1px 4px rgba(0,0,0,1)" }}>{rivalry}</div>}
-            <div className="mb-3">
+            <div className="mb-3" style={{ color: '#fff' }}>
               {sport === "tennis"     ? <TennisScore /> :
                sport === "volleyball" ? <VolleyScore /> :
                sport === "hockey"     ? <HockeyScore big /> :
