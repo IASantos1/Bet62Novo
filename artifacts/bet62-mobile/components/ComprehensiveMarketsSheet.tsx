@@ -83,42 +83,32 @@ function formatDateDisplay(date?: string, isLive?: boolean, minute?: number, tim
 function getTabsForSport(
   sport: string, isLive: boolean, show2tempo: boolean, showET: boolean, showPen: boolean
 ): TabDef[] {
-  const AV: TabDef = { key: "aovivo", label: "⚡ Ao Vivo" };
-  const ST: TabDef = { key: "stats", label: "📊 Stats" };
-  const pre: TabDef[] = [ST];
-  const suf: TabDef[] = isLive ? [AV] : [];
-
+  // Stats (📊) and Ao Vivo (⚡) are accessible via header icons — not shown in tab bar
   if (sport === "basketball") return [
-    ...pre,
     { key: "todos", label: "Todos" }, { key: "resultado", label: "Vencedor" },
     { key: "handicap", label: "Handicap" }, { key: "pontos", label: "Pontos" },
-    { key: "1periodo", label: "1º Quarto" }, ...suf,
+    { key: "1periodo", label: "1º Quarto" },
   ];
   if (sport === "tennis") return [
-    ...pre,
     { key: "todos", label: "Todos" }, { key: "resultado", label: "Vencedor" },
-    { key: "sets", label: "Sets" }, ...suf,
+    { key: "sets", label: "Sets" },
   ];
   if (sport === "hockey") return [
-    ...pre,
     { key: "todos", label: "Todos" }, { key: "resultado", label: "Resultado" },
     { key: "gols", label: "Golos" }, { key: "periodos", label: "Períodos" },
-    { key: "handicap", label: "Handicap" }, ...suf,
+    { key: "handicap", label: "Handicap" },
   ];
   if (sport === "volleyball") return [
-    ...pre,
     { key: "todos", label: "Todos" }, { key: "resultado", label: "Resultado" },
-    { key: "sets", label: "Sets" }, { key: "handicap", label: "Handicap" }, ...suf,
+    { key: "sets", label: "Sets" }, { key: "handicap", label: "Handicap" },
   ];
   if (sport === "baseball") return [
-    ...pre,
     { key: "todos", label: "Todos" }, { key: "resultado", label: "Resultado" },
-    { key: "runline", label: "Run Line" }, { key: "pontos", label: "Corridas" }, ...suf,
+    { key: "runline", label: "Run Line" }, { key: "pontos", label: "Corridas" },
   ];
-  if (showPen) return [...pre, { key: "todos", label: "Todos" }, { key: "penaltis", label: "🎯 Penáltis" }, ...suf];
-  if (showET) return [...pre, { key: "todos", label: "Todos" }, { key: "prolongamento", label: "⏱ Prorrogação" }, ...suf];
+  if (showPen) return [{ key: "todos", label: "Todos" }, { key: "penaltis", label: "🎯 Penáltis" }];
+  if (showET) return [{ key: "todos", label: "Todos" }, { key: "prolongamento", label: "⏱ Prorrogação" }];
   return [
-    ...pre,
     { key: "todos", label: "Todos" }, { key: "resultado", label: "Resultado" },
     { key: "dupla", label: "Dupla Chance" }, { key: "gols", label: "Golos" },
     { key: "especiais", label: "Especiais" }, { key: "handicap", label: "Handicap" },
@@ -126,7 +116,6 @@ function getTabsForSport(
     ...(show2tempo ? [{ key: "2tempo" as TabKey, label: "2º Tempo" }] : []),
     { key: "htft", label: "HT/FT" }, { key: "placar", label: "Placar" },
     { key: "escanteios", label: "Escanteios" }, { key: "cartoes", label: "Cartões" },
-    ...suf,
   ];
 }
 
