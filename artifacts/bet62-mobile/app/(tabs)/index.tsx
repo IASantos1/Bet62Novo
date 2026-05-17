@@ -23,7 +23,7 @@ import { API_BASE } from "@/context/AuthContext";
 import { ComprehensiveMarketsSheet } from "@/components/ComprehensiveMarketsSheet";
 import { BetSlipModal } from "@/components/BetSlipModal";
 import type { LiveMatchMarkets } from "@/hooks/useLiveMatches";
-import { getTeamBannerUrl } from "@/utils/teamBanners";
+import { getMatchBannerUrl, getLeagueFlag } from "@/utils/teamBanners";
 
 type MCIconName = ComponentProps<typeof MaterialCommunityIcons>["name"];
 
@@ -51,28 +51,19 @@ const SPORTS = [
 ];
 
 const SPORT_COLORS: Record<string, string> = {
-  football: "#22c55e",
-  basketball: "#f97316",
-  tennis: "#eab308",
-  hockey: "#60a5fa",
-  volleyball: "#a78bfa",
-  baseball: "#fb7185",
+  football: "#22c55e", basketball: "#f97316", tennis: "#eab308",
+  hockey: "#60a5fa", volleyball: "#a78bfa", baseball: "#fb7185",
 };
 
 const SPORT_ICONS: Record<string, MCIconName> = {
-  football: "soccer",
-  basketball: "basketball",
-  tennis: "tennis",
-  hockey: "hockey-puck",
-  volleyball: "volleyball",
-  baseball: "baseball",
+  football: "soccer", basketball: "basketball", tennis: "tennis",
+  hockey: "hockey-puck", volleyball: "volleyball", baseball: "baseball",
 };
 
 function parseKickoff(date: string, time: string): Date {
   const raw = date ?? "";
   const timeParts = (time ?? "00:00").split(":").map(Number);
   const [h = 0, mi = 0] = timeParts;
-  // Handle both "DD.MM.YYYY" and "YYYY-MM-DD"
   if (raw.includes(".")) {
     const [d = 1, mo = 1, y = 2025] = raw.split(".").map(Number);
     return new Date(y, mo - 1, d, h, mi);
@@ -88,6 +79,8 @@ function UpcomingCard({ match }: { match: UpcomingMatch }) {
 
   const sportCol = SPORT_COLORS[match.sport] ?? colors.mutedForeground;
   const hasDraw = match.odds.draw > 1.01;
+  const bannerUrl = getMatchBannerUrl(match.home, match.away);
+  const leagueFlag = getLeagueFlag(match.league, match.country);
 
   const kickoffDate = parseKickoff(match.date, match.time);
   const today = new Date();
@@ -95,14 +88,9 @@ function UpcomingCard({ match }: { match: UpcomingMatch }) {
   tomorrow.setDate(today.getDate() + 1);
   const isToday = kickoffDate.toDateString() === today.toDateString();
   const isTomorrow = kickoffDate.toDateString() === tomorrow.toDateString();
-  const dateStr = isToday ? "Hoje"
-    : isTomorrow ? "Amanhã"
+  const dateStr = isToday ? "Hoje" : isTomorrow ? "Amanhã"
     : kickoffDate.toLocaleDateString("pt-PT", { day: "2-digit", month: "short" });
   const timeStr = kickoffDate.toLocaleTimeString("pt-PT", { hour: "2-digit", minute: "2-digit" });
-
-  const homeBanner = getTeamBannerUrl(match.home);
-  const awayBanner = getTeamBannerUrl(match.away);
-  const hasBanner = !!(homeBanner || awayBanner);
 
   function handleOdds(market: string, label: string, value: number) {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -110,92 +98,89 @@ function UpcomingCard({ match }: { match: UpcomingMatch }) {
     else addSelection({ matchId: match.id, matchTitle: `${match.home} vs ${match.away}`, market, selection: market, label: `${match.home} vs ${match.away} — ${label}`, odds: value });
   }
 
-  const s = StyleSheet.create({
-    card: { backgroundColor: colors.card, borderRadius: 12, marginHorizontal: 14, marginBottom: 10, borderWidth: 1, borderColor: colors.border, overflow: "hidden" },
-    stripe: { height: 3, backgroundColor: sportCol },
-    body: { padding: 12 },
-    topRow: { flexDirection: "row", alignItems: "center", gap: 5, marginBottom: 8 },
-    league: { flex: 1, fontSize: 11, fontFamily: "Inter_500Medium", color: colors.mutedForeground },
-    time: { fontSize: 11, fontFamily: "Inter_600SemiBold", color: colors.foreground },
-    date: { fontSize: 10, fontFamily: "Inter_400Regular", color: colors.mutedForeground, marginLeft: 3 },
-    teamsRow: { flexDirection: "row", alignItems: "center", marginBottom: 10 },
-    team: { flex: 1, fontSize: 13, fontFamily: "Inter_600SemiBold", color: colors.foreground },
-    teamAway: { textAlign: "right" as const },
-    vsBox: { backgroundColor: colors.muted, borderRadius: 6, paddingHorizontal: 10, paddingVertical: 5, marginHorizontal: 8 },
-    vsText: { fontSize: 11, fontFamily: "Inter_600SemiBold", color: colors.mutedForeground },
-    oddsRow: { flexDirection: "row", gap: 6 },
-    oddsBtn: { flex: 1, borderRadius: 8, borderWidth: 1, paddingVertical: 8, alignItems: "center" },
-    oddsLabel: { fontSize: 10, fontFamily: "Inter_500Medium", marginBottom: 1 },
-    oddsValue: { fontSize: 13, fontFamily: "Inter_700Bold" },
-  });
+  const OddsButton = ({ mkt, lbl, val }: { mkt: string; lbl: string; val: number }) => {
+    const sel = hasSelection(match.id, mkt);
+    return (
+      <Pressable
+        style={({ pressed }) => ({
+          flex: 1, borderRadius: 8, paddingVertical: 9, paddingHorizontal: 4,
+          alignItems: "center" as const,
+          backgroundColor: sel ? colors.primary : "#1c1c26",
+          borderWidth: 1,
+          borderColor: sel ? colors.primary : "#2e2e3c",
+          opacity: pressed ? 0.78 : 1,
+        })}
+        onPress={(e) => { e.stopPropagation?.(); handleOdds(mkt, lbl, val); }}
+      >
+        <Text style={{ fontSize: 10, fontFamily: "Inter_500Medium", color: sel ? "#fff" : "#9ca3af", marginBottom: 2 }}>{lbl}</Text>
+        <Text style={{ fontSize: 14, fontFamily: "Inter_700Bold", color: "#ffffff" }}>{val.toFixed(2)}</Text>
+      </Pressable>
+    );
+  };
+
+  const oddsButtons = (
+    <View style={{ flexDirection: "row", gap: 6 }}>
+      <OddsButton mkt="1x2-home" lbl="Casa" val={match.odds.home} />
+      {hasDraw && <OddsButton mkt="1x2-draw" lbl="Emp." val={match.odds.draw} />}
+      <OddsButton mkt="1x2-away" lbl="Fora" val={match.odds.away} />
+    </View>
+  );
 
   return (
     <>
       <Pressable
-        style={({ pressed }) => [s.card, { opacity: pressed ? 0.97 : 1 }]}
+        style={({ pressed }) => ({
+          backgroundColor: colors.card,
+          borderRadius: 12,
+          marginHorizontal: 14,
+          marginBottom: 10,
+          borderWidth: 1,
+          borderColor: colors.border,
+          overflow: "hidden" as const,
+          opacity: pressed ? 0.97 : 1,
+        })}
         onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setMarketsOpen(true); }}
       >
-        {hasBanner ? (
-          <View style={{ height: 50, flexDirection: "row", overflow: "hidden" }}>
-            <View style={{ flex: 1, overflow: "hidden", backgroundColor: sportCol + "18" }}>
-              {homeBanner && <Image source={{ uri: homeBanner }} style={StyleSheet.absoluteFill} resizeMode="cover" />}
-            </View>
-            <View style={{ flex: 1, overflow: "hidden", backgroundColor: sportCol + "10" }}>
-              {awayBanner && <Image source={{ uri: awayBanner }} style={StyleSheet.absoluteFill} resizeMode="cover" />}
-            </View>
-            <View style={[StyleSheet.absoluteFill, { flexDirection: "row", alignItems: "center", backgroundColor: "#00000055", paddingHorizontal: 12, gap: 8 }]}>
-              <Text style={{ flex: 1, color: "#fff", fontSize: 12, fontFamily: "Inter_700Bold" }} numberOfLines={1}>{match.home}</Text>
-              <View style={{ backgroundColor: "#00000070", borderRadius: 4, paddingHorizontal: 8, paddingVertical: 3 }}>
-                <Text style={{ color: "#fff", fontSize: 10, fontFamily: "Inter_600SemiBold" }}>vs</Text>
+        {bannerUrl ? (
+          <>
+            <View style={{ height: 145, position: "relative" as const, overflow: "hidden" as const }}>
+              <Image source={{ uri: bannerUrl }} style={StyleSheet.absoluteFill} resizeMode="cover" />
+              <View style={[StyleSheet.absoluteFill, { backgroundColor: "#00000065" }]} />
+              <View style={{ position: "absolute" as const, top: 10, left: 12, right: 12, flexDirection: "row" as const, alignItems: "center" as const }}>
+                <Text style={{ fontSize: 11, fontFamily: "Inter_500Medium", color: "#ffffffdd" }}>{leagueFlag} {match.league ?? match.sport}</Text>
+                <View style={{ flex: 1 }} />
+                <Text style={{ fontSize: 11, fontFamily: "Inter_600SemiBold", color: "#ffffffdd" }}>{dateStr} • {timeStr}</Text>
               </View>
-              <Text style={{ flex: 1, color: "#fff", fontSize: 12, fontFamily: "Inter_700Bold", textAlign: "right" as const }} numberOfLines={1}>{match.away}</Text>
+              <View style={{ position: "absolute" as const, bottom: 0, left: 0, right: 0, paddingHorizontal: 12, paddingTop: 28, paddingBottom: 11, backgroundColor: "#000000aa" }}>
+                <Text style={{ fontSize: 18, fontFamily: "Inter_700Bold", color: "#ffffff" }} numberOfLines={1}>
+                  {match.home} <Text style={{ fontFamily: "Inter_400Regular", color: "#ffffffaa", fontSize: 15 }}>vs</Text> {match.away}
+                </Text>
+              </View>
             </View>
-          </View>
+            <View style={{ padding: 10, paddingTop: 10 }}>
+              {oddsButtons}
+            </View>
+          </>
         ) : (
-          <View style={s.stripe} />
-        )}
-
-        <View style={s.body}>
-          <View style={s.topRow}>
-            <MaterialCommunityIcons name={SPORT_ICONS[match.sport] ?? "trophy"} size={12} color={sportCol} />
-            <Text style={s.league} numberOfLines={1}>{match.league ?? match.sport}</Text>
-            <Text style={s.time}>{timeStr}</Text>
-            <Text style={s.date}>{dateStr}</Text>
-          </View>
-
-          {!hasBanner && (
-            <View style={s.teamsRow}>
-              <Text style={s.team} numberOfLines={1}>{match.home}</Text>
-              <View style={s.vsBox}><Text style={s.vsText}>vs</Text></View>
-              <Text style={[s.team, s.teamAway]} numberOfLines={1}>{match.away}</Text>
+          <View style={{ padding: 12 }}>
+            <View style={{ flexDirection: "row", alignItems: "center", marginBottom: 8 }}>
+              <MaterialCommunityIcons name={SPORT_ICONS[match.sport] ?? "trophy"} size={11} color={sportCol} />
+              <Text style={{ fontSize: 11, fontFamily: "Inter_500Medium", color: colors.mutedForeground, marginLeft: 5, flex: 1 }} numberOfLines={1}>
+                {leagueFlag} {match.league ?? match.sport}
+              </Text>
+              <Text style={{ fontSize: 11, fontFamily: "Inter_600SemiBold", color: colors.foreground }}>{dateStr} • {timeStr}</Text>
             </View>
-          )}
-
-          <View style={s.oddsRow}>
-            {[
-              { mkt: "1x2-home", lbl: "1", val: match.odds.home, fullLabel: "1 (Casa)" },
-              ...(hasDraw ? [{ mkt: "1x2-draw", lbl: "X", val: match.odds.draw, fullLabel: "X (Empate)" }] : []),
-              { mkt: "1x2-away", lbl: "2", val: match.odds.away, fullLabel: "2 (Fora)" },
-            ].map(({ mkt, lbl, val, fullLabel }) => {
-              const sel = hasSelection(match.id, mkt);
-              return (
-                <Pressable
-                  key={mkt}
-                  style={({ pressed }) => [s.oddsBtn, { backgroundColor: sel ? colors.primary : colors.muted, borderColor: sel ? colors.primary : colors.border, opacity: pressed ? 0.8 : 1 }]}
-                  onPress={(e) => { e.stopPropagation?.(); handleOdds(mkt, fullLabel, val); }}
-                >
-                  <Text style={[s.oddsLabel, { color: sel ? colors.primaryForeground : colors.mutedForeground }]}>{lbl}</Text>
-                  <Text style={[s.oddsValue, { color: sel ? colors.primaryForeground : colors.foreground }]}>{val.toFixed(2)}</Text>
-                </Pressable>
-              );
-            })}
+            <Text style={{ fontSize: 15, fontFamily: "Inter_600SemiBold", color: colors.foreground, marginBottom: 10 }} numberOfLines={1}>
+              {match.home} <Text style={{ color: colors.mutedForeground, fontFamily: "Inter_400Regular" }}>vs</Text> {match.away}
+            </Text>
+            {oddsButtons}
           </View>
-        </View>
+        )}
       </Pressable>
 
       <ComprehensiveMarketsSheet
         visible={marketsOpen}
-        match={{ ...match, isLive: false }}
+        match={{ ...match, isLive: false, date: match.date, time: match.time, country: match.country }}
         onClose={() => setMarketsOpen(false)}
       />
     </>

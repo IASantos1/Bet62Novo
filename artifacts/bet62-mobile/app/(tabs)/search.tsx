@@ -443,7 +443,7 @@ export default function SearchScreen() {
       {marketsMatch && (
         <ComprehensiveMarketsSheet
           visible={true}
-          match={marketsMatch}
+          match={{ ...marketsMatch, isLive: marketsMatch.isLive ?? false }}
           onClose={() => setMarketsMatch(null)}
         />
       )}

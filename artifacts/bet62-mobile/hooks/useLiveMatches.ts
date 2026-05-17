@@ -12,9 +12,11 @@ export interface LiveMatchMarkets {
     over55: number; under55: number;
     over65: number; under65: number;
   };
+  _total?: number;
   doubleChance?: { homeOrDraw: number; awayOrDraw: number; homeOrAway: number };
   bothTeamsScore?: { yes: number; no: number };
   halfTime?: { home: number; draw: number; away: number };
+  secondHalf?: { home: number; draw: number; away: number };
   handicap?: { homeMinusOne: number; awayPlusOne: number; homeMinusOneHalf: number; awayPlusOneHalf: number };
   firstGoal?: { home: number; noGoal: number; away: number };
   exactGoals?: { g0: number; g1: number; g2: number; g3: number; g4: number; g5plus: number };
@@ -29,6 +31,27 @@ export interface LiveMatchMarkets {
     setExactScore?: Record<string, number>;
   };
   handicapPoints?: { line: number; home: number; away: number };
+  etExtra?: {
+    tieWinner: { home: number; away: number };
+    totalGoals: { o05: number; u05: number; o15: number; u15: number; o25: number; u25: number };
+    etResult: { home: number; draw: number; away: number };
+    nextGoal: { home: number; away: number };
+  };
+  penExtra?: { winner: { home: number; away: number } };
+  winToNil?: { home: number; away: number };
+  cleanSheet?: { home: number; away: number };
+  toWinBothHalves?: { home: number; away: number };
+  highestScoringHalf?: { first: number; second: number; equal: number };
+  teamGoals?: {
+    homeOver05: number; homeUnder05: number;
+    homeOver15: number; homeUnder15: number;
+    homeOver25: number; homeUnder25: number;
+    awayOver05: number; awayUnder05: number;
+    awayOver15: number; awayUnder15: number;
+    awayOver25: number; awayUnder25: number;
+  };
+  btts1H?: { yes: number; no: number };
+  goalOddEven?: { odd: number; even: number };
 }
 
 export interface LiveMatch {
