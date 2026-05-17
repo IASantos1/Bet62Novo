@@ -304,9 +304,19 @@ export function ComprehensiveMarketsSheet({ visible, match, onClose }: Props) {
   const dateStr = formatDateDisplay(match.date, isLive, match.minute, match.time);
   const hasDraw = match.odds.draw > 1.01;
 
+  const isObviousLiveResult = isLive && isFootball && (() => {
+    const minOdd = Math.min(match.odds.home, match.odds.away);
+    if (minOdd <= 1.05) return true;
+    const min = match.minute ?? 0;
+    const diff = Math.abs((match.homeScore ?? 0) - (match.awayScore ?? 0));
+    if (min >= 80 && diff >= 2) return true;
+    if (min >= 85 && diff >= 1) return true;
+    return false;
+  })();
+
   const s = StyleSheet.create({
     overlay: { flex: 1, backgroundColor: "#00000080" },
-    sheet: { flex: 1, backgroundColor: colors.background, marginTop: 48 + (Platform.OS === "web" ? 0 : insets.top), borderTopLeftRadius: 18, borderTopRightRadius: 18, overflow: "hidden" },
+    sheet: { flex: 1, backgroundColor: colors.background, marginTop: Platform.OS === "web" ? 0 : insets.top, borderTopLeftRadius: 0, borderTopRightRadius: 0, overflow: "hidden" },
     header: { backgroundColor: colors.card, borderBottomWidth: 1, borderBottomColor: colors.border },
     backRow: { flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 14, paddingTop: topPad + 12, paddingBottom: 6 },
     backText: { fontSize: 13, fontFamily: "Inter_500Medium", color: colors.mutedForeground },
@@ -669,7 +679,7 @@ export function ComprehensiveMarketsSheet({ visible, match, onClose }: Props) {
 
             {activeTab !== "aovivo" && (
               <>
-                {match.odds.home > 1.01 && (
+                {match.odds.home > 1.01 && !isObviousLiveResult && (
                   <Section title="Resultado Final" tabKey="resultado">
                     <View style={s.row}>
                       <OddsBtn market="1x2-home" label={isFootball || isHockey ? "Casa (1)" : match.home} value={match.odds.home} dir={getDir("1x2-home")} />
