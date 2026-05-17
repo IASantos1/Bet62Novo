@@ -2997,7 +2997,7 @@ export default function Home() {
         onClick={() => setExpandedMatch(match)}
       >
         <CompactLeagueRow match={match} rightSlot={liveBadge} />
-        <div className="px-3 py-2.5" onClick={e => e.stopPropagation()}>
+        <div className="px-3 py-2.5" style={{ color: '#fff' }} onClick={e => e.stopPropagation()}>
           {sport === "tennis"     ? <TennisScore /> :
            sport === "volleyball" ? <VolleyScore /> :
            sport === "hockey"     ? <HockeyScore /> :
@@ -3066,11 +3066,11 @@ export default function Home() {
         onClick={() => setExpandedMatch(match)}
       >
         <CompactLeagueRow match={match} />
-        <div className="px-3 pb-3 pt-1" onClick={e => e.stopPropagation()}>
+        <div className="px-3 pb-3 pt-1" style={{ color: '#fff' }} onClick={e => e.stopPropagation()}>
           <div className="flex items-baseline gap-1.5 mb-2 min-w-0">
-            <span className="font-bold text-white text-sm truncate">{match.home}</span>
-            <span className="text-zinc-600 text-xs shrink-0">vs</span>
-            <span className="font-bold text-white text-sm truncate">{match.away}</span>
+            <span className="font-bold text-sm truncate" style={{ color: '#ffffff' }}>{match.home}</span>
+            <span className="text-xs shrink-0" style={{ color: 'rgb(82 82 91)' }}>vs</span>
+            <span className="font-bold text-sm truncate" style={{ color: '#ffffff' }}>{match.away}</span>
           </div>
           <OddsRow />
         </div>
