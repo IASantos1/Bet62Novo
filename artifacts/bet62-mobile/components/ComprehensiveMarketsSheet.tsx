@@ -82,10 +82,8 @@ function formatDateDisplay(date?: string, isLive?: boolean, minute?: number, tim
 function getTabsForSport(
   sport: string, isLive: boolean, show2tempo: boolean, showET: boolean, showPen: boolean
 ): TabDef[] {
-  const ST: TabDef = { key: "stats", label: "Estatísticas" };
-  const CL: TabDef = { key: "classificacao", label: "Classificação" };
   const AV: TabDef = { key: "aovivo", label: "⚡ Ao Vivo" };
-  const pre = [ST, CL];
+  const pre: TabDef[] = [];
   const suf: TabDef[] = isLive ? [AV] : [];
 
   if (sport === "basketball") return [
@@ -156,10 +154,10 @@ export function ComprehensiveMarketsSheet({ visible, match, onClose }: Props) {
   const showPen = isFootball && isLive && !!m?.penExtra;
 
   const tabs = getTabsForSport(match.sport, isLive, show2tempo, showET, showPen);
-  const [activeTab, setActiveTab] = useState<TabKey>("stats");
+  const [activeTab, setActiveTab] = useState<TabKey>("todos");
 
   useEffect(() => {
-    if (visible) setActiveTab("stats");
+    if (visible) setActiveTab("todos");
   }, [visible, match.id]);
 
   const prevOddsRef = useRef<Record<string, number>>({});
@@ -606,34 +604,27 @@ export function ComprehensiveMarketsSheet({ visible, match, onClose }: Props) {
             <View style={s.teamsRow}>
               <Text style={s.teamText} numberOfLines={1}>{match.home}</Text>
               <View style={{ flexDirection: "row", alignItems: "center", gap: 5 }}>
-                <Pressable onPress={() => setActiveTab("stats")} hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}>
-                  <Ionicons name="bar-chart-outline" size={16} color={activeTab === "stats" ? colors.primary : colors.mutedForeground} />
-                </Pressable>
+                <Ionicons name="bar-chart-outline" size={16} color={colors.mutedForeground} />
                 {isLive && (
                   <Pressable onPress={() => setActiveTab("aovivo")} hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}>
                     <Ionicons name="pulse-outline" size={16} color={activeTab === "aovivo" ? "#22c55e" : colors.mutedForeground} />
                   </Pressable>
                 )}
-                <Text style={{ fontSize: 12, fontFamily: "Inter_400Regular", color: colors.mutedForeground }}>vs</Text>
               </View>
               <Text style={[s.teamText, { textAlign: "right" }]} numberOfLines={1}>{match.away}</Text>
             </View>
 
             {isLive && (
-              <View style={s.scoreRow}>
-                <Text style={s.teamText} numberOfLines={1}>{match.home}</Text>
-                <View style={{ alignItems: "center", gap: 4 }}>
-                  <View style={s.scoreBox}>
-                    <Text style={s.scoreText}>{match.homeScore ?? 0} – {match.awayScore ?? 0}</Text>
-                  </View>
-                  <View style={s.minuteBadge}>
-                    <Text style={{ fontSize: 11, fontFamily: "Inter_700Bold", color: "#f59e0b" }}>
-                      {isTennis ? `Set ${match.minute ?? 1}` : `${match.minute ?? 0}'`}
-                      {match.status === "HT" ? " • INT." : ""}
-                    </Text>
-                  </View>
+              <View style={{ alignItems: "center", paddingBottom: 10, gap: 5 }}>
+                <View style={s.scoreBox}>
+                  <Text style={s.scoreText}>{match.homeScore ?? 0} – {match.awayScore ?? 0}</Text>
                 </View>
-                <Text style={[s.teamText, { textAlign: "right" }]} numberOfLines={1}>{match.away}</Text>
+                <View style={s.minuteBadge}>
+                  <Text style={{ fontSize: 11, fontFamily: "Inter_700Bold", color: "#f59e0b" }}>
+                    {isTennis ? `Set ${match.minute ?? 1}` : `${match.minute ?? 0}'`}
+                    {match.status === "HT" ? " • INT." : ""}
+                  </Text>
+                </View>
               </View>
             )}
 
@@ -674,11 +665,9 @@ export function ComprehensiveMarketsSheet({ visible, match, onClose }: Props) {
 
           <ScrollView style={s.scroll} contentContainerStyle={{ paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
 
-            {activeTab === "stats" && <StatsContent />}
-            {activeTab === "classificacao" && <ClassificacaoContent />}
             {activeTab === "aovivo" && isLive && <AoVivoContent />}
 
-            {activeTab !== "stats" && activeTab !== "classificacao" && activeTab !== "aovivo" && (
+            {activeTab !== "aovivo" && (
               <>
                 {match.odds.home > 1.01 && (
                   <Section title="Resultado Final" tabKey="resultado">
