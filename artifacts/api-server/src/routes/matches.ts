@@ -3846,6 +3846,60 @@ export function initSportWebSockets(): void {
   }
 }
 
+// ─── V2 /api/schedule/:date — multi-day upcoming events ──────────────────────
+
+// Per-(sport,date) cache — schedule data for future days changes rarely (30min TTL)
+type ScheduleV2Entry = { events: SAPIV2Event[]; fetchedAt: number };
+const scheduleV2Cache = new Map<string, ScheduleV2Entry>();
+const SCHEDULE_V2_TTL = 30 * 60_000;
+
+/** Fetch all events scheduled for `date` (YYYY-MM-DD) from the given sport. */
+async function getScheduleV2(sport: SportKey, date: string): Promise<SAPIV2Event[]> {
+  const cacheKey = `${sport}:${date}`;
+  const cached = scheduleV2Cache.get(cacheKey);
+  if (cached && Date.now() - cached.fetchedAt < SCHEDULE_V2_TTL) return cached.events;
+  const domain = WS_DOMAINS[sport]; // "v2.football.sportsapipro.com" etc.
+  try {
+    const resp = await fetch(`https://${domain}/api/schedule/${date}`, {
+      signal: AbortSignal.timeout(9000),
+      headers: sapiHeaders(),
+    });
+    if (!resp.ok) return cached?.events ?? [];
+    const data = (await resp.json()) as { success?: boolean; data?: { events?: SAPIV2Event[] } };
+    const events = data.data?.events ?? [];
+    scheduleV2Cache.set(cacheKey, { events, fetchedAt: Date.now() });
+    return events;
+  } catch {
+    return cached?.events ?? [];
+  }
+}
+
+/**
+ * Returns upcoming (not-yet-started) events across the next `days` calendar days
+ * for the given sport, sorted by startTimestamp ascending.
+ * Filters out events with status.type === "finished" and startTimestamp <= now.
+ */
+async function getUpcomingEventsV2(sport: SportKey, days = 3): Promise<SAPIV2Event[]> {
+  const dates: string[] = [];
+  const nowMs = Date.now();
+  for (let i = 0; i < days; i++) {
+    const d = new Date(nowMs + i * 86_400_000);
+    dates.push(d.toISOString().slice(0, 10));
+  }
+  const allDays = await Promise.all(dates.map(dt => getScheduleV2(sport, dt).catch(() => [] as SAPIV2Event[])));
+  const nowSec = nowMs / 1000;
+  return allDays
+    .flat()
+    .filter(ev => {
+      if (!ev.startTimestamp || ev.startTimestamp <= nowSec) return false;
+      // Exclude already-finished events that the schedule may still list
+      const st = ev.status;
+      if (st && typeof st === "object" && (st as SAPIV2StatusObj).type === "finished") return false;
+      return true;
+    })
+    .sort((a, b) => (a.startTimestamp ?? 0) - (b.startTimestamp ?? 0));
+}
+
 // ─── V2 /api/today fetch helpers ──────────────────────────────────────────────
 
 async function getFootballTodayV2(): Promise<SAPIV2Event[]> {
@@ -4810,17 +4864,11 @@ async function buildLiveMatches(): Promise<LiveMatchState[]> {
 }
 
 async function buildUpcomingMatches(): Promise<UpcomingMatch[]> {
-  const events = await getFootballTodayV2();
-  const nowSec = Date.now() / 1000;
+  const events = await getUpcomingEventsV2("football", 3);
   const results: UpcomingMatch[] = [];
   const seen = new Set<string>();
 
-  // Filter to not-yet-started events, sort by scheduled time ascending
-  const upcoming = events
-    .filter(ev => ev.startTimestamp && ev.startTimestamp > nowSec)
-    .sort((a, b) => (a.startTimestamp ?? 0) - (b.startTimestamp ?? 0));
-
-  for (const ev of upcoming) {
+  for (const ev of events) {
     const home = v2TeamName(ev.homeTeam);
     const away = v2TeamName(ev.awayTeam);
     if (home === "Unknown" || away === "Unknown") continue;
@@ -5403,16 +5451,11 @@ router.get("/live-stream", (req, res) => {
 
 async function buildTennisUpcoming(): Promise<UpcomingMatch[]> {
   try {
-    const events = await getTennisTodayV2();
-    const nowSec = Date.now() / 1000;
+    const events = await getUpcomingEventsV2("tennis", 2);
     const results: UpcomingMatch[] = [];
     const seen = new Set<string>();
 
-    const upcoming = events
-      .filter(ev => ev.startTimestamp && ev.startTimestamp > nowSec)
-      .sort((a, b) => (a.startTimestamp ?? 0) - (b.startTimestamp ?? 0));
-
-    for (const ev of upcoming) {
+    for (const ev of events) {
       const home = v2TeamName(ev.homeTeam);
       const away = v2TeamName(ev.awayTeam);
       if (home === "Unknown" || away === "Unknown") continue;
@@ -5460,16 +5503,11 @@ async function buildTennisUpcoming(): Promise<UpcomingMatch[]> {
 
 async function buildBasketballUpcoming(): Promise<UpcomingMatch[]> {
   try {
-    const events = await getBasketballTodayV2();
-    const nowSec = Date.now() / 1000;
+    const events = await getUpcomingEventsV2("basketball", 3);
     const results: UpcomingMatch[] = [];
     const seen = new Set<string>();
 
-    const upcoming = events
-      .filter(ev => ev.startTimestamp && ev.startTimestamp > nowSec)
-      .sort((a, b) => (a.startTimestamp ?? 0) - (b.startTimestamp ?? 0));
-
-    for (const ev of upcoming) {
+    for (const ev of events) {
       const home = v2TeamName(ev.homeTeam);
       const away = v2TeamName(ev.awayTeam);
       if (home === "Unknown" || away === "Unknown") continue;
@@ -5503,16 +5541,11 @@ async function buildBasketballUpcoming(): Promise<UpcomingMatch[]> {
 
 async function buildHockeyUpcoming(): Promise<UpcomingMatch[]> {
   try {
-    const events = await getHockeyTodayV2();
-    const nowSec = Date.now() / 1000;
+    const events = await getUpcomingEventsV2("hockey", 3);
     const results: UpcomingMatch[] = [];
     const seen = new Set<string>();
 
-    const upcoming = events
-      .filter(ev => ev.startTimestamp && ev.startTimestamp > nowSec)
-      .sort((a, b) => (a.startTimestamp ?? 0) - (b.startTimestamp ?? 0));
-
-    for (const ev of upcoming) {
+    for (const ev of events) {
       const home = v2TeamName(ev.homeTeam);
       const away = v2TeamName(ev.awayTeam);
       if (home === "Unknown" || away === "Unknown") continue;
@@ -5584,16 +5617,11 @@ async function buildVolleyballUpcoming(): Promise<UpcomingMatch[]> {
 
 async function buildBaseballUpcoming(): Promise<UpcomingMatch[]> {
   try {
-    const events = await getBaseballTodayV2();
-    const nowSec = Date.now() / 1000;
+    const events = await getUpcomingEventsV2("baseball", 3);
     const results: UpcomingMatch[] = [];
     const seen = new Set<string>();
 
-    const upcoming = events
-      .filter(ev => ev.startTimestamp && ev.startTimestamp > nowSec)
-      .sort((a, b) => (a.startTimestamp ?? 0) - (b.startTimestamp ?? 0));
-
-    for (const ev of upcoming) {
+    for (const ev of events) {
       const home = v2TeamName(ev.homeTeam);
       const away = v2TeamName(ev.awayTeam);
       if (home === "Unknown" || away === "Unknown") continue;

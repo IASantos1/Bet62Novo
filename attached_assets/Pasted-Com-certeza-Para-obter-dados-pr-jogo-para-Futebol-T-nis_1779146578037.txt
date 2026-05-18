@@ -1,0 +1,96 @@
+Com certeza! Para obter dados pré-jogo para Futebol, Tênis, Basquete, Hóquei, Vôlei e Beisebol na V2, o processo é semelhante, mas os endpoints específicos e a disponibilidade de dados podem variar muito.
+
+Aqui está um passo a passo geral, com exemplos para cada esporte, você precisa identificar as partidas que ainda não ocorreram. 2. Escolher o Endpoint de Dados Pré-Jogo: Selecione o endpoint específico que você deseja consultar (ex: odds, formulário, especificações). 3. Fazer a Requisição: Use o ID de partida e sua chave de API para obter os dados.
+
+Detalhes por
+Para cada esporte, o URL base muda ( v2.{sport}.sportsapipro.com)./schedule/:date` para listar todas as partidas agendadas para um dado específico.
+
+* **Exemplo:** Listar partidas para 2025-01-18 ```bash curl -X GET "https://v2.football.sportsapipro.com/api/schedule/2025-01-18" \ -H "x-api-key: [redacted] ``` * **Resposta:** Procure por `id` nas partidas. Ex: `{"id": 12345, "startTimestamp": 1737283200, ...}`. O `startTimestamp` é um Unix epoch, verifique se é uma data futura. **b. Obter Odds Pré-Jogo:** Use o endpoint `/api/match/:id/odds/pre-match` com o `id` da partida. * **Exemplo:** Odds pré-jogo para a partida `12345` ```bash curl -X GET "https://v2.football.sportsapipro.com/api/match/12345/odds/pre-match" \ -H "x-api-key: [redacted] ``` * **Parâmetros:** `topBookmaker` (opcional, para filtrar por casa de apostas específica). **c. Obter Formulário Pré-Jogo (Recent Form):** Use o endpoint `/api/match/:id/pregame-form`. * **Exemplo:** Formulário pré-jogo para a partida `12345` ```bash curl -X GET "https://v2.football.sportsapipro.com/api/match/12345/pregame-form" \ -H "x-api-key: [redacted] ``` **d. Obter Previsões/Sugestões:** Use o endpoint `/api/match/:id/suggestions`. * **Exemplo:** Sugestões para a partida `12345` ```bash curl -X GET "https://v2.football.sportsapipro.com/api/match/12345/suggestions" \ -H "x-api-key: [redacted] ```
+2. Basquete
+URL base: https://v2.basketball.sportsapipro.com
+
+um. Obter Partidas Futuras: Use o endpoint /api/schedule/:date.
+
+Exemplo: Listar partidas para 2025-01-18
+
+curl -X GET "https://v2.basketball.sportsapipro.com/api/schedule/2025-01-18" \
+  -H "x-api-key: [redacted]
+b. Obter Odds Pré-Jogo: Use o endpoint /api/match/:id/odds/pre-match.
+
+Exemplo: Odds pré-jogo para a partida67890
+
+curl -X GET "https://v2.basketball.sportsapipro.com/api/match/67890/odds/pre-match" \
+  -H "x-api-key: e1e6...388f"
+c. Obter Formulário Pré-Jogo: Use o endpoint /api/match/:id/pregame-form.
+
+Exemplo: Formulário pré-jogo para a partida67890
+
+curl -X GET "https://v2.basketball.sportsapipro.com/api/match/67890/pregame-form" \
+  -H "x-api-key: [redacted]f"
+3. Tênis
+URL base: https://v2.tennis.sportsapipro.com
+
+um. Obter Partidas Futuras: Use o endpoint /api/schedule/:date.
+
+Exemplo: Listar partidas para 2025-01-18
+
+curl -X GET "https://v2.tennis.sportsapipro.com/api/schedule/2025-01-18" \
+  -H "x-api-key: e1e6...388f"
+b. Obter Odds Pré-Jogo: Use o endpoint /api/match/:id/odds/pre-match.
+
+Exemplo: Odds pré-jogo para a partida11223
+
+curl -X GET "https://v2.tennis.sportsapipro.com/api/match/11223/odds/pre-match" \
+  -H "x-api-key: [redacted]
+4. Hóquei no Gelo (Hóquei no Gelo)
+URL base: https://v2.icehockey.sportsapipro.com
+
+um. Obter Partidas Futuras: Use o endpoint /api/schedule/:date.
+
+Exemplo: Listar partidas para 2025-01-18
+
+curl -X GET "https://v2.icehockey.sportsapipro.com/api/schedule/2025-01-18" \
+  -H "x-api-key: [redacted]
+b. Obter Odds Pré-Jogo: Use o endpoint /api/match/:id/odds/pre-match.
+
+Exemplo: Odds pré-jogo para a partida44556
+
+curl -X GET "https://v2.icehockey.sportsapipro.com/api/match/44556/odds/pre-match" \
+  -H "x-api-key: [redacted]f"
+5. Vôlei (Voleibol)
+URL base: https://v2.volleyball.sportsapipro.com
+
+um. Obter Partidas Futuras: Use o endpoint /api/schedule/:date.
+
+Exemplo: Listar partidas para 2025-01-18
+
+curl -X GET "https://v2.volleyball.sportsapipro.com/api/schedule/2025-01-18" \
+  -H "x-api-key: [redacted]
+b. Obter Odds Pré-Jogo: Use o endpoint /api/match/:id/odds/pre-match.
+
+Exemplo: Odds pré-jogo para a partida77889
+
+curl -X GET "https://v2.volleyball.sportsapipro.com/api/match/77889/odds/pre-match" \
+  -H "x-api-key: [redacted]f"
+6. Beisebol (Beisebol)
+URL base: https://v2.baseball.sportsapipro.com
+
+um. Obter Partidas Futuras: Use o endpoint /api/schedule/:date.
+
+Exemplo: Listar partidas para 2025-01-18
+
+curl -X GET "https://v2.baseball.sportsapipro.com/api/schedule/2025-01-18" \
+  -H "x-api-key: e1e6...388f"
+b. Obter Odds Pré-Jogo: Use o endpoint /api/match/:id/odds/pre-match.
+
+Exemplo: Odds pré-jogo para a partida99001
+
+curl -X GET "https://v2.baseball.sportsapipro.com/api/match/99001/odds/pre-match" \
+  -H "x-api-key: [redacted]
+Observações Importantes:
+
+matchId: Sempre substitua {matchId}pelo ID real da partida que você obteve do endpoint /api/schedule/:date.
+date: Use o formato YYYY-MM-DDpara a data.
+x-api-key: Substitui e1e6...388fpela sua chave de API real.
+Disponibilidade de Dados: A quantidade e o tipo de dados pré-jogo variam dependendo do esporte, da competição e da importância da partida. Partidas de ligas menores podem ter menos dados de odds ou formulário.
+Erro 404: Se você tentar obter dados pré-jogo para uma partida que já começou ou terminou, a API provavelmente retornará um erro 404 (Not Found) ou um objeto vazio, pois esses dados não são mais "pré-jogo".
