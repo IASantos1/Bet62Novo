@@ -3671,6 +3671,181 @@ async function getTennisLiveV2(): Promise<SAPIV2Event[]> {
   }
 }
 
+// ─── SportsAPI Pro V2 WebSocket — real-time live-scores ───────────────────────
+//
+// One persistent WS connection per sport. Incoming messages update the same
+// in-memory caches used by the REST poll helpers, so the GET /live endpoint
+// automatically returns fresh data on the next request without waiting for the
+// 30-second polling interval.
+//
+// Message shapes handled (API may send any of these):
+//   { events: SAPIV2Event[] }              – full snapshot (most common)
+//   { event:  SAPIV2Event  }               – single-event delta
+//   { type: string, events?: ..., event?: ... }  – wrapped variant
+
+type SportKey = "football" | "basketball" | "hockey" | "baseball" | "tennis";
+
+const WS_DOMAINS: Record<SportKey, string> = {
+  football:   "v2.football.sportsapipro.com",
+  basketball: "v2.basketball.sportsapipro.com",
+  hockey:     "v2.hockey.sportsapipro.com",
+  baseball:   "v2.baseball.sportsapipro.com",
+  tennis:     "v2.tennis.sportsapipro.com",
+};
+
+// Track which sports currently have an open WS connection
+const wsConnected = new Set<SportKey>();
+// Track reconnect timers so we can avoid duplicate reconnects
+const wsTimers = new Map<SportKey, ReturnType<typeof setTimeout>>();
+
+function applyV2WsMessage(sport: SportKey, raw: unknown): void {
+  if (!raw || typeof raw !== "object") return;
+  const msg = raw as Record<string, unknown>;
+
+  // Extract event array from various possible message shapes
+  let incoming: SAPIV2Event[] | null = null;
+
+  if (Array.isArray(msg["events"])) {
+    incoming = msg["events"] as SAPIV2Event[];
+  } else if (msg["event"] && typeof msg["event"] === "object") {
+    // Single-event delta — merge into existing cache
+    const ev = msg["event"] as SAPIV2Event;
+    incoming = null; // handled below
+    mergeSingleV2Event(sport, ev);
+    return;
+  } else if (Array.isArray(msg["data"])) {
+    incoming = msg["data"] as SAPIV2Event[];
+  }
+
+  if (!incoming) return;
+
+  const now = Date.now();
+  switch (sport) {
+    case "football":
+      footballLiveV2Cache   = incoming;
+      footballLiveV2FetchedAt = now;
+      // Also update today cache (live events are a subset of today)
+      if (footballTodayV2Cache !== null) {
+        footballTodayV2Cache   = incoming;
+        footballTodayV2FetchedAt = now;
+      }
+      break;
+    case "basketball":
+      basketballLiveV2Cache   = incoming;
+      basketballLiveV2FetchedAt = now;
+      if (basketballTodayV2Cache !== null) {
+        basketballTodayV2Cache   = incoming;
+        basketballTodayV2FetchedAt = now;
+      }
+      break;
+    case "hockey":
+      hockeyLiveV2Cache   = incoming;
+      hockeyLiveV2FetchedAt = now;
+      if (hockeyTodayV2Cache !== null) {
+        hockeyTodayV2Cache   = incoming;
+        hockeyTodayV2FetchedAt = now;
+      }
+      break;
+    case "baseball":
+      baseballLiveV2Cache   = incoming;
+      baseballLiveV2FetchedAt = now;
+      if (baseballTodayV2Cache !== null) {
+        baseballTodayV2Cache   = incoming;
+        baseballTodayV2FetchedAt = now;
+      }
+      break;
+    case "tennis":
+      tennisLiveV2Cache   = incoming;
+      tennisLiveV2FetchedAt = now;
+      if (tennisTodayV2Cache !== null) {
+        tennisTodayV2Cache   = incoming;
+        tennisTodayV2FetchedAt = now;
+      }
+      break;
+  }
+}
+
+function mergeSingleV2Event(sport: SportKey, ev: SAPIV2Event): void {
+  const now = Date.now();
+  let cache: SAPIV2Event[] | null = null;
+  switch (sport) {
+    case "football":   cache = footballLiveV2Cache;   break;
+    case "basketball": cache = basketballLiveV2Cache; break;
+    case "hockey":     cache = hockeyLiveV2Cache;     break;
+    case "baseball":   cache = baseballLiveV2Cache;   break;
+    case "tennis":     cache = tennisLiveV2Cache;     break;
+  }
+  if (!cache) {
+    // No existing snapshot yet — treat as a 1-event array
+    applyV2WsMessage(sport, { events: [ev] });
+    return;
+  }
+  const idx = cache.findIndex(e => e.id === ev.id);
+  const updated = idx >= 0
+    ? [...cache.slice(0, idx), ev, ...cache.slice(idx + 1)]
+    : [...cache, ev];
+  applyV2WsMessage(sport, { events: updated });
+  void now; // used indirectly above
+}
+
+function connectSportWS(sport: SportKey): void {
+  // Don't open duplicate connections
+  if (wsConnected.has(sport)) return;
+
+  const key = SPORTSAPI_KEY;
+  if (!key) return; // no API key — skip WS entirely
+
+  const url = `wss://${WS_DOMAINS[sport]}/ws?x-api-key=${key}`;
+
+  let ws: WebSocket;
+  try {
+    ws = new WebSocket(url);
+  } catch {
+    scheduleReconnect(sport);
+    return;
+  }
+
+  ws.addEventListener("open", () => {
+    wsConnected.add(sport);
+    ws.send(JSON.stringify({ action: "subscribe", channel: "live-scores" }));
+  });
+
+  ws.addEventListener("message", (evt) => {
+    try {
+      const data: unknown = JSON.parse(typeof evt.data === "string" ? evt.data : String(evt.data));
+      applyV2WsMessage(sport, data);
+    } catch {
+      // non-JSON heartbeat / ping — ignore
+    }
+  });
+
+  ws.addEventListener("close", () => {
+    wsConnected.delete(sport);
+    scheduleReconnect(sport);
+  });
+
+  ws.addEventListener("error", () => {
+    // error always precedes close; let the close handler reconnect
+    wsConnected.delete(sport);
+  });
+}
+
+function scheduleReconnect(sport: SportKey): void {
+  if (wsTimers.has(sport)) return; // already scheduled
+  const t = setTimeout(() => {
+    wsTimers.delete(sport);
+    connectSportWS(sport);
+  }, 5_000);
+  wsTimers.set(sport, t);
+}
+
+/** Call once at server startup to open WS connections for all sports. */
+export function initSportWebSockets(): void {
+  for (const sport of Object.keys(WS_DOMAINS) as SportKey[]) {
+    connectSportWS(sport);
+  }
+}
+
 // ─── V2 /api/today fetch helpers ──────────────────────────────────────────────
 
 async function getFootballTodayV2(): Promise<SAPIV2Event[]> {
