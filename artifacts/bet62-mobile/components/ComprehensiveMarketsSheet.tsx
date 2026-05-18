@@ -82,7 +82,7 @@ function formatDateDisplay(date?: string, isLive?: boolean, minute?: number, tim
 }
 
 function getTabsForSport(
-  sport: string, isLive: boolean, show2tempo: boolean, showET: boolean, showPen: boolean
+  sport: string, isLive: boolean, show1tempo: boolean, show2tempo: boolean, showET: boolean, showPen: boolean
 ): TabDef[] {
   // Stats (📊) and Ao Vivo (⚡) are accessible via header icons — not shown in tab bar
   if (sport === "basketball") return [
@@ -113,7 +113,7 @@ function getTabsForSport(
     { key: "todos", label: "Todos" }, { key: "resultado", label: "Resultado" },
     { key: "dupla", label: "Dupla Chance" }, { key: "gols", label: "Golos" },
     { key: "especiais", label: "Especiais" }, { key: "handicap", label: "Handicap" },
-    { key: "1tempo", label: "1º Tempo" },
+    ...(show1tempo ? [{ key: "1tempo" as TabKey, label: "1º Tempo" }] : []),
     ...(show2tempo ? [{ key: "2tempo" as TabKey, label: "2º Tempo" }] : []),
     { key: "htft", label: "HT/FT" }, { key: "placar", label: "Placar" },
     { key: "escanteios", label: "Escanteios" }, { key: "cartoes", label: "Cartões" },
@@ -141,11 +141,14 @@ export function ComprehensiveMarketsSheet({ visible, match, onClose }: Props) {
   const liveHalf = isFootball && isLive && !m?.etExtra && !m?.penExtra
     ? (match.status === "HT" ? 0 : (match.minute ?? 0) > 45 ? 2 : 1)
     : null;
+  // show1tempo: pre-match (null) or 1st half (1) — hides when HT (0) or 2nd half (2)
+  const show1tempo = liveHalf === null || liveHalf === 1;
+  // show2tempo: at HT break (0) or during 2nd half (2)
   const show2tempo = liveHalf === 0 || liveHalf === 2;
   const showET = isFootball && isLive && !!m?.etExtra;
   const showPen = isFootball && isLive && !!m?.penExtra;
 
-  const tabs = getTabsForSport(match.sport, isLive, show2tempo, showET, showPen);
+  const tabs = getTabsForSport(match.sport, isLive, show1tempo, show2tempo, showET, showPen);
   const [activeTab, setActiveTab] = useState<TabKey>("todos");
   const [simulatorOpen, setSimulatorOpen] = useState(false);
 
@@ -916,7 +919,7 @@ export function ComprehensiveMarketsSheet({ visible, match, onClose }: Props) {
                   </Section>
                 )}
 
-                {isFootball && m?.halfTime && m.halfTime.home > 1.01 && (
+                {isFootball && show1tempo && m?.halfTime && m.halfTime.home > 1.01 && (
                   <Section title="1º Tempo — Resultado" tabKey="1tempo">
                     <View style={s.row}>
                       <OddsBtn market="ht-home" label="Casa (1)" value={m.halfTime.home} />
@@ -926,7 +929,7 @@ export function ComprehensiveMarketsSheet({ visible, match, onClose }: Props) {
                   </Section>
                 )}
 
-                {isFootball && m?.firstGoal && m.firstGoal.home > 1.01 && (
+                {isFootball && show1tempo && m?.firstGoal && m.firstGoal.home > 1.01 && (
                   <Section title="1º Golo" tabKey="1tempo">
                     <View style={s.row}>
                       <OddsBtn market="fg-home" label={match.home} value={m.firstGoal.home} />
