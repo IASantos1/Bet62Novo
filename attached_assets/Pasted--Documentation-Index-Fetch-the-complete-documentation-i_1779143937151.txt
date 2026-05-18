@@ -1,0 +1,193 @@
+> ## Documentation Index
+> Fetch the complete documentation index at: https://docs.sportsapipro.com/llms.txt
+> Use this file to discover all available pages before exploring further.
+
+# WebSocket Real-Time API
+
+> Connect to the WebSocket server for real-time live scores, match events, statistics, and odds with sub-second latency
+
+## Connection
+
+```
+wss://v2.football.sportsapipro.com/ws?x-api-key=YOUR_API_KEY
+```
+
+### Authentication
+
+Pass your API key via:
+
+* **Query string** (recommended for browser clients): `?x-api-key=YOUR_API_KEY`
+* **Header**: `x-api-key: YOUR_API_KEY`
+
+### Sport Selection
+
+Optionally set the `x-sport` header during connection to scope `live-scores` to a specific sport (default: `football`).
+
+**Supported values:** `football`, `basketball`, `ice-hockey`, `tennis`, `rugby`, `handball`, `volleyball`, `baseball`, `american-football`, `cricket`, `futsal`, `mma`, `motorsport`, `darts`, `snooker`, `badminton`, `table-tennis`, `beach-volley`, `cycling`, `esports`, `bandy`, `aussie-rules`, `floorball`, `minifootball`, `waterpolo`.
+
+## Message Format
+
+All messages are JSON. Send actions to subscribe/unsubscribe from channels:
+
+```json theme={null}
+{ "action": "subscribe", "channel": "live-scores" }
+{ "action": "subscribe", "channel": "match:14109842" }
+{ "action": "subscribe", "channel": "match:14109842:incidents" }
+{ "action": "unsubscribe", "channel": "match:14109842" }
+{ "action": "ping", "channel": "live-scores" }
+```
+
+## Available Channels
+
+| Channel                     | Description                                                            | Delivery                          |
+| --------------------------- | ---------------------------------------------------------------------- | --------------------------------- |
+| `live-scores`               | All live match scores & status changes (auto-scoped to your `x-sport`) | NATS push — sub-second            |
+| `live-scores:{sport}`       | Live scores for a specific sport (e.g. `live-scores:basketball`)       | NATS push — sub-second            |
+| `match:{matchId}`           | Score & status updates for a single match                              | NATS push — sub-second            |
+| `match:{matchId}:incidents` | Goals, cards, substitutions, VAR decisions                             | NATS-triggered fetch — sub-second |
+| `match:{matchId}:stats`     | Match statistics (possession, shots, passes)                           | NATS-triggered fetch — sub-second |
+| `match:{matchId}:odds`      | Live odds from all providers                                           | NATS-triggered fetch — sub-second |
+| `match:{matchId}:lineups`   | Team lineups (typically available pre-match)                           | Polling — 60s interval            |
+
+### Delivery Modes
+
+* **NATS push** — Data is pushed directly from the real-time feed with no delay
+* **NATS-triggered fetch** — When any match update is detected, detailed data is fetched instantly (no waiting for poll cycle)
+* **Polling** — Data is fetched at regular intervals (used for lineups which rarely change)
+
+## Response Types
+
+### `welcome`
+
+Sent immediately on connection:
+
+```json theme={null}
+{
+  "type": "welcome",
+  "message": "SportsAPIData WebSocket v3.1 — All Channels Sub-Second",
+  "sport": "football",
+  "natsConnected": true,
+  "channels": ["live-scores", "match:{matchId}", "..."]
+}
+```
+
+### `subscribed`
+
+Confirms a channel subscription:
+
+```json theme={null}
+{
+  "type": "subscribed",
+  "channel": "match:14109842:incidents",
+  "mode": "realtime (NATS-triggered fetch, 15000ms safety-net poll)"
+}
+```
+
+### `snapshot`
+
+Last known data sent immediately upon subscribing (if available):
+
+```json theme={null}
+{
+  "channel": "match:14109842",
+  "type": "snapshot",
+  "data": { ... },
+  "timestamp": 1710729600000
+}
+```
+
+### `update`
+
+New data pushed in real-time:
+
+```json theme={null}
+{
+  "channel": "match:14109842:incidents",
+  "type": "update",
+  "data": { ... },
+  "source": "nats",
+  "timestamp": 1710729600437
+}
+```
+
+### `pong`
+
+Response to a ping (for keep-alive):
+
+```json theme={null}
+{
+  "type": "pong",
+  "channel": "live-scores",
+  "timestamp": 1710729600000
+}
+```
+
+## Quick Start Examples
+
+<CodeGroup>
+  ```javascript JavaScript (Browser) theme={null}
+  const ws = new WebSocket('wss://v2.football.sportsapipro.com/ws?x-api-key=YOUR_API_KEY');
+
+  ws.onopen = () => {
+    // Subscribe to all live football scores
+    ws.send(JSON.stringify({ action: 'subscribe', channel: 'live-scores' }));
+
+    // Subscribe to a specific match's incidents (goals, cards, subs)
+    ws.send(JSON.stringify({ action: 'subscribe', channel: 'match:14109842:incidents' }));
+  };
+
+  ws.onmessage = (event) => {
+    const msg = JSON.parse(event.data);
+    console.log(`[${msg.type}] ${msg.channel}:`, msg.data);
+  };
+  ```
+
+  ```python Python theme={null}
+  import websockets, asyncio, json
+
+  async def connect():
+      uri = "wss://v2.football.sportsapipro.com/ws?x-api-key=YOUR_API_KEY"
+      async with websockets.connect(uri) as ws:
+          await ws.send(json.dumps({"action": "subscribe", "channel": "live-scores"}))
+          async for message in ws:
+              data = json.loads(message)
+              print(f"[{data['type']}] {data.get('channel', '')}")
+
+  asyncio.run(connect())
+  ```
+
+  ```bash cURL (wscat) theme={null}
+  wscat -c "wss://v2.football.sportsapipro.com/ws?x-api-key=YOUR_API_KEY"
+  > {"action":"subscribe","channel":"live-scores"}
+  > {"action":"subscribe","channel":"match:14109842:incidents"}
+  > {"action":"ping","channel":"live-scores"}
+  ```
+</CodeGroup>
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Subscribe only to channels you need">
+    Each subscription consumes server resources. Only subscribe to channels your application actively uses.
+  </Accordion>
+
+  <Accordion title="Use incidents for real-time match events">
+    Use `match:{id}:incidents` for real-time match events rather than polling the REST endpoint.
+  </Accordion>
+
+  <Accordion title="Handle snapshot messages">
+    When you subscribe, you immediately get the last known state so your UI is never blank.
+  </Accordion>
+
+  <Accordion title="Send periodic pings">
+    Send `{"action":"ping","channel":"live-scores"}` every 30s to keep the connection alive.
+  </Accordion>
+
+  <Accordion title="Reconnect with backoff">
+    If disconnected, reconnect with exponential backoff (1s, 2s, 4s, 8s…).
+  </Accordion>
+
+  <Accordion title="Unsubscribe when done">
+    Unsubscribe from match channels when the user navigates away.
+  </Accordion>
+</AccordionGroup>

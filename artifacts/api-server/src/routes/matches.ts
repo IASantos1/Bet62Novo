@@ -3,9 +3,19 @@ import { CONFIG } from "../lib/config";
 
 const router: IRouter = Router();
 
-const STATSPAL_KEY = process.env.STATSPAL_API_KEY;
-const BASE_V2 = "https://statpal.io/api/v2";
-const BASE_V1 = "https://statpal.io/api/v1";
+const SPORTSAPI_KEY = process.env.SPORTSAPI_KEY ?? "";
+
+// SportsAPI Pro V1 — base URLs per sport (auth via x-api-key header, not query param)
+const SAPI_FOOTBALL  = "https://v1.football.sportsapipro.com/api/v1";
+const SAPI_BASKETBALL = "https://v1.basketball.sportsapipro.com/api/v1";
+const SAPI_HOCKEY    = "https://v1.hockey.sportsapipro.com/api/v1";
+const SAPI_TENNIS    = "https://v1.tennis.sportsapipro.com/api/v1";
+const SAPI_VOLLEYBALL = "https://v1.volleyball.sportsapipro.com/api/v1";
+const SAPI_BASEBALL  = "https://v1.baseball.sportsapipro.com/api/v1";
+
+// Auth headers helper
+const sapiHeaders = (): Record<string, string> => ({ "x-api-key": SPORTSAPI_KEY });
+
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -2285,8 +2295,8 @@ async function getLiveLeagues(): Promise<StatpalLeagueV2[]> {
   if (liveIsFetching) return liveCache ?? [];
   liveIsFetching = true;
   try {
-    const resp = await fetch(`${BASE_V2}/soccer/matches/live?access_key=${STATSPAL_KEY}`, {
-      signal: AbortSignal.timeout(9000),
+    const resp = await fetch(`${SAPI_FOOTBALL}/soccer/matches/live`, {
+      signal: AbortSignal.timeout(9000), headers: sapiHeaders(),
     });
     if (!resp.ok) {
       console.warn(`[live] Statpal HTTP ${resp.status} — using cache or empty`);
@@ -2315,8 +2325,8 @@ async function getDailyLeagues(): Promise<StatpalLeagueV2[]> {
   const now = Date.now();
   if (dailyCache && now - dailyFetchedAt < CONFIG.DAILY_CACHE_TTL) return dailyCache;
   try {
-    const resp = await fetch(`${BASE_V2}/soccer/matches/daily?offset=0&access_key=${STATSPAL_KEY}`, {
-      signal: AbortSignal.timeout(9000),
+    const resp = await fetch(`${SAPI_FOOTBALL}/soccer/matches/daily?offset=0`, {
+      signal: AbortSignal.timeout(9000), headers: sapiHeaders(),
     });
     if (!resp.ok) {
       console.warn(`[daily] Statpal HTTP ${resp.status} — using cache or empty`);
@@ -2337,8 +2347,8 @@ async function getTomorrowLeagues(): Promise<StatpalLeagueV2[]> {
   const now = Date.now();
   if (dailyTomorrowCache && now - dailyTomorrowFetchedAt < CONFIG.TOMORROW_CACHE_TTL) return dailyTomorrowCache;
   try {
-    const resp = await fetch(`${BASE_V2}/soccer/matches/daily?offset=1&access_key=${STATSPAL_KEY}`, {
-      signal: AbortSignal.timeout(9000),
+    const resp = await fetch(`${SAPI_FOOTBALL}/soccer/matches/daily?offset=1`, {
+      signal: AbortSignal.timeout(9000), headers: sapiHeaders(),
     });
     if (!resp.ok) return dailyTomorrowCache ?? [];
     const raw = (await resp.json()) as Record<string, { league: StatpalLeagueV2[] }>;
@@ -2357,8 +2367,8 @@ async function getDailyLeaguesForFutureOffset(offset: number): Promise<StatpalLe
   const cached = dailyFutureCache.get(offset);
   if (cached && now - cached.fetchedAt < DAILY_FUTURE_TTL) return cached.data;
   try {
-    const resp = await fetch(`${BASE_V2}/soccer/matches/daily?offset=${offset}&access_key=${STATSPAL_KEY}`, {
-      signal: AbortSignal.timeout(9000),
+    const resp = await fetch(`${SAPI_FOOTBALL}/soccer/matches/daily?offset=${offset}`, {
+      signal: AbortSignal.timeout(9000), headers: sapiHeaders(),
     });
     if (!resp.ok) return cached?.data ?? [];
     const raw = (await resp.json()) as Record<string, { league: StatpalLeagueV2[] }>;
@@ -2387,8 +2397,8 @@ async function getOddsMap(): Promise<Map<string, RealOdds>> {
     COUNTRIES.map(async (country) => {
       try {
         const resp = await fetch(
-          `${BASE_V1}/soccer/odds/${country}?access_key=${STATSPAL_KEY}`,
-          { signal: AbortSignal.timeout(9000) }
+          `${SAPI_FOOTBALL}/soccer/odds/${country}`,
+          { signal: AbortSignal.timeout(9000), headers: sapiHeaders() }
         );
         if (!resp.ok) return;
         const raw = (await resp.json()) as {
@@ -3012,8 +3022,8 @@ async function getNHLLive(): Promise<NHLTournament[]> {
   const now = Date.now();
   if (nhlLiveCache && now - nhlLiveFetchedAt < CONFIG.LIVE_CACHE_TTL) return nhlLiveCache;
   try {
-    const resp = await fetch(`${BASE_V1}/nhl/livescores?access_key=${STATSPAL_KEY}`, {
-      signal: AbortSignal.timeout(8000),
+    const resp = await fetch(`${SAPI_HOCKEY}/nhl/livescores`, {
+      signal: AbortSignal.timeout(8000), headers: sapiHeaders(),
     });
     if (!resp.ok) return nhlLiveCache ?? [];
     const data = (await resp.json()) as { livescores?: { tournament?: NHLTournament | NHLTournament[] } };
@@ -3138,8 +3148,8 @@ async function getMLBLive(): Promise<MLBTournament[]> {
   const now = Date.now();
   if (mlbLiveCache && now - mlbLiveFetchedAt < CONFIG.LIVE_CACHE_TTL) return mlbLiveCache;
   try {
-    const resp = await fetch(`${BASE_V1}/mlb/livescores?access_key=${STATSPAL_KEY}`, {
-      signal: AbortSignal.timeout(8000),
+    const resp = await fetch(`${SAPI_BASEBALL}/mlb/livescores`, {
+      signal: AbortSignal.timeout(8000), headers: sapiHeaders(),
     });
     if (!resp.ok) return mlbLiveCache ?? [];
     const data = (await resp.json()) as { livescores?: { tournament?: MLBTournament | MLBTournament[] } };
@@ -3322,8 +3332,8 @@ async function getNBALive(): Promise<NBATournament[]> {
   const now = Date.now();
   if (nbaLiveCache && now - nbaLiveFetchedAt < CONFIG.LIVE_CACHE_TTL) return nbaLiveCache;
   try {
-    const resp = await fetch(`${BASE_V1}/nba/livescores?access_key=${STATSPAL_KEY}`, {
-      signal: AbortSignal.timeout(8000),
+    const resp = await fetch(`${SAPI_BASKETBALL}/nba/livescores`, {
+      signal: AbortSignal.timeout(8000), headers: sapiHeaders(),
     });
     if (!resp.ok) return nbaLiveCache ?? [];
     const data = (await resp.json()) as { livescores?: { tournament?: NBATournament | NBATournament[] } };
@@ -3442,7 +3452,7 @@ async function getTennisStatsMap(): Promise<Map<string, [TennisStatData, TennisS
   const now = Date.now();
   if (tennisStatsCache && now - tennisStatsFetchedAt < TENNIS_LIVE_CACHE_TTL) return tennisStatsCache;
   try {
-    const resp = await fetch(`${BASE_V1}/tennis/livestats?access_key=${STATSPAL_KEY}`, { signal: AbortSignal.timeout(8000) });
+    const resp = await fetch(`${SAPI_TENNIS}/tennis/livestats`, { signal: AbortSignal.timeout(8000), headers: sapiHeaders() });
     if (!resp.ok) return tennisStatsCache ?? new Map();
     const data = (await resp.json()) as { livestats?: { tournament?: TennisStatsTournament | TennisStatsTournament[] } };
     const raw = data?.livestats?.tournament;
@@ -3469,7 +3479,7 @@ async function getTennisLive(): Promise<TennisTournament[]> {
   const now = Date.now();
   if (tennisLiveCache && now - tennisLiveFetchedAt < TENNIS_LIVE_CACHE_TTL) return tennisLiveCache;
   try {
-    const resp = await fetch(`${BASE_V1}/tennis/livescores?access_key=${STATSPAL_KEY}`, { signal: AbortSignal.timeout(8000) });
+    const resp = await fetch(`${SAPI_TENNIS}/tennis/livescores`, { signal: AbortSignal.timeout(8000), headers: sapiHeaders() });
     if (!resp.ok) return tennisLiveCache ?? [];
     const data = (await resp.json()) as { livescores?: { tournament?: TennisTournament | TennisTournament[] } };
     const raw = data?.livescores?.tournament;
@@ -3486,7 +3496,7 @@ async function getVolleyballLive(): Promise<VolleyTournament[]> {
   const now = Date.now();
   if (volleyLiveCache && now - volleyLiveFetchedAt < CONFIG.LIVE_CACHE_TTL) return volleyLiveCache;
   try {
-    const resp = await fetch(`${BASE_V1}/volleyball/livescores?access_key=${STATSPAL_KEY}`, { signal: AbortSignal.timeout(8000) });
+    const resp = await fetch(`${SAPI_VOLLEYBALL}/volleyball/livescores`, { signal: AbortSignal.timeout(8000), headers: sapiHeaders() });
     if (!resp.ok) return volleyLiveCache ?? [];
     const data = (await resp.json()) as { livescores?: { tournament?: VolleyTournament | VolleyTournament[] } };
     const raw = data?.livescores?.tournament;
@@ -5176,8 +5186,8 @@ router.get("/stats", async (req, res) => {
   // Only attempt Statpal API for football
   if (sport === "football") {
     try {
-      const resp = await fetch(`${BASE_V2}/soccer/matches/daily?offset=-1&access_key=${STATSPAL_KEY}`, {
-        signal: AbortSignal.timeout(5000),
+      const resp = await fetch(`${SAPI_FOOTBALL}/soccer/matches/daily?offset=-1`, {
+        signal: AbortSignal.timeout(5000), headers: sapiHeaders(),
       });
       if (resp.ok) {
         // Response is date-keyed: { "matches_DD_MM_YYYY": { league: [...] } }
@@ -5320,8 +5330,8 @@ async function getActiveTournaments(): Promise<ActiveTournament[]> {
   const results: ActiveTournament[] = [];
   for (const tour of ["atp", "wta"] as const) {
     try {
-      const resp = await fetch(`${BASE_V1}/tennis/tournament-list/${tour}?access_key=${STATSPAL_KEY}`, {
-        signal: AbortSignal.timeout(8000),
+      const resp = await fetch(`${SAPI_TENNIS}/tennis/tournament-list/${tour}`, {
+        signal: AbortSignal.timeout(8000), headers: sapiHeaders(),
       });
       if (!resp.ok) continue;
       const data = (await resp.json()) as { tournaments?: { tournament?: TournamentRaw | TournamentRaw[] } };
@@ -5346,7 +5356,7 @@ async function getVolleyballDailyResults(): Promise<VolleyDailyResult[]> {
   const now = Date.now();
   if (volleyResultsCache && now - volleyResultsFetchedAt < RESULTS_CACHE_TTL) return volleyResultsCache;
   try {
-    const resp = await fetch(`${BASE_V1}/volleyball/daily/d-1?access_key=${STATSPAL_KEY}`, { signal: AbortSignal.timeout(9000) });
+    const resp = await fetch(`${SAPI_VOLLEYBALL}/volleyball/daily/d-1`, { signal: AbortSignal.timeout(9000), headers: sapiHeaders() });
     if (!resp.ok) return volleyResultsCache ?? [];
     const data = (await resp.json()) as { livescores?: { tournament?: unknown } };
     const raw = data?.livescores?.tournament;
@@ -5387,7 +5397,7 @@ async function getVolleyballStandings(leagueId: string): Promise<VolleyStandings
   const cached = volleyStandingsCache.get(leagueId);
   if (cached && Date.now() - cached.at < VOLLEY_SCHEDULE_TTL) return cached.data;
   try {
-    const resp = await fetch(`${BASE_V1}/volleyball/standings/${leagueId}?access_key=${STATSPAL_KEY}`, { signal: AbortSignal.timeout(9000) });
+    const resp = await fetch(`${SAPI_VOLLEYBALL}/volleyball/standings/${leagueId}`, { signal: AbortSignal.timeout(9000), headers: sapiHeaders() });
     if (!resp.ok) return null;
     const raw = (await resp.json()) as {
       standings?: {
@@ -5424,7 +5434,7 @@ async function getVolleyballSchedule(leagueId: string): Promise<VolleyScheduleDa
   const cached = volleyScheduleCache.get(leagueId);
   if (cached && Date.now() - cached.at < VOLLEY_SCHEDULE_TTL) return cached.data;
   try {
-    const resp = await fetch(`${BASE_V1}/volleyball/season-schedule/${leagueId}?access_key=${STATSPAL_KEY}`, { signal: AbortSignal.timeout(9000) });
+    const resp = await fetch(`${SAPI_VOLLEYBALL}/volleyball/season-schedule/${leagueId}`, { signal: AbortSignal.timeout(9000), headers: sapiHeaders() });
     if (!resp.ok) return null;
     const raw = (await resp.json()) as {
       scores?: {
@@ -5484,7 +5494,7 @@ async function getTennisDailyResults(): Promise<TennisDailyResult[]> {
   const now = Date.now();
   if (tennisResultsCache && now - tennisResultsFetchedAt < RESULTS_CACHE_TTL) return tennisResultsCache;
   try {
-    const resp = await fetch(`${BASE_V1}/tennis/daily/d-1?access_key=${STATSPAL_KEY}`, { signal: AbortSignal.timeout(9000) });
+    const resp = await fetch(`${SAPI_TENNIS}/tennis/daily/d-1`, { signal: AbortSignal.timeout(9000), headers: sapiHeaders() });
     if (!resp.ok) return tennisResultsCache ?? [];
     const data = (await resp.json()) as { scores?: { tournament?: unknown } };
     const raw = data?.scores?.tournament;
@@ -5525,7 +5535,7 @@ async function getHockeyDailyResults(): Promise<HockeyDailyResult[]> {
   const now = Date.now();
   if (hockeyResultsCache && now - hockeyResultsFetchedAt < RESULTS_CACHE_TTL) return hockeyResultsCache;
   try {
-    const resp = await fetch(`${BASE_V1}/nhl/daily/d-1?access_key=${STATSPAL_KEY}`, { signal: AbortSignal.timeout(9000) });
+    const resp = await fetch(`${SAPI_HOCKEY}/nhl/daily/d-1`, { signal: AbortSignal.timeout(9000), headers: sapiHeaders() });
     if (!resp.ok) return hockeyResultsCache ?? [];
     const data = (await resp.json()) as { scores?: { tournament?: unknown } };
     const raw = data?.scores?.tournament;
@@ -5583,7 +5593,7 @@ async function getMLBDailyResults(): Promise<MLBDailyResult[]> {
   const now = Date.now();
   if (mlbResultsCache && now - mlbResultsFetchedAt < RESULTS_CACHE_TTL) return mlbResultsCache;
   try {
-    const resp = await fetch(`${BASE_V1}/mlb/daily/d-1?access_key=${STATSPAL_KEY}`, { signal: AbortSignal.timeout(9000) });
+    const resp = await fetch(`${SAPI_BASEBALL}/mlb/daily/d-1`, { signal: AbortSignal.timeout(9000), headers: sapiHeaders() });
     if (!resp.ok) return mlbResultsCache ?? [];
     const data = (await resp.json()) as { scores?: { tournament?: unknown } };
     const raw = data?.scores?.tournament;
@@ -5642,7 +5652,7 @@ async function getBasketballSchedule(): Promise<BasketballScheduleData> {
   const now = Date.now();
   if (basketballScheduleCache && now - basketballScheduleFetchedAt < BBALL_SCHEDULE_TTL) return basketballScheduleCache;
   try {
-    const resp = await fetch(`${BASE_V1}/nba/season-schedule?access_key=${STATSPAL_KEY}`, { signal: AbortSignal.timeout(12000) });
+    const resp = await fetch(`${SAPI_BASKETBALL}/nba/season-schedule`, { signal: AbortSignal.timeout(12000), headers: sapiHeaders() });
     if (!resp.ok) return basketballScheduleCache ?? { league: "NBA", season: "", upcomingMatches: [], recentMatches: [] };
     const data = (await resp.json()) as { scores?: { tournament?: { league?: string; season?: string; match: unknown } } };
     const t = data?.scores?.tournament;
@@ -5710,7 +5720,7 @@ async function getBasketballSchedule(): Promise<BasketballScheduleData> {
     // Fallback: if season-schedule is empty (e.g. playoffs), pull from livescores
     if (upcomingMatches.length === 0) {
       try {
-        const lr = await fetch(`${BASE_V1}/nba/livescores?access_key=${STATSPAL_KEY}`, { signal: AbortSignal.timeout(9000) });
+        const lr = await fetch(`${SAPI_BASKETBALL}/nba/livescores`, { signal: AbortSignal.timeout(9000), headers: sapiHeaders() });
         if (lr.ok) {
           const ld = (await lr.json()) as { livescores?: { tournament?: { league?: string; match?: unknown } } };
           const lt = ld?.livescores?.tournament;
@@ -5755,7 +5765,7 @@ async function getBasketballDailyResults(): Promise<BasketballDailyResult[]> {
   const now = Date.now();
   if (basketballResultsCache && now - basketballResultsFetchedAt < RESULTS_CACHE_TTL) return basketballResultsCache;
   try {
-    const resp = await fetch(`${BASE_V1}/nba/daily/d-1?access_key=${STATSPAL_KEY}`, { signal: AbortSignal.timeout(9000) });
+    const resp = await fetch(`${SAPI_BASKETBALL}/nba/daily/d-1`, { signal: AbortSignal.timeout(9000), headers: sapiHeaders() });
     if (!resp.ok) return basketballResultsCache ?? [];
     const data = (await resp.json()) as { scores?: { tournament?: unknown } };
     const raw = data?.scores?.tournament;
@@ -5808,7 +5818,7 @@ async function getHockeySchedule(): Promise<HockeyScheduleData> {
   const now = Date.now();
   if (hockeyScheduleCache && now - hockeyScheduleFetchedAt < HOCKEY_SCHEDULE_TTL) return hockeyScheduleCache;
   try {
-    const resp = await fetch(`${BASE_V1}/nhl/season-schedule?access_key=${STATSPAL_KEY}`, { signal: AbortSignal.timeout(12000) });
+    const resp = await fetch(`${SAPI_HOCKEY}/nhl/season-schedule`, { signal: AbortSignal.timeout(12000), headers: sapiHeaders() });
     if (!resp.ok) return hockeyScheduleCache ?? { league: "NHL", season: "", upcomingMatches: [], recentMatches: [] };
     const data = (await resp.json()) as { scores?: { tournament?: { league?: string; season?: string; match: unknown } } };
     const t = data?.scores?.tournament;
@@ -5906,7 +5916,7 @@ async function getHockeySchedule(): Promise<HockeyScheduleData> {
     // Fallback: if season-schedule is empty (e.g. playoffs), pull from livescores
     if (upcomingMatches.length === 0) {
       try {
-        const lr = await fetch(`${BASE_V1}/nhl/livescores?access_key=${STATSPAL_KEY}`, { signal: AbortSignal.timeout(9000) });
+        const lr = await fetch(`${SAPI_HOCKEY}/nhl/livescores`, { signal: AbortSignal.timeout(9000), headers: sapiHeaders() });
         if (lr.ok) {
           const ld = (await lr.json()) as { livescores?: { tournament?: { league?: string; match?: unknown } } };
           const lt = ld?.livescores?.tournament;
@@ -5955,7 +5965,7 @@ async function getMLBSchedule(): Promise<MLBScheduleData> {
   if (mlbScheduleCache && now - mlbScheduleFetchedAt < MLB_SCHEDULE_TTL) return mlbScheduleCache;
   const empty: MLBScheduleData = { league: "MLB", season: "", upcomingMatches: [], recentMatches: [] };
   try {
-    const resp = await fetch(`${BASE_V1}/mlb/season-schedule?access_key=${STATSPAL_KEY}`, { signal: AbortSignal.timeout(12000) });
+    const resp = await fetch(`${SAPI_BASEBALL}/mlb/season-schedule`, { signal: AbortSignal.timeout(12000), headers: sapiHeaders() });
     if (!resp.ok) return mlbScheduleCache ?? empty;
     const data = (await resp.json()) as { scores?: { tournament?: { league?: string; season?: string; match: unknown } } };
     const t = data?.scores?.tournament;
@@ -6013,7 +6023,7 @@ async function getMLBSchedule(): Promise<MLBScheduleData> {
     // Fallback to livescores if season-schedule is empty
     if (upcomingMatches.length === 0) {
       try {
-        const lr = await fetch(`${BASE_V1}/mlb/livescores?access_key=${STATSPAL_KEY}`, { signal: AbortSignal.timeout(9000) });
+        const lr = await fetch(`${SAPI_BASEBALL}/mlb/livescores`, { signal: AbortSignal.timeout(9000), headers: sapiHeaders() });
         if (lr.ok) {
           const ld = (await lr.json()) as { livescores?: { tournament?: { match?: unknown } } };
           const lms = ld?.livescores?.tournament?.match;
@@ -6065,8 +6075,8 @@ async function getTournamentDetail(id: string): Promise<TournamentDetail> {
   const cached = tourDetailCache.get(id);
   if (cached && Date.now() - cached.at < TOUR_DETAIL_TTL) return cached.data;
 
-  const resp = await fetch(`${BASE_V1}/tennis/tournament/${id}?access_key=${STATSPAL_KEY}`, {
-    signal: AbortSignal.timeout(9000),
+  const resp = await fetch(`${SAPI_TENNIS}/tennis/tournament/${id}`, {
+    signal: AbortSignal.timeout(9000), headers: sapiHeaders(),
   });
   if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
   const data = (await resp.json()) as {
@@ -6163,7 +6173,7 @@ async function getTennisStandings(): Promise<StandingsTour> {
   if (standingsCache && now - standingsFetchedAt < STANDINGS_CACHE_TTL) return standingsCache;
   const fetchTour = async (tour: "atp" | "wta"): Promise<StandingPlayer[]> => {
     try {
-      const resp = await fetch(`${BASE_V1}/tennis/standings/${tour}?access_key=${STATSPAL_KEY}`, { signal: AbortSignal.timeout(8000) });
+      const resp = await fetch(`${SAPI_TENNIS}/tennis/standings/${tour}`, { signal: AbortSignal.timeout(8000), headers: sapiHeaders() });
       if (!resp.ok) return [];
       const data = (await resp.json()) as { standings?: { player?: StandingPlayer | StandingPlayer[] } };
       const raw = data?.standings?.player;
@@ -6273,7 +6283,7 @@ async function getHockeyStandings(): Promise<NHLStandingsData> {
   const now = Date.now();
   if (hockeyStandingsCache && now - hockeyStandingsFetchedAt < HOCKEY_STANDINGS_TTL) return hockeyStandingsCache;
   try {
-    const resp = await fetch(`${BASE_V1}/nhl/standings?access_key=${STATSPAL_KEY}`);
+    const resp = await fetch(`${SAPI_HOCKEY}/nhl/standings`, { headers: sapiHeaders() });
     if (!resp.ok) return hockeyStandingsCache ?? { season: "", conferences: [] };
     const json = (await resp.json()) as {
       standings?: {
@@ -6340,7 +6350,7 @@ async function getMLBStandings(): Promise<MLBStandingsData> {
   if (mlbStandingsCache && now - mlbStandingsFetchedAt < MLB_STANDINGS_TTL) return mlbStandingsCache;
   const empty: MLBStandingsData = { season: "", leagues: [] };
   try {
-    const resp = await fetch(`${BASE_V1}/mlb/standings?access_key=${STATSPAL_KEY}`, { signal: AbortSignal.timeout(9000) });
+    const resp = await fetch(`${SAPI_BASEBALL}/mlb/standings`, { signal: AbortSignal.timeout(9000), headers: sapiHeaders() });
     if (!resp.ok) return mlbStandingsCache ?? empty;
     const json = (await resp.json()) as {
       standings?: {
@@ -6419,7 +6429,7 @@ async function getMLBRoster(abbr: string): Promise<MLBRosterData | null> {
   const fetchedAt = mlbRosterFetchedAt.get(abbr) ?? 0;
   if (cached && now - fetchedAt < MLB_ROSTER_TTL) return cached;
   try {
-    const resp = await fetch(`${BASE_V1}/mlb/rosters/${abbr}?access_key=${STATSPAL_KEY}`, { signal: AbortSignal.timeout(9000) });
+    const resp = await fetch(`${SAPI_BASEBALL}/mlb/rosters/${abbr}`, { signal: AbortSignal.timeout(9000), headers: sapiHeaders() });
     if (!resp.ok) return cached ?? null;
     const json = (await resp.json()) as {
       team?: {
@@ -6498,7 +6508,7 @@ async function getMLBTeamStats(abbr: string): Promise<MLBTeamStatsData | null> {
   const fetchedAt = mlbTeamStatsFetchedAt.get(abbr) ?? 0;
   if (cached && now - fetchedAt < MLB_TEAM_STATS_TTL) return cached;
   try {
-    const resp = await fetch(`${BASE_V1}/mlb/team-stats/${abbr}?access_key=${STATSPAL_KEY}`, { signal: AbortSignal.timeout(9000) });
+    const resp = await fetch(`${SAPI_BASEBALL}/mlb/team-stats/${abbr}`, { signal: AbortSignal.timeout(9000), headers: sapiHeaders() });
     if (!resp.ok) return cached ?? null;
     const json = (await resp.json()) as {
       statistics?: {
@@ -6598,7 +6608,7 @@ async function getMLBInjuries(abbr: string): Promise<MLBInjuriesData | null> {
   const fetchedAt = mlbInjuriesFetchedAt.get(abbr) ?? 0;
   if (cached && now - fetchedAt < MLB_INJURIES_TTL) return cached;
   try {
-    const resp = await fetch(`${BASE_V1}/mlb/injuries/${abbr}?access_key=${STATSPAL_KEY}`, { signal: AbortSignal.timeout(9000) });
+    const resp = await fetch(`${SAPI_BASEBALL}/mlb/injuries/${abbr}`, { signal: AbortSignal.timeout(9000), headers: sapiHeaders() });
     if (!resp.ok) return cached ?? null;
     const json = (await resp.json()) as {
       team?: {
@@ -6656,7 +6666,7 @@ async function getMLBLeagueStats(): Promise<MLBLeagueStatsData> {
   if (mlbLeagueStatsCache && now - mlbLeagueStatsFetchedAt < MLB_LEAGUE_STATS_TTL) return mlbLeagueStatsCache;
 
   try {
-    const resp = await fetch(`${BASE_V1}/mlb/league-stats/mlb_player_batting?access_key=${STATSPAL_KEY}`, { signal: AbortSignal.timeout(8000) });
+    const resp = await fetch(`${SAPI_BASEBALL}/mlb/league-stats/mlb_player_batting`, { signal: AbortSignal.timeout(8000), headers: sapiHeaders() });
     if (!resp.ok) return mlbLeagueStatsCache ?? { batters: [] };
     const json = (await resp.json()) as { statistics?: { category?: { player?: unknown } } };
     const raw = json?.statistics?.category?.player;
@@ -6703,7 +6713,7 @@ async function getNBAStandings(): Promise<NBAStandingsData> {
   const now = Date.now();
   if (nbaStandingsCache && now - nbaStandingsFetchedAt < NBA_STANDINGS_TTL) return nbaStandingsCache;
   try {
-    const resp = await fetch(`${BASE_V1}/nba/standings?access_key=${STATSPAL_KEY}`);
+    const resp = await fetch(`${SAPI_BASKETBALL}/nba/standings`, { headers: sapiHeaders() });
     if (!resp.ok) return nbaStandingsCache ?? { season: "", conferences: [] };
     const json = (await resp.json()) as {
       standings?: {
@@ -6790,7 +6800,7 @@ async function getBasketballRoster(abbr: string): Promise<NBATeamRoster | null> 
   const fetchedAt = nbaRosterFetchedAt.get(abbr) ?? 0;
   if (cached && now - fetchedAt < NBA_ROSTER_TTL) return cached;
   try {
-    const resp = await fetch(`${BASE_V1}/nba/rosters/${abbr}?access_key=${STATSPAL_KEY}`);
+    const resp = await fetch(`${SAPI_BASKETBALL}/nba/rosters/${abbr}`, { headers: sapiHeaders() });
     if (!resp.ok) return cached ?? null;
     const json = (await resp.json()) as {
       team?: {
@@ -6867,7 +6877,7 @@ async function getBasketballTeamStats(abbr: string): Promise<NBATeamStatsData | 
   const fetchedAt = nbaTeamStatsFetchedAt.get(abbr) ?? 0;
   if (cached && now - fetchedAt < NBA_TEAM_STATS_TTL) return cached;
   try {
-    const resp = await fetch(`${BASE_V1}/nba/team-stats/${abbr}?access_key=${STATSPAL_KEY}`);
+    const resp = await fetch(`${SAPI_BASKETBALL}/nba/team-stats/${abbr}`, { headers: sapiHeaders() });
     if (!resp.ok) return cached ?? null;
     const json = (await resp.json()) as {
       statistics?: {
@@ -6944,7 +6954,7 @@ async function getHockeyRoster(abbr: string): Promise<NHLRosterData | null> {
   const fetchedAt = hockeyRosterFetchedAt.get(abbr) ?? 0;
   if (cached && now - fetchedAt < HOCKEY_ROSTER_TTL) return cached;
   try {
-    const resp = await fetch(`${BASE_V1}/nhl/rosters/${abbr}?access_key=${STATSPAL_KEY}`);
+    const resp = await fetch(`${SAPI_HOCKEY}/nhl/rosters/${abbr}`, { headers: sapiHeaders() });
     if (!resp.ok) return cached ?? null;
     const json = (await resp.json()) as {
       team?: {
@@ -7025,7 +7035,7 @@ async function getHockeyTeamStats(abbr: string): Promise<NHLTeamStatsData | null
   const fetchedAt = hockeyTeamStatsFetchedAt.get(abbr) ?? 0;
   if (cached && now - fetchedAt < HOCKEY_TEAM_STATS_TTL) return cached;
   try {
-    const resp = await fetch(`${BASE_V1}/nhl/team-stats/${abbr}?access_key=${STATSPAL_KEY}`);
+    const resp = await fetch(`${SAPI_HOCKEY}/nhl/team-stats/${abbr}`, { headers: sapiHeaders() });
     if (!resp.ok) return cached ?? null;
     const json = (await resp.json()) as {
       statistics?: {
@@ -7122,7 +7132,7 @@ async function getHockeyInjuries(abbr: string): Promise<NHLInjuriesData | null> 
   const fetchedAt = hockeyInjuriesFetchedAt.get(abbr) ?? 0;
   if (cached && now - fetchedAt < HOCKEY_INJURIES_TTL) return cached;
   try {
-    const resp = await fetch(`${BASE_V1}/nhl/injuries/${abbr}?access_key=${STATSPAL_KEY}`);
+    const resp = await fetch(`${SAPI_HOCKEY}/nhl/injuries/${abbr}`, { headers: sapiHeaders() });
     if (!resp.ok) return cached ?? null;
     const json = (await resp.json()) as {
       team?: {
@@ -7175,7 +7185,7 @@ async function getBasketballInjuries(abbr: string): Promise<NBAInjuriesData | nu
   const fetchedAt = nbaInjuriesFetchedAt.get(abbr) ?? 0;
   if (cached && now - fetchedAt < NBA_INJURIES_TTL) return cached;
   try {
-    const resp = await fetch(`${BASE_V1}/nba/injuries/${abbr}?access_key=${STATSPAL_KEY}`);
+    const resp = await fetch(`${SAPI_BASKETBALL}/nba/injuries/${abbr}`, { headers: sapiHeaders() });
     if (!resp.ok) return cached ?? null;
     const json = (await resp.json()) as {
       team?: {
@@ -7284,7 +7294,7 @@ async function getVolleyballOdds(): Promise<VolleyOddsEntry[]> {
   if (volleyOddsCache && now - volleyOddsFetchedAt < VOLLEY_ODDS_TTL) return volleyOddsCache;
   let resp: Response;
   try {
-    resp = await fetch(`${BASE_V1}/volleyball/odds?access_key=${STATSPAL_KEY}`, { signal: AbortSignal.timeout(9000) });
+    resp = await fetch(`${SAPI_VOLLEYBALL}/volleyball/odds`, { signal: AbortSignal.timeout(9000), headers: sapiHeaders() });
   } catch {
     return volleyOddsCache ?? [];
   }
@@ -7413,7 +7423,7 @@ async function getBasketballOdds(): Promise<NBAOddsEntry[]> {
   if (nbaOddsCache && now - nbaOddsFetchedAt < NBA_ODDS_TTL) return nbaOddsCache;
   let resp: Response;
   try {
-    resp = await fetch(`${BASE_V1}/nba/odds?access_key=${STATSPAL_KEY}`, { signal: AbortSignal.timeout(9000) });
+    resp = await fetch(`${SAPI_BASKETBALL}/nba/odds`, { signal: AbortSignal.timeout(9000), headers: sapiHeaders() });
   } catch {
     return nbaOddsCache ?? [];
   }
@@ -7527,7 +7537,7 @@ async function getHockeyOdds(): Promise<HockeyOddsEntry[]> {
   if (hockeyOddsCache && now - hockeyOddsFetchedAt < HOCKEY_ODDS_TTL) return hockeyOddsCache;
   let resp: Response;
   try {
-    resp = await fetch(`${BASE_V1}/nhl/odds?access_key=${STATSPAL_KEY}`, { signal: AbortSignal.timeout(9000) });
+    resp = await fetch(`${SAPI_HOCKEY}/nhl/odds`, { signal: AbortSignal.timeout(9000), headers: sapiHeaders() });
   } catch {
     return hockeyOddsCache ?? [];
   }
@@ -7648,7 +7658,7 @@ async function getMLBOdds(): Promise<MLBOddsEntry[]> {
   if (mlbOddsCache && now - mlbOddsFetchedAt < MLB_ODDS_TTL) return mlbOddsCache;
   let resp: Response;
   try {
-    resp = await fetch(`${BASE_V1}/mlb/odds?access_key=${STATSPAL_KEY}`, { signal: AbortSignal.timeout(9000) });
+    resp = await fetch(`${SAPI_BASEBALL}/mlb/odds`, { signal: AbortSignal.timeout(9000), headers: sapiHeaders() });
   } catch {
     return mlbOddsCache ?? [];
   }
@@ -7725,7 +7735,7 @@ async function getTennisOdds(): Promise<TennisOddsEntry[]> {
   if (tennisOddsCache && now - tennisOddsFetchedAt < TENNIS_ODDS_TTL) return tennisOddsCache;
   let resp: Response;
   try {
-    resp = await fetch(`${BASE_V1}/tennis/odds?access_key=${STATSPAL_KEY}`, { signal: AbortSignal.timeout(9000) });
+    resp = await fetch(`${SAPI_TENNIS}/tennis/odds`, { signal: AbortSignal.timeout(9000), headers: sapiHeaders() });
   } catch {
     return tennisOddsCache ?? [];
   }
@@ -7973,7 +7983,7 @@ const FOOTBALL_LEAGUES_TTL = 5 * 60 * 1000;
 async function getFootballLeagues(): Promise<FootballLeague[]> {
   const now = Date.now();
   if (footballLeaguesCache && now - footballLeaguesFetchedAt < FOOTBALL_LEAGUES_TTL) return footballLeaguesCache;
-  const resp = await fetch(`${BASE_V2}/soccer/leagues/seasons?access_key=${STATSPAL_KEY}`, { signal: AbortSignal.timeout(9000) });
+  const resp = await fetch(`${SAPI_FOOTBALL}/soccer/leagues/seasons`, { signal: AbortSignal.timeout(9000), headers: sapiHeaders() });
   if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
   const data = (await resp.json()) as { league?: unknown };
   const rawLeagues = data?.league;
@@ -8139,7 +8149,7 @@ async function getFootballSchedule(id: string): Promise<{ weeks: FootballSchedul
   const now = Date.now();
   const cached = footballScheduleCache.get(id);
   if (cached && now - cached.fetchedAt < FOOTBALL_SCHEDULE_TTL) return { weeks: cached.data, meta: cached.meta };
-  const resp = await fetch(`${BASE_V2}/soccer/leagues/${encodeURIComponent(id)}/matches?access_key=${STATSPAL_KEY}`, { signal: AbortSignal.timeout(12000) });
+  const resp = await fetch(`${SAPI_FOOTBALL}/soccer/leagues/${encodeURIComponent(id)}/matches`, { signal: AbortSignal.timeout(12000), headers: sapiHeaders() });
   if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
   const data = (await resp.json()) as FootballScheduleRaw;
   const tour = data?.matches?.tournament;
@@ -8282,7 +8292,7 @@ async function getFootballMatchStats(leagueId: string): Promise<object> {
   const now = Date.now();
   const cached = footballMatchStatsCache.get(leagueId);
   if (cached && now - cached.fetchedAt < FOOTBALL_MATCH_STATS_TTL) return cached.data as object;
-  const resp = await fetch(`${BASE_V2}/soccer/leagues/${encodeURIComponent(leagueId)}/matches/stats?access_key=${STATSPAL_KEY}`, { signal: AbortSignal.timeout(12000) });
+  const resp = await fetch(`${SAPI_FOOTBALL}/soccer/leagues/${encodeURIComponent(leagueId)}/matches/stats`, { signal: AbortSignal.timeout(12000), headers: sapiHeaders() });
   if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
   const raw = (await resp.json()) as FootballMatchStatsRaw;
   const ms = raw["match-stats"];
@@ -8413,7 +8423,7 @@ async function getFootballStandings(leagueId: string): Promise<{ teams: Football
   const now = Date.now();
   const cached = footballStandingsCache.get(leagueId);
   if (cached && now - cached.fetchedAt < FOOTBALL_STANDINGS_TTL) return { teams: cached.data, meta: cached.meta };
-  const resp = await fetch(`${BASE_V2}/soccer/leagues/${encodeURIComponent(leagueId)}/standings?access_key=${STATSPAL_KEY}`, { signal: AbortSignal.timeout(9000) });
+  const resp = await fetch(`${SAPI_FOOTBALL}/soccer/leagues/${encodeURIComponent(leagueId)}/standings`, { signal: AbortSignal.timeout(9000), headers: sapiHeaders() });
   if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
   const data = (await resp.json()) as FootballStandingsRaw;
   const tour = data?.standings?.tournament;
@@ -8561,7 +8571,7 @@ async function getFootballLeagueStats(leagueId: string): Promise<{ teams: Footba
   const now = Date.now();
   const cached = footballLeagueStatsCache.get(leagueId);
   if (cached && now - cached.fetchedAt < FOOTBALL_LEAGUE_STATS_TTL) return { teams: cached.data, meta: cached.meta };
-  const resp = await fetch(`${BASE_V2}/soccer/leagues/${encodeURIComponent(leagueId)}/stats?access_key=${STATSPAL_KEY}`, { signal: AbortSignal.timeout(15000) });
+  const resp = await fetch(`${SAPI_FOOTBALL}/soccer/leagues/${encodeURIComponent(leagueId)}/stats`, { signal: AbortSignal.timeout(15000), headers: sapiHeaders() });
   if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
   const data = (await resp.json()) as FootballLeagueStatsRaw;
   const league = data?.league_stats?.league;
@@ -8652,8 +8662,8 @@ async function getFootballH2H(team1: string, team2: string): Promise<object> {
   const now = Date.now();
   const cached = footballH2HCache.get(key);
   if (cached && now - cached.fetchedAt < FOOTBALL_H2H_TTL) return cached.data;
-  const url = `${BASE_V2}/soccer/head-to-head?team1=${encodeURIComponent(team1)}&team2=${encodeURIComponent(team2)}&access_key=${STATSPAL_KEY}`;
-  const resp = await fetch(url, { signal: AbortSignal.timeout(10000) });
+  const url = `${SAPI_FOOTBALL}/soccer/head-to-head?team1=${encodeURIComponent(team1)}&team2=${encodeURIComponent(team2)}`;
+  const resp = await fetch(url, { signal: AbortSignal.timeout(10000), headers: sapiHeaders() });
   if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
   const data = (await resp.json()) as FootballH2HRaw;
   const h2h = data["head-to-head"];
@@ -8779,7 +8789,7 @@ function parseInjuryTeam(t: FootballInjuryTeamRaw): FootballInjuryTeam {
 async function getFootballInjuries(): Promise<FootballInjuryLeague[]> {
   const now = Date.now();
   if (footballInjuriesCache && now - footballInjuriesFetchedAt < FOOTBALL_INJURIES_TTL) return footballInjuriesCache;
-  const resp = await fetch(`${BASE_V2}/soccer/injuries-suspensions?access_key=${STATSPAL_KEY}`, { signal: AbortSignal.timeout(10000) });
+  const resp = await fetch(`${SAPI_FOOTBALL}/soccer/injuries-suspensions`, { signal: AbortSignal.timeout(10000), headers: sapiHeaders() });
   if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
   const data = (await resp.json()) as FootballInjuriesRaw;
   const rawLeagues = data?.injuries_suspensions?.league;
@@ -8889,7 +8899,7 @@ async function getFootballTeam(teamId: string): Promise<object> {
   const now = Date.now();
   const cached = footballTeamCache.get(teamId);
   if (cached && now - cached.fetchedAt < FOOTBALL_TEAM_TTL) return cached.data;
-  const resp = await fetch(`${BASE_V2}/soccer/teams/${encodeURIComponent(teamId)}?access_key=${STATSPAL_KEY}`, { signal: AbortSignal.timeout(12000) });
+  const resp = await fetch(`${SAPI_FOOTBALL}/soccer/teams/${encodeURIComponent(teamId)}`, { signal: AbortSignal.timeout(12000), headers: sapiHeaders() });
   if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
   const data = (await resp.json()) as FootballTeamProfileRaw;
   const t = data?.team;
@@ -9084,7 +9094,7 @@ async function getFootballPlayer(playerId: string): Promise<object> {
   const now = Date.now();
   const cached = footballPlayerCache.get(playerId);
   if (cached && now - cached.fetchedAt < FOOTBALL_PLAYER_TTL) return cached.data;
-  const resp = await fetch(`${BASE_V2}/soccer/players/${encodeURIComponent(playerId)}?access_key=${STATSPAL_KEY}`, { signal: AbortSignal.timeout(10000) });
+  const resp = await fetch(`${SAPI_FOOTBALL}/soccer/players/${encodeURIComponent(playerId)}`, { signal: AbortSignal.timeout(10000), headers: sapiHeaders() });
   if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
   const data = (await resp.json()) as FootballPlayerProfileRaw;
   const p = data?.player;
@@ -9142,7 +9152,7 @@ async function getFootballCoach(coachId: string): Promise<object> {
   const now = Date.now();
   const cached = footballCoachCache.get(coachId);
   if (cached && now - cached.fetchedAt < FOOTBALL_COACH_TTL) return cached.data;
-  const resp = await fetch(`${BASE_V2}/soccer/coaches/${encodeURIComponent(coachId)}?access_key=${STATSPAL_KEY}`, { signal: AbortSignal.timeout(10000) });
+  const resp = await fetch(`${SAPI_FOOTBALL}/soccer/coaches/${encodeURIComponent(coachId)}`, { signal: AbortSignal.timeout(10000), headers: sapiHeaders() });
   if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
   const data = (await resp.json()) as FootballCoachProfileRaw;
   const c = data?.coach;
@@ -9207,8 +9217,8 @@ router.get("/football-image", async (req, res) => {
   }
 
   try {
-    const url = `${BASE_V2}/soccer/images?type=${encodeURIComponent(type)}&id=${encodeURIComponent(id)}&access_key=${STATSPAL_KEY}`;
-    const imgResp = await fetch(url, { signal: AbortSignal.timeout(8000) });
+    const url = `${SAPI_FOOTBALL}/soccer/images?type=${encodeURIComponent(type)}&id=${encodeURIComponent(id)}`;
+    const imgResp = await fetch(url, { signal: AbortSignal.timeout(8000), headers: sapiHeaders() });
     if (!imgResp.ok) { res.status(imgResp.status).json({ error: "Imagem não encontrada" }); return; }
     const contentType = imgResp.headers.get("content-type") ?? "image/png";
     const arrayBuf = await imgResp.arrayBuffer();
@@ -9267,7 +9277,7 @@ async function getFootballLeagueOdds(leagueId: string): Promise<{ odds: Football
   const cached = footballOddsCache.get(leagueId);
   if (cached && now - cached.fetchedAt < FOOTBALL_ODDS_TTL) return { odds: cached.data, meta: cached.meta };
 
-  const resp = await fetch(`${BASE_V2}/soccer/leagues/${encodeURIComponent(leagueId)}/odds/prematch?access_key=${STATSPAL_KEY}`, { signal: AbortSignal.timeout(10000) });
+  const resp = await fetch(`${SAPI_FOOTBALL}/soccer/leagues/${encodeURIComponent(leagueId)}/odds/prematch`, { signal: AbortSignal.timeout(10000), headers: sapiHeaders() });
   if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
   const data = (await resp.json()) as FootballPrematchOddsRaw;
   const league = data?.prematch_odds?.league;
@@ -9368,7 +9378,7 @@ const FOOTBALL_LIVE_ODDS_TTL = 10 * 1000; // 10s — in-play data, very fresh
 async function getFootballLiveOdds(): Promise<object[]> {
   const now = Date.now();
   if (footballLiveOddsCache && now - footballLiveOddsFetchedAt < FOOTBALL_LIVE_ODDS_TTL) return footballLiveOddsCache;
-  const resp = await fetch(`${BASE_V2}/soccer/odds/live?access_key=${STATSPAL_KEY}`, { signal: AbortSignal.timeout(8000) });
+  const resp = await fetch(`${SAPI_FOOTBALL}/soccer/odds/live`, { signal: AbortSignal.timeout(8000), headers: sapiHeaders() });
   if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
   const data = (await resp.json()) as FootballLiveOddsRaw;
   const matches = data?.live_matches ?? [];
@@ -9441,7 +9451,7 @@ router.get("/football-live-markets", async (_req, res) => {
     return;
   }
   try {
-    const resp = await fetch(`${BASE_V2}/soccer/odds/live/markets?access_key=${STATSPAL_KEY}`, { signal: AbortSignal.timeout(8000) });
+    const resp = await fetch(`${SAPI_FOOTBALL}/soccer/odds/live/markets`, { signal: AbortSignal.timeout(8000), headers: sapiHeaders() });
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     // Response is a bare array: [{id: number, name: string}, ...]
     const data = (await resp.json()) as { id: number; name: string }[];
@@ -9469,7 +9479,7 @@ router.get("/football-live-match-states", async (_req, res) => {
     return;
   }
   try {
-    const resp = await fetch(`${BASE_V2}/soccer/odds/live/match-states?access_key=${STATSPAL_KEY}`, { signal: AbortSignal.timeout(8000) });
+    const resp = await fetch(`${SAPI_FOOTBALL}/soccer/odds/live/match-states`, { signal: AbortSignal.timeout(8000), headers: sapiHeaders() });
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     const data = (await resp.json()) as { id: number; name: string }[];
     const states = Array.isArray(data) ? data.map(s => ({ id: s.id, name: s.name })) : [];
@@ -9539,7 +9549,7 @@ router.get("/football-livescores", async (_req, res) => {
     return;
   }
   try {
-    const resp = await fetch(`${BASE_V1}/soccer/livescores?access_key=${STATSPAL_KEY}`, { signal: AbortSignal.timeout(9000) });
+    const resp = await fetch(`${SAPI_FOOTBALL}/soccer/livescores`, { signal: AbortSignal.timeout(9000), headers: sapiHeaders() });
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     const data = (await resp.json()) as V1SoccerLivescoresRaw;
     const rawLeagues = data?.livescore?.league;
@@ -9617,7 +9627,7 @@ router.get("/football-daily/:offset", async (req, res) => {
     return;
   }
   try {
-    const resp = await fetch(`${BASE_V1}/soccer/daily/${key}?access_key=${STATSPAL_KEY}`, { signal: AbortSignal.timeout(9000) });
+    const resp = await fetch(`${SAPI_FOOTBALL}/soccer/daily/${key}`, { signal: AbortSignal.timeout(9000), headers: sapiHeaders() });
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     const data = (await resp.json()) as V1SoccerLivescoresRaw;
     const rawLeagues = data?.livescore?.league;
@@ -9698,7 +9708,7 @@ router.get("/football-upcoming/:country", async (req, res) => {
     return;
   }
   try {
-    const resp = await fetch(`${BASE_V1}/soccer/upcoming-schedule/${encodeURIComponent(country)}?access_key=${STATSPAL_KEY}`, { signal: AbortSignal.timeout(9000) });
+    const resp = await fetch(`${SAPI_FOOTBALL}/soccer/upcoming-schedule/${encodeURIComponent(country)}`, { signal: AbortSignal.timeout(9000), headers: sapiHeaders() });
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     const data = (await resp.json()) as V1UpcomingScheduleRaw;
     const rawLeagues = data?.fixtures?.league;
@@ -9795,7 +9805,7 @@ router.get("/football-extended-schedule/:country", async (req, res) => {
     return;
   }
   try {
-    const resp = await fetch(`${BASE_V1}/soccer/extended-schedule/${encodeURIComponent(country)}?access_key=${STATSPAL_KEY}`, { signal: AbortSignal.timeout(9000) });
+    const resp = await fetch(`${SAPI_FOOTBALL}/soccer/extended-schedule/${encodeURIComponent(country)}`, { signal: AbortSignal.timeout(9000), headers: sapiHeaders() });
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     const data = (await resp.json()) as V1ExtScheduleRaw;
     const rawLeagues = data?.extended_fixtures?.league;
@@ -9916,7 +9926,7 @@ router.get("/football-results-country/:country", async (req, res) => {
     return;
   }
   try {
-    const resp = await fetch(`${BASE_V1}/soccer/results/${encodeURIComponent(country)}?access_key=${STATSPAL_KEY}`, { signal: AbortSignal.timeout(9000) });
+    const resp = await fetch(`${SAPI_FOOTBALL}/soccer/results/${encodeURIComponent(country)}`, { signal: AbortSignal.timeout(9000), headers: sapiHeaders() });
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     const data = (await resp.json()) as V1ResultsRaw;
     const rawLeagues = data?.results?.league;
@@ -10066,7 +10076,7 @@ router.get("/football-live-match-stats/:leagueSlug", async (req, res) => {
     return;
   }
   try {
-    const resp = await fetch(`${BASE_V1}/soccer/live-match-stats/${encodeURIComponent(slug)}?access_key=${STATSPAL_KEY}`, { signal: AbortSignal.timeout(9000) });
+    const resp = await fetch(`${SAPI_FOOTBALL}/soccer/live-match-stats/${encodeURIComponent(slug)}`, { signal: AbortSignal.timeout(9000), headers: sapiHeaders() });
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     const data = (await resp.json()) as V1LiveStatsRaw;
     const comm = data?.commentaries;
@@ -10179,7 +10189,7 @@ router.get("/football-standings-country/:country", async (req, res) => {
     return;
   }
   try {
-    const resp = await fetch(`${BASE_V1}/soccer/standings/${encodeURIComponent(country)}?access_key=${STATSPAL_KEY}`, { signal: AbortSignal.timeout(9000) });
+    const resp = await fetch(`${SAPI_FOOTBALL}/soccer/standings/${encodeURIComponent(country)}`, { signal: AbortSignal.timeout(9000), headers: sapiHeaders() });
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     const data = (await resp.json()) as V1StandingsRaw;
     const rawLeagues = data?.standings?.league;
@@ -10244,7 +10254,7 @@ router.get("/football-scoring-leaders/:country", async (req, res) => {
     return;
   }
   try {
-    const resp = await fetch(`${BASE_V1}/soccer/scoring-leaders/${encodeURIComponent(country)}?access_key=${STATSPAL_KEY}`, { signal: AbortSignal.timeout(9000) });
+    const resp = await fetch(`${SAPI_FOOTBALL}/soccer/scoring-leaders/${encodeURIComponent(country)}`, { signal: AbortSignal.timeout(9000), headers: sapiHeaders() });
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     const data = (await resp.json()) as V1ScorersRaw;
     const rawLeagues = data?.scorers?.league;
@@ -10309,7 +10319,7 @@ router.get("/football-injuries-v1", async (_req, res) => {
     return;
   }
   try {
-    const resp = await fetch(`${BASE_V1}/soccer/injuries?access_key=${STATSPAL_KEY}`, { signal: AbortSignal.timeout(10000) });
+    const resp = await fetch(`${SAPI_FOOTBALL}/soccer/injuries`, { signal: AbortSignal.timeout(10000), headers: sapiHeaders() });
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     const data = (await resp.json()) as V1InjuriesRaw;
     const rawLeagues = data?.injuries_suspensions?.league;
@@ -10458,7 +10468,7 @@ router.get("/football-odds-country/:country", async (req, res) => {
     return;
   }
   try {
-    const resp = await fetch(`${BASE_V1}/soccer/odds/${encodeURIComponent(country)}?access_key=${STATSPAL_KEY}`, { signal: AbortSignal.timeout(10000) });
+    const resp = await fetch(`${SAPI_FOOTBALL}/soccer/odds/${encodeURIComponent(country)}`, { signal: AbortSignal.timeout(10000), headers: sapiHeaders() });
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     const raw = (await resp.json()) as {
       example?: { odds_feed?: { league?: OddsLeague | OddsLeague[] } };

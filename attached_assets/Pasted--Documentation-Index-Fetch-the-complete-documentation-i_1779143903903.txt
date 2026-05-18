@@ -1,0 +1,144 @@
+> ## Documentation Index
+> Fetch the complete documentation index at: https://docs.sportsapipro.com/llms.txt
+> Use this file to discover all available pages before exploring further.
+
+# Fantasy & Player of the Season Endpoints
+
+> V2 Football API: Fantasy player data, fixtures, and player of the season awards
+
+## Base URL
+
+```
+https://v2.football.sportsapipro.com
+```
+
+<Warning>
+  **Fantasy IDs are NOT player IDs.** You must first discover the fantasy ID using `/api/players/{playerId}/fantasy/competitions` (see [Player Endpoints → Fantasy](/api-reference/football-v2/player#fantasy)), then use the returned `fantasyId` with the endpoints below.
+
+  **Discovery flow:**
+
+  1. Get the regular player ID via search or lineups
+  2. Call `GET /api/players/{playerId}/fantasy/competitions`
+  3. Extract the `fantasyId` from the response
+  4. Use that `fantasyId` in the endpoints below
+</Warning>
+
+***
+
+## Fantasy Endpoints
+
+### Fantasy Player Details
+
+```bash theme={null}
+GET /api/fantasy/player/{fantasyId}
+```
+
+Returns fantasy-specific player data: ownership percentage, price, total points, points per game, and form.
+
+<ParamField path="fantasyId" type="number" required>
+  Fantasy player ID (NOT the regular player ID). Discover via `/api/players/{playerId}/fantasy/competitions`.
+</ParamField>
+
+### Fantasy Player Fixtures
+
+```bash theme={null}
+GET /api/fantasy/player/{fantasyId}/fixtures
+```
+
+Returns upcoming fixtures with difficulty ratings for the fantasy player — useful for transfer planning and captaincy decisions.
+
+***
+
+## Player of the Season
+
+### Highest Ratings
+
+```bash theme={null}
+GET /api/player-of-the-season/highest-ratings
+```
+
+Returns players with the highest average ratings across all competitions.
+
+### Available Years
+
+```bash theme={null}
+GET /api/player-of-the-season/available-years
+```
+
+Returns all years with Player of the Season data available.
+
+### Most Awards (Paginated)
+
+```bash theme={null}
+GET /api/player-of-the-season/most-awards?page={page}
+```
+
+Returns players ranked by the number of Player of the Season awards received.
+
+<ParamField query="page" type="number" default="0">
+  Page number for pagination (0-indexed).
+</ParamField>
+
+### Top Competitions
+
+```bash theme={null}
+GET /api/player-of-the-season/top-competitions
+```
+
+Returns competitions ranked by prestige/quality of their Player of the Season awards.
+
+***
+
+## Example Requests
+
+<CodeGroup>
+  ```bash cURL theme={null}
+  # Step 1: Discover fantasy ID from player ID
+  curl -X GET "https://v2.football.sportsapipro.com/api/players/839956/fantasy/competitions" \
+    -H "x-api-key: YOUR_API_KEY"
+
+  # Step 2: Use the fantasyId from the response
+  curl -X GET "https://v2.football.sportsapipro.com/api/fantasy/player/49002/fixtures" \
+    -H "x-api-key: YOUR_API_KEY"
+
+  # Player of the Season — no discovery needed
+  curl -X GET "https://v2.football.sportsapipro.com/api/player-of-the-season/highest-ratings" \
+    -H "x-api-key: YOUR_API_KEY"
+  ```
+
+  ```javascript JavaScript theme={null}
+  // Step 1: Get fantasy ID
+  const fantasyComps = await fetch(
+    'https://v2.football.sportsapipro.com/api/players/839956/fantasy/competitions',
+    { headers: { 'x-api-key': 'YOUR_API_KEY' } }
+  ).then(r => r.json());
+
+  const fantasyId = fantasyComps.fantasyId; // extract from response
+
+  // Step 2: Get fantasy fixtures
+  const fixtures = await fetch(
+    `https://v2.football.sportsapipro.com/api/fantasy/player/${fantasyId}/fixtures`,
+    { headers: { 'x-api-key': 'YOUR_API_KEY' } }
+  ).then(r => r.json());
+  ```
+
+  ```python Python theme={null}
+  import requests
+
+  headers = {'x-api-key': 'YOUR_API_KEY'}
+
+  # Step 1: Get fantasy ID
+  fantasy_comps = requests.get(
+      'https://v2.football.sportsapipro.com/api/players/839956/fantasy/competitions',
+      headers=headers
+  ).json()
+
+  fantasy_id = fantasy_comps['fantasyId']  # extract from response
+
+  # Step 2: Get fantasy fixtures
+  fixtures = requests.get(
+      f'https://v2.football.sportsapipro.com/api/fantasy/player/{fantasy_id}/fixtures',
+      headers=headers
+  ).json()
+  ```
+</CodeGroup>
