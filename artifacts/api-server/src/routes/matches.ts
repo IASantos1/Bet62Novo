@@ -1895,6 +1895,19 @@ let dailyTomorrowFetchedAt = 0;
 const dailyFutureCache = new Map<number, { data: StatpalLeagueV2[]; fetchedAt: number }>();
 const DAILY_FUTURE_TTL = 10 * 60_000;
 
+// V2 /api/today caches — 60s TTL (includes not-started + live events for the current day)
+let footballTodayV2Cache: SAPIV2Event[] | null = null;
+let footballTodayV2FetchedAt = 0;
+let basketballTodayV2Cache: SAPIV2Event[] | null = null;
+let basketballTodayV2FetchedAt = 0;
+let hockeyTodayV2Cache: SAPIV2Event[] | null = null;
+let hockeyTodayV2FetchedAt = 0;
+let tennisTodayV2Cache: SAPIV2Event[] | null = null;
+let tennisTodayV2FetchedAt = 0;
+let baseballTodayV2Cache: SAPIV2Event[] | null = null;
+let baseballTodayV2FetchedAt = 0;
+const TODAY_V2_TTL = 60_000;
+
 // v1 odds: map from match numeric ID → real odds; cache 10min
 type RealOdds = { home: number; draw: number; away: number; types: OddsType[] };
 let oddsMap: Map<string, RealOdds> | null = null;
@@ -3658,6 +3671,86 @@ async function getTennisLiveV2(): Promise<SAPIV2Event[]> {
   }
 }
 
+// ─── V2 /api/today fetch helpers ──────────────────────────────────────────────
+
+async function getFootballTodayV2(): Promise<SAPIV2Event[]> {
+  const now = Date.now();
+  if (footballTodayV2Cache && now - footballTodayV2FetchedAt < TODAY_V2_TTL) return footballTodayV2Cache;
+  try {
+    const resp = await fetch(`${SAPI_V2_FOOTBALL}/today`, { signal: AbortSignal.timeout(9000), headers: sapiHeaders() });
+    if (!resp.ok) return footballTodayV2Cache ?? [];
+    const data = (await resp.json()) as { events?: SAPIV2Event[] };
+    footballTodayV2Cache = data.events ?? [];
+    footballTodayV2FetchedAt = now;
+    return footballTodayV2Cache;
+  } catch { return footballTodayV2Cache ?? []; }
+}
+
+async function getBasketballTodayV2(): Promise<SAPIV2Event[]> {
+  const now = Date.now();
+  if (basketballTodayV2Cache && now - basketballTodayV2FetchedAt < TODAY_V2_TTL) return basketballTodayV2Cache;
+  try {
+    const resp = await fetch(`${SAPI_V2_BASKETBALL}/today`, { signal: AbortSignal.timeout(9000), headers: sapiHeaders() });
+    if (!resp.ok) return basketballTodayV2Cache ?? [];
+    const data = (await resp.json()) as { events?: SAPIV2Event[] };
+    basketballTodayV2Cache = data.events ?? [];
+    basketballTodayV2FetchedAt = now;
+    return basketballTodayV2Cache;
+  } catch { return basketballTodayV2Cache ?? []; }
+}
+
+async function getHockeyTodayV2(): Promise<SAPIV2Event[]> {
+  const now = Date.now();
+  if (hockeyTodayV2Cache && now - hockeyTodayV2FetchedAt < TODAY_V2_TTL) return hockeyTodayV2Cache;
+  try {
+    const resp = await fetch(`${SAPI_V2_HOCKEY}/today`, { signal: AbortSignal.timeout(9000), headers: sapiHeaders() });
+    if (!resp.ok) return hockeyTodayV2Cache ?? [];
+    const data = (await resp.json()) as { events?: SAPIV2Event[] };
+    hockeyTodayV2Cache = data.events ?? [];
+    hockeyTodayV2FetchedAt = now;
+    return hockeyTodayV2Cache;
+  } catch { return hockeyTodayV2Cache ?? []; }
+}
+
+async function getTennisTodayV2(): Promise<SAPIV2Event[]> {
+  const now = Date.now();
+  if (tennisTodayV2Cache && now - tennisTodayV2FetchedAt < TODAY_V2_TTL) return tennisTodayV2Cache;
+  try {
+    const resp = await fetch(`${SAPI_V2_TENNIS}/today`, { signal: AbortSignal.timeout(9000), headers: sapiHeaders() });
+    if (!resp.ok) return tennisTodayV2Cache ?? [];
+    const data = (await resp.json()) as { events?: SAPIV2Event[] };
+    tennisTodayV2Cache = data.events ?? [];
+    tennisTodayV2FetchedAt = now;
+    return tennisTodayV2Cache;
+  } catch { return tennisTodayV2Cache ?? []; }
+}
+
+async function getBaseballTodayV2(): Promise<SAPIV2Event[]> {
+  const now = Date.now();
+  if (baseballTodayV2Cache && now - baseballTodayV2FetchedAt < TODAY_V2_TTL) return baseballTodayV2Cache;
+  try {
+    const resp = await fetch(`${SAPI_V2_BASEBALL}/today`, { signal: AbortSignal.timeout(9000), headers: sapiHeaders() });
+    if (!resp.ok) return baseballTodayV2Cache ?? [];
+    const data = (await resp.json()) as { events?: SAPIV2Event[] };
+    baseballTodayV2Cache = data.events ?? [];
+    baseballTodayV2FetchedAt = now;
+    return baseballTodayV2Cache;
+  } catch { return baseballTodayV2Cache ?? []; }
+}
+
+// Shared helper: convert a SAPIV2Event startTimestamp to date/time strings (UTC)
+function v2EventDateTime(ev: SAPIV2Event): { date: string; time: string } {
+  const ts = ev.startTimestamp;
+  if (!ts) return { date: "", time: "" };
+  const d = new Date(ts * 1000);
+  const dd = String(d.getUTCDate()).padStart(2, "0");
+  const mm = String(d.getUTCMonth() + 1).padStart(2, "0");
+  const yyyy = d.getUTCFullYear();
+  const hh = String(d.getUTCHours()).padStart(2, "0");
+  const min = String(d.getUTCMinutes()).padStart(2, "0");
+  return { date: `${dd}.${mm}.${yyyy}`, time: `${hh}:${min}` };
+}
+
 const TENNIS_LIVE_STATUSES = new Set(["Set 1", "Set 2", "Set 3", "Set 4", "Set 5"]);
 
 function buildTennisLiveMatches(
@@ -4542,79 +4635,44 @@ async function buildLiveMatches(): Promise<LiveMatchState[]> {
 }
 
 async function buildUpcomingMatches(): Promise<UpcomingMatch[]> {
-  // Fetch all 7 days (today + 6 ahead) plus odds in parallel
-  const [day0, day1, day2, day3, day4, day5, day6, odds] = await Promise.all([
-    getDailyLeagues().catch(() => [] as StatpalLeagueV2[]),
-    getTomorrowLeagues().catch(() => [] as StatpalLeagueV2[]),
-    getDailyLeaguesForFutureOffset(2).catch(() => [] as StatpalLeagueV2[]),
-    getDailyLeaguesForFutureOffset(3).catch(() => [] as StatpalLeagueV2[]),
-    getDailyLeaguesForFutureOffset(4).catch(() => [] as StatpalLeagueV2[]),
-    getDailyLeaguesForFutureOffset(5).catch(() => [] as StatpalLeagueV2[]),
-    getDailyLeaguesForFutureOffset(6).catch(() => [] as StatpalLeagueV2[]),
-    getOddsMap().catch(() => new Map<string, RealOdds>()),
-  ]);
-
-  // Merge all days, tagged with their day offset so we sort day-first, then priority
-  type TaggedLeague = StatpalLeagueV2 & { _dayOffset: number };
-  const seenIds = new Set<string>();
-  const allLeagues: TaggedLeague[] = [
-    ...day0.map(l => ({ ...l, _dayOffset: 0 })),
-    ...day1.map(l => ({ ...l, _dayOffset: 1 })),
-    ...day2.map(l => ({ ...l, _dayOffset: 2 })),
-    ...day3.map(l => ({ ...l, _dayOffset: 3 })),
-    ...day4.map(l => ({ ...l, _dayOffset: 4 })),
-    ...day5.map(l => ({ ...l, _dayOffset: 5 })),
-    ...day6.map(l => ({ ...l, _dayOffset: 6 })),
-  ];
-
-  // Sort: day offset first (so today's games appear before tomorrow's etc.),
-  // then by league priority within each day
-  const sorted = allLeagues
-    .filter(l => leaguePriority(l.name, l.country) < 100)
-    .sort((a, b) =>
-      a._dayOffset !== b._dayOffset
-        ? a._dayOffset - b._dayOffset
-        : leaguePriority(a.name, a.country) - leaguePriority(b.name, b.country)
-    );
-
+  const events = await getFootballTodayV2();
+  const nowSec = Date.now() / 1000;
   const results: UpcomingMatch[] = [];
+  const seen = new Set<string>();
 
-  for (const league of sorted) {
-    if (results.length >= 600) break;
-    const matches: StatpalMatchV2[] = Array.isArray(league.match) ? league.match : [league.match];
+  // Filter to not-yet-started events, sort by scheduled time ascending
+  const upcoming = events
+    .filter(ev => ev.startTimestamp && ev.startTimestamp > nowSec)
+    .sort((a, b) => (a.startTimestamp ?? 0) - (b.startTimestamp ?? 0));
 
-    for (const m of matches) {
-      if (results.length >= 600) break;
-      if (!/^\d{2}:\d{2}$/.test(m.status)) continue;
-      if (m.home.goals !== "?" || m.away.goals !== "?") continue;
-      if (seenIds.has(m.main_id)) continue;
-      seenIds.add(m.main_id);
+  for (const ev of upcoming) {
+    const home = v2TeamName(ev.homeTeam);
+    const away = v2TeamName(ev.awayTeam);
+    if (home === "Unknown" || away === "Unknown") continue;
+    const key = `${home}|${away}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
 
-      // Skip matches whose scheduled time has already passed
-      if (isMatchTimePast(m.date ?? "", m.status)) continue;
+    const { date, time } = v2EventDateTime(ev);
+    const baseOdds = makeOddsFromTeams(home, away);
+    const markets = makeAdvancedMarketsFromTeams(home, away);
 
-      const { odds: matchOdds, markets, real } = resolveOdds(m, odds);
+    results.push({
+      id: `fb-v2-${ev.id}`,
+      home,
+      away,
+      league: normalizeLeagueName(v2TournName(ev.tournament), ""),
+      country: "",
+      time,
+      date,
+      sport: "football",
+      hasRealOdds: false,
+      odds: baseOdds,
+      markets,
+      leagueId: ev.tournamentId ? String(ev.tournamentId) : undefined,
+    });
 
-      // Skip matches without real Statpal odds UNLESS the league is high-priority
-      // (priority < 50 = Copa do Brasil, Liga Profesional, Copa Libertadores, etc.)
-      const leaguePri = leaguePriority(league.name ?? "", league.country ?? "");
-      if (!real && leaguePri >= 50) continue;
-
-      results.push({
-        id: m.main_id,
-        home: m.home.name,
-        away: m.away.name,
-        league: normalizeLeagueName(league.name, league.country),
-        country: league.country,
-        time: addOneHour(m.status),
-        date: m.date,
-        sport: "football",
-        hasRealOdds: true,
-        odds: matchOdds,
-        markets,
-        leagueId: league.id,
-      });
-    }
+    if (results.length >= 200) break;
   }
 
   return results;
@@ -5170,123 +5228,56 @@ router.get("/live-stream", (req, res) => {
 
 async function buildTennisUpcoming(): Promise<UpcomingMatch[]> {
   try {
-    const [odds, liveData] = await Promise.all([getTennisOdds(), getTennisLive()]);
-
-    // Build odds lookup keyed by normalised surname pair so name format differences
-    // (e.g. "Andrey Rublev" vs "A. Rublev", "Coco Gauff" vs "C. Gauff") are handled.
-    const oddsMapByNorm = new Map<string, typeof odds[0]>();
-    for (const e of odds) {
-      if (!e.players[0]?.name || !e.players[1]?.name) continue;
-      if (e.players[0].name.includes("/") || e.players[1].name.includes("/")) continue;
-      oddsMapByNorm.set(_tennisPairKey(e.players[0].name, e.players[1].name), e);
-    }
-
-    const seenNorm = new Set<string>(); // normalised dedup across both loops
+    const events = await getTennisTodayV2();
+    const nowSec = Date.now() / 1000;
     const results: UpcomingMatch[] = [];
+    const seen = new Set<string>();
 
-    // First: matches that have real pre-match odds (Not Started only — skip in-play)
-    for (const e of odds) {
-      if (!e.players[0]?.name || !e.players[1]?.name) continue;
-      if (e.players[0].name.includes("/") || e.players[1].name.includes("/")) continue;
-      // Skip matches that are already in progress in the odds API (status like "1","2","3" = set number)
-      if (e.status && e.status !== "Not Started" && /^\d+$/.test(e.status)) continue;
-      const normKey = _tennisPairKey(e.players[0].name, e.players[1].name);
-      if (seenNorm.has(normKey)) continue;
-      seenNorm.add(normKey);
+    const upcoming = events
+      .filter(ev => ev.startTimestamp && ev.startTimestamp > nowSec)
+      .sort((a, b) => (a.startTimestamp ?? 0) - (b.startTimestamp ?? 0));
+
+    for (const ev of upcoming) {
+      const home = v2TeamName(ev.homeTeam);
+      const away = v2TeamName(ev.awayTeam);
+      if (home === "Unknown" || away === "Unknown") continue;
+      if (home.includes("/") || away.includes("/")) continue;
+      const key = `${home}|${away}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+
+      const { date, time } = v2EventDateTime(ev);
+      const sr = seededRng(`tennis:${home}:${away}`);
+      const pHome = mc(0.52 + (sr(1) - 0.5) * 0.20, 0.15, 0.85);
+      const [compH, compA] = probsToDecimalOdds([pHome, 1 - pHome], 1.06);
+      const tennisExtras = computeTennisExtras(pHome);
+
       results.push({
-        id:          `tennis-${e.matchId}`,
-        home:        e.players[0].name,
-        away:        e.players[1].name,
-        league:      e.tournamentName,
-        country:     "",
-        ...shiftHour(e.date, e.time),
-        sport:       "tennis" as const,
-        hasRealOdds: true,
-        odds:        { home: e.matchOdds[0], draw: 0, away: e.matchOdds[1] },
-        markets:     e.markets as AdvancedMarkets,
+        id: `tennis-v2-${ev.id}`,
+        home,
+        away,
+        league: v2TournName(ev.tournament),
+        country: "",
+        date,
+        time,
+        sport: "tennis" as const,
+        hasRealOdds: false,
+        odds: { home: compH!, draw: 0, away: compA! },
+        markets: {
+          doubleChance: { homeOrDraw: 0, awayOrDraw: 0, homeOrAway: 0 },
+          bothTeamsScore: { yes: 0, no: 0 },
+          totalGoals: { over05:0, under05:0, over15:0, under15:0, over25:0, under25:0, over35:0, under35:0, over45:0, under45:0, over55:0, under55:0, over65:0, under65:0 },
+          handicap: { homeMinusOne: 0, awayPlusOne: 0, homeMinusOneHalf: 0, awayPlusOneHalf: 0 },
+          halfTime: { home: 0, draw: 0, away: 0 },
+          firstGoal: { home: 0, noGoal: 0, away: 0 },
+          tennisExtra: tennisExtras,
+        } as unknown as AdvancedMarkets,
       });
+
+      if (results.length >= 50) break;
     }
 
-    // Second: "Not Started" matches from livescores — cross-reference odds by surname.
-    // Matches with real odds get them; Challengers and other matches without real odds
-    // use computed odds so real API matches are never dropped.
-    for (const tournament of liveData) {
-      const matches: TennisMatch[] = Array.isArray(tournament.match)
-        ? tournament.match
-        : (tournament.match ? [tournament.match] : []);
-      for (const m of matches) {
-        if (m.status !== "Not Started") continue;
-        const players: TennisPlayer[] = Array.isArray(m.player)
-          ? m.player
-          : (m.player ? [m.player] : []);
-        const p0 = players[0];
-        const p1 = players[1];
-        if (!p0?.name || !p1?.name) continue;
-        // Skip doubles (e.g. "Nys/ Roger-Vasselin")
-        if (p0.name.includes("/") || p1.name.includes("/")) continue;
-        const normKey = _tennisPairKey(p0.name, p1.name);
-        if (seenNorm.has(normKey)) continue;
-        seenNorm.add(normKey);
-        const oddsEntry = oddsMapByNorm.get(normKey);
-        if (oddsEntry) {
-          // Real odds available (main tour)
-          results.push({
-            id:          `tennis-ls-${m.id}`,
-            home:        p0.name,
-            away:        p1.name,
-            league:      tournament.name ?? "Ténis",
-            country:     "",
-            ...shiftHour(m.date, m.time),
-            sport:       "tennis" as const,
-            hasRealOdds: true,
-            odds:        { home: oddsEntry.matchOdds[0], draw: 0, away: oddsEntry.matchOdds[1] },
-            markets:     oddsEntry.markets as AdvancedMarkets,
-          });
-        } else {
-          // No real odds (Challengers, ITF, etc.) — compute fair odds from player names
-          const sr = seededRng(`tennis-ch:${p0.name}:${p1.name}`);
-          const pHome = mc(0.52 + (sr(1) - 0.5) * 0.20, 0.15, 0.85);
-          const [compH, compA] = probsToDecimalOdds([pHome, 1 - pHome], 1.06);
-          const tennisExtras = computeTennisExtras(pHome);
-          results.push({
-            id:          `tennis-ch-${m.id}`,
-            home:        p0.name,
-            away:        p1.name,
-            league:      tournament.name ?? "Challenger",
-            country:     "",
-            ...shiftHour(m.date, m.time),
-            sport:       "tennis" as const,
-            hasRealOdds: false,
-            odds:        { home: compH!, draw: 0, away: compA! },
-            markets: {
-              doubleChance: { homeOrDraw: 0, awayOrDraw: 0, homeOrAway: 0 },
-              bothTeamsScore: { yes: 0, no: 0 },
-              totalGoals: { over05:0, under05:0, over15:0, under15:0, over25:0, under25:0, over35:0, under35:0, over45:0, under45:0, over55:0, under55:0, over65:0, under65:0 },
-              handicap: { homeMinusOne: 0, awayPlusOne: 0, homeMinusOneHalf: 0, awayPlusOneHalf: 0 },
-              halfTime: { home: 0, draw: 0, away: 0 },
-              firstGoal: { home: 0, noGoal: 0, away: 0 },
-              tennisExtra: tennisExtras,
-            } as unknown as AdvancedMarkets,
-          });
-        }
-      }
-    }
-
-    // Sort by date (DD.MM.YYYY → YYYY-MM-DD for lexicographic sort) then time
-    const dateSortKey = (d?: string): string => {
-      if (!d) return "9999-99-99";
-      if (/^\d{2}\.\d{2}\.\d{4}$/.test(d)) {
-        const [dd, mm, yyyy] = d.split(".");
-        return `${yyyy}-${mm}-${dd}`;
-      }
-      return d;
-    };
-    results.sort((a, b) => {
-      const dk = dateSortKey(a.date).localeCompare(dateSortKey(b.date));
-      return dk !== 0 ? dk : (a.time ?? "").localeCompare(b.time ?? "");
-    });
-
-    return results.slice(0, 300);
+    return results;
   } catch {
     return [];
   }
@@ -5294,62 +5285,42 @@ async function buildTennisUpcoming(): Promise<UpcomingMatch[]> {
 
 async function buildBasketballUpcoming(): Promise<UpcomingMatch[]> {
   try {
-    const [schedule, oddsArr] = await Promise.all([
-      getBasketballSchedule(),
-      getBasketballOdds(),
-    ]);
+    const events = await getBasketballTodayV2();
+    const nowSec = Date.now() / 1000;
     const results: UpcomingMatch[] = [];
     const seen = new Set<string>();
 
-    const oddsMap = new Map<string, NBAOddsEntry>();
-    for (const o of oddsArr) {
-      if (o.homeTeam.name && o.awayTeam.name) {
-        oddsMap.set(`${o.homeTeam.name}|${o.awayTeam.name}`, o);
-      }
-    }
+    const upcoming = events
+      .filter(ev => ev.startTimestamp && ev.startTimestamp > nowSec)
+      .sort((a, b) => (a.startTimestamp ?? 0) - (b.startTimestamp ?? 0));
 
-    for (const m of schedule.upcomingMatches) {
-      const key = `${m.home}|${m.away}`;
+    for (const ev of upcoming) {
+      const home = v2TeamName(ev.homeTeam);
+      const away = v2TeamName(ev.awayTeam);
+      if (home === "Unknown" || away === "Unknown") continue;
+      const key = `${home}|${away}`;
       if (seen.has(key)) continue;
       seen.add(key);
-      if (isMatchTimePast(m.date, m.time)) continue;
-      const realOdds = oddsMap.get(key);
+
+      const { date, time } = v2EventDateTime(ev);
       results.push({
-        id: `nba-${m.id}`,
-        home: m.home,
-        away: m.away,
-        league: schedule.league || "NBA",
+        id: `bball-v2-${ev.id}`,
+        home,
+        away,
+        league: v2TournName(ev.tournament),
         country: "usa",
-        ...shiftHour(m.date, m.time),
+        date,
+        time,
         sport: "basketball",
-        hasRealOdds: true,
-        odds: realOdds
-          ? { home: realOdds.homeOdds, draw: 0, away: realOdds.awayOdds }
-          : makeBasketballMarketsFromTeams(m.home, m.away).handicap && { home: 1.9, draw: 0, away: 1.9 } || { home: 1.9, draw: 0, away: 1.9 },
-        markets: (realOdds?.markets as AdvancedMarkets) ?? makeBasketballMarketsFromTeams(m.home, m.away),
+        hasRealOdds: false,
+        odds: { home: 1.9, draw: 0, away: 1.9 },
+        markets: makeBasketballMarketsFromTeams(home, away),
       });
+
+      if (results.length >= 30) break;
     }
 
-    for (const o of oddsArr) {
-      if (!o.homeTeam.name || !o.awayTeam.name) continue;
-      const key = `${o.homeTeam.name}|${o.awayTeam.name}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      results.push({
-        id: `nba-odds-${o.matchId}`,
-        home: o.homeTeam.name,
-        away: o.awayTeam.name,
-        league: "NBA",
-        country: "usa",
-        ...shiftHour(o.date, o.time),
-        sport: "basketball",
-        hasRealOdds: true,
-        odds: { home: o.homeOdds, draw: 0, away: o.awayOdds },
-        markets: (o.markets as AdvancedMarkets) ?? makeBasketballMarketsFromTeams(o.homeTeam.name, o.awayTeam.name),
-      });
-    }
-
-    return results.slice(0, 30);
+    return results;
   } catch {
     return [];
   }
@@ -5357,97 +5328,42 @@ async function buildBasketballUpcoming(): Promise<UpcomingMatch[]> {
 
 async function buildHockeyUpcoming(): Promise<UpcomingMatch[]> {
   try {
-    const [schedule, liveData, oddsArr] = await Promise.all([
-      getHockeySchedule(),
-      getNHLLive(),
-      getHockeyOdds(),
-    ]);
+    const events = await getHockeyTodayV2();
+    const nowSec = Date.now() / 1000;
     const results: UpcomingMatch[] = [];
     const seen = new Set<string>();
 
-    const oddsMap = new Map<string, HockeyOddsEntry>();
-    for (const o of oddsArr) {
-      if (o.homeTeam.name && o.awayTeam.name) {
-        oddsMap.set(`${o.homeTeam.name}|${o.awayTeam.name}`, o);
-      }
-    }
+    const upcoming = events
+      .filter(ev => ev.startTimestamp && ev.startTimestamp > nowSec)
+      .sort((a, b) => (a.startTimestamp ?? 0) - (b.startTimestamp ?? 0));
 
-    for (const m of schedule.upcomingMatches) {
-      const key = `${m.home}|${m.away}`;
+    for (const ev of upcoming) {
+      const home = v2TeamName(ev.homeTeam);
+      const away = v2TeamName(ev.awayTeam);
+      if (home === "Unknown" || away === "Unknown") continue;
+      const key = `${home}|${away}`;
       if (seen.has(key)) continue;
       seen.add(key);
-      if (isMatchTimePast(m.date, m.time)) continue;
-      const realOdds = oddsMap.get(key);
+
+      const { date, time } = v2EventDateTime(ev);
       results.push({
-        id: `nhl-${m.id}`,
-        home: m.home,
-        away: m.away,
-        league: schedule.league || "NHL",
+        id: `hockey-v2-${ev.id}`,
+        home,
+        away,
+        league: v2TournName(ev.tournament),
         country: "usa",
-        ...shiftHour(m.date, m.time),
+        date,
+        time,
         sport: "hockey",
-        hasRealOdds: true,
-        odds: realOdds
-          ? { home: realOdds.homeOdds, draw: realOdds.drawOdds, away: realOdds.awayOdds }
-          : { home: 2.1, draw: 3.8, away: 2.1 },
-        markets: (realOdds?.markets as AdvancedMarkets) ?? makeHockeyMarketsFromTeams(m.home, m.away),
+        hasRealOdds: false,
+        odds: { home: 2.1, draw: 3.8, away: 2.1 },
+        markets: makeHockeyMarketsFromTeams(home, away),
       });
+
+      if (results.length >= 30) break;
     }
 
-    const todayD = new Date();
-    const tomorrowD = new Date(todayD); tomorrowD.setDate(todayD.getDate() + 1);
-    const fmtDate = (d: Date) =>
-      `${String(d.getDate()).padStart(2, "0")}.${String(d.getMonth() + 1).padStart(2, "0")}.${d.getFullYear()}`;
-    const todayStr = fmtDate(todayD);
-    const tomorrowStr = fmtDate(tomorrowD);
-
-    for (const t of liveData) {
-      const tMatches = Array.isArray(t.match) ? t.match : (t.match ? [t.match] : []);
-      for (const m of tMatches) {
-        if (!m || m.status !== "Not Started") continue;
-        if (m.date !== todayStr && m.date !== tomorrowStr) continue;
-        if (!m.date || isMatchTimePast(m.date, m.time ?? "")) continue;
-        const key = `${m.home.name}|${m.away.name}`;
-        if (seen.has(key)) continue;
-        seen.add(key);
-        const realOdds = oddsMap.get(key);
-        results.push({
-          id: `nhl-live-${m.id}`,
-          home: m.home.name,
-          away: m.away.name,
-          league: t.league,
-          country: t.country,
-          ...shiftHour(m.date, m.time ?? "00:00"),
-          sport: "hockey",
-          hasRealOdds: true,
-          odds: realOdds
-            ? { home: realOdds.homeOdds, draw: realOdds.drawOdds, away: realOdds.awayOdds }
-            : { home: 2.1, draw: 3.8, away: 2.1 },
-          markets: (realOdds?.markets as AdvancedMarkets) ?? makeHockeyMarketsFromTeams(m.home.name, m.away.name),
-        });
-      }
-    }
-
-    for (const o of oddsArr) {
-      if (!o.homeTeam.name || !o.awayTeam.name) continue;
-      const key = `${o.homeTeam.name}|${o.awayTeam.name}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      results.push({
-        id: `nhl-odds-${o.matchId}`,
-        home: o.homeTeam.name,
-        away: o.awayTeam.name,
-        league: "NHL",
-        country: "usa",
-        ...shiftHour(o.date, o.time),
-        sport: "hockey",
-        hasRealOdds: true,
-        odds: { home: o.homeOdds, draw: o.drawOdds, away: o.awayOdds },
-        markets: (o.markets as AdvancedMarkets) ?? makeHockeyMarketsFromTeams(o.homeTeam.name, o.awayTeam.name),
-      });
-    }
-
-    return results.slice(0, 30);
+    return results;
   } catch {
     return [];
   }
@@ -5491,11 +5407,58 @@ async function buildVolleyballUpcoming(): Promise<UpcomingMatch[]> {
   }
 }
 
+async function buildBaseballUpcoming(): Promise<UpcomingMatch[]> {
+  try {
+    const events = await getBaseballTodayV2();
+    const nowSec = Date.now() / 1000;
+    const results: UpcomingMatch[] = [];
+    const seen = new Set<string>();
+
+    const upcoming = events
+      .filter(ev => ev.startTimestamp && ev.startTimestamp > nowSec)
+      .sort((a, b) => (a.startTimestamp ?? 0) - (b.startTimestamp ?? 0));
+
+    for (const ev of upcoming) {
+      const home = v2TeamName(ev.homeTeam);
+      const away = v2TeamName(ev.awayTeam);
+      if (home === "Unknown" || away === "Unknown") continue;
+      const key = `${home}|${away}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+
+      const { date, time } = v2EventDateTime(ev);
+      const sr = seededRng(`baseball:${home}:${away}`);
+      const pHome = mc(0.5 + (sr(1) - 0.5) * 0.12, 0.25, 0.75);
+      const [compH, compA] = probsToDecimalOdds([pHome, 1 - pHome], 1.065);
+
+      results.push({
+        id: `mlb-v2-${ev.id}`,
+        home,
+        away,
+        league: v2TournName(ev.tournament),
+        country: "usa",
+        date,
+        time,
+        sport: "baseball",
+        hasRealOdds: false,
+        odds: { home: compH!, draw: 0, away: compA! },
+        markets: makeAdvancedMarketsFromTeams(home, away),
+      });
+
+      if (results.length >= 20) break;
+    }
+
+    return results;
+  } catch {
+    return [];
+  }
+}
+
 // ─── Top-level upcoming cache — 60s TTL so repeated 30s polls are instant ─────
 type UpcomingTopCache = {
   football: UpcomingMatch[]; tennis: UpcomingMatch[];
   basketball: UpcomingMatch[]; hockey: UpcomingMatch[];
-  volleyball: UpcomingMatch[]; fetchedAt: number;
+  volleyball: UpcomingMatch[]; baseball: UpcomingMatch[]; fetchedAt: number;
 };
 let upcomingTopCache: UpcomingTopCache | null = null;
 const UPCOMING_TOP_TTL = 60_000;
@@ -5504,14 +5467,15 @@ async function getUpcomingAll(): Promise<UpcomingTopCache> {
   const now = Date.now();
   if (upcomingTopCache && now - upcomingTopCache.fetchedAt < UPCOMING_TOP_TTL) return upcomingTopCache;
   const empty: UpcomingMatch[] = [];
-  const [football, tennis, basketball, hockey, volleyball] = await Promise.all([
+  const [football, tennis, basketball, hockey, volleyball, baseball] = await Promise.all([
     buildUpcomingMatches().catch(() => empty),
     buildTennisUpcoming().catch(() => empty),
     buildBasketballUpcoming().catch(() => empty),
     buildHockeyUpcoming().catch(() => empty),
     buildVolleyballUpcoming().catch(() => empty),
+    buildBaseballUpcoming().catch(() => empty),
   ]);
-  upcomingTopCache = { football, tennis, basketball, hockey, volleyball, fetchedAt: Date.now() };
+  upcomingTopCache = { football, tennis, basketball, hockey, volleyball, baseball, fetchedAt: Date.now() };
   return upcomingTopCache;
 }
 
@@ -5524,7 +5488,8 @@ router.get("/upcoming", async (req, res) => {
   else if (sport === "basketball") matches = cache.basketball;
   else if (sport === "hockey") matches = cache.hockey;
   else if (sport === "volleyball") matches = cache.volleyball;
-  else matches = [...cache.football, ...cache.tennis, ...cache.basketball, ...cache.hockey, ...cache.volleyball];
+  else if (sport === "baseball") matches = cache.baseball;
+  else matches = [...cache.football, ...cache.tennis, ...cache.basketball, ...cache.hockey, ...cache.volleyball, ...cache.baseball];
   res.json({ matches });
 });
 
