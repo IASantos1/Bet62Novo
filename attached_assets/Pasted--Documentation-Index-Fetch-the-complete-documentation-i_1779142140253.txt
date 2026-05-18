@@ -1,0 +1,79 @@
+> ## Documentation Index
+> Fetch the complete documentation index at: https://docs.sportsapipro.com/llms.txt
+> Use this file to discover all available pages before exploring further.
+
+# Developer Updates
+
+> Stay informed about API changes, platform status, and upcoming updates to SportsAPI Pro.
+
+## How We Communicate Changes
+
+We notify developers through multiple channels so you never miss an important update.
+
+<CardGroup cols={2}>
+  <Card title="Email Alerts" icon="envelope">
+    Active production users receive email notifications for breaking changes, major updates, and deprecation notices. Manage your preferences in the [dashboard](https://sportsapipro.com/dashboard).
+  </Card>
+
+  <Card title="Changelog" icon="clock-rotate-left" href="/changelog">
+    A full chronological history of every API change, new endpoint, and improvement — all in one place.
+  </Card>
+
+  <Card title="Status Page" icon="signal" href="https://sportsapipro.com/status">
+    Real-time platform health, uptime monitoring, and active incident tracking.
+  </Card>
+
+  <Card title="Dashboard Notices" icon="bell">
+    Your [dashboard](https://sportsapipro.com/dashboard) displays banners for active incidents, upcoming deprecations, and maintenance windows.
+  </Card>
+</CardGroup>
+
+## What Gets Communicated
+
+We proactively notify you about any change that could affect your integration:
+
+| Change Type                        | Notification                  | Lead Time        |
+| ---------------------------------- | ----------------------------- | ---------------- |
+| **Breaking changes**               | Email + Dashboard banner      | 30 days minimum  |
+| **Endpoint additions**             | Changelog + Email             | Same day         |
+| **Field additions** (non-breaking) | Changelog                     | Same day         |
+| **Field removals / renames**       | Email + Changelog             | 30 days minimum  |
+| **Authentication changes**         | Email + Dashboard banner      | 30 days minimum  |
+| **Deprecations**                   | Email + Changelog + Dashboard | 90 days minimum  |
+| **Schema / enum changes**          | Email + Changelog             | 14 days minimum  |
+| **Behavioral changes**             | Email + Changelog             | 14 days minimum  |
+| **Maintenance windows**            | Email + Status page           | 48 hours minimum |
+
+## AI Tools Stay Current
+
+If you use AI coding assistants with SportsAPI Pro, they automatically stay up-to-date:
+
+* **MCP Server** — always reflects the latest documentation and endpoints:
+  ```
+  https://docs.sportsapipro.com/mcp
+  ```
+* **LLM Context Files** — updated with every API change:
+  * [docs.sportsapipro.com/llms-full.txt](https://docs.sportsapipro.com/llms-full.txt) (full context)
+  * [docs.sportsapipro.com/llms.txt](https://docs.sportsapipro.com/llms.txt) (summary)
+
+No action needed on your side — your AI tools will pick up changes automatically.
+
+## How to Subscribe
+
+<Steps>
+  <Step title="Log in to your dashboard">
+    Visit [sportsapipro.com/dashboard](https://sportsapipro.com/dashboard) and sign in.
+  </Step>
+
+  <Step title="Check notification preferences">
+    Navigate to **Settings** and ensure email notifications are enabled for API updates.
+  </Step>
+
+  <Step title="Add team members">
+    Need multiple people notified? Email [support@sportsapipro.com](mailto:support@sportsapipro.com) with the addresses to add.
+  </Step>
+</Steps>
+
+<Info>
+  **Versioning Reminder:** SportsAPI Pro maintains V1, V2, and V3 as independent, permanently supported APIs. Version transitions are never forced — you migrate on your own schedule.
+</Info>

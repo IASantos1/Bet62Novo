@@ -1,0 +1,171 @@
+> ## Documentation Index
+> Fetch the complete documentation index at: https://docs.sportsapipro.com/llms.txt
+> Use this file to discover all available pages before exploring further.
+
+# Rate Limits
+
+> API quotas, pricing plans, and rate limit handling
+
+<Note>
+  Rate limits are **shared across all 25+ sports APIs**. Your daily quota applies to your combined usage of Football, Basketball, Tennis, and every other sport.
+</Note>
+
+## Plan Limits
+
+| Plan  | Daily Requests | Price   |
+| ----- | -------------- | ------- |
+| Free  | 100            | \$0     |
+| Pro   | 7,500          | \$15/mo |
+| Ultra | 75,000         | \$29/mo |
+| Mega  | 150,000        | \$59/mo |
+
+<Note>
+  All daily quotas reset at **midnight UTC** (00:00 UTC). The reset timestamp is included in every response via the `X-RateLimit-Reset` header.
+</Note>
+
+<Info>
+  Need more? [Contact us](mailto:enterprise@sportsapipro.com) for custom enterprise plans with higher limits, dedicated servers, and SLA guarantees.
+</Info>
+
+## Rate Limit Headers
+
+Every API response includes rate limit headers:
+
+| Header                  | Description                          |
+| ----------------------- | ------------------------------------ |
+| `X-RateLimit-Limit`     | Your daily request limit             |
+| `X-RateLimit-Remaining` | Requests remaining today             |
+| `X-RateLimit-Reset`     | ISO 8601 timestamp when quota resets |
+
+### Example Response Headers
+
+```http theme={null}
+HTTP/1.1 200 OK
+X-RateLimit-Limit: 7500
+X-RateLimit-Remaining: 7255
+X-RateLimit-Reset: 2026-04-13T00:00:00.000Z
+Content-Type: application/json
+```
+
+## Checking Your Usage
+
+Use the `/status` endpoint on any sport's API:
+
+```bash theme={null}
+curl -H "x-api-key: YOUR_API_KEY" \
+  "https://v2.football.sportsapipro.com/status"
+```
+
+```json theme={null}
+{
+  "success": true,
+  "api": "SportsAPI Pro - Football V2 (Enhanced)",
+  "version": "v2",
+  "account": {
+    "email": "you@example.com",
+    "name": "Your Name",
+    "plan": "Pro",
+    "member_since": "2025-01-15T10:30:00Z"
+  },
+  "usage": {
+    "daily_limit": 7500,
+    "remaining": 7255,
+    "requests_today": 245,
+    "reset_at": "2026-04-13T00:00:00.000Z"
+  }
+}
+```
+
+## Rate Limit Exceeded
+
+When you exceed your daily quota, the API returns `429 Too Many Requests`:
+
+```json theme={null}
+{
+  "success": false,
+  "error": {
+    "code": "RATE_LIMIT_EXCEEDED",
+    "message": "Daily quota exceeded. Resets at midnight UTC."
+  }
+}
+```
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Use Built-In TTL Caching">
+    Every API response includes a `ttl` field (seconds). Respect this value — the data won't change before the TTL expires.
+
+    | Data Type      | Typical TTL |
+    | -------------- | ----------- |
+    | Live scores    | 5s          |
+    | Player stats   | 60s         |
+    | Standings      | 300s        |
+    | Countries list | 300s        |
+
+    ```javascript theme={null}
+    const response = await fetch(url, { headers });
+    const data = await response.json();
+
+    // Cache for the recommended duration
+    const cacheDuration = data.ttl || 300; // seconds
+    cache.set(url, data, cacheDuration);
+    ```
+  </Accordion>
+
+  <Accordion title="Monitor Usage in Code">
+    Check rate limit headers in every response:
+
+    ```javascript theme={null}
+    function checkRateLimit(response) {
+      const remaining = parseInt(response.headers.get('X-RateLimit-Remaining'));
+      const limit = parseInt(response.headers.get('X-RateLimit-Limit'));
+      const usagePercent = ((limit - remaining) / limit) * 100;
+      
+      if (usagePercent > 80) {
+        console.warn(`Warning: ${usagePercent.toFixed(1)}% of daily quota used`);
+      }
+    }
+    ```
+  </Accordion>
+
+  <Accordion title="Implement Retry with Backoff">
+    For `429` errors, wait and retry:
+
+    ```javascript theme={null}
+    async function fetchWithRetry(url, options, maxRetries = 3) {
+      for (let i = 0; i < maxRetries; i++) {
+        const response = await fetch(url, options);
+        if (response.status !== 429) return response;
+        
+        const waitTime = Math.pow(2, i) * 1000;
+        await new Promise(r => setTimeout(r, waitTime));
+      }
+      throw new Error('Rate limit exceeded — max retries reached');
+    }
+    ```
+  </Accordion>
+
+  <Accordion title="Prioritize Live Data">
+    During peak usage, prioritize live score updates over less time-sensitive data like standings or historical stats. Different sports have different update frequencies — NBA games have more scoring events than football matches.
+  </Accordion>
+</AccordionGroup>
+
+## What Counts as a Request?
+
+* Each API call counts as **1 request**, regardless of sport
+* V2 image endpoint calls (`/images/...`) count as requests. V1 image endpoints are free and do not count
+* `/status` endpoint calls count as requests
+* WebSocket connections count initial connection as 1 request; subsequent messages do not count
+
+## Upgrading Your Plan
+
+<CardGroup cols={2}>
+  <Card title="View Plans" icon="credit-card" href="https://sportsapipro.com/pricing">
+    Compare plan features and pricing
+  </Card>
+
+  <Card title="Contact Sales" icon="envelope" href="mailto:enterprise@sportsapipro.com">
+    Discuss custom enterprise solutions
+  </Card>
+</CardGroup>

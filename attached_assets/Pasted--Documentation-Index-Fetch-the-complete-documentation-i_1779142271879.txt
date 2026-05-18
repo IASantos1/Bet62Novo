@@ -1,0 +1,214 @@
+> ## Documentation Index
+> Fetch the complete documentation index at: https://docs.sportsapipro.com/llms.txt
+> Use this file to discover all available pages before exploring further.
+
+# Team Endpoints
+
+> V2 Football API: 18 team endpoints for squad, transfers, statistics, goal distributions, media, and events
+
+## Base URL
+
+```
+https://v2.football.sportsapipro.com
+```
+
+<Info>
+  **Finding Team IDs:** Use `/api/search?q=arsenal` to find team IDs, or extract them from match details (`homeTeam.id`, `awayTeam.id`).
+</Info>
+
+***
+
+## Team Profile
+
+### Team Details
+
+```bash theme={null}
+GET /api/teams/{teamId}
+```
+
+Returns team metadata: name, short name, country, venue, manager, founded year, and competition info.
+
+<ParamField path="teamId" type="number" required>
+  Numeric team ID. Discover via `/api/search` or match details.
+</ParamField>
+
+### Team Squad / Players
+
+```bash theme={null}
+GET /api/teams/{teamId}/players
+```
+
+Returns the full squad with player details: name, position, nationality, jersey number, age, market value, and contract expiry.
+
+### Team Image
+
+```bash theme={null}
+GET /api/teams/{teamId}/image
+```
+
+Returns the team crest/badge image URL.
+
+***
+
+## Events
+
+### Last Events (Paginated)
+
+```bash theme={null}
+GET /api/teams/{teamId}/events/last/{page}
+```
+
+Returns the team's most recent completed matches, paginated.
+
+<ParamField path="page" type="number" required>
+  Page number (0-indexed). Start with `0` for the most recent events.
+</ParamField>
+
+### Next Events (Paginated)
+
+```bash theme={null}
+GET /api/teams/{teamId}/events/next/{page}
+```
+
+Returns upcoming scheduled matches for the team, paginated.
+
+### Near Events
+
+```bash theme={null}
+GET /api/teams/{teamId}/near-events
+```
+
+Returns the closest past and upcoming events around the current date.
+
+### Featured Event
+
+```bash theme={null}
+GET /api/teams/{teamId}/featured-event
+```
+
+Returns the team's most prominent upcoming match (e.g., next league fixture, derby, or cup match).
+
+***
+
+## Statistics
+
+### Team Statistics in Tournament Season
+
+```bash theme={null}
+GET /api/teams/{teamId}/tournament/{tournamentId}/season/{seasonId}/statistics?type={type}
+```
+
+Returns detailed team statistics for a specific tournament and season.
+
+<ParamField query="type" type="string" default="overall">
+  Filter by match location: `overall`, `home`, or `away`.
+</ParamField>
+
+<Note>
+  Use `/api/tournaments/{id}/seasons` to discover valid `seasonId` values.
+</Note>
+
+### Goal Distributions
+
+```bash theme={null}
+GET /api/teams/{teamId}/tournament/{tournamentId}/season/{seasonId}/goal-distributions
+```
+
+Returns when goals were scored and conceded, broken down by time intervals (0–15, 16–30, 31–45, 46–60, 61–75, 76–90 minutes).
+
+### Performance / Recent Form
+
+```bash theme={null}
+GET /api/teams/{teamId}/performance
+```
+
+Returns the team's recent form: last N results, win/draw/loss streak, and performance trend.
+
+***
+
+## Metadata
+
+### Tournaments
+
+```bash theme={null}
+GET /api/teams/{teamId}/unique-tournaments
+```
+
+Returns all competitions the team participates in (e.g., Premier League, Champions League, FA Cup).
+
+### Transfers
+
+```bash theme={null}
+GET /api/teams/{teamId}/transfers
+```
+
+Returns the team's transfer activity: signings, departures, loan deals, and transfer fees.
+
+### Media
+
+```bash theme={null}
+GET /api/teams/{teamId}/media
+```
+
+Returns media content associated with the team (photos, videos).
+
+### Media Summary
+
+```bash theme={null}
+GET /api/teams/{teamId}/media-summary?country={country}
+```
+
+Returns a media summary for the team (highlights, videos) localized by country.
+
+<ParamField query="country" type="string" default="GB">
+  Country code for localized content (e.g., `GB`, `US`, `DE`).
+</ParamField>
+
+### Tweets
+
+```bash theme={null}
+GET /api/teams/{teamId}/tweets
+```
+
+Returns official tweets from the team's X/Twitter account.
+
+### Available Seasons
+
+Discover which seasons have data available for this team:
+
+```bash theme={null}
+GET /api/teams/{teamId}/player-statistics/seasons
+GET /api/teams/{teamId}/standings/seasons
+GET /api/teams/{teamId}/team-statistics/seasons
+```
+
+Use these endpoints to find valid season IDs before calling season-specific statistics endpoints.
+
+***
+
+## Example Requests
+
+<CodeGroup>
+  ```bash cURL theme={null}
+  curl -X GET "https://v2.football.sportsapipro.com/api/teams/42/players" \
+    -H "x-api-key: YOUR_API_KEY"
+  ```
+
+  ```javascript JavaScript theme={null}
+  const response = await fetch(
+    'https://v2.football.sportsapipro.com/api/teams/42/players',
+    { headers: { 'x-api-key': 'YOUR_API_KEY' } }
+  );
+  const squad = await response.json();
+  ```
+
+  ```python Python theme={null}
+  import requests
+
+  response = requests.get(
+      'https://v2.football.sportsapipro.com/api/teams/42/players',
+      headers={'x-api-key': 'YOUR_API_KEY'}
+  )
+  squad = response.json()
+  ```
+</CodeGroup>

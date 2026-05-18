@@ -1,0 +1,306 @@
+> ## Documentation Index
+> Fetch the complete documentation index at: https://docs.sportsapipro.com/llms.txt
+> Use this file to discover all available pages before exploring further.
+
+# Player Endpoints
+
+> V2 Football API: 24 player endpoints for profiles, statistics, heatmaps, transfer history, ratings, and more
+
+## Base URL
+
+```
+https://v2.football.sportsapipro.com
+```
+
+<Info>
+  **Finding Player IDs:** Use `/api/search?q=haaland` to find player IDs, or extract them from match lineups (`/api/match/{id}/lineups`) or team squads (`/api/teams/{id}/players`).
+</Info>
+
+***
+
+## Player Profile
+
+### Player Details
+
+```bash theme={null}
+GET /api/players/{playerId}
+```
+
+Returns player profile: name, nationality, age, height, weight, position, current team, shirt number, preferred foot, and market value.
+
+<ParamField path="playerId" type="number" required>
+  Numeric player ID (e.g., `934235` for Haaland). Discover via search, lineups, or squads.
+</ParamField>
+
+### Player Image
+
+```bash theme={null}
+GET /api/players/{playerId}/image
+```
+
+Returns the player's profile photo URL.
+
+### Characteristics
+
+```bash theme={null}
+GET /api/players/{playerId}/characteristics
+```
+
+Returns player traits and playing style descriptions (e.g., "Strong in the air", "Clinical finisher").
+
+### Attribute Overviews
+
+```bash theme={null}
+GET /api/players/{playerId}/attribute-overviews
+```
+
+Returns radar chart data for player attributes: attacking, defending, technical, physical, and mental categories with numeric scores.
+
+### Last Year Summary
+
+```bash theme={null}
+GET /api/players/{playerId}/last-year-summary
+```
+
+Returns a summary of the player's performance over the last calendar year: goals, assists, appearances, and ratings.
+
+***
+
+## Statistics
+
+### Overall Statistics
+
+```bash theme={null}
+GET /api/players/{playerId}/statistics
+```
+
+Returns career statistics across all competitions: goals, assists, appearances, minutes, cards, and ratings.
+
+### Statistics Seasons
+
+```bash theme={null}
+GET /api/players/{playerId}/statistics/seasons
+```
+
+Returns all seasons with available statistics. **Use this to discover valid season IDs** for season-specific endpoints.
+
+### Career Stats by Match Type
+
+```bash theme={null}
+GET /api/players/{playerId}/statistics/match-type?type={type}
+```
+
+Returns career statistics filtered by match type.
+
+<ParamField query="type" type="string">
+  Match type filter (e.g., domestic league, cup, international).
+</ParamField>
+
+### Tournament Season Statistics
+
+```bash theme={null}
+GET /api/players/{playerId}/tournament/{tournamentId}/season/{seasonId}/statistics?type={type}
+```
+
+Returns player statistics for a specific tournament and season.
+
+<ParamField query="type" type="string" default="overall">
+  Filter: `overall`, `home`, or `away`.
+</ParamField>
+
+### National Team Statistics
+
+```bash theme={null}
+GET /api/players/{playerId}/national-team-statistics
+```
+
+Returns international career statistics: caps, goals, and assists for the national team.
+
+***
+
+## Visual Data
+
+### Match Heatmap
+
+```bash theme={null}
+GET /api/players/{playerId}/match/{matchId}/heatmap
+```
+
+Returns heatmap data showing the player's movement and positioning during a specific match.
+
+### Season Heatmap
+
+```bash theme={null}
+GET /api/players/{playerId}/tournament/{tournamentId}/season/{seasonId}/heatmap?type={type}
+```
+
+Returns an aggregated heatmap across all matches in a tournament season.
+
+<ParamField query="type" type="string" default="overall">
+  Filter: `overall`, `home`, or `away`.
+</ParamField>
+
+### Season Ratings
+
+```bash theme={null}
+GET /api/players/{playerId}/tournament/{tournamentId}/season/{seasonId}/ratings?type={type}
+```
+
+Returns match-by-match player ratings throughout the season — useful for performance trend charts.
+
+<ParamField query="type" type="string" default="overall">
+  Filter: `overall`, `home`, or `away`.
+</ParamField>
+
+***
+
+## Near Events
+
+### Near Events
+
+```bash theme={null}
+GET /api/players/{playerId}/near-events
+```
+
+Returns the player's previous and next match with player ratings. Useful for quick context on recent and upcoming fixtures.
+
+***
+
+## Events
+
+### Last Events (Paginated)
+
+```bash theme={null}
+GET /api/players/{playerId}/events/last/{page}
+```
+
+Returns the player's most recent matches with stats and ratings, paginated.
+
+<ParamField path="page" type="number" required>
+  Page number (0-indexed). Start with `0` for the most recent.
+</ParamField>
+
+***
+
+## Season Summary
+
+### Tournament Season Summary
+
+```bash theme={null}
+GET /api/players/{playerId}/tournament/{tournamentId}/season/{seasonId}/summary
+```
+
+Returns a summary of the player's performance in a specific tournament season: appearances, goals, assists, ratings, and key stats.
+
+***
+
+## Transfer & Career
+
+### Transfer History
+
+```bash theme={null}
+GET /api/players/{playerId}/transfer-history
+```
+
+Returns complete transfer history: clubs, dates, fees, and transfer types (permanent, loan, free).
+
+### Unique Tournaments
+
+```bash theme={null}
+GET /api/players/{playerId}/unique-tournaments
+```
+
+Returns all competitions the player has participated in throughout their career.
+
+### Penalty History
+
+```bash theme={null}
+GET /api/players/{playerId}/penalty-history
+```
+
+Returns the player's career penalty record: taken, scored, missed, and saved.
+
+### Tournament Penalty History
+
+```bash theme={null}
+GET /api/players/{playerId}/tournament/{tournamentId}/season/{seasonId}/penalty-history
+```
+
+Returns penalty record for a specific tournament season.
+
+***
+
+## Media
+
+### Media
+
+```bash theme={null}
+GET /api/players/{playerId}/media
+```
+
+Returns media content associated with the player (photos).
+
+### Media Videos
+
+```bash theme={null}
+GET /api/players/{playerId}/media/videos
+```
+
+Returns video highlights and clips featuring the player.
+
+### Media Summary
+
+```bash theme={null}
+GET /api/players/{playerId}/media-summary?country={country}
+```
+
+Returns a media summary for the player (highlights, YouTube videos) localized by country.
+
+<ParamField query="country" type="string" default="GB">
+  Country code for localized content (e.g., `GB`, `US`, `DE`).
+</ParamField>
+
+***
+
+## Fantasy
+
+### Fantasy Competitions
+
+```bash theme={null}
+GET /api/players/{playerId}/fantasy/competitions
+```
+
+Returns fantasy competitions the player is registered in, along with the player's **fantasy ID**.
+
+<Warning>
+  **Important:** Fantasy IDs are NOT the same as player IDs. Use this endpoint to discover the `fantasyId`, then pass it to `/api/fantasy/player/{fantasyId}` endpoints. See [Fantasy Endpoints](/api-reference/football-v2/fantasy).
+</Warning>
+
+***
+
+## Example Requests
+
+<CodeGroup>
+  ```bash cURL theme={null}
+  curl -X GET "https://v2.football.sportsapipro.com/api/players/934235/statistics" \
+    -H "x-api-key: YOUR_API_KEY"
+  ```
+
+  ```javascript JavaScript theme={null}
+  const response = await fetch(
+    'https://v2.football.sportsapipro.com/api/players/934235/statistics',
+    { headers: { 'x-api-key': 'YOUR_API_KEY' } }
+  );
+  const stats = await response.json();
+  ```
+
+  ```python Python theme={null}
+  import requests
+
+  response = requests.get(
+      'https://v2.football.sportsapipro.com/api/players/934235/statistics',
+      headers={'x-api-key': 'YOUR_API_KEY'}
+  )
+  stats = response.json()
+  ```
+</CodeGroup>

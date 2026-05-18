@@ -1,0 +1,172 @@
+> ## Documentation Index
+> Fetch the complete documentation index at: https://docs.sportsapipro.com/llms.txt
+> Use this file to discover all available pages before exploring further.
+
+# Authentication
+
+> How to authenticate API requests across all 25+ sports
+
+<Note>
+  Your API key works across **all SportsAPI Pro endpoints** — Football, Basketball, Tennis, Baseball, and every other sport. One key, all sports.
+</Note>
+
+## API Key Authentication
+
+All API requests require the `x-api-key` header:
+
+<CodeGroup>
+  ```bash Football V2 theme={null}
+  curl -H "x-api-key: YOUR_API_KEY" \
+    "https://v2.football.sportsapipro.com/api/live"
+  ```
+
+  ```bash Basketball V2 theme={null}
+  curl -H "x-api-key: YOUR_API_KEY" \
+    "https://v2.basketball.sportsapipro.com/api/live"
+  ```
+
+  ```bash Tennis V2 theme={null}
+  curl -H "x-api-key: YOUR_API_KEY" \
+    "https://v2.tennis.sportsapipro.com/api/live"
+  ```
+
+  ```bash V1 API theme={null}
+  curl -H "x-api-key: YOUR_API_KEY" \
+    "https://v1.football.sportsapipro.com/games/current"
+  ```
+</CodeGroup>
+
+<Warning>
+  Never share your API key publicly or commit it to version control. Treat it like a password.
+</Warning>
+
+## Getting Your API Key
+
+1. Sign up at [sportsapipro.com/register](https://sportsapipro.com/register)
+2. Go to your [Dashboard](https://sportsapipro.com/dashboard)
+3. Copy your API key from the **API Credentials** section
+
+## Regenerating Your Key
+
+If your API key is compromised:
+
+1. Go to your Dashboard
+2. Click **Regenerate Token**
+3. Update all applications with the new key
+
+<Warning>
+  Regenerating immediately invalidates the old key. All applications using it will stop working.
+</Warning>
+
+## Security Best Practices
+
+<AccordionGroup>
+  <Accordion title="Use Environment Variables">
+    Store your API key in environment variables:
+
+    ```bash theme={null}
+    # .env file
+    SPORTSAPI_KEY=your_api_key_here
+    ```
+
+    <CodeGroup>
+      ```javascript Node.js theme={null}
+      const API_KEY = process.env.SPORTSAPI_KEY;
+      const headers = { "x-api-key": API_KEY };
+
+      // Same key for all sports
+      const football = await fetch("https://v2.football.sportsapipro.com/api/live", { headers });
+      const basketball = await fetch("https://v2.basketball.sportsapipro.com/api/live", { headers });
+      ```
+
+      ```python Python theme={null}
+      import os, requests
+
+      api_key = os.environ["SPORTSAPI_KEY"]
+      headers = {"x-api-key": api_key}
+
+      football = requests.get("https://v2.football.sportsapipro.com/api/live", headers=headers)
+      basketball = requests.get("https://v2.basketball.sportsapipro.com/api/live", headers=headers)
+      ```
+    </CodeGroup>
+  </Accordion>
+
+  <Accordion title="Server-Side Only">
+    Always make API requests from your backend. Never expose your API key in client-side JavaScript or mobile apps.
+  </Accordion>
+
+  <Accordion title="Monitor Usage">
+    Check your usage regularly via the `/status` endpoint or your Dashboard. Unexpected spikes may indicate a compromised key.
+  </Accordion>
+</AccordionGroup>
+
+## Authentication Errors
+
+| Status | Error               | Description                     |
+| ------ | ------------------- | ------------------------------- |
+| `401`  | Missing API Key     | No `x-api-key` header provided  |
+| `401`  | Invalid API Key     | The key is invalid or revoked   |
+| `403`  | Account Suspended   | Your account has been suspended |
+| `429`  | Rate Limit Exceeded | Daily quota exceeded            |
+
+### Error Response
+
+```json theme={null}
+{
+  "success": false,
+  "error": {
+    "code": "UNAUTHORIZED",
+    "message": "Valid x-api-key header or Bearer token required"
+  }
+}
+```
+
+## V1 vs V2 vs V3 Authentication
+
+All three API versions use the same `x-api-key` header. The same API key works across all versions:
+
+| Version | Auth Header      | WebSocket Auth                                       |
+| ------- | ---------------- | ---------------------------------------------------- |
+| V1      | `x-api-key: KEY` | `wss://v1.{sport}.sportsapipro.com/ws?x-api-key=KEY` |
+| V2      | `x-api-key: KEY` | `wss://v2.{sport}.sportsapipro.com/ws?x-api-key=KEY` |
+| V3      | `x-api-key: KEY` | N/A (REST only)                                      |
+
+## WebSocket Authentication
+
+WebSocket connections authenticate via the `x-api-key` query parameter:
+
+<CodeGroup>
+  ```javascript V2 WebSocket theme={null}
+  const ws = new WebSocket(
+    "wss://v2.football.sportsapipro.com/ws?x-api-key=YOUR_API_KEY"
+  );
+
+  ws.onopen = () => {
+    ws.send(JSON.stringify({
+      action: "subscribe",
+      channel: "live-scores"
+    }));
+  };
+
+  ws.onmessage = (event) => {
+    const data = JSON.parse(event.data);
+    console.log("Live update:", data);
+  };
+  ```
+
+  ```javascript V1 WebSocket theme={null}
+  const ws = new WebSocket(
+    "wss://v1.football.sportsapipro.com/ws?x-api-key=YOUR_API_KEY"
+  );
+
+  ws.onmessage = (event) => {
+    const data = JSON.parse(event.data);
+    // V1 messages include a "source": "v1-poll" field
+    console.log("Score update:", data);
+  };
+  ```
+</CodeGroup>
+
+<Info>
+  V2 WebSocket requires a JSON subscription message after connecting. V1 WebSocket streams updates automatically upon connection. See the [WebSocket Guide](/api-reference/football-v2/websocket) for full details.
+</Info>

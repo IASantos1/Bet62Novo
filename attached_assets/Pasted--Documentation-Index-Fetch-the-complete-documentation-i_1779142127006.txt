@@ -1,0 +1,109 @@
+> ## Documentation Index
+> Fetch the complete documentation index at: https://docs.sportsapipro.com/llms.txt
+> Use this file to discover all available pages before exploring further.
+
+# Changelog
+
+> Track all API changes, updates, and improvements to SportsAPI Pro.
+
+<Note>
+  **Versioning Policy:** SportsAPI Pro maintains three independent API versions — V1, V2, and V3 — each sourced from different providers. These are **not** sequential upgrades. All versions are permanently supported with no planned deprecation. You can use whichever version best fits your needs.
+</Note>
+
+## June 2025
+
+<AccordionGroup>
+  <Accordion title="MCP Server Migration" icon="rotate">
+    <span style={{background: '#3b82f6', color: 'white', padding: '2px 8px', borderRadius: '4px', fontSize: '12px', fontWeight: 600}}>Changed</span>
+
+    Migrated MCP infrastructure to Mintlify's native documentation-search MCP for improved reliability and always up-to-date context.
+
+    **New MCP Server URL:**
+
+    ```
+    https://docs.sportsapipro.com/mcp
+    ```
+
+    Update your Codex, Cursor, or Claude Desktop MCP configuration to point to this new URL.
+
+    **Impact:** Existing MCP configurations using the old URL will need to be updated. No authentication changes required.
+  </Accordion>
+</AccordionGroup>
+
+## May 2025
+
+<AccordionGroup>
+  <Accordion title="LLM Context Files for AI Integration" icon="robot">
+    <span style={{background: '#10b981', color: 'white', padding: '2px 8px', borderRadius: '4px', fontSize: '12px', fontWeight: 600}}>Added</span>
+
+    Published machine-readable context files to give AI coding assistants full understanding of SportsAPI Pro:
+
+    * **Full context:** [docs.sportsapipro.com/llms-full.txt](https://docs.sportsapipro.com/llms-full.txt)
+    * **Short context:** [docs.sportsapipro.com/llms.txt](https://docs.sportsapipro.com/llms.txt)
+
+    Feed these to any AI tool (ChatGPT, Claude, Cursor, Windsurf) for accurate API integration help.
+  </Accordion>
+</AccordionGroup>
+
+## April 2025
+
+<AccordionGroup>
+  <Accordion title="V2 API Expanded to 25+ Sports" icon="futbol">
+    <span style={{background: '#10b981', color: 'white', padding: '2px 8px', borderRadius: '4px', fontSize: '12px', fontWeight: 600}}>Added</span>
+
+    The V2 API now covers 25+ sports with a standardized endpoint structure across all of them. New sports added include:
+
+    * Cycling, Motorsport, Esports, Aussie Rules
+    * Floorball, Bandy, Minifootball
+    * Beach Volleyball, Water Polo
+
+    All V2 sports follow the same consistent pattern: `/match`, `/tournament`, `/team`, `/player`, `/manager`, `/global`.
+  </Accordion>
+
+  <Accordion title="Standardized V2 Terminology" icon="book">
+    <span style={{background: '#3b82f6', color: 'white', padding: '2px 8px', borderRadius: '4px', fontSize: '12px', fontWeight: 600}}>Changed</span>
+
+    V2 API responses now use consistent terminology across all sports:
+
+    * **Events** (not "games")
+    * **homeTeam / awayTeam** (not "competitors")
+    * **tournament** (not "competition")
+    * **startTimestamp** (Unix epoch integer)
+  </Accordion>
+</AccordionGroup>
+
+## March 2025
+
+<AccordionGroup>
+  <Accordion title="WebSocket Support for Football V2" icon="bolt">
+    <span style={{background: '#10b981', color: 'white', padding: '2px 8px', borderRadius: '4px', fontSize: '12px', fontWeight: 600}}>Added</span>
+
+    Real-time WebSocket connections are now available for Football V2, enabling live score updates, match events, and statistics pushed directly to your application.
+
+    See the [Football V2 WebSocket docs](/api-reference/football-v2/websocket) for connection details and event types.
+  </Accordion>
+</AccordionGroup>
+
+## February 2025
+
+<AccordionGroup>
+  <Accordion title="AI Tools Setup Guide" icon="wand-magic-sparkles">
+    <span style={{background: '#10b981', color: 'white', padding: '2px 8px', borderRadius: '4px', fontSize: '12px', fontWeight: 600}}>Added</span>
+
+    Published a comprehensive guide for integrating SportsAPI Pro with AI coding tools including Cursor, Windsurf, Codex, and Claude Desktop.
+
+    See the [AI Tools Setup guide](/ai-tools) for configuration instructions.
+  </Accordion>
+
+  <Accordion title="Fantasy Endpoints for Football V2" icon="star">
+    <span style={{background: '#10b981', color: 'white', padding: '2px 8px', borderRadius: '4px', fontSize: '12px', fontWeight: 600}}>Added</span>
+
+    New fantasy-related endpoints added to Football V2 for player ratings, form data, and fantasy-relevant statistics.
+  </Accordion>
+</AccordionGroup>
+
+***
+
+<Info>
+  **Stay Updated:** For breaking changes or major updates, we notify active users via email. You can also check this page regularly or subscribe to updates through the [dashboard](https://sportsapipro.com/dashboard).
+</Info>
