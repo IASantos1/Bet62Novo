@@ -213,6 +213,7 @@ export type UpcomingMatch = {
   odds: { home: number; draw: number; away: number };
   markets: AdvancedMarkets;
   leagueId?: string;
+  isWomens?: boolean;
 };
 
 type StatpalMatchV2Event = {
@@ -3900,6 +3901,127 @@ async function getUpcomingEventsV2(sport: SportKey, days = 3): Promise<SAPIV2Eve
     .sort((a, b) => (a.startTimestamp ?? 0) - (b.startTimestamp ?? 0));
 }
 
+// ─── V2 Pre-Match Odds ─────────────────────────────────────────────────────────
+
+type V2RawMarket = {
+  marketName: string;
+  marketGroup: string;
+  choices: Array<{ name: string; fractionalValue: string }>;
+};
+
+type V2PreMatchOdds = {
+  home: number;
+  draw: number;
+  away: number;
+  bttsYes?: number;
+  bttsNo?: number;
+  over25?: number;
+  under25?: number;
+  firstSetHome?: number;
+  firstSetAway?: number;
+};
+
+function fractionalToDecimal(frac: string): number {
+  const parts = frac.split("/");
+  if (parts.length !== 2) return 0;
+  const num = parseFloat(parts[0]!);
+  const den = parseFloat(parts[1]!);
+  if (!den || isNaN(num) || isNaN(den)) return 0;
+  return Math.round((num / den + 1) * 100) / 100;
+}
+
+function parseV2PreMatchOdds(markets: V2RawMarket[]): V2PreMatchOdds | null {
+  let home = 0, draw = 0, away = 0;
+  let bttsYes = 0, bttsNo = 0, over25 = 0, under25 = 0;
+  let firstSetHome = 0, firstSetAway = 0;
+
+  for (const mkt of markets) {
+    const grp = mkt.marketGroup ?? "";
+    const name = mkt.marketName ?? "";
+    const choices = mkt.choices ?? [];
+
+    if (grp === "1X2" && name === "Full time") {
+      for (const c of choices) {
+        const v = fractionalToDecimal(c.fractionalValue);
+        if (c.name === "1") home = v;
+        else if (c.name === "X") draw = v;
+        else if (c.name === "2") away = v;
+      }
+    }
+    if (grp === "Home/Away" && name === "Full time") {
+      for (const c of choices) {
+        const v = fractionalToDecimal(c.fractionalValue);
+        if (c.name === "1") home = v;
+        else if (c.name === "2") away = v;
+      }
+    }
+    if (name === "Both teams to score") {
+      for (const c of choices) {
+        if (c.name === "Yes") bttsYes = fractionalToDecimal(c.fractionalValue);
+        else if (c.name === "No") bttsNo = fractionalToDecimal(c.fractionalValue);
+      }
+    }
+    if (name.includes("2.5")) {
+      for (const c of choices) {
+        const v = fractionalToDecimal(c.fractionalValue);
+        if (c.name?.startsWith("Over")) over25 = v;
+        else if (c.name?.startsWith("Under")) under25 = v;
+      }
+    }
+    if (name === "First set winner") {
+      for (const c of choices) {
+        const v = fractionalToDecimal(c.fractionalValue);
+        if (c.name === "1") firstSetHome = v;
+        else if (c.name === "2") firstSetAway = v;
+      }
+    }
+  }
+
+  if (!home) return null;
+  return { home, draw, away, bttsYes, bttsNo, over25, under25, firstSetHome, firstSetAway };
+}
+
+type PreMatchOddsEntry = { odds: V2PreMatchOdds; fetchedAt: number };
+const preMatchOddsV2Cache = new Map<string, PreMatchOddsEntry>();
+const PRE_MATCH_ODDS_TTL = 15 * 60_000;
+
+async function getPreMatchOddsV2(sport: SportKey, matchId: number): Promise<V2PreMatchOdds | null> {
+  const key = `${sport}:${matchId}`;
+  const cached = preMatchOddsV2Cache.get(key);
+  if (cached && Date.now() - cached.fetchedAt < PRE_MATCH_ODDS_TTL) return cached.odds;
+  const domain = WS_DOMAINS[sport];
+  try {
+    const resp = await fetch(`https://${domain}/api/match/${matchId}/odds/pre-match`, {
+      signal: AbortSignal.timeout(5000),
+      headers: sapiHeaders(),
+    });
+    if (!resp.ok) return null;
+    const data = (await resp.json()) as { success?: boolean; data?: { markets?: V2RawMarket[] } };
+    if (!data.success || !data.data?.markets?.length) return null;
+    const parsed = parseV2PreMatchOdds(data.data.markets);
+    if (parsed) preMatchOddsV2Cache.set(key, { odds: parsed, fetchedAt: Date.now() });
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+// ─── League Filters ────────────────────────────────────────────────────────────
+
+/** Returns true for youth leagues (U15–U21, U23) that should be hidden. */
+function isBlockedLeague(name: string): boolean {
+  const n = name.toLowerCase();
+  if (/\bu(1[5-9]|2[013])\b/.test(n)) return true;
+  if (/\bunder[- ]?(1[5-9]|2[013])\b/.test(n)) return true;
+  if (/\bjuniors?\b|\byouth\b/.test(n) && !/women|feminine|feminino|frauen|femenin/i.test(n)) return true;
+  return false;
+}
+
+/** Returns true for women's football leagues (kept but flagged for frontend). */
+function isWomensLeague(name: string): boolean {
+  return /women|feminine|féminin|feminino|frauen|femenin|damall|nwsl|wsl/i.test(name);
+}
+
 // ─── V2 /api/today fetch helpers ──────────────────────────────────────────────
 
 async function getFootballTodayV2(): Promise<SAPIV2Event[]> {
@@ -4865,37 +4987,70 @@ async function buildLiveMatches(): Promise<LiveMatchState[]> {
 
 async function buildUpcomingMatches(): Promise<UpcomingMatch[]> {
   const events = await getUpcomingEventsV2("football", 3);
-  const results: UpcomingMatch[] = [];
   const seen = new Set<string>();
+  const filtered: SAPIV2Event[] = [];
 
   for (const ev of events) {
     const home = v2TeamName(ev.homeTeam);
     const away = v2TeamName(ev.awayTeam);
     if (home === "Unknown" || away === "Unknown") continue;
+    const leagueName = normalizeLeagueName(v2TournName(ev.tournament), "");
+    if (isBlockedLeague(leagueName)) continue;
     const key = `${home}|${away}`;
     if (seen.has(key)) continue;
     seen.add(key);
+    filtered.push(ev);
+    if (filtered.length >= 200) break;
+  }
 
+  const oddsResults = await Promise.all(
+    filtered.map(ev => getPreMatchOddsV2("football", ev.id).catch(() => null))
+  );
+
+  const results: UpcomingMatch[] = [];
+  for (let i = 0; i < filtered.length; i++) {
+    const ev = filtered[i]!;
+    const home = v2TeamName(ev.homeTeam);
+    const away = v2TeamName(ev.awayTeam);
+    const leagueName = normalizeLeagueName(v2TournName(ev.tournament), "");
     const { date, time } = v2EventDateTime(ev);
-    const baseOdds = makeOddsFromTeams(home, away);
-    const markets = makeAdvancedMarketsFromTeams(home, away);
+    const realOdds = oddsResults[i] ?? null;
+    const isWomens = isWomensLeague(v2TournName(ev.tournament));
+
+    let odds: { home: number; draw: number; away: number };
+    let markets: AdvancedMarkets;
+    let hasRealOdds: boolean;
+
+    if (realOdds && realOdds.home > 0) {
+      odds = { home: realOdds.home, draw: realOdds.draw, away: realOdds.away };
+      const baseMarkets = makeAdvancedMarketsFromTeams(home, away);
+      markets = {
+        ...baseMarkets,
+        ...(realOdds.bttsYes ? { bothTeamsScore: { yes: realOdds.bttsYes, no: realOdds.bttsNo ?? 0 } } : {}),
+        ...(realOdds.over25 ? { totalGoals: { ...baseMarkets.totalGoals, over25: realOdds.over25, under25: realOdds.under25 ?? 0 } } : {}),
+      };
+      hasRealOdds = true;
+    } else {
+      odds = makeOddsFromTeams(home, away);
+      markets = makeAdvancedMarketsFromTeams(home, away);
+      hasRealOdds = false;
+    }
 
     results.push({
       id: `fb-v2-${ev.id}`,
       home,
       away,
-      league: normalizeLeagueName(v2TournName(ev.tournament), ""),
+      league: leagueName,
       country: "",
       time,
       date,
       sport: "football",
-      hasRealOdds: false,
-      odds: baseOdds,
+      hasRealOdds,
+      odds,
       markets,
+      isWomens,
       leagueId: ev.tournamentId ? String(ev.tournamentId) : undefined,
     });
-
-    if (results.length >= 200) break;
   }
 
   return results;
@@ -5452,8 +5607,8 @@ router.get("/live-stream", (req, res) => {
 async function buildTennisUpcoming(): Promise<UpcomingMatch[]> {
   try {
     const events = await getUpcomingEventsV2("tennis", 2);
-    const results: UpcomingMatch[] = [];
     const seen = new Set<string>();
+    const filtered: SAPIV2Event[] = [];
 
     for (const ev of events) {
       const home = v2TeamName(ev.homeTeam);
@@ -5463,12 +5618,28 @@ async function buildTennisUpcoming(): Promise<UpcomingMatch[]> {
       const key = `${home}|${away}`;
       if (seen.has(key)) continue;
       seen.add(key);
+      filtered.push(ev);
+      if (filtered.length >= 50) break;
+    }
 
+    const oddsResults = await Promise.all(
+      filtered.map(ev => getPreMatchOddsV2("tennis", ev.id).catch(() => null))
+    );
+
+    const results: UpcomingMatch[] = [];
+    for (let i = 0; i < filtered.length; i++) {
+      const ev = filtered[i]!;
+      const home = v2TeamName(ev.homeTeam);
+      const away = v2TeamName(ev.awayTeam);
       const { date, time } = v2EventDateTime(ev);
+      const realOdds = oddsResults[i] ?? null;
       const sr = seededRng(`tennis:${home}:${away}`);
       const pHome = mc(0.52 + (sr(1) - 0.5) * 0.20, 0.15, 0.85);
       const [compH, compA] = probsToDecimalOdds([pHome, 1 - pHome], 1.06);
       const tennisExtras = computeTennisExtras(pHome);
+      const homeOdds = (realOdds && realOdds.home > 0) ? realOdds.home : compH!;
+      const awayOdds = (realOdds && realOdds.away > 0) ? realOdds.away : compA!;
+      const hasRealOdds = !!(realOdds && realOdds.home > 0);
 
       results.push({
         id: `tennis-v2-${ev.id}`,
@@ -5479,8 +5650,8 @@ async function buildTennisUpcoming(): Promise<UpcomingMatch[]> {
         date,
         time,
         sport: "tennis" as const,
-        hasRealOdds: false,
-        odds: { home: compH!, draw: 0, away: compA! },
+        hasRealOdds,
+        odds: { home: homeOdds, draw: 0, away: awayOdds },
         markets: {
           doubleChance: { homeOrDraw: 0, awayOrDraw: 0, homeOrAway: 0 },
           bothTeamsScore: { yes: 0, no: 0 },
@@ -5488,11 +5659,11 @@ async function buildTennisUpcoming(): Promise<UpcomingMatch[]> {
           handicap: { homeMinusOne: 0, awayPlusOne: 0, homeMinusOneHalf: 0, awayPlusOneHalf: 0 },
           halfTime: { home: 0, draw: 0, away: 0 },
           firstGoal: { home: 0, noGoal: 0, away: 0 },
-          tennisExtra: tennisExtras,
+          tennisExtra: (realOdds?.firstSetHome)
+            ? { ...tennisExtras, firstSetHome: realOdds.firstSetHome, firstSetAway: realOdds.firstSetAway ?? 0 }
+            : tennisExtras,
         } as unknown as AdvancedMarkets,
       });
-
-      if (results.length >= 50) break;
     }
 
     return results;
@@ -5504,8 +5675,8 @@ async function buildTennisUpcoming(): Promise<UpcomingMatch[]> {
 async function buildBasketballUpcoming(): Promise<UpcomingMatch[]> {
   try {
     const events = await getUpcomingEventsV2("basketball", 3);
-    const results: UpcomingMatch[] = [];
     const seen = new Set<string>();
+    const filtered: SAPIV2Event[] = [];
 
     for (const ev of events) {
       const home = v2TeamName(ev.homeTeam);
@@ -5514,8 +5685,23 @@ async function buildBasketballUpcoming(): Promise<UpcomingMatch[]> {
       const key = `${home}|${away}`;
       if (seen.has(key)) continue;
       seen.add(key);
+      filtered.push(ev);
+      if (filtered.length >= 30) break;
+    }
 
+    const oddsResults = await Promise.all(
+      filtered.map(ev => getPreMatchOddsV2("basketball", ev.id).catch(() => null))
+    );
+
+    const results: UpcomingMatch[] = [];
+    for (let i = 0; i < filtered.length; i++) {
+      const ev = filtered[i]!;
+      const home = v2TeamName(ev.homeTeam);
+      const away = v2TeamName(ev.awayTeam);
       const { date, time } = v2EventDateTime(ev);
+      const realOdds = oddsResults[i] ?? null;
+      const homeOdds = (realOdds && realOdds.home > 0) ? realOdds.home : 1.9;
+      const awayOdds = (realOdds && realOdds.away > 0) ? realOdds.away : 1.9;
       results.push({
         id: `bball-v2-${ev.id}`,
         home,
@@ -5525,12 +5711,10 @@ async function buildBasketballUpcoming(): Promise<UpcomingMatch[]> {
         date,
         time,
         sport: "basketball",
-        hasRealOdds: false,
-        odds: { home: 1.9, draw: 0, away: 1.9 },
+        hasRealOdds: !!(realOdds && realOdds.home > 0),
+        odds: { home: homeOdds, draw: 0, away: awayOdds },
         markets: makeBasketballMarketsFromTeams(home, away),
       });
-
-      if (results.length >= 30) break;
     }
 
     return results;
@@ -5618,8 +5802,8 @@ async function buildVolleyballUpcoming(): Promise<UpcomingMatch[]> {
 async function buildBaseballUpcoming(): Promise<UpcomingMatch[]> {
   try {
     const events = await getUpcomingEventsV2("baseball", 3);
-    const results: UpcomingMatch[] = [];
     const seen = new Set<string>();
+    const filtered: SAPIV2Event[] = [];
 
     for (const ev of events) {
       const home = v2TeamName(ev.homeTeam);
@@ -5628,11 +5812,26 @@ async function buildBaseballUpcoming(): Promise<UpcomingMatch[]> {
       const key = `${home}|${away}`;
       if (seen.has(key)) continue;
       seen.add(key);
+      filtered.push(ev);
+      if (filtered.length >= 20) break;
+    }
 
+    const oddsResults = await Promise.all(
+      filtered.map(ev => getPreMatchOddsV2("baseball", ev.id).catch(() => null))
+    );
+
+    const results: UpcomingMatch[] = [];
+    for (let i = 0; i < filtered.length; i++) {
+      const ev = filtered[i]!;
+      const home = v2TeamName(ev.homeTeam);
+      const away = v2TeamName(ev.awayTeam);
       const { date, time } = v2EventDateTime(ev);
+      const realOdds = oddsResults[i] ?? null;
       const sr = seededRng(`baseball:${home}:${away}`);
       const pHome = mc(0.5 + (sr(1) - 0.5) * 0.12, 0.25, 0.75);
       const [compH, compA] = probsToDecimalOdds([pHome, 1 - pHome], 1.065);
+      const homeOdds = (realOdds && realOdds.home > 0) ? realOdds.home : compH!;
+      const awayOdds = (realOdds && realOdds.away > 0) ? realOdds.away : compA!;
 
       results.push({
         id: `mlb-v2-${ev.id}`,
@@ -5643,12 +5842,10 @@ async function buildBaseballUpcoming(): Promise<UpcomingMatch[]> {
         date,
         time,
         sport: "baseball",
-        hasRealOdds: false,
-        odds: { home: compH!, draw: 0, away: compA! },
+        hasRealOdds: !!(realOdds && realOdds.home > 0),
+        odds: { home: homeOdds, draw: 0, away: awayOdds },
         markets: makeAdvancedMarketsFromTeams(home, away),
       });
-
-      if (results.length >= 20) break;
     }
 
     return results;

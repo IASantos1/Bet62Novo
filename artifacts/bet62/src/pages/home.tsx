@@ -582,9 +582,15 @@ function getTeamBanner(teamName: string, country?: string): string | undefined {
 
 const ARENA_BANNER = "/arena-banner.png";
 
-function getMatchBanner(match: { home: string; country?: string; sport?: string }): string | undefined {
+function isWomensMatch(match: { league?: string; isWomens?: boolean }): boolean {
+  if (match.isWomens) return true;
+  return /women|feminine|féminin|feminino|frauen|femenin|damall|nwsl|wsl/i.test(match.league ?? "");
+}
+
+function getMatchBanner(match: { home: string; country?: string; sport?: string; league?: string; isWomens?: boolean }): string | undefined {
   // Only use football team banners for football — no image for basketball/tennis/hockey/volleyball
-  if (!match.sport || match.sport === "football") {
+  // Never show male team banners on women's matches
+  if ((!match.sport || match.sport === "football") && !isWomensMatch(match)) {
     return getTeamBanner(match.home, match.country);
   }
   return undefined;
@@ -1059,6 +1065,7 @@ type Match = {
   date?: string;
   sport?: string;
   hasRealOdds?: boolean;
+  isWomens?: boolean;
   odds: Odds;
   isLive?: boolean;
   homeScore?: number;
