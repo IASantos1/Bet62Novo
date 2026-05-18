@@ -733,7 +733,7 @@ export function LiveMatchSimulator({ visible, match, onClose }: {
   }, [visible, match.id, match.homeScore, match.awayScore, match.minute]);
 
   // ── Local fallback simulation (only when API unavailable) ───────────────────
-  const waypoints = getBallWaypoints(sport, match.suspensionReason ?? "", seed + tick, homeWinning);
+  const waypoints = getBallWaypoints(sport, match._suspensionReason ?? match.suspensionReason ?? "", seed + tick, homeWinning);
   useEffect(() => {
     if (!visible || hasTracking.current) return;
     function go() {
@@ -759,23 +759,24 @@ export function LiveMatchSimulator({ visible, match, onClose }: {
 
   // ── Match events (goal, VAR, etc.) ──────────────────────────────────────────
   useEffect(() => {
-    const r = (match.suspensionReason ?? "").toUpperCase();
+    const suspReason = match._suspensionReason ?? match.suspensionReason ?? "";
+    const r = suspReason.toUpperCase();
     if (r && (r.includes("GOLO") || r.includes("GOAL") || r.includes("VAR") || r.includes("PENAL") || r.includes("CHANCE"))) {
-      setEventReason(match.suspensionReason ?? "");
+      setEventReason(suspReason);
       setEventKey((k) => k + 1);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     }
-  }, [match.suspensionReason]);
+  }, [match._suspensionReason, match.suspensionReason]);
 
   useEffect(() => {
-    const r = (match.suspensionReason ?? "").toUpperCase();
+    const r = (match._suspensionReason ?? match.suspensionReason ?? "").toUpperCase();
     if (r.includes("GOLO") || r.includes("GOAL")) {
       Animated.loop(Animated.sequence([
         Animated.timing(pulseAnim, { toValue: 1.8, duration: 260, useNativeDriver: true }),
         Animated.timing(pulseAnim, { toValue: 1,   duration: 260, useNativeDriver: true }),
       ]), { iterations: 6 }).start();
     }
-  }, [match.suspensionReason]);
+  }, [match._suspensionReason, match.suspensionReason]);
 
   // ── Player list — API data when available, local simulation otherwise ────────
   const homeFallback = getFormationPositions(sport, "home", seed);
@@ -821,7 +822,7 @@ export function LiveMatchSimulator({ visible, match, onClose }: {
     hockey: "#2563eb", baseball: "#15803d", volleyball: "#d97706",
   };
 
-  const isVAR = (match.suspensionReason ?? "").toUpperCase().includes("VAR");
+  const isVAR = (match._suspensionReason ?? match.suspensionReason ?? "").toUpperCase().includes("VAR");
   const s = seed;
 
   const ballEl = sport === "hockey"

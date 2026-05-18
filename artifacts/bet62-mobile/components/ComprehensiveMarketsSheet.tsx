@@ -44,6 +44,7 @@ export interface MatchInfo {
   date?: string;
   time?: string;
   suspensionReason?: string;
+  _suspensionReason?: string;
   _liveExtra?: {
     sets?: Array<[number, number]>;
     currentPoints?: [number | string, number | string];
@@ -180,12 +181,16 @@ export function ComprehensiveMarketsSheet({ visible, match, onClose }: Props) {
   const now = Date.now();
   function hasBlockingReason(): boolean {
     if (!isLive) return false;
-    const r = (match.suspensionReason ?? "").toUpperCase();
+    const r = ((match._suspensionReason ?? match.suspensionReason) ?? "").toUpperCase();
     return r.includes("VAR") || r.includes("PENAL") || r.includes("PÊNALTI") || r.includes("PENÁLT") ||
-      r === "GOLO" || r.includes("GOAL") || r.includes("CHANCE");
+      r === "GOLO!" || r === "GOLO" || r.includes("GOAL") || r.includes("CHANCE");
   }
 
   function susp(market: string): boolean {
+    // If the global "result" market is suspended, lock ALL markets
+    const globalExp = match.marketSuspension?.["result"];
+    if (globalExp != null && globalExp > now) return true;
+    // Check specific market key
     const exp = match.marketSuspension?.[market];
     if (exp != null && exp > now) return true;
     return hasBlockingReason();
@@ -309,11 +314,12 @@ export function ComprehensiveMarketsSheet({ visible, match, onClose }: Props) {
       const who = match.odds.home <= 1.06 ? match.home : match.away;
       return `⚡ GRANDE CHANCE DE GOLO — ${who}`;
     }
-    const r = (match.suspensionReason ?? "").toUpperCase();
+    const r = ((match._suspensionReason ?? match.suspensionReason) ?? "").toUpperCase();
     if (r.includes("VAR")) return "📺 REVISÃO VAR";
     if (r.includes("PENAL") || r.includes("PÊNALTI") || r.includes("PENÁLT")) return "🎯 PENÁLTI";
-    if (r === "GOLO" || r.includes("GOAL")) return "⚽ GOLO MARCADO";
+    if (r.includes("GOLO") || r.includes("GOAL")) return "⚽ GOLO MARCADO";
     if (r.includes("CHANCE")) return "⚡ GRANDE CHANCE DE GOLO";
+    if (r.includes("SUSPEN")) return "⏸ MERCADOS SUSPENSOS";
     return "⚠️ ODDS EM ATUALIZAÇÃO";
   }
 

@@ -69,6 +69,7 @@ export interface LiveMatch {
   markets?: LiveMatchMarkets;
   marketSuspension?: Record<string, number>;
   suspensionReason?: string;
+  _suspensionReason?: string;
   date?: string;
   time?: string;
   _liveExtra?: {
