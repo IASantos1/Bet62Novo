@@ -13,6 +13,14 @@ const SAPI_TENNIS    = "https://v1.tennis.sportsapipro.com/api/v1";
 const SAPI_VOLLEYBALL = "https://v1.volleyball.sportsapipro.com/api/v1";
 const SAPI_BASEBALL  = "https://v1.baseball.sportsapipro.com/api/v1";
 
+// SportsAPI Pro V2 — real-time live scores (V2 domains, correct paths)
+const SAPI_V2_FOOTBALL   = "https://v2.football.sportsapipro.com/api";
+const SAPI_V2_BASKETBALL = "https://v2.basketball.sportsapipro.com/api";
+const SAPI_V2_HOCKEY     = "https://v2.hockey.sportsapipro.com/api";
+const SAPI_V2_TENNIS     = "https://v2.tennis.sportsapipro.com/api";
+const SAPI_V2_BASEBALL   = "https://v2.baseball.sportsapipro.com/api";
+// No V2 volleyball domain is available
+
 // Auth headers helper
 const sapiHeaders = (): Record<string, string> => ({ "x-api-key": SPORTSAPI_KEY });
 
@@ -1809,6 +1817,58 @@ function makeVolleyballMarketsFromTeams(home: string, away: string, realHomeOdds
   } as unknown as AdvancedMarkets;
 }
 
+// ─── SportsAPI Pro V2 Live Response Types ─────────────────────────────────────
+
+type SAPIV2ScoreObj = {
+  current?: number; display?: number;
+  period1?: number; period2?: number; period3?: number; period4?: number;
+  innings?: Record<string, { run?: number | null }>;
+  inningsBaseball?: { run?: number; hits?: number; errors?: number };
+};
+type SAPIV2StatusObj = { code?: number; description?: string; type?: string };
+type SAPIV2TournObj  = { name?: string; slug?: string; category?: { name?: string } };
+type SAPIV2TeamObj   = { id?: number; name: string };
+
+type SAPIV2Event = {
+  id: number;
+  slug?: string;
+  tournament: string | SAPIV2TournObj;
+  homeTeam: string | SAPIV2TeamObj;
+  awayTeam: string | SAPIV2TeamObj;
+  homeScore: number | SAPIV2ScoreObj;
+  awayScore: number | SAPIV2ScoreObj;
+  status: string | SAPIV2StatusObj;
+  statusCode?: number;
+  startTimestamp?: number;
+  tournamentId?: number;
+  homeTeamId?: number;
+  awayTeamId?: number;
+  roundInfo?: { round?: number };
+};
+
+// Normaliser helpers
+function v2TeamName(t: string | SAPIV2TeamObj | undefined): string {
+  if (!t) return "Unknown";
+  return typeof t === "string" ? t : (t.name ?? "Unknown");
+}
+function v2CurrentScore(s: number | SAPIV2ScoreObj | undefined): number {
+  if (s === undefined || s === null) return 0;
+  return typeof s === "number" ? s : (s.current ?? 0);
+}
+function v2StatusStr(s: string | SAPIV2StatusObj | undefined): string {
+  if (!s) return "";
+  return typeof s === "string" ? s : (s.description ?? "");
+}
+function v2StatusCode(ev: SAPIV2Event): number | undefined {
+  const s = ev.status;
+  if (typeof s === "object" && s.code !== undefined) return s.code;
+  return ev.statusCode;
+}
+function v2TournName(t: string | SAPIV2TournObj | undefined): string {
+  if (!t) return "Unknown";
+  return typeof t === "string" ? t : (t.name ?? "Unknown");
+}
+
 // ─── Caches ───────────────────────────────────────────────────────────────────
 
 // v2/live: cache 30s
@@ -1944,6 +2004,18 @@ type VolleyMatch = { id: string; status: string; time: string; date: string; hom
 type VolleyTournament = { id: string; gid: string; country: string; league: string; match: VolleyMatch | VolleyMatch[] };
 let volleyLiveCache: VolleyTournament[] | null = null;
 let volleyLiveFetchedAt = 0;
+
+// SportsAPI Pro V2 live caches (30s each sport)
+let footballLiveV2Cache: SAPIV2Event[] | null = null;
+let footballLiveV2FetchedAt = 0;
+let basketballLiveV2Cache: SAPIV2Event[] | null = null;
+let basketballLiveV2FetchedAt = 0;
+let hockeyLiveV2Cache: SAPIV2Event[] | null = null;
+let hockeyLiveV2FetchedAt = 0;
+let baseballLiveV2Cache: SAPIV2Event[] | null = null;
+let baseballLiveV2FetchedAt = 0;
+let tennisLiveV2Cache: SAPIV2Event[] | null = null;
+let tennisLiveV2FetchedAt = 0;
 
 
 // Tennis daily results (d-1 = yesterday) — longer TTL (yesterday won't change)
@@ -3509,6 +3581,83 @@ async function getVolleyballLive(): Promise<VolleyTournament[]> {
   }
 }
 
+// ─── SportsAPI Pro V2 Live Fetch Functions ────────────────────────────────────
+
+async function getFootballLiveV2(): Promise<SAPIV2Event[]> {
+  const now = Date.now();
+  if (footballLiveV2Cache && now - footballLiveV2FetchedAt < CONFIG.LIVE_CACHE_TTL) return footballLiveV2Cache;
+  try {
+    const resp = await fetch(`${SAPI_V2_FOOTBALL}/live`, { signal: AbortSignal.timeout(9000), headers: sapiHeaders() });
+    if (!resp.ok) return footballLiveV2Cache ?? [];
+    const data = (await resp.json()) as { events?: SAPIV2Event[] };
+    footballLiveV2Cache = data.events ?? [];
+    footballLiveV2FetchedAt = now;
+    return footballLiveV2Cache;
+  } catch {
+    return footballLiveV2Cache ?? [];
+  }
+}
+
+async function getBasketballLiveV2(): Promise<SAPIV2Event[]> {
+  const now = Date.now();
+  if (basketballLiveV2Cache && now - basketballLiveV2FetchedAt < CONFIG.LIVE_CACHE_TTL) return basketballLiveV2Cache;
+  try {
+    const resp = await fetch(`${SAPI_V2_BASKETBALL}/live`, { signal: AbortSignal.timeout(9000), headers: sapiHeaders() });
+    if (!resp.ok) return basketballLiveV2Cache ?? [];
+    const data = (await resp.json()) as { events?: SAPIV2Event[] };
+    basketballLiveV2Cache = data.events ?? [];
+    basketballLiveV2FetchedAt = now;
+    return basketballLiveV2Cache;
+  } catch {
+    return basketballLiveV2Cache ?? [];
+  }
+}
+
+async function getHockeyLiveV2(): Promise<SAPIV2Event[]> {
+  const now = Date.now();
+  if (hockeyLiveV2Cache && now - hockeyLiveV2FetchedAt < CONFIG.LIVE_CACHE_TTL) return hockeyLiveV2Cache;
+  try {
+    const resp = await fetch(`${SAPI_V2_HOCKEY}/live`, { signal: AbortSignal.timeout(9000), headers: sapiHeaders() });
+    if (!resp.ok) return hockeyLiveV2Cache ?? [];
+    const data = (await resp.json()) as { events?: SAPIV2Event[] };
+    hockeyLiveV2Cache = data.events ?? [];
+    hockeyLiveV2FetchedAt = now;
+    return hockeyLiveV2Cache;
+  } catch {
+    return hockeyLiveV2Cache ?? [];
+  }
+}
+
+async function getBaseballLiveV2(): Promise<SAPIV2Event[]> {
+  const now = Date.now();
+  if (baseballLiveV2Cache && now - baseballLiveV2FetchedAt < CONFIG.LIVE_CACHE_TTL) return baseballLiveV2Cache;
+  try {
+    const resp = await fetch(`${SAPI_V2_BASEBALL}/live`, { signal: AbortSignal.timeout(9000), headers: sapiHeaders() });
+    if (!resp.ok) return baseballLiveV2Cache ?? [];
+    const data = (await resp.json()) as { events?: SAPIV2Event[] };
+    baseballLiveV2Cache = data.events ?? [];
+    baseballLiveV2FetchedAt = now;
+    return baseballLiveV2Cache;
+  } catch {
+    return baseballLiveV2Cache ?? [];
+  }
+}
+
+async function getTennisLiveV2(): Promise<SAPIV2Event[]> {
+  const now = Date.now();
+  if (tennisLiveV2Cache && now - tennisLiveV2FetchedAt < CONFIG.LIVE_CACHE_TTL) return tennisLiveV2Cache;
+  try {
+    const resp = await fetch(`${SAPI_V2_TENNIS}/live`, { signal: AbortSignal.timeout(9000), headers: sapiHeaders() });
+    if (!resp.ok) return tennisLiveV2Cache ?? [];
+    const data = (await resp.json()) as { events?: SAPIV2Event[] };
+    tennisLiveV2Cache = data.events ?? [];
+    tennisLiveV2FetchedAt = now;
+    return tennisLiveV2Cache;
+  } catch {
+    return tennisLiveV2Cache ?? [];
+  }
+}
+
 const TENNIS_LIVE_STATUSES = new Set(["Set 1", "Set 2", "Set 3", "Set 4", "Set 5"]);
 
 function buildTennisLiveMatches(
@@ -4566,37 +4715,353 @@ function _tennisPairKey(n0: string, n1: string): string {
 
 export { buildLiveMatches, buildUpcomingMatches, getUpcomingAll };
 
+// ─── SportsAPI Pro V2 Live Build Functions ────────────────────────────────────
+
+const FOOTBALL_V2_FINISHED = new Set([
+  "Finished", "Ended", "FT", "After Extra Time", "After Penalties", "AP",
+  "AET", "Postponed", "Cancelled", "Abandoned", "Suspended",
+]);
+const FOOTBALL_V2_LIVE = new Set([
+  "1st half", "2nd half", "HT", "Extra Time", "1st extra time", "2nd extra time",
+  "Penalties", "Break Time", "Pause",
+]);
+
+function buildFootballLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
+  const now = Date.now();
+  const result: LiveMatchState[] = [];
+  const currentIds = new Set<string>();
+
+  for (const ev of events) {
+    const statusStr = v2StatusStr(ev.status);
+    if (FOOTBALL_V2_FINISHED.has(statusStr)) continue;
+    if (!FOOTBALL_V2_LIVE.has(statusStr)) continue;
+
+    const id = `football-v2-${ev.id}`;
+    currentIds.add(id);
+
+    const homeTeam = v2TeamName(ev.homeTeam);
+    const awayTeam = v2TeamName(ev.awayTeam);
+    const homeScore = v2CurrentScore(ev.homeScore);
+    const awayScore = v2CurrentScore(ev.awayScore);
+    const league = v2TournName(ev.tournament);
+
+    const isHT = statusStr === "HT";
+    const isET = statusStr.includes("extra") || statusStr === "Extra Time" || statusStr === "Penalties";
+    const minute = isHT ? 45 : isET ? 105 : statusStr === "1st half" ? 25 : statusStr === "2nd half" ? 70 : 45;
+
+    const existing = liveMatchState.get(id);
+    if (existing) {
+      const scored = homeScore !== existing.homeScore || awayScore !== existing.awayScore;
+      const baseOdds = existing._baseOdds ?? { home: existing.odds.home, draw: existing.odds.draw, away: existing.odds.away };
+      const newOdds = scored
+        ? calculateLive1x2({ minute, homeGoals: homeScore, awayGoals: awayScore, redCardsHome: 0, redCardsAway: 0, baseHome: baseOdds.home, baseAway: baseOdds.away })
+        : existing.odds;
+      const updated: LiveMatchState = {
+        ...existing,
+        homeScore,
+        awayScore,
+        minute,
+        status: isHT ? "HT" : isET ? "ET" : statusStr,
+        odds: newOdds,
+        _baseOdds: baseOdds,
+        _baseMarkets: existing._baseMarkets ?? existing.markets,
+      };
+      liveMatchState.set(id, applyTieredMarketDrift(updated, now));
+      result.push(liveMatchState.get(id)!);
+    } else {
+      const baseOdds = makeOddsFromTeams(homeTeam, awayTeam);
+      const liveOdds = (homeScore === 0 && awayScore === 0)
+        ? baseOdds
+        : calculateLive1x2({ minute, homeGoals: homeScore, awayGoals: awayScore, redCardsHome: 0, redCardsAway: 0, baseHome: baseOdds.home, baseAway: baseOdds.away });
+      const markets = makeAdvancedMarketsFromTeams(homeTeam, awayTeam);
+      const state: LiveMatchState = {
+        id,
+        home: homeTeam,
+        away: awayTeam,
+        league,
+        country: "",
+        sport: "football",
+        homeScore,
+        awayScore,
+        minute,
+        status: isHT ? "HT" : isET ? "ET" : statusStr,
+        hasRealOdds: true,
+        odds: liveOdds,
+        markets,
+        events: [],
+        _firstSeenAt: now,
+        _baseOdds: baseOdds,
+        _baseMarkets: markets,
+        _oddsUpdatedAt: now,
+      };
+      liveMatchState.set(id, state);
+      result.push(state);
+    }
+  }
+
+  // Garbage collect football matches no longer in the V2 live feed
+  for (const id of liveMatchState.keys()) {
+    if (!id.startsWith("football-v2-")) continue;
+    if (!currentIds.has(id)) {
+      const state = liveMatchState.get(id)!;
+      finishedMatchResults.set(id, {
+        home: state.homeScore, away: state.awayScore,
+        homeTeam: state.home, awayTeam: state.away, finishedAt: now,
+      });
+      liveMatchState.delete(id);
+    }
+  }
+
+  return result;
+}
+
+function buildBasketballLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
+  const result: LiveMatchState[] = [];
+  for (const ev of events) {
+    const code = v2StatusCode(ev);
+    // code 100 = ended; 0 = not started; undefined = keep
+    if (code === 100 || code === 0) continue;
+    const statusStr = v2StatusStr(ev.status);
+    if (statusStr === "Not started" || statusStr === "Ended" || statusStr === "Finished") continue;
+
+    const homeTeam = v2TeamName(ev.homeTeam);
+    const awayTeam = v2TeamName(ev.awayTeam);
+    const hS = typeof ev.homeScore === "object" && ev.homeScore !== null ? ev.homeScore as SAPIV2ScoreObj : null;
+    const aS = typeof ev.awayScore === "object" && ev.awayScore !== null ? ev.awayScore as SAPIV2ScoreObj : null;
+    const homeScore = hS?.current ?? v2CurrentScore(ev.homeScore);
+    const awayScore = aS?.current ?? v2CurrentScore(ev.awayScore);
+
+    // Build quarters array from period1..4
+    const quarters: Array<[number, number]> = [];
+    if (hS && aS) {
+      ([["period1", "period1"], ["period2", "period2"], ["period3", "period3"], ["period4", "period4"]] as Array<[keyof SAPIV2ScoreObj, keyof SAPIV2ScoreObj]>).forEach(([hp, ap]) => {
+        const h = hS[hp] as number | undefined;
+        const a = aS[ap] as number | undefined;
+        if ((h ?? 0) > 0 || (a ?? 0) > 0) quarters.push([h ?? 0, a ?? 0]);
+      });
+    }
+
+    // Determine quarter from statusCode (13=Q1, 14=Q2, 15=Q3, 16=Q4, 17=OT, 30=Pause, 31=HT)
+    const isHT = code === 31 || statusStr.toLowerCase().includes("half");
+    const isPause = code === 30 || statusStr.toLowerCase() === "pause";
+    const qNum = code === 13 ? 1 : code === 14 ? 2 : code === 15 ? 3 : code === 16 ? 4 : code === 17 ? 5 : quarters.length > 0 ? Math.max(1, quarters.length) : 1;
+    const minute = isHT ? 24 : isPause ? (qNum - 1) * 12 : (qNum - 1) * 12 + 6;
+    const statusLabel = isHT ? "HT" : isPause ? `Q${Math.min(qNum, 4)}` : code === 17 ? "OT" : `Q${Math.min(qNum, 4)}`;
+
+    const odds = makeOddsFromTeams(homeTeam, awayTeam);
+    const diff = homeScore - awayScore;
+    let liveOdds = { ...odds, draw: 0 };
+    if (diff !== 0) {
+      const factor = Math.min(0.40, Math.abs(diff) * 0.03);
+      liveOdds = diff > 0
+        ? { home: Math.max(1.04, +(odds.home * (1 - factor)).toFixed(2)), draw: 0, away: Math.min(12, +(odds.away * (1 + factor)).toFixed(2)) }
+        : { home: Math.min(12, +(odds.home * (1 + factor)).toFixed(2)), draw: 0, away: Math.max(1.04, +(odds.away * (1 - factor)).toFixed(2)) };
+    }
+
+    result.push({
+      id: `bball-v2-${ev.id}`,
+      home: homeTeam, away: awayTeam,
+      league: v2TournName(ev.tournament), country: "",
+      sport: "basketball", homeScore, awayScore, minute,
+      status: statusLabel, hasRealOdds: true, odds: liveOdds,
+      markets: makeBasketballMarketsFromTeams(homeTeam, awayTeam),
+      events: [],
+      _liveExtra: quarters.length > 0 ? { quarters } : undefined,
+    });
+  }
+  return result;
+}
+
+function buildHockeyLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
+  const result: LiveMatchState[] = [];
+  for (const ev of events) {
+    const code = v2StatusCode(ev);
+    if (code === 100 || code === 0) continue;
+    const statusStr = v2StatusStr(ev.status);
+    if (statusStr === "Not started" || statusStr === "Ended" || statusStr === "Finished") continue;
+
+    const homeTeam = v2TeamName(ev.homeTeam);
+    const awayTeam = v2TeamName(ev.awayTeam);
+    const hS = typeof ev.homeScore === "object" && ev.homeScore !== null ? ev.homeScore as SAPIV2ScoreObj : null;
+    const aS = typeof ev.awayScore === "object" && ev.awayScore !== null ? ev.awayScore as SAPIV2ScoreObj : null;
+    const homeScore = hS?.current ?? v2CurrentScore(ev.homeScore);
+    const awayScore = aS?.current ?? v2CurrentScore(ev.awayScore);
+
+    const periods: Array<[number, number]> = [];
+    if (hS && aS) {
+      (["period1", "period2", "period3", "period4"] as Array<keyof SAPIV2ScoreObj>).forEach(p => {
+        const h = hS[p] as number | undefined;
+        const a = aS[p] as number | undefined;
+        if ((h ?? 0) > 0 || (a ?? 0) > 0) periods.push([h ?? 0, a ?? 0]);
+      });
+    }
+
+    const pNum = code === 13 ? 1 : code === 14 ? 2 : code === 15 ? 3 : code === 17 ? 4 : periods.length > 0 ? Math.max(1, periods.length) : 1;
+    const isPause = code === 30 || statusStr.toLowerCase().includes("intermission") || statusStr.toLowerCase().includes("pause");
+    const minute = isPause ? (pNum - 1) * 20 : (pNum - 1) * 20 + 10;
+    const statusLabel = isPause ? `P${Math.min(pNum, 3)} Break` : code === 17 ? "OT" : `P${Math.min(pNum, 3)}`;
+
+    const odds = makeOddsFromTeams(homeTeam, awayTeam);
+    const diff = homeScore - awayScore;
+    let liveOdds = { ...odds, draw: 0 };
+    if (diff !== 0) {
+      const factor = Math.min(0.40, Math.abs(diff) * 0.15);
+      liveOdds = diff > 0
+        ? { home: Math.max(1.04, +(odds.home * (1 - factor)).toFixed(2)), draw: 0, away: Math.min(12, +(odds.away * (1 + factor)).toFixed(2)) }
+        : { home: Math.min(12, +(odds.home * (1 + factor)).toFixed(2)), draw: 0, away: Math.max(1.04, +(odds.away * (1 - factor)).toFixed(2)) };
+    }
+    liveOdds.draw = 0;
+
+    result.push({
+      id: `hockey-v2-${ev.id}`,
+      home: homeTeam, away: awayTeam,
+      league: v2TournName(ev.tournament), country: "",
+      sport: "hockey", homeScore, awayScore, minute,
+      status: statusLabel, hasRealOdds: true, odds: liveOdds,
+      markets: makeHockeyMarketsFromTeams(homeTeam, awayTeam),
+      events: [],
+      _liveExtra: periods.length > 0 ? { periods } : undefined,
+    });
+  }
+  return result;
+}
+
+function buildBaseballLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
+  const result: LiveMatchState[] = [];
+  for (const ev of events) {
+    const code = v2StatusCode(ev);
+    const statusStr = v2StatusStr(ev.status);
+    const statusType = typeof ev.status === "object" ? (ev.status as SAPIV2StatusObj).type : "";
+    if (code === 100 || statusStr === "Ended" || statusStr === "Finished") continue;
+    if (statusType !== "inprogress" && !statusStr.toLowerCase().includes("inning") && !statusStr.toLowerCase().includes("progress")) continue;
+
+    const homeTeam = v2TeamName(ev.homeTeam);
+    const awayTeam = v2TeamName(ev.awayTeam);
+    const hS = typeof ev.homeScore === "object" && ev.homeScore !== null ? ev.homeScore as SAPIV2ScoreObj : null;
+    const aS = typeof ev.awayScore === "object" && ev.awayScore !== null ? ev.awayScore as SAPIV2ScoreObj : null;
+    const homeScore = hS?.current ?? v2CurrentScore(ev.homeScore);
+    const awayScore = aS?.current ?? v2CurrentScore(ev.awayScore);
+
+    // Extract innings from inning1..inning9
+    const innings: Array<[number, number]> = [];
+    if (hS?.innings && aS?.innings) {
+      for (let i = 1; i <= 12; i++) {
+        const hRun = hS.innings[`inning${i}`]?.run;
+        const aRun = aS.innings[`inning${i}`]?.run;
+        if (hRun !== undefined && hRun !== null && aRun !== undefined && aRun !== null) {
+          innings.push([hRun, aRun]);
+        } else break;
+      }
+    }
+
+    const league = v2TournName(ev.tournament);
+    const odds = makeBaseballBaseOdds(homeTeam, awayTeam);
+    const diff = homeScore - awayScore;
+    let liveOdds = { ...odds, draw: 0 };
+    if (diff !== 0) {
+      const factor = Math.min(0.40, Math.abs(diff) * 0.10);
+      liveOdds = diff > 0
+        ? { home: Math.max(1.04, +(odds.home * (1 - factor)).toFixed(2)), draw: 0, away: Math.min(15, +(odds.away * (1 + factor)).toFixed(2)) }
+        : { home: Math.min(15, +(odds.home * (1 + factor)).toFixed(2)), draw: 0, away: Math.max(1.04, +(odds.away * (1 - factor)).toFixed(2)) };
+    }
+
+    result.push({
+      id: `baseball-v2-${ev.id}`,
+      home: homeTeam, away: awayTeam,
+      league, country: "",
+      sport: "baseball", homeScore, awayScore,
+      minute: innings.length,
+      status: statusStr, hasRealOdds: true, odds: liveOdds,
+      markets: makeMLBMarketsFromTeams(homeTeam, awayTeam),
+      events: [],
+      _liveExtra: innings.length > 0 ? { innings } : undefined,
+    });
+  }
+  return result;
+}
+
+function buildTennisLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
+  const result: LiveMatchState[] = [];
+  for (const ev of events) {
+    const code = v2StatusCode(ev);
+    const statusStr = v2StatusStr(ev.status);
+    if (code === 100 || statusStr === "Ended" || statusStr === "Finished" || !statusStr) continue;
+    // Tennis live: typically "1st set", "2nd set", etc. or statusCode 13-17
+    const isLive = statusStr.toLowerCase().includes("set") || (code !== undefined && code >= 13 && code <= 50);
+    if (!isLive) continue;
+
+    const homeTeam = v2TeamName(ev.homeTeam);
+    const awayTeam = v2TeamName(ev.awayTeam);
+    const hS = typeof ev.homeScore === "object" && ev.homeScore !== null ? ev.homeScore as SAPIV2ScoreObj : null;
+    const aS = typeof ev.awayScore === "object" && ev.awayScore !== null ? ev.awayScore as SAPIV2ScoreObj : null;
+    const homeScore = hS?.current ?? v2CurrentScore(ev.homeScore);
+    const awayScore = aS?.current ?? v2CurrentScore(ev.awayScore);
+
+    // Build sets from period1..5
+    const sets: Array<[number, number]> = [];
+    if (hS && aS) {
+      (["period1", "period2", "period3", "period4", "period5"] as Array<keyof SAPIV2ScoreObj>).forEach(p => {
+        const h = hS[p] as number | undefined;
+        const a = aS[p] as number | undefined;
+        if (h !== undefined && a !== undefined) sets.push([h, a]);
+      });
+    }
+
+    const setNum = code !== undefined && code >= 13 ? code - 12 : sets.length + 1;
+    const odds = makeOddsFromTeams(homeTeam, awayTeam);
+    const diff = homeScore - awayScore;
+    let liveOdds = { ...odds, draw: 0 };
+    if (diff !== 0) {
+      const factor = Math.min(0.55, Math.abs(diff) * 0.22);
+      liveOdds = diff > 0
+        ? { home: Math.max(1.01, +(odds.home * (1 - factor)).toFixed(2)), draw: 0, away: Math.min(50, +(odds.away * (1 + factor)).toFixed(2)) }
+        : { home: Math.min(50, +(odds.home * (1 + factor)).toFixed(2)), draw: 0, away: Math.max(1.01, +(odds.away * (1 - factor)).toFixed(2)) };
+    }
+
+    result.push({
+      id: `tennis-v2-${ev.id}`,
+      home: homeTeam, away: awayTeam,
+      league: v2TournName(ev.tournament), country: "",
+      sport: "tennis", homeScore, awayScore,
+      minute: setNum * 20,
+      status: statusStr, hasRealOdds: true, odds: liveOdds,
+      markets: makeAdvancedMarketsFromTeams(homeTeam, awayTeam),
+      events: [],
+      _liveExtra: sets.length > 0 ? { sets } : undefined,
+    });
+  }
+  return result;
+}
+
 // ─── Routes ───────────────────────────────────────────────────────────────────
 
 // Shared payload builder — used by both /live HTTP route and SSE broadcast
 async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
   const empty: UpcomingMatch[] = [];
   const [
-    soccerMatches, nhlTournaments, nbaTournaments, mlbTournaments,
-    tennisTournaments, volleyTournaments, tennisStatsMap,
+    footballEvents, basketballEvents, hockeyEvents, baseballEvents, tennisEvents,
     upFootball, upTennis, upBasketball, upHockey, upVolleyball,
   ] = await Promise.all([
-    buildLiveMatches(),
-    getNHLLive(),
-    getNBALive(),
-    getMLBLive(),
-    getTennisLive(),
-    getVolleyballLive(),
-    getTennisStatsMap(),
+    getFootballLiveV2(),
+    getBasketballLiveV2(),
+    getHockeyLiveV2(),
+    getBaseballLiveV2(),
+    getTennisLiveV2(),
     buildUpcomingMatches().catch(() => empty),
     buildTennisUpcoming().catch(() => empty),
     buildBasketballUpcoming().catch(() => empty),
     buildHockeyUpcoming().catch(() => empty),
     buildVolleyballUpcoming().catch(() => empty),
     getTennisOdds().catch(() => []),
-    getMLBOdds().catch(() => []), // warms mlbRawOddsMap so live games get real base odds
+    getMLBOdds().catch(() => []),
   ]);
-  const nhlMatches    = buildNHLLiveMatches(nhlTournaments);
-  const nbaMatches    = buildNBALiveMatches(nbaTournaments);
-  const mlbMatches    = buildMLBLiveMatches(mlbTournaments);
-  const tennisMatches = buildTennisLiveMatches(tennisTournaments, tennisStatsMap);
-  const volleyMatches = buildVolleyballLiveMatches(volleyTournaments);
-  const livePart = [...soccerMatches, ...nhlMatches, ...nbaMatches, ...mlbMatches, ...tennisMatches, ...volleyMatches];
+  const livePart = [
+    ...buildFootballLiveV2(footballEvents),
+    ...buildBasketballLiveV2(basketballEvents),
+    ...buildHockeyLiveV2(hockeyEvents),
+    ...buildBaseballLiveV2(baseballEvents),
+    ...buildTennisLiveV2(tennisEvents),
+  ];
 
   const liveIds = new Set(livePart.map(m => String(m.id)));
   // Deduplicate by team pair — prevents upcoming duplicating a match already in the live feed
