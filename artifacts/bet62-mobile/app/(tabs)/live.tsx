@@ -366,7 +366,7 @@ export default function LiveScreen() {
   const { matches, connected, lastUpdated } = useLiveMatches();
   const topPad = Platform.OS === "web" ? 67 : insets.top;
 
-  const filtered = selectedSport === "all" ? matches : matches.filter((m) => m.sport === selectedSport);
+  const filtered = matches.filter((m) => m.hasRealOdds !== false && (selectedSport === "all" || m.sport === selectedSport));
 
   const s = StyleSheet.create({
     container: { flex: 1, backgroundColor: colors.background },

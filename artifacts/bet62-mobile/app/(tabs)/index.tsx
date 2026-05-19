@@ -39,6 +39,7 @@ interface UpcomingMatch {
   league?: string;
   country?: string;
   markets?: LiveMatchMarkets;
+  hasRealOdds?: boolean;
 }
 
 const SPORTS = [
@@ -210,7 +211,7 @@ export default function PreGameScreen() {
   });
 
   const allUpcoming: UpcomingMatch[] = data?.matches ?? [];
-  const filtered = selectedSport === "all" ? allUpcoming : allUpcoming.filter((m) => m.sport === selectedSport);
+  const filtered = allUpcoming.filter((m) => m.hasRealOdds !== false && (selectedSport === "all" || m.sport === selectedSport));
 
   const s = StyleSheet.create({
     container: { flex: 1, backgroundColor: colors.background },

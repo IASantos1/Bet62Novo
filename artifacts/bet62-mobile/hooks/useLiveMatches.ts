@@ -72,6 +72,7 @@ export interface LiveMatch {
   _suspensionReason?: string;
   date?: string;
   time?: string;
+  hasRealOdds?: boolean;
   _liveExtra?: {
     sets?: Array<[number, number]>;
     currentPoints?: [number | string, number | string];

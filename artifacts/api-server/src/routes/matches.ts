@@ -5812,7 +5812,7 @@ router.get("/upcoming", async (req, res) => {
   else if (sport === "volleyball") matches = cache.volleyball;
   else if (sport === "baseball") matches = cache.baseball;
   else matches = [...cache.football, ...cache.tennis, ...cache.basketball, ...cache.hockey, ...cache.volleyball, ...cache.baseball];
-  res.json({ matches });
+  res.json({ matches: matches.filter(m => m.hasRealOdds) });
 });
 
 router.get("/", async (_req, res) => {

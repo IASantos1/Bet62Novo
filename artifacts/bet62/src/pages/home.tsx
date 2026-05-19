@@ -2203,7 +2203,7 @@ export default function Home() {
           id: string; home: string; away: string; league: string; country?: string;
           time?: string; date?: string; sport?: string; hasRealOdds?: boolean; odds: Odds; markets?: AdvancedMarkets;
         }>;
-        setUpcomingMatches(matches.map(m => ({ ...m, isLive: false })));
+        setUpcomingMatches(matches.filter(m => m.hasRealOdds !== false).map(m => ({ ...m, isLive: false })));
       })
       .catch(() => { /* keep empty */ })
       .finally(() => { if (showSpinner) setUpcomingLoading(false); });
@@ -2264,7 +2264,7 @@ export default function Home() {
       }
       prevLiveOdds.current = newPrev;
       prevLiveMarkets.current = newPrevMkts;
-      return matches.map(m => ({ ...m, isLive: true }));
+      return matches.filter(m => m.hasRealOdds !== false).map(m => ({ ...m, isLive: true }));
     });
   }, []);
 
