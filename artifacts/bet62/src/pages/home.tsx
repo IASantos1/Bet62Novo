@@ -5990,16 +5990,16 @@ export default function Home() {
                           return "⚡ Ao Vivo";
                         };
                         const tabs: string[] = expandedMatch.sport === "tennis"
-                          ? (expandedMatch.isLive ? ["stats", "confrontos", "yesterday", "ranking", "odds", "live"] : ["stats", "confrontos", "yesterday", "ranking", "odds"])
+                          ? (expandedMatch.isLive ? ["stats", "confrontos", "yesterday", "ranking", "live"] : ["stats", "confrontos", "yesterday", "ranking"])
                           : expandedMatch.sport === "hockey"
-                          ? (expandedMatch.isLive ? ["stats", "confrontos", "yesterday", "odds", "live"] : ["stats", "confrontos", "yesterday", "odds"])
+                          ? (expandedMatch.isLive ? ["stats", "confrontos", "yesterday", "live"] : ["stats", "confrontos", "yesterday"])
                           : expandedMatch.sport === "basketball"
-                          ? (expandedMatch.isLive ? ["stats", "confrontos", "standings", "yesterday", "odds", "live"] : ["stats", "confrontos", "standings", "yesterday", "odds"])
+                          ? (expandedMatch.isLive ? ["stats", "confrontos", "standings", "yesterday", "live"] : ["stats", "confrontos", "standings", "yesterday"])
                           : expandedMatch.sport === "baseball"
-                          ? (expandedMatch.isLive ? ["stats", "confrontos", "yesterday", "liga", "odds", "live"] : ["stats", "confrontos", "yesterday", "liga", "odds"])
+                          ? (expandedMatch.isLive ? ["stats", "confrontos", "yesterday", "liga", "live"] : ["stats", "confrontos", "yesterday", "liga"])
                           : expandedMatch.sport === "volleyball"
-                          ? (expandedMatch.isLive ? ["stats", "confrontos", "odds", "live"] : ["stats", "confrontos", "odds"])
-                          : (expandedMatch.isLive ? ["stats", "confrontos", "standings", "odds", "lineups", "live"] : ["stats", "confrontos", "standings", "odds", "lineups"]);
+                          ? (expandedMatch.isLive ? ["stats", "confrontos", "live"] : ["stats", "confrontos"])
+                          : (expandedMatch.isLive ? ["stats", "confrontos", "standings", "lineups", "live"] : ["stats", "confrontos", "standings", "lineups"]);
                         return tabs.map(tab => (
                           <button
                             key={tab}
