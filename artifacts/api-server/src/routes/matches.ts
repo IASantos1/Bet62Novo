@@ -4102,6 +4102,112 @@ function v2EventDateTime(ev: SAPIV2Event): { date: string; time: string } {
   return { date: `${dd}.${mm}.${yyyy}`, time: `${hh}:${min}` };
 }
 
+// ─── V2 Tournament/Season ID Cache ────────────────────────────────────────────
+const v2TournIdCache = new Map<string, { tid: number; sid: number; fetchedAt: number }>();
+const V2_TOURN_ID_TTL = 30 * 60_000;
+
+/** Resolves the dominant tournament+season IDs for a sport from V2 live or schedule. */
+async function getV2TournamentIds(sport: SportKey): Promise<{ tid: number; sid: number } | null> {
+  const cached = v2TournIdCache.get(sport);
+  if (cached && Date.now() - cached.fetchedAt < V2_TOURN_ID_TTL) return cached;
+  const domain = WS_DOMAINS[sport];
+
+  const extractIds = (events: unknown[]): { tid: number; sid: number } | null => {
+    const countMap = new Map<string, { tid: number; sid: number; n: number }>();
+    for (const ev of events) {
+      const e = ev as Record<string, unknown>;
+      const tourn = e["tournament"] as Record<string, unknown> | undefined;
+      const uniq = tourn?.["uniqueTournament"] as Record<string, unknown> | undefined;
+      const tid = Number(e["tournamentId"] ?? uniq?.["id"] ?? tourn?.["id"] ?? 0);
+      const season = e["season"] as Record<string, unknown> | undefined;
+      const sid = Number(e["seasonId"] ?? season?.["id"] ?? 0);
+      if (!tid || !sid) continue;
+      const key = `${tid}:${sid}`;
+      const ex = countMap.get(key);
+      if (ex) ex.n++; else countMap.set(key, { tid, sid, n: 1 });
+    }
+    let best: { tid: number; sid: number } | null = null; let bestN = 0;
+    for (const entry of countMap.values()) { if (entry.n > bestN) { bestN = entry.n; best = { tid: entry.tid, sid: entry.sid }; } }
+    return best;
+  };
+
+  // Try V2 live first (flat event structure)
+  try {
+    const r = await fetch(`https://${domain}/api/live`, { signal: AbortSignal.timeout(7000), headers: sapiHeaders() });
+    if (r.ok) {
+      const d = await r.json() as Record<string, unknown>;
+      const evts = (d["events"] ?? (d["data"] as Record<string, unknown>)?.["events"] ?? []) as unknown[];
+      const ids = extractIds(evts);
+      if (ids) { v2TournIdCache.set(sport, { ...ids, fetchedAt: Date.now() }); return ids; }
+    }
+  } catch {}
+
+  // Fall back to today's schedule (nested data.events structure)
+  const todayStr = new Date().toISOString().slice(0, 10);
+  const scheduleEvts = await getScheduleV2(sport, todayStr).catch(() => [] as SAPIV2Event[]);
+  const ids2 = extractIds(scheduleEvts as unknown[]);
+  if (ids2) { v2TournIdCache.set(sport, { ...ids2, fetchedAt: Date.now() }); return ids2; }
+  return cached ?? null;
+}
+
+// ─── V2 Events/Last Cache ──────────────────────────────────────────────────────
+const v2EventsLastMap = new Map<string, { events: unknown[]; fetchedAt: number }>();
+const V2_EVENTS_LAST_TTL = 5 * 60_000;
+
+async function getV2EventsLast(sport: SportKey, n = 30): Promise<unknown[]> {
+  const ids = await getV2TournamentIds(sport);
+  if (!ids) return [];
+  const cacheKey = `${sport}:${ids.tid}:${ids.sid}:${n}`;
+  const cached = v2EventsLastMap.get(cacheKey);
+  if (cached && Date.now() - cached.fetchedAt < V2_EVENTS_LAST_TTL) return cached.events;
+  const domain = WS_DOMAINS[sport];
+  try {
+    const resp = await fetch(
+      `https://${domain}/api/tournament/${ids.tid}/season/${ids.sid}/events/last/${n}`,
+      { signal: AbortSignal.timeout(9000), headers: sapiHeaders() }
+    );
+    if (!resp.ok) return cached?.events ?? [];
+    const d = await resp.json() as Record<string, unknown>;
+    const events = ((d["data"] as Record<string, unknown>)?.["events"] ?? []) as unknown[];
+    v2EventsLastMap.set(cacheKey, { events, fetchedAt: Date.now() });
+    return events;
+  } catch { return cached?.events ?? []; }
+}
+
+// ─── V2 Standings Rows ─────────────────────────────────────────────────────────
+type V2StandingRow = {
+  position: number; team: { id: number; name: string; nameCode: string };
+  matches: number; wins: number; losses: number; draws?: number;
+  points?: number; percentage?: number; gamesBehind?: number; streak?: number;
+  normaltimeLosses?: number; overtimeLosses?: number;
+  scoresFor?: number; scoresAgainst?: number; scoreDiffFormatted?: string;
+};
+
+const v2StandingsRowCache = new Map<string, { rows: V2StandingRow[]; fetchedAt: number }>();
+const V2_STANDINGS_ROWS_TTL = 30 * 60_000;
+
+async function getV2StandingRows(sport: SportKey): Promise<V2StandingRow[]> {
+  const ids = await getV2TournamentIds(sport);
+  if (!ids) return [];
+  const cacheKey = `${sport}:${ids.tid}:${ids.sid}`;
+  const cached = v2StandingsRowCache.get(cacheKey);
+  if (cached && Date.now() - cached.fetchedAt < V2_STANDINGS_ROWS_TTL) return cached.rows;
+  const domain = WS_DOMAINS[sport];
+  try {
+    const resp = await fetch(
+      `https://${domain}/api/tournament/${ids.tid}/season/${ids.sid}/standings`,
+      { signal: AbortSignal.timeout(9000), headers: sapiHeaders() }
+    );
+    if (!resp.ok) return cached?.rows ?? [];
+    const d = await resp.json() as Record<string, unknown>;
+    const standings = ((d["data"] as Record<string, unknown>)?.["standings"] ?? []) as Array<{ type: string; rows?: V2StandingRow[] }>;
+    const total = standings.find(s => s.type === "total") ?? standings[0];
+    const rows = (total?.rows ?? []) as V2StandingRow[];
+    v2StandingsRowCache.set(cacheKey, { rows, fetchedAt: Date.now() });
+    return rows;
+  } catch { return cached?.rows ?? []; }
+}
+
 const TENNIS_LIVE_STATUSES = new Set(["Set 1", "Set 2", "Set 3", "Set 4", "Set 5"]);
 
 function buildTennisLiveMatches(
@@ -5726,8 +5832,8 @@ async function buildBasketballUpcoming(): Promise<UpcomingMatch[]> {
 async function buildHockeyUpcoming(): Promise<UpcomingMatch[]> {
   try {
     const events = await getUpcomingEventsV2("hockey", 3);
-    const results: UpcomingMatch[] = [];
     const seen = new Set<string>();
+    const filtered: SAPIV2Event[] = [];
 
     for (const ev of events) {
       const home = v2TeamName(ev.homeTeam);
@@ -5736,23 +5842,36 @@ async function buildHockeyUpcoming(): Promise<UpcomingMatch[]> {
       const key = `${home}|${away}`;
       if (seen.has(key)) continue;
       seen.add(key);
+      filtered.push(ev);
+      if (filtered.length >= 30) break;
+    }
 
+    const oddsResults = await Promise.all(
+      filtered.map(ev => getPreMatchOddsV2("hockey", ev.id).catch(() => null))
+    );
+
+    const results: UpcomingMatch[] = [];
+    for (let i = 0; i < filtered.length; i++) {
+      const ev = filtered[i]!;
+      const home = v2TeamName(ev.homeTeam);
+      const away = v2TeamName(ev.awayTeam);
       const { date, time } = v2EventDateTime(ev);
+      const realOdds = oddsResults[i] ?? null;
+      const hasRealOdds = !!(realOdds && realOdds.home > 0);
+      const homeOdds = hasRealOdds ? realOdds!.home : 2.1;
+      const drawOdds = hasRealOdds ? (realOdds!.draw || 3.8) : 3.8;
+      const awayOdds = hasRealOdds ? realOdds!.away : 2.1;
       results.push({
         id: `hockey-v2-${ev.id}`,
-        home,
-        away,
+        home, away,
         league: v2TournName(ev.tournament),
         country: "usa",
-        date,
-        time,
+        date, time,
         sport: "hockey",
-        hasRealOdds: false,
-        odds: { home: 2.1, draw: 3.8, away: 2.1 },
+        hasRealOdds,
+        odds: { home: homeOdds, draw: drawOdds, away: awayOdds },
         markets: makeHockeyMarketsFromTeams(home, away),
       });
-
-      if (results.length >= 30) break;
     }
 
     return results;
@@ -6365,51 +6484,33 @@ async function getHockeyDailyResults(): Promise<HockeyDailyResult[]> {
   const now = Date.now();
   if (hockeyResultsCache && now - hockeyResultsFetchedAt < RESULTS_CACHE_TTL) return hockeyResultsCache;
   try {
-    const resp = await fetch(`${SAPI_HOCKEY}/nhl/daily/d-1`, { signal: AbortSignal.timeout(9000), headers: sapiHeaders() });
-    if (!resp.ok) return hockeyResultsCache ?? [];
-    const data = (await resp.json()) as { scores?: { tournament?: unknown } };
-    const raw = data?.scores?.tournament;
-    if (!raw) return hockeyResultsCache ?? [];
-    // tournament is a single object for NHL (not an array)
-    const arr = Array.isArray(raw) ? raw : [raw];
+    const events = await getV2EventsLast("hockey", 20);
+    const yd = new Date(Date.now() - 86400000);
+    const ydStr = `${String(yd.getUTCDate()).padStart(2, "0")}.${String(yd.getUTCMonth() + 1).padStart(2, "0")}.${yd.getUTCFullYear()}`;
     const results: HockeyDailyResult[] = [];
-    for (const t of arr as Array<{ id: string; league: string; country: string; match: unknown }>) {
-      const matches = Array.isArray(t.match) ? t.match : (t.match ? [t.match] : []);
-      for (const m of matches as Array<{
-        id: string; status: string; date: string; time: string;
-        home: { id: string; name: string; totalscore: string };
-        away: { id: string; name: string; totalscore: string };
-        events?: {
-          firstperiod?:  { score?: string };
-          secondperiod?: { score?: string };
-          thirdperiod?:  { score?: string };
-          overtime?:     { score?: string };
-          penalties?:    { score?: string };
-        };
-      }>) {
-        if (!m?.status || m.status !== "Finished") continue;
-        if (!m.home?.name || !m.away?.name) continue;
-        const parseScore = (s: string | undefined): [number, number] | null => {
-          if (!s || s.trim() === "") return null;
-          const parts = s.split("-").map(p => parseInt(p.trim()) || 0);
-          if (parts.length < 2) return null;
-          return [parts[0]!, parts[1]!];
-        };
-        const periods: Array<[number, number]> = [];
-        for (const key of ["firstperiod", "secondperiod", "thirdperiod", "overtime", "penalties"] as const) {
-          const p = parseScore(m.events?.[key]?.score);
-          if (p) periods.push(p);
-        }
-        const homeScore = parseInt(m.home.totalscore) || 0;
-        const awayScore = parseInt(m.away.totalscore) || 0;
-        results.push({
-          id: m.id, home: m.home.name, away: m.away.name,
-          homeScore, awayScore, periods,
-          homeWon: homeScore > awayScore,
-          league: t.league, country: t.country ?? "",
-          date: m.date, time: m.time,
-        });
+    for (const raw of events) {
+      const ev = raw as Record<string, unknown>;
+      const st = (ev["status"] as Record<string, unknown> | undefined)?.["type"] ?? ev["status"];
+      if (typeof st === "string" && st !== "finished") continue;
+      const ts = ev["startTimestamp"] as number | undefined;
+      if (!ts) continue;
+      const { date, time } = v2EventDateTime({ startTimestamp: ts } as SAPIV2Event);
+      if (date !== ydStr) continue;
+      const hs = ev["homeScore"] as Record<string, unknown> | undefined;
+      const as_ = ev["awayScore"] as Record<string, unknown> | undefined;
+      const homeScore = Number(hs?.["current"] ?? 0);
+      const awayScore = Number(as_?.["current"] ?? 0);
+      const periods: Array<[number, number]> = [];
+      for (const p of ["period1", "period2", "period3", "overtime", "shootout"]) {
+        const hv = hs?.[p]; const av = as_?.[p];
+        if (hv != null && av != null) periods.push([Number(hv), Number(av)]);
       }
+      const homeTeam = ev["homeTeam"] as Record<string, unknown> | undefined;
+      const awayTeam = ev["awayTeam"] as Record<string, unknown> | undefined;
+      const home = String(homeTeam?.["name"] ?? homeTeam?.["shortName"] ?? "");
+      const away = String(awayTeam?.["name"] ?? awayTeam?.["shortName"] ?? "");
+      if (!home || !away) continue;
+      results.push({ id: String(ev["id"] ?? ""), home, away, homeScore, awayScore, periods, homeWon: ev["winnerCode"] === 1, league: "NHL", country: "usa", date, time });
     }
     hockeyResultsCache = results;
     hockeyResultsFetchedAt = now;
@@ -6423,52 +6524,43 @@ async function getMLBDailyResults(): Promise<MLBDailyResult[]> {
   const now = Date.now();
   if (mlbResultsCache && now - mlbResultsFetchedAt < RESULTS_CACHE_TTL) return mlbResultsCache;
   try {
-    const resp = await fetch(`${SAPI_BASEBALL}/mlb/daily/d-1`, { signal: AbortSignal.timeout(9000), headers: sapiHeaders() });
-    if (!resp.ok) return mlbResultsCache ?? [];
-    const data = (await resp.json()) as { scores?: { tournament?: unknown } };
-    const raw = data?.scores?.tournament;
-    if (!raw) return mlbResultsCache ?? [];
-    const arr = Array.isArray(raw) ? raw : [raw];
+    const events = await getV2EventsLast("baseball", 20);
+    const yd = new Date(Date.now() - 86400000);
+    const ydStr = `${String(yd.getUTCDate()).padStart(2, "0")}.${String(yd.getUTCMonth() + 1).padStart(2, "0")}.${yd.getUTCFullYear()}`;
     const results: MLBDailyResult[] = [];
-    for (const t of arr as Array<{ id: string; league: string; country: string; match: unknown }>) {
-      const matches = Array.isArray(t.match) ? t.match : (t.match ? [t.match] : []);
-      for (const m of matches as Array<{
-        id: string; status: string; date: string; time: string; extra_inn?: string;
-        home: { name: string; totalscore: string; hits: string; errors: string; in1: string; in2: string; in3: string; in4: string; in5: string; in6: string; in7: string; in8: string; in9: string; extra: string };
-        away: { name: string; totalscore: string; hits: string; errors: string; in1: string; in2: string; in3: string; in4: string; in5: string; in6: string; in7: string; in8: string; in9: string; extra: string };
-      }>) {
-        if (!m?.status || m.status !== "Finished") continue;
-        if (!m.home?.name || !m.away?.name) continue;
-        const inKeys = ["in1", "in2", "in3", "in4", "in5", "in6", "in7", "in8", "in9"] as const;
-        const innings: Array<[number | null, number | null]> = [];
-        for (const key of inKeys) {
-          const hStr = m.home[key]; const aStr = m.away[key];
-          // Both empty = inning not reached (home walk-off win)
-          if (hStr === "" && aStr === "") break;
-          const h = hStr === "" ? null : (parseInt(hStr) || 0);
-          const a = aStr === "" ? null : (parseInt(aStr) || 0);
-          innings.push([h, a]);
-        }
-        // Extra innings
-        const hasExtra = !!(m.home.extra && m.home.extra !== "") || !!(m.away.extra && m.away.extra !== "");
-        if (hasExtra) {
-          const h = m.home.extra && m.home.extra !== "" ? (parseInt(m.home.extra) || 0) : null;
-          const a = m.away.extra && m.away.extra !== "" ? (parseInt(m.away.extra) || 0) : null;
-          innings.push([h, a]);
-        }
-        const homeScore = parseInt(m.home.totalscore) || 0;
-        const awayScore = parseInt(m.away.totalscore) || 0;
-        results.push({
-          id: m.id, home: m.home.name, away: m.away.name,
-          homeScore, awayScore,
-          homeHits: parseInt(m.home.hits) || 0, awayHits: parseInt(m.away.hits) || 0,
-          homeErrors: parseInt(m.home.errors) || 0, awayErrors: parseInt(m.away.errors) || 0,
-          innings, hasExtra,
-          homeWon: homeScore > awayScore,
-          league: t.league, country: t.country ?? "",
-          date: m.date, time: m.time,
-        });
+    for (const raw of events) {
+      const ev = raw as Record<string, unknown>;
+      const st = (ev["status"] as Record<string, unknown> | undefined)?.["type"] ?? ev["status"];
+      if (typeof st === "string" && st !== "finished") continue;
+      const ts = ev["startTimestamp"] as number | undefined;
+      if (!ts) continue;
+      const { date, time } = v2EventDateTime({ startTimestamp: ts } as SAPIV2Event);
+      if (date !== ydStr) continue;
+      const hs = ev["homeScore"] as Record<string, unknown> | undefined;
+      const as_ = ev["awayScore"] as Record<string, unknown> | undefined;
+      const homeScore = Number(hs?.["current"] ?? 0);
+      const awayScore = Number(as_?.["current"] ?? 0);
+      const innings: Array<[number | null, number | null]> = [];
+      for (let inn = 1; inn <= 9; inn++) {
+        const key = `period${inn}`;
+        const hv = hs?.[key]; const av = as_?.[key];
+        if (hv == null && av == null) break;
+        innings.push([hv != null ? Number(hv) : null, av != null ? Number(av) : null]);
       }
+      const hOT = hs?.["overtime"]; const aOT = as_?.["overtime"];
+      const hasExtra = hOT != null || aOT != null;
+      if (hasExtra) innings.push([hOT != null ? Number(hOT) : null, aOT != null ? Number(aOT) : null]);
+      const homeTeam = ev["homeTeam"] as Record<string, unknown> | undefined;
+      const awayTeam = ev["awayTeam"] as Record<string, unknown> | undefined;
+      const home = String(homeTeam?.["name"] ?? "");
+      const away = String(awayTeam?.["name"] ?? "");
+      if (!home || !away) continue;
+      results.push({
+        id: String(ev["id"] ?? ""), home, away, homeScore, awayScore,
+        homeHits: 0, awayHits: 0, homeErrors: 0, awayErrors: 0,
+        innings, hasExtra,
+        homeWon: ev["winnerCode"] === 1, league: "MLB", country: "usa", date, time,
+      });
     }
     mlbResultsCache = results;
     mlbResultsFetchedAt = now;
@@ -6482,108 +6574,47 @@ async function getBasketballSchedule(): Promise<BasketballScheduleData> {
   const now = Date.now();
   if (basketballScheduleCache && now - basketballScheduleFetchedAt < BBALL_SCHEDULE_TTL) return basketballScheduleCache;
   try {
-    const resp = await fetch(`${SAPI_BASKETBALL}/nba/season-schedule`, { signal: AbortSignal.timeout(12000), headers: sapiHeaders() });
-    if (!resp.ok) return basketballScheduleCache ?? { league: "NBA", season: "", upcomingMatches: [], recentMatches: [] };
-    const data = (await resp.json()) as { scores?: { tournament?: { league?: string; season?: string; match: unknown } } };
-    const t = data?.scores?.tournament;
-    if (!t) return basketballScheduleCache ?? { league: "NBA", season: "", upcomingMatches: [], recentMatches: [] };
+    const [upcomingEvents, lastEvents] = await Promise.all([
+      getUpcomingEventsV2("basketball", 21),
+      getV2EventsLast("basketball", 60),
+    ]);
+    const cutoff14 = Date.now() - 14 * 86400000;
+    const dateKey = (s: string) => { const [d, mo, y] = s.split("."); return `${y ?? ""}${mo ?? ""}${d ?? ""}`; };
 
-    let league = t.league ?? "NBA";
-    const season = t.season ?? "";
-    const rawMatches = Array.isArray(t.match) ? t.match : (t.match ? [t.match] : []);
+    const upcomingMatches: BasketballScheduleMatch[] = upcomingEvents.slice(0, 40).map(ev => {
+      const home = v2TeamName(ev.homeTeam);
+      const away = v2TeamName(ev.awayTeam);
+      const { date, time } = v2EventDateTime(ev);
+      return { id: String(ev.id), date, time, status: "Not Started", home, away, homeScore: 0, awayScore: 0, quarters: [] };
+    });
 
-    const parseDateStr = (s: string): Date => {
-      const [d, m, y] = s.split(".");
-      return new Date(parseInt(y!), parseInt(m!) - 1, parseInt(d!));
-    };
-    const today = new Date(); today.setHours(0, 0, 0, 0);
-    const inDays = (d: Date, n: number) => { const t2 = new Date(today); t2.setDate(t2.getDate() + n); return d <= t2; };
-
-    const FINISHED = new Set(["Finished", "After Over Time", "After Overtime", "After OT", "Awarded", "Final"]);
-    const upcomingMatches: BasketballScheduleMatch[] = [];
     const recentMatches: BasketballScheduleMatch[] = [];
-
-    for (const m of rawMatches as Array<{
-      id: string; date: string; time: string; status: string; venue?: string;
-      home: { name: string; ot?: string; q1?: string; q2?: string; q3?: string; q4?: string; totalscore: string };
-      away: { name: string; ot?: string; q1?: string; q2?: string; q3?: string; q4?: string; totalscore: string };
-    }>) {
-      if (!m?.date || !m.home?.name || !m.away?.name) continue;
-      const matchDate = parseDateStr(m.date);
-      const homeScore = parseInt(m.home.totalscore) || 0;
-      const awayScore = parseInt(m.away.totalscore) || 0;
-
-      const qi = (h: string | undefined, a: string | undefined): [number, number] | null => {
-        const hv = parseInt(h ?? "") || 0; const av = parseInt(a ?? "") || 0;
-        return (hv > 0 || av > 0) ? [hv, av] : null;
-      };
+    for (const raw of lastEvents) {
+      const ev = raw as Record<string, unknown>;
+      const st = (ev["status"] as Record<string, unknown> | undefined)?.["type"] ?? "";
+      if (typeof st !== "string" || st !== "finished") continue;
+      const ts = ev["startTimestamp"] as number | undefined;
+      if (!ts || ts * 1000 < cutoff14) continue;
+      const hs = ev["homeScore"] as Record<string, unknown> | undefined;
+      const as_ = ev["awayScore"] as Record<string, unknown> | undefined;
+      const homeScore = Number(hs?.["current"] ?? 0);
+      const awayScore = Number(as_?.["current"] ?? 0);
       const quarters: Array<[number, number]> = [];
-      for (const [hf, af] of [
-        [m.home.q1, m.away.q1], [m.home.q2, m.away.q2],
-        [m.home.q3, m.away.q3], [m.home.q4, m.away.q4],
-        [m.home.ot, m.away.ot],
-      ] as [string | undefined, string | undefined][]) {
-        const q = qi(hf, af); if (q) quarters.push(q);
+      for (const p of ["period1", "period2", "period3", "period4", "overtime"]) {
+        const hv = hs?.[p]; const av = as_?.[p];
+        if (hv != null && av != null) quarters.push([Number(hv), Number(av)]);
       }
-
-      if (m.status === "Not Started" && matchDate >= today && inDays(matchDate, 21)) {
-        upcomingMatches.push({
-          id: m.id, date: m.date, time: m.time, status: m.status, venue: m.venue,
-          home: m.home.name, away: m.away.name, homeScore: 0, awayScore: 0, quarters: [],
-        });
-      } else if (FINISHED.has(m.status)) {
-        const daysAgo = (today.getTime() - matchDate.getTime()) / 86400000;
-        if (daysAgo <= 14 && daysAgo >= 0) {
-          recentMatches.push({
-            id: m.id, date: m.date, time: m.time, status: m.status, venue: m.venue,
-            home: m.home.name, away: m.away.name, homeScore, awayScore, quarters,
-            homeWon: homeScore > awayScore,
-          });
-        }
-      }
+      const homeTeam = ev["homeTeam"] as Record<string, unknown> | undefined;
+      const awayTeam = ev["awayTeam"] as Record<string, unknown> | undefined;
+      const home = String(homeTeam?.["name"] ?? homeTeam?.["shortName"] ?? "");
+      const away = String(awayTeam?.["name"] ?? awayTeam?.["shortName"] ?? "");
+      if (!home || !away) continue;
+      const { date, time } = v2EventDateTime({ startTimestamp: ts } as SAPIV2Event);
+      recentMatches.push({ id: String(ev["id"] ?? ""), date, time, status: "Finished", home, away, homeScore, awayScore, quarters, homeWon: ev["winnerCode"] === 1 });
     }
 
-    const dateKey = (s: string) => { const [d, mo, y] = s.split("."); return `${y}${mo}${d}`; };
-    upcomingMatches.sort((a, b) => dateKey(a.date).localeCompare(dateKey(b.date)) || a.time.localeCompare(b.time));
     recentMatches.sort((a, b) => dateKey(b.date).localeCompare(dateKey(a.date)));
-
-    // Fallback: if season-schedule is empty (e.g. playoffs), pull from livescores
-    if (upcomingMatches.length === 0) {
-      try {
-        const lr = await fetch(`${SAPI_BASKETBALL}/nba/livescores`, { signal: AbortSignal.timeout(9000), headers: sapiHeaders() });
-        if (lr.ok) {
-          const ld = (await lr.json()) as { livescores?: { tournament?: { league?: string; match?: unknown } } };
-          const lt = ld?.livescores?.tournament;
-          if (lt) {
-            if ((lt as { league?: string }).league) league = (lt as { league?: string }).league!;
-            const lm = (lt as { match?: unknown }).match;
-            const lms = Array.isArray(lm) ? lm : (lm ? [lm] : []);
-            const seenIds = new Set(upcomingMatches.map(x => x.id).concat(recentMatches.map(x => x.id)));
-            for (const m of lms as Array<{ id: string; date: string; time: string; status: string; home: { name: string; q1?: string; q2?: string; q3?: string; q4?: string; ot?: string; totalscore: string }; away: { name: string; q1?: string; q2?: string; q3?: string; q4?: string; ot?: string; totalscore: string } }>) {
-              if (!m?.id || !m.date || !m.home?.name || seenIds.has(m.id)) continue;
-              seenIds.add(m.id);
-              const matchDate = parseDateStr(m.date);
-              if (m.status === "Not Started" && matchDate >= today && inDays(matchDate, 21)) {
-                upcomingMatches.push({ id: m.id, date: m.date, time: m.time, status: m.status, home: m.home.name, away: m.away.name, homeScore: 0, awayScore: 0, quarters: [] });
-              } else if (FINISHED.has(m.status)) {
-                const daysAgo = (today.getTime() - matchDate.getTime()) / 86400000;
-                if (daysAgo <= 14 && daysAgo >= 0) {
-                  const hs = parseInt(m.home.totalscore) || 0; const as_ = parseInt(m.away.totalscore) || 0;
-                  const qi = (h: string | undefined, a: string | undefined): [number, number] | null => { const hv = parseInt(h ?? "") || 0; const av = parseInt(a ?? "") || 0; return (hv > 0 || av > 0) ? [hv, av] : null; };
-                  const qs: Array<[number, number]> = [];
-                  for (const [hf, af] of [[m.home.q1, m.away.q1],[m.home.q2, m.away.q2],[m.home.q3, m.away.q3],[m.home.q4, m.away.q4],[m.home.ot, m.away.ot]] as [string|undefined,string|undefined][]) { const q = qi(hf,af); if(q) qs.push(q); }
-                  recentMatches.push({ id: m.id, date: m.date, time: m.time, status: m.status, home: m.home.name, away: m.away.name, homeScore: hs, awayScore: as_, quarters: qs, homeWon: hs > as_ });
-                }
-              }
-            }
-            upcomingMatches.sort((a, b) => dateKey(a.date).localeCompare(dateKey(b.date)) || a.time.localeCompare(b.time));
-            recentMatches.sort((a, b) => dateKey(b.date).localeCompare(dateKey(a.date)));
-          }
-        }
-      } catch { /* non-critical */ }
-    }
-
-    basketballScheduleCache = { league, season, upcomingMatches: upcomingMatches.slice(0, 40), recentMatches: recentMatches.slice(0, 15) };
+    basketballScheduleCache = { league: "NBA", season: "2025-26", upcomingMatches, recentMatches: recentMatches.slice(0, 15) };
     basketballScheduleFetchedAt = now;
     return basketballScheduleCache;
   } catch {
@@ -6595,46 +6626,33 @@ async function getBasketballDailyResults(): Promise<BasketballDailyResult[]> {
   const now = Date.now();
   if (basketballResultsCache && now - basketballResultsFetchedAt < RESULTS_CACHE_TTL) return basketballResultsCache;
   try {
-    const resp = await fetch(`${SAPI_BASKETBALL}/nba/daily/d-1`, { signal: AbortSignal.timeout(9000), headers: sapiHeaders() });
-    if (!resp.ok) return basketballResultsCache ?? [];
-    const data = (await resp.json()) as { scores?: { tournament?: unknown } };
-    const raw = data?.scores?.tournament;
-    if (!raw) return basketballResultsCache ?? [];
-    const arr = Array.isArray(raw) ? raw : [raw];
+    const events = await getV2EventsLast("basketball", 20);
+    const yd = new Date(Date.now() - 86400000);
+    const ydStr = `${String(yd.getUTCDate()).padStart(2, "0")}.${String(yd.getUTCMonth() + 1).padStart(2, "0")}.${yd.getUTCFullYear()}`;
     const results: BasketballDailyResult[] = [];
-    for (const t of arr as Array<{ id: string; league: string; country: string; match: unknown }>) {
-      const matches = Array.isArray(t.match) ? t.match : (t.match ? [t.match] : []);
-      for (const m of matches as Array<{
-        id: string; status: string; date: string; time: string;
-        home: { id: string; name: string; ot?: string; q1?: string; q2?: string; q3?: string; q4?: string; totalscore: string };
-        away: { id: string; name: string; ot?: string; q1?: string; q2?: string; q3?: string; q4?: string; totalscore: string };
-      }>) {
-        if (!m?.status || m.status !== "Finished") continue;
-        if (!m.home?.name || !m.away?.name) continue;
-        const qi = (h: string | undefined, a: string | undefined): [number, number] | null => {
-          const hv = parseInt(h ?? "") || 0; const av = parseInt(a ?? "") || 0;
-          return (hv > 0 || av > 0) ? [hv, av] : null;
-        };
-        const quarters: Array<[number, number]> = [];
-        for (const [hf, af] of [
-          [m.home.q1, m.away.q1], [m.home.q2, m.away.q2],
-          [m.home.q3, m.away.q3], [m.home.q4, m.away.q4],
-          [m.home.ot, m.away.ot],
-        ] as [string | undefined, string | undefined][]) {
-          const q = qi(hf, af);
-          if (q) quarters.push(q);
-        }
-        const homeScore = parseInt(m.home.totalscore) || 0;
-        const awayScore = parseInt(m.away.totalscore) || 0;
-        const leagueName = t.league.includes("Nba") || t.league.includes("NBA") ? "NBA" : t.league;
-        results.push({
-          id: m.id, home: m.home.name, away: m.away.name,
-          homeScore, awayScore, quarters,
-          homeWon: homeScore > awayScore,
-          league: leagueName, country: t.country ?? "",
-          date: m.date, time: m.time,
-        });
+    for (const raw of events) {
+      const ev = raw as Record<string, unknown>;
+      const st = (ev["status"] as Record<string, unknown> | undefined)?.["type"] ?? ev["status"];
+      if (typeof st === "string" && st !== "finished") continue;
+      const ts = ev["startTimestamp"] as number | undefined;
+      if (!ts) continue;
+      const { date, time } = v2EventDateTime({ startTimestamp: ts } as SAPIV2Event);
+      if (date !== ydStr) continue;
+      const hs = ev["homeScore"] as Record<string, unknown> | undefined;
+      const as_ = ev["awayScore"] as Record<string, unknown> | undefined;
+      const homeScore = Number(hs?.["current"] ?? 0);
+      const awayScore = Number(as_?.["current"] ?? 0);
+      const quarters: Array<[number, number]> = [];
+      for (const p of ["period1", "period2", "period3", "period4", "overtime"]) {
+        const hv = hs?.[p]; const av = as_?.[p];
+        if (hv != null && av != null) quarters.push([Number(hv), Number(av)]);
       }
+      const homeTeam = ev["homeTeam"] as Record<string, unknown> | undefined;
+      const awayTeam = ev["awayTeam"] as Record<string, unknown> | undefined;
+      const home = String(homeTeam?.["name"] ?? homeTeam?.["shortName"] ?? "");
+      const away = String(awayTeam?.["name"] ?? awayTeam?.["shortName"] ?? "");
+      if (!home || !away) continue;
+      results.push({ id: String(ev["id"] ?? ""), home, away, homeScore, awayScore, quarters, homeWon: ev["winnerCode"] === 1, league: "NBA", country: "usa", date, time });
     }
     basketballResultsCache = results;
     basketballResultsFetchedAt = now;
@@ -6648,141 +6666,47 @@ async function getHockeySchedule(): Promise<HockeyScheduleData> {
   const now = Date.now();
   if (hockeyScheduleCache && now - hockeyScheduleFetchedAt < HOCKEY_SCHEDULE_TTL) return hockeyScheduleCache;
   try {
-    const resp = await fetch(`${SAPI_HOCKEY}/nhl/season-schedule`, { signal: AbortSignal.timeout(12000), headers: sapiHeaders() });
-    if (!resp.ok) return hockeyScheduleCache ?? { league: "NHL", season: "", upcomingMatches: [], recentMatches: [] };
-    const data = (await resp.json()) as { scores?: { tournament?: { league?: string; season?: string; match: unknown } } };
-    const t = data?.scores?.tournament;
-    if (!t) return hockeyScheduleCache ?? { league: "NHL", season: "", upcomingMatches: [], recentMatches: [] };
+    const [upcomingEvents, lastEvents] = await Promise.all([
+      getUpcomingEventsV2("hockey", 21),
+      getV2EventsLast("hockey", 60),
+    ]);
+    const cutoff14 = Date.now() - 14 * 86400000;
+    const dateKey = (s: string) => { const [d, mo, y] = s.split("."); return `${y ?? ""}${mo ?? ""}${d ?? ""}`; };
 
-    let league = t.league ?? "NHL";
-    const season = t.season ?? "";
-    const rawMatches = Array.isArray(t.match) ? t.match : (t.match ? [t.match] : []);
+    const upcomingMatches: HockeyScheduleMatch[] = upcomingEvents.slice(0, 40).map(ev => {
+      const home = v2TeamName(ev.homeTeam);
+      const away = v2TeamName(ev.awayTeam);
+      const { date, time } = v2EventDateTime(ev);
+      return { id: String(ev.id), date, time, status: "Not Started", home, away, homeScore: 0, awayScore: 0, periods: [] };
+    });
 
-    // Date helpers: "DD.MM.YYYY" → Date
-    const parseDateStr = (s: string): Date => {
-      const [d, m, y] = s.split(".");
-      return new Date(parseInt(y!), parseInt(m!) - 1, parseInt(d!));
-    };
-    const today = new Date(); today.setHours(0, 0, 0, 0);
-    const inDays = (d: Date, n: number) => { const t = new Date(today); t.setDate(t.getDate() + n); return d <= t; };
-
-    const parseScore = (s: string | undefined): [number, number] | null => {
-      if (!s || s.trim() === "") return null;
-      const parts = s.split("-").map(p => parseInt(p.trim()));
-      if (parts.length < 2 || isNaN(parts[0]!) || isNaN(parts[1]!)) return null;
-      return [parts[0]!, parts[1]!];
-    };
-
-    const parseTeamStats = (raw: Record<string, unknown> | undefined | null): NHLTeamStats | null => {
-      if (!raw) return null;
-      const shots = raw["shots"] as Record<string, string> | undefined;
-      const saves = raw["saves"] as Record<string, string> | undefined;
-      const goals = raw["goals"] as Record<string, string> | undefined;
-      const faceoffs = raw["faceoffs"] as Record<string, string> | undefined;
-      const penalties = raw["penalties"] as Record<string, string> | undefined;
-      return {
-        shotsOnGoal: parseInt(shots?.["ongoal"] ?? "0") || 0,
-        savesPct: parseInt(saves?.["saves_pct"] ?? "0") || 0,
-        ppGoals: parseInt(goals?.["pp_goals"] ?? "0") || 0,
-        ppPct: parseInt(goals?.["pp_pct"] ?? "0") || 0,
-        penKillPct: parseInt(goals?.["pen_kill_pct"] ?? "0") || 0,
-        faceoffPct: parseInt(faceoffs?.["pct"] ?? "0") || 0,
-        penaltyMinutes: parseInt(penalties?.["minutes"] ?? "0") || 0,
-      };
-    };
-
-    const FINISHED = new Set(["Finished", "After Penalties", "After Overtime", "Awarded"]);
-    const upcomingMatches: HockeyScheduleMatch[] = [];
     const recentMatches: HockeyScheduleMatch[] = [];
-
-    for (const m of rawMatches as Array<{
-      id: string; date: string; time: string; status: string; venue?: string;
-      home: { name: string; totalscore: string };
-      away: { name: string; totalscore: string };
-      events?: {
-        firstperiod?:  { score?: string };
-        secondperiod?: { score?: string };
-        thirdperiod?:  { score?: string };
-        overtime?:     { score?: string };
-        penalties?:    { score?: string };
-      };
-      team_stats?: { home?: unknown; away?: unknown };
-    }>) {
-      if (!m?.date || !m.home?.name || !m.away?.name) continue;
-      const matchDate = parseDateStr(m.date);
-      const homeScore = parseInt(m.home.totalscore) || 0;
-      const awayScore = parseInt(m.away.totalscore) || 0;
+    for (const raw of lastEvents) {
+      const ev = raw as Record<string, unknown>;
+      const st = (ev["status"] as Record<string, unknown> | undefined)?.["type"] ?? "";
+      if (typeof st !== "string" || st !== "finished") continue;
+      const ts = ev["startTimestamp"] as number | undefined;
+      if (!ts || ts * 1000 < cutoff14) continue;
+      const hs = ev["homeScore"] as Record<string, unknown> | undefined;
+      const as_ = ev["awayScore"] as Record<string, unknown> | undefined;
+      const homeScore = Number(hs?.["current"] ?? 0);
+      const awayScore = Number(as_?.["current"] ?? 0);
       const periods: Array<[number, number]> = [];
-      for (const key of ["firstperiod", "secondperiod", "thirdperiod", "overtime", "penalties"] as const) {
-        const p = parseScore(m.events?.[key]?.score);
-        if (p) periods.push(p);
+      for (const p of ["period1", "period2", "period3", "overtime", "shootout"]) {
+        const hv = hs?.[p]; const av = as_?.[p];
+        if (hv != null && av != null) periods.push([Number(hv), Number(av)]);
       }
-
-      if (m.status === "Not Started" && matchDate >= today && inDays(matchDate, 21)) {
-        upcomingMatches.push({
-          id: m.id, date: m.date, time: m.time, status: m.status, venue: m.venue,
-          home: m.home.name, away: m.away.name, homeScore: 0, awayScore: 0, periods: [],
-        });
-      } else if (FINISHED.has(m.status)) {
-        const daysAgo = (today.getTime() - matchDate.getTime()) / 86400000;
-        if (daysAgo <= 14 && daysAgo >= 0) {
-          const homeStats = parseTeamStats(m.team_stats?.home as Record<string, unknown> | null);
-          const awayStats = parseTeamStats(m.team_stats?.away as Record<string, unknown> | null);
-          recentMatches.push({
-            id: m.id, date: m.date, time: m.time, status: m.status, venue: m.venue,
-            home: m.home.name, away: m.away.name, homeScore, awayScore, periods,
-            homeWon: homeScore > awayScore,
-            ...(homeStats && awayStats ? { teamStats: { home: homeStats, away: awayStats } } : {}),
-          });
-        }
-      }
+      const homeTeam = ev["homeTeam"] as Record<string, unknown> | undefined;
+      const awayTeam = ev["awayTeam"] as Record<string, unknown> | undefined;
+      const home = String(homeTeam?.["name"] ?? homeTeam?.["shortName"] ?? "");
+      const away = String(awayTeam?.["name"] ?? awayTeam?.["shortName"] ?? "");
+      if (!home || !away) continue;
+      const { date, time } = v2EventDateTime({ startTimestamp: ts } as SAPIV2Event);
+      recentMatches.push({ id: String(ev["id"] ?? ""), date, time, status: "Finished", home, away, homeScore, awayScore, periods, homeWon: ev["winnerCode"] === 1 });
     }
 
-    // Sort upcoming by date asc, recent by date desc
-    const dateKey = (s: string) => { const [d, mo, y] = s.split("."); return `${y}${mo}${d}`; };
-    upcomingMatches.sort((a, b) => dateKey(a.date).localeCompare(dateKey(b.date)) || a.time.localeCompare(b.time));
     recentMatches.sort((a, b) => dateKey(b.date).localeCompare(dateKey(a.date)));
-
-    // Fallback: if season-schedule is empty (e.g. playoffs), pull from livescores
-    if (upcomingMatches.length === 0) {
-      try {
-        const lr = await fetch(`${SAPI_HOCKEY}/nhl/livescores`, { signal: AbortSignal.timeout(9000), headers: sapiHeaders() });
-        if (lr.ok) {
-          const ld = (await lr.json()) as { livescores?: { tournament?: { league?: string; match?: unknown } } };
-          const lt = ld?.livescores?.tournament;
-          if (lt) {
-            if ((lt as { league?: string }).league) league = (lt as { league?: string }).league!;
-            const lm = (lt as { match?: unknown }).match;
-            const lms = Array.isArray(lm) ? lm : (lm ? [lm] : []);
-            const seenIds = new Set(upcomingMatches.map(x => x.id).concat(recentMatches.map(x => x.id)));
-            const LIVE_FIN = new Set(["Finished", "After Penalties", "After Overtime"]);
-            for (const m of lms as Array<{ id: string; fix_id?: string; date: string; time: string; status: string; home: { name: string; totalscore: string }; away: { name: string; totalscore: string }; events?: { firstperiod?: { score?: string }; secondperiod?: { score?: string }; thirdperiod?: { score?: string }; overtime?: { score?: string }; penalties?: { score?: string } } }>) {
-              if (!m?.id || !m.date || !m.home?.name || seenIds.has(m.id)) continue;
-              seenIds.add(m.id);
-              const matchDate = parseDateStr(m.date);
-              if (m.status === "Not Started" && matchDate >= today && inDays(matchDate, 21)) {
-                upcomingMatches.push({ id: m.id, date: m.date, time: m.time, status: m.status, home: m.home.name, away: m.away.name, homeScore: 0, awayScore: 0, periods: [] });
-              } else if (LIVE_FIN.has(m.status)) {
-                const daysAgo = (today.getTime() - matchDate.getTime()) / 86400000;
-                if (daysAgo <= 14 && daysAgo >= 0) {
-                  const hs = parseInt(m.home.totalscore) || 0; const as_ = parseInt(m.away.totalscore) || 0;
-                  const periods: Array<[number, number]> = [];
-                  for (const key of ["firstperiod", "secondperiod", "thirdperiod", "overtime", "penalties"] as const) {
-                    const sc = m.events?.[key]?.score; if (!sc) continue;
-                    const ps = sc.split("-").map((p: string) => parseInt(p.trim())); if (ps.length >= 2 && !isNaN(ps[0]!) && !isNaN(ps[1]!)) periods.push([ps[0]!, ps[1]!]);
-                  }
-                  recentMatches.push({ id: m.id, date: m.date, time: m.time, status: m.status, home: m.home.name, away: m.away.name, homeScore: hs, awayScore: as_, periods, homeWon: hs > as_ });
-                }
-              }
-            }
-            upcomingMatches.sort((a, b) => dateKey(a.date).localeCompare(dateKey(b.date)) || a.time.localeCompare(b.time));
-            recentMatches.sort((a, b) => dateKey(b.date).localeCompare(dateKey(a.date)));
-          }
-        }
-      } catch { /* non-critical */ }
-    }
-
-    hockeyScheduleCache = { league, season, upcomingMatches: upcomingMatches.slice(0, 30), recentMatches: recentMatches.slice(0, 15) };
+    hockeyScheduleCache = { league: "NHL", season: "2025-26", upcomingMatches, recentMatches: recentMatches.slice(0, 15) };
     hockeyScheduleFetchedAt = now;
     return hockeyScheduleCache;
   } catch {
@@ -6795,84 +6719,42 @@ async function getMLBSchedule(): Promise<MLBScheduleData> {
   if (mlbScheduleCache && now - mlbScheduleFetchedAt < MLB_SCHEDULE_TTL) return mlbScheduleCache;
   const empty: MLBScheduleData = { league: "MLB", season: "", upcomingMatches: [], recentMatches: [] };
   try {
-    const resp = await fetch(`${SAPI_BASEBALL}/mlb/season-schedule`, { signal: AbortSignal.timeout(12000), headers: sapiHeaders() });
-    if (!resp.ok) return mlbScheduleCache ?? empty;
-    const data = (await resp.json()) as { scores?: { tournament?: { league?: string; season?: string; match: unknown } } };
-    const t = data?.scores?.tournament;
-    if (!t) return mlbScheduleCache ?? empty;
+    const [upcomingEvents, lastEvents] = await Promise.all([
+      getUpcomingEventsV2("baseball", 21),
+      getV2EventsLast("baseball", 60),
+    ]);
+    const cutoff14 = Date.now() - 14 * 86400000;
+    const dateKey = (s: string) => { const [d, mo, y] = s.split("."); return `${y ?? ""}${mo ?? ""}${d ?? ""}`; };
 
-    const league = t.league ?? "MLB";
-    const season = t.season ?? "";
-    const rawMatches = Array.isArray(t.match) ? t.match : (t.match ? [t.match] : []);
+    const upcomingMatches: MLBScheduleMatch[] = upcomingEvents.slice(0, 50).map(ev => {
+      const home = v2TeamName(ev.homeTeam);
+      const away = v2TeamName(ev.awayTeam);
+      const { date, time } = v2EventDateTime(ev);
+      return { id: String(ev.id), date, time, status: "Not Started", home, away, homeScore: 0, awayScore: 0 };
+    });
 
-    const parseDateStr = (s: string): Date => {
-      const [d, m, y] = s.split(".");
-      return new Date(parseInt(y!), parseInt(m!) - 1, parseInt(d!));
-    };
-    const today = new Date(); today.setHours(0, 0, 0, 0);
-    const dateKey = (s: string) => { const [d, mo, y] = s.split("."); return `${y}${mo}${d}`; };
-
-    const UPCOMING = new Set(["Scheduled", "Not Started"]);
-    const FINISHED  = new Set(["Finished"]);
-    const upcomingMatches: MLBScheduleMatch[] = [];
-    const recentMatches:   MLBScheduleMatch[] = [];
-
-    for (const m of rawMatches as Array<{
-      id: string; date: string; time: string; status: string; venue?: string;
-      home: { name: string; totalscore: string };
-      away: { name: string; totalscore: string };
-    }>) {
-      if (!m?.date || !m.home?.name || !m.away?.name) continue;
-      const matchDate = parseDateStr(m.date);
-      const homeScore = parseInt(m.home.totalscore) || 0;
-      const awayScore = parseInt(m.away.totalscore) || 0;
-
-      if (UPCOMING.has(m.status)) {
-        const daysAhead = (matchDate.getTime() - today.getTime()) / 86400000;
-        if (matchDate >= today && daysAhead <= 21) {
-          upcomingMatches.push({
-            id: m.id, date: m.date, time: m.time, status: m.status, venue: m.venue,
-            home: m.home.name, away: m.away.name, homeScore: 0, awayScore: 0,
-          });
-        }
-      } else if (FINISHED.has(m.status)) {
-        const daysAgo = (today.getTime() - matchDate.getTime()) / 86400000;
-        if (daysAgo >= 0 && daysAgo <= 14) {
-          recentMatches.push({
-            id: m.id, date: m.date, time: m.time, status: m.status, venue: m.venue,
-            home: m.home.name, away: m.away.name, homeScore, awayScore,
-            homeWon: homeScore > awayScore,
-          });
-        }
-      }
+    const recentMatches: MLBScheduleMatch[] = [];
+    for (const raw of lastEvents) {
+      const ev = raw as Record<string, unknown>;
+      const st = (ev["status"] as Record<string, unknown> | undefined)?.["type"] ?? "";
+      if (typeof st !== "string" || st !== "finished") continue;
+      const ts = ev["startTimestamp"] as number | undefined;
+      if (!ts || ts * 1000 < cutoff14) continue;
+      const hs = ev["homeScore"] as Record<string, unknown> | undefined;
+      const as_ = ev["awayScore"] as Record<string, unknown> | undefined;
+      const homeScore = Number(hs?.["current"] ?? 0);
+      const awayScore = Number(as_?.["current"] ?? 0);
+      const homeTeam = ev["homeTeam"] as Record<string, unknown> | undefined;
+      const awayTeam = ev["awayTeam"] as Record<string, unknown> | undefined;
+      const home = String(homeTeam?.["name"] ?? homeTeam?.["shortName"] ?? "");
+      const away = String(awayTeam?.["name"] ?? awayTeam?.["shortName"] ?? "");
+      if (!home || !away) continue;
+      const { date, time } = v2EventDateTime({ startTimestamp: ts } as SAPIV2Event);
+      recentMatches.push({ id: String(ev["id"] ?? ""), date, time, status: "Finished", home, away, homeScore, awayScore, homeWon: ev["winnerCode"] === 1 });
     }
 
-    upcomingMatches.sort((a, b) => dateKey(a.date).localeCompare(dateKey(b.date)) || a.time.localeCompare(b.time));
     recentMatches.sort((a, b) => dateKey(b.date).localeCompare(dateKey(a.date)));
-
-    // Fallback to livescores if season-schedule is empty
-    if (upcomingMatches.length === 0) {
-      try {
-        const lr = await fetch(`${SAPI_BASEBALL}/mlb/livescores`, { signal: AbortSignal.timeout(9000), headers: sapiHeaders() });
-        if (lr.ok) {
-          const ld = (await lr.json()) as { livescores?: { tournament?: { match?: unknown } } };
-          const lms = ld?.livescores?.tournament?.match;
-          const arr = Array.isArray(lms) ? lms : (lms ? [lms] : []);
-          const seenIds = new Set(upcomingMatches.map(x => x.id));
-          for (const m of arr as Array<{ id: string; date: string; time: string; status: string; home: { name: string; totalscore: string }; away: { name: string; totalscore: string } }>) {
-            if (!m?.id || !m.date || !m.home?.name || seenIds.has(m.id)) continue;
-            seenIds.add(m.id);
-            const matchDate = parseDateStr(m.date);
-            if (UPCOMING.has(m.status) && matchDate >= today) {
-              upcomingMatches.push({ id: m.id, date: m.date, time: m.time, status: m.status, home: m.home.name, away: m.away.name, homeScore: 0, awayScore: 0 });
-            }
-          }
-          upcomingMatches.sort((a, b) => dateKey(a.date).localeCompare(dateKey(b.date)) || a.time.localeCompare(b.time));
-        }
-      } catch { /* non-critical */ }
-    }
-
-    mlbScheduleCache = { league, season, upcomingMatches: upcomingMatches.slice(0, 50), recentMatches: recentMatches.slice(0, 20) };
+    mlbScheduleCache = { league: "MLB", season: "2025", upcomingMatches, recentMatches: recentMatches.slice(0, 20) };
     mlbScheduleFetchedAt = now;
     return mlbScheduleCache;
   } catch {
@@ -7113,61 +6995,27 @@ async function getHockeyStandings(): Promise<NHLStandingsData> {
   const now = Date.now();
   if (hockeyStandingsCache && now - hockeyStandingsFetchedAt < HOCKEY_STANDINGS_TTL) return hockeyStandingsCache;
   try {
-    const resp = await fetch(`${SAPI_HOCKEY}/nhl/standings`, { headers: sapiHeaders() });
-    if (!resp.ok) return hockeyStandingsCache ?? { season: "", conferences: [] };
-    const json = (await resp.json()) as {
-      standings?: {
-        tournament?: {
-          season?: string;
-          league?: Array<{
-            name: string;
-            division?: Array<{
-              name: string;
-              team?: Array<{
-                id: string; name: string; position: string;
-                games_played: string; won: string; lost: string; ot_losses: string;
-                points: string; goals_for: string; goals_against: string;
-                difference: string; streak: string; last_ten: string;
-                home_record: string; road_record: string;
-              }>;
-            }>;
-          }>;
-        };
-      };
-    };
-    const t = json.standings?.tournament;
-    if (!t) return hockeyStandingsCache ?? { season: "", conferences: [] };
-    const season = t.season ?? "";
-    const leagues = Array.isArray(t.league) ? t.league : t.league ? [t.league] : [];
-    const conferences: NHLStandingsConference[] = leagues.map(conf => {
-      const divs = Array.isArray(conf.division) ? conf.division : conf.division ? [conf.division] : [];
-      const divisions: NHLStandingsDivision[] = divs.map(div => {
-        const teams = Array.isArray(div.team) ? div.team : div.team ? [div.team] : [];
-        return {
-          name: div.name,
-          teams: teams.map(t2 => ({
-            id: t2.id,
-            name: t2.name,
-            abbr: NHL_ABBR[t2.name] ?? t2.name.toLowerCase().replace(/\s+/g, "").slice(0, 3),
-            position: parseInt(t2.position) || 0,
-            gp: parseInt(t2.games_played) || 0,
-            won: parseInt(t2.won) || 0,
-            lost: parseInt(t2.lost) || 0,
-            otLosses: parseInt(t2.ot_losses) || 0,
-            points: parseInt(t2.points) || 0,
-            gf: parseInt(t2.goals_for) || 0,
-            ga: parseInt(t2.goals_against) || 0,
-            diff: t2.difference ?? "0",
-            streak: t2.streak ?? "",
-            lastTen: t2.last_ten ?? "",
-            homeRecord: t2.home_record ?? "",
-            roadRecord: t2.road_record ?? "",
-          })).sort((a, b) => a.position - b.position),
-        };
-      });
-      return { name: conf.name, divisions };
-    });
-    hockeyStandingsCache = { season, conferences };
+    const rows = await getV2StandingRows("hockey");
+    if (!rows.length) return hockeyStandingsCache ?? { season: "", conferences: [] };
+    const teams: NHLStandingsTeam[] = rows.map(row => ({
+      id: String(row.team.id),
+      name: row.team.name,
+      abbr: NHL_ABBR[row.team.name] ?? row.team.nameCode?.toLowerCase() ?? row.team.name.slice(0, 3).toLowerCase(),
+      position: row.position,
+      gp: row.matches,
+      won: row.wins,
+      lost: row.normaltimeLosses ?? row.losses,
+      otLosses: row.overtimeLosses ?? 0,
+      points: row.points ?? (row.wins * 2),
+      gf: row.scoresFor ?? 0,
+      ga: row.scoresAgainst ?? 0,
+      diff: row.scoreDiffFormatted ?? "0",
+      streak: typeof row.streak === "number" ? String(row.streak) : (row.streak as string | undefined ?? ""),
+      lastTen: "",
+      homeRecord: "",
+      roadRecord: "",
+    })).sort((a, b) => a.position - b.position);
+    hockeyStandingsCache = { season: "2025-26", conferences: [{ name: "NHL", divisions: [{ name: "Classificação", teams }] }] };
     hockeyStandingsFetchedAt = now;
     return hockeyStandingsCache;
   } catch {
@@ -7180,54 +7028,23 @@ async function getMLBStandings(): Promise<MLBStandingsData> {
   if (mlbStandingsCache && now - mlbStandingsFetchedAt < MLB_STANDINGS_TTL) return mlbStandingsCache;
   const empty: MLBStandingsData = { season: "", leagues: [] };
   try {
-    const resp = await fetch(`${SAPI_BASEBALL}/mlb/standings`, { signal: AbortSignal.timeout(9000), headers: sapiHeaders() });
-    if (!resp.ok) return mlbStandingsCache ?? empty;
-    const json = (await resp.json()) as {
-      standings?: {
-        category?: {
-          season?: string;
-          league?: Array<{
-            name: string;
-            division?: Array<{
-              name: string;
-              team?: Array<{
-                id: string; name: string; position: string;
-                won: string; lost: string; games_back: string;
-                current_streak: string; home_record: string; away_record: string;
-                runs_scored: string; runs_allowed: string; runs_diff: string;
-              }>;
-            }>;
-          }>;
-        };
-      };
-    };
-    const cat = json.standings?.category;
-    if (!cat) return mlbStandingsCache ?? empty;
-    const season = cat.season ?? "";
-    const rawLeagues = Array.isArray(cat.league) ? cat.league : cat.league ? [cat.league] : [];
-    const leagues: MLBStandingsLeague[] = rawLeagues.map(lg => {
-      const rawDivs = Array.isArray(lg.division) ? lg.division : lg.division ? [lg.division] : [];
-      const divisions: MLBStandingsDivision[] = rawDivs.map(div => {
-        const rawTeams = Array.isArray(div.team) ? div.team : div.team ? [div.team] : [];
-        return {
-          name: div.name,
-          teams: rawTeams.map(t => ({
-            id: t.id, name: t.name,
-            position: parseInt(t.position) || 0,
-            won: parseInt(t.won) || 0, lost: parseInt(t.lost) || 0,
-            gamesBack: t.games_back ?? "-",
-            streak: t.current_streak ?? "",
-            homeRecord: t.home_record ?? "",
-            awayRecord: t.away_record ?? "",
-            runsScored: parseInt(t.runs_scored) || 0,
-            runsAllowed: parseInt(t.runs_allowed) || 0,
-            runsDiff: t.runs_diff ?? "0",
-          })).sort((a, b) => a.position - b.position),
-        };
-      });
-      return { name: lg.name, divisions };
-    });
-    mlbStandingsCache = { season, leagues };
+    const rows = await getV2StandingRows("baseball");
+    if (!rows.length) return mlbStandingsCache ?? empty;
+    const teams: MLBStandingsTeam[] = rows.map(row => ({
+      id: String(row.team.id),
+      name: row.team.name,
+      position: row.position,
+      won: row.wins,
+      lost: row.losses,
+      gamesBack: row.gamesBehind != null ? String(row.gamesBehind) : "-",
+      streak: typeof row.streak === "number" ? String(row.streak) : (row.streak as string | undefined ?? ""),
+      homeRecord: "",
+      awayRecord: "",
+      runsScored: row.scoresFor ?? 0,
+      runsAllowed: row.scoresAgainst ?? 0,
+      runsDiff: row.scoreDiffFormatted ?? "0",
+    })).sort((a, b) => a.position - b.position);
+    mlbStandingsCache = { season: "2025", leagues: [{ name: "MLB", divisions: [{ name: "Classificação", teams }] }] };
     mlbStandingsFetchedAt = now;
     return mlbStandingsCache;
   } catch {
@@ -7543,61 +7360,26 @@ async function getNBAStandings(): Promise<NBAStandingsData> {
   const now = Date.now();
   if (nbaStandingsCache && now - nbaStandingsFetchedAt < NBA_STANDINGS_TTL) return nbaStandingsCache;
   try {
-    const resp = await fetch(`${SAPI_BASKETBALL}/nba/standings`, { headers: sapiHeaders() });
-    if (!resp.ok) return nbaStandingsCache ?? { season: "", conferences: [] };
-    const json = (await resp.json()) as {
-      standings?: {
-        tournament?: {
-          season?: string;
-          league?: Array<{
-            name: string;
-            division?: Array<{
-              name: string;
-              team?: Array<{
-                id: string; name: string; position: string;
-                won: string; lost: string; percentage: string; gb: string;
-                streak: string; last_10: string;
-                home_record: string; road_record: string;
-                average_points_for: string; average_points_agains: string;
-                difference: string;
-              }>;
-            }>;
-          }>;
-        };
-      };
-    };
-    const t = json.standings?.tournament;
-    if (!t) return nbaStandingsCache ?? { season: "", conferences: [] };
-    const season = t.season ?? "";
-    const leagues = Array.isArray(t.league) ? t.league : t.league ? [t.league] : [];
-    const conferences: NBAStandingsConference[] = leagues.map(conf => {
-      const divs = Array.isArray(conf.division) ? conf.division : conf.division ? [conf.division] : [];
-      const divisions: NBAStandingsDivision[] = divs.map(div => {
-        const teams = Array.isArray(div.team) ? div.team : div.team ? [div.team] : [];
-        return {
-          name: div.name,
-          teams: teams.map(t2 => ({
-            id: t2.id,
-            name: t2.name,
-            abbr: NBA_ABBR[t2.name] ?? t2.name.toLowerCase().replace(/\s+/g, "").slice(0, 3),
-            position: parseInt(t2.position) || 0,
-            won: parseInt(t2.won) || 0,
-            lost: parseInt(t2.lost) || 0,
-            pct: t2.percentage ?? ".000",
-            gb: t2.gb ?? "-",
-            streak: t2.streak ?? "",
-            lastTen: t2.last_10 ?? "",
-            homeRecord: t2.home_record ?? "",
-            roadRecord: t2.road_record ?? "",
-            ppg: parseFloat(t2.average_points_for || "0").toFixed(1),
-            papg: parseFloat(t2.average_points_agains || "0").toFixed(1),
-            diff: t2.difference ?? "0",
-          })).sort((a, b) => a.position - b.position),
-        };
-      });
-      return { name: conf.name, divisions };
-    });
-    nbaStandingsCache = { season, conferences };
+    const rows = await getV2StandingRows("basketball");
+    if (!rows.length) return nbaStandingsCache ?? { season: "", conferences: [] };
+    const teams: NBAStandingsTeam[] = rows.map(row => ({
+      id: String(row.team.id),
+      name: row.team.name,
+      abbr: NBA_ABBR[row.team.name] ?? row.team.nameCode?.toLowerCase() ?? row.team.name.slice(0, 3).toLowerCase(),
+      position: row.position,
+      won: row.wins,
+      lost: row.losses,
+      pct: row.percentage != null ? ("." + Math.round(row.percentage * 1000).toString().padStart(3, "0")) : ".000",
+      gb: row.gamesBehind != null ? String(row.gamesBehind) : "-",
+      streak: typeof row.streak === "number" ? String(row.streak) : (row.streak as string | undefined ?? ""),
+      lastTen: "",
+      homeRecord: "",
+      roadRecord: "",
+      ppg: (row.scoresFor != null && row.matches > 0) ? (row.scoresFor / row.matches).toFixed(1) : "0.0",
+      papg: (row.scoresAgainst != null && row.matches > 0) ? (row.scoresAgainst / row.matches).toFixed(1) : "0.0",
+      diff: row.scoreDiffFormatted ?? "0",
+    })).sort((a, b) => a.position - b.position);
+    nbaStandingsCache = { season: "2025-26", conferences: [{ name: "NBA", divisions: [{ name: "Classificação", teams }] }] };
     nbaStandingsFetchedAt = now;
     return nbaStandingsCache;
   } catch {
@@ -8251,82 +8033,35 @@ const NBA_ODDS_TTL = 60 * 1000;
 async function getBasketballOdds(): Promise<NBAOddsEntry[]> {
   const now = Date.now();
   if (nbaOddsCache && now - nbaOddsFetchedAt < NBA_ODDS_TTL) return nbaOddsCache;
-  let resp: Response;
   try {
-    resp = await fetch(`${SAPI_BASKETBALL}/nba/odds`, { signal: AbortSignal.timeout(9000), headers: sapiHeaders() });
+    const events = await getUpcomingEventsV2("basketball", 7);
+    const oddsResults = await Promise.all(
+      events.map(ev => getPreMatchOddsV2("basketball", ev.id).catch(() => null))
+    );
+    const results: NBAOddsEntry[] = [];
+    for (let i = 0; i < events.length; i++) {
+      const ev = events[i]!;
+      const realOdds = oddsResults[i];
+      if (!realOdds || realOdds.home <= 0) continue;
+      const homeName = v2TeamName(ev.homeTeam);
+      const awayName = v2TeamName(ev.awayTeam);
+      const { date, time } = v2EventDateTime(ev);
+      const mkt = makeBasketballMarketsFromTeams(homeName, awayName) as Record<string, unknown>;
+      mkt["odds"] = { home: realOdds.home, draw: 0, away: realOdds.away };
+      results.push({
+        matchId: String(ev.id), date, time,
+        homeTeam: { id: "", name: homeName },
+        awayTeam: { id: "", name: awayName },
+        homeOdds: realOdds.home, awayOdds: realOdds.away,
+        markets: mkt,
+      });
+    }
+    nbaOddsCache = results;
+    nbaOddsFetchedAt = now;
+    return results;
   } catch {
     return nbaOddsCache ?? [];
   }
-  if (!resp.ok) return nbaOddsCache ?? [];
-  const data = (await resp.json()) as { odds?: { category?: { matches?: { match?: NBAOddsMatch | NBAOddsMatch[] } } } };
-  const rawMatches = data?.odds?.category?.matches?.match;
-  if (!rawMatches) return [];
-  const matches = Array.isArray(rawMatches) ? rawMatches : [rawMatches];
-
-  const avgOdd = (bks: NBAOddsBk[], name: string): number => {
-    const vals: number[] = [];
-    for (const bk of bks) {
-      if (bk.stop === "True") continue;
-      const odds = Array.isArray(bk.odd) ? bk.odd : (bk.odd ? [bk.odd] : []);
-      const o = odds.find(o => o.name === name);
-      const v = parseFloat(o?.value ?? "0");
-      if (v > 1) vals.push(v);
-    }
-    if (!vals.length) return 0;
-    const avg = vals.reduce((a, b) => a + b, 0) / vals.length;
-    return Math.max(1.01, Math.round(avg * 0.975 * 100) / 100);
-  };
-  const getHA = (types: NBAOddsType[], typeValue: string): { home: number; away: number } | undefined => {
-    const t = types.find(tp => tp.value === typeValue);
-    if (!t) return undefined;
-    const bks = (Array.isArray(t.bookmaker) ? t.bookmaker : t.bookmaker ? [t.bookmaker] : []) as NBAOddsBk[];
-    const h = avgOdd(bks, "Home"); const a = avgOdd(bks, "Away");
-    return (h && a) ? { home: h, away: a } : undefined;
-  };
-
-  const results: NBAOddsEntry[] = [];
-  const seen = new Set<string>();
-  for (const m of matches) {
-    if (!m.id || seen.has(m.id)) continue;
-    if (m.status !== "Not Started") continue;
-    seen.add(m.id);
-    const rawTypes = m.odds?.type;
-    const types: NBAOddsType[] = !rawTypes ? [] : Array.isArray(rawTypes) ? rawTypes : [rawTypes];
-    const threeWay = types.find(tp => tp.value === "3Way Result");
-    if (!threeWay) continue;
-    const bks = (Array.isArray(threeWay.bookmaker) ? threeWay.bookmaker : threeWay.bookmaker ? [threeWay.bookmaker] : []) as NBAOddsBk[];
-    const h = avgOdd(bks, "Home");
-    const a = avgOdd(bks, "Away");
-    if (!h || !a) continue;
-    const halfOdds = getHA(types, "Home/Away - 1st Half");
-    const q1Odds   = getHA(types, "Home/Away - 1st Qtr");
-    const q2Odds   = getHA(types, "Home/Away - 2nd Qtr");
-    const q3Odds   = getHA(types, "Home/Away - 3rd Qtr");
-    const q4Odds   = getHA(types, "Home/Away - 4th Qtr");
-    const homeName = m.home?.name ?? "";
-    const awayName = m.away?.name ?? "";
-    const mkt = makeBasketballMarketsFromTeams(homeName, awayName) as Record<string, unknown>;
-    mkt["odds"] = { home: h, draw: 0, away: a };
-    if (halfOdds) mkt["halfTime"] = { home: halfOdds.home, draw: 0, away: halfOdds.away };
-    const bExtra = (mkt["basketballExtra"] as Record<string, unknown>) ?? {};
-    if (q1Odds) bExtra["q1"] = { home: q1Odds.home, away: q1Odds.away };
-    if (q2Odds) bExtra["q2"] = { home: q2Odds.home, away: q2Odds.away };
-    if (q3Odds) bExtra["q3"] = { home: q3Odds.home, away: q3Odds.away };
-    if (q4Odds) bExtra["q4"] = { home: q4Odds.home, away: q4Odds.away };
-    mkt["basketballExtra"] = bExtra;
-    results.push({
-      matchId: m.id, date: m.date ?? "", time: m.time ?? "",
-      homeTeam: { id: m.home?.id ?? "", name: homeName },
-      awayTeam: { id: m.away?.id ?? "", name: awayName },
-      homeOdds: h, awayOdds: a,
-      halfOdds, q1Odds, q2Odds, q3Odds, q4Odds,
-      markets: mkt,
-    });
-  }
-  const fresh = results.filter(r => !isMatchTimePast(r.date, r.time));
-  nbaOddsCache = fresh;
-  nbaOddsFetchedAt = now;
-  return fresh;
 }
 
 router.get("/basketball-odds", async (_req, res) => {
@@ -8365,93 +8100,36 @@ const HOCKEY_ODDS_TTL = 60 * 1000;
 async function getHockeyOdds(): Promise<HockeyOddsEntry[]> {
   const now = Date.now();
   if (hockeyOddsCache && now - hockeyOddsFetchedAt < HOCKEY_ODDS_TTL) return hockeyOddsCache;
-  let resp: Response;
   try {
-    resp = await fetch(`${SAPI_HOCKEY}/nhl/odds`, { signal: AbortSignal.timeout(9000), headers: sapiHeaders() });
+    const events = await getUpcomingEventsV2("hockey", 7);
+    const oddsResults = await Promise.all(
+      events.map(ev => getPreMatchOddsV2("hockey", ev.id).catch(() => null))
+    );
+    const results: HockeyOddsEntry[] = [];
+    for (let i = 0; i < events.length; i++) {
+      const ev = events[i]!;
+      const realOdds = oddsResults[i];
+      if (!realOdds || realOdds.home <= 0) continue;
+      const homeName = v2TeamName(ev.homeTeam);
+      const awayName = v2TeamName(ev.awayTeam);
+      const { date, time } = v2EventDateTime(ev);
+      const mkt = makeHockeyMarketsFromTeams(homeName, awayName) as Record<string, unknown>;
+      const h = realOdds.home; const d = realOdds.draw || 0; const a = realOdds.away;
+      mkt["odds"] = { home: h, draw: d, away: a };
+      results.push({
+        matchId: String(ev.id), date, time,
+        homeTeam: { id: "", name: homeName },
+        awayTeam: { id: "", name: awayName },
+        homeOdds: h, drawOdds: d, awayOdds: a,
+        markets: mkt,
+      });
+    }
+    hockeyOddsCache = results;
+    hockeyOddsFetchedAt = now;
+    return results;
   } catch {
     return hockeyOddsCache ?? [];
   }
-  if (!resp.ok) return hockeyOddsCache ?? [];
-  const data = (await resp.json()) as { odds?: { category?: { matches?: { match?: HockeyOddsMatch | HockeyOddsMatch[] } } } };
-  const rawMatches = data?.odds?.category?.matches?.match;
-  if (!rawMatches) return [];
-  const matches = Array.isArray(rawMatches) ? rawMatches : [rawMatches];
-
-  const avgOdd = (bks: HockeyOddsBk[], name: string): number => {
-    const vals: number[] = [];
-    for (const bk of bks) {
-      if (bk.stop === "True") continue;
-      const odds = Array.isArray(bk.odd) ? bk.odd : (bk.odd ? [bk.odd] : []);
-      const o = odds.find(o => o.name === name);
-      const v = parseFloat(o?.value ?? "0");
-      if (v > 1) vals.push(v);
-    }
-    if (!vals.length) return 0;
-    const avg = vals.reduce((a, b) => a + b, 0) / vals.length;
-    return Math.max(1.01, Math.round(avg * 0.975 * 100) / 100);
-  };
-  const getBks = (types: HockeyOddsType[], typeValue: string): HockeyOddsBk[] => {
-    const t = types.find(tp => tp.value === typeValue);
-    if (!t) return [];
-    return (Array.isArray(t.bookmaker) ? t.bookmaker : t.bookmaker ? [t.bookmaker] : []) as HockeyOddsBk[];
-  };
-  const getHDA = (types: HockeyOddsType[], typeValue: string): { home: number; draw: number; away: number } | undefined => {
-    const bks = getBks(types, typeValue);
-    const h = avgOdd(bks, "Home"); const d = avgOdd(bks, "Draw"); const a = avgOdd(bks, "Away");
-    return (h && a) ? { home: h, draw: d || 0, away: a } : undefined;
-  };
-
-  const results: HockeyOddsEntry[] = [];
-  const seen = new Set<string>();
-  for (const m of matches) {
-    if (!m.id || seen.has(m.id)) continue;
-    if (m.status !== "Not Started") continue;
-    seen.add(m.id);
-    const rawTypes = m.odds?.type;
-    const types: HockeyOddsType[] = !rawTypes ? [] : Array.isArray(rawTypes) ? rawTypes : [rawTypes];
-    const threeWay = types.find(tp => tp.value === "3Way Result");
-    if (!threeWay) continue;
-    const bks = (Array.isArray(threeWay.bookmaker) ? threeWay.bookmaker : threeWay.bookmaker ? [threeWay.bookmaker] : []) as HockeyOddsBk[];
-    const h = avgOdd(bks, "Home");
-    const d = avgOdd(bks, "Draw");
-    const a = avgOdd(bks, "Away");
-    if (!h || !a) continue;
-    // BTTS
-    const bttsBks = getBks(types, "Both Teams To Score");
-    const bttsYes = avgOdd(bttsBks, "Yes"); const bttsNo = avgOdd(bttsBks, "No");
-    const btts = (bttsYes && bttsNo) ? { yes: bttsYes, no: bttsNo } : undefined;
-    // Double Chance
-    const dcBks = getBks(types, "Double Chance");
-    const dcHD = avgOdd(dcBks, "Home/Draw"); const dcHA = avgOdd(dcBks, "Home/Away"); const dcDA = avgOdd(dcBks, "Draw/Away");
-    const doubleChance = (dcHD && dcHA && dcDA) ? { homeOrDraw: dcHD, homeOrAway: dcHA, drawOrAway: dcDA } : undefined;
-    const p1Odds = getHDA(types, "1x2 (1st Period)");
-    const p2Odds = getHDA(types, "3Way Result (2st Period)");
-    const p3Odds = getHDA(types, "3Way Result 3rdPeriod)");
-    const homeName = m.home?.name ?? "";
-    const awayName = m.away?.name ?? "";
-    const mkt = makeHockeyMarketsFromTeams(homeName, awayName) as Record<string, unknown>;
-    mkt["odds"] = { home: h, draw: d || 0, away: a };
-    if (p1Odds) mkt["halfTime"] = p1Odds;
-    if (btts) mkt["bothTeamsScore"] = btts;
-    if (doubleChance) mkt["doubleChance"] = { homeOrDraw: doubleChance.homeOrDraw, awayOrDraw: doubleChance.drawOrAway, homeOrAway: doubleChance.homeOrAway };
-    const hExtra = (mkt["hockeyExtra"] as Record<string, unknown>) ?? {};
-    if (p2Odds) hExtra["period2"] = p2Odds;
-    if (p3Odds) hExtra["period3"] = p3Odds;
-    if (btts) hExtra["bothTeamsScoreGame"] = btts;
-    mkt["hockeyExtra"] = hExtra;
-    results.push({
-      matchId: m.id, date: m.date ?? "", time: m.time ?? "",
-      homeTeam: { id: m.home?.id ?? "", name: homeName },
-      awayTeam: { id: m.away?.id ?? "", name: awayName },
-      homeOdds: h, drawOdds: d || 0, awayOdds: a,
-      btts, doubleChance, p1Odds, p2Odds, p3Odds,
-      markets: mkt,
-    });
-  }
-  const fresh = results.filter(r => !isMatchTimePast(r.date, r.time));
-  hockeyOddsCache = fresh;
-  hockeyOddsFetchedAt = now;
-  return fresh;
 }
 
 router.get("/hockey-odds", async (_req, res) => {
@@ -8486,69 +8164,40 @@ let mlbOddsFetchedAt = 0;
 async function getMLBOdds(): Promise<MLBOddsEntry[]> {
   const now = Date.now();
   if (mlbOddsCache && now - mlbOddsFetchedAt < MLB_ODDS_TTL) return mlbOddsCache;
-  let resp: Response;
   try {
-    resp = await fetch(`${SAPI_BASEBALL}/mlb/odds`, { signal: AbortSignal.timeout(9000), headers: sapiHeaders() });
+    const events = await getUpcomingEventsV2("baseball", 7);
+    const oddsResults = await Promise.all(
+      events.map(ev => getPreMatchOddsV2("baseball", ev.id).catch(() => null))
+    );
+    const results: MLBOddsEntry[] = [];
+    for (let i = 0; i < events.length; i++) {
+      const ev = events[i]!;
+      const realOdds = oddsResults[i];
+      if (!realOdds || realOdds.home <= 0) continue;
+      const homeName = v2TeamName(ev.homeTeam);
+      const awayName = v2TeamName(ev.awayTeam);
+      const { date, time } = v2EventDateTime(ev);
+      results.push({
+        matchId: String(ev.id), date, time,
+        homeTeam: { id: "", name: homeName },
+        awayTeam: { id: "", name: awayName },
+        homeOdds: realOdds.home, drawOdds: 0, awayOdds: realOdds.away,
+        markets: makeMLBMarketsFromTeams(homeName, awayName, realOdds.home, realOdds.away),
+      });
+    }
+    // Populate raw odds map for live match building
+    for (const r of results) {
+      const normH = r.homeTeam.name.toLowerCase().trim();
+      const normA = r.awayTeam.name.toLowerCase().trim();
+      mlbRawOddsMap.set(`${normH}|${normA}`, { h: r.homeOdds, a: r.awayOdds });
+      mlbRawOddsMap.set(`${normA}|${normH}`, { h: r.awayOdds, a: r.homeOdds });
+    }
+    mlbOddsCache = results;
+    mlbOddsFetchedAt = now;
+    return results;
   } catch {
     return mlbOddsCache ?? [];
   }
-  if (!resp.ok) return mlbOddsCache ?? [];
-  const data = (await resp.json()) as { odds?: { category?: { matches?: { match?: MLBOddsMatch | MLBOddsMatch[] } } } };
-  const rawMatches = data?.odds?.category?.matches?.match;
-  if (!rawMatches) return [];
-  const matches = Array.isArray(rawMatches) ? rawMatches : [rawMatches];
-
-  const avgOdd = (bks: MLBOddsBk[], name: string): number => {
-    const vals: number[] = [];
-    for (const bk of bks) {
-      if (bk.stop === "True") continue;
-      const odds = Array.isArray(bk.odd) ? bk.odd : (bk.odd ? [bk.odd] : []);
-      const o = odds.find(o => o.name === name);
-      const v = parseFloat(o?.value ?? "0");
-      if (v > 1) vals.push(v);
-    }
-    if (!vals.length) return 0;
-    const avg = vals.reduce((a, b) => a + b, 0) / vals.length;
-    return Math.max(1.01, Math.round(avg * 0.975 * 100) / 100);
-  };
-
-  const results: MLBOddsEntry[] = [];
-  const seen = new Set<string>();
-  for (const m of matches) {
-    if (!m.id || seen.has(m.id)) continue;
-    if (m.status !== "Not Started") continue;
-    seen.add(m.id);
-    const rawTypes = m.odds?.type;
-    const types: MLBOddsType[] = !rawTypes ? [] : Array.isArray(rawTypes) ? rawTypes : [rawTypes];
-    const threeWay = types.find(tp => tp.value === "3Way Result");
-    if (!threeWay) continue;
-    const bks = (Array.isArray(threeWay.bookmaker) ? threeWay.bookmaker : threeWay.bookmaker ? [threeWay.bookmaker] : []) as MLBOddsBk[];
-    const h = avgOdd(bks, "Home");
-    const a = avgOdd(bks, "Away");
-    if (!h || !a) continue;
-    // Draw exists in API but is unrealistic in baseball (>6 = cancelled/postponed) — zero it out
-    const rawD = avgOdd(bks, "Draw");
-    const d = rawD > 0 && rawD < 6 ? rawD : 0;
-    results.push({
-      matchId: m.id, date: m.date ?? "", time: m.time ?? "",
-      homeTeam: { id: m.home?.id ?? "", name: m.home?.name ?? "" },
-      awayTeam: { id: m.away?.id ?? "", name: m.away?.name ?? "" },
-      homeOdds: h, drawOdds: d, awayOdds: a,
-      markets: makeMLBMarketsFromTeams(m.home?.name ?? "", m.away?.name ?? "", h, a),
-    });
-  }
-  // Populate raw odds map BEFORE filtering — so live games (already past start time)
-  // can still be looked up by buildMLBLiveMatches using real base odds
-  for (const r of results) {
-    const normH = r.homeTeam.name.toLowerCase().trim();
-    const normA = r.awayTeam.name.toLowerCase().trim();
-    mlbRawOddsMap.set(`${normH}|${normA}`, { h: r.homeOdds, a: r.awayOdds });
-    mlbRawOddsMap.set(`${normA}|${normH}`, { h: r.awayOdds, a: r.homeOdds }); // reversed key too
-  }
-  const fresh = results.filter(r => !isMatchTimePast(r.date, r.time));
-  mlbOddsCache = fresh;
-  mlbOddsFetchedAt = now;
-  return fresh;
 }
 
 router.get("/mlb-odds", async (_req, res) => {
@@ -8563,206 +8212,45 @@ router.get("/mlb-odds", async (_req, res) => {
 async function getTennisOdds(): Promise<TennisOddsEntry[]> {
   const now = Date.now();
   if (tennisOddsCache && now - tennisOddsFetchedAt < TENNIS_ODDS_TTL) return tennisOddsCache;
-  let resp: Response;
   try {
-    resp = await fetch(`${SAPI_TENNIS}/tennis/odds`, { signal: AbortSignal.timeout(9000), headers: sapiHeaders() });
-  } catch {
-    return tennisOddsCache ?? [];
-  }
-  if (!resp.ok) return tennisOddsCache ?? [];
-  const data = (await resp.json()) as { odds?: { tournament?: unknown } };
-  const rawTours = data?.odds?.tournament;
-  if (!rawTours) return [];
-  const tours = Array.isArray(rawTours) ? rawTours : [rawTours];
-
-  type RawOdd   = { name?: string; value?: string };
-  type RawTotal = { name?: string; stop?: string; odd?: RawOdd | RawOdd[] };
-  type RawBk    = { stop?: string; odd?: RawOdd | RawOdd[]; total?: RawTotal | RawTotal[] };
-  type RawType  = { value?: string; bookmaker?: RawBk | RawBk[] };
-  type RawMatch = { id?: string; date?: string; time?: string; status?: string; player?: Array<{ id?: string; name?: string }>; odds?: { type?: RawType | RawType[] } };
-  type RawTour  = { name?: string; matches?: { match?: RawMatch | RawMatch[] } };
-
-  const getBks = (types: RawType[], typeValue: string): RawBk[] => {
-    const t = types.find(tp => tp.value === typeValue);
-    if (!t) return [];
-    return (Array.isArray(t.bookmaker) ? t.bookmaker : t.bookmaker ? [t.bookmaker] : []) as RawBk[];
-  };
-  const margin = (v: number) => Math.max(1.01, Math.round(v * 0.975 * 100) / 100);
-  const avgArr = (vals: number[]) => vals.length ? margin(vals.reduce((a, b) => a + b, 0) / vals.length) : 0;
-
-  // Average odds by name then index (Home=0, Away=1) — for simple 2-way markets
-  // Some bookmakers provide a single-odd object (e.g. only the underdog "Away" value).
-  // We prefer name-based lookup so a single "Away" odd never pollutes the home average.
-  const avgIdx = (bks: RawBk[], idx: 0 | 1): number => {
-    const vals: number[] = [];
-    const idxName = idx === 0 ? "Home" : "Away";
-    for (const bk of bks) {
-      if (bk.stop === "True") continue;
-      const isArr = Array.isArray(bk.odd);
-      const odds: RawOdd[] = isArr ? (bk.odd as RawOdd[]) : (bk.odd ? [bk.odd as RawOdd] : []);
-      // Prefer lookup by name; fall back to positional index only for un-named array odds
-      const byName = odds.find(o => o.name === idxName);
-      const o = byName ?? (isArr ? odds[idx] : undefined);
-      const v = parseFloat(o?.value ?? "0");
-      if (v > 1) vals.push(v);
-    }
-    return avgArr(vals);
-  };
-  // Average odds by name (for Home/Away (2nd Set), Odd/Even, Set Betting, etc.)
-  const avgName = (types: RawType[], typeValue: string, oddName: string): number => {
-    const vals: number[] = [];
-    for (const bk of getBks(types, typeValue)) {
-      if (bk.stop === "True") continue;
-      const odds = Array.isArray(bk.odd) ? bk.odd : (bk.odd ? [bk.odd] : []);
-      const o = odds.find(o => o.name === oddName);
-      const v = parseFloat(o?.value ?? "0");
-      if (v > 1) vals.push(v);
-    }
-    return avgArr(vals);
-  };
-  // Parse Over/Under market with totals — picks the most represented line
-  const parseTotal = (types: RawType[], typeValue: string, overName = "Over", underName = "Under"): { line: number; over: number; under: number } | undefined => {
-    const lineMap = new Map<number, { overs: number[]; unders: number[] }>();
-    for (const bk of getBks(types, typeValue)) {
-      if (bk.stop === "True") continue;
-      const totals = Array.isArray(bk.total) ? bk.total : (bk.total ? [bk.total] : []);
-      for (const tot of totals) {
-        if (tot.stop === "True") continue;
-        const line = parseFloat(tot.name ?? "0");
-        if (!line) continue;
-        const odds = Array.isArray(tot.odd) ? tot.odd : (tot.odd ? [tot.odd] : []);
-        const o = odds.find(o => o.name === overName);  const u = odds.find(o => o.name === underName);
-        const ov = parseFloat(o?.value ?? "0"); const uv = parseFloat(u?.value ?? "0");
-        if (ov > 1 && uv > 1) {
-          if (!lineMap.has(line)) lineMap.set(line, { overs: [], unders: [] });
-          lineMap.get(line)!.overs.push(ov); lineMap.get(line)!.unders.push(uv);
-        }
+    const events = await getUpcomingEventsV2("tennis", 7);
+    const oddsResults = await Promise.all(
+      events.map(ev => getPreMatchOddsV2("tennis", ev.id).catch(() => null))
+    );
+    const results: TennisOddsEntry[] = [];
+    for (let i = 0; i < events.length; i++) {
+      const ev = events[i]!;
+      const realOdds = oddsResults[i];
+      if (!realOdds || realOdds.home <= 0) continue;
+      const p0Name = v2TeamName(ev.homeTeam);
+      const p1Name = v2TeamName(ev.awayTeam);
+      const { date, time } = v2EventDateTime(ev);
+      const h = realOdds.home; const a = realOdds.away;
+      if (p0Name && p1Name) {
+        _tennisPreMatchOdds.set(_tennisPairKey(p0Name, p1Name), { home: h, away: a });
       }
-    }
-    if (!lineMap.size) return undefined;
-    let bestLine = 0, bestCount = 0;
-    for (const [line, { overs }] of lineMap) { if (overs.length > bestCount) { bestCount = overs.length; bestLine = line; } }
-    const { overs, unders } = lineMap.get(bestLine)!;
-    return { line: bestLine, over: avgArr(overs), under: avgArr(unders) };
-  };
-  // Collect all named odds averaged across bookmakers (for Set Betting, Set/Match, Correct Score)
-  const allNames = (types: RawType[], typeValue: string): Record<string, number> => {
-    const nameMap = new Map<string, number[]>();
-    for (const bk of getBks(types, typeValue)) {
-      if (bk.stop === "True") continue;
-      const odds = Array.isArray(bk.odd) ? bk.odd : (bk.odd ? [bk.odd] : []);
-      for (const o of odds) {
-        const v = parseFloat(o?.value ?? "0");
-        if (v > 1 && o.name) { if (!nameMap.has(o.name)) nameMap.set(o.name, []); nameMap.get(o.name)!.push(v); }
-      }
-    }
-    const res: Record<string, number> = {};
-    for (const [name, vals] of nameMap) res[name] = avgArr(vals);
-    return res;
-  };
-  const topScores = (types: RawType[], typeValue: string, n = 8): Array<{ label: string; odds: number }> =>
-    Object.entries(allNames(types, typeValue)).map(([label, odds]) => ({ label, odds })).sort((a, b) => a.odds - b.odds).slice(0, n);
-
-  const results: TennisOddsEntry[] = [];
-  const seen = new Set<string>();
-
-  for (const rawTour of tours as RawTour[]) {
-    const rawMatches = rawTour.matches?.match;
-    if (!rawMatches) continue;
-    const matches = Array.isArray(rawMatches) ? rawMatches : [rawMatches];
-    for (const m of matches) {
-      if (!m.id || seen.has(m.id)) continue;
-      // Include upcoming AND in-play matches; exclude only Finished/retired/unknown
-      const EXCLUDE_STATUSES = new Set(["Finished", "9", "Retired", "Walkover", "Cancelled"]);
-      if (EXCLUDE_STATUSES.has(m.status ?? "")) continue;
-      seen.add(m.id);
-      const rawTypes = m.odds?.type;
-      const types: RawType[] = !rawTypes ? [] : Array.isArray(rawTypes) ? rawTypes : [rawTypes];
-
-      // Match winner
-      const hwBks = getBks(types, "Home/Away");
-      const h = avgIdx(hwBks, 0); const a = avgIdx(hwBks, 1);
-      if (!h || !a) continue;
-
-      // 1st set winner
-      const s1Bks = getBks(types, "Home/Away (1st Set)");
-      const s1h = avgIdx(s1Bks, 0); const s1a = avgIdx(s1Bks, 1);
-      const set1Odds: [number, number] | null = (s1h && s1a) ? [s1h, s1a] : null;
-
-      // 2nd set winner
-      const s2h = avgName(types, "Home/Away (2nd Set)", "Home"); const s2a = avgName(types, "Home/Away (2nd Set)", "Away");
-
-      // Odd/Even
-      const oeOdd = avgName(types, "Odd/Even", "Odd");         const oeEven = avgName(types, "Odd/Even", "Even");
-      const oe1Odd = avgName(types, "Odd/Even (1st Set)", "Odd"); const oe1Even = avgName(types, "Odd/Even (1st Set)", "Even");
-      const oe2Odd = avgName(types, "Odd/Even (2nd Set)", "Odd"); const oe2Even = avgName(types, "Odd/Even (2nd Set)", "Even");
-
-      // Win at least one set
-      const wal1Yes = avgName(types, "Win at least one set (Player 1)", "Yes"); const wal1No = avgName(types, "Win at least one set (Player 1)", "No");
-      const wal2Yes = avgName(types, "Win at least one set (Player 2)", "Yes"); const wal2No = avgName(types, "Win at least one set (Player 2)", "No");
-
-      // Set Betting (exact sets)
-      const sb = allNames(types, "Set Betting");
-      // Set/Match combo
-      const smAll = allNames(types, "Set / Match");
-
-      // Total games O/U
-      const totalGamesOdds = parseTotal(types, "Over/Under by Games in Match");
-      const set1GamesOdds  = parseTotal(types, "Over/Under (1st Set)");
-      const set2GamesOdds  = parseTotal(types, "Over/Under by Games (2nd Set)");
-      const homePlayerOdds = parseTotal(types, "Total - Home");
-      const awayPlayerOdds = parseTotal(types, "Total - Away");
-      const setsOU         = parseTotal(types, "Over/Under");  // Sets O/U (line 2.5)
-
-      // Correct Score 1st / 2nd set (top 8)
-      const sc1 = topScores(types, "Correct Score 1st Half");
-      const sc2 = topScores(types, "Correct Score 2nd Half");
-
-      // Build tennisExtra
       const tExtra = {
-        firstSet: set1Odds ? { home: set1Odds[0], away: set1Odds[1] } : { home: 0, away: 0 },
-        set2: (s2h && s2a) ? { home: s2h, away: s2a } : { home: 0, away: 0 },
-        set3: { home: 0, away: 0 },
-        exactSets: { h20: sb["2:0"] ?? 0, h21: sb["2:1"] ?? 0, a02: sb["0:2"] ?? 0, a12: sb["1:2"] ?? 0 },
+        firstSet: { home: 0, away: 0 },
+        set2: { home: 0, away: 0 }, set3: { home: 0, away: 0 },
+        exactSets: { h20: 0, h21: 0, a02: 0, a12: 0 },
         setHandicap: { home: 0, away: 0 },
-        totalGames: totalGamesOdds ?? { line: 0, over: 0, under: 0 },
-        totalGamesLines: totalGamesOdds ? [totalGamesOdds] : [],
-        set1Games: set1GamesOdds ?? { line: 0, over: 0, under: 0 },
+        totalGames: { line: 0, over: 0, under: 0 },
+        totalGamesLines: [] as Array<{ line: number; over: number; under: number }>,
+        set1Games: { line: 0, over: 0, under: 0 },
         gameHandicap: { line: 0, home: 0, away: 0 },
-        set2Games: set2GamesOdds,
-        homePlayerGames: homePlayerOdds,
-        awayPlayerGames: awayPlayerOdds,
-        oddEvenGames: (oeOdd && oeEven) ? { odd: oeOdd, even: oeEven } : undefined,
-        oddEven1st:   (oe1Odd && oe1Even) ? { odd: oe1Odd, even: oe1Even } : undefined,
-        oddEven2nd:   (oe2Odd && oe2Even) ? { odd: oe2Odd, even: oe2Even } : undefined,
-        winAtLeast1P1: (wal1Yes && wal1No) ? { yes: wal1Yes, no: wal1No } : undefined,
-        winAtLeast1P2: (wal2Yes && wal2No) ? { yes: wal2Yes, no: wal2No } : undefined,
-        setMatch: Object.keys(smAll).length ? { h11: smAll["1/1"] ?? 0, h12: smAll["1/2"] ?? 0, a21: smAll["2/1"] ?? 0, a22: smAll["2/2"] ?? 0 } : undefined,
-        score1st: sc1.length ? sc1 : undefined,
-        score2nd: sc2.length ? sc2 : undefined,
       };
-
-      const p = m.player ?? [];
-      // Cache pre-match/in-play odds by player pair so buildTennisLiveMatches can use them
-      if (p[0]?.name && p[1]?.name) {
-        _tennisPreMatchOdds.set(_tennisPairKey(p[0].name, p[1].name), { home: h, away: a });
-      }
       results.push({
-        matchId: m.id,
-        date: m.date ?? "", time: m.time ?? "",
-        tournamentName: rawTour.name ?? "",
-        status: m.status ?? "",
-        players: [{ id: p[0]?.id ?? "", name: p[0]?.name ?? "" }, { id: p[1]?.id ?? "", name: p[1]?.name ?? "" }],
-        matchOdds: [h, a], set1Odds,
+        matchId: String(ev.id),
+        date, time,
+        tournamentName: (ev.tournament as { name?: string } | undefined)?.name ?? "",
+        status: "Not Started",
+        players: [{ id: "", name: p0Name }, { id: "", name: p1Name }],
+        matchOdds: [h, a],
+        set1Odds: null,
         markets: {
           doubleChance: { homeOrDraw: 0, awayOrDraw: 0, homeOrAway: 0 },
           bothTeamsScore: { yes: 0, no: 0 },
-          totalGoals: {
-            over05: 0, under05: 0,
-            over15: set1Odds ? set1Odds[0] : 0, under15: set1Odds ? set1Odds[1] : 0,
-            over25: setsOU?.over ?? 0, under25: setsOU?.under ?? 0,
-            over35: 0, under35: 0, over45: 0, under45: 0, over55: 0, under55: 0, over65: 0, under65: 0,
-          },
+          totalGoals: { over05: 0, under05: 0, over15: 0, under15: 0, over25: 0, under25: 0, over35: 0, under35: 0, over45: 0, under45: 0, over55: 0, under55: 0, over65: 0, under65: 0 },
           handicap: { homeMinusOne: 0, awayPlusOne: 0, homeMinusOneHalf: 0, awayPlusOneHalf: 0 },
           halfTime: { home: 0, draw: 0, away: 0 },
           firstGoal: { home: 0, noGoal: 0, away: 0 },
@@ -8770,11 +8258,12 @@ async function getTennisOdds(): Promise<TennisOddsEntry[]> {
         },
       });
     }
+    tennisOddsCache = results;
+    tennisOddsFetchedAt = now;
+    return results;
+  } catch {
+    return tennisOddsCache ?? [];
   }
-  const fresh = results.filter(r => !isMatchTimePast(r.date, r.time));
-  tennisOddsCache = fresh;
-  tennisOddsFetchedAt = now;
-  return fresh;
 }
 
 router.get("/tennis-odds", async (_req, res) => {
