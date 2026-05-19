@@ -1907,6 +1907,7 @@ export default function Home() {
   const [matchStats, setMatchStats] = useState<MatchStatsData | null>(null);
   const [matchStatsLoading, setMatchStatsLoading] = useState(false);
   const [standings, setStandings] = useState<StandingRow[] | null>(null);
+  const [standingsGroups, setStandingsGroups] = useState<Array<{ name: string; rows: StandingRow[] }> | null>(null);
   const [standingsLoading, setStandingsLoading] = useState(false);
   const [standingsLeague, setStandingsLeague] = useState("");
   type AllOddsMarket = { name: string; group: string; choices: Array<{ name: string; label: string; odds: number }> };
@@ -2024,7 +2025,7 @@ export default function Home() {
     const loadV1 = () =>
       fetch(`/api/matches/league-standings?league=${encodeURIComponent(league)}`)
         .then(r => r.ok ? r.json() : null)
-        .then(d => { if (d && Array.isArray(d.teams)) { setStandingsLeague(d.league ?? league); setStandings(d.teams as StandingRow[]); } });
+        .then(d => { if (d && Array.isArray(d.teams)) { setStandingsLeague(d.league ?? league); setStandings(d.teams as StandingRow[]); setStandingsGroups(null); } });
     const isV2Football = expandedMatch.sport === "football" && String(expandedMatch.id).startsWith("fb-v2-");
     if (isV2Football) {
       const rawId = String(expandedMatch.id).replace("fb-v2-", "");
@@ -2034,6 +2035,7 @@ export default function Home() {
           if (d && Array.isArray(d.standings) && d.standings.length > 0) {
             setStandingsLeague(d.league ?? league);
             setStandings(d.standings as StandingRow[]);
+            setStandingsGroups(Array.isArray(d.groups) && d.groups.length > 0 ? d.groups as Array<{ name: string; rows: StandingRow[] }> : null);
             return Promise.resolve();
           }
           return loadV1();
@@ -6206,47 +6208,65 @@ export default function Home() {
                       </div>
                     ) : standings.length === 0 ? (
                       <div className="text-center text-zinc-500 py-8 text-sm">Classificação indisponível para esta liga.</div>
-                    ) : (
-                      <div>
-                        <div className="text-[10px] font-black text-red-500 uppercase tracking-widest mb-3">{standingsLeague}</div>
-                        <div className="overflow-x-auto">
-                          <table className="w-full text-xs">
-                            <thead>
-                              <tr className="text-zinc-500 border-b border-zinc-800">
-                                <th className="text-left py-1.5 pr-2 font-bold w-6">#</th>
-                                <th className="text-left py-1.5 font-bold">Equipa</th>
-                                <th className="text-center py-1.5 px-1 font-bold">J</th>
-                                <th className="text-center py-1.5 px-1 font-bold">V</th>
-                                <th className="text-center py-1.5 px-1 font-bold">E</th>
-                                <th className="text-center py-1.5 px-1 font-bold">D</th>
-                                <th className="text-center py-1.5 px-1 font-bold">GF</th>
-                                <th className="text-center py-1.5 px-1 font-bold">GC</th>
-                                <th className="text-center py-1.5 px-1 font-bold text-white">Pts</th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {standings.map(row => {
-                                const isHome = row.name.toLowerCase().includes(expandedMatch.home.toLowerCase().slice(0, 5));
-                                const isAway = row.name.toLowerCase().includes(expandedMatch.away.toLowerCase().slice(0, 5));
-                                return (
-                                  <tr key={row.pos} className={`border-b border-zinc-800/50 ${isHome ? "bg-blue-500/10" : isAway ? "bg-red-500/10" : ""}`}>
-                                    <td className="py-2 pr-2 text-zinc-500">{row.pos}</td>
-                                    <td className={`py-2 font-semibold truncate max-w-[120px] ${isHome || isAway ? "text-white" : "text-zinc-300"}`}>{row.name}</td>
-                                    <td className="py-2 text-center text-zinc-400">{row.played}</td>
-                                    <td className="py-2 text-center text-green-400">{row.won}</td>
-                                    <td className="py-2 text-center text-yellow-400">{row.drawn}</td>
-                                    <td className="py-2 text-center text-red-400">{row.lost}</td>
-                                    <td className="py-2 text-center text-zinc-400">{row.gf}</td>
-                                    <td className="py-2 text-center text-zinc-400">{row.ga}</td>
-                                    <td className="py-2 text-center font-black text-white">{row.pts}</td>
-                                  </tr>
-                                );
-                              })}
-                            </tbody>
-                          </table>
+                    ) : (() => {
+                      const StandingsTable = ({ rows }: { rows: StandingRow[] }) => (
+                        <table className="w-full text-xs">
+                          <thead>
+                            <tr className="text-zinc-500 border-b border-zinc-800">
+                              <th className="text-left py-1.5 pr-2 font-bold w-6">#</th>
+                              <th className="text-left py-1.5 font-bold">Equipa</th>
+                              <th className="text-center py-1.5 px-1 font-bold">J</th>
+                              <th className="text-center py-1.5 px-1 font-bold">V</th>
+                              <th className="text-center py-1.5 px-1 font-bold">E</th>
+                              <th className="text-center py-1.5 px-1 font-bold">D</th>
+                              <th className="text-center py-1.5 px-1 font-bold">GF</th>
+                              <th className="text-center py-1.5 px-1 font-bold">GC</th>
+                              <th className="text-center py-1.5 px-1 font-bold text-white">Pts</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {rows.map((row, ri) => {
+                              const isHome = row.name.toLowerCase().includes(expandedMatch.home.toLowerCase().slice(0, 5));
+                              const isAway = row.name.toLowerCase().includes(expandedMatch.away.toLowerCase().slice(0, 5));
+                              return (
+                                <tr key={ri} className={`border-b border-zinc-800/50 ${isHome ? "bg-blue-500/10" : isAway ? "bg-red-500/10" : ""}`}>
+                                  <td className="py-2 pr-2 text-zinc-500">{row.pos}</td>
+                                  <td className={`py-2 font-semibold truncate max-w-[120px] ${isHome || isAway ? "text-white" : "text-zinc-300"}`}>{row.name}</td>
+                                  <td className="py-2 text-center text-zinc-400">{row.played}</td>
+                                  <td className="py-2 text-center text-green-400">{row.won}</td>
+                                  <td className="py-2 text-center text-yellow-400">{row.drawn}</td>
+                                  <td className="py-2 text-center text-red-400">{row.lost}</td>
+                                  <td className="py-2 text-center text-zinc-400">{row.gf}</td>
+                                  <td className="py-2 text-center text-zinc-400">{row.ga}</td>
+                                  <td className="py-2 text-center font-black text-white">{row.pts}</td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      );
+                      return (
+                        <div>
+                          <div className="text-[10px] font-black text-red-500 uppercase tracking-widest mb-3">{standingsLeague}</div>
+                          {standingsGroups && standingsGroups.length > 0 ? (
+                            <div className="space-y-4">
+                              {standingsGroups.map(group => (
+                                <div key={group.name}>
+                                  <div className="text-[9px] font-black text-zinc-400 uppercase tracking-widest bg-zinc-800/60 rounded px-2 py-1 mb-2">{group.name}</div>
+                                  <div className="overflow-x-auto">
+                                    <StandingsTable rows={group.rows} />
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          ) : (
+                            <div className="overflow-x-auto">
+                              <StandingsTable rows={standings} />
+                            </div>
+                          )}
                         </div>
-                      </div>
-                    )}
+                      );
+                    })()}
                   </div>
                 )}
 

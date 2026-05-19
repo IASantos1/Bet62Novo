@@ -6180,19 +6180,8 @@ router.get("/stats", async (req, res) => {
   // If no match is found in LEAGUE_TEAMS, buildLeagueStandings uses the real team names + generic fillers.
   const standingsData = buildLeagueStandings(leagueParam, home, away);
 
-  // --- Lineups / Titulares (football only) ---
-  const fnPool = ["João","Pedro","Miguel","Rafael","Bruno","André","Hugo","Rui","Nuno","Diogo","Carlos","Luís","Fábio","Nelson","Ricardo","Gabriel","Marco","Tiago","Filipe","Bernardo"];
-  const lnPool = ["Silva","Costa","Santos","Oliveira","Pereira","Ferreira","Rodrigues","Gomes","Lopes","Martins","Alves","Carvalho","Sousa","Pinto","Monteiro","Ribeiro","Moreira","Neves","Cunha","Cardoso"];
-  const pos11 = ["GR","DD","DC","DC","DE","MC","MC","MC","AE","AV","AD"];
-  const mkLineup = (s: number) => pos11.map((position, i) => ({
-    number: i === 0 ? 1 : i + 2,
-    name: `${fnPool[ri(0, fnPool.length - 1, s + i * 3.7 + 1.1)]!} ${lnPool[ri(0, lnPool.length - 1, s + i * 2.3 + 0.7)]!}`,
-    position,
-  }));
-  const lineups = (sport === "football" || sport === "soccer") ? {
-    home: mkLineup(seed + 100),
-    away: mkLineup(seed + 200),
-  } : null;
+  // Lineups: never generate fake players — real data is fetched by clients via /v2-lineups
+  const lineups = null;
 
   res.json({
     formIsReal,
@@ -9591,22 +9580,54 @@ router.get("/v2-standings", async (req, res) => {
     // Step 2: fetch standings
     const stdResp = await fetch(`${base}/tournament/${tId}/season/${sId}/standings`, { signal: AbortSignal.timeout(8000), headers: sapiHeaders() });
     if (!stdResp.ok) { res.json({ standings: [], league: leagueName }); return; }
-    const stdData = await stdResp.json() as {
-      standings?: Array<{ position?: number; teamName?: string; played?: number; won?: number; drawn?: number; lost?: number; goalsFor?: number; goalsAgainst?: number; points?: number }>;
-    };
-    const rows = (stdData.standings ?? []).map((r, i) => ({
-      pos: r.position ?? i + 1,
-      name: r.teamName ?? "",
-      played: r.played ?? 0,
-      won: r.won ?? 0,
-      drawn: r.drawn ?? 0,
-      lost: r.lost ?? 0,
-      gf: r.goalsFor ?? 0,
-      ga: r.goalsAgainst ?? 0,
-      pts: r.points ?? 0,
-    }));
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const stdData = await stdResp.json() as any;
+    const rawArr: any[] = stdData.standings ?? [];
 
-    const result = { standings: rows, league: leagueName };
+    function parseStandingRow(r: any, i: number) {
+      return {
+        pos:    r.position ?? r.rank ?? i + 1,
+        name:   r.teamName ?? r.team?.shortName ?? r.team?.name ?? "",
+        played: r.played  ?? r.matches ?? 0,
+        won:    r.won     ?? r.wins    ?? 0,
+        drawn:  r.drawn   ?? r.draws   ?? 0,
+        lost:   r.lost    ?? r.losses  ?? 0,
+        gf:     r.goalsFor    ?? r.goals_for    ?? r.scored    ?? 0,
+        ga:     r.goalsAgainst ?? r.goals_against ?? r.conceded ?? 0,
+        pts:    r.points  ?? 0,
+      };
+    }
+
+    // Detect group-stage competition: each item has a "group" key OR a nested rows/standings array
+    const firstItem = rawArr[0];
+    const isGrouped = firstItem && (
+      typeof firstItem.group !== "undefined" ||
+      Array.isArray(firstItem.rows) ||
+      Array.isArray(firstItem.standings)
+    );
+
+    let rows: ReturnType<typeof parseStandingRow>[];
+    let groups: Array<{ name: string; rows: ReturnType<typeof parseStandingRow>[] }> | undefined;
+
+    if (isGrouped) {
+      groups = rawArr.map((g: any) => {
+        const rawName: string =
+          typeof g.group === "string" ? g.group :
+          (g.group?.name ?? g.name ?? "Grupo");
+        // Prefix "Grupo" if it looks like a bare letter (A, B, C…) or number
+        const name = /^[A-Z0-9]$/.test(rawName.trim())
+          ? `Grupo ${rawName.trim()}`
+          : rawName.startsWith("Group") ? rawName.replace("Group", "Grupo") : rawName;
+        const nestedRows: any[] = g.rows ?? g.standings ?? [];
+        return { name, rows: nestedRows.map((r: any, i: number) => parseStandingRow(r, i)) };
+      });
+      rows = groups.flatMap(g => g.rows);
+    } else {
+      rows = rawArr.map((r: any, i: number) => parseStandingRow(r, i));
+      groups = undefined;
+    }
+
+    const result = { standings: rows, groups, league: leagueName };
     v2StandingsCache.set(cacheKey, { data: result, fetchedAt: Date.now() });
     res.json(result);
   } catch {
