@@ -3689,10 +3689,13 @@ async function getUpcomingEventsV2(sport: SportKey, days = 3): Promise<SAPIV2Eve
   }
   const allDays = await Promise.all(dates.map(dt => getScheduleV2(sport, dt).catch(() => [] as SAPIV2Event[])));
   const nowSec = nowMs / 1000;
+  // Grace period: keep games up to 90 min past their start time so games that
+  // haven't appeared in the live feed yet don't vanish from upcoming.
+  const graceSec = 90 * 60;
   return allDays
     .flat()
     .filter(ev => {
-      if (!ev.startTimestamp || ev.startTimestamp <= nowSec) return false;
+      if (!ev.startTimestamp || ev.startTimestamp < nowSec - graceSec) return false;
       // Exclude already-finished events that the schedule may still list
       const st = ev.status;
       if (st && typeof st === "object" && (st as SAPIV2StatusObj).type === "finished") return false;
@@ -5850,7 +5853,7 @@ router.get("/upcoming", async (req, res) => {
   else if (sport === "volleyball") matches = cache.volleyball;
   else if (sport === "baseball") matches = cache.baseball;
   else matches = [...cache.football, ...cache.tennis, ...cache.basketball, ...cache.hockey, ...cache.volleyball, ...cache.baseball];
-  res.json({ matches: matches.filter(m => m.hasRealOdds) });
+  res.json({ matches });
 });
 
 router.get("/", async (_req, res) => {
