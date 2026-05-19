@@ -1936,17 +1936,20 @@ export default function Home() {
   const [playerMarketsLoading, setPlayerMarketsLoading] = useState(false);
   const [playerMarketsMatchId, setPlayerMarketsMatchId] = useState<string | null>(null);
 
-  // Minute ticker — ticks every 30s so displayed clock interpolates between API calls
+  // Minute ticker — ticks every 10s so displayed clock updates visibly between API calls
   useEffect(() => {
-    const interval = setInterval(() => setMinuteTick(t => t + 1), 30000);
+    const interval = setInterval(() => setMinuteTick(t => t + 1), 10000);
     return () => clearInterval(interval);
   }, []);
 
-  // Compute displayed minute for a live match (local interpolation between API refreshes)
+  // Compute displayed minute for a live match (local interpolation between API refreshes).
+  // Interpolation is paused only when match status is "HT" (half-time break),
+  // NOT simply because minute equals 45/90 (those can occur during active play).
   const getDisplayMinute = (match: Match): number => {
     const apiMin = apiMinutesRef.current[String(match.id)] ?? match.minute ?? 0;
     const fetchedAt = liveDataFetchedAt.current;
-    if (fetchedAt === 0 || apiMin === 45 || apiMin === 90 || apiMin === 105) return apiMin;
+    const isHalfTimeBreak = match.status === "HT";
+    if (fetchedAt === 0 || isHalfTimeBreak) return apiMin;
     const elapsed = Math.floor((Date.now() - fetchedAt) / 60000);
     const computed = apiMin + elapsed;
     if (apiMin < 45) return Math.min(45, computed);
@@ -4185,7 +4188,7 @@ export default function Home() {
         </div>
 
         {/* ── SUSPENSION BANNER (modal) ── */}
-        {match.marketSuspension && Object.values(match.marketSuspension).some(ts => ts > Date.now()) && (
+        {((match.marketSuspension && Object.values(match.marketSuspension).some(ts => ts > Date.now())) || !!(match._suspensionReason)) && (
           <div className="mb-4">
             <SuspensionBanner match={match} />
           </div>

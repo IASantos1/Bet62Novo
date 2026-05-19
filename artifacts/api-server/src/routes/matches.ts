@@ -4555,7 +4555,7 @@ async function buildLiveMatches(): Promise<LiveMatchState[]> {
 
       if (existing && existing.homeScore === homeScore && existing.awayScore === awayScore) {
         // Score unchanged — background drift timer handles market updates every 2s.
-        // Here we only update the minute and clean up expired suspensions.
+        // Here we update minute, clean up expired suspensions, and re-filter settled markets.
         const now = Date.now();
         if (existing.marketSuspension) {
           const active = Object.fromEntries(
@@ -4564,10 +4564,16 @@ async function buildLiveMatches(): Promise<LiveMatchState[]> {
           matchMarketSuspension = Object.keys(active).length > 0 ? active : undefined;
         }
 
-        // Read current state (already drifted by background timer); just update minute + suspensions
+        // Re-apply filterLiveMarkets so settled lines (BTTS, Over/Under) stay zeroed
+        // even if drift or initialization left them non-zero.
+        const safeMarkets = filterLiveMarkets(existing.markets, homeScore, awayScore);
+        const safeBase   = filterLiveMarkets(existing._baseMarkets ?? existing.markets, homeScore, awayScore);
+
         const updatedState = {
           ...existing,
           minute,
+          markets: safeMarkets,
+          _baseMarkets: safeBase,
           marketSuspension: matchMarketSuspension,
           _suspensionReason: matchMarketSuspension ? existing._suspensionReason : undefined,
           _firstSeenAt: firstSeenAt,
@@ -5152,6 +5158,17 @@ const FOOTBALL_V2_LIVE = new Set([
   "Penalties", "Break Time", "Pause",
 ]);
 
+// Suspension delays (ms) used when a goal is detected in the V2 football builder
+const GOAL_SUSP_V2: Record<string, number> = {
+  result: 25000, doubleChance: 25000, totalGoals: 28000, handicap: 28000,
+  halfTime: 25000, htft: 30000, correctScore: 35000, asianHandicap: 30000,
+  asianTotals: 30000, drawNoBet: 25000, firstGoal: 25000, winToNil: 25000,
+  cleanSheet: 25000, goalOddEven: 28000, exactGoals: 30000, btts1H: 25000,
+  toWinBothHalves: 28000, highestScoringHalf: 25000, htCorrectScore: 35000,
+  h2CorrectScore: 35000, teamGoals: 28000, secondHalf: 25000, drawNoBet2: 25000,
+  handicapPoints: 28000,
+};
+
 function buildFootballLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
   const now = Date.now();
   const result: LiveMatchState[] = [];
@@ -5174,6 +5191,7 @@ function buildFootballLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
     const isHT = statusStr === "HT";
     const isET = statusStr.includes("extra") || statusStr === "Extra Time" || statusStr === "Penalties";
     const minute = isHT ? 45 : isET ? 105 : statusStr === "1st half" ? 25 : statusStr === "2nd half" ? 70 : 45;
+    const newStatus = isHT ? "HT" : isET ? "ET" : statusStr;
 
     const existing = liveMatchState.get(id);
     if (existing) {
@@ -5182,24 +5200,53 @@ function buildFootballLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
       const newOdds = scored
         ? calculateLive1x2({ minute, homeGoals: homeScore, awayGoals: awayScore, redCardsHome: 0, redCardsAway: 0, baseHome: baseOdds.home, baseAway: baseOdds.away })
         : existing.odds;
-      const updated: LiveMatchState = {
-        ...existing,
-        homeScore,
-        awayScore,
-        minute,
-        status: isHT ? "HT" : isET ? "ET" : statusStr,
-        odds: newOdds,
-        _baseOdds: baseOdds,
-        _baseMarkets: existing._baseMarkets ?? existing.markets,
-      };
-      liveMatchState.set(id, applyTieredMarketDrift(updated, now));
+
+      if (scored) {
+        // Goal detected — filter settled markets, set goal suspension
+        const filteredMarkets = filterLiveMarkets(existing.markets, homeScore, awayScore);
+        const filteredBase = filterLiveMarkets(existing._baseMarkets ?? existing.markets, homeScore, awayScore);
+        const susp = Object.fromEntries(Object.entries(GOAL_SUSP_V2).map(([k, d]) => [k, now + d]));
+        const updated: LiveMatchState = {
+          ...existing,
+          homeScore, awayScore, minute, status: newStatus,
+          odds: newOdds,
+          markets: filteredMarkets,
+          _baseOdds: baseOdds,
+          _baseMarkets: filteredBase,
+          marketSuspension: susp,
+          _suspensionReason: "GOLO!",
+        };
+        liveMatchState.set(id, applyTieredMarketDrift(updated, now));
+      } else {
+        // Score unchanged — clean up expired suspensions, re-filter for safety
+        let susp = existing.marketSuspension;
+        if (susp) {
+          const active = Object.fromEntries(Object.entries(susp).filter(([, ts]) => ts > now));
+          susp = Object.keys(active).length > 0 ? active : undefined;
+        }
+        const filteredMarkets = filterLiveMarkets(existing.markets, homeScore, awayScore);
+        const filteredBase = filterLiveMarkets(existing._baseMarkets ?? existing.markets, homeScore, awayScore);
+        const updated: LiveMatchState = {
+          ...existing,
+          homeScore, awayScore, minute, status: newStatus,
+          odds: newOdds,
+          markets: filteredMarkets,
+          _baseOdds: baseOdds,
+          _baseMarkets: filteredBase,
+          marketSuspension: susp,
+          _suspensionReason: susp ? existing._suspensionReason : undefined,
+        };
+        liveMatchState.set(id, applyTieredMarketDrift(updated, now));
+      }
       result.push(liveMatchState.get(id)!);
     } else {
+      // First seen — build initial state with score-filtered markets
       const baseOdds = makeOddsFromTeams(homeTeam, awayTeam);
       const liveOdds = (homeScore === 0 && awayScore === 0)
         ? baseOdds
         : calculateLive1x2({ minute, homeGoals: homeScore, awayGoals: awayScore, redCardsHome: 0, redCardsAway: 0, baseHome: baseOdds.home, baseAway: baseOdds.away });
-      const markets = makeAdvancedMarketsFromTeams(homeTeam, awayTeam);
+      const rawMarkets = makeAdvancedMarketsFromTeams(homeTeam, awayTeam);
+      const markets = filterLiveMarkets(rawMarkets, homeScore, awayScore);
       const state: LiveMatchState = {
         id,
         home: homeTeam,
@@ -5210,7 +5257,7 @@ function buildFootballLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
         homeScore,
         awayScore,
         minute,
-        status: isHT ? "HT" : isET ? "ET" : statusStr,
+        status: newStatus,
         hasRealOdds: true,
         odds: liveOdds,
         markets,
