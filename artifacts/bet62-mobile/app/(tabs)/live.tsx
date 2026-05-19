@@ -19,7 +19,7 @@ import { useBetSlip } from "@/context/BetSlipContext";
 import { useLiveMatches, type LiveMatch } from "@/hooks/useLiveMatches";
 import { ComprehensiveMarketsSheet } from "@/components/ComprehensiveMarketsSheet";
 import { BetSlipModal } from "@/components/BetSlipModal";
-import { getMatchBannerUrl } from "@/utils/teamBanners";
+import { getMatchBannerUrl, getLeagueFlag } from "@/utils/teamBanners";
 
 type MCIconName = ComponentProps<typeof MaterialCommunityIcons>["name"];
 
@@ -299,7 +299,7 @@ function LiveMatchCard({ match }: { match: LiveMatch }) {
                 <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: colors.primary }} />
                 <MaterialCommunityIcons name={SPORT_ICONS[match.sport] ?? "trophy"} size={11} color={sportColor} />
                 <Text style={{ fontSize: 11, fontFamily: "Inter_500Medium", color: colors.mutedForeground, flex: 1 }} numberOfLines={1}>
-                  {match.league ?? match.sport}
+                  {getLeagueFlag(match.league, match.country)} {match.league ?? match.sport}
                 </Text>
                 <Text style={{ fontSize: 11, fontFamily: "Inter_700Bold", color: "#f59e0b" }}>{minuteLabel}</Text>
               </View>

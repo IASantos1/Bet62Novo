@@ -64,6 +64,7 @@ export interface LiveMatch {
   awayScore: number;
   odds: { home: number; draw: number; away: number };
   league?: string;
+  country?: string;
   leagueId?: string;
   markets?: LiveMatchMarkets;
   marketSuspension?: Record<string, number>;

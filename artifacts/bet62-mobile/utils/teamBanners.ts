@@ -200,31 +200,121 @@ export function getMatchBannerUrl(home: string, away: string): string | null {
 }
 
 export const LEAGUE_FLAGS: Record<string, string> = {
-  "La Liga": "🇪🇸", "LaLiga": "🇪🇸", "LaLiga2": "🇪🇸", "LaLiga Hypermotion": "🇪🇸", "Segunda": "🇪🇸", "Copa del Rey": "🇪🇸",
-  "Premier League": "🏴󠁧󠁢󠁥󠁮󠁧󠁿", "EFL Championship": "🏴󠁧󠁢󠁥󠁮󠁧󠁿", "Championship": "🏴󠁧󠁢󠁥󠁮󠁧󠁿", "League One": "🏴󠁧󠁢󠁥󠁮󠁧󠁿", "FA Cup": "🏴󠁧󠁢󠁥󠁮󠁧󠁿",
-  "Champions League": "⭐", "UEFA Champions League": "⭐", "Europa League": "🌟", "Conference League": "🟢",
-  "Serie A": "🇮🇹", "Serie B": "🇮🇹", "Coppa Italia": "🇮🇹",
-  "Bundesliga": "🇩🇪", "2. Bundesliga": "🇩🇪", "DFB-Pokal": "🇩🇪",
+  // ── Spain ──
+  "La Liga": "🇪🇸", "LaLiga": "🇪🇸", "LaLiga2": "🇪🇸", "LaLiga Hypermotion": "🇪🇸",
+  "Segunda": "🇪🇸", "Segunda División": "🇪🇸", "Copa del Rey": "🇪🇸", "Supercopa de España": "🇪🇸",
+  // ── England ──
+  "Premier League": "🏴󠁧󠁢󠁥󠁮󠁧󠁿", "EFL Championship": "🏴󠁧󠁢󠁥󠁮󠁧󠁿", "Championship": "🏴󠁧󠁢󠁥󠁮󠁧󠁿",
+  "League One": "🏴󠁧󠁢󠁥󠁮󠁧󠁿", "League Two": "🏴󠁧󠁢󠁥󠁮󠁧󠁿", "FA Cup": "🏴󠁧󠁢󠁥󠁮󠁧󠁿", "EFL Cup": "🏴󠁧󠁢󠁥󠁮󠁧󠁿", "Carabao Cup": "🏴󠁧󠁢󠁥󠁮󠁧󠁿",
+  // ── UEFA ──
+  "Champions League": "⭐", "UEFA Champions League": "⭐", "UCL": "⭐",
+  "Europa League": "🌟", "UEFA Europa League": "🌟", "UEL": "🌟",
+  "Conference League": "🟢", "UEFA Conference League": "🟢",
+  // ── Italy ──
+  "Serie A": "🇮🇹", "Serie B": "🇮🇹", "Serie C": "🇮🇹", "Coppa Italia": "🇮🇹",
+  // ── Germany ──
+  "Bundesliga": "🇩🇪", "2. Bundesliga": "🇩🇪", "3. Liga": "🇩🇪", "DFB-Pokal": "🇩🇪",
+  // ── France ──
   "Ligue 1": "🇫🇷", "Ligue 2": "🇫🇷", "Coupe de France": "🇫🇷",
-  "Liga Portugal": "🇵🇹", "Primeira Liga": "🇵🇹", "Segunda Liga": "🇵🇹", "Liga Portugal 2": "🇵🇹", "Taça de Portugal": "🇵🇹",
+  // ── Portugal ──
+  "Liga Portugal": "🇵🇹", "Primeira Liga": "🇵🇹", "Liga NOS": "🇵🇹",
+  "Segunda Liga": "🇵🇹", "Liga Portugal 2": "🇵🇹", "Taça de Portugal": "🇵🇹", "Taça da Liga": "🇵🇹",
+  // ── Netherlands ──
   "Eredivisie": "🇳🇱", "Eerste Divisie": "🇳🇱", "KNVB Cup": "🇳🇱",
-  "Belgian Pro League": "🇧🇪", "Jupiler Pro League": "🇧🇪",
-  "Süper Lig": "🇹🇷", "Super Lig": "🇹🇷", "TFF First League": "🇹🇷",
-  "Scottish Premiership": "🏴󠁧󠁢󠁳󠁣󠁴󠁿", "Scottish Championship": "🏴󠁧󠁢󠁳󠁣󠁴󠁿",
-  "Swiss Super League": "🇨🇭",
-  "Danish Superliga": "🇩🇰",
+  // ── Belgium ──
+  "Belgian Pro League": "🇧🇪", "Jupiler Pro League": "🇧🇪", "First Division A": "🇧🇪",
+  // ── Turkey ──
+  "Süper Lig": "🇹🇷", "Super Lig": "🇹🇷", "TFF First League": "🇹🇷", "TFF Second League": "🇹🇷",
+  // ── Scotland ──
+  "Scottish Premiership": "🏴󠁧󠁢󠁳󠁣󠁴󠁿", "Scottish Championship": "🏴󠁧󠁢󠁳󠁣󠁴󠁿", "Scottish League Cup": "🏴󠁧󠁢󠁳󠁣󠁴󠁿",
+  // ── Switzerland ──
+  "Swiss Super League": "🇨🇭", "Swiss Challenge League": "🇨🇭",
+  // ── Denmark ──
+  "Danish Superliga": "🇩🇰", "1. Division": "🇩🇰",
+  // ── Sweden ──
   "Allsvenskan": "🇸🇪", "Superettan": "🇸🇪",
+  // ── Norway ──
   "Eliteserien": "🇳🇴",
-  "HNL": "🇭🇷",
-  "Serbian SuperLiga": "🇷🇸",
-  "Brasileirao": "🇧🇷", "Brasileirão": "🇧🇷", "Campeonato Brasileiro": "🇧🇷", "Copa do Brasil": "🇧🇷",
-  "Primera División": "🇦🇷", "Primera Division": "🇦🇷",
-  "Liga MX": "🇲🇽",
-  "MLS": "🇺🇸", "NBA": "🇺🇸", "NHL": "🇺🇸", "MLB": "⚾", "USA: MLB": "⚾",
-  "ATP 500": "🎾", "ATP 250": "🎾", "WTA 1000": "🎾", "WTA 250": "🎾", "Roland Garros": "🇫🇷",
-  "NHL — Playoffs": "🏒",
+  // ── Finland ──
+  "Veikkausliiga": "🇫🇮",
+  // ── Croatia ──
+  "HNL": "🇭🇷", "Prva HNL": "🇭🇷",
+  // ── Serbia ──
+  "Serbian SuperLiga": "🇷🇸", "SuperLiga": "🇷🇸",
+  // ── Czech Republic ──
+  "Czech Liga": "🇨🇿", "Czech First League": "🇨🇿", "Fortuna Liga": "🇨🇿",
+  // ── Poland ──
+  "Ekstraklasa": "🇵🇱",
+  // ── Greece ──
+  "Super League": "🇬🇷", "Super League 1": "🇬🇷",
+  // ── Austria ──
+  "Austrian Bundesliga": "🇦🇹", "Bundesliga Austria": "🇦🇹",
+  // ── Russia ──
+  "Russian Premier League": "🇷🇺", "RPL": "🇷🇺",
+  // ── Ukraine ──
+  "Ukrainian Premier League": "🇺🇦",
+  // ── Romania ──
+  "Liga 1": "🇷🇴",
+  // ── Hungary ──
+  "OTP Bank Liga": "🇭🇺",
+  // ── Slovakia ──
+  "Fortuna Liga Slovakia": "🇸🇰",
+  // ── Israel ──
+  "Israeli Premier League": "🇮🇱", "Ligat ha'Al": "🇮🇱",
+  // ── Brazil ──
+  "Brasileirao": "🇧🇷", "Brasileirão": "🇧🇷", "Campeonato Brasileiro": "🇧🇷",
+  "Copa do Brasil": "🇧🇷", "Série B": "🇧🇷", "Série A": "🇧🇷",
+  "Campeonato Paulista": "🇧🇷", "Campeonato Carioca": "🇧🇷", "Campeonato Gaúcho": "🇧🇷",
+  // ── Argentina ──
+  "Primera División": "🇦🇷", "Primera Division": "🇦🇷", "Liga Profesional": "🇦🇷",
+  "Copa de la Liga": "🇦🇷", "Torneo Apertura": "🇦🇷", "Torneo Clausura": "🇦🇷",
+  // ── Mexico ──
+  "Liga MX": "🇲🇽", "Apertura": "🇲🇽", "Clausura": "🇲🇽", "Liga de Expansión MX": "🇲🇽",
+  // ── Colombia ──
+  "Liga BetPlay": "🇨🇴", "Primera A": "🇨🇴",
+  // ── Chile ──
+  "Primera División Chile": "🇨🇱",
+  // ── Uruguay ──
+  "Primera División Uruguay": "🇺🇾",
+  // ── Peru ──
+  "Liga 1 Peru": "🇵🇪", "Primera División Perú": "🇵🇪",
+  // ── Ecuador ──
+  "LigaPro": "🇪🇨",
+  // ── Paraguay ──
+  "División de Honor": "🇵🇾",
+  // ── Bolivia ──
+  "División Profesional": "🇧🇴",
+  // ── Venezuela ──
+  "Primera División Venezuela": "🇻🇪",
+  // ── USA / Canada ──
+  "MLS": "🇺🇸", "USL Championship": "🇺🇸",
+  "NBA": "🇺🇸", "NHL": "🇺🇸", "MLB": "⚾", "USA: MLB": "⚾", "NFL": "🇺🇸",
+  "NHL — Playoffs": "🏒", "NBA Playoffs": "🇺🇸",
+  // ── South Korea ──
+  "K League 1": "🇰🇷", "K League 2": "🇰🇷",
+  // ── Japan ──
+  "J1 League": "🇯🇵", "J2 League": "🇯🇵",
+  // ── China ──
+  "Chinese Super League": "🇨🇳", "CSL": "🇨🇳",
+  // ── Australia ──
+  "A-League Men": "🇦🇺", "A-League": "🇦🇺",
+  // ── Saudi Arabia ──
+  "Saudi Pro League": "🇸🇦", "Saudi Professional League": "🇸🇦",
+  // ── Qatar ──
+  "Qatar Stars League": "🇶🇦",
+  // ── UAE ──
+  "UAE Pro League": "🇦🇪",
+  // ── Tennis ──
+  "ATP 1000": "🎾", "ATP 500": "🎾", "ATP 250": "🎾",
+  "WTA 1000": "🎾", "WTA 500": "🎾", "WTA 250": "🎾",
+  "Roland Garros": "🇫🇷", "Wimbledon": "🏴󠁧󠁢󠁥󠁮󠁧󠁿", "US Open": "🇺🇸", "Australian Open": "🇦🇺",
+  "Davis Cup": "🎾", "ATP Finals": "🎾",
+  // ── Volleyball ──
   "Volleyball Nations League": "🏐", "Superlega — Itália": "🏐",
-  "EuroLeague": "⭐",
+  "CEV Champions League": "🏐", "Superliga Brasileira": "🏐",
+  // ── Basketball ──
+  "EuroLeague": "⭐", "EuroCup": "🏀",
+  "ACB": "🇪🇸", "Betclic Elite": "🇫🇷", "Basketball Bundesliga": "🇩🇪",
 };
 
 const COUNTRY_FLAGS: Record<string, string> = {

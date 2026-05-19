@@ -15,6 +15,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useColors } from "@/hooks/useColors";
 import { useBetSlip } from "@/context/BetSlipContext";
 import type { LiveMatchMarkets } from "@/hooks/useLiveMatches";
+import { getLeagueFlag } from "@/utils/teamBanners";
 
 type TabKey =
   | "stats" | "classificacao" | "aovivo"
@@ -638,7 +639,7 @@ export function ComprehensiveMarketsSheet({ visible, match, onClose }: Props) {
           <View style={{ alignItems: "center", paddingVertical: 30, gap: 10 }}>
             <Ionicons name="trophy-outline" size={36} color={colors.border} />
             <Text style={{ fontSize: 14, fontFamily: "Inter_600SemiBold", color: colors.mutedForeground }}>
-              {match.league ?? "Liga"}
+              {getLeagueFlag(match.league, match.country)} {match.league ?? "Liga"}
             </Text>
             <Text style={{ fontSize: 12, fontFamily: "Inter_400Regular", color: colors.mutedForeground, textAlign: "center" }}>
               Classificação disponível em breve
@@ -662,7 +663,7 @@ export function ComprehensiveMarketsSheet({ visible, match, onClose }: Props) {
             </Pressable>
 
             <View style={s.leagueRow}>
-              <Text style={s.leagueText}>{match.league ?? match.sport}</Text>
+              <Text style={s.leagueText}>{getLeagueFlag(match.league, match.country)} {match.league ?? match.sport}</Text>
               <View style={{ flex: 1 }} />
               <Text style={s.dateText}>{dateStr}</Text>
             </View>

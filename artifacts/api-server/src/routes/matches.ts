@@ -2568,13 +2568,28 @@ function applyTieredMarketDrift(state: LiveMatchState, now: number): LiveMatchSt
   };
 
   // ── Main 1X2 odds (highest priority, 45–90s cadence) ───────────────────────
+  // For football, re-anchor to score-aware Poisson model every tick so that a
+  // team winning 5-0 always has very low odds — not the pre-match line.
+  const liveAnchor: { home: number; draw: number; away: number } =
+    state.sport === "football"
+      ? calculateLive1x2({
+          minute,
+          homeGoals: homeScore,
+          awayGoals: awayScore,
+          redCardsHome: state.redCardsHome ?? 0,
+          redCardsAway: state.redCardsAway ?? 0,
+          baseHome: baseOdds.home,
+          baseAway: baseOdds.away,
+        })
+      : baseOdds;
+
   const oddsOscH = Math.sin(t * 0.31 + phase * 0.7) * 0.018 + Math.cos(t * 0.17) * 0.009;
   const oddsOscD = Math.cos(t * 0.23 + phase * 0.5) * 0.014 + Math.sin(t * 0.11) * 0.007;
   const oddsOscA = Math.sin(t * 0.27 + phase * 0.9) * 0.018 + Math.cos(t * 0.19) * 0.009;
   const newOdds = due("odds", 45_000, 90_000) ? {
-    home: Math.max(1.04, Math.min(200, r(baseOdds.home * (1 + oddsOscH - (diff > 0 ? timePressure * 0.4 : timePressure * 0.6))))),
-    draw: baseOdds.draw > 0 ? Math.max(2.00, Math.min(200, r(baseOdds.draw * (1 + oddsOscD + timePressure * 0.3)))) : 0,
-    away: Math.max(1.04, Math.min(200, r(baseOdds.away * (1 + oddsOscA + (diff > 0 ? timePressure * 0.6 : timePressure * 0.4))))),
+    home: Math.max(1.04, Math.min(200, r(liveAnchor.home * (1 + oddsOscH)))),
+    draw: liveAnchor.draw > 0 ? Math.max(2.00, Math.min(200, r(liveAnchor.draw * (1 + oddsOscD)))) : 0,
+    away: Math.max(1.04, Math.min(200, r(liveAnchor.away * (1 + oddsOscA)))),
   } : state.odds; // not due yet → unchanged (no arrow on frontend)
 
   // ── Oscillator values — computed fresh each cycle but only APPLIED when due ─
@@ -5199,10 +5214,14 @@ function buildBasketballLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
     const diff = homeScore - awayScore;
     let liveOdds = { ...odds, draw: 0 };
     if (diff !== 0) {
-      const factor = Math.min(0.40, Math.abs(diff) * 0.03);
+      // Basketball: each point ~2.5% probability swing; at 20pts lead → ~96% win chance
+      const absDiff = Math.abs(diff);
+      const winPct = Math.min(0.96, 0.5 + absDiff * 0.025);
+      const winnerOdds = Math.max(1.04, +(0.975 / winPct).toFixed(2));
+      const loserOdds  = Math.min(50,   +(0.975 / Math.max(0.04, 1 - winPct)).toFixed(2));
       liveOdds = diff > 0
-        ? { home: Math.max(1.04, +(odds.home * (1 - factor)).toFixed(2)), draw: 0, away: Math.min(12, +(odds.away * (1 + factor)).toFixed(2)) }
-        : { home: Math.min(12, +(odds.home * (1 + factor)).toFixed(2)), draw: 0, away: Math.max(1.04, +(odds.away * (1 - factor)).toFixed(2)) };
+        ? { home: winnerOdds, draw: 0, away: loserOdds }
+        : { home: loserOdds,  draw: 0, away: winnerOdds };
     }
 
     result.push({
@@ -5252,10 +5271,14 @@ function buildHockeyLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
     const diff = homeScore - awayScore;
     let liveOdds = { ...odds, draw: 0 };
     if (diff !== 0) {
-      const factor = Math.min(0.40, Math.abs(diff) * 0.15);
+      // Hockey: each goal ~17% probability swing; 3+ goal lead → decisive favourite
+      const absDiff = Math.abs(diff);
+      const winPct = Math.min(0.97, 0.5 + absDiff * 0.17);
+      const winnerOdds = Math.max(1.04, +(0.975 / winPct).toFixed(2));
+      const loserOdds  = Math.min(50,   +(0.975 / Math.max(0.03, 1 - winPct)).toFixed(2));
       liveOdds = diff > 0
-        ? { home: Math.max(1.04, +(odds.home * (1 - factor)).toFixed(2)), draw: 0, away: Math.min(12, +(odds.away * (1 + factor)).toFixed(2)) }
-        : { home: Math.min(12, +(odds.home * (1 + factor)).toFixed(2)), draw: 0, away: Math.max(1.04, +(odds.away * (1 - factor)).toFixed(2)) };
+        ? { home: winnerOdds, draw: 0, away: loserOdds }
+        : { home: loserOdds,  draw: 0, away: winnerOdds };
     }
     liveOdds.draw = 0;
 
@@ -5306,10 +5329,14 @@ function buildBaseballLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
     const diff = homeScore - awayScore;
     let liveOdds = { ...odds, draw: 0 };
     if (diff !== 0) {
-      const factor = Math.min(0.40, Math.abs(diff) * 0.10);
+      // Baseball: each run ~14% probability swing; 5+ run lead → decisive favourite
+      const absDiff = Math.abs(diff);
+      const winPct = Math.min(0.97, 0.5 + absDiff * 0.14);
+      const winnerOdds = Math.max(1.04, +(0.975 / winPct).toFixed(2));
+      const loserOdds  = Math.min(50,   +(0.975 / Math.max(0.03, 1 - winPct)).toFixed(2));
       liveOdds = diff > 0
-        ? { home: Math.max(1.04, +(odds.home * (1 - factor)).toFixed(2)), draw: 0, away: Math.min(15, +(odds.away * (1 + factor)).toFixed(2)) }
-        : { home: Math.min(15, +(odds.home * (1 + factor)).toFixed(2)), draw: 0, away: Math.max(1.04, +(odds.away * (1 - factor)).toFixed(2)) };
+        ? { home: winnerOdds, draw: 0, away: loserOdds }
+        : { home: loserOdds,  draw: 0, away: winnerOdds };
     }
 
     result.push({

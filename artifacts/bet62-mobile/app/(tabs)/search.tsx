@@ -19,6 +19,7 @@ import { API_BASE } from "@/context/AuthContext";
 import { useLiveMatches, type LiveMatchMarkets } from "@/hooks/useLiveMatches";
 import { ComprehensiveMarketsSheet } from "@/components/ComprehensiveMarketsSheet";
 import { BetSlipModal } from "@/components/BetSlipModal";
+import { getLeagueFlag } from "@/utils/teamBanners";
 
 type MCIconName = ComponentProps<typeof MaterialCommunityIcons>["name"];
 
@@ -270,7 +271,7 @@ export default function SearchScreen() {
             </View>
           )}
           <Text style={s.matchTeams} numberOfLines={1}>{match.home} vs {match.away}</Text>
-          <Text style={s.matchLeague} numberOfLines={1}>{match.league ?? match.sport}</Text>
+          <Text style={s.matchLeague} numberOfLines={1}>{getLeagueFlag(match.league, (match as { country?: string }).country)} {match.league ?? match.sport}</Text>
           <View style={s.matchOdds}>
             {([
               { mkt: "1x2-home", lbl: "1", val: match.odds.home },
