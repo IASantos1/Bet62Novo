@@ -6084,7 +6084,9 @@ router.get("/stats", async (req, res) => {
 
   // --- League standings ---
   const leagueParam = String(req.query["league"] ?? "");
-  const standingsData = buildLeagueStandings(leagueParam || (sport === "football" || sport === "soccer" ? "england" : sport), home, away);
+  // Do NOT default to "england" — use only the actual league name sent by the client.
+  // If no match is found in LEAGUE_TEAMS, buildLeagueStandings uses the real team names + generic fillers.
+  const standingsData = buildLeagueStandings(leagueParam, home, away);
 
   // --- Lineups / Titulares (football only) ---
   const fnPool = ["João","Pedro","Miguel","Rafael","Bruno","André","Hugo","Rui","Nuno","Diogo","Carlos","Luís","Fábio","Nelson","Ricardo","Gabriel","Marco","Tiago","Filipe","Bernardo"];
@@ -6127,58 +6129,113 @@ router.get("/stats", async (req, res) => {
 // ─── Standings endpoint + league data ────────────────────────────────────────
 
 // ─── Known league team lists (for standings generation) ───────────────────────
+// IMPORTANT: patterns must be specific enough to avoid cross-league false matches.
+// Never use a bare generic name (e.g. "super league", "liga 1", "primeira liga",
+// "serie a") that could collide with another country's competition.
+// Use country-qualified patterns like "greece:super" or "super league greece".
 const LEAGUE_TEAMS: Array<{ patterns: string[]; name: string; teams: string[] }> = [
-  { patterns: ["premier league", "england:premier","england:top"], name: "Premier League", teams: ["Manchester City","Arsenal","Liverpool","Aston Villa","Tottenham","Chelsea","Newcastle","Manchester Utd","West Ham","Brighton","Wolves","Brentford","Fulham","Everton","Crystal Palace","Nottingham Forest","Bournemouth","Burnley","Luton","Sheffield Utd"] },
-  { patterns: ["championship", "england:championship","efl championship"], name: "EFL Championship", teams: ["Leicester City","Leeds Utd","Ipswich","Southampton","West Brom","Norwich","Watford","Middlesbrough","Coventry","Sheffield Wed","Stoke","Millwall","Preston","Swansea","Hull","Cardiff","QPR","Blackburn","Sunderland","Bristol City","Rotherham","Huddersfield","Birmingham","Plymouth"] },
-  { patterns: ["league one","england:league one"], name: "League One", teams: ["Derby County","Portsmouth","Bolton","Oxford Utd","Bristol Rovers","Exeter","Peterborough","Barnsley","Charlton","Leyton Orient","Lincoln","Burton","Northampton","Reading","Cambridge","Shrewsbury","Port Vale","Stevenage","Cheltenham","Fleetwood","Wycombe","Blackpool","Morecambe","Forest Green"] },
-  { patterns: ["laliga", "la liga", "primera division", "primera división","spain:top","spain:laliga"], name: "LaLiga", teams: ["Real Madrid","Barcelona","Atletico Madrid","Athletic Club","Real Sociedad","Villarreal","Real Betis","Valencia","Osasuna","Sevilla","Getafe","Rayo Vallecano","Alaves","Celta Vigo","Mallorca","Las Palmas","Girona","Cadiz","Granada","Almeria"] },
-  { patterns: ["laliga 2","segunda division","segunda división","spain:second"], name: "LaLiga 2", teams: ["Sporting Gijon","Racing Santander","Elche","Levante","Valladolid","Huesca","Zaragoza","Tenerife","Las Palmas","Albacete","Mirandes","Leganes","Oviedo","Burgos","Cartagena","Eibar","Ferrol","Andorra","Eldense","Amorebieta","SD Ponferradina","Villarreal B","Alcorcon","Wigan"] },
-  { patterns: ["bundesliga","germany:top","germany:bundesliga"], name: "Bundesliga", teams: ["Bayern Munich","Bayer Leverkusen","RB Leipzig","Borussia Dortmund","VfB Stuttgart","Eintracht Frankfurt","SC Freiburg","B. Monchengladbach","Union Berlin","Hoffenheim","Augsburg","Wolfsburg","Mainz","Bochum","Koln","Werder Bremen","Heidenheim","Darmstadt"] },
-  { patterns: ["2. bundesliga","2.bundesliga","germany:second"], name: "2. Bundesliga", teams: ["HSV","FC Schalke","Fortuna Dusseldorf","Karlsruher SC","Hertha Berlin","1. FC Nurnberg","SpVgg Greuther Furth","SV Darmstadt","FC Paderborn","Holstein Kiel","FC St. Pauli","Hannover 96","VfL Osnabruck","SV Elversberg","1. FC Magdeburg","Wehen Wiesbaden","FC Kaiserslautern","Eintracht Braunschweig"] },
-  { patterns: ["serie a","italy:top","italy:serie a"], name: "Serie A", teams: ["Inter","AC Milan","Juventus","Napoli","Atalanta","AS Roma","SS Lazio","Fiorentina","Bologna","Torino","Monza","Genoa","Lecce","Hellas Verona","Cagliari","Empoli","Frosinone","Udinese","Salernitana","Sassuolo"] },
-  { patterns: ["serie b","italy:serie b","italy:second"], name: "Serie B", teams: ["Parma","Como","Venezia","Palermo","Cremonese","Catanzaro","Sampdoria","Modena","Bari","Ternana","Cosenza","Spezia","Cittadella","Sudtirol","Ascoli","Reggiana","Lecco","FeralpiSalo","Brescia","Pisa","Cesena","Carrarese","Mantova"] },
-  { patterns: ["ligue 1","france:top","france:ligue 1"], name: "Ligue 1", teams: ["PSG","Monaco","Lille","Marseille","Lyon","Nice","Rennes","Lens","Reims","Strasbourg","Toulouse","Montpellier","Brest","Nantes","Metz","Le Havre","Lorient","Clermont","Auxerre","Troyes"] },
-  { patterns: ["ligue 2","france:second"], name: "Ligue 2", teams: ["Grenoble","Amiens","Pau FC","Laval","Rodez","Guingamp","Caen","Quevilly Rouen","Annecy","Troyes","Concarneau","Valenciennes","Bastia","Dunkerque","Niort","Angers","St Etienne","Auxerre","Metz","Charleville"] },
-  { patterns: ["liga portugal","primeira liga","portugal:top","ligabwin","liga bwin","liga betclic","portugal:liga"], name: "Liga Portugal", teams: ["Benfica","Sporting CP","Porto","Braga","Vitoria Guimaraes","Famalicao","Casa Pia","Moreirense","Estoril","Arouca","Vizela","Rio Ave","Boavista","Chaves","Estrela Amadora","Portimonense","Santa Clara","Gil Vicente"] },
-  { patterns: ["liga portugal 2","liga sabseg","portugal:second"], name: "Liga Portugal 2", teams: ["Academico de Viseu","Leixoes","Penafiel","Mafra","Tondela","Feirense","Oliveirense","Varzim","Vilafranquense","UD Vilafranquense","Sporting B","Benfica B","Porto B","Braga B","Maritimo","Nacional","Avs","Cova da Piedade"] },
-  { patterns: ["eredivisie","netherlands:top","netherlands:eredivisie","holland:"], name: "Eredivisie", teams: ["PSV","Feyenoord","Ajax","AZ Alkmaar","FC Twente","Utrecht","Groningen","Heerenveen","Sparta Rotterdam","NEC Nijmegen","Go Ahead Eagles","Heracles","Almere City","RKC Waalwijk","Fortuna Sittard","Excelsior","SC Cambuur","FC Volendam"] },
-  { patterns: ["süper lig","super lig","turkey:top","turkey:super"], name: "Süper Lig", teams: ["Galatasaray","Fenerbahce","Besiktas","Trabzonspor","Basaksehir","Sivasspor","Konyaspor","Antalyaspor","Kasimpasa","Adana Demirspor","Ankaragücü","Gaziantep FK","Kayserispor","Rizespor","Alanyaspor","Samsunspor","Pendikspor","Hatayspor"] },
-  { patterns: ["scottish premiership","scotland:top","scotland:premiership","spfl"], name: "Scottish Premiership", teams: ["Celtic","Rangers","Hearts","Hibernian","Aberdeen","Motherwell","St Mirren","Dundee United","Livingston","Ross County","Kilmarnock","St Johnstone"] },
-  { patterns: ["jupiler","belgium:top","belgium:first","pro league","belgium:jupiler"], name: "Jupiler Pro League", teams: ["Club Brugge","Anderlecht","Union SG","Gent","Antwerp","Standard Liege","Charleroi","Westerlo","OH Leuven","Mechelen","Cercle Brugge","Genk","Sint-Truiden","Eupen","Kortrijk","Zulte Waregem"] },
-  { patterns: ["ekstraklasa","poland:top","poland:ekstraklasa"], name: "Ekstraklasa", teams: ["Legia Warsaw","Rakow Czestochowa","Lech Poznan","Piast Gliwice","Wisla Krakow","Cracovia","Gornik Zabrze","Zagłebie Lubin","Jagiellonia","Slask Wroclaw","Stal Mielec","Korona Kielce","Warta Poznan","Ruch Chorzow","Puszcza Niepolomice","GKS Katowice"] },
-  { patterns: ["super league","greece:top","greece:super"], name: "Super League Grécia", teams: ["Olympiakos","Panathinaikos","PAOK","AEK Athens","Aris","Atromitos","Volos","OFI Crete","Lamia","Panserraikos","Levadiakos","Asteras Tripolis","Giannina","Ionikos"] },
-  { patterns: ["chinese super league","china:top","csl:","china:super"], name: "Chinese Super League", teams: ["Shanghai Port","Shandong Taishan","Beijing Guoan","Wuhan Three Towns","Guangzhou FC","Shanghai Shenhua","Tianjin Jinmen Tiger","Shenzhen FC","Zhejiang FC","Changchun Yatai","Qingdao West Coast","Dalian Pro","Meizhou Hakka","Nantong Zhiyun","Henan FC","Chengdu Rongcheng"] },
-  { patterns: ["liga 1","indonesia:top","indonesia:liga"], name: "Liga 1 Indonésia", teams: ["Persib Bandung","Persija Jakarta","Bali United","PSM Makassar","Arema FC","Persebaya Surabaya","Borneo FC","Bhayangkara FC","PSIS Semarang","Persikabo","Barito Putera","Madura United","Dewa United","RANS Nusantara","PSS Sleman","Persita Tangerang"] },
-  { patterns: ["mls","major league soccer","usa:mls","united states:mls"], name: "MLS", teams: ["Inter Miami","Los Angeles FC","FC Cincinnati","Columbus Crew","Orlando City","Atlanta United","Seattle Sounders","Portland Timbers","NYCFC","New England","Philadelphia Union","Nashville SC","St. Louis City","Austin FC","Real Salt Lake","LA Galaxy","Minnesota United","Toronto FC","Chicago Fire","NY Red Bulls"] },
-  { patterns: ["brasileirao","brasileirão","campeonato brasileiro","brazil:top","série a","serie a brasileira"], name: "Brasileirão Série A", teams: ["Atlético Mineiro","Palmeiras","Flamengo","Botafogo","Fluminense","Internacional","Grêmio","São Paulo","Corinthians","Vasco","Cruzeiro","Bragantino","Bahia","Athletico-PR","Cuiabá","Goiás","Coritiba","Fortaleza","Santos","América MG"] },
-  { patterns: ["liga mx","mexico:top","mexico:liga mx","ligamx"], name: "Liga MX", teams: ["Club América","Tigres UANL","Chivas","Cruz Azul","UNAM Pumas","Monterrey","Atlas","Toluca","León","Santos Laguna","Puebla","Pachuca","Necaxa","Mazatlán","FC Juárez","Tijuana","San Luis","Querétaro","Atlético San Luis","Mazatlán FC"] },
-  { patterns: ["primera division argentina","argentina:top","argentina:primera","superliga argentina"], name: "Primera División Argentina", teams: ["River Plate","Boca Juniors","Independiente","Racing Club","San Lorenzo","Estudiantes","Vélez Sársfield","Newells Old Boys","Lanús","Huracán","Belgrano","Talleres","Godoy Cruz","Defensa y Justicia","Gimnasia La Plata","Banfield","Platense","Rosario Central","Instituto","Tigre"] },
-  { patterns: ["j1 league","j-league","japan:top","japan:j1"], name: "J1 League", teams: ["Vissel Kobe","Yokohama F. Marinos","Urawa Red Diamonds","Kashima Antlers","Gamba Osaka","Kawasaki Frontale","Nagoya Grampus","FC Tokyo","Sanfrecce Hiroshima","Consadole Sapporo","Cerezo Osaka","Shonan Bellmare","Avispa Fukuoka","Kyoto Sanga","Tokushima Vortis","Jubilo Iwata","Albirex Niigata","Kashiwa Reysol"] },
-  { patterns: ["saudi pro league","saudi professional league","saudi arabia:top","spl:"], name: "Saudi Pro League", teams: ["Al-Hilal","Al-Nassr","Al-Ittihad","Al-Ahli","Al-Shabab","Al-Qadsiah","Al-Ettifaq","Al-Fateh","Al-Taawon","Al-Khaleej","Al-Hazem","Al-Feiha","Abha","Al-Riyadh","Al-Tai","Damac"] },
-  { patterns: ["russian premier league","rpm","russia:top","rpl:"], name: "Russian Premier League", teams: ["Zenit","CSKA Moscow","Lokomotiv Moscow","Spartak Moscow","Krasnodar","Dynamo Moscow","Rostov","Akhmat","Ufa","Rubin Kazan","Khimki","Ural","Samara","Sochi","Arsenal Tula","Torpedo Moscow"] },
-  { patterns: ["primeira liga","austria:top","austria:bundesliga","bundesliga österreich"], name: "Austrian Bundesliga", teams: ["Red Bull Salzburg","Sturm Graz","LASK","Austria Vienna","Rapid Vienna","Wolfsberger","Hartberg","WAC","Rheindorf Altach","Austria Lustenau","Blau-Weiss Linz","SCR Altach"] },
-  { patterns: ["swiss super league","switzerland:top","super league schweiz"], name: "Swiss Super League", teams: ["FC Basel","Young Boys","FC Lugano","Servette","FC Zürich","FC Luzern","Winterthur","Grasshopper","FC St. Gallen","Yverdon","FC Lausanne-Sport","FC Vaduz"] },
-  { patterns: ["danish superliga","denmark:top","superliga denmark"], name: "Danish Superliga", teams: ["FC Copenhagen","FC Midtjylland","Brondby","Silkeborg","AGF","Aarhus","Nordsjælland","Randers","OB","Vejle","AC Horsens","HB Koge","Lyngby","FC Fredericia","Viborg"] },
-  { patterns: ["allsvenskan","sweden:top","sweden:allsvenskan"], name: "Allsvenskan", teams: ["Malmo FF","IF Elfsborg","Djurgårdens IF","AIK","IFK Göteborg","Hammarby","IFK Norrköping","BK Häcken","Kalmar FF","GAIS","Sirius","Degerfors","Örebro","Mjällby","Halmstad","Varberg"] },
-  { patterns: ["eliteserien","norway:top","norway:eliteserien"], name: "Eliteserien", teams: ["Bodø/Glimt","Molde","Rosenborg","Brann","Viking","Lillestrøm","Vålerenga","HamKam","Stabæk","Sandefjord","Strømsgodset","Aalesund","Sarpsborg","Odd","Haugesund","Tromsø"] },
-  { patterns: ["veikkausliiga","finland:top","finland:veikkausliiga"], name: "Veikkausliiga", teams: ["HJK Helsinki","HIFK","KuPS","SJK","Ilves","VPS","FC Inter Turku","Mariehamn","KTP","AC Oulu","EIF","FC Honka","Gnistan","FC Haka"] },
-  { patterns: ["primera federacion","segunda rfef","rfef","spain:third"], name: "Primera RFEF", teams: ["Deportivo La Coruña","SD Amorebieta","Mérida AD","Algeciras CF","Celta B","Deportivo Alaves B","Barça B","Atletico B","Sevilla B","Athletic B","Real Sociedad B","Valencia B","Villarreal B","Málaga","Pontevedra","Córdoba"] },
-  { patterns: ["liga acb","acb","spain:basketball"], name: "Liga ACB", teams: ["Real Madrid","FC Barcelona","Baskonia","Valencia Basket","Gran Canaria","Unicaja","Joventut","San Pablo Burgos","Manresa","Betis","Bilbao Basket","Estudiantes","Obradoiro","Breogán","Fuenlabrada","Zaragoza","Rio Breogan","Tenerife"] },
-  { patterns: ["pro14","urc","united rugby","premiership rugby","aviva premiership","top 14"], name: "Rugby", teams: ["Leinster","Munster","Ulster","Connacht","Glasgow","Edinburgh","Cardiff","Dragons","Scarlets","Ospreys","Lions","Sharks","Bulls","Stormers","Benetton","Zebre"] },
-  { patterns: ["champions league","europa league","conference league","uefa"], name: "UEFA Champions League", teams: ["Real Madrid","Manchester City","Bayern Munich","PSG","Barcelona","Liverpool","Arsenal","Atletico Madrid","Inter","Borussia Dortmund","Napoli","AC Milan","Chelsea","Benfica","Porto","RB Leipzig","Sevilla","Lazio","Juventus","Shakhtar Donetsk"] },
+  // ── England ──────────────────────────────────────────────────────────────────
+  { patterns: ["premier league","england:premier","england:top","england premier"], name: "Premier League", teams: ["Manchester City","Arsenal","Liverpool","Aston Villa","Tottenham","Chelsea","Newcastle","Manchester Utd","West Ham","Brighton","Wolves","Brentford","Fulham","Everton","Crystal Palace","Nottingham Forest","Bournemouth","Burnley","Luton","Sheffield Utd"] },
+  { patterns: ["efl championship","england:championship","england championship"], name: "EFL Championship", teams: ["Leicester City","Leeds Utd","Ipswich","Southampton","West Brom","Norwich","Watford","Middlesbrough","Coventry","Sheffield Wed","Stoke","Millwall","Preston","Swansea","Hull","Cardiff","QPR","Blackburn","Sunderland","Bristol City","Rotherham","Huddersfield","Birmingham","Plymouth"] },
+  { patterns: ["league one","england:league one","england league one"], name: "League One", teams: ["Derby County","Portsmouth","Bolton","Oxford Utd","Bristol Rovers","Exeter","Peterborough","Barnsley","Charlton","Leyton Orient","Lincoln","Burton","Northampton","Reading","Cambridge","Shrewsbury","Port Vale","Stevenage","Cheltenham","Fleetwood","Wycombe","Blackpool","Morecambe","Forest Green"] },
+  // ── Spain ─────────────────────────────────────────────────────────────────────
+  { patterns: ["laliga","la liga","primera division","primera división","spain:top","spain:laliga","liga española"], name: "LaLiga", teams: ["Real Madrid","Barcelona","Atletico Madrid","Athletic Club","Real Sociedad","Villarreal","Real Betis","Valencia","Osasuna","Sevilla","Getafe","Rayo Vallecano","Alaves","Celta Vigo","Mallorca","Las Palmas","Girona","Cadiz","Granada","Almeria"] },
+  { patterns: ["laliga 2","segunda division","segunda división","spain:second","spain segunda"], name: "LaLiga 2", teams: ["Sporting Gijon","Racing Santander","Elche","Levante","Valladolid","Huesca","Zaragoza","Tenerife","Albacete","Mirandes","Leganes","Oviedo","Burgos","Cartagena","Eibar","Ferrol","Andorra","Eldense","Amorebieta","Alcorcon"] },
+  // ── Germany ───────────────────────────────────────────────────────────────────
+  { patterns: ["bundesliga","germany:top","germany:bundesliga","german bundesliga","1. bundesliga"], name: "Bundesliga", teams: ["Bayern Munich","Bayer Leverkusen","RB Leipzig","Borussia Dortmund","VfB Stuttgart","Eintracht Frankfurt","SC Freiburg","B. Monchengladbach","Union Berlin","Hoffenheim","Augsburg","Wolfsburg","Mainz","Bochum","Koln","Werder Bremen","Heidenheim","Darmstadt"] },
+  { patterns: ["2. bundesliga","2.bundesliga","germany:second","german second"], name: "2. Bundesliga", teams: ["HSV","FC Schalke","Fortuna Dusseldorf","Karlsruher SC","Hertha Berlin","1. FC Nurnberg","SpVgg Greuther Furth","SV Darmstadt","FC Paderborn","Holstein Kiel","FC St. Pauli","Hannover 96","VfL Osnabruck","SV Elversberg","1. FC Magdeburg","Wehen Wiesbaden","FC Kaiserslautern","Eintracht Braunschweig"] },
+  // ── Italy ─────────────────────────────────────────────────────────────────────
+  { patterns: ["italy:top","italy:serie a","serie a italia","italian serie a","calcio serie a","serie a tim"], name: "Serie A", teams: ["Inter","AC Milan","Juventus","Napoli","Atalanta","AS Roma","SS Lazio","Fiorentina","Bologna","Torino","Monza","Genoa","Lecce","Hellas Verona","Cagliari","Empoli","Frosinone","Udinese","Salernitana","Sassuolo"] },
+  { patterns: ["serie b","italy:serie b","italy:second","serie b italia"], name: "Serie B", teams: ["Parma","Como","Venezia","Palermo","Cremonese","Catanzaro","Sampdoria","Modena","Bari","Ternana","Cosenza","Spezia","Cittadella","Sudtirol","Ascoli","Reggiana","Lecco","FeralpiSalo","Brescia","Pisa","Cesena","Carrarese","Mantova"] },
+  // ── France ────────────────────────────────────────────────────────────────────
+  { patterns: ["ligue 1","france:top","france:ligue 1","french ligue 1"], name: "Ligue 1", teams: ["PSG","Monaco","Lille","Marseille","Lyon","Nice","Rennes","Lens","Reims","Strasbourg","Toulouse","Montpellier","Brest","Nantes","Metz","Le Havre","Lorient","Clermont","Auxerre","Troyes"] },
+  { patterns: ["ligue 2","france:second","french ligue 2"], name: "Ligue 2", teams: ["Grenoble","Amiens","Pau FC","Laval","Rodez","Guingamp","Caen","Quevilly Rouen","Annecy","Concarneau","Valenciennes","Bastia","Dunkerque","Niort","Angers","St Etienne","Charleville"] },
+  // ── Portugal ──────────────────────────────────────────────────────────────────
+  { patterns: ["liga portugal","portugal:top","portugal:liga","ligabwin","liga bwin","liga betclic","primeira liga portugal","portuguese primeira","liga nos"], name: "Liga Portugal", teams: ["Benfica","Sporting CP","Porto","Braga","Vitoria Guimaraes","Famalicao","Casa Pia","Moreirense","Estoril","Arouca","Vizela","Rio Ave","Boavista","Chaves","Estrela Amadora","Portimonense","Santa Clara","Gil Vicente"] },
+  { patterns: ["liga portugal 2","liga sabseg","portugal:second","portuguese second"], name: "Liga Portugal 2", teams: ["Academico de Viseu","Leixoes","Penafiel","Mafra","Tondela","Feirense","Oliveirense","Varzim","Vilafranquense","Sporting B","Benfica B","Porto B","Braga B","Maritimo","Nacional","Avs","Cova da Piedade"] },
+  // ── Netherlands ───────────────────────────────────────────────────────────────
+  { patterns: ["eredivisie","netherlands:top","netherlands:eredivisie","dutch eredivisie","holland:top"], name: "Eredivisie", teams: ["PSV","Feyenoord","Ajax","AZ Alkmaar","FC Twente","Utrecht","Groningen","Heerenveen","Sparta Rotterdam","NEC Nijmegen","Go Ahead Eagles","Heracles","Almere City","RKC Waalwijk","Fortuna Sittard","Excelsior","SC Cambuur","FC Volendam"] },
+  // ── Turkey ────────────────────────────────────────────────────────────────────
+  { patterns: ["süper lig","super lig","turkey:top","turkey:super","turkish super lig"], name: "Süper Lig", teams: ["Galatasaray","Fenerbahce","Besiktas","Trabzonspor","Basaksehir","Sivasspor","Konyaspor","Antalyaspor","Kasimpasa","Adana Demirspor","Ankaragücü","Gaziantep FK","Kayserispor","Rizespor","Alanyaspor","Samsunspor","Pendikspor","Hatayspor"] },
+  // ── Scotland ──────────────────────────────────────────────────────────────────
+  { patterns: ["scottish premiership","scotland:top","scotland:premiership","spfl premiership","scottish premier"], name: "Scottish Premiership", teams: ["Celtic","Rangers","Hearts","Hibernian","Aberdeen","Motherwell","St Mirren","Dundee United","Livingston","Ross County","Kilmarnock","St Johnstone"] },
+  // ── Belgium ───────────────────────────────────────────────────────────────────
+  { patterns: ["jupiler","belgium:top","belgium:first","belgium pro league","jupiler pro"], name: "Jupiler Pro League", teams: ["Club Brugge","Anderlecht","Union SG","Gent","Antwerp","Standard Liege","Charleroi","Westerlo","OH Leuven","Mechelen","Cercle Brugge","Genk","Sint-Truiden","Eupen","Kortrijk","Zulte Waregem"] },
+  // ── Poland ────────────────────────────────────────────────────────────────────
+  { patterns: ["ekstraklasa","poland:top","poland:ekstraklasa","polish ekstraklasa"], name: "Ekstraklasa", teams: ["Legia Warsaw","Rakow Czestochowa","Lech Poznan","Piast Gliwice","Wisla Krakow","Cracovia","Gornik Zabrze","Zagłebie Lubin","Jagiellonia","Slask Wroclaw","Stal Mielec","Korona Kielce","Warta Poznan","Ruch Chorzow","Puszcza Niepolomice","GKS Katowice"] },
+  // ── Greece ────────────────────────────────────────────────────────────────────
+  // NOTE: patterns must NOT include bare "super league" — that collides with Swiss/Chinese/Turkish leagues.
+  { patterns: ["greece:top","greece:super","super league greece","greek super league","superleague greece","superleague ellada"], name: "Super League Grécia", teams: ["Olympiakos","Panathinaikos","PAOK","AEK Athens","Aris","Atromitos","Volos","OFI Crete","Lamia","Panserraikos","Levadiakos","Asteras Tripolis","Giannina","Ionikos"] },
+  // ── China ─────────────────────────────────────────────────────────────────────
+  { patterns: ["chinese super league","china:top","china:super","csl","chinese football"], name: "Chinese Super League", teams: ["Shanghai Port","Shandong Taishan","Beijing Guoan","Wuhan Three Towns","Guangzhou FC","Shanghai Shenhua","Tianjin Jinmen Tiger","Shenzhen FC","Zhejiang FC","Changchun Yatai","Qingdao West Coast","Dalian Pro","Meizhou Hakka","Nantong Zhiyun","Henan FC","Chengdu Rongcheng"] },
+  // ── Indonesia ─────────────────────────────────────────────────────────────────
+  // NOTE: "liga 1" alone is NOT used — collides with Romania Liga 1, Peru Liga 1, etc.
+  { patterns: ["indonesia:top","indonesia:liga","liga 1 indonesia","indonesian liga","liga indonesia"], name: "Liga 1 Indonésia", teams: ["Persib Bandung","Persija Jakarta","Bali United","PSM Makassar","Arema FC","Persebaya Surabaya","Borneo FC","Bhayangkara FC","PSIS Semarang","Persikabo","Barito Putera","Madura United","Dewa United","RANS Nusantara","PSS Sleman","Persita Tangerang"] },
+  // ── Australia ─────────────────────────────────────────────────────────────────
+  { patterns: ["a-league","a league","australia:top","australian a-league","isuzu ute","npl australia"], name: "A-League", teams: ["Melbourne City","Western Sydney Wanderers","Melbourne Victory","Sydney FC","Brisbane Roar","Adelaide United","Wellington Phoenix","Perth Glory","Western United","Macarthur FC","Central Coast Mariners","Newcastle Jets"] },
+  // ── USA ───────────────────────────────────────────────────────────────────────
+  { patterns: ["mls","major league soccer","usa:mls","united states:mls","us soccer mls"], name: "MLS", teams: ["Inter Miami","Los Angeles FC","FC Cincinnati","Columbus Crew","Orlando City","Atlanta United","Seattle Sounders","Portland Timbers","NYCFC","New England","Philadelphia Union","Nashville SC","St. Louis City","Austin FC","Real Salt Lake","LA Galaxy","Minnesota United","Toronto FC","Chicago Fire","NY Red Bulls"] },
+  // ── Brazil ────────────────────────────────────────────────────────────────────
+  // NOTE: "serie a" alone is NOT used — collides with Italian Serie A.
+  { patterns: ["brasileirao","brasileirão","campeonato brasileiro","brazil:top","serie a brasil","série a brasil","futebol brasileiro"], name: "Brasileirão Série A", teams: ["Atlético Mineiro","Palmeiras","Flamengo","Botafogo","Fluminense","Internacional","Grêmio","São Paulo","Corinthians","Vasco","Cruzeiro","Bragantino","Bahia","Athletico-PR","Cuiabá","Goiás","Coritiba","Fortaleza","Santos","América MG"] },
+  // ── Mexico ────────────────────────────────────────────────────────────────────
+  { patterns: ["liga mx","mexico:top","mexico:liga mx","ligamx","mexican liga"], name: "Liga MX", teams: ["Club América","Tigres UANL","Chivas","Cruz Azul","UNAM Pumas","Monterrey","Atlas","Toluca","León","Santos Laguna","Puebla","Pachuca","Necaxa","Mazatlán","FC Juárez","Tijuana","San Luis","Querétaro","Atlético San Luis"] },
+  // ── Argentina ─────────────────────────────────────────────────────────────────
+  { patterns: ["primera division argentina","argentina:top","argentina:primera","superliga argentina","liga profesional argentina"], name: "Primera División Argentina", teams: ["River Plate","Boca Juniors","Independiente","Racing Club","San Lorenzo","Estudiantes","Vélez Sársfield","Newells Old Boys","Lanús","Huracán","Belgrano","Talleres","Godoy Cruz","Defensa y Justicia","Gimnasia La Plata","Banfield","Platense","Rosario Central","Instituto","Tigre"] },
+  // ── Colombia ──────────────────────────────────────────────────────────────────
+  { patterns: ["liga betplay","colombia:top","colombia primera","colombian first"], name: "Liga BetPlay", teams: ["Millonarios","Atlético Nacional","Santa Fe","Junior","América de Cali","Deportes Tolima","Deportivo Cali","Atlético Bucaramanga","Once Caldas","Independiente Medellín","La Equidad","Jaguares","Águilas Doradas","Peñarol Cali","Envigado","Alianza Petrolera"] },
+  // ── Chile ─────────────────────────────────────────────────────────────────────
+  { patterns: ["primera division chile","chile:top","campeonato chile","chilean primera"], name: "Primera División Chile", teams: ["Colo-Colo","Universidad de Chile","Universidad Católica","Palestino","Ñublense","Huachipato","Everton","Cobresal","Deportes Antofagasta","Audax Italiano","Curicó Unido","Deportes La Serena","Rangers","Deportes Iquique","O'Higgins","Santiago Wanderers"] },
+  // ── Japan ─────────────────────────────────────────────────────────────────────
+  { patterns: ["j1 league","j-league","japan:top","japan:j1","japanese j1"], name: "J1 League", teams: ["Vissel Kobe","Yokohama F. Marinos","Urawa Red Diamonds","Kashima Antlers","Gamba Osaka","Kawasaki Frontale","Nagoya Grampus","FC Tokyo","Sanfrecce Hiroshima","Consadole Sapporo","Cerezo Osaka","Shonan Bellmare","Avispa Fukuoka","Kyoto Sanga","Jubilo Iwata","Albirex Niigata","Kashiwa Reysol"] },
+  // ── Saudi Arabia ──────────────────────────────────────────────────────────────
+  { patterns: ["saudi pro league","saudi professional league","saudi arabia:top","saudi football"], name: "Saudi Pro League", teams: ["Al-Hilal","Al-Nassr","Al-Ittihad","Al-Ahli","Al-Shabab","Al-Qadsiah","Al-Ettifaq","Al-Fateh","Al-Taawon","Al-Khaleej","Al-Hazem","Al-Feiha","Abha","Al-Riyadh","Al-Tai","Damac"] },
+  // ── Russia ────────────────────────────────────────────────────────────────────
+  { patterns: ["russian premier league","russia:top","rpl russia","russian football premier"], name: "Russian Premier League", teams: ["Zenit","CSKA Moscow","Lokomotiv Moscow","Spartak Moscow","Krasnodar","Dynamo Moscow","Rostov","Akhmat","Ufa","Rubin Kazan","Khimki","Ural","Samara","Sochi","Arsenal Tula","Torpedo Moscow"] },
+  // ── Austria ───────────────────────────────────────────────────────────────────
+  // NOTE: "primeira liga" is NOT included here — it belongs to Portugal only.
+  { patterns: ["austria:top","austria:bundesliga","austrian bundesliga","bundesliga österreich","österreichische bundesliga"], name: "Austrian Bundesliga", teams: ["Red Bull Salzburg","Sturm Graz","LASK","Austria Vienna","Rapid Vienna","Wolfsberger","Hartberg","WAC","Rheindorf Altach","Austria Lustenau","Blau-Weiss Linz","SCR Altach"] },
+  // ── Switzerland ───────────────────────────────────────────────────────────────
+  { patterns: ["swiss super league","switzerland:top","super league schweiz","switzerland super","swiss football"], name: "Swiss Super League", teams: ["FC Basel","Young Boys","FC Lugano","Servette","FC Zürich","FC Luzern","Winterthur","Grasshopper","FC St. Gallen","Yverdon","FC Lausanne-Sport","FC Vaduz"] },
+  // ── Denmark ───────────────────────────────────────────────────────────────────
+  { patterns: ["danish superliga","denmark:top","superliga denmark","danish football"], name: "Danish Superliga", teams: ["FC Copenhagen","FC Midtjylland","Brondby","Silkeborg","AGF","Aarhus","Nordsjælland","Randers","OB","Vejle","AC Horsens","HB Koge","Lyngby","FC Fredericia","Viborg"] },
+  // ── Sweden ────────────────────────────────────────────────────────────────────
+  { patterns: ["allsvenskan","sweden:top","sweden:allsvenskan","swedish allsvenskan"], name: "Allsvenskan", teams: ["Malmo FF","IF Elfsborg","Djurgårdens IF","AIK","IFK Göteborg","Hammarby","IFK Norrköping","BK Häcken","Kalmar FF","GAIS","Sirius","Degerfors","Örebro","Mjällby","Halmstad","Varberg"] },
+  // ── Norway ────────────────────────────────────────────────────────────────────
+  { patterns: ["eliteserien","norway:top","norway:eliteserien","norwegian eliteserien"], name: "Eliteserien", teams: ["Bodø/Glimt","Molde","Rosenborg","Brann","Viking","Lillestrøm","Vålerenga","HamKam","Stabæk","Sandefjord","Strømsgodset","Aalesund","Sarpsborg","Odd","Haugesund","Tromsø"] },
+  // ── Finland ───────────────────────────────────────────────────────────────────
+  { patterns: ["veikkausliiga","finland:top","finland:veikkausliiga","finnish veikkausliiga"], name: "Veikkausliiga", teams: ["HJK Helsinki","HIFK","KuPS","SJK","Ilves","VPS","FC Inter Turku","Mariehamn","KTP","AC Oulu","EIF","FC Honka","Gnistan","FC Haka"] },
+  // ── Romania ───────────────────────────────────────────────────────────────────
+  { patterns: ["superliga romania","romania:top","liga 1 romania","romanian liga","liga i romania"], name: "SuperLiga Romania", teams: ["FCSB","CFR Cluj","Rapid Bucharest","Universitatea Craiova","Farul Constanta","Petrolul","Sepsi","Dinamo","UTA Arad","Hermannstadt","Voluntari","Poli Iasi","FC Botosani","Otelul Galati","FC Arges","Politehnica"] },
+  // ── Spain Lower ───────────────────────────────────────────────────────────────
+  { patterns: ["primera federacion","primera rfef","spain:third","rfef primera"], name: "Primera RFEF", teams: ["Deportivo La Coruña","SD Amorebieta","Mérida AD","Algeciras CF","Celta B","Deportivo Alaves B","Barça B","Atletico B","Sevilla B","Athletic B","Real Sociedad B","Valencia B","Villarreal B","Málaga","Pontevedra","Córdoba"] },
+  // ── UEFA Competitions ─────────────────────────────────────────────────────────
+  { patterns: ["champions league","europa league","conference league","uefa cl","ucl","uel","uecl"], name: "UEFA Champions League", teams: ["Real Madrid","Manchester City","Bayern Munich","PSG","Barcelona","Liverpool","Arsenal","Atletico Madrid","Inter","Borussia Dortmund","Napoli","AC Milan","Chelsea","Benfica","Porto","RB Leipzig","Sevilla","Lazio","Juventus","Shakhtar Donetsk"] },
 ];
 
-/** Check if a team name is represented in a list (fuzzy: first meaningful word match) */
+/** Check if a team name is represented in a list (word-level matching).
+ *  Strips generic suffixes (FC, SC, City, United, etc.) then requires at least
+ *  one significant word (≥ 4 chars) to match exactly as a word in the list entry.
+ *  This prevents "Melbourne City" from matching "Manchester City" in the EPL list.
+ */
 function teamInList(list: string[], teamName: string): boolean {
   if (!teamName) return true;
-  const stopWords = new Set(["fc","sc","ac","cf","bk","if","fk","sk","afc","bfc","ud","cd","rj","mg","sp","rs","pr","ba"]);
-  const words = teamName.toLowerCase().split(/[\s\-\.]+/).filter(w => w.length > 2 && !stopWords.has(w));
-  const key = words[0] ?? teamName.toLowerCase().slice(0, 4);
+  // Stop words that are too common to be discriminating
+  const stopWords = new Set([
+    "fc","sc","ac","cf","bk","if","fk","sk","afc","bfc","ud","cd","rj","mg","sp","rs","pr","ba",
+    "city","united","athletic","athletics","real","club","sporting","sport","deportivo","deportes",
+    "atlético","atletico","junior","senior","rovers","wanderers","dynamo","rapid","victoria",
+  ]);
+  const sig = (name: string) =>
+    name.toLowerCase().split(/[\s\-\.]+/).filter(w => w.length >= 4 && !stopWords.has(w));
+
+  const teamWords = sig(teamName);
+  if (teamWords.length === 0) return false;
+
   return list.some(t => {
-    const tl = t.toLowerCase();
-    const tWords = tl.split(/[\s\-\.]+/).filter(w => w.length > 2 && !stopWords.has(w));
-    const tKey = tWords[0] ?? tl.slice(0, 4);
-    return tl.includes(key) || key.includes(tKey) || (key.length >= 4 && tl.includes(key.slice(0, 4)));
+    const listWords = sig(t);
+    // At least one significant word from the team name must appear verbatim in the list entry
+    return teamWords.some(tw => listWords.includes(tw));
   });
 }
 
@@ -7396,7 +7453,7 @@ router.get("/tennis-odds", async (_req, res) => {
   }
 });
 
-router.get("/standings", async (req, res) => {
+router.get("/league-standings", async (req, res) => {
   const league = String(req.query["league"] ?? "");
   try {
     const standing = buildLeagueStandings(league, "", "");

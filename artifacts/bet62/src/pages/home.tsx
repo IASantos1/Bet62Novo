@@ -2019,7 +2019,7 @@ export default function Home() {
     const league = expandedMatch.league ?? "";
     setStandingsLeague(league);
     const loadV1 = () =>
-      fetch(`/api/matches/standings?league=${encodeURIComponent(league)}`)
+      fetch(`/api/matches/league-standings?league=${encodeURIComponent(league)}`)
         .then(r => r.ok ? r.json() : null)
         .then(d => { if (d && Array.isArray(d.teams)) { setStandingsLeague(d.league ?? league); setStandings(d.teams as StandingRow[]); } });
     const isV2Football = expandedMatch.sport === "football" && String(expandedMatch.id).startsWith("fb-v2-");
