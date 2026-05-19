@@ -153,6 +153,9 @@ export function ComprehensiveMarketsSheet({ visible, match, onClose }: Props) {
   const [activeTab, setActiveTab] = useState<TabKey>("todos");
   const [simulatorOpen, setSimulatorOpen] = useState(false);
 
+  type H2HMatch = { date: string; home: string; homeScore: number; away: string; awayScore: number };
+  type StandingRow = { pos: number; name: string; played: number; won: number; drawn: number; lost: number; gf: number; ga: number; pts: number };
+  type LineupPlayer = { number: number; name: string; position: string };
   type ApiMatchStats = {
     avgStats: { goalsScored: number; leagueGoals: number; btts: number; leagueBtts: number; over15: number; leagueOver15: number; over25: number; leagueOver25: number; cards: number; corners: number };
     winProb: { home: number; draw: number; away: number };
@@ -160,6 +163,9 @@ export function ComprehensiveMarketsSheet({ visible, match, onClose }: Props) {
     homeForm: Array<{ result: string; goalsFor: number; goalsAgainst: number }>;
     awayForm: Array<{ result: string; goalsFor: number; goalsAgainst: number }>;
     formIsReal: boolean;
+    h2hMatches: H2HMatch[];
+    standings: { league: string; teams: StandingRow[] };
+    lineups: { home: LineupPlayer[]; away: LineupPlayer[] } | null;
   };
   const [apiStats, setApiStats] = useState<ApiMatchStats | null>(null);
   const [apiStatsLoading, setApiStatsLoading] = useState(false);
@@ -170,7 +176,8 @@ export function ComprehensiveMarketsSheet({ visible, match, onClose }: Props) {
   }, [visible, match.id]);
 
   useEffect(() => {
-    if (activeTab !== "stats" || apiStats || apiStatsLoading) return;
+    if (activeTab !== "stats" && activeTab !== "classificacao") return;
+    if (apiStats || apiStatsLoading) return;
     setApiStatsLoading(true);
     const p = new URLSearchParams({
       home: match.home,
@@ -179,6 +186,7 @@ export function ComprehensiveMarketsSheet({ visible, match, onClose }: Props) {
       drawOdd: String(match.odds.draw),
       awayOdd: String(match.odds.away),
       sport: match.sport,
+      league: match.league ?? "",
     });
     fetch(`${API_BASE}/matches/stats?${p.toString()}`)
       .then((r) => r.ok ? r.json() : null)
@@ -606,6 +614,66 @@ export function ComprehensiveMarketsSheet({ visible, match, onClose }: Props) {
             </View>
           </View>
         )}
+
+        {a && a.h2hMatches.length > 0 && (
+          <View style={s.statCard}>
+            <Text style={s.statSectionTitle}>Últimos Confrontos</Text>
+            {a.h2hMatches.map((m2, i) => {
+              const isHomeWin = m2.homeScore > m2.awayScore;
+              const isAwayWin = m2.awayScore > m2.homeScore;
+              const isDraw = m2.homeScore === m2.awayScore;
+              return (
+                <View key={i} style={{ flexDirection: "row", alignItems: "center", paddingVertical: 7, borderBottomWidth: i < a.h2hMatches.length - 1 ? 1 : 0, borderBottomColor: colors.border }}>
+                  <Text style={{ fontSize: 10, fontFamily: "Inter_400Regular", color: colors.mutedForeground, width: 58 }}>{m2.date}</Text>
+                  <Text style={{ flex: 1, fontSize: 11, fontFamily: "Inter_600SemiBold", color: isHomeWin ? "#3b82f6" : colors.foreground, textAlign: "right" }} numberOfLines={1}>{m2.home}</Text>
+                  <View style={{ flexDirection: "row", alignItems: "center", marginHorizontal: 8, gap: 4 }}>
+                    <View style={{ backgroundColor: isHomeWin ? "#1d3a6e" : isDraw ? "#3f3f46" : "#3f3f46", borderRadius: 4, paddingHorizontal: 7, paddingVertical: 3 }}>
+                      <Text style={{ fontSize: 12, fontFamily: "Inter_700Bold", color: isDraw ? "#eab308" : isHomeWin ? "#3b82f6" : colors.foreground }}>{m2.homeScore}</Text>
+                    </View>
+                    <Text style={{ fontSize: 10, fontFamily: "Inter_400Regular", color: colors.mutedForeground }}>–</Text>
+                    <View style={{ backgroundColor: isAwayWin ? "#3b1a1a" : "#3f3f46", borderRadius: 4, paddingHorizontal: 7, paddingVertical: 3 }}>
+                      <Text style={{ fontSize: 12, fontFamily: "Inter_700Bold", color: isAwayWin ? "#ef4444" : isDraw ? "#eab308" : colors.foreground }}>{m2.awayScore}</Text>
+                    </View>
+                  </View>
+                  <Text style={{ flex: 1, fontSize: 11, fontFamily: "Inter_600SemiBold", color: isAwayWin ? "#ef4444" : colors.foreground }} numberOfLines={1}>{m2.away}</Text>
+                </View>
+              );
+            })}
+          </View>
+        )}
+
+        {a && a.lineups && (
+          <View style={s.statCard}>
+            <Text style={s.statSectionTitle}>Titulares</Text>
+            <View style={{ flexDirection: "row", gap: 12 }}>
+              <View style={{ flex: 1 }}>
+                <Text style={{ fontSize: 11, fontFamily: "Inter_700Bold", color: "#3b82f6", marginBottom: 8, textAlign: "center" }} numberOfLines={1}>{match.home}</Text>
+                {a.lineups.home.map((p, i) => (
+                  <View key={i} style={{ flexDirection: "row", alignItems: "center", gap: 6, paddingVertical: 4, borderBottomWidth: i < a.lineups!.home.length - 1 ? 1 : 0, borderBottomColor: "#27272a" }}>
+                    <Text style={{ fontSize: 10, fontFamily: "Inter_700Bold", color: colors.mutedForeground, width: 18, textAlign: "center" }}>{p.number}</Text>
+                    <View style={{ backgroundColor: "#1e3a6e", borderRadius: 3, paddingHorizontal: 4, paddingVertical: 1 }}>
+                      <Text style={{ fontSize: 9, fontFamily: "Inter_700Bold", color: "#93c5fd" }}>{p.position}</Text>
+                    </View>
+                    <Text style={{ flex: 1, fontSize: 11, fontFamily: "Inter_400Regular", color: colors.foreground }} numberOfLines={1}>{p.name}</Text>
+                  </View>
+                ))}
+              </View>
+              <View style={{ width: 1, backgroundColor: colors.border }} />
+              <View style={{ flex: 1 }}>
+                <Text style={{ fontSize: 11, fontFamily: "Inter_700Bold", color: "#ef4444", marginBottom: 8, textAlign: "center" }} numberOfLines={1}>{match.away}</Text>
+                {a.lineups.away.map((p, i) => (
+                  <View key={i} style={{ flexDirection: "row", alignItems: "center", gap: 6, paddingVertical: 4, borderBottomWidth: i < a.lineups!.away.length - 1 ? 1 : 0, borderBottomColor: "#27272a" }}>
+                    <Text style={{ fontSize: 10, fontFamily: "Inter_700Bold", color: colors.mutedForeground, width: 18, textAlign: "center" }}>{p.number}</Text>
+                    <View style={{ backgroundColor: "#3b1a1a", borderRadius: 3, paddingHorizontal: 4, paddingVertical: 1 }}>
+                      <Text style={{ fontSize: 9, fontFamily: "Inter_700Bold", color: "#fca5a5" }}>{p.position}</Text>
+                    </View>
+                    <Text style={{ flex: 1, fontSize: 11, fontFamily: "Inter_400Regular", color: colors.foreground }} numberOfLines={1}>{p.name}</Text>
+                  </View>
+                ))}
+              </View>
+            </View>
+          </View>
+        )}
       </View>
     );
   }
@@ -706,18 +774,57 @@ export function ComprehensiveMarketsSheet({ visible, match, onClose }: Props) {
   }
 
   function ClassificacaoContent() {
+    if (apiStatsLoading && !apiStats) {
+      return (
+        <View style={{ paddingTop: 60, alignItems: "center" }}>
+          <Ionicons name="trophy-outline" size={32} color={colors.mutedForeground} style={{ marginBottom: 10 }} />
+          <Text style={{ fontSize: 13, fontFamily: "Inter_400Regular", color: colors.mutedForeground }}>A carregar classificação…</Text>
+        </View>
+      );
+    }
+    const st = apiStats?.standings;
+    const teams = st?.teams ?? [];
+    const homeNorm = match.home.toLowerCase();
+    const awayNorm = match.away.toLowerCase();
     return (
       <View style={{ paddingHorizontal: 14, paddingTop: 14 }}>
         <View style={s.statCard}>
-          <Text style={s.statSectionTitle}>Classificação</Text>
-          <View style={{ alignItems: "center", paddingVertical: 30, gap: 10 }}>
-            <Ionicons name="trophy-outline" size={36} color={colors.border} />
-            <Text style={{ fontSize: 14, fontFamily: "Inter_600SemiBold", color: colors.mutedForeground }}>
-              {getLeagueFlag(match.league, match.country)} {match.league ?? "Liga"}
-            </Text>
-            <Text style={{ fontSize: 12, fontFamily: "Inter_400Regular", color: colors.mutedForeground, textAlign: "center" }}>
-              Classificação disponível em breve
-            </Text>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 12 }}>
+            <Ionicons name="trophy-outline" size={14} color="#f59e0b" />
+            <Text style={s.statSectionTitle}>{st?.league ?? match.league ?? "Classificação"}</Text>
+          </View>
+          <View style={{ flexDirection: "row", paddingBottom: 6, borderBottomWidth: 1, borderBottomColor: colors.border, marginBottom: 4 }}>
+            <Text style={{ width: 28, fontSize: 10, fontFamily: "Inter_600SemiBold", color: colors.mutedForeground, textAlign: "center" }}>#</Text>
+            <Text style={{ flex: 1, fontSize: 10, fontFamily: "Inter_600SemiBold", color: colors.mutedForeground }}>Equipa</Text>
+            <Text style={{ width: 26, fontSize: 10, fontFamily: "Inter_600SemiBold", color: colors.mutedForeground, textAlign: "center" }}>J</Text>
+            <Text style={{ width: 26, fontSize: 10, fontFamily: "Inter_600SemiBold", color: colors.mutedForeground, textAlign: "center" }}>V</Text>
+            <Text style={{ width: 26, fontSize: 10, fontFamily: "Inter_600SemiBold", color: colors.mutedForeground, textAlign: "center" }}>E</Text>
+            <Text style={{ width: 26, fontSize: 10, fontFamily: "Inter_600SemiBold", color: colors.mutedForeground, textAlign: "center" }}>D</Text>
+            <Text style={{ width: 32, fontSize: 10, fontFamily: "Inter_600SemiBold", color: "#f59e0b", textAlign: "center" }}>Pts</Text>
+          </View>
+          {teams.slice(0, 16).map((t, i) => {
+            const isMatch = t.name.toLowerCase().includes(homeNorm.split(" ")[0]!) || t.name.toLowerCase().includes(awayNorm.split(" ")[0]!);
+            return (
+              <View key={i} style={{ flexDirection: "row", alignItems: "center", paddingVertical: 5, backgroundColor: isMatch ? "#1e293b" : "transparent", borderRadius: isMatch ? 6 : 0, paddingHorizontal: isMatch ? 4 : 0, marginHorizontal: isMatch ? -4 : 0 }}>
+                <Text style={{ width: 28, fontSize: 11, fontFamily: "Inter_700Bold", color: i < 4 ? "#22c55e" : i >= teams.length - 3 ? "#ef4444" : colors.mutedForeground, textAlign: "center" }}>{t.pos}</Text>
+                <Text style={{ flex: 1, fontSize: 11, fontFamily: isMatch ? "Inter_700Bold" : "Inter_400Regular", color: isMatch ? colors.primary : colors.foreground }} numberOfLines={1}>{t.name}</Text>
+                <Text style={{ width: 26, fontSize: 11, fontFamily: "Inter_400Regular", color: colors.mutedForeground, textAlign: "center" }}>{t.played}</Text>
+                <Text style={{ width: 26, fontSize: 11, fontFamily: "Inter_400Regular", color: colors.mutedForeground, textAlign: "center" }}>{t.won}</Text>
+                <Text style={{ width: 26, fontSize: 11, fontFamily: "Inter_400Regular", color: colors.mutedForeground, textAlign: "center" }}>{t.drawn}</Text>
+                <Text style={{ width: 26, fontSize: 11, fontFamily: "Inter_400Regular", color: colors.mutedForeground, textAlign: "center" }}>{t.lost}</Text>
+                <Text style={{ width: 32, fontSize: 11, fontFamily: "Inter_700Bold", color: isMatch ? colors.primary : colors.foreground, textAlign: "center" }}>{t.pts}</Text>
+              </View>
+            );
+          })}
+          <View style={{ flexDirection: "row", gap: 16, marginTop: 10, paddingTop: 8, borderTopWidth: 1, borderTopColor: colors.border }}>
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
+              <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: "#22c55e" }} />
+              <Text style={{ fontSize: 9, fontFamily: "Inter_400Regular", color: colors.mutedForeground }}>Zona Europa</Text>
+            </View>
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
+              <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: "#ef4444" }} />
+              <Text style={{ fontSize: 9, fontFamily: "Inter_400Regular", color: colors.mutedForeground }}>Descida</Text>
+            </View>
           </View>
         </View>
       </View>
@@ -748,6 +855,9 @@ export function ComprehensiveMarketsSheet({ visible, match, onClose }: Props) {
               <View style={{ flexDirection: "row", alignItems: "center", gap: 5 }}>
                 <Pressable onPress={() => setActiveTab("stats")} hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}>
                   <Ionicons name="bar-chart-outline" size={16} color={activeTab === "stats" ? colors.primary : colors.mutedForeground} />
+                </Pressable>
+                <Pressable onPress={() => setActiveTab("classificacao")} hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}>
+                  <Ionicons name="trophy-outline" size={16} color={activeTab === "classificacao" ? "#f59e0b" : colors.mutedForeground} />
                 </Pressable>
                 {isLive && (
                   <Pressable onPress={() => setActiveTab("aovivo")} hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}>
@@ -813,7 +923,9 @@ export function ComprehensiveMarketsSheet({ visible, match, onClose }: Props) {
 
             {activeTab === "stats" && <StatsContent />}
 
-            {activeTab !== "aovivo" && activeTab !== "stats" && (
+            {activeTab === "classificacao" && <ClassificacaoContent />}
+
+            {activeTab !== "aovivo" && activeTab !== "stats" && activeTab !== "classificacao" && (
               <>
                 {match.odds.home > 1.01 && !isObviousLiveResult && (
                   <Section title="Resultado Final" tabKey="resultado">
