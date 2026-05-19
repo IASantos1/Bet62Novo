@@ -2040,17 +2040,13 @@ export default function Home() {
       .finally(() => setMlbLeagueStatsLoading(false));
   }, [matchViewTab, expandedMatch?.sport]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Fetch all real V2 odds markets when the markets panel is open for V2-capable matches
+  // Fetch all V2 odds markets (kept for future use / "odds" tab)
   useEffect(() => {
-    if (!expandedMatch) return;
-    if (matchViewTab !== "markets" && matchViewTab !== "odds") return;
-    // Only fetch for V2-capable matches (those with a numeric ID prefix)
-    const rawIdMatch = String(expandedMatch.id).match(/^[a-z]+-v2-(\d+)$/);
-    if (!rawIdMatch) return;
-    if (allOddsData !== null) return; // already loaded
+    if (matchViewTab !== "odds" || !expandedMatch) return;
+    if (allOddsData !== null) return;
     setAllOddsData(null);
     setAllOddsLoading(true);
-    const rawId = rawIdMatch[1];
+    const rawId = String(expandedMatch.id).replace(/^[a-z]+-v2-/, "");
     const sport = expandedMatch.sport ?? "football";
     fetch(`/api/matches/v2-match-odds?sport=${sport}&matchId=${rawId}`)
       .then(r => r.ok ? r.json() : { markets: [] })
@@ -7553,66 +7549,11 @@ export default function Home() {
                 )}
 
                 {/* Market tabs inline — only visible in markets view */}
-                {matchViewTab === "markets" && (() => {
-                  const isV2Match = /^[a-z]+-v2-\d+$/.test(String(expandedMatch.id));
-                  // For V2 matches: show real Statpal markets while loading, then real data or fallback
-                  if (isV2Match && allOddsLoading) {
-                    return (
-                      <div className="bg-zinc-900 rounded-xl border border-zinc-800 p-4 flex items-center justify-center py-12">
-                        <Loader2 className="animate-spin text-blue-400" size={28} />
-                      </div>
-                    );
-                  }
-                  if (isV2Match && allOddsData && allOddsData.length > 0) {
-                    return (
-                      <div className="bg-zinc-900 rounded-xl border border-zinc-800 p-4">
-                        <div className="text-[10px] font-black text-red-500 uppercase tracking-widest mb-3">📊 Mercados — Dados Statpal</div>
-                        <div className="space-y-3">
-                          {allOddsData.map((market, mi) => (
-                            <div key={mi} className="bg-zinc-950/60 rounded-lg border border-zinc-800 p-3">
-                              <div className="text-[10px] font-black text-zinc-400 uppercase tracking-wider mb-2">{market.name}</div>
-                              <div className={`grid gap-2 ${market.choices.length === 2 ? "grid-cols-2" : market.choices.length === 3 ? "grid-cols-3" : "grid-cols-2"}`}>
-                                {market.choices.map((choice, ci) => {
-                                  const mkKey = `all_${mi}_${ci}`;
-                                  const isSelected = !!bets.find(b => b.matchId === expandedMatch.id && b.market === mkKey);
-                                  return (
-                                    <button
-                                      key={ci}
-                                      onClick={() => {
-                                        if (!isSelected) {
-                                          setBets(prev => [...prev.filter(b => !(b.matchId === expandedMatch.id && (b.market ?? "").startsWith(`all_${mi}_`))), {
-                                            matchId: expandedMatch.id,
-                                            matchTitle: `${expandedMatch.home} — ${expandedMatch.away}`,
-                                            odd: choice.odds,
-                                            market: mkKey,
-                                            selection: `${market.name}: ${choice.label}`,
-                                            label: choice.label,
-                                          }]);
-                                        } else {
-                                          setBets(prev => prev.filter(b => !(b.matchId === expandedMatch.id && b.market === mkKey)));
-                                        }
-                                      }}
-                                      className={`flex flex-col items-center py-2.5 px-2 rounded-md text-xs font-bold transition-all border ${isSelected ? "bg-red-600 border-red-500 text-white" : "bg-zinc-800 border-zinc-700 text-zinc-300 hover:border-zinc-500 hover:text-white"}`}
-                                    >
-                                      <span className="text-[10px] text-inherit opacity-70 mb-0.5">{choice.label}</span>
-                                      <span className="font-black text-base tabular-nums">{choice.odds.toFixed(2)}</span>
-                                    </button>
-                                  );
-                                })}
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    );
-                  }
-                  // Fallback: computed markets from match object (non-V2 or no V2 data)
-                  return (
-                    <div className="bg-zinc-900 rounded-xl border border-zinc-800 p-4">
-                      {renderMatchMarkets(expandedMatch)}
-                    </div>
-                  );
-                })()}
+                {matchViewTab === "markets" && (
+                  <div className="bg-zinc-900 rounded-xl border border-zinc-800 p-4">
+                    {renderMatchMarkets(expandedMatch)}
+                  </div>
+                )}
               </div>
             )}
 
