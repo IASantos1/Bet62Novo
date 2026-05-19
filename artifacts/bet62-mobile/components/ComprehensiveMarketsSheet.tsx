@@ -1,6 +1,7 @@
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import React, { useEffect, useRef, useState } from "react";
+import { API_BASE } from "@/context/AuthContext";
 import {
   Modal,
   Platform,
@@ -152,10 +153,39 @@ export function ComprehensiveMarketsSheet({ visible, match, onClose }: Props) {
   const [activeTab, setActiveTab] = useState<TabKey>("todos");
   const [simulatorOpen, setSimulatorOpen] = useState(false);
 
+  type ApiMatchStats = {
+    avgStats: { goalsScored: number; leagueGoals: number; btts: number; leagueBtts: number; over15: number; leagueOver15: number; over25: number; leagueOver25: number; cards: number; corners: number };
+    winProb: { home: number; draw: number; away: number };
+    h2h: { homeWins: number; draws: number; awayWins: number };
+    homeForm: Array<{ result: string; goalsFor: number; goalsAgainst: number }>;
+    awayForm: Array<{ result: string; goalsFor: number; goalsAgainst: number }>;
+    formIsReal: boolean;
+  };
+  const [apiStats, setApiStats] = useState<ApiMatchStats | null>(null);
+  const [apiStatsLoading, setApiStatsLoading] = useState(false);
+
   useEffect(() => {
-    if (visible) setActiveTab("todos");
+    if (visible) { setActiveTab("todos"); setApiStats(null); }
     if (!visible) setSimulatorOpen(false);
   }, [visible, match.id]);
+
+  useEffect(() => {
+    if (activeTab !== "stats" || apiStats || apiStatsLoading) return;
+    setApiStatsLoading(true);
+    const p = new URLSearchParams({
+      home: match.home,
+      away: match.away,
+      homeOdd: String(match.odds.home),
+      drawOdd: String(match.odds.draw),
+      awayOdd: String(match.odds.away),
+      sport: match.sport,
+    });
+    fetch(`${API_BASE}/matches/stats?${p.toString()}`)
+      .then((r) => r.ok ? r.json() : null)
+      .then((d) => { if (d) setApiStats(d as ApiMatchStats); })
+      .catch(() => {})
+      .finally(() => setApiStatsLoading(false));
+  }, [activeTab, match.id]);
 
   const prevOddsRef = useRef<Record<string, number>>({});
   const [flashDirs, setFlashDirs] = useState<Record<string, "up" | "down">>({});
@@ -438,8 +468,38 @@ export function ComprehensiveMarketsSheet({ visible, match, onClose }: Props) {
     );
   }
 
+  function FormDots({ form }: { form: Array<{ result: string }> }) {
+    return (
+      <View style={{ flexDirection: "row", gap: 4, marginTop: 6 }}>
+        {form.slice(0, 5).map((f, i) => (
+          <View key={i} style={{ width: 22, height: 22, borderRadius: 11, alignItems: "center", justifyContent: "center", backgroundColor: f.result === "W" ? "#16a34a" : f.result === "D" ? "#ca8a04" : "#dc2626" }}>
+            <Text style={{ fontSize: 10, fontFamily: "Inter_700Bold", color: "#fff" }}>{f.result}</Text>
+          </View>
+        ))}
+      </View>
+    );
+  }
+
   function StatsContent() {
     const st = computeStats();
+    const a = apiStats;
+
+    if (apiStatsLoading && !a) {
+      return (
+        <View style={{ paddingTop: 60, alignItems: "center" }}>
+          <Ionicons name="bar-chart-outline" size={32} color={colors.mutedForeground} style={{ marginBottom: 10 }} />
+          <Text style={{ fontSize: 13, fontFamily: "Inter_400Regular", color: colors.mutedForeground }}>A carregar estatísticas…</Text>
+        </View>
+      );
+    }
+
+    const probH = a ? Math.round(a.winProb.home) : st.probH;
+    const probD = a ? Math.round(a.winProb.draw) : st.probD;
+    const probA = a ? Math.round(a.winProb.away) : st.probA;
+    const h2hH = a ? a.h2h.homeWins : st.wH;
+    const h2hD = a ? a.h2h.draws : st.wD;
+    const h2hA = a ? a.h2h.awayWins : st.wA;
+
     return (
       <View style={{ paddingHorizontal: 14, paddingTop: 14 }}>
         <View style={s.statCard}>
@@ -447,26 +507,26 @@ export function ComprehensiveMarketsSheet({ visible, match, onClose }: Props) {
           <View style={s.statRow}>
             <View style={s.statCol}>
               <Text style={s.statLabel}>Golos Marcados</Text>
-              <Text style={s.statValue}>{st.eg.toFixed(2)}</Text>
-              <Text style={s.statSubtitle}>Liga: 2.55</Text>
+              <Text style={s.statValue}>{a ? a.avgStats.goalsScored.toFixed(2) : st.eg.toFixed(2)}</Text>
+              <Text style={s.statSubtitle}>Liga: {a ? a.avgStats.leagueGoals.toFixed(2) : "2.55"}</Text>
             </View>
             <View style={s.statCol}>
               <Text style={s.statLabel}>AEM</Text>
-              <Text style={s.statValue}>{st.bttsProb ?? 46}%</Text>
-              <Text style={s.statSubtitle}>Liga: 46%</Text>
+              <Text style={s.statValue}>{a ? `${a.avgStats.btts}%` : `${st.bttsProb ?? 46}%`}</Text>
+              <Text style={s.statSubtitle}>Liga: {a ? `${a.avgStats.leagueBtts}%` : "46%"}</Text>
             </View>
           </View>
           {isFootball && (
             <View style={s.statRow}>
               <View style={s.statCol}>
                 <Text style={s.statLabel}>Mais de 1.5</Text>
-                <Text style={s.statValue}>{st.over15 ?? 79}%</Text>
-                <Text style={s.statSubtitle}>Liga: 79%</Text>
+                <Text style={s.statValue}>{a ? `${a.avgStats.over15}%` : `${st.over15 ?? 79}%`}</Text>
+                <Text style={s.statSubtitle}>Liga: {a ? `${a.avgStats.leagueOver15}%` : "79%"}</Text>
               </View>
               <View style={s.statCol}>
                 <Text style={s.statLabel}>Mais de 2.5</Text>
-                <Text style={s.statValue}>{st.over25 ?? 50}%</Text>
-                <Text style={s.statSubtitle}>Liga: 50%</Text>
+                <Text style={s.statValue}>{a ? `${a.avgStats.over25}%` : `${st.over25 ?? 50}%`}</Text>
+                <Text style={s.statSubtitle}>Liga: {a ? `${a.avgStats.leagueOver25}%` : "50%"}</Text>
               </View>
             </View>
           )}
@@ -474,11 +534,11 @@ export function ComprehensiveMarketsSheet({ visible, match, onClose }: Props) {
             <View style={[s.statRow, { marginBottom: 0 }]}>
               <View style={s.statCol}>
                 <Text style={s.statLabel}>Total Cartões</Text>
-                <Text style={s.statValue}>{(st.avgCards ?? 3.80).toFixed(2)}</Text>
+                <Text style={s.statValue}>{a ? a.avgStats.cards.toFixed(2) : (st.avgCards ?? 3.80).toFixed(2)}</Text>
               </View>
               <View style={s.statCol}>
                 <Text style={s.statLabel}>Cantos</Text>
-                <Text style={s.statValue}>{(st.avgCorners ?? 9.50).toFixed(2)}</Text>
+                <Text style={s.statValue}>{a ? a.avgStats.corners.toFixed(2) : (st.avgCorners ?? 9.50).toFixed(2)}</Text>
               </View>
             </View>
           )}
@@ -489,49 +549,63 @@ export function ComprehensiveMarketsSheet({ visible, match, onClose }: Props) {
           <View style={{ marginBottom: 10 }}>
             <View style={{ flexDirection: "row", justifyContent: "space-between", marginBottom: 4 }}>
               <Text style={{ fontSize: 12, fontFamily: "Inter_500Medium", color: colors.foreground }} numberOfLines={1}>{match.home}</Text>
-              <Text style={{ fontSize: 12, fontFamily: "Inter_700Bold", color: colors.foreground }}>{st.probH}%</Text>
+              <Text style={{ fontSize: 12, fontFamily: "Inter_700Bold", color: colors.foreground }}>{probH}%</Text>
             </View>
             <View style={s.probBar}>
-              <View style={{ height: 6, width: `${st.probH}%`, backgroundColor: "#3b82f6", borderRadius: 3 }} />
+              <View style={{ height: 6, width: `${probH}%`, backgroundColor: "#3b82f6", borderRadius: 3 }} />
             </View>
           </View>
-          {st.probD > 0 && (
+          {probD > 0 && (
             <View style={{ marginBottom: 10 }}>
               <View style={{ flexDirection: "row", justifyContent: "space-between", marginBottom: 4 }}>
                 <Text style={{ fontSize: 12, fontFamily: "Inter_500Medium", color: colors.foreground }}>Empate</Text>
-                <Text style={{ fontSize: 12, fontFamily: "Inter_700Bold", color: colors.foreground }}>{st.probD}%</Text>
+                <Text style={{ fontSize: 12, fontFamily: "Inter_700Bold", color: colors.foreground }}>{probD}%</Text>
               </View>
               <View style={s.probBar}>
-                <View style={{ height: 6, width: `${st.probD}%`, backgroundColor: "#eab308", borderRadius: 3 }} />
+                <View style={{ height: 6, width: `${probD}%`, backgroundColor: "#eab308", borderRadius: 3 }} />
               </View>
             </View>
           )}
           <View style={{ marginBottom: 16 }}>
             <View style={{ flexDirection: "row", justifyContent: "space-between", marginBottom: 4 }}>
               <Text style={{ fontSize: 12, fontFamily: "Inter_500Medium", color: colors.foreground }} numberOfLines={1}>{match.away}</Text>
-              <Text style={{ fontSize: 12, fontFamily: "Inter_700Bold", color: colors.foreground }}>{st.probA}%</Text>
+              <Text style={{ fontSize: 12, fontFamily: "Inter_700Bold", color: colors.foreground }}>{probA}%</Text>
             </View>
             <View style={s.probBar}>
-              <View style={{ height: 6, width: `${st.probA}%`, backgroundColor: "#ef4444", borderRadius: 3 }} />
+              <View style={{ height: 6, width: `${probA}%`, backgroundColor: "#ef4444", borderRadius: 3 }} />
             </View>
           </View>
           <View style={s.winCountRow}>
             <View style={{ alignItems: "center" }}>
-              <Text style={[s.winCountNum, { color: "#3b82f6" }]}>{st.wH}</Text>
+              <Text style={[s.winCountNum, { color: "#3b82f6" }]}>{h2hH}</Text>
               <Text style={s.winCountLabel}>Vitórias {match.home.split(" ")[0]}</Text>
             </View>
-            {st.probD > 0 && (
+            {probD > 0 && (
               <View style={{ alignItems: "center" }}>
-                <Text style={[s.winCountNum, { color: "#eab308" }]}>{st.wD}</Text>
+                <Text style={[s.winCountNum, { color: "#eab308" }]}>{h2hD}</Text>
                 <Text style={s.winCountLabel}>Empates</Text>
               </View>
             )}
             <View style={{ alignItems: "center" }}>
-              <Text style={[s.winCountNum, { color: "#ef4444" }]}>{st.wA}</Text>
+              <Text style={[s.winCountNum, { color: "#ef4444" }]}>{h2hA}</Text>
               <Text style={s.winCountLabel}>Vitórias {match.away.split(" ")[0]}</Text>
             </View>
           </View>
         </View>
+
+        {a && (
+          <View style={s.statCard}>
+            <Text style={s.statSectionTitle}>Últimos 5 Jogos</Text>
+            <View style={{ marginBottom: 14 }}>
+              <Text style={{ fontSize: 12, fontFamily: "Inter_600SemiBold", color: colors.foreground }} numberOfLines={1}>{match.home}</Text>
+              <FormDots form={a.homeForm} />
+            </View>
+            <View>
+              <Text style={{ fontSize: 12, fontFamily: "Inter_600SemiBold", color: colors.foreground }} numberOfLines={1}>{match.away}</Text>
+              <FormDots form={a.awayForm} />
+            </View>
+          </View>
+        )}
       </View>
     );
   }

@@ -679,17 +679,8 @@ const COUNTRY_FLAGS: Record<string, string> = {
   za: "🇿🇦", ma: "🇲🇦", eg: "🇪🇬", ng: "🇳🇬", gh: "🇬🇭", sn: "🇸🇳",
   cm: "🇨🇲", ci: "🇨🇮", ke: "🇰🇪", et: "🇪🇹", dz: "🇩🇿", tn: "🇹🇳",
   sm: "🇸🇲",
-  // Alternative names SportsAPI may use
-  hellas: "🇬🇷", "türkiye": "🇹🇷", türkiye: "🇹🇷",
-  "czech republic": "🇨🇿", "northern ireland": "🇬🇧",
-  "korea republic": "🇰🇷", "south korea": "🇰🇷",
-  "ivory coast": "🇨🇮", "cote d'ivoire": "🇨🇮",
-  "hong kong": "🇭🇰", "new zealand": "🇳🇿", "saudi arabia": "🇸🇦",
-  "united arab emirates": "🇦🇪", uae: "🇦🇪",
-  "south africa": "🇿🇦", "north macedonia": "🇲🇰", macedonia: "🇲🇰",
-  "faroe islands": "🇫🇴", fo: "🇫🇴",
-  "costa rica": "🇨🇷", "el salvador": "🇸🇻", "dominican republic": "🇩🇴",
-  "north america": "🌎", "south america": "🌎",
+  // Alternative names SportsAPI may use (keys not already in main map above)
+  hellas: "🇬🇷", "türkiye": "🇹🇷", fo: "🇫🇴", "south america": "🌎",
 };
 
 // Pure helper — compute if a selection won/lost based on a known final score.

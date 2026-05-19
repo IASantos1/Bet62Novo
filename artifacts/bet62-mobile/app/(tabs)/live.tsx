@@ -434,7 +434,7 @@ export default function LiveScreen() {
         </ScrollView>
       </View>
 
-      {matches.length === 0 && !connected ? (
+      {lastUpdated === 0 ? (
         <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
           <ActivityIndicator size="large" color={colors.primary} />
         </View>
