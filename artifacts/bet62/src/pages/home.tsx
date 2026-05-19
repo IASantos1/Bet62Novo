@@ -1870,8 +1870,8 @@ export default function Home() {
     el.scrollTo({ left: Math.max(0, target), behavior });
   }, []);
 
-  // Match detail view tab: "markets" | "stats" | "standings" | "live"
-  const [matchViewTab, setMatchViewTab] = useState<"markets" | "stats" | "standings" | "live" | "yesterday" | "ranking" | "liga">("markets");
+  // Match detail view tab
+  const [matchViewTab, setMatchViewTab] = useState<"markets" | "stats" | "standings" | "live" | "yesterday" | "ranking" | "liga" | "odds" | "lineups">("markets");
   // Market sub-tab — lifted here so live refreshes don't unmount MatchModalMarkets and reset the selection
   const [modalTab, setModalTab] = useState("todos");
   const [matchStats, setMatchStats] = useState<MatchStatsData | null>(null);
@@ -1879,6 +1879,13 @@ export default function Home() {
   const [standings, setStandings] = useState<StandingRow[] | null>(null);
   const [standingsLoading, setStandingsLoading] = useState(false);
   const [standingsLeague, setStandingsLeague] = useState("");
+  type AllOddsMarket = { name: string; group: string; choices: Array<{ name: string; label: string; odds: number }> };
+  type LineupsV2Player = { name: string; shortName?: string; position: string; number: string; rating?: number };
+  type LineupsV2 = { confirmed: boolean; home: { formation?: string; starters: LineupsV2Player[]; bench: LineupsV2Player[] }; away: { formation?: string; starters: LineupsV2Player[]; bench: LineupsV2Player[] } };
+  const [allOddsData, setAllOddsData] = useState<AllOddsMarket[] | null>(null);
+  const [allOddsLoading, setAllOddsLoading] = useState(false);
+  const [lineupsData, setLineupsData] = useState<LineupsV2 | null>(null);
+  const [lineupsLoading, setLineupsLoading] = useState(false);
 
   // Player markets (football "Jogadores" tab) — per-match, filtered to the two match teams
   type PlayerMarket = { id: string; name: string; team: string; teamId: string; appearances: number; stat: number; odds: number };
@@ -2012,6 +2019,34 @@ export default function Home() {
       .catch(() => {})
       .finally(() => setMlbLeagueStatsLoading(false));
   }, [matchViewTab, expandedMatch?.sport]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Fetch all odds markets when "odds" tab is selected
+  useEffect(() => {
+    if (matchViewTab !== "odds" || !expandedMatch) return;
+    setAllOddsData(null);
+    setAllOddsLoading(true);
+    const rawId = String(expandedMatch.id).replace(/^[a-z]+-v2-/, "");
+    const sport = expandedMatch.sport ?? "football";
+    fetch(`/api/matches/v2-match-odds?sport=${sport}&matchId=${rawId}`)
+      .then(r => r.ok ? r.json() : { markets: [] })
+      .then(d => setAllOddsData((d as { markets: AllOddsMarket[] }).markets ?? []))
+      .catch(() => setAllOddsData([]))
+      .finally(() => setAllOddsLoading(false));
+  }, [matchViewTab, expandedMatch?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Fetch lineups when "lineups" tab is selected
+  useEffect(() => {
+    if (matchViewTab !== "lineups" || !expandedMatch) return;
+    setLineupsData(null);
+    setLineupsLoading(true);
+    const rawId = String(expandedMatch.id).replace(/^[a-z]+-v2-/, "");
+    const sport = expandedMatch.sport ?? "football";
+    fetch(`/api/matches/v2-lineups?sport=${sport}&matchId=${rawId}`)
+      .then(r => r.ok ? r.json() : null)
+      .then(d => setLineupsData(d as LineupsV2))
+      .catch(() => setLineupsData(null))
+      .finally(() => setLineupsLoading(false));
+  }, [matchViewTab, expandedMatch?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Handle ?payment= query param on return from card payment
   useEffect(() => {
@@ -5866,8 +5901,8 @@ export default function Home() {
                         <span className="font-bold text-white text-sm truncate flex-1 text-right">{expandedMatch.home}</span>
                         <div className="flex items-center gap-1 shrink-0">
                           <button
-                            onClick={() => setMatchViewTab(matchViewTab === "stats" || matchViewTab === "standings" ? "markets" : "stats")}
-                            className={`flex items-center gap-1 px-2 py-1.5 rounded-lg border text-[11px] font-bold transition-all ${matchViewTab === "stats" || matchViewTab === "standings" ? "border-blue-500 bg-blue-500/10 text-blue-400" : "border-zinc-700 bg-zinc-800 text-zinc-400 hover:text-white hover:border-zinc-600"}`}
+                            onClick={() => setMatchViewTab(matchViewTab !== "markets" && matchViewTab !== "live" ? "markets" : "stats")}
+                            className={`flex items-center gap-1 px-2 py-1.5 rounded-lg border text-[11px] font-bold transition-all ${matchViewTab !== "markets" && matchViewTab !== "live" ? "border-blue-500 bg-blue-500/10 text-blue-400" : "border-zinc-700 bg-zinc-800 text-zinc-400 hover:text-white hover:border-zinc-600"}`}
                             title="Estatísticas"
                           >
                             <BarChart2 size={12} />
@@ -5911,80 +5946,75 @@ export default function Home() {
                     <div className="flex border-t border-zinc-800 overflow-x-auto no-scrollbar">
                       {expandedMatch.sport === "tennis" ? (
                         <>
-                          {(["stats", "yesterday", "ranking"] as const).map(tab => (
-                            <button
-                              key={tab}
-                              onClick={() => setMatchViewTab(tab)}
-                              className={`flex-1 py-2 text-xs font-bold transition-colors whitespace-nowrap px-2 ${matchViewTab === tab ? "text-blue-400 border-b-2 border-blue-500" : "text-zinc-500 hover:text-white"}`}
-                            >
-                              {tab === "stats" ? "Estatísticas" : tab === "yesterday" ? "Resultado Ontem" : "Ranking"}
-                            </button>
-                          ))}
-                          {expandedMatch.isLive && (
-                            <button
-                              onClick={() => setMatchViewTab("live")}
-                              className={`flex-1 py-2 text-xs font-bold transition-colors whitespace-nowrap px-2 ${matchViewTab === "live" ? "text-red-400 border-b-2 border-red-500" : "text-zinc-500 hover:text-white"}`}
-                            >
-                              ⚡ Ao Vivo
-                            </button>
-                          )}
-                        </>
-                      ) : expandedMatch.sport === "hockey" ? (
-                        <>
                           {(expandedMatch.isLive
-                            ? (["stats", "yesterday", "live"] as const)
-                            : (["stats", "yesterday"] as const)
+                            ? (["stats", "yesterday", "ranking", "odds", "live"] as const)
+                            : (["stats", "yesterday", "ranking", "odds"] as const)
                           ).map(tab => (
                             <button
                               key={tab}
                               onClick={() => setMatchViewTab(tab)}
                               className={`flex-1 py-2 text-xs font-bold transition-colors whitespace-nowrap px-2 ${matchViewTab === tab ? (tab === "live" ? "text-red-400 border-b-2 border-red-500" : "text-blue-400 border-b-2 border-blue-500") : "text-zinc-500 hover:text-white"}`}
                             >
-                              {tab === "stats" ? "Estatísticas" : tab === "yesterday" ? "🏆 Classificação" : "⚡ Ao Vivo"}
+                              {tab === "stats" ? "Estatísticas" : tab === "yesterday" ? "Ontem" : tab === "ranking" ? "Ranking" : tab === "odds" ? "📊 Mercados" : "⚡ Ao Vivo"}
+                            </button>
+                          ))}
+                        </>
+                      ) : expandedMatch.sport === "hockey" ? (
+                        <>
+                          {(expandedMatch.isLive
+                            ? (["stats", "yesterday", "odds", "live"] as const)
+                            : (["stats", "yesterday", "odds"] as const)
+                          ).map(tab => (
+                            <button
+                              key={tab}
+                              onClick={() => setMatchViewTab(tab)}
+                              className={`flex-1 py-2 text-xs font-bold transition-colors whitespace-nowrap px-2 ${matchViewTab === tab ? (tab === "live" ? "text-red-400 border-b-2 border-red-500" : "text-blue-400 border-b-2 border-blue-500") : "text-zinc-500 hover:text-white"}`}
+                            >
+                              {tab === "stats" ? "Estatísticas" : tab === "yesterday" ? "🏆 Classificação" : tab === "odds" ? "📊 Mercados" : "⚡ Ao Vivo"}
                             </button>
                           ))}
                         </>
                       ) : expandedMatch.sport === "basketball" ? (
                         <>
                           {(expandedMatch.isLive
-                            ? (["stats", "standings", "yesterday", "live"] as const)
-                            : (["stats", "standings", "yesterday"] as const)
+                            ? (["stats", "standings", "yesterday", "odds", "live"] as const)
+                            : (["stats", "standings", "yesterday", "odds"] as const)
                           ).map(tab => (
                             <button
                               key={tab}
                               onClick={() => setMatchViewTab(tab)}
                               className={`flex-1 py-2 text-xs font-bold transition-colors whitespace-nowrap px-2 ${matchViewTab === tab ? (tab === "live" ? "text-red-400 border-b-2 border-red-500" : "text-blue-400 border-b-2 border-blue-500") : "text-zinc-500 hover:text-white"}`}
                             >
-                              {tab === "stats" ? "Estatísticas" : tab === "standings" ? "🏆 Classificação" : tab === "yesterday" ? "📅 Ontem" : "⚡ Ao Vivo"}
+                              {tab === "stats" ? "Estatísticas" : tab === "standings" ? "🏆 Classificação" : tab === "yesterday" ? "📅 Ontem" : tab === "odds" ? "📊 Mercados" : "⚡ Ao Vivo"}
                             </button>
                           ))}
                         </>
                       ) : expandedMatch.sport === "baseball" ? (
                         <>
                           {(expandedMatch.isLive
-                            ? (["stats", "yesterday", "liga", "live"] as const)
-                            : (["stats", "yesterday", "liga"] as const)
+                            ? (["stats", "yesterday", "liga", "odds", "live"] as const)
+                            : (["stats", "yesterday", "liga", "odds"] as const)
                           ).map(tab => (
                             <button
                               key={tab}
                               onClick={() => setMatchViewTab(tab)}
                               className={`flex-1 py-2 text-xs font-bold transition-colors whitespace-nowrap px-2 ${matchViewTab === tab ? (tab === "live" ? "text-red-400 border-b-2 border-red-500" : "text-blue-400 border-b-2 border-blue-500") : "text-zinc-500 hover:text-white"}`}
                             >
-                              {tab === "stats" ? "Estatísticas" : tab === "yesterday" ? "🏆 Classificação" : tab === "liga" ? "⭐ Liga" : "⚡ Ao Vivo"}
+                              {tab === "stats" ? "Estatísticas" : tab === "yesterday" ? "🏆 Classificação" : tab === "liga" ? "⭐ Liga" : tab === "odds" ? "📊 Mercados" : "⚡ Ao Vivo"}
                             </button>
                           ))}
                         </>
                       ) : (
                         (expandedMatch.isLive
-                          ? (["stats", "standings", "live"] as const)
-                          : (["stats", "standings"] as const)
+                          ? (["stats", "standings", "odds", "lineups", "live"] as const)
+                          : (["stats", "standings", "odds", "lineups"] as const)
                         ).map(tab => (
                           <button
                             key={tab}
                             onClick={() => setMatchViewTab(tab)}
-                            className={`flex-1 py-2 text-xs font-bold transition-colors ${matchViewTab === tab ? (tab === "live" ? "text-red-400 border-b-2 border-red-500" : "text-blue-400 border-b-2 border-blue-500") : "text-zinc-500 hover:text-white"}`}
+                            className={`flex-1 py-2 text-xs font-bold transition-colors whitespace-nowrap px-1 ${matchViewTab === tab ? (tab === "live" ? "text-red-400 border-b-2 border-red-500" : "text-blue-400 border-b-2 border-blue-500") : "text-zinc-500 hover:text-white"}`}
                           >
-                            {tab === "stats" ? "Estatísticas" : tab === "standings" ? "Classificação" : "⚡ Ao Vivo"}
+                            {tab === "stats" ? "Estatísticas" : tab === "standings" ? "Classificação" : tab === "odds" ? "📊 Mercados" : tab === "lineups" ? "👥 Escalação" : "⚡ Ao Vivo"}
                           </button>
                         ))
                       )}
@@ -7308,6 +7338,128 @@ export default function Home() {
                         </div>
                       );
                     })()}
+                  </div>
+                )}
+
+                {/* All Odds Markets panel */}
+                {matchViewTab === "odds" && (
+                  <div className="bg-zinc-900 rounded-xl border border-zinc-800 p-4 mb-2 animate-in fade-in duration-200">
+                    <div className="text-[10px] font-black text-red-500 uppercase tracking-widest mb-3">📊 Todos os Mercados</div>
+                    {allOddsLoading || !allOddsData ? (
+                      <div className="flex items-center justify-center py-12">
+                        <Loader2 className="animate-spin text-blue-400" size={28} />
+                      </div>
+                    ) : allOddsData.length === 0 ? (
+                      <div className="text-center text-zinc-500 py-8">
+                        <div className="text-2xl mb-2">📭</div>
+                        <div className="text-sm font-medium">Mercados indisponíveis</div>
+                        <div className="text-xs text-zinc-600 mt-1">Odds não disponíveis para este jogo</div>
+                      </div>
+                    ) : (
+                      <div className="space-y-3">
+                        {allOddsData.map((market, mi) => (
+                          <div key={mi} className="bg-zinc-950/60 rounded-lg border border-zinc-800 p-3">
+                            <div className="text-[10px] font-black text-zinc-400 uppercase tracking-wider mb-2">{market.name}</div>
+                            <div className={`grid gap-2 ${market.choices.length === 2 ? "grid-cols-2" : market.choices.length === 3 ? "grid-cols-3" : "grid-cols-2"}`}>
+                              {market.choices.map((choice, ci) => (
+                                <button
+                                  key={ci}
+                                  onClick={() => {
+                                    const mkKey = `all_${mi}_${ci}`;
+                                    const slip = bets.find(b => b.matchId === expandedMatch.id && b.market === mkKey);
+                                    if (!slip) {
+                                      setBets(prev => [...prev.filter(b => !(b.matchId === expandedMatch.id && (b.market ?? "").startsWith(`all_${mi}_`))), {
+                                        matchId: expandedMatch.id,
+                                        matchTitle: `${expandedMatch.home} — ${expandedMatch.away}`,
+                                        odd: choice.odds,
+                                        market: mkKey,
+                                        selection: `${market.name}: ${choice.label}`,
+                                        label: choice.label,
+                                      }]);
+                                    } else {
+                                      setBets(prev => prev.filter(b => !(b.matchId === expandedMatch.id && b.market === mkKey)));
+                                    }
+                                  }}
+                                  className={`flex flex-col items-center py-2.5 px-2 rounded-md text-xs font-bold transition-all border ${
+                                    bets.find(b => b.matchId === expandedMatch.id && b.market === `all_${mi}_${ci}`)
+                                      ? "bg-red-600 border-red-500 text-white"
+                                      : "bg-zinc-800 border-zinc-700 text-zinc-300 hover:border-zinc-500 hover:text-white"
+                                  }`}
+                                >
+                                  <span className="text-[10px] text-inherit opacity-70 mb-0.5">{choice.label}</span>
+                                  <span className="font-black text-base tabular-nums">{choice.odds.toFixed(2)}</span>
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Lineups panel */}
+                {matchViewTab === "lineups" && (
+                  <div className="bg-zinc-900 rounded-xl border border-zinc-800 p-4 mb-2 animate-in fade-in duration-200">
+                    <div className="text-[10px] font-black text-red-500 uppercase tracking-widest mb-3">
+                      👥 Escalação
+                      {lineupsData?.confirmed && <span className="ml-2 text-green-400 normal-case font-bold text-[9px]">✓ Confirmada</span>}
+                    </div>
+                    {lineupsLoading || !lineupsData ? (
+                      <div className="flex items-center justify-center py-12">
+                        <Loader2 className="animate-spin text-blue-400" size={28} />
+                      </div>
+                    ) : lineupsData.home.starters.length === 0 && lineupsData.away.starters.length === 0 ? (
+                      <div className="text-center text-zinc-500 py-8">
+                        <div className="text-2xl mb-2">📋</div>
+                        <div className="text-sm font-medium">Escalação não disponível</div>
+                        <div className="text-xs text-zinc-600 mt-1">Ainda não foi divulgada para este jogo</div>
+                      </div>
+                    ) : (
+                      <div className="grid grid-cols-2 gap-3">
+                        {(["home", "away"] as const).map(side => {
+                          const teamData = lineupsData[side];
+                          const teamName = side === "home" ? expandedMatch.home : expandedMatch.away;
+                          const starters = teamData.starters;
+                          const bench = teamData.bench;
+                          return (
+                            <div key={side}>
+                              <div className="flex items-center justify-between mb-2">
+                                <div className={`text-[10px] font-black uppercase tracking-wider truncate ${side === "home" ? "text-blue-400" : "text-red-400"}`}>{teamName}</div>
+                                {teamData.formation && <div className="text-[9px] text-zinc-500 font-bold shrink-0 ml-1">{teamData.formation}</div>}
+                              </div>
+                              <div className="space-y-1">
+                                {starters.map((p, i) => (
+                                  <div key={i} className="flex items-center gap-1.5 bg-zinc-950/60 rounded px-2 py-1.5">
+                                    <span className="text-[9px] font-black text-zinc-600 w-4 text-right shrink-0">{p.number || "—"}</span>
+                                    <span className={`text-[9px] font-black px-1 rounded shrink-0 ${
+                                      p.position === "GR" ? "bg-yellow-500/20 text-yellow-400" :
+                                      p.position === "DEF" ? "bg-blue-500/20 text-blue-400" :
+                                      p.position === "MEI" ? "bg-green-500/20 text-green-400" :
+                                      "bg-red-500/20 text-red-400"
+                                    }`}>{p.position || "?"}</span>
+                                    <span className="text-[11px] text-zinc-200 font-medium truncate">{p.shortName ?? p.name}</span>
+                                    {p.rating && <span className="text-[9px] text-zinc-500 ml-auto shrink-0">{p.rating.toFixed(1)}</span>}
+                                  </div>
+                                ))}
+                                {bench.length > 0 && (
+                                  <>
+                                    <div className="text-[8px] text-zinc-600 font-black uppercase tracking-wider pt-1.5 pl-1">Banco</div>
+                                    {bench.map((p, i) => (
+                                      <div key={i} className="flex items-center gap-1.5 bg-zinc-800/30 rounded px-2 py-1">
+                                        <span className="text-[9px] font-black text-zinc-700 w-4 text-right shrink-0">{p.number || "—"}</span>
+                                        <span className="text-[9px] font-bold text-zinc-600 shrink-0">{p.position || "?"}</span>
+                                        <span className="text-[10px] text-zinc-500 truncate">{p.shortName ?? p.name}</span>
+                                      </div>
+                                    ))}
+                                  </>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
                   </div>
                 )}
 

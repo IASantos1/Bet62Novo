@@ -11469,6 +11469,191 @@ function buildTeamMarkets(team: FootballLeagueStatsTeam): TeamPlayerMarkets {
   };
 }
 
+// ─── V2 All-Markets Odds Proxy ──────────────────────────────────────────────
+
+interface V2AllMarketsEntry {
+  markets: AllOddsMarket[];
+  fetchedAt: number;
+}
+interface AllOddsMarket {
+  name: string;
+  group: string;
+  choices: Array<{ name: string; label: string; odds: number }>;
+}
+
+const allMarketsV2Cache = new Map<string, V2AllMarketsEntry>();
+const ALL_MARKETS_TTL = 15 * 60_000;
+
+const MARKET_NAME_PT: Record<string, string> = {
+  "Full time":             "Resultado Final",
+  "Double chance":         "Dupla Hipótese",
+  "1st half":              "Primeiro Tempo",
+  "Draw no bet":           "Empate Anula Aposta",
+  "Both teams to score":   "Ambas Marcam",
+  "Match goals":           "Total de Golos",
+  "1st quarter winner":    "Vencedor 1º Quarto",
+  "1st half winner":       "Vencedor 1º Tempo",
+  "Point spread":          "Handicap de Pontos",
+  "Game total":            "Total de Pontos",
+  "1st period goals":      "Golos 1º Período",
+  "First set winner":      "Vencedor 1º Set",
+  "Total games won":       "Total de Games",
+  "Correct score":         "Resultado Exato",
+};
+
+const CHOICE_LABEL_PT: Record<string, string> = {
+  "1": "Casa", "X": "Empate", "2": "Fora",
+  "1X": "Casa/Empate", "X2": "Empate/Fora", "12": "Casa/Fora",
+  "Yes": "Sim", "No": "Não",
+  "Over": "Mais", "Under": "Menos",
+  "Home": "Casa", "Away": "Fora",
+};
+
+function translateMarketNamePT(raw: string): string {
+  return MARKET_NAME_PT[raw] ?? raw;
+}
+
+function v2SportBase(sport: string): string | null {
+  switch (sport) {
+    case "football":   return SAPI_V2_FOOTBALL;
+    case "basketball": return SAPI_V2_BASKETBALL;
+    case "hockey":     return SAPI_V2_HOCKEY;
+    case "tennis":     return SAPI_V2_TENNIS;
+    case "baseball":   return SAPI_V2_BASEBALL;
+    default:           return null;
+  }
+}
+
+router.get("/v2-match-odds", async (req, res) => {
+  const sport   = String(req.query["sport"]   ?? "football");
+  const matchId = String(req.query["matchId"] ?? "");
+  if (!matchId) { res.json({ markets: [] }); return; }
+  const base = v2SportBase(sport);
+  if (!base)  { res.json({ markets: [] }); return; }
+
+  const cacheKey = `allMkts:${sport}:${matchId}`;
+  const cached = allMarketsV2Cache.get(cacheKey);
+  if (cached && Date.now() - cached.fetchedAt < ALL_MARKETS_TTL) {
+    res.json({ markets: cached.markets });
+    return;
+  }
+
+  try {
+    const resp = await fetch(`${base}/match/${matchId}/odds/all`, {
+      signal: AbortSignal.timeout(8000),
+      headers: sapiHeaders(),
+    });
+    if (!resp.ok) { res.json({ markets: [] }); return; }
+    const data = (await resp.json()) as {
+      data?: { markets?: Array<{ marketName?: string; marketGroup?: string; choices?: Array<{ name?: string; fractionalValue?: string }> }> };
+    };
+    const rawMarkets = data.data?.markets ?? [];
+    const markets: AllOddsMarket[] = rawMarkets
+      .filter(m => (m.choices?.length ?? 0) > 0)
+      .map(m => ({
+        name: translateMarketNamePT(m.marketName ?? ""),
+        group: m.marketGroup ?? "",
+        choices: (m.choices ?? [])
+          .map(c => ({
+            name: c.name ?? "",
+            label: CHOICE_LABEL_PT[c.name ?? ""] ?? (c.name ?? ""),
+            odds: fractionalToDecimal(c.fractionalValue ?? ""),
+          }))
+          .filter(c => c.odds >= 1.01),
+      }))
+      .filter(m => m.choices.length > 0);
+
+    allMarketsV2Cache.set(cacheKey, { markets, fetchedAt: Date.now() });
+    res.json({ markets });
+  } catch {
+    res.json({ markets: [] });
+  }
+});
+
+// ─── V2 Lineups Proxy ────────────────────────────────────────────────────────
+
+interface LineupsV2Entry { data: LineupsResponseV2; fetchedAt: number; }
+interface LineupsResponseV2 {
+  confirmed: boolean;
+  home: { formation?: string; starters: LineupPlayerV2[]; bench: LineupPlayerV2[] };
+  away: { formation?: string; starters: LineupPlayerV2[]; bench: LineupPlayerV2[] };
+}
+interface LineupPlayerV2 {
+  name: string; shortName?: string; position: string; number: string; rating?: number;
+}
+
+const lineupsV2Cache = new Map<string, LineupsV2Entry>();
+
+const POSITION_PT: Record<string, string> = {
+  "G": "GR", "GK": "GR",
+  "D": "DEF", "DF": "DEF",
+  "M": "MEI", "MF": "MEI",
+  "F": "AV",  "FW": "AV",
+};
+
+type RawLineupsPlayer = { avgRating?: number; substitute?: boolean; player?: { name?: string; shortName?: string; position?: string; jerseyNumber?: string } };
+
+router.get("/v2-lineups", async (req, res) => {
+  const sport   = String(req.query["sport"]   ?? "football");
+  const matchId = String(req.query["matchId"] ?? "");
+  const emptyResp: LineupsResponseV2 = { confirmed: false, home: { starters: [], bench: [] }, away: { starters: [], bench: [] } };
+  if (!matchId) { res.json(emptyResp); return; }
+  const base = v2SportBase(sport);
+  if (!base)  { res.json(emptyResp); return; }
+
+  const cacheKey = `lineups:${sport}:${matchId}`;
+  const cached = lineupsV2Cache.get(cacheKey);
+  if (cached && Date.now() - cached.fetchedAt < ALL_MARKETS_TTL) {
+    res.json(cached.data);
+    return;
+  }
+
+  try {
+    const resp = await fetch(`${base}/match/${matchId}/lineups`, {
+      signal: AbortSignal.timeout(8000),
+      headers: sapiHeaders(),
+    });
+    if (!resp.ok) { res.json(emptyResp); return; }
+    const data = (await resp.json()) as {
+      data?: {
+        confirmed?: boolean;
+        home?: { formation?: string; players?: RawLineupsPlayer[] };
+        away?: { formation?: string; players?: RawLineupsPlayer[] };
+      };
+    };
+
+    const toPlayers = (arr: RawLineupsPlayer[] | undefined, isStarters: boolean): LineupPlayerV2[] =>
+      (arr ?? [])
+        .filter(p => p.player?.name && (isStarters ? !p.substitute : !!p.substitute))
+        .map(p => ({
+          name: p.player!.name!,
+          shortName: p.player!.shortName,
+          position: POSITION_PT[p.player!.position ?? ""] ?? (p.player!.position ?? ""),
+          number: p.player!.jerseyNumber ?? "",
+          rating: p.avgRating,
+        }));
+
+    const result: LineupsResponseV2 = {
+      confirmed: data.data?.confirmed ?? false,
+      home: {
+        formation: data.data?.home?.formation,
+        starters: toPlayers(data.data?.home?.players, true),
+        bench: toPlayers(data.data?.home?.players, false),
+      },
+      away: {
+        formation: data.data?.away?.formation,
+        starters: toPlayers(data.data?.away?.players, true),
+        bench: toPlayers(data.data?.away?.players, false),
+      },
+    };
+
+    lineupsV2Cache.set(cacheKey, { data: result, fetchedAt: Date.now() });
+    res.json(result);
+  } catch {
+    res.json(emptyResp);
+  }
+});
+
 router.get("/football-player-markets/:leagueId", async (req, res) => {
   const leagueId = String(req.params["leagueId"]);
   const homeTeam = String(req.query["homeTeam"] ?? "").trim();

@@ -1,0 +1,82 @@
+Para futebol, quando você consulta o endpoint GET /api/match/:matchId/odds/all, a resposta conterá uma lista de provedores de odds (bookmakers), e cada provedor listará os mercados que oferece para aquela partida.
+
+Não há uma lista fixa e universal de "todos os mercados" porque eles podem variar por provedor e por partida. No entanto, posso listar os tipos de mercados mais comuns e populares que você provavelmente encontrará na API para futebol:
+
+Mercados Comuns e Populares em Futebol:
+
+1X2 (Match Winner / Full Time Result):
+
+Vitória do Time da Casa (1)
+Empate (X)
+Vitória do Time Visitante (2)
+Over/Under Gols (Total Goals):
+
+Mais de X gols (ex: Over 0.5, Over 1.5, Over 2.5, Over 3.5, etc.)
+Menos de X gols (ex: Under 0.5, Under 1.5, Under 2.5, Under 3.5, etc.)
+Ambas as Equipes Marcam (Both Teams to Score - BTTS):
+
+Sim (Ambas as equipes marcam)
+Não (Pelo menos uma equipe não marca)
+Handicap Asiático (Asian Handicap):
+
+Time da Casa -X (ex: -0.5, -1.0, -1.5)
+Time Visitante +X (ex: +0.5, +1.0, +1.5)
+E variações com linhas inteiras e de quarto de gol.
+Handicap Europeu (European Handicap):
+
+Time da Casa (-1)
+Empate (-1)
+Time Visitante (+1)
+E outras variações.
+Dupla Chance (Double Chance):
+
+Time da Casa ou Empate (1X)
+Time Visitante ou Empate (X2)
+Time da Casa ou Time Visitante (12)
+Resultado Correto (Correct Score):
+
+Prever o placar exato da partida (ex: 1-0, 2-1, 0-0, etc.)
+Primeiro Marcador (First Goalscorer):
+
+Qual jogador marcará o primeiro gol.
+A Qualquer Momento Marcador (Anytime Goalscorer):
+
+Qual jogador marcará um gol a qualquer momento na partida.
+Intervalo/Fim de Jogo (Half-Time/Full-Time):
+
+Prever o resultado no intervalo e no final do jogo (ex: 1/1, 1/X, X/2, etc.)
+Total de Escanteios (Total Corners):
+
+Mais de X escanteios
+Menos de X escanteios
+Handicap de Escanteios (Corner Handicap):
+
+Time da Casa (-X) escanteios
+Time Visitante (+X) escanteios
+Total de Cartões (Total Cards):
+
+Mais de X cartões
+Menos de X cartões
+Cartão Vermelho (Red Card):
+
+Sim (Haverá um cartão vermelho)
+Não (Não haverá um cartão vermelho)
+Para Marcar em Ambos os Tempos (Team to Score in Both Halves):
+
+Time da Casa Sim/Não
+Time Visitante Sim/Não
+Primeiro Time a Marcar (First Team to Score):
+
+Time da Casa
+Time Visitante
+Nenhum Gol
+Último Time a Marcar (Last Team to Score):
+
+Time da Casa
+Time Visitante
+Nenhum Gol
+Margem de Vitória (Winning Margin):
+
+Time da Casa por 1 gol, Time da Casa por 2 gols, etc.
+Empate com gols, Empate sem gols.
+**Ímpar/Par de Gols (Odd/Even mercados mais comuns. A API pode oferecer ainda mais mercados específicos ou combinações, dependendo da profundidade da cobertura do provedor de odds. Para ter a lista exata para uma partida, você precisará fazer a chamada à API e analisar a resposta.
