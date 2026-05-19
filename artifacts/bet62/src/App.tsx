@@ -17,7 +17,14 @@ function applyTheme() {
   document.documentElement.classList.toggle("light-mode", !isDark);
 }
 
-const queryClient = new QueryClient();
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      staleTime: 5 * 60_000,
+      gcTime: 15 * 60_000,
+    },
+  },
+});
 
 function Router() {
   return (

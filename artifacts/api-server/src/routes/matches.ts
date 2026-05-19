@@ -3910,17 +3910,22 @@ async function getBaseballTodayV2(): Promise<SAPIV2Event[]> {
   } catch { return baseballTodayV2Cache ?? []; }
 }
 
-// Shared helper: convert a SAPIV2Event startTimestamp to date/time strings (UTC)
+// Shared helper: convert a SAPIV2Event startTimestamp to date/time strings (Europe/Lisbon)
 function v2EventDateTime(ev: SAPIV2Event): { date: string; time: string } {
   const ts = ev.startTimestamp;
   if (!ts) return { date: "", time: "" };
   const d = new Date(ts * 1000);
-  const dd = String(d.getUTCDate()).padStart(2, "0");
-  const mm = String(d.getUTCMonth() + 1).padStart(2, "0");
-  const yyyy = d.getUTCFullYear();
-  const hh = String(d.getUTCHours()).padStart(2, "0");
-  const min = String(d.getUTCMinutes()).padStart(2, "0");
-  return { date: `${dd}.${mm}.${yyyy}`, time: `${hh}:${min}` };
+  const fmt = new Intl.DateTimeFormat("pt-PT", {
+    timeZone: "Europe/Lisbon",
+    day: "2-digit", month: "2-digit", year: "numeric",
+    hour: "2-digit", minute: "2-digit", hour12: false,
+  });
+  const parts = fmt.formatToParts(d);
+  const get = (t: string) => parts.find(p => p.type === t)?.value ?? "00";
+  return {
+    date: `${get("day")}.${get("month")}.${get("year")}`,
+    time: `${get("hour")}:${get("minute")}`,
+  };
 }
 
 // ─── V2 Tournament/Season ID Cache ────────────────────────────────────────────

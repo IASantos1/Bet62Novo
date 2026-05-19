@@ -2203,7 +2203,7 @@ export default function Home() {
           id: string; home: string; away: string; league: string; country?: string;
           time?: string; date?: string; sport?: string; hasRealOdds?: boolean; odds: Odds; markets?: AdvancedMarkets;
         }>;
-        setUpcomingMatches(matches.filter(m => m.hasRealOdds !== false).map(m => ({ ...m, isLive: false })));
+        setUpcomingMatches(matches.map(m => ({ ...m, isLive: false })));
       })
       .catch(() => { /* keep empty */ })
       .finally(() => { if (showSpinner) setUpcomingLoading(false); });
@@ -8416,8 +8416,26 @@ export default function Home() {
                     <Trophy className="text-red-600" /> {selectedCountry ? `⚽ ${selectedCountry}` : selectedLeague ? selectedLeague : "Próximos Eventos"}
                   </h2>
                   {upcomingLoading ? (
-                    <div className="flex items-center justify-center py-20">
-                      <Loader2 className="animate-spin text-red-600" size={32} />
+                    <div className="space-y-3">
+                      {[1,2,3,4,5,6].map(i => (
+                        <div key={i} className="bg-zinc-900 border border-zinc-800 rounded-xl p-4 animate-pulse">
+                          <div className="flex items-center gap-2 mb-3">
+                            <div className="w-10 h-3 bg-zinc-700 rounded" />
+                            <div className="w-24 h-3 bg-zinc-700 rounded" />
+                            <div className="ml-auto w-12 h-3 bg-zinc-700 rounded" />
+                          </div>
+                          <div className="flex items-center justify-between mb-4">
+                            <div className="w-28 h-4 bg-zinc-700 rounded" />
+                            <div className="w-6 h-4 bg-zinc-800 rounded" />
+                            <div className="w-28 h-4 bg-zinc-700 rounded" />
+                          </div>
+                          <div className="grid grid-cols-3 gap-2">
+                            <div className="h-10 bg-zinc-800 rounded-lg" />
+                            <div className="h-10 bg-zinc-800 rounded-lg" />
+                            <div className="h-10 bg-zinc-800 rounded-lg" />
+                          </div>
+                        </div>
+                      ))}
                     </div>
                   ) : filteredUpcoming.length === 0 ? (
                     <div className="py-20 text-center text-zinc-500 bg-zinc-900/50 rounded-xl border border-zinc-800">

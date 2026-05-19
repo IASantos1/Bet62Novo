@@ -3,7 +3,6 @@ import * as Haptics from "expo-haptics";
 import { router } from "expo-router";
 import React, { type ComponentProps, useState } from "react";
 import {
-  ActivityIndicator,
   FlatList,
   Image,
   Platform,
@@ -209,6 +208,7 @@ export default function PreGameScreen() {
       return res.json() as Promise<{ matches: UpcomingMatch[] }>;
     },
     refetchInterval: 60000,
+    placeholderData: (prev) => prev,
   });
 
   const allUpcoming: UpcomingMatch[] = data?.matches ?? [];
@@ -302,9 +302,29 @@ export default function PreGameScreen() {
       </View>
 
       {isLoading ? (
-        <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
-          <ActivityIndicator size="large" color={colors.primary} />
-        </View>
+        <ScrollView contentContainerStyle={{ paddingTop: 6, paddingBottom: 160 }} showsVerticalScrollIndicator={false}>
+          <View style={{ marginHorizontal: 14, marginBottom: 10, flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 10 }}>
+            <View style={{ height: 10, width: 100, backgroundColor: "#2e2e3c", borderRadius: 5 }} />
+            <View style={{ height: 18, width: 28, backgroundColor: "#2e2e3c", borderRadius: 9 }} />
+          </View>
+          {[1, 2, 3, 4, 5].map(i => (
+            <View key={i} style={{ marginHorizontal: 14, marginBottom: 10, borderRadius: 12, backgroundColor: "#1c1c26", padding: 12, borderWidth: 1, borderColor: "#2e2e3c" }}>
+              <View style={{ flexDirection: "row", alignItems: "center", marginBottom: 10, gap: 6 }}>
+                <View style={{ width: 11, height: 11, borderRadius: 3, backgroundColor: "#2e2e3c" }} />
+                <View style={{ width: 14, height: 14, borderRadius: 3, backgroundColor: "#2e2e3c" }} />
+                <View style={{ height: 10, width: 120, backgroundColor: "#2e2e3c", borderRadius: 5 }} />
+                <View style={{ flex: 1 }} />
+                <View style={{ height: 10, width: 60, backgroundColor: "#2e2e3c", borderRadius: 5 }} />
+              </View>
+              <View style={{ height: 15, width: "70%", backgroundColor: "#2e2e3c", borderRadius: 5, marginBottom: 12 }} />
+              <View style={{ flexDirection: "row", gap: 8 }}>
+                <View style={{ flex: 1, height: 44, backgroundColor: "#2e2e3c", borderRadius: 8 }} />
+                <View style={{ flex: 1, height: 44, backgroundColor: "#2e2e3c", borderRadius: 8 }} />
+                <View style={{ flex: 1, height: 44, backgroundColor: "#2e2e3c", borderRadius: 8 }} />
+              </View>
+            </View>
+          ))}
+        </ScrollView>
       ) : (
         <FlatList
           data={items}
