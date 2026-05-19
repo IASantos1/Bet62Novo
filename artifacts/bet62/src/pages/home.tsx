@@ -2846,19 +2846,19 @@ export default function Home() {
       || !!(match._suspensionReason);
     if (!isActive) return null;
     const rawReason = (match._suspensionReason ?? "SUSPENSO").toUpperCase();
-    let icon = "⏸";
-    let label = rawReason;
-    if (rawReason.includes("GOLO") || rawReason.includes("GOAL")) { icon = "⚽"; label = "GOLO MARCADO"; }
-    else if (rawReason.includes("VAR")) { icon = "📺"; label = "REVISÃO VAR"; }
-    else if (rawReason.includes("PENAL")) { icon = "🎯"; label = "PENÁLTI"; }
-    else if (rawReason.includes("CHANCE")) { icon = "⚡"; label = "GRANDE CHANCE"; }
+    let label = "SUSPENSO";
+    let prefix = "";
+    if (rawReason.includes("GOLO") || rawReason.includes("GOAL")) { label = "GOLO!"; }
+    else if (rawReason.includes("VAR")) { prefix = "🎥 "; label = "REVISÃO VAR"; }
+    else if (rawReason.includes("PENAL")) { label = "PENÁLTI"; }
+    else if (rawReason.includes("CHANCE")) { label = "GRANDE CHANCE"; }
     return (
       <button
         disabled
         className="w-full py-2.5 px-3 rounded-md bg-red-950 border border-red-800/50 text-red-200 font-black text-sm tracking-widest cursor-not-allowed select-none animate-pulse"
         style={{ letterSpacing: "0.2em" }}
       >
-        {icon} {label} — ODDS EM ATUALIZAÇÃO
+        {prefix}{label}
       </button>
     );
   };

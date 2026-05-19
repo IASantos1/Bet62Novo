@@ -206,12 +206,11 @@ function LiveMatchCard({ match }: { match: LiveMatch }) {
 
   const suspText = (() => {
     const r = (match._suspensionReason ?? match.suspensionReason ?? "").toUpperCase();
-    if (r.includes("VAR")) return "📺 REVISÃO VAR";
-    if (r.includes("PENAL") || r.includes("PÊNALTI") || r.includes("PENÁLT")) return "🎯 PENÁLTI";
-    if (r.includes("GOLO") || r.includes("GOAL")) return "⚽ GOLO!";
-    if (r.includes("CHANCE")) return "⚡ GRANDE CHANCE";
-    if (anySusp) return "⏸ ODDS A ATUALIZAR";
-    return "⏸ SUSPENSO";
+    if (r.includes("VAR")) return "🎥 REVISÃO VAR";
+    if (r.includes("PENAL") || r.includes("PÊNALTI") || r.includes("PENÁLT")) return "PENÁLTI";
+    if (r.includes("GOLO") || r.includes("GOAL")) return "GOLO!";
+    if (r.includes("CHANCE")) return "GRANDE CHANCE";
+    return "SUSPENSO";
   })();
 
   const OddsRowContent = suspended ? (
@@ -401,13 +400,20 @@ export default function LiveScreen() {
     : null;
 
   type ListItem =
-    | { type: "header"; id: string; count: number }
+    | { type: "header"; id: string; kind: "live" | "soon"; count: number }
     | { type: "match"; id: string; match: LiveMatch };
 
+  const actualLive = filtered.filter((m) => m.startsIn === undefined);
+  const emBreve = filtered.filter((m) => m.startsIn !== undefined);
+
   const items: ListItem[] = [];
-  if (filtered.length > 0) {
-    items.push({ type: "header", id: "h", count: filtered.length });
-    filtered.forEach((m) => items.push({ type: "match", id: m.id, match: m }));
+  if (actualLive.length > 0) {
+    items.push({ type: "header", id: "h-live", kind: "live", count: actualLive.length });
+    actualLive.forEach((m) => items.push({ type: "match", id: m.id, match: m }));
+  }
+  if (emBreve.length > 0) {
+    items.push({ type: "header", id: "h-soon", kind: "soon", count: emBreve.length });
+    emBreve.forEach((m) => items.push({ type: "match", id: m.id, match: m }));
   }
 
   return (
@@ -460,12 +466,24 @@ export default function LiveScreen() {
           }
           renderItem={({ item }) => {
             if (item.type === "header") {
+              const isLiveHeader = item.kind === "live";
               return (
-                <View style={s.sectionHeader}>
-                  <View style={{ width: 7, height: 7, borderRadius: 4, backgroundColor: colors.primary }} />
-                  <Text style={s.sectionTitle}>Ao Vivo Agora</Text>
-                  <View style={s.sectionCount}><Text style={s.sectionCountText}>{item.count}</Text></View>
-                </View>
+                <>
+                  {item.kind === "soon" && (
+                    <View style={{ marginHorizontal: 14, marginBottom: 10, marginTop: 4, height: 1, backgroundColor: colors.border }} />
+                  )}
+                  <View style={s.sectionHeader}>
+                    {isLiveHeader ? (
+                      <View style={{ width: 7, height: 7, borderRadius: 4, backgroundColor: colors.primary }} />
+                    ) : (
+                      <Ionicons name="time-outline" size={12} color="#f59e0b" />
+                    )}
+                    <Text style={[s.sectionTitle, { color: isLiveHeader ? colors.mutedForeground : "#f59e0b" }]}>
+                      {isLiveHeader ? "Ao Vivo Agora" : "Em Breve"}
+                    </Text>
+                    <View style={s.sectionCount}><Text style={s.sectionCountText}>{item.count}</Text></View>
+                  </View>
+                </>
               );
             }
             return <LiveMatchCard match={item.match} />;

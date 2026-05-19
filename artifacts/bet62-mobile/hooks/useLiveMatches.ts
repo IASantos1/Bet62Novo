@@ -73,6 +73,7 @@ export interface LiveMatch {
   date?: string;
   time?: string;
   hasRealOdds?: boolean;
+  startsIn?: number;
   _liveExtra?: {
     sets?: Array<[number, number]>;
     currentPoints?: [number | string, number | string];

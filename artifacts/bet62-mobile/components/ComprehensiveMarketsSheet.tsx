@@ -356,17 +356,13 @@ export function ComprehensiveMarketsSheet({ visible, match, onClose }: Props) {
   const showSuspBanner = isSuspendedGlobal || isBigChance || hasReasonBanner;
 
   function getSuspText(): string {
-    if (isBigChance) {
-      const who = match.odds.home <= 1.06 ? match.home : match.away;
-      return `⚡ GRANDE CHANCE DE GOLO — ${who}`;
-    }
+    if (isBigChance) return "GRANDE CHANCE";
     const r = ((match._suspensionReason ?? match.suspensionReason) ?? "").toUpperCase();
-    if (r.includes("VAR")) return "📺 REVISÃO VAR";
-    if (r.includes("PENAL") || r.includes("PÊNALTI") || r.includes("PENÁLT")) return "🎯 PENÁLTI";
-    if (r.includes("GOLO") || r.includes("GOAL")) return "⚽ GOLO MARCADO";
-    if (r.includes("CHANCE")) return "⚡ GRANDE CHANCE DE GOLO";
-    if (r.includes("SUSPEN")) return "⏸ MERCADOS SUSPENSOS";
-    return "⚠️ ODDS EM ATUALIZAÇÃO";
+    if (r.includes("VAR")) return "🎥 REVISÃO VAR";
+    if (r.includes("PENAL") || r.includes("PÊNALTI") || r.includes("PENÁLT")) return "PENÁLTI";
+    if (r.includes("GOLO") || r.includes("GOAL")) return "GOLO!";
+    if (r.includes("CHANCE")) return "GRANDE CHANCE";
+    return "SUSPENSO";
   }
 
   const s = StyleSheet.create({

@@ -5190,7 +5190,23 @@ function buildFootballLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
 
     const isHT = statusStr === "HT";
     const isET = statusStr.includes("extra") || statusStr === "Extra Time" || statusStr === "Penalties";
-    const minute = isHT ? 45 : isET ? 105 : statusStr === "1st half" ? 25 : statusStr === "2nd half" ? 70 : 45;
+    let minute: number;
+    if (isHT) {
+      minute = 45;
+    } else if (isET) {
+      minute = 105;
+    } else if (ev.startTimestamp) {
+      const minsFromKickoff = Math.floor((now / 1000 - ev.startTimestamp) / 60);
+      if (statusStr === "1st half") {
+        minute = Math.min(44, Math.max(1, minsFromKickoff));
+      } else if (statusStr === "2nd half") {
+        minute = Math.min(89, Math.max(46, minsFromKickoff - 15));
+      } else {
+        minute = Math.min(44, Math.max(1, minsFromKickoff));
+      }
+    } else {
+      minute = statusStr === "1st half" ? 25 : statusStr === "2nd half" ? 70 : 45;
+    }
     const newStatus = isHT ? "HT" : isET ? "ET" : statusStr;
 
     const existing = liveMatchState.get(id);
