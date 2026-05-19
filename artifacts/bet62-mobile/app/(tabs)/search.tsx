@@ -271,7 +271,10 @@ export default function SearchScreen() {
             </View>
           )}
           <Text style={s.matchTeams} numberOfLines={1}>{match.home} vs {match.away}</Text>
-          <Text style={s.matchLeague} numberOfLines={1}>{getLeagueFlag(match.league, (match as { country?: string }).country)} {match.league ?? match.sport}</Text>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
+            <Text style={{ fontSize: 14 }}>{getLeagueFlag(match.league, (match as { country?: string }).country)}</Text>
+            <Text style={s.matchLeague} numberOfLines={1}>{match.league ?? match.sport}</Text>
+          </View>
           <View style={s.matchOdds}>
             {([
               { mkt: "1x2-home", lbl: "1", val: match.odds.home },

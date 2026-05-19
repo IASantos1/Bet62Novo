@@ -298,8 +298,9 @@ function LiveMatchCard({ match }: { match: LiveMatch }) {
               <View style={{ flexDirection: "row", alignItems: "center", gap: 5, marginBottom: 8 }}>
                 <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: colors.primary }} />
                 <MaterialCommunityIcons name={SPORT_ICONS[match.sport] ?? "trophy"} size={11} color={sportColor} />
+                <Text style={{ fontSize: 14, marginLeft: 1, marginRight: 2 }}>{getLeagueFlag(match.league, match.country)}</Text>
                 <Text style={{ fontSize: 11, fontFamily: "Inter_500Medium", color: colors.mutedForeground, flex: 1 }} numberOfLines={1}>
-                  {getLeagueFlag(match.league, match.country)} {match.league ?? match.sport}
+                  {match.league ?? match.sport}
                 </Text>
                 <Text style={{ fontSize: 11, fontFamily: "Inter_700Bold", color: "#f59e0b" }}>{minuteLabel}</Text>
               </View>

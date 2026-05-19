@@ -663,7 +663,8 @@ export function ComprehensiveMarketsSheet({ visible, match, onClose }: Props) {
             </Pressable>
 
             <View style={s.leagueRow}>
-              <Text style={s.leagueText}>{getLeagueFlag(match.league, match.country)} {match.league ?? match.sport}</Text>
+              <Text style={{ fontSize: 16, marginRight: 5 }}>{getLeagueFlag(match.league, match.country)}</Text>
+              <Text style={s.leagueText}>{match.league ?? match.sport}</Text>
               <View style={{ flex: 1 }} />
               <Text style={s.dateText}>{dateStr}</Text>
             </View>
