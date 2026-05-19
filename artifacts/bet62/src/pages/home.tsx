@@ -4369,6 +4369,12 @@ export default function Home() {
                 <MarketOddsBtn match={match} sel="btts1h-n" odd={(m as any).btts1H.no} market="gols" label="Não" />
               </MarketGroup>
             )}
+            {show2tempo && (m as any).btts2H?.yes > 0 && (
+              <MarketGroup title="Ambas Marcam — 2º Tempo">
+                <MarketOddsBtn match={match} sel="btts2h-y" odd={(m as any).btts2H.yes} market="gols" label="Sim" />
+                <MarketOddsBtn match={match} sel="btts2h-n" odd={(m as any).btts2H.no} market="gols" label="Não" />
+              </MarketGroup>
+            )}
             {(m as any).goalOddEven?.odd > 0 && (
               <MarketGroup title="Total de Gols — Ímpar / Par">
                 <MarketOddsBtn match={match} sel="goe-odd"  odd={(m as any).goalOddEven.odd}  market="gols" label="Ímpar" />

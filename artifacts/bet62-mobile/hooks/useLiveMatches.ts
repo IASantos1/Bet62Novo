@@ -50,6 +50,7 @@ export interface LiveMatchMarkets {
     awayOver25: number; awayUnder25: number;
   };
   btts1H?: { yes: number; no: number };
+  btts2H?: { yes: number; no: number };
   goalOddEven?: { odd: number; even: number };
 }
 

@@ -988,6 +988,15 @@ export function ComprehensiveMarketsSheet({ visible, match, onClose }: Props) {
                   </Section>
                 )}
 
+                {isFootball && show2tempo && m?.btts2H && m.btts2H.yes > 1.01 && (
+                  <Section title="Ambas Marcam — 2º Tempo" tabKey="gols">
+                    <View style={s.row}>
+                      <OddsBtn market="btts2h-yes" label="Sim" value={m.btts2H.yes} />
+                      <OddsBtn market="btts2h-no" label="Não" value={m.btts2H.no} />
+                    </View>
+                  </Section>
+                )}
+
                 {isFootball && m?.goalOddEven && m.goalOddEven.odd > 1.01 && (
                   <Section title="Total Golos — Par / Ímpar" tabKey="gols">
                     <View style={s.row}>
