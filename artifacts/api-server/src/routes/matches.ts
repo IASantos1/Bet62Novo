@@ -5,14 +5,6 @@ const router: IRouter = Router();
 
 const SPORTSAPI_KEY = process.env.SPORTSAPI_KEY ?? "";
 
-// SportsAPI Pro V1 — base URLs per sport (auth via x-api-key header, not query param)
-const SAPI_FOOTBALL  = "https://v1.football.sportsapipro.com/api/v1";
-const SAPI_BASKETBALL = "https://v1.basketball.sportsapipro.com/api/v1";
-const SAPI_HOCKEY    = "https://v1.hockey.sportsapipro.com/api/v1";
-const SAPI_TENNIS    = "https://v1.tennis.sportsapipro.com/api/v1";
-const SAPI_VOLLEYBALL = "https://v1.volleyball.sportsapipro.com/api/v1";
-const SAPI_BASEBALL  = "https://v1.baseball.sportsapipro.com/api/v1";
-
 // SportsAPI Pro V2 — real-time live scores (V2 domains, correct paths)
 const SAPI_V2_FOOTBALL   = "https://v2.football.sportsapipro.com/api";
 const SAPI_V2_BASKETBALL = "https://v2.basketball.sportsapipro.com/api";
@@ -2405,170 +2397,25 @@ export async function scanDailyForFinished(): Promise<void> {
 // ─── Fetch helpers ────────────────────────────────────────────────────────────
 
 async function getLiveLeagues(): Promise<StatpalLeagueV2[]> {
-  const now = Date.now();
-  if (liveCache && now - liveFetchedAt < CONFIG.LIVE_CACHE_TTL) return liveCache;
-  // Prevent concurrent fetches — return stale while a fetch is already in flight
-  if (liveIsFetching) return liveCache ?? [];
-  liveIsFetching = true;
-  try {
-    const resp = await fetch(`${SAPI_FOOTBALL}/soccer/matches/live`, {
-      signal: AbortSignal.timeout(9000), headers: sapiHeaders(),
-    });
-    if (!resp.ok) {
-      console.warn(`[live] Statpal HTTP ${resp.status} — using cache or empty`);
-      liveFetchedAt = now; // back off — don't hammer the API on next call
-      return liveCache ?? [];
-    }
-    const data = (await resp.json()) as { live_matches?: { league?: StatpalLeagueV2 | StatpalLeagueV2[]; updated_ts?: number } };
-    const raw = data?.live_matches?.league;
-    // Track Statpal's own feed timestamp (seconds) — used to detect frozen feed
-    const feedTs = data?.live_matches?.updated_ts;
-    if (feedTs && feedTs > liveFeedUpdatedTs) liveFeedUpdatedTs = feedTs;
-    liveCache = raw == null ? [] : Array.isArray(raw) ? raw : [raw];
-    liveFetchedAt = now;
-    return liveCache;
-  } catch (err) {
-    console.warn(`[live] Statpal fetch error — using cache or empty:`, err);
-    // Back off: retry after full TTL, not immediately
-    liveFetchedAt = now;
-    return liveCache ?? [];
-  } finally {
-    liveIsFetching = false;
-  }
+  return liveCache ?? [];
 }
 
 async function getDailyLeagues(): Promise<StatpalLeagueV2[]> {
-  const now = Date.now();
-  if (dailyCache && now - dailyFetchedAt < CONFIG.DAILY_CACHE_TTL) return dailyCache;
-  try {
-    const resp = await fetch(`${SAPI_FOOTBALL}/soccer/matches/daily?offset=0`, {
-      signal: AbortSignal.timeout(9000), headers: sapiHeaders(),
-    });
-    if (!resp.ok) {
-      console.warn(`[daily] Statpal HTTP ${resp.status} — using cache or empty`);
-      return dailyCache ?? [];
-    }
-    const raw = (await resp.json()) as Record<string, { league: StatpalLeagueV2[] }>;
-    const dayData = Object.values(raw)[0];
-    dailyCache = dayData?.league ?? [];
-    dailyFetchedAt = now;
-    return dailyCache;
-  } catch (err) {
-    console.warn(`[daily] Statpal fetch error — using cache or empty:`, err);
-    return dailyCache ?? [];
-  }
+  return dailyCache ?? [];
 }
 
 async function getTomorrowLeagues(): Promise<StatpalLeagueV2[]> {
-  const now = Date.now();
-  if (dailyTomorrowCache && now - dailyTomorrowFetchedAt < CONFIG.TOMORROW_CACHE_TTL) return dailyTomorrowCache;
-  try {
-    const resp = await fetch(`${SAPI_FOOTBALL}/soccer/matches/daily?offset=1`, {
-      signal: AbortSignal.timeout(9000), headers: sapiHeaders(),
-    });
-    if (!resp.ok) return dailyTomorrowCache ?? [];
-    const raw = (await resp.json()) as Record<string, { league: StatpalLeagueV2[] }>;
-    const dayData = Object.values(raw)[0];
-    dailyTomorrowCache = dayData?.league ?? [];
-    dailyTomorrowFetchedAt = now;
-    return dailyTomorrowCache;
-  } catch {
-    return dailyTomorrowCache ?? [];
-  }
+  return dailyTomorrowCache ?? [];
 }
 
 // Fetch daily football leagues for offset N (days ahead, 2–6 = days 3–7 from today)
 async function getDailyLeaguesForFutureOffset(offset: number): Promise<StatpalLeagueV2[]> {
-  const now = Date.now();
-  const cached = dailyFutureCache.get(offset);
-  if (cached && now - cached.fetchedAt < DAILY_FUTURE_TTL) return cached.data;
-  try {
-    const resp = await fetch(`${SAPI_FOOTBALL}/soccer/matches/daily?offset=${offset}`, {
-      signal: AbortSignal.timeout(9000), headers: sapiHeaders(),
-    });
-    if (!resp.ok) return cached?.data ?? [];
-    const raw = (await resp.json()) as Record<string, { league: StatpalLeagueV2[] }>;
-    const dayData = Object.values(raw)[0];
-    const data = dayData?.league ?? [];
-    dailyFutureCache.set(offset, { data, fetchedAt: now });
-    return data;
-  } catch {
-    return cached?.data ?? [];
-  }
+  return dailyFutureCache.get(offset)?.data ?? [];
 }
 
 // Fetch real odds for major European countries in parallel
 async function getOddsMap(): Promise<Map<string, RealOdds>> {
-  const now = Date.now();
-  if (oddsMap && now - oddsFetchedAt < CONFIG.ODDS_CACHE_TTL) return oddsMap;
-
-  const COUNTRIES = [
-    "england", "spain", "germany", "italy", "france", "portugal", "netherlands",
-    "korea", "japan", "australia", "brazil", "usa", "mexico", "turkey",
-    "argentina", "scotland", "greece", "russia", "china",
-  ];
-  const map = new Map<string, RealOdds>();
-
-  await Promise.allSettled(
-    COUNTRIES.map(async (country) => {
-      try {
-        const resp = await fetch(
-          `${SAPI_FOOTBALL}/soccer/odds/${country}`,
-          { signal: AbortSignal.timeout(9000), headers: sapiHeaders() }
-        );
-        if (!resp.ok) return;
-        const raw = (await resp.json()) as {
-          example?: { odds_feed: { league: OddsLeague[] } };
-          odds_feed?: { league: OddsLeague[] };
-        };
-        const feed = raw?.example?.odds_feed ?? raw?.odds_feed;
-        const leagues: OddsLeague[] = feed?.league ?? [];
-
-        for (const league of leagues) {
-          const matches = Array.isArray(league.match) ? league.match : [league.match];
-          for (const m of matches) {
-            if (!m?.odds?.type) continue;
-            const types = Array.isArray(m.odds.type) ? m.odds.type : [m.odds.type];
-
-            // Find 1x2 odds — average across ALL active bookmakers with 2.5% house margin
-            // (was: bookmaker[0] only — inconsistent with hockey/basketball/volleyball/tennis)
-            const wx2 = types.find(t => t.name === "1x2" || t.name === "3Way Result");
-            if (!wx2) continue;
-            const bks: OddsBookmaker[] = Array.isArray(wx2.bookmaker) ? wx2.bookmaker : [wx2.bookmaker];
-            const avgSide = (side: "Home" | "Draw" | "Away"): number => {
-              const vals: number[] = [];
-              for (const bk of bks) {
-                if (bk.stop === "True") continue;
-                const odds = bk.odd ? (Array.isArray(bk.odd) ? bk.odd : [bk.odd]) : [];
-                const o = odds.find(o => o.name === side);
-                const v = parseFloat(o?.value ?? "0");
-                if (v > 1) vals.push(v);
-              }
-              if (!vals.length) return 0;
-              const avg = vals.reduce((a, b) => a + b, 0) / vals.length;
-              return Math.max(1.01, Math.round(avg * 0.975 * 100) / 100);
-            };
-            const homeVal = avgSide("Home");
-            const drawVal = avgSide("Draw");
-            const awayVal = avgSide("Away");
-            if (homeVal <= 0 || drawVal <= 0 || awayVal <= 0) continue;
-
-            const entry: RealOdds = { home: homeVal, draw: drawVal, away: awayVal, types };
-            // Index by all known IDs for maximum match coverage
-            if (m.id) map.set(m.id, entry);
-            if (m.alternate_id) map.set(m.alternate_id, entry);
-            if (m.alternate_id_2) map.set(m.alternate_id_2, entry);
-          }
-        }
-      } catch {
-        // Country fetch failed — skip silently
-      }
-    })
-  );
-
-  oddsMap = map;
-  oddsFetchedAt = now;
-  return map;
+  return oddsMap ?? new Map();
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -3135,22 +2982,7 @@ function resolveOdds(
 }
 
 async function getNHLLive(): Promise<NHLTournament[]> {
-  const now = Date.now();
-  if (nhlLiveCache && now - nhlLiveFetchedAt < CONFIG.LIVE_CACHE_TTL) return nhlLiveCache;
-  try {
-    const resp = await fetch(`${SAPI_HOCKEY}/nhl/livescores`, {
-      signal: AbortSignal.timeout(8000), headers: sapiHeaders(),
-    });
-    if (!resp.ok) return nhlLiveCache ?? [];
-    const data = (await resp.json()) as { livescores?: { tournament?: NHLTournament | NHLTournament[] } };
-    const raw = data?.livescores?.tournament;
-    if (!raw) return nhlLiveCache ?? [];
-    nhlLiveCache = Array.isArray(raw) ? raw : [raw];
-    nhlLiveFetchedAt = now;
-    return nhlLiveCache;
-  } catch {
-    return nhlLiveCache ?? [];
-  }
+  return nhlLiveCache ?? [];
 }
 
 function buildNHLLiveMatches(tournaments: NHLTournament[]): LiveMatchState[] {
@@ -3261,22 +3093,7 @@ function buildNHLLiveMatches(tournaments: NHLTournament[]): LiveMatchState[] {
 
 // ─── MLB live feed ────────────────────────────────────────────────────────────
 async function getMLBLive(): Promise<MLBTournament[]> {
-  const now = Date.now();
-  if (mlbLiveCache && now - mlbLiveFetchedAt < CONFIG.LIVE_CACHE_TTL) return mlbLiveCache;
-  try {
-    const resp = await fetch(`${SAPI_BASEBALL}/mlb/livescores`, {
-      signal: AbortSignal.timeout(8000), headers: sapiHeaders(),
-    });
-    if (!resp.ok) return mlbLiveCache ?? [];
-    const data = (await resp.json()) as { livescores?: { tournament?: MLBTournament | MLBTournament[] } };
-    const raw = data?.livescores?.tournament;
-    if (!raw) return mlbLiveCache ?? [];
-    mlbLiveCache = Array.isArray(raw) ? raw : [raw];
-    mlbLiveFetchedAt = now;
-    return mlbLiveCache;
-  } catch {
-    return mlbLiveCache ?? [];
-  }
+  return mlbLiveCache ?? [];
 }
 
 function buildMLBLiveMatches(tournaments: MLBTournament[]): LiveMatchState[] {
@@ -3445,22 +3262,7 @@ function buildMLBLiveMatches(tournaments: MLBTournament[]): LiveMatchState[] {
 }
 
 async function getNBALive(): Promise<NBATournament[]> {
-  const now = Date.now();
-  if (nbaLiveCache && now - nbaLiveFetchedAt < CONFIG.LIVE_CACHE_TTL) return nbaLiveCache;
-  try {
-    const resp = await fetch(`${SAPI_BASKETBALL}/nba/livescores`, {
-      signal: AbortSignal.timeout(8000), headers: sapiHeaders(),
-    });
-    if (!resp.ok) return nbaLiveCache ?? [];
-    const data = (await resp.json()) as { livescores?: { tournament?: NBATournament | NBATournament[] } };
-    const raw = data?.livescores?.tournament;
-    if (!raw) return nbaLiveCache ?? [];
-    nbaLiveCache = Array.isArray(raw) ? raw : [raw];
-    nbaLiveFetchedAt = now;
-    return nbaLiveCache;
-  } catch {
-    return nbaLiveCache ?? [];
-  }
+  return nbaLiveCache ?? [];
 }
 
 function buildNBALiveMatches(tournaments: NBATournament[]): LiveMatchState[] {
@@ -3565,64 +3367,15 @@ function _parseTennisStat(raw: TennisStatsPlayerRaw | undefined): TennisStatData
 
 
 async function getTennisStatsMap(): Promise<Map<string, [TennisStatData, TennisStatData]>> {
-  const now = Date.now();
-  if (tennisStatsCache && now - tennisStatsFetchedAt < TENNIS_LIVE_CACHE_TTL) return tennisStatsCache;
-  try {
-    const resp = await fetch(`${SAPI_TENNIS}/tennis/livestats`, { signal: AbortSignal.timeout(8000), headers: sapiHeaders() });
-    if (!resp.ok) return tennisStatsCache ?? new Map();
-    const data = (await resp.json()) as { livestats?: { tournament?: TennisStatsTournament | TennisStatsTournament[] } };
-    const raw = data?.livestats?.tournament;
-    if (!raw) return tennisStatsCache ?? new Map();
-    const arr = Array.isArray(raw) ? raw : [raw];
-    const map = new Map<string, [TennisStatData, TennisStatData]>();
-    for (const t of arr) {
-      const matches = Array.isArray(t.match) ? t.match : [t.match];
-      for (const m of matches) {
-        if (!m?.id) continue;
-        const players = Array.isArray(m.player) ? m.player : [m.player];
-        map.set(String(m.id), [_parseTennisStat(players[0]), _parseTennisStat(players[1])]);
-      }
-    }
-    tennisStatsCache = map;
-    tennisStatsFetchedAt = now;
-    return map;
-  } catch {
-    return tennisStatsCache ?? new Map();
-  }
+  return tennisStatsCache ?? new Map();
 }
 
 async function getTennisLive(): Promise<TennisTournament[]> {
-  const now = Date.now();
-  if (tennisLiveCache && now - tennisLiveFetchedAt < TENNIS_LIVE_CACHE_TTL) return tennisLiveCache;
-  try {
-    const resp = await fetch(`${SAPI_TENNIS}/tennis/livescores`, { signal: AbortSignal.timeout(8000), headers: sapiHeaders() });
-    if (!resp.ok) return tennisLiveCache ?? [];
-    const data = (await resp.json()) as { livescores?: { tournament?: TennisTournament | TennisTournament[] } };
-    const raw = data?.livescores?.tournament;
-    if (!raw) return tennisLiveCache ?? [];
-    tennisLiveCache = Array.isArray(raw) ? raw : [raw];
-    tennisLiveFetchedAt = now;
-    return tennisLiveCache;
-  } catch {
-    return tennisLiveCache ?? [];
-  }
+  return tennisLiveCache ?? [];
 }
 
 async function getVolleyballLive(): Promise<VolleyTournament[]> {
-  const now = Date.now();
-  if (volleyLiveCache && now - volleyLiveFetchedAt < CONFIG.LIVE_CACHE_TTL) return volleyLiveCache;
-  try {
-    const resp = await fetch(`${SAPI_VOLLEYBALL}/volleyball/livescores`, { signal: AbortSignal.timeout(8000), headers: sapiHeaders() });
-    if (!resp.ok) return volleyLiveCache ?? [];
-    const data = (await resp.json()) as { livescores?: { tournament?: VolleyTournament | VolleyTournament[] } };
-    const raw = data?.livescores?.tournament;
-    if (!raw) return volleyLiveCache ?? [];
-    volleyLiveCache = Array.isArray(raw) ? raw : [raw];
-    volleyLiveFetchedAt = now;
-    return volleyLiveCache;
-  } catch {
-    return volleyLiveCache ?? [];
-  }
+  return volleyLiveCache ?? [];
 }
 
 // ─── SportsAPI Pro V2 Live Fetch Functions ────────────────────────────────────
@@ -6182,47 +5935,6 @@ router.get("/stats", async (req, res) => {
   let homeForm: FormEntry[] = [];
   let awayForm: FormEntry[] = [];
 
-  // Only attempt Statpal API for football
-  if (sport === "football") {
-    try {
-      const resp = await fetch(`${SAPI_FOOTBALL}/soccer/matches/daily?offset=-1`, {
-        signal: AbortSignal.timeout(5000), headers: sapiHeaders(),
-      });
-      if (resp.ok) {
-        // Response is date-keyed: { "matches_DD_MM_YYYY": { league: [...] } }
-        const data = (await resp.json()) as Record<string, { league?: unknown[] }>;
-        const leagueArr = (Object.values(data)[0])?.league;
-        const leagues: unknown[] = Array.isArray(leagueArr) ? leagueArr : [];
-        for (const league of leagues) {
-          if (homeForm.length >= 5 && awayForm.length >= 5) break;
-          const lObj = league as Record<string, unknown>;
-          const ms: unknown[] = Array.isArray(lObj["match"]) ? (lObj["match"] as unknown[]) : lObj["match"] ? [lObj["match"]] : [];
-          for (const m of ms) {
-            const mo = m as Record<string, unknown>;
-            const mh = mo["home"] as Record<string, unknown> | undefined;
-            const ma = mo["away"] as Record<string, unknown> | undefined;
-            const hg = parseInt(String(mh?.["goals"] ?? "x"));
-            const ag = parseInt(String(ma?.["goals"] ?? "x"));
-            if (isNaN(hg) || isNaN(ag)) continue;
-            const mhName = String(mh?.["name"] ?? "");
-            const maName = String(ma?.["name"] ?? "");
-            const homeSlug = home.toLowerCase().slice(0, 5);
-            const awaySlug = away.toLowerCase().slice(0, 5);
-            if (mhName.toLowerCase().includes(homeSlug) && homeForm.length < 5) {
-              homeForm.push({ result: hg > ag ? "W" : hg === ag ? "D" : "L", score: `${hg}-${ag}`, opponent: maName, home: true });
-            } else if (maName.toLowerCase().includes(homeSlug) && homeForm.length < 5) {
-              homeForm.push({ result: ag > hg ? "W" : ag === hg ? "D" : "L", score: `${ag}-${hg}`, opponent: mhName, home: false });
-            }
-            if (mhName.toLowerCase().includes(awaySlug) && awayForm.length < 5) {
-              awayForm.push({ result: hg > ag ? "W" : hg === ag ? "D" : "L", score: `${hg}-${ag}`, opponent: maName, home: true });
-            } else if (maName.toLowerCase().includes(awaySlug) && awayForm.length < 5) {
-              awayForm.push({ result: ag > hg ? "W" : ag === hg ? "D" : "L", score: `${ag}-${hg}`, opponent: mhName, home: false });
-            }
-          }
-        }
-      }
-    } catch { /* use computed fallback */ }
-  }
 
   const realHomeCount = homeForm.length;
   const realAwayCount = awayForm.length;
@@ -6318,108 +6030,15 @@ function buildLeagueStandings(leagueName: string): { league: string; teams: Arra
 }
 
 async function getActiveTournaments(): Promise<ActiveTournament[]> {
-  const now = Date.now();
-  if (tourListCache && now - tourListFetchedAt < TOUR_CACHE_TTL) return tourListCache;
-  const parseDate = (s: string): Date => {
-    const [dd, mm, yy] = s.split(".");
-    return new Date(+yy!, +mm! - 1, +dd!);
-  };
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const results: ActiveTournament[] = [];
-  for (const tour of ["atp", "wta"] as const) {
-    try {
-      const resp = await fetch(`${SAPI_TENNIS}/tennis/tournament-list/${tour}`, {
-        signal: AbortSignal.timeout(8000), headers: sapiHeaders(),
-      });
-      if (!resp.ok) continue;
-      const data = (await resp.json()) as { tournaments?: { tournament?: TournamentRaw | TournamentRaw[] } };
-      const raw = data?.tournaments?.tournament;
-      if (!raw) continue;
-      const arr = Array.isArray(raw) ? raw : [raw];
-      for (const t of arr) {
-        try {
-          const start = parseDate(t.date_start);
-          const end   = parseDate(t.date_end);
-          if (start <= today && end >= today) results.push({ ...t, tour });
-        } catch { /* skip malformed dates */ }
-      }
-    } catch { /* skip failed tour */ }
-  }
-  tourListCache = results;
-  tourListFetchedAt = now;
-  return results;
+  return tourListCache ?? [];
 }
 
 async function getVolleyballDailyResults(): Promise<VolleyDailyResult[]> {
-  const now = Date.now();
-  if (volleyResultsCache && now - volleyResultsFetchedAt < RESULTS_CACHE_TTL) return volleyResultsCache;
-  try {
-    const resp = await fetch(`${SAPI_VOLLEYBALL}/volleyball/daily/d-1`, { signal: AbortSignal.timeout(9000), headers: sapiHeaders() });
-    if (!resp.ok) return volleyResultsCache ?? [];
-    const data = (await resp.json()) as { livescores?: { tournament?: unknown } };
-    const raw = data?.livescores?.tournament;
-    if (!raw) return volleyResultsCache ?? [];
-    const arr = Array.isArray(raw) ? raw : [raw];
-    const results: VolleyDailyResult[] = [];
-    for (const t of arr as Array<{ id: string; league: string; country: string; match: unknown }>) {
-      const matches = Array.isArray(t.match) ? t.match : [t.match];
-      for (const m of matches as Array<{ id: string; status: string; time: string; date: string; home: VolleyTeam; away: VolleyTeam }>) {
-        if (!m?.status || m.status !== "Finished") continue;
-        if (!m.home?.name || !m.away?.name) continue;
-        const sfs = ["s1", "s2", "s3", "s4", "s5"] as const;
-        const sets: Array<[number, number]> = [];
-        for (const sf of sfs) {
-          const h = m.home[sf]; const a = m.away[sf];
-          if (!h || !a) break;
-          sets.push([parseInt(h) || 0, parseInt(a) || 0]);
-        }
-        const homeSets = parseInt(m.home.totalscore) || 0;
-        const awaySets = parseInt(m.away.totalscore) || 0;
-        results.push({
-          id: m.id, home: m.home.name, away: m.away.name,
-          homeSets, awaySets, sets, homeWon: homeSets > awaySets,
-          league: t.league, country: t.country ?? "",
-          date: m.date, time: m.time,
-        });
-      }
-    }
-    volleyResultsCache = results;
-    volleyResultsFetchedAt = now;
-    return results;
-  } catch {
-    return volleyResultsCache ?? [];
-  }
+  return volleyResultsCache ?? [];
 }
 
 async function getVolleyballStandings(leagueId: string): Promise<VolleyStandingsData | null> {
-  const cached = volleyStandingsCache.get(leagueId);
-  if (cached && Date.now() - cached.at < VOLLEY_SCHEDULE_TTL) return cached.data;
-  try {
-    const resp = await fetch(`${SAPI_VOLLEYBALL}/volleyball/standings/${leagueId}`, { signal: AbortSignal.timeout(9000), headers: sapiHeaders() });
-    if (!resp.ok) return null;
-    const raw = (await resp.json()) as {
-      standings?: {
-        country?: string;
-        category?: {
-          id?: string; name?: string; season?: string;
-          league?: { team?: VolleyStandingTeam | VolleyStandingTeam[] };
-        };
-      };
-    };
-    const country = raw?.standings?.country ?? "";
-    const cat = raw?.standings?.category;
-    const teamsRaw = cat?.league?.team;
-    const teams = Array.isArray(teamsRaw) ? teamsRaw : (teamsRaw ? [teamsRaw] : []);
-    const data: VolleyStandingsData = {
-      id: leagueId, name: cat?.name ?? "", season: cat?.season ?? "",
-      country, teams,
-    };
-    volleyStandingsCache.set(leagueId, { data, at: Date.now() });
-    return data;
-  } catch {
-    return null;
-  }
+  return volleyStandingsCache.get(leagueId)?.data ?? null;
 }
 
 async function getVolleyballActiveLeagues(): Promise<VolleyLeague[]> {
@@ -6430,104 +6049,11 @@ async function getVolleyballActiveLeagues(): Promise<VolleyLeague[]> {
 }
 
 async function getVolleyballSchedule(leagueId: string): Promise<VolleyScheduleData | null> {
-  const cached = volleyScheduleCache.get(leagueId);
-  if (cached && Date.now() - cached.at < VOLLEY_SCHEDULE_TTL) return cached.data;
-  try {
-    const resp = await fetch(`${SAPI_VOLLEYBALL}/volleyball/season-schedule/${leagueId}`, { signal: AbortSignal.timeout(9000), headers: sapiHeaders() });
-    if (!resp.ok) return null;
-    const raw = (await resp.json()) as {
-      scores?: {
-        country?: string;
-        tournament?: { id?: string; league?: string; season?: string; week?: VolleyScheduleWeek | VolleyScheduleWeek[] };
-      };
-    };
-    const t = raw?.scores?.tournament;
-    const country = raw?.scores?.country ?? "";
-    if (!t) return null;
-
-    const weeksArr = Array.isArray(t.week) ? t.week : (t.week ? [t.week] : []);
-    const sfs = ["s1", "s2", "s3", "s4", "s5"] as const;
-
-    const parseFinished = (m: VolleyScheduleMatch): VolleyScheduleEntry => {
-      const sets: Array<[number, number]> = [];
-      for (const sf of sfs) {
-        const h = m.home[sf]; const a = m.away[sf];
-        if (!h || !a) break;
-        sets.push([parseInt(h) || 0, parseInt(a) || 0]);
-      }
-      const homeSets = parseInt(m.home.totalscore) || 0;
-      const awaySets = parseInt(m.away.totalscore) || 0;
-      return { id: m.id, home: m.home.name, away: m.away.name, homeSets, awaySets, sets, homeWon: homeSets > awaySets, date: m.date, time: m.time };
-    };
-
-    const recentWeeks: VolleyScheduleData["recentWeeks"] = [];
-    let nextWeek: VolleyScheduleData["nextWeek"] = null;
-
-    for (const w of weeksArr) {
-      const matches = Array.isArray(w.match) ? w.match : (w.match ? [w.match] : []);
-      const allFinished = matches.length > 0 && matches.every(m => m.status === "Finished");
-      const hasUpcoming = matches.some(m => m.status === "Not Started");
-      if (allFinished) {
-        recentWeeks.push({ number: w.number, matches: matches.map(parseFinished) });
-      } else if (hasUpcoming && !nextWeek) {
-        nextWeek = {
-          number: w.number,
-          matches: matches.filter(m => m.status === "Not Started")
-            .map(m => ({ id: m.id, home: m.home.name, away: m.away.name, date: m.date, time: m.time })),
-        };
-      }
-    }
-
-    const data: VolleyScheduleData = {
-      id: leagueId, league: t.league ?? "", season: t.season ?? "", country,
-      recentWeeks: recentWeeks.slice(-3), nextWeek,
-    };
-    volleyScheduleCache.set(leagueId, { data, at: Date.now() });
-    return data;
-  } catch {
-    return null;
-  }
+  return volleyScheduleCache.get(leagueId)?.data ?? null;
 }
 
 async function getTennisDailyResults(): Promise<TennisDailyResult[]> {
-  const now = Date.now();
-  if (tennisResultsCache && now - tennisResultsFetchedAt < RESULTS_CACHE_TTL) return tennisResultsCache;
-  try {
-    const resp = await fetch(`${SAPI_TENNIS}/tennis/daily/d-1`, { signal: AbortSignal.timeout(9000), headers: sapiHeaders() });
-    if (!resp.ok) return tennisResultsCache ?? [];
-    const data = (await resp.json()) as { scores?: { tournament?: unknown } };
-    const raw = data?.scores?.tournament;
-    if (!raw) return tennisResultsCache ?? [];
-    const arr = Array.isArray(raw) ? raw : [raw];
-    const DONE = new Set(["Finished", "Retired", "Walkover"]);
-    const results: TennisDailyResult[] = [];
-    for (const t of arr as Array<{ id: string; name: string; match: unknown }>) {
-      const matches = Array.isArray(t.match) ? t.match : [t.match];
-      for (const m of matches as Array<{ id: string; status: string; time: string; date: string; player: unknown }>) {
-        if (!m || !DONE.has(m.status)) continue;
-        const players = Array.isArray(m.player) ? m.player : [m.player];
-        if (players.length < 2) continue;
-        const p0 = players[0] as { name: string; s1: string; s2: string; s3: string; s4: string; s5: string; winner: string; dp1?: string };
-        const p1 = players[1] as typeof p0;
-        if (!p0 || !p1) continue;
-        if (p0.name.includes("/") || p0.dp1) continue; // skip doubles
-        const sets: Array<[number, number]> = [];
-        for (const sf of ["s1", "s2", "s3", "s4", "s5"] as const) {
-          if (p0[sf] !== "" && p1[sf] !== "") sets.push([parseInt(p0[sf]) || 0, parseInt(p1[sf]) || 0]);
-        }
-        results.push({
-          id: m.id, home: p0.name, away: p1.name, sets,
-          homeWon: p0.winner === "True", status: m.status,
-          tournament: t.name, date: m.date, time: m.time,
-        });
-      }
-    }
-    tennisResultsCache = results;
-    tennisResultsFetchedAt = now;
-    return results;
-  } catch {
-    return tennisResultsCache ?? [];
-  }
+  return tennisResultsCache ?? [];
 }
 
 async function getHockeyDailyResults(): Promise<HockeyDailyResult[]> {
@@ -6835,83 +6361,8 @@ const ROUND_ORDER: Record<string, number> = {
 
 async function getTournamentDetail(id: string): Promise<TournamentDetail> {
   const cached = tourDetailCache.get(id);
-  if (cached && Date.now() - cached.at < TOUR_DETAIL_TTL) return cached.data;
-
-  const resp = await fetch(`${SAPI_TENNIS}/tennis/tournament/${id}`, {
-    signal: AbortSignal.timeout(9000), headers: sapiHeaders(),
-  });
-  if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-  const data = (await resp.json()) as {
-    scores?: {
-      tournament?: {
-        id?: string; league?: string; season?: string;
-        week?: Array<{
-          number?: string; qualification?: string;
-          match?: Array<{
-            id?: string; status?: string; date?: string; time?: string; court?: string;
-            player?: Array<{ id?: string; name?: string; totalscore?: string;
-              s1?: string; s2?: string; s3?: string; s4?: string; s5?: string;
-              winner?: string; serve?: string; }>;
-          }> | {
-            id?: string; status?: string; date?: string; time?: string; court?: string;
-            player?: Array<{ id?: string; name?: string; totalscore?: string;
-              s1?: string; s2?: string; s3?: string; s4?: string; s5?: string;
-              winner?: string; serve?: string; }>;
-          };
-        }> | {
-          number?: string; qualification?: string;
-          match?: unknown;
-        };
-      };
-    };
-  };
-
-  const t = data?.scores?.tournament;
-  const leagueVal = t?.league ?? "";
-  const seasonVal = t?.season ?? "";
-  const rawWeeks = t?.week;
-  const weeks = !rawWeeks ? [] : Array.isArray(rawWeeks) ? rawWeeks : [rawWeeks];
-
-  const seen = new Set<string>();
-  const matches: TournamentMatch[] = [];
-
-  for (const week of weeks) {
-    if (week.qualification === "True") continue; // skip qualifying
-    const rawRound = week.number ?? "";
-    const roundName = rawRound.includes(" - ") ? rawRound.split(" - ").slice(1).join(" - ").toLowerCase() : rawRound.toLowerCase();
-    const roundOrder = ROUND_ORDER[roundName] ?? 99;
-    const rawMatches = week.match;
-    if (!rawMatches) continue;
-    const matchArr = Array.isArray(rawMatches) ? rawMatches : [rawMatches];
-    for (const m of matchArr) {
-      if (!m.id || seen.has(m.id)) continue;
-      seen.add(m.id);
-      const rawPlayers: Array<{ id?: string; name?: string; totalscore?: string; s1?: string; s2?: string; s3?: string; s4?: string; s5?: string; winner?: string; serve?: string; }> = (m.player as typeof rawPlayers | undefined) ?? [];
-      const players: TournamentMatchPlayer[] = rawPlayers.map(p => ({
-        id: p.id ?? "", name: p.name ?? "",
-        totalscore: p.totalscore ?? "",
-        s1: p.s1 ?? "", s2: p.s2 ?? "", s3: p.s3 ?? "", s4: p.s4 ?? "", s5: p.s5 ?? "",
-        winner: p.winner === "True",
-        serve: p.serve === "True",
-      }));
-      matches.push({
-        id: m.id, status: m.status ?? "", date: m.date ?? "", time: m.time ?? "", court: m.court ?? "",
-        round: roundName, roundOrder, players,
-      });
-    }
-  }
-
-  // Sort by round order, then date+time
-  matches.sort((a, b) => {
-    if (a.roundOrder !== b.roundOrder) return a.roundOrder - b.roundOrder;
-    const da = a.date.split(".").reverse().join("") + a.time;
-    const db = b.date.split(".").reverse().join("") + b.time;
-    return da.localeCompare(db);
-  });
-
-  const detail: TournamentDetail = { id, league: leagueVal, season: seasonVal, matches };
-  tourDetailCache.set(id, { data: detail, at: Date.now() });
-  return detail;
+  if (cached) return cached.data;
+  throw new Error("Detalhe de torneio indisponível");
 }
 
 router.get("/tournaments", async (_req, res) => {
@@ -6931,23 +6382,7 @@ let standingsFetchedAt = 0;
 const STANDINGS_CACHE_TTL = 30 * 60 * 1000;
 
 async function getTennisStandings(): Promise<StandingsTour> {
-  const now = Date.now();
-  if (standingsCache && now - standingsFetchedAt < STANDINGS_CACHE_TTL) return standingsCache;
-  const fetchTour = async (tour: "atp" | "wta"): Promise<StandingPlayer[]> => {
-    try {
-      const resp = await fetch(`${SAPI_TENNIS}/tennis/standings/${tour}`, { signal: AbortSignal.timeout(8000), headers: sapiHeaders() });
-      if (!resp.ok) return [];
-      const data = (await resp.json()) as { standings?: { player?: StandingPlayer | StandingPlayer[] } };
-      const raw = data?.standings?.player;
-      if (!raw) return [];
-      const arr = Array.isArray(raw) ? raw : [raw];
-      return arr.slice(0, 100); // top 100 per tour
-    } catch { return []; }
-  };
-  const [atp, wta] = await Promise.all([fetchTour("atp"), fetchTour("wta")]);
-  standingsCache = { atp, wta };
-  standingsFetchedAt = now;
-  return standingsCache;
+  return standingsCache ?? { atp: [], wta: [] };
 }
 
 router.get("/standings", async (_req, res) => {
@@ -7121,54 +6556,7 @@ router.get("/hockey-standings", async (_req, res) => {
 });
 
 async function getMLBRoster(abbr: string): Promise<MLBRosterData | null> {
-  const now = Date.now();
-  const cached = mlbRosterCache.get(abbr);
-  const fetchedAt = mlbRosterFetchedAt.get(abbr) ?? 0;
-  if (cached && now - fetchedAt < MLB_ROSTER_TTL) return cached;
-  try {
-    const resp = await fetch(`${SAPI_BASEBALL}/mlb/rosters/${abbr}`, { signal: AbortSignal.timeout(9000), headers: sapiHeaders() });
-    if (!resp.ok) return cached ?? null;
-    const json = (await resp.json()) as {
-      team?: {
-        name?: string; abbreviation?: string; season?: string;
-        position?: Array<{ name: string; player?: Array<{
-          id: string; name: string; number?: string; age?: string;
-          position?: string; height?: string; weight?: string;
-          bats?: string; throws?: string; salary?: string;
-        }> | { id: string; name: string; number?: string; age?: string; position?: string; height?: string; weight?: string; bats?: string; throws?: string; salary?: string; } }>;
-      };
-    };
-    const t = json.team;
-    if (!t) return cached ?? null;
-    const positions = Array.isArray(t.position) ? t.position : t.position ? [t.position] : [];
-    const data: MLBRosterData = {
-      teamName: t.name ?? abbr,
-      abbreviation: t.abbreviation ?? abbr.toUpperCase(),
-      season: t.season ?? "",
-      positions: positions.map(p => {
-        const rawPlayers = Array.isArray(p.player) ? p.player : p.player ? [p.player] : [];
-        return {
-          name: p.name,
-          players: rawPlayers.map(pl => ({
-            id: pl.id, name: pl.name,
-            number: pl.number ?? "",
-            age: parseInt(pl.age ?? "0") || 0,
-            position: pl.position ?? "",
-            height: pl.height ?? "",
-            weight: pl.weight ?? "",
-            bats: pl.bats ?? "",
-            throws: pl.throws ?? "",
-            salary: pl.salary ?? "",
-          })),
-        };
-      }),
-    };
-    mlbRosterCache.set(abbr, data);
-    mlbRosterFetchedAt.set(abbr, now);
-    return data;
-  } catch {
-    return cached ?? null;
-  }
+  return mlbRosterCache.get(abbr) ?? null;
 }
 
 router.get("/mlb-roster/:team", async (req, res) => {
@@ -7200,85 +6588,7 @@ const mlbTeamStatsFetchedAt = new Map<string, number>();
 const MLB_TEAM_STATS_TTL = 30 * 60 * 1000;
 
 async function getMLBTeamStats(abbr: string): Promise<MLBTeamStatsData | null> {
-  const now = Date.now();
-  const cached = mlbTeamStatsCache.get(abbr);
-  const fetchedAt = mlbTeamStatsFetchedAt.get(abbr) ?? 0;
-  if (cached && now - fetchedAt < MLB_TEAM_STATS_TTL) return cached;
-  try {
-    const resp = await fetch(`${SAPI_BASEBALL}/mlb/team-stats/${abbr}`, { signal: AbortSignal.timeout(9000), headers: sapiHeaders() });
-    if (!resp.ok) return cached ?? null;
-    const json = (await resp.json()) as {
-      statistics?: {
-        id?: string; season?: string; team?: string;
-        category?: Array<{
-          name: string;
-          team?: { player?: Array<Record<string, string>> | Record<string, string> };
-        }>;
-      };
-    };
-    const stats = json.statistics;
-    if (!stats) return cached ?? null;
-    const teamName = stats.team ?? abbr.toUpperCase();
-    const season = stats.season ?? "";
-    const categories = Array.isArray(stats.category) ? stats.category : stats.category ? [stats.category] : [];
-
-    const batters: MLBBatterStat[] = [];
-    const pitchers: MLBPitcherStat[] = [];
-
-    for (const cat of categories) {
-      const rawPlayers = Array.isArray(cat.team?.player) ? cat.team!.player : cat.team?.player ? [cat.team!.player] : [];
-      const players = rawPlayers as Record<string, string>[];
-      if (cat.name === "Batting") {
-        for (const p of players) {
-          batters.push({
-            id: p["id"] ?? "", rank: parseInt(p["rank"] ?? "0") || 0, name: p["name"] ?? "",
-            gp: parseInt(p["games_played"] ?? "0") || 0,
-            ab: parseInt(p["at_bats"] ?? "0") || 0,
-            h: parseInt(p["hits"] ?? "0") || 0,
-            avg: p["batting_avg"] ?? ".000",
-            obp: p["on_base_percentage"] ?? ".000",
-            slg: p["slugging_percentage"] ?? ".000",
-            r: parseInt(p["runs"] ?? "0") || 0,
-            rbi: parseInt(p["runs_batted_in"] ?? "0") || 0,
-            hr: parseInt(p["home_runs"] ?? "0") || 0,
-            doubles: parseInt(p["doubles"] ?? "0") || 0,
-            triples: parseInt(p["triples"] ?? "0") || 0,
-            sb: parseInt(p["stolen_bases"] ?? "0") || 0,
-            bb: parseInt(p["walks"] ?? "0") || 0,
-            so: parseInt(p["strikeouts"] ?? "0") || 0,
-          });
-        }
-      } else if (cat.name === "Pitching") {
-        for (const p of players) {
-          pitchers.push({
-            id: p["id"] ?? "", rank: parseInt(p["rank"] ?? "0") || 0, name: p["name"] ?? "",
-            gp: parseInt(p["games_played"] ?? p["games"] ?? "0") || 0,
-            gs: parseInt(p["games_started"] ?? "0") || 0,
-            era: p["era"] ?? "0.00",
-            w: parseInt(p["wins"] ?? p["won"] ?? "0") || 0,
-            l: parseInt(p["losses"] ?? p["lost"] ?? "0") || 0,
-            ip: p["innings_pitched"] ?? "0.0",
-            so: parseInt(p["strikeouts"] ?? "0") || 0,
-            bb: parseInt(p["walks"] ?? "0") || 0,
-            h: parseInt(p["hits"] ?? "0") || 0,
-            hr: parseInt(p["home_runs"] ?? "0") || 0,
-            whip: p["whip"] ?? "0.00",
-            baa: p["batting_avg_against"] ?? p["batting_avg"] ?? ".000",
-          });
-        }
-      }
-    }
-
-    batters.sort((a, b) => parseFloat(b.avg.replace(",", ".")) - parseFloat(a.avg.replace(",", ".")));
-    pitchers.sort((a, b) => parseFloat(a.era.replace(",", ".")) - parseFloat(b.era.replace(",", ".")));
-
-    const data: MLBTeamStatsData = { teamName, season, batters, pitchers };
-    mlbTeamStatsCache.set(abbr, data);
-    mlbTeamStatsFetchedAt.set(abbr, now);
-    return data;
-  } catch {
-    return cached ?? null;
-  }
+  return mlbTeamStatsCache.get(abbr) ?? null;
 }
 
 router.get("/mlb-team-stats/:team", async (req, res) => {
@@ -7300,38 +6610,7 @@ const mlbInjuriesFetchedAt = new Map<string, number>();
 const MLB_INJURIES_TTL = 15 * 60 * 1000;
 
 async function getMLBInjuries(abbr: string): Promise<MLBInjuriesData | null> {
-  const now = Date.now();
-  const cached = mlbInjuriesCache.get(abbr);
-  const fetchedAt = mlbInjuriesFetchedAt.get(abbr) ?? 0;
-  if (cached && now - fetchedAt < MLB_INJURIES_TTL) return cached;
-  try {
-    const resp = await fetch(`${SAPI_BASEBALL}/mlb/injuries/${abbr}`, { signal: AbortSignal.timeout(9000), headers: sapiHeaders() });
-    if (!resp.ok) return cached ?? null;
-    const json = (await resp.json()) as {
-      team?: {
-        id?: string; name?: string;
-        report?: Array<{ player_name?: string; player_id?: string; status?: string; description?: string; date?: string }> | { player_name?: string; player_id?: string; status?: string; description?: string; date?: string };
-      };
-    };
-    const t = json.team;
-    if (!t) return cached ?? null;
-    const raw = Array.isArray(t.report) ? t.report : t.report ? [t.report] : [];
-    const data: MLBInjuriesData = {
-      teamName: t.name ?? abbr,
-      report: raw.map(r => ({
-        playerName: r.player_name ?? "",
-        playerId: r.player_id ?? "",
-        status: r.status ?? "",
-        description: r.description ?? "",
-        date: r.date ?? "",
-      })),
-    };
-    mlbInjuriesCache.set(abbr, data);
-    mlbInjuriesFetchedAt.set(abbr, now);
-    return data;
-  } catch {
-    return cached ?? null;
-  }
+  return mlbInjuriesCache.get(abbr) ?? null;
 }
 
 router.get("/mlb-injuries/:team", async (req, res) => {
@@ -7359,42 +6638,7 @@ let mlbLeagueStatsCache: MLBLeagueStatsData | null = null;
 let mlbLeagueStatsFetchedAt = 0;
 
 async function getMLBLeagueStats(): Promise<MLBLeagueStatsData> {
-  const now = Date.now();
-  if (mlbLeagueStatsCache && now - mlbLeagueStatsFetchedAt < MLB_LEAGUE_STATS_TTL) return mlbLeagueStatsCache;
-
-  try {
-    const resp = await fetch(`${SAPI_BASEBALL}/mlb/league-stats/mlb_player_batting`, { signal: AbortSignal.timeout(8000), headers: sapiHeaders() });
-    if (!resp.ok) return mlbLeagueStatsCache ?? { batters: [] };
-    const json = (await resp.json()) as { statistics?: { category?: { player?: unknown } } };
-    const raw = json?.statistics?.category?.player;
-    const rawArr = raw ? ((Array.isArray(raw) ? raw : [raw]) as Record<string, string>[]) : [];
-
-    const batters: MLBLeaderBatter[] = rawArr.slice(0, 50).map(p => ({
-      rank: p["rank"] ?? "",
-      name: p["name"] ?? "",
-      team: p["team"] ?? "",
-      gp: p["gp"] ?? "",
-      atBats: p["at_bats"] ?? "",
-      hits: p["hits"] ?? "",
-      doubles: p["doubles"] ?? "",
-      triples: p["triples"] ?? "",
-      homeRuns: p["home_runs"] ?? "",
-      runs: p["runs"] ?? "",
-      rbi: p["runs_batted_in"] ?? "",
-      stolenBases: p["stolen_bases"] ?? "",
-      walks: p["walks"] ?? "",
-      strikeouts: p["strikeouts"] ?? "",
-      avg: p["batting_avg"] ?? "",
-      obp: p["on_base_percentage"] ?? "",
-      slg: p["slugging_percentage"] ?? "",
-    }));
-
-    mlbLeagueStatsCache = { batters };
-    mlbLeagueStatsFetchedAt = now;
-    return mlbLeagueStatsCache;
-  } catch {
-    return mlbLeagueStatsCache ?? { batters: [] };
-  }
+  return mlbLeagueStatsCache ?? { batters: [] };
 }
 
 router.get("/mlb-league-stats", async (_req, res) => {
@@ -7457,55 +6701,7 @@ const nbaRosterFetchedAt = new Map<string, number>();
 const NBA_ROSTER_TTL = 60 * 60 * 1000;
 
 async function getBasketballRoster(abbr: string): Promise<NBATeamRoster | null> {
-  const now = Date.now();
-  const cached = nbaRosterCache.get(abbr);
-  const fetchedAt = nbaRosterFetchedAt.get(abbr) ?? 0;
-  if (cached && now - fetchedAt < NBA_ROSTER_TTL) return cached;
-  try {
-    const resp = await fetch(`${SAPI_BASKETBALL}/nba/rosters/${abbr}`, { headers: sapiHeaders() });
-    if (!resp.ok) return cached ?? null;
-    const json = (await resp.json()) as {
-      team?: {
-        name?: string; abbreviation?: string; season?: string;
-        player?: Array<{
-          id: string; name: string; number?: string; age?: string;
-          position?: string; college?: string;
-          heigth?: string; weigth?: string; salary?: string;
-        }> | {
-          id: string; name: string; number?: string; age?: string;
-          position?: string; college?: string;
-          heigth?: string; weigth?: string; salary?: string;
-        };
-      };
-    };
-    const t = json.team;
-    if (!t) return cached ?? null;
-    const rawPlayers = Array.isArray(t.player) ? t.player : t.player ? [t.player] : [];
-    const data: NBATeamRoster = {
-      teamName: t.name ?? abbr,
-      abbreviation: t.abbreviation ?? abbr.toUpperCase(),
-      season: t.season ?? "",
-      players: rawPlayers.map(p => ({
-        id: p.id,
-        name: p.name,
-        number: p.number ?? "",
-        age: parseInt(p.age ?? "0") || 0,
-        position: p.position ?? "",
-        college: p.college ?? "",
-        height: p.heigth ?? "",
-        weight: p.weigth ?? "",
-        salary: p.salary ?? "",
-      })).sort((a, b) => {
-        const ORDER: Record<string, number> = { G: 0, "G-F": 1, "F-G": 2, F: 3, "F-C": 4, "C-F": 5, C: 6 };
-        return (ORDER[a.position] ?? 7) - (ORDER[b.position] ?? 7) || a.name.localeCompare(b.name);
-      }),
-    };
-    nbaRosterCache.set(abbr, data);
-    nbaRosterFetchedAt.set(abbr, now);
-    return data;
-  } catch {
-    return cached ?? null;
-  }
+  return nbaRosterCache.get(abbr) ?? null;
 }
 
 router.get("/basketball-roster/:team", async (req, res) => {
@@ -7534,69 +6730,7 @@ const nbaTeamStatsFetchedAt = new Map<string, number>();
 const NBA_TEAM_STATS_TTL = 30 * 60 * 1000;
 
 async function getBasketballTeamStats(abbr: string): Promise<NBATeamStatsData | null> {
-  const now = Date.now();
-  const cached = nbaTeamStatsCache.get(abbr);
-  const fetchedAt = nbaTeamStatsFetchedAt.get(abbr) ?? 0;
-  if (cached && now - fetchedAt < NBA_TEAM_STATS_TTL) return cached;
-  try {
-    const resp = await fetch(`${SAPI_BASKETBALL}/nba/team-stats/${abbr}`, { headers: sapiHeaders() });
-    if (!resp.ok) return cached ?? null;
-    const json = (await resp.json()) as {
-      statistics?: {
-        team?: string; id?: string;
-        category?: Array<{ name: string; player?: unknown[] | unknown }>;
-      };
-    };
-    const stats = json.statistics;
-    if (!stats) return cached ?? null;
-    const teamName = stats.team ?? abbr.toUpperCase();
-    const categories = Array.isArray(stats.category) ? stats.category : stats.category ? [stats.category] : [];
-
-    // index by player id for merging
-    const byId = new Map<string, Record<string, string>>();
-    for (const cat of categories) {
-      const rawPlayers = Array.isArray(cat.player) ? cat.player : cat.player ? [cat.player] : [];
-      for (const p of rawPlayers as Record<string, string>[]) {
-        const pid = p["id"] ?? "";
-        if (!byId.has(pid)) byId.set(pid, {});
-        Object.assign(byId.get(pid)!, p);
-      }
-    }
-
-    const players: NBAPlayerStat[] = [...byId.values()].map(p => ({
-      id: p["id"] ?? "",
-      rank: parseInt(p["rank"] ?? "0") || 0,
-      name: p["name"] ?? "",
-      gp: parseInt(p["games_played"] ?? "0") || 0,
-      gs: parseInt(p["games_started"] ?? "0") || 0,
-      min: parseFloat(p["minutes"] ?? "0").toFixed(1),
-      ppg: parseFloat(p["points_per_game"] ?? "0").toFixed(1),
-      apg: parseFloat(p["assists_per_game"] ?? "0").toFixed(1),
-      rpg: parseFloat(p["rebounds_per_game"] ?? "0").toFixed(1),
-      orpg: parseFloat(p["offensive_rebounds_per_game"] ?? "0").toFixed(1),
-      drpg: parseFloat(p["defensive_rebounds_per_game"] ?? "0").toFixed(1),
-      bpg: parseFloat(p["blocks_per_game"] ?? "0").toFixed(1),
-      spg: parseFloat(p["steals_per_game"] ?? "0").toFixed(1),
-      topg: parseFloat(p["turnovers_per_game"] ?? "0").toFixed(1),
-      fpg: parseFloat(p["fouls_per_game"] ?? "0").toFixed(1),
-      fgPct: p["fg_pct"] ? (parseFloat(p["fg_pct"]) * 100).toFixed(1) : "—",
-      fg3Pct: p["three_point_pct"] ? (parseFloat(p["three_point_pct"]) * 100).toFixed(1) : "—",
-      ftPct: p["free_throws_pct"] ? (parseFloat(p["free_throws_pct"]) * 100).toFixed(1) : "—",
-      fgm: parseFloat(p["fg_made_per_game"] ?? "0").toFixed(1),
-      fga: parseFloat(p["fg_attempts_per_game"] ?? "0").toFixed(1),
-      fg3m: parseFloat(p["three_point_made_per_game"] ?? "0").toFixed(1),
-      fg3a: parseFloat(p["three_point_attempts_per_game"] ?? "0").toFixed(1),
-      ftm: parseFloat(p["free_throws_made_per_game"] ?? "0").toFixed(1),
-      fta: parseFloat(p["free_throws_attempts_per_game"] ?? "0").toFixed(1),
-    })).sort((a, b) => parseFloat(b.ppg) - parseFloat(a.ppg));
-
-    const data: NBATeamStatsData = { teamName, players };
-    nbaTeamStatsCache.set(abbr, data);
-    nbaTeamStatsFetchedAt.set(abbr, now);
-    return data;
-  } catch {
-    return cached ?? null;
-  }
+  return nbaTeamStatsCache.get(abbr) ?? null;
 }
 
 router.get("/basketball-team-stats/:team", async (req, res) => {
@@ -7611,54 +6745,7 @@ router.get("/basketball-team-stats/:team", async (req, res) => {
 });
 
 async function getHockeyRoster(abbr: string): Promise<NHLRosterData | null> {
-  const now = Date.now();
-  const cached = hockeyRosterCache.get(abbr);
-  const fetchedAt = hockeyRosterFetchedAt.get(abbr) ?? 0;
-  if (cached && now - fetchedAt < HOCKEY_ROSTER_TTL) return cached;
-  try {
-    const resp = await fetch(`${SAPI_HOCKEY}/nhl/rosters/${abbr}`, { headers: sapiHeaders() });
-    if (!resp.ok) return cached ?? null;
-    const json = (await resp.json()) as {
-      team?: {
-        name?: string; abbreviation?: string; season?: string;
-        position?: Array<{ name: string; player?: Array<{
-          id: string; name: string; number?: string; age?: string;
-          birth_place?: string; height?: string; weight?: string;
-          shot?: string; salarycap?: string;
-        }> | { id: string; name: string; number?: string; age?: string; birth_place?: string; height?: string; weight?: string; shot?: string; salarycap?: string; } }>;
-      };
-    };
-    const t = json.team;
-    if (!t) return cached ?? null;
-    const positions = Array.isArray(t.position) ? t.position : t.position ? [t.position] : [];
-    const data: NHLRosterData = {
-      teamName: t.name ?? abbr,
-      abbreviation: t.abbreviation ?? abbr.toUpperCase(),
-      season: t.season ?? "",
-      positions: positions.map(p => {
-        const rawPlayers = Array.isArray(p.player) ? p.player : p.player ? [p.player] : [];
-        return {
-          name: p.name,
-          players: rawPlayers.map(pl => ({
-            id: pl.id,
-            name: pl.name,
-            number: pl.number ?? "",
-            age: parseInt(pl.age ?? "0") || 0,
-            birthPlace: pl.birth_place ?? "",
-            height: pl.height ?? "",
-            weight: pl.weight ?? "",
-            shot: pl.shot ?? "",
-            salary: pl.salarycap ?? "",
-          })),
-        };
-      }),
-    };
-    hockeyRosterCache.set(abbr, data);
-    hockeyRosterFetchedAt.set(abbr, now);
-    return data;
-  } catch {
-    return cached ?? null;
-  }
+  return hockeyRosterCache.get(abbr) ?? null;
 }
 
 router.get("/hockey-roster/:team", async (req, res) => {
@@ -7692,82 +6779,7 @@ const hockeyTeamStatsFetchedAt = new Map<string, number>();
 const HOCKEY_TEAM_STATS_TTL = 30 * 60 * 1000;
 
 async function getHockeyTeamStats(abbr: string): Promise<NHLTeamStatsData | null> {
-  const now = Date.now();
-  const cached = hockeyTeamStatsCache.get(abbr);
-  const fetchedAt = hockeyTeamStatsFetchedAt.get(abbr) ?? 0;
-  if (cached && now - fetchedAt < HOCKEY_TEAM_STATS_TTL) return cached;
-  try {
-    const resp = await fetch(`${SAPI_HOCKEY}/nhl/team-stats/${abbr}`, { headers: sapiHeaders() });
-    if (!resp.ok) return cached ?? null;
-    const json = (await resp.json()) as {
-      statistics?: {
-        season?: string;
-        team?: [string, { player?: unknown[] }] | unknown[];
-        goalkeepers?: { player?: unknown[] } | { player?: unknown };
-      };
-    };
-    const stats = json.statistics;
-    if (!stats) return cached ?? null;
-
-    const teamArr = Array.isArray(stats.team) ? stats.team : [];
-    const teamName = typeof teamArr[0] === "string" ? teamArr[0] : abbr.toUpperCase();
-    const skaterObj = teamArr[1] as { player?: unknown[] } | undefined;
-    const rawSkaters = Array.isArray(skaterObj?.player) ? skaterObj.player : [];
-
-    const skaters: NHLSkaterStat[] = (rawSkaters as Record<string, string>[]).map(p => ({
-      id: p["id"] ?? "",
-      rank: parseInt(p["rank"] ?? "0") || 0,
-      name: p["name"] ?? "",
-      pos: p["pos"] ?? "",
-      gp: parseInt(p["games_played"] ?? "0") || 0,
-      goals: parseInt(p["goals"] ?? "0") || 0,
-      assists: parseInt(p["assists"] ?? "0") || 0,
-      points: parseInt(p["points"] ?? "0") || 0,
-      plusMinus: parseInt(p["plus_minus"] ?? "0") || 0,
-      pim: parseInt(p["penalty_minutes"] ?? "0") || 0,
-      ppg: parseInt(p["pp_goals"] ?? "0") || 0,
-      ppa: parseInt(p["pp_assists"] ?? "0") || 0,
-      shg: parseInt(p["sh_goals"] ?? "0") || 0,
-      sha: parseInt(p["sh_assists"] ?? "0") || 0,
-      shots: parseInt(p["shots"] ?? "0") || 0,
-      gwg: parseInt(p["game_winning_goals"] ?? "0") || 0,
-      toiPerGame: p["toi_per_game"] ?? "",
-      faceoffPct: p["faceoffs_pct"] ?? "",
-    })).sort((a, b) => a.rank - b.rank);
-
-    const gkObj = stats.goalkeepers;
-    const rawGoalies = gkObj
-      ? Array.isArray((gkObj as { player?: unknown[] }).player)
-        ? (gkObj as { player: unknown[] }).player
-        : (gkObj as { player?: unknown }).player
-          ? [(gkObj as { player: unknown }).player]
-          : []
-      : [];
-
-    const goalies: NHLGoalieStat[] = (rawGoalies as Record<string, string>[]).map(g => ({
-      id: g["id"] ?? "",
-      rank: parseInt(g["rank"] ?? "0") || 0,
-      name: g["name"] ?? "",
-      gp: parseInt(g["games_played"] ?? "0") || 0,
-      wins: parseInt(g["wins"] ?? "0") || 0,
-      losses: parseInt(g["losses"] ?? "0") || 0,
-      otLosses: parseInt(g["ot_losses"] ?? "0") || 0,
-      saves: parseInt(g["saves"] ?? "0") || 0,
-      savesPct: g["saves_pct"] ?? "",
-      gaa: g["goals_against_diff"] ?? "",
-      shotsAgainst: parseInt(g["total_shots_against"] ?? "0") || 0,
-      goalsAgainst: parseInt(g["total_goals_against"] ?? "0") || 0,
-      shutouts: parseInt(g["shutouts"] ?? "0") || 0,
-      toi: g["time_on_ice"] ?? "",
-    })).sort((a, b) => a.rank - b.rank);
-
-    const data: NHLTeamStatsData = { teamName, season: stats.season ?? "", skaters, goalies };
-    hockeyTeamStatsCache.set(abbr, data);
-    hockeyTeamStatsFetchedAt.set(abbr, now);
-    return data;
-  } catch {
-    return cached ?? null;
-  }
+  return hockeyTeamStatsCache.get(abbr) ?? null;
 }
 
 router.get("/hockey-team-stats/:team", async (req, res) => {
@@ -7789,38 +6801,7 @@ const hockeyInjuriesFetchedAt = new Map<string, number>();
 const HOCKEY_INJURIES_TTL = 15 * 60 * 1000; // 15 min — injuries change more often
 
 async function getHockeyInjuries(abbr: string): Promise<NHLInjuriesData | null> {
-  const now = Date.now();
-  const cached = hockeyInjuriesCache.get(abbr);
-  const fetchedAt = hockeyInjuriesFetchedAt.get(abbr) ?? 0;
-  if (cached && now - fetchedAt < HOCKEY_INJURIES_TTL) return cached;
-  try {
-    const resp = await fetch(`${SAPI_HOCKEY}/nhl/injuries/${abbr}`, { headers: sapiHeaders() });
-    if (!resp.ok) return cached ?? null;
-    const json = (await resp.json()) as {
-      team?: {
-        id?: string; name?: string;
-        report?: Array<{ player_name?: string; player_id?: string; status?: string; description?: string; date?: string }> | { player_name?: string; player_id?: string; status?: string; description?: string; date?: string };
-      };
-    };
-    const t = json.team;
-    if (!t) return cached ?? null;
-    const raw = Array.isArray(t.report) ? t.report : t.report ? [t.report] : [];
-    const data: NHLInjuriesData = {
-      teamName: t.name ?? abbr,
-      report: raw.map(r => ({
-        playerName: r.player_name ?? "",
-        playerId: r.player_id ?? "",
-        status: r.status ?? "",
-        description: r.description ?? "",
-        date: r.date ?? "",
-      })),
-    };
-    hockeyInjuriesCache.set(abbr, data);
-    hockeyInjuriesFetchedAt.set(abbr, now);
-    return data;
-  } catch {
-    return cached ?? null;
-  }
+  return hockeyInjuriesCache.get(abbr) ?? null;
 }
 
 router.get("/hockey-injuries/:team", async (req, res) => {
@@ -7842,39 +6823,7 @@ const nbaInjuriesFetchedAt = new Map<string, number>();
 const NBA_INJURIES_TTL = 15 * 60 * 1000;
 
 async function getBasketballInjuries(abbr: string): Promise<NBAInjuriesData | null> {
-  const now = Date.now();
-  const cached = nbaInjuriesCache.get(abbr);
-  const fetchedAt = nbaInjuriesFetchedAt.get(abbr) ?? 0;
-  if (cached && now - fetchedAt < NBA_INJURIES_TTL) return cached;
-  try {
-    const resp = await fetch(`${SAPI_BASKETBALL}/nba/injuries/${abbr}`, { headers: sapiHeaders() });
-    if (!resp.ok) return cached ?? null;
-    const json = (await resp.json()) as {
-      team?: {
-        id?: string; name?: string;
-        report?: Array<{ player_name?: string; player_id?: string; status?: string; description?: string; date?: string }>
-                | { player_name?: string; player_id?: string; status?: string; description?: string; date?: string };
-      };
-    };
-    const t = json.team;
-    if (!t) return cached ?? null;
-    const raw = Array.isArray(t.report) ? t.report : t.report ? [t.report] : [];
-    const data: NBAInjuriesData = {
-      teamName: t.name ?? abbr,
-      report: raw.map(r => ({
-        playerName: r.player_name ?? "",
-        playerId: r.player_id ?? "",
-        status: r.status ?? "",
-        description: r.description ?? "",
-        date: r.date ?? "",
-      })),
-    };
-    nbaInjuriesCache.set(abbr, data);
-    nbaInjuriesFetchedAt.set(abbr, now);
-    return data;
-  } catch {
-    return cached ?? null;
-  }
+  return nbaInjuriesCache.get(abbr) ?? null;
 }
 
 router.get("/basketball-injuries/:team", async (req, res) => {
@@ -7952,99 +6901,7 @@ let volleyOddsFetchedAt = 0;
 const VOLLEY_ODDS_TTL = 60 * 1000;
 
 async function getVolleyballOdds(): Promise<VolleyOddsEntry[]> {
-  const now = Date.now();
-  if (volleyOddsCache && now - volleyOddsFetchedAt < VOLLEY_ODDS_TTL) return volleyOddsCache;
-  let resp: Response;
-  try {
-    resp = await fetch(`${SAPI_VOLLEYBALL}/volleyball/odds`, { signal: AbortSignal.timeout(9000), headers: sapiHeaders() });
-  } catch {
-    return volleyOddsCache ?? [];
-  }
-  if (!resp.ok) return volleyOddsCache ?? [];
-  const data = (await resp.json()) as { odds?: { tournament?: unknown } };
-  const rawTours = data?.odds?.tournament;
-  if (!rawTours) return [];
-  const tours = (Array.isArray(rawTours) ? rawTours : [rawTours]) as VolleyOddsTour[];
-
-  // Average decimal odds across bookmakers then apply 2.5% house margin
-  const avgOdd = (bks: VolleyOddsBk[], nameFilter: "Home" | "Away"): number => {
-    const vals: number[] = [];
-    for (const bk of bks) {
-      if (bk.stop === "True") continue;
-      const odds = Array.isArray(bk.odd) ? bk.odd : (bk.odd ? [bk.odd] : []);
-      const o = odds.find(o => o.name === nameFilter);
-      const v = parseFloat(o?.value ?? "0");
-      if (v > 1) vals.push(v);
-    }
-    if (!vals.length) return 0;
-    const avg = vals.reduce((a, b) => a + b, 0) / vals.length;
-    return Math.max(1.01, Math.round(avg * 0.975 * 100) / 100);
-  };
-
-  const results: VolleyOddsEntry[] = [];
-  const seen = new Set<string>();
-
-  for (const t of tours) {
-    const rawMatches = t.matches?.match;
-    if (!rawMatches) continue;
-    const matches = Array.isArray(rawMatches) ? rawMatches : [rawMatches];
-    for (const m of matches) {
-      if (!m.id || seen.has(m.id)) continue;
-      if (m.status !== "Not Started") continue;
-      seen.add(m.id);
-      const rawTypes = m.odds?.type;
-      const types: VolleyOddsType[] = !rawTypes ? [] : Array.isArray(rawTypes) ? rawTypes : [rawTypes];
-
-      // Home/Away odds
-      const haType = types.find(tp => tp.value === "Home/Away");
-      if (!haType) continue;
-      const haBks = (Array.isArray(haType.bookmaker) ? haType.bookmaker : haType.bookmaker ? [haType.bookmaker] : []) as VolleyOddsBk[];
-      const h = avgOdd(haBks, "Home");
-      const a = avgOdd(haBks, "Away");
-      if (!h || !a) continue;
-
-      // Over/Under line 3.5 (match goes 4+ sets) — average across all bookmakers
-      let overUnder: VolleyOddsEntry["overUnder"] = null;
-      const ouType = types.find(tp => tp.value === "Over/Under");
-      if (ouType) {
-        const ouBks = (Array.isArray(ouType.bookmaker) ? ouType.bookmaker : ouType.bookmaker ? [ouType.bookmaker] : []) as VolleyOddsBk[];
-        const overVals: number[] = [];
-        const underVals: number[] = [];
-        for (const bk of ouBks) {
-          if (bk.stop === "True") continue;
-          const totals = (Array.isArray(bk.total) ? bk.total : bk.total ? [bk.total] : []) as VolleyOddsTotal[];
-          const t35 = totals.find(t => t.name === "3.5");
-          if (!t35) continue;
-          const odds35 = Array.isArray(t35.odd) ? t35.odd : (t35.odd ? [t35.odd] : []);
-          const ov = parseFloat(odds35.find(o => o.name === "Over")?.value ?? "0");
-          const un = parseFloat(odds35.find(o => o.name === "Under")?.value ?? "0");
-          if (ov > 1) overVals.push(ov);
-          if (un > 1) underVals.push(un);
-        }
-        if (overVals.length && underVals.length) {
-          const avgOver  = overVals.reduce((a, b) => a + b, 0) / overVals.length;
-          const avgUnder = underVals.reduce((a, b) => a + b, 0) / underVals.length;
-          overUnder = {
-            line: "3.5",
-            over:  Math.max(1.01, Math.round(avgOver  * 0.975 * 100) / 100),
-            under: Math.max(1.01, Math.round(avgUnder * 0.975 * 100) / 100),
-          };
-        }
-      }
-
-      results.push({
-        matchId: m.id, date: m.date ?? "", time: m.time ?? "",
-        league: t.league ?? "",
-        homeTeam: { id: m.home?.id ?? "", name: m.home?.name ?? "" },
-        awayTeam: { id: m.away?.id ?? "", name: m.away?.name ?? "" },
-        homeOdds: h, awayOdds: a, overUnder,
-      });
-    }
-  }
-  const fresh = results.filter(r => !isMatchTimePast(r.date, r.time));
-  volleyOddsCache = fresh;
-  volleyOddsFetchedAt = now;
-  return fresh;
+  return volleyOddsCache ?? [];
 }
 
 router.get("/volleyball-odds", async (_req, res) => {
@@ -8350,27 +7207,7 @@ let footballLeaguesFetchedAt = 0;
 const FOOTBALL_LEAGUES_TTL = 5 * 60 * 1000;
 
 async function getFootballLeagues(): Promise<FootballLeague[]> {
-  const now = Date.now();
-  if (footballLeaguesCache && now - footballLeaguesFetchedAt < FOOTBALL_LEAGUES_TTL) return footballLeaguesCache;
-  const resp = await fetch(`${SAPI_FOOTBALL}/soccer/leagues/seasons`, { signal: AbortSignal.timeout(9000), headers: sapiHeaders() });
-  if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-  const data = (await resp.json()) as { league?: unknown };
-  const rawLeagues = data?.league;
-  if (!rawLeagues) return [];
-  const leagues = Array.isArray(rawLeagues) ? rawLeagues : [rawLeagues];
-  const results: FootballLeague[] = [];
-  for (const l of leagues) {
-    const lo = l as Record<string, unknown>;
-    const id = String(lo["id"] ?? "");
-    const name = String(lo["name"] ?? "");
-    const country = String(lo["country"] ?? "");
-    const season = String(lo["season"] ?? "");
-    const isCurrent = String(lo["is_current"] ?? "False") === "True";
-    if (id && name) results.push({ id, name, country, season, isCurrent });
-  }
-  footballLeaguesCache = results;
-  footballLeaguesFetchedAt = now;
-  return results;
+  return footballLeaguesCache ?? [];
 }
 
 router.get("/football-leagues", async (_req, res) => {
@@ -8515,24 +7352,9 @@ function parseFootballMatch(m: FootballScheduleMatch): FootballScheduleMatchOut 
 }
 
 async function getFootballSchedule(id: string): Promise<{ weeks: FootballScheduleWeekOut[]; meta: { league: string; season: string; country: string } }> {
-  const now = Date.now();
   const cached = footballScheduleCache.get(id);
-  if (cached && now - cached.fetchedAt < FOOTBALL_SCHEDULE_TTL) return { weeks: cached.data, meta: cached.meta };
-  const resp = await fetch(`${SAPI_FOOTBALL}/soccer/leagues/${encodeURIComponent(id)}/matches`, { signal: AbortSignal.timeout(12000), headers: sapiHeaders() });
-  if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-  const data = (await resp.json()) as FootballScheduleRaw;
-  const tour = data?.matches?.tournament;
-  if (!tour) throw new Error("Calendário não encontrado");
-  const meta = { league: tour.league ?? "", season: tour.season ?? "", country: data.matches?.country ?? "" };
-  const rawWeeks = tour.week;
-  const weeks: FootballScheduleWeek[] = !rawWeeks ? [] : Array.isArray(rawWeeks) ? rawWeeks : [rawWeeks];
-  const weeksOut: FootballScheduleWeekOut[] = weeks.map(w => {
-    const rawMatches = w.match;
-    const matches: FootballScheduleMatch[] = !rawMatches ? [] : Array.isArray(rawMatches) ? rawMatches : [rawMatches];
-    return { number: parseInt(w.number) || 0, matches: matches.map(parseFootballMatch) };
-  });
-  footballScheduleCache.set(id, { data: weeksOut, meta, fetchedAt: now });
-  return { weeks: weeksOut, meta };
+  if (cached) return { weeks: cached.data, meta: cached.meta };
+  throw new Error("Calendário indisponível");
 }
 
 router.get("/football-schedule/:id", async (req, res) => {
@@ -8658,84 +7480,9 @@ function normMatchStatsList<T>(raw: T | T[] | undefined | null): T[] {
 }
 
 async function getFootballMatchStats(leagueId: string): Promise<object> {
-  const now = Date.now();
   const cached = footballMatchStatsCache.get(leagueId);
-  if (cached && now - cached.fetchedAt < FOOTBALL_MATCH_STATS_TTL) return cached.data as object;
-  const resp = await fetch(`${SAPI_FOOTBALL}/soccer/leagues/${encodeURIComponent(leagueId)}/matches/stats`, { signal: AbortSignal.timeout(12000), headers: sapiHeaders() });
-  if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-  const raw = (await resp.json()) as FootballMatchStatsRaw;
-  const ms = raw["match-stats"];
-  const tour = ms?.tournament;
-  const m = tour?.matches;
-  if (!m) throw new Error("Estatísticas não encontradas");
-
-  const toPlayers = (raw2: FootballMatchStatsPlayer | FootballMatchStatsPlayer[] | undefined) => normMatchStatsList(raw2);
-  const toGoals   = (raw2: FootballMatchStatsEventGoal | FootballMatchStatsEventGoal[] | undefined) => normMatchStatsList(raw2);
-  const toCards   = (raw2: FootballMatchStatsEventCard | FootballMatchStatsEventCard[] | undefined) => normMatchStatsList(raw2);
-  const toVar     = (raw2: FootballMatchStatsEventVar  | FootballMatchStatsEventVar[]  | undefined) => normMatchStatsList(raw2);
-  const toSubs    = (raw2: FootballMatchStatsSub | FootballMatchStatsSub[] | undefined) => normMatchStatsList(raw2);
-
-  const parseHalfStat = (s?: { total: string; total_h1: string; total_h2: string }) =>
-    s ? { total: parseFloat(s.total) || 0, h1: parseFloat(s.total_h1) || 0, h2: parseFloat(s.total_h2) || 0 } : null;
-
-  type EventSide = {
-    goals?: { event: FootballMatchStatsEventGoal | FootballMatchStatsEventGoal[] };
-    yellowcards?: { event: FootballMatchStatsEventCard | FootballMatchStatsEventCard[] };
-    redcards?: { event: FootballMatchStatsEventCard | FootballMatchStatsEventCard[] } | string;
-    var?: { event: FootballMatchStatsEventVar | FootballMatchStatsEventVar[] } | string;
-  } | undefined;
-  const parseGoalEvents = (side: EventSide) => {
-    const goals = typeof side?.goals === "object" ? toGoals(side.goals?.event) : [];
-    const yellows = typeof side?.yellowcards === "object" ? toCards((side.yellowcards as { event?: FootballMatchStatsEventCard | FootballMatchStatsEventCard[] })?.event) : [];
-    const reds = side?.redcards && typeof side.redcards === "object" ? toCards((side.redcards as { event?: FootballMatchStatsEventCard | FootballMatchStatsEventCard[] })?.event) : [];
-    const varEvents = side?.var && typeof side.var === "object" ? toVar((side.var as { event?: FootballMatchStatsEventVar | FootballMatchStatsEventVar[] })?.event) : [];
-    return { goals, yellowCards: yellows, redCards: reds, varEvents };
-  };
-
-  const result = {
-    matchId: m.main_id,
-    date: m.date,
-    time: m.time,
-    status: m.status,
-    tournament: { id: tour?.id ?? "", name: tour?.name ?? "" },
-    stadium: m.match_info?.stadium?.name ?? null,
-    referee: m.match_info?.referee?.name ?? null,
-    addedTime: m.match_info?.time ? { p1: m.match_info.time.added_time_period_1, p2: m.match_info.time.added_time_period_2 } : null,
-    homeTeam: { id: m.home.id, name: m.home.name, goals: parseInt(m.home.goals) || 0 },
-    awayTeam: { id: m.away.id, name: m.away.name, goals: parseInt(m.away.goals) || 0 },
-    htScore: m.ht ? { home: parseInt(m.ht.home_goals) || 0, away: parseInt(m.ht.away_goals) || 0 } : null,
-    ftScore: m.ft ? { home: parseInt(m.ft.home_goals) || 0, away: parseInt(m.ft.away_goals) || 0 } : null,
-    etScore: m.et ? { home: parseInt(m.et.home_goals) || 0, away: parseInt(m.et.away_goals) || 0 } : null,
-    penScore: m.penalties ? { home: parseInt(m.penalties.home_pen) || 0, away: parseInt(m.penalties.away_pen) || 0 } : null,
-    lineups: {
-      home: { formation: m.lineups?.home?.formation ?? "", players: toPlayers(m.lineups?.home?.player) },
-      away: { formation: m.lineups?.away?.formation ?? "", players: toPlayers(m.lineups?.away?.player) },
-    },
-    bench: {
-      home: toPlayers(m.bench?.home?.player),
-      away: toPlayers(m.bench?.away?.player),
-    },
-    substitutions: {
-      home: toSubs(m.substitutions?.home?.substitution),
-      away: toSubs(m.substitutions?.away?.substitution),
-    },
-    teamColors: m.team_colors ?? null,
-    teamStats: {
-      home: { corners: parseHalfStat(m.team_stats?.home?.corners), xg: parseHalfStat(m.team_stats?.home?.expected_goals), fouls: parseInt(m.team_stats?.home?.fouls?.total ?? "0") || 0 },
-      away: { corners: parseHalfStat(m.team_stats?.away?.corners), xg: parseHalfStat(m.team_stats?.away?.expected_goals), fouls: parseInt(m.team_stats?.away?.fouls?.total ?? "0") || 0 },
-    },
-    playerStats: {
-      home: toPlayers(m.player_stats?.home?.player),
-      away: toPlayers(m.player_stats?.away?.player),
-    },
-    events: {
-      home: parseGoalEvents(m.event_summary?.home),
-      away: parseGoalEvents(m.event_summary?.away),
-    },
-  };
-
-  footballMatchStatsCache.set(leagueId, { data: result, fetchedAt: now });
-  return result;
+  if (cached) return cached.data as object;
+  throw new Error("Estatísticas indisponíveis");
 }
 
 router.get("/football-match-stats/:leagueId", async (req, res) => {
@@ -8789,52 +7536,9 @@ const footballStandingsCache = new Map<string, { data: FootballStandingsTeam[]; 
 const FOOTBALL_STANDINGS_TTL = 5 * 60 * 1000;
 
 async function getFootballStandings(leagueId: string): Promise<{ teams: FootballStandingsTeam[]; meta: { id: string; league: string; season: string; country: string } }> {
-  const now = Date.now();
   const cached = footballStandingsCache.get(leagueId);
-  if (cached && now - cached.fetchedAt < FOOTBALL_STANDINGS_TTL) return { teams: cached.data, meta: cached.meta };
-  const resp = await fetch(`${SAPI_FOOTBALL}/soccer/leagues/${encodeURIComponent(leagueId)}/standings`, { signal: AbortSignal.timeout(9000), headers: sapiHeaders() });
-  if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-  const data = (await resp.json()) as FootballStandingsRaw;
-  const tour = data?.standings?.tournament;
-  if (!tour) throw new Error("Classificação não encontrada");
-  const meta = { id: tour.id, league: tour.league, season: tour.season, country: data.standings?.country ?? "" };
-  const rawTeams = tour.team;
-  const teams: FootballStandingsTeamRaw[] = !rawTeams ? [] : Array.isArray(rawTeams) ? rawTeams : [rawTeams];
-  const pi = (s: string | undefined) => parseInt(s ?? "0") || 0;
-  const out: FootballStandingsTeam[] = teams.map(t => ({
-    position:    pi(t.position),
-    name:        t.name,
-    id:          t.id,
-    status:      t.status,
-    recentForm:  t.recent_form,
-    gp:          pi(t.overall?.games_played),
-    wins:        pi(t.overall?.wins),
-    draws:       pi(t.overall?.draws),
-    losses:      pi(t.overall?.losses),
-    goalsFor:    pi(t.overall?.goals_scored),
-    goalsAgainst:pi(t.overall?.goals_allowed),
-    goalDiff:    pi(t.total?.goal_difference),
-    points:      pi(t.total?.points),
-    home: {
-      gp:          pi(t.home?.games_played),
-      wins:        pi(t.home?.wins),
-      draws:       pi(t.home?.draws),
-      losses:      pi(t.home?.losses),
-      goalsFor:    pi(t.home?.goals_scored),
-      goalsAgainst:pi(t.home?.goals_allowed),
-    },
-    away: {
-      gp:          pi(t.away?.games_played),
-      wins:        pi(t.away?.wins),
-      draws:       pi(t.away?.draws),
-      losses:      pi(t.away?.losses),
-      goalsFor:    pi(t.away?.goals_scored),
-      goalsAgainst:pi(t.away?.goals_allowed),
-    },
-    description: t.description?.value ?? "",
-  }));
-  footballStandingsCache.set(leagueId, { data: out, meta, fetchedAt: now });
-  return { teams: out, meta };
+  if (cached) return { teams: cached.data, meta: cached.meta };
+  throw new Error("Classificação indisponível");
 }
 
 router.get("/football-standings/:id", async (req, res) => {
@@ -8937,29 +7641,9 @@ function parseFootballStatsPlayer(p: FootballLeagueStatsPlayerRaw): FootballLeag
 }
 
 async function getFootballLeagueStats(leagueId: string): Promise<{ teams: FootballLeagueStatsTeam[]; meta: { id: string; name: string; country: string } }> {
-  const now = Date.now();
   const cached = footballLeagueStatsCache.get(leagueId);
-  if (cached && now - cached.fetchedAt < FOOTBALL_LEAGUE_STATS_TTL) return { teams: cached.data, meta: cached.meta };
-  const resp = await fetch(`${SAPI_FOOTBALL}/soccer/leagues/${encodeURIComponent(leagueId)}/stats`, { signal: AbortSignal.timeout(15000), headers: sapiHeaders() });
-  if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-  const data = (await resp.json()) as FootballLeagueStatsRaw;
-  const league = data?.league_stats?.league;
-  if (!league) throw new Error("Estatísticas não encontradas");
-  const meta = { id: league.id, name: league.name, country: league.country };
-  const rawTeams = league.team;
-  const teams: FootballLeagueStatsTeamRaw[] = !rawTeams ? [] : Array.isArray(rawTeams) ? rawTeams : [rawTeams];
-  const out: FootballLeagueStatsTeam[] = teams.map(t => {
-    const rawPlayers = t.squad?.player;
-    const players: FootballLeagueStatsPlayerRaw[] = !rawPlayers ? [] : Array.isArray(rawPlayers) ? rawPlayers : [rawPlayers];
-    return {
-      id: t.id, name: t.name,
-      venue: t.venue ? { id: t.venue.id, name: t.venue.name } : null,
-      coach: t.coach ? { id: t.coach.id, name: t.coach.name } : null,
-      players: players.map(parseFootballStatsPlayer),
-    };
-  });
-  footballLeagueStatsCache.set(leagueId, { data: out, meta, fetchedAt: now });
-  return { teams: out, meta };
+  if (cached) return { teams: cached.data, meta: cached.meta };
+  throw new Error("Estatísticas indisponíveis");
 }
 
 router.get("/football-league-stats/:id", async (req, res) => {
@@ -9028,57 +7712,9 @@ const FOOTBALL_H2H_TTL = 10 * 60 * 1000; // 10 min
 
 async function getFootballH2H(team1: string, team2: string): Promise<object> {
   const key = `${team1}-${team2}`;
-  const now = Date.now();
   const cached = footballH2HCache.get(key);
-  if (cached && now - cached.fetchedAt < FOOTBALL_H2H_TTL) return cached.data;
-  const url = `${SAPI_FOOTBALL}/soccer/head-to-head?team1=${encodeURIComponent(team1)}&team2=${encodeURIComponent(team2)}`;
-  const resp = await fetch(url, { signal: AbortSignal.timeout(10000), headers: sapiHeaders() });
-  if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-  const data = (await resp.json()) as FootballH2HRaw;
-  const h2h = data["head-to-head"];
-  if (!h2h) throw new Error("H2H não encontrado");
-
-  const toMatches = (raw: H2HMatchRaw | H2HMatchRaw[] | undefined) =>
-    !raw ? [] : (Array.isArray(raw) ? raw : [raw]).map(normaliseH2HMatch);
-
-  const overallTotal = mergeH2HArray(h2h.overall_record?.total?.total ?? []);
-  const overallHomeT1 = mergeH2HArray(h2h.overall_record?.home?.team1 ?? []);
-  const overallHomeT2 = mergeH2HArray(h2h.overall_record?.home?.team2 ?? []);
-  const overallAwayT1 = mergeH2HArray(h2h.overall_record?.away?.team1 ?? []);
-  const overallAwayT2 = mergeH2HArray(h2h.overall_record?.away?.team2 ?? []);
-  const goalsTotal = mergeH2HArray(h2h.goals?.total?.total ?? []);
-  const goalsHome  = mergeH2HArray(h2h.goals?.home?.home  ?? []);
-  const goalsAway  = mergeH2HArray(h2h.goals?.away?.away  ?? []);
-
-  const rawLeagues = h2h.leagues?.league;
-  const leagues = !rawLeagues ? [] : (Array.isArray(rawLeagues) ? rawLeagues : [rawLeagues]).map(l => ({
-    name: l.name, id: l.id,
-    games: parseInt(l.games) || 0, team1Won: parseInt(l.team1_won) || 0, team2Won: parseInt(l.team2_won) || 0, draws: parseInt(l.draw) || 0,
-  }));
-
-  const result = {
-    team1Id: h2h.team1_id, team2Id: h2h.team2_id,
-    recentMeetings: toMatches(h2h.recent_meetings?.match),
-    overallRecord: {
-      total:   { games: overallTotal["games"] ?? 0, team1Won: overallTotal["team1_won"] ?? 0, team2Won: overallTotal["team2_won"] ?? 0, draws: overallTotal["draws"] ?? 0 },
-      homeTeam1: { games: overallHomeT1["games"] ?? 0, won: overallHomeT1["won"] ?? 0, lost: overallHomeT1["lost"] ?? 0, draws: overallHomeT1["draws"] ?? 0 },
-      homeTeam2: { games: overallHomeT2["games"] ?? 0, won: overallHomeT2["won"] ?? 0, lost: overallHomeT2["lost"] ?? 0, draws: overallHomeT2["draws"] ?? 0 },
-      awayTeam1: { games: overallAwayT1["games"] ?? 0, won: overallAwayT1["won"] ?? 0, lost: overallAwayT1["lost"] ?? 0, draws: overallAwayT1["draws"] ?? 0 },
-      awayTeam2: { games: overallAwayT2["games"] ?? 0, won: overallAwayT2["won"] ?? 0, lost: overallAwayT2["lost"] ?? 0, draws: overallAwayT2["draws"] ?? 0 },
-    },
-    goals: {
-      total:  { team1Scored: goalsTotal["team1_scored"] ?? 0, team1Conceded: goalsTotal["team1_conceded"] ?? 0, team2Scored: goalsTotal["team2_scored"] ?? 0, team2Conceded: goalsTotal["team2_conceded"] ?? 0 },
-      home:   { team1Scored: goalsHome["team1_scored"]  ?? 0, team1Conceded: goalsHome["team1_conceded"]  ?? 0, team2Scored: goalsHome["team2_scored"]  ?? 0, team2Conceded: goalsHome["team2_conceded"]  ?? 0 },
-      away:   { team1Scored: goalsAway["team1_scored"]  ?? 0, team1Conceded: goalsAway["team1_conceded"]  ?? 0, team2Scored: goalsAway["team2_scored"]  ?? 0, team2Conceded: goalsAway["team2_conceded"]  ?? 0 },
-    },
-    leagues,
-    biggestVictory: { team1: h2h.biggest_victory?.team1?.match ? normaliseH2HMatch(h2h.biggest_victory.team1.match) : null, team2: h2h.biggest_victory?.team2?.match ? normaliseH2HMatch(h2h.biggest_victory.team2.match) : null },
-    biggestDefeat:  { team1: h2h.biggest_defeat?.team1?.match  ? normaliseH2HMatch(h2h.biggest_defeat.team1.match)  : null, team2: h2h.biggest_defeat?.team2?.match  ? normaliseH2HMatch(h2h.biggest_defeat.team2.match)  : null },
-    last5Home: { team1: toMatches(h2h.last5_home?.team1?.match), team2: toMatches(h2h.last5_home?.team2?.match) },
-    last5Away: { team1: toMatches(h2h.last5_away?.team1?.match), team2: toMatches(h2h.last5_away?.team2?.match) },
-  };
-  footballH2HCache.set(key, { data: result, fetchedAt: now });
-  return result;
+  if (cached) return cached.data;
+  throw new Error("H2H indisponível");
 }
 
 router.get("/football-h2h", async (req, res) => {
@@ -9156,25 +7792,7 @@ function parseInjuryTeam(t: FootballInjuryTeamRaw): FootballInjuryTeam {
 }
 
 async function getFootballInjuries(): Promise<FootballInjuryLeague[]> {
-  const now = Date.now();
-  if (footballInjuriesCache && now - footballInjuriesFetchedAt < FOOTBALL_INJURIES_TTL) return footballInjuriesCache;
-  const resp = await fetch(`${SAPI_FOOTBALL}/soccer/injuries-suspensions`, { signal: AbortSignal.timeout(10000), headers: sapiHeaders() });
-  if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-  const data = (await resp.json()) as FootballInjuriesRaw;
-  const rawLeagues = data?.injuries_suspensions?.league;
-  if (!rawLeagues) { footballInjuriesCache = []; footballInjuriesFetchedAt = now; return []; }
-  const leagues: FootballInjuryLeagueRaw[] = Array.isArray(rawLeagues) ? rawLeagues : [rawLeagues];
-  const out: FootballInjuryLeague[] = leagues.map(l => {
-    const rawMatches = l.match;
-    const matches: FootballInjuryMatchRaw[] = !rawMatches ? [] : Array.isArray(rawMatches) ? rawMatches : [rawMatches];
-    return {
-      id: l.id, name: l.name,
-      matches: matches.map(m => ({ id: m.main_id, date: m.date, time: m.time, home: parseInjuryTeam(m.home), away: parseInjuryTeam(m.away) })),
-    };
-  });
-  footballInjuriesCache = out;
-  footballInjuriesFetchedAt = now;
-  return out;
+  return footballInjuriesCache ?? [];
 }
 
 router.get("/football-injuries", async (_req, res) => {
@@ -9265,83 +7883,9 @@ function parseTeamPeriods(raw: FootballTeamPeriodRaw | FootballTeamPeriodRaw[] |
 }
 
 async function getFootballTeam(teamId: string): Promise<object> {
-  const now = Date.now();
   const cached = footballTeamCache.get(teamId);
-  if (cached && now - cached.fetchedAt < FOOTBALL_TEAM_TTL) return cached.data;
-  const resp = await fetch(`${SAPI_FOOTBALL}/soccer/teams/${encodeURIComponent(teamId)}`, { signal: AbortSignal.timeout(12000), headers: sapiHeaders() });
-  if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-  const data = (await resp.json()) as FootballTeamProfileRaw;
-  const t = data?.team;
-  if (!t) throw new Error("Equipa não encontrada");
-
-  const pi = (s: string | undefined) => parseInt(s ?? "") || 0;
-  const pf = (s: string | undefined) => parseFloat(s ?? "") || 0;
-
-  const rawPlayers = t.squad?.player;
-  const players = (rawPlayers ? (Array.isArray(rawPlayers) ? rawPlayers : [rawPlayers]) : []).map(p => ({
-    id: p.id, name: p.name, number: p.number, age: pi(p.age), position: p.position,
-    isCaptain: p.is_captain === "True", injured: p.injured === "True",
-    minutesPlayed: pi(p.minutes_played), startingLineups: pi(p.starting_lineups),
-    subIn: pi(p.substitute_in), onBench: pi(p.on_bench),
-    appearances: pi(p.appearences),  // API typo — intentional
-    goals: pi(p.goals), assists: pi(p.assists), rating: pf(p.rating),
-    yellowCards: pi(p.yellowcards), yellowRed: pi(p.yellowred), redCards: pi(p.redcards),
-    saves: pi(p.saves), goalsConceded: pi(p.goals_conceded), insideBoxSaves: pi(p.inside_box_saves), penSaved: pi(p.pen_saved),
-    shotsTotal: pi(p.shots_total), shotsOnTarget: pi(p.shots_on_target), shotsWoodwork: pi(p.shots_woodwork),
-    passAttempts: pi(p.pass_attempts), passSuccess: pi(p.pass_success), keyPasses: pi(p.key_passes),
-    dribbleAttempts: pi(p.dribble_attempts), dribbleSuccess: pi(p.dribble_success),
-    duelsTotal: pi(p.duels_total), duelsWon: pi(p.duels_won),
-    foulsCommitted: pi(p.fouls_committed), foulsDrawn: pi(p.fouls_drawn),
-    tackles: pi(p.tackles), blocks: pi(p.blocks), clearances: pi(p.clearances), interceptions: pi(p.interceptions),
-    crossesTotal: pi(p.crosses_total), crossesAccurate: pi(p.crosses_accurate),
-    penScored: pi(p.pen_scored), penMissed: pi(p.pen_missed),
-  }));
-
-  const toTransfers = (raw: FootballTeamTransferPlayerRaw | FootballTeamTransferPlayerRaw[] | undefined) =>
-    !raw ? [] : (Array.isArray(raw) ? raw : [raw]).map(p => ({
-      id: p.id, name: p.name, date: p.date, position: p.position ?? "",
-      from: p.from ?? "", to: p.to ?? "", teamId: p.team_id ?? "", type: p.type, price: p.price ?? "",
-    }));
-
-  const rawTrophies = t.trophies?.trophy;
-  const trophies = !rawTrophies ? [] : (Array.isArray(rawTrophies) ? rawTrophies : [rawTrophies]).map(tr => ({
-    country: tr.country, league: tr.league, status: tr.status, count: parseInt(tr.count) || 0, seasons: tr.seasons,
-  }));
-
-  const rawLeagueStats = t.league_stats?.league;
-  const leagueStats = !rawLeagueStats ? [] : (Array.isArray(rawLeagueStats) ? rawLeagueStats : [rawLeagueStats]).map(ls => ({
-    name: ls.name, id: ls.id, season: ls.season,
-    fulltime:   parseTeamHalfRecord(ls.fulltime),
-    firsthalf:  parseTeamHalfRecord(ls.firsthalf),
-    secondhalf: parseTeamHalfRecord(ls.secondhalf),
-    scoringMinutes:        parseTeamPeriods(ls.scoring_minutes?.period),
-    goalsConcededMinutes:  parseTeamPeriods(ls.goals_conceded_minutes?.period),
-    yellowCardMinutes:     parseTeamPeriods(ls.yellowcard_minutes?.period),
-    redCardMinutes:        parseTeamPeriods(ls.redcard_minutes?.period),
-  }));
-
-  const rawLeagueIds = t.leagues?.league_id;
-  const leagueIds = !rawLeagueIds ? [] : Array.isArray(rawLeagueIds) ? rawLeagueIds : [rawLeagueIds];
-
-  const result = {
-    id: t.id, name: t.name, country: t.country,
-    founded: parseInt(t.founded) || null,
-    isNationalTeam: t.is_national_team === "True",
-    isWomen: t.is_women === "True",
-    leagueIds,
-    venue: t.venue_name ? {
-      id: t.venue_id ?? "", name: t.venue_name, surface: t.venue_surface ?? "",
-      capacity: parseInt(t.venue_capacity ?? "") || null,
-      address: t.venue_address ?? "", city: t.venue_city ?? "",
-    } : null,
-    coach: t.coach ? { id: t.coach.id, name: t.coach.name } : null,
-    squad: players,
-    transfers: { in: toTransfers(t.transfers?.in?.player), out: toTransfers(t.transfers?.out?.player) },
-    trophies,
-    leagueStats,
-  };
-  footballTeamCache.set(teamId, { data: result, fetchedAt: now });
-  return result;
+  if (cached) return cached.data;
+  throw new Error("Equipa indisponível");
 }
 
 router.get("/football-team/:id", async (req, res) => {
@@ -9460,32 +8004,9 @@ function toClubStats(raw: FootballPlayerClubStatRaw | FootballPlayerClubStatRaw[
 }
 
 async function getFootballPlayer(playerId: string): Promise<object> {
-  const now = Date.now();
   const cached = footballPlayerCache.get(playerId);
-  if (cached && now - cached.fetchedAt < FOOTBALL_PLAYER_TTL) return cached.data;
-  const resp = await fetch(`${SAPI_FOOTBALL}/soccer/players/${encodeURIComponent(playerId)}`, { signal: AbortSignal.timeout(10000), headers: sapiHeaders() });
-  if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-  const data = (await resp.json()) as FootballPlayerProfileRaw;
-  const p = data?.player;
-  if (!p) throw new Error("Jogador não encontrado");
-
-  const result = {
-    id: p.id, name: p.name, firstName: p.firstname, lastName: p.lastname,
-    age: parseInt(p.age) || null, birthdate: p.birthdate,
-    nationality: p.nationality, birthplace: p.birthplace, birthcountry: p.birthcountry,
-    position: p.position,
-    height: parseInt(p.height) || null, weight: parseInt(p.weight) || null,
-    preferredFoot: p.preferred_foot,
-    currentTeam: { id: p.team_id, name: p.team },
-    nationalTeamId: p.national_team_id ?? null,
-    marketValueEur: p.market_value_eur ? parseInt(p.market_value_eur) || null : null,
-    leagueStats:     toClubStats(p.club_league_statistics?.club),
-    domesticCupStats: toClubStats(p.club_domestic_cup_statistics?.club),
-    intlCupStats:    toClubStats(p.club_intl_cup_statistics?.club),
-    overallStats:    p.overall_club_statistics ? parsePlayerOverall(p.overall_club_statistics) : null,
-  };
-  footballPlayerCache.set(playerId, { data: result, fetchedAt: now });
-  return result;
+  if (cached) return cached.data;
+  throw new Error("Jogador indisponível");
 }
 
 router.get("/football-player/:id", async (req, res) => {
@@ -9518,38 +8039,9 @@ const footballCoachCache = new Map<string, { data: object; fetchedAt: number }>(
 const FOOTBALL_COACH_TTL = 30 * 60 * 1000;
 
 async function getFootballCoach(coachId: string): Promise<object> {
-  const now = Date.now();
   const cached = footballCoachCache.get(coachId);
-  if (cached && now - cached.fetchedAt < FOOTBALL_COACH_TTL) return cached.data;
-  const resp = await fetch(`${SAPI_FOOTBALL}/soccer/coaches/${encodeURIComponent(coachId)}`, { signal: AbortSignal.timeout(10000), headers: sapiHeaders() });
-  if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-  const data = (await resp.json()) as FootballCoachProfileRaw;
-  const c = data?.coach;
-  if (!c) throw new Error("Treinador não encontrado");
-
-  const rawTrophies = c.trophies?.trophy;
-  const trophies = !rawTrophies ? [] : (Array.isArray(rawTrophies) ? rawTrophies : [rawTrophies]).map(t => ({
-    country: t.country, league: t.league, status: t.status, count: parseInt(t.count) || 0, seasons: t.seasons,
-  }));
-
-  const rawCareer = c.career_stats?.team;
-  const career = !rawCareer ? [] : (Array.isArray(rawCareer) ? rawCareer : [rawCareer]).map(t => ({
-    id: t.id, name: t.name, from: t.from, to: t.to || null,
-  }));
-
-  const result = {
-    id: c.id, name: c.name, firstName: c.firstname, lastName: c.lastname,
-    currentTeam: { id: c.team_id, name: c.team },
-    nationality: c.nationality, birthdate: c.birthdate, age: parseInt(c.age) || null,
-    birthcountry: c.birthcountry, birthplace: c.birthplace,
-    // Strip units: "180 cm" → 180, "70 kg" → 70
-    height: parseInt(c.height) || null,
-    weight: parseInt(c.weight) || null,
-    trophies,
-    career,
-  };
-  footballCoachCache.set(coachId, { data: result, fetchedAt: now });
-  return result;
+  if (cached) return cached.data;
+  throw new Error("Treinador indisponível");
 }
 
 router.get("/football-coach/:id", async (req, res) => {
@@ -9570,35 +8062,8 @@ router.get("/football-coach/:id", async (req, res) => {
 const imageCache = new Map<string, { buf: Buffer; fetchedAt: number }>();
 const IMAGE_TTL = 7 * 24 * 60 * 60 * 1000; // 7 days
 
-router.get("/football-image", async (req, res) => {
-  const type = String(req.query["type"] ?? "");
-  const id   = String(req.query["id"]   ?? "");
-  if (!type || !id) { res.status(400).json({ error: "Parâmetros 'type' e 'id' são obrigatórios" }); return; }
-
-  const cacheKey = `${type}-${id}`;
-  const now = Date.now();
-  const cached = imageCache.get(cacheKey);
-  if (cached && now - cached.fetchedAt < IMAGE_TTL) {
-    res.set("Content-Type", "image/png");
-    res.set("Cache-Control", "public, max-age=604800");
-    res.send(cached.buf);
-    return;
-  }
-
-  try {
-    const url = `${SAPI_FOOTBALL}/soccer/images?type=${encodeURIComponent(type)}&id=${encodeURIComponent(id)}`;
-    const imgResp = await fetch(url, { signal: AbortSignal.timeout(8000), headers: sapiHeaders() });
-    if (!imgResp.ok) { res.status(imgResp.status).json({ error: "Imagem não encontrada" }); return; }
-    const contentType = imgResp.headers.get("content-type") ?? "image/png";
-    const arrayBuf = await imgResp.arrayBuffer();
-    const buf = Buffer.from(arrayBuf);
-    imageCache.set(cacheKey, { buf, fetchedAt: now });
-    res.set("Content-Type", contentType);
-    res.set("Cache-Control", "public, max-age=604800");
-    res.send(buf);
-  } catch {
-    res.status(500).json({ error: "Imagem indisponível" });
-  }
+router.get("/football-image", (_req, res) => {
+  res.status(404).json({ error: "Imagens indisponíveis" });
 });
 
 // ─── Football Pre-match Odds (per league, v2) ──────────────────────────────────
@@ -9642,52 +8107,9 @@ const footballOddsCache = new Map<string, { data: FootballOddsEntry[]; meta: { i
 const FOOTBALL_ODDS_TTL = 5 * 60 * 1000;
 
 async function getFootballLeagueOdds(leagueId: string): Promise<{ odds: FootballOddsEntry[]; meta: { id: string; name: string; country: string } }> {
-  const now = Date.now();
   const cached = footballOddsCache.get(leagueId);
-  if (cached && now - cached.fetchedAt < FOOTBALL_ODDS_TTL) return { odds: cached.data, meta: cached.meta };
-
-  const resp = await fetch(`${SAPI_FOOTBALL}/soccer/leagues/${encodeURIComponent(leagueId)}/odds/prematch`, { signal: AbortSignal.timeout(10000), headers: sapiHeaders() });
-  if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-  const data = (await resp.json()) as FootballPrematchOddsRaw;
-  const league = data?.prematch_odds?.league;
-  if (!league) throw new Error("Odds não encontradas");
-  const meta = { id: league.id, name: league.name, country: league.country };
-
-  const rawMatches = league.match;
-  const matches: FootballOddsMatchRaw[] = !rawMatches ? [] : Array.isArray(rawMatches) ? rawMatches : [rawMatches];
-
-  // Average odds across all active bookmakers then apply 2.5% house margin
-  const avgOdd = (bks: FootballOddsBookmakerRaw[], side: "Home" | "Draw" | "Away"): number => {
-    const vals: number[] = [];
-    for (const bk of bks) {
-      if (bk.stop === "True") continue;
-      const odds = Array.isArray(bk.odd) ? bk.odd : (bk.odd ? [bk.odd] : []);
-      const o = odds.find(o => o.name === side);
-      const v = parseFloat(o?.value ?? "0");
-      if (v > 1) vals.push(v);
-    }
-    if (!vals.length) return 0;
-    const avg = vals.reduce((a, b) => a + b, 0) / vals.length;
-    return Math.max(1.01, Math.round(avg * 0.975 * 100) / 100);
-  };
-
-  const results: FootballOddsEntry[] = [];
-  for (const m of matches) {
-    const rawMarkets = m.odds;
-    const markets: FootballOddsMarketRaw[] = !rawMarkets ? [] : Array.isArray(rawMarkets) ? rawMarkets : [rawMarkets];
-    // Find 1x2 market
-    const market1x2 = markets.find(mk => mk.name === "1x2" || mk.name === "3Way Result");
-    if (!market1x2 || market1x2.stop === "True") continue;
-    const bks: FootballOddsBookmakerRaw[] = !market1x2.bookmaker ? [] : Array.isArray(market1x2.bookmaker) ? market1x2.bookmaker : [market1x2.bookmaker];
-    const h = avgOdd(bks, "Home");
-    const d = avgOdd(bks, "Draw");
-    const a = avgOdd(bks, "Away");
-    if (!h || !d || !a) continue;
-    results.push({ matchId: m.main_id, date: m.date, time: m.time, homeTeam: m.home, awayTeam: m.away, homeOdds: h, drawOdds: d, awayOdds: a });
-  }
-
-  footballOddsCache.set(leagueId, { data: results, meta, fetchedAt: now });
-  return { odds: results, meta };
+  if (cached) return { odds: cached.data, meta: cached.meta };
+  throw new Error("Odds indisponíveis");
 }
 
 router.get("/football-odds/:leagueId", async (req, res) => {
@@ -9745,55 +8167,7 @@ let footballLiveOddsFetchedAt = 0;
 const FOOTBALL_LIVE_ODDS_TTL = 10 * 1000; // 10s — in-play data, very fresh
 
 async function getFootballLiveOdds(): Promise<object[]> {
-  const now = Date.now();
-  if (footballLiveOddsCache && now - footballLiveOddsFetchedAt < FOOTBALL_LIVE_ODDS_TTL) return footballLiveOddsCache;
-  const resp = await fetch(`${SAPI_FOOTBALL}/soccer/odds/live`, { signal: AbortSignal.timeout(8000), headers: sapiHeaders() });
-  if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-  const data = (await resp.json()) as FootballLiveOddsRaw;
-  const matches = data?.live_matches ?? [];
-
-  const out = matches.map(m => {
-    const info = m.match_info;
-    const home = m.team_info?.home;
-    const away = m.team_info?.away;
-    // Parse "1:1" score
-    const [homeScore, awayScore] = (info?.score ?? "0:0").split(":").map(s => parseInt(s) || 0);
-    // stats object → array sorted by numeric key
-    const statsArr = Object.entries(m.stats ?? {})
-      .sort(([a], [b]) => parseInt(a) - parseInt(b))
-      .map(([, v]) => ({ name: v.name, home: v.home, away: v.away }));
-    const status = m.status;
-    return {
-      matchId: info?.main_id ?? "",
-      name: info?.name ?? "",
-      leagueId: info?.league_id ?? "",
-      league: info?.league ?? "",
-      startDate: info?.start_date ?? "",
-      startTime: info?.start_time ?? "",
-      startTs: info?.start_ts ?? 0,
-      score: { home: homeScore, away: awayScore },
-      period: info?.period ?? "",
-      minute: parseInt(info?.minute ?? "0") || 0,
-      ballPos: info?.ball_pos ?? null,
-      stateName: info?.state_name ?? null,
-      stateDetails: info?.state_details ?? null,
-      status: status ? {
-        stopped:  status.stopped  === "1",
-        blocked:  status.blocked  === "1",
-        finished: status.finished === "1",
-        updatedTs: parseInt(status.updated_ts) || 0,   // ms
-      } : null,
-      homeTeam: home ? { id: home.id, name: home.name, score: parseInt(home.score) || 0, kitColor: home.kit_color ?? null } : null,
-      awayTeam: away ? { id: away.id, name: away.name, score: parseInt(away.score) || 0, kitColor: away.kit_color ?? null } : null,
-      stats: statsArr,
-      hasEvents: (m.match_events?.length ?? 0) > 0,
-      hasOdds:   (m.odds?.length ?? 0) > 0,
-    };
-  });
-
-  footballLiveOddsCache = out;
-  footballLiveOddsFetchedAt = now;
-  return out;
+  return footballLiveOddsCache ?? [];
 }
 
 router.get("/football-live-odds", async (_req, res) => {
@@ -9814,23 +8188,7 @@ let footballLiveMarketsFetchedAt = 0;
 const FOOTBALL_LIVE_MARKETS_TTL = 60 * 60 * 1000; // 1h — catalogue rarely changes
 
 router.get("/football-live-markets", async (_req, res) => {
-  const now = Date.now();
-  if (footballLiveMarketsCache && now - footballLiveMarketsFetchedAt < FOOTBALL_LIVE_MARKETS_TTL) {
-    res.json({ markets: footballLiveMarketsCache });
-    return;
-  }
-  try {
-    const resp = await fetch(`${SAPI_FOOTBALL}/soccer/odds/live/markets`, { signal: AbortSignal.timeout(8000), headers: sapiHeaders() });
-    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-    // Response is a bare array: [{id: number, name: string}, ...]
-    const data = (await resp.json()) as { id: number; name: string }[];
-    const markets = Array.isArray(data) ? data.map(m => ({ id: m.id, name: m.name })) : [];
-    footballLiveMarketsCache = markets;
-    footballLiveMarketsFetchedAt = now;
-    res.json({ markets });
-  } catch {
-    res.status(500).json({ error: "Mercados de odds ao vivo indisponíveis" });
-  }
+  res.json({ markets: footballLiveMarketsCache ?? [] });
 });
 
 // ─── Football Live Match States catalogue ─────────────────────────────────────
@@ -9842,22 +8200,7 @@ let footballLiveStatesFetchedAt = 0;
 const FOOTBALL_LIVE_STATES_TTL = 60 * 60 * 1000; // 1h — static catalogue
 
 router.get("/football-live-match-states", async (_req, res) => {
-  const now = Date.now();
-  if (footballLiveStatesCache && now - footballLiveStatesFetchedAt < FOOTBALL_LIVE_STATES_TTL) {
-    res.json({ states: footballLiveStatesCache });
-    return;
-  }
-  try {
-    const resp = await fetch(`${SAPI_FOOTBALL}/soccer/odds/live/match-states`, { signal: AbortSignal.timeout(8000), headers: sapiHeaders() });
-    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-    const data = (await resp.json()) as { id: number; name: string }[];
-    const states = Array.isArray(data) ? data.map(s => ({ id: s.id, name: s.name })) : [];
-    footballLiveStatesCache = states;
-    footballLiveStatesFetchedAt = now;
-    res.json({ states });
-  } catch {
-    res.status(500).json({ error: "Estados de jogo indisponíveis" });
-  }
+  res.json({ states: footballLiveStatesCache ?? [] });
 });
 
 // ─── Football Livescores (v1) ──────────────────────────────────────────────────
@@ -9912,64 +8255,7 @@ let footballV1LiveFetchedAt = 0;
 const FOOTBALL_V1_LIVE_TTL = 30 * 1000;
 
 router.get("/football-livescores", async (_req, res) => {
-  const now = Date.now();
-  if (footballV1LiveCache && now - footballV1LiveFetchedAt < FOOTBALL_V1_LIVE_TTL) {
-    res.json({ leagues: footballV1LiveCache });
-    return;
-  }
-  try {
-    const resp = await fetch(`${SAPI_FOOTBALL}/soccer/livescores`, { signal: AbortSignal.timeout(9000), headers: sapiHeaders() });
-    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-    const data = (await resp.json()) as V1SoccerLivescoresRaw;
-    const rawLeagues = data?.livescore?.league;
-    const leagues: V1SoccerLeague[] = !rawLeagues ? [] : Array.isArray(rawLeagues) ? rawLeagues : [rawLeagues];
-
-    const out = leagues.map(lg => {
-      const rawMatches = lg.match;
-      const matches: V1SoccerMatch[] = !rawMatches ? [] : Array.isArray(rawMatches) ? rawMatches : [rawMatches];
-      return {
-        id: lg.id,
-        name: lg.name,
-        country: lg.country,
-        cup: lg.cup === "True",
-        subId: lg.sub_id,
-        matches: matches.map(m => {
-          const rawEvents = m.events?.event;
-          const events: V1SoccerEvent[] = !rawEvents ? [] : Array.isArray(rawEvents) ? rawEvents : [rawEvents];
-          return {
-            id: m.id,
-            alternateId: m.alternate_id,
-            alternateId2: m.alternate_id_2,
-            staticId: m.static_id,
-            status: m.status,
-            date: m.date,
-            time: m.time,
-            venue: m.venue || null,
-            commentary: m.commentary === "True",
-            injMinute: m.inj_minute || null,
-            injTime: m.inj_time || null,
-            homeTeam: { id: m.home.id, name: m.home.name, goals: parseInt(m.home.goals) || 0, wonOnAgg: m.home.agg === "true" },
-            awayTeam: { id: m.away.id, name: m.away.name, goals: parseInt(m.away.goals) || 0, wonOnAgg: m.away.agg === "true" },
-            ht: parseScoreStr(m.ht?.score),
-            ft: parseScoreStr(m.ft?.score),
-            events: events.map(e => ({
-              id: e.id, type: e.type, team: e.team,
-              minute: e.minute, extraMin: e.extra_min || null,
-              player: e.player, playerId: e.playerid,
-              assist: e.assist || null, assistId: e.assistid || null,
-              result: e.result,
-            })),
-          };
-        }),
-      };
-    });
-
-    footballV1LiveCache = out;
-    footballV1LiveFetchedAt = now;
-    res.json({ leagues: out });
-  } catch {
-    res.status(500).json({ error: "Livescores indisponíveis" });
-  }
+  res.json({ leagues: footballV1LiveCache ?? [] });
 });
 
 // ─── Football Daily Results (v1) ──────────────────────────────────────────────
@@ -9983,59 +8269,10 @@ const footballDailyCache = new Map<string, { data: object[]; fetchedAt: number }
 router.get("/football-daily/:offset", async (req, res) => {
   const raw = String(req.params["offset"]);
   const n = parseInt(raw);
-  if (isNaN(n) || n < 0 || n > 7) {
-    res.status(400).json({ error: "Offset inválido (0–7)" });
-    return;
-  }
+  if (isNaN(n) || n < 0 || n > 7) { res.status(400).json({ error: "Offset inválido (0–7)" }); return; }
   const key = `d-${n}`;
-  const ttl = n <= 1 ? 5 * 60 * 1000 : 30 * 60 * 1000;
-  const now = Date.now();
   const cached = footballDailyCache.get(key);
-  if (cached && now - cached.fetchedAt < ttl) {
-    res.json({ leagues: cached.data });
-    return;
-  }
-  try {
-    const resp = await fetch(`${SAPI_FOOTBALL}/soccer/daily/${key}`, { signal: AbortSignal.timeout(9000), headers: sapiHeaders() });
-    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-    const data = (await resp.json()) as V1SoccerLivescoresRaw;
-    const rawLeagues = data?.livescore?.league;
-    const leagues: V1SoccerLeague[] = !rawLeagues ? [] : Array.isArray(rawLeagues) ? rawLeagues : [rawLeagues];
-
-    const out = leagues.map(lg => {
-      const rawMatches = lg.match;
-      const matches: V1SoccerMatch[] = !rawMatches ? [] : Array.isArray(rawMatches) ? rawMatches : [rawMatches];
-      return {
-        id: lg.id, name: lg.name, country: lg.country,
-        cup: lg.cup === "True", subId: lg.sub_id,
-        matches: matches.map(m => {
-          const rawEvents = m.events?.event;
-          const events: V1SoccerEvent[] = !rawEvents ? [] : Array.isArray(rawEvents) ? rawEvents : [rawEvents];
-          return {
-            id: m.id, alternateId: m.alternate_id, alternateId2: m.alternate_id_2, staticId: m.static_id,
-            status: m.status, date: m.date, time: m.time,
-            venue: m.venue || null, commentary: m.commentary === "True",
-            homeTeam: { id: m.home.id, name: m.home.name, goals: parseInt(m.home.goals) || 0, wonOnAgg: m.home.agg === "true" },
-            awayTeam: { id: m.away.id, name: m.away.name, goals: parseInt(m.away.goals) || 0, wonOnAgg: m.away.agg === "true" },
-            ht: parseScoreStr(m.ht?.score),
-            ft: parseScoreStr(m.ft?.score),
-            events: events.map(e => ({
-              id: e.id, type: e.type, team: e.team,
-              minute: e.minute, extraMin: e.extra_min || null,
-              player: e.player, playerId: e.playerid,
-              assist: e.assist || null, assistId: e.assistid || null,
-              result: e.result,
-            })),
-          };
-        }),
-      };
-    });
-
-    footballDailyCache.set(key, { data: out, fetchedAt: now });
-    res.json({ leagues: out });
-  } catch {
-    res.status(500).json({ error: "Resultados diários indisponíveis" });
-  }
+  res.json({ leagues: cached?.data ?? [] });
 });
 
 // ─── Football Upcoming Schedule by country/region ─────────────────────────────
@@ -10070,44 +8307,8 @@ const FOOTBALL_UPCOMING_TTL = 30 * 60 * 1000; // 30 min — fixtures rarely chan
 router.get("/football-upcoming/:country", async (req, res) => {
   const country = String(req.params["country"]).toLowerCase().replace(/[^a-z0-9-]/g, "");
   if (!country) { res.status(400).json({ error: "País inválido" }); return; }
-  const now = Date.now();
   const cached = footballUpcomingCache.get(country);
-  if (cached && now - cached.fetchedAt < FOOTBALL_UPCOMING_TTL) {
-    res.json({ leagues: cached.data });
-    return;
-  }
-  try {
-    const resp = await fetch(`${SAPI_FOOTBALL}/soccer/upcoming-schedule/${encodeURIComponent(country)}`, { signal: AbortSignal.timeout(9000), headers: sapiHeaders() });
-    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-    const data = (await resp.json()) as V1UpcomingScheduleRaw;
-    const rawLeagues = data?.fixtures?.league;
-    const leagues: V1UpcomingLeague[] = !rawLeagues ? [] : Array.isArray(rawLeagues) ? rawLeagues : [rawLeagues];
-
-    const out = leagues.map(lg => {
-      const rawMatches = lg.match;
-      const matches: V1UpcomingMatch[] = !rawMatches ? [] : Array.isArray(rawMatches) ? rawMatches : [rawMatches];
-      return {
-        id: lg.id, name: lg.name, country: lg.country, subId: lg.sub_id,
-        matches: matches.map(m => {
-          const rawTv = m.tv_stations?.tv;
-          const tvChannels: string[] = !rawTv ? [] : (Array.isArray(rawTv) ? rawTv : [rawTv]).map(t => t.name);
-          return {
-            id: m.id, alternateId: m.alternate_id, alternateId2: m.alternate_id_2, staticId: m.static_id,
-            status: m.status, date: m.date, time: m.time,
-            venue: m.venue || null,
-            homeTeam: { id: m.home.id, name: m.home.name },
-            awayTeam: { id: m.away.id, name: m.away.name },
-            tvChannels,
-          };
-        }),
-      };
-    });
-
-    footballUpcomingCache.set(country, { data: out, fetchedAt: now });
-    res.json({ leagues: out });
-  } catch {
-    res.status(500).json({ error: "Calendário indisponível" });
-  }
+  res.json({ leagues: cached?.data ?? [] });
 });
 
 // ─── Football Extended Schedule by country/region ─────────────────────────────
@@ -10167,66 +8368,8 @@ function parseExtScore(s: string | undefined): number | null {
 router.get("/football-extended-schedule/:country", async (req, res) => {
   const country = String(req.params["country"]).toLowerCase().replace(/[^a-z0-9-]/g, "");
   if (!country) { res.status(400).json({ error: "País inválido" }); return; }
-  const now = Date.now();
   const cached = footballExtCache.get(country);
-  if (cached && now - cached.fetchedAt < FOOTBALL_EXT_TTL) {
-    res.json({ leagues: cached.data });
-    return;
-  }
-  try {
-    const resp = await fetch(`${SAPI_FOOTBALL}/soccer/extended-schedule/${encodeURIComponent(country)}`, { signal: AbortSignal.timeout(9000), headers: sapiHeaders() });
-    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-    const data = (await resp.json()) as V1ExtScheduleRaw;
-    const rawLeagues = data?.extended_fixtures?.league;
-    const leagues: V1ExtLeague[] = !rawLeagues ? [] : Array.isArray(rawLeagues) ? rawLeagues : [rawLeagues];
-
-    const out = leagues.map(lg => {
-      const rawWeeks = lg.week;
-      const weeks: V1ExtWeek[] = !rawWeeks ? [] : Array.isArray(rawWeeks) ? rawWeeks : [rawWeeks];
-      return {
-        id: lg.id, name: lg.name, season: lg.season, subId: lg.sub_id,
-        weeks: weeks.map(w => {
-          const rawMatches = w.match;
-          const matches: V1ExtMatch[] = !rawMatches ? [] : Array.isArray(rawMatches) ? rawMatches : [rawMatches];
-          return {
-            weekNumber: parseInt(w.number) || 0,
-            matches: matches.map(m => ({
-              id: m.id, alternateId: m.alternate_id, alternateId2: m.alternate_id_2, staticId: m.static_id,
-              status: m.status, date: m.date, time: m.time,
-              venue: m.venue || null, venueCity: m.venue_city || null, venueId: m.venue_id || null,
-              attendance: parseInt(m.attendance) || null,
-              homeTeam: {
-                id: m.home.id, name: m.home.name,
-                score:    parseExtScore(m.home.score),
-                ftScore:  parseExtScore(m.home.ft_score),
-                etScore:  parseExtScore(m.home.et_score),
-                penScore: parseExtScore(m.home.pen_score),
-              },
-              awayTeam: {
-                id: m.away.id, name: m.away.name,
-                score:    parseExtScore(m.away.score),
-                ftScore:  parseExtScore(m.away.ft_score),
-                etScore:  parseExtScore(m.away.et_score),
-                penScore: parseExtScore(m.away.pen_score),
-              },
-              halftimeScore: parseScoreStr(m.halftime?.score),
-              hasLineups:      m.lineups !== null,
-              hasSubstitutions: m.substitutions !== null,
-              hasGoals:        m.goals !== null,
-              homeCoach: m.coaches?.home?.coach ? { id: m.coaches.home.coach.id, name: m.coaches.home.coach.name } : null,
-              awayCoach: m.coaches?.away?.coach ? { id: m.coaches.away.coach.id, name: m.coaches.away.coach.name } : null,
-              referee: (m.referee?.name) ? { id: m.referee.id, name: m.referee.name } : null,
-            })),
-          };
-        }),
-      };
-    });
-
-    footballExtCache.set(country, { data: out, fetchedAt: now });
-    res.json({ leagues: out });
-  } catch {
-    res.status(500).json({ error: "Calendário extendido indisponível" });
-  }
+  res.json({ leagues: cached?.data ?? [] });
 });
 
 // ─── Football Results by country/region ───────────────────────────────────────
@@ -10288,68 +8431,8 @@ function toArr<T>(v: T | T[] | null | undefined): T[] {
 router.get("/football-results-country/:country", async (req, res) => {
   const country = String(req.params["country"]).toLowerCase().replace(/[^a-z0-9-]/g, "");
   if (!country) { res.status(400).json({ error: "País inválido" }); return; }
-  const now = Date.now();
   const cached = footballResultsCountryCache.get(country);
-  if (cached && now - cached.fetchedAt < FOOTBALL_RESULTS_COUNTRY_TTL) {
-    res.json({ leagues: cached.data });
-    return;
-  }
-  try {
-    const resp = await fetch(`${SAPI_FOOTBALL}/soccer/results/${encodeURIComponent(country)}`, { signal: AbortSignal.timeout(9000), headers: sapiHeaders() });
-    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-    const data = (await resp.json()) as V1ResultsRaw;
-    const rawLeagues = data?.results?.league;
-    const leagues: V1ResultsLeague[] = toArr(rawLeagues);
-
-    const out = leagues.map(lg => ({
-      id: lg.id, name: lg.name, season: lg.season, subId: lg.sub_id,
-      weeks: toArr(lg.week).map(w => ({
-        weekNumber: parseInt(w.number) || 0,
-        matches: toArr(w.match).map(m => {
-          const goals = toArr(m.goals?.goal).map(g => ({
-            minute: g.minute, player: g.player, playerId: g.playerid,
-            assist: g.assist || null, score: g.score, team: g.team,
-          }));
-          const homePlayers = toArr(m.lineups?.home?.player).map(p => ({
-            id: p.id, name: p.name, number: p.number, booking: p.booking || null,
-          }));
-          const awayPlayers = toArr(m.lineups?.away?.player).map(p => ({
-            id: p.id, name: p.name, number: p.number, booking: p.booking || null,
-          }));
-          const homeSubs = toArr(m.substitutions?.home?.substitution).map(s => ({
-            minute: s.minute,
-            playerIn:  { id: s.player_in_id,  name: s.player_in_name,  number: s.player_in_number,  booking: s.player_in_booking || null },
-            playerOut: { id: s.player_out_id, name: s.player_out_name },
-          }));
-          const awaySubs = toArr(m.substitutions?.away?.substitution).map(s => ({
-            minute: s.minute,
-            playerIn:  { id: s.player_in_id,  name: s.player_in_name,  number: s.player_in_number,  booking: s.player_in_booking || null },
-            playerOut: { id: s.player_out_id, name: s.player_out_name },
-          }));
-          return {
-            id: m.id, alternateId: m.alternate_id, alternateId2: m.alternate_id_2, staticId: m.static_id,
-            status: m.status, date: m.date, time: m.time,
-            venue: m.venue || null, venueCity: m.venue_city || null, venueId: m.venue_id || null,
-            attendance: parseInt(m.attendance) || null,
-            homeTeam: { id: m.home.id, name: m.home.name, score: parseExtScore(m.home.score), ftScore: parseExtScore(m.home.ft_score), etScore: parseExtScore(m.home.et_score), penScore: parseExtScore(m.home.pen_score) },
-            awayTeam: { id: m.away.id, name: m.away.name, score: parseExtScore(m.away.score), ftScore: parseExtScore(m.away.ft_score), etScore: parseExtScore(m.away.et_score), penScore: parseExtScore(m.away.pen_score) },
-            halftimeScore: parseScoreStr(m.halftime?.score),
-            goals,
-            lineups: { home: homePlayers, away: awayPlayers },
-            substitutions: { home: homeSubs, away: awaySubs },
-            homeCoach: m.coaches?.home?.coach?.name ? { id: m.coaches.home.coach.id, name: m.coaches.home.coach.name } : null,
-            awayCoach: m.coaches?.away?.coach?.name ? { id: m.coaches.away.coach.id, name: m.coaches.away.coach.name } : null,
-            referee: m.referee?.name ? { id: m.referee.id, name: m.referee.name } : null,
-          };
-        }),
-      })),
-    }));
-
-    footballResultsCountryCache.set(country, { data: out, fetchedAt: now });
-    res.json({ leagues: out });
-  } catch {
-    res.status(500).json({ error: "Resultados indisponíveis" });
-  }
+  res.json({ leagues: cached?.data ?? [] });
 });
 
 // ─── Football Live Match Stats / Commentary ────────────────────────────────────
@@ -10438,67 +8521,9 @@ const FOOTBALL_LIVE_STATS_TTL = 30 * 1000; // 30s — live data
 router.get("/football-live-match-stats/:leagueSlug", async (req, res) => {
   const slug = String(req.params["leagueSlug"]).toLowerCase().replace(/[^a-z0-9_-]/g, "");
   if (!slug) { res.status(400).json({ error: "Slug inválido" }); return; }
-  const now = Date.now();
   const cached = footballLiveStatsCache.get(slug);
-  if (cached && now - cached.fetchedAt < FOOTBALL_LIVE_STATS_TTL) {
-    res.json(cached.data);
-    return;
-  }
-  try {
-    const resp = await fetch(`${SAPI_FOOTBALL}/soccer/live-match-stats/${encodeURIComponent(slug)}`, { signal: AbortSignal.timeout(9000), headers: sapiHeaders() });
-    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-    const data = (await resp.json()) as V1LiveStatsRaw;
-    const comm = data?.commentaries;
-    const lg = comm?.league;
-    if (!lg) { res.status(404).json({ error: "Liga não encontrada" }); return; }
-    const m = lg.match;
-    const mi = m.matchinfo;
-
-    const mapTeam = (t: V1LiveStatsTeam) => ({
-      id: t.id, name: t.name,
-      goals: parseInt(t.goals) || 0,
-      htScore: parseExtScore(t.ht_score),
-      ftScore: parseExtScore(t.ft_score),
-      etScore: parseExtScore(t.et_score),
-      penScore: parseExtScore(t.pen_score),
-    });
-
-    const out = {
-      league: { id: lg.id, name: lg.name, country: lg.country },
-      match: {
-        id: m.id, alternateId: m.alternate_id, alternateId2: m.alternate_id_2, staticId: m.static_id,
-        status: m.status, date: m.date, time: m.time, timer: m.timer || null,
-        homeTeam: mapTeam(m.home), awayTeam: mapTeam(m.away),
-        matchInfo: mi ? {
-          stadium:    mi.stadium?.name    || null,
-          attendance: mi.attendance?.name ? (parseInt(mi.attendance.name) || null) : null,
-          startTime:  mi.time?.name       || null,
-          addedTimeP1: parseInt(mi.time?.addedtime_period1 ?? "") || null,
-          addedTimeP2: parseInt(mi.time?.addedtime_period2 ?? "") || null,
-          referee:    mi.referee?.name    || null,
-        } : null,
-        summary: {
-          home: {
-            goals:       mapSummaryGoals(m.summary?.home?.goals),
-            yellowCards: mapCards(m.summary?.home?.yellowcards),
-            redCards:    mapCards(m.summary?.home?.redcards),
-            var:         mapVar(m.summary?.home?.var),
-          },
-          away: {
-            goals:       mapSummaryGoals(m.summary?.away?.goals),
-            yellowCards: mapCards(m.summary?.away?.yellowcards),
-            redCards:    mapCards(m.summary?.away?.redcards),
-            var:         mapVar(m.summary?.away?.var),
-          },
-        },
-      },
-    };
-
-    footballLiveStatsCache.set(slug, { data: out, fetchedAt: now });
-    res.json(out);
-  } catch {
-    res.status(500).json({ error: "Estatísticas ao vivo indisponíveis" });
-  }
+  if (cached) { res.json(cached.data); return; }
+  res.status(404).json({ error: "Dados ao vivo indisponíveis" });
 });
 
 // ─── Football Standings by country/region (v1) ────────────────────────────────
@@ -10551,41 +8576,8 @@ const FOOTBALL_STANDINGS_COUNTRY_TTL = 30 * 60 * 1000; // 30 min
 router.get("/football-standings-country/:country", async (req, res) => {
   const country = String(req.params["country"]).toLowerCase().replace(/[^a-z0-9-]/g, "");
   if (!country) { res.status(400).json({ error: "País inválido" }); return; }
-  const now = Date.now();
   const cached = footballStandingsCountryCache.get(country);
-  if (cached && now - cached.fetchedAt < FOOTBALL_STANDINGS_COUNTRY_TTL) {
-    res.json({ leagues: cached.data });
-    return;
-  }
-  try {
-    const resp = await fetch(`${SAPI_FOOTBALL}/soccer/standings/${encodeURIComponent(country)}`, { signal: AbortSignal.timeout(9000), headers: sapiHeaders() });
-    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-    const data = (await resp.json()) as V1StandingsRaw;
-    const rawLeagues = data?.standings?.league;
-    const leagues: V1StandingsLeague[] = toArr(rawLeagues);
-
-    const out = leagues.map(lg => ({
-      id: lg.id, name: lg.name, country: lg.country, season: lg.season, subId: lg.sub_id,
-      isCurrent: lg.is_current === "True",
-      teams: toArr(lg.team).map(t => ({
-        id: t.id, name: t.name,
-        position: parseInt(t.position) || 0,
-        recentForm: t.recent_form,          // "WWWLW" — W/D/L chars
-        positionStatus: t.status,           // "same" | "up" | "down"
-        overall: mapRecord(t.overall),
-        home:    mapRecord(t.home),
-        away:    mapRecord(t.away),
-        points:         parseInt(t.totals.points)          || 0,
-        goalDifference: parseInt(t.totals.goal_difference) || 0,
-        zone: t.special?.name || null,      // "Promotion - League One" etc.
-      })),
-    }));
-
-    footballStandingsCountryCache.set(country, { data: out, fetchedAt: now });
-    res.json({ leagues: out });
-  } catch {
-    res.status(500).json({ error: "Classificações indisponíveis" });
-  }
+  res.json({ leagues: cached?.data ?? [] });
 });
 
 // ─── Football Scoring Leaders by country ──────────────────────────────────────
@@ -10616,35 +8608,8 @@ const FOOTBALL_SCORERS_TTL = 30 * 60 * 1000; // 30 min — changes at most daily
 router.get("/football-scoring-leaders/:country", async (req, res) => {
   const country = String(req.params["country"]).toLowerCase().replace(/[^a-z0-9-]/g, "");
   if (!country) { res.status(400).json({ error: "País inválido" }); return; }
-  const now = Date.now();
   const cached = footballScorersCache.get(country);
-  if (cached && now - cached.fetchedAt < FOOTBALL_SCORERS_TTL) {
-    res.json({ leagues: cached.data });
-    return;
-  }
-  try {
-    const resp = await fetch(`${SAPI_FOOTBALL}/soccer/scoring-leaders/${encodeURIComponent(country)}`, { signal: AbortSignal.timeout(9000), headers: sapiHeaders() });
-    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-    const data = (await resp.json()) as V1ScorersRaw;
-    const rawLeagues = data?.scorers?.league;
-    const leagues: V1ScorerLeague[] = toArr(rawLeagues);
-
-    const out = leagues.map(lg => ({
-      id: lg.id, name: lg.name, country: lg.country, subId: lg.sub_id,
-      players: toArr(lg.player).map(p => ({
-        id: p.id, name: p.name,
-        rank:         parseInt(p.pos)           || 0,
-        goals:        parseInt(p.goals)         || 0,
-        penaltyGoals: parseInt(p.penalty_goals) || 0,
-        team: p.team, teamId: p.team_id,
-      })),
-    }));
-
-    footballScorersCache.set(country, { data: out, fetchedAt: now });
-    res.json({ leagues: out });
-  } catch {
-    res.status(500).json({ error: "Marcadores indisponíveis" });
-  }
+  res.json({ leagues: cached?.data ?? [] });
 });
 
 // ─── Football Injuries/Suspensions (v1) ───────────────────────────────────────
@@ -10681,43 +8646,8 @@ let footballInjuriesV1Cache: object[] | null = null;
 let footballInjuriesV1FetchedAt = 0;
 const FOOTBALL_INJURIES_V1_TTL = 15 * 60 * 1000; // 15 min — same as v2
 
-router.get("/football-injuries-v1", async (_req, res) => {
-  const now = Date.now();
-  if (footballInjuriesV1Cache && now - footballInjuriesV1FetchedAt < FOOTBALL_INJURIES_V1_TTL) {
-    res.json({ leagues: footballInjuriesV1Cache });
-    return;
-  }
-  try {
-    const resp = await fetch(`${SAPI_FOOTBALL}/soccer/injuries`, { signal: AbortSignal.timeout(10000), headers: sapiHeaders() });
-    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-    const data = (await resp.json()) as V1InjuriesRaw;
-    const rawLeagues = data?.injuries_suspensions?.league;
-    const leagues: V1InjuryLeagueRaw[] = toArr(rawLeagues);
-
-    const out = leagues.map(lg => ({
-      id: lg.id, name: lg.name, subId: lg.sub_id,
-      matches: toArr(lg.match).map(m => ({
-        id: m.id, alternateId: m.alternate_id, alternateId2: m.alternate_id_2, staticId: m.static_id,
-        date: m.date, time: m.time, status: m.status,
-        homeTeam: {
-          id: m.home.id, name: m.home.name,
-          toMiss:       parseInjuryPlayers(m.home.sidelined?.to_miss?.player),
-          questionable: parseInjuryPlayers(m.home.sidelined?.questionable?.player),
-        },
-        awayTeam: {
-          id: m.away.id, name: m.away.name,
-          toMiss:       parseInjuryPlayers(m.away.sidelined?.to_miss?.player),
-          questionable: parseInjuryPlayers(m.away.sidelined?.questionable?.player),
-        },
-      })),
-    }));
-
-    footballInjuriesV1Cache = out;
-    footballInjuriesV1FetchedAt = now;
-    res.json({ leagues: out });
-  } catch {
-    res.status(500).json({ error: "Lesões indisponíveis" });
-  }
+router.get("/football-injuries-v1", (_req, res) => {
+  res.json({ leagues: footballInjuriesV1Cache ?? [] });
 });
 
 // ─── Football Odds by country (v1) — public multi-market route ────────────────
@@ -10830,44 +8760,8 @@ function processOddsType(t: OddsType): object | null {
 router.get("/football-odds-country/:country", async (req, res) => {
   const country = String(req.params["country"]).toLowerCase().replace(/[^a-z0-9-]/g, "");
   if (!country) { res.status(400).json({ error: "País inválido" }); return; }
-  const now = Date.now();
   const cached = footballOddsCountryCache.get(country);
-  if (cached && now - cached.fetchedAt < FOOTBALL_ODDS_COUNTRY_TTL) {
-    res.json({ leagues: cached.data });
-    return;
-  }
-  try {
-    const resp = await fetch(`${SAPI_FOOTBALL}/soccer/odds/${encodeURIComponent(country)}`, { signal: AbortSignal.timeout(10000), headers: sapiHeaders() });
-    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-    const raw = (await resp.json()) as {
-      example?: { odds_feed?: { league?: OddsLeague | OddsLeague[] } };
-      odds_feed?: { league?: OddsLeague | OddsLeague[] };
-    };
-    const feed = raw?.example?.odds_feed ?? raw?.odds_feed;
-    const rawLeagues = feed?.league;
-    const leagues: OddsLeague[] = toArr(rawLeagues);
-
-    const out = leagues.map(lg => ({
-      id: lg.id, gid: lg.gid ?? null, name: lg.name, country: lg.country, subId: lg.sub_id ?? null,
-      matches: toArr(lg.match).map(m => {
-        const types: OddsType[] = m.odds?.type ? (Array.isArray(m.odds.type) ? m.odds.type : [m.odds.type]) : [];
-        const markets = types.map(t => processOddsType(t)).filter((x): x is object => x !== null);
-        return {
-          id: m.id, alternateId: m.alternate_id, alternateId2: m.alternate_id_2 ?? null, staticId: m.static_id ?? null,
-          date: m.date ?? null, time: m.time ?? null, status: m.status,
-          venue: m.venue || null,
-          homeTeam: { id: m.home.id, name: m.home.name, alternateId: m.home.alternate_id ?? null },
-          awayTeam: { id: m.away.id, name: m.away.name, alternateId: m.away.alternate_id ?? null },
-          markets,
-        };
-      }),
-    }));
-
-    footballOddsCountryCache.set(country, { data: out, fetchedAt: now });
-    res.json({ leagues: out });
-  } catch {
-    res.status(500).json({ error: "Odds indisponíveis" });
-  }
+  res.json({ leagues: cached?.data ?? [] });
 });
 
 // ─── Background Market Drift Engine ─────────────────────────────────────────
