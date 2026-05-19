@@ -4484,6 +4484,24 @@ export default function Home() {
           <div className="text-center text-zinc-600 py-6 text-sm">Mercado não disponível para esta partida.</div>
         )}
 
+        {/* ── BEISEBOL: PRIMEIRAS 5 ENTRADAS (F5) ── */}
+        {isBaseball && (modalTab === "gols" || modalTab === "todos") && m && (m as any).mlbExtra && (
+          <div>
+            {((m as any).mlbExtra as any).f5Result?.home > 0 && (
+              <MarketGroup title="Resultado — Primeiras 5 Entradas">
+                <MarketOddsBtn match={match} sel="f5-home" odd={((m as any).mlbExtra as any).f5Result.home} market="gols" label={match.home} />
+                <MarketOddsBtn match={match} sel="f5-away" odd={((m as any).mlbExtra as any).f5Result.away} market="gols" label={match.away} />
+              </MarketGroup>
+            )}
+            {((m as any).mlbExtra as any).f5Total?.over > 0 && (
+              <MarketGroup title={`Total F5 — O/U ${((m as any).mlbExtra as any).f5Total.line}`}>
+                <MarketOddsBtn match={match} sel="f5t-o" odd={((m as any).mlbExtra as any).f5Total.over} market="gols" label={`Mais de ${((m as any).mlbExtra as any).f5Total.line}`} />
+                <MarketOddsBtn match={match} sel="f5t-u" odd={((m as any).mlbExtra as any).f5Total.under} market="gols" label={`Menos de ${((m as any).mlbExtra as any).f5Total.line}`} />
+              </MarketGroup>
+            )}
+          </div>
+        )}
+
         {/* ── BASQUETE: TOTAIS ── */}
         {isBasketball && (modalTab === "totais" || modalTab === "todos") && m && (
           <div>
@@ -4816,6 +4834,56 @@ export default function Home() {
                 {Array.from({ length: maxRows }).flatMap((_, i) => [
                   <div key={`hw-${i}`} className="flex">{homeWins[i] ? <MarketOddsBtn match={match} sel={`ses-${homeWins[i][0]}`} odd={homeWins[i][1]} market="placar" label={homeWins[i][0]} /> : <div className="flex-1" />}</div>,
                   <div key={`aw-${i}`} className="flex">{awayWins[i] ? <MarketOddsBtn match={match} sel={`ses-${awayWins[i][0]}`} odd={awayWins[i][1]} market="placar" label={awayWins[i][0]} /> : <div className="flex-1" />}</div>,
+                ])}
+              </div>
+            </div>
+          );
+        })()}
+
+        {/* ── TÉNIS: PLACAR EXATO — 1º SET ── */}
+        {isTennis && (modalTab === "placar" || modalTab === "todos") && m && (m as any).tennisExtra?.set1ExactScore && Object.keys((m as any).tennisExtra.set1ExactScore as Record<string, number>).length > 0 && (() => {
+          const ses1 = (m as any).tennisExtra.set1ExactScore as Record<string, number>;
+          const isSettled1 = Object.values(ses1).some(v => v === 1.01);
+          const homeWins1 = Object.entries(ses1).filter(([s, v]) => v > 0 && (Number(s.split("-")[0]) ?? 0) > (Number(s.split("-")[1]) ?? 0)).sort(([, a], [, b]) => a - b);
+          const awayWins1 = Object.entries(ses1).filter(([s, v]) => v > 0 && (Number(s.split("-")[1]) ?? 0) > (Number(s.split("-")[0]) ?? 0)).sort(([, a], [, b]) => a - b);
+          const maxRows1 = Math.max(homeWins1.length, awayWins1.length);
+          if (maxRows1 === 0) return null;
+          return (
+            <div className="mb-4">
+              <p className="text-xs text-zinc-500 mb-3 font-medium">{isSettled1 ? "✓ 1º Set — Placar Final" : "1º Set — Placar Exato"}</p>
+              <div className="grid grid-cols-2 gap-x-3 mb-1">
+                <div className="text-xs text-zinc-400 text-center font-semibold pb-1 border-b border-zinc-700 truncate">{match.home}</div>
+                <div className="text-xs text-zinc-400 text-center font-semibold pb-1 border-b border-zinc-700 truncate">{match.away}</div>
+              </div>
+              <div className="grid grid-cols-2 gap-x-3 gap-y-2 mt-2">
+                {Array.from({ length: maxRows1 }).flatMap((_, i) => [
+                  <div key={`s1hw-${i}`} className="flex">{homeWins1[i] ? <MarketOddsBtn match={match} sel={`s1es-${homeWins1[i][0]}`} odd={homeWins1[i][1]} market="placar" label={homeWins1[i][0]} /> : <div className="flex-1" />}</div>,
+                  <div key={`s1aw-${i}`} className="flex">{awayWins1[i] ? <MarketOddsBtn match={match} sel={`s1es-${awayWins1[i][0]}`} odd={awayWins1[i][1]} market="placar" label={awayWins1[i][0]} /> : <div className="flex-1" />}</div>,
+                ])}
+              </div>
+            </div>
+          );
+        })()}
+
+        {/* ── TÉNIS: PLACAR EXATO — 2º SET ── */}
+        {isTennis && (modalTab === "placar" || modalTab === "todos") && m && (m as any).tennisExtra?.set2ExactScore && Object.keys((m as any).tennisExtra.set2ExactScore as Record<string, number>).length > 0 && (() => {
+          const ses2 = (m as any).tennisExtra.set2ExactScore as Record<string, number>;
+          const isSettled2 = Object.values(ses2).some(v => v === 1.01);
+          const homeWins2 = Object.entries(ses2).filter(([s, v]) => v > 0 && (Number(s.split("-")[0]) ?? 0) > (Number(s.split("-")[1]) ?? 0)).sort(([, a], [, b]) => a - b);
+          const awayWins2 = Object.entries(ses2).filter(([s, v]) => v > 0 && (Number(s.split("-")[1]) ?? 0) > (Number(s.split("-")[0]) ?? 0)).sort(([, a], [, b]) => a - b);
+          const maxRows2 = Math.max(homeWins2.length, awayWins2.length);
+          if (maxRows2 === 0) return null;
+          return (
+            <div className="mb-4">
+              <p className="text-xs text-zinc-500 mb-3 font-medium">{isSettled2 ? "✓ 2º Set — Placar Final" : "2º Set — Placar Exato"}</p>
+              <div className="grid grid-cols-2 gap-x-3 mb-1">
+                <div className="text-xs text-zinc-400 text-center font-semibold pb-1 border-b border-zinc-700 truncate">{match.home}</div>
+                <div className="text-xs text-zinc-400 text-center font-semibold pb-1 border-b border-zinc-700 truncate">{match.away}</div>
+              </div>
+              <div className="grid grid-cols-2 gap-x-3 gap-y-2 mt-2">
+                {Array.from({ length: maxRows2 }).flatMap((_, i) => [
+                  <div key={`s2hw-${i}`} className="flex">{homeWins2[i] ? <MarketOddsBtn match={match} sel={`s2es-${homeWins2[i][0]}`} odd={homeWins2[i][1]} market="placar" label={homeWins2[i][0]} /> : <div className="flex-1" />}</div>,
+                  <div key={`s2aw-${i}`} className="flex">{awayWins2[i] ? <MarketOddsBtn match={match} sel={`s2es-${awayWins2[i][0]}`} odd={awayWins2[i][1]} market="placar" label={awayWins2[i][0]} /> : <div className="flex-1" />}</div>,
                 ])}
               </div>
             </div>
@@ -5226,6 +5294,18 @@ export default function Home() {
           </div>
         )}
 
+        {/* ── BASQUETE: TOTAL DE PONTOS — MÚLTIPLAS LINHAS ── */}
+        {isBasketball && (modalTab === "totais" || modalTab === "todos") && m && (m as any).basketballExtra && ((m as any).basketballExtra as any).totalsRange?.length > 0 && (
+          <div>
+            {((m as any).basketballExtra as any).totalsRange.map((tr: { line: number; over: number; under: number }) => (
+              <MarketGroup key={`tr-${tr.line}`} title={`Total de Pontos — O/U ${tr.line}`}>
+                <MarketOddsBtn match={match} sel={`tr-o-${tr.line}`} odd={tr.over} market="totais" label={`Mais de ${tr.line}`} />
+                <MarketOddsBtn match={match} sel={`tr-u-${tr.line}`} odd={tr.under} market="totais" label={`Menos de ${tr.line}`} />
+              </MarketGroup>
+            ))}
+          </div>
+        )}
+
         {/* ── TÉNIS: TOTAL DE JOGOS ── */}
         {isTennis && (modalTab === "jogos" || modalTab === "todos") && m && (m as any).tennisExtra && (
           <div>
@@ -5410,6 +5490,18 @@ export default function Home() {
                   <MarketGroup title={`Total 1º Período — O/U ${((m as any).hockeyExtra as any).period1Total.line}`}>
                     <MarketOddsBtn match={match} sel="p1t-o" odd={((m as any).hockeyExtra as any).period1Total.over} market="especiais" label={`Mais de ${((m as any).hockeyExtra as any).period1Total.line}`} />
                     <MarketOddsBtn match={match} sel="p1t-u" odd={((m as any).hockeyExtra as any).period1Total.under} market="especiais" label={`Menos de ${((m as any).hockeyExtra as any).period1Total.line}`} />
+                  </MarketGroup>
+                )}
+                {((m as any).hockeyExtra as any).period2Total?.over > 0 && (
+                  <MarketGroup title={`Total 2º Período — O/U ${((m as any).hockeyExtra as any).period2Total.line}`}>
+                    <MarketOddsBtn match={match} sel="p2t-o" odd={((m as any).hockeyExtra as any).period2Total.over} market="especiais" label={`Mais de ${((m as any).hockeyExtra as any).period2Total.line}`} />
+                    <MarketOddsBtn match={match} sel="p2t-u" odd={((m as any).hockeyExtra as any).period2Total.under} market="especiais" label={`Menos de ${((m as any).hockeyExtra as any).period2Total.line}`} />
+                  </MarketGroup>
+                )}
+                {((m as any).hockeyExtra as any).period3Total?.over > 0 && (
+                  <MarketGroup title={`Total 3º Período — O/U ${((m as any).hockeyExtra as any).period3Total.line}`}>
+                    <MarketOddsBtn match={match} sel="p3t-o" odd={((m as any).hockeyExtra as any).period3Total.over} market="especiais" label={`Mais de ${((m as any).hockeyExtra as any).period3Total.line}`} />
+                    <MarketOddsBtn match={match} sel="p3t-u" odd={((m as any).hockeyExtra as any).period3Total.under} market="especiais" label={`Menos de ${((m as any).hockeyExtra as any).period3Total.line}`} />
                   </MarketGroup>
                 )}
                 {((m as any).hockeyExtra as any).shotsOnGoal.over > 0 && (

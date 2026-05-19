@@ -1405,6 +1405,36 @@ export function ComprehensiveMarketsSheet({ visible, match, onClose }: Props) {
                   </Section>
                 )}
 
+                {/* Basketball — multiple O/U lines */}
+                {isBball && (m as any)?.basketballExtra?.totalsRange?.length > 0 && (
+                  <Section title="Linhas de Totais" tabKey="pontos">
+                    {((m as any).basketballExtra.totalsRange as { line: number; over: number; under: number }[]).map((tr) => (
+                      <View key={`tr-${tr.line}`} style={s.row}>
+                        <OddsBtn market={`tr-o-${tr.line}`} label={`Mais ${tr.line}`} value={tr.over} />
+                        <OddsBtn market={`tr-u-${tr.line}`} label={`Menos ${tr.line}`} value={tr.under} />
+                      </View>
+                    ))}
+                  </Section>
+                )}
+
+                {/* Hockey — period 2 and period 3 totals */}
+                {isHockey && (m as any)?.hockeyExtra?.period2Total?.over > 1.01 && (
+                  <Section title={`Total 2º Período — O/U ${(m as any).hockeyExtra.period2Total.line}`} tabKey="periodos">
+                    <View style={s.row}>
+                      <OddsBtn market="p2t-o" label={`Mais ${(m as any).hockeyExtra.period2Total.line}`} value={(m as any).hockeyExtra.period2Total.over} />
+                      <OddsBtn market="p2t-u" label={`Menos ${(m as any).hockeyExtra.period2Total.line}`} value={(m as any).hockeyExtra.period2Total.under} />
+                    </View>
+                  </Section>
+                )}
+                {isHockey && (m as any)?.hockeyExtra?.period3Total?.over > 1.01 && (
+                  <Section title={`Total 3º Período — O/U ${(m as any).hockeyExtra.period3Total.line}`} tabKey="periodos">
+                    <View style={s.row}>
+                      <OddsBtn market="p3t-o" label={`Mais ${(m as any).hockeyExtra.period3Total.line}`} value={(m as any).hockeyExtra.period3Total.over} />
+                      <OddsBtn market="p3t-u" label={`Menos ${(m as any).hockeyExtra.period3Total.line}`} value={(m as any).hockeyExtra.period3Total.under} />
+                    </View>
+                  </Section>
+                )}
+
                 {(isBball || isHockey) && m?.halfTime && m.halfTime.home > 1.01 && (
                   <Section title={isBball ? "1º Quarto" : "1º Período"} tabKey="1periodo">
                     <View style={s.row}>
@@ -1445,6 +1475,39 @@ export function ComprehensiveMarketsSheet({ visible, match, onClose }: Props) {
                         </View>
                       </>
                     )}
+                    {/* Placar exato por set */}
+                    {(m as any).tennisExtra?.set1ExactScore && Object.keys((m as any).tennisExtra.set1ExactScore).length > 0 && (() => {
+                      const ses1 = (m as any).tennisExtra.set1ExactScore as Record<string, number>;
+                      const settled = Object.values(ses1).some(v => v === 1.01);
+                      const entries = Object.entries(ses1).filter(([, v]) => v > 0);
+                      if (entries.length === 0) return null;
+                      return (
+                        <>
+                          <Text style={s.subsectionLabel}>{settled ? "✓ 1º Set — Placar Final" : "1º Set — Placar Exato"}</Text>
+                          <View style={[s.row, { flexWrap: "wrap" }]}>
+                            {entries.map(([score, odd]) => (
+                              <OddsBtn key={`s1es-${score}`} market={`s1es-${score}`} label={score} value={odd} />
+                            ))}
+                          </View>
+                        </>
+                      );
+                    })()}
+                    {(m as any).tennisExtra?.set2ExactScore && Object.keys((m as any).tennisExtra.set2ExactScore).length > 0 && (() => {
+                      const ses2 = (m as any).tennisExtra.set2ExactScore as Record<string, number>;
+                      const settled = Object.values(ses2).some(v => v === 1.01);
+                      const entries = Object.entries(ses2).filter(([, v]) => v > 0);
+                      if (entries.length === 0) return null;
+                      return (
+                        <>
+                          <Text style={s.subsectionLabel}>{settled ? "✓ 2º Set — Placar Final" : "2º Set — Placar Exato"}</Text>
+                          <View style={[s.row, { flexWrap: "wrap" }]}>
+                            {entries.map(([score, odd]) => (
+                              <OddsBtn key={`s2es-${score}`} market={`s2es-${score}`} label={score} value={odd} />
+                            ))}
+                          </View>
+                        </>
+                      );
+                    })()}
                   </View>
                 )}
 
@@ -1472,6 +1535,22 @@ export function ComprehensiveMarketsSheet({ visible, match, onClose }: Props) {
                         <OddsBtn market={row.ku} label={`Menos ${row.line}`} value={row.u} />
                       </View>
                     ))}
+                  </Section>
+                )}
+
+                {/* Baseball F5 */}
+                {match.sport === "baseball" && (m as any)?.mlbExtra?.f5Result?.home > 1.01 && (
+                  <Section title="Primeiras 5 Entradas" tabKey="pontos">
+                    <View style={s.row}>
+                      <OddsBtn market="f5-home" label={match.home} value={(m as any).mlbExtra.f5Result.home} />
+                      <OddsBtn market="f5-away" label={match.away} value={(m as any).mlbExtra.f5Result.away} />
+                    </View>
+                    {(m as any).mlbExtra?.f5Total?.over > 1.01 && (
+                      <View style={s.row}>
+                        <OddsBtn market="f5t-o" label={`Mais ${(m as any).mlbExtra.f5Total.line}`} value={(m as any).mlbExtra.f5Total.over} />
+                        <OddsBtn market="f5t-u" label={`Menos ${(m as any).mlbExtra.f5Total.line}`} value={(m as any).mlbExtra.f5Total.under} />
+                      </View>
+                    )}
                   </Section>
                 )}
 

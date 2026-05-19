@@ -1594,6 +1594,17 @@ function makeBasketballMarketsFromTeams(home: string, away: string): AdvancedMar
   const [q3H, q3A] = probsToDecimalOdds([mc(0.5 + (pHomeML - 0.5) * 0.48, 0.25, 0.75), mc(0.5 - (pHomeML - 0.5) * 0.48, 0.25, 0.75)], 1.07);
   const [q4H, q4A] = probsToDecimalOdds([mc(0.5 + (pHomeML - 0.5) * 0.52, 0.25, 0.75), mc(0.5 - (pHomeML - 0.5) * 0.52, 0.25, 0.75)], 1.07);
 
+  // Multiple game-total O/U lines: main line ±15 at 2.5-pt increments (13 lines)
+  const totalsRange: { line: number; over: number; under: number }[] = [];
+  for (let off = -15; off <= 15; off += 2.5) {
+    const line = Math.round((totalLine + off) * 10) / 10;
+    const [oL, uL] = probsToDecimalOdds([
+      mc(1 - normalCdf((line - mean) / sd), 0.02, 0.98),
+      mc(normalCdf((line - mean) / sd), 0.02, 0.98),
+    ], 1.06);
+    totalsRange.push({ line, over: oL!, under: uL! });
+  }
+
   return {
     doubleChance:  { homeOrDraw: 0, awayOrDraw: 0, homeOrAway: 0 },
     bothTeamsScore: { yes: 0, no: 0 },
@@ -1616,6 +1627,7 @@ function makeBasketballMarketsFromTeams(home: string, away: string): AdvancedMar
       q4: { home: q4H!, away: q4A! },
       teamTotalHome: { line: teamTotalLine, over: oHT!, under: uHT! },
       teamTotalAway: { line: awayTotalLine, over: oAT!, under: uAT! },
+      totalsRange,
     },
     _extraUsed: { oTotal1H, uTotal1H, oAT, uAT },
   } as unknown as AdvancedMarkets;
@@ -1663,6 +1675,11 @@ function makeHockeyMarketsFromTeams(home: string, away: string): AdvancedMarkets
   const shotsLine = mc((isNHL ? 60.5 : 55.5) + (sr(17) - 0.5) * 8, 48.5, 72.5);
   const [oShots, uShots] = probsToDecimalOdds([mc(0.5 + (sr(18) - 0.5) * 0.12, 0.38, 0.62), mc(0.5 - (sr(18) - 0.5) * 0.12, 0.38, 0.62)], 1.06);
 
+  const per2TotalSd = mc(per1TotalSd * (0.88 + sr(19) * 0.22), 0.5, 1.6);
+  const per3TotalSd = mc(per1TotalSd * (0.80 + sr(20) * 0.20), 0.5, 1.6);
+  const [oPer2T, uPer2T] = probsToDecimalOdds([mc(1 - normalCdf((per1TotalLine - mean1P) / per2TotalSd), 0.05, 0.95), mc(normalCdf((per1TotalLine - mean1P) / per2TotalSd), 0.05, 0.95)], 1.06);
+  const [oPer3T, uPer3T] = probsToDecimalOdds([mc(1 - normalCdf((per1TotalLine - mean1P) / per3TotalSd), 0.05, 0.95), mc(normalCdf((per1TotalLine - mean1P) / per3TotalSd), 0.05, 0.95)], 1.06);
+
   return {
     doubleChance:  { homeOrDraw: 0, awayOrDraw: 0, homeOrAway: 0 },
     bothTeamsScore: { yes: btsYes!, no: btsNo! },
@@ -1682,6 +1699,8 @@ function makeHockeyMarketsFromTeams(home: string, away: string): AdvancedMarkets
       period2: { home: p2.home, draw: p2.draw, away: p2.away },
       period3: { home: p3.home, draw: p3.draw, away: p3.away },
       period1Total: { line: per1TotalLine, over: oPer1T!, under: uPer1T! },
+      period2Total: { line: per1TotalLine, over: oPer2T!, under: uPer2T! },
+      period3Total: { line: per1TotalLine, over: oPer3T!, under: uPer3T! },
       bothTeamsScoreGame: { yes: btsYes!, no: btsNo! },
       shotsOnGoal: { line: shotsLine, over: oShots!, under: uShots! },
     },
@@ -1717,6 +1736,20 @@ function makeMLBMarketsFromTeams(home: string, away: string, realHomeOdds?: numb
   const marginSd   = mc(2.8 + sr(4) * 0.8, 2.2, 4.0);
   const pHomeRL    = mc(1 - normalCdf((-1.5 - marginMean) / marginSd), 0.05, 0.95);
   const [rlH, rlA] = probsToDecimalOdds([pHomeRL, 1 - pHomeRL], 1.06);
+
+  // First 5 innings (F5) markets — starters pitch ~5 innings; smaller run total
+  const f5MeanTotal = mc(meanTotal * (5 / 9), 2.5, 7.0);
+  const f5TotalLine = Math.round(f5MeanTotal * 2) / 2;
+  const f5TotalSd   = mc(totalSd * 0.72, 1.0, 2.5);
+  const [oF5T, uF5T] = probsToDecimalOdds([
+    mc(1 - normalCdf((f5TotalLine - f5MeanTotal) / f5TotalSd), 0.05, 0.95),
+    mc(normalCdf((f5TotalLine - f5MeanTotal) / f5TotalSd), 0.05, 0.95),
+  ], 1.06);
+  const f5MarginMean = mc(marginMean * 0.65 + (sr(5) - 0.5) * 0.5, -2.0, 2.0);
+  const f5MarginSd   = mc(marginSd * 0.9, 2.0, 3.5);
+  const f5HomeP = mc(normalCdf(f5MarginMean / f5MarginSd), 0.25, 0.75);
+  const [f5H, f5A] = probsToDecimalOdds([f5HomeP, 1 - f5HomeP], 1.06);
+
   return {
     doubleChance:   { homeOrDraw: 0, awayOrDraw: 0, homeOrAway: 0 },
     bothTeamsScore: { yes: 0, no: 0 },
@@ -1732,6 +1765,10 @@ function makeMLBMarketsFromTeams(home: string, away: string, realHomeOdds?: numb
     firstGoal: { home: 0, noGoal: 0, away: 0 },
     _spread: 1.5,
     _total:  totalLine,
+    mlbExtra: {
+      f5Result: { home: f5H!, away: f5A! },
+      f5Total:  { line: f5TotalLine, over: oF5T!, under: uF5T! },
+    },
   } as unknown as AdvancedMarkets;
 }
 
@@ -2653,7 +2690,9 @@ function applyTieredMarketDrift(state: LiveMatchState, now: number): LiveMatchSt
   const fgDue  = due("firstGoal",      90_000, 170_000);
   const ahDue  = due("asianHandicap",  95_000, 180_000);
   const htftDue = due("htft",         100_000, 190_000);
-  const csDue  = due("correctScore",  105_000, 200_000);
+  const csDue   = due("correctScore",   105_000, 200_000);
+  const htCSDue = due("htCorrectScore",  90_000, 175_000);
+  const h2CSDue = due("h2CorrectScore",  90_000, 175_000);
 
   // ── Tier 3 markets — 120–260s ──────────────────────────────────────────────
   const cornDue = due("corners", 120_000, 250_000);
@@ -2743,12 +2782,22 @@ function applyTieredMarketDrift(state: LiveMatchState, now: number): LiveMatchSt
       ? { hh: s2(bm.htft.hh), hd: s2(bm.htft.hd), ha: s2(bm.htft.ha), dh: s2(bm.htft.dh), dd: s2(bm.htft.dd), da: s2(bm.htft.da), ah: s2(bm.htft.ah), ad: s2(bm.htft.ad), aa: s2(bm.htft.aa) }
       : state.markets.htft,
 
-    correctScore: csDue && bm.correctScore
-      ? Object.fromEntries(Object.entries(bm.correctScore).map(([k, v]) => {
-          const cur = state.markets.correctScore?.[k] ?? 0;
-          return [k, keep0(cur, v, s2)];
-        }))
-      : state.markets.correctScore,
+    correctScore: csDue && state.sport === "football"
+      ? recalcLiveCorrectScore(state.home, state.away, homeScore, awayScore, minute, state.status, state.markets.correctScore)
+      : (csDue && bm.correctScore
+          ? Object.fromEntries(Object.entries(bm.correctScore).map(([k, v]) => {
+              const cur = state.markets.correctScore?.[k] ?? 0;
+              return [k, keep0(cur, v, s2)];
+            }))
+          : state.markets.correctScore),
+
+    htCorrectScore: htCSDue && state.sport === "football"
+      ? recalcLiveHtCorrectScore(state.home, state.away, homeScore, awayScore, (state._liveExtra as any)?.htScore ?? null, minute, state.status, state.markets.htCorrectScore as Record<string, number> | undefined)
+      : state.markets.htCorrectScore,
+
+    h2CorrectScore: h2CSDue && state.sport === "football"
+      ? recalcLiveH2CorrectScore(state.home, state.away, homeScore, awayScore, (state._liveExtra as any)?.htScore ?? null, minute, state.status, state.markets.h2CorrectScore as Record<string, number> | undefined)
+      : state.markets.h2CorrectScore,
 
     corners: cornDue && bm.corners
       ? { o85: s3(bm.corners.o85), u85: s3(bm.corners.u85), o95: s3(bm.corners.o95), u95: s3(bm.corners.u95), o105: s3(bm.corners.o105), u105: s3(bm.corners.u105) }
@@ -2919,6 +2968,176 @@ function recalcLiveSecondHalf(
     1.08
   );
   return { home: h!, draw: d!, away: a! };
+}
+
+// ─── Live correct-score recalculation (Poisson remaining time) ────────────────
+
+/**
+ * Reprices the full-match correct score market live.
+ * Each still-reachable score gets a fresh probability from Poisson(λ_rem).
+ * Settled (zeroed) entries stay at 0; "Outro" absorbs all untracked scorelines.
+ */
+function recalcLiveCorrectScore(
+  home: string, away: string,
+  homeScore: number, awayScore: number,
+  minute: number, status: string,
+  current: Record<string, number> | undefined
+): Record<string, number> | undefined {
+  if (!current || Object.keys(current).length === 0) return current;
+  const isHT = status === "HT";
+  const remainingMins = isHT ? 45 : Math.max(1, 90 - Math.min(90, minute));
+  const { lambdaHome, lambdaAway } = soccerPoissonModel(home, away);
+  const lambdaRemH = lambdaHome * (remainingMins / 90);
+  const lambdaRemA = lambdaAway * (remainingMins / 90);
+
+  const maxAdd = 6;
+  const pAddH = poissonPmf(lambdaRemH, maxAdd);
+  const pAddA = poissonPmf(lambdaRemA, maxAdd);
+
+  const scoreProbs = new Map<string, number>();
+  let pOther = 0;
+  for (let addH = 0; addH <= maxAdd; addH++) {
+    for (let addA = 0; addA <= maxAdd; addA++) {
+      const p = (pAddH[addH] ?? 0) * (pAddA[addA] ?? 0);
+      const key = `${homeScore + addH}-${awayScore + addA}`;
+      if (current[key] !== undefined) scoreProbs.set(key, (scoreProbs.get(key) ?? 0) + p);
+      else pOther += p;
+    }
+  }
+
+  const total = Array.from(scoreProbs.values()).reduce((s, v) => s + v, 0) + pOther;
+  if (total < 1e-9) return current;
+
+  const result: Record<string, number> = {};
+  for (const [score, p] of scoreProbs) {
+    if ((current[score] ?? 0) <= 0) { result[score] = 0; continue; }
+    const [odds] = probsToDecimalOdds([mc(p / total, 0.003, 0.97)], 1.12);
+    result[score] = Math.max(1.01, odds!);
+  }
+  if ("Outro" in current && (current["Outro"] ?? 0) > 0) {
+    const [odds] = probsToDecimalOdds([mc(pOther / total, 0.003, 0.97)], 1.12);
+    result["Outro"] = Math.max(1.01, odds!);
+  }
+  return result;
+}
+
+/**
+ * Reprices the HT correct score market live.
+ * During 1st half: Poisson for remaining 1st-half minutes.
+ * After HT: settled — show actual HT score at 1.01, rest at 0.
+ */
+function recalcLiveHtCorrectScore(
+  home: string, away: string,
+  homeScore: number, awayScore: number,
+  htScore: [number, number] | null,
+  minute: number, status: string,
+  current: Record<string, number> | undefined
+): Record<string, number> | undefined {
+  if (!current || Object.keys(current).length === 0) return current;
+  const isHT = status === "HT";
+  const inSecondHalf = !isHT && minute > 45;
+
+  if (isHT || inSecondHalf) {
+    const finalH = htScore ? htScore[0] : homeScore;
+    const finalA = htScore ? htScore[1] : awayScore;
+    const settledKey = `${finalH}-${finalA}`;
+    const result: Record<string, number> = {};
+    for (const k of Object.keys(current)) result[k] = k === settledKey ? 1.01 : 0;
+    return result;
+  }
+
+  const remainingMins = Math.max(1, 45 - Math.min(45, minute));
+  const { lambdaHome, lambdaAway } = soccerPoissonModel(home, away);
+  const lambdaRemH = lambdaHome * (remainingMins / 90);
+  const lambdaRemA = lambdaAway * (remainingMins / 90);
+
+  const maxAdd = 5;
+  const pAddH = poissonPmf(lambdaRemH, maxAdd);
+  const pAddA = poissonPmf(lambdaRemA, maxAdd);
+
+  const scoreProbs = new Map<string, number>();
+  let pOther = 0;
+  for (let addH = 0; addH <= maxAdd; addH++) {
+    for (let addA = 0; addA <= maxAdd; addA++) {
+      const p = (pAddH[addH] ?? 0) * (pAddA[addA] ?? 0);
+      const key = `${homeScore + addH}-${awayScore + addA}`;
+      if (current[key] !== undefined) scoreProbs.set(key, (scoreProbs.get(key) ?? 0) + p);
+      else pOther += p;
+    }
+  }
+
+  const total = Array.from(scoreProbs.values()).reduce((s, v) => s + v, 0) + pOther;
+  if (total < 1e-9) return current;
+
+  const result: Record<string, number> = {};
+  for (const [score, p] of scoreProbs) {
+    if ((current[score] ?? 0) <= 0) { result[score] = 0; continue; }
+    const [odds] = probsToDecimalOdds([mc(p / total, 0.003, 0.97)], 1.12);
+    result[score] = Math.max(1.01, odds!);
+  }
+  if ("Outro" in current && (current["Outro"] ?? 0) > 0) {
+    const [odds] = probsToDecimalOdds([mc(pOther / total, 0.003, 0.97)], 1.12);
+    result["Outro"] = Math.max(1.01, odds!);
+  }
+  return result;
+}
+
+/**
+ * Reprices the 2nd-half correct score market live.
+ * Uses current 2nd-half partial score (total minus HT score) + remaining time.
+ * During 1st half / HT: returns pre-match odds unchanged.
+ */
+function recalcLiveH2CorrectScore(
+  home: string, away: string,
+  homeScoreTotal: number, awayScoreTotal: number,
+  htScore: [number, number] | null,
+  minute: number, status: string,
+  current: Record<string, number> | undefined
+): Record<string, number> | undefined {
+  if (!current || Object.keys(current).length === 0) return current;
+  const isHT = status === "HT";
+  const inFirstHalf = !isHT && minute <= 45;
+  if (inFirstHalf || isHT) return current;
+
+  const htH = htScore ? htScore[0] : 0;
+  const htA = htScore ? htScore[1] : 0;
+  const h2H = Math.max(0, homeScoreTotal - htH);
+  const h2A = Math.max(0, awayScoreTotal - htA);
+
+  const remainingMins = Math.max(1, 90 - Math.min(90, minute));
+  const { lambdaHome, lambdaAway } = soccerPoissonModel(home, away);
+  const lambdaRemH = lambdaHome * (remainingMins / 90);
+  const lambdaRemA = lambdaAway * (remainingMins / 90);
+
+  const maxAdd = 5;
+  const pAddH = poissonPmf(lambdaRemH, maxAdd);
+  const pAddA = poissonPmf(lambdaRemA, maxAdd);
+
+  const scoreProbs = new Map<string, number>();
+  let pOther = 0;
+  for (let addH = 0; addH <= maxAdd; addH++) {
+    for (let addA = 0; addA <= maxAdd; addA++) {
+      const p = (pAddH[addH] ?? 0) * (pAddA[addA] ?? 0);
+      const key = `${h2H + addH}-${h2A + addA}`;
+      if (current[key] !== undefined) scoreProbs.set(key, (scoreProbs.get(key) ?? 0) + p);
+      else pOther += p;
+    }
+  }
+
+  const total = Array.from(scoreProbs.values()).reduce((s, v) => s + v, 0) + pOther;
+  if (total < 1e-9) return current;
+
+  const result: Record<string, number> = {};
+  for (const [score, p] of scoreProbs) {
+    if ((current[score] ?? 0) <= 0) { result[score] = 0; continue; }
+    const [odds] = probsToDecimalOdds([mc(p / total, 0.003, 0.97)], 1.12);
+    result[score] = Math.max(1.01, odds!);
+  }
+  if ("Outro" in current && (current["Outro"] ?? 0) > 0) {
+    const [odds] = probsToDecimalOdds([mc(pOther / total, 0.003, 0.97)], 1.12);
+    result["Outro"] = Math.max(1.01, odds!);
+  }
+  return result;
 }
 
 // Remove/zero out market lines that are already settled or impossible given the current live score
@@ -4245,7 +4464,17 @@ function buildTennisLiveMatches(
         handicap:        { homeMinusOne: 0, awayPlusOne: 0, homeMinusOneHalf: 0, awayPlusOneHalf: 0 },
         halfTime:        { home: 0, draw: 0, away: 0 },
         firstGoal:       { home: 0, noGoal: 0, away: 0 },
-        tennisExtra:     { ...baseExtras, firstSet: firstSetOdds, set2: set2Odds, setExactScore, currentSetNum: setNum },
+        tennisExtra:     { ...baseExtras, firstSet: firstSetOdds, set2: set2Odds, setExactScore, currentSetNum: setNum,
+          // Per-set exact score: live-updated for in-progress set, settled (single entry) for completed sets
+          set1ExactScore: numDoneSets === 0
+            ? setExactScore
+            : { [`${set1Games[0]}-${set1Games[1]}`]: 1.01 },
+          set2ExactScore: numDoneSets === 0
+            ? undefined
+            : numDoneSets === 1
+              ? setExactScore
+              : { [`${set2Games[0]}-${set2Games[1]}`]: 1.01 },
+        },
       } as unknown as AdvancedMarkets;
 
       result.push({
