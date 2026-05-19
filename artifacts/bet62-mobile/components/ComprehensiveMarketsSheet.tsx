@@ -1419,10 +1419,12 @@ export function ComprehensiveMarketsSheet({ visible, match, onClose }: Props) {
                   </Section>
                 )}
 
-                {/* Basketball — multiple O/U lines */}
+                {/* Basketball — multiple O/U lines (exclude main line already shown above) */}
                 {isBball && (m as any)?.basketballExtra?.totalsRange?.length > 0 && (
                   <Section title="Linhas de Totais" tabKey="pontos">
-                    {((m as any).basketballExtra.totalsRange as { line: number; over: number; under: number }[]).map((tr) => (
+                    {((m as any).basketballExtra.totalsRange as { line: number; over: number; under: number }[])
+                      .filter((tr) => tr.line !== ((m as any)?._total ?? -1))
+                      .map((tr) => (
                       <View key={`tr-${tr.line}`} style={s.row}>
                         <OddsBtn market={`tr-o-${tr.line}`} label={`Mais ${tr.line}`} value={tr.over} />
                         <OddsBtn market={`tr-u-${tr.line}`} label={`Menos ${tr.line}`} value={tr.under} />

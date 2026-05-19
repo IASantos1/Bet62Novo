@@ -5299,12 +5299,14 @@ export default function Home() {
         {/* ── BASQUETE: TOTAL DE PONTOS — MÚLTIPLAS LINHAS ── */}
         {isBasketball && (modalTab === "totais" || modalTab === "todos") && m && (m as any).basketballExtra && ((m as any).basketballExtra as any).totalsRange?.length > 0 && (
           <div>
-            {((m as any).basketballExtra as any).totalsRange.map((tr: { line: number; over: number; under: number }) => (
-              <MarketGroup key={`tr-${tr.line}`} title={`Total de Pontos — O/U ${tr.line}`}>
-                <MarketOddsBtn match={match} sel={`tr-o-${tr.line}`} odd={tr.over} market="totais" label={`Mais de ${tr.line}`} />
-                <MarketOddsBtn match={match} sel={`tr-u-${tr.line}`} odd={tr.under} market="totais" label={`Menos de ${tr.line}`} />
-              </MarketGroup>
-            ))}
+            {((m as any).basketballExtra as any).totalsRange
+              .filter((tr: { line: number; over: number; under: number }) => tr.line !== (m._total ?? -1))
+              .map((tr: { line: number; over: number; under: number }) => (
+                <MarketGroup key={`tr-${tr.line}`} title={`Total de Pontos — O/U ${tr.line}`}>
+                  <MarketOddsBtn match={match} sel={`tr-o-${tr.line}`} odd={tr.over} market="totais" label={`Mais de ${tr.line}`} />
+                  <MarketOddsBtn match={match} sel={`tr-u-${tr.line}`} odd={tr.under} market="totais" label={`Menos de ${tr.line}`} />
+                </MarketGroup>
+              ))}
           </div>
         )}
 

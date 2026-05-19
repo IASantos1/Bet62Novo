@@ -4201,16 +4201,21 @@ function v2EventDateTime(ev: SAPIV2Event): { date: string; time: string } {
   const ts = ev.startTimestamp;
   if (!ts) return { date: "", time: "" };
   const d = new Date(ts * 1000);
-  const fmt = new Intl.DateTimeFormat("pt-PT", {
+  // Use "en-US" for predictable formatToParts field names (avoids pt-PT locale quirks
+  // in some Node environments where hour/minute keys may differ).
+  const parts = new Intl.DateTimeFormat("en-US", {
     timeZone: "Europe/Lisbon",
-    day: "2-digit", month: "2-digit", year: "numeric",
-    hour: "2-digit", minute: "2-digit", hour12: false,
-  });
-  const parts = fmt.formatToParts(d);
-  const get = (t: string) => parts.find(p => p.type === t)?.value ?? "00";
+    year: "numeric", month: "2-digit", day: "2-digit",
+    hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false,
+  }).formatToParts(d);
+  const p: Record<string, string> = {};
+  for (const part of parts) p[part.type] = part.value;
+  // hour12:false may give "24" at midnight in some environments
+  const hh = p["hour"] === "24" ? "00" : (p["hour"] ?? "00");
+  const mm = p["minute"] ?? "00";
   return {
-    date: `${get("day")}.${get("month")}.${get("year")}`,
-    time: `${get("hour")}:${get("minute")}`,
+    date: `${p["day"] ?? "01"}.${p["month"] ?? "01"}.${p["year"] ?? "2025"}`,
+    time: `${hh}:${mm}`,
   };
 }
 
@@ -5489,6 +5494,19 @@ function buildFootballLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
 
     const existing = liveMatchState.get(id);
     if (existing) {
+      // Monotonic clock — never let the computed minute go backward (prevents clock regression
+      // on reconnect or when startTimestamp-based computation differs between polls).
+      minute = Math.max(existing.minute, minute);
+
+      // Pre-compute VAR status once, used in both scored and non-scored branches
+      const rawStatusDesc = v2StatusStr(ev.status).toLowerCase();
+      const isVARStatus = rawStatusDesc.includes("var") ||
+        rawStatusDesc.includes("video review") ||
+        rawStatusDesc.includes("awaiting review") ||
+        rawStatusDesc.includes("var check") ||
+        rawStatusDesc.includes("awaiting var") ||
+        rawStatusDesc.includes("video assistant");
+
       const scored = homeScore !== existing.homeScore || awayScore !== existing.awayScore;
       const baseOdds = existing._baseOdds ?? { home: existing.odds.home, draw: existing.odds.draw, away: existing.odds.away };
       const newOdds = scored
@@ -5496,7 +5514,9 @@ function buildFootballLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
         : existing.odds;
 
       if (scored) {
-        // Goal detected — filter settled markets, set goal suspension
+        // Goal detected — filter settled markets, set goal suspension.
+        // If the API is simultaneously reporting a VAR review (e.g. goal under review),
+        // override the label immediately so the frontend shows "REVISÃO AO VAR".
         const filteredMarkets = filterLiveMarkets(existing.markets, homeScore, awayScore, newStatus);
         const filteredBase = filterLiveMarkets(existing._baseMarkets ?? existing.markets, homeScore, awayScore, newStatus);
         const susp = Object.fromEntries(Object.entries(GOAL_SUSP_V2).map(([k, d]) => [k, now + d]));
@@ -5508,7 +5528,7 @@ function buildFootballLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
           _baseOdds: baseOdds,
           _baseMarkets: filteredBase,
           marketSuspension: susp,
-          _suspensionReason: "GOLO!",
+          _suspensionReason: isVARStatus ? "REVISÃO AO VAR" : "GOLO!",
         };
         liveMatchState.set(id, applyTieredMarketDrift(updated, now));
       } else {
@@ -5521,10 +5541,7 @@ function buildFootballLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
         const filteredMarkets = filterLiveMarkets(existing.markets, homeScore, awayScore, newStatus);
         const filteredBase = filterLiveMarkets(existing._baseMarkets ?? existing.markets, homeScore, awayScore, newStatus);
 
-        // Detect VAR review from V2 status field
-        // SportsAPI Pro V2 sends status descriptions like "VAR Review" / "Video Review"
-        const rawStatusDesc = v2StatusStr(ev.status).toLowerCase();
-        const isVARStatus = rawStatusDesc.includes("var") || rawStatusDesc.includes("video review") || rawStatusDesc.includes("awaiting review");
+        // isVARStatus already computed above
 
         // If VAR is active: ensure suspension is set and override reason label
         if (isVARStatus) {
