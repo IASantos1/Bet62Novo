@@ -27,9 +27,12 @@ interface UpcomingMatch {
   sport: string;
   home: string;
   away: string;
-  kickoff: string;
+  date?: string;
+  time?: string;
   odds: { home: number; draw: number; away: number };
   league?: string;
+  country?: string;
+  hasRealOdds?: boolean;
 }
 
 interface MatchResult {
@@ -117,16 +120,20 @@ export default function SearchScreen() {
   const upcoming: UpcomingMatch[] = upcomingData?.matches ?? [];
 
   const allMatches: MatchResult[] = useMemo(() => {
-    const live: MatchResult[] = liveMatches.map((m) => ({
-      id: m.id, sport: m.sport, home: m.home, away: m.away,
-      odds: m.odds, league: m.league, isLive: true,
-      homeScore: m.homeScore, awayScore: m.awayScore,
-      markets: m.markets, marketSuspension: m.marketSuspension,
-    }));
-    const up: MatchResult[] = upcoming.map((m) => ({
-      id: m.id, sport: m.sport, home: m.home, away: m.away,
-      odds: m.odds, league: m.league, kickoff: m.kickoff,
-    }));
+    const live: MatchResult[] = liveMatches
+      .filter((m) => m.hasRealOdds !== false)
+      .map((m) => ({
+        id: m.id, sport: m.sport, home: m.home, away: m.away,
+        odds: m.odds, league: m.league, isLive: true,
+        homeScore: m.homeScore, awayScore: m.awayScore,
+        markets: m.markets, marketSuspension: m.marketSuspension,
+      }));
+    const up: MatchResult[] = upcoming
+      .filter((m) => m.hasRealOdds !== false)
+      .map((m) => ({
+        id: m.id, sport: m.sport, home: m.home, away: m.away,
+        odds: m.odds, league: m.league,
+      }));
     return [...live, ...up];
   }, [liveMatches, upcoming]);
 
