@@ -1827,7 +1827,7 @@ type SAPIV2ScoreObj = {
   inningsBaseball?: { run?: number; hits?: number; errors?: number };
 };
 type SAPIV2StatusObj = { code?: number; description?: string; type?: string };
-type SAPIV2TournObj  = { name?: string; slug?: string; category?: { name?: string } };
+type SAPIV2TournObj  = { id?: number; name?: string; slug?: string; category?: { name?: string } };
 type SAPIV2TeamObj   = { id?: number; name: string };
 
 type SAPIV2Event = {
@@ -1868,6 +1868,36 @@ function v2StatusCode(ev: SAPIV2Event): number | undefined {
 function v2TournName(t: string | SAPIV2TournObj | undefined): string {
   if (!t) return "Unknown";
   return typeof t === "string" ? t : (t.name ?? "Unknown");
+}
+
+/**
+ * Returns true if the raw event (Record<string, unknown>) belongs to the primary
+ * competition we show for a given sport.  Used by getV2TournamentIds and
+ * getUpcomingLeagueEventsV2 to exclude non-target tournaments.
+ */
+function isMainLeagueEventRaw(sport: SportKey, e: Record<string, unknown>): boolean {
+  if (sport === "football") return true;
+  const t = e["tournament"] as Record<string, unknown> | undefined;
+  const slug = (String(t?.["slug"] ?? "")).toLowerCase();
+  const name = (String(t?.["name"] ?? "")).toLowerCase();
+  switch (sport) {
+    case "basketball":
+      // Match NBA or NBA Playoffs; exclude WNBA (slug/name contains "nba" but also "wnba")
+      return (slug.includes("nba") || name.includes("nba")) && !slug.includes("wnba") && !name.includes("wnba");
+    case "hockey":
+      return slug.includes("nhl") || name.includes("nhl");
+    case "baseball":
+      return slug.includes("mlb") || name.includes("mlb");
+    case "tennis": {
+      const cat = String((t?.["category"] as Record<string, unknown> | undefined)?.["name"] ?? "");
+      if (cat !== "ATP" && cat !== "WTA") return false;
+      // The V2 API may have wrong slugs for doubles/qualifying — check the name too
+      if (name.includes("double") || name.includes("qualifying")) return false;
+      if (slug.includes("double") || slug.includes("qualifying")) return false;
+      return true;
+    }
+    default: return true;
+  }
 }
 
 // ─── Caches ───────────────────────────────────────────────────────────────────
@@ -3901,6 +3931,24 @@ async function getUpcomingEventsV2(sport: SportKey, days = 3): Promise<SAPIV2Eve
     .sort((a, b) => (a.startTimestamp ?? 0) - (b.startTimestamp ?? 0));
 }
 
+/**
+ * Like getUpcomingEventsV2 but filtered to the primary competition for this sport:
+ * NBA (basketball), NHL (hockey), MLB (baseball), ATP/WTA main draw (tennis).
+ * Also deduplicates by event ID (same event may appear in multiple days' schedules).
+ */
+async function getUpcomingLeagueEventsV2(sport: SportKey, days = 7): Promise<SAPIV2Event[]> {
+  const events = await getUpcomingEventsV2(sport, days);
+  const seen = new Set<number>();
+  const filtered: SAPIV2Event[] = [];
+  for (const ev of events) {
+    if (seen.has(ev.id)) continue;
+    seen.add(ev.id);
+    if (sport !== "football" && !isMainLeagueEventRaw(sport, ev as unknown as Record<string, unknown>)) continue;
+    filtered.push(ev);
+  }
+  return filtered;
+}
+
 // ─── V2 Pre-Match Odds ─────────────────────────────────────────────────────────
 
 type V2RawMarket = {
@@ -4116,6 +4164,8 @@ async function getV2TournamentIds(sport: SportKey): Promise<{ tid: number; sid: 
     const countMap = new Map<string, { tid: number; sid: number; n: number }>();
     for (const ev of events) {
       const e = ev as Record<string, unknown>;
+      // Only count events that belong to the primary league for this sport
+      if (!isMainLeagueEventRaw(sport, e)) continue;
       const tourn = e["tournament"] as Record<string, unknown> | undefined;
       const uniq = tourn?.["uniqueTournament"] as Record<string, unknown> | undefined;
       const tid = Number(e["tournamentId"] ?? uniq?.["id"] ?? tourn?.["id"] ?? 0);
@@ -6575,7 +6625,7 @@ async function getBasketballSchedule(): Promise<BasketballScheduleData> {
   if (basketballScheduleCache && now - basketballScheduleFetchedAt < BBALL_SCHEDULE_TTL) return basketballScheduleCache;
   try {
     const [upcomingEvents, lastEvents] = await Promise.all([
-      getUpcomingEventsV2("basketball", 21),
+      getUpcomingLeagueEventsV2("basketball", 21),
       getV2EventsLast("basketball", 60),
     ]);
     const cutoff14 = Date.now() - 14 * 86400000;
@@ -6667,7 +6717,7 @@ async function getHockeySchedule(): Promise<HockeyScheduleData> {
   if (hockeyScheduleCache && now - hockeyScheduleFetchedAt < HOCKEY_SCHEDULE_TTL) return hockeyScheduleCache;
   try {
     const [upcomingEvents, lastEvents] = await Promise.all([
-      getUpcomingEventsV2("hockey", 21),
+      getUpcomingLeagueEventsV2("hockey", 21),
       getV2EventsLast("hockey", 60),
     ]);
     const cutoff14 = Date.now() - 14 * 86400000;
@@ -6720,7 +6770,7 @@ async function getMLBSchedule(): Promise<MLBScheduleData> {
   const empty: MLBScheduleData = { league: "MLB", season: "", upcomingMatches: [], recentMatches: [] };
   try {
     const [upcomingEvents, lastEvents] = await Promise.all([
-      getUpcomingEventsV2("baseball", 21),
+      getUpcomingLeagueEventsV2("baseball", 21),
       getV2EventsLast("baseball", 60),
     ]);
     const cutoff14 = Date.now() - 14 * 86400000;
@@ -8034,7 +8084,7 @@ async function getBasketballOdds(): Promise<NBAOddsEntry[]> {
   const now = Date.now();
   if (nbaOddsCache && now - nbaOddsFetchedAt < NBA_ODDS_TTL) return nbaOddsCache;
   try {
-    const events = await getUpcomingEventsV2("basketball", 7);
+    const events = await getUpcomingLeagueEventsV2("basketball", 7);
     const oddsResults = await Promise.all(
       events.map(ev => getPreMatchOddsV2("basketball", ev.id).catch(() => null))
     );
@@ -8101,7 +8151,7 @@ async function getHockeyOdds(): Promise<HockeyOddsEntry[]> {
   const now = Date.now();
   if (hockeyOddsCache && now - hockeyOddsFetchedAt < HOCKEY_ODDS_TTL) return hockeyOddsCache;
   try {
-    const events = await getUpcomingEventsV2("hockey", 7);
+    const events = await getUpcomingLeagueEventsV2("hockey", 7);
     const oddsResults = await Promise.all(
       events.map(ev => getPreMatchOddsV2("hockey", ev.id).catch(() => null))
     );
@@ -8165,7 +8215,7 @@ async function getMLBOdds(): Promise<MLBOddsEntry[]> {
   const now = Date.now();
   if (mlbOddsCache && now - mlbOddsFetchedAt < MLB_ODDS_TTL) return mlbOddsCache;
   try {
-    const events = await getUpcomingEventsV2("baseball", 7);
+    const events = await getUpcomingLeagueEventsV2("baseball", 7);
     const oddsResults = await Promise.all(
       events.map(ev => getPreMatchOddsV2("baseball", ev.id).catch(() => null))
     );
@@ -8213,7 +8263,7 @@ async function getTennisOdds(): Promise<TennisOddsEntry[]> {
   const now = Date.now();
   if (tennisOddsCache && now - tennisOddsFetchedAt < TENNIS_ODDS_TTL) return tennisOddsCache;
   try {
-    const events = await getUpcomingEventsV2("tennis", 7);
+    const events = await getUpcomingLeagueEventsV2("tennis", 7);
     const oddsResults = await Promise.all(
       events.map(ev => getPreMatchOddsV2("tennis", ev.id).catch(() => null))
     );
