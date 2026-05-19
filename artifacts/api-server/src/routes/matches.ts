@@ -5498,6 +5498,7 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
   const allUpcoming = [...upFootball, ...upTennis, ...upBasketball, ...upHockey, ...upVolleyball];
   const startingSoon: LiveMatchState[] = allUpcoming
     .filter(m => {
+      if (!m.hasRealOdds) return false;
       const si = matchStartsInMinutes(m.date, m.time);
       const maxSi = SOON_WINDOW[m.sport] ?? DEFAULT_SOON_WINDOW;
       return isFinite(si) && si >= -10 && si <= maxSi
@@ -5899,7 +5900,7 @@ router.get("/upcoming", async (req, res) => {
   else if (sport === "volleyball") matches = cache.volleyball;
   else if (sport === "baseball") matches = cache.baseball;
   else matches = [...cache.football, ...cache.tennis, ...cache.basketball, ...cache.hockey, ...cache.volleyball, ...cache.baseball];
-  res.json({ matches });
+  res.json({ matches: matches.filter(m => m.hasRealOdds) });
 });
 
 router.get("/", async (_req, res) => {
