@@ -1820,7 +1820,10 @@ type SAPIV2ScoreObj = {
   inningsBaseball?: { run?: number; hits?: number; errors?: number };
 };
 type SAPIV2StatusObj = { code?: number; description?: string; type?: string };
-type SAPIV2TournObj  = { id?: number; name?: string; slug?: string; category?: { name?: string } };
+type SAPIV2TournObj  = {
+  id?: number; name?: string; slug?: string;
+  category?: { name?: string; id?: number; country?: { name?: string; alpha2?: string } };
+};
 type SAPIV2TeamObj   = { id?: number; name: string };
 
 type SAPIV2Event = {
@@ -1857,6 +1860,35 @@ function v2StatusCode(ev: SAPIV2Event): number | undefined {
   const s = ev.status;
   if (typeof s === "object" && s.code !== undefined) return s.code;
   return ev.statusCode;
+}
+
+/** Returns the current Europe/Lisbon UTC offset in hours (+0 WET winter, +1 WEST summer). */
+function lisbonOffsetHours(): number {
+  const now = new Date();
+  const utcH = now.getUTCHours();
+  let lisbonH = parseInt(
+    new Intl.DateTimeFormat("en-US", { timeZone: "Europe/Lisbon", hour: "numeric", hour12: false }).format(now)
+  );
+  if (lisbonH === 24) lisbonH = 0;
+  let diff = lisbonH - utcH;
+  if (diff > 12) diff -= 24;
+  if (diff < -12) diff += 24;
+  return diff; // typically +0 (Nov–Mar) or +1 (Mar–Oct)
+}
+
+/**
+ * Extract country name from a SportsAPI V2 event's tournament.
+ * Prefers category.country.name (most specific), falls back to category.name.
+ */
+function v2TournCountry(ev: SAPIV2Event): string {
+  const t = ev.tournament;
+  if (typeof t === "object") {
+    const cat = t.category;
+    if (cat?.country?.name) return cat.country.name.toLowerCase();
+    if (cat?.country?.alpha2) return cat.country.alpha2.toLowerCase();
+    if (cat?.name) return cat.name.toLowerCase();
+  }
+  return "";
 }
 function v2TournName(t: string | SAPIV2TournObj | undefined): string {
   if (!t) return "Unknown";
@@ -3689,16 +3721,21 @@ async function getUpcomingEventsV2(sport: SportKey, days = 3): Promise<SAPIV2Eve
   }
   const allDays = await Promise.all(dates.map(dt => getScheduleV2(sport, dt).catch(() => [] as SAPIV2Event[])));
   const nowSec = nowMs / 1000;
-  // Grace period: keep games up to 90 min past their start time so games that
-  // haven't appeared in the live feed yet don't vanish from upcoming.
-  const graceSec = 90 * 60;
+  // Grace period: keep games up to 5 min past their start time so games that
+  // just kicked off but haven't appeared in the live feed yet don't vanish.
+  const graceSec = 5 * 60;
   return allDays
     .flat()
     .filter(ev => {
       if (!ev.startTimestamp || ev.startTimestamp < nowSec - graceSec) return false;
       // Exclude already-finished events that the schedule may still list
       const st = ev.status;
-      if (st && typeof st === "object" && (st as SAPIV2StatusObj).type === "finished") return false;
+      if (!st) return true;
+      const statusType = typeof st === "object" ? (st.type ?? "") : "";
+      const statusStr  = typeof st === "string" ? st.toLowerCase() : "";
+      // Exclude live/inprogress events — they belong in the live feed only
+      if (statusType === "inprogress" || statusStr === "inprogress" || statusStr === "live" || statusStr === "in progress") return false;
+      if (typeof st === "object" && statusType === "finished") return false;
       return true;
     })
     .sort((a, b) => (a.startTimestamp ?? 0) - (b.startTimestamp ?? 0));
@@ -4975,7 +5012,7 @@ async function buildUpcomingMatches(): Promise<UpcomingMatch[]> {
       home,
       away,
       league: leagueName,
-      country: "",
+      country: v2TournCountry(ev),
       time,
       date,
       sport: "football",
@@ -5008,7 +5045,11 @@ function isMatchTimePast(dateStr: string, timeStr: string): boolean {
     } else {
       return false;
     }
-    const scheduledMs = new Date(`${isoDate}T${timeStr}:00`).getTime();
+    // timeStr is Europe/Lisbon local time — convert to UTC before comparing
+    const offsetH = lisbonOffsetHours();
+    const [hStr, mStr] = timeStr.split(":");
+    const hUtc = ((parseInt(hStr!) - offsetH) + 24) % 24;
+    const scheduledMs = new Date(`${isoDate}T${String(hUtc).padStart(2, "0")}:${mStr}:00Z`).getTime();
     return Date.now() >= scheduledMs;
   } catch {
     return false;
@@ -5031,11 +5072,11 @@ function matchStartsInMinutes(dateStr: string, displayTimeStr: string): number {
       return Infinity;
     }
     if (!/^\d{2}:\d{2}$/.test(displayTimeStr)) return Infinity;
-    // displayTimeStr is UTC+1; subtract 1 hour to compare against Date.now() (UTC)
+    // displayTimeStr is Europe/Lisbon local time — convert to UTC dynamically
+    const offsetH = lisbonOffsetHours();
     const [hStr, mStr] = displayTimeStr.split(":");
-    const hUtc = ((parseInt(hStr) - 1) + 24) % 24;
-    const utcTime = `${String(hUtc).padStart(2, "0")}:${mStr}`;
-    const matchMs = new Date(`${isoDate}T${utcTime}:00`).getTime();
+    const hUtc = ((parseInt(hStr!) - offsetH) + 24) % 24;
+    const matchMs = new Date(`${isoDate}T${String(hUtc).padStart(2, "0")}:${mStr}:00Z`).getTime();
     return (matchMs - Date.now()) / 60000;
   } catch {
     return Infinity;
@@ -5235,7 +5276,7 @@ function buildBasketballLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
     result.push({
       id: `bball-v2-${ev.id}`,
       home: homeTeam, away: awayTeam,
-      league: v2TournName(ev.tournament), country: "",
+      league: v2TournName(ev.tournament), country: v2TournCountry(ev),
       sport: "basketball", homeScore, awayScore, minute,
       status: statusLabel, hasRealOdds: true, odds: liveOdds,
       markets: makeBasketballMarketsFromTeams(homeTeam, awayTeam),
@@ -5293,7 +5334,7 @@ function buildHockeyLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
     result.push({
       id: `hockey-v2-${ev.id}`,
       home: homeTeam, away: awayTeam,
-      league: v2TournName(ev.tournament), country: "",
+      league: v2TournName(ev.tournament), country: v2TournCountry(ev),
       sport: "hockey", homeScore, awayScore, minute,
       status: statusLabel, hasRealOdds: true, odds: liveOdds,
       markets: makeHockeyMarketsFromTeams(homeTeam, awayTeam),
@@ -5350,7 +5391,7 @@ function buildBaseballLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
     result.push({
       id: `baseball-v2-${ev.id}`,
       home: homeTeam, away: awayTeam,
-      league, country: "",
+      league, country: v2TournCountry(ev),
       sport: "baseball", homeScore, awayScore,
       minute: innings.length,
       status: statusStr, hasRealOdds: true, odds: liveOdds,
@@ -5403,7 +5444,7 @@ function buildTennisLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
     result.push({
       id: `tennis-v2-${ev.id}`,
       home: homeTeam, away: awayTeam,
-      league: v2TournName(ev.tournament), country: "",
+      league: v2TournName(ev.tournament), country: v2TournCountry(ev),
       sport: "tennis", homeScore, awayScore,
       minute: setNum * 20,
       status: statusStr, hasRealOdds: true, odds: liveOdds,
@@ -5601,7 +5642,7 @@ async function buildTennisUpcoming(): Promise<UpcomingMatch[]> {
         home,
         away,
         league: v2TournName(ev.tournament),
-        country: "",
+        country: v2TournCountry(ev),
         date,
         time,
         sport: "tennis" as const,
