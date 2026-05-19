@@ -3674,6 +3674,9 @@ function connectSportWS(sport: SportKey): void {
     try {
       const data: unknown = JSON.parse(typeof evt.data === "string" ? evt.data : String(evt.data));
       applyV2WsMessage(sport, data);
+      // Push to clients immediately on every WS message — don't wait for the 2s drift interval.
+      // broadcastLive() already guards against concurrent calls so this is safe.
+      broadcastLive().catch(() => { /* ignore */ });
     } catch {
       // non-JSON heartbeat / ping — ignore
     }
@@ -4929,11 +4932,17 @@ async function buildLiveMatches(): Promise<LiveMatchState[]> {
       };
       const recentThreshold = Math.max(1, minute - 2);
       const isGoalEvent = existing != null && (homeScore > (existing.homeScore ?? -1) || awayScore > (existing.awayScore ?? -1));
-      const dangerEvent = !isGoalEvent ? events.find(e => {
+      // Search for a danger event in recent play.
+      // On a goal tick we still allow VAR/penalty through — but suppress bigchance/missed
+      // because those make no sense when a goal was actually scored.
+      const dangerEvent = events.find(e => {
         const t = e.type.toLowerCase().replace(/[\s_-]/g, "");
-        return e.minute >= recentThreshold && VAR_DANGER_TOKENS.some(token => t.includes(token.replace("_", "")));
-      }) : undefined;
-      if (dangerEvent && !matchMarketSuspension) {
+        if (e.minute < recentThreshold) return false;
+        if (!VAR_DANGER_TOKENS.some(token => t.includes(token.replace("_", "")))) return false;
+        if (isGoalEvent && !t.includes("var") && !t.includes("penalty")) return false;
+        return true;
+      });
+      if (dangerEvent) {
         const now = Date.now();
         const VAR_SUSPENSION_MS: Record<string, number> = {
           result: 45000, doubleChance: 45000, totalGoals: 50000, handicap: 50000,
@@ -4944,12 +4953,21 @@ async function buildLiveMatches(): Promise<LiveMatchState[]> {
           htCorrectScore: 60000, h2CorrectScore: 60000, teamGoals: 50000,
           secondHalf: 45000, drawNoBet2: 45000, handicapPoints: 50000,
         };
-        matchMarketSuspension = Object.fromEntries(
-          Object.entries(VAR_SUSPENSION_MS).map(([k, delay]) => [k, now + delay])
-        );
         const evType = dangerEvent.type.toLowerCase().replace(/[\s_-]/g, "");
         const reasonKey = Object.keys(VAR_REASON_MAP).find(k => evType.includes(k));
-        matchSuspensionReason = reasonKey ? VAR_REASON_MAP[reasonKey] : "SUSPENSO";
+        const reason = reasonKey ? VAR_REASON_MAP[reasonKey] : "SUSPENSO";
+        const isHighPriority = reason.includes("VAR") || reason.includes("PENÁL");
+        if (!matchMarketSuspension) {
+          // No active suspension yet — set full timers
+          matchMarketSuspension = Object.fromEntries(
+            Object.entries(VAR_SUSPENSION_MS).map(([k, delay]) => [k, now + delay])
+          );
+          matchSuspensionReason = reason;
+        } else if (isHighPriority) {
+          // VAR/penalty always overrides existing label (e.g. "GOLO!" → "REVISÃO AO VAR")
+          // Do NOT reset suspension timers — keep the existing (longer) goal timers
+          matchSuspensionReason = reason;
+        }
       }
 
       // Inject ET markets when in extra time (minute > 90 or isET status)
@@ -5185,6 +5203,8 @@ const FOOTBALL_V2_FINISHED = new Set([
 const FOOTBALL_V2_LIVE = new Set([
   "1st half", "2nd half", "HT", "Extra Time", "1st extra time", "2nd extra time",
   "Penalties", "Break Time", "Pause",
+  // VAR / video review — match stays live while review is in progress
+  "VAR Review", "Video Review", "VAR", "Awaiting Review", "Awaiting review",
 ]);
 
 // Suspension delays (ms) used when a goal is detected in the V2 football builder
@@ -5271,17 +5291,50 @@ function buildFootballLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
         }
         const filteredMarkets = filterLiveMarkets(existing.markets, homeScore, awayScore, newStatus);
         const filteredBase = filterLiveMarkets(existing._baseMarkets ?? existing.markets, homeScore, awayScore, newStatus);
-        const updated: LiveMatchState = {
-          ...existing,
-          homeScore, awayScore, minute, status: newStatus,
-          odds: newOdds,
-          markets: filteredMarkets,
-          _baseOdds: baseOdds,
-          _baseMarkets: filteredBase,
-          marketSuspension: susp,
-          _suspensionReason: susp ? existing._suspensionReason : undefined,
-        };
-        liveMatchState.set(id, applyTieredMarketDrift(updated, now));
+
+        // Detect VAR review from V2 status field
+        // SportsAPI Pro V2 sends status descriptions like "VAR Review" / "Video Review"
+        const rawStatusDesc = v2StatusStr(ev.status).toLowerCase();
+        const isVARStatus = rawStatusDesc.includes("var") || rawStatusDesc.includes("video review") || rawStatusDesc.includes("awaiting review");
+
+        // If VAR is active: ensure suspension is set and override reason label
+        if (isVARStatus) {
+          if (!susp || Object.keys(susp).length === 0) {
+            // No suspension yet — set VAR-duration timers (45s for most markets)
+            const varDelay = 45_000;
+            susp = Object.fromEntries([
+              "result","doubleChance","totalGoals","handicap","halfTime","correctScore",
+              "asianHandicap","asianTotals","drawNoBet","firstGoal","htft","winToNil",
+              "cleanSheet","goalOddEven","exactGoals","btts1H","btts2H","toWinBothHalves",
+              "highestScoringHalf","htCorrectScore","h2CorrectScore","teamGoals","secondHalf",
+              "drawNoBet2","handicapPoints",
+            ].map(k => [k, now + varDelay]));
+          }
+          // Always override the reason label with VAR (covers "GOLO!" → "REVISÃO AO VAR")
+          const updated: LiveMatchState = {
+            ...existing,
+            homeScore, awayScore, minute, status: newStatus,
+            odds: newOdds,
+            markets: filteredMarkets,
+            _baseOdds: baseOdds,
+            _baseMarkets: filteredBase,
+            marketSuspension: susp,
+            _suspensionReason: "REVISÃO AO VAR",
+          };
+          liveMatchState.set(id, applyTieredMarketDrift(updated, now));
+        } else {
+          const updated: LiveMatchState = {
+            ...existing,
+            homeScore, awayScore, minute, status: newStatus,
+            odds: newOdds,
+            markets: filteredMarkets,
+            _baseOdds: baseOdds,
+            _baseMarkets: filteredBase,
+            marketSuspension: susp,
+            _suspensionReason: susp ? existing._suspensionReason : undefined,
+          };
+          liveMatchState.set(id, applyTieredMarketDrift(updated, now));
+        }
       }
       result.push(liveMatchState.get(id)!);
     } else {
