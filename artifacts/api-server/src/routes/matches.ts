@@ -5478,17 +5478,35 @@ function buildFootballLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
       minute = 45;
     } else if (isET) {
       minute = 105;
-    } else if (ev.startTimestamp) {
-      const minsFromKickoff = Math.floor((now / 1000 - ev.startTimestamp) / 60);
-      if (statusStr === "1st half") {
-        minute = Math.min(44, Math.max(1, minsFromKickoff));
-      } else if (statusStr === "2nd half") {
-        minute = Math.min(89, Math.max(46, minsFromKickoff - 15));
-      } else {
-        minute = Math.min(44, Math.max(1, minsFromKickoff));
-      }
     } else {
-      minute = statusStr === "1st half" ? 25 : statusStr === "2nd half" ? 70 : 45;
+      // Resolve kickoff timestamp: prefer the event's own startTimestamp; if absent or zero,
+      // fall back to the event's scheduled time so each game has its own independent clock.
+      let kickoffSec = ev.startTimestamp ?? 0;
+      if (!kickoffSec) {
+        const { date: sDate, time: sTime } = v2EventDateTime(ev);
+        if (sDate && /^\d{2}:\d{2}$/.test(sTime)) {
+          try {
+            const [dd, mm, yyyy] = sDate.split(".");
+            const offsetH = lisbonOffsetHours();
+            const [hStr, mStr] = sTime.split(":");
+            const hUtc = ((parseInt(hStr!) - offsetH) + 24) % 24;
+            kickoffSec = new Date(`${yyyy}-${mm}-${dd}T${String(hUtc).padStart(2, "0")}:${mStr}:00Z`).getTime() / 1000;
+          } catch { kickoffSec = 0; }
+        }
+      }
+      if (kickoffSec > 0) {
+        const minsFromKickoff = Math.floor((now / 1000 - kickoffSec) / 60);
+        if (statusStr === "1st half") {
+          minute = Math.min(44, Math.max(1, minsFromKickoff));
+        } else if (statusStr === "2nd half") {
+          minute = Math.min(89, Math.max(46, minsFromKickoff - 15));
+        } else {
+          minute = Math.min(44, Math.max(1, minsFromKickoff));
+        }
+      } else {
+        // Last resort: no timestamp available at all — use mid-period defaults
+        minute = statusStr === "1st half" ? 25 : statusStr === "2nd half" ? 70 : 45;
+      }
     }
     const newStatus = isHT ? "HT" : isET ? "ET" : statusStr;
 
