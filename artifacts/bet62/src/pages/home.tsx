@@ -4840,17 +4840,18 @@ export default function Home() {
           );
         })()}
 
-        {/* ── TÉNIS: PLACAR EXATO — 1º SET ── */}
-        {isTennis && (modalTab === "placar" || modalTab === "todos") && m && (m as any).tennisExtra?.set1ExactScore && Object.keys((m as any).tennisExtra.set1ExactScore as Record<string, number>).length > 0 && (() => {
+        {/* ── TÉNIS: PLACAR EXATO — 1º SET (só quando liquidado) ── */}
+        {isTennis && (modalTab === "placar" || modalTab === "todos") && m && (m as any).tennisExtra?.set1ExactScore && (() => {
           const ses1 = (m as any).tennisExtra.set1ExactScore as Record<string, number>;
           const isSettled1 = Object.values(ses1).some(v => v === 1.01);
-          const homeWins1 = Object.entries(ses1).filter(([s, v]) => v > 0 && (Number(s.split("-")[0]) ?? 0) > (Number(s.split("-")[1]) ?? 0)).sort(([, a], [, b]) => a - b);
-          const awayWins1 = Object.entries(ses1).filter(([s, v]) => v > 0 && (Number(s.split("-")[1]) ?? 0) > (Number(s.split("-")[0]) ?? 0)).sort(([, a], [, b]) => a - b);
+          if (!isSettled1) return null; // while set is live it's already shown in "setExactScore" above
+          const homeWins1 = Object.entries(ses1).filter(([s, v]) => v > 0 && Number(s.split("-")[0]) > Number(s.split("-")[1]));
+          const awayWins1 = Object.entries(ses1).filter(([s, v]) => v > 0 && Number(s.split("-")[1]) > Number(s.split("-")[0]));
           const maxRows1 = Math.max(homeWins1.length, awayWins1.length);
           if (maxRows1 === 0) return null;
           return (
             <div className="mb-4">
-              <p className="text-xs text-zinc-500 mb-3 font-medium">{isSettled1 ? "✓ 1º Set — Placar Final" : "1º Set — Placar Exato"}</p>
+              <p className="text-xs text-zinc-500 mb-3 font-medium">✓ 1º Set — Resultado Final</p>
               <div className="grid grid-cols-2 gap-x-3 mb-1">
                 <div className="text-xs text-zinc-400 text-center font-semibold pb-1 border-b border-zinc-700 truncate">{match.home}</div>
                 <div className="text-xs text-zinc-400 text-center font-semibold pb-1 border-b border-zinc-700 truncate">{match.away}</div>
@@ -4865,17 +4866,18 @@ export default function Home() {
           );
         })()}
 
-        {/* ── TÉNIS: PLACAR EXATO — 2º SET ── */}
-        {isTennis && (modalTab === "placar" || modalTab === "todos") && m && (m as any).tennisExtra?.set2ExactScore && Object.keys((m as any).tennisExtra.set2ExactScore as Record<string, number>).length > 0 && (() => {
+        {/* ── TÉNIS: PLACAR EXATO — 2º SET (só quando liquidado) ── */}
+        {isTennis && (modalTab === "placar" || modalTab === "todos") && m && (m as any).tennisExtra?.set2ExactScore && (() => {
           const ses2 = (m as any).tennisExtra.set2ExactScore as Record<string, number>;
           const isSettled2 = Object.values(ses2).some(v => v === 1.01);
-          const homeWins2 = Object.entries(ses2).filter(([s, v]) => v > 0 && (Number(s.split("-")[0]) ?? 0) > (Number(s.split("-")[1]) ?? 0)).sort(([, a], [, b]) => a - b);
-          const awayWins2 = Object.entries(ses2).filter(([s, v]) => v > 0 && (Number(s.split("-")[1]) ?? 0) > (Number(s.split("-")[0]) ?? 0)).sort(([, a], [, b]) => a - b);
+          if (!isSettled2) return null;
+          const homeWins2 = Object.entries(ses2).filter(([s, v]) => v > 0 && Number(s.split("-")[0]) > Number(s.split("-")[1]));
+          const awayWins2 = Object.entries(ses2).filter(([s, v]) => v > 0 && Number(s.split("-")[1]) > Number(s.split("-")[0]));
           const maxRows2 = Math.max(homeWins2.length, awayWins2.length);
           if (maxRows2 === 0) return null;
           return (
             <div className="mb-4">
-              <p className="text-xs text-zinc-500 mb-3 font-medium">{isSettled2 ? "✓ 2º Set — Placar Final" : "2º Set — Placar Exato"}</p>
+              <p className="text-xs text-zinc-500 mb-3 font-medium">✓ 2º Set — Resultado Final</p>
               <div className="grid grid-cols-2 gap-x-3 mb-1">
                 <div className="text-xs text-zinc-400 text-center font-semibold pb-1 border-b border-zinc-700 truncate">{match.home}</div>
                 <div className="text-xs text-zinc-400 text-center font-semibold pb-1 border-b border-zinc-700 truncate">{match.away}</div>

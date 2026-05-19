@@ -468,6 +468,7 @@ export function ComprehensiveMarketsSheet({ visible, match, onClose }: Props) {
   }
 
   function OddsBtn({ market, label, value, dir }: { market: string; label: string; value: number; dir?: "up" | "down" }) {
+    if (value <= 0) return null;
     const isSusp = susp(market);
     const isObvious = checkObvious(market, value);
     const isLowOdds = !isObvious && value < 1.15 && (market === "1x2-home" || market === "1x2-draw" || market === "1x2-away");
@@ -1111,6 +1112,19 @@ export function ComprehensiveMarketsSheet({ visible, match, onClose }: Props) {
                   </Section>
                 )}
 
+                {/* Placar exato de futebol (marcador final) */}
+                {isFootball && (m as any)?.correctScore && Object.keys((m as any).correctScore as Record<string, number>).length > 0 && (
+                  <Section title="Placar Exato" tabKey="placar">
+                    <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
+                      {Object.entries((m as any).correctScore as Record<string, number>)
+                        .filter(([, v]) => v > 0)
+                        .map(([score, odd]) => (
+                          <OddsBtn key={`cs-${score}`} market={`cs-${score}`} label={score} value={odd} />
+                        ))}
+                    </View>
+                  </Section>
+                )}
+
                 {isFootball && m?.exactGoals && m.exactGoals.g0 > 1.01 && (
                   <Section title="Golos Exatos" tabKey="placar">
                     <View style={s.row}>
@@ -1475,34 +1489,36 @@ export function ComprehensiveMarketsSheet({ visible, match, onClose }: Props) {
                         </View>
                       </>
                     )}
-                    {/* Placar exato por set */}
-                    {(m as any).tennisExtra?.set1ExactScore && Object.keys((m as any).tennisExtra.set1ExactScore).length > 0 && (() => {
+                    {/* Placar exato por set — só quando o set já está liquidado */}
+                    {(m as any).tennisExtra?.set1ExactScore && (() => {
                       const ses1 = (m as any).tennisExtra.set1ExactScore as Record<string, number>;
-                      const settled = Object.values(ses1).some(v => v === 1.01);
-                      const entries = Object.entries(ses1).filter(([, v]) => v > 0);
+                      const settled = Object.values(ses1).some((v: number) => v === 1.01);
+                      if (!settled) return null;
+                      const entries = Object.entries(ses1).filter(([, v]) => (v as number) > 0);
                       if (entries.length === 0) return null;
                       return (
                         <>
-                          <Text style={s.subsectionLabel}>{settled ? "✓ 1º Set — Placar Final" : "1º Set — Placar Exato"}</Text>
+                          <Text style={s.subsectionLabel}>✓ 1º Set — Resultado Final</Text>
                           <View style={[s.row, { flexWrap: "wrap" }]}>
                             {entries.map(([score, odd]) => (
-                              <OddsBtn key={`s1es-${score}`} market={`s1es-${score}`} label={score} value={odd} />
+                              <OddsBtn key={`s1es-${score}`} market={`s1es-${score}`} label={score} value={odd as number} />
                             ))}
                           </View>
                         </>
                       );
                     })()}
-                    {(m as any).tennisExtra?.set2ExactScore && Object.keys((m as any).tennisExtra.set2ExactScore).length > 0 && (() => {
+                    {(m as any).tennisExtra?.set2ExactScore && (() => {
                       const ses2 = (m as any).tennisExtra.set2ExactScore as Record<string, number>;
-                      const settled = Object.values(ses2).some(v => v === 1.01);
-                      const entries = Object.entries(ses2).filter(([, v]) => v > 0);
+                      const settled = Object.values(ses2).some((v: number) => v === 1.01);
+                      if (!settled) return null;
+                      const entries = Object.entries(ses2).filter(([, v]) => (v as number) > 0);
                       if (entries.length === 0) return null;
                       return (
                         <>
-                          <Text style={s.subsectionLabel}>{settled ? "✓ 2º Set — Placar Final" : "2º Set — Placar Exato"}</Text>
+                          <Text style={s.subsectionLabel}>✓ 2º Set — Resultado Final</Text>
                           <View style={[s.row, { flexWrap: "wrap" }]}>
                             {entries.map(([score, odd]) => (
-                              <OddsBtn key={`s2es-${score}`} market={`s2es-${score}`} label={score} value={odd} />
+                              <OddsBtn key={`s2es-${score}`} market={`s2es-${score}`} label={score} value={odd as number} />
                             ))}
                           </View>
                         </>

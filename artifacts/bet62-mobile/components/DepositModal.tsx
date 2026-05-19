@@ -4,6 +4,7 @@ import * as Linking from "expo-linking";
 import React, { useState } from "react";
 import {
   ActivityIndicator,
+  Image,
   KeyboardAvoidingView,
   Modal,
   Platform,
@@ -14,9 +15,17 @@ import {
   TextInput,
   View,
 } from "react-native";
+
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useColors } from "@/hooks/useColors";
 import { useAuth, API_BASE } from "@/context/AuthContext";
+
+const LOGOS = {
+  multibanco: require("../assets/images/logo-multibanco.png") as number,
+  mbway:      require("../assets/images/logo-mbway.png") as number,
+  mastercard: require("../assets/images/logo-mastercard.png") as number,
+  visa:       require("../assets/images/logo-visa.png") as number,
+};
 
 type Method = "multibanco" | "mbway" | "card";
 
@@ -151,10 +160,10 @@ export function DepositModal({ visible, onClose }: Props) {
     newDepositBtn: { marginHorizontal: 20, marginTop: 12, borderRadius: 14, paddingVertical: 13, alignItems: "center", borderWidth: 1.5 },
   });
 
-  const METHODS: Array<{ key: Method; label: string; icon: keyof typeof Ionicons.glyphMap; color: string }> = [
-    { key: "multibanco", label: "Multibanco", icon: "card-outline", color: "#3b82f6" },
-    { key: "mbway", label: "MB Way", icon: "phone-portrait-outline", color: "#ef4444" },
-    { key: "card", label: "Cartão", icon: "card", color: "#22c55e" },
+  const METHODS: Array<{ key: Method; label: string; icon: keyof typeof Ionicons.glyphMap; color: string; logo?: keyof typeof LOGOS }> = [
+    { key: "multibanco", label: "Multibanco", icon: "card-outline",            color: "#3b82f6", logo: "multibanco" },
+    { key: "mbway",      label: "MB Way",     icon: "phone-portrait-outline",  color: "#ef4444", logo: "mbway"      },
+    { key: "card",       label: "Cartão",     icon: "card",                    color: "#22c55e"                     },
   ];
 
   function renderResult() {
@@ -263,7 +272,10 @@ export function DepositModal({ visible, onClose }: Props) {
                           }]}
                           onPress={() => { setMethod(m.key); setError(null); Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); }}
                         >
-                          <Ionicons name={m.icon} size={22} color={active ? m.color : colors.mutedForeground} />
+                          {m.logo
+                            ? <Image source={LOGOS[m.logo]} style={{ width: 36, height: 24, resizeMode: "contain", opacity: active ? 1 : 0.5 }} />
+                            : <Ionicons name={m.icon} size={22} color={active ? m.color : colors.mutedForeground} />
+                          }
                           <Text style={[s.methodLabel, { color: active ? m.color : colors.mutedForeground }]}>{m.label}</Text>
                         </Pressable>
                       );
