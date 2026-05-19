@@ -19,7 +19,7 @@ import { useBetSlip } from "@/context/BetSlipContext";
 import { useLiveMatches, type LiveMatch } from "@/hooks/useLiveMatches";
 import { ComprehensiveMarketsSheet } from "@/components/ComprehensiveMarketsSheet";
 import { BetSlipModal } from "@/components/BetSlipModal";
-import { getMatchBannerUrl, getLeagueFlag } from "@/utils/teamBanners";
+import { getMatchBannerUrl } from "@/utils/teamBanners";
 
 type MCIconName = ComponentProps<typeof MaterialCommunityIcons>["name"];
 
@@ -146,7 +146,6 @@ function LiveMatchCard({ match }: { match: LiveMatch }) {
   const isBase = match.sport === "baseball";
   const hasDraw = match.odds.draw > 1.01;
   const bannerUrl = getMatchBannerUrl(match.home, match.away);
-  const leagueFlag = getLeagueFlag(match.league);
 
   function handleOdds(market: string, label: string, value: number) {
     if (suspended) return;
@@ -262,7 +261,7 @@ function LiveMatchCard({ match }: { match: LiveMatch }) {
               <View style={{ position: "absolute" as const, top: 10, left: 12, right: 12, flexDirection: "row" as const, alignItems: "center" as const }}>
                 <View style={{ flexDirection: "row", alignItems: "center", gap: 5 }}>
                   <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: colors.primary }} />
-                  <Text style={{ fontSize: 11, fontFamily: "Inter_500Medium", color: "#ffffffdd" }}>{leagueFlag} {match.league ?? match.sport}</Text>
+                  <Text style={{ fontSize: 11, fontFamily: "Inter_500Medium", color: "#ffffffdd" }}>{match.league ?? match.sport}</Text>
                 </View>
                 <View style={{ flex: 1 }} />
                 <View style={{ backgroundColor: "#f59e0b22", borderRadius: 5, paddingHorizontal: 7, paddingVertical: 3, borderWidth: 1, borderColor: "#f59e0b55" }}>
@@ -300,7 +299,7 @@ function LiveMatchCard({ match }: { match: LiveMatch }) {
                 <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: colors.primary }} />
                 <MaterialCommunityIcons name={SPORT_ICONS[match.sport] ?? "trophy"} size={11} color={sportColor} />
                 <Text style={{ fontSize: 11, fontFamily: "Inter_500Medium", color: colors.mutedForeground, flex: 1 }} numberOfLines={1}>
-                  {leagueFlag} {match.league ?? match.sport}
+                  {match.league ?? match.sport}
                 </Text>
                 <Text style={{ fontSize: 11, fontFamily: "Inter_700Bold", color: "#f59e0b" }}>{minuteLabel}</Text>
               </View>

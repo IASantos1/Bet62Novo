@@ -24,7 +24,7 @@ import { ComprehensiveMarketsSheet } from "@/components/ComprehensiveMarketsShee
 import { BetSlipModal } from "@/components/BetSlipModal";
 import { DepositModal } from "@/components/DepositModal";
 import type { LiveMatchMarkets } from "@/hooks/useLiveMatches";
-import { getMatchBannerUrl, getLeagueFlag } from "@/utils/teamBanners";
+import { getMatchBannerUrl } from "@/utils/teamBanners";
 
 type MCIconName = ComponentProps<typeof MaterialCommunityIcons>["name"];
 
@@ -82,7 +82,6 @@ function UpcomingCard({ match }: { match: UpcomingMatch }) {
   const sportCol = SPORT_COLORS[match.sport] ?? colors.mutedForeground;
   const hasDraw = match.odds.draw > 1.01;
   const bannerUrl = getMatchBannerUrl(match.home, match.away);
-  const leagueFlag = getLeagueFlag(match.league, match.country);
 
   const kickoffDate = parseKickoff(match.date, match.time);
   const today = new Date();
@@ -149,7 +148,7 @@ function UpcomingCard({ match }: { match: UpcomingMatch }) {
               <Image source={{ uri: bannerUrl }} style={StyleSheet.absoluteFill} resizeMode="cover" />
               <View style={[StyleSheet.absoluteFill, { backgroundColor: "#00000065" }]} />
               <View style={{ position: "absolute" as const, top: 10, left: 12, right: 12, flexDirection: "row" as const, alignItems: "center" as const }}>
-                <Text style={{ fontSize: 11, fontFamily: "Inter_500Medium", color: "#ffffffdd" }}>{leagueFlag} {match.league ?? match.sport}</Text>
+                <Text style={{ fontSize: 11, fontFamily: "Inter_500Medium", color: "#ffffffdd" }}>{match.league ?? match.sport}</Text>
                 <View style={{ flex: 1 }} />
                 <Text style={{ fontSize: 11, fontFamily: "Inter_600SemiBold", color: "#ffffffdd" }}>{dateStr} • {timeStr}</Text>
               </View>
@@ -168,7 +167,7 @@ function UpcomingCard({ match }: { match: UpcomingMatch }) {
             <View style={{ flexDirection: "row", alignItems: "center", marginBottom: 8 }}>
               <MaterialCommunityIcons name={SPORT_ICONS[match.sport] ?? "trophy"} size={11} color={sportCol} />
               <Text style={{ fontSize: 11, fontFamily: "Inter_500Medium", color: colors.mutedForeground, marginLeft: 5, flex: 1 }} numberOfLines={1}>
-                {leagueFlag} {match.league ?? match.sport}
+                {match.league ?? match.sport}
               </Text>
               <Text style={{ fontSize: 11, fontFamily: "Inter_600SemiBold", color: colors.foreground }}>{dateStr} • {timeStr}</Text>
             </View>

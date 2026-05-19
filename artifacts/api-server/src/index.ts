@@ -1,7 +1,7 @@
 import { createServer } from "http";
 import app from "./app";
 import { logger } from "./lib/logger";
-import { getUpcomingAll, initSportWebSockets } from "./routes/matches";
+import { getUpcomingAll, initSportWebSockets, initLiveWsServer } from "./routes/matches";
 import { startSettlementWorker } from "./settlement";
 
 const rawPort = process.env["PORT"];
@@ -30,6 +30,9 @@ server.listen(port, (err?: Error) => {
 
   // Open persistent WebSocket connections to SportsAPI Pro V2 for real-time live scores
   initSportWebSockets();
+
+  // WebSocket endpoint for mobile clients (/api/matches/ws)
+  initLiveWsServer(server);
 
   // Start background bet auto-settlement worker
   startSettlementWorker();

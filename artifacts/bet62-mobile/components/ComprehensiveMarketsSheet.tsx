@@ -15,7 +15,6 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useColors } from "@/hooks/useColors";
 import { useBetSlip } from "@/context/BetSlipContext";
 import type { LiveMatchMarkets } from "@/hooks/useLiveMatches";
-import { getLeagueFlag } from "@/utils/teamBanners";
 
 type TabKey =
   | "stats" | "classificacao" | "aovivo"
@@ -293,7 +292,6 @@ export function ComprehensiveMarketsSheet({ visible, match, onClose }: Props) {
   }
 
   const topPad = Platform.OS === "web" ? 0 : insets.top;
-  const leagueFlag = getLeagueFlag(match.league, match.country);
   const dateStr = formatDateDisplay(match.date, isLive, match.minute, match.time);
   const hasDraw = match.odds.draw > 1.01;
 
@@ -664,7 +662,7 @@ export function ComprehensiveMarketsSheet({ visible, match, onClose }: Props) {
             </Pressable>
 
             <View style={s.leagueRow}>
-              <Text style={s.leagueText}>{leagueFlag} {match.league ?? match.sport}</Text>
+              <Text style={s.leagueText}>{match.league ?? match.sport}</Text>
               <View style={{ flex: 1 }} />
               <Text style={s.dateText}>{dateStr}</Text>
             </View>

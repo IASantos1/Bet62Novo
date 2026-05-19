@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState } from "react";
-import EventSource from "react-native-sse";
 import { API_BASE } from "@/context/AuthContext";
 
 export interface LiveMatchMarkets {
@@ -85,6 +84,8 @@ export interface LiveMatch {
 const RECONNECT_DELAY_MS = 3_000;
 const MAX_RECONNECT_DELAY_MS = 30_000;
 const HTTP_FALLBACK_INTERVAL_MS = 5_000;
+// Throttle UI updates: apply incoming data at most once every 2 s
+const UPDATE_THROTTLE_MS = 2_000;
 
 export function useLiveMatches(): {
   matches: LiveMatch[];
@@ -95,15 +96,36 @@ export function useLiveMatches(): {
   const [connected, setConnected] = useState(false);
   const [lastUpdated, setLastUpdated] = useState(0);
 
-  const esRef = useRef<InstanceType<typeof EventSource> | null>(null);
+  const wsRef = useRef<WebSocket | null>(null);
   const reconnectDelayRef = useRef(RECONNECT_DELAY_MS);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const fallbackTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const throttleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingRef = useRef<{ matches: LiveMatch[] } | null>(null);
   const mountedRef = useRef(true);
 
   function clearTimers() {
     if (reconnectTimerRef.current) { clearTimeout(reconnectTimerRef.current); reconnectTimerRef.current = null; }
     if (fallbackTimerRef.current) { clearInterval(fallbackTimerRef.current); fallbackTimerRef.current = null; }
+  }
+
+  function applyPending() {
+    const data = pendingRef.current;
+    if (!data || !mountedRef.current) return;
+    pendingRef.current = null;
+    setMatches(data.matches);
+    setLastUpdated(Date.now());
+  }
+
+  // Throttle state updates to at most once per UPDATE_THROTTLE_MS (2 s)
+  function scheduleUpdate(data: { matches: LiveMatch[] }) {
+    pendingRef.current = data;
+    if (!throttleTimerRef.current) {
+      throttleTimerRef.current = setTimeout(() => {
+        throttleTimerRef.current = null;
+        applyPending();
+      }, UPDATE_THROTTLE_MS);
+    }
   }
 
   function startFallbackPolling() {
@@ -114,45 +136,56 @@ export function useLiveMatches(): {
         const res = await fetch(`${API_BASE}/matches/live`);
         if (!res.ok) return;
         const data = (await res.json()) as { matches: LiveMatch[] };
-        if (mountedRef.current && data.matches) {
-          setMatches(data.matches);
-          setLastUpdated(Date.now());
-        }
+        if (mountedRef.current && data.matches) scheduleUpdate(data);
       } catch { /* ignore */ }
     }, HTTP_FALLBACK_INTERVAL_MS);
   }
 
   function connect() {
     if (!mountedRef.current) return;
-    const streamUrl = `${API_BASE}/matches/live-stream`;
+    // Convert https:// → wss://  (or http:// → ws://) for native WebSocket
+    const wsUrl = API_BASE
+      .replace(/^https:\/\//, "wss://")
+      .replace(/^http:\/\//, "ws://")
+      + "/matches/ws";
+
     try {
-      const es = new EventSource(streamUrl);
-      esRef.current = es;
-      es.addEventListener("open", () => {
+      const ws = new WebSocket(wsUrl);
+      wsRef.current = ws;
+
+      ws.onopen = () => {
         if (!mountedRef.current) return;
         setConnected(true);
         reconnectDelayRef.current = RECONNECT_DELAY_MS;
-        clearTimers();
-      });
-      es.addEventListener("message", (event) => {
-        if (!mountedRef.current || !event.data) return;
+        // Stop fallback polling if WS came up
+        if (fallbackTimerRef.current) { clearInterval(fallbackTimerRef.current); fallbackTimerRef.current = null; }
+      };
+
+      ws.onmessage = (event) => {
+        if (!mountedRef.current) return;
         try {
-          const data = JSON.parse(event.data) as { matches: LiveMatch[] };
-          if (data.matches) { setMatches(data.matches); setLastUpdated(Date.now()); }
+          const data = JSON.parse(event.data as string) as { matches: LiveMatch[] };
+          if (data.matches) scheduleUpdate(data);
         } catch { /* ignore */ }
-      });
-      es.addEventListener("error", () => {
+      };
+
+      ws.onerror = () => {
         if (!mountedRef.current) return;
         setConnected(false);
-        es.close();
-        esRef.current = null;
+      };
+
+      ws.onclose = () => {
+        if (!mountedRef.current) return;
+        setConnected(false);
+        wsRef.current = null;
         startFallbackPolling();
         reconnectTimerRef.current = setTimeout(() => {
+          if (!mountedRef.current) return;
           clearTimers();
           reconnectDelayRef.current = Math.min(reconnectDelayRef.current * 2, MAX_RECONNECT_DELAY_MS);
           connect();
         }, reconnectDelayRef.current);
-      });
+      };
     } catch {
       setConnected(false);
       startFallbackPolling();
@@ -161,18 +194,26 @@ export function useLiveMatches(): {
 
   useEffect(() => {
     mountedRef.current = true;
+
+    // Fetch initial state immediately so the UI isn't blank while WS handshakes
     fetch(`${API_BASE}/matches/live`)
       .then((r) => r.json())
       .then((d: { matches: LiveMatch[] }) => {
-        if (mountedRef.current && d.matches) { setMatches(d.matches); setLastUpdated(Date.now()); }
+        if (mountedRef.current && d.matches) {
+          setMatches(d.matches);
+          setLastUpdated(Date.now());
+        }
       })
       .catch(() => {});
+
     connect();
+
     return () => {
       mountedRef.current = false;
       clearTimers();
-      esRef.current?.close();
-      esRef.current = null;
+      if (throttleTimerRef.current) { clearTimeout(throttleTimerRef.current); throttleTimerRef.current = null; }
+      wsRef.current?.close();
+      wsRef.current = null;
     };
   }, []);
 

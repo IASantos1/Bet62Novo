@@ -1,4 +1,5 @@
 import { Router, type IRouter } from "express";
+import { WebSocketServer, type WebSocket as WsClient } from "ws";
 import { CONFIG } from "../lib/config";
 
 const router: IRouter = Router();
@@ -1901,9 +1902,10 @@ let liveIsFetching = false;
 // Track Statpal's own updated_ts so we can detect a frozen feed
 let liveFeedUpdatedTs = 0;
 
-// ─── SSE clients ──────────────────────────────────────────────────────────────
+// ─── SSE + WebSocket clients ───────────────────────────────────────────────────
 interface SSEClient { write: (chunk: string) => boolean; }
 const sseClients = new Set<SSEClient>();
+const wsLiveClients = new Set<WsClient>();
 let broadcastInProgress = false;
 
 // v2/daily today: cache 5min
@@ -5451,20 +5453,29 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
   return { matches: [...livePart, ...startingSoon] };
 }
 
-// Broadcast payload to all connected SSE clients; prune dead connections.
+// Broadcast payload to all connected SSE + WebSocket clients; prune dead connections.
 // Guards: (1) skip if no clients, (2) skip if a broadcast is already in
-// progress (prevents pileup when Statpal is slow), (3) never send empty
-// matches — keep the last good state on clients instead.
+// progress (prevents pileup), (3) never send empty matches — keep the last
+// good state on clients instead.
 async function broadcastLive(): Promise<void> {
-  if (sseClients.size === 0) return;
+  if (sseClients.size === 0 && wsLiveClients.size === 0) return;
   if (broadcastInProgress) return;
   broadcastInProgress = true;
   try {
     const payload = await buildLivePayload();
     if (payload.matches.length === 0) return; // keep last good state; don't wipe UI
-    const chunk = `data: ${JSON.stringify(payload)}\n\n`;
+    // SSE clients
+    const sseChunk = `data: ${JSON.stringify(payload)}\n\n`;
     for (const client of sseClients) {
-      try { client.write(chunk); } catch { sseClients.delete(client); }
+      try { client.write(sseChunk); } catch { sseClients.delete(client); }
+    }
+    // WebSocket clients (native JSON message)
+    const wsMsg = JSON.stringify(payload);
+    for (const ws of wsLiveClients) {
+      try {
+        if (ws.readyState === 1 /* OPEN */) ws.send(wsMsg);
+        else wsLiveClients.delete(ws);
+      } catch { wsLiveClients.delete(ws); }
     }
   } catch {
     /* ignore — keep clients connected */
@@ -9250,5 +9261,39 @@ router.get("/v2-standings", async (req, res) => {
     res.json({ standings: [], league: "" });
   }
 });
+
+// ─── WebSocket server for mobile clients (/api/matches/ws) ───────────────────
+// Accepts native WebSocket connections and pushes the same live payload that
+// broadcastLive() sends to SSE clients — every 2 s, piggy-backed on the
+// market-drift engine. Mobile clients reconnect automatically on close/error.
+export function initLiveWsServer(httpServer: import("http").Server): void {
+  const wss = new WebSocketServer({ noServer: true });
+
+  httpServer.on("upgrade", (req, socket, head) => {
+    const url = req.url ?? "";
+    if (url === "/api/matches/ws" || url.startsWith("/api/matches/ws?")) {
+      wss.handleUpgrade(req, socket as import("net").Socket, head, (ws) => {
+        wss.emit("connection", ws, req);
+      });
+    } else {
+      // Not our path — let other handlers decide (or destroy)
+      socket.destroy();
+    }
+  });
+
+  wss.on("connection", (ws: WsClient) => {
+    wsLiveClients.add(ws);
+
+    // Send current live state immediately so the client isn't blank for 2 s
+    buildLivePayload()
+      .then((p) => {
+        try { if (ws.readyState === 1) ws.send(JSON.stringify(p)); } catch { /* ignore */ }
+      })
+      .catch(() => { /* ignore */ });
+
+    ws.on("close", () => wsLiveClients.delete(ws));
+    ws.on("error", () => wsLiveClients.delete(ws));
+  });
+}
 
 export default router;
