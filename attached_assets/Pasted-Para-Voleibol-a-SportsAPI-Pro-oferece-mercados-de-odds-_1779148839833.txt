@@ -1,0 +1,77 @@
+Para Voleibol, a SportsAPI Pro oferece mercados de odds que se concentram nos resultados da partida, sets e pontos, refletindo a dinâmica do esporte. A abordagem para integrar esses dados é a mesma dos outros esportes: faça uma requisição ao endpoint de odds do voleibol e processe a estrutura JSON.
+
+Base URL: https://v2.volleyball.sportsapipro.com
+Endpoint de Odds: GET /api/match/:matchId/odds
+Endpoint de Linhas de Apostas: GET /api/match/:matchId/lines
+Aqui estão os mercados de odds mais comuns e populares que você provavelmente encontrará na API para Voleibol:
+
+Mercados Comuns e Populares em Voleibol:
+
+Match Winner (Vencedor da Partida):
+
+Time da Casa para Vencer
+Time Visitante para Vencer
+Este é o mercado mais básico, onde você aposta em qual time vencerá o jogo.
+Set Handicap (Handicap de Sets):
+
+Time da Casa com Handicap de Sets (ex: -1.5 sets)
+Time Visitante com Handicap de Sets (ex: +1.5 sets)
+Similar ao tênis, o time com -1.5 sets precisa vencer por uma margem de 2 sets ou mais (ex: 3-0 ou 3-1), enquanto o time com +1.5 sets pode perder por 1 set e ainda "cobrir" o handicap (ex: perder por 2-3).
+Total Points Over/Under (Total de Pontos Acima/Abaixo):
+
+Mais de X pontos (ex: Over 135.5 pontos)
+Menos de X pontos (ex: Under 135.5 pontos)
+Refere-se ao total combinado de pontos marcados por ambas as equipes na partida inteira.
+Correct Score (Placar Correto - Sets):
+
+Prever o placar exato em sets (ex: 3-0 para Time da Casa, 3-1 para Time da Casa, 0-3 para Time Visitante, etc.).
+A disponibilidade de 3-0, 3-1, 3-2 dependerá do formato da partida (melhor de 3 ou melhor de 5 sets).
+Set Winner (Vencedor do Set):
+
+Vencedor do 1º Set: Time da Casa / Time Visitante
+Vencedor do 2º Set: Time da Casa / Time Visitante
+E assim por diante para sets subsequentes.
+Total Points in Set (Total de Pontos no Set - Over/Under):
+
+Mais de X pontos no 1º Set (ex: Over 45.5 pontos no 1º Set)
+Menos de X pontos no 1º Set (ex: Under 45.5 pontos no 1º Set)
+Pode ser oferecido para sets específicos.
+Team Total Points Over/Under (Total de Pontos da Equipe Acima/Abaixo):
+
+Mais de X pontos para o Time da Casa
+Menos de X pontos para o Time da Casa
+Mais de X pontos para o Time Visitante
+Menos de X pontos para o Time Visitante
+Odd/Even Points (Ímpar/Par de Pontos):
+
+Total de pontos na partida será ímpar ou par.
+Total de pontos em um set específico será ímpar ou par.
+Handicap de Pontos (Point Handicap):
+
+Time da Casa com Handicap de Pontos (ex: -8.5 pontos)
+Time Visitante com Handicap de Pontos (ex: +8.5 pontos)
+Este mercado aplica um handicap ao total de pontos marcados na partida, não aos sets.
+Como Identificar e Configurar (Voleibol):
+
+Faça a requisição:
+
+
+curl -X GET "https://v2.volleyball.sportsapipro.com/api/match/:matchId/odds" \
+  -H "x-api-key: [redacted]]]]]]]
+Analise a resposta JSON: Percorra a lista de bookmakers e, dentro de cada um, a lista de markets.
+
+Use market.name e outcome.name: Para identificar os mercados específicos.
+
+Exemplo de Mapeamento para Voleibol:
+
+Mercado Comum	market.name Típico	outcome.name Típico
+Match Winner	"Match Winner"	"Home", "Away"
+Set Handicap	"Set Handicap"	"Home -X.Y", "Away +X.Y"
+Total Points Over/Under	"Total Points Over/Under"	"Over X.Y", "Under X.Y"
+Correct Score (Sets)	"Correct Score"	"3-0", "3-1", "3-2", "0-3", "1-3", "2-3", etc.
+1st Set Winner	"1st Set Winner"	"Home", "Away"
+Total Points in 1st Set	"1st Set Total Points Over/Under"	"Over X.Y", "Under X.Y"
+Team Total Points	"Team Total Points Over/Under"	"Home Over X.Y", "Home Under X.Y", "Away Over X.Y", "Away Under X.Y"
+Odd/Even Points	"Total Points Odd/Even", "Set Total Points Odd/Even"	"Odd", "Even"
+Point Handicap	"Point Handicap"	"Home -X.Y", "Away +X.Y"
+Como sempre, os nomes exatos podem ter pequenas variações entre os provedores de odds, mas esses são os termos mais comuns que você encontrará para os mercados de voleibol.
