@@ -1871,7 +1871,7 @@ export default function Home() {
   }, []);
 
   // Match detail view tab
-  const [matchViewTab, setMatchViewTab] = useState<"markets" | "stats" | "standings" | "live" | "yesterday" | "ranking" | "liga" | "odds" | "lineups">("markets");
+  const [matchViewTab, setMatchViewTab] = useState<"markets" | "stats" | "standings" | "live" | "yesterday" | "ranking" | "liga" | "odds" | "lineups" | "confrontos">("markets");
   // Market sub-tab — lifted here so live refreshes don't unmount MatchModalMarkets and reset the selection
   const [modalTab, setModalTab] = useState("todos");
   const [matchStats, setMatchStats] = useState<MatchStatsData | null>(null);
@@ -1886,6 +1886,10 @@ export default function Home() {
   const [allOddsLoading, setAllOddsLoading] = useState(false);
   const [lineupsData, setLineupsData] = useState<LineupsV2 | null>(null);
   const [lineupsLoading, setLineupsLoading] = useState(false);
+  type H2HMeeting = { date: string; team1: string; team2: string; score1: number; score2: number; league: string; country?: string };
+  type ConfrontosData = { homeWins: number; awayWins: number; draws: number; recentMeetings: H2HMeeting[]; team1Name: string; team2Name: string; sport: string };
+  const [confrontosData, setConfrontosData] = useState<ConfrontosData | null>(null);
+  const [confrontosLoading, setConfrontosLoading] = useState(false);
 
   // Player markets (football "Jogadores" tab) — per-match, filtered to the two match teams
   type PlayerMarket = { id: string; name: string; team: string; teamId: string; appearances: number; stat: number; odds: number };
@@ -1942,6 +1946,8 @@ export default function Home() {
     setStandingsLeague("");
     setPlayerMarkets(null);
     setPlayerMarketsMatchId(null);
+    setConfrontosData(null);
+    setConfrontosLoading(false);
     // Auto-switch to ET/Pen tab if match is already in that phase
     if (expandedMatch?.markets?.etExtra) { setModalTab("prolongamento"); setTimeout(() => scrollTabIntoView("prolongamento", "instant"), 0); }
     else if (expandedMatch?.markets?.penExtra) { setModalTab("penaltis"); setTimeout(() => scrollTabIntoView("penaltis", "instant"), 0); }
@@ -1980,17 +1986,29 @@ export default function Home() {
     setStandingsLoading(true);
     const league = expandedMatch.league ?? "";
     setStandingsLeague(league);
-    fetch(`/api/matches/standings?league=${encodeURIComponent(league)}`)
-      .then(r => r.ok ? r.json() : null)
-      .then(d => {
-        if (d && Array.isArray(d.teams)) {
-          setStandingsLeague(d.league ?? league);
-          setStandings(d.teams as StandingRow[]);
-        }
-      })
-      .catch(() => {})
-      .finally(() => setStandingsLoading(false));
-  }, [matchViewTab, expandedMatch?.id]);
+    const loadV1 = () =>
+      fetch(`/api/matches/standings?league=${encodeURIComponent(league)}`)
+        .then(r => r.ok ? r.json() : null)
+        .then(d => { if (d && Array.isArray(d.teams)) { setStandingsLeague(d.league ?? league); setStandings(d.teams as StandingRow[]); } });
+    const isV2Football = expandedMatch.sport === "football" && String(expandedMatch.id).startsWith("fb-v2-");
+    if (isV2Football) {
+      const rawId = String(expandedMatch.id).replace("fb-v2-", "");
+      fetch(`/api/matches/v2-standings?sport=football&matchId=${rawId}`)
+        .then(r => r.ok ? r.json() : null)
+        .then(d => {
+          if (d && Array.isArray(d.standings) && d.standings.length > 0) {
+            setStandingsLeague(d.league ?? league);
+            setStandings(d.standings as StandingRow[]);
+            return Promise.resolve();
+          }
+          return loadV1();
+        })
+        .catch(() => loadV1())
+        .finally(() => setStandingsLoading(false));
+    } else {
+      loadV1().catch(() => {}).finally(() => setStandingsLoading(false));
+    }
+  }, [matchViewTab, expandedMatch?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Fetch player markets when "Jogadores" tab is active (football only)
   useEffect(() => {
@@ -2046,6 +2064,21 @@ export default function Home() {
       .then(d => setLineupsData(d as LineupsV2))
       .catch(() => setLineupsData(null))
       .finally(() => setLineupsLoading(false));
+  }, [matchViewTab, expandedMatch?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Fetch H2H confrontos when "confrontos" tab is selected
+  useEffect(() => {
+    if (matchViewTab !== "confrontos" || !expandedMatch) return;
+    setConfrontosData(null);
+    setConfrontosLoading(true);
+    const rawId = String(expandedMatch.id).replace(/^[a-z]+-v2-/, "");
+    const sport = expandedMatch.sport ?? "football";
+    const p = new URLSearchParams({ sport, matchId: rawId, home: expandedMatch.home, away: expandedMatch.away });
+    fetch(`/api/matches/confrontos?${p}`)
+      .then(r => r.ok ? r.json() : null)
+      .then(d => setConfrontosData(d as ConfrontosData))
+      .catch(() => setConfrontosData(null))
+      .finally(() => setConfrontosLoading(false));
   }, [matchViewTab, expandedMatch?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Handle ?payment= query param on return from card payment
@@ -5944,80 +5977,39 @@ export default function Home() {
                   {/* Stats/Standings/Live sub-tabs */}
                   {matchViewTab !== "markets" && (
                     <div className="flex border-t border-zinc-800 overflow-x-auto no-scrollbar">
-                      {expandedMatch.sport === "tennis" ? (
-                        <>
-                          {(expandedMatch.isLive
-                            ? (["stats", "yesterday", "ranking", "odds", "live"] as const)
-                            : (["stats", "yesterday", "ranking", "odds"] as const)
-                          ).map(tab => (
-                            <button
-                              key={tab}
-                              onClick={() => setMatchViewTab(tab)}
-                              className={`flex-1 py-2 text-xs font-bold transition-colors whitespace-nowrap px-2 ${matchViewTab === tab ? (tab === "live" ? "text-red-400 border-b-2 border-red-500" : "text-blue-400 border-b-2 border-blue-500") : "text-zinc-500 hover:text-white"}`}
-                            >
-                              {tab === "stats" ? "Estatísticas" : tab === "yesterday" ? "Ontem" : tab === "ranking" ? "Ranking" : tab === "odds" ? "📊 Mercados" : "⚡ Ao Vivo"}
-                            </button>
-                          ))}
-                        </>
-                      ) : expandedMatch.sport === "hockey" ? (
-                        <>
-                          {(expandedMatch.isLive
-                            ? (["stats", "yesterday", "odds", "live"] as const)
-                            : (["stats", "yesterday", "odds"] as const)
-                          ).map(tab => (
-                            <button
-                              key={tab}
-                              onClick={() => setMatchViewTab(tab)}
-                              className={`flex-1 py-2 text-xs font-bold transition-colors whitespace-nowrap px-2 ${matchViewTab === tab ? (tab === "live" ? "text-red-400 border-b-2 border-red-500" : "text-blue-400 border-b-2 border-blue-500") : "text-zinc-500 hover:text-white"}`}
-                            >
-                              {tab === "stats" ? "Estatísticas" : tab === "yesterday" ? "🏆 Classificação" : tab === "odds" ? "📊 Mercados" : "⚡ Ao Vivo"}
-                            </button>
-                          ))}
-                        </>
-                      ) : expandedMatch.sport === "basketball" ? (
-                        <>
-                          {(expandedMatch.isLive
-                            ? (["stats", "standings", "yesterday", "odds", "live"] as const)
-                            : (["stats", "standings", "yesterday", "odds"] as const)
-                          ).map(tab => (
-                            <button
-                              key={tab}
-                              onClick={() => setMatchViewTab(tab)}
-                              className={`flex-1 py-2 text-xs font-bold transition-colors whitespace-nowrap px-2 ${matchViewTab === tab ? (tab === "live" ? "text-red-400 border-b-2 border-red-500" : "text-blue-400 border-b-2 border-blue-500") : "text-zinc-500 hover:text-white"}`}
-                            >
-                              {tab === "stats" ? "Estatísticas" : tab === "standings" ? "🏆 Classificação" : tab === "yesterday" ? "📅 Ontem" : tab === "odds" ? "📊 Mercados" : "⚡ Ao Vivo"}
-                            </button>
-                          ))}
-                        </>
-                      ) : expandedMatch.sport === "baseball" ? (
-                        <>
-                          {(expandedMatch.isLive
-                            ? (["stats", "yesterday", "liga", "odds", "live"] as const)
-                            : (["stats", "yesterday", "liga", "odds"] as const)
-                          ).map(tab => (
-                            <button
-                              key={tab}
-                              onClick={() => setMatchViewTab(tab)}
-                              className={`flex-1 py-2 text-xs font-bold transition-colors whitespace-nowrap px-2 ${matchViewTab === tab ? (tab === "live" ? "text-red-400 border-b-2 border-red-500" : "text-blue-400 border-b-2 border-blue-500") : "text-zinc-500 hover:text-white"}`}
-                            >
-                              {tab === "stats" ? "Estatísticas" : tab === "yesterday" ? "🏆 Classificação" : tab === "liga" ? "⭐ Liga" : tab === "odds" ? "📊 Mercados" : "⚡ Ao Vivo"}
-                            </button>
-                          ))}
-                        </>
-                      ) : (
-                        (expandedMatch.isLive
-                          ? (["stats", "standings", "odds", "lineups", "live"] as const)
-                          : (["stats", "standings", "odds", "lineups"] as const)
-                        ).map(tab => (
+                      {(() => {
+                        const tabLabel = (tab: string) => {
+                          if (tab === "stats") return "Estatísticas";
+                          if (tab === "confrontos") return "⚔️ H2H";
+                          if (tab === "standings") return "Classificação";
+                          if (tab === "yesterday") return expandedMatch.sport === "basketball" ? "📅 Ontem" : expandedMatch.sport === "hockey" || expandedMatch.sport === "baseball" ? "🏆 Classificação" : "Ontem";
+                          if (tab === "ranking") return "Ranking";
+                          if (tab === "liga") return "⭐ Liga";
+                          if (tab === "odds") return "📊 Mercados";
+                          if (tab === "lineups") return "👥 Escalação";
+                          return "⚡ Ao Vivo";
+                        };
+                        const tabs: string[] = expandedMatch.sport === "tennis"
+                          ? (expandedMatch.isLive ? ["stats", "confrontos", "yesterday", "ranking", "odds", "live"] : ["stats", "confrontos", "yesterday", "ranking", "odds"])
+                          : expandedMatch.sport === "hockey"
+                          ? (expandedMatch.isLive ? ["stats", "confrontos", "yesterday", "odds", "live"] : ["stats", "confrontos", "yesterday", "odds"])
+                          : expandedMatch.sport === "basketball"
+                          ? (expandedMatch.isLive ? ["stats", "confrontos", "standings", "yesterday", "odds", "live"] : ["stats", "confrontos", "standings", "yesterday", "odds"])
+                          : expandedMatch.sport === "baseball"
+                          ? (expandedMatch.isLive ? ["stats", "confrontos", "yesterday", "liga", "odds", "live"] : ["stats", "confrontos", "yesterday", "liga", "odds"])
+                          : expandedMatch.sport === "volleyball"
+                          ? (expandedMatch.isLive ? ["stats", "confrontos", "odds", "live"] : ["stats", "confrontos", "odds"])
+                          : (expandedMatch.isLive ? ["stats", "confrontos", "standings", "odds", "lineups", "live"] : ["stats", "confrontos", "standings", "odds", "lineups"]);
+                        return tabs.map(tab => (
                           <button
                             key={tab}
-                            onClick={() => setMatchViewTab(tab)}
+                            onClick={() => setMatchViewTab(tab as typeof matchViewTab)}
                             className={`flex-1 py-2 text-xs font-bold transition-colors whitespace-nowrap px-1 ${matchViewTab === tab ? (tab === "live" ? "text-red-400 border-b-2 border-red-500" : "text-blue-400 border-b-2 border-blue-500") : "text-zinc-500 hover:text-white"}`}
                           >
-                            {tab === "stats" ? "Estatísticas" : tab === "standings" ? "Classificação" : tab === "odds" ? "📊 Mercados" : tab === "lineups" ? "👥 Escalação" : "⚡ Ao Vivo"}
+                            {tabLabel(tab)}
                           </button>
-                        ))
-                      )}
+                        ));
+                      })()}
                     </div>
                   )}
                 </div>
@@ -7458,6 +7450,96 @@ export default function Home() {
                             </div>
                           );
                         })}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Confrontos (H2H) panel */}
+                {matchViewTab === "confrontos" && (
+                  <div className="bg-zinc-900 rounded-xl border border-zinc-800 p-4 mb-2 animate-in fade-in duration-200">
+                    {confrontosLoading ? (
+                      <div className="flex items-center justify-center py-12">
+                        <Loader2 className="animate-spin text-blue-400" size={28} />
+                      </div>
+                    ) : !confrontosData ? (
+                      <div className="text-center py-8">
+                        <div className="text-zinc-600 text-2xl mb-2">⚔️</div>
+                        <div className="text-zinc-500 text-sm font-medium">Histórico indisponível</div>
+                        <div className="text-zinc-600 text-xs mt-1">Dados H2H não disponíveis para este jogo</div>
+                      </div>
+                    ) : (
+                      <div className="space-y-4">
+                        {/* H2H Record */}
+                        <div className="bg-zinc-950/60 rounded-lg border border-zinc-800 p-4">
+                          <div className="text-[10px] font-black text-red-500 uppercase tracking-widest mb-4">
+                            Histórico de Confrontos Directos
+                          </div>
+                          <div className="grid grid-cols-3 gap-3 text-center mb-4">
+                            <div>
+                              <div className="text-3xl font-black text-blue-400">{confrontosData.homeWins}</div>
+                              <div className="text-[10px] text-zinc-500 mt-1 truncate">{expandedMatch.home.split(" ").slice(0, 2).join(" ")}</div>
+                            </div>
+                            <div>
+                              <div className="text-3xl font-black text-yellow-400">{confrontosData.draws}</div>
+                              <div className="text-[10px] text-zinc-500 mt-1">Empates</div>
+                            </div>
+                            <div>
+                              <div className="text-3xl font-black text-red-400">{confrontosData.awayWins}</div>
+                              <div className="text-[10px] text-zinc-500 mt-1 truncate">{expandedMatch.away.split(" ").slice(0, 2).join(" ")}</div>
+                            </div>
+                          </div>
+                          {(confrontosData.homeWins + confrontosData.draws + confrontosData.awayWins) > 0 && (() => {
+                            const total = confrontosData.homeWins + confrontosData.draws + confrontosData.awayWins;
+                            const homePct = Math.round(confrontosData.homeWins / total * 100);
+                            const drawPct = Math.round(confrontosData.draws / total * 100);
+                            const awayPct = 100 - homePct - drawPct;
+                            return (
+                              <div className="mt-2 space-y-1">
+                                <div className="h-3 rounded-full overflow-hidden flex">
+                                  {homePct > 0 && <div className="bg-blue-500 h-full transition-all" style={{ width: `${homePct}%` }} />}
+                                  {drawPct > 0 && <div className="bg-yellow-400 h-full transition-all" style={{ width: `${drawPct}%` }} />}
+                                  {awayPct > 0 && <div className="bg-red-500 h-full transition-all" style={{ width: `${awayPct}%` }} />}
+                                </div>
+                                <div className="flex justify-between text-[9px] text-zinc-600">
+                                  <span>{homePct}%</span>
+                                  {drawPct > 0 && <span>{drawPct}%</span>}
+                                  <span>{awayPct}%</span>
+                                </div>
+                              </div>
+                            );
+                          })()}
+                        </div>
+
+                        {/* Recent Meetings */}
+                        {confrontosData.recentMeetings.length > 0 ? (
+                          <div className="bg-zinc-950/60 rounded-lg border border-zinc-800 p-4">
+                            <div className="text-[10px] font-black text-red-500 uppercase tracking-widest mb-3">
+                              Últimos Encontros
+                            </div>
+                            <div className="space-y-0">
+                              {confrontosData.recentMeetings.map((m, i) => {
+                                const homeWon = m.score1 > m.score2;
+                                const awayWon = m.score2 > m.score1;
+                                return (
+                                  <div key={i} className="flex items-center gap-2 py-2 border-b border-zinc-800/40 last:border-0">
+                                    <span className="text-[9px] text-zinc-600 shrink-0 w-20 tabular-nums">{m.date}</span>
+                                    <span className={`flex-1 text-[11px] font-semibold truncate text-right ${homeWon ? "text-white" : "text-zinc-500"}`}>{m.team1}</span>
+                                    <span className="shrink-0 font-black text-sm tabular-nums text-white bg-zinc-800 px-2 py-0.5 rounded">{m.score1} - {m.score2}</span>
+                                    <span className={`flex-1 text-[11px] font-semibold truncate ${awayWon ? "text-white" : "text-zinc-500"}`}>{m.team2}</span>
+                                    {m.league && <span className="text-[9px] text-zinc-600 shrink-0 max-w-[72px] truncate hidden sm:block">{m.league}</span>}
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="bg-zinc-950/60 rounded-lg border border-zinc-800 p-5 text-center">
+                            <div className="text-zinc-600 text-2xl mb-2">📋</div>
+                            <div className="text-zinc-500 text-sm font-medium">Histórico de partidas não disponível</div>
+                            <div className="text-zinc-600 text-xs mt-1">O historial directo entre as equipas não está disponível</div>
+                          </div>
+                        )}
                       </div>
                     )}
                   </div>

@@ -11683,4 +11683,139 @@ router.get("/football-player-markets/:leagueId", async (req, res) => {
   }
 });
 
+// ─── Confrontos (H2H Real Data) ───────────────────────────────────────────────
+
+type ConfrontosH2HMeeting = { date: string; team1: string; team2: string; score1: number; score2: number; league: string; country?: string };
+type ConfrontosResult = { homeWins: number; awayWins: number; draws: number; recentMeetings: ConfrontosH2HMeeting[]; team1Name: string; team2Name: string; sport: string };
+
+const confrontosCache = new Map<string, { data: ConfrontosResult; fetchedAt: number }>();
+const CONFRONTOS_TTL = 15 * 60_000;
+
+router.get("/confrontos", async (req, res) => {
+  const sport   = String(req.query["sport"]   ?? "football");
+  const matchId = String(req.query["matchId"] ?? "");
+  const home    = String(req.query["home"]    ?? "").trim();
+  const away    = String(req.query["away"]    ?? "").trim();
+
+  const cacheKey = `confrontos:${sport}:${matchId}:${home}:${away}`;
+  const cached = confrontosCache.get(cacheKey);
+  if (cached && Date.now() - cached.fetchedAt < CONFRONTOS_TTL) { res.json(cached.data); return; }
+
+  let homeWins = 0, awayWins = 0, draws = 0;
+  const recentMeetings: ConfrontosH2HMeeting[] = [];
+  let team1Name = home, team2Name = away;
+
+  // V2 h2h aggregate (works for all sports)
+  const base = v2SportBase(sport);
+  if (base && matchId) {
+    try {
+      const resp = await fetch(`${base}/match/${matchId}/h2h`, { signal: AbortSignal.timeout(8000), headers: sapiHeaders() });
+      if (resp.ok) {
+        const d = await resp.json() as {
+          data?: {
+            teamDuel?: { homeWins?: number; awayWins?: number; draws?: number };
+            previousMatches?: Array<{
+              homeTeam?: { name?: string };
+              awayTeam?: { name?: string };
+              homeScore?: { current?: number };
+              awayScore?: { current?: number };
+              startTimestamp?: number;
+              tournament?: { name?: string };
+            }>;
+          };
+        };
+        const td = d.data?.teamDuel;
+        if (td) { homeWins = td.homeWins ?? 0; awayWins = td.awayWins ?? 0; draws = td.draws ?? 0; }
+        for (const m of (d.data?.previousMatches ?? []).slice(0, 10)) {
+          const dt = m.startTimestamp ? new Date(m.startTimestamp * 1000).toISOString().slice(0, 10) : "";
+          recentMeetings.push({ date: dt, team1: m.homeTeam?.name ?? "", team2: m.awayTeam?.name ?? "", score1: m.homeScore?.current ?? 0, score2: m.awayScore?.current ?? 0, league: m.tournament?.name ?? "" });
+        }
+      }
+    } catch { /* ignore */ }
+  }
+
+  // For football: enrich with V1 API (richer recent meetings list)
+  if (sport === "football" && home && away) {
+    try {
+      const h2hData = await getFootballH2H(home, away) as {
+        recentMeetings?: Array<{ date: string; league: string; country?: string; team1: { name: string; score: number }; team2: { name: string; score: number } }>;
+        overallRecord?: { total?: { games?: number; team1Won?: number; team2Won?: number; draws?: number } };
+      };
+      // Use V1 aggregate if V2 returned nothing
+      if (homeWins === 0 && awayWins === 0 && draws === 0) {
+        const ov = h2hData.overallRecord?.total;
+        if (ov) { homeWins = ov.team1Won ?? 0; awayWins = ov.team2Won ?? 0; draws = ov.draws ?? 0; }
+      }
+      // Use V1 recent meetings if V2 had none
+      if (recentMeetings.length === 0) {
+        for (const m of (h2hData.recentMeetings ?? []).slice(0, 10)) {
+          recentMeetings.push({ date: m.date, team1: m.team1.name, team2: m.team2.name, score1: m.team1.score, score2: m.team2.score, league: m.league, country: m.country });
+        }
+      }
+    } catch { /* ignore */ }
+  }
+
+  const result: ConfrontosResult = { homeWins, awayWins, draws, recentMeetings, team1Name, team2Name, sport };
+  confrontosCache.set(cacheKey, { data: result, fetchedAt: Date.now() });
+  res.json(result);
+});
+
+// ─── V2 Tournament Standings (match-specific) ────────────────────────────────
+
+const v2StandingsCache = new Map<string, { data: object; fetchedAt: number }>();
+const V2_STANDINGS_TTL = 15 * 60_000;
+
+router.get("/v2-standings", async (req, res) => {
+  const sport   = String(req.query["sport"]   ?? "football");
+  const matchId = String(req.query["matchId"] ?? "");
+  if (!matchId) { res.json({ standings: [], league: "" }); return; }
+
+  const base = v2SportBase(sport);
+  if (!base) { res.json({ standings: [], league: "" }); return; }
+
+  const cacheKey = `v2std:${sport}:${matchId}`;
+  const cached = v2StandingsCache.get(cacheKey);
+  if (cached && Date.now() - cached.fetchedAt < V2_STANDINGS_TTL) { res.json(cached.data); return; }
+
+  try {
+    // Step 1: match details → uniqueTournament.id + season.id
+    const matchResp = await fetch(`${base}/match/${matchId}`, { signal: AbortSignal.timeout(8000), headers: sapiHeaders() });
+    if (!matchResp.ok) { res.json({ standings: [], league: "" }); return; }
+    const matchData = await matchResp.json() as {
+      match?: {
+        tournament?: { name?: string; uniqueTournament?: { id?: number; name?: string } };
+        season?: { id?: number };
+      };
+    };
+    const tId = matchData.match?.tournament?.uniqueTournament?.id;
+    const sId = matchData.match?.season?.id;
+    const leagueName = matchData.match?.tournament?.uniqueTournament?.name ?? matchData.match?.tournament?.name ?? "";
+    if (!tId || !sId) { res.json({ standings: [], league: leagueName }); return; }
+
+    // Step 2: fetch standings
+    const stdResp = await fetch(`${base}/tournament/${tId}/season/${sId}/standings`, { signal: AbortSignal.timeout(8000), headers: sapiHeaders() });
+    if (!stdResp.ok) { res.json({ standings: [], league: leagueName }); return; }
+    const stdData = await stdResp.json() as {
+      standings?: Array<{ position?: number; teamName?: string; played?: number; won?: number; drawn?: number; lost?: number; goalsFor?: number; goalsAgainst?: number; points?: number }>;
+    };
+    const rows = (stdData.standings ?? []).map((r, i) => ({
+      pos: r.position ?? i + 1,
+      name: r.teamName ?? "",
+      played: r.played ?? 0,
+      won: r.won ?? 0,
+      drawn: r.drawn ?? 0,
+      lost: r.lost ?? 0,
+      gf: r.goalsFor ?? 0,
+      ga: r.goalsAgainst ?? 0,
+      pts: r.points ?? 0,
+    }));
+
+    const result = { standings: rows, league: leagueName };
+    v2StandingsCache.set(cacheKey, { data: result, fetchedAt: Date.now() });
+    res.json(result);
+  } catch {
+    res.json({ standings: [], league: "" });
+  }
+});
+
 export default router;
