@@ -129,11 +129,14 @@ function LiveMatchCard({ match }: { match: LiveMatch }) {
   const sportColor = SPORT_COLORS[match.sport] ?? colors.mutedForeground;
   const now = Date.now();
   const hasBlockingEvent = (() => {
-    const r = (match.suspensionReason ?? "").toUpperCase();
+    // Check both _suspensionReason (API internal) and suspensionReason (fallback)
+    const r = (match._suspensionReason ?? match.suspensionReason ?? "").toUpperCase();
     return r.includes("VAR") || r.includes("PENAL") || r.includes("PÊNALTI") || r.includes("PENÁLT") ||
-      r === "GOLO" || r.includes("GOAL") || r.includes("CHANCE");
+      r === "GOLO!" || r === "GOLO" || r.includes("GOAL") || r.includes("CHANCE");
   })();
-  const suspended = (match.marketSuspension?.["result"] != null && match.marketSuspension["result"]! > now) || hasBlockingEvent;
+  // Global lock: any market still suspended → lock all
+  const anySusp = match.marketSuspension != null && Object.values(match.marketSuspension).some(ts => ts > now);
+  const suspended = anySusp || hasBlockingEvent;
   const sets = match._liveExtra?.sets;
   const currentPoints = match._liveExtra?.currentPoints;
   const periods = match._liveExtra?.periods;
@@ -202,11 +205,12 @@ function LiveMatchCard({ match }: { match: LiveMatch }) {
   })();
 
   const suspText = (() => {
-    const r = (match.suspensionReason ?? "").toUpperCase();
+    const r = (match._suspensionReason ?? match.suspensionReason ?? "").toUpperCase();
     if (r.includes("VAR")) return "📺 REVISÃO VAR";
     if (r.includes("PENAL") || r.includes("PÊNALTI") || r.includes("PENÁLT")) return "🎯 PENÁLTI";
     if (r.includes("GOLO") || r.includes("GOAL")) return "⚽ GOLO!";
     if (r.includes("CHANCE")) return "⚡ GRANDE CHANCE";
+    if (anySusp) return "⏸ ODDS A ATUALIZAR";
     return "⏸ SUSPENSO";
   })();
 
@@ -347,7 +351,9 @@ function LiveMatchCard({ match }: { match: LiveMatch }) {
           odds: match.odds, markets: match.markets, marketSuspension: match.marketSuspension,
           homeScore: match.homeScore, awayScore: match.awayScore,
           isLive: true, minute: match.minute, status: match.status,
-          league: match.league, suspensionReason: match.suspensionReason,
+          league: match.league,
+          suspensionReason: match._suspensionReason ?? match.suspensionReason,
+          _suspensionReason: match._suspensionReason ?? match.suspensionReason,
           _liveExtra: match._liveExtra,
         }}
         onClose={() => setMarketsOpen(false)}

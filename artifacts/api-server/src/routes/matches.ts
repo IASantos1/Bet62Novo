@@ -4516,28 +4516,33 @@ async function buildLiveMatches(): Promise<LiveMatchState[]> {
       const minute = isHT ? 45 : isET ? 105 : parseInt(m.status) || 1;
 
       // Market suspension delays on goal (ms per market key)
+      // ALL markets suspended for the same duration so the global "result" key acts as
+      // a reliable kill-switch for frontends (they check result key as a global lock).
       const GOAL_SUSPENSION_MS: Record<string, number> = {
-        result: 8000,
-        doubleChance: 7000,
-        totalGoals: 10000,
-        handicap: 10000,
-        halfTime: 6000,
-        htft: 12000,
-        correctScore: 15000,
-        asianHandicap: 12000,
-        asianTotals: 12000,
-        drawNoBet: 8000,
-        firstGoal: 8000,
-        winToNil: 8000,
-        cleanSheet: 8000,
-        goalOddEven: 10000,
-        exactGoals: 12000,
-        btts1H: 8000,
-        toWinBothHalves: 10000,
-        highestScoringHalf: 8000,
-        htCorrectScore: 15000,
-        h2CorrectScore: 15000,
-        teamGoals: 10000,
+        result: 25000,
+        doubleChance: 25000,
+        totalGoals: 28000,
+        handicap: 28000,
+        halfTime: 25000,
+        htft: 30000,
+        correctScore: 35000,
+        asianHandicap: 30000,
+        asianTotals: 30000,
+        drawNoBet: 25000,
+        firstGoal: 25000,
+        winToNil: 25000,
+        cleanSheet: 25000,
+        goalOddEven: 28000,
+        exactGoals: 30000,
+        btts1H: 25000,
+        toWinBothHalves: 28000,
+        highestScoringHalf: 25000,
+        htCorrectScore: 35000,
+        h2CorrectScore: 35000,
+        teamGoals: 28000,
+        secondHalf: 25000,
+        drawNoBet2: 25000,
+        handicapPoints: 28000,
       };
 
       // Stable odds: once assigned, keep unless score changes significantly
@@ -4822,9 +4827,18 @@ async function buildLiveMatches(): Promise<LiveMatchState[]> {
         };
       }
 
-      // Zero out htCorrectScore after 1st half (market settles at HT)
-      if ((isHT || (!isHT && !isET && minute >= 45)) && matchMarkets.htCorrectScore) {
-        matchMarkets = { ...matchMarkets, htCorrectScore: undefined };
+      // ── Remove 1st-half markets after half-time ─────────────────────────────
+      // These markets are settled at half-time and must not show in the 2nd half.
+      const in2ndHalf = !isHT && !isET && !m.penalties && minute > 45;
+      const isAtHT    = isHT;
+      if (isAtHT || in2ndHalf) {
+        matchMarkets = {
+          ...matchMarkets,
+          htCorrectScore: undefined,                          // 1T correct score — settled
+          halfTime:  { home: 0, draw: 0, away: 0 },          // 1T result — settled (zeros hide in UI)
+          btts1H:    undefined,                               // Both teams score in 1T — settled
+          firstGoal: { home: 0, noGoal: 0, away: 0 },        // First goalscorer — settled (zeros hide in UI)
+        };
       }
 
       // Live-recalculate h2CorrectScore during 2nd half from remaining λ
@@ -4887,12 +4901,13 @@ async function buildLiveMatches(): Promise<LiveMatchState[]> {
       if (dangerEvent && !matchMarketSuspension) {
         const now = Date.now();
         const VAR_SUSPENSION_MS: Record<string, number> = {
-          result: 20000, doubleChance: 18000, totalGoals: 22000, handicap: 22000,
-          halfTime: 15000, correctScore: 30000, asianHandicap: 25000, asianTotals: 25000,
-          drawNoBet: 20000, firstGoal: 20000, htft: 30000,
-          winToNil: 20000, cleanSheet: 20000, goalOddEven: 22000, exactGoals: 25000,
-          btts1H: 15000, toWinBothHalves: 22000, highestScoringHalf: 15000,
-          htCorrectScore: 30000, h2CorrectScore: 30000, teamGoals: 22000,
+          result: 45000, doubleChance: 45000, totalGoals: 50000, handicap: 50000,
+          halfTime: 45000, correctScore: 60000, asianHandicap: 55000, asianTotals: 55000,
+          drawNoBet: 45000, firstGoal: 45000, htft: 60000,
+          winToNil: 45000, cleanSheet: 45000, goalOddEven: 50000, exactGoals: 55000,
+          btts1H: 45000, toWinBothHalves: 50000, highestScoringHalf: 45000,
+          htCorrectScore: 60000, h2CorrectScore: 60000, teamGoals: 50000,
+          secondHalf: 45000, drawNoBet2: 45000, handicapPoints: 50000,
         };
         matchMarketSuspension = Object.fromEntries(
           Object.entries(VAR_SUSPENSION_MS).map(([k, delay]) => [k, now + delay])

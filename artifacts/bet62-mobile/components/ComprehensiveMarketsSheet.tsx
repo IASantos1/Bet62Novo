@@ -345,9 +345,15 @@ export function ComprehensiveMarketsSheet({ visible, match, onClose }: Props) {
   })();
 
   const isSuspendedGlobal = susp("result");
+  // Big chance: use the actual suspension reason from API (not an odds heuristic)
+  const suspReason = ((match._suspensionReason ?? match.suspensionReason) ?? "").toUpperCase();
   const isBigChance = isLive && isFootball && !isSuspendedGlobal && !isObviousLiveResult &&
-    (match.odds.home <= 1.06 || match.odds.away <= 1.06) && (match.minute ?? 0) > 0;
-  const showSuspBanner = isSuspendedGlobal || isBigChance;
+    suspReason.includes("CHANCE");
+  // Show banner when: globally suspended OR reason is set (VAR/GOLO/PENÁLTI/GRANDE CHANCE)
+  const hasReasonBanner = isLive && suspReason.length > 0 &&
+    (suspReason.includes("VAR") || suspReason.includes("GOLO") || suspReason.includes("GOAL") ||
+     suspReason.includes("PENAL") || suspReason.includes("CHANCE") || suspReason.includes("SUSPENSO"));
+  const showSuspBanner = isSuspendedGlobal || isBigChance || hasReasonBanner;
 
   function getSuspText(): string {
     if (isBigChance) {

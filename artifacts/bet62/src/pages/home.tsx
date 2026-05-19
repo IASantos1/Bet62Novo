@@ -2836,18 +2836,26 @@ export default function Home() {
     );
   };
 
-  // Returns a single wide red button when match markets are suspended, null otherwise
+  // Returns a full-width animated suspension banner; null when no suspension
   const SuspensionBanner = ({ match }: { match: Match }) => {
     const now = Date.now();
-    const isActive = match.marketSuspension && Object.values(match.marketSuspension).some(ts => ts > now);
+    const isActive = (match.marketSuspension && Object.values(match.marketSuspension).some(ts => ts > now))
+      || !!(match._suspensionReason);
     if (!isActive) return null;
-    const reason = match._suspensionReason ?? "SUSPENSO";
+    const rawReason = (match._suspensionReason ?? "SUSPENSO").toUpperCase();
+    let icon = "⏸";
+    let label = rawReason;
+    if (rawReason.includes("GOLO") || rawReason.includes("GOAL")) { icon = "⚽"; label = "GOLO MARCADO"; }
+    else if (rawReason.includes("VAR")) { icon = "📺"; label = "REVISÃO VAR"; }
+    else if (rawReason.includes("PENAL")) { icon = "🎯"; label = "PENÁLTI"; }
+    else if (rawReason.includes("CHANCE")) { icon = "⚡"; label = "GRANDE CHANCE"; }
     return (
       <button
         disabled
-        className="w-full py-2.5 px-3 rounded-md bg-red-950 border border-red-800/60 text-red-200 font-bold text-sm tracking-widest cursor-not-allowed select-none"
+        className="w-full py-2.5 px-3 rounded-md bg-red-950 border border-red-800/50 text-red-200 font-black text-sm tracking-widest cursor-not-allowed select-none animate-pulse"
+        style={{ letterSpacing: "0.2em" }}
       >
-        {reason}
+        {icon} {label} — ODDS EM ATUALIZAÇÃO
       </button>
     );
   };
@@ -3188,10 +3196,16 @@ export default function Home() {
       return false;
     })();
 
+    // Suspension: check marketSuspension timestamps OR _suspensionReason being set
+    const isLiveSuspended = match.isLive && (
+      (match.marketSuspension != null && Object.values(match.marketSuspension).some(ts => ts > Date.now()))
+      || !!(match._suspensionReason)
+    );
+
     const oddsRow = match.hasRealOdds ? (
       <div className="flex gap-2 w-full mt-2.5">
         <SuspensionBanner match={match} />
-        {!match.marketSuspension || !Object.values(match.marketSuspension).some(ts => ts > Date.now()) ? (
+        {!isLiveSuspended ? (
           isObviousLiveResult ? (
             <button
               className="flex-1 flex flex-col items-center py-2.5 px-2 rounded-md text-xs bg-amber-900/20 border border-amber-600/30"
@@ -3239,7 +3253,7 @@ export default function Home() {
             {match.hasRealOdds && (
               <div className="flex gap-2 w-full">
                 <SuspensionBanner match={match} />
-                {!match.marketSuspension || !Object.values(match.marketSuspension).some(ts => ts > Date.now()) ? (
+                {!isLiveSuspended ? (
                   isObviousLiveResult ? (
                     <button
                       className="flex-1 flex flex-col items-center py-2.5 px-2 rounded-md text-xs bg-amber-900/20 border border-amber-600/30"
@@ -3286,7 +3300,10 @@ export default function Home() {
     const rivalry = RIVALRY_TAGS[`${match.home}|${match.away}`];
     const hasDraw = match.odds.draw > 0;
 
-    const isSuspendedMatch = !!match.marketSuspension && Object.values(match.marketSuspension).some(ts => ts > Date.now());
+    const isSuspendedMatch = match.isLive && (
+      (!!match.marketSuspension && Object.values(match.marketSuspension).some(ts => ts > Date.now()))
+      || !!(match._suspensionReason)
+    );
     const OddsRow = () => match.hasRealOdds ? (
       <div className="flex gap-2 w-full">
         <SuspensionBanner match={match} />
@@ -3926,9 +3943,19 @@ export default function Home() {
   }
 
   const MarketOddsBtn = ({ match, sel, odd, market, label }: { match: Match; sel: string; odd: number; market: string; label: string }) => {
+    if (odd <= 0) return null; // settled/impossible market line — hide completely
     if (market === "result" && odd <= 1.01) return null;
-    const isSusp = !!match.marketSuspension && Object.values(match.marketSuspension).some(ts => ts > Date.now());
-    if (isSusp) return null;
+    const isSusp = (!!match.marketSuspension && Object.values(match.marketSuspension).some(ts => ts > Date.now()))
+      || !!(match._suspensionReason);
+    if (isSusp) {
+      // Show a locked placeholder so section headers don't look empty
+      return (
+        <div className="flex-1 flex flex-col items-center py-2.5 px-1 rounded-lg border border-zinc-800 bg-zinc-900/60 min-w-0 opacity-60 cursor-not-allowed select-none">
+          <span className="text-[10px] text-zinc-600 mb-1 leading-tight text-center truncate w-full px-0.5">{label}</span>
+          <svg className="text-zinc-600" width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zm-6 9c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2zm3.1-9H8.9V6c0-1.71 1.39-3.1 3.1-3.1 1.71 0 3.1 1.39 3.1 3.1v2z"/></svg>
+        </div>
+      );
+    }
     const active = !!bets.find(b => b.matchId === match.id && b.market === market && b.selection === sel);
     const prevOdd = match.isLive ? prevLiveMarkets.current[String(match.id)]?.[`${market}:${sel}`] : undefined;
     // Server controls update cadence — only animate when actual data changed >= threshold
@@ -4333,7 +4360,7 @@ export default function Home() {
         {/* ── FUTEBOL: BTTS 1º TEMPO / ÍMPAR-PAR / GOLS EXATOS ── */}
         {isFootball && !showET && !showPen && !isLateGame && (modalTab === "gols" || modalTab === "todos") && m && (
           <div>
-            {(m as any).btts1H?.yes > 0 && (
+            {show1tempo && (m as any).btts1H?.yes > 0 && (
               <MarketGroup title="Ambas Marcam — 1º Tempo">
                 <MarketOddsBtn match={match} sel="btts1h-y" odd={(m as any).btts1H.yes} market="gols" label="Sim" />
                 <MarketOddsBtn match={match} sel="btts1h-n" odd={(m as any).btts1H.no} market="gols" label="Não" />
