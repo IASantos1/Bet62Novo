@@ -6068,22 +6068,16 @@ export default function Home() {
                   </p>
 
 
-                  <div className="flex flex-wrap gap-3">
-                    {auth.user ? (
-                      <Button size="lg" className="bg-red-600 hover:bg-red-700 text-white font-black text-base px-8 h-12 italic">
-                        FAZER DEPÓSITO <ChevronRight size={18} className="ml-1" />
+                  {!auth.user && (
+                    <div className="flex flex-wrap gap-3">
+                      <Button size="lg" onClick={() => setAuthModalOpen(true)} className="bg-red-600 hover:bg-red-700 text-white font-black text-base px-8 h-12 italic">
+                        CRIAR CONTA <ChevronRight size={18} className="ml-1" />
                       </Button>
-                    ) : (
-                      <>
-                        <Button size="lg" onClick={() => setAuthModalOpen(true)} className="bg-red-600 hover:bg-red-700 text-white font-black text-base px-8 h-12 italic">
-                          CRIAR CONTA <ChevronRight size={18} className="ml-1" />
-                        </Button>
-                        <Button size="lg" variant="outline" onClick={() => setAuthModalOpen(true)} className="border-zinc-700 text-zinc-300 hover:bg-zinc-800 h-12 px-8">
-                          JÁ TENHO CONTA
-                        </Button>
-                      </>
-                    )}
-                  </div>
+                      <Button size="lg" variant="outline" onClick={() => setAuthModalOpen(true)} className="border-zinc-700 text-zinc-300 hover:bg-zinc-800 h-12 px-8">
+                        JÁ TENHO CONTA
+                      </Button>
+                    </div>
+                  )}
                 </motion.div>
               </div>
             </div>
@@ -7929,25 +7923,6 @@ export default function Home() {
 
               return (
                 <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
-                  {!selectedLeague && (
-                    <div className="mb-4 relative overflow-hidden rounded-xl cursor-pointer select-none group"
-                      onClick={() => { setSelectedSport("football"); setSelectedWC(true); setSelectedLeague(null); }}>
-                      <motion.img
-                        src="/copa-banner.jpeg"
-                        className="w-full object-cover block"
-                        style={{ height: 180 }}
-                        animate={{ x: [0, -8, 8, -4, 0], scaleX: [1, 1.012, 0.988, 1.006, 1] }}
-                        transition={{ duration: 5, repeat: Infinity, ease: "easeInOut" }}
-                      />
-                      <div className="absolute inset-0 bg-gradient-to-t from-black/20 to-transparent pointer-events-none" />
-                      <button
-                        className="absolute bottom-3 right-3 bg-red-600 group-hover:bg-red-500 text-white text-sm font-bold px-5 py-2.5 rounded-xl shadow-lg shadow-red-900/40 transition-colors"
-                        onClick={(e) => { e.stopPropagation(); setSelectedSport("football"); setSelectedWC(true); setSelectedLeague(null); }}
-                      >
-                        APOSTAR JÁ →
-                      </button>
-                    </div>
-                  )}
                   {selectedWC && (
                     <div className="mb-3 flex items-center gap-2">
                       <button
@@ -8004,16 +7979,28 @@ export default function Home() {
                         if (ml && !seenLabels.has(ml.label)) { seenLabels.add(ml.label); chips.push({ label: ml.label, logo: ml.logo, color: ml.color }); }
                       }
                     }
-                    if (chips.length < 2) return null;
+                    const showWCChip = selectedSport === "football" || selectedSport === "all";
+                    if (chips.length < 2 && !showWCChip) return null;
                     return (
                       <div className="overflow-x-auto flex gap-2.5 pb-3 mb-5 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
-                        <button
-                          onClick={() => setSelectedLeague(null)}
-                          className={`flex items-center gap-2 px-3.5 py-2.5 rounded-xl border whitespace-nowrap text-sm font-semibold transition-all flex-shrink-0 ${!selectedLeague ? "border-amber-500 bg-amber-500/10 text-white shadow-[0_0_10px_rgba(245,158,11,0.18)]" : "border-zinc-700 bg-zinc-900/60 text-zinc-300 hover:border-zinc-500 hover:text-white"}`}
-                        >
-                          <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="shrink-0"><rect width="7" height="7" x="3" y="3" rx="1"/><rect width="7" height="7" x="14" y="3" rx="1"/><rect width="7" height="7" x="14" y="14" rx="1"/><rect width="7" height="7" x="3" y="14" rx="1"/></svg>
-                          <span>Todas</span>
-                        </button>
+                        {showWCChip && (
+                          <button
+                            onClick={() => { setSelectedWC(!selectedWC); setSelectedLeague(null); if (!selectedWC) setSelectedSport("football"); }}
+                            className={`flex items-center gap-2 px-3.5 py-2.5 rounded-xl border whitespace-nowrap text-sm font-semibold transition-all flex-shrink-0 ${selectedWC ? "border-amber-500 bg-amber-500/10 text-white shadow-[0_0_10px_rgba(245,158,11,0.18)]" : "border-zinc-700 bg-zinc-900/60 text-zinc-300 hover:border-zinc-500 hover:text-white"}`}
+                          >
+                            <span className="text-base leading-none">🌍</span>
+                            <span>Mundial 2026</span>
+                          </button>
+                        )}
+                        {chips.length >= 2 && (
+                          <button
+                            onClick={() => setSelectedLeague(null)}
+                            className={`flex items-center gap-2 px-3.5 py-2.5 rounded-xl border whitespace-nowrap text-sm font-semibold transition-all flex-shrink-0 ${!selectedLeague && !selectedWC ? "border-amber-500 bg-amber-500/10 text-white shadow-[0_0_10px_rgba(245,158,11,0.18)]" : "border-zinc-700 bg-zinc-900/60 text-zinc-300 hover:border-zinc-500 hover:text-white"}`}
+                          >
+                            <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="shrink-0"><rect width="7" height="7" x="3" y="3" rx="1"/><rect width="7" height="7" x="14" y="3" rx="1"/><rect width="7" height="7" x="14" y="14" rx="1"/><rect width="7" height="7" x="3" y="14" rx="1"/></svg>
+                            <span>Todas</span>
+                          </button>
+                        )}
                         {chips.map((c, i) => {
                           const active = selectedLeague === c.label;
                           return (
