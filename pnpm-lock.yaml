@@ -435,8 +435,8 @@ importers:
   artifacts/bet62-mobile:
     dependencies:
       expo-local-authentication:
-        specifier: ^55.0.14
-        version: 55.0.14(expo@54.0.34)
+        specifier: ~17.0.8
+        version: 17.0.8(expo@54.0.34)
       react-native-sse:
         specifier: ^1.2.1
         version: 1.2.1
@@ -3658,8 +3658,8 @@ packages:
       react: '*'
       react-native: '*'
 
-  expo-local-authentication@55.0.14:
-    resolution: {integrity: sha512-7yMXn/3A/rHUeqxXApkmtANFRCrECEMEnYPKfR6hLHBB5GdoZ3aeIdgkj809yyKT76jW6X8+aNAI938O769KQw==}
+  expo-local-authentication@17.0.8:
+    resolution: {integrity: sha512-Q5fXHhu6w3pVPlFCibU72SYIAN+9wX7QpFn9h49IUqs0Equ44QgswtGrxeh7fdnDqJrrYGPet5iBzjnE70uolA==}
     peerDependencies:
       expo: '*'
 
@@ -9576,7 +9576,7 @@ snapshots:
       - expo
       - supports-color
 
-  expo-local-authentication@55.0.14(expo@54.0.34):
+  expo-local-authentication@17.0.8(expo@54.0.34):
     dependencies:
       expo: 54.0.34(@babel/core@7.29.0)(@expo/metro-runtime@6.1.2)(expo-router@6.0.23)(react-native@0.81.5(@babel/core@7.29.0)(@types/react@19.1.17)(react@19.1.0))(react@19.1.0)(typescript@5.9.3)
       invariant: 2.2.4

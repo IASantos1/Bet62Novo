@@ -9428,7 +9428,7 @@ export default function Home() {
                                 const displayMin = lm ? (lm.status === "HT" ? "HT" : `${lm.minute ?? 0}'`) : null;
 
                                 // Per-selection left icon
-                                let leftIcon: React.ReactNode;
+                                let leftIcon: ReactNode;
                                 if (isLost) {
                                   // For lost bets: show individual win/loss per selection
                                   const indivOk = outcome !== "red";

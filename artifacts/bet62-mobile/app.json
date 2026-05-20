@@ -30,6 +30,9 @@
       "expo-font",
       "expo-web-browser"
     ],
+    "assetBundlePatterns": [
+      "**/*"
+    ],
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
