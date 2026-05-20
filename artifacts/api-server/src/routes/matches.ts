@@ -2706,7 +2706,16 @@ function applyTieredMarketDrift(state: LiveMatchState, now: number): LiveMatchSt
       : state.markets.doubleChance,
 
     bothTeamsScore: btsDue
-      ? { yes: s1(bm.bothTeamsScore.yes), no: s1(bm.bothTeamsScore.no) }
+      ? (() => {
+          const live = recalcLiveBothTeamsScore(
+            state.home, state.away,
+            state.homeScore ?? 0, state.awayScore ?? 0,
+            state.minute ?? 0, state.status,
+            state.markets.bothTeamsScore
+          );
+          if (!live || live.yes <= 0) return state.markets.bothTeamsScore;
+          return { yes: s1(live.yes), no: s1(live.no) };
+        })()
       : state.markets.bothTeamsScore,
 
     totalGoals: tgDue
@@ -2729,6 +2738,25 @@ function applyTieredMarketDrift(state: LiveMatchState, now: number): LiveMatchSt
           };
         })()
       : state.markets.totalGoals,
+
+    teamGoals: tgDue && state.markets.teamGoals
+      ? (() => {
+          const live = recalcLiveTeamGoals(
+            state.home, state.away,
+            state.homeScore ?? 0, state.awayScore ?? 0,
+            state.minute ?? 0, state.status,
+            state.markets.teamGoals
+          );
+          return {
+            homeOver05: live.homeOver05 > 0 ? s1(live.homeOver05) : 0, homeUnder05: live.homeUnder05 > 0 ? s1(live.homeUnder05) : 0,
+            homeOver15: live.homeOver15 > 0 ? s1(live.homeOver15) : 0, homeUnder15: live.homeUnder15 > 0 ? s1(live.homeUnder15) : 0,
+            homeOver25: live.homeOver25 > 0 ? s1(live.homeOver25) : 0, homeUnder25: live.homeUnder25 > 0 ? s1(live.homeUnder25) : 0,
+            awayOver05: live.awayOver05 > 0 ? s1(live.awayOver05) : 0, awayUnder05: live.awayUnder05 > 0 ? s1(live.awayUnder05) : 0,
+            awayOver15: live.awayOver15 > 0 ? s1(live.awayOver15) : 0, awayUnder15: live.awayUnder15 > 0 ? s1(live.awayUnder15) : 0,
+            awayOver25: live.awayOver25 > 0 ? s1(live.awayOver25) : 0, awayUnder25: live.awayUnder25 > 0 ? s1(live.awayUnder25) : 0,
+          };
+        })()
+      : state.markets.teamGoals,
 
     handicap: hcDue ? {
       homeMinusOne:     s1(bm.handicap.homeMinusOne),
@@ -2856,6 +2884,77 @@ function recalcLiveTotalGoals(
     over55: o55, under55: u55,
     over65: o65, under65: u65,
   };
+}
+
+// Per-team goal O/U live recalculation using remaining Poisson lambda per team
+function recalcLiveTeamGoals(
+  home: string,
+  away: string,
+  homeScore: number,
+  awayScore: number,
+  minute: number,
+  status: string,
+  settled: NonNullable<AdvancedMarkets["teamGoals"]>
+): NonNullable<AdvancedMarkets["teamGoals"]> {
+  const { lambdaHome, lambdaAway } = soccerPoissonModel(home, away);
+  const isHT = status === "HT";
+  const remainingMins = isHT ? 45 : Math.max(1, 90 - Math.min(90, minute));
+  const lambdaRemH = lambdaHome * (remainingMins / 90);
+  const lambdaRemA = lambdaAway * (remainingMins / 90);
+
+  const recalcTeamLine = (cur: number, targetTotal: number, teamScore: number, lambdaRem: number): [number, number] => {
+    if (cur <= 0) return [0, 0];
+    const needed = Math.max(1, targetTotal - teamScore);
+    const pOver = mc(1 - poissonCdf(lambdaRem, needed - 1), 0.01, 0.99);
+    const pUnder = mc(1 - pOver, 0.01, 0.99);
+    const [oOdds, uOdds] = probsToDecimalOdds([pOver, pUnder], 1.06);
+    return [oOdds!, uOdds!];
+  };
+
+  const [hO05, hU05] = recalcTeamLine(settled.homeOver05, 1, homeScore, lambdaRemH);
+  const [hO15, hU15] = recalcTeamLine(settled.homeOver15, 2, homeScore, lambdaRemH);
+  const [hO25, hU25] = recalcTeamLine(settled.homeOver25, 3, homeScore, lambdaRemH);
+  const [aO05, aU05] = recalcTeamLine(settled.awayOver05, 1, awayScore, lambdaRemA);
+  const [aO15, aU15] = recalcTeamLine(settled.awayOver15, 2, awayScore, lambdaRemA);
+  const [aO25, aU25] = recalcTeamLine(settled.awayOver25, 3, awayScore, lambdaRemA);
+
+  return {
+    homeOver05: hO05, homeUnder05: hU05,
+    homeOver15: hO15, homeUnder15: hU15,
+    homeOver25: hO25, homeUnder25: hU25,
+    awayOver05: aO05, awayUnder05: aU05,
+    awayOver15: aO15, awayUnder15: aU15,
+    awayOver25: aO25, awayUnder25: aU25,
+  };
+}
+
+// Live "Ambas Marcam" recalculation: accounts for which teams have already scored.
+function recalcLiveBothTeamsScore(
+  home: string,
+  away: string,
+  homeScore: number,
+  awayScore: number,
+  minute: number,
+  status: string,
+  settled: AdvancedMarkets["bothTeamsScore"]
+): AdvancedMarkets["bothTeamsScore"] {
+  if (!settled || settled.yes <= 0) return settled;
+  const { lambdaHome, lambdaAway } = soccerPoissonModel(home, away);
+  const isHT = status === "HT";
+  const remainingMins = isHT ? 45 : Math.max(1, 90 - Math.min(90, minute));
+  const lambdaRemH = lambdaHome * (remainingMins / 90);
+  const lambdaRemA = lambdaAway * (remainingMins / 90);
+  // P(team scores ≥1 from now) = 1 − e^(−λ_rem)
+  const pHomeSc = 1 - Math.exp(-lambdaRemH);
+  const pAwaySc = 1 - Math.exp(-lambdaRemA);
+  let pYes: number;
+  if (homeScore >= 1 && awayScore >= 1) return { yes: 0, no: 0 }; // already settled
+  else if (homeScore >= 1) pYes = pAwaySc;   // only away needs to score
+  else if (awayScore >= 1) pYes = pHomeSc;   // only home needs to score
+  else pYes = pHomeSc * pAwaySc;             // both must still score
+  pYes = mc(pYes, 0.02, 0.98);
+  const [yes, no] = probsToDecimalOdds([pYes, 1 - pYes], 1.06);
+  return { yes: yes!, no: no! };
 }
 
 /**
@@ -3151,7 +3250,12 @@ function recalcLiveH2CorrectScore(
 
 // Remove/zero out market lines that are already settled or impossible given the current live score
 function filterLiveMarkets(markets: AdvancedMarkets, homeScore: number, awayScore: number, status?: string): AdvancedMarkets {
-  const m: AdvancedMarkets = { ...markets, totalGoals: { ...markets.totalGoals } };
+  const m: AdvancedMarkets = {
+    ...markets,
+    totalGoals: { ...markets.totalGoals },
+    ...(markets.teamGoals  ? { teamGoals:  { ...markets.teamGoals  } } : {}),
+    ...(markets.exactGoals ? { exactGoals: { ...markets.exactGoals } } : {}),
+  };
   const totalGoals = homeScore + awayScore;
 
   // Correct Score: only keep scorelines that are still achievable (both sides >= current score)
@@ -4914,6 +5018,18 @@ async function buildLiveMatches(): Promise<LiveMatchState[]> {
             homeScore + awayScore, minute, m.status,
             matchMarkets.totalGoals
           ),
+          ...(matchMarkets.teamGoals ? {
+            teamGoals: recalcLiveTeamGoals(
+              m.home.name, m.away.name,
+              homeScore, awayScore, minute, m.status,
+              matchMarkets.teamGoals
+            ),
+          } : {}),
+          bothTeamsScore: recalcLiveBothTeamsScore(
+            m.home.name, m.away.name,
+            homeScore, awayScore, minute, m.status,
+            matchMarkets.bothTeamsScore
+          ) ?? matchMarkets.bothTeamsScore,
         };
 
         // Recalculate halfTime / secondHalf immediately on score change (Poisson-based)
