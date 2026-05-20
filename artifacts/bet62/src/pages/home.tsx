@@ -7,6 +7,7 @@ import {
   LogOut, User, History, Loader2, Zap, TrendingUp,
   ChevronRight, ChevronLeft, ChevronDown, ChevronUp, AlertCircle, BarChart2, Wallet, ArrowDownCircle, ArrowUpCircle, Plus, Clock, Smartphone,
   Copy, Share2, CircleDollarSign, Lock, Trash2, Check, Fingerprint, ScanFace, ShieldCheck,
+  RefreshCw, Ticket, CalendarDays, ListOrdered,
 } from "lucide-react";
 import ProfileTab from "@/components/ProfileTab";
 import { Button } from "@/components/ui/button";
@@ -9347,218 +9348,252 @@ export default function Home() {
                     </div>
                   );
                   return (
-                    <div className="space-y-3">
+                    <div className="space-y-4">
                       {filtered.map(bet => {
                         const sels = getBetSelections(bet);
                         const isMultiple = sels.length > 1;
-                        const betTypeLabel = isMultiple ? `Múltipla de ${sels.length}` : "Simples";
-                        const isCollapsed = collapsedBets.has(bet.id);
                         const isPending = bet.status === "pending";
                         const localOutcome = resolvedBetOutcomes.get(bet.id);
                         const effectiveStatus = localOutcome ?? bet.status;
-                        const statusCls = isPending && !localOutcome ? "bg-zinc-700 text-zinc-300"
-                          : effectiveStatus === "won" ? "bg-green-800 text-green-300"
-                          : effectiveStatus === "lost" ? "bg-red-900/60 text-red-400"
-                          : bet.status === "cashed_out" ? "bg-yellow-900/50 text-yellow-400"
-                          : "bg-zinc-700 text-zinc-300";
-                        const statusLbl = isPending && !localOutcome ? "ABERTA"
-                          : effectiveStatus === "won" ? "GANHA"
-                          : effectiveStatus === "lost" ? "PERDIDA"
-                          : bet.status === "cashed_out" ? "CASH OUT"
-                          : "ABERTA";
+                        const isWon = effectiveStatus === "won";
+                        const isLost = effectiveStatus === "lost";
+                        const isCashedOut = bet.status === "cashed_out";
+                        const ticketCode = `BT62-${String(bet.id).padStart(6, "0")}`;
+                        const betDate = new Date(bet.createdAt);
+                        const dateStr = betDate.toLocaleDateString("pt-PT", { day: "2-digit", month: "2-digit", year: "numeric" });
+                        const timeStr = betDate.toLocaleTimeString("pt-PT", { hour: "2-digit", minute: "2-digit" });
+
+                        const isActivePending = isPending && !localOutcome;
+                        // Card & text colours
+                        const cardBg   = isLost ? "bg-[#7b1111]" : "bg-white";
+                        const selsBg   = isLost ? "bg-[#8f1616]" : "bg-white";
+                        const divider  = isLost ? "divide-[#a02020]/50" : "divide-gray-100";
+                        const txtMain  = isLost ? "text-white"     : "text-gray-900";
+                        const txtSub   = isLost ? "text-red-200"   : "text-gray-500";
+                        const summBg   = isLost ? "bg-[#6b0f0f]/60 border-[#a02020]/40" : "bg-gray-50 border-gray-100";
+                        const summDiv  = isLost ? "divide-[#a02020]/30" : "divide-gray-100";
+                        const summTxt  = isLost ? "text-red-100"   : "text-gray-600";
 
                         return (
-                          <div key={bet.id} className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden">
-                            {/* Header */}
-                            <div className="px-4 pt-4 pb-3 flex items-center justify-between gap-2">
-                              <div className="flex items-center gap-2 min-w-0">
-                                <span className="font-black text-white text-sm">{betTypeLabel}</span>
-                                <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${statusCls}`}>{statusLbl}</span>
-                              </div>
-                              <div className="flex items-center gap-2 text-zinc-500 shrink-0">
-                                <span className="text-xs font-mono">ID: {bet.id}</span>
-                                <button
-                                  onClick={() => { navigator.clipboard.writeText(String(bet.id)); toast.success("ID copiado!"); }}
-                                  className="hover:text-zinc-200 transition-colors p-0.5" title="Copiar ID">
-                                  <Copy size={12} />
-                                </button>
-                                <button onClick={() => toggleBetCollapse(bet.id)} className="hover:text-zinc-200 transition-colors p-0.5">
-                                  {isCollapsed ? <ChevronDown size={16} /> : <ChevronUp size={16} />}
-                                </button>
-                              </div>
-                            </div>
+                          <div key={bet.id} className={`rounded-2xl overflow-hidden shadow-xl ${cardBg}`} style={{ boxShadow: isLost ? "0 8px 32px rgba(120,0,0,0.5)" : "0 4px 20px rgba(0,0,0,0.35)" }}>
 
-                            {/* Stats row */}
-                            <div className="grid grid-cols-3 border-t border-zinc-800">
-                              <div className="px-4 py-2.5">
-                                <div className="text-xs text-zinc-500 mb-0.5">Cota Total</div>
-                                <div className="font-black text-white text-sm">{parseFloat(bet.totalOdds).toFixed(2)}</div>
-                              </div>
-                              <div className="px-4 py-2.5 border-x border-zinc-800">
-                                <div className="text-xs text-zinc-500 mb-0.5">Valor da Aposta</div>
-                                <div className="font-black text-white text-sm">€ {parseFloat(bet.stake).toFixed(2)}</div>
-                              </div>
-                              <div className="px-4 py-2.5">
-                                <div className="text-xs text-zinc-500 mb-0.5">Possível Retorno</div>
-                                <div className={`font-black text-sm ${isPending && !localOutcome ? "text-red-400" : effectiveStatus === "won" ? "text-green-400" : "text-zinc-500"}`}>
-                                  € {parseFloat(bet.potentialWin).toFixed(2)}
+                            {/* ── HEADER ── */}
+                            <div className="bg-red-700 px-5 py-4 flex items-center justify-between">
+                              <div className="flex items-center gap-3">
+                                <div className="bg-white/20 rounded-xl p-2 shrink-0">
+                                  <ListOrdered size={20} className="text-white" />
+                                </div>
+                                <div>
+                                  <div className="font-black text-white text-[17px] leading-tight italic">Boletim de Aposta</div>
+                                  <div className="flex items-center gap-1.5 text-red-200 text-[11px] font-medium mt-0.5">
+                                    <CalendarDays size={11} />
+                                    {dateStr} • {timeStr}
+                                  </div>
                                 </div>
                               </div>
+                              {isActivePending && (
+                                <div className="w-9 h-9 bg-white/25 border-2 border-white/60 rounded-full flex items-center justify-center shrink-0">
+                                  <Check size={18} className="text-white" strokeWidth={3} />
+                                </div>
+                              )}
+                              {isWon && (
+                                <div className="w-9 h-9 bg-white rounded-full flex items-center justify-center shrink-0 shadow-lg">
+                                  <Check size={18} className="text-red-600" strokeWidth={3} />
+                                </div>
+                              )}
+                              {isLost && (
+                                <div className="w-9 h-9 bg-white/20 border-2 border-white/40 rounded-full flex items-center justify-center shrink-0">
+                                  <X size={18} className="text-white" strokeWidth={3} />
+                                </div>
+                              )}
+                              {isCashedOut && (
+                                <div className="w-9 h-9 bg-yellow-400 rounded-full flex items-center justify-center shrink-0 shadow-lg">
+                                  <CircleDollarSign size={18} className="text-yellow-900" />
+                                </div>
+                              )}
                             </div>
 
-                            {/* Selections */}
-                            {!isCollapsed && (
-                              <div className="divide-y divide-zinc-800/60 border-t border-zinc-800">
-                                {sels.map((sel, i) => {
-                                  const outcome = getSelOutcome(sel, bet.status);
-                                  const lm = isPending ? findLiveMatchForSel(sel) : null;
-                                  const liveOdd = lm ? getLiveOddForSel(sel, lm) : null;
-                                  const isHT = lm?.status === "HT";
-                                  const displayMin = lm ? (isHT ? "HT" : `${lm.minute ?? 0}'`) : null;
-                                  // Left indicator icon
-                                  const SelIcon = () => {
-                                    // Server-settled outcomes
-                                    if (outcome === "green") return (
-                                      <div className="w-6 h-6 rounded-full bg-green-600 flex items-center justify-center shrink-0 mt-0.5">
-                                        <Check size={13} className="text-white" strokeWidth={3} />
-                                      </div>
-                                    );
-                                    if (outcome === "red") return (
-                                      <div className="w-6 h-6 rounded-full bg-red-700 flex items-center justify-center shrink-0 mt-0.5">
-                                        <X size={13} className="text-white" strokeWidth={3} />
-                                      </div>
-                                    );
-                                    if (outcome === "cashout") return (
-                                      <div className="w-6 h-6 rounded-full bg-yellow-700/80 flex items-center justify-center shrink-0 mt-0.5">
-                                        <CircleDollarSign size={13} className="text-white" />
-                                      </div>
-                                    );
-                                    // While match is live: numbered circle only — no win/lose icons during play
-                                    if (lm) return (
-                                      <div className="w-6 h-6 rounded-full bg-red-700 flex items-center justify-center shrink-0 text-xs font-black text-white mt-0.5 leading-none">
-                                        {i + 1}
-                                      </div>
-                                    );
-                                    // Match finished: show outcome from final score if known
-                                    const normT2 = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
-                                    const [th2 = "", ta2 = ""] = sel.matchTitle.split(" vs ");
-                                    const fsKey = `${normT2(th2)}-${normT2(ta2)}`;
-                                    const fs = finishedMatchScores.current.get(fsKey);
-                                    if (fs) {
-                                      const finalOutcome = scoreOutcomeForSel(sel, fs);
-                                      if (finalOutcome === "won") return (
-                                        <div className="w-6 h-6 rounded-full bg-green-700/70 border border-green-500/40 flex items-center justify-center shrink-0 mt-0.5">
-                                          <Check size={12} className="text-green-300" strokeWidth={3} />
-                                        </div>
-                                      );
-                                      if (finalOutcome === "lost") return (
-                                        <div className="w-6 h-6 rounded-full bg-red-900/70 border border-red-500/40 flex items-center justify-center shrink-0 mt-0.5">
-                                          <X size={12} className="text-red-400" strokeWidth={3} />
-                                        </div>
-                                      );
-                                    }
-                                    // Still pending/unknown
-                                    return (
-                                      <div className="w-6 h-6 rounded-full bg-red-600 flex items-center justify-center shrink-0 text-xs font-black text-white mt-0.5 leading-none">
-                                        {i + 1}
-                                      </div>
-                                    );
-                                  };
-                                  return (
-                                  <div key={i} className="px-4 py-3 flex items-start gap-3">
-                                    <SelIcon />
+                            {/* ── SELECTIONS HEADER ── */}
+                            <div className={`px-5 pt-4 pb-2 flex items-center gap-2 ${isLost ? "bg-[#8f1616]" : "bg-gray-50 border-b border-gray-100"}`}>
+                              <ListOrdered size={13} className={txtSub} />
+                              <span className={`text-[11px] font-black uppercase tracking-widest ${txtSub}`}>Seleções</span>
+                            </div>
+
+                            {/* ── SELECTIONS LIST ── */}
+                            <div className={`${selsBg} divide-y ${divider}`}>
+                              {sels.map((sel, i) => {
+                                const outcome = getSelOutcome(sel, bet.status);
+                                const lm = isActivePending ? findLiveMatchForSel(sel) : null;
+                                const liveOdd = lm ? getLiveOddForSel(sel, lm) : null;
+                                const displayMin = lm ? (lm.status === "HT" ? "HT" : `${lm.minute ?? 0}'`) : null;
+
+                                // Per-selection left icon
+                                let leftIcon: React.ReactNode;
+                                if (isLost) {
+                                  // For lost bets: show individual win/loss per selection
+                                  const indivOk = outcome !== "red";
+                                  leftIcon = indivOk
+                                    ? <div className="w-6 h-6 rounded-full bg-white/30 flex items-center justify-center shrink-0"><Check size={13} className="text-white" strokeWidth={3} /></div>
+                                    : <div className="w-6 h-6 rounded-full bg-red-950/60 border border-white/20 flex items-center justify-center shrink-0"><X size={13} className="text-white" strokeWidth={2.5} /></div>;
+                                } else if (isWon) {
+                                  leftIcon = <div className="w-6 h-6 rounded-full bg-green-500 flex items-center justify-center shrink-0"><Check size={13} className="text-white" strokeWidth={3} /></div>;
+                                } else if (isCashedOut) {
+                                  leftIcon = <div className="w-6 h-6 rounded-full bg-yellow-500/70 flex items-center justify-center shrink-0"><CircleDollarSign size={11} className="text-white" /></div>;
+                                } else {
+                                  leftIcon = <span className="text-xl shrink-0 leading-none">⚽</span>;
+                                }
+
+                                // Final score for resolved bets
+                                const normT = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
+                                const [th = "", ta = ""] = sel.matchTitle.split(" vs ");
+                                const fsKey = `${normT(th)}-${normT(ta)}`;
+                                const fs = !isActivePending ? finishedMatchScores.current.get(fsKey) : null;
+
+                                return (
+                                  <div key={i} className="px-5 py-3.5 flex items-start gap-3">
+                                    {leftIcon}
                                     <div className="flex-1 min-w-0">
-                                      <div className="font-bold text-white text-sm leading-snug">{getSelLabel(sel)}</div>
-                                      <div className="text-xs text-zinc-500 mt-0.5">{MARKET_LABEL[sel.market ?? "result"] ?? "Mercado"}</div>
-                                      <div className="text-xs text-zinc-600 mt-0.5 truncate">{sel.matchTitle}</div>
+                                      <div className={`font-bold text-[13px] leading-snug ${txtMain}`}>
+                                        {i + 1}. {sel.matchTitle}
+                                      </div>
+                                      <div className={`text-[11px] mt-0.5 ${txtSub}`}>{getSelLabel(sel)}</div>
+                                      {/* Live badge */}
                                       {lm && (
                                         <div className="flex items-center gap-2 mt-1.5 flex-wrap">
-                                          <span className="flex items-center gap-1 text-[10px] font-black text-red-400 uppercase tracking-wide">
-                                            <Clock size={10} className="text-red-400 shrink-0" />
-                                            {displayMin ?? "Ao Vivo"}
+                                          <span className="flex items-center gap-1 bg-red-600 text-white text-[10px] font-black px-2 py-0.5 rounded-full">
+                                            Ao vivo <span className="inline-block w-1.5 h-1.5 rounded-full bg-white animate-pulse ml-0.5" />
                                           </span>
-                                          <span className="text-xs font-black text-white tabular-nums">
-                                            {lm.homeScore} – {lm.awayScore}
-                                          </span>
+                                          <span className="text-[11px] font-black text-gray-700 tabular-nums">{displayMin} • {lm.homeScore}–{lm.awayScore}</span>
                                           {liveOdd !== null && Math.abs(liveOdd - sel.odd) > 0.01 && (
-                                            <span className={`text-[10px] font-bold ${liveOdd < sel.odd ? "text-green-400" : "text-red-400"}`}>
+                                            <span className={`text-[10px] font-bold ${liveOdd < sel.odd ? "text-green-500" : "text-red-500"}`}>
                                               {liveOdd < sel.odd ? "▼" : "▲"} {liveOdd.toFixed(2)}
                                             </span>
                                           )}
                                         </div>
                                       )}
-                                      {!lm && !isPending && (() => {
-                                        const normT = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
-                                        const [th = "", ta = ""] = sel.matchTitle.split(" vs ");
-                                        const key = `${normT(th)}-${normT(ta)}`;
-                                        const fs = finishedMatchScores.current.get(key);
-                                        if (!fs) return null;
-                                        return (
-                                          <div className="flex items-center gap-1.5 mt-1.5">
-                                            <span className="text-[10px] text-zinc-500 uppercase tracking-wide font-bold">Resultado Final</span>
-                                            <span className="text-xs font-black text-zinc-300 tabular-nums bg-zinc-800 px-2 py-0.5 rounded">
-                                              {fs.home} – {fs.away}
-                                            </span>
-                                          </div>
-                                        );
-                                      })()}
+                                      {/* Final score */}
+                                      {fs && (
+                                        <div className={`text-[11px] mt-1 font-semibold ${txtSub}`}>
+                                          Resultado: {fs.home} - {fs.away}
+                                        </div>
+                                      )}
                                     </div>
-                                    <div className="font-bold text-white text-sm shrink-0 pt-0.5">{Number(sel.odd).toFixed(2)}</div>
+                                    <div className="flex flex-col items-end gap-1 shrink-0">
+                                      <div className="bg-red-600 text-white font-black text-[13px] px-3 py-1 rounded-lg tabular-nums">
+                                        {Number(sel.odd).toFixed(2)}
+                                      </div>
+                                      {isWon && (
+                                        <span className="text-[10px] font-black text-green-600 flex items-center gap-0.5">⚽ VENCIDO</span>
+                                      )}
+                                    </div>
                                   </div>
-                                  );
-                                })}
-                              </div>
-                            )}
+                                );
+                              })}
+                            </div>
 
-                            {/* Cash Out row */}
-                            {isPending && !isCollapsed && (
+                            {/* ── SUMMARY BOX ── */}
+                            <div className={`mx-4 my-4 rounded-xl border divide-y ${summBg} ${summDiv}`}>
+                              {[
+                                {
+                                  label: "Tipo de aposta:",
+                                  value: isMultiple ? "Múltipla" : "Simples",
+                                  valueCls: "text-red-500 font-bold",
+                                },
+                                {
+                                  label: "Total de odds:",
+                                  value: parseFloat(bet.totalOdds).toFixed(2),
+                                  valueCls: `font-semibold ${txtMain}`,
+                                },
+                                {
+                                  label: "Valor apostado:",
+                                  value: `€${parseFloat(bet.stake).toFixed(2)}`,
+                                  valueCls: `font-semibold ${txtMain}`,
+                                },
+                                {
+                                  label: isWon ? "Retorno recebido:" : isLost ? "Retorno:" : "Retorno estimado:",
+                                  value: isLost ? "€0,00" : `€${parseFloat(bet.potentialWin).toFixed(2)}`,
+                                  valueCls: isWon ? "font-black text-green-600 text-base" : isLost ? "font-bold text-red-100" : `font-black ${txtMain}`,
+                                },
+                              ].map(({ label, value, valueCls }, ri) => (
+                                <div key={ri} className={`flex items-center justify-between px-4 py-3 text-sm ${summTxt}`}>
+                                  <span>{label}</span>
+                                  <span className={valueCls}>{value}</span>
+                                </div>
+                              ))}
+                            </div>
+
+                            {/* ── CASH OUT BUTTON ── */}
+                            {isActivePending ? (
                               cashoutExpandedId === bet.id ? (
-                                <div className="border-t border-zinc-800 bg-zinc-900/80 px-4 py-3 flex items-center gap-3">
-                                  <CircleDollarSign size={18} className="text-green-400 shrink-0" />
-                                  <div className="flex-1 min-w-0">
-                                    <span className="text-[11px] text-zinc-500 block leading-none mb-0.5">Cash Out estimado</span>
-                                    <span className="font-black text-green-400 text-base leading-none">€ {cashoutEstimate(bet)}</span>
+                                <div className="mx-4 mb-4 rounded-2xl bg-green-600 px-5 py-4 flex items-center gap-3">
+                                  <CircleDollarSign size={20} className="text-white shrink-0" />
+                                  <div className="flex-1">
+                                    <span className="text-[11px] text-green-100 block leading-none mb-0.5">Cash Out estimado</span>
+                                    <span className="font-black text-white text-lg leading-none">€ {cashoutEstimate(bet)}</span>
                                   </div>
-                                  <button
-                                    onClick={() => setCashoutExpandedId(null)}
-                                    disabled={cashingOut === bet.id}
-                                    className="text-zinc-500 hover:text-zinc-300 text-xs px-2 py-1 rounded transition-colors disabled:opacity-40">
-                                    Cancelar
-                                  </button>
-                                  <button
-                                    onClick={() => handleCashout(bet)}
-                                    disabled={cashingOut === bet.id}
-                                    className="bg-green-600 hover:bg-green-500 active:bg-green-700 text-white font-black text-sm px-4 py-2 rounded-lg transition-colors disabled:opacity-50 flex items-center gap-1.5">
-                                    {cashingOut === bet.id
-                                      ? <Loader2 size={13} className="animate-spin" />
-                                      : "CONFIRMAR"}
+                                  <button onClick={() => setCashoutExpandedId(null)} disabled={cashingOut === bet.id} className="text-green-100 hover:text-white text-xs px-3 py-1.5 rounded-lg transition-colors">Cancelar</button>
+                                  <button onClick={() => handleCashout(bet)} disabled={cashingOut === bet.id}
+                                    className="bg-white text-green-700 font-black text-sm px-4 py-2 rounded-xl flex items-center gap-1.5 disabled:opacity-50">
+                                    {cashingOut === bet.id ? <Loader2 size={13} className="animate-spin" /> : "CONFIRMAR"}
                                   </button>
                                 </div>
                               ) : (
-                                <button
-                                  onClick={() => setCashoutExpandedId(bet.id)}
-                                  disabled={cashingOut === bet.id}
-                                  className="w-full px-4 py-3 flex items-center gap-3 border-t border-zinc-800 bg-zinc-800/40 hover:bg-zinc-800/70 transition-colors disabled:opacity-50">
-                                  <CircleDollarSign size={18} className="text-zinc-400 shrink-0" />
-                                  <span className="flex-1 text-left font-bold text-sm text-white">Cash Out</span>
-                                  <span className="font-black text-red-400 text-sm">€ {cashoutEstimate(bet)}</span>
-                                  <ChevronRight size={16} className="text-zinc-500" />
+                                <button onClick={() => setCashoutExpandedId(bet.id)} disabled={cashingOut === bet.id}
+                                  className="mx-4 mb-4 w-[calc(100%-2rem)] bg-red-600 hover:bg-red-500 active:bg-red-700 text-white font-black text-[15px] py-4 rounded-2xl flex items-center justify-center gap-2.5 transition-colors shadow-lg shadow-red-900/40 disabled:opacity-50">
+                                  <RefreshCw size={18} />
+                                  Cash Out disponível
                                 </button>
                               )
-                            )}
+                            ) : isCashedOut || isWon ? (
+                              <div className="mx-4 mb-4 bg-gray-100 text-gray-400 font-bold text-[14px] py-4 rounded-2xl flex items-center justify-center gap-2 cursor-not-allowed select-none">
+                                <Lock size={15} />
+                                Cash Out encerrado
+                              </div>
+                            ) : isLost ? (
+                              <div className="mx-4 mb-4 bg-[#6b0f0f]/60 border border-[#a02020]/50 text-red-300/70 font-bold text-[14px] py-4 rounded-2xl flex items-center justify-center gap-2 cursor-not-allowed select-none">
+                                <RefreshCw size={15} className="opacity-40" />
+                                Cash Out indisponível
+                                <Lock size={13} className="ml-auto mr-0 opacity-40" />
+                              </div>
+                            ) : null}
 
-                            {/* Footer */}
-                            <div className="px-4 py-2.5 border-t border-zinc-800 flex items-center justify-between text-xs text-zinc-600">
-                              <span className="flex items-center gap-1.5">
-                                <Clock size={11} />
-                                Criada em {new Date(bet.createdAt).toLocaleDateString("pt-PT", { day: "2-digit", month: "2-digit", year: "numeric" })}, {new Date(bet.createdAt).toLocaleTimeString("pt-PT", { hour: "2-digit", minute: "2-digit" })}
-                              </span>
-                              <button
-                                onClick={() => { navigator.clipboard.writeText(`Bet62 — ID ${bet.id} | Odds ${parseFloat(bet.totalOdds).toFixed(2)} | € ${parseFloat(bet.stake).toFixed(2)}`); toast.success("Aposta copiada!"); }}
-                                className="flex items-center gap-1 hover:text-zinc-400 transition-colors">
-                                <Share2 size={11} /> Partilhar
-                              </button>
+                            {/* ── FOOTER ── */}
+                            <div className={`flex items-center justify-between px-5 py-3.5 ${isLost ? "bg-[#6b0f0f]" : "bg-red-700"}`}>
+                              <div className="flex items-center gap-2.5">
+                                <Ticket size={16} className="text-white/60 shrink-0" />
+                                <div>
+                                  <span className="text-[9px] text-white/50 block leading-none font-medium uppercase tracking-wide">Código do bilhete:</span>
+                                  <button
+                                    onClick={() => { navigator.clipboard.writeText(ticketCode); toast.success("Código copiado!"); }}
+                                    className="text-[13px] font-black text-white font-mono hover:text-red-200 transition-colors">
+                                    {ticketCode}
+                                  </button>
+                                </div>
+                              </div>
+                              <div>
+                                {isActivePending && (
+                                  <div className="flex items-center gap-1.5 bg-white/20 text-white text-[11px] font-bold px-3 py-1.5 rounded-full">
+                                    <ShieldCheck size={13} /> Aposta confirmada
+                                  </div>
+                                )}
+                                {isWon && (
+                                  <div className="flex items-center gap-1.5 bg-white/25 text-white text-[11px] font-bold px-3 py-1.5 rounded-full">
+                                    <Trophy size={13} /> Bilhete vencedor
+                                  </div>
+                                )}
+                                {isLost && (
+                                  <div className="flex items-center gap-1.5 bg-red-950/60 border border-white/20 text-white/80 text-[11px] font-bold px-3 py-1.5 rounded-full">
+                                    <X size={13} /> Bilhete perdido
+                                  </div>
+                                )}
+                                {isCashedOut && (
+                                  <div className="flex items-center gap-1.5 bg-yellow-400 text-yellow-900 text-[11px] font-bold px-3 py-1.5 rounded-full">
+                                    <CircleDollarSign size={13} /> Cash Out
+                                  </div>
+                                )}
+                              </div>
                             </div>
+
                           </div>
                         );
                       })}
