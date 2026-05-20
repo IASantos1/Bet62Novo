@@ -2347,7 +2347,7 @@ export default function Home() {
           let anyLost = false;
           let allDetermined = sels.length > 0;
           for (const sel of sels) {
-            const [th = "", ta = ""] = sel.matchTitle.split(" vs ");
+            const [th = "", ta = ""] = (sel.matchTitle ?? "").split(" vs ");
             const key = `${normT(th)}-${normT(ta)}`;
             const fs = finishedMatchScores.current.get(key);
             if (!fs) { allDetermined = false; continue; }
@@ -5550,7 +5550,7 @@ export default function Home() {
 
   // Find the live match (if any) corresponding to a stored selection
   const findLiveMatchForSel = (sel: StoredSelection): Match | null => {
-    const [h = "", a = ""] = sel.matchTitle.split(" vs ");
+    const [h = "", a = ""] = (sel.matchTitle ?? "").split(" vs ");
     const nh = normTeam(h); const na = normTeam(a);
     if (!nh) return null;
     return liveMatches.find(m => {
@@ -5649,7 +5649,7 @@ export default function Home() {
 
   const getSelLabel = (sel: StoredSelection): string => {
     if (sel.label && sel.label !== sel.selection) return sel.label;
-    const [home = "", away = ""] = sel.matchTitle.split(" vs ");
+    const [home = "", away = ""] = (sel.matchTitle ?? "").split(" vs ");
     const map: Record<string, string> = {
       home, away, draw: "Empate",
       homeOrDraw: `${home} ou X`, awayOrDraw: `${away} ou X`, homeOrAway: "1 ou 2",
@@ -9445,7 +9445,7 @@ export default function Home() {
 
                                 // Final score for resolved bets
                                 const normT = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
-                                const [th = "", ta = ""] = sel.matchTitle.split(" vs ");
+                                const [th = "", ta = ""] = (sel.matchTitle ?? "").split(" vs ");
                                 const fsKey = `${normT(th)}-${normT(ta)}`;
                                 const fs = !isActivePending ? finishedMatchScores.current.get(fsKey) : null;
 
