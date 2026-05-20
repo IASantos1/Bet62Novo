@@ -1115,11 +1115,15 @@ export function ComprehensiveMarketsSheet({ visible, match, onClose }: Props) {
                 {/* Placar exato de futebol (marcador final) */}
                 {isFootball && (m as any)?.correctScore && Object.keys((m as any).correctScore as Record<string, number>).length > 0 && (
                   <Section title="Placar Exato" tabKey="placar">
-                    <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
+                    {/* 3-column grid — each cell has explicit width so flex:1 on OddsBtn
+                        stretches to fill the cell rather than collapsing to content width */}
+                    <View style={{ flexDirection: "row", flexWrap: "wrap", rowGap: 4, columnGap: 4 }}>
                       {Object.entries((m as any).correctScore as Record<string, number>)
                         .filter(([, v]) => v > 0)
                         .map(([score, odd]) => (
-                          <OddsBtn key={`cs-${score}`} market={`cs-${score}`} label={score} value={odd} />
+                          <View key={`cs-${score}`} style={{ width: "31.5%", flexShrink: 0 }}>
+                            <OddsBtn market={`cs-${score}`} label={score} value={odd} />
+                          </View>
                         ))}
                     </View>
                   </Section>

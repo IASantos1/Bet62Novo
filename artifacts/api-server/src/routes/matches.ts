@@ -3011,12 +3011,15 @@ function recalcLiveCorrectScore(
   const result: Record<string, number> = {};
   for (const [score, p] of scoreProbs) {
     if ((current[score] ?? 0) <= 0) { result[score] = 0; continue; }
-    const [odds] = probsToDecimalOdds([mc(p / total, 0.003, 0.97)], 1.12);
-    result[score] = Math.max(1.01, odds!);
+    // Direct single-outcome odds: 1 / (prob × margin). Calling probsToDecimalOdds
+    // with a single element always normalises it to 1.0 and returns the margin floor
+    // (≈0.89 → clamped to 1.01), so we compute directly instead.
+    const prob = mc(p / total, 0.003, 0.97);
+    result[score] = Math.max(1.01, mr(1 / (prob * 1.12)));
   }
   if ("Outro" in current && (current["Outro"] ?? 0) > 0) {
-    const [odds] = probsToDecimalOdds([mc(pOther / total, 0.003, 0.97)], 1.12);
-    result["Outro"] = Math.max(1.01, odds!);
+    const pOtherProb = mc(pOther / total, 0.003, 0.97);
+    result["Outro"] = Math.max(1.01, mr(1 / (pOtherProb * 1.12)));
   }
   return result;
 }
@@ -3072,12 +3075,15 @@ function recalcLiveHtCorrectScore(
   const result: Record<string, number> = {};
   for (const [score, p] of scoreProbs) {
     if ((current[score] ?? 0) <= 0) { result[score] = 0; continue; }
-    const [odds] = probsToDecimalOdds([mc(p / total, 0.003, 0.97)], 1.12);
-    result[score] = Math.max(1.01, odds!);
+    // Direct single-outcome odds: 1 / (prob × margin). Calling probsToDecimalOdds
+    // with a single element always normalises it to 1.0 and returns the margin floor
+    // (≈0.89 → clamped to 1.01), so we compute directly instead.
+    const prob = mc(p / total, 0.003, 0.97);
+    result[score] = Math.max(1.01, mr(1 / (prob * 1.12)));
   }
   if ("Outro" in current && (current["Outro"] ?? 0) > 0) {
-    const [odds] = probsToDecimalOdds([mc(pOther / total, 0.003, 0.97)], 1.12);
-    result["Outro"] = Math.max(1.01, odds!);
+    const pOtherProb = mc(pOther / total, 0.003, 0.97);
+    result["Outro"] = Math.max(1.01, mr(1 / (pOtherProb * 1.12)));
   }
   return result;
 }
@@ -3130,12 +3136,15 @@ function recalcLiveH2CorrectScore(
   const result: Record<string, number> = {};
   for (const [score, p] of scoreProbs) {
     if ((current[score] ?? 0) <= 0) { result[score] = 0; continue; }
-    const [odds] = probsToDecimalOdds([mc(p / total, 0.003, 0.97)], 1.12);
-    result[score] = Math.max(1.01, odds!);
+    // Direct single-outcome odds: 1 / (prob × margin). Calling probsToDecimalOdds
+    // with a single element always normalises it to 1.0 and returns the margin floor
+    // (≈0.89 → clamped to 1.01), so we compute directly instead.
+    const prob = mc(p / total, 0.003, 0.97);
+    result[score] = Math.max(1.01, mr(1 / (prob * 1.12)));
   }
   if ("Outro" in current && (current["Outro"] ?? 0) > 0) {
-    const [odds] = probsToDecimalOdds([mc(pOther / total, 0.003, 0.97)], 1.12);
-    result["Outro"] = Math.max(1.01, odds!);
+    const pOtherProb = mc(pOther / total, 0.003, 0.97);
+    result["Outro"] = Math.max(1.01, mr(1 / (pOtherProb * 1.12)));
   }
   return result;
 }
@@ -5497,11 +5506,13 @@ function buildFootballLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
       if (kickoffSec > 0) {
         const minsFromKickoff = Math.floor((now / 1000 - kickoffSec) / 60);
         if (statusStr === "1st half") {
-          minute = Math.min(44, Math.max(1, minsFromKickoff));
+          // Allow up to 49' for first-half stoppage time
+          minute = Math.min(49, Math.max(1, minsFromKickoff));
         } else if (statusStr === "2nd half") {
-          minute = Math.min(89, Math.max(46, minsFromKickoff - 15));
+          // Allow up to 99' so the clock keeps advancing in stoppage time
+          minute = Math.min(99, Math.max(46, minsFromKickoff - 15));
         } else {
-          minute = Math.min(44, Math.max(1, minsFromKickoff));
+          minute = Math.min(49, Math.max(1, minsFromKickoff));
         }
       } else {
         // Last resort: no timestamp available at all — use mid-period defaults
