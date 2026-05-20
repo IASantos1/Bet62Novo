@@ -12,6 +12,7 @@ import {
   StyleSheet,
   Text,
   View,
+  Animated,
 } from "react-native";
 import { useQuery } from "@tanstack/react-query";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -27,6 +28,179 @@ import { getMatchBannerUrl, getLeagueFlag } from "@/utils/teamBanners";
 import { findMajorLeague, type MajorLeague } from "@/utils/majorLeagues";
 
 type MCIconName = ComponentProps<typeof MaterialCommunityIcons>["name"];
+
+// ── Hero intro banner ─────────────────────────────────────────────────────────
+function HeroSection({
+  user,
+  onDeposit,
+}: {
+  user: { name: string } | null;
+  onDeposit: () => void;
+}) {
+  const dotAnim = React.useRef(new Animated.Value(0)).current;
+
+  React.useEffect(() => {
+    Animated.loop(
+      Animated.sequence([
+        Animated.timing(dotAnim, { toValue: 1, duration: 900, useNativeDriver: true }),
+        Animated.timing(dotAnim, { toValue: 0, duration: 900, useNativeDriver: true }),
+      ])
+    ).start();
+  }, [dotAnim]);
+
+  return (
+    <View style={hero.wrap}>
+      <View style={hero.blurTL} />
+      <View style={hero.blurBR} />
+
+      <View style={hero.inner}>
+        <View style={hero.badgeRow}>
+          <Animated.View style={[hero.dot, { opacity: dotAnim.interpolate({ inputRange: [0, 1], outputRange: [0.4, 1] }) }]} />
+          <Text style={hero.badgeText}>PLATAFORMA OFICIAL</Text>
+        </View>
+
+        <Text style={hero.logo}>
+          BET<Text style={hero.logoRed}>62</Text>
+        </Text>
+
+        <Text style={hero.tagline}>
+          Onde cada jogo é uma oportunidade.{"\n"}As melhores odds da Europa, ao vivo ou pré-jogo.
+        </Text>
+
+        {user ? (
+          <Pressable
+            style={({ pressed }) => [hero.btnPrimary, { opacity: pressed ? 0.85 : 1 }]}
+            onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium); onDeposit(); }}
+          >
+            <Ionicons name="wallet-outline" size={16} color="#fff" />
+            <Text style={hero.btnPrimaryText}>FAZER DEPÓSITO</Text>
+          </Pressable>
+        ) : (
+          <View style={hero.btnRow}>
+            <Pressable
+              style={({ pressed }) => [hero.btnPrimary, { flex: 1, opacity: pressed ? 0.85 : 1 }]}
+              onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium); router.push("/(auth)/register"); }}
+            >
+              <Text style={hero.btnPrimaryText}>CRIAR CONTA</Text>
+            </Pressable>
+            <Pressable
+              style={({ pressed }) => [hero.btnOutline, { flex: 1, opacity: pressed ? 0.85 : 1 }]}
+              onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); router.push("/(auth)/login"); }}
+            >
+              <Text style={hero.btnOutlineText}>JÁ TENHO CONTA</Text>
+            </Pressable>
+          </View>
+        )}
+      </View>
+    </View>
+  );
+}
+
+const hero = StyleSheet.create({
+  wrap: {
+    marginHorizontal: 14,
+    marginTop: 10,
+    marginBottom: 6,
+    borderRadius: 16,
+    overflow: "hidden",
+    backgroundColor: "#0d0d17",
+    borderWidth: 1,
+    borderColor: "#1e1e2e",
+  },
+  blurTL: {
+    position: "absolute",
+    width: 180,
+    height: 180,
+    borderRadius: 90,
+    backgroundColor: "rgba(212,32,32,0.08)",
+    top: -60,
+    left: -60,
+  },
+  blurBR: {
+    position: "absolute",
+    width: 160,
+    height: 160,
+    borderRadius: 80,
+    backgroundColor: "rgba(180,20,20,0.06)",
+    bottom: -50,
+    right: -50,
+  },
+  inner: {
+    padding: 20,
+    paddingBottom: 22,
+  },
+  badgeRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    marginBottom: 12,
+  },
+  dot: {
+    width: 7,
+    height: 7,
+    borderRadius: 4,
+    backgroundColor: "#ef4444",
+  },
+  badgeText: {
+    fontSize: 10,
+    fontFamily: "Inter_700Bold",
+    color: "#ef4444",
+    letterSpacing: 1.2,
+  },
+  logo: {
+    fontSize: 48,
+    fontFamily: "Inter_700Bold",
+    color: "#ffffff",
+    lineHeight: 52,
+    marginBottom: 8,
+  },
+  logoRed: {
+    color: "#d42020",
+  },
+  tagline: {
+    fontSize: 13,
+    fontFamily: "Inter_400Regular",
+    color: "#8888a0",
+    lineHeight: 20,
+    marginBottom: 20,
+  },
+  btnRow: {
+    flexDirection: "row",
+    gap: 10,
+  },
+  btnPrimary: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    backgroundColor: "#d42020",
+    borderRadius: 10,
+    paddingVertical: 13,
+    paddingHorizontal: 16,
+  },
+  btnPrimaryText: {
+    fontSize: 13,
+    fontFamily: "Inter_700Bold",
+    color: "#ffffff",
+    letterSpacing: 0.5,
+  },
+  btnOutline: {
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 10,
+    paddingVertical: 13,
+    paddingHorizontal: 16,
+    borderWidth: 1.5,
+    borderColor: "#2e2e3c",
+    backgroundColor: "transparent",
+  },
+  btnOutlineText: {
+    fontSize: 13,
+    fontFamily: "Inter_600SemiBold",
+    color: "#a0a0b8",
+    letterSpacing: 0.3,
+  },
+});
 
 interface UpcomingMatch {
   id: string;
@@ -577,6 +751,7 @@ export default function PreGameScreen() {
           }
           ListHeaderComponent={
             <>
+              <HeroSection user={user} onDeposit={() => setDepositVisible(true)} />
               <PopularBanners matches={allUpcoming} />
               <LeagueChips matches={sportFiltered} selected={selectedLeague} onSelect={setSelectedLeague} />
             </>

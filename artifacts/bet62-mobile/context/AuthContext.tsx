@@ -30,6 +30,7 @@ interface AuthContextType {
   enableBiometric: () => Promise<void>;
   disableBiometric: () => Promise<void>;
   unlockBiometric: () => Promise<void>;
+  lockBiometric: () => void;
   failBiometric: () => void;
 }
 
@@ -105,6 +106,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }, [pendingToken]);
 
+  const lockBiometric = useCallback(() => {
+    if (!token || !isBiometricEnabled) return;
+    setPendingToken(token);
+    setToken(null);
+    setUser(null);
+    setIsBiometricLocked(true);
+  }, [token, isBiometricEnabled]);
+
   const failBiometric = useCallback(() => {
     setPendingToken(null);
     setIsBiometricLocked(false);
@@ -174,7 +183,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       isBiometricEnabled, isBiometricLocked,
       login, register, logout, refreshUser, setUser,
       enableBiometric, disableBiometric,
-      unlockBiometric, failBiometric,
+      unlockBiometric, lockBiometric, failBiometric,
     }}>
       {children}
     </AuthContext.Provider>

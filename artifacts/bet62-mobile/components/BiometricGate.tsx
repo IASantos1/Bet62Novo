@@ -4,10 +4,12 @@ import * as LocalAuthentication from "expo-local-authentication";
 import React, { useCallback, useEffect, useRef } from "react";
 import { Animated, Easing, Modal, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/context/AuthContext";
 
 export function BiometricGate() {
   const { isBiometricLocked, unlockBiometric, failBiometric } = useAuth();
+  const queryClient = useQueryClient();
   const insets = useSafeAreaInsets();
 
   const pulse1 = useRef(new Animated.Value(1)).current;
@@ -28,19 +30,20 @@ export function BiometricGate() {
       }
       const result = await LocalAuthentication.authenticateAsync({
         promptMessage: "Desbloquear Bet62",
-        fallbackLabel: "Cancelar",
-        disableDeviceFallback: false,
+        disableDeviceFallback: true,
+        cancelLabel: "Cancelar",
       });
       if (result.success) {
         await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-        unlockBiometric();
+        await unlockBiometric();
+        queryClient.refetchQueries({ type: "active", stale: true });
       } else {
         failBiometric();
       }
     } catch {
       failBiometric();
     }
-  }, [unlockBiometric, failBiometric]);
+  }, [unlockBiometric, failBiometric, queryClient]);
 
   useEffect(() => {
     if (!isBiometricLocked) return;
