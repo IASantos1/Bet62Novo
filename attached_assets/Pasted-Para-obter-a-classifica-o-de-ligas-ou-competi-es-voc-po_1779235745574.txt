@@ -1,0 +1,30 @@
+Para obter a classificação de ligas ou competições, você pode usar o endpoint de standings (classificação).
+Para a V2 API (recomendado para novas integrações):
+O endpoint V2 para classificações é geralmente estruturado assim: GET /api/tournament/{tournamentId}/season/{seasonId}/standings
+Você precisará do tournamentId e do seasonId.
+Descobrir tournamentId:
+Use o endpoint /api/search?query={nome_da_liga} para encontrar o ID da liga. Por exemplo, para a Premier League, você pode pesquisar por "Premier League".
+Ou, se você já tem um matchId de um jogo da liga, pode obter o tournament.id e season.id da resposta do endpoint /api/match/{matchId}.
+Descobrir seasonId:
+Depois de ter o tournamentId, use o endpoint /api/tournaments/{tournamentId}/seasons para listar todas as temporadas disponíveis para essa liga e obter o seasonId da temporada desejada.
+Exemplo em cURL (usando a V2 Football API):
+
+# Exemplo: Obter classificações da Premier League (ID 2) para uma temporada específica
+# Primeiro, encontre o seasonId para a temporada atual (ex: 2023/2024)
+# curl -X GET "https://v2.football.sportsapipro.com/api/tournaments/2/seasons" -H "x-api-key: [redacted]
+# Supondo que o seasonId seja 52186 para 2023/2024
+
+curl -X GET "https://v2.football.sportsapipro.com/api/tournament/2/season/52186/standings" \
+  -H "x-api-key: [redacted]
+Para a V1 API (se você estiver usando uma integração existente):
+O endpoint V1 para classificações é geralmente estruturado assim: GET /standings?competitions={competitionId}
+Você precisará do competitionId.
+Descobrir competitionId:
+Use o endpoint /search?query={nome_da_liga} para encontrar o ID da competição.
+Ou, use /competitions ou /competitions/top para listar as competições e seus IDs.
+Exemplo em cURL (usando a V1 Basketball API):
+
+# Exemplo: Obter classificações da NBA (ID 132)
+curl -X GET "https://v1.basketball.sportsapipro.com/standings?competitions=132" \
+  -H "x-api-key: [redacted]
+Lembre-se de substituir YOUR_API_KEY pela sua chave de API real e ajustar o subdomínio {sport} (ex: football, basketball) conforme o esporte desejado.

@@ -9896,13 +9896,21 @@ router.get("/v2-standings", async (req, res) => {
     if (!matchResp.ok) { res.json({ standings: [], league: "" }); return; }
     const matchData = await matchResp.json() as {
       match?: {
-        tournament?: { name?: string; uniqueTournament?: { id?: number; name?: string } };
+        tournament?: {
+          name?: string;
+          isGroup?: boolean;
+          groupName?: string;
+          groupSign?: string;
+          uniqueTournament?: { id?: number; name?: string };
+        };
         season?: { id?: number };
       };
     };
     const tId = matchData.match?.tournament?.uniqueTournament?.id;
     const sId = matchData.match?.season?.id;
     const leagueName = matchData.match?.tournament?.uniqueTournament?.name ?? matchData.match?.tournament?.name ?? "";
+    const isGroupTournament = matchData.match?.tournament?.isGroup ?? false;
+    const rawGroupName = matchData.match?.tournament?.groupName ?? "";
     if (!tId || !sId) { res.json({ standings: [], league: leagueName }); return; }
 
     // Step 2: fetch standings
@@ -9952,7 +9960,16 @@ router.get("/v2-standings", async (req, res) => {
       rows = groups.flatMap(g => g.rows);
     } else {
       rows = rawArr.map((r: any, i: number) => parseStandingRow(r, i));
-      groups = undefined;
+      // When the API returns a flat list for a group-stage competition (e.g. Libertadores),
+      // wrap the rows in a single named group using the match's tournament.groupName.
+      if (isGroupTournament && rawGroupName && rows.length > 0) {
+        const groupLabel = rawGroupName.startsWith("Group")
+          ? rawGroupName.replace("Group", "Grupo")
+          : /^[A-Z0-9]$/.test(rawGroupName.trim()) ? `Grupo ${rawGroupName.trim()}` : rawGroupName;
+        groups = [{ name: groupLabel, rows }];
+      } else {
+        groups = undefined;
+      }
     }
 
     const result = { standings: rows, groups, league: leagueName };
