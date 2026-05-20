@@ -6454,6 +6454,112 @@ async function getUpcomingAll(): Promise<UpcomingTopCache> {
   return upcomingTopCache;
 }
 
+// ─── WC 2026 Endpoint ──────────────────────────────────────────────────────────
+let wc2026Cache: { matches: UpcomingMatch[]; fetchedAt: number } | null = null;
+const WC2026_TTL = 60 * 60_000; // 60 min
+
+async function buildWC2026Matches(): Promise<UpcomingMatch[]> {
+  if (wc2026Cache && Date.now() - wc2026Cache.fetchedAt < WC2026_TTL) {
+    return wc2026Cache.matches;
+  }
+
+  // Fetch the next 45 days in batches of 8 to cover the full WC group stage
+  const nowMs = Date.now();
+  const dates: string[] = [];
+  for (let i = 0; i < 45; i++) {
+    dates.push(new Date(nowMs + i * 86_400_000).toISOString().slice(0, 10));
+  }
+
+  const BATCH = 8;
+  const allEvents: SAPIV2Event[] = [];
+  for (let b = 0; b < dates.length; b += BATCH) {
+    const batch = dates.slice(b, b + BATCH);
+    const results = await Promise.all(batch.map(dt => getScheduleV2("football", dt).catch(() => [] as SAPIV2Event[])));
+    allEvents.push(...results.flat());
+  }
+
+  // Deduplicate and filter for WC matches
+  const seen = new Set<number>();
+  const wcEvents: SAPIV2Event[] = [];
+  for (const ev of allEvents) {
+    if (seen.has(ev.id)) continue;
+    seen.add(ev.id);
+    const home = v2TeamName(ev.homeTeam);
+    const away = v2TeamName(ev.awayTeam);
+    if (home === "Unknown" || away === "Unknown") continue;
+    const leagueName = normalizeLeagueName(v2TournName(ev.tournament), "");
+    const lg = leagueName.toLowerCase();
+    const isWCLeague = lg.includes("world cup") || lg.includes("copa do mundo") || lg.includes("fifa world") || lg.includes("wc 2026") || lg.includes("worldcup");
+    const { date } = v2EventDateTime(ev);
+    // June 11 – July 19 2026 (WC group stage + knockout)
+    const isWCDate = /\d{2}\.(06|07)\.2026/.test(date);
+    if (!isWCLeague && !isWCDate) continue;
+    wcEvents.push(ev);
+    if (wcEvents.length >= 300) break;
+  }
+
+  const oddsResults = await Promise.all(
+    wcEvents.map(ev => getPreMatchOddsV2("football", ev.id).catch(() => null))
+  );
+
+  const results: UpcomingMatch[] = [];
+  for (let i = 0; i < wcEvents.length; i++) {
+    const ev = wcEvents[i]!;
+    const home = v2TeamName(ev.homeTeam);
+    const away = v2TeamName(ev.awayTeam);
+    const leagueName = normalizeLeagueName(v2TournName(ev.tournament), "");
+    const { date, time } = v2EventDateTime(ev);
+    const realOdds = oddsResults[i] ?? null;
+
+    let odds: { home: number; draw: number; away: number };
+    let markets: AdvancedMarkets;
+    let hasRealOdds: boolean;
+
+    if (realOdds && realOdds.home > 0) {
+      odds = { home: realOdds.home, draw: realOdds.draw, away: realOdds.away };
+      const baseMarkets = makeAdvancedMarketsFromTeams(home, away);
+      markets = {
+        ...baseMarkets,
+        ...(realOdds.bttsYes ? { bothTeamsScore: { yes: realOdds.bttsYes, no: realOdds.bttsNo ?? 0 } } : {}),
+        ...(realOdds.over25 ? { totalGoals: { ...baseMarkets.totalGoals, over25: realOdds.over25, under25: realOdds.under25 ?? 0 } } : {}),
+      };
+      hasRealOdds = true;
+    } else {
+      odds = makeOddsFromTeams(home, away);
+      markets = makeAdvancedMarketsFromTeams(home, away);
+      hasRealOdds = false;
+    }
+
+    results.push({
+      id: `fb-v2-${ev.id}`,
+      home,
+      away,
+      league: leagueName,
+      country: v2TournCountry(ev),
+      time,
+      date,
+      sport: "football",
+      hasRealOdds,
+      odds,
+      markets,
+      isWomens: false,
+      leagueId: ev.tournamentId ? String(ev.tournamentId) : undefined,
+    });
+  }
+
+  wc2026Cache = { matches: results, fetchedAt: Date.now() };
+  return results;
+}
+
+router.get("/wc2026", async (_req, res) => {
+  try {
+    const matches = await buildWC2026Matches();
+    res.json({ matches });
+  } catch {
+    res.status(500).json({ error: "Erro ao buscar jogos do Mundial 2026" });
+  }
+});
+
 router.get("/upcoming", async (req, res) => {
   const sport = String(req.query["sport"] ?? "all");
   const cache = await getUpcomingAll();

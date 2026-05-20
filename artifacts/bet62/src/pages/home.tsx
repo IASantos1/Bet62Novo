@@ -1465,6 +1465,8 @@ export default function Home() {
   const [upcomingLoading, setUpcomingLoading] = useState(true);
   const [selectedSport, setSelectedSport] = useState<string>("all");
   const [selectedWC, setSelectedWC] = useState(false);
+  const [wcMatchesData, setWcMatchesData] = useState<Match[]>([]);
+  const [wcLoading, setWcLoading] = useState(false);
 
   // Recent tennis results (yesterday)
   type TennisResult = {
@@ -2251,6 +2253,20 @@ export default function Home() {
     const id = setInterval(() => fetchUpcoming(false), 30_000);
     return () => clearInterval(id);
   }, [fetchUpcoming]);
+
+  // Fetch WC 2026 matches when filter is activated
+  useEffect(() => {
+    if (!selectedWC) return;
+    if (wcMatchesData.length > 0) return; // already loaded
+    setWcLoading(true);
+    fetch("/api/matches/wc2026")
+      .then(r => r.ok ? r.json() : { matches: [] })
+      .then((data: { matches?: Array<{ id: string; home: string; away: string; league: string; country?: string; time?: string; date?: string; sport?: string; hasRealOdds?: boolean; odds: Odds; markets?: AdvancedMarkets }> }) => {
+        setWcMatchesData((data.matches ?? []).map(m => ({ ...m, isLive: false })));
+      })
+      .catch(() => {})
+      .finally(() => setWcLoading(false));
+  }, [selectedWC, wcMatchesData.length]);
 
   // Fetch live matches — polls every 5s
   type LiveMatchRaw = {
@@ -6044,44 +6060,6 @@ export default function Home() {
 
         <main className="flex-1 pb-32 lg:pb-8 overflow-hidden min-w-0">
 
-          {/* HERO — sports tab only, hidden when a match is expanded */}
-          {activeTab === "sports" && !expandedMatch && (
-            <div className="relative overflow-hidden bg-gradient-to-br from-zinc-900 via-zinc-950 to-black border-b border-zinc-900">
-              <div className="absolute inset-0 pointer-events-none">
-                <div className="absolute -top-20 -left-20 w-96 h-96 bg-red-600/10 rounded-full blur-3xl" />
-                <div className="absolute -bottom-20 -right-20 w-96 h-96 bg-red-900/10 rounded-full blur-3xl" />
-              </div>
-
-              <div className="relative z-10 px-4 lg:px-8 pt-10 pb-10 max-w-4xl">
-                <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.6 }}>
-                  <div className="flex items-center gap-2 mb-3">
-                    <span className="inline-flex items-center gap-1.5 bg-red-600/20 border border-red-500/30 text-red-400 text-xs font-bold px-3 py-1 rounded-full">
-                      <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse inline-block" />
-                      PLATAFORMA OFICIAL
-                    </span>
-                  </div>
-                  <h1 className="text-5xl lg:text-7xl font-black italic tracking-tighter mb-3 leading-none">
-                    <span className="text-white">BET</span><span className="text-red-600">62</span>
-                  </h1>
-                  <p className="text-lg lg:text-xl text-zinc-400 mb-8 max-w-xl">
-                    Onde cada jogo é uma oportunidade. As melhores odds da Europa, ao vivo ou pré-jogo.
-                  </p>
-
-
-                  {!auth.user && (
-                    <div className="flex flex-wrap gap-3">
-                      <Button size="lg" onClick={() => setAuthModalOpen(true)} className="bg-red-600 hover:bg-red-700 text-white font-black text-base px-8 h-12 italic">
-                        CRIAR CONTA <ChevronRight size={18} className="ml-1" />
-                      </Button>
-                      <Button size="lg" variant="outline" onClick={() => setAuthModalOpen(true)} className="border-zinc-700 text-zinc-300 hover:bg-zinc-800 h-12 px-8">
-                        JÁ TENHO CONTA
-                      </Button>
-                    </div>
-                  )}
-                </motion.div>
-              </div>
-            </div>
-          )}
 
           <div className="p-4 lg:p-8">
             {/* Inline market detail view — replaces match list when a match is expanded */}
@@ -7902,7 +7880,7 @@ export default function Home() {
               };
               const _wcMatches = allUpcoming.filter(_isWC);
               const filteredUpcoming = selectedWC
-                ? (_wcMatches.length > 0 ? _wcMatches : allUpcoming.filter(m => (m.sport ?? "football") === "football"))
+                ? (wcMatchesData.length > 0 ? wcMatchesData : (_wcMatches.length > 0 ? _wcMatches : allUpcoming.filter(m => (m.sport ?? "football") === "football")))
                 : (selectedSport === "all" ? allUpcoming : allUpcoming.filter(m => (m.sport ?? "football") === selectedSport));
 
               // Sport grouping for display
@@ -7923,6 +7901,31 @@ export default function Home() {
 
               return (
                 <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
+                  {!selectedLeague && (
+                    <div className="mb-4 relative overflow-hidden rounded-xl cursor-pointer select-none group"
+                      onClick={() => { setSelectedSport("football"); setSelectedWC(true); setSelectedLeague(null); }}>
+                      <motion.img
+                        src="/copa-banner.jpeg"
+                        className="w-full object-cover block"
+                        style={{ height: 180 }}
+                        animate={{ x: [0, -8, 8, -4, 0], scaleX: [1, 1.012, 0.988, 1.006, 1] }}
+                        transition={{ duration: 5, repeat: Infinity, ease: "easeInOut" }}
+                      />
+                      <div className="absolute inset-0 bg-gradient-to-t from-black/20 to-transparent pointer-events-none" />
+                      <button
+                        className="absolute bottom-3 right-3 bg-red-600 group-hover:bg-red-500 text-white text-sm font-bold px-5 py-2.5 rounded-xl shadow-lg shadow-red-900/40 transition-colors"
+                        onClick={(e) => { e.stopPropagation(); setSelectedSport("football"); setSelectedWC(true); setSelectedLeague(null); }}
+                      >
+                        APOSTAR JÁ →
+                      </button>
+                    </div>
+                  )}
+                  {selectedWC && wcLoading && (
+                    <div className="mb-3 flex items-center gap-2 text-zinc-400 text-sm">
+                      <span className="w-3 h-3 border-2 border-zinc-600 border-t-red-500 rounded-full animate-spin inline-block" />
+                      A carregar jogos do Mundial 2026…
+                    </div>
+                  )}
                   {selectedWC && (
                     <div className="mb-3 flex items-center gap-2">
                       <button
