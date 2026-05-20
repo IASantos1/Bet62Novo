@@ -2858,10 +2858,14 @@ function recalcLiveTotalGoals(
 
   // For a given line (e.g. 2.5), needed = goals still required to win Over
   // If already settled (cur ≤ 0 from filterLiveMarkets) → keep 0
+  // If pOverRaw < 0.01 (< 1% chance), zero the line so it disappears rather than
+  // bunching with other impossible lines at the same floor odds (~94x).
   const recalcLine = (cur: number, targetTotal: number): [number, number] => {
     if (cur <= 0) return [0, 0];
     const needed = Math.max(1, targetTotal - currentGoals);
-    const pOver = mc(1 - poissonCdf(lambdaRem, needed - 1), 0.01, 0.99);
+    const pOverRaw = 1 - poissonCdf(lambdaRem, needed - 1);
+    if (pOverRaw < 0.01) return [0, 0]; // effectively impossible — hide line
+    const pOver = mc(pOverRaw, 0.01, 0.99);
     const pUnder = mc(1 - pOver, 0.01, 0.99);
     const [oOdds, uOdds] = probsToDecimalOdds([pOver, pUnder], 1.06);
     return [oOdds!, uOdds!];
@@ -2905,7 +2909,9 @@ function recalcLiveTeamGoals(
   const recalcTeamLine = (cur: number, targetTotal: number, teamScore: number, lambdaRem: number): [number, number] => {
     if (cur <= 0) return [0, 0];
     const needed = Math.max(1, targetTotal - teamScore);
-    const pOver = mc(1 - poissonCdf(lambdaRem, needed - 1), 0.01, 0.99);
+    const pOverRaw = 1 - poissonCdf(lambdaRem, needed - 1);
+    if (pOverRaw < 0.01) return [0, 0]; // effectively impossible — hide line
+    const pOver = mc(pOverRaw, 0.01, 0.99);
     const pUnder = mc(1 - pOver, 0.01, 0.99);
     const [oOdds, uOdds] = probsToDecimalOdds([pOver, pUnder], 1.06);
     return [oOdds!, uOdds!];
