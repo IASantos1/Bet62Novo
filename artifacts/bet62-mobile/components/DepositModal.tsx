@@ -36,11 +36,12 @@ interface CardResult { orderId: string; paymentUrl: string }
 interface Props {
   visible: boolean;
   onClose: () => void;
+  onPromoNotif?: (type: "freebets10" | "freebets20") => void;
 }
 
 const PRESETS = [10, 20, 50, 100, 200, 500];
 
-export function DepositModal({ visible, onClose }: Props) {
+export function DepositModal({ visible, onClose, onPromoNotif }: Props) {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const { token, refreshUser } = useAuth();
@@ -118,6 +119,8 @@ export function DepositModal({ visible, onClose }: Props) {
         }
       }
       await refreshUser().catch(() => {});
+      if (amountNum === 10) onPromoNotif?.("freebets10");
+      else if (amountNum === 20) onPromoNotif?.("freebets20");
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     } catch {
       setError("Erro de ligação. Verifica a tua internet e tenta novamente.");

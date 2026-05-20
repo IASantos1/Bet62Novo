@@ -3,9 +3,10 @@ import * as Haptics from "expo-haptics";
 import * as LocalAuthentication from "expo-local-authentication";
 import * as Linking from "expo-linking";
 import { router } from "expo-router";
-import React, { type ComponentProps, useEffect, useState } from "react";
+import React, { type ComponentProps, useEffect, useRef, useState } from "react";
 import {
   Alert,
+  Animated,
   Platform,
   Pressable,
   ScrollView,
@@ -75,6 +76,8 @@ export default function ProfileScreen() {
   const [showWithdraw, setShowWithdraw] = useState(false);
   const [biometricAvailable, setBiometricAvailable] = useState(false);
   const [modalKyc, setModalKyc] = useState(false);
+  const [promoNotif, setPromoNotif] = useState<"freebets10" | "freebets20" | null>(null);
+  const promoAnim = useRef(new Animated.Value(0)).current;
 
   const [withdrawAmount, setWithdrawAmount] = useState("");
   const [withdrawIban, setWithdrawIban] = useState("");
@@ -97,6 +100,18 @@ export default function ProfileScreen() {
       if (user.nif) setWithdrawNif(user.nif);
     }
   }, [user]);
+
+  function handlePromoNotif(type: "freebets10" | "freebets20") {
+    setDepositModalVisible(false);
+    setTimeout(() => {
+      setPromoNotif(type);
+      Animated.sequence([
+        Animated.timing(promoAnim, { toValue: 1, duration: 400, useNativeDriver: true }),
+        Animated.delay(3500),
+        Animated.timing(promoAnim, { toValue: 0, duration: 350, useNativeDriver: true }),
+      ]).start(() => setPromoNotif(null));
+    }, 400);
+  }
 
   async function handleWithdraw() {
     const amount = parseFloat(withdrawAmount);
@@ -537,7 +552,38 @@ export default function ProfileScreen() {
       </ScrollView>
 
       {/* ── Deposit Modal (MBWay / Multibanco / Cartão) ── */}
-      <DepositModal visible={depositModalVisible} onClose={() => setDepositModalVisible(false)} />
+      {promoNotif !== null && (
+        <Animated.View style={{
+          position: "absolute",
+          bottom: bottomPad,
+          left: 16,
+          right: 16,
+          backgroundColor: promoNotif === "freebets10" ? "#8b5cf6" : "#10b981",
+          borderRadius: 16,
+          padding: 16,
+          flexDirection: "row",
+          alignItems: "center",
+          gap: 12,
+          shadowColor: "#000",
+          shadowOffset: { width: 0, height: 4 },
+          shadowOpacity: 0.3,
+          shadowRadius: 8,
+          elevation: 10,
+          zIndex: 999,
+          opacity: promoAnim,
+          transform: [{ translateY: promoAnim.interpolate({ inputRange: [0, 1], outputRange: [16, 0] }) }],
+        }}>
+          <View style={{ flex: 1 }}>
+            <Text style={{ fontSize: 14, fontFamily: "Inter_700Bold", color: "#fff" }}>🎁 FREE BET Desbloqueada!</Text>
+            <Text style={{ fontSize: 12, fontFamily: "Inter_400Regular", color: "rgba(255,255,255,0.85)", marginTop: 2 }}>
+              {promoNotif === "freebets10" ? "€5 em free bets foram adicionados à tua conta." : "€10 em free bets foram adicionados à tua conta."}
+            </Text>
+          </View>
+          <Ionicons name="checkmark-circle" size={28} color="rgba(255,255,255,0.9)" />
+        </Animated.View>
+      )}
+
+      <DepositModal visible={depositModalVisible} onClose={() => setDepositModalVisible(false)} onPromoNotif={handlePromoNotif} />
 
       {/* ── KYC Modal ── */}
       <Modal visible={modalKyc} transparent animationType="slide" onRequestClose={() => setModalKyc(false)}>

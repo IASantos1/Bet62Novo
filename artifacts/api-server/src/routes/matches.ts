@@ -5965,9 +5965,13 @@ function buildTennisLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
   for (const ev of events) {
     const code = v2StatusCode(ev);
     const statusStr = v2StatusStr(ev.status);
-    if (code === 100 || statusStr === "Ended" || statusStr === "Finished" || !statusStr) continue;
-    // Tennis live: typically "1st set", "2nd set", etc. or statusCode 13-17
-    const isLive = statusStr.toLowerCase().includes("set") || (code !== undefined && code >= 13 && code <= 50);
+    if (code === 100 || statusStr === "Ended" || statusStr === "Finished" || statusStr === "Not Started" || statusStr === "Postponed" || statusStr === "Cancelled" || statusStr === "Walkover" || statusStr === "Retired") continue;
+    // Tennis live: "1st/2nd/3rd set", "In Progress", "Playing", "Break", "Advantage", codes 6–60
+    const sLow = statusStr.toLowerCase();
+    const isLive = sLow.includes("set") || sLow.includes("progress") || sLow.includes("play") ||
+      sLow.includes("live") || sLow.includes("break") || sLow.includes("game") ||
+      sLow.includes("advantage") || sLow.includes("tiebreak") ||
+      (code !== undefined && code >= 6 && code <= 60);
     if (!isLive) continue;
 
     const homeTeam = v2TeamName(ev.homeTeam);
@@ -6035,12 +6039,16 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
     getTennisOdds().catch(() => []),
     getMLBOdds().catch(() => []),
   ]);
+  const tennisV2Part = buildTennisLiveV2(tennisEvents);
+  const tennisLivePart = tennisV2Part.length > 0
+    ? tennisV2Part
+    : buildTennisLiveMatches(await getTennisLive(), await getTennisStatsMap());
   const livePart = [
     ...buildFootballLiveV2(footballEvents),
     ...buildBasketballLiveV2(basketballEvents),
     ...buildHockeyLiveV2(hockeyEvents),
     ...buildBaseballLiveV2(baseballEvents),
-    ...buildTennisLiveV2(tennisEvents),
+    ...tennisLivePart,
   ];
 
   const liveIds = new Set(livePart.map(m => String(m.id)));
