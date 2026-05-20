@@ -9,7 +9,6 @@ import {
   Platform,
   Pressable,
   RefreshControl,
-  StyleSheet,
   Text,
   View,
 } from "react-native";
@@ -19,11 +18,19 @@ import { useColors } from "@/hooks/useColors";
 import { useAuth } from "@/context/AuthContext";
 import { API_BASE } from "@/context/AuthContext";
 
+interface StoredSelection {
+  matchTitle: string;
+  selection: string;
+  odd: number;
+  market?: string;
+  label?: string;
+}
+
 interface Bet {
   id: number;
   matchId: string;
   matchTitle: string;
-  selections: Array<{ label: string; odds: number; market?: string; matchTitle?: string; date?: string; time?: string }>;
+  selections: StoredSelection[] | unknown;
   stake: string;
   potentialWin: string;
   totalOdds: string;
@@ -32,48 +39,59 @@ interface Bet {
   createdAt: string;
 }
 
-function statusColor(status: Bet["status"], colors: ReturnType<typeof useColors>) {
-  switch (status) {
-    case "won": return colors.success ?? "#22c55e";
-    case "lost": return colors.destructive;
-    case "cashed_out": return colors.warning ?? "#f59e0b";
-    default: return colors.primary;
-  }
+function getBetSelections(bet: Bet): StoredSelection[] {
+  if (Array.isArray(bet.selections)) return bet.selections as StoredSelection[];
+  return [{ matchTitle: bet.matchTitle, selection: "home", odd: parseFloat(bet.totalOdds), market: "result" }];
 }
 
-function statusLabel(status: Bet["status"]) {
-  switch (status) {
-    case "won": return "Ganhou";
-    case "lost": return "Perdeu";
-    case "cashed_out": return "Cash Out";
-    default: return "Pendente";
-  }
+function getSelLabel(sel: StoredSelection): string {
+  if (sel.label && sel.label !== sel.selection) return sel.label;
+  const [home = "", away = ""] = sel.matchTitle.split(" vs ");
+  const map: Record<string, string> = {
+    home, away, draw: "Empate",
+    homeOrDraw: `${home} ou X`, awayOrDraw: `${away} ou X`, homeOrAway: "1 ou 2",
+    "bts-yes": "Ambas Marcam — Sim", "bts-no": "Ambas Marcam — Não",
+    o05: "Mais de 0.5", u05: "Menos de 0.5",
+    o15: "Mais de 1.5", u15: "Menos de 1.5",
+    o25: "Mais de 2.5", u25: "Menos de 2.5",
+    o35: "Mais de 3.5", u35: "Menos de 3.5",
+    o45: "Mais de 4.5", u45: "Menos de 4.5",
+  };
+  return map[sel.selection] ?? sel.selection;
 }
 
-function parseSelectionLabel(raw: string): { match: string | null; pick: string } {
-  const sep = raw.indexOf("—");
-  if (sep > 0) {
-    return { match: raw.slice(0, sep).trim(), pick: raw.slice(sep + 1).trim() };
-  }
-  const dashSep = raw.indexOf(" - ");
-  if (dashSep > 0) {
-    return { match: raw.slice(0, dashSep).trim(), pick: raw.slice(dashSep + 3).trim() };
-  }
-  return { match: null, pick: raw };
-}
+// ─── BOLETIM CARD ────────────────────────────────────────────────────────────
 
 function BetCard({ bet, token, onCashout }: { bet: Bet; token: string | null; onCashout: () => void }) {
-  const colors = useColors();
   const [cashingOut, setCashingOut] = useState(false);
-  const [expanded, setExpanded] = useState(false);
+  const [cashoutExpanded, setCashoutExpanded] = useState(false);
+
+  const sels = getBetSelections(bet);
+  const isMultiple = sels.length > 1;
+  const isPending = bet.status === "pending";
+  const isWon = bet.status === "won";
+  const isLost = bet.status === "lost";
+  const isCashedOut = bet.status === "cashed_out";
 
   const stake = parseFloat(bet.stake);
   const totalOdds = parseFloat(bet.totalOdds);
   const potentialWin = parseFloat(bet.potentialWin);
-  // Correct estimate: at minimum you recover stake × 0.92 (the 8% house margin when current ≈ original odds).
-  // potentialWin × 0.92 was wrong — that formula assumed you could cash out at near-full win.
   const estimatedCashout = (stake * 0.92).toFixed(2);
-  const actualCashout = bet.cashoutValue ? parseFloat(bet.cashoutValue).toFixed(2) : null;
+
+  const ticketCode = `BT62-${String(bet.id).padStart(6, "0")}`;
+  const betDate = new Date(bet.createdAt);
+  const dateStr = betDate.toLocaleDateString("pt-PT", { day: "2-digit", month: "2-digit", year: "numeric" });
+  const timeStr = betDate.toLocaleTimeString("pt-PT", { hour: "2-digit", minute: "2-digit" });
+
+  // colours
+  const cardBg = isLost ? "#7b1111" : "#ffffff";
+  const selsBg = isLost ? "#8f1616" : "#ffffff";
+  const txtMain = isLost ? "#ffffff" : "#111827";
+  const txtSub = isLost ? "#fca5a5" : "#6b7280";
+  const dividerColor = isLost ? "rgba(160,32,32,0.5)" : "#f3f4f6";
+  const summBg = isLost ? "rgba(107,15,15,0.6)" : "#f9fafb";
+  const summBorder = isLost ? "rgba(160,32,32,0.4)" : "#e5e7eb";
+  const summTxt = isLost ? "#fecaca" : "#4b5563";
 
   async function executeCashout() {
     if (!token) { router.push("/(auth)/login"); return; }
@@ -86,7 +104,7 @@ function BetCard({ bet, token, onCashout }: { bet: Bet; token: string | null; on
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      setExpanded(false);
+      setCashoutExpanded(false);
       Alert.alert("Cash Out", `Recebeste €${parseFloat(data.cashoutValue).toFixed(2)}`);
       onCashout();
     } catch (err: unknown) {
@@ -97,223 +115,232 @@ function BetCard({ bet, token, onCashout }: { bet: Bet; token: string | null; on
     }
   }
 
-  function handleCashoutPress() {
-    if (!token) { router.push("/(auth)/login"); return; }
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    setExpanded(true);
-  }
-
-  const color = statusColor(bet.status, colors);
-  const dateStr = new Date(bet.createdAt).toLocaleDateString("pt-PT", {
-    day: "2-digit",
-    month: "short",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-
-  const selections = Array.isArray(bet.selections) ? bet.selections : [];
-  const isMultiple = selections.length > 1;
-
-  const s = StyleSheet.create({
-    card: {
-      backgroundColor: colors.card,
-      borderRadius: 12,
-      marginHorizontal: 16,
-      marginBottom: 10,
-      borderWidth: 1,
-      borderColor: colors.border,
-      borderLeftWidth: 3,
-      borderLeftColor: color,
-      overflow: "hidden",
-    },
-    inner: { padding: 14 },
-    header: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 10, gap: 8 },
-    titleWrap: { flex: 1 },
-    title: { fontSize: 13, fontFamily: "Inter_600SemiBold", color: colors.foreground, marginBottom: 2 },
-    multipleBadge: { alignSelf: "flex-start", backgroundColor: colors.primary + "22", borderRadius: 4, paddingHorizontal: 6, paddingVertical: 2, marginBottom: 6 },
-    multipleBadgeText: { fontSize: 10, fontFamily: "Inter_700Bold", color: colors.primary },
-    statusBadge: { borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3, backgroundColor: color + "22", flexShrink: 0 },
-    statusBadgeText: { fontSize: 12, fontFamily: "Inter_700Bold", color },
-    selections: { marginBottom: 10, gap: 3 },
-    selectionRow: { flexDirection: "row", alignItems: "flex-start", gap: 6, paddingVertical: 2 },
-    selectionDot: { width: 5, height: 5, borderRadius: 3, backgroundColor: colors.mutedForeground, marginTop: 5 },
-    selectionBody: { flex: 1 },
-    selectionMatch: { fontSize: 11, fontFamily: "Inter_400Regular", color: colors.mutedForeground, marginBottom: 1 },
-    selectionPick: { fontSize: 13, fontFamily: "Inter_600SemiBold", color: colors.foreground },
-    selectionOdds: { fontSize: 13, fontFamily: "Inter_700Bold", color: colors.primary, alignSelf: "flex-start", marginTop: 2 },
-    statsRow: { flexDirection: "row", gap: 0, marginBottom: bet.status === "pending" ? 12 : 8, backgroundColor: colors.muted, borderRadius: 8 },
-    stat: { flex: 1, alignItems: "center", paddingVertical: 8 },
-    statDivider: { width: 1, backgroundColor: colors.border, marginVertical: 6 },
-    statLabel: { fontSize: 10, fontFamily: "Inter_500Medium", color: colors.mutedForeground, marginBottom: 2 },
-    statValue: { fontSize: 14, fontFamily: "Inter_700Bold", color: colors.foreground },
-    cashoutBtn: {
-      backgroundColor: (colors.warning ?? "#f59e0b") + "18",
-      borderRadius: 8,
-      borderWidth: 1,
-      borderColor: colors.warning ?? "#f59e0b",
-      padding: 11,
-      flexDirection: "row",
-      alignItems: "center",
-      justifyContent: "space-between",
-    },
-    cashoutBtnLeft: { flexDirection: "row", alignItems: "center", gap: 6 },
-    cashoutBtnText: { fontSize: 13, fontFamily: "Inter_600SemiBold", color: colors.warning ?? "#f59e0b" },
-    cashoutBtnValue: { fontSize: 14, fontFamily: "Inter_700Bold", color: colors.warning ?? "#f59e0b" },
-    expandedRow: {
-      borderTopWidth: 1,
-      borderTopColor: colors.border,
-      backgroundColor: colors.muted,
-      paddingHorizontal: 14,
-      paddingVertical: 12,
-      flexDirection: "row",
-      alignItems: "center",
-      gap: 10,
-    },
-    expandedLeft: { flex: 1 },
-    expandedLabel: { fontSize: 11, fontFamily: "Inter_500Medium", color: colors.mutedForeground, marginBottom: 2 },
-    expandedValue: { fontSize: 20, fontFamily: "Inter_700Bold", color: "#22c55e" },
-    cancelBtn: { paddingHorizontal: 10, paddingVertical: 8 },
-    cancelBtnText: { fontSize: 12, fontFamily: "Inter_500Medium", color: colors.mutedForeground },
-    confirmBtn: {
-      backgroundColor: "#16a34a",
-      borderRadius: 8,
-      paddingHorizontal: 16,
-      paddingVertical: 10,
-      alignItems: "center",
-      justifyContent: "center",
-      minWidth: 96,
-    },
-    confirmBtnText: { fontSize: 13, fontFamily: "Inter_700Bold", color: "#ffffff" },
-    footer: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginTop: 4 },
-    date: { fontSize: 11, fontFamily: "Inter_400Regular", color: colors.mutedForeground },
-    cashoutReceivedRow: { flexDirection: "row", alignItems: "center", gap: 4 },
-    cashoutReceivedLabel: { fontSize: 11, fontFamily: "Inter_400Regular", color: colors.mutedForeground },
-    cashoutReceivedValue: { fontSize: 13, fontFamily: "Inter_700Bold", color: colors.warning ?? "#f59e0b" },
-  });
-
   return (
-    <View style={s.card}>
-      <View style={s.inner}>
-        <View style={s.header}>
-          <View style={s.titleWrap}>
-            {isMultiple && (
-              <View style={s.multipleBadge}>
-                <Text style={s.multipleBadgeText}>MÚLTIPLA • {selections.length} seleções</Text>
-              </View>
-            )}
-            <Text style={s.title} numberOfLines={2}>{bet.matchTitle}</Text>
-          </View>
-          <View style={s.statusBadge}>
-            <Text style={s.statusBadgeText}>{statusLabel(bet.status)}</Text>
-          </View>
-        </View>
+    <View style={{
+      marginHorizontal: 12,
+      marginBottom: 16,
+      borderRadius: 16,
+      overflow: "hidden",
+      backgroundColor: cardBg,
+      shadowColor: isLost ? "#7b0000" : "#000",
+      shadowOffset: { width: 0, height: 4 },
+      shadowOpacity: isLost ? 0.5 : 0.3,
+      shadowRadius: 12,
+      elevation: 8,
+    }}>
 
-        {selections.length > 0 && (
-          <View style={s.selections}>
-            {selections.map((sel, i) => {
-              const { match, pick } = parseSelectionLabel(sel.label ?? "");
-              const matchDateLabel = sel.date
-                ? new Date(sel.date).toLocaleDateString("pt-PT", { weekday: "short", day: "2-digit", month: "2-digit" }) + (sel.time ? ` ${sel.time.slice(0, 5)}` : "")
-                : null;
-              return (
-                <View key={i} style={s.selectionRow}>
-                  <View style={s.selectionDot} />
-                  <View style={s.selectionBody}>
-                    {matchDateLabel && (
-                      <Text style={[s.selectionMatch, { color: colors.primary + "bb", fontSize: 10 }]} numberOfLines={1}>
-                        🗓 {matchDateLabel}
-                      </Text>
-                    )}
-                    {match && <Text style={s.selectionMatch} numberOfLines={1}>{match}</Text>}
-                    <Text style={s.selectionPick} numberOfLines={1}>{pick}</Text>
-                  </View>
-                  <Text style={s.selectionOdds}>{(sel.odds ?? 0).toFixed(2)}</Text>
-                </View>
-              );
-            })}
+      {/* ── HEADER ── */}
+      <View style={{ backgroundColor: "#b91c1c", paddingHorizontal: 16, paddingVertical: 14, flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 10, flex: 1 }}>
+          <View style={{ backgroundColor: "rgba(255,255,255,0.2)", borderRadius: 10, padding: 8 }}>
+            <Ionicons name="receipt-outline" size={18} color="#fff" />
           </View>
-        )}
-
-        <View style={s.statsRow}>
-          <View style={s.stat}>
-            <Text style={s.statLabel}>Apostado</Text>
-            <Text style={s.statValue}>€{stake.toFixed(2)}</Text>
-          </View>
-          <View style={s.statDivider} />
-          <View style={s.stat}>
-            <Text style={s.statLabel}>Odds</Text>
-            <Text style={s.statValue}>{totalOdds.toFixed(2)}</Text>
-          </View>
-          <View style={s.statDivider} />
-          <View style={s.stat}>
-            <Text style={s.statLabel}>{bet.status === "won" ? "Ganho" : "Potencial"}</Text>
-            <Text style={[s.statValue, { color: bet.status === "won" ? (colors.success ?? "#22c55e") : colors.foreground }]}>
-              €{potentialWin.toFixed(2)}
+          <View>
+            <Text style={{ fontFamily: "Inter_800ExtraBold", fontSize: 16, color: "#fff", fontStyle: "italic" }}>
+              Boletim de Aposta
+            </Text>
+            <Text style={{ fontFamily: "Inter_400Regular", fontSize: 11, color: "#fca5a5", marginTop: 2 }}>
+              📅 {dateStr} • {timeStr}
             </Text>
           </View>
         </View>
-
-        {bet.status === "pending" && !expanded && (
-          <Pressable
-            style={({ pressed }) => [s.cashoutBtn, { opacity: pressed || cashingOut ? 0.8 : 1 }]}
-            onPress={handleCashoutPress}
-            disabled={cashingOut}
-          >
-            {cashingOut ? (
-              <ActivityIndicator size="small" color={colors.warning ?? "#f59e0b"} />
-            ) : (
-              <>
-                <View style={s.cashoutBtnLeft}>
-                  <Ionicons name="cash-outline" size={16} color={colors.warning ?? "#f59e0b"} />
-                  <Text style={s.cashoutBtnText}>Cash Out</Text>
-                </View>
-                <Text style={s.cashoutBtnValue}>€ {estimatedCashout}</Text>
-              </>
-            )}
-          </Pressable>
+        {isPending && (
+          <View style={{ width: 34, height: 34, borderRadius: 17, backgroundColor: "rgba(255,255,255,0.25)", borderWidth: 2, borderColor: "rgba(255,255,255,0.6)", alignItems: "center", justifyContent: "center" }}>
+            <Ionicons name="checkmark" size={18} color="#fff" />
+          </View>
         )}
+        {isWon && (
+          <View style={{ width: 34, height: 34, borderRadius: 17, backgroundColor: "#fff", alignItems: "center", justifyContent: "center", shadowColor: "#000", shadowOpacity: 0.2, shadowRadius: 4, elevation: 3 }}>
+            <Ionicons name="checkmark" size={18} color="#b91c1c" />
+          </View>
+        )}
+        {isLost && (
+          <View style={{ width: 34, height: 34, borderRadius: 17, backgroundColor: "rgba(255,255,255,0.2)", borderWidth: 2, borderColor: "rgba(255,255,255,0.4)", alignItems: "center", justifyContent: "center" }}>
+            <Ionicons name="close" size={18} color="#fff" />
+          </View>
+        )}
+        {isCashedOut && (
+          <View style={{ width: 34, height: 34, borderRadius: 17, backgroundColor: "#fbbf24", alignItems: "center", justifyContent: "center" }}>
+            <Ionicons name="cash-outline" size={16} color="#78350f" />
+          </View>
+        )}
+      </View>
 
-        <View style={s.footer}>
-          <Text style={s.date}>{dateStr}</Text>
-          {bet.status === "cashed_out" && actualCashout && (
-            <View style={s.cashoutReceivedRow}>
-              <Ionicons name="checkmark-circle" size={13} color={colors.warning ?? "#f59e0b"} />
-              <Text style={s.cashoutReceivedLabel}>Recebido </Text>
-              <Text style={s.cashoutReceivedValue}>€{actualCashout}</Text>
+      {/* ── SELEÇÕES HEADER ── */}
+      <View style={{ backgroundColor: isLost ? "#8f1616" : "#f9fafb", paddingHorizontal: 16, paddingTop: 12, paddingBottom: 6, flexDirection: "row", alignItems: "center", gap: 6, borderBottomWidth: 1, borderBottomColor: dividerColor }}>
+        <Ionicons name="list-outline" size={13} color={txtSub} />
+        <Text style={{ fontFamily: "Inter_700Bold", fontSize: 10, color: txtSub, letterSpacing: 1.5, textTransform: "uppercase" }}>
+          Seleções
+        </Text>
+      </View>
+
+      {/* ── SELEÇÕES LIST ── */}
+      <View style={{ backgroundColor: selsBg }}>
+        {sels.map((sel, i) => {
+          // Per-selection icon
+          let iconName: string = "football-outline";
+          let iconColor = txtSub;
+          let iconBg = "transparent";
+          let showCircle = false;
+
+          if (isWon) { iconName = "checkmark"; iconColor = "#fff"; iconBg = "#22c55e"; showCircle = true; }
+          else if (isLost) { iconName = "close"; iconColor = "#fff"; iconBg = "rgba(0,0,0,0.3)"; showCircle = true; }
+          else if (isCashedOut) { iconName = "cash-outline"; iconColor = "#fff"; iconBg = "rgba(251,191,36,0.7)"; showCircle = true; }
+
+          return (
+            <View key={i} style={{ flexDirection: "row", alignItems: "flex-start", paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: dividerColor, gap: 10 }}>
+              {/* Left icon */}
+              {showCircle ? (
+                <View style={{ width: 26, height: 26, borderRadius: 13, backgroundColor: iconBg, alignItems: "center", justifyContent: "center", marginTop: 2, flexShrink: 0 }}>
+                  <Ionicons name={iconName as never} size={14} color={iconColor} />
+                </View>
+              ) : (
+                <Text style={{ fontSize: 20, lineHeight: 26, marginTop: 1, flexShrink: 0 }}>⚽</Text>
+              )}
+
+              {/* Middle */}
+              <View style={{ flex: 1, minWidth: 0 }}>
+                <Text style={{ fontFamily: "Inter_700Bold", fontSize: 13, color: txtMain, lineHeight: 18 }} numberOfLines={2}>
+                  {i + 1}. {sel.matchTitle}
+                </Text>
+                <Text style={{ fontFamily: "Inter_400Regular", fontSize: 11, color: txtSub, marginTop: 2 }}>
+                  {getSelLabel(sel)}
+                </Text>
+              </View>
+
+              {/* Right: odds pill + VENCIDO */}
+              <View style={{ alignItems: "flex-end", gap: 4, flexShrink: 0 }}>
+                <View style={{ backgroundColor: "#dc2626", borderRadius: 8, paddingHorizontal: 10, paddingVertical: 4 }}>
+                  <Text style={{ fontFamily: "Inter_800ExtraBold", fontSize: 13, color: "#fff" }}>
+                    {Number(sel.odd).toFixed(2)}
+                  </Text>
+                </View>
+                {isWon && (
+                  <Text style={{ fontFamily: "Inter_700Bold", fontSize: 10, color: "#16a34a" }}>⚽ VENCIDO</Text>
+                )}
+              </View>
+            </View>
+          );
+        })}
+      </View>
+
+      {/* ── SUMMARY BOX ── */}
+      <View style={{ marginHorizontal: 12, marginTop: 12, marginBottom: 12, backgroundColor: summBg, borderRadius: 12, borderWidth: 1, borderColor: summBorder, overflow: "hidden" }}>
+        {[
+          { label: "Tipo de aposta:", value: isMultiple ? "Múltipla" : "Simples", valueColor: "#dc2626", valueBold: true },
+          { label: "Total de odds:", value: totalOdds.toFixed(2), valueColor: txtMain, valueBold: false },
+          { label: "Valor apostado:", value: `€${stake.toFixed(2)}`, valueColor: txtMain, valueBold: false },
+          {
+            label: isWon ? "Retorno recebido:" : isLost ? "Retorno:" : "Retorno estimado:",
+            value: isLost ? "€0,00" : `€${potentialWin.toFixed(2)}`,
+            valueColor: isWon ? "#16a34a" : isLost ? "#fca5a5" : txtMain,
+            valueBold: true,
+          },
+        ].map(({ label, value, valueColor, valueBold }, ri, arr) => (
+          <View key={ri} style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 14, paddingVertical: 11, borderBottomWidth: ri < arr.length - 1 ? 1 : 0, borderBottomColor: summBorder }}>
+            <Text style={{ fontFamily: "Inter_400Regular", fontSize: 13, color: summTxt }}>{label}</Text>
+            <Text style={{ fontFamily: valueBold ? "Inter_700Bold" : "Inter_500Medium", fontSize: 13, color: valueColor }}>{value}</Text>
+          </View>
+        ))}
+      </View>
+
+      {/* ── CASH OUT BUTTON ── */}
+      {isPending ? (
+        cashoutExpanded ? (
+          <View style={{ marginHorizontal: 12, marginBottom: 12, backgroundColor: "#16a34a", borderRadius: 16, paddingHorizontal: 14, paddingVertical: 14, flexDirection: "row", alignItems: "center", gap: 10 }}>
+            <Ionicons name="cash-outline" size={22} color="#fff" />
+            <View style={{ flex: 1 }}>
+              <Text style={{ fontFamily: "Inter_400Regular", fontSize: 11, color: "rgba(255,255,255,0.7)", marginBottom: 2 }}>Cash Out estimado</Text>
+              <Text style={{ fontFamily: "Inter_800ExtraBold", fontSize: 20, color: "#fff" }}>€ {estimatedCashout}</Text>
+            </View>
+            <Pressable onPress={() => setCashoutExpanded(false)} disabled={cashingOut} style={{ paddingHorizontal: 10, paddingVertical: 8 }}>
+              <Text style={{ fontFamily: "Inter_500Medium", fontSize: 12, color: "rgba(255,255,255,0.75)" }}>Cancelar</Text>
+            </Pressable>
+            <Pressable
+              onPress={executeCashout}
+              disabled={cashingOut}
+              style={({ pressed }) => ({ backgroundColor: "#fff", borderRadius: 12, paddingHorizontal: 16, paddingVertical: 10, opacity: pressed || cashingOut ? 0.75 : 1 })}
+            >
+              {cashingOut
+                ? <ActivityIndicator size="small" color="#16a34a" />
+                : <Text style={{ fontFamily: "Inter_700Bold", fontSize: 13, color: "#15803d" }}>CONFIRMAR</Text>}
+            </Pressable>
+          </View>
+        ) : (
+          <Pressable
+            onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium); setCashoutExpanded(true); }}
+            disabled={cashingOut}
+            style={({ pressed }) => ({
+              marginHorizontal: 12, marginBottom: 12,
+              backgroundColor: pressed ? "#b91c1c" : "#dc2626",
+              borderRadius: 16, paddingVertical: 16,
+              flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 10,
+              shadowColor: "#7f1d1d", shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.4, shadowRadius: 8, elevation: 6,
+            })}
+          >
+            <Ionicons name="refresh-outline" size={20} color="#fff" />
+            <Text style={{ fontFamily: "Inter_800ExtraBold", fontSize: 15, color: "#fff" }}>Cash Out disponível</Text>
+          </Pressable>
+        )
+      ) : isCashedOut || isWon ? (
+        <View style={{ marginHorizontal: 12, marginBottom: 12, backgroundColor: "#e5e7eb", borderRadius: 16, paddingVertical: 16, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8 }}>
+          <Ionicons name="lock-closed-outline" size={16} color="#9ca3af" />
+          <Text style={{ fontFamily: "Inter_700Bold", fontSize: 14, color: "#9ca3af" }}>Cash Out encerrado</Text>
+        </View>
+      ) : isLost ? (
+        <View style={{ marginHorizontal: 12, marginBottom: 12, backgroundColor: "rgba(107,15,15,0.6)", borderWidth: 1, borderColor: "rgba(160,32,32,0.5)", borderRadius: 16, paddingVertical: 16, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8 }}>
+          <Ionicons name="refresh-outline" size={16} color="rgba(252,165,165,0.5)" />
+          <Text style={{ fontFamily: "Inter_700Bold", fontSize: 14, color: "rgba(252,165,165,0.6)" }}>Cash Out indisponível</Text>
+          <Ionicons name="lock-closed-outline" size={14} color="rgba(252,165,165,0.4)" style={{ marginLeft: "auto" as never }} />
+        </View>
+      ) : null}
+
+      {/* ── FOOTER ── */}
+      <View style={{ backgroundColor: isLost ? "#6b0f0f" : "#b91c1c", paddingHorizontal: 16, paddingVertical: 12, flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+          <Ionicons name="ticket-outline" size={16} color="rgba(255,255,255,0.6)" />
+          <View>
+            <Text style={{ fontFamily: "Inter_400Regular", fontSize: 9, color: "rgba(255,255,255,0.5)", textTransform: "uppercase", letterSpacing: 1 }}>
+              Código do bilhete:
+            </Text>
+            <Text style={{ fontFamily: "Inter_700Bold", fontSize: 13, color: "#fff", letterSpacing: 0.5 }}>
+              {ticketCode}
+            </Text>
+          </View>
+        </View>
+        <View>
+          {isPending && (
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 6, backgroundColor: "rgba(255,255,255,0.2)", paddingHorizontal: 10, paddingVertical: 6, borderRadius: 20 }}>
+              <Ionicons name="shield-checkmark-outline" size={13} color="#fff" />
+              <Text style={{ fontFamily: "Inter_700Bold", fontSize: 11, color: "#fff" }}>Aposta confirmada</Text>
+            </View>
+          )}
+          {isWon && (
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 6, backgroundColor: "rgba(255,255,255,0.25)", paddingHorizontal: 10, paddingVertical: 6, borderRadius: 20 }}>
+              <Ionicons name="trophy-outline" size={13} color="#fff" />
+              <Text style={{ fontFamily: "Inter_700Bold", fontSize: 11, color: "#fff" }}>Bilhete vencedor</Text>
+            </View>
+          )}
+          {isLost && (
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 6, backgroundColor: "rgba(0,0,0,0.3)", borderWidth: 1, borderColor: "rgba(255,255,255,0.2)", paddingHorizontal: 10, paddingVertical: 6, borderRadius: 20 }}>
+              <Ionicons name="close-circle-outline" size={13} color="rgba(255,255,255,0.8)" />
+              <Text style={{ fontFamily: "Inter_700Bold", fontSize: 11, color: "rgba(255,255,255,0.8)" }}>Bilhete perdido</Text>
+            </View>
+          )}
+          {isCashedOut && (
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 6, backgroundColor: "#fbbf24", paddingHorizontal: 10, paddingVertical: 6, borderRadius: 20 }}>
+              <Ionicons name="cash-outline" size={13} color="#78350f" />
+              <Text style={{ fontFamily: "Inter_700Bold", fontSize: 11, color: "#78350f" }}>Cash Out</Text>
             </View>
           )}
         </View>
       </View>
 
-      {bet.status === "pending" && expanded && (
-        <View style={s.expandedRow}>
-          <View style={s.expandedLeft}>
-            <Text style={s.expandedLabel}>Cash Out estimado</Text>
-            <Text style={s.expandedValue}>€ {estimatedCashout}</Text>
-          </View>
-          <Pressable
-            style={s.cancelBtn}
-            onPress={() => setExpanded(false)}
-            disabled={cashingOut}
-          >
-            <Text style={s.cancelBtnText}>Cancelar</Text>
-          </Pressable>
-          <Pressable
-            style={({ pressed }) => [s.confirmBtn, { opacity: pressed || cashingOut ? 0.75 : 1 }]}
-            onPress={executeCashout}
-            disabled={cashingOut}
-          >
-            {cashingOut ? (
-              <ActivityIndicator size="small" color="#ffffff" />
-            ) : (
-              <Text style={s.confirmBtnText}>CONFIRMAR</Text>
-            )}
-          </Pressable>
-        </View>
-      )}
     </View>
   );
 }
+
+// ─── SCREEN ──────────────────────────────────────────────────────────────────
 
 export default function BetsScreen() {
   const colors = useColors();
@@ -321,6 +348,7 @@ export default function BetsScreen() {
   const { user, token } = useAuth();
   const queryClient = useQueryClient();
   const topPad = Platform.OS === "web" ? 67 : insets.top;
+  const [tab, setTab] = useState<"abertas" | "resolvidas">("abertas");
 
   const { data, isLoading, refetch } = useQuery({
     queryKey: ["my-bets", token],
@@ -337,63 +365,66 @@ export default function BetsScreen() {
   });
 
   const bets = data ?? [];
-  const pending = bets.filter((b) => b.status === "pending").length;
-  const won = bets.filter((b) => b.status === "won").length;
+  const filtered = tab === "abertas"
+    ? bets.filter(b => b.status === "pending")
+    : bets.filter(b => b.status !== "pending");
 
-  const s = StyleSheet.create({
-    container: { flex: 1, backgroundColor: colors.background },
-    header: {
-      paddingTop: topPad + 8,
-      paddingHorizontal: 16,
-      paddingBottom: 14,
-      backgroundColor: colors.background,
-      borderBottomWidth: 1,
-      borderBottomColor: colors.border,
-    },
-    titleRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
-    title: { fontSize: 22, fontFamily: "Inter_700Bold", color: colors.foreground },
-    subtitle: { fontSize: 13, fontFamily: "Inter_400Regular", color: colors.mutedForeground, marginTop: 2 },
-    statsRow: { flexDirection: "row", gap: 10, marginTop: 12 },
-    statChip: { flexDirection: "row", alignItems: "center", gap: 5, backgroundColor: colors.card, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6, borderWidth: 1, borderColor: colors.border },
-    statChipText: { fontSize: 12, fontFamily: "Inter_600SemiBold", color: colors.foreground },
-    emptyContainer: { flex: 1, alignItems: "center", justifyContent: "center", gap: 12, paddingTop: 80 },
-    emptyText: { fontSize: 16, fontFamily: "Inter_600SemiBold", color: colors.mutedForeground },
-    emptySubtext: { fontSize: 13, fontFamily: "Inter_400Regular", color: colors.mutedForeground },
-    loginBtn: { backgroundColor: colors.primary, borderRadius: 10, paddingHorizontal: 24, paddingVertical: 12, marginTop: 8 },
-    loginBtnText: { fontSize: 14, fontFamily: "Inter_600SemiBold", color: colors.primaryForeground },
-  });
+  const pending = bets.filter(b => b.status === "pending").length;
+  const won = bets.filter(b => b.status === "won").length;
 
   return (
-    <View style={s.container}>
-      <View style={s.header}>
-        <View style={s.titleRow}>
-          <Text style={s.title}>Minhas Apostas</Text>
+    <View style={{ flex: 1, backgroundColor: colors.background }}>
+
+      {/* Header */}
+      <View style={{ paddingTop: topPad + 8, paddingHorizontal: 16, paddingBottom: 14, backgroundColor: colors.background, borderBottomWidth: 1, borderBottomColor: colors.border }}>
+        <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
+          <Text style={{ fontSize: 22, fontFamily: "Inter_700Bold", color: colors.foreground }}>Minhas Apostas</Text>
         </View>
-        {user && <Text style={s.subtitle}>{bets.length} apostas registadas</Text>}
+        {user && <Text style={{ fontSize: 13, fontFamily: "Inter_400Regular", color: colors.mutedForeground, marginTop: 2 }}>{bets.length} apostas registadas</Text>}
         {user && bets.length > 0 && (
-          <View style={s.statsRow}>
+          <View style={{ flexDirection: "row", gap: 8, marginTop: 10 }}>
             {pending > 0 && (
-              <View style={s.statChip}>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 5, backgroundColor: colors.card, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6, borderWidth: 1, borderColor: colors.border }}>
                 <Ionicons name="time-outline" size={13} color={colors.primary} />
-                <Text style={s.statChipText}>{pending} pendente{pending !== 1 ? "s" : ""}</Text>
+                <Text style={{ fontSize: 12, fontFamily: "Inter_600SemiBold", color: colors.foreground }}>{pending} pendente{pending !== 1 ? "s" : ""}</Text>
               </View>
             )}
             {won > 0 && (
-              <View style={s.statChip}>
-                <Ionicons name="trophy-outline" size={13} color={colors.success ?? "#22c55e"} />
-                <Text style={[s.statChipText, { color: colors.success ?? "#22c55e" }]}>{won} ganha{won !== 1 ? "s" : ""}</Text>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 5, backgroundColor: colors.card, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6, borderWidth: 1, borderColor: colors.border }}>
+                <Ionicons name="trophy-outline" size={13} color="#22c55e" />
+                <Text style={{ fontSize: 12, fontFamily: "Inter_600SemiBold", color: "#22c55e" }}>{won} ganha{won !== 1 ? "s" : ""}</Text>
               </View>
             )}
+          </View>
+        )}
+
+        {/* Tab switcher */}
+        {user && bets.length > 0 && (
+          <View style={{ flexDirection: "row", marginTop: 12, backgroundColor: colors.muted, borderRadius: 10, padding: 3 }}>
+            {(["abertas", "resolvidas"] as const).map(t => (
+              <Pressable
+                key={t}
+                onPress={() => setTab(t)}
+                style={{ flex: 1, paddingVertical: 8, borderRadius: 8, alignItems: "center", backgroundColor: tab === t ? colors.card : "transparent" }}
+              >
+                <Text style={{ fontFamily: tab === t ? "Inter_700Bold" : "Inter_500Medium", fontSize: 13, color: tab === t ? colors.primary : colors.mutedForeground }}>
+                  {t === "abertas" ? "Abertas" : "Resolvidas"}
+                </Text>
+              </Pressable>
+            ))}
           </View>
         )}
       </View>
 
       {!user ? (
-        <View style={s.emptyContainer}>
+        <View style={{ flex: 1, alignItems: "center", justifyContent: "center", gap: 12, paddingTop: 80 }}>
           <Ionicons name="receipt-outline" size={48} color={colors.border} />
-          <Text style={s.emptyText}>Inicia sessão para ver as tuas apostas</Text>
-          <Pressable style={({ pressed }) => [s.loginBtn, { opacity: pressed ? 0.8 : 1 }]} onPress={() => router.push("/(auth)/login")}>
-            <Text style={s.loginBtnText}>Entrar</Text>
+          <Text style={{ fontSize: 16, fontFamily: "Inter_600SemiBold", color: colors.mutedForeground }}>Inicia sessão para ver as tuas apostas</Text>
+          <Pressable
+            style={({ pressed }) => ({ backgroundColor: colors.primary, borderRadius: 10, paddingHorizontal: 24, paddingVertical: 12, opacity: pressed ? 0.8 : 1 })}
+            onPress={() => router.push("/(auth)/login")}
+          >
+            <Text style={{ fontSize: 14, fontFamily: "Inter_600SemiBold", color: colors.primaryForeground }}>Entrar</Text>
           </Pressable>
         </View>
       ) : isLoading ? (
@@ -402,19 +433,23 @@ export default function BetsScreen() {
         </View>
       ) : (
         <FlatList
-          data={bets}
+          data={filtered}
           keyExtractor={(b) => String(b.id)}
-          contentContainerStyle={{ paddingTop: 8, paddingBottom: Platform.OS === "web" ? 100 : 120 }}
-          scrollEnabled={bets.length > 0}
+          contentContainerStyle={{ paddingTop: 14, paddingBottom: Platform.OS === "web" ? 100 : 120 }}
+          scrollEnabled={filtered.length > 0}
           showsVerticalScrollIndicator={false}
           refreshControl={
             <RefreshControl refreshing={false} onRefresh={() => refetch()} tintColor={colors.primary} />
           }
           ListEmptyComponent={
-            <View style={s.emptyContainer}>
+            <View style={{ flex: 1, alignItems: "center", justifyContent: "center", gap: 10, paddingTop: 80 }}>
               <Ionicons name="receipt-outline" size={48} color={colors.border} />
-              <Text style={s.emptyText}>Sem apostas</Text>
-              <Text style={s.emptySubtext}>As tuas apostas aparecerão aqui</Text>
+              <Text style={{ fontSize: 16, fontFamily: "Inter_600SemiBold", color: colors.mutedForeground }}>
+                {tab === "abertas" ? "Sem apostas abertas" : "Sem apostas resolvidas"}
+              </Text>
+              <Text style={{ fontSize: 13, fontFamily: "Inter_400Regular", color: colors.mutedForeground }}>
+                {tab === "abertas" ? "As tuas apostas activas aparecerão aqui" : "Apostas ganhas, perdidas e cash out aparecem aqui"}
+              </Text>
             </View>
           }
           renderItem={({ item }) => (
