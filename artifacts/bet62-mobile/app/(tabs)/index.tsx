@@ -73,6 +73,145 @@ function parseKickoff(date: string, time: string): Date {
   return new Date(y, mo - 1, d, h, mi);
 }
 
+const BANNER_CFGS = [
+  { title: "MÚLTIPLAS", subtitle: "POPULARES", label: "🔥 COMBOS POPULARES", count: "200+ apostas" },
+  { title: "TOP", subtitle: "APOSTAS",    label: "⭐ MAIS APOSTADOS",    count: "150+ apostas" },
+  { title: "ALTO",    subtitle: "RETORNO",  label: "💰 ALTO RETORNO",     count: "100+ apostas" },
+  { title: "EM",      subtitle: "DESTAQUE", label: "🏆 FAVORITOS DO DIA", count: "80+ apostas"  },
+] as const;
+
+function PopularBanners({ matches }: { matches: UpcomingMatch[] }) {
+  const { addSelection, hasSelection } = useBetSlip();
+  if (matches.length === 0) return null;
+
+  const withOdds = matches.filter((m) => m.odds.home > 1.01);
+  const favPool  = withOdds.filter((m) => m.odds.home >= 1.20 && m.odds.home < 1.50).sort((a, b) => a.odds.home - b.odds.home);
+  const medPool  = withOdds.filter((m) => m.odds.home >= 1.50 && m.odds.home < 2.00).sort((a, b) => a.odds.home - b.odds.home);
+  const mid25Pool = withOdds.filter((m) => m.odds.home >= 2.00 && m.odds.home < 3.00).sort((a, b) => Math.abs(a.odds.home - 2.5) - Math.abs(b.odds.home - 2.5));
+  const high31Pool = withOdds.filter((m) => m.odds.home >= 2.80).sort((a, b) => Math.abs(a.odds.home - 3.10) - Math.abs(b.odds.home - 3.10));
+
+  const usedIds = new Set<string>();
+  const pickN = (pool: UpcomingMatch[], n: number): UpcomingMatch[] => {
+    const out: UpcomingMatch[] = [];
+    for (const m of pool) {
+      if (!usedIds.has(m.id)) { out.push(m); usedIds.add(m.id); if (out.length === n) break; }
+    }
+    return out;
+  };
+
+  const chunks: UpcomingMatch[][] = [];
+  for (let i = 0; i < 3; i++) {
+    const favs  = pickN(favPool, 3);
+    const spike = pickN(mid25Pool, 1);
+    const chunk = [...favs, ...spike];
+    if (chunk.length > 0) chunks.push(chunk);
+  }
+  const meds   = pickN(medPool, 3);
+  const spike4 = pickN(high31Pool, 1);
+  const last   = [...meds, ...spike4];
+  if (last.length > 0) chunks.push(last);
+
+  if (chunks.length === 0) return null;
+
+  const addAll = (events: UpcomingMatch[]) => {
+    events.forEach((m) => {
+      if (!hasSelection(m.id, "1x2-home")) {
+        addSelection({
+          matchId: m.id,
+          matchTitle: `${m.home} vs ${m.away}`,
+          market: "1x2-home",
+          selection: "1x2-home",
+          label: `${m.home} vs ${m.away} — Casa`,
+          odds: m.odds.home,
+        });
+      }
+    });
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+  };
+
+  return (
+    <View style={{ marginBottom: 4 }}>
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={{ paddingHorizontal: 14, paddingVertical: 10, gap: 10 }}
+      >
+        {chunks.map((events, bi) => {
+          const cfg = BANNER_CFGS[bi];
+          if (!cfg) return null;
+          const totalOdds = events.reduce((acc, m) => acc * m.odds.home, 1).toFixed(2);
+          return (
+            <View
+              key={bi}
+              style={{
+                width: 264, borderRadius: 18, padding: 14,
+                backgroundColor: "#120505",
+                borderWidth: 1, borderColor: "rgba(220,38,38,0.22)",
+              }}
+            >
+              <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 8 }}>
+                <View>
+                  <Text style={{ fontFamily: "Inter_700Bold", fontSize: 22, color: "#ffffff", fontStyle: "italic" }}>{cfg.title}</Text>
+                  <Text style={{ fontFamily: "Inter_700Bold", fontSize: 22, color: "#dc2626", fontStyle: "italic", marginTop: -4 }}>{cfg.subtitle}</Text>
+                </View>
+                <View style={{ backgroundColor: "#0b0b0b", borderRadius: 10, borderWidth: 2, borderColor: "#dc2626", paddingHorizontal: 10, paddingVertical: 6, alignItems: "center" }}>
+                  <Text style={{ fontFamily: "Inter_700Bold", fontSize: 13, color: "#ffffff", fontStyle: "italic", lineHeight: 16 }}>BET</Text>
+                  <Text style={{ fontFamily: "Inter_700Bold", fontSize: 13, color: "#dc2626", fontStyle: "italic", lineHeight: 16 }}>62</Text>
+                </View>
+              </View>
+
+              <View style={{ flexDirection: "row", justifyContent: "space-between", marginBottom: 10 }}>
+                <Text style={{ fontFamily: "Inter_600SemiBold", fontSize: 10, color: "#dc2626" }}>{cfg.label}</Text>
+                <Text style={{ fontFamily: "Inter_600SemiBold", fontSize: 10, color: "#9ca3af" }}>{cfg.count}</Text>
+              </View>
+
+              <View style={{ gap: 5, marginBottom: 12 }}>
+                {events.map((m, ei) => (
+                  <View
+                    key={ei}
+                    style={{
+                      backgroundColor: "#0d0d0d", borderRadius: 10, padding: 8,
+                      flexDirection: "row", alignItems: "center", justifyContent: "space-between",
+                      borderWidth: 1, borderColor: "rgba(220,38,38,0.10)",
+                    }}
+                  >
+                    <View style={{ flex: 1, minWidth: 0 }}>
+                      <Text style={{ fontFamily: "Inter_700Bold", fontSize: 11, color: "#ffffff" }} numberOfLines={1}>{m.home}</Text>
+                      <Text style={{ fontFamily: "Inter_400Regular", fontSize: 10, color: "#71717a" }} numberOfLines={1}>vs {m.away}</Text>
+                    </View>
+                    <Text style={{ fontFamily: "Inter_700Bold", fontSize: 18, color: "#dc2626", marginLeft: 8 }}>{m.odds.home.toFixed(2)}</Text>
+                  </View>
+                ))}
+              </View>
+
+              <View style={{ flexDirection: "row", gap: 8 }}>
+                <View style={{
+                  backgroundColor: "#0b0b0b", borderRadius: 10, borderWidth: 1, borderColor: "#dc2626",
+                  paddingHorizontal: 12, paddingVertical: 8, alignItems: "center",
+                }}>
+                  <Text style={{ fontFamily: "Inter_400Regular", fontSize: 8, color: "#71717a" }}>ODD TOTAL</Text>
+                  <Text style={{ fontFamily: "Inter_700Bold", fontSize: 18, color: "#dc2626" }}>{totalOdds}</Text>
+                </View>
+                <Pressable
+                  style={({ pressed }) => ({
+                    flex: 1, borderRadius: 10, alignItems: "center" as const, justifyContent: "center" as const,
+                    backgroundColor: "#dc2626", opacity: pressed ? 0.82 : 1,
+                  })}
+                  onPress={() => addAll(events)}
+                >
+                  <Text style={{ fontFamily: "Inter_700Bold", fontSize: 11, color: "#ffffff", textAlign: "center" }}>
+                    {"ADICIONAR\nAO BOLETIM"}
+                  </Text>
+                </Pressable>
+              </View>
+            </View>
+          );
+        })}
+      </ScrollView>
+    </View>
+  );
+}
+
 function UpcomingCard({ match }: { match: UpcomingMatch }) {
   const colors = useColors();
   const { addSelection, removeSelection, hasSelection } = useBetSlip();
@@ -339,6 +478,7 @@ export default function PreGameScreen() {
               <Text style={s.emptySubtext}>Tenta outro desporto ou volta mais tarde</Text>
             </View>
           }
+          ListHeaderComponent={<PopularBanners matches={allUpcoming} />}
           renderItem={({ item }) => {
             if (item.type === "header") {
               return (

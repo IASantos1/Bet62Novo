@@ -67,12 +67,6 @@ function getSport(s: string): SportType {
   return "football";
 }
 
-// Skin tones and hair colours — varied per player based on position seed
-const SKINS = ["#f5c5a3", "#edb891", "#c88045", "#9b5e28", "#7b3f14"];
-const HAIRS = ["#1a0a00", "#2d1800", "#6b3a20", "#0a0808", "#3a2a10", "#4a3520"];
-const SHORTS_DARK = "#111827";
-const SHORTS_LIGHT = "#e5e7eb";
-
 // Jersey numbers by formation position (football 4-3-3)
 const FB_NUMS = [1, 2, 5, 3, 6, 4, 8, 10, 7, 11, 9];
 const BB_NUMS = [15, 23, 3, 1, 11];
@@ -80,156 +74,6 @@ const TN_NUMS = [1];
 const HK_NUMS = [31, 2, 5, 11, 10, 44];
 const BS_FIELD_NUMS = [21, 14, 23, 3, 8, 1, 45, 17, 99];
 const VB_NUMS = [1, 7, 10, 14, 3, 9];
-
-// ─── Player Figure ────────────────────────────────────────────────────────────
-/**
- * Top-down humanoid player — visible from ~24° angle (same as field perspective).
- * Body is the dominant element; head smaller but detailed (eyes, brows, mouth, hair).
- * Rotates to face the ball when within range.
- */
-function PlayerFigure({
-  x, y, color, isGK = false, num = 7, skinIdx = 0, hairIdx = 0, ballX, ballY,
-}: {
-  x: number; y: number; color: string; isGK?: boolean;
-  num?: number; skinIdx?: number; hairIdx?: number;
-  ballX: number; ballY: number;
-}) {
-  const jersey = isGK ? "#f59e0b" : color;
-  const jerseyDark = isGK ? "#b45309" : `${color}bb`;
-  const skin = SKINS[skinIdx % SKINS.length]!;
-  const hair = HAIRS[hairIdx % HAIRS.length]!;
-  const shortsCol = color === "#dc2626" ? SHORTS_DARK : SHORTS_DARK;
-  const socksCol = "#f0f0f0";
-
-  // Direction: players face the ball
-  const dx = ballX - x;
-  const dy = ballY - y;
-  const dist = Math.sqrt(dx * dx + dy * dy);
-  // Only rotate if reasonably close to ball; else face toward attack
-  const raw = dist < FIELD_W * 0.55 ? Math.atan2(dy, dx) * (180 / Math.PI) : (color === "#dc2626" ? 90 : -90);
-  // Clamp to avoid extreme backward lean
-  const facingAngle = raw;
-
-  return (
-    <G>
-      {/* ── Ground shadow (not rotated, stays flat) */}
-      <Ellipse cx={x} cy={y + 13} rx={13} ry={5} fill="#00000055" />
-
-      {/* ── Rotating body group */}
-      <G transform={`rotate(${facingAngle - 90}, ${x}, ${y})`}>
-
-        {/* BOOTS */}
-        <Ellipse cx={x - 5} cy={y + 13} rx={4.5} ry={6} fill="#0d0d0d" />
-        <Ellipse cx={x + 5} cy={y + 13} rx={4.5} ry={6} fill="#0d0d0d" />
-        {/* Boot laces highlight */}
-        <Ellipse cx={x - 5} cy={y + 11.5} rx={2} ry={2.5} fill="#333" />
-        <Ellipse cx={x + 5} cy={y + 11.5} rx={2} ry={2.5} fill="#333" />
-
-        {/* SOCKS */}
-        <Ellipse cx={x - 5} cy={y + 7} rx={3.8} ry={6} fill={socksCol} />
-        <Ellipse cx={x + 5} cy={y + 7} rx={3.8} ry={6} fill={socksCol} />
-        {/* Sock band */}
-        <Line x1={x - 9} y1={y + 2} x2={x - 1} y2={y + 2} stroke="#cccccc" strokeWidth={2} strokeLinecap="round" />
-        <Line x1={x + 1} y1={y + 2} x2={x + 9} y2={y + 2} stroke="#cccccc" strokeWidth={2} strokeLinecap="round" />
-
-        {/* SHORTS */}
-        <Ellipse cx={x - 3.5} cy={y + 1} rx={6} ry={6.5} fill={shortsCol} />
-        <Ellipse cx={x + 3.5} cy={y + 1} rx={6} ry={6.5} fill={shortsCol} />
-        {/* Shorts centre seam */}
-        <Line x1={x} y1={y - 3} x2={x} y2={y + 8} stroke="#ffffff22" strokeWidth={1.2} />
-
-        {/* JERSEY */}
-        <Ellipse cx={x} cy={y - 5} rx={10} ry={11} fill={jersey} />
-        {/* Jersey depth shading (right side darker) */}
-        <Ellipse cx={x + 2} cy={y - 4} rx={10} ry={11} fill="#00000018" />
-        {/* Jersey collar */}
-        <Path
-          d={`M${x - 3.5},${y - 14} L${x},${y - 12} L${x + 3.5},${y - 14}`}
-          fill={jerseyDark}
-          stroke="#00000044"
-          strokeWidth={0.8}
-        />
-        {/* Jersey sleeve stitching */}
-        <Line x1={x - 10} y1={y - 8} x2={x - 10} y2={y - 2} stroke="#ffffff22" strokeWidth={1} />
-        <Line x1={x + 10} y1={y - 8} x2={x + 10} y2={y - 2} stroke="#ffffff22" strokeWidth={1} />
-
-        {/* ARMS */}
-        <Ellipse cx={x - 13} cy={y - 5} rx={3.5} ry={7} fill={jersey} />
-        <Ellipse cx={x + 13} cy={y - 5} rx={3.5} ry={7} fill={jersey} />
-        {/* Wrists / hands */}
-        <Ellipse cx={x - 13} cy={y + 2.5} rx={3} ry={3.5} fill={skin} />
-        <Ellipse cx={x + 13} cy={y + 2.5} rx={3} ry={3.5} fill={skin} />
-
-        {/* JERSEY NUMBER */}
-        <SvgText
-          x={x} y={y - 2}
-          fontSize={7.5} fontWeight="bold"
-          textAnchor="middle" alignmentBaseline="middle"
-          fill="#ffffffdd"
-        >
-          {num}
-        </SvgText>
-
-        {/* NECK */}
-        <Ellipse cx={x} cy={y - 15} rx={4} ry={3.2} fill={skin} />
-
-        {/* HEAD — smaller than body, properly proportioned */}
-        <Circle cx={x} cy={y - 22} r={8.5} fill={skin} />
-        {/* Head side shading */}
-        <Circle cx={x + 2} cy={y - 21} r={8.5} fill="#00000018" />
-        {/* Forehead highlight */}
-        <Ellipse cx={x - 2} cy={y - 25} rx={4} ry={2.5} fill="#ffffff1a" />
-
-        {/* HAIR */}
-        <Path
-          d={`M${x - 8.5},${y - 22}
-             Q${x - 7},${y - 32}
-             ${x},${y - 31.5}
-             Q${x + 7},${y - 32}
-             ${x + 8.5},${y - 22}
-             Q${x + 5},${y - 28}
-             ${x - 5},${y - 28} Z`}
-          fill={hair}
-        />
-        {/* Temple hair */}
-        <Ellipse cx={x - 8} cy={y - 22.5} rx={1.5} ry={3} fill={hair} opacity={0.7} />
-        <Ellipse cx={x + 8} cy={y - 22.5} rx={1.5} ry={3} fill={hair} opacity={0.7} />
-
-        {/* FACE ─ eyebrows */}
-        <Path
-          d={`M${x - 6},${y - 25.5} Q${x - 3.5},${y - 27} ${x - 1.5},${y - 25.5}`}
-          stroke={hair} strokeWidth={1.4} fill="none" strokeLinecap="round"
-        />
-        <Path
-          d={`M${x + 1.5},${y - 25.5} Q${x + 3.5},${y - 27} ${x + 6},${y - 25.5}`}
-          stroke={hair} strokeWidth={1.4} fill="none" strokeLinecap="round"
-        />
-
-        {/* FACE ─ eyes */}
-        <Ellipse cx={x - 3.5} cy={y - 23} rx={1.8} ry={1.4} fill="#fffff5" />
-        <Ellipse cx={x + 3.5} cy={y - 23} rx={1.8} ry={1.4} fill="#fffff5" />
-        <Circle cx={x - 3.5} cy={y - 23} r={1} fill="#1a0a00" />
-        <Circle cx={x + 3.5} cy={y - 23} r={1} fill="#1a0a00" />
-        {/* Eye gleam */}
-        <Circle cx={x - 2.8} cy={y - 23.5} r={0.5} fill="#ffffffbb" />
-        <Circle cx={x + 4.2} cy={y - 23.5} r={0.5} fill="#ffffffbb" />
-
-        {/* FACE ─ nose */}
-        <Path
-          d={`M${x - 1.2},${y - 20.5} L${x - 2},${y - 19} L${x + 2},${y - 19} L${x + 1.2},${y - 20.5}`}
-          fill={skin} stroke="#c0806080" strokeWidth={0.6}
-        />
-
-        {/* FACE ─ mouth */}
-        <Path
-          d={`M${x - 3},${y - 17} Q${x},${y - 15.5} ${x + 3},${y - 17}`}
-          stroke="#00000077" strokeWidth={1.1} fill="none" strokeLinecap="round"
-        />
-
-      </G>{/* end rotating group */}
-    </G>
-  );
-}
 
 // ─── FIELD COMPONENTS (React.memo — never re-render) ─────────────────────────
 const FootballField = React.memo(function FootballField() {
@@ -449,7 +293,7 @@ const VolleyballCourt = React.memo(function VolleyballCourt() {
 });
 
 // ─── Player positions ─────────────────────────────────────────────────────────
-type PlayerDot = { x: number; y: number; color: string; isGK?: boolean; num: number; skinIdx: number; hairIdx: number; };
+type PlayerDot = { x: number; y: number; color: string; isGK?: boolean; num: number; };
 
 function getFormationPositions(sport: SportType, side: "home" | "away", seed: number): PlayerDot[] {
   const W = FIELD_W, H = FIELD_H;
@@ -473,8 +317,6 @@ function getFormationPositions(sport: SportType, side: "home" | "away", seed: nu
       y: jitter(fy * H, 7, seed + s * 7.3),
       color, isGK: gk,
       num: nums[idx] ?? idx + 1,
-      skinIdx: Math.floor(seededRand(seed + s * 5.1) * SKINS.length),
-      hairIdx: Math.floor(seededRand(seed + s * 9.3) * HAIRS.length),
     };
   }
 
@@ -497,7 +339,7 @@ function getFormationPositions(sport: SportType, side: "home" | "away", seed: nu
 
   if (sport === "tennis") {
     const baseY = side === "home" ? H * 0.8 : H * 0.2;
-    return [{ x: W / 2 + (seededRand(seed) - 0.5) * 70, y: baseY, color, num: 1, skinIdx: seed % SKINS.length, hairIdx: (seed + 3) % HAIRS.length }];
+    return [{ x: W / 2 + (seededRand(seed) - 0.5) * 70, y: baseY, color, num: 1 }];
   }
 
   if (sport === "hockey") return [
@@ -519,12 +361,10 @@ function getFormationPositions(sport: SportType, side: "home" | "away", seed: nu
       return raw.map(([x, y], i) => ({
         x: jitter(x, 6, seed + i * 11), y: jitter(y, 6, seed + i * 7),
         color, isGK: i === 7, num: BS_FIELD_NUMS[i] ?? i + 1,
-        skinIdx: Math.floor(seededRand(seed + i * 5) * SKINS.length),
-        hairIdx: Math.floor(seededRand(seed + i * 9) * HAIRS.length),
       }));
     } else {
       const cx = W / 2, cy = H * 0.63;
-      return [{ x: cx, y: cy + 7, color, num: 24, skinIdx: seed % SKINS.length, hairIdx: (seed + 2) % HAIRS.length }];
+      return [{ x: cx, y: cy + 7, color, num: 24 }];
     }
   }
 
@@ -534,8 +374,6 @@ function getFormationPositions(sport: SportType, side: "home" | "away", seed: nu
       x: jitter(W * 0.18 + (i % 3) * W * 0.32, 6, seed + i * 8),
       y: jitter(yBase + Math.floor(i / 3) * H * 0.14 * (side === "home" ? 1 : -1), 6, seed + i * 6),
       color, num: VB_NUMS[i] ?? i + 1,
-      skinIdx: Math.floor(seededRand(seed + i * 5) * SKINS.length),
-      hairIdx: Math.floor(seededRand(seed + i * 9) * HAIRS.length),
     }));
   }
   return [];
@@ -784,15 +622,13 @@ export function LiveMatchSimulator({ visible, match, onClose }: {
 
   const allPlayers = useMemo((): PlayerDot[] => {
     if (trackingFrame) {
-      // Map normalized API coords → pixel coords, preserve visual attributes
+      // Map normalized API coords → pixel coords
       return trackingFrame.players.map((tp) => ({
-        x:       tp.x * FIELD_W,
-        y:       tp.y * FIELD_H,
-        color:   tp.team === "home" ? "#dc2626" : "#1d4ed8",
-        isGK:    tp.isGK,
-        num:     tp.num,
-        skinIdx: Math.abs(tp.id * 3 + seed) % SKINS.length,
-        hairIdx: Math.abs(tp.id * 7 + seed) % HAIRS.length,
+        x:     tp.x * FIELD_W,
+        y:     tp.y * FIELD_H,
+        color: tp.team === "home" ? "#dc2626" : "#1d4ed8",
+        isGK:  tp.isGK,
+        num:   tp.num,
       }));
     }
     // Local fallback with wander
@@ -853,21 +689,25 @@ export function LiveMatchSimulator({ visible, match, onClose }: {
             {sport === "baseball" && <BaseballDiamond />}
             {sport === "volleyball" && <VolleyballCourt />}
 
-            {/* Players — humanoid SVG figures, facing the ball */}
+            {/* Players — 2D dots (top-down, Betano-style) */}
             <Svg width={FIELD_W} height={FIELD_H} style={StyleSheet.absoluteFill}>
-              {allPlayers.map((p, i) => (
-                <PlayerFigure
-                  key={i}
-                  x={p.x} y={p.y}
-                  color={p.color}
-                  isGK={p.isGK}
-                  num={p.num}
-                  skinIdx={p.skinIdx}
-                  hairIdx={p.hairIdx}
-                  ballX={ballTarget[0]}
-                  ballY={ballTarget[1]}
-                />
-              ))}
+              {allPlayers.map((p, i) => {
+                const r = p.isGK ? 12 : 10;
+                const fill = p.isGK ? "#f59e0b" : p.color;
+                const stroke = p.isGK ? "#b45309" : "#ffffff";
+                return (
+                  <G key={i}>
+                    <Ellipse cx={p.x} cy={p.y + r + 2} rx={r + 1} ry={3.5} fill="#00000040" />
+                    <Circle cx={p.x} cy={p.y} r={r} fill={fill} stroke={stroke} strokeWidth={1.8} />
+                    <SvgText
+                      x={p.x} y={p.y + 0.5}
+                      fontSize={6.5} fontWeight="bold"
+                      textAnchor="middle" alignmentBaseline="middle"
+                      fill="white"
+                    >{p.num}</SvgText>
+                  </G>
+                );
+              })}
             </Svg>
 
             {/* Animated ball */}
@@ -939,7 +779,7 @@ const styles = StyleSheet.create({
   scoreDash: { fontSize: 24, fontFamily: "Inter_700Bold", color: "#4b5563", textAlign: "center" },
   periodLabel: { fontSize: 9, fontFamily: "Inter_600SemiBold", color: "#f59e0b", textAlign: "center" },
   fieldOuter: { flex: 1, alignItems: "center", justifyContent: "center", overflow: "hidden", backgroundColor: "#030508" },
-  fieldPerspective: { width: FIELD_W, height: FIELD_H, transform: [{ perspective: 750 }, { rotateX: "23deg" }, { scaleY: 0.91 }], shadowOffset: { width: 0, height: 14 }, shadowOpacity: 0.65, shadowRadius: 28, elevation: 16 },
+  fieldPerspective: { width: FIELD_W, height: FIELD_H, shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.55, shadowRadius: 20, elevation: 12 },
   ballWrapper: { position: "absolute" },
   ball: { width: 18, height: 18, borderRadius: 9, backgroundColor: "#fff", shadowColor: "#000", shadowOpacity: 0.85, shadowRadius: 6, elevation: 10 },
   eventOverlay: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0, alignItems: "center", justifyContent: "center" },
