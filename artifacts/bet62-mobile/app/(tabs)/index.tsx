@@ -24,6 +24,7 @@ import { BetSlipModal } from "@/components/BetSlipModal";
 import { DepositModal } from "@/components/DepositModal";
 import type { LiveMatchMarkets } from "@/hooks/useLiveMatches";
 import { getMatchBannerUrl, getLeagueFlag } from "@/utils/teamBanners";
+import { findMajorLeague, type MajorLeague } from "@/utils/majorLeagues";
 
 type MCIconName = ComponentProps<typeof MaterialCommunityIcons>["name"];
 
@@ -61,11 +62,6 @@ const SPORT_ICONS: Record<string, MCIconName> = {
   hockey: "hockey-puck", volleyball: "volleyball", baseball: "baseball",
 };
 
-const SPORT_ICON: Record<string, string> = {
-  football: "⚽", basketball: "🏀", tennis: "🎾",
-  hockey: "🏒", baseball: "⚾", volleyball: "🏐",
-};
-
 function LeagueChips({
   matches, selected, onSelect,
 }: {
@@ -74,16 +70,19 @@ function LeagueChips({
   onSelect: (l: string | null) => void;
 }) {
   const colors = useColors();
+  const [imgErrors, setImgErrors] = useState<Set<string>>(new Set());
+
   const seen = new Set<string>();
-  const leagues: Array<{ league: string; country?: string; sport: string }> = [];
+  const chips: Array<{ league: string; config: MajorLeague }> = [];
   for (const m of matches) {
     const key = m.league ?? "";
     if (key && !seen.has(key)) {
-      seen.add(key);
-      leagues.push({ league: key, country: m.country, sport: m.sport });
+      const ml = findMajorLeague(key);
+      if (ml) { seen.add(key); chips.push({ league: key, config: ml }); }
     }
   }
-  if (leagues.length < 2) return null;
+  if (chips.length < 2) return null;
+
   return (
     <View style={{ marginBottom: 4 }}>
       <ScrollView
@@ -102,22 +101,21 @@ function LeagueChips({
             opacity: pressed ? 0.78 : 1,
           })}
         >
-          <Text style={{ fontSize: 15 }}>🌐</Text>
+          <Ionicons name="grid-outline" size={15} color={!selected ? "#f59e0b" : colors.mutedForeground} />
           <Text style={{ fontFamily: "Inter_600SemiBold", fontSize: 12, color: !selected ? "#fff" : colors.mutedForeground }}>
             Todas
           </Text>
         </Pressable>
 
-        {leagues.slice(0, 22).map((l, i) => {
-          const active = selected === l.league;
-          const flag = getLeagueFlag(l.league, l.country);
-          const sIcon = SPORT_ICON[l.sport] ?? "🏅";
+        {chips.map(({ league, config }, i) => {
+          const active = selected === league;
+          const hasErr = imgErrors.has(league);
           return (
             <Pressable
               key={i}
-              onPress={() => { onSelect(active ? null : l.league); Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); }}
+              onPress={() => { onSelect(active ? null : league); Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); }}
               style={({ pressed }) => ({
-                flexDirection: "row" as const, alignItems: "center" as const, gap: 7,
+                flexDirection: "row" as const, alignItems: "center" as const, gap: 8,
                 paddingHorizontal: 12, paddingVertical: 8,
                 borderRadius: 14, borderWidth: 1.5,
                 borderColor: active ? "#f59e0b" : colors.border,
@@ -125,15 +123,25 @@ function LeagueChips({
                 opacity: pressed ? 0.78 : 1,
               })}
             >
-              <View style={{ alignItems: "center" as const, width: 18 }}>
-                <Text style={{ fontSize: 13, lineHeight: 15 }}>{flag}</Text>
-                <Text style={{ fontSize: 8, lineHeight: 10 }}>{sIcon}</Text>
-              </View>
+              {hasErr ? (
+                <View style={{ width: 22, height: 22, borderRadius: 4, backgroundColor: config.color + "cc", alignItems: "center" as const, justifyContent: "center" as const }}>
+                  <Text style={{ fontSize: 7, fontFamily: "Inter_700Bold", color: "#fff" }}>
+                    {config.label.slice(0, 3).toUpperCase()}
+                  </Text>
+                </View>
+              ) : (
+                <Image
+                  source={{ uri: config.logo }}
+                  style={{ width: 22, height: 22, borderRadius: 3 }}
+                  onError={() => setImgErrors(prev => new Set([...prev, league]))}
+                  resizeMode="contain"
+                />
+              )}
               <Text
-                style={{ fontFamily: "Inter_600SemiBold", fontSize: 12, color: active ? "#fff" : colors.foreground, maxWidth: 130 }}
+                style={{ fontFamily: "Inter_600SemiBold", fontSize: 12, color: active ? "#fff" : colors.foreground, maxWidth: 120 }}
                 numberOfLines={1}
               >
-                {l.league}
+                {config.label}
               </Text>
             </Pressable>
           );

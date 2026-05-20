@@ -2,7 +2,6 @@ import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import React, { type ComponentProps, useEffect, useRef, useState } from "react";
 import {
-  ActivityIndicator,
   FlatList,
   Image,
   Platform,
@@ -196,11 +195,12 @@ function LiveMatchCard({ match }: { match: LiveMatch }) {
 
   const isObviousLiveResult = isFootball && !suspended && (() => {
     const minOdd = Math.min(match.odds.home, match.odds.away);
-    if (minOdd <= 1.05) return true;
+    if (minOdd <= 1.04) return true;
     const min = match.minute ?? 0;
     const diff = Math.abs((match.homeScore ?? 0) - (match.awayScore ?? 0));
-    if (min >= 80 && diff >= 2) return true;
-    if (min >= 85 && diff >= 1) return true;
+    if (min >= 80 && diff >= 3) return true;
+    if (min >= 85 && diff >= 2) return true;
+    if (min >= 90 && diff >= 1) return true;
     return false;
   })();
 
@@ -447,9 +447,29 @@ export default function LiveScreen() {
       </View>
 
       {lastUpdated === 0 ? (
-        <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
-          <ActivityIndicator size="large" color={colors.primary} />
-        </View>
+        <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingTop: 8, paddingHorizontal: 14, paddingBottom: 80 }} showsVerticalScrollIndicator={false}>
+          {[1, 2, 3, 4].map(i => (
+            <View key={i} style={{ backgroundColor: colors.card, borderRadius: 12, marginBottom: 10, borderWidth: 1, borderColor: colors.border, overflow: "hidden" }}>
+              <View style={{ height: 54, backgroundColor: "#0e0e1a", flexDirection: "row", alignItems: "center", paddingHorizontal: 14, justifyContent: "space-between" }}>
+                <View style={{ width: 90, height: 12, backgroundColor: "#2e2e3c", borderRadius: 4 }} />
+                <View style={{ width: 44, height: 20, backgroundColor: "#1e1e2e", borderRadius: 6, borderWidth: 1, borderColor: "#3a3a50" }} />
+                <View style={{ width: 50, height: 12, backgroundColor: "#2e2e3c", borderRadius: 4 }} />
+              </View>
+              <View style={{ padding: 12 }}>
+                <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+                  <View style={{ width: 100, height: 13, backgroundColor: "#2e2e3c", borderRadius: 4 }} />
+                  <View style={{ width: 36, height: 22, backgroundColor: "#1c1c2e", borderRadius: 6 }} />
+                  <View style={{ width: 100, height: 13, backgroundColor: "#2e2e3c", borderRadius: 4 }} />
+                </View>
+                <View style={{ flexDirection: "row", gap: 8 }}>
+                  <View style={{ flex: 1, height: 38, backgroundColor: "#1c1c26", borderRadius: 8, borderWidth: 1, borderColor: "#2e2e3c" }} />
+                  <View style={{ flex: 1, height: 38, backgroundColor: "#1c1c26", borderRadius: 8, borderWidth: 1, borderColor: "#2e2e3c" }} />
+                  <View style={{ flex: 1, height: 38, backgroundColor: "#1c1c26", borderRadius: 8, borderWidth: 1, borderColor: "#2e2e3c" }} />
+                </View>
+              </View>
+            </View>
+          ))}
+        </ScrollView>
       ) : (
         <FlatList
           data={items}

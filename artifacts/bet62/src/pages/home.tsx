@@ -7873,59 +7873,88 @@ export default function Home() {
                 <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
                   {!selectedLeague && <PopularBanners />}
 
-                  {/* ─── League filter chips ─────────────────────────────────── */}
+                  {/* ─── League filter chips (grandes ligas com logos oficiais) ── */}
                   {filteredUpcoming.length > 0 && (() => {
+                    const ML = [
+                      { p: ["champions league","liga dos campeões","liga campeões"], label: "Champions", logo: "https://api.sofascore.app/api/v1/unique-tournament/7/image", color: "#001489" },
+                      { p: ["europa league","liga europa"], label: "Europa League", logo: "https://api.sofascore.app/api/v1/unique-tournament/679/image", color: "#F77F00" },
+                      { p: ["conference league","liga conferência"], label: "Conference", logo: "https://api.sofascore.app/api/v1/unique-tournament/17015/image", color: "#00B386" },
+                      { p: ["premier league"], label: "Premier League", logo: "https://api.sofascore.app/api/v1/unique-tournament/17/image", color: "#3D195B" },
+                      { p: ["la liga","laliga"], label: "La Liga", logo: "https://api.sofascore.app/api/v1/unique-tournament/8/image", color: "#FF4B44" },
+                      { p: ["bundesliga"], label: "Bundesliga", logo: "https://api.sofascore.app/api/v1/unique-tournament/35/image", color: "#D3010C" },
+                      { p: ["serie a"], label: "Serie A", logo: "https://api.sofascore.app/api/v1/unique-tournament/23/image", color: "#024494" },
+                      { p: ["ligue 1","ligue1"], label: "Ligue 1", logo: "https://api.sofascore.app/api/v1/unique-tournament/34/image", color: "#243F8B" },
+                      { p: ["primeira liga","liga portugal","liga nos","liga bwin"], label: "Primeira Liga", logo: "https://api.sofascore.app/api/v1/unique-tournament/238/image", color: "#00924B" },
+                      { p: ["eredivisie"], label: "Eredivisie", logo: "https://api.sofascore.app/api/v1/unique-tournament/37/image", color: "#D00000" },
+                      { p: ["super lig","süper lig"], label: "Süper Lig", logo: "https://api.sofascore.app/api/v1/unique-tournament/52/image", color: "#E30A17" },
+                      { p: ["liga mx"], label: "Liga MX", logo: "https://api.sofascore.app/api/v1/unique-tournament/11521/image", color: "#013369" },
+                      { p: ["mls"], label: "MLS", logo: "https://api.sofascore.app/api/v1/unique-tournament/242/image", color: "#003087" },
+                      { p: ["brasileirao","brasileirão","campeonato brasileiro"], label: "Brasileirão", logo: "https://api.sofascore.app/api/v1/unique-tournament/325/image", color: "#009C3B" },
+                      { p: ["copa libertadores","libertadores"], label: "Libertadores", logo: "https://api.sofascore.app/api/v1/unique-tournament/384/image", color: "#006B3F" },
+                      { p: ["fa cup"], label: "FA Cup", logo: "https://api.sofascore.app/api/v1/unique-tournament/4/image", color: "#3C1F78" },
+                      { p: ["copa del rey"], label: "Copa del Rey", logo: "https://api.sofascore.app/api/v1/unique-tournament/329/image", color: "#FFCC02" },
+                      { p: ["coppa italia"], label: "Coppa Italia", logo: "https://api.sofascore.app/api/v1/unique-tournament/471/image", color: "#009246" },
+                      { p: ["dfb pokal","dfl pokal"], label: "DFB Pokal", logo: "https://api.sofascore.app/api/v1/unique-tournament/74/image", color: "#D3010C" },
+                      { p: ["nba"], label: "NBA", logo: "https://api.sofascore.app/api/v1/unique-tournament/132/image", color: "#006BB6" },
+                      { p: ["nhl"], label: "NHL", logo: "https://api.sofascore.app/api/v1/unique-tournament/123/image", color: "#17468C" },
+                      { p: ["mlb"], label: "MLB", logo: "https://api.sofascore.app/api/v1/unique-tournament/64/image", color: "#003087" },
+                      { p: ["wimbledon"], label: "Wimbledon", logo: "https://api.sofascore.app/api/v1/unique-tournament/1549/image", color: "#3D1F3A" },
+                      { p: ["roland garros","french open"], label: "Roland Garros", logo: "https://api.sofascore.app/api/v1/unique-tournament/2480/image", color: "#B75A3A" },
+                      { p: ["us open"], label: "US Open", logo: "https://api.sofascore.app/api/v1/unique-tournament/2429/image", color: "#003087" },
+                      { p: ["australian open"], label: "Australian Open", logo: "https://api.sofascore.app/api/v1/unique-tournament/2478/image", color: "#00AEEF" },
+                      { p: ["atp 1000","masters 1000","rolex masters","monte-carlo","monte carlo","madrid open"], label: "ATP Masters", logo: "https://api.sofascore.app/api/v1/unique-tournament/1541/image", color: "#2C5F8B" },
+                    ];
+                    const findML = (name: string) => {
+                      const n = name.toLowerCase();
+                      return ML.find(ml => ml.p.some(pt => n.includes(pt)));
+                    };
                     const seen = new Set<string>();
-                    const leagues: Array<{league: string; country?: string; sport: string}> = [];
+                    const chips: Array<{ league: string; label: string; logo: string; color: string }> = [];
                     for (const m of filteredUpcoming) {
                       const key = m.league ?? "";
-                      if (key && !seen.has(key)) { seen.add(key); leagues.push({ league: key, country: m.country, sport: m.sport ?? "football" }); }
+                      if (key && !seen.has(key)) {
+                        const ml = findML(key);
+                        if (ml) { seen.add(key); chips.push({ league: key, label: ml.label, logo: ml.logo, color: ml.color }); }
+                      }
                     }
-                    if (leagues.length < 2) return null;
-                    const cFlag = (country?: string, league?: string): string => {
-                      const c = (country ?? "").toLowerCase();
-                      const l = (league ?? "").toLowerCase();
-                      if (c.includes("portugal") || l.includes("primeira")) return "🇵🇹";
-                      if (c.includes("spain") || c.includes("espanha") || l.includes("la liga") || l.includes("laliga")) return "🇪🇸";
-                      if (c.includes("italy") || c.includes("itali") || l.includes("serie a") || l.includes("série a")) return "🇮🇹";
-                      if (c.includes("germany") || c.includes("alemanha") || l.includes("bundesliga")) return "🇩🇪";
-                      if (c.includes("france") || c.includes("fran") || l.includes("ligue 1")) return "🇫🇷";
-                      if (c.includes("england") || c.includes("inglater") || l.includes("premier league")) return "🏴󠁧󠁢󠁥󠁮󠁧󠁿";
-                      if (c.includes("brazil") || c.includes("brasil")) return "🇧🇷";
-                      if (c.includes("argentina")) return "🇦🇷";
-                      if (c.includes("netherlands") || c.includes("holanda")) return "🇳🇱";
-                      if (c.includes("turkey") || c.includes("turquia")) return "🇹🇷";
-                      if (c.includes("russia")) return "🇷🇺";
-                      if (c.includes("belgium") || c.includes("bélgica")) return "🇧🇪";
-                      if (c.includes("scotland") || c.includes("escoc")) return "🏴󠁧󠁢󠁳󠁣󠁴󠁿";
-                      if (l.includes("nba") || l.includes("nhl") || l.includes("mlb") || l.includes("wnba") || c.includes("usa") || c.includes("america")) return "🇺🇸";
-                      if (l.includes("libertadores") || l.includes("sul-americana") || l.includes("conmebol")) return "🌎";
-                      if (l.includes("champions") || l.includes("liga europa") || l.includes("euroliga") || l.includes("euroleague") || l.includes("uefa")) return "🌍";
-                      return "🌍";
-                    };
-                    const sIcon = (s: string) => (({ football:"⚽", basketball:"🏀", tennis:"🎾", hockey:"🏒", baseball:"⚾", volleyball:"🏐" } as Record<string,string>)[s] ?? "🏅");
+                    if (chips.length < 2) return null;
                     return (
                       <div className="overflow-x-auto flex gap-2.5 pb-3 mb-5 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
                         <button
                           onClick={() => setSelectedLeague(null)}
                           className={`flex items-center gap-2 px-3.5 py-2.5 rounded-xl border whitespace-nowrap text-sm font-semibold transition-all flex-shrink-0 ${!selectedLeague ? "border-amber-500 bg-amber-500/10 text-white shadow-[0_0_10px_rgba(245,158,11,0.18)]" : "border-zinc-700 bg-zinc-900/60 text-zinc-300 hover:border-zinc-500 hover:text-white"}`}
                         >
-                          <span className="text-base">🌐</span>
+                          <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="shrink-0"><rect width="7" height="7" x="3" y="3" rx="1"/><rect width="7" height="7" x="14" y="3" rx="1"/><rect width="7" height="7" x="14" y="14" rx="1"/><rect width="7" height="7" x="3" y="14" rx="1"/></svg>
                           <span>Todas</span>
                         </button>
-                        {leagues.slice(0, 22).map((l, i) => {
-                          const active = selectedLeague === l.league;
+                        {chips.map((c, i) => {
+                          const active = selectedLeague === c.league;
                           return (
                             <button
                               key={i}
-                              onClick={() => setSelectedLeague(active ? null : l.league)}
+                              onClick={() => setSelectedLeague(active ? null : c.league)}
                               className={`flex items-center gap-2.5 px-3.5 py-2.5 rounded-xl border whitespace-nowrap text-sm font-semibold transition-all flex-shrink-0 ${active ? "border-amber-500 bg-amber-500/10 text-white shadow-[0_0_10px_rgba(245,158,11,0.18)]" : "border-zinc-700 bg-zinc-900/60 text-zinc-300 hover:border-zinc-500 hover:text-white"}`}
                             >
-                              <span className="flex flex-col items-center leading-tight text-center w-5 shrink-0">
-                                <span className="text-sm">{cFlag(l.country, l.league)}</span>
-                                <span className="text-[8px] mt-0.5">{sIcon(l.sport)}</span>
+                              <img
+                                src={c.logo}
+                                alt={c.label}
+                                width={20}
+                                height={20}
+                                className="rounded object-contain shrink-0"
+                                style={{ background: "transparent" }}
+                                onError={(e) => {
+                                  const t = e.currentTarget;
+                                  t.style.display = "none";
+                                  const fb = t.nextElementSibling as HTMLElement | null;
+                                  if (fb) fb.style.display = "flex";
+                                }}
+                              />
+                              <span
+                                style={{ display: "none", width: 20, height: 20, borderRadius: 4, backgroundColor: c.color + "cc", alignItems: "center", justifyContent: "center", fontSize: 7, fontWeight: 700, color: "#fff", flexShrink: 0 }}
+                              >
+                                {c.label.slice(0, 3).toUpperCase()}
                               </span>
-                              <span className="max-w-[140px] truncate">{l.league}</span>
+                              <span className="max-w-[140px] truncate">{c.label}</span>
                             </button>
                           );
                         })}
