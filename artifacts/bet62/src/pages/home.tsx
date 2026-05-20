@@ -1463,6 +1463,7 @@ export default function Home() {
   const [upcomingMatches, setUpcomingMatches] = useState<Match[]>([]);
   const [upcomingLoading, setUpcomingLoading] = useState(true);
   const [selectedSport, setSelectedSport] = useState<string>("all");
+  const [selectedWC, setSelectedWC] = useState(false);
 
   // Recent tennis results (yesterday)
   type TennisResult = {
@@ -7897,9 +7898,17 @@ export default function Home() {
                   .filter(m => { const k = String(m.id); if (seen.has(k)) return false; seen.add(k); return true; });
               })();
 
-              const filteredUpcoming = (selectedSport === "all")
-                ? allUpcoming
-                : allUpcoming.filter(m => (m.sport ?? "football") === selectedSport);
+              const _isWC = (m: Match) => {
+                if ((m.sport ?? "football") !== "football") return false;
+                const lg = (m.league ?? "").toLowerCase();
+                if (lg.includes("world cup") || lg.includes("copa do mundo") || lg.includes("copa mundo") || lg.includes("fifa world") || lg.includes("wc 2026")) return true;
+                const d = (m.date ?? "");
+                return d.startsWith("2026-06") || /\d{2}\.06\.2026/.test(d);
+              };
+              const _wcMatches = allUpcoming.filter(_isWC);
+              const filteredUpcoming = selectedWC
+                ? (_wcMatches.length > 0 ? _wcMatches : allUpcoming.filter(m => (m.sport ?? "football") === "football"))
+                : (selectedSport === "all" ? allUpcoming : allUpcoming.filter(m => (m.sport ?? "football") === selectedSport));
 
               // Sport grouping for display
               const SPORT_GROUPS = [
@@ -7919,6 +7928,35 @@ export default function Home() {
 
               return (
                 <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
+                  {!selectedLeague && (
+                    <div className="mb-4 relative overflow-hidden rounded-xl cursor-pointer select-none group"
+                      onClick={() => { setSelectedSport("football"); setSelectedWC(true); setSelectedLeague(null); }}>
+                      <motion.img
+                        src="/copa-banner.jpeg"
+                        className="w-full object-cover block"
+                        style={{ height: 180 }}
+                        animate={{ x: [0, -8, 8, -4, 0], scaleX: [1, 1.012, 0.988, 1.006, 1] }}
+                        transition={{ duration: 5, repeat: Infinity, ease: "easeInOut" }}
+                      />
+                      <div className="absolute inset-0 bg-gradient-to-t from-black/20 to-transparent pointer-events-none" />
+                      <button
+                        className="absolute bottom-3 right-3 bg-red-600 group-hover:bg-red-500 text-white text-sm font-bold px-5 py-2.5 rounded-xl shadow-lg shadow-red-900/40 transition-colors"
+                        onClick={(e) => { e.stopPropagation(); setSelectedSport("football"); setSelectedWC(true); setSelectedLeague(null); }}
+                      >
+                        APOSTAR JÁ →
+                      </button>
+                    </div>
+                  )}
+                  {selectedWC && (
+                    <div className="mb-3 flex items-center gap-2">
+                      <button
+                        className="flex items-center gap-1.5 bg-red-600/15 border border-red-500/40 text-red-400 text-xs font-bold px-3 py-1.5 rounded-full hover:bg-red-600/25 transition-colors"
+                        onClick={() => { setSelectedWC(false); setSelectedSport("football"); }}
+                      >
+                        🌍 Copa do Mundo <span className="ml-1 opacity-70">✕</span>
+                      </button>
+                    </div>
+                  )}
                   {!selectedLeague && <PopularBanners />}
 
                   {/* ─── League filter chips (grandes ligas com logos oficiais) ── */}
