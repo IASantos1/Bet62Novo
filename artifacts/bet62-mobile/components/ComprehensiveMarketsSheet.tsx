@@ -299,8 +299,9 @@ export function ComprehensiveMarketsSheet({ visible, match, onClose }: Props) {
     if (value <= 1.04) return true;
     const diff = Math.abs((match.homeScore ?? 0) - (match.awayScore ?? 0));
     const min = match.minute ?? 0;
-    if (min >= 80 && diff >= 2) return true;
-    if (min >= 85 && diff >= 1) return true;
+    if (min >= 80 && diff >= 3) return true;
+    if (min >= 85 && diff >= 2) return true;
+    if (min >= 90 && diff >= 1) return true;
     return false;
   }
 
@@ -373,8 +374,9 @@ export function ComprehensiveMarketsSheet({ visible, match, onClose }: Props) {
     if (minOdd <= 1.05) return true;
     const min = match.minute ?? 0;
     const diff = Math.abs((match.homeScore ?? 0) - (match.awayScore ?? 0));
-    if (min >= 80 && diff >= 2) return true;
-    if (min >= 85 && diff >= 1) return true;
+    if (min >= 80 && diff >= 3) return true;
+    if (min >= 85 && diff >= 2) return true;
+    if (min >= 90 && diff >= 1) return true;
     return false;
   })();
 
@@ -1064,7 +1066,7 @@ export function ComprehensiveMarketsSheet({ visible, match, onClose }: Props) {
                   </Section>
                 )}
 
-                {isFootball && m?.totalGoals && m.totalGoals.over05 > 1.01 && (
+                {isFootball && m?.totalGoals && [m.totalGoals.over05, m.totalGoals.over15, m.totalGoals.over25, m.totalGoals.over35, m.totalGoals.over45, m.totalGoals.over55, m.totalGoals.over65].some(v => (v ?? 0) > 1.01) && (
                   <Section title="Total de Golos" tabKey="gols">
                     {(
                       [
@@ -1144,7 +1146,7 @@ export function ComprehensiveMarketsSheet({ visible, match, onClose }: Props) {
                   </Section>
                 )}
 
-                {isFootball && m?.teamGoals && m.teamGoals.homeOver05 > 1.01 && (
+                {isFootball && m?.teamGoals && [m.teamGoals.homeOver05, m.teamGoals.homeOver15, m.teamGoals.homeOver25].some(v => (v ?? 0) > 1.01) && (
                   <Section title={`Golos — ${match.home}`} tabKey="gols">
                     {(
                       [
@@ -1161,7 +1163,7 @@ export function ComprehensiveMarketsSheet({ visible, match, onClose }: Props) {
                   </Section>
                 )}
 
-                {isFootball && m?.teamGoals && m.teamGoals.awayOver05 > 1.01 && (
+                {isFootball && m?.teamGoals && [m.teamGoals.awayOver05, m.teamGoals.awayOver15, m.teamGoals.awayOver25].some(v => (v ?? 0) > 1.01) && (
                   <Section title={`Golos — ${match.away}`} tabKey="gols">
                     {(
                       [
