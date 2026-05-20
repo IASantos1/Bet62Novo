@@ -61,6 +61,88 @@ const SPORT_ICONS: Record<string, MCIconName> = {
   hockey: "hockey-puck", volleyball: "volleyball", baseball: "baseball",
 };
 
+const SPORT_ICON: Record<string, string> = {
+  football: "⚽", basketball: "🏀", tennis: "🎾",
+  hockey: "🏒", baseball: "⚾", volleyball: "🏐",
+};
+
+function LeagueChips({
+  matches, selected, onSelect,
+}: {
+  matches: UpcomingMatch[];
+  selected: string | null;
+  onSelect: (l: string | null) => void;
+}) {
+  const colors = useColors();
+  const seen = new Set<string>();
+  const leagues: Array<{ league: string; country?: string; sport: string }> = [];
+  for (const m of matches) {
+    const key = m.league ?? "";
+    if (key && !seen.has(key)) {
+      seen.add(key);
+      leagues.push({ league: key, country: m.country, sport: m.sport });
+    }
+  }
+  if (leagues.length < 2) return null;
+  return (
+    <View style={{ marginBottom: 4 }}>
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={{ paddingHorizontal: 14, paddingVertical: 6, gap: 8 }}
+      >
+        <Pressable
+          onPress={() => { onSelect(null); Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); }}
+          style={({ pressed }) => ({
+            flexDirection: "row" as const, alignItems: "center" as const, gap: 6,
+            paddingHorizontal: 12, paddingVertical: 8,
+            borderRadius: 14, borderWidth: 1.5,
+            borderColor: !selected ? "#f59e0b" : colors.border,
+            backgroundColor: !selected ? "rgba(245,158,11,0.10)" : colors.card,
+            opacity: pressed ? 0.78 : 1,
+          })}
+        >
+          <Text style={{ fontSize: 15 }}>🌐</Text>
+          <Text style={{ fontFamily: "Inter_600SemiBold", fontSize: 12, color: !selected ? "#fff" : colors.mutedForeground }}>
+            Todas
+          </Text>
+        </Pressable>
+
+        {leagues.slice(0, 22).map((l, i) => {
+          const active = selected === l.league;
+          const flag = getLeagueFlag(l.league, l.country);
+          const sIcon = SPORT_ICON[l.sport] ?? "🏅";
+          return (
+            <Pressable
+              key={i}
+              onPress={() => { onSelect(active ? null : l.league); Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); }}
+              style={({ pressed }) => ({
+                flexDirection: "row" as const, alignItems: "center" as const, gap: 7,
+                paddingHorizontal: 12, paddingVertical: 8,
+                borderRadius: 14, borderWidth: 1.5,
+                borderColor: active ? "#f59e0b" : colors.border,
+                backgroundColor: active ? "rgba(245,158,11,0.10)" : colors.card,
+                opacity: pressed ? 0.78 : 1,
+              })}
+            >
+              <View style={{ alignItems: "center" as const, width: 18 }}>
+                <Text style={{ fontSize: 13, lineHeight: 15 }}>{flag}</Text>
+                <Text style={{ fontSize: 8, lineHeight: 10 }}>{sIcon}</Text>
+              </View>
+              <Text
+                style={{ fontFamily: "Inter_600SemiBold", fontSize: 12, color: active ? "#fff" : colors.foreground, maxWidth: 130 }}
+                numberOfLines={1}
+              >
+                {l.league}
+              </Text>
+            </Pressable>
+          );
+        })}
+      </ScrollView>
+    </View>
+  );
+}
+
 function parseKickoff(date: string, time: string): Date {
   const raw = date ?? "";
   const timeParts = (time ?? "00:00").split(":").map(Number);
@@ -335,6 +417,7 @@ export default function PreGameScreen() {
   const { count } = useBetSlip();
   const [slipVisible, setSlipVisible] = useState(false);
   const [selectedSport, setSelectedSport] = useState("all");
+  const [selectedLeague, setSelectedLeague] = useState<string | null>(null);
   const [depositVisible, setDepositVisible] = useState(false);
 
   const topPad = Platform.OS === "web" ? 67 : insets.top;
@@ -351,7 +434,8 @@ export default function PreGameScreen() {
   });
 
   const allUpcoming: UpcomingMatch[] = data?.matches ?? [];
-  const filtered = allUpcoming.filter((m) => selectedSport === "all" || m.sport === selectedSport);
+  const sportFiltered = allUpcoming.filter((m) => selectedSport === "all" || m.sport === selectedSport);
+  const filtered = selectedLeague ? sportFiltered.filter((m) => m.league === selectedLeague) : sportFiltered;
 
   const s = StyleSheet.create({
     container: { flex: 1, backgroundColor: colors.background },
@@ -431,7 +515,7 @@ export default function PreGameScreen() {
               <Pressable
                 key={sp.key}
                 style={[s.sportChip, { backgroundColor: active ? col : colors.muted, borderColor: active ? col : colors.border }]}
-                onPress={() => { setSelectedSport(sp.key); Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); }}
+                onPress={() => { setSelectedSport(sp.key); setSelectedLeague(null); Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); }}
               >
                 <Text style={{ fontSize: 12, fontFamily: "Inter_600SemiBold", color: active ? "#ffffff" : colors.foreground }}>{sp.label}</Text>
               </Pressable>
@@ -478,7 +562,12 @@ export default function PreGameScreen() {
               <Text style={s.emptySubtext}>Tenta outro desporto ou volta mais tarde</Text>
             </View>
           }
-          ListHeaderComponent={<PopularBanners matches={allUpcoming} />}
+          ListHeaderComponent={
+            <>
+              <PopularBanners matches={allUpcoming} />
+              <LeagueChips matches={sportFiltered} selected={selectedLeague} onSelect={setSelectedLeague} />
+            </>
+          }
           renderItem={({ item }) => {
             if (item.type === "header") {
               return (

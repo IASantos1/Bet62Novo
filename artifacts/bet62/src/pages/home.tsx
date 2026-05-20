@@ -7873,6 +7873,66 @@ export default function Home() {
                 <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
                   {!selectedLeague && <PopularBanners />}
 
+                  {/* ─── League filter chips ─────────────────────────────────── */}
+                  {filteredUpcoming.length > 0 && (() => {
+                    const seen = new Set<string>();
+                    const leagues: Array<{league: string; country?: string; sport: string}> = [];
+                    for (const m of filteredUpcoming) {
+                      const key = m.league ?? "";
+                      if (key && !seen.has(key)) { seen.add(key); leagues.push({ league: key, country: m.country, sport: m.sport ?? "football" }); }
+                    }
+                    if (leagues.length < 2) return null;
+                    const cFlag = (country?: string, league?: string): string => {
+                      const c = (country ?? "").toLowerCase();
+                      const l = (league ?? "").toLowerCase();
+                      if (c.includes("portugal") || l.includes("primeira")) return "🇵🇹";
+                      if (c.includes("spain") || c.includes("espanha") || l.includes("la liga") || l.includes("laliga")) return "🇪🇸";
+                      if (c.includes("italy") || c.includes("itali") || l.includes("serie a") || l.includes("série a")) return "🇮🇹";
+                      if (c.includes("germany") || c.includes("alemanha") || l.includes("bundesliga")) return "🇩🇪";
+                      if (c.includes("france") || c.includes("fran") || l.includes("ligue 1")) return "🇫🇷";
+                      if (c.includes("england") || c.includes("inglater") || l.includes("premier league")) return "🏴󠁧󠁢󠁥󠁮󠁧󠁿";
+                      if (c.includes("brazil") || c.includes("brasil")) return "🇧🇷";
+                      if (c.includes("argentina")) return "🇦🇷";
+                      if (c.includes("netherlands") || c.includes("holanda")) return "🇳🇱";
+                      if (c.includes("turkey") || c.includes("turquia")) return "🇹🇷";
+                      if (c.includes("russia")) return "🇷🇺";
+                      if (c.includes("belgium") || c.includes("bélgica")) return "🇧🇪";
+                      if (c.includes("scotland") || c.includes("escoc")) return "🏴󠁧󠁢󠁳󠁣󠁴󠁿";
+                      if (l.includes("nba") || l.includes("nhl") || l.includes("mlb") || l.includes("wnba") || c.includes("usa") || c.includes("america")) return "🇺🇸";
+                      if (l.includes("libertadores") || l.includes("sul-americana") || l.includes("conmebol")) return "🌎";
+                      if (l.includes("champions") || l.includes("liga europa") || l.includes("euroliga") || l.includes("euroleague") || l.includes("uefa")) return "🌍";
+                      return "🌍";
+                    };
+                    const sIcon = (s: string) => (({ football:"⚽", basketball:"🏀", tennis:"🎾", hockey:"🏒", baseball:"⚾", volleyball:"🏐" } as Record<string,string>)[s] ?? "🏅");
+                    return (
+                      <div className="overflow-x-auto flex gap-2.5 pb-3 mb-5 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
+                        <button
+                          onClick={() => setSelectedLeague(null)}
+                          className={`flex items-center gap-2 px-3.5 py-2.5 rounded-xl border whitespace-nowrap text-sm font-semibold transition-all flex-shrink-0 ${!selectedLeague ? "border-amber-500 bg-amber-500/10 text-white shadow-[0_0_10px_rgba(245,158,11,0.18)]" : "border-zinc-700 bg-zinc-900/60 text-zinc-300 hover:border-zinc-500 hover:text-white"}`}
+                        >
+                          <span className="text-base">🌐</span>
+                          <span>Todas</span>
+                        </button>
+                        {leagues.slice(0, 22).map((l, i) => {
+                          const active = selectedLeague === l.league;
+                          return (
+                            <button
+                              key={i}
+                              onClick={() => setSelectedLeague(active ? null : l.league)}
+                              className={`flex items-center gap-2.5 px-3.5 py-2.5 rounded-xl border whitespace-nowrap text-sm font-semibold transition-all flex-shrink-0 ${active ? "border-amber-500 bg-amber-500/10 text-white shadow-[0_0_10px_rgba(245,158,11,0.18)]" : "border-zinc-700 bg-zinc-900/60 text-zinc-300 hover:border-zinc-500 hover:text-white"}`}
+                            >
+                              <span className="flex flex-col items-center leading-tight text-center w-5 shrink-0">
+                                <span className="text-sm">{cFlag(l.country, l.league)}</span>
+                                <span className="text-[8px] mt-0.5">{sIcon(l.sport)}</span>
+                              </span>
+                              <span className="max-w-[140px] truncate">{l.league}</span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    );
+                  })()}
+
                   {/* ─── Torneios em Curso (oculto) ─────────────────────────── */}
                   {false && (selectedSport === "all" || selectedSport === "tennis") && activeTournaments.length > 0 && !selectedLeague && (() => {
                     const surfaceColor = (s: string) => {
