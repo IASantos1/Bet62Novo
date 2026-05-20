@@ -72,13 +72,16 @@ function LeagueChips({
   const colors = useColors();
   const [imgErrors, setImgErrors] = useState<Set<string>>(new Set());
 
-  const seen = new Set<string>();
-  const chips: Array<{ league: string; config: MajorLeague }> = [];
+  const seenLabels = new Set<string>();
+  const chips: Array<{ config: MajorLeague }> = [];
   for (const m of matches) {
     const key = m.league ?? "";
-    if (key && !seen.has(key)) {
+    if (key) {
       const ml = findMajorLeague(key);
-      if (ml) { seen.add(key); chips.push({ league: key, config: ml }); }
+      if (ml && !seenLabels.has(ml.label)) {
+        seenLabels.add(ml.label);
+        chips.push({ config: ml });
+      }
     }
   }
   if (chips.length < 2) return null;
@@ -107,13 +110,13 @@ function LeagueChips({
           </Text>
         </Pressable>
 
-        {chips.map(({ league, config }, i) => {
-          const active = selected === league;
-          const hasErr = imgErrors.has(league);
+        {chips.map(({ config }, i) => {
+          const active = selected === config.label;
+          const hasErr = imgErrors.has(config.label);
           return (
             <Pressable
               key={i}
-              onPress={() => { onSelect(active ? null : league); Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); }}
+              onPress={() => { onSelect(active ? null : config.label); Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); }}
               style={({ pressed }) => ({
                 flexDirection: "row" as const, alignItems: "center" as const, gap: 8,
                 paddingHorizontal: 12, paddingVertical: 8,
@@ -133,7 +136,7 @@ function LeagueChips({
                 <Image
                   source={{ uri: config.logo }}
                   style={{ width: 22, height: 22, borderRadius: 3 }}
-                  onError={() => setImgErrors(prev => new Set([...prev, league]))}
+                  onError={() => setImgErrors(prev => new Set([...prev, config.label]))}
                   resizeMode="contain"
                 />
               )}
@@ -443,7 +446,9 @@ export default function PreGameScreen() {
 
   const allUpcoming: UpcomingMatch[] = data?.matches ?? [];
   const sportFiltered = allUpcoming.filter((m) => selectedSport === "all" || m.sport === selectedSport);
-  const filtered = selectedLeague ? sportFiltered.filter((m) => m.league === selectedLeague) : sportFiltered;
+  const filtered = selectedLeague
+    ? sportFiltered.filter((m) => findMajorLeague(m.league ?? "")?.label === selectedLeague)
+    : sportFiltered;
 
   const s = StyleSheet.create({
     container: { flex: 1, backgroundColor: colors.background },

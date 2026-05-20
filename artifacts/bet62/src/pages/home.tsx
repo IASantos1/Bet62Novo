@@ -7842,10 +7842,40 @@ export default function Home() {
                   }
                 }
                 if (!selectedLeague) return combined;
-                // Filter by selected league using flexible matching (handles "Country: League" API prefixes)
+                // ML-aware filter: matches major-league label (from chips) OR legacy flexible matching (from sidebar)
+                const _mlPats: Array<{p: string[], label: string}> = [
+                  { p: ["champions league","liga dos campeões","liga campeões"], label: "Champions" },
+                  { p: ["europa league","liga europa"], label: "Europa League" },
+                  { p: ["conference league","liga conferência"], label: "Conference" },
+                  { p: ["premier league"], label: "Premier League" },
+                  { p: ["la liga","laliga"], label: "La Liga" },
+                  { p: ["bundesliga"], label: "Bundesliga" },
+                  { p: ["serie a"], label: "Serie A" },
+                  { p: ["ligue 1","ligue1"], label: "Ligue 1" },
+                  { p: ["primeira liga","liga portugal","liga nos","liga bwin"], label: "Primeira Liga" },
+                  { p: ["eredivisie"], label: "Eredivisie" },
+                  { p: ["super lig","süper lig"], label: "Süper Lig" },
+                  { p: ["liga mx"], label: "Liga MX" },
+                  { p: ["mls"], label: "MLS" },
+                  { p: ["brasileirao","brasileirão","campeonato brasileiro"], label: "Brasileirão" },
+                  { p: ["copa libertadores","libertadores"], label: "Libertadores" },
+                  { p: ["fa cup"], label: "FA Cup" },
+                  { p: ["copa del rey"], label: "Copa del Rey" },
+                  { p: ["coppa italia"], label: "Coppa Italia" },
+                  { p: ["dfb pokal","dfl pokal"], label: "DFB Pokal" },
+                  { p: ["nba"], label: "NBA" },
+                  { p: ["nhl"], label: "NHL" },
+                  { p: ["mlb"], label: "MLB" },
+                  { p: ["wimbledon"], label: "Wimbledon" },
+                  { p: ["roland garros","french open"], label: "Roland Garros" },
+                  { p: ["us open"], label: "US Open" },
+                  { p: ["australian open"], label: "Australian Open" },
+                  { p: ["atp 1000","masters 1000","rolex masters","monte-carlo","monte carlo","madrid open"], label: "ATP Masters" },
+                ];
+                const _fml = (n: string) => { const ln = (n ?? "").toLowerCase(); return _mlPats.find(ml => ml.p.some(p => ln.includes(p))); };
                 const seen = new Set<string>();
                 return combined
-                  .filter(m => leagueMatchesFilter(m.league, selectedLeague))
+                  .filter(m => { const ml = _fml(m.league); return (ml && ml.label === selectedLeague) || leagueMatchesFilter(m.league, selectedLeague); })
                   .filter(m => { const k = String(m.id); if (seen.has(k)) return false; seen.add(k); return true; });
               })();
 
@@ -7908,13 +7938,13 @@ export default function Home() {
                       const n = name.toLowerCase();
                       return ML.find(ml => ml.p.some(pt => n.includes(pt)));
                     };
-                    const seen = new Set<string>();
-                    const chips: Array<{ league: string; label: string; logo: string; color: string }> = [];
+                    const seenLabels = new Set<string>();
+                    const chips: Array<{ label: string; logo: string; color: string }> = [];
                     for (const m of filteredUpcoming) {
                       const key = m.league ?? "";
-                      if (key && !seen.has(key)) {
+                      if (key) {
                         const ml = findML(key);
-                        if (ml) { seen.add(key); chips.push({ league: key, label: ml.label, logo: ml.logo, color: ml.color }); }
+                        if (ml && !seenLabels.has(ml.label)) { seenLabels.add(ml.label); chips.push({ label: ml.label, logo: ml.logo, color: ml.color }); }
                       }
                     }
                     if (chips.length < 2) return null;
@@ -7928,11 +7958,11 @@ export default function Home() {
                           <span>Todas</span>
                         </button>
                         {chips.map((c, i) => {
-                          const active = selectedLeague === c.league;
+                          const active = selectedLeague === c.label;
                           return (
                             <button
                               key={i}
-                              onClick={() => setSelectedLeague(active ? null : c.league)}
+                              onClick={() => setSelectedLeague(active ? null : c.label)}
                               className={`flex items-center gap-2.5 px-3.5 py-2.5 rounded-xl border whitespace-nowrap text-sm font-semibold transition-all flex-shrink-0 ${active ? "border-amber-500 bg-amber-500/10 text-white shadow-[0_0_10px_rgba(245,158,11,0.18)]" : "border-zinc-700 bg-zinc-900/60 text-zinc-300 hover:border-zinc-500 hover:text-white"}`}
                             >
                               <img
