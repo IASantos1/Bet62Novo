@@ -156,7 +156,39 @@ function LiveMatchCard({ match }: { match: LiveMatch }) {
     else addSelection({ matchId: match.id, matchTitle: `${match.home} vs ${match.away}`, market, selection: market, label: `${match.home} vs ${match.away} — ${label}`, odds: value, date: match.date, time: match.time });
   }
 
-  const minuteLabel = isTennis ? `S${match.minute ?? 1}` : `${match.minute ?? 0}'`;
+  const minuteLabel = (() => {
+    if (isTennis) return `S${match.minute ?? 1}`;
+    if (isBball) {
+      const s = match.status ?? "";
+      if (s === "HT" || s === "Halftime") return "Int.";
+      if (s === "OT") return "OT";
+      if (s.startsWith("Q")) return s; // Q1 / Q2 / Q3 / Q4
+      return `${match.minute ?? 0}'`;
+    }
+    if (isHockey) {
+      const s = match.status ?? "";
+      if (s === "1P" || s === "P1" || s === "1st Period") return "1º Per.";
+      if (s === "2P" || s === "P2" || s === "2nd Period") return "2º Per.";
+      if (s === "3P" || s === "P3" || s === "3rd Period") return "3º Per.";
+      if (s === "OT") return "OT";
+      if (s === "SO") return "SO";
+      if (s.includes("Break") || s === "INT") return "Int.";
+      return s || `${match.minute ?? 0}'`;
+    }
+    if (isBase) {
+      const s = match.status ?? "";
+      const m2 = s.match(/\b(\d+)(st|nd|rd|th)\b/i);
+      if (m2) return `${m2[1]}ª Ent.`;
+      const lg: Record<string, string> = {
+        "1st Inning": "1ª Ent.", "2nd Inning": "2ª Ent.", "3rd Inning": "3ª Ent.",
+        "4th Inning": "4ª Ent.", "5th Inning": "5ª Ent.", "6th Inning": "6ª Ent.",
+        "7th Inning": "7ª Ent.", "8th Inning": "8ª Ent.", "9th Inning": "9ª Ent.",
+        "Extra Inning": "Extra",
+      };
+      return lg[s] ?? s;
+    }
+    return `${match.minute ?? 0}'`;
+  })();
 
   const OddsButton = ({ mkt, lbl, val }: { mkt: string; lbl: string; val: number }) => {
     const sel = hasSelection(match.id, mkt);

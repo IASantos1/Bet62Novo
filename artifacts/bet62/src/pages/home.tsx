@@ -2912,9 +2912,27 @@ export default function Home() {
 
     // ── Live badge label per sport ────────────────────────────────────────────
     const liveBadgeLabel = (() => {
-      if (sport === "basketball" && match.status) return `${match.status}${extra?.clockStr ? ` · ${extra.clockStr}` : ""}`;
-      if (sport === "hockey"     && match.status) return `${match.status}${extra?.clockStr ? ` · ${extra.clockStr}` : ""}`;
-      if (sport === "baseball"   && match.status) return match.status.replace(" Inning", "ª Entrada");
+      if (sport === "basketball" && match.status) {
+        const s = match.status;
+        const lbl = s === "HT" || s === "Halftime" ? "Int." : s;
+        return `${lbl}${extra?.clockStr ? ` · ${extra.clockStr}` : ""}`;
+      }
+      if (sport === "hockey" && match.status) {
+        const s = match.status;
+        const lbl = s === "1P" || s === "P1" ? "1º Per."
+          : s === "2P" || s === "P2" ? "2º Per."
+          : s === "3P" || s === "P3" ? "3º Per."
+          : s.includes("Break") || s === "INT" ? "Int."
+          : s; // OT / SO passam direto
+        return `${lbl}${extra?.clockStr ? ` · ${extra.clockStr}` : ""}`;
+      }
+      if (sport === "baseball" && match.status) {
+        const s = match.status;
+        const m2 = s.match(/\b(\d+)(st|nd|rd|th)\b/i);
+        if (m2) return `${m2[1]}ª Ent.`;
+        if (s === "Extra Inning") return "Extra";
+        return s.replace(/(\d+)(st|nd|rd|th) Inning/i, "$1ª Ent.");
+      }
       if (sport === "tennis"     && match.status) return match.status;
       if (sport === "volleyball" && match.status) return match.status;
 
