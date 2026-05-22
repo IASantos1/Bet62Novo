@@ -1,0 +1,11 @@
+[phases.setup]
+cmds = ["corepack enable", "corepack prepare pnpm@10.28.1 --activate"]
+
+[phases.install]
+cmds = ["pnpm install --no-frozen-lockfile"]
+
+[phases.build]
+cmds = ["pnpm -C artifacts/api-server build"]
+
+[start]
+cmd = "pnpm -C artifacts/api-server start"
