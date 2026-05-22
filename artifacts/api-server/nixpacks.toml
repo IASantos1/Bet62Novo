@@ -1,0 +1,8 @@
+[phases.install]
+cmds = ["cd ../.. && pnpm install --no-frozen-lockfile"]
+
+[phases.build]
+cmds = ["cd ../.. && pnpm -C artifacts/api-server build"]
+
+[start]
+cmd = "cd ../.. && pnpm -C artifacts/api-server start"
