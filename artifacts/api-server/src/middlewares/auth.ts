@@ -1,8 +1,7 @@
 import { type Request, type Response, type NextFunction } from "express";
 import jwt from "jsonwebtoken";
 import { logger } from "../lib/logger";
-
-const SESSION_SECRET = process.env.SESSION_SECRET || "default_secret";
+import { SESSION_SECRET } from "../lib/env";
 
 export interface AuthRequest extends Request {
   user?: {

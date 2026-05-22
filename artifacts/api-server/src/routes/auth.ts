@@ -4,9 +4,9 @@ import jwt from "jsonwebtoken";
 import { db, usersTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import { logger } from "../lib/logger";
+import { SESSION_SECRET } from "../lib/env";
 
 const router: IRouter = Router();
-const SESSION_SECRET = process.env.SESSION_SECRET || "default_secret";
 
 router.post("/register", async (req, res): Promise<void> => {
   const { name, email, password } = req.body;

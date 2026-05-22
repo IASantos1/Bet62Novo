@@ -4,6 +4,7 @@ import { db, usersTable, betsTable, paymentsTable, withdrawalsTable } from "@wor
 import { eq, desc, count, sum, sql, gte, lte, and } from "drizzle-orm";
 import { adminMiddleware, type AdminRequest } from "../middlewares/adminAuth";
 import { logger } from "../lib/logger";
+import { ADMIN_EMAIL, ADMIN_PASSWORD, ADMIN_USERNAME, SESSION_SECRET } from "../lib/env";
 
 function escapeCsv(val: unknown): string {
   if (val === null || val === undefined) return "";
@@ -23,11 +24,6 @@ function buildCsvRow(fields: unknown[]): string {
 }
 
 const router: IRouter = Router();
-
-const SESSION_SECRET = process.env.SESSION_SECRET || "default_secret";
-const ADMIN_USERNAME = process.env.ADMIN_USERNAME || "admin";
-const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "bet62admin2026";
-const ADMIN_EMAIL = process.env.ADMIN_EMAIL || "admin@bet62.com";
 
 // POST /api/admin/login
 router.post("/login", (req: Request, res: Response): void => {
