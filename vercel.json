@@ -1,7 +1,7 @@
 {
   "framework": "vite",
   "installCommand": "npx -y pnpm@10.28.1 install --no-frozen-lockfile",
-  "buildCommand": "npx -y pnpm@10.28.1 --filter @workspace/bet62 build && rm -rf dist && cp -R artifacts/bet62/dist dist",
+  "buildCommand": "npx -y pnpm@10.28.1 --filter @workspace/bet62 build && node -e \"const fs=require('fs'); const path=require('path'); let dir=process.cwd(); while(dir!==path.dirname(dir) && !fs.existsSync(path.join(dir,'pnpm-workspace.yaml'))) dir=path.dirname(dir); const root=dir; const src=path.join(root,'artifacts','bet62','dist'); const dst=path.join(root,'dist'); fs.rmSync(dst,{recursive:true,force:true}); fs.cpSync(src,dst,{recursive:true});\"",
   "outputDirectory": "dist",
   "routes": [
     { "handle": "filesystem" },
