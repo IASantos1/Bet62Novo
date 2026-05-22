@@ -14,14 +14,7 @@ function findWorkspaceRoot(startDir) {
 }
 
 const root = findWorkspaceRoot(process.cwd());
-execSync("npx -y pnpm@10.28.1 --filter @workspace/bet62 build", { stdio: "inherit", cwd: root });
-
-const src = path.join(root, "artifacts", "bet62", "dist");
-const dst = path.join(process.cwd(), "dist");
-
-if (!fs.existsSync(src)) {
-  throw new Error(`Expected build output not found at: ${src}`);
-}
-
-fs.rmSync(dst, { recursive: true, force: true });
-fs.cpSync(src, dst, { recursive: true });
+execSync("npx -y pnpm@10.28.1 install --no-frozen-lockfile", {
+  stdio: "inherit",
+  cwd: root,
+});
