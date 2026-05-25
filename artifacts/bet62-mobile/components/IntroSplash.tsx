@@ -2,17 +2,17 @@ import React, { useEffect, useRef, useState } from "react";
 import {
   Animated,
   Easing,
-  Modal,
   StyleSheet,
   Text,
   View,
 } from "react-native";
 
 export function IntroSplash({ onDone }: { onDone: () => void }) {
-  const [visible, setVisible] = useState(true);
-  const fadeAnim  = useRef(new Animated.Value(0)).current;
+  const [gone, setGone] = useState(false);
+  const fadeAnim  = useRef(new Animated.Value(1)).current;
   const pulseAnim = useRef(new Animated.Value(0.88)).current;
   const onDoneRef = useRef(onDone);
+  useEffect(() => { onDoneRef.current = onDone; });
 
   useEffect(() => {
     const pulse = Animated.loop(
@@ -32,21 +32,12 @@ export function IntroSplash({ onDone }: { onDone: () => void }) {
       ])
     );
 
-    // Fade in → start pulse loop
-    Animated.timing(fadeAnim, {
+    Animated.timing(pulseAnim, {
       toValue: 1,
-      duration: 520,
-      easing: Easing.out(Easing.ease),
+      duration: 250,
       useNativeDriver: true,
-    }).start(() => {
-      Animated.timing(pulseAnim, {
-        toValue: 1,
-        duration: 250,
-        useNativeDriver: true,
-      }).start(() => pulse.start());
-    });
+    }).start(() => pulse.start());
 
-    // After 2.4s: fade out and dismiss
     const t = setTimeout(() => {
       pulse.stop();
       Animated.timing(fadeAnim, {
@@ -54,7 +45,7 @@ export function IntroSplash({ onDone }: { onDone: () => void }) {
         duration: 420,
         useNativeDriver: true,
       }).start(() => {
-        setVisible(false);
+        setGone(true);
         onDoneRef.current();
       });
     }, 2400);
@@ -66,40 +57,35 @@ export function IntroSplash({ onDone }: { onDone: () => void }) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  if (gone) return null;
+
   return (
-    <Modal visible={visible} transparent animationType="none" statusBarTranslucent>
-      <Animated.View style={[styles.overlay, { opacity: fadeAnim }]}>
+    <Animated.View style={[styles.overlay, { opacity: fadeAnim }]} pointerEvents="none">
+      <View style={styles.glowCenterWrap} pointerEvents="none">
+        <View style={styles.glowCenter} />
+      </View>
 
-        {/* Center red radial glow */}
-        <View style={styles.glowCenterWrap} pointerEvents="none">
-          <View style={styles.glowCenter} />
+      <View style={styles.glowBottomWrap} pointerEvents="none">
+        <View style={styles.glowBottom} />
+      </View>
+
+      <Animated.View style={{ transform: [{ scale: pulseAnim }], alignItems: "center" }}>
+        <View style={styles.logoRow}>
+          <Text style={styles.bet}>BET</Text>
+          <Text style={styles.sixty}>62</Text>
         </View>
-
-        {/* Bottom red glow */}
-        <View style={styles.glowBottomWrap} pointerEvents="none">
-          <View style={styles.glowBottom} />
-        </View>
-
-        {/* Pulsing BET62 brand */}
-        <Animated.View
-          style={{ transform: [{ scale: pulseAnim }], alignItems: "center" }}
-        >
-          <View style={styles.logoRow}>
-            <Text style={styles.bet}>BET</Text>
-            <Text style={styles.sixty}>62</Text>
-          </View>
-        </Animated.View>
-
-        {/* Tagline */}
-        <Text style={styles.tagline}>A melhor casa de apostas</Text>
       </Animated.View>
-    </Modal>
+
+      <Text style={styles.tagline}>A melhor casa de apostas</Text>
+    </Animated.View>
   );
 }
 
 const styles = StyleSheet.create({
   overlay: {
-    flex: 1,
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 9999,
+    elevation: 9999,
     backgroundColor: "#000000",
     alignItems: "center",
     justifyContent: "center",

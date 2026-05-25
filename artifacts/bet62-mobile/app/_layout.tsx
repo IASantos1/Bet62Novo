@@ -26,11 +26,11 @@ const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
       retry: 1,
-      staleTime: 2 * 60_000,        // 2 min — data considered fresh
-      gcTime:    60 * 60_000,        // 1 hour — never evict from memory during a session
-      refetchOnWindowFocus: false,   // no surprise refetch on focus
-      refetchOnReconnect: true,      // reconnect → refresh
-      placeholderData: (prev: unknown) => prev, // always show last cached data instantly
+      staleTime: 2 * 60_000,
+      gcTime:    60 * 60_000,
+      refetchOnWindowFocus: false,
+      refetchOnReconnect: true,
+      placeholderData: (prev: unknown) => prev,
     },
   },
 });
@@ -84,29 +84,32 @@ export default function RootLayout() {
   });
   const [introDone, setIntroDone] = useState(false);
 
+  // Hide native splash immediately — IntroSplash takes over visually
   useEffect(() => {
-    if (fontsLoaded || fontError) {
-      SplashScreen.hideAsync();
-    }
-  }, [fontsLoaded, fontError]);
+    SplashScreen.hideAsync().catch(() => {});
+  }, []);
 
-  if (!fontsLoaded && !fontError) return null;
+  const appReady = (fontsLoaded || !!fontError) && introDone;
 
   return (
     <SafeAreaProvider>
       <ErrorBoundary>
         <QueryClientProvider client={queryClient}>
-          <GestureHandlerRootView style={{ flex: 1 }}>
-            <AuthProvider>
-              <InactivityProvider>
-                <BetSlipProvider>
-                  <AppShell />
-                  {!introDone && (
-                    <IntroSplash onDone={() => setIntroDone(true)} />
-                  )}
-                </BetSlipProvider>
-              </InactivityProvider>
-            </AuthProvider>
+          <GestureHandlerRootView style={{ flex: 1, backgroundColor: "#000" }}>
+            {appReady ? (
+              <AuthProvider>
+                <InactivityProvider>
+                  <BetSlipProvider>
+                    <AppShell />
+                  </BetSlipProvider>
+                </InactivityProvider>
+              </AuthProvider>
+            ) : (
+              <View style={{ flex: 1, backgroundColor: "#000" }} />
+            )}
+            {!introDone && (
+              <IntroSplash onDone={() => setIntroDone(true)} />
+            )}
           </GestureHandlerRootView>
         </QueryClientProvider>
       </ErrorBoundary>
