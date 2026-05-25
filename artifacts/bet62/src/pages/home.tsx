@@ -9701,7 +9701,7 @@ export default function Home() {
       {/* MOBILE BET SLIP */}
       <div className={`lg:hidden fixed left-1/2 -translate-x-1/2 z-[55] transition-all duration-300 ${showAppBanner ? "bottom-32" : "bottom-6"}`}>
         {bets.length > 0 && (
-          <Drawer open={betSlipOpenMobile} onOpenChange={setBetSlipOpenMobile}>
+          <Drawer open={betSlipOpenMobile} onOpenChange={setBetSlipOpenMobile} shouldScaleBackground={false}>
             <DrawerTrigger asChild>
               {/* Hide trigger when drawer is open — prevents it floating on top of the
                   DrawerContent and intercepting taps on the "APOSTAR AGORA" button */}
