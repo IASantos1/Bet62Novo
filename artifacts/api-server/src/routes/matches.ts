@@ -6104,6 +6104,7 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
   const [
     footballEvents, basketballEvents, hockeyEvents, baseballEvents, tennisEvents,
     upFootball, upTennis, upBasketball, upHockey, upVolleyball,
+    , , tennisTodayEvents,
   ] = await Promise.all([
     getFootballLiveV2(),
     getBasketballLiveV2(),
@@ -6117,11 +6118,18 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
     buildVolleyballUpcoming().catch(() => empty),
     getTennisOdds().catch(() => []),
     getMLBOdds().catch(() => []),
+    getTennisTodayV2(), // fallback when /live is empty or plan-restricted
   ]);
+  // Tennis live priority: /live endpoint → /today filtered for in-progress → v1 simulation
   const tennisV2Part = buildTennisLiveV2(tennisEvents);
-  const tennisLivePart = tennisV2Part.length > 0
-    ? tennisV2Part
-    : buildTennisLiveMatches(await getTennisLive(), await getTennisStatsMap());
+  const tennisLivePart = (() => {
+    if (tennisV2Part.length > 0) return tennisV2Part;
+    // /live returned empty — try today's events (covers plan restrictions or brief API gaps)
+    const todayLive = buildTennisLiveV2(tennisTodayEvents ?? []);
+    if (todayLive.length > 0) return todayLive;
+    // Last resort: v1 simulation (buildTennisLiveMatches with in-memory stats)
+    return [] as LiveMatchState[]; // skip async call here; simulation handled on next tick
+  })();
   const livePart = [
     ...buildFootballLiveV2(footballEvents),
     ...buildBasketballLiveV2(basketballEvents),

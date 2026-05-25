@@ -1451,6 +1451,7 @@ export default function Home() {
   // Live matches
   const [liveMatches, setLiveMatches] = useState<Match[]>([]);
   const [liveLoading, setLiveLoading] = useState(false);
+  const [liveSportFilter, setLiveSportFilter] = useState<string>("all");
   const prevLiveOdds = useRef<Record<string, Odds>>({});
   // Flat map of "market:sel" → previous odd value, for arrows in MarketOddsBtn
   const prevLiveMarkets = useRef<Record<string, Record<string, number>>>({});
@@ -9138,9 +9139,48 @@ export default function Home() {
                   </button>
                 </div>
 
+                {/* ── Sport filter bar ── */}
+                {liveMatches.length > 0 && (() => {
+                  const sportsMeta: { key: string; label: string; icon: string }[] = [
+                    { key: "all",        label: "Todos",     icon: "⚡" },
+                    { key: "football",   label: "Futebol",   icon: "⚽" },
+                    { key: "basketball", label: "Basquete",  icon: "🏀" },
+                    { key: "tennis",     label: "Ténis",     icon: "🎾" },
+                    { key: "hockey",     label: "Hóquei",    icon: "🏒" },
+                    { key: "baseball",   label: "Basebol",   icon: "⚾" },
+                    { key: "volleyball", label: "Voleibol",  icon: "🏐" },
+                  ];
+                  const presentSports = new Set(liveMatches.map(m => m.sport ?? "football"));
+                  const visible = sportsMeta.filter(s => s.key === "all" || presentSports.has(s.key));
+                  if (visible.length <= 2) return null; // only show if there's real choice
+                  return (
+                    <div className="flex gap-2 overflow-x-auto pb-1 mb-4 scrollbar-none">
+                      {visible.map(s => {
+                        const active = liveSportFilter === s.key;
+                        return (
+                          <button
+                            key={s.key}
+                            onClick={() => setLiveSportFilter(s.key)}
+                            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap transition-all border ${
+                              active
+                                ? "bg-red-600 border-red-500 text-white shadow-[0_0_8px_rgba(239,68,68,0.4)]"
+                                : "bg-zinc-900 border-zinc-700 text-zinc-400 hover:border-zinc-500 hover:text-white"
+                            }`}
+                          >
+                            <span>{s.icon}</span>
+                            <span>{s.label}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  );
+                })()}
+
                 {(() => {
-                  const actualLive = liveMatches.filter(m => m.startsIn === undefined);
-                  const emBreve = liveMatches.filter(m => m.startsIn !== undefined);
+                  const filterBySport = (m: Match) =>
+                    liveSportFilter === "all" || (m.sport ?? "football") === liveSportFilter;
+                  const actualLive = liveMatches.filter(m => m.startsIn === undefined && filterBySport(m));
+                  const emBreve = liveMatches.filter(m => m.startsIn !== undefined && filterBySport(m));
                   if (liveLoading && liveMatches.length === 0) {
                     return (
                       <div className="flex items-center justify-center py-20">
@@ -9154,6 +9194,16 @@ export default function Home() {
                         <Activity className="mx-auto mb-4 opacity-20" size={48} />
                         <p className="font-medium">Nenhum jogo ao vivo no momento.</p>
                         <p className="text-sm mt-1">Volte em breve para acompanhar as partidas em tempo real.</p>
+                      </div>
+                    );
+                  }
+                  if (actualLive.length === 0 && emBreve.length === 0) {
+                    return (
+                      <div className="py-12 text-center text-zinc-500 bg-zinc-900/50 rounded-xl border border-zinc-800">
+                        <p className="font-medium">Nenhum jogo deste desporto ao vivo.</p>
+                        <button onClick={() => setLiveSportFilter("all")} className="mt-3 text-sm text-red-500 hover:text-red-400 underline">
+                          Ver todos os desportos
+                        </button>
                       </div>
                     );
                   }
