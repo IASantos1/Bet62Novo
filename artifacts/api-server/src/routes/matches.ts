@@ -2679,9 +2679,9 @@ function applyTieredMarketDrift(state: LiveMatchState, now: number): LiveMatchSt
   const oddsOscD = Math.cos(t * 0.23 + phase * 0.5) * 0.014 + Math.sin(t * 0.11) * 0.007;
   const oddsOscA = Math.sin(t * 0.27 + phase * 0.9) * 0.018 + Math.cos(t * 0.19) * 0.009;
   const newOdds = due("odds", 45_000, 90_000) ? {
-    home: Math.max(1.04, Math.min(200, r(liveAnchor.home * (1 + oddsOscH)))),
-    draw: liveAnchor.draw > 0 ? Math.max(2.00, Math.min(200, r(liveAnchor.draw * (1 + oddsOscD)))) : 0,
-    away: Math.max(1.04, Math.min(200, r(liveAnchor.away * (1 + oddsOscA)))),
+    home: Math.max(1.04, Math.min(49.99, r(liveAnchor.home * (1 + oddsOscH)))),
+    draw: liveAnchor.draw > 0 ? Math.max(2.00, Math.min(49.99, r(liveAnchor.draw * (1 + oddsOscD)))) : 0,
+    away: Math.max(1.04, Math.min(49.99, r(liveAnchor.away * (1 + oddsOscA)))),
   } : state.odds; // not due yet → unchanged (no arrow on frontend)
 
   // ── Oscillator values — computed fresh each cycle but only APPLIED when due ─
@@ -2689,9 +2689,9 @@ function applyTieredMarketDrift(state: LiveMatchState, now: number): LiveMatchSt
   const osc2 = Math.sin(t * 0.11 + phase * 0.35) * 0.007 + Math.cos(t * 0.07 + phase * 0.2) * 0.003;
   const osc3 = Math.sin(t * 0.04 + phase * 0.15) * 0.003 + Math.cos(t * 0.025 + phase * 0.1) * 0.0015;
 
-  const s1 = (n: number) => n <= 0 ? n : r(Math.max(1.01, n * (1 + osc1)));
-  const s2 = (n: number) => n <= 0 ? n : r(Math.max(1.01, n * (1 + osc2)));
-  const s3 = (n: number) => n <= 0 ? n : r(Math.max(1.01, n * (1 + osc3)));
+  const s1 = (n: number) => n <= 0 ? n : r(Math.min(49.99, Math.max(1.01, n * (1 + osc1))));
+  const s2 = (n: number) => n <= 0 ? n : r(Math.min(49.99, Math.max(1.01, n * (1 + osc2))));
+  const s3 = (n: number) => n <= 0 ? n : r(Math.min(49.99, Math.max(1.01, n * (1 + osc3))));
 
   // Carry through already-settled zeros (filterLiveMarkets output)
   const keep0 = (cur: number, base: number, fn: (n: number) => number) => cur <= 0 ? 0 : fn(base);
@@ -2749,13 +2749,13 @@ function applyTieredMarketDrift(state: LiveMatchState, now: number): LiveMatchSt
             state.markets.totalGoals
           );
           return {
-            over05:  live.over05  > 0 ? s1(live.over05)  : 0, under05: live.under05  > 0 ? s1(live.under05)  : 0,
-            over15:  live.over15  > 0 ? s1(live.over15)  : 0, under15: live.under15  > 0 ? s1(live.under15)  : 0,
-            over25:  live.over25  > 0 ? s1(live.over25)  : 0, under25: live.under25  > 0 ? s1(live.under25)  : 0,
-            over35:  live.over35  > 0 ? s1(live.over35)  : 0, under35: live.under35  > 0 ? s1(live.under35)  : 0,
-            over45:  live.over45  > 0 ? s1(live.over45)  : 0, under45: live.under45  > 0 ? s1(live.under45)  : 0,
-            over55:  live.over55  > 0 ? s1(live.over55)  : 0, under55: live.under55  > 0 ? s1(live.under55)  : 0,
-            over65:  live.over65  > 0 ? s1(live.over65)  : 0, under65: live.under65  > 0 ? s1(live.under65)  : 0,
+            over05:  live.over05  > 0 ? Math.min(5.00,  s1(live.over05))  : 0, under05: live.under05  > 0 ? s1(live.under05)  : 0,
+            over15:  live.over15  > 0 ? Math.min(49.99, s1(live.over15))  : 0, under15: live.under15  > 0 ? s1(live.under15)  : 0,
+            over25:  live.over25  > 0 ? Math.min(49.99, s1(live.over25))  : 0, under25: live.under25  > 0 ? s1(live.under25)  : 0,
+            over35:  live.over35  > 0 ? Math.min(49.99, s1(live.over35))  : 0, under35: live.under35  > 0 ? s1(live.under35)  : 0,
+            over45:  live.over45  > 0 ? Math.min(49.99, s1(live.over45))  : 0, under45: live.under45  > 0 ? s1(live.under45)  : 0,
+            over55:  live.over55  > 0 ? Math.min(49.99, s1(live.over55))  : 0, under55: live.under55  > 0 ? s1(live.under55)  : 0,
+            over65:  live.over65  > 0 ? Math.min(49.99, s1(live.over65))  : 0, under65: live.under65  > 0 ? s1(live.under65)  : 0,
           };
         })()
       : state.markets.totalGoals,
@@ -6113,6 +6113,15 @@ function buildTennisLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
         : { home: Math.min(50, +(odds.home * (1 + factor)).toFixed(2)), draw: 0, away: Math.max(1.01, +(odds.away * (1 - factor)).toFixed(2)) };
     }
 
+    // Simulate game points for V2 tennis (game_score not available in this endpoint)
+    const PT_V2 = [0, 15, 30, 40] as const;
+    const v2Cycle = Math.floor(Date.now() / 2500);
+    const hIdxV2 = (v2Cycle + (ev.id ?? 0) * 3) % 4;
+    const aIdxV2 = (v2Cycle + (ev.id ?? 0) * 5 + 2) % 4;
+    let hPtV2: number | string = PT_V2[hIdxV2]!;
+    let aPtV2: number | string = PT_V2[aIdxV2]!;
+    if (hPtV2 === 40 && aPtV2 === 40) { hPtV2 = "D"; aPtV2 = "D"; }
+
     result.push({
       id: `tennis-v2-${ev.id}`,
       home: homeTeam, away: awayTeam,
@@ -6122,7 +6131,7 @@ function buildTennisLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
       status: statusStr, hasRealOdds: true, odds: liveOdds,
       markets: makeAdvancedMarketsFromTeams(homeTeam, awayTeam),
       events: [],
-      _liveExtra: sets.length > 0 ? { sets } : undefined,
+      _liveExtra: sets.length > 0 ? { sets, currentPoints: [hPtV2, aPtV2] } : { currentPoints: [hPtV2, aPtV2] },
     });
   }
   return result;
@@ -6211,6 +6220,15 @@ function buildTennisSimulation(): LiveMatchState[] {
         ? { home: Math.max(1.01, +(odds.home * (1 - factor)).toFixed(2)), draw: 0, away: Math.min(50, +(odds.away * (1 + factor)).toFixed(2)) }
         : { home: Math.min(50, +(odds.home * (1 + factor)).toFixed(2)), draw: 0, away: Math.max(1.01, +(odds.away * (1 - factor)).toFixed(2)) };
     }
+    // Simulate game points: cycle through 0/15/30/40 every 2.5s using time + seed offset
+    const PT_VALS = [0, 15, 30, 40] as const;
+    const simCycle = Math.floor(Date.now() / 2500);
+    const hIdx = (simCycle + idx * 7) % 4;
+    const aIdx = (simCycle + idx * 3 + 2) % 4;
+    let hPtSim: number | string = PT_VALS[hIdx]!;
+    let aPtSim: number | string = PT_VALS[aIdx]!;
+    if (hPtSim === 40 && aPtSim === 40) { hPtSim = "D"; aPtSim = "D"; }
+
     return {
       id, home, away, league: tournament, country, sport: "tennis" as const,
       homeScore: st.homeScore, awayScore: st.awayScore,
@@ -6218,7 +6236,7 @@ function buildTennisSimulation(): LiveMatchState[] {
       status: `Set ${st.setNum}`, hasRealOdds: false, odds: liveOdds,
       markets: makeAdvancedMarketsFromTeams(home, away),
       events: [],
-      _liveExtra: { sets: st.sets },
+      _liveExtra: { sets: st.sets, currentPoints: [hPtSim, aPtSim] },
     };
   });
 }

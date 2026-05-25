@@ -3491,7 +3491,8 @@ export default function Home() {
           if (!alreadyIn) toggleBet(m, "home", m.odds.home, "result", m.home);
         }
       });
-      setBetSlipOpenMobile(true);
+      // Only open the mobile drawer on small screens — desktop uses the right-panel
+      if (window.innerWidth < 1024) setBetSlipOpenMobile(true);
     };
 
     return (
