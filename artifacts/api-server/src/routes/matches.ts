@@ -1055,8 +1055,13 @@ function makeAdvancedMarketsFromTeams(homeName: string, awayName: string): Advan
   const pH = poissonPmf(lambdaHome, maxG);
   const pA = poissonPmf(lambdaAway, maxG);
 
-  // Double Chance
-  const [dcHD, dcDA, dcHA] = probsToDecimalOdds([pHomeWin + pDraw, pDraw + pAwayWin, pHomeWin + pAwayWin], 1.06);
+  // Double Chance — computed directly from true combined probability (NOT via
+  // probsToDecimalOdds which normalises by sum; DC probs sum to 2, which would
+  // halve each probability and produce odds ~2× too high).
+  const dcMargin = 1.065;
+  const dcHD = mr(mc(1 / Math.max(1e-9, (pHomeWin + pDraw)   * dcMargin), 1.01, 50));
+  const dcDA = mr(mc(1 / Math.max(1e-9, (pDraw   + pAwayWin) * dcMargin), 1.01, 50));
+  const dcHA = mr(mc(1 / Math.max(1e-9, (pHomeWin + pAwayWin) * dcMargin), 1.01, 50));
 
   // BTTS
   const pBttsYes = mc((1 - Math.exp(-lambdaHome)) * (1 - Math.exp(-lambdaAway)), 0.02, 0.98);
