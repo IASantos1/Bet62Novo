@@ -3834,7 +3834,7 @@ export default function Home() {
 
         {/* ── FOOTER ── */}
         {bets.length > 0 && (
-          <div className="px-4 pb-6 pt-3 space-y-3" style={{ background: "#0a0a0a", borderTop: "1px solid rgba(255,255,255,0.06)" }} data-vaul-no-drag>
+          <div className="px-4 pt-3 space-y-3" style={{ background: "#0a0a0a", borderTop: "1px solid rgba(255,255,255,0.06)", paddingBottom: "max(1.5rem, env(safe-area-inset-bottom, 1.5rem))" }} data-vaul-no-drag>
 
             {/* Múltipla stake input */}
             {effectiveBetMode === "multipla" && (
@@ -9703,8 +9703,10 @@ export default function Home() {
         {bets.length > 0 && (
           <Drawer open={betSlipOpenMobile} onOpenChange={setBetSlipOpenMobile}>
             <DrawerTrigger asChild>
+              {/* Hide trigger when drawer is open — prevents it floating on top of the
+                  DrawerContent and intercepting taps on the "APOSTAR AGORA" button */}
               <button
-                className="flex items-center gap-0 rounded-2xl overflow-hidden text-white transition-all active:scale-[0.97]"
+                className={`flex items-center gap-0 rounded-2xl overflow-hidden text-white transition-all active:scale-[0.97] ${betSlipOpenMobile ? "opacity-0 pointer-events-none" : ""}`}
                 style={{
                   boxShadow: "0 6px 28px rgba(220,38,38,0.45), 0 2px 8px rgba(0,0,0,0.6)",
                   background: "linear-gradient(135deg,#dc2626 0%,#7f1d1d 100%)",
@@ -9726,7 +9728,8 @@ export default function Home() {
                 </div>
               </button>
             </DrawerTrigger>
-            <DrawerContent className="border-0 text-white h-[88vh] p-0" style={{ background: "#0a0a0a", borderRadius: "24px 24px 0 0" }}>
+            {/* z-[60] ensures DrawerContent is always above the z-[55] trigger button */}
+            <DrawerContent className="border-0 text-white h-[88svh] p-0 z-[60]" style={{ background: "#0a0a0a", borderRadius: "24px 24px 0 0" }}>
               {BetSlipContent()}
             </DrawerContent>
           </Drawer>
