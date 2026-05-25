@@ -982,6 +982,27 @@ function getTeamElo(name: string): number {
     "racing club": 1660, "san lorenzo": 1640,
     "america": 1690, "chivas": 1680, "cruz azul": 1650, "pumas": 1630,
     "leon": 1620, "monterrey": 1650, "tigres": 1660,
+    // ── National teams — FIFA World Cup 2026 participants (based on FIFA ranking) ─
+    "argentina": 1965, "france": 1950, "england": 1940,
+    "spain": 1935, "brazil": 1930, "portugal": 1915,
+    "netherlands": 1905, "germany": 1890, "belgium": 1885,
+    "colombia": 1865, "croatia": 1845, "uruguay": 1835,
+    "morocco": 1810, "mexico": 1795, "usa": 1800, "united states": 1800,
+    "switzerland": 1782, "japan": 1775, "senegal": 1758,
+    "ecuador": 1755, "australia": 1712, "south korea": 1716,
+    "iran": 1700, "serbia": 1698, "austria": 1682,
+    "scotland": 1675, "turkiye": 1662, "turkey": 1662,
+    "canada": 1742, "norway": 1668, "sweden": 1652,
+    "algeria": 1622, "czechia": 1632, "czech republic": 1632,
+    "paraguay": 1598, "romania": 1618, "egypt": 1562,
+    "cote d ivoire": 1582, "ivory coast": 1582, "côte d'ivoire": 1582,
+    "ghana": 1538, "tunisia": 1538, "dr congo": 1542, "congo": 1542,
+    "iraq": 1572, "jordan": 1565, "uzbekistan": 1582,
+    "saudi arabia": 1552, "qatar": 1512,
+    "panama": 1542, "south africa": 1538,
+    "new zealand": 1498, "cabo verde": 1522, "curaçao": 1452, "curacao": 1452,
+    "haiti": 1458, "bosnia & herzegovina": 1558, "bosnia": 1558,
+    "bosnia and herzegovina": 1558,
   };
   if (known[n] !== undefined) return known[n]!;
   const h = hashStr(`elo:${n}`);
@@ -6543,7 +6564,7 @@ async function getUpcomingAll(): Promise<UpcomingTopCache> {
 
 // ─── WC 2026 Endpoint ──────────────────────────────────────────────────────────
 let wc2026Cache: { matches: UpcomingMatch[]; fetchedAt: number } | null = null;
-const WC2026_TTL = 60 * 60_000; // 60 min
+const WC2026_TTL = 15 * 60_000; // 15 min — shorter so real odds get picked up when API publishes them
 
 async function buildWC2026Matches(): Promise<UpcomingMatch[]> {
   if (wc2026Cache && Date.now() - wc2026Cache.fetchedAt < WC2026_TTL) {
