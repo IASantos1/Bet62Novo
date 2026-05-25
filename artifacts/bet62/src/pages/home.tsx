@@ -7,7 +7,7 @@ import {
   LogOut, User, History, Loader2, Zap, TrendingUp,
   ChevronRight, ChevronLeft, ChevronDown, ChevronUp, AlertCircle, BarChart2, Wallet, ArrowDownCircle, ArrowUpCircle, Plus, Clock, Smartphone,
   Copy, Share2, CircleDollarSign, Lock, Trash2, Check, Fingerprint, ScanFace, ShieldCheck,
-  RefreshCw, Ticket, CalendarDays, ListOrdered,
+  RefreshCw, Ticket, CalendarDays, ListOrdered, Search,
 } from "lucide-react";
 import ProfileTab from "@/components/ProfileTab";
 import { Button } from "@/components/ui/button";
@@ -1452,6 +1452,7 @@ export default function Home() {
   const [liveMatches, setLiveMatches] = useState<Match[]>([]);
   const [liveLoading, setLiveLoading] = useState(false);
   const [liveSportFilter, setLiveSportFilter] = useState<string>("all");
+  const [liveSearchQuery, setLiveSearchQuery] = useState<string>("");
   const prevLiveOdds = useRef<Record<string, Odds>>({});
   // Flat map of "market:sel" → previous odd value, for arrows in MarketOddsBtn
   const prevLiveMarkets = useRef<Record<string, Record<string, number>>>({});
@@ -9148,6 +9149,28 @@ export default function Home() {
                   </button>
                 </div>
 
+                {/* ── Search bar ── */}
+                {liveMatches.length > 0 && (
+                  <div className="relative mb-3">
+                    <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500 pointer-events-none" />
+                    <input
+                      type="text"
+                      value={liveSearchQuery}
+                      onChange={e => setLiveSearchQuery(e.target.value)}
+                      placeholder="Pesquisar equipa ou liga…"
+                      className="w-full bg-zinc-900 border border-zinc-700 rounded-lg pl-8 pr-8 py-2 text-sm text-white placeholder-zinc-500 focus:outline-none focus:border-red-500/60 transition-colors"
+                    />
+                    {liveSearchQuery && (
+                      <button
+                        onClick={() => setLiveSearchQuery("")}
+                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-white transition-colors"
+                      >
+                        <X size={14} />
+                      </button>
+                    )}
+                  </div>
+                )}
+
                 {/* ── Sport filter bar ── */}
                 {liveMatches.length > 0 && (() => {
                   const sportsMeta: { key: string; label: string; icon: string }[] = [
@@ -9186,8 +9209,12 @@ export default function Home() {
                 })()}
 
                 {(() => {
-                  const filterBySport = (m: Match) =>
-                    liveSportFilter === "all" || (m.sport ?? "football") === liveSportFilter;
+                  const filterBySport = (m: Match) => {
+                    const bySport = liveSportFilter === "all" || (m.sport ?? "football") === liveSportFilter;
+                    const q = liveSearchQuery.trim().toLowerCase();
+                    const bySearch = !q || m.home.toLowerCase().includes(q) || m.away.toLowerCase().includes(q) || (m.league ?? "").toLowerCase().includes(q);
+                    return bySport && bySearch;
+                  };
                   const actualLive = liveMatches.filter(m => m.startsIn === undefined && filterBySport(m));
                   const emBreve = liveMatches.filter(m => m.startsIn !== undefined && filterBySport(m));
                   if (liveLoading && liveMatches.length === 0) {

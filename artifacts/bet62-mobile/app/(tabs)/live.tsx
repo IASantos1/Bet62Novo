@@ -10,6 +10,7 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -399,11 +400,27 @@ export default function LiveScreen() {
   const { count } = useBetSlip();
   const [slipVisible, setSlipVisible] = useState(false);
   const [selectedSport, setSelectedSport] = useState("all");
+  const [searchQuery, setSearchQuery] = useState("");
 
   const { matches, connected, lastUpdated } = useLiveMatches();
   const topPad = Platform.OS === "web" ? 67 : insets.top;
 
-  const filtered = matches.filter((m) => m.hasRealOdds !== false && (selectedSport === "all" || m.sport === selectedSport));
+  const q = searchQuery.trim().toLowerCase();
+  const filtered = matches.filter((m) => {
+    if (m.hasRealOdds === false) return false;
+    if (selectedSport !== "all" && m.sport !== selectedSport) return false;
+    if (q && !m.home.toLowerCase().includes(q) && !m.away.toLowerCase().includes(q) && !(m.league ?? "").toLowerCase().includes(q)) return false;
+    return true;
+  });
+
+  // Counts per sport for badge display (unfiltered by sport/search)
+  const sportCounts = matches.reduce<Record<string, number>>((acc, m) => {
+    if (m.hasRealOdds === false) return acc;
+    const sp = m.sport ?? "football";
+    acc[sp] = (acc[sp] ?? 0) + 1;
+    return acc;
+  }, {});
+  const presentSports = new Set(Object.keys(sportCounts));
 
   const s = StyleSheet.create({
     container: { flex: 1, backgroundColor: colors.background },
@@ -461,21 +478,47 @@ export default function LiveScreen() {
           </View>
         </View>
 
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 2 }}>
-          {SPORTS.map((sp) => {
+        {/* Sport filter chips — only show sports with live matches */}
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 4 }}>
+          {SPORTS.filter(sp => sp.key === "all" || presentSports.has(sp.key)).map((sp) => {
             const active = selectedSport === sp.key;
             const col = SPORT_COLORS[sp.key] ?? colors.primary;
+            const cnt = sp.key === "all" ? matches.filter(m => m.hasRealOdds !== false).length : (sportCounts[sp.key] ?? 0);
             return (
               <Pressable
                 key={sp.key}
-                style={[s.sportChip, { backgroundColor: active ? col : colors.muted, borderColor: active ? col : colors.border }]}
+                style={[s.sportChip, { backgroundColor: active ? col : colors.muted, borderColor: active ? col : colors.border, flexDirection: "row", alignItems: "center", gap: 5 }]}
                 onPress={() => { setSelectedSport(sp.key); Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); }}
               >
                 <Text style={{ fontSize: 12, fontFamily: "Inter_600SemiBold", color: active ? "#ffffff" : colors.foreground }}>{sp.label}</Text>
+                {cnt > 0 && (
+                  <View style={{ backgroundColor: active ? "rgba(255,255,255,0.25)" : colors.border, borderRadius: 8, paddingHorizontal: 5, paddingVertical: 1 }}>
+                    <Text style={{ fontSize: 10, fontFamily: "Inter_700Bold", color: active ? "#ffffff" : colors.mutedForeground }}>{cnt}</Text>
+                  </View>
+                )}
               </Pressable>
             );
           })}
         </ScrollView>
+
+        {/* Search bar */}
+        <View style={{ flexDirection: "row", alignItems: "center", backgroundColor: colors.muted, borderRadius: 10, borderWidth: 1, borderColor: colors.border, paddingHorizontal: 10, marginTop: 8, gap: 6 }}>
+          <Ionicons name="search-outline" size={16} color={colors.mutedForeground} />
+          <TextInput
+            value={searchQuery}
+            onChangeText={setSearchQuery}
+            placeholder="Pesquisar equipa ou liga…"
+            placeholderTextColor={colors.mutedForeground}
+            style={{ flex: 1, paddingVertical: 9, fontSize: 14, fontFamily: "Inter_400Regular", color: colors.foreground }}
+            returnKeyType="search"
+            clearButtonMode="while-editing"
+          />
+          {searchQuery.length > 0 && (
+            <Pressable onPress={() => setSearchQuery("")} hitSlop={8}>
+              <Ionicons name="close-circle" size={16} color={colors.mutedForeground} />
+            </Pressable>
+          )}
+        </View>
       </View>
 
       {lastUpdated === 0 ? (
