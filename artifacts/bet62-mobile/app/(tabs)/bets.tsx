@@ -1,7 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
-import { router } from "expo-router";
-import React, { useState } from "react";
+import { router, useFocusEffect } from "expo-router";
+import React, { useCallback, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -361,8 +361,15 @@ export default function BetsScreen() {
       return res.json() as Promise<Bet[]>;
     },
     enabled: !!token,
-    refetchInterval: 30000,
+    refetchInterval: 10000,
   });
+
+  // Refetch immediately when the tab comes into focus — mirrors web behaviour
+  useFocusEffect(
+    useCallback(() => {
+      if (token) void refetch();
+    }, [token, refetch]),
+  );
 
   const bets = data ?? [];
   const filtered = tab === "abertas"
