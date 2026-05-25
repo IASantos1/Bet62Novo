@@ -3881,8 +3881,19 @@ async function getTennisLiveV2(): Promise<SAPIV2Event[]> {
   try {
     const resp = await fetch(`${SAPI_V2_TENNIS}/live`, { signal: AbortSignal.timeout(9000), headers: sapiHeaders() });
     if (!resp.ok) return tennisLiveV2Cache ?? [];
-    const data = (await resp.json()) as { events?: SAPIV2Event[] };
-    tennisLiveV2Cache = data.events ?? [];
+    // Tennis endpoint shape varies across plans/versions:
+    //   { events: [...] }                   — standard V2
+    //   { data: { events: [...] } }          — wrapped variant
+    //   { data: [...] }                      — array directly under data
+    const raw = (await resp.json()) as {
+      events?: SAPIV2Event[];
+      data?: SAPIV2Event[] | { events?: SAPIV2Event[] };
+    };
+    const nested = raw.data;
+    tennisLiveV2Cache =
+      raw.events ??
+      (Array.isArray(nested) ? nested : (nested as { events?: SAPIV2Event[] } | undefined)?.events) ??
+      [];
     tennisLiveV2FetchedAt = now;
     return tennisLiveV2Cache;
   } catch {
