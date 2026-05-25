@@ -5965,14 +5965,19 @@ function buildTennisLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
   for (const ev of events) {
     const code = v2StatusCode(ev);
     const statusStr = v2StatusStr(ev.status);
-    if (code === 100 || statusStr === "Ended" || statusStr === "Finished" || statusStr === "Not Started" || statusStr === "Postponed" || statusStr === "Cancelled" || statusStr === "Walkover" || statusStr === "Retired") continue;
-    // Tennis live: "1st/2nd/3rd set", "In Progress", "Playing", "Break", "Advantage", codes 6–60
+    // Skip only matches that are definitively not live
     const sLow = statusStr.toLowerCase();
-    const isLive = sLow.includes("set") || sLow.includes("progress") || sLow.includes("play") ||
-      sLow.includes("live") || sLow.includes("break") || sLow.includes("game") ||
-      sLow.includes("advantage") || sLow.includes("tiebreak") ||
-      (code !== undefined && code >= 6 && code <= 60);
-    if (!isLive) continue;
+    const notLive =
+      code === 100 ||                        // finished (SportsApiPro code)
+      (code === 0 && (sLow === "" || sLow.includes("not start") || sLow.includes("schedul"))) || // pre-match
+      sLow.includes("ended") || sLow.includes("finished") ||
+      sLow.includes("not start") || sLow.includes("postpone") ||
+      sLow.includes("cancel") || sLow.includes("walkover") ||
+      sLow.includes("retired") || sLow.includes("abandon") ||
+      sLow.includes("awarded");
+    if (notLive) continue;
+    // Accept everything else: "Playing", "1st Set", "2nd Set", "In Progress",
+    // "Break Time", "Advantage", "Tiebreak", "Suspended", "Paused", etc.
 
     const homeTeam = v2TeamName(ev.homeTeam);
     const awayTeam = v2TeamName(ev.awayTeam);
