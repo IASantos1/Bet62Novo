@@ -6,7 +6,10 @@ import { eq } from "drizzle-orm";
 import { logger } from "../lib/logger";
 
 const router: IRouter = Router();
-const SESSION_SECRET = process.env.SESSION_SECRET || "default_secret";
+const SESSION_SECRET = process.env.SESSION_SECRET;
+if (!SESSION_SECRET) {
+  throw new Error("[SECURITY] SESSION_SECRET environment variable is not set.");
+}
 
 router.post("/register", async (req, res): Promise<void> => {
   const { name, email, password } = req.body;

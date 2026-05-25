@@ -24,7 +24,10 @@ function buildCsvRow(fields: unknown[]): string {
 
 const router: IRouter = Router();
 
-const SESSION_SECRET = process.env.SESSION_SECRET || "default_secret";
+const SESSION_SECRET = process.env.SESSION_SECRET;
+if (!SESSION_SECRET) {
+  throw new Error("[SECURITY] SESSION_SECRET environment variable is not set.");
+}
 const ADMIN_USERNAME = process.env.ADMIN_USERNAME || "admin";
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "bet62admin2026";
 const ADMIN_EMAIL = process.env.ADMIN_EMAIL || "admin@bet62.com";

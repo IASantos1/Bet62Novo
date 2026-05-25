@@ -8,9 +8,12 @@ import { randomUUID } from "crypto";
 
 const router: IRouter = Router();
 
-const MBWAY_KEY = process.env.IFTHENPAY_MBWAY_KEY || "";
-const MULTIBANCO_KEY = process.env.IFTHENPAY_MULTIBANCO_KEY || "";
-const CARD_KEY = process.env.IFTHENPAY_CARD_KEY || "";
+const MBWAY_KEY       = process.env.IFTHENPAY_MBWAY_KEY       || "";
+const MULTIBANCO_KEY  = process.env.IFTHENPAY_MULTIBANCO_KEY  || "";
+const CARD_KEY        = process.env.IFTHENPAY_CARD_KEY        || "";
+// Anti-tampering key: included in all callback/return URLs so only ifthenpay
+// can trigger them. Verified on every incoming callback/card-return request.
+const BACKOFFICE_KEY  = process.env.IFTHENPAY_BACKOFFICE_KEY  || "";
 
 function getBaseUrl(req: Request): string {
   const domains = process.env.REPLIT_DOMAINS;
@@ -32,7 +35,11 @@ router.post("/multibanco", authMiddleware, async (req: AuthRequest, res: Respons
   const amountStr = amount.toFixed(2);
 
   try {
-    const callbackUrl = `${getBaseUrl(req)}/api/payments/callback`;
+    // Include anti-tampering key in callback URL so the handler can verify
+    // that the request comes from ifthenpay, not from an attacker
+    const callbackUrl = BACKOFFICE_KEY
+      ? `${getBaseUrl(req)}/api/payments/callback?key=${encodeURIComponent(BACKOFFICE_KEY)}`
+      : `${getBaseUrl(req)}/api/payments/callback`;
 
     const ifthenpayRes = await fetch("https://ifthenpay.com/api/multibanco/reference/init", {
       method: "POST",
@@ -169,9 +176,11 @@ router.post("/card", authMiddleware, async (req: AuthRequest, res: Response): Pr
         cardKey: CARD_KEY,
         orderId,
         amount: amountStr,
-        successUrl: `${base}/api/payments/card-return?status=success&orderId=${orderId}`,
-        errorUrl: `${base}/api/payments/card-return?status=error&orderId=${orderId}`,
-        cancelUrl: `${base}/api/payments/card-return?status=cancel&orderId=${orderId}`,
+        // Anti-tampering key appended so card-return can verify the redirect
+        // comes from ifthenpay and not from the user crafting the URL manually
+        successUrl: `${base}/api/payments/card-return?status=success&orderId=${orderId}${BACKOFFICE_KEY ? `&key=${encodeURIComponent(BACKOFFICE_KEY)}` : ""}`,
+        errorUrl:   `${base}/api/payments/card-return?status=error&orderId=${orderId}`,
+        cancelUrl:  `${base}/api/payments/card-return?status=cancel&orderId=${orderId}`,
       }),
     });
 
@@ -275,9 +284,19 @@ router.get("/status/:orderId", authMiddleware, async (req: AuthRequest, res: Res
 });
 
 // ─── GET /api/payments/callback ──────────────────────────────────────────────
-// Called by ifthenpay when a payment is confirmed (Multibanco & MB WAY)
+// Called by ifthenpay when a payment is confirmed (Multibanco & MB WAY).
+// The URL includes ?key=BACKOFFICE_KEY as anti-tampering protection —
+// any request without the correct key is rejected immediately.
 router.get("/callback", async (req: Request, res: Response): Promise<void> => {
-  const { orderId, amount, requestId } = req.query as Record<string, string>;
+  const { orderId, amount, requestId, key } = req.query as Record<string, string>;
+
+  // Anti-tampering: verify the key matches what we embedded in the callback URL.
+  // BACKOFFICE_KEY is empty only in local dev without the env var — skip check then.
+  if (BACKOFFICE_KEY && key !== BACKOFFICE_KEY) {
+    logger.warn({ orderId, ip: req.ip }, "Callback rejected: invalid anti-tampering key");
+    res.status(403).send("Forbidden");
+    return;
+  }
 
   if (!orderId) {
     res.status(400).send("Missing orderId");
@@ -338,7 +357,19 @@ router.get("/callback", async (req: Request, res: Response): Promise<void> => {
 
 // ─── GET /api/payments/card-return ───────────────────────────────────────────
 router.get("/card-return", async (req: Request, res: Response): Promise<void> => {
-  const { status, orderId } = req.query as Record<string, string>;
+  const { status, orderId, key } = req.query as Record<string, string>;
+
+  const domains = process.env.REPLIT_DOMAINS;
+  const base = domains ? `https://${domains.split(",")[0]}` : "/";
+
+  // Anti-tampering: only credit balance when the key matches the one we embedded
+  // in the successUrl. Without this, a user who knows their orderId could hit this
+  // endpoint before actually paying and get free credit.
+  if (status === "success" && BACKOFFICE_KEY && key !== BACKOFFICE_KEY) {
+    logger.warn({ orderId, ip: req.ip }, "Card-return rejected: invalid anti-tampering key");
+    res.redirect(`${base}/?payment=error`);
+    return;
+  }
 
   if (status === "success" && orderId) {
     try {
@@ -371,8 +402,6 @@ router.get("/card-return", async (req: Request, res: Response): Promise<void> =>
     }
   }
 
-  const domains = process.env.REPLIT_DOMAINS;
-  const base = domains ? `https://${domains.split(",")[0]}` : "/";
   res.redirect(`${base}/?payment=${status ?? "unknown"}`);
 });
 
