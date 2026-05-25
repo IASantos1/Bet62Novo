@@ -6586,6 +6586,14 @@ async function buildWC2026Matches(): Promise<UpcomingMatch[]> {
       lg.includes("mundial 2026") ||
       lg.includes("coupe du monde");
     if (!isWCLeague) continue;
+    // Exclude Women's WC qualification — show only the main men's tournament
+    const isWomensOrQual =
+      lg.includes("women") ||
+      lg.includes("qualification") ||
+      lg.includes("qualif") ||
+      lg.includes("feminino") ||
+      lg.includes("féminin");
+    if (isWomensOrQual) continue;
     wcEvents.push(ev);
     if (wcEvents.length >= 300) break;
   }

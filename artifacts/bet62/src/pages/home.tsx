@@ -2255,10 +2255,9 @@ export default function Home() {
     return () => clearInterval(id);
   }, [fetchUpcoming]);
 
-  // Fetch WC 2026 matches when filter is activated
+  // Fetch WC 2026 matches whenever filter is activated (always re-fetch for freshness)
   useEffect(() => {
     if (!selectedWC) return;
-    if (wcMatchesData.length > 0) return; // already loaded
     setWcLoading(true);
     fetch("/api/matches/wc2026")
       .then(r => r.ok ? r.json() : { matches: [] })
@@ -2267,7 +2266,7 @@ export default function Home() {
       })
       .catch(() => {})
       .finally(() => setWcLoading(false));
-  }, [selectedWC, wcMatchesData.length]);
+  }, [selectedWC]);
 
   // Fetch live matches — polls every 5s
   type LiveMatchRaw = {
@@ -8754,9 +8753,9 @@ export default function Home() {
 
 
                   <h2 className="text-2xl font-black italic uppercase tracking-tight mb-4 flex items-center gap-2">
-                    <Trophy className="text-red-600" /> {selectedCountry ? `⚽ ${selectedCountry}` : selectedLeague ? selectedLeague : "Próximos Eventos"}
+                    <Trophy className="text-red-600" /> {selectedCountry ? `⚽ ${selectedCountry}` : selectedLeague ? selectedLeague : selectedWC ? "Copa do Mundo 2026" : "Próximos Eventos"}
                   </h2>
-                  {upcomingLoading ? (
+                  {(selectedWC ? wcLoading : upcomingLoading) ? (
                     <div className="space-y-3">
                       {[1,2,3,4,5,6].map(i => (
                         <div key={i} className="bg-zinc-900 border border-zinc-800 rounded-xl p-4 animate-pulse">
@@ -8783,7 +8782,7 @@ export default function Home() {
                       <Trophy className="mx-auto mb-4 opacity-20" size={48} />
                       <p className="font-medium">
                         {selectedWC
-                          ? "Nenhum jogo do Mundial 2026 disponível de momento. Os jogos aparecem assim que a SportsApiPro os publicar (início a 11 de junho)."
+                          ? "Nenhum jogo do Mundial 2026 encontrado de momento. Tente novamente em breve."
                           : selectedCountry
                             ? `Nenhum evento para ${selectedCountry}.`
                             : selectedLeague
