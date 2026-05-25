@@ -4315,6 +4315,80 @@ async function getBaseballTodayV2(): Promise<SAPIV2Event[]> {
   } catch { return baseballTodayV2Cache ?? []; }
 }
 
+/**
+ * Scan all V2 sports "today" feeds and register any finished events into
+ * finishedMatchResults. Called by the settlement worker every 60 s so that
+ * bets on basketball/hockey/baseball/tennis/football are settled correctly
+ * even after a server restart (when the live-eviction path is cold).
+ *
+ * Match-ID prefix map (must match the IDs used when placing bets):
+ *   football   → football-v2-{ev.id}
+ *   basketball → bball-v2-{ev.id}
+ *   hockey     → hockey-v2-{ev.id}
+ *   baseball   → baseball-v2-{ev.id}  AND  mlb-v2-{ev.id}
+ *   tennis     → tennis-v2-{ev.id}
+ */
+export async function scanV2AllSportsForFinished(): Promise<void> {
+  try {
+    const now = Date.now();
+
+    const [footR, bballR, hockR, baseR, tennR] = await Promise.allSettled([
+      getFootballTodayV2(),
+      getBasketballTodayV2(),
+      getHockeyTodayV2(),
+      getBaseballTodayV2(),
+      getTennisTodayV2(),
+    ]);
+
+    type SportBundle = { prefix: string[]; events: SAPIV2Event[]; isFootball?: boolean };
+    const bundles: SportBundle[] = [
+      { prefix: ["football-v2"],              events: footR.status  === "fulfilled" ? footR.value  : [], isFootball: true },
+      { prefix: ["bball-v2"],                  events: bballR.status === "fulfilled" ? bballR.value : [] },
+      { prefix: ["hockey-v2"],                 events: hockR.status  === "fulfilled" ? hockR.value  : [] },
+      { prefix: ["baseball-v2", "mlb-v2"],     events: baseR.status  === "fulfilled" ? baseR.value  : [] },
+      { prefix: ["tennis-v2"],                 events: tennR.status  === "fulfilled" ? tennR.value  : [] },
+    ];
+
+    for (const { prefix, events, isFootball } of bundles) {
+      for (const ev of events) {
+        const st = (ev.status as Record<string, unknown> | null | undefined);
+        const stType = typeof st?.["type"] === "string" ? (st["type"] as string).toLowerCase() : "";
+        const code = v2StatusCode(ev);
+        const isFinished = stType === "finished" || code === 100;
+        if (!isFinished) continue;
+
+        const hS = typeof ev.homeScore === "object" && ev.homeScore !== null
+          ? (ev.homeScore as SAPIV2ScoreObj) : null;
+        const aS = typeof ev.awayScore === "object" && ev.awayScore !== null
+          ? (ev.awayScore as SAPIV2ScoreObj) : null;
+        const home = hS?.current ?? v2CurrentScore(ev.homeScore) ?? 0;
+        const away = aS?.current ?? v2CurrentScore(ev.awayScore) ?? 0;
+
+        // For football extract HT from period1 score; other sports leave undefined
+        const htHome = isFootball ? (typeof hS?.["period1"] === "number" ? hS["period1"] as number : undefined) : undefined;
+        const htAway = isFootball ? (typeof aS?.["period1"] === "number" ? aS["period1"] as number : undefined) : undefined;
+
+        const record = {
+          home, away,
+          htHome, htAway,
+          homeTeam: v2TeamName(ev.homeTeam),
+          awayTeam: v2TeamName(ev.awayTeam),
+          finishedAt: now,
+        };
+
+        for (const p of prefix) {
+          const id = `${p}-${ev.id}`;
+          if (!finishedMatchResults.has(id)) finishedMatchResults.set(id, record);
+        }
+      }
+    }
+
+    _pruneFinishedResults();
+  } catch {
+    // non-critical — settlement will retry on next cycle
+  }
+}
+
 // Shared helper: convert a SAPIV2Event startTimestamp to date/time strings (Europe/Lisbon)
 function v2EventDateTime(ev: SAPIV2Event): { date: string; time: string } {
   const ts = ev.startTimestamp;

@@ -1,7 +1,7 @@
 import { db, betsTable, usersTable } from "@workspace/db";
-import { eq, and } from "drizzle-orm";
+import { eq, and, lt } from "drizzle-orm";
 import { logger } from "./lib/logger";
-import { finishedMatchResults, scanDailyForFinished } from "./routes/matches";
+import { finishedMatchResults, scanDailyForFinished, scanV2AllSportsForFinished } from "./routes/matches";
 
 export type SelectionRecord = {
   matchId?: string;
@@ -363,22 +363,20 @@ export async function autoSettlePendingBets(): Promise<void> {
 
           if (rows.length === 0) return; // already settled elsewhere
 
-          if (true) {
-            const [user] = await tx
-              .select({ balance: usersTable.balance })
-              .from(usersTable)
-              .where(eq(usersTable.id, bet.userId))
-              .limit(1);
+          const [user] = await tx
+            .select({ balance: usersTable.balance })
+            .from(usersTable)
+            .where(eq(usersTable.id, bet.userId))
+            .limit(1);
 
-            if (user) {
-              const newBalance = (
-                parseFloat(user.balance) + parseFloat(bet.potentialWin)
-              ).toFixed(2);
-              await tx
-                .update(usersTable)
-                .set({ balance: newBalance })
-                .where(eq(usersTable.id, bet.userId));
-            }
+          if (user) {
+            const newBalance = (
+              parseFloat(user.balance) + parseFloat(bet.potentialWin)
+            ).toFixed(2);
+            await tx
+              .update(usersTable)
+              .set({ balance: newBalance })
+              .where(eq(usersTable.id, bet.userId));
           }
         });
 
@@ -401,17 +399,121 @@ export async function autoSettlePendingBets(): Promise<void> {
 }
 
 /**
+ * Void and refund any pending bets older than STALE_THRESHOLD_MS where no
+ * match result has been found. This prevents bets from staying pending forever
+ * if data was never received (API outage, server restart, cancelled match, etc.).
+ *
+ * Status is set to "voided". Stake is refunded to user balance.
+ */
+const STALE_THRESHOLD_MS = 72 * 60 * 60 * 1000; // 72 hours
+
+async function expireStalePendingBets(): Promise<void> {
+  try {
+    const cutoff = new Date(Date.now() - STALE_THRESHOLD_MS);
+    const staleBets = await db
+      .select()
+      .from(betsTable)
+      .where(and(
+        eq(betsTable.status, "pending"),
+        lt(betsTable.createdAt, cutoff)
+      ));
+
+    if (staleBets.length === 0) return;
+
+    for (const bet of staleBets) {
+      try {
+        // One last attempt to find the result before voiding
+        const selections = bet.selections as SelectionRecord[];
+        const isSingle = Array.isArray(selections) && selections.length === 1;
+        const hasResult = Array.isArray(selections) && selections.some(sel => {
+          if (sel.matchId && finishedMatchResults.has(sel.matchId)) return true;
+          if (isSingle && finishedMatchResults.has(bet.matchId)) return true;
+          return false;
+        });
+
+        // If result just became available, skip — next settlement cycle handles it
+        if (hasResult) continue;
+
+        await db.transaction(async (tx) => {
+          const rows = await tx
+            .update(betsTable)
+            .set({ status: "voided" })
+            .where(and(eq(betsTable.id, bet.id), eq(betsTable.status, "pending")))
+            .returning({ id: betsTable.id });
+
+          if (rows.length === 0) return; // already settled elsewhere
+
+          // Refund the original stake
+          const [user] = await tx
+            .select({ balance: usersTable.balance })
+            .from(usersTable)
+            .where(eq(usersTable.id, bet.userId))
+            .limit(1);
+
+          if (user) {
+            const newBalance = (
+              parseFloat(user.balance) + parseFloat(bet.stake)
+            ).toFixed(2);
+            await tx
+              .update(usersTable)
+              .set({ balance: newBalance })
+              .where(eq(usersTable.id, bet.userId));
+          }
+        });
+
+        logger.warn(
+          { betId: bet.id, userId: bet.userId, stake: bet.stake, createdAt: bet.createdAt, matchId: bet.matchId },
+          "Stale bet voided — pending >72 h without result, stake refunded"
+        );
+      } catch (err) {
+        logger.error({ err, betId: bet.id }, "Error voiding stale bet");
+      }
+    }
+  } catch (err) {
+    logger.error({ err }, "Error scanning for stale bets");
+  }
+}
+
+/**
  * Start the background settlement worker.
- * Runs a daily-feed scan + pending-bet settlement every 60 seconds.
+ *
+ * Each cycle (every ~60 s):
+ *   1. scanDailyForFinished()       — football v1/v2 daily feed
+ *   2. scanV2AllSportsForFinished() — V2 today feeds for ALL sports
+ *   3. autoSettlePendingBets()      — settle bets with known results
+ *   4. expireStalePendingBets()     — void bets pending >72 h (stake refunded)
+ *
+ * Uses self-scheduling setTimeout (not setInterval) so each cycle only starts
+ * after the previous one completes — prevents overlap on slow DB/API cycles.
+ * Fully independent of user sessions: runs server-side at all times.
  */
 export function startSettlementWorker(): void {
-  const run = async () => {
-    await scanDailyForFinished();
-    await autoSettlePendingBets();
+  const run = async (): Promise<void> => {
+    try {
+      // Parallel scan: football daily feed + all V2 sports today feed
+      await Promise.allSettled([
+        scanDailyForFinished(),
+        scanV2AllSportsForFinished(),
+      ]);
+      // Settle bets whose results are now known
+      await autoSettlePendingBets();
+      // Void and refund bets with no data after 72 h
+      await expireStalePendingBets();
+    } catch (err) {
+      logger.error({ err }, "Settlement worker unhandled error");
+    }
   };
 
-  setTimeout(() => { void run(); }, 5000);
-  setInterval(() => { void run(); }, 60_000);
+  const schedule = (): void => {
+    setTimeout(() => {
+      void run().finally(schedule);
+    }, 60_000);
+  };
 
-  logger.info("Bet auto-settlement worker started (60 s interval)");
+  // First run shortly after startup, then self-schedule every 60 s
+  setTimeout(() => {
+    void run().finally(schedule);
+  }, 5_000);
+
+  logger.info("Bet auto-settlement worker started (60 s self-scheduling, all sports)");
 }
