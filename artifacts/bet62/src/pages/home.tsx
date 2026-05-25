@@ -7871,16 +7871,8 @@ export default function Home() {
                   .filter(m => { const k = String(m.id); if (seen.has(k)) return false; seen.add(k); return true; });
               })();
 
-              const _isWC = (m: Match) => {
-                if ((m.sport ?? "football") !== "football") return false;
-                const lg = (m.league ?? "").toLowerCase();
-                if (lg.includes("world cup") || lg.includes("copa do mundo") || lg.includes("copa mundo") || lg.includes("fifa world") || lg.includes("wc 2026")) return true;
-                const d = (m.date ?? "");
-                return d.startsWith("2026-06") || /\d{2}\.06\.2026/.test(d);
-              };
-              const _wcMatches = allUpcoming.filter(_isWC);
               const filteredUpcoming = selectedWC
-                ? (wcMatchesData.length > 0 ? wcMatchesData : (_wcMatches.length > 0 ? _wcMatches : allUpcoming.filter(m => (m.sport ?? "football") === "football")))
+                ? wcMatchesData
                 : (selectedSport === "all" ? allUpcoming : allUpcoming.filter(m => (m.sport ?? "football") === selectedSport));
 
               // Sport grouping for display
@@ -8788,7 +8780,15 @@ export default function Home() {
                   ) : filteredUpcoming.length === 0 ? (
                     <div className="py-20 text-center text-zinc-500 bg-zinc-900/50 rounded-xl border border-zinc-800">
                       <Trophy className="mx-auto mb-4 opacity-20" size={48} />
-                      <p className="font-medium">{selectedCountry ? `Nenhum evento para ${selectedCountry}.` : selectedLeague ? "Nenhum evento para esta liga." : "Nenhum evento programado no momento."}</p>
+                      <p className="font-medium">
+                        {selectedWC
+                          ? "Nenhum jogo do Mundial 2026 disponível de momento. Os jogos aparecem assim que a Statpal os publicar (início a 11 de junho)."
+                          : selectedCountry
+                            ? `Nenhum evento para ${selectedCountry}.`
+                            : selectedLeague
+                              ? "Nenhum evento para esta liga."
+                              : "Nenhum evento programado no momento."}
+                      </p>
                     </div>
                   ) : (selectedLeague || selectedCountry) ? (
                     (() => {

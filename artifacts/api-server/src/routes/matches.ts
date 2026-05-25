@@ -6489,11 +6489,16 @@ async function buildWC2026Matches(): Promise<UpcomingMatch[]> {
     if (home === "Unknown" || away === "Unknown") continue;
     const leagueName = normalizeLeagueName(v2TournName(ev.tournament), "");
     const lg = leagueName.toLowerCase();
-    const isWCLeague = lg.includes("world cup") || lg.includes("copa do mundo") || lg.includes("fifa world") || lg.includes("wc 2026") || lg.includes("worldcup");
-    const { date } = v2EventDateTime(ev);
-    // June 11 – July 19 2026 (WC group stage + knockout)
-    const isWCDate = /\d{2}\.(06|07)\.2026/.test(date);
-    if (!isWCLeague && !isWCDate) continue;
+    const isWCLeague =
+      lg.includes("world cup") ||
+      lg.includes("copa do mundo") ||
+      lg.includes("copa mundial") ||
+      lg.includes("fifa world") ||
+      lg.includes("wc 2026") ||
+      lg.includes("worldcup") ||
+      lg.includes("mundial 2026") ||
+      lg.includes("coupe du monde");
+    if (!isWCLeague) continue;
     wcEvents.push(ev);
     if (wcEvents.length >= 300) break;
   }

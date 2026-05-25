@@ -3,7 +3,7 @@ import { eq, and } from "drizzle-orm";
 import { logger } from "./lib/logger";
 import { finishedMatchResults, scanDailyForFinished } from "./routes/matches";
 
-type SelectionRecord = {
+export type SelectionRecord = {
   matchId?: string;
   matchTitle?: string;
   selection: string;
@@ -42,7 +42,7 @@ type HTScore = { htHome: number; htAway: number };
  *       2h-{o|u}{N}g   (e.g. 2h-o05g)
  *       h2cs-{H}-{A}
  */
-function scoreOutcomeForSel(
+export function scoreOutcomeForSel(
   sel: { selection: string },
   ft: FTScore,
   ht?: HTScore
@@ -330,11 +330,28 @@ export async function autoSettlePendingBets(): Promise<void> {
           outcomes.push(scoreOutcomeForSel(sel, result, ht));
         }
 
+        // ── Early loss: if any leg is definitively lost, settle immediately ──
+        if (outcomes.some(o => o === "lost")) {
+          await db.transaction(async (tx) => {
+            await tx
+              .update(betsTable)
+              .set({ status: "lost" })
+              .where(and(eq(betsTable.id, bet.id), eq(betsTable.status, "pending")))
+              .returning({ id: betsTable.id });
+          });
+          logger.info(
+            { betId: bet.id, userId: bet.userId, status: "lost" },
+            "Bet auto-settled (early loss — leg failed)"
+          );
+          settled++;
+          continue;
+        }
+
         // Only settle when every selection has a resolved outcome (no nulls)
         if (outcomes.some(o => o === null)) continue;
 
-        const allWon = outcomes.every(o => o === "won");
-        const newStatus = allWon ? "won" : "lost";
+        // All outcomes resolved and none is "lost" → all won
+        const newStatus = "won";
 
         await db.transaction(async (tx) => {
           // Optimistic lock: only update if still pending
@@ -346,7 +363,7 @@ export async function autoSettlePendingBets(): Promise<void> {
 
           if (rows.length === 0) return; // already settled elsewhere
 
-          if (allWon) {
+          if (true) {
             const [user] = await tx
               .select({ balance: usersTable.balance })
               .from(usersTable)

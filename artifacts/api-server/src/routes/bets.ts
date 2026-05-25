@@ -3,7 +3,8 @@ import { db, betsTable, usersTable } from "@workspace/db";
 import { eq, desc } from "drizzle-orm";
 import { authMiddleware, type AuthRequest } from "../middlewares/auth";
 import { logger } from "../lib/logger";
-import { liveMatchState } from "./matches";
+import { liveMatchState, finishedMatchResults } from "./matches";
+import { scoreOutcomeForSel, type SelectionRecord } from "../settlement";
 
 const router: IRouter = Router();
 
@@ -103,6 +104,28 @@ router.post("/:id/cashout", authMiddleware, async (req: AuthRequest, res: Respon
 
     if (bet.status !== "pending") {
       res.status(400).json({ error: "Bet is not eligible for cash out" });
+      return;
+    }
+
+    // ── Block cash out if any leg is already lost (real-time check, before
+    //    the 60-second settlement worker has a chance to run) ──────────────
+    const selRecs = (bet.selections as SelectionRecord[]) ?? [];
+    const isSingleLeg = selRecs.length === 1;
+    const hasLostLeg = selRecs.some(sel => {
+      const matchId = sel.matchId ?? (isSingleLeg ? bet.matchId : undefined);
+      if (!matchId) return false;
+      const result = finishedMatchResults.get(matchId);
+      if (!result) return false;
+      const ht =
+        typeof result.htHome === "number" && typeof result.htAway === "number"
+          ? { htHome: result.htHome, htAway: result.htAway }
+          : undefined;
+      return scoreOutcomeForSel(sel, result, ht) === "lost";
+    });
+    if (hasLostLeg) {
+      // Proactively mark the bet as lost so the UI reflects it immediately
+      await db.update(betsTable).set({ status: "lost" }).where(eq(betsTable.id, bet.id));
+      res.status(400).json({ error: "Boletim já tem uma seleção perdida — cash out indisponível" });
       return;
     }
 
