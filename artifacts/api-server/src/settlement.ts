@@ -281,6 +281,7 @@ function findResult(
   betMatchId: string,
   isSingle: boolean
 ): { home: number; away: number; htHome?: number; htAway?: number } | null {
+  // 1. Exact ID match (fastest path)
   if (sel.matchId) {
     const r = finishedMatchResults.get(sel.matchId);
     if (r) return r;
@@ -289,6 +290,26 @@ function findResult(
     const r = finishedMatchResults.get(betMatchId);
     if (r) return r;
   }
+
+  // 2. Fallback: search by team names from matchTitle ("Home vs Away")
+  //    Handles ID format mismatches (pre-match ID ≠ live ID, server restart, etc.)
+  const title = sel.matchTitle ?? "";
+  const vsSplit = title.split(" vs ");
+  if (vsSplit.length >= 2) {
+    const homeQ = vsSplit[0]!.trim().toLowerCase();
+    const awayQ = vsSplit.slice(1).join(" vs ").trim().toLowerCase();
+    if (homeQ && awayQ) {
+      for (const result of finishedMatchResults.values()) {
+        const rH = result.homeTeam.toLowerCase();
+        const rA = result.awayTeam.toLowerCase();
+        // Accept if either name contains the other (handles abbreviations & extra words)
+        const homeMatch = rH.includes(homeQ) || homeQ.includes(rH);
+        const awayMatch = rA.includes(awayQ) || awayQ.includes(rA);
+        if (homeMatch && awayMatch) return result;
+      }
+    }
+  }
+
   return null;
 }
 

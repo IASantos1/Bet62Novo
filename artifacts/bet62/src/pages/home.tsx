@@ -3545,42 +3545,59 @@ export default function Home() {
                     const flag = COUNTRY_FLAGS[m.country?.toLowerCase() ?? ""] ?? sportEmoji(m.sport);
                     const timeStr = m.date ? formatMatchDate(m.date) : (m.time ?? "");
                     const isSelected = !!bets.find(b => b.matchId === m.id && b.market === "result" && b.selection === "home");
+                    const evBanner = getMatchBanner(m);
                     return (
                       <div
                         key={ei}
-                        className="rounded-[14px] p-2.5 flex justify-between items-center"
+                        className="rounded-[12px] overflow-hidden cursor-pointer"
                         style={{
-                          background: isSelected ? "rgba(220,38,38,0.12)" : "#0d0d0d",
-                          border: isSelected ? "1px solid rgba(220,38,38,0.5)" : "1px solid rgba(220,38,38,0.1)",
+                          border: isSelected ? "1.5px solid rgba(220,38,38,0.7)" : "1px solid rgba(220,38,38,0.15)",
+                          boxShadow: isSelected ? "0 0 10px rgba(220,38,38,0.25)" : "none",
                         }}
+                        onClick={() => m.odds.home > 0 && toggleBet(m, "home", m.odds.home, "result", m.home)}
                       >
-                        <div className="flex gap-2 min-w-0">
-                          {/* Team logo circles */}
-                          <div className="flex flex-col gap-1 shrink-0">
+                        {/* Image area */}
+                        <div
+                          className="relative w-full overflow-hidden"
+                          style={{ height: 52 }}
+                        >
+                          {evBanner ? (
+                            <img
+                              src={evBanner}
+                              alt={m.home}
+                              className="w-full h-full object-cover"
+                              style={{ filter: "brightness(0.55) saturate(1.1)" }}
+                            />
+                          ) : (
                             <div
-                              className="w-6 h-6 rounded-full flex items-center justify-center text-[10px]"
-                              style={{ background: "#1a1a1a", border: "1.5px solid #dc2626" }}
+                              className="w-full h-full flex items-center justify-center text-[22px]"
+                              style={{ background: "linear-gradient(135deg,#1a0505,#0d0d0d)" }}
                             >
                               {flag}
                             </div>
-                            <div
-                              className="w-6 h-6 rounded-full flex items-center justify-center text-[10px]"
-                              style={{ background: "#1a1a1a", border: "1.5px solid #dc2626" }}
-                            >
-                              {flag}
-                            </div>
-                          </div>
-                          {/* Text */}
-                          <div className="min-w-0">
-                            <div className="truncate leading-tight text-[12px]" style={{ color: '#ffffff', fontWeight: 700 }}>{m.home}</div>
-                            <div className="truncate text-[10px]" style={{ color: '#a1a1aa' }}>Vencedor</div>
-                            <div className="truncate leading-tight text-[11px]" style={{ color: '#ffffff', fontWeight: 600 }}>{m.away}</div>
-                            <div className="text-[10px]" style={{ color: '#a1a1aa' }}>🕒 {timeStr}</div>
+                          )}
+                          {/* Overlay team names on image */}
+                          <div className="absolute inset-0 flex items-center justify-between px-2.5">
+                            <span className="text-white font-bold text-[11px] truncate max-w-[44%]" style={{ textShadow: "0 1px 4px rgba(0,0,0,0.9)" }}>{m.home}</span>
+                            <span className="text-zinc-400 font-bold text-[9px] shrink-0 mx-1">VS</span>
+                            <span className="text-white font-bold text-[11px] truncate max-w-[44%] text-right" style={{ textShadow: "0 1px 4px rgba(0,0,0,0.9)" }}>{m.away}</span>
                           </div>
                         </div>
-                        {/* Odds */}
-                        <div className="text-red-500 font-bold text-[20px] leading-none shrink-0 ml-1.5">
-                          {m.odds.home > 0 ? m.odds.home.toFixed(2) : "—"}
+                        {/* Odds strip — below image */}
+                        <div
+                          className="flex items-center justify-between px-2.5 py-1.5"
+                          style={{ background: isSelected ? "rgba(220,38,38,0.12)" : "#111" }}
+                        >
+                          <span className="text-zinc-500 text-[9px] font-semibold">🕒 {timeStr}</span>
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-zinc-500 text-[9px]">Casa</span>
+                            <span
+                              className="font-black text-[15px] leading-none"
+                              style={{ color: isSelected ? "#f87171" : "#ef4444" }}
+                            >
+                              {m.odds.home > 0 ? m.odds.home.toFixed(2) : "—"}
+                            </span>
+                          </div>
                         </div>
                       </div>
                     );
