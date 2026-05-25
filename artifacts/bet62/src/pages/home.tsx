@@ -3278,24 +3278,27 @@ export default function Home() {
       return (
         <motion.div
           {...motionProps}
-          className="banner-card relative aspect-video rounded-xl border border-zinc-800 hover:border-red-500/40 transition-colors cursor-pointer overflow-hidden"
+          className="banner-card rounded-xl border border-zinc-800 hover:border-red-500/40 transition-colors cursor-pointer overflow-hidden"
           onClick={() => setExpandedMatch(match)}
         >
-          <img src={bannerImg} alt={`${match.home} contra ${match.away} — ${match.league}`} className="absolute inset-0 w-full h-full object-cover opacity-90" />
-          <div className="absolute inset-0" style={{ background: "linear-gradient(to top, rgba(0,0,0,1) 0%, rgba(0,0,0,0.92) 35%, rgba(0,0,0,0.55) 65%, rgba(0,0,0,0.2) 100%)" }} />
-          <div className="absolute top-0 left-0 right-0 flex items-center justify-between px-4 pt-3">
-            <div className="flex items-center gap-2">
-              <div className="relative w-5 h-5 flex items-center justify-center leading-none text-sm">
-                {flag}
-                <span className="absolute -bottom-0.5 -right-1.5 bg-black/60 rounded-full text-[8px] w-3 h-3 flex items-center justify-center">{sportEmoji(match.sport)}</span>
+          {/* Image section — visible at top */}
+          <div className="relative w-full overflow-hidden" style={{ aspectRatio: "16/7" }}>
+            <img src={bannerImg} alt={`${match.home} contra ${match.away} — ${match.league}`} className="absolute inset-0 w-full h-full object-cover" style={{ filter: "brightness(0.7) saturate(1.1)" }} />
+            <div className="absolute inset-0" style={{ background: "linear-gradient(to bottom, rgba(0,0,0,0.1) 0%, rgba(0,0,0,0.55) 100%)" }} />
+            <div className="absolute top-0 left-0 right-0 flex items-center justify-between px-3 pt-2.5">
+              <div className="flex items-center gap-1.5">
+                <div className="relative w-4 h-4 flex items-center justify-center leading-none text-xs">{flag}</div>
+                <span className="text-[11px] font-medium" style={{ color: '#ffffffcc', textShadow: "0 1px 3px rgba(0,0,0,1)" }}>{match.league}</span>
               </div>
-              <span className="text-xs font-medium" style={{ color: '#ffffff', textShadow: "0 1px 4px rgba(0,0,0,1)" }}>{match.league}</span>
+              <div className="flex items-center gap-2">{liveBadge}</div>
             </div>
-            <div className="flex items-center gap-2">{liveBadge}</div>
+            {rivalry && (
+              <div className="absolute bottom-2 left-3 text-[10px] font-black uppercase tracking-widest" style={{ color: '#f87171', textShadow: "0 1px 3px rgba(0,0,0,1)" }}>{rivalry}</div>
+            )}
           </div>
-          <div className="absolute bottom-0 left-0 right-0 px-4 pb-4" onClick={e => e.stopPropagation()}>
-            {rivalry && <div className="text-[11px] font-black uppercase tracking-widest mb-1" style={{ color: '#f87171', textShadow: "0 1px 4px rgba(0,0,0,1)" }}>{rivalry}</div>}
-            <div className="mb-3">
+          {/* Content below image */}
+          <div className="px-3 pt-2 pb-3" style={{ background: "#0f0f0f" }} onClick={e => e.stopPropagation()}>
+            <div className="mb-2">
               {sport === "tennis"     ? <TennisScore /> :
                sport === "volleyball" ? <VolleyScore /> :
                sport === "hockey"     ? <HockeyScore big /> :
@@ -3371,27 +3374,30 @@ export default function Home() {
     if (bannerImg) {
       return (
         <div
-          className="banner-card relative aspect-video rounded-xl border border-zinc-800 hover:border-red-500/40 transition-colors cursor-pointer overflow-hidden"
+          className="banner-card rounded-xl border border-zinc-800 hover:border-red-500/40 transition-colors cursor-pointer overflow-hidden"
           onClick={() => setExpandedMatch(match)}
         >
-          <img src={bannerImg} alt={`${match.home} contra ${match.away} — ${match.league}`} className="absolute inset-0 w-full h-full object-cover opacity-90" />
-          <div className="absolute inset-0" style={{ background: "linear-gradient(to top, rgba(0,0,0,1) 0%, rgba(0,0,0,0.92) 35%, rgba(0,0,0,0.55) 65%, rgba(0,0,0,0.2) 100%)" }} />
-          <div className="absolute top-0 left-0 right-0 flex items-center justify-between px-4 pt-3">
-            <div className="flex items-center gap-2">
-              <div className="relative w-5 h-5 flex items-center justify-center leading-none text-sm">
-                {flag}
-                <span className="absolute -bottom-0.5 -right-1.5 bg-black/60 rounded-full text-[8px] w-3 h-3 flex items-center justify-center">{sportEmoji(match.sport)}</span>
+          {/* Image section — visible at top */}
+          <div className="relative w-full overflow-hidden" style={{ aspectRatio: "16/7" }}>
+            <img src={bannerImg} alt={`${match.home} contra ${match.away} — ${match.league}`} className="absolute inset-0 w-full h-full object-cover" style={{ filter: "brightness(0.7) saturate(1.1)" }} />
+            <div className="absolute inset-0" style={{ background: "linear-gradient(to bottom, rgba(0,0,0,0.05) 0%, rgba(0,0,0,0.5) 100%)" }} />
+            <div className="absolute top-0 left-0 right-0 flex items-center justify-between px-3 pt-2.5">
+              <div className="flex items-center gap-1.5">
+                <span className="text-sm leading-none">{flag}</span>
+                <span className="text-[11px] font-medium" style={{ color: '#ffffffcc', textShadow: "0 1px 3px rgba(0,0,0,1)" }}>{match.league}</span>
               </div>
-              <span className="text-xs font-medium" style={{ color: '#ffffff', textShadow: "0 1px 4px rgba(0,0,0,1)" }}>{match.league}</span>
+              <span className="text-[11px]" style={{ color: 'rgba(255,255,255,0.7)', textShadow: "0 1px 3px rgba(0,0,0,1)" }}>{dateStr}{match.time ? ` • ${match.time}` : ""}</span>
             </div>
-            <span className="text-xs" style={{ color: 'rgba(255,255,255,0.9)', textShadow: "0 1px 4px rgba(0,0,0,1)" }}>{dateStr}{match.time ? ` • ${match.time}` : ""}</span>
+            {rivalry && (
+              <div className="absolute bottom-2 left-3 text-[10px] font-black uppercase tracking-widest" style={{ color: '#f87171', textShadow: "0 1px 3px rgba(0,0,0,1)" }}>{rivalry}</div>
+            )}
           </div>
-          <div className="absolute bottom-0 left-0 right-0 px-4 pb-4" onClick={e => e.stopPropagation()}>
-            {rivalry && <div className="text-[11px] font-black uppercase tracking-widest mb-1" style={{ color: '#f87171', textShadow: "0 1px 4px rgba(0,0,0,1)" }}>{rivalry}</div>}
-            <div className="flex items-baseline gap-2 mb-3 min-w-0">
-              <span className="font-black text-xl leading-tight truncate" style={{ color: '#ffffff', textShadow: "0 2px 12px rgba(0,0,0,1), 0 1px 4px rgba(0,0,0,1)" }}>{match.home}</span>
-              <span className="text-sm shrink-0" style={{ color: 'rgba(255,255,255,0.9)', textShadow: "0 1px 4px rgba(0,0,0,1)" }}>vs</span>
-              <span className="font-black text-xl leading-tight truncate" style={{ color: '#ffffff', textShadow: "0 2px 12px rgba(0,0,0,1), 0 1px 4px rgba(0,0,0,1)" }}>{match.away}</span>
+          {/* Content below image */}
+          <div className="px-3 pt-2.5 pb-3" style={{ background: "#0f0f0f" }} onClick={e => e.stopPropagation()}>
+            <div className="flex items-baseline gap-1.5 mb-2.5 min-w-0">
+              <span className="font-bold text-sm leading-tight truncate text-white">{match.home}</span>
+              <span className="text-xs shrink-0 text-zinc-500">vs</span>
+              <span className="font-bold text-sm leading-tight truncate text-white">{match.away}</span>
             </div>
             <OddsRow />
           </div>
@@ -3545,59 +3551,42 @@ export default function Home() {
                     const flag = COUNTRY_FLAGS[m.country?.toLowerCase() ?? ""] ?? sportEmoji(m.sport);
                     const timeStr = m.date ? formatMatchDate(m.date) : (m.time ?? "");
                     const isSelected = !!bets.find(b => b.matchId === m.id && b.market === "result" && b.selection === "home");
-                    const evBanner = getMatchBanner(m);
                     return (
                       <div
                         key={ei}
-                        className="rounded-[12px] overflow-hidden cursor-pointer"
+                        className="rounded-[14px] p-2.5 flex justify-between items-center"
                         style={{
-                          border: isSelected ? "1.5px solid rgba(220,38,38,0.7)" : "1px solid rgba(220,38,38,0.15)",
-                          boxShadow: isSelected ? "0 0 10px rgba(220,38,38,0.25)" : "none",
+                          background: isSelected ? "rgba(220,38,38,0.12)" : "#0d0d0d",
+                          border: isSelected ? "1px solid rgba(220,38,38,0.5)" : "1px solid rgba(220,38,38,0.1)",
                         }}
-                        onClick={() => m.odds.home > 0 && toggleBet(m, "home", m.odds.home, "result", m.home)}
                       >
-                        {/* Image area */}
-                        <div
-                          className="relative w-full overflow-hidden"
-                          style={{ height: 52 }}
-                        >
-                          {evBanner ? (
-                            <img
-                              src={evBanner}
-                              alt={m.home}
-                              className="w-full h-full object-cover"
-                              style={{ filter: "brightness(0.55) saturate(1.1)" }}
-                            />
-                          ) : (
+                        <div className="flex gap-2 min-w-0">
+                          {/* Team logo circles */}
+                          <div className="flex flex-col gap-1 shrink-0">
                             <div
-                              className="w-full h-full flex items-center justify-center text-[22px]"
-                              style={{ background: "linear-gradient(135deg,#1a0505,#0d0d0d)" }}
+                              className="w-6 h-6 rounded-full flex items-center justify-center text-[10px]"
+                              style={{ background: "#1a1a1a", border: "1.5px solid #dc2626" }}
                             >
                               {flag}
                             </div>
-                          )}
-                          {/* Overlay team names on image */}
-                          <div className="absolute inset-0 flex items-center justify-between px-2.5">
-                            <span className="text-white font-bold text-[11px] truncate max-w-[44%]" style={{ textShadow: "0 1px 4px rgba(0,0,0,0.9)" }}>{m.home}</span>
-                            <span className="text-zinc-400 font-bold text-[9px] shrink-0 mx-1">VS</span>
-                            <span className="text-white font-bold text-[11px] truncate max-w-[44%] text-right" style={{ textShadow: "0 1px 4px rgba(0,0,0,0.9)" }}>{m.away}</span>
+                            <div
+                              className="w-6 h-6 rounded-full flex items-center justify-center text-[10px]"
+                              style={{ background: "#1a1a1a", border: "1.5px solid #dc2626" }}
+                            >
+                              {flag}
+                            </div>
+                          </div>
+                          {/* Text */}
+                          <div className="min-w-0">
+                            <div className="truncate leading-tight text-[12px]" style={{ color: '#ffffff', fontWeight: 700 }}>{m.home}</div>
+                            <div className="truncate text-[10px]" style={{ color: '#a1a1aa' }}>Vencedor</div>
+                            <div className="truncate leading-tight text-[11px]" style={{ color: '#ffffff', fontWeight: 600 }}>{m.away}</div>
+                            <div className="text-[10px]" style={{ color: '#a1a1aa' }}>🕒 {timeStr}</div>
                           </div>
                         </div>
-                        {/* Odds strip — below image */}
-                        <div
-                          className="flex items-center justify-between px-2.5 py-1.5"
-                          style={{ background: isSelected ? "rgba(220,38,38,0.12)" : "#111" }}
-                        >
-                          <span className="text-zinc-500 text-[9px] font-semibold">🕒 {timeStr}</span>
-                          <div className="flex items-center gap-1.5">
-                            <span className="text-zinc-500 text-[9px]">Casa</span>
-                            <span
-                              className="font-black text-[15px] leading-none"
-                              style={{ color: isSelected ? "#f87171" : "#ef4444" }}
-                            >
-                              {m.odds.home > 0 ? m.odds.home.toFixed(2) : "—"}
-                            </span>
-                          </div>
+                        {/* Odds */}
+                        <div className="text-red-500 font-bold text-[20px] leading-none shrink-0 ml-1.5">
+                          {m.odds.home > 0 ? m.odds.home.toFixed(2) : "—"}
                         </div>
                       </div>
                     );
@@ -7962,33 +7951,33 @@ export default function Home() {
                   {/* ─── League filter chips (grandes ligas com logos oficiais) ── */}
                   {filteredUpcoming.length > 0 && (() => {
                     const ML = [
-                      { p: ["champions league","liga dos campeões","liga campeões"], label: "Champions", logo: "https://api.sofascore.app/api/v1/unique-tournament/7/image", color: "#001489" },
-                      { p: ["europa league","liga europa"], label: "Europa League", logo: "https://api.sofascore.app/api/v1/unique-tournament/679/image", color: "#F77F00" },
-                      { p: ["conference league","liga conferência"], label: "Conference", logo: "https://api.sofascore.app/api/v1/unique-tournament/17015/image", color: "#00B386" },
-                      { p: ["premier league"], label: "Premier League", logo: "https://api.sofascore.app/api/v1/unique-tournament/17/image", color: "#3D195B" },
-                      { p: ["la liga","laliga"], label: "La Liga", logo: "https://api.sofascore.app/api/v1/unique-tournament/8/image", color: "#FF4B44" },
-                      { p: ["bundesliga"], label: "Bundesliga", logo: "https://api.sofascore.app/api/v1/unique-tournament/35/image", color: "#D3010C" },
-                      { p: ["serie a"], label: "Serie A", logo: "https://api.sofascore.app/api/v1/unique-tournament/23/image", color: "#024494" },
-                      { p: ["ligue 1","ligue1"], label: "Ligue 1", logo: "https://api.sofascore.app/api/v1/unique-tournament/34/image", color: "#243F8B" },
-                      { p: ["primeira liga","liga portugal","liga nos","liga bwin"], label: "Primeira Liga", logo: "https://api.sofascore.app/api/v1/unique-tournament/238/image", color: "#00924B" },
-                      { p: ["eredivisie"], label: "Eredivisie", logo: "https://api.sofascore.app/api/v1/unique-tournament/37/image", color: "#D00000" },
-                      { p: ["super lig","süper lig"], label: "Süper Lig", logo: "https://api.sofascore.app/api/v1/unique-tournament/52/image", color: "#E30A17" },
-                      { p: ["liga mx"], label: "Liga MX", logo: "https://api.sofascore.app/api/v1/unique-tournament/11521/image", color: "#013369" },
-                      { p: ["mls"], label: "MLS", logo: "https://api.sofascore.app/api/v1/unique-tournament/242/image", color: "#003087" },
-                      { p: ["brasileirao","brasileirão","campeonato brasileiro"], label: "Brasileirão", logo: "https://api.sofascore.app/api/v1/unique-tournament/325/image", color: "#009C3B" },
-                      { p: ["copa libertadores","libertadores"], label: "Libertadores", logo: "https://api.sofascore.app/api/v1/unique-tournament/384/image", color: "#006B3F" },
-                      { p: ["fa cup"], label: "FA Cup", logo: "https://api.sofascore.app/api/v1/unique-tournament/4/image", color: "#3C1F78" },
-                      { p: ["copa del rey"], label: "Copa del Rey", logo: "https://api.sofascore.app/api/v1/unique-tournament/329/image", color: "#FFCC02" },
-                      { p: ["coppa italia"], label: "Coppa Italia", logo: "https://api.sofascore.app/api/v1/unique-tournament/471/image", color: "#009246" },
-                      { p: ["dfb pokal","dfl pokal"], label: "DFB Pokal", logo: "https://api.sofascore.app/api/v1/unique-tournament/74/image", color: "#D3010C" },
-                      { p: ["nba"], label: "NBA", logo: "https://api.sofascore.app/api/v1/unique-tournament/132/image", color: "#006BB6" },
-                      { p: ["nhl"], label: "NHL", logo: "https://api.sofascore.app/api/v1/unique-tournament/123/image", color: "#17468C" },
-                      { p: ["mlb"], label: "MLB", logo: "https://api.sofascore.app/api/v1/unique-tournament/64/image", color: "#003087" },
-                      { p: ["wimbledon"], label: "Wimbledon", logo: "https://api.sofascore.app/api/v1/unique-tournament/1549/image", color: "#3D1F3A" },
-                      { p: ["roland garros","french open"], label: "Roland Garros", logo: "https://api.sofascore.app/api/v1/unique-tournament/2480/image", color: "#B75A3A" },
-                      { p: ["us open"], label: "US Open", logo: "https://api.sofascore.app/api/v1/unique-tournament/2429/image", color: "#003087" },
-                      { p: ["australian open"], label: "Australian Open", logo: "https://api.sofascore.app/api/v1/unique-tournament/2478/image", color: "#00AEEF" },
-                      { p: ["atp 1000","masters 1000","rolex masters","monte-carlo","monte carlo","madrid open"], label: "ATP Masters", logo: "https://api.sofascore.app/api/v1/unique-tournament/1541/image", color: "#2C5F8B" },
+                      { p: ["champions league","liga dos campeões","liga campeões"], label: "Champions", logo: "https://media.api-sports.io/football/leagues/2.png", color: "#001489" },
+                      { p: ["europa league","liga europa"], label: "Europa League", logo: "https://media.api-sports.io/football/leagues/3.png", color: "#F77F00" },
+                      { p: ["conference league","liga conferência"], label: "Conference", logo: "https://media.api-sports.io/football/leagues/848.png", color: "#00B386" },
+                      { p: ["premier league"], label: "Premier League", logo: "https://media.api-sports.io/football/leagues/39.png", color: "#3D195B" },
+                      { p: ["la liga","laliga"], label: "La Liga", logo: "https://media.api-sports.io/football/leagues/140.png", color: "#FF4B44" },
+                      { p: ["bundesliga"], label: "Bundesliga", logo: "https://media.api-sports.io/football/leagues/78.png", color: "#D3010C" },
+                      { p: ["serie a"], label: "Serie A", logo: "https://media.api-sports.io/football/leagues/135.png", color: "#024494" },
+                      { p: ["ligue 1","ligue1"], label: "Ligue 1", logo: "https://media.api-sports.io/football/leagues/61.png", color: "#243F8B" },
+                      { p: ["primeira liga","liga portugal","liga nos","liga bwin"], label: "Primeira Liga", logo: "https://media.api-sports.io/football/leagues/94.png", color: "#00924B" },
+                      { p: ["eredivisie"], label: "Eredivisie", logo: "https://media.api-sports.io/football/leagues/88.png", color: "#D00000" },
+                      { p: ["super lig","süper lig"], label: "Süper Lig", logo: "https://media.api-sports.io/football/leagues/203.png", color: "#E30A17" },
+                      { p: ["liga mx"], label: "Liga MX", logo: "https://media.api-sports.io/football/leagues/262.png", color: "#013369" },
+                      { p: ["mls"], label: "MLS", logo: "https://media.api-sports.io/football/leagues/253.png", color: "#003087" },
+                      { p: ["brasileirao","brasileirão","campeonato brasileiro"], label: "Brasileirão", logo: "https://media.api-sports.io/football/leagues/71.png", color: "#009C3B" },
+                      { p: ["copa libertadores","libertadores"], label: "Libertadores", logo: "https://media.api-sports.io/football/leagues/11.png", color: "#006B3F" },
+                      { p: ["fa cup"], label: "FA Cup", logo: "https://media.api-sports.io/football/leagues/45.png", color: "#3C1F78" },
+                      { p: ["copa del rey"], label: "Copa del Rey", logo: "https://media.api-sports.io/football/leagues/143.png", color: "#FFCC02" },
+                      { p: ["coppa italia"], label: "Coppa Italia", logo: "https://media.api-sports.io/football/leagues/137.png", color: "#009246" },
+                      { p: ["dfb pokal","dfl pokal"], label: "DFB Pokal", logo: "https://media.api-sports.io/football/leagues/81.png", color: "#D3010C" },
+                      { p: ["nba"], label: "NBA", logo: "https://media.api-sports.io/basketball/leagues/12.png", color: "#006BB6" },
+                      { p: ["nhl"], label: "NHL", logo: "https://media.api-sports.io/hockey/leagues/57.png", color: "#17468C" },
+                      { p: ["mlb"], label: "MLB", logo: "https://media.api-sports.io/baseball/leagues/1.png", color: "#003087" },
+                      { p: ["wimbledon"], label: "Wimbledon", logo: "https://media.api-sports.io/football/leagues/45.png", color: "#3D1F3A" },
+                      { p: ["roland garros","french open"], label: "Roland Garros", logo: "https://upload.wikimedia.org/wikipedia/fr/thumb/0/0f/Roland-Garros-Logo.svg/120px-Roland-Garros-Logo.svg.png", color: "#B75A3A" },
+                      { p: ["us open"], label: "US Open", logo: "https://upload.wikimedia.org/wikipedia/en/thumb/e/e8/US_Open_Logo_2017.svg/120px-US_Open_Logo_2017.svg.png", color: "#003087" },
+                      { p: ["australian open"], label: "Australian Open", logo: "https://upload.wikimedia.org/wikipedia/commons/thumb/b/b4/Australian_Open_Logo_2017.svg/120px-Australian_Open_Logo_2017.svg.png", color: "#00AEEF" },
+                      { p: ["atp 1000","masters 1000","rolex masters","monte-carlo","monte carlo","madrid open"], label: "ATP Masters", logo: "https://media.api-sports.io/football/leagues/2.png", color: "#2C5F8B" },
                     ];
                     const findML = (name: string) => {
                       const n = name.toLowerCase();

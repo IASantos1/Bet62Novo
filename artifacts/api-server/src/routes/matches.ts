@@ -6113,15 +6113,8 @@ function buildTennisLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
         : { home: Math.min(50, +(odds.home * (1 + factor)).toFixed(2)), draw: 0, away: Math.max(1.01, +(odds.away * (1 - factor)).toFixed(2)) };
     }
 
-    // Simulate game points for V2 tennis (game_score not available in this endpoint)
-    const PT_V2 = [0, 15, 30, 40] as const;
-    const v2Cycle = Math.floor(Date.now() / 2500);
-    const hIdxV2 = (v2Cycle + (ev.id ?? 0) * 3) % 4;
-    const aIdxV2 = (v2Cycle + (ev.id ?? 0) * 5 + 2) % 4;
-    let hPtV2: number | string = PT_V2[hIdxV2]!;
-    let aPtV2: number | string = PT_V2[aIdxV2]!;
-    if (hPtV2 === 40 && aPtV2 === 40) { hPtV2 = "D"; aPtV2 = "D"; }
-
+    // V2 tennis: game_score not available — do NOT simulate cycling points.
+    // currentPoints only populated when the real v1 API provides game_score.
     result.push({
       id: `tennis-v2-${ev.id}`,
       home: homeTeam, away: awayTeam,
@@ -6131,7 +6124,7 @@ function buildTennisLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
       status: statusStr, hasRealOdds: true, odds: liveOdds,
       markets: makeAdvancedMarketsFromTeams(homeTeam, awayTeam),
       events: [],
-      _liveExtra: sets.length > 0 ? { sets, currentPoints: [hPtV2, aPtV2] } : { currentPoints: [hPtV2, aPtV2] },
+      _liveExtra: sets.length > 0 ? { sets } : {},
     });
   }
   return result;
@@ -6220,15 +6213,7 @@ function buildTennisSimulation(): LiveMatchState[] {
         ? { home: Math.max(1.01, +(odds.home * (1 - factor)).toFixed(2)), draw: 0, away: Math.min(50, +(odds.away * (1 + factor)).toFixed(2)) }
         : { home: Math.min(50, +(odds.home * (1 + factor)).toFixed(2)), draw: 0, away: Math.max(1.01, +(odds.away * (1 - factor)).toFixed(2)) };
     }
-    // Simulate game points: cycle through 0/15/30/40 every 2.5s using time + seed offset
-    const PT_VALS = [0, 15, 30, 40] as const;
-    const simCycle = Math.floor(Date.now() / 2500);
-    const hIdx = (simCycle + idx * 7) % 4;
-    const aIdx = (simCycle + idx * 3 + 2) % 4;
-    let hPtSim: number | string = PT_VALS[hIdx]!;
-    let aPtSim: number | string = PT_VALS[aIdx]!;
-    if (hPtSim === 40 && aPtSim === 40) { hPtSim = "D"; aPtSim = "D"; }
-
+    // Simulation: no real game_score available — do NOT cycle fake points.
     return {
       id, home, away, league: tournament, country, sport: "tennis" as const,
       homeScore: st.homeScore, awayScore: st.awayScore,
@@ -6236,7 +6221,7 @@ function buildTennisSimulation(): LiveMatchState[] {
       status: `Set ${st.setNum}`, hasRealOdds: false, odds: liveOdds,
       markets: makeAdvancedMarketsFromTeams(home, away),
       events: [],
-      _liveExtra: { sets: st.sets, currentPoints: [hPtSim, aPtSim] },
+      _liveExtra: { sets: st.sets },
     };
   });
 }
