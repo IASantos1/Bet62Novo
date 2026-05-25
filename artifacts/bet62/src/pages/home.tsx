@@ -3721,7 +3721,7 @@ export default function Home() {
         </div>
 
         {/* ── BET CARDS ── */}
-        <div className="flex-1 overflow-y-auto px-4 py-3 space-y-2.5">
+        <div className="flex-1 overflow-y-auto px-4 py-3 space-y-2.5" data-vaul-no-drag>
           {bets.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-full py-16 gap-3">
               <div className="w-16 h-16 rounded-2xl flex items-center justify-center" style={{ background: "rgba(220,38,38,0.07)", border: "1px solid rgba(220,38,38,0.12)" }}>
@@ -3806,12 +3806,14 @@ export default function Home() {
                           <div className="flex items-center rounded-xl overflow-hidden" style={{ background: "rgba(0,0,0,0.4)", border: "1px solid rgba(255,255,255,0.08)" }}>
                             <span className="pl-3 text-zinc-500 text-sm font-bold">€</span>
                             <input
-                              type="number"
+                              type="text"
+                              inputMode="decimal"
                               placeholder="Outro valor"
-                              min="0.50"
-                              step="0.50"
                               value={betStakes[betKey(bet)] || ""}
-                              onChange={e => setBetStakes(prev => ({ ...prev, [betKey(bet)]: e.target.value }))}
+                              onChange={e => {
+                                const v = e.target.value.replace(/[^0-9.,]/g, "").replace(",", ".");
+                                setBetStakes(prev => ({ ...prev, [betKey(bet)]: v }));
+                              }}
                               className="flex-1 bg-transparent text-white text-sm font-mono px-2 py-2 outline-none placeholder-zinc-600"
                             />
                             {parseFloat(betStakes[betKey(bet)] || "0") > 0 && (
@@ -3832,7 +3834,7 @@ export default function Home() {
 
         {/* ── FOOTER ── */}
         {bets.length > 0 && (
-          <div className="px-4 pb-6 pt-3 space-y-3" style={{ background: "#0a0a0a", borderTop: "1px solid rgba(255,255,255,0.06)" }}>
+          <div className="px-4 pb-6 pt-3 space-y-3" style={{ background: "#0a0a0a", borderTop: "1px solid rgba(255,255,255,0.06)" }} data-vaul-no-drag>
 
             {/* Múltipla stake input */}
             {effectiveBetMode === "multipla" && (
@@ -3855,12 +3857,14 @@ export default function Home() {
                 <div className="flex items-center rounded-xl overflow-hidden" style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }}>
                   <span className="pl-3 text-zinc-500 font-bold">€</span>
                   <input
-                    type="number"
+                    type="text"
+                    inputMode="decimal"
                     placeholder="Outro valor"
-                    min="0.50"
-                    step="0.50"
                     value={stake}
-                    onChange={e => setStake(e.target.value)}
+                    onChange={e => {
+                      const v = e.target.value.replace(/[^0-9.,]/g, "").replace(",", ".");
+                      setStake(v);
+                    }}
                     className="flex-1 bg-transparent text-white font-mono px-2 py-2.5 outline-none placeholder-zinc-600 text-sm"
                   />
                 </div>
