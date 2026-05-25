@@ -1207,6 +1207,17 @@ function nifMask(value: string) {
     .replace(/(\d{3})(\d)/, "$1 $2");
 }
 
+function validatePortugueseNif(nif: string): boolean {
+  const digits = nif.replace(/\s/g, "");
+  if (!/^\d{9}$/.test(digits)) return false;
+  if (!["1","2","3","5","6","7","8","9"].includes(digits[0]!)) return false;
+  let sum = 0;
+  for (let i = 0; i < 8; i++) sum += parseInt(digits[i]!) * (9 - i);
+  const rem = sum % 11;
+  const check = rem < 2 ? 0 : 11 - rem;
+  return check === parseInt(digits[8]!);
+}
+
 const TennisBallIcon = ({ size = 16 }: { size?: number }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
     <circle cx="12" cy="12" r="11" fill="#C8E600" />
@@ -2709,9 +2720,14 @@ export default function Home() {
       if (age < 18) { toast.error("Você precisa ter pelo menos 18 anos para se cadastrar."); return; }
     }
     if (!regTerms || !regAge) { toast.error("Você deve aceitar os termos e confirmar a sua idade."); return; }
+    const nifDigits = regNif.replace(/\s/g, "");
+    if (!validatePortugueseNif(nifDigits)) {
+      toast.error("NIF inválido. Insira um NIF português válido com 9 dígitos.");
+      return;
+    }
     setAuthLoading(true);
     try {
-      await auth.register(regName, regEmail, regPassword);
+      await auth.register(regName, regEmail, regPassword, nifDigits);
       setAuthModalOpen(false);
       toast.success("Conta criada com sucesso! Bem-vindo à Bet62!");
       setRegName(""); setRegEmail(""); setRegPassword(""); setRegNif(""); setRegPhone(""); setRegDob(""); setRegTerms(false); setRegAge(false);
@@ -9847,7 +9863,23 @@ export default function Home() {
                   <div className="grid grid-cols-2 gap-3">
                     <div className="space-y-1.5">
                       <Label htmlFor="reg-nif" className="text-sm">NIF</Label>
-                      <Input id="reg-nif" type="text" placeholder="999 999 999" className="bg-zinc-900 border-zinc-800 text-white" required maxLength={11} value={regNif} onChange={e => setRegNif(nifMask(e.target.value))} />
+                      <Input
+                        id="reg-nif"
+                        type="text"
+                        inputMode="numeric"
+                        placeholder="999 999 999"
+                        required
+                        maxLength={11}
+                        value={regNif}
+                        onChange={e => setRegNif(nifMask(e.target.value))}
+                        className={`bg-zinc-900 text-white transition-colors ${
+                          regNif.replace(/\s/g, "").length === 9
+                            ? validatePortugueseNif(regNif.replace(/\s/g, ""))
+                              ? "border-green-600 focus-visible:ring-green-600"
+                              : "border-red-500 focus-visible:ring-red-500"
+                            : "border-zinc-800"
+                        }`}
+                      />
                     </div>
                     <div className="space-y-1.5">
                       <Label htmlFor="reg-phone" className="text-sm">Telemóvel</Label>

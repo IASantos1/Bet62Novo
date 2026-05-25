@@ -11,11 +11,28 @@ if (!SESSION_SECRET) {
   throw new Error("[SECURITY] SESSION_SECRET environment variable is not set.");
 }
 
+function validatePortugueseNif(nif: string): boolean {
+  const digits = (nif ?? "").replace(/\s/g, "");
+  if (!/^\d{9}$/.test(digits)) return false;
+  if (!["1","2","3","5","6","7","8","9"].includes(digits[0]!)) return false;
+  let sum = 0;
+  for (let i = 0; i < 8; i++) sum += parseInt(digits[i]!) * (9 - i);
+  const rem = sum % 11;
+  const check = rem < 2 ? 0 : 11 - rem;
+  return check === parseInt(digits[8]!);
+}
+
 router.post("/register", async (req, res): Promise<void> => {
-  const { name, email, password } = req.body;
+  const { name, email, password, nif } = req.body as { name?: string; email?: string; password?: string; nif?: string };
 
   if (!name || !email || !password) {
     res.status(400).json({ error: "Missing name, email or password" });
+    return;
+  }
+
+  const nifClean = (nif ?? "").replace(/\s/g, "");
+  if (!validatePortugueseNif(nifClean)) {
+    res.status(400).json({ error: "NIF inválido. Insira um NIF português válido com 9 dígitos." });
     return;
   }
 
@@ -31,6 +48,7 @@ router.post("/register", async (req, res): Promise<void> => {
       name,
       email,
       passwordHash,
+      nif: nifClean,
       balance: "0.00",
       freebetBalance: "0.00",
     }).returning();
