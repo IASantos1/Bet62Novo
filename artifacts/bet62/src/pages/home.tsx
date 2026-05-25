@@ -5876,7 +5876,7 @@ export default function Home() {
       </Dialog>
 
       {/* HEADER */}
-      <header className="sticky top-0 z-40 bg-zinc-950 border-b border-zinc-900">
+      <header className="sticky top-0 z-40 bg-zinc-950 border-b border-zinc-900" style={{ paddingTop: "env(safe-area-inset-top)" }}>
         <div className="flex items-center justify-between px-4 h-16 max-w-[1600px] mx-auto">
           <div className="flex items-center gap-4">
             <button className="lg:hidden p-2 -ml-2 text-zinc-400 hover:text-white transition-colors" onClick={() => setSidebarOpen(true)}>
