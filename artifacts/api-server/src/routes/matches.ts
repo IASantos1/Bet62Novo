@@ -6117,6 +6117,101 @@ function buildTennisLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
   return result;
 }
 
+// ─── Tennis simulation — fallback when V2 live + today both return empty ───────
+//
+// Maintains 2 persistent in-memory matches that advance their scores over time.
+// Scores drift every ~8s (one game), sets are best-of-3. Match resets when
+// a player reaches 2 sets. This only activates as a last resort; whenever real
+// V2 data is available, buildTennisLiveV2 takes priority.
+
+type TennisSimState = {
+  homeScore: number; awayScore: number;
+  sets: Array<[number, number]>;
+  setNum: number;
+  updatedAt: number;
+  seed: number; // deterministic bias so one player "leads"
+};
+
+const _tennisSimMap = new Map<string, TennisSimState>();
+
+const TENNIS_SIM_PLAYERS: Array<{ home: string; away: string; tournament: string; country: string }> = [
+  { home: "C. Alcaraz", away: "H. Hurkacz",   tournament: "Roland Garros", country: "France" },
+  { home: "I. Swiatek",  away: "A. Sabalenka", tournament: "Roland Garros", country: "France" },
+];
+
+function _advanceTennisSim(id: string, idx: number): TennisSimState {
+  const now = Date.now();
+  const existing = _tennisSimMap.get(id);
+  if (!existing) {
+    const st: TennisSimState = {
+      homeScore: 0, awayScore: 0,
+      sets: [[idx === 0 ? 2 : 1, idx === 0 ? 1 : 3]], // start mid-set
+      setNum: 1,
+      updatedAt: now,
+      seed: 0.52 + idx * 0.04,
+    };
+    _tennisSimMap.set(id, st);
+    return st;
+  }
+  if (now - existing.updatedAt < 8_000) return existing;
+
+  const st: TennisSimState = {
+    ...existing,
+    sets: existing.sets.map(s => [s[0], s[1]] as [number, number]),
+  };
+  st.updatedAt = now;
+
+  // Advance one game in the current set
+  const homeWins = Math.random() < st.seed;
+  const cur = st.sets[st.sets.length - 1]!;
+  if (homeWins) cur[0]++; else cur[1]++;
+
+  const h = cur[0], a = cur[1];
+  const setWonByHome = (h >= 6 && h - a >= 2) || h === 7;
+  const setWonByAway = (a >= 6 && a - h >= 2) || a === 7;
+  if (setWonByHome) {
+    st.homeScore++;
+    if (st.homeScore < 2) { st.sets.push([0, 0]); st.setNum++; }
+  } else if (setWonByAway) {
+    st.awayScore++;
+    if (st.awayScore < 2) { st.sets.push([0, 0]); st.setNum++; }
+  }
+
+  // Reset when match is over (best of 3 = 2 sets)
+  if (st.homeScore >= 2 || st.awayScore >= 2) {
+    st.homeScore = 0; st.awayScore = 0;
+    st.sets = [[0, 0]]; st.setNum = 1;
+  }
+
+  _tennisSimMap.set(id, st);
+  return st;
+}
+
+function buildTennisSimulation(): LiveMatchState[] {
+  return TENNIS_SIM_PLAYERS.map(({ home, away, tournament, country }, idx) => {
+    const id = `tennis-sim-${idx}`;
+    const st = _advanceTennisSim(id, idx);
+    const odds = makeOddsFromTeams(home, away);
+    const diff = st.homeScore - st.awayScore;
+    let liveOdds = { ...odds, draw: 0 };
+    if (diff !== 0) {
+      const factor = Math.min(0.55, Math.abs(diff) * 0.22);
+      liveOdds = diff > 0
+        ? { home: Math.max(1.01, +(odds.home * (1 - factor)).toFixed(2)), draw: 0, away: Math.min(50, +(odds.away * (1 + factor)).toFixed(2)) }
+        : { home: Math.min(50, +(odds.home * (1 + factor)).toFixed(2)), draw: 0, away: Math.max(1.01, +(odds.away * (1 - factor)).toFixed(2)) };
+    }
+    return {
+      id, home, away, league: tournament, country, sport: "tennis" as const,
+      homeScore: st.homeScore, awayScore: st.awayScore,
+      minute: st.setNum * 20,
+      status: `Set ${st.setNum}`, hasRealOdds: false, odds: liveOdds,
+      markets: makeAdvancedMarketsFromTeams(home, away),
+      events: [],
+      _liveExtra: { sets: st.sets },
+    };
+  });
+}
+
 // ─── Routes ───────────────────────────────────────────────────────────────────
 
 // Shared payload builder — used by both /live HTTP route and SSE broadcast
@@ -6148,8 +6243,8 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
     // /live returned empty — try today's events (covers plan restrictions or brief API gaps)
     const todayLive = buildTennisLiveV2(tennisTodayEvents ?? []);
     if (todayLive.length > 0) return todayLive;
-    // Last resort: v1 simulation (buildTennisLiveMatches with in-memory stats)
-    return [] as LiveMatchState[]; // skip async call here; simulation handled on next tick
+    // Last resort: persistent in-memory simulation (Roland Garros-style matches)
+    return buildTennisSimulation();
   })();
   const livePart = [
     ...buildFootballLiveV2(footballEvents),
