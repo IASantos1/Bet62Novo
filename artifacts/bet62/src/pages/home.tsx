@@ -3280,7 +3280,7 @@ export default function Home() {
           className="banner-card relative aspect-video rounded-xl border border-zinc-800 hover:border-red-500/40 transition-colors cursor-pointer overflow-hidden"
           onClick={() => setExpandedMatch(match)}
         >
-          <img src={bannerImg} alt="" className="absolute inset-0 w-full h-full object-cover opacity-90" />
+          <img src={bannerImg} alt={`${match.home} contra ${match.away} — ${match.league}`} className="absolute inset-0 w-full h-full object-cover opacity-90" />
           <div className="absolute inset-0" style={{ background: "linear-gradient(to top, rgba(0,0,0,1) 0%, rgba(0,0,0,0.92) 35%, rgba(0,0,0,0.55) 65%, rgba(0,0,0,0.2) 100%)" }} />
           <div className="absolute top-0 left-0 right-0 flex items-center justify-between px-4 pt-3">
             <div className="flex items-center gap-2">
@@ -3373,7 +3373,7 @@ export default function Home() {
           className="banner-card relative aspect-video rounded-xl border border-zinc-800 hover:border-red-500/40 transition-colors cursor-pointer overflow-hidden"
           onClick={() => setExpandedMatch(match)}
         >
-          <img src={bannerImg} alt="" className="absolute inset-0 w-full h-full object-cover opacity-90" />
+          <img src={bannerImg} alt={`${match.home} contra ${match.away} — ${match.league}`} className="absolute inset-0 w-full h-full object-cover opacity-90" />
           <div className="absolute inset-0" style={{ background: "linear-gradient(to top, rgba(0,0,0,1) 0%, rgba(0,0,0,0.92) 35%, rgba(0,0,0,0.55) 65%, rgba(0,0,0,0.2) 100%)" }} />
           <div className="absolute top-0 left-0 right-0 flex items-center justify-between px-4 pt-3">
             <div className="flex items-center gap-2">
@@ -9882,7 +9882,7 @@ export default function Home() {
             >
               {promoNotif.type === "freebets10" && (
                 <>
-                  <img src="https://images.unsplash.com/photo-1553481187-be93c21490a9?q=80&w=800&auto=format&fit=crop" className="absolute inset-0 w-full h-full object-cover scale-105" alt="" />
+                  <img src="https://images.unsplash.com/photo-1553481187-be93c21490a9?q=80&w=800&auto=format&fit=crop" className="absolute inset-0 w-full h-full object-cover scale-105" alt="Promoção Free Bet — deposite €10 e ganhe €5 em apostas grátis" />
                   <div className="absolute inset-0 bg-gradient-to-br from-violet-600/85 to-black/95" />
                   <div className="relative z-10 p-8 text-center">
                     <div className="text-5xl mb-3">🎁</div>
@@ -9901,7 +9901,7 @@ export default function Home() {
               )}
               {promoNotif.type === "freebets20" && (
                 <>
-                  <img src="https://images.unsplash.com/photo-1521412644187-c49fa049e84d?q=80&w=800&auto=format&fit=crop" className="absolute inset-0 w-full h-full object-cover scale-105" alt="" />
+                  <img src="https://images.unsplash.com/photo-1521412644187-c49fa049e84d?q=80&w=800&auto=format&fit=crop" className="absolute inset-0 w-full h-full object-cover scale-105" alt="Promoção Free Bet — deposite €20 e ganhe €10 em apostas grátis" />
                   <div className="absolute inset-0 bg-gradient-to-br from-emerald-600/85 to-black/95" />
                   <div className="relative z-10 p-8 text-center">
                     <div className="text-5xl mb-3">🎉</div>
@@ -9925,7 +9925,7 @@ export default function Home() {
               )}
               {promoNotif.type === "bonus100" && (
                 <>
-                  <img src="https://images.unsplash.com/photo-1517466787929-bc90951d0974?q=80&w=800&auto=format&fit=crop" className="absolute inset-0 w-full h-full object-cover scale-105" alt="" />
+                  <img src="https://images.unsplash.com/photo-1517466787929-bc90951d0974?q=80&w=800&auto=format&fit=crop" className="absolute inset-0 w-full h-full object-cover scale-105" alt="Bónus de boas-vindas — 100% no primeiro depósito duplicado" />
                   <div className="absolute inset-0 bg-gradient-to-br from-yellow-700/85 to-black/95" />
                   <div className="relative z-10 p-8 text-center">
                     <div className="text-5xl mb-3">🏆</div>
@@ -9939,7 +9939,7 @@ export default function Home() {
               )}
               {promoNotif.type === "cashback" && (
                 <>
-                  <img src="https://images.unsplash.com/photo-1546519638-68e109498ffc?q=80&w=800&auto=format&fit=crop" className="absolute inset-0 w-full h-full object-cover scale-105" alt="" />
+                  <img src="https://images.unsplash.com/photo-1546519638-68e109498ffc?q=80&w=800&auto=format&fit=crop" className="absolute inset-0 w-full h-full object-cover scale-105" alt="Cashback semanal — recupere 10% das suas perdas em apostas" />
                   <div className="absolute inset-0 bg-gradient-to-br from-cyan-700/85 to-black/95" />
                   <div className="relative z-10 p-8 text-center">
                     <div className="text-5xl mb-3">💰</div>
