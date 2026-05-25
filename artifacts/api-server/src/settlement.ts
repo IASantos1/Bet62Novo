@@ -1,5 +1,5 @@
 import { db, betsTable, usersTable } from "@workspace/db";
-import { eq, and, lt } from "drizzle-orm";
+import { eq, and, lt, sql } from "drizzle-orm";
 import { logger } from "./lib/logger";
 import { finishedMatchResults, scanDailyForFinished, scanV2AllSportsForFinished } from "./routes/matches";
 
@@ -363,21 +363,11 @@ export async function autoSettlePendingBets(): Promise<void> {
 
           if (rows.length === 0) return; // already settled elsewhere
 
-          const [user] = await tx
-            .select({ balance: usersTable.balance })
-            .from(usersTable)
-            .where(eq(usersTable.id, bet.userId))
-            .limit(1);
-
-          if (user) {
-            const newBalance = (
-              parseFloat(user.balance) + parseFloat(bet.potentialWin)
-            ).toFixed(2);
-            await tx
-              .update(usersTable)
-              .set({ balance: newBalance })
-              .where(eq(usersTable.id, bet.userId));
-          }
+          // Atomic SQL addition — no read-then-write race condition
+          await tx
+            .update(usersTable)
+            .set({ balance: sql`${usersTable.balance} + ${bet.potentialWin}::numeric` })
+            .where(eq(usersTable.id, bet.userId));
         });
 
         logger.info(
@@ -443,22 +433,11 @@ async function expireStalePendingBets(): Promise<void> {
 
           if (rows.length === 0) return; // already settled elsewhere
 
-          // Refund the original stake
-          const [user] = await tx
-            .select({ balance: usersTable.balance })
-            .from(usersTable)
-            .where(eq(usersTable.id, bet.userId))
-            .limit(1);
-
-          if (user) {
-            const newBalance = (
-              parseFloat(user.balance) + parseFloat(bet.stake)
-            ).toFixed(2);
-            await tx
-              .update(usersTable)
-              .set({ balance: newBalance })
-              .where(eq(usersTable.id, bet.userId));
-          }
+          // Atomic SQL addition — stake refund, no read-then-write race
+          await tx
+            .update(usersTable)
+            .set({ balance: sql`${usersTable.balance} + ${bet.stake}::numeric` })
+            .where(eq(usersTable.id, bet.userId));
         });
 
         logger.warn(
@@ -507,13 +486,13 @@ export function startSettlementWorker(): void {
   const schedule = (): void => {
     setTimeout(() => {
       void run().finally(schedule);
-    }, 60_000);
+    }, 15_000);
   };
 
-  // First run shortly after startup, then self-schedule every 60 s
+  // First run shortly after startup, then self-schedule every 15 s
   setTimeout(() => {
     void run().finally(schedule);
   }, 5_000);
 
-  logger.info("Bet auto-settlement worker started (60 s self-scheduling, all sports)");
+  logger.info("Bet auto-settlement worker started (15 s self-scheduling, all sports)");
 }

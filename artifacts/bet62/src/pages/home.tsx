@@ -2462,12 +2462,22 @@ export default function Home() {
     }
   }, [auth.token]);
 
-  // Auto-refresh bets every 30s for any logged-in user — detects settlements on any tab
+  // Auto-refresh bets every 10s for any logged-in user — detects settlements quickly.
+  // 10s is fast enough that a settled bet appears within seconds of the 15s worker cycle.
   useEffect(() => {
     if (!auth.token) return;
-    const id = setInterval(() => fetchMyBets(true), 30000);
+    const id = setInterval(() => fetchMyBets(true), 10000);
     return () => clearInterval(id);
   }, [auth.token, fetchMyBets]);
+
+  // Immediately fetch bets whenever "Minhas Apostas" tab becomes active
+  // (in addition to the interval above, so there's no wait on tab open)
+  useEffect(() => {
+    if (activeTab === "mybets" && auth.token) {
+      void fetchMyBets(true);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab]);
 
   // Auto-dismiss win animation after 5s
   useEffect(() => {
