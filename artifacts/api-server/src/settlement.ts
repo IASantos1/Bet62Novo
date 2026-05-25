@@ -332,10 +332,16 @@ export async function autoSettlePendingBets(): Promise<void> {
 
         // ── Early loss: if any leg is definitively lost, settle immediately ──
         if (outcomes.some(o => o === "lost")) {
+          const updatedSelsLost = selections.map(sel => {
+            const mId = sel.matchId ?? (isSingle ? bet.matchId : undefined);
+            if (!mId) return sel;
+            const r = finishedMatchResults.get(mId);
+            return r ? { ...sel, finalScore: { home: r.home, away: r.away } } : sel;
+          });
           await db.transaction(async (tx) => {
             await tx
               .update(betsTable)
-              .set({ status: "lost" })
+              .set({ status: "lost", selections: updatedSelsLost })
               .where(and(eq(betsTable.id, bet.id), eq(betsTable.status, "pending")))
               .returning({ id: betsTable.id });
           });
@@ -353,11 +359,18 @@ export async function autoSettlePendingBets(): Promise<void> {
         // All outcomes resolved and none is "lost" → all won
         const newStatus = "won";
 
+        const updatedSelsWon = selections.map(sel => {
+          const mId = sel.matchId ?? (isSingle ? bet.matchId : undefined);
+          if (!mId) return sel;
+          const r = finishedMatchResults.get(mId);
+          return r ? { ...sel, finalScore: { home: r.home, away: r.away } } : sel;
+        });
+
         await db.transaction(async (tx) => {
           // Optimistic lock: only update if still pending
           const rows = await tx
             .update(betsTable)
-            .set({ status: newStatus })
+            .set({ status: newStatus, selections: updatedSelsWon })
             .where(and(eq(betsTable.id, bet.id), eq(betsTable.status, "pending")))
             .returning({ id: betsTable.id });
 

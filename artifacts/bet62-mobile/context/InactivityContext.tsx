@@ -2,16 +2,17 @@ import React, { createContext, useCallback, useContext, useEffect, useRef } from
 import { AppState } from "react-native";
 import { useAuth } from "./AuthContext";
 
-const LOCK_AFTER_MS = 30_000;
+const LOCK_AFTER_MS = 60_000;
 
 const InactivityResetCtx = createContext<() => void>(() => {});
 export const useResetInactivity = () => useContext(InactivityResetCtx);
 
 export function InactivityProvider({ children }: { children: React.ReactNode }) {
-  const { isBiometricEnabled, token, lockBiometric } = useAuth();
+  const { token, lockBiometric } = useAuth();
   const timerRef   = useRef<ReturnType<typeof setTimeout> | null>(null);
   const bgStartRef = useRef<number | null>(null);
-  const isActive   = isBiometricEnabled && !!token;
+  // Lock applies to all authenticated users (not just biometric)
+  const isActive   = !!token;
 
   const startTimer = useCallback(() => {
     if (timerRef.current) clearTimeout(timerRef.current);

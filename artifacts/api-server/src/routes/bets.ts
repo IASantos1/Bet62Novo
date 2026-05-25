@@ -180,6 +180,21 @@ router.post("/:id/cashout", authMiddleware, async (req: AuthRequest, res: Respon
       return;
     }
 
+    // Block cashout during active market suspension (VAR, golo, penálti, etc.)
+    const liveSt = liveMatchState.get(bet.matchId);
+    if (liveSt) {
+      const now = Date.now();
+      const suspended =
+        (liveSt.marketSuspension != null &&
+          Object.values(liveSt.marketSuspension).some(ts => ts > now)) ||
+        !!liveSt._suspensionReason;
+      if (suspended) {
+        const reason = liveSt._suspensionReason ?? "LANCE CRÍTICO";
+        res.status(400).json({ error: `Cash out suspenso — ${reason}. Aguarde e tente novamente.` });
+        return;
+      }
+    }
+
     const stake        = parseFloat(bet.stake);
     const originalOdds = parseFloat(bet.totalOdds);
 

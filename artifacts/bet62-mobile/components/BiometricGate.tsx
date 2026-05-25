@@ -1,16 +1,40 @@
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import * as LocalAuthentication from "expo-local-authentication";
-import React, { useCallback, useEffect, useRef } from "react";
-import { Animated, Easing, Modal, StyleSheet, Text, View } from "react-native";
+import React, { useCallback, useEffect, useRef, useState } from "react";
+import {
+  ActivityIndicator,
+  Animated,
+  Easing,
+  KeyboardAvoidingView,
+  Modal,
+  Platform,
+  Pressable,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/context/AuthContext";
 
 export function BiometricGate() {
-  const { isBiometricLocked, unlockBiometric, failBiometric } = useAuth();
+  const {
+    isBiometricLocked,
+    isBiometricEnabled,
+    lockedUserEmail,
+    unlockBiometric,
+    unlockWithPassword,
+    logout,
+  } = useAuth();
   const queryClient = useQueryClient();
   const insets = useSafeAreaInsets();
+
+  const [showPwd, setShowPwd] = useState(false);
+  const [pwd, setPwd] = useState("");
+  const [pwdError, setPwdError] = useState("");
+  const [pwdLoading, setPwdLoading] = useState(false);
 
   const pulse1 = useRef(new Animated.Value(1)).current;
   const pulse2 = useRef(new Animated.Value(1)).current;
@@ -20,45 +44,56 @@ export function BiometricGate() {
   const opacity3 = useRef(new Animated.Value(0.3)).current;
   const scanLine = useRef(new Animated.Value(0)).current;
 
+  useEffect(() => {
+    if (!isBiometricLocked) {
+      setPwd("");
+      setPwdError("");
+      setPwdLoading(false);
+      setShowPwd(false);
+    } else if (!isBiometricEnabled) {
+      setShowPwd(true);
+    }
+  }, [isBiometricLocked, isBiometricEnabled]);
+
   const triggerBiometric = useCallback(async () => {
     try {
       const hasHW = await LocalAuthentication.hasHardwareAsync();
       const enrolled = await LocalAuthentication.isEnrolledAsync();
       if (!hasHW || !enrolled) {
-        failBiometric();
+        setShowPwd(true);
         return;
       }
       const result = await LocalAuthentication.authenticateAsync({
         promptMessage: "Desbloquear Bet62",
         disableDeviceFallback: true,
-        cancelLabel: "Cancelar",
+        cancelLabel: "Usar password",
       });
       if (result.success) {
         await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
         await unlockBiometric();
         queryClient.refetchQueries({ type: "active", stale: true });
       } else {
-        failBiometric();
+        setShowPwd(true);
       }
     } catch {
-      failBiometric();
+      setShowPwd(true);
     }
-  }, [unlockBiometric, failBiometric, queryClient]);
+  }, [unlockBiometric, queryClient]);
 
   useEffect(() => {
-    if (!isBiometricLocked) return;
+    if (!isBiometricLocked || showPwd || !isBiometricEnabled) return;
 
-    const ring = (scale: Animated.Value, opacity: Animated.Value, delay: number) =>
+    const ring = (scale: Animated.Value, op: Animated.Value, delay: number) =>
       Animated.loop(
         Animated.sequence([
           Animated.delay(delay),
           Animated.parallel([
             Animated.timing(scale, { toValue: 1.6, duration: 1800, easing: Easing.out(Easing.ease), useNativeDriver: true }),
-            Animated.timing(opacity, { toValue: 0, duration: 1800, easing: Easing.out(Easing.ease), useNativeDriver: true }),
+            Animated.timing(op, { toValue: 0, duration: 1800, easing: Easing.out(Easing.ease), useNativeDriver: true }),
           ]),
           Animated.parallel([
             Animated.timing(scale, { toValue: 1, duration: 0, useNativeDriver: true }),
-            Animated.timing(opacity, { toValue: delay === 0 ? 0.7 : delay === 400 ? 0.5 : 0.3, duration: 0, useNativeDriver: true }),
+            Animated.timing(op, { toValue: delay === 0 ? 0.7 : delay === 400 ? 0.5 : 0.3, duration: 0, useNativeDriver: true }),
           ]),
         ])
       );
@@ -73,7 +108,6 @@ export function BiometricGate() {
     const a1 = ring(pulse1, opacity1, 0);
     const a2 = ring(pulse2, opacity2, 400);
     const a3 = ring(pulse3, opacity3, 800);
-
     a1.start(); a2.start(); a3.start(); scanAnim.start();
 
     const timer = setTimeout(triggerBiometric, 700);
@@ -81,7 +115,27 @@ export function BiometricGate() {
       clearTimeout(timer);
       a1.stop(); a2.stop(); a3.stop(); scanAnim.stop();
     };
-  }, [isBiometricLocked, triggerBiometric, pulse1, pulse2, pulse3, opacity1, opacity2, opacity3, scanLine]);
+  }, [isBiometricLocked, showPwd, isBiometricEnabled, triggerBiometric,
+      pulse1, pulse2, pulse3, opacity1, opacity2, opacity3, scanLine]);
+
+  const handleUnlockPassword = async () => {
+    if (!pwd.trim()) { setPwdError("Introduza a sua password"); return; }
+    setPwdLoading(true);
+    setPwdError("");
+    try {
+      await unlockWithPassword(pwd);
+      queryClient.refetchQueries({ type: "active", stale: true });
+    } catch (e: unknown) {
+      setPwdError(e instanceof Error ? e.message : "Password incorreta");
+      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+    } finally {
+      setPwdLoading(false);
+    }
+  };
+
+  const handleLogout = async () => {
+    await logout();
+  };
 
   if (!isBiometricLocked) return null;
 
@@ -89,43 +143,117 @@ export function BiometricGate() {
 
   return (
     <Modal visible={isBiometricLocked} transparent animationType="fade" statusBarTranslucent>
-      <View style={[styles.overlay, { paddingTop: insets.top }]}>
-        <View style={styles.logoRow}>
-          <View style={styles.logoBadge}>
-            <Text style={styles.logoText}>62</Text>
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : "height"}>
+        <View style={[styles.overlay, { paddingTop: insets.top }]}>
+
+          {/* ── Logo ── */}
+          <View style={styles.logoRow}>
+            <View style={styles.logoBadge}><Text style={styles.logoText}>62</Text></View>
+            <Text style={styles.logoLabel}>Bet62</Text>
           </View>
-          <Text style={styles.logoLabel}>Bet62</Text>
-        </View>
 
-        <View style={styles.centerContent}>
-          <View style={styles.iconWrap}>
-            <Animated.View style={[styles.ring, styles.ring1, { transform: [{ scale: pulse1 }], opacity: opacity1 }]} />
-            <Animated.View style={[styles.ring, styles.ring2, { transform: [{ scale: pulse2 }], opacity: opacity2 }]} />
-            <Animated.View style={[styles.ring, styles.ring3, { transform: [{ scale: pulse3 }], opacity: opacity3 }]} />
-
-            <View style={styles.faceFrame}>
-              <View style={[styles.corner, styles.cornerTL]} />
-              <View style={[styles.corner, styles.cornerTR]} />
-              <View style={[styles.corner, styles.cornerBL]} />
-              <View style={[styles.corner, styles.cornerBR]} />
-              <Ionicons name="scan-outline" size={80} color="#d42020" style={{ opacity: 0.15 }} />
-              <View style={styles.faceIconWrap}>
-                <Ionicons name="person-outline" size={44} color="#ffffff" />
+          {!showPwd ? (
+            /* ── BIOMETRIC SCAN ── */
+            <View style={styles.centerContent}>
+              <View style={styles.iconWrap}>
+                <Animated.View style={[styles.ring, styles.ring1, { transform: [{ scale: pulse1 }], opacity: opacity1 }]} />
+                <Animated.View style={[styles.ring, styles.ring2, { transform: [{ scale: pulse2 }], opacity: opacity2 }]} />
+                <Animated.View style={[styles.ring, styles.ring3, { transform: [{ scale: pulse3 }], opacity: opacity3 }]} />
+                <View style={styles.faceFrame}>
+                  <View style={[styles.corner, styles.cornerTL]} />
+                  <View style={[styles.corner, styles.cornerTR]} />
+                  <View style={[styles.corner, styles.cornerBL]} />
+                  <View style={[styles.corner, styles.cornerBR]} />
+                  <Ionicons name="scan-outline" size={80} color="#d42020" style={{ opacity: 0.15 }} />
+                  <View style={styles.faceIconWrap}>
+                    <Ionicons name="person-outline" size={44} color="#ffffff" />
+                  </View>
+                  <Animated.View style={[styles.scanBar, { transform: [{ translateY: scanTranslate }] }]} />
+                </View>
               </View>
-              <Animated.View style={[styles.scanBar, { transform: [{ translateY: scanTranslate }] }]} />
+              <Text style={styles.title}>Desbloquear Bet62</Text>
+              <Text style={styles.subtitle}>Aproxima o rosto para desbloquear automaticamente</Text>
+              <Pressable onPress={() => setShowPwd(true)} style={styles.switchBtn}>
+                <Text style={styles.switchBtnTxt}>Usar email e password</Text>
+              </Pressable>
             </View>
-          </View>
 
-          <Text style={styles.title}>Desbloquear Bet62</Text>
-          <Text style={styles.subtitle}>Aproxima o rosto para desbloquear automaticamente</Text>
+          ) : (
+            /* ── PASSWORD FORM ── */
+            <View style={styles.pwdContent}>
+              <View style={styles.lockIconWrap}>
+                <Ionicons name="lock-closed" size={36} color="#d42020" />
+              </View>
 
-          <View style={styles.dotsRow}>
-            {[0, 1, 2].map((i) => (
-              <View key={i} style={[styles.dot, i === 1 && styles.dotActive]} />
-            ))}
-          </View>
+              <Text style={styles.title}>Sessão bloqueada</Text>
+              <Text style={styles.subtitle}>60 segundos sem atividade</Text>
+
+              {/* Email row (pre-filled, read-only) */}
+              {lockedUserEmail ? (
+                <View style={styles.emailRow}>
+                  <Ionicons name="mail-outline" size={15} color="#a5a5b5" />
+                  <Text style={styles.emailTxt}>{lockedUserEmail}</Text>
+                </View>
+              ) : null}
+
+              {/* Password input */}
+              <View style={styles.inputWrap}>
+                <Ionicons name="key-outline" size={17} color="#666" style={styles.inputIcon} />
+                <TextInput
+                  style={styles.pwdInput}
+                  placeholder="Password"
+                  placeholderTextColor="#555"
+                  secureTextEntry
+                  value={pwd}
+                  onChangeText={t => { setPwd(t); setPwdError(""); }}
+                  autoCapitalize="none"
+                  returnKeyType="done"
+                  onSubmitEditing={handleUnlockPassword}
+                  autoFocus
+                />
+              </View>
+
+              {pwdError ? (
+                <View style={styles.errorRow}>
+                  <Ionicons name="alert-circle-outline" size={13} color="#f87171" />
+                  <Text style={styles.errorTxt}>{pwdError}</Text>
+                </View>
+              ) : null}
+
+              {/* Unlock button */}
+              <Pressable
+                onPress={handleUnlockPassword}
+                disabled={pwdLoading || !pwd}
+                style={({ pressed }) => [styles.unlockBtn, (pwdLoading || !pwd) && { opacity: 0.55 }, pressed && { opacity: 0.8 }]}
+              >
+                {pwdLoading
+                  ? <ActivityIndicator color="#fff" size="small" />
+                  : <>
+                      <Ionicons name="shield-checkmark-outline" size={18} color="#fff" />
+                      <Text style={styles.unlockBtnTxt}>Desbloquear</Text>
+                    </>}
+              </Pressable>
+
+              {/* Switch back to Face ID if available */}
+              {isBiometricEnabled && (
+                <Pressable
+                  onPress={() => { setShowPwd(false); triggerBiometric(); }}
+                  style={styles.switchBtn}
+                >
+                  <Ionicons name="finger-print-outline" size={15} color="#a5a5b5" />
+                  <Text style={[styles.switchBtnTxt, { marginLeft: 5 }]}>Usar Face ID</Text>
+                </Pressable>
+              )}
+
+              {/* Logout */}
+              <Pressable onPress={handleLogout} style={styles.logoutBtn}>
+                <Ionicons name="log-out-outline" size={13} color="#555" />
+                <Text style={styles.logoutTxt}>Terminar sessão</Text>
+              </Pressable>
+            </View>
+          )}
         </View>
-      </View>
+      </KeyboardAvoidingView>
     </Modal>
   );
 }
@@ -163,6 +291,8 @@ const styles = StyleSheet.create({
     fontFamily: "Inter_700Bold",
     color: "#ffffff",
   },
+
+  /* ── Biometric scan ── */
   centerContent: {
     flex: 1,
     alignItems: "center",
@@ -216,6 +346,125 @@ const styles = StyleSheet.create({
     opacity: 0.7,
     borderRadius: 1,
   },
+
+  /* ── Password form ── */
+  pwdContent: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 28,
+    paddingBottom: 60,
+    width: "100%",
+  },
+  lockIconWrap: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    backgroundColor: "#0f0f1a",
+    borderWidth: 1.5,
+    borderColor: "#2a2a3a",
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 22,
+  },
+  emailRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 7,
+    backgroundColor: "#0f0f1a",
+    borderWidth: 1,
+    borderColor: "#1e1e2e",
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    width: "100%",
+    marginBottom: 12,
+  },
+  emailTxt: {
+    fontFamily: "Inter_400Regular",
+    fontSize: 13,
+    color: "#a5a5b5",
+    flex: 1,
+  },
+  inputWrap: {
+    width: "100%",
+    position: "relative",
+    marginBottom: 8,
+  },
+  inputIcon: {
+    position: "absolute",
+    left: 15,
+    top: 14,
+    zIndex: 1,
+  },
+  pwdInput: {
+    backgroundColor: "#0f0f1a",
+    borderWidth: 1,
+    borderColor: "#2a2a3a",
+    borderRadius: 12,
+    paddingLeft: 44,
+    paddingRight: 16,
+    paddingVertical: 14,
+    fontSize: 14,
+    fontFamily: "Inter_400Regular",
+    color: "#ffffff",
+    width: "100%",
+  },
+  errorRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    width: "100%",
+    marginBottom: 10,
+  },
+  errorTxt: {
+    fontFamily: "Inter_400Regular",
+    fontSize: 12,
+    color: "#f87171",
+  },
+  unlockBtn: {
+    backgroundColor: RED,
+    borderRadius: 14,
+    paddingVertical: 15,
+    width: "100%",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    marginBottom: 18,
+    marginTop: 4,
+  },
+  unlockBtnTxt: {
+    fontFamily: "Inter_700Bold",
+    fontSize: 15,
+    color: "#ffffff",
+  },
+  switchBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: 10,
+    marginBottom: 6,
+  },
+  switchBtnTxt: {
+    fontFamily: "Inter_400Regular",
+    fontSize: 13,
+    color: "#a5a5b5",
+    textDecorationLine: "underline",
+  },
+  logoutBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingVertical: 10,
+    marginTop: 4,
+  },
+  logoutTxt: {
+    fontFamily: "Inter_400Regular",
+    fontSize: 12,
+    color: "#555",
+  },
+
+  /* ── Shared ── */
   title: {
     fontSize: 22,
     fontFamily: "Inter_700Bold",
@@ -230,21 +479,6 @@ const styles = StyleSheet.create({
     textAlign: "center",
     maxWidth: 260,
     lineHeight: 20,
-    marginBottom: 32,
-  },
-  dotsRow: {
-    flexDirection: "row",
-    gap: 8,
-  },
-  dot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: "#262633",
-  },
-  dotActive: {
-    backgroundColor: RED,
-    width: 20,
-    borderRadius: 3,
+    marginBottom: 28,
   },
 });

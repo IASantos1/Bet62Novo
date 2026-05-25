@@ -22,6 +22,7 @@ interface AuthContextType {
   isLoading: boolean;
   isBiometricEnabled: boolean;
   isBiometricLocked: boolean;
+  lockedUserEmail: string | null;
   login: (email: string, password: string) => Promise<void>;
   register: (name: string, email: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
@@ -30,6 +31,7 @@ interface AuthContextType {
   enableBiometric: () => Promise<void>;
   disableBiometric: () => Promise<void>;
   unlockBiometric: () => Promise<void>;
+  unlockWithPassword: (password: string) => Promise<void>;
   lockBiometric: () => void;
   failBiometric: () => void;
 }
@@ -43,6 +45,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [isBiometricEnabled, setIsBiometricEnabled] = useState(false);
   const [isBiometricLocked, setIsBiometricLocked] = useState(false);
   const [pendingToken, setPendingToken] = useState<string | null>(null);
+  const [lockedUserEmail, setLockedUserEmail] = useState<string | null>(null);
 
   useEffect(() => {
     loadStoredAuth();
@@ -103,20 +106,44 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       // ignore
     } finally {
       setIsBiometricLocked(false);
+      setLockedUserEmail(null);
     }
   }, [pendingToken]);
 
+  // Unlock via email+password — works for both biometric and non-biometric users
+  const unlockWithPassword = useCallback(async (password: string) => {
+    if (!lockedUserEmail) {
+      setIsBiometricLocked(false);
+      return;
+    }
+    const res = await fetch(`${API_BASE}/auth/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: lockedUserEmail, password }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Password incorreta");
+    await AsyncStorage.setItem("auth_token", data.token);
+    setToken(data.token);
+    setUser(data.user);
+    setPendingToken(null);
+    setLockedUserEmail(null);
+    setIsBiometricLocked(false);
+  }, [lockedUserEmail]);
+
+  // Lock session — works for ALL authenticated users (not just biometric)
   const lockBiometric = useCallback(() => {
-    if (!token || !isBiometricEnabled) return;
+    if (!token) return;
+    setLockedUserEmail(user?.email ?? null);
     setPendingToken(token);
     setToken(null);
     setUser(null);
     setIsBiometricLocked(true);
-  }, [token, isBiometricEnabled]);
+  }, [token, user]);
 
+  // No-op: BiometricGate handles fallback to password form internally
   const failBiometric = useCallback(() => {
-    setPendingToken(null);
-    setIsBiometricLocked(false);
+    // Gate stays visible — component switches to password form
   }, []);
 
   const login = useCallback(async (email: string, password: string) => {
@@ -150,6 +177,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setToken(null);
     setUser(null);
     setPendingToken(null);
+    setLockedUserEmail(null);
+    setIsBiometricLocked(false);
   }, []);
 
   const refreshUser = useCallback(async () => {
@@ -180,10 +209,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   return (
     <AuthContext.Provider value={{
       user, token, isLoading,
-      isBiometricEnabled, isBiometricLocked,
+      isBiometricEnabled, isBiometricLocked, lockedUserEmail,
       login, register, logout, refreshUser, setUser,
       enableBiometric, disableBiometric,
-      unlockBiometric, lockBiometric, failBiometric,
+      unlockBiometric, unlockWithPassword, lockBiometric, failBiometric,
     }}>
       {children}
     </AuthContext.Provider>

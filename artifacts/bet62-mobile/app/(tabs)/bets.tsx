@@ -24,6 +24,7 @@ interface StoredSelection {
   odd: number;
   market?: string;
   label?: string;
+  finalScore?: { home: number; away: number };
 }
 
 interface Bet {
@@ -206,6 +207,11 @@ function BetCard({ bet, token, onCashout }: { bet: Bet; token: string | null; on
                 <Text style={{ fontFamily: "Inter_400Regular", fontSize: 11, color: txtSub, marginTop: 2 }}>
                   {getSelLabel(sel)}
                 </Text>
+                {(isWon || isLost || isCashedOut) && sel.finalScore != null && (
+                  <Text style={{ fontFamily: "Inter_500Medium", fontSize: 11, color: txtSub, marginTop: 3 }}>
+                    Resultado: {sel.finalScore.home} – {sel.finalScore.away}
+                  </Text>
+                )}
               </View>
 
               {/* Right: odds pill + VENCIDO */}
