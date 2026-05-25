@@ -5706,7 +5706,7 @@ function buildFootballLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
     const awayTeam = v2TeamName(ev.awayTeam);
     const homeScore = v2CurrentScore(ev.homeScore);
     const awayScore = v2CurrentScore(ev.awayScore);
-    const league = v2TournName(ev.tournament);
+    const league = normalizeLeagueName(v2TournName(ev.tournament), "");
 
     const isHT = statusStr === "HT";
     const isET = statusStr.includes("extra") || statusStr === "Extra Time" || statusStr === "Penalties";
