@@ -1141,7 +1141,7 @@ type Match = {
   scheduledTime?: string;
   // Scheduled date (DD.MM.YYYY) for "Em Breve" entries
   scheduledDate?: string;
-  // Statpal league ID — used to fetch player markets (football only)
+  // SportsApiPro league ID — used to fetch player markets (football only)
   leagueId?: string;
 };
 
@@ -8783,7 +8783,7 @@ export default function Home() {
                       <Trophy className="mx-auto mb-4 opacity-20" size={48} />
                       <p className="font-medium">
                         {selectedWC
-                          ? "Nenhum jogo do Mundial 2026 disponível de momento. Os jogos aparecem assim que a Statpal os publicar (início a 11 de junho)."
+                          ? "Nenhum jogo do Mundial 2026 disponível de momento. Os jogos aparecem assim que a SportsApiPro os publicar (início a 11 de junho)."
                           : selectedCountry
                             ? `Nenhum evento para ${selectedCountry}.`
                             : selectedLeague

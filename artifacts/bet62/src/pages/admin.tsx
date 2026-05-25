@@ -1373,7 +1373,7 @@ export default function AdminPage() {
                 <div className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden">
                   <div className="px-5 py-4 border-b border-zinc-800 flex items-center gap-2">
                     <Radio size={16} className={feedStatus?.overall === "ok" ? "text-green-500" : "text-red-500"} />
-                    <span className="font-bold text-sm text-zinc-300">Estado do Feed de Dados (Statpal)</span>
+                    <span className="font-bold text-sm text-zinc-300">Estado do Feed de Dados (SportsApiPro)</span>
                     {feedStatus && (
                       <Badge cls={feedStatus.overall === "ok" ? "bg-green-900/50 text-green-400" : "bg-red-900/50 text-red-400"}
                         label={feedStatus.overall === "ok" ? "Operacional" : "Degradado"} />
