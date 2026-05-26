@@ -1,4 +1,4 @@
-import { db, betsTable, usersTable } from "@workspace/db";
+import { db, betsTable, usersTable, settlementLogsTable } from "@workspace/db";
 import { eq, and, lt, sql } from "drizzle-orm";
 import { logger } from "./lib/logger";
 import { finishedMatchResults, scanDailyForFinished, scanV2AllSportsForFinished } from "./routes/matches";
@@ -360,11 +360,20 @@ export async function autoSettlePendingBets(): Promise<void> {
             return r ? { ...sel, finalScore: { home: r.home, away: r.away } } : sel;
           });
           await db.transaction(async (tx) => {
-            await tx
+            const rows = await tx
               .update(betsTable)
               .set({ status: "lost", selections: updatedSelsLost })
               .where(and(eq(betsTable.id, bet.id), eq(betsTable.status, "pending")))
               .returning({ id: betsTable.id });
+            if (rows.length === 0) return;
+            await tx.insert(settlementLogsTable).values({
+              betId: bet.id,
+              userId: bet.userId,
+              oldStatus: "pending",
+              newStatus: "lost",
+              payout: "0.00",
+              message: "Auto-settled: losing leg detected",
+            });
           });
           logger.info(
             { betId: bet.id, userId: bet.userId, status: "lost" },
@@ -402,6 +411,15 @@ export async function autoSettlePendingBets(): Promise<void> {
             .update(usersTable)
             .set({ balance: sql`${usersTable.balance} + ${bet.potentialWin}::numeric` })
             .where(eq(usersTable.id, bet.userId));
+
+          await tx.insert(settlementLogsTable).values({
+            betId: bet.id,
+            userId: bet.userId,
+            oldStatus: "pending",
+            newStatus: "won",
+            payout: bet.potentialWin,
+            message: `Auto-settled: all ${selections.length} leg(s) won`,
+          });
         });
 
         logger.info(
@@ -472,6 +490,15 @@ async function expireStalePendingBets(): Promise<void> {
             .update(usersTable)
             .set({ balance: sql`${usersTable.balance} + ${bet.stake}::numeric` })
             .where(eq(usersTable.id, bet.userId));
+
+          await tx.insert(settlementLogsTable).values({
+            betId: bet.id,
+            userId: bet.userId,
+            oldStatus: "pending",
+            newStatus: "voided",
+            payout: bet.stake,
+            message: "Stale bet voided after 72h — stake refunded",
+          });
         });
 
         logger.warn(

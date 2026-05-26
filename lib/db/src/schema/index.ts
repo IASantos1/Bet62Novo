@@ -24,3 +24,4 @@ export * from "./withdrawals";
 export * from "./adminAuditLog";
 export * from "./platformSettings";
 export * from "./suspendedMatches";
+export * from "./settlementLogs";

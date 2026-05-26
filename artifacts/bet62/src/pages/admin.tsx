@@ -10,7 +10,7 @@ import {
   Wallet, FileText, UserX, UserCheck, Download,
   BarChart2, ShieldAlert, Zap, Settings, Calendar,
   Ban, AlertTriangle, WifiOff, Wifi, Clock, Lock, Unlock,
-  PlusCircle, Trash2, Radio
+  PlusCircle, Trash2, Radio, ScrollText
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -76,6 +76,12 @@ type SuspendedMatch = {
 type AuditLog = {
   id: number; action: string; adminUser: string; targetType: string | null; targetId: string | null;
   details: unknown; ip: string | null; createdAt: string;
+};
+
+type SettlementLogEntry = {
+  id: number; betId: number; userId: number; oldStatus: string; newStatus: string;
+  payout: string | null; message: string | null; createdAt: string;
+  userName: string | null; userEmail: string | null;
 };
 
 type FeedStatus = {
@@ -156,7 +162,7 @@ function Badge({ cls, label }: { cls: string; label: string }) {
   return <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${cls}`}>{label}</span>;
 }
 
-type TabId = "dashboard" | "users" | "bets" | "payments" | "withdrawals" | "risk" | "analytics" | "events" | "settings";
+type TabId = "dashboard" | "users" | "bets" | "payments" | "withdrawals" | "risk" | "analytics" | "events" | "settlement-logs" | "settings";
 
 const ADMIN_VERSION = "v2.1";
 
@@ -197,6 +203,7 @@ export default function AdminPage() {
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
   const [feedStatus, setFeedStatus] = useState<FeedStatus | null>(null);
   const [feedLoading, setFeedLoading] = useState(false);
+  const [settlementLogs, setSettlementLogs] = useState<SettlementLogEntry[]>([]);
   const [suspendForm, setSuspendForm] = useState({ matchId: "", matchTitle: "", sport: "football", reason: "" });
   const [suspending, setSuspending] = useState(false);
   const [unsuspending, setUnsuspending] = useState<string | null>(null);
@@ -331,6 +338,12 @@ export default function AdminPage() {
     catch { /* ignore */ } finally { setFeedLoading(false); }
   }, [token]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  const fetchSettlementLogs = useCallback(async () => {
+    if (!token) return;
+    try { const res = await fetch("/api/admin/settlement-logs", { headers: authHeader }); if (res.ok) setSettlementLogs(await res.json()); }
+    catch { /* ignore */ }
+  }, [token]); // eslint-disable-line react-hooks/exhaustive-deps
+
   useEffect(() => {
     if (!token) return;
     fetchStats();
@@ -341,6 +354,7 @@ export default function AdminPage() {
     else if (activeTab === "risk") fetchRisk();
     else if (activeTab === "analytics") fetchAnalytics();
     else if (activeTab === "events") { fetchSuspended(); fetchFeed(); }
+    else if (activeTab === "settlement-logs") fetchSettlementLogs();
     else if (activeTab === "settings") { fetchSettings(); fetchAuditLogs(); }
   }, [token, activeTab]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -598,14 +612,16 @@ export default function AdminPage() {
     { id: "withdrawals", icon: <ArrowUpCircle size={18} />,   label: "Levantamentos",  badge: stats?.withdrawals.pendingCount || null, section: "core" },
     { id: "risk",        icon: <ShieldAlert size={18} />,     label: "Risco",          section: "pro" },
     { id: "analytics",   icon: <BarChart2 size={18} />,       label: "Analytics",      section: "pro" },
-    { id: "events",      icon: <Zap size={18} />,             label: "Eventos",        section: "pro" },
-    { id: "settings",    icon: <Settings size={18} />,        label: "Configurações",  section: "pro" },
+    { id: "events",           icon: <Zap size={18} />,             label: "Eventos",         section: "pro" },
+    { id: "settlement-logs",  icon: <ScrollText size={18} />,     label: "Liquidações",     section: "pro" },
+    { id: "settings",         icon: <Settings size={18} />,       label: "Configurações",   section: "pro" },
   ];
 
   const tabLabel: Record<TabId, string> = {
     dashboard: "Visão Geral", users: "Utilizadores", bets: "Apostas",
     payments: "Depósitos", withdrawals: "Levantamentos",
-    risk: "Gestão de Risco", analytics: "Analytics", events: "Controlo de Eventos", settings: "Configurações",
+    risk: "Gestão de Risco", analytics: "Analytics", events: "Controlo de Eventos",
+    "settlement-logs": "Logs de Liquidação", settings: "Configurações",
   };
 
   const switchTab = (tab: TabId) => { setActiveTab(tab); setMobileSidebarOpen(false); };
@@ -1476,6 +1492,92 @@ export default function AdminPage() {
                             {unsuspending === m.matchId ? <Loader2 size={12} className="animate-spin mr-1" /> : <Unlock size={12} className="mr-1" />}
                             Reativar
                           </Button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </motion.div>
+            )}
+
+            {/* ── LOGS DE LIQUIDAÇÃO ── */}
+            {activeTab === "settlement-logs" && (
+              <motion.div key="settlement-logs" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h2 className="text-lg font-bold text-white">Logs de Liquidação</h2>
+                    <p className="text-xs text-zinc-500 mt-0.5">Histórico automático de apostas liquidadas, perdidas e anuladas</p>
+                  </div>
+                  <button onClick={fetchSettlementLogs} className="flex items-center gap-2 px-3 py-2 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-sm transition-colors">
+                    <RefreshCw size={14} /> Atualizar
+                  </button>
+                </div>
+
+                <div className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden">
+                  <div className="px-5 py-3 border-b border-zinc-800 flex items-center gap-3">
+                    <ScrollText size={15} className="text-zinc-400" />
+                    <span className="text-sm font-semibold text-zinc-300">Últimas {settlementLogs.length} liquidações</span>
+                    <div className="ml-auto flex items-center gap-3 text-xs text-zinc-600">
+                      <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-green-500 inline-block" /> Ganhou</span>
+                      <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-red-500 inline-block" /> Perdeu</span>
+                      <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-zinc-500 inline-block" /> Anulada</span>
+                    </div>
+                  </div>
+
+                  {settlementLogs.length === 0 ? (
+                    <div className="px-5 py-16 text-center text-zinc-600 text-sm">
+                      <ScrollText size={28} className="mx-auto mb-3 text-zinc-700" />
+                      Nenhuma liquidação registada ainda.<br />
+                      <span className="text-xs">Os logs aparecem aqui assim que apostas forem liquidadas automaticamente.</span>
+                    </div>
+                  ) : (
+                    <div className="divide-y divide-zinc-800/60">
+                      {settlementLogs.map(log => (
+                        <div key={log.id} className="px-5 py-3 flex items-center gap-4 hover:bg-zinc-800/30 transition-colors">
+                          {/* Status dot */}
+                          <div className={`w-2.5 h-2.5 rounded-full shrink-0 ${
+                            log.newStatus === "won"    ? "bg-green-500" :
+                            log.newStatus === "lost"   ? "bg-red-500" :
+                            log.newStatus === "voided" ? "bg-zinc-500" : "bg-yellow-500"
+                          }`} />
+
+                          {/* Bet ID */}
+                          <div className="shrink-0 text-zinc-600 font-mono text-xs w-16">
+                            #bet{log.betId}
+                          </div>
+
+                          {/* User */}
+                          <div className="flex-1 min-w-0">
+                            <div className="text-sm text-zinc-200 font-medium truncate">{log.userName ?? `user#${log.userId}`}</div>
+                            <div className="text-xs text-zinc-600 truncate">{log.userEmail ?? ""}</div>
+                          </div>
+
+                          {/* Status change */}
+                          <div className="shrink-0 flex items-center gap-1.5 text-xs">
+                            <span className="text-zinc-600 font-mono">{log.oldStatus}</span>
+                            <span className="text-zinc-700">→</span>
+                            <span className={`font-bold ${
+                              log.newStatus === "won"    ? "text-green-400" :
+                              log.newStatus === "lost"   ? "text-red-400" :
+                              log.newStatus === "voided" ? "text-zinc-500" : "text-yellow-400"
+                            }`}>{log.newStatus === "won" ? "GANHOU" : log.newStatus === "lost" ? "PERDEU" : log.newStatus === "voided" ? "ANULADA" : log.newStatus.toUpperCase()}</span>
+                          </div>
+
+                          {/* Payout */}
+                          <div className="shrink-0 text-right w-20">
+                            {log.payout && parseFloat(log.payout) > 0 ? (
+                              <span className={`text-sm font-bold ${log.newStatus === "won" ? "text-green-400" : log.newStatus === "voided" ? "text-zinc-400" : "text-red-400"}`}>
+                                {log.newStatus === "won" ? "+" : ""}{fmtEur(parseFloat(log.payout))}
+                              </span>
+                            ) : (
+                              <span className="text-xs text-zinc-600">—</span>
+                            )}
+                          </div>
+
+                          {/* Timestamp */}
+                          <div className="shrink-0 text-xs text-zinc-600 w-32 text-right">
+                            {new Date(log.createdAt).toLocaleString("pt-PT", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}
+                          </div>
                         </div>
                       ))}
                     </div>

@@ -1,6 +1,6 @@
 import { Router, type IRouter, type Response, type Request } from "express";
 import jwt from "jsonwebtoken";
-import { db, usersTable, betsTable, paymentsTable, withdrawalsTable } from "@workspace/db";
+import { db, usersTable, betsTable, paymentsTable, withdrawalsTable, settlementLogsTable } from "@workspace/db";
 import { eq, desc, count, sum, sql, gte, lte, and } from "drizzle-orm";
 import { adminMiddleware, type AdminRequest } from "../middlewares/adminAuth";
 import { logger } from "../lib/logger";
@@ -515,6 +515,33 @@ router.get("/export", adminMiddleware, async (req: AdminRequest, res: Response):
   } catch (err) {
     logger.error({ err }, "Admin export error");
     res.status(500).json({ error: "Erro ao gerar relatório" });
+  }
+});
+
+// GET /api/admin/settlement-logs — last 200 settlement events
+router.get("/settlement-logs", adminMiddleware, async (_req: AdminRequest, res: Response): Promise<void> => {
+  try {
+    const logs = await db
+      .select({
+        id: settlementLogsTable.id,
+        betId: settlementLogsTable.betId,
+        userId: settlementLogsTable.userId,
+        oldStatus: settlementLogsTable.oldStatus,
+        newStatus: settlementLogsTable.newStatus,
+        payout: settlementLogsTable.payout,
+        message: settlementLogsTable.message,
+        createdAt: settlementLogsTable.createdAt,
+        userName: usersTable.name,
+        userEmail: usersTable.email,
+      })
+      .from(settlementLogsTable)
+      .leftJoin(usersTable, eq(settlementLogsTable.userId, usersTable.id))
+      .orderBy(desc(settlementLogsTable.createdAt))
+      .limit(200);
+    res.json(logs);
+  } catch (err) {
+    logger.error({ err }, "Admin settlement-logs error");
+    res.status(500).json({ error: "Erro ao carregar logs" });
   }
 });
 
