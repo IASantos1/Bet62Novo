@@ -560,6 +560,7 @@ export default function AdminPage() {
     else if (activeTab === "risk") fetchRisk();
     else if (activeTab === "analytics") fetchAnalytics();
     else if (activeTab === "events") { fetchSuspended(); fetchFeed(); }
+    else if (activeTab === "settlement-logs") fetchSettlementLogs();
     else if (activeTab === "settings") { fetchSettings(); fetchAuditLogs(); }
   };
 

@@ -1416,6 +1416,8 @@ export default function Home() {
   const [expandedMatch, setExpandedMatch] = useState<Match | null>(null);
   const [betSlipOpenMobile, setBetSlipOpenMobile] = useState(false);
   const [isPlacingBet, setIsPlacingBet] = useState(false);
+  // Track visual viewport height to shrink drawer when virtual keyboard opens
+  const [vvHeight, setVvHeight] = useState<number | null>(null);
   const [betMode, setBetMode] = useState<"simples" | "multipla">("multipla");
   const [selectedLeague, setSelectedLeague] = useState<string | null>(null);
   const [showAppBanner, setShowAppBanner] = useState(() => {
@@ -1896,6 +1898,16 @@ export default function Home() {
         .then(ok => setBiometricAvailable(ok))
         .catch(() => setBiometricAvailable(false));
     }
+  }, []);
+
+  // ── Visual Viewport — shrink drawer when virtual keyboard opens ───────────────
+  useEffect(() => {
+    const vv = window.visualViewport;
+    if (!vv) return;
+    const onResize = () => setVvHeight(vv.height);
+    vv.addEventListener("resize", onResize);
+    onResize();
+    return () => vv.removeEventListener("resize", onResize);
   }, []);
 
   // ── Tab scroll ref ────────────────────────────────────────────────────────────
@@ -3830,6 +3842,10 @@ export default function Home() {
                                 const v = e.target.value.replace(/[^0-9.,]/g, "").replace(",", ".");
                                 setBetStakes(prev => ({ ...prev, [betKey(bet)]: v }));
                               }}
+                              onFocus={e => {
+                                const el = e.currentTarget;
+                                setTimeout(() => el.scrollIntoView({ block: "center", behavior: "smooth" }), 350);
+                              }}
                               className="flex-1 bg-transparent text-white text-sm font-mono px-2 py-2 outline-none placeholder-zinc-600"
                             />
                             {parseFloat(betStakes[betKey(bet)] || "0") > 0 && (
@@ -3880,6 +3896,10 @@ export default function Home() {
                     onChange={e => {
                       const v = e.target.value.replace(/[^0-9.,]/g, "").replace(",", ".");
                       setStake(v);
+                    }}
+                    onFocus={e => {
+                      const el = e.currentTarget;
+                      setTimeout(() => el.scrollIntoView({ block: "center", behavior: "smooth" }), 350);
                     }}
                     className="flex-1 bg-transparent text-white font-mono px-2 py-2.5 outline-none placeholder-zinc-600 text-sm"
                   />
@@ -9715,7 +9735,12 @@ export default function Home() {
       </div>
 
       {/* MOBILE BET SLIP */}
-      <div className={`lg:hidden fixed left-1/2 -translate-x-1/2 z-[55] transition-all duration-300 ${showAppBanner ? "bottom-32" : "bottom-6"}`}>
+      {/* safe-area-inset-bottom keeps the FAB above the home indicator on iOS.
+          Extra offset when the app banner is visible. */}
+      <div
+        className="lg:hidden fixed left-1/2 -translate-x-1/2 z-[55] transition-all duration-300"
+        style={{ bottom: showAppBanner ? "calc(7rem + env(safe-area-inset-bottom, 0px))" : "calc(1.5rem + env(safe-area-inset-bottom, 0px))" }}
+      >
         {bets.length > 0 && (
           <Drawer open={betSlipOpenMobile} onOpenChange={setBetSlipOpenMobile} shouldScaleBackground={false}>
             <DrawerTrigger asChild>
@@ -9744,8 +9769,19 @@ export default function Home() {
                 </div>
               </button>
             </DrawerTrigger>
-            {/* z-[60] ensures DrawerContent is always above the z-[55] trigger button */}
-            <DrawerContent className="border-0 text-white h-[88svh] p-0 z-[60]" style={{ background: "#0a0a0a", borderRadius: "24px 24px 0 0" }}>
+            {/* z-[60] ensures DrawerContent is always above the z-[55] trigger button.
+                Height is driven by visualViewport so the drawer shrinks when the virtual
+                keyboard opens — keeping the "APOSTAR AGORA" button always visible. */}
+            <DrawerContent
+              className="border-0 text-white p-0 z-[60]"
+              style={{
+                background: "#0a0a0a",
+                borderRadius: "24px 24px 0 0",
+                height: vvHeight ? `min(${Math.round(vvHeight * 0.96)}px, 92svh)` : "88svh",
+                maxHeight: vvHeight ? `${Math.round(vvHeight * 0.96)}px` : "92svh",
+                transition: "height 0.15s ease-out, max-height 0.15s ease-out",
+              }}
+            >
               {BetSlipContent()}
             </DrawerContent>
           </Drawer>
