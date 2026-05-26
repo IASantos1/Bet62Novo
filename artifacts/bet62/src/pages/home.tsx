@@ -1154,6 +1154,7 @@ type BetSelection = {
 };
 
 type StoredSelection = {
+  matchId?: string;
   matchTitle: string;
   selection: string;
   odd: number;
@@ -5609,8 +5610,14 @@ export default function Home() {
   // Normalize team name for fuzzy matching against live data
   const normTeam = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
 
-  // Find the live match (if any) corresponding to a stored selection
+  // Find the live/upcoming match corresponding to a stored selection.
+  // Priority 1: exact matchId (most reliable — works even after live status change).
+  // Priority 2: fuzzy team-name match (fallback for older bets without stored matchId).
   const findLiveMatchForSel = (sel: StoredSelection): Match | null => {
+    if (sel.matchId) {
+      const byId = liveMatches.find(m => String(m.id) === String(sel.matchId));
+      if (byId) return byId;
+    }
     const [h = "", a = ""] = (sel.matchTitle ?? "").split(" vs ");
     const nh = normTeam(h); const na = normTeam(a);
     if (!nh) return null;
@@ -9567,18 +9574,30 @@ export default function Home() {
                                         {i + 1}. {sel.matchTitle}
                                       </div>
                                       <div className={`text-[11px] mt-0.5 ${txtSub}`}>{getSelLabel(sel)}</div>
-                                      {/* Live badge */}
-                                      {lm && (
+                                      {/* Live / upcoming badge */}
+                                      {lm && lm.status !== "Not Started" && (
                                         <div className="flex items-center gap-2 mt-1.5 flex-wrap">
                                           <span className="flex items-center gap-1 bg-red-600 text-white text-[10px] font-black px-2 py-0.5 rounded-full">
                                             Ao vivo <span className="inline-block w-1.5 h-1.5 rounded-full bg-white animate-pulse ml-0.5" />
                                           </span>
-                                          <span className="text-[11px] font-black text-gray-700 tabular-nums">{displayMin} • {lm.homeScore}–{lm.awayScore}</span>
+                                          <span className="text-[11px] font-black text-gray-700 tabular-nums">{displayMin} • {lm.homeScore ?? 0}–{lm.awayScore ?? 0}</span>
                                           {liveOdd !== null && Math.abs(liveOdd - sel.odd) > 0.01 && (
                                             <span className={`text-[10px] font-bold ${liveOdd < sel.odd ? "text-green-500" : "text-red-500"}`}>
                                               {liveOdd < sel.odd ? "▼" : "▲"} {liveOdd.toFixed(2)}
                                             </span>
                                           )}
+                                        </div>
+                                      )}
+                                      {lm && lm.status === "Not Started" && (
+                                        <div className="flex items-center gap-2 mt-1.5">
+                                          <span className="flex items-center gap-1 bg-zinc-700 text-zinc-200 text-[10px] font-black px-2 py-0.5 rounded-full">
+                                            <Clock size={9} />
+                                            {lm.scheduledTime
+                                              ? `Hoje ${lm.scheduledTime}`
+                                              : lm.time
+                                              ? `Hoje ${lm.time}`
+                                              : "Em breve"}
+                                          </span>
                                         </div>
                                       )}
                                       {/* Final score */}
