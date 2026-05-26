@@ -15,7 +15,6 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Drawer, DrawerContent, DrawerTrigger } from "@/components/ui/drawer";
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem,
   DropdownMenuSeparator, DropdownMenuTrigger
@@ -1416,8 +1415,6 @@ export default function Home() {
   const [expandedMatch, setExpandedMatch] = useState<Match | null>(null);
   const [betSlipOpenMobile, setBetSlipOpenMobile] = useState(false);
   const [isPlacingBet, setIsPlacingBet] = useState(false);
-  // Track visual viewport height to shrink drawer when virtual keyboard opens
-  const [vvHeight, setVvHeight] = useState<number | null>(null);
   const [betMode, setBetMode] = useState<"simples" | "multipla">("multipla");
   const [selectedLeague, setSelectedLeague] = useState<string | null>(null);
   const [showAppBanner, setShowAppBanner] = useState(() => {
@@ -1898,16 +1895,6 @@ export default function Home() {
         .then(ok => setBiometricAvailable(ok))
         .catch(() => setBiometricAvailable(false));
     }
-  }, []);
-
-  // ── Visual Viewport — shrink drawer when virtual keyboard opens ───────────────
-  useEffect(() => {
-    const vv = window.visualViewport;
-    if (!vv) return;
-    const onResize = () => setVvHeight(vv.height);
-    vv.addEventListener("resize", onResize);
-    onResize();
-    return () => vv.removeEventListener("resize", onResize);
   }, []);
 
   // ── Tab scroll ref ────────────────────────────────────────────────────────────
@@ -9734,59 +9721,297 @@ export default function Home() {
         </aside>
       </div>
 
-      {/* MOBILE BET SLIP */}
-      {/* safe-area-inset-bottom keeps the FAB above the home indicator on iOS.
-          Extra offset when the app banner is visible. */}
-      <div
-        className="lg:hidden fixed left-1/2 -translate-x-1/2 z-[55] transition-all duration-300"
-        style={{ bottom: showAppBanner ? "calc(7rem + env(safe-area-inset-bottom, 0px))" : "calc(1.5rem + env(safe-area-inset-bottom, 0px))" }}
-      >
-        {bets.length > 0 && (
-          <Drawer open={betSlipOpenMobile} onOpenChange={setBetSlipOpenMobile} shouldScaleBackground={false}>
-            <DrawerTrigger asChild>
-              {/* Hide trigger when drawer is open — prevents it floating on top of the
-                  DrawerContent and intercepting taps on the "APOSTAR AGORA" button */}
-              <button
-                className={`flex items-center gap-0 rounded-2xl overflow-hidden text-white transition-all active:scale-[0.97] ${betSlipOpenMobile ? "opacity-0 pointer-events-none" : ""}`}
-                style={{
-                  boxShadow: "0 6px 28px rgba(220,38,38,0.45), 0 2px 8px rgba(0,0,0,0.6)",
-                  background: "linear-gradient(135deg,#dc2626 0%,#7f1d1d 100%)",
-                }}
-              >
-                {/* left: icon + label */}
-                <div className="flex items-center gap-2 pl-4 pr-3 py-3.5">
-                  <div className="w-5 h-5 rounded-full flex items-center justify-center font-black text-[11px]" style={{ background: "rgba(255,255,255,0.2)" }}>
-                    {bets.length}
-                  </div>
-                  <span className="font-black text-[13px] tracking-wide">BOLETIM</span>
-                </div>
-                {/* divider */}
-                <div className="w-px h-8 self-center" style={{ background: "rgba(255,255,255,0.2)" }} />
-                {/* right: odds or stake info */}
-                <div className="pl-3 pr-4 py-3.5 flex items-center gap-1">
-                  <span className="font-black text-[15px]">{totalOdds}</span>
-                  <span className="text-[11px] font-semibold opacity-70">×</span>
-                </div>
-              </button>
-            </DrawerTrigger>
-            {/* z-[60] ensures DrawerContent is always above the z-[55] trigger button.
-                Height is driven by visualViewport so the drawer shrinks when the virtual
-                keyboard opens — keeping the "APOSTAR AGORA" button always visible. */}
-            <DrawerContent
-              className="border-0 text-white p-0 z-[60]"
+      {/* ── MOBILE BET SLIP ── collapsed bar + full-screen overlay */}
+
+      {/* 1. Collapsed bar — slides up when bets are added, hidden when full-screen is open */}
+      <AnimatePresence>
+        {bets.length > 0 && !betSlipOpenMobile && (
+          <motion.div
+            key="betslip-bar"
+            initial={{ y: 80, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            exit={{ y: 80, opacity: 0 }}
+            transition={{ type: "spring", bounce: 0.2, duration: 0.4 }}
+            className="lg:hidden fixed left-0 right-0 z-[55] px-3"
+            style={{
+              bottom: showAppBanner
+                ? "calc(5.5rem + env(safe-area-inset-bottom, 0px))"
+                : "calc(0.75rem + env(safe-area-inset-bottom, 0px))",
+            }}
+            onClick={() => setBetSlipOpenMobile(true)}
+          >
+            <div
+              className="rounded-2xl px-4 py-3.5 flex items-center gap-3 active:scale-[0.98] transition-transform cursor-pointer select-none"
               style={{
-                background: "#0a0a0a",
-                borderRadius: "24px 24px 0 0",
-                height: vvHeight ? `min(${Math.round(vvHeight * 0.96)}px, 92svh)` : "88svh",
-                maxHeight: vvHeight ? `${Math.round(vvHeight * 0.96)}px` : "92svh",
-                transition: "height 0.15s ease-out, max-height 0.15s ease-out",
+                background: "linear-gradient(135deg, #dc2626 0%, #991b1b 100%)",
+                boxShadow: "0 6px 28px rgba(220,38,38,0.5), 0 2px 8px rgba(0,0,0,0.6)",
               }}
             >
-              {BetSlipContent()}
-            </DrawerContent>
-          </Drawer>
+              {/* Count badge */}
+              <div
+                className="w-8 h-8 rounded-full flex items-center justify-center font-black text-sm text-white shrink-0"
+                style={{ background: "rgba(255,255,255,0.18)" }}
+              >
+                {bets.length}
+              </div>
+              {/* Selections info */}
+              <div className="flex-1 min-w-0">
+                <div className="text-white/60 text-[10px] truncate leading-tight">
+                  {bets.map(b => b.label).join(" · ")}
+                </div>
+                <div className="text-white font-bold text-[13px] leading-snug">
+                  {effectiveBetMode === "multipla"
+                    ? `Múltipla (${bets.length})`
+                    : `Simples (${bets.length})`}
+                </div>
+              </div>
+              {/* Odds badge — amber, like reference */}
+              <div className="rounded-xl px-3 py-2 shrink-0" style={{ background: "#f59e0b" }}>
+                <span className="font-black text-black text-[17px] leading-none tabular-nums">{totalOdds}</span>
+              </div>
+            </div>
+          </motion.div>
         )}
-      </div>
+      </AnimatePresence>
+
+      {/* 2. Full-screen bet slip overlay */}
+      <AnimatePresence>
+        {betSlipOpenMobile && (
+          <motion.div
+            key="betslip-fullscreen"
+            initial={{ y: "100%" }}
+            animate={{ y: 0 }}
+            exit={{ y: "100%" }}
+            transition={{ type: "spring", bounce: 0, duration: 0.35 }}
+            className="lg:hidden fixed inset-0 z-[60] flex flex-col"
+            style={{ background: "#0f0f0f", paddingTop: "env(safe-area-inset-top, 0px)" }}
+          >
+            {/* Top bar */}
+            <div
+              className="flex items-center justify-between px-4 py-2.5 border-b border-zinc-800/80 shrink-0"
+              style={{ background: "#0a0a0a" }}
+            >
+              <button
+                onClick={() => setBetSlipOpenMobile(false)}
+                className="w-9 h-9 flex items-center justify-center rounded-full"
+                style={{ background: "rgba(255,255,255,0.07)" }}
+              >
+                <ChevronDown size={20} className="text-white" />
+              </button>
+
+              {/* Stake summary pill */}
+              <div
+                className="flex items-center gap-1.5 rounded-full px-4 py-1.5"
+                style={{ background: "rgba(255,255,255,0.07)", border: "1px solid rgba(255,255,255,0.1)" }}
+              >
+                <Plus size={12} className="text-zinc-400" />
+                <span className="text-white font-bold text-[13px] tabular-nums">
+                  {effectiveBetMode === "simples"
+                    ? `${bets.reduce((s, b) => s + parseFloat(betStakes[betKey(b)] || "0"), 0).toFixed(2)} €`
+                    : `${parseFloat(stake || "0").toFixed(2)} €`}
+                </span>
+              </div>
+
+              {/* Clear all */}
+              <button
+                onClick={() => { setBets([]); setBetStakes({}); setStake(""); setBetSlipOpenMobile(false); }}
+                className="w-9 h-9 flex items-center justify-center rounded-full"
+                style={{ background: "rgba(220,38,38,0.1)", border: "1px solid rgba(220,38,38,0.2)" }}
+              >
+                <Trash2 size={16} className="text-red-500" />
+              </button>
+            </div>
+
+            {/* Tabs */}
+            <div className="flex border-b border-zinc-800 shrink-0" style={{ background: "#0a0a0a" }}>
+              <button
+                onClick={() => { if (!hasDuplicateMatches) setBetMode("simples"); }}
+                className={`flex-1 py-3 text-[13px] font-bold transition-all ${effectiveBetMode === "simples" ? "text-white border-b-2 border-red-600" : "text-zinc-500"}`}
+              >
+                Simples
+              </button>
+              <button
+                onClick={() => { if (!hasDuplicateMatches) setBetMode("multipla"); }}
+                disabled={hasDuplicateMatches}
+                className={`flex-1 py-3 text-[13px] font-bold transition-all ${effectiveBetMode === "multipla" ? "text-white border-b-2 border-red-600" : hasDuplicateMatches ? "text-zinc-700" : "text-zinc-500"}`}
+              >
+                Múltipla ({bets.length})
+              </button>
+            </div>
+
+            {/* Scrollable bet cards */}
+            <div className="flex-1 overflow-y-auto px-3 py-3 space-y-2">
+              <AnimatePresence>
+                {bets.map((bet) => {
+                  const nowMs = Date.now();
+                  const lmatch = liveMatches.find(m => String(m.id) === String(bet.matchId));
+                  const mkt = bet.market ?? "result";
+                  const isSusp = lmatch?.marketSuspension
+                    ? ((lmatch.marketSuspension[mkt] ?? 0) > nowMs || (lmatch.marketSuspension["result"] ?? 0) > nowMs)
+                    : false;
+                  return (
+                    <motion.div
+                      key={`fs-${bet.matchId}-${bet.market}-${bet.selection}`}
+                      initial={{ opacity: 0, y: 12 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, x: -20, scale: 0.95 }}
+                      transition={{ duration: 0.2 }}
+                      className="relative rounded-2xl overflow-hidden"
+                      style={{
+                        background: isSusp ? "rgba(120,53,15,0.25)" : "rgba(255,255,255,0.04)",
+                        border: isSusp ? "1px solid rgba(245,158,11,0.35)" : "1px solid rgba(255,255,255,0.08)",
+                      }}
+                    >
+                      {isSusp && (
+                        <div className="absolute inset-0 flex items-center justify-center z-10 backdrop-blur-[2px] rounded-2xl" style={{ background: "rgba(0,0,0,0.55)" }}>
+                          <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-black animate-pulse" style={{ background: "#f59e0b", color: "#000" }}>
+                            <Lock size={10} /> ODDS SUSPENSAS
+                          </div>
+                        </div>
+                      )}
+                      <div className="px-4 py-3">
+                        {/* Match header + remove */}
+                        <div className="flex items-start justify-between mb-1.5">
+                          <div className="flex-1 min-w-0 pr-2">
+                            <div className="text-[10px] font-semibold uppercase tracking-wider truncate" style={{ color: "#dc2626" }}>
+                              {bet.matchTitle.split(" vs ")[0]?.trim()}
+                            </div>
+                            <div className="text-[11px] text-zinc-500 truncate">{bet.matchTitle}</div>
+                          </div>
+                          <button
+                            onClick={() => removeBet(bet.matchId, bet.market || "result", bet.selection)}
+                            className="w-5 h-5 rounded-full flex items-center justify-center shrink-0 z-20"
+                            style={{ background: "rgba(220,38,38,0.15)" }}
+                          >
+                            <X size={11} className="text-red-400" />
+                          </button>
+                        </div>
+                        {/* Selection + odd */}
+                        <div className="flex items-center justify-between">
+                          <div className="flex-1 pr-3">
+                            <div className="text-white font-bold text-[14px] leading-tight">{bet.label}</div>
+                            <div className="text-zinc-600 text-[11px] mt-0.5">Seleção</div>
+                          </div>
+                          <span
+                            className="font-black text-[22px] leading-none shrink-0"
+                            style={{ color: isSusp ? "#f59e0b" : "#dc2626" }}
+                          >
+                            {bet.odd.toFixed(2)}
+                          </span>
+                        </div>
+                        {/* Simples: individual stake */}
+                        {effectiveBetMode === "simples" && (
+                          <div className="mt-3">
+                            <div className="flex gap-1.5 mb-1.5">
+                              {[5, 10, 25, 50].map(amt => (
+                                <button
+                                  key={amt}
+                                  onClick={() => setBetStakes(prev => ({ ...prev, [betKey(bet)]: String(amt) }))}
+                                  className="flex-1 py-1 rounded-lg text-[11px] font-bold transition-all"
+                                  style={parseFloat(betStakes[betKey(bet)] || "0") === amt
+                                    ? { background: "#dc2626", color: "#fff" }
+                                    : { background: "rgba(255,255,255,0.05)", color: "#a1a1aa", border: "1px solid rgba(255,255,255,0.07)" }}
+                                >
+                                  €{amt}
+                                </button>
+                              ))}
+                            </div>
+                            <div className="flex items-center rounded-xl overflow-hidden" style={{ background: "rgba(0,0,0,0.4)", border: "1px solid rgba(255,255,255,0.08)" }}>
+                              <span className="pl-3 text-zinc-500 text-sm font-bold">€</span>
+                              <input
+                                type="text"
+                                inputMode="decimal"
+                                placeholder="Outro valor"
+                                value={betStakes[betKey(bet)] || ""}
+                                onChange={e => {
+                                  const v = e.target.value.replace(/[^0-9.,]/g, "").replace(",", ".");
+                                  setBetStakes(prev => ({ ...prev, [betKey(bet)]: v }));
+                                }}
+                                onFocus={e => {
+                                  const el = e.currentTarget;
+                                  setTimeout(() => el.scrollIntoView({ block: "center", behavior: "smooth" }), 350);
+                                }}
+                                className="flex-1 bg-transparent text-white text-sm font-mono px-2 py-2 outline-none placeholder-zinc-600"
+                              />
+                              {parseFloat(betStakes[betKey(bet)] || "0") > 0 && (
+                                <span className="pr-3 text-[12px] font-bold" style={{ color: "#22c55e" }}>
+                                  → €{(parseFloat(betStakes[betKey(bet)] || "0") * bet.odd).toFixed(2)}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </motion.div>
+                  );
+                })}
+              </AnimatePresence>
+            </div>
+
+            {/* Footer: stake input + summary + CTA */}
+            <div
+              className="px-4 pt-3 shrink-0 border-t border-zinc-800"
+              style={{ paddingBottom: "max(1rem, env(safe-area-inset-bottom, 1rem))", background: "#0a0a0a" }}
+            >
+              {/* Múltipla: Montante input + odds badge */}
+              {effectiveBetMode === "multipla" && (
+                <div className="flex items-center gap-3 mb-3">
+                  <div
+                    className="flex-1 flex items-center rounded-xl overflow-hidden"
+                    style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.1)" }}
+                  >
+                    <span className="pl-3 text-zinc-600 text-sm shrink-0">Montante</span>
+                    <input
+                      type="text"
+                      inputMode="decimal"
+                      placeholder="0,00"
+                      value={stake}
+                      onChange={e => {
+                        const v = e.target.value.replace(/[^0-9.,]/g, "").replace(",", ".");
+                        setStake(v);
+                      }}
+                      onFocus={e => {
+                        const el = e.currentTarget;
+                        setTimeout(() => el.scrollIntoView({ block: "center", behavior: "smooth" }), 350);
+                      }}
+                      className="flex-1 bg-transparent text-white font-mono px-2 py-3 outline-none placeholder-zinc-700 text-sm text-right"
+                    />
+                    <span className="pr-3 text-zinc-600 text-sm shrink-0">€</span>
+                  </div>
+                  <div className="rounded-xl px-3 py-2.5 shrink-0" style={{ background: "#f59e0b" }}>
+                    <span className="font-black text-black text-[17px] leading-none tabular-nums">{totalOdds}</span>
+                  </div>
+                </div>
+              )}
+
+              {/* Ganhos possíveis */}
+              <div className="flex items-center justify-between mb-3">
+                <span className="text-zinc-500 text-sm">Ganhos possíveis</span>
+                <span className="font-bold text-[15px]" style={{ color: "#22c55e" }}>
+                  {effectiveBetMode === "simples"
+                    ? `${simplesPotential} €`
+                    : `${(parseFloat(stake || "0") * parseFloat(totalOdds)).toFixed(2)} €`}
+                </span>
+              </div>
+
+              {/* APOSTAR button */}
+              <button
+                onClick={handlePlaceBet}
+                disabled={isPlacingBet}
+                className="w-full h-13 rounded-2xl font-black text-[15px] text-white flex items-center justify-center gap-2 transition-all active:scale-[0.98]"
+                style={{
+                  background: "linear-gradient(135deg,#dc2626 0%,#991b1b 100%)",
+                  boxShadow: "0 4px 20px rgba(220,38,38,0.4)",
+                }}
+              >
+                {isPlacingBet
+                  ? <><Loader2 className="animate-spin" size={16} /> A PROCESSAR...</>
+                  : auth.user ? "APOSTAR" : "ENTRAR PARA APOSTAR"}
+              </button>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* MOBILE APP DOWNLOAD BANNER */}
       <AnimatePresence>
