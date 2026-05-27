@@ -4321,67 +4321,6 @@ export default function Home() {
 
         <main className="flex-1 pb-32 lg:pb-8 overflow-hidden min-w-0">
 
-          {/* HERO — sports tab only, hidden when a match is expanded */}
-          {activeTab === "sports" && !expandedMatch && (
-            <div className="relative overflow-hidden bg-gradient-to-br from-zinc-900 via-zinc-950 to-black border-b border-zinc-900">
-              <div className="absolute inset-0 pointer-events-none">
-                <div className="absolute -top-20 -left-20 w-96 h-96 bg-red-600/10 rounded-full blur-3xl" />
-                <div className="absolute -bottom-20 -right-20 w-96 h-96 bg-red-900/10 rounded-full blur-3xl" />
-              </div>
-
-              <div className="relative z-10 px-4 lg:px-8 pt-10 pb-10 max-w-4xl">
-                <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.6 }}>
-                  <div className="flex items-center gap-2 mb-3">
-                    <span className="inline-flex items-center gap-1.5 bg-red-600/20 border border-red-500/30 text-red-400 text-xs font-bold px-3 py-1 rounded-full">
-                      <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse inline-block" />
-                      PLATAFORMA OFICIAL
-                    </span>
-                  </div>
-                  <h1 className="text-5xl lg:text-7xl font-black italic tracking-tighter mb-3 leading-none">
-                    <span className="text-white">BET</span><span className="text-red-600">62</span>
-                  </h1>
-                  <p className="text-lg lg:text-xl text-zinc-400 mb-8 max-w-xl">
-                    Onde cada jogo é uma oportunidade. As melhores odds da Europa, ao vivo ou pré-jogo.
-                  </p>
-
-                  {/* Real stats from API */}
-                  {platformStats && (
-                    <div className="flex flex-wrap gap-6 mb-8">
-                      <div className="flex items-center gap-2 text-sm text-zinc-300">
-                        <User size={14} className="text-red-500" />
-                        <span>{platformStats.totalUsers.toLocaleString("pt-BR")} usuários cadastrados</span>
-                      </div>
-                      <div className="flex items-center gap-2 text-sm text-zinc-300">
-                        <TrendingUp size={14} className="text-red-500" />
-                        <span>{platformStats.totalBets.toLocaleString("pt-BR")} apostas realizadas</span>
-                      </div>
-                      {platformStats.totalPaidOut > 0 && (
-                        <div className="flex items-center gap-2 text-sm text-zinc-300">
-                          <Zap size={14} className="text-red-500" />
-                          <span>€ {platformStats.totalPaidOut.toLocaleString("pt-PT", { minimumFractionDigits: 2 })} em prémios pagos</span>
-                        </div>
-                      )}
-                    </div>
-                  )}
-
-                  <div className="flex flex-wrap gap-3">
-                    {auth.user ? (
-                      <Button size="lg" className="bg-red-600 hover:bg-red-700 text-white font-black text-base px-8 h-12 italic">
-                        FAZER DEPÓSITO <ChevronRight size={18} className="ml-1" />
-                      </Button>
-                    ) : (
-                      <>
-                        <Button size="lg" onClick={() => setAuthModalOpen(true)} className="bg-red-600 hover:bg-red-700 text-white font-black text-base px-8 h-12 italic">
-                          CRIAR CONTA <ChevronRight size={18} className="ml-1" />
-                        </Button>
-                      </>
-                    )}
-                  </div>
-                </motion.div>
-              </div>
-            </div>
-          )}
-
           <div className="p-4 lg:p-8">
             {/* Inline market detail view — replaces match list when a match is expanded */}
             {expandedMatch && (
