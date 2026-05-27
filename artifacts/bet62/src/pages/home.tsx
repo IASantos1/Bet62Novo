@@ -4374,9 +4374,6 @@ export default function Home() {
                         <Button size="lg" onClick={() => setAuthModalOpen(true)} className="bg-red-600 hover:bg-red-700 text-white font-black text-base px-8 h-12 italic">
                           CRIAR CONTA <ChevronRight size={18} className="ml-1" />
                         </Button>
-                        <Button size="lg" variant="outline" onClick={() => setAuthModalOpen(true)} className="border-zinc-700 text-zinc-300 hover:bg-zinc-800 h-12 px-8">
-                          JÁ TENHO CONTA
-                        </Button>
                       </>
                     )}
                   </div>
