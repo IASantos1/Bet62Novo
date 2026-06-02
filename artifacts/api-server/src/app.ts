@@ -43,7 +43,7 @@ if (process.env.NODE_ENV === "production") {
   );
   if (fs.existsSync(webDistPath)) {
     app.use(express.static(webDistPath));
-    app.get("*", (_req, res) => {
+    app.get("/{*path}", (_req, res) => {
       res.sendFile(path.join(webDistPath, "index.html"));
     });
     logger.info({ webDistPath }, "Serving web SPA from dist");
