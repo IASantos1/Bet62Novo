@@ -1470,6 +1470,9 @@ export default function Home() {
   // Live minute ticker — interpolates clock between API refreshes
   const liveDataFetchedAt = useRef(0);
   const apiMinutesRef = useRef<Record<string, number>>({});
+  // Per-match: timestamp when the API minute value last CHANGED (not just when SSE arrived).
+  // Used so elapsed grows correctly between events (API only updates minute on goals/cards).
+  const minuteChangedAtRef = useRef<Record<string, number>>({});
   const seenMatchIds = useRef(new Set<string>());
   const [, setMinuteTick] = useState(0);
 
@@ -1964,12 +1967,17 @@ export default function Home() {
   // Interpolation is paused only when match status is "HT" (half-time break),
   // NOT simply because minute equals 45/90 (those can occur during active play).
   const getDisplayMinute = (match: Match): number => {
-    const apiMin = apiMinutesRef.current[String(match.id)] ?? match.minute ?? 0;
-    const fetchedAt = liveDataFetchedAt.current;
+    const id = String(match.id);
+    const apiMin = apiMinutesRef.current[id] ?? match.minute ?? 0;
     const isHalfTimeBreak = match.status === "HT";
-    if (fetchedAt === 0 || isHalfTimeBreak) return apiMin;
-    // Cap elapsed at 1 min — avoids clock runaway when SSE pauses/drops
-    const elapsed = Math.min(1, Math.floor((Date.now() - fetchedAt) / 60000));
+    if (isHalfTimeBreak) return apiMin;
+    // Use per-match "minute last changed" timestamp so elapsed grows correctly
+    // between API events (API only updates minute on goals/cards — not every second).
+    // Falls back to liveDataFetchedAt for newly seen matches.
+    const changedAt = minuteChangedAtRef.current[id] ?? liveDataFetchedAt.current;
+    if (changedAt === 0) return apiMin;
+    // Cap at 10 min to prevent runaway if match disappears from feed briefly
+    const elapsed = Math.min(10, Math.floor((Date.now() - changedAt) / 60000));
     const computed = apiMin + elapsed;
     if (apiMin < 45) return Math.min(45, computed);
     if (apiMin < 90) return Math.min(90, computed);
@@ -2318,9 +2326,17 @@ export default function Home() {
     // Guard: never replace live state with an empty list — keep stale on API errors
     if (matches.length === 0) return;
     const newMins: Record<string, number> = {};
-    for (const m of matches) newMins[String(m.id)] = m.minute;
+    const now = Date.now();
+    for (const m of matches) {
+      const id = String(m.id);
+      newMins[id] = m.minute;
+      // Only reset the clock when the API minute value actually advances
+      if (m.minute !== apiMinutesRef.current[id]) {
+        minuteChangedAtRef.current[id] = now;
+      }
+    }
     apiMinutesRef.current = newMins;
-    liveDataFetchedAt.current = Date.now();
+    liveDataFetchedAt.current = now;
     setLiveMatches(prev => {
       const newPrev: Record<string, Odds> = {};
       const newPrevMkts: Record<string, Record<string, number>> = {};
