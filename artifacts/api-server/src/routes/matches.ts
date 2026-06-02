@@ -1891,15 +1891,44 @@ type SAPIV2TournObj  = {
   category?: { name?: string; slug?: string; id?: number; country?: { name?: string; alpha2?: string } };
 };
 
-// Allowed tennis category slugs (ATP Tour, WTA Tour, ATP Challenger, WTA 125).
-// Everything else (ITF, UTR PTT, Juniors, Wheelchair, Legends…) is excluded.
-const TENNIS_ELITE_SLUGS = new Set(["atp", "wta", "wta-125", "challenger"]);
+// Slugs for pre-match upcoming filter: only top-tier circuits.
+const TENNIS_UPCOMING_SLUGS = new Set(["atp", "wta", "wta-125", "challenger"]);
+// Slugs for live filter: also include ITF men/women singles (other bookmakers cover these).
+const TENNIS_LIVE_SLUGS = new Set(["atp", "wta", "wta-125", "challenger", "itf-men", "itf-women"]);
 
+/** Tournament name patterns that are always excluded (doubles, wheelchair, juniors, etc.) */
+function isTennisExcludedName(name: string): boolean {
+  const n = name.toLowerCase();
+  return (
+    n.includes("doubles") ||
+    n.includes("wheelchair") ||
+    n.includes("quad") ||
+    n.includes("junior") ||
+    n.includes("boys") ||
+    n.includes("girls") ||
+    n.includes("legends") ||
+    n.includes("exhibition") ||
+    n.includes("utr") ||
+    n.includes("mc finals")
+  );
+}
+
+/** Live filter: ATP/WTA/Challenger + ITF singles. Excludes doubles/wheelchair/juniors. */
 function isTennisElite(ev: SAPIV2Event): boolean {
   const t = ev.tournament;
-  if (typeof t !== "object") return false; // string-only tournament — no category info, exclude
+  if (typeof t !== "object") return false;
   const slug = t.category?.slug?.toLowerCase() ?? "";
-  return TENNIS_ELITE_SLUGS.has(slug);
+  if (!TENNIS_LIVE_SLUGS.has(slug)) return false;
+  return !isTennisExcludedName(t.name ?? "");
+}
+
+/** Upcoming filter: top-tier only (ATP/WTA/Challenger/WTA-125). No ITF in pre-match. */
+function isTennisEliteUpcoming(ev: SAPIV2Event): boolean {
+  const t = ev.tournament;
+  if (typeof t !== "object") return false;
+  const slug = t.category?.slug?.toLowerCase() ?? "";
+  if (!TENNIS_UPCOMING_SLUGS.has(slug)) return false;
+  return !isTennisExcludedName(t.name ?? "");
 }
 type SAPIV2TeamObj   = { id?: number; name: string };
 
@@ -6243,10 +6272,21 @@ function buildBaseballLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
 
 function buildTennisLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
   const result: LiveMatchState[] = [];
+  const seenIds = new Set<number>();
+  const seenPairs = new Set<string>();
   const nowSec = Date.now() / 1000;
   for (const ev of events) {
-    // Only ATP, WTA, ATP Challenger, WTA 125 — exclude ITF, UTR, Juniors, Wheelchair, etc.
+    // Deduplicate by event ID (API sometimes returns the same event twice)
+    if (seenIds.has(ev.id)) continue;
+    seenIds.add(ev.id);
+    // ATP/WTA/Challenger/WTA-125 + ITF singles; excludes doubles/wheelchair/UTR/juniors
     if (!isTennisElite(ev)) continue;
+    // Also deduplicate by player pair (API can return same match with different IDs)
+    const h = v2TeamName(ev.homeTeam).toLowerCase();
+    const a = v2TeamName(ev.awayTeam).toLowerCase();
+    const pairKey = `${h}|${a}`;
+    if (seenPairs.has(pairKey)) continue;
+    seenPairs.add(pairKey);
     const code = v2StatusCode(ev);
     const statusStr = v2StatusStr(ev.status);
     // Skip only matches that are definitively not live
@@ -6635,8 +6675,8 @@ async function buildTennisUpcoming(): Promise<UpcomingMatch[]> {
     const filtered: SAPIV2Event[] = [];
 
     for (const ev of events) {
-      // Only ATP, WTA, ATP Challenger, WTA 125
-      if (!isTennisElite(ev)) continue;
+      // Only ATP, WTA, ATP Challenger, WTA 125 — no ITF in pre-match upcoming
+      if (!isTennisEliteUpcoming(ev)) continue;
       const home = v2TeamName(ev.homeTeam);
       const away = v2TeamName(ev.awayTeam);
       if (home === "Unknown" || away === "Unknown") continue;
