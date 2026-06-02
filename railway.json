@@ -1,0 +1,11 @@
+{
+  "$schema": "https://railway.com/railway.schema.json",
+  "build": {
+    "buildCommand": "pnpm install && PORT=3000 BASE_PATH=/ pnpm --filter @workspace/bet62 run build && pnpm --filter @workspace/api-server run build"
+  },
+  "deploy": {
+    "startCommand": "pnpm --filter @workspace/api-server run start",
+    "restartPolicyType": "on_failure",
+    "restartPolicyMaxRetries": 5
+  }
+}
