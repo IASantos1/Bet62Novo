@@ -4,11 +4,17 @@ import jwt from "jsonwebtoken";
 import { db, usersTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import { logger } from "../lib/logger";
+import { randomBytes } from "crypto";
 
 const router: IRouter = Router();
-const SESSION_SECRET = process.env.SESSION_SECRET;
+
+let SESSION_SECRET = process.env.SESSION_SECRET;
 if (!SESSION_SECRET) {
-  throw new Error("[SECURITY] SESSION_SECRET environment variable is not set.");
+  SESSION_SECRET = randomBytes(32).toString("hex");
+  console.warn(
+    "[WARNING] SESSION_SECRET is not set. A temporary random secret has been generated. " +
+    "Set SESSION_SECRET in your deployment configuration to persist sessions across restarts."
+  );
 }
 
 function validatePortugueseNif(nif: string): boolean {
@@ -37,6 +43,11 @@ router.post("/register", async (req, res): Promise<void> => {
   }
 
   try {
+    if (!db) {
+      res.status(503).json({ error: "Database connection unavailable" });
+      return;
+    }
+
     const existingUser = await db.select().from(usersTable).where(eq(usersTable.email, email)).limit(1);
     if (existingUser.length > 0) {
       res.status(400).json({ error: "Email already registered" });
@@ -80,6 +91,11 @@ router.post("/login", async (req, res): Promise<void> => {
   }
 
   try {
+    if (!db) {
+      res.status(503).json({ error: "Database connection unavailable" });
+      return;
+    }
+
     const [user] = await db.select().from(usersTable).where(eq(usersTable.email, email)).limit(1);
     if (!user) {
       res.status(401).json({ error: "Invalid credentials" });
@@ -122,6 +138,11 @@ router.post("/deposit", authMiddleware, async (req: AuthRequest, res: Response):
     return;
   }
   try {
+    if (!db) {
+      res.status(503).json({ error: "Database connection unavailable" });
+      return;
+    }
+
     const [user] = await db
       .update(usersTable)
       .set({ balance: sql`${usersTable.balance} + ${amount.toFixed(2)}` })
@@ -148,6 +169,11 @@ router.post("/deposit", authMiddleware, async (req: AuthRequest, res: Response):
 // ─── WEEKLY CASHBACK CHECK ───────────────────────────────────────────────────
 router.get("/cashback", authMiddleware, async (req: AuthRequest, res: Response): Promise<void> => {
   try {
+    if (!db) {
+      res.status(503).json({ error: "Database connection unavailable" });
+      return;
+    }
+
     const userId = req.user!.id;
     // Sum all bets lost in the last 7 days
     const { betsTable } = await import("@workspace/db");
@@ -169,6 +195,11 @@ router.get("/cashback", authMiddleware, async (req: AuthRequest, res: Response):
 
 router.get("/me", authMiddleware, async (req: AuthRequest, res: Response): Promise<void> => {
   try {
+    if (!db) {
+      res.status(503).json({ error: "Database connection unavailable" });
+      return;
+    }
+
     const [user] = await db.select().from(usersTable).where(eq(usersTable.id, req.user!.id)).limit(1);
     if (!user) {
       res.status(404).json({ error: "User not found" });
@@ -196,3 +227,4 @@ router.get("/me", authMiddleware, async (req: AuthRequest, res: Response): Promi
 });
 
 export default router;
+
