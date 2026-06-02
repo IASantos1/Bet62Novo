@@ -4308,10 +4308,7 @@ export default function Home() {
       return (
         <div className="mt-4">
           <div className="flex flex-col items-center gap-4 py-4">
-            <div className="flex flex-col items-center gap-1">
-              <span className="text-[9px] font-black uppercase tracking-widest text-yellow-400 bg-yellow-950/40 border border-yellow-700/40 rounded px-3 py-1">🎯 Penáltis em curso</span>
-              <span className="text-[11px] font-black uppercase tracking-widest text-white/80 mt-1">Vencedor da Final</span>
-            </div>
+            <span className="text-[11px] font-black uppercase tracking-widest text-white/80">🎯 Vencedor da Final</span>
             <div className="flex gap-3 w-full max-w-xs">
               <MarketOddsBtn match={match} sel="pen-home" odd={m.penExtra.winner.home} market="penaltis" label={match.home} />
               <MarketOddsBtn match={match} sel="pen-away" odd={m.penExtra.winner.away} market="penaltis" label={match.away} />
@@ -4385,17 +4382,7 @@ export default function Home() {
         )}
 
         {/* ── PENÁLTIS (SHOOTOUT) ── */}
-        {isFootball && showPen && m?.penExtra && (modalTab === "penaltis" || modalTab === "todos") && (
-          <div className="mb-2">
-            <div className="flex items-center gap-2 mb-3 px-1">
-              <span className="text-[10px] font-black uppercase tracking-widest text-yellow-400 bg-yellow-950/40 border border-yellow-700/40 rounded px-2 py-0.5">🎯 Penáltis em curso</span>
-            </div>
-            <MarketGroup title="Vencedor nos Penáltis">
-              <MarketOddsBtn match={match} sel="pen-home" odd={m.penExtra.winner.home} market="penaltis" label={match.home} />
-              <MarketOddsBtn match={match} sel="pen-away" odd={m.penExtra.winner.away} market="penaltis" label={match.away} />
-            </MarketGroup>
-          </div>
-        )}
+        {/* Penalty section handled by early-return above when showPen */}
 
         {/* ── RESULTADO / VENCEDOR ── hide for live football when result is obvious ── */}
         {(modalTab === "resultado" || modalTab === "todos") && (() => {
