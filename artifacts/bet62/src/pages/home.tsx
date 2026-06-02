@@ -1968,7 +1968,8 @@ export default function Home() {
     const fetchedAt = liveDataFetchedAt.current;
     const isHalfTimeBreak = match.status === "HT";
     if (fetchedAt === 0 || isHalfTimeBreak) return apiMin;
-    const elapsed = Math.floor((Date.now() - fetchedAt) / 60000);
+    // Cap elapsed at 1 min — avoids clock runaway when SSE pauses/drops
+    const elapsed = Math.min(1, Math.floor((Date.now() - fetchedAt) / 60000));
     const computed = apiMin + elapsed;
     if (apiMin < 45) return Math.min(45, computed);
     if (apiMin < 90) return Math.min(90, computed);
@@ -2997,6 +2998,7 @@ export default function Home() {
     const countdownLabel = (() => {
       if (!isEmBreve) return "";
       const si = match.startsIn!;
+      if (si === 0) return "A Iniciar";
       if (si < 60) return `Em ${si}min`;
       const h = Math.floor(si / 60);
       const m = si % 60;
@@ -3020,10 +3022,18 @@ export default function Home() {
       return `${match.scheduledDate} ${time}`;
     })();
 
+    const isStarting = isEmBreve && match.startsIn === 0;
     const liveBadge = isEmBreve ? (
       <div className="flex items-center gap-1.5">
-        <Clock size={10} className="text-amber-400 shrink-0" />
-        <span className="text-[10px] font-bold text-amber-400 tabular-nums">
+        {isStarting ? (
+          <span className="relative flex h-1.5 w-1.5 shrink-0">
+            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
+            <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-amber-400"></span>
+          </span>
+        ) : (
+          <Clock size={10} className="text-amber-400 shrink-0" />
+        )}
+        <span className={`text-[10px] font-bold tabular-nums ${isStarting ? "text-amber-300" : "text-amber-400"}`}>
           {scheduledDisplay ?? countdownLabel}
         </span>
       </div>
