@@ -1,7 +1,7 @@
 import { createServer } from "http";
 import app from "./app";
 import { logger } from "./lib/logger";
-import { getUpcomingAll, initSportWebSockets, initLiveWsServer } from "./routes/matches";
+import { getUpcomingAll, initSportWebSockets, initV1SportWebSockets, initLiveWsServer } from "./routes/matches";
 import { startSettlementWorker } from "./settlement";
 
 const rawPort = process.env["PORT"];
@@ -30,6 +30,9 @@ server.listen(port, (err?: Error) => {
 
   // Open persistent WebSocket connections to SportsAPI Pro V2 for real-time live scores
   initSportWebSockets();
+
+  // Open V1 WebSocket connections for faster score-only updates (1-2s latency)
+  initV1SportWebSockets();
 
   // WebSocket endpoint for mobile clients (/api/matches/ws)
   initLiveWsServer(server);

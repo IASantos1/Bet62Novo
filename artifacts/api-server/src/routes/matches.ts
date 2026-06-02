@@ -1,6 +1,7 @@
 import { Router, type IRouter } from "express";
 import { WebSocketServer, type WebSocket as WsClient } from "ws";
 import { CONFIG } from "../lib/config";
+import { logger } from "../lib/logger";
 
 const router: IRouter = Router();
 
@@ -4042,6 +4043,7 @@ function connectSportWS(sport: SportKey): void {
 
   ws.addEventListener("open", () => {
     wsConnected.add(sport);
+    logger.info({ sport, version: "v2" }, "WS connected");
     ws.send(JSON.stringify({ action: "subscribe", channel: "live-scores" }));
   });
 
@@ -4059,12 +4061,14 @@ function connectSportWS(sport: SportKey): void {
 
   ws.addEventListener("close", () => {
     wsConnected.delete(sport);
+    logger.warn({ sport, version: "v2" }, "WS closed — reconnecting in 5s");
     scheduleReconnect(sport);
   });
 
-  ws.addEventListener("error", () => {
+  ws.addEventListener("error", (err) => {
     // error always precedes close; let the close handler reconnect
     wsConnected.delete(sport);
+    logger.error({ sport, version: "v2", err }, "WS error");
   });
 }
 
@@ -4081,6 +4085,157 @@ function scheduleReconnect(sport: SportKey): void {
 export function initSportWebSockets(): void {
   for (const sport of Object.keys(WS_DOMAINS) as SportKey[]) {
     connectSportWS(sport);
+  }
+}
+
+// ─── V1 WebSocket — 1-2s score-only updates ────────────────────────────────
+// V1 gives faster score deltas (1-2s vs 2-5s on V2). We use it exclusively
+// for patching homeScore/awayScore/status/minute into the V2 in-memory cache.
+// All other data (odds, stats, etc.) stays with V2.
+
+const V1_WS_DOMAINS: Record<SportKey, string> = {
+  football:   "v1.football.sportsapipro.com",
+  basketball: "v1.basketball.sportsapipro.com",
+  hockey:     "v1.hockey.sportsapipro.com",
+  baseball:   "v1.baseball.sportsapipro.com",
+  tennis:     "v1.tennis.sportsapipro.com",
+};
+
+const v1WsConnected = new Set<SportKey>();
+const v1WsTimers = new Map<SportKey, ReturnType<typeof setTimeout>>();
+const v1WsRetryDelay = new Map<SportKey, number>(); // ms, doubles on each failure (cap 60s)
+
+type V1ScoreEvent = {
+  id?: number;
+  homeScore?: number | { current?: number };
+  awayScore?: number | { current?: number };
+  status?: string | { description?: string };
+  minute?: number;
+};
+
+function v1ScoreNum(s: number | { current?: number } | undefined): number | undefined {
+  if (s === undefined || s === null) return undefined;
+  return typeof s === "number" ? s : s.current;
+}
+
+function v1StatusStr(s: string | { description?: string } | undefined): string | undefined {
+  if (!s) return undefined;
+  return typeof s === "string" ? s : s.description;
+}
+
+/** Patch a single V1 score delta into the existing V2 cache for the sport. */
+function applyV1ScorePatch(sport: SportKey, ev: V1ScoreEvent): void {
+  if (!ev.id) return;
+
+  let cache: SAPIV2Event[] | null = null;
+  switch (sport) {
+    case "football":   cache = footballLiveV2Cache;   break;
+    case "basketball": cache = basketballLiveV2Cache; break;
+    case "hockey":     cache = hockeyLiveV2Cache;     break;
+    case "baseball":   cache = baseballLiveV2Cache;   break;
+    case "tennis":     cache = tennisLiveV2Cache;     break;
+  }
+  if (!cache) return; // no V2 snapshot yet — ignore until V2 provides context
+
+  const idx = cache.findIndex(e => e.id === ev.id);
+  if (idx < 0) return; // match not in current V2 cache — skip
+
+  const existing = cache[idx]!;
+  const homeScore = v1ScoreNum(ev.homeScore);
+  const awayScore = v1ScoreNum(ev.awayScore);
+  const status    = v1StatusStr(ev.status);
+
+  // Build a shallow-patched copy — only overwrite score-related fields
+  const patched: SAPIV2Event = {
+    ...existing,
+    ...(homeScore !== undefined ? { homeScore } : {}),
+    ...(awayScore !== undefined ? { awayScore } : {}),
+    ...(status    !== undefined ? { status }    : {}),
+    ...(ev.minute !== undefined ? { roundInfo: { round: ev.minute } } : {}),
+  };
+
+  const updated = [...cache.slice(0, idx), patched, ...cache.slice(idx + 1)];
+  applyV2WsMessage(sport, { events: updated });
+  broadcastLive().catch(() => { /* ignore */ });
+}
+
+/** Parse a raw V1 WS message and dispatch score patches. */
+function applyV1WsMessage(sport: SportKey, raw: unknown): void {
+  if (!raw || typeof raw !== "object") return;
+  const msg = raw as Record<string, unknown>;
+
+  if (Array.isArray(msg["events"])) {
+    for (const ev of msg["events"] as V1ScoreEvent[]) applyV1ScorePatch(sport, ev);
+  } else if (msg["event"] && typeof msg["event"] === "object") {
+    applyV1ScorePatch(sport, msg["event"] as V1ScoreEvent);
+  } else if (Array.isArray(msg["data"])) {
+    for (const ev of msg["data"] as V1ScoreEvent[]) applyV1ScorePatch(sport, ev);
+  } else if ((msg as V1ScoreEvent).id !== undefined) {
+    // Bare event object
+    applyV1ScorePatch(sport, msg as V1ScoreEvent);
+  }
+}
+
+function connectV1SportWS(sport: SportKey): void {
+  if (v1WsConnected.has(sport)) return;
+
+  const key = SPORTSAPI_KEY;
+  if (!key) return;
+
+  const url = `wss://${V1_WS_DOMAINS[sport]}/ws?x-api-key=${key}`;
+  let ws: WebSocket;
+  try {
+    ws = new WebSocket(url);
+  } catch {
+    scheduleV1Reconnect(sport);
+    return;
+  }
+
+  ws.addEventListener("open", () => {
+    v1WsConnected.add(sport);
+    v1WsRetryDelay.set(sport, 5_000); // reset backoff on success
+    logger.info({ sport, version: "v1" }, "V1 WS connected");
+    try { ws.send(JSON.stringify({ action: "subscribe", channel: "live-scores" })); } catch { /* ignore */ }
+  });
+
+  ws.addEventListener("message", (evt) => {
+    try {
+      const data: unknown = JSON.parse(typeof evt.data === "string" ? evt.data : String(evt.data));
+      applyV1WsMessage(sport, data);
+    } catch {
+      // non-JSON heartbeat — ignore
+    }
+  });
+
+  ws.addEventListener("close", () => {
+    v1WsConnected.delete(sport);
+    const delay = v1WsRetryDelay.get(sport) ?? 5_000;
+    logger.warn({ sport, version: "v1", retryMs: delay }, "V1 WS closed — scheduling reconnect");
+    scheduleV1Reconnect(sport, delay);
+  });
+
+  ws.addEventListener("error", () => {
+    // error always precedes close — close handler does the reconnect
+    v1WsConnected.delete(sport);
+  });
+}
+
+function scheduleV1Reconnect(sport: SportKey, delayMs = 5_000): void {
+  if (v1WsTimers.has(sport)) return;
+  // Exponential backoff: double each failure, cap at 60s
+  const nextDelay = Math.min(delayMs * 2, 60_000);
+  v1WsRetryDelay.set(sport, nextDelay);
+  const t = setTimeout(() => {
+    v1WsTimers.delete(sport);
+    connectV1SportWS(sport);
+  }, delayMs);
+  v1WsTimers.set(sport, t);
+}
+
+/** Call once at startup to open V1 WebSocket connections for fastest score updates. */
+export function initV1SportWebSockets(): void {
+  for (const sport of Object.keys(V1_WS_DOMAINS) as SportKey[]) {
+    connectV1SportWS(sport);
   }
 }
 
