@@ -1888,8 +1888,19 @@ type SAPIV2ScoreObj = {
 type SAPIV2StatusObj = { code?: number; description?: string; type?: string };
 type SAPIV2TournObj  = {
   id?: number; name?: string; slug?: string;
-  category?: { name?: string; id?: number; country?: { name?: string; alpha2?: string } };
+  category?: { name?: string; slug?: string; id?: number; country?: { name?: string; alpha2?: string } };
 };
+
+// Allowed tennis category slugs (ATP Tour, WTA Tour, ATP Challenger, WTA 125).
+// Everything else (ITF, UTR PTT, Juniors, Wheelchair, Legends…) is excluded.
+const TENNIS_ELITE_SLUGS = new Set(["atp", "wta", "wta-125", "challenger"]);
+
+function isTennisElite(ev: SAPIV2Event): boolean {
+  const t = ev.tournament;
+  if (typeof t !== "object") return false; // string-only tournament — no category info, exclude
+  const slug = t.category?.slug?.toLowerCase() ?? "";
+  return TENNIS_ELITE_SLUGS.has(slug);
+}
 type SAPIV2TeamObj   = { id?: number; name: string };
 
 type SAPIV2Event = {
@@ -6234,6 +6245,8 @@ function buildTennisLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
   const result: LiveMatchState[] = [];
   const nowSec = Date.now() / 1000;
   for (const ev of events) {
+    // Only ATP, WTA, ATP Challenger, WTA 125 — exclude ITF, UTR, Juniors, Wheelchair, etc.
+    if (!isTennisElite(ev)) continue;
     const code = v2StatusCode(ev);
     const statusStr = v2StatusStr(ev.status);
     // Skip only matches that are definitively not live
@@ -6619,6 +6632,8 @@ async function buildTennisUpcoming(): Promise<UpcomingMatch[]> {
     const filtered: SAPIV2Event[] = [];
 
     for (const ev of events) {
+      // Only ATP, WTA, ATP Challenger, WTA 125
+      if (!isTennisElite(ev)) continue;
       const home = v2TeamName(ev.homeTeam);
       const away = v2TeamName(ev.awayTeam);
       if (home === "Unknown" || away === "Unknown") continue;
