@@ -6514,12 +6514,15 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
   const SOON_WINDOW: Record<string, number> = {
     football: 2160, soccer: 2160,   // football: up to 36 h (many fixtures spread over days)
     basketball: 480, hockey: 480,    // NBA/NHL: up to 8 h (evening US games)
+    tennis: 900,                     // tennis: 15 h — covers next-day morning Roland Garros at night
   };
-  const DEFAULT_SOON_WINDOW = 240; // 4 h for tennis, volleyball, etc.
+  const DEFAULT_SOON_WINDOW = 240; // 4 h for volleyball, etc.
   const allUpcoming = [...upFootball, ...upTennis, ...upBasketball, ...upHockey, ...upVolleyball];
   const startingSoon: LiveMatchState[] = allUpcoming
     .filter(m => {
-      if (!m.hasRealOdds) return false;
+      // Tennis always has computed odds even without a real bookmaker price — allow all.
+      // Other sports require real odds to avoid showing matches with no betting context.
+      if (m.sport !== "tennis" && !m.hasRealOdds) return false;
       const si = matchStartsInMinutes(m.date, m.time);
       const maxSi = SOON_WINDOW[m.sport] ?? DEFAULT_SOON_WINDOW;
       return isFinite(si) && si >= -60 && si <= maxSi
@@ -6627,7 +6630,7 @@ async function buildTennisUpcoming(): Promise<UpcomingMatch[]> {
     // Use 90-min grace: keep matches visible as "Em Breve" even if the live
     // feed hasn't picked them up yet. Without this, a match that started and
     // isn't yet in /live simply disappears from view for up to 90 minutes.
-    const events = await getUpcomingEventsV2("tennis", 2, 90 * 60);
+    const events = await getUpcomingEventsV2("tennis", 3, 90 * 60);
     const seen = new Set<string>();
     const filtered: SAPIV2Event[] = [];
 
