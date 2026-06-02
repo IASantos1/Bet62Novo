@@ -2285,6 +2285,7 @@ export default function Home() {
     id: string; home: string; away: string; league: string;
     country?: string; sport?: string; status?: string;
     homeScore: number; awayScore: number; minute: number;
+    startsIn?: number;
     hasRealOdds?: boolean; odds: Odds; markets?: AdvancedMarkets;
     events?: Array<{ type: string; team: string; minute: number; player: string }>;
     marketSuspension?: Record<string, number>;

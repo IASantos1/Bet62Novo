@@ -1,4 +1,5 @@
 [steps.install]
+useDefaultCmds = false
 cmds = [
   "pnpm add -g node-gyp",
   "pnpm install --no-frozen-lockfile"
