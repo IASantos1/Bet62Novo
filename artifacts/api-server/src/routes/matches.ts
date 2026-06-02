@@ -6473,12 +6473,16 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
     getTennisTodayV2(), // fallback when /live is empty or plan-restricted
   ]);
   // Tennis live priority: /live endpoint → /today filtered for in-progress → v1 simulation
+  // Always also check /today for matches that started but haven't appeared in /live yet
+  // (the SportsApiPro /live endpoint can lag 2-5 min behind actual match start).
   const tennisV2Part = buildTennisLiveV2(tennisEvents);
+  const liveIdsFromV2 = new Set(tennisV2Part.map(m => m.id));
+  const todayStartedExtra = buildTennisLiveV2(
+    (tennisTodayEvents ?? []).filter(ev => !liveIdsFromV2.has(`tennis-v2-${ev.id}`))
+  );
   const tennisLivePart = (() => {
-    if (tennisV2Part.length > 0) return tennisV2Part;
-    // /live returned empty — try today's events (covers plan restrictions or brief API gaps)
-    const todayLive = buildTennisLiveV2(tennisTodayEvents ?? []);
-    if (todayLive.length > 0) return todayLive;
+    const merged = [...tennisV2Part, ...todayStartedExtra];
+    if (merged.length > 0) return merged;
     // Last resort: persistent in-memory simulation (Roland Garros-style matches)
     return buildTennisSimulation();
   })();
