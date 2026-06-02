@@ -1921,7 +1921,12 @@ function isTennisElite(ev: SAPIV2Event): boolean {
   if (typeof t !== "object") return false;
   const slug = t.category?.slug?.toLowerCase() ?? "";
   if (!TENNIS_LIVE_SLUGS.has(slug)) return false;
-  return !isTennisExcludedName(t.name ?? "");
+  if (isTennisExcludedName(t.name ?? "")) return false;
+  // Detect doubles by player name: any "/" in the name means "Player A / Player B" (doubles pair)
+  const homeName = typeof ev.homeTeam === "object" ? (ev.homeTeam.name ?? "") : (ev.homeTeam ?? "");
+  const awayName = typeof ev.awayTeam === "object" ? (ev.awayTeam.name ?? "") : (ev.awayTeam ?? "");
+  if (homeName.includes(" / ") || awayName.includes(" / ")) return false;
+  return true;
 }
 
 /** Upcoming filter: top-tier only (ATP/WTA/Challenger/WTA-125). No ITF in pre-match. */
@@ -1949,6 +1954,10 @@ type SAPIV2Event = {
   homeTeamId?: number;
   awayTeamId?: number;
   roundInfo?: { round?: number };
+  /** true when the API is only showing the final score — match has ended */
+  finalResultOnly?: boolean;
+  /** true when the live feed is locked (match ended/suspended by API) */
+  feedLocked?: boolean;
 };
 
 // Normaliser helpers
@@ -6324,13 +6333,20 @@ function buildTennisLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
   const liveIds = events.map(e => e.id).filter(Boolean) as number[];
   refreshTennisLiveOdds(liveIds);
   const nowSec = Date.now() / 1000;
-  for (const ev of events) {
+  // Sort descending by status code so that when the same match pair appears twice,
+  // the more-advanced (higher code = later set) entry is processed first and wins the dedup.
+  const sorted = [...events].sort((a, b) => (v2StatusCode(b) ?? 0) - (v2StatusCode(a) ?? 0));
+  for (const ev of sorted) {
     // Deduplicate by event ID (API sometimes returns the same event twice)
     if (seenIds.has(ev.id)) continue;
     seenIds.add(ev.id);
     // ATP/WTA/Challenger/WTA-125 + ITF singles; excludes doubles/wheelchair/UTR/juniors
+    // isTennisElite also checks player names for " / " (doubles pair indicator)
     if (!isTennisElite(ev)) continue;
-    // Also deduplicate by player pair (API can return same match with different IDs)
+    // finalResultOnly=true means the API is only showing the final score → match ended
+    if (ev.finalResultOnly === true) continue;
+    // Also deduplicate by player pair (API can return same match with different IDs).
+    // Keep the entry with the HIGHER status code (later in the match = more authoritative).
     const h = v2TeamName(ev.homeTeam).toLowerCase();
     const a = v2TeamName(ev.awayTeam).toLowerCase();
     const pairKey = `${h}|${a}`;
@@ -6338,24 +6354,27 @@ function buildTennisLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
     seenPairs.add(pairKey);
     const code = v2StatusCode(ev);
     const statusStr = v2StatusStr(ev.status);
-    // Skip only matches that are definitively not live
+    // Skip matches that are definitively not live
     const sLow = statusStr.toLowerCase();
     const notLive =
       code === 100 ||                        // finished (SportsApiPro code)
-      (code === 0 && (sLow === "" || sLow.includes("not start") || sLow.includes("schedul"))) || // pre-match
-      sLow.includes("ended") || sLow.includes("finished") ||
+      code === 110 ||                        // postponed
+      code === 120 ||                        // abandoned
+      (code === 0 && (sLow === "" || sLow.includes("not start") || sLow.includes("schedul"))) ||
+      sLow.includes("ended") || sLow.includes("finished") || sLow.includes("complete") ||
       sLow.includes("not start") || sLow.includes("postpone") ||
       sLow.includes("cancel") || sLow.includes("walkover") ||
       sLow.includes("retired") || sLow.includes("abandon") ||
-      sLow.includes("awarded");
-    // Override: if the match already started (past startTimestamp by >2 min)
-    // treat it as live even if the API hasn't updated its status yet.
-    // This handles the /today fallback where status may lag behind reality.
+      sLow.includes("awarded") || sLow.includes("default");
+    // startedAlready override: accept matches that started >2 min ago even if status lags.
+    // NOT applied if the match started >5 hours ago (almost certainly finished by then).
+    const matchAgeSeconds = ev.startTimestamp !== undefined ? nowSec - ev.startTimestamp : 0;
     const startedAlready =
       !sLow.includes("cancel") && !sLow.includes("postpone") &&
       !sLow.includes("walkover") && !sLow.includes("retired") &&
       !sLow.includes("awarded") &&
-      ev.startTimestamp !== undefined && ev.startTimestamp < nowSec - 120;
+      ev.startTimestamp !== undefined &&
+      matchAgeSeconds > 120 && matchAgeSeconds < 5 * 3600;
     if (notLive && !startedAlready) continue;
     // Accept everything else: "Playing", "1st Set", "2nd Set", "In Progress",
     // "Break Time", "Advantage", "Tiebreak", "Suspended", "Paused", etc.
