@@ -6910,10 +6910,12 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
   // Always also check /today for matches that started but haven't appeared in /live yet
   // (the SportsApiPro /live endpoint can lag 2-5 min behind actual match start).
   const tennisV2Part = buildTennisLiveV2(tennisEvents);
-  const liveIdsFromV2 = new Set(tennisV2Part.map(m => m.id));
+  const liveIdsFromV2 = new Set(tennisV2Part.map(m => String(m.id)));
   const todayStartedExtra = buildTennisLiveV2(
     (tennisTodayEvents ?? []).filter(ev => !liveIdsFromV2.has(`tennis-v2-${ev.id}`))
-  );
+  // The second call's GC loop re-emits grace-period matches already returned by the first
+  // call — deduplicate here so each match ID appears at most once in the final array.
+  ).filter(m => !liveIdsFromV2.has(String(m.id)));
   const tennisLivePart = (() => {
     const merged = [...tennisV2Part, ...todayStartedExtra];
     if (merged.length > 0) return merged;
