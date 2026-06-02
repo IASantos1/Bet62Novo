@@ -15,6 +15,12 @@ const SAPI_V2_TENNIS     = "https://v2.tennis.sportsapipro.com/api";
 const SAPI_V2_BASEBALL   = "https://v2.baseball.sportsapipro.com/api";
 // No V2 volleyball domain is available
 
+// SportsAPI Pro V1 — lower-latency HTTP endpoints (1-2s vs V2's 3-5s)
+// Used as the primary source for /live; V2 is the fallback via Promise.any()
+const SAPI_V1_FOOTBALL   = "https://v1.football.sportsapipro.com/api";
+const SAPI_V1_BASKETBALL = "https://v1.basketball.sportsapipro.com/api";
+const SAPI_V1_TENNIS     = "https://v1.tennis.sportsapipro.com/api";
+
 // Auth headers helper
 const sapiHeaders = (): Record<string, string> => ({ "x-api-key": SPORTSAPI_KEY });
 
@@ -3883,16 +3889,30 @@ async function getVolleyballLive(): Promise<VolleyTournament[]> {
 
 // ─── SportsAPI Pro V2 Live Fetch Functions ────────────────────────────────────
 
+/** Race V1 vs V2 HTTP — whichever resolves first wins. V1 = 1-2s, V2 = 3-5s. */
+async function fetchLiveRace(v1Base: string, v2Base: string): Promise<SAPIV2Event[]> {
+  const headers = sapiHeaders();
+  const tryFetch = async (base: string): Promise<SAPIV2Event[]> => {
+    const resp = await fetch(`${base}/live`, { signal: AbortSignal.timeout(8000), headers });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const data = (await resp.json()) as { events?: SAPIV2Event[]; data?: SAPIV2Event[] };
+    const events = data.events ?? (data.data as SAPIV2Event[] | undefined) ?? [];
+    if (events.length === 0) throw new Error("empty");
+    return events;
+  };
+  return Promise.any([tryFetch(v1Base), tryFetch(v2Base)]).catch(() => []);
+}
+
 async function getFootballLiveV2(): Promise<SAPIV2Event[]> {
   const now = Date.now();
   if (footballLiveV2Cache && now - footballLiveV2FetchedAt < CONFIG.LIVE_CACHE_TTL) return footballLiveV2Cache;
   try {
-    const resp = await fetch(`${SAPI_V2_FOOTBALL}/live`, { signal: AbortSignal.timeout(9000), headers: sapiHeaders() });
-    if (!resp.ok) return footballLiveV2Cache ?? [];
-    const data = (await resp.json()) as { events?: SAPIV2Event[] };
-    footballLiveV2Cache = data.events ?? [];
-    footballLiveV2FetchedAt = now;
-    return footballLiveV2Cache;
+    const events = await fetchLiveRace(SAPI_V1_FOOTBALL, SAPI_V2_FOOTBALL);
+    if (events.length > 0) {
+      footballLiveV2Cache = events;
+      footballLiveV2FetchedAt = now;
+    }
+    return footballLiveV2Cache ?? [];
   } catch {
     return footballLiveV2Cache ?? [];
   }
@@ -3902,12 +3922,12 @@ async function getBasketballLiveV2(): Promise<SAPIV2Event[]> {
   const now = Date.now();
   if (basketballLiveV2Cache && now - basketballLiveV2FetchedAt < CONFIG.LIVE_CACHE_TTL) return basketballLiveV2Cache;
   try {
-    const resp = await fetch(`${SAPI_V2_BASKETBALL}/live`, { signal: AbortSignal.timeout(9000), headers: sapiHeaders() });
-    if (!resp.ok) return basketballLiveV2Cache ?? [];
-    const data = (await resp.json()) as { events?: SAPIV2Event[] };
-    basketballLiveV2Cache = data.events ?? [];
-    basketballLiveV2FetchedAt = now;
-    return basketballLiveV2Cache;
+    const events = await fetchLiveRace(SAPI_V1_BASKETBALL, SAPI_V2_BASKETBALL);
+    if (events.length > 0) {
+      basketballLiveV2Cache = events;
+      basketballLiveV2FetchedAt = now;
+    }
+    return basketballLiveV2Cache ?? [];
   } catch {
     return basketballLiveV2Cache ?? [];
   }
@@ -3947,23 +3967,29 @@ async function getTennisLiveV2(): Promise<SAPIV2Event[]> {
   const now = Date.now();
   if (tennisLiveV2Cache && now - tennisLiveV2FetchedAt < CONFIG.LIVE_CACHE_TTL) return tennisLiveV2Cache;
   try {
-    const resp = await fetch(`${SAPI_V2_TENNIS}/live`, { signal: AbortSignal.timeout(9000), headers: sapiHeaders() });
-    if (!resp.ok) return tennisLiveV2Cache ?? [];
-    // Tennis endpoint shape varies across plans/versions:
-    //   { events: [...] }                   — standard V2
-    //   { data: { events: [...] } }          — wrapped variant
-    //   { data: [...] }                      — array directly under data
-    const raw = (await resp.json()) as {
-      events?: SAPIV2Event[];
-      data?: SAPIV2Event[] | { events?: SAPIV2Event[] };
+    // Race V1 vs V2 — tennis endpoint shape varies, handle both formats
+    const headers = sapiHeaders();
+    const tryTennis = async (base: string): Promise<SAPIV2Event[]> => {
+      const resp = await fetch(`${base}/live`, { signal: AbortSignal.timeout(8000), headers });
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const raw = (await resp.json()) as {
+        events?: SAPIV2Event[];
+        data?: SAPIV2Event[] | { events?: SAPIV2Event[] };
+      };
+      const nested = raw.data;
+      const events =
+        raw.events ??
+        (Array.isArray(nested) ? nested : (nested as { events?: SAPIV2Event[] } | undefined)?.events) ??
+        [];
+      if (events.length === 0) throw new Error("empty");
+      return events;
     };
-    const nested = raw.data;
-    tennisLiveV2Cache =
-      raw.events ??
-      (Array.isArray(nested) ? nested : (nested as { events?: SAPIV2Event[] } | undefined)?.events) ??
-      [];
-    tennisLiveV2FetchedAt = now;
-    return tennisLiveV2Cache;
+    const events = await Promise.any([tryTennis(SAPI_V1_TENNIS), tryTennis(SAPI_V2_TENNIS)]).catch(() => []);
+    if (events.length > 0) {
+      tennisLiveV2Cache = events;
+      tennisLiveV2FetchedAt = now;
+    }
+    return tennisLiveV2Cache ?? [];
   } catch {
     return tennisLiveV2Cache ?? [];
   }
@@ -4167,7 +4193,7 @@ const v1WsTimers = new Map<SportKey, ReturnType<typeof setTimeout>>();
 const v1WsRetryDelay = new Map<SportKey, number>(); // ms, doubles on each failure (cap 60s)
 
 type V1ScoreEvent = {
-  id?: number;
+  id?: number | string; // V1 may send string IDs for some sports
   homeScore?: number | { current?: number };
   awayScore?: number | { current?: number };
   status?: string | { description?: string };
@@ -4198,7 +4224,8 @@ function applyV1ScorePatch(sport: SportKey, ev: V1ScoreEvent): void {
   }
   if (!cache) return; // no V2 snapshot yet — ignore until V2 provides context
 
-  const idx = cache.findIndex(e => e.id === ev.id);
+  // Use string comparison — V1 may send string IDs while V2 stores numbers
+  const idx = cache.findIndex(e => String(e.id) === String(ev.id));
   if (idx < 0) return; // match not in current V2 cache — skip
 
   const existing = cache[idx]!;
@@ -4283,8 +4310,9 @@ function connectV1SportWS(sport: SportKey): void {
 
 function scheduleV1Reconnect(sport: SportKey, delayMs = 5_000): void {
   if (v1WsTimers.has(sport)) return;
-  // Exponential backoff: double each failure, cap at 60s
-  const nextDelay = Math.min(delayMs * 2, 60_000);
+  // Exponential backoff: double each failure, cap at 15s (was 60s — shorter gap means
+  // faster recovery when V1 WS drops, reducing fallback to V2-only latency)
+  const nextDelay = Math.min(delayMs * 2, 15_000);
   v1WsRetryDelay.set(sport, nextDelay);
   const t = setTimeout(() => {
     v1WsTimers.delete(sport);
