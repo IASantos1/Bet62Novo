@@ -2329,7 +2329,11 @@ export default function Home() {
       }
       prevLiveOdds.current = newPrev;
       prevLiveMarkets.current = newPrevMkts;
-      return matches.filter(m => m.hasRealOdds !== false).map(m => ({ ...m, isLive: true }));
+      // Live matches (startsIn === undefined) always show even without odds — the game is happening.
+      // "Em Breve" entries only show when there are real odds to bet on.
+      return matches
+        .filter(m => m.startsIn === undefined || m.hasRealOdds !== false)
+        .map(m => ({ ...m, isLive: true }));
     });
   }, []);
 
