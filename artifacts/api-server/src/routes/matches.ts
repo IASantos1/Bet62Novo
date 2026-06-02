@@ -5993,6 +5993,11 @@ function buildFootballLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
     if (FOOTBALL_V2_FINISHED.has(statusStr)) continue;
     if (!FOOTBALL_V2_LIVE.has(statusStr)) continue;
 
+    // Skip matches that started more than 4 hours ago — catches zombies even after
+    // server restart when finishedMatchResults is empty (cold start).
+    const evAgeSeconds = ev.startTimestamp ? Date.now() / 1000 - ev.startTimestamp : 0;
+    if (evAgeSeconds > 4 * 3600) continue;
+
     const id = `football-v2-${ev.id}`;
     currentIds.add(id);
 
@@ -6459,6 +6464,10 @@ const TENNIS_SUSP_KEYS = [
   "exactSets", "totalGames", "gameHandicap", "setHandicap", "set1Games",
 ] as const;
 
+// Grace-period tracker: ms when a tennis match first disappeared from the live feed.
+// Prevents transient feed gaps from causing matches to flicker out of the UI.
+const _tennisMissingFrom = new Map<string, number>();
+
 function buildTennisLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
   const now = Date.now();
   const result: LiveMatchState[] = [];
@@ -6654,10 +6663,21 @@ function buildTennisLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
     result.push(state);
   }
 
-  // Garbage collect tennis states no longer in the feed
+  // Garbage collect tennis states no longer in the feed.
+  // Grace period of 45 s: transient feed gaps (Tyler/Challenger matches that briefly
+  // disappear between polls) don't cause the match to vanish from the UI.
   for (const id of liveMatchState.keys()) {
     if (!id.startsWith("tennis-v2-")) continue;
-    if (!currentIds.has(id)) liveMatchState.delete(id);
+    if (!currentIds.has(id)) {
+      const firstMissing = _tennisMissingFrom.get(id) ?? now;
+      _tennisMissingFrom.set(id, firstMissing);
+      if (now - firstMissing > 45_000) {
+        liveMatchState.delete(id);
+        _tennisMissingFrom.delete(id);
+      }
+    } else {
+      _tennisMissingFrom.delete(id); // back in feed — reset grace timer
+    }
   }
 
   return result;
