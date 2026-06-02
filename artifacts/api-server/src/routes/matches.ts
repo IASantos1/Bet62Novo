@@ -5999,10 +5999,13 @@ function buildFootballLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
     const league = normalizeLeagueName(v2TournName(ev.tournament), "");
 
     const isHT = statusStr === "HT";
-    const isET = statusStr.includes("extra") || statusStr === "Extra Time" || statusStr === "Penalties";
+    const isPen = statusStr === "Penalties";
+    const isET = !isPen && (statusStr.includes("extra") || statusStr === "Extra Time");
     let minute: number;
     if (isHT) {
       minute = 45;
+    } else if (isPen) {
+      minute = 120;
     } else if (isET) {
       minute = 105;
     } else {
@@ -6037,7 +6040,7 @@ function buildFootballLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
         minute = statusStr === "1st half" ? 25 : statusStr === "2nd half" ? 70 : 45;
       }
     }
-    const newStatus = isHT ? "HT" : isET ? "ET" : statusStr;
+    const newStatus = isHT ? "HT" : isPen ? "Penalties" : isET ? "ET" : statusStr;
 
     const existing = liveMatchState.get(id);
     if (existing) {
@@ -6060,12 +6063,16 @@ function buildFootballLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
         ? calculateLive1x2({ minute, homeGoals: homeScore, awayGoals: awayScore, redCardsHome: 0, redCardsAway: 0, baseHome: baseOdds.home, baseAway: baseOdds.away })
         : existing.odds;
 
+      // Helper: patch penExtra into markets when match is in penalty shootout
+      const withPen = (mkts: typeof existing.markets) =>
+        isPen ? { ...mkts, penExtra: makePenMarketsFromScore(0, 0) } : mkts;
+
       if (scored) {
         // Goal detected — filter settled markets, set goal suspension.
         // If the API is simultaneously reporting a VAR review (e.g. goal under review),
         // override the label immediately so the frontend shows "REVISÃO AO VAR".
-        const filteredMarkets = filterLiveMarkets(existing.markets, homeScore, awayScore, newStatus);
-        const filteredBase = filterLiveMarkets(existing._baseMarkets ?? existing.markets, homeScore, awayScore, newStatus);
+        const filteredMarkets = withPen(filterLiveMarkets(existing.markets, homeScore, awayScore, newStatus));
+        const filteredBase = withPen(filterLiveMarkets(existing._baseMarkets ?? existing.markets, homeScore, awayScore, newStatus));
         const susp = Object.fromEntries(Object.entries(GOAL_SUSP_V2).map(([k, d]) => [k, now + d]));
         const updated: LiveMatchState = {
           ...existing,
@@ -6085,8 +6092,8 @@ function buildFootballLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
           const active = Object.fromEntries(Object.entries(susp).filter(([, ts]) => ts > now));
           susp = Object.keys(active).length > 0 ? active : undefined;
         }
-        const filteredMarkets = filterLiveMarkets(existing.markets, homeScore, awayScore, newStatus);
-        const filteredBase = filterLiveMarkets(existing._baseMarkets ?? existing.markets, homeScore, awayScore, newStatus);
+        const filteredMarkets = withPen(filterLiveMarkets(existing.markets, homeScore, awayScore, newStatus));
+        const filteredBase = withPen(filterLiveMarkets(existing._baseMarkets ?? existing.markets, homeScore, awayScore, newStatus));
 
         // isVARStatus already computed above
 
@@ -6137,7 +6144,8 @@ function buildFootballLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
         ? baseOdds
         : calculateLive1x2({ minute, homeGoals: homeScore, awayGoals: awayScore, redCardsHome: 0, redCardsAway: 0, baseHome: baseOdds.home, baseAway: baseOdds.away });
       const rawMarkets = makeAdvancedMarketsFromTeams(homeTeam, awayTeam);
-      const markets = filterLiveMarkets(rawMarkets, homeScore, awayScore, newStatus);
+      const baseMarkets = filterLiveMarkets(rawMarkets, homeScore, awayScore, newStatus);
+      const markets = isPen ? { ...baseMarkets, penExtra: makePenMarketsFromScore(0, 0) } : baseMarkets;
       const state: LiveMatchState = {
         id,
         home: homeTeam,
