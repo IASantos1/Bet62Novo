@@ -2581,10 +2581,14 @@ function calculateLive1x2(state: {
   const total = pHomeWin + pDraw + pAwayWin;
   pHomeWin /= total; pDraw /= total; pAwayWin /= total;
 
+  // Global hard cap: no 1X2 odd exceeds 30.00.
+  // Late-game draw rule: at 80+ min with a level score, cap further at 10.00.
+  const isLevelLate = state.minute >= 80 && state.homeGoals === state.awayGoals;
+  const cap = isLevelLate ? 10.00 : 30.00;
   return {
-    home: Math.max(1.04, r((1 / pHomeWin) * vigFactor)),
-    draw: pDraw > 0.005 ? Math.max(2.00, r((1 / pDraw) * vigFactor)) : 0,
-    away: Math.max(1.04, r((1 / pAwayWin) * vigFactor)),
+    home: Math.min(cap, Math.max(1.04, r((1 / pHomeWin) * vigFactor))),
+    draw: pDraw > 0.005 ? Math.min(cap, Math.max(2.00, r((1 / pDraw) * vigFactor))) : 0,
+    away: Math.min(cap, Math.max(1.04, r((1 / pAwayWin) * vigFactor))),
   };
 }
 
@@ -2684,10 +2688,14 @@ function applyTieredMarketDrift(state: LiveMatchState, now: number): LiveMatchSt
   const oddsOscH = Math.sin(t * 0.31 + phase * 0.7) * 0.018 + Math.cos(t * 0.17) * 0.009;
   const oddsOscD = Math.cos(t * 0.23 + phase * 0.5) * 0.014 + Math.sin(t * 0.11) * 0.007;
   const oddsOscA = Math.sin(t * 0.27 + phase * 0.9) * 0.018 + Math.cos(t * 0.19) * 0.009;
+  // Hard caps: global max = 30.00; at 80+ min with level score → max = 10.00
+  const _isLevelLate = minute >= 80 && homeScore === awayScore;
+  const _oddsCap = _isLevelLate ? 10.00 : 30.00;
+
   const newOdds = due("odds", 45_000, 90_000) ? {
-    home: Math.max(1.04, Math.min(49.99, r(liveAnchor.home * (1 + oddsOscH)))),
-    draw: liveAnchor.draw > 0 ? Math.max(2.00, Math.min(49.99, r(liveAnchor.draw * (1 + oddsOscD)))) : 0,
-    away: Math.max(1.04, Math.min(49.99, r(liveAnchor.away * (1 + oddsOscA)))),
+    home: Math.max(1.04, Math.min(_oddsCap, r(liveAnchor.home * (1 + oddsOscH)))),
+    draw: liveAnchor.draw > 0 ? Math.max(2.00, Math.min(_oddsCap, r(liveAnchor.draw * (1 + oddsOscD)))) : 0,
+    away: Math.max(1.04, Math.min(_oddsCap, r(liveAnchor.away * (1 + oddsOscA)))),
   } : state.odds; // not due yet → unchanged (no arrow on frontend)
 
   // ── Oscillator values — computed fresh each cycle but only APPLIED when due ─
@@ -2695,9 +2703,9 @@ function applyTieredMarketDrift(state: LiveMatchState, now: number): LiveMatchSt
   const osc2 = Math.sin(t * 0.11 + phase * 0.35) * 0.007 + Math.cos(t * 0.07 + phase * 0.2) * 0.003;
   const osc3 = Math.sin(t * 0.04 + phase * 0.15) * 0.003 + Math.cos(t * 0.025 + phase * 0.1) * 0.0015;
 
-  const s1 = (n: number) => n <= 0 ? n : r(Math.min(49.99, Math.max(1.01, n * (1 + osc1))));
-  const s2 = (n: number) => n <= 0 ? n : r(Math.min(49.99, Math.max(1.01, n * (1 + osc2))));
-  const s3 = (n: number) => n <= 0 ? n : r(Math.min(49.99, Math.max(1.01, n * (1 + osc3))));
+  const s1 = (n: number) => n <= 0 ? n : r(Math.min(30.00, Math.max(1.01, n * (1 + osc1))));
+  const s2 = (n: number) => n <= 0 ? n : r(Math.min(30.00, Math.max(1.01, n * (1 + osc2))));
+  const s3 = (n: number) => n <= 0 ? n : r(Math.min(30.00, Math.max(1.01, n * (1 + osc3))));
 
   // Carry through already-settled zeros (filterLiveMarkets output)
   const keep0 = (cur: number, base: number, fn: (n: number) => number) => cur <= 0 ? 0 : fn(base);
