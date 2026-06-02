@@ -6757,7 +6757,30 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
       scheduledDate: m.date,
     } satisfies LiveMatchState));
 
-  return { matches: [...livePart, ...startingSoon] };
+  // Promote tennis "Em Breve" matches that started >2 min ago into the live feed.
+  // The Statpal /live endpoint can lag 5-15 min for Challenger events; this bridges
+  // the gap by showing them as live (0-0, "1st set") until real data arrives.
+  const promotedTennis: LiveMatchState[] = [];
+  const startingSoonFinal: LiveMatchState[] = [];
+  for (const m of startingSoon) {
+    if (m.sport === "tennis" && m.startsIn === 0) {
+      const realSi = matchStartsInMinutes(m.scheduledDate ?? "", m.scheduledTime ?? "");
+      if (isFinite(realSi) && realSi < -2) {
+        // Strip Em Breve fields; promote to live with initial set score
+        const { startsIn: _si, scheduledTime: _st, scheduledDate: _sd, ...liveBase } = m;
+        promotedTennis.push({
+          ...liveBase,
+          status: "1st set",
+          homeScore: 0,
+          awayScore: 0,
+        } as LiveMatchState);
+        continue;
+      }
+    }
+    startingSoonFinal.push(m);
+  }
+
+  return { matches: [...livePart, ...promotedTennis, ...startingSoonFinal] };
 }
 
 // Broadcast payload to all connected SSE + WebSocket clients; prune dead connections.
