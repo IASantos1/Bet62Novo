@@ -5997,10 +5997,11 @@ function buildFootballLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
     if (FOOTBALL_V2_FINISHED.has(statusStr)) continue;
     if (!FOOTBALL_V2_LIVE.has(statusStr)) continue;
 
-    // Skip matches that started more than 4 hours ago — catches zombies even after
+    // Skip matches that started more than 2.5 hours ago — catches zombies even after
     // server restart when finishedMatchResults is empty (cold start).
+    // 2.5 h covers the longest possible match (90 min + 30 min ET + penalties + stoppages).
     const evAgeSeconds = ev.startTimestamp ? Date.now() / 1000 - ev.startTimestamp : 0;
-    if (evAgeSeconds > 4 * 3600) continue;
+    if (evAgeSeconds > 2.5 * 3600) continue;
 
     const id = `football-v2-${ev.id}`;
     currentIds.add(id);
@@ -6081,6 +6082,17 @@ function buildFootballLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
     }
 
     const existing = liveMatchState.get(id);
+
+    // Late-game wall-clock cap: if we've been tracking this match for 28+ min AND the
+    // computed minute is 82+, the match has almost certainly ended even though the API
+    // never sent a "Finished" status (common with lower-tier leagues like Primera B).
+    if (existing && minute >= 82 && now - (existing._firstSeenAt ?? now) > 28 * 60 * 1000) {
+      finishedMatchResults.set(id, { home: homeScore, away: awayScore, homeTeam, awayTeam, finishedAt: now });
+      liveMatchState.delete(id);
+      _v2StuckTracker.delete(id);
+      continue;
+    }
+
     if (existing) {
       // Monotonic clock — never let the computed minute go backward (prevents clock regression
       // on reconnect or when startTimestamp-based computation differs between polls).
