@@ -1,1 +1,1 @@
-- [Tennis live odds + game score](tennis-live-impl.md) — V2 API has `homeScore.point` (real 15/30/40/A); live odds from `/api/match/:id/odds` Full time market (isLive:true), fractional format.
+- [Live broadcast latency](live-broadcast-latency.md) — broadcastPending flag + 30s upcoming cache keeps score-to-client < 5ms
