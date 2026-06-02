@@ -5983,6 +5983,10 @@ const GOAL_SUSP_V2: Record<string, number> = {
   handicapPoints: 28000,
 };
 
+// Tracks the last time a match's minute+score changed.
+// If both are frozen for > 20 min the match is a zombie and gets evicted.
+const _v2StuckTracker = new Map<string, { minute: number; score: string; since: number }>();
+
 function buildFootballLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
   const now = Date.now();
   const result: LiveMatchState[] = [];
@@ -6057,6 +6061,24 @@ function buildFootballLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
       }
     }
     const newStatus = isHT ? "HT" : isPen ? "Penalties" : isET ? "ET" : statusStr;
+
+    // Zombie detector: if minute AND score are identical for > 20 min the feed is frozen.
+    // Exclude HT/ET/Penalties where minute naturally stays constant for legitimate breaks.
+    if (!isHT && !isPen && !isET) {
+      const scoreKey = `${homeScore}-${awayScore}`;
+      const stuck = _v2StuckTracker.get(id);
+      if (stuck && stuck.minute === minute && stuck.score === scoreKey) {
+        if (now - stuck.since > 20 * 60 * 1000) {
+          // Mark finished so it doesn't reappear; clean up tracker and skip.
+          finishedMatchResults.set(id, { home: homeScore, away: awayScore, homeTeam, awayTeam, finishedAt: now });
+          liveMatchState.delete(id);
+          _v2StuckTracker.delete(id);
+          continue;
+        }
+      } else {
+        _v2StuckTracker.set(id, { minute, score: scoreKey, since: now });
+      }
+    }
 
     const existing = liveMatchState.get(id);
     if (existing) {
@@ -6594,9 +6616,15 @@ function buildTennisLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
 
     // ── Market suspension: detect point played and compute duration ─────────────
     // A point is played when currentPoints or sets changes compared to last tick.
+    // Guard: buildTennisLiveV2 is called TWICE per request (live feed + todayStarted).
+    // The 2nd call sees state just saved by the 1st and would falsely detect a point.
+    // Only treat a change as a real point if the state was saved > 1.5 s ago (= previous poll).
     const prevPoints = existing?._liveExtra?.currentPoints;
     const prevSets   = existing?._liveExtra?.sets;
+    const lastTennisUpdate = existing?._oddsUpdatedAt ?? 0;
+    const isDifferentPollCycle = (now - lastTennisUpdate) > 1500;
     const pointPlayed =
+      isDifferentPollCycle &&
       prevPoints !== undefined && (
         JSON.stringify(prevPoints) !== JSON.stringify(currentPoints) ||
         JSON.stringify(prevSets)   !== JSON.stringify(sets)
@@ -6674,6 +6702,10 @@ function buildTennisLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
       if (now - firstMissing > 45_000) {
         liveMatchState.delete(id);
         _tennisMissingFrom.delete(id);
+      } else {
+        // Still within grace period — keep the last known state visible in the UI.
+        const cached = liveMatchState.get(id);
+        if (cached) result.push(cached);
       }
     } else {
       _tennisMissingFrom.delete(id); // back in feed — reset grace timer
