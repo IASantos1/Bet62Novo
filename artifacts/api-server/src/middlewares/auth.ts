@@ -1,13 +1,15 @@
 import { type Request, type Response, type NextFunction } from "express";
 import jwt from "jsonwebtoken";
+import { randomBytes } from "crypto";
 import { logger } from "../lib/logger";
 
-const SESSION_SECRET = process.env.SESSION_SECRET;
+let SESSION_SECRET = process.env.SESSION_SECRET;
 if (!SESSION_SECRET) {
-  throw new Error(
-    "[SECURITY] SESSION_SECRET environment variable is not set. " +
-    "The server refuses to start without a JWT secret. " +
-    "Set SESSION_SECRET in your deployment configuration."
+  SESSION_SECRET = randomBytes(32).toString("hex");
+  console.warn(
+    "[WARNING] SESSION_SECRET is not set. A temporary random secret has been generated for this process. " +
+    "All existing sessions will be invalidated on every restart. " +
+    "Set SESSION_SECRET in your deployment configuration to persist sessions across restarts."
   );
 }
 

@@ -5,12 +5,17 @@ import * as schema from "./schema";
 const { Pool } = pg;
 
 if (!process.env.DATABASE_URL) {
-  throw new Error(
-    "DATABASE_URL must be set. Did you forget to provision a database?",
+  console.warn(
+    "[WARNING] DATABASE_URL is not set. The database connection will be unavailable. " +
+    "The app is starting in offline mode — all database operations will fail at runtime. " +
+    "Set DATABASE_URL in your deployment configuration to restore full functionality.",
   );
 }
 
-export const pool = new Pool({ connectionString: process.env.DATABASE_URL });
-export const db = drizzle(pool, { schema });
+export const pool = process.env.DATABASE_URL
+  ? new Pool({ connectionString: process.env.DATABASE_URL })
+  : null;
+
+export const db = pool ? drizzle(pool, { schema }) : null;
 
 export * from "./schema";
