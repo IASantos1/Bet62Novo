@@ -5996,6 +5996,10 @@ function buildFootballLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
     const id = `football-v2-${ev.id}`;
     currentIds.add(id);
 
+    // Skip matches the server already saw finish — API sometimes re-reports
+    // completed matches as "live" in a later poll (zombie feed).
+    if (finishedMatchResults.has(id)) continue;
+
     const homeTeam = v2TeamName(ev.homeTeam);
     const awayTeam = v2TeamName(ev.awayTeam);
     const homeScore = v2CurrentScore(ev.homeScore);
