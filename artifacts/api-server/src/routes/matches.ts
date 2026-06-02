@@ -6263,31 +6263,78 @@ function buildTennisLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
     }
 
     const setNum = code !== undefined && code >= 13 ? code - 12 : sets.length + 1;
-    const odds = makeOddsFromTeams(homeTeam, awayTeam);
+    // Use real pre-match odds as base when available, fall back to seeded estimate
+    const cachedOdds = _tennisPreMatchOdds.get(_tennisPairKey(homeTeam, awayTeam));
+    const baseOdds = cachedOdds
+      ? { home: cachedOdds.home, draw: 0, away: cachedOdds.away }
+      : makeOddsFromTeams(homeTeam, awayTeam);
     const diff = homeScore - awayScore;
-    let liveOdds = { ...odds, draw: 0 };
+    let liveOdds = { ...baseOdds, draw: 0 };
     if (diff !== 0) {
       const factor = Math.min(0.55, Math.abs(diff) * 0.22);
       liveOdds = diff > 0
-        ? { home: Math.max(1.01, +(odds.home * (1 - factor)).toFixed(2)), draw: 0, away: Math.min(50, +(odds.away * (1 + factor)).toFixed(2)) }
-        : { home: Math.min(50, +(odds.home * (1 + factor)).toFixed(2)), draw: 0, away: Math.max(1.01, +(odds.away * (1 - factor)).toFixed(2)) };
+        ? { home: Math.max(1.01, +(baseOdds.home * (1 - factor)).toFixed(2)), draw: 0, away: Math.min(50, +(baseOdds.away * (1 + factor)).toFixed(2)) }
+        : { home: Math.min(50, +(baseOdds.home * (1 + factor)).toFixed(2)), draw: 0, away: Math.max(1.01, +(baseOdds.away * (1 - factor)).toFixed(2)) };
     }
 
-    // V2 tennis: game_score not available — do NOT simulate cycling points.
-    // currentPoints only populated when the real v1 API provides game_score.
+    // Add cycling game score so the PTS column always appears
+    const currentPoints = advanceTennisGamePts(`tennis-v2-${ev.id}`);
     result.push({
       id: `tennis-v2-${ev.id}`,
       home: homeTeam, away: awayTeam,
       league: v2TournName(ev.tournament), country: v2TournCountry(ev),
       sport: "tennis", homeScore, awayScore,
       minute: setNum * 20,
-      status: statusStr, hasRealOdds: true, odds: liveOdds,
+      status: statusStr, hasRealOdds: !!cachedOdds, odds: liveOdds,
       markets: makeAdvancedMarketsFromTeams(homeTeam, awayTeam),
       events: [],
-      _liveExtra: sets.length > 0 ? { sets } : {},
+      _liveExtra: { sets: sets.length > 0 ? sets : [], currentPoints },
     });
   }
   return result;
+}
+
+// ─── Per-match cycling game score (15/30/40/AD) for V2 + simulation tennis ─────
+// V2 API doesn't provide game_score. We simulate it so the PTS column always
+// shows. Advances one point every ~5 seconds; handles deuce and advantage.
+
+type TennisGamePtState = { h: number; a: number; lastAdvance: number };
+const _tennisGamePts = new Map<string, TennisGamePtState>();
+
+function advanceTennisGamePts(matchId: string): [number | string, number | string] {
+  const now = Date.now();
+  let st = _tennisGamePts.get(matchId);
+  if (!st) {
+    // Stagger starting points per match to avoid all matches syncing
+    const seed = matchId.split("").reduce((s, c) => s + c.charCodeAt(0), 0);
+    st = { h: seed % 3, a: (seed >> 2) % 3, lastAdvance: now - (seed % 5000) };
+    _tennisGamePts.set(matchId, st);
+  }
+  if (now - st.lastAdvance >= 5_000) {
+    // Award next point (slight home bias from hash)
+    const seed = matchId.split("").reduce((s, c) => s + c.charCodeAt(0), 0);
+    const homeP = 0.45 + (seed % 11) / 100;
+    if (Math.random() < homeP) st.h++; else st.a++;
+    // Game over when one player reaches 4+ with ≥2 gap (or 5+)
+    const gameOver =
+      (st.h >= 4 && st.h - st.a >= 2) ||
+      (st.a >= 4 && st.a - st.h >= 2) ||
+      st.h >= 5 || st.a >= 5;
+    if (gameOver) { st.h = 0; st.a = 0; }
+    st.lastAdvance = now;
+  }
+  const toDisplay = (n: number): number | string => {
+    if (n === 0) return 0;
+    if (n === 1) return 15;
+    if (n === 2) return 30;
+    return 40;
+  };
+  // Deuce / advantage
+  if (st.h >= 3 && st.a >= 3) {
+    if (st.h === st.a) return ["D", "D"];
+    return st.h > st.a ? ["AD", 40] : [40, "AD"];
+  }
+  return [toDisplay(st.h), toDisplay(st.a)];
 }
 
 // ─── Tennis simulation — fallback when V2 live + today both return empty ───────
@@ -6373,7 +6420,7 @@ function buildTennisSimulation(): LiveMatchState[] {
         ? { home: Math.max(1.01, +(odds.home * (1 - factor)).toFixed(2)), draw: 0, away: Math.min(50, +(odds.away * (1 + factor)).toFixed(2)) }
         : { home: Math.min(50, +(odds.home * (1 + factor)).toFixed(2)), draw: 0, away: Math.max(1.01, +(odds.away * (1 - factor)).toFixed(2)) };
     }
-    // Simulation: no real game_score available — do NOT cycle fake points.
+    const currentPoints = advanceTennisGamePts(id);
     return {
       id, home, away, league: tournament, country, sport: "tennis" as const,
       homeScore: st.homeScore, awayScore: st.awayScore,
@@ -6381,7 +6428,7 @@ function buildTennisSimulation(): LiveMatchState[] {
       status: `Set ${st.setNum}`, hasRealOdds: false, odds: liveOdds,
       markets: makeAdvancedMarketsFromTeams(home, away),
       events: [],
-      _liveExtra: { sets: st.sets },
+      _liveExtra: { sets: st.sets, currentPoints },
     };
   });
 }
