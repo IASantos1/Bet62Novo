@@ -3305,29 +3305,31 @@ export default function Home() {
     const isPenShootout = match.isLive && sport === "football" && !!match.markets?.penExtra;
 
     const oddsRow = match.hasRealOdds ? (
-      <div className="flex flex-col gap-1 w-full mt-2.5">
-        <SuspensionBanner match={match} />
-        {!isLiveSuspended && isPenShootout ? (<>
-          <span className="text-[9px] font-black uppercase tracking-widest text-yellow-400 text-center">🎯 Vencedor da Final</span>
-          <div className="flex gap-2 w-full">
+      <>
+        {isPenShootout && !isLiveSuspended && (
+          <div className="text-[9px] font-black uppercase tracking-widest text-yellow-400 text-center mt-2">🎯 Vencedor da Final</div>
+        )}
+        <div className="flex gap-2 w-full mt-1.5">
+          <SuspensionBanner match={match} />
+          {!isLiveSuspended && isPenShootout ? (<>
             <OddsButton match={match} selection="pen-home" odd={match.markets!.penExtra!.winner.home} market="penaltis" label={match.home.split(" ").slice(-1)[0]!} grow />
             <OddsButton match={match} selection="pen-away" odd={match.markets!.penExtra!.winner.away} market="penaltis" label={match.away.split(" ").slice(-1)[0]!} grow />
-          </div>
-        </>) : !isLiveSuspended ? (
-          isObviousLiveResult ? (
-            <button
-              className="flex-1 flex flex-col items-center py-2.5 px-2 rounded-md text-xs bg-amber-900/20 border border-amber-600/30"
-              onClick={() => setExpandedMatch(match)}
-            >
-              <span className="font-bold text-[11px] text-amber-400 uppercase tracking-wider">Aposta Já</span>
-            </button>
-          ) : (<>
-            <OddsButton match={match} selection="home" odd={match.odds.home} market="result" label="Casa" grow />
-            {match.odds.draw > 0 && <OddsButton match={match} selection="draw" odd={match.odds.draw} market="result" label="Emp." grow />}
-            <OddsButton match={match} selection="away" odd={match.odds.away} market="result" label="Fora" grow />
-          </>)
-        ) : null}
-      </div>
+          </>) : !isLiveSuspended ? (
+            isObviousLiveResult ? (
+              <button
+                className="flex-1 flex flex-col items-center py-2.5 px-2 rounded-md text-xs bg-amber-900/20 border border-amber-600/30"
+                onClick={() => setExpandedMatch(match)}
+              >
+                <span className="font-bold text-[11px] text-amber-400 uppercase tracking-wider">Aposta Já</span>
+              </button>
+            ) : (<>
+              <OddsButton match={match} selection="home" odd={match.odds.home} market="result" label="Casa" grow />
+              {match.odds.draw > 0 && <OddsButton match={match} selection="draw" odd={match.odds.draw} market="result" label="Emp." grow />}
+              <OddsButton match={match} selection="away" odd={match.odds.away} market="result" label="Fora" grow />
+            </>)
+          ) : null}
+        </div>
+      </>
     ) : null;
 
     if (bannerImg) {
@@ -3361,15 +3363,15 @@ export default function Home() {
                sport === "baseball"   ? <BaseballScore big /> :
                <SimpleScore big />}
             </div>
-            {match.hasRealOdds && (
-              <div className="flex flex-col gap-1 w-full">
+            {match.hasRealOdds && (<>
+              {isPenShootout && !isLiveSuspended && (
+                <div className="text-[9px] font-black uppercase tracking-widest text-yellow-400 text-center mb-1">🎯 Vencedor da Final</div>
+              )}
+              <div className="flex gap-2 w-full">
                 <SuspensionBanner match={match} />
                 {!isLiveSuspended && isPenShootout ? (<>
-                  <span className="text-[9px] font-black uppercase tracking-widest text-yellow-400 text-center">🎯 Vencedor da Final</span>
-                  <div className="flex gap-2 w-full">
-                    <OddsButton match={match} selection="pen-home" odd={match.markets!.penExtra!.winner.home} market="penaltis" label={match.home.split(" ").slice(-1)[0]!} grow />
-                    <OddsButton match={match} selection="pen-away" odd={match.markets!.penExtra!.winner.away} market="penaltis" label={match.away.split(" ").slice(-1)[0]!} grow />
-                  </div>
+                  <OddsButton match={match} selection="pen-home" odd={match.markets!.penExtra!.winner.home} market="penaltis" label={match.home.split(" ").slice(-1)[0]!} grow />
+                  <OddsButton match={match} selection="pen-away" odd={match.markets!.penExtra!.winner.away} market="penaltis" label={match.away.split(" ").slice(-1)[0]!} grow />
                 </>) : !isLiveSuspended ? (
                   isObviousLiveResult ? (
                     <button
@@ -3385,7 +3387,7 @@ export default function Home() {
                   </>)
                 ) : null}
               </div>
-            )}
+            </>)}
           </div>
         </motion.div>
       );
