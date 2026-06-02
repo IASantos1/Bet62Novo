@@ -6353,7 +6353,10 @@ function buildTennisLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
       league: v2TournName(ev.tournament), country: v2TournCountry(ev),
       sport: "tennis", homeScore, awayScore,
       minute: setNum * 20,
-      status: displayStatus, hasRealOdds: !!cachedOdds, odds: liveOdds,
+      // hasRealOdds=true for ALL live tennis — we always generate odds (either from
+      // pre-match bookmaker cache or from makeOddsFromTeams seeded estimate).
+      // The flag controls whether bet buttons render; live matches should always show them.
+      status: displayStatus, hasRealOdds: true, odds: liveOdds,
       markets: makeAdvancedMarketsFromTeams(homeTeam, awayTeam),
       events: [],
       _liveExtra: { sets: sets.length > 0 ? sets : [], currentPoints },
