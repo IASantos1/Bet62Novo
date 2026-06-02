@@ -6395,14 +6395,76 @@ function buildBaseballLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
   return result;
 }
 
+/**
+ * Returns the appropriate market suspension duration (ms) for a tennis point.
+ * Based on real sportsbook behaviour: longer suspension at high-pressure moments.
+ *   - Match point               → 25 s
+ *   - Set point + break point   → 18 s
+ *   - Set point alone           → 15 s
+ *   - Break point (0/15/30-40)  → 12 s
+ *   - Deuce / Advantage         → 10 s
+ *   - Tie-break point           → 12 s
+ *   - Normal point              →  5 s
+ */
+function tennisSuspensionMs(
+  pts: [number | string, number | string],
+  sets: Array<[number, number]>,
+  homeSets: number,
+  awaySets: number,
+): number {
+  const h = String(pts[0]);
+  const a = String(pts[1]);
+
+  // Deuce / Advantage situations
+  const isDeuce = h === "40" && a === "40";
+  const isAdv = h === "AD" || a === "AD";
+
+  // Break-point: one side has "40" while the other is behind (0/15/30)
+  const isBreakPoint =
+    (h === "40" && (a === "0" || a === "15" || a === "30")) ||
+    (a === "40" && (h === "0" || h === "15" || h === "30"));
+
+  // Tie-break: both players have 6 games in the current set
+  const currentSet = sets[sets.length - 1] ?? [0, 0];
+  const isTiebreak = currentSet[0] === 6 && currentSet[1] === 6;
+
+  // Set point: one player is at 5 or 6 games and ahead of the other
+  // (crude heuristic — good enough for suspension timing)
+  const isSetPoint = !isTiebreak && (
+    (currentSet[0] >= 5 && currentSet[0] > currentSet[1]) ||
+    (currentSet[1] >= 5 && currentSet[1] > currentSet[0])
+  );
+
+  // Match point: player needs exactly 1 more set to win (best-of-3)
+  const setsNeeded = 2; // best-of-3 by default
+  const isMatchPoint = (homeSets === setsNeeded - 1 || awaySets === setsNeeded - 1);
+
+  if (isMatchPoint && (isBreakPoint || isAdv)) return 25_000;
+  if (isMatchPoint) return 20_000;
+  if (isSetPoint && isBreakPoint) return 18_000;
+  if (isSetPoint) return 15_000;
+  if (isBreakPoint) return 12_000;
+  if (isTiebreak) return 12_000;
+  if (isAdv || isDeuce) return 10_000;
+  return 5_000;
+}
+
+// Tennis market keys to suspend after each point (flat keys used by frontend)
+const TENNIS_SUSP_KEYS = [
+  "result", "firstSet", "set2", "set3",
+  "exactSets", "totalGames", "gameHandicap", "setHandicap", "set1Games",
+] as const;
+
 function buildTennisLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
+  const now = Date.now();
   const result: LiveMatchState[] = [];
+  const currentIds = new Set<string>();
   const seenIds = new Set<number>();
   const seenPairs = new Set<string>();
   // Kick off background live-odds refresh for all valid match IDs (fire-and-forget)
   const liveIds = events.map(e => e.id).filter(Boolean) as number[];
   refreshTennisLiveOdds(liveIds);
-  const nowSec = Date.now() / 1000;
+  const nowSec = now / 1000;
   // Sort descending by status code so that when the same match pair appears twice,
   // the more-advanced (higher code = later set) entry is processed first and wins the dedup.
   const sorted = [...events].sort((a, b) => (v2StatusCode(b) ?? 0) - (v2StatusCode(a) ?? 0));
@@ -6422,6 +6484,9 @@ function buildTennisLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
     const pairKey = `${h}|${a}`;
     if (seenPairs.has(pairKey)) continue;
     seenPairs.add(pairKey);
+    const id = `tennis-v2-${ev.id}`;
+    currentIds.add(id);
+    const existing = liveMatchState.get(id);
     const code = v2StatusCode(ev);
     const statusStr = v2StatusStr(ev.status);
     // Skip matches that are definitively not live
@@ -6514,21 +6579,83 @@ function buildTennisLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
         ? [parsePoint(realHPt), parsePoint(realAPt)]
         : advanceTennisGamePts(`tennis-v2-${ev.id}`);
 
+    // ── Market suspension: detect point played and compute duration ─────────────
+    // A point is played when currentPoints or sets changes compared to last tick.
+    const prevPoints = existing?._liveExtra?.currentPoints;
+    const prevSets   = existing?._liveExtra?.sets;
+    const pointPlayed =
+      prevPoints !== undefined && (
+        JSON.stringify(prevPoints) !== JSON.stringify(currentPoints) ||
+        JSON.stringify(prevSets)   !== JSON.stringify(sets)
+      );
+
+    // Settled set markets: permanently suspend once a set is done
+    const doneSets = sets.filter(([h, a]) => {
+      const maxG = Math.max(h, a);
+      const minG = Math.min(h, a);
+      return (maxG >= 6 && maxG - minG >= 2) || maxG === 7;
+    }).length;
+    const SETTLED = now + 30 * 24 * 60 * 60 * 1000;
+    const settledSusp: Record<string, number> = {};
+    if (doneSets >= 1) settledSusp["firstSet"] = SETTLED;
+    if (doneSets >= 2) settledSusp["set2"]     = SETTLED;
+
+    let marketSuspension: Record<string, number> | undefined = existing?.marketSuspension
+      ? Object.fromEntries(Object.entries(existing.marketSuspension).filter(([, ts]) => ts > now))
+      : undefined;
+    // Merge settled set suspensions (these are permanent — never expire)
+    if (Object.keys(settledSusp).length > 0) {
+      marketSuspension = { ...(marketSuspension ?? {}), ...settledSusp };
+    }
+
+    let suspensionReason = existing?._suspensionReason;
+
+    if (pointPlayed) {
+      const suspMs = tennisSuspensionMs(currentPoints, sets, homeScore, awayScore);
+      const pointSusp = Object.fromEntries(
+        TENNIS_SUSP_KEYS.map(k => [k, now + suspMs]),
+      );
+      // Merge: settled markets keep their permanent timestamp; point suspension overrides temporary ones
+      marketSuspension = { ...(marketSuspension ?? {}), ...pointSusp, ...settledSusp };
+      suspensionReason = "PONTO EM JOGO";
+    } else if (marketSuspension && Object.keys(marketSuspension).length === 0) {
+      marketSuspension = undefined;
+      suspensionReason = undefined;
+    } else if (!pointPlayed && suspensionReason === "PONTO EM JOGO") {
+      // Suspension has expired — clear the reason
+      const active = marketSuspension
+        ? Object.entries(marketSuspension).filter(([k, ts]) => ts > now && settledSusp[k] === undefined)
+        : [];
+      suspensionReason = active.length > 0 ? suspensionReason : undefined;
+    }
+
     // If we accepted this match via startedAlready override, show a sensible status
     const displayStatus = (startedAlready && notLive) ? "Em Jogo" : statusStr;
-    result.push({
-      id: `tennis-v2-${ev.id}`,
+
+    const state: LiveMatchState = {
+      id,
       home: homeTeam, away: awayTeam,
       league: v2TournName(ev.tournament), country: v2TournCountry(ev),
       sport: "tennis", homeScore, awayScore,
       minute: setNum * 20,
-      // hasRealOdds=true: we always have odds (real live bookmaker, pre-match, or estimate)
       status: displayStatus, hasRealOdds: true, odds: liveOdds,
       markets: makeAdvancedMarketsFromTeams(homeTeam, awayTeam),
       events: [],
+      _firstSeenAt: existing?._firstSeenAt ?? now,
       _liveExtra: { sets: sets.length > 0 ? sets : [], currentPoints },
-    });
+      marketSuspension: marketSuspension && Object.keys(marketSuspension).length > 0 ? marketSuspension : undefined,
+      _suspensionReason: suspensionReason,
+    };
+    liveMatchState.set(id, state);
+    result.push(state);
   }
+
+  // Garbage collect tennis states no longer in the feed
+  for (const id of liveMatchState.keys()) {
+    if (!id.startsWith("tennis-v2-")) continue;
+    if (!currentIds.has(id)) liveMatchState.delete(id);
+  }
+
   return result;
 }
 
