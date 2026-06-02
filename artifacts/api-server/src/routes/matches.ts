@@ -4001,10 +4001,9 @@ function applyV2WsMessage(sport: SportKey, raw: unknown): void {
     case "tennis":
       tennisLiveV2Cache   = incoming;
       tennisLiveV2FetchedAt = now;
-      if (tennisTodayV2Cache !== null) {
-        tennisTodayV2Cache   = incoming;
-        tennisTodayV2FetchedAt = now;
-      }
+      // NOTE: do NOT sync tennisTodayV2Cache from the WS — the WS only
+      // sends in-progress events, so syncing it would erase pre-match
+      // events that buildTennisLiveV2 needs to detect started matches.
       break;
   }
 }
@@ -4280,7 +4279,7 @@ async function getScheduleV2(sport: SportKey, date: string): Promise<SAPIV2Event
  * for the given sport, sorted by startTimestamp ascending.
  * Filters out events with status.type === "finished" and startTimestamp <= now.
  */
-async function getUpcomingEventsV2(sport: SportKey, days = 3): Promise<SAPIV2Event[]> {
+async function getUpcomingEventsV2(sport: SportKey, days = 3, graceSec = 5 * 60): Promise<SAPIV2Event[]> {
   const dates: string[] = [];
   const nowMs = Date.now();
   for (let i = 0; i < days; i++) {
@@ -4289,9 +4288,6 @@ async function getUpcomingEventsV2(sport: SportKey, days = 3): Promise<SAPIV2Eve
   }
   const allDays = await Promise.all(dates.map(dt => getScheduleV2(sport, dt).catch(() => [] as SAPIV2Event[])));
   const nowSec = nowMs / 1000;
-  // Grace period: keep games up to 5 min past their start time so games that
-  // just kicked off but haven't appeared in the live feed yet don't vanish.
-  const graceSec = 5 * 60;
   return allDays
     .flat()
     .filter(ev => {
@@ -6236,6 +6232,7 @@ function buildBaseballLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
 
 function buildTennisLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
   const result: LiveMatchState[] = [];
+  const nowSec = Date.now() / 1000;
   for (const ev of events) {
     const code = v2StatusCode(ev);
     const statusStr = v2StatusStr(ev.status);
@@ -6249,7 +6246,15 @@ function buildTennisLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
       sLow.includes("cancel") || sLow.includes("walkover") ||
       sLow.includes("retired") || sLow.includes("abandon") ||
       sLow.includes("awarded");
-    if (notLive) continue;
+    // Override: if the match already started (past startTimestamp by >2 min)
+    // treat it as live even if the API hasn't updated its status yet.
+    // This handles the /today fallback where status may lag behind reality.
+    const startedAlready =
+      !sLow.includes("cancel") && !sLow.includes("postpone") &&
+      !sLow.includes("walkover") && !sLow.includes("retired") &&
+      !sLow.includes("awarded") &&
+      ev.startTimestamp !== undefined && ev.startTimestamp < nowSec - 120;
+    if (notLive && !startedAlready) continue;
     // Accept everything else: "Playing", "1st Set", "2nd Set", "In Progress",
     // "Break Time", "Advantage", "Tiebreak", "Suspended", "Paused", etc.
 
@@ -6287,13 +6292,15 @@ function buildTennisLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
 
     // Add cycling game score so the PTS column always appears
     const currentPoints = advanceTennisGamePts(`tennis-v2-${ev.id}`);
+    // If we accepted this match via startedAlready override, show a sensible status
+    const displayStatus = (startedAlready && notLive) ? "Em Jogo" : statusStr;
     result.push({
       id: `tennis-v2-${ev.id}`,
       home: homeTeam, away: awayTeam,
       league: v2TournName(ev.tournament), country: v2TournCountry(ev),
       sport: "tennis", homeScore, awayScore,
       minute: setNum * 20,
-      status: statusStr, hasRealOdds: !!cachedOdds, odds: liveOdds,
+      status: displayStatus, hasRealOdds: !!cachedOdds, odds: liveOdds,
       markets: makeAdvancedMarketsFromTeams(homeTeam, awayTeam),
       events: [],
       _liveExtra: { sets: sets.length > 0 ? sets : [], currentPoints },
@@ -6600,7 +6607,10 @@ router.get("/live-stream", (req, res) => {
 
 async function buildTennisUpcoming(): Promise<UpcomingMatch[]> {
   try {
-    const events = await getUpcomingEventsV2("tennis", 2);
+    // Use 90-min grace: keep matches visible as "Em Breve" even if the live
+    // feed hasn't picked them up yet. Without this, a match that started and
+    // isn't yet in /live simply disappears from view for up to 90 minutes.
+    const events = await getUpcomingEventsV2("tennis", 2, 90 * 60);
     const seen = new Set<string>();
     const filtered: SAPIV2Event[] = [];
 
