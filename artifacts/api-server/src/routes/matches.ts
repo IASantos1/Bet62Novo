@@ -198,6 +198,7 @@ export type LiveMatchState = {
     htScore?: [number, number];          // football: half-time score [homeHT, awayHT]
     etScore?: [number, number];          // football: extra-time score [homeET, awayET]
     penScore?: [number, number];         // football: penalty shootout [homePen, awayPen]
+    penBaseScore?: [number, number];     // football: score at start of penalty phase (to compute pen goals)
   };
 };
 
@@ -6063,9 +6064,24 @@ function buildFootballLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
         ? calculateLive1x2({ minute, homeGoals: homeScore, awayGoals: awayScore, redCardsHome: 0, redCardsAway: 0, baseHome: baseOdds.home, baseAway: baseOdds.away })
         : existing.odds;
 
-      // Helper: patch penExtra into markets when match is in penalty shootout
+      // Penalty score tracking: when entering "Penalties" phase store the pre-penalty base score.
+      // On every subsequent tick compute goals scored in the shootout from the delta.
+      const prevBase = existing._liveExtra?.penBaseScore;
+      const penBase: [number, number] = isPen
+        ? (existing.status !== "Penalties"
+            ? [homeScore, awayScore]              // just transitioned — current score IS the base
+            : (prevBase ?? [homeScore, awayScore])) // already in penalties — keep stored base
+        : [0, 0];
+      const penGoals: [number, number] = isPen
+        ? [Math.max(0, homeScore - penBase[0]), Math.max(0, awayScore - penBase[1])]
+        : [0, 0];
+      const penLiveExtra: LiveMatchState["_liveExtra"] = isPen
+        ? { ...(existing._liveExtra ?? {}), penBaseScore: penBase, penScore: penGoals }
+        : existing._liveExtra;
+
+      // Helper: patch penExtra with real penalty odds into markets
       const withPen = (mkts: typeof existing.markets) =>
-        isPen ? { ...mkts, penExtra: makePenMarketsFromScore(0, 0) } : mkts;
+        isPen ? { ...mkts, penExtra: makePenMarketsFromScore(penGoals[0], penGoals[1]) } : mkts;
 
       if (scored) {
         // Goal detected — filter settled markets, set goal suspension.
@@ -6083,6 +6099,7 @@ function buildFootballLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
           _baseMarkets: filteredBase,
           marketSuspension: susp,
           _suspensionReason: isVARStatus ? "REVISÃO AO VAR" : "GOLO!",
+          _liveExtra: penLiveExtra,
         };
         liveMatchState.set(id, applyTieredMarketDrift(updated, now));
       } else {
@@ -6120,6 +6137,7 @@ function buildFootballLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
             _baseMarkets: filteredBase,
             marketSuspension: susp,
             _suspensionReason: "REVISÃO AO VAR",
+            _liveExtra: penLiveExtra,
           };
           liveMatchState.set(id, applyTieredMarketDrift(updated, now));
         } else {
@@ -6132,6 +6150,7 @@ function buildFootballLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
             _baseMarkets: filteredBase,
             marketSuspension: susp,
             _suspensionReason: susp ? existing._suspensionReason : undefined,
+            _liveExtra: penLiveExtra,
           };
           liveMatchState.set(id, applyTieredMarketDrift(updated, now));
         }
@@ -6145,6 +6164,7 @@ function buildFootballLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
         : calculateLive1x2({ minute, homeGoals: homeScore, awayGoals: awayScore, redCardsHome: 0, redCardsAway: 0, baseHome: baseOdds.home, baseAway: baseOdds.away });
       const rawMarkets = makeAdvancedMarketsFromTeams(homeTeam, awayTeam);
       const baseMarkets = filterLiveMarkets(rawMarkets, homeScore, awayScore, newStatus);
+      // First time seen in penalties — store current score as base (0-0 penalties so far)
       const markets = isPen ? { ...baseMarkets, penExtra: makePenMarketsFromScore(0, 0) } : baseMarkets;
       const state: LiveMatchState = {
         id,
@@ -6165,6 +6185,7 @@ function buildFootballLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
         _baseOdds: baseOdds,
         _baseMarkets: markets,
         _oddsUpdatedAt: now,
+        _liveExtra: isPen ? { penBaseScore: [homeScore, awayScore] as [number, number], penScore: [0, 0] as [number, number] } : undefined,
       };
       liveMatchState.set(id, state);
       result.push(state);
