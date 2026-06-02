@@ -1884,6 +1884,8 @@ type SAPIV2ScoreObj = {
   period1?: number; period2?: number; period3?: number; period4?: number;
   innings?: Record<string, { run?: number | null }>;
   inningsBaseball?: { run?: number; hits?: number; errors?: number };
+  /** Tennis only: current game score — "0" | "15" | "30" | "40" | "AD" | "D" */
+  point?: string;
 };
 type SAPIV2StatusObj = { code?: number; description?: string; type?: string };
 type SAPIV2TournObj  = {
@@ -5866,6 +5868,50 @@ function _tennisPairKey(n0: string, n1: string): string {
   return [sur(n0), sur(n1)].sort().join("|");
 }
 
+// ─── Live odds cache: real bookmaker live odds fetched per-match ───────────────
+// Keyed by V2 match ID (number). TTL = 45 s. Fetched from:
+//   GET {SAPI_V2_TENNIS}/match/:id/odds  →  market "Full time" isLive:true
+// Populated by refreshTennisLiveOdds() (fire-and-forget, called from buildTennisLiveV2).
+const _tennisLiveOddsCache = new Map<number, { home: number; away: number; at: number }>();
+const TENNIS_LIVE_ODDS_TTL = 45_000;
+
+/** Convert fractional odd string (e.g. "7/2") to decimal (e.g. 4.50). */
+function parseFractionalOdd(frac: string): number {
+  const [n, d] = frac.split("/").map(Number);
+  if (!d || isNaN(n) || isNaN(d)) return 0;
+  return +(1 + n / d).toFixed(2);
+}
+
+/** Fire-and-forget: fetch live bookmaker odds for each match ID and store in cache. */
+function refreshTennisLiveOdds(matchIds: number[]): void {
+  const toFetch = matchIds.filter(id => {
+    const cached = _tennisLiveOddsCache.get(id);
+    return !cached || Date.now() - cached.at > TENNIS_LIVE_ODDS_TTL;
+  });
+  if (toFetch.length === 0) return;
+  void Promise.allSettled(toFetch.map(async id => {
+    try {
+      const res = await fetch(`${SAPI_V2_TENNIS}/match/${id}/odds`, {
+        headers: sapiHeaders(),
+        signal: AbortSignal.timeout(6_000),
+      });
+      if (!res.ok) return;
+      const j = await res.json() as { data?: { markets?: Array<{ marketName?: string; marketId?: number; isLive?: boolean; choices?: Array<{ name?: string; fractionalValue?: string }> }> } };
+      const markets = j.data?.markets ?? [];
+      // Pick the live Full time (match winner) market
+      const ft = markets.find(m => (m.marketName === "Full time" || m.marketId === 1) && m.isLive === true);
+      if (!ft) return;
+      const homeChoice = (ft.choices ?? []).find(c => c.name === "1");
+      const awayChoice = (ft.choices ?? []).find(c => c.name === "2");
+      if (!homeChoice?.fractionalValue || !awayChoice?.fractionalValue) return;
+      const home = parseFractionalOdd(homeChoice.fractionalValue);
+      const away = parseFractionalOdd(awayChoice.fractionalValue);
+      if (home <= 1 || away <= 1) return; // sanity — 1/1 or worse is a data error
+      _tennisLiveOddsCache.set(id, { home, away, at: Date.now() });
+    } catch { /* ignore */ }
+  }));
+}
+
 
 export { buildLiveMatches, buildUpcomingMatches, getUpcomingAll };
 
@@ -6274,6 +6320,9 @@ function buildTennisLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
   const result: LiveMatchState[] = [];
   const seenIds = new Set<number>();
   const seenPairs = new Set<string>();
+  // Kick off background live-odds refresh for all valid match IDs (fire-and-forget)
+  const liveIds = events.map(e => e.id).filter(Boolean) as number[];
+  refreshTennisLiveOdds(liveIds);
   const nowSec = Date.now() / 1000;
   for (const ev of events) {
     // Deduplicate by event ID (API sometimes returns the same event twice)
@@ -6329,22 +6378,45 @@ function buildTennisLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
     }
 
     const setNum = code !== undefined && code >= 13 ? code - 12 : sets.length + 1;
-    // Use real pre-match odds as base when available, fall back to seeded estimate
-    const cachedOdds = _tennisPreMatchOdds.get(_tennisPairKey(homeTeam, awayTeam));
-    const baseOdds = cachedOdds
-      ? { home: cachedOdds.home, draw: 0, away: cachedOdds.away }
-      : makeOddsFromTeams(homeTeam, awayTeam);
-    const diff = homeScore - awayScore;
-    let liveOdds = { ...baseOdds, draw: 0 };
-    if (diff !== 0) {
-      const factor = Math.min(0.55, Math.abs(diff) * 0.22);
-      liveOdds = diff > 0
-        ? { home: Math.max(1.01, +(baseOdds.home * (1 - factor)).toFixed(2)), draw: 0, away: Math.min(50, +(baseOdds.away * (1 + factor)).toFixed(2)) }
-        : { home: Math.min(50, +(baseOdds.home * (1 + factor)).toFixed(2)), draw: 0, away: Math.max(1.01, +(baseOdds.away * (1 - factor)).toFixed(2)) };
+
+    // ── Odds: prefer real bookmaker live odds (from cache), else fall back to
+    //    pre-match cached odds + drift, else seeded estimate + drift. ──────────
+    const realLiveOdds = ev.id ? _tennisLiveOddsCache.get(ev.id) : undefined;
+    let liveOdds: { home: number; draw: number; away: number };
+    if (realLiveOdds) {
+      // Real bookmaker live odds — use directly (already reflect current score)
+      liveOdds = { home: realLiveOdds.home, draw: 0, away: realLiveOdds.away };
+    } else {
+      // Fallback: pre-match odds (or seeded estimate) + score-based drift
+      const cachedOdds = _tennisPreMatchOdds.get(_tennisPairKey(homeTeam, awayTeam));
+      const baseOdds = cachedOdds
+        ? { home: cachedOdds.home, draw: 0, away: cachedOdds.away }
+        : makeOddsFromTeams(homeTeam, awayTeam);
+      const diff = homeScore - awayScore;
+      liveOdds = { ...baseOdds, draw: 0 };
+      if (diff !== 0) {
+        const factor = Math.min(0.55, Math.abs(diff) * 0.22);
+        liveOdds = diff > 0
+          ? { home: Math.max(1.01, +(baseOdds.home * (1 - factor)).toFixed(2)), draw: 0, away: Math.min(50, +(baseOdds.away * (1 + factor)).toFixed(2)) }
+          : { home: Math.min(50, +(baseOdds.home * (1 + factor)).toFixed(2)), draw: 0, away: Math.max(1.01, +(baseOdds.away * (1 - factor)).toFixed(2)) };
+      }
     }
 
-    // Add cycling game score so the PTS column always appears
-    const currentPoints = advanceTennisGamePts(`tennis-v2-${ev.id}`);
+    // ── Game score: use real point score from API when available ───────────────
+    // hS.point / aS.point = "0" | "15" | "30" | "40" | "AD" — provided by V2 live
+    const parsePoint = (p: string | undefined): number | string => {
+      if (p === undefined) return 0;
+      if (p === "AD") return "AD";
+      const n = parseInt(p, 10);
+      return isNaN(n) ? p : n; // pass through "15", "30", "40" as numbers; "D"/"A" as string
+    };
+    const realHPt = hS?.point;
+    const realAPt = aS?.point;
+    const currentPoints: [number | string, number | string] =
+      realHPt !== undefined && realAPt !== undefined
+        ? [parsePoint(realHPt), parsePoint(realAPt)]
+        : advanceTennisGamePts(`tennis-v2-${ev.id}`);
+
     // If we accepted this match via startedAlready override, show a sensible status
     const displayStatus = (startedAlready && notLive) ? "Em Jogo" : statusStr;
     result.push({
@@ -6353,9 +6425,7 @@ function buildTennisLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
       league: v2TournName(ev.tournament), country: v2TournCountry(ev),
       sport: "tennis", homeScore, awayScore,
       minute: setNum * 20,
-      // hasRealOdds=true for ALL live tennis — we always generate odds (either from
-      // pre-match bookmaker cache or from makeOddsFromTeams seeded estimate).
-      // The flag controls whether bet buttons render; live matches should always show them.
+      // hasRealOdds=true: we always have odds (real live bookmaker, pre-match, or estimate)
       status: displayStatus, hasRealOdds: true, odds: liveOdds,
       markets: makeAdvancedMarketsFromTeams(homeTeam, awayTeam),
       events: [],
@@ -6365,9 +6435,11 @@ function buildTennisLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
   return result;
 }
 
-// ─── Per-match cycling game score (15/30/40/AD) for V2 + simulation tennis ─────
-// V2 API doesn't provide game_score. We simulate it so the PTS column always
-// shows. Advances one point every ~5 seconds; handles deuce and advantage.
+// ─── Per-match cycling game score — simulation fallback ──────────────────────
+// V2 API DOES provide point scores via homeScore.point / awayScore.point
+// ("0"|"15"|"30"|"40"|"A"). buildTennisLiveV2 uses real API values when present
+// and falls back to this simulation only when the field is missing (e.g. ITF
+// matches where the API sometimes omits the point field).
 
 type TennisGamePtState = { h: number; a: number; lastAdvance: number };
 const _tennisGamePts = new Map<string, TennisGamePtState>();
