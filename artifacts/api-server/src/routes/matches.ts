@@ -4513,12 +4513,15 @@ async function getPreMatchOddsV2(sport: SportKey, matchId: number): Promise<V2Pr
 
 // ─── League Filters ────────────────────────────────────────────────────────────
 
-/** Returns true for youth leagues (U15–U21, U23) that should be hidden. */
+/** Returns true for youth leagues (U15–U21, U23) or blocked tournaments that should be hidden. */
 function isBlockedLeague(name: string): boolean {
   const n = name.toLowerCase();
   if (/\bu(1[5-9]|2[013])\b/.test(n)) return true;
   if (/\bunder[- ]?(1[5-9]|2[013])\b/.test(n)) return true;
   if (/\bjuniors?\b|\byouth\b/.test(n) && !/women|feminine|feminino|frauen|femenin/i.test(n)) return true;
+  // Specific blocked preseason / youth tournaments
+  if (n.includes("trofeo dossena")) return true;
+  if (n.includes("int.p")) return true;
   return false;
 }
 
@@ -5999,6 +6002,9 @@ function buildFootballLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
     const awayScore = v2CurrentScore(ev.awayScore);
     const league = normalizeLeagueName(v2TournName(ev.tournament), "");
 
+    // Block youth matches: check league name AND team names (e.g. "Pergolettese U19")
+    if (isBlockedLeague(`${league} ${homeTeam} ${awayTeam}`)) continue;
+
     const isHT = statusStr === "HT";
     const isPen = statusStr === "Penalties";
     const isET = !isPen && (statusStr.includes("extra") || statusStr === "Extra Time");
@@ -6193,10 +6199,14 @@ function buildFootballLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
   }
 
   // Garbage collect football matches no longer in the V2 live feed
+  // Also evict matches blocked by youth filter or stuck > 4h (frozen feed safety net)
+  const MAX_V2_LIVE_MS = 4 * 60 * 60 * 1000; // 4 hours
   for (const id of liveMatchState.keys()) {
     if (!id.startsWith("football-v2-")) continue;
-    if (!currentIds.has(id)) {
-      const state = liveMatchState.get(id)!;
+    const state = liveMatchState.get(id)!;
+    const tooOld = now - (state._firstSeenAt ?? now) > MAX_V2_LIVE_MS;
+    const blockedNow = isBlockedLeague(`${state.league} ${state.home} ${state.away}`);
+    if (!currentIds.has(id) || tooOld || blockedNow) {
       finishedMatchResults.set(id, {
         home: state.homeScore, away: state.awayScore,
         homeTeam: state.home, awayTeam: state.away, finishedAt: now,
