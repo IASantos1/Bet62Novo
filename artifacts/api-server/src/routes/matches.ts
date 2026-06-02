@@ -2056,6 +2056,9 @@ interface SSEClient { write: (chunk: string) => boolean; }
 const sseClients = new Set<SSEClient>();
 const wsLiveClients = new Set<WsClient>();
 let broadcastInProgress = false;
+// When a score patch arrives while a broadcast is already running, set this flag
+// so the broadcast runs again immediately after finishing (instead of being dropped).
+let broadcastPending = false;
 
 // v2/daily today: cache 5min
 let dailyCache: StatpalLeagueV2[] | null = null;
@@ -6375,6 +6378,14 @@ function buildTennisLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
       !sLow.includes("awarded") &&
       ev.startTimestamp !== undefined &&
       matchAgeSeconds > 120 && matchAgeSeconds < 5 * 3600;
+    // Zombie detection: match claims to be in progress but started too long ago.
+    // Tennis best-of-3 ≤ ~3h; best-of-5 ≤ ~5h. If still "playing" after 4h, the
+    // API is stuck — treat as finished and skip.
+    const isZombie =
+      matchAgeSeconds > 4 * 3600 &&
+      (code === 8 || code === 9 || code === 10 ||
+       sLow.includes("set") || sLow.includes("playing") || sLow.includes("progress"));
+    if (isZombie) continue;
     if (notLive && !startedAlready) continue;
     // Accept everything else: "Playing", "1st Set", "2nd Set", "In Progress",
     // "Break Time", "Advantage", "Tiebreak", "Suspended", "Paused", etc.
@@ -6597,28 +6608,51 @@ function buildTennisSimulation(): LiveMatchState[] {
 
 // ─── Routes ───────────────────────────────────────────────────────────────────
 
+// ── Upcoming matches cache (Em Breve section) ─────────────────────────────────
+// Upcoming matches change slowly (every few minutes), so we cache them for 30s.
+// Live score data is always rebuilt fresh (pure in-memory, sub-millisecond).
+// This means a V1 score patch triggers a broadcast in ~5ms instead of ~200ms.
+let _allUpcomingCache: UpcomingMatch[] = [];
+let _allUpcomingCacheBuiltAt = 0;
+const UPCOMING_CACHE_TTL_MS = 30_000;
+let _upcomingRebuildInProgress = false;
+
+async function rebuildUpcomingCache(): Promise<void> {
+  if (_upcomingRebuildInProgress) return;
+  _upcomingRebuildInProgress = true;
+  const empty: UpcomingMatch[] = [];
+  try {
+    const [upFootball, upTennis, upBasketball, upHockey, upVolleyball] = await Promise.all([
+      buildUpcomingMatches().catch(() => empty),
+      buildTennisUpcoming().catch(() => empty),
+      buildBasketballUpcoming().catch(() => empty),
+      buildHockeyUpcoming().catch(() => empty),
+      buildVolleyballUpcoming().catch(() => empty),
+    ]);
+    _allUpcomingCache = [...upFootball, ...upTennis, ...upBasketball, ...upHockey, ...upVolleyball];
+    _allUpcomingCacheBuiltAt = Date.now();
+  } catch { /* keep stale */ } finally {
+    _upcomingRebuildInProgress = false;
+  }
+}
+
 // Shared payload builder — used by both /live HTTP route and SSE broadcast
 async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
-  const empty: UpcomingMatch[] = [];
+  // ── Fast path: live data from in-memory WS caches (sub-ms each) ──────────
   const [
     footballEvents, basketballEvents, hockeyEvents, baseballEvents, tennisEvents,
-    upFootball, upTennis, upBasketball, upHockey, upVolleyball,
-    , , tennisTodayEvents,
+    tennisTodayEvents,
   ] = await Promise.all([
     getFootballLiveV2(),
     getBasketballLiveV2(),
     getHockeyLiveV2(),
     getBaseballLiveV2(),
     getTennisLiveV2(),
-    buildUpcomingMatches().catch(() => empty),
-    buildTennisUpcoming().catch(() => empty),
-    buildBasketballUpcoming().catch(() => empty),
-    buildHockeyUpcoming().catch(() => empty),
-    buildVolleyballUpcoming().catch(() => empty),
-    getTennisOdds().catch(() => []),
-    getMLBOdds().catch(() => []),
-    getTennisTodayV2(), // fallback when /live is empty or plan-restricted
+    getTennisTodayV2(),
   ]);
+  // Fire-and-forget odds cache warmers — don't block the broadcast path
+  getTennisOdds().catch(() => {});
+  getMLBOdds().catch(() => {});
   // Tennis live priority: /live endpoint → /today filtered for in-progress → v1 simulation
   // Always also check /today for matches that started but haven't appeared in /live yet
   // (the SportsApiPro /live endpoint can lag 2-5 min behind actual match start).
@@ -6644,14 +6678,24 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
   const liveIds = new Set(livePart.map(m => String(m.id)));
   // Deduplicate by team pair — prevents upcoming duplicating a match already in the live feed
   const liveTeamPairs = new Set(livePart.map(m => `${m.home}|${m.away}`));
+
+  // ── Slow path: upcoming matches from 30s cache ────────────────────────────
+  // First call awaits; subsequent calls use the stale cache while a background
+  // rebuild runs so the broadcast path is never blocked by network I/O.
+  if (_allUpcomingCacheBuiltAt === 0) {
+    await rebuildUpcomingCache();
+  } else if (Date.now() - _allUpcomingCacheBuiltAt > UPCOMING_CACHE_TTL_MS) {
+    rebuildUpcomingCache().catch(() => {}); // rebuild in background; use stale now
+  }
+  const allUpcoming = _allUpcomingCache;
+
   // Max minutes ahead a match can be to appear as "Em Breve", per sport
   const SOON_WINDOW: Record<string, number> = {
     football: 2160, soccer: 2160,   // football: up to 36 h (many fixtures spread over days)
     basketball: 480, hockey: 480,    // NBA/NHL: up to 8 h (evening US games)
-    tennis: 900,                     // tennis: 15 h — covers next-day morning Roland Garros at night
+    tennis: 90,                      // tennis: 90 min — only show matches starting very soon as "Em Breve"
   };
   const DEFAULT_SOON_WINDOW = 240; // 4 h for volleyball, etc.
-  const allUpcoming = [...upFootball, ...upTennis, ...upBasketball, ...upHockey, ...upVolleyball];
   const startingSoon: LiveMatchState[] = allUpcoming
     .filter(m => {
       // Tennis always has computed odds even without a real bookmaker price — allow all.
@@ -6689,13 +6733,17 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
 }
 
 // Broadcast payload to all connected SSE + WebSocket clients; prune dead connections.
-// Guards: (1) skip if no clients, (2) skip if a broadcast is already in
-// progress (prevents pileup), (3) never send empty matches — keep the last
-// good state on clients instead.
+// Guards: (1) skip if no clients, (2) if a broadcast is already in progress, set
+// broadcastPending so the update is sent immediately after — never silently dropped.
+// (3) never send empty matches — keep the last good state on clients instead.
 async function broadcastLive(): Promise<void> {
   if (sseClients.size === 0 && wsLiveClients.size === 0) return;
-  if (broadcastInProgress) return;
+  if (broadcastInProgress) {
+    broadcastPending = true; // queue a follow-up — don't drop the score update
+    return;
+  }
   broadcastInProgress = true;
+  broadcastPending = false;
   try {
     const payload = await buildLivePayload();
     if (payload.matches.length === 0) return; // keep last good state; don't wipe UI
@@ -6716,6 +6764,11 @@ async function broadcastLive(): Promise<void> {
     /* ignore — keep clients connected */
   } finally {
     broadcastInProgress = false;
+    // If a score update arrived while we were building, send it now immediately.
+    if (broadcastPending) {
+      broadcastPending = false;
+      setImmediate(() => { broadcastLive().catch(() => {}); });
+    }
   }
 }
 
