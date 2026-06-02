@@ -6703,9 +6703,12 @@ function buildTennisLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
         liveMatchState.delete(id);
         _tennisMissingFrom.delete(id);
       } else {
-        // Still within grace period — keep the last known state visible in the UI.
+        // Within grace period: only include in result for the first 8 s of the gap.
+        // This covers transient feed blips (1-4 polls) without surfacing finished matches
+        // that have permanently left the feed.  State is retained for the full 45 s so
+        // we can resume accurately if the match genuinely returns.
         const cached = liveMatchState.get(id);
-        if (cached) result.push(cached);
+        if (cached && (now - firstMissing) < 8_000) result.push(cached);
       }
     } else {
       _tennisMissingFrom.delete(id); // back in feed — reset grace timer
