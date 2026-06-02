@@ -3301,10 +3301,19 @@ export default function Home() {
       || !!(match._suspensionReason)
     );
 
+    // Penalty shootout: only show winner market with VENCEDOR DA FINAL header
+    const isPenShootout = match.isLive && sport === "football" && !!match.markets?.penExtra;
+
     const oddsRow = match.hasRealOdds ? (
-      <div className="flex gap-2 w-full mt-2.5">
+      <div className="flex flex-col gap-1 w-full mt-2.5">
         <SuspensionBanner match={match} />
-        {!isLiveSuspended ? (
+        {!isLiveSuspended && isPenShootout ? (<>
+          <span className="text-[9px] font-black uppercase tracking-widest text-yellow-400 text-center">🎯 Vencedor da Final</span>
+          <div className="flex gap-2 w-full">
+            <OddsButton match={match} selection="pen-home" odd={match.markets!.penExtra!.winner.home} market="penaltis" label={match.home.split(" ").slice(-1)[0]!} grow />
+            <OddsButton match={match} selection="pen-away" odd={match.markets!.penExtra!.winner.away} market="penaltis" label={match.away.split(" ").slice(-1)[0]!} grow />
+          </div>
+        </>) : !isLiveSuspended ? (
           isObviousLiveResult ? (
             <button
               className="flex-1 flex flex-col items-center py-2.5 px-2 rounded-md text-xs bg-amber-900/20 border border-amber-600/30"
@@ -3353,9 +3362,15 @@ export default function Home() {
                <SimpleScore big />}
             </div>
             {match.hasRealOdds && (
-              <div className="flex gap-2 w-full">
+              <div className="flex flex-col gap-1 w-full">
                 <SuspensionBanner match={match} />
-                {!isLiveSuspended ? (
+                {!isLiveSuspended && isPenShootout ? (<>
+                  <span className="text-[9px] font-black uppercase tracking-widest text-yellow-400 text-center">🎯 Vencedor da Final</span>
+                  <div className="flex gap-2 w-full">
+                    <OddsButton match={match} selection="pen-home" odd={match.markets!.penExtra!.winner.home} market="penaltis" label={match.home.split(" ").slice(-1)[0]!} grow />
+                    <OddsButton match={match} selection="pen-away" odd={match.markets!.penExtra!.winner.away} market="penaltis" label={match.away.split(" ").slice(-1)[0]!} grow />
+                  </div>
+                </>) : !isLiveSuspended ? (
                   isObviousLiveResult ? (
                     <button
                       className="flex-1 flex flex-col items-center py-2.5 px-2 rounded-md text-xs bg-amber-900/20 border border-amber-600/30"
@@ -4282,6 +4297,24 @@ export default function Home() {
           <div className="text-3xl mb-3">📊</div>
           <div className="text-sm font-medium">Odds não disponíveis para esta partida.</div>
           <div className="text-xs mt-1 text-zinc-600">Apenas partidas com odds confirmadas são apresentadas.</div>
+        </div>
+      );
+    }
+
+    // Penalty shootout: replace entire market area with VENCEDOR DA FINAL only
+    if (showPen && m?.penExtra) {
+      return (
+        <div className="mt-4">
+          <div className="flex flex-col items-center gap-4 py-4">
+            <div className="flex flex-col items-center gap-1">
+              <span className="text-[9px] font-black uppercase tracking-widest text-yellow-400 bg-yellow-950/40 border border-yellow-700/40 rounded px-3 py-1">🎯 Penáltis em curso</span>
+              <span className="text-[11px] font-black uppercase tracking-widest text-white/80 mt-1">Vencedor da Final</span>
+            </div>
+            <div className="flex gap-3 w-full max-w-xs">
+              <MarketOddsBtn match={match} sel="pen-home" odd={m.penExtra.winner.home} market="penaltis" label={match.home} />
+              <MarketOddsBtn match={match} sel="pen-away" odd={m.penExtra.winner.away} market="penaltis" label={match.away} />
+            </div>
+          </div>
         </div>
       );
     }
