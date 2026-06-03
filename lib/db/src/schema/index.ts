@@ -27,3 +27,4 @@ export * from "./suspendedMatches";
 export * from "./settlementLogs";
 export * from "./matchResults";
 export * from "./cashoutStates";
+export * from "./kycDocuments";

@@ -23,7 +23,6 @@ export function BiometricGate() {
   const {
     isBiometricLocked,
     isBiometricEnabled,
-    lockedUserEmail,
     unlockBiometric,
     unlockWithPassword,
     logout,
@@ -66,7 +65,7 @@ export function BiometricGate() {
       const result = await LocalAuthentication.authenticateAsync({
         promptMessage: "Desbloquear Bet62",
         disableDeviceFallback: true,
-        cancelLabel: "Usar password",
+        cancelLabel: "Cancelar",
       });
       if (result.success) {
         await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
@@ -173,9 +172,6 @@ export function BiometricGate() {
               </View>
               <Text style={styles.title}>Desbloquear Bet62</Text>
               <Text style={styles.subtitle}>Aproxima o rosto para desbloquear automaticamente</Text>
-              <Pressable onPress={() => setShowPwd(true)} style={styles.switchBtn}>
-                <Text style={styles.switchBtnTxt}>Usar email e password</Text>
-              </Pressable>
             </View>
 
           ) : (
@@ -186,15 +182,7 @@ export function BiometricGate() {
               </View>
 
               <Text style={styles.title}>Sessão bloqueada</Text>
-              <Text style={styles.subtitle}>60 segundos sem atividade</Text>
-
-              {/* Email row (pre-filled, read-only) */}
-              {lockedUserEmail ? (
-                <View style={styles.emailRow}>
-                  <Ionicons name="mail-outline" size={15} color="#a5a5b5" />
-                  <Text style={styles.emailTxt}>{lockedUserEmail}</Text>
-                </View>
-              ) : null}
+              <Text style={styles.subtitle}>Introduza a sua password para desbloquear</Text>
 
               {/* Password input */}
               <View style={styles.inputWrap}>
@@ -233,17 +221,6 @@ export function BiometricGate() {
                       <Text style={styles.unlockBtnTxt}>Desbloquear</Text>
                     </>}
               </Pressable>
-
-              {/* Switch back to Face ID if available */}
-              {isBiometricEnabled && (
-                <Pressable
-                  onPress={() => { setShowPwd(false); triggerBiometric(); }}
-                  style={styles.switchBtn}
-                >
-                  <Ionicons name="finger-print-outline" size={15} color="#a5a5b5" />
-                  <Text style={[styles.switchBtnTxt, { marginLeft: 5 }]}>Usar Face ID</Text>
-                </Pressable>
-              )}
 
               {/* Logout */}
               <Pressable onPress={handleLogout} style={styles.logoutBtn}>

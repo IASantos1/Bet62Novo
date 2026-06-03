@@ -138,6 +138,19 @@ export async function initDb(): Promise<void> {
         updated_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
       );
 
+      CREATE TABLE IF NOT EXISTS kyc_documents (
+        id           SERIAL PRIMARY KEY,
+        user_id      INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        kind         TEXT NOT NULL,
+        file_name    TEXT NOT NULL,
+        mime_type    TEXT NOT NULL,
+        file_size    INTEGER NOT NULL,
+        storage_path TEXT NOT NULL,
+        status       TEXT NOT NULL DEFAULT 'pending',
+        created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        reviewed_at  TIMESTAMPTZ
+      );
+
       ALTER TABLE match_results ADD COLUMN IF NOT EXISTS home_team     TEXT;
       ALTER TABLE match_results ADD COLUMN IF NOT EXISTS away_team     TEXT;
       ALTER TABLE match_results ADD COLUMN IF NOT EXISTS corners_total INTEGER;
@@ -149,6 +162,8 @@ export async function initDb(): Promise<void> {
 
       ALTER TABLE cashout_states ADD COLUMN IF NOT EXISTS reason            TEXT;
       ALTER TABLE cashout_states ADD COLUMN IF NOT EXISTS updated_at        TIMESTAMPTZ;
+
+      ALTER TABLE kyc_documents ADD COLUMN IF NOT EXISTS reviewed_at        TIMESTAMPTZ;
     `);
 
     console.info("[db/init] Schema initialisation complete.");

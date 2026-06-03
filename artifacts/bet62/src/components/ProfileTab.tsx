@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { toast } from "sonner";
 import {
@@ -117,6 +117,9 @@ export default function ProfileTab({ myBets, myBetsLoading, fetchMyBets }: Profi
   const [ibanName, setIbanName] = useState(auth.user?.withdrawalName ?? "");
   const [nif, setNif] = useState(auth.user?.nif ?? "");
   const [savingBanking, setSavingBanking] = useState(false);
+  const [kycUploading, setKycUploading] = useState<null | "id" | "address">(null);
+  const kycIdInputRef = useRef<HTMLInputElement | null>(null);
+  const kycAddressInputRef = useRef<HTMLInputElement | null>(null);
 
   const wonBets = myBets.filter(b => b.status === "won");
   const totalWagered = myBets.reduce((s, b) => s + parseFloat(b.stake), 0);
@@ -179,6 +182,49 @@ export default function ProfileTab({ myBets, myBetsLoading, fetchMyBets }: Profi
       }
     } catch { toast.error("Erro de ligação."); }
     finally { setExcludingFor(null); }
+  };
+
+  const readFileAsBase64 = (file: File): Promise<string> =>
+    new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onerror = () => reject(new Error("Falha ao ler ficheiro"));
+      reader.onload = () => {
+        const result = String(reader.result || "");
+        const idx = result.indexOf(",");
+        resolve(idx >= 0 ? result.slice(idx + 1) : result);
+      };
+      reader.readAsDataURL(file);
+    });
+
+  const uploadKycFiles = async (kind: "id" | "address", fileList: FileList) => {
+    if (!auth.token) { toast.error("Sessão inválida. Faça login novamente."); return; }
+    const files = Array.from(fileList).slice(0, 4);
+    if (files.length === 0) return;
+    const tooBig = files.find(f => f.size > 5 * 1024 * 1024);
+    if (tooBig) { toast.error("Arquivo muito grande. Máximo 5MB por arquivo."); return; }
+
+    setKycUploading(kind);
+    try {
+      const payloadFiles = await Promise.all(files.map(async (f) => ({
+        fileName: f.name,
+        mimeType: f.type || "application/octet-stream",
+        base64: await readFileAsBase64(f),
+      })));
+
+      const r = await fetch("/api/profile/kyc/upload", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${auth.token}` },
+        body: JSON.stringify({ kind, files: payloadFiles }),
+      });
+      const d = await r.json().catch(() => ({})) as { error?: string };
+      if (!r.ok) { toast.error(d.error ?? "Erro ao enviar documentos."); return; }
+      await auth.refreshUser();
+      toast.success("Documentos enviados. Estado: em análise.");
+    } catch {
+      toast.error("Erro ao enviar documentos.");
+    } finally {
+      setKycUploading(null);
+    }
   };
 
   const user = auth.user;
@@ -269,23 +315,48 @@ export default function ProfileTab({ myBets, myBetsLoading, fetchMyBets }: Profi
                 <FileText size={14} className="text-red-500" /> Como submeter documentos
               </h4>
               <ol className="text-xs text-zinc-400 space-y-2 list-decimal list-inside leading-relaxed">
-                <li>Envie um email para <span className="text-white font-semibold">kyc@bet62.pt</span></li>
                 <li>Inclua o seu ID de membro: <span className="text-red-400 font-mono font-bold">{memberId}</span></li>
                 <li>Anexe: Cartão de Cidadão ou Passaporte (frente e verso)</li>
                 <li>Anexe: Comprovativo de morada recente (fatura, extrato)</li>
+                <li>Limites: até 4 ficheiros por envio, máximo 5MB cada</li>
+                <li>Suporte: <span className="text-white font-semibold">suportebet62@gmail.com</span></li>
               </ol>
               <div className="flex flex-col sm:flex-row gap-2">
-                <a
-                  href={`mailto:kyc@bet62.pt?subject=KYC Verificação — ${memberId}&body=Olá,%0A%0AEnvio os meus documentos para verificação de identidade.%0A%0AID de Membro: ${memberId}%0A%0ADocumentos em anexo:%0A- Cartão de Cidadão ou Passaporte (frente e verso)%0A- Comprovativo de morada recente (fatura ou extrato)%0A%0ACom os melhores cumprimentos`}
-                  className="inline-flex items-center justify-center gap-1.5 bg-red-600 hover:bg-red-700 text-white text-xs font-semibold px-3 py-2 rounded-md transition-colors"
-                >
-                  <Mail size={12} /> Enviar Documentos por Email
-                </a>
+                <input
+                  ref={kycIdInputRef}
+                  type="file"
+                  multiple
+                  accept="image/*,application/pdf"
+                  className="hidden"
+                  onChange={(e) => { if (e.target.files) uploadKycFiles("id", e.target.files); e.currentTarget.value = ""; }}
+                />
+                <input
+                  ref={kycAddressInputRef}
+                  type="file"
+                  multiple
+                  accept="image/*,application/pdf"
+                  className="hidden"
+                  onChange={(e) => { if (e.target.files) uploadKycFiles("address", e.target.files); e.currentTarget.value = ""; }}
+                />
                 <button
-                  onClick={() => { navigator.clipboard.writeText("kyc@bet62.pt"); toast.success("Email copiado!"); }}
+                  onClick={() => kycIdInputRef.current?.click()}
+                  disabled={kycUploading !== null}
+                  className="inline-flex items-center justify-center gap-1.5 bg-red-600 hover:bg-red-700 disabled:opacity-60 text-white text-xs font-semibold px-3 py-2 rounded-md transition-colors"
+                >
+                  {kycUploading === "id" ? <Loader2 className="animate-spin" size={12} /> : <FileText size={12} />} Enviar Documento (ID)
+                </button>
+                <button
+                  onClick={() => kycAddressInputRef.current?.click()}
+                  disabled={kycUploading !== null}
+                  className="inline-flex items-center justify-center gap-1.5 bg-zinc-700 hover:bg-zinc-600 disabled:opacity-60 text-zinc-200 text-xs font-semibold px-3 py-2 rounded-md transition-colors"
+                >
+                  {kycUploading === "address" ? <Loader2 className="animate-spin" size={12} /> : <FileText size={12} />} Enviar Morada
+                </button>
+                <button
+                  onClick={() => { navigator.clipboard.writeText("suportebet62@gmail.com"); toast.success("Email copiado!"); }}
                   className="inline-flex items-center justify-center gap-1.5 bg-zinc-700 hover:bg-zinc-600 text-zinc-300 text-xs font-semibold px-3 py-2 rounded-md transition-colors"
                 >
-                  <Mail size={12} /> Copiar email KYC
+                  <Mail size={12} /> Copiar email
                 </button>
               </div>
             </div>
@@ -421,7 +492,7 @@ export default function ProfileTab({ myBets, myBetsLoading, fetchMyBets }: Profi
                           Excluído até: <strong>{selfExcludedUntil?.toLocaleDateString("pt-PT", { day: "2-digit", month: "long", year: "numeric" })}</strong>
                         </div>
                         <div className="text-xs text-zinc-500 mt-1">
-                          Para cancelar, contacte: suporte@bet62.pt
+                          Para cancelar, contacte: suportebet62@gmail.com
                         </div>
                       </div>
                     </div>
@@ -606,7 +677,7 @@ export default function ProfileTab({ myBets, myBetsLoading, fetchMyBets }: Profi
           >
             <div className="space-y-3">
               {[
-                { icon: <Mail size={16} className="text-red-400" />, label: "Email de suporte", value: "suporte@bet62.pt", sub: "Resposta em até 24 horas úteis" },
+                { icon: <Mail size={16} className="text-red-400" />, label: "Email de suporte", value: "suportebet62@gmail.com", sub: "Resposta em até 24 horas úteis" },
                 { icon: <Phone size={16} className="text-red-400" />, label: "Linha de apoio", value: "+351 800 000 000", sub: "Chamada gratuita · 24h / 7 dias" },
                 { icon: <Clock size={16} className="text-red-400" />, label: "Horário de atendimento", value: "24 horas, 7 dias por semana", sub: "Chat ao vivo disponível" },
               ].map(item => (
