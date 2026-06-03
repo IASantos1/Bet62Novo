@@ -13,6 +13,91 @@ const MAX_STAKE  = 2000.00;
 const MIN_ODDS   = 1.01;
 const MAX_ODDS   = 500.00;
 
+type CashoutStatus = "available" | "suspended" | "locked" | "closed";
+
+const CASHOUT_UNFAVORABLE_CYCLE_MS = 60000;
+const CASHOUT_UNFAVORABLE_OPEN_MS = 15000;
+const cashoutUnfavorableSince = new Map<string, number>();
+
+function getBetSelections(bet: { matchId: string; matchTitle: string; selections: unknown; totalOdds: string }): SelectionRecord[] {
+  if (Array.isArray(bet.selections)) return bet.selections as SelectionRecord[];
+  return [{ matchId: bet.matchId, matchTitle: bet.matchTitle, selection: "home", odd: parseFloat(bet.totalOdds), market: "result", label: "home" }];
+}
+
+function cashoutInfoForBet(bet: { id?: number | string; matchId: string; matchTitle: string; selections: unknown; stake: string; totalOdds: string; status: string }): {
+  cashoutStatus: CashoutStatus;
+  cashoutReason?: string;
+  cashoutEstimate?: string;
+} {
+  if (bet.status !== "pending") {
+    if (bet.id != null) cashoutUnfavorableSince.delete(String(bet.id));
+    return { cashoutStatus: "closed" };
+  }
+
+  const now = Date.now();
+  const selections = getBetSelections(bet);
+  if (selections.length === 0) return { cashoutStatus: "locked", cashoutReason: "Sem seleções" };
+
+  const stake = parseFloat(bet.stake);
+  const originalOdds = parseFloat(bet.totalOdds);
+  if (!Number.isFinite(stake) || !Number.isFinite(originalOdds) || stake <= 0 || originalOdds <= 0) {
+    return { cashoutStatus: "locked", cashoutReason: "Dados inválidos" };
+  }
+
+  const betKey = bet.id != null ? String(bet.id) : `${bet.matchId}:${JSON.stringify(selections.map(s => [s.matchId, s.market, s.selection]))}`;
+  let anyLive = false;
+  let suspendedReason: string | null = null;
+  let unfavorableReason: string | null = null;
+  let currentOddsProduct = 1;
+
+  for (const sel of selections) {
+    const mId = sel.matchId;
+    const liveSt = mId ? liveMatchState.get(String(mId)) : undefined;
+    if (liveSt) {
+      anyLive = true;
+      const suspended =
+        (liveSt.marketSuspension != null && Object.values(liveSt.marketSuspension).some(ts => ts > now)) ||
+        !!liveSt._suspensionReason;
+      if (suspended && !suspendedReason) suspendedReason = liveSt._suspensionReason ?? "LANCE CRÍTICO";
+
+      if (!unfavorableReason && typeof liveSt.homeScore === "number" && typeof liveSt.awayScore === "number") {
+        if (sel.selection === "home" && liveSt.homeScore < liveSt.awayScore) unfavorableReason = "Time selecionado está perdendo";
+        if (sel.selection === "away" && liveSt.awayScore < liveSt.homeScore) unfavorableReason = "Time selecionado está perdendo";
+      }
+    }
+
+    const baseOdd = Math.max(1.01, Number(sel.odd ?? 1.01));
+    if (!liveSt) {
+      currentOddsProduct *= baseOdd;
+      continue;
+    }
+
+    if (sel.selection === "home" && liveSt.odds?.home) currentOddsProduct *= Math.max(1.01, liveSt.odds.home);
+    else if (sel.selection === "away" && liveSt.odds?.away) currentOddsProduct *= Math.max(1.01, liveSt.odds.away);
+    else if (sel.selection === "draw" && liveSt.odds?.draw) currentOddsProduct *= Math.max(1.01, liveSt.odds.draw);
+    else currentOddsProduct *= baseOdd;
+  }
+
+  if (!anyLive) {
+    cashoutUnfavorableSince.delete(betKey);
+    return { cashoutStatus: "locked", cashoutReason: "Sem dados ao vivo" };
+  }
+  if (suspendedReason) return { cashoutStatus: "suspended", cashoutReason: suspendedReason };
+
+  if (unfavorableReason) {
+    const since = cashoutUnfavorableSince.get(betKey) ?? now;
+    if (!cashoutUnfavorableSince.has(betKey)) cashoutUnfavorableSince.set(betKey, since);
+    const elapsed = Math.max(0, now - since);
+    const open = (elapsed % CASHOUT_UNFAVORABLE_CYCLE_MS) < CASHOUT_UNFAVORABLE_OPEN_MS;
+    if (!open) return { cashoutStatus: "suspended", cashoutReason: unfavorableReason };
+  } else {
+    cashoutUnfavorableSince.delete(betKey);
+  }
+
+  const estimate = Math.max(0, Number(((stake * originalOdds) / Math.max(1.01, currentOddsProduct) * 0.92).toFixed(2)));
+  return { cashoutStatus: "available", cashoutEstimate: estimate.toFixed(2) };
+}
+
 // ─── POST /api/bets/place ─────────────────────────────────────────────────────
 router.post("/place", authMiddleware, async (req: AuthRequest, res: Response): Promise<void> => {
   const { matchId, matchTitle, selections, stake, totalOdds, isFreebet } = req.body;
@@ -128,7 +213,10 @@ router.get("/my", authMiddleware, async (req: AuthRequest, res: Response): Promi
       .where(eq(betsTable.userId, req.user!.id))
       .orderBy(desc(betsTable.createdAt));
 
-    res.json(bets);
+    res.json(bets.map(b => {
+      const info = cashoutInfoForBet(b as unknown as { id: number | string; matchId: string; matchTitle: string; selections: unknown; stake: string; totalOdds: string; status: string });
+      return { ...b, ...info };
+    }));
   } catch (err) {
     logger.error({ err }, "Fetch bets error");
     res.status(500).json({ error: "Internal server error" });
@@ -206,38 +294,17 @@ router.post("/:id/cashout", authMiddleware, async (req: AuthRequest, res: Respon
       return;
     }
 
-    // Block cashout during active market suspension (VAR, golo, penálti, etc.)
-    const liveSt = liveMatchState.get(bet.matchId);
-    if (liveSt) {
-      const now = Date.now();
-      const suspended =
-        (liveSt.marketSuspension != null &&
-          Object.values(liveSt.marketSuspension).some(ts => ts > now)) ||
-        !!liveSt._suspensionReason;
-      if (suspended) {
-        const reason = liveSt._suspensionReason ?? "LANCE CRÍTICO";
-        res.status(400).json({ error: `Cash out suspenso — ${reason}. Aguarde e tente novamente.` });
-        return;
-      }
+    const info = cashoutInfoForBet(bet as unknown as { id: number | string; matchId: string; matchTitle: string; selections: unknown; stake: string; totalOdds: string; status: string });
+    if (info.cashoutStatus !== "available" || !info.cashoutEstimate) {
+      const reason = info.cashoutStatus === "suspended"
+        ? `Cash out suspenso — ${info.cashoutReason ?? "LANCE CRÍTICO"}. Aguarde e tente novamente.`
+        : "Cash out indisponível no momento.";
+      res.status(400).json({ error: reason });
+      return;
     }
 
-    const stake        = parseFloat(bet.stake);
-    const originalOdds = parseFloat(bet.totalOdds);
-
-    // Current odds from live state, otherwise apply small drift
-    let currentOdds = originalOdds;
-    const liveMatch = liveMatchState.get(bet.matchId);
-    if (liveMatch) {
-      currentOdds = liveMatch.odds.home * liveMatch.odds.draw * liveMatch.odds.away;
-      currentOdds = Math.max(1.05, currentOdds);
-    } else {
-      const drift = 1 + Math.random() * 0.2;
-      currentOdds = Math.max(1.05, originalOdds * drift);
-    }
-
-    // cashoutValue = (stake × originalOdds) / currentOdds × 0.92  (8% house margin)
-    const cashoutValue = Math.max(0, Number(((stake * originalOdds) / currentOdds * 0.92).toFixed(2)));
-    const cashoutStr   = cashoutValue.toFixed(2);
+    const cashoutStr = info.cashoutEstimate;
+    const cashoutValue = parseFloat(cashoutStr);
 
     const result = await db.transaction(async (tx) => {
       // Atomic cashout — prevent double cashout via concurrent requests

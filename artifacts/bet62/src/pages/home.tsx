@@ -1174,6 +1174,9 @@ type UserBet = {
   totalOdds: string;
   status: string;
   cashoutValue?: string | null;
+  cashoutStatus?: string;
+  cashoutReason?: string;
+  cashoutEstimate?: string;
   createdAt: string;
 };
 
@@ -5775,6 +5778,7 @@ export default function Home() {
   };
 
   const cashoutEstimate = (bet: UserBet) => {
+    if (bet.cashoutEstimate && !Number.isNaN(parseFloat(bet.cashoutEstimate))) return parseFloat(bet.cashoutEstimate).toFixed(2);
     const s = parseFloat(bet.stake);
     const originalOdds = parseFloat(bet.totalOdds);
     const sels = getBetSelections(bet);
@@ -9773,7 +9777,8 @@ export default function Home() {
 
                             {/* ── CASH OUT BUTTON ── */}
                             {isActivePending ? (
-                              cashoutExpandedId === bet.id ? (
+                              bet.cashoutStatus === "available" ? (
+                                cashoutExpandedId === bet.id ? (
                                 <div className="mx-4 mb-4 rounded-2xl bg-green-600 px-5 py-4 flex items-center gap-3">
                                   <CircleDollarSign size={20} className="text-white shrink-0" />
                                   <div className="flex-1">
@@ -9786,12 +9791,23 @@ export default function Home() {
                                     {cashingOut === bet.id ? <Loader2 size={13} className="animate-spin" /> : "CONFIRMAR"}
                                   </button>
                                 </div>
-                              ) : (
+                                ) : (
                                 <button onClick={() => setCashoutExpandedId(bet.id)} disabled={cashingOut === bet.id}
                                   className="mx-4 mb-4 w-[calc(100%-2rem)] bg-red-600 hover:bg-red-500 active:bg-red-700 text-white font-black text-[15px] py-4 rounded-2xl flex items-center justify-center gap-2.5 transition-colors shadow-lg shadow-red-900/40 disabled:opacity-50">
                                   <RefreshCw size={18} />
                                   Cash Out disponível
                                 </button>
+                                )
+                              ) : bet.cashoutStatus === "suspended" ? (
+                                <div className="mx-4 mb-4 bg-gray-100 text-gray-500 font-bold text-[14px] py-4 rounded-2xl flex items-center justify-center gap-2 cursor-not-allowed select-none">
+                                  <Lock size={15} />
+                                  Cash Out suspenso{bet.cashoutReason ? ` — ${bet.cashoutReason}` : ""}
+                                </div>
+                              ) : (
+                                <div className="mx-4 mb-4 bg-gray-100 text-gray-400 font-bold text-[14px] py-4 rounded-2xl flex items-center justify-center gap-2 cursor-not-allowed select-none">
+                                  <Lock size={15} />
+                                  Cash Out indisponível
+                                </div>
                               )
                             ) : isCashedOut || isWon ? (
                               <div className="mx-4 mb-4 bg-gray-100 text-gray-400 font-bold text-[14px] py-4 rounded-2xl flex items-center justify-center gap-2 cursor-not-allowed select-none">
