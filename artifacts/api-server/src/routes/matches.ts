@@ -6928,12 +6928,9 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
   // The second call's GC loop re-emits grace-period matches already returned by the first
   // call — deduplicate here so each match ID appears at most once in the final array.
   ).filter(m => !liveIdsFromV2.has(String(m.id)));
-  const tennisLivePart = (() => {
-    const merged = [...tennisV2Part, ...todayStartedExtra];
-    if (merged.length > 0) return merged;
-    // Last resort: persistent in-memory simulation (Roland Garros-style matches)
-    return buildTennisSimulation();
-  })();
+  // Only real API data — simulation removed to avoid misleading users with
+  // hardcoded player names during active Grand Slam events.
+  const tennisLivePart = [...tennisV2Part, ...todayStartedExtra];
   const livePart = [
     ...buildFootballLiveV2(footballEvents),
     ...buildBasketballLiveV2(basketballEvents),
