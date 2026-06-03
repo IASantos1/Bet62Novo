@@ -3,11 +3,12 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { AuthProvider } from "@/hooks/use-auth";
-import { useState, useEffect } from "react";
+import { useState, useEffect, lazy, Suspense } from "react";
 import NotFound from "@/pages/not-found";
 import Home from "@/pages/home";
-import AdminPage from "@/pages/admin";
 import SplashScreen from "@/components/SplashScreen";
+
+const AdminPage = lazy(() => import("@/pages/admin"));
 
 // 08:00–18:59 → light mode · 19:00–07:59 → dark mode
 function applyTheme() {
@@ -30,7 +31,7 @@ function Router() {
   return (
     <Switch>
       <Route path="/" component={Home} />
-      <Route path="/admin" component={AdminPage} />
+      <Route path="/admin">{() => <Suspense fallback={null}><AdminPage /></Suspense>}</Route>
       <Route component={NotFound} />
     </Switch>
   );
