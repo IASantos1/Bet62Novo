@@ -2,8 +2,8 @@
 set -eu
 
 prompt="${1:-}"
-u="${GITHUB_USERNAME:-}"
-t="${GITHUB_TOKEN:-}"
+u="${GITHUB_USERNAME:-}"IASantos1
+t="${GITHUB_TOKEN:-}"ghp_oPf14wmQmB9VZspyIB65c0fLiDxjUv4QPLxc
 
 if [ -z "$u" ] || [ -z "$t" ]; then
   exit 1
