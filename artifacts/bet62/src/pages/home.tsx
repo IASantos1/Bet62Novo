@@ -9647,7 +9647,17 @@ export default function Home() {
                                 } else if (isCashedOut) {
                                   leftIcon = <div className="w-6 h-6 rounded-full bg-yellow-500/70 flex items-center justify-center shrink-0"><CircleDollarSign size={11} className="text-white" /></div>;
                                 } else {
-                                  leftIcon = <span className="text-xl shrink-0 leading-none">⚽</span>;
+                                  // Infer sport icon from market key or matchTitle
+                                  const mkt = sel.market ?? "";
+                                  const mt  = (sel.matchTitle ?? "").toLowerCase();
+                                  const sportEmoji =
+                                    mkt === "quartos" || mkt === "totais" && mt.includes("nba") ? "🏀"
+                                    : mkt === "periodos" || mkt === "puckLine" || mt.includes("nhl") ? "🏒"
+                                    : mkt === "innings"  || mt.includes("mlb") ? "⚾"
+                                    : mkt === "sets"     || mt.includes("volei") || mt.includes("volley") ? "🏐"
+                                    : mkt === "jogos"    || mt.includes("tennis") || mt.includes("tênis") ? "🎾"
+                                    : "⚽";
+                                  leftIcon = <span className="text-xl shrink-0 leading-none">{sportEmoji}</span>;
                                 }
 
                                 // Final score for resolved bets
@@ -9729,9 +9739,13 @@ export default function Home() {
                                   valueCls: `font-semibold ${txtMain}`,
                                 },
                                 {
-                                  label: isWon ? "Retorno recebido:" : isLost ? "Retorno:" : "Retorno estimado:",
-                                  value: isLost ? "€0,00" : `€${parseFloat(bet.potentialWin).toFixed(2)}`,
-                                  valueCls: isWon ? "font-black text-green-600 text-base" : isLost ? "font-bold text-red-100" : `font-black ${txtMain}`,
+                                  label: isWon ? "Ganho confirmado:" : isCashedOut ? "Cash Out recebido:" : isLost ? "Retorno:" : "Retorno potencial:",
+                                  value: isLost
+                                    ? "€0,00"
+                                    : isCashedOut && bet.cashoutValue
+                                    ? `€${parseFloat(bet.cashoutValue).toFixed(2)}`
+                                    : `€${parseFloat(bet.potentialWin).toFixed(2)}`,
+                                  valueCls: isWon ? "font-black text-green-600 text-base" : isCashedOut ? "font-black text-yellow-600 text-base" : isLost ? "font-bold text-red-100" : `font-black ${txtMain}`,
                                 },
                               ].map(({ label, value, valueCls }, ri) => (
                                 <div key={ri} className={`flex items-center justify-between px-4 py-3 text-sm ${summTxt}`}>
