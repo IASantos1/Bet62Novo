@@ -2530,6 +2530,9 @@ export const finishedMatchResults = new Map<string, {
   htAway?: number;   // half-time goals (away)
   homeTeam: string;
   awayTeam: string;
+  cornersTotal?: number;
+  cardsTotal?: number;
+  firstGoal?: "home" | "away" | "none";
   finishedAt: number; // ms
 }>();
 
@@ -2543,6 +2546,88 @@ function _pruneFinishedResults(): void {
 export async function ensureFinishedMatchResult(matchId: string): Promise<boolean> {
   if (!matchId) return false;
   if (finishedMatchResults.has(matchId)) return true;
+
+  const fetchFootballExtras = async (id: number): Promise<{
+    cornersTotal?: number;
+    cardsTotal?: number;
+    firstGoal?: "home" | "away" | "none";
+  } | null> => {
+    try {
+      const resp = await fetch(`${SAPI_V2_FOOTBALL}/match/${id}/statistics`, {
+        signal: AbortSignal.timeout(9000),
+        headers: sapiHeaders(),
+      });
+      if (!resp.ok) return null;
+      const data = await resp.json() as Record<string, unknown>;
+      const get = (o: unknown, path: string[]): unknown => {
+        let cur: unknown = o;
+        for (const k of path) {
+          if (!cur || typeof cur !== "object") return undefined;
+          cur = (cur as Record<string, unknown>)[k];
+        }
+        return cur;
+      };
+      const toNum = (v: unknown): number | undefined => {
+        if (typeof v === "number" && Number.isFinite(v)) return v;
+        if (typeof v === "string" && v.trim() !== "") {
+          const n = Number(v);
+          return Number.isFinite(n) ? n : undefined;
+        }
+        return undefined;
+      };
+      const cornersHome = toNum(get(data, ["team_stats", "home", "corners", "total"])) ?? 0;
+      const cornersAway = toNum(get(data, ["team_stats", "away", "corners", "total"])) ?? 0;
+      const cornersTotal = cornersHome + cornersAway;
+
+      const ev = get(data, ["event_summary"]) as Record<string, unknown> | undefined;
+      const toArr = (v: unknown): Record<string, unknown>[] => {
+        if (!v) return [];
+        if (Array.isArray(v)) return v.filter(x => x && typeof x === "object") as Record<string, unknown>[];
+        if (typeof v === "object") return [v as Record<string, unknown>];
+        return [];
+      };
+      const countCards = (side: "home" | "away"): number => {
+        const s = ev?.[side] as Record<string, unknown> | undefined;
+        const y = toArr((s?.["yellowcards"] as Record<string, unknown> | undefined)?.["event"]);
+        const r = toArr((s?.["redcards"] as Record<string, unknown> | undefined)?.["event"]);
+        return y.length + r.length;
+      };
+      const cardsTotal = countCards("home") + countCards("away");
+
+      const parseMinute = (e: Record<string, unknown>): number => {
+        const m = toNum(e["minute"]) ?? 0;
+        const ex = toNum(e["extra_min"]) ?? 0;
+        return m * 100 + ex;
+      };
+      const minOrNull = (vals: number[]): number | null => vals.length ? vals.reduce((a, b) => Math.min(a, b), vals[0]!) : null;
+      const homeGoalsArr = (() => {
+        const s = ev?.["home"] as Record<string, unknown> | undefined;
+        const goals = toArr((s?.["goals"] as Record<string, unknown> | undefined)?.["event"]);
+        return goals.map(parseMinute).filter(n => Number.isFinite(n));
+      })();
+      const awayGoalsArr = (() => {
+        const s = ev?.["away"] as Record<string, unknown> | undefined;
+        const goals = toArr((s?.["goals"] as Record<string, unknown> | undefined)?.["event"]);
+        return goals.map(parseMinute).filter(n => Number.isFinite(n));
+      })();
+      const fgH = minOrNull(homeGoalsArr);
+      const fgA = minOrNull(awayGoalsArr);
+      const firstGoal =
+        fgH == null && fgA == null ? "none"
+        : fgH != null && fgA == null ? "home"
+        : fgH == null && fgA != null ? "away"
+        : (fgH as number) <= (fgA as number) ? "home"
+        : "away";
+
+      return {
+        cornersTotal: Number.isFinite(cornersTotal) ? cornersTotal : undefined,
+        cardsTotal: Number.isFinite(cardsTotal) ? cardsTotal : undefined,
+        firstGoal,
+      };
+    } catch {
+      return null;
+    }
+  };
 
   const parse = (): { sport: SportKey; prefix: string; id: number } | null => {
     const m = matchId.match(/^(football-v2|bball-v2|hockey-v2|tennis-v2|baseball-v2|mlb-v2)-(\d+)$/);
@@ -2582,6 +2667,10 @@ export async function ensureFinishedMatchResult(matchId: string): Promise<boolea
       const htHome = parsed.sport === "football" ? (typeof hS?.["period1"] === "number" ? hS["period1"] as number : undefined) : undefined;
       const htAway = parsed.sport === "football" ? (typeof aS?.["period1"] === "number" ? aS["period1"] as number : undefined) : undefined;
 
+      const extras = parsed.sport === "football"
+        ? await fetchFootballExtras(parsed.id)
+        : null;
+
       finishedMatchResults.set(matchId, {
         home,
         away,
@@ -2589,6 +2678,9 @@ export async function ensureFinishedMatchResult(matchId: string): Promise<boolea
         htAway,
         homeTeam: v2TeamName(ev.homeTeam),
         awayTeam: v2TeamName(ev.awayTeam),
+        cornersTotal: extras?.cornersTotal,
+        cardsTotal: extras?.cardsTotal,
+        firstGoal: extras?.firstGoal,
         finishedAt: now,
       });
       _pruneFinishedResults();

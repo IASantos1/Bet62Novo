@@ -17,6 +17,7 @@ export type SelectionRecord = {
 
 type FTScore = { home: number; away: number };
 type HTScore = { htHome: number; htAway: number };
+type FinishedResult = (typeof finishedMatchResults extends Map<string, infer V> ? V : never);
 
 /**
  * Evaluate a single bet selection against a known final score + optional HT score.
@@ -48,7 +49,8 @@ type HTScore = { htHome: number; htAway: number };
 export function scoreOutcomeForSel(
   sel: { selection: string },
   ft: FTScore,
-  ht?: HTScore
+  ht?: HTScore,
+  extra?: { cornersTotal?: number; cardsTotal?: number; firstGoal?: "home" | "away" | "none" }
 ): "won" | "lost" | null {
   // ── Key normalisation (ComprehensiveMarketsSheet keys → canonical keys) ────
   let s = sel.selection;
@@ -78,18 +80,35 @@ export function scoreOutcomeForSel(
 
   let winning: boolean | null = null;
 
+  // ── Corners O/U (requires stats) ──────────────────────────────────────────
+  if (/^[ou]c\d+$/.test(s)) {
+    if (extra?.cornersTotal == null) return null;
+    const line = parseInt(s.slice(2), 10) / 10;
+    if (!Number.isFinite(line)) return null;
+    winning = s[0] === "o" ? extra.cornersTotal > line : extra.cornersTotal < line;
+  }
+  // ── Cards O/U (requires stats) ────────────────────────────────────────────
+  else if (/^[ou]card\d+$/.test(s)) {
+    if (extra?.cardsTotal == null) return null;
+    const line = parseInt(s.slice(5), 10) / 10;
+    if (!Number.isFinite(line)) return null;
+    winning = s[0] === "o" ? extra.cardsTotal > line : extra.cardsTotal < line;
+  }
+  // ── First goal (requires stats) ───────────────────────────────────────────
+  else if (s === "fg-home" || s === "fg-away" || s === "fg-none") {
+    if (!extra?.firstGoal) return null;
+    winning = s === `fg-${extra.firstGoal}`;
+  }
   // ── Markets not resolvable from score alone — leave pending for admin ──────
-  if (
-    s.startsWith("oc") || s.startsWith("uc") ||          // corners
-    s.startsWith("cards-") ||                              // cards
-    s.startsWith("s1-")  || s.startsWith("s2-") ||        // tennis set winner
-    s.startsWith("ts-")  ||                                // tennis total sets
-    s.startsWith("hcp-") ||                                // hcap points (no line)
-    s === "fg-home" || s === "fg-away" || s === "fg-none"  // first goal
+  else if (
+    s.startsWith("s1-")  || s.startsWith("s2-") ||        // tennis set winner (legacy keys)
+    s.startsWith("ts-")  ||                                // tennis total sets (legacy keys)
+    s.startsWith("hcp-")                                  // hcap points (no line)
   ) return null;
 
   // ── Handicap ±1 / ±1.5  (hc-hm1, hc-ap1, hc-hm15, hc-ap15) ─────────────
-  if      (s === "hc-hm1"  || s === "hc-hm15") { winning = (home - away) >= 2; }
+  if      (winning !== null) { /* already resolved above */ }
+  else if (s === "hc-hm1"  || s === "hc-hm15") { winning = (home - away) >= 2; }
   else if (s === "hc-ap1"  || s === "hc-ap15") { winning = (home - away) <= 1; }
 
   // ── 1X2 ───────────────────────────────────────────────────────────────────
@@ -283,7 +302,7 @@ function findResult(
   sel: SelectionRecord,
   betMatchId: string,
   isSingle: boolean
-): { home: number; away: number; htHome?: number; htAway?: number } | null {
+): FinishedResult | null {
   // 1. Exact ID match (fastest path)
   if (sel.matchId) {
     const r = finishedMatchResults.get(sel.matchId);
@@ -370,7 +389,11 @@ export async function autoSettlePendingBets(): Promise<void> {
               ? { htHome: result.htHome, htAway: result.htAway }
               : undefined;
 
-          outcomes.push(scoreOutcomeForSel(sel, result, ht));
+          outcomes.push(scoreOutcomeForSel(sel, result, ht, {
+            cornersTotal: result.cornersTotal,
+            cardsTotal: result.cardsTotal,
+            firstGoal: result.firstGoal,
+          }));
         }
 
         // ── Early loss: if any leg is definitively lost, settle immediately ──
@@ -387,7 +410,11 @@ export async function autoSettlePendingBets(): Promise<void> {
               ...sel,
               finalScore: { home: r.home, away: r.away },
               htScore: ht,
-              outcome: scoreOutcomeForSel(sel, { home: r.home, away: r.away }, ht),
+              outcome: scoreOutcomeForSel(sel, { home: r.home, away: r.away }, ht, {
+                cornersTotal: r.cornersTotal,
+                cardsTotal: r.cardsTotal,
+                firstGoal: r.firstGoal,
+              }),
             };
           });
           await db.transaction(async (tx) => {
@@ -432,7 +459,11 @@ export async function autoSettlePendingBets(): Promise<void> {
             ...sel,
             finalScore: { home: r.home, away: r.away },
             htScore: ht,
-            outcome: scoreOutcomeForSel(sel, { home: r.home, away: r.away }, ht),
+            outcome: scoreOutcomeForSel(sel, { home: r.home, away: r.away }, ht, {
+              cornersTotal: r.cornersTotal,
+              cardsTotal: r.cardsTotal,
+              firstGoal: r.firstGoal,
+            }),
           };
         });
 

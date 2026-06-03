@@ -172,7 +172,11 @@ router.post("/:id/cashout", authMiddleware, async (req: AuthRequest, res: Respon
         typeof result.htHome === "number" && typeof result.htAway === "number"
           ? { htHome: result.htHome, htAway: result.htAway }
           : undefined;
-      return scoreOutcomeForSel(sel, result, ht) === "lost";
+      return scoreOutcomeForSel(sel, result, ht, {
+        cornersTotal: result.cornersTotal,
+        cardsTotal: result.cardsTotal,
+        firstGoal: result.firstGoal,
+      }) === "lost";
     });
     if (hasLostLeg) {
       const updatedSelsLost = selRecs.map(sel => {
@@ -188,7 +192,11 @@ router.post("/:id/cashout", authMiddleware, async (req: AuthRequest, res: Respon
           ...sel,
           finalScore: { home: result.home, away: result.away },
           htScore: ht,
-          outcome: scoreOutcomeForSel(sel, result, ht),
+          outcome: scoreOutcomeForSel(sel, result, ht, {
+            cornersTotal: result.cornersTotal,
+            cardsTotal: result.cardsTotal,
+            firstGoal: result.firstGoal,
+          }),
         };
       });
       await db.update(betsTable).set({ status: "lost", selections: updatedSelsLost }).where(eq(betsTable.id, bet.id));
