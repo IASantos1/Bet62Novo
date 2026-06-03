@@ -4885,7 +4885,11 @@ async function getTennisAllV1(): Promise<V1TennisGame[]> {
   }
 }
 
-async function getTennisLiveV1(): Promise<V1TennisGame[]> {
+const TENNIS_LIVE_V1_TTL = 2000;
+let _tennisLiveV1Cache: { games: V1TennisGame[]; fetchedAt: number } | null = null;
+let _tennisLiveV1InFlight: Promise<V1TennisGame[]> | null = null;
+
+async function fetchTennisLiveV1(): Promise<V1TennisGame[]> {
   try {
     const resp = await fetch(`${SAPI_V1_TENNIS}/v1/tennis/live`, {
       signal: AbortSignal.timeout(8000),
@@ -4897,6 +4901,25 @@ async function getTennisLiveV1(): Promise<V1TennisGame[]> {
   } catch {
     return [];
   }
+}
+
+async function getTennisLiveV1(): Promise<V1TennisGame[]> {
+  const now = Date.now();
+  if (_tennisLiveV1Cache && now - _tennisLiveV1Cache.fetchedAt < TENNIS_LIVE_V1_TTL) return _tennisLiveV1Cache.games;
+  if (_tennisLiveV1Cache) {
+    if (!_tennisLiveV1InFlight) {
+      _tennisLiveV1InFlight = fetchTennisLiveV1()
+        .then(games => { _tennisLiveV1Cache = { games, fetchedAt: Date.now() }; return games; })
+        .finally(() => { _tennisLiveV1InFlight = null; });
+    }
+    return _tennisLiveV1Cache.games;
+  }
+  if (!_tennisLiveV1InFlight) {
+    _tennisLiveV1InFlight = fetchTennisLiveV1()
+      .then(games => { _tennisLiveV1Cache = { games, fetchedAt: Date.now() }; return games; })
+      .finally(() => { _tennisLiveV1InFlight = null; });
+  }
+  return _tennisLiveV1InFlight;
 }
 
 async function getBaseballTodayV2(): Promise<SAPIV2Event[]> {
@@ -7341,10 +7364,8 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
   // The tennis API does not support v2 live/today endpoints (returns 404).
   // Primary source: v1/tennis/live (buildTennisLiveV1). The v2 path is kept as
   // a fallback for any future API upgrade that enables a v2 tennis live endpoint.
-  const [tennisV2Part, tennisV1LivePart] = await Promise.all([
-    Promise.resolve(buildTennisLiveV2(tennisEvents)),
-    buildTennisLiveV1(),
-  ]);
+  const tennisV2Part = buildTennisLiveV2(tennisEvents);
+  const tennisV1LivePart = await buildTennisLiveV1Cached();
   const allLiveIds = new Set([...tennisV2Part, ...tennisV1LivePart].map(m => String(m.id)));
   const todayStartedExtra = buildTennisLiveV2(
     (tennisTodayEvents ?? []).filter(ev => !allLiveIds.has(`tennis-v2-${ev.id}`))
@@ -7565,6 +7586,31 @@ async function buildTennisLiveV1(): Promise<LiveMatchState[]> {
   } catch {
     return [];
   }
+}
+
+let _tennisLiveV1StateCache: { matches: LiveMatchState[]; fetchedAt: number } | null = null;
+let _tennisLiveV1StateInFlight: Promise<LiveMatchState[]> | null = null;
+
+async function buildTennisLiveV1Cached(): Promise<LiveMatchState[]> {
+  const now = Date.now();
+  if (_tennisLiveV1StateCache && now - _tennisLiveV1StateCache.fetchedAt < TENNIS_LIVE_V1_TTL) return _tennisLiveV1StateCache.matches;
+  if (_tennisLiveV1StateCache) {
+    if (!_tennisLiveV1StateInFlight) {
+      _tennisLiveV1StateInFlight = buildTennisLiveV1()
+        .then(matches => { _tennisLiveV1StateCache = { matches, fetchedAt: Date.now() }; return matches; })
+        .finally(() => { _tennisLiveV1StateInFlight = null; });
+    }
+    return _tennisLiveV1StateCache.matches;
+  }
+  if (!_tennisLiveV1StateInFlight) {
+    _tennisLiveV1StateInFlight = buildTennisLiveV1()
+      .then(matches => { _tennisLiveV1StateCache = { matches, fetchedAt: Date.now() }; return matches; })
+      .finally(() => { _tennisLiveV1StateInFlight = null; });
+  }
+  return Promise.race([
+    _tennisLiveV1StateInFlight,
+    waitMs(1200).then(() => [] as LiveMatchState[]),
+  ]);
 }
 
 // ─── Tennis upcoming from V1 native API ───────────────────────────────────────
@@ -9292,15 +9338,60 @@ export type NBAOddsEntry = {
 let nbaOddsCache: NBAOddsEntry[] | null = null;
 let nbaOddsFetchedAt = 0;
 const NBA_ODDS_TTL = 60 * 1000;
+let nbaOddsInFlight: Promise<NBAOddsEntry[]> | null = null;
 
 async function getBasketballOdds(): Promise<NBAOddsEntry[]> {
   const now = Date.now();
   if (nbaOddsCache && now - nbaOddsFetchedAt < NBA_ODDS_TTL) return nbaOddsCache;
+  if (nbaOddsCache) {
+    if (!nbaOddsInFlight) {
+      nbaOddsInFlight = (async () => {
+        try {
+          const events = (await getUpcomingLeagueEventsV2("basketball", 7)).slice(0, 20);
+          const oddsResults: Array<V2PreMatchOdds | null> = new Array(events.length).fill(null);
+          const batchSize = 10;
+          for (let i = 0; i < events.length; i += batchSize) {
+            const slice = events.slice(i, i + batchSize);
+            const out = await Promise.all(slice.map(ev => getPreMatchOddsV2("basketball", ev.id).catch(() => null)));
+            for (let j = 0; j < out.length; j++) oddsResults[i + j] = out[j] ?? null;
+          }
+          const results: NBAOddsEntry[] = [];
+          for (let i = 0; i < events.length; i++) {
+            const ev = events[i]!;
+            const realOdds = oddsResults[i];
+            if (!realOdds || realOdds.home <= 0) continue;
+            const homeName = v2TeamName(ev.homeTeam);
+            const awayName = v2TeamName(ev.awayTeam);
+            const { date, time } = v2EventDateTime(ev);
+            const mkt = makeBasketballMarketsFromTeams(homeName, awayName) as Record<string, unknown>;
+            mkt["odds"] = { home: realOdds.home, draw: 0, away: realOdds.away };
+            results.push({
+              matchId: String(ev.id), date, time,
+              homeTeam: { id: "", name: homeName },
+              awayTeam: { id: "", name: awayName },
+              homeOdds: realOdds.home, awayOdds: realOdds.away,
+              markets: mkt,
+            });
+          }
+          nbaOddsCache = results;
+          nbaOddsFetchedAt = Date.now();
+          return results;
+        } catch {
+          return nbaOddsCache ?? [];
+        }
+      })().finally(() => { nbaOddsInFlight = null; });
+    }
+    return nbaOddsCache;
+  }
   try {
-    const events = await getUpcomingLeagueEventsV2("basketball", 7);
-    const oddsResults = await Promise.all(
-      events.map(ev => getPreMatchOddsV2("basketball", ev.id).catch(() => null))
-    );
+    const events = (await getUpcomingLeagueEventsV2("basketball", 7)).slice(0, 20);
+    const oddsResults: Array<V2PreMatchOdds | null> = new Array(events.length).fill(null);
+    const batchSize = 10;
+    for (let i = 0; i < events.length; i += batchSize) {
+      const slice = events.slice(i, i + batchSize);
+      const out = await Promise.all(slice.map(ev => getPreMatchOddsV2("basketball", ev.id).catch(() => null)));
+      for (let j = 0; j < out.length; j++) oddsResults[i + j] = out[j] ?? null;
+    }
     const results: NBAOddsEntry[] = [];
     for (let i = 0; i < events.length; i++) {
       const ev = events[i]!;
@@ -9359,15 +9450,61 @@ export type HockeyOddsEntry = {
 let hockeyOddsCache: HockeyOddsEntry[] | null = null;
 let hockeyOddsFetchedAt = 0;
 const HOCKEY_ODDS_TTL = 60 * 1000;
+let hockeyOddsInFlight: Promise<HockeyOddsEntry[]> | null = null;
 
 async function getHockeyOdds(): Promise<HockeyOddsEntry[]> {
   const now = Date.now();
   if (hockeyOddsCache && now - hockeyOddsFetchedAt < HOCKEY_ODDS_TTL) return hockeyOddsCache;
+  if (hockeyOddsCache) {
+    if (!hockeyOddsInFlight) {
+      hockeyOddsInFlight = (async () => {
+        try {
+          const events = (await getUpcomingLeagueEventsV2("hockey", 7)).slice(0, 20);
+          const oddsResults: Array<V2PreMatchOdds | null> = new Array(events.length).fill(null);
+          const batchSize = 10;
+          for (let i = 0; i < events.length; i += batchSize) {
+            const slice = events.slice(i, i + batchSize);
+            const out = await Promise.all(slice.map(ev => getPreMatchOddsV2("hockey", ev.id).catch(() => null)));
+            for (let j = 0; j < out.length; j++) oddsResults[i + j] = out[j] ?? null;
+          }
+          const results: HockeyOddsEntry[] = [];
+          for (let i = 0; i < events.length; i++) {
+            const ev = events[i]!;
+            const realOdds = oddsResults[i];
+            if (!realOdds || realOdds.home <= 0) continue;
+            const homeName = v2TeamName(ev.homeTeam);
+            const awayName = v2TeamName(ev.awayTeam);
+            const { date, time } = v2EventDateTime(ev);
+            const mkt = makeHockeyMarketsFromTeams(homeName, awayName) as Record<string, unknown>;
+            const h = realOdds.home; const d = realOdds.draw || 0; const a = realOdds.away;
+            mkt["odds"] = { home: h, draw: d, away: a };
+            results.push({
+              matchId: String(ev.id), date, time,
+              homeTeam: { id: "", name: homeName },
+              awayTeam: { id: "", name: awayName },
+              homeOdds: h, drawOdds: d, awayOdds: a,
+              markets: mkt,
+            });
+          }
+          hockeyOddsCache = results;
+          hockeyOddsFetchedAt = Date.now();
+          return results;
+        } catch {
+          return hockeyOddsCache ?? [];
+        }
+      })().finally(() => { hockeyOddsInFlight = null; });
+    }
+    return hockeyOddsCache;
+  }
   try {
-    const events = await getUpcomingLeagueEventsV2("hockey", 7);
-    const oddsResults = await Promise.all(
-      events.map(ev => getPreMatchOddsV2("hockey", ev.id).catch(() => null))
-    );
+    const events = (await getUpcomingLeagueEventsV2("hockey", 7)).slice(0, 20);
+    const oddsResults: Array<V2PreMatchOdds | null> = new Array(events.length).fill(null);
+    const batchSize = 10;
+    for (let i = 0; i < events.length; i += batchSize) {
+      const slice = events.slice(i, i + batchSize);
+      const out = await Promise.all(slice.map(ev => getPreMatchOddsV2("hockey", ev.id).catch(() => null)));
+      for (let j = 0; j < out.length; j++) oddsResults[i + j] = out[j] ?? null;
+    }
     const results: HockeyOddsEntry[] = [];
     for (let i = 0; i < events.length; i++) {
       const ev = events[i]!;
@@ -9423,15 +9560,58 @@ export type MLBOddsEntry = {
 const MLB_ODDS_TTL = 5 * 60 * 1000;
 let mlbOddsCache: MLBOddsEntry[] | null = null;
 let mlbOddsFetchedAt = 0;
+let mlbOddsInFlight: Promise<MLBOddsEntry[]> | null = null;
 
 async function getMLBOdds(): Promise<MLBOddsEntry[]> {
   const now = Date.now();
   if (mlbOddsCache && now - mlbOddsFetchedAt < MLB_ODDS_TTL) return mlbOddsCache;
+  if (mlbOddsCache) {
+    if (!mlbOddsInFlight) {
+      mlbOddsInFlight = (async () => {
+        try {
+          const events = (await getUpcomingLeagueEventsV2("baseball", 7)).slice(0, 20);
+          const oddsResults: Array<V2PreMatchOdds | null> = new Array(events.length).fill(null);
+          const batchSize = 10;
+          for (let i = 0; i < events.length; i += batchSize) {
+            const slice = events.slice(i, i + batchSize);
+            const out = await Promise.all(slice.map(ev => getPreMatchOddsV2("baseball", ev.id).catch(() => null)));
+            for (let j = 0; j < out.length; j++) oddsResults[i + j] = out[j] ?? null;
+          }
+          const results: MLBOddsEntry[] = [];
+          for (let i = 0; i < events.length; i++) {
+            const ev = events[i]!;
+            const realOdds = oddsResults[i];
+            if (!realOdds || realOdds.home <= 0) continue;
+            const homeName = v2TeamName(ev.homeTeam);
+            const awayName = v2TeamName(ev.awayTeam);
+            const { date, time } = v2EventDateTime(ev);
+            results.push({
+              matchId: String(ev.id), date, time,
+              homeTeam: { id: "", name: homeName },
+              awayTeam: { id: "", name: awayName },
+              homeOdds: realOdds.home, drawOdds: realOdds.draw || 0, awayOdds: realOdds.away,
+              markets: makeAdvancedMarketsFromTeams(homeName, awayName),
+            });
+          }
+          mlbOddsCache = results;
+          mlbOddsFetchedAt = Date.now();
+          return results;
+        } catch {
+          return mlbOddsCache ?? [];
+        }
+      })().finally(() => { mlbOddsInFlight = null; });
+    }
+    return mlbOddsCache;
+  }
   try {
-    const events = await getUpcomingLeagueEventsV2("baseball", 7);
-    const oddsResults = await Promise.all(
-      events.map(ev => getPreMatchOddsV2("baseball", ev.id).catch(() => null))
-    );
+    const events = (await getUpcomingLeagueEventsV2("baseball", 7)).slice(0, 20);
+    const oddsResults: Array<V2PreMatchOdds | null> = new Array(events.length).fill(null);
+    const batchSize = 10;
+    for (let i = 0; i < events.length; i += batchSize) {
+      const slice = events.slice(i, i + batchSize);
+      const out = await Promise.all(slice.map(ev => getPreMatchOddsV2("baseball", ev.id).catch(() => null)));
+      for (let j = 0; j < out.length; j++) oddsResults[i + j] = out[j] ?? null;
+    }
     const results: MLBOddsEntry[] = [];
     for (let i = 0; i < events.length; i++) {
       const ev = events[i]!;
