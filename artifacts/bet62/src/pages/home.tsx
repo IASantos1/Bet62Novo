@@ -4101,11 +4101,22 @@ export default function Home() {
     return f;
   }
 
-  const MarketOddsBtn = ({ match, sel, odd, market, label }: { match: Match; sel: string; odd: number; market: string; label: string }) => {
+  // suspKey: the specific marketSuspension key to check for this button.
+  // When provided, the button locks if that key is suspended OR if the global
+  // `result` key is suspended (e.g., point being played).
+  // When omitted, only the global `result` key and `_suspensionReason` are checked.
+  // This prevents a settled set market (e.g. firstSet=SETTLED) from locking buttons
+  // for ALL other markets on the same match.
+  const MarketOddsBtn = ({ match, sel, odd, market, label, suspKey }: { match: Match; sel: string; odd: number; market: string; label: string; suspKey?: string }) => {
     if (odd <= 0) return null; // settled/impossible market line — hide completely
     if (market === "result" && odd <= 1.01) return null;
-    const isSusp = (!!match.marketSuspension && Object.values(match.marketSuspension).some(ts => ts > Date.now()))
+    const now = Date.now();
+    const globalSusp = (match.marketSuspension?.["result"] != null && match.marketSuspension["result"] > now)
       || !!(match._suspensionReason);
+    const perMarketSusp = suspKey != null
+      ? (match.marketSuspension?.[suspKey] != null && match.marketSuspension[suspKey]! > now)
+      : false;
+    const isSusp = globalSusp || perMarketSusp;
     if (isSusp) {
       // Show a locked placeholder so section headers don't look empty
       return (
@@ -4712,27 +4723,27 @@ export default function Home() {
             {/* 1st Set winner — visible throughout match (settled by server once set ends) */}
             {((m as any).tennisExtra?.firstSet?.home > 0 ? (
               <MarketGroup title="Vencedor do 1º Set">
-                <MarketOddsBtn match={match} sel="set1-home" odd={(m as any).tennisExtra.firstSet.home} market="sets" label={match.home} />
-                <MarketOddsBtn match={match} sel="set1-away" odd={(m as any).tennisExtra.firstSet.away} market="sets" label={match.away} />
+                <MarketOddsBtn match={match} sel="set1-home" odd={(m as any).tennisExtra.firstSet.home} market="sets" label={match.home} suspKey="firstSet" />
+                <MarketOddsBtn match={match} sel="set1-away" odd={(m as any).tennisExtra.firstSet.away} market="sets" label={match.away} suspKey="firstSet" />
               </MarketGroup>
             ) : m.totalGoals.over15 > 0 && (
               <MarketGroup title="Vencedor do 1º Set">
-                <MarketOddsBtn match={match} sel="set1-home" odd={m.totalGoals.over15} market="sets" label={match.home} />
-                <MarketOddsBtn match={match} sel="set1-away" odd={m.totalGoals.under15} market="sets" label={match.away} />
+                <MarketOddsBtn match={match} sel="set1-home" odd={m.totalGoals.over15} market="sets" label={match.home} suspKey="firstSet" />
+                <MarketOddsBtn match={match} sel="set1-away" odd={m.totalGoals.under15} market="sets" label={match.away} suspKey="firstSet" />
               </MarketGroup>
             ))}
             {/* 2nd Set winner — visible throughout match */}
             {(m as any).tennisExtra?.set2?.home > 0 && (
               <MarketGroup title="Vencedor do 2º Set">
-                <MarketOddsBtn match={match} sel="set2-home" odd={(m as any).tennisExtra.set2.home} market="sets" label={match.home} />
-                <MarketOddsBtn match={match} sel="set2-away" odd={(m as any).tennisExtra.set2.away} market="sets" label={match.away} />
+                <MarketOddsBtn match={match} sel="set2-home" odd={(m as any).tennisExtra.set2.home} market="sets" label={match.home} suspKey="set2" />
+                <MarketOddsBtn match={match} sel="set2-away" odd={(m as any).tennisExtra.set2.away} market="sets" label={match.away} suspKey="set2" />
               </MarketGroup>
             )}
             {/* 3rd Set winner */}
             {(m as any).tennisExtra?.set3?.home > 0 && (
               <MarketGroup title="Vencedor do 3º Set (se disputado)">
-                <MarketOddsBtn match={match} sel="set3-home" odd={(m as any).tennisExtra.set3.home} market="sets" label={match.home} />
-                <MarketOddsBtn match={match} sel="set3-away" odd={(m as any).tennisExtra.set3.away} market="sets" label={match.away} />
+                <MarketOddsBtn match={match} sel="set3-home" odd={(m as any).tennisExtra.set3.home} market="sets" label={match.home} suspKey="set3" />
+                <MarketOddsBtn match={match} sel="set3-away" odd={(m as any).tennisExtra.set3.away} market="sets" label={match.away} suspKey="set3" />
               </MarketGroup>
             )}
             {m.totalGoals.over25 > 0 && (
