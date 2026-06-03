@@ -6540,7 +6540,7 @@ function tennisSuspensionMs(
   if (isBreakPoint) return 12_000;
   if (isTiebreak) return 12_000;
   if (isAdv || isDeuce) return 10_000;
-  return 5_000;
+  return 0; // Normal point — no suspension (only high-pressure moments suspend markets)
 }
 
 // Tennis market keys to suspend after each point (flat keys used by frontend)
@@ -6716,12 +6716,14 @@ function buildTennisLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
 
     if (pointPlayed) {
       const suspMs = tennisSuspensionMs(currentPoints, sets, homeScore, awayScore);
-      const pointSusp = Object.fromEntries(
-        TENNIS_SUSP_KEYS.map(k => [k, now + suspMs]),
-      );
-      // Merge: settled markets keep their permanent timestamp; point suspension overrides temporary ones
-      marketSuspension = { ...(marketSuspension ?? {}), ...pointSusp, ...settledSusp };
-      suspensionReason = "PONTO EM JOGO";
+      if (suspMs > 0) {
+        const pointSusp = Object.fromEntries(
+          TENNIS_SUSP_KEYS.map(k => [k, now + suspMs]),
+        );
+        // Merge: settled markets keep their permanent timestamp; point suspension overrides temporary ones
+        marketSuspension = { ...(marketSuspension ?? {}), ...pointSusp, ...settledSusp };
+        suspensionReason = "PONTO EM JOGO";
+      }
     } else if (marketSuspension && Object.keys(marketSuspension).length === 0) {
       marketSuspension = undefined;
       suspensionReason = undefined;
