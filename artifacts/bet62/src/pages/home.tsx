@@ -2928,10 +2928,13 @@ export default function Home() {
     );
   };
 
-  // Returns a full-width animated suspension banner; null when no suspension
+  // Returns a full-width animated suspension banner; null when no suspension.
+  // Only the `result` market key triggers the global banner — permanently-settled
+  // set/period markets (firstSet, set2, etc.) have a far-future timestamp and
+  // must NOT activate the banner, as they are settled rather than truly suspended.
   const SuspensionBanner = ({ match }: { match: Match }) => {
     const now = Date.now();
-    const isActive = (match.marketSuspension && Object.values(match.marketSuspension).some(ts => ts > now))
+    const isActive = (match.marketSuspension?.["result"] != null && match.marketSuspension["result"] > now)
       || !!(match._suspensionReason);
     if (!isActive) return null;
     const rawReason = (match._suspensionReason ?? "SUSPENSO").toUpperCase();
@@ -3315,16 +3318,17 @@ export default function Home() {
       return false;
     })();
 
-    // Suspension: check marketSuspension timestamps OR _suspensionReason being set
+    // Suspension: only the `result` key gates the card odds-row — settled set/period
+    // markets have far-future timestamps and must NOT count as "suspended" here.
     const isLiveSuspended = match.isLive && (
-      (match.marketSuspension != null && Object.values(match.marketSuspension).some(ts => ts > Date.now()))
+      (match.marketSuspension?.["result"] != null && match.marketSuspension["result"] > Date.now())
       || !!(match._suspensionReason)
     );
 
     // Penalty shootout: only show winner market with VENCEDOR DA FINAL header
     const isPenShootout = match.isLive && sport === "football" && !!match.markets?.penExtra;
 
-    const oddsRow = match.hasRealOdds ? (
+    const oddsRow = (match.hasRealOdds || match.isLive) ? (
       <>
         {isPenShootout && !isLiveSuspended && (
           <div className="text-[9px] font-black uppercase tracking-widest text-yellow-400 text-center mt-2">🎯 Vencedor da Final</div>
