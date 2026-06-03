@@ -1466,7 +1466,9 @@ export default function Home() {
   const [liveSearchQuery, setLiveSearchQuery] = useState<string>("");
   const prevLiveOdds = useRef<Record<string, Odds>>({});
   // Flat map of "market:sel" → previous odd value, for arrows in MarketOddsBtn
-  const prevLiveMarkets = useRef<Record<string, Record<string, number>>>({});
+  const prevLiveMarkets = useRef<Record<string, Record<string, number>>>({}); 
+  // Grace period: track last time each match was seen in the API response (ms timestamp)
+  const matchLastSeenRef = useRef<Record<string, number>>({});
   // Live minute ticker — interpolates clock between API refreshes
   const liveDataFetchedAt = useRef(0);
   const apiMinutesRef = useRef<Record<string, number>>({});
@@ -1979,11 +1981,14 @@ export default function Home() {
     // Cap at 10 min to prevent runaway if match disappears from feed briefly
     const elapsed = Math.min(10, Math.floor((Date.now() - changedAt) / 60000));
     const computed = apiMin + elapsed;
-    if (apiMin < 45) return Math.min(45, computed);
-    if (apiMin < 90) return Math.min(90, computed);
+    // Football clock: API feed runs ~3 minutes ahead of real match time — correct for it
+    const isFootball = !match.sport || match.sport === "football";
+    const adjusted = isFootball ? computed - 3 : computed;
+    if (apiMin < 45) return Math.max(1, Math.min(45, adjusted));
+    if (apiMin < 90) return Math.max(46, Math.min(90, adjusted));
     // Extra time: first half caps at 105, second half at 120
-    if (apiMin <= 105) return Math.min(105, computed);
-    return Math.min(120, computed);
+    if (apiMin <= 105) return Math.min(105, adjusted);
+    return Math.min(120, adjusted);
   };
 
   // Sync expandedMatch with live data silently (score/odds update without closing panel)
@@ -2337,6 +2342,9 @@ export default function Home() {
     }
     apiMinutesRef.current = newMins;
     liveDataFetchedAt.current = now;
+    // Update last-seen timestamps for every match in this response
+    for (const m of matches) matchLastSeenRef.current[String(m.id)] = now;
+
     setLiveMatches(prev => {
       const newPrev: Record<string, Odds> = {};
       const newPrevMkts: Record<string, Record<string, number>> = {};
@@ -2347,11 +2355,23 @@ export default function Home() {
       }
       prevLiveOdds.current = newPrev;
       prevLiveMarkets.current = newPrevMkts;
+
+      const freshIds = new Set(matches.map(m => String(m.id)));
+      // Keep stale matches that disappeared from API < 60s ago (prevents flickering)
+      const staleMatches = prev.filter(m => {
+        const id = String(m.id);
+        if (freshIds.has(id)) return false;
+        const lastSeen = matchLastSeenRef.current[id] ?? 0;
+        return (now - lastSeen) < 60_000;
+      });
+
       // Live matches (startsIn === undefined) always show even without odds — the game is happening.
       // "Em Breve" entries only show when there are real odds to bet on.
-      return matches
+      const freshMatches = matches
         .filter(m => m.startsIn === undefined || m.hasRealOdds !== false)
         .map(m => ({ ...m, isLive: true }));
+
+      return [...staleMatches, ...freshMatches];
     });
   }, []);
 
@@ -4685,8 +4705,8 @@ export default function Home() {
         {/* ── TÉNIS: SETS ── */}
         {isTennis && (modalTab === "sets" || modalTab === "todos") && m && (
           <div>
-            {/* 1st Set winner — hidden when match has advanced past Set 1 */}
-            {currentSet <= 1 && ((m as any).tennisExtra?.firstSet?.home > 0 ? (
+            {/* 1st Set winner — visible throughout match (settled by server once set ends) */}
+            {((m as any).tennisExtra?.firstSet?.home > 0 ? (
               <MarketGroup title="Vencedor do 1º Set">
                 <MarketOddsBtn match={match} sel="set1-home" odd={(m as any).tennisExtra.firstSet.home} market="sets" label={match.home} />
                 <MarketOddsBtn match={match} sel="set1-away" odd={(m as any).tennisExtra.firstSet.away} market="sets" label={match.away} />
@@ -4697,8 +4717,8 @@ export default function Home() {
                 <MarketOddsBtn match={match} sel="set1-away" odd={m.totalGoals.under15} market="sets" label={match.away} />
               </MarketGroup>
             ))}
-            {/* 2nd Set winner — hidden when match has advanced past Set 2 */}
-            {currentSet <= 2 && (m as any).tennisExtra?.set2?.home > 0 && (
+            {/* 2nd Set winner — visible throughout match */}
+            {(m as any).tennisExtra?.set2?.home > 0 && (
               <MarketGroup title="Vencedor do 2º Set">
                 <MarketOddsBtn match={match} sel="set2-home" odd={(m as any).tennisExtra.set2.home} market="sets" label={match.home} />
                 <MarketOddsBtn match={match} sel="set2-away" odd={(m as any).tennisExtra.set2.away} market="sets" label={match.away} />
@@ -5239,8 +5259,8 @@ export default function Home() {
           </div>
         )}
 
-        {/* ── HÓQUEI: 1º PERÍODO — hide when already past P1 ── */}
-        {isHockey && currentP <= 1 && (modalTab === "1periodo" || modalTab === "todos") && m && m.halfTime.home > 0 && (
+        {/* ── HÓQUEI: 1º PERÍODO — visible throughout match ── */}
+        {isHockey && (modalTab === "1periodo" || modalTab === "todos") && m && m.halfTime.home > 0 && (
           <div>
             <MarketGroup title="Resultado — 1º Período">
               <MarketOddsBtn match={match} sel="per1-home" odd={m.halfTime.home} market="1periodo" label={match.home} />
@@ -5251,7 +5271,7 @@ export default function Home() {
         )}
 
         {/* ── HÓQUEI: 2º PERÍODO ── */}
-        {isHockey && currentP <= 2 && (modalTab === "2periodo" || modalTab === "todos") && m && m.period2 && m.period2.home > 0 && (
+        {isHockey && (modalTab === "2periodo" || modalTab === "todos") && m && m.period2 && m.period2.home > 0 && (
           <div>
             <MarketGroup title="Resultado — 2º Período">
               <MarketOddsBtn match={match} sel="per2-home" odd={m.period2.home} market="2periodo" label={match.home} />
@@ -5338,15 +5358,15 @@ export default function Home() {
         {/* ── VOLEIBOL: POR SET ── */}
         {isVolleyball && (modalTab === "perset" || modalTab === "todos") && m && (m as any).volleyballExtra && (
           <div>
-            {/* Set 1: hidden when match has advanced past Set 1 */}
-            {currentSet <= 1 && ((m as any).volleyballExtra as { set1: { home: number; away: number }; set2: { home: number; away: number }; set3: { home: number; away: number } }).set1.home > 0 && (
+            {/* Set 1: visible throughout match (settled by server once set ends) */}
+            {((m as any).volleyballExtra as { set1: { home: number; away: number }; set2: { home: number; away: number }; set3: { home: number; away: number } }).set1.home > 0 && (
               <MarketGroup title="Vencedor do 1º Set">
                 <MarketOddsBtn match={match} sel="vs1h" odd={((m as any).volleyballExtra as any).set1.home} market="perset" label={match.home} />
                 <MarketOddsBtn match={match} sel="vs1a" odd={((m as any).volleyballExtra as any).set1.away} market="perset" label={match.away} />
               </MarketGroup>
             )}
-            {/* Set 2: hidden when match has advanced past Set 2 */}
-            {currentSet <= 2 && ((m as any).volleyballExtra as any).set2.home > 0 && (
+            {/* Set 2: visible throughout match */}
+            {((m as any).volleyballExtra as any).set2.home > 0 && (
               <MarketGroup title="Vencedor do 2º Set">
                 <MarketOddsBtn match={match} sel="vs2h" odd={((m as any).volleyballExtra as any).set2.home} market="perset" label={match.home} />
                 <MarketOddsBtn match={match} sel="vs2a" odd={((m as any).volleyballExtra as any).set2.away} market="perset" label={match.away} />
@@ -5401,8 +5421,7 @@ export default function Home() {
             {(m as any).basketballExtra && (["q1","q2","q3","q4"] as const).map((q, qi) => {
               const ex = (m as any).basketballExtra as any;
               const labels = ["1º Quarto","2º Quarto","3º Quarto","4º Quarto"];
-              // Hide past quarter markets: qi+1 is quarter number; skip if live and already past
-              if (currentQ > 0 && (qi + 1) < currentQ) return null;
+              // All quarter markets remain visible throughout the match (settled by server once quarter ends)
               return ex[q].home > 0 ? (
                 <MarketGroup key={q} title={`Vencedor — ${labels[qi]}`}>
                   <MarketOddsBtn match={match} sel={`${q}-home`} odd={ex[q].home} market="quartos" label={match.home} />
