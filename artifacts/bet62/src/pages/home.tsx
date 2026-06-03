@@ -1160,6 +1160,9 @@ type StoredSelection = {
   odd: number;
   market?: string;
   label?: string;
+  finalScore?: { home: number; away: number };
+  htScore?: { htHome: number; htAway: number };
+  outcome?: "won" | "lost" | "void" | null;
 };
 
 type UserBet = {
@@ -1171,6 +1174,9 @@ type UserBet = {
   totalOdds: string;
   status: string;
   cashoutValue?: string | null;
+  cashoutStatus?: string;
+  cashoutReason?: string;
+  cashoutEstimate?: string;
   createdAt: string;
 };
 
@@ -1449,8 +1455,6 @@ export default function Home() {
   const prevWonBetIds = useRef<Set<number> | null>(null);
   const prevLiveMatchesRef = useRef<Match[]>([]);
   const finishedMatchScores = useRef<Map<string, { home: number; away: number }>>(new Map());
-  // Locally-resolved bet outcomes (client-side, before admin settlement)
-  const [resolvedBetOutcomes, setResolvedBetOutcomes] = useState<Map<number, "won" | "lost">>(new Map());
 
   // Deposit modal
   const [depositModalOpen, setDepositModalOpen] = useState(false);
@@ -2391,50 +2395,19 @@ export default function Home() {
     }
   }, [processLiveData]);
 
-  // Track disappearing live matches to store final scores + compute local bet outcomes
+  // Track disappearing live matches to store final scores
   useEffect(() => {
     const prev = prevLiveMatchesRef.current;
     const currentIds = new Set(liveMatches.map(m => m.id));
-    let anyNew = false;
     for (const m of prev) {
       if (!currentIds.has(m.id)) {
         const normT = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
         const key = `${normT(m.home)}-${normT(m.away)}`;
         finishedMatchScores.current.set(key, { home: m.homeScore ?? 0, away: m.awayScore ?? 0 });
-        anyNew = true;
       }
     }
     prevLiveMatchesRef.current = [...liveMatches];
-
-    // When a match disappears, check all pending bets to see if any selections are now resolved
-    if (anyNew && myBets.length > 0) {
-      setResolvedBetOutcomes(prev => {
-        const updated = new Map(prev);
-        for (const bet of myBets) {
-          if (bet.status !== "pending") continue;
-          if (updated.has(bet.id)) continue;
-          const sels: Array<{ selection: string; matchTitle: string }> = Array.isArray(bet.selections)
-            ? (bet.selections as Array<{ selection: string; matchTitle: string }>)
-            : [{ matchTitle: bet.matchTitle, selection: "home" }];
-          const normT = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
-          let anyLost = false;
-          let allDetermined = sels.length > 0;
-          for (const sel of sels) {
-            const [th = "", ta = ""] = (sel.matchTitle ?? "").split(" vs ");
-            const key = `${normT(th)}-${normT(ta)}`;
-            const fs = finishedMatchScores.current.get(key);
-            if (!fs) { allDetermined = false; continue; }
-            const outcome = scoreOutcomeForSel(sel, fs);
-            if (outcome === "lost") { anyLost = true; break; }
-            if (outcome === null) allDetermined = false;
-          }
-          if (anyLost) updated.set(bet.id, "lost");
-          else if (allDetermined) updated.set(bet.id, "won");
-        }
-        return updated;
-      });
-    }
-  }, [liveMatches, myBets]);
+  }, [liveMatches]);
 
   // SSE live stream — replaces polling interval.
   // The server pushes every 2s (piggybacked on the market drift engine).
@@ -2499,18 +2472,49 @@ export default function Home() {
         setMyBets(bets);
         myBetsInitialized.current = true;
         const currentWonIds = new Set(bets.filter(b => b.status === "won").map(b => b.id));
-        if (prevWonBetIds.current !== null) {
-          const newWon = bets.filter(b => b.status === "won" && !prevWonBetIds.current!.has(b.id));
-          if (newWon.length > 0) {
-            const biggest = newWon.reduce((a, b) =>
-              parseFloat(a.potentialWin) >= parseFloat(b.potentialWin) ? a : b
-            );
-            setWinAnim({ amount: parseFloat(biggest.potentialWin), title: biggest.matchTitle ?? "Aposta" });
-            // Immediately refresh balance so the credited winnings appear straight away
-            void auth.refreshUser();
+        let handledByStorage = false;
+        if (auth.user?.id) {
+          const key = `bet62_seen_won_${auth.user.id}`;
+          try {
+            const raw = localStorage.getItem(key);
+            if (raw) {
+              const arr = JSON.parse(raw) as unknown;
+              const seen = new Set<number>(Array.isArray(arr) ? (arr as unknown[]).map(n => Number(n)).filter(n => Number.isFinite(n)) : []);
+              const newWon = bets.filter(b => b.status === "won" && !seen.has(b.id));
+              if (newWon.length > 0) {
+                const biggest = newWon.reduce((a, b) =>
+                  parseFloat(a.potentialWin) >= parseFloat(b.potentialWin) ? a : b
+                );
+                setWinAnim({ amount: parseFloat(biggest.potentialWin), title: biggest.matchTitle ?? "Aposta" });
+                void auth.refreshUser();
+              }
+              const merged = new Set<number>([...seen, ...currentWonIds]);
+              localStorage.setItem(key, JSON.stringify(Array.from(merged)));
+              handledByStorage = true;
+            } else {
+              localStorage.setItem(key, JSON.stringify(Array.from(currentWonIds)));
+              handledByStorage = true;
+            }
+          } catch {
+            handledByStorage = false;
           }
         }
-        prevWonBetIds.current = currentWonIds;
+
+        if (!handledByStorage) {
+          if (prevWonBetIds.current !== null) {
+            const newWon = bets.filter(b => b.status === "won" && !prevWonBetIds.current!.has(b.id));
+            if (newWon.length > 0) {
+              const biggest = newWon.reduce((a, b) =>
+                parseFloat(a.potentialWin) >= parseFloat(b.potentialWin) ? a : b
+              );
+              setWinAnim({ amount: parseFloat(biggest.potentialWin), title: biggest.matchTitle ?? "Aposta" });
+              void auth.refreshUser();
+            }
+          }
+          prevWonBetIds.current = currentWonIds;
+        } else {
+          prevWonBetIds.current = currentWonIds;
+        }
       }
     } catch {
       if (!silent) toast.error("Erro ao carregar apostas");
@@ -5731,11 +5735,20 @@ export default function Home() {
   };
 
   // Determine per-selection outcome for resolved bets or live tentative state
-  type SelOutcome = "green" | "red" | "cashout" | "live-win" | "live-lose" | "pending";
+  type SelOutcome = "green" | "red" | "cashout" | "live-win" | "live-lose" | "pending" | "void";
   const getSelOutcome = (sel: StoredSelection, betStatus: string): SelOutcome => {
-    if (betStatus === "won") return "green";
-    if (betStatus === "lost") return "red";
     if (betStatus === "cashed_out") return "cashout";
+    if (betStatus === "voided") return "pending";
+    if (sel.outcome === "won") return "green";
+    if (sel.outcome === "lost") return "red";
+    if (sel.outcome === "void") return "void";
+    if (sel.finalScore) {
+      const out = scoreOutcomeForSel(sel, sel.finalScore);
+      if (out === "won") return "green";
+      if (out === "lost") return "red";
+    }
+    if (betStatus === "won") return "green";
+    if (betStatus === "lost") return "pending";
     // Pending: check live match for tentative state
     const lm = findLiveMatchForSel(sel);
     if (!lm) return "pending";
@@ -5765,6 +5778,7 @@ export default function Home() {
   };
 
   const cashoutEstimate = (bet: UserBet) => {
+    if (bet.cashoutEstimate && !Number.isNaN(parseFloat(bet.cashoutEstimate))) return parseFloat(bet.cashoutEstimate).toFixed(2);
     const s = parseFloat(bet.stake);
     const originalOdds = parseFloat(bet.totalOdds);
     const sels = getBetSelections(bet);
@@ -9476,10 +9490,13 @@ export default function Home() {
                         const isWon = bet.status === "won";
                         const isCO = bet.status === "cashed_out";
                         const isPending = bet.status === "pending";
+                        const isVoided = bet.status === "voided";
                         const credit = isWon
                           ? parseFloat(bet.potentialWin)
                           : isCO && bet.cashoutValue
                           ? parseFloat(bet.cashoutValue)
+                          : isVoided
+                          ? parseFloat(bet.stake)
                           : null;
                         return (
                           <div key={bet.id} className="flex items-center justify-between px-4 py-3">
@@ -9492,8 +9509,8 @@ export default function Home() {
                               <div className="min-w-0">
                                 <div className="text-sm font-medium truncate">{bet.matchTitle}</div>
                                 <div className="text-xs text-zinc-500 flex items-center gap-1.5">
-                                  <span className={`font-semibold ${isWon ? "text-green-500" : isCO ? "text-yellow-500" : isPending ? "text-zinc-400" : "text-red-500"}`}>
-                                    {isWon ? "Ganhou" : isCO ? "Cash Out" : isPending ? "Pendente" : "Perdeu"}
+                                  <span className={`font-semibold ${isWon ? "text-green-500" : isCO ? "text-yellow-500" : isPending ? "text-zinc-400" : isVoided ? "text-blue-400" : "text-red-500"}`}>
+                                    {isWon ? "Ganhou" : isCO ? "Cash Out" : isPending ? "Pendente" : isVoided ? "Anulada" : "Perdeu"}
                                   </span>
                                   · {new Date(bet.createdAt).toLocaleDateString("pt-PT", { day: "2-digit", month: "2-digit", year: "numeric" })}
                                 </div>
@@ -9524,8 +9541,8 @@ export default function Home() {
                 <div className="flex border-b border-zinc-800 mb-5">
                   {(["abertas", "resolvidas"] as const).map((t) => {
                     const cnt = t === "abertas"
-                      ? myBets.filter(b => b.status === "pending" && !resolvedBetOutcomes.has(b.id)).length
-                      : myBets.filter(b => b.status !== "pending" || resolvedBetOutcomes.has(b.id)).length;
+                      ? myBets.filter(b => b.status === "pending").length
+                      : myBets.filter(b => b.status !== "pending").length;
                     const lbl = t === "abertas" ? "Abertas" : "Resolvidas";
                     return (
                       <button key={t} onClick={() => setBetFilterTab(t)}
@@ -9542,8 +9559,8 @@ export default function Home() {
                 ) : (() => {
                   const filtered = myBets.filter(b =>
                     betFilterTab === "resolvidas"
-                      ? b.status !== "pending" || resolvedBetOutcomes.has(b.id)
-                      : b.status === "pending" && !resolvedBetOutcomes.has(b.id)
+                      ? b.status !== "pending"
+                      : b.status === "pending"
                   );
                   if (filtered.length === 0) return (
                     <div className="py-20 text-center text-zinc-500 bg-zinc-900/50 rounded-xl border border-zinc-800">
@@ -9560,17 +9577,16 @@ export default function Home() {
                         const sels = getBetSelections(bet);
                         const isMultiple = sels.length > 1;
                         const isPending = bet.status === "pending";
-                        const localOutcome = resolvedBetOutcomes.get(bet.id);
-                        const effectiveStatus = localOutcome ?? bet.status;
-                        const isWon = effectiveStatus === "won";
-                        const isLost = effectiveStatus === "lost";
+                        const isWon = bet.status === "won";
+                        const isLost = bet.status === "lost";
                         const isCashedOut = bet.status === "cashed_out";
+                        const isVoided = bet.status === "voided";
                         const ticketCode = `BT62-${String(bet.id).padStart(6, "0")}`;
                         const betDate = new Date(bet.createdAt);
                         const dateStr = betDate.toLocaleDateString("pt-PT", { day: "2-digit", month: "2-digit", year: "numeric" });
                         const timeStr = betDate.toLocaleTimeString("pt-PT", { hour: "2-digit", minute: "2-digit" });
 
-                        const isActivePending = isPending && !localOutcome;
+                        const isActivePending = isPending;
                         // Card & text colours
                         const cardBg   = isLost ? "bg-[#7b1111]" : "bg-white";
                         const selsBg   = isLost ? "bg-[#8f1616]" : "bg-white";
@@ -9637,13 +9653,17 @@ export default function Home() {
                                 // Per-selection left icon
                                 let leftIcon: ReactNode;
                                 if (isLost) {
-                                  // For lost bets: show individual win/loss per selection
-                                  const indivOk = outcome !== "red";
-                                  leftIcon = indivOk
+                                  leftIcon = outcome === "void"
+                                    ? <div className="w-6 h-6 rounded-full bg-zinc-700/40 border border-white/20 flex items-center justify-center shrink-0"><span className="text-white text-[11px] font-black leading-none">—</span></div>
+                                    : outcome === "green"
                                     ? <div className="w-6 h-6 rounded-full bg-white/30 flex items-center justify-center shrink-0"><Check size={13} className="text-white" strokeWidth={3} /></div>
-                                    : <div className="w-6 h-6 rounded-full bg-red-950/60 border border-white/20 flex items-center justify-center shrink-0"><X size={13} className="text-white" strokeWidth={2.5} /></div>;
+                                    : outcome === "red"
+                                    ? <div className="w-6 h-6 rounded-full bg-red-950/60 border border-white/20 flex items-center justify-center shrink-0"><X size={13} className="text-white" strokeWidth={2.5} /></div>
+                                    : <div className="w-6 h-6 rounded-full bg-zinc-800/60 border border-white/20 flex items-center justify-center shrink-0"><Clock size={13} className="text-white" /></div>;
                                 } else if (isWon) {
-                                  leftIcon = <div className="w-6 h-6 rounded-full bg-green-500 flex items-center justify-center shrink-0"><Check size={13} className="text-white" strokeWidth={3} /></div>;
+                                  leftIcon = outcome === "void"
+                                    ? <div className="w-6 h-6 rounded-full bg-zinc-200 border border-zinc-300 flex items-center justify-center shrink-0"><span className="text-zinc-600 text-[11px] font-black leading-none">—</span></div>
+                                    : <div className="w-6 h-6 rounded-full bg-green-500 flex items-center justify-center shrink-0"><Check size={13} className="text-white" strokeWidth={3} /></div>;
                                 } else if (isCashedOut) {
                                   leftIcon = <div className="w-6 h-6 rounded-full bg-yellow-500/70 flex items-center justify-center shrink-0"><CircleDollarSign size={11} className="text-white" /></div>;
                                 } else {
@@ -9664,7 +9684,7 @@ export default function Home() {
                                 const normT = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
                                 const [th = "", ta = ""] = (sel.matchTitle ?? "").split(" vs ");
                                 const fsKey = `${normT(th)}-${normT(ta)}`;
-                                const fs = !isActivePending ? finishedMatchScores.current.get(fsKey) : null;
+                                const fs = sel.finalScore ?? (!isActivePending ? finishedMatchScores.current.get(fsKey) : null);
 
                                 return (
                                   <div key={i} className="px-5 py-3.5 flex items-start gap-3">
@@ -9739,13 +9759,15 @@ export default function Home() {
                                   valueCls: `font-semibold ${txtMain}`,
                                 },
                                 {
-                                  label: isWon ? "Ganho confirmado:" : isCashedOut ? "Cash Out recebido:" : isLost ? "Retorno:" : "Retorno potencial:",
+                                  label: isWon ? "Ganho confirmado:" : isCashedOut ? "Cash Out recebido:" : isLost ? "Retorno:" : isVoided ? "Reembolso:" : "Retorno potencial:",
                                   value: isLost
                                     ? "€0,00"
+                                    : isVoided
+                                    ? `€${parseFloat(bet.stake).toFixed(2)}`
                                     : isCashedOut && bet.cashoutValue
                                     ? `€${parseFloat(bet.cashoutValue).toFixed(2)}`
                                     : `€${parseFloat(bet.potentialWin).toFixed(2)}`,
-                                  valueCls: isWon ? "font-black text-green-600 text-base" : isCashedOut ? "font-black text-yellow-600 text-base" : isLost ? "font-bold text-red-100" : `font-black ${txtMain}`,
+                                  valueCls: isWon ? "font-black text-green-600 text-base" : isCashedOut ? "font-black text-yellow-600 text-base" : isLost ? "font-bold text-red-100" : isVoided ? "font-black text-blue-300 text-base" : `font-black ${txtMain}`,
                                 },
                               ].map(({ label, value, valueCls }, ri) => (
                                 <div key={ri} className={`flex items-center justify-between px-4 py-3 text-sm ${summTxt}`}>
@@ -9757,7 +9779,8 @@ export default function Home() {
 
                             {/* ── CASH OUT BUTTON ── */}
                             {isActivePending ? (
-                              cashoutExpandedId === bet.id ? (
+                              bet.cashoutStatus === "available" ? (
+                                cashoutExpandedId === bet.id ? (
                                 <div className="mx-4 mb-4 rounded-2xl bg-green-600 px-5 py-4 flex items-center gap-3">
                                   <CircleDollarSign size={20} className="text-white shrink-0" />
                                   <div className="flex-1">
@@ -9770,12 +9793,23 @@ export default function Home() {
                                     {cashingOut === bet.id ? <Loader2 size={13} className="animate-spin" /> : "CONFIRMAR"}
                                   </button>
                                 </div>
-                              ) : (
+                                ) : (
                                 <button onClick={() => setCashoutExpandedId(bet.id)} disabled={cashingOut === bet.id}
                                   className="mx-4 mb-4 w-[calc(100%-2rem)] bg-red-600 hover:bg-red-500 active:bg-red-700 text-white font-black text-[15px] py-4 rounded-2xl flex items-center justify-center gap-2.5 transition-colors shadow-lg shadow-red-900/40 disabled:opacity-50">
                                   <RefreshCw size={18} />
                                   Cash Out disponível
                                 </button>
+                                )
+                              ) : bet.cashoutStatus === "suspended" ? (
+                                <div className="mx-4 mb-4 bg-gray-100 text-gray-500 font-bold text-[14px] py-4 rounded-2xl flex items-center justify-center gap-2 cursor-not-allowed select-none">
+                                  <Lock size={15} />
+                                  Cash Out suspenso{bet.cashoutReason ? ` — ${bet.cashoutReason}` : ""}
+                                </div>
+                              ) : (
+                                <div className="mx-4 mb-4 bg-gray-100 text-gray-400 font-bold text-[14px] py-4 rounded-2xl flex items-center justify-center gap-2 cursor-not-allowed select-none">
+                                  <Lock size={15} />
+                                  Cash Out indisponível
+                                </div>
                               )
                             ) : isCashedOut || isWon ? (
                               <div className="mx-4 mb-4 bg-gray-100 text-gray-400 font-bold text-[14px] py-4 rounded-2xl flex items-center justify-center gap-2 cursor-not-allowed select-none">

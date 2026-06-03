@@ -1,7 +1,7 @@
-import { db, betsTable, usersTable, settlementLogsTable } from "@workspace/db";
-import { eq, and, lt, sql } from "drizzle-orm";
+import { db, betsTable, cashoutStatesTable, usersTable, settlementLogsTable } from "@workspace/db";
+import { eq, and, lt, sql, gte, desc } from "drizzle-orm";
 import { logger } from "./lib/logger";
-import { finishedMatchResults, scanDailyForFinished, scanV2AllSportsForFinished } from "./routes/matches";
+import { ensureFinishedMatchResult, finishedMatchResults, scanDailyForFinished, scanV2AllSportsForFinished } from "./routes/matches";
 
 export type SelectionRecord = {
   matchId?: string;
@@ -10,10 +10,14 @@ export type SelectionRecord = {
   odd?: number;
   market?: string;
   label?: string;
+  finalScore?: { home: number; away: number };
+  htScore?: { htHome: number; htAway: number };
+  outcome?: "won" | "lost" | "void" | null;
 };
 
 type FTScore = { home: number; away: number };
 type HTScore = { htHome: number; htAway: number };
+type FinishedResult = (typeof finishedMatchResults extends Map<string, infer V> ? V : never);
 
 /**
  * Evaluate a single bet selection against a known final score + optional HT score.
@@ -45,8 +49,9 @@ type HTScore = { htHome: number; htAway: number };
 export function scoreOutcomeForSel(
   sel: { selection: string },
   ft: FTScore,
-  ht?: HTScore
-): "won" | "lost" | null {
+  ht?: HTScore,
+  extra?: { cornersTotal?: number; cardsTotal?: number; firstGoal?: "home" | "away" | "none"; extras?: unknown }
+): "won" | "lost" | "void" | null {
   // ── Key normalisation (ComprehensiveMarketsSheet keys → canonical keys) ────
   let s = sel.selection;
   if      (s === "1x2-home")   s = "home";
@@ -74,19 +79,100 @@ export function scoreOutcomeForSel(
   const h2A = htA !== null ? away - htA : null;
 
   let winning: boolean | null = null;
+  let voided = false;
 
+  // ── Corners O/U (requires stats) ──────────────────────────────────────────
+  if (/^[ou]c\d+$/.test(s)) {
+    if (extra?.cornersTotal == null) return null;
+    const line = parseInt(s.slice(2), 10) / 10;
+    if (!Number.isFinite(line)) return null;
+    if (extra.cornersTotal === line) voided = true;
+    else winning = s[0] === "o" ? extra.cornersTotal > line : extra.cornersTotal < line;
+  }
+  // ── Cards O/U (requires stats) ────────────────────────────────────────────
+  else if (/^[ou]card\d+$/.test(s)) {
+    if (extra?.cardsTotal == null) return null;
+    const line = parseInt(s.slice(5), 10) / 10;
+    if (!Number.isFinite(line)) return null;
+    if (extra.cardsTotal === line) voided = true;
+    else winning = s[0] === "o" ? extra.cardsTotal > line : extra.cardsTotal < line;
+  }
+  // ── First goal (requires stats) ───────────────────────────────────────────
+  else if (s === "fg-home" || s === "fg-away" || s === "fg-none") {
+    if (!extra?.firstGoal) return null;
+    winning = s === `fg-${extra.firstGoal}`;
+  }
+  // ── Set winners (tennis/volleyball — requires per-period scores) ──────────
+  else if (/^set[123]-(home|away)$/.test(s) || /^vs[123][ha]$/.test(s)) {
+    const setNum =
+      s.startsWith("set") ? parseInt(s.slice(3, 4), 10)
+      : parseInt(s.slice(2, 3), 10);
+    const wantHome = s.endsWith("home") || s.endsWith("h");
+    const wantAway = s.endsWith("away") || s.endsWith("a");
+    if (!Number.isFinite(setNum) || setNum <= 0) return null;
+    const ex = (extra?.extras ?? {}) as Record<string, unknown>;
+    const hs = ex["homeScore"] as Record<string, unknown> | undefined;
+    const as = ex["awayScore"] as Record<string, unknown> | undefined;
+    const h = typeof hs?.[`period${setNum}`] === "number" ? hs?.[`period${setNum}`] as number : null;
+    const a = typeof as?.[`period${setNum}`] === "number" ? as?.[`period${setNum}`] as number : null;
+    if (h === null || a === null) return null;
+    if (h === a) return "void";
+    winning = wantHome ? h > a : wantAway ? a > h : null;
+  }
+  // ── Exact sets (tennis) ───────────────────────────────────────────────────
+  else if (/^es-(h20|h21|a02|a12)$/.test(s)) {
+    const ex = (extra?.extras ?? {}) as Record<string, unknown>;
+    const hs = ex["homeScore"] as Record<string, unknown> | undefined;
+    const as = ex["awayScore"] as Record<string, unknown> | undefined;
+    const hc = typeof hs?.["current"] === "number" ? hs["current"] as number : null;
+    const ac = typeof as?.["current"] === "number" ? as["current"] as number : null;
+    if (hc === null || ac === null) return null;
+    const score = `${hc}-${ac}`;
+    const want =
+      s === "es-h20" ? "2-0" :
+      s === "es-h21" ? "2-1" :
+      s === "es-a02" ? "0-2" :
+      "1-2";
+    winning = score === want;
+  }
+  // ── Total sets O/U (tennis) ───────────────────────────────────────────────
+  else if (/^([ou])sets(35|25)?$/.test(s)) {
+    const m = s.match(/^([ou])sets(35|25)?$/)!;
+    const dir = m[1]!;
+    const suf = m[2] ?? "";
+    const line = suf === "35" ? 3.5 : 2.5;
+    const ex = (extra?.extras ?? {}) as Record<string, unknown>;
+    const hs = ex["homeScore"] as Record<string, unknown> | undefined;
+    const as = ex["awayScore"] as Record<string, unknown> | undefined;
+    const hc = typeof hs?.["current"] === "number" ? hs["current"] as number : null;
+    const ac = typeof as?.["current"] === "number" ? as["current"] as number : null;
+    if (hc === null || ac === null) return null;
+    const totalSets = hc + ac;
+    if (totalSets === line) voided = true;
+    else winning = dir === "o" ? totalSets > line : totalSets < line;
+  }
+  // ── Volleyball exact score (best-of-5) ────────────────────────────────────
+  else if (/^vs-s(30|31|32|03|13|23)$/.test(s)) {
+    const ex = (extra?.extras ?? {}) as Record<string, unknown>;
+    const hs = ex["homeScore"] as Record<string, unknown> | undefined;
+    const as = ex["awayScore"] as Record<string, unknown> | undefined;
+    const hc = typeof hs?.["current"] === "number" ? hs["current"] as number : null;
+    const ac = typeof as?.["current"] === "number" ? as["current"] as number : null;
+    if (hc === null || ac === null) return null;
+    const want = s.slice(4, 6);
+    const score = `${hc}${ac}`;
+    winning = score === want;
+  }
   // ── Markets not resolvable from score alone — leave pending for admin ──────
-  if (
-    s.startsWith("oc") || s.startsWith("uc") ||          // corners
-    s.startsWith("cards-") ||                              // cards
-    s.startsWith("s1-")  || s.startsWith("s2-") ||        // tennis set winner
-    s.startsWith("ts-")  ||                                // tennis total sets
-    s.startsWith("hcp-") ||                                // hcap points (no line)
-    s === "fg-home" || s === "fg-away" || s === "fg-none"  // first goal
+  else if (
+    s.startsWith("s1-")  || s.startsWith("s2-") ||        // tennis set winner (legacy keys)
+    s.startsWith("ts-")  ||                                // tennis total sets (legacy keys)
+    s.startsWith("hcp-")                                  // hcap points (no line)
   ) return null;
 
   // ── Handicap ±1 / ±1.5  (hc-hm1, hc-ap1, hc-hm15, hc-ap15) ─────────────
-  if      (s === "hc-hm1"  || s === "hc-hm15") { winning = (home - away) >= 2; }
+  if      (winning !== null) { /* already resolved above */ }
+  else if (s === "hc-hm1"  || s === "hc-hm15") { winning = (home - away) >= 2; }
   else if (s === "hc-ap1"  || s === "hc-ap15") { winning = (home - away) <= 1; }
 
   // ── 1X2 ───────────────────────────────────────────────────────────────────
@@ -106,7 +192,10 @@ export function scoreOutcomeForSel(
   // ── Total Goals O/U  (o25, u35, o05, etc.) ────────────────────────────────
   else if (/^[ou][\d.]+$/.test(s)) {
     const line = parseFloat(s.slice(1));
-    if (!isNaN(line)) winning = s[0] === "o" ? total > line : total < line;
+    if (!isNaN(line)) {
+      if (total === line) voided = true;
+      else winning = s[0] === "o" ? total > line : total < line;
+    }
   }
 
   // ── Goal Odd / Even ────────────────────────────────────────────────────────
@@ -129,10 +218,10 @@ export function scoreOutcomeForSel(
 
   // ── Draw No Bet  (void = null on draw) ────────────────────────────────────
   else if (s === "dnb-home") {
-    if (home === away) return null;
+    if (home === away) return "void";
     winning = home > away;
   } else if (s === "dnb-away") {
-    if (home === away) return null;
+    if (home === away) return "void";
     winning = away > home;
   }
 
@@ -159,14 +248,16 @@ export function scoreOutcomeForSel(
   else if (/^tgh-([ou])(\d+)$/.test(s)) {
     const m = s.match(/^tgh-([ou])(\d+)$/)!;
     const line = parseInt(m[2]!, 10) / 10;
-    winning = m[1] === "o" ? home > line : home < line;
+    if (home === line) voided = true;
+    else winning = m[1] === "o" ? home > line : home < line;
   }
 
   // ── Away Team Goals O/U  (tga-o15 = away scores > 1.5) ───────────────────
   else if (/^tga-([ou])(\d+)$/.test(s)) {
     const m = s.match(/^tga-([ou])(\d+)$/)!;
     const line = parseInt(m[2]!, 10) / 10;
-    winning = m[1] === "o" ? away > line : away < line;
+    if (away === line) voided = true;
+    else winning = m[1] === "o" ? away > line : away < line;
   }
 
   // ══════════ MARKETS THAT REQUIRE HT SCORE ════════════════════════════════
@@ -269,6 +360,7 @@ export function scoreOutcomeForSel(
     }
   }
 
+  if (voided) return "void";
   return winning === null ? null : winning ? "won" : "lost";
 }
 
@@ -280,7 +372,7 @@ function findResult(
   sel: SelectionRecord,
   betMatchId: string,
   isSingle: boolean
-): { home: number; away: number; htHome?: number; htAway?: number } | null {
+): FinishedResult | null {
   // 1. Exact ID match (fastest path)
   if (sel.matchId) {
     const r = finishedMatchResults.get(sel.matchId);
@@ -326,6 +418,25 @@ export async function autoSettlePendingBets(): Promise<void> {
 
     if (pendingBets.length === 0) return;
 
+    const idsToEnsure = new Set<string>();
+    for (const bet of pendingBets) {
+      const selections = bet.selections as SelectionRecord[];
+      if (!Array.isArray(selections) || selections.length === 0) continue;
+      const isSingle = selections.length === 1;
+      for (const sel of selections) {
+        const mId = sel.matchId ?? (isSingle ? bet.matchId : undefined);
+        if (!mId) continue;
+        if (finishedMatchResults.has(mId)) continue;
+        idsToEnsure.add(mId);
+      }
+    }
+
+    const ids = Array.from(idsToEnsure);
+    for (let i = 0; i < ids.length; i += 12) {
+      const chunk = ids.slice(i, i + 12);
+      await Promise.allSettled(chunk.map((id) => ensureFinishedMatchResult(id)));
+    }
+
     let settled = 0;
 
     for (const bet of pendingBets) {
@@ -334,7 +445,7 @@ export async function autoSettlePendingBets(): Promise<void> {
         if (!Array.isArray(selections) || selections.length === 0) continue;
 
         const isSingle = selections.length === 1;
-        const outcomes: Array<"won" | "lost" | null> = [];
+        const outcomes: Array<"won" | "lost" | "void" | null> = [];
 
         for (const sel of selections) {
           const result = findResult(sel, bet.matchId, isSingle);
@@ -348,7 +459,12 @@ export async function autoSettlePendingBets(): Promise<void> {
               ? { htHome: result.htHome, htAway: result.htAway }
               : undefined;
 
-          outcomes.push(scoreOutcomeForSel(sel, result, ht));
+          outcomes.push(scoreOutcomeForSel(sel, result, ht, {
+            cornersTotal: result.cornersTotal,
+            cardsTotal: result.cardsTotal,
+            firstGoal: result.firstGoal,
+            extras: result.extras,
+          }));
         }
 
         // ── Early loss: if any leg is definitively lost, settle immediately ──
@@ -357,7 +473,21 @@ export async function autoSettlePendingBets(): Promise<void> {
             const mId = sel.matchId ?? (isSingle ? bet.matchId : undefined);
             if (!mId) return sel;
             const r = finishedMatchResults.get(mId);
-            return r ? { ...sel, finalScore: { home: r.home, away: r.away } } : sel;
+            if (!r) return sel;
+            const ht = typeof r.htHome === "number" && typeof r.htAway === "number"
+              ? { htHome: r.htHome, htAway: r.htAway }
+              : undefined;
+            return {
+              ...sel,
+              finalScore: { home: r.home, away: r.away },
+              htScore: ht,
+              outcome: scoreOutcomeForSel(sel, { home: r.home, away: r.away }, ht, {
+                cornersTotal: r.cornersTotal,
+                cardsTotal: r.cardsTotal,
+                firstGoal: r.firstGoal,
+                extras: r.extras,
+              }),
+            };
           });
           await db.transaction(async (tx) => {
             const rows = await tx
@@ -366,6 +496,7 @@ export async function autoSettlePendingBets(): Promise<void> {
               .where(and(eq(betsTable.id, bet.id), eq(betsTable.status, "pending")))
               .returning({ id: betsTable.id });
             if (rows.length === 0) return;
+            await tx.delete(cashoutStatesTable).where(eq(cashoutStatesTable.betId, bet.id));
             await tx.insert(settlementLogsTable).values({
               betId: bet.id,
               userId: bet.userId,
@@ -386,30 +517,83 @@ export async function autoSettlePendingBets(): Promise<void> {
         // Only settle when every selection has a resolved outcome (no nulls)
         if (outcomes.some(o => o === null)) continue;
 
-        // All outcomes resolved and none is "lost" → all won
+        if (outcomes.every(o => o === "void")) {
+          await db.transaction(async (tx) => {
+            const rows = await tx
+              .update(betsTable)
+              .set({ status: "voided" })
+              .where(and(eq(betsTable.id, bet.id), eq(betsTable.status, "pending")))
+              .returning({ id: betsTable.id });
+            if (rows.length === 0) return;
+            await tx.delete(cashoutStatesTable).where(eq(cashoutStatesTable.betId, bet.id));
+
+            await tx
+              .update(usersTable)
+              .set({ balance: sql`${usersTable.balance} + ${bet.stake}::numeric` })
+              .where(eq(usersTable.id, bet.userId));
+
+            await tx.insert(settlementLogsTable).values({
+              betId: bet.id,
+              userId: bet.userId,
+              oldStatus: "pending",
+              newStatus: "voided",
+              payout: bet.stake,
+              message: "Auto-settled: all selections voided — stake refunded",
+            });
+          });
+          settled++;
+          continue;
+        }
+
+        // All outcomes resolved and none is "lost" → won (void legs ignored)
         const newStatus = "won";
+
+        const stakeNum = parseFloat(bet.stake);
+        const effectiveOdds = selections.reduce((acc, sel, idx) => {
+          const o = outcomes[idx];
+          if (o === "won") return acc * Math.max(1.01, Number(sel.odd ?? 1));
+          return acc;
+        }, 1);
+        const payoutNum = Math.max(0, Number((stakeNum * effectiveOdds).toFixed(2)));
+        const payoutStr = payoutNum.toFixed(2);
+        const oddsStr = Number(effectiveOdds.toFixed(2)).toFixed(2);
 
         const updatedSelsWon = selections.map(sel => {
           const mId = sel.matchId ?? (isSingle ? bet.matchId : undefined);
           if (!mId) return sel;
           const r = finishedMatchResults.get(mId);
-          return r ? { ...sel, finalScore: { home: r.home, away: r.away } } : sel;
+          if (!r) return sel;
+          const ht = typeof r.htHome === "number" && typeof r.htAway === "number"
+            ? { htHome: r.htHome, htAway: r.htAway }
+            : undefined;
+          return {
+            ...sel,
+            finalScore: { home: r.home, away: r.away },
+            htScore: ht,
+            outcome: scoreOutcomeForSel(sel, { home: r.home, away: r.away }, ht, {
+              cornersTotal: r.cornersTotal,
+              cardsTotal: r.cardsTotal,
+              firstGoal: r.firstGoal,
+              extras: r.extras,
+            }),
+          };
         });
 
         await db.transaction(async (tx) => {
           // Optimistic lock: only update if still pending
           const rows = await tx
             .update(betsTable)
-            .set({ status: newStatus, selections: updatedSelsWon })
+            .set({ status: newStatus, selections: updatedSelsWon, potentialWin: payoutStr, totalOdds: oddsStr })
             .where(and(eq(betsTable.id, bet.id), eq(betsTable.status, "pending")))
             .returning({ id: betsTable.id });
 
           if (rows.length === 0) return; // already settled elsewhere
+          await tx.delete(cashoutStatesTable).where(eq(cashoutStatesTable.betId, bet.id));
 
           // Atomic SQL addition — no read-then-write race condition
           await tx
             .update(usersTable)
-            .set({ balance: sql`${usersTable.balance} + ${bet.potentialWin}::numeric` })
+            .set({ balance: sql`${usersTable.balance} + ${payoutStr}::numeric` })
             .where(eq(usersTable.id, bet.userId));
 
           await tx.insert(settlementLogsTable).values({
@@ -417,8 +601,8 @@ export async function autoSettlePendingBets(): Promise<void> {
             userId: bet.userId,
             oldStatus: "pending",
             newStatus: "won",
-            payout: bet.potentialWin,
-            message: `Auto-settled: all ${selections.length} leg(s) won`,
+            payout: payoutStr,
+            message: `Auto-settled: settled with ${outcomes.filter(o => o === "void").length} void leg(s)`,
           });
         });
 
@@ -437,6 +621,72 @@ export async function autoSettlePendingBets(): Promise<void> {
     }
   } catch (err) {
     logger.error({ err }, "Auto-settlement worker error");
+  }
+}
+
+async function hydrateSettledBetSelections(): Promise<void> {
+  try {
+    const cutoff = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+    const lostBets = await db
+      .select({
+        id: betsTable.id,
+        matchId: betsTable.matchId,
+        selections: betsTable.selections,
+        createdAt: betsTable.createdAt,
+      })
+      .from(betsTable)
+      .where(and(eq(betsTable.status, "lost"), gte(betsTable.createdAt, cutoff)))
+      .orderBy(desc(betsTable.createdAt))
+      .limit(200);
+
+    if (lostBets.length === 0) return;
+
+    for (const bet of lostBets) {
+      const selections = bet.selections as SelectionRecord[];
+      if (!Array.isArray(selections) || selections.length === 0) continue;
+
+      const isSingle = selections.length === 1;
+      let changed = false;
+
+      const next = selections.map((sel) => {
+        const mId = sel.matchId ?? (isSingle ? bet.matchId : undefined);
+        if (!mId) return sel;
+        const r = finishedMatchResults.get(mId);
+        if (!r) return sel;
+
+        const needsOutcome = sel.outcome == null;
+        const needsScore = sel.finalScore == null;
+        if (!needsOutcome && !needsScore) return sel;
+
+        const ht = typeof r.htHome === "number" && typeof r.htAway === "number"
+          ? { htHome: r.htHome, htAway: r.htAway }
+          : undefined;
+
+        changed = true;
+        return {
+          ...sel,
+          finalScore: needsScore ? { home: r.home, away: r.away } : sel.finalScore,
+          htScore: sel.htScore ?? ht,
+          outcome: needsOutcome
+            ? scoreOutcomeForSel(sel, { home: r.home, away: r.away }, ht, {
+                cornersTotal: r.cornersTotal,
+                cardsTotal: r.cardsTotal,
+                firstGoal: r.firstGoal,
+                extras: r.extras,
+              })
+            : sel.outcome,
+        };
+      });
+
+      if (!changed) continue;
+
+      await db
+        .update(betsTable)
+        .set({ selections: next })
+        .where(eq(betsTable.id, bet.id));
+    }
+  } catch (err) {
+    logger.error({ err }, "Hydrate settled bet selections error");
   }
 }
 
@@ -484,6 +734,7 @@ async function expireStalePendingBets(): Promise<void> {
             .returning({ id: betsTable.id });
 
           if (rows.length === 0) return; // already settled elsewhere
+          await tx.delete(cashoutStatesTable).where(eq(cashoutStatesTable.betId, bet.id));
 
           // Atomic SQL addition — stake refund, no read-then-write race
           await tx
@@ -537,6 +788,8 @@ export function startSettlementWorker(): void {
       ]);
       // Settle bets whose results are now known
       await autoSettlePendingBets();
+      // Enrich early-loss bets with per-leg scores/outcomes when remaining matches finish
+      await hydrateSettledBetSelections();
       // Void and refund bets with no data after 72 h
       await expireStalePendingBets();
     } catch (err) {

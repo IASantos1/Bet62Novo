@@ -112,6 +112,58 @@ export async function initDb(): Promise<void> {
         message    TEXT,
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       );
+
+      CREATE TABLE IF NOT EXISTS match_results (
+        match_id      TEXT PRIMARY KEY,
+        sport         TEXT NOT NULL,
+        home          INTEGER,
+        away          INTEGER,
+        ht_home       INTEGER,
+        ht_away       INTEGER,
+        home_team     TEXT,
+        away_team     TEXT,
+        corners_total INTEGER,
+        cards_total   INTEGER,
+        first_goal    TEXT,
+        extras        JSONB,
+        finished_at   TIMESTAMPTZ,
+        created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+
+      CREATE TABLE IF NOT EXISTS cashout_states (
+        bet_id            INTEGER PRIMARY KEY REFERENCES bets(id) ON DELETE CASCADE,
+        unfavorable_since TIMESTAMPTZ NOT NULL,
+        reason            TEXT,
+        updated_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+
+      CREATE TABLE IF NOT EXISTS kyc_documents (
+        id           SERIAL PRIMARY KEY,
+        user_id      INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        kind         TEXT NOT NULL,
+        file_name    TEXT NOT NULL,
+        mime_type    TEXT NOT NULL,
+        file_size    INTEGER NOT NULL,
+        storage_path TEXT NOT NULL,
+        status       TEXT NOT NULL DEFAULT 'pending',
+        created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        reviewed_at  TIMESTAMPTZ
+      );
+
+      ALTER TABLE match_results ADD COLUMN IF NOT EXISTS home_team     TEXT;
+      ALTER TABLE match_results ADD COLUMN IF NOT EXISTS away_team     TEXT;
+      ALTER TABLE match_results ADD COLUMN IF NOT EXISTS corners_total INTEGER;
+      ALTER TABLE match_results ADD COLUMN IF NOT EXISTS cards_total   INTEGER;
+      ALTER TABLE match_results ADD COLUMN IF NOT EXISTS first_goal    TEXT;
+      ALTER TABLE match_results ADD COLUMN IF NOT EXISTS extras        JSONB;
+      ALTER TABLE match_results ADD COLUMN IF NOT EXISTS finished_at   TIMESTAMPTZ;
+      ALTER TABLE match_results ADD COLUMN IF NOT EXISTS updated_at    TIMESTAMPTZ;
+
+      ALTER TABLE cashout_states ADD COLUMN IF NOT EXISTS reason            TEXT;
+      ALTER TABLE cashout_states ADD COLUMN IF NOT EXISTS updated_at        TIMESTAMPTZ;
+
+      ALTER TABLE kyc_documents ADD COLUMN IF NOT EXISTS reviewed_at        TIMESTAMPTZ;
     `);
 
     console.info("[db/init] Schema initialisation complete.");

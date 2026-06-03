@@ -1,7 +1,10 @@
 import { Router, type IRouter, type Response } from "express";
-import { db, usersTable } from "@workspace/db";
+import { db } from "@workspace/db";
+import { kycDocumentsTable, usersTable } from "@workspace/db/schema";
 import { eq } from "drizzle-orm";
 import { authMiddleware, type AuthRequest } from "../middlewares/auth";
+import fs from "fs";
+import path from "path";
 
 const router: IRouter = Router();
 
@@ -154,6 +157,81 @@ router.post("/self-exclude", authMiddleware, async (req: AuthRequest, res: Respo
       .returning();
 
     res.json({ selfExcludedUntil: updated.selfExcludedUntil });
+  } catch {
+    res.status(500).json({ error: "Erro interno" });
+  }
+});
+
+router.post("/kyc/upload", authMiddleware, async (req: AuthRequest, res: Response): Promise<void> => {
+  const { kind, files } = req.body as {
+    kind?: string;
+    files?: Array<{ fileName?: string; mimeType?: string; base64?: string }>;
+  };
+
+  const validKinds = ["id", "address"];
+  if (!kind || !validKinds.includes(kind)) {
+    res.status(400).json({ error: "Tipo inválido. Use: id, address." });
+    return;
+  }
+
+  if (!Array.isArray(files) || files.length === 0 || files.length > 4) {
+    res.status(400).json({ error: "Envie entre 1 e 4 arquivos." });
+    return;
+  }
+
+  const userId = req.user!.id;
+  const uploadRoot = path.resolve(
+    (globalThis as Record<string, unknown>).__dirname as string ?? __dirname,
+    "../uploads/kyc",
+  );
+  fs.mkdirSync(uploadRoot, { recursive: true });
+
+  try {
+    const savedDocs: Array<{ id: number; storagePath: string }> = [];
+
+    for (const f of files) {
+      const fileName = String(f.fileName ?? "documento").replace(/[\/\\]/g, "_").slice(0, 80);
+      const mimeType = String(f.mimeType ?? "application/octet-stream").slice(0, 120);
+      const base64 = String(f.base64 ?? "");
+      if (!base64 || base64.length < 16) {
+        res.status(400).json({ error: "Arquivo inválido (base64 ausente)." });
+        return;
+      }
+
+      const buf = Buffer.from(base64, "base64");
+      if (!buf || buf.length === 0) {
+        res.status(400).json({ error: "Arquivo inválido." });
+        return;
+      }
+      if (buf.length > 5 * 1024 * 1024) {
+        res.status(400).json({ error: "Arquivo muito grande. Máximo 5MB por arquivo." });
+        return;
+      }
+
+      const storagePath = path.join(uploadRoot, `${userId}_${Date.now()}_${Math.random().toString(16).slice(2)}_${fileName}`);
+      fs.writeFileSync(storagePath, buf);
+
+      const [doc] = await db
+        .insert(kycDocumentsTable)
+        .values({
+          userId,
+          kind,
+          fileName,
+          mimeType,
+          fileSize: buf.length,
+          storagePath,
+          status: "pending",
+        })
+        .returning({ id: kycDocumentsTable.id, storagePath: kycDocumentsTable.storagePath });
+      savedDocs.push(doc);
+    }
+
+    await db
+      .update(usersTable)
+      .set({ kycStatus: "pending", kycSubmittedAt: new Date() })
+      .where(eq(usersTable.id, userId));
+
+    res.json({ ok: true, documents: savedDocs });
   } catch {
     res.status(500).json({ error: "Erro interno" });
   }

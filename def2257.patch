@@ -1,0 +1,153 @@
+From def2257c8ec50bef5f153345bd108e0e3a2c3f33 Mon Sep 17 00:00:00 2001
+From: IASantos1 <IASantos1@users.noreply.github.com>
+Date: Wed, 3 Jun 2026 21:05:00 +0000
+Subject: [PATCH] Fix resolved lost bets leg outcomes and scores
+
+---
+ artifacts/api-server/src/settlement.ts     | 70 +++++++++++++++++++++-
+ artifacts/bet62-mobile/app/(tabs)/bets.tsx |  3 +-
+ artifacts/bet62/src/pages/home.tsx         |  8 ++-
+ 3 files changed, 76 insertions(+), 5 deletions(-)
+
+diff --git a/artifacts/api-server/src/settlement.ts b/artifacts/api-server/src/settlement.ts
+index 99ddabf..00079b4 100644
+--- a/artifacts/api-server/src/settlement.ts
++++ b/artifacts/api-server/src/settlement.ts
+@@ -1,5 +1,5 @@
+ import { db, betsTable, cashoutStatesTable, usersTable, settlementLogsTable } from "@workspace/db";
+-import { eq, and, lt, sql } from "drizzle-orm";
++import { eq, and, lt, sql, gte, desc } from "drizzle-orm";
+ import { logger } from "./lib/logger";
+ import { ensureFinishedMatchResult, finishedMatchResults, scanDailyForFinished, scanV2AllSportsForFinished } from "./routes/matches";
+ 
+@@ -624,6 +624,72 @@ export async function autoSettlePendingBets(): Promise<void> {
+   }
+ }
+ 
++async function hydrateSettledBetSelections(): Promise<void> {
++  try {
++    const cutoff = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
++    const lostBets = await db
++      .select({
++        id: betsTable.id,
++        matchId: betsTable.matchId,
++        selections: betsTable.selections,
++        createdAt: betsTable.createdAt,
++      })
++      .from(betsTable)
++      .where(and(eq(betsTable.status, "lost"), gte(betsTable.createdAt, cutoff)))
++      .orderBy(desc(betsTable.createdAt))
++      .limit(200);
++
++    if (lostBets.length === 0) return;
++
++    for (const bet of lostBets) {
++      const selections = bet.selections as SelectionRecord[];
++      if (!Array.isArray(selections) || selections.length === 0) continue;
++
++      const isSingle = selections.length === 1;
++      let changed = false;
++
++      const next = selections.map((sel) => {
++        const mId = sel.matchId ?? (isSingle ? bet.matchId : undefined);
++        if (!mId) return sel;
++        const r = finishedMatchResults.get(mId);
++        if (!r) return sel;
++
++        const needsOutcome = sel.outcome == null;
++        const needsScore = sel.finalScore == null;
++        if (!needsOutcome && !needsScore) return sel;
++
++        const ht = typeof r.htHome === "number" && typeof r.htAway === "number"
++          ? { htHome: r.htHome, htAway: r.htAway }
++          : undefined;
++
++        changed = true;
++        return {
++          ...sel,
++          finalScore: needsScore ? { home: r.home, away: r.away } : sel.finalScore,
++          htScore: sel.htScore ?? ht,
++          outcome: needsOutcome
++            ? scoreOutcomeForSel(sel, { home: r.home, away: r.away }, ht, {
++                cornersTotal: r.cornersTotal,
++                cardsTotal: r.cardsTotal,
++                firstGoal: r.firstGoal,
++                extras: r.extras,
++              })
++            : sel.outcome,
++        };
++      });
++
++      if (!changed) continue;
++
++      await db
++        .update(betsTable)
++        .set({ selections: next })
++        .where(eq(betsTable.id, bet.id));
++    }
++  } catch (err) {
++    logger.error({ err }, "Hydrate settled bet selections error");
++  }
++}
++
+ /**
+  * Void and refund any pending bets older than STALE_THRESHOLD_MS where no
+  * match result has been found. This prevents bets from staying pending forever
+@@ -722,6 +788,8 @@ export function startSettlementWorker(): void {
+       ]);
+       // Settle bets whose results are now known
+       await autoSettlePendingBets();
++      // Enrich early-loss bets with per-leg scores/outcomes when remaining matches finish
++      await hydrateSettledBetSelections();
+       // Void and refund bets with no data after 72 h
+       await expireStalePendingBets();
+     } catch (err) {
+diff --git a/artifacts/bet62-mobile/app/(tabs)/bets.tsx b/artifacts/bet62-mobile/app/(tabs)/bets.tsx
+index 9e2c374..b17d073 100644
+--- a/artifacts/bet62-mobile/app/(tabs)/bets.tsx
++++ b/artifacts/bet62-mobile/app/(tabs)/bets.tsx
+@@ -192,12 +192,13 @@ function BetCard({ bet, token, onCashout }: { bet: Bet; token: string | null; on
+           let iconBg = "transparent";
+           let showCircle = false;
+ 
+-          const selOutcome = sel.outcome ?? (isWon ? "won" : isLost ? "lost" : null);
++          const selOutcome = sel.outcome ?? null;
+           if (isCashedOut) { iconName = "cash-outline"; iconColor = "#fff"; iconBg = "rgba(251,191,36,0.7)"; showCircle = true; }
+           else if (isVoided) { iconName = "lock-closed-outline"; iconColor = "#fff"; iconBg = "rgba(59,130,246,0.6)"; showCircle = true; }
+           else if (selOutcome === "won") { iconName = "checkmark"; iconColor = "#fff"; iconBg = "#22c55e"; showCircle = true; }
+           else if (selOutcome === "lost") { iconName = "close"; iconColor = "#fff"; iconBg = "rgba(0,0,0,0.3)"; showCircle = true; }
+           else if (selOutcome === "void") { iconName = "remove"; iconColor = "#fff"; iconBg = "rgba(156,163,175,0.55)"; showCircle = true; }
++          else if (isWon || isLost) { iconName = "time-outline"; iconColor = "#fff"; iconBg = "rgba(156,163,175,0.35)"; showCircle = true; }
+ 
+           return (
+             <View key={i} style={{ flexDirection: "row", alignItems: "flex-start", paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: dividerColor, gap: 10 }}>
+diff --git a/artifacts/bet62/src/pages/home.tsx b/artifacts/bet62/src/pages/home.tsx
+index d47b760..372ce75 100644
+--- a/artifacts/bet62/src/pages/home.tsx
++++ b/artifacts/bet62/src/pages/home.tsx
+@@ -5748,7 +5748,7 @@ export default function Home() {
+       if (out === "lost") return "red";
+     }
+     if (betStatus === "won") return "green";
+-    if (betStatus === "lost") return "red";
++    if (betStatus === "lost") return "pending";
+     // Pending: check live match for tentative state
+     const lm = findLiveMatchForSel(sel);
+     if (!lm) return "pending";
+@@ -9655,9 +9655,11 @@ export default function Home() {
+                                 if (isLost) {
+                                   leftIcon = outcome === "void"
+                                     ? <div className="w-6 h-6 rounded-full bg-zinc-700/40 border border-white/20 flex items-center justify-center shrink-0"><span className="text-white text-[11px] font-black leading-none">—</span></div>
+-                                    : outcome !== "red"
++                                    : outcome === "green"
+                                     ? <div className="w-6 h-6 rounded-full bg-white/30 flex items-center justify-center shrink-0"><Check size={13} className="text-white" strokeWidth={3} /></div>
+-                                    : <div className="w-6 h-6 rounded-full bg-red-950/60 border border-white/20 flex items-center justify-center shrink-0"><X size={13} className="text-white" strokeWidth={2.5} /></div>;
++                                    : outcome === "red"
++                                    ? <div className="w-6 h-6 rounded-full bg-red-950/60 border border-white/20 flex items-center justify-center shrink-0"><X size={13} className="text-white" strokeWidth={2.5} /></div>
++                                    : <div className="w-6 h-6 rounded-full bg-zinc-800/60 border border-white/20 flex items-center justify-center shrink-0"><Clock size={13} className="text-white" /></div>;
+                                 } else if (isWon) {
+                                   leftIcon = outcome === "void"
+                                     ? <div className="w-6 h-6 rounded-full bg-zinc-200 border border-zinc-300 flex items-center justify-center shrink-0"><span className="text-zinc-600 text-[11px] font-black leading-none">—</span></div>
+-- 
+2.43.0
+

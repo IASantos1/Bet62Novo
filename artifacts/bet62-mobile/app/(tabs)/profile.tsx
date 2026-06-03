@@ -1,5 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
+import * as ImagePicker from "expo-image-picker";
 import * as LocalAuthentication from "expo-local-authentication";
 import * as Linking from "expo-linking";
 import { router } from "expo-router";
@@ -76,6 +77,7 @@ export default function ProfileScreen() {
   const [showWithdraw, setShowWithdraw] = useState(false);
   const [biometricAvailable, setBiometricAvailable] = useState(false);
   const [modalKyc, setModalKyc] = useState(false);
+  const [kycUploading, setKycUploading] = useState<null | "id" | "address">(null);
   const [promoNotif, setPromoNotif] = useState<"freebets10" | "freebets20" | null>(null);
   const promoAnim = useRef(new Animated.Value(0)).current;
 
@@ -166,6 +168,62 @@ export default function ProfileScreen() {
       Alert.alert("Erro", err instanceof Error ? err.message : "Falha no pedido de levantamento.");
     } finally {
       setWithdrawLoading(false);
+    }
+  }
+
+  async function pickAndUploadKyc(kind: "id" | "address") {
+    if (!token) { router.push("/(auth)/login"); return; }
+    try {
+      setKycUploading(kind);
+      const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (perm.status !== "granted") {
+        Alert.alert("Permissão necessária", "Ativa o acesso às fotos para anexar documentos.");
+        return;
+      }
+
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        base64: true,
+        quality: 0.9,
+        allowsMultipleSelection: true,
+        selectionLimit: 4,
+      });
+
+      if (result.canceled) return;
+
+      const assets = result.assets.slice(0, 4);
+      const files = assets.map((a, idx) => ({
+        fileName: a.fileName ?? `documento_${idx + 1}.jpg`,
+        mimeType: a.mimeType ?? "image/jpeg",
+        base64: a.base64,
+      }));
+
+      if (files.some(f => !f.base64)) {
+        Alert.alert("Erro", "Não foi possível ler o ficheiro. Tenta novamente.");
+        return;
+      }
+
+      const res = await fetch(`${API_BASE}/profile/kyc/upload`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ kind, files }),
+      });
+
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        Alert.alert("Erro", (data as { error?: string }).error ?? "Falha no upload dos documentos.");
+        return;
+      }
+
+      await refreshUser();
+      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      Alert.alert("Enviado", "Documentos submetidos com sucesso. Estado: Em análise.");
+      setModalKyc(false);
+    } catch (err: unknown) {
+      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      Alert.alert("Erro", err instanceof Error ? err.message : "Falha no upload dos documentos.");
+    } finally {
+      setKycUploading(null);
     }
   }
 
@@ -336,7 +394,7 @@ export default function ProfileScreen() {
           {[
             "Prepara o teu Cartão de Cidadão ou Passaporte (frente e verso)",
             "Prepara um comprovativo de morada recente (fatura ou extrato bancário)",
-            `Envia para o email com o teu ID: ${memberId}`,
+            `Confirma o teu ID: ${memberId}`,
             "Aguarda confirmação por email (até 48h úteis)",
           ].map((step, i) => (
             <View key={i} style={s.kycStep}>
@@ -346,14 +404,23 @@ export default function ProfileScreen() {
           ))}
           <Pressable
             style={({ pressed }) => [s.mailBtn, { opacity: pressed ? 0.8 : 1 }]}
-            onPress={() => {
-              const subject = encodeURIComponent(`KYC Verificação — ${memberId}`);
-              const body = encodeURIComponent(`Olá,\n\nEnvio os meus documentos para verificação.\n\nID de Membro: ${memberId}\n\nDocumentos em anexo.\n\nCom os melhores cumprimentos`);
-              Linking.openURL(`mailto:kyc@bet62.pt?subject=${subject}&body=${body}`);
-            }}
+            disabled={kycUploading !== null}
+            onPress={() => pickAndUploadKyc("id")}
           >
-            <Ionicons name="mail-outline" size={18} color="#fff" />
-            <Text style={s.mailBtnText}>Enviar documentos por email</Text>
+            {kycUploading === "id"
+              ? <ActivityIndicator color="#fff" />
+              : <Ionicons name="cloud-upload-outline" size={18} color="#fff" />}
+            <Text style={s.mailBtnText}>Enviar Documento (ID)</Text>
+          </Pressable>
+          <Pressable
+            style={({ pressed }) => [s.primaryBtn, { backgroundColor: colors.muted, opacity: pressed ? 0.8 : 1 }]}
+            disabled={kycUploading !== null}
+            onPress={() => pickAndUploadKyc("address")}
+          >
+            {kycUploading === "address"
+              ? <ActivityIndicator color={colors.foreground} />
+              : <Ionicons name="cloud-upload-outline" size={18} color={colors.foreground} />}
+            <Text style={[s.primaryBtnText, { color: colors.foreground }]}>Enviar Morada</Text>
           </Pressable>
         </AccordionSection>
 
@@ -413,7 +480,7 @@ export default function ProfileScreen() {
           ))}
           <Pressable
             style={({ pressed }) => [s.primaryBtn, { backgroundColor: "#ef444415", borderWidth: 1, borderColor: "#ef444430", opacity: pressed ? 0.8 : 1 }]}
-            onPress={() => Alert.alert("Autoexclusão", "Para solicitar autoexclusão, envia um email para suporte@bet62.pt com o assunto 'Autoexclusão'.", [{ text: "OK" }, { text: "Enviar email", onPress: () => Linking.openURL("mailto:suporte@bet62.pt?subject=Autoexclus%C3%A3o") }])}
+            onPress={() => Alert.alert("Autoexclusão", "Para solicitar autoexclusão, envia um email para suportebet62@gmail.com com o assunto 'Autoexclusão'.", [{ text: "OK" }, { text: "Enviar email", onPress: () => Linking.openURL("mailto:suportebet62@gmail.com?subject=Autoexclus%C3%A3o") }])}
           >
             <Ionicons name="ban-outline" size={16} color="#ef4444" />
             <Text style={[s.primaryBtnText, { color: "#ef4444" }]}>Solicitar Autoexclusão</Text>
@@ -498,9 +565,9 @@ export default function ProfileScreen() {
         {/* ── Suporte e Assistência ── */}
         <AccordionSection icon="help-circle-outline" label="Suporte e Assistência">
           <Text style={s.infoText}>A nossa equipa está disponível 24/7 para te ajudar.</Text>
-          <Pressable style={({ pressed }) => [s.primaryBtn, { opacity: pressed ? 0.8 : 1 }]} onPress={() => Linking.openURL("mailto:suporte@bet62.pt")}>
+          <Pressable style={({ pressed }) => [s.primaryBtn, { opacity: pressed ? 0.8 : 1 }]} onPress={() => Linking.openURL("mailto:suportebet62@gmail.com")}>
             <Ionicons name="mail-outline" size={18} color="#fff" />
-            <Text style={s.primaryBtnText}>Email: suporte@bet62.pt</Text>
+            <Text style={s.primaryBtnText}>Email: suportebet62@gmail.com</Text>
           </Pressable>
           <Pressable style={({ pressed }) => [s.primaryBtn, { backgroundColor: "#25D36615", borderWidth: 1, borderColor: "#25D36630", opacity: pressed ? 0.8 : 1 }]} onPress={() => Linking.openURL("https://wa.me/351910000000")}>
             <Ionicons name="logo-whatsapp" size={18} color="#25D366" />
@@ -597,13 +664,25 @@ export default function ProfileScreen() {
                   <View style={[s.kycBadge, { backgroundColor: kycBadgeColor + "22", marginBottom: 4 }]}>
                     <Text style={{ fontSize: 12, fontFamily: "Inter_600SemiBold", color: kycBadgeColor }}>Estado: {kycBadgeLabel}</Text>
                   </View>
-                  <Pressable style={({ pressed }) => [s.mailBtn, { opacity: pressed ? 0.8 : 1 }]} onPress={() => {
-                    const subject = encodeURIComponent(`KYC Verificação — ${memberId}`);
-                    const body = encodeURIComponent(`Olá,\n\nEnvio os meus documentos para verificação.\n\nID de Membro: ${memberId}\n\nCom os melhores cumprimentos`);
-                    Linking.openURL(`mailto:kyc@bet62.pt?subject=${subject}&body=${body}`);
-                  }}>
-                    <Ionicons name="mail-outline" size={18} color="#fff" />
-                    <Text style={s.mailBtnText}>Enviar documentos por email</Text>
+                  <Pressable
+                    style={({ pressed }) => [s.mailBtn, { opacity: pressed ? 0.8 : 1 }]}
+                    disabled={kycUploading !== null}
+                    onPress={() => pickAndUploadKyc("id")}
+                  >
+                    {kycUploading === "id"
+                      ? <ActivityIndicator color="#fff" />
+                      : <Ionicons name="cloud-upload-outline" size={18} color="#fff" />}
+                    <Text style={s.mailBtnText}>Enviar Documento (ID)</Text>
+                  </Pressable>
+                  <Pressable
+                    style={({ pressed }) => [s.primaryBtn, { backgroundColor: colors.muted, opacity: pressed ? 0.8 : 1 }]}
+                    disabled={kycUploading !== null}
+                    onPress={() => pickAndUploadKyc("address")}
+                  >
+                    {kycUploading === "address"
+                      ? <ActivityIndicator color={colors.foreground} />
+                      : <Ionicons name="cloud-upload-outline" size={18} color={colors.foreground} />}
+                    <Text style={[s.primaryBtnText, { color: colors.foreground }]}>Enviar Morada</Text>
                   </Pressable>
                   <Pressable style={({ pressed }) => [s.primaryBtn, { backgroundColor: colors.muted, marginTop: 4, opacity: pressed ? 0.8 : 1 }]} onPress={() => setModalKyc(false)}>
                     <Text style={[s.primaryBtnText, { color: colors.foreground }]}>Fechar</Text>

@@ -2,6 +2,8 @@ import { Router, type IRouter } from "express";
 import { WebSocketServer, type WebSocket as WsClient } from "ws";
 import { CONFIG } from "../lib/config";
 import { logger } from "../lib/logger";
+import { db, matchResultsTable } from "@workspace/db";
+import { eq } from "drizzle-orm";
 
 const router: IRouter = Router();
 
@@ -199,6 +201,7 @@ export type LiveMatchState = {
     etScore?: [number, number];          // football: extra-time score [homeET, awayET]
     penScore?: [number, number];         // football: penalty shootout [homePen, awayPen]
     penBaseScore?: [number, number];     // football: score at start of penalty phase (to compute pen goals)
+    secondHalfKickoffSec?: number;
   };
 };
 
@@ -2530,14 +2533,241 @@ export const finishedMatchResults = new Map<string, {
   htAway?: number;   // half-time goals (away)
   homeTeam: string;
   awayTeam: string;
+  cornersTotal?: number;
+  cardsTotal?: number;
+  firstGoal?: "home" | "away" | "none";
+  extras?: unknown;
   finishedAt: number; // ms
 }>();
 
 function _pruneFinishedResults(): void {
-  const cutoff = Date.now() - 4 * 60 * 60 * 1000; // 4 h
+  const cutoff = Date.now() - 96 * 60 * 60 * 1000;
   for (const [id, r] of finishedMatchResults.entries()) {
     if (r.finishedAt < cutoff) finishedMatchResults.delete(id);
   }
+}
+
+export async function ensureFinishedMatchResult(matchId: string): Promise<boolean> {
+  if (!matchId) return false;
+  if (finishedMatchResults.has(matchId)) return true;
+
+  try {
+    if (db) {
+      const [row] = await db.select().from(matchResultsTable).where(eq(matchResultsTable.matchId, matchId)).limit(1);
+      if (row && typeof row.home === "number" && typeof row.away === "number") {
+        finishedMatchResults.set(matchId, {
+          home: row.home,
+          away: row.away,
+          htHome: row.htHome ?? undefined,
+          htAway: row.htAway ?? undefined,
+          homeTeam: row.homeTeam ?? "",
+          awayTeam: row.awayTeam ?? "",
+          cornersTotal: row.cornersTotal ?? undefined,
+          cardsTotal: row.cardsTotal ?? undefined,
+          firstGoal: (row.firstGoal as "home" | "away" | "none" | null) ?? undefined,
+          extras: row.extras ?? undefined,
+          finishedAt: row.finishedAt ? row.finishedAt.getTime() : Date.now(),
+        });
+        return true;
+      }
+    }
+  } catch {
+  }
+
+  const fetchFootballExtras = async (id: number): Promise<{
+    cornersTotal?: number;
+    cardsTotal?: number;
+    firstGoal?: "home" | "away" | "none";
+  } | null> => {
+    try {
+      const resp = await fetch(`${SAPI_V2_FOOTBALL}/match/${id}/statistics`, {
+        signal: AbortSignal.timeout(9000),
+        headers: sapiHeaders(),
+      });
+      if (!resp.ok) return null;
+      const data = await resp.json() as Record<string, unknown>;
+      const get = (o: unknown, path: string[]): unknown => {
+        let cur: unknown = o;
+        for (const k of path) {
+          if (!cur || typeof cur !== "object") return undefined;
+          cur = (cur as Record<string, unknown>)[k];
+        }
+        return cur;
+      };
+      const toNum = (v: unknown): number | undefined => {
+        if (typeof v === "number" && Number.isFinite(v)) return v;
+        if (typeof v === "string" && v.trim() !== "") {
+          const n = Number(v);
+          return Number.isFinite(n) ? n : undefined;
+        }
+        return undefined;
+      };
+      const cornersHome = toNum(get(data, ["team_stats", "home", "corners", "total"])) ?? 0;
+      const cornersAway = toNum(get(data, ["team_stats", "away", "corners", "total"])) ?? 0;
+      const cornersTotal = cornersHome + cornersAway;
+
+      const ev = get(data, ["event_summary"]) as Record<string, unknown> | undefined;
+      const toArr = (v: unknown): Record<string, unknown>[] => {
+        if (!v) return [];
+        if (Array.isArray(v)) return v.filter(x => x && typeof x === "object") as Record<string, unknown>[];
+        if (typeof v === "object") return [v as Record<string, unknown>];
+        return [];
+      };
+      const countCards = (side: "home" | "away"): number => {
+        const s = ev?.[side] as Record<string, unknown> | undefined;
+        const y = toArr((s?.["yellowcards"] as Record<string, unknown> | undefined)?.["event"]);
+        const r = toArr((s?.["redcards"] as Record<string, unknown> | undefined)?.["event"]);
+        return y.length + r.length;
+      };
+      const cardsTotal = countCards("home") + countCards("away");
+
+      const parseMinute = (e: Record<string, unknown>): number => {
+        const m = toNum(e["minute"]) ?? 0;
+        const ex = toNum(e["extra_min"]) ?? 0;
+        return m * 100 + ex;
+      };
+      const minOrNull = (vals: number[]): number | null => vals.length ? vals.reduce((a, b) => Math.min(a, b), vals[0]!) : null;
+      const homeGoalsArr = (() => {
+        const s = ev?.["home"] as Record<string, unknown> | undefined;
+        const goals = toArr((s?.["goals"] as Record<string, unknown> | undefined)?.["event"]);
+        return goals.map(parseMinute).filter(n => Number.isFinite(n));
+      })();
+      const awayGoalsArr = (() => {
+        const s = ev?.["away"] as Record<string, unknown> | undefined;
+        const goals = toArr((s?.["goals"] as Record<string, unknown> | undefined)?.["event"]);
+        return goals.map(parseMinute).filter(n => Number.isFinite(n));
+      })();
+      const fgH = minOrNull(homeGoalsArr);
+      const fgA = minOrNull(awayGoalsArr);
+      const firstGoal =
+        fgH == null && fgA == null ? "none"
+        : fgH != null && fgA == null ? "home"
+        : fgH == null && fgA != null ? "away"
+        : (fgH as number) <= (fgA as number) ? "home"
+        : "away";
+
+      return {
+        cornersTotal: Number.isFinite(cornersTotal) ? cornersTotal : undefined,
+        cardsTotal: Number.isFinite(cardsTotal) ? cardsTotal : undefined,
+        firstGoal,
+      };
+    } catch {
+      return null;
+    }
+  };
+
+  const parse = (): { sport: SportKey; prefix: string; id: number } | null => {
+    const m = matchId.match(/^(football-v2|bball-v2|hockey-v2|tennis-v2|baseball-v2|mlb-v2)-(\d+)$/);
+    if (!m) return null;
+    const prefix = m[1]!;
+    const id = Number(m[2]);
+    if (!Number.isFinite(id) || id <= 0) return null;
+    const sport =
+      prefix === "football-v2" ? "football" :
+      prefix === "bball-v2" ? "basketball" :
+      prefix === "hockey-v2" ? "hockey" :
+      prefix === "tennis-v2" ? "tennis" :
+      "baseball";
+    return { sport, prefix, id };
+  };
+
+  const parsed = parse();
+  if (!parsed) return false;
+
+  const now = Date.now();
+  const tryEvents = async (events: unknown[]): Promise<boolean> => {
+    for (const raw of events) {
+      const ev = raw as SAPIV2Event;
+      if (Number(ev.id) !== parsed.id) continue;
+      const st = (ev.status as Record<string, unknown> | null | undefined);
+      const stType = typeof st?.["type"] === "string" ? (st["type"] as string).toLowerCase() : "";
+      const code = v2StatusCode(ev);
+      const isFinished = stType === "finished" || code === 100;
+      if (!isFinished) return false;
+
+      const hS = typeof ev.homeScore === "object" && ev.homeScore !== null
+        ? (ev.homeScore as SAPIV2ScoreObj) : null;
+      const aS = typeof ev.awayScore === "object" && ev.awayScore !== null
+        ? (ev.awayScore as SAPIV2ScoreObj) : null;
+      const home = hS?.current ?? v2CurrentScore(ev.homeScore) ?? 0;
+      const away = aS?.current ?? v2CurrentScore(ev.awayScore) ?? 0;
+      const htHome = parsed.sport === "football" ? (typeof hS?.["period1"] === "number" ? hS["period1"] as number : undefined) : undefined;
+      const htAway = parsed.sport === "football" ? (typeof aS?.["period1"] === "number" ? aS["period1"] as number : undefined) : undefined;
+
+      const extras = parsed.sport === "football"
+        ? await fetchFootballExtras(parsed.id)
+        : null;
+
+      const fullRecord = {
+        home,
+        away,
+        htHome,
+        htAway,
+        homeTeam: v2TeamName(ev.homeTeam),
+        awayTeam: v2TeamName(ev.awayTeam),
+        cornersTotal: extras?.cornersTotal,
+        cardsTotal: extras?.cardsTotal,
+        firstGoal: extras?.firstGoal,
+        extras: { homeScore: ev.homeScore, awayScore: ev.awayScore },
+        finishedAt: now,
+      };
+
+      finishedMatchResults.set(matchId, fullRecord);
+      try {
+        if (db) {
+          await db.insert(matchResultsTable).values({
+            matchId,
+            sport: parsed.sport,
+            home: fullRecord.home,
+            away: fullRecord.away,
+            htHome: fullRecord.htHome ?? null,
+            htAway: fullRecord.htAway ?? null,
+            homeTeam: fullRecord.homeTeam,
+            awayTeam: fullRecord.awayTeam,
+            cornersTotal: fullRecord.cornersTotal ?? null,
+            cardsTotal: fullRecord.cardsTotal ?? null,
+            firstGoal: fullRecord.firstGoal ?? null,
+            extras: fullRecord.extras ?? null,
+            finishedAt: new Date(fullRecord.finishedAt),
+            updatedAt: new Date(),
+          }).onConflictDoUpdate({
+            target: matchResultsTable.matchId,
+            set: {
+              home: fullRecord.home,
+              away: fullRecord.away,
+              htHome: fullRecord.htHome ?? null,
+              htAway: fullRecord.htAway ?? null,
+              homeTeam: fullRecord.homeTeam,
+              awayTeam: fullRecord.awayTeam,
+              cornersTotal: fullRecord.cornersTotal ?? null,
+              cardsTotal: fullRecord.cardsTotal ?? null,
+              firstGoal: fullRecord.firstGoal ?? null,
+              extras: fullRecord.extras ?? null,
+              finishedAt: new Date(fullRecord.finishedAt),
+              updatedAt: new Date(),
+            },
+          });
+        }
+      } catch {
+      }
+      _pruneFinishedResults();
+      return true;
+    }
+    return false;
+  };
+
+  const last = await getV2EventsLast(parsed.sport, 120).catch(() => []);
+  if (await tryEvents(last)) return true;
+
+  const todayStr = new Date().toISOString().slice(0, 10);
+  const schedToday = await getScheduleV2(parsed.sport, todayStr).catch(() => []);
+  if (await tryEvents(schedToday as unknown[])) return true;
+
+  const y = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  const schedY = await getScheduleV2(parsed.sport, y).catch(() => []);
+  if (await tryEvents(schedY as unknown[])) return true;
+
+  return false;
 }
 
 /** Scan today's daily feed and add any finished matches to finishedMatchResults. */
@@ -2553,7 +2783,7 @@ export async function scanDailyForFinished(): Promise<void> {
         if (finishedMatchResults.has(m.main_id)) continue;
         const home = parseInt(m.home.goals) || 0;
         const away = parseInt(m.away.goals) || 0;
-        finishedMatchResults.set(m.main_id, {
+        const rec = {
           home,
           away,
           htHome: typeof m.ht?.home_goals === "number" ? m.ht.home_goals : undefined,
@@ -2561,7 +2791,41 @@ export async function scanDailyForFinished(): Promise<void> {
           homeTeam: m.home.name,
           awayTeam: m.away.name,
           finishedAt: Date.now(),
-        });
+        };
+        finishedMatchResults.set(m.main_id, rec);
+        try {
+          if (db) {
+            await db.insert(matchResultsTable).values({
+              matchId: m.main_id,
+              sport: "football",
+              home: rec.home,
+              away: rec.away,
+              htHome: rec.htHome ?? null,
+              htAway: rec.htAway ?? null,
+              homeTeam: rec.homeTeam,
+              awayTeam: rec.awayTeam,
+              cornersTotal: null,
+              cardsTotal: null,
+              firstGoal: null,
+              extras: null,
+              finishedAt: new Date(rec.finishedAt),
+              updatedAt: new Date(),
+            }).onConflictDoUpdate({
+              target: matchResultsTable.matchId,
+              set: {
+                home: rec.home,
+                away: rec.away,
+                htHome: rec.htHome ?? null,
+                htAway: rec.htAway ?? null,
+                homeTeam: rec.homeTeam,
+                awayTeam: rec.awayTeam,
+                finishedAt: new Date(rec.finishedAt),
+                updatedAt: new Date(),
+              },
+            });
+          }
+        } catch {
+        }
       }
     }
     _pruneFinishedResults();
@@ -4621,7 +4885,11 @@ async function getTennisAllV1(): Promise<V1TennisGame[]> {
   }
 }
 
-async function getTennisLiveV1(): Promise<V1TennisGame[]> {
+const TENNIS_LIVE_V1_TTL = 2000;
+let _tennisLiveV1Cache: { games: V1TennisGame[]; fetchedAt: number } | null = null;
+let _tennisLiveV1InFlight: Promise<V1TennisGame[]> | null = null;
+
+async function fetchTennisLiveV1(): Promise<V1TennisGame[]> {
   try {
     const resp = await fetch(`${SAPI_V1_TENNIS}/v1/tennis/live`, {
       signal: AbortSignal.timeout(8000),
@@ -4633,6 +4901,25 @@ async function getTennisLiveV1(): Promise<V1TennisGame[]> {
   } catch {
     return [];
   }
+}
+
+async function getTennisLiveV1(): Promise<V1TennisGame[]> {
+  const now = Date.now();
+  if (_tennisLiveV1Cache && now - _tennisLiveV1Cache.fetchedAt < TENNIS_LIVE_V1_TTL) return _tennisLiveV1Cache.games;
+  if (_tennisLiveV1Cache) {
+    if (!_tennisLiveV1InFlight) {
+      _tennisLiveV1InFlight = fetchTennisLiveV1()
+        .then(games => { _tennisLiveV1Cache = { games, fetchedAt: Date.now() }; return games; })
+        .finally(() => { _tennisLiveV1InFlight = null; });
+    }
+    return _tennisLiveV1Cache.games;
+  }
+  if (!_tennisLiveV1InFlight) {
+    _tennisLiveV1InFlight = fetchTennisLiveV1()
+      .then(games => { _tennisLiveV1Cache = { games, fetchedAt: Date.now() }; return games; })
+      .finally(() => { _tennisLiveV1InFlight = null; });
+  }
+  return _tennisLiveV1InFlight;
 }
 
 async function getBaseballTodayV2(): Promise<SAPIV2Event[]> {
@@ -4706,12 +4993,47 @@ export async function scanV2AllSportsForFinished(): Promise<void> {
           htHome, htAway,
           homeTeam: v2TeamName(ev.homeTeam),
           awayTeam: v2TeamName(ev.awayTeam),
+          extras: { homeScore: ev.homeScore, awayScore: ev.awayScore },
           finishedAt: now,
         };
 
         for (const p of prefix) {
           const id = `${p}-${ev.id}`;
           if (!finishedMatchResults.has(id)) finishedMatchResults.set(id, record);
+          try {
+            if (db) {
+              await db.insert(matchResultsTable).values({
+                matchId: id,
+                sport: isFootball ? "football" : p.startsWith("bball") ? "basketball" : p.startsWith("hockey") ? "hockey" : p.startsWith("tennis") ? "tennis" : "baseball",
+                home: record.home,
+                away: record.away,
+                htHome: record.htHome ?? null,
+                htAway: record.htAway ?? null,
+                homeTeam: record.homeTeam,
+                awayTeam: record.awayTeam,
+                cornersTotal: null,
+                cardsTotal: null,
+                firstGoal: null,
+                extras: record.extras ?? null,
+                finishedAt: new Date(record.finishedAt),
+                updatedAt: new Date(),
+              }).onConflictDoUpdate({
+                target: matchResultsTable.matchId,
+                set: {
+                  home: record.home,
+                  away: record.away,
+                  htHome: record.htHome ?? null,
+                  htAway: record.htAway ?? null,
+                  homeTeam: record.homeTeam,
+                  awayTeam: record.awayTeam,
+                  extras: record.extras ?? null,
+                  finishedAt: new Date(record.finishedAt),
+                  updatedAt: new Date(),
+                },
+              });
+            }
+          } catch {
+          }
         }
       }
     }
@@ -5303,7 +5625,13 @@ async function buildLiveMatches(): Promise<LiveMatchState[]> {
 
       const homeScore = m.home.goals === "?" ? 0 : parseInt(m.home.goals) || 0;
       const awayScore = m.away.goals === "?" ? 0 : parseInt(m.away.goals) || 0;
-      const minute = isHT ? 45 : isET ? 105 : parseInt(m.status) || 1;
+      const injMinute = parseInt(m.inj_minute) || 0;
+      const injTime = parseInt(m.inj_time) || 0;
+      const minuteBase = isHT ? 45 : isET ? 105 : parseInt(m.status) || 1;
+      const minuteRaw = injMinute > 0
+        ? Math.min(130, Math.max(1, injMinute + Math.max(0, injTime)))
+        : minuteBase;
+      const minute = existing ? Math.max(existing.minute, minuteRaw) : minuteRaw;
       const gameStatus = isHT ? "HT" : isET ? "ET" : parseInt(m.status) > 45 ? "2nd half" : "1st half";
 
       // Market suspension delays on goal (ms per market key)
@@ -5811,12 +6139,17 @@ async function buildUpcomingMatches(): Promise<UpcomingMatch[]> {
     if (seen.has(key)) continue;
     seen.add(key);
     filtered.push(ev);
-    if (filtered.length >= 200) break;
+    if (filtered.length >= 80) break;
   }
 
-  const oddsResults = await Promise.all(
-    filtered.map(ev => getPreMatchOddsV2("football", ev.id).catch(() => null))
-  );
+  const oddsResults: Array<V2PreMatchOdds | null> = new Array(filtered.length).fill(null);
+  const maxOddsLookups = Math.min(filtered.length, 30);
+  const batchSize = 10;
+  for (let i = 0; i < maxOddsLookups; i += batchSize) {
+    const slice = filtered.slice(i, i + batchSize);
+    const out = await Promise.all(slice.map(ev => getPreMatchOddsV2("football", ev.id).catch(() => null)));
+    for (let j = 0; j < out.length; j++) oddsResults[i + j] = out[j] ?? null;
+  }
 
   const results: UpcomingMatch[] = [];
   for (let i = 0; i < filtered.length; i++) {
@@ -6102,8 +6435,13 @@ function buildFootballLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
           // Allow up to 49' for first-half stoppage time
           minute = Math.min(49, Math.max(1, minsFromKickoff));
         } else if (statusStr === "2nd half") {
-          // Allow up to 99' so the clock keeps advancing in stoppage time
-          minute = Math.min(99, Math.max(46, minsFromKickoff - 15));
+          const shKickoff = liveMatchState.get(id)?._liveExtra?.secondHalfKickoffSec;
+          if (typeof shKickoff === "number" && Number.isFinite(shKickoff) && shKickoff > 0) {
+            const minsFromSecondHalf = Math.floor((now / 1000 - shKickoff) / 60);
+            minute = Math.min(99, Math.max(46, 46 + minsFromSecondHalf));
+          } else {
+            minute = Math.min(99, Math.max(46, minsFromKickoff - 15));
+          }
         } else {
           minute = Math.min(49, Math.max(1, minsFromKickoff));
         }
@@ -6178,6 +6516,13 @@ function buildFootballLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
       const penLiveExtra: LiveMatchState["_liveExtra"] = isPen
         ? { ...(existing._liveExtra ?? {}), penBaseScore: penBase, penScore: penGoals }
         : existing._liveExtra;
+      const shKickoffSec =
+        statusStr === "2nd half"
+          ? (existing.status !== "2nd half"
+              ? Math.floor(now / 1000)
+              : (existing._liveExtra?.secondHalfKickoffSec ?? Math.floor(now / 1000)))
+          : existing._liveExtra?.secondHalfKickoffSec;
+      const liveExtra = shKickoffSec ? { ...(penLiveExtra ?? {}), secondHalfKickoffSec: shKickoffSec } : penLiveExtra;
 
       // Helper: patch penExtra with real penalty odds into markets
       const withPen = (mkts: typeof existing.markets) =>
@@ -6199,7 +6544,7 @@ function buildFootballLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
           _baseMarkets: filteredBase,
           marketSuspension: susp,
           _suspensionReason: isVARStatus ? "REVISÃO AO VAR" : "GOLO!",
-          _liveExtra: penLiveExtra,
+          _liveExtra: liveExtra,
         };
         liveMatchState.set(id, applyTieredMarketDrift(updated, now));
       } else {
@@ -6237,7 +6582,7 @@ function buildFootballLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
             _baseMarkets: filteredBase,
             marketSuspension: susp,
             _suspensionReason: "REVISÃO AO VAR",
-            _liveExtra: penLiveExtra,
+            _liveExtra: liveExtra,
           };
           liveMatchState.set(id, applyTieredMarketDrift(updated, now));
         } else {
@@ -6250,7 +6595,7 @@ function buildFootballLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
             _baseMarkets: filteredBase,
             marketSuspension: susp,
             _suspensionReason: susp ? existing._suspensionReason : undefined,
-            _liveExtra: penLiveExtra,
+            _liveExtra: liveExtra,
           };
           liveMatchState.set(id, applyTieredMarketDrift(updated, now));
         }
@@ -6266,6 +6611,7 @@ function buildFootballLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
       const baseMarkets = filterLiveMarkets(rawMarkets, homeScore, awayScore, newStatus);
       // First time seen in penalties — store current score as base (0-0 penalties so far)
       const markets = isPen ? { ...baseMarkets, penExtra: makePenMarketsFromScore(0, 0) } : baseMarkets;
+      const shKickoffSec = statusStr === "2nd half" ? Math.floor(now / 1000) - Math.max(0, minute - 46) * 60 : undefined;
       const state: LiveMatchState = {
         id,
         home: homeTeam,
@@ -6285,7 +6631,9 @@ function buildFootballLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
         _baseOdds: baseOdds,
         _baseMarkets: markets,
         _oddsUpdatedAt: now,
-        _liveExtra: isPen ? { penBaseScore: [homeScore, awayScore] as [number, number], penScore: [0, 0] as [number, number] } : undefined,
+        _liveExtra: (isPen || shKickoffSec)
+          ? { ...(isPen ? { penBaseScore: [homeScore, awayScore] as [number, number], penScore: [0, 0] as [number, number] } : {}), ...(shKickoffSec ? { secondHalfKickoffSec: shKickoffSec } : {}) }
+          : undefined,
       };
       liveMatchState.set(id, state);
       result.push(state);
@@ -7016,10 +7364,8 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
   // The tennis API does not support v2 live/today endpoints (returns 404).
   // Primary source: v1/tennis/live (buildTennisLiveV1). The v2 path is kept as
   // a fallback for any future API upgrade that enables a v2 tennis live endpoint.
-  const [tennisV2Part, tennisV1LivePart] = await Promise.all([
-    Promise.resolve(buildTennisLiveV2(tennisEvents)),
-    buildTennisLiveV1(),
-  ]);
+  const tennisV2Part = buildTennisLiveV2(tennisEvents);
+  const tennisV1LivePart = await buildTennisLiveV1Cached();
   const allLiveIds = new Set([...tennisV2Part, ...tennisV1LivePart].map(m => String(m.id)));
   const todayStartedExtra = buildTennisLiveV2(
     (tennisTodayEvents ?? []).filter(ev => !allLiveIds.has(`tennis-v2-${ev.id}`))
@@ -7240,6 +7586,31 @@ async function buildTennisLiveV1(): Promise<LiveMatchState[]> {
   } catch {
     return [];
   }
+}
+
+let _tennisLiveV1StateCache: { matches: LiveMatchState[]; fetchedAt: number } | null = null;
+let _tennisLiveV1StateInFlight: Promise<LiveMatchState[]> | null = null;
+
+async function buildTennisLiveV1Cached(): Promise<LiveMatchState[]> {
+  const now = Date.now();
+  if (_tennisLiveV1StateCache && now - _tennisLiveV1StateCache.fetchedAt < TENNIS_LIVE_V1_TTL) return _tennisLiveV1StateCache.matches;
+  if (_tennisLiveV1StateCache) {
+    if (!_tennisLiveV1StateInFlight) {
+      _tennisLiveV1StateInFlight = buildTennisLiveV1()
+        .then(matches => { _tennisLiveV1StateCache = { matches, fetchedAt: Date.now() }; return matches; })
+        .finally(() => { _tennisLiveV1StateInFlight = null; });
+    }
+    return _tennisLiveV1StateCache.matches;
+  }
+  if (!_tennisLiveV1StateInFlight) {
+    _tennisLiveV1StateInFlight = buildTennisLiveV1()
+      .then(matches => { _tennisLiveV1StateCache = { matches, fetchedAt: Date.now() }; return matches; })
+      .finally(() => { _tennisLiveV1StateInFlight = null; });
+  }
+  return Promise.race([
+    _tennisLiveV1StateInFlight,
+    waitMs(1200).then(() => [] as LiveMatchState[]),
+  ]);
 }
 
 // ─── Tennis upcoming from V1 native API ───────────────────────────────────────
@@ -7515,11 +7886,10 @@ type UpcomingTopCache = {
   volleyball: UpcomingMatch[]; baseball: UpcomingMatch[]; fetchedAt: number;
 };
 let upcomingTopCache: UpcomingTopCache | null = null;
+let upcomingTopInFlight: Promise<UpcomingTopCache> | null = null;
 const UPCOMING_TOP_TTL = 60_000;
 
-async function getUpcomingAll(): Promise<UpcomingTopCache> {
-  const now = Date.now();
-  if (upcomingTopCache && now - upcomingTopCache.fetchedAt < UPCOMING_TOP_TTL) return upcomingTopCache;
+async function refreshUpcomingTop(): Promise<UpcomingTopCache> {
   const empty: UpcomingMatch[] = [];
   const [football, tennis, basketball, hockey, volleyball, baseball] = await Promise.all([
     buildUpcomingMatches().catch(() => empty),
@@ -7531,6 +7901,21 @@ async function getUpcomingAll(): Promise<UpcomingTopCache> {
   ]);
   upcomingTopCache = { football, tennis, basketball, hockey, volleyball, baseball, fetchedAt: Date.now() };
   return upcomingTopCache;
+}
+
+async function getUpcomingAll(): Promise<UpcomingTopCache> {
+  const now = Date.now();
+  if (upcomingTopCache && now - upcomingTopCache.fetchedAt < UPCOMING_TOP_TTL) return upcomingTopCache;
+  if (upcomingTopCache) {
+    if (!upcomingTopInFlight) {
+      upcomingTopInFlight = refreshUpcomingTop().finally(() => { upcomingTopInFlight = null; });
+    }
+    return upcomingTopCache;
+  }
+  if (!upcomingTopInFlight) {
+    upcomingTopInFlight = refreshUpcomingTop().finally(() => { upcomingTopInFlight = null; });
+  }
+  return upcomingTopInFlight;
 }
 
 // ─── WC 2026 Endpoint ──────────────────────────────────────────────────────────
@@ -7652,9 +8037,18 @@ router.get("/wc2026", async (_req, res) => {
   }
 });
 
+function waitMs(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
 router.get("/upcoming", async (req, res) => {
   const sport = String(req.query["sport"] ?? "all");
-  const cache = await getUpcomingAll();
+  const cache = upcomingTopCache
+    ? await getUpcomingAll()
+    : await Promise.race([
+        getUpcomingAll(),
+        waitMs(1500).then(() => upcomingTopCache ?? { football: [], tennis: [], basketball: [], hockey: [], volleyball: [], baseball: [], fetchedAt: Date.now() }),
+      ]);
   let matches: UpcomingMatch[];
   if (sport === "football") matches = cache.football;
   else if (sport === "tennis") matches = cache.tennis;
@@ -8944,15 +9338,60 @@ export type NBAOddsEntry = {
 let nbaOddsCache: NBAOddsEntry[] | null = null;
 let nbaOddsFetchedAt = 0;
 const NBA_ODDS_TTL = 60 * 1000;
+let nbaOddsInFlight: Promise<NBAOddsEntry[]> | null = null;
 
 async function getBasketballOdds(): Promise<NBAOddsEntry[]> {
   const now = Date.now();
   if (nbaOddsCache && now - nbaOddsFetchedAt < NBA_ODDS_TTL) return nbaOddsCache;
+  if (nbaOddsCache) {
+    if (!nbaOddsInFlight) {
+      nbaOddsInFlight = (async () => {
+        try {
+          const events = (await getUpcomingLeagueEventsV2("basketball", 7)).slice(0, 20);
+          const oddsResults: Array<V2PreMatchOdds | null> = new Array(events.length).fill(null);
+          const batchSize = 10;
+          for (let i = 0; i < events.length; i += batchSize) {
+            const slice = events.slice(i, i + batchSize);
+            const out = await Promise.all(slice.map(ev => getPreMatchOddsV2("basketball", ev.id).catch(() => null)));
+            for (let j = 0; j < out.length; j++) oddsResults[i + j] = out[j] ?? null;
+          }
+          const results: NBAOddsEntry[] = [];
+          for (let i = 0; i < events.length; i++) {
+            const ev = events[i]!;
+            const realOdds = oddsResults[i];
+            if (!realOdds || realOdds.home <= 0) continue;
+            const homeName = v2TeamName(ev.homeTeam);
+            const awayName = v2TeamName(ev.awayTeam);
+            const { date, time } = v2EventDateTime(ev);
+            const mkt = makeBasketballMarketsFromTeams(homeName, awayName) as Record<string, unknown>;
+            mkt["odds"] = { home: realOdds.home, draw: 0, away: realOdds.away };
+            results.push({
+              matchId: String(ev.id), date, time,
+              homeTeam: { id: "", name: homeName },
+              awayTeam: { id: "", name: awayName },
+              homeOdds: realOdds.home, awayOdds: realOdds.away,
+              markets: mkt,
+            });
+          }
+          nbaOddsCache = results;
+          nbaOddsFetchedAt = Date.now();
+          return results;
+        } catch {
+          return nbaOddsCache ?? [];
+        }
+      })().finally(() => { nbaOddsInFlight = null; });
+    }
+    return nbaOddsCache;
+  }
   try {
-    const events = await getUpcomingLeagueEventsV2("basketball", 7);
-    const oddsResults = await Promise.all(
-      events.map(ev => getPreMatchOddsV2("basketball", ev.id).catch(() => null))
-    );
+    const events = (await getUpcomingLeagueEventsV2("basketball", 7)).slice(0, 20);
+    const oddsResults: Array<V2PreMatchOdds | null> = new Array(events.length).fill(null);
+    const batchSize = 10;
+    for (let i = 0; i < events.length; i += batchSize) {
+      const slice = events.slice(i, i + batchSize);
+      const out = await Promise.all(slice.map(ev => getPreMatchOddsV2("basketball", ev.id).catch(() => null)));
+      for (let j = 0; j < out.length; j++) oddsResults[i + j] = out[j] ?? null;
+    }
     const results: NBAOddsEntry[] = [];
     for (let i = 0; i < events.length; i++) {
       const ev = events[i]!;
@@ -9011,15 +9450,61 @@ export type HockeyOddsEntry = {
 let hockeyOddsCache: HockeyOddsEntry[] | null = null;
 let hockeyOddsFetchedAt = 0;
 const HOCKEY_ODDS_TTL = 60 * 1000;
+let hockeyOddsInFlight: Promise<HockeyOddsEntry[]> | null = null;
 
 async function getHockeyOdds(): Promise<HockeyOddsEntry[]> {
   const now = Date.now();
   if (hockeyOddsCache && now - hockeyOddsFetchedAt < HOCKEY_ODDS_TTL) return hockeyOddsCache;
+  if (hockeyOddsCache) {
+    if (!hockeyOddsInFlight) {
+      hockeyOddsInFlight = (async () => {
+        try {
+          const events = (await getUpcomingLeagueEventsV2("hockey", 7)).slice(0, 20);
+          const oddsResults: Array<V2PreMatchOdds | null> = new Array(events.length).fill(null);
+          const batchSize = 10;
+          for (let i = 0; i < events.length; i += batchSize) {
+            const slice = events.slice(i, i + batchSize);
+            const out = await Promise.all(slice.map(ev => getPreMatchOddsV2("hockey", ev.id).catch(() => null)));
+            for (let j = 0; j < out.length; j++) oddsResults[i + j] = out[j] ?? null;
+          }
+          const results: HockeyOddsEntry[] = [];
+          for (let i = 0; i < events.length; i++) {
+            const ev = events[i]!;
+            const realOdds = oddsResults[i];
+            if (!realOdds || realOdds.home <= 0) continue;
+            const homeName = v2TeamName(ev.homeTeam);
+            const awayName = v2TeamName(ev.awayTeam);
+            const { date, time } = v2EventDateTime(ev);
+            const mkt = makeHockeyMarketsFromTeams(homeName, awayName) as Record<string, unknown>;
+            const h = realOdds.home; const d = realOdds.draw || 0; const a = realOdds.away;
+            mkt["odds"] = { home: h, draw: d, away: a };
+            results.push({
+              matchId: String(ev.id), date, time,
+              homeTeam: { id: "", name: homeName },
+              awayTeam: { id: "", name: awayName },
+              homeOdds: h, drawOdds: d, awayOdds: a,
+              markets: mkt,
+            });
+          }
+          hockeyOddsCache = results;
+          hockeyOddsFetchedAt = Date.now();
+          return results;
+        } catch {
+          return hockeyOddsCache ?? [];
+        }
+      })().finally(() => { hockeyOddsInFlight = null; });
+    }
+    return hockeyOddsCache;
+  }
   try {
-    const events = await getUpcomingLeagueEventsV2("hockey", 7);
-    const oddsResults = await Promise.all(
-      events.map(ev => getPreMatchOddsV2("hockey", ev.id).catch(() => null))
-    );
+    const events = (await getUpcomingLeagueEventsV2("hockey", 7)).slice(0, 20);
+    const oddsResults: Array<V2PreMatchOdds | null> = new Array(events.length).fill(null);
+    const batchSize = 10;
+    for (let i = 0; i < events.length; i += batchSize) {
+      const slice = events.slice(i, i + batchSize);
+      const out = await Promise.all(slice.map(ev => getPreMatchOddsV2("hockey", ev.id).catch(() => null)));
+      for (let j = 0; j < out.length; j++) oddsResults[i + j] = out[j] ?? null;
+    }
     const results: HockeyOddsEntry[] = [];
     for (let i = 0; i < events.length; i++) {
       const ev = events[i]!;
@@ -9075,15 +9560,58 @@ export type MLBOddsEntry = {
 const MLB_ODDS_TTL = 5 * 60 * 1000;
 let mlbOddsCache: MLBOddsEntry[] | null = null;
 let mlbOddsFetchedAt = 0;
+let mlbOddsInFlight: Promise<MLBOddsEntry[]> | null = null;
 
 async function getMLBOdds(): Promise<MLBOddsEntry[]> {
   const now = Date.now();
   if (mlbOddsCache && now - mlbOddsFetchedAt < MLB_ODDS_TTL) return mlbOddsCache;
+  if (mlbOddsCache) {
+    if (!mlbOddsInFlight) {
+      mlbOddsInFlight = (async () => {
+        try {
+          const events = (await getUpcomingLeagueEventsV2("baseball", 7)).slice(0, 20);
+          const oddsResults: Array<V2PreMatchOdds | null> = new Array(events.length).fill(null);
+          const batchSize = 10;
+          for (let i = 0; i < events.length; i += batchSize) {
+            const slice = events.slice(i, i + batchSize);
+            const out = await Promise.all(slice.map(ev => getPreMatchOddsV2("baseball", ev.id).catch(() => null)));
+            for (let j = 0; j < out.length; j++) oddsResults[i + j] = out[j] ?? null;
+          }
+          const results: MLBOddsEntry[] = [];
+          for (let i = 0; i < events.length; i++) {
+            const ev = events[i]!;
+            const realOdds = oddsResults[i];
+            if (!realOdds || realOdds.home <= 0) continue;
+            const homeName = v2TeamName(ev.homeTeam);
+            const awayName = v2TeamName(ev.awayTeam);
+            const { date, time } = v2EventDateTime(ev);
+            results.push({
+              matchId: String(ev.id), date, time,
+              homeTeam: { id: "", name: homeName },
+              awayTeam: { id: "", name: awayName },
+              homeOdds: realOdds.home, drawOdds: realOdds.draw || 0, awayOdds: realOdds.away,
+              markets: makeAdvancedMarketsFromTeams(homeName, awayName),
+            });
+          }
+          mlbOddsCache = results;
+          mlbOddsFetchedAt = Date.now();
+          return results;
+        } catch {
+          return mlbOddsCache ?? [];
+        }
+      })().finally(() => { mlbOddsInFlight = null; });
+    }
+    return mlbOddsCache;
+  }
   try {
-    const events = await getUpcomingLeagueEventsV2("baseball", 7);
-    const oddsResults = await Promise.all(
-      events.map(ev => getPreMatchOddsV2("baseball", ev.id).catch(() => null))
-    );
+    const events = (await getUpcomingLeagueEventsV2("baseball", 7)).slice(0, 20);
+    const oddsResults: Array<V2PreMatchOdds | null> = new Array(events.length).fill(null);
+    const batchSize = 10;
+    for (let i = 0; i < events.length; i += batchSize) {
+      const slice = events.slice(i, i + batchSize);
+      const out = await Promise.all(slice.map(ev => getPreMatchOddsV2("baseball", ev.id).catch(() => null)));
+      for (let j = 0; j < out.length; j++) oddsResults[i + j] = out[j] ?? null;
+    }
     const results: MLBOddsEntry[] = [];
     for (let i = 0; i < events.length; i++) {
       const ev = events[i]!;

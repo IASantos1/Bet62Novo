@@ -25,6 +25,8 @@ interface StoredSelection {
   market?: string;
   label?: string;
   finalScore?: { home: number; away: number };
+  htScore?: { htHome: number; htAway: number };
+  outcome?: "won" | "lost" | "void" | null;
 }
 
 interface Bet {
@@ -35,7 +37,7 @@ interface Bet {
   stake: string;
   potentialWin: string;
   totalOdds: string;
-  status: "pending" | "won" | "lost" | "cashed_out";
+  status: "pending" | "won" | "lost" | "cashed_out" | "voided";
   cashoutValue?: string | null;
   createdAt: string;
 }
@@ -73,6 +75,7 @@ function BetCard({ bet, token, onCashout }: { bet: Bet; token: string | null; on
   const isWon = bet.status === "won";
   const isLost = bet.status === "lost";
   const isCashedOut = bet.status === "cashed_out";
+  const isVoided = bet.status === "voided";
 
   const stake = parseFloat(bet.stake);
   const totalOdds = parseFloat(bet.totalOdds);
@@ -165,6 +168,11 @@ function BetCard({ bet, token, onCashout }: { bet: Bet; token: string | null; on
             <Ionicons name="cash-outline" size={16} color="#78350f" />
           </View>
         )}
+        {isVoided && (
+          <View style={{ width: 34, height: 34, borderRadius: 17, backgroundColor: "rgba(255,255,255,0.2)", borderWidth: 2, borderColor: "rgba(255,255,255,0.4)", alignItems: "center", justifyContent: "center" }}>
+            <Ionicons name="lock-closed-outline" size={18} color="#fff" />
+          </View>
+        )}
       </View>
 
       {/* ── SELEÇÕES HEADER ── */}
@@ -184,9 +192,13 @@ function BetCard({ bet, token, onCashout }: { bet: Bet; token: string | null; on
           let iconBg = "transparent";
           let showCircle = false;
 
-          if (isWon) { iconName = "checkmark"; iconColor = "#fff"; iconBg = "#22c55e"; showCircle = true; }
-          else if (isLost) { iconName = "close"; iconColor = "#fff"; iconBg = "rgba(0,0,0,0.3)"; showCircle = true; }
-          else if (isCashedOut) { iconName = "cash-outline"; iconColor = "#fff"; iconBg = "rgba(251,191,36,0.7)"; showCircle = true; }
+          const selOutcome = sel.outcome ?? null;
+          if (isCashedOut) { iconName = "cash-outline"; iconColor = "#fff"; iconBg = "rgba(251,191,36,0.7)"; showCircle = true; }
+          else if (isVoided) { iconName = "lock-closed-outline"; iconColor = "#fff"; iconBg = "rgba(59,130,246,0.6)"; showCircle = true; }
+          else if (selOutcome === "won") { iconName = "checkmark"; iconColor = "#fff"; iconBg = "#22c55e"; showCircle = true; }
+          else if (selOutcome === "lost") { iconName = "close"; iconColor = "#fff"; iconBg = "rgba(0,0,0,0.3)"; showCircle = true; }
+          else if (selOutcome === "void") { iconName = "remove"; iconColor = "#fff"; iconBg = "rgba(156,163,175,0.55)"; showCircle = true; }
+          else if (isWon || isLost) { iconName = "time-outline"; iconColor = "#fff"; iconBg = "rgba(156,163,175,0.35)"; showCircle = true; }
 
           return (
             <View key={i} style={{ flexDirection: "row", alignItems: "flex-start", paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: dividerColor, gap: 10 }}>
@@ -207,7 +219,7 @@ function BetCard({ bet, token, onCashout }: { bet: Bet; token: string | null; on
                 <Text style={{ fontFamily: "Inter_400Regular", fontSize: 11, color: txtSub, marginTop: 2 }}>
                   {getSelLabel(sel)}
                 </Text>
-                {(isWon || isLost || isCashedOut) && sel.finalScore != null && (
+                {(isWon || isLost || isCashedOut || isVoided) && sel.finalScore != null && (
                   <Text style={{ fontFamily: "Inter_500Medium", fontSize: 11, color: txtSub, marginTop: 3 }}>
                     Resultado: {sel.finalScore.home} – {sel.finalScore.away}
                   </Text>
@@ -237,9 +249,9 @@ function BetCard({ bet, token, onCashout }: { bet: Bet; token: string | null; on
           { label: "Total de odds:", value: totalOdds.toFixed(2), valueColor: txtMain, valueBold: false },
           { label: "Valor apostado:", value: `€${stake.toFixed(2)}`, valueColor: txtMain, valueBold: false },
           {
-            label: isWon ? "Retorno recebido:" : isLost ? "Retorno:" : "Retorno estimado:",
-            value: isLost ? "€0,00" : `€${potentialWin.toFixed(2)}`,
-            valueColor: isWon ? "#16a34a" : isLost ? "#fca5a5" : txtMain,
+            label: isWon ? "Retorno recebido:" : isLost ? "Retorno:" : isVoided ? "Reembolso:" : "Retorno estimado:",
+            value: isLost ? "€0,00" : isVoided ? `€${stake.toFixed(2)}` : `€${potentialWin.toFixed(2)}`,
+            valueColor: isWon ? "#16a34a" : isLost ? "#fca5a5" : isVoided ? "#93c5fd" : txtMain,
             valueBold: true,
           },
         ].map(({ label, value, valueColor, valueBold }, ri, arr) => (

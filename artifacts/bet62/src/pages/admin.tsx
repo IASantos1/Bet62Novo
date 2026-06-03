@@ -48,11 +48,24 @@ type AdminPayment = {
   userName: string | null; userEmail: string | null;
 };
 
+type KycDocument = {
+  id: number;
+  userId: number;
+  kind: string;
+  fileName: string;
+  mimeType: string;
+  fileSize: number;
+  status: string;
+  createdAt: string;
+  reviewedAt: string | null;
+};
+
 type UserDetail = {
   user: AdminUser;
   bets: AdminBet[];
   payments: AdminPayment[];
   withdrawals: AdminWithdrawal[];
+  kycDocuments: KycDocument[];
 };
 
 type RiskData = {
@@ -132,6 +145,11 @@ const SETTING_META: Record<string, { label: string; desc: string; type: "number"
   default_margin:     { label: "Margem Padrão",         desc: "Margem da casa (0.06 = 6%)",          type: "number" },
   bet_limits_enabled: { label: "Limites Ativos",        desc: "Ativar/desativar limites de aposta",  type: "boolean" },
   sports_enabled:     { label: "Desportos Ativos",      desc: "Lista separada por vírgulas",         type: "text" },
+  cashout_enabled:               { label: "Cash Out Ativo",         desc: "Ativar/desativar cash out no sistema",                        type: "boolean" },
+  cashout_unfavorable_cycle_ms:  { label: "Ciclo Cash Out (ms)",    desc: "Duração do ciclo de janela quando a seleção está desfavorável", type: "number", unit: "ms" },
+  cashout_unfavorable_open_ms:   { label: "Janela Cash Out (ms)",   desc: "Tempo aberto dentro do ciclo quando a seleção está desfavorável", type: "number", unit: "ms" },
+  cashout_odds_worse_mult:       { label: "Odds Piorou (x)",        desc: "Multiplicador (ex.: 1.2 = 20% pior) para ativar modo desfavorável", type: "number" },
+  cashout_fee_mult:              { label: "Fator Cash Out",         desc: "Fator aplicado no valor estimado (ex.: 0.92 = 8% fee)",          type: "number" },
 };
 
 const AUDIT_ACTION_LABEL: Record<string, string> = {
@@ -233,6 +251,7 @@ export default function AdminPage() {
   const [updatingWithdrawal, setUpdatingWithdrawal] = useState<number | null>(null);
   const [updatingBet, setUpdatingBet] = useState<number | null>(null);
   const [creditingPayment, setCreditingPayment] = useState<number | null>(null);
+  const [updatingKycDoc, setUpdatingKycDoc] = useState<number | null>(null);
 
   const [exportType, setExportType] = useState<"bets" | "deposits" | "withdrawals">("bets");
   const [exportFrom, setExportFrom] = useState("");
@@ -367,6 +386,46 @@ export default function AdminPage() {
       if (res.ok) setDetailModal(await res.json());
     } catch { toast.error("Erro ao carregar detalhes"); }
     finally { setDetailLoading(false); }
+  };
+
+  const handleDownloadKycDoc = async (doc: KycDocument) => {
+    try {
+      const res = await fetch(`/api/admin/kyc/documents/${doc.id}/download`, { headers: authHeader });
+      if (!res.ok) { toast.error("Erro ao descarregar documento"); return; }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = doc.fileName || `kyc_${doc.id}`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch {
+      toast.error("Erro ao descarregar documento");
+    }
+  };
+
+  const handleUpdateKycDocStatus = async (docId: number, status: "pending" | "approved" | "rejected") => {
+    setUpdatingKycDoc(docId);
+    try {
+      const res = await fetch(`/api/admin/kyc/documents/${docId}/status`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json", ...authHeader },
+        body: JSON.stringify({ status }),
+      });
+      const data = await res.json();
+      if (!res.ok) { toast.error(data.error || "Erro ao atualizar documento"); return; }
+      toast.success("Documento atualizado");
+      setDetailModal(prev => {
+        if (!prev) return prev;
+        const nextDocs = prev.kycDocuments.map(d => d.id === docId ? { ...d, status: data.document.status, reviewedAt: data.document.reviewedAt } : d);
+        return { ...prev, kycDocuments: nextDocs, user: { ...prev.user, kycStatus: data.user?.kycStatus ?? prev.user.kycStatus } };
+      });
+      fetchUsers();
+    } catch {
+      toast.error("Erro ao atualizar documento");
+    } finally {
+      setUpdatingKycDoc(null);
+    }
   };
 
   const handleUpdateBalance = async () => {
@@ -1789,8 +1848,7 @@ export default function AdminPage() {
                     </div>
                   </div>
 
-                  {/* KYC Documents section */}
-                  {detailModal.user.kycDocumentType && (
+                  {(detailModal.user.kycDocumentType || detailModal.kycDocuments.length > 0) && (
                     <div className="p-5 border-b border-zinc-800 shrink-0">
                       <div className="flex items-center justify-between mb-3">
                         <div className="text-xs font-bold text-zinc-400 uppercase tracking-wider flex items-center gap-2">
@@ -1800,22 +1858,70 @@ export default function AdminPage() {
                           {KYC_LABELS[detailModal.user.kycStatus || "not_submitted"]?.label}
                         </span>
                       </div>
-                      <div className="grid grid-cols-3 gap-3">
-                        <div className="bg-zinc-800 rounded-lg p-3">
-                          <div className="text-xs text-zinc-500 mb-1">Tipo</div>
-                          <div className="font-semibold text-white text-sm">
-                            {detailModal.user.kycDocumentType === "cc" ? "Cartão de Cidadão" : "Passaporte"}
+
+                      {detailModal.user.kycDocumentType && (
+                        <div className="grid grid-cols-3 gap-3">
+                          <div className="bg-zinc-800 rounded-lg p-3">
+                            <div className="text-xs text-zinc-500 mb-1">Tipo</div>
+                            <div className="font-semibold text-white text-sm">
+                              {detailModal.user.kycDocumentType === "cc" ? "Cartão de Cidadão" : "Passaporte"}
+                            </div>
+                          </div>
+                          <div className="bg-zinc-800 rounded-lg p-3">
+                            <div className="text-xs text-zinc-500 mb-1">Nº Documento</div>
+                            <div className="font-mono font-semibold text-white text-sm">{detailModal.user.kycDocumentNumber || "—"}</div>
+                          </div>
+                          <div className="bg-zinc-800 rounded-lg p-3">
+                            <div className="text-xs text-zinc-500 mb-1">Submetido</div>
+                            <div className="font-semibold text-white text-xs">{detailModal.user.kycSubmittedAt ? fmtDate(detailModal.user.kycSubmittedAt) : "—"}</div>
                           </div>
                         </div>
-                        <div className="bg-zinc-800 rounded-lg p-3">
-                          <div className="text-xs text-zinc-500 mb-1">Nº Documento</div>
-                          <div className="font-mono font-semibold text-white text-sm">{detailModal.user.kycDocumentNumber || "—"}</div>
+                      )}
+
+                      {detailModal.kycDocuments.length > 0 ? (
+                        <div className="mt-4 space-y-2">
+                          {detailModal.kycDocuments.map(doc => (
+                            <div key={doc.id} className="bg-zinc-800 rounded-lg p-3 flex items-center gap-3">
+                              <div className="flex-1 min-w-0">
+                                <div className="text-sm text-zinc-200 truncate">{doc.fileName}</div>
+                                <div className="text-xs text-zinc-500 mt-0.5">
+                                  {doc.kind === "id" ? "Identificação" : doc.kind === "address" ? "Morada" : doc.kind} · {(doc.fileSize / 1024).toFixed(0)} KB · {fmtDate(doc.createdAt)}
+                                </div>
+                              </div>
+                              <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${
+                                doc.status === "approved" ? "bg-green-900/60 text-green-400"
+                                : doc.status === "rejected" ? "bg-red-900/40 text-red-400"
+                                : "bg-yellow-900/40 text-yellow-400"
+                              }`}>
+                                {doc.status === "approved" ? "Aprovado" : doc.status === "rejected" ? "Rejeitado" : "Pendente"}
+                              </span>
+                              <div className="flex items-center gap-2 shrink-0">
+                                <Button
+                                  variant="outline"
+                                  className="border-zinc-700 text-zinc-200 hover:bg-zinc-700 h-8 px-2"
+                                  onClick={() => handleDownloadKycDoc(doc)}
+                                >
+                                  <Download size={14} />
+                                </Button>
+                                <Button
+                                  className="bg-green-700 hover:bg-green-600 text-white h-8 px-3"
+                                  disabled={updatingKycDoc === doc.id}
+                                  onClick={() => handleUpdateKycDocStatus(doc.id, "approved")}
+                                >
+                                  {updatingKycDoc === doc.id ? <Loader2 className="animate-spin" size={14} /> : <CheckCircle size={14} />}
+                                </Button>
+                                <Button
+                                  className="bg-red-700 hover:bg-red-600 text-white h-8 px-3"
+                                  disabled={updatingKycDoc === doc.id}
+                                  onClick={() => handleUpdateKycDocStatus(doc.id, "rejected")}
+                                >
+                                  {updatingKycDoc === doc.id ? <Loader2 className="animate-spin" size={14} /> : <XCircle size={14} />}
+                                </Button>
+                              </div>
+                            </div>
+                          ))}
                         </div>
-                        <div className="bg-zinc-800 rounded-lg p-3">
-                          <div className="text-xs text-zinc-500 mb-1">Submetido</div>
-                          <div className="font-semibold text-white text-xs">{detailModal.user.kycSubmittedAt ? fmtDate(detailModal.user.kycSubmittedAt) : "—"}</div>
-                        </div>
-                      </div>
+                      ) : null}
                     </div>
                   )}
 

@@ -1,9 +1,12 @@
 import { Router, type IRouter, type Response, type Request } from "express";
 import jwt from "jsonwebtoken";
-import { db, usersTable, betsTable, paymentsTable, withdrawalsTable, settlementLogsTable } from "@workspace/db";
+import { db } from "@workspace/db";
+import { kycDocumentsTable, usersTable, betsTable, paymentsTable, withdrawalsTable, settlementLogsTable } from "@workspace/db/schema";
 import { eq, desc, count, sum, sql, gte, lte, and } from "drizzle-orm";
 import { adminMiddleware, type AdminRequest } from "../middlewares/adminAuth";
 import { logger } from "../lib/logger";
+import fs from "fs";
+import path from "path";
 
 function escapeCsv(val: unknown): string {
   if (val === null || val === undefined) return "";
@@ -154,8 +157,23 @@ router.get("/users/:id/detail", adminMiddleware, async (req: AdminRequest, res: 
     const bets = await db.select().from(betsTable).where(eq(betsTable.userId, userId)).orderBy(desc(betsTable.createdAt)).limit(50);
     const payments = await db.select().from(paymentsTable).where(eq(paymentsTable.userId, userId)).orderBy(desc(paymentsTable.createdAt)).limit(50);
     const withdrawals = await db.select().from(withdrawalsTable).where(eq(withdrawalsTable.userId, userId)).orderBy(desc(withdrawalsTable.createdAt)).limit(50);
+    const kycDocuments = await db
+      .select({
+        id: kycDocumentsTable.id,
+        userId: kycDocumentsTable.userId,
+        kind: kycDocumentsTable.kind,
+        fileName: kycDocumentsTable.fileName,
+        mimeType: kycDocumentsTable.mimeType,
+        fileSize: kycDocumentsTable.fileSize,
+        status: kycDocumentsTable.status,
+        createdAt: kycDocumentsTable.createdAt,
+        reviewedAt: kycDocumentsTable.reviewedAt,
+      })
+      .from(kycDocumentsTable)
+      .where(eq(kycDocumentsTable.userId, userId))
+      .orderBy(desc(kycDocumentsTable.createdAt));
 
-    res.json({ user, bets, payments, withdrawals });
+    res.json({ user, bets, payments, withdrawals, kycDocuments });
   } catch (err) {
     logger.error({ err }, "Admin user detail error");
     res.status(500).json({ error: "Erro ao carregar detalhes" });
@@ -248,6 +266,146 @@ router.put("/users/:id/kyc", adminMiddleware, async (req: AdminRequest, res: Res
   } catch (err) {
     logger.error({ err }, "Admin KYC error");
     res.status(500).json({ error: "Erro ao atualizar KYC" });
+  }
+});
+
+function getKycUploadRoot(): string {
+  return path.resolve((globalThis as Record<string, unknown>).__dirname as string ?? __dirname, "../uploads/kyc");
+}
+
+router.get("/kyc/documents", adminMiddleware, async (req: AdminRequest, res: Response): Promise<void> => {
+  const userIdStr = String(req.query["userId"] || "");
+  const userId = userIdStr ? parseInt(userIdStr, 10) : null;
+  const status = String(req.query["status"] || "");
+
+  if (userIdStr && (userId === null || isNaN(userId))) {
+    res.status(400).json({ error: "userId inválido" });
+    return;
+  }
+
+  const validStatuses = ["pending", "approved", "rejected"];
+  if (status && !validStatuses.includes(status)) {
+    res.status(400).json({ error: "status inválido" });
+    return;
+  }
+
+  try {
+    const conditions = [];
+    if (userId !== null) conditions.push(eq(kycDocumentsTable.userId, userId));
+    if (status) conditions.push(eq(kycDocumentsTable.status, status));
+
+    const docs = await db
+      .select({
+        id: kycDocumentsTable.id,
+        userId: kycDocumentsTable.userId,
+        kind: kycDocumentsTable.kind,
+        fileName: kycDocumentsTable.fileName,
+        mimeType: kycDocumentsTable.mimeType,
+        fileSize: kycDocumentsTable.fileSize,
+        status: kycDocumentsTable.status,
+        createdAt: kycDocumentsTable.createdAt,
+        reviewedAt: kycDocumentsTable.reviewedAt,
+      })
+      .from(kycDocumentsTable)
+      .where(conditions.length ? and(...conditions) : undefined)
+      .orderBy(desc(kycDocumentsTable.createdAt))
+      .limit(500);
+
+    res.json(docs);
+  } catch (err) {
+    logger.error({ err }, "Admin kyc documents error");
+    res.status(500).json({ error: "Erro ao carregar documentos" });
+  }
+});
+
+router.get("/kyc/documents/:id/download", adminMiddleware, async (req: AdminRequest, res: Response): Promise<void> => {
+  const docId = parseInt(String(req.params["id"]), 10);
+  if (isNaN(docId)) { res.status(400).json({ error: "ID inválido" }); return; }
+
+  try {
+    const [doc] = await db
+      .select({
+        id: kycDocumentsTable.id,
+        fileName: kycDocumentsTable.fileName,
+        mimeType: kycDocumentsTable.mimeType,
+        storagePath: kycDocumentsTable.storagePath,
+      })
+      .from(kycDocumentsTable)
+      .where(eq(kycDocumentsTable.id, docId))
+      .limit(1);
+
+    if (!doc) { res.status(404).json({ error: "Documento não encontrado" }); return; }
+
+    const uploadRoot = getKycUploadRoot();
+    const resolved = path.resolve(doc.storagePath);
+    if (!resolved.startsWith(uploadRoot + path.sep)) {
+      res.status(400).json({ error: "Caminho inválido" });
+      return;
+    }
+    if (!fs.existsSync(resolved)) {
+      res.status(404).json({ error: "Ficheiro não encontrado" });
+      return;
+    }
+
+    res.setHeader("Content-Type", doc.mimeType);
+    res.download(resolved, doc.fileName);
+  } catch (err) {
+    logger.error({ err }, "Admin kyc download error");
+    res.status(500).json({ error: "Erro ao descarregar documento" });
+  }
+});
+
+router.put("/kyc/documents/:id/status", adminMiddleware, async (req: AdminRequest, res: Response): Promise<void> => {
+  const docId = parseInt(String(req.params["id"]), 10);
+  const { status } = req.body as { status?: string };
+  const validStatuses = ["pending", "approved", "rejected"];
+
+  if (isNaN(docId) || !status || !validStatuses.includes(status)) {
+    res.status(400).json({ error: "Status inválido" });
+    return;
+  }
+
+  try {
+    const [updated] = await db
+      .update(kycDocumentsTable)
+      .set({ status, reviewedAt: status === "approved" || status === "rejected" ? new Date() : null })
+      .where(eq(kycDocumentsTable.id, docId))
+      .returning({
+        id: kycDocumentsTable.id,
+        userId: kycDocumentsTable.userId,
+        kind: kycDocumentsTable.kind,
+        fileName: kycDocumentsTable.fileName,
+        mimeType: kycDocumentsTable.mimeType,
+        fileSize: kycDocumentsTable.fileSize,
+        status: kycDocumentsTable.status,
+        createdAt: kycDocumentsTable.createdAt,
+        reviewedAt: kycDocumentsTable.reviewedAt,
+      });
+
+    if (!updated) {
+      res.status(404).json({ error: "Documento não encontrado" });
+      return;
+    }
+
+    const allDocs = await db
+      .select({ status: kycDocumentsTable.status })
+      .from(kycDocumentsTable)
+      .where(eq(kycDocumentsTable.userId, updated.userId));
+
+    const hasRejected = allDocs.some(d => d.status === "rejected");
+    const allApproved = allDocs.length > 0 && allDocs.every(d => d.status === "approved");
+    const nextUserStatus = hasRejected ? "rejected" : allApproved ? "approved" : "pending";
+
+    const [user] = await db
+      .update(usersTable)
+      .set({ kycStatus: nextUserStatus })
+      .where(eq(usersTable.id, updated.userId))
+      .returning({ id: usersTable.id, kycStatus: usersTable.kycStatus });
+
+    res.json({ ok: true, document: updated, user });
+  } catch (err) {
+    logger.error({ err }, "Admin kyc update status error");
+    res.status(500).json({ error: "Erro ao atualizar status do documento" });
   }
 });
 
