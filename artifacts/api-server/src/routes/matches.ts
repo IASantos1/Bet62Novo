@@ -2214,6 +2214,21 @@ let baseballLiveV2FetchedAt = 0;
 let tennisLiveV2Cache: SAPIV2Event[] | null = null;
 let tennisLiveV2FetchedAt = 0;
 
+// V1 tennis native format (all endpoint — different schema from SAPIV2Event)
+interface V1TennisGame {
+  id: number;
+  competitionId?: number;
+  competitionDisplayName?: string;
+  startTime: string;
+  statusGroup?: number; // 1=live, 2=scheduled, 3=finished
+  statusText?: string;
+  homeCompetitor?: { id?: number; name?: string; score?: number; isWinner?: boolean };
+  awayCompetitor?: { id?: number; name?: string; score?: number; isWinner?: boolean };
+  stageName?: string;
+  roundName?: string;
+}
+let _tennisAllV1Cache: V1TennisGame[] | null = null;
+let _tennisAllV1FetchedAt = 0;
 
 // Tennis daily results (d-1 = yesterday) — longer TTL (yesterday won't change)
 type TennisDailyResult = {
@@ -4584,6 +4599,42 @@ async function getTennisTodayV2(): Promise<SAPIV2Event[]> {
   } catch { return tennisTodayV2Cache ?? []; }
 }
 
+// ─── V1 Tennis: native API (v1.tennis.sportsapipro.com) ───────────────────────
+// Tennis uses a completely different API schema from other sports (no v2 live/today).
+// The /all endpoint returns all today+tomorrow games; /live returns in-progress ones.
+
+async function getTennisAllV1(): Promise<V1TennisGame[]> {
+  const now = Date.now();
+  if (_tennisAllV1Cache && now - _tennisAllV1FetchedAt < TODAY_V2_TTL) return _tennisAllV1Cache;
+  try {
+    const resp = await fetch(`${SAPI_V1_TENNIS}/v1/tennis/all`, {
+      signal: AbortSignal.timeout(9000),
+      headers: sapiHeaders(),
+    });
+    if (!resp.ok) return _tennisAllV1Cache ?? [];
+    const data = (await resp.json()) as { data?: { games?: V1TennisGame[] } };
+    _tennisAllV1Cache = data.data?.games ?? [];
+    _tennisAllV1FetchedAt = now;
+    return _tennisAllV1Cache;
+  } catch {
+    return _tennisAllV1Cache ?? [];
+  }
+}
+
+async function getTennisLiveV1(): Promise<V1TennisGame[]> {
+  try {
+    const resp = await fetch(`${SAPI_V1_TENNIS}/v1/tennis/live`, {
+      signal: AbortSignal.timeout(8000),
+      headers: sapiHeaders(),
+    });
+    if (!resp.ok) return [];
+    const data = (await resp.json()) as { data?: { games?: V1TennisGame[] } };
+    return data.data?.games ?? [];
+  } catch {
+    return [];
+  }
+}
+
 async function getBaseballTodayV2(): Promise<SAPIV2Event[]> {
   const now = Date.now();
   if (baseballTodayV2Cache && now - baseballTodayV2FetchedAt < TODAY_V2_TTL) return baseballTodayV2Cache;
@@ -6918,19 +6969,19 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
   // Fire-and-forget odds cache warmers — don't block the broadcast path
   getTennisOdds().catch(() => {});
   getMLBOdds().catch(() => {});
-  // Tennis live priority: /live endpoint → /today filtered for in-progress → v1 simulation
-  // Always also check /today for matches that started but haven't appeared in /live yet
-  // (the SportsApiPro /live endpoint can lag 2-5 min behind actual match start).
-  const tennisV2Part = buildTennisLiveV2(tennisEvents);
-  const liveIdsFromV2 = new Set(tennisV2Part.map(m => String(m.id)));
+  // Tennis live: v2 feed (usually empty for tennis) + v1 native live + today fallback.
+  // The tennis API does not support v2 live/today endpoints (returns 404).
+  // Primary source: v1/tennis/live (buildTennisLiveV1). The v2 path is kept as
+  // a fallback for any future API upgrade that enables a v2 tennis live endpoint.
+  const [tennisV2Part, tennisV1LivePart] = await Promise.all([
+    Promise.resolve(buildTennisLiveV2(tennisEvents)),
+    buildTennisLiveV1(),
+  ]);
+  const allLiveIds = new Set([...tennisV2Part, ...tennisV1LivePart].map(m => String(m.id)));
   const todayStartedExtra = buildTennisLiveV2(
-    (tennisTodayEvents ?? []).filter(ev => !liveIdsFromV2.has(`tennis-v2-${ev.id}`))
-  // The second call's GC loop re-emits grace-period matches already returned by the first
-  // call — deduplicate here so each match ID appears at most once in the final array.
-  ).filter(m => !liveIdsFromV2.has(String(m.id)));
-  // Only real API data — simulation removed to avoid misleading users with
-  // hardcoded player names during active Grand Slam events.
-  const tennisLivePart = [...tennisV2Part, ...todayStartedExtra];
+    (tennisTodayEvents ?? []).filter(ev => !allLiveIds.has(`tennis-v2-${ev.id}`))
+  ).filter(m => !allLiveIds.has(String(m.id)));
+  const tennisLivePart = [...tennisV2Part, ...tennisV1LivePart, ...todayStartedExtra];
   const livePart = [
     ...buildFootballLiveV2(footballEvents),
     ...buildBasketballLiveV2(basketballEvents),
@@ -7099,59 +7150,102 @@ router.get("/live-stream", (req, res) => {
 
 // ─── Real upcoming builders (from live API data) ──────────────────────────────
 
+// ─── Tennis live from V1 native API ───────────────────────────────────────────
+// Called from buildLivePayload as primary source for in-progress tennis matches.
+// Maps V1TennisGame to LiveMatchState. Set scores come from homeCompetitor.score.
+async function buildTennisLiveV1(): Promise<LiveMatchState[]> {
+  try {
+    const games = await getTennisLiveV1();
+    const result: LiveMatchState[] = [];
+    for (const g of games) {
+      if (g.statusGroup === 3 || g.statusGroup === 2) continue;
+      const home = g.homeCompetitor?.name?.trim() ?? "";
+      const away = g.awayCompetitor?.name?.trim() ?? "";
+      if (!home || !away) continue;
+      if (home.includes("/") || away.includes("/")) continue;
+      const compName = g.competitionDisplayName ?? "";
+      if (/double|mixed/i.test(compName)) continue;
+      const homeScore = Math.max(0, g.homeCompetitor?.score ?? 0);
+      const awayScore = Math.max(0, g.awayCompetitor?.score ?? 0);
+      const odds = makeOddsFromTeams(home, away);
+      const diff = homeScore - awayScore;
+      let liveOdds = { ...odds, draw: 0 };
+      if (diff !== 0) {
+        const factor = Math.min(0.55, Math.abs(diff) * 0.22);
+        liveOdds = diff > 0
+          ? { home: Math.max(1.01, +(odds.home * (1 - factor)).toFixed(2)), draw: 0, away: Math.min(50, +(odds.away * (1 + factor)).toFixed(2)) }
+          : { home: Math.min(50, +(odds.home * (1 + factor)).toFixed(2)), draw: 0, away: Math.max(1.01, +(odds.away * (1 - factor)).toFixed(2)) };
+      }
+      const setNum = homeScore + awayScore + 1;
+      result.push({
+        id: `tennis-v1-${g.id}`,
+        home, away,
+        league: compName || "Tennis",
+        country: "",
+        sport: "tennis" as const,
+        homeScore, awayScore,
+        minute: setNum * 20,
+        status: g.statusText ?? "Em Jogo",
+        hasRealOdds: true,
+        odds: liveOdds,
+        markets: makeAdvancedMarketsFromTeams(home, away),
+        events: [],
+        _liveExtra: { sets: [[homeScore, awayScore]], currentPoints: ["0", "0"] },
+      });
+    }
+    return result;
+  } catch {
+    return [];
+  }
+}
+
+// ─── Tennis upcoming from V1 native API ───────────────────────────────────────
+// The tennis API does not have a v2 schedule endpoint (returns 404).
+// Instead we use v1/tennis/all which returns all today+tomorrow scheduled games.
 async function buildTennisUpcoming(): Promise<UpcomingMatch[]> {
   try {
-    // Use 90-min grace: keep matches visible as "Em Breve" even if the live
-    // feed hasn't picked them up yet. Without this, a match that started and
-    // isn't yet in /live simply disappears from view for up to 90 minutes.
-    const events = await getUpcomingEventsV2("tennis", 3, 90 * 60);
-    const seen = new Set<string>();
-    const filtered: SAPIV2Event[] = [];
-
-    for (const ev of events) {
-      // Only ATP, WTA, ATP Challenger, WTA 125 — no ITF in pre-match upcoming
-      if (!isTennisEliteUpcoming(ev)) continue;
-      const home = v2TeamName(ev.homeTeam);
-      const away = v2TeamName(ev.awayTeam);
-      if (home === "Unknown" || away === "Unknown") continue;
-      if (home.includes("/") || away.includes("/")) continue;
-      const key = `${home}|${away}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      filtered.push(ev);
-      if (filtered.length >= 50) break;
-    }
-
-    const oddsResults = await Promise.all(
-      filtered.map(ev => getPreMatchOddsV2("tennis", ev.id).catch(() => null))
-    );
-
+    const now = Date.now();
+    const games = await getTennisAllV1();
     const results: UpcomingMatch[] = [];
-    for (let i = 0; i < filtered.length; i++) {
-      const ev = filtered[i]!;
-      const home = v2TeamName(ev.homeTeam);
-      const away = v2TeamName(ev.awayTeam);
-      const { date, time } = v2EventDateTime(ev);
-      const realOdds = oddsResults[i] ?? null;
+    const seen = new Set<string>();
+
+    for (const g of games) {
+      if (g.statusGroup === 3) continue; // skip finished
+      const home = g.homeCompetitor?.name?.trim() ?? "";
+      const away = g.awayCompetitor?.name?.trim() ?? "";
+      if (!home || !away) continue;
+      // Skip doubles (player pairs have " / " in name)
+      if (home.includes("/") || away.includes("/")) continue;
+      const compName = g.competitionDisplayName ?? "";
+      if (/double|mixed/i.test(compName)) continue;
+
+      const startMs = new Date(g.startTime).getTime();
+      if (startMs < now - 90 * 60 * 1000) continue; // 90-min grace
+      if (startMs > now + 3 * 86_400_000) continue;  // max 3 days ahead
+
+      const pairKey = `${home}|${away}`;
+      if (seen.has(pairKey)) continue;
+      seen.add(pairKey);
+
+      const date = g.startTime.slice(0, 10);
+      const time = g.startTime.slice(11, 16);
+
       const sr = seededRng(`tennis:${home}:${away}`);
       const pHome = mc(0.52 + (sr(1) - 0.5) * 0.20, 0.15, 0.85);
       const [compH, compA] = probsToDecimalOdds([pHome, 1 - pHome], 1.06);
       const tennisExtras = computeTennisExtras(pHome);
-      const homeOdds = (realOdds && realOdds.home > 0) ? realOdds.home : compH!;
-      const awayOdds = (realOdds && realOdds.away > 0) ? realOdds.away : compA!;
-      const hasRealOdds = !!(realOdds && realOdds.home > 0);
 
       results.push({
-        id: `tennis-v2-${ev.id}`,
+        id: `tennis-v1-${g.id}`,
         home,
         away,
-        league: v2TournName(ev.tournament),
-        country: v2TournCountry(ev),
+        league: compName || "Tennis",
+        country: "",
         date,
         time,
         sport: "tennis" as const,
-        hasRealOdds,
-        odds: { home: homeOdds, draw: 0, away: awayOdds },
+        hasRealOdds: false,
+        odds: { home: compH!, draw: 0, away: compA! },
         markets: {
           doubleChance: { homeOrDraw: 0, awayOrDraw: 0, homeOrAway: 0 },
           bothTeamsScore: { yes: 0, no: 0 },
@@ -7159,14 +7253,18 @@ async function buildTennisUpcoming(): Promise<UpcomingMatch[]> {
           handicap: { homeMinusOne: 0, awayPlusOne: 0, homeMinusOneHalf: 0, awayPlusOneHalf: 0 },
           halfTime: { home: 0, draw: 0, away: 0 },
           firstGoal: { home: 0, noGoal: 0, away: 0 },
-          tennisExtra: (realOdds?.firstSetHome)
-            ? { ...tennisExtras, firstSetHome: realOdds.firstSetHome, firstSetAway: realOdds.firstSetAway ?? 0 }
-            : tennisExtras,
+          tennisExtra: tennisExtras,
         } as unknown as AdvancedMarkets,
       });
+
+      if (results.length >= 60) break;
     }
 
-    return results;
+    return results.sort((a, b) => {
+      const ta = new Date(`${a.date}T${a.time}`).getTime();
+      const tb = new Date(`${b.date}T${b.time}`).getTime();
+      return ta - tb;
+    });
   } catch {
     return [];
   }
