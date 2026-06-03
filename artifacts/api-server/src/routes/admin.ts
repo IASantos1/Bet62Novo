@@ -295,7 +295,7 @@ router.put("/bets/:id/status", adminMiddleware, async (req: AdminRequest, res: R
   const betId = parseInt(String(req.params["id"]), 10);
   const { status } = req.body;
 
-  const validStatuses = ["pending", "won", "lost", "cashed_out"];
+  const validStatuses = ["pending", "won", "lost", "cashed_out", "voided"];
   if (!validStatuses.includes(status)) {
     res.status(400).json({ error: "Status inválido" }); return;
   }
@@ -304,16 +304,44 @@ router.put("/bets/:id/status", adminMiddleware, async (req: AdminRequest, res: R
     const [bet] = await db.select().from(betsTable).where(eq(betsTable.id, betId)).limit(1);
     if (!bet) { res.status(404).json({ error: "Aposta não encontrada" }); return; }
 
-    if (status === "won" && bet.status !== "won") {
-      await db.transaction(async (tx) => {
-        await tx.update(betsTable).set({ status }).where(eq(betsTable.id, betId));
-        const [user] = await tx.select().from(usersTable).where(eq(usersTable.id, bet.userId)).limit(1);
-        const newBalance = (parseFloat(user.balance) + parseFloat(bet.potentialWin)).toFixed(2);
-        await tx.update(usersTable).set({ balance: newBalance }).where(eq(usersTable.id, bet.userId));
+    const oldStatus = bet.status;
+
+    await db.transaction(async (tx) => {
+      // Optimistic lock: only update if status actually changed
+      const rows = await tx
+        .update(betsTable)
+        .set({ status })
+        .where(and(eq(betsTable.id, betId), sql`${betsTable.status} != ${status}`))
+        .returning({ id: betsTable.id });
+
+      if (rows.length === 0) return; // already at desired status — no-op
+
+      // Credit balance atomically when marking won (only from non-won state)
+      if (status === "won" && oldStatus !== "won") {
+        await tx
+          .update(usersTable)
+          .set({ balance: sql`${usersTable.balance} + ${bet.potentialWin}::numeric` })
+          .where(eq(usersTable.id, bet.userId));
+      }
+
+      // Refund stake when voiding (only from non-voided state)
+      if (status === "voided" && oldStatus !== "voided") {
+        await tx
+          .update(usersTable)
+          .set({ balance: sql`${usersTable.balance} + ${bet.stake}::numeric` })
+          .where(eq(usersTable.id, bet.userId));
+      }
+
+      // Audit log
+      await tx.insert(settlementLogsTable).values({
+        betId: bet.id,
+        userId: bet.userId,
+        oldStatus,
+        newStatus: status,
+        payout: status === "won" ? bet.potentialWin : status === "voided" ? bet.stake : "0.00",
+        message: `Manual settlement by admin`,
       });
-    } else {
-      await db.update(betsTable).set({ status }).where(eq(betsTable.id, betId));
-    }
+    });
 
     res.json({ id: betId, status });
   } catch (err) {
