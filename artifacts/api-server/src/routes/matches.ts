@@ -6116,12 +6116,17 @@ async function buildUpcomingMatches(): Promise<UpcomingMatch[]> {
     if (seen.has(key)) continue;
     seen.add(key);
     filtered.push(ev);
-    if (filtered.length >= 200) break;
+    if (filtered.length >= 80) break;
   }
 
-  const oddsResults = await Promise.all(
-    filtered.map(ev => getPreMatchOddsV2("football", ev.id).catch(() => null))
-  );
+  const oddsResults: Array<V2PreMatchOdds | null> = new Array(filtered.length).fill(null);
+  const maxOddsLookups = Math.min(filtered.length, 30);
+  const batchSize = 10;
+  for (let i = 0; i < maxOddsLookups; i += batchSize) {
+    const slice = filtered.slice(i, i + batchSize);
+    const out = await Promise.all(slice.map(ev => getPreMatchOddsV2("football", ev.id).catch(() => null)));
+    for (let j = 0; j < out.length; j++) oddsResults[i + j] = out[j] ?? null;
+  }
 
   const results: UpcomingMatch[] = [];
   for (let i = 0; i < filtered.length; i++) {
@@ -7835,11 +7840,10 @@ type UpcomingTopCache = {
   volleyball: UpcomingMatch[]; baseball: UpcomingMatch[]; fetchedAt: number;
 };
 let upcomingTopCache: UpcomingTopCache | null = null;
+let upcomingTopInFlight: Promise<UpcomingTopCache> | null = null;
 const UPCOMING_TOP_TTL = 60_000;
 
-async function getUpcomingAll(): Promise<UpcomingTopCache> {
-  const now = Date.now();
-  if (upcomingTopCache && now - upcomingTopCache.fetchedAt < UPCOMING_TOP_TTL) return upcomingTopCache;
+async function refreshUpcomingTop(): Promise<UpcomingTopCache> {
   const empty: UpcomingMatch[] = [];
   const [football, tennis, basketball, hockey, volleyball, baseball] = await Promise.all([
     buildUpcomingMatches().catch(() => empty),
@@ -7851,6 +7855,21 @@ async function getUpcomingAll(): Promise<UpcomingTopCache> {
   ]);
   upcomingTopCache = { football, tennis, basketball, hockey, volleyball, baseball, fetchedAt: Date.now() };
   return upcomingTopCache;
+}
+
+async function getUpcomingAll(): Promise<UpcomingTopCache> {
+  const now = Date.now();
+  if (upcomingTopCache && now - upcomingTopCache.fetchedAt < UPCOMING_TOP_TTL) return upcomingTopCache;
+  if (upcomingTopCache) {
+    if (!upcomingTopInFlight) {
+      upcomingTopInFlight = refreshUpcomingTop().finally(() => { upcomingTopInFlight = null; });
+    }
+    return upcomingTopCache;
+  }
+  if (!upcomingTopInFlight) {
+    upcomingTopInFlight = refreshUpcomingTop().finally(() => { upcomingTopInFlight = null; });
+  }
+  return upcomingTopInFlight;
 }
 
 // ─── WC 2026 Endpoint ──────────────────────────────────────────────────────────
@@ -7972,9 +7991,18 @@ router.get("/wc2026", async (_req, res) => {
   }
 });
 
+function waitMs(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
 router.get("/upcoming", async (req, res) => {
   const sport = String(req.query["sport"] ?? "all");
-  const cache = await getUpcomingAll();
+  const cache = upcomingTopCache
+    ? await getUpcomingAll()
+    : await Promise.race([
+        getUpcomingAll(),
+        waitMs(1500).then(() => upcomingTopCache ?? { football: [], tennis: [], basketball: [], hockey: [], volleyball: [], baseball: [], fetchedAt: Date.now() }),
+      ]);
   let matches: UpcomingMatch[];
   if (sport === "football") matches = cache.football;
   else if (sport === "tennis") matches = cache.tennis;
