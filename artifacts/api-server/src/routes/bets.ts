@@ -3,7 +3,7 @@ import { db, betsTable, usersTable } from "@workspace/db";
 import { eq, desc, sql, and } from "drizzle-orm";
 import { authMiddleware, type AuthRequest } from "../middlewares/auth";
 import { logger } from "../lib/logger";
-import { liveMatchState, finishedMatchResults } from "./matches";
+import { liveMatchState, finishedMatchResults, type LiveMatchState } from "./matches";
 import { scoreOutcomeForSel, type SelectionRecord } from "../settlement";
 
 const router: IRouter = Router();
@@ -17,7 +17,226 @@ type CashoutStatus = "available" | "suspended" | "locked" | "closed";
 
 const CASHOUT_UNFAVORABLE_CYCLE_MS = 60000;
 const CASHOUT_UNFAVORABLE_OPEN_MS = 15000;
+const CASHOUT_ODDS_WORSE_MULT = 1.2;
 const cashoutUnfavorableSince = new Map<string, number>();
+
+function normalizeSelectionKey(sel: string): string {
+  let s = sel;
+  if      (s === "1x2-home")   s = "home";
+  else if (s === "1x2-draw")   s = "draw";
+  else if (s === "1x2-away")   s = "away";
+  else if (/^tg-([ou][\d]+)$/.test(s))  s = s.slice(3);
+  else if (s === "dc-12")      s = "homeOrAway";
+  else if (s === "eg-0")       s = "eg-g0";
+  else if (s === "eg-1")       s = "eg-g1";
+  else if (s === "eg-2")       s = "eg-g2";
+  else if (s === "eg-3")       s = "eg-g3";
+  else if (s === "eg-4")       s = "eg-g4";
+  else if (s === "eg-5p")      s = "eg-g5plus";
+  return s;
+}
+
+function currentOddForSelection(sel: SelectionRecord, liveSt: LiveMatchState): number | null {
+  const s = normalizeSelectionKey(String(sel.selection ?? ""));
+  const m = (liveSt as { markets?: Record<string, unknown> }).markets as unknown as Record<string, unknown> | undefined;
+  const mk = (m ?? {}) as unknown as {
+    doubleChance?: { homeOrDraw?: number; awayOrDraw?: number; homeOrAway?: number };
+    bothTeamsScore?: { yes?: number; no?: number };
+    totalGoals?: Record<string, number>;
+    handicap?: { homeMinusOne?: number; awayPlusOne?: number; homeMinusOneHalf?: number; awayPlusOneHalf?: number };
+    halfTime?: { home?: number; draw?: number; away?: number };
+    secondHalf?: { home?: number; draw?: number; away?: number };
+    firstGoal?: { home?: number; noGoal?: number; away?: number };
+    drawNoBet?: { home?: number; away?: number };
+    asianTotals?: Record<string, number>;
+    htft?: Record<string, number>;
+    correctScore?: Record<string, number>;
+    corners?: Record<string, number>;
+    cards?: Record<string, number>;
+    winToNil?: { home?: number; away?: number };
+    cleanSheet?: { home?: number; away?: number };
+    goalOddEven?: { odd?: number; even?: number };
+    exactGoals?: Record<string, number>;
+    btts1H?: { yes?: number; no?: number };
+    btts2H?: { yes?: number; no?: number };
+    toWinBothHalves?: { home?: number; away?: number };
+    highestScoringHalf?: { first?: number; second?: number; equal?: number };
+    htCorrectScore?: Record<string, number>;
+    h2CorrectScore?: Record<string, number>;
+    teamGoals?: Record<string, number>;
+    tennisExtra?: Record<string, unknown>;
+    volleyballExtra?: Record<string, unknown>;
+    basketballExtra?: Record<string, unknown>;
+    hockeyExtra?: Record<string, unknown>;
+    etExtra?: Record<string, unknown>;
+    penExtra?: Record<string, unknown>;
+  };
+
+  const odds1x2 = (liveSt as { odds?: { home?: number; draw?: number; away?: number } }).odds;
+  if (s === "home") return Number.isFinite(odds1x2?.home) ? odds1x2!.home! : null;
+  if (s === "draw") return Number.isFinite(odds1x2?.draw) ? odds1x2!.draw! : null;
+  if (s === "away") return Number.isFinite(odds1x2?.away) ? odds1x2!.away! : null;
+
+  if (s === "homeOrDraw" || s === "dc-hd") return Number.isFinite(mk.doubleChance?.homeOrDraw) ? mk.doubleChance!.homeOrDraw! : null;
+  if (s === "awayOrDraw" || s === "dc-da") return Number.isFinite(mk.doubleChance?.awayOrDraw) ? mk.doubleChance!.awayOrDraw! : null;
+  if (s === "homeOrAway" || s === "dc-ha") return Number.isFinite(mk.doubleChance?.homeOrAway) ? mk.doubleChance!.homeOrAway! : null;
+
+  if (s === "bts-yes") return Number.isFinite(mk.bothTeamsScore?.yes) ? mk.bothTeamsScore!.yes! : null;
+  if (s === "bts-no")  return Number.isFinite(mk.bothTeamsScore?.no)  ? mk.bothTeamsScore!.no!  : null;
+
+  if (s === "goe-odd")  return Number.isFinite(mk.goalOddEven?.odd)  ? mk.goalOddEven!.odd!  : null;
+  if (s === "goe-even") return Number.isFinite(mk.goalOddEven?.even) ? mk.goalOddEven!.even! : null;
+
+  if (s === "wtn-h") return Number.isFinite(mk.winToNil?.home) ? mk.winToNil!.home! : null;
+  if (s === "wtn-a") return Number.isFinite(mk.winToNil?.away) ? mk.winToNil!.away! : null;
+
+  if (s === "cs-h") return Number.isFinite(mk.cleanSheet?.home) ? mk.cleanSheet!.home! : null;
+  if (s === "cs-a") return Number.isFinite(mk.cleanSheet?.away) ? mk.cleanSheet!.away! : null;
+
+  if (s === "dnb-home") return Number.isFinite(mk.drawNoBet?.home) ? mk.drawNoBet!.home! : null;
+  if (s === "dnb-away") return Number.isFinite(mk.drawNoBet?.away) ? mk.drawNoBet!.away! : null;
+
+  if (s === "hc-hm1")  return Number.isFinite(mk.handicap?.homeMinusOne) ? mk.handicap!.homeMinusOne! : null;
+  if (s === "hc-ap1")  return Number.isFinite(mk.handicap?.awayPlusOne) ? mk.handicap!.awayPlusOne! : null;
+  if (s === "hc-hm15") return Number.isFinite(mk.handicap?.homeMinusOneHalf) ? mk.handicap!.homeMinusOneHalf! : null;
+  if (s === "hc-ap15") return Number.isFinite(mk.handicap?.awayPlusOneHalf) ? mk.handicap!.awayPlusOneHalf! : null;
+
+  if (s === "ht-home") return Number.isFinite(mk.halfTime?.home) ? mk.halfTime!.home! : null;
+  if (s === "ht-draw") return Number.isFinite(mk.halfTime?.draw) ? mk.halfTime!.draw! : null;
+  if (s === "ht-away") return Number.isFinite(mk.halfTime?.away) ? mk.halfTime!.away! : null;
+
+  if (s === "2h-home") return Number.isFinite(mk.secondHalf?.home) ? mk.secondHalf!.home! : null;
+  if (s === "2h-draw") return Number.isFinite(mk.secondHalf?.draw) ? mk.secondHalf!.draw! : null;
+  if (s === "2h-away") return Number.isFinite(mk.secondHalf?.away) ? mk.secondHalf!.away! : null;
+
+  if (s === "fg-home") return Number.isFinite(mk.firstGoal?.home) ? mk.firstGoal!.home! : null;
+  if (s === "fg-away") return Number.isFinite(mk.firstGoal?.away) ? mk.firstGoal!.away! : null;
+  if (s === "fg-none") return Number.isFinite(mk.firstGoal?.noGoal) ? mk.firstGoal!.noGoal! : null;
+
+  if (/^[ou]\d+$/.test(s)) {
+    const n = parseInt(s.slice(1), 10);
+    if (Number.isFinite(n)) {
+      const asAsian = mk.asianTotals?.[s];
+      if (Number.isFinite(asAsian)) return asAsian!;
+      const key = `${s[0] === "o" ? "over" : "under"}${String(n).padStart(2, "0")}`;
+      const v = mk.totalGoals?.[key];
+      return Number.isFinite(v) ? v! : null;
+    }
+  }
+
+  if (/^[ou]c\d+$/.test(s)) {
+    const key = `${s[0]}${s.slice(2)}`;
+    const v = mk.corners?.[key];
+    return Number.isFinite(v) ? v! : null;
+  }
+
+  if (/^[ou]card\d+$/.test(s)) {
+    const key = `${s[0]}${s.slice(5)}`;
+    const v = mk.cards?.[key];
+    return Number.isFinite(v) ? v! : null;
+  }
+
+  if (s.startsWith("htft-")) {
+    const k = s.slice(5);
+    const v = mk.htft?.[k];
+    return Number.isFinite(v) ? v! : null;
+  }
+
+  if (s.startsWith("cs-")) {
+    const k = s.slice(3);
+    const v = mk.correctScore?.[k];
+    return Number.isFinite(v) ? v! : null;
+  }
+
+  if (s.startsWith("htcs-")) {
+    const k = s.slice(5);
+    const v = mk.htCorrectScore?.[k];
+    return Number.isFinite(v) ? v! : null;
+  }
+
+  if (s.startsWith("h2cs-")) {
+    const k = s.slice(5);
+    const v = mk.h2CorrectScore?.[k];
+    return Number.isFinite(v) ? v! : null;
+  }
+
+  if (s.startsWith("eg-")) {
+    const k = s.slice(3);
+    const v = mk.exactGoals?.[k];
+    return Number.isFinite(v) ? v! : null;
+  }
+
+  if (s === "b1h-yes") return Number.isFinite(mk.btts1H?.yes) ? mk.btts1H!.yes! : null;
+  if (s === "b1h-no")  return Number.isFinite(mk.btts1H?.no)  ? mk.btts1H!.no!  : null;
+  if (s === "b2h-yes") return Number.isFinite(mk.btts2H?.yes) ? mk.btts2H!.yes! : null;
+  if (s === "b2h-no")  return Number.isFinite(mk.btts2H?.no)  ? mk.btts2H!.no!  : null;
+
+  if (s === "wbh-h") return Number.isFinite(mk.toWinBothHalves?.home) ? mk.toWinBothHalves!.home! : null;
+  if (s === "wbh-a") return Number.isFinite(mk.toWinBothHalves?.away) ? mk.toWinBothHalves!.away! : null;
+
+  if (s === "hsf-1") return Number.isFinite(mk.highestScoringHalf?.first) ? mk.highestScoringHalf!.first! : null;
+  if (s === "hsf-2") return Number.isFinite(mk.highestScoringHalf?.second) ? mk.highestScoringHalf!.second! : null;
+  if (s === "hsf-e") return Number.isFinite(mk.highestScoringHalf?.equal) ? mk.highestScoringHalf!.equal! : null;
+
+  if (s.startsWith("tgh-") || s.startsWith("tga-")) {
+    const isHome = s.startsWith("tgh-");
+    const dir = s.slice(4, 5);
+    const n = s.slice(5);
+    const k = `${isHome ? "home" : "away"}${dir === "o" ? "Over" : "Under"}${n}`;
+    const v = mk.teamGoals?.[k];
+    return Number.isFinite(v) ? v! : null;
+  }
+
+  if (/^set[123]-(home|away)$/.test(s)) {
+    const setNum = parseInt(s.slice(3, 4), 10);
+    const side = s.endsWith("home") ? "home" : "away";
+    const vt = mk.tennisExtra as unknown as Record<string, unknown> | undefined;
+    const vv = mk.volleyballExtra as unknown as Record<string, unknown> | undefined;
+    const key = setNum === 1 ? "firstSet" : `set${setNum}`;
+    const t = (vt?.[key] as Record<string, unknown> | undefined)?.[side];
+    const v = (vv?.[`set${setNum}`] as Record<string, unknown> | undefined)?.[side];
+    const out = Number.isFinite(t as number) ? (t as number) : Number.isFinite(v as number) ? (v as number) : null;
+    return out;
+  }
+
+  if (/^vs[123][ha]$/.test(s)) {
+    const setNum = parseInt(s.slice(2, 3), 10);
+    const side = s.endsWith("h") ? "home" : "away";
+    const vv = mk.volleyballExtra as unknown as Record<string, unknown> | undefined;
+    const v = (vv?.[`set${setNum}`] as Record<string, unknown> | undefined)?.[side];
+    return Number.isFinite(v as number) ? (v as number) : null;
+  }
+
+  if (/^es-(h20|h21|a02|a12)$/.test(s)) {
+    const vt = mk.tennisExtra as unknown as Record<string, unknown> | undefined;
+    const v = (vt?.["exactSets"] as Record<string, unknown> | undefined)?.[s.slice(3)];
+    return Number.isFinite(v as number) ? (v as number) : null;
+  }
+
+  if (/^vs-s(30|31|32|03|13|23)$/.test(s)) {
+    const vv = mk.volleyballExtra as unknown as Record<string, unknown> | undefined;
+    const v = (vv?.["exactScore"] as Record<string, unknown> | undefined)?.[s.slice(3)];
+    return Number.isFinite(v as number) ? (v as number) : null;
+  }
+
+  if (/^q[1234]-(home|away)$/.test(s)) {
+    const q = `q${s.slice(1, 2)}`;
+    const side = s.endsWith("home") ? "home" : "away";
+    const vb = mk.basketballExtra as unknown as Record<string, unknown> | undefined;
+    const v = (vb?.[q] as Record<string, unknown> | undefined)?.[side];
+    return Number.isFinite(v as number) ? (v as number) : null;
+  }
+
+  if (/^p[123]-(home|draw|away)$/.test(s)) {
+    const p = `period${s.slice(1, 2)}`;
+    const side = s.endsWith("home") ? "home" : s.endsWith("draw") ? "draw" : "away";
+    const vh = mk.hockeyExtra as unknown as Record<string, unknown> | undefined;
+    const v = (vh?.[p] as Record<string, unknown> | undefined)?.[side];
+    return Number.isFinite(v as number) ? (v as number) : null;
+  }
+
+  return null;
+}
 
 function getBetSelections(bet: { matchId: string; matchTitle: string; selections: unknown; totalOdds: string }): SelectionRecord[] {
   if (Array.isArray(bet.selections)) return bet.selections as SelectionRecord[];
@@ -61,8 +280,9 @@ function cashoutInfoForBet(bet: { id?: number | string; matchId: string; matchTi
       if (suspended && !suspendedReason) suspendedReason = liveSt._suspensionReason ?? "LANCE CRÍTICO";
 
       if (!unfavorableReason && typeof liveSt.homeScore === "number" && typeof liveSt.awayScore === "number") {
-        if (sel.selection === "home" && liveSt.homeScore < liveSt.awayScore) unfavorableReason = "Time selecionado está perdendo";
-        if (sel.selection === "away" && liveSt.awayScore < liveSt.homeScore) unfavorableReason = "Time selecionado está perdendo";
+        const k = normalizeSelectionKey(String(sel.selection ?? ""));
+        if ((k === "home" || k === "homeOrDraw" || k === "dc-hd" || k === "dnb-home") && liveSt.homeScore < liveSt.awayScore) unfavorableReason = "Seleção está em desvantagem";
+        if ((k === "away" || k === "awayOrDraw" || k === "dc-da" || k === "dnb-away") && liveSt.awayScore < liveSt.homeScore) unfavorableReason = "Seleção está em desvantagem";
       }
     }
 
@@ -72,10 +292,10 @@ function cashoutInfoForBet(bet: { id?: number | string; matchId: string; matchTi
       continue;
     }
 
-    if (sel.selection === "home" && liveSt.odds?.home) currentOddsProduct *= Math.max(1.01, liveSt.odds.home);
-    else if (sel.selection === "away" && liveSt.odds?.away) currentOddsProduct *= Math.max(1.01, liveSt.odds.away);
-    else if (sel.selection === "draw" && liveSt.odds?.draw) currentOddsProduct *= Math.max(1.01, liveSt.odds.draw);
-    else currentOddsProduct *= baseOdd;
+    const curOdd = currentOddForSelection(sel, liveSt);
+    const useOdd = Number.isFinite(curOdd) && (curOdd as number) > 1.0 ? Math.max(1.01, curOdd as number) : baseOdd;
+    currentOddsProduct *= useOdd;
+    if (!unfavorableReason && Number.isFinite(curOdd) && (curOdd as number) >= baseOdd * CASHOUT_ODDS_WORSE_MULT) unfavorableReason = "Odds ficaram desfavoráveis";
   }
 
   if (!anyLive) {
