@@ -6,8 +6,8 @@ export default function SplashScreen({ onDone }: { onDone: () => void }) {
   const onDoneRef = useRef(onDone);
 
   useEffect(() => {
-    const t1 = setTimeout(() => setVisible(false), 2400);
-    const t2 = setTimeout(() => onDoneRef.current(), 2850);
+    const t1 = setTimeout(() => setVisible(false), 700);
+    const t2 = setTimeout(() => onDoneRef.current(), 950);
     return () => { clearTimeout(t1); clearTimeout(t2); };
   }, []);
 
@@ -18,7 +18,7 @@ export default function SplashScreen({ onDone }: { onDone: () => void }) {
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
-          transition={{ duration: 0.4 }}
+          transition={{ duration: 0.22 }}
           className="fixed inset-0 z-[9999] bg-black flex flex-col items-center justify-center select-none overflow-hidden"
         >
           {/* Radial red glow — centered */}
@@ -41,20 +41,9 @@ export default function SplashScreen({ onDone }: { onDone: () => void }) {
 
           {/* Pulsing brand */}
           <motion.div
-            initial={{ opacity: 0, scale: 0.88 }}
-            animate={{
-              opacity: 1,
-              scale: [0.88, 1, 1.04, 1, 1.04, 1],
-            }}
-            transition={{
-              opacity: { duration: 0.5, delay: 0.15 },
-              scale: {
-                times: [0, 0.2, 0.45, 0.65, 0.85, 1],
-                duration: 2.2,
-                delay: 0.15,
-                ease: "easeInOut",
-              },
-            }}
+            initial={{ opacity: 0, scale: 0.90 }}
+            animate={{ opacity: 1, scale: 1 }}
+            transition={{ opacity: { duration: 0.28, delay: 0.05 }, scale: { duration: 0.32, delay: 0.05, ease: "easeOut" } }}
             className="flex items-end leading-none"
           >
             <span
@@ -80,7 +69,7 @@ export default function SplashScreen({ onDone }: { onDone: () => void }) {
           <motion.p
             initial={{ opacity: 0 }}
             animate={{ opacity: 0.38 }}
-            transition={{ delay: 0.8, duration: 0.7 }}
+            transition={{ delay: 0.22, duration: 0.3 }}
             className="absolute bottom-14 text-white text-xs tracking-[0.30em] uppercase font-medium"
           >
             A melhor casa de apostas
