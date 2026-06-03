@@ -5748,7 +5748,7 @@ export default function Home() {
       if (out === "lost") return "red";
     }
     if (betStatus === "won") return "green";
-    if (betStatus === "lost") return "red";
+    if (betStatus === "lost") return "pending";
     // Pending: check live match for tentative state
     const lm = findLiveMatchForSel(sel);
     if (!lm) return "pending";
@@ -9655,9 +9655,11 @@ export default function Home() {
                                 if (isLost) {
                                   leftIcon = outcome === "void"
                                     ? <div className="w-6 h-6 rounded-full bg-zinc-700/40 border border-white/20 flex items-center justify-center shrink-0"><span className="text-white text-[11px] font-black leading-none">—</span></div>
-                                    : outcome !== "red"
+                                    : outcome === "green"
                                     ? <div className="w-6 h-6 rounded-full bg-white/30 flex items-center justify-center shrink-0"><Check size={13} className="text-white" strokeWidth={3} /></div>
-                                    : <div className="w-6 h-6 rounded-full bg-red-950/60 border border-white/20 flex items-center justify-center shrink-0"><X size={13} className="text-white" strokeWidth={2.5} /></div>;
+                                    : outcome === "red"
+                                    ? <div className="w-6 h-6 rounded-full bg-red-950/60 border border-white/20 flex items-center justify-center shrink-0"><X size={13} className="text-white" strokeWidth={2.5} /></div>
+                                    : <div className="w-6 h-6 rounded-full bg-zinc-800/60 border border-white/20 flex items-center justify-center shrink-0"><Clock size={13} className="text-white" /></div>;
                                 } else if (isWon) {
                                   leftIcon = outcome === "void"
                                     ? <div className="w-6 h-6 rounded-full bg-zinc-200 border border-zinc-300 flex items-center justify-center shrink-0"><span className="text-zinc-600 text-[11px] font-black leading-none">—</span></div>

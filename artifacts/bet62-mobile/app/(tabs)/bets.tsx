@@ -192,12 +192,13 @@ function BetCard({ bet, token, onCashout }: { bet: Bet; token: string | null; on
           let iconBg = "transparent";
           let showCircle = false;
 
-          const selOutcome = sel.outcome ?? (isWon ? "won" : isLost ? "lost" : null);
+          const selOutcome = sel.outcome ?? null;
           if (isCashedOut) { iconName = "cash-outline"; iconColor = "#fff"; iconBg = "rgba(251,191,36,0.7)"; showCircle = true; }
           else if (isVoided) { iconName = "lock-closed-outline"; iconColor = "#fff"; iconBg = "rgba(59,130,246,0.6)"; showCircle = true; }
           else if (selOutcome === "won") { iconName = "checkmark"; iconColor = "#fff"; iconBg = "#22c55e"; showCircle = true; }
           else if (selOutcome === "lost") { iconName = "close"; iconColor = "#fff"; iconBg = "rgba(0,0,0,0.3)"; showCircle = true; }
           else if (selOutcome === "void") { iconName = "remove"; iconColor = "#fff"; iconBg = "rgba(156,163,175,0.55)"; showCircle = true; }
+          else if (isWon || isLost) { iconName = "time-outline"; iconColor = "#fff"; iconBg = "rgba(156,163,175,0.35)"; showCircle = true; }
 
           return (
             <View key={i} style={{ flexDirection: "row", alignItems: "flex-start", paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: dividerColor, gap: 10 }}>

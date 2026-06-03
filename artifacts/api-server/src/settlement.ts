@@ -1,5 +1,5 @@
 import { db, betsTable, cashoutStatesTable, usersTable, settlementLogsTable } from "@workspace/db";
-import { eq, and, lt, sql } from "drizzle-orm";
+import { eq, and, lt, sql, gte, desc } from "drizzle-orm";
 import { logger } from "./lib/logger";
 import { ensureFinishedMatchResult, finishedMatchResults, scanDailyForFinished, scanV2AllSportsForFinished } from "./routes/matches";
 
@@ -624,6 +624,72 @@ export async function autoSettlePendingBets(): Promise<void> {
   }
 }
 
+async function hydrateSettledBetSelections(): Promise<void> {
+  try {
+    const cutoff = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+    const lostBets = await db
+      .select({
+        id: betsTable.id,
+        matchId: betsTable.matchId,
+        selections: betsTable.selections,
+        createdAt: betsTable.createdAt,
+      })
+      .from(betsTable)
+      .where(and(eq(betsTable.status, "lost"), gte(betsTable.createdAt, cutoff)))
+      .orderBy(desc(betsTable.createdAt))
+      .limit(200);
+
+    if (lostBets.length === 0) return;
+
+    for (const bet of lostBets) {
+      const selections = bet.selections as SelectionRecord[];
+      if (!Array.isArray(selections) || selections.length === 0) continue;
+
+      const isSingle = selections.length === 1;
+      let changed = false;
+
+      const next = selections.map((sel) => {
+        const mId = sel.matchId ?? (isSingle ? bet.matchId : undefined);
+        if (!mId) return sel;
+        const r = finishedMatchResults.get(mId);
+        if (!r) return sel;
+
+        const needsOutcome = sel.outcome == null;
+        const needsScore = sel.finalScore == null;
+        if (!needsOutcome && !needsScore) return sel;
+
+        const ht = typeof r.htHome === "number" && typeof r.htAway === "number"
+          ? { htHome: r.htHome, htAway: r.htAway }
+          : undefined;
+
+        changed = true;
+        return {
+          ...sel,
+          finalScore: needsScore ? { home: r.home, away: r.away } : sel.finalScore,
+          htScore: sel.htScore ?? ht,
+          outcome: needsOutcome
+            ? scoreOutcomeForSel(sel, { home: r.home, away: r.away }, ht, {
+                cornersTotal: r.cornersTotal,
+                cardsTotal: r.cardsTotal,
+                firstGoal: r.firstGoal,
+                extras: r.extras,
+              })
+            : sel.outcome,
+        };
+      });
+
+      if (!changed) continue;
+
+      await db
+        .update(betsTable)
+        .set({ selections: next })
+        .where(eq(betsTable.id, bet.id));
+    }
+  } catch (err) {
+    logger.error({ err }, "Hydrate settled bet selections error");
+  }
+}
+
 /**
  * Void and refund any pending bets older than STALE_THRESHOLD_MS where no
  * match result has been found. This prevents bets from staying pending forever
@@ -722,6 +788,8 @@ export function startSettlementWorker(): void {
       ]);
       // Settle bets whose results are now known
       await autoSettlePendingBets();
+      // Enrich early-loss bets with per-leg scores/outcomes when remaining matches finish
+      await hydrateSettledBetSelections();
       // Void and refund bets with no data after 72 h
       await expireStalePendingBets();
     } catch (err) {
