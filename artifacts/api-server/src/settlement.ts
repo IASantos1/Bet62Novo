@@ -12,7 +12,7 @@ export type SelectionRecord = {
   label?: string;
   finalScore?: { home: number; away: number };
   htScore?: { htHome: number; htAway: number };
-  outcome?: "won" | "lost" | null;
+  outcome?: "won" | "lost" | "void" | null;
 };
 
 type FTScore = { home: number; away: number };
@@ -50,8 +50,8 @@ export function scoreOutcomeForSel(
   sel: { selection: string },
   ft: FTScore,
   ht?: HTScore,
-  extra?: { cornersTotal?: number; cardsTotal?: number; firstGoal?: "home" | "away" | "none" }
-): "won" | "lost" | null {
+  extra?: { cornersTotal?: number; cardsTotal?: number; firstGoal?: "home" | "away" | "none"; extras?: unknown }
+): "won" | "lost" | "void" | null {
   // ── Key normalisation (ComprehensiveMarketsSheet keys → canonical keys) ────
   let s = sel.selection;
   if      (s === "1x2-home")   s = "home";
@@ -79,25 +79,89 @@ export function scoreOutcomeForSel(
   const h2A = htA !== null ? away - htA : null;
 
   let winning: boolean | null = null;
+  let voided = false;
 
   // ── Corners O/U (requires stats) ──────────────────────────────────────────
   if (/^[ou]c\d+$/.test(s)) {
     if (extra?.cornersTotal == null) return null;
     const line = parseInt(s.slice(2), 10) / 10;
     if (!Number.isFinite(line)) return null;
-    winning = s[0] === "o" ? extra.cornersTotal > line : extra.cornersTotal < line;
+    if (extra.cornersTotal === line) voided = true;
+    else winning = s[0] === "o" ? extra.cornersTotal > line : extra.cornersTotal < line;
   }
   // ── Cards O/U (requires stats) ────────────────────────────────────────────
   else if (/^[ou]card\d+$/.test(s)) {
     if (extra?.cardsTotal == null) return null;
     const line = parseInt(s.slice(5), 10) / 10;
     if (!Number.isFinite(line)) return null;
-    winning = s[0] === "o" ? extra.cardsTotal > line : extra.cardsTotal < line;
+    if (extra.cardsTotal === line) voided = true;
+    else winning = s[0] === "o" ? extra.cardsTotal > line : extra.cardsTotal < line;
   }
   // ── First goal (requires stats) ───────────────────────────────────────────
   else if (s === "fg-home" || s === "fg-away" || s === "fg-none") {
     if (!extra?.firstGoal) return null;
     winning = s === `fg-${extra.firstGoal}`;
+  }
+  // ── Set winners (tennis/volleyball — requires per-period scores) ──────────
+  else if (/^set[123]-(home|away)$/.test(s) || /^vs[123][ha]$/.test(s)) {
+    const setNum =
+      s.startsWith("set") ? parseInt(s.slice(3, 4), 10)
+      : parseInt(s.slice(2, 3), 10);
+    const wantHome = s.endsWith("home") || s.endsWith("h");
+    const wantAway = s.endsWith("away") || s.endsWith("a");
+    if (!Number.isFinite(setNum) || setNum <= 0) return null;
+    const ex = (extra?.extras ?? {}) as Record<string, unknown>;
+    const hs = ex["homeScore"] as Record<string, unknown> | undefined;
+    const as = ex["awayScore"] as Record<string, unknown> | undefined;
+    const h = typeof hs?.[`period${setNum}`] === "number" ? hs?.[`period${setNum}`] as number : null;
+    const a = typeof as?.[`period${setNum}`] === "number" ? as?.[`period${setNum}`] as number : null;
+    if (h === null || a === null) return null;
+    if (h === a) return "void";
+    winning = wantHome ? h > a : wantAway ? a > h : null;
+  }
+  // ── Exact sets (tennis) ───────────────────────────────────────────────────
+  else if (/^es-(h20|h21|a02|a12)$/.test(s)) {
+    const ex = (extra?.extras ?? {}) as Record<string, unknown>;
+    const hs = ex["homeScore"] as Record<string, unknown> | undefined;
+    const as = ex["awayScore"] as Record<string, unknown> | undefined;
+    const hc = typeof hs?.["current"] === "number" ? hs["current"] as number : null;
+    const ac = typeof as?.["current"] === "number" ? as["current"] as number : null;
+    if (hc === null || ac === null) return null;
+    const score = `${hc}-${ac}`;
+    const want =
+      s === "es-h20" ? "2-0" :
+      s === "es-h21" ? "2-1" :
+      s === "es-a02" ? "0-2" :
+      "1-2";
+    winning = score === want;
+  }
+  // ── Total sets O/U (tennis) ───────────────────────────────────────────────
+  else if (/^([ou])sets(35|25)?$/.test(s)) {
+    const m = s.match(/^([ou])sets(35|25)?$/)!;
+    const dir = m[1]!;
+    const suf = m[2] ?? "";
+    const line = suf === "35" ? 3.5 : 2.5;
+    const ex = (extra?.extras ?? {}) as Record<string, unknown>;
+    const hs = ex["homeScore"] as Record<string, unknown> | undefined;
+    const as = ex["awayScore"] as Record<string, unknown> | undefined;
+    const hc = typeof hs?.["current"] === "number" ? hs["current"] as number : null;
+    const ac = typeof as?.["current"] === "number" ? as["current"] as number : null;
+    if (hc === null || ac === null) return null;
+    const totalSets = hc + ac;
+    if (totalSets === line) voided = true;
+    else winning = dir === "o" ? totalSets > line : totalSets < line;
+  }
+  // ── Volleyball exact score (best-of-5) ────────────────────────────────────
+  else if (/^vs-s(30|31|32|03|13|23)$/.test(s)) {
+    const ex = (extra?.extras ?? {}) as Record<string, unknown>;
+    const hs = ex["homeScore"] as Record<string, unknown> | undefined;
+    const as = ex["awayScore"] as Record<string, unknown> | undefined;
+    const hc = typeof hs?.["current"] === "number" ? hs["current"] as number : null;
+    const ac = typeof as?.["current"] === "number" ? as["current"] as number : null;
+    if (hc === null || ac === null) return null;
+    const want = s.slice(4, 6);
+    const score = `${hc}${ac}`;
+    winning = score === want;
   }
   // ── Markets not resolvable from score alone — leave pending for admin ──────
   else if (
@@ -128,7 +192,10 @@ export function scoreOutcomeForSel(
   // ── Total Goals O/U  (o25, u35, o05, etc.) ────────────────────────────────
   else if (/^[ou][\d.]+$/.test(s)) {
     const line = parseFloat(s.slice(1));
-    if (!isNaN(line)) winning = s[0] === "o" ? total > line : total < line;
+    if (!isNaN(line)) {
+      if (total === line) voided = true;
+      else winning = s[0] === "o" ? total > line : total < line;
+    }
   }
 
   // ── Goal Odd / Even ────────────────────────────────────────────────────────
@@ -151,10 +218,10 @@ export function scoreOutcomeForSel(
 
   // ── Draw No Bet  (void = null on draw) ────────────────────────────────────
   else if (s === "dnb-home") {
-    if (home === away) return null;
+    if (home === away) return "void";
     winning = home > away;
   } else if (s === "dnb-away") {
-    if (home === away) return null;
+    if (home === away) return "void";
     winning = away > home;
   }
 
@@ -181,14 +248,16 @@ export function scoreOutcomeForSel(
   else if (/^tgh-([ou])(\d+)$/.test(s)) {
     const m = s.match(/^tgh-([ou])(\d+)$/)!;
     const line = parseInt(m[2]!, 10) / 10;
-    winning = m[1] === "o" ? home > line : home < line;
+    if (home === line) voided = true;
+    else winning = m[1] === "o" ? home > line : home < line;
   }
 
   // ── Away Team Goals O/U  (tga-o15 = away scores > 1.5) ───────────────────
   else if (/^tga-([ou])(\d+)$/.test(s)) {
     const m = s.match(/^tga-([ou])(\d+)$/)!;
     const line = parseInt(m[2]!, 10) / 10;
-    winning = m[1] === "o" ? away > line : away < line;
+    if (away === line) voided = true;
+    else winning = m[1] === "o" ? away > line : away < line;
   }
 
   // ══════════ MARKETS THAT REQUIRE HT SCORE ════════════════════════════════
@@ -291,6 +360,7 @@ export function scoreOutcomeForSel(
     }
   }
 
+  if (voided) return "void";
   return winning === null ? null : winning ? "won" : "lost";
 }
 
@@ -375,7 +445,7 @@ export async function autoSettlePendingBets(): Promise<void> {
         if (!Array.isArray(selections) || selections.length === 0) continue;
 
         const isSingle = selections.length === 1;
-        const outcomes: Array<"won" | "lost" | null> = [];
+        const outcomes: Array<"won" | "lost" | "void" | null> = [];
 
         for (const sel of selections) {
           const result = findResult(sel, bet.matchId, isSingle);
@@ -393,6 +463,7 @@ export async function autoSettlePendingBets(): Promise<void> {
             cornersTotal: result.cornersTotal,
             cardsTotal: result.cardsTotal,
             firstGoal: result.firstGoal,
+            extras: result.extras,
           }));
         }
 
@@ -414,6 +485,7 @@ export async function autoSettlePendingBets(): Promise<void> {
                 cornersTotal: r.cornersTotal,
                 cardsTotal: r.cardsTotal,
                 firstGoal: r.firstGoal,
+                extras: r.extras,
               }),
             };
           });
@@ -444,8 +516,45 @@ export async function autoSettlePendingBets(): Promise<void> {
         // Only settle when every selection has a resolved outcome (no nulls)
         if (outcomes.some(o => o === null)) continue;
 
-        // All outcomes resolved and none is "lost" → all won
+        if (outcomes.every(o => o === "void")) {
+          await db.transaction(async (tx) => {
+            const rows = await tx
+              .update(betsTable)
+              .set({ status: "voided" })
+              .where(and(eq(betsTable.id, bet.id), eq(betsTable.status, "pending")))
+              .returning({ id: betsTable.id });
+            if (rows.length === 0) return;
+
+            await tx
+              .update(usersTable)
+              .set({ balance: sql`${usersTable.balance} + ${bet.stake}::numeric` })
+              .where(eq(usersTable.id, bet.userId));
+
+            await tx.insert(settlementLogsTable).values({
+              betId: bet.id,
+              userId: bet.userId,
+              oldStatus: "pending",
+              newStatus: "voided",
+              payout: bet.stake,
+              message: "Auto-settled: all selections voided — stake refunded",
+            });
+          });
+          settled++;
+          continue;
+        }
+
+        // All outcomes resolved and none is "lost" → won (void legs ignored)
         const newStatus = "won";
+
+        const stakeNum = parseFloat(bet.stake);
+        const effectiveOdds = selections.reduce((acc, sel, idx) => {
+          const o = outcomes[idx];
+          if (o === "won") return acc * Math.max(1.01, Number(sel.odd ?? 1));
+          return acc;
+        }, 1);
+        const payoutNum = Math.max(0, Number((stakeNum * effectiveOdds).toFixed(2)));
+        const payoutStr = payoutNum.toFixed(2);
+        const oddsStr = Number(effectiveOdds.toFixed(2)).toFixed(2);
 
         const updatedSelsWon = selections.map(sel => {
           const mId = sel.matchId ?? (isSingle ? bet.matchId : undefined);
@@ -463,6 +572,7 @@ export async function autoSettlePendingBets(): Promise<void> {
               cornersTotal: r.cornersTotal,
               cardsTotal: r.cardsTotal,
               firstGoal: r.firstGoal,
+              extras: r.extras,
             }),
           };
         });
@@ -471,7 +581,7 @@ export async function autoSettlePendingBets(): Promise<void> {
           // Optimistic lock: only update if still pending
           const rows = await tx
             .update(betsTable)
-            .set({ status: newStatus, selections: updatedSelsWon })
+            .set({ status: newStatus, selections: updatedSelsWon, potentialWin: payoutStr, totalOdds: oddsStr })
             .where(and(eq(betsTable.id, bet.id), eq(betsTable.status, "pending")))
             .returning({ id: betsTable.id });
 
@@ -480,7 +590,7 @@ export async function autoSettlePendingBets(): Promise<void> {
           // Atomic SQL addition — no read-then-write race condition
           await tx
             .update(usersTable)
-            .set({ balance: sql`${usersTable.balance} + ${bet.potentialWin}::numeric` })
+            .set({ balance: sql`${usersTable.balance} + ${payoutStr}::numeric` })
             .where(eq(usersTable.id, bet.userId));
 
           await tx.insert(settlementLogsTable).values({
@@ -488,8 +598,8 @@ export async function autoSettlePendingBets(): Promise<void> {
             userId: bet.userId,
             oldStatus: "pending",
             newStatus: "won",
-            payout: bet.potentialWin,
-            message: `Auto-settled: all ${selections.length} leg(s) won`,
+            payout: payoutStr,
+            message: `Auto-settled: settled with ${outcomes.filter(o => o === "void").length} void leg(s)`,
           });
         });
 

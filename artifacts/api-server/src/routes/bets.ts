@@ -176,6 +176,7 @@ router.post("/:id/cashout", authMiddleware, async (req: AuthRequest, res: Respon
         cornersTotal: result.cornersTotal,
         cardsTotal: result.cardsTotal,
         firstGoal: result.firstGoal,
+        extras: result.extras,
       }) === "lost";
     });
     if (hasLostLeg) {
@@ -196,6 +197,7 @@ router.post("/:id/cashout", authMiddleware, async (req: AuthRequest, res: Respon
             cornersTotal: result.cornersTotal,
             cardsTotal: result.cardsTotal,
             firstGoal: result.firstGoal,
+            extras: result.extras,
           }),
         };
       });

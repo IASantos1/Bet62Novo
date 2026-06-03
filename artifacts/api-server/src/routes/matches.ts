@@ -2,6 +2,8 @@ import { Router, type IRouter } from "express";
 import { WebSocketServer, type WebSocket as WsClient } from "ws";
 import { CONFIG } from "../lib/config";
 import { logger } from "../lib/logger";
+import { db, matchResultsTable } from "@workspace/db";
+import { eq } from "drizzle-orm";
 
 const router: IRouter = Router();
 
@@ -2533,6 +2535,7 @@ export const finishedMatchResults = new Map<string, {
   cornersTotal?: number;
   cardsTotal?: number;
   firstGoal?: "home" | "away" | "none";
+  extras?: unknown;
   finishedAt: number; // ms
 }>();
 
@@ -2546,6 +2549,29 @@ function _pruneFinishedResults(): void {
 export async function ensureFinishedMatchResult(matchId: string): Promise<boolean> {
   if (!matchId) return false;
   if (finishedMatchResults.has(matchId)) return true;
+
+  try {
+    if (db) {
+      const [row] = await db.select().from(matchResultsTable).where(eq(matchResultsTable.matchId, matchId)).limit(1);
+      if (row && typeof row.home === "number" && typeof row.away === "number") {
+        finishedMatchResults.set(matchId, {
+          home: row.home,
+          away: row.away,
+          htHome: row.htHome ?? undefined,
+          htAway: row.htAway ?? undefined,
+          homeTeam: row.homeTeam ?? "",
+          awayTeam: row.awayTeam ?? "",
+          cornersTotal: row.cornersTotal ?? undefined,
+          cardsTotal: row.cardsTotal ?? undefined,
+          firstGoal: (row.firstGoal as "home" | "away" | "none" | null) ?? undefined,
+          extras: row.extras ?? undefined,
+          finishedAt: row.finishedAt ? row.finishedAt.getTime() : Date.now(),
+        });
+        return true;
+      }
+    }
+  } catch {
+  }
 
   const fetchFootballExtras = async (id: number): Promise<{
     cornersTotal?: number;
@@ -2671,7 +2697,7 @@ export async function ensureFinishedMatchResult(matchId: string): Promise<boolea
         ? await fetchFootballExtras(parsed.id)
         : null;
 
-      finishedMatchResults.set(matchId, {
+      const fullRecord = {
         home,
         away,
         htHome,
@@ -2681,8 +2707,48 @@ export async function ensureFinishedMatchResult(matchId: string): Promise<boolea
         cornersTotal: extras?.cornersTotal,
         cardsTotal: extras?.cardsTotal,
         firstGoal: extras?.firstGoal,
+        extras: { homeScore: ev.homeScore, awayScore: ev.awayScore },
         finishedAt: now,
-      });
+      };
+
+      finishedMatchResults.set(matchId, fullRecord);
+      try {
+        if (db) {
+          await db.insert(matchResultsTable).values({
+            matchId,
+            sport: parsed.sport,
+            home: fullRecord.home,
+            away: fullRecord.away,
+            htHome: fullRecord.htHome ?? null,
+            htAway: fullRecord.htAway ?? null,
+            homeTeam: fullRecord.homeTeam,
+            awayTeam: fullRecord.awayTeam,
+            cornersTotal: fullRecord.cornersTotal ?? null,
+            cardsTotal: fullRecord.cardsTotal ?? null,
+            firstGoal: fullRecord.firstGoal ?? null,
+            extras: fullRecord.extras ?? null,
+            finishedAt: new Date(fullRecord.finishedAt),
+            updatedAt: new Date(),
+          }).onConflictDoUpdate({
+            target: matchResultsTable.matchId,
+            set: {
+              home: fullRecord.home,
+              away: fullRecord.away,
+              htHome: fullRecord.htHome ?? null,
+              htAway: fullRecord.htAway ?? null,
+              homeTeam: fullRecord.homeTeam,
+              awayTeam: fullRecord.awayTeam,
+              cornersTotal: fullRecord.cornersTotal ?? null,
+              cardsTotal: fullRecord.cardsTotal ?? null,
+              firstGoal: fullRecord.firstGoal ?? null,
+              extras: fullRecord.extras ?? null,
+              finishedAt: new Date(fullRecord.finishedAt),
+              updatedAt: new Date(),
+            },
+          });
+        }
+      } catch {
+      }
       _pruneFinishedResults();
       return true;
     }
@@ -2716,7 +2782,7 @@ export async function scanDailyForFinished(): Promise<void> {
         if (finishedMatchResults.has(m.main_id)) continue;
         const home = parseInt(m.home.goals) || 0;
         const away = parseInt(m.away.goals) || 0;
-        finishedMatchResults.set(m.main_id, {
+        const rec = {
           home,
           away,
           htHome: typeof m.ht?.home_goals === "number" ? m.ht.home_goals : undefined,
@@ -2724,7 +2790,41 @@ export async function scanDailyForFinished(): Promise<void> {
           homeTeam: m.home.name,
           awayTeam: m.away.name,
           finishedAt: Date.now(),
-        });
+        };
+        finishedMatchResults.set(m.main_id, rec);
+        try {
+          if (db) {
+            await db.insert(matchResultsTable).values({
+              matchId: m.main_id,
+              sport: "football",
+              home: rec.home,
+              away: rec.away,
+              htHome: rec.htHome ?? null,
+              htAway: rec.htAway ?? null,
+              homeTeam: rec.homeTeam,
+              awayTeam: rec.awayTeam,
+              cornersTotal: null,
+              cardsTotal: null,
+              firstGoal: null,
+              extras: null,
+              finishedAt: new Date(rec.finishedAt),
+              updatedAt: new Date(),
+            }).onConflictDoUpdate({
+              target: matchResultsTable.matchId,
+              set: {
+                home: rec.home,
+                away: rec.away,
+                htHome: rec.htHome ?? null,
+                htAway: rec.htAway ?? null,
+                homeTeam: rec.homeTeam,
+                awayTeam: rec.awayTeam,
+                finishedAt: new Date(rec.finishedAt),
+                updatedAt: new Date(),
+              },
+            });
+          }
+        } catch {
+        }
       }
     }
     _pruneFinishedResults();
@@ -4869,12 +4969,47 @@ export async function scanV2AllSportsForFinished(): Promise<void> {
           htHome, htAway,
           homeTeam: v2TeamName(ev.homeTeam),
           awayTeam: v2TeamName(ev.awayTeam),
+          extras: { homeScore: ev.homeScore, awayScore: ev.awayScore },
           finishedAt: now,
         };
 
         for (const p of prefix) {
           const id = `${p}-${ev.id}`;
           if (!finishedMatchResults.has(id)) finishedMatchResults.set(id, record);
+          try {
+            if (db) {
+              await db.insert(matchResultsTable).values({
+                matchId: id,
+                sport: isFootball ? "football" : p.startsWith("bball") ? "basketball" : p.startsWith("hockey") ? "hockey" : p.startsWith("tennis") ? "tennis" : "baseball",
+                home: record.home,
+                away: record.away,
+                htHome: record.htHome ?? null,
+                htAway: record.htAway ?? null,
+                homeTeam: record.homeTeam,
+                awayTeam: record.awayTeam,
+                cornersTotal: null,
+                cardsTotal: null,
+                firstGoal: null,
+                extras: record.extras ?? null,
+                finishedAt: new Date(record.finishedAt),
+                updatedAt: new Date(),
+              }).onConflictDoUpdate({
+                target: matchResultsTable.matchId,
+                set: {
+                  home: record.home,
+                  away: record.away,
+                  htHome: record.htHome ?? null,
+                  htAway: record.htAway ?? null,
+                  homeTeam: record.homeTeam,
+                  awayTeam: record.awayTeam,
+                  extras: record.extras ?? null,
+                  finishedAt: new Date(record.finishedAt),
+                  updatedAt: new Date(),
+                },
+              });
+            }
+          } catch {
+          }
         }
       }
     }

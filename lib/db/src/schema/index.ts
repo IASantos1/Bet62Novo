@@ -25,3 +25,4 @@ export * from "./adminAuditLog";
 export * from "./platformSettings";
 export * from "./suspendedMatches";
 export * from "./settlementLogs";
+export * from "./matchResults";

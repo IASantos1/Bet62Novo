@@ -1162,7 +1162,7 @@ type StoredSelection = {
   label?: string;
   finalScore?: { home: number; away: number };
   htScore?: { htHome: number; htAway: number };
-  outcome?: "won" | "lost" | null;
+  outcome?: "won" | "lost" | "void" | null;
 };
 
 type UserBet = {
@@ -5732,12 +5732,13 @@ export default function Home() {
   };
 
   // Determine per-selection outcome for resolved bets or live tentative state
-  type SelOutcome = "green" | "red" | "cashout" | "live-win" | "live-lose" | "pending";
+  type SelOutcome = "green" | "red" | "cashout" | "live-win" | "live-lose" | "pending" | "void";
   const getSelOutcome = (sel: StoredSelection, betStatus: string): SelOutcome => {
     if (betStatus === "cashed_out") return "cashout";
     if (betStatus === "voided") return "pending";
     if (sel.outcome === "won") return "green";
     if (sel.outcome === "lost") return "red";
+    if (sel.outcome === "void") return "void";
     if (sel.finalScore) {
       const out = scoreOutcomeForSel(sel, sel.finalScore);
       if (out === "won") return "green";
@@ -9648,13 +9649,15 @@ export default function Home() {
                                 // Per-selection left icon
                                 let leftIcon: ReactNode;
                                 if (isLost) {
-                                  // For lost bets: show individual win/loss per selection
-                                  const indivOk = outcome !== "red";
-                                  leftIcon = indivOk
+                                  leftIcon = outcome === "void"
+                                    ? <div className="w-6 h-6 rounded-full bg-zinc-700/40 border border-white/20 flex items-center justify-center shrink-0"><span className="text-white text-[11px] font-black leading-none">—</span></div>
+                                    : outcome !== "red"
                                     ? <div className="w-6 h-6 rounded-full bg-white/30 flex items-center justify-center shrink-0"><Check size={13} className="text-white" strokeWidth={3} /></div>
                                     : <div className="w-6 h-6 rounded-full bg-red-950/60 border border-white/20 flex items-center justify-center shrink-0"><X size={13} className="text-white" strokeWidth={2.5} /></div>;
                                 } else if (isWon) {
-                                  leftIcon = <div className="w-6 h-6 rounded-full bg-green-500 flex items-center justify-center shrink-0"><Check size={13} className="text-white" strokeWidth={3} /></div>;
+                                  leftIcon = outcome === "void"
+                                    ? <div className="w-6 h-6 rounded-full bg-zinc-200 border border-zinc-300 flex items-center justify-center shrink-0"><span className="text-zinc-600 text-[11px] font-black leading-none">—</span></div>
+                                    : <div className="w-6 h-6 rounded-full bg-green-500 flex items-center justify-center shrink-0"><Check size={13} className="text-white" strokeWidth={3} /></div>;
                                 } else if (isCashedOut) {
                                   leftIcon = <div className="w-6 h-6 rounded-full bg-yellow-500/70 flex items-center justify-center shrink-0"><CircleDollarSign size={11} className="text-white" /></div>;
                                 } else {

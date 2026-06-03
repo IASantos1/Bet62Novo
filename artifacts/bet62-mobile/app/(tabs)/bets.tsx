@@ -26,7 +26,7 @@ interface StoredSelection {
   label?: string;
   finalScore?: { home: number; away: number };
   htScore?: { htHome: number; htAway: number };
-  outcome?: "won" | "lost" | null;
+  outcome?: "won" | "lost" | "void" | null;
 }
 
 interface Bet {
@@ -197,6 +197,7 @@ function BetCard({ bet, token, onCashout }: { bet: Bet; token: string | null; on
           else if (isVoided) { iconName = "lock-closed-outline"; iconColor = "#fff"; iconBg = "rgba(59,130,246,0.6)"; showCircle = true; }
           else if (selOutcome === "won") { iconName = "checkmark"; iconColor = "#fff"; iconBg = "#22c55e"; showCircle = true; }
           else if (selOutcome === "lost") { iconName = "close"; iconColor = "#fff"; iconBg = "rgba(0,0,0,0.3)"; showCircle = true; }
+          else if (selOutcome === "void") { iconName = "remove"; iconColor = "#fff"; iconBg = "rgba(156,163,175,0.55)"; showCircle = true; }
 
           return (
             <View key={i} style={{ flexDirection: "row", alignItems: "flex-start", paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: dividerColor, gap: 10 }}>
