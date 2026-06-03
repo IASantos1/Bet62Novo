@@ -7008,7 +7008,7 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
   const SOON_WINDOW: Record<string, number> = {
     football: 2160, soccer: 2160,   // football: up to 36 h (many fixtures spread over days)
     basketball: 480, hockey: 480,    // NBA/NHL: up to 8 h (evening US games)
-    tennis: 90,                      // tennis: 90 min — only show matches starting very soon as "Em Breve"
+    tennis: 600,                     // tennis: 10 h — show all Challenger/ATP/WTA matches scheduled today
   };
   const DEFAULT_SOON_WINDOW = 240; // 4 h for volleyball, etc.
   const startingSoon: LiveMatchState[] = allUpcoming
