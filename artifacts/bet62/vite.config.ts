@@ -54,6 +54,18 @@ export default defineConfig({
   build: {
     outDir: path.resolve(import.meta.dirname, "dist/public"),
     emptyOutDir: true,
+    rollupOptions: {
+      output: {
+        manualChunks(id: string) {
+          if (id.includes("/node_modules/react-dom/") || id.includes("/node_modules/react/")) return "react-vendor";
+          if (id.includes("/node_modules/framer-motion/")) return "framer";
+          if (id.includes("/node_modules/@tanstack/")) return "query";
+          if (id.includes("/node_modules/recharts/") || id.includes("/node_modules/d3-") || id.includes("/node_modules/victory-vendor/")) return "charts";
+          if (id.includes("/node_modules/@radix-ui/")) return "radix";
+          if (id.includes("/node_modules/lucide-react/")) return "lucide";
+        },
+      },
+    },
   },
   server: {
     port,
