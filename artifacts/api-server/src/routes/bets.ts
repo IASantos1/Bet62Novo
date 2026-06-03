@@ -175,7 +175,23 @@ router.post("/:id/cashout", authMiddleware, async (req: AuthRequest, res: Respon
       return scoreOutcomeForSel(sel, result, ht) === "lost";
     });
     if (hasLostLeg) {
-      await db.update(betsTable).set({ status: "lost" }).where(eq(betsTable.id, bet.id));
+      const updatedSelsLost = selRecs.map(sel => {
+        const mId = sel.matchId ?? (isSingleLeg ? bet.matchId : undefined);
+        if (!mId) return sel;
+        const result = finishedMatchResults.get(mId);
+        if (!result) return sel;
+        const ht =
+          typeof result.htHome === "number" && typeof result.htAway === "number"
+            ? { htHome: result.htHome, htAway: result.htAway }
+            : undefined;
+        return {
+          ...sel,
+          finalScore: { home: result.home, away: result.away },
+          htScore: ht,
+          outcome: scoreOutcomeForSel(sel, result, ht),
+        };
+      });
+      await db.update(betsTable).set({ status: "lost", selections: updatedSelsLost }).where(eq(betsTable.id, bet.id));
       res.status(400).json({ error: "Boletim já tem uma seleção perdida — cash out indisponível" });
       return;
     }

@@ -2534,10 +2534,81 @@ export const finishedMatchResults = new Map<string, {
 }>();
 
 function _pruneFinishedResults(): void {
-  const cutoff = Date.now() - 4 * 60 * 60 * 1000; // 4 h
+  const cutoff = Date.now() - 96 * 60 * 60 * 1000;
   for (const [id, r] of finishedMatchResults.entries()) {
     if (r.finishedAt < cutoff) finishedMatchResults.delete(id);
   }
+}
+
+export async function ensureFinishedMatchResult(matchId: string): Promise<boolean> {
+  if (!matchId) return false;
+  if (finishedMatchResults.has(matchId)) return true;
+
+  const parse = (): { sport: SportKey; prefix: string; id: number } | null => {
+    const m = matchId.match(/^(football-v2|bball-v2|hockey-v2|tennis-v2|baseball-v2|mlb-v2)-(\d+)$/);
+    if (!m) return null;
+    const prefix = m[1]!;
+    const id = Number(m[2]);
+    if (!Number.isFinite(id) || id <= 0) return null;
+    const sport =
+      prefix === "football-v2" ? "football" :
+      prefix === "bball-v2" ? "basketball" :
+      prefix === "hockey-v2" ? "hockey" :
+      prefix === "tennis-v2" ? "tennis" :
+      "baseball";
+    return { sport, prefix, id };
+  };
+
+  const parsed = parse();
+  if (!parsed) return false;
+
+  const now = Date.now();
+  const tryEvents = async (events: unknown[]): Promise<boolean> => {
+    for (const raw of events) {
+      const ev = raw as SAPIV2Event;
+      if (Number(ev.id) !== parsed.id) continue;
+      const st = (ev.status as Record<string, unknown> | null | undefined);
+      const stType = typeof st?.["type"] === "string" ? (st["type"] as string).toLowerCase() : "";
+      const code = v2StatusCode(ev);
+      const isFinished = stType === "finished" || code === 100;
+      if (!isFinished) return false;
+
+      const hS = typeof ev.homeScore === "object" && ev.homeScore !== null
+        ? (ev.homeScore as SAPIV2ScoreObj) : null;
+      const aS = typeof ev.awayScore === "object" && ev.awayScore !== null
+        ? (ev.awayScore as SAPIV2ScoreObj) : null;
+      const home = hS?.current ?? v2CurrentScore(ev.homeScore) ?? 0;
+      const away = aS?.current ?? v2CurrentScore(ev.awayScore) ?? 0;
+      const htHome = parsed.sport === "football" ? (typeof hS?.["period1"] === "number" ? hS["period1"] as number : undefined) : undefined;
+      const htAway = parsed.sport === "football" ? (typeof aS?.["period1"] === "number" ? aS["period1"] as number : undefined) : undefined;
+
+      finishedMatchResults.set(matchId, {
+        home,
+        away,
+        htHome,
+        htAway,
+        homeTeam: v2TeamName(ev.homeTeam),
+        awayTeam: v2TeamName(ev.awayTeam),
+        finishedAt: now,
+      });
+      _pruneFinishedResults();
+      return true;
+    }
+    return false;
+  };
+
+  const last = await getV2EventsLast(parsed.sport, 120).catch(() => []);
+  if (await tryEvents(last)) return true;
+
+  const todayStr = new Date().toISOString().slice(0, 10);
+  const schedToday = await getScheduleV2(parsed.sport, todayStr).catch(() => []);
+  if (await tryEvents(schedToday as unknown[])) return true;
+
+  const y = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  const schedY = await getScheduleV2(parsed.sport, y).catch(() => []);
+  if (await tryEvents(schedY as unknown[])) return true;
+
+  return false;
 }
 
 /** Scan today's daily feed and add any finished matches to finishedMatchResults. */

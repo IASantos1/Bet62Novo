@@ -1,7 +1,7 @@
 import { db, betsTable, usersTable, settlementLogsTable } from "@workspace/db";
 import { eq, and, lt, sql } from "drizzle-orm";
 import { logger } from "./lib/logger";
-import { finishedMatchResults, scanDailyForFinished, scanV2AllSportsForFinished } from "./routes/matches";
+import { ensureFinishedMatchResult, finishedMatchResults, scanDailyForFinished, scanV2AllSportsForFinished } from "./routes/matches";
 
 export type SelectionRecord = {
   matchId?: string;
@@ -10,6 +10,9 @@ export type SelectionRecord = {
   odd?: number;
   market?: string;
   label?: string;
+  finalScore?: { home: number; away: number };
+  htScore?: { htHome: number; htAway: number };
+  outcome?: "won" | "lost" | null;
 };
 
 type FTScore = { home: number; away: number };
@@ -326,6 +329,25 @@ export async function autoSettlePendingBets(): Promise<void> {
 
     if (pendingBets.length === 0) return;
 
+    const idsToEnsure = new Set<string>();
+    for (const bet of pendingBets) {
+      const selections = bet.selections as SelectionRecord[];
+      if (!Array.isArray(selections) || selections.length === 0) continue;
+      const isSingle = selections.length === 1;
+      for (const sel of selections) {
+        const mId = sel.matchId ?? (isSingle ? bet.matchId : undefined);
+        if (!mId) continue;
+        if (finishedMatchResults.has(mId)) continue;
+        idsToEnsure.add(mId);
+      }
+    }
+
+    const ids = Array.from(idsToEnsure);
+    for (let i = 0; i < ids.length; i += 12) {
+      const chunk = ids.slice(i, i + 12);
+      await Promise.allSettled(chunk.map((id) => ensureFinishedMatchResult(id)));
+    }
+
     let settled = 0;
 
     for (const bet of pendingBets) {
@@ -357,7 +379,16 @@ export async function autoSettlePendingBets(): Promise<void> {
             const mId = sel.matchId ?? (isSingle ? bet.matchId : undefined);
             if (!mId) return sel;
             const r = finishedMatchResults.get(mId);
-            return r ? { ...sel, finalScore: { home: r.home, away: r.away } } : sel;
+            if (!r) return sel;
+            const ht = typeof r.htHome === "number" && typeof r.htAway === "number"
+              ? { htHome: r.htHome, htAway: r.htAway }
+              : undefined;
+            return {
+              ...sel,
+              finalScore: { home: r.home, away: r.away },
+              htScore: ht,
+              outcome: scoreOutcomeForSel(sel, { home: r.home, away: r.away }, ht),
+            };
           });
           await db.transaction(async (tx) => {
             const rows = await tx
@@ -393,7 +424,16 @@ export async function autoSettlePendingBets(): Promise<void> {
           const mId = sel.matchId ?? (isSingle ? bet.matchId : undefined);
           if (!mId) return sel;
           const r = finishedMatchResults.get(mId);
-          return r ? { ...sel, finalScore: { home: r.home, away: r.away } } : sel;
+          if (!r) return sel;
+          const ht = typeof r.htHome === "number" && typeof r.htAway === "number"
+            ? { htHome: r.htHome, htAway: r.htAway }
+            : undefined;
+          return {
+            ...sel,
+            finalScore: { home: r.home, away: r.away },
+            htScore: ht,
+            outcome: scoreOutcomeForSel(sel, { home: r.home, away: r.away }, ht),
+          };
         });
 
         await db.transaction(async (tx) => {
