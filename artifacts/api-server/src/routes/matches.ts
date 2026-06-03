@@ -6738,6 +6738,47 @@ function buildTennisLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
     // If we accepted this match via startedAlready override, show a sensible status
     const displayStatus = (startedAlready && notLive) ? "Em Jogo" : statusStr;
 
+    // ── Tennis set-winner markets for V2 matches ──────────────────────────────
+    // Compute liveHomeP from current odds so we can derive set markets.
+    const v2HomeP = liveOdds.home > 0 && liveOdds.away > 0
+      ? (1 / liveOdds.home) / (1 / liveOdds.home + 1 / liveOdds.away)
+      : 0.5;
+    const v2BaseExtras = computeTennisExtras(v2HomeP);
+    const v2Set1Games  = sets[0] ?? ([0, 0] as [number, number]);
+    const v2Set2Games  = sets.length >= 2 ? (sets[1] ?? ([0, 0] as [number, number])) : ([0, 0] as [number, number]);
+    const v2SetWinProb = (hG: number, aG: number, base: number): number =>
+      Math.min(0.97, Math.max(0.03, 0.5 + (base - 0.5) * 0.55 + (hG - aG) * 0.055));
+
+    let v2FirstSetOdds: { home: number; away: number };
+    if (doneSets === 0 && sets.length >= 1) {
+      const pS1 = v2SetWinProb(v2Set1Games[0], v2Set1Games[1], v2HomeP);
+      const [s1h, s1a] = probsToDecimalOdds([pS1, 1 - pS1], 1.06);
+      v2FirstSetOdds = { home: s1h!, away: s1a! };
+    } else {
+      v2FirstSetOdds = v2BaseExtras.firstSet;
+    }
+
+    let v2Set2Odds: { home: number; away: number };
+    if (doneSets === 1 && sets.length >= 2) {
+      const pS2 = v2SetWinProb(v2Set2Games[0], v2Set2Games[1], v2HomeP);
+      const [s2h, s2a] = probsToDecimalOdds([pS2, 1 - pS2], 1.07);
+      v2Set2Odds = { home: s2h!, away: s2a! };
+    } else {
+      v2Set2Odds = v2BaseExtras.set2;
+    }
+
+    const v2TennisExtra = {
+      ...v2BaseExtras,
+      firstSet: v2FirstSetOdds,
+      set2:     v2Set2Odds,
+      currentSetNum: setNum,
+    };
+
+    const v2Markets = {
+      ...makeAdvancedMarketsFromTeams(homeTeam, awayTeam),
+      tennisExtra: v2TennisExtra,
+    } as unknown as AdvancedMarkets;
+
     const state: LiveMatchState = {
       id,
       home: homeTeam, away: awayTeam,
@@ -6745,7 +6786,7 @@ function buildTennisLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
       sport: "tennis", homeScore, awayScore,
       minute: setNum * 20,
       status: displayStatus, hasRealOdds: true, odds: liveOdds,
-      markets: makeAdvancedMarketsFromTeams(homeTeam, awayTeam),
+      markets: v2Markets,
       events: [],
       _firstSeenAt: existing?._firstSeenAt ?? now,
       _liveExtra: { sets: sets.length > 0 ? sets : [], currentPoints },
