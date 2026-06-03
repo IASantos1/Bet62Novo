@@ -132,6 +132,11 @@ const SETTING_META: Record<string, { label: string; desc: string; type: "number"
   default_margin:     { label: "Margem Padrão",         desc: "Margem da casa (0.06 = 6%)",          type: "number" },
   bet_limits_enabled: { label: "Limites Ativos",        desc: "Ativar/desativar limites de aposta",  type: "boolean" },
   sports_enabled:     { label: "Desportos Ativos",      desc: "Lista separada por vírgulas",         type: "text" },
+  cashout_enabled:               { label: "Cash Out Ativo",         desc: "Ativar/desativar cash out no sistema",                        type: "boolean" },
+  cashout_unfavorable_cycle_ms:  { label: "Ciclo Cash Out (ms)",    desc: "Duração do ciclo de janela quando a seleção está desfavorável", type: "number", unit: "ms" },
+  cashout_unfavorable_open_ms:   { label: "Janela Cash Out (ms)",   desc: "Tempo aberto dentro do ciclo quando a seleção está desfavorável", type: "number", unit: "ms" },
+  cashout_odds_worse_mult:       { label: "Odds Piorou (x)",        desc: "Multiplicador (ex.: 1.2 = 20% pior) para ativar modo desfavorável", type: "number" },
+  cashout_fee_mult:              { label: "Fator Cash Out",         desc: "Fator aplicado no valor estimado (ex.: 0.92 = 8% fee)",          type: "number" },
 };
 
 const AUDIT_ACTION_LABEL: Record<string, string> = {

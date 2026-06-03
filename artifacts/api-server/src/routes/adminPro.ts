@@ -31,6 +31,11 @@ const DEFAULT_SETTINGS: Record<string, string> = {
   default_margin: "0.06",
   bet_limits_enabled: "true",
   sports_enabled: "football,basketball,tennis,hockey,volleyball",
+  cashout_enabled: "true",
+  cashout_unfavorable_cycle_ms: "60000",
+  cashout_unfavorable_open_ms: "15000",
+  cashout_odds_worse_mult: "1.2",
+  cashout_fee_mult: "0.92",
 };
 
 async function ensureSettings() {

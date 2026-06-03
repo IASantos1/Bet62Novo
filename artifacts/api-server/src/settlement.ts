@@ -1,4 +1,4 @@
-import { db, betsTable, usersTable, settlementLogsTable } from "@workspace/db";
+import { db, betsTable, cashoutStatesTable, usersTable, settlementLogsTable } from "@workspace/db";
 import { eq, and, lt, sql } from "drizzle-orm";
 import { logger } from "./lib/logger";
 import { ensureFinishedMatchResult, finishedMatchResults, scanDailyForFinished, scanV2AllSportsForFinished } from "./routes/matches";
@@ -496,6 +496,7 @@ export async function autoSettlePendingBets(): Promise<void> {
               .where(and(eq(betsTable.id, bet.id), eq(betsTable.status, "pending")))
               .returning({ id: betsTable.id });
             if (rows.length === 0) return;
+            await tx.delete(cashoutStatesTable).where(eq(cashoutStatesTable.betId, bet.id));
             await tx.insert(settlementLogsTable).values({
               betId: bet.id,
               userId: bet.userId,
@@ -524,6 +525,7 @@ export async function autoSettlePendingBets(): Promise<void> {
               .where(and(eq(betsTable.id, bet.id), eq(betsTable.status, "pending")))
               .returning({ id: betsTable.id });
             if (rows.length === 0) return;
+            await tx.delete(cashoutStatesTable).where(eq(cashoutStatesTable.betId, bet.id));
 
             await tx
               .update(usersTable)
@@ -586,6 +588,7 @@ export async function autoSettlePendingBets(): Promise<void> {
             .returning({ id: betsTable.id });
 
           if (rows.length === 0) return; // already settled elsewhere
+          await tx.delete(cashoutStatesTable).where(eq(cashoutStatesTable.betId, bet.id));
 
           // Atomic SQL addition — no read-then-write race condition
           await tx
@@ -665,6 +668,7 @@ async function expireStalePendingBets(): Promise<void> {
             .returning({ id: betsTable.id });
 
           if (rows.length === 0) return; // already settled elsewhere
+          await tx.delete(cashoutStatesTable).where(eq(cashoutStatesTable.betId, bet.id));
 
           // Atomic SQL addition — stake refund, no read-then-write race
           await tx

@@ -131,6 +131,13 @@ export async function initDb(): Promise<void> {
         updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
       );
 
+      CREATE TABLE IF NOT EXISTS cashout_states (
+        bet_id            INTEGER PRIMARY KEY REFERENCES bets(id) ON DELETE CASCADE,
+        unfavorable_since TIMESTAMPTZ NOT NULL,
+        reason            TEXT,
+        updated_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+
       ALTER TABLE match_results ADD COLUMN IF NOT EXISTS home_team     TEXT;
       ALTER TABLE match_results ADD COLUMN IF NOT EXISTS away_team     TEXT;
       ALTER TABLE match_results ADD COLUMN IF NOT EXISTS corners_total INTEGER;
@@ -139,6 +146,9 @@ export async function initDb(): Promise<void> {
       ALTER TABLE match_results ADD COLUMN IF NOT EXISTS extras        JSONB;
       ALTER TABLE match_results ADD COLUMN IF NOT EXISTS finished_at   TIMESTAMPTZ;
       ALTER TABLE match_results ADD COLUMN IF NOT EXISTS updated_at    TIMESTAMPTZ;
+
+      ALTER TABLE cashout_states ADD COLUMN IF NOT EXISTS reason            TEXT;
+      ALTER TABLE cashout_states ADD COLUMN IF NOT EXISTS updated_at        TIMESTAMPTZ;
     `);
 
     console.info("[db/init] Schema initialisation complete.");
