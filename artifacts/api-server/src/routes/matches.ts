@@ -201,6 +201,7 @@ export type LiveMatchState = {
     etScore?: [number, number];          // football: extra-time score [homeET, awayET]
     penScore?: [number, number];         // football: penalty shootout [homePen, awayPen]
     penBaseScore?: [number, number];     // football: score at start of penalty phase (to compute pen goals)
+    secondHalfKickoffSec?: number;
   };
 };
 
@@ -5601,7 +5602,13 @@ async function buildLiveMatches(): Promise<LiveMatchState[]> {
 
       const homeScore = m.home.goals === "?" ? 0 : parseInt(m.home.goals) || 0;
       const awayScore = m.away.goals === "?" ? 0 : parseInt(m.away.goals) || 0;
-      const minute = isHT ? 45 : isET ? 105 : parseInt(m.status) || 1;
+      const injMinute = parseInt(m.inj_minute) || 0;
+      const injTime = parseInt(m.inj_time) || 0;
+      const minuteBase = isHT ? 45 : isET ? 105 : parseInt(m.status) || 1;
+      const minuteRaw = injMinute > 0
+        ? Math.min(130, Math.max(1, injMinute + Math.max(0, injTime)))
+        : minuteBase;
+      const minute = existing ? Math.max(existing.minute, minuteRaw) : minuteRaw;
       const gameStatus = isHT ? "HT" : isET ? "ET" : parseInt(m.status) > 45 ? "2nd half" : "1st half";
 
       // Market suspension delays on goal (ms per market key)
@@ -6400,8 +6407,13 @@ function buildFootballLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
           // Allow up to 49' for first-half stoppage time
           minute = Math.min(49, Math.max(1, minsFromKickoff));
         } else if (statusStr === "2nd half") {
-          // Allow up to 99' so the clock keeps advancing in stoppage time
-          minute = Math.min(99, Math.max(46, minsFromKickoff - 15));
+          const shKickoff = liveMatchState.get(id)?._liveExtra?.secondHalfKickoffSec;
+          if (typeof shKickoff === "number" && Number.isFinite(shKickoff) && shKickoff > 0) {
+            const minsFromSecondHalf = Math.floor((now / 1000 - shKickoff) / 60);
+            minute = Math.min(99, Math.max(46, 46 + minsFromSecondHalf));
+          } else {
+            minute = Math.min(99, Math.max(46, minsFromKickoff - 15));
+          }
         } else {
           minute = Math.min(49, Math.max(1, minsFromKickoff));
         }
@@ -6476,6 +6488,13 @@ function buildFootballLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
       const penLiveExtra: LiveMatchState["_liveExtra"] = isPen
         ? { ...(existing._liveExtra ?? {}), penBaseScore: penBase, penScore: penGoals }
         : existing._liveExtra;
+      const shKickoffSec =
+        statusStr === "2nd half"
+          ? (existing.status !== "2nd half"
+              ? Math.floor(now / 1000)
+              : (existing._liveExtra?.secondHalfKickoffSec ?? Math.floor(now / 1000)))
+          : existing._liveExtra?.secondHalfKickoffSec;
+      const liveExtra = shKickoffSec ? { ...(penLiveExtra ?? {}), secondHalfKickoffSec: shKickoffSec } : penLiveExtra;
 
       // Helper: patch penExtra with real penalty odds into markets
       const withPen = (mkts: typeof existing.markets) =>
@@ -6497,7 +6516,7 @@ function buildFootballLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
           _baseMarkets: filteredBase,
           marketSuspension: susp,
           _suspensionReason: isVARStatus ? "REVISÃO AO VAR" : "GOLO!",
-          _liveExtra: penLiveExtra,
+          _liveExtra: liveExtra,
         };
         liveMatchState.set(id, applyTieredMarketDrift(updated, now));
       } else {
@@ -6535,7 +6554,7 @@ function buildFootballLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
             _baseMarkets: filteredBase,
             marketSuspension: susp,
             _suspensionReason: "REVISÃO AO VAR",
-            _liveExtra: penLiveExtra,
+            _liveExtra: liveExtra,
           };
           liveMatchState.set(id, applyTieredMarketDrift(updated, now));
         } else {
@@ -6548,7 +6567,7 @@ function buildFootballLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
             _baseMarkets: filteredBase,
             marketSuspension: susp,
             _suspensionReason: susp ? existing._suspensionReason : undefined,
-            _liveExtra: penLiveExtra,
+            _liveExtra: liveExtra,
           };
           liveMatchState.set(id, applyTieredMarketDrift(updated, now));
         }
@@ -6564,6 +6583,7 @@ function buildFootballLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
       const baseMarkets = filterLiveMarkets(rawMarkets, homeScore, awayScore, newStatus);
       // First time seen in penalties — store current score as base (0-0 penalties so far)
       const markets = isPen ? { ...baseMarkets, penExtra: makePenMarketsFromScore(0, 0) } : baseMarkets;
+      const shKickoffSec = statusStr === "2nd half" ? Math.floor(now / 1000) - Math.max(0, minute - 46) * 60 : undefined;
       const state: LiveMatchState = {
         id,
         home: homeTeam,
@@ -6583,7 +6603,9 @@ function buildFootballLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
         _baseOdds: baseOdds,
         _baseMarkets: markets,
         _oddsUpdatedAt: now,
-        _liveExtra: isPen ? { penBaseScore: [homeScore, awayScore] as [number, number], penScore: [0, 0] as [number, number] } : undefined,
+        _liveExtra: (isPen || shKickoffSec)
+          ? { ...(isPen ? { penBaseScore: [homeScore, awayScore] as [number, number], penScore: [0, 0] as [number, number] } : {}), ...(shKickoffSec ? { secondHalfKickoffSec: shKickoffSec } : {}) }
+          : undefined,
       };
       liveMatchState.set(id, state);
       result.push(state);
