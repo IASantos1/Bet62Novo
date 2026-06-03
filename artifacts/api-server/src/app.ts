@@ -5,8 +5,14 @@ import path from "path";
 import fs from "fs";
 import router from "./routes";
 import { logger } from "./lib/logger";
+import { initDb } from "@workspace/db";
 
 const app: Express = express();
+
+// Initialise database schema on startup (idempotent — uses IF NOT EXISTS).
+initDb()
+  .then(() => logger.info("Database schema ready"))
+  .catch((err) => logger.error({ err }, "Database schema initialisation failed"));
 
 app.use(
   pinoHttp({
