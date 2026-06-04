@@ -2699,6 +2699,46 @@ export async function ensureFinishedMatchResult(matchId: string): Promise<boolea
         ? await fetchFootballExtras(parsed.id)
         : null;
 
+      const p = (obj: SAPIV2ScoreObj | null, n: number): number | null => {
+        const v = obj?.[`period${n}` as keyof SAPIV2ScoreObj];
+        return typeof v === "number" ? (v as number) : null;
+      };
+
+      const p1H = parsed.sport === "football" ? p(hS, 1) : null;
+      const p1A = parsed.sport === "football" ? p(aS, 1) : null;
+      const p2H = parsed.sport === "football" ? p(hS, 2) : null;
+      const p2A = parsed.sport === "football" ? p(aS, 2) : null;
+      const p3H = parsed.sport === "football" ? p(hS, 3) : null;
+      const p3A = parsed.sport === "football" ? p(aS, 3) : null;
+      const p4H = parsed.sport === "football" ? p(hS, 4) : null;
+      const p4A = parsed.sport === "football" ? p(aS, 4) : null;
+
+      const ftHome = parsed.sport === "football"
+        ? ((p1H ?? 0) + (p2H ?? 0))
+        : null;
+      const ftAway = parsed.sport === "football"
+        ? ((p1A ?? 0) + (p2A ?? 0))
+        : null;
+      const etHome = parsed.sport === "football"
+        ? ((p3H ?? 0) + (p4H ?? 0))
+        : null;
+      const etAway = parsed.sport === "football"
+        ? ((p3A ?? 0) + (p4A ?? 0))
+        : null;
+
+      const baseNoPensHome = parsed.sport === "football"
+        ? (ftHome ?? 0) + (etHome ?? 0)
+        : 0;
+      const baseNoPensAway = parsed.sport === "football"
+        ? (ftAway ?? 0) + (etAway ?? 0)
+        : 0;
+      const penHome = parsed.sport === "football"
+        ? Math.max(0, home - baseNoPensHome)
+        : null;
+      const penAway = parsed.sport === "football"
+        ? Math.max(0, away - baseNoPensAway)
+        : null;
+
       const fullRecord = {
         home,
         away,
@@ -2709,7 +2749,13 @@ export async function ensureFinishedMatchResult(matchId: string): Promise<boolea
         cornersTotal: extras?.cornersTotal,
         cardsTotal: extras?.cardsTotal,
         firstGoal: extras?.firstGoal,
-        extras: { homeScore: ev.homeScore, awayScore: ev.awayScore },
+        extras: {
+          homeScore: ev.homeScore,
+          awayScore: ev.awayScore,
+          ...(parsed.sport === "football"
+            ? { football: { ftHome, ftAway, etHome, etAway, penHome, penAway } }
+            : {}),
+        },
         finishedAt: now,
       };
 
@@ -5674,13 +5720,36 @@ async function buildLiveMatches(): Promise<LiveMatchState[]> {
     if (!currentMatchIds.has(id)) {
       const state = liveMatchState.get(id)!;
       // Capture final result for bet auto-settlement before evicting
+      const ht = state._liveExtra?.htScore;
+      const et = state._liveExtra?.etScore;
+      const pen = state._liveExtra?.penScore;
+
+      const totalHome = state.homeScore;
+      const totalAway = state.awayScore;
+      const etHome = et?.[0] ?? 0;
+      const etAway = et?.[1] ?? 0;
+      const penHome = pen?.[0] ?? 0;
+      const penAway = pen?.[1] ?? 0;
+      const ftHome = Math.max(0, totalHome - etHome - penHome);
+      const ftAway = Math.max(0, totalAway - etAway - penAway);
+
       finishedMatchResults.set(id, {
         home: state.homeScore,
         away: state.awayScore,
-        htHome: state._liveExtra?.htScore?.[0],
-        htAway: state._liveExtra?.htScore?.[1],
+        htHome: ht?.[0],
+        htAway: ht?.[1],
         homeTeam: state.home,
         awayTeam: state.away,
+        extras: {
+          football: {
+            ftHome,
+            ftAway,
+            etHome,
+            etAway,
+            penHome,
+            penAway,
+          },
+        },
         finishedAt: Date.now(),
       });
       liveMatchState.delete(id);

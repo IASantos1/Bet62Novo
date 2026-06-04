@@ -293,6 +293,42 @@ function currentOddForSelection(sel: SelectionRecord, liveSt: LiveMatchState): n
     return Number.isFinite(v as number) ? (v as number) : null;
   }
 
+  if (s.startsWith("et-")) {
+    const v = mk.etExtra as unknown as Record<string, unknown> | undefined;
+    if (!v) return null;
+
+    if (s === "et-home" || s === "et-draw" || s === "et-away") {
+      const k = s.slice(3);
+      const out = (v["etResult"] as Record<string, unknown> | undefined)?.[k];
+      return Number.isFinite(out as number) ? (out as number) : null;
+    }
+
+    if (s === "et-tw-home" || s === "et-tw-away") {
+      const k = s.slice(6);
+      const out = (v["tieWinner"] as Record<string, unknown> | undefined)?.[k];
+      return Number.isFinite(out as number) ? (out as number) : null;
+    }
+
+    if (s === "et-ng-home" || s === "et-ng-away") {
+      const k = s.slice(6);
+      const out = (v["nextGoal"] as Record<string, unknown> | undefined)?.[k];
+      return Number.isFinite(out as number) ? (out as number) : null;
+    }
+
+    if (/^et-[ou]\d+$/.test(s)) {
+      const k = s.slice(3);
+      const out = (v["totalGoals"] as Record<string, unknown> | undefined)?.[k];
+      return Number.isFinite(out as number) ? (out as number) : null;
+    }
+  }
+
+  if (s === "pen-home" || s === "pen-away") {
+    const v = mk.penExtra as unknown as Record<string, unknown> | undefined;
+    const k = s.slice(4);
+    const out = (v?.["winner"] as Record<string, unknown> | undefined)?.[k];
+    return Number.isFinite(out as number) ? (out as number) : null;
+  }
+
   return null;
 }
 
@@ -429,12 +465,12 @@ router.post("/place", authMiddleware, async (req: AuthRequest, res: Response): P
 
   if (selList.length === 0) {
     const liveSt = liveMatchState.get(String(matchId));
-    if (liveSt?.sport === "tennis") {
+    if (liveSt?.sport === "tennis" || liveSt?.sport === "football") {
       const anySuspended = liveSt.marketSuspension != null && Object.values(liveSt.marketSuspension).some((ts) => ts > now);
       if (anySuspended || liveSt._suspensionReason) {
         res.status(409).json({
           error: "Mercado suspenso. Aguarde alguns segundos e tente novamente.",
-          reason: liveSt._suspensionReason ?? "PONTO EM JOGO",
+          reason: liveSt._suspensionReason ?? (liveSt.sport === "tennis" ? "PONTO EM JOGO" : "EVENTO CRÍTICO"),
         });
         return;
       }
@@ -445,7 +481,7 @@ router.post("/place", authMiddleware, async (req: AuthRequest, res: Response): P
     const mId = String(sel.matchId ?? matchId);
     const liveSt = liveMatchState.get(mId);
     if (!liveSt) continue;
-    if (liveSt.sport !== "tennis") continue;
+    if (liveSt.sport !== "tennis" && liveSt.sport !== "football") continue;
 
     const marketKey = typeof sel.market === "string" && sel.market.trim() !== ""
       ? sel.market
@@ -458,7 +494,7 @@ router.post("/place", authMiddleware, async (req: AuthRequest, res: Response): P
     if (suspended) {
       res.status(409).json({
         error: "Mercado suspenso. Aguarde alguns segundos e tente novamente.",
-        reason: liveSt._suspensionReason ?? "PONTO EM JOGO",
+        reason: liveSt._suspensionReason ?? (liveSt.sport === "tennis" ? "PONTO EM JOGO" : "EVENTO CRÍTICO"),
       });
       return;
     }

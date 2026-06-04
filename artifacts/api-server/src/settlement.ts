@@ -163,6 +163,49 @@ export function scoreOutcomeForSel(
     const score = `${hc}${ac}`;
     winning = score === want;
   }
+
+  // ── Extra time (football) ─────────────────────────────────────────────────
+  else if (s.startsWith("et-")) {
+    const ex = (extra?.extras ?? {}) as Record<string, unknown>;
+    const fx = ex["football"] as Record<string, unknown> | undefined;
+
+    const etHome = typeof fx?.["etHome"] === "number" ? (fx["etHome"] as number) : null;
+    const etAway = typeof fx?.["etAway"] === "number" ? (fx["etAway"] as number) : null;
+    const ftHome = typeof fx?.["ftHome"] === "number" ? (fx["ftHome"] as number) : null;
+    const ftAway = typeof fx?.["ftAway"] === "number" ? (fx["ftAway"] as number) : null;
+
+    if (etHome === null || etAway === null) return null;
+
+    if (s === "et-home") winning = etHome > etAway;
+    else if (s === "et-draw") winning = etHome === etAway;
+    else if (s === "et-away") winning = etAway > etHome;
+    else if (s === "et-tw-home" || s === "et-tw-away") {
+      if (ftHome === null || ftAway === null) return null;
+      const totalDiff = (ftHome + etHome) - (ftAway + etAway);
+      if (totalDiff === 0) return null;
+      winning = s === "et-tw-home" ? totalDiff > 0 : totalDiff < 0;
+    } else if (/^et-([ou])(\d+)$/.test(s)) {
+      const m = s.match(/^et-([ou])(\d+)$/)!;
+      const line = parseInt(m[2]!, 10) / 10;
+      const totalET = etHome + etAway;
+      if (totalET === line) voided = true;
+      else winning = m[1] === "o" ? totalET > line : totalET < line;
+    } else {
+      return null;
+    }
+  }
+
+  // ── Penalty shootout winner (football) ────────────────────────────────────
+  else if (s === "pen-home" || s === "pen-away") {
+    const ex = (extra?.extras ?? {}) as Record<string, unknown>;
+    const fx = ex["football"] as Record<string, unknown> | undefined;
+
+    const penHome = typeof fx?.["penHome"] === "number" ? (fx["penHome"] as number) : null;
+    const penAway = typeof fx?.["penAway"] === "number" ? (fx["penAway"] as number) : null;
+    if (penHome === null || penAway === null) return null;
+    if (penHome === penAway) return null;
+    winning = s === "pen-home" ? penHome > penAway : penAway > penHome;
+  }
   // ── Markets not resolvable from score alone — leave pending for admin ──────
   else if (
     s.startsWith("s1-")  || s.startsWith("s2-") ||        // tennis set winner (legacy keys)
