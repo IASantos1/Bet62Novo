@@ -4442,7 +4442,7 @@ function mergeSingleV2Event(sport: SportKey, ev: SAPIV2Event): void {
     homeScore: v2CurrentScore(ev.homeScore),
     awayScore: v2CurrentScore(ev.awayScore),
     status: v2StatusStr(ev.status),
-    minute: ev.status?.minute ?? 0,
+    minute: (ev.status as any)?.minute ?? 0,
   });
 }
 

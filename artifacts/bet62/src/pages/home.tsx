@@ -2373,7 +2373,7 @@ export default function Home() {
     }
     emptyLiveStreakRef.current = 0;
     const newMins: Record<string, number> = {};
-    const now = Date.now();
+    // Duplicate 'now' declaration removed
     for (const m of matches) {
       const id = String(m.id);
       newMins[id] = m.minute;
@@ -11061,7 +11061,7 @@ function DepositWithdrawModal({
   }
 
   return (
-    <Dialog open={open} onOpenChange={v => { if (!v) onClose(); }}>
+    <Dialog open={open} onOpenChange={(v: boolean) => { if (!v) onClose(); }}>
       <DialogContent className="bg-zinc-950 border-zinc-800 text-white max-w-md p-0 overflow-hidden">
         {/* Header */}
         <div className="bg-gradient-to-r from-zinc-900 to-zinc-800 px-5 py-4 border-b border-zinc-700 flex items-center gap-3">
@@ -11181,7 +11181,7 @@ function DepositWithdrawModal({
                       value={wAmount} onChange={e => setWAmount(e.target.value)} />
                   </div>
                   <div className="flex gap-1.5">
-                    {[20, 50, 100, 250].map(v => (
+                    {[20, 50, 100, 250].map((v: number) => (
                       <button key={v} onClick={() => setWAmount(String(v))}
                         className={`flex-1 py-1.5 rounded-lg border text-xs font-bold transition-colors ${wAmount === String(v) ? "border-orange-500 bg-orange-500/10 text-orange-400" : "border-zinc-700 hover:border-zinc-500 text-zinc-400"}`}>
                         €{v}
@@ -11243,9 +11243,9 @@ function DepositWithdrawModal({
           <div>
             <p className="text-xs text-zinc-400 mb-2 font-semibold uppercase tracking-widest">Valor</p>
             <div className="grid grid-cols-5 gap-1.5 mb-3">
-              {[10, 20, 50, 100, 200].map(v => (
-                <button
-                  key={v}
+              {[10, 20, 50, 100, 200].map((v: number) => (
+                  <button
+                    key={v}
                   onClick={() => { setDepositAmount(String(v)); setMbRef(null); setMbwayDone(false); }}
                   className={`py-2 rounded-lg border font-bold text-xs transition-colors ${depositAmount === String(v) ? "border-emerald-500 bg-emerald-500/10 text-emerald-400" : "border-zinc-700 hover:border-zinc-500 text-zinc-300"}`}
                 >
