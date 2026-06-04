@@ -1411,10 +1411,10 @@ export function ComprehensiveMarketsSheet({ visible, match, onClose }: Props) {
                   </Section>
                 )}
 
-                {isBball && m?.totalGoals && m.totalGoals.over05 > 1.01 && (
+                {isBball && m?.totalGoals && (m._total != null) && m.totalGoals.over25 > 1.01 && (
                   <Section title="Total de Pontos" tabKey="pontos">
                     {(
-                      [{ line: String(m._total ?? "215.5"), o: m.totalGoals.over25, u: m.totalGoals.under25, ko: "pts-o", ku: "pts-u" }]
+                      [{ line: String(m._total ?? "215.5"), o: m.totalGoals.over25, u: m.totalGoals.under25, ko: `b-pts-o-${String(m._total ?? "215.5")}`, ku: `b-pts-u-${String(m._total ?? "215.5")}` }]
                         .filter((r) => r.o > 1.01)
                     ).map((row) => (
                       <View key={row.line} style={s.row}>
@@ -1432,8 +1432,8 @@ export function ComprehensiveMarketsSheet({ visible, match, onClose }: Props) {
                       .filter((tr) => tr.line !== ((m as any)?._total ?? -1))
                       .map((tr) => (
                       <View key={`tr-${tr.line}`} style={s.row}>
-                        <OddsBtn market={`tr-o-${tr.line}`} label={`Mais ${tr.line}`} value={tr.over} />
-                        <OddsBtn market={`tr-u-${tr.line}`} label={`Menos ${tr.line}`} value={tr.under} />
+                        <OddsBtn market={`b-pts-o-${tr.line}`} label={`Mais ${tr.line}`} value={tr.over} />
+                        <OddsBtn market={`b-pts-u-${tr.line}`} label={`Menos ${tr.line}`} value={tr.under} />
                       </View>
                     ))}
                   </Section>
@@ -1457,12 +1457,21 @@ export function ComprehensiveMarketsSheet({ visible, match, onClose }: Props) {
                   </Section>
                 )}
 
-                {(isBball || isHockey) && m?.halfTime && m.halfTime.home > 1.01 && (
-                  <Section title={isBball ? "1º Quarto" : "1º Período"} tabKey="1periodo">
+                {isHockey && m?.halfTime && m.halfTime.home > 1.01 && (
+                  <Section title="1º Período" tabKey="1periodo">
                     <View style={s.row}>
-                      <OddsBtn market="ht-home" label={match.home} value={m.halfTime.home} />
-                      {m.halfTime.draw > 1.01 && <OddsBtn market="ht-draw" label="Empate" value={m.halfTime.draw} />}
-                      <OddsBtn market="ht-away" label={match.away} value={m.halfTime.away} />
+                      <OddsBtn market="p1-home" label={match.home} value={m.halfTime.home} />
+                      {m.halfTime.draw > 1.01 && <OddsBtn market="p1-draw" label="Empate" value={m.halfTime.draw} />}
+                      <OddsBtn market="p1-away" label={match.away} value={m.halfTime.away} />
+                    </View>
+                  </Section>
+                )}
+
+                {isBball && (m as any)?.basketballExtra?.q1?.home > 1.01 && (
+                  <Section title="1º Quarto" tabKey="1periodo">
+                    <View style={s.row}>
+                      <OddsBtn market="q1-home" label={match.home} value={(m as any).basketballExtra.q1.home} />
+                      <OddsBtn market="q1-away" label={match.away} value={(m as any).basketballExtra.q1.away} />
                     </View>
                   </Section>
                 )}

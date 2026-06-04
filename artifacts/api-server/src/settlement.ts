@@ -177,6 +177,97 @@ export function scoreOutcomeForSel(
     winning = score === want;
   }
 
+  // ── Basketball (totals / spread / team totals / halves / quarters) ─────────
+  else if (
+    s.startsWith("b-") ||
+    s.startsWith("q") && /^q[1234]-(home|away)$/.test(s) ||
+    (s === "h1-home" || s === "h1-away")
+  ) {
+    const hs = ex["homeScore"] as Record<string, unknown> | undefined;
+    const as = ex["awayScore"] as Record<string, unknown> | undefined;
+
+    const period = (obj: Record<string, unknown> | undefined, n: number): number | null => {
+      const v = obj?.[`period${n}`];
+      return typeof v === "number" && Number.isFinite(v) ? (v as number) : null;
+    };
+
+    const q1H = period(hs, 1); const q1A = period(as, 1);
+    const q2H = period(hs, 2); const q2A = period(as, 2);
+    const q3H = period(hs, 3); const q3A = period(as, 3);
+    const q4H = period(hs, 4); const q4A = period(as, 4);
+
+    const regHome = (q1H ?? 0) + (q2H ?? 0) + (q3H ?? 0) + (q4H ?? 0);
+    const regAway = (q1A ?? 0) + (q2A ?? 0) + (q3A ?? 0) + (q4A ?? 0);
+    const hasRegBreakdown = (q1H !== null || q1A !== null || q2H !== null || q2A !== null || q3H !== null || q3A !== null || q4H !== null || q4A !== null);
+
+    const parseLine = (str: string): number | null => {
+      const n = Number(str);
+      return Number.isFinite(n) ? n : null;
+    };
+
+    const tot = s.match(/^b-pts-([ou])-(\d+(?:\.\d+)?)$/);
+    if (tot) {
+      const dir = tot[1]!;
+      const line = parseLine(tot[2]!);
+      if (line === null) return null;
+      const t = ft.home + ft.away;
+      if (t === line) voided = true;
+      else winning = dir === "o" ? t > line : t < line;
+    }
+
+    const totH1 = s.match(/^b-h1-pts-([ou])-(\d+(?:\.\d+)?)$/);
+    if (winning === null && totH1) {
+      const dir = totH1[1]!;
+      const line = parseLine(totH1[2]!);
+      if (line === null) return null;
+      if (!hasRegBreakdown) return null;
+      const t = (q1H ?? 0) + (q1A ?? 0) + (q2H ?? 0) + (q2A ?? 0);
+      if (t === line) voided = true;
+      else winning = dir === "o" ? t > line : t < line;
+    }
+
+    const spread = s.match(/^b-spread-(home|away)-(\d+(?:\.\d+)?)$/);
+    if (winning === null && spread) {
+      const side = spread[1]!;
+      const line = parseLine(spread[2]!);
+      if (line === null) return null;
+      const diff = ft.home - ft.away;
+      const adj = diff - line;
+      if (adj === 0) voided = true;
+      else winning = side === "home" ? adj > 0 : adj < 0;
+    }
+
+    const tt = s.match(/^b-tt-(home|away)-([ou])-(\d+(?:\.\d+)?)$/);
+    if (winning === null && tt) {
+      const side = tt[1]!;
+      const dir = tt[2]!;
+      const line = parseLine(tt[3]!);
+      if (line === null) return null;
+      const score = side === "home" ? ft.home : ft.away;
+      if (score === line) voided = true;
+      else winning = dir === "o" ? score > line : score < line;
+    }
+
+    const q = s.match(/^q([1234])-(home|away)$/);
+    if (winning === null && q) {
+      const qNum = Number(q[1]);
+      const side = q[2]!;
+      const qH = qNum === 1 ? q1H : qNum === 2 ? q2H : qNum === 3 ? q3H : q4H;
+      const qA = qNum === 1 ? q1A : qNum === 2 ? q2A : qNum === 3 ? q3A : q4A;
+      if (qH === null || qA === null) return null;
+      if (qH === qA) voided = true;
+      else winning = side === "home" ? qH > qA : qA > qH;
+    }
+
+    if (winning === null && (s === "h1-home" || s === "h1-away")) {
+      if (!hasRegBreakdown) return null;
+      const h1H = (q1H ?? 0) + (q2H ?? 0);
+      const h1A = (q1A ?? 0) + (q2A ?? 0);
+      if (h1H === h1A) voided = true;
+      else winning = s === "h1-home" ? h1H > h1A : h1A > h1H;
+    }
+  }
+
   // ── Extra time (football) ─────────────────────────────────────────────────
   else if (s.startsWith("et-")) {
     const etHome = typeof fx?.["etHome"] === "number" ? (fx["etHome"] as number) : null;

@@ -6897,6 +6897,7 @@ function buildBasketballLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
       finishedMatchResults.set(id, {
         home: state.homeScore, away: state.awayScore,
         homeTeam: state.home, awayTeam: state.away, finishedAt: now,
+        extras: state._liveExtra?.quarters ? { basketball: { quarters: state._liveExtra.quarters } } : undefined,
       });
       liveMatchState.delete(id);
     }

@@ -4740,14 +4740,14 @@ export default function Home() {
           <div>
             {m._total && m.totalGoals.over25 > 0 && (
               <MarketGroup title={`Total Jogo — ${m._total}`}>
-                <MarketOddsBtn match={match} sel="o25" odd={m.totalGoals.over25} market="totais" label={`Mais de ${m._total}`} suspKey="total" />
-                <MarketOddsBtn match={match} sel="u25" odd={m.totalGoals.under25} market="totais" label={`Menos de ${m._total}`} suspKey="total" />
+                <MarketOddsBtn match={match} sel={`b-pts-o-${m._total}`} odd={m.totalGoals.over25} market="totais" label={`Mais de ${m._total}`} suspKey="totalGoals" />
+                <MarketOddsBtn match={match} sel={`b-pts-u-${m._total}`} odd={m.totalGoals.under25} market="totais" label={`Menos de ${m._total}`} suspKey="totalGoals" />
               </MarketGroup>
             )}
             {m._total1H && m.totalGoals.over15 > 0 && (
               <MarketGroup title={`Total 1º Tempo — ${m._total1H}`}>
-                <MarketOddsBtn match={match} sel="o15" odd={m.totalGoals.over15} market="totais" label={`Mais de ${m._total1H}`} suspKey="half1" />
-                <MarketOddsBtn match={match} sel="u15" odd={m.totalGoals.under15} market="totais" label={`Menos de ${m._total1H}`} suspKey="half1" />
+                <MarketOddsBtn match={match} sel={`b-h1-pts-o-${m._total1H}`} odd={m.totalGoals.over15} market="totais" label={`Mais de ${m._total1H}`} suspKey="totalGoals" />
+                <MarketOddsBtn match={match} sel={`b-h1-pts-u-${m._total1H}`} odd={m.totalGoals.under15} market="totais" label={`Menos de ${m._total1H}`} suspKey="totalGoals" />
               </MarketGroup>
             )}
             {m.totalGoals.over35 > 0 && (
@@ -4759,9 +4759,9 @@ export default function Home() {
           </div>
         )}
         {isBasketball && (modalTab === "1tempo" || modalTab === "todos") && m && m.totalGoals.over15 > 0 && (
-          <MarketGroup title={`Total 1º Quarto — ${m._total1H ? Math.round((m._total1H as number) / 2) : "—"}`}>
-            <MarketOddsBtn match={match} sel="o15" odd={m.totalGoals.over15} market="1tempo" label="Acima" suspKey="q1" />
-            <MarketOddsBtn match={match} sel="u15" odd={m.totalGoals.under15} market="1tempo" label="Abaixo" suspKey="q1" />
+          <MarketGroup title={`Total 1º Tempo — ${m._total1H ?? "—"}`}>
+            <MarketOddsBtn match={match} sel={`b-h1-pts-o-${m._total1H ?? 0}`} odd={m.totalGoals.over15} market="1tempo" label="Acima" suspKey="totalGoals" />
+            <MarketOddsBtn match={match} sel={`b-h1-pts-u-${m._total1H ?? 0}`} odd={m.totalGoals.under15} market="1tempo" label="Abaixo" suspKey="totalGoals" />
           </MarketGroup>
         )}
 
@@ -4770,8 +4770,8 @@ export default function Home() {
           <div>
             {m._spread !== undefined && (
               <MarketGroup title={`Spread — ${match.home} ${m._spread > 0 ? `−${m._spread}` : `+${Math.abs(m._spread)}`}`}>
-                <MarketOddsBtn match={match} sel="hm1" odd={m.handicap.homeMinusOne} market="spread" label={`${match.home} cobre`} suspKey="spread" />
-                <MarketOddsBtn match={match} sel="ap1" odd={m.handicap.awayPlusOne} market="spread" label={`${match.away} cobre`} suspKey="spread" />
+                <MarketOddsBtn match={match} sel={`b-spread-home-${Math.abs(m._spread)}`} odd={m.handicap.homeMinusOne} market="spread" label={`${match.home} cobre`} suspKey="handicap" />
+                <MarketOddsBtn match={match} sel={`b-spread-away-${Math.abs(m._spread)}`} odd={m.handicap.awayPlusOne} market="spread" label={`${match.away} cobre`} suspKey="handicap" />
               </MarketGroup>
             )}
           </div>
@@ -5492,8 +5492,8 @@ export default function Home() {
             {/* 1ª Metade = Q1+Q2; hide when already in Q3 or Q4 */}
             {m.halfTime.home > 0 && (currentQ === 0 || currentQ <= 2) && (
               <MarketGroup title="Vencedor — 1ª Metade">
-                <MarketOddsBtn match={match} sel="h1-home" odd={m.halfTime.home} market="quartos" label={match.home} suspKey="half1" />
-                <MarketOddsBtn match={match} sel="h1-away" odd={m.halfTime.away} market="quartos" label={match.away} suspKey="half1" />
+                <MarketOddsBtn match={match} sel="h1-home" odd={m.halfTime.home} market="quartos" label={match.home} suspKey="halfTime" />
+                <MarketOddsBtn match={match} sel="h1-away" odd={m.halfTime.away} market="quartos" label={match.away} suspKey="halfTime" />
               </MarketGroup>
             )}
             {(m as any).basketballExtra && (["q1","q2","q3","q4"] as const).map((q, qi) => {
@@ -5502,8 +5502,8 @@ export default function Home() {
               // All quarter markets remain visible throughout the match (settled by server once quarter ends)
               return ex[q].home > 0 ? (
                 <MarketGroup key={q} title={`Vencedor — ${labels[qi]}`}>
-                  <MarketOddsBtn match={match} sel={`${q}-home`} odd={ex[q].home} market="quartos" label={match.home} suspKey={q} />
-                  <MarketOddsBtn match={match} sel={`${q}-away`} odd={ex[q].away} market="quartos" label={match.away} suspKey={q} />
+                  <MarketOddsBtn match={match} sel={`${q}-home`} odd={ex[q].home} market="quartos" label={match.home} suspKey="basketballExtra" />
+                  <MarketOddsBtn match={match} sel={`${q}-away`} odd={ex[q].away} market="quartos" label={match.away} suspKey="basketballExtra" />
                 </MarketGroup>
               ) : null;
             })}
@@ -5515,14 +5515,14 @@ export default function Home() {
           <div>
             {((m as any).basketballExtra as any).teamTotalHome.over > 0 && (
               <MarketGroup title={`Total ${match.home} — O/U ${((m as any).basketballExtra as any).teamTotalHome.line}`}>
-                <MarketOddsBtn match={match} sel="tth-o" odd={((m as any).basketballExtra as any).teamTotalHome.over} market="times" label={`Mais de ${((m as any).basketballExtra as any).teamTotalHome.line}`} suspKey="teamTotal" />
-                <MarketOddsBtn match={match} sel="tth-u" odd={((m as any).basketballExtra as any).teamTotalHome.under} market="times" label={`Menos de ${((m as any).basketballExtra as any).teamTotalHome.line}`} suspKey="teamTotal" />
+                <MarketOddsBtn match={match} sel={`b-tt-home-o-${((m as any).basketballExtra as any).teamTotalHome.line}`} odd={((m as any).basketballExtra as any).teamTotalHome.over} market="times" label={`Mais de ${((m as any).basketballExtra as any).teamTotalHome.line}`} suspKey="basketballExtra" />
+                <MarketOddsBtn match={match} sel={`b-tt-home-u-${((m as any).basketballExtra as any).teamTotalHome.line}`} odd={((m as any).basketballExtra as any).teamTotalHome.under} market="times" label={`Menos de ${((m as any).basketballExtra as any).teamTotalHome.line}`} suspKey="basketballExtra" />
               </MarketGroup>
             )}
             {((m as any).basketballExtra as any).teamTotalAway.over > 0 && (
               <MarketGroup title={`Total ${match.away} — O/U ${((m as any).basketballExtra as any).teamTotalAway.line}`}>
-                <MarketOddsBtn match={match} sel="tta-o" odd={((m as any).basketballExtra as any).teamTotalAway.over} market="times" label={`Mais de ${((m as any).basketballExtra as any).teamTotalAway.line}`} suspKey="teamTotal" />
-                <MarketOddsBtn match={match} sel="tta-u" odd={((m as any).basketballExtra as any).teamTotalAway.under} market="times" label={`Menos de ${((m as any).basketballExtra as any).teamTotalAway.line}`} suspKey="teamTotal" />
+                <MarketOddsBtn match={match} sel={`b-tt-away-o-${((m as any).basketballExtra as any).teamTotalAway.line}`} odd={((m as any).basketballExtra as any).teamTotalAway.over} market="times" label={`Mais de ${((m as any).basketballExtra as any).teamTotalAway.line}`} suspKey="basketballExtra" />
+                <MarketOddsBtn match={match} sel={`b-tt-away-u-${((m as any).basketballExtra as any).teamTotalAway.line}`} odd={((m as any).basketballExtra as any).teamTotalAway.under} market="times" label={`Menos de ${((m as any).basketballExtra as any).teamTotalAway.line}`} suspKey="basketballExtra" />
               </MarketGroup>
             )}
           </div>
@@ -5535,8 +5535,8 @@ export default function Home() {
               .filter((tr: { line: number; over: number; under: number }) => tr.line !== (m._total ?? -1))
               .map((tr: { line: number; over: number; under: number }) => (
                 <MarketGroup key={`tr-${tr.line}`} title={`Total de Pontos — O/U ${tr.line}`}>
-                  <MarketOddsBtn match={match} sel={`tr-o-${tr.line}`} odd={tr.over} market="totais" label={`Mais de ${tr.line}`} suspKey="total" />
-                  <MarketOddsBtn match={match} sel={`tr-u-${tr.line}`} odd={tr.under} market="totais" label={`Menos de ${tr.line}`} suspKey="total" />
+                  <MarketOddsBtn match={match} sel={`b-pts-o-${tr.line}`} odd={tr.over} market="totais" label={`Mais de ${tr.line}`} suspKey="totalGoals" />
+                  <MarketOddsBtn match={match} sel={`b-pts-u-${tr.line}`} odd={tr.under} market="totais" label={`Menos de ${tr.line}`} suspKey="totalGoals" />
                 </MarketGroup>
               ))}
           </div>
