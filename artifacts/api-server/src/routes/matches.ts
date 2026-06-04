@@ -4185,7 +4185,6 @@ async function fetchLiveRace(v1Base: string, v2Base: string): Promise<SAPIV2Even
 
 async function getFootballLiveV2(): Promise<SAPIV2Event[]> {
   const now = Date.now();
-  if ((wsConnected.has("football") || v1WsConnected.has("football")) && footballLiveV2Cache) return footballLiveV2Cache;
   if (footballLiveV2Cache && now - footballLiveV2FetchedAt < CONFIG.LIVE_CACHE_TTL) return footballLiveV2Cache;
   try {
     const events = await fetchLiveRace(SAPI_V1_FOOTBALL, SAPI_V2_FOOTBALL);
@@ -4201,7 +4200,6 @@ async function getFootballLiveV2(): Promise<SAPIV2Event[]> {
 
 async function getBasketballLiveV2(): Promise<SAPIV2Event[]> {
   const now = Date.now();
-  if ((wsConnected.has("basketball") || v1WsConnected.has("basketball")) && basketballLiveV2Cache) return basketballLiveV2Cache;
   if (basketballLiveV2Cache && now - basketballLiveV2FetchedAt < CONFIG.LIVE_CACHE_TTL) return basketballLiveV2Cache;
   try {
     const events = await fetchLiveRace(SAPI_V1_BASKETBALL, SAPI_V2_BASKETBALL);
@@ -4217,7 +4215,6 @@ async function getBasketballLiveV2(): Promise<SAPIV2Event[]> {
 
 async function getHockeyLiveV2(): Promise<SAPIV2Event[]> {
   const now = Date.now();
-  if ((wsConnected.has("hockey") || v1WsConnected.has("hockey")) && hockeyLiveV2Cache) return hockeyLiveV2Cache;
   if (hockeyLiveV2Cache && now - hockeyLiveV2FetchedAt < CONFIG.LIVE_CACHE_TTL) return hockeyLiveV2Cache;
   try {
     const resp = await fetch(`${SAPI_V2_HOCKEY}/live`, { signal: AbortSignal.timeout(9000), headers: sapiHeaders() });
@@ -4233,7 +4230,6 @@ async function getHockeyLiveV2(): Promise<SAPIV2Event[]> {
 
 async function getBaseballLiveV2(): Promise<SAPIV2Event[]> {
   const now = Date.now();
-  if ((wsConnected.has("baseball") || v1WsConnected.has("baseball")) && baseballLiveV2Cache) return baseballLiveV2Cache;
   if (baseballLiveV2Cache && now - baseballLiveV2FetchedAt < CONFIG.LIVE_CACHE_TTL) return baseballLiveV2Cache;
   try {
     const resp = await fetch(`${SAPI_V2_BASEBALL}/live`, { signal: AbortSignal.timeout(9000), headers: sapiHeaders() });
@@ -4249,7 +4245,6 @@ async function getBaseballLiveV2(): Promise<SAPIV2Event[]> {
 
 async function getTennisLiveV2(): Promise<SAPIV2Event[]> {
   const now = Date.now();
-  if ((wsConnected.has("tennis") || v1WsConnected.has("tennis")) && tennisLiveV2Cache) return tennisLiveV2Cache;
   if (tennisLiveV2Cache && now - tennisLiveV2FetchedAt < CONFIG.LIVE_CACHE_TTL) return tennisLiveV2Cache;
   try {
     // Race V1 vs V2 — tennis endpoint shape varies, handle both formats
