@@ -205,6 +205,20 @@ export type LiveMatchState = {
   };
 };
 
+type LiveMatchPayload = Omit<
+  LiveMatchState,
+  | "events"
+  | "_baseOdds"
+  | "_baseMarkets"
+  | "_oddsUpdatedAt"
+  | "_driftPhase"
+  | "_marketNextUpdate"
+  | "_firstSeenAt"
+  | "_htStartedAt"
+> & {
+  events?: LiveMatchState["events"];
+};
+
 export type UpcomingMatch = {
   id: string;
   home: string;
@@ -7531,8 +7545,24 @@ async function rebuildUpcomingCache(): Promise<void> {
   }
 }
 
+function toLiveMatchPayload(m: LiveMatchState): LiveMatchPayload {
+  const {
+    _baseOdds: _bo,
+    _baseMarkets: _bm,
+    _oddsUpdatedAt: _ou,
+    _driftPhase: _dp,
+    _marketNextUpdate: _mnu,
+    _firstSeenAt: _fs,
+    _htStartedAt: _ht,
+    events,
+    ...rest
+  } = m;
+  if (events.length === 0) return rest;
+  return { ...rest, events };
+}
+
 // Shared payload builder — used by both /live HTTP route and SSE broadcast
-async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
+async function buildLivePayload(): Promise<{ matches: LiveMatchPayload[] }> {
   // ── Fast path: live data from in-memory WS caches (sub-ms each) ──────────
   const [
     footballEvents, basketballEvents, hockeyEvents, baseballEvents, tennisEvents,
@@ -7644,7 +7674,7 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
     startingSoonFinal.push(m);
   }
 
-  return { matches: [...livePart, ...promotedTennis, ...startingSoonFinal] };
+  return { matches: [...livePart, ...promotedTennis, ...startingSoonFinal].map(toLiveMatchPayload) };
 }
 
 // Broadcast payload to all connected SSE + WebSocket clients; prune dead connections.
