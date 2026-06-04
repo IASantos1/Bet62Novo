@@ -7334,23 +7334,23 @@ function buildTennisLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
   }
 
   // Garbage collect tennis states no longer in the feed.
-  // Grace period of 45 s: transient feed gaps (Tyler/Challenger matches that briefly
+  // Grace period of 15 s: transient feed gaps (Tyler/Challenger matches that briefly
   // disappear between polls) don't cause the match to vanish from the UI.
   for (const id of liveMatchState.keys()) {
     if (!id.startsWith("tennis-v2-")) continue;
     if (!currentIds.has(id)) {
       const firstMissing = _tennisMissingFrom.get(id) ?? now;
       _tennisMissingFrom.set(id, firstMissing);
-      if (now - firstMissing > 45_000) {
+      if (now - firstMissing > 15_000) {
         liveMatchState.delete(id);
         _tennisMissingFrom.delete(id);
       } else {
-        // Within grace period: only include in result for the first 8 s of the gap.
+        // Within grace period: only include in result for the first 5 s of the gap.
         // This covers transient feed blips (1-4 polls) without surfacing finished matches
-        // that have permanently left the feed.  State is retained for the full 45 s so
+        // that have permanently left the feed.  State is retained for the full 15 s so
         // we can resume accurately if the match genuinely returns.
         const cached = liveMatchState.get(id);
-        if (cached && (now - firstMissing) < 8_000) result.push(cached);
+        if (cached && (now - firstMissing) < 5_000) result.push(cached);
       }
     } else {
       _tennisMissingFrom.delete(id); // back in feed — reset grace timer
