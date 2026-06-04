@@ -1,370 +1,390 @@
-From 93d3370a153175d8d3c53dae9ae1653d8a0978d0 Mon Sep 17 00:00:00 2001
+From 62b0bdb498ee688238baa317453fff6f16aa8e1e Mon Sep 17 00:00:00 2001
 From: IASantos1 <IASantos1@users.noreply.github.com>
-Date: Wed, 3 Jun 2026 23:17:06 +0000
-Subject: [PATCH] feat: Fazer Pull Repository
+Date: Wed, 3 Jun 2026 23:45:19 +0000
+Subject: [PATCH 1/2] feat: Fazer Pull Repository
 
 Co-authored-by: traeagent <traeagent@users.noreply.github.com>
 ---
- artifacts/api-server/src/lib/config.ts     |   4 +-
- artifacts/api-server/src/routes/matches.ts | 183 ++++++++++++++++++---
- 2 files changed, 164 insertions(+), 23 deletions(-)
+ patches/0001-feat-Fazer-Pull-Repository.patch | 370 ++++++++++++++++++
+ 1 file changed, 370 insertions(+)
+ create mode 100644 patches/0001-feat-Fazer-Pull-Repository.patch
 
-diff --git a/artifacts/api-server/src/lib/config.ts b/artifacts/api-server/src/lib/config.ts
-index ecd36b9..f055001 100644
---- a/artifacts/api-server/src/lib/config.ts
-+++ b/artifacts/api-server/src/lib/config.ts
-@@ -1,12 +1,12 @@
- export const CONFIG = {
--  LIVE_UPDATE_INTERVAL: 5000,
-+  LIVE_UPDATE_INTERVAL: 1000,
-   PREMATCH_UPDATE_INTERVAL: 300_000,
-   REOPEN_DELAY_GOAL: 8000,
-   REOPEN_DELAY_VAR: 15_000,
-   MAX_ODDS_DRIFT: 0.40,
-   CACHE_TTL: 86_400,
- 
--  LIVE_CACHE_TTL: 15_000,
-+  LIVE_CACHE_TTL: 2_000,
-   DAILY_CACHE_TTL: 300_000,
-   TOMORROW_CACHE_TTL: 1_800_000,
-   ODDS_CACHE_TTL: 300_000,
-diff --git a/artifacts/api-server/src/routes/matches.ts b/artifacts/api-server/src/routes/matches.ts
-index f62e7f4..899e0cf 100644
---- a/artifacts/api-server/src/routes/matches.ts
-+++ b/artifacts/api-server/src/routes/matches.ts
-@@ -4185,6 +4185,7 @@ async function fetchLiveRace(v1Base: string, v2Base: string): Promise<SAPIV2Even
- 
- async function getFootballLiveV2(): Promise<SAPIV2Event[]> {
-   const now = Date.now();
-+  if ((wsConnected.has("football") || v1WsConnected.has("football")) && footballLiveV2Cache) return footballLiveV2Cache;
-   if (footballLiveV2Cache && now - footballLiveV2FetchedAt < CONFIG.LIVE_CACHE_TTL) return footballLiveV2Cache;
-   try {
-     const events = await fetchLiveRace(SAPI_V1_FOOTBALL, SAPI_V2_FOOTBALL);
-@@ -4200,6 +4201,7 @@ async function getFootballLiveV2(): Promise<SAPIV2Event[]> {
- 
- async function getBasketballLiveV2(): Promise<SAPIV2Event[]> {
-   const now = Date.now();
-+  if ((wsConnected.has("basketball") || v1WsConnected.has("basketball")) && basketballLiveV2Cache) return basketballLiveV2Cache;
-   if (basketballLiveV2Cache && now - basketballLiveV2FetchedAt < CONFIG.LIVE_CACHE_TTL) return basketballLiveV2Cache;
-   try {
-     const events = await fetchLiveRace(SAPI_V1_BASKETBALL, SAPI_V2_BASKETBALL);
-@@ -4215,6 +4217,7 @@ async function getBasketballLiveV2(): Promise<SAPIV2Event[]> {
- 
- async function getHockeyLiveV2(): Promise<SAPIV2Event[]> {
-   const now = Date.now();
-+  if ((wsConnected.has("hockey") || v1WsConnected.has("hockey")) && hockeyLiveV2Cache) return hockeyLiveV2Cache;
-   if (hockeyLiveV2Cache && now - hockeyLiveV2FetchedAt < CONFIG.LIVE_CACHE_TTL) return hockeyLiveV2Cache;
-   try {
-     const resp = await fetch(`${SAPI_V2_HOCKEY}/live`, { signal: AbortSignal.timeout(9000), headers: sapiHeaders() });
-@@ -4230,6 +4233,7 @@ async function getHockeyLiveV2(): Promise<SAPIV2Event[]> {
- 
- async function getBaseballLiveV2(): Promise<SAPIV2Event[]> {
-   const now = Date.now();
-+  if ((wsConnected.has("baseball") || v1WsConnected.has("baseball")) && baseballLiveV2Cache) return baseballLiveV2Cache;
-   if (baseballLiveV2Cache && now - baseballLiveV2FetchedAt < CONFIG.LIVE_CACHE_TTL) return baseballLiveV2Cache;
-   try {
-     const resp = await fetch(`${SAPI_V2_BASEBALL}/live`, { signal: AbortSignal.timeout(9000), headers: sapiHeaders() });
-@@ -4245,6 +4249,7 @@ async function getBaseballLiveV2(): Promise<SAPIV2Event[]> {
- 
- async function getTennisLiveV2(): Promise<SAPIV2Event[]> {
-   const now = Date.now();
-+  if ((wsConnected.has("tennis") || v1WsConnected.has("tennis")) && tennisLiveV2Cache) return tennisLiveV2Cache;
-   if (tennisLiveV2Cache && now - tennisLiveV2FetchedAt < CONFIG.LIVE_CACHE_TTL) return tennisLiveV2Cache;
-   try {
-     // Race V1 vs V2 — tennis endpoint shape varies, handle both formats
-@@ -5674,7 +5679,7 @@ async function buildLiveMatches(): Promise<LiveMatchState[]> {
-       let hasRealOdds = true; // Always show odds — use model when real unavailable
- 
-       if (existing && existing.homeScore === homeScore && existing.awayScore === awayScore) {
--        // Score unchanged — background drift timer handles market updates every 2s.
-+        // Score unchanged — background drift timer handles market updates every 1–2s.
-         // Here we update minute, clean up expired suspensions, and re-filter settled markets.
-         const now = Date.now();
-         if (existing.marketSuspension) {
-@@ -6660,8 +6665,15 @@ function buildFootballLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
-   return result;
- }
- 
-+const BBALL_SUSP_KEYS = ["result", "totalGoals", "handicap", "halfTime", "basketballExtra"] as const;
-+const HOCKEY_SUSP_KEYS = ["result", "totalGoals", "handicap", "halfTime", "hockeyExtra"] as const;
-+const BASEBALL_SUSP_KEYS = ["result", "totalGoals", "handicap", "mlbExtra"] as const;
-+const MAX_LIVE_STATE_MS = 4 * 60 * 60 * 1000;
+diff --git a/patches/0001-feat-Fazer-Pull-Repository.patch b/patches/0001-feat-Fazer-Pull-Repository.patch
+new file mode 100644
+index 0000000..006c9cf
+--- /dev/null
++++ b/patches/0001-feat-Fazer-Pull-Repository.patch
+@@ -0,0 +1,370 @@
++From 93d3370a153175d8d3c53dae9ae1653d8a0978d0 Mon Sep 17 00:00:00 2001
++From: IASantos1 <IASantos1@users.noreply.github.com>
++Date: Wed, 3 Jun 2026 23:17:06 +0000
++Subject: [PATCH] feat: Fazer Pull Repository
 +
- function buildBasketballLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
-   const result: LiveMatchState[] = [];
-+  const now = Date.now();
-+  const currentIds = new Set<string>();
-   for (const ev of events) {
-     const code = v2StatusCode(ev);
-     // code 100 = ended; 0 = not started; undefined = keep
-@@ -6707,22 +6719,64 @@ function buildBasketballLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
-         : { home: loserOdds,  draw: 0, away: winnerOdds };
-     }
- 
--    result.push({
--      id: `bball-v2-${ev.id}`,
-+    const id = `bball-v2-${ev.id}`;
-+    currentIds.add(id);
++Co-authored-by: traeagent <traeagent@users.noreply.github.com>
++---
++ artifacts/api-server/src/lib/config.ts     |   4 +-
++ artifacts/api-server/src/routes/matches.ts | 183 ++++++++++++++++++---
++ 2 files changed, 164 insertions(+), 23 deletions(-)
 +
-+    const prev = liveMatchState.get(id);
-+    let marketSuspension = prev?.marketSuspension;
-+    let suspensionReason = prev?._suspensionReason;
++diff --git a/artifacts/api-server/src/lib/config.ts b/artifacts/api-server/src/lib/config.ts
++index ecd36b9..f055001 100644
++--- a/artifacts/api-server/src/lib/config.ts
+++++ b/artifacts/api-server/src/lib/config.ts
++@@ -1,12 +1,12 @@
++ export const CONFIG = {
++-  LIVE_UPDATE_INTERVAL: 5000,
+++  LIVE_UPDATE_INTERVAL: 1000,
++   PREMATCH_UPDATE_INTERVAL: 300_000,
++   REOPEN_DELAY_GOAL: 8000,
++   REOPEN_DELAY_VAR: 15_000,
++   MAX_ODDS_DRIFT: 0.40,
++   CACHE_TTL: 86_400,
++ 
++-  LIVE_CACHE_TTL: 15_000,
+++  LIVE_CACHE_TTL: 2_000,
++   DAILY_CACHE_TTL: 300_000,
++   TOMORROW_CACHE_TTL: 1_800_000,
++   ODDS_CACHE_TTL: 300_000,
++diff --git a/artifacts/api-server/src/routes/matches.ts b/artifacts/api-server/src/routes/matches.ts
++index f62e7f4..899e0cf 100644
++--- a/artifacts/api-server/src/routes/matches.ts
+++++ b/artifacts/api-server/src/routes/matches.ts
++@@ -4185,6 +4185,7 @@ async function fetchLiveRace(v1Base: string, v2Base: string): Promise<SAPIV2Even
++ 
++ async function getFootballLiveV2(): Promise<SAPIV2Event[]> {
++   const now = Date.now();
+++  if ((wsConnected.has("football") || v1WsConnected.has("football")) && footballLiveV2Cache) return footballLiveV2Cache;
++   if (footballLiveV2Cache && now - footballLiveV2FetchedAt < CONFIG.LIVE_CACHE_TTL) return footballLiveV2Cache;
++   try {
++     const events = await fetchLiveRace(SAPI_V1_FOOTBALL, SAPI_V2_FOOTBALL);
++@@ -4200,6 +4201,7 @@ async function getFootballLiveV2(): Promise<SAPIV2Event[]> {
++ 
++ async function getBasketballLiveV2(): Promise<SAPIV2Event[]> {
++   const now = Date.now();
+++  if ((wsConnected.has("basketball") || v1WsConnected.has("basketball")) && basketballLiveV2Cache) return basketballLiveV2Cache;
++   if (basketballLiveV2Cache && now - basketballLiveV2FetchedAt < CONFIG.LIVE_CACHE_TTL) return basketballLiveV2Cache;
++   try {
++     const events = await fetchLiveRace(SAPI_V1_BASKETBALL, SAPI_V2_BASKETBALL);
++@@ -4215,6 +4217,7 @@ async function getBasketballLiveV2(): Promise<SAPIV2Event[]> {
++ 
++ async function getHockeyLiveV2(): Promise<SAPIV2Event[]> {
++   const now = Date.now();
+++  if ((wsConnected.has("hockey") || v1WsConnected.has("hockey")) && hockeyLiveV2Cache) return hockeyLiveV2Cache;
++   if (hockeyLiveV2Cache && now - hockeyLiveV2FetchedAt < CONFIG.LIVE_CACHE_TTL) return hockeyLiveV2Cache;
++   try {
++     const resp = await fetch(`${SAPI_V2_HOCKEY}/live`, { signal: AbortSignal.timeout(9000), headers: sapiHeaders() });
++@@ -4230,6 +4233,7 @@ async function getHockeyLiveV2(): Promise<SAPIV2Event[]> {
++ 
++ async function getBaseballLiveV2(): Promise<SAPIV2Event[]> {
++   const now = Date.now();
+++  if ((wsConnected.has("baseball") || v1WsConnected.has("baseball")) && baseballLiveV2Cache) return baseballLiveV2Cache;
++   if (baseballLiveV2Cache && now - baseballLiveV2FetchedAt < CONFIG.LIVE_CACHE_TTL) return baseballLiveV2Cache;
++   try {
++     const resp = await fetch(`${SAPI_V2_BASEBALL}/live`, { signal: AbortSignal.timeout(9000), headers: sapiHeaders() });
++@@ -4245,6 +4249,7 @@ async function getBaseballLiveV2(): Promise<SAPIV2Event[]> {
++ 
++ async function getTennisLiveV2(): Promise<SAPIV2Event[]> {
++   const now = Date.now();
+++  if ((wsConnected.has("tennis") || v1WsConnected.has("tennis")) && tennisLiveV2Cache) return tennisLiveV2Cache;
++   if (tennisLiveV2Cache && now - tennisLiveV2FetchedAt < CONFIG.LIVE_CACHE_TTL) return tennisLiveV2Cache;
++   try {
++     // Race V1 vs V2 — tennis endpoint shape varies, handle both formats
++@@ -5674,7 +5679,7 @@ async function buildLiveMatches(): Promise<LiveMatchState[]> {
++       let hasRealOdds = true; // Always show odds — use model when real unavailable
++ 
++       if (existing && existing.homeScore === homeScore && existing.awayScore === awayScore) {
++-        // Score unchanged — background drift timer handles market updates every 2s.
+++        // Score unchanged — background drift timer handles market updates every 1–2s.
++         // Here we update minute, clean up expired suspensions, and re-filter settled markets.
++         const now = Date.now();
++         if (existing.marketSuspension) {
++@@ -6660,8 +6665,15 @@ function buildFootballLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
++   return result;
++ }
++ 
+++const BBALL_SUSP_KEYS = ["result", "totalGoals", "handicap", "halfTime", "basketballExtra"] as const;
+++const HOCKEY_SUSP_KEYS = ["result", "totalGoals", "handicap", "halfTime", "hockeyExtra"] as const;
+++const BASEBALL_SUSP_KEYS = ["result", "totalGoals", "handicap", "mlbExtra"] as const;
+++const MAX_LIVE_STATE_MS = 4 * 60 * 60 * 1000;
+++
++ function buildBasketballLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
++   const result: LiveMatchState[] = [];
+++  const now = Date.now();
+++  const currentIds = new Set<string>();
++   for (const ev of events) {
++     const code = v2StatusCode(ev);
++     // code 100 = ended; 0 = not started; undefined = keep
++@@ -6707,22 +6719,64 @@ function buildBasketballLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
++         : { home: loserOdds,  draw: 0, away: winnerOdds };
++     }
++ 
++-    result.push({
++-      id: `bball-v2-${ev.id}`,
+++    const id = `bball-v2-${ev.id}`;
+++    currentIds.add(id);
+++
+++    const prev = liveMatchState.get(id);
+++    let marketSuspension = prev?.marketSuspension;
+++    let suspensionReason = prev?._suspensionReason;
+++
+++    if (marketSuspension) {
+++      const kept = Object.fromEntries(Object.entries(marketSuspension).filter(([, ts]) => ts > now));
+++      marketSuspension = Object.keys(kept).length ? kept : undefined;
+++    }
+++    if (!marketSuspension) suspensionReason = undefined;
+++
+++    const scoreChanged = prev != null && (prev.homeScore !== homeScore || prev.awayScore !== awayScore);
+++    const statusChanged = prev != null && prev.status !== statusLabel;
+++
+++    if (scoreChanged) {
+++      marketSuspension = Object.fromEntries(BBALL_SUSP_KEYS.map(k => [k, now + 5_000]));
+++      suspensionReason = "CESTA";
+++    } else if (statusChanged && (isHT || isPause)) {
+++      marketSuspension = Object.fromEntries(BBALL_SUSP_KEYS.map(k => [k, now + 8_000]));
+++      suspensionReason = "INTERVALO";
+++    }
+++
+++    const state: LiveMatchState = {
+++      id,
++       home: homeTeam, away: awayTeam,
++       league: v2TournName(ev.tournament), country: v2TournCountry(ev),
++       sport: "basketball", homeScore, awayScore, minute,
++       status: statusLabel, hasRealOdds: true, odds: liveOdds,
++       markets: makeBasketballMarketsFromTeams(homeTeam, awayTeam),
++       events: [],
+++      marketSuspension,
+++      _suspensionReason: suspensionReason,
+++      _firstSeenAt: prev?._firstSeenAt ?? now,
++       _liveExtra: quarters.length > 0 ? { quarters } : undefined,
++-    });
+++    };
+++    liveMatchState.set(id, state);
+++    result.push(state);
+++  }
+++  for (const [id, state] of liveMatchState.entries()) {
+++    if (!id.startsWith("bball-v2-")) continue;
+++    const tooOld = now - (state._firstSeenAt ?? now) > MAX_LIVE_STATE_MS;
+++    if (!currentIds.has(id) || tooOld) {
+++      finishedMatchResults.set(id, {
+++        home: state.homeScore, away: state.awayScore,
+++        homeTeam: state.home, awayTeam: state.away, finishedAt: now,
+++      });
+++      liveMatchState.delete(id);
+++    }
++   }
++   return result;
++ }
++ 
++ function buildHockeyLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
++   const result: LiveMatchState[] = [];
+++  const now = Date.now();
+++  const currentIds = new Set<string>();
++   for (const ev of events) {
++     const code = v2StatusCode(ev);
++     if (code === 100 || code === 0) continue;
++@@ -6765,22 +6819,67 @@ function buildHockeyLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
++     }
++     liveOdds.draw = 0;
++ 
++-    result.push({
++-      id: `hockey-v2-${ev.id}`,
+++    const id = `hockey-v2-${ev.id}`;
+++    currentIds.add(id);
+++
+++    const prev = liveMatchState.get(id);
+++    let marketSuspension = prev?.marketSuspension;
+++    let suspensionReason = prev?._suspensionReason;
+++
+++    if (marketSuspension) {
+++      const kept = Object.fromEntries(Object.entries(marketSuspension).filter(([, ts]) => ts > now));
+++      marketSuspension = Object.keys(kept).length ? kept : undefined;
+++    }
+++    if (!marketSuspension) suspensionReason = undefined;
+++
+++    const scoreChanged = prev != null && (prev.homeScore !== homeScore || prev.awayScore !== awayScore);
+++    const statusChanged = prev != null && prev.status !== statusLabel;
+++
+++    if (scoreChanged) {
+++      marketSuspension = Object.fromEntries(HOCKEY_SUSP_KEYS.map(k => [k, now + 12_000]));
+++      suspensionReason = "GOLO";
+++    } else if (statusChanged && isPause) {
+++      marketSuspension = Object.fromEntries(HOCKEY_SUSP_KEYS.map(k => [k, now + 10_000]));
+++      suspensionReason = "INTERVALO";
+++    } else if (statusChanged && code === 17) {
+++      marketSuspension = Object.fromEntries(HOCKEY_SUSP_KEYS.map(k => [k, now + 10_000]));
+++      suspensionReason = "PRORROGAÇÃO";
+++    }
+++
+++    const state: LiveMatchState = {
+++      id,
++       home: homeTeam, away: awayTeam,
++       league: v2TournName(ev.tournament), country: v2TournCountry(ev),
++       sport: "hockey", homeScore, awayScore, minute,
++       status: statusLabel, hasRealOdds: true, odds: liveOdds,
++       markets: makeHockeyMarketsFromTeams(homeTeam, awayTeam),
++       events: [],
+++      marketSuspension,
+++      _suspensionReason: suspensionReason,
+++      _firstSeenAt: prev?._firstSeenAt ?? now,
++       _liveExtra: periods.length > 0 ? { periods } : undefined,
++-    });
+++    };
+++    liveMatchState.set(id, state);
+++    result.push(state);
+++  }
+++  for (const [id, state] of liveMatchState.entries()) {
+++    if (!id.startsWith("hockey-v2-")) continue;
+++    const tooOld = now - (state._firstSeenAt ?? now) > MAX_LIVE_STATE_MS;
+++    if (!currentIds.has(id) || tooOld) {
+++      finishedMatchResults.set(id, {
+++        home: state.homeScore, away: state.awayScore,
+++        homeTeam: state.home, awayTeam: state.away, finishedAt: now,
+++      });
+++      liveMatchState.delete(id);
+++    }
++   }
++   return result;
++ }
++ 
++ function buildBaseballLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
++   const result: LiveMatchState[] = [];
+++  const now = Date.now();
+++  const currentIds = new Set<string>();
++   for (const ev of events) {
++     const code = v2StatusCode(ev);
++     const statusStr = v2StatusStr(ev.status);
++@@ -6822,8 +6921,33 @@ function buildBaseballLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
++         : { home: loserOdds,  draw: 0, away: winnerOdds };
++     }
++ 
++-    result.push({
++-      id: `baseball-v2-${ev.id}`,
+++    const id = `baseball-v2-${ev.id}`;
+++    currentIds.add(id);
+++
+++    const prev = liveMatchState.get(id);
+++    let marketSuspension = prev?.marketSuspension;
+++    let suspensionReason = prev?._suspensionReason;
+++
+++    if (marketSuspension) {
+++      const kept = Object.fromEntries(Object.entries(marketSuspension).filter(([, ts]) => ts > now));
+++      marketSuspension = Object.keys(kept).length ? kept : undefined;
+++    }
+++    if (!marketSuspension) suspensionReason = undefined;
+++
+++    const scoreChanged = prev != null && (prev.homeScore !== homeScore || prev.awayScore !== awayScore);
+++    const prevInningsLen = (prev?._liveExtra?.innings?.length ?? 0);
+++    const inningChanged = prev != null && prevInningsLen !== innings.length;
+++
+++    if (scoreChanged) {
+++      marketSuspension = Object.fromEntries(BASEBALL_SUSP_KEYS.map(k => [k, now + 12_000]));
+++      suspensionReason = "RUN";
+++    } else if (inningChanged) {
+++      marketSuspension = Object.fromEntries(BASEBALL_SUSP_KEYS.map(k => [k, now + 10_000]));
+++      suspensionReason = "TROCA DE INNING";
+++    }
+++
+++    const state: LiveMatchState = {
+++      id,
++       home: homeTeam, away: awayTeam,
++       league, country: v2TournCountry(ev),
++       sport: "baseball", homeScore, awayScore,
++@@ -6831,8 +6955,24 @@ function buildBaseballLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
++       status: statusStr, hasRealOdds: true, odds: liveOdds,
++       markets: makeMLBMarketsFromTeams(homeTeam, awayTeam),
++       events: [],
+++      marketSuspension,
+++      _suspensionReason: suspensionReason,
+++      _firstSeenAt: prev?._firstSeenAt ?? now,
++       _liveExtra: innings.length > 0 ? { innings } : undefined,
++-    });
+++    };
+++    liveMatchState.set(id, state);
+++    result.push(state);
+++  }
+++  for (const [id, state] of liveMatchState.entries()) {
+++    if (!id.startsWith("baseball-v2-")) continue;
+++    const tooOld = now - (state._firstSeenAt ?? now) > MAX_LIVE_STATE_MS;
+++    if (!currentIds.has(id) || tooOld) {
+++      finishedMatchResults.set(id, {
+++        home: state.homeScore, away: state.awayScore,
+++        homeTeam: state.home, awayTeam: state.away, finishedAt: now,
+++      });
+++      liveMatchState.delete(id);
+++    }
++   }
++   return result;
++ }
++@@ -7509,7 +7649,7 @@ router.get("/live", async (_req, res) => {
++   }
++ });
++ 
++-// ─── SSE endpoint — pushes live data every 2 s (piggybacked on drift engine) ──
+++// ─── SSE endpoint — pushes live data continuously (WS-triggered + 1–2s cadence) ─
++ router.get("/live-stream", (req, res) => {
++   res.setHeader("Content-Type", "text/event-stream");
++   res.setHeader("Cache-Control", "no-cache, no-transform");
++@@ -7521,7 +7661,7 @@ router.get("/live-stream", (req, res) => {
++ 
++   sseClients.add(res);
++ 
++-  // Send an initial event right away so the client doesn't wait up to 2s
+++  // Send an initial event right away so the client doesn't wait for the next tick
++   buildLivePayload()
++     .then(p => { try { res.write(`data: ${JSON.stringify(p)}\n\n`); } catch { /* ignore */ } })
++     .catch(() => { /* ignore */ });
++@@ -11301,11 +11441,12 @@ router.get("/football-odds-country/:country", async (req, res) => {
++ });
++ 
++ // ─── Background Market Drift Engine ─────────────────────────────────────────
++-// Runs every 2s independently of Statpal API polls so the frontend sees smooth
+++// Runs every 1–2s independently of Statpal API polls so the frontend sees smooth
++ // per-tier odds movement even between data-fetch cycles.
++-// Tier 1 markets (Over/Under, Handicap) drift every 2s.
++-// Tier 2 markets (HT/FT, Correct Score) drift every 2s at a much smaller rate.
++-// Tier 3 markets (Corners, Cards) drift every 2s at a very gentle rate.
+++// Tier 1 markets (Over/Under, Handicap) drift on this cadence.
+++// Tier 2 markets (HT/FT, Correct Score) drift on this cadence at a much smaller rate.
+++// Tier 3 markets (Corners, Cards) drift on this cadence at a very gentle rate.
+++const LIVE_BROADCAST_INTERVAL_MS = Math.min(2000, Math.max(1000, CONFIG.LIVE_UPDATE_INTERVAL));
++ setInterval(() => {
++   const now = Date.now();
++   for (const [id, state] of liveMatchState.entries()) {
++@@ -11322,9 +11463,9 @@ setInterval(() => {
++     }
++     liveMatchState.set(id, applyTieredMarketDrift(state, now));
++   }
++-  // Push to SSE clients every 2s (same cadence as market drift)
+++  // Push to SSE clients (same cadence as market drift)
++   broadcastLive().catch(() => { /* ignore */ });
++-}, 2000);
+++}, LIVE_BROADCAST_INTERVAL_MS);
++ 
++ // ─── Football Player Markets (per-match, filtered to home + away team only) ───
++ // GET /api/matches/football-player-markets/:leagueId?homeTeam=...&awayTeam=...
++@@ -11838,8 +11979,8 @@ router.get("/v2-standings", async (req, res) => {
++ 
++ // ─── WebSocket server for mobile clients (/api/matches/ws) ───────────────────
++ // Accepts native WebSocket connections and pushes the same live payload that
++-// broadcastLive() sends to SSE clients — every 2 s, piggy-backed on the
++-// market-drift engine. Mobile clients reconnect automatically on close/error.
+++// broadcastLive() sends to SSE clients (WS-triggered + 1–2s cadence), piggy-backed
+++// on the market-drift engine. Mobile clients reconnect automatically on close/error.
++ export function initLiveWsServer(httpServer: import("http").Server): void {
++   const wss = new WebSocketServer({ noServer: true });
++ 
++@@ -11858,7 +11999,7 @@ export function initLiveWsServer(httpServer: import("http").Server): void {
++   wss.on("connection", (ws: WsClient) => {
++     wsLiveClients.add(ws);
++ 
++-    // Send current live state immediately so the client isn't blank for 2 s
+++    // Send current live state immediately so the client isn't blank for the next tick
++     buildLivePayload()
++       .then((p) => {
++         try { if (ws.readyState === 1) ws.send(JSON.stringify(p)); } catch { /* ignore */ }
++-- 
++2.43.0
 +
-+    if (marketSuspension) {
-+      const kept = Object.fromEntries(Object.entries(marketSuspension).filter(([, ts]) => ts > now));
-+      marketSuspension = Object.keys(kept).length ? kept : undefined;
-+    }
-+    if (!marketSuspension) suspensionReason = undefined;
-+
-+    const scoreChanged = prev != null && (prev.homeScore !== homeScore || prev.awayScore !== awayScore);
-+    const statusChanged = prev != null && prev.status !== statusLabel;
-+
-+    if (scoreChanged) {
-+      marketSuspension = Object.fromEntries(BBALL_SUSP_KEYS.map(k => [k, now + 5_000]));
-+      suspensionReason = "CESTA";
-+    } else if (statusChanged && (isHT || isPause)) {
-+      marketSuspension = Object.fromEntries(BBALL_SUSP_KEYS.map(k => [k, now + 8_000]));
-+      suspensionReason = "INTERVALO";
-+    }
-+
-+    const state: LiveMatchState = {
-+      id,
-       home: homeTeam, away: awayTeam,
-       league: v2TournName(ev.tournament), country: v2TournCountry(ev),
-       sport: "basketball", homeScore, awayScore, minute,
-       status: statusLabel, hasRealOdds: true, odds: liveOdds,
-       markets: makeBasketballMarketsFromTeams(homeTeam, awayTeam),
-       events: [],
-+      marketSuspension,
-+      _suspensionReason: suspensionReason,
-+      _firstSeenAt: prev?._firstSeenAt ?? now,
-       _liveExtra: quarters.length > 0 ? { quarters } : undefined,
--    });
-+    };
-+    liveMatchState.set(id, state);
-+    result.push(state);
-+  }
-+  for (const [id, state] of liveMatchState.entries()) {
-+    if (!id.startsWith("bball-v2-")) continue;
-+    const tooOld = now - (state._firstSeenAt ?? now) > MAX_LIVE_STATE_MS;
-+    if (!currentIds.has(id) || tooOld) {
-+      finishedMatchResults.set(id, {
-+        home: state.homeScore, away: state.awayScore,
-+        homeTeam: state.home, awayTeam: state.away, finishedAt: now,
-+      });
-+      liveMatchState.delete(id);
-+    }
-   }
-   return result;
- }
- 
- function buildHockeyLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
-   const result: LiveMatchState[] = [];
-+  const now = Date.now();
-+  const currentIds = new Set<string>();
-   for (const ev of events) {
-     const code = v2StatusCode(ev);
-     if (code === 100 || code === 0) continue;
-@@ -6765,22 +6819,67 @@ function buildHockeyLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
-     }
-     liveOdds.draw = 0;
- 
--    result.push({
--      id: `hockey-v2-${ev.id}`,
-+    const id = `hockey-v2-${ev.id}`;
-+    currentIds.add(id);
-+
-+    const prev = liveMatchState.get(id);
-+    let marketSuspension = prev?.marketSuspension;
-+    let suspensionReason = prev?._suspensionReason;
-+
-+    if (marketSuspension) {
-+      const kept = Object.fromEntries(Object.entries(marketSuspension).filter(([, ts]) => ts > now));
-+      marketSuspension = Object.keys(kept).length ? kept : undefined;
-+    }
-+    if (!marketSuspension) suspensionReason = undefined;
-+
-+    const scoreChanged = prev != null && (prev.homeScore !== homeScore || prev.awayScore !== awayScore);
-+    const statusChanged = prev != null && prev.status !== statusLabel;
-+
-+    if (scoreChanged) {
-+      marketSuspension = Object.fromEntries(HOCKEY_SUSP_KEYS.map(k => [k, now + 12_000]));
-+      suspensionReason = "GOLO";
-+    } else if (statusChanged && isPause) {
-+      marketSuspension = Object.fromEntries(HOCKEY_SUSP_KEYS.map(k => [k, now + 10_000]));
-+      suspensionReason = "INTERVALO";
-+    } else if (statusChanged && code === 17) {
-+      marketSuspension = Object.fromEntries(HOCKEY_SUSP_KEYS.map(k => [k, now + 10_000]));
-+      suspensionReason = "PRORROGAÇÃO";
-+    }
-+
-+    const state: LiveMatchState = {
-+      id,
-       home: homeTeam, away: awayTeam,
-       league: v2TournName(ev.tournament), country: v2TournCountry(ev),
-       sport: "hockey", homeScore, awayScore, minute,
-       status: statusLabel, hasRealOdds: true, odds: liveOdds,
-       markets: makeHockeyMarketsFromTeams(homeTeam, awayTeam),
-       events: [],
-+      marketSuspension,
-+      _suspensionReason: suspensionReason,
-+      _firstSeenAt: prev?._firstSeenAt ?? now,
-       _liveExtra: periods.length > 0 ? { periods } : undefined,
--    });
-+    };
-+    liveMatchState.set(id, state);
-+    result.push(state);
-+  }
-+  for (const [id, state] of liveMatchState.entries()) {
-+    if (!id.startsWith("hockey-v2-")) continue;
-+    const tooOld = now - (state._firstSeenAt ?? now) > MAX_LIVE_STATE_MS;
-+    if (!currentIds.has(id) || tooOld) {
-+      finishedMatchResults.set(id, {
-+        home: state.homeScore, away: state.awayScore,
-+        homeTeam: state.home, awayTeam: state.away, finishedAt: now,
-+      });
-+      liveMatchState.delete(id);
-+    }
-   }
-   return result;
- }
- 
- function buildBaseballLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
-   const result: LiveMatchState[] = [];
-+  const now = Date.now();
-+  const currentIds = new Set<string>();
-   for (const ev of events) {
-     const code = v2StatusCode(ev);
-     const statusStr = v2StatusStr(ev.status);
-@@ -6822,8 +6921,33 @@ function buildBaseballLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
-         : { home: loserOdds,  draw: 0, away: winnerOdds };
-     }
- 
--    result.push({
--      id: `baseball-v2-${ev.id}`,
-+    const id = `baseball-v2-${ev.id}`;
-+    currentIds.add(id);
-+
-+    const prev = liveMatchState.get(id);
-+    let marketSuspension = prev?.marketSuspension;
-+    let suspensionReason = prev?._suspensionReason;
-+
-+    if (marketSuspension) {
-+      const kept = Object.fromEntries(Object.entries(marketSuspension).filter(([, ts]) => ts > now));
-+      marketSuspension = Object.keys(kept).length ? kept : undefined;
-+    }
-+    if (!marketSuspension) suspensionReason = undefined;
-+
-+    const scoreChanged = prev != null && (prev.homeScore !== homeScore || prev.awayScore !== awayScore);
-+    const prevInningsLen = (prev?._liveExtra?.innings?.length ?? 0);
-+    const inningChanged = prev != null && prevInningsLen !== innings.length;
-+
-+    if (scoreChanged) {
-+      marketSuspension = Object.fromEntries(BASEBALL_SUSP_KEYS.map(k => [k, now + 12_000]));
-+      suspensionReason = "RUN";
-+    } else if (inningChanged) {
-+      marketSuspension = Object.fromEntries(BASEBALL_SUSP_KEYS.map(k => [k, now + 10_000]));
-+      suspensionReason = "TROCA DE INNING";
-+    }
-+
-+    const state: LiveMatchState = {
-+      id,
-       home: homeTeam, away: awayTeam,
-       league, country: v2TournCountry(ev),
-       sport: "baseball", homeScore, awayScore,
-@@ -6831,8 +6955,24 @@ function buildBaseballLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
-       status: statusStr, hasRealOdds: true, odds: liveOdds,
-       markets: makeMLBMarketsFromTeams(homeTeam, awayTeam),
-       events: [],
-+      marketSuspension,
-+      _suspensionReason: suspensionReason,
-+      _firstSeenAt: prev?._firstSeenAt ?? now,
-       _liveExtra: innings.length > 0 ? { innings } : undefined,
--    });
-+    };
-+    liveMatchState.set(id, state);
-+    result.push(state);
-+  }
-+  for (const [id, state] of liveMatchState.entries()) {
-+    if (!id.startsWith("baseball-v2-")) continue;
-+    const tooOld = now - (state._firstSeenAt ?? now) > MAX_LIVE_STATE_MS;
-+    if (!currentIds.has(id) || tooOld) {
-+      finishedMatchResults.set(id, {
-+        home: state.homeScore, away: state.awayScore,
-+        homeTeam: state.home, awayTeam: state.away, finishedAt: now,
-+      });
-+      liveMatchState.delete(id);
-+    }
-   }
-   return result;
- }
-@@ -7509,7 +7649,7 @@ router.get("/live", async (_req, res) => {
-   }
- });
- 
--// ─── SSE endpoint — pushes live data every 2 s (piggybacked on drift engine) ──
-+// ─── SSE endpoint — pushes live data continuously (WS-triggered + 1–2s cadence) ─
- router.get("/live-stream", (req, res) => {
-   res.setHeader("Content-Type", "text/event-stream");
-   res.setHeader("Cache-Control", "no-cache, no-transform");
-@@ -7521,7 +7661,7 @@ router.get("/live-stream", (req, res) => {
- 
-   sseClients.add(res);
- 
--  // Send an initial event right away so the client doesn't wait up to 2s
-+  // Send an initial event right away so the client doesn't wait for the next tick
-   buildLivePayload()
-     .then(p => { try { res.write(`data: ${JSON.stringify(p)}\n\n`); } catch { /* ignore */ } })
-     .catch(() => { /* ignore */ });
-@@ -11301,11 +11441,12 @@ router.get("/football-odds-country/:country", async (req, res) => {
- });
- 
- // ─── Background Market Drift Engine ─────────────────────────────────────────
--// Runs every 2s independently of Statpal API polls so the frontend sees smooth
-+// Runs every 1–2s independently of Statpal API polls so the frontend sees smooth
- // per-tier odds movement even between data-fetch cycles.
--// Tier 1 markets (Over/Under, Handicap) drift every 2s.
--// Tier 2 markets (HT/FT, Correct Score) drift every 2s at a much smaller rate.
--// Tier 3 markets (Corners, Cards) drift every 2s at a very gentle rate.
-+// Tier 1 markets (Over/Under, Handicap) drift on this cadence.
-+// Tier 2 markets (HT/FT, Correct Score) drift on this cadence at a much smaller rate.
-+// Tier 3 markets (Corners, Cards) drift on this cadence at a very gentle rate.
-+const LIVE_BROADCAST_INTERVAL_MS = Math.min(2000, Math.max(1000, CONFIG.LIVE_UPDATE_INTERVAL));
- setInterval(() => {
-   const now = Date.now();
-   for (const [id, state] of liveMatchState.entries()) {
-@@ -11322,9 +11463,9 @@ setInterval(() => {
-     }
-     liveMatchState.set(id, applyTieredMarketDrift(state, now));
-   }
--  // Push to SSE clients every 2s (same cadence as market drift)
-+  // Push to SSE clients (same cadence as market drift)
-   broadcastLive().catch(() => { /* ignore */ });
--}, 2000);
-+}, LIVE_BROADCAST_INTERVAL_MS);
- 
- // ─── Football Player Markets (per-match, filtered to home + away team only) ───
- // GET /api/matches/football-player-markets/:leagueId?homeTeam=...&awayTeam=...
-@@ -11838,8 +11979,8 @@ router.get("/v2-standings", async (req, res) => {
- 
- // ─── WebSocket server for mobile clients (/api/matches/ws) ───────────────────
- // Accepts native WebSocket connections and pushes the same live payload that
--// broadcastLive() sends to SSE clients — every 2 s, piggy-backed on the
--// market-drift engine. Mobile clients reconnect automatically on close/error.
-+// broadcastLive() sends to SSE clients (WS-triggered + 1–2s cadence), piggy-backed
-+// on the market-drift engine. Mobile clients reconnect automatically on close/error.
- export function initLiveWsServer(httpServer: import("http").Server): void {
-   const wss = new WebSocketServer({ noServer: true });
- 
-@@ -11858,7 +11999,7 @@ export function initLiveWsServer(httpServer: import("http").Server): void {
-   wss.on("connection", (ws: WsClient) => {
-     wsLiveClients.add(ws);
- 
--    // Send current live state immediately so the client isn't blank for 2 s
-+    // Send current live state immediately so the client isn't blank for the next tick
-     buildLivePayload()
-       .then((p) => {
-         try { if (ws.readyState === 1) ws.send(JSON.stringify(p)); } catch { /* ignore */ }
 -- 
 2.43.0
 
