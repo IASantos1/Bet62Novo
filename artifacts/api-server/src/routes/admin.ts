@@ -31,9 +31,14 @@ const SESSION_SECRET = process.env.SESSION_SECRET;
 if (!SESSION_SECRET) {
   throw new Error("[SECURITY] SESSION_SECRET environment variable is not set.");
 }
-const ADMIN_USERNAME = process.env.ADMIN_USERNAME || "admin";
-const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "bet62admin2026";
-const ADMIN_EMAIL = process.env.ADMIN_EMAIL || "admin@bet62.com";
+const ADMIN_USERNAME = process.env.ADMIN_USERNAME;
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD;
+const ADMIN_EMAIL = process.env.ADMIN_EMAIL;
+if (!ADMIN_USERNAME || !ADMIN_PASSWORD || !ADMIN_EMAIL) {
+  throw new Error(
+    "[SECURITY] ADMIN_USERNAME, ADMIN_PASSWORD, and ADMIN_EMAIL must be set.",
+  );
+}
 
 // POST /api/admin/login
 router.post("/login", (req: Request, res: Response): void => {

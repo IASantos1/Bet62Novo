@@ -69,9 +69,7 @@ Bet62 é uma plataforma completa de apostas esportivas com dados ao vivo via Sta
 ## Admin Access
 
 - URL: `/admin`
-- Default username: `admin` OR email: `admin@bet62.com`
-- Default password: `bet62admin2026`
-- Override via env vars: `ADMIN_USERNAME`, `ADMIN_PASSWORD`, `ADMIN_EMAIL`
+- Required env vars: `ADMIN_USERNAME`, `ADMIN_PASSWORD`, `ADMIN_EMAIL`
 - Admin JWT lasts 8 hours; stored in sessionStorage (clears on tab close)
 
 ## Ifthenpay Payment Flow
@@ -115,7 +113,7 @@ Bet62 é uma plataforma completa de apostas esportivas com dados ao vivo via Sta
 
 - Always run `pnpm run typecheck:libs` before `api-server typecheck` (lib must be built first)
 - Statpal API base URL is `statpal.io` (not `statspal.io`) with `?access_key=` query param
-- Admin credentials default to `admin` / `bet62admin2026` if env vars not set — change in production
+- Admin credentials are required via env vars (`ADMIN_USERNAME`, `ADMIN_PASSWORD`, `ADMIN_EMAIL`)
 - `req.params.id` must be cast with `String(req.params["id"])` in Express 5 (TS union type)
 - ifthenpay callback URL must be configured in the ifthenpay backoffice portal pointing to `/api/payments/callback`
 
