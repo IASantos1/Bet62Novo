@@ -4168,6 +4168,7 @@ async function getVolleyballLive(): Promise<VolleyTournament[]> {
 }
 
 // ─── SportsAPI Pro V2 Live Fetch Functions ────────────────────────────────────
+const V2_LIVE_MAX_STALE_MS = 30_000;
 
 /** Race V1 vs V2 HTTP — whichever resolves first wins. V1 = 1-2s, V2 = 3-5s. */
 async function fetchLiveRace(v1Base: string, v2Base: string): Promise<SAPIV2Event[]> {
@@ -4192,6 +4193,12 @@ async function getFootballLiveV2(): Promise<SAPIV2Event[]> {
     if (events.length > 0) {
       footballLiveV2Cache = events;
       footballLiveV2FetchedAt = now;
+      return footballLiveV2Cache;
+    }
+    if (footballLiveV2Cache && now - footballLiveV2FetchedAt > V2_LIVE_MAX_STALE_MS) {
+      footballLiveV2Cache = [];
+      footballLiveV2FetchedAt = now;
+      return [];
     }
     return footballLiveV2Cache ?? [];
   } catch {
@@ -4208,6 +4215,12 @@ async function getBasketballLiveV2(): Promise<SAPIV2Event[]> {
     if (events.length > 0) {
       basketballLiveV2Cache = events;
       basketballLiveV2FetchedAt = now;
+      return basketballLiveV2Cache;
+    }
+    if (basketballLiveV2Cache && now - basketballLiveV2FetchedAt > V2_LIVE_MAX_STALE_MS) {
+      basketballLiveV2Cache = [];
+      basketballLiveV2FetchedAt = now;
+      return [];
     }
     return basketballLiveV2Cache ?? [];
   } catch {
@@ -4223,9 +4236,19 @@ async function getHockeyLiveV2(): Promise<SAPIV2Event[]> {
     const resp = await fetch(`${SAPI_V2_HOCKEY}/live`, { signal: AbortSignal.timeout(9000), headers: sapiHeaders() });
     if (!resp.ok) return hockeyLiveV2Cache ?? [];
     const data = (await resp.json()) as { events?: SAPIV2Event[] };
-    hockeyLiveV2Cache = data.events ?? [];
+    const events = data.events ?? [];
+    if (events.length > 0) {
+      hockeyLiveV2Cache = events;
+      hockeyLiveV2FetchedAt = now;
+      return hockeyLiveV2Cache;
+    }
+    if (hockeyLiveV2Cache && now - hockeyLiveV2FetchedAt > V2_LIVE_MAX_STALE_MS) {
+      hockeyLiveV2Cache = [];
+      hockeyLiveV2FetchedAt = now;
+      return [];
+    }
     hockeyLiveV2FetchedAt = now;
-    return hockeyLiveV2Cache;
+    return hockeyLiveV2Cache ?? [];
   } catch {
     return hockeyLiveV2Cache ?? [];
   }
@@ -4239,9 +4262,19 @@ async function getBaseballLiveV2(): Promise<SAPIV2Event[]> {
     const resp = await fetch(`${SAPI_V2_BASEBALL}/live`, { signal: AbortSignal.timeout(9000), headers: sapiHeaders() });
     if (!resp.ok) return baseballLiveV2Cache ?? [];
     const data = (await resp.json()) as { events?: SAPIV2Event[] };
-    baseballLiveV2Cache = data.events ?? [];
+    const events = data.events ?? [];
+    if (events.length > 0) {
+      baseballLiveV2Cache = events;
+      baseballLiveV2FetchedAt = now;
+      return baseballLiveV2Cache;
+    }
+    if (baseballLiveV2Cache && now - baseballLiveV2FetchedAt > V2_LIVE_MAX_STALE_MS) {
+      baseballLiveV2Cache = [];
+      baseballLiveV2FetchedAt = now;
+      return [];
+    }
     baseballLiveV2FetchedAt = now;
-    return baseballLiveV2Cache;
+    return baseballLiveV2Cache ?? [];
   } catch {
     return baseballLiveV2Cache ?? [];
   }
@@ -4273,6 +4306,12 @@ async function getTennisLiveV2(): Promise<SAPIV2Event[]> {
     if (events.length > 0) {
       tennisLiveV2Cache = events;
       tennisLiveV2FetchedAt = now;
+      return tennisLiveV2Cache;
+    }
+    if (tennisLiveV2Cache && now - tennisLiveV2FetchedAt > V2_LIVE_MAX_STALE_MS) {
+      tennisLiveV2Cache = [];
+      tennisLiveV2FetchedAt = now;
+      return [];
     }
     return tennisLiveV2Cache ?? [];
   } catch {
@@ -7672,6 +7711,7 @@ async function broadcastLive(): Promise<void> {
 }
 
 router.get("/live", async (_req, res) => {
+  res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0");
   try {
     const payload = await buildLivePayload();
     res.json(payload);
@@ -7679,6 +7719,34 @@ router.get("/live", async (_req, res) => {
     console.error("[live route] unexpected error:", err);
     res.json({ matches: [] });
   }
+});
+
+router.get("/feed-status", (_req, res) => {
+  res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0");
+  const now = Date.now();
+  const asAge = (t: number) => (t > 0 ? Math.max(0, now - t) : null);
+  res.json({
+    serverTime: now,
+    sportsApiKeyPresent: !!SPORTSAPI_KEY,
+    wsConnected: Array.from(wsConnected),
+    v1WsConnected: Array.from(v1WsConnected),
+    fetchedAt: {
+      football: footballLiveV2FetchedAt,
+      basketball: basketballLiveV2FetchedAt,
+      hockey: hockeyLiveV2FetchedAt,
+      baseball: baseballLiveV2FetchedAt,
+      tennis: tennisLiveV2FetchedAt,
+      tennisV1: _tennisLiveV1Cache?.fetchedAt ?? 0,
+    },
+    ageMs: {
+      football: asAge(footballLiveV2FetchedAt),
+      basketball: asAge(basketballLiveV2FetchedAt),
+      hockey: asAge(hockeyLiveV2FetchedAt),
+      baseball: asAge(baseballLiveV2FetchedAt),
+      tennis: asAge(tennisLiveV2FetchedAt),
+      tennisV1: asAge(_tennisLiveV1Cache?.fetchedAt ?? 0),
+    },
+  });
 });
 
 // ─── SSE endpoint — pushes live data continuously (WS-triggered + 1–2s cadence) ─
