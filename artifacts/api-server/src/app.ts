@@ -9,6 +9,10 @@ import { initDb } from "@workspace/db";
 
 const app: Express = express();
 
+if (process.env.NODE_ENV === "production") {
+  app.set("trust proxy", 1);
+}
+
 // Initialise database schema on startup (idempotent — uses IF NOT EXISTS).
 initDb()
   .then(() => logger.info("Database schema ready"))

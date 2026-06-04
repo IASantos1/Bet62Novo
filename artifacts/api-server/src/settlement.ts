@@ -779,6 +779,20 @@ async function expireStalePendingBets(): Promise<void> {
  * Fully independent of user sessions: runs server-side at all times.
  */
 export function startSettlementWorker(): void {
+  const rawIntervalMs = process.env.SETTLEMENT_INTERVAL_MS ?? "15000";
+  const intervalMs = Number(rawIntervalMs);
+
+  if (Number.isNaN(intervalMs) || intervalMs < 1_000) {
+    throw new Error(`Invalid SETTLEMENT_INTERVAL_MS value: "${rawIntervalMs}"`);
+  }
+
+  const rawInitialDelayMs = process.env.SETTLEMENT_INITIAL_DELAY_MS ?? "5000";
+  const initialDelayMs = Number(rawInitialDelayMs);
+
+  if (Number.isNaN(initialDelayMs) || initialDelayMs < 0) {
+    throw new Error(`Invalid SETTLEMENT_INITIAL_DELAY_MS value: "${rawInitialDelayMs}"`);
+  }
+
   const run = async (): Promise<void> => {
     try {
       // Parallel scan: football daily feed + all V2 sports today feed
@@ -800,13 +814,13 @@ export function startSettlementWorker(): void {
   const schedule = (): void => {
     setTimeout(() => {
       void run().finally(schedule);
-    }, 15_000);
+    }, intervalMs);
   };
 
-  // First run shortly after startup, then self-schedule every 15 s
+  // First run shortly after startup, then self-schedule on interval
   setTimeout(() => {
     void run().finally(schedule);
-  }, 5_000);
+  }, initialDelayMs);
 
-  logger.info("Bet auto-settlement worker started (15 s self-scheduling, all sports)");
+  logger.info({ intervalMs }, "Bet auto-settlement worker started (self-scheduling, all sports)");
 }

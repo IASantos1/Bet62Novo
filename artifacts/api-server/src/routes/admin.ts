@@ -4,6 +4,7 @@ import { db } from "@workspace/db";
 import { kycDocumentsTable, usersTable, betsTable, paymentsTable, withdrawalsTable, settlementLogsTable } from "@workspace/db/schema";
 import { eq, desc, count, sum, sql, gte, lte, and } from "drizzle-orm";
 import { adminMiddleware, type AdminRequest } from "../middlewares/adminAuth";
+import { rateLimit } from "../middlewares/rateLimit";
 import { logger } from "../lib/logger";
 import fs from "fs";
 import path from "path";
@@ -40,8 +41,14 @@ if (!ADMIN_USERNAME || !ADMIN_PASSWORD || !ADMIN_EMAIL) {
   );
 }
 
+const adminLoginRateLimit = rateLimit({
+  windowMs: 60_000,
+  max: 5,
+  message: "Muitas tentativas. Tente novamente em 1 minuto.",
+});
+
 // POST /api/admin/login
-router.post("/login", (req: Request, res: Response): void => {
+router.post("/login", adminLoginRateLimit, (req: Request, res: Response): void => {
   const { username, email, password } = req.body as { username?: string; email?: string; password?: string };
   const loginId = username || email;
 
