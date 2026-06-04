@@ -1443,16 +1443,16 @@ export function ComprehensiveMarketsSheet({ visible, match, onClose }: Props) {
                 {isHockey && (m as any)?.hockeyExtra?.period2Total?.over > 1.01 && (
                   <Section title={`Total 2º Período — O/U ${(m as any).hockeyExtra.period2Total.line}`} tabKey="periodos">
                     <View style={s.row}>
-                      <OddsBtn market="p2t-o" label={`Mais ${(m as any).hockeyExtra.period2Total.line}`} value={(m as any).hockeyExtra.period2Total.over} />
-                      <OddsBtn market="p2t-u" label={`Menos ${(m as any).hockeyExtra.period2Total.line}`} value={(m as any).hockeyExtra.period2Total.under} />
+                      <OddsBtn market={`p2t-o-${(m as any).hockeyExtra.period2Total.line}`} label={`Mais ${(m as any).hockeyExtra.period2Total.line}`} value={(m as any).hockeyExtra.period2Total.over} />
+                      <OddsBtn market={`p2t-u-${(m as any).hockeyExtra.period2Total.line}`} label={`Menos ${(m as any).hockeyExtra.period2Total.line}`} value={(m as any).hockeyExtra.period2Total.under} />
                     </View>
                   </Section>
                 )}
                 {isHockey && (m as any)?.hockeyExtra?.period3Total?.over > 1.01 && (
                   <Section title={`Total 3º Período — O/U ${(m as any).hockeyExtra.period3Total.line}`} tabKey="periodos">
                     <View style={s.row}>
-                      <OddsBtn market="p3t-o" label={`Mais ${(m as any).hockeyExtra.period3Total.line}`} value={(m as any).hockeyExtra.period3Total.over} />
-                      <OddsBtn market="p3t-u" label={`Menos ${(m as any).hockeyExtra.period3Total.line}`} value={(m as any).hockeyExtra.period3Total.under} />
+                      <OddsBtn market={`p3t-o-${(m as any).hockeyExtra.period3Total.line}`} label={`Mais ${(m as any).hockeyExtra.period3Total.line}`} value={(m as any).hockeyExtra.period3Total.over} />
+                      <OddsBtn market={`p3t-u-${(m as any).hockeyExtra.period3Total.line}`} label={`Menos ${(m as any).hockeyExtra.period3Total.line}`} value={(m as any).hockeyExtra.period3Total.under} />
                     </View>
                   </Section>
                 )}
@@ -1554,13 +1554,13 @@ export function ComprehensiveMarketsSheet({ visible, match, onClose }: Props) {
                   </Section>
                 )}
 
-                {match.sport === "baseball" && m?.totalGoals && m.totalGoals.over25 > 1.01 && (
+                {match.sport === "baseball" && m?.totalGoals && (m as any)?._total != null && m.totalGoals.over25 > 1.01 && (
                   <Section title="Total de Corridas" tabKey="pontos">
                     {(
                       [
-                        { line: "7.5", o: m.totalGoals.over25, u: m.totalGoals.under25, ko: "mlb-o75", ku: "mlb-u75" },
-                        { line: "8.5", o: m.totalGoals.over35, u: m.totalGoals.under35, ko: "mlb-o85", ku: "mlb-u85" },
-                        { line: "9.5", o: m.totalGoals.over45, u: m.totalGoals.under45, ko: "mlb-o95", ku: "mlb-u95" },
+                        { line: String((m as any)._total - 0.5), o: m.totalGoals.over25, u: m.totalGoals.under25, ko: `mlb-tot-o-${String((m as any)._total - 0.5)}`, ku: `mlb-tot-u-${String((m as any)._total - 0.5)}` },
+                        { line: String((m as any)._total), o: m.totalGoals.over35, u: m.totalGoals.under35, ko: `mlb-tot-o-${String((m as any)._total)}`, ku: `mlb-tot-u-${String((m as any)._total)}` },
+                        { line: String((m as any)._total + 0.5), o: m.totalGoals.over45, u: m.totalGoals.under45, ko: `mlb-tot-o-${String((m as any)._total + 0.5)}`, ku: `mlb-tot-u-${String((m as any)._total + 0.5)}` },
                       ].filter((r) => r.o > 1.01)
                     ).map((row) => (
                       <View key={row.line} style={s.row}>
@@ -1575,13 +1575,13 @@ export function ComprehensiveMarketsSheet({ visible, match, onClose }: Props) {
                 {match.sport === "baseball" && (m as any)?.mlbExtra?.f5Result?.home > 1.01 && (
                   <Section title="Primeiras 5 Entradas" tabKey="pontos">
                     <View style={s.row}>
-                      <OddsBtn market="f5-home" label={match.home} value={(m as any).mlbExtra.f5Result.home} />
-                      <OddsBtn market="f5-away" label={match.away} value={(m as any).mlbExtra.f5Result.away} />
+                      <OddsBtn market="mlb-f5-home" label={match.home} value={(m as any).mlbExtra.f5Result.home} />
+                      <OddsBtn market="mlb-f5-away" label={match.away} value={(m as any).mlbExtra.f5Result.away} />
                     </View>
                     {(m as any).mlbExtra?.f5Total?.over > 1.01 && (
                       <View style={s.row}>
-                        <OddsBtn market="f5t-o" label={`Mais ${(m as any).mlbExtra.f5Total.line}`} value={(m as any).mlbExtra.f5Total.over} />
-                        <OddsBtn market="f5t-u" label={`Menos ${(m as any).mlbExtra.f5Total.line}`} value={(m as any).mlbExtra.f5Total.under} />
+                        <OddsBtn market={`mlb-f5t-o-${(m as any).mlbExtra.f5Total.line}`} label={`Mais ${(m as any).mlbExtra.f5Total.line}`} value={(m as any).mlbExtra.f5Total.over} />
+                        <OddsBtn market={`mlb-f5t-u-${(m as any).mlbExtra.f5Total.line}`} label={`Menos ${(m as any).mlbExtra.f5Total.line}`} value={(m as any).mlbExtra.f5Total.under} />
                       </View>
                     )}
                   </Section>
@@ -1590,8 +1590,8 @@ export function ComprehensiveMarketsSheet({ visible, match, onClose }: Props) {
                 {match.sport === "baseball" && m?.handicap && m.handicap.homeMinusOne > 1.01 && (
                   <Section title="Run Line (±1.5)" tabKey="runline">
                     <View style={s.row}>
-                      <OddsBtn market="rl-home" label={`${match.home} -1.5`} value={m.handicap.homeMinusOneHalf} />
-                      <OddsBtn market="rl-away" label={`${match.away} +1.5`} value={m.handicap.awayPlusOneHalf} />
+                      <OddsBtn market="mlb-rl-home-1.5" label={`${match.home} -1.5`} value={m.handicap.homeMinusOne} />
+                      <OddsBtn market="mlb-rl-away-1.5" label={`${match.away} +1.5`} value={m.handicap.awayPlusOne} />
                     </View>
                   </Section>
                 )}

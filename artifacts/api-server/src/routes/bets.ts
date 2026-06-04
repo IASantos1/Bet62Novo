@@ -414,6 +414,129 @@ function currentOddForSelection(sel: SelectionRecord, liveSt: LiveMatchState): n
     if (s === "h1-away") return Number.isFinite(mk.halfTime?.away) ? mk.halfTime!.away! : null;
   }
 
+  if (liveSt.sport === "hockey") {
+    const toNum = (v: unknown): number | null => {
+      const n = typeof v === "number" ? v : typeof v === "string" ? Number(v) : NaN;
+      return Number.isFinite(n) ? n : null;
+    };
+    const hx = mk.hockeyExtra as unknown as {
+      period2?: { home?: number; draw?: number; away?: number };
+      period3?: { home?: number; draw?: number; away?: number };
+      period1Total?: { line?: number; over?: number; under?: number };
+      period2Total?: { line?: number; over?: number; under?: number };
+      period3Total?: { line?: number; over?: number; under?: number };
+      shotsOnGoal?: { line?: number; over?: number; under?: number };
+    } | undefined;
+
+    const labelLine = typeof sel.label === "string" ? toNum((sel.label.match(/(\d+(?:\.\d+)?)/)?.[1]) ?? null) : null;
+
+    if (s === "p1-home") return Number.isFinite(mk.halfTime?.home) ? mk.halfTime!.home! : null;
+    if (s === "p1-draw") return Number.isFinite(mk.halfTime?.draw) ? mk.halfTime!.draw! : null;
+    if (s === "p1-away") return Number.isFinite(mk.halfTime?.away) ? mk.halfTime!.away! : null;
+
+    const perAlias = s.match(/^per([123])-(home|draw|away)$/);
+    if (perAlias) {
+      if (perAlias[1] === "1") {
+        const side = perAlias[2]!;
+        if (side === "home") return Number.isFinite(mk.halfTime?.home) ? mk.halfTime!.home! : null;
+        if (side === "draw") return Number.isFinite(mk.halfTime?.draw) ? mk.halfTime!.draw! : null;
+        return Number.isFinite(mk.halfTime?.away) ? mk.halfTime!.away! : null;
+      }
+      const p = `period${perAlias[1]}` as "period2" | "period3";
+      const side = perAlias[2]!;
+      const out = (hx?.[p] as Record<string, unknown> | undefined)?.[side];
+      return Number.isFinite(out as number) ? (out as number) : null;
+    }
+
+    const per = s.match(/^p([23])-(home|draw|away)$/);
+    if (per) {
+      const p = `period${per[1]}` as "period2" | "period3";
+      const side = per[2]!;
+      const out = (hx?.[p] as Record<string, unknown> | undefined)?.[side];
+      return Number.isFinite(out as number) ? (out as number) : null;
+    }
+
+    const pt = s.match(/^p([123])t-([ou])(?:-(\d+(?:\.\d+)?))?$/);
+    if (pt) {
+      const p = pt[1] === "1" ? hx?.period1Total : pt[1] === "2" ? hx?.period2Total : hx?.period3Total;
+      if (!p) return null;
+      const line = pt[3] ? toNum(pt[3]) : labelLine;
+      if (line == null || !Number.isFinite(p.line) || Math.abs((p.line as number) - line) > 1e-9) return null;
+      const out = pt[2] === "o" ? p.over : p.under;
+      return Number.isFinite(out) ? (out as number) : null;
+    }
+
+    const sog = s.match(/^sog-([ou])(?:-(\d+(?:\.\d+)?))?$/);
+    if (sog) {
+      const p = hx?.shotsOnGoal;
+      if (!p) return null;
+      const line = sog[2] ? toNum(sog[2]) : labelLine;
+      if (line == null || !Number.isFinite(p.line) || Math.abs((p.line as number) - line) > 1e-9) return null;
+      const out = sog[1] === "o" ? p.over : p.under;
+      return Number.isFinite(out) ? (out as number) : null;
+    }
+  }
+
+  if (liveSt.sport === "baseball") {
+    const toNum = (v: unknown): number | null => {
+      const n = typeof v === "number" ? v : typeof v === "string" ? Number(v) : NaN;
+      return Number.isFinite(n) ? n : null;
+    };
+
+    const labelLine = typeof sel.label === "string" ? toNum((sel.label.match(/(\d+(?:\.\d+)?)/)?.[1]) ?? null) : null;
+    const mt = toNum(rawMarkets?.["_total"]);
+    const spread = toNum(rawMarkets?.["_spread"]) ?? 1.5;
+    const mx = (rawMarkets ?? {}) as unknown as { mlbExtra?: { f5Result?: { home?: number; away?: number }; f5Total?: { line?: number; over?: number; under?: number } } };
+    const f5 = mx.mlbExtra;
+
+    const tot = s.match(/^mlb-tot-([ou])-(\d+(?:\.\d+)?)$/) || s.match(/^mlb-([ou])(\d+(?:\.\d+)?)$/);
+    if (tot) {
+      const dir = tot[1]!;
+      const line = toNum(tot[2]!);
+      if (line == null) return null;
+      if (mt == null) return null;
+      const lo = Math.round((mt - 0.5) * 10) / 10;
+      const hi = Math.round((mt + 0.5) * 10) / 10;
+      if (Math.abs(line - lo) < 1e-9) {
+        return dir === "o" ? (Number.isFinite(mk.totalGoals?.over25) ? mk.totalGoals!.over25 : null) : (Number.isFinite(mk.totalGoals?.under25) ? mk.totalGoals!.under25 : null);
+      }
+      if (Math.abs(line - mt) < 1e-9) {
+        return dir === "o" ? (Number.isFinite(mk.totalGoals?.over35) ? mk.totalGoals!.over35 : null) : (Number.isFinite(mk.totalGoals?.under35) ? mk.totalGoals!.under35 : null);
+      }
+      if (Math.abs(line - hi) < 1e-9) {
+        return dir === "o" ? (Number.isFinite(mk.totalGoals?.over45) ? mk.totalGoals!.over45 : null) : (Number.isFinite(mk.totalGoals?.under45) ? mk.totalGoals!.under45 : null);
+      }
+      return null;
+    }
+
+    if (s === "f5-home" || s === "mlb-f5-home") return Number.isFinite(f5?.f5Result?.home) ? f5!.f5Result!.home! : null;
+    if (s === "f5-away" || s === "mlb-f5-away") return Number.isFinite(f5?.f5Result?.away) ? f5!.f5Result!.away! : null;
+
+    const f5t = s.match(/^mlb-f5t-([ou])-(\d+(?:\.\d+)?)$/) || s.match(/^f5t-([ou])$/);
+    if (f5t) {
+      const dir = f5t[1]!;
+      const line = f5t[2] ? toNum(f5t[2]) : labelLine;
+      if (line == null) return null;
+      if (!Number.isFinite(f5?.f5Total?.line) || Math.abs((f5!.f5Total!.line as number) - line) > 1e-9) return null;
+      const out = dir === "o" ? f5!.f5Total!.over : f5!.f5Total!.under;
+      return Number.isFinite(out) ? (out as number) : null;
+    }
+
+    const rl = s.match(/^mlb-rl-(home|away)-(\d+(?:\.\d+)?)$/) || s.match(/^rl-(home|away)$/) || s.match(/^(hm1|ap1)$/);
+    if (rl) {
+      const side =
+        rl[1] === "hm1" ? "home"
+        : rl[1] === "ap1" ? "away"
+        : rl[1] === "home" ? "home"
+        : rl[1] === "away" ? "away"
+        : "home";
+      const line = rl[2] ? toNum(rl[2]) : spread;
+      if (line == null || Math.abs(line - 1.5) > 1e-9) return null;
+      if (side === "home") return Number.isFinite(mk.handicap?.homeMinusOne) ? mk.handicap!.homeMinusOne! : null;
+      return Number.isFinite(mk.handicap?.awayPlusOne) ? mk.handicap!.awayPlusOne! : null;
+    }
+  }
+
   return null;
 }
 
@@ -550,14 +673,28 @@ router.post("/place", authMiddleware, async (req: AuthRequest, res: Response): P
 
   if (selList.length === 0) {
     const liveSt = liveMatchState.get(String(matchId));
-    if (liveSt?.sport === "tennis" || liveSt?.sport === "football" || liveSt?.sport === "basketball") {
+    if (
+      liveSt?.sport === "tennis" ||
+      liveSt?.sport === "football" ||
+      liveSt?.sport === "basketball" ||
+      liveSt?.sport === "hockey" ||
+      liveSt?.sport === "baseball"
+    ) {
       const anySuspended = liveSt.marketSuspension != null && Object.values(liveSt.marketSuspension).some((ts) => ts > now);
       if (anySuspended || liveSt._suspensionReason) {
         res.status(409).json({
           error: "Mercado suspenso. Aguarde alguns segundos e tente novamente.",
           reason:
             liveSt._suspensionReason ??
-            (liveSt.sport === "tennis" ? "PONTO EM JOGO" : liveSt.sport === "football" ? "EVENTO CRÍTICO" : "CESTA"),
+            (liveSt.sport === "tennis"
+              ? "PONTO EM JOGO"
+              : liveSt.sport === "football"
+                ? "EVENTO CRÍTICO"
+                : liveSt.sport === "basketball"
+                  ? "CESTA"
+                  : liveSt.sport === "hockey"
+                    ? "GOLO"
+                    : "RUN"),
         });
         return;
       }
@@ -568,7 +705,13 @@ router.post("/place", authMiddleware, async (req: AuthRequest, res: Response): P
     const mId = String(sel.matchId ?? matchId);
     const liveSt = liveMatchState.get(mId);
     if (!liveSt) continue;
-    if (liveSt.sport !== "tennis" && liveSt.sport !== "football" && liveSt.sport !== "basketball") continue;
+    if (
+      liveSt.sport !== "tennis" &&
+      liveSt.sport !== "football" &&
+      liveSt.sport !== "basketball" &&
+      liveSt.sport !== "hockey" &&
+      liveSt.sport !== "baseball"
+    ) continue;
 
     const marketKey = typeof sel.market === "string" && sel.market.trim() !== ""
       ? sel.market
@@ -583,7 +726,15 @@ router.post("/place", authMiddleware, async (req: AuthRequest, res: Response): P
         error: "Mercado suspenso. Aguarde alguns segundos e tente novamente.",
         reason:
           liveSt._suspensionReason ??
-          (liveSt.sport === "tennis" ? "PONTO EM JOGO" : liveSt.sport === "football" ? "EVENTO CRÍTICO" : "CESTA"),
+          (liveSt.sport === "tennis"
+            ? "PONTO EM JOGO"
+            : liveSt.sport === "football"
+              ? "EVENTO CRÍTICO"
+              : liveSt.sport === "basketball"
+                ? "CESTA"
+                : liveSt.sport === "hockey"
+                  ? "GOLO"
+                  : "RUN"),
       });
       return;
     }

@@ -7001,6 +7001,7 @@ function buildHockeyLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
       finishedMatchResults.set(id, {
         home: state.homeScore, away: state.awayScore,
         homeTeam: state.home, awayTeam: state.away, finishedAt: now,
+        extras: state._liveExtra?.periods ? { hockey: { periods: state._liveExtra.periods } } : undefined,
       });
       liveMatchState.delete(id);
     }
@@ -7102,6 +7103,7 @@ function buildBaseballLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
       finishedMatchResults.set(id, {
         home: state.homeScore, away: state.awayScore,
         homeTeam: state.home, awayTeam: state.away, finishedAt: now,
+        extras: state._liveExtra?.innings ? { baseball: { innings: state._liveExtra.innings } } : undefined,
       });
       liveMatchState.delete(id);
     }

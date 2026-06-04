@@ -70,11 +70,6 @@ export function scoreOutcomeForSel(
   else if (s === "et-res-away") s = "et-away";
   else if (s === "et-tie-home") s = "et-tw-home";
   else if (s === "et-tie-away") s = "et-tw-away";
-  // Period-1 winner (basketball/hockey): use HT-score branch
-  else if (s === "p1-home")    s = "ht-home";
-  else if (s === "p1-draw")    s = "ht-draw";
-  else if (s === "p1-away")    s = "ht-away";
-
   const ex = (extra?.extras ?? {}) as Record<string, unknown>;
   const fx = ex["football"] as Record<string, unknown> | undefined;
 
@@ -265,6 +260,147 @@ export function scoreOutcomeForSel(
       const h1A = (q1A ?? 0) + (q2A ?? 0);
       if (h1H === h1A) voided = true;
       else winning = s === "h1-home" ? h1H > h1A : h1A > h1H;
+    }
+  }
+
+  // ── Hockey (periods / period totals) ──────────────────────────────────────
+  else if (
+    /^p[123]-(home|draw|away)$/.test(s) ||
+    /^per[123]-(home|draw|away)$/.test(s) ||
+    /^p[123]t-([ou])(?:-(\d+(?:\.\d+)?))?$/.test(s) ||
+    /^sog-([ou])(?:-(\d+(?:\.\d+)?))?$/.test(s)
+  ) {
+    const hs = ex["homeScore"] as Record<string, unknown> | undefined;
+    const as = ex["awayScore"] as Record<string, unknown> | undefined;
+    const p = (obj: Record<string, unknown> | undefined, n: number): number | null => {
+      const v = obj?.[`period${n}`];
+      return typeof v === "number" && Number.isFinite(v) ? (v as number) : null;
+    };
+    const p1H = p(hs, 1); const p1A = p(as, 1);
+    const p2H = p(hs, 2); const p2A = p(as, 2);
+    const p3H = p(hs, 3); const p3A = p(as, 3);
+
+    const parseLine = (v: string | null | undefined): number | null => {
+      if (!v) return null;
+      const n = Number(v);
+      return Number.isFinite(n) ? n : null;
+    };
+    const labelLine = typeof (sel as { label?: unknown }).label === "string"
+      ? parseLine((((sel as { label?: string }).label ?? "").match(/(\d+(?:\.\d+)?)/)?.[1]) ?? null)
+      : null;
+
+    const perAlias = s.match(/^per([123])-(home|draw|away)$/);
+    if (perAlias) s = `p${perAlias[1]}-${perAlias[2]}`;
+
+    const per = s.match(/^p([123])-(home|draw|away)$/);
+    if (per) {
+      const n = Number(per[1]);
+      const want = per[2]!;
+      const h = n === 1 ? p1H : n === 2 ? p2H : p3H;
+      const a = n === 1 ? p1A : n === 2 ? p2A : p3A;
+      if (h === null || a === null) return null;
+      if (want === "home") winning = h > a;
+      else if (want === "away") winning = a > h;
+      else winning = h === a;
+    }
+
+    const pt = s.match(/^p([123])t-([ou])(?:-(\d+(?:\.\d+)?))?$/);
+    if (winning === null && pt) {
+      const n = Number(pt[1]);
+      const dir = pt[2]!;
+      const line = parseLine(pt[3]) ?? labelLine;
+      if (line === null) return null;
+      const h = n === 1 ? p1H : n === 2 ? p2H : p3H;
+      const a = n === 1 ? p1A : n === 2 ? p2A : p3A;
+      if (h === null || a === null) return null;
+      const t = h + a;
+      if (t === line) voided = true;
+      else winning = dir === "o" ? t > line : t < line;
+    }
+
+    if (winning === null && s.startsWith("sog-")) return null;
+  }
+
+  // ── Baseball (game totals / run line / F5) ────────────────────────────────
+  else if (
+    /^mlb-tot-([ou])-(\d+(?:\.\d+)?)$/.test(s) ||
+    /^mlb-([ou])(\d+(?:\.\d+)?)$/.test(s) ||
+    /^mlb-rl-(home|away)-(\d+(?:\.\d+)?)$/.test(s) ||
+    /^rl-(home|away)$/.test(s) ||
+    /^mlb-f5-(home|away)$/.test(s) ||
+    /^f5-(home|away)$/.test(s) ||
+    /^mlb-f5t-([ou])-(\d+(?:\.\d+)?)$/.test(s) ||
+    /^f5t-([ou])$/.test(s)
+  ) {
+    const hs = ex["homeScore"] as Record<string, unknown> | undefined;
+    const as = ex["awayScore"] as Record<string, unknown> | undefined;
+    const inningsH = (hs?.["innings"] as Record<string, unknown> | undefined) ?? undefined;
+    const inningsA = (as?.["innings"] as Record<string, unknown> | undefined) ?? undefined;
+
+    const inningRun = (obj: Record<string, unknown> | undefined, i: number): number | null => {
+      const inn = obj?.[`inning${i}`] as Record<string, unknown> | undefined;
+      const r = inn?.["run"];
+      return typeof r === "number" && Number.isFinite(r) ? (r as number) : null;
+    };
+
+    const parseLine = (v: string | null | undefined): number | null => {
+      if (!v) return null;
+      const n = Number(v);
+      return Number.isFinite(n) ? n : null;
+    };
+    const labelLine = typeof (sel as { label?: unknown }).label === "string"
+      ? parseLine((((sel as { label?: string }).label ?? "").match(/(\d+(?:\.\d+)?)/)?.[1]) ?? null)
+      : null;
+
+    const tot = s.match(/^mlb-tot-([ou])-(\d+(?:\.\d+)?)$/) || s.match(/^mlb-([ou])(\d+(?:\.\d+)?)$/);
+    if (tot) {
+      const dir = tot[1]!;
+      const line = parseLine(tot[2])!;
+      const t = ft.home + ft.away;
+      if (t === line) voided = true;
+      else winning = dir === "o" ? t > line : t < line;
+    }
+
+    const rl = s.match(/^mlb-rl-(home|away)-(\d+(?:\.\d+)?)$/) || s.match(/^rl-(home|away)$/);
+    if (winning === null && rl) {
+      const side = rl[1]!;
+      const line = parseLine(rl[2]) ?? 1.5;
+      if (line === null) return null;
+      const diff = ft.home - ft.away;
+      if (diff === line) voided = true;
+      else winning = side === "home" ? diff > line : diff < line;
+    }
+
+    const f5res = s.match(/^mlb-f5-(home|away)$/) || s.match(/^f5-(home|away)$/);
+    if (winning === null && f5res) {
+      if (!inningsH || !inningsA) return null;
+      let h = 0, a = 0;
+      for (let i = 1; i <= 5; i++) {
+        const rh = inningRun(inningsH, i);
+        const ra = inningRun(inningsA, i);
+        if (rh === null || ra === null) return null;
+        h += rh; a += ra;
+      }
+      if (h === a) voided = true;
+      else winning = f5res[1] === "home" ? h > a : a > h;
+    }
+
+    const f5t = s.match(/^mlb-f5t-([ou])-(\d+(?:\.\d+)?)$/) || s.match(/^f5t-([ou])$/);
+    if (winning === null && f5t) {
+      if (!inningsH || !inningsA) return null;
+      const dir = f5t[1]!;
+      const line = parseLine(f5t[2]) ?? labelLine;
+      if (line === null) return null;
+      let h = 0, a = 0;
+      for (let i = 1; i <= 5; i++) {
+        const rh = inningRun(inningsH, i);
+        const ra = inningRun(inningsA, i);
+        if (rh === null || ra === null) return null;
+        h += rh; a += ra;
+      }
+      const t = h + a;
+      if (t === line) voided = true;
+      else winning = dir === "o" ? t > line : t < line;
     }
   }
 
