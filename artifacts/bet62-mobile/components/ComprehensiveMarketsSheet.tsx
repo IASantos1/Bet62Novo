@@ -1331,17 +1331,17 @@ export function ComprehensiveMarketsSheet({ visible, match, onClose }: Props) {
                     {m.etExtra.tieWinner.home > 1.01 && (
                       <Section title="Vencedor da Eliminatória" tabKey="prolongamento">
                         <View style={s.row}>
-                          <OddsBtn market="et-tie-home" label={match.home} value={m.etExtra.tieWinner.home} />
-                          <OddsBtn market="et-tie-away" label={match.away} value={m.etExtra.tieWinner.away} />
+                          <OddsBtn market="et-tw-home" label={match.home} value={m.etExtra.tieWinner.home} />
+                          <OddsBtn market="et-tw-away" label={match.away} value={m.etExtra.tieWinner.away} />
                         </View>
                       </Section>
                     )}
                     {m.etExtra.etResult.home > 1.01 && (
                       <Section title="Resultado da Prorrogação" tabKey="prolongamento">
                         <View style={s.row}>
-                          <OddsBtn market="et-res-home" label="Casa" value={m.etExtra.etResult.home} />
-                          <OddsBtn market="et-res-draw" label="Pen." value={m.etExtra.etResult.draw} />
-                          <OddsBtn market="et-res-away" label="Fora" value={m.etExtra.etResult.away} />
+                          <OddsBtn market="et-home" label="Casa" value={m.etExtra.etResult.home} />
+                          <OddsBtn market="et-draw" label="Pen." value={m.etExtra.etResult.draw} />
+                          <OddsBtn market="et-away" label="Fora" value={m.etExtra.etResult.away} />
                         </View>
                       </Section>
                     )}

@@ -91,6 +91,11 @@ function normalizeSelectionKey(sel: string): string {
   else if (s === "eg-3")       s = "eg-g3";
   else if (s === "eg-4")       s = "eg-g4";
   else if (s === "eg-5p")      s = "eg-g5plus";
+  else if (s === "et-res-home") s = "et-home";
+  else if (s === "et-res-draw") s = "et-draw";
+  else if (s === "et-res-away") s = "et-away";
+  else if (s === "et-tie-home") s = "et-tw-home";
+  else if (s === "et-tie-away") s = "et-tw-away";
   return s;
 }
 
@@ -501,6 +506,17 @@ router.post("/place", authMiddleware, async (req: AuthRequest, res: Response): P
   }
 
   const useFreebets = isFreebet === true;
+  const selectionsToStore = Array.isArray(selections)
+    ? selections.map((x) => {
+        if (!x || typeof x !== "object") return x;
+        const r = x as Record<string, unknown>;
+        const sel = typeof r.selection === "string" ? r.selection : null;
+        if (!sel) return x;
+        const n = normalizeSelectionKey(sel);
+        if (n === sel) return x;
+        return { ...r, selection: n };
+      })
+    : selections;
 
   try {
     const result = await db.transaction(async (tx) => {
@@ -524,7 +540,7 @@ router.post("/place", authMiddleware, async (req: AuthRequest, res: Response): P
           userId: req.user!.id,
           matchId,
           matchTitle,
-          selections,
+          selections: selectionsToStore,
           stake: stakeStr,
           potentialWin,
           totalOdds: oddsStr,
@@ -552,7 +568,7 @@ router.post("/place", authMiddleware, async (req: AuthRequest, res: Response): P
           userId: req.user!.id,
           matchId,
           matchTitle,
-          selections,
+          selections: selectionsToStore,
           stake: stakeStr,
           potentialWin,
           totalOdds: oddsStr,

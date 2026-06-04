@@ -4446,8 +4446,8 @@ export default function Home() {
               <span className="text-[10px] font-black uppercase tracking-widest text-red-500 bg-red-950/40 border border-red-800/40 rounded px-2 py-0.5">⏱ Prorrogação em curso</span>
             </div>
             <MarketGroup title="Vencedor da Eliminatória">
-              <MarketOddsBtn match={match} sel="et-tie-home" odd={m.etExtra.tieWinner.home} market="prolongamento" label={match.home} />
-              <MarketOddsBtn match={match} sel="et-tie-away" odd={m.etExtra.tieWinner.away} market="prolongamento" label={match.away} />
+              <MarketOddsBtn match={match} sel="et-tw-home" odd={m.etExtra.tieWinner.home} market="prolongamento" label={match.home} />
+              <MarketOddsBtn match={match} sel="et-tw-away" odd={m.etExtra.tieWinner.away} market="prolongamento" label={match.away} />
             </MarketGroup>
             {m.etExtra.totalGoals.o05 > 0 && (
               <MarketGroup title="Golos na Prorrogação — 0.5">
@@ -4468,9 +4468,9 @@ export default function Home() {
               </MarketGroup>
             )}
             <MarketGroup title="Resultado da Prorrogação">
-              <MarketOddsBtn match={match} sel="et-res-home" odd={m.etExtra.etResult.home} market="prolongamento" label={match.home} />
-              <MarketOddsBtn match={match} sel="et-res-draw" odd={m.etExtra.etResult.draw} market="prolongamento" label="Empate → Penáltis" />
-              <MarketOddsBtn match={match} sel="et-res-away" odd={m.etExtra.etResult.away} market="prolongamento" label={match.away} />
+              <MarketOddsBtn match={match} sel="et-home" odd={m.etExtra.etResult.home} market="prolongamento" label={match.home} />
+              <MarketOddsBtn match={match} sel="et-draw" odd={m.etExtra.etResult.draw} market="prolongamento" label="Empate → Penáltis" />
+              <MarketOddsBtn match={match} sel="et-away" odd={m.etExtra.etResult.away} market="prolongamento" label={match.away} />
             </MarketGroup>
             <MarketGroup title="Equipa a Marcar na Prorrogação">
               <MarketOddsBtn match={match} sel="et-ng-home" odd={m.etExtra.nextGoal.home} market="prolongamento" label={`Gol 1 — ${match.home}`} />

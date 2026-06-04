@@ -65,12 +65,25 @@ export function scoreOutcomeForSel(
   else if (s === "eg-3")       s = "eg-g3";
   else if (s === "eg-4")       s = "eg-g4";
   else if (s === "eg-5p")      s = "eg-g5plus";
+  else if (s === "et-res-home") s = "et-home";
+  else if (s === "et-res-draw") s = "et-draw";
+  else if (s === "et-res-away") s = "et-away";
+  else if (s === "et-tie-home") s = "et-tw-home";
+  else if (s === "et-tie-away") s = "et-tw-away";
   // Period-1 winner (basketball/hockey): use HT-score branch
   else if (s === "p1-home")    s = "ht-home";
   else if (s === "p1-draw")    s = "ht-draw";
   else if (s === "p1-away")    s = "ht-away";
 
-  const { home, away } = ft;
+  const ex = (extra?.extras ?? {}) as Record<string, unknown>;
+  const fx = ex["football"] as Record<string, unknown> | undefined;
+
+  const ftHome90 = typeof fx?.["ftHome"] === "number" ? (fx["ftHome"] as number) : null;
+  const ftAway90 = typeof fx?.["ftAway"] === "number" ? (fx["ftAway"] as number) : null;
+
+  const isExtraScoped = s.startsWith("et-") || s === "pen-home" || s === "pen-away";
+  const home = (!isExtraScoped && ftHome90 !== null && ftAway90 !== null) ? ftHome90 : ft.home;
+  const away = (!isExtraScoped && ftHome90 !== null && ftAway90 !== null) ? ftAway90 : ft.away;
   const total = home + away;
 
   const htH = ht?.htHome ?? null;
@@ -166,9 +179,6 @@ export function scoreOutcomeForSel(
 
   // ── Extra time (football) ─────────────────────────────────────────────────
   else if (s.startsWith("et-")) {
-    const ex = (extra?.extras ?? {}) as Record<string, unknown>;
-    const fx = ex["football"] as Record<string, unknown> | undefined;
-
     const etHome = typeof fx?.["etHome"] === "number" ? (fx["etHome"] as number) : null;
     const etAway = typeof fx?.["etAway"] === "number" ? (fx["etAway"] as number) : null;
     const ftHome = typeof fx?.["ftHome"] === "number" ? (fx["ftHome"] as number) : null;
@@ -197,9 +207,6 @@ export function scoreOutcomeForSel(
 
   // ── Penalty shootout winner (football) ────────────────────────────────────
   else if (s === "pen-home" || s === "pen-away") {
-    const ex = (extra?.extras ?? {}) as Record<string, unknown>;
-    const fx = ex["football"] as Record<string, unknown> | undefined;
-
     const penHome = typeof fx?.["penHome"] === "number" ? (fx["penHome"] as number) : null;
     const penAway = typeof fx?.["penAway"] === "number" ? (fx["penAway"] as number) : null;
     if (penHome === null || penAway === null) return null;

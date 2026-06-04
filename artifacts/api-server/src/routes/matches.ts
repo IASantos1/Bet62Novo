@@ -1,6 +1,6 @@
 import { Router, type IRouter } from "express";
 import { WebSocketServer, type WebSocket as WsClient } from "ws";
-import { CONFIG } from "../lib/config";
+import { CONFIG, FOOTBALL_SUSP_KEYS_GOAL, FOOTBALL_SUSP_KEYS_VAR, footballSuspensionDelayMs } from "../lib/config";
 import { logger } from "../lib/logger";
 import { db, matchResultsTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
@@ -5824,37 +5824,6 @@ async function buildLiveMatches(): Promise<LiveMatchState[]> {
       const minute = existing ? Math.max(existing.minute, minuteRaw) : minuteRaw;
       const gameStatus = isHT ? "HT" : isET ? "ET" : parseInt(m.status) > 45 ? "2nd half" : "1st half";
 
-      // Market suspension delays on goal (ms per market key)
-      // ALL markets suspended for the same duration so the global "result" key acts as
-      // a reliable kill-switch for frontends (they check result key as a global lock).
-      const GOAL_SUSPENSION_MS: Record<string, number> = {
-        result: 25000,
-        doubleChance: 25000,
-        totalGoals: 28000,
-        handicap: 28000,
-        halfTime: 25000,
-        htft: 30000,
-        correctScore: 35000,
-        asianHandicap: 30000,
-        asianTotals: 30000,
-        drawNoBet: 25000,
-        firstGoal: 25000,
-        winToNil: 25000,
-        cleanSheet: 25000,
-        goalOddEven: 28000,
-        exactGoals: 30000,
-        btts1H: 25000,
-        btts2H: 25000,
-        toWinBothHalves: 28000,
-        highestScoringHalf: 25000,
-        htCorrectScore: 35000,
-        h2CorrectScore: 35000,
-        teamGoals: 28000,
-        secondHalf: 25000,
-        drawNoBet2: 25000,
-        handicapPoints: 28000,
-      };
-
       // Stable odds: once assigned, keep unless score changes significantly
       let matchOdds: { home: number; draw: number; away: number };
       let matchMarkets: AdvancedMarkets;
@@ -5914,8 +5883,8 @@ async function buildLiveMatches(): Promise<LiveMatchState[]> {
         if (isGoal) {
           const now = Date.now();
           matchMarketSuspension = Object.fromEntries(
-            Object.entries(GOAL_SUSPENSION_MS).map(([k, delay]) => [k, now + delay])
-          );
+            FOOTBALL_SUSP_KEYS_GOAL.map(k => [k, now + footballSuspensionDelayMs("goal", k)])
+          ) as Record<string, number>;
           matchSuspensionReason = "GOLO!";
         }
         const resolved = resolveOdds(m, odds);
@@ -6234,15 +6203,6 @@ async function buildLiveMatches(): Promise<LiveMatchState[]> {
       });
       if (dangerEvent) {
         const now = Date.now();
-        const VAR_SUSPENSION_MS: Record<string, number> = {
-          result: 45000, doubleChance: 45000, totalGoals: 50000, handicap: 50000,
-          halfTime: 45000, correctScore: 60000, asianHandicap: 55000, asianTotals: 55000,
-          drawNoBet: 45000, firstGoal: 45000, htft: 60000,
-          winToNil: 45000, cleanSheet: 45000, goalOddEven: 50000, exactGoals: 55000,
-          btts1H: 45000, toWinBothHalves: 50000, highestScoringHalf: 45000,
-          htCorrectScore: 60000, h2CorrectScore: 60000, teamGoals: 50000,
-          secondHalf: 45000, drawNoBet2: 45000, handicapPoints: 50000,
-        };
         const evType = dangerEvent.type.toLowerCase().replace(/[\s_-]/g, "");
         const reasonKey = Object.keys(VAR_REASON_MAP).find(k => evType.includes(k));
         const reason = reasonKey ? VAR_REASON_MAP[reasonKey] : "SUSPENSO";
@@ -6250,8 +6210,8 @@ async function buildLiveMatches(): Promise<LiveMatchState[]> {
         if (!matchMarketSuspension) {
           // No active suspension yet — set full timers
           matchMarketSuspension = Object.fromEntries(
-            Object.entries(VAR_SUSPENSION_MS).map(([k, delay]) => [k, now + delay])
-          );
+            FOOTBALL_SUSP_KEYS_VAR.map(k => [k, now + footballSuspensionDelayMs("var", k)])
+          ) as Record<string, number>;
           matchSuspensionReason = reason;
         } else if (isHighPriority) {
           // VAR/penalty always overrides existing label (e.g. "GOLO!" → "REVISÃO AO VAR")
@@ -6546,17 +6506,6 @@ const FOOTBALL_V2_LIVE = new Set([
   "VAR Review", "Video Review", "VAR", "Awaiting Review", "Awaiting review",
 ]);
 
-// Suspension delays (ms) used when a goal is detected in the V2 football builder
-const GOAL_SUSP_V2: Record<string, number> = {
-  result: 25000, doubleChance: 25000, totalGoals: 28000, handicap: 28000,
-  halfTime: 25000, htft: 30000, correctScore: 35000, asianHandicap: 30000,
-  asianTotals: 30000, drawNoBet: 25000, firstGoal: 25000, winToNil: 25000,
-  cleanSheet: 25000, goalOddEven: 28000, exactGoals: 30000, btts1H: 25000, btts2H: 25000,
-  toWinBothHalves: 28000, highestScoringHalf: 25000, htCorrectScore: 35000,
-  h2CorrectScore: 35000, teamGoals: 28000, secondHalf: 25000, drawNoBet2: 25000,
-  handicapPoints: 28000,
-};
-
 // Tracks the last time a match's minute+score changed.
 // If both are frozen for > 20 min the match is a zombie and gets evicted.
 const _v2StuckTracker = new Map<string, { minute: number; score: string; since: number }>();
@@ -6724,7 +6673,9 @@ function buildFootballLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
         // override the label immediately so the frontend shows "REVISÃO AO VAR".
         const filteredMarkets = withPen(filterLiveMarkets(existing.markets, homeScore, awayScore, newStatus));
         const filteredBase = withPen(filterLiveMarkets(existing._baseMarkets ?? existing.markets, homeScore, awayScore, newStatus));
-        const susp = Object.fromEntries(Object.entries(GOAL_SUSP_V2).map(([k, d]) => [k, now + d]));
+        const susp = Object.fromEntries(
+          FOOTBALL_SUSP_KEYS_GOAL.map(k => [k, now + footballSuspensionDelayMs("goal", k)])
+        ) as Record<string, number>;
         const updated: LiveMatchState = {
           ...existing,
           homeScore, awayScore, minute, status: newStatus,
@@ -6753,14 +6704,9 @@ function buildFootballLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
         if (isVARStatus) {
           if (!susp || Object.keys(susp).length === 0) {
             // No suspension yet — set VAR-duration timers (45s for most markets)
-            const varDelay = 45_000;
-            susp = Object.fromEntries([
-              "result","doubleChance","totalGoals","handicap","halfTime","correctScore",
-              "asianHandicap","asianTotals","drawNoBet","firstGoal","htft","winToNil",
-              "cleanSheet","goalOddEven","exactGoals","btts1H","btts2H","toWinBothHalves",
-              "highestScoringHalf","htCorrectScore","h2CorrectScore","teamGoals","secondHalf",
-              "drawNoBet2","handicapPoints",
-            ].map(k => [k, now + varDelay]));
+            susp = Object.fromEntries(
+              FOOTBALL_SUSP_KEYS_VAR.map(k => [k, now + footballSuspensionDelayMs("var", k)])
+            ) as Record<string, number>;
           }
           // Always override the reason label with VAR (covers "GOLO!" → "REVISÃO AO VAR")
           const updated: LiveMatchState = {
