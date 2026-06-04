@@ -4168,6 +4168,8 @@ async function getVolleyballLive(): Promise<VolleyTournament[]> {
 }
 
 // ─── SportsAPI Pro V2 Live Fetch Functions ────────────────────────────────────
+const V2_LIVE_MAX_STALE_MS = 30_000;
+const WS_PREFERRED_MAX_STALE_MS = 10_000;
 
 /** Race V1 vs V2 HTTP — whichever resolves first wins. V1 = 1-2s, V2 = 3-5s. */
 async function fetchLiveRace(v1Base: string, v2Base: string): Promise<SAPIV2Event[]> {
@@ -4185,12 +4187,19 @@ async function fetchLiveRace(v1Base: string, v2Base: string): Promise<SAPIV2Even
 
 async function getFootballLiveV2(): Promise<SAPIV2Event[]> {
   const now = Date.now();
+  if ((wsConnected.has("football") || v1WsConnected.has("football")) && footballLiveV2Cache && now - footballLiveV2FetchedAt < WS_PREFERRED_MAX_STALE_MS && (wsLastMessageAt.get("football") ?? 0) > now - WS_PREFERRED_MAX_STALE_MS) return footballLiveV2Cache;
   if (footballLiveV2Cache && now - footballLiveV2FetchedAt < CONFIG.LIVE_CACHE_TTL) return footballLiveV2Cache;
   try {
     const events = await fetchLiveRace(SAPI_V1_FOOTBALL, SAPI_V2_FOOTBALL);
     if (events.length > 0) {
       footballLiveV2Cache = events;
       footballLiveV2FetchedAt = now;
+      return footballLiveV2Cache;
+    }
+    if (footballLiveV2Cache && now - footballLiveV2FetchedAt > V2_LIVE_MAX_STALE_MS) {
+      footballLiveV2Cache = [];
+      footballLiveV2FetchedAt = now;
+      return [];
     }
     return footballLiveV2Cache ?? [];
   } catch {
@@ -4200,12 +4209,19 @@ async function getFootballLiveV2(): Promise<SAPIV2Event[]> {
 
 async function getBasketballLiveV2(): Promise<SAPIV2Event[]> {
   const now = Date.now();
+  if ((wsConnected.has("basketball") || v1WsConnected.has("basketball")) && basketballLiveV2Cache && now - basketballLiveV2FetchedAt < WS_PREFERRED_MAX_STALE_MS && (wsLastMessageAt.get("basketball") ?? 0) > now - WS_PREFERRED_MAX_STALE_MS) return basketballLiveV2Cache;
   if (basketballLiveV2Cache && now - basketballLiveV2FetchedAt < CONFIG.LIVE_CACHE_TTL) return basketballLiveV2Cache;
   try {
     const events = await fetchLiveRace(SAPI_V1_BASKETBALL, SAPI_V2_BASKETBALL);
     if (events.length > 0) {
       basketballLiveV2Cache = events;
       basketballLiveV2FetchedAt = now;
+      return basketballLiveV2Cache;
+    }
+    if (basketballLiveV2Cache && now - basketballLiveV2FetchedAt > V2_LIVE_MAX_STALE_MS) {
+      basketballLiveV2Cache = [];
+      basketballLiveV2FetchedAt = now;
+      return [];
     }
     return basketballLiveV2Cache ?? [];
   } catch {
@@ -4215,14 +4231,25 @@ async function getBasketballLiveV2(): Promise<SAPIV2Event[]> {
 
 async function getHockeyLiveV2(): Promise<SAPIV2Event[]> {
   const now = Date.now();
+  if ((wsConnected.has("hockey") || v1WsConnected.has("hockey")) && hockeyLiveV2Cache && now - hockeyLiveV2FetchedAt < WS_PREFERRED_MAX_STALE_MS && (wsLastMessageAt.get("hockey") ?? 0) > now - WS_PREFERRED_MAX_STALE_MS) return hockeyLiveV2Cache;
   if (hockeyLiveV2Cache && now - hockeyLiveV2FetchedAt < CONFIG.LIVE_CACHE_TTL) return hockeyLiveV2Cache;
   try {
     const resp = await fetch(`${SAPI_V2_HOCKEY}/live`, { signal: AbortSignal.timeout(9000), headers: sapiHeaders() });
     if (!resp.ok) return hockeyLiveV2Cache ?? [];
     const data = (await resp.json()) as { events?: SAPIV2Event[] };
-    hockeyLiveV2Cache = data.events ?? [];
+    const events = data.events ?? [];
+    if (events.length > 0) {
+      hockeyLiveV2Cache = events;
+      hockeyLiveV2FetchedAt = now;
+      return hockeyLiveV2Cache;
+    }
+    if (hockeyLiveV2Cache && now - hockeyLiveV2FetchedAt > V2_LIVE_MAX_STALE_MS) {
+      hockeyLiveV2Cache = [];
+      hockeyLiveV2FetchedAt = now;
+      return [];
+    }
     hockeyLiveV2FetchedAt = now;
-    return hockeyLiveV2Cache;
+    return hockeyLiveV2Cache ?? [];
   } catch {
     return hockeyLiveV2Cache ?? [];
   }
@@ -4230,14 +4257,25 @@ async function getHockeyLiveV2(): Promise<SAPIV2Event[]> {
 
 async function getBaseballLiveV2(): Promise<SAPIV2Event[]> {
   const now = Date.now();
+  if ((wsConnected.has("baseball") || v1WsConnected.has("baseball")) && baseballLiveV2Cache && now - baseballLiveV2FetchedAt < WS_PREFERRED_MAX_STALE_MS && (wsLastMessageAt.get("baseball") ?? 0) > now - WS_PREFERRED_MAX_STALE_MS) return baseballLiveV2Cache;
   if (baseballLiveV2Cache && now - baseballLiveV2FetchedAt < CONFIG.LIVE_CACHE_TTL) return baseballLiveV2Cache;
   try {
     const resp = await fetch(`${SAPI_V2_BASEBALL}/live`, { signal: AbortSignal.timeout(9000), headers: sapiHeaders() });
     if (!resp.ok) return baseballLiveV2Cache ?? [];
     const data = (await resp.json()) as { events?: SAPIV2Event[] };
-    baseballLiveV2Cache = data.events ?? [];
+    const events = data.events ?? [];
+    if (events.length > 0) {
+      baseballLiveV2Cache = events;
+      baseballLiveV2FetchedAt = now;
+      return baseballLiveV2Cache;
+    }
+    if (baseballLiveV2Cache && now - baseballLiveV2FetchedAt > V2_LIVE_MAX_STALE_MS) {
+      baseballLiveV2Cache = [];
+      baseballLiveV2FetchedAt = now;
+      return [];
+    }
     baseballLiveV2FetchedAt = now;
-    return baseballLiveV2Cache;
+    return baseballLiveV2Cache ?? [];
   } catch {
     return baseballLiveV2Cache ?? [];
   }
@@ -4245,6 +4283,7 @@ async function getBaseballLiveV2(): Promise<SAPIV2Event[]> {
 
 async function getTennisLiveV2(): Promise<SAPIV2Event[]> {
   const now = Date.now();
+  if ((wsConnected.has("tennis") || v1WsConnected.has("tennis")) && tennisLiveV2Cache && now - tennisLiveV2FetchedAt < WS_PREFERRED_MAX_STALE_MS && (wsLastMessageAt.get("tennis") ?? 0) > now - WS_PREFERRED_MAX_STALE_MS) return tennisLiveV2Cache;
   if (tennisLiveV2Cache && now - tennisLiveV2FetchedAt < CONFIG.LIVE_CACHE_TTL) return tennisLiveV2Cache;
   try {
     // Race V1 vs V2 — tennis endpoint shape varies, handle both formats
@@ -4268,6 +4307,12 @@ async function getTennisLiveV2(): Promise<SAPIV2Event[]> {
     if (events.length > 0) {
       tennisLiveV2Cache = events;
       tennisLiveV2FetchedAt = now;
+      return tennisLiveV2Cache;
+    }
+    if (tennisLiveV2Cache && now - tennisLiveV2FetchedAt > V2_LIVE_MAX_STALE_MS) {
+      tennisLiveV2Cache = [];
+      tennisLiveV2FetchedAt = now;
+      return [];
     }
     return tennisLiveV2Cache ?? [];
   } catch {
@@ -4301,6 +4346,7 @@ const WS_DOMAINS: Record<SportKey, string> = {
 const wsConnected = new Set<SportKey>();
 // Track reconnect timers so we can avoid duplicate reconnects
 const wsTimers = new Map<SportKey, ReturnType<typeof setTimeout>>();
+const wsLastMessageAt = new Map<SportKey, number>();
 
 function applyV2WsMessage(sport: SportKey, raw: unknown): void {
   if (!raw || typeof raw !== "object") return;
@@ -4415,6 +4461,7 @@ function connectSportWS(sport: SportKey): void {
   });
 
   ws.addEventListener("message", (evt) => {
+    wsLastMessageAt.set(sport, Date.now());
     try {
       const data: unknown = JSON.parse(typeof evt.data === "string" ? evt.data : String(evt.data));
       applyV2WsMessage(sport, data);
@@ -4428,6 +4475,7 @@ function connectSportWS(sport: SportKey): void {
 
   ws.addEventListener("close", () => {
     wsConnected.delete(sport);
+    wsLastMessageAt.delete(sport);
     logger.warn({ sport, version: "v2" }, "WS closed — reconnecting in 5s");
     scheduleReconnect(sport);
   });
@@ -4435,6 +4483,7 @@ function connectSportWS(sport: SportKey): void {
   ws.addEventListener("error", (err) => {
     // error always precedes close; let the close handler reconnect
     wsConnected.delete(sport);
+    wsLastMessageAt.delete(sport);
     logger.error({ sport, version: "v2", err }, "WS error");
   });
 }
@@ -4567,6 +4616,7 @@ function connectV1SportWS(sport: SportKey): void {
   });
 
   ws.addEventListener("message", (evt) => {
+    wsLastMessageAt.set(sport, Date.now());
     try {
       const data: unknown = JSON.parse(typeof evt.data === "string" ? evt.data : String(evt.data));
       applyV1WsMessage(sport, data);
@@ -4577,6 +4627,7 @@ function connectV1SportWS(sport: SportKey): void {
 
   ws.addEventListener("close", () => {
     v1WsConnected.delete(sport);
+    wsLastMessageAt.delete(sport);
     const delay = v1WsRetryDelay.get(sport) ?? 5_000;
     logger.warn({ sport, version: "v1", retryMs: delay }, "V1 WS closed — scheduling reconnect");
     scheduleV1Reconnect(sport, delay);
@@ -4585,6 +4636,7 @@ function connectV1SportWS(sport: SportKey): void {
   ws.addEventListener("error", () => {
     // error always precedes close — close handler does the reconnect
     v1WsConnected.delete(sport);
+    wsLastMessageAt.delete(sport);
   });
 }
 
@@ -7635,6 +7687,7 @@ async function broadcastLive(): Promise<void> {
 }
 
 router.get("/live", async (_req, res) => {
+  res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0");
   try {
     const payload = await buildLivePayload();
     res.json(payload);
@@ -7642,6 +7695,35 @@ router.get("/live", async (_req, res) => {
     console.error("[live route] unexpected error:", err);
     res.json({ matches: [] });
   }
+});
+
+router.get("/feed-status", (_req, res) => {
+  res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0");
+  const now = Date.now();
+  const asAge = (t: number) => (t > 0 ? Math.max(0, now - t) : null);
+  res.json({
+    serverTime: now,
+    sportsApiKeyPresent: !!SPORTSAPI_KEY,
+    wsConnected: Array.from(wsConnected),
+    v1WsConnected: Array.from(v1WsConnected),
+    lastMessageAt: Object.fromEntries((Object.keys(WS_DOMAINS) as SportKey[]).map(k => [k, wsLastMessageAt.get(k) ?? 0])),
+    fetchedAt: {
+      football: footballLiveV2FetchedAt,
+      basketball: basketballLiveV2FetchedAt,
+      hockey: hockeyLiveV2FetchedAt,
+      baseball: baseballLiveV2FetchedAt,
+      tennis: tennisLiveV2FetchedAt,
+      tennisV1: _tennisLiveV1Cache?.fetchedAt ?? 0,
+    },
+    ageMs: {
+      football: asAge(footballLiveV2FetchedAt),
+      basketball: asAge(basketballLiveV2FetchedAt),
+      hockey: asAge(hockeyLiveV2FetchedAt),
+      baseball: asAge(baseballLiveV2FetchedAt),
+      tennis: asAge(tennisLiveV2FetchedAt),
+      tennisV1: asAge(_tennisLiveV1Cache?.fetchedAt ?? 0),
+    },
+  });
 });
 
 // ─── SSE endpoint — pushes live data continuously (WS-triggered + 1–2s cadence) ─
