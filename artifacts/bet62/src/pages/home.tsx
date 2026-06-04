@@ -2334,7 +2334,32 @@ export default function Home() {
   };
 
   // Shared processing — called both by fetchLive (HTTP fallback) and the SSE handler
-  const processLiveData = useCallback((data: { matches?: LiveMatchRaw[] }) => {
+  const processLiveData = useCallback((data: any) => {
+    const now = Date.now();
+    
+    // Handle partial delta updates for sub-second latency
+    if (data.type === "update" && data.matchId) {
+      const { matchId, delta } = data;
+      setLiveMatches(prev => {
+        const idx = prev.findIndex(m => String(m.id) === String(matchId));
+        if (idx === -1) return prev;
+        
+        const current = prev[idx];
+        const updated = { ...current, ...delta };
+        
+        // Track previous odds for arrows
+        const pOdds = { ...prevLiveOdds.current };
+        const pMkts = { ...prevLiveMarkets.current };
+        pOdds[String(matchId)] = current.odds;
+        pMkts[String(matchId)] = flattenMatchMarketsForArrows(current);
+        prevLiveOdds.current = pOdds;
+        prevLiveMarkets.current = pMkts;
+        
+        return [...prev.slice(0, idx), updated, ...prev.slice(idx + 1)];
+      });
+      return;
+    }
+
     const matches = (data.matches || []) as LiveMatchRaw[];
     if (matches.length === 0) {
       emptyLiveStreakRef.current += 1;

@@ -3010,7 +3010,7 @@ function applyTieredMarketDrift(state: LiveMatchState, now: number): LiveMatchSt
     return false;
   };
 
-  // ── Main 1X2 odds (highest priority, 45–90s cadence) ───────────────────────
+  // ── Main 1X2 odds (highest priority, 8–15s cadence for live feel) ──────────
   // For football, re-anchor to score-aware Poisson model every tick so that a
   // team winning 5-0 always has very low odds — not the pre-match line.
   const liveAnchor: { home: number; draw: number; away: number } =
@@ -3033,7 +3033,7 @@ function applyTieredMarketDrift(state: LiveMatchState, now: number): LiveMatchSt
   const _isLevelLate = minute >= 80 && homeScore === awayScore;
   const _oddsCap = _isLevelLate ? 10.00 : 30.00;
 
-  const newOdds = due("odds", 45_000, 90_000) ? {
+  const newOdds = due("odds", 8_000, 15_000) ? {
     home: Math.max(1.04, Math.min(_oddsCap, r(liveAnchor.home * (1 + oddsOscH)))),
     draw: liveAnchor.draw > 0 ? Math.max(2.00, Math.min(_oddsCap, r(liveAnchor.draw * (1 + oddsOscD)))) : 0,
     away: Math.max(1.04, Math.min(_oddsCap, r(liveAnchor.away * (1 + oddsOscA)))),
@@ -3053,26 +3053,26 @@ function applyTieredMarketDrift(state: LiveMatchState, now: number): LiveMatchSt
   const tg  = state.markets.totalGoals;
   const btg = bm.totalGoals;
 
-  // ── Tier 1 markets — each on its own 50–110s schedule ──────────────────────
-  const dcDue  = due("doubleChance",   50_000, 110_000);
-  const btsDue = due("bothTeamsScore", 55_000, 115_000);
-  const tgDue  = due("totalGoals",     60_000, 120_000);
-  const hcDue  = due("handicap",       65_000, 125_000);
-  const dnbDue = due("drawNoBet",      70_000, 130_000);
-  const atDue  = due("asianTotals",    75_000, 135_000);
+  // ── Tier 1 markets — each on its own 12–25s schedule ──────────────────────
+  const dcDue  = due("doubleChance",   12_000, 25_000);
+  const btsDue = due("bothTeamsScore", 15_000, 30_000);
+  const tgDue  = due("totalGoals",     18_000, 35_000);
+  const hcDue  = due("handicap",       20_000, 40_000);
+  const dnbDue = due("drawNoBet",      22_000, 45_000);
+  const atDue  = due("asianTotals",    25_000, 50_000);
 
-  // ── Tier 2 markets — 85–180s ───────────────────────────────────────────────
-  const htDue  = due("halfTime",       85_000, 160_000);
-  const fgDue  = due("firstGoal",      90_000, 170_000);
-  const ahDue  = due("asianHandicap",  95_000, 180_000);
-  const htftDue = due("htft",         100_000, 190_000);
-  const csDue   = due("correctScore",   105_000, 200_000);
-  const htCSDue = due("htCorrectScore",  90_000, 175_000);
-  const h2CSDue = due("h2CorrectScore",  90_000, 175_000);
+  // ── Tier 2 markets — 40–80s ───────────────────────────────────────────────
+  const htDue  = due("halfTime",       40_000, 80_000);
+  const fgDue  = due("firstGoal",      45_000, 90_000);
+  const ahDue  = due("asianHandicap",  50_000, 100_000);
+  const htftDue = due("htft",         60_000, 120_000);
+  const csDue   = due("correctScore",   65_000, 130_000);
+  const htCSDue = due("htCorrectScore",  50_000, 100_000);
+  const h2CSDue = due("h2CorrectScore",  50_000, 100_000);
 
-  // ── Tier 3 markets — 120–260s ──────────────────────────────────────────────
-  const cornDue = due("corners", 120_000, 250_000);
-  const cardDue = due("cards",   130_000, 260_000);
+  // ── Tier 3 markets — 80–150s ──────────────────────────────────────────────
+  const cornDue = due("corners", 80_000, 150_000);
+  const cardDue = due("cards",   90_000, 160_000);
 
   const newMarkets: AdvancedMarkets = {
     ...state.markets, // default: keep ALL current values (no change = no arrow)
@@ -4435,7 +4435,15 @@ function mergeSingleV2Event(sport: SportKey, ev: SAPIV2Event): void {
     ? [...cache.slice(0, idx), ev, ...cache.slice(idx + 1)]
     : [...cache, ev];
   applyV2WsMessage(sport, { events: updated });
-  void now; // used indirectly above
+
+  // Trigger immediate Delta Broadcast for real-time score updates
+  const id = String(ev.id);
+  broadcastMatchDelta(id, {
+    homeScore: v2CurrentScore(ev.homeScore),
+    awayScore: v2CurrentScore(ev.awayScore),
+    status: v2StatusStr(ev.status),
+    minute: ev.status?.minute ?? 0,
+  });
 }
 
 function connectSportWS(sport: SportKey): void {
@@ -4574,6 +4582,15 @@ function applyV1ScorePatch(sport: SportKey, ev: V1ScoreEvent): void {
 
   const updated = [...cache.slice(0, idx), patched, ...cache.slice(idx + 1)];
   applyV2WsMessage(sport, { events: updated });
+
+  // Trigger immediate Delta Broadcast for sub-second score-only updates (V1 source)
+  broadcastMatchDelta(String(ev.id), {
+    homeScore: homeScore ?? (typeof existing.homeScore === "number" ? existing.homeScore : 0),
+    awayScore: awayScore ?? (typeof existing.awayScore === "number" ? existing.awayScore : 0),
+    status: status,
+    minute: ev.minute,
+  });
+
   broadcastLive().catch(() => { /* ignore */ });
 }
 
@@ -7667,13 +7684,13 @@ async function broadcastLive(): Promise<void> {
     } else {
       consecutiveEmptyBroadcasts = 0;
     }
-    // SSE clients
+    // SSE clients (keep full payload for SSE)
     const sseChunk = `data: ${JSON.stringify(payload)}\n\n`;
     for (const client of sseClients) {
       try { client.write(sseChunk); } catch { sseClients.delete(client); }
     }
     // WebSocket clients (native JSON message)
-    const wsMsg = JSON.stringify(payload);
+    const wsMsg = JSON.stringify({ type: "snapshot", ...payload });
     for (const ws of wsLiveClients) {
       try {
         if (ws.readyState === 1 /* OPEN */) ws.send(wsMsg);
@@ -7688,6 +7705,33 @@ async function broadcastLive(): Promise<void> {
     if (broadcastPending) {
       broadcastPending = false;
       setImmediate(() => { broadcastLive().catch(() => {}); });
+    }
+  }
+}
+
+/**
+ * Broadcasts a partial update (delta) for a single match to all connected clients (SSE & WS).
+ * This is used for sub-second updates of scores and odds.
+ */
+export function broadcastMatchDelta(matchId: string, delta: Partial<LiveMatchState>): void {
+  const msgObj = { type: "update", matchId, delta };
+  
+  // 1. WebSocket clients (Native JSON)
+  if (wsLiveClients.size > 0) {
+    const wsMsg = JSON.stringify(msgObj);
+    for (const ws of wsLiveClients) {
+      try {
+        if (ws.readyState === 1) ws.send(wsMsg);
+        else wsLiveClients.delete(ws);
+      } catch { wsLiveClients.delete(ws); }
+    }
+  }
+
+  // 2. SSE clients (data: JSON\n\n)
+  if (sseClients.size > 0) {
+    const sseChunk = `data: ${JSON.stringify(msgObj)}\n\n`;
+    for (const client of sseClients) {
+      try { client.write(sseChunk); } catch { sseClients.delete(client); }
     }
   }
 }
@@ -11532,6 +11576,7 @@ router.get("/football-odds-country/:country", async (req, res) => {
 const LIVE_BROADCAST_INTERVAL_MS = Math.min(2000, Math.max(1000, CONFIG.LIVE_UPDATE_INTERVAL));
 setInterval(() => {
   const now = Date.now();
+  let anyChange = false;
   for (const [id, state] of liveMatchState.entries()) {
     if (state.sport !== "football") continue;
     const skip = ["HT", "FT", "AET", "Em Breve", "Fin.", "Fin. (AET)"];
@@ -11544,10 +11589,22 @@ setInterval(() => {
       });
       if (allCoresSuspended) continue;
     }
-    liveMatchState.set(id, applyTieredMarketDrift(state, now));
+    const updated = applyTieredMarketDrift(state, now);
+    if (updated !== state) {
+      liveMatchState.set(id, updated);
+      // Trigger a delta broadcast immediately if something changed
+      broadcastMatchDelta(id, { 
+        odds: updated.odds, 
+        markets: updated.markets,
+        _marketNextUpdate: updated._marketNextUpdate
+      });
+      anyChange = true;
+    }
   }
-  // Push to SSE clients (same cadence as market drift)
-  broadcastLive().catch(() => { /* ignore */ });
+  // Push full snapshot to SSE/WS clients periodically or on any change
+  if (anyChange) {
+    broadcastLive().catch(() => { /* ignore */ });
+  }
 }, LIVE_BROADCAST_INTERVAL_MS);
 
 // ─── Football Player Markets (per-match, filtered to home + away team only) ───
