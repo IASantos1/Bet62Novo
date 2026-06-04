@@ -4499,6 +4499,29 @@ function v1StatusStr(s: string | { description?: string } | undefined): string |
 function applyV1ScorePatch(sport: SportKey, ev: V1ScoreEvent): void {
   if (!ev.id) return;
 
+  if (sport === "tennis" && _tennisLiveV1StateCache) {
+    const idxT = _tennisLiveV1StateCache.matches.findIndex(m => m.id === `tennis-v1-${ev.id}`);
+    if (idxT >= 0) {
+      const existingT = _tennisLiveV1StateCache.matches[idxT]!;
+      const homeScoreT = v1ScoreNum(ev.homeScore);
+      const awayScoreT = v1ScoreNum(ev.awayScore);
+      const statusT    = v1StatusStr(ev.status);
+      const patchedT: LiveMatchState = {
+        ...existingT,
+        ...(homeScoreT !== undefined ? { homeScore: homeScoreT } : {}),
+        ...(awayScoreT !== undefined ? { awayScore: awayScoreT } : {}),
+        ...(statusT    !== undefined ? { status: statusT } : {}),
+      };
+      const updatedT = [
+        ..._tennisLiveV1StateCache.matches.slice(0, idxT),
+        patchedT,
+        ..._tennisLiveV1StateCache.matches.slice(idxT + 1),
+      ];
+      _tennisLiveV1StateCache = { matches: updatedT, fetchedAt: Date.now() };
+      broadcastLive().catch(() => { /* ignore */ });
+    }
+  }
+
   let cache: SAPIV2Event[] | null = null;
   switch (sport) {
     case "football":   cache = footballLiveV2Cache;   break;
@@ -4507,7 +4530,7 @@ function applyV1ScorePatch(sport: SportKey, ev: V1ScoreEvent): void {
     case "baseball":   cache = baseballLiveV2Cache;   break;
     case "tennis":     cache = tennisLiveV2Cache;     break;
   }
-  if (!cache) return; // no V2 snapshot yet — ignore until V2 provides context
+  if (!cache) return;
 
   // Use string comparison — V1 may send string IDs while V2 stores numbers
   const idx = cache.findIndex(e => String(e.id) === String(ev.id));
@@ -4891,6 +4914,7 @@ async function getTennisAllV1(): Promise<V1TennisGame[]> {
 }
 
 const TENNIS_LIVE_V1_TTL = 2000;
+const TENNIS_LIVE_V1_MAX_STALE = 30_000;
 let _tennisLiveV1Cache: { games: V1TennisGame[]; fetchedAt: number } | null = null;
 let _tennisLiveV1InFlight: Promise<V1TennisGame[]> | null = null;
 
@@ -4912,10 +4936,18 @@ async function getTennisLiveV1(): Promise<V1TennisGame[]> {
   const now = Date.now();
   if (_tennisLiveV1Cache && now - _tennisLiveV1Cache.fetchedAt < TENNIS_LIVE_V1_TTL) return _tennisLiveV1Cache.games;
   if (_tennisLiveV1Cache) {
+    const age = now - _tennisLiveV1Cache.fetchedAt;
     if (!_tennisLiveV1InFlight) {
       _tennisLiveV1InFlight = fetchTennisLiveV1()
         .then(games => { _tennisLiveV1Cache = { games, fetchedAt: Date.now() }; return games; })
         .finally(() => { _tennisLiveV1InFlight = null; });
+    }
+    if (age > TENNIS_LIVE_V1_MAX_STALE) {
+      try {
+        return await _tennisLiveV1InFlight;
+      } catch {
+        return _tennisLiveV1Cache.games;
+      }
     }
     return _tennisLiveV1Cache.games;
   }
@@ -7735,10 +7767,17 @@ async function buildTennisLiveV1Cached(): Promise<LiveMatchState[]> {
   const now = Date.now();
   if (_tennisLiveV1StateCache && now - _tennisLiveV1StateCache.fetchedAt < TENNIS_LIVE_V1_TTL) return _tennisLiveV1StateCache.matches;
   if (_tennisLiveV1StateCache) {
+    const age = now - _tennisLiveV1StateCache.fetchedAt;
     if (!_tennisLiveV1StateInFlight) {
       _tennisLiveV1StateInFlight = buildTennisLiveV1()
         .then(matches => { _tennisLiveV1StateCache = { matches, fetchedAt: Date.now() }; return matches; })
         .finally(() => { _tennisLiveV1StateInFlight = null; });
+    }
+    if (age > TENNIS_LIVE_V1_MAX_STALE) {
+      return Promise.race([
+        _tennisLiveV1StateInFlight,
+        waitMs(1500).then(() => _tennisLiveV1StateCache?.matches ?? []),
+      ]);
     }
     return _tennisLiveV1StateCache.matches;
   }
