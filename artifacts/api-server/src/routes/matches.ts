@@ -4170,7 +4170,7 @@ async function getVolleyballLive(): Promise<VolleyTournament[]> {
 
 // ─── SportsAPI Pro V2 Live Fetch Functions ────────────────────────────────────
 const V2_LIVE_MAX_STALE_MS = 30_000;
-const WS_PREFERRED_MAX_STALE_MS = 10_000;
+const WS_PREFERRED_MAX_STALE_MS = 5_000;
 
 /** Race V1 vs V2 HTTP — whichever resolves first wins. V1 = 1-2s, V2 = 3-5s. */
 async function fetchLiveRace(v1Base: string, v2Base: string): Promise<SAPIV2Event[]> {
