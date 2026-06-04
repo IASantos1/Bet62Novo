@@ -5267,6 +5267,10 @@ function buildTennisLiveMatches(
     for (const m of matches) {
       if (!m) continue;
 
+      const now = Date.now();
+      const id = `tennis-live-${m.id}`;
+      const existing = liveMatchState.get(id);
+
       // Skip any match not explicitly live according to Statpal.
       // Tennis courts run late (previous match still in progress) — never
       // infer "in progress" from time alone; only trust real API statuses.
@@ -5373,11 +5377,56 @@ function buildTennisLiveMatches(
       }
 
       // Completed set markets are permanently settled — suspend them
-      const SETTLED = Date.now() + 30 * 24 * 60 * 60 * 1000;
-      const tennisSetSusp: Record<string, number> = {};
-      if (numDoneSets >= 1) tennisSetSusp['firstSet'] = SETTLED;
-      if (numDoneSets >= 2) tennisSetSusp['set2']     = SETTLED;
-      const tennisSuspension = Object.keys(tennisSetSusp).length > 0 ? tennisSetSusp : undefined;
+      const SETTLED = now + 30 * 24 * 60 * 60 * 1000;
+      const settledSusp: Record<string, number> = {};
+      if (numDoneSets >= 1) settledSusp["firstSet"] = SETTLED;
+      if (numDoneSets >= 2) settledSusp["set2"]     = SETTLED;
+
+      const currentPoints: [number | string, number | string] = [hPt, aPt];
+      const suspPts: [number | string, number | string] = [
+        hPt === "D" ? "40" : hPt,
+        aPt === "D" ? "40" : aPt,
+      ];
+
+      const prevPoints = existing?._liveExtra?.currentPoints;
+      const prevSets   = existing?._liveExtra?.sets;
+      const lastTennisUpdate = existing?._oddsUpdatedAt ?? 0;
+      const isDifferentPollCycle = (now - lastTennisUpdate) > 1500;
+      const pointPlayed =
+        isDifferentPollCycle &&
+        prevPoints !== undefined && (
+          JSON.stringify(prevPoints) !== JSON.stringify(currentPoints) ||
+          JSON.stringify(prevSets)   !== JSON.stringify(sets)
+        );
+
+      let marketSuspension: Record<string, number> | undefined = existing?.marketSuspension
+        ? Object.fromEntries(Object.entries(existing.marketSuspension).filter(([, ts]) => ts > now))
+        : undefined;
+
+      if (Object.keys(settledSusp).length > 0) {
+        marketSuspension = { ...(marketSuspension ?? {}), ...settledSusp };
+      }
+
+      let suspensionReason = existing?._suspensionReason;
+
+      if (pointPlayed) {
+        const suspMs = tennisSuspensionMs(suspPts, sets, homeScore, awayScore);
+        if (suspMs > 0) {
+          const pointSusp = Object.fromEntries(
+            TENNIS_SUSP_KEYS.map((k) => [k, now + suspMs]),
+          );
+          marketSuspension = { ...(marketSuspension ?? {}), ...pointSusp, ...settledSusp };
+          suspensionReason = "PONTO EM JOGO";
+        }
+      } else if (marketSuspension && Object.keys(marketSuspension).length === 0) {
+        marketSuspension = undefined;
+        suspensionReason = undefined;
+      } else if (!pointPlayed && suspensionReason === "PONTO EM JOGO") {
+        const active = marketSuspension
+          ? Object.entries(marketSuspension).filter(([k, ts]) => ts > now && settledSusp[k] === undefined)
+          : [];
+        suspensionReason = active.length > 0 ? suspensionReason : undefined;
+      }
 
       // Only tennis-relevant markets — no football goals/corners/cards
       const tennisOnlyMarkets = {
@@ -5401,7 +5450,7 @@ function buildTennisLiveMatches(
       } as unknown as AdvancedMarkets;
 
       result.push({
-        id:               `tennis-live-${m.id}`,
+        id,
         home:             p0.name,
         away:             p1.name,
         league:           t.name,
@@ -5415,8 +5464,10 @@ function buildTennisLiveMatches(
         odds:             liveOdds,
         markets:          tennisOnlyMarkets,
         events:           [],
-        marketSuspension: tennisSuspension,
-        _liveExtra:       { sets, currentPoints: [hPt, aPt], tennisStats: statsMap.get(m.id) },
+        marketSuspension: marketSuspension && Object.keys(marketSuspension).length > 0 ? marketSuspension : undefined,
+        _suspensionReason: suspensionReason,
+        _oddsUpdatedAt:    now,
+        _liveExtra:        { sets, currentPoints, tennisStats: statsMap.get(m.id) },
       });
     }
   }
@@ -7082,9 +7133,11 @@ function tennisSuspensionMs(
     (currentSet[1] >= 5 && currentSet[1] > currentSet[0])
   );
 
-  // Match point: player needs exactly 1 more set to win (best-of-3)
-  const setsNeeded = 2; // best-of-3 by default
-  const isMatchPoint = (homeSets === setsNeeded - 1 || awaySets === setsNeeded - 1);
+  // Match point (best-of-3 assumption): only treat as match point when a player
+  // is one set away AND this is effectively a set-point situation.
+  const setsNeeded = 2;
+  const oneSetAway = (homeSets === setsNeeded - 1 || awaySets === setsNeeded - 1);
+  const isMatchPoint = oneSetAway && (isSetPoint || isTiebreak);
 
   if (isMatchPoint && (isBreakPoint || isAdv)) return 25_000;
   if (isMatchPoint) return 20_000;
@@ -7093,7 +7146,7 @@ function tennisSuspensionMs(
   if (isBreakPoint) return 12_000;
   if (isTiebreak) return 12_000;
   if (isAdv || isDeuce) return 10_000;
-  return 0; // Normal point — no suspension (only high-pressure moments suspend markets)
+  return 5_000;
 }
 
 // Tennis market keys to suspend after each point (flat keys used by frontend)

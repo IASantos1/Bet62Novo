@@ -422,6 +422,48 @@ router.post("/place", authMiddleware, async (req: AuthRequest, res: Response): P
     return;
   }
 
+  const now = Date.now();
+  const selList: Array<{ matchId?: unknown; market?: unknown }> = Array.isArray(selections)
+    ? (selections as Array<{ matchId?: unknown; market?: unknown }>)
+    : [];
+
+  if (selList.length === 0) {
+    const liveSt = liveMatchState.get(String(matchId));
+    if (liveSt?.sport === "tennis") {
+      const anySuspended = liveSt.marketSuspension != null && Object.values(liveSt.marketSuspension).some((ts) => ts > now);
+      if (anySuspended || liveSt._suspensionReason) {
+        res.status(409).json({
+          error: "Mercado suspenso. Aguarde alguns segundos e tente novamente.",
+          reason: liveSt._suspensionReason ?? "PONTO EM JOGO",
+        });
+        return;
+      }
+    }
+  }
+
+  for (const sel of selList) {
+    const mId = String(sel.matchId ?? matchId);
+    const liveSt = liveMatchState.get(mId);
+    if (!liveSt) continue;
+    if (liveSt.sport !== "tennis") continue;
+
+    const marketKey = typeof sel.market === "string" && sel.market.trim() !== ""
+      ? sel.market
+      : "result";
+
+    const suspendedUntil = liveSt.marketSuspension?.[marketKey] ?? 0;
+    const anySuspended = liveSt.marketSuspension != null && Object.values(liveSt.marketSuspension).some((ts) => ts > now);
+    const suspended = suspendedUntil > now || (anySuspended && !!liveSt._suspensionReason);
+
+    if (suspended) {
+      res.status(409).json({
+        error: "Mercado suspenso. Aguarde alguns segundos e tente novamente.",
+        reason: liveSt._suspensionReason ?? "PONTO EM JOGO",
+      });
+      return;
+    }
+  }
+
   const useFreebets = isFreebet === true;
 
   try {
