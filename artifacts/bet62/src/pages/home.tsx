@@ -2364,13 +2364,28 @@ export default function Home() {
       prevLiveMarkets.current = newPrevMkts;
 
       const freshIds = new Set(matches.map(m => String(m.id)));
-      // Keep stale matches that disappeared from API < 60s ago (prevents flickering)
-      const staleMatches = prev.filter(m => {
-        const id = String(m.id);
-        if (freshIds.has(id)) return false;
-        const lastSeen = matchLastSeenRef.current[id] ?? 0;
-        return (now - lastSeen) < 60_000;
-      });
+      const isFinishedStatus = (st: string | undefined) => {
+        const s = (st ?? "").trim().toLowerCase();
+        if (!s) return false;
+        if (s === "ft") return true;
+        if (s.includes("fin")) return true;
+        if (s.includes("end")) return true;
+        if (s.includes("final")) return true;
+        if (s.includes("full time")) return true;
+        if (s.includes("finished")) return true;
+        if (s.includes("retired")) return true;
+        if (s.includes("walk over") || s.includes("walkover") || s.includes("w/o")) return true;
+        return false;
+      };
+      const staleMatches = prev
+        .filter(m => {
+          const id = String(m.id);
+          if (freshIds.has(id)) return false;
+          if (isFinishedStatus(m.status)) return false;
+          const lastSeen = matchLastSeenRef.current[id] ?? 0;
+          return (now - lastSeen) < 10_000;
+        })
+        .map(m => ({ ...m, marketSuspension: undefined, _suspensionReason: undefined, suspensionReason: undefined }));
 
       // Live matches (startsIn === undefined) always show even without odds — the game is happening.
       // "Em Breve" entries only show when there are real odds to bet on.
