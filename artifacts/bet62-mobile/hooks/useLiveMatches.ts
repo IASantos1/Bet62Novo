@@ -86,9 +86,8 @@ export interface LiveMatch {
 
 const RECONNECT_DELAY_MS = 3_000;
 const MAX_RECONNECT_DELAY_MS = 30_000;
-const HTTP_FALLBACK_INTERVAL_MS = 5_000;
-// Throttle UI updates: apply incoming data at most once every 2 s
-const UPDATE_THROTTLE_MS = 2_000;
+const HTTP_FALLBACK_INTERVAL_MS = 2_000;
+const UPDATE_THROTTLE_MS = 1_000;
 
 export function useLiveMatches(): {
   matches: LiveMatch[];
