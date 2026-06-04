@@ -2069,6 +2069,7 @@ let broadcastInProgress = false;
 // When a score patch arrives while a broadcast is already running, set this flag
 // so the broadcast runs again immediately after finishing (instead of being dropped).
 let broadcastPending = false;
+let consecutiveEmptyBroadcasts = 0;
 
 // v2/daily today: cache 5min
 let dailyCache: StatpalLeagueV2[] | null = null;
@@ -7649,7 +7650,7 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
 // Broadcast payload to all connected SSE + WebSocket clients; prune dead connections.
 // Guards: (1) skip if no clients, (2) if a broadcast is already in progress, set
 // broadcastPending so the update is sent immediately after — never silently dropped.
-// (3) never send empty matches — keep the last good state on clients instead.
+// (3) avoid sending empty matches unless confirmed, to keep the last good state on clients.
 async function broadcastLive(): Promise<void> {
   if (sseClients.size === 0 && wsLiveClients.size === 0) return;
   if (broadcastInProgress) {
@@ -7660,7 +7661,12 @@ async function broadcastLive(): Promise<void> {
   broadcastPending = false;
   try {
     const payload = await buildLivePayload();
-    if (payload.matches.length === 0) return; // keep last good state; don't wipe UI
+    if (payload.matches.length === 0) {
+      consecutiveEmptyBroadcasts += 1;
+      if (consecutiveEmptyBroadcasts < 3) return;
+    } else {
+      consecutiveEmptyBroadcasts = 0;
+    }
     // SSE clients
     const sseChunk = `data: ${JSON.stringify(payload)}\n\n`;
     for (const client of sseClients) {

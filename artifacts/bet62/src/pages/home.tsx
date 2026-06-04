@@ -1473,6 +1473,7 @@ export default function Home() {
   const prevLiveMarkets = useRef<Record<string, Record<string, number>>>({}); 
   // Grace period: track last time each match was seen in the API response (ms timestamp)
   const matchLastSeenRef = useRef<Record<string, number>>({});
+  const emptyLiveStreakRef = useRef(0);
   // Live minute ticker — interpolates clock between API refreshes
   const liveDataFetchedAt = useRef(0);
   const apiMinutesRef = useRef<Record<string, number>>({});
@@ -2335,8 +2336,17 @@ export default function Home() {
   // Shared processing — called both by fetchLive (HTTP fallback) and the SSE handler
   const processLiveData = useCallback((data: { matches?: LiveMatchRaw[] }) => {
     const matches = (data.matches || []) as LiveMatchRaw[];
-    // Guard: never replace live state with an empty list — keep stale on API errors
-    if (matches.length === 0) return;
+    if (matches.length === 0) {
+      emptyLiveStreakRef.current += 1;
+      if (emptyLiveStreakRef.current < 3) return;
+      emptyLiveStreakRef.current = 0;
+      apiMinutesRef.current = {};
+      minuteChangedAtRef.current = {};
+      matchLastSeenRef.current = {};
+      setLiveMatches([]);
+      return;
+    }
+    emptyLiveStreakRef.current = 0;
     const newMins: Record<string, number> = {};
     const now = Date.now();
     for (const m of matches) {
@@ -2371,9 +2381,15 @@ export default function Home() {
         if (s.includes("fin")) return true;
         if (s.includes("end")) return true;
         if (s.includes("final")) return true;
+        if (s.includes("complete")) return true;
         if (s.includes("full time")) return true;
         if (s.includes("finished")) return true;
         if (s.includes("retired")) return true;
+        if (s.includes("abandon")) return true;
+        if (s.includes("cancel")) return true;
+        if (s.includes("postpon")) return true;
+        if (s.includes("awarded")) return true;
+        if (s.includes("default")) return true;
         if (s.includes("walk over") || s.includes("walkover") || s.includes("w/o")) return true;
         return false;
       };
@@ -8321,13 +8337,15 @@ export default function Home() {
                           const upcoming = tournamentDetail?.matches.filter(m =>
                             m.status === "Not Started" && (m.date === todayStr || m.date === tomorrowStr)
                           ) ?? [];
-                          const finished = tournamentDetail?.matches.filter(m =>
-                            m.status === "Finished" || m.status === "Retired" || m.status === "Walk Over"
-                          ).slice().reverse() ?? [];
+                          const finished = (tournamentDetail?.matches ?? []).filter(m => {
+                            const s = String(m.status ?? "").trim().toLowerCase();
+                            return s === "finished" || s === "retired" || s === "walk over" || s === "walkover" || s === "w/o" || s === "wo";
+                          }).slice().reverse();
 
                           const StatusBadge = ({ status }: { status: string }) => {
-                            if (status === "Retired") return <span className="text-[8px] font-black bg-red-900/40 text-red-400 border border-red-800/30 rounded px-1">RET</span>;
-                            if (status === "Walk Over") return <span className="text-[8px] font-black bg-zinc-800 text-zinc-500 border border-zinc-700 rounded px-1">W/O</span>;
+                            const s = String(status ?? "").trim().toLowerCase();
+                            if (s === "retired") return <span className="text-[8px] font-black bg-red-900/40 text-red-400 border border-red-800/30 rounded px-1">RET</span>;
+                            if (s === "walk over" || s === "walkover" || s === "w/o" || s === "wo") return <span className="text-[8px] font-black bg-zinc-800 text-zinc-500 border border-zinc-700 rounded px-1">W/O</span>;
                             return null;
                           };
 
