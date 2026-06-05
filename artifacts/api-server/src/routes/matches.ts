@@ -11928,8 +11928,10 @@ function v2SportBase(sport: string): string | null {
     case "football":   return SAPI_V2_FOOTBALL;
     case "basketball": return SAPI_V2_BASKETBALL;
     case "hockey":     return SAPI_V2_HOCKEY;
+    case "icehockey":  return SAPI_V2_HOCKEY;
     case "tennis":     return SAPI_V2_TENNIS;
     case "baseball":   return SAPI_V2_BASEBALL;
+    case "basebol":    return SAPI_V2_BASEBALL;
     default:           return null;
   }
 }
@@ -12061,6 +12063,64 @@ router.get("/v2-lineups", async (req, res) => {
     res.json(result);
   } catch {
     res.json(emptyResp);
+  }
+});
+
+// ─── V2 Incidents/Statistics Proxy ───────────────────────────────────────────
+
+const v2IncidentsCache = new Map<string, { data: unknown; fetchedAt: number }>();
+const V2_INCIDENTS_TTL = 2500;
+
+router.get("/v2-incidents", async (req, res) => {
+  const sport   = String(req.query["sport"]   ?? "football");
+  const matchId = String(req.query["matchId"] ?? "");
+  if (!matchId) { res.json({}); return; }
+  const base = v2SportBase(sport);
+  if (!base) { res.json({}); return; }
+
+  const cacheKey = `v2inc:${sport}:${matchId}`;
+  const cached = v2IncidentsCache.get(cacheKey);
+  if (cached && Date.now() - cached.fetchedAt < V2_INCIDENTS_TTL) { res.json(cached.data); return; }
+
+  try {
+    const resp = await fetch(`${base}/match/${matchId}/incidents`, {
+      signal: AbortSignal.timeout(8000),
+      headers: sapiHeaders(),
+    });
+    if (!resp.ok) { res.json({}); return; }
+    const data = (await resp.json()) as unknown;
+    v2IncidentsCache.set(cacheKey, { data, fetchedAt: Date.now() });
+    res.json(data);
+  } catch {
+    res.json({});
+  }
+});
+
+const v2StatisticsCache = new Map<string, { data: unknown; fetchedAt: number }>();
+const V2_STATISTICS_TTL = 4000;
+
+router.get("/v2-statistics", async (req, res) => {
+  const sport   = String(req.query["sport"]   ?? "football");
+  const matchId = String(req.query["matchId"] ?? "");
+  if (!matchId) { res.json({}); return; }
+  const base = v2SportBase(sport);
+  if (!base) { res.json({}); return; }
+
+  const cacheKey = `v2stats:${sport}:${matchId}`;
+  const cached = v2StatisticsCache.get(cacheKey);
+  if (cached && Date.now() - cached.fetchedAt < V2_STATISTICS_TTL) { res.json(cached.data); return; }
+
+  try {
+    const resp = await fetch(`${base}/match/${matchId}/statistics`, {
+      signal: AbortSignal.timeout(8000),
+      headers: sapiHeaders(),
+    });
+    if (!resp.ok) { res.json({}); return; }
+    const data = (await resp.json()) as unknown;
+    v2StatisticsCache.set(cacheKey, { data, fetchedAt: Date.now() });
+    res.json(data);
+  } catch {
+    res.json({});
   }
 });
 
