@@ -4405,6 +4405,7 @@ const wsRetryDelay = new Map<SportKey, number>();
 const wsLastMessageAt = new Map<SportKey, number>();
 const v1PatchedAt = new Map<string, number>();
 const V1_PATCH_PREFER_WINDOW_MS = 15_000;
+const tennisV1WsScore = new Map<string, { home?: number; away?: number; status?: string; minute?: number; patchedAt: number }>();
 
 function v1PatchKey(sport: SportKey, id: number | string): string {
   return `${sport}:${String(id)}`;
@@ -4650,7 +4651,25 @@ function v1StatusStr(s: string | { description?: string } | undefined): string |
 function applyV1ScorePatch(sport: SportKey, ev: V1ScoreEvent): void {
   if (!ev.id) return;
 
-  v1PatchedAt.set(v1PatchKey(sport, ev.id), Date.now());
+  const now = Date.now();
+  v1PatchedAt.set(v1PatchKey(sport, ev.id), now);
+
+  if (sport === "tennis") {
+    const hs = v1ScoreNum(ev.homeScore);
+    const as = v1ScoreNum(ev.awayScore);
+    const st = v1StatusStr(ev.status);
+    const mn = ev.minute;
+    tennisV1WsScore.set(String(ev.id), { home: hs, away: as, status: st, minute: mn, patchedAt: now });
+
+    const delta: Partial<LiveMatchState> = {};
+    if (hs !== undefined) delta.homeScore = hs;
+    if (as !== undefined) delta.awayScore = as;
+    if (st !== undefined) delta.status = st;
+    if (mn !== undefined) delta.minute = mn;
+    if (Object.keys(delta).length > 0) {
+      broadcastMatchDelta(liveMatchIdForSportV2("tennis", ev.id), delta);
+    }
+  }
 
   let cache: SAPIV2Event[] | null = null;
   switch (sport) {
@@ -7957,8 +7976,13 @@ async function buildTennisLiveV1(): Promise<LiveMatchState[]> {
       if (home.includes("/") || away.includes("/")) continue;
       const compName = g.competitionDisplayName ?? "";
       if (/double|mixed/i.test(compName)) continue;
-      const homeScore = Math.max(0, g.homeCompetitor?.score ?? 0);
-      const awayScore = Math.max(0, g.awayCompetitor?.score ?? 0);
+      let homeScore = Math.max(0, g.homeCompetitor?.score ?? 0);
+      let awayScore = Math.max(0, g.awayCompetitor?.score ?? 0);
+      const ws = tennisV1WsScore.get(String(g.id));
+      if (ws && Date.now() - ws.patchedAt < 60_000) {
+        if (typeof ws.home === "number") homeScore = Math.max(0, ws.home);
+        if (typeof ws.away === "number") awayScore = Math.max(0, ws.away);
+      }
       const odds = makeOddsFromTeams(home, away);
       const diff = homeScore - awayScore;
       let liveOdds = { ...odds, draw: 0 };
@@ -7970,14 +7994,14 @@ async function buildTennisLiveV1(): Promise<LiveMatchState[]> {
       }
       const setNum = homeScore + awayScore + 1;
       result.push({
-        id: `tennis-v1-${g.id}`,
+        id: `tennis-v2-${g.id}`,
         home, away,
         league: compName || "Tennis",
         country: "",
         sport: "tennis" as const,
         homeScore, awayScore,
         minute: setNum * 20,
-        status: g.statusText ?? "Em Jogo",
+        status: ws?.status ?? g.statusText ?? "Em Jogo",
         hasRealOdds: true,
         odds: liveOdds,
         markets: makeAdvancedMarketsFromTeams(home, away),
@@ -8053,7 +8077,7 @@ async function buildTennisUpcoming(): Promise<UpcomingMatch[]> {
       const tennisExtras = computeTennisExtras(pHome);
 
       results.push({
-        id: `tennis-v1-${g.id}`,
+        id: `tennis-v2-${g.id}`,
         home,
         away,
         league: compName || "Tennis",
