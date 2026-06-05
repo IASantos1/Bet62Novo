@@ -4730,6 +4730,17 @@ export function initV1SportWebSockets(): void {
   }
 }
 
+export async function primeSportLiveCaches(): Promise<void> {
+  if (!process.env.SPORTSAPI_KEY) return;
+  await Promise.all([
+    getFootballLiveV2().catch(() => []),
+    getBasketballLiveV2().catch(() => []),
+    getHockeyLiveV2().catch(() => []),
+    getBaseballLiveV2().catch(() => []),
+    getTennisTodayV2().catch(() => []),
+  ]);
+}
+
 // ─── V2 /api/schedule/:date — multi-day upcoming events ──────────────────────
 
 // Per-(sport,date) cache — schedule data for future days changes rarely (30min TTL)

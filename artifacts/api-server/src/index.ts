@@ -1,7 +1,7 @@
 import { createServer } from "http";
 import app from "./app";
 import { logger } from "./lib/logger";
-import { getUpcomingAll, initSportWebSockets, initV1SportWebSockets, initLiveWsServer } from "./routes/matches";
+import { getUpcomingAll, initSportWebSockets, initV1SportWebSockets, initLiveWsServer, primeSportLiveCaches } from "./routes/matches";
 import { startSettlementWorker } from "./settlement";
 
 const rawPort = process.env["PORT"];
@@ -27,12 +27,14 @@ server.listen(port, (err?: Error) => {
 
   // Pre-warm all upcoming caches so first user request is instant
   getUpcomingAll().catch(() => {});
+  primeSportLiveCaches().catch(() => {});
 
-  // Open persistent WebSocket connections to SportsAPI Pro V2 for real-time live scores
-  initSportWebSockets();
+  const wsMode = String(process.env.SPORTSAPI_WS_MODE ?? "v1").toLowerCase();
+  const enableV2 = wsMode === "v2" || wsMode === "hybrid" || wsMode === "v1+v2" || wsMode === "v1v2";
+  const enableV1 = wsMode === "v1" || wsMode === "hybrid" || wsMode === "v1+v2" || wsMode === "v1v2";
 
-  // Open V1 WebSocket connections for faster score-only updates (1-2s latency)
-  initV1SportWebSockets();
+  if (enableV2) initSportWebSockets();
+  if (enableV1) initV1SportWebSockets();
 
   // WebSocket endpoint for mobile clients (/api/matches/ws)
   initLiveWsServer(server);
