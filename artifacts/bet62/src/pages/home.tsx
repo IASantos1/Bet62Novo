@@ -1954,10 +1954,9 @@ export default function Home() {
   type V2StatsGroup = { title: string; rows: Array<{ name: string; home: string; away: string }> };
   type V2Incident = { key: string; time: string; team: "home" | "away" | "neutral"; title: string; detail: string };
   const [v2StatsGroups, setV2StatsGroups] = useState<V2StatsGroup[] | null>(null);
-  const [v2StatsRaw, setV2StatsRaw] = useState<unknown | null>(null);
   const [v2StatsLoading, setV2StatsLoading] = useState(false);
+  const [showAllV2Stats, setShowAllV2Stats] = useState(false);
   const [v2Incidents, setV2Incidents] = useState<V2Incident[] | null>(null);
-  const [v2IncidentsRaw, setV2IncidentsRaw] = useState<unknown | null>(null);
   const [v2IncidentsLoading, setV2IncidentsLoading] = useState(false);
   const [standings, setStandings] = useState<StandingRow[] | null>(null);
   const [standingsGroups, setStandingsGroups] = useState<Array<{ name: string; rows: StandingRow[] }> | null>(null);
@@ -2079,6 +2078,50 @@ export default function Home() {
       .filter(e => e.title || e.detail);
   };
 
+  const extractLiveKeyStats = (groups: V2StatsGroup[]): Array<{ key: string; label: string; home: string; away: string }> => {
+    const normalize = (s: string) =>
+      s
+        .toLowerCase()
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .replace(/[^a-z0-9]+/g, " ")
+        .trim();
+
+    const flat = groups.flatMap(g => g.rows.map(r => ({ name: r.name, home: r.home, away: r.away })));
+
+    const pick = (label: string, patterns: string[]): { label: string; home: string; away: string } | null => {
+      const hit = flat.find(r => {
+        const n = normalize(r.name);
+        return patterns.some(p => n.includes(p));
+      });
+      if (!hit) return null;
+      if (!hit.home && !hit.away) return null;
+      return { label, home: hit.home || "-", away: hit.away || "-" };
+    };
+
+    const wanted: Array<{ key: string; label: string; patterns: string[] }> = [
+      { key: "possession", label: "Posse de bola", patterns: ["possession", "posse de bola", "ball possession"] },
+      { key: "shots", label: "Remates", patterns: ["shots", "remates", "chutes"] },
+      { key: "shotsOn", label: "Remates à baliza", patterns: ["shots on target", "remates a baliza", "chutes no alvo", "on target"] },
+      { key: "shotsOff", label: "Remates fora", patterns: ["shots off target", "remates fora", "chutes para fora", "off target"] },
+      { key: "corners", label: "Cantos", patterns: ["corners", "cantos", "escanteios"] },
+      { key: "fouls", label: "Faltas", patterns: ["fouls", "faltas"] },
+      { key: "yellow", label: "Cartões amarelos", patterns: ["yellow cards", "cartoes amarelos", "yellow"] },
+      { key: "red", label: "Cartões vermelhos", patterns: ["red cards", "cartoes vermelhos", "red"] },
+      { key: "offsides", label: "Fora de jogo", patterns: ["offsides", "fora de jogo", "offside"] },
+      { key: "passes", label: "Passes", patterns: ["passes"] },
+      { key: "passAcc", label: "Precisão de passe", patterns: ["pass accuracy", "precisao de passe"] },
+      { key: "xg", label: "xG", patterns: ["expected goals", "xg"] },
+    ];
+
+    return wanted
+      .map(w => {
+        const row = pick(w.label, w.patterns.map(normalize));
+        return row ? { key: w.key, ...row } : null;
+      })
+      .filter(Boolean) as Array<{ key: string; label: string; home: string; away: string }>;
+  };
+
   // Minute ticker — ticks every 10s so displayed clock updates visibly between API calls
   useEffect(() => {
     const interval = setInterval(() => setMinuteTick(t => t + 1), 10000);
@@ -2128,10 +2171,9 @@ export default function Home() {
     setMatchViewTab("markets");
     setMatchStats(null);
     setV2StatsGroups(null);
-    setV2StatsRaw(null);
     setV2StatsLoading(false);
+    setShowAllV2Stats(false);
     setV2Incidents(null);
-    setV2IncidentsRaw(null);
     setV2IncidentsLoading(false);
     setStandings(null);
     setStandingsLeague("");
@@ -2174,7 +2216,8 @@ export default function Home() {
   }, [matchViewTab, expandedMatch?.id]);
 
   useEffect(() => {
-    if (matchViewTab !== "stats" || !expandedMatch) return;
+    const wantsStatsData = matchViewTab === "stats" || (matchViewTab === "live" && !!expandedMatch?.isLive);
+    if (!wantsStatsData || !expandedMatch) return;
     if (v2StatsGroups !== null || v2StatsLoading) return;
     const rawId = String(expandedMatch.id).replace(/^[a-z]+-v2-/, "");
     const sport = expandedMatch.sport ?? "football";
@@ -2183,18 +2226,17 @@ export default function Home() {
     fetch(`/api/matches/v2-statistics?sport=${sport}&matchId=${rawId}`)
       .then(r => r.ok ? r.json() : null)
       .then(d => {
-        setV2StatsRaw(d);
         setV2StatsGroups(d ? extractV2StatsGroups(d as any) : []);
       })
       .catch(() => {
-        setV2StatsRaw(null);
         setV2StatsGroups([]);
       })
       .finally(() => setV2StatsLoading(false));
   }, [matchViewTab, expandedMatch?.id, v2StatsGroups, v2StatsLoading]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
-    if (matchViewTab !== "stats" || !expandedMatch) return;
+    const wantsIncidents = matchViewTab === "live" && !!expandedMatch?.isLive;
+    if (!wantsIncidents || !expandedMatch) return;
     if (v2Incidents !== null || v2IncidentsLoading) return;
     const rawId = String(expandedMatch.id).replace(/^[a-z]+-v2-/, "");
     const sport = expandedMatch.sport ?? "football";
@@ -2203,58 +2245,13 @@ export default function Home() {
     fetch(`/api/matches/v2-incidents?sport=${sport}&matchId=${rawId}`)
       .then(r => r.ok ? r.json() : null)
       .then(d => {
-        setV2IncidentsRaw(d);
         setV2Incidents(d ? extractV2Incidents(d as any) : []);
       })
       .catch(() => {
-        setV2IncidentsRaw(null);
         setV2Incidents([]);
       })
       .finally(() => setV2IncidentsLoading(false));
   }, [matchViewTab, expandedMatch?.id, v2Incidents, v2IncidentsLoading]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  useEffect(() => {
-    if (matchViewTab !== "stats" || !expandedMatch) return;
-    if (confrontosData !== null || confrontosLoading) return;
-    const rawId = String(expandedMatch.id).replace(/^[a-z]+-v2-/, "");
-    const sport = expandedMatch.sport ?? "football";
-    if (!rawId) return;
-    setConfrontosLoading(true);
-    const p = new URLSearchParams({ sport, matchId: rawId, home: expandedMatch.home, away: expandedMatch.away });
-    fetch(`/api/matches/confrontos?${p}`)
-      .then(r => r.ok ? r.json() : null)
-      .then(d => setConfrontosData(d as any))
-      .catch(() => setConfrontosData(null))
-      .finally(() => setConfrontosLoading(false));
-  }, [matchViewTab, expandedMatch?.id, confrontosData, confrontosLoading]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  useEffect(() => {
-    if (matchViewTab !== "stats" || !expandedMatch) return;
-    if (lineupsData !== null || lineupsLoading) return;
-    const rawId = String(expandedMatch.id).replace(/^[a-z]+-v2-/, "");
-    const sport = expandedMatch.sport ?? "football";
-    if (!rawId) return;
-    setLineupsLoading(true);
-    fetch(`/api/matches/v2-lineups?sport=${sport}&matchId=${rawId}`)
-      .then(r => r.ok ? r.json() : null)
-      .then(d => setLineupsData(d as any))
-      .catch(() => setLineupsData(null))
-      .finally(() => setLineupsLoading(false));
-  }, [matchViewTab, expandedMatch?.id, lineupsData, lineupsLoading]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  useEffect(() => {
-    if (matchViewTab !== "stats" || !expandedMatch) return;
-    if (allOddsData !== null || allOddsLoading) return;
-    const rawId = String(expandedMatch.id).replace(/^[a-z]+-v2-/, "");
-    const sport = expandedMatch.sport ?? "football";
-    if (!rawId) return;
-    setAllOddsLoading(true);
-    fetch(`/api/matches/v2-match-odds?sport=${sport}&matchId=${rawId}`)
-      .then(r => r.ok ? r.json() : { markets: [] })
-      .then(d => setAllOddsData((d as any)?.markets ?? []))
-      .catch(() => setAllOddsData([]))
-      .finally(() => setAllOddsLoading(false));
-  }, [matchViewTab, expandedMatch?.id, allOddsData, allOddsLoading]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Fetch standings when standings tab is active
   useEffect(() => {
@@ -6785,180 +6782,61 @@ export default function Home() {
                           </div>
                         )}
 
-                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-                          <div className="bg-zinc-950/60 rounded-lg border border-zinc-800 p-4">
-                            <div className="flex items-center justify-between mb-3">
-                              <div className="text-[10px] font-black text-red-500 uppercase tracking-widest">Estatísticas oficiais</div>
+                        <div className="bg-zinc-950/60 rounded-lg border border-zinc-800 p-4">
+                          <div className="flex items-center justify-between mb-3 gap-2">
+                            <div className="text-[10px] font-black text-red-500 uppercase tracking-widest">Estatísticas do Jogo</div>
+                            <div className="flex items-center gap-2 shrink-0">
                               {v2StatsLoading ? (
                                 <Loader2 className="animate-spin text-blue-400" size={14} />
                               ) : (
                                 <div className="text-[10px] text-zinc-600">{v2StatsGroups ? `${v2StatsGroups.length} grupos` : "—"}</div>
                               )}
-                            </div>
-                            {v2StatsLoading ? (
-                              <div className="flex items-center justify-center py-10">
-                                <Loader2 className="animate-spin text-blue-400" size={22} />
-                              </div>
-                            ) : v2StatsGroups && v2StatsGroups.length > 0 ? (
-                              <div className="space-y-3">
-                                {v2StatsGroups.slice(0, 4).map(g => (
-                                  <div key={g.title} className="border border-zinc-800 rounded-lg overflow-hidden">
-                                    <div className="bg-zinc-900/50 px-3 py-2 text-[10px] font-black text-zinc-300">{g.title}</div>
-                                    <div className="divide-y divide-zinc-800">
-                                      {g.rows.slice(0, 10).map(r => (
-                                        <div key={r.name} className="grid grid-cols-[1fr_auto_auto] gap-2 px-3 py-2 text-xs">
-                                          <span className="text-zinc-400 truncate">{r.name}</span>
-                                          <span className="text-blue-400 font-bold tabular-nums">{r.home || "-"}</span>
-                                          <span className="text-red-400 font-bold tabular-nums">{r.away || "-"}</span>
-                                        </div>
-                                      ))}
-                                    </div>
-                                  </div>
-                                ))}
-                                {v2StatsGroups.length > 4 && (
-                                  <div className="text-[10px] text-zinc-600">+{v2StatsGroups.length - 4} grupos</div>
-                                )}
-                              </div>
-                            ) : (
-                              <div className="text-center text-zinc-500 text-sm py-8">Estatísticas oficiais indisponíveis</div>
-                            )}
-                          </div>
-
-                          <div className="bg-zinc-950/60 rounded-lg border border-zinc-800 p-4">
-                            <div className="flex items-center justify-between mb-3">
-                              <div className="text-[10px] font-black text-red-500 uppercase tracking-widest">Eventos (incidents)</div>
-                              {v2IncidentsLoading ? (
-                                <Loader2 className="animate-spin text-blue-400" size={14} />
-                              ) : (
-                                <div className="text-[10px] text-zinc-600">{v2Incidents ? `${v2Incidents.length} itens` : "—"}</div>
+                              {v2StatsGroups && v2StatsGroups.length > 3 && (
+                                <button
+                                  onClick={() => setShowAllV2Stats(v => !v)}
+                                  className="text-[10px] font-bold text-blue-400 hover:text-blue-300"
+                                >
+                                  {showAllV2Stats ? "Ver menos" : "Ver mais"}
+                                </button>
                               )}
                             </div>
-                            {v2IncidentsLoading ? (
-                              <div className="flex items-center justify-center py-10">
-                                <Loader2 className="animate-spin text-blue-400" size={22} />
-                              </div>
-                            ) : v2Incidents && v2Incidents.length > 0 ? (
-                              <div className="space-y-2 max-h-[360px] overflow-y-auto pr-1">
-                                {v2Incidents.slice(0, 30).map(ev => (
-                                  <div key={ev.key} className="flex items-start gap-2.5 border border-zinc-800/70 bg-zinc-900/30 rounded-lg px-3 py-2">
-                                    <div className={`text-[10px] font-black tabular-nums w-10 shrink-0 ${ev.team === "home" ? "text-blue-400" : ev.team === "away" ? "text-red-400" : "text-zinc-500"}`}>{ev.time || "—"}</div>
-                                    <div className="min-w-0">
-                                      <div className="text-xs font-bold text-white truncate">{ev.title}</div>
-                                      {ev.detail && <div className="text-[11px] text-zinc-500 truncate">{ev.detail}</div>}
-                                    </div>
-                                  </div>
-                                ))}
-                              </div>
-                            ) : (
-                              <div className="text-center text-zinc-500 text-sm py-8">Sem eventos disponíveis</div>
-                            )}
                           </div>
-                        </div>
-
-                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-                          <div className="bg-zinc-950/60 rounded-lg border border-zinc-800 p-4">
-                            <div className="flex items-center justify-between mb-3">
-                              <div className="text-[10px] font-black text-red-500 uppercase tracking-widest">Escalações</div>
-                              <button
-                                onClick={() => setMatchViewTab("lineups")}
-                                className="text-[10px] font-bold text-blue-400 hover:text-blue-300"
-                              >
-                                Ver completo
-                              </button>
+                          {v2StatsLoading ? (
+                            <div className="flex items-center justify-center py-10">
+                              <Loader2 className="animate-spin text-blue-400" size={22} />
                             </div>
-                            {lineupsLoading ? (
-                              <div className="flex items-center justify-center py-10">
-                                <Loader2 className="animate-spin text-blue-400" size={22} />
-                              </div>
-                            ) : lineupsData ? (
-                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                                <div className="border border-zinc-800 rounded-lg p-3 bg-zinc-900/30">
-                                  <div className="flex items-center justify-between mb-2">
-                                    <div className="text-[10px] font-black text-blue-400 uppercase tracking-widest truncate">{expandedMatch.home}</div>
-                                    <div className="text-[10px] text-zinc-500">{lineupsData.home.formation ?? ""}</div>
-                                  </div>
-                                  <div className="space-y-1">
-                                    {lineupsData.home.starters.slice(0, 11).map(p => (
-                                      <div key={`${p.name}-${p.number}`} className="flex items-center justify-between text-xs">
-                                        <span className="text-zinc-300 truncate">{p.name}</span>
-                                        <span className="text-zinc-500 tabular-nums ml-2 shrink-0">{p.number}</span>
+                          ) : v2StatsGroups && v2StatsGroups.length > 0 ? (
+                            <div className="space-y-3">
+                              {(showAllV2Stats ? v2StatsGroups : v2StatsGroups.slice(0, 3)).map(g => (
+                                <div key={g.title} className="border border-zinc-800 rounded-lg overflow-hidden">
+                                  <div className="bg-zinc-900/50 px-3 py-2 text-[10px] font-black text-zinc-300">{g.title}</div>
+                                  <div className="divide-y divide-zinc-800">
+                                    {g.rows.map(r => (
+                                      <div key={r.name} className="grid grid-cols-[1fr_auto_auto] gap-2 px-3 py-2 text-xs">
+                                        <span className="text-zinc-400 truncate">{r.name}</span>
+                                        <span className="text-blue-400 font-bold tabular-nums">{r.home || "-"}</span>
+                                        <span className="text-red-400 font-bold tabular-nums">{r.away || "-"}</span>
                                       </div>
                                     ))}
                                   </div>
                                 </div>
-                                <div className="border border-zinc-800 rounded-lg p-3 bg-zinc-900/30">
-                                  <div className="flex items-center justify-between mb-2">
-                                    <div className="text-[10px] font-black text-red-400 uppercase tracking-widest truncate">{expandedMatch.away}</div>
-                                    <div className="text-[10px] text-zinc-500">{lineupsData.away.formation ?? ""}</div>
-                                  </div>
-                                  <div className="space-y-1">
-                                    {lineupsData.away.starters.slice(0, 11).map(p => (
-                                      <div key={`${p.name}-${p.number}`} className="flex items-center justify-between text-xs">
-                                        <span className="text-zinc-300 truncate">{p.name}</span>
-                                        <span className="text-zinc-500 tabular-nums ml-2 shrink-0">{p.number}</span>
-                                      </div>
-                                    ))}
-                                  </div>
-                                </div>
-                              </div>
-                            ) : (
-                              <div className="text-center text-zinc-500 text-sm py-8">Escalação indisponível</div>
-                            )}
-                          </div>
-
-                          <div className="bg-zinc-950/60 rounded-lg border border-zinc-800 p-4">
-                            <div className="flex items-center justify-between mb-3">
-                              <div className="text-[10px] font-black text-red-500 uppercase tracking-widest">Mercados</div>
+                              ))}
+                            </div>
+                          ) : (
+                            <div className="text-center text-zinc-500 text-sm py-8">Estatísticas indisponíveis</div>
+                          )}
+                          {expandedMatch.isLive && (
+                            <div className="mt-3 pt-3 border-t border-zinc-800 flex items-center justify-between">
+                              <div className="text-[10px] text-zinc-600">Para estatísticas ao vivo (posse, remates, etc.)</div>
                               <button
-                                onClick={() => setMatchViewTab("odds")}
-                                className="text-[10px] font-bold text-blue-400 hover:text-blue-300"
+                                onClick={() => setMatchViewTab("live")}
+                                className="text-[10px] font-bold text-red-400 hover:text-red-300"
                               >
-                                Ver todos
+                                Abrir Ao Vivo
                               </button>
                             </div>
-                            {allOddsLoading ? (
-                              <div className="flex items-center justify-center py-10">
-                                <Loader2 className="animate-spin text-blue-400" size={22} />
-                              </div>
-                            ) : allOddsData && allOddsData.length > 0 ? (
-                              <div className="space-y-2">
-                                {allOddsData.slice(0, 6).map(m => (
-                                  <div key={`${m.group}-${m.name}`} className="border border-zinc-800 rounded-lg p-3 bg-zinc-900/30">
-                                    <div className="flex items-center justify-between gap-2 mb-2">
-                                      <div className="text-xs font-bold text-white truncate">{m.name}</div>
-                                      <div className="text-[10px] text-zinc-500 truncate">{m.group}</div>
-                                    </div>
-                                    <div className="flex flex-wrap gap-1.5">
-                                      {m.choices.slice(0, 6).map(c => (
-                                        <span key={`${c.name}-${c.odds}`} className="text-[10px] font-bold border border-zinc-800 bg-zinc-950/50 rounded px-2 py-1 text-zinc-300">
-                                          {c.label} {c.odds.toFixed(2)}
-                                        </span>
-                                      ))}
-                                    </div>
-                                  </div>
-                                ))}
-                              </div>
-                            ) : (
-                              <div className="text-center text-zinc-500 text-sm py-8">Mercados indisponíveis</div>
-                            )}
-                          </div>
+                          )}
                         </div>
-
-                        {(v2StatsRaw || v2IncidentsRaw) && (
-                          <div className="bg-zinc-950/60 rounded-lg border border-zinc-800 p-4">
-                            <div className="text-[10px] font-black text-red-500 uppercase tracking-widest mb-3">Dados completos (JSON)</div>
-                            <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-                              <div className="border border-zinc-800 rounded-lg bg-zinc-900/30 overflow-hidden">
-                                <div className="px-3 py-2 border-b border-zinc-800 text-[10px] font-black text-zinc-400 uppercase tracking-widest">Statistics</div>
-                                <pre className="p-3 text-[10px] text-zinc-400 overflow-auto max-h-[280px]">{JSON.stringify(v2StatsRaw ?? {}, null, 2)}</pre>
-                              </div>
-                              <div className="border border-zinc-800 rounded-lg bg-zinc-900/30 overflow-hidden">
-                                <div className="px-3 py-2 border-b border-zinc-800 text-[10px] font-black text-zinc-400 uppercase tracking-widest">Incidents</div>
-                                <pre className="p-3 text-[10px] text-zinc-400 overflow-auto max-h-[280px]">{JSON.stringify(v2IncidentsRaw ?? {}, null, 2)}</pre>
-                              </div>
-                            </div>
-                          </div>
-                        )}
                       </div>
                     )}
                   </div>
@@ -8017,6 +7895,54 @@ export default function Home() {
                 {matchViewTab === "live" && expandedMatch.isLive && (
                   <div className="bg-zinc-900 rounded-xl border border-zinc-800 p-4 mb-2 animate-in fade-in duration-200">
                     <MomentumChart match={expandedMatch} />
+                    {v2StatsGroups && v2StatsGroups.length > 0 && (() => {
+                      const rows = extractLiveKeyStats(v2StatsGroups);
+                      if (rows.length === 0) return null;
+                      return (
+                        <div className="mt-4 pt-4 border-t border-zinc-700/60">
+                          <div className="flex items-center justify-between mb-3">
+                            <div className="text-[10px] font-black text-red-500 uppercase tracking-widest">Estatísticas ao Vivo</div>
+                            {v2StatsLoading && <Loader2 className="animate-spin text-blue-400" size={14} />}
+                          </div>
+                          <div className="rounded-lg border border-zinc-800 overflow-hidden">
+                            <div className="grid grid-cols-[1fr_4rem_4rem] px-3 py-2 bg-zinc-800/40 text-[9px] font-black text-zinc-500 uppercase tracking-widest">
+                              <div />
+                              <div className="text-center truncate">{expandedMatch.home.split(" ").slice(-1)[0]}</div>
+                              <div className="text-center truncate">{expandedMatch.away.split(" ").slice(-1)[0]}</div>
+                            </div>
+                            <div className="divide-y divide-zinc-800">
+                              {rows.map(r => (
+                                <div key={r.key} className="grid grid-cols-[1fr_4rem_4rem] gap-2 px-3 py-2 text-xs">
+                                  <div className="text-zinc-400 truncate">{r.label}</div>
+                                  <div className="text-center text-blue-400 font-black tabular-nums">{r.home}</div>
+                                  <div className="text-center text-red-400 font-black tabular-nums">{r.away}</div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })()}
+
+                    {v2Incidents && v2Incidents.length > 0 && (
+                      <div className="mt-4 pt-4 border-t border-zinc-700/60">
+                        <div className="flex items-center justify-between mb-3">
+                          <div className="text-[10px] font-black text-red-500 uppercase tracking-widest">Eventos</div>
+                          {v2IncidentsLoading && <Loader2 className="animate-spin text-blue-400" size={14} />}
+                        </div>
+                        <div className="space-y-2 max-h-[320px] overflow-y-auto pr-1">
+                          {v2Incidents.slice(0, 40).map(ev => (
+                            <div key={ev.key} className="flex items-start gap-2.5 border border-zinc-800/70 bg-zinc-900/30 rounded-lg px-3 py-2">
+                              <div className={`text-[10px] font-black tabular-nums w-10 shrink-0 ${ev.team === "home" ? "text-blue-400" : ev.team === "away" ? "text-red-400" : "text-zinc-500"}`}>{ev.time || "—"}</div>
+                              <div className="min-w-0">
+                                <div className="text-xs font-bold text-white truncate">{ev.title}</div>
+                                {ev.detail && <div className="text-[11px] text-zinc-500 truncate">{ev.detail}</div>}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                     {/* Tennis live match stats below chart */}
                     {expandedMatch.sport === "tennis" && expandedMatch._liveExtra?.tennisStats && (() => {
                       const st = expandedMatch._liveExtra.tennisStats;
