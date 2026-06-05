@@ -4395,6 +4395,34 @@ const wsConnected = new Set<SportKey>();
 const wsTimers = new Map<SportKey, ReturnType<typeof setTimeout>>();
 const wsRetryDelay = new Map<SportKey, number>();
 const wsLastMessageAt = new Map<SportKey, number>();
+const v1PatchedAt = new Map<string, number>();
+const V1_PATCH_PREFER_WINDOW_MS = 15_000;
+
+function v1PatchKey(sport: SportKey, id: number | string): string {
+  return `${sport}:${String(id)}`;
+}
+
+function isRecentlyV1Patched(sport: SportKey, id: number | string, now: number): boolean {
+  const t = v1PatchedAt.get(v1PatchKey(sport, id));
+  return t !== undefined && now - t < V1_PATCH_PREFER_WINDOW_MS;
+}
+
+function mergeIncomingPreferFastScore(sport: SportKey, incoming: SAPIV2Event[], existing: SAPIV2Event[] | null, now: number): SAPIV2Event[] {
+  if (!existing || existing.length === 0) return incoming;
+  const exById = new Map(existing.map((e) => [String(e.id), e] as const));
+  return incoming.map((ev) => {
+    const ex = exById.get(String(ev.id));
+    if (!ex) return ev;
+    const exH = v2CurrentScore(ex.homeScore);
+    const exA = v2CurrentScore(ex.awayScore);
+    const inH = v2CurrentScore(ev.homeScore);
+    const inA = v2CurrentScore(ev.awayScore);
+    const prefer = isRecentlyV1Patched(sport, ev.id, now);
+    const keepScore = prefer && (inH < exH || inA < exA);
+    if (!keepScore) return ev;
+    return { ...ev, homeScore: ex.homeScore, awayScore: ex.awayScore };
+  });
+}
 
 function applyV2WsMessage(sport: SportKey, raw: unknown): void {
   if (!raw || typeof raw !== "object") return;
@@ -4420,40 +4448,40 @@ function applyV2WsMessage(sport: SportKey, raw: unknown): void {
   const now = Date.now();
   switch (sport) {
     case "football":
-      footballLiveV2Cache   = incoming;
+      footballLiveV2Cache = mergeIncomingPreferFastScore(sport, incoming, footballLiveV2Cache, now);
       footballLiveV2FetchedAt = now;
       // Also update today cache (live events are a subset of today)
       if (footballTodayV2Cache !== null) {
-        footballTodayV2Cache   = incoming;
+        footballTodayV2Cache = footballLiveV2Cache;
         footballTodayV2FetchedAt = now;
       }
       break;
     case "basketball":
-      basketballLiveV2Cache   = incoming;
+      basketballLiveV2Cache = mergeIncomingPreferFastScore(sport, incoming, basketballLiveV2Cache, now);
       basketballLiveV2FetchedAt = now;
       if (basketballTodayV2Cache !== null) {
-        basketballTodayV2Cache   = incoming;
+        basketballTodayV2Cache = basketballLiveV2Cache;
         basketballTodayV2FetchedAt = now;
       }
       break;
     case "hockey":
-      hockeyLiveV2Cache   = incoming;
+      hockeyLiveV2Cache = mergeIncomingPreferFastScore(sport, incoming, hockeyLiveV2Cache, now);
       hockeyLiveV2FetchedAt = now;
       if (hockeyTodayV2Cache !== null) {
-        hockeyTodayV2Cache   = incoming;
+        hockeyTodayV2Cache = hockeyLiveV2Cache;
         hockeyTodayV2FetchedAt = now;
       }
       break;
     case "baseball":
-      baseballLiveV2Cache   = incoming;
+      baseballLiveV2Cache = mergeIncomingPreferFastScore(sport, incoming, baseballLiveV2Cache, now);
       baseballLiveV2FetchedAt = now;
       if (baseballTodayV2Cache !== null) {
-        baseballTodayV2Cache   = incoming;
+        baseballTodayV2Cache = baseballLiveV2Cache;
         baseballTodayV2FetchedAt = now;
       }
       break;
     case "tennis":
-      tennisLiveV2Cache   = incoming;
+      tennisLiveV2Cache = mergeIncomingPreferFastScore(sport, incoming, tennisLiveV2Cache, now);
       tennisLiveV2FetchedAt = now;
       // NOTE: do NOT sync tennisTodayV2Cache from the WS — the WS only
       // sends in-progress events, so syncing it would erase pre-match
@@ -4603,6 +4631,8 @@ function v1StatusStr(s: string | { description?: string } | undefined): string |
 /** Patch a single V1 score delta into the existing V2 cache for the sport. */
 function applyV1ScorePatch(sport: SportKey, ev: V1ScoreEvent): void {
   if (!ev.id) return;
+
+  v1PatchedAt.set(v1PatchKey(sport, ev.id), Date.now());
 
   let cache: SAPIV2Event[] | null = null;
   switch (sport) {
