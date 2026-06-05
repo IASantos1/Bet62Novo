@@ -1,6 +1,6 @@
 import { Router, type IRouter } from "express";
 import { WebSocketServer, type WebSocket as WsClient } from "ws";
-import { CONFIG, FOOTBALL_SUSP_KEYS_GOAL, FOOTBALL_SUSP_KEYS_VAR, footballSuspensionDelayMs } from "../lib/config";
+import { CONFIG, FOOTBALL_SUSP_KEYS, footballSuspensionDelayMs } from "../lib/config";
 import { logger } from "../lib/logger";
 import { db, matchResultsTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
@@ -4389,10 +4389,39 @@ const WS_DOMAINS: Record<SportKey, string> = {
   tennis:     "v2.tennis.sportsapipro.com",
 };
 
+const FOOTBALL_SUSP_KEYS = [
+  "result",
+  "doubleChance",
+  "totalGoals",
+  "handicap",
+  "halfTime",
+  "htft",
+  "correctScore",
+  "asianHandicap",
+  "asianTotals",
+  "drawNoBet",
+  "firstGoal",
+  "winToNil",
+  "cleanSheet",
+  "goalOddEven",
+  "exactGoals",
+  "btts1H",
+  "btts2H",
+  "toWinBothHalves",
+  "highestScoringHalf",
+  "htCorrectScore",
+  "h2CorrectScore",
+  "teamGoals",
+  "secondHalf",
+  "drawNoBet2",
+  "handicapPoints",
+] as const;
+
 // Track which sports currently have an open WS connection
 const wsConnected = new Set<SportKey>();
 // Track reconnect timers so we can avoid duplicate reconnects
 const wsTimers = new Map<SportKey, ReturnType<typeof setTimeout>>();
+const wsRetryDelay = new Map<SportKey, number>();
 const wsLastMessageAt = new Map<SportKey, number>();
 
 function applyV2WsMessage(sport: SportKey, raw: unknown): void {
@@ -4511,6 +4540,7 @@ function connectSportWS(sport: SportKey): void {
 
   ws.addEventListener("open", () => {
     wsConnected.add(sport);
+    wsRetryDelay.set(sport, 5_000);
     logger.info({ sport, version: "v2" }, "WS connected");
     ws.send(JSON.stringify({ action: "subscribe", channel: "live-scores" }));
   });
@@ -4531,7 +4561,6 @@ function connectSportWS(sport: SportKey): void {
   ws.addEventListener("close", () => {
     wsConnected.delete(sport);
     wsLastMessageAt.delete(sport);
-    logger.warn({ sport, version: "v2" }, "WS closed — reconnecting in 5s");
     scheduleReconnect(sport);
   });
 
@@ -4545,10 +4574,15 @@ function connectSportWS(sport: SportKey): void {
 
 function scheduleReconnect(sport: SportKey): void {
   if (wsTimers.has(sport)) return; // already scheduled
+  const prev = wsRetryDelay.get(sport) ?? 5_000;
+  const delay = Math.min(prev, 60_000);
+  const jitter = Math.floor(Math.random() * 2_000);
+  const next = delay + jitter;
+  wsRetryDelay.set(sport, Math.min(delay * 2, 60_000));
   const t = setTimeout(() => {
     wsTimers.delete(sport);
     connectSportWS(sport);
-  }, 5_000);
+  }, next);
   wsTimers.set(sport, t);
 }
 
@@ -5883,7 +5917,7 @@ async function buildLiveMatches(): Promise<LiveMatchState[]> {
         if (isGoal) {
           const now = Date.now();
           matchMarketSuspension = Object.fromEntries(
-            FOOTBALL_SUSP_KEYS_GOAL.map(k => [k, now + footballSuspensionDelayMs("goal", k)])
+            FOOTBALL_SUSP_KEYS.map((k) => [k, now + footballSuspensionDelayMs("goal", k)])
           ) as Record<string, number>;
           matchSuspensionReason = "GOLO!";
         }
@@ -6210,7 +6244,7 @@ async function buildLiveMatches(): Promise<LiveMatchState[]> {
         if (!matchMarketSuspension) {
           // No active suspension yet — set full timers
           matchMarketSuspension = Object.fromEntries(
-            FOOTBALL_SUSP_KEYS_VAR.map(k => [k, now + footballSuspensionDelayMs("var", k)])
+            FOOTBALL_SUSP_KEYS.map((k) => [k, now + footballSuspensionDelayMs("var", k)])
           ) as Record<string, number>;
           matchSuspensionReason = reason;
         } else if (isHighPriority) {
@@ -6674,7 +6708,7 @@ function buildFootballLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
         const filteredMarkets = withPen(filterLiveMarkets(existing.markets, homeScore, awayScore, newStatus));
         const filteredBase = withPen(filterLiveMarkets(existing._baseMarkets ?? existing.markets, homeScore, awayScore, newStatus));
         const susp = Object.fromEntries(
-          FOOTBALL_SUSP_KEYS_GOAL.map(k => [k, now + footballSuspensionDelayMs("goal", k)])
+          FOOTBALL_SUSP_KEYS.map((k) => [k, now + footballSuspensionDelayMs("goal", k)])
         ) as Record<string, number>;
         const updated: LiveMatchState = {
           ...existing,
@@ -6703,9 +6737,8 @@ function buildFootballLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
         // If VAR is active: ensure suspension is set and override reason label
         if (isVARStatus) {
           if (!susp || Object.keys(susp).length === 0) {
-            // No suspension yet — set VAR-duration timers (45s for most markets)
             susp = Object.fromEntries(
-              FOOTBALL_SUSP_KEYS_VAR.map(k => [k, now + footballSuspensionDelayMs("var", k)])
+              FOOTBALL_SUSP_KEYS.map((k) => [k, now + footballSuspensionDelayMs("var", k)])
             ) as Record<string, number>;
           }
           // Always override the reason label with VAR (covers "GOLO!" → "REVISÃO AO VAR")

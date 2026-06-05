@@ -101,14 +101,15 @@ export function useLiveMatches(): {
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectDelayRef = useRef(RECONNECT_DELAY_MS);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const fallbackTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const fallbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const fallbackSinceRef = useRef<number | null>(null);
   const throttleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pendingRef = useRef<{ matches: LiveMatch[] } | null>(null);
   const mountedRef = useRef(true);
 
   function clearTimers() {
     if (reconnectTimerRef.current) { clearTimeout(reconnectTimerRef.current); reconnectTimerRef.current = null; }
-    if (fallbackTimerRef.current) { clearInterval(fallbackTimerRef.current); fallbackTimerRef.current = null; }
+    if (fallbackTimerRef.current) { clearTimeout(fallbackTimerRef.current); fallbackTimerRef.current = null; }
   }
 
   function applyPending() {
@@ -132,7 +133,8 @@ export function useLiveMatches(): {
 
   function startFallbackPolling() {
     if (fallbackTimerRef.current) return;
-    fallbackTimerRef.current = setInterval(async () => {
+    if (fallbackSinceRef.current == null) fallbackSinceRef.current = Date.now();
+    const run = async () => {
       if (!mountedRef.current) return;
       try {
         const res = await fetch(`${API_BASE}/matches/live`);
@@ -140,7 +142,15 @@ export function useLiveMatches(): {
         const data = (await res.json()) as { matches: LiveMatch[] };
         if (mountedRef.current && data.matches) scheduleUpdate(data);
       } catch { /* ignore */ }
-    }, HTTP_FALLBACK_INTERVAL_MS);
+      const since = fallbackSinceRef.current ?? Date.now();
+      const elapsed = Date.now() - since;
+      const nextDelay =
+        elapsed < 60_000 ? HTTP_FALLBACK_INTERVAL_MS :
+        elapsed < 300_000 ? 5_000 :
+        10_000;
+      fallbackTimerRef.current = setTimeout(run, nextDelay);
+    };
+    fallbackTimerRef.current = setTimeout(run, HTTP_FALLBACK_INTERVAL_MS);
   }
 
   function connect() {
@@ -160,7 +170,8 @@ export function useLiveMatches(): {
         setConnected(true);
         reconnectDelayRef.current = RECONNECT_DELAY_MS;
         // Stop fallback polling if WS came up
-        if (fallbackTimerRef.current) { clearInterval(fallbackTimerRef.current); fallbackTimerRef.current = null; }
+        if (fallbackTimerRef.current) { clearTimeout(fallbackTimerRef.current); fallbackTimerRef.current = null; }
+        fallbackSinceRef.current = null;
       };
 
       ws.onmessage = (event) => {

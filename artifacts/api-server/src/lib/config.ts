@@ -1,10 +1,12 @@
 export const CONFIG = {
   LIVE_UPDATE_INTERVAL: 1000,
   PREMATCH_UPDATE_INTERVAL: 300_000,
-  REOPEN_DELAY_GOAL: 25_000,
-  REOPEN_DELAY_VAR: 45_000,
+  REOPEN_DELAY_GOAL_LOW: 12_000,
+  REOPEN_DELAY_VAR_LOW: 20_000,
+  REOPEN_DELAY_GOAL_HIGH: 25_000,
+  REOPEN_DELAY_VAR_HIGH: 45_000,
   MAX_ODDS_DRIFT: 0.40,
-  CACHE_TTL: 86_400,
+  CACHE_TTL_MS: 86_400_000,
 
   LIVE_CACHE_TTL: 2_000,
   DAILY_CACHE_TTL: 300_000,
@@ -16,7 +18,7 @@ export const CRITICAL_EVENTS = ["goal", "var", "red_card", "penalty", "touchdown
 
 export type CriticalEvent = typeof CRITICAL_EVENTS[number];
 
-export const FOOTBALL_SUSP_KEYS_GOAL = [
+export const FOOTBALL_SUSP_KEYS = [
   "result",
   "doubleChance",
   "totalGoals",
@@ -44,49 +46,24 @@ export const FOOTBALL_SUSP_KEYS_GOAL = [
   "handicapPoints",
 ] as const;
 
-export const FOOTBALL_SUSP_KEYS_VAR = [
-  "result",
-  "doubleChance",
-  "totalGoals",
-  "handicap",
-  "halfTime",
-  "correctScore",
-  "asianHandicap",
-  "asianTotals",
-  "drawNoBet",
-  "firstGoal",
-  "htft",
-  "winToNil",
-  "cleanSheet",
-  "goalOddEven",
-  "exactGoals",
-  "btts1H",
-  "toWinBothHalves",
-  "highestScoringHalf",
-  "htCorrectScore",
-  "h2CorrectScore",
-  "teamGoals",
-  "secondHalf",
-  "drawNoBet2",
-  "handicapPoints",
-] as const;
-
-export type FootballSuspensionKey = typeof FOOTBALL_SUSP_KEYS_GOAL[number] | typeof FOOTBALL_SUSP_KEYS_VAR[number];
 export type FootballSuspensionEvent = "goal" | "var";
 
-const FOOTBALL_GOAL_MULT: Record<FootballSuspensionKey, number> = {
-  result: 1,
-  doubleChance: 1,
-  halfTime: 1,
-  drawNoBet: 1,
-  firstGoal: 1,
-  winToNil: 1,
-  cleanSheet: 1,
-  btts1H: 1,
-  btts2H: 1,
-  highestScoringHalf: 1,
-  secondHalf: 1,
-  drawNoBet2: 1,
+const FOOTBALL_LOW_RISK_KEYS = new Set([
+  "result",
+  "doubleChance",
+  "halfTime",
+  "drawNoBet",
+  "firstGoal",
+  "winToNil",
+  "cleanSheet",
+  "btts1H",
+  "btts2H",
+  "highestScoringHalf",
+  "secondHalf",
+  "drawNoBet2",
+] as const);
+
+const FOOTBALL_GOAL_HIGH_MULT: Record<string, number> = {
   totalGoals: 28 / 25,
   handicap: 28 / 25,
   goalOddEven: 28 / 25,
@@ -102,19 +79,7 @@ const FOOTBALL_GOAL_MULT: Record<FootballSuspensionKey, number> = {
   h2CorrectScore: 35 / 25,
 };
 
-const FOOTBALL_VAR_MULT: Record<FootballSuspensionKey, number> = {
-  result: 1,
-  doubleChance: 1,
-  halfTime: 1,
-  drawNoBet: 1,
-  firstGoal: 1,
-  winToNil: 1,
-  cleanSheet: 1,
-  btts1H: 1,
-  btts2H: 1,
-  highestScoringHalf: 1,
-  secondHalf: 1,
-  drawNoBet2: 1,
+const FOOTBALL_VAR_HIGH_MULT: Record<string, number> = {
   totalGoals: 50 / 45,
   handicap: 50 / 45,
   goalOddEven: 50 / 45,
@@ -130,9 +95,13 @@ const FOOTBALL_VAR_MULT: Record<FootballSuspensionKey, number> = {
   h2CorrectScore: 60 / 45,
 };
 
-export function footballSuspensionDelayMs(event: FootballSuspensionEvent, marketKey: FootballSuspensionKey): number {
-  const base = event === "goal" ? CONFIG.REOPEN_DELAY_GOAL : CONFIG.REOPEN_DELAY_VAR;
-  const mult = event === "goal" ? FOOTBALL_GOAL_MULT[marketKey] : FOOTBALL_VAR_MULT[marketKey];
+export function footballSuspensionDelayMs(event: FootballSuspensionEvent, marketKey: string): number {
+  const low = FOOTBALL_LOW_RISK_KEYS.has(marketKey as any);
+  const base =
+    event === "goal"
+      ? (low ? CONFIG.REOPEN_DELAY_GOAL_LOW : CONFIG.REOPEN_DELAY_GOAL_HIGH)
+      : (low ? CONFIG.REOPEN_DELAY_VAR_LOW : CONFIG.REOPEN_DELAY_VAR_HIGH);
+  const mult = event === "goal" ? (FOOTBALL_GOAL_HIGH_MULT[marketKey] ?? 1) : (FOOTBALL_VAR_HIGH_MULT[marketKey] ?? 1);
   const ms = Math.round(base * mult);
   return Number.isFinite(ms) && ms > 0 ? ms : base;
 }
