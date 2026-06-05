@@ -402,6 +402,24 @@ const TEAM_BANNERS: Record<string, string> = {
   "Go Ahead Eagles": goAheadEaglesBanner,
 };
 
+const TEAM_NAME_PT: Record<string, string> = {
+  Norway: "Noruega",
+  Uruguay: "Uruguai",
+  Senegal: "Senegal",
+  France: "França",
+  Iraq: "Iraque",
+  Noruega: "Noruega",
+  Uruguai: "Uruguai",
+  França: "França",
+  Iraque: "Iraque",
+};
+
+function teamNamePt(name: string): string {
+  const n = (name ?? "").trim();
+  if (!n) return n;
+  return TEAM_NAME_PT[n] ?? n;
+}
+
 const LEAGUE_FLAGS: Record<string, string> = {
   "La Liga": "🇪🇸", "Laliga": "🇪🇸", "Laliga2": "🇪🇸", "Segunda": "🇪🇸", "LaLiga Hypermotion": "🇪🇸", "Copa del Rey": "🇪🇸",
   "Premier League": "🏴󠁧󠁢󠁥󠁮󠁧󠁿", "EFL Championship": "🏴󠁧󠁢󠁥󠁮󠁧󠁿", "Championship": "🏴󠁧󠁢󠁥󠁮󠁧󠁿", "League One": "🏴󠁧󠁢󠁥󠁮󠁧󠁿", "FA Cup": "🏴󠁧󠁢󠁥󠁮󠁧󠁿",
@@ -3072,6 +3090,8 @@ export default function Home() {
     const flag   = COUNTRY_FLAGS[match.country?.toLowerCase() ?? ""] ?? sportEmoji(match.sport);
     const bannerImg = getMatchBanner(match);
     const matchKey  = String(match.id);
+    const homeName = teamNamePt(match.home);
+    const awayName = teamNamePt(match.away);
     const isNew     = !seenMatchIds.current.has(matchKey);
     if (isNew) seenMatchIds.current.add(matchKey);
 
@@ -3200,7 +3220,7 @@ export default function Home() {
           </div>
           {/* Home row */}
           <div className="flex items-center">
-            <div className="flex-1 font-bold text-white text-xs truncate">{match.home}</div>
+            <div className="flex-1 font-bold text-white text-xs truncate">{homeName}</div>
             {sets.map(([h], i) => (
               <div key={i} className={`${colW} text-center font-black ${h > (sets[i]?.[1] ?? 0) ? "text-white" : "text-zinc-500"}`}>{h}</div>
             ))}
@@ -3208,7 +3228,7 @@ export default function Home() {
           </div>
           {/* Away row */}
           <div className="flex items-center">
-            <div className="flex-1 font-bold text-white text-xs truncate">{match.away}</div>
+            <div className="flex-1 font-bold text-white text-xs truncate">{awayName}</div>
             {sets.map(([, a], i) => (
               <div key={i} className={`${colW} text-center font-black ${a > (sets[i]?.[0] ?? 0) ? "text-white" : "text-zinc-500"}`}>{a}</div>
             ))}
@@ -3234,14 +3254,14 @@ export default function Home() {
             {pts && <div className={`${colW} text-center text-yellow-500 text-[10px] font-bold`}>S{vSets.length + 1}</div>}
           </div>
           <div className="flex items-center">
-            <div className="flex-1 font-bold text-white text-xs truncate">{match.home}</div>
+            <div className="flex-1 font-bold text-white text-xs truncate">{homeName}</div>
             {vSets.map(([h, a], i) => (
               <div key={i} className={`${colW} text-center font-black ${h > a ? "text-white" : "text-zinc-500"}`}>{h}</div>
             ))}
             {pts && <div className={`${colW} text-center font-black text-yellow-400`}>{pts[0]}</div>}
           </div>
           <div className="flex items-center">
-            <div className="flex-1 font-bold text-white text-xs truncate">{match.away}</div>
+            <div className="flex-1 font-bold text-white text-xs truncate">{awayName}</div>
             {vSets.map(([h, a], i) => (
               <div key={i} className={`${colW} text-center font-black ${a > h ? "text-white" : "text-zinc-500"}`}>{a}</div>
             ))}
@@ -3355,11 +3375,11 @@ export default function Home() {
 
     const SimpleScore = ({ big }: { big?: boolean }) => isEmBreve ? (
       <div className="flex items-center gap-2 w-full">
-        <span className={`font-bold ${big ? "text-base" : "text-sm"} truncate flex-1 text-right`} style={bannerImg ? { color: '#ffffff' } : undefined}>{match.home}</span>
+        <span className={`font-bold ${big ? "text-base" : "text-sm"} truncate flex-1 text-right`} style={bannerImg ? { color: '#ffffff' } : undefined}>{homeName}</span>
         <div className={`${big ? "text-3xl" : "text-xl"} font-black tabular-nums shrink-0 ${big ? "px-2" : "px-1"} text-center`} style={{ color: 'rgb(63 63 70)' }}>
           –<span style={{ color: 'rgb(39 39 42)' }} className={big ? "mx-1" : "mx-0.5"}>:</span>–
         </div>
-        <span className={`font-bold ${big ? "text-base" : "text-sm"} truncate flex-1`} style={bannerImg ? { color: '#ffffff' } : undefined}>{match.away}</span>
+        <span className={`font-bold ${big ? "text-base" : "text-sm"} truncate flex-1`} style={bannerImg ? { color: '#ffffff' } : undefined}>{awayName}</span>
       </div>
     ) : (
       <div className="flex items-center gap-2 w-full">
@@ -3368,7 +3388,7 @@ export default function Home() {
           <span
             className={`font-bold text-white ${big ? "text-base" : "text-sm"} truncate`}
             style={big ? { textShadow: "0 1px 8px rgba(0,0,0,1), 0 2px 16px rgba(0,0,0,0.8)" } : undefined}
-          >{match.home}</span>
+          >{homeName}</span>
           <RcBadge count={rcH} />
         </div>
         <div
@@ -3383,7 +3403,7 @@ export default function Home() {
           <span
             className={`font-bold text-white ${big ? "text-base" : "text-sm"} truncate`}
             style={big ? { textShadow: "0 1px 8px rgba(0,0,0,1), 0 2px 16px rgba(0,0,0,0.8)" } : undefined}
-          >{match.away}</span>
+          >{awayName}</span>
         </div>
       </div>
     );
@@ -3421,8 +3441,8 @@ export default function Home() {
         <div className="flex gap-2 w-full mt-1.5">
           <SuspensionBanner match={match} />
           {!isLiveSuspended && isPenShootout ? (<>
-            <OddsButton match={match} selection="pen-home" odd={match.markets!.penExtra!.winner.home} market="penaltis" label={match.home.split(" ").slice(-1)[0]!} grow />
-            <OddsButton match={match} selection="pen-away" odd={match.markets!.penExtra!.winner.away} market="penaltis" label={match.away.split(" ").slice(-1)[0]!} grow />
+            <OddsButton match={match} selection="pen-home" odd={match.markets!.penExtra!.winner.home} market="penaltis" label={homeName.split(" ").slice(-1)[0]!} grow />
+            <OddsButton match={match} selection="pen-away" odd={match.markets!.penExtra!.winner.away} market="penaltis" label={awayName.split(" ").slice(-1)[0]!} grow />
           </>) : !isLiveSuspended ? (
             isObviousLiveResult ? (
               <button
@@ -3527,6 +3547,8 @@ export default function Home() {
     const bannerImg = getMatchBanner(match);
     const rivalry = RIVALRY_TAGS[`${match.home}|${match.away}`];
     const hasDraw = match.odds.draw > 0;
+    const homeName = teamNamePt(match.home);
+    const awayName = teamNamePt(match.away);
 
     const isSuspendedMatch = match.isLive && (
       (!!match.marketSuspension && Object.values(match.marketSuspension).some(ts => ts > Date.now()))
@@ -3536,9 +3558,9 @@ export default function Home() {
       <div className="flex gap-2 w-full">
         <SuspensionBanner match={match} />
         {!isSuspendedMatch && (<>
-          <OddsButton match={match} selection="home" odd={match.odds.home} market="result" label={hasDraw ? "Casa" : match.home.split(" ").slice(-1)[0]} grow />
+          <OddsButton match={match} selection="home" odd={match.odds.home} market="result" label={hasDraw ? "Casa" : homeName.split(" ").slice(-1)[0]} grow />
           {hasDraw && <OddsButton match={match} selection="draw" odd={match.odds.draw} market="result" label="Emp." grow />}
-          <OddsButton match={match} selection="away" odd={match.odds.away} market="result" label={hasDraw ? "Fora" : match.away.split(" ").slice(-1)[0]} grow />
+          <OddsButton match={match} selection="away" odd={match.odds.away} market="result" label={hasDraw ? "Fora" : awayName.split(" ").slice(-1)[0]} grow />
         </>)}
       </div>
     ) : null;
@@ -3568,9 +3590,9 @@ export default function Home() {
           {/* Content below image */}
           <div className="px-3 pt-2.5 pb-3" style={{ background: "#0f0f0f" }} onClick={e => e.stopPropagation()}>
             <div className="flex items-baseline gap-1.5 mb-2.5 min-w-0">
-              <span className="font-bold text-sm leading-tight truncate text-white">{match.home}</span>
+              <span className="font-bold text-sm leading-tight truncate text-white">{homeName}</span>
               <span className="text-xs shrink-0 text-zinc-500">vs</span>
-              <span className="font-bold text-sm leading-tight truncate text-white">{match.away}</span>
+              <span className="font-bold text-sm leading-tight truncate text-white">{awayName}</span>
             </div>
             <OddsRow />
           </div>
@@ -3586,9 +3608,9 @@ export default function Home() {
         <CompactLeagueRow match={match} />
         <div className="px-3 pb-3 pt-1" onClick={e => e.stopPropagation()}>
           <div className="flex items-baseline gap-1.5 mb-2 min-w-0">
-            <span className="font-bold text-sm truncate">{match.home}</span>
+            <span className="font-bold text-sm truncate">{homeName}</span>
             <span className="text-xs text-zinc-500 shrink-0">vs</span>
-            <span className="font-bold text-sm truncate">{match.away}</span>
+            <span className="font-bold text-sm truncate">{awayName}</span>
           </div>
           <OddsRow />
         </div>
