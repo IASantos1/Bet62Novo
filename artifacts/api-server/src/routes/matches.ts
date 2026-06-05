@@ -5073,7 +5073,7 @@ let _tennisLiveV1InFlight: Promise<V1TennisGame[]> | null = null;
 async function fetchTennisLiveV1(): Promise<V1TennisGame[]> {
   try {
     const resp = await fetch(`${SAPI_V1_TENNIS}/v1/tennis/live`, {
-      signal: AbortSignal.timeout(8000),
+      signal: AbortSignal.timeout(4000),
       headers: sapiHeaders(),
     });
     if (!resp.ok) return [];
@@ -5093,7 +5093,7 @@ async function getTennisLiveV1(): Promise<V1TennisGame[]> {
         .then(games => { _tennisLiveV1Cache = { games, fetchedAt: Date.now() }; return games; })
         .finally(() => { _tennisLiveV1InFlight = null; });
     }
-    return _tennisLiveV1Cache.games;
+    return (await Promise.race([_tennisLiveV1InFlight, waitMs(1500).then(() => null)])) ?? _tennisLiveV1Cache.games;
   }
   if (!_tennisLiveV1InFlight) {
     _tennisLiveV1InFlight = fetchTennisLiveV1()
