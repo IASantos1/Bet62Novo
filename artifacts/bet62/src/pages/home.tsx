@@ -3,7 +3,7 @@ import { useIdle } from "@/hooks/use-idle";
 import { motion, AnimatePresence } from "framer-motion";
 import { toast } from "sonner";
 import {
-  Menu, X, Trophy, Activity, Gift,
+  Menu, X, Trophy, Activity, Gift, Flag,
   LogOut, User, History, Loader2, Zap, TrendingUp,
   ChevronRight, ChevronLeft, ChevronDown, ChevronUp, AlertCircle, BarChart2, Wallet, ArrowDownCircle, ArrowUpCircle, Plus, Clock, Smartphone,
   Copy, Share2, CircleDollarSign, Lock, Trash2, Check, Fingerprint, ScanFace, ShieldCheck,
@@ -1952,12 +1952,24 @@ export default function Home() {
   const [matchStats, setMatchStats] = useState<MatchStatsData | null>(null);
   const [matchStatsLoading, setMatchStatsLoading] = useState(false);
   type V2StatsGroup = { title: string; rows: Array<{ name: string; home: string; away: string }> };
-  type V2Incident = { key: string; time: string; team: "home" | "away" | "neutral"; title: string; detail: string };
+  type V2IncidentKind = "goal" | "corner" | "card" | "sub" | "other";
+  type V2Incident = {
+    key: string;
+    time: string;
+    minute: number | null;
+    team: "home" | "away" | "neutral";
+    kind: V2IncidentKind;
+    card: "yellow" | "red" | null;
+    score?: string;
+    title: string;
+    detail: string;
+  };
   const [v2StatsGroups, setV2StatsGroups] = useState<V2StatsGroup[] | null>(null);
   const [v2StatsLoading, setV2StatsLoading] = useState(false);
   const [showAllV2Stats, setShowAllV2Stats] = useState(false);
   const [v2Incidents, setV2Incidents] = useState<V2Incident[] | null>(null);
   const [v2IncidentsLoading, setV2IncidentsLoading] = useState(false);
+  const [liveAdvancedTab, setLiveAdvancedTab] = useState<"all" | "goals" | "corners" | "cards">("all");
   const [standings, setStandings] = useState<StandingRow[] | null>(null);
   const [standingsGroups, setStandingsGroups] = useState<Array<{ name: string; rows: StandingRow[] }> | null>(null);
   const [standingsLoading, setStandingsLoading] = useState(false);
@@ -2057,10 +2069,29 @@ export default function Home() {
       return String(v);
     };
 
+    const normalize = (s: string) =>
+      s
+        .toLowerCase()
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .replace(/[^a-z0-9]+/g, " ")
+        .trim();
+
+    const parseMinute = (raw: string): number | null => {
+      const s = raw.trim();
+      if (!s) return null;
+      const parts = s.split("+").map(p => p.trim()).filter(Boolean);
+      const base = Number.parseInt(parts[0] ?? "", 10);
+      if (!Number.isFinite(base)) return null;
+      const extra = parts.length > 1 ? Number.parseInt(parts[1] ?? "", 10) : 0;
+      return base + (Number.isFinite(extra) ? extra : 0);
+    };
+
     return arr
       .map((e: any, idx: number) => {
         const minute = e?.time ?? e?.minute ?? e?.matchTime ?? e?.timeMinute ?? e?.addedTime ?? "";
-        const time = minute !== "" ? `${toText(minute)}'` : "";
+        const minuteRaw = toText(minute);
+        const time = minuteRaw !== "" ? `${minuteRaw}'` : "";
         const isHome = !!(e?.isHome ?? e?.home ?? e?.team === "home" ?? e?.side === "home");
         const isAway = !!(e?.isAway ?? e?.away ?? e?.team === "away" ?? e?.side === "away");
         const team: "home" | "away" | "neutral" = isHome ? "home" : isAway ? "away" : "neutral";
@@ -2073,7 +2104,47 @@ export default function Home() {
           e?.reason ??
           ""
         ).trim();
-        return { key: `${idx}-${title}-${detail}-${time}`, time, team, title, detail } satisfies V2Incident;
+        const sig = normalize(`${title} ${detail}`);
+        let kind: V2IncidentKind = "other";
+        if (sig.includes("goal") || sig.includes("golo") || sig.includes("gol")) kind = "goal";
+        else if (sig.includes("corner") || sig.includes("canto") || sig.includes("escanteio")) kind = "corner";
+        else if (sig.includes("card") || sig.includes("cartao") || sig.includes("cartao") || sig.includes("yellow") || sig.includes("red") || sig.includes("amarel") || sig.includes("vermelh")) kind = "card";
+        else if (sig.includes("substitution") || sig.includes("substituic")) kind = "sub";
+
+        const card: "yellow" | "red" | null =
+          kind === "card"
+            ? (sig.includes("red") || sig.includes("vermelh")) ? "red" : "yellow"
+            : null;
+
+        const hs =
+          e?.homeScore?.current ??
+          e?.homeScore ??
+          e?.score?.home ??
+          e?.home ??
+          e?.homeTeamScore ??
+          e?.homeGoals ??
+          null;
+        const as =
+          e?.awayScore?.current ??
+          e?.awayScore ??
+          e?.score?.away ??
+          e?.away ??
+          e?.awayTeamScore ??
+          e?.awayGoals ??
+          null;
+        const score = (typeof hs === "number" && typeof as === "number") ? `${hs}-${as}` : undefined;
+
+        return {
+          key: `${idx}-${title}-${detail}-${time}`,
+          time,
+          minute: parseMinute(minuteRaw),
+          team,
+          kind,
+          card,
+          score,
+          title,
+          detail
+        } satisfies V2Incident;
       })
       .filter(e => e.title || e.detail);
   };
@@ -2175,6 +2246,7 @@ export default function Home() {
     setShowAllV2Stats(false);
     setV2Incidents(null);
     setV2IncidentsLoading(false);
+    setLiveAdvancedTab("all");
     setStandings(null);
     setStandingsLeague("");
     setPlayerMarkets(null);
@@ -2263,10 +2335,12 @@ export default function Home() {
       fetch(`/api/matches/league-standings?league=${encodeURIComponent(league)}`)
         .then(r => r.ok ? r.json() : null)
         .then(d => { if (d && Array.isArray(d.teams)) { setStandingsLeague(d.league ?? league); setStandings(d.teams as StandingRow[]); setStandingsGroups(null); } });
-    const isV2Football = expandedMatch.sport === "football" && String(expandedMatch.id).startsWith("fb-v2-");
-    if (isV2Football) {
-      const rawId = String(expandedMatch.id).replace("fb-v2-", "");
-      fetch(`/api/matches/v2-standings?sport=football&matchId=${rawId}`)
+    const sport = expandedMatch.sport ?? "football";
+    const idStr = String(expandedMatch.id);
+    const rawId = idStr.replace(/^[a-z]+-v2-/, "");
+    const isV2 = rawId !== idStr && rawId.length > 0;
+    if (isV2 && sport !== "tennis") {
+      fetch(`/api/matches/v2-standings?sport=${sport}&matchId=${rawId}`)
         .then(r => r.ok ? r.json() : null)
         .then(d => {
           if (d && Array.isArray(d.standings) && d.standings.length > 0) {
@@ -7924,23 +7998,140 @@ export default function Home() {
                       );
                     })()}
 
-                    {v2Incidents && v2Incidents.length > 0 && (
+                    {expandedMatch.sport === "football" && (
                       <div className="mt-4 pt-4 border-t border-zinc-700/60">
                         <div className="flex items-center justify-between mb-3">
-                          <div className="text-[10px] font-black text-red-500 uppercase tracking-widest">Eventos</div>
+                          <div className="text-[10px] font-black text-red-500 uppercase tracking-widest">Estatística Avançada</div>
                           {v2IncidentsLoading && <Loader2 className="animate-spin text-blue-400" size={14} />}
                         </div>
-                        <div className="space-y-2 max-h-[320px] overflow-y-auto pr-1">
-                          {v2Incidents.slice(0, 40).map(ev => (
-                            <div key={ev.key} className="flex items-start gap-2.5 border border-zinc-800/70 bg-zinc-900/30 rounded-lg px-3 py-2">
-                              <div className={`text-[10px] font-black tabular-nums w-10 shrink-0 ${ev.team === "home" ? "text-blue-400" : ev.team === "away" ? "text-red-400" : "text-zinc-500"}`}>{ev.time || "—"}</div>
-                              <div className="min-w-0">
-                                <div className="text-xs font-bold text-white truncate">{ev.title}</div>
-                                {ev.detail && <div className="text-[11px] text-zinc-500 truncate">{ev.detail}</div>}
-                              </div>
-                            </div>
+
+                        <div className="flex items-center gap-2 mb-3">
+                          {([
+                            { key: "all", label: "Tudo" },
+                            { key: "goals", label: "Golos" },
+                            { key: "corners", label: "Cantos" },
+                            { key: "cards", label: "Cartões" },
+                          ] as const).map(t => (
+                            <button
+                              key={t.key}
+                              onClick={() => setLiveAdvancedTab(t.key)}
+                              className={`px-3 py-1.5 rounded-full border text-[11px] font-black transition-colors ${
+                                liveAdvancedTab === t.key
+                                  ? "bg-white text-zinc-900 border-white"
+                                  : "bg-transparent text-zinc-200 border-zinc-600 hover:border-zinc-400"
+                              }`}
+                            >
+                              {t.label}
+                            </button>
                           ))}
                         </div>
+
+                        {(() => {
+                          const raw = (v2Incidents ?? [])
+                            .filter(ev => ev.team !== "neutral")
+                            .sort((a, b) => (a.minute ?? 9999) - (b.minute ?? 9999));
+
+                          const filtered = raw.filter(ev => {
+                            if (liveAdvancedTab === "all") return true;
+                            if (liveAdvancedTab === "goals") return ev.kind === "goal";
+                            if (liveAdvancedTab === "corners") return ev.kind === "corner";
+                            if (liveAdvancedTab === "cards") return ev.kind === "card";
+                            return true;
+                          });
+
+                          const counts = {
+                            home: { corner: 0, goal: 0, yellow: 0, red: 0 },
+                            away: { corner: 0, goal: 0, yellow: 0, red: 0 },
+                          };
+
+                          const withTitles = filtered.map(ev => {
+                            const side = ev.team === "away" ? "away" : "home";
+                            let title = ev.title || "Evento";
+                            if (ev.kind === "corner") {
+                              counts[side].corner += 1;
+                              title = `${counts[side].corner}º Pontapé de canto`;
+                            } else if (ev.kind === "goal") {
+                              counts[side].goal += 1;
+                              title = "Golo";
+                            } else if (ev.kind === "card") {
+                              if (ev.card === "red") {
+                                counts[side].red += 1;
+                                title = `${counts[side].red}º Cartão vermelho`;
+                              } else {
+                                counts[side].yellow += 1;
+                                title = `${counts[side].yellow}º Cartão amarelo`;
+                              }
+                            } else if (ev.kind === "sub") {
+                              title = "Substituição";
+                            }
+                            return { ...ev, displayTitle: title };
+                          });
+
+                          if (withTitles.length === 0) {
+                            return <div className="text-center text-zinc-500 text-sm py-6">Sem eventos disponíveis</div>;
+                          }
+
+                          const iconFor = (ev: typeof withTitles[number]) => {
+                            if (ev.kind === "goal") return <Zap size={14} className="text-emerald-400" />;
+                            if (ev.kind === "corner") return <Flag size={14} className="text-zinc-200" />;
+                            if (ev.kind === "card") return <Ticket size={14} className={ev.card === "red" ? "text-red-400" : "text-yellow-400"} />;
+                            if (ev.kind === "sub") return <RefreshCw size={14} className="text-zinc-300" />;
+                            return <AlertCircle size={14} className="text-zinc-400" />;
+                          };
+
+                          return (
+                            <div className="relative">
+                              <div className="absolute left-1/2 -translate-x-1/2 top-0 bottom-0 w-px bg-zinc-700/60" />
+                              <div className="max-h-[420px] overflow-y-auto pr-1 space-y-2">
+                                {withTitles.slice(0, 80).map(ev => (
+                                  <div key={ev.key} className="grid grid-cols-[1fr_auto_1fr] gap-3 items-start relative">
+                                    <div className={`min-w-0 ${ev.team === "home" ? "text-right" : "opacity-0 pointer-events-none"}`}>
+                                      <div className="inline-flex max-w-full items-start gap-2 border border-zinc-700/70 bg-zinc-900/40 rounded-xl px-3 py-2">
+                                        <div className="min-w-0">
+                                          <div className="text-sm font-bold text-white truncate">{ev.displayTitle}</div>
+                                          <div className="text-[11px] text-zinc-400 truncate">{ev.detail || expandedMatch.home}</div>
+                                        </div>
+                                        {ev.kind === "goal" && (ev.score || (expandedMatch.homeScore != null && expandedMatch.awayScore != null)) && (
+                                          <div className="shrink-0 px-2 py-0.5 rounded-full border border-emerald-500/60 text-emerald-300 text-[11px] font-black tabular-nums">
+                                            {ev.score ?? `${expandedMatch.homeScore}-${expandedMatch.awayScore}`}
+                                          </div>
+                                        )}
+                                      </div>
+                                    </div>
+
+                                    <div className="flex flex-col items-center gap-1 py-1">
+                                      <div className="w-9 h-9 rounded-full bg-zinc-800 border border-zinc-700 flex items-center justify-center">
+                                        {iconFor(ev)}
+                                      </div>
+                                      <div className="text-[11px] font-black text-zinc-300 tabular-nums">{ev.time || "—"}</div>
+                                    </div>
+
+                                    <div className={`min-w-0 ${ev.team === "away" ? "text-left" : "opacity-0 pointer-events-none"}`}>
+                                      <div className="inline-flex max-w-full items-start gap-2 border border-zinc-700/70 bg-zinc-900/40 rounded-xl px-3 py-2">
+                                        {ev.kind === "goal" && (ev.score || (expandedMatch.homeScore != null && expandedMatch.awayScore != null)) && (
+                                          <div className="shrink-0 px-2 py-0.5 rounded-full border border-emerald-500/60 text-emerald-300 text-[11px] font-black tabular-nums">
+                                            {ev.score ?? `${expandedMatch.homeScore}-${expandedMatch.awayScore}`}
+                                          </div>
+                                        )}
+                                        <div className="min-w-0">
+                                          <div className="text-sm font-bold text-white truncate">{ev.displayTitle}</div>
+                                          <div className="text-[11px] text-zinc-400 truncate">{ev.detail || expandedMatch.away}</div>
+                                        </div>
+                                      </div>
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+
+                              <div className="mt-3">
+                                <div className="w-full bg-zinc-800/60 border border-zinc-700 rounded-xl px-4 py-3 flex items-center justify-center gap-2 text-zinc-200 font-bold">
+                                  <Clock size={16} className="text-zinc-300" />
+                                  {expandedMatch.status === "HT" ? "Fim da 1ª parte" : expandedMatch.status === "FT" ? "Fim da Partida" : "Início da Partida"}
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })()}
                       </div>
                     )}
                     {/* Tennis live match stats below chart */}
