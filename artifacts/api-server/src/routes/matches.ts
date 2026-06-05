@@ -4389,34 +4389,6 @@ const WS_DOMAINS: Record<SportKey, string> = {
   tennis:     "v2.tennis.sportsapipro.com",
 };
 
-const FOOTBALL_SUSP_KEYS = [
-  "result",
-  "doubleChance",
-  "totalGoals",
-  "handicap",
-  "halfTime",
-  "htft",
-  "correctScore",
-  "asianHandicap",
-  "asianTotals",
-  "drawNoBet",
-  "firstGoal",
-  "winToNil",
-  "cleanSheet",
-  "goalOddEven",
-  "exactGoals",
-  "btts1H",
-  "btts2H",
-  "toWinBothHalves",
-  "highestScoringHalf",
-  "htCorrectScore",
-  "h2CorrectScore",
-  "teamGoals",
-  "secondHalf",
-  "drawNoBet2",
-  "handicapPoints",
-] as const;
-
 // Track which sports currently have an open WS connection
 const wsConnected = new Set<SportKey>();
 // Track reconnect timers so we can avoid duplicate reconnects
