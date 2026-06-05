@@ -4415,6 +4415,16 @@ function isRecentlyV1Patched(sport: SportKey, id: number | string, now: number):
   return t !== undefined && now - t < V1_PATCH_PREFER_WINDOW_MS;
 }
 
+function liveMatchIdForSportV2(sport: SportKey, id: number | string): string {
+  switch (sport) {
+    case "football": return `football-v2-${id}`;
+    case "basketball": return `bball-v2-${id}`;
+    case "hockey": return `hockey-v2-${id}`;
+    case "baseball": return `baseball-v2-${id}`;
+    case "tennis": return `tennis-v2-${id}`;
+  }
+}
+
 function mergeIncomingPreferFastScore(sport: SportKey, incoming: SAPIV2Event[], existing: SAPIV2Event[] | null, now: number): SAPIV2Event[] {
   if (!existing || existing.length === 0) return incoming;
   const exById = new Map(existing.map((e) => [String(e.id), e] as const));
@@ -4520,7 +4530,7 @@ function mergeSingleV2Event(sport: SportKey, ev: SAPIV2Event): void {
   applyV2WsMessage(sport, { events: updated });
 
   // Trigger immediate Delta Broadcast for real-time score updates
-  const id = String(ev.id);
+  const id = liveMatchIdForSportV2(sport, ev.id);
   broadcastMatchDelta(id, {
     homeScore: v2CurrentScore(ev.homeScore),
     awayScore: v2CurrentScore(ev.awayScore),
@@ -4674,7 +4684,7 @@ function applyV1ScorePatch(sport: SportKey, ev: V1ScoreEvent): void {
   applyV2WsMessage(sport, { events: updated });
 
   // Trigger immediate Delta Broadcast for sub-second score-only updates (V1 source)
-  broadcastMatchDelta(String(ev.id), {
+  broadcastMatchDelta(liveMatchIdForSportV2(sport, ev.id), {
     homeScore: homeScore ?? (typeof existing.homeScore === "number" ? existing.homeScore : 0),
     awayScore: awayScore ?? (typeof existing.awayScore === "number" ? existing.awayScore : 0),
     status: status,

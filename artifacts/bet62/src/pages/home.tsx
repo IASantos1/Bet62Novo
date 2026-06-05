@@ -2479,7 +2479,29 @@ export default function Home() {
 
     es.onmessage = (ev: MessageEvent) => {
       if (isIdleRef.current) return;
-      try { processLiveData(JSON.parse(ev.data as string) as { matches?: LiveMatchRaw[] }); } catch { /* ignore malformed */ }
+      try {
+        const msg = JSON.parse(ev.data as string) as any;
+        if (msg && typeof msg === "object" && msg.type === "update" && typeof msg.matchId === "string" && msg.delta && typeof msg.delta === "object") {
+          const now = Date.now();
+          const matchId = String(msg.matchId);
+          matchLastSeenRef.current[matchId] = now;
+          if (typeof msg.delta.minute === "number") {
+            const prevMin = apiMinutesRef.current[matchId];
+            if (prevMin !== msg.delta.minute) minuteChangedAtRef.current[matchId] = now;
+            apiMinutesRef.current[matchId] = msg.delta.minute;
+          }
+          liveDataFetchedAt.current = now;
+          setLiveMatches(prev => {
+            const idx = prev.findIndex(m => String(m.id) === matchId);
+            if (idx < 0) return prev;
+            const next = [...prev];
+            next[idx] = { ...(next[idx] as any), ...(msg.delta as any) };
+            return next;
+          });
+          return;
+        }
+        processLiveData(msg as { matches?: LiveMatchRaw[] });
+      } catch { /* ignore malformed */ }
     };
 
     // onerror fires on reconnect attempts — EventSource handles reconnection

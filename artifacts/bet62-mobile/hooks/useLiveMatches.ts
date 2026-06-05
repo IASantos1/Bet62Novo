@@ -177,8 +177,24 @@ export function useLiveMatches(): {
       ws.onmessage = (event) => {
         if (!mountedRef.current) return;
         try {
-          const data = JSON.parse(event.data as string) as { matches: LiveMatch[] };
-          if (data.matches) scheduleUpdate(data);
+          const msg = JSON.parse(event.data as string) as any;
+          if (msg && typeof msg === "object" && msg.type === "snapshot" && Array.isArray(msg.matches)) {
+            scheduleUpdate({ matches: msg.matches as LiveMatch[] });
+            return;
+          }
+          if (msg && typeof msg === "object" && msg.type === "update" && typeof msg.matchId === "string" && msg.delta && typeof msg.delta === "object") {
+            const matchId = String(msg.matchId);
+            setMatches(prev => {
+              const idx = prev.findIndex(m => String(m.id) === matchId);
+              if (idx < 0) return prev;
+              const next = [...prev];
+              next[idx] = { ...(next[idx] as any), ...(msg.delta as any) };
+              return next;
+            });
+            setLastUpdated(Date.now());
+            return;
+          }
+          if (Array.isArray(msg.matches)) scheduleUpdate({ matches: msg.matches as LiveMatch[] });
         } catch { /* ignore */ }
       };
 
