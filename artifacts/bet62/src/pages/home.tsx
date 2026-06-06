@@ -1411,7 +1411,7 @@ function sportEmoji(sport?: string): string {
 
 export default function Home() {
   const auth = useAuth();
-  const { isIdle, resetIdle } = useIdle(60_000);
+  const { isIdle, resetIdle } = useIdle(120_000);
   const isIdleRef = useRef(false);
   useEffect(() => { isIdleRef.current = isIdle; }, [isIdle]);
 
@@ -1889,10 +1889,24 @@ export default function Home() {
   // Sync isLocked → ref (used in async callbacks)
   useEffect(() => { isLockedRef.current = isLocked; }, [isLocked]);
 
-  // When idle timer fires → lock screen (requires explicit auth to dismiss)
   useEffect(() => {
-    if (isIdle && !isLockedRef.current) setIsLocked(true);
-  }, [isIdle]);
+    if (typeof window === "undefined") return;
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") resetIdle();
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => document.removeEventListener("visibilitychange", onVisibility);
+  }, [resetIdle]);
+
+  // When idle timer fires → lock screen
+  useEffect(() => {
+    if (!isIdle || isLockedRef.current) return;
+    if (typeof document !== "undefined" && document.visibilityState !== "visible") return;
+    if (!auth.user) return;
+    if (!(biometricAvailable && biometricCredentialId)) return;
+    setLockError("");
+    setIsLocked(true);
+  }, [isIdle, auth.user, biometricAvailable, biometricCredentialId]);
 
   // Check WebAuthn platform authenticator availability + stored credential
   useEffect(() => {
@@ -4924,17 +4938,6 @@ export default function Home() {
         )}
 
         {/* ── FUTEBOL: PLACAR EXATO DO 1º TEMPO ── */}
-        {isFootball && !showET && !showPen && show1tempo && (modalTab === "1tempo" || modalTab === "todos") && m && (m as any).htCorrectScore && Object.keys((m as any).htCorrectScore as Record<string, number>).length > 1 && (
-          <div>
-            <p className="text-xs text-zinc-500 mb-3">Marcador exato ao intervalo.</p>
-            <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
-              {Object.entries((m as any).htCorrectScore as Record<string, number>).map(([score, odd]) => (
-                <MarketOddsBtn key={score} match={match} sel={`htcs-${score}`} odd={odd as number} market="1tempo" label={score} />
-              ))}
-            </div>
-          </div>
-        )}
-
         {/* ── FUTEBOL: GOLS POR EQUIPA — 1º TEMPO ── */}
         {isFootball && !showET && !showPen && show1tempo && (modalTab === "1tempo" || modalTab === "todos") && m && (m as any).teamGoals?.homeOver05 > 0 && (
           <div>
@@ -5943,7 +5946,7 @@ export default function Home() {
                 {auth.user && (
                   <p className="text-zinc-400 text-sm mt-1">{auth.user.email}</p>
                 )}
-                <p className="text-zinc-600 text-xs mt-1">60 segundos sem atividade detectada</p>
+                <p className="text-zinc-600 text-xs mt-1">120 segundos sem atividade detectada</p>
               </div>
 
               {/* Biometric button — only when registered */}
@@ -6040,7 +6043,7 @@ export default function Home() {
           </DialogHeader>
           <div className="space-y-4 pt-2">
             <p className="text-zinc-400 text-sm">
-              Ative o desbloqueio com <strong className="text-white">Face ID</strong> ou <strong className="text-white">Impressão Digital</strong> para desbloquear a sessão rapidamente após 60 segundos de inatividade.
+              Ative o desbloqueio com <strong className="text-white">Face ID</strong> ou <strong className="text-white">Impressão Digital</strong> para desbloquear a sessão rapidamente após 120 segundos de inatividade.
             </p>
             <div className="flex items-center gap-2 p-3 bg-blue-950/30 border border-blue-500/20 rounded-lg">
               <ScanFace size={18} className="text-blue-400 shrink-0" />
