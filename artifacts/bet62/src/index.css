@@ -406,3 +406,11 @@ html.light-mode ::-webkit-scrollbar-track { background-color: #f0f0f3; }
 .odds-flash-up   { animation: oddsUp   1.1s ease-out; }
 .odds-flash-down { animation: oddsDown 1.1s ease-out; }
 
+button,
+[role="button"],
+a,
+input[type="button"],
+input[type="submit"] {
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}

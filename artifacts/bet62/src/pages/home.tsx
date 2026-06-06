@@ -1454,13 +1454,13 @@ export default function Home() {
     if (Math.abs(x - s.x) > 24 || Math.abs(y - s.y) > 24) s.moved = true;
   }, []);
   const tapTouchStart = useCallback((e: React.TouchEvent) => {
-    if (Date.now() - lastPointerDownAtRef.current < 1000) return;
+    if (Date.now() - lastPointerDownAtRef.current < 300) return;
     const t = e.touches?.[0];
     if (!t) return;
     tapStartAt(t.clientX, t.clientY);
   }, [tapStartAt]);
   const tapTouchMove = useCallback((e: React.TouchEvent) => {
-    if (Date.now() - lastPointerDownAtRef.current < 1000) return;
+    if (Date.now() - lastPointerDownAtRef.current < 300) return;
     const s = tapStateRef.current;
     if (!s) return;
     const t = e.touches?.[0];
@@ -1503,7 +1503,7 @@ export default function Home() {
         lastTouchAtRef.current = Date.now();
       },
       onClick: () => {
-        if (Date.now() - lastTouchAtRef.current < 500) return;
+        if (Date.now() - lastTouchAtRef.current < 250) return;
         handler();
       },
     };
@@ -4153,7 +4153,10 @@ export default function Home() {
 
     return (
       <div className="mb-6">
-        <div className="flex gap-3 overflow-x-auto pb-2 snap-x snap-mandatory scrollbar-none" style={{ scrollbarWidth: "none" }}>
+        <div
+          className="flex gap-3 overflow-x-auto pb-2 snap-x snap-mandatory scrollbar-none"
+          style={{ scrollbarWidth: "none", WebkitOverflowScrolling: "touch", touchAction: "pan-x" } as React.CSSProperties}
+        >
           {chunks.map((events, bi) => {
             const cfg = BANNER_CONFIGS[bi];
             const totalOddsVal = events
