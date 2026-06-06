@@ -2649,30 +2649,36 @@ export default function Home() {
   }, []);
 
   // Fetch upcoming matches — polls every 30s so new games appear automatically
-  const fetchUpcoming = useCallback((showSpinner = false) => {
+  const fetchUpcoming = useCallback(async (showSpinner = false) => {
     if (isIdleRef.current || isLockedRef.current) return;
     if (showSpinner) setUpcomingLoading(true);
     const param = selectedSport === "all" ? "" : `?sport=${selectedSport}`;
-    fetch(`/api/matches/upcoming${param}`)
-      .then(r => r.ok ? r.json() : { matches: [] })
-      .then(data => {
-        const matches = (data.matches || []) as Array<{
-          id: string; home: string; away: string; league: string; country?: string;
-          time?: string; date?: string; sport?: string; hasRealOdds?: boolean; odds: Odds; markets?: AdvancedMarkets;
-        }>;
-        setUpcomingMatches(matches.map(m => ({ ...m, isLive: false })));
-        writeSnapshot(upcomingSnapshotKey(selectedSport), matches);
-      })
-      .catch(() => { /* keep empty */ })
-      .finally(() => { if (showSpinner) setUpcomingLoading(false); });
+    const ctrl = new AbortController();
+    const tid = setTimeout(() => ctrl.abort(), 10_000);
+    try {
+      const r = await fetch(`/api/matches/upcoming${param}`, { signal: ctrl.signal });
+      const data = r.ok ? await r.json() : { matches: [] };
+      const matches = (data.matches || []) as Array<{
+        id: string; home: string; away: string; league: string; country?: string;
+        time?: string; date?: string; sport?: string; hasRealOdds?: boolean; odds: Odds; markets?: AdvancedMarkets;
+      }>;
+      setUpcomingMatches(matches.map(m => ({ ...m, isLive: false })));
+      writeSnapshot(upcomingSnapshotKey(selectedSport), matches);
+    } catch {
+    } finally {
+      clearTimeout(tid);
+      if (showSpinner) setUpcomingLoading(false);
+    }
   }, [selectedSport, upcomingSnapshotKey, writeSnapshot]);
 
   useEffect(() => {
     const snap = readSnapshot<any[]>(upcomingSnapshotKey(selectedSport));
-    if (snap && (Date.now() - snap.savedAt) < 10 * 60_000 && Array.isArray(snap.value)) {
+    const canUseSnap = !!(snap && (Date.now() - snap.savedAt) < 10 * 60_000 && Array.isArray(snap.value));
+    if (canUseSnap) {
       setUpcomingMatches(snap.value.map(m => ({ ...(m as any), isLive: false })));
+      setUpcomingLoading(false);
     }
-    if (activeTab !== "live" && activeTab !== "mybets") fetchUpcoming(true);
+    if (activeTab !== "live" && activeTab !== "mybets") fetchUpcoming(!canUseSnap);
     const id = setInterval(() => fetchUpcoming(false), 30_000);
     return () => clearInterval(id);
   }, [fetchUpcoming, readSnapshot, selectedSport, upcomingSnapshotKey, activeTab]);
@@ -2832,12 +2838,15 @@ export default function Home() {
       setLiveLoading(true);
       setUpcomingLoading(true);
     }
+    let tid: ReturnType<typeof setTimeout> | null = null;
     try {
       const qs = new URLSearchParams();
       if (selectedSport !== "all") qs.set("sport", selectedSport);
       qs.set("includeMarkets", "1");
       const q = qs.toString();
-      const res = await fetch(`/api/matches/initial${q ? `?${q}` : ""}`);
+      const ctrl = new AbortController();
+      tid = setTimeout(() => ctrl.abort(), 10_000);
+      const res = await fetch(`/api/matches/initial${q ? `?${q}` : ""}`, { signal: ctrl.signal });
       if (!res.ok) return;
       const data = await res.json();
       const live = Array.isArray(data?.live) ? data.live : [];
@@ -2848,6 +2857,9 @@ export default function Home() {
       setUpcomingMatches(upcoming.map((m: any) => ({ ...m, isLive: false })));
     } catch {
     } finally {
+      if (tid) {
+        try { clearTimeout(tid); } catch {}
+      }
       if (showSpinner) {
         setLiveLoading(false);
         setUpcomingLoading(false);
