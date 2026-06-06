@@ -3306,7 +3306,14 @@ export default function Home() {
     const oddsUp   = !isSuspended && delta >= ODDS_ANIM_THRESHOLD;
     const oddsDown = !isSuspended && delta <= -ODDS_ANIM_THRESHOLD;
 
-    if (isSuspended) return null;
+    if (isSuspended) {
+      return (
+        <div className={`relative flex flex-col items-center py-2.5 px-2 rounded-md text-xs ${grow ? "flex-1" : ""} bg-zinc-800/40 border border-zinc-700/30 opacity-70 select-none`}>
+          <span className="mb-0.5 text-[10px] leading-tight opacity-60">{label}</span>
+          <span className="font-bold text-sm text-zinc-300 tabular-nums line-through">{odd.toFixed(2)}</span>
+        </div>
+      );
+    }
 
     if (odd < 1.15 && market === "result") {
       return (

@@ -2926,15 +2926,20 @@ function calculateLive1x2(state: {
   redCardsHome: number;
   redCardsAway: number;
   baseHome: number; // starting odds for this match (model/real)
+  baseDraw: number;
   baseAway: number;
 }): { home: number; draw: number; away: number } {
   const r = (n: number) => Math.round(n * 100) / 100;
   const vigFactor = 1 - LIVE_MARGIN;
 
-  // 1. Fair pre-match probabilities from odds
-  const pHome0 = vigFactor / state.baseHome;
-  const pAway0 = vigFactor / state.baseAway;
-  const pDraw0 = Math.max(0.02, 1 - pHome0 - pAway0);
+  // 1. Fair pre-match probabilities from odds (normalised)
+  const invH = state.baseHome > 1.01 ? 1 / state.baseHome : 0.33;
+  const invD = state.baseDraw > 1.01 ? 1 / state.baseDraw : 0.33;
+  const invA = state.baseAway > 1.01 ? 1 / state.baseAway : 0.33;
+  const invSum = Math.max(1e-6, invH + invD + invA);
+  const pHome0 = invH / invSum;
+  const pDraw0 = invD / invSum;
+  const pAway0 = invA / invSum;
 
   // 2. Estimate pre-match lambdas via team-strength split
   //    Total ~2.6 expected goals; each team's share proportional to (win + 45% draw) prob
@@ -2982,7 +2987,7 @@ function calculateLive1x2(state: {
   const cap = isLevelLate ? 10.00 : 30.00;
   return {
     home: Math.min(cap, Math.max(1.04, r((1 / pHomeWin) * vigFactor))),
-    draw: pDraw > 0.005 ? Math.min(cap, Math.max(2.00, r((1 / pDraw) * vigFactor))) : 0,
+    draw: pDraw > 0.005 ? Math.min(cap, Math.max(1.04, r((1 / pDraw) * vigFactor))) : 0,
     away: Math.min(cap, Math.max(1.04, r((1 / pAwayWin) * vigFactor))),
   };
 }
@@ -3076,6 +3081,7 @@ function applyTieredMarketDrift(state: LiveMatchState, now: number): LiveMatchSt
           redCardsHome: state.redCardsHome ?? 0,
           redCardsAway: state.redCardsAway ?? 0,
           baseHome: baseOdds.home,
+          baseDraw: baseOdds.draw,
           baseAway: baseOdds.away,
         })
       : baseOdds;
@@ -3089,7 +3095,7 @@ function applyTieredMarketDrift(state: LiveMatchState, now: number): LiveMatchSt
 
   const newOdds = due("odds", 8_000, 15_000) ? {
     home: Math.max(1.04, Math.min(_oddsCap, r(liveAnchor.home * (1 + oddsOscH)))),
-    draw: liveAnchor.draw > 0 ? Math.max(2.00, Math.min(_oddsCap, r(liveAnchor.draw * (1 + oddsOscD)))) : 0,
+    draw: liveAnchor.draw > 0 ? Math.max(1.04, Math.min(_oddsCap, r(liveAnchor.draw * (1 + oddsOscD)))) : 0,
     away: Math.max(1.04, Math.min(_oddsCap, r(liveAnchor.away * (1 + oddsOscA)))),
   } : state.odds; // not due yet → unchanged (no arrow on frontend)
 
@@ -5988,6 +5994,7 @@ async function buildLiveMatches(): Promise<LiveMatchState[]> {
           redCardsHome: rcHome,
           redCardsAway: rcAway,
           baseHome: resolved.odds.home,
+          baseDraw: resolved.odds.draw,
           baseAway: resolved.odds.away,
         });
 
@@ -6594,10 +6601,39 @@ const FOOTBALL_V2_LIVE = new Set([
 // If both are frozen for > 20 min the match is a zombie and gets evicted.
 const _v2StuckTracker = new Map<string, { minute: number; score: string; since: number }>();
 
-function buildFootballLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
+async function buildFootballLiveV2(events: SAPIV2Event[]): Promise<LiveMatchState[]> {
   const now = Date.now();
   const result: LiveMatchState[] = [];
   const currentIds = new Set<string>();
+
+  const pool = async <T>(items: T[], limit: number, fn: (item: T) => Promise<void>): Promise<void> => {
+    let i = 0;
+    const workers = Array.from({ length: Math.max(1, limit) }).map(async () => {
+      while (i < items.length) {
+        const cur = items[i++]!;
+        await fn(cur);
+      }
+    });
+    await Promise.all(workers);
+  };
+
+  const firstSeenMatchIds = Array.from(new Set(events
+    .filter(ev => {
+      const statusStr = v2StatusStr(ev.status);
+      if (FOOTBALL_V2_FINISHED.has(statusStr)) return false;
+      if (!FOOTBALL_V2_LIVE.has(statusStr)) return false;
+      const evAgeSeconds = ev.startTimestamp ? Date.now() / 1000 - ev.startTimestamp : 0;
+      if (evAgeSeconds > 2.5 * 3600) return false;
+      return !liveMatchState.has(`football-v2-${ev.id}`);
+    })
+    .map(ev => ev.id)
+  ));
+
+  const prefetchOdds = new Map<number, { home: number; draw: number; away: number }>();
+  await pool(firstSeenMatchIds, 6, async (id) => {
+    const o = await getV2Match1x2Odds("football", String(id));
+    if (o) prefetchOdds.set(id, o);
+  });
 
   for (const ev of events) {
     const statusStr = v2StatusStr(ev.status);
@@ -6722,7 +6758,7 @@ function buildFootballLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
       const scored = homeScore !== existing.homeScore || awayScore !== existing.awayScore;
       const baseOdds = existing._baseOdds ?? { home: existing.odds.home, draw: existing.odds.draw, away: existing.odds.away };
       const newOdds = scored
-        ? calculateLive1x2({ minute, homeGoals: homeScore, awayGoals: awayScore, redCardsHome: 0, redCardsAway: 0, baseHome: baseOdds.home, baseAway: baseOdds.away })
+        ? calculateLive1x2({ minute, homeGoals: homeScore, awayGoals: awayScore, redCardsHome: 0, redCardsAway: 0, baseHome: baseOdds.home, baseDraw: baseOdds.draw, baseAway: baseOdds.away })
         : existing.odds;
 
       // Penalty score tracking: when entering "Penalties" phase store the pre-penalty base score.
@@ -6822,10 +6858,10 @@ function buildFootballLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
       result.push(liveMatchState.get(id)!);
     } else {
       // First seen — build initial state with score-filtered markets
-      const baseOdds = makeOddsFromTeams(homeTeam, awayTeam);
+      const baseOdds = prefetchOdds.get(ev.id) ?? makeOddsFromTeams(homeTeam, awayTeam);
       const liveOdds = (homeScore === 0 && awayScore === 0)
         ? baseOdds
-        : calculateLive1x2({ minute, homeGoals: homeScore, awayGoals: awayScore, redCardsHome: 0, redCardsAway: 0, baseHome: baseOdds.home, baseAway: baseOdds.away });
+        : calculateLive1x2({ minute, homeGoals: homeScore, awayGoals: awayScore, redCardsHome: 0, redCardsAway: 0, baseHome: baseOdds.home, baseDraw: baseOdds.draw, baseAway: baseOdds.away });
       const rawMarkets = makeAdvancedMarketsFromTeams(homeTeam, awayTeam);
       const baseMarkets = filterLiveMarkets(rawMarkets, homeScore, awayScore, newStatus);
       // First time seen in penalties — store current score as base (0-0 penalties so far)
@@ -7731,7 +7767,7 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
   ).filter(m => !allLiveIds.has(String(m.id)));
   const tennisLivePart = [...tennisV2Part, ...tennisV1LivePart, ...todayStartedExtra];
   const livePart = [
-    ...buildFootballLiveV2(footballEvents),
+    ...(await buildFootballLiveV2(footballEvents)),
     ...buildBasketballLiveV2(basketballEvents),
     ...buildHockeyLiveV2(hockeyEvents),
     ...buildBaseballLiveV2(baseballEvents),
@@ -11894,6 +11930,47 @@ interface AllOddsMarket {
 
 const allMarketsV2Cache = new Map<string, V2AllMarketsEntry>();
 const ALL_MARKETS_TTL = 15 * 60_000;
+
+const v2Match1x2Cache = new Map<string, { odds: { home: number; draw: number; away: number }; fetchedAt: number }>();
+const V2_MATCH_1X2_TTL = 2 * 60_000;
+
+async function getV2Match1x2Odds(sport: string, matchId: string): Promise<{ home: number; draw: number; away: number } | null> {
+  if (!process.env.SPORTSAPI_KEY) return null;
+  const base = v2SportBase(sport);
+  if (!base) return null;
+  const cacheKey = `1x2:${sport}:${matchId}`;
+  const cached = v2Match1x2Cache.get(cacheKey);
+  if (cached && Date.now() - cached.fetchedAt < V2_MATCH_1X2_TTL) return cached.odds;
+
+  try {
+    const resp = await fetch(`${base}/match/${matchId}/odds/all`, {
+      signal: AbortSignal.timeout(1800),
+      headers: sapiHeaders(),
+    });
+    if (!resp.ok) return null;
+    const data = (await resp.json()) as {
+      data?: { markets?: Array<{ marketName?: string; marketGroup?: string; choices?: Array<{ name?: string; fractionalValue?: string }> }> };
+    };
+    const rawMarkets = data.data?.markets ?? [];
+    for (const m of rawMarkets) {
+      const choices = m.choices ?? [];
+      const c1 = choices.find(c => c.name === "1");
+      const cx = choices.find(c => c.name === "X");
+      const c2 = choices.find(c => c.name === "2");
+      if (!c1 || !cx || !c2) continue;
+      const home = fractionalToDecimal(c1.fractionalValue ?? "");
+      const draw = fractionalToDecimal(cx.fractionalValue ?? "");
+      const away = fractionalToDecimal(c2.fractionalValue ?? "");
+      if (home < 1.01 || draw < 1.01 || away < 1.01) continue;
+      const odds = { home: Math.round(home * 100) / 100, draw: Math.round(draw * 100) / 100, away: Math.round(away * 100) / 100 };
+      v2Match1x2Cache.set(cacheKey, { odds, fetchedAt: Date.now() });
+      return odds;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
 
 const MARKET_NAME_PT: Record<string, string> = {
   "Full time":             "Resultado Final",
