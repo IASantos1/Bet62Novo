@@ -1445,6 +1445,7 @@ export default function Home() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [bets, setBets] = useState<BetSelection[]>([]);
   const [authModalOpen, setAuthModalOpen] = useState(false);
+  const [authMode, setAuthMode] = useState<"login" | "register">("login");
   const [expandedMatch, setExpandedMatch] = useState<Match | null>(null);
   const [betSlipOpenMobile, setBetSlipOpenMobile] = useState(false);
   const [isPlacingBet, setIsPlacingBet] = useState(false);
@@ -3227,7 +3228,7 @@ export default function Home() {
   };
 
   const handlePlaceBet = async () => {
-    if (!auth.user) { setAuthModalOpen(true); return; }
+    if (!auth.user) { setAuthMode("login"); setAuthModalOpen(true); return; }
 
     // Guard: block placement if any live selection has an active market suspension
     {
@@ -3819,6 +3820,7 @@ export default function Home() {
           {...motionProps}
           className="banner-card rounded-xl border border-zinc-800 hover:border-red-500/40 transition-colors cursor-pointer overflow-hidden"
           onClick={() => setExpandedMatch(match)}
+          onTouchStart={() => setExpandedMatch(match)}
         >
           {/* Image section — visible at top */}
           <div className="relative w-full overflow-hidden" style={{ aspectRatio: "16/7" }}>
@@ -3836,7 +3838,7 @@ export default function Home() {
             )}
           </div>
           {/* Content below image */}
-          <div className="px-3 pt-2 pb-3" style={{ background: "#0f0f0f" }} onClick={e => e.stopPropagation()}>
+          <div className="px-3 pt-2 pb-3" style={{ background: "#0f0f0f" }} onClick={e => e.stopPropagation()} onTouchStart={e => e.stopPropagation()}>
             <div className="mb-2">
               {sport === "tennis"     ? <TennisScore /> :
                sport === "volleyball" ? <VolleyScore /> :
@@ -3879,9 +3881,10 @@ export default function Home() {
         {...motionProps}
         className="bg-zinc-900 rounded-lg border border-zinc-800 hover:border-red-500/30 transition-colors cursor-pointer overflow-hidden"
         onClick={() => setExpandedMatch(match)}
+        onTouchStart={() => setExpandedMatch(match)}
       >
         <CompactLeagueRow match={match} rightSlot={liveBadge} />
-        <div className="px-3 py-2.5" onClick={e => e.stopPropagation()}>
+        <div className="px-3 py-2.5" onClick={e => e.stopPropagation()} onTouchStart={e => e.stopPropagation()}>
           {sport === "tennis"     ? <TennisScore /> :
            sport === "volleyball" ? <VolleyScore /> :
            sport === "hockey"     ? <HockeyScore /> :
@@ -3923,6 +3926,7 @@ export default function Home() {
         <div
           className="banner-card rounded-xl border border-zinc-800 hover:border-red-500/40 transition-colors cursor-pointer overflow-hidden"
           onClick={() => setExpandedMatch(match)}
+          onTouchStart={() => setExpandedMatch(match)}
         >
           {/* Image section — visible at top */}
           <div className="relative w-full overflow-hidden" style={{ aspectRatio: "16/7" }}>
@@ -3940,7 +3944,7 @@ export default function Home() {
             )}
           </div>
           {/* Content below image */}
-          <div className="px-3 pt-2.5 pb-3" style={{ background: "#0f0f0f" }} onClick={e => e.stopPropagation()}>
+          <div className="px-3 pt-2.5 pb-3" style={{ background: "#0f0f0f" }} onClick={e => e.stopPropagation()} onTouchStart={e => e.stopPropagation()}>
             <div className="flex items-baseline gap-1.5 mb-2.5 min-w-0">
               <span className="font-bold text-sm leading-tight truncate text-white">{homeName}</span>
               <span className="text-xs shrink-0 text-zinc-500">vs</span>
@@ -3956,9 +3960,10 @@ export default function Home() {
       <div
         className="bg-zinc-900 rounded-lg border border-zinc-800 hover:border-red-500/30 transition-colors cursor-pointer overflow-hidden"
         onClick={() => setExpandedMatch(match)}
+        onTouchStart={() => setExpandedMatch(match)}
       >
         <CompactLeagueRow match={match} />
-        <div className="px-3 pb-3 pt-1" onClick={e => e.stopPropagation()}>
+        <div className="px-3 pb-3 pt-1" onClick={e => e.stopPropagation()} onTouchStart={e => e.stopPropagation()}>
           <div className="flex items-baseline gap-1.5 mb-2 min-w-0">
             <span className="font-bold text-sm truncate">{homeName}</span>
             <span className="text-xs text-zinc-500 shrink-0">vs</span>
@@ -6649,7 +6654,7 @@ export default function Home() {
                 </DropdownMenu>
               </>
             ) : (
-              <Button onClick={() => setAuthModalOpen(true)} className="bg-red-600 hover:bg-red-700 text-white font-bold px-6">
+              <Button onClick={() => { setAuthMode("login"); setAuthModalOpen(true); }} className="bg-red-600 hover:bg-red-700 text-white font-bold px-6">
                 ENTRAR
               </Button>
             )}
@@ -11117,27 +11122,41 @@ export default function Home() {
 
 
       {/* AUTH MODAL */}
-      <Dialog open={authModalOpen} onOpenChange={setAuthModalOpen}>
-        <DialogContent className="bg-zinc-950 border-zinc-800 text-white sm:max-w-md p-0 overflow-hidden max-h-[95vh] overflow-y-auto">
-          <DialogHeader className="sr-only">
-            <DialogTitle>Autenticação</DialogTitle>
-            <DialogDescription>Entrar ou criar conta</DialogDescription>
-          </DialogHeader>
-          <div className="bg-zinc-900 p-6 border-b border-zinc-800 text-center relative overflow-hidden">
-            <div className="absolute inset-0 bg-red-600/10 blur-xl"></div>
-            <div className="relative font-black text-3xl tracking-tighter italic">
-              <span className="text-white">BET</span><span className="text-red-600">62</span>
-            </div>
-          </div>
+      {authModalOpen && (
+        <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/75 backdrop-blur-sm px-4" onClick={() => setAuthModalOpen(false)}>
+          <div className="relative w-full max-w-md bg-zinc-950 border border-zinc-800 text-white rounded-xl overflow-hidden max-h-[95vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+            <button
+              onClick={() => setAuthModalOpen(false)}
+              className="absolute right-3 top-3 w-8 h-8 rounded-full bg-zinc-900/80 hover:bg-zinc-800 flex items-center justify-center text-zinc-400 hover:text-white transition-colors z-10"
+              aria-label="Fechar"
+            >
+              <X size={16} />
+            </button>
 
-          <Tabs defaultValue="login" className="w-full">
-            <TabsList className="w-full bg-zinc-950 border-b border-zinc-800 rounded-none p-0 h-auto">
-              <TabsTrigger value="login" className="flex-1 rounded-none data-[state=active]:bg-zinc-900 data-[state=active]:text-white data-[state=active]:border-b-2 data-[state=active]:border-red-600 py-4 text-sm font-bold uppercase">Entrar</TabsTrigger>
-              <TabsTrigger value="register" className="flex-1 rounded-none data-[state=active]:bg-zinc-900 data-[state=active]:text-white data-[state=active]:border-b-2 data-[state=active]:border-red-600 py-4 text-sm font-bold uppercase">Criar Conta</TabsTrigger>
-            </TabsList>
+            <div className="bg-zinc-900 p-6 border-b border-zinc-800 text-center relative overflow-hidden">
+              <div className="absolute inset-0 bg-red-600/10 blur-xl"></div>
+              <div className="relative font-black text-3xl tracking-tighter italic">
+                <span className="text-white">BET</span><span className="text-red-600">62</span>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 bg-zinc-950 border-b border-zinc-800">
+              <button
+                onClick={() => setAuthMode("login")}
+                className={`py-4 text-sm font-bold uppercase transition-colors border-b-2 ${authMode === "login" ? "bg-zinc-900 text-white border-red-600" : "text-zinc-400 border-transparent hover:text-white"}`}
+              >
+                Entrar
+              </button>
+              <button
+                onClick={() => setAuthMode("register")}
+                className={`py-4 text-sm font-bold uppercase transition-colors border-b-2 ${authMode === "register" ? "bg-zinc-900 text-white border-red-600" : "text-zinc-400 border-transparent hover:text-white"}`}
+              >
+                Criar Conta
+              </button>
+            </div>
 
             <div className="p-6">
-              <TabsContent value="login" className="mt-0 space-y-4">
+              {authMode === "login" ? (
                 <form onSubmit={handleLoginSubmit} className="space-y-4">
                   <div className="space-y-2">
                     <Label htmlFor="login-email">E-mail</Label>
@@ -11151,9 +11170,7 @@ export default function Home() {
                     {authLoading ? <Loader2 className="animate-spin mr-2" size={16} /> : null}ENTRAR
                   </Button>
                 </form>
-              </TabsContent>
-
-              <TabsContent value="register" className="mt-0">
+              ) : (
                 <form onSubmit={handleRegisterSubmit} className="space-y-3">
                   <div className="space-y-1.5">
                     <Label htmlFor="reg-name" className="text-sm">Nome Completo</Label>
@@ -11218,11 +11235,11 @@ export default function Home() {
                     {authLoading ? <Loader2 className="animate-spin mr-2" size={16} /> : null}CRIAR CONTA
                   </Button>
                 </form>
-              </TabsContent>
+              )}
             </div>
-          </Tabs>
-        </DialogContent>
-      </Dialog>
+          </div>
+        </div>
+      )}
 
       {/* ── DEPOSIT / WITHDRAW MODAL ──────────────────────────── */}
       <DepositWithdrawModal
