@@ -4177,75 +4177,80 @@ export default function Home() {
     };
 
     return (
-      <div className="mb-6 space-y-3">
-        {combos.map((combo, bi) => {
-          const totalOddsVal = combo.matches
-            .reduce((acc, m) => m.odds.home > 0 ? acc * m.odds.home : acc, 1)
-            .toFixed(2);
-          return (
-            <div
-              key={bi}
-              className="rounded-2xl p-4 border border-zinc-800 bg-zinc-950/60"
-              style={{ boxShadow: "0 0 24px rgba(220,38,38,0.08)" }}
-            >
-              <div className="flex items-start justify-between mb-2">
-                <div className="leading-[1.05]">
-                  <div className="font-black italic text-[20px] text-white tracking-wide uppercase">{combo.title}</div>
-                  <div className="font-black italic text-[20px] text-red-500 tracking-wide uppercase">{combo.subtitle}</div>
+      <div className="mb-6">
+        <div
+          className="flex gap-3 overflow-x-auto pb-2 snap-x snap-mandatory scrollbar-none"
+          style={{ scrollbarWidth: "none", WebkitOverflowScrolling: "touch", touchAction: "pan-x pan-y" } as React.CSSProperties}
+        >
+          {combos.map((combo, bi) => {
+            const totalOddsVal = combo.matches
+              .reduce((acc, m) => m.odds.home > 0 ? acc * m.odds.home : acc, 1)
+              .toFixed(2);
+            return (
+              <div
+                key={bi}
+                className="snap-center shrink-0 w-[268px] rounded-2xl p-4 border border-zinc-800 bg-zinc-950/60"
+                style={{ boxShadow: "0 0 24px rgba(220,38,38,0.08)" }}
+              >
+                <div className="flex items-start justify-between mb-2">
+                  <div className="leading-[1.05]">
+                    <div className="font-black italic text-[20px] text-white tracking-wide uppercase">{combo.title}</div>
+                    <div className="font-black italic text-[20px] text-red-500 tracking-wide uppercase">{combo.subtitle}</div>
+                  </div>
+                  <div className="text-[11px] font-semibold text-red-500">{combo.label}</div>
                 </div>
-                <div className="text-[11px] font-semibold text-red-500">{combo.label}</div>
-              </div>
 
-              <div className="flex flex-col gap-2">
-                {combo.matches.map((m, ei) => {
-                  const flag = COUNTRY_FLAGS[m.country?.toLowerCase() ?? ""] ?? sportEmoji(m.sport);
-                  const timeStr = m.date ? formatMatchDate(m.date) : (m.time ?? "");
-                  const isSelected = !!bets.find(b => b.matchId === m.id && b.market === "result" && b.selection === "home");
-                  return (
-                    <button
-                      key={ei}
-                      type="button"
-                      className="w-full rounded-xl p-3 flex items-center justify-between border transition-colors"
-                      style={{
-                        background: isSelected ? "rgba(220,38,38,0.10)" : "rgba(255,255,255,0.03)",
-                        borderColor: isSelected ? "rgba(220,38,38,0.5)" : "rgba(255,255,255,0.07)",
-                      }}
-                      {...makeTap(() => toggleBet(m, "home", m.odds.home, "result", m.home))}
-                    >
-                      <div className="flex items-center gap-2 min-w-0">
-                        <div className="w-7 h-7 rounded-full flex items-center justify-center text-[11px]" style={{ background: "#141414", border: "1.5px solid rgba(220,38,38,0.7)" }}>
-                          {flag}
+                <div className="flex flex-col gap-2">
+                  {combo.matches.map((m, ei) => {
+                    const flag = COUNTRY_FLAGS[m.country?.toLowerCase() ?? ""] ?? sportEmoji(m.sport);
+                    const timeStr = m.date ? formatMatchDate(m.date) : (m.time ?? "");
+                    const isSelected = !!bets.find(b => b.matchId === m.id && b.market === "result" && b.selection === "home");
+                    return (
+                      <button
+                        key={ei}
+                        type="button"
+                        className="w-full rounded-xl p-3 flex items-center justify-between border transition-colors"
+                        style={{
+                          background: isSelected ? "rgba(220,38,38,0.10)" : "rgba(255,255,255,0.03)",
+                          borderColor: isSelected ? "rgba(220,38,38,0.5)" : "rgba(255,255,255,0.07)",
+                        }}
+                        {...makeTap(() => toggleBet(m, "home", m.odds.home, "result", m.home))}
+                      >
+                        <div className="flex items-center gap-2 min-w-0">
+                          <div className="w-7 h-7 rounded-full flex items-center justify-center text-[11px]" style={{ background: "#141414", border: "1.5px solid rgba(220,38,38,0.7)" }}>
+                            {flag}
+                          </div>
+                          <div className="min-w-0 text-left">
+                            <div className="text-[12px] font-bold text-white truncate">{m.home}</div>
+                            <div className="text-[10px] text-zinc-500 truncate">🕒 {timeStr}</div>
+                          </div>
                         </div>
-                        <div className="min-w-0 text-left">
-                          <div className="text-[12px] font-bold text-white truncate">{m.home}</div>
-                          <div className="text-[10px] text-zinc-500 truncate">🕒 {timeStr}</div>
+                        <div className="text-red-500 font-black text-[18px] tabular-nums">
+                          {m.odds.home > 0 ? m.odds.home.toFixed(2) : "—"}
                         </div>
-                      </div>
-                      <div className="text-red-500 font-black text-[18px] tabular-nums">
-                        {m.odds.home > 0 ? m.odds.home.toFixed(2) : "—"}
-                      </div>
-                    </button>
-                  );
-                })}
-              </div>
-
-              <div className="flex items-center justify-between gap-3 mt-3">
-                <div className="rounded-xl px-3 py-2 border border-red-500/40 bg-black/40">
-                  <div className="text-zinc-500 text-[10px] leading-none mb-0.5">ODD TOTAL</div>
-                  <div className="text-red-500 font-black text-[18px] leading-none">{totalOddsVal}</div>
+                      </button>
+                    );
+                  })}
                 </div>
-                <button
-                  type="button"
-                  {...makeTap(() => addAllToBetSlip(combo.matches))}
-                  className="flex-1 h-11 rounded-xl font-black text-[12px] text-white active:scale-[0.98]"
-                  style={{ background: "linear-gradient(135deg,#dc2626,#991b1b)" }}
-                >
-                  ADICIONAR AO BOLETIM
-                </button>
+
+                <div className="flex items-center justify-between gap-3 mt-3">
+                  <div className="rounded-xl px-3 py-2 border border-red-500/40 bg-black/40">
+                    <div className="text-zinc-500 text-[10px] leading-none mb-0.5">ODD TOTAL</div>
+                    <div className="text-red-500 font-black text-[18px] leading-none">{totalOddsVal}</div>
+                  </div>
+                  <button
+                    type="button"
+                    {...makeTap(() => addAllToBetSlip(combo.matches))}
+                    className="flex-1 h-11 rounded-xl font-black text-[12px] text-white active:scale-[0.98]"
+                    style={{ background: "linear-gradient(135deg,#dc2626,#991b1b)" }}
+                  >
+                    ADICIONAR AO BOLETIM
+                  </button>
+                </div>
               </div>
-            </div>
-          );
-        })}
+            );
+          })}
+        </div>
       </div>
     );
   };
