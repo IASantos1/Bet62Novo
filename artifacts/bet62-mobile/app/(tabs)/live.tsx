@@ -19,7 +19,7 @@ import { useBetSlip } from "@/context/BetSlipContext";
 import { useLiveMatches, type LiveMatch } from "@/hooks/useLiveMatches";
 import { ComprehensiveMarketsSheet } from "@/components/ComprehensiveMarketsSheet";
 import { BetSlipModal } from "@/components/BetSlipModal";
-import { getMatchBannerUrl, getLeagueFlag } from "@/utils/teamBanners";
+import { getMatchBannerUrlStable, getLeagueFlag } from "@/utils/teamBanners";
 
 type MCIconName = ComponentProps<typeof MaterialCommunityIcons>["name"];
 
@@ -148,7 +148,7 @@ function LiveMatchCard({ match }: { match: LiveMatch }) {
   const isBball = match.sport === "basketball";
   const isBase = match.sport === "baseball";
   const hasDraw = match.odds.draw > 1.01;
-  const bannerUrl = getMatchBannerUrl(match.home, match.away);
+  const bannerUrl = getMatchBannerUrlStable(String(match.id), match.home, match.away);
 
   function handleOdds(market: string, label: string, value: number) {
     if (suspended) return;

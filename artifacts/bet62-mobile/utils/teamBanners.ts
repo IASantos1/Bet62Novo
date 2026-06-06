@@ -249,6 +249,17 @@ export function getMatchBannerUrl(home: string, away: string): string | null {
   return getTeamBannerUrl(home) ?? getTeamBannerUrl(away);
 }
 
+const MATCH_BANNER_CACHE = new Map<string, string>();
+
+export function getMatchBannerUrlStable(matchId: string, home: string, away: string): string | null {
+  const computed = getMatchBannerUrl(home, away);
+  if (computed) {
+    MATCH_BANNER_CACHE.set(matchId, computed);
+    return computed;
+  }
+  return MATCH_BANNER_CACHE.get(matchId) ?? null;
+}
+
 export const LEAGUE_FLAGS: Record<string, string> = {
   // ── Spain ──
   "La Liga": "🇪🇸", "LaLiga": "🇪🇸", "LaLiga2": "🇪🇸", "LaLiga Hypermotion": "🇪🇸",

@@ -24,7 +24,7 @@ import { ComprehensiveMarketsSheet } from "@/components/ComprehensiveMarketsShee
 import { BetSlipModal } from "@/components/BetSlipModal";
 import { DepositModal } from "@/components/DepositModal";
 import type { LiveMatchMarkets } from "@/hooks/useLiveMatches";
-import { getMatchBannerUrl, getLeagueFlag } from "@/utils/teamBanners";
+import { getMatchBannerUrlStable, getLeagueFlag } from "@/utils/teamBanners";
 import { findMajorLeague, type MajorLeague } from "@/utils/majorLeagues";
 
 type MCIconName = ComponentProps<typeof MaterialCommunityIcons>["name"];
@@ -111,12 +111,12 @@ function LeagueChips({
           </Text>
         </Pressable>
 
-        {chips.map(({ config }, i) => {
+        {chips.map(({ config }) => {
           const active = selected === config.label;
           const hasErr = imgErrors.has(config.label);
           return (
             <Pressable
-              key={i}
+              key={config.label}
               onPress={() => { onSelect(active ? null : config.label); Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); }}
               style={({ pressed }) => ({
                 flexDirection: "row" as const, alignItems: "center" as const, gap: 8,
@@ -360,7 +360,7 @@ function UpcomingCard({ match }: { match: UpcomingMatch }) {
 
   const sportCol = SPORT_COLORS[match.sport] ?? colors.mutedForeground;
   const hasDraw = match.odds.draw > 1.01;
-  const bannerUrl = getMatchBannerUrl(match.home, match.away);
+  const bannerUrl = getMatchBannerUrlStable(String(match.id), match.home, match.away);
 
   const kickoffDate = parseKickoff(match.date, match.time);
   const today = new Date();

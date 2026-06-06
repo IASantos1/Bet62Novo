@@ -713,6 +713,19 @@ function getMatchBanner(match: { home: string; country?: string; sport?: string;
   return undefined;
 }
 
+const MATCH_BANNER_CACHE = new Map<string, string>();
+
+function getMatchBannerStable(match: { id?: string | number; home: string; country?: string; sport?: string; league?: string; isWomens?: boolean }): string | undefined {
+  const id = String(match.id ?? "");
+  const computed = getMatchBanner(match);
+  if (computed) {
+    if (id) MATCH_BANNER_CACHE.set(id, computed);
+    return computed;
+  }
+  if (id) return MATCH_BANNER_CACHE.get(id);
+  return undefined;
+}
+
 const COUNTRY_FLAGS: Record<string, string> = {
   // British Isles
   england: "🏴󠁧󠁢󠁥󠁮󠁧󠁿", scotland: "🏴󠁧󠁢󠁳󠁣󠁴󠁿", wales: "🏴󠁧󠁢󠁷󠁬󠁳󠁿", "northern ireland": "🇬🇧",
@@ -3780,8 +3793,8 @@ export default function Home() {
     const sport  = match.sport ?? "football";
     const extra  = match._liveExtra;
     const flag   = COUNTRY_FLAGS[match.country?.toLowerCase() ?? ""] ?? sportEmoji(match.sport);
-    const bannerImg = getMatchBanner(match);
     const matchKey  = String(match.id);
+    const bannerImg = getMatchBannerStable(match);
     const homeName = teamNamePt(match.home);
     const awayName = teamNamePt(match.away);
     const isNew     = !seenMatchIds.current.has(matchKey);
@@ -4238,7 +4251,7 @@ export default function Home() {
   const MatchCard = ({ match }: { match: Match }) => {
     const flag = COUNTRY_FLAGS[match.country?.toLowerCase() ?? ""] ?? sportEmoji(match.sport);
     const dateStr = match.date ? formatMatchDate(match.date) : "";
-    const bannerImg = getMatchBanner(match);
+    const bannerImg = getMatchBannerStable(match);
     const rivalry = RIVALRY_TAGS[`${match.home}|${match.away}`];
     const hasDraw = match.odds.draw > 0;
     const homeName = teamNamePt(match.home);
