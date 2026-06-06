@@ -8507,6 +8507,8 @@ function waitMs(ms: number): Promise<void> {
 router.get("/initial", async (req, res) => {
   res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0");
   const sport = String(req.query["sport"] ?? "all");
+  const includeMarkets = String(req.query["includeMarkets"] ?? "0") === "1";
+  const includeEvents = String(req.query["includeEvents"] ?? "0") === "1";
   const liveLimitRaw = parseInt(String(req.query["liveLimit"] ?? ""), 10);
   const upcomingLimitRaw = parseInt(String(req.query["upcomingLimit"] ?? ""), 10);
   const liveLimit = Number.isFinite(liveLimitRaw) ? Math.max(0, Math.min(250, liveLimitRaw)) : 0;
@@ -8533,14 +8535,26 @@ router.get("/initial", async (req, res) => {
 
     const live = (liveLimit > 0 ? livePayload.matches.slice(0, liveLimit) : livePayload.matches)
       .map(m => {
-        const { markets, events, ...rest } = m as any;
+        const anyM = m as any;
+        if (includeMarkets && includeEvents) return anyM;
+        if (includeMarkets && !includeEvents) {
+          const { events, ...rest } = anyM;
+          return rest;
+        }
+        if (!includeMarkets && includeEvents) {
+          const { markets, ...rest } = anyM;
+          return rest;
+        }
+        const { markets, events, ...rest } = anyM;
         return rest;
       });
     const up = upcoming
       .filter(m => m.hasRealOdds)
       .slice(0, upcomingLimit)
       .map(m => {
-        const { markets, ...rest } = m as any;
+        const anyM = m as any;
+        if (includeMarkets) return anyM;
+        const { markets, ...rest } = anyM;
         return rest;
       });
     res.json({ serverTime: Date.now(), live, upcoming: up });
