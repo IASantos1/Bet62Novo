@@ -2839,6 +2839,7 @@ export default function Home() {
       setUpcomingLoading(true);
     }
     let tid: ReturnType<typeof setTimeout> | null = null;
+    let loaded = false;
     try {
       const qs = new URLSearchParams();
       if (selectedSport !== "all") qs.set("sport", selectedSport);
@@ -2855,6 +2856,7 @@ export default function Home() {
       writeSnapshot(upcomingSnapshotKey(selectedSport), upcoming);
       processLiveData({ matches: live });
       setUpcomingMatches(upcoming.map((m: any) => ({ ...m, isLive: false })));
+      loaded = true;
     } catch {
     } finally {
       if (tid) {
@@ -2865,7 +2867,25 @@ export default function Home() {
         setUpcomingLoading(false);
       }
     }
+
+    if (!loaded) {
+      const ctrl2 = new AbortController();
+      const t2 = setTimeout(() => ctrl2.abort(), 10_000);
+      try {
+        const res2 = await fetch("/api/matches/live", { signal: ctrl2.signal });
+        if (res2.ok) processLiveData(await res2.json());
+      } catch {
+      } finally {
+        try { clearTimeout(t2); } catch {}
+      }
+    }
   }, [processLiveData, selectedSport, upcomingSnapshotKey, writeSnapshot]);
+
+  useEffect(() => {
+    if (!liveLoading) return;
+    const id = setTimeout(() => setLiveLoading(false), 12_000);
+    return () => clearTimeout(id);
+  }, [liveLoading]);
 
   // Track disappearing live matches to store final scores
   useEffect(() => {
