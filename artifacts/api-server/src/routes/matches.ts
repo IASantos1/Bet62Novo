@@ -4967,7 +4967,17 @@ function parseV2PreMatchOdds(markets: V2RawMarket[]): V2PreMatchOdds | null {
     }
   }
 
-  if (!home) return null;
+  const hasAny =
+    home > 0 ||
+    draw > 0 ||
+    away > 0 ||
+    bttsYes > 0 ||
+    bttsNo > 0 ||
+    over25 > 0 ||
+    under25 > 0 ||
+    firstSetHome > 0 ||
+    firstSetAway > 0;
+  if (!hasAny) return null;
   return { home, draw, away, bttsYes, bttsNo, over25, under25, firstSetHome, firstSetAway };
 }
 
@@ -6406,20 +6416,16 @@ async function buildUpcomingMatches(): Promise<UpcomingMatch[]> {
     let markets: AdvancedMarkets;
     let hasRealOdds: boolean;
 
-    if (realOdds && realOdds.home > 0) {
-      odds = { home: realOdds.home, draw: realOdds.draw, away: realOdds.away };
-      const baseMarkets = makeAdvancedMarketsFromTeams(home, away);
-      markets = {
-        ...baseMarkets,
-        ...(realOdds.bttsYes ? { bothTeamsScore: { yes: realOdds.bttsYes, no: realOdds.bttsNo ?? 0 } } : {}),
-        ...(realOdds.over25 ? { totalGoals: { ...baseMarkets.totalGoals, over25: realOdds.over25, under25: realOdds.under25 ?? 0 } } : {}),
-      };
-      hasRealOdds = true;
-    } else {
-      odds = makeOddsFromTeams(home, away);
-      markets = makeAdvancedMarketsFromTeams(home, away);
-      hasRealOdds = false;
-    }
+    const baseOdds = makeOddsFromTeams(home, away);
+    const baseMarkets = makeAdvancedMarketsFromTeams(home, away);
+    markets = {
+      ...baseMarkets,
+      ...(realOdds?.bttsYes ? { bothTeamsScore: { yes: realOdds.bttsYes, no: realOdds.bttsNo ?? 0 } } : {}),
+      ...(realOdds?.over25 ? { totalGoals: { ...baseMarkets.totalGoals, over25: realOdds.over25, under25: realOdds.under25 ?? 0 } } : {}),
+    };
+    const hasFull1x2 = !!(realOdds && realOdds.home > 0 && realOdds.draw > 0 && realOdds.away > 0);
+    odds = hasFull1x2 ? { home: realOdds!.home, draw: realOdds!.draw, away: realOdds!.away } : baseOdds;
+    hasRealOdds = hasFull1x2;
 
     results.push({
       id: `fb-v2-${ev.id}`,
@@ -8486,20 +8492,16 @@ async function buildWC2026Matches(): Promise<UpcomingMatch[]> {
     let markets: AdvancedMarkets;
     let hasRealOdds: boolean;
 
-    if (realOdds && realOdds.home > 0) {
-      odds = { home: realOdds.home, draw: realOdds.draw, away: realOdds.away };
-      const baseMarkets = makeAdvancedMarketsFromTeams(home, away);
-      markets = {
-        ...baseMarkets,
-        ...(realOdds.bttsYes ? { bothTeamsScore: { yes: realOdds.bttsYes, no: realOdds.bttsNo ?? 0 } } : {}),
-        ...(realOdds.over25 ? { totalGoals: { ...baseMarkets.totalGoals, over25: realOdds.over25, under25: realOdds.under25 ?? 0 } } : {}),
-      };
-      hasRealOdds = true;
-    } else {
-      odds = makeOddsFromTeams(home, away);
-      markets = makeAdvancedMarketsFromTeams(home, away);
-      hasRealOdds = false;
-    }
+    const baseOdds = makeOddsFromTeams(home, away);
+    const baseMarkets = makeAdvancedMarketsFromTeams(home, away);
+    markets = {
+      ...baseMarkets,
+      ...(realOdds?.bttsYes ? { bothTeamsScore: { yes: realOdds.bttsYes, no: realOdds.bttsNo ?? 0 } } : {}),
+      ...(realOdds?.over25 ? { totalGoals: { ...baseMarkets.totalGoals, over25: realOdds.over25, under25: realOdds.under25 ?? 0 } } : {}),
+    };
+    const hasFull1x2 = !!(realOdds && realOdds.home > 0 && realOdds.draw > 0 && realOdds.away > 0);
+    odds = hasFull1x2 ? { home: realOdds!.home, draw: realOdds!.draw, away: realOdds!.away } : baseOdds;
+    hasRealOdds = hasFull1x2;
 
     results.push({
       id: `fb-v2-${ev.id}`,
