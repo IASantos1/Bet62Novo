@@ -8504,6 +8504,52 @@ function waitMs(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
+router.get("/initial", async (req, res) => {
+  res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0");
+  const sport = String(req.query["sport"] ?? "all");
+  const liveLimitRaw = parseInt(String(req.query["liveLimit"] ?? ""), 10);
+  const upcomingLimitRaw = parseInt(String(req.query["upcomingLimit"] ?? ""), 10);
+  const liveLimit = Number.isFinite(liveLimitRaw) ? Math.max(0, Math.min(250, liveLimitRaw)) : 0;
+  const upcomingLimit = Number.isFinite(upcomingLimitRaw) ? Math.max(0, Math.min(250, upcomingLimitRaw)) : 60;
+  try {
+    const [livePayload, upcomingCache] = await Promise.all([
+      buildLivePayload(),
+      upcomingTopCache
+        ? getUpcomingAll()
+        : Promise.race([
+            getUpcomingAll(),
+            waitMs(1500).then(() => upcomingTopCache ?? { football: [], tennis: [], basketball: [], hockey: [], volleyball: [], baseball: [], fetchedAt: Date.now() }),
+          ]),
+    ]);
+
+    let upcoming: UpcomingMatch[];
+    if (sport === "football") upcoming = upcomingCache.football;
+    else if (sport === "tennis") upcoming = upcomingCache.tennis;
+    else if (sport === "basketball") upcoming = upcomingCache.basketball;
+    else if (sport === "hockey") upcoming = upcomingCache.hockey;
+    else if (sport === "volleyball") upcoming = upcomingCache.volleyball;
+    else if (sport === "baseball") upcoming = upcomingCache.baseball;
+    else upcoming = [...upcomingCache.football, ...upcomingCache.tennis, ...upcomingCache.basketball, ...upcomingCache.hockey, ...upcomingCache.volleyball, ...upcomingCache.baseball];
+
+    const live = (liveLimit > 0 ? livePayload.matches.slice(0, liveLimit) : livePayload.matches)
+      .map(m => {
+        const { markets, events, ...rest } = m as any;
+        return rest;
+      });
+    const up = upcoming
+      .filter(m => m.hasRealOdds)
+      .slice(0, upcomingLimit)
+      .map(m => {
+        const { markets, ...rest } = m as any;
+        return rest;
+      });
+    res.json({ serverTime: Date.now(), live, upcoming: up });
+  } catch (err) {
+    console.error("[initial route] unexpected error:", err);
+    res.json({ serverTime: Date.now(), live: [], upcoming: [] });
+  }
+});
+
 router.get("/upcoming", async (req, res) => {
   const sport = String(req.query["sport"] ?? "all");
   const cache = upcomingTopCache
