@@ -2632,7 +2632,6 @@ export default function Home() {
   }, []);
 
   type Snapshot<T> = { savedAt: number; value: T };
-  const LIVE_SNAPSHOT_KEY = "bet62_snapshot_live_v1";
   const upcomingSnapshotKey = (sport: string) => `bet62_snapshot_upcoming_v1:${sport}`;
   const readSnapshot = useCallback(<T,>(key: string): Snapshot<T> | null => {
     try {
@@ -2729,49 +2728,9 @@ export default function Home() {
     };
   };
 
-  const pendingLiveDeltasRef = useRef<Record<string, Record<string, unknown>>>({});
-  const liveDeltaFlushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  const flushPendingLiveDeltas = useCallback(() => {
-    if (liveDeltaFlushTimerRef.current) {
-      try { clearTimeout(liveDeltaFlushTimerRef.current); } catch {}
-    }
-    liveDeltaFlushTimerRef.current = null;
-
-    const pending = pendingLiveDeltasRef.current;
-    pendingLiveDeltasRef.current = {};
-    const keys = Object.keys(pending);
-    if (keys.length === 0) return;
-
-    setLiveMatches(prev => {
-      let changed = false;
-      const next = prev.map(m => {
-        const d = pending[String(m.id)];
-        if (!d) return m;
-        changed = true;
-        prevLiveOdds.current[String(m.id)] = m.odds;
-        prevLiveMarkets.current[String(m.id)] = flattenMatchMarketsForArrows(m);
-        return { ...(m as any), ...(d as any) };
-      });
-      return changed ? next : prev;
-    });
-  }, []);
-
-  // Shared processing — called both by fetchLive (HTTP fallback) and the SSE handler
+  // Shared processing — used by the Ao Vivo polling
   const processLiveData = useCallback((data: any) => {
     const now = Date.now();
-    
-    // Handle partial delta updates for sub-second latency
-    if (data.type === "update" && data.matchId) {
-      const matchId = String(data.matchId);
-      const delta = (data.delta && typeof data.delta === "object") ? (data.delta as Record<string, unknown>) : {};
-      const prev = pendingLiveDeltasRef.current[matchId] ?? {};
-      pendingLiveDeltasRef.current[matchId] = { ...prev, ...delta };
-      if (!liveDeltaFlushTimerRef.current) {
-        liveDeltaFlushTimerRef.current = setTimeout(flushPendingLiveDeltas, 120);
-      }
-      return;
-    }
 
     const matches = (data.matches || []) as LiveMatchRaw[];
     if (matches.length === 0) {
@@ -2851,78 +2810,44 @@ export default function Home() {
     });
   }, []);
 
-  const fetchInitial = useCallback(async (showSpinner = false) => {
+  const fetchLive = useCallback(async (showSpinner = false) => {
     if (isIdleRef.current || isLockedRef.current) return;
-    if (showSpinner) {
-      setLiveLoading(true);
-      setUpcomingLoading(true);
-    }
-    let tid: ReturnType<typeof setTimeout> | null = null;
-    let loaded = false;
+    if (showSpinner) setLiveLoading(true);
     try {
-      const qs = new URLSearchParams();
-      if (selectedSport !== "all") qs.set("sport", selectedSport);
-      qs.set("liveLimit", "120");
-      qs.set("upcomingLimit", "60");
-      const q = qs.toString();
       const ctrl = new AbortController();
-      tid = setTimeout(() => ctrl.abort(), 10_000);
-      const res = await fetch(`/api/matches/initial${q ? `?${q}` : ""}`, { signal: ctrl.signal });
-      if (!res.ok) return;
-      const data = await res.json();
-      const live = Array.isArray(data?.live) ? data.live : [];
-      const upcoming = Array.isArray(data?.upcoming) ? data.upcoming : [];
-      writeSnapshot(LIVE_SNAPSHOT_KEY, live);
-      writeSnapshot(upcomingSnapshotKey(selectedSport), upcoming);
-      processLiveData({ matches: live });
-      setUpcomingMatches(upcoming.map((m: any) => ({ ...m, isLive: false })));
-      loaded = true;
-    } catch {
-    } finally {
-      if (tid) {
+      const tid = setTimeout(() => ctrl.abort(), 10_000);
+      try {
+        const res = await fetch("/api/matches/live", { signal: ctrl.signal });
+        const data = res.ok ? await res.json() : { matches: [] };
+        processLiveData(data);
+      } finally {
         try { clearTimeout(tid); } catch {}
       }
-      if (showSpinner) {
-        setLiveLoading(false);
-        setUpcomingLoading(false);
-      }
+    } catch {
+    } finally {
+      if (showSpinner) setLiveLoading(false);
     }
-
-    if (!loaded) {
-      const ctrl2 = new AbortController();
-      const t2 = setTimeout(() => ctrl2.abort(), 10_000);
-      try {
-        const res2 = await fetch("/api/matches/live?lean=1&limit=120", { signal: ctrl2.signal });
-        if (res2.ok) processLiveData(await res2.json());
-      } catch {
-      } finally {
-        try { clearTimeout(t2); } catch {}
-      }
-    }
-  }, [processLiveData, selectedSport, upcomingSnapshotKey, writeSnapshot]);
+  }, [processLiveData]);
 
   const selectMainTab = useCallback((id: typeof activeTab, onSelect?: () => void) => {
     const prev = activeTabRef.current;
     if (prev !== id) setActiveTab(id);
     onSelect?.();
-    if (id === "live" && prev !== "live") fetchInitial(true);
-  }, [fetchInitial]);
-
-  const touchGateRef = useRef(0);
-  const runTouch = useCallback((fn: () => void) => {
-    touchGateRef.current = Date.now();
-    fn();
-  }, []);
-  const runClick = useCallback((fn: () => void) => {
-    if (Date.now() - touchGateRef.current < 650) return;
-    fn();
-  }, []);
+    if (id === "live" && prev !== "live") fetchLive(true);
+  }, [fetchLive]);
 
   useEffect(() => {
     if (!liveLoading) return;
     const id = setTimeout(() => setLiveLoading(false), 12_000);
     return () => clearTimeout(id);
   }, [liveLoading]);
+
+  useEffect(() => {
+    if (activeTab !== "live") return;
+    fetchLive(liveMatches.length === 0);
+    const id = setInterval(() => fetchLive(false), 5_000);
+    return () => clearInterval(id);
+  }, [activeTab, fetchLive, liveMatches.length]);
 
   // Track disappearing live matches to store final scores
   useEffect(() => {
@@ -2937,46 +2862,6 @@ export default function Home() {
     }
     prevLiveMatchesRef.current = [...liveMatches];
   }, [liveMatches]);
-
-  // SSE live stream — replaces polling interval.
-  // The server pushes every 2s (piggybacked on the market drift engine).
-  // EventSource auto-reconnects on network blips.
-  // Falls back to one-off HTTP fetch on open so the UI never waits.
-  useEffect(() => {
-    if (activeTab !== "live" && activeTab !== "mybets") return;
-
-    const snap = readSnapshot<any[]>(LIVE_SNAPSHOT_KEY);
-    if (snap && (Date.now() - snap.savedAt) < 60_000 && Array.isArray(snap.value)) {
-      processLiveData({ matches: snap.value });
-    }
-    fetchInitial(activeTab === "live");
-
-    const es = new EventSource("/api/matches/live-stream?lean=1&limit=120");
-
-    es.onmessage = (ev: MessageEvent) => {
-      if (isIdleRef.current) return;
-      try {
-        const msg = JSON.parse(ev.data as string) as any;
-        if (msg && typeof msg === "object" && msg.type === "update" && typeof msg.matchId === "string" && msg.delta && typeof msg.delta === "object") {
-          const now = Date.now();
-          const matchId = String(msg.matchId);
-          matchLastSeenRef.current[matchId] = now;
-          if (typeof msg.delta.minute === "number") {
-            const prevMin = apiMinutesRef.current[matchId];
-            if (prevMin !== msg.delta.minute) minuteChangedAtRef.current[matchId] = now;
-            apiMinutesRef.current[matchId] = msg.delta.minute;
-          }
-          liveDataFetchedAt.current = now;
-        }
-        processLiveData(msg as any);
-      } catch { /* ignore malformed */ }
-    };
-
-    // onerror fires on reconnect attempts — EventSource handles reconnection
-    // automatically; nothing to do here.
-
-    return () => { es.close(); };
-  }, [activeTab, fetchInitial, processLiveData, readSnapshot]);
 
   // Poll tennis, basketball, hockey, volleyball odds every 60s
   useEffect(() => {
@@ -6780,8 +6665,7 @@ export default function Home() {
           ].map(tab => (
             <button
               key={tab.id}
-              onTouchStart={() => runTouch(() => selectMainTab(tab.id as typeof activeTab, (tab as { onSelect?: () => void }).onSelect))}
-              onClick={() => runClick(() => selectMainTab(tab.id as typeof activeTab, (tab as { onSelect?: () => void }).onSelect))}
+              onClick={() => selectMainTab(tab.id as typeof activeTab, (tab as { onSelect?: () => void }).onSelect)}
               className={`py-3 font-semibold text-sm transition-colors border-b-2 whitespace-nowrap flex items-center gap-2 ${activeTab === tab.id ? "border-red-600 text-white" : "border-transparent text-zinc-500 hover:text-zinc-300"}`}
             >
               {tab.icon}
@@ -6796,8 +6680,7 @@ export default function Home() {
           ))}
           {auth.user && (
             <button
-              onTouchStart={() => runTouch(() => { setActiveTab("wallet"); fetchMyBets(); })}
-              onClick={() => runClick(() => { setActiveTab("wallet"); fetchMyBets(); })}
+              onClick={() => { setActiveTab("wallet"); fetchMyBets(); }}
               className={`py-3 font-semibold text-sm transition-colors border-b-2 whitespace-nowrap flex items-center gap-2 ${activeTab === "wallet" ? "border-red-600 text-white" : "border-transparent text-zinc-500 hover:text-zinc-300"}`}
             >
               <Wallet size={16} />
@@ -6806,8 +6689,7 @@ export default function Home() {
           )}
           {auth.user && (
             <button
-              onTouchStart={() => runTouch(() => { setActiveTab("mybets"); fetchMyBets(); })}
-              onClick={() => runClick(() => { setActiveTab("mybets"); fetchMyBets(); })}
+              onClick={() => { setActiveTab("mybets"); fetchMyBets(); }}
               className={`py-3 font-semibold text-sm transition-colors border-b-2 whitespace-nowrap flex items-center gap-2 ${activeTab === "mybets" ? "border-red-600 text-white" : "border-transparent text-zinc-500 hover:text-zinc-300"}`}
             >
               <History size={16} />
@@ -6816,8 +6698,7 @@ export default function Home() {
           )}
           {auth.user && (
             <button
-              onTouchStart={() => runTouch(() => setActiveTab("profile"))}
-              onClick={() => runClick(() => setActiveTab("profile"))}
+              onClick={() => setActiveTab("profile")}
               className={`py-3 font-semibold text-sm transition-colors border-b-2 whitespace-nowrap flex items-center gap-2 ${activeTab === "profile" ? "border-red-600 text-white" : "border-transparent text-zinc-500 hover:text-zinc-300"}`}
             >
               <User size={16} />
@@ -10267,7 +10148,7 @@ export default function Home() {
                     })()}
                   </h2>
                   <button
-                    onClick={() => fetchInitial(true)}
+                    onClick={() => fetchLive(true)}
                     disabled={false}
                     className="text-xs text-zinc-500 hover:text-white transition-colors border border-zinc-800 hover:border-zinc-600 px-3 py-1.5 rounded-md flex items-center gap-1.5"
                   >

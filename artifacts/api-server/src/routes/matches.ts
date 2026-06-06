@@ -7929,32 +7929,9 @@ export function broadcastMatchDelta(matchId: string, delta: Partial<LiveMatchSta
 
 router.get("/live", async (req, res) => {
   res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0");
-  const lean = String(req.query["lean"] ?? "0") === "1";
-  const includeMarkets = !lean && String(req.query["includeMarkets"] ?? "1") === "1";
-  const includeEvents = !lean && String(req.query["includeEvents"] ?? "1") === "1";
-  const limitRaw = parseInt(String(req.query["limit"] ?? ""), 10);
-  const limit = Number.isFinite(limitRaw) ? Math.max(0, Math.min(500, limitRaw)) : 0;
   try {
     const payload = await buildLivePayload();
-    const matches = limit > 0 ? payload.matches.slice(0, limit) : payload.matches;
-    if (includeMarkets && includeEvents) {
-      res.json({ matches });
-      return;
-    }
-    const out = matches.map(m => {
-      const anyM = m as any;
-      if (includeMarkets && !includeEvents) {
-        const { events, ...rest } = anyM;
-        return rest;
-      }
-      if (!includeMarkets && includeEvents) {
-        const { markets, ...rest } = anyM;
-        return rest;
-      }
-      const { markets, events, ...rest } = anyM;
-      return rest;
-    });
-    res.json({ matches: out });
+    res.json(payload);
   } catch (err) {
     console.error("[live route] unexpected error:", err);
     res.json({ matches: [] });
@@ -8003,32 +7980,9 @@ router.get("/live-stream", (req, res) => {
   sseClients.add(res);
 
   // Send an initial event right away so the client doesn't wait for the next tick
-  const lean = String(req.query["lean"] ?? "0") === "1";
-  const includeMarkets = !lean && String(req.query["includeMarkets"] ?? "1") === "1";
-  const includeEvents = !lean && String(req.query["includeEvents"] ?? "1") === "1";
-  const limitRaw = parseInt(String(req.query["limit"] ?? ""), 10);
-  const limit = Number.isFinite(limitRaw) ? Math.max(0, Math.min(500, limitRaw)) : 0;
   buildLivePayload()
     .then(p => {
-      const matches = limit > 0 ? p.matches.slice(0, limit) : p.matches;
-      if (includeMarkets && includeEvents) {
-        try { res.write(`data: ${JSON.stringify({ matches })}\n\n`); } catch { /* ignore */ }
-        return;
-      }
-      const out = matches.map(m => {
-        const anyM = m as any;
-        if (includeMarkets && !includeEvents) {
-          const { events, ...rest } = anyM;
-          return rest;
-        }
-        if (!includeMarkets && includeEvents) {
-          const { markets, ...rest } = anyM;
-          return rest;
-        }
-        const { markets, events, ...rest } = anyM;
-        return rest;
-      });
-      try { res.write(`data: ${JSON.stringify({ matches: out })}\n\n`); } catch { /* ignore */ }
+      try { res.write(`data: ${JSON.stringify(p)}\n\n`); } catch { /* ignore */ }
     })
     .catch(() => { /* ignore */ });
 
@@ -8551,66 +8505,6 @@ router.get("/wc2026", async (_req, res) => {
 function waitMs(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
-
-router.get("/initial", async (req, res) => {
-  res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0");
-  const sport = String(req.query["sport"] ?? "all");
-  const includeMarkets = String(req.query["includeMarkets"] ?? "0") === "1";
-  const includeEvents = String(req.query["includeEvents"] ?? "0") === "1";
-  const liveLimitRaw = parseInt(String(req.query["liveLimit"] ?? ""), 10);
-  const upcomingLimitRaw = parseInt(String(req.query["upcomingLimit"] ?? ""), 10);
-  const liveLimit = Number.isFinite(liveLimitRaw) ? Math.max(0, Math.min(250, liveLimitRaw)) : 0;
-  const upcomingLimit = Number.isFinite(upcomingLimitRaw) ? Math.max(0, Math.min(250, upcomingLimitRaw)) : 60;
-  try {
-    const [livePayload, upcomingCache] = await Promise.all([
-      buildLivePayload(),
-      upcomingTopCache
-        ? getUpcomingAll()
-        : Promise.race([
-            getUpcomingAll(),
-            waitMs(1500).then(() => upcomingTopCache ?? { football: [], tennis: [], basketball: [], hockey: [], volleyball: [], baseball: [], fetchedAt: Date.now() }),
-          ]),
-    ]);
-
-    let upcoming: UpcomingMatch[];
-    if (sport === "football") upcoming = upcomingCache.football;
-    else if (sport === "tennis") upcoming = upcomingCache.tennis;
-    else if (sport === "basketball") upcoming = upcomingCache.basketball;
-    else if (sport === "hockey") upcoming = upcomingCache.hockey;
-    else if (sport === "volleyball") upcoming = upcomingCache.volleyball;
-    else if (sport === "baseball") upcoming = upcomingCache.baseball;
-    else upcoming = [...upcomingCache.football, ...upcomingCache.tennis, ...upcomingCache.basketball, ...upcomingCache.hockey, ...upcomingCache.volleyball, ...upcomingCache.baseball];
-
-    const live = (liveLimit > 0 ? livePayload.matches.slice(0, liveLimit) : livePayload.matches)
-      .map(m => {
-        const anyM = m as any;
-        if (includeMarkets && includeEvents) return anyM;
-        if (includeMarkets && !includeEvents) {
-          const { events, ...rest } = anyM;
-          return rest;
-        }
-        if (!includeMarkets && includeEvents) {
-          const { markets, ...rest } = anyM;
-          return rest;
-        }
-        const { markets, events, ...rest } = anyM;
-        return rest;
-      });
-    const up = upcoming
-      .filter(m => m.hasRealOdds)
-      .slice(0, upcomingLimit)
-      .map(m => {
-        const anyM = m as any;
-        if (includeMarkets) return anyM;
-        const { markets, ...rest } = anyM;
-        return rest;
-      });
-    res.json({ serverTime: Date.now(), live, upcoming: up });
-  } catch (err) {
-    console.error("[initial route] unexpected error:", err);
-    res.json({ serverTime: Date.now(), live: [], upcoming: [] });
-  }
-});
 
 router.get("/upcoming", async (req, res) => {
   const sport = String(req.query["sport"] ?? "all");
