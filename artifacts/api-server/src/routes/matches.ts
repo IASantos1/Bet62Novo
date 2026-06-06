@@ -180,6 +180,8 @@ export type LiveMatchState = {
   // Timestamps for stale-match expiry
   _firstSeenAt?: number;   // ms — when this match first appeared in live feed
   _htStartedAt?: number;   // ms — when status first became "HT" (resets on 2H kick-off)
+  _lastSeenAt?: number;    // ms — last time this match was observed in provider feed
+  _missingSinceAt?: number; // ms — when this match first disappeared from provider feed
   // Sport-specific live display data
   _liveExtra?: {
     clockStr?: string;                   // basketball/hockey: "06:44"
@@ -5810,6 +5812,8 @@ async function buildLiveMatches(): Promise<LiveMatchState[]> {
     .sort((a, b) => leaguePriority(a.name, a.country) - leaguePriority(b.name, b.country))
     .filter(l => leaguePriority(l.name, l.country) < 100);
 
+  const LIVE_DISAPPEAR_GRACE_MS = 12 * 60 * 1000;
+
   // ── Garbage-collect liveMatchState for IDs no longer in the Statpal response ──
   const currentMatchIds = new Set<string>();
   for (const league of sorted) {
@@ -5817,41 +5821,22 @@ async function buildLiveMatches(): Promise<LiveMatchState[]> {
     for (const m of ms) currentMatchIds.add(m.main_id);
   }
   for (const id of liveMatchState.keys()) {
-    if (!currentMatchIds.has(id)) {
-      const state = liveMatchState.get(id)!;
-      // Capture final result for bet auto-settlement before evicting
-      const ht = state._liveExtra?.htScore;
-      const et = state._liveExtra?.etScore;
-      const pen = state._liveExtra?.penScore;
-
-      const totalHome = state.homeScore;
-      const totalAway = state.awayScore;
-      const etHome = et?.[0] ?? 0;
-      const etAway = et?.[1] ?? 0;
-      const penHome = pen?.[0] ?? 0;
-      const penAway = pen?.[1] ?? 0;
-      const ftHome = Math.max(0, totalHome - etHome - penHome);
-      const ftAway = Math.max(0, totalAway - etAway - penAway);
-
-      finishedMatchResults.set(id, {
-        home: state.homeScore,
-        away: state.awayScore,
-        htHome: ht?.[0],
-        htAway: ht?.[1],
-        homeTeam: state.home,
-        awayTeam: state.away,
-        extras: {
-          football: {
-            ftHome,
-            ftAway,
-            etHome,
-            etAway,
-            penHome,
-            penAway,
-          },
-        },
-        finishedAt: Date.now(),
-      });
+    const state = liveMatchState.get(id);
+    if (!state) continue;
+    if (state.sport !== "football") continue;
+    if (id.startsWith("football-v2-")) continue;
+    if (currentMatchIds.has(id)) {
+      if (state._missingSinceAt) {
+        liveMatchState.set(id, { ...state, _missingSinceAt: undefined });
+      }
+      continue;
+    }
+    const missingSince = state._missingSinceAt ?? Date.now();
+    if (!state._missingSinceAt) {
+      liveMatchState.set(id, { ...state, _missingSinceAt: missingSince });
+      continue;
+    }
+    if (Date.now() - missingSince > LIVE_DISAPPEAR_GRACE_MS) {
       liveMatchState.delete(id);
     }
   }
@@ -6611,6 +6596,7 @@ async function buildFootballLiveV2(events: SAPIV2Event[]): Promise<LiveMatchStat
   const now = Date.now();
   const result: LiveMatchState[] = [];
   const currentIds = new Set<string>();
+  const LIVE_DISAPPEAR_GRACE_MS = 12 * 60 * 1000;
 
   const pool = async <T>(items: T[], limit: number, fn: (item: T) => Promise<void>): Promise<void> => {
     let i = 0;
@@ -6812,6 +6798,8 @@ async function buildFootballLiveV2(events: SAPIV2Event[]): Promise<LiveMatchStat
           marketSuspension: susp,
           _suspensionReason: isVARStatus ? "REVISÃO AO VAR" : "GOLO!",
           _liveExtra: liveExtra,
+          _lastSeenAt: now,
+          _missingSinceAt: undefined,
         };
         liveMatchState.set(id, applyTieredMarketDrift(updated, now));
       } else {
@@ -6844,6 +6832,8 @@ async function buildFootballLiveV2(events: SAPIV2Event[]): Promise<LiveMatchStat
             marketSuspension: susp,
             _suspensionReason: "REVISÃO AO VAR",
             _liveExtra: liveExtra,
+            _lastSeenAt: now,
+            _missingSinceAt: undefined,
           };
           liveMatchState.set(id, applyTieredMarketDrift(updated, now));
         } else {
@@ -6857,6 +6847,8 @@ async function buildFootballLiveV2(events: SAPIV2Event[]): Promise<LiveMatchStat
             marketSuspension: susp,
             _suspensionReason: susp ? existing._suspensionReason : undefined,
             _liveExtra: liveExtra,
+            _lastSeenAt: now,
+            _missingSinceAt: undefined,
           };
           liveMatchState.set(id, applyTieredMarketDrift(updated, now));
         }
@@ -6889,6 +6881,7 @@ async function buildFootballLiveV2(events: SAPIV2Event[]): Promise<LiveMatchStat
         markets,
         events: [],
         _firstSeenAt: now,
+        _lastSeenAt: now,
         _baseOdds: baseOdds,
         _baseMarkets: markets,
         _oddsUpdatedAt: now,
@@ -6904,17 +6897,41 @@ async function buildFootballLiveV2(events: SAPIV2Event[]): Promise<LiveMatchStat
   // Garbage collect football matches no longer in the V2 live feed
   // Also evict matches blocked by youth filter or stuck > 4h (frozen feed safety net)
   const MAX_V2_LIVE_MS = 4 * 60 * 60 * 1000; // 4 hours
+  const resultIds = new Set(result.map(m => String(m.id)));
   for (const id of liveMatchState.keys()) {
     if (!id.startsWith("football-v2-")) continue;
-    const state = liveMatchState.get(id)!;
+    const state = liveMatchState.get(id);
+    if (!state) continue;
     const tooOld = now - (state._firstSeenAt ?? now) > MAX_V2_LIVE_MS;
     const blockedNow = isBlockedLeague(`${state.league} ${state.home} ${state.away}`);
-    if (!currentIds.has(id) || tooOld || blockedNow) {
-      finishedMatchResults.set(id, {
-        home: state.homeScore, away: state.awayScore,
-        homeTeam: state.home, awayTeam: state.away, finishedAt: now,
-      });
+    if (tooOld || blockedNow) {
       liveMatchState.delete(id);
+      _v2StuckTracker.delete(id);
+      continue;
+    }
+    if (currentIds.has(id)) continue;
+    const missingSince = state._missingSinceAt ?? now;
+    if (!state._missingSinceAt) {
+      const updated: LiveMatchState = {
+        ...state,
+        _missingSinceAt: missingSince,
+        _suspensionReason: "SINAL INSTÁVEL",
+      };
+      liveMatchState.set(id, updated);
+      if (!resultIds.has(id)) {
+        result.push(updated);
+        resultIds.add(id);
+      }
+      continue;
+    }
+    if (now - missingSince > LIVE_DISAPPEAR_GRACE_MS) {
+      liveMatchState.delete(id);
+      _v2StuckTracker.delete(id);
+      continue;
+    }
+    if (!resultIds.has(id)) {
+      result.push(state);
+      resultIds.add(id);
     }
   }
 
