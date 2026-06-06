@@ -1547,6 +1547,7 @@ export default function Home() {
   const [betPlacedAnim, setBetPlacedAnim] = useState(false);
   const prevWonBetIds = useRef<Set<number> | null>(null);
   const prevLiveMatchesRef = useRef<Match[]>([]);
+  const liveExpandedFullFetchRef = useRef<string | null>(null);
   const finishedMatchScores = useRef<Map<string, { home: number; away: number }>>(new Map());
 
   // Deposit modal
@@ -2372,8 +2373,43 @@ export default function Home() {
   useEffect(() => {
     if (!expandedMatch?.isLive) return;
     const updated = liveMatches.find(m => String(m.id) === String(expandedMatch.id));
-    if (updated) setExpandedMatch({ ...updated });
+    if (updated) {
+      setExpandedMatch(prev => {
+        if (!prev || String(prev.id) !== String(updated.id)) return { ...updated };
+        const anyUpdated = updated as any;
+        const anyPrev = prev as any;
+        return {
+          ...anyUpdated,
+          markets: anyUpdated.markets ?? anyPrev.markets,
+          events: anyUpdated.events ?? anyPrev.events,
+        };
+      });
+    }
   }, [liveMatches]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (!expandedMatch?.isLive) return;
+    const id = String(expandedMatch.id);
+    const hasMarkets = !!(expandedMatch as any).markets;
+    if (hasMarkets) return;
+    if (liveExpandedFullFetchRef.current === id) return;
+    liveExpandedFullFetchRef.current = id;
+    const ctrl = new AbortController();
+    const tid = setTimeout(() => ctrl.abort(), 12_000);
+    fetch(`/api/matches/live-match/${encodeURIComponent(id)}`, { signal: ctrl.signal })
+      .then(r => r.ok ? r.json() : null)
+      .then(d => {
+        const m = d?.match as Match | null | undefined;
+        if (!m) return;
+        setExpandedMatch(prev => (prev && String(prev.id) === id ? (m as any) : prev));
+      })
+      .catch(() => {})
+      .finally(() => {
+        clearTimeout(tid);
+        if (liveExpandedFullFetchRef.current === id) liveExpandedFullFetchRef.current = null;
+      });
+    return () => { clearTimeout(tid); ctrl.abort(); };
+  }, [expandedMatch?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Clear seenMatchIds when leaving live tab so new entries animate on return
   useEffect(() => {

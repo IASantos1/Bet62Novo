@@ -7951,6 +7951,22 @@ router.get("/live", async (req, res) => {
   }
 });
 
+router.get("/live-match/:id", async (req, res) => {
+  res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0");
+  const id = String(req.params["id"] ?? "");
+  if (!id) {
+    res.json({ match: null });
+    return;
+  }
+  try {
+    const payload = await buildLivePayload();
+    const match = payload.matches.find(m => String(m.id) === id) ?? null;
+    res.json({ match });
+  } catch {
+    res.json({ match: null });
+  }
+});
+
 router.get("/feed-status", (_req, res) => {
   res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0");
   const now = Date.now();
