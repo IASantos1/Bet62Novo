@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useRef, createContext, useContext, type ReactNode } from "react";
+import { useState, useCallback, useEffect, useRef, useMemo, createContext, useContext, Children, type ReactNode } from "react";
 import { useIdle } from "@/hooks/use-idle";
 import { motion, AnimatePresence } from "framer-motion";
 import { toast } from "sonner";
@@ -1222,6 +1222,7 @@ type MatchStatsData = {
 type StandingRow = { pos: number; name: string; played: number; won: number; drawn: number; lost: number; gf: number; ga: number; pts: number };
 
 const MarketTabCtx = createContext<string>("");
+const MarketGroupSeqCtx = createContext<{ next: () => number } | null>(null);
 
 function nifMask(value: string) {
   return value
@@ -1949,6 +1950,13 @@ export default function Home() {
   const [matchViewTab, setMatchViewTab] = useState<"markets" | "stats" | "standings" | "live" | "yesterday" | "ranking" | "liga" | "odds" | "lineups" | "confrontos">("markets");
   // Market sub-tab — lifted here so live refreshes don't unmount MatchModalMarkets and reset the selection
   const [modalTab, setModalTab] = useState("todos");
+  const marketGroupSeqRef = useRef(0);
+  const marketGroupSeqApi = useMemo(() => ({
+    next: () => {
+      marketGroupSeqRef.current += 1;
+      return marketGroupSeqRef.current;
+    }
+  }), []);
   const [matchStats, setMatchStats] = useState<MatchStatsData | null>(null);
   const [matchStatsLoading, setMatchStatsLoading] = useState(false);
   type V2StatsGroup = { title: string; rows: Array<{ name: string; home: string; away: string }> };
@@ -4619,7 +4627,10 @@ export default function Home() {
   const MarketGrid2Group = ({ title, children }: { title: string; children: ReactNode }) => {
     const tab = useContext(MarketTabCtx);
     const collapsible = tab === "todos";
-    const [open, setOpen] = useState(true);
+    const seq = useContext(MarketGroupSeqCtx);
+    const idx = useMemo(() => seq?.next() ?? 9999, []); // eslint-disable-line react-hooks/exhaustive-deps
+    const childCount = Children.count(children);
+    const [open, setOpen] = useState(!collapsible || idx <= 5);
     if (!collapsible) {
       return (
         <div className="mb-4 last:mb-0">
@@ -4635,7 +4646,10 @@ export default function Home() {
           onClick={() => setOpen(o => !o)}
         >
           <span className="text-[10px] font-black text-zinc-300 uppercase tracking-widest">{title}</span>
-          <ChevronDown size={14} className={`text-zinc-500 transition-transform duration-200 ${open ? "rotate-180" : ""}`} />
+          <div className="flex items-center gap-2">
+            <span className="text-[10px] font-bold text-zinc-500 tabular-nums">{childCount}</span>
+            <ChevronDown size={14} className={`text-zinc-500 transition-transform duration-200 ${open ? "rotate-180" : ""}`} />
+          </div>
         </button>
         {open && (
           <div className="px-3 py-3">
@@ -4649,7 +4663,10 @@ export default function Home() {
   const MarketGroup = ({ title, children }: { title: string; children: ReactNode }) => {
     const tab = useContext(MarketTabCtx);
     const collapsible = tab === "todos";
-    const [open, setOpen] = useState(true);
+    const seq = useContext(MarketGroupSeqCtx);
+    const idx = useMemo(() => seq?.next() ?? 9999, []); // eslint-disable-line react-hooks/exhaustive-deps
+    const childCount = Children.count(children);
+    const [open, setOpen] = useState(!collapsible || idx <= 5);
 
     if (!collapsible) {
       return (
@@ -4667,7 +4684,10 @@ export default function Home() {
           onClick={() => setOpen(o => !o)}
         >
           <span className="text-[10px] font-black text-zinc-300 uppercase tracking-widest">{title}</span>
-          <ChevronDown size={14} className={`text-zinc-500 transition-transform duration-200 ${open ? "rotate-180" : ""}`} />
+          <div className="flex items-center gap-2">
+            <span className="text-[10px] font-bold text-zinc-500 tabular-nums">{childCount}</span>
+            <ChevronDown size={14} className={`text-zinc-500 transition-transform duration-200 ${open ? "rotate-180" : ""}`} />
+          </div>
         </button>
         {open && (
           <div className="px-3 py-3">
@@ -4821,8 +4841,10 @@ export default function Home() {
       );
     }
 
+    marketGroupSeqRef.current = 0;
     return (
       <MarketTabCtx.Provider value={modalTab}>
+      <MarketGroupSeqCtx.Provider key={`mgrp:${match.id}:${modalTab}`} value={marketGroupSeqApi}>
       <div className="mt-2">
         <div ref={tabContainerRef} className="flex gap-1 overflow-x-auto no-scrollbar mb-4 pb-1 border-b border-zinc-800" style={{ scrollbarWidth: "none", touchAction: "pan-x", WebkitOverflowScrolling: "touch" } as React.CSSProperties}>
           {tabs.map(t => (
@@ -5464,15 +5486,27 @@ export default function Home() {
           return (
             <div className="mb-4">
               <p className="text-xs text-zinc-500 mb-3 font-medium">{setNum}º Set — Placar Exato</p>
-              <div className="grid grid-cols-2 gap-x-3 mb-1">
-                <div className="text-xs text-zinc-400 text-center font-semibold pb-1 border-b border-zinc-700 truncate">{match.home}</div>
-                <div className="text-xs text-zinc-400 text-center font-semibold pb-1 border-b border-zinc-700 truncate">{match.away}</div>
-              </div>
-              <div className="grid grid-cols-2 gap-x-3 gap-y-2 mt-2">
-                {Array.from({ length: maxRows }).flatMap((_, i) => [
-                  <div key={`hw-${i}`} className="flex">{homeWins[i] ? <MarketOddsBtn match={match} sel={`ses-${homeWins[i][0]}`} odd={homeWins[i][1]} market="placar" label={homeWins[i][0]} /> : <div className="flex-1" />}</div>,
-                  <div key={`aw-${i}`} className="flex">{awayWins[i] ? <MarketOddsBtn match={match} sel={`ses-${awayWins[i][0]}`} odd={awayWins[i][1]} market="placar" label={awayWins[i][0]} /> : <div className="flex-1" />}</div>,
-                ])}
+              <div className="space-y-4">
+                <div>
+                  <div className="text-xs text-zinc-400 font-semibold pb-1 border-b border-zinc-700 truncate">{match.home}</div>
+                  <div className="flex flex-col gap-2 mt-2">
+                    {homeWins.map(([score, odd]) => (
+                      <div key={`ses-h-${score}`} className="flex">
+                        <MarketOddsBtn match={match} sel={`ses-${score}`} odd={odd} market="placar" label={score} />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-xs text-zinc-400 font-semibold pb-1 border-b border-zinc-700 truncate">{match.away}</div>
+                  <div className="flex flex-col gap-2 mt-2">
+                    {awayWins.map(([score, odd]) => (
+                      <div key={`ses-a-${score}`} className="flex">
+                        <MarketOddsBtn match={match} sel={`ses-${score}`} odd={odd} market="placar" label={score} />
+                      </div>
+                    ))}
+                  </div>
+                </div>
               </div>
             </div>
           );
@@ -5490,15 +5524,27 @@ export default function Home() {
           return (
             <div className="mb-4">
               <p className="text-xs text-zinc-500 mb-3 font-medium">✓ 1º Set — Resultado Final</p>
-              <div className="grid grid-cols-2 gap-x-3 mb-1">
-                <div className="text-xs text-zinc-400 text-center font-semibold pb-1 border-b border-zinc-700 truncate">{match.home}</div>
-                <div className="text-xs text-zinc-400 text-center font-semibold pb-1 border-b border-zinc-700 truncate">{match.away}</div>
-              </div>
-              <div className="grid grid-cols-2 gap-x-3 gap-y-2 mt-2">
-                {Array.from({ length: maxRows1 }).flatMap((_, i) => [
-                  <div key={`s1hw-${i}`} className="flex">{homeWins1[i] ? <MarketOddsBtn match={match} sel={`s1es-${homeWins1[i][0]}`} odd={homeWins1[i][1]} market="placar" label={homeWins1[i][0]} /> : <div className="flex-1" />}</div>,
-                  <div key={`s1aw-${i}`} className="flex">{awayWins1[i] ? <MarketOddsBtn match={match} sel={`s1es-${awayWins1[i][0]}`} odd={awayWins1[i][1]} market="placar" label={awayWins1[i][0]} /> : <div className="flex-1" />}</div>,
-                ])}
+              <div className="space-y-4">
+                <div>
+                  <div className="text-xs text-zinc-400 font-semibold pb-1 border-b border-zinc-700 truncate">{match.home}</div>
+                  <div className="flex flex-col gap-2 mt-2">
+                    {homeWins1.map(([score, odd]) => (
+                      <div key={`s1es-h-${score}`} className="flex">
+                        <MarketOddsBtn match={match} sel={`s1es-${score}`} odd={odd} market="placar" label={score} />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-xs text-zinc-400 font-semibold pb-1 border-b border-zinc-700 truncate">{match.away}</div>
+                  <div className="flex flex-col gap-2 mt-2">
+                    {awayWins1.map(([score, odd]) => (
+                      <div key={`s1es-a-${score}`} className="flex">
+                        <MarketOddsBtn match={match} sel={`s1es-${score}`} odd={odd} market="placar" label={score} />
+                      </div>
+                    ))}
+                  </div>
+                </div>
               </div>
             </div>
           );
@@ -5516,15 +5562,27 @@ export default function Home() {
           return (
             <div className="mb-4">
               <p className="text-xs text-zinc-500 mb-3 font-medium">✓ 2º Set — Resultado Final</p>
-              <div className="grid grid-cols-2 gap-x-3 mb-1">
-                <div className="text-xs text-zinc-400 text-center font-semibold pb-1 border-b border-zinc-700 truncate">{match.home}</div>
-                <div className="text-xs text-zinc-400 text-center font-semibold pb-1 border-b border-zinc-700 truncate">{match.away}</div>
-              </div>
-              <div className="grid grid-cols-2 gap-x-3 gap-y-2 mt-2">
-                {Array.from({ length: maxRows2 }).flatMap((_, i) => [
-                  <div key={`s2hw-${i}`} className="flex">{homeWins2[i] ? <MarketOddsBtn match={match} sel={`s2es-${homeWins2[i][0]}`} odd={homeWins2[i][1]} market="placar" label={homeWins2[i][0]} /> : <div className="flex-1" />}</div>,
-                  <div key={`s2aw-${i}`} className="flex">{awayWins2[i] ? <MarketOddsBtn match={match} sel={`s2es-${awayWins2[i][0]}`} odd={awayWins2[i][1]} market="placar" label={awayWins2[i][0]} /> : <div className="flex-1" />}</div>,
-                ])}
+              <div className="space-y-4">
+                <div>
+                  <div className="text-xs text-zinc-400 font-semibold pb-1 border-b border-zinc-700 truncate">{match.home}</div>
+                  <div className="flex flex-col gap-2 mt-2">
+                    {homeWins2.map(([score, odd]) => (
+                      <div key={`s2es-h-${score}`} className="flex">
+                        <MarketOddsBtn match={match} sel={`s2es-${score}`} odd={odd} market="placar" label={score} />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-xs text-zinc-400 font-semibold pb-1 border-b border-zinc-700 truncate">{match.away}</div>
+                  <div className="flex flex-col gap-2 mt-2">
+                    {awayWins2.map(([score, odd]) => (
+                      <div key={`s2es-a-${score}`} className="flex">
+                        <MarketOddsBtn match={match} sel={`s2es-${score}`} odd={odd} market="placar" label={score} />
+                      </div>
+                    ))}
+                  </div>
+                </div>
               </div>
             </div>
           );
@@ -6158,6 +6216,7 @@ export default function Home() {
 
         {!m && <div className="text-center text-zinc-500 py-6 text-sm">Mercados adicionais indisponíveis para esta partida.</div>}
       </div>
+      </MarketGroupSeqCtx.Provider>
       </MarketTabCtx.Provider>
     );
   };
