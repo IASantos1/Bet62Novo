@@ -3170,6 +3170,13 @@ export default function Home() {
     return () => window.clearTimeout(t);
   }, [isLocked, biometricAvailable, biometricCredentialId, handleBiometricUnlock]);
 
+  useEffect(() => {
+    if (!isLocked) return;
+    if (!(biometricAvailable && biometricCredentialId)) return;
+    const t = window.setTimeout(() => { void handleBiometricUnlock(); }, 120);
+    return () => window.clearTimeout(t);
+  }, [isLocked, biometricAvailable, biometricCredentialId]);
+
   const handleRegisterBiometric = async () => {
     if (!auth.user) return;
     try {
@@ -5457,18 +5464,6 @@ export default function Home() {
           <div className="text-center text-zinc-600 py-6 text-sm">Mercado não disponível para esta partida.</div>
         )}
 
-        {/* ── FUTEBOL: PLACAR EXATO DO 1º TEMPO ── */}
-        {isFootball && !showET && !showPen && show1tempo && (modalTab === "1tempo" || modalTab === "todos") && m && (m as any).htCorrectScore && Object.keys((m as any).htCorrectScore as Record<string, number>).length > 1 && (
-          <div>
-            <p className="text-xs text-zinc-500 mb-3">Marcador exato ao intervalo.</p>
-            <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
-              {Object.entries((m as any).htCorrectScore as Record<string, number>).map(([score, odd]) => (
-                <MarketOddsBtn key={score} match={match} sel={`htcs-${score}`} odd={odd as number} market="1tempo" label={score} />
-              ))}
-            </div>
-          </div>
-        )}
-
         {/* ── FUTEBOL: GOLS POR EQUIPA — 1º TEMPO ── */}
         {isFootball && !showET && !showPen && show1tempo && (modalTab === "1tempo" || modalTab === "todos") && m && (m as any).teamGoals?.homeOver05 > 0 && (
           <div>
@@ -6518,7 +6513,7 @@ export default function Home() {
               {/* Title + user */}
               <div className="text-center">
                 <p className="text-white font-black text-xl tracking-tight">Desbloqueio facial</p>
-                <p className="text-zinc-500 text-xs mt-1">Voltou ao app/site. Confirme para continuar.</p>
+                <p className="text-zinc-600 text-xs mt-1">120 segundos sem atividade detectada</p>
               </div>
 
               <div className="w-full flex flex-col items-center gap-2">
