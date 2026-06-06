@@ -90,6 +90,55 @@ import parisFCBanner from "@assets/file_1779019459045_1779019658504.jpeg";
 import lorientBanner from "@assets/file_1779019450188_1779019658504.jpeg";
 import brestBanner from "@assets/file_1779019468348_1779019658504.jpeg";
 
+// ── Copa do Mundo 2026 — Seleções Nacionais ──
+import ghanaBanner from "@assets/file_1780780661723_1780781005840.jpeg";
+import englandBanner from "@assets/file_1780780657153_1780781005840.jpeg";
+import panamaBanner from "@assets/file_1780780651333_1780781005840.jpeg";
+import spainBanner from "@assets/file_1780780613202_1780781005840.jpeg";
+import algeriaBanner from "@assets/file_1780780608279_1780781005840.jpeg";
+import austriaBanner from "@assets/file_1780780601696_1780781005840.jpeg";
+import jordanBanner from "@assets/file_1780780596680_1780781005840.jpeg";
+import portugalBanner from "@assets/file_1780780589392_1780781005840.jpeg";
+import colombiaBanner from "@assets/file_1780780582677_1780781005840.jpeg";
+import drCongoBanner from "@assets/file_1780780578373_1780781005840.jpeg";
+import uzbekistanBanner from "@assets/file_1780780571015_1780781005840.jpeg";
+import croatiaBanner from "@assets/file_1780780566159_1780781005840.jpeg";
+import brazilNationalBanner from "@assets/file_1780272909971_1780780146439.jpeg";
+import mexicoNationalBanner from "@assets/file_1780272818069_1780780146439.jpeg";
+import usaBanner from "@assets/file_1780272929955_1780780146439.jpeg";
+import canadaNationalBanner from "@assets/file_1780272885494_1780780146439.jpeg";
+import scotlandBanner from "@assets/file_1780272925744_1780780146439.jpeg";
+import moroccoBanner from "@assets/file_1780272914437_1780780146439.jpeg";
+import southAfricaBanner from "@assets/file_1780272827972_1780780146439.jpeg";
+import southKoreaBanner from "@assets/file_1780272832352_1780780146439.jpeg";
+import australiaBanner from "@assets/file_1780272935048_1780780146439.jpeg";
+import paraguayBanner from "@assets/file_1780272941088_1780780146438.jpeg";
+import haitiBanner from "@assets/file_1780272921122_1780780146439.jpeg";
+import qatarBanner from "@assets/file_1780272899159_1780780146439.jpeg";
+import switzerlandBanner from "@assets/file_1780272904435_1780780146439.jpeg";
+import bosniaBanner from "@assets/file_1780272890958_1780780146439.jpeg";
+import czechRepublicBanner from "@assets/file_1780272840445_1780780146439.jpeg";
+import franceBanner from "@assets/file_1780273049333_1780779933809.jpeg";
+import germanyBanner from "@assets/file_1780272950823_1780779933809.jpeg";
+import netherlandsBanner from "@assets/file_1780272976718_1780779933809.jpeg";
+import belgiumBanner from "@assets/file_1780273000997_1780779933809.jpeg";
+import swedenBanner from "@assets/file_1780272982273_1780779933809.jpeg";
+import turkeyBanner from "@assets/file_1780272944606_1780779933809.jpeg";
+import uruguayBanner from "@assets/file_1780273044009_1780779933809.jpeg";
+import ecuadorBanner from "@assets/file_1780272966570_1780779933809.jpeg";
+import japanBanner from "@assets/file_1780272971512_1780779933809.jpeg";
+import iranBanner from "@assets/file_1780273021889_1780779933809.jpeg";
+import iraqBanner from "@assets/file_1780273054337_1780779933809.jpeg";
+import saudiArabiaBanner from "@assets/file_1780273037555_1780779933809.jpeg";
+import egyptBanner from "@assets/file_1780273007462_1780779933809.jpeg";
+import tunisiaBanner from "@assets/file_1780272994238_1780779933809.jpeg";
+import senegalBanner from "@assets/file_1780273066530_1780779933809.jpeg";
+import norwayBanner from "@assets/file_1780273061419_1780779933809.jpeg";
+import newZealandBanner from "@assets/file_1780273027929_1780779933809.jpeg";
+import ivoryCastBanner from "@assets/file_1780272957669_1780779933809.jpeg";
+import capeVerdeBanner from "@assets/file_1780273032822_1780779933809.jpeg";
+import curacaoBanner from "@assets/file_1780272962091_1780779933809.jpeg";
+
 const TEAM_BANNERS: Record<string, string> = {
   // ── Liga Portugal ──
   "FC Porto": "/banners/porto.jpg",
@@ -400,6 +449,56 @@ const TEAM_BANNERS: Record<string, string> = {
   "SC Heerenveen": heerenveenBanner,
   "Heerenveen": heerenveenBanner,
   "Go Ahead Eagles": goAheadEaglesBanner,
+  // ── Copa do Mundo 2026 — Seleções Nacionais (time da casa) ──
+  "France": franceBanner, "França": franceBanner, "Frankreich": franceBanner,
+  "Germany": germanyBanner, "Deutschland": germanyBanner, "Alemanha": germanyBanner,
+  "Netherlands": netherlandsBanner, "Holland": netherlandsBanner, "Países Baixos": netherlandsBanner,
+  "Belgium": belgiumBanner, "Belgique": belgiumBanner, "Bélgica": belgiumBanner,
+  "Sweden": swedenBanner, "Sverige": swedenBanner, "Suécia": swedenBanner,
+  "Turkey": turkeyBanner, "Türkiye": turkeyBanner, "Turquia": turkeyBanner,
+  "Uruguay": uruguayBanner, "Uruguai": uruguayBanner,
+  "Ecuador": ecuadorBanner, "Equador": ecuadorBanner,
+  "Japan": japanBanner, "Japon": japanBanner, "Japão": japanBanner,
+  "Iran": iranBanner, "IR Iran": iranBanner, "Irã": iranBanner, "Iran Islamic Republic": iranBanner,
+  "Iraq": iraqBanner, "Iraque": iraqBanner,
+  "Saudi Arabia": saudiArabiaBanner, "Arábia Saudita": saudiArabiaBanner, "Arabia Saudita": saudiArabiaBanner,
+  "Egypt": egyptBanner, "Egito": egyptBanner,
+  "Tunisia": tunisiaBanner, "Tunísia": tunisiaBanner, "Tunisie": tunisiaBanner,
+  "Senegal": senegalBanner, "Sénégal": senegalBanner,
+  "Norway": norwayBanner, "Noruega": norwayBanner, "Norge": norwayBanner,
+  "New Zealand": newZealandBanner, "Nova Zelândia": newZealandBanner, "Nueva Zelanda": newZealandBanner,
+  "Ivory Coast": ivoryCastBanner, "Côte d'Ivoire": ivoryCastBanner, "Cote d'Ivoire": ivoryCastBanner, "Cote dIvoire": ivoryCastBanner,
+  "Cape Verde": capeVerdeBanner, "Cabo Verde": capeVerdeBanner,
+  "Curaçao": curacaoBanner, "Curacao": curacaoBanner,
+  // ── Copa do Mundo 2026 — Seleções Nacionais (lote 2) ──
+  "Brazil": brazilNationalBanner, "Brasil": brazilNationalBanner,
+  "Mexico": mexicoNationalBanner, "México": mexicoNationalBanner,
+  "United States": usaBanner, "USA": usaBanner, "US": usaBanner, "Estados Unidos": usaBanner,
+  "Canada": canadaNationalBanner,
+  "Scotland": scotlandBanner, "Escócia": scotlandBanner,
+  "Morocco": moroccoBanner, "Marrocos": moroccoBanner, "Maroc": moroccoBanner,
+  "South Africa": southAfricaBanner, "África do Sul": southAfricaBanner,
+  "South Korea": southKoreaBanner, "Korea Republic": southKoreaBanner, "Coreia do Sul": southKoreaBanner,
+  "Australia": australiaBanner, "Austrália": australiaBanner,
+  "Paraguay": paraguayBanner, "Paraguai": paraguayBanner,
+  "Haiti": haitiBanner,
+  "Qatar": qatarBanner,
+  "Switzerland": switzerlandBanner, "Suíça": switzerlandBanner, "Schweiz": switzerlandBanner,
+  "Bosnia and Herzegovina": bosniaBanner, "Bosnia": bosniaBanner, "Bósnia": bosniaBanner,
+  "Czech Republic": czechRepublicBanner, "Czechia": czechRepublicBanner, "República Checa": czechRepublicBanner,
+  // ── Copa do Mundo 2026 — Seleções Nacionais (lote 3) ──
+  "Ghana": ghanaBanner,
+  "England": englandBanner, "Inglaterra": englandBanner, "Angleterre": englandBanner,
+  "Panama": panamaBanner, "Panamá": panamaBanner,
+  "Spain": spainBanner, "España": spainBanner, "Espanha": spainBanner, "Espagne": spainBanner,
+  "Algeria": algeriaBanner, "Argélia": algeriaBanner, "Algérie": algeriaBanner,
+  "Austria": austriaBanner, "Áustria": austriaBanner, "Österreich": austriaBanner,
+  "Jordan": jordanBanner, "Jordânia": jordanBanner,
+  "Portugal": portugalBanner,
+  "Colombia": colombiaBanner, "Colômbia": colombiaBanner,
+  "DR Congo": drCongoBanner, "Congo DR": drCongoBanner, "Democratic Republic of Congo": drCongoBanner, "República Democrática do Congo": drCongoBanner,
+  "Uzbekistan": uzbekistanBanner, "Uzbequistão": uzbekistanBanner,
+  "Croatia": croatiaBanner, "Croácia": croatiaBanner, "Croatie": croatiaBanner, "Kroatien": croatiaBanner,
 };
 
 const TEAM_NAME_PT: Record<string, string> = {
@@ -2769,13 +2868,7 @@ export default function Home() {
     if (isIdleRef.current || isLockedRef.current) return;
     if (showSpinner) setUpcomingLoading(true);
     const param = selectedSport === "all" ? "" : `?sport=${selectedSport}`;
-    if (upcomingFetchCtrlRef.current) {
-      if (showSpinner) {
-        try { upcomingFetchCtrlRef.current.abort(); } catch {}
-      } else {
-        return;
-      }
-    }
+    try { upcomingFetchCtrlRef.current?.abort(); } catch {}
     const ctrl = new AbortController();
     upcomingFetchCtrlRef.current = ctrl;
     const tid = setTimeout(() => ctrl.abort(), 10_000);
@@ -2941,13 +3034,7 @@ export default function Home() {
     if (showSpinner) setLiveLoading(true);
     let ctrl: AbortController | null = null;
     try {
-      if (liveFetchCtrlRef.current) {
-        if (showSpinner) {
-          try { liveFetchCtrlRef.current.abort(); } catch {}
-        } else {
-          return;
-        }
-      }
+      try { liveFetchCtrlRef.current?.abort(); } catch {}
       ctrl = new AbortController();
       const currentCtrl = ctrl;
       liveFetchCtrlRef.current = currentCtrl;
@@ -4164,18 +4251,69 @@ export default function Home() {
   // ─── Múltiplas Populares Banners ──────────────────────────────────
   const PopularBanners = () => {
     if (upcomingMatches.length === 0) return null;
+
+    const BANNER_CONFIGS = [
+      { title: "MÚLTIPLAS", subtitle: "POPULARES", label: "🔥 COMBOS POPULARES",   count: "200+ apostas" },
+      { title: "TOP",       subtitle: "APOSTAS",   label: "⭐ MAIS APOSTADOS",      count: "150+ apostas" },
+      { title: "ALTA",      subtitle: "RETORNO",   label: "💰 ALTO RETORNO",         count: "100+ apostas" },
+      { title: "EM",        subtitle: "DESTAQUE",  label: "🏆 FAVORITOS DO DIA",     count: "80+ apostas"  },
+    ];
+
+    // Filter by odds ranges for each banner type
     const withOdds = upcomingMatches.filter(m => m.odds.home > 0);
-    if (withOdds.length === 0) return null;
 
-    const sorted = [...withOdds].sort((a, b) => a.odds.home - b.odds.home);
-    const top = sorted.slice(0, 12);
-    const combos: Array<{ title: string; subtitle: string; label: string; matches: Match[] }> = [
-      { title: "MÚLTIPLAS", subtitle: "POPULARES", label: "🔥 COMBOS POPULARES", matches: top.slice(0, 4) },
-      { title: "TOP", subtitle: "APOSTAS", label: "⭐ MAIS APOSTADOS", matches: top.slice(4, 8) },
-      { title: "ALTA", subtitle: "RETORNO", label: "💰 ALTO RETORNO", matches: top.slice(8, 12) },
-    ].filter(c => c.matches.length > 0);
+    // 1.20–1.49: short favourites (for the 3 "fav" banners)
+    const favPool = withOdds
+      .filter(m => m.odds.home >= 1.20 && m.odds.home < 1.50)
+      .sort((a, b) => a.odds.home - b.odds.home);
 
-    if (combos.length === 0) return null;
+    // 1.50–1.99: medium odds (for the 4th banner)
+    const medPool = withOdds
+      .filter(m => m.odds.home >= 1.50 && m.odds.home < 2.00)
+      .sort((a, b) => a.odds.home - b.odds.home);
+
+    // ~2.5 spike (2.00–2.99, sorted by closeness to 2.5)
+    const mid25Pool = withOdds
+      .filter(m => m.odds.home >= 2.00 && m.odds.home < 3.00)
+      .sort((a, b) => Math.abs(a.odds.home - 2.5) - Math.abs(b.odds.home - 2.5));
+
+    // ~3.10 spike (≥2.80, sorted by closeness to 3.10)
+    const high31Pool = withOdds
+      .filter(m => m.odds.home >= 2.80)
+      .sort((a, b) => Math.abs(a.odds.home - 3.10) - Math.abs(b.odds.home - 3.10));
+
+    const usedIds = new Set<string | number>();
+    const pickN = (pool: Match[], n: number): Match[] => {
+      const out: Match[] = [];
+      for (const m of pool) {
+        if (!usedIds.has(m.id)) {
+          out.push(m);
+          usedIds.add(m.id);
+          if (out.length === n) break;
+        }
+      }
+      return out;
+    };
+
+    const chunks: Match[][] = [];
+
+    // 3 banners: 3 odds (1.20–1.49) + 1 odd (~2.5)
+    for (let i = 0; i < 3; i++) {
+      const favs  = pickN(favPool,   3);
+      const spike = pickN(mid25Pool, 1);
+      const chunk = [...favs, ...spike];
+      if (chunk.length > 0) chunks.push(chunk);
+    }
+
+    // 1 banner: 3 odds (1.50–1.99) + 1 odd (~3.10)
+    {
+      const meds  = pickN(medPool,    3);
+      const spike = pickN(high31Pool, 1);
+      const chunk = [...meds, ...spike];
+      if (chunk.length > 0) chunks.push(chunk);
+    }
+
+    if (chunks.length === 0) return null;
 
     const addAllToBetSlip = (events: Match[]) => {
       events.forEach(m => {
@@ -4194,70 +4332,121 @@ export default function Home() {
           className="flex gap-3 overflow-x-auto pb-2 snap-x snap-mandatory scrollbar-none"
           style={{ scrollbarWidth: "none", WebkitOverflowScrolling: "touch", touchAction: "pan-x pan-y" } as React.CSSProperties}
         >
-          {combos.map((combo, bi) => {
-            const totalOddsVal = combo.matches
+          {chunks.map((events, bi) => {
+            const cfg = BANNER_CONFIGS[bi];
+            const totalOddsVal = events
               .reduce((acc, m) => m.odds.home > 0 ? acc * m.odds.home : acc, 1)
               .toFixed(2);
+
             return (
               <div
                 key={bi}
-                className="snap-center shrink-0 w-[268px] rounded-2xl p-4 border border-zinc-800 bg-zinc-950/60"
-                style={{ boxShadow: "0 0 24px rgba(220,38,38,0.08)" }}
+                className="snap-center shrink-0 w-[268px] rounded-[22px] p-4 flex flex-col"
+                style={{
+                  background: "linear-gradient(180deg,#1c0a0a,#0a0a0a)",
+                  border: "1px solid rgba(220,38,38,0.2)",
+                  boxShadow: "0 0 24px rgba(220,38,38,0.1)",
+                }}
               >
-                <div className="flex items-start justify-between mb-2">
-                  <div className="leading-[1.05]">
-                    <div className="font-black italic text-[20px] text-white tracking-wide uppercase">{combo.title}</div>
-                    <div className="font-black italic text-[20px] text-red-500 tracking-wide uppercase">{combo.subtitle}</div>
+                {/* Header */}
+                <div className="flex justify-between items-start mb-3">
+                  <div className="leading-[1.1]">
+                    <div className="font-black italic text-[26px] text-white tracking-wide uppercase">{cfg.title}</div>
+                    <div className="font-black italic text-[26px] text-red-500 tracking-wide uppercase">{cfg.subtitle}</div>
                   </div>
-                  <div className="text-[11px] font-semibold text-red-500">{combo.label}</div>
+                  <div
+                    className="rounded-[14px] px-3 py-2 text-center"
+                    style={{
+                      background: "#0b0b0b",
+                      border: "2px solid #dc2626",
+                      boxShadow: "0 0 14px rgba(220,38,38,0.3)",
+                    }}
+                  >
+                    <span className="block text-white font-black text-[14px] italic leading-none tracking-tight">BET</span>
+                    <span className="block text-red-500 font-black text-[14px] italic leading-none tracking-tight">62</span>
+                  </div>
                 </div>
 
-                <div className="flex flex-col gap-2">
-                  {combo.matches.map((m, ei) => {
+                {/* Info row */}
+                <div className="flex justify-between mb-3 text-red-500 font-semibold text-[11px]">
+                  <span>{cfg.label}</span>
+                  <span>{cfg.count}</span>
+                </div>
+
+                {/* Event rows */}
+                <div className="flex flex-col gap-2 flex-1">
+                  {events.map((m, ei) => {
                     const flag = COUNTRY_FLAGS[m.country?.toLowerCase() ?? ""] ?? sportEmoji(m.sport);
                     const timeStr = m.date ? formatMatchDate(m.date) : (m.time ?? "");
                     const isSelected = !!bets.find(b => b.matchId === m.id && b.market === "result" && b.selection === "home");
                     return (
-                      <button
+                      <div
                         key={ei}
-                        type="button"
-                        className="w-full rounded-xl p-3 flex items-center justify-between border transition-colors"
+                        className="rounded-[14px] p-2.5 flex justify-between items-center"
                         style={{
-                          background: isSelected ? "rgba(220,38,38,0.10)" : "rgba(255,255,255,0.03)",
-                          borderColor: isSelected ? "rgba(220,38,38,0.5)" : "rgba(255,255,255,0.07)",
+                          background: isSelected ? "rgba(220,38,38,0.12)" : "#0d0d0d",
+                          border: isSelected ? "1px solid rgba(220,38,38,0.5)" : "1px solid rgba(220,38,38,0.1)",
                         }}
                         {...makeTap(() => toggleBet(m, "home", m.odds.home, "result", m.home))}
                       >
-                        <div className="flex items-center gap-2 min-w-0">
-                          <div className="w-7 h-7 rounded-full flex items-center justify-center text-[11px]" style={{ background: "#141414", border: "1.5px solid rgba(220,38,38,0.7)" }}>
-                            {flag}
+                        <div className="flex gap-2 min-w-0">
+                          {/* Team logo circles */}
+                          <div className="flex flex-col gap-1 shrink-0">
+                            <div
+                              className="w-6 h-6 rounded-full flex items-center justify-center text-[10px]"
+                              style={{ background: "#1a1a1a", border: "1.5px solid #dc2626" }}
+                            >
+                              {flag}
+                            </div>
+                            <div
+                              className="w-6 h-6 rounded-full flex items-center justify-center text-[10px]"
+                              style={{ background: "#1a1a1a", border: "1.5px solid #dc2626" }}
+                            >
+                              {flag}
+                            </div>
                           </div>
-                          <div className="min-w-0 text-left">
-                            <div className="text-[12px] font-bold text-white truncate">{m.home}</div>
-                            <div className="text-[10px] text-zinc-500 truncate">🕒 {timeStr}</div>
+                          {/* Text */}
+                          <div className="min-w-0">
+                            <div className="truncate leading-tight text-[12px]" style={{ color: '#ffffff', fontWeight: 700 }}>{m.home}</div>
+                            <div className="truncate text-[10px]" style={{ color: '#a1a1aa' }}>Vencedor</div>
+                            <div className="truncate leading-tight text-[11px]" style={{ color: '#ffffff', fontWeight: 600 }}>{m.away}</div>
+                            <div className="text-[10px]" style={{ color: '#a1a1aa' }}>🕒 {timeStr}</div>
                           </div>
                         </div>
-                        <div className="text-red-500 font-black text-[18px] tabular-nums">
+                        {/* Odds */}
+                        <div className="text-red-500 font-bold text-[20px] leading-none shrink-0 ml-1.5">
                           {m.odds.home > 0 ? m.odds.home.toFixed(2) : "—"}
                         </div>
-                      </button>
+                      </div>
                     );
                   })}
                 </div>
 
-                <div className="flex items-center justify-between gap-3 mt-3">
-                  <div className="rounded-xl px-3 py-2 border border-red-500/40 bg-black/40">
+                {/* Footer */}
+                <div className="flex gap-2 mt-3">
+                  <div
+                    className="rounded-[14px] px-3 py-2"
+                    style={{ background: "#0b0b0b", border: "1px solid #dc2626" }}
+                  >
                     <div className="text-zinc-500 text-[10px] leading-none mb-0.5">ODD TOTAL</div>
-                    <div className="text-red-500 font-black text-[18px] leading-none">{totalOddsVal}</div>
+                    <div className="text-red-500 font-black text-[22px] leading-none">{totalOddsVal}</div>
                   </div>
                   <button
-                    type="button"
-                    {...makeTap(() => addAllToBetSlip(combo.matches))}
-                    className="flex-1 h-11 rounded-xl font-black text-[12px] text-white active:scale-[0.98]"
-                    style={{ background: "linear-gradient(135deg,#dc2626,#991b1b)" }}
+                    {...makeTap(() => addAllToBetSlip(events))}
+                    className="flex-1 rounded-[14px] font-bold text-[12px] text-white transition-opacity hover:opacity-90 active:scale-95"
+                    style={{
+                      background: "linear-gradient(135deg,#dc2626,#991b1b)",
+                      boxShadow: "0 0 16px rgba(220,38,38,0.4)",
+                    }}
                   >
-                    ADICIONAR AO BOLETIM
+                    ADICIONAR<br />AO BOLETIM
                   </button>
+                </div>
+
+                {/* Bottom disclaimer */}
+                <div className="flex justify-between mt-2.5 text-[9px]">
+                  <span className="text-zinc-700">JOGUE COM RESPONSABILIDADE</span>
+                  <span className="text-red-800 font-semibold">AS MELHORES ODDS</span>
                 </div>
               </div>
             );
@@ -4320,8 +4509,7 @@ export default function Home() {
               )}
               {bets.length > 0 && (
                 <button
-                  type="button"
-                  {...makeTap(() => { setBets([]); setBetStakes({}); setStake(""); })}
+                  onClick={() => { setBets([]); setBetStakes({}); setStake(""); }}
                   className="w-8 h-8 rounded-full flex items-center justify-center transition-colors"
                   style={{ background: "rgba(220,38,38,0.1)", border: "1px solid rgba(220,38,38,0.2)" }}
                   title="Limpar boletim"
@@ -4336,8 +4524,7 @@ export default function Home() {
           {bets.length > 0 && (
             <div className="flex mt-3 rounded-[10px] overflow-hidden p-0.5 gap-0.5" style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.06)" }}>
               <button
-                type="button"
-                {...makeTap(() => { if (!hasDuplicateMatches) setBetMode("simples"); })}
+                onClick={() => { if (!hasDuplicateMatches) setBetMode("simples"); }}
                 className="flex-1 py-1.5 text-[12px] font-bold rounded-[8px] transition-all duration-200"
                 style={effectiveBetMode === "simples"
                   ? { background: "linear-gradient(135deg,#dc2626,#991b1b)", color: "#fff", boxShadow: "0 2px 8px rgba(220,38,38,0.35)" }
@@ -4346,8 +4533,7 @@ export default function Home() {
                 Simples
               </button>
               <button
-                type="button"
-                {...makeTap(() => { if (!hasDuplicateMatches) setBetMode("multipla"); })}
+                onClick={() => { if (!hasDuplicateMatches) setBetMode("multipla"); }}
                 disabled={hasDuplicateMatches}
                 className="flex-1 py-1.5 text-[12px] font-bold rounded-[8px] transition-all duration-200"
                 style={effectiveBetMode === "multipla"
@@ -4406,8 +4592,7 @@ export default function Home() {
                           {bet.matchTitle.split(" vs ")[0]?.trim() || bet.matchTitle}
                         </span>
                         <button
-                          type="button"
-                          {...makeTap(() => removeBet(bet.matchId, bet.market || "result", bet.selection))}
+                          onClick={() => removeBet(bet.matchId, bet.market || "result", bet.selection)}
                           className="w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0 transition-colors z-20"
                           style={{ background: "rgba(220,38,38,0.15)" }}
                         >
@@ -4436,8 +4621,7 @@ export default function Home() {
                             {quickAmounts.map(amt => (
                               <button
                                 key={amt}
-                                type="button"
-                                {...makeTap(() => setBetStakes(prev => ({ ...prev, [betKey(bet)]: String(amt) })))}
+                                onClick={() => setBetStakes(prev => ({ ...prev, [betKey(bet)]: String(amt) }))}
                                 className="flex-1 py-1 rounded-lg text-[11px] font-bold transition-all"
                                 style={parseFloat(betStakes[betKey(bet)] || "0") === amt
                                   ? { background: "#dc2626", color: "#fff" }
@@ -4492,8 +4676,7 @@ export default function Home() {
                   {quickAmounts.map(amt => (
                     <button
                       key={amt}
-                      type="button"
-                      {...makeTap(() => setStake(String(amt)))}
+                      onClick={() => setStake(String(amt))}
                       className="flex-1 py-1.5 rounded-xl text-[12px] font-bold transition-all"
                       style={parseFloat(stake || "0") === amt
                         ? { background: "linear-gradient(135deg,#dc2626,#991b1b)", color: "#fff", boxShadow: "0 2px 8px rgba(220,38,38,0.3)" }
@@ -4562,8 +4745,7 @@ export default function Home() {
 
             {/* CTA */}
             <button
-              type="button"
-              {...makeTap(handlePlaceBet)}
+              onClick={handlePlaceBet}
               disabled={isPlacingBet || anySuspended}
               className="w-full h-13 rounded-2xl font-black text-[14px] text-white flex items-center justify-center gap-2 transition-all active:scale-[0.98]"
               style={anySuspended
@@ -6749,7 +6931,7 @@ export default function Home() {
                 </DropdownMenu>
               </>
             ) : (
-              <Button {...makeTap(() => { setAuthMode("login"); setAuthModalOpen(true); })} className="bg-red-600 hover:bg-red-700 text-white font-bold px-6">
+              <Button onClick={() => { setAuthMode("login"); setAuthModalOpen(true); }} className="bg-red-600 hover:bg-red-700 text-white font-bold px-6">
                 ENTRAR
               </Button>
             )}
@@ -11218,11 +11400,10 @@ export default function Home() {
 
       {/* AUTH MODAL */}
       {authModalOpen && (
-        <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/75 backdrop-blur-sm px-4" {...makeTap(() => setAuthModalOpen(false))}>
+        <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/75 backdrop-blur-sm px-4" onClick={() => setAuthModalOpen(false)}>
           <div className="relative w-full max-w-md bg-zinc-950 border border-zinc-800 text-white rounded-xl overflow-hidden max-h-[95vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
             <button
-              type="button"
-              {...makeTap(() => setAuthModalOpen(false))}
+              onClick={() => setAuthModalOpen(false)}
               className="absolute right-3 top-3 w-8 h-8 rounded-full bg-zinc-900/80 hover:bg-zinc-800 flex items-center justify-center text-zinc-400 hover:text-white transition-colors z-10"
               aria-label="Fechar"
             >
@@ -11238,15 +11419,13 @@ export default function Home() {
 
             <div className="grid grid-cols-2 bg-zinc-950 border-b border-zinc-800">
               <button
-                type="button"
-                {...makeTap(() => setAuthMode("login"))}
+                onClick={() => setAuthMode("login")}
                 className={`py-4 text-sm font-bold uppercase transition-colors border-b-2 ${authMode === "login" ? "bg-zinc-900 text-white border-red-600" : "text-zinc-400 border-transparent hover:text-white"}`}
               >
                 Entrar
               </button>
               <button
-                type="button"
-                {...makeTap(() => setAuthMode("register"))}
+                onClick={() => setAuthMode("register")}
                 className={`py-4 text-sm font-bold uppercase transition-colors border-b-2 ${authMode === "register" ? "bg-zinc-900 text-white border-red-600" : "text-zinc-400 border-transparent hover:text-white"}`}
               >
                 Criar Conta
