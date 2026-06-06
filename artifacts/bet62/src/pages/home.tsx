@@ -2129,8 +2129,8 @@ export default function Home() {
         const minute = e?.time ?? e?.minute ?? e?.matchTime ?? e?.timeMinute ?? e?.addedTime ?? "";
         const minuteRaw = toText(minute);
         const time = minuteRaw !== "" ? `${minuteRaw}'` : "";
-        const isHome = !!(e?.isHome ?? e?.home ?? e?.team === "home" ?? e?.side === "home");
-        const isAway = !!(e?.isAway ?? e?.away ?? e?.team === "away" ?? e?.side === "away");
+        const isHome = Boolean(e?.isHome || e?.home || e?.team === "home" || e?.side === "home");
+        const isAway = Boolean(e?.isAway || e?.away || e?.team === "away" || e?.side === "away");
         const team: "home" | "away" | "neutral" = isHome ? "home" : isAway ? "away" : "neutral";
         const title = String(e?.type ?? e?.incidentType ?? e?.name ?? e?.title ?? "Evento").trim();
         const detail = String(
@@ -2629,6 +2629,25 @@ export default function Home() {
     return () => clearTimeout(tid);
   }, []);
 
+  type Snapshot<T> = { savedAt: number; value: T };
+  const LIVE_SNAPSHOT_KEY = "bet62_snapshot_live_v1";
+  const upcomingSnapshotKey = (sport: string) => `bet62_snapshot_upcoming_v1:${sport}`;
+  const readSnapshot = useCallback(<T,>(key: string): Snapshot<T> | null => {
+    try {
+      const raw = localStorage.getItem(key);
+      if (!raw) return null;
+      const parsed = JSON.parse(raw) as Snapshot<T>;
+      if (!parsed || typeof parsed !== "object") return null;
+      if (typeof (parsed as any).savedAt !== "number") return null;
+      return parsed;
+    } catch {
+      return null;
+    }
+  }, []);
+  const writeSnapshot = useCallback((key: string, value: any) => {
+    try { localStorage.setItem(key, JSON.stringify({ savedAt: Date.now(), value })); } catch {}
+  }, []);
+
   // Fetch upcoming matches — polls every 30s so new games appear automatically
   const fetchUpcoming = useCallback((showSpinner = false) => {
     if (isIdleRef.current || isLockedRef.current) return;
@@ -2642,16 +2661,21 @@ export default function Home() {
           time?: string; date?: string; sport?: string; hasRealOdds?: boolean; odds: Odds; markets?: AdvancedMarkets;
         }>;
         setUpcomingMatches(matches.map(m => ({ ...m, isLive: false })));
+        writeSnapshot(upcomingSnapshotKey(selectedSport), matches);
       })
       .catch(() => { /* keep empty */ })
       .finally(() => { if (showSpinner) setUpcomingLoading(false); });
-  }, [selectedSport]);
+  }, [selectedSport, upcomingSnapshotKey, writeSnapshot]);
 
   useEffect(() => {
-    fetchUpcoming(true);
+    const snap = readSnapshot<any[]>(upcomingSnapshotKey(selectedSport));
+    if (snap && (Date.now() - snap.savedAt) < 10 * 60_000 && Array.isArray(snap.value)) {
+      setUpcomingMatches(snap.value.map(m => ({ ...(m as any), isLive: false })));
+    }
+    if (activeTab !== "live" && activeTab !== "mybets") fetchUpcoming(true);
     const id = setInterval(() => fetchUpcoming(false), 30_000);
     return () => clearInterval(id);
-  }, [fetchUpcoming]);
+  }, [fetchUpcoming, readSnapshot, selectedSport, upcomingSnapshotKey, activeTab]);
 
   // Fetch WC 2026 matches whenever filter is activated (always re-fetch for freshness)
   useEffect(() => {
@@ -2802,18 +2826,31 @@ export default function Home() {
     });
   }, []);
 
-  const fetchLive = useCallback(async (showSpinner = false) => {
-    if (isIdleRef.current) return;
-    if (showSpinner) setLiveLoading(true);
-    try {
-      const res = await fetch("/api/matches/live");
-      if (res.ok) processLiveData(await res.json());
-    } catch {
-      /* keep stale */
-    } finally {
-      if (showSpinner) setLiveLoading(false);
+  const fetchInitial = useCallback(async (showSpinner = false) => {
+    if (isIdleRef.current || isLockedRef.current) return;
+    if (showSpinner) {
+      setLiveLoading(true);
+      setUpcomingLoading(true);
     }
-  }, [processLiveData]);
+    try {
+      const param = selectedSport === "all" ? "" : `?sport=${encodeURIComponent(selectedSport)}`;
+      const res = await fetch(`/api/matches/initial${param}`);
+      if (!res.ok) return;
+      const data = await res.json();
+      const live = Array.isArray(data?.live) ? data.live : [];
+      const upcoming = Array.isArray(data?.upcoming) ? data.upcoming : [];
+      writeSnapshot(LIVE_SNAPSHOT_KEY, live);
+      writeSnapshot(upcomingSnapshotKey(selectedSport), upcoming);
+      processLiveData({ matches: live });
+      setUpcomingMatches(upcoming.map((m: any) => ({ ...m, isLive: false })));
+    } catch {
+    } finally {
+      if (showSpinner) {
+        setLiveLoading(false);
+        setUpcomingLoading(false);
+      }
+    }
+  }, [processLiveData, selectedSport, upcomingSnapshotKey, writeSnapshot]);
 
   // Track disappearing live matches to store final scores
   useEffect(() => {
@@ -2836,8 +2873,11 @@ export default function Home() {
   useEffect(() => {
     if (activeTab !== "live" && activeTab !== "mybets") return;
 
-    // Immediate HTTP fetch with loading spinner so data appears instantly
-    fetchLive(activeTab === "live");
+    const snap = readSnapshot<any[]>(LIVE_SNAPSHOT_KEY);
+    if (snap && (Date.now() - snap.savedAt) < 60_000 && Array.isArray(snap.value)) {
+      processLiveData({ matches: snap.value });
+    }
+    fetchInitial(activeTab === "live");
 
     const es = new EventSource("/api/matches/live-stream");
 
@@ -2872,7 +2912,7 @@ export default function Home() {
     // automatically; nothing to do here.
 
     return () => { es.close(); };
-  }, [activeTab, fetchLive, processLiveData]);
+  }, [activeTab, fetchInitial, processLiveData, readSnapshot]);
 
   // Poll tennis, basketball, hockey, volleyball odds every 60s
   useEffect(() => {
@@ -10150,7 +10190,7 @@ export default function Home() {
                     })()}
                   </h2>
                   <button
-                    onClick={() => fetchLive(true)}
+                    onClick={() => fetchInitial(true)}
                     disabled={liveLoading}
                     className="text-xs text-zinc-500 hover:text-white transition-colors border border-zinc-800 hover:border-zinc-600 px-3 py-1.5 rounded-md flex items-center gap-1.5"
                   >
