@@ -1443,39 +1443,71 @@ export default function Home() {
   const activeTabRef = useRef(activeTab);
   useEffect(() => { activeTabRef.current = activeTab; }, [activeTab]);
   const lastTouchAtRef = useRef(0);
+  const lastPointerDownAtRef = useRef(0);
   const tapStateRef = useRef<{ x: number; y: number; startedAt: number; moved: boolean } | null>(null);
+  const tapStartAt = useCallback((x: number, y: number) => {
+    tapStateRef.current = { x, y, startedAt: Date.now(), moved: false };
+  }, []);
+  const tapMoveAt = useCallback((x: number, y: number) => {
+    const s = tapStateRef.current;
+    if (!s) return;
+    if (Math.abs(x - s.x) > 24 || Math.abs(y - s.y) > 24) s.moved = true;
+  }, []);
   const tapTouchStart = useCallback((e: React.TouchEvent) => {
+    if (Date.now() - lastPointerDownAtRef.current < 1000) return;
     const t = e.touches?.[0];
     if (!t) return;
-    tapStateRef.current = { x: t.clientX, y: t.clientY, startedAt: Date.now(), moved: false };
-  }, []);
+    tapStartAt(t.clientX, t.clientY);
+  }, [tapStartAt]);
   const tapTouchMove = useCallback((e: React.TouchEvent) => {
+    if (Date.now() - lastPointerDownAtRef.current < 1000) return;
     const s = tapStateRef.current;
     if (!s) return;
     const t = e.touches?.[0];
     if (!t) return;
-    if (Math.abs(t.clientX - s.x) > 24 || Math.abs(t.clientY - s.y) > 24) s.moved = true;
-  }, []);
+    tapMoveAt(t.clientX, t.clientY);
+  }, [tapMoveAt]);
   const makeTap = useCallback((handler: () => void) => {
+    const finish = () => {
+      const s = tapStateRef.current;
+      tapStateRef.current = null;
+      if (!s) return;
+      const dt = Date.now() - s.startedAt;
+      if (s.moved || dt > 900) {
+        lastTouchAtRef.current = Date.now();
+        return;
+      }
+      lastTouchAtRef.current = Date.now();
+      handler();
+    };
     return {
       onTouchStart: (e: React.TouchEvent) => { tapTouchStart(e); },
       onTouchMove: (e: React.TouchEvent) => { tapTouchMove(e); },
-      onTouchEnd: () => {
-        const s = tapStateRef.current;
+      onTouchEnd: finish,
+      onPointerDown: (e: React.PointerEvent) => {
+        if (e.pointerType !== "touch") return;
+        lastPointerDownAtRef.current = Date.now();
+        tapStartAt(e.clientX, e.clientY);
+      },
+      onPointerMove: (e: React.PointerEvent) => {
+        if (e.pointerType !== "touch") return;
+        tapMoveAt(e.clientX, e.clientY);
+      },
+      onPointerUp: (e: React.PointerEvent) => {
+        if (e.pointerType !== "touch") return;
+        finish();
+      },
+      onPointerCancel: (e: React.PointerEvent) => {
+        if (e.pointerType !== "touch") return;
         tapStateRef.current = null;
-        if (!s) return;
-        const dt = Date.now() - s.startedAt;
-        if (s.moved) return;
-        if (dt > 900) return;
         lastTouchAtRef.current = Date.now();
-        handler();
       },
       onClick: () => {
         if (Date.now() - lastTouchAtRef.current < 500) return;
         handler();
       },
     };
-  }, [tapTouchMove, tapTouchStart]);
+  }, [tapMoveAt, tapStartAt, tapTouchMove, tapTouchStart]);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [bets, setBets] = useState<BetSelection[]>([]);
   const [authModalOpen, setAuthModalOpen] = useState(false);
@@ -3403,7 +3435,7 @@ export default function Home() {
 
     return (
       <button
-        onClick={() => toggleBet(match, selection, odd, market, label)}
+        {...makeTap(() => toggleBet(match, selection, odd, market, label))}
         className={`relative flex flex-col items-center py-2.5 px-2 rounded-md transition-colors text-xs ${grow ? "flex-1" : ""} ${isSelected ? "bg-red-600 text-white" : "bg-zinc-800 hover:bg-zinc-700 text-zinc-300"} ${flashClass}`}
       >
         <span className="mb-0.5 text-[10px] leading-tight opacity-70">{label}</span>
@@ -3834,7 +3866,7 @@ export default function Home() {
             isObviousLiveResult ? (
               <button
                 className="flex-1 flex flex-col items-center py-2.5 px-2 rounded-md text-xs bg-amber-900/20 border border-amber-600/30"
-                onClick={() => setExpandedMatch(match)}
+                {...makeTap(() => setExpandedMatch(match))}
               >
                 <span className="font-bold text-[11px] text-amber-400 uppercase tracking-wider">Aposta Já</span>
               </button>
@@ -3871,7 +3903,7 @@ export default function Home() {
             )}
           </div>
           {/* Content below image */}
-          <div className="px-3 pt-2 pb-3" style={{ background: "#0f0f0f" }} onClick={e => e.stopPropagation()} onTouchStart={e => e.stopPropagation()} onTouchMove={e => e.stopPropagation()} onTouchEnd={e => e.stopPropagation()}>
+          <div className="px-3 pt-2 pb-3" style={{ background: "#0f0f0f" }} onClick={e => e.stopPropagation()} onTouchStart={e => e.stopPropagation()} onTouchMove={e => e.stopPropagation()} onTouchEnd={e => e.stopPropagation()} onPointerDown={e => e.stopPropagation()} onPointerMove={e => e.stopPropagation()} onPointerUp={e => e.stopPropagation()}>
             <div className="mb-2">
               {sport === "tennis"     ? <TennisScore /> :
                sport === "volleyball" ? <VolleyScore /> :
@@ -3892,7 +3924,7 @@ export default function Home() {
                   isObviousLiveResult ? (
                     <button
                       className="flex-1 flex flex-col items-center py-2.5 px-2 rounded-md text-xs bg-amber-900/20 border border-amber-600/30"
-                      onClick={() => setExpandedMatch(match)}
+                      {...makeTap(() => setExpandedMatch(match))}
                     >
                       <span className="font-bold text-[11px] text-amber-400 uppercase tracking-wider">Aposta Já</span>
                     </button>
@@ -3916,7 +3948,7 @@ export default function Home() {
         className="bg-zinc-900 rounded-lg border border-zinc-800 hover:border-red-500/30 transition-colors cursor-pointer overflow-hidden"
       >
         <CompactLeagueRow match={match} rightSlot={liveBadge} />
-        <div className="px-3 py-2.5" onClick={e => e.stopPropagation()} onTouchStart={e => e.stopPropagation()} onTouchMove={e => e.stopPropagation()} onTouchEnd={e => e.stopPropagation()}>
+        <div className="px-3 py-2.5" onClick={e => e.stopPropagation()} onTouchStart={e => e.stopPropagation()} onTouchMove={e => e.stopPropagation()} onTouchEnd={e => e.stopPropagation()} onPointerDown={e => e.stopPropagation()} onPointerMove={e => e.stopPropagation()} onPointerUp={e => e.stopPropagation()}>
           {sport === "tennis"     ? <TennisScore /> :
            sport === "volleyball" ? <VolleyScore /> :
            sport === "hockey"     ? <HockeyScore /> :
@@ -3975,7 +4007,7 @@ export default function Home() {
             )}
           </div>
           {/* Content below image */}
-          <div className="px-3 pt-2.5 pb-3" style={{ background: "#0f0f0f" }} onClick={e => e.stopPropagation()} onTouchStart={e => e.stopPropagation()} onTouchMove={e => e.stopPropagation()} onTouchEnd={e => e.stopPropagation()}>
+          <div className="px-3 pt-2.5 pb-3" style={{ background: "#0f0f0f" }} onClick={e => e.stopPropagation()} onTouchStart={e => e.stopPropagation()} onTouchMove={e => e.stopPropagation()} onTouchEnd={e => e.stopPropagation()} onPointerDown={e => e.stopPropagation()} onPointerMove={e => e.stopPropagation()} onPointerUp={e => e.stopPropagation()}>
             <div className="flex items-baseline gap-1.5 mb-2.5 min-w-0">
               <span className="font-bold text-sm leading-tight truncate text-white">{homeName}</span>
               <span className="text-xs shrink-0 text-zinc-500">vs</span>
@@ -3993,7 +4025,7 @@ export default function Home() {
         {...makeTap(() => setExpandedMatch(match))}
       >
         <CompactLeagueRow match={match} />
-        <div className="px-3 pb-3 pt-1" onClick={e => e.stopPropagation()} onTouchStart={e => e.stopPropagation()} onTouchMove={e => e.stopPropagation()} onTouchEnd={e => e.stopPropagation()}>
+        <div className="px-3 pb-3 pt-1" onClick={e => e.stopPropagation()} onTouchStart={e => e.stopPropagation()} onTouchMove={e => e.stopPropagation()} onTouchEnd={e => e.stopPropagation()} onPointerDown={e => e.stopPropagation()} onPointerMove={e => e.stopPropagation()} onPointerUp={e => e.stopPropagation()}>
           <div className="flex items-baseline gap-1.5 mb-2 min-w-0">
             <span className="font-bold text-sm truncate">{homeName}</span>
             <span className="text-xs text-zinc-500 shrink-0">vs</span>
