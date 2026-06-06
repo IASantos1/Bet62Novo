@@ -1967,9 +1967,12 @@ export default function Home() {
   const [v2StatsGroups, setV2StatsGroups] = useState<V2StatsGroup[] | null>(null);
   const [v2StatsLoading, setV2StatsLoading] = useState(false);
   const [showAllV2Stats, setShowAllV2Stats] = useState(false);
+  const [v2StatsFetchedAt, setV2StatsFetchedAt] = useState(0);
   const [v2Incidents, setV2Incidents] = useState<V2Incident[] | null>(null);
   const [v2IncidentsLoading, setV2IncidentsLoading] = useState(false);
+  const [v2IncidentsFetchedAt, setV2IncidentsFetchedAt] = useState(0);
   const [liveAdvancedTab, setLiveAdvancedTab] = useState<"all" | "goals" | "corners" | "cards">("all");
+  const [livePollTick, setLivePollTick] = useState(0);
   const [standings, setStandings] = useState<StandingRow[] | null>(null);
   const [standingsGroups, setStandingsGroups] = useState<Array<{ name: string; rows: StandingRow[] }> | null>(null);
   const [standingsLoading, setStandingsLoading] = useState(false);
@@ -2244,9 +2247,12 @@ export default function Home() {
     setV2StatsGroups(null);
     setV2StatsLoading(false);
     setShowAllV2Stats(false);
+    setV2StatsFetchedAt(0);
     setV2Incidents(null);
     setV2IncidentsLoading(false);
+    setV2IncidentsFetchedAt(0);
     setLiveAdvancedTab("all");
+    setLivePollTick(0);
     setStandings(null);
     setStandingsLeague("");
     setPlayerMarkets(null);
@@ -2290,7 +2296,8 @@ export default function Home() {
   useEffect(() => {
     const wantsStatsData = matchViewTab === "stats" || (matchViewTab === "live" && !!expandedMatch?.isLive);
     if (!wantsStatsData || !expandedMatch) return;
-    if (v2StatsGroups !== null || v2StatsLoading) return;
+    if (v2StatsLoading) return;
+    if (v2StatsGroups !== null && Date.now() - v2StatsFetchedAt < 6000) return;
     const rawId = String(expandedMatch.id).replace(/^[a-z]+-v2-/, "");
     const sport = expandedMatch.sport ?? "football";
     if (!rawId) return;
@@ -2299,17 +2306,20 @@ export default function Home() {
       .then(r => r.ok ? r.json() : null)
       .then(d => {
         setV2StatsGroups(d ? extractV2StatsGroups(d as any) : []);
+        setV2StatsFetchedAt(Date.now());
       })
       .catch(() => {
         setV2StatsGroups([]);
+        setV2StatsFetchedAt(Date.now());
       })
       .finally(() => setV2StatsLoading(false));
-  }, [matchViewTab, expandedMatch?.id, v2StatsGroups, v2StatsLoading]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [matchViewTab, expandedMatch?.id, v2StatsGroups, v2StatsLoading, v2StatsFetchedAt, livePollTick]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     const wantsIncidents = matchViewTab === "live" && !!expandedMatch?.isLive;
     if (!wantsIncidents || !expandedMatch) return;
-    if (v2Incidents !== null || v2IncidentsLoading) return;
+    if (v2IncidentsLoading) return;
+    if (v2Incidents !== null && Date.now() - v2IncidentsFetchedAt < 6000) return;
     const rawId = String(expandedMatch.id).replace(/^[a-z]+-v2-/, "");
     const sport = expandedMatch.sport ?? "football";
     if (!rawId) return;
@@ -2318,12 +2328,20 @@ export default function Home() {
       .then(r => r.ok ? r.json() : null)
       .then(d => {
         setV2Incidents(d ? extractV2Incidents(d as any) : []);
+        setV2IncidentsFetchedAt(Date.now());
       })
       .catch(() => {
         setV2Incidents([]);
+        setV2IncidentsFetchedAt(Date.now());
       })
       .finally(() => setV2IncidentsLoading(false));
-  }, [matchViewTab, expandedMatch?.id, v2Incidents, v2IncidentsLoading]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [matchViewTab, expandedMatch?.id, v2Incidents, v2IncidentsLoading, v2IncidentsFetchedAt, livePollTick]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (matchViewTab !== "live" || !expandedMatch?.isLive) return;
+    const tid = setInterval(() => setLivePollTick(t => t + 1), 6000);
+    return () => clearInterval(tid);
+  }, [matchViewTab, expandedMatch?.id, !!expandedMatch?.isLive]);
 
   // Fetch standings when standings tab is active
   useEffect(() => {
@@ -6653,7 +6671,7 @@ export default function Home() {
                         <span className="font-bold text-white text-sm truncate flex-1 text-right">{expandedMatch.home}</span>
                         <div className="flex items-center gap-1 shrink-0">
                           <button
-                            onClick={() => setMatchViewTab(matchViewTab !== "markets" && matchViewTab !== "live" ? "markets" : "stats")}
+                            onClick={() => setMatchViewTab(matchViewTab !== "markets" ? "markets" : "live")}
                             className={`flex items-center gap-1 px-2 py-1.5 rounded-lg border text-[11px] font-bold transition-all ${matchViewTab !== "markets" && matchViewTab !== "live" ? "border-blue-500 bg-blue-500/10 text-blue-400" : "border-zinc-700 bg-zinc-800 text-zinc-400 hover:text-white hover:border-zinc-600"}`}
                             title="Estatísticas"
                           >
@@ -6719,7 +6737,8 @@ export default function Home() {
                           : expandedMatch.sport === "volleyball"
                           ? (expandedMatch.isLive ? ["stats", "confrontos", "live"] : ["stats", "confrontos"])
                           : (expandedMatch.isLive ? ["stats", "confrontos", "standings", "lineups", "live"] : ["stats", "confrontos", "standings", "lineups"]);
-                        return tabs.map(tab => (
+                        const orderedTabs = expandedMatch.isLive ? ["live", ...tabs.filter(t => t !== "live")] : tabs;
+                        return orderedTabs.map(tab => (
                           <button
                             key={tab}
                             onClick={() => setMatchViewTab(tab as typeof matchViewTab)}
@@ -7969,9 +7988,54 @@ export default function Home() {
                 {matchViewTab === "live" && expandedMatch.isLive && (
                   <div className="bg-zinc-900 rounded-xl border border-zinc-800 p-4 mb-2 animate-in fade-in duration-200">
                     <MomentumChart match={expandedMatch} />
+                    {((!v2StatsGroups || v2StatsGroups.length === 0) && (!v2Incidents || v2Incidents.length === 0) && !v2StatsLoading && !v2IncidentsLoading) && (
+                      <div className="mt-4 pt-4 border-t border-zinc-700/60">
+                        <div className="text-center text-zinc-500 text-sm">Sem dados ao vivo da API para este jogo.</div>
+                        <div className="flex justify-center mt-3">
+                          <button
+                            onClick={() => {
+                              setV2StatsGroups(null);
+                              setV2Incidents(null);
+                              setV2StatsFetchedAt(0);
+                              setV2IncidentsFetchedAt(0);
+                              setLivePollTick(t => t + 1);
+                            }}
+                            className="px-3 py-1.5 rounded-lg border border-zinc-700 bg-zinc-950/60 text-zinc-200 text-xs font-bold hover:border-zinc-500"
+                          >
+                            Atualizar
+                          </button>
+                        </div>
+                        <div className="text-center text-zinc-600 text-[10px] mt-2">Se continuar vazio, a SportsAPI pode não disponibilizar incidents/statistics para este jogo.</div>
+                      </div>
+                    )}
                     {v2StatsGroups && v2StatsGroups.length > 0 && (() => {
                       const rows = extractLiveKeyStats(v2StatsGroups);
-                      if (rows.length === 0) return null;
+                      if (rows.length === 0) {
+                        const first = v2StatsGroups[0];
+                        return (
+                          <div className="mt-4 pt-4 border-t border-zinc-700/60">
+                            <div className="flex items-center justify-between mb-2">
+                              <div className="text-[10px] font-black text-red-500 uppercase tracking-widest">Estatísticas ao Vivo</div>
+                              {v2StatsLoading && <Loader2 className="animate-spin text-blue-400" size={14} />}
+                            </div>
+                            <div className="text-zinc-500 text-sm">A API retornou estatísticas, mas sem os campos “posse/remates” detectáveis.</div>
+                            {first && first.rows.length > 0 && (
+                              <div className="mt-3 rounded-lg border border-zinc-800 overflow-hidden">
+                                <div className="bg-zinc-800/40 px-3 py-2 text-[9px] font-black text-zinc-500 uppercase tracking-widest">{first.title}</div>
+                                <div className="divide-y divide-zinc-800">
+                                  {first.rows.slice(0, 8).map(r => (
+                                    <div key={r.name} className="grid grid-cols-[1fr_auto_auto] gap-2 px-3 py-2 text-xs">
+                                      <div className="text-zinc-400 truncate">{r.name}</div>
+                                      <div className="text-blue-400 font-black tabular-nums">{r.home || "-"}</div>
+                                      <div className="text-red-400 font-black tabular-nums">{r.away || "-"}</div>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      }
                       return (
                         <div className="mt-4 pt-4 border-t border-zinc-700/60">
                           <div className="flex items-center justify-between mb-3">
@@ -8028,10 +8092,10 @@ export default function Home() {
 
                         {(() => {
                           const raw = (v2Incidents ?? [])
-                            .filter(ev => ev.team !== "neutral")
                             .sort((a, b) => (a.minute ?? 9999) - (b.minute ?? 9999));
 
                           const filtered = raw.filter(ev => {
+                            if (ev.team === "neutral") return liveAdvancedTab === "all";
                             if (liveAdvancedTab === "all") return true;
                             if (liveAdvancedTab === "goals") return ev.kind === "goal";
                             if (liveAdvancedTab === "corners") return ev.kind === "corner";
@@ -8045,8 +8109,9 @@ export default function Home() {
                           };
 
                           const withTitles = filtered.map(ev => {
-                            const side = ev.team === "away" ? "away" : "home";
                             let title = ev.title || "Evento";
+                            if (ev.team === "neutral") return { ...ev, displayTitle: title };
+                            const side = ev.team === "away" ? "away" : "home";
                             if (ev.kind === "corner") {
                               counts[side].corner += 1;
                               title = `${counts[side].corner}º Pontapé de canto`;
@@ -8084,6 +8149,24 @@ export default function Home() {
                               <div className="absolute left-1/2 -translate-x-1/2 top-0 bottom-0 w-px bg-zinc-700/60" />
                               <div className="max-h-[420px] overflow-y-auto pr-1 space-y-2">
                                 {withTitles.slice(0, 80).map(ev => (
+                                  ev.team === "neutral" ? (
+                                    <div key={ev.key} className="grid grid-cols-[1fr_auto_1fr] gap-3 items-start">
+                                      <div className="opacity-0 pointer-events-none" />
+                                      <div className="flex flex-col items-center gap-1 py-1">
+                                        <div className="w-9 h-9 rounded-full bg-zinc-800 border border-zinc-700 flex items-center justify-center">
+                                          {iconFor(ev)}
+                                        </div>
+                                        <div className="text-[11px] font-black text-zinc-300 tabular-nums">{ev.time || "—"}</div>
+                                      </div>
+                                      <div className="opacity-0 pointer-events-none" />
+                                      <div className="col-span-3 -mt-1">
+                                        <div className="w-full bg-zinc-800/60 border border-zinc-700 rounded-xl px-4 py-3 flex items-center justify-center gap-2 text-zinc-200 font-bold">
+                                          <Clock size={16} className="text-zinc-300" />
+                                          {ev.displayTitle}
+                                        </div>
+                                      </div>
+                                    </div>
+                                  ) : (
                                   <div key={ev.key} className="grid grid-cols-[1fr_auto_1fr] gap-3 items-start relative">
                                     <div className={`min-w-0 ${ev.team === "home" ? "text-right" : "opacity-0 pointer-events-none"}`}>
                                       <div className="inline-flex max-w-full items-start gap-2 border border-zinc-700/70 bg-zinc-900/40 rounded-xl px-3 py-2">
@@ -8120,6 +8203,7 @@ export default function Home() {
                                       </div>
                                     </div>
                                   </div>
+                                  )
                                 ))}
                               </div>
 
