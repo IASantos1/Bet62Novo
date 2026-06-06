@@ -4708,7 +4708,7 @@ export default function Home() {
     const flashClass = oddUp ? "odds-flash-up" : oddDown ? "odds-flash-down" : "";
     return (
       <button
-        onClick={() => toggleBet(match, sel, odd, market, label)}
+        {...makeTap(() => toggleBet(match, sel, odd, market, label))}
         className={`flex-1 flex flex-col items-center py-2.5 px-1 rounded-lg border transition-all min-w-0 ${active ? "border-red-600 bg-red-600/15 ring-1 ring-red-500/40" : "border-zinc-800 bg-zinc-900/80 hover:border-red-500/40 hover:bg-zinc-800"} ${flashClass}`}
       >
         <span className="text-[11px] text-zinc-400 mb-1 leading-tight text-center truncate w-full px-0.5">{label}</span>
@@ -4749,7 +4749,7 @@ export default function Home() {
       <div className="mb-1.5 last:mb-0 border border-zinc-800 rounded-lg overflow-hidden">
         <button
           className="w-full flex items-center justify-between px-3 py-2.5 text-left bg-zinc-800/60 hover:bg-zinc-800 active:bg-zinc-700 transition-colors"
-          onClick={() => setOpen(o => !o)}
+          {...makeTap(() => setOpen(o => !o))}
         >
           <span className="text-[10px] font-black text-zinc-300 uppercase tracking-widest">{title}</span>
           <div className="flex items-center gap-2">
@@ -4796,7 +4796,7 @@ export default function Home() {
       <div className="mb-1.5 last:mb-0 border border-zinc-800 rounded-lg overflow-hidden">
         <button
           className="w-full flex items-center justify-between px-3 py-2.5 text-left bg-zinc-800/60 hover:bg-zinc-800 active:bg-zinc-700 transition-colors"
-          onClick={() => setOpen(o => !o)}
+          {...makeTap(() => setOpen(o => !o))}
         >
           <span className="text-[10px] font-black text-zinc-300 uppercase tracking-widest">{title}</span>
           <div className="flex items-center gap-2">
@@ -4827,7 +4827,7 @@ export default function Home() {
       <div className="mb-1.5 last:mb-0 border border-zinc-800 rounded-lg overflow-hidden">
         <button
           className="w-full flex items-center justify-between px-3 py-2.5 text-left bg-zinc-800/60 hover:bg-zinc-800 active:bg-zinc-700 transition-colors"
-          onClick={() => setOpen(o => !o)}
+          {...makeTap(() => setOpen(o => !o))}
         >
           <span className="text-[10px] font-black text-zinc-300 uppercase tracking-widest">{title}</span>
           <div className="flex items-center gap-2">
@@ -5007,7 +5007,7 @@ export default function Home() {
             <button
               key={t.key}
               data-tab={t.key}
-              onClick={() => { setModalTab(t.key); scrollTabIntoView(t.key); }}
+              {...makeTap(() => { setModalTab(t.key); scrollTabIntoView(t.key); })}
               className={`px-3 py-1.5 rounded-md text-xs font-bold whitespace-nowrap transition-colors flex-shrink-0 ${modalTab === t.key ? "bg-red-600 text-white" : "bg-zinc-800 text-zinc-400 hover:text-white"}`}
             >
               {t.label}
@@ -10839,7 +10839,7 @@ export default function Home() {
                 ? "calc(5.5rem + env(safe-area-inset-bottom, 0px))"
                 : "calc(0.75rem + env(safe-area-inset-bottom, 0px))",
             }}
-            onClick={() => setBetSlipOpenMobile(true)}
+            {...makeTap(() => setBetSlipOpenMobile(true))}
           >
             <div
               className="rounded-2xl px-4 py-3.5 flex items-center gap-3 active:scale-[0.98] transition-transform cursor-pointer select-none"
@@ -10893,7 +10893,7 @@ export default function Home() {
               style={{ background: "#0a0a0a" }}
             >
               <button
-                onClick={() => setBetSlipOpenMobile(false)}
+                {...makeTap(() => setBetSlipOpenMobile(false))}
                 className="w-9 h-9 flex items-center justify-center rounded-full"
                 style={{ background: "rgba(255,255,255,0.07)" }}
               >
@@ -10915,7 +10915,7 @@ export default function Home() {
 
               {/* Clear all */}
               <button
-                onClick={() => { setBets([]); setBetStakes({}); setStake(""); setBetSlipOpenMobile(false); }}
+                {...makeTap(() => { setBets([]); setBetStakes({}); setStake(""); setBetSlipOpenMobile(false); })}
                 className="w-9 h-9 flex items-center justify-center rounded-full"
                 style={{ background: "rgba(220,38,38,0.1)", border: "1px solid rgba(220,38,38,0.2)" }}
               >
@@ -10926,13 +10926,13 @@ export default function Home() {
             {/* Tabs */}
             <div className="flex border-b border-zinc-800 shrink-0" style={{ background: "#0a0a0a" }}>
               <button
-                onClick={() => { if (!hasDuplicateMatches) setBetMode("simples"); }}
+                {...makeTap(() => { if (!hasDuplicateMatches) setBetMode("simples"); })}
                 className={`flex-1 py-3 text-[13px] font-bold transition-all ${effectiveBetMode === "simples" ? "text-white border-b-2 border-red-600" : "text-zinc-500"}`}
               >
                 Simples
               </button>
               <button
-                onClick={() => { if (!hasDuplicateMatches) setBetMode("multipla"); }}
+                {...makeTap(() => { if (!hasDuplicateMatches) setBetMode("multipla"); })}
                 disabled={hasDuplicateMatches}
                 className={`flex-1 py-3 text-[13px] font-bold transition-all ${effectiveBetMode === "multipla" ? "text-white border-b-2 border-red-600" : hasDuplicateMatches ? "text-zinc-700" : "text-zinc-500"}`}
               >
@@ -10980,7 +10980,7 @@ export default function Home() {
                             <div className="text-[11px] text-zinc-500 truncate">{bet.matchTitle}</div>
                           </div>
                           <button
-                            onClick={() => removeBet(bet.matchId, bet.market || "result", bet.selection)}
+                            {...makeTap(() => removeBet(bet.matchId, bet.market || "result", bet.selection))}
                             className="w-5 h-5 rounded-full flex items-center justify-center shrink-0 z-20"
                             style={{ background: "rgba(220,38,38,0.15)" }}
                           >
@@ -11007,7 +11007,7 @@ export default function Home() {
                               {[5, 10, 25, 50].map(amt => (
                                 <button
                                   key={amt}
-                                  onClick={() => setBetStakes(prev => ({ ...prev, [betKey(bet)]: String(amt) }))}
+                                  {...makeTap(() => setBetStakes(prev => ({ ...prev, [betKey(bet)]: String(amt) })))}
                                   className="flex-1 py-1 rounded-lg text-[11px] font-bold transition-all"
                                   style={parseFloat(betStakes[betKey(bet)] || "0") === amt
                                     ? { background: "#dc2626", color: "#fff" }
@@ -11097,7 +11097,7 @@ export default function Home() {
 
               {/* APOSTAR button */}
               <button
-                onClick={handlePlaceBet}
+                {...makeTap(handlePlaceBet)}
                 disabled={isPlacingBet}
                 className="w-full h-13 rounded-2xl font-black text-[15px] text-white flex items-center justify-center gap-2 transition-all active:scale-[0.98]"
                 style={{
