@@ -2253,6 +2253,18 @@ export default function Home() {
     return Math.max(0, Math.min(isFootball ? 130 : 999, computed));
   };
 
+  const getFootballPhaseTag = (match: Match, minute: number): "1P" | "HT" | "2P" | "ET" | "PEN" | null => {
+    const status = String(match.status ?? "").trim().toLowerCase();
+    const showET = !!match.markets?.etExtra || status.includes("extra") || status === "et";
+    const showPen = !!match.markets?.penExtra || status.includes("pen") || status.includes("shootout");
+    if (showPen) return "PEN";
+    if (status === "ht" || status.includes("half time")) return "HT";
+    if (showET) return "ET";
+    if (minute <= 0) return null;
+    if (minute <= 45) return "1P";
+    return "2P";
+  };
+
   // Sync expandedMatch with live data silently (score/odds update without closing panel)
   useEffect(() => {
     if (!expandedMatch?.isLive) return;
@@ -3431,10 +3443,12 @@ export default function Home() {
       if (sport === "tennis"     && match.status) return match.status;
       if (sport === "volleyball" && match.status) return match.status;
 
-      if (minute === 45) return "HT";
-      if (minute === 105) return "Int.P";
-      if (minute > 90) return `${minute > 105 ? "2P" : "1P"} ${minute}'`;
-      return `${minute}'`;
+      const tag = getFootballPhaseTag(match, minute);
+      if (tag === "HT") return "HT";
+      if (tag === "ET") return `${minute > 0 ? `${minute}' · ` : ""}ET`;
+      if (tag === "PEN") return "PEN";
+      if (tag) return `${minute}' · ${tag}`;
+      return minute > 0 ? `${minute}'` : "AO VIVO";
     })();
 
     // "Em Breve" — upcoming real match, not yet started
@@ -6689,7 +6703,12 @@ export default function Home() {
                         <span className="text-[10px] font-bold text-red-500">
                           {(() => {
                             const m = getDisplayMinute(expandedMatch);
-                            return m > 0 ? `AO VIVO ${m}'` : "AO VIVO (Atrasado)";
+                            const isFootball = !expandedMatch.sport || expandedMatch.sport === "football";
+                            const tag = isFootball ? getFootballPhaseTag(expandedMatch, m) : null;
+                            if (m <= 0) return "AO VIVO (Atrasado)";
+                            if (tag === "HT") return "AO VIVO HT";
+                            if (tag) return `AO VIVO ${m}' · ${tag}`;
+                            return `AO VIVO ${m}'`;
                           })()}
                         </span>
                       </div>
