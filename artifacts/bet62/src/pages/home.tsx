@@ -1442,6 +1442,40 @@ export default function Home() {
   const [activeTab, setActiveTab] = useState<"sports" | "live" | "promos" | "mybets" | "wallet" | "profile">("sports");
   const activeTabRef = useRef(activeTab);
   useEffect(() => { activeTabRef.current = activeTab; }, [activeTab]);
+  const lastTouchAtRef = useRef(0);
+  const tapStateRef = useRef<{ x: number; y: number; startedAt: number; moved: boolean } | null>(null);
+  const tapTouchStart = useCallback((e: React.TouchEvent) => {
+    const t = e.touches?.[0];
+    if (!t) return;
+    tapStateRef.current = { x: t.clientX, y: t.clientY, startedAt: Date.now(), moved: false };
+  }, []);
+  const tapTouchMove = useCallback((e: React.TouchEvent) => {
+    const s = tapStateRef.current;
+    if (!s) return;
+    const t = e.touches?.[0];
+    if (!t) return;
+    if (Math.abs(t.clientX - s.x) > 12 || Math.abs(t.clientY - s.y) > 12) s.moved = true;
+  }, []);
+  const makeTap = useCallback((handler: () => void) => {
+    return {
+      onTouchStart: (e: React.TouchEvent) => { tapTouchStart(e); },
+      onTouchMove: (e: React.TouchEvent) => { tapTouchMove(e); },
+      onTouchEnd: () => {
+        const s = tapStateRef.current;
+        tapStateRef.current = null;
+        if (!s) return;
+        const dt = Date.now() - s.startedAt;
+        if (!s.moved) lastTouchAtRef.current = Date.now();
+        if (s.moved) return;
+        if (dt > 550) return;
+        handler();
+      },
+      onClick: () => {
+        if (Date.now() - lastTouchAtRef.current < 700) return;
+        handler();
+      },
+    };
+  }, [tapTouchMove, tapTouchStart]);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [bets, setBets] = useState<BetSelection[]>([]);
   const [authModalOpen, setAuthModalOpen] = useState(false);
@@ -3818,9 +3852,8 @@ export default function Home() {
       return (
         <motion.div
           {...motionProps}
+          {...makeTap(() => setExpandedMatch(match))}
           className="banner-card rounded-xl border border-zinc-800 hover:border-red-500/40 transition-colors cursor-pointer overflow-hidden"
-          onClick={() => setExpandedMatch(match)}
-          onTouchStart={() => setExpandedMatch(match)}
         >
           {/* Image section — visible at top */}
           <div className="relative w-full overflow-hidden" style={{ aspectRatio: "16/7" }}>
@@ -3838,7 +3871,7 @@ export default function Home() {
             )}
           </div>
           {/* Content below image */}
-          <div className="px-3 pt-2 pb-3" style={{ background: "#0f0f0f" }} onClick={e => e.stopPropagation()} onTouchStart={e => e.stopPropagation()}>
+          <div className="px-3 pt-2 pb-3" style={{ background: "#0f0f0f" }} onClick={e => e.stopPropagation()} onTouchStart={e => e.stopPropagation()} onTouchMove={e => e.stopPropagation()} onTouchEnd={e => e.stopPropagation()}>
             <div className="mb-2">
               {sport === "tennis"     ? <TennisScore /> :
                sport === "volleyball" ? <VolleyScore /> :
@@ -3879,12 +3912,11 @@ export default function Home() {
     return (
       <motion.div
         {...motionProps}
+        {...makeTap(() => setExpandedMatch(match))}
         className="bg-zinc-900 rounded-lg border border-zinc-800 hover:border-red-500/30 transition-colors cursor-pointer overflow-hidden"
-        onClick={() => setExpandedMatch(match)}
-        onTouchStart={() => setExpandedMatch(match)}
       >
         <CompactLeagueRow match={match} rightSlot={liveBadge} />
-        <div className="px-3 py-2.5" onClick={e => e.stopPropagation()} onTouchStart={e => e.stopPropagation()}>
+        <div className="px-3 py-2.5" onClick={e => e.stopPropagation()} onTouchStart={e => e.stopPropagation()} onTouchMove={e => e.stopPropagation()} onTouchEnd={e => e.stopPropagation()}>
           {sport === "tennis"     ? <TennisScore /> :
            sport === "volleyball" ? <VolleyScore /> :
            sport === "hockey"     ? <HockeyScore /> :
@@ -3925,8 +3957,7 @@ export default function Home() {
       return (
         <div
           className="banner-card rounded-xl border border-zinc-800 hover:border-red-500/40 transition-colors cursor-pointer overflow-hidden"
-          onClick={() => setExpandedMatch(match)}
-          onTouchStart={() => setExpandedMatch(match)}
+          {...makeTap(() => setExpandedMatch(match))}
         >
           {/* Image section — visible at top */}
           <div className="relative w-full overflow-hidden" style={{ aspectRatio: "16/7" }}>
@@ -3944,7 +3975,7 @@ export default function Home() {
             )}
           </div>
           {/* Content below image */}
-          <div className="px-3 pt-2.5 pb-3" style={{ background: "#0f0f0f" }} onClick={e => e.stopPropagation()} onTouchStart={e => e.stopPropagation()}>
+          <div className="px-3 pt-2.5 pb-3" style={{ background: "#0f0f0f" }} onClick={e => e.stopPropagation()} onTouchStart={e => e.stopPropagation()} onTouchMove={e => e.stopPropagation()} onTouchEnd={e => e.stopPropagation()}>
             <div className="flex items-baseline gap-1.5 mb-2.5 min-w-0">
               <span className="font-bold text-sm leading-tight truncate text-white">{homeName}</span>
               <span className="text-xs shrink-0 text-zinc-500">vs</span>
@@ -3959,11 +3990,10 @@ export default function Home() {
     return (
       <div
         className="bg-zinc-900 rounded-lg border border-zinc-800 hover:border-red-500/30 transition-colors cursor-pointer overflow-hidden"
-        onClick={() => setExpandedMatch(match)}
-        onTouchStart={() => setExpandedMatch(match)}
+        {...makeTap(() => setExpandedMatch(match))}
       >
         <CompactLeagueRow match={match} />
-        <div className="px-3 pb-3 pt-1" onClick={e => e.stopPropagation()} onTouchStart={e => e.stopPropagation()}>
+        <div className="px-3 pb-3 pt-1" onClick={e => e.stopPropagation()} onTouchStart={e => e.stopPropagation()} onTouchMove={e => e.stopPropagation()} onTouchEnd={e => e.stopPropagation()}>
           <div className="flex items-baseline gap-1.5 mb-2 min-w-0">
             <span className="font-bold text-sm truncate">{homeName}</span>
             <span className="text-xs text-zinc-500 shrink-0">vs</span>
@@ -6670,7 +6700,7 @@ export default function Home() {
           ].map(tab => (
             <button
               key={tab.id}
-              onClick={() => selectMainTab(tab.id as typeof activeTab, (tab as { onSelect?: () => void }).onSelect)}
+              {...makeTap(() => selectMainTab(tab.id as typeof activeTab, (tab as { onSelect?: () => void }).onSelect))}
               className={`py-3 font-semibold text-sm transition-colors border-b-2 whitespace-nowrap flex items-center gap-2 ${activeTab === tab.id ? "border-red-600 text-white" : "border-transparent text-zinc-500 hover:text-zinc-300"}`}
             >
               {tab.icon}
@@ -6685,7 +6715,7 @@ export default function Home() {
           ))}
           {auth.user && (
             <button
-              onClick={() => { setActiveTab("wallet"); fetchMyBets(); }}
+              {...makeTap(() => { setActiveTab("wallet"); fetchMyBets(); })}
               className={`py-3 font-semibold text-sm transition-colors border-b-2 whitespace-nowrap flex items-center gap-2 ${activeTab === "wallet" ? "border-red-600 text-white" : "border-transparent text-zinc-500 hover:text-zinc-300"}`}
             >
               <Wallet size={16} />
@@ -6694,7 +6724,7 @@ export default function Home() {
           )}
           {auth.user && (
             <button
-              onClick={() => { setActiveTab("mybets"); fetchMyBets(); }}
+              {...makeTap(() => { setActiveTab("mybets"); fetchMyBets(); })}
               className={`py-3 font-semibold text-sm transition-colors border-b-2 whitespace-nowrap flex items-center gap-2 ${activeTab === "mybets" ? "border-red-600 text-white" : "border-transparent text-zinc-500 hover:text-zinc-300"}`}
             >
               <History size={16} />
@@ -6703,7 +6733,7 @@ export default function Home() {
           )}
           {auth.user && (
             <button
-              onClick={() => setActiveTab("profile")}
+              {...makeTap(() => setActiveTab("profile"))}
               className={`py-3 font-semibold text-sm transition-colors border-b-2 whitespace-nowrap flex items-center gap-2 ${activeTab === "profile" ? "border-red-600 text-white" : "border-transparent text-zinc-500 hover:text-zinc-300"}`}
             >
               <User size={16} />
