@@ -1204,6 +1204,12 @@ type MatchStatsData = {
 type StandingRow = { pos: number; name: string; played: number; won: number; drawn: number; lost: number; gf: number; ga: number; pts: number };
 
 const MarketTabCtx = createContext<string>("");
+const MarketGroupSeqCtx = createContext<{ next: () => number } | null>(null);
+const MarketGroupOpenCtx = createContext<{
+  matchId: string;
+  getOpen: (key: string, fallback: boolean) => boolean;
+  setOpen: (key: string, open: boolean) => void;
+} | null>(null);
 
 function nifMask(value: string) {
   return value
@@ -1945,6 +1951,18 @@ export default function Home() {
   const [matchViewTab, setMatchViewTab] = useState<"markets" | "stats" | "standings" | "live" | "yesterday" | "ranking" | "liga" | "odds" | "lineups" | "confrontos">("markets");
   // Market sub-tab — lifted here so live refreshes don't unmount MatchModalMarkets and reset the selection
   const [modalTab, setModalTab] = useState("todos");
+  const marketGroupSeqRef = useRef(0);
+  const marketGroupSeqApi = useMemo(() => ({
+    next: () => {
+      marketGroupSeqRef.current += 1;
+      return marketGroupSeqRef.current;
+    }
+  }), []);
+  const [marketGroupOpenMap, setMarketGroupOpenMap] = useState<Record<string, boolean>>({});
+  const marketGroupOpenApi = useMemo(() => ({
+    getOpen: (key: string, fallback: boolean) => marketGroupOpenMap[key] ?? fallback,
+    setOpen: (key: string, open: boolean) => setMarketGroupOpenMap(prev => (prev[key] === open ? prev : { ...prev, [key]: open })),
+  }), [marketGroupOpenMap]);
   const [matchStats, setMatchStats] = useState<MatchStatsData | null>(null);
   const [matchStatsLoading, setMatchStatsLoading] = useState(false);
   const [standings, setStandings] = useState<StandingRow[] | null>(null);
@@ -2768,11 +2786,18 @@ export default function Home() {
         window.location.reload();
       }
     } catch {
-      setLockError("Verificação biométrica falhou. Use a sua password.");
+      setLockError("Verificação biométrica cancelada ou falhou.");
     } finally {
       setBiometricLoading(false);
     }
   };
+
+  useEffect(() => {
+    if (!isLocked) return;
+    if (!(biometricAvailable && biometricCredentialId)) return;
+    const t = window.setTimeout(() => { void handleBiometricUnlock(); }, 120);
+    return () => window.clearTimeout(t);
+  }, [isLocked, biometricAvailable, biometricCredentialId]);
 
   const handleRegisterBiometric = async () => {
     if (!auth.user) return;
@@ -4228,7 +4253,18 @@ export default function Home() {
   const MarketGrid2Group = ({ title, children }: { title: string; children: ReactNode }) => {
     const tab = useContext(MarketTabCtx);
     const collapsible = tab === "todos";
-    const [open, setOpen] = useState(true);
+    const seq = useContext(MarketGroupSeqCtx);
+    const idx = useMemo(() => seq?.next() ?? 9999, []); // eslint-disable-line react-hooks/exhaustive-deps
+    const openCtx = useContext(MarketGroupOpenCtx);
+    const initialOpen = !collapsible || idx <= 5;
+    const key = `${openCtx?.matchId ?? "x"}:grid2:${title}`;
+    const [localOpen, setLocalOpen] = useState(initialOpen);
+    const open = openCtx ? openCtx.getOpen(key, initialOpen) : localOpen;
+    const setOpen = (updater: boolean | ((prev: boolean) => boolean)) => {
+      const next = typeof updater === "function" ? (updater as (p: boolean) => boolean)(open) : updater;
+      if (openCtx) openCtx.setOpen(key, next);
+      else setLocalOpen(next);
+    };
     if (!collapsible) {
       return (
         <div className="mb-4 last:mb-0">
@@ -4258,7 +4294,18 @@ export default function Home() {
   const MarketGroup = ({ title, children }: { title: string; children: ReactNode }) => {
     const tab = useContext(MarketTabCtx);
     const collapsible = tab === "todos";
-    const [open, setOpen] = useState(true);
+    const seq = useContext(MarketGroupSeqCtx);
+    const idx = useMemo(() => seq?.next() ?? 9999, []); // eslint-disable-line react-hooks/exhaustive-deps
+    const openCtx = useContext(MarketGroupOpenCtx);
+    const initialOpen = !collapsible || idx <= 5;
+    const key = `${openCtx?.matchId ?? "x"}:grp:${title}`;
+    const [localOpen, setLocalOpen] = useState(initialOpen);
+    const open = openCtx ? openCtx.getOpen(key, initialOpen) : localOpen;
+    const setOpen = (updater: boolean | ((prev: boolean) => boolean)) => {
+      const next = typeof updater === "function" ? (updater as (p: boolean) => boolean)(open) : updater;
+      if (openCtx) openCtx.setOpen(key, next);
+      else setLocalOpen(next);
+    };
 
     if (!collapsible) {
       return (
@@ -4281,6 +4328,37 @@ export default function Home() {
         {open && (
           <div className="px-3 py-3">
             <div className="flex flex-wrap gap-2">{children}</div>
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  const MarketAccordionSection = ({ title, defaultOpen = false, count, children }: { title: string; defaultOpen?: boolean; count?: number; children: ReactNode }) => {
+    const openCtx = useContext(MarketGroupOpenCtx);
+    const key = `${openCtx?.matchId ?? "x"}:acc:${title}`;
+    const [localOpen, setLocalOpen] = useState(defaultOpen);
+    const open = openCtx ? openCtx.getOpen(key, defaultOpen) : localOpen;
+    const setOpen = (updater: boolean | ((prev: boolean) => boolean)) => {
+      const next = typeof updater === "function" ? (updater as (p: boolean) => boolean)(open) : updater;
+      if (openCtx) openCtx.setOpen(key, next);
+      else setLocalOpen(next);
+    };
+    return (
+      <div className="mb-1.5 last:mb-0 border border-zinc-800 rounded-lg overflow-hidden">
+        <button
+          className="w-full flex items-center justify-between px-3 py-2.5 text-left bg-zinc-800/60 hover:bg-zinc-800 active:bg-zinc-700 transition-colors"
+          onClick={() => setOpen(o => !o)}
+        >
+          <span className="text-[10px] font-black text-zinc-300 uppercase tracking-widest">{title}</span>
+          <div className="flex items-center gap-2">
+            {count != null && <span className="text-[10px] font-bold text-zinc-500 tabular-nums">{count}</span>}
+            <ChevronDown size={14} className={`text-zinc-500 transition-transform duration-200 ${open ? "rotate-180" : ""}`} />
+          </div>
+        </button>
+        {open && (
+          <div className="px-3 py-3">
+            {children}
           </div>
         )}
       </div>
@@ -4430,8 +4508,11 @@ export default function Home() {
       );
     }
 
+    marketGroupSeqRef.current = 0;
     return (
       <MarketTabCtx.Provider value={modalTab}>
+      <MarketGroupOpenCtx.Provider value={{ matchId: String(match.id), getOpen: marketGroupOpenApi.getOpen, setOpen: marketGroupOpenApi.setOpen }}>
+      <MarketGroupSeqCtx.Provider key={`mgrp:${match.id}:${modalTab}`} value={marketGroupSeqApi}>
       <div className="mt-2">
         <div ref={tabContainerRef} className="flex gap-1 overflow-x-auto no-scrollbar mb-4 pb-1 border-b border-zinc-800" style={{ scrollbarWidth: "none", touchAction: "pan-x", WebkitOverflowScrolling: "touch" } as React.CSSProperties}>
           {tabs.map(t => (
@@ -4937,7 +5018,6 @@ export default function Home() {
           <div className="text-center text-zinc-600 py-6 text-sm">Mercado não disponível para esta partida.</div>
         )}
 
-        {/* ── FUTEBOL: PLACAR EXATO DO 1º TEMPO ── */}
         {/* ── FUTEBOL: GOLS POR EQUIPA — 1º TEMPO ── */}
         {isFootball && !showET && !showPen && show1tempo && (modalTab === "1tempo" || modalTab === "todos") && m && (m as any).teamGoals?.homeOver05 > 0 && (
           <div>
@@ -5131,12 +5211,14 @@ export default function Home() {
         {/* ── FUTEBOL: PLACAR EXATO ── */}
         {isFootball && !showET && !showPen && !isLateGame && (modalTab === "placar" || modalTab === "todos") && m && m.correctScore && (
           <div>
-            <p className="text-xs text-zinc-500 mb-3">Selecione o marcador exato ao final da partida.</p>
-            <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
-              {Object.entries(m.correctScore).map(([score, odd]) => (
-                <MarketOddsBtn key={score} match={match} sel={`cs-${score}`} odd={odd} market="placar" label={score} />
-              ))}
-            </div>
+            <MarketAccordionSection title="Placar Exato" defaultOpen={false} count={Object.keys(m.correctScore).length}>
+              <p className="text-xs text-zinc-500 mb-3">Selecione o marcador exato ao final da partida.</p>
+              <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
+                {Object.entries(m.correctScore).map(([score, odd]) => (
+                  <MarketOddsBtn key={score} match={match} sel={`cs-${score}`} odd={odd} market="placar" label={score} />
+                ))}
+              </div>
+            </MarketAccordionSection>
           </div>
         )}
         {isFootball && !showET && !showPen && !isLateGame && modalTab === "placar" && m && !m.correctScore && (
@@ -5756,6 +5838,8 @@ export default function Home() {
 
         {!m && <div className="text-center text-zinc-500 py-6 text-sm">Mercados adicionais indisponíveis para esta partida.</div>}
       </div>
+      </MarketGroupSeqCtx.Provider>
+      </MarketGroupOpenCtx.Provider>
       </MarketTabCtx.Provider>
     );
   };
@@ -5942,91 +6026,36 @@ export default function Home() {
 
               {/* Title + user */}
               <div className="text-center">
-                <p className="text-white font-black text-xl tracking-tight">Sessão bloqueada</p>
-                {auth.user && (
-                  <p className="text-zinc-400 text-sm mt-1">{auth.user.email}</p>
-                )}
+                <p className="text-white font-black text-xl tracking-tight">Desbloqueio facial</p>
                 <p className="text-zinc-600 text-xs mt-1">120 segundos sem atividade detectada</p>
               </div>
 
-              {/* Biometric button — only when registered */}
-              {biometricAvailable && biometricCredentialId && (
-                <button
-                  onClick={handleBiometricUnlock}
-                  disabled={biometricLoading}
-                  className="w-full flex items-center justify-center gap-3 py-3.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 hover:border-zinc-500 active:bg-zinc-900 transition-all text-white font-semibold text-sm disabled:opacity-60"
-                >
-                  {biometricLoading
-                    ? <Loader2 size={20} className="animate-spin text-zinc-400" />
-                    : <Fingerprint size={22} className="text-blue-400" />}
-                  <span>{biometricLoading ? "A verificar..." : "Desbloquear com Face ID / Impressão Digital"}</span>
-                </button>
-              )}
-
-              {/* Biometric available but not registered → offer setup */}
-              {biometricAvailable && !biometricCredentialId && auth.user && (
-                <button
-                  onClick={() => { setIsLocked(false); resetIdle(); setShowBiometricSetup(true); }}
-                  className="text-xs text-zinc-500 hover:text-zinc-300 underline underline-offset-2 transition-colors"
-                >
-                  Ativar desbloqueio biométrico
-                </button>
-              )}
-
-              {/* Divider */}
-              {biometricAvailable && biometricCredentialId && (
-                <div className="w-full flex items-center gap-3">
-                  <div className="flex-1 h-px bg-zinc-800" />
-                  <span className="text-zinc-600 text-xs">ou</span>
-                  <div className="flex-1 h-px bg-zinc-800" />
-                </div>
-              )}
-
-              {/* Password form */}
-              {auth.user ? (
-                <form onSubmit={handlePasswordUnlock} className="w-full space-y-3">
-                  <div>
-                    <Input
-                      type="password"
-                      placeholder="Introduza a sua password"
-                      value={lockPassword}
-                      onChange={e => { setLockPassword(e.target.value); setLockError(""); }}
-                      className="bg-zinc-900 border-zinc-700 text-white placeholder:text-zinc-500 h-12 text-sm focus:border-red-500"
-                      autoFocus
-                    />
-                    {lockError && (
-                      <p className="text-red-400 text-xs mt-1.5 flex items-center gap-1">
-                        <AlertCircle size={12} />{lockError}
-                      </p>
-                    )}
+              <div className="w-full flex flex-col items-center gap-2">
+                {biometricLoading ? (
+                  <div className="flex items-center gap-2 text-zinc-400 text-sm">
+                    <Loader2 size={18} className="animate-spin text-zinc-400" />
+                    <span>A verificar…</span>
                   </div>
-                  <Button
-                    type="submit"
-                    disabled={lockLoading || !lockPassword}
-                    className="w-full bg-red-600 hover:bg-red-500 text-white font-bold h-12"
+                ) : (
+                  <div className="flex items-center gap-2 text-zinc-400 text-sm">
+                    <ScanFace size={18} className="text-blue-400" />
+                    <span>Aproxime o rosto / use o sensor</span>
+                  </div>
+                )}
+                {lockError && (
+                  <p className="text-red-400 text-xs mt-1 flex items-center gap-1">
+                    <AlertCircle size={12} />{lockError}
+                  </p>
+                )}
+                {!!lockError && biometricAvailable && biometricCredentialId && (
+                  <button
+                    onClick={() => void handleBiometricUnlock()}
+                    className="mt-2 text-xs text-zinc-500 hover:text-zinc-300 underline underline-offset-2 transition-colors"
                   >
-                    {lockLoading ? <Loader2 size={16} className="animate-spin mr-2" /> : <ShieldCheck size={16} className="mr-2" />}
-                    Desbloquear
-                  </Button>
-                </form>
-              ) : (
-                <button
-                  onClick={() => { setIsLocked(false); resetIdle(); setAuthModalOpen(true); }}
-                  className="w-full py-3 rounded-xl bg-red-600 hover:bg-red-500 text-white font-bold text-sm transition-colors"
-                >
-                  Entrar na conta
-                </button>
-              )}
-
-              {/* Logout option */}
-              {auth.user && (
-                <button
-                  onClick={() => { auth.logout(); setIsLocked(false); resetIdle(); }}
-                  className="text-xs text-zinc-600 hover:text-zinc-400 transition-colors flex items-center gap-1.5"
-                >
-                  <LogOut size={12} />Terminar sessão
-                </button>
-              )}
+                    Tentar novamente
+                  </button>
+                )}
+              </div>
             </motion.div>
           </motion.div>
         )}
