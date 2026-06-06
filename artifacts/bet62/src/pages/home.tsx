@@ -1443,12 +1443,6 @@ export default function Home() {
   const activeTabRef = useRef(activeTab);
   useEffect(() => { activeTabRef.current = activeTab; }, [activeTab]);
   const lastTouchAtRef = useRef(0);
-  const lastScrollAtRef = useRef(0);
-  useEffect(() => {
-    const onScroll = () => { lastScrollAtRef.current = Date.now(); };
-    document.addEventListener("scroll", onScroll, { capture: true, passive: true });
-    return () => { document.removeEventListener("scroll", onScroll, true); };
-  }, []);
   const tapStateRef = useRef<{ x: number; y: number; startedAt: number; moved: boolean } | null>(null);
   const tapTouchStart = useCallback((e: React.TouchEvent) => {
     const t = e.touches?.[0];
@@ -1470,10 +1464,6 @@ export default function Home() {
         const s = tapStateRef.current;
         tapStateRef.current = null;
         if (!s) return;
-        if (Date.now() - lastScrollAtRef.current < 120) {
-          lastTouchAtRef.current = Date.now();
-          return;
-        }
         const dt = Date.now() - s.startedAt;
         if (s.moved) {
           lastTouchAtRef.current = Date.now();
