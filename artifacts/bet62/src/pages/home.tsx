@@ -1454,7 +1454,7 @@ export default function Home() {
     if (!s) return;
     const t = e.touches?.[0];
     if (!t) return;
-    if (Math.abs(t.clientX - s.x) > 18 || Math.abs(t.clientY - s.y) > 18) s.moved = true;
+    if (Math.abs(t.clientX - s.x) > 24 || Math.abs(t.clientY - s.y) > 24) s.moved = true;
   }, []);
   const makeTap = useCallback((handler: () => void) => {
     return {
@@ -1465,16 +1465,13 @@ export default function Home() {
         tapStateRef.current = null;
         if (!s) return;
         const dt = Date.now() - s.startedAt;
-        if (s.moved) {
-          lastTouchAtRef.current = Date.now();
-          return;
-        }
+        if (s.moved) return;
         if (dt > 900) return;
         lastTouchAtRef.current = Date.now();
         handler();
       },
       onClick: () => {
-        if (Date.now() - lastTouchAtRef.current < 800) return;
+        if (Date.now() - lastTouchAtRef.current < 500) return;
         handler();
       },
     };
@@ -9035,7 +9032,7 @@ export default function Home() {
                       <div className="overflow-x-auto flex gap-2.5 pb-3 mb-5 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
                         {showWCChip && (
                           <button
-                            onClick={() => { setSelectedWC(!selectedWC); setSelectedLeague(null); if (!selectedWC) setSelectedSport("football"); }}
+                            {...makeTap(() => { setSelectedWC(!selectedWC); setSelectedLeague(null); if (!selectedWC) setSelectedSport("football"); })}
                             className={`flex items-center gap-2 px-3.5 py-2.5 rounded-xl border whitespace-nowrap text-sm font-semibold transition-all flex-shrink-0 ${selectedWC ? "border-amber-500 bg-amber-500/10 text-white shadow-[0_0_10px_rgba(245,158,11,0.18)]" : "border-zinc-700 bg-zinc-900/60 text-zinc-300 hover:border-zinc-500 hover:text-white"}`}
                           >
                             <span className="text-base leading-none">🌍</span>
@@ -9044,7 +9041,7 @@ export default function Home() {
                         )}
                         {chips.length >= 2 && (
                           <button
-                            onClick={() => setSelectedLeague(null)}
+                            {...makeTap(() => setSelectedLeague(null))}
                             className={`flex items-center gap-2 px-3.5 py-2.5 rounded-xl border whitespace-nowrap text-sm font-semibold transition-all flex-shrink-0 ${!selectedLeague && !selectedWC ? "border-amber-500 bg-amber-500/10 text-white shadow-[0_0_10px_rgba(245,158,11,0.18)]" : "border-zinc-700 bg-zinc-900/60 text-zinc-300 hover:border-zinc-500 hover:text-white"}`}
                           >
                             <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="shrink-0"><rect width="7" height="7" x="3" y="3" rx="1"/><rect width="7" height="7" x="14" y="3" rx="1"/><rect width="7" height="7" x="14" y="14" rx="1"/><rect width="7" height="7" x="3" y="14" rx="1"/></svg>
@@ -9056,7 +9053,7 @@ export default function Home() {
                           return (
                             <button
                               key={i}
-                              onClick={() => setSelectedLeague(active ? null : c.label)}
+                              {...makeTap(() => setSelectedLeague(active ? null : c.label))}
                               className={`flex items-center gap-2.5 px-3.5 py-2.5 rounded-xl border whitespace-nowrap text-sm font-semibold transition-all flex-shrink-0 ${active ? "border-amber-500 bg-amber-500/10 text-white shadow-[0_0_10px_rgba(245,158,11,0.18)]" : "border-zinc-700 bg-zinc-900/60 text-zinc-300 hover:border-zinc-500 hover:text-white"}`}
                             >
                               <img
@@ -10238,7 +10235,7 @@ export default function Home() {
                         return (
                           <button
                             key={s.key}
-                            onClick={() => setLiveSportFilter(s.key)}
+                            {...makeTap(() => setLiveSportFilter(s.key))}
                             className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap transition-all border ${
                               active
                                 ? "bg-red-600 border-red-500 text-white shadow-[0_0_8px_rgba(239,68,68,0.4)]"
@@ -10301,7 +10298,7 @@ export default function Home() {
                     return (
                       <div className="py-12 text-center text-zinc-500 bg-zinc-900/50 rounded-xl border border-zinc-800">
                         <p className="font-medium">Nenhum jogo deste desporto ao vivo.</p>
-                        <button onClick={() => setLiveSportFilter("all")} className="mt-3 text-sm text-red-500 hover:text-red-400 underline">
+                        <button {...makeTap(() => setLiveSportFilter("all"))} className="mt-3 text-sm text-red-500 hover:text-red-400 underline">
                           Ver todos os desportos
                         </button>
                       </div>
