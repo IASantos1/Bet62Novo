@@ -1438,6 +1438,8 @@ export default function Home() {
   const { isIdle, resetIdle } = useIdle(120_000);
   const isIdleRef = useRef(false);
   useEffect(() => { isIdleRef.current = isIdle; }, [isIdle]);
+  const upcomingFetchCtrlRef = useRef<AbortController | null>(null);
+  const liveFetchCtrlRef = useRef<AbortController | null>(null);
 
   const [activeTab, setActiveTab] = useState<"sports" | "live" | "promos" | "mybets" | "wallet" | "profile">("sports");
   const activeTabRef = useRef(activeTab);
@@ -1548,6 +1550,7 @@ export default function Home() {
   const prevWonBetIds = useRef<Set<number> | null>(null);
   const prevLiveMatchesRef = useRef<Match[]>([]);
   const liveExpandedFullFetchRef = useRef<string | null>(null);
+  const livePrefetchingRef = useRef<Set<string>>(new Set());
   const finishedMatchScores = useRef<Map<string, { home: number; away: number }>>(new Map());
 
   // Deposit modal
@@ -2369,6 +2372,26 @@ export default function Home() {
     return "2P";
   };
 
+  type Snapshot<T> = { savedAt: number; value: T };
+  const upcomingSnapshotKey = (sport: string) => `bet62_snapshot_upcoming_v1:${sport}`;
+  const liveSnapshotKey = () => "bet62_snapshot_live_v1";
+  const matchSnapshotKey = (id: string) => `bet62_snapshot_match_v1:${id}`;
+  const readSnapshot = useCallback(<T,>(key: string): Snapshot<T> | null => {
+    try {
+      const raw = localStorage.getItem(key);
+      if (!raw) return null;
+      const parsed = JSON.parse(raw) as Snapshot<T>;
+      if (!parsed || typeof parsed !== "object") return null;
+      if (typeof (parsed as any).savedAt !== "number") return null;
+      return parsed;
+    } catch {
+      return null;
+    }
+  }, []);
+  const writeSnapshot = useCallback((key: string, value: any) => {
+    try { localStorage.setItem(key, JSON.stringify({ savedAt: Date.now(), value })); } catch {}
+  }, []);
+
   // Sync expandedMatch with live data silently (score/odds update without closing panel)
   useEffect(() => {
     if (!expandedMatch?.isLive) return;
@@ -2392,6 +2415,11 @@ export default function Home() {
     const id = String(expandedMatch.id);
     const hasMarkets = !!(expandedMatch as any).markets;
     if (hasMarkets) return;
+    const snap = readSnapshot<Match>(matchSnapshotKey(id));
+    const canUseSnap = !!(snap && (Date.now() - snap.savedAt) < 10 * 60_000 && snap.value);
+    if (canUseSnap) {
+      setExpandedMatch(prev => (prev && String(prev.id) === id ? (snap.value as any) : prev));
+    }
     if (liveExpandedFullFetchRef.current === id) return;
     liveExpandedFullFetchRef.current = id;
     const ctrl = new AbortController();
@@ -2401,6 +2429,7 @@ export default function Home() {
       .then(d => {
         const m = d?.match as Match | null | undefined;
         if (!m) return;
+        writeSnapshot(matchSnapshotKey(id), m as any);
         setExpandedMatch(prev => (prev && String(prev.id) === id ? (m as any) : prev));
       })
       .catch(() => {})
@@ -2409,7 +2438,7 @@ export default function Home() {
         if (liveExpandedFullFetchRef.current === id) liveExpandedFullFetchRef.current = null;
       });
     return () => { clearTimeout(tid); ctrl.abort(); };
-  }, [expandedMatch?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [expandedMatch?.id, matchSnapshotKey, readSnapshot, writeSnapshot]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Clear seenMatchIds when leaving live tab so new entries animate on return
   useEffect(() => {
@@ -2734,30 +2763,15 @@ export default function Home() {
     return () => clearTimeout(tid);
   }, []);
 
-  type Snapshot<T> = { savedAt: number; value: T };
-  const upcomingSnapshotKey = (sport: string) => `bet62_snapshot_upcoming_v1:${sport}`;
-  const readSnapshot = useCallback(<T,>(key: string): Snapshot<T> | null => {
-    try {
-      const raw = localStorage.getItem(key);
-      if (!raw) return null;
-      const parsed = JSON.parse(raw) as Snapshot<T>;
-      if (!parsed || typeof parsed !== "object") return null;
-      if (typeof (parsed as any).savedAt !== "number") return null;
-      return parsed;
-    } catch {
-      return null;
-    }
-  }, []);
-  const writeSnapshot = useCallback((key: string, value: any) => {
-    try { localStorage.setItem(key, JSON.stringify({ savedAt: Date.now(), value })); } catch {}
-  }, []);
-
   // Fetch upcoming matches — polls every 30s so new games appear automatically
   const fetchUpcoming = useCallback(async (showSpinner = false) => {
+    if (document.visibilityState === "hidden") return;
     if (isIdleRef.current || isLockedRef.current) return;
     if (showSpinner) setUpcomingLoading(true);
     const param = selectedSport === "all" ? "" : `?sport=${selectedSport}`;
+    try { upcomingFetchCtrlRef.current?.abort(); } catch {}
     const ctrl = new AbortController();
+    upcomingFetchCtrlRef.current = ctrl;
     const tid = setTimeout(() => ctrl.abort(), 10_000);
     try {
       const r = await fetch(`/api/matches/upcoming${param}`, { signal: ctrl.signal });
@@ -2771,6 +2785,7 @@ export default function Home() {
     } catch {
     } finally {
       clearTimeout(tid);
+      if (upcomingFetchCtrlRef.current === ctrl) upcomingFetchCtrlRef.current = null;
       if (showSpinner) setUpcomingLoading(false);
     }
   }, [selectedSport, upcomingSnapshotKey, writeSnapshot]);
@@ -2782,7 +2797,8 @@ export default function Home() {
       setUpcomingMatches(snap.value.map(m => ({ ...(m as any), isLive: false })));
       setUpcomingLoading(false);
     }
-    if (activeTab !== "live" && activeTab !== "mybets") fetchUpcoming(!canUseSnap);
+    if (activeTab !== "sports") return;
+    fetchUpcoming(!canUseSnap);
     const id = setInterval(() => fetchUpcoming(false), 30_000);
     return () => clearInterval(id);
   }, [fetchUpcoming, readSnapshot, selectedSport, upcomingSnapshotKey, activeTab]);
@@ -2914,30 +2930,47 @@ export default function Home() {
   }, []);
 
   const fetchLive = useCallback(async (showSpinner = false) => {
+    if (document.visibilityState === "hidden") return;
     if (isIdleRef.current || isLockedRef.current) return;
     if (showSpinner) setLiveLoading(true);
+    let ctrl: AbortController | null = null;
     try {
-      const ctrl = new AbortController();
-      const tid = setTimeout(() => ctrl.abort(), 20_000);
+      try { liveFetchCtrlRef.current?.abort(); } catch {}
+      ctrl = new AbortController();
+      const currentCtrl = ctrl;
+      liveFetchCtrlRef.current = currentCtrl;
+      const tid = setTimeout(() => currentCtrl.abort(), 20_000);
       try {
-        const res = await fetch("/api/matches/live?lean=1&limit=200", { signal: ctrl.signal });
+        const res = await fetch("/api/matches/live?lean=1&limit=200", { signal: currentCtrl.signal });
         const data = res.ok ? await res.json() : { matches: [] };
+        if (res.ok && Array.isArray((data as any)?.matches)) {
+          writeSnapshot(liveSnapshotKey(), (data as any).matches);
+        }
         processLiveData(data);
       } finally {
         try { clearTimeout(tid); } catch {}
       }
     } catch {
     } finally {
+      if (ctrl && liveFetchCtrlRef.current === ctrl) liveFetchCtrlRef.current = null;
       if (showSpinner) setLiveLoading(false);
     }
-  }, [processLiveData]);
+  }, [processLiveData, liveSnapshotKey, writeSnapshot]);
 
   const selectMainTab = useCallback((id: typeof activeTab, onSelect?: () => void) => {
     const prev = activeTabRef.current;
     if (prev !== id) setActiveTab(id);
     onSelect?.();
-    if (id === "live" && prev !== "live") fetchLive(true);
-  }, [fetchLive]);
+    if (id === "live" && prev !== "live") {
+      const snap = readSnapshot<LiveMatchRaw[]>(liveSnapshotKey());
+      const canUseSnap = !!(snap && (Date.now() - snap.savedAt) < 2 * 60_000 && Array.isArray(snap.value));
+      if (snap && canUseSnap && liveMatches.length === 0) {
+        setLiveMatches(snap.value.map(m => ({ ...(m as any), isLive: true })));
+        setLiveLoading(false);
+      }
+      fetchLive(!(canUseSnap && liveMatches.length === 0));
+    }
+  }, [fetchLive, liveMatches.length, liveSnapshotKey, readSnapshot, setLiveMatches]);
 
   useEffect(() => {
     if (!liveLoading) return;
@@ -2947,10 +2980,53 @@ export default function Home() {
 
   useEffect(() => {
     if (activeTab !== "live") return;
-    fetchLive(liveMatches.length === 0);
+    let canUseSnap = false;
+    if (liveMatches.length === 0) {
+      const snap = readSnapshot<LiveMatchRaw[]>(liveSnapshotKey());
+      canUseSnap = !!(snap && (Date.now() - snap.savedAt) < 2 * 60_000 && Array.isArray(snap.value));
+      if (snap && canUseSnap) {
+        setLiveMatches(snap.value.map(m => ({ ...(m as any), isLive: true })));
+        setLiveLoading(false);
+      }
+    }
+    fetchLive(liveMatches.length === 0 && !canUseSnap);
     const id = setInterval(() => fetchLive(false), 5_000);
     return () => clearInterval(id);
-  }, [activeTab, fetchLive, liveMatches.length]);
+  }, [activeTab, fetchLive, liveMatches.length, liveSnapshotKey, readSnapshot]);
+
+  useEffect(() => {
+    if (activeTab !== "live") return;
+    if (liveMatches.length === 0) return;
+    if (document.visibilityState === "hidden") return;
+    const ctrl = new AbortController();
+    const tid = setTimeout(() => ctrl.abort(), 12_000);
+    const run = async () => {
+      const ids = liveMatches.slice(0, 2).map(m => String(m.id));
+      for (const id of ids) {
+        if (ctrl.signal.aborted) return;
+        if (livePrefetchingRef.current.has(id)) continue;
+        const snap = readSnapshot<Match>(matchSnapshotKey(id));
+        const canUseSnap = !!(snap && (Date.now() - snap.savedAt) < 2 * 60_000 && snap.value);
+        if (canUseSnap) continue;
+        livePrefetchingRef.current.add(id);
+        try {
+          const r = await fetch(`/api/matches/live-match/${encodeURIComponent(id)}`, { signal: ctrl.signal });
+          const d = r.ok ? await r.json() : null;
+          const m = d?.match as Match | null | undefined;
+          if (m) writeSnapshot(matchSnapshotKey(id), m as any);
+        } catch {
+        } finally {
+          livePrefetchingRef.current.delete(id);
+        }
+      }
+    };
+    const t = setTimeout(() => { run(); }, 700);
+    return () => {
+      clearTimeout(t);
+      clearTimeout(tid);
+      ctrl.abort();
+    };
+  }, [activeTab, liveMatches, matchSnapshotKey, readSnapshot, writeSnapshot]);
 
   // Track disappearing live matches to store final scores
   useEffect(() => {
