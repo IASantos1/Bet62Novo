@@ -2207,25 +2207,50 @@ export default function Home() {
   // NOT simply because minute equals 45/90 (those can occur during active play).
   const getDisplayMinute = (match: Match): number => {
     const id = String(match.id);
-    const apiMin = apiMinutesRef.current[id] ?? match.minute ?? 0;
-    const isHalfTimeBreak = match.status === "HT";
-    if (isHalfTimeBreak) return apiMin;
-    // Use per-match "minute last changed" timestamp so elapsed grows correctly
-    // between API events (API only updates minute on goals/cards — not every second).
-    // Falls back to liveDataFetchedAt for newly seen matches.
-    const changedAt = minuteChangedAtRef.current[id] ?? liveDataFetchedAt.current;
-    if (changedAt === 0) return apiMin;
-    // Cap at 10 min to prevent runaway if match disappears from feed briefly
-    const elapsed = Math.min(10, Math.floor((Date.now() - changedAt) / 60000));
-    const computed = apiMin + elapsed;
-    // Football clock: API feed runs ~3 minutes ahead of real match time — correct for it
+    const status = String(match.status ?? "").trim().toLowerCase();
     const isFootball = !match.sport || match.sport === "football";
-    const adjusted = isFootball ? computed - 3 : computed;
-    if (apiMin < 45) return Math.max(1, Math.min(45, adjusted));
-    if (apiMin < 90) return Math.max(46, Math.min(90, adjusted));
-    // Extra time: first half caps at 105, second half at 120
-    if (apiMin <= 105) return Math.min(105, adjusted);
-    return Math.min(120, adjusted);
+
+    const apiMinRaw = apiMinutesRef.current[id] ?? match.minute ?? 0;
+    let apiMin = Number.isFinite(Number(apiMinRaw)) ? Number(apiMinRaw) : 0;
+
+    const maxEventMin = (match.events ?? []).reduce((acc, e) => Math.max(acc, e.minute ?? 0), 0);
+    const maxIncidentMin =
+      expandedMatch && String(expandedMatch.id) === id
+        ? (v2Incidents ?? []).reduce((acc, e) => Math.max(acc, e.minute ?? 0), 0)
+        : 0;
+    const maxKnownMin = Math.max(maxEventMin, maxIncidentMin);
+
+    if (maxKnownMin > 0) {
+      if (apiMin === 0) apiMin = maxKnownMin;
+      if (apiMin > maxKnownMin + 8) apiMin = maxKnownMin;
+    }
+
+    const isHalfTimeBreak = status === "ht" || status.includes("half time");
+    if (isHalfTimeBreak) return Math.max(0, apiMin);
+
+    const looksNotStarted =
+      apiMin <= 0 &&
+      maxKnownMin === 0 &&
+      (
+        status === "ns" ||
+        status.includes("not started") ||
+        status.includes("scheduled") ||
+        status.includes("delay") ||
+        status.includes("postpon") ||
+        status.includes("tbd") ||
+        status.includes("await")
+      );
+
+    const canTick = !!match.isLive && !looksNotStarted && apiMin > 0;
+    if (!canTick) return Math.max(0, apiMin);
+
+    const changedAt = minuteChangedAtRef.current[id] ?? liveDataFetchedAt.current;
+    if (!changedAt) return Math.max(0, apiMin);
+
+    const elapsed = Math.min(3, Math.floor((Date.now() - changedAt) / 60000));
+    let computed = apiMin + elapsed;
+    if (isFootball) computed = Math.max(0, computed - 3);
+    return Math.max(0, Math.min(isFootball ? 130 : 999, computed));
   };
 
   // Sync expandedMatch with live data silently (score/odds update without closing panel)
@@ -6661,7 +6686,12 @@ export default function Home() {
                           <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-500 opacity-75"></span>
                           <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-red-500"></span>
                         </span>
-                        <span className="text-[10px] font-bold text-red-500">AO VIVO {getDisplayMinute(expandedMatch)}'</span>
+                        <span className="text-[10px] font-bold text-red-500">
+                          {(() => {
+                            const m = getDisplayMinute(expandedMatch);
+                            return m > 0 ? `AO VIVO ${m}'` : "AO VIVO (Atrasado)";
+                          })()}
+                        </span>
                       </div>
                     ) : undefined
                   } />
