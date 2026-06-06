@@ -1648,6 +1648,13 @@ export default function Home() {
   const [betPlacedAnim, setBetPlacedAnim] = useState(false);
   const prevWonBetIds = useRef<Set<number> | null>(null);
   const prevLiveMatchesRef = useRef<Match[]>([]);
+  // Always-current mirror of liveMatches state — lets effects read the current
+  // value without adding liveMatches / liveMatches.length to their dep arrays
+  // (which would restart intervals on every 5-second poll response).
+  const liveMatchesRef = useRef<Match[]>([]);
+  // SSE connection for real-time live updates
+  const sseRef = useRef<EventSource | null>(null);
+  const sseActiveRef = useRef(false); // true when SSE is connected and receiving data
   const liveExpandedFullFetchRef = useRef<string | null>(null);
   const livePrefetchingRef = useRef<Set<string>>(new Set());
   const finishedMatchScores = useRef<Map<string, { home: number; away: number }>>(new Map());
@@ -2472,9 +2479,11 @@ export default function Home() {
   };
 
   type Snapshot<T> = { savedAt: number; value: T };
-  const upcomingSnapshotKey = (sport: string) => `bet62_snapshot_upcoming_v1:${sport}`;
-  const liveSnapshotKey = () => "bet62_snapshot_live_v1";
-  const matchSnapshotKey = (id: string) => `bet62_snapshot_match_v1:${id}`;
+  // Stable key generators — wrapped in useCallback so they never get a new reference
+  // on re-render, which would cascade into useCallback/useEffect loops.
+  const upcomingSnapshotKey = useCallback((sport: string) => `bet62_snapshot_upcoming_v1:${sport}`, []);
+  const liveSnapshotKey     = useCallback(() => "bet62_snapshot_live_v1", []);
+  const matchSnapshotKey    = useCallback((id: string) => `bet62_snapshot_match_v1:${id}`, []);
   const readSnapshot = useCallback(<T,>(key: string): Snapshot<T> | null => {
     try {
       const raw = localStorage.getItem(key);
@@ -3063,13 +3072,15 @@ export default function Home() {
     if (id === "live" && prev !== "live") {
       const snap = readSnapshot<LiveMatchRaw[]>(liveSnapshotKey());
       const canUseSnap = !!(snap && (Date.now() - snap.savedAt) < 2 * 60_000 && Array.isArray(snap.value));
-      if (snap && canUseSnap && liveMatches.length === 0) {
+      // Use ref so this callback is not recreated on every live-data update
+      const hasMatches = liveMatchesRef.current.length > 0;
+      if (snap && canUseSnap && !hasMatches) {
         setLiveMatches(snap.value.map(m => ({ ...(m as any), isLive: true })));
         setLiveLoading(false);
       }
-      fetchLive(!(canUseSnap && liveMatches.length === 0));
+      fetchLive(!(canUseSnap && hasMatches));
     }
-  }, [fetchLive, liveMatches.length, liveSnapshotKey, readSnapshot, setLiveMatches]);
+  }, [fetchLive, liveSnapshotKey, readSnapshot, setLiveMatches]); // liveMatchesRef is a ref — no dep needed
 
   useEffect(() => {
     if (!liveLoading) return;
@@ -3078,20 +3089,70 @@ export default function Home() {
   }, [liveLoading]);
 
   useEffect(() => {
-    if (activeTab !== "live") return;
-    let canUseSnap = false;
-    if (liveMatches.length === 0) {
+    if (activeTab !== "live") {
+      // Leave live tab — close SSE
+      if (sseRef.current) { sseRef.current.close(); sseRef.current = null; }
+      sseActiveRef.current = false;
+      return;
+    }
+
+    // ── 1. Show cached snapshot immediately (zero-latency initial render) ────
+    const hasMatches = liveMatchesRef.current.length > 0;
+    if (!hasMatches) {
       const snap = readSnapshot<LiveMatchRaw[]>(liveSnapshotKey());
-      canUseSnap = !!(snap && (Date.now() - snap.savedAt) < 2 * 60_000 && Array.isArray(snap.value));
+      const canUseSnap = !!(snap && (Date.now() - snap.savedAt) < 2 * 60_000 && Array.isArray(snap.value));
       if (snap && canUseSnap) {
         setLiveMatches(snap.value.map(m => ({ ...(m as any), isLive: true })));
         setLiveLoading(false);
       }
     }
-    fetchLive(liveMatches.length === 0 && !canUseSnap);
-    const id = setInterval(() => fetchLive(false), 5_000);
-    return () => clearInterval(id);
-  }, [activeTab, fetchLive, liveMatches.length, liveSnapshotKey, readSnapshot]);
+
+    // ── 2. Open SSE for real-time push updates (<100ms latency) ─────────────
+    const openSSE = () => {
+      if (sseRef.current) return; // already open
+      const es = new EventSource("/api/matches/live-stream");
+      sseRef.current = es;
+      es.onopen = () => { sseActiveRef.current = true; };
+      es.onmessage = (evt) => {
+        try {
+          const data = JSON.parse(evt.data) as any;
+          if (data.type === "update" && data.matchId) {
+            // Sub-second delta — patch just the changed match
+            setLiveMatches(prev => prev.map(m =>
+              String(m.id) === String(data.matchId) ? { ...m, ...(data.delta ?? {}), isLive: true } : m
+            ));
+          } else if (Array.isArray(data.matches)) {
+            // Full snapshot from server broadcast
+            writeSnapshot(liveSnapshotKey(), data.matches);
+            processLiveData(data);
+            setLiveLoading(false);
+          }
+        } catch { /* ignore malformed frames */ }
+      };
+      es.onerror = () => {
+        // SSE dropped — close and fall back to polling
+        es.close();
+        if (sseRef.current === es) { sseRef.current = null; sseActiveRef.current = false; }
+        // Reconnect in 4s
+        setTimeout(() => { if (sseRef.current === null && activeTabRef.current === "live") openSSE(); }, 4_000);
+      };
+    };
+    openSSE();
+
+    // ── 3. HTTP fallback poll: fire once immediately, then every 8s ──────────
+    // Handles: first load before SSE delivers, SSE failure gaps, idle recovery.
+    fetchLive(!hasMatches);
+    const pollId = setInterval(() => {
+      if (!sseActiveRef.current) fetchLive(false); // only poll when SSE is down
+      else if (Date.now() - (liveDataFetchedAt.current ?? 0) > 15_000) fetchLive(false); // stale guard
+    }, 8_000);
+
+    return () => {
+      clearInterval(pollId);
+      if (sseRef.current) { sseRef.current.close(); sseRef.current = null; }
+      sseActiveRef.current = false;
+    };
+  }, [activeTab, fetchLive, liveSnapshotKey, readSnapshot, processLiveData, writeSnapshot]); // all stable refs
 
   useEffect(() => {
     if (activeTab !== "live") return;
@@ -3126,6 +3187,9 @@ export default function Home() {
       ctrl.abort();
     };
   }, [activeTab, liveMatches, matchSnapshotKey, readSnapshot, writeSnapshot]);
+
+  // Keep liveMatchesRef always in sync so effects can read it without deps
+  useEffect(() => { liveMatchesRef.current = liveMatches; }, [liveMatches]);
 
   // Track disappearing live matches to store final scores
   useEffect(() => {
@@ -4327,10 +4391,10 @@ export default function Home() {
     };
 
     return (
-      <div className="mb-6">
+      <div className="mb-5">
         <div
-          className="flex gap-3 overflow-x-auto pb-2 snap-x snap-mandatory scrollbar-none"
-          style={{ scrollbarWidth: "none", WebkitOverflowScrolling: "touch", touchAction: "pan-x pan-y" } as React.CSSProperties}
+          className="flex gap-3 overflow-x-auto pb-1 snap-x snap-mandatory"
+          style={{ scrollbarWidth: "none" } as React.CSSProperties}
         >
           {chunks.map((events, bi) => {
             const cfg = BANNER_CONFIGS[bi];
@@ -4341,40 +4405,19 @@ export default function Home() {
             return (
               <div
                 key={bi}
-                className="snap-center shrink-0 w-[268px] rounded-[22px] p-4 flex flex-col"
-                style={{
-                  background: "linear-gradient(180deg,#1c0a0a,#0a0a0a)",
-                  border: "1px solid rgba(220,38,38,0.2)",
-                  boxShadow: "0 0 24px rgba(220,38,38,0.1)",
-                }}
+                className="snap-center shrink-0 w-[252px] rounded-2xl bg-zinc-900/80 border border-zinc-800 p-3.5 flex flex-col gap-2.5"
               >
                 {/* Header */}
-                <div className="flex justify-between items-start mb-3">
-                  <div className="leading-[1.1]">
-                    <div className="font-black italic text-[26px] text-white tracking-wide uppercase">{cfg.title}</div>
-                    <div className="font-black italic text-[26px] text-red-500 tracking-wide uppercase">{cfg.subtitle}</div>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <span className="text-xs font-black text-white uppercase tracking-wide">{cfg.title} </span>
+                    <span className="text-xs font-black text-red-500 uppercase tracking-wide">{cfg.subtitle}</span>
                   </div>
-                  <div
-                    className="rounded-[14px] px-3 py-2 text-center"
-                    style={{
-                      background: "#0b0b0b",
-                      border: "2px solid #dc2626",
-                      boxShadow: "0 0 14px rgba(220,38,38,0.3)",
-                    }}
-                  >
-                    <span className="block text-white font-black text-[14px] italic leading-none tracking-tight">BET</span>
-                    <span className="block text-red-500 font-black text-[14px] italic leading-none tracking-tight">62</span>
-                  </div>
-                </div>
-
-                {/* Info row */}
-                <div className="flex justify-between mb-3 text-red-500 font-semibold text-[11px]">
-                  <span>{cfg.label}</span>
-                  <span>{cfg.count}</span>
+                  <span className="text-[10px] text-zinc-500">{cfg.label}</span>
                 </div>
 
                 {/* Event rows */}
-                <div className="flex flex-col gap-2 flex-1">
+                <div className="flex flex-col gap-1.5">
                   {events.map((m, ei) => {
                     const flag = COUNTRY_FLAGS[m.country?.toLowerCase() ?? ""] ?? sportEmoji(m.sport);
                     const timeStr = m.date ? formatMatchDate(m.date) : (m.time ?? "");
@@ -4382,71 +4425,40 @@ export default function Home() {
                     return (
                       <div
                         key={ei}
-                        className="rounded-[14px] p-2.5 flex justify-between items-center"
-                        style={{
-                          background: isSelected ? "rgba(220,38,38,0.12)" : "#0d0d0d",
-                          border: isSelected ? "1px solid rgba(220,38,38,0.5)" : "1px solid rgba(220,38,38,0.1)",
-                        }}
+                        className={`rounded-xl px-2.5 py-2 flex items-center justify-between gap-2 cursor-pointer transition-colors ${
+                          isSelected
+                            ? "bg-red-600/15 border border-red-500/40"
+                            : "bg-zinc-800/60 border border-zinc-700/50 hover:bg-zinc-800"
+                        }`}
                         {...makeTap(() => toggleBet(m, "home", m.odds.home, "result", m.home))}
                       >
-                        <div className="flex gap-2 min-w-0">
-                          {/* Team logo circles */}
-                          <div className="flex flex-col gap-1 shrink-0">
-                            <div
-                              className="w-6 h-6 rounded-full flex items-center justify-center text-[10px]"
-                              style={{ background: "#1a1a1a", border: "1.5px solid #dc2626" }}
-                            >
-                              {flag}
-                            </div>
-                            <div
-                              className="w-6 h-6 rounded-full flex items-center justify-center text-[10px]"
-                              style={{ background: "#1a1a1a", border: "1.5px solid #dc2626" }}
-                            >
-                              {flag}
-                            </div>
-                          </div>
-                          {/* Text */}
+                        <div className="flex items-center gap-2 min-w-0">
+                          <span className="text-base shrink-0">{flag}</span>
                           <div className="min-w-0">
-                            <div className="truncate leading-tight text-[12px]" style={{ color: '#ffffff', fontWeight: 700 }}>{m.home}</div>
-                            <div className="truncate text-[10px]" style={{ color: '#a1a1aa' }}>Vencedor</div>
-                            <div className="truncate leading-tight text-[11px]" style={{ color: '#ffffff', fontWeight: 600 }}>{m.away}</div>
-                            <div className="text-[10px]" style={{ color: '#a1a1aa' }}>🕒 {timeStr}</div>
+                            <div className="text-[11px] font-bold text-white truncate leading-tight">{m.home}</div>
+                            <div className="text-[10px] text-zinc-500 truncate">{m.away} · {timeStr}</div>
                           </div>
                         </div>
-                        {/* Odds */}
-                        <div className="text-red-500 font-bold text-[20px] leading-none shrink-0 ml-1.5">
+                        <span className={`text-sm font-black shrink-0 ${isSelected ? "text-red-400" : "text-red-500"}`}>
                           {m.odds.home > 0 ? m.odds.home.toFixed(2) : "—"}
-                        </div>
+                        </span>
                       </div>
                     );
                   })}
                 </div>
 
                 {/* Footer */}
-                <div className="flex gap-2 mt-3">
-                  <div
-                    className="rounded-[14px] px-3 py-2"
-                    style={{ background: "#0b0b0b", border: "1px solid #dc2626" }}
-                  >
-                    <div className="text-zinc-500 text-[10px] leading-none mb-0.5">ODD TOTAL</div>
-                    <div className="text-red-500 font-black text-[22px] leading-none">{totalOddsVal}</div>
+                <div className="flex items-center gap-2 mt-0.5">
+                  <div className="text-center px-3 py-1.5 rounded-xl bg-zinc-800 border border-zinc-700 shrink-0">
+                    <div className="text-[9px] text-zinc-500 uppercase tracking-widest leading-none mb-0.5">Total</div>
+                    <div className="text-red-500 font-black text-base leading-none">{totalOddsVal}</div>
                   </div>
                   <button
                     {...makeTap(() => addAllToBetSlip(events))}
-                    className="flex-1 rounded-[14px] font-bold text-[12px] text-white transition-opacity hover:opacity-90 active:scale-95"
-                    style={{
-                      background: "linear-gradient(135deg,#dc2626,#991b1b)",
-                      boxShadow: "0 0 16px rgba(220,38,38,0.4)",
-                    }}
+                    className="flex-1 bg-red-600 hover:bg-red-500 active:scale-95 text-white font-black text-[11px] rounded-xl py-2.5 transition-all uppercase tracking-wide"
                   >
-                    ADICIONAR<br />AO BOLETIM
+                    Adicionar ao boletim
                   </button>
-                </div>
-
-                {/* Bottom disclaimer */}
-                <div className="flex justify-between mt-2.5 text-[9px]">
-                  <span className="text-zinc-700">JOGUE COM RESPONSABILIDADE</span>
-                  <span className="text-red-800 font-semibold">AS MELHORES ODDS</span>
                 </div>
               </div>
             );
@@ -9193,23 +9205,9 @@ export default function Home() {
               return (
                 <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
                   {!selectedLeague && (
-                    <div className="mb-4 relative overflow-hidden rounded-xl cursor-pointer select-none group"
-                      onClick={() => { setSelectedSport("football"); setSelectedWC(true); setSelectedLeague(null); }}>
-                      <motion.img
-                        src="/copa-banner.jpeg"
-                        className="w-full object-cover block"
-                        style={{ height: 180 }}
-                        animate={{ x: [0, -8, 8, -4, 0], scaleX: [1, 1.012, 0.988, 1.006, 1] }}
-                        transition={{ duration: 5, repeat: Infinity, ease: "easeInOut" }}
-                      />
-                      <div className="absolute inset-0 bg-gradient-to-t from-black/20 to-transparent pointer-events-none" />
-                      <button
-                        className="absolute bottom-3 right-3 bg-red-600 group-hover:bg-red-500 text-white text-sm font-bold px-5 py-2.5 rounded-xl shadow-lg shadow-red-900/40 transition-colors"
-                        onClick={(e) => { e.stopPropagation(); setSelectedSport("football"); setSelectedWC(true); setSelectedLeague(null); }}
-                      >
-                        APOSTAR JÁ →
-                      </button>
-                    </div>
+                    <WorldCupBanner3D
+                      onClick={() => { setSelectedSport("football"); setSelectedWC(true); setSelectedLeague(null); }}
+                    />
                   )}
                   {selectedWC && wcLoading && (
                     <div className="mb-3 flex items-center gap-2 text-zinc-400 text-sm">
@@ -11778,6 +11776,284 @@ export default function Home() {
   );
 }
 
+// ─── WORLD CUP 3D BANNER ─────────────────────────────────────────────────────
+function WorldCupBanner3D({ onClick }: { onClick: () => void }) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [mouse, setMouse] = useState({ x: 0, y: 0 });
+  const [isHovered, setIsHovered] = useState(false);
+  const handleMouseMove = (e: React.MouseEvent) => {
+    const rect = containerRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    setMouse({ x: (e.clientX - rect.left) / rect.width - 0.5, y: (e.clientY - rect.top) / rect.height - 0.5 });
+  };
+  const particles = [
+    { size: 2, left: 12, top: 22, dur: 2.2, delay: 0 },
+    { size: 3, left: 26, top: 62, dur: 2.6, delay: 0.28 },
+    { size: 2, left: 40, top: 33, dur: 2.1, delay: 0.56 },
+    { size: 4, left: 55, top: 78, dur: 2.9, delay: 0.84 },
+    { size: 2, left: 64, top: 18, dur: 2.4, delay: 1.12 },
+    { size: 3, left: 74, top: 55, dur: 2.7, delay: 1.4 },
+    { size: 2, left: 82, top: 38, dur: 2.3, delay: 1.68 },
+    { size: 3, left: 91, top: 68, dur: 2.5, delay: 1.96 },
+  ];
+  return (
+    <div
+      ref={containerRef}
+      className="mb-4 relative overflow-hidden rounded-2xl cursor-pointer select-none"
+      style={{ height: 220, perspective: "1000px" }}
+      onClick={onClick}
+      onMouseMove={handleMouseMove}
+      onMouseEnter={() => setIsHovered(true)}
+      onMouseLeave={() => { setIsHovered(false); setMouse({ x: 0, y: 0 }); }}
+    >
+      {/* BG layer — moves slowest, opposite direction */}
+      <motion.div
+        className="absolute inset-0"
+        animate={{ x: mouse.x * -18, y: mouse.y * -10, scale: isHovered ? 1.07 : 1.03 }}
+        transition={{ type: "spring", stiffness: 100, damping: 18 }}
+      >
+        <img src="/copa-banner.jpeg" className="w-full h-full object-cover" alt="" />
+      </motion.div>
+
+      {/* Colour depth overlays */}
+      <div className="absolute inset-0 bg-gradient-to-r from-black/85 via-black/45 to-black/10 pointer-events-none" />
+      <div className="absolute inset-0 bg-gradient-to-t from-black/75 via-transparent to-transparent pointer-events-none" />
+      <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_70%_30%,rgba(220,38,38,0.30),transparent_55%)] pointer-events-none" />
+      <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_25%_80%,rgba(234,179,8,0.13),transparent_45%)] pointer-events-none" />
+
+      {/* Floating gold particles */}
+      {particles.map((p, i) => (
+        <motion.div
+          key={i}
+          className="absolute rounded-full bg-yellow-300/80 pointer-events-none"
+          style={{ width: p.size, height: p.size, left: `${p.left}%`, top: `${p.top}%`, filter: "blur(0.5px)" }}
+          animate={{ opacity: [0.3, 0.9, 0.3], scale: [1, 1.6, 1], y: [-4, 4, -4] }}
+          transition={{ duration: p.dur, repeat: Infinity, ease: "easeInOut", delay: p.delay }}
+        />
+      ))}
+
+      {/* Main content — slight 3D tilt */}
+      <motion.div
+        className="absolute inset-0 flex flex-col justify-center px-6 sm:px-8"
+        animate={{ rotateX: mouse.y * -4, rotateY: mouse.x * 6, x: mouse.x * 10, y: mouse.y * 5 }}
+        style={{ transformStyle: "preserve-3d" }}
+        transition={{ type: "spring", stiffness: 180, damping: 24 }}
+      >
+        <motion.div
+          className="flex items-center gap-2 mb-3"
+          animate={{ x: mouse.x * 6, y: mouse.y * 3 }}
+          transition={{ type: "spring", stiffness: 160, damping: 22 }}
+        >
+          <span className="bg-red-600/90 backdrop-blur-sm text-white text-[10px] font-black tracking-[0.2em] px-3 py-1 rounded-full border border-red-400/30 shadow-lg shadow-red-900/40">
+            🏆 COPA DO MUNDO
+          </span>
+          <span className="bg-yellow-500/20 backdrop-blur-sm text-yellow-300 text-[10px] font-black tracking-[0.12em] px-3 py-1 rounded-full border border-yellow-400/25">
+            USA · CAN · MEX 2026
+          </span>
+        </motion.div>
+
+        <motion.h2
+          className="text-white font-black leading-none tracking-tight"
+          style={{
+            fontSize: "clamp(1.4rem,3.8vw,2.4rem)",
+            textShadow: "0 4px 30px rgba(0,0,0,0.9), 0 0 60px rgba(220,38,38,0.35)",
+          }}
+          animate={{ x: mouse.x * 9, y: mouse.y * 4 }}
+          transition={{ type: "spring", stiffness: 145, damping: 20 }}
+        >
+          ANO DA{" "}
+          <span className="text-transparent bg-clip-text bg-gradient-to-r from-red-400 via-yellow-300 to-red-400">
+            COPA
+          </span>
+        </motion.h2>
+
+        <motion.p
+          className="text-white/80 text-sm sm:text-base mt-2 font-medium"
+          animate={{ x: mouse.x * 6, y: mouse.y * 3 }}
+          transition={{ type: "spring", stiffness: 130, damping: 18 }}
+        >
+          Viva a emoção do futebol com a{" "}
+          <span className="text-red-400 font-bold">Bet62</span>
+        </motion.p>
+      </motion.div>
+
+      {/* Trophy — moves most, creates parallax depth */}
+      <motion.div
+        className="absolute right-6 sm:right-12 top-1/2 -translate-y-1/2 pointer-events-none"
+        animate={{ x: mouse.x * 28, y: mouse.y * 16, rotateZ: mouse.x * 4, scale: isHovered ? 1.1 : 1 }}
+        transition={{ type: "spring", stiffness: 90, damping: 16 }}
+      >
+        <div className="relative">
+          <div className="absolute inset-0 blur-3xl bg-yellow-400/35 rounded-full" />
+          <Trophy
+            size={88}
+            className="text-yellow-400 relative z-10"
+            strokeWidth={1.1}
+            style={{ filter: "drop-shadow(0 0 24px rgba(251,191,36,0.75))" }}
+          />
+          <motion.div
+            className="absolute -bottom-1 left-1/2 -translate-x-1/2 w-14 h-2.5 bg-yellow-400/25 rounded-full"
+            style={{ filter: "blur(8px)" }}
+            animate={{ opacity: isHovered ? 1 : 0.6, scaleX: isHovered ? 1.3 : 1 }}
+            transition={{ duration: 0.4 }}
+          />
+        </div>
+      </motion.div>
+
+      {/* CTA button */}
+      <motion.button
+        className="absolute bottom-4 right-4 bg-red-600 text-white text-sm font-black px-5 py-2.5 rounded-xl border border-red-500/50 z-20"
+        animate={{ x: mouse.x * 14, y: mouse.y * 7, scale: isHovered ? 1.06 : 1 }}
+        style={{ boxShadow: "0 4px 20px rgba(220,38,38,0.45)" }}
+        whileTap={{ scale: 0.94 }}
+        transition={{ type: "spring", stiffness: 280, damping: 28 }}
+        onClick={(e) => { e.stopPropagation(); onClick(); }}
+      >
+        APOSTAR JÁ →
+      </motion.button>
+
+      {/* Rim light */}
+      <div className="absolute inset-0 rounded-2xl ring-1 ring-inset ring-white/[0.07] pointer-events-none" />
+      <div className="absolute top-0 left-12 right-12 h-px bg-gradient-to-r from-transparent via-white/30 to-transparent pointer-events-none" />
+    </div>
+  );
+}
+
+// ─── PROMO CARD 3D ─────────────────────────────────────────────────────────
+type PromoItem = {
+  id: string; title: string; subtitle: string; description: string;
+  badge: string; image: string; gradient: string;
+  highlight: string; highlightLabel: string;
+  terms: string[]; cta: string; action: () => void;
+};
+
+function PromoCard3D({
+  promo, index, isLoggedIn, cashbackData,
+}: {
+  promo: PromoItem;
+  index: number;
+  isLoggedIn: boolean;
+  cashbackData: { totalLost: number; cashback: number; bets: number } | null;
+}) {
+  const cardRef = useRef<HTMLDivElement>(null);
+  const [tilt, setTilt] = useState({ x: 0, y: 0 });
+  const [glare, setGlare] = useState({ x: 50, y: 50, opacity: 0 });
+  const [hovered, setHovered] = useState(false);
+
+  const onMove = (e: React.MouseEvent<HTMLDivElement>) => {
+    const r = cardRef.current?.getBoundingClientRect();
+    if (!r) return;
+    const x = (e.clientX - r.left) / r.width;
+    const y = (e.clientY - r.top) / r.height;
+    setTilt({ x: (y - 0.5) * -9, y: (x - 0.5) * 11 });
+    setGlare({ x: x * 100, y: y * 100, opacity: 0.11 });
+  };
+
+  const onLeave = () => {
+    setTilt({ x: 0, y: 0 });
+    setGlare({ x: 50, y: 50, opacity: 0 });
+    setHovered(false);
+  };
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 28 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.45, delay: index * 0.07, ease: [0.23, 1, 0.32, 1] }}
+      style={{ perspective: 1100 }}
+    >
+      <motion.div
+        ref={cardRef}
+        onMouseMove={onMove}
+        onMouseEnter={() => setHovered(true)}
+        onMouseLeave={onLeave}
+        animate={{ rotateX: tilt.x, rotateY: tilt.y }}
+        style={{ transformStyle: "preserve-3d" }}
+        transition={{ type: "spring", stiffness: 260, damping: 26 }}
+        className="relative overflow-hidden rounded-[28px] min-h-[280px] border border-white/10 shadow-[0_20px_60px_rgba(0,0,0,0.5)]"
+      >
+        {/* Background image */}
+        <motion.img
+          src={promo.image}
+          alt={promo.title}
+          className="absolute inset-0 w-full h-full object-cover"
+          animate={{ scale: hovered ? 1.09 : 1.03 }}
+          transition={{ duration: 0.65, ease: "easeOut" }}
+        />
+
+        {/* Colour overlays */}
+        <div className={`absolute inset-0 bg-gradient-to-r ${promo.gradient}`} />
+        <div className="absolute inset-0 bg-black/52" />
+
+        {/* Dynamic glare */}
+        <div
+          className="absolute inset-0 pointer-events-none z-20 rounded-[28px]"
+          style={{
+            background: `radial-gradient(circle at ${glare.x}% ${glare.y}%, rgba(255,255,255,${glare.opacity}) 0%, transparent 52%)`,
+          }}
+        />
+
+        {/* Top rim light */}
+        <div className="absolute top-0 left-8 right-8 h-px bg-gradient-to-r from-transparent via-white/35 to-transparent pointer-events-none" />
+
+        {/* Content */}
+        <div className="relative z-10 h-full flex items-center justify-between p-6 sm:p-8 gap-6">
+          <div className="max-w-2xl flex-1">
+            <div className="flex items-center gap-3 mb-4">
+              <span className="px-3 py-1.5 rounded-full bg-white/15 backdrop-blur-xl text-xs font-black tracking-[0.18em] border border-white/20 text-white">
+                {promo.badge}
+              </span>
+              {promo.id === "cashback" && cashbackData && cashbackData.cashback > 0 && (
+                <span className="px-3 py-1.5 rounded-full bg-cyan-500/20 text-xs font-black tracking-wider border border-cyan-400/30 text-cyan-300">
+                  💰 DISPONÍVEL
+                </span>
+              )}
+            </div>
+            <h2 className="text-3xl sm:text-4xl font-black text-white leading-tight tracking-tight drop-shadow-2xl">
+              {promo.title}
+            </h2>
+            <h3 className="text-base sm:text-lg font-bold text-white/85 mt-2 tracking-wide">
+              {promo.subtitle}
+            </h3>
+            <p className="mt-3 text-sm sm:text-base text-white/75 max-w-xl leading-relaxed">
+              {promo.description}
+            </p>
+            <div className="mt-4 flex flex-wrap gap-2">
+              {promo.terms.map((term, i) => (
+                <div key={i} className="px-3 py-1.5 rounded-2xl bg-white/10 backdrop-blur-xl border border-white/10 text-xs text-white/75">
+                  {term}
+                </div>
+              ))}
+            </div>
+            <motion.button
+              onClick={isLoggedIn || promo.id === "superodds" ? promo.action : () => {}}
+              className="mt-5 px-6 py-3 rounded-2xl bg-white text-black font-black text-sm tracking-wide shadow-lg"
+              whileHover={{ scale: 1.04 }}
+              whileTap={{ scale: 0.96 }}
+            >
+              {!isLoggedIn && promo.id !== "superodds" ? "ENTRAR PARA ATIVAR" : promo.cta}
+            </motion.button>
+          </div>
+
+          <div className="hidden lg:flex flex-col items-center shrink-0">
+            <motion.div
+              className="bg-white/10 backdrop-blur-2xl border border-white/15 rounded-[24px] px-7 py-5 text-center min-w-[140px]"
+              animate={{ scale: hovered ? 1.08 : 1, y: hovered ? -5 : 0 }}
+              transition={{ type: "spring", stiffness: 280, damping: 24 }}
+            >
+              <div className="text-white/50 text-[10px] font-bold mb-1 uppercase tracking-widest">Promoção Ativa</div>
+              <div className="text-5xl font-black text-white leading-none">{promo.highlight}</div>
+              <div className="mt-2 text-emerald-300 font-semibold text-xs">{promo.highlightLabel}</div>
+            </motion.div>
+          </div>
+        </div>
+
+        <div className="absolute bottom-0 left-0 right-0 h-[2px] bg-gradient-to-r from-transparent via-white/60 to-transparent" />
+      </motion.div>
+    </motion.div>
+  );
+}
+
 // ─── PROMOS PAGE ─────────────────────────────────────────────────────────────
 function PromosPage({
   isLoggedIn,
@@ -11868,74 +12144,53 @@ function PromosPage({
   ];
 
   return (
-    <div className="bg-[#050816] px-4 sm:px-6 py-8 min-h-[60vh]">
-      <div className="max-w-5xl mx-auto space-y-6">
-        {promos.map((promo) => (
-          <div
-            key={promo.id}
-            className="relative overflow-hidden rounded-[28px] min-h-[300px] group border border-white/10 shadow-[0_20px_60px_rgba(0,0,0,0.45)]"
+    <div className="bg-[#050816] min-h-[60vh]">
+      {/* ── Section header ── */}
+      <div className="relative overflow-hidden px-4 sm:px-6 pt-7 pb-8">
+        <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_50%_0%,rgba(220,38,38,0.13),transparent_65%)] pointer-events-none" />
+        <div
+          className="absolute inset-0 opacity-[0.025] pointer-events-none"
+          style={{ backgroundImage: "repeating-linear-gradient(90deg,white 0,white 1px,transparent 0,transparent 100%)", backgroundSize: "44px 44px" }}
+        />
+        <div className="relative max-w-5xl mx-auto text-center">
+          <motion.div
+            initial={{ opacity: 0, y: -16 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.5 }}
           >
-            <img
-              src={promo.image}
-              alt={promo.title}
-              className="absolute inset-0 w-full h-full object-cover scale-105 group-hover:scale-110 transition-all duration-700"
-            />
-            <div className={`absolute inset-0 bg-gradient-to-r ${promo.gradient}`} />
-            <div className="absolute inset-0 bg-black/55" />
-
-            <div className="relative z-10 h-full flex items-center justify-between p-6 sm:p-8 gap-6">
-              <div className="max-w-2xl flex-1">
-                <div className="flex items-center gap-3 mb-4">
-                  <span className="px-3 py-1.5 rounded-full bg-white/15 backdrop-blur-xl text-xs font-black tracking-[0.18em] border border-white/20 text-white">
-                    {promo.badge}
-                  </span>
-                  {promo.id === "cashback" && cashbackData && cashbackData.cashback > 0 && (
-                    <span className="px-3 py-1.5 rounded-full bg-cyan-500/20 text-xs font-black tracking-wider border border-cyan-400/30 text-cyan-300">
-                      💰 DISPONÍVEL
-                    </span>
-                  )}
-                </div>
-                <h2 className="text-3xl sm:text-4xl font-black text-white leading-tight tracking-tight drop-shadow-2xl">
-                  {promo.title}
-                </h2>
-                <h3 className="text-base sm:text-lg font-bold text-white/85 mt-2 tracking-wide">
-                  {promo.subtitle}
-                </h3>
-                <p className="mt-3 text-sm sm:text-base text-white/75 max-w-xl leading-relaxed">
-                  {promo.description}
-                </p>
-                <div className="mt-4 flex flex-wrap gap-2">
-                  {promo.terms.map((term, i) => (
-                    <div key={i} className="px-3 py-1.5 rounded-2xl bg-white/10 backdrop-blur-xl border border-white/10 text-xs text-white/75">
-                      {term}
-                    </div>
-                  ))}
-                </div>
-                <button
-                  onClick={isLoggedIn || promo.id === "superodds" ? promo.action : () => {}}
-                  className="mt-5 px-6 py-3 rounded-2xl bg-white text-black font-black text-sm tracking-wide hover:bg-white/90 transition-all active:scale-95 shadow-lg"
-                >
-                  {!isLoggedIn && promo.id !== "superodds" ? "ENTRAR PARA ATIVAR" : promo.cta}
-                </button>
-              </div>
-
-              <div className="hidden lg:flex flex-col items-center shrink-0">
-                <div className="bg-white/10 backdrop-blur-2xl border border-white/15 rounded-[24px] px-7 py-5 group-hover:scale-105 transition-all duration-500 text-center min-w-[140px]">
-                  <div className="text-white/50 text-[10px] font-bold mb-1 uppercase tracking-widest">Promoção Ativa</div>
-                  <div className="text-5xl font-black text-white leading-none">{promo.highlight}</div>
-                  <div className="mt-2 text-emerald-300 font-semibold text-xs">{promo.highlightLabel}</div>
-                </div>
-              </div>
-            </div>
-
-            <div className="absolute bottom-0 left-0 right-0 h-[2px] bg-gradient-to-r from-transparent via-white/60 to-transparent" />
-          </div>
-        ))}
+            <span className="inline-flex items-center gap-2 bg-red-600/15 text-red-400 text-[10px] font-black tracking-[0.22em] px-4 py-2 rounded-full border border-red-500/25 mb-4">
+              <Gift size={11} /> PROMOÇÕES EXCLUSIVAS
+            </span>
+            <h1 className="text-white font-black text-2xl sm:text-3xl tracking-tight">
+              Ofertas{" "}
+              <span className="text-transparent bg-clip-text bg-gradient-to-r from-red-400 to-yellow-400">
+                Especiais
+              </span>
+            </h1>
+            <p className="text-white/45 text-sm mt-2">Aproveite os melhores bónus do mercado</p>
+          </motion.div>
+        </div>
       </div>
 
-      <div className="max-w-5xl mx-auto mt-10">
+      {/* ── 3D Promo cards ── */}
+      <div className="px-4 sm:px-6 pb-8">
+        <div className="max-w-5xl mx-auto space-y-5">
+          {promos.map((promo, index) => (
+            <PromoCard3D
+              key={promo.id}
+              promo={promo}
+              index={index}
+              isLoggedIn={isLoggedIn}
+              cashbackData={cashbackData}
+            />
+          ))}
+        </div>
+      </div>
+
+      {/* ── Terms ── */}
+      <div className="max-w-5xl mx-auto px-4 sm:px-6 pb-10">
         <div className="relative overflow-hidden rounded-[24px] border border-white/10 bg-white/5 backdrop-blur-2xl px-6 py-6">
-          <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(52,211,153,0.10),transparent_40%)]" />
+          <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(52,211,153,0.10),transparent_40%)] pointer-events-none" />
           <div className="relative z-10">
             <h4 className="text-lg font-black text-white tracking-wide mb-4">TERMOS & CONDIÇÕES DAS PROMOÇÕES</h4>
             <div className="grid md:grid-cols-2 gap-4 text-white/65 text-sm leading-relaxed">
