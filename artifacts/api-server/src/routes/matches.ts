@@ -7927,11 +7927,34 @@ export function broadcastMatchDelta(matchId: string, delta: Partial<LiveMatchSta
   }
 }
 
-router.get("/live", async (_req, res) => {
+router.get("/live", async (req, res) => {
   res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0");
+  const lean = String(req.query["lean"] ?? "0") === "1";
+  const includeMarkets = !lean && String(req.query["includeMarkets"] ?? "1") === "1";
+  const includeEvents = !lean && String(req.query["includeEvents"] ?? "1") === "1";
+  const limitRaw = parseInt(String(req.query["limit"] ?? ""), 10);
+  const limit = Number.isFinite(limitRaw) ? Math.max(0, Math.min(500, limitRaw)) : 0;
   try {
     const payload = await buildLivePayload();
-    res.json(payload);
+    const matches = limit > 0 ? payload.matches.slice(0, limit) : payload.matches;
+    if (includeMarkets && includeEvents) {
+      res.json({ matches });
+      return;
+    }
+    const out = matches.map(m => {
+      const anyM = m as any;
+      if (includeMarkets && !includeEvents) {
+        const { events, ...rest } = anyM;
+        return rest;
+      }
+      if (!includeMarkets && includeEvents) {
+        const { markets, ...rest } = anyM;
+        return rest;
+      }
+      const { markets, events, ...rest } = anyM;
+      return rest;
+    });
+    res.json({ matches: out });
   } catch (err) {
     console.error("[live route] unexpected error:", err);
     res.json({ matches: [] });
@@ -7980,8 +8003,33 @@ router.get("/live-stream", (req, res) => {
   sseClients.add(res);
 
   // Send an initial event right away so the client doesn't wait for the next tick
+  const lean = String(req.query["lean"] ?? "0") === "1";
+  const includeMarkets = !lean && String(req.query["includeMarkets"] ?? "1") === "1";
+  const includeEvents = !lean && String(req.query["includeEvents"] ?? "1") === "1";
+  const limitRaw = parseInt(String(req.query["limit"] ?? ""), 10);
+  const limit = Number.isFinite(limitRaw) ? Math.max(0, Math.min(500, limitRaw)) : 0;
   buildLivePayload()
-    .then(p => { try { res.write(`data: ${JSON.stringify(p)}\n\n`); } catch { /* ignore */ } })
+    .then(p => {
+      const matches = limit > 0 ? p.matches.slice(0, limit) : p.matches;
+      if (includeMarkets && includeEvents) {
+        try { res.write(`data: ${JSON.stringify({ matches })}\n\n`); } catch { /* ignore */ }
+        return;
+      }
+      const out = matches.map(m => {
+        const anyM = m as any;
+        if (includeMarkets && !includeEvents) {
+          const { events, ...rest } = anyM;
+          return rest;
+        }
+        if (!includeMarkets && includeEvents) {
+          const { markets, ...rest } = anyM;
+          return rest;
+        }
+        const { markets, events, ...rest } = anyM;
+        return rest;
+      });
+      try { res.write(`data: ${JSON.stringify({ matches: out })}\n\n`); } catch { /* ignore */ }
+    })
     .catch(() => { /* ignore */ });
 
   // Keepalive comment every 20s so proxies don't close the connection
