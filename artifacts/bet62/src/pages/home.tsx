@@ -4209,6 +4209,7 @@ export default function Home() {
                           background: isSelected ? "rgba(220,38,38,0.12)" : "#0d0d0d",
                           border: isSelected ? "1px solid rgba(220,38,38,0.5)" : "1px solid rgba(220,38,38,0.1)",
                         }}
+                        {...makeTap(() => toggleBet(m, "home", m.odds.home, "result", m.home))}
                       >
                         <div className="flex gap-2 min-w-0">
                           {/* Team logo circles */}
@@ -4253,7 +4254,7 @@ export default function Home() {
                     <div className="text-red-500 font-black text-[22px] leading-none">{totalOddsVal}</div>
                   </div>
                   <button
-                    onClick={() => addAllToBetSlip(events)}
+                    {...makeTap(() => addAllToBetSlip(events))}
                     className="flex-1 rounded-[14px] font-bold text-[12px] text-white transition-opacity hover:opacity-90 active:scale-95"
                     style={{
                       background: "linear-gradient(135deg,#dc2626,#991b1b)",
