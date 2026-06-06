@@ -14,7 +14,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem,
   DropdownMenuSeparator, DropdownMenuTrigger
@@ -11167,6 +11167,10 @@ export default function Home() {
       {/* AUTH MODAL */}
       <Dialog open={authModalOpen} onOpenChange={setAuthModalOpen}>
         <DialogContent className="bg-zinc-950 border-zinc-800 text-white sm:max-w-md p-0 overflow-hidden max-h-[95vh] overflow-y-auto">
+          <DialogHeader className="sr-only">
+            <DialogTitle>Autenticação</DialogTitle>
+            <DialogDescription>Entrar ou criar conta</DialogDescription>
+          </DialogHeader>
           <div className="bg-zinc-900 p-6 border-b border-zinc-800 text-center relative overflow-hidden">
             <div className="absolute inset-0 bg-red-600/10 blur-xl"></div>
             <div className="relative font-black text-3xl tracking-tighter italic">
