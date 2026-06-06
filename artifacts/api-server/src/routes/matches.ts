@@ -8704,7 +8704,7 @@ const LEAGUE_TEAMS: Array<{ patterns: string[]; name: string; teams: string[] }>
   { patterns: ["2. bundesliga","2.bundesliga","germany:second","german second"], name: "2. Bundesliga", teams: ["HSV","FC Schalke","Fortuna Dusseldorf","Karlsruher SC","Hertha Berlin","1. FC Nurnberg","SpVgg Greuther Furth","SV Darmstadt","FC Paderborn","Holstein Kiel","FC St. Pauli","Hannover 96","VfL Osnabruck","SV Elversberg","1. FC Magdeburg","Wehen Wiesbaden","FC Kaiserslautern","Eintracht Braunschweig"] },
   // ── Italy ─────────────────────────────────────────────────────────────────────
   { patterns: ["italy:top","italy:serie a","serie a italia","italian serie a","calcio serie a","serie a tim"], name: "Serie A", teams: ["Inter","AC Milan","Juventus","Napoli","Atalanta","AS Roma","SS Lazio","Fiorentina","Bologna","Torino","Monza","Genoa","Lecce","Hellas Verona","Cagliari","Empoli","Frosinone","Udinese","Salernitana","Sassuolo"] },
-  { patterns: ["serie b","italy:serie b","italy:second","serie b italia"], name: "Serie B", teams: ["Parma","Como","Venezia","Palermo","Cremonese","Catanzaro","Sampdoria","Modena","Bari","Ternana","Cosenza","Spezia","Cittadella","Sudtirol","Ascoli","Reggiana","Lecco","FeralpiSalo","Brescia","Pisa","Cesena","Carrarese","Mantova"] },
+  { patterns: ["italy:serie b","italy:second","serie b italia","italian serie b"], name: "Serie B", teams: ["Parma","Como","Venezia","Palermo","Cremonese","Catanzaro","Sampdoria","Modena","Bari","Ternana","Cosenza","Spezia","Cittadella","Sudtirol","Ascoli","Reggiana","Lecco","FeralpiSalo","Brescia","Pisa","Cesena","Carrarese","Mantova"] },
   // ── France ────────────────────────────────────────────────────────────────────
   { patterns: ["ligue 1","france:top","france:ligue 1","french ligue 1"], name: "Ligue 1", teams: ["PSG","Monaco","Lille","Marseille","Lyon","Nice","Rennes","Lens","Reims","Strasbourg","Toulouse","Montpellier","Brest","Nantes","Metz","Le Havre","Lorient","Clermont","Auxerre","Troyes"] },
   { patterns: ["ligue 2","france:second","french ligue 2"], name: "Ligue 2", teams: ["Grenoble","Amiens","Pau FC","Laval","Rodez","Guingamp","Caen","Quevilly Rouen","Annecy","Concarneau","Valenciennes","Bastia","Dunkerque","Niort","Angers","St Etienne","Charleville"] },
@@ -8735,7 +8735,8 @@ const LEAGUE_TEAMS: Array<{ patterns: string[]; name: string; teams: string[] }>
   { patterns: ["mls","major league soccer","usa:mls","united states:mls","us soccer mls"], name: "MLS", teams: ["Inter Miami","Los Angeles FC","FC Cincinnati","Columbus Crew","Orlando City","Atlanta United","Seattle Sounders","Portland Timbers","NYCFC","New England","Philadelphia Union","Nashville SC","St. Louis City","Austin FC","Real Salt Lake","LA Galaxy","Minnesota United","Toronto FC","Chicago Fire","NY Red Bulls"] },
   // ── Brazil ────────────────────────────────────────────────────────────────────
   // NOTE: "serie a" alone is NOT used — collides with Italian Serie A.
-  { patterns: ["brasileirao","brasileirão","campeonato brasileiro","brazil:top","serie a brasil","série a brasil","futebol brasileiro"], name: "Brasileirão Série A", teams: ["Atlético Mineiro","Palmeiras","Flamengo","Botafogo","Fluminense","Internacional","Grêmio","São Paulo","Corinthians","Vasco","Cruzeiro","Bragantino","Bahia","Athletico-PR","Cuiabá","Goiás","Coritiba","Fortaleza","Santos","América MG"] },
+  { patterns: ["brazil:serie b","brazil: serie b","brasileirao serie b","brasileirão série b","campeonato brasileiro serie b","serie b brasil","série b brasil","brasileirao b"], name: "Brasileirão Série B", teams: ["Santos","Sport","Ceará","Goiás","Coritiba","América MG","Avaí","Chapecoense","Paysandu","Remo","Mirassol","Novorizontino","Ponte Preta","Guarani","Vila Nova","Ituano","CRB","Botafogo-SP","Amazonas","Operário-PR"] },
+  { patterns: ["brazil:top","brasileirao serie a","brasileirão série a","campeonato brasileiro serie a","serie a brasil","série a brasil","futebol brasileiro","brasileirao","brasileirão"], name: "Brasileirão Série A", teams: ["Atlético Mineiro","Palmeiras","Flamengo","Botafogo","Fluminense","Internacional","Grêmio","São Paulo","Corinthians","Vasco","Cruzeiro","Bragantino","Bahia","Athletico-PR","Cuiabá","Goiás","Coritiba","Fortaleza","Santos","América MG"] },
   // ── Mexico ────────────────────────────────────────────────────────────────────
   { patterns: ["liga mx","mexico:top","mexico:liga mx","ligamx","mexican liga"], name: "Liga MX", teams: ["Club América","Tigres UANL","Chivas","Cruz Azul","UNAM Pumas","Monterrey","Atlas","Toluca","León","Santos Laguna","Puebla","Pachuca","Necaxa","Mazatlán","FC Juárez","Tijuana","San Luis","Querétaro","Atlético San Luis"] },
   // ── Argentina ─────────────────────────────────────────────────────────────────
@@ -8798,7 +8799,7 @@ function teamInList(list: string[], teamName: string): boolean {
 }
 
 function buildLeagueStandings(leagueName: string, homeTeam: string, awayTeam: string): { league: string; teams: Array<{ pos: number; name: string; played: number; won: number; drawn: number; lost: number; gf: number; ga: number; pts: number }> } {
-  const slug = leagueName.toLowerCase();
+  const slug = leagueName.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
   const found = LEAGUE_TEAMS.find(l => l.patterns.some(p => slug.includes(p)));
 
   let teamList: string[];
