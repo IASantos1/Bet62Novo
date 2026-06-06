@@ -2815,9 +2815,9 @@ export default function Home() {
     if (showSpinner) setLiveLoading(true);
     try {
       const ctrl = new AbortController();
-      const tid = setTimeout(() => ctrl.abort(), 10_000);
+      const tid = setTimeout(() => ctrl.abort(), 20_000);
       try {
-        const res = await fetch("/api/matches/live", { signal: ctrl.signal });
+        const res = await fetch("/api/matches/live?lean=1&limit=200", { signal: ctrl.signal });
         const data = res.ok ? await res.json() : { matches: [] };
         processLiveData(data);
       } finally {

@@ -7929,9 +7929,22 @@ export function broadcastMatchDelta(matchId: string, delta: Partial<LiveMatchSta
 
 router.get("/live", async (req, res) => {
   res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0");
+  const lean = String(req.query["lean"] ?? "0") === "1";
+  const limitRaw = parseInt(String(req.query["limit"] ?? ""), 10);
+  const limit = Number.isFinite(limitRaw) ? Math.max(0, Math.min(500, limitRaw)) : 0;
   try {
     const payload = await buildLivePayload();
-    res.json(payload);
+    const matches = limit > 0 ? payload.matches.slice(0, limit) : payload.matches;
+    if (!lean) {
+      res.json({ matches });
+      return;
+    }
+    const out = matches.map(m => {
+      const anyM = m as any;
+      const { markets, events, ...rest } = anyM;
+      return rest;
+    });
+    res.json({ matches: out });
   } catch (err) {
     console.error("[live route] unexpected error:", err);
     res.json({ matches: [] });
