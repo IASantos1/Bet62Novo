@@ -2769,7 +2769,13 @@ export default function Home() {
     if (isIdleRef.current || isLockedRef.current) return;
     if (showSpinner) setUpcomingLoading(true);
     const param = selectedSport === "all" ? "" : `?sport=${selectedSport}`;
-    try { upcomingFetchCtrlRef.current?.abort(); } catch {}
+    if (upcomingFetchCtrlRef.current) {
+      if (showSpinner) {
+        try { upcomingFetchCtrlRef.current.abort(); } catch {}
+      } else {
+        return;
+      }
+    }
     const ctrl = new AbortController();
     upcomingFetchCtrlRef.current = ctrl;
     const tid = setTimeout(() => ctrl.abort(), 10_000);
@@ -2935,7 +2941,13 @@ export default function Home() {
     if (showSpinner) setLiveLoading(true);
     let ctrl: AbortController | null = null;
     try {
-      try { liveFetchCtrlRef.current?.abort(); } catch {}
+      if (liveFetchCtrlRef.current) {
+        if (showSpinner) {
+          try { liveFetchCtrlRef.current.abort(); } catch {}
+        } else {
+          return;
+        }
+      }
       ctrl = new AbortController();
       const currentCtrl = ctrl;
       liveFetchCtrlRef.current = currentCtrl;
