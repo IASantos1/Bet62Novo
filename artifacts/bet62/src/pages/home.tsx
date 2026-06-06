@@ -2881,6 +2881,15 @@ export default function Home() {
     }
   }, [processLiveData, selectedSport, upcomingSnapshotKey, writeSnapshot]);
 
+  const mainTabPointerAtRef = useRef(0);
+  const selectMainTab = useCallback((id: typeof activeTab, onSelect?: () => void) => {
+    setActiveTab(id);
+    onSelect?.();
+    if (id === "live") {
+      setTimeout(() => fetchInitial(true), 0);
+    }
+  }, [fetchInitial]);
+
   useEffect(() => {
     if (!liveLoading) return;
     const id = setTimeout(() => setLiveLoading(false), 12_000);
@@ -6751,7 +6760,11 @@ export default function Home() {
           ].map(tab => (
             <button
               key={tab.id}
-              onClick={() => { setActiveTab(tab.id as typeof activeTab); (tab as { onSelect?: () => void }).onSelect?.(); }}
+              onPointerDown={() => { mainTabPointerAtRef.current = Date.now(); selectMainTab(tab.id as typeof activeTab, (tab as { onSelect?: () => void }).onSelect); }}
+              onClick={() => {
+                if (Date.now() - mainTabPointerAtRef.current < 450) return;
+                selectMainTab(tab.id as typeof activeTab, (tab as { onSelect?: () => void }).onSelect);
+              }}
               className={`py-3 font-semibold text-sm transition-colors border-b-2 whitespace-nowrap flex items-center gap-2 ${activeTab === tab.id ? "border-red-600 text-white" : "border-transparent text-zinc-500 hover:text-zinc-300"}`}
             >
               {tab.icon}
@@ -6766,7 +6779,11 @@ export default function Home() {
           ))}
           {auth.user && (
             <button
-              onClick={() => { setActiveTab("wallet"); fetchMyBets(); }}
+              onPointerDown={() => { mainTabPointerAtRef.current = Date.now(); setActiveTab("wallet"); fetchMyBets(); }}
+              onClick={() => {
+                if (Date.now() - mainTabPointerAtRef.current < 450) return;
+                setActiveTab("wallet"); fetchMyBets();
+              }}
               className={`py-3 font-semibold text-sm transition-colors border-b-2 whitespace-nowrap flex items-center gap-2 ${activeTab === "wallet" ? "border-red-600 text-white" : "border-transparent text-zinc-500 hover:text-zinc-300"}`}
             >
               <Wallet size={16} />
@@ -6775,7 +6792,11 @@ export default function Home() {
           )}
           {auth.user && (
             <button
-              onClick={() => { setActiveTab("mybets"); fetchMyBets(); }}
+              onPointerDown={() => { mainTabPointerAtRef.current = Date.now(); setActiveTab("mybets"); fetchMyBets(); }}
+              onClick={() => {
+                if (Date.now() - mainTabPointerAtRef.current < 450) return;
+                setActiveTab("mybets"); fetchMyBets();
+              }}
               className={`py-3 font-semibold text-sm transition-colors border-b-2 whitespace-nowrap flex items-center gap-2 ${activeTab === "mybets" ? "border-red-600 text-white" : "border-transparent text-zinc-500 hover:text-zinc-300"}`}
             >
               <History size={16} />
@@ -6784,7 +6805,11 @@ export default function Home() {
           )}
           {auth.user && (
             <button
-              onClick={() => setActiveTab("profile")}
+              onPointerDown={() => { mainTabPointerAtRef.current = Date.now(); setActiveTab("profile"); }}
+              onClick={() => {
+                if (Date.now() - mainTabPointerAtRef.current < 450) return;
+                setActiveTab("profile");
+              }}
               className={`py-3 font-semibold text-sm transition-colors border-b-2 whitespace-nowrap flex items-center gap-2 ${activeTab === "profile" ? "border-red-600 text-white" : "border-transparent text-zinc-500 hover:text-zinc-300"}`}
             >
               <User size={16} />
@@ -10235,7 +10260,7 @@ export default function Home() {
                   </h2>
                   <button
                     onClick={() => fetchInitial(true)}
-                    disabled={liveLoading}
+                    disabled={false}
                     className="text-xs text-zinc-500 hover:text-white transition-colors border border-zinc-800 hover:border-zinc-600 px-3 py-1.5 rounded-md flex items-center gap-1.5"
                   >
                     {liveLoading ? <Loader2 size={12} className="animate-spin" /> : <Activity size={12} />}
@@ -10313,8 +10338,26 @@ export default function Home() {
                   const emBreve = liveMatches.filter(m => m.startsIn !== undefined && filterBySport(m));
                   if (liveLoading && liveMatches.length === 0) {
                     return (
-                      <div className="flex items-center justify-center py-20">
-                        <Loader2 className="animate-spin text-red-600" size={32} />
+                      <div className="space-y-3 py-2">
+                        {[1,2,3,4,5,6].map(i => (
+                          <div key={i} className="bg-zinc-900 border border-zinc-800 rounded-xl p-4 animate-pulse">
+                            <div className="flex items-center gap-2 mb-3">
+                              <div className="w-10 h-3 bg-zinc-700 rounded" />
+                              <div className="w-24 h-3 bg-zinc-700 rounded" />
+                              <div className="ml-auto w-12 h-3 bg-zinc-700 rounded" />
+                            </div>
+                            <div className="flex items-center justify-between mb-4">
+                              <div className="w-28 h-4 bg-zinc-700 rounded" />
+                              <div className="w-6 h-4 bg-zinc-800 rounded" />
+                              <div className="w-28 h-4 bg-zinc-700 rounded" />
+                            </div>
+                            <div className="grid grid-cols-3 gap-2">
+                              <div className="h-10 bg-zinc-800 rounded-lg" />
+                              <div className="h-10 bg-zinc-800 rounded-lg" />
+                              <div className="h-10 bg-zinc-800 rounded-lg" />
+                            </div>
+                          </div>
+                        ))}
                       </div>
                     );
                   }
