@@ -2833,8 +2833,11 @@ export default function Home() {
       setUpcomingLoading(true);
     }
     try {
-      const param = selectedSport === "all" ? "" : `?sport=${encodeURIComponent(selectedSport)}`;
-      const res = await fetch(`/api/matches/initial${param}`);
+      const qs = new URLSearchParams();
+      if (selectedSport !== "all") qs.set("sport", selectedSport);
+      qs.set("includeMarkets", "1");
+      const q = qs.toString();
+      const res = await fetch(`/api/matches/initial${q ? `?${q}` : ""}`);
       if (!res.ok) return;
       const data = await res.json();
       const live = Array.isArray(data?.live) ? data.live : [];
@@ -4952,6 +4955,15 @@ export default function Home() {
           <div className="text-3xl mb-3">📊</div>
           <div className="text-sm font-medium">Odds não disponíveis para esta partida.</div>
           <div className="text-xs mt-1 text-zinc-600">Apenas partidas com odds confirmadas são apresentadas.</div>
+        </div>
+      );
+    }
+
+    if (!m) {
+      return (
+        <div className="mt-4 text-center py-10 text-zinc-500">
+          <div className="text-3xl mb-3">⏳</div>
+          <div className="text-sm font-medium">A carregar mercados…</div>
         </div>
       );
     }
