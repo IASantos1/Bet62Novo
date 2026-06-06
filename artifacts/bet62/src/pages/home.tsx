@@ -1435,7 +1435,7 @@ function sportEmoji(sport?: string): string {
 
 export default function Home() {
   const auth = useAuth();
-  const { isIdle, resetIdle } = useIdle(60_000);
+  const { isIdle, resetIdle } = useIdle(120_000);
   const isIdleRef = useRef(false);
   useEffect(() => { isIdleRef.current = isIdle; }, [isIdle]);
 
@@ -1909,43 +1909,18 @@ export default function Home() {
   const [biometricCredentialId, setBiometricCredentialId] = useState<string | null>(null);
   const [biometricLoading, setBiometricLoading] = useState(false);
   const [showBiometricSetup, setShowBiometricSetup] = useState(false);
-  const handleBiometricUnlockRef = useRef<() => Promise<void>>(async () => {});
 
   // Sync isLocked → ref (used in async callbacks)
   useEffect(() => { isLockedRef.current = isLocked; }, [isLocked]);
 
-  const lockOnBackground = useCallback(() => {
-    if (isLockedRef.current) return;
-    if (!(biometricAvailable && biometricCredentialId)) return;
-    setLockError("");
-    setIsLocked(true);
-  }, [biometricAvailable, biometricCredentialId]);
-
   useEffect(() => {
     if (typeof window === "undefined") return;
     const onVisibility = () => {
-      if (document.visibilityState === "hidden") lockOnBackground();
-      if (document.visibilityState === "visible") {
-        if (isLockedRef.current && biometricAvailable && biometricCredentialId) {
-          void handleBiometricUnlockRef.current();
-        }
-      }
-    };
-    const onBlur = () => lockOnBackground();
-    const onFocus = () => {
-      if (isLockedRef.current && biometricAvailable && biometricCredentialId) {
-        void handleBiometricUnlockRef.current();
-      }
+      if (document.visibilityState === "visible") resetIdle();
     };
     document.addEventListener("visibilitychange", onVisibility);
-    window.addEventListener("blur", onBlur);
-    window.addEventListener("focus", onFocus);
-    return () => {
-      document.removeEventListener("visibilitychange", onVisibility);
-      window.removeEventListener("blur", onBlur);
-      window.removeEventListener("focus", onFocus);
-    };
-  }, [biometricAvailable, biometricCredentialId, lockOnBackground]);
+    return () => document.removeEventListener("visibilitychange", onVisibility);
+  }, [resetIdle]);
 
   // Check WebAuthn platform authenticator availability + stored credential
   useEffect(() => {
@@ -1960,6 +1935,18 @@ export default function Home() {
         .catch(() => setBiometricAvailable(false));
     }
   }, []);
+
+  useEffect(() => {
+    if (!isIdle || isLockedRef.current) return;
+    if (typeof document !== "undefined" && document.visibilityState !== "visible") {
+      resetIdle();
+      return;
+    }
+    if (!auth.user) return;
+    if (!(biometricAvailable && biometricCredentialId)) return;
+    setLockError("");
+    setIsLocked(true);
+  }, [isIdle, auth.user, biometricAvailable, biometricCredentialId, resetIdle]);
 
   // ── Tab scroll ref ────────────────────────────────────────────────────────────
   const tabContainerRef = useRef<HTMLDivElement | null>(null);
@@ -2978,6 +2965,14 @@ export default function Home() {
     }
   }, [auth.token]);
 
+  useEffect(() => {
+    if (cashoutExpandedId == null) return;
+    const bet = myBets.find(b => b.id === cashoutExpandedId);
+    if (!bet || bet.status !== "pending" || bet.cashoutStatus !== "available") {
+      setCashoutExpandedId(null);
+    }
+  }, [cashoutExpandedId, myBets]);
+
   // Auto-refresh bets every 10s for any logged-in user — detects settlements quickly.
   // 10s is fast enough that a settled bet appears within seconds of the 15s worker cycle.
   useEffect(() => {
@@ -3119,7 +3114,7 @@ export default function Home() {
       if (res.ok) {
         setIsLocked(false);
         resetIdle();
-        window.location.reload();
+        auth.refreshUser();
       } else {
         const data = await res.json();
         setLockError(data.error || "Password incorreta");
@@ -3150,32 +3145,14 @@ export default function Home() {
       if (assertion) {
         setIsLocked(false);
         resetIdle();
-        window.location.reload();
+        auth.refreshUser();
       }
     } catch {
       setLockError("Verificação biométrica cancelada ou falhou.");
     } finally {
       setBiometricLoading(false);
     }
-  }, [biometricCredentialId, resetIdle]);
-
-  useEffect(() => {
-    handleBiometricUnlockRef.current = handleBiometricUnlock;
-  }, [handleBiometricUnlock]);
-
-  useEffect(() => {
-    if (!isLocked) return;
-    if (!(biometricAvailable && biometricCredentialId)) return;
-    const t = window.setTimeout(() => { void handleBiometricUnlock(); }, 120);
-    return () => window.clearTimeout(t);
-  }, [isLocked, biometricAvailable, biometricCredentialId, handleBiometricUnlock]);
-
-  useEffect(() => {
-    if (!isLocked) return;
-    if (!(biometricAvailable && biometricCredentialId)) return;
-    const t = window.setTimeout(() => { void handleBiometricUnlock(); }, 120);
-    return () => window.clearTimeout(t);
-  }, [isLocked, biometricAvailable, biometricCredentialId]);
+  }, [biometricCredentialId, resetIdle, auth]);
 
   const handleRegisterBiometric = async () => {
     if (!auth.user) return;
@@ -6466,6 +6443,37 @@ export default function Home() {
     return map[sel.selection] ?? sel.selection;
   };
 
+  const parseDMY = (raw: string): Date | null => {
+    const m1 = raw.match(/^(\d{2})[./-](\d{2})[./-](\d{4})$/);
+    if (m1) return new Date(Number(m1[3]), Number(m1[2]) - 1, Number(m1[1]), 0, 0, 0, 0);
+    const m2 = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (m2) return new Date(Number(m2[1]), Number(m2[2]) - 1, Number(m2[3]), 0, 0, 0, 0);
+    return null;
+  };
+
+  const formatMatchWhen = (m: Match): string | null => {
+    const dateRaw = (m as any).scheduledDate ?? (m as any).date;
+    const timeRaw = (m as any).scheduledTime ?? (m as any).time;
+    const date = typeof dateRaw === "string" ? parseDMY(dateRaw) : null;
+    if (!date && !timeRaw) return null;
+    const t = typeof timeRaw === "string" ? timeRaw : null;
+    if (date && t && /^\d{1,2}:\d{2}$/.test(t)) {
+      const [hh, mm] = t.split(":").map(Number);
+      date.setHours(hh, mm, 0, 0);
+    }
+    if (!date) return t;
+    const now = new Date();
+    const startToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const startThat = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+    const diffDays = Math.round((startThat.getTime() - startToday.getTime()) / 86400000);
+    const dayLabel = diffDays === 0
+      ? "Hoje"
+      : diffDays === 1
+        ? "Amanhã"
+        : date.toLocaleDateString("pt-PT", { day: "2-digit", month: "2-digit", year: "numeric" });
+    return t ? `${dayLabel} • ${t}` : dayLabel;
+  };
+
   const getBetSelections = (bet: UserBet): StoredSelection[] => {
     if (Array.isArray(bet.selections)) return bet.selections as StoredSelection[];
     return [{ matchTitle: bet.matchTitle, selection: "home", odd: parseFloat(bet.totalOdds), market: "result" }];
@@ -6498,50 +6506,20 @@ export default function Home() {
               initial={{ scale: 0.88, opacity: 0, y: 20 }}
               animate={{ scale: 1, opacity: 1, y: 0 }}
               transition={{ delay: 0.08, type: "spring", stiffness: 280, damping: 24 }}
-              className="w-full max-w-sm px-6 flex flex-col items-center gap-5"
+              className="w-full max-w-sm px-6 flex flex-col items-center"
             >
-              {/* Logo */}
-              <p className="text-zinc-600 text-xs mb-1">
-                <span className="text-white font-black text-2xl italic">BET</span><span className="text-red-600 font-black text-2xl italic">62</span>
-              </p>
-
-              {/* Lock icon */}
-              <div className="w-20 h-20 rounded-full bg-zinc-900 border border-zinc-700 flex items-center justify-center shadow-2xl">
-                <Lock size={36} className="text-red-500" />
-              </div>
-
-              {/* Title + user */}
-              <div className="text-center">
-                <p className="text-white font-black text-xl tracking-tight">Desbloqueio facial</p>
-                <p className="text-zinc-600 text-xs mt-1">120 segundos sem atividade detectada</p>
-              </div>
-
-              <div className="w-full flex flex-col items-center gap-2">
+              <button
+                onClick={() => void handleBiometricUnlock()}
+                disabled={biometricLoading}
+                className="w-20 h-20 rounded-full bg-zinc-900 border border-zinc-700 flex items-center justify-center shadow-2xl disabled:opacity-70"
+                aria-label="Desbloquear"
+              >
                 {biometricLoading ? (
-                  <div className="flex items-center gap-2 text-zinc-400 text-sm">
-                    <Loader2 size={18} className="animate-spin text-zinc-400" />
-                    <span>A verificar…</span>
-                  </div>
+                  <Loader2 size={22} className="animate-spin text-zinc-300" />
                 ) : (
-                  <div className="flex items-center gap-2 text-zinc-400 text-sm">
-                    <ScanFace size={18} className="text-blue-400" />
-                    <span>Aproxime o rosto / use o sensor</span>
-                  </div>
+                  <Lock size={34} className="text-red-500" />
                 )}
-                {lockError && (
-                  <p className="text-red-400 text-xs mt-1 flex items-center gap-1">
-                    <AlertCircle size={12} />{lockError}
-                  </p>
-                )}
-                {!!lockError && biometricAvailable && biometricCredentialId && (
-                  <button
-                    onClick={() => void handleBiometricUnlock()}
-                    className="mt-2 text-xs text-zinc-500 hover:text-zinc-300 underline underline-offset-2 transition-colors"
-                  >
-                    Tentar novamente
-                  </button>
-                )}
-              </div>
+              </button>
             </motion.div>
           </motion.div>
         )}
@@ -6558,7 +6536,7 @@ export default function Home() {
           </DialogHeader>
           <div className="space-y-4 pt-2">
             <p className="text-zinc-400 text-sm">
-              Ative o desbloqueio com <strong className="text-white">Face ID</strong> ou <strong className="text-white">Impressão Digital</strong> para desbloquear rapidamente quando você voltar ao app/site.
+              Ative o desbloqueio com <strong className="text-white">Face ID</strong> ou <strong className="text-white">Impressão Digital</strong> para desbloquear a sessão após 120 segundos sem atividade.
             </p>
             <div className="flex items-center gap-2 p-3 bg-blue-950/30 border border-blue-500/20 rounded-lg">
               <ScanFace size={18} className="text-blue-400 shrink-0" />
@@ -10599,11 +10577,7 @@ export default function Home() {
                                         <div className="flex items-center gap-2 mt-1.5">
                                           <span className="flex items-center gap-1 bg-zinc-700 text-zinc-200 text-[10px] font-black px-2 py-0.5 rounded-full">
                                             <Clock size={9} />
-                                            {lm.scheduledTime
-                                              ? `Hoje ${lm.scheduledTime}`
-                                              : lm.time
-                                              ? `Hoje ${lm.time}`
-                                              : "Em breve"}
+                                            {formatMatchWhen(lm) ?? (lm.scheduledTime ?? lm.time ?? "Em breve")}
                                           </span>
                                         </div>
                                       )}
