@@ -4231,7 +4231,7 @@ export default function Home() {
       <div className="mb-6">
         <div
           className="flex gap-3 overflow-x-auto pb-2 snap-x snap-mandatory scrollbar-none"
-          style={{ scrollbarWidth: "none", WebkitOverflowScrolling: "touch", touchAction: "pan-x" } as React.CSSProperties}
+          style={{ scrollbarWidth: "none", WebkitOverflowScrolling: "touch", touchAction: "pan-x pan-y" } as React.CSSProperties}
         >
           {chunks.map((events, bi) => {
             const cfg = BANNER_CONFIGS[bi];
@@ -5118,7 +5118,7 @@ export default function Home() {
       <MarketGroupOpenCtx.Provider value={{ matchId: String(match.id), getOpen: marketGroupOpenApi.getOpen, setOpen: marketGroupOpenApi.setOpen }}>
       <MarketGroupSeqCtx.Provider key={`mgrp:${match.id}:${modalTab}`} value={marketGroupSeqApi}>
       <div className="mt-2">
-        <div ref={tabContainerRef} className="flex gap-1 overflow-x-auto no-scrollbar mb-4 pb-1 border-b border-zinc-800" style={{ scrollbarWidth: "none", touchAction: "pan-x", WebkitOverflowScrolling: "touch" } as React.CSSProperties}>
+        <div ref={tabContainerRef} className="flex gap-1 overflow-x-auto no-scrollbar mb-4 pb-1 border-b border-zinc-800" style={{ scrollbarWidth: "none", touchAction: "pan-x pan-y", WebkitOverflowScrolling: "touch" } as React.CSSProperties}>
           {tabs.map(t => (
             <button
               key={t.key}
