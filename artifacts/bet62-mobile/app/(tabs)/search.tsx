@@ -41,7 +41,8 @@ interface MatchResult {
   sport: string;
   home: string;
   away: string;
-  kickoff?: string;
+  date?: string;
+  time?: string;
   odds: { home: number; draw: number; away: number };
   league?: string;
   isLive?: boolean;
@@ -128,11 +129,15 @@ export default function SearchScreen() {
         odds: m.odds, league: m.league, isLive: true,
         homeScore: m.homeScore, awayScore: m.awayScore,
         markets: m.markets, marketSuspension: m.marketSuspension,
+        date: m.date,
+        time: m.time,
       }));
     const up: MatchResult[] = upcoming
       .filter((m) => m.hasRealOdds !== false)
       .map((m) => ({
         id: m.id, sport: m.sport, home: m.home, away: m.away,
+        date: m.date,
+        time: m.time,
         odds: m.odds, league: m.league,
       }));
     return [...live, ...up];
@@ -161,6 +166,8 @@ export default function SearchScreen() {
       market, selection: market,
       label: `${match.home} vs ${match.away} — ${label}`,
       odds: value,
+      date: match.date,
+      time: match.time,
     });
   }
 

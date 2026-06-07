@@ -264,6 +264,8 @@ function PopularBanners({ matches }: { matches: UpcomingMatch[] }) {
           selection: "1x2-home",
           label: `${m.home} vs ${m.away} — Casa`,
           odds: m.odds.home,
+          date: m.date,
+          time: m.time,
         });
       }
     });
@@ -375,7 +377,16 @@ function UpcomingCard({ match }: { match: UpcomingMatch }) {
   function handleOdds(market: string, label: string, value: number) {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     if (hasSelection(match.id, market)) removeSelection(match.id, market);
-    else addSelection({ matchId: match.id, matchTitle: `${match.home} vs ${match.away}`, market, selection: market, label: `${match.home} vs ${match.away} — ${label}`, odds: value });
+    else addSelection({
+      matchId: match.id,
+      matchTitle: `${match.home} vs ${match.away}`,
+      market,
+      selection: market,
+      label: `${match.home} vs ${match.away} — ${label}`,
+      odds: value,
+      date: match.date,
+      time: match.time,
+    });
   }
 
   const OddsButton = ({ mkt, lbl, val }: { mkt: string; lbl: string; val: number }) => {

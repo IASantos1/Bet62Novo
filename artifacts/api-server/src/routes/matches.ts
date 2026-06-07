@@ -154,6 +154,8 @@ export type LiveMatchState = {
   odds: { home: number; draw: number; away: number };
   markets: AdvancedMarkets;
   events: Array<{ type: string; team: string; minute: number; player: string }>;
+  date?: string;
+  time?: string;
   // market key → timestamp (ms) when it reopens; absent or past = open
   marketSuspension?: Record<string, number>;
   // Reason for current suspension (displayed in UI)
@@ -1971,6 +1973,49 @@ type SAPIV2Event = {
   /** true when the live feed is locked (match ended/suspended by API) */
   feedLocked?: boolean;
 };
+
+type V2RedCards = { home: number; away: number };
+type V2RedCardsEntry = V2RedCards & { fetchedAt: number };
+const v2FootballRedCardsCache = new Map<number, V2RedCardsEntry>();
+const V2_RED_CARDS_TTL_MS = 45_000;
+
+async function getFootballV2RedCards(matchId: number): Promise<V2RedCards | null> {
+  const cached = v2FootballRedCardsCache.get(matchId);
+  if (cached && Date.now() - cached.fetchedAt < V2_RED_CARDS_TTL_MS) return { home: cached.home, away: cached.away };
+  try {
+    const resp = await fetch(`${SAPI_V2_FOOTBALL}/match/${matchId}/statistics`, {
+      signal: AbortSignal.timeout(6000),
+      headers: sapiHeaders(),
+    });
+    if (!resp.ok) return null;
+    const data = await resp.json() as Record<string, unknown>;
+    const get = (o: unknown, path: string[]): unknown => {
+      let cur: unknown = o;
+      for (const k of path) {
+        if (!cur || typeof cur !== "object") return undefined;
+        cur = (cur as Record<string, unknown>)[k];
+      }
+      return cur;
+    };
+    const toArr = (v: unknown): Record<string, unknown>[] => {
+      if (!v) return [];
+      if (Array.isArray(v)) return v.filter(x => x && typeof x === "object") as Record<string, unknown>[];
+      if (typeof v === "object") return [v as Record<string, unknown>];
+      return [];
+    };
+    const redCount = (side: "home" | "away"): number => {
+      const ev = get(data, ["event_summary"]) as Record<string, unknown> | undefined;
+      const s = (ev?.[side] as Record<string, unknown> | undefined) ?? undefined;
+      const r = toArr((s?.["redcards"] as Record<string, unknown> | undefined)?.["event"]);
+      return r.length;
+    };
+    const out = { home: redCount("home"), away: redCount("away") };
+    v2FootballRedCardsCache.set(matchId, { ...out, fetchedAt: Date.now() });
+    return out;
+  } catch {
+    return null;
+  }
+}
 
 // Normaliser helpers
 function v2TeamName(t: string | SAPIV2TeamObj | undefined): string {
@@ -5936,6 +5981,8 @@ async function buildLiveMatches(): Promise<LiveMatchState[]> {
         const updatedState = {
           ...existing,
           minute,
+          date: m.date,
+          time: m.time,
           markets: safeMarkets,
           _baseMarkets: safeBase,
           marketSuspension: matchMarketSuspension,
@@ -6348,6 +6395,8 @@ async function buildLiveMatches(): Promise<LiveMatchState[]> {
         _htStartedAt: isHT ? htStartedAt : undefined,
         redCardsHome: stateRcHome > 0 ? stateRcHome : undefined,
         redCardsAway: stateRcAway > 0 ? stateRcAway : undefined,
+        date: m.date,
+        time: m.time,
         leagueId: league.id,
       };
 
@@ -6627,6 +6676,21 @@ async function buildFootballLiveV2(events: SAPIV2Event[]): Promise<LiveMatchStat
     if (o) prefetchOdds.set(id, o);
   });
 
+  const redCardIds = Array.from(new Set(events
+    .filter(ev => {
+      const statusStr = v2StatusStr(ev.status);
+      if (FOOTBALL_V2_FINISHED.has(statusStr)) return false;
+      return FOOTBALL_V2_LIVE.has(statusStr);
+    })
+    .map(ev => ev.id)
+  )).slice(0, 12);
+
+  const prefetchRedCards = new Map<number, V2RedCards>();
+  await pool(redCardIds, 4, async (id) => {
+    const rc = await getFootballV2RedCards(id);
+    if (rc) prefetchRedCards.set(id, rc);
+  });
+
   for (const ev of events) {
     const statusStr = v2StatusStr(ev.status);
     if (FOOTBALL_V2_FINISHED.has(statusStr)) continue;
@@ -6650,6 +6714,10 @@ async function buildFootballLiveV2(events: SAPIV2Event[]): Promise<LiveMatchStat
     const homeScore = v2CurrentScore(ev.homeScore);
     const awayScore = v2CurrentScore(ev.awayScore);
     const league = normalizeLeagueName(v2TournName(ev.tournament), "");
+    const { date, time } = v2EventDateTime(ev);
+    const rc = prefetchRedCards.get(ev.id) ?? v2FootballRedCardsCache.get(ev.id) ?? { home: 0, away: 0, fetchedAt: 0 };
+    const rcHome = rc.home ?? 0;
+    const rcAway = rc.away ?? 0;
 
     // Block youth matches: check league name AND team names (e.g. "Pergolettese U19")
     if (isBlockedLeague(`${league} ${homeTeam} ${awayTeam}`)) continue;
@@ -6750,7 +6818,7 @@ async function buildFootballLiveV2(events: SAPIV2Event[]): Promise<LiveMatchStat
       const scored = homeScore !== existing.homeScore || awayScore !== existing.awayScore;
       const baseOdds = existing._baseOdds ?? { home: existing.odds.home, draw: existing.odds.draw, away: existing.odds.away };
       const newOdds = scored
-        ? calculateLive1x2({ minute, homeGoals: homeScore, awayGoals: awayScore, redCardsHome: 0, redCardsAway: 0, baseHome: baseOdds.home, baseDraw: baseOdds.draw, baseAway: baseOdds.away })
+        ? calculateLive1x2({ minute, homeGoals: homeScore, awayGoals: awayScore, redCardsHome: rcHome, redCardsAway: rcAway, baseHome: baseOdds.home, baseDraw: baseOdds.draw, baseAway: baseOdds.away })
         : existing.odds;
 
       // Penalty score tracking: when entering "Penalties" phase store the pre-penalty base score.
@@ -6800,6 +6868,10 @@ async function buildFootballLiveV2(events: SAPIV2Event[]): Promise<LiveMatchStat
           _liveExtra: liveExtra,
           _lastSeenAt: now,
           _missingSinceAt: undefined,
+          date,
+          time,
+          redCardsHome: rcHome > 0 ? rcHome : undefined,
+          redCardsAway: rcAway > 0 ? rcAway : undefined,
         };
         liveMatchState.set(id, applyTieredMarketDrift(updated, now));
       } else {
@@ -6834,6 +6906,10 @@ async function buildFootballLiveV2(events: SAPIV2Event[]): Promise<LiveMatchStat
             _liveExtra: liveExtra,
             _lastSeenAt: now,
             _missingSinceAt: undefined,
+            date,
+            time,
+            redCardsHome: rcHome > 0 ? rcHome : undefined,
+            redCardsAway: rcAway > 0 ? rcAway : undefined,
           };
           liveMatchState.set(id, applyTieredMarketDrift(updated, now));
         } else {
@@ -6849,6 +6925,10 @@ async function buildFootballLiveV2(events: SAPIV2Event[]): Promise<LiveMatchStat
             _liveExtra: liveExtra,
             _lastSeenAt: now,
             _missingSinceAt: undefined,
+            date,
+            time,
+            redCardsHome: rcHome > 0 ? rcHome : undefined,
+            redCardsAway: rcAway > 0 ? rcAway : undefined,
           };
           liveMatchState.set(id, applyTieredMarketDrift(updated, now));
         }
@@ -6859,7 +6939,7 @@ async function buildFootballLiveV2(events: SAPIV2Event[]): Promise<LiveMatchStat
       const baseOdds = prefetchOdds.get(ev.id) ?? makeOddsFromTeams(homeTeam, awayTeam);
       const liveOdds = (homeScore === 0 && awayScore === 0)
         ? baseOdds
-        : calculateLive1x2({ minute, homeGoals: homeScore, awayGoals: awayScore, redCardsHome: 0, redCardsAway: 0, baseHome: baseOdds.home, baseDraw: baseOdds.draw, baseAway: baseOdds.away });
+        : calculateLive1x2({ minute, homeGoals: homeScore, awayGoals: awayScore, redCardsHome: rcHome, redCardsAway: rcAway, baseHome: baseOdds.home, baseDraw: baseOdds.draw, baseAway: baseOdds.away });
       const rawMarkets = makeAdvancedMarketsFromTeams(homeTeam, awayTeam);
       const baseMarkets = filterLiveMarkets(rawMarkets, homeScore, awayScore, newStatus);
       // First time seen in penalties — store current score as base (0-0 penalties so far)
@@ -6882,6 +6962,10 @@ async function buildFootballLiveV2(events: SAPIV2Event[]): Promise<LiveMatchStat
         events: [],
         _firstSeenAt: now,
         _lastSeenAt: now,
+        date,
+        time,
+        redCardsHome: rcHome > 0 ? rcHome : undefined,
+        redCardsAway: rcAway > 0 ? rcAway : undefined,
         _baseOdds: baseOdds,
         _baseMarkets: markets,
         _oddsUpdatedAt: now,
@@ -7846,6 +7930,8 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
       odds:          m.odds,
       markets:       m.markets,
       events:        [],
+      date:          m.date,
+      time:          m.time,
       startsIn:      Math.max(0, Math.round(matchStartsInMinutes(m.date, m.time))),
       scheduledTime: m.time,
       scheduledDate: m.date,

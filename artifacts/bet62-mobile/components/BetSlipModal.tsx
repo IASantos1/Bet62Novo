@@ -210,6 +210,7 @@ export function BetSlipModal({ visible, onClose }: Props) {
     selectionRow: { flexDirection: "row", alignItems: "flex-start", gap: 10 },
     selectionBody: { flex: 1 },
     selectionMatch: { fontSize: 12, fontFamily: "Inter_600SemiBold", color: colors.mutedForeground, marginBottom: 2 },
+    selectionMeta: { fontSize: 12, fontFamily: "Inter_500Medium", color: colors.mutedForeground, marginBottom: 6 },
     selectionPick: { fontSize: 15, fontFamily: "Inter_700Bold", color: colors.foreground, marginBottom: 4 },
     selectionMarketBadge: { alignSelf: "flex-start", backgroundColor: colors.muted, borderRadius: 4, paddingHorizontal: 6, paddingVertical: 2 },
     selectionMarketText: { fontSize: 10, fontFamily: "Inter_500Medium", color: colors.mutedForeground },
@@ -376,6 +377,9 @@ export function BetSlipModal({ visible, onClose }: Props) {
                       <View style={s.selectionBody}>
                         <Text style={s.selectionMatch} numberOfLines={1}>
                           {sel.matchTitle}
+                        </Text>
+                        <Text style={s.selectionMeta} numberOfLines={1}>
+                          {(sel.date && sel.time) ? `${sel.date} • ${sel.time}` : "Data e horário indisponíveis"}
                         </Text>
                         <Text style={s.selectionPick} numberOfLines={2}>
                           {sel.label}

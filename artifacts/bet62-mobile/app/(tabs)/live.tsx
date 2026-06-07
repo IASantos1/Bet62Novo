@@ -147,8 +147,16 @@ function LiveMatchCard({ match }: { match: LiveMatch }) {
   const isHockey = match.sport === "hockey";
   const isBball = match.sport === "basketball";
   const isBase = match.sport === "baseball";
+  const rcHome = match.redCardsHome ?? 0;
+  const rcAway = match.redCardsAway ?? 0;
   const hasDraw = match.odds.draw > 1.01;
   const bannerUrl = getMatchBannerUrlStable(String(match.id), match.home, match.away);
+
+  const RedCard = ({ n }: { n: number }) => (
+    <View style={{ width: 16, height: 20, borderRadius: 4, backgroundColor: "#dc2626", alignItems: "center", justifyContent: "center" }}>
+      <Text style={{ fontSize: 11, fontFamily: "Inter_700Bold", color: "#fff", lineHeight: 12 }}>{n}</Text>
+    </View>
+  );
 
   function handleOdds(market: string, label: string, value: number) {
     if (suspended) return;
@@ -309,7 +317,10 @@ function LiveMatchCard({ match }: { match: LiveMatch }) {
                   <TennisScoreRow sets={sets} currentPoints={currentPoints} home={match.home} away={match.away} colors={colors} />
                 ) : (
                   <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-                    <Text style={{ flex: 1, fontSize: 15, fontFamily: "Inter_700Bold", color: "#fff" }} numberOfLines={1}>{match.home}</Text>
+                    <View style={{ flex: 1, flexDirection: "row", alignItems: "center", gap: 6, minWidth: 0 }}>
+                      <Text style={{ flex: 1, fontSize: 15, fontFamily: "Inter_700Bold", color: "#fff" }} numberOfLines={1}>{match.home}</Text>
+                      {isFootball && rcHome > 0 && <RedCard n={rcHome} />}
+                    </View>
                     <View style={{ backgroundColor: "#000000cc", borderRadius: 8, paddingHorizontal: 12, paddingVertical: 6, borderWidth: 1, borderColor: colors.primary + "55" }}>
                       <Text style={{ fontSize: 20, fontFamily: "Inter_700Bold", color: "#fff", letterSpacing: 1 }}>{match.homeScore} – {match.awayScore}</Text>
                       {(isHockey && periods && periods.length > 0) && <PeriodBreakdown periods={periods} colors={colors} />}
@@ -318,7 +329,10 @@ function LiveMatchCard({ match }: { match: LiveMatch }) {
                         <Text style={{ fontSize: 9, color: colors.mutedForeground, fontFamily: "Inter_400Regular", textAlign: "center" }}>{innings.length}ª ent.</Text>
                       )}
                     </View>
-                    <Text style={{ flex: 1, fontSize: 15, fontFamily: "Inter_700Bold", color: "#fff", textAlign: "right" as const }} numberOfLines={1}>{match.away}</Text>
+                    <View style={{ flex: 1, flexDirection: "row", justifyContent: "flex-end" as const, alignItems: "center" as const, gap: 6, minWidth: 0 }}>
+                      {isFootball && rcAway > 0 && <RedCard n={rcAway} />}
+                      <Text style={{ flex: 1, fontSize: 15, fontFamily: "Inter_700Bold", color: "#fff", textAlign: "right" as const }} numberOfLines={1}>{match.away}</Text>
+                    </View>
                   </View>
                 )}
               </View>
@@ -346,7 +360,10 @@ function LiveMatchCard({ match }: { match: LiveMatch }) {
                 </View>
               ) : (
                 <View style={{ flexDirection: "row", alignItems: "center", marginBottom: 10 }}>
-                  <Text style={{ flex: 1, fontSize: 13, fontFamily: "Inter_600SemiBold", color: colors.foreground }} numberOfLines={1}>{match.home}</Text>
+                  <View style={{ flex: 1, flexDirection: "row", alignItems: "center", gap: 6, minWidth: 0 }}>
+                    <Text style={{ flex: 1, fontSize: 13, fontFamily: "Inter_600SemiBold", color: colors.foreground }} numberOfLines={1}>{match.home}</Text>
+                    {isFootball && rcHome > 0 && <RedCard n={rcHome} />}
+                  </View>
                   <View style={{ backgroundColor: "#0c0c12", borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6, marginHorizontal: 6, borderWidth: 1, borderColor: colors.primary + "40", alignItems: "center" }}>
                     {(isHockey && periods && periods.length > 0) ? (
                       <View style={{ alignItems: "center" }}>
@@ -367,7 +384,10 @@ function LiveMatchCard({ match }: { match: LiveMatch }) {
                       <Text style={{ fontSize: 18, fontFamily: "Inter_700Bold", color: "#ffffff" }}>{match.homeScore} – {match.awayScore}</Text>
                     )}
                   </View>
-                  <Text style={{ flex: 1, fontSize: 13, fontFamily: "Inter_600SemiBold", color: colors.foreground, textAlign: "right" as const }} numberOfLines={1}>{match.away}</Text>
+                  <View style={{ flex: 1, flexDirection: "row", justifyContent: "flex-end" as const, alignItems: "center" as const, gap: 6, minWidth: 0 }}>
+                    {isFootball && rcAway > 0 && <RedCard n={rcAway} />}
+                    <Text style={{ flex: 1, fontSize: 13, fontFamily: "Inter_600SemiBold", color: colors.foreground, textAlign: "right" as const }} numberOfLines={1}>{match.away}</Text>
+                  </View>
                 </View>
               )}
               {OddsRowContent}
