@@ -1,8 +1,9 @@
 import { Router, type IRouter, type Response } from "express";
-import { db, betsTable, cashoutStatesTable, platformSettingsTable, usersTable } from "@workspace/db";
-import { eq, desc, sql, and, inArray } from "drizzle-orm";
+import { db, betsTable, cashoutStatesTable, platformSettingsTable, settlementLogsTable, usersTable } from "@workspace/db";
+import { eq, desc, sql, and, inArray, asc } from "drizzle-orm";
 import { authMiddleware, type AuthRequest } from "../middlewares/auth";
 import { logger } from "../lib/logger";
+import { applyBalanceDelta, insertLedgerEntry } from "../lib/ledger";
 import { liveMatchState, finishedMatchResults, type LiveMatchState } from "./matches";
 import { scoreOutcomeForSel, type SelectionRecord } from "../settlement";
 
@@ -869,6 +870,16 @@ router.post("/place", authMiddleware, async (req: AuthRequest, res: Response): P
           status: "pending",
         }).returning();
 
+        await insertLedgerEntry(tx, {
+          userId: req.user!.id,
+          amount: (-parseFloat(stakeStr)).toFixed(2),
+          kind: "bet_stake_debit",
+          idempotencyKey: `bet:${bet.id}:stake_debit`,
+          refType: "bet",
+          refId: String(bet.id),
+          metadata: { matchId },
+        });
+
         return { bet, newBalance: updated[0]!.balance };
       }
     });
@@ -893,6 +904,21 @@ router.get("/my", authMiddleware, async (req: AuthRequest, res: Response): Promi
       .orderBy(desc(betsTable.createdAt));
 
     const betIds = bets.map(b => b.id);
+    const logs = betIds.length === 0
+      ? []
+      : await db
+        .select({ betId: settlementLogsTable.betId, createdAt: settlementLogsTable.createdAt })
+        .from(settlementLogsTable)
+        .where(and(
+          eq(settlementLogsTable.oldStatus, "pending"),
+          inArray(settlementLogsTable.betId, betIds),
+        ))
+        .orderBy(asc(settlementLogsTable.createdAt));
+    const firstSettleMap = new Map<number, Date>();
+    for (const l of logs) {
+      if (!firstSettleMap.has(l.betId)) firstSettleMap.set(l.betId, l.createdAt);
+    }
+
     const policy = await getCashoutPolicy();
     const states = betIds.length === 0
       ? []
@@ -918,7 +944,26 @@ router.get("/my", authMiddleware, async (req: AuthRequest, res: Response): Promi
       if (calc.stateOp.type === "insert" && b.id != null) inserts.push({ betId: b.id, unfavorableSince: calc.stateOp.since, reason: calc.stateOp.reason, updatedAt: nowDate });
       else if (calc.stateOp.type === "update_reason" && b.id != null) updates.push({ betId: b.id, reason: calc.stateOp.reason, updatedAt: nowDate });
       else if (calc.stateOp.type === "delete" && b.id != null) deletes.push(b.id);
-      return { ...b, ...calc.info };
+
+      const settledAt = firstSettleMap.get(b.id) ?? null;
+      const createdAtDate = b.createdAt instanceof Date ? b.createdAt : new Date(b.createdAt as unknown as string);
+      const settlementSeconds = settledAt ? Math.max(0, Math.round((settledAt.getTime() - createdAtDate.getTime()) / 1000)) : null;
+
+      const status = String(b.status);
+      const stakeNum = parseFloat(String(b.stake));
+      const payout =
+        status === "won"
+          ? String(b.potentialWin)
+          : status === "cashed_out"
+            ? (b.cashoutValue ? String(b.cashoutValue) : null)
+            : status === "voided"
+              ? String(b.stake)
+              : status === "lost"
+                ? "0.00"
+                : null;
+      const netProfit = payout === null ? null : (parseFloat(payout) - stakeNum).toFixed(2);
+
+      return { ...b, ...calc.info, settledAt, settlementSeconds, payout, netProfit };
     });
 
     if (deletes.length > 0) {
@@ -1054,11 +1099,23 @@ router.post("/:id/cashout", authMiddleware, async (req: AuthRequest, res: Respon
         throw Object.assign(new Error("Bet is not eligible for cash out"), { status: 400 });
       }
 
-      // Atomic balance credit using SQL addition (no read-then-write race)
-      await tx
-        .update(usersTable)
-        .set({ balance: sql`${usersTable.balance} + ${cashoutStr}::numeric` })
-        .where(eq(usersTable.id, req.user!.id));
+      await applyBalanceDelta(tx, {
+        userId: req.user!.id,
+        amount: cashoutStr,
+        kind: "bet_cashout_payout",
+        idempotencyKey: `bet:${betId}:cashout`,
+        refType: "bet",
+        refId: String(betId),
+      });
+
+      await tx.insert(settlementLogsTable).values({
+        betId,
+        userId: req.user!.id,
+        oldStatus: "pending",
+        newStatus: "cashed_out",
+        payout: cashoutStr,
+        message: "Cashout",
+      });
 
       await tx.delete(cashoutStatesTable).where(eq(cashoutStatesTable.betId, betId));
 

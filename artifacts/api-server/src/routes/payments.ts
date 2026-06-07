@@ -4,6 +4,7 @@ import { eq, sql, count } from "drizzle-orm";
 import { authMiddleware, type AuthRequest } from "../middlewares/auth";
 import { logger } from "../lib/logger";
 import { sendDepositConfirmed } from "../lib/mailer";
+import { applyBalanceDelta } from "../lib/ledger";
 import { randomUUID } from "crypto";
 
 const router: IRouter = Router();
@@ -14,6 +15,9 @@ const CARD_KEY        = process.env.IFTHENPAY_CARD_KEY        || "";
 // Anti-tampering key: included in all callback/return URLs so only ifthenpay
 // can trigger them. Verified on every incoming callback/card-return request.
 const BACKOFFICE_KEY  = process.env.IFTHENPAY_BACKOFFICE_KEY  || "";
+if (process.env.NODE_ENV === "production" && !BACKOFFICE_KEY) {
+  throw new Error("[SECURITY] IFTHENPAY_BACKOFFICE_KEY environment variable is not set.");
+}
 
 function getBaseUrl(req: Request): string {
   const domains = process.env.REPLIT_DOMAINS;
@@ -326,9 +330,14 @@ router.get("/callback", async (req: Request, res: Response): Promise<void> => {
 
     await db.transaction(async (tx) => {
       await tx.update(paymentsTable).set({ status: "completed", requestId: requestId || payment.requestId }).where(eq(paymentsTable.orderId, orderId));
-      await tx.update(usersTable).set({
-        balance: sql`${usersTable.balance} + ${payment.amount}`,
-      }).where(eq(usersTable.id, payment.userId));
+      await applyBalanceDelta(tx, {
+        userId: payment.userId,
+        amount: payment.amount,
+        kind: "payment_deposit_credit",
+        idempotencyKey: `payment:${orderId}:credit`,
+        refType: "payment",
+        refId: orderId,
+      });
     });
 
     logger.info({ orderId, userId: payment.userId, amount: payment.amount }, "Payment confirmed and balance credited");
@@ -377,9 +386,14 @@ router.get("/card-return", async (req: Request, res: Response): Promise<void> =>
       if (payment && payment.status === "pending") {
         await db.transaction(async (tx) => {
           await tx.update(paymentsTable).set({ status: "completed" }).where(eq(paymentsTable.orderId, orderId));
-          await tx.update(usersTable).set({
-            balance: sql`${usersTable.balance} + ${payment.amount}`,
-          }).where(eq(usersTable.id, payment.userId));
+          await applyBalanceDelta(tx, {
+            userId: payment.userId,
+            amount: payment.amount,
+            kind: "payment_deposit_credit",
+            idempotencyKey: `payment:${orderId}:credit`,
+            refType: "payment",
+            refId: orderId,
+          });
         });
 
         // Grant freebet if this is the first deposit

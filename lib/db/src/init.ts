@@ -113,6 +113,19 @@ export async function initDb(): Promise<void> {
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       );
 
+      CREATE TABLE IF NOT EXISTS ledger_entries (
+        id              SERIAL PRIMARY KEY,
+        user_id         INTEGER NOT NULL REFERENCES users(id),
+        amount          DECIMAL(12, 2) NOT NULL,
+        currency        TEXT NOT NULL DEFAULT 'EUR',
+        kind            TEXT NOT NULL,
+        ref_type        TEXT,
+        ref_id          TEXT,
+        idempotency_key TEXT NOT NULL UNIQUE,
+        metadata        JSONB,
+        created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+
       CREATE TABLE IF NOT EXISTS match_results (
         match_id      TEXT PRIMARY KEY,
         sport         TEXT NOT NULL,

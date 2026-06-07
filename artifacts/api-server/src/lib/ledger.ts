@@ -1,0 +1,103 @@
+import { ledgerEntriesTable, usersTable } from "@workspace/db";
+import { and, eq, sql } from "drizzle-orm";
+
+export async function insertLedgerEntry(
+  tx: unknown,
+  args: {
+    userId: number;
+    amount: string;
+    kind: string;
+    idempotencyKey: string;
+    refType?: string | null;
+    refId?: string | null;
+    metadata?: unknown;
+  },
+): Promise<boolean> {
+  const txDb = tx as {
+    insert: typeof import("@workspace/db")["db"]["insert"];
+  };
+
+  const amountNum = Number(args.amount);
+  if (!Number.isFinite(amountNum)) {
+    throw new Error("Invalid amount");
+  }
+  const amountStr = amountNum.toFixed(2);
+
+  const inserted = await txDb
+    .insert(ledgerEntriesTable)
+    .values({
+      userId: args.userId,
+      amount: amountStr,
+      currency: "EUR",
+      kind: args.kind,
+      refType: args.refType ?? null,
+      refId: args.refId ?? null,
+      idempotencyKey: args.idempotencyKey,
+      metadata: (args.metadata ?? null) as never,
+    })
+    .onConflictDoNothing()
+    .returning({ id: ledgerEntriesTable.id });
+
+  return inserted.length > 0;
+}
+
+export async function applyBalanceDelta(
+  tx: unknown,
+  args: {
+    userId: number;
+    amount: string;
+    kind: string;
+    idempotencyKey: string;
+    refType?: string | null;
+    refId?: string | null;
+    metadata?: unknown;
+    enforceNonNegative?: boolean;
+  },
+): Promise<boolean> {
+  const txDb = tx as {
+    insert: typeof import("@workspace/db")["db"]["insert"];
+    update: typeof import("@workspace/db")["db"]["update"];
+  };
+
+  const amountNum = Number(args.amount);
+  if (!Number.isFinite(amountNum)) {
+    throw new Error("Invalid amount");
+  }
+  const amountStr = amountNum.toFixed(2);
+
+  const inserted = await txDb
+    .insert(ledgerEntriesTable)
+    .values({
+      userId: args.userId,
+      amount: amountStr,
+      currency: "EUR",
+      kind: args.kind,
+      refType: args.refType ?? null,
+      refId: args.refId ?? null,
+      idempotencyKey: args.idempotencyKey,
+      metadata: (args.metadata ?? null) as never,
+    })
+    .onConflictDoNothing()
+    .returning({ id: ledgerEntriesTable.id });
+
+  if (inserted.length === 0) return false;
+
+  const where = args.enforceNonNegative
+    ? and(
+        eq(usersTable.id, args.userId),
+        sql`${usersTable.balance}::numeric + ${amountStr}::numeric >= 0`,
+      )
+    : eq(usersTable.id, args.userId);
+
+  const updated = await txDb
+    .update(usersTable)
+    .set({ balance: sql`${usersTable.balance} + ${amountStr}::numeric` })
+    .where(where)
+    .returning({ id: usersTable.id });
+
+  if (updated.length === 0) {
+    throw Object.assign(new Error("Insufficient balance"), { status: 400 });
+  }
+
+  return true;
+}

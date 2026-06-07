@@ -40,6 +40,10 @@ interface Bet {
   status: "pending" | "won" | "lost" | "cashed_out" | "voided";
   cashoutValue?: string | null;
   createdAt: string;
+  settledAt?: string | null;
+  settlementSeconds?: number | null;
+  payout?: string | null;
+  netProfit?: string | null;
 }
 
 function getBetSelections(bet: Bet): StoredSelection[] {
@@ -86,6 +90,10 @@ function BetCard({ bet, token, onCashout }: { bet: Bet; token: string | null; on
   const betDate = new Date(bet.createdAt);
   const dateStr = betDate.toLocaleDateString("pt-PT", { day: "2-digit", month: "2-digit", year: "numeric" });
   const timeStr = betDate.toLocaleTimeString("pt-PT", { hour: "2-digit", minute: "2-digit" });
+  const settledAt = bet.settledAt ? new Date(bet.settledAt) : null;
+  const settledDateStr = settledAt ? settledAt.toLocaleDateString("pt-PT", { day: "2-digit", month: "2-digit", year: "numeric" }) : null;
+  const settledTimeStr = settledAt ? settledAt.toLocaleTimeString("pt-PT", { hour: "2-digit", minute: "2-digit" }) : null;
+  const settlementMins = typeof bet.settlementSeconds === "number" ? Math.max(0, Math.round(bet.settlementSeconds / 60)) : null;
 
   // colours
   const cardBg = isLost ? "#7b1111" : "#ffffff";
@@ -146,6 +154,11 @@ function BetCard({ bet, token, onCashout }: { bet: Bet; token: string | null; on
             <Text style={{ fontFamily: "Inter_400Regular", fontSize: 11, color: "#fca5a5", marginTop: 2 }}>
               📅 {dateStr} • {timeStr}
             </Text>
+            {!isPending && settledAt && (
+              <Text style={{ fontFamily: "Inter_500Medium", fontSize: 11, color: "rgba(255,255,255,0.9)", marginTop: 2 }}>
+                Liquidada: {settledDateStr} • {settledTimeStr}{settlementMins !== null ? ` (${settlementMins} min)` : ""}
+              </Text>
+            )}
           </View>
         </View>
         {isPending && (
@@ -254,6 +267,24 @@ function BetCard({ bet, token, onCashout }: { bet: Bet; token: string | null; on
             valueColor: isWon ? "#16a34a" : isLost ? "#fca5a5" : isVoided ? "#93c5fd" : txtMain,
             valueBold: true,
           },
+          ...(!isPending ? (() => {
+            const net =
+              typeof bet.netProfit === "string" && !Number.isNaN(parseFloat(bet.netProfit))
+                ? parseFloat(bet.netProfit)
+                : null;
+            if (net === null) return [];
+            const sign = net > 0 ? "+" : "";
+            const color =
+              net > 0 ? "#16a34a"
+              : net < 0 ? "#ef4444"
+              : isVoided ? "#93c5fd" : txtMain;
+            return [{
+              label: "Lucro/Prejuízo:",
+              value: `${sign}€${net.toFixed(2)}`,
+              valueColor: color,
+              valueBold: true,
+            }];
+          })() : []),
         ].map(({ label, value, valueColor, valueBold }, ri, arr) => (
           <View key={ri} style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 14, paddingVertical: 11, borderBottomWidth: ri < arr.length - 1 ? 1 : 0, borderBottomColor: summBorder }}>
             <Text style={{ fontFamily: "Inter_400Regular", fontSize: 13, color: summTxt }}>{label}</Text>
@@ -366,7 +397,7 @@ export default function BetsScreen() {
   const { user, token } = useAuth();
   const queryClient = useQueryClient();
   const topPad = Platform.OS === "web" ? 67 : insets.top;
-  const [tab, setTab] = useState<"abertas" | "resolvidas">("abertas");
+  const [tab, setTab] = useState<"abertas" | "resolvidas" | "cashout" | "anuladas">("abertas");
 
   const { data, isLoading, refetch } = useQuery({
     queryKey: ["my-bets", token],
@@ -390,9 +421,14 @@ export default function BetsScreen() {
   );
 
   const bets = data ?? [];
-  const filtered = tab === "abertas"
-    ? bets.filter(b => b.status === "pending")
-    : bets.filter(b => b.status !== "pending");
+  const filtered =
+    tab === "abertas"
+      ? bets.filter(b => b.status === "pending")
+      : tab === "cashout"
+        ? bets.filter(b => b.status === "cashed_out")
+        : tab === "anuladas"
+          ? bets.filter(b => b.status === "voided")
+          : bets.filter(b => b.status === "won" || b.status === "lost");
 
   const pending = bets.filter(b => b.status === "pending").length;
   const won = bets.filter(b => b.status === "won").length;
@@ -426,14 +462,14 @@ export default function BetsScreen() {
         {/* Tab switcher */}
         {user && bets.length > 0 && (
           <View style={{ flexDirection: "row", marginTop: 12, backgroundColor: colors.muted, borderRadius: 10, padding: 3 }}>
-            {(["abertas", "resolvidas"] as const).map(t => (
+            {(["abertas", "resolvidas", "cashout", "anuladas"] as const).map(t => (
               <Pressable
                 key={t}
                 onPress={() => setTab(t)}
                 style={{ flex: 1, paddingVertical: 8, borderRadius: 8, alignItems: "center", backgroundColor: tab === t ? colors.card : "transparent" }}
               >
                 <Text style={{ fontFamily: tab === t ? "Inter_700Bold" : "Inter_500Medium", fontSize: 13, color: tab === t ? colors.primary : colors.mutedForeground }}>
-                  {t === "abertas" ? "Abertas" : "Resolvidas"}
+                  {t === "abertas" ? "Abertas" : t === "cashout" ? "Cash Out" : t === "anuladas" ? "Anuladas" : "Resolvidas"}
                 </Text>
               </Pressable>
             ))}
@@ -470,10 +506,22 @@ export default function BetsScreen() {
             <View style={{ flex: 1, alignItems: "center", justifyContent: "center", gap: 10, paddingTop: 80 }}>
               <Ionicons name="receipt-outline" size={48} color={colors.border} />
               <Text style={{ fontSize: 16, fontFamily: "Inter_600SemiBold", color: colors.mutedForeground }}>
-                {tab === "abertas" ? "Sem apostas abertas" : "Sem apostas resolvidas"}
+                {tab === "abertas"
+                  ? "Sem apostas abertas"
+                  : tab === "cashout"
+                    ? "Sem apostas em Cash Out"
+                    : tab === "anuladas"
+                      ? "Sem apostas anuladas"
+                      : "Sem apostas resolvidas"}
               </Text>
               <Text style={{ fontSize: 13, fontFamily: "Inter_400Regular", color: colors.mutedForeground }}>
-                {tab === "abertas" ? "As tuas apostas activas aparecerão aqui" : "Apostas ganhas, perdidas e cash out aparecem aqui"}
+                {tab === "abertas"
+                  ? "As tuas apostas activas aparecerão aqui"
+                  : tab === "cashout"
+                    ? "As apostas encerradas por Cash Out aparecem aqui"
+                    : tab === "anuladas"
+                      ? "As apostas anuladas aparecem aqui"
+                      : "Apostas ganhas e perdidas aparecem aqui"}
               </Text>
             </View>
           }

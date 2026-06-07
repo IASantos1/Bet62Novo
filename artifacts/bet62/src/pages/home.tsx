@@ -1353,6 +1353,10 @@ type UserBet = {
   cashoutReason?: string;
   cashoutEstimate?: string;
   createdAt: string;
+  settledAt?: string | null;
+  settlementSeconds?: number | null;
+  payout?: string | null;
+  netProfit?: string | null;
 };
 
 type PlatformStats = {
@@ -1698,7 +1702,7 @@ export default function Home() {
   const [myBetsLoading, setMyBetsLoading] = useState(false);
   const [cashingOut, setCashingOut] = useState<number | null>(null);
   const [cashoutExpandedId, setCashoutExpandedId] = useState<number | null>(null);
-  const [betFilterTab, setBetFilterTab] = useState<"abertas" | "resolvidas">("abertas");
+  const [betFilterTab, setBetFilterTab] = useState<"abertas" | "resolvidas" | "cashout" | "anuladas">("abertas");
   const myBetsInitialized = useRef(false);
   const [collapsedBets, setCollapsedBets] = useState<Set<number>>(new Set());
   const [winAnim, setWinAnim] = useState<{ amount: number; title: string } | null>(null);
@@ -2499,6 +2503,8 @@ export default function Home() {
     const isHalfTimeBreak = status === "ht" || status.includes("half time");
     if (isHalfTimeBreak) return Math.max(0, apiMin);
 
+    if (isFootball && (match as any)?._liveExtra?.kickoffSec) return Math.max(0, apiMin);
+
     const looksNotStarted =
       apiMin <= 0 &&
       maxKnownMin === 0 &&
@@ -2520,7 +2526,6 @@ export default function Home() {
 
     const elapsed = Math.min(3, Math.floor((Date.now() - changedAt) / 60000));
     let computed = apiMin + elapsed;
-    if (isFootball) computed = Math.max(0, computed - 3);
     return Math.max(0, Math.min(isFootball ? 130 : 999, computed));
   };
 
@@ -3886,8 +3891,9 @@ export default function Home() {
       if (tag === "HT") return "HT";
       if (tag === "ET") return `${minute > 0 ? `${minute}' · ` : ""}ET`;
       if (tag === "PEN") return "PEN";
-      if (tag) return `${minute}' · ${tag}`;
-      return minute > 0 ? `${minute}'` : "AO VIVO";
+      const minLbl = extra?.clockStr ?? (minute > 0 ? `${minute}'` : "");
+      if (tag) return `${minLbl} · ${tag}`.trim();
+      return minLbl || "AO VIVO";
     })();
 
     // "Em Breve" — upcoming real match, not yet started
@@ -10746,11 +10752,17 @@ export default function Home() {
 
                 {/* Tabs */}
                 <div className="flex border-b border-zinc-800 mb-5">
-                  {(["abertas", "resolvidas"] as const).map((t) => {
-                    const cnt = t === "abertas"
-                      ? myBets.filter(b => b.status === "pending").length
-                      : myBets.filter(b => b.status !== "pending").length;
-                    const lbl = t === "abertas" ? "Abertas" : "Resolvidas";
+                  {(["abertas", "resolvidas", "cashout", "anuladas"] as const).map((t) => {
+                    const cnt =
+                      t === "abertas" ? myBets.filter(b => b.status === "pending").length
+                      : t === "cashout" ? myBets.filter(b => b.status === "cashed_out").length
+                      : t === "anuladas" ? myBets.filter(b => b.status === "voided").length
+                      : myBets.filter(b => b.status === "won" || b.status === "lost").length;
+                    const lbl =
+                      t === "abertas" ? "Abertas"
+                      : t === "cashout" ? "Cash Out"
+                      : t === "anuladas" ? "Anuladas"
+                      : "Resolvidas";
                     return (
                       <button key={t} onClick={() => setBetFilterTab(t)}
                         className={`px-4 py-2.5 text-sm font-bold flex items-center gap-2 border-b-2 transition-colors ${betFilterTab === t ? "border-red-500 text-white" : "border-transparent text-zinc-500 hover:text-zinc-300"}`}>
@@ -10765,17 +10777,27 @@ export default function Home() {
                   <div className="flex items-center justify-center py-20"><Loader2 className="animate-spin text-red-600" size={32} /></div>
                 ) : (() => {
                   const filtered = myBets.filter(b =>
-                    betFilterTab === "resolvidas"
-                      ? b.status !== "pending"
-                      : b.status === "pending"
+                    betFilterTab === "abertas"
+                      ? b.status === "pending"
+                      : betFilterTab === "cashout"
+                        ? b.status === "cashed_out"
+                        : betFilterTab === "anuladas"
+                          ? b.status === "voided"
+                          : (b.status === "won" || b.status === "lost")
                   );
                   if (filtered.length === 0) return (
                     <div className="py-20 text-center text-zinc-500 bg-zinc-900/50 rounded-xl border border-zinc-800">
                       <Trophy className="mx-auto mb-4 opacity-20" size={48} />
                       <p className="font-medium">
-                        {betFilterTab === "resolvidas" ? "Sem apostas resolvidas." : "Sem apostas abertas."}
+                        {betFilterTab === "abertas"
+                          ? "Sem apostas abertas."
+                          : betFilterTab === "cashout"
+                            ? "Sem apostas em Cash Out."
+                            : betFilterTab === "anuladas"
+                              ? "Sem apostas anuladas."
+                              : "Sem apostas resolvidas."}
                       </p>
-                      {betFilterTab !== "resolvidas" && <p className="text-sm mt-1">Escolha um jogo e faça sua primeira aposta!</p>}
+                      {betFilterTab === "abertas" && <p className="text-sm mt-1">Escolha um jogo e faça sua primeira aposta!</p>}
                     </div>
                   );
                   return (
@@ -10792,6 +10814,10 @@ export default function Home() {
                         const betDate = new Date(bet.createdAt);
                         const dateStr = betDate.toLocaleDateString("pt-PT", { day: "2-digit", month: "2-digit", year: "numeric" });
                         const timeStr = betDate.toLocaleTimeString("pt-PT", { hour: "2-digit", minute: "2-digit" });
+                        const settledAt = bet.settledAt ? new Date(bet.settledAt) : null;
+                        const settledDateStr = settledAt ? settledAt.toLocaleDateString("pt-PT", { day: "2-digit", month: "2-digit", year: "numeric" }) : null;
+                        const settledTimeStr = settledAt ? settledAt.toLocaleTimeString("pt-PT", { hour: "2-digit", minute: "2-digit" }) : null;
+                        const settlementMins = typeof bet.settlementSeconds === "number" ? Math.max(0, Math.round(bet.settlementSeconds / 60)) : null;
 
                         const isActivePending = isPending;
                         // Card & text colours
@@ -10819,6 +10845,11 @@ export default function Home() {
                                     <CalendarDays size={11} />
                                     {dateStr} • {timeStr}
                                   </div>
+                                  {!isPending && settledAt && (
+                                    <div className="text-red-100 text-[11px] font-medium mt-0.5">
+                                      Liquidada: {settledDateStr} • {settledTimeStr}{settlementMins !== null ? ` (${settlementMins} min)` : ""}
+                                    </div>
+                                  )}
                                 </div>
                               </div>
                               {isActivePending && (
@@ -10972,6 +11003,23 @@ export default function Home() {
                                     : `€${parseFloat(bet.potentialWin).toFixed(2)}`,
                                   valueCls: isWon ? "font-black text-green-600 text-base" : isCashedOut ? "font-black text-yellow-600 text-base" : isLost ? "font-bold text-red-100" : isVoided ? "font-black text-blue-300 text-base" : `font-black ${txtMain}`,
                                 },
+                                ...(!isPending ? (() => {
+                                  const net =
+                                    typeof bet.netProfit === "string" && !Number.isNaN(parseFloat(bet.netProfit))
+                                      ? parseFloat(bet.netProfit)
+                                      : null;
+                                  if (net === null) return [];
+                                  const cls =
+                                    net > 0 ? "font-black text-green-600 text-base"
+                                    : net < 0 ? (isLost ? "font-black text-red-100 text-base" : "font-black text-red-600 text-base")
+                                    : isVoided ? "font-black text-blue-300 text-base" : `font-black ${txtMain}`;
+                                  const sign = net > 0 ? "+" : "";
+                                  return [{
+                                    label: "Lucro/Prejuízo:",
+                                    value: `${sign}€${net.toFixed(2)}`,
+                                    valueCls: cls,
+                                  }];
+                                })() : []),
                               ].map(({ label, value, valueCls }, ri) => (
                                 <div key={ri} className={`flex items-center justify-between px-4 py-3 text-sm ${summTxt}`}>
                                   <span>{label}</span>
