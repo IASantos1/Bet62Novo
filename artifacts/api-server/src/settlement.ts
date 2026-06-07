@@ -687,7 +687,7 @@ function findResult(
  * Scan all pending bets and settle those whose matches have finished.
  * Won bets credit potentialWin to the user's balance atomically.
  */
-export async function autoSettlePendingBets(): Promise<void> {
+export async function autoSettlePendingBets(opts?: { matchIds?: string[] }): Promise<void> {
   try {
     const pendingBets = await db
       .select()
@@ -696,11 +696,23 @@ export async function autoSettlePendingBets(): Promise<void> {
 
     if (pendingBets.length === 0) return;
 
+    const matchIdSet = Array.isArray(opts?.matchIds) && opts!.matchIds!.length > 0
+      ? new Set(opts!.matchIds!.map((x) => String(x)))
+      : null;
+
     const idsToEnsure = new Set<string>();
     for (const bet of pendingBets) {
       const selections = bet.selections as SelectionRecord[];
       if (!Array.isArray(selections) || selections.length === 0) continue;
       const isSingle = selections.length === 1;
+      if (matchIdSet) {
+        let touches = false;
+        for (const sel of selections) {
+          const mId = sel.matchId ?? (isSingle ? bet.matchId : undefined);
+          if (mId && matchIdSet.has(mId)) { touches = true; break; }
+        }
+        if (!touches) continue;
+      }
       for (const sel of selections) {
         const mId = sel.matchId ?? (isSingle ? bet.matchId : undefined);
         if (!mId) continue;
@@ -723,6 +735,14 @@ export async function autoSettlePendingBets(): Promise<void> {
         if (!Array.isArray(selections) || selections.length === 0) continue;
 
         const isSingle = selections.length === 1;
+        if (matchIdSet) {
+          let touches = false;
+          for (const sel of selections) {
+            const mId = sel.matchId ?? (isSingle ? bet.matchId : undefined);
+            if (mId && matchIdSet.has(mId)) { touches = true; break; }
+          }
+          if (!touches) continue;
+        }
         const outcomes: Array<"won" | "lost" | "void" | null> = [];
 
         for (const sel of selections) {
@@ -1081,6 +1101,14 @@ export function startSettlementWorker(): void {
     throw new Error(`Invalid SETTLEMENT_INITIAL_DELAY_MS value: "${rawInitialDelayMs}"`);
   }
 
+  const queueEnabled = typeof process.env["REDIS_URL"] === "string" && process.env["REDIS_URL"]!.trim() !== "";
+  const rawCatchupMs = process.env.SETTLEMENT_CATCHUP_INTERVAL_MS ?? "300000";
+  const catchupMs = Number(rawCatchupMs);
+  if (Number.isNaN(catchupMs) || catchupMs < 10_000) {
+    throw new Error(`Invalid SETTLEMENT_CATCHUP_INTERVAL_MS value: "${rawCatchupMs}"`);
+  }
+  let lastCatchupAt = 0;
+
   const run = async (): Promise<void> => {
     try {
       // Parallel scan: football daily feed + all V2 sports today feed
@@ -1088,8 +1116,11 @@ export function startSettlementWorker(): void {
         scanDailyForFinished(),
         scanV2AllSportsForFinished(),
       ]);
-      // Settle bets whose results are now known
-      await autoSettlePendingBets();
+      const now = Date.now();
+      if (!queueEnabled || now - lastCatchupAt >= catchupMs) {
+        await autoSettlePendingBets();
+        lastCatchupAt = now;
+      }
       // Enrich early-loss bets with per-leg scores/outcomes when remaining matches finish
       await hydrateSettledBetSelections();
       // Void and refund bets with no data after 72 h

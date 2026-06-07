@@ -2,6 +2,7 @@ import { Router, type IRouter } from "express";
 import { WebSocketServer, type WebSocket as WsClient } from "ws";
 import { CONFIG, FOOTBALL_SUSP_KEYS, footballSuspensionDelayMs } from "../lib/config";
 import { logger } from "../lib/logger";
+import { buildMatchSettlementJobId, enqueueMatchSettlement } from "../lib/settlementQueue";
 import { db, matchResultsTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 
@@ -3007,6 +3008,16 @@ export async function ensureFinishedMatchResult(matchId: string): Promise<boolea
       };
 
       finishedMatchResults.set(matchId, fullRecord);
+      await enqueueMatchSettlement({
+        matchId,
+        jobId: buildMatchSettlementJobId({
+          matchId,
+          home: fullRecord.home,
+          away: fullRecord.away,
+          htHome: fullRecord.htHome,
+          htAway: fullRecord.htAway,
+        }),
+      });
       try {
         if (db) {
           await db.insert(matchResultsTable).values({
@@ -3087,6 +3098,16 @@ export async function scanDailyForFinished(): Promise<void> {
           finishedAt: Date.now(),
         };
         finishedMatchResults.set(m.main_id, rec);
+        await enqueueMatchSettlement({
+          matchId: m.main_id,
+          jobId: buildMatchSettlementJobId({
+            matchId: m.main_id,
+            home: rec.home,
+            away: rec.away,
+            htHome: rec.htHome,
+            htAway: rec.htAway,
+          }),
+        });
         try {
           if (db) {
             await db.insert(matchResultsTable).values({
@@ -5455,6 +5476,16 @@ export async function scanV2AllSportsForFinished(): Promise<void> {
         for (const p of prefix) {
           const id = `${p}-${ev.id}`;
           if (!finishedMatchResults.has(id)) finishedMatchResults.set(id, record);
+          await enqueueMatchSettlement({
+            matchId: id,
+            jobId: buildMatchSettlementJobId({
+              matchId: id,
+              home: record.home,
+              away: record.away,
+              htHome: record.htHome,
+              htAway: record.htAway,
+            }),
+          });
           try {
             if (db) {
               await db.insert(matchResultsTable).values({
