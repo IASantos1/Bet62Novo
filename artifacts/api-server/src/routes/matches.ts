@@ -816,6 +816,37 @@ function basketballLeaguePriority(league: string): number {
   return 999;
 }
 
+const BASKETBALL_LIVE_ALLOW_PATTERNS = [
+  "nba", "national basketball association",
+  "euroleague",
+  "liga acb", "acb",
+  "basketball bundesliga",
+  "lega basket serie a", "serie a",
+  "lnb pro a", "proa",
+  "chinese basketball association", "cba",
+  "b.league", "b league",
+  "novo basquete brasil", "nbb",
+  "vtb united league", "vtb",
+  "basketball super league", "basketbol super ligi", "bsl",
+  "liga nacional de basquet", "liga nacional",
+  "korean basketball league", "kbl",
+  "philippine basketball association", "pba",
+];
+
+function basketballLeagueAllowed(countryRaw: string, leagueName: string): boolean {
+  const countryKey = normalizeCountryKey(countryRaw);
+  const lower = `${countryKey}: ${leagueName}`.toLowerCase();
+  if (lower.includes("g league")) return false;
+  if (lower.includes("d-league")) return false;
+  if (lower.includes("development")) return false;
+
+  if (lower.includes("nbl")) {
+    return countryKey === "australia" || lower.includes("australia");
+  }
+
+  return BASKETBALL_LIVE_ALLOW_PATTERNS.some((p) => lower.includes(p));
+}
+
 // ─── Tennis tournament priority ────────────────────────────────────────────────
 // Tennis has no divisions — ranked by tier: Grand Slams > Masters > ATP Finals > 500 > 250 > Challenger > ITF
 const TENNIS_PRIORITY: Array<[string, number]> = [
@@ -7206,6 +7237,10 @@ function buildBasketballLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
     const homeScore = hS?.current ?? v2CurrentScore(ev.homeScore);
     const awayScore = aS?.current ?? v2CurrentScore(ev.awayScore);
 
+    const league = v2TournName(ev.tournament);
+    const country = v2TournCountry(ev);
+    if (!basketballLeagueAllowed(country, league)) continue;
+
     // Build quarters array from period1..4
     const quarters: Array<[number, number]> = [];
     if (hS && aS) {
@@ -7264,7 +7299,7 @@ function buildBasketballLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
     const state: LiveMatchState = {
       id,
       home: homeTeam, away: awayTeam,
-      league: v2TournName(ev.tournament), country: v2TournCountry(ev),
+      league, country,
       sport: "basketball", homeScore, awayScore, minute,
       status: statusLabel, hasRealOdds: true, odds: liveOdds,
       markets: makeBasketballMarketsFromTeams(homeTeam, awayTeam),
