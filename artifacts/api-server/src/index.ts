@@ -29,9 +29,9 @@ server.listen(port, (err?: Error) => {
   getUpcomingAll().catch(() => {});
   primeSportLiveCaches().catch(() => {});
 
-  const wsMode = String(process.env.SPORTSAPI_WS_MODE ?? "v1").toLowerCase();
+  const wsMode = String(process.env.SPORTSAPI_WS_MODE ?? "hybrid").toLowerCase();
   const enableV2 = wsMode === "v2" || wsMode === "hybrid" || wsMode === "v1+v2" || wsMode === "v1v2";
-  const enableV1 = wsMode === "v1" || wsMode === "hybrid" || wsMode === "v1+v2" || wsMode === "v1v2";
+  const enableV1 = wsMode !== "none";
 
   if (enableV2) initSportWebSockets();
   if (enableV1) initV1SportWebSockets();
