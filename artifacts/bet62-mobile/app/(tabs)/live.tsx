@@ -103,29 +103,6 @@ function LiveMatchCard({ match }: { match: LiveMatch }) {
   const { addSelection, removeSelection, hasSelection } = useBetSlip();
   const [marketsOpen, setMarketsOpen] = useState(false);
 
-  const prevOddsRef = useRef<Record<string, number>>({});
-  const [oddsDir, setOddsDir] = useState<Record<string, "up" | "down">>({});
-  useEffect(() => {
-    const entries: Array<[string, number]> = [
-      ["home", match.odds.home], ["draw", match.odds.draw], ["away", match.odds.away],
-    ];
-    const dirs: Record<string, "up" | "down"> = {};
-    let changed = false;
-    for (const [k, v] of entries) {
-      const prev = prevOddsRef.current[k];
-      if (prev !== undefined && Math.abs(v - prev) >= 0.01) {
-        dirs[k] = v > prev ? "up" : "down";
-        changed = true;
-      }
-      prevOddsRef.current[k] = v;
-    }
-    if (changed) {
-      setOddsDir((d) => ({ ...d, ...dirs }));
-      const t = setTimeout(() => setOddsDir({}), 4000);
-      return () => clearTimeout(t);
-    }
-  }, [match.odds.home, match.odds.draw, match.odds.away]);
-
   const sportColor = SPORT_COLORS[match.sport] ?? colors.mutedForeground;
   const now = Date.now();
   const hasBlockingEvent = (() => {
@@ -201,10 +178,6 @@ function LiveMatchCard({ match }: { match: LiveMatch }) {
 
   const OddsButton = ({ mkt, lbl, val }: { mkt: string; lbl: string; val: number }) => {
     const sel = hasSelection(match.id, mkt);
-    const dir = mkt === "1x2-home" ? oddsDir["home"]
-      : mkt === "1x2-draw" ? oddsDir["draw"]
-      : mkt === "1x2-away" ? oddsDir["away"]
-      : undefined;
     return (
       <Pressable
         style={({ pressed }) => ({
@@ -212,24 +185,22 @@ function LiveMatchCard({ match }: { match: LiveMatch }) {
           alignItems: "center" as const,
           backgroundColor: suspended ? "#18181f" : sel ? colors.primary : "#1c1c26",
           borderWidth: 1,
-          borderColor: suspended ? "#2a2a35" : sel ? colors.primary : dir === "up" ? "#22c55e55" : dir === "down" ? "#ef444455" : "#2e2e3c",
+          borderColor: suspended ? "#2a2a35" : sel ? colors.primary : "#2e2e3c",
           opacity: suspended ? 0.5 : pressed ? 0.78 : 1,
         })}
         onPress={(e) => { e.stopPropagation?.(); handleOdds(mkt, lbl, val); }}
       >
         <Text style={{ fontSize: 10, fontFamily: "Inter_500Medium", color: sel ? "#fff" : "#9ca3af", marginBottom: 2 }}>{lbl}</Text>
-        {suspended
-          ? <Ionicons name="lock-closed" size={11} color="#6b7280" />
-          : (
-            <View style={{ flexDirection: "row", alignItems: "center", gap: 2 }}>
-              {dir === "up" && <Text style={{ fontSize: 10, fontFamily: "Inter_700Bold", color: "#22c55e", lineHeight: 14 }}>▲</Text>}
-              <Text style={{ fontSize: 14, fontFamily: "Inter_700Bold", color: dir === "up" ? "#22c55e" : dir === "down" ? "#f87171" : "#ffffff" }}>
-                {val.toFixed(2)}
-              </Text>
-              {dir === "down" && <Text style={{ fontSize: 10, fontFamily: "Inter_700Bold", color: "#f87171", lineHeight: 14 }}>▼</Text>}
-            </View>
-          )
-        }
+        <Text
+          style={{
+            fontSize: 14,
+            fontFamily: "Inter_700Bold",
+            color: suspended ? "#6b7280" : sel ? "#fff" : "#ffffff",
+            fontVariant: ["tabular-nums"],
+          }}
+        >
+          {suspended ? "—" : val.toFixed(2)}
+        </Text>
       </Pressable>
     );
   };
@@ -254,31 +225,51 @@ function LiveMatchCard({ match }: { match: LiveMatch }) {
     return "SUSPENSO";
   })();
 
-  const OddsRowContent = suspended ? (
-    <View style={{ borderRadius: 8, borderWidth: 1, backgroundColor: "#3b0000", borderColor: "#7f1d1d", paddingVertical: 14, alignItems: "center" as const }}>
-      <Text style={{ fontSize: 15, fontFamily: "Inter_700Bold", color: "#fca5a5", letterSpacing: 3, textTransform: "uppercase" as const }}>
-        {suspText}
-      </Text>
-    </View>
-  ) : isObviousLiveResult ? (
-    <Pressable
-      style={{ borderRadius: 8, borderWidth: 1, backgroundColor: "#2d1500", borderColor: "#92400e55", paddingVertical: 14, alignItems: "center" as const }}
-      onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setMarketsOpen(true); }}
-    >
-      <Text style={{ fontSize: 15, fontFamily: "Inter_700Bold", color: "#f59e0b", letterSpacing: 3, textTransform: "uppercase" as const }}>
-        APOSTA JÁ
-      </Text>
-    </Pressable>
-  ) : isTennis ? (
-    <View style={{ flexDirection: "row" as const, gap: 6 }}>
-      <OddsButton mkt="1x2-home" lbl={match.home.split(" ").pop() ?? match.home} val={match.odds.home} />
-      <OddsButton mkt="1x2-away" lbl={match.away.split(" ").pop() ?? match.away} val={match.odds.away} />
-    </View>
-  ) : (
-    <View style={{ flexDirection: "row" as const, gap: 6 }}>
-      <OddsButton mkt="1x2-home" lbl="Casa" val={match.odds.home} />
-      {hasDraw && <OddsButton mkt="1x2-draw" lbl="Emp." val={match.odds.draw} />}
-      <OddsButton mkt="1x2-away" lbl="Fora" val={match.odds.away} />
+  const statusOverlay = suspended ? suspText : isObviousLiveResult ? "APOSTA JÁ" : null;
+
+  const OddsRowContent = (
+    <View style={{ position: "relative" as const, minHeight: 42, justifyContent: "center" as const }}>
+      {isTennis ? (
+        <View style={{ flexDirection: "row" as const, gap: 6 }}>
+          <OddsButton mkt="1x2-home" lbl={match.home.split(" ").pop() ?? match.home} val={match.odds.home} />
+          <OddsButton mkt="1x2-away" lbl={match.away.split(" ").pop() ?? match.away} val={match.odds.away} />
+        </View>
+      ) : (
+        <View style={{ flexDirection: "row" as const, gap: 6 }}>
+          <OddsButton mkt="1x2-home" lbl="Casa" val={match.odds.home} />
+          {hasDraw && <OddsButton mkt="1x2-draw" lbl="Emp." val={match.odds.draw} />}
+          <OddsButton mkt="1x2-away" lbl="Fora" val={match.odds.away} />
+        </View>
+      )}
+      {statusOverlay && (
+        <Pressable
+          onPress={() => { if (isObviousLiveResult && !suspended) { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setMarketsOpen(true); } }}
+          style={{
+            position: "absolute",
+            left: 0,
+            right: 0,
+            top: 0,
+            bottom: 0,
+            alignItems: "center" as const,
+            justifyContent: "center" as const,
+          }}
+        >
+          <View
+            style={{
+              borderRadius: 999,
+              paddingHorizontal: 12,
+              paddingVertical: 6,
+              backgroundColor: suspended ? "#3b0000" : "#2d1500",
+              borderWidth: 1,
+              borderColor: suspended ? "#7f1d1d" : "#92400e55",
+            }}
+          >
+            <Text style={{ fontSize: 12, fontFamily: "Inter_800ExtraBold", color: suspended ? "#fca5a5" : "#f59e0b", letterSpacing: 2, textTransform: "uppercase" as const }}>
+              {statusOverlay}
+            </Text>
+          </View>
+        </Pressable>
+      )}
     </View>
   );
 

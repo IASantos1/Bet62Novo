@@ -114,11 +114,25 @@ export function useLiveMatches(): {
     if (fallbackTimerRef.current) { clearTimeout(fallbackTimerRef.current); fallbackTimerRef.current = null; }
   }
 
+  function mergeMatches(prev: LiveMatch[], next: LiveMatch[]): LiveMatch[] {
+    const map = new Map(next.map(m => [String(m.id), m] as const));
+    const out: LiveMatch[] = [];
+    for (const p of prev) {
+      const id = String(p.id);
+      const n = map.get(id);
+      if (!n) continue;
+      out.push({ ...(p as any), ...(n as any) });
+      map.delete(id);
+    }
+    for (const n of map.values()) out.push(n);
+    return out;
+  }
+
   function applyPending() {
     const data = pendingRef.current;
     if (!data || !mountedRef.current) return;
     pendingRef.current = null;
-    setMatches(data.matches);
+    setMatches(prev => mergeMatches(prev, data.matches));
     setLastUpdated(Date.now());
   }
 
