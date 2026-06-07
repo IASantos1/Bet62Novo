@@ -114,37 +114,6 @@ import { authMiddleware, type AuthRequest } from "../middlewares/auth";
 import { type Response } from "express";
 import { sql } from "drizzle-orm";
 
-// ─── DEPOSIT ────────────────────────────────────────────────────────────────
-router.post("/deposit", authMiddleware, async (req: AuthRequest, res: Response): Promise<void> => {
-  const { amount } = req.body as { amount?: number };
-  if (!amount || typeof amount !== "number" || amount < 10 || amount > 5000) {
-    res.status(400).json({ error: "Valor inválido. Mínimo €10, máximo €5000." });
-    return;
-  }
-  try {
-    const [user] = await db
-      .update(usersTable)
-      .set({ balance: sql`${usersTable.balance} + ${amount.toFixed(2)}` })
-      .where(eq(usersTable.id, req.user!.id))
-      .returning();
-
-    // Determine which promotions are triggered
-    const promotions: string[] = [];
-    const newBalance = parseFloat(user.balance);
-    const isFirstDeposit = newBalance - amount <= 1000; // started at 1000
-    if (isFirstDeposit && amount >= 20) promotions.push("freebets20");
-    if (isFirstDeposit && amount >= 100) promotions.push("bonus100");
-
-    res.json({
-      balance: user.balance,
-      promotions,
-    });
-  } catch (err) {
-    logger.error({ err }, "Deposit error");
-    res.status(500).json({ error: "Erro ao processar depósito" });
-  }
-});
-
 // ─── WEEKLY CASHBACK CHECK ───────────────────────────────────────────────────
 router.get("/cashback", authMiddleware, async (req: AuthRequest, res: Response): Promise<void> => {
   try {

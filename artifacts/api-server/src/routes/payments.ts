@@ -14,6 +14,9 @@ const CARD_KEY        = process.env.IFTHENPAY_CARD_KEY        || "";
 // Anti-tampering key: included in all callback/return URLs so only ifthenpay
 // can trigger them. Verified on every incoming callback/card-return request.
 const BACKOFFICE_KEY  = process.env.IFTHENPAY_BACKOFFICE_KEY  || "";
+if (process.env.NODE_ENV === "production" && !BACKOFFICE_KEY) {
+  throw new Error("[SECURITY] IFTHENPAY_BACKOFFICE_KEY environment variable is not set.");
+}
 
 function getBaseUrl(req: Request): string {
   const domains = process.env.REPLIT_DOMAINS;
