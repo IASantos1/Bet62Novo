@@ -523,6 +523,10 @@ const LEAGUE_FLAGS: Record<string, string> = {
   "La Liga": "🇪🇸", "Laliga": "🇪🇸", "Laliga2": "🇪🇸", "Segunda": "🇪🇸", "LaLiga Hypermotion": "🇪🇸", "Copa del Rey": "🇪🇸",
   "Premier League": "🏴󠁧󠁢󠁥󠁮󠁧󠁿", "EFL Championship": "🏴󠁧󠁢󠁥󠁮󠁧󠁿", "Championship": "🏴󠁧󠁢󠁥󠁮󠁧󠁿", "League One": "🏴󠁧󠁢󠁥󠁮󠁧󠁿", "FA Cup": "🏴󠁧󠁢󠁥󠁮󠁧󠁿",
   "Champions League": "⭐", "UEFA Champions League": "⭐", "Europa League": "🌟", "Conference League": "🟢",
+  "UEFA Nations League": "⭐", "UEFA European Championship": "⭐",
+  "FIFA World Cup": "🌍", "Copa América": "🌎", "Copa America": "🌎",
+  "CONCACAF Gold Cup": "🏆", "Africa Cup of Nations": "🏆", "AFC Asian Cup": "🏆",
+  "International Friendlies": "🤝", "International Friendly": "🤝", "Amistosos internacionais": "🤝",
   "Serie A": "🇮🇹", "Serie B": "🇮🇹", "Coppa Italia": "🇮🇹",
   "Bundesliga": "🇩🇪", "2. Bundesliga": "🇩🇪", "DFB-Pokal": "🇩🇪",
   "Ligue 1": "🇫🇷", "Ligue 2": "🇫🇷", "Coupe de France": "🇫🇷",
@@ -546,6 +550,26 @@ const LEAGUE_FLAGS: Record<string, string> = {
   "ATP 500": "🎾", "ATP 250": "🎾", "WTA 1000": "🎾", "WTA 250": "🎾", "Roland Garros": "🇫🇷",
   "NHL — Playoffs": "🏒", "KHL — Playoff": "🏒",
   "Volleyball Nations League": "🏐", "Superlega — Itália": "🏐", "Superliga — Rússia": "🏐", "Superliga — Brasil": "🏐",
+};
+
+const LEAGUE_LOGOS: Record<string, string> = {
+  "Champions League": "https://media.api-sports.io/football/leagues/2.png",
+  "UEFA Champions League": "https://media.api-sports.io/football/leagues/2.png",
+  "Europa League": "https://media.api-sports.io/football/leagues/3.png",
+  "UEFA Europa League": "https://media.api-sports.io/football/leagues/3.png",
+  "Conference League": "https://media.api-sports.io/football/leagues/848.png",
+  "UEFA Super Cup": "https://media.api-sports.io/football/leagues/531.png",
+  "UEFA Nations League": "https://media.api-sports.io/football/leagues/5.png",
+  "UEFA European Championship": "https://media.api-sports.io/football/leagues/4.png",
+  "FIFA World Cup": "https://media.api-sports.io/football/leagues/1.png",
+  "Copa América": "https://media.api-sports.io/football/leagues/9.png",
+  "Copa America": "https://media.api-sports.io/football/leagues/9.png",
+  "CONCACAF Gold Cup": "https://media.api-sports.io/football/leagues/22.png",
+  "Africa Cup of Nations": "https://media.api-sports.io/football/leagues/6.png",
+  "AFC Asian Cup": "https://media.api-sports.io/football/leagues/7.png",
+  "International Friendlies": "https://media.api-sports.io/football/leagues/10.png",
+  "International Friendly": "https://media.api-sports.io/football/leagues/10.png",
+  "Amistosos internacionais": "https://media.api-sports.io/football/leagues/10.png",
 };
 
 const TEAM_COUNTRY: Record<string, string> = {
@@ -909,11 +933,18 @@ function leagueMatchesFilter(matchLeague: string, filterLeague: string): boolean
   if (ml === fl) return true;
   if (ml.includes(fl)) return true;
   const mlClean = ml.replace(/^[^:]+:\s*/, "").trim();
-  return mlClean === fl || mlClean.includes(fl);
+  if (mlClean === fl || mlClean.includes(fl)) return true;
+  const flAlt = fl.replace(/^uefa\s+/, "").replace(/^fifa\s+/, "").trim();
+  if (!flAlt || flAlt === fl) return false;
+  if (ml === flAlt) return true;
+  if (ml.includes(flAlt)) return true;
+  return mlClean === flAlt || mlClean.includes(flAlt);
 }
 
 const FOOTBALL_COUNTRIES: { name: string; flag: string; leagues: string[] }[] = [
   { name: "Europa", flag: "⭐", leagues: ["Champions League", "Europa League", "Conference League", "UEFA Super Cup"] },
+  { name: "FIFA", flag: "🌍", leagues: ["FIFA World Cup", "Copa América", "CONCACAF Gold Cup", "Africa Cup of Nations", "AFC Asian Cup", "International Friendlies"] },
+  { name: "UEFA", flag: "⭐", leagues: ["UEFA Champions League", "UEFA Europa League", "UEFA European Championship", "UEFA Nations League"] },
   { name: "Inglaterra", flag: "🏴󠁧󠁢󠁥󠁮󠁧󠁿", leagues: ["Premier League", "EFL Championship", "League One", "League Two", "FA Cup", "EFL Cup", "Community Shield"] },
   { name: "Espanha", flag: "🇪🇸", leagues: ["La Liga", "LaLiga Hypermotion", "Copa del Rey", "Supercopa de España"] },
   { name: "Alemanha", flag: "🇩🇪", leagues: ["Bundesliga", "2. Bundesliga", "3. Liga", "DFB-Pokal", "DFL-Supercup"] },
@@ -1127,13 +1158,18 @@ function SidebarTreeContent({
                   <div className="ml-2 mt-0.5 space-y-0.5 border-l border-zinc-800 pl-2">
                     {leagues.map(league => {
                       const active = selectedLeague === league;
+                      const logo = LEAGUE_LOGOS[league];
                       return (
                         <button
                           key={league}
                           onClick={() => { setSelectedLeague?.(active ? null : league); setSelectedCountry?.(null); setSelectedSport("football"); setActiveTab("sports"); onClose?.(); }}
                           className={`flex items-center gap-1.5 w-full px-2 py-1 rounded-md text-[11px] transition-colors ${active ? "bg-red-600/20 text-red-400 border border-red-500/30" : "text-zinc-500 hover:text-white hover:bg-zinc-900"}`}
                         >
-                          <span className="text-xs leading-none shrink-0">{LEAGUE_FLAGS[league] ?? "⚽"}</span>
+                          {logo ? (
+                            <img src={logo} alt="" className="w-4 h-4 shrink-0 object-contain" loading="lazy" decoding="async" />
+                          ) : (
+                            <span className="text-xs leading-none shrink-0">{LEAGUE_FLAGS[league] ?? "⚽"}</span>
+                          )}
                           <span className="truncate">{league}</span>
                         </button>
                       );
@@ -1161,13 +1197,18 @@ function SidebarTreeContent({
             <div className="ml-2 mt-0.5 space-y-0.5 border-l border-zinc-800 pl-2">
               {leagues.map(league => {
                 const active = selectedLeague === league;
+                const logo = LEAGUE_LOGOS[league];
                 return (
                   <button
                     key={league}
                     onClick={() => { setSelectedLeague?.(active ? null : league); setSelectedSport(key); setActiveTab("sports"); onClose?.(); }}
                     className={`flex items-center gap-1.5 w-full px-2 py-1.5 rounded-md text-[12px] transition-colors ${active ? "bg-red-600/20 text-red-400 border border-red-500/30" : "text-zinc-400 hover:text-white hover:bg-zinc-900"}`}
                   >
-                    <span className="text-xs leading-none shrink-0">{LEAGUE_FLAGS[league] ?? "🏆"}</span>
+                    {logo ? (
+                      <img src={logo} alt="" className="w-4 h-4 shrink-0 object-contain" loading="lazy" decoding="async" />
+                    ) : (
+                      <span className="text-xs leading-none shrink-0">{LEAGUE_FLAGS[league] ?? "🏆"}</span>
+                    )}
                     <span className="truncate">{league}</span>
                   </button>
                 );
