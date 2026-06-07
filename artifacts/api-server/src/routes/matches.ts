@@ -2003,10 +2003,52 @@ type SAPIV2TournObj  = {
   category?: { name?: string; slug?: string; id?: number; country?: { name?: string; alpha2?: string } };
 };
 
-// Slugs for pre-match upcoming filter: only top-tier circuits.
-const TENNIS_UPCOMING_SLUGS = new Set(["atp", "wta", "wta-125", "challenger"]);
-// Slugs for live filter: also include ITF men/women singles (other bookmakers cover these).
-const TENNIS_LIVE_SLUGS = new Set(["atp", "wta", "wta-125", "challenger", "itf-men", "itf-women"]);
+function tennisTierRank(name: string): number {
+  const n = String(name ?? "")
+    .toLowerCase()
+    .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+    .trim();
+  if (!n) return 999;
+
+  if (
+    n.includes("wimbledon") ||
+    n.includes("roland garros") ||
+    n.includes("french open") ||
+    n.includes("australian open") ||
+    n.includes("us open") ||
+    n.includes("grand slam")
+  ) return 1;
+
+  if (
+    n.includes("atp finals") ||
+    n.includes("nitto") ||
+    n.includes("wta finals")
+  ) return 2;
+
+  if (
+    n.includes("masters 1000") ||
+    n.includes("atp masters") ||
+    n.includes("wta 1000") ||
+    /\b(m1000)\b/.test(n)
+  ) return 3;
+
+  if (n.includes("atp 500") || n.includes("wta 500")) return 4;
+  if (n.includes("atp 250") || n.includes("wta 250")) return 5;
+
+  if (
+    n.includes("challenger") ||
+    n.includes("wta 125") ||
+    n.includes("wta-125")
+  ) return 6;
+
+  if (
+    n.includes("itf") ||
+    n.includes("world tennis tour") ||
+    /\b(w|m)\d{2,3}\b/.test(n)
+  ) return 7;
+
+  return 999;
+}
 
 /** Tournament name patterns that are always excluded (doubles, wheelchair, juniors, etc.) */
 function isTennisExcludedName(name: string): boolean {
@@ -2029,8 +2071,8 @@ function isTennisExcludedName(name: string): boolean {
 function isTennisElite(ev: SAPIV2Event): boolean {
   const t = ev.tournament;
   if (typeof t !== "object") return false;
-  const slug = t.category?.slug?.toLowerCase() ?? "";
-  if (!TENNIS_LIVE_SLUGS.has(slug)) return false;
+  const tier = tennisTierRank(t.name ?? t.category?.name ?? "");
+  if (tier === 999) return false;
   if (isTennisExcludedName(t.name ?? "")) return false;
   // Detect doubles by player name: any "/" in the name means "Player A / Player B" (doubles pair)
   const homeName = typeof ev.homeTeam === "object" ? (ev.homeTeam.name ?? "") : (ev.homeTeam ?? "");
@@ -2043,8 +2085,8 @@ function isTennisElite(ev: SAPIV2Event): boolean {
 function isTennisEliteUpcoming(ev: SAPIV2Event): boolean {
   const t = ev.tournament;
   if (typeof t !== "object") return false;
-  const slug = t.category?.slug?.toLowerCase() ?? "";
-  if (!TENNIS_UPCOMING_SLUGS.has(slug)) return false;
+  const tier = tennisTierRank(t.name ?? t.category?.name ?? "");
+  if (tier === 999) return false;
   return !isTennisExcludedName(t.name ?? "");
 }
 type SAPIV2TeamObj   = { id?: number; name: string };
@@ -8263,7 +8305,8 @@ router.get("/live-stream", (req, res) => {
 async function buildTennisLiveV1(): Promise<LiveMatchState[]> {
   try {
     const games = await getTennisLiveV1();
-    const result: LiveMatchState[] = [];
+    const primary: Array<{ r: number; m: LiveMatchState }> = [];
+    const itf: Array<{ r: number; m: LiveMatchState }> = [];
     for (const g of games) {
       if (g.statusGroup === 3 || g.statusGroup === 2) continue;
       const home = g.homeCompetitor?.name?.trim() ?? "";
@@ -8272,6 +8315,8 @@ async function buildTennisLiveV1(): Promise<LiveMatchState[]> {
       if (home.includes("/") || away.includes("/")) continue;
       const compName = g.competitionDisplayName ?? "";
       if (/double|mixed/i.test(compName)) continue;
+      const tier = tennisTierRank(compName);
+      if (tier === 999) continue;
       let homeScore = Math.max(0, g.homeCompetitor?.score ?? 0);
       let awayScore = Math.max(0, g.awayCompetitor?.score ?? 0);
       const ws = tennisV1WsScore.get(String(g.id));
@@ -8289,7 +8334,7 @@ async function buildTennisLiveV1(): Promise<LiveMatchState[]> {
           : { home: Math.min(50, +(odds.home * (1 + factor)).toFixed(2)), draw: 0, away: Math.max(1.01, +(odds.away * (1 - factor)).toFixed(2)) };
       }
       const setNum = homeScore + awayScore + 1;
-      result.push({
+      const item: LiveMatchState = {
         id: `tennis-v2-${g.id}`,
         home, away,
         league: compName || "Tennis",
@@ -8303,9 +8348,18 @@ async function buildTennisLiveV1(): Promise<LiveMatchState[]> {
         markets: makeAdvancedMarketsFromTeams(home, away),
         events: [],
         _liveExtra: { sets: [[homeScore, awayScore]], currentPoints: ["0", "0"] },
-      });
+      };
+      if (tier === 7) itf.push({ r: tier, m: item });
+      else primary.push({ r: tier, m: item });
     }
-    return result;
+    primary.sort((a, b) => a.r - b.r || a.m.league.localeCompare(b.m.league) || a.m.home.localeCompare(b.m.home));
+    itf.sort((a, b) => a.m.league.localeCompare(b.m.league) || a.m.home.localeCompare(b.m.home));
+    const capPrimary = 30;
+    const capItf = primary.length > 0 ? 8 : 30;
+    return [
+      ...primary.slice(0, capPrimary).map(x => x.m),
+      ...itf.slice(0, capItf).map(x => x.m),
+    ];
   } catch {
     return [];
   }
@@ -8343,7 +8397,8 @@ async function buildTennisUpcoming(): Promise<UpcomingMatch[]> {
   try {
     const now = Date.now();
     const games = await getTennisAllV1();
-    const results: UpcomingMatch[] = [];
+    const primary: Array<{ r: number; m: UpcomingMatch }> = [];
+    const itf: Array<{ r: number; m: UpcomingMatch }> = [];
     const seen = new Set<string>();
 
     for (const g of games) {
@@ -8355,6 +8410,8 @@ async function buildTennisUpcoming(): Promise<UpcomingMatch[]> {
       if (home.includes("/") || away.includes("/")) continue;
       const compName = g.competitionDisplayName ?? "";
       if (/double|mixed/i.test(compName)) continue;
+      const tier = tennisTierRank(compName);
+      if (tier === 999) continue;
 
       const startMs = new Date(g.startTime).getTime();
       if (startMs < now - 90 * 60 * 1000) continue; // 90-min grace
@@ -8372,7 +8429,7 @@ async function buildTennisUpcoming(): Promise<UpcomingMatch[]> {
       const [compH, compA] = probsToDecimalOdds([pHome, 1 - pHome], 1.06);
       const tennisExtras = computeTennisExtras(pHome);
 
-      results.push({
+      const item: UpcomingMatch = {
         id: `tennis-v2-${g.id}`,
         home,
         away,
@@ -8392,16 +8449,26 @@ async function buildTennisUpcoming(): Promise<UpcomingMatch[]> {
           firstGoal: { home: 0, noGoal: 0, away: 0 },
           tennisExtra: tennisExtras,
         } as unknown as AdvancedMarkets,
-      });
+      };
+      if (tier === 7) itf.push({ r: tier, m: item });
+      else primary.push({ r: tier, m: item });
 
-      if (results.length >= 60) break;
+      if (primary.length >= 60) break;
     }
 
-    return results.sort((a, b) => {
+    const byTime = (a: UpcomingMatch, b: UpcomingMatch) => {
       const ta = new Date(`${a.date}T${a.time}`).getTime();
       const tb = new Date(`${b.date}T${b.time}`).getTime();
       return ta - tb;
-    });
+    };
+    primary.sort((a, b) => a.r - b.r || byTime(a.m, b.m));
+    itf.sort((a, b) => byTime(a.m, b.m));
+    const capPrimary = 60;
+    const capItf = primary.length > 0 ? 12 : 60;
+    return [
+      ...primary.slice(0, capPrimary).map(x => x.m),
+      ...itf.slice(0, capItf).map(x => x.m),
+    ];
   } catch {
     return [];
   }
