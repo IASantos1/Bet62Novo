@@ -189,6 +189,7 @@ export type LiveMatchState = {
     clockStr?: string;                   // basketball/hockey: "06:44"
     sets?: Array<[number, number]>;      // tennis: [[6,3],[4,2]] last entry is in-progress
     currentPoints?: [number | string, number | string]; // tennis: [30, 15] or ["D","D"] or ["AD",40]
+    serving?: [boolean, boolean];
     currentPts?: [number, number];       // volleyball: current set points [18, 16]
     vollSets?: Array<[number, number]>;  // volleyball: completed set scores [[25,18],[22,25]]
     tennisStats?: [TennisStatData, TennisStatData]; // home / away match stats
@@ -321,12 +322,34 @@ const INTL_TOURNAMENTS = [
   "europa league",
   "conference league",
   "uefa super cup",
+  "uefa european championship",
+  "european championship",
   "nations league",
+  "fifa world cup",
   "copa libertadores",
   "copa sudamericana",
+  "concacaf gold cup",
+  "gold cup",
+  "africa cup of nations",
+  "african cup of nations",
+  "afc asian cup",
+  "asian cup",
   "copa america",
   "world cup",
+  "international friendly",
+  "international friendlies",
+  "amistosos internacionais",
 ];
+
+function isIntlTournamentName(leagueName: string): boolean {
+  const base = String(leagueName ?? "")
+    .toLowerCase()
+    .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+    .split(" - ")[0]
+    .trim();
+  if (!base) return false;
+  return INTL_TOURNAMENTS.some((p) => base.includes(p));
+}
 
 // DOMESTIC_PRIORITY: [pattern, priority]
 // priority < 100 → shown; ≥ 100 → filtered out
@@ -632,8 +655,7 @@ function footballLeagueAllowedStrict(countryRaw: string, leagueDisplayName: stri
   const countryKey = normalizeCountryKey(countryRaw);
   const key = `${countryKey}: ${leagueDisplayName}`.toLowerCase();
   const prio = leaguePriority(key, countryKey);
-  const isIntl = !ALL_DOMESTIC_COUNTRIES.has(countryKey) && prio < 100;
-  if (isIntl) return true;
+  if (prio < 100 && isIntlTournamentName(leagueDisplayName)) return true;
   if (!LIVE_FOOTBALL_COUNTRY_ALLOW.has(countryKey)) return false;
   if (LIVE_FOOTBALL_FIRST_DIV_ONLY.has(countryKey)) {
     const allow = LIVE_FOOTBALL_FIRST_DIV_PATTERNS[countryKey] ?? [];
@@ -643,8 +665,11 @@ function footballLeagueAllowedStrict(countryRaw: string, leagueDisplayName: stri
 }
 
 function leaguePriority(name: string, country?: string): number {
-  const lower = name.toLowerCase();
-  const lowerCountry = (country ?? "").toLowerCase();
+  const lowerRaw = name.toLowerCase();
+  const lower = lowerRaw.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  const lowerCountry = String(country ?? "")
+    .toLowerCase()
+    .normalize("NFD").replace(/[\u0300-\u036f]/g, "");
 
   // ── Block youth / women / reserve / amateur / futsal leagues universally ──────
   // These keywords in the league name ALWAYS indicate a non-main competition.
@@ -661,16 +686,14 @@ function leaguePriority(name: string, country?: string): number {
   // Main part of league name (before first " - "), lowercased
   const mainPart = lower.split(" - ")[0];
 
-  // International tournaments: only when the country is not a known domestic one
-  if (!ALL_DOMESTIC_COUNTRIES.has(lowerCountry)) {
-    for (let i = 0; i < INTL_TOURNAMENTS.length; i++) {
-      if (mainPart.includes(INTL_TOURNAMENTS[i])) return i;
-    }
+  for (let i = 0; i < INTL_TOURNAMENTS.length; i++) {
+    if (mainPart.includes(INTL_TOURNAMENTS[i])) return i;
   }
 
   // Domestic leagues — first match wins (order matters for specificity)
   for (const [pattern, rank] of DOMESTIC_PRIORITY) {
-    if (mainPart.includes(pattern)) return rank;
+    const p = pattern.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+    if (mainPart.includes(p)) return rank;
   }
 
   // Unknown league → filter out
@@ -5745,6 +5768,7 @@ function buildTennisLiveMatches(
       if (numDoneSets >= 2) settledSusp["set2"]     = SETTLED;
 
       const currentPoints: [number | string, number | string] = [hPt, aPt];
+      const serving: [boolean, boolean] = [p0.serve === "True", p1.serve === "True"];
       const suspPts: [number | string, number | string] = [
         hPt === "D" ? "40" : hPt,
         aPt === "D" ? "40" : aPt,
@@ -5829,7 +5853,7 @@ function buildTennisLiveMatches(
         marketSuspension: marketSuspension && Object.keys(marketSuspension).length > 0 ? marketSuspension : undefined,
         _suspensionReason: suspensionReason,
         _oddsUpdatedAt:    now,
-        _liveExtra:        { sets, currentPoints, tennisStats: statsMap.get(m.id) },
+        _liveExtra:        { sets, currentPoints, serving, tennisStats: statsMap.get(m.id) },
       });
     }
   }
@@ -7860,7 +7884,18 @@ function buildTennisLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
         // that have permanently left the feed.  State is retained for the full 45 s so
         // we can resume accurately if the match genuinely returns.
         const cached = liveMatchState.get(id);
-        if (cached && (now - firstMissing) < 8_000) result.push(cached);
+        if (cached) {
+          const sLow = String(cached.status ?? "").toLowerCase();
+          const finished =
+            (cached.homeScore ?? 0) >= 2 || (cached.awayScore ?? 0) >= 2 ||
+            sLow.includes("ended") || sLow.includes("finished") || sLow.includes("complete");
+          if (finished) {
+            liveMatchState.delete(id);
+            _tennisMissingFrom.delete(id);
+          } else if ((now - firstMissing) < 8_000) {
+            result.push(cached);
+          }
+        }
       }
     } else {
       _tennisMissingFrom.delete(id); // back in feed — reset grace timer

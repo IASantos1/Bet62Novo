@@ -25,6 +25,7 @@ export interface LiveMatchMarkets {
   tennisExtra?: {
     firstSet: { home: number; away: number };
     set2: { home: number; away: number };
+    set3?: { home: number; away: number };
     totalSets?: { over15: number; under15: number };
     currentSetNum: number;
     setExactScore?: Record<string, number>;
@@ -80,6 +81,7 @@ export interface LiveMatch {
   _liveExtra?: {
     sets?: Array<[number, number]>;
     currentPoints?: [number | string, number | string];
+    serving?: [boolean, boolean];
     periods?: Array<[number, number]>;
     quarters?: Array<[number, number]>;
     innings?: Array<[number, number]>;

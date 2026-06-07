@@ -44,10 +44,11 @@ const SPORT_ICONS: Record<string, MCIconName> = {
 };
 
 function TennisScoreRow({
-  sets, currentPoints, home, away, colors,
+  sets, currentPoints, serving, home, away, colors,
 }: {
   sets: Array<[number, number]>;
   currentPoints?: [number | string, number | string];
+  serving?: [boolean, boolean];
   home: string; away: string;
   colors: ReturnType<typeof useColors>;
 }) {
@@ -59,9 +60,10 @@ function TennisScoreRow({
       </View>
     );
   }
-  function PtCell({ value }: { value: number | string }) {
+  function PtCell({ value, isServing }: { value: number | string; isServing?: boolean }) {
     return (
-      <View style={{ width: 26, height: 20, borderRadius: 4, alignItems: "center", justifyContent: "center", backgroundColor: "#f59e0b15", borderWidth: 1, borderColor: "#f59e0b40" }}>
+      <View style={{ width: 32, height: 20, borderRadius: 4, flexDirection: "row", gap: 2, alignItems: "center", justifyContent: "center", backgroundColor: "#f59e0b15", borderWidth: 1, borderColor: "#f59e0b40" }}>
+        {isServing ? <Text style={{ fontSize: 9, fontFamily: "Inter_700Bold", color: "#f59e0b", lineHeight: 10 }}>🎾</Text> : null}
         <Text style={{ fontSize: 10, fontFamily: "Inter_700Bold", color: "#f59e0b" }}>{String(value)}</Text>
       </View>
     );
@@ -75,11 +77,11 @@ function TennisScoreRow({
       <View style={{ gap: 5 }}>
         <View style={{ flexDirection: "row", gap: 3 }}>
           {sets.map((s, i) => <SetCell key={i} value={s[0]} isCurrent={i === currentIdx} />)}
-          {currentPoints != null && <PtCell value={currentPoints[0]} />}
+          {currentPoints != null && <PtCell value={currentPoints[0]} isServing={serving?.[0]} />}
         </View>
         <View style={{ flexDirection: "row", gap: 3 }}>
           {sets.map((s, i) => <SetCell key={i} value={s[1]} isCurrent={i === currentIdx} />)}
-          {currentPoints != null && <PtCell value={currentPoints[1]} />}
+          {currentPoints != null && <PtCell value={currentPoints[1]} isServing={serving?.[1]} />}
         </View>
       </View>
     </View>
@@ -117,6 +119,7 @@ function LiveMatchCard({ match }: { match: LiveMatch }) {
   const suspended = anySusp || hasBlockingEvent;
   const sets = match._liveExtra?.sets;
   const currentPoints = match._liveExtra?.currentPoints;
+  const serving = match._liveExtra?.serving;
   const periods = match._liveExtra?.periods;
   const quarters = match._liveExtra?.quarters;
   const innings = match._liveExtra?.innings;
@@ -313,7 +316,7 @@ function LiveMatchCard({ match }: { match: LiveMatch }) {
               </View>
               <View style={{ position: "absolute" as const, bottom: 0, left: 0, right: 0, backgroundColor: "#000000aa", paddingHorizontal: 12, paddingTop: 20, paddingBottom: 10 }}>
                 {isTennis && sets && sets.length > 0 ? (
-                  <TennisScoreRow sets={sets} currentPoints={currentPoints} home={match.home} away={match.away} colors={colors} />
+                  <TennisScoreRow sets={sets} currentPoints={currentPoints} serving={serving} home={match.home} away={match.away} colors={colors} />
                 ) : (
                   <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
                     <View style={{ flex: 1, flexDirection: "row", alignItems: "center", gap: 6, minWidth: 0 }}>
@@ -355,7 +358,7 @@ function LiveMatchCard({ match }: { match: LiveMatch }) {
               </View>
               {isTennis && sets && sets.length > 0 ? (
                 <View style={{ marginBottom: 10 }}>
-                  <TennisScoreRow sets={sets} currentPoints={currentPoints} home={match.home} away={match.away} colors={colors} />
+                  <TennisScoreRow sets={sets} currentPoints={currentPoints} serving={serving} home={match.home} away={match.away} colors={colors} />
                 </View>
               ) : (
                 <View style={{ flexDirection: "row", alignItems: "center", marginBottom: 10 }}>
