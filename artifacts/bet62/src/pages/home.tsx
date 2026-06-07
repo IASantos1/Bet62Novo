@@ -214,8 +214,6 @@ const TEAM_BANNERS: Record<string, string> = {
   "Deportivo Alaves": "/banners/file_1778704789962_1778715064131.jpeg",
   "Alavés": "/banners/file_1778704789962_1778715064131.jpeg",
   "Alaves": "/banners/file_1778704789962_1778715064131.jpeg",
-  "Las Palmas": "/banners/file_1778704794042_1778715064131.jpeg",
-  "UD Las Palmas": "/banners/file_1778704794042_1778715064131.jpeg",
   "Espanyol": "/banners/file_1778704805773_1778715064131.jpeg",
   "RCD Espanyol": "/banners/file_1778704805773_1778715064131.jpeg",
   "Valladolid": "/banners/file_1778704817279_1778715064131.jpeg",
