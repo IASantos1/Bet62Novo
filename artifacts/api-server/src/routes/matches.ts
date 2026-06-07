@@ -320,6 +320,7 @@ const INTL_TOURNAMENTS = [
   "champions league",
   "europa league",
   "conference league",
+  "uefa super cup",
   "nations league",
   "copa libertadores",
   "copa sudamericana",
@@ -545,6 +546,101 @@ const ALL_DOMESTIC_COUNTRIES = new Set([
   // Asia / Middle East
   "japan", "south korea", "korea", "saudi arabia", "thailand", "india",
 ]);
+
+function normalizeCountryKey(country?: string): string {
+  const raw = (country ?? "")
+    .toLowerCase()
+    .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+    .trim();
+  if (!raw) return "";
+  if (raw === "us" || raw === "usa" || raw === "united states" || raw.includes("united states")) return "usa";
+  if (raw === "ru" || raw === "russian federation") return "russia";
+  if (raw === "ua") return "ukraine";
+  if (raw === "gb" || raw === "uk" || raw === "united kingdom") return "england";
+  if (raw === "pt") return "portugal";
+  if (raw === "es") return "spain";
+  if (raw === "de") return "germany";
+  if (raw === "it") return "italy";
+  if (raw === "fr") return "france";
+  if (raw === "nl") return "netherlands";
+  if (raw === "be") return "belgium";
+  if (raw === "tr") return "turkey";
+  if (raw === "gr") return "greece";
+  if (raw === "at") return "austria";
+  if (raw === "ch") return "switzerland";
+  if (raw === "dk") return "denmark";
+  if (raw === "no") return "norway";
+  if (raw === "se") return "sweden";
+  if (raw === "hr") return "croatia";
+  if (raw === "rs") return "serbia";
+  if (raw === "pl") return "poland";
+  if (raw === "cz" || raw === "czech republic" || raw.includes("czech")) return "czechia";
+  if (raw === "hu") return "hungary";
+  if (raw === "ro") return "romania";
+  if (raw === "bg") return "bulgaria";
+  if (raw === "il" || raw === "israel") return "israel";
+  if (raw === "br") return "brazil";
+  if (raw === "ar") return "argentina";
+  if (raw === "mx") return "mexico";
+  if (raw === "cl") return "chile";
+  if (raw === "co") return "colombia";
+  if (raw === "sa") return "saudi arabia";
+  if (raw === "jp") return "japan";
+  if (raw === "kr" || raw === "korea republic" || raw === "korea") return "south korea";
+  if (raw === "th") return "thailand";
+  if (raw === "in") return "india";
+  return raw;
+}
+
+const LIVE_FOOTBALL_COUNTRY_ALLOW = new Set([
+  "england", "spain", "germany", "italy", "france", "portugal", "netherlands", "belgium", "turkey",
+  "greece", "austria", "scotland", "switzerland", "denmark", "norway", "sweden", "croatia", "serbia",
+  "poland", "czechia", "russia", "ukraine", "hungary", "romania", "bulgaria", "israel",
+  "brazil", "argentina", "mexico", "chile", "colombia", "usa", "saudi arabia", "japan", "south korea",
+  "thailand", "india",
+]);
+
+const LIVE_FOOTBALL_FIRST_DIV_ONLY = new Set([
+  "india", "thailand", "south korea", "japan", "saudi arabia", "colombia", "chile", "usa", "mexico",
+]);
+
+const LIVE_FOOTBALL_FIRST_DIV_PATTERNS: Record<string, string[]> = {
+  india: ["india: indian super league", "india: isl"],
+  thailand: ["thailand: thai league 1", "thailand: thai league"],
+  "south korea": ["south korea: k league 1", "korea: k league 1"],
+  japan: ["japan: j1 league", "japan: j.league"],
+  "saudi arabia": ["saudi arabia: saudi pro league", "saudi arabia: pro league"],
+  colombia: ["colombia: categoria primera a", "colombia: categoría primera a", "colombia: primera a"],
+  chile: ["chile: primera division", "chile: primera división"],
+  usa: ["usa: mls", "usa: major league soccer"],
+  mexico: ["mexico: liga mx"],
+};
+
+function isLeagueUniversallyBlocked(name: string): boolean {
+  const lower = name.toLowerCase();
+  if (/\bu(1[0-9]|2[0-3])\b/.test(lower)) return true;
+  if (/\b(under[ -]?\d{2})\b/.test(lower)) return true;
+  if (/\b(women|woman|feminine|femenin[ao]|feminino|feminina|ladies|dames|femmes)\b/.test(lower)) return true;
+  if (/\b(reserv[ae]s?|b-team|youth|juniores?|juvenil|amateur|futsal|beach|indoor|sala)\b/.test(lower)) return true;
+  if (lower.includes("next pro")) return true;
+  if (lower.includes("premier league cup")) return true;
+  if (lower.includes("league cup") && lower.includes("play offs") && !lower.includes("carabao") && !lower.includes("efl")) return true;
+  return false;
+}
+
+function footballLeagueAllowedStrict(countryRaw: string, leagueDisplayName: string): boolean {
+  const countryKey = normalizeCountryKey(countryRaw);
+  const key = `${countryKey}: ${leagueDisplayName}`.toLowerCase();
+  const prio = leaguePriority(key, countryKey);
+  const isIntl = !ALL_DOMESTIC_COUNTRIES.has(countryKey) && prio < 100;
+  if (isIntl) return true;
+  if (!LIVE_FOOTBALL_COUNTRY_ALLOW.has(countryKey)) return false;
+  if (LIVE_FOOTBALL_FIRST_DIV_ONLY.has(countryKey)) {
+    const allow = LIVE_FOOTBALL_FIRST_DIV_PATTERNS[countryKey] ?? [];
+    return allow.some((p) => key.includes(p));
+  }
+  return prio < 100;
+}
 
 function leaguePriority(name: string, country?: string): number {
   const lower = name.toLowerCase();
@@ -6412,20 +6508,26 @@ async function buildLiveMatches(): Promise<LiveMatchState[]> {
 async function buildUpcomingMatches(): Promise<UpcomingMatch[]> {
   const events = await getUpcomingEventsV2("football", 3);
   const seen = new Set<string>();
-  const filtered: SAPIV2Event[] = [];
+  const primary: SAPIV2Event[] = [];
+  const fallback: SAPIV2Event[] = [];
 
   for (const ev of events) {
     const home = v2TeamName(ev.homeTeam);
     const away = v2TeamName(ev.awayTeam);
     if (home === "Unknown" || away === "Unknown") continue;
-    const leagueName = normalizeLeagueName(v2TournName(ev.tournament), "");
-    if (isBlockedLeague(leagueName)) continue;
+    const countryRaw = v2TournCountry(ev);
+    const countryKey = normalizeCountryKey(countryRaw);
+    const leagueRaw = countryKey ? `${countryKey}: ${v2TournName(ev.tournament)}` : v2TournName(ev.tournament);
+    const leagueName = normalizeLeagueName(leagueRaw, countryKey);
+    if (isBlockedLeague(`${leagueName} ${home} ${away}`)) continue;
     const key = `${home}|${away}`;
     if (seen.has(key)) continue;
     seen.add(key);
-    filtered.push(ev);
-    if (filtered.length >= 80) break;
+    if (footballLeagueAllowedStrict(countryRaw, leagueName)) primary.push(ev);
+    else if (!isLeagueUniversallyBlocked(`${leagueName} ${home} ${away}`)) fallback.push(ev);
+    if (primary.length >= 80) break;
   }
+  const filtered = (primary.length > 0 ? primary : fallback).slice(0, primary.length > 0 ? 80 : 3);
 
   const oddsResults: Array<V2PreMatchOdds | null> = new Array(filtered.length).fill(null);
   const maxOddsLookups = Math.min(filtered.length, 30);
@@ -6441,7 +6543,10 @@ async function buildUpcomingMatches(): Promise<UpcomingMatch[]> {
     const ev = filtered[i]!;
     const home = v2TeamName(ev.homeTeam);
     const away = v2TeamName(ev.awayTeam);
-    const leagueName = normalizeLeagueName(v2TournName(ev.tournament), "");
+    const countryRaw = v2TournCountry(ev);
+    const countryKey = normalizeCountryKey(countryRaw);
+    const leagueRaw = countryKey ? `${countryKey}: ${v2TournName(ev.tournament)}` : v2TournName(ev.tournament);
+    const leagueName = normalizeLeagueName(leagueRaw, countryKey);
     const { date, time } = v2EventDateTime(ev);
     const realOdds = oddsResults[i] ?? null;
     const isWomens = isWomensLeague(v2TournName(ev.tournament));
@@ -6466,7 +6571,7 @@ async function buildUpcomingMatches(): Promise<UpcomingMatch[]> {
       home,
       away,
       league: leagueName,
-      country: v2TournCountry(ev),
+      country: countryRaw,
       time,
       date,
       sport: "football",
@@ -6658,15 +6763,43 @@ async function buildFootballLiveV2(events: SAPIV2Event[]): Promise<LiveMatchStat
     await Promise.all(workers);
   };
 
-  const firstSeenMatchIds = Array.from(new Set(events
-    .filter(ev => {
-      const statusStr = v2StatusStr(ev.status);
-      if (FOOTBALL_V2_FINISHED.has(statusStr)) return false;
-      if (!FOOTBALL_V2_LIVE.has(statusStr)) return false;
-      const evAgeSeconds = ev.startTimestamp ? Date.now() / 1000 - ev.startTimestamp : 0;
-      if (evAgeSeconds > 2.5 * 3600) return false;
-      return !liveMatchState.has(`football-v2-${ev.id}`);
-    })
+  const metaById = new Map<number, { countryRaw: string; countryKey: string; leagueName: string; prio: number }>();
+  const primary: Array<{ ev: SAPIV2Event; prio: number }> = [];
+  const fallback: Array<{ ev: SAPIV2Event; prio: number }> = [];
+
+  for (const ev of events) {
+    const statusStr = v2StatusStr(ev.status);
+    if (FOOTBALL_V2_FINISHED.has(statusStr)) continue;
+    if (!FOOTBALL_V2_LIVE.has(statusStr)) continue;
+    const evAgeSeconds = ev.startTimestamp ? Date.now() / 1000 - ev.startTimestamp : 0;
+    if (evAgeSeconds > 2.5 * 3600) continue;
+    const homeTeam = v2TeamName(ev.homeTeam);
+    const awayTeam = v2TeamName(ev.awayTeam);
+    if (homeTeam === "Unknown" || awayTeam === "Unknown") continue;
+
+    const countryRaw = v2TournCountry(ev);
+    const countryKey = normalizeCountryKey(countryRaw);
+    const leagueRaw = countryKey ? `${countryKey}: ${v2TournName(ev.tournament)}` : v2TournName(ev.tournament);
+    const leagueName = normalizeLeagueName(leagueRaw, countryKey);
+    if (isBlockedLeague(`${leagueName} ${homeTeam} ${awayTeam}`)) continue;
+
+    const key = `${countryKey}: ${leagueName}`.toLowerCase();
+    const prio = leaguePriority(key, countryKey);
+    metaById.set(ev.id, { countryRaw, countryKey, leagueName, prio });
+
+    if (footballLeagueAllowedStrict(countryRaw, leagueName)) primary.push({ ev, prio });
+    else if (!isLeagueUniversallyBlocked(`${leagueName} ${homeTeam} ${awayTeam}`)) fallback.push({ ev, prio: prio === 999 ? 500 : prio });
+  }
+
+  primary.sort((a, b) => a.prio - b.prio);
+  fallback.sort((a, b) => a.prio - b.prio);
+
+  const chosen =
+    (primary.length > 0 ? primary.slice(0, 40) : fallback.slice(0, 3))
+      .map((x) => x.ev);
+
+  const firstSeenMatchIds = Array.from(new Set(chosen
+    .filter(ev => !liveMatchState.has(`football-v2-${ev.id}`))
     .map(ev => ev.id)
   ));
 
@@ -6676,14 +6809,7 @@ async function buildFootballLiveV2(events: SAPIV2Event[]): Promise<LiveMatchStat
     if (o) prefetchOdds.set(id, o);
   });
 
-  const redCardIds = Array.from(new Set(events
-    .filter(ev => {
-      const statusStr = v2StatusStr(ev.status);
-      if (FOOTBALL_V2_FINISHED.has(statusStr)) return false;
-      return FOOTBALL_V2_LIVE.has(statusStr);
-    })
-    .map(ev => ev.id)
-  )).slice(0, 12);
+  const redCardIds = Array.from(new Set(chosen.map(ev => ev.id))).slice(0, 12);
 
   const prefetchRedCards = new Map<number, V2RedCards>();
   await pool(redCardIds, 4, async (id) => {
@@ -6691,16 +6817,8 @@ async function buildFootballLiveV2(events: SAPIV2Event[]): Promise<LiveMatchStat
     if (rc) prefetchRedCards.set(id, rc);
   });
 
-  for (const ev of events) {
+  for (const ev of chosen) {
     const statusStr = v2StatusStr(ev.status);
-    if (FOOTBALL_V2_FINISHED.has(statusStr)) continue;
-    if (!FOOTBALL_V2_LIVE.has(statusStr)) continue;
-
-    // Skip matches that started more than 2.5 hours ago — catches zombies even after
-    // server restart when finishedMatchResults is empty (cold start).
-    // 2.5 h covers the longest possible match (90 min + 30 min ET + penalties + stoppages).
-    const evAgeSeconds = ev.startTimestamp ? Date.now() / 1000 - ev.startTimestamp : 0;
-    if (evAgeSeconds > 2.5 * 3600) continue;
 
     const id = `football-v2-${ev.id}`;
     currentIds.add(id);
@@ -6713,7 +6831,8 @@ async function buildFootballLiveV2(events: SAPIV2Event[]): Promise<LiveMatchStat
     const awayTeam = v2TeamName(ev.awayTeam);
     const homeScore = v2CurrentScore(ev.homeScore);
     const awayScore = v2CurrentScore(ev.awayScore);
-    const league = normalizeLeagueName(v2TournName(ev.tournament), "");
+    const meta = metaById.get(ev.id);
+    const league = meta?.leagueName ?? normalizeLeagueName(v2TournName(ev.tournament), "");
     const { date, time } = v2EventDateTime(ev);
     const rc = prefetchRedCards.get(ev.id) ?? v2FootballRedCardsCache.get(ev.id) ?? { home: 0, away: 0, fetchedAt: 0 };
     const rcHome = rc.home ?? 0;
