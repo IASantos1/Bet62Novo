@@ -63,7 +63,7 @@ export async function enqueueMatchSettlement(args: {
   }
 }
 
-export function startSettlementQueueWorker(handler: (matchId: string) => Promise<void>): void {
+export function startSettlementQueueWorker(handler: (args: { matchId: string; jobId: string }) => Promise<void>): void {
   if (_worker) return;
   const url = getRedisUrl();
   if (!url) return;
@@ -73,7 +73,7 @@ export function startSettlementQueueWorker(handler: (matchId: string) => Promise
     QUEUE_NAME,
     async (job) => {
       const data = job.data as MatchSettlementJob;
-      await handler(data.matchId);
+      await handler({ matchId: data.matchId, jobId: String(job.id ?? "") });
     },
     { connection: redis, concurrency: 8 },
   );

@@ -929,6 +929,195 @@ export async function autoSettlePendingBets(opts?: { matchIds?: string[] }): Pro
   }
 }
 
+export async function regradeSettledBetsForMatch(matchId: string, jobId: string): Promise<void> {
+  const mId = String(matchId ?? "").trim();
+  const jId = String(jobId ?? "").trim();
+  if (!mId || !jId) return;
+
+  try {
+    const settledBets = await db
+      .select()
+      .from(betsTable)
+      .where(and(
+        sql`${betsTable.status} <> 'pending'`,
+        sql`${betsTable.status} <> 'cashed_out'`,
+        sql`(${betsTable.matchId} = ${mId} OR EXISTS (SELECT 1 FROM jsonb_array_elements(${betsTable.selections}) AS elem WHERE elem->>'matchId' = ${mId}))`,
+      ));
+
+    if (settledBets.length === 0) return;
+
+    const idsToEnsure = new Set<string>();
+    for (const bet of settledBets) {
+      const selections = bet.selections as SelectionRecord[];
+      if (!Array.isArray(selections) || selections.length === 0) continue;
+      const isSingle = selections.length === 1;
+      for (const sel of selections) {
+        const selMatchId = sel.matchId ?? (isSingle ? bet.matchId : undefined);
+        if (!selMatchId) continue;
+        if (finishedMatchResults.has(selMatchId)) continue;
+        idsToEnsure.add(selMatchId);
+      }
+    }
+
+    const ids = Array.from(idsToEnsure);
+    for (let i = 0; i < ids.length; i += 12) {
+      const chunk = ids.slice(i, i + 12);
+      await Promise.allSettled(chunk.map((id) => ensureFinishedMatchResult(id)));
+    }
+
+    let regraded = 0;
+
+    for (const bet of settledBets) {
+      try {
+        const selections = bet.selections as SelectionRecord[];
+        if (!Array.isArray(selections) || selections.length === 0) continue;
+
+        const isSingle = selections.length === 1;
+
+        const outcomes: Array<"won" | "lost" | "void" | null> = [];
+        const updatedSelections = selections.map((sel) => {
+          const result = findResult(sel, bet.matchId, isSingle);
+          if (!result) {
+            outcomes.push(null);
+            return sel;
+          }
+
+          const ht: HTScore | undefined =
+            typeof result.htHome === "number" && typeof result.htAway === "number"
+              ? { htHome: result.htHome, htAway: result.htAway }
+              : undefined;
+
+          const outcome = scoreOutcomeForSel(sel, result, ht, {
+            cornersTotal: result.cornersTotal,
+            cardsTotal: result.cardsTotal,
+            firstGoal: result.firstGoal,
+            extras: result.extras,
+          });
+          outcomes.push(outcome);
+
+          return {
+            ...sel,
+            finalScore: { home: result.home, away: result.away },
+            htScore: ht,
+            outcome,
+          };
+        });
+
+        if (outcomes.some((o) => o === null)) continue;
+
+        const oldStatus = String(bet.status ?? "");
+
+        let newStatus: "won" | "lost" | "voided";
+        let payoutStr: string;
+        let oddsStr: string | null = null;
+
+        const stakeNum = parseFloat(bet.stake);
+        const stakeStr = Number.isFinite(stakeNum) ? Number(stakeNum.toFixed(2)).toFixed(2) : "0.00";
+
+        if (outcomes.some((o) => o === "lost")) {
+          newStatus = "lost";
+          payoutStr = "0.00";
+        } else if (outcomes.every((o) => o === "void")) {
+          newStatus = "voided";
+          payoutStr = stakeStr;
+        } else {
+          newStatus = "won";
+
+          const effectiveOdds = selections.reduce((acc, sel, idx) => {
+            const o = outcomes[idx];
+            if (o === "won") return acc * Math.max(1.01, Number(sel.odd ?? 1));
+            return acc;
+          }, 1);
+
+          const payoutNum = Math.max(0, Number((stakeNum * effectiveOdds).toFixed(2)));
+          payoutStr = payoutNum.toFixed(2);
+          oddsStr = Number(effectiveOdds.toFixed(2)).toFixed(2);
+        }
+
+        const oldCreditStr =
+          oldStatus === "won"
+            ? Number(parseFloat(bet.potentialWin).toFixed(2)).toFixed(2)
+            : oldStatus === "voided"
+              ? stakeStr
+              : "0.00";
+
+        const deltaNum = Number((parseFloat(payoutStr) - parseFloat(oldCreditStr)).toFixed(2));
+        const deltaStr = deltaNum.toFixed(2);
+
+        const statusChanged = newStatus !== oldStatus;
+        const payoutChanged = newStatus === "won" && oldStatus === "won" && payoutStr !== oldCreditStr;
+        const selectionsChanged = JSON.stringify(updatedSelections) !== JSON.stringify(selections);
+
+        if (!statusChanged && !payoutChanged && !selectionsChanged) continue;
+
+        await db.transaction(async (tx) => {
+          const set: Partial<Record<keyof typeof betsTable.$inferSelect, unknown>> = {
+            selections: updatedSelections,
+          };
+
+          if (statusChanged || payoutChanged) {
+            set.status = newStatus;
+            if (newStatus === "won") {
+              set.potentialWin = payoutStr;
+              set.totalOdds = oddsStr!;
+            }
+          }
+
+          const rows = await tx
+            .update(betsTable)
+            .set(set as never)
+            .where(and(eq(betsTable.id, bet.id), eq(betsTable.status, oldStatus)))
+            .returning({ id: betsTable.id });
+
+          if (rows.length === 0) return;
+
+          await tx.delete(cashoutStatesTable).where(eq(cashoutStatesTable.betId, bet.id));
+
+          if (deltaNum !== 0) {
+            const applied = await applyBalanceDelta(tx, {
+              userId: bet.userId,
+              amount: deltaStr,
+              kind: "bet_regrade_delta",
+              idempotencyKey: `bet:${bet.id}:regrade:${jId}:delta`,
+              refType: "bet",
+              refId: String(bet.id),
+              metadata: {
+                matchId: mId,
+                jobId: jId,
+                oldStatus,
+                newStatus,
+                oldPayout: oldCreditStr,
+                newPayout: payoutStr,
+              },
+            });
+
+            if (!applied) return;
+
+            await tx.insert(settlementLogsTable).values({
+              betId: bet.id,
+              userId: bet.userId,
+              oldStatus,
+              newStatus,
+              payout: payoutStr,
+              message: `Regrade: match ${mId} corrected (job ${jId})`,
+            });
+          }
+        });
+
+        if (deltaNum !== 0) regraded++;
+      } catch (err) {
+        logger.error({ err, betId: bet.id, matchId: mId, jobId: jId }, "Error regrading bet");
+      }
+    }
+
+    if (regraded > 0) {
+      logger.warn({ matchId: mId, jobId: jId, regraded }, "Regrade applied (settled bets adjusted)");
+    }
+  } catch (err) {
+    logger.error({ err, matchId: mId, jobId: jId }, "Regrade cycle error");
+  }
+}
+
 async function hydrateSettledBetSelections(): Promise<void> {
   try {
     const cutoff = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);

@@ -2,7 +2,7 @@ import { createServer } from "http";
 import app from "./app";
 import { logger } from "./lib/logger";
 import { getUpcomingAll, initSportWebSockets, initV1SportWebSockets, initLiveWsServer, primeSportLiveCaches } from "./routes/matches";
-import { startSettlementWorker, autoSettlePendingBets } from "./settlement";
+import { startSettlementWorker, autoSettlePendingBets, regradeSettledBetsForMatch } from "./settlement";
 import { startSettlementQueueWorker } from "./lib/settlementQueue";
 
 const rawPort = process.env["PORT"];
@@ -41,8 +41,9 @@ server.listen(port, (err?: Error) => {
   initLiveWsServer(server);
 
   // Start background bet auto-settlement worker
-  startSettlementQueueWorker(async (matchId) => {
+  startSettlementQueueWorker(async ({ matchId, jobId }) => {
     await autoSettlePendingBets({ matchIds: [matchId] });
+    await regradeSettledBetsForMatch(matchId, jobId);
   });
   startSettlementWorker();
 });
