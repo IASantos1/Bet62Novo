@@ -2122,9 +2122,9 @@ let lastBroadcastAt = 0;
 setInterval(() => {
   if (sseClients.size === 0 && wsLiveClients.size === 0) return;
   const now = Date.now();
-  if (now - lastBroadcastAt < 1800) return;
+  if (now - lastBroadcastAt < 900) return;
   broadcastLive().catch(() => {});
-}, 2000);
+}, 1000);
 
 // v2/daily today: cache 5min
 let dailyCache: StatpalLeagueV2[] | null = null;

@@ -102,6 +102,7 @@ function LiveMatchCard({ match }: { match: LiveMatch }) {
   const colors = useColors();
   const { addSelection, removeSelection, hasSelection } = useBetSlip();
   const [marketsOpen, setMarketsOpen] = useState(false);
+  const ODDS_BTN_HEIGHT = 48;
 
   const sportColor = SPORT_COLORS[match.sport] ?? colors.mutedForeground;
   const now = Date.now();
@@ -181,8 +182,13 @@ function LiveMatchCard({ match }: { match: LiveMatch }) {
     return (
       <Pressable
         style={({ pressed }) => ({
-          flex: 1, borderRadius: 8, paddingVertical: 9, paddingHorizontal: 4,
+          flex: 1,
+          height: ODDS_BTN_HEIGHT,
+          borderRadius: 8,
+          paddingVertical: 9,
+          paddingHorizontal: 4,
           alignItems: "center" as const,
+          justifyContent: "center" as const,
           backgroundColor: suspended ? "#18181f" : sel ? colors.primary : "#1c1c26",
           borderWidth: 1,
           borderColor: suspended ? "#2a2a35" : sel ? colors.primary : "#2e2e3c",
@@ -228,7 +234,7 @@ function LiveMatchCard({ match }: { match: LiveMatch }) {
   const statusOverlay = suspended ? suspText : isObviousLiveResult ? "APOSTA JÁ" : null;
 
   const OddsRowContent = (
-    <View style={{ position: "relative" as const, minHeight: 42, justifyContent: "center" as const }}>
+    <View style={{ position: "relative" as const, minHeight: ODDS_BTN_HEIGHT, justifyContent: "center" as const }}>
       {isTennis ? (
         <View style={{ flexDirection: "row" as const, gap: 6 }}>
           <OddsButton mkt="1x2-home" lbl={match.home.split(" ").pop() ?? match.home} val={match.odds.home} />
@@ -256,9 +262,11 @@ function LiveMatchCard({ match }: { match: LiveMatch }) {
         >
           <View
             style={{
-              borderRadius: 999,
+              height: ODDS_BTN_HEIGHT,
+              borderRadius: 8,
               paddingHorizontal: 12,
-              paddingVertical: 6,
+              alignItems: "center" as const,
+              justifyContent: "center" as const,
               backgroundColor: suspended ? "#3b0000" : "#2d1500",
               borderWidth: 1,
               borderColor: suspended ? "#7f1d1d" : "#92400e55",

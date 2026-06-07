@@ -13,6 +13,65 @@ const MAX_STAKE  = 2000.00;
 const MIN_ODDS   = 1.01;
 const MAX_ODDS   = 500.00;
 
+router.post("/quote", authMiddleware, async (req: AuthRequest, res: Response): Promise<void> => {
+  const now = Date.now();
+  const raw = req.body as { selections?: Array<{ matchId?: unknown; market?: unknown; selection?: unknown }> } | null;
+  const selList = Array.isArray(raw?.selections) ? raw!.selections! : [];
+  const out: Array<{ matchId: string; market: string; odds: number | null; suspended: boolean; reason?: string }> = [];
+
+  for (const sel of selList) {
+    const matchId = String(sel?.matchId ?? "");
+    const market = String(sel?.market ?? "result");
+    const selection = typeof sel?.selection === "string" && sel.selection.trim() !== "" ? sel.selection : market;
+    if (!matchId) continue;
+
+    if (finishedMatchResults.has(matchId)) {
+      out.push({ matchId, market, odds: null, suspended: true, reason: "JOGO FINALIZADO" });
+      continue;
+    }
+
+    const liveSt = liveMatchState.get(matchId);
+    if (!liveSt) {
+      out.push({ matchId, market, odds: null, suspended: false });
+      continue;
+    }
+
+    const allowed =
+      liveSt.sport === "tennis" ||
+      liveSt.sport === "football" ||
+      liveSt.sport === "basketball" ||
+      liveSt.sport === "hockey" ||
+      liveSt.sport === "baseball";
+    if (!allowed) {
+      out.push({ matchId, market, odds: null, suspended: false });
+      continue;
+    }
+
+    const suspendedUntil = liveSt.marketSuspension?.[market] ?? 0;
+    const anySuspended = liveSt.marketSuspension != null && Object.values(liveSt.marketSuspension).some((ts) => ts > now);
+    const suspended = suspendedUntil > now || (anySuspended && !!liveSt._suspensionReason);
+    const reason =
+      suspended
+        ? liveSt._suspensionReason ??
+          (liveSt.sport === "tennis"
+            ? "PONTO EM JOGO"
+            : liveSt.sport === "football"
+              ? "EVENTO CRÍTICO"
+              : liveSt.sport === "basketball"
+                ? "CESTA"
+                : liveSt.sport === "hockey"
+                  ? "GOLO"
+                  : "RUN")
+        : undefined;
+
+    const curOdd = currentOddForSelection({ selection } as SelectionRecord, liveSt);
+    const odds = Number.isFinite(curOdd) && (curOdd as number) > 1.0 ? Math.max(1.01, curOdd as number) : null;
+    out.push({ matchId, market, odds, suspended, ...(reason ? { reason } : {}) });
+  }
+
+  res.json({ selections: out });
+});
+
 type CashoutStatus = "available" | "suspended" | "locked" | "closed";
 
 type CashoutPolicy = {

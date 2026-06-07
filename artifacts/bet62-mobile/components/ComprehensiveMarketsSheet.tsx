@@ -425,7 +425,7 @@ export function ComprehensiveMarketsSheet({ visible, match, onClose }: Props) {
     sectionHeader: { backgroundColor: "#27272a", borderRadius: 6, paddingHorizontal: 12, paddingVertical: 9, marginBottom: 8 },
     sectionHeaderText: { fontSize: 10, fontFamily: "Inter_700Bold", color: "#a1a1aa", textTransform: "uppercase", letterSpacing: 1 },
     row: { flexDirection: "row", gap: 6, marginBottom: 6 },
-    oddsBtn: { flex: 1, borderRadius: 8, paddingVertical: 10, paddingHorizontal: 6, alignItems: "center", borderWidth: 1 },
+    oddsBtn: { flex: 1, height: 48, borderRadius: 8, paddingVertical: 10, paddingHorizontal: 6, alignItems: "center", justifyContent: "center", borderWidth: 1 },
     oddsBtnNorm: { backgroundColor: "#1c1c26", borderColor: "#2e2e3c" },
     oddsBtnSel: { backgroundColor: colors.primary, borderColor: colors.primary },
     oddsBtnLocked: { backgroundColor: "#18181f", borderColor: "#2a2a35", opacity: 0.45 },

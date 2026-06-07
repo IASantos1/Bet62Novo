@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useSyncExternalStore } from "react";
 import { API_BASE } from "@/context/AuthContext";
 
 export interface LiveMatchMarkets {
@@ -89,178 +89,187 @@ export interface LiveMatch {
 const RECONNECT_DELAY_MS = 3_000;
 const MAX_RECONNECT_DELAY_MS = 30_000;
 const HTTP_FALLBACK_INTERVAL_MS = 2_000;
-const UPDATE_THROTTLE_MS = 1_000;
+const UPDATE_THROTTLE_MS = 500;
 
-export function useLiveMatches(): {
-  matches: LiveMatch[];
-  connected: boolean;
-  lastUpdated: number;
-} {
-  const [matches, setMatches] = useState<LiveMatch[]>([]);
-  const [connected, setConnected] = useState(false);
-  const [lastUpdated, setLastUpdated] = useState(0);
+type StoreState = { matches: LiveMatch[]; connected: boolean; lastUpdated: number };
 
-  const wsRef = useRef<WebSocket | null>(null);
-  const reconnectDelayRef = useRef(RECONNECT_DELAY_MS);
-  const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const fallbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const fallbackSinceRef = useRef<number | null>(null);
-  const throttleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const pendingRef = useRef<{ matches: LiveMatch[] } | null>(null);
-  const mountedRef = useRef(true);
+let state: StoreState = { matches: [], connected: false, lastUpdated: 0 };
+const listeners = new Set<() => void>();
 
-  function clearTimers() {
-    if (reconnectTimerRef.current) { clearTimeout(reconnectTimerRef.current); reconnectTimerRef.current = null; }
-    if (fallbackTimerRef.current) { clearTimeout(fallbackTimerRef.current); fallbackTimerRef.current = null; }
+let started = false;
+let ws: WebSocket | null = null;
+let reconnectDelay = RECONNECT_DELAY_MS;
+let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+let fallbackTimer: ReturnType<typeof setTimeout> | null = null;
+let fallbackSince: number | null = null;
+let throttleTimer: ReturnType<typeof setTimeout> | null = null;
+let pending: { matches: LiveMatch[] } | null = null;
+
+function emit() {
+  for (const l of listeners) l();
+}
+
+function setState(patch: Partial<StoreState>) {
+  state = { ...state, ...patch };
+  emit();
+}
+
+function mergeMatches(prev: LiveMatch[], next: LiveMatch[]): LiveMatch[] {
+  const map = new Map(next.map((m) => [String(m.id), m] as const));
+  const out: LiveMatch[] = [];
+  for (const p of prev) {
+    const id = String(p.id);
+    const n = map.get(id);
+    if (!n) continue;
+    out.push({ ...(p as any), ...(n as any) });
+    map.delete(id);
   }
+  for (const n of map.values()) out.push(n);
+  return out;
+}
 
-  function mergeMatches(prev: LiveMatch[], next: LiveMatch[]): LiveMatch[] {
-    const map = new Map(next.map(m => [String(m.id), m] as const));
-    const out: LiveMatch[] = [];
-    for (const p of prev) {
-      const id = String(p.id);
-      const n = map.get(id);
-      if (!n) continue;
-      out.push({ ...(p as any), ...(n as any) });
-      map.delete(id);
-    }
-    for (const n of map.values()) out.push(n);
-    return out;
+function applyPending() {
+  const data = pending;
+  if (!data) return;
+  pending = null;
+  state = { ...state, matches: mergeMatches(state.matches, data.matches), lastUpdated: Date.now() };
+  emit();
+}
+
+function scheduleUpdate(data: { matches: LiveMatch[] }) {
+  pending = data;
+  if (!throttleTimer) {
+    throttleTimer = setTimeout(() => {
+      throttleTimer = null;
+      applyPending();
+    }, UPDATE_THROTTLE_MS);
   }
+}
 
-  function applyPending() {
-    const data = pendingRef.current;
-    if (!data || !mountedRef.current) return;
-    pendingRef.current = null;
-    setMatches(prev => mergeMatches(prev, data.matches));
-    setLastUpdated(Date.now());
-  }
+function clearTimers() {
+  if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+  if (fallbackTimer) { clearTimeout(fallbackTimer); fallbackTimer = null; }
+}
 
-  // Throttle state updates to at most once per UPDATE_THROTTLE_MS (2 s)
-  function scheduleUpdate(data: { matches: LiveMatch[] }) {
-    pendingRef.current = data;
-    if (!throttleTimerRef.current) {
-      throttleTimerRef.current = setTimeout(() => {
-        throttleTimerRef.current = null;
-        applyPending();
-      }, UPDATE_THROTTLE_MS);
-    }
-  }
-
-  function startFallbackPolling() {
-    if (fallbackTimerRef.current) return;
-    if (fallbackSinceRef.current == null) fallbackSinceRef.current = Date.now();
-    const run = async () => {
-      if (!mountedRef.current) return;
-      try {
-        const res = await fetch(`${API_BASE}/matches/live`);
-        if (!res.ok) return;
-        const data = (await res.json()) as { matches: LiveMatch[] };
-        if (mountedRef.current && data.matches) scheduleUpdate(data);
-      } catch { /* ignore */ }
-      const since = fallbackSinceRef.current ?? Date.now();
-      const elapsed = Date.now() - since;
-      const nextDelay =
-        elapsed < 60_000 ? HTTP_FALLBACK_INTERVAL_MS :
-        elapsed < 300_000 ? 5_000 :
-        10_000;
-      fallbackTimerRef.current = setTimeout(run, nextDelay);
-    };
-    fallbackTimerRef.current = setTimeout(run, HTTP_FALLBACK_INTERVAL_MS);
-  }
-
-  function connect() {
-    if (!mountedRef.current) return;
-    // Convert https:// → wss://  (or http:// → ws://) for native WebSocket
-    const wsUrl = API_BASE
-      .replace(/^https:\/\//, "wss://")
-      .replace(/^http:\/\//, "ws://")
-      + "/matches/ws";
-
+function startFallbackPolling() {
+  if (fallbackTimer) return;
+  if (fallbackSince == null) fallbackSince = Date.now();
+  const run = async () => {
     try {
-      const ws = new WebSocket(wsUrl);
-      wsRef.current = ws;
+      const res = await fetch(`${API_BASE}/matches/live`);
+      if (!res.ok) return;
+      const data = (await res.json()) as { matches: LiveMatch[] };
+      if (data.matches) scheduleUpdate(data);
+    } catch {}
+    const since = fallbackSince ?? Date.now();
+    const elapsed = Date.now() - since;
+    const nextDelay =
+      elapsed < 60_000 ? HTTP_FALLBACK_INTERVAL_MS :
+      elapsed < 300_000 ? 5_000 :
+      10_000;
+    fallbackTimer = setTimeout(run, nextDelay);
+  };
+  fallbackTimer = setTimeout(run, HTTP_FALLBACK_INTERVAL_MS);
+}
 
-      ws.onopen = () => {
-        if (!mountedRef.current) return;
-        setConnected(true);
-        reconnectDelayRef.current = RECONNECT_DELAY_MS;
-        // Stop fallback polling if WS came up
-        if (fallbackTimerRef.current) { clearTimeout(fallbackTimerRef.current); fallbackTimerRef.current = null; }
-        fallbackSinceRef.current = null;
-      };
+function connect() {
+  const wsUrl = API_BASE
+    .replace(/^https:\/\//, "wss://")
+    .replace(/^http:\/\//, "ws://")
+    + "/matches/ws";
 
-      ws.onmessage = (event) => {
-        if (!mountedRef.current) return;
-        try {
-          const msg = JSON.parse(event.data as string) as any;
-          if (msg && typeof msg === "object" && msg.type === "snapshot" && Array.isArray(msg.matches)) {
-            scheduleUpdate({ matches: msg.matches as LiveMatch[] });
-            return;
-          }
-          if (msg && typeof msg === "object" && msg.type === "update" && typeof msg.matchId === "string" && msg.delta && typeof msg.delta === "object") {
-            const matchId = String(msg.matchId);
-            setMatches(prev => {
-              const idx = prev.findIndex(m => String(m.id) === matchId);
-              if (idx < 0) return prev;
-              const next = [...prev];
-              next[idx] = { ...(next[idx] as any), ...(msg.delta as any) };
-              return next;
-            });
-            setLastUpdated(Date.now());
-            return;
-          }
-          if (Array.isArray(msg.matches)) scheduleUpdate({ matches: msg.matches as LiveMatch[] });
-        } catch { /* ignore */ }
-      };
+  try {
+    const sock = new WebSocket(wsUrl);
+    ws = sock;
 
-      ws.onerror = () => {
-        if (!mountedRef.current) return;
-        setConnected(false);
-      };
-
-      ws.onclose = () => {
-        if (!mountedRef.current) return;
-        setConnected(false);
-        wsRef.current = null;
-        startFallbackPolling();
-        reconnectTimerRef.current = setTimeout(() => {
-          if (!mountedRef.current) return;
-          clearTimers();
-          reconnectDelayRef.current = Math.min(reconnectDelayRef.current * 2, MAX_RECONNECT_DELAY_MS);
-          connect();
-        }, reconnectDelayRef.current);
-      };
-    } catch {
-      setConnected(false);
-      startFallbackPolling();
-    }
-  }
-
-  useEffect(() => {
-    mountedRef.current = true;
-
-    // Fetch initial state immediately so the UI isn't blank while WS handshakes
-    fetch(`${API_BASE}/matches/live`)
-      .then((r) => r.json())
-      .then((d: { matches: LiveMatch[] }) => {
-        if (mountedRef.current && d.matches) {
-          setMatches(d.matches);
-          setLastUpdated(Date.now());
-        }
-      })
-      .catch(() => {});
-
-    connect();
-
-    return () => {
-      mountedRef.current = false;
-      clearTimers();
-      if (throttleTimerRef.current) { clearTimeout(throttleTimerRef.current); throttleTimerRef.current = null; }
-      wsRef.current?.close();
-      wsRef.current = null;
+    sock.onopen = () => {
+      setState({ connected: true });
+      reconnectDelay = RECONNECT_DELAY_MS;
+      if (fallbackTimer) { clearTimeout(fallbackTimer); fallbackTimer = null; }
+      fallbackSince = null;
     };
-  }, []);
 
-  return { matches, connected, lastUpdated };
+    sock.onmessage = (event) => {
+      try {
+        const msg = JSON.parse(event.data as string) as any;
+        if (msg && typeof msg === "object" && msg.type === "snapshot" && Array.isArray(msg.matches)) {
+          scheduleUpdate({ matches: msg.matches as LiveMatch[] });
+          return;
+        }
+        if (msg && typeof msg === "object" && msg.type === "update" && typeof msg.matchId === "string" && msg.delta && typeof msg.delta === "object") {
+          const matchId = String(msg.matchId);
+          const idx = state.matches.findIndex((m) => String(m.id) === matchId);
+          if (idx < 0) return;
+          const next = [...state.matches];
+          next[idx] = { ...(next[idx] as any), ...(msg.delta as any) };
+          state = { ...state, matches: next, lastUpdated: Date.now() };
+          emit();
+          return;
+        }
+        if (Array.isArray(msg.matches)) scheduleUpdate({ matches: msg.matches as LiveMatch[] });
+      } catch {}
+    };
+
+    sock.onerror = () => {
+      setState({ connected: false });
+    };
+
+    sock.onclose = () => {
+      setState({ connected: false });
+      ws = null;
+      startFallbackPolling();
+      reconnectTimer = setTimeout(() => {
+        clearTimers();
+        reconnectDelay = Math.min(reconnectDelay * 2, MAX_RECONNECT_DELAY_MS);
+        connect();
+      }, reconnectDelay);
+    };
+  } catch {
+    setState({ connected: false });
+    startFallbackPolling();
+  }
+}
+
+function ensureStarted() {
+  if (started) return;
+  started = true;
+  fetch(`${API_BASE}/matches/live`)
+    .then((r) => r.json())
+    .then((d: { matches: LiveMatch[] }) => {
+      if (d.matches) {
+        state = { ...state, matches: d.matches, lastUpdated: Date.now() };
+        emit();
+      }
+    })
+    .catch(() => {});
+  connect();
+}
+
+function cleanup() {
+  clearTimers();
+  if (throttleTimer) { clearTimeout(throttleTimer); throttleTimer = null; }
+  pending = null;
+  ws?.close();
+  ws = null;
+  started = false;
+  reconnectDelay = RECONNECT_DELAY_MS;
+  fallbackSince = null;
+  setState({ connected: false });
+}
+
+function subscribe(onStoreChange: () => void) {
+  listeners.add(onStoreChange);
+  ensureStarted();
+  return () => {
+    listeners.delete(onStoreChange);
+    if (listeners.size === 0) cleanup();
+  };
+}
+
+function getSnapshot(): StoreState {
+  return state;
+}
+
+export function useLiveMatches(): StoreState {
+  return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
 }

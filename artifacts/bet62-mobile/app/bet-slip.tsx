@@ -1,7 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { router } from "expo-router";
-import React, { useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -47,8 +47,10 @@ export default function BetSlipScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const { user, token, refreshUser } = useAuth();
-  const { selections, removeSelection, clearSlip, totalOdds, count } = useBetSlip();
+  const { selections, removeSelection, clearSlip, totalOdds, count, applyQuote } = useBetSlip();
   const queryClient = useQueryClient();
+  const selectionsRef = useRef(selections);
+  useEffect(() => { selectionsRef.current = selections; }, [selections]);
 
   const [stake, setStake] = useState("");
   const [loading, setLoading] = useState(false);
@@ -61,7 +63,46 @@ export default function BetSlipScreen() {
   const hasFreebet = fbBalance > 0;
   const activeBalance = useFreebet ? fbBalance : balance;
   const isInsufficient = stakeNum > 0 && stakeNum > activeBalance;
-  const canPlace = stakeNum >= 0.5 && !isInsufficient && count > 0 && !loading;
+  const anySuspended = selections.some((s) => s.suspended);
+  const canPlace = stakeNum >= 0.5 && !isInsufficient && count > 0 && !loading && !anySuspended;
+
+  async function fetchQuote(): Promise<Array<{ matchId: string; market: string; odds: number | null; suspended: boolean; reason?: string }> | null> {
+    const cur = selectionsRef.current;
+    if (!token || cur.length === 0) return null;
+    try {
+      const res = await fetch(`${API_BASE}/bets/quote`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          selections: cur.map((s) => ({
+            matchId: s.matchId,
+            market: s.market,
+            selection: s.selection ?? s.market,
+          })),
+        }),
+      });
+      if (!res.ok) return null;
+      const data = (await res.json()) as { selections?: Array<{ matchId: string; market: string; odds: number | null; suspended: boolean; reason?: string }> };
+      return Array.isArray(data.selections) ? data.selections : null;
+    } catch {
+      return null;
+    }
+  }
+
+  useEffect(() => {
+    if (!token) return;
+    if (selections.length === 0) return;
+    let mounted = true;
+    let timer: ReturnType<typeof setInterval> | null = null;
+    fetchQuote().then((q) => { if (mounted && q) applyQuote(q); });
+    timer = setInterval(() => {
+      fetchQuote().then((q) => { if (mounted && q) applyQuote(q); });
+    }, 1000);
+    return () => {
+      mounted = false;
+      if (timer) clearInterval(timer);
+    };
+  }, [token, selections.length]);
 
   async function handlePlaceBet() {
     if (!user || !token) {
@@ -86,6 +127,23 @@ export default function BetSlipScreen() {
 
     setLoading(true);
     try {
+      const quote = await fetchQuote();
+      if (quote) {
+        applyQuote(quote);
+        const blocked = quote.find((x) => x.suspended);
+        if (blocked) {
+          await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+          Alert.alert("Mercado suspenso", blocked.reason ? `Aguarda alguns segundos.\n${blocked.reason}` : "Aguarda alguns segundos e tenta novamente.");
+          return;
+        }
+      }
+      const quoteMap = quote ? new Map(quote.map((x) => [`${x.matchId}::${x.market}`, x] as const)) : null;
+      const effectiveOdds = selections.reduce((acc, s) => {
+        const q = quoteMap?.get(`${s.matchId}::${s.market}`);
+        const o = q?.odds != null && Number.isFinite(q.odds) ? q.odds : s.odds;
+        return acc * o;
+      }, 1);
+      const finalWin = stakeNum * effectiveOdds;
       const res = await fetch(`${API_BASE}/bets/place`, {
         method: "POST",
         headers: {
@@ -100,11 +158,11 @@ export default function BetSlipScreen() {
             selection: s.selection ?? s.market,
             market: s.market,
             label: s.label,
-            odds: s.odds,
+            odds: quoteMap?.get(`${s.matchId}::${s.market}`)?.odds ?? s.odds,
           })),
           stake: stakeNum.toFixed(2),
-          potentialWin: potentialWin.toFixed(2),
-          totalOdds: totalOdds.toFixed(4),
+          potentialWin: (stakeNum * effectiveOdds).toFixed(2),
+          totalOdds: effectiveOdds.toFixed(4),
           isFreebet: useFreebet,
         }),
       });
@@ -118,7 +176,7 @@ export default function BetSlipScreen() {
       router.dismiss();
       Alert.alert(
         "✅ Aposta registada!",
-        `Ganho potencial: €${potentialWin.toFixed(2)}${useFreebet ? "\n(Apostado com Freebet)" : ""}`
+        `Ganho potencial: €${finalWin.toFixed(2)}${useFreebet ? "\n(Apostado com Freebet)" : ""}`
       );
     } catch (err: unknown) {
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
@@ -216,6 +274,7 @@ export default function BetSlipScreen() {
     selectionMarketText: { fontSize: 10, fontFamily: "Inter_500Medium", color: colors.mutedForeground },
     selectionOddsCol: { alignItems: "flex-end", gap: 4 },
     selectionOdds: { fontSize: 20, fontFamily: "Inter_700Bold", color: colors.primary },
+    selectionSusp: { fontSize: 10, fontFamily: "Inter_700Bold", color: "#ef4444", textTransform: "uppercase", letterSpacing: 0.6 },
     removeBtn: { padding: 4 },
 
     freebetCard: {
@@ -469,6 +528,11 @@ export default function BetSlipScreen() {
                   </View>
                   <View style={s.selectionOddsCol}>
                     <Text style={s.selectionOdds}>{sel.odds.toFixed(2)}</Text>
+                    {sel.suspended && (
+                      <Text style={s.selectionSusp} numberOfLines={1}>
+                        {sel.suspendedReason ? sel.suspendedReason : "SUSPENSO"}
+                      </Text>
+                    )}
                     <Pressable
                       style={s.removeBtn}
                       onPress={() => {

@@ -8,6 +8,8 @@ export interface BetSelection {
   selection?: string;
   label: string;
   odds: number;
+  suspended?: boolean;
+  suspendedReason?: string;
   date?: string;
   time?: string;
 }
@@ -18,6 +20,7 @@ interface BetSlipContextType {
   removeSelection: (matchId: string, market: string) => void;
   clearSlip: () => void;
   hasSelection: (matchId: string, market: string) => boolean;
+  applyQuote: (q: Array<{ matchId: string; market: string; odds: number | null; suspended: boolean; reason?: string }>) => void;
   totalOdds: number;
   count: number;
 }
@@ -50,12 +53,29 @@ export function BetSlipProvider({ children }: { children: React.ReactNode }) {
     [selections]
   );
 
+  const applyQuote = useCallback((q: Array<{ matchId: string; market: string; odds: number | null; suspended: boolean; reason?: string }>) => {
+    if (!Array.isArray(q) || q.length === 0) return;
+    const map = new Map(q.map((x) => [`${x.matchId}::${x.market}`, x] as const));
+    setSelections((prev) =>
+      prev.map((s) => {
+        const hit = map.get(`${s.matchId}::${s.market}`);
+        if (!hit) return s;
+        return {
+          ...s,
+          odds: hit.odds != null && Number.isFinite(hit.odds) ? Math.max(1.01, hit.odds) : s.odds,
+          suspended: hit.suspended,
+          suspendedReason: hit.reason,
+        };
+      })
+    );
+  }, []);
+
   const totalOdds = selections.reduce((acc, s) => acc * s.odds, 1);
   const count = selections.length;
 
   return (
     <BetSlipContext.Provider
-      value={{ selections, addSelection, removeSelection, clearSlip, hasSelection, totalOdds, count }}
+      value={{ selections, addSelection, removeSelection, clearSlip, hasSelection, applyQuote, totalOdds, count }}
     >
       {children}
     </BetSlipContext.Provider>
