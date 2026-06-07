@@ -4170,8 +4170,8 @@ export default function Home() {
 
     const rivalry = RIVALRY_TAGS[`${match.home}|${match.away}`];
     const motionProps = isNew
-      ? { layout: true as const, initial: { opacity: 0, y: 10 }, animate: { opacity: 1, y: 0 } }
-      : { layout: true as const };
+      ? { initial: { opacity: 0, y: 10 }, animate: { opacity: 1, y: 0 } }
+      : {};
 
     const isObviousLiveResult = match.isLive && (match.sport === "football" || !match.sport) && (() => {
       const minOdd = Math.min(match.odds.home, match.odds.away);

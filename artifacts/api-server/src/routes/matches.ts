@@ -6880,6 +6880,11 @@ const _v2StuckTracker = new Map<string, { minute: number; score: string; since: 
 
 async function buildFootballLiveV2(events: SAPIV2Event[]): Promise<LiveMatchState[]> {
   const now = Date.now();
+  const clockSkewSec = (() => {
+    const v = Number(process.env.FOOTBALL_CLOCK_SKEW_SEC ?? "180");
+    if (!Number.isFinite(v)) return 180;
+    return Math.min(600, Math.max(0, Math.trunc(v)));
+  })();
   const result: LiveMatchState[] = [];
   const currentIds = new Set<string>();
   const LIVE_DISAPPEAR_GRACE_MS = 12 * 60 * 1000;
@@ -7004,14 +7009,14 @@ async function buildFootballLiveV2(events: SAPIV2Event[]): Promise<LiveMatchStat
       }
       if (kickoffSec > 0) {
         resolvedKickoffSec = kickoffSec;
-        const minsFromKickoff = Math.floor((now / 1000 - kickoffSec) / 60);
+        const minsFromKickoff = Math.floor(((now / 1000 - kickoffSec) - clockSkewSec) / 60);
         if (statusStr === "1st half") {
           // Allow up to 49' for first-half stoppage time
           minute = Math.min(49, Math.max(1, minsFromKickoff));
         } else if (statusStr === "2nd half") {
           const shKickoff = existing?._liveExtra?.secondHalfKickoffSec;
           if (typeof shKickoff === "number" && Number.isFinite(shKickoff) && shKickoff > 0) {
-            const minsFromSecondHalf = Math.floor((now / 1000 - shKickoff) / 60);
+            const minsFromSecondHalf = Math.floor(((now / 1000 - shKickoff) - clockSkewSec) / 60);
             minute = Math.min(99, Math.max(46, 46 + minsFromSecondHalf));
           } else {
             minute = Math.min(99, Math.max(46, minsFromKickoff - 15));
@@ -7028,6 +7033,13 @@ async function buildFootballLiveV2(events: SAPIV2Event[]): Promise<LiveMatchStat
     if (inferredHT) minute = 45;
     const newStatus = inferredHT ? "HT" : isHT ? "HT" : isPen ? "Penalties" : isET ? "ET" : statusStr;
 
+    if (existing) {
+      const diff = existing.minute - minute;
+      if (!(diff > 0 && diff <= 8)) {
+        minute = Math.max(existing.minute, minute);
+      }
+    }
+
     const clockNowSec = Math.floor(now / 1000);
     const clamp = (n: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, n));
     const isFirstHalf = statusStr === "1st half";
@@ -7040,13 +7052,13 @@ async function buildFootballLiveV2(events: SAPIV2Event[]): Promise<LiveMatchStat
       !resolvedKickoffSec ? null
       : newStatus === "HT" ? 45 * 60
       : isFirstHalf
-        ? clamp(clockNowSec - resolvedKickoffSec, 0, 49 * 60)
+        ? clamp(clockNowSec - resolvedKickoffSec - clockSkewSec, 0, 49 * 60)
         : isSecondHalf
           ? clamp(
               45 * 60 +
                 (shKickoffSec > 0
-                  ? (clockNowSec - shKickoffSec)
-                  : Math.max(0, (clockNowSec - resolvedKickoffSec) - (15 * 60))),
+                  ? (clockNowSec - shKickoffSec - clockSkewSec)
+                  : Math.max(0, (clockNowSec - resolvedKickoffSec - clockSkewSec) - (15 * 60))),
               45 * 60,
               99 * 60,
             )
@@ -7091,10 +7103,6 @@ async function buildFootballLiveV2(events: SAPIV2Event[]): Promise<LiveMatchStat
     }
 
     if (existing) {
-      // Monotonic clock — never let the computed minute go backward (prevents clock regression
-      // on reconnect or when startTimestamp-based computation differs between polls).
-      minute = Math.max(existing.minute, minute);
-
       // Pre-compute VAR status once, used in both scored and non-scored branches
       const rawStatusDesc = v2StatusStr(ev.status).toLowerCase();
       const isVARStatus = rawStatusDesc.includes("var") ||

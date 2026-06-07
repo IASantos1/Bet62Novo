@@ -302,7 +302,7 @@ function LiveMatchCard({ match }: { match: LiveMatch }) {
         {bannerUrl ? (
           <>
             <View style={{ height: 145, position: "relative" as const, overflow: "hidden" as const }}>
-              <Image source={{ uri: bannerUrl }} style={StyleSheet.absoluteFill} resizeMode="cover" />
+              <Image source={{ uri: bannerUrl, cache: "force-cache" }} style={StyleSheet.absoluteFill} resizeMode="cover" fadeDuration={0} />
               <View style={[StyleSheet.absoluteFill, { backgroundColor: "#00000065" }]} />
               <View style={{ position: "absolute" as const, top: 10, left: 12, right: 12, flexDirection: "row" as const, alignItems: "center" as const }}>
                 <View style={{ flexDirection: "row", alignItems: "center", gap: 5 }}>
