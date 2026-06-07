@@ -3686,7 +3686,7 @@ export default function Home() {
 
     if (isSuspended) {
       return (
-        <div className={`relative flex flex-col items-center justify-center h-11 px-2 rounded-md text-xs ${grow ? "flex-1" : ""} bg-zinc-800/40 border border-zinc-700/30 opacity-70 select-none`}>
+        <div className={`relative flex flex-col items-center justify-center h-10 px-2 rounded-md text-xs ${grow ? "flex-1" : ""} bg-zinc-800/40 border border-zinc-700/30 opacity-70 select-none`}>
           <span className="text-[10px] leading-none opacity-60">{label}</span>
           <span className="font-bold text-sm leading-none text-zinc-300 tabular-nums line-through">{odd.toFixed(2)}</span>
         </div>
@@ -3695,7 +3695,7 @@ export default function Home() {
 
     if (odd < 1.15 && market === "result") {
       return (
-        <div className={`relative flex flex-col items-center justify-center h-11 px-2 rounded-md text-xs ${grow ? "flex-1" : ""} bg-zinc-800/40 border border-zinc-700/30`}>
+        <div className={`relative flex flex-col items-center justify-center h-10 px-2 rounded-md text-xs ${grow ? "flex-1" : ""} bg-zinc-800/40 border border-zinc-700/30`}>
           <span className="text-[10px] leading-none opacity-40">{label}</span>
           <span className="font-bold text-base leading-none text-zinc-600 tabular-nums">--</span>
         </div>
@@ -3712,7 +3712,7 @@ export default function Home() {
     })();
     if (isObviousResult) {
       return (
-        <div className={`relative flex flex-col items-center justify-center h-11 px-2 rounded-md text-xs ${grow ? "flex-1" : ""} bg-amber-900/20 border border-amber-600/30`}>
+        <div className={`relative flex flex-col items-center justify-center h-10 px-2 rounded-md text-xs ${grow ? "flex-1" : ""} bg-amber-900/20 border border-amber-600/30`}>
           <span className="text-[10px] leading-none opacity-50">{label}</span>
           <span className="font-bold text-[9px] leading-none text-amber-400 uppercase tracking-wider">Aposta Já</span>
         </div>
@@ -3724,7 +3724,7 @@ export default function Home() {
     return (
       <button
         {...makeTap(() => toggleBet(match, selection, odd, market, label))}
-        className={`relative flex flex-col items-center justify-center h-11 px-2 rounded-md transition-colors text-xs ${grow ? "flex-1" : ""} ${isSelected ? "bg-red-600 text-white" : "bg-zinc-800 hover:bg-zinc-700 text-zinc-300"} ${flashClass}`}
+        className={`relative flex flex-col items-center justify-center h-10 px-2 rounded-md transition-colors text-xs ${grow ? "flex-1" : ""} ${isSelected ? "bg-red-600 text-white" : "bg-zinc-800 hover:bg-zinc-700 text-zinc-300"} ${flashClass}`}
       >
         <span className="text-[10px] leading-none opacity-70">{label}</span>
         <span className="font-bold text-sm leading-none tabular-nums flex items-center gap-0.5">
@@ -3755,7 +3755,7 @@ export default function Home() {
     return (
       <button
         disabled
-        className="w-full h-11 px-3 flex items-center justify-center rounded-md bg-red-950 border border-red-800/50 text-red-200 font-black text-sm tracking-widest cursor-not-allowed select-none animate-pulse"
+        className="w-full h-10 px-3 flex items-center justify-center rounded-md bg-red-950 border border-red-800/50 text-red-200 font-black text-sm tracking-widest cursor-not-allowed select-none animate-pulse"
         style={{ letterSpacing: "0.2em" }}
       >
         {prefix}{label}

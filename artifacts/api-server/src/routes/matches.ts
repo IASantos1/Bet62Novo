@@ -8233,6 +8233,7 @@ router.get("/live-stream", (req, res) => {
 
   // Flush headers immediately so the browser sees an open stream
   res.flushHeaders();
+  try { res.write(`:${" ".repeat(2048)}\n\n`); } catch { /* ignore */ }
 
   sseClients.add(res);
 
@@ -8245,8 +8246,8 @@ router.get("/live-stream", (req, res) => {
 
   // Keepalive comment every 20s so proxies don't close the connection
   const keepAlive = setInterval(() => {
-    try { res.write(": keepalive\n\n"); } catch { /* ignore */ }
-  }, 20_000);
+    try { res.write(`: keepalive ${" ".repeat(256)}\n\n`); } catch { /* ignore */ }
+  }, 5_000);
 
   req.on("close", () => {
     clearInterval(keepAlive);
