@@ -791,4 +791,109 @@ router.get("/settlement-logs", adminMiddleware, async (_req: AdminRequest, res: 
   }
 });
 
+router.get("/settlement-metrics", adminMiddleware, async (req: AdminRequest, res: Response): Promise<void> => {
+  try {
+    const from = String((req as unknown as Request).query["from"] ?? "");
+    const to = String((req as unknown as Request).query["to"] ?? "");
+    const sport = String((req as unknown as Request).query["sport"] ?? "");
+    const status = String((req as unknown as Request).query["status"] ?? "");
+
+    const fromDate = from ? new Date(from) : null;
+    const toDate = to ? new Date(to) : null;
+
+    const fromCond = fromDate && !Number.isNaN(fromDate.getTime()) ? sql`AND fs.settled_at >= ${fromDate}` : sql``;
+    const toCond = toDate && !Number.isNaN(toDate.getTime()) ? sql`AND fs.settled_at <= ${toDate}` : sql``;
+    const sportCond = sport ? sql`AND mr.sport = ${sport}` : sql``;
+    const statusCond = status ? sql`AND fs.new_status = ${status}` : sql``;
+
+    const [overall] = (await db.execute(sql`
+      WITH first_settlement AS (
+        SELECT DISTINCT ON (sl.bet_id)
+          sl.bet_id,
+          sl.new_status,
+          sl.created_at AS settled_at
+        FROM settlement_logs sl
+        WHERE sl.old_status = 'pending'
+        ORDER BY sl.bet_id, sl.created_at ASC
+      )
+      SELECT
+        COUNT(*)::int AS count,
+        AVG(EXTRACT(EPOCH FROM (fs.settled_at - b.created_at))) AS avg_seconds,
+        PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY EXTRACT(EPOCH FROM (fs.settled_at - b.created_at))) AS p50_seconds,
+        PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY EXTRACT(EPOCH FROM (fs.settled_at - b.created_at))) AS p95_seconds,
+        MIN(EXTRACT(EPOCH FROM (fs.settled_at - b.created_at))) AS min_seconds,
+        MAX(EXTRACT(EPOCH FROM (fs.settled_at - b.created_at))) AS max_seconds
+      FROM first_settlement fs
+      JOIN bets b ON b.id = fs.bet_id
+      LEFT JOIN match_results mr ON mr.match_id = b.match_id
+      WHERE 1=1
+      ${fromCond}
+      ${toCond}
+      ${sportCond}
+      ${statusCond}
+    `)).rows as Array<Record<string, unknown>>;
+
+    const bySport = (await db.execute(sql`
+      WITH first_settlement AS (
+        SELECT DISTINCT ON (sl.bet_id)
+          sl.bet_id,
+          sl.new_status,
+          sl.created_at AS settled_at
+        FROM settlement_logs sl
+        WHERE sl.old_status = 'pending'
+        ORDER BY sl.bet_id, sl.created_at ASC
+      )
+      SELECT
+        COALESCE(mr.sport, 'unknown') AS sport,
+        COUNT(*)::int AS count,
+        AVG(EXTRACT(EPOCH FROM (fs.settled_at - b.created_at))) AS avg_seconds,
+        PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY EXTRACT(EPOCH FROM (fs.settled_at - b.created_at))) AS p50_seconds,
+        PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY EXTRACT(EPOCH FROM (fs.settled_at - b.created_at))) AS p95_seconds
+      FROM first_settlement fs
+      JOIN bets b ON b.id = fs.bet_id
+      LEFT JOIN match_results mr ON mr.match_id = b.match_id
+      WHERE 1=1
+      ${fromCond}
+      ${toCond}
+      ${sportCond}
+      ${statusCond}
+      GROUP BY sport
+      ORDER BY count DESC
+    `)).rows as Array<Record<string, unknown>>;
+
+    const byStatus = (await db.execute(sql`
+      WITH first_settlement AS (
+        SELECT DISTINCT ON (sl.bet_id)
+          sl.bet_id,
+          sl.new_status,
+          sl.created_at AS settled_at
+        FROM settlement_logs sl
+        WHERE sl.old_status = 'pending'
+        ORDER BY sl.bet_id, sl.created_at ASC
+      )
+      SELECT
+        fs.new_status AS status,
+        COUNT(*)::int AS count,
+        AVG(EXTRACT(EPOCH FROM (fs.settled_at - b.created_at))) AS avg_seconds,
+        PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY EXTRACT(EPOCH FROM (fs.settled_at - b.created_at))) AS p50_seconds,
+        PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY EXTRACT(EPOCH FROM (fs.settled_at - b.created_at))) AS p95_seconds
+      FROM first_settlement fs
+      JOIN bets b ON b.id = fs.bet_id
+      LEFT JOIN match_results mr ON mr.match_id = b.match_id
+      WHERE 1=1
+      ${fromCond}
+      ${toCond}
+      ${sportCond}
+      ${statusCond}
+      GROUP BY fs.new_status
+      ORDER BY count DESC
+    `)).rows as Array<Record<string, unknown>>;
+
+    res.json({ overall: overall ?? null, bySport, byStatus });
+  } catch (err) {
+    logger.error({ err }, "Admin settlement-metrics error");
+    res.status(500).json({ error: "Erro ao carregar métricas de liquidação" });
+  }
+});
+
 export default router;
