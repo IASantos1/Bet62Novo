@@ -6,6 +6,7 @@ import { eq, desc, count, sum, sql, gte, lte, and } from "drizzle-orm";
 import { adminMiddleware, type AdminRequest } from "../middlewares/adminAuth";
 import { rateLimit } from "../middlewares/rateLimit";
 import { logger } from "../lib/logger";
+import { applyBalanceDelta } from "../lib/ledger";
 import fs from "fs";
 import path from "path";
 
@@ -200,23 +201,51 @@ router.put("/users/:id/balance", adminMiddleware, async (req: AdminRequest, res:
   if (isNaN(userId)) { res.status(400).json({ error: "ID inválido" }); return; }
 
   try {
-    const [user] = await db.select().from(usersTable).where(eq(usersTable.id, userId)).limit(1);
-    if (!user) { res.status(404).json({ error: "Usuário não encontrado" }); return; }
+    const updated = await db.transaction(async (tx) => {
+      const [user] = await tx.select().from(usersTable).where(eq(usersTable.id, userId)).limit(1);
+      if (!user) throw Object.assign(new Error("Usuário não encontrado"), { status: 404 });
 
-    let newBalance: string;
-    if (operation === "add") {
-      newBalance = (parseFloat(user.balance) + parseFloat(amount)).toFixed(2);
-    } else if (operation === "subtract") {
-      newBalance = Math.max(0, parseFloat(user.balance) - parseFloat(amount)).toFixed(2);
-    } else if (balance !== undefined) {
-      newBalance = parseFloat(balance).toFixed(2);
-    } else {
-      res.status(400).json({ error: "Operação inválida" }); return;
-    }
+      let newBalance: string;
+      if (operation === "add") {
+        newBalance = (parseFloat(user.balance) + parseFloat(amount)).toFixed(2);
+      } else if (operation === "subtract") {
+        newBalance = Math.max(0, parseFloat(user.balance) - parseFloat(amount)).toFixed(2);
+      } else if (balance !== undefined) {
+        newBalance = Math.max(0, parseFloat(balance)).toFixed(2);
+      } else {
+        throw Object.assign(new Error("Operação inválida"), { status: 400 });
+      }
 
-    const [updated] = await db.update(usersTable).set({ balance: newBalance }).where(eq(usersTable.id, userId)).returning();
+      const delta = (parseFloat(newBalance) - parseFloat(user.balance)).toFixed(2);
+      if (delta !== "0.00") {
+        const reqKey =
+          String((req as unknown as Request).header("Idempotency-Key") ?? (req as unknown as Request).header("X-Idempotency-Key") ?? "");
+        const idempotencyKey = reqKey.trim() !== ""
+          ? reqKey.trim()
+          : `admin:balance:${userId}:${newBalance}:${String(operation ?? "set")}`;
+        await applyBalanceDelta(tx, {
+          userId,
+          amount: delta,
+          kind: "admin_balance_adjustment",
+          idempotencyKey,
+          refType: "admin",
+          refId: req.admin?.username ?? "admin",
+          enforceNonNegative: true,
+          metadata: { operation: operation ?? "set", newBalance },
+        });
+      }
+
+      const [after] = await tx.select({ id: usersTable.id, balance: usersTable.balance }).from(usersTable).where(eq(usersTable.id, userId)).limit(1);
+      return after!;
+    });
+
     res.json({ id: updated.id, balance: updated.balance });
   } catch (err) {
+    const e = err as Error & { status?: number };
+    if (e.status === 400 || e.status === 404) {
+      res.status(e.status).json({ error: e.message });
+      return;
+    }
     logger.error({ err }, "Admin balance update error");
     res.status(500).json({ error: "Erro ao atualizar saldo" });
   }
@@ -494,18 +523,26 @@ router.put("/bets/:id/status", adminMiddleware, async (req: AdminRequest, res: R
 
       // Credit balance atomically when marking won (only from non-won state)
       if (status === "won" && oldStatus !== "won") {
-        await tx
-          .update(usersTable)
-          .set({ balance: sql`${usersTable.balance} + ${bet.potentialWin}::numeric` })
-          .where(eq(usersTable.id, bet.userId));
+        await applyBalanceDelta(tx, {
+          userId: bet.userId,
+          amount: bet.potentialWin,
+          kind: "admin_bet_settlement_payout",
+          idempotencyKey: `admin:bet:${betId}:status:won`,
+          refType: "bet",
+          refId: String(betId),
+        });
       }
 
       // Refund stake when voiding (only from non-voided state)
       if (status === "voided" && oldStatus !== "voided") {
-        await tx
-          .update(usersTable)
-          .set({ balance: sql`${usersTable.balance} + ${bet.stake}::numeric` })
-          .where(eq(usersTable.id, bet.userId));
+        await applyBalanceDelta(tx, {
+          userId: bet.userId,
+          amount: bet.stake,
+          kind: "admin_bet_settlement_refund",
+          idempotencyKey: `admin:bet:${betId}:status:voided`,
+          refType: "bet",
+          refId: String(betId),
+        });
       }
 
       // Audit log
@@ -572,9 +609,14 @@ router.post("/payments/:id/credit", adminMiddleware, async (req: AdminRequest, r
 
     await db.transaction(async (tx) => {
       await tx.update(paymentsTable).set({ status: "completed" }).where(eq(paymentsTable.id, paymentId));
-      await tx.update(usersTable)
-        .set({ balance: sql`${usersTable.balance} + ${payment.amount}` })
-        .where(eq(usersTable.id, payment.userId));
+      await applyBalanceDelta(tx, {
+        userId: payment.userId,
+        amount: payment.amount,
+        kind: "admin_payment_credit",
+        idempotencyKey: `payment:${payment.orderId}:admin_credit`,
+        refType: "payment",
+        refId: payment.orderId,
+      });
     });
 
     res.json({ id: paymentId, status: "completed" });

@@ -1,8 +1,9 @@
 import { Router, type IRouter, type Response } from "express";
-import { db, betsTable, cashoutStatesTable, platformSettingsTable, usersTable } from "@workspace/db";
+import { db, betsTable, cashoutStatesTable, platformSettingsTable, settlementLogsTable, usersTable } from "@workspace/db";
 import { eq, desc, sql, and, inArray } from "drizzle-orm";
 import { authMiddleware, type AuthRequest } from "../middlewares/auth";
 import { logger } from "../lib/logger";
+import { applyBalanceDelta, insertLedgerEntry } from "../lib/ledger";
 import { liveMatchState, finishedMatchResults, type LiveMatchState } from "./matches";
 import { scoreOutcomeForSel, type SelectionRecord } from "../settlement";
 
@@ -869,6 +870,16 @@ router.post("/place", authMiddleware, async (req: AuthRequest, res: Response): P
           status: "pending",
         }).returning();
 
+        await insertLedgerEntry(tx, {
+          userId: req.user!.id,
+          amount: (-parseFloat(stakeStr)).toFixed(2),
+          kind: "bet_stake_debit",
+          idempotencyKey: `bet:${bet.id}:stake_debit`,
+          refType: "bet",
+          refId: String(bet.id),
+          metadata: { matchId },
+        });
+
         return { bet, newBalance: updated[0]!.balance };
       }
     });
@@ -1054,11 +1065,23 @@ router.post("/:id/cashout", authMiddleware, async (req: AuthRequest, res: Respon
         throw Object.assign(new Error("Bet is not eligible for cash out"), { status: 400 });
       }
 
-      // Atomic balance credit using SQL addition (no read-then-write race)
-      await tx
-        .update(usersTable)
-        .set({ balance: sql`${usersTable.balance} + ${cashoutStr}::numeric` })
-        .where(eq(usersTable.id, req.user!.id));
+      await applyBalanceDelta(tx, {
+        userId: req.user!.id,
+        amount: cashoutStr,
+        kind: "bet_cashout_payout",
+        idempotencyKey: `bet:${betId}:cashout`,
+        refType: "bet",
+        refId: String(betId),
+      });
+
+      await tx.insert(settlementLogsTable).values({
+        betId,
+        userId: req.user!.id,
+        oldStatus: "pending",
+        newStatus: "cashed_out",
+        payout: cashoutStr,
+        message: "Cashout",
+      });
 
       await tx.delete(cashoutStatesTable).where(eq(cashoutStatesTable.betId, betId));
 

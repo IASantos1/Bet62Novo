@@ -4,6 +4,7 @@ import { eq, sql, count } from "drizzle-orm";
 import { authMiddleware, type AuthRequest } from "../middlewares/auth";
 import { logger } from "../lib/logger";
 import { sendDepositConfirmed } from "../lib/mailer";
+import { applyBalanceDelta } from "../lib/ledger";
 import { randomUUID } from "crypto";
 
 const router: IRouter = Router();
@@ -329,9 +330,14 @@ router.get("/callback", async (req: Request, res: Response): Promise<void> => {
 
     await db.transaction(async (tx) => {
       await tx.update(paymentsTable).set({ status: "completed", requestId: requestId || payment.requestId }).where(eq(paymentsTable.orderId, orderId));
-      await tx.update(usersTable).set({
-        balance: sql`${usersTable.balance} + ${payment.amount}`,
-      }).where(eq(usersTable.id, payment.userId));
+      await applyBalanceDelta(tx, {
+        userId: payment.userId,
+        amount: payment.amount,
+        kind: "payment_deposit_credit",
+        idempotencyKey: `payment:${orderId}:credit`,
+        refType: "payment",
+        refId: orderId,
+      });
     });
 
     logger.info({ orderId, userId: payment.userId, amount: payment.amount }, "Payment confirmed and balance credited");
@@ -380,9 +386,14 @@ router.get("/card-return", async (req: Request, res: Response): Promise<void> =>
       if (payment && payment.status === "pending") {
         await db.transaction(async (tx) => {
           await tx.update(paymentsTable).set({ status: "completed" }).where(eq(paymentsTable.orderId, orderId));
-          await tx.update(usersTable).set({
-            balance: sql`${usersTable.balance} + ${payment.amount}`,
-          }).where(eq(usersTable.id, payment.userId));
+          await applyBalanceDelta(tx, {
+            userId: payment.userId,
+            amount: payment.amount,
+            kind: "payment_deposit_credit",
+            idempotencyKey: `payment:${orderId}:credit`,
+            refType: "payment",
+            refId: orderId,
+          });
         });
 
         // Grant freebet if this is the first deposit

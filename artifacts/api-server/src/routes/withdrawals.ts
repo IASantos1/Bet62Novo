@@ -6,6 +6,7 @@ import { authMiddleware, type AuthRequest } from "../middlewares/auth";
 import { adminMiddleware, type AdminRequest } from "../middlewares/adminAuth";
 import { logger } from "../lib/logger";
 import { sendWithdrawalApproved, sendWithdrawalRejected } from "../lib/mailer";
+import { applyBalanceDelta } from "../lib/ledger";
 
 const router: IRouter = Router();
 
@@ -71,13 +72,8 @@ router.post("/", authMiddleware, async (req: AuthRequest, res: Response): Promis
       return;
     }
 
-    const [withdrawal] = await db.transaction(async (tx) => {
-      await tx
-        .update(usersTable)
-        .set({ balance: sql`${usersTable.balance} - ${amount.toFixed(2)}` })
-        .where(eq(usersTable.id, req.user!.id));
-
-      return await tx.insert(withdrawalsTable).values({
+    const withdrawal = await db.transaction(async (tx) => {
+      const [w] = await tx.insert(withdrawalsTable).values({
         userId: req.user!.id,
         amount: amount.toFixed(2),
         iban: cleanIban,
@@ -85,6 +81,18 @@ router.post("/", authMiddleware, async (req: AuthRequest, res: Response): Promis
         nif,
         status: "pending",
       }).returning();
+
+      await applyBalanceDelta(tx, {
+        userId: req.user!.id,
+        amount: (-amount).toFixed(2),
+        kind: "withdrawal_request_debit",
+        idempotencyKey: `withdrawal:${w.id}:debit`,
+        refType: "withdrawal",
+        refId: String(w.id),
+        enforceNonNegative: true,
+      });
+
+      return w;
     });
 
     res.json({ withdrawal });
@@ -156,10 +164,14 @@ router.put("/admin/:id", adminMiddleware, async (req: Request, res: Response): P
 
     const [updated] = await db.transaction(async (tx) => {
       if (status === "rejected") {
-        await tx
-          .update(usersTable)
-          .set({ balance: sql`${usersTable.balance} + ${existing.amount}` })
-          .where(eq(usersTable.id, existing.userId));
+        await applyBalanceDelta(tx, {
+          userId: existing.userId,
+          amount: existing.amount,
+          kind: "withdrawal_reject_refund",
+          idempotencyKey: `withdrawal:${id}:refund`,
+          refType: "withdrawal",
+          refId: String(id),
+        });
       }
 
       return await tx

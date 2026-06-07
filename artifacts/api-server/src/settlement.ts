@@ -1,6 +1,7 @@
 import { db, betsTable, cashoutStatesTable, usersTable, settlementLogsTable } from "@workspace/db";
 import { eq, and, lt, sql, gte, desc } from "drizzle-orm";
 import { logger } from "./lib/logger";
+import { applyBalanceDelta } from "./lib/ledger";
 import { ensureFinishedMatchResult, finishedMatchResults, scanDailyForFinished, scanV2AllSportsForFinished } from "./routes/matches";
 
 export type SelectionRecord = {
@@ -804,10 +805,14 @@ export async function autoSettlePendingBets(): Promise<void> {
             if (rows.length === 0) return;
             await tx.delete(cashoutStatesTable).where(eq(cashoutStatesTable.betId, bet.id));
 
-            await tx
-              .update(usersTable)
-              .set({ balance: sql`${usersTable.balance} + ${bet.stake}::numeric` })
-              .where(eq(usersTable.id, bet.userId));
+            await applyBalanceDelta(tx, {
+              userId: bet.userId,
+              amount: bet.stake,
+              kind: "bet_settlement_void_refund",
+              idempotencyKey: `bet:${bet.id}:settlement:void_refund`,
+              refType: "bet",
+              refId: String(bet.id),
+            });
 
             await tx.insert(settlementLogsTable).values({
               betId: bet.id,
@@ -867,11 +872,14 @@ export async function autoSettlePendingBets(): Promise<void> {
           if (rows.length === 0) return; // already settled elsewhere
           await tx.delete(cashoutStatesTable).where(eq(cashoutStatesTable.betId, bet.id));
 
-          // Atomic SQL addition — no read-then-write race condition
-          await tx
-            .update(usersTable)
-            .set({ balance: sql`${usersTable.balance} + ${payoutStr}::numeric` })
-            .where(eq(usersTable.id, bet.userId));
+          await applyBalanceDelta(tx, {
+            userId: bet.userId,
+            amount: payoutStr,
+            kind: "bet_settlement_payout",
+            idempotencyKey: `bet:${bet.id}:settlement:payout`,
+            refType: "bet",
+            refId: String(bet.id),
+          });
 
           await tx.insert(settlementLogsTable).values({
             betId: bet.id,
@@ -1013,11 +1021,14 @@ async function expireStalePendingBets(): Promise<void> {
           if (rows.length === 0) return; // already settled elsewhere
           await tx.delete(cashoutStatesTable).where(eq(cashoutStatesTable.betId, bet.id));
 
-          // Atomic SQL addition — stake refund, no read-then-write race
-          await tx
-            .update(usersTable)
-            .set({ balance: sql`${usersTable.balance} + ${bet.stake}::numeric` })
-            .where(eq(usersTable.id, bet.userId));
+          await applyBalanceDelta(tx, {
+            userId: bet.userId,
+            amount: bet.stake,
+            kind: "bet_settlement_stale_refund",
+            idempotencyKey: `bet:${bet.id}:settlement:stale_refund`,
+            refType: "bet",
+            refId: String(bet.id),
+          });
 
           await tx.insert(settlementLogsTable).values({
             betId: bet.id,
