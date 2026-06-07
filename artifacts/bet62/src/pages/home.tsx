@@ -2503,6 +2503,8 @@ export default function Home() {
     const isHalfTimeBreak = status === "ht" || status.includes("half time");
     if (isHalfTimeBreak) return Math.max(0, apiMin);
 
+    if (isFootball && (match as any)?._liveExtra?.kickoffSec) return Math.max(0, apiMin);
+
     const looksNotStarted =
       apiMin <= 0 &&
       maxKnownMin === 0 &&
@@ -2524,7 +2526,6 @@ export default function Home() {
 
     const elapsed = Math.min(3, Math.floor((Date.now() - changedAt) / 60000));
     let computed = apiMin + elapsed;
-    if (isFootball) computed = Math.max(0, computed - 3);
     return Math.max(0, Math.min(isFootball ? 130 : 999, computed));
   };
 
@@ -3890,8 +3891,9 @@ export default function Home() {
       if (tag === "HT") return "HT";
       if (tag === "ET") return `${minute > 0 ? `${minute}' · ` : ""}ET`;
       if (tag === "PEN") return "PEN";
-      if (tag) return `${minute}' · ${tag}`;
-      return minute > 0 ? `${minute}'` : "AO VIVO";
+      const minLbl = extra?.clockStr ?? (minute > 0 ? `${minute}'` : "");
+      if (tag) return `${minLbl} · ${tag}`.trim();
+      return minLbl || "AO VIVO";
     })();
 
     // "Em Breve" — upcoming real match, not yet started

@@ -152,18 +152,18 @@ function LiveMatchCard({ match }: { match: LiveMatch }) {
       const s = match.status ?? "";
       if (s === "HT" || s === "Halftime") return "Int.";
       if (s === "OT") return "OT";
-      if (s.startsWith("Q")) return s; // Q1 / Q2 / Q3 / Q4
-      return `${match.minute ?? 0}'`;
+      if (s.startsWith("Q")) return `${s}${match._liveExtra?.clockStr ? ` · ${match._liveExtra.clockStr}` : ""}`; // Q1 / Q2 / Q3 / Q4
+      return `${match.minute ?? 0}'${match._liveExtra?.clockStr ? ` · ${match._liveExtra.clockStr}` : ""}`;
     }
     if (isHockey) {
       const s = match.status ?? "";
-      if (s === "1P" || s === "P1" || s === "1st Period") return "1º Per.";
-      if (s === "2P" || s === "P2" || s === "2nd Period") return "2º Per.";
-      if (s === "3P" || s === "P3" || s === "3rd Period") return "3º Per.";
+      if (s === "1P" || s === "P1" || s === "1st Period") return `1º Per.${match._liveExtra?.clockStr ? ` · ${match._liveExtra.clockStr}` : ""}`;
+      if (s === "2P" || s === "P2" || s === "2nd Period") return `2º Per.${match._liveExtra?.clockStr ? ` · ${match._liveExtra.clockStr}` : ""}`;
+      if (s === "3P" || s === "P3" || s === "3rd Period") return `3º Per.${match._liveExtra?.clockStr ? ` · ${match._liveExtra.clockStr}` : ""}`;
       if (s === "OT") return "OT";
       if (s === "SO") return "SO";
       if (s.includes("Break") || s === "INT") return "Int.";
-      return s || `${match.minute ?? 0}'`;
+      return `${s || `${match.minute ?? 0}'`}${match._liveExtra?.clockStr ? ` · ${match._liveExtra.clockStr}` : ""}`;
     }
     if (isBase) {
       const s = match.status ?? "";
@@ -177,7 +177,7 @@ function LiveMatchCard({ match }: { match: LiveMatch }) {
       };
       return lg[s] ?? s;
     }
-    return `${match.minute ?? 0}'`;
+    return match._liveExtra?.clockStr ?? `${match.minute ?? 0}'`;
   })();
 
   const OddsButton = ({ mkt, lbl, val }: { mkt: string; lbl: string; val: number }) => {

@@ -79,6 +79,8 @@ export interface LiveMatch {
   hasRealOdds?: boolean;
   startsIn?: number;
   _liveExtra?: {
+    clockStr?: string;
+    kickoffSec?: number;
     sets?: Array<[number, number]>;
     currentPoints?: [number | string, number | string];
     serving?: [boolean, boolean];

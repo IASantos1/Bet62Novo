@@ -188,6 +188,7 @@ export type LiveMatchState = {
   // Sport-specific live display data
   _liveExtra?: {
     clockStr?: string;                   // basketball/hockey: "06:44"
+    kickoffSec?: number;
     sets?: Array<[number, number]>;      // tennis: [[6,3],[4,2]] last entry is in-progress
     currentPoints?: [number | string, number | string]; // tennis: [30, 15] or ["D","D"] or ["AD",40]
     serving?: [boolean, boolean];
@@ -6969,9 +6970,12 @@ async function buildFootballLiveV2(events: SAPIV2Event[]): Promise<LiveMatchStat
     // Block youth matches: check league name AND team names (e.g. "Pergolettese U19")
     if (isBlockedLeague(`${league} ${homeTeam} ${awayTeam}`)) continue;
 
+    const existing = liveMatchState.get(id);
     const isHT = statusStr === "HT";
     const isPen = statusStr === "Penalties";
     const isET = !isPen && (statusStr.includes("extra") || statusStr === "Extra Time");
+    const isBreak = statusStr === "Break Time" || statusStr === "Pause";
+    let resolvedKickoffSec: number | undefined = existing?._liveExtra?.kickoffSec;
     let minute: number;
     if (isHT) {
       minute = 45;
@@ -6982,7 +6986,7 @@ async function buildFootballLiveV2(events: SAPIV2Event[]): Promise<LiveMatchStat
     } else {
       // Resolve kickoff timestamp: prefer the event's own startTimestamp; if absent or zero,
       // fall back to the event's scheduled time so each game has its own independent clock.
-      let kickoffSec = ev.startTimestamp ?? 0;
+      let kickoffSec = existing?._liveExtra?.kickoffSec ?? ev.startTimestamp ?? 0;
       if (!kickoffSec) {
         const { date: sDate, time: sTime } = v2EventDateTime(ev);
         if (sDate && /^\d{2}:\d{2}$/.test(sTime)) {
@@ -6996,12 +7000,13 @@ async function buildFootballLiveV2(events: SAPIV2Event[]): Promise<LiveMatchStat
         }
       }
       if (kickoffSec > 0) {
+        resolvedKickoffSec = kickoffSec;
         const minsFromKickoff = Math.floor((now / 1000 - kickoffSec) / 60);
         if (statusStr === "1st half") {
           // Allow up to 49' for first-half stoppage time
           minute = Math.min(49, Math.max(1, minsFromKickoff));
         } else if (statusStr === "2nd half") {
-          const shKickoff = liveMatchState.get(id)?._liveExtra?.secondHalfKickoffSec;
+          const shKickoff = existing?._liveExtra?.secondHalfKickoffSec;
           if (typeof shKickoff === "number" && Number.isFinite(shKickoff) && shKickoff > 0) {
             const minsFromSecondHalf = Math.floor((now / 1000 - shKickoff) / 60);
             minute = Math.min(99, Math.max(46, 46 + minsFromSecondHalf));
@@ -7016,7 +7021,17 @@ async function buildFootballLiveV2(events: SAPIV2Event[]): Promise<LiveMatchStat
         minute = statusStr === "1st half" ? 25 : statusStr === "2nd half" ? 70 : 45;
       }
     }
-    const newStatus = isHT ? "HT" : isPen ? "Penalties" : isET ? "ET" : statusStr;
+    const inferredHT = isBreak && !existing?._liveExtra?.secondHalfKickoffSec && minute >= 45 && minute <= 55;
+    if (inferredHT) minute = 45;
+    const newStatus = inferredHT ? "HT" : isHT ? "HT" : isPen ? "Penalties" : isET ? "ET" : statusStr;
+
+    const clockStr =
+      newStatus === "HT" ? undefined
+      : newStatus === "2nd half" || newStatus === "2nd Half" || newStatus === "2nd half"
+        ? (minute > 90 ? `90+${minute - 90}'` : minute > 0 ? `${minute}'` : undefined)
+        : (newStatus === "1st half" || newStatus === "1st Half" || newStatus === "1st half" || newStatus === "Pause" || newStatus === "Break Time")
+          ? (minute > 45 ? `45+${minute - 45}'` : minute > 0 ? `${minute}'` : undefined)
+          : (minute > 0 ? `${minute}'` : undefined);
 
     // Zombie detector: if minute AND score are identical for > 20 min the feed is frozen.
     // Exclude HT/ET/Penalties where minute naturally stays constant for legitimate breaks.
@@ -7035,8 +7050,6 @@ async function buildFootballLiveV2(events: SAPIV2Event[]): Promise<LiveMatchStat
         _v2StuckTracker.set(id, { minute, score: scoreKey, since: now });
       }
     }
-
-    const existing = liveMatchState.get(id);
 
     // Late-game wall-clock cap: if we've been tracking this match for 28+ min AND the
     // computed minute is 82+, the match has almost certainly ended even though the API
@@ -7088,7 +7101,12 @@ async function buildFootballLiveV2(events: SAPIV2Event[]): Promise<LiveMatchStat
               ? Math.floor(now / 1000)
               : (existing._liveExtra?.secondHalfKickoffSec ?? Math.floor(now / 1000)))
           : existing._liveExtra?.secondHalfKickoffSec;
-      const liveExtra = shKickoffSec ? { ...(penLiveExtra ?? {}), secondHalfKickoffSec: shKickoffSec } : penLiveExtra;
+      const liveExtra = {
+        ...(penLiveExtra ?? {}),
+        ...(shKickoffSec ? { secondHalfKickoffSec: shKickoffSec } : {}),
+        kickoffSec: resolvedKickoffSec,
+        clockStr,
+      };
 
       // Helper: patch penExtra with real penalty odds into markets
       const withPen = (mkts: typeof existing.markets) =>
@@ -7216,9 +7234,12 @@ async function buildFootballLiveV2(events: SAPIV2Event[]): Promise<LiveMatchStat
         _baseOdds: baseOdds,
         _baseMarkets: markets,
         _oddsUpdatedAt: now,
-        _liveExtra: (isPen || shKickoffSec)
-          ? { ...(isPen ? { penBaseScore: [homeScore, awayScore] as [number, number], penScore: [0, 0] as [number, number] } : {}), ...(shKickoffSec ? { secondHalfKickoffSec: shKickoffSec } : {}) }
-          : undefined,
+        _liveExtra: {
+          ...(isPen ? { penBaseScore: [homeScore, awayScore] as [number, number], penScore: [0, 0] as [number, number] } : {}),
+          ...(shKickoffSec ? { secondHalfKickoffSec: shKickoffSec } : {}),
+          kickoffSec: resolvedKickoffSec,
+          clockStr,
+        },
       };
       liveMatchState.set(id, state);
       result.push(state);
