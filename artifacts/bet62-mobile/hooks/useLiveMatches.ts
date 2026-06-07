@@ -80,6 +80,7 @@ export interface LiveMatch {
   _liveExtra?: {
     sets?: Array<[number, number]>;
     currentPoints?: [number | string, number | string];
+    serving?: [boolean, boolean];
     periods?: Array<[number, number]>;
     quarters?: Array<[number, number]>;
     innings?: Array<[number, number]>;

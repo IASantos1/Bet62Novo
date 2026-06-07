@@ -189,6 +189,7 @@ export type LiveMatchState = {
     clockStr?: string;                   // basketball/hockey: "06:44"
     sets?: Array<[number, number]>;      // tennis: [[6,3],[4,2]] last entry is in-progress
     currentPoints?: [number | string, number | string]; // tennis: [30, 15] or ["D","D"] or ["AD",40]
+    serving?: [boolean, boolean];
     currentPts?: [number, number];       // volleyball: current set points [18, 16]
     vollSets?: Array<[number, number]>;  // volleyball: completed set scores [[25,18],[22,25]]
     tennisStats?: [TennisStatData, TennisStatData]; // home / away match stats
@@ -5767,6 +5768,7 @@ function buildTennisLiveMatches(
       if (numDoneSets >= 2) settledSusp["set2"]     = SETTLED;
 
       const currentPoints: [number | string, number | string] = [hPt, aPt];
+      const serving: [boolean, boolean] = [p0.serve === "True", p1.serve === "True"];
       const suspPts: [number | string, number | string] = [
         hPt === "D" ? "40" : hPt,
         aPt === "D" ? "40" : aPt,
@@ -5851,7 +5853,7 @@ function buildTennisLiveMatches(
         marketSuspension: marketSuspension && Object.keys(marketSuspension).length > 0 ? marketSuspension : undefined,
         _suspensionReason: suspensionReason,
         _oddsUpdatedAt:    now,
-        _liveExtra:        { sets, currentPoints, tennisStats: statsMap.get(m.id) },
+        _liveExtra:        { sets, currentPoints, serving, tennisStats: statsMap.get(m.id) },
       });
     }
   }

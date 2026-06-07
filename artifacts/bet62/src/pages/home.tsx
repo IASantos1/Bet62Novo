@@ -1287,6 +1287,7 @@ type Match = {
     clockStr?: string;
     sets?: Array<[number, number]>;
     currentPoints?: [number | string, number | string];
+    serving?: [boolean, boolean];
     currentPts?: [number, number];
     vollSets?: Array<[number, number]>;
     tennisStats?: [
@@ -2995,6 +2996,7 @@ export default function Home() {
       clockStr?: string;
       sets?: Array<[number, number]>;
       currentPoints?: [number | string, number | string];
+      serving?: [boolean, boolean];
       currentPts?: [number, number];
       vollSets?: Array<[number, number]>;
       tennisStats?: [
@@ -3953,6 +3955,7 @@ export default function Home() {
     const TennisScore = () => {
       const sets = extra?.sets ?? [];
       const pts  = extra?.currentPoints;
+      const serving = extra?.serving;
       const st   = extra?.tennisStats;
       const colW = sets.length > 1 ? "w-7" : "w-8";
       const isDeuce = pts?.[0] === "D" && pts?.[1] === "D";
@@ -3975,7 +3978,7 @@ export default function Home() {
             {sets.map(([h], i) => (
               <div key={i} className={`${colW} text-center font-black ${h > (sets[i]?.[1] ?? 0) ? "text-white" : "text-zinc-500"}`}>{h}</div>
             ))}
-            {pts && <div className={`w-8 text-center font-black ${hPtColor}`}>{isDeuce ? "D" : pts[0]}</div>}
+            {pts && <div className={`w-8 text-center font-black ${hPtColor}`}>{isDeuce ? "D" : `${serving?.[0] ? "🎾" : ""}${pts[0]}`}</div>}
           </div>
           {/* Away row */}
           <div className="flex items-center">
@@ -3983,7 +3986,7 @@ export default function Home() {
             {sets.map(([, a], i) => (
               <div key={i} className={`${colW} text-center font-black ${a > (sets[i]?.[0] ?? 0) ? "text-white" : "text-zinc-500"}`}>{a}</div>
             ))}
-            {pts && <div className={`w-8 text-center font-black ${aPtColor}`}>{isDeuce ? "D" : pts[1]}</div>}
+            {pts && <div className={`w-8 text-center font-black ${aPtColor}`}>{isDeuce ? "D" : `${serving?.[1] ? "🎾" : ""}${pts[1]}`}</div>}
           </div>
         </div>
       );
