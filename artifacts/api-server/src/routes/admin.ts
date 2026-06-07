@@ -462,8 +462,14 @@ router.get("/bets", adminMiddleware, async (req: AdminRequest, res: Response): P
 
 // PUT /api/admin/bets/:id/status
 router.put("/bets/:id/status", adminMiddleware, async (req: AdminRequest, res: Response): Promise<void> => {
-  const betId = parseInt(String(req.params["id"]), 10);
+  const rawId = String(req.params["id"] ?? "");
+  const normalized = rawId.toUpperCase().startsWith("BT62-") ? rawId.slice(5) : rawId;
+  const betId = parseInt(normalized, 10);
   const { status } = req.body;
+
+  if (!Number.isFinite(betId) || betId <= 0) {
+    res.status(400).json({ error: "ID inválido" }); return;
+  }
 
   const validStatuses = ["pending", "won", "lost", "cashed_out", "voided"];
   if (!validStatuses.includes(status)) {
