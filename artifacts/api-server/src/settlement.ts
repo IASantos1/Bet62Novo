@@ -2,7 +2,7 @@ import { db, betsTable, cashoutStatesTable, usersTable, settlementLogsTable } fr
 import { eq, and, lt, sql, gte, desc } from "drizzle-orm";
 import { logger } from "./lib/logger";
 import { applyBalanceDelta } from "./lib/ledger";
-import { ensureFinishedMatchResult, finishedMatchResults, scanDailyForFinished, scanV2AllSportsForFinished } from "./routes/matches";
+import { ensureFinishedMatchResult, finishedMatchResults, liveMatchState, scanDailyForFinished, scanV2AllSportsForFinished } from "./routes/matches";
 
 export type SelectionRecord = {
   matchId?: string;
@@ -19,6 +19,7 @@ export type SelectionRecord = {
 type FTScore = { home: number; away: number };
 type HTScore = { htHome: number; htAway: number };
 type FinishedResult = (typeof finishedMatchResults extends Map<string, infer V> ? V : never);
+type LiveResult = (typeof liveMatchState extends Map<string, infer V> ? V : never);
 
 /**
  * Evaluate a single bet selection against a known final score + optional HT score.
@@ -683,6 +684,39 @@ function findResult(
   return null;
 }
 
+function findLiveResult(
+  sel: SelectionRecord,
+  betMatchId: string,
+  isSingle: boolean
+): LiveResult | null {
+  if (sel.matchId) {
+    const r = liveMatchState.get(sel.matchId);
+    if (r) return r;
+  }
+  if (isSingle) {
+    const r = liveMatchState.get(betMatchId);
+    if (r) return r;
+  }
+
+  const title = sel.matchTitle ?? "";
+  const vsSplit = title.split(" vs ");
+  if (vsSplit.length >= 2) {
+    const homeQ = vsSplit[0]!.trim().toLowerCase();
+    const awayQ = vsSplit.slice(1).join(" vs ").trim().toLowerCase();
+    if (homeQ && awayQ) {
+      for (const result of liveMatchState.values()) {
+        const rH = String((result as any).home ?? "").toLowerCase();
+        const rA = String((result as any).away ?? "").toLowerCase();
+        const homeMatch = rH.includes(homeQ) || homeQ.includes(rH);
+        const awayMatch = rA.includes(awayQ) || awayQ.includes(rA);
+        if (homeMatch && awayMatch) return result;
+      }
+    }
+  }
+
+  return null;
+}
+
 /**
  * Scan all pending bets and settle those whose matches have finished.
  * Won bets credit potentialWin to the user's balance atomically.
@@ -743,6 +777,89 @@ export async function autoSettlePendingBets(opts?: { matchIds?: string[] }): Pro
           }
           if (!touches) continue;
         }
+
+        if (isSingle) {
+          const sel = selections[0]!;
+          const live = findLiveResult(sel, bet.matchId, true);
+          const homeScore = live ? Number((live as any).homeScore ?? 0) : 0;
+          const awayScore = live ? Number((live as any).awayScore ?? 0) : 0;
+          const bothScored = Number.isFinite(homeScore) && Number.isFinite(awayScore) && homeScore > 0 && awayScore > 0;
+          if (bothScored && (sel.selection === "bts-yes" || sel.selection === "bts-no")) {
+            const outcome = scoreOutcomeForSel(sel, { home: homeScore, away: awayScore });
+            if (outcome === "won" || outcome === "lost") {
+              const updatedSel: SelectionRecord = {
+                ...sel,
+                finalScore: { home: homeScore, away: awayScore },
+                outcome,
+              };
+
+              if (outcome === "won") {
+                const stakeNum = parseFloat(bet.stake);
+                const effectiveOdds = Math.max(1.01, Number(sel.odd ?? 1));
+                const payoutNum = Math.max(0, Number((stakeNum * effectiveOdds).toFixed(2)));
+                const payoutStr = payoutNum.toFixed(2);
+                const oddsStr = Number(effectiveOdds.toFixed(2)).toFixed(2);
+
+                await db.transaction(async (tx) => {
+                  const rows = await tx
+                    .update(betsTable)
+                    .set({ status: "won", selections: [updatedSel], potentialWin: payoutStr, totalOdds: oddsStr })
+                    .where(and(eq(betsTable.id, bet.id), eq(betsTable.status, "pending")))
+                    .returning({ id: betsTable.id });
+                  if (rows.length === 0) return;
+
+                  await tx.delete(cashoutStatesTable).where(eq(cashoutStatesTable.betId, bet.id));
+
+                  await applyBalanceDelta(tx, {
+                    userId: bet.userId,
+                    amount: payoutStr,
+                    kind: "bet_settlement_early_payout",
+                    idempotencyKey: `bet:${bet.id}:settlement:payout`,
+                    refType: "bet",
+                    refId: String(bet.id),
+                    metadata: { trigger: "live_market_resolution", market: sel.selection },
+                  });
+
+                  await tx.insert(settlementLogsTable).values({
+                    betId: bet.id,
+                    userId: bet.userId,
+                    oldStatus: "pending",
+                    newStatus: "won",
+                    payout: payoutStr,
+                    message: "Auto-settled early: market resolved in-play (BTTS)",
+                  });
+                });
+
+                settled++;
+                continue;
+              }
+
+              await db.transaction(async (tx) => {
+                const rows = await tx
+                  .update(betsTable)
+                  .set({ status: "lost", selections: [updatedSel] })
+                  .where(and(eq(betsTable.id, bet.id), eq(betsTable.status, "pending")))
+                  .returning({ id: betsTable.id });
+                if (rows.length === 0) return;
+
+                await tx.delete(cashoutStatesTable).where(eq(cashoutStatesTable.betId, bet.id));
+
+                await tx.insert(settlementLogsTable).values({
+                  betId: bet.id,
+                  userId: bet.userId,
+                  oldStatus: "pending",
+                  newStatus: "lost",
+                  payout: "0.00",
+                  message: "Auto-settled early: market resolved in-play (BTTS)",
+                });
+              });
+
+              settled++;
+              continue;
+            }
+          }
+        }
+
         const outcomes: Array<"won" | "lost" | "void" | null> = [];
 
         for (const sel of selections) {
