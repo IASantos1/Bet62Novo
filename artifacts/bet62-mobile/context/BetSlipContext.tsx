@@ -60,11 +60,15 @@ export function BetSlipProvider({ children }: { children: React.ReactNode }) {
       prev.map((s) => {
         const hit = map.get(`${s.matchId}::${s.market}`);
         if (!hit) return s;
+        const nextOdds = hit.odds != null && Number.isFinite(hit.odds) ? Math.max(1.01, hit.odds) : s.odds;
+        const prevRounded = Math.round(s.odds * 100) / 100;
+        const nextRounded = Math.round(nextOdds * 100) / 100;
+        const oddsChanged = Number.isFinite(nextRounded) && Math.abs(nextRounded - prevRounded) >= 0.01;
         return {
           ...s,
-          odds: hit.odds != null && Number.isFinite(hit.odds) ? Math.max(1.01, hit.odds) : s.odds,
-          suspended: hit.suspended,
-          suspendedReason: hit.reason,
+          odds: nextOdds,
+          suspended: hit.suspended || oddsChanged,
+          suspendedReason: hit.suspended ? hit.reason : oddsChanged ? "ODD ATUALIZADA" : undefined,
         };
       })
     );
