@@ -1353,6 +1353,10 @@ type UserBet = {
   cashoutReason?: string;
   cashoutEstimate?: string;
   createdAt: string;
+  settledAt?: string | null;
+  settlementSeconds?: number | null;
+  payout?: string | null;
+  netProfit?: string | null;
 };
 
 type PlatformStats = {
@@ -10792,6 +10796,10 @@ export default function Home() {
                         const betDate = new Date(bet.createdAt);
                         const dateStr = betDate.toLocaleDateString("pt-PT", { day: "2-digit", month: "2-digit", year: "numeric" });
                         const timeStr = betDate.toLocaleTimeString("pt-PT", { hour: "2-digit", minute: "2-digit" });
+                        const settledAt = bet.settledAt ? new Date(bet.settledAt) : null;
+                        const settledDateStr = settledAt ? settledAt.toLocaleDateString("pt-PT", { day: "2-digit", month: "2-digit", year: "numeric" }) : null;
+                        const settledTimeStr = settledAt ? settledAt.toLocaleTimeString("pt-PT", { hour: "2-digit", minute: "2-digit" }) : null;
+                        const settlementMins = typeof bet.settlementSeconds === "number" ? Math.max(0, Math.round(bet.settlementSeconds / 60)) : null;
 
                         const isActivePending = isPending;
                         // Card & text colours
@@ -10819,6 +10827,11 @@ export default function Home() {
                                     <CalendarDays size={11} />
                                     {dateStr} • {timeStr}
                                   </div>
+                                  {!isPending && settledAt && (
+                                    <div className="text-red-100 text-[11px] font-medium mt-0.5">
+                                      Liquidada: {settledDateStr} • {settledTimeStr}{settlementMins !== null ? ` (${settlementMins} min)` : ""}
+                                    </div>
+                                  )}
                                 </div>
                               </div>
                               {isActivePending && (

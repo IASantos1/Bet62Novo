@@ -40,6 +40,10 @@ interface Bet {
   status: "pending" | "won" | "lost" | "cashed_out" | "voided";
   cashoutValue?: string | null;
   createdAt: string;
+  settledAt?: string | null;
+  settlementSeconds?: number | null;
+  payout?: string | null;
+  netProfit?: string | null;
 }
 
 function getBetSelections(bet: Bet): StoredSelection[] {
@@ -86,6 +90,10 @@ function BetCard({ bet, token, onCashout }: { bet: Bet; token: string | null; on
   const betDate = new Date(bet.createdAt);
   const dateStr = betDate.toLocaleDateString("pt-PT", { day: "2-digit", month: "2-digit", year: "numeric" });
   const timeStr = betDate.toLocaleTimeString("pt-PT", { hour: "2-digit", minute: "2-digit" });
+  const settledAt = bet.settledAt ? new Date(bet.settledAt) : null;
+  const settledDateStr = settledAt ? settledAt.toLocaleDateString("pt-PT", { day: "2-digit", month: "2-digit", year: "numeric" }) : null;
+  const settledTimeStr = settledAt ? settledAt.toLocaleTimeString("pt-PT", { hour: "2-digit", minute: "2-digit" }) : null;
+  const settlementMins = typeof bet.settlementSeconds === "number" ? Math.max(0, Math.round(bet.settlementSeconds / 60)) : null;
 
   // colours
   const cardBg = isLost ? "#7b1111" : "#ffffff";
@@ -146,6 +154,11 @@ function BetCard({ bet, token, onCashout }: { bet: Bet; token: string | null; on
             <Text style={{ fontFamily: "Inter_400Regular", fontSize: 11, color: "#fca5a5", marginTop: 2 }}>
               📅 {dateStr} • {timeStr}
             </Text>
+            {!isPending && settledAt && (
+              <Text style={{ fontFamily: "Inter_500Medium", fontSize: 11, color: "rgba(255,255,255,0.9)", marginTop: 2 }}>
+                Liquidada: {settledDateStr} • {settledTimeStr}{settlementMins !== null ? ` (${settlementMins} min)` : ""}
+              </Text>
+            )}
           </View>
         </View>
         {isPending && (
