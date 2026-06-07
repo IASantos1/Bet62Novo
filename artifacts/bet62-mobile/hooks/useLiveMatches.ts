@@ -81,6 +81,9 @@ export interface LiveMatch {
   _liveExtra?: {
     clockStr?: string;
     kickoffSec?: number;
+    clockSec?: number;
+    clockAtMs?: number;
+    clockRunning?: boolean;
     sets?: Array<[number, number]>;
     currentPoints?: [number | string, number | string];
     serving?: [boolean, boolean];

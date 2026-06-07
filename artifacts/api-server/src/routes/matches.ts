@@ -189,6 +189,9 @@ export type LiveMatchState = {
   _liveExtra?: {
     clockStr?: string;                   // basketball/hockey: "06:44"
     kickoffSec?: number;
+    clockSec?: number;
+    clockAtMs?: number;
+    clockRunning?: boolean;
     sets?: Array<[number, number]>;      // tennis: [[6,3],[4,2]] last entry is in-progress
     currentPoints?: [number | string, number | string]; // tennis: [30, 15] or ["D","D"] or ["AD",40]
     serving?: [boolean, boolean];
@@ -7025,12 +7028,38 @@ async function buildFootballLiveV2(events: SAPIV2Event[]): Promise<LiveMatchStat
     if (inferredHT) minute = 45;
     const newStatus = inferredHT ? "HT" : isHT ? "HT" : isPen ? "Penalties" : isET ? "ET" : statusStr;
 
+    const clockNowSec = Math.floor(now / 1000);
+    const clamp = (n: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, n));
+    const isFirstHalf = statusStr === "1st half";
+    const isSecondHalf = statusStr === "2nd half";
+    const isClockRunning = !!(resolvedKickoffSec && (isFirstHalf || isSecondHalf) && newStatus !== "HT");
+    const shKickoffSec = isSecondHalf
+      ? (existing?._liveExtra?.secondHalfKickoffSec ?? 0)
+      : 0;
+    const baseSec =
+      !resolvedKickoffSec ? null
+      : newStatus === "HT" ? 45 * 60
+      : isFirstHalf
+        ? clamp(clockNowSec - resolvedKickoffSec, 0, 49 * 60)
+        : isSecondHalf
+          ? clamp(
+              45 * 60 +
+                (shKickoffSec > 0
+                  ? (clockNowSec - shKickoffSec)
+                  : Math.max(0, (clockNowSec - resolvedKickoffSec) - (15 * 60))),
+              45 * 60,
+              99 * 60,
+            )
+          : null;
+    const secInMin = baseSec === null ? 0 : clamp(baseSec % 60, 0, 59);
+    const secStr = String(secInMin).padStart(2, "0");
+
     const clockStr =
       newStatus === "HT" ? undefined
-      : newStatus === "2nd half" || newStatus === "2nd Half" || newStatus === "2nd half"
-        ? (minute > 90 ? `90+${minute - 90}'` : minute > 0 ? `${minute}'` : undefined)
-        : (newStatus === "1st half" || newStatus === "1st Half" || newStatus === "1st half" || newStatus === "Pause" || newStatus === "Break Time")
-          ? (minute > 45 ? `45+${minute - 45}'` : minute > 0 ? `${minute}'` : undefined)
+      : isFirstHalf
+        ? (minute > 45 ? `45+${minute - 45}'` : minute > 0 ? `${String(minute).padStart(2, "0")}:${secStr}` : undefined)
+        : isSecondHalf
+          ? (minute > 90 ? `90+${minute - 90}'` : minute > 0 ? `${String(minute).padStart(2, "0")}:${secStr}` : undefined)
           : (minute > 0 ? `${minute}'` : undefined);
 
     // Zombie detector: if minute AND score are identical for > 20 min the feed is frozen.
@@ -7105,6 +7134,7 @@ async function buildFootballLiveV2(events: SAPIV2Event[]): Promise<LiveMatchStat
         ...(penLiveExtra ?? {}),
         ...(shKickoffSec ? { secondHalfKickoffSec: shKickoffSec } : {}),
         kickoffSec: resolvedKickoffSec,
+        ...(baseSec !== null ? { clockSec: baseSec, clockAtMs: now, clockRunning: isClockRunning } : {}),
         clockStr,
       };
 
@@ -7238,6 +7268,7 @@ async function buildFootballLiveV2(events: SAPIV2Event[]): Promise<LiveMatchStat
           ...(isPen ? { penBaseScore: [homeScore, awayScore] as [number, number], penScore: [0, 0] as [number, number] } : {}),
           ...(shKickoffSec ? { secondHalfKickoffSec: shKickoffSec } : {}),
           kickoffSec: resolvedKickoffSec,
+          ...(baseSec !== null ? { clockSec: baseSec, clockAtMs: now, clockRunning: isClockRunning } : {}),
           clockStr,
         },
       };
