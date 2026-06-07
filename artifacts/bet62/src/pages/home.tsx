@@ -5653,60 +5653,46 @@ export default function Home() {
         {/* ── TÉNIS: SETS ── */}
         {isTennis && (modalTab === "sets" || modalTab === "todos") && m && (
           <div>
-            {/* 1st Set winner — visible throughout match (settled by server once set ends) */}
-            {((m as any).tennisExtra?.firstSet?.home > 0 ? (
-              <MarketGroup title="Vencedor do 1º Set">
-                <MarketOddsBtn match={match} sel="set1-home" odd={(m as any).tennisExtra.firstSet.home} market="sets" label={match.home} suspKey="firstSet" />
-                <MarketOddsBtn match={match} sel="set1-away" odd={(m as any).tennisExtra.firstSet.away} market="sets" label={match.away} suspKey="firstSet" />
-              </MarketGroup>
-            ) : m.totalGoals.over15 > 0 && (
-              <MarketGroup title="Vencedor do 1º Set">
-                <MarketOddsBtn match={match} sel="set1-home" odd={m.totalGoals.over15} market="sets" label={match.home} suspKey="firstSet" />
-                <MarketOddsBtn match={match} sel="set1-away" odd={m.totalGoals.under15} market="sets" label={match.away} suspKey="firstSet" />
-              </MarketGroup>
-            ))}
-            {/* 2nd Set winner — visible throughout match */}
-            {(m as any).tennisExtra?.set2?.home > 0 && (
-              <MarketGroup title="Vencedor do 2º Set">
-                <MarketOddsBtn match={match} sel="set2-home" odd={(m as any).tennisExtra.set2.home} market="sets" label={match.home} suspKey="set2" />
-                <MarketOddsBtn match={match} sel="set2-away" odd={(m as any).tennisExtra.set2.away} market="sets" label={match.away} suspKey="set2" />
-              </MarketGroup>
-            )}
-            {/* 3rd Set winner */}
-            {(m as any).tennisExtra?.set3?.home > 0 && (
-              <MarketGroup title="Vencedor do 3º Set (se disputado)">
-                <MarketOddsBtn match={match} sel="set3-home" odd={(m as any).tennisExtra.set3.home} market="sets" label={match.home} suspKey="set3" />
-                <MarketOddsBtn match={match} sel="set3-away" odd={(m as any).tennisExtra.set3.away} market="sets" label={match.away} suspKey="set3" />
-              </MarketGroup>
-            )}
-            {m.totalGoals.over25 > 0 && (
-              <MarketGroup title="Total de Sets — O/U 2.5">
-                <MarketOddsBtn match={match} sel="osets" odd={m.totalGoals.over25} market="sets" label="Mais de 2.5 sets" suspKey="sets" />
-                <MarketOddsBtn match={match} sel="usets" odd={m.totalGoals.under25} market="sets" label="Menos de 2.5 sets" suspKey="sets" />
-              </MarketGroup>
-            )}
-            {/* Set handicap -1.5 */}
-            {(m as any).tennisExtra?.setHandicap?.home > 0 && (
-              <MarketGroup title={`Handicap de Sets — ${match.home} −1.5`}>
-                <MarketOddsBtn match={match} sel="sh15-home" odd={(m as any).tennisExtra.setHandicap.home} market="sets" label={`${match.home} −1.5`} suspKey="setHandicap" />
-                <MarketOddsBtn match={match} sel="sh15-away" odd={(m as any).tennisExtra.setHandicap.away} market="sets" label={`${match.away} +1.5`} suspKey="setHandicap" />
-              </MarketGroup>
-            )}
-            {m.bothTeamsScore.yes > 0 && (
-              <MarketGroup title="Tie-Break no Jogo">
-                <MarketOddsBtn match={match} sel="tie-yes" odd={m.bothTeamsScore.yes} market="sets" label="Sim" suspKey="tieBrk" />
-                <MarketOddsBtn match={match} sel="tie-no" odd={m.bothTeamsScore.no} market="sets" label="Não" suspKey="tieBrk" />
-              </MarketGroup>
-            )}
-            {/* Set / Match combo */}
-            {((m as any).tennisExtra?.setMatch?.h11 > 0) && (
-              <MarketGroup title="Set + Resultado Final">
-                {((m as any).tennisExtra.setMatch.h11 > 0) && <MarketOddsBtn match={match} sel="sm-11" odd={(m as any).tennisExtra.setMatch.h11} market="sets" label={`${match.home} ganhar 1º Set + Jogo`} suspKey="setMatch" />}
-                {((m as any).tennisExtra.setMatch.h12 > 0) && <MarketOddsBtn match={match} sel="sm-12" odd={(m as any).tennisExtra.setMatch.h12} market="sets" label={`${match.home} ganhar 1º Set / ${match.away} Jogo`} suspKey="setMatch" />}
-                {((m as any).tennisExtra.setMatch.a21 > 0) && <MarketOddsBtn match={match} sel="sm-21" odd={(m as any).tennisExtra.setMatch.a21} market="sets" label={`${match.away} ganhar 1º Set / ${match.home} Jogo`} suspKey="setMatch" />}
-                {((m as any).tennisExtra.setMatch.a22 > 0) && <MarketOddsBtn match={match} sel="sm-22" odd={(m as any).tennisExtra.setMatch.a22} market="sets" label={`${match.away} ganhar 1º Set + Jogo`} suspKey="setMatch" />}
-              </MarketGroup>
-            )}
+            {(() => {
+              const te = (m as any).tennisExtra as any;
+              const cur = te?.currentSetNum ?? match.minute ?? 1;
+              const showSet1 = cur <= 1;
+              const showSet2 = cur === 2;
+              const showSet3 = cur >= 3;
+              return (
+                <>
+                  {showSet1 && (te?.firstSet?.home > 0 ? (
+                    <MarketGroup title="Vencedor do 1º Set">
+                      <MarketOddsBtn match={match} sel="set1-home" odd={te.firstSet.home} market="sets" label={match.home} suspKey="firstSet" />
+                      <MarketOddsBtn match={match} sel="set1-away" odd={te.firstSet.away} market="sets" label={match.away} suspKey="firstSet" />
+                    </MarketGroup>
+                  ) : m.totalGoals.over15 > 0 && (
+                    <MarketGroup title="Vencedor do 1º Set">
+                      <MarketOddsBtn match={match} sel="set1-home" odd={m.totalGoals.over15} market="sets" label={match.home} suspKey="firstSet" />
+                      <MarketOddsBtn match={match} sel="set1-away" odd={m.totalGoals.under15} market="sets" label={match.away} suspKey="firstSet" />
+                    </MarketGroup>
+                  ))}
+                  {showSet2 && te?.set2?.home > 0 && (
+                    <MarketGroup title="Vencedor do 2º Set">
+                      <MarketOddsBtn match={match} sel="set2-home" odd={te.set2.home} market="sets" label={match.home} suspKey="set2" />
+                      <MarketOddsBtn match={match} sel="set2-away" odd={te.set2.away} market="sets" label={match.away} suspKey="set2" />
+                    </MarketGroup>
+                  )}
+                  {showSet3 && te?.set3?.home > 0 && (
+                    <MarketGroup title="Vencedor do 3º Set">
+                      <MarketOddsBtn match={match} sel="set3-home" odd={te.set3.home} market="sets" label={match.home} suspKey="set3" />
+                      <MarketOddsBtn match={match} sel="set3-away" odd={te.set3.away} market="sets" label={match.away} suspKey="set3" />
+                    </MarketGroup>
+                  )}
+                  {!showSet3 && m.totalGoals.over25 > 0 && (
+                    <MarketGroup title="Total de Sets — O/U 2.5">
+                      <MarketOddsBtn match={match} sel="osets" odd={m.totalGoals.over25} market="sets" label="Mais de 2.5 sets" suspKey="sets" />
+                      <MarketOddsBtn match={match} sel="usets" odd={m.totalGoals.under25} market="sets" label="Menos de 2.5 sets" suspKey="sets" />
+                    </MarketGroup>
+                  )}
+                </>
+              );
+            })()}
           </div>
         )}
 
@@ -5944,7 +5930,7 @@ export default function Home() {
         })()}
 
         {/* ── TÉNIS: PLACAR EXATO — 1º SET (só quando liquidado) ── */}
-        {isTennis && (modalTab === "placar" || modalTab === "todos") && m && (m as any).tennisExtra?.set1ExactScore && (() => {
+        {isTennis && (modalTab === "placar" || modalTab === "todos") && m && false && (m as any).tennisExtra?.set1ExactScore && (() => {
           const ses1 = (m as any).tennisExtra.set1ExactScore as Record<string, number>;
           const isSettled1 = Object.values(ses1).some(v => v === 1.01);
           if (!isSettled1) return null; // while set is live it's already shown in "setExactScore" above
@@ -5984,7 +5970,7 @@ export default function Home() {
         })()}
 
         {/* ── TÉNIS: PLACAR EXATO — 2º SET (só quando liquidado) ── */}
-        {isTennis && (modalTab === "placar" || modalTab === "todos") && m && (m as any).tennisExtra?.set2ExactScore && (() => {
+        {isTennis && (modalTab === "placar" || modalTab === "todos") && m && false && (m as any).tennisExtra?.set2ExactScore && (() => {
           const ses2 = (m as any).tennisExtra.set2ExactScore as Record<string, number>;
           const isSettled2 = Object.values(ses2).some(v => v === 1.01);
           if (!isSettled2) return null;

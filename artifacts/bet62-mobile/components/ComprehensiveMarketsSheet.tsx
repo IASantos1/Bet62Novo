@@ -1478,66 +1478,64 @@ export function ComprehensiveMarketsSheet({ visible, match, onClose }: Props) {
 
                 {isTennis && m?.tennisExtra && (activeTab === "todos" || activeTab === "sets") && (
                   <View style={{ paddingHorizontal: 14, paddingTop: 12, paddingBottom: 2 }}>
-                    <SH title="Mercados de Set" />
-                    {m.tennisExtra.firstSet.home > 1.01 && (
-                      <>
-                        <Text style={s.subsectionLabel}>Vencedor Set 1</Text>
-                        <View style={s.row}>
-                          <OddsBtn market="s1-home" label={match.home} value={m.tennisExtra.firstSet.home} />
-                          <OddsBtn market="s1-away" label={match.away} value={m.tennisExtra.firstSet.away} />
-                        </View>
-                      </>
-                    )}
-                    {m.tennisExtra.set2.home > 1.01 && (
-                      <>
-                        <Text style={s.subsectionLabel}>Vencedor Set 2</Text>
-                        <View style={s.row}>
-                          <OddsBtn market="s2-home" label={match.home} value={m.tennisExtra.set2.home} />
-                          <OddsBtn market="s2-away" label={match.away} value={m.tennisExtra.set2.away} />
-                        </View>
-                      </>
-                    )}
-                    {(m.tennisExtra.totalSets?.over15 ?? 0) > 1.01 && (
-                      <>
-                        <Text style={s.subsectionLabel}>Total de Sets</Text>
-                        <View style={s.row}>
-                          <OddsBtn market="ts-o15" label="Mais 1.5 sets" value={m.tennisExtra.totalSets!.over15} />
-                          <OddsBtn market="ts-u15" label="Menos 1.5 sets" value={m.tennisExtra.totalSets!.under15} />
-                        </View>
-                      </>
-                    )}
-                    {/* Placar exato por set — só quando o set já está liquidado */}
-                    {(m as any).tennisExtra?.set1ExactScore && (() => {
-                      const ses1 = (m as any).tennisExtra.set1ExactScore as Record<string, number>;
-                      const settled = Object.values(ses1).some((v: number) => v === 1.01);
-                      if (!settled) return null;
-                      const entries = Object.entries(ses1).filter(([, v]) => (v as number) > 0);
-                      if (entries.length === 0) return null;
+                    {(() => {
+                      const currentSetNum = m.tennisExtra!.currentSetNum ?? 1;
+                      const set3 = m.tennisExtra!.set3;
+                      const showSet1 = currentSetNum <= 1 && m.tennisExtra!.firstSet.home > 1.01;
+                      const showSet2 = currentSetNum === 2 && m.tennisExtra!.set2.home > 1.01;
+                      const showSet3 = currentSetNum >= 3 && (set3?.home ?? 0) > 1.01;
+                      const showTotalSets = currentSetNum <= 2 && (m.tennisExtra!.totalSets?.over15 ?? 0) > 1.01;
+                      const ses = m.tennisExtra!.setExactScore;
+                      const sesEntries = ses ? Object.entries(ses).filter(([, v]) => (v as number) > 1.01) : [];
                       return (
                         <>
-                          <Text style={s.subsectionLabel}>✓ 1º Set — Resultado Final</Text>
-                          <View style={[s.row, { flexWrap: "wrap" }]}>
-                            {entries.map(([score, odd]) => (
-                              <OddsBtn key={`s1es-${score}`} market={`s1es-${score}`} label={score} value={odd as number} />
-                            ))}
-                          </View>
-                        </>
-                      );
-                    })()}
-                    {(m as any).tennisExtra?.set2ExactScore && (() => {
-                      const ses2 = (m as any).tennisExtra.set2ExactScore as Record<string, number>;
-                      const settled = Object.values(ses2).some((v: number) => v === 1.01);
-                      if (!settled) return null;
-                      const entries = Object.entries(ses2).filter(([, v]) => (v as number) > 0);
-                      if (entries.length === 0) return null;
-                      return (
-                        <>
-                          <Text style={s.subsectionLabel}>✓ 2º Set — Resultado Final</Text>
-                          <View style={[s.row, { flexWrap: "wrap" }]}>
-                            {entries.map(([score, odd]) => (
-                              <OddsBtn key={`s2es-${score}`} market={`s2es-${score}`} label={score} value={odd as number} />
-                            ))}
-                          </View>
+                          <SH title={`Mercados do Set ${currentSetNum}`} />
+                          {showSet1 && (
+                            <>
+                              <Text style={s.subsectionLabel}>Vencedor Set 1</Text>
+                              <View style={s.row}>
+                                <OddsBtn market="s1-home" label={match.home} value={m.tennisExtra!.firstSet.home} />
+                                <OddsBtn market="s1-away" label={match.away} value={m.tennisExtra!.firstSet.away} />
+                              </View>
+                            </>
+                          )}
+                          {showSet2 && (
+                            <>
+                              <Text style={s.subsectionLabel}>Vencedor Set 2</Text>
+                              <View style={s.row}>
+                                <OddsBtn market="s2-home" label={match.home} value={m.tennisExtra!.set2.home} />
+                                <OddsBtn market="s2-away" label={match.away} value={m.tennisExtra!.set2.away} />
+                              </View>
+                            </>
+                          )}
+                          {showSet3 && (
+                            <>
+                              <Text style={s.subsectionLabel}>Vencedor Set 3</Text>
+                              <View style={s.row}>
+                                <OddsBtn market="s3-home" label={match.home} value={set3!.home} />
+                                <OddsBtn market="s3-away" label={match.away} value={set3!.away} />
+                              </View>
+                            </>
+                          )}
+                          {showTotalSets && (
+                            <>
+                              <Text style={s.subsectionLabel}>Total de Sets</Text>
+                              <View style={s.row}>
+                                <OddsBtn market="ts-o15" label="Mais 1.5 sets" value={m.tennisExtra!.totalSets!.over15} />
+                                <OddsBtn market="ts-u15" label="Menos 1.5 sets" value={m.tennisExtra!.totalSets!.under15} />
+                              </View>
+                            </>
+                          )}
+                          {sesEntries.length > 0 && (
+                            <>
+                              <Text style={s.subsectionLabel}>Placar Exato do Set</Text>
+                              <View style={[s.row, { flexWrap: "wrap" }]}>
+                                {sesEntries.map(([score, odd]) => (
+                                  <OddsBtn key={`ses-${currentSetNum}-${score}`} market={`ses${currentSetNum}-${score}`} label={score} value={odd as number} />
+                                ))}
+                              </View>
+                            </>
+                          )}
                         </>
                       );
                     })()}

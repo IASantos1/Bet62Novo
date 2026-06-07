@@ -7884,7 +7884,18 @@ function buildTennisLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
         // that have permanently left the feed.  State is retained for the full 45 s so
         // we can resume accurately if the match genuinely returns.
         const cached = liveMatchState.get(id);
-        if (cached && (now - firstMissing) < 8_000) result.push(cached);
+        if (cached) {
+          const sLow = String(cached.status ?? "").toLowerCase();
+          const finished =
+            (cached.homeScore ?? 0) >= 2 || (cached.awayScore ?? 0) >= 2 ||
+            sLow.includes("ended") || sLow.includes("finished") || sLow.includes("complete");
+          if (finished) {
+            liveMatchState.delete(id);
+            _tennisMissingFrom.delete(id);
+          } else if ((now - firstMissing) < 8_000) {
+            result.push(cached);
+          }
+        }
       }
     } else {
       _tennisMissingFrom.delete(id); // back in feed — reset grace timer
