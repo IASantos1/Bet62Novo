@@ -392,6 +392,9 @@ export default function AdminPage() {
   const [betSearch, setBetSearch] = useState("");
   const [betStatusFilter, setBetStatusFilter] = useState("all");
   const [paymentSearch, setPaymentSearch] = useState("");
+  const [withdrawalSearch, setWithdrawalSearch] = useState("");
+  const [withdrawalStatusFilter, setWithdrawalStatusFilter] = useState("all");
+  const [withdrawalRiskFilter, setWithdrawalRiskFilter] = useState("all");
   const [sortUsers, setSortUsers] = useState<{ key: keyof AdminUser; dir: "asc" | "desc" }>({ key: "createdAt", dir: "desc" });
 
   const [balanceModal, setBalanceModal] = useState<AdminUser | null>(null);
@@ -1018,6 +1021,20 @@ export default function AdminPage() {
     p.orderId.toLowerCase().includes(paymentSearch.toLowerCase())
   );
 
+  const filteredWithdrawals = withdrawals.filter((w) => {
+    const search = withdrawalSearch.trim().toLowerCase();
+    const riskFlags = getWithdrawalRiskFlags(w.riskFlags);
+    const matchesSearch = !search || (
+      (w.userName || "").toLowerCase().includes(search) ||
+      (w.userEmail || "").toLowerCase().includes(search) ||
+      w.iban.toLowerCase().includes(search) ||
+      w.nif.toLowerCase().includes(search)
+    );
+    const matchesStatus = withdrawalStatusFilter === "all" || w.status === withdrawalStatusFilter;
+    const matchesRisk = withdrawalRiskFilter === "all" || riskFlags.some((flag) => flag.severity === withdrawalRiskFilter);
+    return matchesSearch && matchesStatus && matchesRisk;
+  });
+
   const runtimeSummary = {
     total: runtimeEvents.length,
     overridden: runtimeEvents.filter(hasEventOverride).length,
@@ -1607,11 +1624,45 @@ export default function AdminPage() {
             {/* ── LEVANTAMENTOS ── */}
             {activeTab === "withdrawals" && (
               <motion.div key="withdrawals" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} className="space-y-4">
+                <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_180px_180px]">
+                  <div className="relative">
+                    <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" />
+                    <Input
+                      placeholder="Buscar por utilizador, e-mail, IBAN ou NIF..."
+                      value={withdrawalSearch}
+                      onChange={e => setWithdrawalSearch(e.target.value)}
+                      className="bg-zinc-900 border-zinc-700 text-white pl-9"
+                    />
+                  </div>
+                  <select
+                    value={withdrawalStatusFilter}
+                    onChange={e => setWithdrawalStatusFilter(e.target.value)}
+                    className="h-10 rounded-lg border border-zinc-700 bg-zinc-900 px-3 text-sm text-zinc-200 focus:outline-none focus:border-zinc-500"
+                  >
+                    <option value="all">Todos os estados</option>
+                    {Object.entries(STATUS_WITHDRAWAL).map(([status, meta]) => (
+                      <option key={status} value={status}>{meta.label}</option>
+                    ))}
+                  </select>
+                  <select
+                    value={withdrawalRiskFilter}
+                    onChange={e => setWithdrawalRiskFilter(e.target.value)}
+                    className="h-10 rounded-lg border border-zinc-700 bg-zinc-900 px-3 text-sm text-zinc-200 focus:outline-none focus:border-zinc-500"
+                  >
+                    <option value="all">Todo o risco</option>
+                    <option value="high">Risco alto</option>
+                    <option value="medium">Risco médio</option>
+                    <option value="low">Risco baixo</option>
+                  </select>
+                </div>
+                <div className="text-xs text-zinc-500">
+                  {filteredWithdrawals.length} de {withdrawals.length} levantamento(s) visível(is)
+                </div>
                 {loading ? (
                   <div className="flex items-center justify-center py-20"><Loader2 className="animate-spin text-red-600" size={32} /></div>
                 ) : (
                   <div className="space-y-3">
-                    {withdrawals.map(w => (
+                    {filteredWithdrawals.map(w => (
                       <div key={w.id} className={`bg-zinc-900 border rounded-xl p-5 ${w.status === "pending_review" ? "border-yellow-500/30" : w.status === "processing" ? "border-blue-500/30" : "border-zinc-800"}`}>
                         {(() => {
                           const riskFlags = getWithdrawalRiskFlags(w.riskFlags);
@@ -1706,7 +1757,7 @@ export default function AdminPage() {
                         })()}
                       </div>
                     ))}
-                    {withdrawals.length === 0 && (
+                    {filteredWithdrawals.length === 0 && (
                       <div className="bg-zinc-900 border border-zinc-800 rounded-xl py-16 text-center text-zinc-600">Nenhum levantamento encontrado</div>
                     )}
                   </div>
