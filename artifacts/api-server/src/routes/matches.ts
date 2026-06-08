@@ -10389,7 +10389,7 @@ async function getBasketballOdds(): Promise<NBAOddsEntry[]> {
           for (let i = 0; i < events.length; i++) {
             const ev = events[i]!;
             const realOdds = oddsResults[i];
-            if (!realOdds || realOdds.home <= 0) continue;
+            if (!realOdds || realOdds.home <= 0 || realOdds.away <= 0) continue;
             const homeName = v2TeamName(ev.homeTeam);
             const awayName = v2TeamName(ev.awayTeam);
             const { date, time } = v2EventDateTime(ev);
@@ -10426,7 +10426,7 @@ async function getBasketballOdds(): Promise<NBAOddsEntry[]> {
     for (let i = 0; i < events.length; i++) {
       const ev = events[i]!;
       const realOdds = oddsResults[i];
-      if (!realOdds || realOdds.home <= 0) continue;
+      if (!realOdds || realOdds.home <= 0 || realOdds.away <= 0) continue;
       const homeName = v2TeamName(ev.homeTeam);
       const awayName = v2TeamName(ev.awayTeam);
       const { date, time } = v2EventDateTime(ev);
@@ -10703,9 +10703,11 @@ async function getTennisOdds(): Promise<TennisOddsEntry[]> {
         _tennisPreMatchOdds.set(_tennisPairKey(p0Name, p1Name), { home: h, away: a });
       }
       const pHome = h > 0 && a > 0 ? (1 / h) / ((1 / h) + (1 / a)) : 0.5;
+      const set1H = realOdds.firstSetHome ?? 0;
+      const set1A = realOdds.firstSetAway ?? 0;
       const tExtra = computeTennisExtras(pHome, {
-        set1H: realOdds.firstSetHome > 0 ? realOdds.firstSetHome : undefined,
-        set1A: realOdds.firstSetAway > 0 ? realOdds.firstSetAway : undefined,
+        set1H: set1H > 0 ? set1H : undefined,
+        set1A: set1A > 0 ? set1A : undefined,
       });
       results.push({
         matchId: String(ev.id),
@@ -10714,7 +10716,7 @@ async function getTennisOdds(): Promise<TennisOddsEntry[]> {
         status: "Not Started",
         players: [{ id: "", name: p0Name }, { id: "", name: p1Name }],
         matchOdds: [h, a],
-        set1Odds: realOdds.firstSetHome > 0 && realOdds.firstSetAway > 0 ? [realOdds.firstSetHome, realOdds.firstSetAway] : null,
+        set1Odds: set1H > 0 && set1A > 0 ? [set1H, set1A] : null,
         markets: {
           doubleChance: { homeOrDraw: 0, awayOrDraw: 0, homeOrAway: 0 },
           bothTeamsScore: { yes: 0, no: 0 },

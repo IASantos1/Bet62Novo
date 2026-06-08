@@ -9107,32 +9107,23 @@ export default function Home() {
                     return true; // football always included
                   }),
                 ];
-                const isWorldCupLeague = (league: string) => {
-                  const s = String(league ?? "")
-                    .toLowerCase()
-                    .normalize("NFD")
-                    .replace(/[\u0300-\u036f]/g, "")
-                    .replace(/[^a-z0-9]+/g, " ")
-                    .trim();
-                  return s.includes("world cup") || s.includes("copa do mundo") || s.includes("wc 2026") || s.includes("fifa world cup");
-                };
-                const combinedNoWC = combined.filter(m => !isWorldCupLeague(m.league ?? ""));
                 // Filter by country (all leagues of that country)
                 if (selectedCountry) {
                   const countryObj = FOOTBALL_COUNTRIES.find(c => c.name === selectedCountry);
                   if (countryObj) {
                     const seen2 = new Set<string>();
-                    return combinedNoWC
+                    return combined
                       .filter(m => countryObj.leagues.some(l => leagueMatchesFilter(m.league, l)))
                       .filter(m => { const k = String(m.id); if (seen2.has(k)) return false; seen2.add(k); return true; });
                   }
                 }
-                if (!selectedLeague) return combinedNoWC;
+                if (!selectedLeague) return combined;
                 // ML-aware filter: matches major-league label (from chips) OR legacy flexible matching (from sidebar)
                 const _mlPats: Array<{p: string[], label: string}> = [
                   { p: ["champions league","liga dos campeões","liga campeões"], label: "Champions" },
                   { p: ["europa league","liga europa"], label: "Europa League" },
                   { p: ["conference league","liga conferência"], label: "Conference" },
+                  { p: ["fifa world cup","world cup","copa do mundo","wc 2026","mundial"], label: "FIFA World Cup" },
                   { p: ["international friendlies","international friendly","amistosos internacionais","amistosos","friendlies","friendly"], label: "International Friendlies" },
                   { p: ["premier league"], label: "Premier League" },
                   { p: ["la liga","laliga"], label: "La Liga" },
@@ -9161,7 +9152,7 @@ export default function Home() {
                 ];
                 const _fml = (n: string) => { const ln = (n ?? "").toLowerCase(); return _mlPats.find(ml => ml.p.some(p => ln.includes(p))); };
                 const seen = new Set<string>();
-                return combinedNoWC
+                return combined
                   .filter(m => { const ml = _fml(m.league); return (ml && ml.label === selectedLeague) || leagueMatchesFilter(m.league, selectedLeague); })
                   .filter(m => { const k = String(m.id); if (seen.has(k)) return false; seen.add(k); return true; });
               })();
@@ -9194,6 +9185,7 @@ export default function Home() {
                       { p: ["champions league","liga dos campeões","liga campeões"], label: "Champions", logo: "https://media.api-sports.io/football/leagues/2.png", color: "#001489" },
                       { p: ["europa league","liga europa"], label: "Europa League", logo: "https://media.api-sports.io/football/leagues/3.png", color: "#F77F00" },
                       { p: ["conference league","liga conferência"], label: "Conference", logo: "https://media.api-sports.io/football/leagues/848.png", color: "#00B386" },
+                      { p: ["fifa world cup","world cup","copa do mundo","wc 2026","mundial"], label: "FIFA World Cup", logo: "https://media.api-sports.io/football/leagues/1.png", color: "#2563eb" },
                       { p: ["international friendlies","international friendly","amistosos internacionais","amistosos","friendlies","friendly"], label: "International Friendlies", logo: "https://media.api-sports.io/football/leagues/10.png", color: "#dc2626" },
                       { p: ["premier league"], label: "Premier League", logo: "https://media.api-sports.io/football/leagues/39.png", color: "#3D195B" },
                       { p: ["la liga","laliga"], label: "La Liga", logo: "https://media.api-sports.io/football/leagues/140.png", color: "#FF4B44" },
