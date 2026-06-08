@@ -44,6 +44,7 @@ export async function initDb(): Promise<void> {
         stake         DECIMAL(10, 2) NOT NULL,
         potential_win DECIMAL(10, 2) NOT NULL,
         total_odds    DECIMAL(10, 2) NOT NULL,
+        is_freebet    TEXT NOT NULL DEFAULT 'false',
         status        TEXT NOT NULL DEFAULT 'pending',
         cashout_value DECIMAL(10, 2),
         created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -291,6 +292,7 @@ export async function initDb(): Promise<void> {
 
       ALTER TABLE bets ADD COLUMN IF NOT EXISTS kickoff_time  TIMESTAMPTZ;
       ALTER TABLE bets ADD COLUMN IF NOT EXISTS cashout_value DECIMAL(10, 2);
+      ALTER TABLE bets ADD COLUMN IF NOT EXISTS is_freebet    TEXT NOT NULL DEFAULT 'false';
 
       ALTER TABLE cashout_states ADD COLUMN IF NOT EXISTS reason            TEXT;
       ALTER TABLE cashout_states ADD COLUMN IF NOT EXISTS updated_at        TIMESTAMPTZ;

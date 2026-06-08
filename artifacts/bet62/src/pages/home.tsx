@@ -1225,6 +1225,7 @@ type BetSelection = {
   homeTeam?: string;
   awayTeam?: string;
   kickoffTime?: string;
+  sport?: string;
   selection: string;
   odd: number;
   market?: string;
@@ -1238,6 +1239,7 @@ type StoredSelection = {
   awayTeam?: string;
   kickoffTime?: string;
   scheduledAt?: string;
+  sport?: string;
   selection: string;
   odd: number;
   market?: string;
@@ -1254,6 +1256,7 @@ type UserBet = {
   stake: string;
   potentialWin: string;
   totalOdds: string;
+  isFreebet?: string | boolean;
   status: string;
   cashoutValue?: string | null;
   cashoutStatus?: string;
@@ -3380,6 +3383,7 @@ export default function Home() {
         homeTeam: match.home,
         awayTeam: match.away,
         kickoffTime: getMatchKickoffIso(match),
+        sport: match.sport,
         selection,
         odd,
         market,
@@ -6924,6 +6928,19 @@ export default function Home() {
     return [{ matchTitle: bet.matchTitle, selection: "home", odd: parseFloat(bet.totalOdds), market: "result" }];
   };
 
+  const getStoredSelectionSport = (sel: StoredSelection, liveMatch?: Match | null): string | undefined => {
+    if (typeof sel.sport === "string" && sel.sport.trim() !== "") return sel.sport;
+    if (liveMatch?.sport) return liveMatch.sport;
+    const market = String(sel.market ?? "").toLowerCase();
+    const title = String(sel.matchTitle ?? "").toLowerCase();
+    if (market === "quartos" || title.includes("nba") || title.includes("basquete")) return "basketball";
+    if (market === "periodos" || market === "puckline" || title.includes("nhl") || title.includes("hóquei") || title.includes("hockey")) return "hockey";
+    if (market === "innings" || title.includes("mlb") || title.includes("beisebol") || title.includes("baseball")) return "baseball";
+    if (market === "sets" || title.includes("vôlei") || title.includes("volei") || title.includes("volley")) return "volleyball";
+    if (market === "jogos" || title.includes("tennis") || title.includes("tênis")) return "tennis";
+    return "football";
+  };
+
   const toggleBetCollapse = (id: number) => {
     setCollapsedBets(prev => {
       const next = new Set(prev);
@@ -7024,15 +7041,15 @@ export default function Home() {
                 <button
                   onClick={() => freebetBalance > 0 && setUseFreebet(prev => !prev)}
                   disabled={freebetBalance <= 0}
-                  className={`hidden sm:flex items-center gap-2 rounded-lg px-2.5 py-1.5 transition-all ${freebetBalance <= 0 ? "opacity-60 cursor-not-allowed" : ""}`}
+                  className={`hidden sm:flex items-center gap-1.5 rounded-lg px-2 py-1 transition-all ${freebetBalance <= 0 ? "opacity-60 cursor-not-allowed" : ""}`}
                   style={useFreebet
                     ? { background: "rgba(124,58,237,0.18)", border: "1px solid rgba(167,139,250,0.42)" }
                     : { background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }
                   }
                   title={freebetBalance > 0 ? "Alternar entre saldo e freebets" : "Sem freebets disponíveis"}
                 >
-                  {useFreebet ? <ToggleRight size={16} className="text-violet-300" /> : <ToggleLeft size={16} className="text-zinc-500" />}
-                  <span className={`text-[11px] font-black tracking-wide ${useFreebet ? "text-violet-300" : "text-zinc-300"}`}>
+                  {useFreebet ? <ToggleRight size={14} className="text-violet-300" /> : <ToggleLeft size={14} className="text-zinc-500" />}
+                  <span className={`text-[10px] font-black tracking-wide ${useFreebet ? "text-violet-300" : "text-zinc-300"}`}>
                     {useFreebet ? "FREEBETS" : "SALDO"}
                   </span>
                 </button>
@@ -10919,6 +10936,8 @@ export default function Home() {
                         const summDiv  = isLost ? "divide-[#a02020]/30" : "divide-gray-100";
                         const summTxt  = isLost ? "text-red-100"   : "text-gray-600";
 
+                        const wasFreebet = String(bet.isFreebet) === "true" || bet.isFreebet === true;
+
                         return (
                           <div key={bet.id} className={`rounded-2xl overflow-hidden shadow-xl ${cardBg}`} style={{ boxShadow: isLost ? "0 8px 32px rgba(120,0,0,0.5)" : "0 4px 20px rgba(0,0,0,0.35)" }}>
 
@@ -10930,6 +10949,12 @@ export default function Home() {
                                 </div>
                                 <div>
                                   <div className="font-black text-white text-[17px] leading-tight italic">Boletim de Aposta</div>
+                                  {wasFreebet && (
+                                    <div className="mt-1 inline-flex items-center gap-1.5 bg-violet-500/20 border border-violet-300/30 text-violet-100 text-[10px] font-black px-2.5 py-1 rounded-full uppercase tracking-wide">
+                                      <Sparkles size={10} />
+                                      Freebets
+                                    </div>
+                                  )}
                                   {gameKickoffStr && (
                                     <div className="flex items-center gap-1.5 text-red-100 text-[11px] font-semibold mt-0.5">
                                       <CalendarDays size={11} />
@@ -11009,16 +11034,7 @@ export default function Home() {
                                   } else if (outcome === "void") {
                                     leftIcon = <div className="w-6 h-6 rounded-full bg-zinc-200 border border-zinc-300 flex items-center justify-center shrink-0"><span className="text-zinc-600 text-[11px] font-black leading-none">—</span></div>;
                                   } else {
-                                    const mkt = sel.market ?? "";
-                                    const mt  = (sel.matchTitle ?? "").toLowerCase();
-                                    const sportEmoji =
-                                      mkt === "quartos" || mkt === "totais" && mt.includes("nba") ? "🏀"
-                                      : mkt === "periodos" || mkt === "puckLine" || mt.includes("nhl") ? "🏒"
-                                      : mkt === "innings"  || mt.includes("mlb") ? "⚾"
-                                      : mkt === "sets"     || mt.includes("volei") || mt.includes("volley") ? "🏐"
-                                      : mkt === "jogos"    || mt.includes("tennis") || mt.includes("tênis") ? "🎾"
-                                      : "⚽";
-                                    leftIcon = <span className="text-xl shrink-0 leading-none">{sportEmoji}</span>;
+                                    leftIcon = <span className="text-xl shrink-0 leading-none">{sportEmoji(getStoredSelectionSport(sel, lm) ?? "football")}</span>;
                                   }
                                 }
 
@@ -11105,14 +11121,19 @@ export default function Home() {
                                   valueCls: "text-red-500 font-bold",
                                 },
                                 {
+                                  label: "Carteira usada:",
+                                  value: String(bet.isFreebet) === "true" || bet.isFreebet === true ? "Freebets" : "Saldo em euro",
+                                  valueCls: String(bet.isFreebet) === "true" || bet.isFreebet === true ? "text-violet-500 font-bold" : `font-semibold ${txtMain}`,
+                                },
+                                {
                                   label: "Total de odds:",
                                   value: parseFloat(bet.totalOdds).toFixed(2),
                                   valueCls: `font-semibold ${txtMain}`,
                                 },
                                 {
                                   label: "Valor apostado:",
-                                  value: `€${parseFloat(bet.stake).toFixed(2)}`,
-                                  valueCls: `font-semibold ${txtMain}`,
+                                  value: `${String(bet.isFreebet) === "true" || bet.isFreebet === true ? "FB" : "€"}${parseFloat(bet.stake).toFixed(2)}`,
+                                  valueCls: String(bet.isFreebet) === "true" || bet.isFreebet === true ? "font-semibold text-violet-500" : `font-semibold ${txtMain}`,
                                 },
                                 {
                                   label: isWon ? "Ganho confirmado:" : isCashedOut ? "Cash Out recebido:" : isLost ? "Retorno:" : isVoided ? "Reembolso:" : "Retorno potencial:",
@@ -11331,14 +11352,14 @@ export default function Home() {
 
               {/* Stake summary pill */}
               <div
-                className="flex items-center gap-1.5 rounded-full px-4 py-1.5"
+                className="flex items-center gap-1 rounded-full px-3 py-1"
                 style={useFreebet
                   ? { background: "rgba(124,58,237,0.16)", border: "1px solid rgba(167,139,250,0.28)" }
                   : { background: "rgba(255,255,255,0.07)", border: "1px solid rgba(255,255,255,0.1)" }
                 }
               >
-                {useFreebet ? <Sparkles size={12} className="text-violet-300" /> : <Plus size={12} className="text-zinc-400" />}
-                <span className={`font-bold text-[13px] tabular-nums ${useFreebet ? "text-violet-200" : "text-white"}`}>
+                {useFreebet ? <Sparkles size={10} className="text-violet-300" /> : <Plus size={10} className="text-zinc-400" />}
+                <span className={`font-bold text-[12px] tabular-nums ${useFreebet ? "text-violet-200" : "text-white"}`}>
                   {effectiveBetMode === "simples"
                     ? `${bets.reduce((s, b) => s + parseFloat(betStakes[betKey(b)] || "0"), 0).toFixed(2)} €`
                     : `${parseFloat(stake || "0").toFixed(2)} €`}
@@ -11373,28 +11394,28 @@ export default function Home() {
             </div>
 
             {auth.user && (
-              <div className="px-4 py-2.5 border-b border-zinc-800/80 shrink-0" style={{ background: "#0a0a0a" }}>
+              <div className="px-4 py-2 border-b border-zinc-800/80 shrink-0" style={{ background: "#0a0a0a" }}>
                 <button
                   {...makeTap(() => freebetBalance > 0 && setUseFreebet(prev => !prev))}
                   disabled={freebetBalance <= 0}
-                  className={`w-full rounded-2xl px-4 py-3 flex items-center justify-between transition-all ${freebetBalance <= 0 ? "opacity-60 cursor-not-allowed" : ""}`}
+                  className={`w-full rounded-xl px-3 py-2 flex items-center justify-between transition-all ${freebetBalance <= 0 ? "opacity-60 cursor-not-allowed" : ""}`}
                   style={useFreebet
                     ? { background: "rgba(124,58,237,0.18)", border: "1px solid rgba(167,139,250,0.34)" }
                     : { background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }
                   }
                 >
-                  <div className="flex items-center gap-3 min-w-0">
-                    <div className="w-10 h-10 rounded-xl flex items-center justify-center" style={{ background: useFreebet ? "rgba(124,58,237,0.22)" : "rgba(255,255,255,0.06)" }}>
-                      {useFreebet ? <Sparkles size={18} className="text-violet-300" /> : <Wallet size={18} className="text-zinc-400" />}
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ background: useFreebet ? "rgba(124,58,237,0.22)" : "rgba(255,255,255,0.06)" }}>
+                      {useFreebet ? <Sparkles size={14} className="text-violet-300" /> : <Wallet size={14} className="text-zinc-400" />}
                     </div>
                     <div className="text-left min-w-0">
-                      <div className="text-white font-bold text-sm">{useFreebet ? "Freebets ativadas" : "Usar Freebets"}</div>
-                      <div className="text-xs text-zinc-500 truncate">
+                      <div className="text-white font-bold text-[13px]">{useFreebet ? "Freebets ativadas" : "Usar Freebets"}</div>
+                      <div className="text-[11px] text-zinc-500 truncate">
                         {freebetBalance > 0 ? `Disponível: € ${freebetBalance.toFixed(2)}` : "Sem freebets disponíveis"}
                       </div>
                     </div>
                   </div>
-                  {useFreebet ? <ToggleRight size={24} className="text-violet-300 shrink-0" /> : <ToggleLeft size={24} className="text-zinc-500 shrink-0" />}
+                  {useFreebet ? <ToggleRight size={20} className="text-violet-300 shrink-0" /> : <ToggleLeft size={20} className="text-zinc-500 shrink-0" />}
                 </button>
               </div>
             )}

@@ -944,6 +944,7 @@ router.post("/place", authMiddleware, async (req: Request, res: Response): Promi
           stake: stakeStr,
           potentialWin,
           totalOdds: oddsStr,
+          isFreebet: "true",
           kickoffTime: ticketKickoffIso ? new Date(ticketKickoffIso) : null,
           status: "pending",
         }).returning();
@@ -973,6 +974,7 @@ router.post("/place", authMiddleware, async (req: Request, res: Response): Promi
           stake: stakeStr,
           potentialWin,
           totalOdds: oddsStr,
+          isFreebet: "false",
           status: "pending",
         }).returning();
 

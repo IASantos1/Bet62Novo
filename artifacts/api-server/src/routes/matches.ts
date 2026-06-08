@@ -3620,13 +3620,13 @@ function recalcLiveTotalGoals(
 
   // For a given line (e.g. 2.5), needed = goals still required to win Over
   // If already settled (cur ≤ 0 from filterLiveMarkets) → keep 0
-  // If pOverRaw < 0.01 (< 1% chance), zero the line so it disappears rather than
-  // bunching with other impossible lines at the same floor odds (~94x).
+  // Keep mathematically open lines visible for longer so 5.5/6.5 don't disappear
+  // too early after a high-scoring match reaches 4 or 5 goals.
   const recalcLine = (cur: number, targetTotal: number): [number, number] => {
     if (cur <= 0) return [0, 0];
     const needed = Math.max(1, targetTotal - currentGoals);
     const pOverRaw = 1 - poissonCdf(lambdaRem, needed - 1);
-    if (pOverRaw < 0.01) return [0, 0]; // effectively impossible — hide line
+    if (pOverRaw < 0.001) return [0, 0]; // effectively impossible — hide line
     const pOver = mc(pOverRaw, 0.01, 0.99);
     const pUnder = mc(1 - pOver, 0.01, 0.99);
     const [oOdds, uOdds] = probsToDecimalOdds([pOver, pUnder], 1.06);
@@ -5897,11 +5897,14 @@ function buildTennisLiveMatches(
         set2Odds = baseExtras.set2;
       }
 
-      // Completed set markets are permanently settled — suspend them
+      // Completed set markets are permanently settled. Future set markets stay
+      // locked until their respective set actually starts.
       const SETTLED = now + 30 * 24 * 60 * 60 * 1000;
       const settledSusp: Record<string, number> = {};
       if (numDoneSets >= 1) settledSusp["firstSet"] = SETTLED;
       if (numDoneSets >= 2) settledSusp["set2"]     = SETTLED;
+      if (numDoneSets < 1) settledSusp["set2"]      = SETTLED;
+      if (numDoneSets < 2) settledSusp["set3"]      = SETTLED;
 
       const currentPoints: [number | string, number | string] = [hPt, aPt];
       const serving: [boolean, boolean] = [p0Serving, p1Serving];
@@ -7071,6 +7074,7 @@ async function buildFootballLiveV2(events: SAPIV2Event[]): Promise<LiveMatchStat
     if (!FOOTBALL_V2_LIVE.has(statusStr)) continue;
     const evAgeSeconds = ev.startTimestamp ? Date.now() / 1000 - ev.startTimestamp : 0;
     if (evAgeSeconds > 2.5 * 3600) continue;
+    if (!liveMatchState.has(`football-v2-${ev.id}`) && evAgeSeconds > 5 * 60) continue;
     const homeTeam = v2TeamName(ev.homeTeam);
     const awayTeam = v2TeamName(ev.awayTeam);
     if (homeTeam === "Unknown" || awayTeam === "Unknown") continue;
@@ -7920,15 +7924,7 @@ function buildTennisLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
       sLow.includes("cancel") || sLow.includes("walkover") ||
       sLow.includes("retired") || sLow.includes("abandon") ||
       sLow.includes("awarded") || sLow.includes("default");
-    // startedAlready override: accept matches that started >2 min ago even if status lags.
-    // NOT applied if the match started >5 hours ago (almost certainly finished by then).
     const matchAgeSeconds = ev.startTimestamp !== undefined ? nowSec - ev.startTimestamp : 0;
-    const startedAlready =
-      !sLow.includes("cancel") && !sLow.includes("postpone") &&
-      !sLow.includes("walkover") && !sLow.includes("retired") &&
-      !sLow.includes("awarded") &&
-      ev.startTimestamp !== undefined &&
-      matchAgeSeconds > 120 && matchAgeSeconds < 5 * 3600;
     // Zombie detection: match claims to be in progress but started too long ago.
     // Tennis best-of-3 ≤ ~3h; best-of-5 ≤ ~5h. If still "playing" after 4h, the
     // API is stuck — treat as finished and skip.
@@ -7937,7 +7933,8 @@ function buildTennisLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
       (code === 8 || code === 9 || code === 10 ||
        sLow.includes("set") || sLow.includes("playing") || sLow.includes("progress"));
     if (isZombie) continue;
-    if (notLive && !startedAlready) continue;
+    if (notLive) continue;
+    if (!existing && ev.startTimestamp !== undefined && matchAgeSeconds > 5 * 60) continue;
     // Accept everything else: "Playing", "1st Set", "2nd Set", "In Progress",
     // "Break Time", "Advantage", "Tiebreak", "Suspended", "Paused", etc.
 
@@ -8026,6 +8023,8 @@ function buildTennisLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
     const settledSusp: Record<string, number> = {};
     if (doneSets >= 1) settledSusp["firstSet"] = SETTLED;
     if (doneSets >= 2) settledSusp["set2"]     = SETTLED;
+    if (doneSets < 1) settledSusp["set2"]      = SETTLED;
+    if (doneSets < 2) settledSusp["set3"]      = SETTLED;
 
     let marketSuspension: Record<string, number> | undefined = existing?.marketSuspension
       ? Object.fromEntries(Object.entries(existing.marketSuspension).filter(([, ts]) => ts > now))
@@ -8058,8 +8057,7 @@ function buildTennisLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
       suspensionReason = active.length > 0 ? suspensionReason : undefined;
     }
 
-    // If we accepted this match via startedAlready override, show a sensible status
-    const displayStatus = (startedAlready && notLive) ? "Em Jogo" : statusStr;
+    const displayStatus = statusStr;
 
     // ── Tennis set-winner markets for V2 matches ──────────────────────────────
     // Compute liveHomeP from current odds so we can derive set markets.
@@ -8421,28 +8419,8 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
       scheduledDate: m.date,
     } satisfies LiveMatchState));
 
-  // Promote tennis "Em Breve" matches that started >2 min ago into the live feed.
-  // The Statpal /live endpoint can lag 5-15 min for Challenger events; this bridges
-  // the gap by showing them as live (0-0, "1st set") until real data arrives.
   const promotedTennis: LiveMatchState[] = [];
-  const startingSoonFinal: LiveMatchState[] = [];
-  for (const m of startingSoon) {
-    if (m.sport === "tennis" && m.startsIn === 0) {
-      const realSi = matchStartsInMinutes(m.scheduledDate ?? "", m.scheduledTime ?? "");
-      if (isFinite(realSi) && realSi < -2) {
-        // Strip Em Breve fields; promote to live with initial set score
-        const { startsIn: _si, scheduledTime: _st, scheduledDate: _sd, ...liveBase } = m;
-        promotedTennis.push({
-          ...liveBase,
-          status: "1st set",
-          homeScore: 0,
-          awayScore: 0,
-        } as LiveMatchState);
-        continue;
-      }
-    }
-    startingSoonFinal.push(m);
-  }
+  const startingSoonFinal: LiveMatchState[] = startingSoon;
 
   syncLiveCompetitionCatalog([
     ...livePart.map((m) => ({
