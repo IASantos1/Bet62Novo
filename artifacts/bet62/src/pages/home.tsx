@@ -6764,6 +6764,7 @@ export default function Home() {
     if (betStatus === "lost") return "pending";
     // Pending: check live match for tentative state
     const lm = findLiveMatchForSel(sel);
+    if (!hasSelectionStarted(sel, lm)) return "pending";
     if (!lm) return "pending";
     const s = sel.selection;
     const homeScore = lm.homeScore ?? 0;
@@ -6926,6 +6927,19 @@ export default function Home() {
   const getBetSelections = (bet: UserBet): StoredSelection[] => {
     if (Array.isArray(bet.selections)) return bet.selections as StoredSelection[];
     return [{ matchTitle: bet.matchTitle, selection: "home", odd: parseFloat(bet.totalOdds), market: "result" }];
+  };
+
+  const hasSelectionStarted = (sel: StoredSelection, liveMatch: Match | null): boolean => {
+    const kickoffDate = getSelectionKickoffDate(sel);
+    if (kickoffDate && kickoffDate.getTime() > Date.now()) return false;
+    if (!liveMatch) return false;
+    if (liveMatch.status === "Not Started") return false;
+    if ((liveMatch.minute ?? 0) > 0) return true;
+    if (typeof liveMatch.status === "string") {
+      const status = liveMatch.status.toLowerCase();
+      if (status.includes("ht") || status.includes("live") || status.includes("jogo") || status.includes("set") || status.includes("period")) return true;
+    }
+    return (liveMatch.homeScore ?? 0) > 0 || (liveMatch.awayScore ?? 0) > 0;
   };
 
   const getStoredSelectionSport = (sel: StoredSelection, liveMatch?: Match | null): string | undefined => {
