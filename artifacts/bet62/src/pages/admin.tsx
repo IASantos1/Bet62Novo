@@ -297,7 +297,22 @@ const AUDIT_ACTION_LABEL: Record<string, string> = {
   settings_update: "Configuração alterada",
   suspend_match:   "Evento suspenso",
   unsuspend_match: "Evento reativado",
+  withdrawal_created: "Levantamento criado",
+  withdrawal_cancelled_by_user: "Levantamento cancelado pelo utilizador",
+  withdrawal_status_updated: "Estado do levantamento atualizado",
 };
+
+function getWithdrawalAuditDetails(details: unknown): string[] {
+  if (!details || typeof details !== "object") return [];
+  const data = details as Record<string, unknown>;
+  const lines: string[] = [];
+  if (data["amount"] !== undefined && data["amount"] !== null) lines.push(`valor ${String(data["amount"])}`);
+  if (data["previousStatus"] && data["newStatus"]) lines.push(`${String(data["previousStatus"])} -> ${String(data["newStatus"])}`);
+  else if (data["status"]) lines.push(`estado ${String(data["status"])}`);
+  if (data["decisionReason"]) lines.push(`motivo: ${String(data["decisionReason"])}`);
+  if (data["providerReference"]) lines.push(`ref: ${String(data["providerReference"])}`);
+  return lines;
+}
 
 function StatCard({ icon, label, value, sub, color = "red", alert }: {
   icon: React.ReactNode; label: string; value: string | number; sub?: string;
@@ -575,7 +590,7 @@ export default function AdminPage() {
     if (activeTab === "users") fetchUsers();
     else if (activeTab === "bets") fetchBets();
     else if (activeTab === "payments") fetchPayments();
-    else if (activeTab === "withdrawals") fetchWithdrawals();
+    else if (activeTab === "withdrawals") { fetchWithdrawals(); fetchAuditLogs(); }
     else if (activeTab === "risk") fetchRisk();
     else if (activeTab === "analytics") fetchAnalytics();
     else if (activeTab === "events") { fetchSuspended(); fetchFeed(); fetchEventRuntime(); }
@@ -1034,6 +1049,9 @@ export default function AdminPage() {
     const matchesRisk = withdrawalRiskFilter === "all" || riskFlags.some((flag) => flag.severity === withdrawalRiskFilter);
     return matchesSearch && matchesStatus && matchesRisk;
   });
+  const withdrawalAuditLogs = auditLogs.filter((log) =>
+    log.targetType === "withdrawal" || log.action.startsWith("withdrawal_")
+  );
 
   const runtimeSummary = {
     total: runtimeEvents.length,
@@ -1070,7 +1088,7 @@ export default function AdminPage() {
     if (activeTab === "users") fetchUsers();
     else if (activeTab === "bets") fetchBets();
     else if (activeTab === "payments") fetchPayments();
-    else if (activeTab === "withdrawals") fetchWithdrawals();
+    else if (activeTab === "withdrawals") { fetchWithdrawals(); fetchAuditLogs(); }
     else if (activeTab === "risk") fetchRisk();
     else if (activeTab === "analytics") fetchAnalytics();
     else if (activeTab === "events") { fetchSuspended(); fetchFeed(); fetchEventRuntime(); }
@@ -1762,6 +1780,55 @@ export default function AdminPage() {
                     )}
                   </div>
                 )}
+                <div className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden">
+                  <div className="px-5 py-4 border-b border-zinc-800 flex items-center gap-2">
+                    <FileText size={16} className="text-blue-400" />
+                    <span className="font-bold text-sm text-zinc-300">Auditoria de Levantamentos</span>
+                    <span className="ml-auto text-xs text-zinc-600">{withdrawalAuditLogs.length} registos</span>
+                  </div>
+                  {withdrawalAuditLogs.length === 0 ? (
+                    <div className="px-5 py-10 text-center text-zinc-600 text-sm">
+                      <Clock size={24} className="mx-auto mb-2 text-zinc-700" />
+                      Nenhum evento de auditoria para levantamentos ainda
+                    </div>
+                  ) : (
+                    <div className="divide-y divide-zinc-800 max-h-80 overflow-y-auto">
+                      {withdrawalAuditLogs.map((log) => {
+                        const detailLines = getWithdrawalAuditDetails(log.details);
+                        return (
+                          <div key={log.id} className="px-5 py-3 flex items-start gap-3">
+                            <div className="shrink-0 mt-0.5">
+                              {log.action === "withdrawal_created" && <PlusCircle size={14} className="text-blue-400" />}
+                              {log.action === "withdrawal_cancelled_by_user" && <X size={14} className="text-orange-400" />}
+                              {log.action === "withdrawal_status_updated" && <RefreshCw size={14} className="text-green-400" />}
+                              {!["withdrawal_created", "withdrawal_cancelled_by_user", "withdrawal_status_updated"].includes(log.action) && <Activity size={14} className="text-zinc-500" />}
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <span className="text-sm text-zinc-300 font-medium">{AUDIT_ACTION_LABEL[log.action] || log.action}</span>
+                                {log.targetId && <span className="text-xs text-zinc-600 font-mono">withdrawal#{log.targetId}</span>}
+                              </div>
+                              <div className="flex items-center gap-3 mt-0.5 flex-wrap">
+                                <span className="text-xs text-zinc-600">por <span className="text-zinc-500">{log.adminUser}</span></span>
+                                {log.ip && <span className="text-xs text-zinc-700 font-mono">{log.ip}</span>}
+                                <span className="text-xs text-zinc-700">{fmtDate(log.createdAt)}</span>
+                              </div>
+                              {detailLines.length > 0 && (
+                                <div className="mt-2 flex flex-wrap gap-2">
+                                  {detailLines.map((line, index) => (
+                                    <span key={`${log.id}-${index}`} className="text-[11px] text-zinc-400 bg-zinc-800/80 border border-zinc-700 rounded-full px-2 py-0.5">
+                                      {line}
+                                    </span>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
               </motion.div>
             )}
 
