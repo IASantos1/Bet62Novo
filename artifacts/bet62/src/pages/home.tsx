@@ -6379,22 +6379,54 @@ export default function Home() {
                 </div>
               );
 
-              const renderTeamSection = (team: TeamPlayerMarkets, isHome: boolean) => (
-                <div key={team.teamId} className="mb-6">
-                  <div className="flex items-center gap-2 px-1 mb-3 pb-2 border-b border-zinc-700">
-                    <span className={`text-xs font-bold px-2 py-0.5 rounded ${isHome ? "bg-red-900/60 text-red-300" : "bg-zinc-700 text-zinc-300"}`}>
-                      {isHome ? "CASA" : "FORA"}
-                    </span>
-                    <span className="text-sm font-bold text-white">{team.teamName}</span>
-                  </div>
+              const renderTeamSection = (team: TeamPlayerMarkets, isHome: boolean) => {
+                const fallbackTeamName = isHome ? match.home : match.away;
+                const teamBanner =
+                  getTeamBanner(team.teamName, match.country) ??
+                  getTeamBanner(fallbackTeamName, match.country) ??
+                  getTeamBanner(team.teamName) ??
+                  getTeamBanner(fallbackTeamName);
+                return (
+                  <div key={team.teamId} className="mb-6 rounded-2xl overflow-hidden border border-zinc-800 bg-zinc-950/70">
+                    {teamBanner ? (
+                      <div className="relative h-24 sm:h-28 overflow-hidden border-b border-zinc-800">
+                        <img
+                          src={teamBanner}
+                          alt={`${team.teamName} banner`}
+                          className="absolute inset-0 w-full h-full object-cover"
+                          style={{ filter: "brightness(0.6) saturate(1.05)" }}
+                          loading="lazy"
+                          decoding="async"
+                        />
+                        <div className="absolute inset-0 bg-gradient-to-r from-zinc-950 via-zinc-950/70 to-transparent" />
+                        <div className="relative z-10 h-full flex items-end gap-2 px-3 py-3">
+                          <span className={`text-xs font-bold px-2 py-0.5 rounded ${isHome ? "bg-red-900/70 text-red-200 border border-red-500/30" : "bg-zinc-800/80 text-zinc-200 border border-zinc-600/50"}`}>
+                            {isHome ? "CASA" : "FORA"}
+                          </span>
+                          <span className="text-sm sm:text-base font-black text-white drop-shadow truncate">
+                            {team.teamName}
+                          </span>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="flex items-center gap-2 px-3 pt-3 mb-3 pb-2 border-b border-zinc-700">
+                        <span className={`text-xs font-bold px-2 py-0.5 rounded ${isHome ? "bg-red-900/60 text-red-300" : "bg-zinc-700 text-zinc-300"}`}>
+                          {isHome ? "CASA" : "FORA"}
+                        </span>
+                        <span className="text-sm font-bold text-white">{team.teamName}</span>
+                      </div>
+                    )}
 
-                  {pmList(team.anytimeScorers,    "pm-gol", "marcadores",      "⚽ Marcador (Qualquer Momento)",  p => `${p.stat} gol(os) em ${p.appearances} jogos`)}
-                  {pmList(team.firstHalfScorers,  "pm-fh",  "marcador-1t",     "⚽ Marcador no 1.º Tempo",        p => `${p.stat} gol(os) em ${p.appearances} jogos`)}
-                  {pmList(team.secondHalfScorers, "pm-sh",  "marcador-2t",     "⚽ Marcador no 2.º Tempo",        p => `${p.stat} gol(os) em ${p.appearances} jogos`)}
-                  {pmList(team.scoreAndAssist,    "pm-sa",  "marcar-assistir", "🎯 Marcar e Dar Assistência",     p => `${p.stat} vez(es) em ${p.appearances} jogos`)}
-                  {pmList(team.bookings,          "pm-card","cartao-jogador",  "🟨🟥 Cartão (Amarelo ou Vermelho)", p => `${p.stat} cartão(ões) em ${p.appearances} jogos`)}
-                </div>
-              );
+                    <div className="p-3 pt-3">
+                      {pmList(team.anytimeScorers,    "pm-gol", "marcadores",      "⚽ Marcador (Qualquer Momento)",  p => `${p.stat} gol(os) em ${p.appearances} jogos`)}
+                      {pmList(team.firstHalfScorers,  "pm-fh",  "marcador-1t",     "⚽ Marcador no 1.º Tempo",        p => `${p.stat} gol(os) em ${p.appearances} jogos`)}
+                      {pmList(team.secondHalfScorers, "pm-sh",  "marcador-2t",     "⚽ Marcador no 2.º Tempo",        p => `${p.stat} gol(os) em ${p.appearances} jogos`)}
+                      {pmList(team.scoreAndAssist,    "pm-sa",  "marcar-assistir", "🎯 Marcar e Dar Assistência",     p => `${p.stat} vez(es) em ${p.appearances} jogos`)}
+                      {pmList(team.bookings,          "pm-card","cartao-jogador",  "🟨🟥 Cartão (Amarelo ou Vermelho)", p => `${p.stat} cartão(ões) em ${p.appearances} jogos`)}
+                    </div>
+                  </div>
+                );
+              };
 
               return (
                 <>
