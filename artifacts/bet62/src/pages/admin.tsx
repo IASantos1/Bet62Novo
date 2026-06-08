@@ -300,6 +300,7 @@ const AUDIT_ACTION_LABEL: Record<string, string> = {
   withdrawal_created: "Levantamento criado",
   withdrawal_cancelled_by_user: "Levantamento cancelado pelo utilizador",
   withdrawal_status_updated: "Estado do levantamento atualizado",
+  withdrawal_webhook_status_updated: "Estado atualizado por webhook",
 };
 
 function getWithdrawalAuditDetails(details: unknown): string[] {
@@ -1662,8 +1663,9 @@ export default function AdminPage() {
                     <div className="font-bold text-yellow-300 mb-1">Modo operacional atual do levantamento</div>
                     <div>
                       Depósitos têm confirmação automática por callback/webhook da Ifthenpay.
-                      Levantamentos não têm webhook de payout configurado neste projeto neste momento:
-                      o fluxo atual é manual no backoffice, com `hold` de saldo, revisão operacional,
+                      Levantamentos têm agora estrutura de webhook preparada no backend, mas ainda sem
+                      provedor de payout real ligado neste projeto neste momento. Até essa ligação existir,
+                      o fluxo continua manual no backoffice, com `hold` de saldo, revisão operacional,
                       referência do provedor e fecho por estado `paid`/`failed`/`rejected`.
                     </div>
                   </div>

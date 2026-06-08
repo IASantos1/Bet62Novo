@@ -1,4 +1,4 @@
-import { Router, type IRouter, type Response } from "express";
+import { Router, type IRouter, type Request, type Response } from "express";
 import { db, usersTable, withdrawalsTable, betsTable, paymentsTable, adminAuditLogTable } from "@workspace/db";
 import { eq, desc, and, ne, inArray, sql, count, sum } from "drizzle-orm";
 import { authMiddleware, type AuthRequest } from "../middlewares/auth";
@@ -12,6 +12,7 @@ const router: IRouter = Router();
 const OPEN_WITHDRAWAL_STATUSES = ["pending_review", "approved", "processing"] as const;
 const ADMIN_WITHDRAWAL_STATUSES = ["approved", "rejected", "processing", "paid", "failed", "cancelled"] as const;
 const USER_CANCELLABLE_WITHDRAWAL_STATUSES = ["pending_review", "approved"] as const;
+const PAYOUT_WEBHOOK_SECRET = process.env.WITHDRAWAL_PAYOUT_WEBHOOK_SECRET || "";
 
 type WithdrawalRiskFlag = {
   code: string;
@@ -57,6 +58,15 @@ function canTransitionWithdrawalStatus(from: string, to: (typeof ADMIN_WITHDRAWA
 
 function canUserCancelWithdrawalStatus(from: string): boolean {
   return (USER_CANCELLABLE_WITHDRAWAL_STATUSES as readonly string[]).includes(from);
+}
+
+function normalizeWebhookWithdrawalStatus(value: string): "processing" | "paid" | "failed" | null {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (!normalized) return null;
+  if (["processing", "pending", "in_progress", "in-progress"].includes(normalized)) return "processing";
+  if (["paid", "completed", "success", "succeeded"].includes(normalized)) return "paid";
+  if (["failed", "error", "rejected", "declined"].includes(normalized)) return "failed";
+  return null;
 }
 
 function buildWithdrawalRiskFlags(args: {
@@ -181,6 +191,17 @@ async function auditWithdrawalEvent(args: {
   } catch (err) {
     logger.error({ err, action: args.action, withdrawalId: args.targetId }, "Withdrawal audit log error");
   }
+}
+
+function getWithdrawalWebhookSecret(req: AuthRequest | AdminRequest | { headers: Record<string, unknown> }): string {
+  const headerValue = req.headers["x-withdrawal-webhook-secret"];
+  if (typeof headerValue === "string") return headerValue;
+  if (Array.isArray(headerValue) && typeof headerValue[0] === "string") return headerValue[0];
+  const authHeader = req.headers["authorization"];
+  if (typeof authHeader === "string" && authHeader.toLowerCase().startsWith("bearer ")) {
+    return authHeader.slice(7).trim();
+  }
+  return "";
 }
 
 async function getWithdrawalEligibility(userId: number): Promise<WithdrawalEligibilityResult | null> {
@@ -538,6 +559,138 @@ router.post("/:id/cancel", authMiddleware, async (req: AuthRequest, res: Respons
     res.json(updated);
   } catch (err) {
     logger.error({ err, withdrawalId: id, userId: req.user?.id }, "User withdrawal cancel error");
+    res.status(500).json({ error: "Erro interno" });
+  }
+});
+
+router.post("/webhook/payout", async (req: Request, res: Response): Promise<void> => {
+  if (!PAYOUT_WEBHOOK_SECRET) {
+    res.status(503).json({ error: "Webhook de payout não configurado." });
+    return;
+  }
+
+  const secret = getWithdrawalWebhookSecret(req as { headers: Record<string, unknown> });
+  if (secret !== PAYOUT_WEBHOOK_SECRET) {
+    logger.warn({ ip: req.ip }, "Withdrawal payout webhook rejected: invalid secret");
+    res.status(403).json({ error: "Forbidden" });
+    return;
+  }
+
+  const {
+    withdrawalId,
+    providerReference,
+    status,
+    providerStatus,
+    decisionReason,
+    note,
+    eventId,
+    payload,
+  } = (req.body ?? {}) as {
+    withdrawalId?: number | string;
+    providerReference?: string;
+    status?: string;
+    providerStatus?: string;
+    decisionReason?: string;
+    note?: string;
+    eventId?: string;
+    payload?: unknown;
+  };
+
+  const targetStatus = normalizeWebhookWithdrawalStatus(status || providerStatus || "");
+  if (!targetStatus) {
+    res.status(400).json({ error: "Status de payout inválido." });
+    return;
+  }
+
+  const numericId = withdrawalId !== undefined ? Number(withdrawalId) : null;
+  const providerRef = typeof providerReference === "string" ? providerReference.trim() : "";
+  if ((!numericId || !Number.isFinite(numericId) || numericId <= 0) && !providerRef) {
+    res.status(400).json({ error: "É necessário indicar withdrawalId ou providerReference." });
+    return;
+  }
+
+  try {
+    let existing = null as typeof withdrawalsTable.$inferSelect | null;
+    if (numericId && Number.isFinite(numericId) && numericId > 0) {
+      const [byId] = await db.select().from(withdrawalsTable).where(eq(withdrawalsTable.id, numericId)).limit(1);
+      existing = byId ?? null;
+    } else if (providerRef) {
+      const [byProviderRef] = await db.select().from(withdrawalsTable).where(eq(withdrawalsTable.providerReference, providerRef)).limit(1);
+      existing = byProviderRef ?? null;
+    }
+
+    if (!existing) {
+      res.status(404).json({ error: "Levantamento não encontrado." });
+      return;
+    }
+
+    if (providerRef && existing.providerReference && existing.providerReference !== providerRef) {
+      res.status(409).json({ error: "providerReference não corresponde ao levantamento." });
+      return;
+    }
+
+    if (existing.status === targetStatus) {
+      res.json({ ok: true, idempotent: true, status: existing.status, withdrawalId: existing.id });
+      return;
+    }
+
+    if (!canTransitionWithdrawalStatus(existing.status, targetStatus)) {
+      res.status(400).json({ error: `Transição inválida: ${existing.status} -> ${targetStatus}` });
+      return;
+    }
+
+    const now = new Date();
+    const [updated] = await db.transaction(async (tx) => {
+      if (targetStatus === "paid") {
+        await adjustWithdrawalHoldBalance(tx, {
+          userId: existing.userId,
+          amount: (-Number(existing.amount)).toFixed(2),
+        });
+        await applyBalanceDelta(tx, {
+          userId: existing.userId,
+          amount: "0.00",
+          kind: "withdrawal_paid",
+          idempotencyKey: `withdrawal:${existing.id}:paid`,
+          refType: "withdrawal",
+          refId: String(existing.id),
+        });
+      }
+
+      return await tx
+        .update(withdrawalsTable)
+        .set({
+          status: targetStatus,
+          notes: note ?? existing.notes ?? null,
+          reviewedBy: "provider_webhook",
+          reviewedAt: now,
+          decisionReason: decisionReason ?? existing.decisionReason ?? null,
+          providerReference: providerRef || existing.providerReference || null,
+          processedAt: targetStatus === "processing" || targetStatus === "paid" ? now : existing.processedAt,
+          updatedAt: now,
+        })
+        .where(eq(withdrawalsTable.id, existing.id))
+        .returning();
+    });
+
+    await auditWithdrawalEvent({
+      actor: "system:payout_webhook",
+      action: "withdrawal_webhook_status_updated",
+      targetId: String(existing.id),
+      ip: req.ip ?? null,
+      details: {
+        previousStatus: existing.status,
+        newStatus: targetStatus,
+        amount: existing.amount,
+        providerReference: providerRef || existing.providerReference || null,
+        decisionReason: decisionReason ?? null,
+        eventId: eventId ?? null,
+        payload: payload ?? null,
+      },
+    });
+
+    res.json({ ok: true, withdrawalId: updated.id, status: updated.status });
+  } catch (err) {
+    logger.error({ err }, "Withdrawal payout webhook error");
     res.status(500).json({ error: "Erro interno" });
   }
 });
