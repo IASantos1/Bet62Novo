@@ -700,13 +700,6 @@ function getTeamBanner(teamName: string, country?: string): string | undefined {
   );
   if (exactNormalized) return exactNormalized[1];
 
-  const partialNormalized = entries.find(([key]) => {
-    if (!bannerCountryMatches(key, country)) return false;
-    const normalizedKey = normalizeBannerTeamName(key);
-    return normalizedKey.includes(normalizedTarget) || normalizedTarget.includes(normalizedKey);
-  });
-  if (partialNormalized) return partialNormalized[1];
-
   return directBanner;
 }
 
@@ -953,20 +946,59 @@ const RIVALRY_TAGS: Record<string, string> = {
 
 // ─── Sidebar tree data ────────────────────────────────────────────────────────
 
-/** Flexible league name matching — handles "Country: League" API prefixes and substring containment */
+function normalizeLeagueFilterName(value: string): string {
+  return String(value ?? "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/^[^:]+:\s*/, "")
+    .replace(/[^a-z0-9 ]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+const LEAGUE_FILTER_ALIASES: Record<string, string[]> = {
+  champions: ["champions league", "uefa champions league"],
+  "europa league": ["europa league", "uefa europa league"],
+  conference: ["conference league", "uefa conference league"],
+  "copa do mundo 2026": ["fifa world cup", "world cup", "copa do mundo", "wc 2026", "mundial 2026"],
+  "international friendlies": ["international friendlies", "international friendly", "amistosos internacionais", "friendly", "friendlies"],
+  "premier league": ["premier league"],
+  "la liga": ["la liga", "laliga"],
+  bundesliga: ["bundesliga"],
+  "serie a": ["serie a", "serie a tim", "serie a enilive"],
+  "ligue 1": ["ligue 1", "ligue1"],
+  "primeira liga": ["primeira liga", "liga portugal", "liga portugal betclic", "liga nos", "liga bwin"],
+  eredivisie: ["eredivisie"],
+  "super lig": ["super lig", "super lig turkey", "superlig", "super lig turkiye", "super lig turquia", "super lig", "super ligue", "super lig turco", "super lig turca", "super lig tff", "super lig", "super lig 1", "super lig 2", "super lig a", "super lig b", "super lig c", "süper lig"],
+  "liga mx": ["liga mx"],
+  mls: ["mls", "major league soccer"],
+  brasileirao: ["brasileirao", "campeonato brasileiro", "serie a brasil", "brasileirao serie a", "brasileirao assaí"],
+  libertadores: ["copa libertadores", "libertadores"],
+  "fa cup": ["fa cup"],
+  "copa del rey": ["copa del rey"],
+  "coppa italia": ["coppa italia"],
+  "dfb pokal": ["dfb pokal", "dfb-pokal"],
+};
+
+/** Precise league matching — strips country prefixes and allows sponsor suffixes, but avoids cross-league false positives. */
 function leagueMatchesFilter(matchLeague: string, filterLeague: string): boolean {
   if (!filterLeague) return true;
-  const ml = matchLeague.toLowerCase().trim();
-  const fl = filterLeague.toLowerCase().trim();
-  if (ml === fl) return true;
-  if (ml.includes(fl)) return true;
-  const mlClean = ml.replace(/^[^:]+:\s*/, "").trim();
-  if (mlClean === fl || mlClean.includes(fl)) return true;
-  const flAlt = fl.replace(/^uefa\s+/, "").replace(/^fifa\s+/, "").trim();
-  if (!flAlt || flAlt === fl) return false;
-  if (ml === flAlt) return true;
-  if (ml.includes(flAlt)) return true;
-  return mlClean === flAlt || mlClean.includes(flAlt);
+  const matchNorm = normalizeLeagueFilterName(matchLeague);
+  const filterNorm = normalizeLeagueFilterName(filterLeague);
+  if (!matchNorm || !filterNorm) return false;
+
+  const aliases = LEAGUE_FILTER_ALIASES[filterNorm] ?? [
+    filterNorm,
+    filterNorm.replace(/^uefa\s+/, "").replace(/^fifa\s+/, "").trim(),
+  ].filter(Boolean);
+
+  return aliases.some((alias) => {
+    if (matchNorm === alias) return true;
+    // Allow sponsor suffixes like "liga portugal betclic" or "serie a tim",
+    // but do not match unrelated competitions such as "russian premier league".
+    return matchNorm.startsWith(`${alias} `);
+  });
 }
 
 const WC2026_FILTER_LABEL = "Copa do Mundo 2026";
@@ -1806,6 +1838,7 @@ export default function Home() {
   const [wc2026Matches, setWc2026Matches] = useState<Match[]>([]);
   const [upcomingLoading, setUpcomingLoading] = useState(true);
   const [selectedSport, setSelectedSport] = useState<string>("all");
+  const [upcomingSearchQuery, setUpcomingSearchQuery] = useState("");
 
   // Recent tennis results (yesterday)
   type TennisResult = {
@@ -6402,10 +6435,11 @@ export default function Home() {
               const renderTeamSection = (team: TeamPlayerMarkets, isHome: boolean) => {
                 const fallbackTeamName = isHome ? match.home : match.away;
                 const teamBanner =
-                  getTeamBanner(team.teamName, match.country) ??
                   getTeamBanner(fallbackTeamName, match.country) ??
+                  getTeamBanner(team.teamName, match.country) ??
+                  getTeamBanner(fallbackTeamName) ??
                   getTeamBanner(team.teamName) ??
-                  getTeamBanner(fallbackTeamName);
+                  undefined;
                 return (
                   <div key={team.teamId} className="mb-6 rounded-2xl overflow-hidden border border-zinc-800 bg-zinc-950/70">
                     {teamBanner ? (
@@ -9613,6 +9647,13 @@ export default function Home() {
               })();
 
               const filteredUpcoming = selectedSport === "all" ? allUpcoming : allUpcoming.filter(m => (m.sport ?? "football") === selectedSport);
+              const visibleUpcoming = filteredUpcoming.filter((m) => {
+                const q = upcomingSearchQuery.trim().toLowerCase();
+                if (!q) return true;
+                return m.home.toLowerCase().includes(q)
+                  || m.away.toLowerCase().includes(q)
+                  || (m.league ?? "").toLowerCase().includes(q);
+              });
               const homeFeaturedMatches = (() => {
                 const footballUpcoming = allUpcoming
                   .filter((m) => (m.sport ?? "football") === "football" && !m.isWomens)
@@ -9659,7 +9700,7 @@ export default function Home() {
                 { key: "volleyball", emoji: "🏐", label: "Voleibol" },
               ] as const;
               const sportGroups = SPORT_GROUPS
-                .map(g => ({ ...g, matches: filteredUpcoming.filter(m => (m.sport ?? "football") === g.key) }))
+                .map(g => ({ ...g, matches: visibleUpcoming.filter(m => (m.sport ?? "football") === g.key) }))
                 .filter(g => g.matches.length > 0);
 
               // Derive tournament display label from raw API name
@@ -9673,6 +9714,26 @@ export default function Home() {
                       {homeFeaturedMatches.map((match) => (
                         <MatchCard key={match.id} match={match} />
                       ))}
+                    </div>
+                  )}
+                  {filteredUpcoming.length > 0 && (
+                    <div className="relative mb-4">
+                      <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500 pointer-events-none" />
+                      <input
+                        type="text"
+                        value={upcomingSearchQuery}
+                        onChange={e => setUpcomingSearchQuery(e.target.value)}
+                        placeholder="Pesquisar equipa ou liga…"
+                        className="w-full bg-zinc-900 border border-zinc-700 rounded-lg pl-8 pr-8 py-2 text-sm text-white placeholder-zinc-500 focus:outline-none focus:border-red-500/60 transition-colors"
+                      />
+                      {upcomingSearchQuery && (
+                        <button
+                          onClick={() => setUpcomingSearchQuery("")}
+                          className="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-white transition-colors"
+                        >
+                          <X size={14} />
+                        </button>
+                      )}
                     </div>
                   )}
                   {!selectedLeague && <PopularBanners />}
@@ -10518,11 +10579,6 @@ export default function Home() {
                       })()}
                     </div>
                   )}
-
-
-                  <h2 className="text-2xl font-black italic uppercase tracking-tight mb-4 flex items-center gap-2">
-                    <Trophy className="text-red-600" /> {selectedCountry ? `⚽ ${selectedCountry}` : selectedLeague ? selectedLeague : "Próximos Eventos"}
-                  </h2>
                   {upcomingLoading ? (
                     <div className="space-y-3">
                       {[1,2,3,4,5,6].map(i => (
@@ -10545,7 +10601,7 @@ export default function Home() {
                         </div>
                       ))}
                     </div>
-                  ) : filteredUpcoming.length === 0 ? (
+                  ) : visibleUpcoming.length === 0 ? (
                     <div className="py-20 text-center text-zinc-500 bg-zinc-900/50 rounded-xl border border-zinc-800">
                       <Trophy className="mx-auto mb-4 opacity-20" size={48} />
                       <p className="font-medium">
@@ -10584,7 +10640,7 @@ export default function Home() {
                         return date.toLocaleDateString("pt-PT", { weekday: "long", day: "2-digit", month: "short" });
                       };
                       // Sort by date then time
-                      const sorted = [...filteredUpcoming].sort((a, b) => {
+                      const sorted = [...visibleUpcoming].sort((a, b) => {
                         const dk = dateSortKey(a.date).localeCompare(dateSortKey(b.date));
                         if (dk !== 0) return dk;
                         return (a.time ?? "").localeCompare(b.time ?? "");

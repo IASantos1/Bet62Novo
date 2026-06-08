@@ -706,8 +706,8 @@ function leaguePriority(name: string, country?: string): number {
   return 999;
 }
 
-const DEFAULT_FOOTBALL_LIVE_DISAPPEAR_GRACE_MS = 12 * 60 * 1000;
-const PRIORITY_FOOTBALL_LIVE_DISAPPEAR_GRACE_MS = 30 * 60 * 1000;
+const DEFAULT_FOOTBALL_LIVE_DISAPPEAR_GRACE_MS = 20 * 60 * 1000;
+const PRIORITY_FOOTBALL_LIVE_DISAPPEAR_GRACE_MS = 45 * 60 * 1000;
 
 function isCatalogPriorityLeague(prio: number): boolean {
   return prio < 100;
