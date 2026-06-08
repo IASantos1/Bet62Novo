@@ -670,12 +670,44 @@ const TEAM_COUNTRY: Record<string, string> = {
   "Mazatlán": "mexico", "Mazatlan": "mexico", "Mazatlán FC": "mexico",
 };
 
+function normalizeBannerTeamName(name: string): string {
+  return String(name ?? "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\b(fc|afc|sc|cf|sv|ac|rsc|fk|sk|cd|ud|sd|ca|ad|as|ss|us|ssc|club|clube)\b/g, "")
+    .replace(/[^a-z0-9 ]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function bannerCountryMatches(teamKey: string, country?: string): boolean {
+  const expectedCountry = TEAM_COUNTRY[teamKey];
+  if (!expectedCountry || !country) return true;
+  return expectedCountry === country.toLowerCase();
+}
+
 function getTeamBanner(teamName: string, country?: string): string | undefined {
-  const banner = TEAM_BANNERS[teamName];
-  if (!banner) return undefined;
-  const expectedCountry = TEAM_COUNTRY[teamName];
-  if (!expectedCountry || !country) return banner;
-  return expectedCountry === country.toLowerCase() ? banner : undefined;
+  const directBanner = TEAM_BANNERS[teamName];
+  if (directBanner && bannerCountryMatches(teamName, country)) return directBanner;
+
+  const normalizedTarget = normalizeBannerTeamName(teamName);
+  if (!normalizedTarget) return directBanner;
+
+  const entries = Object.entries(TEAM_BANNERS);
+  const exactNormalized = entries.find(([key]) =>
+    normalizeBannerTeamName(key) === normalizedTarget && bannerCountryMatches(key, country),
+  );
+  if (exactNormalized) return exactNormalized[1];
+
+  const partialNormalized = entries.find(([key]) => {
+    if (!bannerCountryMatches(key, country)) return false;
+    const normalizedKey = normalizeBannerTeamName(key);
+    return normalizedKey.includes(normalizedTarget) || normalizedTarget.includes(normalizedKey);
+  });
+  if (partialNormalized) return partialNormalized[1];
+
+  return directBanner;
 }
 
 const ARENA_BANNER = "/arena-banner.png";
