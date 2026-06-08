@@ -90,55 +90,6 @@ import parisFCBanner from "@assets/file_1779019459045_1779019658504.jpeg";
 import lorientBanner from "@assets/file_1779019450188_1779019658504.jpeg";
 import brestBanner from "@assets/file_1779019468348_1779019658504.jpeg";
 
-// ── Copa do Mundo 2026 — Seleções Nacionais ──
-import ghanaBanner from "@assets/file_1780780661723_1780781005840.jpeg";
-import englandBanner from "@assets/file_1780780657153_1780781005840.jpeg";
-import panamaBanner from "@assets/file_1780780651333_1780781005840.jpeg";
-import spainBanner from "@assets/file_1780780613202_1780781005840.jpeg";
-import algeriaBanner from "@assets/file_1780780608279_1780781005840.jpeg";
-import austriaBanner from "@assets/file_1780780601696_1780781005840.jpeg";
-import jordanBanner from "@assets/file_1780780596680_1780781005840.jpeg";
-import portugalBanner from "@assets/file_1780780589392_1780781005840.jpeg";
-import colombiaBanner from "@assets/file_1780780582677_1780781005840.jpeg";
-import drCongoBanner from "@assets/file_1780780578373_1780781005840.jpeg";
-import uzbekistanBanner from "@assets/file_1780780571015_1780781005840.jpeg";
-import croatiaBanner from "@assets/file_1780780566159_1780781005840.jpeg";
-import brazilNationalBanner from "@assets/file_1780272909971_1780780146439.jpeg";
-import mexicoNationalBanner from "@assets/file_1780272818069_1780780146439.jpeg";
-import usaBanner from "@assets/file_1780272929955_1780780146439.jpeg";
-import canadaNationalBanner from "@assets/file_1780272885494_1780780146439.jpeg";
-import scotlandBanner from "@assets/file_1780272925744_1780780146439.jpeg";
-import moroccoBanner from "@assets/file_1780272914437_1780780146439.jpeg";
-import southAfricaBanner from "@assets/file_1780272827972_1780780146439.jpeg";
-import southKoreaBanner from "@assets/file_1780272832352_1780780146439.jpeg";
-import australiaBanner from "@assets/file_1780272935048_1780780146439.jpeg";
-import paraguayBanner from "@assets/file_1780272941088_1780780146438.jpeg";
-import haitiBanner from "@assets/file_1780272921122_1780780146439.jpeg";
-import qatarBanner from "@assets/file_1780272899159_1780780146439.jpeg";
-import switzerlandBanner from "@assets/file_1780272904435_1780780146439.jpeg";
-import bosniaBanner from "@assets/file_1780272890958_1780780146439.jpeg";
-import czechRepublicBanner from "@assets/file_1780272840445_1780780146439.jpeg";
-import franceBanner from "@assets/file_1780273049333_1780779933809.jpeg";
-import germanyBanner from "@assets/file_1780272950823_1780779933809.jpeg";
-import netherlandsBanner from "@assets/file_1780272976718_1780779933809.jpeg";
-import belgiumBanner from "@assets/file_1780273000997_1780779933809.jpeg";
-import swedenBanner from "@assets/file_1780272982273_1780779933809.jpeg";
-import turkeyBanner from "@assets/file_1780272944606_1780779933809.jpeg";
-import uruguayBanner from "@assets/file_1780273044009_1780779933809.jpeg";
-import ecuadorBanner from "@assets/file_1780272966570_1780779933809.jpeg";
-import japanBanner from "@assets/file_1780272971512_1780779933809.jpeg";
-import iranBanner from "@assets/file_1780273021889_1780779933809.jpeg";
-import iraqBanner from "@assets/file_1780273054337_1780779933809.jpeg";
-import saudiArabiaBanner from "@assets/file_1780273037555_1780779933809.jpeg";
-import egyptBanner from "@assets/file_1780273007462_1780779933809.jpeg";
-import tunisiaBanner from "@assets/file_1780272994238_1780779933809.jpeg";
-import senegalBanner from "@assets/file_1780273066530_1780779933809.jpeg";
-import norwayBanner from "@assets/file_1780273061419_1780779933809.jpeg";
-import newZealandBanner from "@assets/file_1780273027929_1780779933809.jpeg";
-import ivoryCastBanner from "@assets/file_1780272957669_1780779933809.jpeg";
-import capeVerdeBanner from "@assets/file_1780273032822_1780779933809.jpeg";
-import curacaoBanner from "@assets/file_1780272962091_1780779933809.jpeg";
-
 const TEAM_BANNERS: Record<string, string> = {
   // ── Liga Portugal ──
   "FC Porto": "/banners/porto.jpg",
@@ -447,56 +398,6 @@ const TEAM_BANNERS: Record<string, string> = {
   "SC Heerenveen": heerenveenBanner,
   "Heerenveen": heerenveenBanner,
   "Go Ahead Eagles": goAheadEaglesBanner,
-  // ── Copa do Mundo 2026 — Seleções Nacionais (time da casa) ──
-  "France": franceBanner, "França": franceBanner, "Frankreich": franceBanner,
-  "Germany": germanyBanner, "Deutschland": germanyBanner, "Alemanha": germanyBanner,
-  "Netherlands": netherlandsBanner, "Holland": netherlandsBanner, "Países Baixos": netherlandsBanner,
-  "Belgium": belgiumBanner, "Belgique": belgiumBanner, "Bélgica": belgiumBanner,
-  "Sweden": swedenBanner, "Sverige": swedenBanner, "Suécia": swedenBanner,
-  "Turkey": turkeyBanner, "Türkiye": turkeyBanner, "Turquia": turkeyBanner,
-  "Uruguay": uruguayBanner, "Uruguai": uruguayBanner,
-  "Ecuador": ecuadorBanner, "Equador": ecuadorBanner,
-  "Japan": japanBanner, "Japon": japanBanner, "Japão": japanBanner,
-  "Iran": iranBanner, "IR Iran": iranBanner, "Irã": iranBanner, "Iran Islamic Republic": iranBanner,
-  "Iraq": iraqBanner, "Iraque": iraqBanner,
-  "Saudi Arabia": saudiArabiaBanner, "Arábia Saudita": saudiArabiaBanner, "Arabia Saudita": saudiArabiaBanner,
-  "Egypt": egyptBanner, "Egito": egyptBanner,
-  "Tunisia": tunisiaBanner, "Tunísia": tunisiaBanner, "Tunisie": tunisiaBanner,
-  "Senegal": senegalBanner, "Sénégal": senegalBanner,
-  "Norway": norwayBanner, "Noruega": norwayBanner, "Norge": norwayBanner,
-  "New Zealand": newZealandBanner, "Nova Zelândia": newZealandBanner, "Nueva Zelanda": newZealandBanner,
-  "Ivory Coast": ivoryCastBanner, "Côte d'Ivoire": ivoryCastBanner, "Cote d'Ivoire": ivoryCastBanner, "Cote dIvoire": ivoryCastBanner,
-  "Cape Verde": capeVerdeBanner, "Cabo Verde": capeVerdeBanner,
-  "Curaçao": curacaoBanner, "Curacao": curacaoBanner,
-  // ── Copa do Mundo 2026 — Seleções Nacionais (lote 2) ──
-  "Brazil": brazilNationalBanner, "Brasil": brazilNationalBanner,
-  "Mexico": mexicoNationalBanner, "México": mexicoNationalBanner,
-  "United States": usaBanner, "USA": usaBanner, "US": usaBanner, "Estados Unidos": usaBanner,
-  "Canada": canadaNationalBanner,
-  "Scotland": scotlandBanner, "Escócia": scotlandBanner,
-  "Morocco": moroccoBanner, "Marrocos": moroccoBanner, "Maroc": moroccoBanner,
-  "South Africa": southAfricaBanner, "África do Sul": southAfricaBanner,
-  "South Korea": southKoreaBanner, "Korea Republic": southKoreaBanner, "Coreia do Sul": southKoreaBanner,
-  "Australia": australiaBanner, "Austrália": australiaBanner,
-  "Paraguay": paraguayBanner, "Paraguai": paraguayBanner,
-  "Haiti": haitiBanner,
-  "Qatar": qatarBanner,
-  "Switzerland": switzerlandBanner, "Suíça": switzerlandBanner, "Schweiz": switzerlandBanner,
-  "Bosnia and Herzegovina": bosniaBanner, "Bosnia": bosniaBanner, "Bósnia": bosniaBanner,
-  "Czech Republic": czechRepublicBanner, "Czechia": czechRepublicBanner, "República Checa": czechRepublicBanner,
-  // ── Copa do Mundo 2026 — Seleções Nacionais (lote 3) ──
-  "Ghana": ghanaBanner,
-  "England": englandBanner, "Inglaterra": englandBanner, "Angleterre": englandBanner,
-  "Panama": panamaBanner, "Panamá": panamaBanner,
-  "Spain": spainBanner, "España": spainBanner, "Espanha": spainBanner, "Espagne": spainBanner,
-  "Algeria": algeriaBanner, "Argélia": algeriaBanner, "Algérie": algeriaBanner,
-  "Austria": austriaBanner, "Áustria": austriaBanner, "Österreich": austriaBanner,
-  "Jordan": jordanBanner, "Jordânia": jordanBanner,
-  "Portugal": portugalBanner,
-  "Colombia": colombiaBanner, "Colômbia": colombiaBanner,
-  "DR Congo": drCongoBanner, "Congo DR": drCongoBanner, "Democratic Republic of Congo": drCongoBanner, "República Democrática do Congo": drCongoBanner,
-  "Uzbekistan": uzbekistanBanner, "Uzbequistão": uzbekistanBanner,
-  "Croatia": croatiaBanner, "Croácia": croatiaBanner, "Croatie": croatiaBanner, "Kroatien": croatiaBanner,
 };
 
 const TEAM_NAME_PT: Record<string, string> = {
@@ -1750,9 +1651,6 @@ export default function Home() {
   const [upcomingMatches, setUpcomingMatches] = useState<Match[]>([]);
   const [upcomingLoading, setUpcomingLoading] = useState(true);
   const [selectedSport, setSelectedSport] = useState<string>("all");
-  const [selectedWC, setSelectedWC] = useState(false);
-  const [wcMatchesData, setWcMatchesData] = useState<Match[]>([]);
-  const [wcLoading, setWcLoading] = useState(false);
 
   // Recent tennis results (yesterday)
   type TennisResult = {
@@ -2972,19 +2870,6 @@ export default function Home() {
     return () => clearInterval(id);
   }, [fetchUpcoming, readSnapshot, selectedSport, upcomingSnapshotKey, activeTab]);
 
-  // Fetch WC 2026 matches whenever filter is activated (always re-fetch for freshness)
-  useEffect(() => {
-    if (!selectedWC) return;
-    setWcLoading(true);
-    fetch("/api/matches/wc2026")
-      .then(r => r.ok ? r.json() : { matches: [] })
-      .then((data: { matches?: Array<{ id: string; home: string; away: string; league: string; country?: string; time?: string; date?: string; sport?: string; hasRealOdds?: boolean; odds: Odds; markets?: AdvancedMarkets }> }) => {
-        setWcMatchesData((data.matches ?? []).map(m => ({ ...m, isLive: false })));
-      })
-      .catch(() => {})
-      .finally(() => setWcLoading(false));
-  }, [selectedWC]);
-
   // Fetch live matches — polls every 5s
   type LiveMatchRaw = {
     id: string; home: string; away: string; league: string;
@@ -3978,19 +3863,25 @@ export default function Home() {
           </div>
           {/* Home row */}
           <div className="flex items-center">
-            <div className="flex-1 font-bold text-white text-xs truncate">{homeName}</div>
+            <div className="flex-1 min-w-0 flex items-center gap-1">
+              <span className="w-4 shrink-0 text-yellow-400">{serving?.[0] ? "🎾" : ""}</span>
+              <span className="font-bold text-white text-xs truncate">{homeName}</span>
+            </div>
             {sets.map(([h], i) => (
               <div key={i} className={`${colW} text-center font-black ${h > (sets[i]?.[1] ?? 0) ? "text-white" : "text-zinc-500"}`}>{h}</div>
             ))}
-            {pts && <div className={`w-8 text-center font-black ${hPtColor}`}>{isDeuce ? "D" : `${serving?.[0] ? "🎾" : ""}${pts[0]}`}</div>}
+            {pts && <div className={`w-8 text-center font-black ${hPtColor}`}>{isDeuce ? "D" : `${pts[0]}`}</div>}
           </div>
           {/* Away row */}
           <div className="flex items-center">
-            <div className="flex-1 font-bold text-white text-xs truncate">{awayName}</div>
+            <div className="flex-1 min-w-0 flex items-center gap-1">
+              <span className="w-4 shrink-0 text-yellow-400">{serving?.[1] ? "🎾" : ""}</span>
+              <span className="font-bold text-white text-xs truncate">{awayName}</span>
+            </div>
             {sets.map(([, a], i) => (
               <div key={i} className={`${colW} text-center font-black ${a > (sets[i]?.[0] ?? 0) ? "text-white" : "text-zinc-500"}`}>{a}</div>
             ))}
-            {pts && <div className={`w-8 text-center font-black ${aPtColor}`}>{isDeuce ? "D" : `${serving?.[1] ? "🎾" : ""}${pts[1]}`}</div>}
+            {pts && <div className={`w-8 text-center font-black ${aPtColor}`}>{isDeuce ? "D" : `${pts[1]}`}</div>}
           </div>
         </div>
       );
@@ -9232,9 +9123,7 @@ export default function Home() {
                   .filter(m => { const k = String(m.id); if (seen.has(k)) return false; seen.add(k); return true; });
               })();
 
-              const filteredUpcoming = selectedWC
-                ? wcMatchesData
-                : (selectedSport === "all" ? allUpcoming : allUpcoming.filter(m => (m.sport ?? "football") === selectedSport));
+              const filteredUpcoming = selectedSport === "all" ? allUpcoming : allUpcoming.filter(m => (m.sport ?? "football") === selectedSport);
 
               // Sport grouping for display
               const SPORT_GROUPS = [
@@ -9254,27 +9143,6 @@ export default function Home() {
 
               return (
                 <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
-                  {!selectedLeague && (
-                    <WorldCupBanner3D
-                      onClick={() => { setSelectedSport("football"); setSelectedWC(true); setSelectedLeague(null); }}
-                    />
-                  )}
-                  {selectedWC && wcLoading && (
-                    <div className="mb-3 flex items-center gap-2 text-zinc-400 text-sm">
-                      <span className="w-3 h-3 border-2 border-zinc-600 border-t-red-500 rounded-full animate-spin inline-block" />
-                      A carregar jogos do Mundial 2026…
-                    </div>
-                  )}
-                  {selectedWC && (
-                    <div className="mb-3 flex items-center gap-2">
-                      <button
-                        className="flex items-center gap-1.5 bg-red-600/15 border border-red-500/40 text-red-400 text-xs font-bold px-3 py-1.5 rounded-full hover:bg-red-600/25 transition-colors"
-                        onClick={() => { setSelectedWC(false); setSelectedSport("football"); }}
-                      >
-                        🌍 Copa do Mundo <span className="ml-1 opacity-70">✕</span>
-                      </button>
-                    </div>
-                  )}
                   {!selectedLeague && <PopularBanners />}
 
                   {/* ─── League filter chips (grandes ligas com logos oficiais) ── */}
@@ -9321,23 +9189,13 @@ export default function Home() {
                         if (ml && !seenLabels.has(ml.label)) { seenLabels.add(ml.label); chips.push({ label: ml.label, logo: ml.logo, color: ml.color }); }
                       }
                     }
-                    const showWCChip = selectedSport === "football" || selectedSport === "all";
-                    if (chips.length < 2 && !showWCChip) return null;
+                    if (chips.length < 2) return null;
                     return (
                       <div className="overflow-x-auto flex gap-2.5 pb-3 mb-5 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
-                        {showWCChip && (
-                          <button
-                            {...makeTap(() => { setSelectedWC(!selectedWC); setSelectedLeague(null); if (!selectedWC) setSelectedSport("football"); })}
-                            className={`flex items-center gap-2 px-3.5 py-2.5 rounded-xl border whitespace-nowrap text-sm font-semibold transition-all flex-shrink-0 ${selectedWC ? "border-amber-500 bg-amber-500/10 text-white shadow-[0_0_10px_rgba(245,158,11,0.18)]" : "border-zinc-700 bg-zinc-900/60 text-zinc-300 hover:border-zinc-500 hover:text-white"}`}
-                          >
-                            <span className="text-base leading-none">🌍</span>
-                            <span>Mundial 2026</span>
-                          </button>
-                        )}
                         {chips.length >= 2 && (
                           <button
                             {...makeTap(() => setSelectedLeague(null))}
-                            className={`flex items-center gap-2 px-3.5 py-2.5 rounded-xl border whitespace-nowrap text-sm font-semibold transition-all flex-shrink-0 ${!selectedLeague && !selectedWC ? "border-amber-500 bg-amber-500/10 text-white shadow-[0_0_10px_rgba(245,158,11,0.18)]" : "border-zinc-700 bg-zinc-900/60 text-zinc-300 hover:border-zinc-500 hover:text-white"}`}
+                            className={`flex items-center gap-2 px-3.5 py-2.5 rounded-xl border whitespace-nowrap text-sm font-semibold transition-all flex-shrink-0 ${!selectedLeague ? "border-amber-500 bg-amber-500/10 text-white shadow-[0_0_10px_rgba(245,158,11,0.18)]" : "border-zinc-700 bg-zinc-900/60 text-zinc-300 hover:border-zinc-500 hover:text-white"}`}
                           >
                             <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="shrink-0"><rect width="7" height="7" x="3" y="3" rx="1"/><rect width="7" height="7" x="14" y="3" rx="1"/><rect width="7" height="7" x="14" y="14" rx="1"/><rect width="7" height="7" x="3" y="14" rx="1"/></svg>
                             <span>Todas</span>
@@ -10102,9 +9960,9 @@ export default function Home() {
 
 
                   <h2 className="text-2xl font-black italic uppercase tracking-tight mb-4 flex items-center gap-2">
-                    <Trophy className="text-red-600" /> {selectedCountry ? `⚽ ${selectedCountry}` : selectedLeague ? selectedLeague : selectedWC ? "Copa do Mundo 2026" : "Próximos Eventos"}
+                    <Trophy className="text-red-600" /> {selectedCountry ? `⚽ ${selectedCountry}` : selectedLeague ? selectedLeague : "Próximos Eventos"}
                   </h2>
-                  {(selectedWC ? wcLoading : upcomingLoading) ? (
+                  {upcomingLoading ? (
                     <div className="space-y-3">
                       {[1,2,3,4,5,6].map(i => (
                         <div key={i} className="bg-zinc-900 border border-zinc-800 rounded-xl p-4 animate-pulse">
@@ -10130,13 +9988,11 @@ export default function Home() {
                     <div className="py-20 text-center text-zinc-500 bg-zinc-900/50 rounded-xl border border-zinc-800">
                       <Trophy className="mx-auto mb-4 opacity-20" size={48} />
                       <p className="font-medium">
-                        {selectedWC
-                          ? "Nenhum jogo do Mundial 2026 encontrado de momento. Tente novamente em breve."
-                          : selectedCountry
-                            ? `Nenhum evento para ${selectedCountry}.`
-                            : selectedLeague
-                              ? "Nenhum evento para esta liga."
-                              : "Nenhum evento programado no momento."}
+                        {selectedCountry
+                          ? `Nenhum evento para ${selectedCountry}.`
+                          : selectedLeague
+                            ? "Nenhum evento para esta liga."
+                            : "Nenhum evento programado no momento."}
                       </p>
                     </div>
                   ) : (selectedLeague || selectedCountry) ? (
@@ -11864,149 +11720,6 @@ export default function Home() {
         )}
       </AnimatePresence>
 
-    </div>
-  );
-}
-
-// ─── WORLD CUP 3D BANNER ─────────────────────────────────────────────────────
-function WorldCupBanner3D({ onClick }: { onClick: () => void }) {
-  const containerRef = useRef<HTMLDivElement>(null);
-  const [mouse, setMouse] = useState({ x: 0, y: 0 });
-  const [isHovered, setIsHovered] = useState(false);
-  const handleMouseMove = (e: React.MouseEvent) => {
-    const rect = containerRef.current?.getBoundingClientRect();
-    if (!rect) return;
-    setMouse({ x: (e.clientX - rect.left) / rect.width - 0.5, y: (e.clientY - rect.top) / rect.height - 0.5 });
-  };
-  const particles = [
-    { size: 2, left: 12, top: 22, dur: 2.2, delay: 0 },
-    { size: 3, left: 26, top: 62, dur: 2.6, delay: 0.28 },
-    { size: 2, left: 40, top: 33, dur: 2.1, delay: 0.56 },
-    { size: 4, left: 55, top: 78, dur: 2.9, delay: 0.84 },
-    { size: 2, left: 64, top: 18, dur: 2.4, delay: 1.12 },
-    { size: 3, left: 74, top: 55, dur: 2.7, delay: 1.4 },
-    { size: 2, left: 82, top: 38, dur: 2.3, delay: 1.68 },
-    { size: 3, left: 91, top: 68, dur: 2.5, delay: 1.96 },
-  ];
-  return (
-    <div
-      ref={containerRef}
-      className="mb-4 relative overflow-hidden rounded-2xl cursor-pointer select-none"
-      style={{ height: 220, perspective: "1000px" }}
-      onClick={onClick}
-      onMouseMove={handleMouseMove}
-      onMouseEnter={() => setIsHovered(true)}
-      onMouseLeave={() => { setIsHovered(false); setMouse({ x: 0, y: 0 }); }}
-    >
-      {/* BG layer — moves slowest, opposite direction */}
-      <motion.div
-        className="absolute inset-0"
-        animate={{ x: mouse.x * -18, y: mouse.y * -10, scale: isHovered ? 1.07 : 1.03 }}
-        transition={{ type: "spring", stiffness: 100, damping: 18 }}
-      >
-        <img src="/copa-banner.jpeg" className="w-full h-full object-cover" alt="" />
-      </motion.div>
-
-      {/* Colour depth overlays */}
-      <div className="absolute inset-0 bg-gradient-to-r from-black/85 via-black/45 to-black/10 pointer-events-none" />
-      <div className="absolute inset-0 bg-gradient-to-t from-black/75 via-transparent to-transparent pointer-events-none" />
-      <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_70%_30%,rgba(220,38,38,0.30),transparent_55%)] pointer-events-none" />
-      <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_25%_80%,rgba(234,179,8,0.13),transparent_45%)] pointer-events-none" />
-
-      {/* Floating gold particles */}
-      {particles.map((p, i) => (
-        <motion.div
-          key={i}
-          className="absolute rounded-full bg-yellow-300/80 pointer-events-none"
-          style={{ width: p.size, height: p.size, left: `${p.left}%`, top: `${p.top}%`, filter: "blur(0.5px)" }}
-          animate={{ opacity: [0.3, 0.9, 0.3], scale: [1, 1.6, 1], y: [-4, 4, -4] }}
-          transition={{ duration: p.dur, repeat: Infinity, ease: "easeInOut", delay: p.delay }}
-        />
-      ))}
-
-      {/* Main content — slight 3D tilt */}
-      <motion.div
-        className="absolute inset-0 flex flex-col justify-center px-6 sm:px-8"
-        animate={{ rotateX: mouse.y * -4, rotateY: mouse.x * 6, x: mouse.x * 10, y: mouse.y * 5 }}
-        style={{ transformStyle: "preserve-3d" }}
-        transition={{ type: "spring", stiffness: 180, damping: 24 }}
-      >
-        <motion.div
-          className="flex items-center gap-2 mb-3"
-          animate={{ x: mouse.x * 6, y: mouse.y * 3 }}
-          transition={{ type: "spring", stiffness: 160, damping: 22 }}
-        >
-          <span className="bg-red-600/90 backdrop-blur-sm text-white text-[10px] font-black tracking-[0.2em] px-3 py-1 rounded-full border border-red-400/30 shadow-lg shadow-red-900/40">
-            🏆 COPA DO MUNDO
-          </span>
-          <span className="bg-yellow-500/20 backdrop-blur-sm text-yellow-300 text-[10px] font-black tracking-[0.12em] px-3 py-1 rounded-full border border-yellow-400/25">
-            USA · CAN · MEX 2026
-          </span>
-        </motion.div>
-
-        <motion.h2
-          className="text-white font-black leading-none tracking-tight"
-          style={{
-            fontSize: "clamp(1.4rem,3.8vw,2.4rem)",
-            textShadow: "0 4px 30px rgba(0,0,0,0.9), 0 0 60px rgba(220,38,38,0.35)",
-          }}
-          animate={{ x: mouse.x * 9, y: mouse.y * 4 }}
-          transition={{ type: "spring", stiffness: 145, damping: 20 }}
-        >
-          ANO DA{" "}
-          <span className="text-transparent bg-clip-text bg-gradient-to-r from-red-400 via-yellow-300 to-red-400">
-            COPA
-          </span>
-        </motion.h2>
-
-        <motion.p
-          className="text-white/80 text-sm sm:text-base mt-2 font-medium"
-          animate={{ x: mouse.x * 6, y: mouse.y * 3 }}
-          transition={{ type: "spring", stiffness: 130, damping: 18 }}
-        >
-          Viva a emoção do futebol com a{" "}
-          <span className="text-red-400 font-bold">Bet62</span>
-        </motion.p>
-      </motion.div>
-
-      {/* Trophy — moves most, creates parallax depth */}
-      <motion.div
-        className="absolute right-6 sm:right-12 top-1/2 -translate-y-1/2 pointer-events-none"
-        animate={{ x: mouse.x * 28, y: mouse.y * 16, rotateZ: mouse.x * 4, scale: isHovered ? 1.1 : 1 }}
-        transition={{ type: "spring", stiffness: 90, damping: 16 }}
-      >
-        <div className="relative">
-          <div className="absolute inset-0 blur-3xl bg-yellow-400/35 rounded-full" />
-          <Trophy
-            size={88}
-            className="text-yellow-400 relative z-10"
-            strokeWidth={1.1}
-            style={{ filter: "drop-shadow(0 0 24px rgba(251,191,36,0.75))" }}
-          />
-          <motion.div
-            className="absolute -bottom-1 left-1/2 -translate-x-1/2 w-14 h-2.5 bg-yellow-400/25 rounded-full"
-            style={{ filter: "blur(8px)" }}
-            animate={{ opacity: isHovered ? 1 : 0.6, scaleX: isHovered ? 1.3 : 1 }}
-            transition={{ duration: 0.4 }}
-          />
-        </div>
-      </motion.div>
-
-      {/* CTA button */}
-      <motion.button
-        className="absolute bottom-4 right-4 bg-red-600 text-white text-sm font-black px-5 py-2.5 rounded-xl border border-red-500/50 z-20"
-        animate={{ x: mouse.x * 14, y: mouse.y * 7, scale: isHovered ? 1.06 : 1 }}
-        style={{ boxShadow: "0 4px 20px rgba(220,38,38,0.45)" }}
-        whileTap={{ scale: 0.94 }}
-        transition={{ type: "spring", stiffness: 280, damping: 28 }}
-        onClick={(e) => { e.stopPropagation(); onClick(); }}
-      >
-        APOSTAR JÁ →
-      </motion.button>
-
-      {/* Rim light */}
-      <div className="absolute inset-0 rounded-2xl ring-1 ring-inset ring-white/[0.07] pointer-events-none" />
-      <div className="absolute top-0 left-12 right-12 h-px bg-gradient-to-r from-transparent via-white/30 to-transparent pointer-events-none" />
     </div>
   );
 }
