@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { toast } from "sonner";
 import {
@@ -152,10 +152,6 @@ export default function ProfileTab({ myBets, myBetsLoading, fetchMyBets }: Profi
   const [kycSavingMeta, setKycSavingMeta] = useState(false);
   const [kycDocType, setKycDocType] = useState<"cc" | "passport">("cc");
   const [kycDocNumber, setKycDocNumber] = useState("");
-  const kycFrontInputRef = useRef<HTMLInputElement | null>(null);
-  const kycBackInputRef = useRef<HTMLInputElement | null>(null);
-  const kycPassportInputRef = useRef<HTMLInputElement | null>(null);
-  const kycAddressInputRef = useRef<HTMLInputElement | null>(null);
 
   const wonBets = myBets.filter(b => b.status === "won");
   const totalWagered = myBets.reduce((s, b) => s + parseFloat(b.stake), 0);
@@ -243,6 +239,7 @@ export default function ProfileTab({ myBets, myBetsLoading, fetchMyBets }: Profi
       if (!r.ok || !d) return;
       setKycProfile(d);
       setKycDocType(d.kycDocumentType ?? d.kycOverview?.currentDocumentType ?? "cc");
+      setKycDocNumber("");
     } catch {
       // ignore
     } finally {
@@ -336,7 +333,7 @@ export default function ProfileTab({ myBets, myBetsLoading, fetchMyBets }: Profi
         ? "pending"
         : "unverified";
 
-  const SectionContent = ({ id }: { id: string }) => {
+  const renderSectionContent = (id: string) => {
     switch (id) {
       case "pessoais":
         return (
@@ -483,45 +480,16 @@ export default function ProfileTab({ myBets, myBetsLoading, fetchMyBets }: Profi
                 )}
               </div>
 
-              <input
-                ref={kycFrontInputRef}
-                type="file"
-                accept="image/*,application/pdf"
-                className="hidden"
-                onChange={(e) => { if (e.target.files) uploadKycFiles("id_front", e.target.files); e.currentTarget.value = ""; }}
-              />
-              <input
-                ref={kycBackInputRef}
-                type="file"
-                accept="image/*,application/pdf"
-                className="hidden"
-                onChange={(e) => { if (e.target.files) uploadKycFiles("id_back", e.target.files); e.currentTarget.value = ""; }}
-              />
-              <input
-                ref={kycPassportInputRef}
-                type="file"
-                accept="image/*,application/pdf"
-                className="hidden"
-                onChange={(e) => { if (e.target.files) uploadKycFiles("passport", e.target.files); e.currentTarget.value = ""; }}
-              />
-              <input
-                ref={kycAddressInputRef}
-                type="file"
-                accept="image/*,application/pdf"
-                className="hidden"
-                onChange={(e) => { if (e.target.files) uploadKycFiles("address", e.target.files); e.currentTarget.value = ""; }}
-              />
-
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                 {(kycDocType === "cc"
                   ? [
-                      { key: "id_front" as const, title: "Frente do documento", description: "Envie a frente do Cartão de Cidadão ou BI.", ref: kycFrontInputRef },
-                      { key: "id_back" as const, title: "Verso do documento", description: "Envie o verso do documento com todos os dados legíveis.", ref: kycBackInputRef },
-                      { key: "address" as const, title: "Comprovativo de morada", description: "Fatura ou extrato recente com nome e morada.", ref: kycAddressInputRef },
+                      { key: "id_front" as const, title: "Frente do documento", description: "Envie a frente do Cartão de Cidadão ou BI." },
+                      { key: "id_back" as const, title: "Verso do documento", description: "Envie o verso do documento com todos os dados legíveis." },
+                      { key: "address" as const, title: "Comprovativo de morada", description: "Fatura ou extrato recente com nome e morada." },
                     ]
                   : [
-                      { key: "passport" as const, title: "Passaporte", description: "Envie a página principal do passaporte.", ref: kycPassportInputRef },
-                      { key: "address" as const, title: "Comprovativo de morada", description: "Fatura ou extrato recente com nome e morada.", ref: kycAddressInputRef },
+                      { key: "passport" as const, title: "Passaporte", description: "Envie a página principal do passaporte." },
+                      { key: "address" as const, title: "Comprovativo de morada", description: "Fatura ou extrato recente com nome e morada." },
                     ]
                 ).map((slot) => {
                   const slotState = kycSlots.find((item) => item.label === slot.title) ?? null;
@@ -545,15 +513,31 @@ export default function ProfileTab({ myBets, myBetsLoading, fetchMyBets }: Profi
                       <div className="text-xs text-zinc-500 truncate">
                         {slotState?.fileName ? `Ficheiro atual: ${slotState.fileName}` : "Nenhum ficheiro enviado."}
                       </div>
-                      <Button
-                        onClick={() => slot.ref.current?.click()}
-                        disabled={kycUploading !== null}
-                        variant="outline"
-                        className="w-full border-zinc-700 text-zinc-200 hover:bg-zinc-800"
-                      >
-                        {kycUploading === slot.key ? <Loader2 className="animate-spin mr-2" size={14} /> : <FileText className="mr-2" size={14} />}
-                        {slotState?.uploaded ? "Substituir ficheiro" : "Adicionar ficheiro"}
-                      </Button>
+                      <div className="space-y-2">
+                        <label className="block">
+                          <span className="sr-only">
+                            {slotState?.uploaded ? "Substituir ficheiro" : "Adicionar ficheiro"} - {slot.title}
+                          </span>
+                          <input
+                            type="file"
+                            accept="image/*,application/pdf"
+                            disabled={kycUploading !== null}
+                            className="block w-full rounded-lg border border-zinc-700 bg-zinc-900 text-xs text-zinc-300 file:mr-3 file:rounded-md file:border-0 file:bg-red-600 file:px-3 file:py-2 file:text-xs file:font-semibold file:text-white hover:file:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50"
+                            onChange={(e) => {
+                              if (e.target.files?.length) void uploadKycFiles(slot.key, e.target.files);
+                              e.currentTarget.value = "";
+                            }}
+                          />
+                        </label>
+                        <div className="flex items-center gap-2 text-[11px] text-zinc-500">
+                          {kycUploading === slot.key ? <Loader2 className="animate-spin" size={12} /> : <FileText size={12} />}
+                          {kycUploading === slot.key
+                            ? "A enviar ficheiro..."
+                            : slotState?.uploaded
+                              ? "Pode selecionar outro ficheiro para substituir o atual."
+                              : "Selecione um ficheiro para enviar."}
+                        </div>
+                      </div>
                     </div>
                   );
                 })}
@@ -992,7 +976,7 @@ export default function ProfileTab({ myBets, myBetsLoading, fetchMyBets }: Profi
                 transition={{ duration: 0.15 }}
                 className="bg-zinc-950 border border-zinc-800 rounded-2xl p-6"
               >
-                <SectionContent id={activeSection} />
+                {renderSectionContent(activeSection)}
               </motion.div>
             </AnimatePresence>
           </div>
@@ -1022,7 +1006,7 @@ export default function ProfileTab({ myBets, myBetsLoading, fetchMyBets }: Profi
                         className="overflow-hidden"
                       >
                         <div className="px-4 pb-4 pt-1 border-t border-zinc-800">
-                          <SectionContent id={s.id} />
+                          {renderSectionContent(s.id)}
                         </div>
                       </motion.div>
                     )}
