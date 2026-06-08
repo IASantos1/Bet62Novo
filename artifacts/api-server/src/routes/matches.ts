@@ -706,6 +706,22 @@ function leaguePriority(name: string, country?: string): number {
   return 999;
 }
 
+const DEFAULT_FOOTBALL_LIVE_DISAPPEAR_GRACE_MS = 12 * 60 * 1000;
+const PRIORITY_FOOTBALL_LIVE_DISAPPEAR_GRACE_MS = 30 * 60 * 1000;
+
+function isCatalogPriorityLeague(prio: number): boolean {
+  return prio < 100;
+}
+
+function getFootballLiveDisappearGraceMs(state: Pick<LiveMatchState, "league" | "country">): number {
+  const countryKey = normalizeCountryKey(state.country);
+  const leagueKey = countryKey ? `${countryKey}: ${state.league}` : state.league;
+  const prio = leaguePriority(leagueKey, countryKey);
+  return isCatalogPriorityLeague(prio)
+    ? PRIORITY_FOOTBALL_LIVE_DISAPPEAR_GRACE_MS
+    : DEFAULT_FOOTBALL_LIVE_DISAPPEAR_GRACE_MS;
+}
+
 // ─── League name normalisation ─────────────────────────────────────────────────
 // Strips sponsor/betting-company names and maps to canonical display names.
 // Statpal format: "Country: [Sponsor - ]LeagueName"
@@ -7051,7 +7067,6 @@ async function buildFootballLiveV2(events: SAPIV2Event[]): Promise<LiveMatchStat
   })();
   const result: LiveMatchState[] = [];
   const currentIds = new Set<string>();
-  const LIVE_DISAPPEAR_GRACE_MS = 12 * 60 * 1000;
 
   const pool = async <T>(items: T[], limit: number, fn: (item: T) => Promise<void>): Promise<void> => {
     let i = 0;
@@ -7074,7 +7089,6 @@ async function buildFootballLiveV2(events: SAPIV2Event[]): Promise<LiveMatchStat
     if (!FOOTBALL_V2_LIVE.has(statusStr)) continue;
     const evAgeSeconds = ev.startTimestamp ? Date.now() / 1000 - ev.startTimestamp : 0;
     if (evAgeSeconds > 2.5 * 3600) continue;
-    if (!liveMatchState.has(`football-v2-${ev.id}`) && evAgeSeconds > 5 * 60) continue;
     const homeTeam = v2TeamName(ev.homeTeam);
     const awayTeam = v2TeamName(ev.awayTeam);
     if (homeTeam === "Unknown" || awayTeam === "Unknown") continue;
@@ -7087,7 +7101,9 @@ async function buildFootballLiveV2(events: SAPIV2Event[]): Promise<LiveMatchStat
 
     const key = `${countryKey}: ${leagueName}`.toLowerCase();
     const prio = leaguePriority(key, countryKey);
+    const isPriorityLeague = isCatalogPriorityLeague(prio);
     metaById.set(ev.id, { countryRaw, countryKey, leagueName, prio });
+    if (!liveMatchState.has(`football-v2-${ev.id}`) && evAgeSeconds > 5 * 60 && !isPriorityLeague) continue;
 
     if (footballLeagueAllowedStrict(countryRaw, leagueName)) primary.push({ ev, prio });
     else if (!isLeagueUniversallyBlocked(`${leagueName} ${homeTeam} ${awayTeam}`)) fallback.push({ ev, prio: prio === 999 ? 500 : prio });
@@ -7324,6 +7340,7 @@ async function buildFootballLiveV2(events: SAPIV2Event[]): Promise<LiveMatchStat
         ) as Record<string, number>;
         const updated: LiveMatchState = {
           ...existing,
+          country: meta?.countryRaw ?? existing.country,
           homeScore, awayScore, minute, status: newStatus,
           odds: newOdds,
           markets: filteredMarkets,
@@ -7362,6 +7379,7 @@ async function buildFootballLiveV2(events: SAPIV2Event[]): Promise<LiveMatchStat
           // Always override the reason label with VAR (covers "GOLO!" → "REVISÃO AO VAR")
           const updated: LiveMatchState = {
             ...existing,
+            country: meta?.countryRaw ?? existing.country,
             homeScore, awayScore, minute, status: newStatus,
             odds: newOdds,
             markets: filteredMarkets,
@@ -7381,6 +7399,7 @@ async function buildFootballLiveV2(events: SAPIV2Event[]): Promise<LiveMatchStat
         } else {
           const updated: LiveMatchState = {
             ...existing,
+            country: meta?.countryRaw ?? existing.country,
             homeScore, awayScore, minute, status: newStatus,
             odds: newOdds,
             markets: filteredMarkets,
@@ -7416,7 +7435,7 @@ async function buildFootballLiveV2(events: SAPIV2Event[]): Promise<LiveMatchStat
         home: homeTeam,
         away: awayTeam,
         league,
-        country: "",
+        country: meta?.countryRaw ?? "",
         sport: "football",
         homeScore,
         awayScore,
@@ -7478,7 +7497,7 @@ async function buildFootballLiveV2(events: SAPIV2Event[]): Promise<LiveMatchStat
       }
       continue;
     }
-    if (now - missingSince > LIVE_DISAPPEAR_GRACE_MS) {
+    if (now - missingSince > getFootballLiveDisappearGraceMs(state)) {
       liveMatchState.delete(id);
       _v2StuckTracker.delete(id);
       continue;

@@ -841,6 +841,20 @@ function leagueMatchesFilter(matchLeague: string, filterLeague: string): boolean
   return mlClean === flAlt || mlClean.includes(flAlt);
 }
 
+const WC2026_FILTER_LABEL = "Copa do Mundo 2026";
+const WC2026_FILTER_PATTERNS = [
+  "fifa world cup",
+  "world cup",
+  "copa do mundo",
+  "wc 2026",
+  "mundial 2026",
+] as const;
+
+function isWC2026LeagueName(name: string): boolean {
+  const lower = String(name ?? "").toLowerCase();
+  return WC2026_FILTER_PATTERNS.some((pattern) => lower.includes(pattern));
+}
+
 const FOOTBALL_COUNTRIES: { name: string; flag: string; leagues: string[] }[] = [
   { name: "Europa", flag: "⭐", leagues: ["Champions League", "Europa League", "Conference League", "UEFA Super Cup"] },
   { name: "FIFA", flag: "🌍", leagues: ["Copa América", "CONCACAF Gold Cup", "Africa Cup of Nations", "AFC Asian Cup", "International Friendlies"] },
@@ -1660,6 +1674,7 @@ export default function Home() {
 
   // Upcoming matches
   const [upcomingMatches, setUpcomingMatches] = useState<Match[]>([]);
+  const [wc2026Matches, setWc2026Matches] = useState<Match[]>([]);
   const [upcomingLoading, setUpcomingLoading] = useState(true);
   const [selectedSport, setSelectedSport] = useState<string>("all");
 
@@ -2839,6 +2854,29 @@ export default function Home() {
         .catch(() => { /* non-critical */ });
     }, 800);
     return () => clearTimeout(tid);
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadWC2026 = async () => {
+      try {
+        const r = await fetch("/api/matches/wc2026");
+        const data = r.ok ? await r.json() : { matches: [] };
+        if (cancelled) return;
+        const matches = Array.isArray(data.matches) ? data.matches : [];
+        setWc2026Matches(matches.map((m: Match) => ({ ...m, isLive: false })));
+      } catch {
+        if (!cancelled) setWc2026Matches([]);
+      }
+    };
+
+    loadWC2026();
+    const id = setInterval(loadWC2026, 15 * 60_000);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
   }, []);
 
   // Fetch upcoming matches — polls every 30s so new games appear automatically
@@ -9323,7 +9361,14 @@ export default function Home() {
 
               // All upcoming: odds-based + all sports from /upcoming (deduped), filtered by league if active
               const allUpcoming = (() => {
+                const wcMatches = wc2026Matches.filter(
+                  (m) =>
+                    (m.sport ?? "football") === "football" &&
+                    !m.isWomens &&
+                    isWC2026LeagueName(m.league),
+                );
                 const combined = [
+                  ...wcMatches,
                   ...tennisOddsAsMatches,
                   ...volleyOddsAsMatches,
                   ...basketballAsMatches,
@@ -9334,7 +9379,15 @@ export default function Home() {
                     if (sport === "volleyball") return !volleyOddsAsMatches.some(v => v.home === m.home && v.away === m.away);
                     if (sport === "basketball") return !basketballAsMatches.some(b => b.home === m.home && b.away === m.away);
                     if (sport === "hockey")     return !hockeyAsMatches.some(h => h.home === m.home && h.away === m.away);
-                    return true; // football always included
+                    return !wcMatches.some(w =>
+                      String(w.id) === String(m.id) ||
+                      (
+                        w.home === m.home &&
+                        w.away === m.away &&
+                        (w.date ?? "") === (m.date ?? "") &&
+                        (w.time ?? "") === (m.time ?? "")
+                      )
+                    );
                   }),
                 ];
                 // Filter by country (all leagues of that country)
@@ -9349,6 +9402,17 @@ export default function Home() {
                 }
                 if (!selectedLeague) return combined;
                 // ML-aware filter: matches major-league label (from chips) OR legacy flexible matching (from sidebar)
+                if (selectedLeague === WC2026_FILTER_LABEL) {
+                  const seen = new Set<string>();
+                  return combined
+                    .filter(m => (m.sport ?? "football") === "football" && isWC2026LeagueName(m.league))
+                    .filter(m => {
+                      const k = String(m.id);
+                      if (seen.has(k)) return false;
+                      seen.add(k);
+                      return true;
+                    });
+                }
                 const _mlPats: Array<{p: string[], label: string}> = [
                   { p: ["champions league","liga dos campeões","liga campeões"], label: "Champions" },
                   { p: ["europa league","liga europa"], label: "Europa League" },
@@ -9448,23 +9512,47 @@ export default function Home() {
                     };
                     const seenLabels = new Set<string>();
                     const chips: Array<{ label: string; logo: string; color: string }> = [];
+                    const hasWC2026Chip = wc2026Matches.some((m) => isWC2026LeagueName(m.league));
                     for (const m of filteredUpcoming) {
                       const key = m.league ?? "";
                       if (key) {
                         const ml = findML(key);
-                        if (ml && !seenLabels.has(ml.label)) { seenLabels.add(ml.label); chips.push({ label: ml.label, logo: ml.logo, color: ml.color }); }
+                        if (ml && ml.label !== "FIFA World Cup" && !seenLabels.has(ml.label)) {
+                          seenLabels.add(ml.label);
+                          chips.push({ label: ml.label, logo: ml.logo, color: ml.color });
+                        }
                       }
                     }
-                    if (chips.length < 2) return null;
+                    if (chips.length === 0 && !hasWC2026Chip) return null;
                     return (
                       <div className="overflow-x-auto flex gap-2.5 pb-3 mb-5 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
-                        {chips.length >= 2 && (
+                        <button
+                          {...makeTap(() => {
+                            setSelectedCountry(null);
+                            setSelectedLeague(null);
+                          })}
+                          className={`flex items-center gap-2 px-3.5 py-2.5 rounded-xl border whitespace-nowrap text-sm font-semibold transition-all flex-shrink-0 ${!selectedLeague ? "border-amber-500 bg-amber-500/10 text-white shadow-[0_0_10px_rgba(245,158,11,0.18)]" : "border-zinc-700 bg-zinc-900/60 text-zinc-300 hover:border-zinc-500 hover:text-white"}`}
+                        >
+                          <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="shrink-0"><rect width="7" height="7" x="3" y="3" rx="1"/><rect width="7" height="7" x="14" y="3" rx="1"/><rect width="7" height="7" x="14" y="14" rx="1"/><rect width="7" height="7" x="3" y="14" rx="1"/></svg>
+                          <span>Todas</span>
+                        </button>
+                        {hasWC2026Chip && (
                           <button
-                            {...makeTap(() => setSelectedLeague(null))}
-                            className={`flex items-center gap-2 px-3.5 py-2.5 rounded-xl border whitespace-nowrap text-sm font-semibold transition-all flex-shrink-0 ${!selectedLeague ? "border-amber-500 bg-amber-500/10 text-white shadow-[0_0_10px_rgba(245,158,11,0.18)]" : "border-zinc-700 bg-zinc-900/60 text-zinc-300 hover:border-zinc-500 hover:text-white"}`}
+                            {...makeTap(() => {
+                              setSelectedCountry(null);
+                              setSelectedSport("all");
+                              setSelectedLeague(selectedLeague === WC2026_FILTER_LABEL ? null : WC2026_FILTER_LABEL);
+                            })}
+                            className={`flex items-center gap-2.5 px-3.5 py-2.5 rounded-xl border whitespace-nowrap text-sm font-semibold transition-all flex-shrink-0 ${selectedLeague === WC2026_FILTER_LABEL ? "border-amber-500 bg-amber-500/10 text-white shadow-[0_0_10px_rgba(245,158,11,0.18)]" : "border-zinc-700 bg-zinc-900/60 text-zinc-300 hover:border-zinc-500 hover:text-white"}`}
                           >
-                            <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="shrink-0"><rect width="7" height="7" x="3" y="3" rx="1"/><rect width="7" height="7" x="14" y="3" rx="1"/><rect width="7" height="7" x="14" y="14" rx="1"/><rect width="7" height="7" x="3" y="14" rx="1"/></svg>
-                            <span>Todas</span>
+                            <img
+                              src="https://media.api-sports.io/football/leagues/1.png"
+                              alt={WC2026_FILTER_LABEL}
+                              width={20}
+                              height={20}
+                              className="rounded object-contain shrink-0"
+                            />
+                            <span className="max-w-[160px] truncate">{WC2026_FILTER_LABEL}</span>
                           </button>
                         )}
                         {chips.map((c, i) => {
@@ -9472,7 +9560,10 @@ export default function Home() {
                           return (
                             <button
                               key={i}
-                              {...makeTap(() => setSelectedLeague(active ? null : c.label))}
+                              {...makeTap(() => {
+                                setSelectedCountry(null);
+                                setSelectedLeague(active ? null : c.label);
+                              })}
                               className={`flex items-center gap-2.5 px-3.5 py-2.5 rounded-xl border whitespace-nowrap text-sm font-semibold transition-all flex-shrink-0 ${active ? "border-amber-500 bg-amber-500/10 text-white shadow-[0_0_10px_rgba(245,158,11,0.18)]" : "border-zinc-700 bg-zinc-900/60 text-zinc-300 hover:border-zinc-500 hover:text-white"}`}
                             >
                               <img
