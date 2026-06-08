@@ -717,6 +717,49 @@ function findLiveResult(
   return null;
 }
 
+function liveDefinitiveOutcomeForSel(
+  sel: SelectionRecord,
+  score: { home: number; away: number }
+): "won" | "lost" | null {
+  const s = String(sel.selection ?? "");
+  const home = score.home;
+  const away = score.away;
+  if (!Number.isFinite(home) || !Number.isFinite(away)) return null;
+  const total = home + away;
+
+  if (s === "bts-yes") return home > 0 && away > 0 ? "won" : null;
+  if (s === "bts-no")  return home > 0 && away > 0 ? "lost" : null;
+
+  const mOU = s.match(/^([ou])([\d.]+)$/);
+  if (mOU) {
+    const side = mOU[1]!;
+    const line = parseFloat(mOU[2]!);
+    if (!Number.isFinite(line)) return null;
+    if (side === "o") return total > line ? "won" : null;
+    return total > line ? "lost" : null;
+  }
+
+  const mTgh = s.match(/^tgh-([ou])(\d+)$/);
+  if (mTgh) {
+    const side = mTgh[1]!;
+    const line = parseInt(mTgh[2]!, 10) / 10;
+    if (!Number.isFinite(line)) return null;
+    if (side === "o") return home > line ? "won" : null;
+    return home > line ? "lost" : null;
+  }
+
+  const mTga = s.match(/^tga-([ou])(\d+)$/);
+  if (mTga) {
+    const side = mTga[1]!;
+    const line = parseInt(mTga[2]!, 10) / 10;
+    if (!Number.isFinite(line)) return null;
+    if (side === "o") return away > line ? "won" : null;
+    return away > line ? "lost" : null;
+  }
+
+  return null;
+}
+
 /**
  * Scan all pending bets and settle those whose matches have finished.
  * Won bets credit potentialWin to the user's balance atomically.
@@ -778,85 +821,135 @@ export async function autoSettlePendingBets(opts?: { matchIds?: string[] }): Pro
           if (!touches) continue;
         }
 
+        let liveLostDetected = false;
+        for (const sel of selections) {
+          const live = findLiveResult(sel, bet.matchId, isSingle);
+          const homeScore = live ? Number((live as any).homeScore ?? 0) : NaN;
+          const awayScore = live ? Number((live as any).awayScore ?? 0) : NaN;
+          const out = Number.isFinite(homeScore) && Number.isFinite(awayScore)
+            ? liveDefinitiveOutcomeForSel(sel, { home: homeScore, away: awayScore })
+            : null;
+          if (out === "lost") { liveLostDetected = true; break; }
+        }
+
+        if (liveLostDetected) {
+          const updatedSelsLost = selections.map(sel => {
+            const live = findLiveResult(sel, bet.matchId, isSingle);
+            const homeScore = live ? Number((live as any).homeScore ?? 0) : NaN;
+            const awayScore = live ? Number((live as any).awayScore ?? 0) : NaN;
+            const out = Number.isFinite(homeScore) && Number.isFinite(awayScore)
+              ? liveDefinitiveOutcomeForSel(sel, { home: homeScore, away: awayScore })
+              : null;
+            if (!out) return sel;
+            return {
+              ...sel,
+              finalScore: { home: homeScore, away: awayScore },
+              outcome: out,
+            };
+          });
+
+          await db.transaction(async (tx) => {
+            const rows = await tx
+              .update(betsTable)
+              .set({ status: "lost", selections: updatedSelsLost })
+              .where(and(eq(betsTable.id, bet.id), eq(betsTable.status, "pending")))
+              .returning({ id: betsTable.id });
+            if (rows.length === 0) return;
+
+            await tx.delete(cashoutStatesTable).where(eq(cashoutStatesTable.betId, bet.id));
+
+            await tx.insert(settlementLogsTable).values({
+              betId: bet.id,
+              userId: bet.userId,
+              oldStatus: "pending",
+              newStatus: "lost",
+              payout: "0.00",
+              message: "Auto-settled: losing leg resolved in-play",
+            });
+          });
+
+          settled++;
+          continue;
+        }
+
         if (isSingle) {
           const sel = selections[0]!;
           const live = findLiveResult(sel, bet.matchId, true);
-          const homeScore = live ? Number((live as any).homeScore ?? 0) : 0;
-          const awayScore = live ? Number((live as any).awayScore ?? 0) : 0;
-          const bothScored = Number.isFinite(homeScore) && Number.isFinite(awayScore) && homeScore > 0 && awayScore > 0;
-          if (bothScored && (sel.selection === "bts-yes" || sel.selection === "bts-no")) {
-            const outcome = scoreOutcomeForSel(sel, { home: homeScore, away: awayScore });
-            if (outcome === "won" || outcome === "lost") {
-              const updatedSel: SelectionRecord = {
-                ...sel,
-                finalScore: { home: homeScore, away: awayScore },
-                outcome,
-              };
+          const homeScore = live ? Number((live as any).homeScore ?? 0) : NaN;
+          const awayScore = live ? Number((live as any).awayScore ?? 0) : NaN;
+          const out = Number.isFinite(homeScore) && Number.isFinite(awayScore)
+            ? liveDefinitiveOutcomeForSel(sel, { home: homeScore, away: awayScore })
+            : null;
+          if (out === "won" || out === "lost") {
+            const updatedSel: SelectionRecord = {
+              ...sel,
+              finalScore: { home: homeScore, away: awayScore },
+              outcome: out,
+            };
 
-              if (outcome === "won") {
-                const stakeNum = parseFloat(bet.stake);
-                const effectiveOdds = Math.max(1.01, Number(sel.odd ?? 1));
-                const payoutNum = Math.max(0, Number((stakeNum * effectiveOdds).toFixed(2)));
-                const payoutStr = payoutNum.toFixed(2);
-                const oddsStr = Number(effectiveOdds.toFixed(2)).toFixed(2);
-
-                await db.transaction(async (tx) => {
-                  const rows = await tx
-                    .update(betsTable)
-                    .set({ status: "won", selections: [updatedSel], potentialWin: payoutStr, totalOdds: oddsStr })
-                    .where(and(eq(betsTable.id, bet.id), eq(betsTable.status, "pending")))
-                    .returning({ id: betsTable.id });
-                  if (rows.length === 0) return;
-
-                  await tx.delete(cashoutStatesTable).where(eq(cashoutStatesTable.betId, bet.id));
-
-                  await applyBalanceDelta(tx, {
-                    userId: bet.userId,
-                    amount: payoutStr,
-                    kind: "bet_settlement_early_payout",
-                    idempotencyKey: `bet:${bet.id}:settlement:payout`,
-                    refType: "bet",
-                    refId: String(bet.id),
-                    metadata: { trigger: "live_market_resolution", market: sel.selection },
-                  });
-
-                  await tx.insert(settlementLogsTable).values({
-                    betId: bet.id,
-                    userId: bet.userId,
-                    oldStatus: "pending",
-                    newStatus: "won",
-                    payout: payoutStr,
-                    message: "Auto-settled early: market resolved in-play (BTTS)",
-                  });
-                });
-
-                settled++;
-                continue;
-              }
+            if (out === "won") {
+              const stakeNum = parseFloat(bet.stake);
+              const effectiveOdds = Math.max(1.01, Number(sel.odd ?? 1));
+              const payoutNum = Math.max(0, Number((stakeNum * effectiveOdds).toFixed(2)));
+              const payoutStr = payoutNum.toFixed(2);
+              const oddsStr = Number(effectiveOdds.toFixed(2)).toFixed(2);
 
               await db.transaction(async (tx) => {
                 const rows = await tx
                   .update(betsTable)
-                  .set({ status: "lost", selections: [updatedSel] })
+                  .set({ status: "won", selections: [updatedSel], potentialWin: payoutStr, totalOdds: oddsStr })
                   .where(and(eq(betsTable.id, bet.id), eq(betsTable.status, "pending")))
                   .returning({ id: betsTable.id });
                 if (rows.length === 0) return;
 
                 await tx.delete(cashoutStatesTable).where(eq(cashoutStatesTable.betId, bet.id));
 
+                await applyBalanceDelta(tx, {
+                  userId: bet.userId,
+                  amount: payoutStr,
+                  kind: "bet_settlement_early_payout",
+                  idempotencyKey: `bet:${bet.id}:settlement:payout`,
+                  refType: "bet",
+                  refId: String(bet.id),
+                  metadata: { trigger: "live_market_resolution", market: sel.selection },
+                });
+
                 await tx.insert(settlementLogsTable).values({
                   betId: bet.id,
                   userId: bet.userId,
                   oldStatus: "pending",
-                  newStatus: "lost",
-                  payout: "0.00",
-                  message: "Auto-settled early: market resolved in-play (BTTS)",
+                  newStatus: "won",
+                  payout: payoutStr,
+                  message: "Auto-settled early: market resolved in-play",
                 });
               });
 
               settled++;
               continue;
             }
+
+            await db.transaction(async (tx) => {
+              const rows = await tx
+                .update(betsTable)
+                .set({ status: "lost", selections: [updatedSel] })
+                .where(and(eq(betsTable.id, bet.id), eq(betsTable.status, "pending")))
+                .returning({ id: betsTable.id });
+              if (rows.length === 0) return;
+
+              await tx.delete(cashoutStatesTable).where(eq(cashoutStatesTable.betId, bet.id));
+
+              await tx.insert(settlementLogsTable).values({
+                betId: bet.id,
+                userId: bet.userId,
+                oldStatus: "pending",
+                newStatus: "lost",
+                payout: "0.00",
+                message: "Auto-settled early: market resolved in-play",
+              });
+            });
+
+            settled++;
+            continue;
           }
         }
 
