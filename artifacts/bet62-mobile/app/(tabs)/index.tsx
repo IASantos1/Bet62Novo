@@ -1,9 +1,8 @@
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { router } from "expo-router";
-import React, { type ComponentProps, useEffect, useRef, useState } from "react";
+import React, { type ComponentProps, useState } from "react";
 import {
-  Animated,
   FlatList,
   Image,
   Platform,
@@ -151,53 +150,6 @@ function LeagueChips({
           );
         })}
       </ScrollView>
-    </View>
-  );
-}
-
-function isWCMatch(m: UpcomingMatch) {
-  if ((m.sport ?? "football") !== "football") return false;
-  const lg = (m.league ?? "").toLowerCase();
-  if (lg.includes("world cup") || lg.includes("copa do mundo") || lg.includes("copa mundo") || lg.includes("fifa world") || lg.includes("wc 2026")) return true;
-  const d = m.date ?? "";
-  return d.startsWith("2026-06") || /\d{2}\.06\.2026/.test(d);
-}
-
-function WorldCupBannerMobile({ onAposta }: { onAposta: () => void }) {
-  const waveAnim = useRef(new Animated.Value(0)).current;
-
-  useEffect(() => {
-    Animated.loop(
-      Animated.sequence([
-        Animated.timing(waveAnim, { toValue: 1, duration: 2800, useNativeDriver: true }),
-        Animated.timing(waveAnim, { toValue: 0, duration: 2800, useNativeDriver: true }),
-      ])
-    ).start();
-  }, [waveAnim]);
-
-  const translateX = waveAnim.interpolate({ inputRange: [0, 1], outputRange: [-10, 10] });
-
-  return (
-    <View style={{ marginHorizontal: 14, marginTop: 12, marginBottom: 10, borderRadius: 14, overflow: "hidden", backgroundColor: "#000" }}>
-      <Animated.Image
-        source={require("../../assets/copa-banner.jpeg")}
-        style={{ width: "114%", marginLeft: "-7%", height: 175, resizeMode: "cover", transform: [{ translateX }] }}
-      />
-      <View style={{ position: "absolute", bottom: 0, left: 0, right: 0, height: 70, backgroundColor: "transparent" }} />
-      <Pressable
-        onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium); onAposta(); }}
-        style={({ pressed }) => ({
-          position: "absolute", bottom: 10, right: 10,
-          backgroundColor: "#dc2626", borderRadius: 10,
-          paddingHorizontal: 16, paddingVertical: 9,
-          opacity: pressed ? 0.85 : 1,
-          shadowColor: "#dc2626", shadowOpacity: 0.6, shadowRadius: 10, elevation: 6,
-        })}
-      >
-        <Text style={{ fontFamily: "Inter_700Bold", fontSize: 13, color: "#fff", letterSpacing: 0.5 }}>
-          APOSTAR JÁ →
-        </Text>
-      </Pressable>
     </View>
   );
 }
@@ -488,7 +440,6 @@ export default function PreGameScreen() {
   const [slipVisible, setSlipVisible] = useState(false);
   const [selectedSport, setSelectedSport] = useState("all");
   const [selectedLeague, setSelectedLeague] = useState<string | null>(null);
-  const [selectedWC, setSelectedWC] = useState(false);
   const [depositVisible, setDepositVisible] = useState(false);
 
   const topPad = Platform.OS === "web" ? 67 : insets.top;
@@ -506,18 +457,9 @@ export default function PreGameScreen() {
 
   const allUpcoming: UpcomingMatch[] = data?.matches ?? [];
   const sportFiltered = allUpcoming.filter((m) => selectedSport === "all" || m.sport === selectedSport);
-  const wcMatches = allUpcoming.filter(isWCMatch);
-  const filtered = selectedWC
-    ? (wcMatches.length > 0 ? wcMatches : allUpcoming.filter((m) => (m.sport ?? "football") === "football"))
-    : (selectedLeague
-        ? sportFiltered.filter((m) => findMajorLeague(m.league ?? "")?.label === selectedLeague)
-        : sportFiltered);
-
-  const handleAposta = () => {
-    setSelectedSport("football");
-    setSelectedWC(true);
-    setSelectedLeague(null);
-  };
+  const filtered = selectedLeague
+    ? sportFiltered.filter((m) => findMajorLeague(m.league ?? "")?.label === selectedLeague)
+    : sportFiltered;
 
   const s = StyleSheet.create({
     container: { flex: 1, backgroundColor: colors.background },
@@ -646,18 +588,6 @@ export default function PreGameScreen() {
           }
           ListHeaderComponent={
             <>
-              <WorldCupBannerMobile onAposta={handleAposta} />
-              {selectedWC && (
-                <View style={{ paddingHorizontal: 14, marginBottom: 4 }}>
-                  <Pressable
-                    onPress={() => { setSelectedWC(false); setSelectedSport("all"); }}
-                    style={{ flexDirection: "row", alignItems: "center", gap: 6, backgroundColor: "rgba(220,38,38,0.12)", borderRadius: 20, paddingHorizontal: 14, paddingVertical: 7, borderWidth: 1.5, borderColor: "#dc2626", alignSelf: "flex-start" }}
-                  >
-                    <Text style={{ fontFamily: "Inter_700Bold", fontSize: 12, color: "#dc2626" }}>🌍 Copa do Mundo</Text>
-                    <Ionicons name="close-circle" size={14} color="#dc2626" />
-                  </Pressable>
-                </View>
-              )}
               <PopularBanners matches={allUpcoming} />
               <LeagueChips matches={sportFiltered} selected={selectedLeague} onSelect={setSelectedLeague} />
             </>
