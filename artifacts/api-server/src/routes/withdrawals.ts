@@ -44,11 +44,18 @@ router.post("/", authMiddleware, async (req: AuthRequest, res: Response): Promis
     const [user] = await db.select().from(usersTable).where(eq(usersTable.id, req.user!.id)).limit(1);
     if (!user) { res.status(404).json({ error: "Utilizador não encontrado" }); return; }
 
-    // KYC check: must have submitted documents
-    if (user.kycStatus === "not_submitted") {
+    const kycStatus = String(user.kycStatus ?? "not_submitted");
+    if (kycStatus !== "approved") {
+      const msg =
+        kycStatus === "pending"
+          ? "Os seus documentos estão em análise. Aguarde a aprovação para efetuar levantamentos."
+          : kycStatus === "rejected"
+            ? "A verificação de identidade foi rejeitada. Submeta novamente os documentos para desbloquear levantamentos."
+            : "É necessário verificar a sua identidade antes de levantar fundos.";
       res.status(403).json({
-        error: "É necessário verificar a sua identidade antes de levantar fundos.",
+        error: msg,
         code: "KYC_REQUIRED",
+        kycStatus,
       });
       return;
     }

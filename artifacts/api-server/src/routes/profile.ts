@@ -8,6 +8,23 @@ import path from "path";
 
 const router: IRouter = Router();
 
+function detectMimeType(buf: Buffer): "application/pdf" | "image/jpeg" | "image/png" | null {
+  if (buf.length >= 5 && buf.subarray(0, 5).toString("ascii") === "%PDF-") return "application/pdf";
+  if (buf.length >= 2 && buf[0] === 0xff && buf[1] === 0xd8) return "image/jpeg";
+  if (
+    buf.length >= 8 &&
+    buf[0] === 0x89 &&
+    buf[1] === 0x50 &&
+    buf[2] === 0x4e &&
+    buf[3] === 0x47 &&
+    buf[4] === 0x0d &&
+    buf[5] === 0x0a &&
+    buf[6] === 0x1a &&
+    buf[7] === 0x0a
+  ) return "image/png";
+  return null;
+}
+
 router.get("/", authMiddleware, async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const [user] = await db.select().from(usersTable).where(eq(usersTable.id, req.user!.id)).limit(1);
@@ -191,7 +208,6 @@ router.post("/kyc/upload", authMiddleware, async (req: AuthRequest, res: Respons
 
     for (const f of files) {
       const fileName = String(f.fileName ?? "documento").replace(/[\/\\]/g, "_").slice(0, 80);
-      const mimeType = String(f.mimeType ?? "application/octet-stream").slice(0, 120);
       const base64 = String(f.base64 ?? "");
       if (!base64 || base64.length < 16) {
         res.status(400).json({ error: "Arquivo inválido (base64 ausente)." });
@@ -205,6 +221,12 @@ router.post("/kyc/upload", authMiddleware, async (req: AuthRequest, res: Respons
       }
       if (buf.length > 5 * 1024 * 1024) {
         res.status(400).json({ error: "Arquivo muito grande. Máximo 5MB por arquivo." });
+        return;
+      }
+
+      const mimeType = detectMimeType(buf);
+      if (!mimeType) {
+        res.status(400).json({ error: "Tipo de arquivo inválido. Use PDF, JPG ou PNG." });
         return;
       }
 

@@ -12632,13 +12632,26 @@ function DepositWithdrawModal({
                   Submeter Documentos
                 </Button>
               </div>
-            ) : kycStatus === "pending" && !kycDone ? (
+            ) : kycStatus === "pending" ? (
               /* ── KYC PENDING NOTICE ── */
               <div className="space-y-4">
                 <div className="bg-yellow-900/20 border border-yellow-600/40 rounded-xl px-4 py-4 text-center space-y-2">
                   <div className="text-3xl">⏳</div>
                   <div className="text-sm font-bold text-yellow-300">Verificação em Análise</div>
                   <div className="text-xs text-yellow-200/70 leading-relaxed">Os seus documentos estão a ser verificados pela nossa equipa. Poderá efectuar levantamentos assim que a verificação for concluída.</div>
+                </div>
+                <div className="bg-orange-900/20 border border-orange-800/40 rounded-xl px-4 py-3 text-xs text-orange-300 leading-relaxed">
+                  Mínimo de levantamento: <strong className="text-white">€20</strong>. Processado por transferência bancária em 2–5 dias úteis.
+                </div>
+              </div>
+            ) : kycStatus === "rejected" ? (
+              <div className="space-y-4">
+                <div className="bg-red-900/20 border border-red-600/40 rounded-xl px-4 py-4 text-center space-y-2">
+                  <div className="text-3xl">❌</div>
+                  <div className="text-sm font-bold text-red-300">Verificação Rejeitada</div>
+                  <div className="text-xs text-red-200/70 leading-relaxed">
+                    A sua verificação foi rejeitada. Submeta novamente os documentos na área de Perfil para desbloquear levantamentos.
+                  </div>
                 </div>
                 <div className="bg-orange-900/20 border border-orange-800/40 rounded-xl px-4 py-3 text-xs text-orange-300 leading-relaxed">
                   Mínimo de levantamento: <strong className="text-white">€20</strong>. Processado por transferência bancária em 2–5 dias úteis.

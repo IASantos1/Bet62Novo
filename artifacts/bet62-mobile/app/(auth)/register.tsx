@@ -23,6 +23,7 @@ export default function RegisterScreen() {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [nif, setNif] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
 
@@ -37,9 +38,13 @@ export default function RegisterScreen() {
       Alert.alert("Erro", "A palavra-passe deve ter pelo menos 6 caracteres.");
       return;
     }
+    if (!/^\d{9}$/.test(nif)) {
+      Alert.alert("Erro", "NIF inválido. Deve ter 9 dígitos.");
+      return;
+    }
     try {
       setLoading(true);
-      await register(name.trim(), email.trim(), password);
+      await register(name.trim(), email.trim(), password, nif);
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       router.dismissAll();
     } catch (err: unknown) {
@@ -88,6 +93,18 @@ export default function RegisterScreen() {
               keyboardType="email-address"
               autoCapitalize="none"
               autoCorrect={false}
+            />
+          </View>
+
+          <View style={s.inputGroup}>
+            <Text style={s.label}>NIF</Text>
+            <TextInput
+              style={s.input}
+              placeholder="123456789"
+              placeholderTextColor={colors.mutedForeground}
+              value={nif}
+              onChangeText={(v) => setNif(v.replace(/\D/g, "").slice(0, 9))}
+              keyboardType="number-pad"
             />
           </View>
 

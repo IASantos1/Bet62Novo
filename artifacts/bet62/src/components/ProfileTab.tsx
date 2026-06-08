@@ -283,9 +283,9 @@ export default function ProfileTab({ myBets, myBetsLoading, fetchMyBets }: Profi
               <VerifyBadge label="NIF / Número de Identificação Fiscal" status={user.nif ? "verified" : "unverified"} />
               <VerifyBadge
                 label="Documento de Identificação (CC / Passaporte)"
-                status={kycStatus === "verified" ? "verified" : kycStatus === "pending" ? "pending" : "unverified"}
+                status={kycStatus === "approved" ? "verified" : kycStatus === "pending" ? "pending" : "unverified"}
               />
-              <VerifyBadge label="Comprovativo de Morada" status={kycStatus === "verified" ? "verified" : "unverified"} />
+              <VerifyBadge label="Comprovativo de Morada" status={kycStatus === "approved" ? "verified" : "unverified"} />
             </div>
 
             {kycStatus === "not_submitted" && (
@@ -305,6 +305,17 @@ export default function ProfileTab({ myBets, myBetsLoading, fetchMyBets }: Profi
                   <Clock className="text-blue-400 shrink-0 mt-0.5" size={16} />
                   <div className="text-sm text-blue-200/80">
                     Os seus documentos estão em análise. Será notificado por email em até 48 horas úteis.
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {kycStatus === "rejected" && (
+              <div className="mt-4 p-4 bg-red-900/20 border border-red-800/50 rounded-xl">
+                <div className="flex items-start gap-3">
+                  <AlertTriangle className="text-red-400 shrink-0 mt-0.5" size={16} />
+                  <div className="text-sm text-red-200/80">
+                    A verificação foi rejeitada. Submeta novamente os documentos para desbloquear levantamentos.
                   </div>
                 </div>
               </div>
