@@ -12567,6 +12567,7 @@ function DepositWithdrawModal({
   const [wDone, setWDone] = useState(false);
   const [withdrawalHistory, setWithdrawalHistory] = useState<UserWithdrawalItem[]>([]);
   const [withdrawalsLoading, setWithdrawalsLoading] = useState(false);
+  const [cancellingWithdrawalId, setCancellingWithdrawalId] = useState<number | null>(null);
 
   // KYC form (shown before withdrawal when not submitted)
   const [kycDocType, setKycDocType] = useState<"cc" | "passport">("cc");
@@ -12578,6 +12579,7 @@ function DepositWithdrawModal({
     item.status === "pending_review" || item.status === "approved" || item.status === "processing"
   ) ?? null;
   const latestWithdrawal = withdrawalHistory[0] ?? null;
+  const canUserCancelWithdrawal = latestOpenWithdrawal?.status === "pending_review" || latestOpenWithdrawal?.status === "approved";
   const formatWithdrawalDate = (value?: string | null) => {
     if (!value) return "sem data";
     const dt = new Date(value);
@@ -12795,6 +12797,29 @@ function DepositWithdrawModal({
     finally { setLoading(false); }
   }
 
+  async function handleCancelWithdrawal(id: number) {
+    setCancellingWithdrawalId(id);
+    try {
+      const r = await fetch(`/api/withdrawals/${id}/cancel`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await r.json().catch(() => ({})) as { error?: string };
+      if (!r.ok) {
+        toast.error(data.error ?? "Não foi possível cancelar o levantamento.");
+        return;
+      }
+      toast.success("Levantamento cancelado e saldo devolvido.");
+      setWDone(false);
+      onSuccess();
+      await fetchWithdrawalHistory();
+    } catch {
+      toast.error("Erro de ligação. Tente novamente.");
+    } finally {
+      setCancellingWithdrawalId(null);
+    }
+  }
+
   function triggerPromoNotif(depositAmount: number) {
     if (depositAmount >= 20) onPromoNotif("freebets20");
     else if (depositAmount >= 10) onPromoNotif("freebets10");
@@ -12925,6 +12950,19 @@ function DepositWithdrawModal({
                   )}
                   {latestWithdrawal.providerReference && (
                     <div className="text-[11px] text-zinc-300">Referência: {latestWithdrawal.providerReference}</div>
+                  )}
+                  {canUserCancelWithdrawal && latestOpenWithdrawal && (
+                    <Button
+                      onClick={() => handleCancelWithdrawal(latestOpenWithdrawal.id)}
+                      disabled={cancellingWithdrawalId === latestOpenWithdrawal.id}
+                      variant="outline"
+                      className="w-full border-red-700/60 text-red-300 hover:bg-red-950/50 hover:text-red-200"
+                    >
+                      {cancellingWithdrawalId === latestOpenWithdrawal.id
+                        ? <Loader2 size={14} className="animate-spin mr-2" />
+                        : <X size={14} className="mr-2" />}
+                      Cancelar levantamento
+                    </Button>
                   )}
                 </div>
               );

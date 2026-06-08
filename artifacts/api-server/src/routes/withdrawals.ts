@@ -11,6 +11,7 @@ const router: IRouter = Router();
 
 const OPEN_WITHDRAWAL_STATUSES = ["pending_review", "approved", "processing"] as const;
 const ADMIN_WITHDRAWAL_STATUSES = ["approved", "rejected", "processing", "paid", "failed", "cancelled"] as const;
+const USER_CANCELLABLE_WITHDRAWAL_STATUSES = ["pending_review", "approved"] as const;
 
 function isAdminWithdrawalStatus(value: string): value is (typeof ADMIN_WITHDRAWAL_STATUSES)[number] {
   return (ADMIN_WITHDRAWAL_STATUSES as readonly string[]).includes(value);
@@ -24,6 +25,10 @@ function canTransitionWithdrawalStatus(from: string, to: (typeof ADMIN_WITHDRAWA
     failed: ["approved", "rejected"],
   };
   return transitions[from]?.includes(to) ?? false;
+}
+
+function canUserCancelWithdrawalStatus(from: string): boolean {
+  return (USER_CANCELLABLE_WITHDRAWAL_STATUSES as readonly string[]).includes(from);
 }
 
 async function adjustWithdrawalHoldBalance(
@@ -196,6 +201,70 @@ router.get("/mine", authMiddleware, async (req: AuthRequest, res: Response): Pro
 
     res.json(withdrawals);
   } catch {
+    res.status(500).json({ error: "Erro interno" });
+  }
+});
+
+router.post("/:id/cancel", authMiddleware, async (req: AuthRequest, res: Response): Promise<void> => {
+  const id = parseInt(String(req.params["id"]), 10);
+  if (!Number.isFinite(id) || id <= 0) {
+    res.status(400).json({ error: "Levantamento inválido." });
+    return;
+  }
+
+  try {
+    const [existing] = await db
+      .select()
+      .from(withdrawalsTable)
+      .where(and(eq(withdrawalsTable.id, id), eq(withdrawalsTable.userId, req.user!.id)))
+      .limit(1);
+
+    if (!existing) {
+      res.status(404).json({ error: "Levantamento não encontrado." });
+      return;
+    }
+
+    if (!canUserCancelWithdrawalStatus(existing.status)) {
+      res.status(400).json({
+        error: "Este levantamento já não pode ser cancelado pelo utilizador.",
+        code: "WITHDRAWAL_NOT_CANCELLABLE",
+        currentStatus: existing.status,
+      });
+      return;
+    }
+
+    const now = new Date();
+    const [updated] = await db.transaction(async (tx) => {
+      await adjustWithdrawalHoldBalance(tx, {
+        userId: existing.userId,
+        amount: (-Number(existing.amount)).toFixed(2),
+      });
+      await applyBalanceDelta(tx, {
+        userId: existing.userId,
+        amount: existing.amount,
+        kind: "withdrawal_cancel_refund",
+        idempotencyKey: `withdrawal:${id}:user_cancel`,
+        refType: "withdrawal",
+        refId: String(id),
+      });
+
+      return await tx
+        .update(withdrawalsTable)
+        .set({
+          status: "cancelled",
+          reviewedBy: "user",
+          reviewedAt: now,
+          decisionReason: existing.decisionReason ?? "Cancelado pelo utilizador",
+          reversedAt: now,
+          updatedAt: now,
+        })
+        .where(eq(withdrawalsTable.id, id))
+        .returning();
+    });
+
+    res.json(updated);
+  } catch (err) {
+    logger.error({ err, withdrawalId: id, userId: req.user?.id }, "User withdrawal cancel error");
     res.status(500).json({ error: "Erro interno" });
   }
 });
