@@ -142,6 +142,58 @@ type EventOverrideDraft = {
   overrideNote: string;
 };
 
+type CompetitionCatalogItem = {
+  id: number;
+  sport: string;
+  name: string;
+  country: string;
+  tier: string;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+  live_enabled: boolean;
+  prematch_enabled: boolean;
+  home_enabled: boolean;
+  mobile_enabled: boolean;
+  featured: boolean;
+  priority: number;
+  display_order: number;
+  trading_mode: string;
+  cashout_enabled: boolean;
+  min_feed_quality_score: number;
+  provider_mappings: number;
+};
+
+type CompetitionConfigDraft = {
+  isActive: boolean;
+  tier: string;
+  liveEnabled: boolean;
+  prematchEnabled: boolean;
+  homeEnabled: boolean;
+  mobileEnabled: boolean;
+  featured: boolean;
+  cashoutEnabled: boolean;
+  priority: string;
+  displayOrder: string;
+  minFeedQualityScore: string;
+  tradingMode: string;
+};
+
+type CompetitionMapping = {
+  id: number;
+  provider: string;
+  providerSport: string;
+  providerCompetitionKey: string;
+  providerCompetitionId: string | null;
+  providerName: string;
+  providerCountry: string;
+  competitionId: number;
+  mappingConfidence: string;
+  firstSeenAt: string;
+  lastSeenAt: string;
+  updatedAt: string;
+};
+
 const STATUS_BET: Record<string, { label: string; cls: string }> = {
   pending:    { label: "Pendente",  cls: "bg-zinc-800 text-zinc-400" },
   won:        { label: "Ganhou",    cls: "bg-green-900/60 text-green-400" },
@@ -260,6 +312,16 @@ export default function AdminPage() {
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
   const [feedStatus, setFeedStatus] = useState<FeedStatus | null>(null);
   const [feedLoading, setFeedLoading] = useState(false);
+  const [competitions, setCompetitions] = useState<CompetitionCatalogItem[]>([]);
+  const [competitionsLoading, setCompetitionsLoading] = useState(false);
+  const [competitionSportFilter, setCompetitionSportFilter] = useState("all");
+  const [competitionLiveFilter, setCompetitionLiveFilter] = useState("all");
+  const [competitionSearch, setCompetitionSearch] = useState("");
+  const [competitionModal, setCompetitionModal] = useState<CompetitionCatalogItem | null>(null);
+  const [competitionDraft, setCompetitionDraft] = useState<CompetitionConfigDraft | null>(null);
+  const [competitionMappings, setCompetitionMappings] = useState<CompetitionMapping[]>([]);
+  const [competitionMappingsLoading, setCompetitionMappingsLoading] = useState(false);
+  const [savingCompetitionId, setSavingCompetitionId] = useState<number | null>(null);
   const [runtimeEvents, setRuntimeEvents] = useState<EventRuntimeItem[]>([]);
   const [runtimeLoading, setRuntimeLoading] = useState(false);
   const [runtimeSearch, setRuntimeSearch] = useState("");
@@ -405,6 +467,26 @@ export default function AdminPage() {
     catch { /* ignore */ } finally { setFeedLoading(false); }
   }, [token]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  const fetchCompetitions = useCallback(async () => {
+    if (!token) return;
+    setCompetitionsLoading(true);
+    try {
+      const params = new URLSearchParams();
+      if (competitionSportFilter !== "all") params.set("sport", competitionSportFilter);
+      if (competitionLiveFilter !== "all") params.set("liveEnabled", competitionLiveFilter);
+      const qs = params.toString();
+      const res = await fetch(`/api/admin/competitions${qs ? `?${qs}` : ""}`, { headers: authHeader });
+      if (res.ok) {
+        const data = await res.json();
+        setCompetitions(Array.isArray(data.competitions) ? data.competitions : []);
+      }
+    } catch {
+      /* ignore */
+    } finally {
+      setCompetitionsLoading(false);
+    }
+  }, [token, competitionSportFilter, competitionLiveFilter]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const fetchEventRuntime = useCallback(async () => {
     if (!token) return;
     setRuntimeLoading(true);
@@ -443,8 +525,8 @@ export default function AdminPage() {
     else if (activeTab === "analytics") fetchAnalytics();
     else if (activeTab === "events") { fetchSuspended(); fetchFeed(); fetchEventRuntime(); }
     else if (activeTab === "settlement-logs") fetchSettlementLogs();
-    else if (activeTab === "settings") { fetchSettings(); fetchAuditLogs(); }
-  }, [token, activeTab, fetchEventRuntime]); // eslint-disable-line react-hooks/exhaustive-deps
+    else if (activeTab === "settings") { fetchSettings(); fetchAuditLogs(); fetchCompetitions(); }
+  }, [token, activeTab, fetchEventRuntime, fetchCompetitions]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => { if (activeTab === "bets") fetchBets(); }, [betStatusFilter]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -737,6 +819,93 @@ export default function AdminPage() {
     }
   };
 
+  const openCompetitionModal = async (competition: CompetitionCatalogItem) => {
+    setCompetitionModal(competition);
+    setCompetitionDraft({
+      isActive: competition.is_active,
+      tier: competition.tier || "standard",
+      liveEnabled: !!competition.live_enabled,
+      prematchEnabled: !!competition.prematch_enabled,
+      homeEnabled: !!competition.home_enabled,
+      mobileEnabled: !!competition.mobile_enabled,
+      featured: !!competition.featured,
+      cashoutEnabled: !!competition.cashout_enabled,
+      priority: String(competition.priority ?? 100),
+      displayOrder: String(competition.display_order ?? 100),
+      minFeedQualityScore: String(competition.min_feed_quality_score ?? 40),
+      tradingMode: competition.trading_mode || "automatic",
+    });
+    setCompetitionMappings([]);
+    setCompetitionMappingsLoading(true);
+    try {
+      const res = await fetch(`/api/admin/competitions/${competition.id}/mappings`, { headers: authHeader });
+      if (res.ok) {
+        const data = await res.json();
+        setCompetitionMappings(Array.isArray(data.mappings) ? data.mappings : []);
+      }
+    } catch {
+      /* ignore */
+    } finally {
+      setCompetitionMappingsLoading(false);
+    }
+  };
+
+  const closeCompetitionModal = () => {
+    setCompetitionModal(null);
+    setCompetitionDraft(null);
+    setCompetitionMappings([]);
+    setCompetitionMappingsLoading(false);
+  };
+
+  const handleSaveCompetitionConfig = async () => {
+    if (!competitionModal || !competitionDraft) return;
+    const nums = [
+      { key: "priority", value: competitionDraft.priority },
+      { key: "displayOrder", value: competitionDraft.displayOrder },
+      { key: "minFeedQualityScore", value: competitionDraft.minFeedQualityScore },
+    ];
+    for (const item of nums) {
+      if (!Number.isFinite(Number(item.value))) {
+        toast.error(`Campo inválido: ${item.key}`);
+        return;
+      }
+    }
+
+    setSavingCompetitionId(competitionModal.id);
+    try {
+      const res = await fetch(`/api/admin/competitions/${competitionModal.id}/config`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json", ...authHeader },
+        body: JSON.stringify({
+          isActive: competitionDraft.isActive,
+          tier: competitionDraft.tier.trim() || "standard",
+          liveEnabled: competitionDraft.liveEnabled,
+          prematchEnabled: competitionDraft.prematchEnabled,
+          homeEnabled: competitionDraft.homeEnabled,
+          mobileEnabled: competitionDraft.mobileEnabled,
+          featured: competitionDraft.featured,
+          cashoutEnabled: competitionDraft.cashoutEnabled,
+          priority: Number(competitionDraft.priority),
+          displayOrder: Number(competitionDraft.displayOrder),
+          minFeedQualityScore: Number(competitionDraft.minFeedQualityScore),
+          tradingMode: competitionDraft.tradingMode.trim() || "automatic",
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        toast.error((data as { error?: string }).error || "Erro ao guardar competição");
+        return;
+      }
+      toast.success("Configuração da competição guardada");
+      await fetchCompetitions();
+      closeCompetitionModal();
+    } catch {
+      toast.error("Erro ao guardar competição");
+    } finally {
+      setSavingCompetitionId(null);
+    }
+  };
+
   const handleSaveSetting = async (key: string) => {
     const value = settingsDraft[key];
     if (value === undefined) return;
@@ -784,6 +953,25 @@ export default function AdminPage() {
     hidden: runtimeEvents.filter(event => getEffectiveVisibilityStatus(event) === "HIDDEN").length,
   };
 
+  const filteredCompetitions = competitions.filter((competition) => {
+    const search = competitionSearch.trim().toLowerCase();
+    if (!search) return true;
+    return (
+      competition.name.toLowerCase().includes(search)
+      || competition.country.toLowerCase().includes(search)
+      || competition.sport.toLowerCase().includes(search)
+      || String(competition.id).includes(search)
+    );
+  });
+
+  const competitionSummary = {
+    total: competitions.length,
+    liveEnabled: competitions.filter((competition) => competition.live_enabled).length,
+    featured: competitions.filter((competition) => competition.featured).length,
+    cashoutEnabled: competitions.filter((competition) => competition.cashout_enabled).length,
+    inactive: competitions.filter((competition) => !competition.is_active).length,
+  };
+
   const fmtDate = (d: string) => new Date(d).toLocaleString("pt-PT", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
   const fmtEur = (v: string | number) => `€ ${parseFloat(String(v)).toFixed(2)}`;
 
@@ -797,7 +985,7 @@ export default function AdminPage() {
     else if (activeTab === "analytics") fetchAnalytics();
     else if (activeTab === "events") { fetchSuspended(); fetchFeed(); fetchEventRuntime(); }
     else if (activeTab === "settlement-logs") fetchSettlementLogs();
-    else if (activeTab === "settings") { fetchSettings(); fetchAuditLogs(); }
+    else if (activeTab === "settings") { fetchSettings(); fetchAuditLogs(); fetchCompetitions(); }
   };
 
   // --- LOGIN ---
@@ -2007,6 +2195,137 @@ export default function AdminPage() {
             {activeTab === "settings" && (
               <motion.div key="settings" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} className="space-y-6">
 
+                {/* Catálogo de Competições */}
+                <div className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden">
+                  <div className="px-5 py-4 border-b border-zinc-800 flex flex-col gap-3 lg:flex-row lg:items-center">
+                    <div className="flex items-center gap-2">
+                      <Trophy size={16} className="text-yellow-400" />
+                      <span className="font-bold text-sm text-zinc-300">Catálogo de Competições</span>
+                      <span className="text-xs text-zinc-600">prioridade, visibilidade, cashout e trading por liga</span>
+                    </div>
+                    <div className="flex flex-1 flex-col gap-3 sm:flex-row lg:justify-end">
+                      <div className="relative flex-1 max-w-md">
+                        <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" />
+                        <Input
+                          placeholder="Buscar por liga, país, desporto ou ID..."
+                          value={competitionSearch}
+                          onChange={e => setCompetitionSearch(e.target.value)}
+                          className="bg-zinc-800 border-zinc-700 text-white pl-9 h-9"
+                        />
+                      </div>
+                      <div className="flex gap-2">
+                        <select
+                          value={competitionSportFilter}
+                          onChange={e => setCompetitionSportFilter(e.target.value)}
+                          className="h-9 bg-zinc-800 border border-zinc-700 rounded-md text-white text-sm px-3 focus:outline-none"
+                        >
+                          <option value="all">Todos os desportos</option>
+                          {Object.entries(SPORT_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+                        </select>
+                        <select
+                          value={competitionLiveFilter}
+                          onChange={e => setCompetitionLiveFilter(e.target.value)}
+                          className="h-9 bg-zinc-800 border border-zinc-700 rounded-md text-white text-sm px-3 focus:outline-none"
+                        >
+                          <option value="all">Live: todos</option>
+                          <option value="true">Live ativo</option>
+                          <option value="false">Live desligado</option>
+                        </select>
+                        <Button
+                          size="sm"
+                          onClick={fetchCompetitions}
+                          disabled={competitionsLoading}
+                          className="h-9 px-3 text-xs bg-zinc-800 hover:bg-zinc-700 text-zinc-300"
+                        >
+                          {competitionsLoading ? <Loader2 size={12} className="animate-spin mr-1" /> : <RefreshCw size={12} className="mr-1" />}
+                          Atualizar
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 xl:grid-cols-5 gap-3 p-5 border-b border-zinc-800 bg-zinc-950/30">
+                    <StatCard icon={<Trophy size={18} />} label="Competições" value={competitionSummary.total} color="blue" />
+                    <StatCard icon={<Radio size={18} />} label="Live Ativo" value={competitionSummary.liveEnabled} color="green" />
+                    <StatCard icon={<Zap size={18} />} label="Featured" value={competitionSummary.featured} color="yellow" />
+                    <StatCard icon={<Wallet size={18} />} label="Cashout Ativo" value={competitionSummary.cashoutEnabled} color="purple" />
+                    <StatCard icon={<Ban size={18} />} label="Inativas" value={competitionSummary.inactive} color="red" alert={competitionSummary.inactive > 0} />
+                  </div>
+
+                  {competitionsLoading && competitions.length === 0 ? (
+                    <div className="p-10 text-center"><Loader2 className="animate-spin text-red-600 mx-auto" size={28} /></div>
+                  ) : filteredCompetitions.length === 0 ? (
+                    <div className="p-10 text-center text-zinc-600 text-sm">Nenhuma competição encontrada para os filtros atuais.</div>
+                  ) : (
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-sm">
+                        <thead>
+                          <tr className="border-b border-zinc-800 bg-zinc-950/50">
+                            <th className="text-left px-4 py-3 text-zinc-500 font-medium">Competição</th>
+                            <th className="text-left px-4 py-3 text-zinc-500 font-medium">Flags</th>
+                            <th className="text-left px-4 py-3 text-zinc-500 font-medium">Prioridade</th>
+                            <th className="text-left px-4 py-3 text-zinc-500 font-medium">Trading</th>
+                            <th className="text-left px-4 py-3 text-zinc-500 font-medium">Mappings</th>
+                            <th className="text-left px-4 py-3 text-zinc-500 font-medium">Atualização</th>
+                            <th className="text-right px-4 py-3 text-zinc-500 font-medium">Ações</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {filteredCompetitions.map((competition) => (
+                            <tr key={competition.id} className="border-b border-zinc-800/50 hover:bg-zinc-800/25 transition-colors align-top">
+                              <td className="px-4 py-3 min-w-[260px]">
+                                <div className="text-white text-sm font-medium">{competition.name}</div>
+                                <div className="text-xs text-zinc-600 mt-1 flex items-center gap-2 flex-wrap">
+                                  <span>{SPORT_LABEL[competition.sport] || competition.sport}</span>
+                                  <span>•</span>
+                                  <span>{competition.country}</span>
+                                  <span>•</span>
+                                  <span>tier {competition.tier}</span>
+                                  <span>•</span>
+                                  <span>#{competition.id}</span>
+                                </div>
+                              </td>
+                              <td className="px-4 py-3 min-w-[240px]">
+                                <div className="flex flex-wrap gap-2">
+                                  <Badge cls={competition.is_active ? "bg-green-900/50 text-green-400" : "bg-red-900/40 text-red-400"} label={competition.is_active ? "Ativa" : "Inativa"} />
+                                  <Badge cls={competition.live_enabled ? "bg-green-900/50 text-green-400" : "bg-zinc-800 text-zinc-400"} label={`Live ${competition.live_enabled ? "ON" : "OFF"}`} />
+                                  <Badge cls={competition.featured ? "bg-yellow-900/40 text-yellow-400" : "bg-zinc-800 text-zinc-400"} label={`Featured ${competition.featured ? "ON" : "OFF"}`} />
+                                  <Badge cls={competition.cashout_enabled ? "bg-purple-900/40 text-purple-400" : "bg-zinc-800 text-zinc-400"} label={`Cashout ${competition.cashout_enabled ? "ON" : "OFF"}`} />
+                                </div>
+                              </td>
+                              <td className="px-4 py-3 min-w-[140px]">
+                                <div className="text-sm text-zinc-300">prio {competition.priority ?? 100}</div>
+                                <div className="text-xs text-zinc-600 mt-1">display {competition.display_order ?? 100}</div>
+                              </td>
+                              <td className="px-4 py-3 min-w-[180px]">
+                                <div className="text-sm text-zinc-300">{competition.trading_mode || "automatic"}</div>
+                                <div className="text-xs text-zinc-600 mt-1">min feed {competition.min_feed_quality_score ?? 40}</div>
+                              </td>
+                              <td className="px-4 py-3 min-w-[100px]">
+                                <div className="text-sm text-zinc-300">{competition.provider_mappings ?? 0}</div>
+                                <div className="text-xs text-zinc-600 mt-1">providers</div>
+                              </td>
+                              <td className="px-4 py-3 min-w-[160px]">
+                                <div className="text-xs text-zinc-400">{competition.updated_at ? fmtDate(competition.updated_at) : "—"}</div>
+                              </td>
+                              <td className="px-4 py-3 text-right min-w-[120px]">
+                                <Button
+                                  size="sm"
+                                  onClick={() => openCompetitionModal(competition)}
+                                  className="h-8 px-3 text-xs bg-red-600 hover:bg-red-700 text-white"
+                                >
+                                  <Settings size={12} className="mr-1" />
+                                  Editar
+                                </Button>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+
                 {/* Configurações da Plataforma */}
                 <div className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden">
                   <div className="px-5 py-4 border-b border-zinc-800 flex items-center gap-2">
@@ -2100,6 +2419,185 @@ export default function AdminPage() {
           </AnimatePresence>
         </div>
       </main>
+
+      {/* ── MODAL: Competição ── */}
+      <AnimatePresence>
+        {competitionModal && competitionDraft && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm"
+            onClick={closeCompetitionModal}
+          >
+            <motion.div
+              initial={{ scale: 0.96, y: 10 }}
+              animate={{ scale: 1, y: 0 }}
+              exit={{ scale: 0.96, y: 10 }}
+              className="bg-zinc-900 border border-zinc-700 rounded-2xl w-full max-w-4xl max-h-[90vh] overflow-auto shadow-2xl"
+              onClick={e => e.stopPropagation()}
+            >
+              <div className="flex items-start justify-between gap-4 p-5 border-b border-zinc-800">
+                <div>
+                  <h2 className="font-bold text-white">Configuração da Competição</h2>
+                  <div className="text-sm text-zinc-300 mt-1">{competitionModal.name}</div>
+                  <div className="text-xs text-zinc-600 mt-1">
+                    {SPORT_LABEL[competitionModal.sport] || competitionModal.sport} • {competitionModal.country} • #{competitionModal.id}
+                  </div>
+                </div>
+                <button onClick={closeCompetitionModal} className="text-zinc-500 hover:text-white"><X size={18} /></button>
+              </div>
+
+              <div className="p-5 space-y-5">
+                <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+                  <div className="bg-zinc-800 rounded-xl p-3">
+                    <div className="text-xs text-zinc-500 mb-1">Tier</div>
+                    <div className="text-sm font-semibold text-white">{competitionModal.tier}</div>
+                  </div>
+                  <div className="bg-zinc-800 rounded-xl p-3">
+                    <div className="text-xs text-zinc-500 mb-1">Priority</div>
+                    <div className="text-sm font-semibold text-white">{competitionModal.priority ?? 100}</div>
+                  </div>
+                  <div className="bg-zinc-800 rounded-xl p-3">
+                    <div className="text-xs text-zinc-500 mb-1">Trading</div>
+                    <div className="text-sm font-semibold text-white">{competitionModal.trading_mode || "automatic"}</div>
+                  </div>
+                  <div className="bg-zinc-800 rounded-xl p-3">
+                    <div className="text-xs text-zinc-500 mb-1">Mappings</div>
+                    <div className="text-sm font-semibold text-white">{competitionModal.provider_mappings ?? 0}</div>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  {([
+                    { key: "isActive", label: "Competição ativa", desc: "Liga disponível no catálogo" },
+                    { key: "liveEnabled", label: "Live ativo", desc: "Permite exibição ao vivo" },
+                    { key: "prematchEnabled", label: "Pré-jogo ativo", desc: "Permite exibição prematch" },
+                    { key: "homeEnabled", label: "Mostrar na home", desc: "Habilita destaque na home" },
+                    { key: "mobileEnabled", label: "Mostrar no mobile", desc: "Disponível no app/mobile" },
+                    { key: "featured", label: "Featured", desc: "Destaque prioritário comercial" },
+                    { key: "cashoutEnabled", label: "Cashout ativo", desc: "Permite cashout da competição" },
+                  ] as const).map((item) => (
+                    <button
+                      key={item.key}
+                      type="button"
+                      onClick={() => setCompetitionDraft(prev => prev ? { ...prev, [item.key]: !prev[item.key] } : prev)}
+                      className={`rounded-xl border p-4 text-left transition-colors ${
+                        competitionDraft[item.key]
+                          ? "border-red-500/40 bg-red-900/20"
+                          : "border-zinc-700 bg-zinc-800 hover:bg-zinc-700"
+                      }`}
+                    >
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="text-sm font-semibold text-white">{item.label}</div>
+                        {competitionDraft[item.key] ? <CheckCircle size={16} className="text-red-400" /> : <XCircle size={16} className="text-zinc-600" />}
+                      </div>
+                      <div className="text-xs text-zinc-500 mt-2">{item.desc}</div>
+                    </button>
+                  ))}
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <Label className="text-zinc-500 text-xs mb-1 block">Tier</Label>
+                    <Input
+                      value={competitionDraft.tier}
+                      onChange={e => setCompetitionDraft(prev => prev ? { ...prev, tier: e.target.value } : prev)}
+                      className="bg-zinc-800 border-zinc-700 text-white"
+                    />
+                  </div>
+                  <div>
+                    <Label className="text-zinc-500 text-xs mb-1 block">Trading mode</Label>
+                    <select
+                      value={competitionDraft.tradingMode}
+                      onChange={e => setCompetitionDraft(prev => prev ? { ...prev, tradingMode: e.target.value } : prev)}
+                      className="w-full h-10 bg-zinc-800 border border-zinc-700 rounded-md text-white text-sm px-3 focus:outline-none"
+                    >
+                      {["automatic", "manual", "restricted"].map((mode) => (
+                        <option key={mode} value={mode}>{mode}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <Label className="text-zinc-500 text-xs mb-1 block">Priority</Label>
+                    <Input
+                      type="number"
+                      value={competitionDraft.priority}
+                      onChange={e => setCompetitionDraft(prev => prev ? { ...prev, priority: e.target.value } : prev)}
+                      className="bg-zinc-800 border-zinc-700 text-white"
+                    />
+                  </div>
+                  <div>
+                    <Label className="text-zinc-500 text-xs mb-1 block">Display order</Label>
+                    <Input
+                      type="number"
+                      value={competitionDraft.displayOrder}
+                      onChange={e => setCompetitionDraft(prev => prev ? { ...prev, displayOrder: e.target.value } : prev)}
+                      className="bg-zinc-800 border-zinc-700 text-white"
+                    />
+                  </div>
+                  <div>
+                    <Label className="text-zinc-500 text-xs mb-1 block">Min feed quality score</Label>
+                    <Input
+                      type="number"
+                      value={competitionDraft.minFeedQualityScore}
+                      onChange={e => setCompetitionDraft(prev => prev ? { ...prev, minFeedQualityScore: e.target.value } : prev)}
+                      className="bg-zinc-800 border-zinc-700 text-white"
+                    />
+                  </div>
+                </div>
+
+                <div className="bg-zinc-950/40 border border-zinc-800 rounded-xl overflow-hidden">
+                  <div className="px-4 py-3 border-b border-zinc-800 flex items-center gap-2">
+                    <Radio size={15} className="text-blue-400" />
+                    <span className="text-sm font-semibold text-zinc-300">Provider mappings</span>
+                    <span className="ml-auto text-xs text-zinc-600">{competitionMappings.length} registo(s)</span>
+                  </div>
+                  {competitionMappingsLoading ? (
+                    <div className="p-6 text-center"><Loader2 className="animate-spin text-red-600 mx-auto" size={22} /></div>
+                  ) : competitionMappings.length === 0 ? (
+                    <div className="p-6 text-center text-zinc-600 text-sm">Sem mappings registados para esta competição.</div>
+                  ) : (
+                    <div className="divide-y divide-zinc-800 max-h-72 overflow-y-auto">
+                      {competitionMappings.map((mapping) => (
+                        <div key={mapping.id} className="px-4 py-3">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="text-sm text-zinc-200 font-medium">{mapping.providerName}</span>
+                            <Badge cls="bg-zinc-800 text-zinc-300" label={mapping.provider} />
+                            <Badge cls="bg-zinc-800 text-zinc-400" label={mapping.mappingConfidence} />
+                          </div>
+                          <div className="text-xs text-zinc-500 mt-1 break-all">
+                            key: {mapping.providerCompetitionKey}
+                            {mapping.providerCompetitionId ? ` • providerId: ${mapping.providerCompetitionId}` : ""}
+                          </div>
+                          <div className="text-xs text-zinc-600 mt-1">
+                            {mapping.providerCountry} • last seen {fmtDate(mapping.lastSeenAt)}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                <div className="flex items-center justify-end gap-2 pt-2 border-t border-zinc-800">
+                  <Button type="button" variant="outline" onClick={closeCompetitionModal} className="border-zinc-700 text-zinc-300 hover:bg-zinc-800">
+                    Cancelar
+                  </Button>
+                  <Button
+                    type="button"
+                    onClick={handleSaveCompetitionConfig}
+                    disabled={savingCompetitionId === competitionModal.id}
+                    className="bg-red-600 hover:bg-red-700 text-white"
+                  >
+                    {savingCompetitionId === competitionModal.id ? <Loader2 size={14} className="animate-spin mr-2" /> : <CheckCircle size={14} className="mr-2" />}
+                    Guardar Competição
+                  </Button>
+                </div>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* ── MODAL: Override de Evento ── */}
       <AnimatePresence>
