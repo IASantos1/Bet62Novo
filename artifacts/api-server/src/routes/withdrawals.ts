@@ -1,6 +1,6 @@
 import { Router, type IRouter, type Response } from "express";
-import { db, usersTable, withdrawalsTable, betsTable } from "@workspace/db";
-import { eq, desc, and, ne, inArray, sql, count } from "drizzle-orm";
+import { db, usersTable, withdrawalsTable, betsTable, paymentsTable } from "@workspace/db";
+import { eq, desc, and, ne, inArray, sql, count, sum } from "drizzle-orm";
 import { authMiddleware, type AuthRequest } from "../middlewares/auth";
 import { adminMiddleware, type AdminRequest } from "../middlewares/adminAuth";
 import { logger } from "../lib/logger";
@@ -12,6 +12,14 @@ const router: IRouter = Router();
 const OPEN_WITHDRAWAL_STATUSES = ["pending_review", "approved", "processing"] as const;
 const ADMIN_WITHDRAWAL_STATUSES = ["approved", "rejected", "processing", "paid", "failed", "cancelled"] as const;
 const USER_CANCELLABLE_WITHDRAWAL_STATUSES = ["pending_review", "approved"] as const;
+
+type WithdrawalRiskFlag = {
+  code: string;
+  severity: "low" | "medium" | "high";
+  label: string;
+  reason: string;
+  value?: string | number;
+};
 
 function isAdminWithdrawalStatus(value: string): value is (typeof ADMIN_WITHDRAWAL_STATUSES)[number] {
   return (ADMIN_WITHDRAWAL_STATUSES as readonly string[]).includes(value);
@@ -29,6 +37,109 @@ function canTransitionWithdrawalStatus(from: string, to: (typeof ADMIN_WITHDRAWA
 
 function canUserCancelWithdrawalStatus(from: string): boolean {
   return (USER_CANCELLABLE_WITHDRAWAL_STATUSES as readonly string[]).includes(from);
+}
+
+function buildWithdrawalRiskFlags(args: {
+  amount: number;
+  userBalanceBefore: number;
+  userCreatedAt: Date | string;
+  previousWithdrawalCount: number;
+  completedDepositCount: number;
+  totalCompletedDeposits: number;
+  latestCompletedDepositAt?: Date | string | null;
+  settledBetCount: number;
+}): WithdrawalRiskFlag[] {
+  const flags: WithdrawalRiskFlag[] = [];
+  const nowMs = Date.now();
+  const createdAt = new Date(args.userCreatedAt);
+  const accountAgeHours = Number.isNaN(createdAt.getTime()) ? null : (nowMs - createdAt.getTime()) / (1000 * 60 * 60);
+  const latestDepositAt = args.latestCompletedDepositAt ? new Date(args.latestCompletedDepositAt) : null;
+  const latestDepositHours =
+    latestDepositAt && !Number.isNaN(latestDepositAt.getTime())
+      ? (nowMs - latestDepositAt.getTime()) / (1000 * 60 * 60)
+      : null;
+  const withdrawalRatio =
+    args.userBalanceBefore > 0 ? args.amount / args.userBalanceBefore : 0;
+
+  if (args.previousWithdrawalCount === 0) {
+    flags.push({
+      code: "first_withdrawal",
+      severity: "low",
+      label: "Primeiro levantamento",
+      reason: "Primeiro pedido de levantamento desta conta.",
+    });
+  }
+
+  if (accountAgeHours !== null && accountAgeHours < 72) {
+    flags.push({
+      code: "new_account",
+      severity: accountAgeHours < 24 ? "high" : "medium",
+      label: "Conta recente",
+      reason: "Conta criada há menos de 72 horas.",
+      value: Number(accountAgeHours.toFixed(1)),
+    });
+  }
+
+  if (latestDepositHours !== null && latestDepositHours < 24) {
+    flags.push({
+      code: "recent_deposit",
+      severity: latestDepositHours < 6 ? "high" : "medium",
+      label: "Depósito recente",
+      reason: "Existe depósito concluído nas últimas 24 horas.",
+      value: Number(latestDepositHours.toFixed(1)),
+    });
+  }
+
+  if (args.completedDepositCount === 0) {
+    flags.push({
+      code: "no_completed_deposits",
+      severity: "medium",
+      label: "Sem depósitos concluídos",
+      reason: "A conta não tem histórico de depósitos concluídos.",
+    });
+  }
+
+  if (args.totalCompletedDeposits > 0 && args.amount > args.totalCompletedDeposits) {
+    flags.push({
+      code: "withdrawal_gt_total_deposits",
+      severity: "medium",
+      label: "Levantamento acima dos depósitos",
+      reason: "O valor solicitado excede o total histórico de depósitos concluídos.",
+      value: Number(args.totalCompletedDeposits.toFixed(2)),
+    });
+  }
+
+  if (args.amount >= 1000) {
+    flags.push({
+      code: "large_amount",
+      severity: args.amount >= 2500 ? "high" : "medium",
+      label: "Montante elevado",
+      reason: "O valor do levantamento é elevado para revisão manual.",
+      value: Number(args.amount.toFixed(2)),
+    });
+  }
+
+  if (withdrawalRatio >= 0.8) {
+    flags.push({
+      code: "high_balance_ratio",
+      severity: withdrawalRatio >= 0.95 ? "high" : "medium",
+      label: "Consome quase todo o saldo",
+      reason: "O levantamento representa grande parte do saldo disponível antes do hold.",
+      value: Number((withdrawalRatio * 100).toFixed(1)),
+    });
+  }
+
+  if (args.settledBetCount <= 3) {
+    flags.push({
+      code: "low_settled_bet_history",
+      severity: "low",
+      label: "Pouco histórico de apostas",
+      reason: "A conta tem poucas apostas liquidadas antes do levantamento.",
+      value: args.settledBetCount,
+    });
+  }
+
+  return flags;
 }
 
 async function adjustWithdrawalHoldBalance(
@@ -148,6 +259,39 @@ router.post("/", authMiddleware, async (req: AuthRequest, res: Response): Promis
       return;
     }
 
+    const [{ completedDepositCount, totalCompletedDeposits }] = await db
+      .select({
+        completedDepositCount: count(),
+        totalCompletedDeposits: sum(paymentsTable.amount),
+      })
+      .from(paymentsTable)
+      .where(and(eq(paymentsTable.userId, req.user!.id), eq(paymentsTable.status, "completed")));
+
+    const [latestCompletedDeposit] = await db
+      .select({
+        createdAt: paymentsTable.createdAt,
+      })
+      .from(paymentsTable)
+      .where(and(eq(paymentsTable.userId, req.user!.id), eq(paymentsTable.status, "completed")))
+      .orderBy(desc(paymentsTable.createdAt))
+      .limit(1);
+
+    const [{ previousWithdrawalCount }] = await db
+      .select({ previousWithdrawalCount: count() })
+      .from(withdrawalsTable)
+      .where(eq(withdrawalsTable.userId, req.user!.id));
+
+    const riskFlags = buildWithdrawalRiskFlags({
+      amount,
+      userBalanceBefore: parseFloat(user.balance),
+      userCreatedAt: user.createdAt,
+      previousWithdrawalCount: Number(previousWithdrawalCount),
+      completedDepositCount: Number(completedDepositCount),
+      totalCompletedDeposits: parseFloat(totalCompletedDeposits || "0"),
+      latestCompletedDepositAt: latestCompletedDeposit?.createdAt ?? null,
+      settledBetCount: Number(settledCount),
+    });
+
     const withdrawal = await db.transaction(async (tx) => {
       const [w] = await tx.insert(withdrawalsTable).values({
         userId: req.user!.id,
@@ -156,7 +300,7 @@ router.post("/", authMiddleware, async (req: AuthRequest, res: Response): Promis
         holderName: holderName.trim(),
         nif,
         status: "pending_review",
-        riskFlags: [],
+        riskFlags,
       }).returning();
 
       await applyBalanceDelta(tx, {

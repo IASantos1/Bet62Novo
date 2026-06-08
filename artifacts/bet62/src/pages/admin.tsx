@@ -46,6 +46,7 @@ type AdminWithdrawal = {
 };
 
 type AdminWithdrawalAction = "approved" | "rejected" | "processing" | "paid" | "failed" | "cancelled";
+type WithdrawalRiskFlag = { code: string; severity: "low" | "medium" | "high"; label: string; reason: string; value?: string | number };
 
 type AdminPayment = {
   id: number; orderId: string; userId: number; amount: string; method: string;
@@ -249,6 +250,18 @@ const WITHDRAWAL_SUCCESS_MESSAGE: Record<AdminWithdrawalAction, string> = {
   failed: "Levantamento marcado com falha",
   cancelled: "Levantamento cancelado e saldo devolvido",
 };
+
+function getWithdrawalRiskFlags(riskFlags: unknown): WithdrawalRiskFlag[] {
+  if (!Array.isArray(riskFlags)) return [];
+  return riskFlags.filter((flag): flag is WithdrawalRiskFlag => {
+    if (!flag || typeof flag !== "object") return false;
+    const candidate = flag as Record<string, unknown>;
+    return typeof candidate["code"] === "string"
+      && typeof candidate["severity"] === "string"
+      && typeof candidate["label"] === "string"
+      && typeof candidate["reason"] === "string";
+  });
+}
 
 const KYC_LABELS: Record<string, { label: string; cls: string }> = {
   not_submitted: { label: "Não enviado", cls: "text-zinc-500" },
@@ -1600,6 +1613,9 @@ export default function AdminPage() {
                   <div className="space-y-3">
                     {withdrawals.map(w => (
                       <div key={w.id} className={`bg-zinc-900 border rounded-xl p-5 ${w.status === "pending_review" ? "border-yellow-500/30" : w.status === "processing" ? "border-blue-500/30" : "border-zinc-800"}`}>
+                        {(() => {
+                          const riskFlags = getWithdrawalRiskFlags(w.riskFlags);
+                          return (
                         <div className="flex flex-col sm:flex-row sm:items-start gap-4">
                           <div className="flex-1 space-y-1">
                             <div className="flex items-center gap-2 flex-wrap">
@@ -1621,6 +1637,26 @@ export default function AdminPage() {
                             {w.reversedAt && <div className="text-xs text-zinc-500">Fundos revertidos: {fmtDate(w.reversedAt)}</div>}
                             {w.providerReference && <div className="text-xs text-zinc-400">Ref. provedor: <span className="font-mono">{w.providerReference}</span></div>}
                             {w.decisionReason && <div className="text-xs text-zinc-400">Motivo: {w.decisionReason}</div>}
+                            {riskFlags.length > 0 && (
+                              <div className="mt-2 flex flex-wrap gap-1.5">
+                                {riskFlags.map((flag) => (
+                                  <span
+                                    key={`${w.id}-${flag.code}`}
+                                    className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-black uppercase tracking-wide ${
+                                      flag.severity === "high"
+                                        ? "border-red-500/40 bg-red-900/30 text-red-300"
+                                        : flag.severity === "medium"
+                                          ? "border-orange-500/40 bg-orange-900/30 text-orange-300"
+                                          : "border-yellow-500/40 bg-yellow-900/30 text-yellow-300"
+                                    }`}
+                                    title={flag.reason}
+                                  >
+                                    {flag.label}
+                                    {flag.value !== undefined ? ` · ${flag.value}` : ""}
+                                  </span>
+                                ))}
+                              </div>
+                            )}
                             {w.notes && <div className="text-xs text-zinc-400 mt-1 italic">Nota: {w.notes}</div>}
                           </div>
                           {(WITHDRAWAL_ACTIONS_BY_STATUS[w.status] ?? []).length > 0 && (
@@ -1666,6 +1702,8 @@ export default function AdminPage() {
                             </div>
                           )}
                         </div>
+                          );
+                        })()}
                       </div>
                     ))}
                     {withdrawals.length === 0 && (
