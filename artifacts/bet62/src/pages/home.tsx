@@ -12533,6 +12533,14 @@ type UserWithdrawalItem = {
   reversedAt?: string | null;
   updatedAt?: string | null;
 };
+type WithdrawalEligibility = {
+  eligible: boolean;
+  code: "WITHDRAWAL_ALREADY_OPEN" | "KYC_REQUIRED" | "BET_REQUIRED" | null;
+  message: string | null;
+  kycStatus: string;
+  settledBetCount: number;
+  openWithdrawalStatus: string | null;
+};
 
 function DepositWithdrawModal({
   open, onClose, onSuccess, onPromoNotif, balance, token, kycStatus,
@@ -12568,18 +12576,21 @@ function DepositWithdrawModal({
   const [withdrawalHistory, setWithdrawalHistory] = useState<UserWithdrawalItem[]>([]);
   const [withdrawalsLoading, setWithdrawalsLoading] = useState(false);
   const [cancellingWithdrawalId, setCancellingWithdrawalId] = useState<number | null>(null);
+  const [withdrawalEligibility, setWithdrawalEligibility] = useState<WithdrawalEligibility | null>(null);
 
   // KYC form (shown before withdrawal when not submitted)
   const [kycDocType, setKycDocType] = useState<"cc" | "passport">("cc");
   const [kycDocNumber, setKycDocNumber] = useState("");
   const [kycNif, setKycNif] = useState("");
   const [kycDone, setKycDone] = useState(false);
-  const needsKyc = kycStatus === "not_submitted" && !kycDone;
+  const effectiveKycStatus = withdrawalEligibility?.kycStatus ?? kycStatus;
+  const needsKyc = effectiveKycStatus === "not_submitted" && !kycDone;
   const latestOpenWithdrawal = withdrawalHistory.find((item) =>
     item.status === "pending_review" || item.status === "approved" || item.status === "processing"
   ) ?? null;
   const latestWithdrawal = withdrawalHistory[0] ?? null;
   const canUserCancelWithdrawal = latestOpenWithdrawal?.status === "pending_review" || latestOpenWithdrawal?.status === "approved";
+  const withdrawalBlockedByBetHistory = withdrawalEligibility?.code === "BET_REQUIRED";
   const formatWithdrawalDate = (value?: string | null) => {
     if (!value) return "sem data";
     const dt = new Date(value);
@@ -12679,6 +12690,20 @@ function DepositWithdrawModal({
     }
   }, [token]);
 
+  const fetchWithdrawalEligibility = useCallback(async () => {
+    if (!token) return;
+    try {
+      const r = await fetch("/api/withdrawals/eligibility", {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!r.ok) return;
+      const data = await r.json() as WithdrawalEligibility;
+      setWithdrawalEligibility(data);
+    } catch {
+      // Silent: eligibility should not break the modal.
+    }
+  }, [token]);
+
   const amount = parseFloat(depositAmount.replace(",", "."));
   const amountValid = !isNaN(amount) && amount >= 10 && amount <= 5000;
   const promoHint = amountValid && amount >= 20;
@@ -12737,7 +12762,8 @@ function DepositWithdrawModal({
   useEffect(() => {
     if (!open || mainTab !== "withdraw") return;
     void fetchWithdrawalHistory();
-  }, [open, mainTab, fetchWithdrawalHistory]);
+    void fetchWithdrawalEligibility();
+  }, [open, mainTab, fetchWithdrawalHistory, fetchWithdrawalEligibility]);
 
   function resetMethod(m: PayMethod) {
     setPayMethod(m);
@@ -12761,6 +12787,7 @@ function DepositWithdrawModal({
       if (!r.ok) { toast.error(data.error ?? "Erro ao submeter documentos."); return; }
       setKycDone(true);
       onSuccess();
+      void fetchWithdrawalEligibility();
       toast.success("Documentos submetidos! A verificação será feita em 1-2 dias úteis.");
     } catch { toast.error("Erro de ligação. Tente novamente."); }
     finally { setLoading(false); }
@@ -12783,6 +12810,9 @@ function DepositWithdrawModal({
       });
       const data = await r.json() as { withdrawal?: { id: number }; error?: string; code?: string };
       if (!r.ok) {
+        if (data.code === "KYC_REQUIRED" || data.code === "BET_REQUIRED" || data.code === "WITHDRAWAL_ALREADY_OPEN") {
+          void fetchWithdrawalEligibility();
+        }
         toast.error(data.error ?? "Erro ao submeter pedido.");
         if (data.code === "WITHDRAWAL_ALREADY_OPEN") {
           void fetchWithdrawalHistory();
@@ -13025,7 +13055,7 @@ function DepositWithdrawModal({
                   Submeter Documentos
                 </Button>
               </div>
-            ) : kycStatus === "pending" ? (
+            ) : effectiveKycStatus === "pending" ? (
               /* ── KYC PENDING NOTICE ── */
               <div className="space-y-4">
                 <div className="bg-yellow-900/20 border border-yellow-600/40 rounded-xl px-4 py-4 text-center space-y-2">
@@ -13037,7 +13067,7 @@ function DepositWithdrawModal({
                   Mínimo de levantamento: <strong className="text-white">€20</strong>. Processado por transferência bancária em 2–5 dias úteis.
                 </div>
               </div>
-            ) : kycStatus === "rejected" ? (
+            ) : effectiveKycStatus === "rejected" ? (
               <div className="space-y-4">
                 <div className="bg-red-900/20 border border-red-600/40 rounded-xl px-4 py-4 text-center space-y-2">
                   <div className="text-3xl">❌</div>
@@ -13048,6 +13078,19 @@ function DepositWithdrawModal({
                 </div>
                 <div className="bg-orange-900/20 border border-orange-800/40 rounded-xl px-4 py-3 text-xs text-orange-300 leading-relaxed">
                   Mínimo de levantamento: <strong className="text-white">€20</strong>. Processado por transferência bancária em 2–5 dias úteis.
+                </div>
+              </div>
+            ) : withdrawalBlockedByBetHistory ? (
+              <div className="space-y-4">
+                <div className="bg-blue-900/20 border border-blue-600/40 rounded-xl px-4 py-4 text-center space-y-2">
+                  <div className="text-3xl">🎯</div>
+                  <div className="text-sm font-bold text-blue-300">Aposta Liquidada Necessária</div>
+                  <div className="text-xs text-blue-200/70 leading-relaxed">
+                    {withdrawalEligibility?.message ?? "Para efectuar um levantamento, é necessário ter pelo menos uma aposta liquidada."}
+                  </div>
+                </div>
+                <div className="bg-orange-900/20 border border-orange-800/40 rounded-xl px-4 py-3 text-xs text-orange-300 leading-relaxed">
+                  Depois de ter pelo menos uma aposta liquidada, o levantamento ficará disponível automaticamente.
                 </div>
               </div>
             ) : latestOpenWithdrawal ? (

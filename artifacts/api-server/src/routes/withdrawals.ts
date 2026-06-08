@@ -21,6 +21,26 @@ type WithdrawalRiskFlag = {
   value?: string | number;
 };
 
+type WithdrawalEligibilityResult =
+  | {
+      eligible: true;
+      user: typeof usersTable.$inferSelect;
+      kycStatus: string;
+      settledBetCount: number;
+      openWithdrawalStatus: null;
+      code: null;
+      message: null;
+    }
+  | {
+      eligible: false;
+      user: typeof usersTable.$inferSelect;
+      kycStatus: string;
+      settledBetCount: number;
+      openWithdrawalStatus: string | null;
+      code: "WITHDRAWAL_ALREADY_OPEN" | "KYC_REQUIRED" | "BET_REQUIRED";
+      message: string;
+    };
+
 function isAdminWithdrawalStatus(value: string): value is (typeof ADMIN_WITHDRAWAL_STATUSES)[number] {
   return (ADMIN_WITHDRAWAL_STATUSES as readonly string[]).includes(value);
 }
@@ -163,6 +183,79 @@ async function auditWithdrawalEvent(args: {
   }
 }
 
+async function getWithdrawalEligibility(userId: number): Promise<WithdrawalEligibilityResult | null> {
+  const [user] = await db.select().from(usersTable).where(eq(usersTable.id, userId)).limit(1);
+  if (!user) return null;
+
+  const [openRequest] = await db
+    .select({ id: withdrawalsTable.id, status: withdrawalsTable.status })
+    .from(withdrawalsTable)
+    .where(and(
+      eq(withdrawalsTable.userId, userId),
+      inArray(withdrawalsTable.status, [...OPEN_WITHDRAWAL_STATUSES]),
+    ))
+    .limit(1);
+
+  const kycStatus = String(user.kycStatus ?? "not_submitted");
+  const [{ settledCount }] = await db
+    .select({ settledCount: count() })
+    .from(betsTable)
+    .where(and(eq(betsTable.userId, userId), ne(betsTable.status, "pending")));
+  const settledBetCount = Number(settledCount);
+
+  if (openRequest) {
+    return {
+      eligible: false,
+      user,
+      kycStatus,
+      settledBetCount,
+      openWithdrawalStatus: openRequest.status,
+      code: "WITHDRAWAL_ALREADY_OPEN",
+      message: "Já existe um levantamento em curso para esta conta.",
+    };
+  }
+
+  if (kycStatus !== "approved") {
+    const msg =
+      kycStatus === "pending"
+        ? "Os seus documentos estão em análise. Aguarde a aprovação para efetuar levantamentos."
+        : kycStatus === "rejected"
+          ? "A verificação de identidade foi rejeitada. Submeta novamente os documentos para desbloquear levantamentos."
+          : "É necessário verificar a sua identidade antes de levantar fundos.";
+    return {
+      eligible: false,
+      user,
+      kycStatus,
+      settledBetCount,
+      openWithdrawalStatus: null,
+      code: "KYC_REQUIRED",
+      message: msg,
+    };
+  }
+
+  if (settledBetCount === 0) {
+    return {
+      eligible: false,
+      user,
+      kycStatus,
+      settledBetCount,
+      openWithdrawalStatus: null,
+      code: "BET_REQUIRED",
+      message: "Para efectuar um levantamento, é necessário ter pelo menos uma aposta liquidada.",
+    };
+  }
+
+  return {
+    eligible: true,
+    user,
+    kycStatus,
+    settledBetCount,
+    openWithdrawalStatus: null,
+    code: null,
+    message: null,
+  };
+}
+
 async function adjustWithdrawalHoldBalance(
   tx: unknown,
   args: { userId: number; amount: string; allowNegative?: boolean }
@@ -225,55 +318,23 @@ router.post("/", authMiddleware, async (req: AuthRequest, res: Response): Promis
   const cleanIban = iban.replace(/\s/g, "").toUpperCase();
 
   try {
-    const [user] = await db.select().from(usersTable).where(eq(usersTable.id, req.user!.id)).limit(1);
-    if (!user) { res.status(404).json({ error: "Utilizador não encontrado" }); return; }
-
-    const openRequests = await db
-      .select({ id: withdrawalsTable.id, status: withdrawalsTable.status })
-      .from(withdrawalsTable)
-      .where(and(
-        eq(withdrawalsTable.userId, req.user!.id),
-        inArray(withdrawalsTable.status, [...OPEN_WITHDRAWAL_STATUSES]),
-      ))
-      .limit(1);
-    if (openRequests.length > 0) {
-      res.status(409).json({
-        error: "Já existe um levantamento em curso para esta conta.",
-        code: "WITHDRAWAL_ALREADY_OPEN",
-        currentStatus: openRequests[0]!.status,
+    const eligibility = await getWithdrawalEligibility(req.user!.id);
+    if (!eligibility) {
+      res.status(404).json({ error: "Utilizador não encontrado" });
+      return;
+    }
+    if (!eligibility.eligible) {
+      res.status(eligibility.code === "WITHDRAWAL_ALREADY_OPEN" ? 409 : 403).json({
+        error: eligibility.message,
+        code: eligibility.code,
+        kycStatus: eligibility.kycStatus,
+        currentStatus: eligibility.openWithdrawalStatus,
+        settledBetCount: eligibility.settledBetCount,
       });
       return;
     }
 
-    const kycStatus = String(user.kycStatus ?? "not_submitted");
-    if (kycStatus !== "approved") {
-      const msg =
-        kycStatus === "pending"
-          ? "Os seus documentos estão em análise. Aguarde a aprovação para efetuar levantamentos."
-          : kycStatus === "rejected"
-            ? "A verificação de identidade foi rejeitada. Submeta novamente os documentos para desbloquear levantamentos."
-            : "É necessário verificar a sua identidade antes de levantar fundos.";
-      res.status(403).json({
-        error: msg,
-        code: "KYC_REQUIRED",
-        kycStatus,
-      });
-      return;
-    }
-
-    // Bet requirement: user must have placed at least one settled bet
-    const [{ settledCount }] = await db
-      .select({ settledCount: count() })
-      .from(betsTable)
-      .where(and(eq(betsTable.userId, req.user!.id), ne(betsTable.status, "pending")));
-
-    if (Number(settledCount) === 0) {
-      res.status(403).json({
-        error: "Para efectuar um levantamento, é necessário ter pelo menos uma aposta liquidada.",
-        code: "BET_REQUIRED",
-      });
-      return;
-    }
+    const user = eligibility.user;
 
     if (parseFloat(user.balance) < amount) {
       res.status(400).json({ error: "Saldo insuficiente." });
@@ -310,7 +371,7 @@ router.post("/", authMiddleware, async (req: AuthRequest, res: Response): Promis
       completedDepositCount: Number(completedDepositCount),
       totalCompletedDeposits: parseFloat(totalCompletedDeposits || "0"),
       latestCompletedDepositAt: latestCompletedDeposit?.createdAt ?? null,
-      settledBetCount: Number(settledCount),
+      settledBetCount: eligibility.settledBetCount,
     });
 
     const withdrawal = await db.transaction(async (tx) => {
@@ -379,6 +440,27 @@ router.get("/mine", authMiddleware, async (req: AuthRequest, res: Response): Pro
 
     res.json(withdrawals);
   } catch {
+    res.status(500).json({ error: "Erro interno" });
+  }
+});
+
+router.get("/eligibility", authMiddleware, async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const result = await getWithdrawalEligibility(req.user!.id);
+    if (!result) {
+      res.status(404).json({ error: "Utilizador não encontrado" });
+      return;
+    }
+    res.json({
+      eligible: result.eligible,
+      code: result.code,
+      message: result.message,
+      kycStatus: result.kycStatus,
+      settledBetCount: result.settledBetCount,
+      openWithdrawalStatus: result.openWithdrawalStatus,
+    });
+  } catch (err) {
+    logger.error({ err, userId: req.user?.id }, "Withdrawal eligibility error");
     res.status(500).json({ error: "Erro interno" });
   }
 });
