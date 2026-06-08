@@ -8,7 +8,7 @@ import {
   LogOut, User, History, Loader2, Zap, TrendingUp,
   ChevronRight, ChevronLeft, ChevronDown, ChevronUp, AlertCircle, BarChart2, Wallet, ArrowDownCircle, ArrowUpCircle, Plus, Clock, Smartphone,
   Copy, Share2, CircleDollarSign, Lock, Trash2, Check, Fingerprint, ScanFace, ShieldCheck,
-  RefreshCw, Ticket, CalendarDays, ListOrdered, Search,
+  RefreshCw, Ticket, CalendarDays, ListOrdered, Search, ToggleLeft, ToggleRight, Sparkles,
 } from "lucide-react";
 import ProfileTab from "@/components/ProfileTab";
 import { Button } from "@/components/ui/button";
@@ -3396,9 +3396,17 @@ export default function Home() {
   const effectiveBetMode: "simples" | "multipla" = hasDuplicateMatches ? "simples" : betMode;
   const totalOdds = bets.reduce((acc, bet) => acc * bet.odd, 1).toFixed(2);
   const [stake, setStake] = useState<string>("");
+  const [useFreebet, setUseFreebet] = useState(false);
   const [betStakes, setBetStakes] = useState<Record<string, string>>({});
   const betKey = (b: BetSelection) => `${b.matchId}-${b.market}-${b.selection}`;
   const simplesPotential = bets.reduce((sum, b) => sum + b.odd * parseFloat(betStakes[betKey(b)] || "0"), 0).toFixed(2);
+  const realBalance = parseFloat(auth.user?.balance ?? "0");
+  const freebetBalance = parseFloat(auth.user?.freebetBalance ?? "0");
+  const activeBalance = useFreebet ? freebetBalance : realBalance;
+
+  useEffect(() => {
+    if (!auth.user || freebetBalance <= 0) setUseFreebet(false);
+  }, [auth.user, freebetBalance]);
 
   // ── Lock screen handlers ────────────────────────────────────────────────────
   const handlePasswordUnlock = async (e: React.FormEvent) => {
@@ -3540,6 +3548,7 @@ export default function Home() {
 
   const handlePlaceBet = async () => {
     if (!auth.user) { setAuthMode("login"); setAuthModalOpen(true); return; }
+    if (useFreebet && freebetBalance <= 0) { toast.error("Não tem freebets disponíveis"); return; }
 
     // Guard: block placement if any live selection has an active market suspension
     {
@@ -3562,7 +3571,7 @@ export default function Home() {
       const missing = bets.some(b => !betStakes[betKey(b)] || parseFloat(betStakes[betKey(b)] || "0") <= 0);
       if (missing) { toast.error("Insira o valor para cada aposta no boletim"); return; }
       const totalCost = bets.reduce((s, b) => s + parseFloat(betStakes[betKey(b)] || "0"), 0);
-      if (totalCost > parseFloat(auth.user.balance)) { toast.error("Saldo insuficiente"); return; }
+      if (totalCost > activeBalance) { toast.error(useFreebet ? "Saldo de freebets insuficiente" : "Saldo insuficiente"); return; }
       setIsPlacingBet(true);
       try {
         let allOk = true;
@@ -3589,15 +3598,16 @@ export default function Home() {
               stake: sNum.toFixed(2),
               potentialWin,
               totalOdds: bet.odd.toFixed(2),
+              isFreebet: useFreebet,
             })
           });
           const data = await res.json();
           if (!res.ok) { toast.error(data.error || "Erro ao realizar aposta"); allOk = false; break; }
         }
         if (allOk) {
-          toast.success(`${bets.length} aposta${bets.length > 1 ? "s" : ""} realizada${bets.length > 1 ? "s" : ""}! Total: € ${totalCost.toFixed(2)}`);
+          toast.success(`${bets.length} aposta${bets.length > 1 ? "s" : ""} realizada${bets.length > 1 ? "s" : ""}! Total: € ${totalCost.toFixed(2)}${useFreebet ? " em freebets" : ""}`);
           setBetPlacedAnim(true);
-          setBets([]); setBetStakes({}); setStake(""); setBetSlipOpenMobile(false); auth.refreshUser();
+          setBets([]); setBetStakes({}); setStake(""); setBetSlipOpenMobile(false); setUseFreebet(false); auth.refreshUser();
         }
       } catch { toast.error("Erro ao realizar aposta"); } finally { setIsPlacingBet(false); }
       return;
@@ -3606,7 +3616,7 @@ export default function Home() {
     // Múltipla mode
     if (!stake) { toast.error("Insira um valor para apostar"); return; }
     const stakeNum = parseFloat(stake);
-    if (stakeNum > parseFloat(auth.user.balance)) { toast.error("Saldo insuficiente"); return; }
+    if (stakeNum > activeBalance) { toast.error(useFreebet ? "Saldo de freebets insuficiente" : "Saldo insuficiente"); return; }
     setIsPlacingBet(true);
     try {
       const matchId = bets.map(b => b.matchId).join("-");
@@ -3632,13 +3642,14 @@ export default function Home() {
           stake: stakeNum.toFixed(2),
           potentialWin,
           totalOdds,
+          isFreebet: useFreebet,
         })
       });
       const data = await res.json();
       if (!res.ok) { toast.error(data.error || "Erro ao realizar aposta"); return; }
-      toast.success(`Aposta múltipla realizada! Potencial de ganho: € ${potentialWin}`);
+      toast.success(`Aposta múltipla realizada${useFreebet ? " com freebets" : ""}! Potencial de ganho: € ${potentialWin}`);
       setBetPlacedAnim(true);
-      setBets([]); setBetStakes({}); setStake(""); setBetSlipOpenMobile(false); auth.refreshUser();
+      setBets([]); setBetStakes({}); setStake(""); setBetSlipOpenMobile(false); setUseFreebet(false); auth.refreshUser();
     } catch { toast.error("Erro ao realizar aposta"); } finally { setIsPlacingBet(false); }
   };
 
@@ -4502,6 +4513,9 @@ export default function Home() {
     const canSwitchMode = !hasDuplicateMatches && bets.length > 1;
     const stakeNum = parseFloat(stake || "0");
     const multipotential = (stakeNum * parseFloat(totalOdds)).toFixed(2);
+    const simpleTotalStake = bets.reduce((s, b) => s + parseFloat(betStakes[betKey(b)] || "0"), 0);
+    const isInsufficient = effectiveBetMode === "simples" ? simpleTotalStake > activeBalance : stakeNum > activeBalance;
+    const canUseFreebets = freebetBalance > 0;
 
     // Suspension detection
     const now = Date.now();
@@ -4543,6 +4557,26 @@ export default function Home() {
             </div>
 
             <div className="flex items-center gap-3">
+              {auth.user && (
+                <button
+                  onClick={() => canUseFreebets && setUseFreebet(prev => !prev)}
+                  disabled={!canUseFreebets}
+                  className={`flex items-center gap-2 rounded-xl px-3 py-2 transition-all ${!canUseFreebets ? "opacity-60 cursor-not-allowed" : ""}`}
+                  style={useFreebet
+                    ? { background: "rgba(124,58,237,0.18)", border: "1px solid rgba(167,139,250,0.42)" }
+                    : { background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.06)" }
+                  }
+                  title={canUseFreebets ? "Alternar entre saldo real e freebets" : "Sem freebets disponíveis"}
+                >
+                  {useFreebet ? <ToggleRight size={18} className="text-violet-300" /> : <ToggleLeft size={18} className="text-zinc-500" />}
+                  <div className="text-left hidden sm:block">
+                    <div className="text-[9px] uppercase tracking-wider text-zinc-500">Carteira</div>
+                    <div className={`text-[11px] font-black ${useFreebet ? "text-violet-300" : "text-white"}`}>
+                      {useFreebet ? "FREEBETS" : "SALDO"}
+                    </div>
+                  </div>
+                </button>
+              )}
               {bets.length > 0 && effectiveBetMode === "multipla" && (
                 <div className="text-right">
                   <div className="text-[10px] text-zinc-500 leading-none mb-0.5">ODDS COMBINADAS</div>
@@ -4588,6 +4622,38 @@ export default function Home() {
           )}
           {bets.length > 0 && hasDuplicateMatches && (
             <p className="text-[10px] text-zinc-600 mt-1.5 text-center">Duas seleções do mesmo evento — modo Simples obrigatório</p>
+          )}
+          {auth.user && (
+            <div
+              className="mt-3 rounded-2xl px-3 py-2.5 flex items-center justify-between gap-3"
+              style={useFreebet
+                ? { background: "rgba(124,58,237,0.14)", border: "1px solid rgba(167,139,250,0.28)" }
+                : { background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.05)" }
+              }
+            >
+              <div className="flex items-center gap-2 min-w-0">
+                <div
+                  className="w-8 h-8 rounded-xl flex items-center justify-center shrink-0"
+                  style={useFreebet ? { background: "rgba(124,58,237,0.22)" } : { background: "rgba(255,255,255,0.05)" }}
+                >
+                  {useFreebet ? <Sparkles size={15} className="text-violet-300" /> : <Wallet size={15} className="text-zinc-400" />}
+                </div>
+                <div className="min-w-0">
+                  <div className="text-[10px] uppercase tracking-wider text-zinc-500">Saldo ativo</div>
+                  <div className={`text-sm font-black ${useFreebet ? "text-violet-300" : "text-white"}`}>
+                    {useFreebet ? "Freebets" : "Saldo em euro"}
+                  </div>
+                </div>
+              </div>
+              <div className="text-right shrink-0">
+                <div className={`text-lg font-black ${useFreebet ? "text-violet-300" : "text-green-400"}`}>
+                  € {activeBalance.toFixed(2)}
+                </div>
+                <div className="text-[10px] text-zinc-500">
+                  {useFreebet ? "crédito promocional" : "saldo disponível"}
+                </div>
+              </div>
+            </div>
           )}
         </div>
 
@@ -4666,7 +4732,7 @@ export default function Home() {
                                 onClick={() => setBetStakes(prev => ({ ...prev, [betKey(bet)]: String(amt) }))}
                                 className="flex-1 py-1 rounded-lg text-[11px] font-bold transition-all"
                                 style={parseFloat(betStakes[betKey(bet)] || "0") === amt
-                                  ? { background: "#dc2626", color: "#fff" }
+                                  ? { background: useFreebet ? "#7c3aed" : "#dc2626", color: "#fff" }
                                   : { background: "rgba(255,255,255,0.05)", color: "#a1a1aa", border: "1px solid rgba(255,255,255,0.07)" }
                                 }
                               >
@@ -4674,12 +4740,18 @@ export default function Home() {
                               </button>
                             ))}
                           </div>
-                          <div className="flex items-center rounded-xl overflow-hidden" style={{ background: "rgba(0,0,0,0.4)", border: "1px solid rgba(255,255,255,0.08)" }}>
-                            <span className="pl-3 text-zinc-500 text-sm font-bold">€</span>
+                          <div
+                            className="flex items-center rounded-xl overflow-hidden"
+                            style={useFreebet
+                              ? { background: "rgba(124,58,237,0.08)", border: "1px solid rgba(167,139,250,0.22)" }
+                              : { background: "rgba(0,0,0,0.4)", border: "1px solid rgba(255,255,255,0.08)" }
+                            }
+                          >
+                            <span className={`pl-3 text-sm font-bold ${useFreebet ? "text-violet-300" : "text-zinc-500"}`}>€</span>
                             <input
                               type="text"
                               inputMode="decimal"
-                              placeholder="Outro valor"
+                              placeholder={useFreebet ? "Valor da freebet" : "Outro valor"}
                               value={betStakes[betKey(bet)] || ""}
                               onChange={e => {
                                 const v = e.target.value.replace(/[^0-9.,]/g, "").replace(",", ".");
@@ -4721,7 +4793,9 @@ export default function Home() {
                       onClick={() => setStake(String(amt))}
                       className="flex-1 py-1.5 rounded-xl text-[12px] font-bold transition-all"
                       style={parseFloat(stake || "0") === amt
-                        ? { background: "linear-gradient(135deg,#dc2626,#991b1b)", color: "#fff", boxShadow: "0 2px 8px rgba(220,38,38,0.3)" }
+                        ? useFreebet
+                          ? { background: "linear-gradient(135deg,#7c3aed,#5b21b6)", color: "#fff", boxShadow: "0 2px 8px rgba(124,58,237,0.35)" }
+                          : { background: "linear-gradient(135deg,#dc2626,#991b1b)", color: "#fff", boxShadow: "0 2px 8px rgba(220,38,38,0.3)" }
                         : { background: "rgba(255,255,255,0.05)", color: "#a1a1aa", border: "1px solid rgba(255,255,255,0.07)" }
                       }
                     >
@@ -4729,12 +4803,18 @@ export default function Home() {
                     </button>
                   ))}
                 </div>
-                <div className="flex items-center rounded-xl overflow-hidden" style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }}>
-                  <span className="pl-3 text-zinc-500 font-bold">€</span>
+                <div
+                  className="flex items-center rounded-xl overflow-hidden"
+                  style={useFreebet
+                    ? { background: "rgba(124,58,237,0.08)", border: "1px solid rgba(167,139,250,0.24)" }
+                    : { background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }
+                  }
+                >
+                  <span className={`pl-3 font-bold ${useFreebet ? "text-violet-300" : "text-zinc-500"}`}>€</span>
                   <input
                     type="text"
                     inputMode="decimal"
-                    placeholder="Outro valor"
+                    placeholder={useFreebet ? "Valor da freebet" : "Outro valor"}
                     value={stake}
                     onChange={e => {
                       const v = e.target.value.replace(/[^0-9.,]/g, "").replace(",", ".");
@@ -4756,10 +4836,13 @@ export default function Home() {
                 <div className="text-[10px] text-zinc-500 uppercase tracking-wider mb-0.5">
                   {effectiveBetMode === "simples" ? "Total em jogo" : "Valor apostado"}
                 </div>
-                <div className="text-white font-black text-[15px]">
+                <div className={`font-black text-[15px] ${useFreebet ? "text-violet-300" : "text-white"}`}>
                   € {effectiveBetMode === "simples"
                     ? bets.reduce((s, b) => s + parseFloat(betStakes[betKey(b)] || "0"), 0).toFixed(2)
                     : (stakeNum || 0).toFixed(2)}
+                </div>
+                <div className="text-[10px] text-zinc-500 mt-0.5">
+                  {useFreebet ? "a debitar de freebets" : "a debitar do saldo real"}
                 </div>
               </div>
               <div className="w-px h-8 self-center" style={{ background: "rgba(255,255,255,0.08)" }} />
@@ -4773,6 +4856,14 @@ export default function Home() {
 
             {effectiveBetMode === "simples" && bets.length > 1 && (
               <p className="text-[10px] text-zinc-600 text-center">{bets.length} apostas independentes</p>
+            )}
+            {isInsufficient && (
+              <div className="flex items-center gap-2 px-3 py-2.5 rounded-xl" style={{ background: "rgba(220,38,38,0.08)", border: "1px solid rgba(220,38,38,0.25)" }}>
+                <AlertCircle size={13} className="text-red-400 flex-shrink-0" />
+                <p className="text-red-400 text-xs font-medium leading-tight">
+                  {useFreebet ? "Saldo de freebets insuficiente para este boletim." : "Saldo insuficiente para este boletim."}
+                </p>
+              </div>
             )}
 
             {/* Suspension warning */}
@@ -4788,19 +4879,23 @@ export default function Home() {
             {/* CTA */}
             <button
               onClick={handlePlaceBet}
-              disabled={isPlacingBet || anySuspended}
+              disabled={isPlacingBet || anySuspended || isInsufficient}
               className="w-full h-13 rounded-2xl font-black text-[14px] text-white flex items-center justify-center gap-2 transition-all active:scale-[0.98]"
-              style={anySuspended
+              style={(anySuspended || isInsufficient)
                 ? { background: "#27272a", cursor: "not-allowed" }
-                : { background: "linear-gradient(135deg,#dc2626 0%,#991b1b 100%)", boxShadow: "0 4px 20px rgba(220,38,38,0.4)" }
+                : useFreebet
+                  ? { background: "linear-gradient(135deg,#7c3aed 0%,#5b21b6 100%)", boxShadow: "0 4px 20px rgba(124,58,237,0.4)" }
+                  : { background: "linear-gradient(135deg,#dc2626 0%,#991b1b 100%)", boxShadow: "0 4px 20px rgba(220,38,38,0.4)" }
               }
             >
               {anySuspended ? (
                 <><Lock size={15} className="animate-pulse" /> APOSTAS BLOQUEADAS</>
+              ) : isInsufficient ? (
+                <><AlertCircle size={15} /> SALDO INSUFICIENTE</>
               ) : isPlacingBet ? (
                 <><Loader2 className="animate-spin" size={16} /> A PROCESSAR...</>
               ) : (
-                auth.user ? "APOSTAR AGORA" : "ENTRAR PARA APOSTAR"
+                auth.user ? (useFreebet ? "APOSTAR COM FREEBETS" : "APOSTAR AGORA") : "ENTRAR PARA APOSTAR"
               )}
             </button>
           </div>
@@ -6926,6 +7021,22 @@ export default function Home() {
           <div className="flex items-center gap-2">
             {auth.user ? (
               <>
+                <button
+                  onClick={() => freebetBalance > 0 && setUseFreebet(prev => !prev)}
+                  disabled={freebetBalance <= 0}
+                  className={`hidden sm:flex items-center gap-2 rounded-lg px-2.5 py-1.5 transition-all ${freebetBalance <= 0 ? "opacity-60 cursor-not-allowed" : ""}`}
+                  style={useFreebet
+                    ? { background: "rgba(124,58,237,0.18)", border: "1px solid rgba(167,139,250,0.42)" }
+                    : { background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }
+                  }
+                  title={freebetBalance > 0 ? "Alternar entre saldo e freebets" : "Sem freebets disponíveis"}
+                >
+                  {useFreebet ? <ToggleRight size={16} className="text-violet-300" /> : <ToggleLeft size={16} className="text-zinc-500" />}
+                  <span className={`text-[11px] font-black tracking-wide ${useFreebet ? "text-violet-300" : "text-zinc-300"}`}>
+                    {useFreebet ? "FREEBETS" : "SALDO"}
+                  </span>
+                </button>
+
                 {/* Free Bet balance pill — always visible */}
                 <div
                   className="hidden sm:flex items-center gap-1.5 bg-violet-900/60 border border-violet-500/40 rounded-lg px-2.5 py-1.5"
@@ -11221,10 +11332,13 @@ export default function Home() {
               {/* Stake summary pill */}
               <div
                 className="flex items-center gap-1.5 rounded-full px-4 py-1.5"
-                style={{ background: "rgba(255,255,255,0.07)", border: "1px solid rgba(255,255,255,0.1)" }}
+                style={useFreebet
+                  ? { background: "rgba(124,58,237,0.16)", border: "1px solid rgba(167,139,250,0.28)" }
+                  : { background: "rgba(255,255,255,0.07)", border: "1px solid rgba(255,255,255,0.1)" }
+                }
               >
-                <Plus size={12} className="text-zinc-400" />
-                <span className="text-white font-bold text-[13px] tabular-nums">
+                {useFreebet ? <Sparkles size={12} className="text-violet-300" /> : <Plus size={12} className="text-zinc-400" />}
+                <span className={`font-bold text-[13px] tabular-nums ${useFreebet ? "text-violet-200" : "text-white"}`}>
                   {effectiveBetMode === "simples"
                     ? `${bets.reduce((s, b) => s + parseFloat(betStakes[betKey(b)] || "0"), 0).toFixed(2)} €`
                     : `${parseFloat(stake || "0").toFixed(2)} €`}
@@ -11257,6 +11371,33 @@ export default function Home() {
                 Múltipla ({bets.length})
               </button>
             </div>
+
+            {auth.user && (
+              <div className="px-4 py-2.5 border-b border-zinc-800/80 shrink-0" style={{ background: "#0a0a0a" }}>
+                <button
+                  {...makeTap(() => freebetBalance > 0 && setUseFreebet(prev => !prev))}
+                  disabled={freebetBalance <= 0}
+                  className={`w-full rounded-2xl px-4 py-3 flex items-center justify-between transition-all ${freebetBalance <= 0 ? "opacity-60 cursor-not-allowed" : ""}`}
+                  style={useFreebet
+                    ? { background: "rgba(124,58,237,0.18)", border: "1px solid rgba(167,139,250,0.34)" }
+                    : { background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }
+                  }
+                >
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div className="w-10 h-10 rounded-xl flex items-center justify-center" style={{ background: useFreebet ? "rgba(124,58,237,0.22)" : "rgba(255,255,255,0.06)" }}>
+                      {useFreebet ? <Sparkles size={18} className="text-violet-300" /> : <Wallet size={18} className="text-zinc-400" />}
+                    </div>
+                    <div className="text-left min-w-0">
+                      <div className="text-white font-bold text-sm">{useFreebet ? "Freebets ativadas" : "Usar Freebets"}</div>
+                      <div className="text-xs text-zinc-500 truncate">
+                        {freebetBalance > 0 ? `Disponível: € ${freebetBalance.toFixed(2)}` : "Sem freebets disponíveis"}
+                      </div>
+                    </div>
+                  </div>
+                  {useFreebet ? <ToggleRight size={24} className="text-violet-300 shrink-0" /> : <ToggleLeft size={24} className="text-zinc-500 shrink-0" />}
+                </button>
+              </div>
+            )}
 
             {/* Scrollable bet cards */}
             <div className="flex-1 overflow-y-auto px-3 py-3 space-y-2">
@@ -11328,19 +11469,25 @@ export default function Home() {
                                   {...makeTap(() => setBetStakes(prev => ({ ...prev, [betKey(bet)]: String(amt) })))}
                                   className="flex-1 py-1 rounded-lg text-[11px] font-bold transition-all"
                                   style={parseFloat(betStakes[betKey(bet)] || "0") === amt
-                                    ? { background: "#dc2626", color: "#fff" }
+                                    ? { background: useFreebet ? "#7c3aed" : "#dc2626", color: "#fff" }
                                     : { background: "rgba(255,255,255,0.05)", color: "#a1a1aa", border: "1px solid rgba(255,255,255,0.07)" }}
                                 >
                                   €{amt}
                                 </button>
                               ))}
                             </div>
-                            <div className="flex items-center rounded-xl overflow-hidden" style={{ background: "rgba(0,0,0,0.4)", border: "1px solid rgba(255,255,255,0.08)" }}>
-                              <span className="pl-3 text-zinc-500 text-sm font-bold">€</span>
+                            <div
+                              className="flex items-center rounded-xl overflow-hidden"
+                              style={useFreebet
+                                ? { background: "rgba(124,58,237,0.08)", border: "1px solid rgba(167,139,250,0.22)" }
+                                : { background: "rgba(0,0,0,0.4)", border: "1px solid rgba(255,255,255,0.08)" }
+                              }
+                            >
+                              <span className={`pl-3 text-sm font-bold ${useFreebet ? "text-violet-300" : "text-zinc-500"}`}>€</span>
                               <input
                                 type="text"
                                 inputMode="decimal"
-                                placeholder="Outro valor"
+                                placeholder={useFreebet ? "Valor da freebet" : "Outro valor"}
                                 value={betStakes[betKey(bet)] || ""}
                                 onChange={e => {
                                   const v = e.target.value.replace(/[^0-9.,]/g, "").replace(",", ".");
@@ -11377,9 +11524,12 @@ export default function Home() {
                 <div className="flex items-center gap-3 mb-3">
                   <div
                     className="flex-1 flex items-center rounded-xl overflow-hidden"
-                    style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.1)" }}
+                    style={useFreebet
+                      ? { background: "rgba(124,58,237,0.08)", border: "1px solid rgba(167,139,250,0.24)" }
+                      : { background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.1)" }
+                    }
                   >
-                    <span className="pl-3 text-zinc-600 text-sm shrink-0">Montante</span>
+                    <span className={`pl-3 text-sm shrink-0 ${useFreebet ? "text-violet-300" : "text-zinc-600"}`}>Montante</span>
                     <input
                       type="text"
                       inputMode="decimal"
@@ -11413,19 +11563,32 @@ export default function Home() {
                 </span>
               </div>
 
+              <div className="flex items-center justify-between mb-3 text-xs">
+                <span className="text-zinc-500">{useFreebet ? "Carteira ativa" : "Saldo ativo"}</span>
+                <span className={useFreebet ? "font-bold text-violet-300" : "font-bold text-white"}>
+                  {useFreebet ? `Freebets € ${freebetBalance.toFixed(2)}` : `Saldo € ${realBalance.toFixed(2)}`}
+                </span>
+              </div>
+
               {/* APOSTAR button */}
               <button
                 {...makeTap(handlePlaceBet)}
-                disabled={isPlacingBet}
+                disabled={isPlacingBet || (effectiveBetMode === "simples"
+                  ? bets.reduce((s, b) => s + parseFloat(betStakes[betKey(b)] || "0"), 0) > activeBalance
+                  : parseFloat(stake || "0") > activeBalance)}
                 className="w-full h-13 rounded-2xl font-black text-[15px] text-white flex items-center justify-center gap-2 transition-all active:scale-[0.98]"
                 style={{
-                  background: "linear-gradient(135deg,#dc2626 0%,#991b1b 100%)",
-                  boxShadow: "0 4px 20px rgba(220,38,38,0.4)",
+                  background: useFreebet
+                    ? "linear-gradient(135deg,#7c3aed 0%,#5b21b6 100%)"
+                    : "linear-gradient(135deg,#dc2626 0%,#991b1b 100%)",
+                  boxShadow: useFreebet
+                    ? "0 4px 20px rgba(124,58,237,0.4)"
+                    : "0 4px 20px rgba(220,38,38,0.4)",
                 }}
               >
                 {isPlacingBet
                   ? <><Loader2 className="animate-spin" size={16} /> A PROCESSAR...</>
-                  : auth.user ? "APOSTAR" : "ENTRAR PARA APOSTAR"}
+                  : auth.user ? (useFreebet ? "APOSTAR COM FREEBETS" : "APOSTAR") : "ENTRAR PARA APOSTAR"}
               </button>
             </div>
           </motion.div>
