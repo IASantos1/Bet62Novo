@@ -8543,6 +8543,7 @@ router.get("/live-stream", (req, res) => {
 async function buildTennisLiveV1(): Promise<LiveMatchState[]> {
   try {
     const games = await getTennisLiveV1();
+    refreshTennisServing(games.map(g => g.id).filter(Boolean) as number[]);
     const primary: Array<{ r: number; m: LiveMatchState }> = [];
     const itf: Array<{ r: number; m: LiveMatchState }> = [];
     for (const g of games) {
@@ -8572,6 +8573,7 @@ async function buildTennisLiveV1(): Promise<LiveMatchState[]> {
           : { home: Math.min(50, +(odds.home * (1 + factor)).toFixed(2)), draw: 0, away: Math.max(1.01, +(odds.away * (1 - factor)).toFixed(2)) };
       }
       const setNum = homeScore + awayScore + 1;
+      const serving = (typeof g.id === "number" ? _tennisServingCache.get(g.id)?.serving : undefined);
       const item: LiveMatchState = {
         id: `tennis-v2-${g.id}`,
         home, away,
@@ -8585,7 +8587,7 @@ async function buildTennisLiveV1(): Promise<LiveMatchState[]> {
         odds: liveOdds,
         markets: makeAdvancedMarketsFromTeams(home, away),
         events: [],
-        _liveExtra: { sets: [[homeScore, awayScore]], currentPoints: ["0", "0"] },
+        _liveExtra: { sets: [[homeScore, awayScore]], currentPoints: ["0", "0"], ...(serving ? { serving } : {}) },
       };
       if (tier === 7) itf.push({ r: tier, m: item });
       else primary.push({ r: tier, m: item });
