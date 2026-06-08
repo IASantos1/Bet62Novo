@@ -1,5 +1,5 @@
 import { Router, type IRouter, type Response } from "express";
-import { db, usersTable, withdrawalsTable, betsTable, paymentsTable } from "@workspace/db";
+import { db, usersTable, withdrawalsTable, betsTable, paymentsTable, adminAuditLogTable } from "@workspace/db";
 import { eq, desc, and, ne, inArray, sql, count, sum } from "drizzle-orm";
 import { authMiddleware, type AuthRequest } from "../middlewares/auth";
 import { adminMiddleware, type AdminRequest } from "../middlewares/adminAuth";
@@ -140,6 +140,27 @@ function buildWithdrawalRiskFlags(args: {
   }
 
   return flags;
+}
+
+async function auditWithdrawalEvent(args: {
+  actor: string;
+  action: string;
+  targetId: string;
+  ip?: string | null;
+  details?: object;
+}): Promise<void> {
+  try {
+    await db.insert(adminAuditLogTable).values({
+      action: args.action,
+      adminUser: args.actor,
+      targetType: "withdrawal",
+      targetId: args.targetId,
+      details: args.details ?? null,
+      ip: args.ip ?? null,
+    });
+  } catch (err) {
+    logger.error({ err, action: args.action, withdrawalId: args.targetId }, "Withdrawal audit log error");
+  }
 }
 
 async function adjustWithdrawalHoldBalance(
@@ -328,6 +349,19 @@ router.post("/", authMiddleware, async (req: AuthRequest, res: Response): Promis
       return w;
     });
 
+    await auditWithdrawalEvent({
+      actor: `user:${req.user!.id}`,
+      action: "withdrawal_created",
+      targetId: String(withdrawal.id),
+      ip: req.ip ?? null,
+      details: {
+        userId: req.user!.id,
+        amount: withdrawal.amount,
+        status: withdrawal.status,
+        riskFlags,
+      },
+    });
+
     res.json({ withdrawal });
   } catch (err) {
     logger.error({ err }, "Withdrawal error");
@@ -404,6 +438,19 @@ router.post("/:id/cancel", authMiddleware, async (req: AuthRequest, res: Respons
         })
         .where(eq(withdrawalsTable.id, id))
         .returning();
+    });
+
+    await auditWithdrawalEvent({
+      actor: `user:${req.user!.id}`,
+      action: "withdrawal_cancelled_by_user",
+      targetId: String(id),
+      ip: req.ip ?? null,
+      details: {
+        userId: req.user!.id,
+        amount: existing.amount,
+        previousStatus: existing.status,
+        newStatus: "cancelled",
+      },
     });
 
     res.json(updated);
@@ -534,6 +581,21 @@ router.put("/admin/:id", adminMiddleware, async (req: AdminRequest, res: Respons
         });
       }
     }
+
+    await auditWithdrawalEvent({
+      actor: `admin:${req.admin?.username ?? "admin"}`,
+      action: "withdrawal_status_updated",
+      targetId: String(id),
+      ip: req.ip ?? null,
+      details: {
+        userId: existing.userId,
+        previousStatus: existing.status,
+        newStatus: status,
+        amount: existing.amount,
+        decisionReason: decisionReason ?? existing.decisionReason ?? null,
+        providerReference: providerReference ?? existing.providerReference ?? null,
+      },
+    });
 
     res.json(updated);
   } catch (err) {
