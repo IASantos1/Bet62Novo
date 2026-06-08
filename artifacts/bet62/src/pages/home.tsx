@@ -835,6 +835,57 @@ function formatMatchDate(dateStr: string): string {
   return d.toLocaleDateString("pt-BR", { weekday: "short", day: "2-digit", month: "2-digit" });
 }
 
+const WC2026_MAIN_START_KEY = "11.06.2026";
+
+function formatDateKey(date: Date): string {
+  return `${String(date.getDate()).padStart(2, "0")}.${String(date.getMonth() + 1).padStart(2, "0")}.${date.getFullYear()}`;
+}
+
+function parseMatchKickoffTimestamp(match: {
+  date?: string | null;
+  time?: string | null;
+  scheduledDate?: string | null;
+  scheduledTime?: string | null;
+}): number {
+  const dateStr = match.date ?? match.scheduledDate;
+  if (!dateStr) return Number.POSITIVE_INFINITY;
+  const parts = dateStr.split(".");
+  if (parts.length !== 3) return Number.POSITIVE_INFINITY;
+  const [dayStr, monthStr, yearStr] = parts;
+  const timeStr = match.time ?? match.scheduledTime ?? "00:00";
+  const [hourStr = "0", minuteStr = "0"] = timeStr.split(":");
+  return new Date(
+    Number(yearStr),
+    Number(monthStr) - 1,
+    Number(dayStr),
+    Number(hourStr),
+    Number(minuteStr),
+    0,
+    0,
+  ).getTime();
+}
+
+function isMatchOnOrAfterWC2026Start(match: {
+  date?: string | null;
+  scheduledDate?: string | null;
+}): boolean {
+  return parseMatchKickoffTimestamp({ date: match.date, scheduledDate: match.scheduledDate }) >=
+    parseMatchKickoffTimestamp({ date: WC2026_MAIN_START_KEY });
+}
+
+function formatMatchKickoffLabel(match: {
+  date?: string | null;
+  time?: string | null;
+  scheduledDate?: string | null;
+  scheduledTime?: string | null;
+}): string {
+  const dateStr = match.date ?? match.scheduledDate;
+  const timeStr = match.time ?? match.scheduledTime;
+  if (dateStr && timeStr) return `${formatMatchDate(dateStr)} · ${timeStr}`;
+  if (dateStr) return formatMatchDate(dateStr);
+  return timeStr ?? "Por definir";
+}
+
 const RIVALRY_TAGS: Record<string, string> = {
   "Barcelona|Real Madrid": "⚡ El Clásico",
   "Real Madrid|Barcelona": "⚡ El Clásico",
@@ -1713,6 +1764,7 @@ export default function Home() {
   const [liveMatches, setLiveMatches] = useState<Match[]>([]);
   const [liveLoading, setLiveLoading] = useState(false);
   const [liveSportFilter, setLiveSportFilter] = useState<string>("all");
+  const [liveLeagueFilter, setLiveLeagueFilter] = useState<string>("all");
   const [liveSearchQuery, setLiveSearchQuery] = useState<string>("");
   const prevLiveOdds = useRef<Record<string, Odds>>({});
   // Flat map of "market:sel" → previous odd value, for arrows in MarketOddsBtn
@@ -9509,6 +9561,48 @@ export default function Home() {
               })();
 
               const filteredUpcoming = selectedSport === "all" ? allUpcoming : allUpcoming.filter(m => (m.sport ?? "football") === selectedSport);
+              const homeFeaturedMatches = (() => {
+                const footballUpcoming = allUpcoming
+                  .filter((m) => (m.sport ?? "football") === "football" && !m.isWomens)
+                  .slice()
+                  .sort((a, b) => parseMatchKickoffTimestamp(a) - parseMatchKickoffTimestamp(b));
+                const tomorrow = new Date();
+                tomorrow.setDate(tomorrow.getDate() + 1);
+                const tomorrowKey = formatDateKey(tomorrow);
+                const nowTs = Date.now();
+                const weekLimitTs = nowTs + 7 * 24 * 60 * 60 * 1000;
+                const wcStarted = Date.now() >= parseMatchKickoffTimestamp({ date: WC2026_MAIN_START_KEY });
+                const nextWeekPool = footballUpcoming.filter((m) => {
+                  const kickoffTs = parseMatchKickoffTimestamp(m);
+                  return Number.isFinite(kickoffTs) && kickoffTs >= nowTs && kickoffTs <= weekLimitTs;
+                });
+                const tomorrowPool = nextWeekPool.filter((m) => (m.date ?? m.scheduledDate) === tomorrowKey);
+                const worldCupPool = nextWeekPool.filter((m) =>
+                  isWC2026LeagueName(m.league) && isMatchOnOrAfterWC2026Start(m),
+                );
+                const picked: Match[] = [];
+                const seen = new Set<string>();
+                const pushUnique = (pool: Match[], limit?: number) => {
+                  for (const match of pool) {
+                    if (picked.length >= 3) break;
+                    const id = String(match.id);
+                    if (seen.has(id)) continue;
+                    picked.push(match);
+                    seen.add(id);
+                    if (limit && picked.length >= limit) break;
+                  }
+                };
+                if (wcStarted) pushUnique(worldCupPool, 2);
+                pushUnique(tomorrowPool);
+                pushUnique(nextWeekPool);
+                return picked.slice(0, 3);
+              })();
+              const homeFeaturedTitle = Date.now() >= parseMatchKickoffTimestamp({ date: WC2026_MAIN_START_KEY })
+                ? "Copa 2026 e Semana"
+                : "Futebol da Semana";
+              const homeFeaturedSubtitle = Date.now() >= parseMatchKickoffTimestamp({ date: WC2026_MAIN_START_KEY })
+                ? "A Copa ganhou prioridade, mas continuamos a misturar com o melhor futebol da semana."
+                : "A Copa 2026 arranca a 11/06. Até lá, destacamos os próximos jogos de futebol.";
 
               // Sport grouping for display
               const SPORT_GROUPS = [
@@ -9528,6 +9622,61 @@ export default function Home() {
 
               return (
                 <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
+                  {!selectedLeague && !selectedCountry && (selectedSport === "all" || selectedSport === "football") && homeFeaturedMatches.length > 0 && (
+                    <div className="mb-5 rounded-2xl border border-zinc-800 bg-gradient-to-br from-zinc-950 via-zinc-900 to-zinc-950 p-4">
+                      <div className="flex items-start justify-between gap-3 mb-3">
+                        <div>
+                          <div className="text-[11px] font-black uppercase tracking-[0.22em] text-amber-400">Entre o topo e o carrossel</div>
+                          <h3 className="text-lg font-black text-white mt-1">{homeFeaturedTitle}</h3>
+                          <p className="text-xs text-zinc-400 mt-1 max-w-[42rem]">{homeFeaturedSubtitle}</p>
+                        </div>
+                        <div className="shrink-0 rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-1.5 text-[11px] font-bold text-amber-300">
+                          Próximos 3 jogos
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                        {homeFeaturedMatches.map((match) => {
+                          const isWorldCup = isWC2026LeagueName(match.league);
+                          const isSelected = !!bets.find((b) => b.matchId === match.id && b.market === "result" && b.selection === "home");
+                          return (
+                            <button
+                              key={match.id}
+                              type="button"
+                              {...makeTap(() => setExpandedMatch(match))}
+                              className="text-left rounded-2xl border border-zinc-800 bg-zinc-900/70 hover:border-zinc-600 hover:bg-zinc-900 transition-all p-3"
+                            >
+                              <div className="flex items-center justify-between gap-2 mb-3">
+                                <span className={`inline-flex items-center gap-1 rounded-full px-2 py-1 text-[10px] font-bold uppercase tracking-wide ${isWorldCup ? "bg-blue-500/15 text-blue-300 border border-blue-400/30" : "bg-red-500/10 text-red-300 border border-red-500/20"}`}>
+                                  <span>{isWorldCup ? "🌍" : "⚽"}</span>
+                                  <span>{isWorldCup ? WC2026_FILTER_LABEL : "Semana"}</span>
+                                </span>
+                                <span className="text-[10px] text-zinc-500">{formatMatchKickoffLabel(match)}</span>
+                              </div>
+                              <div className="space-y-1">
+                                <div className="text-sm font-black text-white truncate">{match.home}</div>
+                                <div className="text-sm font-black text-zinc-300 truncate">{match.away}</div>
+                                <div className="text-[11px] text-zinc-500 truncate">{match.league}</div>
+                              </div>
+                              <div className="mt-3 flex items-center justify-between gap-3">
+                                <div className="text-[11px] text-zinc-400">
+                                  {match.odds.home > 0 ? `Casa ${match.odds.home.toFixed(2)}` : "Ver mercados"}
+                                </div>
+                                <div
+                                  className={`rounded-lg px-2.5 py-1.5 text-[11px] font-bold ${isSelected ? "bg-red-600/15 text-red-300 border border-red-500/30" : "bg-zinc-800 text-zinc-200 border border-zinc-700"}`}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    if (match.odds.home > 0) toggleBet(match, "home", match.odds.home, "result", match.home);
+                                  }}
+                                >
+                                  {isSelected ? "Selecionado" : "Adicionar"}
+                                </div>
+                              </div>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
                   {!selectedLeague && <PopularBanners />}
 
                   {/* ─── League filter chips (grandes ligas com logos oficiais) ── */}
@@ -10800,7 +10949,12 @@ export default function Home() {
                         return (
                           <button
                             key={s.key}
-                            {...makeTap(() => setLiveSportFilter(s.key))}
+                            {...makeTap(() => {
+                              setLiveSportFilter(s.key);
+                              if (s.key !== "all" && s.key !== "football" && liveLeagueFilter === WC2026_FILTER_LABEL) {
+                                setLiveLeagueFilter("all");
+                              }
+                            })}
                             className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap transition-all border ${
                               active
                                 ? "bg-red-600 border-red-500 text-white shadow-[0_0_8px_rgba(239,68,68,0.4)]"
@@ -10816,12 +10970,53 @@ export default function Home() {
                   );
                 })()}
 
+                {liveMatches.length > 0 && (
+                  <div className="flex gap-2 overflow-x-auto pb-1 mb-4 scrollbar-none">
+                    <button
+                      {...makeTap(() => setLiveLeagueFilter("all"))}
+                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap transition-all border ${
+                        liveLeagueFilter === "all"
+                          ? "bg-amber-500/15 border-amber-500/40 text-white shadow-[0_0_8px_rgba(245,158,11,0.25)]"
+                          : "bg-zinc-900 border-zinc-700 text-zinc-400 hover:border-zinc-500 hover:text-white"
+                      }`}
+                    >
+                      <span>🎯</span>
+                      <span>Todos</span>
+                    </button>
+                    <button
+                      {...makeTap(() => {
+                        setLiveSportFilter("football");
+                        setLiveLeagueFilter(liveLeagueFilter === WC2026_FILTER_LABEL ? "all" : WC2026_FILTER_LABEL);
+                      })}
+                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap transition-all border ${
+                        liveLeagueFilter === WC2026_FILTER_LABEL
+                          ? "bg-amber-500/15 border-amber-500/40 text-white shadow-[0_0_8px_rgba(245,158,11,0.25)]"
+                          : "bg-zinc-900 border-zinc-700 text-zinc-400 hover:border-zinc-500 hover:text-white"
+                      }`}
+                    >
+                      <img
+                        src="https://media.api-sports.io/football/leagues/1.png"
+                        alt={WC2026_FILTER_LABEL}
+                        width={14}
+                        height={14}
+                        className="rounded object-contain shrink-0"
+                      />
+                      <span>{WC2026_FILTER_LABEL}</span>
+                    </button>
+                  </div>
+                )}
+
                 {(() => {
                   const filterBySport = (m: Match) => {
                     const bySport = liveSportFilter === "all" || (m.sport ?? "football") === liveSportFilter;
                     const q = liveSearchQuery.trim().toLowerCase();
                     const bySearch = !q || m.home.toLowerCase().includes(q) || m.away.toLowerCase().includes(q) || (m.league ?? "").toLowerCase().includes(q);
-                    return bySport && bySearch;
+                    const byLeague = liveLeagueFilter === "all" || (
+                      (m.sport ?? "football") === "football" &&
+                      liveLeagueFilter === WC2026_FILTER_LABEL &&
+                      isWC2026LeagueName(m.league)
+                    );
+                    return bySport && bySearch && byLeague;
                   };
                   const actualLive = liveMatches.filter(m => m.startsIn === undefined && filterBySport(m));
                   const emBreve = liveMatches.filter(m => m.startsIn !== undefined && filterBySport(m));
@@ -10862,9 +11057,19 @@ export default function Home() {
                   if (actualLive.length === 0 && emBreve.length === 0) {
                     return (
                       <div className="py-12 text-center text-zinc-500 bg-zinc-900/50 rounded-xl border border-zinc-800">
-                        <p className="font-medium">Nenhum jogo deste desporto ao vivo.</p>
-                        <button {...makeTap(() => setLiveSportFilter("all"))} className="mt-3 text-sm text-red-500 hover:text-red-400 underline">
-                          Ver todos os desportos
+                        <p className="font-medium">
+                          {liveLeagueFilter === WC2026_FILTER_LABEL
+                            ? "Nenhum jogo da Copa do Mundo 2026 ao vivo neste momento."
+                            : "Nenhum jogo deste desporto ao vivo."}
+                        </p>
+                        <button
+                          {...makeTap(() => {
+                            setLiveSportFilter("all");
+                            setLiveLeagueFilter("all");
+                          })}
+                          className="mt-3 text-sm text-red-500 hover:text-red-400 underline"
+                        >
+                          Ver todos os jogos
                         </button>
                       </div>
                     );
