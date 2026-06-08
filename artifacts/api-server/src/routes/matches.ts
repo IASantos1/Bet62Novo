@@ -7080,8 +7080,8 @@ async function buildFootballLiveV2(events: SAPIV2Event[]): Promise<LiveMatchStat
   };
 
   const metaById = new Map<number, { countryRaw: string; countryKey: string; leagueName: string; prio: number }>();
-  const primary: Array<{ ev: SAPIV2Event; prio: number }> = [];
-  const fallback: Array<{ ev: SAPIV2Event; prio: number }> = [];
+  const primary: Array<{ ev: SAPIV2Event; prio: number; fromUpcoming: boolean }> = [];
+  const fallback: Array<{ ev: SAPIV2Event; prio: number; fromUpcoming: boolean }> = [];
 
   for (const ev of events) {
     const statusStr = v2StatusStr(ev.status);
@@ -7102,19 +7102,27 @@ async function buildFootballLiveV2(events: SAPIV2Event[]): Promise<LiveMatchStat
     const key = `${countryKey}: ${leagueName}`.toLowerCase();
     const prio = leaguePriority(key, countryKey);
     const isPriorityLeague = isCatalogPriorityLeague(prio);
+    const fromUpcoming = hasRecentUpcomingFootballEligibility(ev.id);
     metaById.set(ev.id, { countryRaw, countryKey, leagueName, prio });
-    if (!liveMatchState.has(`football-v2-${ev.id}`) && evAgeSeconds > 5 * 60 && !isPriorityLeague) continue;
+    if (!liveMatchState.has(`football-v2-${ev.id}`) && evAgeSeconds > 5 * 60 && !isPriorityLeague && !fromUpcoming) continue;
 
-    if (footballLeagueAllowedStrict(countryRaw, leagueName)) primary.push({ ev, prio });
-    else if (!isLeagueUniversallyBlocked(`${leagueName} ${homeTeam} ${awayTeam}`)) fallback.push({ ev, prio: prio === 999 ? 500 : prio });
+    if (footballLeagueAllowedStrict(countryRaw, leagueName)) primary.push({ ev, prio, fromUpcoming });
+    else if (!isLeagueUniversallyBlocked(`${leagueName} ${homeTeam} ${awayTeam}`)) fallback.push({ ev, prio: prio === 999 ? 500 : prio, fromUpcoming });
   }
 
   primary.sort((a, b) => a.prio - b.prio);
   fallback.sort((a, b) => a.prio - b.prio);
 
-  const chosen =
-    (primary.length > 0 ? primary.slice(0, 40) : fallback.slice(0, 3))
-      .map((x) => x.ev);
+  const source = primary.length > 0 ? primary : fallback;
+  const baseCap = primary.length > 0 ? 40 : 3;
+  const chosen: SAPIV2Event[] = [];
+  const chosenIds = new Set<number>();
+  for (const entry of source) {
+    if (chosenIds.has(entry.ev.id)) continue;
+    if (!entry.fromUpcoming && chosen.length >= baseCap) continue;
+    chosen.push(entry.ev);
+    chosenIds.add(entry.ev.id);
+  }
 
   const prefetchRedCards = new Map<number, V2RedCards>();
 
@@ -8339,6 +8347,7 @@ async function rebuildUpcomingCache(): Promise<void> {
       buildHockeyUpcoming().catch(() => empty),
       buildVolleyballUpcoming().catch(() => empty),
     ]);
+    rememberUpcomingFootballEligibility(upFootball);
     _allUpcomingCache = [...upFootball, ...upTennis, ...upBasketball, ...upHockey, ...upVolleyball];
     _allUpcomingCacheBuiltAt = Date.now();
   } catch { /* keep stale */ } finally {
@@ -8348,6 +8357,15 @@ async function rebuildUpcomingCache(): Promise<void> {
 
 // Shared payload builder — used by both /live HTTP route and SSE broadcast
 async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
+  // Warm the upcoming cache first so football matches recently seen in pre-match
+  // are eligible to cross into the live feed even if the provider reports them late.
+  if (_allUpcomingCacheBuiltAt === 0) {
+    await rebuildUpcomingCache();
+  } else if (Date.now() - _allUpcomingCacheBuiltAt > UPCOMING_CACHE_TTL_MS) {
+    rebuildUpcomingCache().catch(() => {}); // rebuild in background; use stale now
+  }
+  const allUpcoming = _allUpcomingCache;
+
   // ── Fast path: live data from in-memory WS caches (sub-ms each) ──────────
   const [
     footballEvents, basketballEvents, hockeyEvents, baseballEvents, tennisEvents,
@@ -8385,16 +8403,6 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
   const liveIds = new Set(livePart.map(m => String(m.id)));
   // Deduplicate by team pair — prevents upcoming duplicating a match already in the live feed
   const liveTeamPairs = new Set(livePart.map(m => `${m.home}|${m.away}`));
-
-  // ── Slow path: upcoming matches from 30s cache ────────────────────────────
-  // First call awaits; subsequent calls use the stale cache while a background
-  // rebuild runs so the broadcast path is never blocked by network I/O.
-  if (_allUpcomingCacheBuiltAt === 0) {
-    await rebuildUpcomingCache();
-  } else if (Date.now() - _allUpcomingCacheBuiltAt > UPCOMING_CACHE_TTL_MS) {
-    rebuildUpcomingCache().catch(() => {}); // rebuild in background; use stale now
-  }
-  const allUpcoming = _allUpcomingCache;
 
   // Max minutes ahead a match can be to appear as "Em Breve", per sport
   const SOON_WINDOW: Record<string, number> = {
@@ -9121,6 +9129,48 @@ type UpcomingTopCache = {
 let upcomingTopCache: UpcomingTopCache | null = null;
 let upcomingTopInFlight: Promise<UpcomingTopCache> | null = null;
 const UPCOMING_TOP_TTL = 60_000;
+const UPCOMING_TO_LIVE_ELIGIBILITY_MS = 6 * 60 * 60 * 1000;
+const recentUpcomingFootballIds = new Map<string, number>();
+
+function parseUpcomingKickoffMs(match: Pick<UpcomingMatch, "date" | "time">): number | null {
+  if (!match.date || !match.time) return null;
+  try {
+    const [dd, mm, yyyy] = match.date.split(".");
+    if (!dd || !mm || !yyyy) return null;
+    const offsetH = lisbonOffsetHours();
+    const [hStr = "0", mStr = "0"] = match.time.split(":");
+    const hUtc = ((parseInt(hStr, 10) - offsetH) + 24) % 24;
+    return new Date(`${yyyy}-${mm}-${dd}T${String(hUtc).padStart(2, "0")}:${mStr}:00Z`).getTime();
+  } catch {
+    return null;
+  }
+}
+
+function rememberUpcomingFootballEligibility(matches: UpcomingMatch[]): void {
+  const now = Date.now();
+  for (const [id, expiryAt] of recentUpcomingFootballIds.entries()) {
+    if (expiryAt <= now) recentUpcomingFootballIds.delete(id);
+  }
+  for (const match of matches) {
+    if ((match.sport ?? "football") !== "football") continue;
+    const scheduledMs = parseUpcomingKickoffMs(match);
+    const expiryAt = scheduledMs
+      ? Math.max(now + 30 * 60 * 1000, scheduledMs + 4 * 60 * 60 * 1000)
+      : now + UPCOMING_TO_LIVE_ELIGIBILITY_MS;
+    recentUpcomingFootballIds.set(String(match.id), expiryAt);
+  }
+}
+
+function hasRecentUpcomingFootballEligibility(eventId: number | string): boolean {
+  const key = `fb-v2-${eventId}`;
+  const expiryAt = recentUpcomingFootballIds.get(key);
+  if (!expiryAt) return false;
+  if (expiryAt <= Date.now()) {
+    recentUpcomingFootballIds.delete(key);
+    return false;
+  }
+  return true;
+}
 
 async function refreshUpcomingTop(): Promise<UpcomingTopCache> {
   const empty: UpcomingMatch[] = [];
@@ -9132,6 +9182,7 @@ async function refreshUpcomingTop(): Promise<UpcomingTopCache> {
     buildVolleyballUpcoming().catch(() => empty),
     buildBaseballUpcoming().catch(() => empty),
   ]);
+  rememberUpcomingFootballEligibility(football);
   upcomingTopCache = { football, tennis, basketball, hockey, volleyball, baseball, fetchedAt: Date.now() };
   return upcomingTopCache;
 }
