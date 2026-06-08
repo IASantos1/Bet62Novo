@@ -34,3 +34,4 @@ export * from "./providerCompetitions";
 export * from "./competitionConfigs";
 export * from "./competitionAliases";
 export * from "./eventRuntimeStates";
+export * from "./eventAdminOverrides";

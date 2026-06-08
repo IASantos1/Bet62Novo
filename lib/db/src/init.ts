@@ -259,6 +259,26 @@ export async function initDb(): Promise<void> {
       CREATE UNIQUE INDEX IF NOT EXISTS event_runtime_states_event_idx
         ON event_runtime_states (event_id);
 
+      CREATE TABLE IF NOT EXISTS event_admin_overrides (
+        id                         SERIAL PRIMARY KEY,
+        event_id                   TEXT NOT NULL,
+        competition_id             INTEGER REFERENCES competitions(id) ON DELETE SET NULL,
+        hidden_by_admin            BOOLEAN NOT NULL DEFAULT FALSE,
+        force_suspend              BOOLEAN NOT NULL DEFAULT FALSE,
+        force_cashout_disable      BOOLEAN NOT NULL DEFAULT FALSE,
+        override_priority          INTEGER,
+        override_state             TEXT,
+        override_visibility_status TEXT,
+        override_trading_status    TEXT,
+        override_note              TEXT,
+        updated_by                 TEXT,
+        created_at                 TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at                 TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+
+      CREATE UNIQUE INDEX IF NOT EXISTS event_admin_overrides_event_idx
+        ON event_admin_overrides (event_id);
+
       ALTER TABLE match_results ADD COLUMN IF NOT EXISTS home_team     TEXT;
       ALTER TABLE match_results ADD COLUMN IF NOT EXISTS away_team     TEXT;
       ALTER TABLE match_results ADD COLUMN IF NOT EXISTS corners_total INTEGER;

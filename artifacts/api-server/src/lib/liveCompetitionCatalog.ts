@@ -3,6 +3,7 @@ import {
   competitionConfigsTable,
   competitionsTable,
   db,
+  eventAdminOverridesTable,
   eventRuntimeStatesTable,
   providerCompetitionsTable,
 } from "@workspace/db";
@@ -59,9 +60,23 @@ type EventRuntimeRule = {
   suspensionReason: string | null;
 };
 
+type EventAdminOverrideRule = {
+  eventId: string;
+  competitionId: number | null;
+  hiddenByAdmin: boolean;
+  forceSuspend: boolean;
+  forceCashoutDisable: boolean;
+  overridePriority: number | null;
+  overrideState: string | null;
+  overrideVisibilityStatus: string | null;
+  overrideTradingStatus: string | null;
+  overrideNote: string | null;
+};
+
 type CompetitionCatalogSnapshot = {
   competitionRulesByKey: Map<string, CompetitionCatalogRule>;
   eventRuntimeByEventId: Map<string, EventRuntimeRule>;
+  eventOverrideByEventId: Map<string, EventAdminOverrideRule>;
 };
 
 export type CompetitionCatalogDecision = {
@@ -74,6 +89,9 @@ export type CompetitionCatalogDecision = {
   reason: string | null;
   feedHealth: string | null;
   state: string | null;
+  tradingStatus: string | null;
+  suspensionReason: string | null;
+  forceCashoutDisable: boolean;
 };
 
 type MatchCatalogInput = {
@@ -320,6 +338,22 @@ async function loadCompetitionCatalogSnapshot(): Promise<CompetitionCatalogSnaps
     .orderBy(desc(eventRuntimeStatesTable.updatedAt))
     .limit(5000);
 
+  const overrideRows = await db
+    .select({
+      eventId: eventAdminOverridesTable.eventId,
+      competitionId: eventAdminOverridesTable.competitionId,
+      hiddenByAdmin: eventAdminOverridesTable.hiddenByAdmin,
+      forceSuspend: eventAdminOverridesTable.forceSuspend,
+      forceCashoutDisable: eventAdminOverridesTable.forceCashoutDisable,
+      overridePriority: eventAdminOverridesTable.overridePriority,
+      overrideState: eventAdminOverridesTable.overrideState,
+      overrideVisibilityStatus: eventAdminOverridesTable.overrideVisibilityStatus,
+      overrideTradingStatus: eventAdminOverridesTable.overrideTradingStatus,
+      overrideNote: eventAdminOverridesTable.overrideNote,
+    })
+    .from(eventAdminOverridesTable)
+    .limit(5000);
+
   const ruleByCompetitionId = new Map<number, CompetitionCatalogRule>();
   const competitionRulesByKey = new Map<string, CompetitionCatalogRule>();
   for (const row of competitionRows) {
@@ -370,7 +404,23 @@ async function loadCompetitionCatalogSnapshot(): Promise<CompetitionCatalogSnaps
     });
   }
 
-  return { competitionRulesByKey, eventRuntimeByEventId };
+  const eventOverrideByEventId = new Map<string, EventAdminOverrideRule>();
+  for (const row of overrideRows) {
+    eventOverrideByEventId.set(row.eventId, {
+      eventId: row.eventId,
+      competitionId: row.competitionId ?? null,
+      hiddenByAdmin: row.hiddenByAdmin ?? false,
+      forceSuspend: row.forceSuspend ?? false,
+      forceCashoutDisable: row.forceCashoutDisable ?? false,
+      overridePriority: row.overridePriority ?? null,
+      overrideState: row.overrideState ?? null,
+      overrideVisibilityStatus: row.overrideVisibilityStatus ?? null,
+      overrideTradingStatus: row.overrideTradingStatus ?? null,
+      overrideNote: row.overrideNote ?? null,
+    });
+  }
+
+  return { competitionRulesByKey, eventRuntimeByEventId, eventOverrideByEventId };
 }
 
 async function getCompetitionCatalogSnapshot(): Promise<CompetitionCatalogSnapshot> {
@@ -391,6 +441,11 @@ async function getCompetitionCatalogSnapshot(): Promise<CompetitionCatalogSnapsh
   return catalogSnapshotInFlight;
 }
 
+export function invalidateCompetitionCatalogSnapshot(): void {
+  catalogSnapshotLoadedAt = 0;
+  catalogSnapshotCache = null;
+}
+
 export async function getCompetitionCatalogDecisions(
   matches: MatchCatalogInput[],
   mode: "live" | "prematch",
@@ -401,24 +456,40 @@ export async function getCompetitionCatalogDecisions(
     const key = competitionRuleKey(match.sport, match.country, match.league);
     const rule = snapshot.competitionRulesByKey.get(key);
     const runtime = snapshot.eventRuntimeByEventId.get(String(match.eventId));
+    const override = snapshot.eventOverrideByEventId.get(String(match.eventId));
     let visible = true;
     let reason: string | null = null;
+    let state: string | null = override?.overrideState ?? runtime?.state ?? null;
+    let tradingStatus: string | null = override?.overrideTradingStatus ?? runtime?.tradingStatus ?? null;
+    let suspensionReason: string | null = runtime?.suspensionReason ?? null;
+    let priority: number | null = override?.overridePriority ?? rule?.priority ?? null;
     if (rule) {
       visible = rule.isActive && (mode === "live" ? rule.liveEnabled : rule.prematchEnabled);
       if (!rule.isActive) reason = "competition_inactive";
       else if (!visible) reason = mode === "live" ? "competition_live_disabled" : "competition_prematch_disabled";
     }
+    if (override?.overrideVisibilityStatus === "HIDDEN" || override?.hiddenByAdmin) {
+      visible = false;
+      reason = "hidden_by_admin";
+      state = "HIDDEN_BY_ADMIN";
+    }
     if (visible && runtime?.visibilityStatus === "HIDDEN") {
       visible = false;
       reason = "hidden_by_admin";
     }
-    if (visible && runtime?.state === "HIDDEN_BY_ADMIN") {
+    if (visible && state === "HIDDEN_BY_ADMIN") {
       visible = false;
       reason = "hidden_by_admin";
     }
+    if (override?.forceSuspend) {
+      state = "SUSPENDED";
+      tradingStatus = override.overrideTradingStatus ?? "manual_suspend";
+      suspensionReason = override.overrideNote?.trim() || "SUSPENSO MANUALMENTE";
+      reason = reason ?? "force_suspend";
+    }
     if (
       visible &&
-      runtime?.state === "UNSTABLE_FEED" &&
+      state === "UNSTABLE_FEED" &&
       rule &&
       !rule.allowUnstableFeedVisibility
     ) {
@@ -427,14 +498,17 @@ export async function getCompetitionCatalogDecisions(
     }
     decisions.set(String(match.eventId), {
       matched: !!rule,
-      competitionId: rule?.competitionId ?? null,
+      competitionId: rule?.competitionId ?? override?.competitionId ?? null,
       mode,
       visible,
       featured: rule?.featured ?? false,
-      priority: rule?.priority ?? null,
+      priority,
       reason,
       feedHealth: runtime?.feedHealth ?? null,
-      state: runtime?.state ?? null,
+      state,
+      tradingStatus: tradingStatus ?? (state === "TRADING_RESTRICTED" ? "trading_restricted" : null),
+      suspensionReason,
+      forceCashoutDisable: override?.forceCashoutDisable ?? false,
     });
   }
   return decisions;

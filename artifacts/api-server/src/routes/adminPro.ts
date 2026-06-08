@@ -4,6 +4,8 @@ import {
   competitionConfigsTable,
   competitionsTable,
   db,
+  eventAdminOverridesTable,
+  eventRuntimeStatesTable,
   paymentsTable,
   adminAuditLogTable,
   platformSettingsTable,
@@ -14,6 +16,7 @@ import {
 import { eq, desc, count, sum, sql, ne } from "drizzle-orm";
 import { adminMiddleware, type AdminRequest } from "../middlewares/adminAuth";
 import { logger } from "../lib/logger";
+import { invalidateCompetitionCatalogSnapshot } from "../lib/liveCompetitionCatalog";
 
 const router: IRouter = Router();
 
@@ -352,6 +355,162 @@ router.get("/feed", adminMiddleware, async (_req: AdminRequest, res: Response): 
   res.json({ overall: allOk ? "ok" : "degraded", endpoints: results, checkedAt: new Date().toISOString() });
 });
 
+// ── EVENT RUNTIME / OVERRIDES ────────────────────────────────────────────────
+router.get("/events/runtime", adminMiddleware, async (req: AdminRequest, res: Response): Promise<void> => {
+  try {
+    const sport = String(req.query.sport ?? "").trim().toLowerCase();
+    const state = String(req.query.state ?? "").trim().toUpperCase();
+    const search = String(req.query.search ?? "").trim().toLowerCase();
+
+    const rows = await db.execute(sql`
+      SELECT
+        ers.event_id,
+        ers.sport,
+        ers.provider,
+        ers.provider_event_id,
+        ers.state,
+        ers.visibility_status,
+        ers.feed_health,
+        ers.trading_status,
+        ers.suspension_reason,
+        ers.last_provider_update_at,
+        ers.last_internal_update_at,
+        ers.updated_at,
+        c.id AS competition_id,
+        c.name AS competition_name,
+        c.country AS competition_country,
+        eao.hidden_by_admin,
+        eao.force_suspend,
+        eao.force_cashout_disable,
+        eao.override_priority,
+        eao.override_state,
+        eao.override_visibility_status,
+        eao.override_trading_status,
+        eao.override_note,
+        eao.updated_by,
+        eao.updated_at AS override_updated_at
+      FROM event_runtime_states ers
+      LEFT JOIN competitions c ON c.id = ers.competition_id
+      LEFT JOIN event_admin_overrides eao ON eao.event_id = ers.event_id
+      WHERE
+        (${sport} = '' OR ers.sport = ${sport})
+        AND (${state} = '' OR COALESCE(eao.override_state, ers.state) = ${state})
+        AND (
+          ${search} = ''
+          OR LOWER(COALESCE(c.name, '')) LIKE ${`%${search}%`}
+          OR LOWER(COALESCE(c.country, '')) LIKE ${`%${search}%`}
+          OR LOWER(ers.event_id) LIKE ${`%${search}%`}
+        )
+      ORDER BY ers.updated_at DESC
+      LIMIT 500
+    `);
+
+    res.json({ events: rows.rows });
+  } catch (err) {
+    logger.error({ err }, "Admin event runtime list error");
+    res.status(500).json({ error: "Erro ao carregar runtime dos eventos" });
+  }
+});
+
+router.put("/events/:eventId/override", adminMiddleware, async (req: AdminRequest, res: Response): Promise<void> => {
+  try {
+    const eventId = String(req.params.eventId ?? "").trim();
+    if (!eventId) {
+      res.status(400).json({ error: "eventId é obrigatório" });
+      return;
+    }
+
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const boolValue = (key: string): boolean | undefined =>
+      typeof body[key] === "boolean" ? body[key] as boolean : undefined;
+    const intValue = (key: string): number | undefined => {
+      if (typeof body[key] !== "number" || !Number.isFinite(body[key])) return undefined;
+      return Math.trunc(body[key] as number);
+    };
+    const textValue = (key: string): string | undefined =>
+      typeof body[key] === "string" && String(body[key]).trim() !== "" ? String(body[key]).trim() : undefined;
+
+    const [runtime] = await db
+      .select({
+        eventId: eventRuntimeStatesTable.eventId,
+        competitionId: eventRuntimeStatesTable.competitionId,
+      })
+      .from(eventRuntimeStatesTable)
+      .where(eq(eventRuntimeStatesTable.eventId, eventId))
+      .limit(1);
+
+    const [existingOverride] = await db
+      .select()
+      .from(eventAdminOverridesTable)
+      .where(eq(eventAdminOverridesTable.eventId, eventId))
+      .limit(1);
+
+    const baseValues = {
+      eventId,
+      competitionId: runtime?.competitionId ?? existingOverride?.competitionId ?? null,
+      hiddenByAdmin: boolValue("hiddenByAdmin") ?? existingOverride?.hiddenByAdmin ?? false,
+      forceSuspend: boolValue("forceSuspend") ?? existingOverride?.forceSuspend ?? false,
+      forceCashoutDisable: boolValue("forceCashoutDisable") ?? existingOverride?.forceCashoutDisable ?? false,
+      overridePriority: intValue("overridePriority") ?? existingOverride?.overridePriority ?? null,
+      overrideState: textValue("overrideState") ?? existingOverride?.overrideState ?? null,
+      overrideVisibilityStatus: textValue("overrideVisibilityStatus") ?? existingOverride?.overrideVisibilityStatus ?? null,
+      overrideTradingStatus: textValue("overrideTradingStatus") ?? existingOverride?.overrideTradingStatus ?? null,
+      overrideNote: textValue("overrideNote") ?? existingOverride?.overrideNote ?? null,
+      updatedBy: (req as { user?: { username?: string } }).user?.username || "admin",
+      updatedAt: new Date(),
+    };
+
+    await db.insert(eventAdminOverridesTable).values(baseValues).onConflictDoUpdate({
+      target: [eventAdminOverridesTable.eventId],
+      set: {
+        competitionId: baseValues.competitionId,
+        hiddenByAdmin: baseValues.hiddenByAdmin,
+        forceSuspend: baseValues.forceSuspend,
+        forceCashoutDisable: baseValues.forceCashoutDisable,
+        overridePriority: baseValues.overridePriority,
+        overrideState: baseValues.overrideState,
+        overrideVisibilityStatus: baseValues.overrideVisibilityStatus,
+        overrideTradingStatus: baseValues.overrideTradingStatus,
+        overrideNote: baseValues.overrideNote,
+        updatedBy: baseValues.updatedBy,
+        updatedAt: baseValues.updatedAt,
+      },
+    });
+
+    invalidateCompetitionCatalogSnapshot();
+    await auditLog(req, "event.override.updated", "event", eventId, baseValues);
+
+    const [saved] = await db
+      .select()
+      .from(eventAdminOverridesTable)
+      .where(eq(eventAdminOverridesTable.eventId, eventId))
+      .limit(1);
+
+    res.json({ ok: true, override: saved ?? null });
+  } catch (err) {
+    logger.error({ err }, "Admin event override update error");
+    res.status(500).json({ error: "Erro ao atualizar override do evento" });
+  }
+});
+
+router.delete("/events/:eventId/override", adminMiddleware, async (req: AdminRequest, res: Response): Promise<void> => {
+  try {
+    const eventId = String(req.params.eventId ?? "").trim();
+    if (!eventId) {
+      res.status(400).json({ error: "eventId é obrigatório" });
+      return;
+    }
+
+    await db.delete(eventAdminOverridesTable).where(eq(eventAdminOverridesTable.eventId, eventId));
+    invalidateCompetitionCatalogSnapshot();
+    await auditLog(req, "event.override.deleted", "event", eventId, {});
+    res.json({ ok: true });
+  } catch (err) {
+    logger.error({ err }, "Admin event override delete error");
+    res.status(500).json({ error: "Erro ao remover override do evento" });
+  }
+});
+
 // ── COMPETITION CATALOG ───────────────────────────────────────────────────────
 router.get("/competitions", adminMiddleware, async (req: AdminRequest, res: Response): Promise<void> => {
   try {
@@ -477,6 +636,7 @@ router.put("/competitions/:id/config", adminMiddleware, async (req: AdminRequest
       .where(eq(competitionConfigsTable.competitionId, competitionId))
       .returning();
 
+    invalidateCompetitionCatalogSnapshot();
     await auditLog(req, "competition.config.updated", "competition", String(competitionId), {
       ...cleanUpdates,
       ...cleanCompetitionUpdates,

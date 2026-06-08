@@ -1,5 +1,5 @@
 import { Router, type IRouter, type Request, type Response } from "express";
-import { db, betsTable, cashoutStatesTable, platformSettingsTable, settlementLogsTable, usersTable } from "@workspace/db";
+import { db, betsTable, cashoutStatesTable, eventAdminOverridesTable, platformSettingsTable, settlementLogsTable, usersTable } from "@workspace/db";
 import { eq, desc, sql, and, inArray, asc } from "drizzle-orm";
 import { authMiddleware, type AuthRequest } from "../middlewares/auth.js";
 import { logger } from "../lib/logger.js";
@@ -683,16 +683,46 @@ function getBetSelections(bet: { matchId: string; matchTitle: string; selections
   return [{ matchId: bet.matchId, matchTitle: bet.matchTitle, selection: "home", odd: parseFloat(bet.totalOdds), market: "result", label: "home" }];
 }
 
+function getBetEventIds(bet: { matchId: string; matchTitle: string; selections: unknown; totalOdds: string }): string[] {
+  const ids = new Set<string>();
+  for (const sel of getBetSelections(bet)) {
+    const matchId = String(sel.matchId ?? "").trim();
+    if (matchId) ids.add(matchId);
+  }
+  const fallbackMatchId = String(bet.matchId ?? "").trim();
+  if (fallbackMatchId) ids.add(fallbackMatchId);
+  return [...ids];
+}
+
+async function getCashoutDisabledEventIdsForBets(
+  bets: Array<{ matchId: string; matchTitle: string; selections: unknown; totalOdds: string }>
+): Promise<Set<string>> {
+  const eventIds = [...new Set(bets.flatMap((bet) => getBetEventIds(bet)))];
+  if (eventIds.length === 0) return new Set<string>();
+
+  const rows = await db
+    .select({ eventId: eventAdminOverridesTable.eventId })
+    .from(eventAdminOverridesTable)
+    .where(and(
+      inArray(eventAdminOverridesTable.eventId, eventIds),
+      eq(eventAdminOverridesTable.forceCashoutDisable, true),
+    ));
+
+  return new Set(rows.map((row) => String(row.eventId)));
+}
+
 function cashoutCalcForBet(args: {
   bet: { id?: number; matchId: string; matchTitle: string; selections: unknown; stake: string; totalOdds: string; status: string };
   policy: CashoutPolicy;
   existingState?: { unfavorableSince: Date; reason?: string | null } | null;
+  cashoutDisabledEventIds?: Set<string>;
 }): {
   info: { cashoutStatus: CashoutStatus; cashoutReason?: string; cashoutEstimate?: string };
   stateOp: { type: "none" } | { type: "insert"; since: Date; reason: string } | { type: "update_reason"; reason: string } | { type: "delete" };
 } {
   const { bet, policy } = args;
   const existing = args.existingState ?? null;
+  const cashoutDisabledEventIds = args.cashoutDisabledEventIds ?? new Set<string>();
   const betId = bet.id ?? null;
   if (bet.status !== "pending") return { info: { cashoutStatus: "closed" }, stateOp: betId != null ? { type: "delete" } : { type: "none" } };
   if (!policy.enabled) return { info: { cashoutStatus: "locked", cashoutReason: "Cash out desativado" }, stateOp: betId != null ? { type: "delete" } : { type: "none" } };
@@ -700,6 +730,9 @@ function cashoutCalcForBet(args: {
   const now = Date.now();
   const selections = getBetSelections(bet);
   if (selections.length === 0) return { info: { cashoutStatus: "locked", cashoutReason: "Sem seleções" }, stateOp: betId != null ? { type: "delete" } : { type: "none" } };
+  if (selections.some((sel) => sel.matchId && cashoutDisabledEventIds.has(String(sel.matchId)))) {
+    return { info: { cashoutStatus: "locked", cashoutReason: "Cash out desativado manualmente para este evento" }, stateOp: betId != null ? { type: "delete" } : { type: "none" } };
+  }
 
   const stake = parseFloat(bet.stake);
   const originalOdds = parseFloat(bet.totalOdds);
@@ -1001,6 +1034,9 @@ router.get("/my", authMiddleware, async (req: Request, res: Response): Promise<v
         .where(inArray(cashoutStatesTable.betId, betIds));
     const stateMap = new Map<number, { unfavorableSince: Date; reason?: string | null }>();
     for (const s of states) stateMap.set(s.betId, { unfavorableSince: s.unfavorableSince, reason: s.reason });
+    const cashoutDisabledEventIds = await getCashoutDisabledEventIdsForBets(
+      bets as Array<{ matchId: string; matchTitle: string; selections: unknown; totalOdds: string }>
+    );
 
     const inserts: Array<{ betId: number; unfavorableSince: Date; reason: string; updatedAt: Date }> = [];
     const updates: Array<{ betId: number; reason: string; updatedAt: Date }> = [];
@@ -1013,6 +1049,7 @@ router.get("/my", authMiddleware, async (req: Request, res: Response): Promise<v
         bet: b as unknown as { id?: number; matchId: string; matchTitle: string; selections: unknown; stake: string; totalOdds: string; status: string },
         policy,
         existingState: existing,
+        cashoutDisabledEventIds,
       });
 
       if (calc.stateOp.type === "insert" && b.id != null) inserts.push({ betId: b.id, unfavorableSince: calc.stateOp.since, reason: calc.stateOp.reason, updatedAt: nowDate });
@@ -1140,10 +1177,14 @@ router.post("/:id/cashout", authMiddleware, async (req: Request, res: Response):
       .from(cashoutStatesTable)
       .where(eq(cashoutStatesTable.betId, bet.id))
       .limit(1);
+    const cashoutDisabledEventIds = await getCashoutDisabledEventIdsForBets([
+      bet as unknown as { matchId: string; matchTitle: string; selections: unknown; totalOdds: string },
+    ]);
     const calc = cashoutCalcForBet({
       bet: bet as unknown as { id?: number; matchId: string; matchTitle: string; selections: unknown; stake: string; totalOdds: string; status: string },
       policy,
       existingState: existingState ? { unfavorableSince: existingState.unfavorableSince, reason: existingState.reason } : null,
+      cashoutDisabledEventIds,
     });
 
     if (calc.stateOp.type === "insert") {

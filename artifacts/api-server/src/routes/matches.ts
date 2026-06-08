@@ -8530,7 +8530,38 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
     (a, b) => matchStartsInMinutes(a.date, a.time) - matchStartsInMinutes(b.date, b.time),
   );
 
-  return { matches: [...filteredLive, ...filteredPrematch] };
+  const applyOperationalDecision = (
+    match: LiveMatchState,
+    decision?: {
+      state: string | null;
+      tradingStatus: string | null;
+      suspensionReason: string | null;
+    },
+  ): LiveMatchState => {
+    if (!decision) return match;
+    const mustSuspend =
+      decision.state === "SUSPENDED"
+      || decision.state === "TRADING_RESTRICTED"
+      || decision.tradingStatus === "manual_suspend"
+      || decision.tradingStatus === "trading_restricted"
+      || decision.tradingStatus === "restricted";
+    if (!mustSuspend) return match;
+    return {
+      ...match,
+      marketSuspension: {
+        ...(match.marketSuspension ?? {}),
+        __admin__: Date.now() + 24 * 60 * 60 * 1000,
+      },
+      _suspensionReason: decision.suspensionReason ?? "SUSPENSO MANUALMENTE",
+    };
+  };
+
+  return {
+    matches: [
+      ...filteredLive.map((match) => applyOperationalDecision(match, liveDecisions.get(String(match.id)))),
+      ...filteredPrematch.map((match) => applyOperationalDecision(match, prematchDecisions.get(String(match.id)))),
+    ],
+  };
 }
 
 // Broadcast payload to all connected SSE + WebSocket clients; prune dead connections.
