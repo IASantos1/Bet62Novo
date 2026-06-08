@@ -314,6 +314,27 @@ function getKycUploadRoot(): string {
   return path.resolve((globalThis as Record<string, unknown>).__dirname as string ?? __dirname, "../uploads/kyc");
 }
 
+function resolveKycStoredFile(storagePath: string): string | null {
+  const uploadRoot = getKycUploadRoot();
+  const normalizedRoot = path.resolve(uploadRoot);
+  const candidates = [
+    path.isAbsolute(storagePath) ? path.resolve(storagePath) : path.resolve(normalizedRoot, storagePath),
+    path.resolve(normalizedRoot, path.basename(storagePath)),
+  ];
+
+  for (const candidate of candidates) {
+    const normalizedCandidate = path.resolve(candidate);
+    if (
+      (normalizedCandidate === normalizedRoot || normalizedCandidate.startsWith(normalizedRoot + path.sep))
+      && fs.existsSync(normalizedCandidate)
+    ) {
+      return normalizedCandidate;
+    }
+  }
+
+  return null;
+}
+
 router.get("/kyc/documents", adminMiddleware, async (req: AdminRequest, res: Response): Promise<void> => {
   const userIdStr = String(req.query["userId"] || "");
   const userId = userIdStr ? parseInt(userIdStr, 10) : null;
@@ -377,18 +398,14 @@ router.get("/kyc/documents/:id/download", adminMiddleware, async (req: AdminRequ
 
     if (!doc) { res.status(404).json({ error: "Documento não encontrado" }); return; }
 
-    const uploadRoot = getKycUploadRoot();
-    const resolved = path.resolve(doc.storagePath);
-    if (!resolved.startsWith(uploadRoot + path.sep)) {
-      res.status(400).json({ error: "Caminho inválido" });
-      return;
-    }
-    if (!fs.existsSync(resolved)) {
+    const resolved = resolveKycStoredFile(doc.storagePath);
+    if (!resolved) {
       res.status(404).json({ error: "Ficheiro não encontrado" });
       return;
     }
 
     res.setHeader("Content-Type", doc.mimeType);
+    res.setHeader("Cache-Control", "no-store");
     res.download(resolved, doc.fileName);
   } catch (err) {
     logger.error({ err }, "Admin kyc download error");

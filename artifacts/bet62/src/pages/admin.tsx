@@ -542,14 +542,23 @@ export default function AdminPage() {
   const handleDownloadKycDoc = async (doc: KycDocument) => {
     try {
       const res = await fetch(`/api/admin/kyc/documents/${doc.id}/download`, { headers: authHeader });
-      if (!res.ok) { toast.error("Erro ao descarregar documento"); return; }
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        toast.error((data as { error?: string }).error || "Erro ao descarregar documento");
+        return;
+      }
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = doc.fileName || `kyc_${doc.id}`;
+      const contentDisposition = res.headers.get("content-disposition") || "";
+      const utf8Name = contentDisposition.match(/filename\*=UTF-8''([^;]+)/i)?.[1];
+      const plainName = contentDisposition.match(/filename="?([^"]+)"?/i)?.[1];
+      a.download = utf8Name ? decodeURIComponent(utf8Name) : (plainName || doc.fileName || `kyc_${doc.id}`);
+      document.body.appendChild(a);
       a.click();
-      URL.revokeObjectURL(url);
+      a.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
     } catch {
       toast.error("Erro ao descarregar documento");
     }
