@@ -8,6 +8,7 @@ export const usersTable = pgTable("users", {
   email: text("email").notNull().unique(),
   passwordHash: text("password_hash").notNull(),
   balance: decimal("balance", { precision: 10, scale: 2 }).notNull().default("0.00"),
+  withdrawalHoldBalance: decimal("withdrawal_hold_balance", { precision: 10, scale: 2 }).notNull().default("0.00"),
   freebetBalance: decimal("freebet_balance", { precision: 10, scale: 2 }).notNull().default("0.00"),
   nif: text("nif"),
   withdrawalIban: text("withdrawal_iban"),

@@ -22,6 +22,7 @@ export async function initDb(): Promise<void> {
         email               TEXT NOT NULL UNIQUE,
         password_hash       TEXT NOT NULL,
         balance             DECIMAL(10, 2) NOT NULL DEFAULT 0.00,
+        withdrawal_hold_balance DECIMAL(10, 2) NOT NULL DEFAULT 0.00,
         freebet_balance     DECIMAL(10, 2) NOT NULL DEFAULT 0.00,
         nif                 TEXT,
         withdrawal_iban     TEXT,
@@ -72,9 +73,17 @@ export async function initDb(): Promise<void> {
         iban        TEXT NOT NULL,
         holder_name TEXT NOT NULL,
         nif         TEXT NOT NULL,
-        status      TEXT NOT NULL DEFAULT 'pending',
+        status      TEXT NOT NULL DEFAULT 'pending_review',
         notes       TEXT,
-        created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        reviewed_by TEXT,
+        reviewed_at TIMESTAMPTZ,
+        decision_reason TEXT,
+        risk_flags  JSONB,
+        provider_reference TEXT,
+        processed_at TIMESTAMPTZ,
+        reversed_at TIMESTAMPTZ,
+        created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
       );
 
       CREATE TABLE IF NOT EXISTS admin_audit_log (
@@ -293,6 +302,15 @@ export async function initDb(): Promise<void> {
       ALTER TABLE bets ADD COLUMN IF NOT EXISTS kickoff_time  TIMESTAMPTZ;
       ALTER TABLE bets ADD COLUMN IF NOT EXISTS cashout_value DECIMAL(10, 2);
       ALTER TABLE bets ADD COLUMN IF NOT EXISTS is_freebet    TEXT NOT NULL DEFAULT 'false';
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS withdrawal_hold_balance DECIMAL(10, 2) NOT NULL DEFAULT 0.00;
+      ALTER TABLE withdrawals ADD COLUMN IF NOT EXISTS reviewed_by TEXT;
+      ALTER TABLE withdrawals ADD COLUMN IF NOT EXISTS reviewed_at TIMESTAMPTZ;
+      ALTER TABLE withdrawals ADD COLUMN IF NOT EXISTS decision_reason TEXT;
+      ALTER TABLE withdrawals ADD COLUMN IF NOT EXISTS risk_flags JSONB;
+      ALTER TABLE withdrawals ADD COLUMN IF NOT EXISTS provider_reference TEXT;
+      ALTER TABLE withdrawals ADD COLUMN IF NOT EXISTS processed_at TIMESTAMPTZ;
+      ALTER TABLE withdrawals ADD COLUMN IF NOT EXISTS reversed_at TIMESTAMPTZ;
+      ALTER TABLE withdrawals ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
 
       ALTER TABLE cashout_states ADD COLUMN IF NOT EXISTS reason            TEXT;
       ALTER TABLE cashout_states ADD COLUMN IF NOT EXISTS updated_at        TIMESTAMPTZ;

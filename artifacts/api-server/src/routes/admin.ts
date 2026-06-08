@@ -83,7 +83,7 @@ router.get("/stats", adminMiddleware, async (_req: AdminRequest, res: Response):
     const [totalPaidOut] = await db.select({ total: sum(betsTable.potentialWin) }).from(betsTable).where(eq(betsTable.status, "won"));
     const [totalBalance] = await db.select({ total: sum(usersTable.balance) }).from(usersTable);
     const [totalDeposited] = await db.select({ total: sum(paymentsTable.amount) }).from(paymentsTable).where(eq(paymentsTable.status, "completed"));
-    const [pendingWithdrawals] = await db.select({ count: count(), total: sum(withdrawalsTable.amount) }).from(withdrawalsTable).where(eq(withdrawalsTable.status, "pending"));
+    const [pendingWithdrawals] = await db.select({ count: count(), total: sum(withdrawalsTable.amount) }).from(withdrawalsTable).where(eq(withdrawalsTable.status, "pending_review"));
 
     const last7Days = await db.execute(sql`
       SELECT DATE(created_at AT TIME ZONE 'UTC') as day, COUNT(*) as bets, SUM(stake::numeric) as volume

@@ -39,8 +39,13 @@ type AdminBet = {
 type AdminWithdrawal = {
   id: number; userId: number; amount: string; iban: string; holderName: string;
   nif: string; status: string; notes: string | null; createdAt: string;
+  reviewedBy?: string | null; reviewedAt?: string | null; decisionReason?: string | null;
+  riskFlags?: unknown; providerReference?: string | null; processedAt?: string | null;
+  reversedAt?: string | null; updatedAt?: string | null;
   userName: string | null; userEmail: string | null;
 };
+
+type AdminWithdrawalAction = "approved" | "rejected" | "processing" | "paid" | "failed" | "cancelled";
 
 type AdminPayment = {
   id: number; orderId: string; userId: number; amount: string; method: string;
@@ -208,9 +213,41 @@ const STATUS_PAYMENT: Record<string, { label: string; cls: string }> = {
 };
 
 const STATUS_WITHDRAWAL: Record<string, { label: string; cls: string }> = {
-  pending:  { label: "Pendente",   cls: "bg-yellow-900/40 text-yellow-400" },
-  approved: { label: "Aprovado",   cls: "bg-green-900/60 text-green-400" },
-  rejected: { label: "Rejeitado",  cls: "bg-red-900/40 text-red-400" },
+  pending_review: { label: "Em revisão",      cls: "bg-yellow-900/40 text-yellow-400" },
+  approved:       { label: "Aprovado",        cls: "bg-emerald-900/50 text-emerald-300" },
+  processing:     { label: "Em processamento", cls: "bg-blue-900/40 text-blue-300" },
+  paid:           { label: "Pago",            cls: "bg-green-900/60 text-green-400" },
+  failed:         { label: "Falhou",          cls: "bg-orange-900/40 text-orange-300" },
+  rejected:       { label: "Rejeitado",       cls: "bg-red-900/40 text-red-400" },
+  cancelled:      { label: "Cancelado",       cls: "bg-zinc-800 text-zinc-400" },
+};
+
+const WITHDRAWAL_ACTIONS_BY_STATUS: Record<string, AdminWithdrawalAction[]> = {
+  pending_review: ["approved", "rejected", "cancelled"],
+  approved: ["processing", "paid", "failed", "rejected"],
+  processing: ["paid", "failed", "rejected"],
+  failed: ["approved", "rejected"],
+};
+
+const WITHDRAWAL_ACTION_META: Record<
+  AdminWithdrawalAction,
+  { label: string; cls: string; icon: React.ComponentType<{ size?: number; className?: string }> }
+> = {
+  approved: { label: "Aprovar", cls: "bg-green-700 hover:bg-green-600 text-white", icon: CheckCircle },
+  rejected: { label: "Rejeitar", cls: "bg-red-800 hover:bg-red-700 text-white", icon: XCircle },
+  processing: { label: "Processar", cls: "bg-blue-700 hover:bg-blue-600 text-white", icon: RefreshCw },
+  paid: { label: "Marcar Pago", cls: "bg-emerald-700 hover:bg-emerald-600 text-white", icon: Wallet },
+  failed: { label: "Marcar Falha", cls: "bg-orange-700 hover:bg-orange-600 text-white", icon: AlertTriangle },
+  cancelled: { label: "Cancelar", cls: "bg-zinc-700 hover:bg-zinc-600 text-white", icon: Ban },
+};
+
+const WITHDRAWAL_SUCCESS_MESSAGE: Record<AdminWithdrawalAction, string> = {
+  approved: "Levantamento aprovado",
+  rejected: "Levantamento rejeitado e saldo devolvido",
+  processing: "Levantamento movido para processamento",
+  paid: "Levantamento marcado como pago",
+  failed: "Levantamento marcado com falha",
+  cancelled: "Levantamento cancelado e saldo devolvido",
 };
 
 const KYC_LABELS: Record<string, { label: string; cls: string }> = {
@@ -358,6 +395,8 @@ export default function AdminPage() {
   const [detailTab, setDetailTab] = useState<"bets" | "payments" | "withdrawals">("bets");
 
   const [withdrawalNotes, setWithdrawalNotes] = useState<Record<number, string>>({});
+  const [withdrawalDecisionReasons, setWithdrawalDecisionReasons] = useState<Record<number, string>>({});
+  const [withdrawalProviderRefs, setWithdrawalProviderRefs] = useState<Record<number, string>>({});
   const [updatingWithdrawal, setUpdatingWithdrawal] = useState<number | null>(null);
   const [updatingBet, setUpdatingBet] = useState<number | null>(null);
   const [creditingPayment, setCreditingPayment] = useState<number | null>(null);
@@ -646,15 +685,27 @@ export default function AdminPage() {
     finally { setUpdatingBet(null); }
   };
 
-  const handleUpdateWithdrawal = async (id: number, status: "approved" | "rejected") => {
+  const handleUpdateWithdrawal = async (id: number, status: AdminWithdrawalAction) => {
     setUpdatingWithdrawal(id);
     try {
+      const noteInput = withdrawalNotes[id];
+      const decisionReasonInput = withdrawalDecisionReasons[id];
+      const providerReferenceInput = withdrawalProviderRefs[id];
       const res = await fetch(`/api/withdrawals/admin/${id}`, {
         method: "PUT", headers: { "Content-Type": "application/json", ...authHeader },
-        body: JSON.stringify({ status, notes: withdrawalNotes[id] || null }),
+        body: JSON.stringify({
+          status,
+          notes: noteInput !== undefined ? (noteInput.trim() || null) : undefined,
+          decisionReason: decisionReasonInput !== undefined ? (decisionReasonInput.trim() || null) : undefined,
+          providerReference: providerReferenceInput !== undefined ? (providerReferenceInput.trim() || null) : undefined,
+        }),
       });
-      if (!res.ok) { toast.error("Erro ao processar levantamento"); return; }
-      toast.success(status === "approved" ? "Levantamento aprovado" : "Levantamento rejeitado (saldo devolvido)");
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        toast.error((data as { error?: string }).error || "Erro ao processar levantamento");
+        return;
+      }
+      toast.success(WITHDRAWAL_SUCCESS_MESSAGE[status]);
       fetchWithdrawals(); fetchStats();
     } catch { toast.error("Erro ao processar levantamento"); }
     finally { setUpdatingWithdrawal(null); }
@@ -1548,7 +1599,7 @@ export default function AdminPage() {
                 ) : (
                   <div className="space-y-3">
                     {withdrawals.map(w => (
-                      <div key={w.id} className={`bg-zinc-900 border rounded-xl p-5 ${w.status === "pending" ? "border-yellow-500/30" : "border-zinc-800"}`}>
+                      <div key={w.id} className={`bg-zinc-900 border rounded-xl p-5 ${w.status === "pending_review" ? "border-yellow-500/30" : w.status === "processing" ? "border-blue-500/30" : "border-zinc-800"}`}>
                         <div className="flex flex-col sm:flex-row sm:items-start gap-4">
                           <div className="flex-1 space-y-1">
                             <div className="flex items-center gap-2 flex-wrap">
@@ -1561,27 +1612,56 @@ export default function AdminPage() {
                               <span className="font-mono">{w.iban}</span> • {w.holderName} • NIF {w.nif}
                             </div>
                             <div className="text-xs text-zinc-600">{fmtDate(w.createdAt)}</div>
+                            {w.reviewedAt && (
+                              <div className="text-xs text-zinc-500">
+                                Revisão: {fmtDate(w.reviewedAt)}{w.reviewedBy ? ` por ${w.reviewedBy}` : ""}
+                              </div>
+                            )}
+                            {w.processedAt && <div className="text-xs text-zinc-500">Processamento iniciado: {fmtDate(w.processedAt)}</div>}
+                            {w.reversedAt && <div className="text-xs text-zinc-500">Fundos revertidos: {fmtDate(w.reversedAt)}</div>}
+                            {w.providerReference && <div className="text-xs text-zinc-400">Ref. provedor: <span className="font-mono">{w.providerReference}</span></div>}
+                            {w.decisionReason && <div className="text-xs text-zinc-400">Motivo: {w.decisionReason}</div>}
                             {w.notes && <div className="text-xs text-zinc-400 mt-1 italic">Nota: {w.notes}</div>}
                           </div>
-                          {w.status === "pending" && (
+                          {(WITHDRAWAL_ACTIONS_BY_STATUS[w.status] ?? []).length > 0 && (
                             <div className="flex flex-col gap-2 min-w-48">
                               <textarea
-                                placeholder="Nota opcional..."
-                                value={withdrawalNotes[w.id] || ""}
+                                placeholder="Notas internas..."
+                                value={withdrawalNotes[w.id] ?? w.notes ?? ""}
                                 onChange={e => setWithdrawalNotes(prev => ({ ...prev, [w.id]: e.target.value }))}
                                 className="w-full bg-zinc-800 border border-zinc-700 rounded-lg text-xs text-zinc-300 placeholder-zinc-600 p-2 resize-none h-16 focus:outline-none focus:border-zinc-500"
                               />
-                              <div className="flex gap-2">
-                                <Button size="sm" disabled={updatingWithdrawal === w.id} onClick={() => handleUpdateWithdrawal(w.id, "approved")}
-                                  className="flex-1 h-8 text-xs bg-green-700 hover:bg-green-600 text-white">
-                                  {updatingWithdrawal === w.id ? <Loader2 size={12} className="animate-spin mr-1" /> : <CheckCircle size={12} className="mr-1" />}
-                                  Aprovar
-                                </Button>
-                                <Button size="sm" disabled={updatingWithdrawal === w.id} onClick={() => handleUpdateWithdrawal(w.id, "rejected")}
-                                  className="flex-1 h-8 text-xs bg-red-800 hover:bg-red-700 text-white">
-                                  {updatingWithdrawal === w.id ? <Loader2 size={12} className="animate-spin mr-1" /> : <XCircle size={12} className="mr-1" />}
-                                  Rejeitar
-                                </Button>
+                              <Input
+                                placeholder="Motivo/decisão"
+                                value={withdrawalDecisionReasons[w.id] ?? w.decisionReason ?? ""}
+                                onChange={e => setWithdrawalDecisionReasons(prev => ({ ...prev, [w.id]: e.target.value }))}
+                                className="h-8 bg-zinc-800 border-zinc-700 text-xs text-zinc-200 placeholder:text-zinc-500"
+                              />
+                              <Input
+                                placeholder="Referência do provedor"
+                                value={withdrawalProviderRefs[w.id] ?? w.providerReference ?? ""}
+                                onChange={e => setWithdrawalProviderRefs(prev => ({ ...prev, [w.id]: e.target.value }))}
+                                className="h-8 bg-zinc-800 border-zinc-700 text-xs text-zinc-200 placeholder:text-zinc-500"
+                              />
+                              <div className="grid grid-cols-2 gap-2">
+                                {(WITHDRAWAL_ACTIONS_BY_STATUS[w.status] ?? []).map((action) => {
+                                  const meta = WITHDRAWAL_ACTION_META[action];
+                                  const ActionIcon = meta.icon;
+                                  return (
+                                    <Button
+                                      key={action}
+                                      size="sm"
+                                      disabled={updatingWithdrawal === w.id}
+                                      onClick={() => handleUpdateWithdrawal(w.id, action)}
+                                      className={`h-8 text-xs ${meta.cls}`}
+                                    >
+                                      {updatingWithdrawal === w.id
+                                        ? <Loader2 size={12} className="animate-spin mr-1" />
+                                        : <ActionIcon size={12} className="mr-1" />}
+                                      {meta.label}
+                                    </Button>
+                                  );
+                                })}
                               </div>
                             </div>
                           )}
