@@ -9083,9 +9083,16 @@ router.get("/upcoming", async (req, res) => {
   else if (sport === "volleyball") matches = cache.volleyball;
   else if (sport === "baseball") matches = cache.baseball;
   else matches = [...cache.football, ...cache.tennis, ...cache.basketball, ...cache.hockey, ...cache.volleyball, ...cache.baseball];
-  const filtered = sport === "football" || sport === "all"
-    ? matches.filter(m => m.odds?.home > 0 && m.odds?.away > 0)
-    : matches.filter(m => m.hasRealOdds);
+  const filtered = sport === "all"
+    ? matches.filter(m => {
+        const sp = m.sport ?? "football";
+        if (sp === "football") return m.odds?.home > 0 && m.odds?.away > 0;
+        if (sp === "tennis") return m.odds?.home > 0 && m.odds?.away > 0;
+        return !!m.hasRealOdds;
+      })
+    : sport === "football"
+      ? matches.filter(m => m.odds?.home > 0 && m.odds?.away > 0)
+      : matches.filter(m => m.hasRealOdds);
   res.json({ matches: filtered });
 });
 
