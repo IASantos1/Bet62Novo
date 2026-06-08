@@ -5741,7 +5741,18 @@ function buildTennisLiveMatches(
         const s = String(v ?? "").trim().toLowerCase();
         return s === "true" || s === "1" || s === "yes";
       };
-      const servingBonus = isServeTrue(p0.serve) ? 0.5 : isServeTrue(p1.serve) ? -0.5 : 0;
+      const getServeVal = (p: any): unknown =>
+        p?.serve ?? p?.serving ?? p?.server ?? p?.isServing ?? p?.service ?? p?.srv;
+      const serveFromMatch = (() => {
+        const raw = (m as any)?.serve ?? (m as any)?.server ?? (m as any)?.serving;
+        const s = String(raw ?? "").trim().toLowerCase();
+        if (s === "1" || s === "home") return [true, false] as const;
+        if (s === "2" || s === "away") return [false, true] as const;
+        return null;
+      })();
+      const p0Serving = serveFromMatch ? serveFromMatch[0] : isServeTrue(getServeVal(p0));
+      const p1Serving = serveFromMatch ? serveFromMatch[1] : isServeTrue(getServeVal(p1));
+      const servingBonus = p0Serving ? 0.5 : p1Serving ? -0.5 : 0;
 
       // Weighted composite: 1 set ≈ 6 games ≈ 24 pts; scale accordingly
       const advantage = setsDiff * 0.22 + gamesDiff * 0.042 + ptDiff * 0.012 + servingBonus * 0.008;
@@ -5807,7 +5818,7 @@ function buildTennisLiveMatches(
       if (numDoneSets >= 2) settledSusp["set2"]     = SETTLED;
 
       const currentPoints: [number | string, number | string] = [hPt, aPt];
-      const serving: [boolean, boolean] = [isServeTrue(p0.serve), isServeTrue(p1.serve)];
+      const serving: [boolean, boolean] = [p0Serving, p1Serving];
       const suspPts: [number | string, number | string] = [
         hPt === "D" ? "40" : hPt,
         aPt === "D" ? "40" : aPt,

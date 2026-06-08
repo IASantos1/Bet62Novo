@@ -10759,17 +10759,24 @@ export default function Home() {
                                 } else if (isCashedOut) {
                                   leftIcon = <div className="w-6 h-6 rounded-full bg-yellow-500/70 flex items-center justify-center shrink-0"><CircleDollarSign size={11} className="text-white" /></div>;
                                 } else {
-                                  // Infer sport icon from market key or matchTitle
-                                  const mkt = sel.market ?? "";
-                                  const mt  = (sel.matchTitle ?? "").toLowerCase();
-                                  const sportEmoji =
-                                    mkt === "quartos" || mkt === "totais" && mt.includes("nba") ? "🏀"
-                                    : mkt === "periodos" || mkt === "puckLine" || mt.includes("nhl") ? "🏒"
-                                    : mkt === "innings"  || mt.includes("mlb") ? "⚾"
-                                    : mkt === "sets"     || mt.includes("volei") || mt.includes("volley") ? "🏐"
-                                    : mkt === "jogos"    || mt.includes("tennis") || mt.includes("tênis") ? "🎾"
-                                    : "⚽";
-                                  leftIcon = <span className="text-xl shrink-0 leading-none">{sportEmoji}</span>;
+                                  if (outcome === "live-win") {
+                                    leftIcon = <div className="w-6 h-6 rounded-full bg-green-500 flex items-center justify-center shrink-0"><Check size={13} className="text-white" strokeWidth={3} /></div>;
+                                  } else if (outcome === "live-lose") {
+                                    leftIcon = <div className="w-6 h-6 rounded-full bg-red-600 flex items-center justify-center shrink-0"><X size={13} className="text-white" strokeWidth={2.5} /></div>;
+                                  } else if (outcome === "void") {
+                                    leftIcon = <div className="w-6 h-6 rounded-full bg-zinc-200 border border-zinc-300 flex items-center justify-center shrink-0"><span className="text-zinc-600 text-[11px] font-black leading-none">—</span></div>;
+                                  } else {
+                                    const mkt = sel.market ?? "";
+                                    const mt  = (sel.matchTitle ?? "").toLowerCase();
+                                    const sportEmoji =
+                                      mkt === "quartos" || mkt === "totais" && mt.includes("nba") ? "🏀"
+                                      : mkt === "periodos" || mkt === "puckLine" || mt.includes("nhl") ? "🏒"
+                                      : mkt === "innings"  || mt.includes("mlb") ? "⚾"
+                                      : mkt === "sets"     || mt.includes("volei") || mt.includes("volley") ? "🏐"
+                                      : mkt === "jogos"    || mt.includes("tennis") || mt.includes("tênis") ? "🎾"
+                                      : "⚽";
+                                    leftIcon = <span className="text-xl shrink-0 leading-none">{sportEmoji}</span>;
+                                  }
                                 }
 
                                 // Final score for resolved bets
@@ -10821,6 +10828,12 @@ export default function Home() {
                                       </div>
                                       {isWon && (
                                         <span className="text-[10px] font-black text-green-600 flex items-center gap-0.5">⚽ VENCIDO</span>
+                                      )}
+                                      {isActivePending && outcome === "live-win" && (
+                                        <span className="text-[10px] font-black text-green-600">VENCIDO</span>
+                                      )}
+                                      {isActivePending && outcome === "live-lose" && (
+                                        <span className="text-[10px] font-black text-red-600">PERDIDO</span>
                                       )}
                                     </div>
                                   </div>
