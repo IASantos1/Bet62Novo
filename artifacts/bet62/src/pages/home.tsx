@@ -4087,7 +4087,8 @@ export default function Home() {
     // Penalty shootout: only show winner market with VENCEDOR DA FINAL header
     const isPenShootout = match.isLive && sport === "football" && !!match.markets?.penExtra;
 
-    const oddsRow = (match.hasRealOdds || match.isLive) ? (
+    const canShowOdds = !!(match.hasRealOdds || (sport === "football" && match.odds.home > 0 && match.odds.away > 0));
+    const oddsRow = (canShowOdds || match.isLive) ? (
       <>
         {isPenShootout && !isLiveSuspended && (
           <div className="text-[9px] font-black uppercase tracking-widest text-yellow-400 text-center mt-2">🎯 Vencedor da Final</div>
@@ -4146,7 +4147,7 @@ export default function Home() {
                sport === "baseball"   ? <BaseballScore big /> :
                <SimpleScore big />}
             </div>
-            {match.hasRealOdds && (<>
+            {canShowOdds && (<>
               {isPenShootout && !isLiveSuspended && (
                 <div className="text-[9px] font-black uppercase tracking-widest text-yellow-400 text-center mb-1">🎯 Vencedor da Final</div>
               )}
@@ -4208,7 +4209,8 @@ export default function Home() {
       (!!match.marketSuspension && Object.values(match.marketSuspension).some(ts => ts > Date.now()))
       || !!(match._suspensionReason)
     );
-    const OddsRow = () => match.hasRealOdds ? (
+    const canShowOdds = !!(match.hasRealOdds || (sport === "football" && match.odds.home > 0 && match.odds.away > 0));
+    const OddsRow = () => canShowOdds ? (
       <div className="flex gap-2 w-full">
         <SuspensionBanner match={match} />
         {!isSuspendedMatch && (<>
