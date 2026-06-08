@@ -159,6 +159,7 @@ export async function initDb(): Promise<void> {
         mime_type    TEXT NOT NULL,
         file_size    INTEGER NOT NULL,
         storage_path TEXT NOT NULL,
+        file_data    BYTEA,
         status       TEXT NOT NULL DEFAULT 'pending',
         created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
         reviewed_at  TIMESTAMPTZ
@@ -295,6 +296,7 @@ export async function initDb(): Promise<void> {
       ALTER TABLE cashout_states ADD COLUMN IF NOT EXISTS updated_at        TIMESTAMPTZ;
 
       ALTER TABLE kyc_documents ADD COLUMN IF NOT EXISTS reviewed_at        TIMESTAMPTZ;
+      ALTER TABLE kyc_documents ADD COLUMN IF NOT EXISTS file_data          BYTEA;
     `);
 
     console.info("[db/init] Schema initialisation complete.");

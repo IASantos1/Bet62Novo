@@ -391,6 +391,7 @@ router.get("/kyc/documents/:id/download", adminMiddleware, async (req: AdminRequ
         fileName: kycDocumentsTable.fileName,
         mimeType: kycDocumentsTable.mimeType,
         storagePath: kycDocumentsTable.storagePath,
+        fileData: kycDocumentsTable.fileData,
       })
       .from(kycDocumentsTable)
       .where(eq(kycDocumentsTable.id, docId))
@@ -400,7 +401,14 @@ router.get("/kyc/documents/:id/download", adminMiddleware, async (req: AdminRequ
 
     const resolved = resolveKycStoredFile(doc.storagePath);
     if (!resolved) {
-      res.status(404).json({ error: "Ficheiro não encontrado" });
+      if (doc.fileData && doc.fileData.length > 0) {
+        res.setHeader("Content-Type", doc.mimeType);
+        res.setHeader("Content-Disposition", `attachment; filename="${encodeURIComponent(doc.fileName)}"`);
+        res.setHeader("Cache-Control", "no-store");
+        res.send(doc.fileData);
+        return;
+      }
+      res.status(404).json({ error: "Ficheiro não encontrado. Este documento foi guardado apenas no disco local e já não existe no servidor atual." });
       return;
     }
 

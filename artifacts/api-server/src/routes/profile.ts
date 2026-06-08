@@ -405,6 +405,7 @@ router.post("/kyc/upload", authMiddleware, async (req: AuthRequest, res: Respons
           mimeType,
           fileSize: buf.length,
           storagePath,
+          fileData: buf,
           status: "pending",
         })
         .returning({ id: kycDocumentsTable.id, storagePath: kycDocumentsTable.storagePath });
