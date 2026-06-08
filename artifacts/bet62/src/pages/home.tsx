@@ -1651,6 +1651,7 @@ export default function Home() {
   const [upcomingMatches, setUpcomingMatches] = useState<Match[]>([]);
   const [upcomingLoading, setUpcomingLoading] = useState(true);
   const [selectedSport, setSelectedSport] = useState<string>("all");
+  const [wc2026Matches, setWc2026Matches] = useState<Match[]>([]);
 
   // Recent tennis results (yesterday)
   type TennisResult = {
@@ -2773,6 +2774,10 @@ export default function Home() {
       fetch("/api/matches/tennis-odds")
         .then(r => r.ok ? r.json() : null)
         .then(d => { if (d?.odds) setTennisOddsMatches(d.odds); })
+        .catch(() => { /* non-critical */ });
+      fetch("/api/matches/wc2026")
+        .then(r => r.ok ? r.json() : { matches: [] })
+        .then(d => setWc2026Matches(((d?.matches ?? []) as Match[]).map(m => ({ ...m, isLive: false }))))
         .catch(() => { /* non-critical */ });
       fetch("/api/matches/basketball-schedule")
         .then(r => r.ok ? r.json() : null)
@@ -4302,16 +4307,45 @@ export default function Home() {
       .sort((a, b) => Math.abs(a.odds.home - 3.10) - Math.abs(b.odds.home - 3.10));
 
     const usedIds = new Set<string | number>();
-    const pickN = (pool: Match[], n: number): Match[] => {
+    const pickN = (pool: Match[], n: number, allowUsed = false): Match[] => {
       const out: Match[] = [];
       for (const m of pool) {
-        if (!usedIds.has(m.id)) {
+        if (allowUsed || !usedIds.has(m.id)) {
           out.push(m);
-          usedIds.add(m.id);
+          if (!allowUsed) usedIds.add(m.id);
           if (out.length === n) break;
         }
       }
       return out;
+    };
+    const fillTo4 = (seed: Match[]): Match[] => {
+      const uniq: Match[] = [];
+      const seen = new Set<string | number>();
+      for (const m of seed) {
+        if (seen.has(m.id)) continue;
+        uniq.push(m);
+        seen.add(m.id);
+      }
+      if (uniq.length >= 4) return uniq.slice(0, 4);
+
+      const pools = [favPool, medPool, mid25Pool, high31Pool, withOdds];
+      for (const pool of pools) {
+        if (uniq.length >= 4) break;
+        for (const m of pool) {
+          if (uniq.length >= 4) break;
+          if (seen.has(m.id) || usedIds.has(m.id)) continue;
+          uniq.push(m);
+          seen.add(m.id);
+          usedIds.add(m.id);
+        }
+      }
+      for (const m of withOdds) {
+        if (uniq.length >= 4) break;
+        if (seen.has(m.id)) continue;
+        uniq.push(m);
+        seen.add(m.id);
+      }
+      return uniq;
     };
 
     const chunks: Match[][] = [];
@@ -4320,16 +4354,16 @@ export default function Home() {
     for (let i = 0; i < 3; i++) {
       const favs  = pickN(favPool,   3);
       const spike = pickN(mid25Pool, 1);
-      const chunk = [...favs, ...spike];
-      if (chunk.length > 0) chunks.push(chunk);
+      const chunk = fillTo4([...favs, ...spike]);
+      if (chunk.length === 4) chunks.push(chunk);
     }
 
     // 1 banner: 3 odds (1.50–1.99) + 1 odd (~3.10)
     {
       const meds  = pickN(medPool,    3);
       const spike = pickN(high31Pool, 1);
-      const chunk = [...meds, ...spike];
-      if (chunk.length > 0) chunks.push(chunk);
+      const chunk = fillTo4([...meds, ...spike]);
+      if (chunk.length === 4) chunks.push(chunk);
     }
 
     if (chunks.length === 0) return null;
@@ -9066,6 +9100,7 @@ export default function Home() {
                   ...volleyOddsAsMatches,
                   ...basketballAsMatches,
                   ...hockeyAsMatches,
+                  ...((selectedSport === "all" || selectedSport === "football") ? wc2026Matches : []),
                   ...upcomingMatches.filter(m => {
                     const sport = m.sport ?? "football";
                     if (sport === "tennis")     return !tennisOddsAsMatches.some(t => t.home === m.home && t.away === m.away);
@@ -9091,6 +9126,8 @@ export default function Home() {
                   { p: ["champions league","liga dos campeões","liga campeões"], label: "Champions" },
                   { p: ["europa league","liga europa"], label: "Europa League" },
                   { p: ["conference league","liga conferência"], label: "Conference" },
+                  { p: ["fifa world cup","world cup","copa do mundo","wc 2026"], label: "FIFA World Cup" },
+                  { p: ["international friendlies","international friendly","amistosos internacionais","amistosos","friendlies","friendly"], label: "International Friendlies" },
                   { p: ["premier league"], label: "Premier League" },
                   { p: ["la liga","laliga"], label: "La Liga" },
                   { p: ["bundesliga"], label: "Bundesliga" },
@@ -9151,6 +9188,8 @@ export default function Home() {
                       { p: ["champions league","liga dos campeões","liga campeões"], label: "Champions", logo: "https://media.api-sports.io/football/leagues/2.png", color: "#001489" },
                       { p: ["europa league","liga europa"], label: "Europa League", logo: "https://media.api-sports.io/football/leagues/3.png", color: "#F77F00" },
                       { p: ["conference league","liga conferência"], label: "Conference", logo: "https://media.api-sports.io/football/leagues/848.png", color: "#00B386" },
+                      { p: ["fifa world cup","world cup","copa do mundo","wc 2026"], label: "FIFA World Cup", logo: "https://media.api-sports.io/football/leagues/1.png", color: "#dc2626" },
+                      { p: ["international friendlies","international friendly","amistosos internacionais","amistosos","friendlies","friendly"], label: "International Friendlies", logo: "https://media.api-sports.io/football/leagues/10.png", color: "#dc2626" },
                       { p: ["premier league"], label: "Premier League", logo: "https://media.api-sports.io/football/leagues/39.png", color: "#3D195B" },
                       { p: ["la liga","laliga"], label: "La Liga", logo: "https://media.api-sports.io/football/leagues/140.png", color: "#FF4B44" },
                       { p: ["bundesliga"], label: "Bundesliga", logo: "https://media.api-sports.io/football/leagues/78.png", color: "#D3010C" },
