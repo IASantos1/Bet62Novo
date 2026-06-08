@@ -9019,7 +9019,10 @@ router.get("/upcoming", async (req, res) => {
   else if (sport === "volleyball") matches = cache.volleyball;
   else if (sport === "baseball") matches = cache.baseball;
   else matches = [...cache.football, ...cache.tennis, ...cache.basketball, ...cache.hockey, ...cache.volleyball, ...cache.baseball];
-  res.json({ matches: matches.filter(m => m.hasRealOdds) });
+  const filtered = sport === "football" || sport === "all"
+    ? matches.filter(m => m.odds?.home > 0 && m.odds?.away > 0)
+    : matches.filter(m => m.hasRealOdds);
+  res.json({ matches: filtered });
 });
 
 router.get("/", async (_req, res) => {
@@ -10635,16 +10638,11 @@ async function getTennisOdds(): Promise<TennisOddsEntry[]> {
       if (p0Name && p1Name) {
         _tennisPreMatchOdds.set(_tennisPairKey(p0Name, p1Name), { home: h, away: a });
       }
-      const tExtra = {
-        firstSet: { home: 0, away: 0 },
-        set2: { home: 0, away: 0 }, set3: { home: 0, away: 0 },
-        exactSets: { h20: 0, h21: 0, a02: 0, a12: 0 },
-        setHandicap: { home: 0, away: 0 },
-        totalGames: { line: 0, over: 0, under: 0 },
-        totalGamesLines: [] as Array<{ line: number; over: number; under: number }>,
-        set1Games: { line: 0, over: 0, under: 0 },
-        gameHandicap: { line: 0, home: 0, away: 0 },
-      };
+      const pHome = h > 0 && a > 0 ? (1 / h) / ((1 / h) + (1 / a)) : 0.5;
+      const tExtra = computeTennisExtras(pHome, {
+        set1H: realOdds.firstSetHome > 0 ? realOdds.firstSetHome : undefined,
+        set1A: realOdds.firstSetAway > 0 ? realOdds.firstSetAway : undefined,
+      });
       results.push({
         matchId: String(ev.id),
         date, time,
@@ -10652,7 +10650,7 @@ async function getTennisOdds(): Promise<TennisOddsEntry[]> {
         status: "Not Started",
         players: [{ id: "", name: p0Name }, { id: "", name: p1Name }],
         matchOdds: [h, a],
-        set1Odds: null,
+        set1Odds: realOdds.firstSetHome > 0 && realOdds.firstSetAway > 0 ? [realOdds.firstSetHome, realOdds.firstSetAway] : null,
         markets: {
           doubleChance: { homeOrDraw: 0, awayOrDraw: 0, homeOrAway: 0 },
           bothTeamsScore: { yes: 0, no: 0 },
