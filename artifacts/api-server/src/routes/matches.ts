@@ -6873,6 +6873,65 @@ function refreshTennisLiveOdds(matchIds: number[]): void {
   }));
 }
 
+const _tennisServingCache = new Map<number, { serving: [boolean, boolean]; at: number }>();
+const _tennisServingInFlight = new Map<number, Promise<void>>();
+const TENNIS_SERVING_TTL = 5_000;
+
+function refreshTennisServing(matchIds: number[]): void {
+  const now = Date.now();
+  const toBool = (v: unknown): boolean | null => {
+    if (v === true || v === false) return v;
+    if (v == null) return null;
+    const s = String(v).trim().toLowerCase();
+    if (s === "true" || s === "1" || s === "yes" || s === "y") return true;
+    if (s === "false" || s === "0" || s === "no" || s === "n") return false;
+    return null;
+  };
+  const extract = (j: any): [boolean, boolean] | null => {
+    const ev =
+      j?.event ??
+      j?.data?.event ??
+      j?.data?.match?.event ??
+      j?.data?.data?.event ??
+      null;
+    if (!ev) return null;
+    const h = ev.homeTeam ?? ev.home ?? ev.homeCompetitor ?? null;
+    const a = ev.awayTeam ?? ev.away ?? ev.awayCompetitor ?? null;
+    const hs = toBool(h?.serving ?? h?.serve ?? h?.isServing ?? h?.service);
+    const as = toBool(a?.serving ?? a?.serve ?? a?.isServing ?? a?.service);
+    if (hs === null && as === null) return null;
+    return [hs === true, as === true];
+  };
+
+  const toFetch = matchIds.filter((id) => {
+    const cached = _tennisServingCache.get(id);
+    if (cached && now - cached.at <= TENNIS_SERVING_TTL) return false;
+    if (_tennisServingInFlight.has(id)) return false;
+    return true;
+  });
+  if (toFetch.length === 0) return;
+
+  for (const id of toFetch) {
+    const p = (async () => {
+      try {
+        const res = await fetch(`${SAPI_V2_TENNIS}/match/${id}`, {
+          headers: sapiHeaders(),
+          signal: AbortSignal.timeout(6_000),
+        });
+        if (!res.ok) return;
+        const j = await res.json();
+        const s = extract(j);
+        if (!s) return;
+        _tennisServingCache.set(id, { serving: s, at: Date.now() });
+      } catch {
+      }
+    })().finally(() => {
+      _tennisServingInFlight.delete(id);
+    });
+    _tennisServingInFlight.set(id, p);
+  }
+}
+
 
 export { buildLiveMatches, buildUpcomingMatches, getUpcomingAll };
 
@@ -7738,6 +7797,7 @@ function buildTennisLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
   // Kick off background live-odds refresh for all valid match IDs (fire-and-forget)
   const liveIds = events.map(e => e.id).filter(Boolean) as number[];
   refreshTennisLiveOdds(liveIds);
+  refreshTennisServing(liveIds);
   const nowSec = now / 1000;
   // Sort descending by status code so that when the same match pair appears twice,
   // the more-advanced (higher code = later set) entry is processed first and wins the dedup.
@@ -7853,6 +7913,8 @@ function buildTennisLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
         ? [parsePoint(realHPt), parsePoint(realAPt)]
         : advanceTennisGamePts(`tennis-v2-${ev.id}`);
 
+    const serving = (ev.id ? _tennisServingCache.get(ev.id)?.serving : undefined) ?? existing?._liveExtra?.serving;
+
     // ── Market suspension: detect point played and compute duration ─────────────
     // A point is played when currentPoints or sets changes compared to last tick.
     // Guard: buildTennisLiveV2 is called TWICE per request (live feed + todayStarted).
@@ -7965,7 +8027,7 @@ function buildTennisLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
       markets: v2Markets,
       events: [],
       _firstSeenAt: existing?._firstSeenAt ?? now,
-      _liveExtra: { sets: sets.length > 0 ? sets : [], currentPoints },
+      _liveExtra: { sets: sets.length > 0 ? sets : [], currentPoints, ...(serving ? { serving } : {}) },
       marketSuspension: marketSuspension && Object.keys(marketSuspension).length > 0 ? marketSuspension : undefined,
       _suspensionReason: suspensionReason,
     };
