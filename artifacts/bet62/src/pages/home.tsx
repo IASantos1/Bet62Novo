@@ -4082,7 +4082,7 @@ export default function Home() {
     // Penalty shootout: only show winner market with VENCEDOR DA FINAL header
     const isPenShootout = match.isLive && sport === "football" && !!match.markets?.penExtra;
 
-    const canShowOdds = !!(match.hasRealOdds || (sport === "football" && match.odds.home > 0 && match.odds.away > 0));
+    const canShowOdds = !!(match.hasRealOdds || (match.odds.home > 0 && match.odds.away > 0));
     const oddsRow = (canShowOdds || match.isLive) ? (
       <>
         {isPenShootout && !isLiveSuspended && (
@@ -4205,7 +4205,7 @@ export default function Home() {
       (!!match.marketSuspension && Object.values(match.marketSuspension).some(ts => ts > Date.now()))
       || !!(match._suspensionReason)
     );
-    const canShowOdds = !!(match.hasRealOdds || (sport === "football" && match.odds.home > 0 && match.odds.away > 0));
+    const canShowOdds = !!(match.hasRealOdds || (match.odds.home > 0 && match.odds.away > 0));
     const OddsRow = () => canShowOdds ? (
       <div className="flex gap-2 w-full">
         <SuspensionBanner match={match} />
