@@ -4192,6 +4192,7 @@ export default function Home() {
   };
 
   const MatchCard = ({ match }: { match: Match }) => {
+    const sport = match.sport ?? "football";
     const flag = COUNTRY_FLAGS[match.country?.toLowerCase() ?? ""] ?? sportEmoji(match.sport);
     const dateStr = match.date ? formatMatchDate(match.date) : "";
     const bannerImg = getMatchBannerStable(match);
