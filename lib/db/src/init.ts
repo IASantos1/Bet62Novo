@@ -164,6 +164,101 @@ export async function initDb(): Promise<void> {
         reviewed_at  TIMESTAMPTZ
       );
 
+      CREATE TABLE IF NOT EXISTS competitions (
+        id                 SERIAL PRIMARY KEY,
+        sport              TEXT NOT NULL,
+        name               TEXT NOT NULL,
+        country            TEXT NOT NULL DEFAULT 'unknown',
+        normalized_name    TEXT NOT NULL,
+        normalized_country TEXT NOT NULL DEFAULT 'unknown',
+        tier               TEXT NOT NULL DEFAULT 'standard',
+        is_active          BOOLEAN NOT NULL DEFAULT TRUE,
+        created_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at         TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+
+      CREATE UNIQUE INDEX IF NOT EXISTS competitions_canonical_idx
+        ON competitions (sport, normalized_country, normalized_name);
+
+      CREATE TABLE IF NOT EXISTS provider_competitions (
+        id                       SERIAL PRIMARY KEY,
+        provider                 TEXT NOT NULL,
+        provider_sport           TEXT NOT NULL,
+        provider_competition_key TEXT NOT NULL,
+        provider_competition_id  TEXT,
+        provider_name            TEXT NOT NULL,
+        provider_country         TEXT NOT NULL DEFAULT 'unknown',
+        competition_id           INTEGER NOT NULL REFERENCES competitions(id) ON DELETE CASCADE,
+        mapping_confidence       TEXT NOT NULL DEFAULT 'high',
+        first_seen_at            TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        last_seen_at             TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        created_at               TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at               TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+
+      CREATE UNIQUE INDEX IF NOT EXISTS provider_competitions_provider_key_idx
+        ON provider_competitions (provider, provider_sport, provider_competition_key);
+
+      CREATE TABLE IF NOT EXISTS competition_configs (
+        id                            SERIAL PRIMARY KEY,
+        competition_id                INTEGER NOT NULL REFERENCES competitions(id) ON DELETE CASCADE,
+        prematch_enabled              BOOLEAN NOT NULL DEFAULT TRUE,
+        live_enabled                  BOOLEAN NOT NULL DEFAULT TRUE,
+        home_enabled                  BOOLEAN NOT NULL DEFAULT FALSE,
+        mobile_enabled                BOOLEAN NOT NULL DEFAULT TRUE,
+        featured                      BOOLEAN NOT NULL DEFAULT FALSE,
+        priority                      INTEGER NOT NULL DEFAULT 100,
+        display_order                 INTEGER NOT NULL DEFAULT 100,
+        max_markets                   INTEGER NOT NULL DEFAULT 50,
+        cashout_enabled               BOOLEAN NOT NULL DEFAULT TRUE,
+        auto_settlement_enabled       BOOLEAN NOT NULL DEFAULT TRUE,
+        tracking_enabled              BOOLEAN NOT NULL DEFAULT TRUE,
+        min_feed_quality_score        INTEGER NOT NULL DEFAULT 40,
+        allow_unstable_feed_visibility BOOLEAN NOT NULL DEFAULT TRUE,
+        trading_mode                  TEXT NOT NULL DEFAULT 'automatic',
+        stake_limit_multiplier        INTEGER NOT NULL DEFAULT 100,
+        created_at                    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at                    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+
+      CREATE UNIQUE INDEX IF NOT EXISTS competition_configs_competition_idx
+        ON competition_configs (competition_id);
+
+      CREATE TABLE IF NOT EXISTS competition_aliases (
+        id               SERIAL PRIMARY KEY,
+        competition_id   INTEGER NOT NULL REFERENCES competitions(id) ON DELETE CASCADE,
+        provider         TEXT NOT NULL DEFAULT 'internal',
+        alias            TEXT NOT NULL,
+        normalized_alias TEXT NOT NULL,
+        created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+
+      CREATE UNIQUE INDEX IF NOT EXISTS competition_aliases_provider_alias_idx
+        ON competition_aliases (provider, normalized_alias);
+
+      CREATE TABLE IF NOT EXISTS event_runtime_states (
+        id                      SERIAL PRIMARY KEY,
+        event_id                TEXT NOT NULL,
+        sport                   TEXT NOT NULL,
+        competition_id          INTEGER REFERENCES competitions(id) ON DELETE SET NULL,
+        provider                TEXT NOT NULL DEFAULT 'internal',
+        provider_event_id       TEXT,
+        state                   TEXT NOT NULL DEFAULT 'ACTIVE',
+        visibility_status       TEXT NOT NULL DEFAULT 'VISIBLE',
+        feed_health             TEXT NOT NULL DEFAULT 'healthy',
+        trading_status          TEXT NOT NULL DEFAULT 'automatic',
+        suspension_reason       TEXT,
+        last_provider_update_at TIMESTAMPTZ,
+        last_internal_update_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        last_market_recalc_at   TIMESTAMPTZ,
+        version                 INTEGER NOT NULL DEFAULT 1,
+        created_at              TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at              TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+
+      CREATE UNIQUE INDEX IF NOT EXISTS event_runtime_states_event_idx
+        ON event_runtime_states (event_id);
+
       ALTER TABLE match_results ADD COLUMN IF NOT EXISTS home_team     TEXT;
       ALTER TABLE match_results ADD COLUMN IF NOT EXISTS away_team     TEXT;
       ALTER TABLE match_results ADD COLUMN IF NOT EXISTS corners_total INTEGER;

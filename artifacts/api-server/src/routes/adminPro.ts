@@ -1,5 +1,15 @@
 import { Router, type IRouter, type Response } from "express";
-import { db, usersTable, betsTable, paymentsTable, adminAuditLogTable, platformSettingsTable, suspendedMatchesTable } from "@workspace/db";
+import {
+  betsTable,
+  competitionConfigsTable,
+  db,
+  paymentsTable,
+  adminAuditLogTable,
+  platformSettingsTable,
+  providerCompetitionsTable,
+  suspendedMatchesTable,
+  usersTable,
+} from "@workspace/db";
 import { eq, desc, count, sum, sql, ne } from "drizzle-orm";
 import { adminMiddleware, type AdminRequest } from "../middlewares/adminAuth";
 import { logger } from "../lib/logger";
@@ -339,6 +349,145 @@ router.get("/feed", adminMiddleware, async (_req: AdminRequest, res: Response): 
 
   const allOk = results.every(r => r.status === "ok");
   res.json({ overall: allOk ? "ok" : "degraded", endpoints: results, checkedAt: new Date().toISOString() });
+});
+
+// ── COMPETITION CATALOG ───────────────────────────────────────────────────────
+router.get("/competitions", adminMiddleware, async (req: AdminRequest, res: Response): Promise<void> => {
+  try {
+    const sport = String(req.query.sport ?? "").trim().toLowerCase();
+    const liveEnabled = String(req.query.liveEnabled ?? "").trim().toLowerCase();
+
+    const rows = await db.execute(sql`
+      SELECT
+        c.id,
+        c.sport,
+        c.name,
+        c.country,
+        c.tier,
+        c.is_active,
+        c.created_at,
+        c.updated_at,
+        cc.live_enabled,
+        cc.prematch_enabled,
+        cc.home_enabled,
+        cc.mobile_enabled,
+        cc.featured,
+        cc.priority,
+        cc.display_order,
+        cc.trading_mode,
+        cc.cashout_enabled,
+        cc.min_feed_quality_score,
+        COUNT(pc.id)::int AS provider_mappings
+      FROM competitions c
+      LEFT JOIN competition_configs cc ON cc.competition_id = c.id
+      LEFT JOIN provider_competitions pc ON pc.competition_id = c.id
+      WHERE
+        (${sport} = '' OR c.sport = ${sport})
+        AND (${liveEnabled} = '' OR COALESCE(cc.live_enabled, TRUE)::text = ${liveEnabled})
+      GROUP BY c.id, cc.id
+      ORDER BY COALESCE(cc.priority, 999), c.sport, c.country, c.name
+      LIMIT 500
+    `);
+
+    res.json({ competitions: rows.rows });
+  } catch (err) {
+    logger.error({ err }, "Admin competitions list error");
+    res.status(500).json({ error: "Erro ao carregar catálogo de competições" });
+  }
+});
+
+router.put("/competitions/:id/config", adminMiddleware, async (req: AdminRequest, res: Response): Promise<void> => {
+  try {
+    const competitionId = Number(req.params.id);
+    if (!Number.isFinite(competitionId) || competitionId <= 0) {
+      res.status(400).json({ error: "ID de competição inválido" });
+      return;
+    }
+
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const boolValue = (key: string): boolean | undefined =>
+      typeof body[key] === "boolean" ? body[key] as boolean : undefined;
+    const intValue = (key: string): number | undefined => {
+      if (typeof body[key] !== "number" || !Number.isFinite(body[key])) return undefined;
+      return Math.trunc(body[key] as number);
+    };
+    const textValue = (key: string): string | undefined =>
+      typeof body[key] === "string" && String(body[key]).trim() !== "" ? String(body[key]).trim() : undefined;
+
+    const updates = {
+      liveEnabled: boolValue("liveEnabled"),
+      prematchEnabled: boolValue("prematchEnabled"),
+      homeEnabled: boolValue("homeEnabled"),
+      mobileEnabled: boolValue("mobileEnabled"),
+      featured: boolValue("featured"),
+      cashoutEnabled: boolValue("cashoutEnabled"),
+      allowUnstableFeedVisibility: boolValue("allowUnstableFeedVisibility"),
+      priority: intValue("priority"),
+      displayOrder: intValue("displayOrder"),
+      maxMarkets: intValue("maxMarkets"),
+      minFeedQualityScore: intValue("minFeedQualityScore"),
+      stakeLimitMultiplier: intValue("stakeLimitMultiplier"),
+      tradingMode: textValue("tradingMode"),
+      updatedAt: new Date(),
+    };
+
+    const cleanUpdates = Object.fromEntries(
+      Object.entries(updates).filter(([, value]) => value !== undefined),
+    );
+
+    await db.insert(competitionConfigsTable).values({
+      competitionId,
+      liveEnabled: true,
+      prematchEnabled: true,
+      homeEnabled: false,
+      mobileEnabled: true,
+      featured: false,
+      priority: 100,
+      displayOrder: 100,
+      maxMarkets: 50,
+      cashoutEnabled: true,
+      autoSettlementEnabled: true,
+      trackingEnabled: true,
+      minFeedQualityScore: 40,
+      allowUnstableFeedVisibility: true,
+      tradingMode: "automatic",
+      stakeLimitMultiplier: 100,
+      updatedAt: new Date(),
+    }).onConflictDoNothing();
+
+    const [updated] = await db
+      .update(competitionConfigsTable)
+      .set(cleanUpdates)
+      .where(eq(competitionConfigsTable.competitionId, competitionId))
+      .returning();
+
+    await auditLog(req, "competition.config.updated", "competition", String(competitionId), cleanUpdates);
+    res.json({ ok: true, config: updated ?? null });
+  } catch (err) {
+    logger.error({ err }, "Admin competition config update error");
+    res.status(500).json({ error: "Erro ao atualizar configuração da competição" });
+  }
+});
+
+router.get("/competitions/:id/mappings", adminMiddleware, async (req: AdminRequest, res: Response): Promise<void> => {
+  try {
+    const competitionId = Number(req.params.id);
+    if (!Number.isFinite(competitionId) || competitionId <= 0) {
+      res.status(400).json({ error: "ID de competição inválido" });
+      return;
+    }
+
+    const mappings = await db
+      .select()
+      .from(providerCompetitionsTable)
+      .where(eq(providerCompetitionsTable.competitionId, competitionId))
+      .orderBy(desc(providerCompetitionsTable.lastSeenAt));
+
+    res.json({ mappings });
+  } catch (err) {
+    logger.error({ err }, "Admin competition mappings error");
+    res.status(500).json({ error: "Erro ao carregar mapeamentos da competição" });
+  }
 });
 
 export default router;

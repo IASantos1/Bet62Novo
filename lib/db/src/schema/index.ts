@@ -29,3 +29,8 @@ export * from "./matchResults";
 export * from "./cashoutStates";
 export * from "./kycDocuments";
 export * from "./ledgerEntries";
+export * from "./competitions";
+export * from "./providerCompetitions";
+export * from "./competitionConfigs";
+export * from "./competitionAliases";
+export * from "./eventRuntimeStates";

@@ -2,6 +2,7 @@ import { Router, type IRouter, type Request, type Response } from "express";
 import { WebSocketServer, type WebSocket as WsClient } from "ws";
 import { CONFIG, FOOTBALL_SUSP_KEYS, footballSuspensionDelayMs } from "../lib/config.js";
 import { logger } from "../lib/logger.js";
+import { syncLiveCompetitionCatalog } from "../lib/liveCompetitionCatalog.js";
 import { buildMatchSettlementJobId, enqueueMatchSettlement } from "../lib/settlementQueue.js";
 import { db, matchResultsTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
@@ -8442,6 +8443,39 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
     }
     startingSoonFinal.push(m);
   }
+
+  syncLiveCompetitionCatalog([
+    ...livePart.map((m) => ({
+      eventId: String(m.id),
+      providerEventId: String(m.id),
+      sport: m.sport,
+      name: m.league,
+      country: m.country,
+      provider: "sportsapi_live",
+      status: m.status,
+      suspensionReason: m._suspensionReason ?? null,
+    })),
+    ...promotedTennis.map((m) => ({
+      eventId: String(m.id),
+      providerEventId: String(m.id),
+      sport: m.sport,
+      name: m.league,
+      country: m.country,
+      provider: "sportsapi_live",
+      status: m.status,
+      suspensionReason: m._suspensionReason ?? null,
+    })),
+    ...startingSoonFinal.map((m) => ({
+      eventId: String(m.id),
+      providerEventId: String(m.id),
+      sport: m.sport,
+      name: m.league,
+      country: m.country,
+      provider: "sportsapi_upcoming",
+      status: m.status,
+      suspensionReason: null,
+    })),
+  ]);
 
   return { matches: [...livePart, ...promotedTennis, ...startingSoonFinal] };
 }
