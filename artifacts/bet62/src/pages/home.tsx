@@ -12521,6 +12521,18 @@ function PromosPage({
 type PayMethod = "multibanco" | "mbway" | "card";
 
 type MbRef = { entity: string; reference: string; amount: string; expiresAt: string; orderId: string };
+type UserWithdrawalItem = {
+  id: number;
+  amount: string;
+  status: string;
+  createdAt: string;
+  reviewedAt?: string | null;
+  decisionReason?: string | null;
+  providerReference?: string | null;
+  processedAt?: string | null;
+  reversedAt?: string | null;
+  updatedAt?: string | null;
+};
 
 function DepositWithdrawModal({
   open, onClose, onSuccess, onPromoNotif, balance, token, kycStatus,
@@ -12553,6 +12565,8 @@ function DepositWithdrawModal({
   const [wName, setWName] = useState("");
   const [wNif, setWNif] = useState("");
   const [wDone, setWDone] = useState(false);
+  const [withdrawalHistory, setWithdrawalHistory] = useState<UserWithdrawalItem[]>([]);
+  const [withdrawalsLoading, setWithdrawalsLoading] = useState(false);
 
   // KYC form (shown before withdrawal when not submitted)
   const [kycDocType, setKycDocType] = useState<"cc" | "passport">("cc");
@@ -12560,6 +12574,108 @@ function DepositWithdrawModal({
   const [kycNif, setKycNif] = useState("");
   const [kycDone, setKycDone] = useState(false);
   const needsKyc = kycStatus === "not_submitted" && !kycDone;
+  const latestOpenWithdrawal = withdrawalHistory.find((item) =>
+    item.status === "pending_review" || item.status === "approved" || item.status === "processing"
+  ) ?? null;
+  const latestWithdrawal = withdrawalHistory[0] ?? null;
+  const formatWithdrawalDate = (value?: string | null) => {
+    if (!value) return "sem data";
+    const dt = new Date(value);
+    if (Number.isNaN(dt.getTime())) return "sem data";
+    return dt.toLocaleDateString("pt-PT", {
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  };
+
+  const getWithdrawalStatusMeta = (status: string) => {
+    switch (status) {
+      case "pending_review":
+        return {
+          label: "Em revisão",
+          badgeCls: "bg-yellow-500/15 text-yellow-300 border-yellow-500/30",
+          panelCls: "bg-yellow-900/20 border-yellow-600/40",
+          icon: <Clock size={16} className="text-yellow-300" />,
+          message: "O seu pedido foi recebido e está a aguardar revisão da nossa equipa.",
+        };
+      case "approved":
+        return {
+          label: "Aprovado",
+          badgeCls: "bg-emerald-500/15 text-emerald-300 border-emerald-500/30",
+          panelCls: "bg-emerald-900/20 border-emerald-600/40",
+          icon: <Check size={16} className="text-emerald-300" />,
+          message: "O seu levantamento foi aprovado e será enviado para processamento bancário.",
+        };
+      case "processing":
+        return {
+          label: "Em processamento",
+          badgeCls: "bg-blue-500/15 text-blue-300 border-blue-500/30",
+          panelCls: "bg-blue-900/20 border-blue-600/40",
+          icon: <RefreshCw size={16} className="text-blue-300" />,
+          message: "O seu levantamento está em processamento. Prazo estimado: 2 a 5 dias úteis.",
+        };
+      case "paid":
+        return {
+          label: "Pago",
+          badgeCls: "bg-green-500/15 text-green-300 border-green-500/30",
+          panelCls: "bg-green-900/20 border-green-600/40",
+          icon: <Wallet size={16} className="text-green-300" />,
+          message: "O levantamento foi concluído e enviado para a sua conta bancária.",
+        };
+      case "failed":
+        return {
+          label: "Falhou",
+          badgeCls: "bg-orange-500/15 text-orange-300 border-orange-500/30",
+          panelCls: "bg-orange-900/20 border-orange-600/40",
+          icon: <AlertCircle size={16} className="text-orange-300" />,
+          message: "O processamento falhou. A nossa equipa poderá rever ou pedir uma nova tentativa.",
+        };
+      case "rejected":
+        return {
+          label: "Rejeitado",
+          badgeCls: "bg-red-500/15 text-red-300 border-red-500/30",
+          panelCls: "bg-red-900/20 border-red-600/40",
+          icon: <X size={16} className="text-red-300" />,
+          message: "O pedido foi rejeitado e o valor foi devolvido ao seu saldo.",
+        };
+      case "cancelled":
+        return {
+          label: "Cancelado",
+          badgeCls: "bg-zinc-700/50 text-zinc-300 border-zinc-600/50",
+          panelCls: "bg-zinc-900/70 border-zinc-700/60",
+          icon: <X size={16} className="text-zinc-300" />,
+          message: "O pedido foi cancelado e o valor foi devolvido ao seu saldo.",
+        };
+      default:
+        return {
+          label: status,
+          badgeCls: "bg-zinc-800 text-zinc-300 border-zinc-700",
+          panelCls: "bg-zinc-900/70 border-zinc-700/60",
+          icon: <Clock size={16} className="text-zinc-300" />,
+          message: "Estado do levantamento atualizado.",
+        };
+    }
+  };
+
+  const fetchWithdrawalHistory = useCallback(async () => {
+    if (!token) return;
+    setWithdrawalsLoading(true);
+    try {
+      const r = await fetch("/api/withdrawals/mine", {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!r.ok) return;
+      const data = await r.json() as UserWithdrawalItem[];
+      setWithdrawalHistory(Array.isArray(data) ? data : []);
+    } catch {
+      // Silent: this panel should not spam the user on background refresh.
+    } finally {
+      setWithdrawalsLoading(false);
+    }
+  }, [token]);
 
   const amount = parseFloat(depositAmount.replace(",", "."));
   const amountValid = !isNaN(amount) && amount >= 10 && amount <= 5000;
@@ -12616,6 +12732,11 @@ function DepositWithdrawModal({
     return () => clearInterval(id);
   }, [mbRef?.orderId, token, onSuccess, onClose]);
 
+  useEffect(() => {
+    if (!open || mainTab !== "withdraw") return;
+    void fetchWithdrawalHistory();
+  }, [open, mainTab, fetchWithdrawalHistory]);
+
   function resetMethod(m: PayMethod) {
     setPayMethod(m);
     setMbRef(null);
@@ -12661,11 +12782,15 @@ function DepositWithdrawModal({
       const data = await r.json() as { withdrawal?: { id: number }; error?: string; code?: string };
       if (!r.ok) {
         toast.error(data.error ?? "Erro ao submeter pedido.");
+        if (data.code === "WITHDRAWAL_ALREADY_OPEN") {
+          void fetchWithdrawalHistory();
+        }
         return;
       }
       setWDone(true);
       onSuccess();
-      toast.success("Pedido de levantamento submetido! Processado em 2-5 dias úteis.");
+      void fetchWithdrawalHistory();
+      toast.success("Pedido de levantamento submetido! Estado inicial: em revisão.");
     } catch { toast.error("Erro de ligação. Tente novamente."); }
     finally { setLoading(false); }
   }
@@ -12772,11 +12897,43 @@ function DepositWithdrawModal({
         {/* Withdrawal form */}
         {mainTab === "withdraw" && (
           <div className="p-5 space-y-4">
+            {withdrawalsLoading && (
+              <div className="flex items-center justify-center py-3 text-zinc-500 text-sm gap-2">
+                <Loader2 size={14} className="animate-spin" />
+                A carregar levantamentos...
+              </div>
+            )}
+            {latestWithdrawal && (() => {
+              const meta = getWithdrawalStatusMeta(latestWithdrawal.status);
+              return (
+                <div className={`border rounded-xl px-4 py-3 space-y-2 ${meta.panelCls}`}>
+                  <div className="flex items-center gap-2">
+                    {meta.icon}
+                    <div className="text-sm font-bold text-white">Último levantamento</div>
+                    <span className={`ml-auto inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-black uppercase tracking-wide ${meta.badgeCls}`}>
+                      {meta.label}
+                    </span>
+                  </div>
+                  <div className="text-sm text-white font-black">€ {parseFloat(latestWithdrawal.amount || "0").toFixed(2)}</div>
+                  <div className="text-xs text-zinc-300 leading-relaxed">{meta.message}</div>
+                  <div className="text-[11px] text-zinc-400">
+                    Pedido em {formatWithdrawalDate(latestWithdrawal.createdAt)}
+                    {latestWithdrawal.processedAt ? ` · Processamento em ${formatWithdrawalDate(latestWithdrawal.processedAt)}` : ""}
+                  </div>
+                  {latestWithdrawal.decisionReason && (
+                    <div className="text-[11px] text-zinc-300">Motivo: {latestWithdrawal.decisionReason}</div>
+                  )}
+                  {latestWithdrawal.providerReference && (
+                    <div className="text-[11px] text-zinc-300">Referência: {latestWithdrawal.providerReference}</div>
+                  )}
+                </div>
+              );
+            })()}
             {wDone ? (
               <div className="text-center py-8 space-y-3">
                 <div className="text-5xl">✅</div>
                 <div className="font-black text-white text-lg">Pedido submetido!</div>
-                <div className="text-sm text-zinc-400 leading-relaxed">O seu pedido de levantamento está em processamento.<br />Prazo estimado: <strong className="text-white">2 a 5 dias úteis</strong>.</div>
+                <div className="text-sm text-zinc-400 leading-relaxed">O seu pedido de levantamento entrou em <strong className="text-white">revisão</strong>.<br />Depois seguirá para processamento e pagamento.</div>
                 <Button onClick={() => { setWDone(false); setWAmount(""); }} variant="outline" className="border-zinc-700 text-zinc-400 mt-2">Novo pedido</Button>
               </div>
             ) : needsKyc ? (
@@ -12853,6 +13010,12 @@ function DepositWithdrawModal({
                 </div>
                 <div className="bg-orange-900/20 border border-orange-800/40 rounded-xl px-4 py-3 text-xs text-orange-300 leading-relaxed">
                   Mínimo de levantamento: <strong className="text-white">€20</strong>. Processado por transferência bancária em 2–5 dias úteis.
+                </div>
+              </div>
+            ) : latestOpenWithdrawal ? (
+              <div className="space-y-4">
+                <div className="bg-orange-900/20 border border-orange-800/40 rounded-xl px-4 py-3 text-xs text-orange-300 leading-relaxed">
+                  Já existe um levantamento em curso nesta conta. Aguarde a conclusão do pedido atual antes de criar um novo.
                 </div>
               </div>
             ) : (
