@@ -2,6 +2,7 @@ import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { router, useFocusEffect } from "expo-router";
 import React, { useCallback, useState } from "react";
+
 import {
   ActivityIndicator,
   Alert,
@@ -24,6 +25,9 @@ interface StoredSelection {
   odd: number;
   market?: string;
   label?: string;
+  scheduledAt?: string;
+  kickoffTime?: string;
+  liveOutcome?: "won" | "lost" | "void" | null;
   finalScore?: { home: number; away: number };
   htScore?: { htHome: number; htAway: number };
   outcome?: "won" | "lost" | "void" | null;
@@ -67,6 +71,32 @@ function getSelLabel(sel: StoredSelection): string {
   return map[sel.selection] ?? sel.selection;
 }
 
+function getSelectionKickoffDate(sel: StoredSelection): Date | null {
+  const raw = sel.kickoffTime ?? sel.scheduledAt;
+  if (!raw) return null;
+  const parsed = new Date(raw);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+function getTicketKickoffDate(selections: StoredSelection[]): Date | null {
+  const dates = selections
+    .map(getSelectionKickoffDate)
+    .filter((value): value is Date => value instanceof Date);
+  if (dates.length === 0) return null;
+  return new Date(Math.min(...dates.map((value) => value.getTime())));
+}
+
+function formatTicketDateTime(value: Date | null): string | null {
+  if (!value) return null;
+  return value.toLocaleDateString("pt-PT", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
 // ─── BOLETIM CARD ────────────────────────────────────────────────────────────
 
 function BetCard({ bet, token, onCashout }: { bet: Bet; token: string | null; onCashout: () => void }) {
@@ -88,8 +118,8 @@ function BetCard({ bet, token, onCashout }: { bet: Bet; token: string | null; on
 
   const ticketCode = `BT62-${String(bet.id).padStart(6, "0")}`;
   const betDate = new Date(bet.createdAt);
-  const dateStr = betDate.toLocaleDateString("pt-PT", { day: "2-digit", month: "2-digit", year: "numeric" });
-  const timeStr = betDate.toLocaleTimeString("pt-PT", { hour: "2-digit", minute: "2-digit" });
+  const betPlacedStr = formatTicketDateTime(betDate);
+  const gameKickoffStr = formatTicketDateTime(getTicketKickoffDate(sels));
   const settledAt = bet.settledAt ? new Date(bet.settledAt) : null;
   const settledDateStr = settledAt ? settledAt.toLocaleDateString("pt-PT", { day: "2-digit", month: "2-digit", year: "numeric" }) : null;
   const settledTimeStr = settledAt ? settledAt.toLocaleTimeString("pt-PT", { hour: "2-digit", minute: "2-digit" }) : null;
@@ -151,8 +181,13 @@ function BetCard({ bet, token, onCashout }: { bet: Bet; token: string | null; on
             <Text style={{ fontFamily: "Inter_800ExtraBold", fontSize: 16, color: "#fff", fontStyle: "italic" }}>
               Boletim de Aposta
             </Text>
+            {gameKickoffStr ? (
+              <Text style={{ fontFamily: "Inter_500Medium", fontSize: 11, color: "rgba(255,255,255,0.92)", marginTop: 2 }}>
+                Jogo: {gameKickoffStr}
+              </Text>
+            ) : null}
             <Text style={{ fontFamily: "Inter_400Regular", fontSize: 11, color: "#fca5a5", marginTop: 2 }}>
-              📅 {dateStr} • {timeStr}
+              Apostada: {betPlacedStr}
             </Text>
             {!isPending && settledAt && (
               <Text style={{ fontFamily: "Inter_500Medium", fontSize: 11, color: "rgba(255,255,255,0.9)", marginTop: 2 }}>
@@ -206,12 +241,20 @@ function BetCard({ bet, token, onCashout }: { bet: Bet; token: string | null; on
           let showCircle = false;
 
           const selOutcome = sel.outcome ?? null;
+          const liveOutcome = sel.liveOutcome ?? null;
           if (isCashedOut) { iconName = "cash-outline"; iconColor = "#fff"; iconBg = "rgba(251,191,36,0.7)"; showCircle = true; }
           else if (isVoided) { iconName = "lock-closed-outline"; iconColor = "#fff"; iconBg = "rgba(59,130,246,0.6)"; showCircle = true; }
           else if (selOutcome === "won") { iconName = "checkmark"; iconColor = "#fff"; iconBg = "#22c55e"; showCircle = true; }
           else if (selOutcome === "lost") { iconName = "close"; iconColor = "#fff"; iconBg = "rgba(0,0,0,0.3)"; showCircle = true; }
           else if (selOutcome === "void") { iconName = "remove"; iconColor = "#fff"; iconBg = "rgba(156,163,175,0.55)"; showCircle = true; }
+          else if (liveOutcome === "won") { iconName = "trending-up-outline"; iconColor = "#fff"; iconBg = "#22c55e"; showCircle = true; }
           else if (isWon || isLost) { iconName = "time-outline"; iconColor = "#fff"; iconBg = "rgba(156,163,175,0.35)"; showCircle = true; }
+
+          let kickoffStr = "";
+          if (sel.kickoffTime) {
+            const d = new Date(sel.kickoffTime);
+            kickoffStr = d.toLocaleDateString("pt-PT", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
+          }
 
           return (
             <View key={i} style={{ flexDirection: "row", alignItems: "flex-start", paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: dividerColor, gap: 10 }}>
@@ -229,6 +272,11 @@ function BetCard({ bet, token, onCashout }: { bet: Bet; token: string | null; on
                 <Text style={{ fontFamily: "Inter_700Bold", fontSize: 13, color: txtMain, lineHeight: 18 }} numberOfLines={2}>
                   {i + 1}. {sel.matchTitle}
                 </Text>
+                {kickoffStr ? (
+                  <Text style={{ fontFamily: "Inter_500Medium", fontSize: 10, color: txtSub, marginTop: 1 }}>
+                    📅 {kickoffStr}
+                  </Text>
+                ) : null}
                 <Text style={{ fontFamily: "Inter_400Regular", fontSize: 11, color: txtSub, marginTop: 2 }}>
                   {getSelLabel(sel)}
                 </Text>
@@ -248,6 +296,12 @@ function BetCard({ bet, token, onCashout }: { bet: Bet; token: string | null; on
                 </View>
                 {isWon && (
                   <Text style={{ fontFamily: "Inter_700Bold", fontSize: 10, color: "#16a34a" }}>⚽ VENCIDO</Text>
+                )}
+                {isPending && liveOutcome === "won" && (
+                  <View style={{ flexDirection: "row", alignItems: "center", gap: 3, backgroundColor: "rgba(34,197,94,0.15)", paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 }}>
+                    <Ionicons name="trending-up-outline" size={10} color="#16a34a" />
+                    <Text style={{ fontFamily: "Inter_800ExtraBold", fontSize: 9, color: "#16a34a" }}>VENCENDO</Text>
+                  </View>
                 )}
               </View>
             </View>
@@ -319,7 +373,7 @@ function BetCard({ bet, token, onCashout }: { bet: Bet; token: string | null; on
           <Pressable
             onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium); setCashoutExpanded(true); }}
             disabled={cashingOut}
-            style={({ pressed }) => ({
+            style={({ pressed }: { pressed: boolean }) => ({
               marginHorizontal: 12, marginBottom: 12,
               backgroundColor: pressed ? "#b91c1c" : "#dc2626",
               borderRadius: 16, paddingVertical: 16,
@@ -399,18 +453,20 @@ export default function BetsScreen() {
   const topPad = Platform.OS === "web" ? 67 : insets.top;
   const [tab, setTab] = useState<"abertas" | "resolvidas" | "cashout" | "anuladas">("abertas");
 
-  const { data, isLoading, refetch } = useQuery({
-    queryKey: ["my-bets", token],
+  const { data: bets = [], isLoading, refetch } = useQuery({
+    queryKey: ["user-bets", token],
     queryFn: async () => {
       if (!token) return [];
-      const res = await fetch(`${API_BASE}/bets/my`, {
+      const res = await fetch(`${API_BASE}/bets`, {
         headers: { Authorization: `Bearer ${token}` },
       });
-      if (!res.ok) throw new Error("Failed");
-      return res.json() as Promise<Bet[]>;
+      if (!res.ok) throw new Error("Falha ao carregar apostas");
+      const data = await res.json();
+      return (data as Bet[]).sort((a, b) => 
+        new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+      );
     },
     enabled: !!token,
-    refetchInterval: 10000,
   });
 
   // Refetch immediately when the tab comes into focus — mirrors web behaviour
@@ -419,8 +475,6 @@ export default function BetsScreen() {
       if (token) void refetch();
     }, [token, refetch]),
   );
-
-  const bets = data ?? [];
   const filtered =
     tab === "abertas"
       ? bets.filter(b => b.status === "pending")

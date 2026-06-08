@@ -3,6 +3,8 @@ import React, { createContext, useCallback, useContext, useState } from "react";
 export interface BetSelection {
   matchId: string;
   matchTitle: string;
+  homeTeam?: string;
+  awayTeam?: string;
   market: string;
   /** Settlement key sent to the API (e.g. "home", "draw", "away", "bts-yes") */
   selection?: string;
@@ -12,6 +14,7 @@ export interface BetSelection {
   suspendedReason?: string;
   date?: string;
   time?: string;
+  kickoffTime?: string;
 }
 
 interface BetSlipContextType {

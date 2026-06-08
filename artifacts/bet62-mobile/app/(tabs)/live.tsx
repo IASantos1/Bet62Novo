@@ -143,7 +143,18 @@ function LiveMatchCard({ match }: { match: LiveMatch }) {
     if (suspended) return;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     if (hasSelection(match.id, market)) removeSelection(match.id, market);
-    else addSelection({ matchId: match.id, matchTitle: `${match.home} vs ${match.away}`, market, selection: market, label: `${match.home} vs ${match.away} — ${label}`, odds: value, date: match.date, time: match.time });
+    else addSelection({
+      matchId: match.id,
+      matchTitle: `${match.home} vs ${match.away}`,
+      homeTeam: match.home,
+      awayTeam: match.away,
+      market,
+      selection: market,
+      label: `${match.home} vs ${match.away} — ${label}`,
+      odds: value,
+      date: match.date,
+      time: match.time,
+    });
   }
 
   const minuteLabel = (() => {

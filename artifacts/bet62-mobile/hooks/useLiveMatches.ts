@@ -213,6 +213,22 @@ function connect() {
           emit();
           return;
         }
+        if (msg && typeof msg === "object" && msg.type === "batch_update" && Array.isArray(msg.updates)) {
+          const next = [...state.matches];
+          let changed = false;
+          for (const upd of msg.updates) {
+            const idx = next.findIndex((m) => String(m.id) === String(upd.matchId));
+            if (idx >= 0) {
+              next[idx] = { ...(next[idx] as any), ...(upd.delta as any) };
+              changed = true;
+            }
+          }
+          if (changed) {
+            state = { ...state, matches: next, lastUpdated: Date.now() };
+            emit();
+          }
+          return;
+        }
         if (Array.isArray(msg.matches)) scheduleUpdate({ matches: msg.matches as LiveMatch[] });
       } catch {}
     };

@@ -1,11 +1,11 @@
-import { Router, type IRouter, type Response } from "express";
+import { Router, type IRouter, type Request, type Response } from "express";
 import { db, betsTable, cashoutStatesTable, platformSettingsTable, settlementLogsTable, usersTable } from "@workspace/db";
 import { eq, desc, sql, and, inArray, asc } from "drizzle-orm";
-import { authMiddleware, type AuthRequest } from "../middlewares/auth";
-import { logger } from "../lib/logger";
-import { applyBalanceDelta, insertLedgerEntry } from "../lib/ledger";
-import { liveMatchState, finishedMatchResults, type LiveMatchState } from "./matches";
-import { scoreOutcomeForSel, type SelectionRecord } from "../settlement";
+import { authMiddleware, type AuthRequest } from "../middlewares/auth.js";
+import { logger } from "../lib/logger.js";
+import { applyBalanceDelta, insertLedgerEntry } from "../lib/ledger.js";
+import { liveMatchState, finishedMatchResults, type LiveMatchState } from "./matches.js";
+import { scoreOutcomeForSel, type SelectionRecord } from "../settlement.js";
 
 const router: IRouter = Router();
 
@@ -14,7 +14,8 @@ const MAX_STAKE  = 2000.00;
 const MIN_ODDS   = 1.01;
 const MAX_ODDS   = 500.00;
 
-router.post("/quote", authMiddleware, async (req: AuthRequest, res: Response): Promise<void> => {
+router.post("/quote", authMiddleware, async (req: Request, res: Response): Promise<void> => {
+  const authReq = req as AuthRequest;
   const now = Date.now();
   const raw = req.body as { selections?: Array<{ matchId?: unknown; market?: unknown; selection?: unknown }> } | null;
   const selList = Array.isArray(raw?.selections) ? raw!.selections! : [];
@@ -49,7 +50,7 @@ router.post("/quote", authMiddleware, async (req: AuthRequest, res: Response): P
     }
 
     const suspendedUntil = liveSt.marketSuspension?.[market] ?? 0;
-    const anySuspended = liveSt.marketSuspension != null && Object.values(liveSt.marketSuspension).some((ts) => ts > now);
+    const anySuspended = liveSt.marketSuspension != null && Object.values(liveSt.marketSuspension).some((ts: any) => ts > now);
     const suspended = suspendedUntil > now || (anySuspended && !!liveSt._suspensionReason);
     const reason =
       suspended
@@ -157,6 +158,83 @@ function normalizeSelectionKey(sel: string): string {
   else if (s === "et-tie-home") s = "et-tw-home";
   else if (s === "et-tie-away") s = "et-tw-away";
   return s;
+}
+
+function extractTeamsFromTitle(title: string): { homeTeam?: string; awayTeam?: string } {
+  const raw = String(title ?? "").trim();
+  if (!raw) return {};
+  const parts = raw.split(/\s+(?:vs|v|x|-|—|–)\s+/i);
+  if (parts.length < 2) return {};
+  const homeTeam = parts[0]!.trim();
+  const awayTeam = parts.slice(1).join(" ").trim();
+  return {
+    ...(homeTeam ? { homeTeam } : {}),
+    ...(awayTeam ? { awayTeam } : {}),
+  };
+}
+
+function parseDateTimeToIso(dateRaw: unknown, timeRaw: unknown): string | undefined {
+  if (typeof dateRaw !== "string" || dateRaw.trim() === "") return undefined;
+  const dateStr = dateRaw.trim();
+  const timeStr = typeof timeRaw === "string" ? timeRaw.trim() : "";
+  const dmy = dateStr.match(/^(\d{2})[./-](\d{2})[./-](\d{4})$/);
+  const ymd = dateStr.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  let date: Date | null = null;
+  if (dmy) date = new Date(Number(dmy[3]), Number(dmy[2]) - 1, Number(dmy[1]), 0, 0, 0, 0);
+  else if (ymd) date = new Date(Number(ymd[1]), Number(ymd[2]) - 1, Number(ymd[3]), 0, 0, 0, 0);
+  if (!date) return undefined;
+  const hm = timeStr.match(/^(\d{1,2}):(\d{2})$/);
+  if (hm) date.setHours(Number(hm[1]), Number(hm[2]), 0, 0);
+  return Number.isNaN(date.getTime()) ? undefined : date.toISOString();
+}
+
+function normalizeKickoffIso(value: unknown): string | undefined {
+  if (value instanceof Date) return Number.isNaN(value.getTime()) ? undefined : value.toISOString();
+  if (typeof value !== "string") return undefined;
+  const raw = value.trim();
+  if (!raw) return undefined;
+  const parsed = new Date(raw);
+  return Number.isNaN(parsed.getTime()) ? undefined : parsed.toISOString();
+}
+
+function getTicketKickoffIso(selections: unknown, fallbackKickoff: unknown): string | undefined {
+  const fallback = normalizeKickoffIso(fallbackKickoff);
+  if (!Array.isArray(selections)) return fallback;
+  const timestamps = selections
+    .map((sel) => normalizeKickoffIso((sel as Record<string, unknown>)?.kickoffTime ?? (sel as Record<string, unknown>)?.scheduledAt))
+    .filter((v): v is string => !!v)
+    .map((v) => new Date(v).getTime())
+    .filter((v) => Number.isFinite(v));
+  if (timestamps.length === 0) return fallback;
+  return new Date(Math.min(...timestamps)).toISOString();
+}
+
+function normalizeStoredSelection(
+  rawSelection: unknown,
+  fallback: { matchId: string; matchTitle: string; kickoffTime?: unknown }
+): unknown {
+  if (!rawSelection || typeof rawSelection !== "object") return rawSelection;
+  const r = rawSelection as Record<string, unknown>;
+  const selection = typeof r.selection === "string" ? r.selection : null;
+  if (!selection) return rawSelection;
+  const matchTitle = typeof r.matchTitle === "string" && r.matchTitle.trim() !== ""
+    ? r.matchTitle
+    : fallback.matchTitle;
+  const kickoffIso =
+    normalizeKickoffIso(r.kickoffTime) ??
+    normalizeKickoffIso(r.scheduledAt) ??
+    parseDateTimeToIso(r.date, r.time) ??
+    normalizeKickoffIso(fallback.kickoffTime);
+  const { homeTeam, awayTeam } = extractTeamsFromTitle(matchTitle);
+  return {
+    ...r,
+    matchId: String(r.matchId ?? fallback.matchId),
+    matchTitle,
+    selection: normalizeSelectionKey(selection),
+    ...(kickoffIso ? { kickoffTime: kickoffIso, scheduledAt: kickoffIso } : {}),
+    ...(homeTeam ? { homeTeam } : {}),
+    ...(awayTeam ? { awayTeam } : {}),
+  };
 }
 
 function currentOddForSelection(sel: SelectionRecord, liveSt: LiveMatchState): number | null {
@@ -694,8 +772,9 @@ function cashoutCalcForBet(args: {
 }
 
 // ─── POST /api/bets/place ─────────────────────────────────────────────────────
-router.post("/place", authMiddleware, async (req: AuthRequest, res: Response): Promise<void> => {
-  const { matchId, matchTitle, selections, stake, totalOdds, isFreebet } = req.body;
+router.post("/place", authMiddleware, async (req: Request, res: Response): Promise<void> => {
+  const authReq = req as AuthRequest;
+  const { matchId, matchTitle, selections, stake, totalOdds, isFreebet, kickoffTime } = (authReq as any).body;
   // potentialWin is intentionally NOT read from req.body — always recalculated server-side
 
   if (!matchId || !matchTitle || !selections || !stake || !totalOdds) {
@@ -740,7 +819,7 @@ router.post("/place", authMiddleware, async (req: AuthRequest, res: Response): P
       liveSt?.sport === "hockey" ||
       liveSt?.sport === "baseball"
     ) {
-      const anySuspended = liveSt.marketSuspension != null && Object.values(liveSt.marketSuspension).some((ts) => ts > now);
+      const anySuspended = liveSt.marketSuspension != null && Object.values(liveSt.marketSuspension).some((ts: any) => ts > now);
       if (anySuspended || liveSt._suspensionReason) {
         res.status(409).json({
           error: "Mercado suspenso. Aguarde alguns segundos e tente novamente.",
@@ -778,7 +857,7 @@ router.post("/place", authMiddleware, async (req: AuthRequest, res: Response): P
       : "result";
 
     const suspendedUntil = liveSt.marketSuspension?.[marketKey] ?? 0;
-    const anySuspended = liveSt.marketSuspension != null && Object.values(liveSt.marketSuspension).some((ts) => ts > now);
+    const anySuspended = liveSt.marketSuspension != null && Object.values(liveSt.marketSuspension).some((ts: any) => ts > now);
     const suspended = suspendedUntil > now || (anySuspended && !!liveSt._suspensionReason);
 
     if (suspended) {
@@ -802,19 +881,12 @@ router.post("/place", authMiddleware, async (req: AuthRequest, res: Response): P
 
   const useFreebets = isFreebet === true;
   const selectionsToStore = Array.isArray(selections)
-    ? selections.map((x) => {
-        if (!x || typeof x !== "object") return x;
-        const r = x as Record<string, unknown>;
-        const sel = typeof r.selection === "string" ? r.selection : null;
-        if (!sel) return x;
-        const n = normalizeSelectionKey(sel);
-        if (n === sel) return x;
-        return { ...r, selection: n };
-      })
+    ? selections.map((x) => normalizeStoredSelection(x, { matchId: String(matchId), matchTitle, kickoffTime }))
     : selections;
+  const ticketKickoffIso = getTicketKickoffIso(selectionsToStore, kickoffTime);
 
   try {
-    const result = await db.transaction(async (tx) => {
+    const result = await db.transaction(async (tx: any) => {
       if (useFreebets) {
         // Atomic freebet deduction — check AND deduct in a single SQL statement
         // to prevent race conditions from concurrent requests
@@ -822,7 +894,7 @@ router.post("/place", authMiddleware, async (req: AuthRequest, res: Response): P
           .update(usersTable)
           .set({ freebetBalance: sql`${usersTable.freebetBalance} - ${stakeStr}::numeric` })
           .where(and(
-            eq(usersTable.id, req.user!.id),
+            eq(usersTable.id, authReq.user!.id),
             sql`${usersTable.freebetBalance}::numeric >= ${stakeStr}::numeric`,
           ))
           .returning({ freebetBalance: usersTable.freebetBalance });
@@ -832,13 +904,14 @@ router.post("/place", authMiddleware, async (req: AuthRequest, res: Response): P
         }
 
         const [bet] = await tx.insert(betsTable).values({
-          userId: req.user!.id,
+          userId: authReq.user!.id,
           matchId,
           matchTitle,
           selections: selectionsToStore,
           stake: stakeStr,
           potentialWin,
           totalOdds: oddsStr,
+          kickoffTime: ticketKickoffIso ? new Date(ticketKickoffIso) : null,
           status: "pending",
         }).returning();
 
@@ -850,7 +923,7 @@ router.post("/place", authMiddleware, async (req: AuthRequest, res: Response): P
           .update(usersTable)
           .set({ balance: sql`${usersTable.balance} - ${stakeStr}::numeric` })
           .where(and(
-            eq(usersTable.id, req.user!.id),
+            eq(usersTable.id, authReq.user!.id),
             sql`${usersTable.balance}::numeric >= ${stakeStr}::numeric`,
           ))
           .returning({ balance: usersTable.balance });
@@ -860,7 +933,7 @@ router.post("/place", authMiddleware, async (req: AuthRequest, res: Response): P
         }
 
         const [bet] = await tx.insert(betsTable).values({
-          userId: req.user!.id,
+          userId: authReq.user!.id,
           matchId,
           matchTitle,
           selections: selectionsToStore,
@@ -871,7 +944,7 @@ router.post("/place", authMiddleware, async (req: AuthRequest, res: Response): P
         }).returning();
 
         await insertLedgerEntry(tx, {
-          userId: req.user!.id,
+          userId: authReq.user!.id,
           amount: (-parseFloat(stakeStr)).toFixed(2),
           kind: "bet_stake_debit",
           idempotencyKey: `bet:${bet.id}:stake_debit`,
@@ -897,10 +970,11 @@ router.post("/place", authMiddleware, async (req: AuthRequest, res: Response): P
 });
 
 // ─── GET /api/bets/my ─────────────────────────────────────────────────────────
-router.get("/my", authMiddleware, async (req: AuthRequest, res: Response): Promise<void> => {
+router.get("/my", authMiddleware, async (req: Request, res: Response): Promise<void> => {
+  const authReq = req as AuthRequest;
   try {
     const bets = await db.select().from(betsTable)
-      .where(eq(betsTable.userId, req.user!.id))
+      .where(eq(betsTable.userId, authReq.user!.id))
       .orderBy(desc(betsTable.createdAt));
 
     const betIds = bets.map(b => b.id);
@@ -918,7 +992,6 @@ router.get("/my", authMiddleware, async (req: AuthRequest, res: Response): Promi
     for (const l of logs) {
       if (!firstSettleMap.has(l.betId)) firstSettleMap.set(l.betId, l.createdAt);
     }
-
     const policy = await getCashoutPolicy();
     const states = betIds.length === 0
       ? []
@@ -934,13 +1007,14 @@ router.get("/my", authMiddleware, async (req: AuthRequest, res: Response): Promi
     const deletes: number[] = [];
     const nowDate = new Date();
 
-    const enriched = bets.map(b => {
+    const enriched = bets.map((b: any) => {
       const existing = stateMap.get(b.id) ?? null;
       const calc = cashoutCalcForBet({
         bet: b as unknown as { id?: number; matchId: string; matchTitle: string; selections: unknown; stake: string; totalOdds: string; status: string },
         policy,
         existingState: existing,
       });
+
       if (calc.stateOp.type === "insert" && b.id != null) inserts.push({ betId: b.id, unfavorableSince: calc.stateOp.since, reason: calc.stateOp.reason, updatedAt: nowDate });
       else if (calc.stateOp.type === "update_reason" && b.id != null) updates.push({ betId: b.id, reason: calc.stateOp.reason, updatedAt: nowDate });
       else if (calc.stateOp.type === "delete" && b.id != null) deletes.push(b.id);
@@ -984,8 +1058,9 @@ router.get("/my", authMiddleware, async (req: AuthRequest, res: Response): Promi
 });
 
 // ─── POST /api/bets/:id/cashout ───────────────────────────────────────────────
-router.post("/:id/cashout", authMiddleware, async (req: AuthRequest, res: Response): Promise<void> => {
-  const betId = parseInt(String(req.params["id"]), 10);
+router.post("/:id/cashout", authMiddleware, async (req: Request, res: Response): Promise<void> => {
+  const authReq = req as AuthRequest;
+  const betId = parseInt(String((authReq as any).params["id"]), 10);
 
   if (isNaN(betId)) {
     res.status(400).json({ error: "Invalid bet ID" });
@@ -994,7 +1069,7 @@ router.post("/:id/cashout", authMiddleware, async (req: AuthRequest, res: Respon
 
   try {
     const [bet] = await db.select().from(betsTable)
-      .where(and(eq(betsTable.id, betId), eq(betsTable.userId, req.user!.id)))
+      .where(and(eq(betsTable.id, betId), eq(betsTable.userId, authReq.user!.id)))
       .limit(1);
 
     if (!bet) {
@@ -1021,10 +1096,12 @@ router.post("/:id/cashout", authMiddleware, async (req: AuthRequest, res: Respon
           ? { htHome: result.htHome, htAway: result.htAway }
           : undefined;
       return scoreOutcomeForSel(sel, result, ht, {
+        status: result.status,
         cornersTotal: result.cornersTotal,
         cardsTotal: result.cardsTotal,
         firstGoal: result.firstGoal,
         extras: result.extras,
+        finishedAt: result.finishedAt,
       }) === "lost";
     });
     if (hasLostLeg) {
@@ -1042,10 +1119,12 @@ router.post("/:id/cashout", authMiddleware, async (req: AuthRequest, res: Respon
           finalScore: { home: result.home, away: result.away },
           htScore: ht,
           outcome: scoreOutcomeForSel(sel, result, ht, {
+            status: result.status,
             cornersTotal: result.cornersTotal,
             cardsTotal: result.cardsTotal,
             firstGoal: result.firstGoal,
             extras: result.extras,
+            finishedAt: result.finishedAt,
           }),
         };
       });
@@ -1086,7 +1165,7 @@ router.post("/:id/cashout", authMiddleware, async (req: AuthRequest, res: Respon
     const cashoutStr = calc.info.cashoutEstimate;
     const cashoutValue = parseFloat(cashoutStr);
 
-    const result = await db.transaction(async (tx) => {
+    const result = await db.transaction(async (tx: any) => {
       // Atomic cashout — prevent double cashout via concurrent requests
       // by making status = 'cashed_out' only if still 'pending'
       const updatedBet = await tx
@@ -1100,7 +1179,7 @@ router.post("/:id/cashout", authMiddleware, async (req: AuthRequest, res: Respon
       }
 
       await applyBalanceDelta(tx, {
-        userId: req.user!.id,
+        userId: authReq.user!.id,
         amount: cashoutStr,
         kind: "bet_cashout_payout",
         idempotencyKey: `bet:${betId}:cashout`,
@@ -1110,7 +1189,7 @@ router.post("/:id/cashout", authMiddleware, async (req: AuthRequest, res: Respon
 
       await tx.insert(settlementLogsTable).values({
         betId,
-        userId: req.user!.id,
+        userId: authReq.user!.id,
         oldStatus: "pending",
         newStatus: "cashed_out",
         payout: cashoutStr,

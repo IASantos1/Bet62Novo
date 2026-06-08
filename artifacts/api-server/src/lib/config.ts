@@ -1,4 +1,11 @@
+const SPORTSAPI_KEY =
+  process.env["SPORTSAPIPRO_KEY"] ??
+  process.env["SPORTSAPI_PRO_KEY"] ??
+  process.env["SPORTSAPI_KEY"] ??
+  "";
+
 export const CONFIG = {
+  SPORTSAPI_KEY,
   LIVE_UPDATE_INTERVAL: 1000,
   PREMATCH_UPDATE_INTERVAL: 300_000,
   REOPEN_DELAY_GOAL_LOW: 12_000,

@@ -1,4 +1,5 @@
-import { useState, useCallback, useEffect, useRef, useMemo, createContext, useContext, Children, type ReactNode } from "react";
+import React, { useState, useCallback, useEffect, useRef, useMemo, createContext, useContext, Children, type ReactNode } from "react";
+
 import { useIdle } from "@/hooks/use-idle";
 import { motion, AnimatePresence } from "framer-motion";
 import { toast } from "sonner";
@@ -1221,6 +1222,9 @@ type Match = {
 type BetSelection = {
   matchId: string | number;
   matchTitle: string;
+  homeTeam?: string;
+  awayTeam?: string;
+  kickoffTime?: string;
   selection: string;
   odd: number;
   market?: string;
@@ -1230,6 +1234,10 @@ type BetSelection = {
 type StoredSelection = {
   matchId?: string;
   matchTitle: string;
+  homeTeam?: string;
+  awayTeam?: string;
+  kickoffTime?: string;
+  scheduledAt?: string;
   selection: string;
   odd: number;
   market?: string;
@@ -3068,6 +3076,18 @@ export default function Home() {
             setLiveMatches(prev => prev.map(m =>
               String(m.id) === String(data.matchId) ? { ...m, ...(data.delta ?? {}), isLive: true } : m
             ));
+          } else if (data.type === "batch_update" && Array.isArray(data.updates)) {
+            // Multiple deltas in one message
+            setLiveMatches(prev => {
+              const next = [...prev];
+              for (const upd of data.updates) {
+                const idx = next.findIndex(m => String(m.id) === String(upd.matchId));
+                if (idx >= 0) {
+                  next[idx] = { ...next[idx]!, ...upd.delta, isLive: true };
+                }
+              }
+              return next;
+            });
           } else if (Array.isArray(data.matches)) {
             // Full snapshot from server broadcast
             writeSnapshot(liveSnapshotKey(), data.matches);
@@ -3357,6 +3377,9 @@ export default function Home() {
       return [...prev, {
         matchId: match.id,
         matchTitle: `${match.home} vs ${match.away}`,
+        homeTeam: match.home,
+        awayTeam: match.away,
+        kickoffTime: getMatchKickoffIso(match),
         selection,
         odd,
         market,
@@ -3552,7 +3575,17 @@ export default function Home() {
             body: JSON.stringify({
               matchId: String(bet.matchId),
               matchTitle: bet.matchTitle,
-              selections: [{ matchId: String(bet.matchId), matchTitle: bet.matchTitle, selection: bet.selection, odd: bet.odd, market: bet.market, label: bet.label || bet.selection }],
+              selections: [{
+                matchId: String(bet.matchId),
+                matchTitle: bet.matchTitle,
+                homeTeam: bet.homeTeam,
+                awayTeam: bet.awayTeam,
+                kickoffTime: bet.kickoffTime,
+                selection: bet.selection,
+                odd: bet.odd,
+                market: bet.market,
+                label: bet.label || bet.selection,
+              }],
               stake: sNum.toFixed(2),
               potentialWin,
               totalOdds: bet.odd.toFixed(2),
@@ -3585,7 +3618,17 @@ export default function Home() {
         body: JSON.stringify({
           matchId,
           matchTitle,
-          selections: bets.map(b => ({ matchId: String(b.matchId), matchTitle: b.matchTitle, selection: b.selection, odd: b.odd, market: b.market, label: b.label || b.selection })),
+          selections: bets.map(b => ({
+            matchId: String(b.matchId),
+            matchTitle: b.matchTitle,
+            homeTeam: b.homeTeam,
+            awayTeam: b.awayTeam,
+            kickoffTime: b.kickoffTime,
+            selection: b.selection,
+            odd: b.odd,
+            market: b.market,
+            label: b.label || b.selection,
+          })),
           stake: stakeNum.toFixed(2),
           potentialWin,
           totalOdds,
@@ -6739,6 +6782,48 @@ export default function Home() {
     return t ? `${dayLabel} • ${t}` : dayLabel;
   };
 
+  const getMatchKickoffIso = (m: Pick<Match, "scheduledDate" | "date" | "scheduledTime" | "time">): string | undefined => {
+    const dateRaw = m.scheduledDate ?? m.date;
+    const timeRaw = m.scheduledTime ?? m.time;
+    const date = typeof dateRaw === "string" ? parseDMY(dateRaw) : null;
+    const time = typeof timeRaw === "string" ? timeRaw : null;
+    if (!date && !time) return undefined;
+    if (date && time && /^\d{1,2}:\d{2}$/.test(time)) {
+      const [hh, mm] = time.split(":").map(Number);
+      date.setHours(hh, mm, 0, 0);
+      return date.toISOString();
+    }
+    if (date) return date.toISOString();
+    return undefined;
+  };
+
+  const getSelectionKickoffDate = (sel: StoredSelection): Date | null => {
+    const raw = sel.kickoffTime ?? sel.scheduledAt;
+    if (!raw) return null;
+    const parsed = new Date(raw);
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
+  };
+
+  const getTicketKickoffDate = (bet: UserBet): Date | null => {
+    const selections = getBetSelections(bet);
+    const dates = selections
+      .map(getSelectionKickoffDate)
+      .filter((value): value is Date => value instanceof Date);
+    if (dates.length === 0) return null;
+    return new Date(Math.min(...dates.map((value) => value.getTime())));
+  };
+
+  const formatTicketMoment = (value: Date | null): string | null => {
+    if (!value) return null;
+    return value.toLocaleDateString("pt-PT", {
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  };
+
   const getBetSelections = (bet: UserBet): StoredSelection[] => {
     if (Array.isArray(bet.selections)) return bet.selections as StoredSelection[];
     return [{ matchTitle: bet.matchTitle, selection: "home", odd: parseFloat(bet.totalOdds), market: "result" }];
@@ -8823,7 +8908,10 @@ export default function Home() {
                                     if (!slip) {
                                       setBets(prev => [...prev.filter(b => !(b.matchId === expandedMatch.id && (b.market ?? "").startsWith(`all_${mi}_`))), {
                                         matchId: expandedMatch.id,
-                                        matchTitle: `${expandedMatch.home} — ${expandedMatch.away}`,
+                                        matchTitle: `${expandedMatch.home} vs ${expandedMatch.away}`,
+                                        homeTeam: expandedMatch.home,
+                                        awayTeam: expandedMatch.away,
+                                        kickoffTime: getMatchKickoffIso(expandedMatch),
                                         odd: choice.odds,
                                         market: mkKey,
                                         selection: `${market.name}: ${choice.label}`,
@@ -10702,8 +10790,8 @@ export default function Home() {
                         const isVoided = bet.status === "voided";
                         const ticketCode = `BT62-${String(bet.id).padStart(6, "0")}`;
                         const betDate = new Date(bet.createdAt);
-                        const dateStr = betDate.toLocaleDateString("pt-PT", { day: "2-digit", month: "2-digit", year: "numeric" });
-                        const timeStr = betDate.toLocaleTimeString("pt-PT", { hour: "2-digit", minute: "2-digit" });
+                        const betPlacedStr = formatTicketMoment(betDate);
+                        const gameKickoffStr = formatTicketMoment(getTicketKickoffDate(bet));
                         const settledAt = bet.settledAt ? new Date(bet.settledAt) : null;
                         const settledDateStr = settledAt ? settledAt.toLocaleDateString("pt-PT", { day: "2-digit", month: "2-digit", year: "numeric" }) : null;
                         const settledTimeStr = settledAt ? settledAt.toLocaleTimeString("pt-PT", { hour: "2-digit", minute: "2-digit" }) : null;
@@ -10731,9 +10819,14 @@ export default function Home() {
                                 </div>
                                 <div>
                                   <div className="font-black text-white text-[17px] leading-tight italic">Boletim de Aposta</div>
-                                  <div className="flex items-center gap-1.5 text-red-200 text-[11px] font-medium mt-0.5">
-                                    <CalendarDays size={11} />
-                                    {dateStr} • {timeStr}
+                                  {gameKickoffStr && (
+                                    <div className="flex items-center gap-1.5 text-red-100 text-[11px] font-semibold mt-0.5">
+                                      <CalendarDays size={11} />
+                                      Jogo: {gameKickoffStr}
+                                    </div>
+                                  )}
+                                  <div className="text-red-200 text-[11px] font-medium mt-0.5">
+                                    Apostada: {betPlacedStr}
                                   </div>
                                   {!isPending && settledAt && (
                                     <div className="text-red-100 text-[11px] font-medium mt-0.5">
@@ -10774,6 +10867,7 @@ export default function Home() {
                             <div className={`${selsBg} divide-y ${divider}`}>
                               {sels.map((sel, i) => {
                                 const outcome = getSelOutcome(sel, bet.status);
+                                const liveOutcome = (sel as any).liveOutcome ?? null;
                                 const lm = isActivePending ? findLiveMatchForSel(sel) : null;
                                 const liveOdd = lm ? getLiveOddForSel(sel, lm) : null;
                                 const displayMin = lm ? (lm.status === "HT" ? "HT" : `${lm.minute ?? 0}'`) : null;
@@ -10794,6 +10888,8 @@ export default function Home() {
                                     : <div className="w-6 h-6 rounded-full bg-green-500 flex items-center justify-center shrink-0"><Check size={13} className="text-white" strokeWidth={3} /></div>;
                                 } else if (isCashedOut) {
                                   leftIcon = <div className="w-6 h-6 rounded-full bg-yellow-500/70 flex items-center justify-center shrink-0"><CircleDollarSign size={11} className="text-white" /></div>;
+                                } else if (liveOutcome === "won") {
+                                  leftIcon = <div className="w-6 h-6 rounded-full bg-green-500 flex items-center justify-center shrink-0 shadow-[0_0_8px_rgba(34,197,94,0.6)]"><TrendingUp size={11} className="text-white" strokeWidth={3} /></div>;
                                 } else {
                                   if (outcome === "live-win") {
                                     leftIcon = <div className="w-6 h-6 rounded-full bg-green-500 flex items-center justify-center shrink-0"><Check size={13} className="text-white" strokeWidth={3} /></div>;
@@ -10815,6 +10911,10 @@ export default function Home() {
                                   }
                                 }
 
+                                const kickoffStr = (sel as any).kickoffTime 
+                                  ? new Date((sel as any).kickoffTime).toLocaleDateString("pt-PT", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })
+                                  : null;
+
                                 // Final score for resolved bets
                                 const normT = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
                                 const [th = "", ta = ""] = (sel.matchTitle ?? "").split(" vs ");
@@ -10828,6 +10928,7 @@ export default function Home() {
                                       <div className={`font-bold text-[13px] leading-snug ${txtMain}`}>
                                         {i + 1}. {sel.matchTitle}
                                       </div>
+                                      {kickoffStr && <div className={`text-[10px] mt-0.5 font-medium ${txtSub}`}>📅 {kickoffStr}</div>}
                                       <div className={`text-[11px] mt-0.5 ${txtSub}`}>{getSelLabel(sel)}</div>
                                       {/* Live / upcoming badge */}
                                       {lm && lm.status !== "Not Started" && (lm.minute ?? 0) > 0 && (
@@ -10841,6 +10942,13 @@ export default function Home() {
                                               {liveOdd < sel.odd ? "▼" : "▲"} {liveOdd.toFixed(2)}
                                             </span>
                                           )}
+                                        </div>
+                                      )}
+                                      {/* Winning Signal badge */}
+                                      {isActivePending && liveOutcome === "won" && (
+                                        <div className="flex items-center gap-1.5 mt-2 bg-green-500/10 border border-green-500/20 px-2.5 py-1 rounded-md w-fit">
+                                          <TrendingUp size={11} className="text-green-500" strokeWidth={3} />
+                                          <span className="text-[10px] font-black text-green-500 uppercase tracking-tight">Vencendo agora</span>
                                         </div>
                                       )}
                                       {lm && (lm.status === "Not Started" || (lm.minute ?? 0) === 0) && (
@@ -11539,7 +11647,7 @@ export default function Home() {
               animate={{ scale: 1, y: 0 }}
               exit={{ scale: 0.85, y: 40 }}
               className="relative overflow-hidden rounded-3xl max-w-md w-full border border-white/15 shadow-2xl"
-              onClick={e => e.stopPropagation()}
+              onClick={(e: React.MouseEvent) => e.stopPropagation()}
             >
               {promoNotif.type === "freebets10" && (
                 <>
@@ -11657,7 +11765,7 @@ export default function Home() {
               transition={{ type: "spring", stiffness: 380, damping: 22 }}
               className="relative z-10 rounded-3xl border border-white/20 shadow-[0_0_80px_rgba(34,197,94,0.45)] overflow-hidden max-w-sm w-full mx-4"
               style={{ background: "linear-gradient(135deg, #0a2a0a 0%, #052010 50%, #0a1a0a 100%)" }}
-              onClick={e => e.stopPropagation()}
+              onClick={(e: React.MouseEvent) => e.stopPropagation()}
             >
               <div className="absolute inset-0 opacity-20" style={{ background: "radial-gradient(circle at 50% 0%, #22c55e 0%, transparent 70%)" }} />
               <div className="relative z-10 p-8 text-center">
@@ -11769,6 +11877,149 @@ export default function Home() {
         )}
       </AnimatePresence>
 
+    </div>
+  );
+}
+
+// ─── WORLD CUP 3D BANNER ─────────────────────────────────────────────────────
+function WorldCupBanner3D({ onClick }: { onClick: () => void }) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [mouse, setMouse] = useState({ x: 0, y: 0 });
+  const [isHovered, setIsHovered] = useState(false);
+  const handleMouseMove = (e: React.MouseEvent) => {
+    const rect = containerRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    setMouse({ x: (e.clientX - rect.left) / rect.width - 0.5, y: (e.clientY - rect.top) / rect.height - 0.5 });
+  };
+  const particles = [
+    { size: 2, left: 12, top: 22, dur: 2.2, delay: 0 },
+    { size: 3, left: 26, top: 62, dur: 2.6, delay: 0.28 },
+    { size: 2, left: 40, top: 33, dur: 2.1, delay: 0.56 },
+    { size: 4, left: 55, top: 78, dur: 2.9, delay: 0.84 },
+    { size: 2, left: 64, top: 18, dur: 2.4, delay: 1.12 },
+    { size: 3, left: 74, top: 55, dur: 2.7, delay: 1.4 },
+    { size: 2, left: 82, top: 38, dur: 2.3, delay: 1.68 },
+    { size: 3, left: 91, top: 68, dur: 2.5, delay: 1.96 },
+  ];
+  return (
+    <div
+      ref={containerRef}
+      className="mb-4 relative overflow-hidden rounded-2xl cursor-pointer select-none"
+      style={{ height: 220, perspective: "1000px" }}
+      onClick={onClick}
+      onMouseMove={handleMouseMove}
+      onMouseEnter={() => setIsHovered(true)}
+      onMouseLeave={() => { setIsHovered(false); setMouse({ x: 0, y: 0 }); }}
+    >
+      {/* BG layer — moves slowest, opposite direction */}
+      <motion.div
+        className="absolute inset-0"
+        animate={{ x: mouse.x * -18, y: mouse.y * -10, scale: isHovered ? 1.07 : 1.03 }}
+        transition={{ type: "spring", stiffness: 100, damping: 18 }}
+      >
+        <img src="/copa-banner.jpeg" className="w-full h-full object-cover" alt="" />
+      </motion.div>
+
+      {/* Colour depth overlays */}
+      <div className="absolute inset-0 bg-gradient-to-r from-black/85 via-black/45 to-black/10 pointer-events-none" />
+      <div className="absolute inset-0 bg-gradient-to-t from-black/75 via-transparent to-transparent pointer-events-none" />
+      <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_70%_30%,rgba(220,38,38,0.30),transparent_55%)] pointer-events-none" />
+      <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_25%_80%,rgba(234,179,8,0.13),transparent_45%)] pointer-events-none" />
+
+      {/* Floating gold particles */}
+      {particles.map((p, i) => (
+        <motion.div
+          key={i}
+          className="absolute rounded-full bg-yellow-300/80 pointer-events-none"
+          style={{ width: p.size, height: p.size, left: `${p.left}%`, top: `${p.top}%`, filter: "blur(0.5px)" }}
+          animate={{ opacity: [0.3, 0.9, 0.3], scale: [1, 1.6, 1], y: [-4, 4, -4] }}
+          transition={{ duration: p.dur, repeat: Infinity, ease: "easeInOut", delay: p.delay }}
+        />
+      ))}
+
+      {/* Main content — slight 3D tilt */}
+      <motion.div
+        className="absolute inset-0 flex flex-col justify-center px-6 sm:px-8"
+        animate={{ rotateX: mouse.y * -4, rotateY: mouse.x * 6, x: mouse.x * 10, y: mouse.y * 5 }}
+        style={{ transformStyle: "preserve-3d" }}
+        transition={{ type: "spring", stiffness: 180, damping: 24 }}
+      >
+        <motion.div
+          className="flex items-center gap-2 mb-3"
+          animate={{ x: mouse.x * 6, y: mouse.y * 3 }}
+          transition={{ type: "spring", stiffness: 160, damping: 22 }}
+        >
+          <span className="bg-red-600/90 backdrop-blur-sm text-white text-[10px] font-black tracking-[0.2em] px-3 py-1 rounded-full border border-red-400/30 shadow-lg shadow-red-900/40">
+            🏆 COPA DO MUNDO
+          </span>
+          <span className="bg-yellow-500/20 backdrop-blur-sm text-yellow-300 text-[10px] font-black tracking-[0.12em] px-3 py-1 rounded-full border border-yellow-400/25">
+            USA · CAN · MEX 2026
+          </span>
+        </motion.div>
+
+        <motion.h2
+          className="text-white font-black leading-none tracking-tight"
+          style={{
+            fontSize: "clamp(1.4rem,3.8vw,2.4rem)",
+            textShadow: "0 4px 30px rgba(0,0,0,0.9), 0 0 60px rgba(220,38,38,0.35)",
+          }}
+          animate={{ x: mouse.x * 9, y: mouse.y * 4 }}
+          transition={{ type: "spring", stiffness: 145, damping: 20 }}
+        >
+          ANO DA{" "}
+          <span className="text-transparent bg-clip-text bg-gradient-to-r from-red-400 via-yellow-300 to-red-400">
+            COPA
+          </span>
+        </motion.h2>
+
+        <motion.p
+          className="text-white/80 text-sm sm:text-base mt-2 font-medium"
+          animate={{ x: mouse.x * 6, y: mouse.y * 3 }}
+          transition={{ type: "spring", stiffness: 130, damping: 18 }}
+        >
+          Viva a emoção do futebol com a{" "}
+          <span className="text-red-400 font-bold">Bet62</span>
+        </motion.p>
+      </motion.div>
+
+      {/* Trophy — moves most, creates parallax depth */}
+      <motion.div
+        className="absolute right-6 sm:right-12 top-1/2 -translate-y-1/2 pointer-events-none"
+        animate={{ x: mouse.x * 28, y: mouse.y * 16, rotateZ: mouse.x * 4, scale: isHovered ? 1.1 : 1 }}
+        transition={{ type: "spring", stiffness: 90, damping: 16 }}
+      >
+        <div className="relative">
+          <div className="absolute inset-0 blur-3xl bg-yellow-400/35 rounded-full" />
+          <Trophy
+            size={88}
+            className="text-yellow-400 relative z-10"
+            strokeWidth={1.1}
+            style={{ filter: "drop-shadow(0 0 24px rgba(251,191,36,0.75))" }}
+          />
+          <motion.div
+            className="absolute -bottom-1 left-1/2 -translate-x-1/2 w-14 h-2.5 bg-yellow-400/25 rounded-full"
+            style={{ filter: "blur(8px)" }}
+            animate={{ opacity: isHovered ? 1 : 0.6, scaleX: isHovered ? 1.3 : 1 }}
+            transition={{ duration: 0.4 }}
+          />
+        </div>
+      </motion.div>
+
+      {/* CTA button */}
+      <motion.button
+        className="absolute bottom-4 right-4 bg-red-600 text-white text-sm font-black px-5 py-2.5 rounded-xl border border-red-500/50 z-20"
+        animate={{ x: mouse.x * 14, y: mouse.y * 7, scale: isHovered ? 1.06 : 1 }}
+        style={{ boxShadow: "0 4px 20px rgba(220,38,38,0.45)" }}
+        whileTap={{ scale: 0.94 }}
+        transition={{ type: "spring", stiffness: 280, damping: 28 }}
+        onClick={(e: React.MouseEvent<HTMLButtonElement>) => { e.stopPropagation(); onClick(); }}
+      >
+        APOSTAR JÁ →
+      </motion.button>
+
+      {/* Rim light */}
+      <div className="absolute inset-0 rounded-2xl ring-1 ring-inset ring-white/[0.07] pointer-events-none" />
+      <div className="absolute top-0 left-12 right-12 h-px bg-gradient-to-r from-transparent via-white/30 to-transparent pointer-events-none" />
     </div>
   );
 }

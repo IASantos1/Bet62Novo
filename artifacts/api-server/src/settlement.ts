@@ -1,12 +1,16 @@
 import { db, betsTable, cashoutStatesTable, usersTable, settlementLogsTable } from "@workspace/db";
 import { eq, and, lt, sql, gte, desc } from "drizzle-orm";
-import { logger } from "./lib/logger";
-import { applyBalanceDelta } from "./lib/ledger";
-import { ensureFinishedMatchResult, finishedMatchResults, liveMatchState, scanDailyForFinished, scanV2AllSportsForFinished } from "./routes/matches";
+import { logger } from "./lib/logger.js";
+import { applyBalanceDelta } from "./lib/ledger.js";
+import { ensureFinishedMatchResult, finishedMatchResults, liveMatchState, scanDailyForFinished, scanV2AllSportsForFinished } from "./routes/matches.js";
 
 export type SelectionRecord = {
   matchId?: string;
   matchTitle?: string;
+  homeTeam?: string;
+  awayTeam?: string;
+  kickoffTime?: string;
+  scheduledAt?: string;
   selection: string;
   odd?: number;
   market?: string;
@@ -52,8 +56,27 @@ export function scoreOutcomeForSel(
   sel: { selection: string },
   ft: FTScore,
   ht?: HTScore,
-  extra?: { cornersTotal?: number; cardsTotal?: number; firstGoal?: "home" | "away" | "none"; extras?: unknown }
+  extra?: { status?: string; cornersTotal?: number; cardsTotal?: number; firstGoal?: "home" | "away" | "none"; extras?: unknown; finishedAt?: number }
 ): "won" | "lost" | "void" | null {
+  // ── Handle Postponed / Cancelled / Void statuses ──────────────────────────
+  const IMMEDIATE_VOID_STATUSES = new Set(["Cancelled", "Cancl.", "Abandoned", "Abd"]);
+  const DELAYED_VOID_STATUSES = new Set(["Postponed", "Postp.", "Delayed", "Susp", "Susp.", "Interrupted"]);
+
+  if (extra?.status) {
+    if (IMMEDIATE_VOID_STATUSES.has(extra.status)) {
+      return "void";
+    }
+    if (DELAYED_VOID_STATUSES.has(extra.status)) {
+      // Only void automatically if 72 hours have passed since it was marked as postponed/delayed
+      const threshold = 72 * 60 * 60 * 1000;
+      if (extra.finishedAt && Date.now() - extra.finishedAt > threshold) {
+        return "void";
+      }
+      // Otherwise keep it as null (pending) to see if it resumes/restarts within the window
+      return null;
+    }
+  }
+
   // ── Key normalisation (ComprehensiveMarketsSheet keys → canonical keys) ────
   let s = sel.selection;
   if      (s === "1x2-home")   s = "home";
@@ -643,9 +666,57 @@ export function scoreOutcomeForSel(
   return winning === null ? null : winning ? "won" : "lost";
 }
 
+function normalizeTeamName(raw: string): string {
+  return raw
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/\b(fc|cf|sc|ac|cd|club|women|woman|feminino|femenino|ladies|reserves|reserve|ii|iii|u\d{2}|sub ?\d{2})\b/g, " ")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+function tokenizeTeamName(raw: string): string[] {
+  return normalizeTeamName(raw)
+    .split(/\s+/)
+    .filter((token) => token.length >= 2);
+}
+
+function teamNameMatchStrength(a: string, b: string): "none" | "fuzzy" | "exact" {
+  const left = normalizeTeamName(a);
+  const right = normalizeTeamName(b);
+  if (!left || !right) return "none";
+  if (left === right) return "exact";
+  if (left.includes(right) || right.includes(left)) return "exact";
+  const leftTokens = tokenizeTeamName(a);
+  const rightTokens = tokenizeTeamName(b);
+  if (leftTokens.length === 0 || rightTokens.length === 0) return "none";
+  const overlap = rightTokens.filter((token) => leftTokens.includes(token)).length;
+  const minNeeded = Math.min(2, Math.min(leftTokens.length, rightTokens.length));
+  return overlap >= Math.max(1, minNeeded) ? "fuzzy" : "none";
+}
+
+function splitTeamsFromTitle(title: string): { home: string; away: string } | null {
+  const raw = String(title ?? "").trim();
+  if (!raw) return null;
+  const parts = raw.split(/\s+(?:vs|v|x|-|—|–)\s+/i);
+  if (parts.length < 2) return null;
+  const home = parts[0]!.trim();
+  const away = parts.slice(1).join(" ").trim();
+  if (!home || !away) return null;
+  return { home, away };
+}
+
+function getSelectionTeams(sel: SelectionRecord): { home: string; away: string } | null {
+  if (sel.homeTeam && sel.awayTeam) {
+    return { home: sel.homeTeam, away: sel.awayTeam };
+  }
+  return splitTeamsFromTitle(sel.matchTitle ?? "");
+}
+
 /**
  * Find the settled result for a selection.
- * Priority: per-selection matchId → bet-level matchId (singles only).
+ * Priority: per-selection matchId -> bet-level matchId (singles only).
  */
 function findResult(
   sel: SelectionRecord,
@@ -662,23 +733,24 @@ function findResult(
     if (r) return r;
   }
 
-  // 2. Fallback: search by team names from matchTitle ("Home vs Away")
-  //    Handles ID format mismatches (pre-match ID ≠ live ID, server restart, etc.)
-  const title = sel.matchTitle ?? "";
-  const vsSplit = title.split(" vs ");
-  if (vsSplit.length >= 2) {
-    const homeQ = vsSplit[0]!.trim().toLowerCase();
-    const awayQ = vsSplit.slice(1).join(" vs ").trim().toLowerCase();
-    if (homeQ && awayQ) {
-      for (const result of finishedMatchResults.values()) {
-        const rH = result.homeTeam.toLowerCase();
-        const rA = result.awayTeam.toLowerCase();
-        // Accept if either name contains the other (handles abbreviations & extra words)
-        const homeMatch = rH.includes(homeQ) || homeQ.includes(rH);
-        const awayMatch = rA.includes(awayQ) || awayQ.includes(rA);
-        if (homeMatch && awayMatch) return result;
+  // 2. Fallback: search by team names captured on the ticket.
+  const teams = getSelectionTeams(sel);
+  if (teams) {
+    const exactMatches: FinishedResult[] = [];
+    const fuzzyMatches: FinishedResult[] = [];
+    for (const result of finishedMatchResults.values()) {
+      const homeStrength = teamNameMatchStrength(result.homeTeam, teams.home);
+      const awayStrength = teamNameMatchStrength(result.awayTeam, teams.away);
+      if (homeStrength === "exact" && awayStrength === "exact") {
+        exactMatches.push(result);
+        continue;
+      }
+      if (homeStrength !== "none" && awayStrength !== "none") {
+        fuzzyMatches.push(result);
       }
     }
+    if (exactMatches.length > 0) return exactMatches[exactMatches.length - 1] ?? null;
+    if (fuzzyMatches.length > 0) return fuzzyMatches[fuzzyMatches.length - 1] ?? null;
   }
 
   return null;
@@ -698,19 +770,12 @@ function findLiveResult(
     if (r) return r;
   }
 
-  const title = sel.matchTitle ?? "";
-  const vsSplit = title.split(" vs ");
-  if (vsSplit.length >= 2) {
-    const homeQ = vsSplit[0]!.trim().toLowerCase();
-    const awayQ = vsSplit.slice(1).join(" vs ").trim().toLowerCase();
-    if (homeQ && awayQ) {
-      for (const result of liveMatchState.values()) {
-        const rH = String((result as any).home ?? "").toLowerCase();
-        const rA = String((result as any).away ?? "").toLowerCase();
-        const homeMatch = rH.includes(homeQ) || homeQ.includes(rH);
-        const awayMatch = rA.includes(awayQ) || awayQ.includes(rA);
-        if (homeMatch && awayMatch) return result;
-      }
+  const teams = getSelectionTeams(sel);
+  if (teams) {
+    for (const result of liveMatchState.values()) {
+      const homeStrength = teamNameMatchStrength(String((result as any).home ?? ""), teams.home);
+      const awayStrength = teamNameMatchStrength(String((result as any).away ?? ""), teams.away);
+      if (homeStrength !== "none" && awayStrength !== "none") return result;
     }
   }
 
@@ -978,9 +1043,7 @@ export async function autoSettlePendingBets(opts?: { matchIds?: string[] }): Pro
         // ── Early loss: if any leg is definitively lost, settle immediately ──
         if (outcomes.some(o => o === "lost")) {
           const updatedSelsLost = selections.map(sel => {
-            const mId = sel.matchId ?? (isSingle ? bet.matchId : undefined);
-            if (!mId) return sel;
-            const r = finishedMatchResults.get(mId);
+            const r = findResult(sel, bet.matchId, isSingle);
             if (!r) return sel;
             const ht = typeof r.htHome === "number" && typeof r.htAway === "number"
               ? { htHome: r.htHome, htAway: r.htAway }
@@ -997,7 +1060,7 @@ export async function autoSettlePendingBets(opts?: { matchIds?: string[] }): Pro
               }),
             };
           });
-          await db.transaction(async (tx) => {
+          await db.transaction(async (tx: any) => {
             const rows = await tx
               .update(betsTable)
               .set({ status: "lost", selections: updatedSelsLost })
@@ -1026,7 +1089,7 @@ export async function autoSettlePendingBets(opts?: { matchIds?: string[] }): Pro
         if (outcomes.some(o => o === null)) continue;
 
         if (outcomes.every(o => o === "void")) {
-          await db.transaction(async (tx) => {
+          await db.transaction(async (tx: any) => {
             const rows = await tx
               .update(betsTable)
               .set({ status: "voided" })
@@ -1071,9 +1134,7 @@ export async function autoSettlePendingBets(opts?: { matchIds?: string[] }): Pro
         const oddsStr = Number(effectiveOdds.toFixed(2)).toFixed(2);
 
         const updatedSelsWon = selections.map(sel => {
-          const mId = sel.matchId ?? (isSingle ? bet.matchId : undefined);
-          if (!mId) return sel;
-          const r = finishedMatchResults.get(mId);
+          const r = findResult(sel, bet.matchId, isSingle);
           if (!r) return sel;
           const ht = typeof r.htHome === "number" && typeof r.htAway === "number"
             ? { htHome: r.htHome, htAway: r.htAway }
@@ -1083,15 +1144,17 @@ export async function autoSettlePendingBets(opts?: { matchIds?: string[] }): Pro
             finalScore: { home: r.home, away: r.away },
             htScore: ht,
             outcome: scoreOutcomeForSel(sel, { home: r.home, away: r.away }, ht, {
+              status: (r as any).status,
               cornersTotal: r.cornersTotal,
               cardsTotal: r.cardsTotal,
               firstGoal: r.firstGoal,
               extras: r.extras,
+              finishedAt: r.finishedAt,
             }),
           };
         });
 
-        await db.transaction(async (tx) => {
+        await db.transaction(async (tx: any) => {
           // Optimistic lock: only update if still pending
           const rows = await tx
             .update(betsTable)
@@ -1353,9 +1416,7 @@ async function hydrateSettledBetSelections(): Promise<void> {
       let changed = false;
 
       const next = selections.map((sel) => {
-        const mId = sel.matchId ?? (isSingle ? bet.matchId : undefined);
-        if (!mId) return sel;
-        const r = finishedMatchResults.get(mId);
+        const r = findResult(sel, bet.matchId, isSingle);
         if (!r) return sel;
 
         const needsOutcome = sel.outcome == null;
@@ -1373,10 +1434,12 @@ async function hydrateSettledBetSelections(): Promise<void> {
           htScore: sel.htScore ?? ht,
           outcome: needsOutcome
             ? scoreOutcomeForSel(sel, { home: r.home, away: r.away }, ht, {
+                status: (r as any).status,
                 cornersTotal: r.cornersTotal,
                 cardsTotal: r.cardsTotal,
                 firstGoal: r.firstGoal,
                 extras: r.extras,
+                finishedAt: r.finishedAt,
               })
             : sel.outcome,
         };
@@ -1405,13 +1468,16 @@ const STALE_THRESHOLD_MS = 72 * 60 * 60 * 1000; // 72 hours
 
 async function expireStalePendingBets(): Promise<void> {
   try {
-    const cutoff = new Date(Date.now() - STALE_THRESHOLD_MS);
+    const now = new Date();
+    const cutoff = new Date(now.getTime() - STALE_THRESHOLD_MS);
+
+    // Find bets where kickoff_time < cutoff OR (no kickoff_time AND created_at < cutoff)
     const staleBets = await db
       .select()
       .from(betsTable)
       .where(and(
         eq(betsTable.status, "pending"),
-        lt(betsTable.createdAt, cutoff)
+        sql`COALESCE(${betsTable.kickoffTime}, ${betsTable.createdAt}) < ${cutoff}`
       ));
 
     if (staleBets.length === 0) return;
@@ -1430,7 +1496,7 @@ async function expireStalePendingBets(): Promise<void> {
         // If result just became available, skip — next settlement cycle handles it
         if (hasResult) continue;
 
-        await db.transaction(async (tx) => {
+        await db.transaction(async (tx: any) => {
           const rows = await tx
             .update(betsTable)
             .set({ status: "voided" })

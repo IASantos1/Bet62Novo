@@ -332,6 +332,8 @@ function UpcomingCard({ match }: { match: UpcomingMatch }) {
     else addSelection({
       matchId: match.id,
       matchTitle: `${match.home} vs ${match.away}`,
+      homeTeam: match.home,
+      awayTeam: match.away,
       market,
       selection: market,
       label: `${match.home} vs ${match.away} — ${label}`,

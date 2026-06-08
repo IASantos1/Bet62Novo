@@ -11,6 +11,7 @@ export const matchResultsTable = pgTable("match_results", {
   htAway: integer("ht_away"),
   homeTeam: text("home_team"),
   awayTeam: text("away_team"),
+  status: text("status"),
   cornersTotal: integer("corners_total"),
   cardsTotal: integer("cards_total"),
   firstGoal: text("first_goal"),

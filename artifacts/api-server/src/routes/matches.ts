@@ -1,14 +1,14 @@
-import { Router, type IRouter } from "express";
+import { Router, type IRouter, type Request, type Response } from "express";
 import { WebSocketServer, type WebSocket as WsClient } from "ws";
-import { CONFIG, FOOTBALL_SUSP_KEYS, footballSuspensionDelayMs } from "../lib/config";
-import { logger } from "../lib/logger";
-import { buildMatchSettlementJobId, enqueueMatchSettlement } from "../lib/settlementQueue";
+import { CONFIG, FOOTBALL_SUSP_KEYS, footballSuspensionDelayMs } from "../lib/config.js";
+import { logger } from "../lib/logger.js";
+import { buildMatchSettlementJobId, enqueueMatchSettlement } from "../lib/settlementQueue.js";
 import { db, matchResultsTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
+import * as http from "http";
+import * as net from "net";
 
 const router: IRouter = Router();
-
-const SPORTSAPI_KEY = process.env.SPORTSAPI_KEY ?? "";
 
 // SportsAPI Pro V2 — real-time live scores (V2 domains, correct paths)
 const SAPI_V2_FOOTBALL   = "https://v2.football.sportsapipro.com/api";
@@ -25,7 +25,7 @@ const SAPI_V1_BASKETBALL = "https://v1.basketball.sportsapipro.com/api";
 const SAPI_V1_TENNIS     = "https://v1.tennis.sportsapipro.com/api";
 
 // Auth headers helper
-const sapiHeaders = (): Record<string, string> => ({ "x-api-key": SPORTSAPI_KEY });
+const sapiHeaders = (): Record<string, string> => ({ "x-api-key": CONFIG.SPORTSAPI_KEY });
 
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -2173,8 +2173,6 @@ type SAPIV2Event = {
 
 type V2RedCards = { home: number; away: number };
 type V2RedCardsEntry = V2RedCards & { fetchedAt: number };
-const v2FootballRedCardsCache = new Map<number, V2RedCardsEntry>();
-const V2_RED_CARDS_TTL_MS = 45_000;
 
 async function getFootballV2RedCards(matchId: number): Promise<V2RedCards | null> {
   const cached = v2FootballRedCardsCache.get(matchId);
@@ -2315,6 +2313,57 @@ let broadcastInProgress = false;
 let broadcastPending = false;
 let consecutiveEmptyBroadcasts = 0;
 let lastBroadcastAt = 0;
+
+// Global buffer for delta updates — collected over 100ms and flushed in a single packet
+let pendingBatchUpdates: Array<{ matchId: string; delta: Partial<LiveMatchState> }> = [];
+let batchFlushTimer: ReturnType<typeof setTimeout> | null = null;
+
+function flushBatchUpdates(): void {
+  if (batchFlushTimer) {
+    clearTimeout(batchFlushTimer);
+    batchFlushTimer = null;
+  }
+  if (pendingBatchUpdates.length === 0) return;
+
+  const updates = [...pendingBatchUpdates];
+  pendingBatchUpdates = [];
+  
+  // Deduplicate: only send the latest delta for each matchId in this batch
+  const latestByMatch = new Map<string, Partial<LiveMatchState>>();
+  for (const { matchId, delta } of updates) {
+    const existing = latestByMatch.get(matchId) || {};
+    latestByMatch.set(matchId, { ...existing, ...delta });
+  }
+
+  const finalUpdates = Array.from(latestByMatch.entries()).map(([matchId, delta]) => ({ matchId, delta }));
+  _executeBroadcastBatch(finalUpdates);
+}
+
+function _executeBroadcastBatch(updates: Array<{ matchId: string; delta: Partial<LiveMatchState> }>): void {
+  if (updates.length === 0) return;
+  if (sseClients.size === 0 && wsLiveClients.size === 0) return;
+
+  const msgObj = { type: "batch_update", updates };
+  const jsonStr = JSON.stringify(msgObj);
+
+  // 1. WebSocket clients
+  if (wsLiveClients.size > 0) {
+    for (const ws of wsLiveClients) {
+      try {
+        if (ws.readyState === 1) ws.send(jsonStr);
+        else wsLiveClients.delete(ws);
+      } catch { wsLiveClients.delete(ws); }
+    }
+  }
+
+  // 2. SSE clients
+  if (sseClients.size > 0) {
+    const sseChunk = `data: ${jsonStr}\n\n`;
+    for (const client of sseClients) {
+      try { client.write(sseChunk); } catch { sseClients.delete(client); }
+    }
+  }
+}
 
 setInterval(() => {
   if (sseClients.size === 0 && wsLiveClients.size === 0) return;
@@ -2469,6 +2518,12 @@ let baseballLiveV2Cache: SAPIV2Event[] | null = null;
 let baseballLiveV2FetchedAt = 0;
 let tennisLiveV2Cache: SAPIV2Event[] | null = null;
 let tennisLiveV2FetchedAt = 0;
+
+const v2FootballOddsCache = new Map<string, { home: number; draw: number; away: number }>();
+const V2_FOOTBALL_ODDS_TTL = 30 * 60_000;
+
+const v2FootballRedCardsCache = new Map<number, V2RedCardsEntry>();
+const V2_RED_CARDS_TTL_MS = 45_000;
 
 // V1 tennis native format (all endpoint — different schema from SAPIV2Event)
 interface V1TennisGame {
@@ -2786,6 +2841,7 @@ export const finishedMatchResults = new Map<string, {
   htAway?: number;   // half-time goals (away)
   homeTeam: string;
   awayTeam: string;
+  status?: string;   // match status (e.g. "FT", "Postponed", "Cancelled")
   cornersTotal?: number;
   cardsTotal?: number;
   firstGoal?: "home" | "away" | "none";
@@ -2815,6 +2871,7 @@ export async function ensureFinishedMatchResult(matchId: string): Promise<boolea
           htAway: row.htAway ?? undefined,
           homeTeam: row.homeTeam ?? "",
           awayTeam: row.awayTeam ?? "",
+          status: row.status ?? undefined,
           cornersTotal: row.cornersTotal ?? undefined,
           cardsTotal: row.cardsTotal ?? undefined,
           firstGoal: (row.firstGoal as "home" | "away" | "none" | null) ?? undefined,
@@ -2935,7 +2992,7 @@ export async function ensureFinishedMatchResult(matchId: string): Promise<boolea
       const st = (ev.status as Record<string, unknown> | null | undefined);
       const stType = typeof st?.["type"] === "string" ? (st["type"] as string).toLowerCase() : "";
       const code = v2StatusCode(ev);
-      const isFinished = stType === "finished" || code === 100;
+      const isFinished = stType === "finished" || code === 100 || (typeof st?.["short"] === "string" && STATPAL_FINISHED_STATUSES.has(st["short"]));
       if (!isFinished) return false;
 
       const hS = typeof ev.homeScore === "object" && ev.homeScore !== null
@@ -2996,6 +3053,7 @@ export async function ensureFinishedMatchResult(matchId: string): Promise<boolea
         away,
         htHome,
         htAway,
+        status: (typeof st?.["short"] === "string" ? st["short"] : "Finished") as string,
         homeTeam: v2TeamName(ev.homeTeam),
         awayTeam: v2TeamName(ev.awayTeam),
         cornersTotal: extras?.cornersTotal,
@@ -3031,6 +3089,7 @@ export async function ensureFinishedMatchResult(matchId: string): Promise<boolea
             away: fullRecord.away,
             htHome: fullRecord.htHome ?? null,
             htAway: fullRecord.htAway ?? null,
+            status: fullRecord.status ?? null,
             homeTeam: fullRecord.homeTeam,
             awayTeam: fullRecord.awayTeam,
             cornersTotal: fullRecord.cornersTotal ?? null,
@@ -3046,6 +3105,7 @@ export async function ensureFinishedMatchResult(matchId: string): Promise<boolea
               away: fullRecord.away,
               htHome: fullRecord.htHome ?? null,
               htAway: fullRecord.htAway ?? null,
+              status: fullRecord.status ?? null,
               homeTeam: fullRecord.homeTeam,
               awayTeam: fullRecord.awayTeam,
               cornersTotal: fullRecord.cornersTotal ?? null,
@@ -3099,6 +3159,7 @@ export async function scanDailyForFinished(): Promise<void> {
           htAway: typeof m.ht?.away_goals === "number" ? m.ht.away_goals : undefined,
           homeTeam: m.home.name,
           awayTeam: m.away.name,
+          status: m.status,
           finishedAt: Date.now(),
         };
         finishedMatchResults.set(m.main_id, rec);
@@ -3850,7 +3911,7 @@ function recalcLiveHtCorrectScore(
     const finalA = htScore ? htScore[1] : awayScore;
     const settledKey = `${finalH}-${finalA}`;
     const result: Record<string, number> = {};
-    for (const k of Object.keys(current)) result[k] = k === settledKey ? 1.01 : 0;
+    for (const k of Object.keys(current)) (result as any)[k] = k === settledKey ? 1.01 : 0;
     return result;
   }
 
@@ -4735,17 +4796,40 @@ function applyV2WsMessage(sport: SportKey, raw: unknown): void {
   if (!incoming) return;
 
   const now = Date.now();
+  const deltas: Array<{ matchId: string; delta: Partial<LiveMatchState> }> = [];
+
+  const captureDeltas = (events: SAPIV2Event[], sportKey: SportKey) => {
+    for (const ev of events) {
+      const id = liveMatchIdForSportV2(sportKey, ev.id);
+      const existing = liveMatchState.get(id);
+      if (!existing) continue;
+
+      const homeScore = v2CurrentScore(ev.homeScore);
+      const awayScore = v2CurrentScore(ev.awayScore);
+      const status = v2StatusStr(ev.status);
+      const minute = (ev.status as any)?.minute ?? 0;
+
+      if (homeScore !== existing.homeScore || awayScore !== existing.awayScore || status !== existing.status) {
+        deltas.push({
+          matchId: id,
+          delta: { homeScore, awayScore, status, minute }
+        });
+      }
+    }
+  };
+
   switch (sport) {
     case "football":
+      captureDeltas(incoming, "football");
       footballLiveV2Cache = mergeIncomingPreferFastScore(sport, incoming, footballLiveV2Cache, now);
       footballLiveV2FetchedAt = now;
-      // Also update today cache (live events are a subset of today)
       if (footballTodayV2Cache !== null) {
         footballTodayV2Cache = footballLiveV2Cache;
         footballTodayV2FetchedAt = now;
       }
       break;
     case "basketball":
+      captureDeltas(incoming, "basketball");
       basketballLiveV2Cache = mergeIncomingPreferFastScore(sport, incoming, basketballLiveV2Cache, now);
       basketballLiveV2FetchedAt = now;
       if (basketballTodayV2Cache !== null) {
@@ -4754,6 +4838,7 @@ function applyV2WsMessage(sport: SportKey, raw: unknown): void {
       }
       break;
     case "hockey":
+      captureDeltas(incoming, "hockey");
       hockeyLiveV2Cache = mergeIncomingPreferFastScore(sport, incoming, hockeyLiveV2Cache, now);
       hockeyLiveV2FetchedAt = now;
       if (hockeyTodayV2Cache !== null) {
@@ -4762,6 +4847,7 @@ function applyV2WsMessage(sport: SportKey, raw: unknown): void {
       }
       break;
     case "baseball":
+      captureDeltas(incoming, "baseball");
       baseballLiveV2Cache = mergeIncomingPreferFastScore(sport, incoming, baseballLiveV2Cache, now);
       baseballLiveV2FetchedAt = now;
       if (baseballTodayV2Cache !== null) {
@@ -4770,12 +4856,14 @@ function applyV2WsMessage(sport: SportKey, raw: unknown): void {
       }
       break;
     case "tennis":
+      captureDeltas(incoming, "tennis");
       tennisLiveV2Cache = mergeIncomingPreferFastScore(sport, incoming, tennisLiveV2Cache, now);
       tennisLiveV2FetchedAt = now;
-      // NOTE: do NOT sync tennisTodayV2Cache from the WS — the WS only
-      // sends in-progress events, so syncing it would erase pre-match
-      // events that buildTennisLiveV2 needs to detect started matches.
       break;
+  }
+
+  if (deltas.length > 0) {
+    broadcastBatchDelta(deltas);
   }
 }
 
@@ -4814,7 +4902,7 @@ function connectSportWS(sport: SportKey): void {
   // Don't open duplicate connections
   if (wsConnected.has(sport)) return;
 
-  const key = SPORTSAPI_KEY;
+  const key = CONFIG.SPORTSAPI_KEY;
   if (!key) return; // no API key — skip WS entirely
 
   const url = `wss://${WS_DOMAINS[sport]}/ws?x-api-key=${key}`;
@@ -4839,9 +4927,8 @@ function connectSportWS(sport: SportKey): void {
     try {
       const data: unknown = JSON.parse(typeof evt.data === "string" ? evt.data : String(evt.data));
       applyV2WsMessage(sport, data);
-      // Push to clients immediately on every WS message — don't wait for the 2s drift interval.
-      // broadcastLive() already guards against concurrent calls so this is safe.
-      broadcastLive().catch(() => { /* ignore */ });
+      // Removed immediate broadcastLive() — reliance on broadcastMatchDelta for immediate 
+      // updates and the 1s setInterval for full state snapshots.
     } catch {
       // non-JSON heartbeat / ping — ignore
     }
@@ -4979,8 +5066,6 @@ function applyV1ScorePatch(sport: SportKey, ev: V1ScoreEvent): void {
     status: status,
     minute: ev.minute,
   });
-
-  broadcastLive().catch(() => { /* ignore */ });
 }
 
 /** Parse a raw V1 WS message and dispatch score patches. */
@@ -5003,7 +5088,7 @@ function applyV1WsMessage(sport: SportKey, raw: unknown): void {
 function connectV1SportWS(sport: SportKey): void {
   if (v1WsConnected.has(sport)) return;
 
-  const key = SPORTSAPI_KEY;
+  const key = CONFIG.SPORTSAPI_KEY;
   if (!key) return;
 
   const url = `wss://${V1_WS_DOMAINS[sport]}/ws?x-api-key=${key}`;
@@ -5068,7 +5153,7 @@ export function initV1SportWebSockets(): void {
 }
 
 export async function primeSportLiveCaches(): Promise<void> {
-  if (!process.env.SPORTSAPI_KEY) return;
+  if (!CONFIG.SPORTSAPI_KEY) return;
   await Promise.all([
     getFootballLiveV2().catch(() => []),
     getBasketballLiveV2().catch(() => []),
@@ -5454,7 +5539,7 @@ export async function scanV2AllSportsForFinished(): Promise<void> {
         const st = (ev.status as Record<string, unknown> | null | undefined);
         const stType = typeof st?.["type"] === "string" ? (st["type"] as string).toLowerCase() : "";
         const code = v2StatusCode(ev);
-        const isFinished = stType === "finished" || code === 100;
+        const isFinished = stType === "finished" || code === 100 || (typeof st?.["short"] === "string" && STATPAL_FINISHED_STATUSES.has(st["short"]));
         if (!isFinished) continue;
 
         const hS = typeof ev.homeScore === "object" && ev.homeScore !== null
@@ -6091,6 +6176,7 @@ const HT_MAX_DURATION_MS = 22 * 60 * 1000;
 const STATPAL_FINISHED_STATUSES = new Set([
   "FT", "AET", "AP", "Pen", "Full Time", "After ET", "After Pens",
   "Finished", "Ended", "Abandoned", "Postponed", "Cancelled", "Susp",
+  "Delayed", "Interrupted", "Cancl.", "Abd", "Postp.", "Susp.",
 ]);
 
 async function buildLiveMatches(): Promise<LiveMatchState[]> {
@@ -6580,7 +6666,7 @@ async function buildLiveMatches(): Promise<LiveMatchState[]> {
       if (dangerEvent) {
         const now = Date.now();
         const evType = dangerEvent.type.toLowerCase().replace(/[\s_-]/g, "");
-        const reasonKey = Object.keys(VAR_REASON_MAP).find(k => evType.includes(k));
+        const reasonKey = Object.keys(VAR_REASON_MAP).find((k: string) => evType.includes(k));
         const reason = reasonKey ? VAR_REASON_MAP[reasonKey] : "SUSPENSO";
         const isHighPriority = reason.includes("VAR") || reason.includes("PENÁL");
         if (!matchMarketSuspension) {
@@ -7009,24 +7095,21 @@ async function buildFootballLiveV2(events: SAPIV2Event[]): Promise<LiveMatchStat
     (primary.length > 0 ? primary.slice(0, 40) : fallback.slice(0, 3))
       .map((x) => x.ev);
 
-  const firstSeenMatchIds = Array.from(new Set(chosen
-    .filter(ev => !liveMatchState.has(`football-v2-${ev.id}`))
-    .map(ev => ev.id)
-  ));
-
-  const prefetchOdds = new Map<number, { home: number; draw: number; away: number }>();
-  await pool(firstSeenMatchIds, 6, async (id) => {
-    const o = await getV2Match1x2Odds("football", String(id));
-    if (o) prefetchOdds.set(id, o);
-  });
-
-  const redCardIds = Array.from(new Set(chosen.map(ev => ev.id))).slice(0, 12);
-
   const prefetchRedCards = new Map<number, V2RedCards>();
-  await pool(redCardIds, 4, async (id) => {
-    const rc = await getFootballV2RedCards(id);
-    if (rc) prefetchRedCards.set(id, rc);
-  });
+
+  const firstSeenMatchIds = chosen
+    .filter(ev => !liveMatchState.has(`football-v2-${ev.id}`))
+    .map(ev => ev.id);
+
+  // Fire-and-forget background pre-fetcher for newly seen matches
+  if (firstSeenMatchIds.length > 0) {
+    (async () => {
+      for (const id of firstSeenMatchIds) {
+        getV2Match1x2Odds("football", String(id)).catch(() => {});
+        getFootballV2RedCards(id).catch(() => {});
+      }
+    })().catch(() => {});
+  }
 
   for (const ev of chosen) {
     const statusStr = v2StatusStr(ev.status);
@@ -7045,7 +7128,7 @@ async function buildFootballLiveV2(events: SAPIV2Event[]): Promise<LiveMatchStat
     const meta = metaById.get(ev.id);
     const league = meta?.leagueName ?? normalizeLeagueName(v2TournName(ev.tournament), "");
     const { date, time } = v2EventDateTime(ev);
-    const rc = prefetchRedCards.get(ev.id) ?? v2FootballRedCardsCache.get(ev.id) ?? { home: 0, away: 0, fetchedAt: 0 };
+    const rc = v2FootballRedCardsCache.get(ev.id) ?? { home: 0, away: 0, fetchedAt: 0 };
     const rcHome = rc.home ?? 0;
     const rcAway = rc.away ?? 0;
 
@@ -7177,6 +7260,7 @@ async function buildFootballLiveV2(events: SAPIV2Event[]): Promise<LiveMatchStat
     }
 
     if (existing) {
+      minute = Math.max(existing.minute, minute);
       // Pre-compute VAR status once, used in both scored and non-scored branches
       const rawStatusDesc = v2StatusStr(ev.status).toLowerCase();
       const isVARStatus = rawStatusDesc.includes("var") ||
@@ -7313,7 +7397,7 @@ async function buildFootballLiveV2(events: SAPIV2Event[]): Promise<LiveMatchStat
       result.push(liveMatchState.get(id)!);
     } else {
       // First seen — build initial state with score-filtered markets
-      const baseOdds = prefetchOdds.get(ev.id) ?? makeOddsFromTeams(homeTeam, awayTeam);
+      const baseOdds = v2FootballOddsCache.get(String(ev.id)) ?? makeOddsFromTeams(homeTeam, awayTeam);
       const liveOdds = (homeScore === 0 && awayScore === 0)
         ? baseOdds
         : calculateLive1x2({ minute, homeGoals: homeScore, awayGoals: awayScore, redCardsHome: rcHome, redCardsAway: rcAway, baseHome: baseOdds.home, baseDraw: baseOdds.draw, baseAway: baseOdds.away });
@@ -8382,16 +8466,19 @@ async function broadcastLive(): Promise<void> {
     } else {
       consecutiveEmptyBroadcasts = 0;
     }
-    // SSE clients (keep full payload for SSE)
-    const sseChunk = `data: ${JSON.stringify(payload)}\n\n`;
+    // Only serialize once
+    const wsMsgObj = { type: "snapshot", ...payload };
+    const jsonStr = JSON.stringify(wsMsgObj);
+
+    // SSE clients
+    const sseChunk = `data: ${jsonStr}\n\n`;
     for (const client of sseClients) {
       try { client.write(sseChunk); } catch { sseClients.delete(client); }
     }
-    // WebSocket clients (native JSON message)
-    const wsMsg = JSON.stringify({ type: "snapshot", ...payload });
+    // WebSocket clients
     for (const ws of wsLiveClients) {
       try {
-        if (ws.readyState === 1 /* OPEN */) ws.send(wsMsg);
+        if (ws.readyState === 1 /* OPEN */) ws.send(jsonStr);
         else wsLiveClients.delete(ws);
       } catch { wsLiveClients.delete(ws); }
     }
@@ -8403,7 +8490,7 @@ async function broadcastLive(): Promise<void> {
     // If a score update arrived while we were building, send it now immediately.
     if (broadcastPending) {
       broadcastPending = false;
-      setImmediate(() => { broadcastLive().catch(() => {}); });
+      setTimeout(() => { broadcastLive().catch(() => {}); }, 0);
     }
   }
 }
@@ -8413,29 +8500,28 @@ async function broadcastLive(): Promise<void> {
  * This is used for sub-second updates of scores and odds.
  */
 export function broadcastMatchDelta(matchId: string, delta: Partial<LiveMatchState>): void {
-  const msgObj = { type: "update", matchId, delta };
-  
-  // 1. WebSocket clients (Native JSON)
-  if (wsLiveClients.size > 0) {
-    const wsMsg = JSON.stringify(msgObj);
-    for (const ws of wsLiveClients) {
-      try {
-        if (ws.readyState === 1) ws.send(wsMsg);
-        else wsLiveClients.delete(ws);
-      } catch { wsLiveClients.delete(ws); }
-    }
-  }
+  broadcastBatchDelta([{ matchId, delta }]);
+}
 
-  // 2. SSE clients (data: JSON\n\n)
-  if (sseClients.size > 0) {
-    const sseChunk = `data: ${JSON.stringify(msgObj)}\n\n`;
-    for (const client of sseClients) {
-      try { client.write(sseChunk); } catch { sseClients.delete(client); }
-    }
+/**
+ * Broadcasts a batch of partial updates to all connected clients.
+ * Reduces overhead by sending multiple updates in a single network packet.
+ */
+export function broadcastBatchDelta(updates: Array<{ matchId: string; delta: Partial<LiveMatchState> }>): void {
+  if (updates.length === 0) return;
+  
+  // Add to global buffer
+  pendingBatchUpdates.push(...updates);
+
+  // If buffer getting large, flush immediately; otherwise wait 100ms
+  if (pendingBatchUpdates.length > 50) {
+    flushBatchUpdates();
+  } else if (!batchFlushTimer) {
+    batchFlushTimer = setTimeout(flushBatchUpdates, 100);
   }
 }
 
-router.get("/live", async (req, res) => {
+router.get("/live", async (req: Request, res: Response) => {
   res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0");
   const lean = String(req.query["lean"] ?? "0") === "1";
   const limitRaw = parseInt(String(req.query["limit"] ?? ""), 10);
@@ -8454,12 +8540,12 @@ router.get("/live", async (req, res) => {
     });
     res.json({ matches: out });
   } catch (err) {
-    console.error("[live route] unexpected error:", err);
+    logger.error({ err }, "[live route] unexpected error");
     res.json({ matches: [] });
   }
 });
 
-router.get("/live-match/:id", async (req, res) => {
+router.get("/live-match/:id", async (req: Request, res: Response) => {
   res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0");
   const id = String(req.params["id"] ?? "");
   if (!id) {
@@ -8475,13 +8561,13 @@ router.get("/live-match/:id", async (req, res) => {
   }
 });
 
-router.get("/feed-status", (_req, res) => {
+router.get("/feed-status", (_req: Request, res: Response) => {
   res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0");
   const now = Date.now();
   const asAge = (t: number) => (t > 0 ? Math.max(0, now - t) : null);
   res.json({
     serverTime: now,
-    sportsApiKeyPresent: !!SPORTSAPI_KEY,
+    sportsApiKeyPresent: !!CONFIG.SPORTSAPI_KEY,
     wsConnected: Array.from(wsConnected),
     v1WsConnected: Array.from(v1WsConnected),
     lastMessageAt: Object.fromEntries((Object.keys(WS_DOMAINS) as SportKey[]).map(k => [k, wsLastMessageAt.get(k) ?? 0])),
@@ -8505,14 +8591,16 @@ router.get("/feed-status", (_req, res) => {
 });
 
 // ─── SSE endpoint — pushes live data continuously (WS-triggered + 1–2s cadence) ─
-router.get("/live-stream", (req, res) => {
+router.get("/live-stream", (req: Request, res: Response) => {
   res.setHeader("Content-Type", "text/event-stream");
   res.setHeader("Cache-Control", "no-cache, no-transform");
   res.setHeader("Connection", "keep-alive");
   res.setHeader("X-Accel-Buffering", "no"); // disable nginx buffering
 
   // Flush headers immediately so the browser sees an open stream
-  res.flushHeaders();
+  // Note: flushHeaders is added by compression or similar middlewares, 
+  // if not available we skip it. Express Response has it in most production setups.
+  if (typeof (res as any).flushHeaders === "function") (res as any).flushHeaders();
   try { res.write(`:${" ".repeat(2048)}\n\n`); } catch { /* ignore */ }
 
   sseClients.add(res);
@@ -9054,7 +9142,7 @@ async function buildWC2026Matches(): Promise<UpcomingMatch[]> {
   return results;
 }
 
-router.get("/wc2026", async (_req, res) => {
+router.get("/wc2026", async (_req: Request, res: Response) => {
   try {
     const matches = await buildWC2026Matches();
     res.json({ matches });
@@ -9067,7 +9155,7 @@ function waitMs(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-router.get("/upcoming", async (req, res) => {
+router.get("/upcoming", async (req: Request, res: Response) => {
   const sport = String(req.query["sport"] ?? "all");
   const cache = upcomingTopCache
     ? await getUpcomingAll()
@@ -9096,7 +9184,7 @@ router.get("/upcoming", async (req, res) => {
   res.json({ matches: filtered });
 });
 
-router.get("/", async (_req, res) => {
+router.get("/", async (_req: Request, res: Response) => {
   try {
     const [live, upcoming] = await Promise.all([buildLiveMatches(), buildUpcomingMatches()]);
     res.json({ live, upcoming });
@@ -9109,7 +9197,7 @@ router.get("/", async (_req, res) => {
 
 type FormEntry = { result: "W" | "D" | "L"; score: string; opponent: string; home: boolean };
 
-router.get("/stats", async (req, res) => {
+router.get("/stats", async (req: Request, res: Response) => {
   const home = String(req.query["home"] ?? "");
   const away = String(req.query["away"] ?? "");
   const sport = String(req.query["sport"] ?? "football");
@@ -9804,7 +9892,7 @@ async function getTournamentDetail(id: string): Promise<TournamentDetail> {
   throw new Error("Detalhe de torneio indisponível");
 }
 
-router.get("/tournaments", async (_req, res) => {
+router.get("/tournaments", async (_req: Request, res: Response) => {
   try {
     const tournaments = await getActiveTournaments();
     res.json({ tournaments });
@@ -9824,7 +9912,7 @@ async function getTennisStandings(): Promise<StandingsTour> {
   return standingsCache ?? { atp: [], wta: [] };
 }
 
-router.get("/standings", async (_req, res) => {
+router.get("/standings", async (_req: Request, res: Response) => {
   try {
     const standings = await getTennisStandings();
     res.json(standings);
@@ -9833,7 +9921,7 @@ router.get("/standings", async (_req, res) => {
   }
 });
 
-router.get("/tournaments/:id", async (req, res) => {
+router.get("/tournaments/:id", async (req: Request, res: Response) => {
   const id = String(req.params["id"]);
   try {
     const detail = await getTournamentDetail(id);
@@ -9843,7 +9931,7 @@ router.get("/tournaments/:id", async (req, res) => {
   }
 });
 
-router.get("/results", async (_req, res) => {
+router.get("/results", async (_req: Request, res: Response) => {
   try {
     const results = await getTennisDailyResults();
     res.json({ results });
@@ -9852,7 +9940,7 @@ router.get("/results", async (_req, res) => {
   }
 });
 
-router.get("/volleyball-results", async (_req, res) => {
+router.get("/volleyball-results", async (_req: Request, res: Response) => {
   try {
     const results = await getVolleyballDailyResults();
     res.json({ results });
@@ -9861,7 +9949,7 @@ router.get("/volleyball-results", async (_req, res) => {
   }
 });
 
-router.get("/hockey-results", async (_req, res) => {
+router.get("/hockey-results", async (_req: Request, res: Response) => {
   try {
     const results = await getHockeyDailyResults();
     res.json({ results });
@@ -9870,7 +9958,7 @@ router.get("/hockey-results", async (_req, res) => {
   }
 });
 
-router.get("/basketball-results", async (_req, res) => {
+router.get("/basketball-results", async (_req: Request, res: Response) => {
   try {
     const results = await getBasketballDailyResults();
     res.json({ results });
@@ -9879,7 +9967,7 @@ router.get("/basketball-results", async (_req, res) => {
   }
 });
 
-router.get("/mlb-results", async (_req, res) => {
+router.get("/mlb-results", async (_req: Request, res: Response) => {
   try {
     const results = await getMLBDailyResults();
     res.json({ results });
@@ -9888,7 +9976,7 @@ router.get("/mlb-results", async (_req, res) => {
   }
 });
 
-router.get("/basketball-schedule", async (_req, res) => {
+router.get("/basketball-schedule", async (_req: Request, res: Response) => {
   try {
     const data = await getBasketballSchedule();
     res.json(data);
@@ -9897,7 +9985,7 @@ router.get("/basketball-schedule", async (_req, res) => {
   }
 });
 
-router.get("/hockey-schedule", async (_req, res) => {
+router.get("/hockey-schedule", async (_req: Request, res: Response) => {
   try {
     const data = await getHockeySchedule();
     res.json(data);
@@ -9906,7 +9994,7 @@ router.get("/hockey-schedule", async (_req, res) => {
   }
 });
 
-router.get("/mlb-schedule", async (_req, res) => {
+router.get("/mlb-schedule", async (_req: Request, res: Response) => {
   try {
     const data = await getMLBSchedule();
     res.json(data);
@@ -9976,7 +10064,7 @@ async function getMLBStandings(): Promise<MLBStandingsData> {
   }
 }
 
-router.get("/mlb-standings", async (_req, res) => {
+router.get("/mlb-standings", async (_req: Request, res: Response) => {
   try {
     const data = await getMLBStandings();
     res.json(data);
@@ -9985,7 +10073,7 @@ router.get("/mlb-standings", async (_req, res) => {
   }
 });
 
-router.get("/hockey-standings", async (_req, res) => {
+router.get("/hockey-standings", async (_req: Request, res: Response) => {
   try {
     const data = await getHockeyStandings();
     res.json(data);
@@ -9998,7 +10086,7 @@ async function getMLBRoster(abbr: string): Promise<MLBRosterData | null> {
   return mlbRosterCache.get(abbr) ?? null;
 }
 
-router.get("/mlb-roster/:team", async (req, res) => {
+router.get("/mlb-roster/:team", async (req: Request, res: Response) => {
   const abbr = String(req.params["team"]).toLowerCase();
   try {
     const data = await getMLBRoster(abbr);
@@ -10030,7 +10118,7 @@ async function getMLBTeamStats(abbr: string): Promise<MLBTeamStatsData | null> {
   return mlbTeamStatsCache.get(abbr) ?? null;
 }
 
-router.get("/mlb-team-stats/:team", async (req, res) => {
+router.get("/mlb-team-stats/:team", async (req: Request, res: Response) => {
   const abbr = String(req.params["team"]).toLowerCase();
   try {
     const data = await getMLBTeamStats(abbr);
@@ -10052,7 +10140,7 @@ async function getMLBInjuries(abbr: string): Promise<MLBInjuriesData | null> {
   return mlbInjuriesCache.get(abbr) ?? null;
 }
 
-router.get("/mlb-injuries/:team", async (req, res) => {
+router.get("/mlb-injuries/:team", async (req: Request, res: Response) => {
   const abbr = String(req.params["team"]).toLowerCase();
   try {
     const data = await getMLBInjuries(abbr);
@@ -10080,7 +10168,7 @@ async function getMLBLeagueStats(): Promise<MLBLeagueStatsData> {
   return mlbLeagueStatsCache ?? { batters: [] };
 }
 
-router.get("/mlb-league-stats", async (_req, res) => {
+router.get("/mlb-league-stats", async (_req: Request, res: Response) => {
   try {
     const data = await getMLBLeagueStats();
     res.json(data);
@@ -10120,7 +10208,7 @@ async function getNBAStandings(): Promise<NBAStandingsData> {
   }
 }
 
-router.get("/basketball-standings", async (_req, res) => {
+router.get("/basketball-standings", async (_req: Request, res: Response) => {
   try {
     const data = await getNBAStandings();
     res.json(data);
@@ -10143,7 +10231,7 @@ async function getBasketballRoster(abbr: string): Promise<NBATeamRoster | null> 
   return nbaRosterCache.get(abbr) ?? null;
 }
 
-router.get("/basketball-roster/:team", async (req, res) => {
+router.get("/basketball-roster/:team", async (req: Request, res: Response) => {
   const abbr = String(req.params["team"]).toLowerCase();
   try {
     const data = await getBasketballRoster(abbr);
@@ -10172,7 +10260,7 @@ async function getBasketballTeamStats(abbr: string): Promise<NBATeamStatsData | 
   return nbaTeamStatsCache.get(abbr) ?? null;
 }
 
-router.get("/basketball-team-stats/:team", async (req, res) => {
+router.get("/basketball-team-stats/:team", async (req: Request, res: Response) => {
   const abbr = String(req.params["team"]).toLowerCase();
   try {
     const data = await getBasketballTeamStats(abbr);
@@ -10187,7 +10275,7 @@ async function getHockeyRoster(abbr: string): Promise<NHLRosterData | null> {
   return hockeyRosterCache.get(abbr) ?? null;
 }
 
-router.get("/hockey-roster/:team", async (req, res) => {
+router.get("/hockey-roster/:team", async (req: Request, res: Response) => {
   const abbr = String(req.params["team"]).toLowerCase();
   try {
     const data = await getHockeyRoster(abbr);
@@ -10221,7 +10309,7 @@ async function getHockeyTeamStats(abbr: string): Promise<NHLTeamStatsData | null
   return hockeyTeamStatsCache.get(abbr) ?? null;
 }
 
-router.get("/hockey-team-stats/:team", async (req, res) => {
+router.get("/hockey-team-stats/:team", async (req: Request, res: Response) => {
   const abbr = String(req.params["team"]).toLowerCase();
   try {
     const data = await getHockeyTeamStats(abbr);
@@ -10243,7 +10331,7 @@ async function getHockeyInjuries(abbr: string): Promise<NHLInjuriesData | null> 
   return hockeyInjuriesCache.get(abbr) ?? null;
 }
 
-router.get("/hockey-injuries/:team", async (req, res) => {
+router.get("/hockey-injuries/:team", async (req: Request, res: Response) => {
   const abbr = String(req.params["team"]).toLowerCase();
   try {
     const data = await getHockeyInjuries(abbr);
@@ -10265,7 +10353,7 @@ async function getBasketballInjuries(abbr: string): Promise<NBAInjuriesData | nu
   return nbaInjuriesCache.get(abbr) ?? null;
 }
 
-router.get("/basketball-injuries/:team", async (req, res) => {
+router.get("/basketball-injuries/:team", async (req: Request, res: Response) => {
   const abbr = String(req.params["team"]).toLowerCase();
   try {
     const data = await getBasketballInjuries(abbr);
@@ -10276,7 +10364,7 @@ router.get("/basketball-injuries/:team", async (req, res) => {
   }
 });
 
-router.get("/volleyball-standings/:id", async (req, res) => {
+router.get("/volleyball-standings/:id", async (req: Request, res: Response) => {
   try {
     const id = String(req.params["id"]);
     const data = await getVolleyballStandings(id);
@@ -10287,7 +10375,7 @@ router.get("/volleyball-standings/:id", async (req, res) => {
   }
 });
 
-router.get("/volleyball-leagues", async (_req, res) => {
+router.get("/volleyball-leagues", async (_req: Request, res: Response) => {
   try {
     const leagues = await getVolleyballActiveLeagues();
     res.json({ leagues });
@@ -10296,7 +10384,7 @@ router.get("/volleyball-leagues", async (_req, res) => {
   }
 });
 
-router.get("/volleyball-schedule/:id", async (req, res) => {
+router.get("/volleyball-schedule/:id", async (req: Request, res: Response) => {
   try {
     const id = String(req.params["id"]);
     const data = await getVolleyballSchedule(id);
@@ -10343,7 +10431,7 @@ async function getVolleyballOdds(): Promise<VolleyOddsEntry[]> {
   return volleyOddsCache ?? [];
 }
 
-router.get("/volleyball-odds", async (_req, res) => {
+router.get("/volleyball-odds", async (_req: Request, res: Response) => {
   try {
     const odds = await getVolleyballOdds();
     res.json({ odds });
@@ -10455,7 +10543,7 @@ async function getBasketballOdds(): Promise<NBAOddsEntry[]> {
   }
 }
 
-router.get("/basketball-odds", async (_req, res) => {
+router.get("/basketball-odds", async (_req: Request, res: Response) => {
   try {
     const odds = await getBasketballOdds();
     res.json({ odds });
@@ -10569,7 +10657,7 @@ async function getHockeyOdds(): Promise<HockeyOddsEntry[]> {
   }
 }
 
-router.get("/hockey-odds", async (_req, res) => {
+router.get("/hockey-odds", async (_req: Request, res: Response) => {
   try {
     const odds = await getHockeyOdds();
     res.json({ odds });
@@ -10680,7 +10768,7 @@ async function getMLBOdds(): Promise<MLBOddsEntry[]> {
   }
 }
 
-router.get("/mlb-odds", async (_req, res) => {
+router.get("/mlb-odds", async (_req: Request, res: Response) => {
   try {
     const odds = await getMLBOdds();
     res.json({ odds });
@@ -10743,7 +10831,7 @@ async function getTennisOdds(): Promise<TennisOddsEntry[]> {
   }
 }
 
-router.get("/tennis-odds", async (_req, res) => {
+router.get("/tennis-odds", async (_req: Request, res: Response) => {
   try {
     const odds = await getTennisOdds();
     res.json({ odds });
@@ -10752,7 +10840,7 @@ router.get("/tennis-odds", async (_req, res) => {
   }
 });
 
-router.get("/league-standings", async (req, res) => {
+router.get("/league-standings", async (req: Request, res: Response) => {
   const league = String(req.query["league"] ?? "");
   try {
     const standing = buildLeagueStandings(league, "", "");
@@ -10780,7 +10868,7 @@ async function getFootballLeagues(): Promise<FootballLeague[]> {
   return footballLeaguesCache ?? [];
 }
 
-router.get("/football-leagues", async (_req, res) => {
+router.get("/football-leagues", async (_req: Request, res: Response) => {
   try {
     const leagues = await getFootballLeagues();
     res.json({ leagues });
@@ -10927,7 +11015,7 @@ async function getFootballSchedule(id: string): Promise<{ weeks: FootballSchedul
   throw new Error("Calendário indisponível");
 }
 
-router.get("/football-schedule/:id", async (req, res) => {
+router.get("/football-schedule/:id", async (req: Request, res: Response) => {
   const id = String(req.params["id"]);
   try {
     const { weeks, meta } = await getFootballSchedule(id);
@@ -11055,7 +11143,7 @@ async function getFootballMatchStats(leagueId: string): Promise<object> {
   throw new Error("Estatísticas indisponíveis");
 }
 
-router.get("/football-match-stats/:leagueId", async (req, res) => {
+router.get("/football-match-stats/:leagueId", async (req: Request, res: Response) => {
   const leagueId = String(req.params["leagueId"]);
   try {
     const stats = await getFootballMatchStats(leagueId);
@@ -11111,7 +11199,7 @@ async function getFootballStandings(leagueId: string): Promise<{ teams: Football
   throw new Error("Classificação indisponível");
 }
 
-router.get("/football-standings/:id", async (req, res) => {
+router.get("/football-standings/:id", async (req: Request, res: Response) => {
   const id = String(req.params["id"]);
   try {
     const { teams, meta } = await getFootballStandings(id);
@@ -11216,7 +11304,7 @@ async function getFootballLeagueStats(leagueId: string): Promise<{ teams: Footba
   throw new Error("Estatísticas indisponíveis");
 }
 
-router.get("/football-league-stats/:id", async (req, res) => {
+router.get("/football-league-stats/:id", async (req: Request, res: Response) => {
   const id = String(req.params["id"]);
   try {
     const { teams, meta } = await getFootballLeagueStats(id);
@@ -11287,7 +11375,7 @@ async function getFootballH2H(team1: string, team2: string): Promise<object> {
   throw new Error("H2H indisponível");
 }
 
-router.get("/football-h2h", async (req, res) => {
+router.get("/football-h2h", async (req: Request, res: Response) => {
   const team1 = String(req.query["team1"] ?? "");
   const team2 = String(req.query["team2"] ?? "");
   if (!team1 || !team2) { res.status(400).json({ error: "Parâmetros team1 e team2 são obrigatórios" }); return; }
@@ -11365,7 +11453,7 @@ async function getFootballInjuries(): Promise<FootballInjuryLeague[]> {
   return footballInjuriesCache ?? [];
 }
 
-router.get("/football-injuries", async (_req, res) => {
+router.get("/football-injuries", async (_req: Request, res: Response) => {
   try {
     const leagues = await getFootballInjuries();
     res.json({ leagues });
@@ -11458,7 +11546,7 @@ async function getFootballTeam(teamId: string): Promise<object> {
   throw new Error("Equipa indisponível");
 }
 
-router.get("/football-team/:id", async (req, res) => {
+router.get("/football-team/:id", async (req: Request, res: Response) => {
   const id = String(req.params["id"]);
   try {
     const team = await getFootballTeam(id);
@@ -11579,7 +11667,7 @@ async function getFootballPlayer(playerId: string): Promise<object> {
   throw new Error("Jogador indisponível");
 }
 
-router.get("/football-player/:id", async (req, res) => {
+router.get("/football-player/:id", async (req: Request, res: Response) => {
   const id = String(req.params["id"]);
   try {
     const player = await getFootballPlayer(id);
@@ -11614,7 +11702,7 @@ async function getFootballCoach(coachId: string): Promise<object> {
   throw new Error("Treinador indisponível");
 }
 
-router.get("/football-coach/:id", async (req, res) => {
+router.get("/football-coach/:id", async (req: Request, res: Response) => {
   const id = String(req.params["id"]);
   try {
     const coach = await getFootballCoach(id);
@@ -11632,7 +11720,7 @@ router.get("/football-coach/:id", async (req, res) => {
 const imageCache = new Map<string, { buf: Buffer; fetchedAt: number }>();
 const IMAGE_TTL = 7 * 24 * 60 * 60 * 1000; // 7 days
 
-router.get("/football-image", (_req, res) => {
+router.get("/football-image", (_req: Request, res: Response) => {
   res.status(404).json({ error: "Imagens indisponíveis" });
 });
 
@@ -11682,7 +11770,7 @@ async function getFootballLeagueOdds(leagueId: string): Promise<{ odds: Football
   throw new Error("Odds indisponíveis");
 }
 
-router.get("/football-odds/:leagueId", async (req, res) => {
+router.get("/football-odds/:leagueId", async (req: Request, res: Response) => {
   const leagueId = String(req.params["leagueId"]);
   try {
     const { odds, meta } = await getFootballLeagueOdds(leagueId);
@@ -11740,7 +11828,7 @@ async function getFootballLiveOdds(): Promise<object[]> {
   return footballLiveOddsCache ?? [];
 }
 
-router.get("/football-live-odds", async (_req, res) => {
+router.get("/football-live-odds", async (_req: Request, res: Response) => {
   try {
     const matches = await getFootballLiveOdds();
     res.json({ matches });
@@ -11757,7 +11845,7 @@ let footballLiveMarketsCache: { id: number; name: string }[] | null = null;
 let footballLiveMarketsFetchedAt = 0;
 const FOOTBALL_LIVE_MARKETS_TTL = 60 * 60 * 1000; // 1h — catalogue rarely changes
 
-router.get("/football-live-markets", async (_req, res) => {
+router.get("/football-live-markets", async (_req: Request, res: Response) => {
   res.json({ markets: footballLiveMarketsCache ?? [] });
 });
 
@@ -11769,7 +11857,7 @@ let footballLiveStatesCache: { id: number; name: string }[] | null = null;
 let footballLiveStatesFetchedAt = 0;
 const FOOTBALL_LIVE_STATES_TTL = 60 * 60 * 1000; // 1h — static catalogue
 
-router.get("/football-live-match-states", async (_req, res) => {
+router.get("/football-live-match-states", async (_req: Request, res: Response) => {
   res.json({ states: footballLiveStatesCache ?? [] });
 });
 
@@ -11824,7 +11912,7 @@ let footballV1LiveCache: object[] | null = null;
 let footballV1LiveFetchedAt = 0;
 const FOOTBALL_V1_LIVE_TTL = 30 * 1000;
 
-router.get("/football-livescores", async (_req, res) => {
+router.get("/football-livescores", async (_req: Request, res: Response) => {
   res.json({ leagues: footballV1LiveCache ?? [] });
 });
 
@@ -11836,7 +11924,7 @@ router.get("/football-livescores", async (_req, res) => {
 
 const footballDailyCache = new Map<string, { data: object[]; fetchedAt: number }>();
 
-router.get("/football-daily/:offset", async (req, res) => {
+router.get("/football-daily/:offset", async (req: Request, res: Response) => {
   const raw = String(req.params["offset"]);
   const n = parseInt(raw);
   if (isNaN(n) || n < 0 || n > 7) { res.status(400).json({ error: "Offset inválido (0–7)" }); return; }
@@ -11874,7 +11962,7 @@ type V1UpcomingScheduleRaw = {
 const footballUpcomingCache = new Map<string, { data: object[]; fetchedAt: number }>();
 const FOOTBALL_UPCOMING_TTL = 30 * 60 * 1000; // 30 min — fixtures rarely change
 
-router.get("/football-upcoming/:country", async (req, res) => {
+router.get("/football-upcoming/:country", async (req: Request, res: Response) => {
   const country = String(req.params["country"]).toLowerCase().replace(/[^a-z0-9-]/g, "");
   if (!country) { res.status(400).json({ error: "País inválido" }); return; }
   const cached = footballUpcomingCache.get(country);
@@ -11935,7 +12023,7 @@ function parseExtScore(s: string | undefined): number | null {
   return isNaN(n) ? null : n;
 }
 
-router.get("/football-extended-schedule/:country", async (req, res) => {
+router.get("/football-extended-schedule/:country", async (req: Request, res: Response) => {
   const country = String(req.params["country"]).toLowerCase().replace(/[^a-z0-9-]/g, "");
   if (!country) { res.status(400).json({ error: "País inválido" }); return; }
   const cached = footballExtCache.get(country);
@@ -11998,7 +12086,7 @@ function toArr<T>(v: T | T[] | null | undefined): T[] {
   return !v ? [] : Array.isArray(v) ? v : [v];
 }
 
-router.get("/football-results-country/:country", async (req, res) => {
+router.get("/football-results-country/:country", async (req: Request, res: Response) => {
   const country = String(req.params["country"]).toLowerCase().replace(/[^a-z0-9-]/g, "");
   if (!country) { res.status(400).json({ error: "País inválido" }); return; }
   const cached = footballResultsCountryCache.get(country);
@@ -12088,7 +12176,7 @@ function mapVar(raw: V1LiveStatsSummaryTeam["var"]): object[] {
 const footballLiveStatsCache = new Map<string, { data: object; fetchedAt: number }>();
 const FOOTBALL_LIVE_STATS_TTL = 30 * 1000; // 30s — live data
 
-router.get("/football-live-match-stats/:leagueSlug", async (req, res) => {
+router.get("/football-live-match-stats/:leagueSlug", async (req: Request, res: Response) => {
   const slug = String(req.params["leagueSlug"]).toLowerCase().replace(/[^a-z0-9_-]/g, "");
   if (!slug) { res.status(400).json({ error: "Slug inválido" }); return; }
   const cached = footballLiveStatsCache.get(slug);
@@ -12143,7 +12231,7 @@ function mapRecord(r: V1StandingsRecord) {
 const footballStandingsCountryCache = new Map<string, { data: object[]; fetchedAt: number }>();
 const FOOTBALL_STANDINGS_COUNTRY_TTL = 30 * 60 * 1000; // 30 min
 
-router.get("/football-standings-country/:country", async (req, res) => {
+router.get("/football-standings-country/:country", async (req: Request, res: Response) => {
   const country = String(req.params["country"]).toLowerCase().replace(/[^a-z0-9-]/g, "");
   if (!country) { res.status(400).json({ error: "País inválido" }); return; }
   const cached = footballStandingsCountryCache.get(country);
@@ -12175,7 +12263,7 @@ type V1ScorersRaw = {
 const footballScorersCache = new Map<string, { data: object[]; fetchedAt: number }>();
 const FOOTBALL_SCORERS_TTL = 30 * 60 * 1000; // 30 min — changes at most daily
 
-router.get("/football-scoring-leaders/:country", async (req, res) => {
+router.get("/football-scoring-leaders/:country", async (req: Request, res: Response) => {
   const country = String(req.params["country"]).toLowerCase().replace(/[^a-z0-9-]/g, "");
   if (!country) { res.status(400).json({ error: "País inválido" }); return; }
   const cached = footballScorersCache.get(country);
@@ -12216,7 +12304,7 @@ let footballInjuriesV1Cache: object[] | null = null;
 let footballInjuriesV1FetchedAt = 0;
 const FOOTBALL_INJURIES_V1_TTL = 15 * 60 * 1000; // 15 min — same as v2
 
-router.get("/football-injuries-v1", (_req, res) => {
+router.get("/football-injuries-v1", (_req: Request, res: Response) => {
   res.json({ leagues: footballInjuriesV1Cache ?? [] });
 });
 
@@ -12327,7 +12415,7 @@ function processOddsType(t: OddsType): object | null {
   }
 }
 
-router.get("/football-odds-country/:country", async (req, res) => {
+router.get("/football-odds-country/:country", async (req: Request, res: Response) => {
   const country = String(req.params["country"]).toLowerCase().replace(/[^a-z0-9-]/g, "");
   if (!country) { res.status(400).json({ error: "País inválido" }); return; }
   const cached = footballOddsCountryCache.get(country);
@@ -12505,7 +12593,7 @@ const v2Match1x2Cache = new Map<string, { odds: { home: number; draw: number; aw
 const V2_MATCH_1X2_TTL = 2 * 60_000;
 
 async function getV2Match1x2Odds(sport: string, matchId: string): Promise<{ home: number; draw: number; away: number } | null> {
-  if (!process.env.SPORTSAPI_KEY) return null;
+  if (!CONFIG.SPORTSAPI_KEY) return null;
   const base = v2SportBase(sport);
   if (!base) return null;
   const cacheKey = `1x2:${sport}:${matchId}`;
@@ -12584,7 +12672,7 @@ function v2SportBase(sport: string): string | null {
   }
 }
 
-router.get("/v2-match-odds", async (req, res) => {
+router.get("/v2-match-odds", async (req: Request, res: Response) => {
   const sport   = String(req.query["sport"]   ?? "football");
   const matchId = String(req.query["matchId"] ?? "");
   if (!matchId) { res.json({ markets: [] }); return; }
@@ -12653,7 +12741,7 @@ const POSITION_PT: Record<string, string> = {
 
 type RawLineupsPlayer = { avgRating?: number; substitute?: boolean; player?: { name?: string; shortName?: string; position?: string; jerseyNumber?: string } };
 
-router.get("/v2-lineups", async (req, res) => {
+router.get("/v2-lineups", async (req: Request, res: Response) => {
   const sport   = String(req.query["sport"]   ?? "football");
   const matchId = String(req.query["matchId"] ?? "");
   const emptyResp: LineupsResponseV2 = { confirmed: false, home: { starters: [], bench: [] }, away: { starters: [], bench: [] } };
@@ -12719,7 +12807,7 @@ router.get("/v2-lineups", async (req, res) => {
 const v2IncidentsCache = new Map<string, { data: unknown; fetchedAt: number }>();
 const V2_INCIDENTS_TTL = 2500;
 
-router.get("/v2-incidents", async (req, res) => {
+router.get("/v2-incidents", async (req: Request, res: Response) => {
   const sport   = String(req.query["sport"]   ?? "football");
   const matchId = String(req.query["matchId"] ?? "");
   if (!matchId) { res.json({}); return; }
@@ -12747,7 +12835,7 @@ router.get("/v2-incidents", async (req, res) => {
 const v2StatisticsCache = new Map<string, { data: unknown; fetchedAt: number }>();
 const V2_STATISTICS_TTL = 4000;
 
-router.get("/v2-statistics", async (req, res) => {
+router.get("/v2-statistics", async (req: Request, res: Response) => {
   const sport   = String(req.query["sport"]   ?? "football");
   const matchId = String(req.query["matchId"] ?? "");
   if (!matchId) { res.json({}); return; }
@@ -12772,7 +12860,7 @@ router.get("/v2-statistics", async (req, res) => {
   }
 });
 
-router.get("/football-player-markets/:leagueId", async (req, res) => {
+router.get("/football-player-markets/:leagueId", async (req: Request, res: Response) => {
   const leagueId = String(req.params["leagueId"]);
   const homeTeam = String(req.query["homeTeam"] ?? "").trim();
   const awayTeam = String(req.query["awayTeam"] ?? "").trim();
@@ -12809,7 +12897,7 @@ type ConfrontosResult = { homeWins: number; awayWins: number; draws: number; rec
 const confrontosCache = new Map<string, { data: ConfrontosResult; fetchedAt: number }>();
 const CONFRONTOS_TTL = 15 * 60_000;
 
-router.get("/confrontos", async (req, res) => {
+router.get("/confrontos", async (req: Request, res: Response) => {
   const sport   = String(req.query["sport"]   ?? "football");
   const matchId = String(req.query["matchId"] ?? "");
   const home    = String(req.query["home"]    ?? "").trim();
@@ -12883,7 +12971,7 @@ router.get("/confrontos", async (req, res) => {
 const v2StandingsCache = new Map<string, { data: object; fetchedAt: number }>();
 const V2_STANDINGS_TTL = 15 * 60_000;
 
-router.get("/v2-standings", async (req, res) => {
+router.get("/v2-standings", async (req: Request, res: Response) => {
   const sport   = String(req.query["sport"]   ?? "football");
   const matchId = String(req.query["matchId"] ?? "");
   if (!matchId) { res.json({ standings: [], league: "" }); return; }
@@ -12922,8 +13010,8 @@ router.get("/v2-standings", async (req, res) => {
     const stdResp = await fetch(`${base}/tournament/${tId}/season/${sId}/standings`, { signal: AbortSignal.timeout(8000), headers: sapiHeaders() });
     if (!stdResp.ok) { res.json({ standings: [], league: leagueName }); return; }
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const stdData = await stdResp.json() as any;
-    const rawArr: any[] = stdData.standings ?? [];
+    const stdData = await stdResp.json() as { standings?: any[] };
+    const rawArr = stdData.standings ?? [];
 
     function parseStandingRow(r: any, i: number) {
       return {
@@ -12989,13 +13077,13 @@ router.get("/v2-standings", async (req, res) => {
 // Accepts native WebSocket connections and pushes the same live payload that
 // broadcastLive() sends to SSE clients (WS-triggered + 1–2s cadence), piggy-backed
 // on the market-drift engine. Mobile clients reconnect automatically on close/error.
-export function initLiveWsServer(httpServer: import("http").Server): void {
+export function initLiveWsServer(httpServer: http.Server): void {
   const wss = new WebSocketServer({ noServer: true });
 
-  httpServer.on("upgrade", (req, socket, head) => {
+  httpServer.on("upgrade", (req: http.IncomingMessage, socket: net.Socket, head: Buffer) => {
     const url = req.url ?? "";
     if (url === "/api/matches/ws" || url.startsWith("/api/matches/ws?")) {
-      wss.handleUpgrade(req, socket as import("net").Socket, head, (ws) => {
+      wss.handleUpgrade(req, socket, head, (ws: WsClient) => {
         wss.emit("connection", ws, req);
       });
     } else {
