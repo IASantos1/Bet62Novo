@@ -3148,8 +3148,8 @@ export async function scanDailyForFinished(): Promise<void> {
       }
     }
     _pruneFinishedResults();
-  } catch {
-    // non-critical — settlement will retry on next cycle
+  } catch (err) {
+    logger.error({ err }, "scanDailyForFinished failed");
   }
 }
 
@@ -5529,8 +5529,8 @@ export async function scanV2AllSportsForFinished(): Promise<void> {
     }
 
     _pruneFinishedResults();
-  } catch {
-    // non-critical — settlement will retry on next cycle
+  } catch (err) {
+    logger.error({ err }, "scanV2AllSportsForFinished failed");
   }
 }
 

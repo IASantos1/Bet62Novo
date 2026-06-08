@@ -1221,6 +1221,13 @@ type Match = {
 type BetSelection = {
   matchId: string | number;
   matchTitle: string;
+  league?: string;
+  country?: string;
+  sport?: string;
+  date?: string;
+  time?: string;
+  scheduledDate?: string;
+  scheduledTime?: string;
   selection: string;
   odd: number;
   market?: string;
@@ -1230,6 +1237,13 @@ type BetSelection = {
 type StoredSelection = {
   matchId?: string;
   matchTitle: string;
+  league?: string;
+  country?: string;
+  sport?: string;
+  date?: string;
+  time?: string;
+  scheduledDate?: string;
+  scheduledTime?: string;
   selection: string;
   odd: number;
   market?: string;
@@ -3357,6 +3371,13 @@ export default function Home() {
       return [...prev, {
         matchId: match.id,
         matchTitle: `${match.home} vs ${match.away}`,
+        league: match.league,
+        country: match.country,
+        sport: match.sport,
+        date: match.date,
+        time: match.time,
+        scheduledDate: (match as any).scheduledDate,
+        scheduledTime: (match as any).scheduledTime,
         selection,
         odd,
         market,
@@ -3552,7 +3573,21 @@ export default function Home() {
             body: JSON.stringify({
               matchId: String(bet.matchId),
               matchTitle: bet.matchTitle,
-              selections: [{ matchId: String(bet.matchId), matchTitle: bet.matchTitle, selection: bet.selection, odd: bet.odd, market: bet.market, label: bet.label || bet.selection }],
+              selections: [{
+                matchId: String(bet.matchId),
+                matchTitle: bet.matchTitle,
+                league: bet.league,
+                country: bet.country,
+                sport: bet.sport,
+                date: bet.date,
+                time: bet.time,
+                scheduledDate: bet.scheduledDate,
+                scheduledTime: bet.scheduledTime,
+                selection: bet.selection,
+                odd: bet.odd,
+                market: bet.market,
+                label: bet.label || bet.selection,
+              }],
               stake: sNum.toFixed(2),
               potentialWin,
               totalOdds: bet.odd.toFixed(2),
@@ -3585,7 +3620,21 @@ export default function Home() {
         body: JSON.stringify({
           matchId,
           matchTitle,
-          selections: bets.map(b => ({ matchId: String(b.matchId), matchTitle: b.matchTitle, selection: b.selection, odd: b.odd, market: b.market, label: b.label || b.selection })),
+          selections: bets.map(b => ({
+            matchId: String(b.matchId),
+            matchTitle: b.matchTitle,
+            league: b.league,
+            country: b.country,
+            sport: b.sport,
+            date: b.date,
+            time: b.time,
+            scheduledDate: b.scheduledDate,
+            scheduledTime: b.scheduledTime,
+            selection: b.selection,
+            odd: b.odd,
+            market: b.market,
+            label: b.label || b.selection,
+          })),
           stake: stakeNum.toFixed(2),
           potentialWin,
           totalOdds,
@@ -4562,6 +4611,12 @@ export default function Home() {
             <AnimatePresence>
               {bets.map((bet, betIdx) => {
                 const isSusp = betSuspended[betIdx] === true;
+                const when = (() => {
+                  const d = bet.scheduledDate ?? bet.date;
+                  const t = bet.scheduledTime ?? bet.time;
+                  if (d && t) return `${d} • ${t}`;
+                  return t || d || null;
+                })();
                 return (
                   <motion.div
                     key={`${bet.matchId}-${bet.market}-${bet.selection}`}
@@ -4588,7 +4643,7 @@ export default function Home() {
                       {/* Top row: sport/league + remove */}
                       <div className="flex items-center justify-between mb-2">
                         <span className="text-[10px] font-semibold uppercase tracking-wider truncate pr-2" style={{ color: "#dc2626" }}>
-                          {bet.matchTitle.split(" vs ")[0]?.trim() || bet.matchTitle}
+                          {bet.league || bet.matchTitle.split(" vs ")[0]?.trim() || bet.matchTitle}
                         </span>
                         <button
                           onClick={() => removeBet(bet.matchId, bet.market || "result", bet.selection)}
@@ -4601,6 +4656,11 @@ export default function Home() {
 
                       {/* Match title */}
                       <div className="text-[11px] text-zinc-400 truncate mb-1.5">{bet.matchTitle}</div>
+                      {(bet.league || when) && (
+                        <div className="text-[10px] text-zinc-500 truncate mb-2">
+                          {[bet.league, when].filter(Boolean).join(" • ")}
+                        </div>
+                      )}
 
                       {/* Selection + odd */}
                       <div className="flex items-center justify-between">
@@ -10829,6 +10889,21 @@ export default function Home() {
                                         {i + 1}. {sel.matchTitle}
                                       </div>
                                       <div className={`text-[11px] mt-0.5 ${txtSub}`}>{getSelLabel(sel)}</div>
+                                      {(() => {
+                                        const when = (() => {
+                                          const d = (sel as any).scheduledDate ?? (sel as any).date;
+                                          const t = (sel as any).scheduledTime ?? (sel as any).time;
+                                          if (d && t) return `${d} • ${t}`;
+                                          return t || d || null;
+                                        })();
+                                        const lg = (sel as any).league as string | undefined;
+                                        if (!lg && !when) return null;
+                                        return (
+                                          <div className={`text-[10px] mt-0.5 ${txtSub} truncate`}>
+                                            {[lg, when].filter(Boolean).join(" • ")}
+                                          </div>
+                                        );
+                                      })()}
                                       {/* Live / upcoming badge */}
                                       {lm && lm.status !== "Not Started" && (lm.minute ?? 0) > 0 && (
                                         <div className="flex items-center gap-2 mt-1.5 flex-wrap">

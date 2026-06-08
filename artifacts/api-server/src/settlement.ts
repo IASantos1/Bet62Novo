@@ -1486,26 +1486,24 @@ async function expireStalePendingBets(): Promise<void> {
  * Fully independent of user sessions: runs server-side at all times.
  */
 export function startSettlementWorker(): void {
-  const rawIntervalMs = process.env.SETTLEMENT_INTERVAL_MS ?? "15000";
-  const intervalMs = Number(rawIntervalMs);
+  const parseMs = (raw: string | undefined, fallback: number, min: number, key: string): number => {
+    const n = Number(raw);
+    if (!Number.isFinite(n) || n < min) {
+      logger.error({ key, raw, fallback }, "Invalid worker interval env; using fallback");
+      return fallback;
+    }
+    return n;
+  };
 
-  if (Number.isNaN(intervalMs) || intervalMs < 1_000) {
-    throw new Error(`Invalid SETTLEMENT_INTERVAL_MS value: "${rawIntervalMs}"`);
-  }
+  const rawIntervalMs = process.env.SETTLEMENT_INTERVAL_MS ?? "15000";
+  const intervalMs = parseMs(rawIntervalMs, 15_000, 1_000, "SETTLEMENT_INTERVAL_MS");
 
   const rawInitialDelayMs = process.env.SETTLEMENT_INITIAL_DELAY_MS ?? "5000";
-  const initialDelayMs = Number(rawInitialDelayMs);
-
-  if (Number.isNaN(initialDelayMs) || initialDelayMs < 0) {
-    throw new Error(`Invalid SETTLEMENT_INITIAL_DELAY_MS value: "${rawInitialDelayMs}"`);
-  }
+  const initialDelayMs = parseMs(rawInitialDelayMs, 5_000, 0, "SETTLEMENT_INITIAL_DELAY_MS");
 
   const queueEnabled = typeof process.env["REDIS_URL"] === "string" && process.env["REDIS_URL"]!.trim() !== "";
-  const rawCatchupMs = process.env.SETTLEMENT_CATCHUP_INTERVAL_MS ?? "300000";
-  const catchupMs = Number(rawCatchupMs);
-  if (Number.isNaN(catchupMs) || catchupMs < 10_000) {
-    throw new Error(`Invalid SETTLEMENT_CATCHUP_INTERVAL_MS value: "${rawCatchupMs}"`);
-  }
+  const rawCatchupMs = process.env.SETTLEMENT_CATCHUP_INTERVAL_MS ?? "60000";
+  const catchupMs = parseMs(rawCatchupMs, 60_000, 10_000, "SETTLEMENT_CATCHUP_INTERVAL_MS");
   let lastCatchupAt = 0;
 
   const run = async (): Promise<void> => {
@@ -1540,5 +1538,5 @@ export function startSettlementWorker(): void {
     void run().finally(schedule);
   }, initialDelayMs);
 
-  logger.info({ intervalMs }, "Bet auto-settlement worker started (self-scheduling, all sports)");
+  logger.info({ intervalMs, initialDelayMs, queueEnabled, catchupMs }, "Bet auto-settlement worker started (self-scheduling, all sports)");
 }
