@@ -23,6 +23,35 @@ type UserBet = {
   createdAt: string;
 };
 
+type KycSlot = {
+  label: string;
+  required: boolean;
+  uploaded: boolean;
+  documentId: number | null;
+  fileName: string | null;
+  status: string;
+  createdAt: string | null;
+  reviewedAt: string | null;
+};
+
+type KycProfileData = {
+  kycStatus: string | null;
+  kycDocumentType: "cc" | "passport" | null;
+  kycSubmittedAt: string | null;
+  kycOverview: {
+    currentDocumentType: "cc" | "passport";
+    documentNumberMasked: string | null;
+    slots: KycSlot[];
+    automaticCheck: {
+      stage: string;
+      readyForManualReview: boolean;
+      requiresManualReview: boolean;
+      missingItems: string[];
+      summary: string;
+    };
+  } | null;
+};
+
 type ProfileTabProps = {
   myBets: UserBet[];
   myBetsLoading: boolean;
@@ -117,8 +146,15 @@ export default function ProfileTab({ myBets, myBetsLoading, fetchMyBets }: Profi
   const [ibanName, setIbanName] = useState(auth.user?.withdrawalName ?? "");
   const [nif, setNif] = useState(auth.user?.nif ?? "");
   const [savingBanking, setSavingBanking] = useState(false);
-  const [kycUploading, setKycUploading] = useState<null | "id" | "address">(null);
-  const kycIdInputRef = useRef<HTMLInputElement | null>(null);
+  const [kycUploading, setKycUploading] = useState<null | "id_front" | "id_back" | "passport" | "address">(null);
+  const [kycProfile, setKycProfile] = useState<KycProfileData | null>(null);
+  const [kycLoading, setKycLoading] = useState(false);
+  const [kycSavingMeta, setKycSavingMeta] = useState(false);
+  const [kycDocType, setKycDocType] = useState<"cc" | "passport">("cc");
+  const [kycDocNumber, setKycDocNumber] = useState("");
+  const kycFrontInputRef = useRef<HTMLInputElement | null>(null);
+  const kycBackInputRef = useRef<HTMLInputElement | null>(null);
+  const kycPassportInputRef = useRef<HTMLInputElement | null>(null);
   const kycAddressInputRef = useRef<HTMLInputElement | null>(null);
 
   const wonBets = myBets.filter(b => b.status === "won");
@@ -196,20 +232,65 @@ export default function ProfileTab({ myBets, myBetsLoading, fetchMyBets }: Profi
       reader.readAsDataURL(file);
     });
 
-  const uploadKycFiles = async (kind: "id" | "address", fileList: FileList) => {
+  const fetchKycProfile = async () => {
+    if (!auth.token) return;
+    setKycLoading(true);
+    try {
+      const r = await fetch("/api/profile", {
+        headers: { Authorization: `Bearer ${auth.token}` },
+      });
+      const d = await r.json().catch(() => null) as KycProfileData | null;
+      if (!r.ok || !d) return;
+      setKycProfile(d);
+      setKycDocType(d.kycDocumentType ?? d.kycOverview?.currentDocumentType ?? "cc");
+    } catch {
+      // ignore
+    } finally {
+      setKycLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!auth.token) return;
+    void fetchKycProfile();
+  }, [auth.token]);
+
+  const saveKycMetadata = async () => {
     if (!auth.token) { toast.error("Sessão inválida. Faça login novamente."); return; }
-    const files = Array.from(fileList).slice(0, 4);
-    if (files.length === 0) return;
-    const tooBig = files.find(f => f.size > 5 * 1024 * 1024);
-    if (tooBig) { toast.error("Arquivo muito grande. Máximo 5MB por arquivo."); return; }
+    if (!/^\d{9}$/.test(nif)) { toast.error("NIF inválido. Deve ter 9 dígitos."); return; }
+    if (!kycDocNumber.trim() || kycDocNumber.trim().length < 5) { toast.error("Número do documento inválido."); return; }
+    setKycSavingMeta(true);
+    try {
+      const r = await fetch("/api/profile/kyc/submit", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${auth.token}` },
+        body: JSON.stringify({ documentType: kycDocType, documentNumber: kycDocNumber.trim(), nif }),
+      });
+      const d = await r.json().catch(() => ({})) as { error?: string };
+      if (!r.ok) { toast.error(d.error ?? "Erro ao guardar dados do KYC."); return; }
+      await auth.refreshUser();
+      await fetchKycProfile();
+      toast.success("Dados do KYC guardados. Continue com o upload dos documentos.");
+    } catch {
+      toast.error("Erro ao guardar dados do KYC.");
+    } finally {
+      setKycSavingMeta(false);
+    }
+  };
+
+  const uploadKycFiles = async (kind: "id_front" | "id_back" | "passport" | "address", fileList: FileList) => {
+    if (!auth.token) { toast.error("Sessão inválida. Faça login novamente."); return; }
+    const file = Array.from(fileList)[0];
+    if (!file) return;
+    if (file.size > 5 * 1024 * 1024) { toast.error("Arquivo muito grande. Máximo 5MB por arquivo."); return; }
 
     setKycUploading(kind);
     try {
-      const payloadFiles = await Promise.all(files.map(async (f) => ({
-        fileName: f.name,
-        mimeType: f.type || "application/octet-stream",
-        base64: await readFileAsBase64(f),
-      })));
+      const payloadFiles = [{
+        fileName: file.name,
+        mimeType: file.type || "application/octet-stream",
+        base64: await readFileAsBase64(file),
+      }];
 
       const r = await fetch("/api/profile/kyc/upload", {
         method: "POST",
@@ -219,7 +300,8 @@ export default function ProfileTab({ myBets, myBetsLoading, fetchMyBets }: Profi
       const d = await r.json().catch(() => ({})) as { error?: string };
       if (!r.ok) { toast.error(d.error ?? "Erro ao enviar documentos."); return; }
       await auth.refreshUser();
-      toast.success("Documentos enviados. Estado: em análise.");
+      await fetchKycProfile();
+      toast.success("Documento enviado com sucesso.");
     } catch {
       toast.error("Erro ao enviar documentos.");
     } finally {
@@ -230,12 +312,29 @@ export default function ProfileTab({ myBets, myBetsLoading, fetchMyBets }: Profi
   const user = auth.user;
   if (!user) return null;
 
-  const kycStatus = user.kycStatus ?? "not_submitted";
+  const kycStatus = kycProfile?.kycStatus ?? user.kycStatus ?? "not_submitted";
+  const kycOverview = kycProfile?.kycOverview ?? null;
   const selfExcludedUntil = user.selfExcludedUntil ? new Date(user.selfExcludedUntil) : null;
   const isExcluded = selfExcludedUntil ? selfExcludedUntil > new Date() : false;
 
   const memberId = `BET62-${String(user.id).padStart(6, "0")}`;
   const joinedDate = new Date().toLocaleDateString("pt-PT", { day: "2-digit", month: "long", year: "numeric" });
+  const kycSlots = kycOverview?.slots ?? [];
+  const identitySlots = kycSlots.filter((slot) => slot.label !== "Comprovativo de morada");
+  const addressSlot = kycSlots.find((slot) => slot.label === "Comprovativo de morada") ?? null;
+  const hasIdentityUploaded = identitySlots.some((slot) => slot.uploaded);
+  const documentBadgeStatus =
+    kycStatus === "approved"
+      ? "verified"
+      : hasIdentityUploaded || kycStatus === "pending"
+        ? "pending"
+        : "unverified";
+  const addressBadgeStatus =
+    kycStatus === "approved"
+      ? "verified"
+      : addressSlot?.uploaded || kycStatus === "pending"
+        ? "pending"
+        : "unverified";
 
   const SectionContent = ({ id }: { id: string }) => {
     switch (id) {
@@ -281,11 +380,8 @@ export default function ProfileTab({ myBets, myBetsLoading, fetchMyBets }: Profi
             <div className="space-y-2">
               <VerifyBadge label="Email" status="verified" />
               <VerifyBadge label="NIF / Número de Identificação Fiscal" status={user.nif ? "verified" : "unverified"} />
-              <VerifyBadge
-                label="Documento de Identificação (CC / Passaporte)"
-                status={kycStatus === "approved" ? "verified" : kycStatus === "pending" ? "pending" : "unverified"}
-              />
-              <VerifyBadge label="Comprovativo de Morada" status={kycStatus === "approved" ? "verified" : "unverified"} />
+              <VerifyBadge label="Documento de Identificação (CC / Passaporte)" status={documentBadgeStatus} />
+              <VerifyBadge label="Comprovativo de Morada" status={addressBadgeStatus} />
             </div>
 
             {kycStatus === "not_submitted" && (
@@ -304,7 +400,7 @@ export default function ProfileTab({ myBets, myBetsLoading, fetchMyBets }: Profi
                 <div className="flex items-start gap-3">
                   <Clock className="text-blue-400 shrink-0 mt-0.5" size={16} />
                   <div className="text-sm text-blue-200/80">
-                    Os seus documentos estão em análise. Será notificado por email em até 48 horas úteis.
+                    Os seus documentos passaram pela pré-verificação automática e estão agora em revisão semiautomática/manual. O processo pode demorar até 48 horas úteis.
                   </div>
                 </div>
               </div>
@@ -321,54 +417,146 @@ export default function ProfileTab({ myBets, myBetsLoading, fetchMyBets }: Profi
               </div>
             )}
 
-            <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-4 space-y-3">
-              <h4 className="font-semibold text-sm text-white flex items-center gap-2">
-                <FileText size={14} className="text-red-500" /> Como submeter documentos
-              </h4>
-              <ol className="text-xs text-zinc-400 space-y-2 list-decimal list-inside leading-relaxed">
-                <li>Inclua o seu ID de membro: <span className="text-red-400 font-mono font-bold">{memberId}</span></li>
-                <li>Anexe: Cartão de Cidadão ou Passaporte (frente e verso)</li>
-                <li>Anexe: Comprovativo de morada recente (fatura, extrato)</li>
-                <li>Limites: até 4 ficheiros por envio, máximo 5MB cada</li>
-                <li>Suporte: <span className="text-white font-semibold">suportebet62@gmail.com</span></li>
-              </ol>
+            <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-4 space-y-4">
+              <div className="flex items-center justify-between gap-3">
+                <h4 className="font-semibold text-sm text-white flex items-center gap-2">
+                  <FileText size={14} className="text-red-500" /> Envio Direto de Documentos
+                </h4>
+                <div className="text-[11px] text-zinc-500">ID de membro: <span className="text-red-400 font-mono font-bold">{memberId}</span></div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <Label className="text-zinc-400 text-xs">Tipo de documento</Label>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      onClick={() => setKycDocType("cc")}
+                      className={`rounded-lg border px-3 py-2 text-xs font-semibold transition-colors ${kycDocType === "cc" ? "border-red-500 bg-red-500/10 text-red-400" : "border-zinc-700 text-zinc-300 hover:border-zinc-500"}`}
+                    >
+                      Cartão de Cidadão
+                    </button>
+                    <button
+                      onClick={() => setKycDocType("passport")}
+                      className={`rounded-lg border px-3 py-2 text-xs font-semibold transition-colors ${kycDocType === "passport" ? "border-red-500 bg-red-500/10 text-red-400" : "border-zinc-700 text-zinc-300 hover:border-zinc-500"}`}
+                    >
+                      Passaporte
+                    </button>
+                  </div>
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-zinc-400 text-xs">Número do documento</Label>
+                  <Input
+                    value={kycDocNumber}
+                    onChange={(e) => setKycDocNumber(e.target.value)}
+                    placeholder={kycDocType === "cc" ? "Ex: 12345678 9 ZX0" : "Ex: AB123456"}
+                    className="bg-zinc-800 border-zinc-700 text-white font-mono"
+                  />
+                  {kycOverview?.documentNumberMasked && (
+                    <div className="text-[11px] text-zinc-500">Registado atualmente: {kycOverview.documentNumberMasked}</div>
+                  )}
+                </div>
+              </div>
+
               <div className="flex flex-col sm:flex-row gap-2">
-                <input
-                  ref={kycIdInputRef}
-                  type="file"
-                  multiple
-                  accept="image/*,application/pdf"
-                  className="hidden"
-                  onChange={(e) => { if (e.target.files) uploadKycFiles("id", e.target.files); e.currentTarget.value = ""; }}
-                />
-                <input
-                  ref={kycAddressInputRef}
-                  type="file"
-                  multiple
-                  accept="image/*,application/pdf"
-                  className="hidden"
-                  onChange={(e) => { if (e.target.files) uploadKycFiles("address", e.target.files); e.currentTarget.value = ""; }}
-                />
-                <button
-                  onClick={() => kycIdInputRef.current?.click()}
-                  disabled={kycUploading !== null}
-                  className="inline-flex items-center justify-center gap-1.5 bg-red-600 hover:bg-red-700 disabled:opacity-60 text-white text-xs font-semibold px-3 py-2 rounded-md transition-colors"
-                >
-                  {kycUploading === "id" ? <Loader2 className="animate-spin" size={12} /> : <FileText size={12} />} Enviar Documento (ID)
-                </button>
-                <button
-                  onClick={() => kycAddressInputRef.current?.click()}
-                  disabled={kycUploading !== null}
-                  className="inline-flex items-center justify-center gap-1.5 bg-zinc-700 hover:bg-zinc-600 disabled:opacity-60 text-zinc-200 text-xs font-semibold px-3 py-2 rounded-md transition-colors"
-                >
-                  {kycUploading === "address" ? <Loader2 className="animate-spin" size={12} /> : <FileText size={12} />} Enviar Morada
-                </button>
-                <button
-                  onClick={() => { navigator.clipboard.writeText("suportebet62@gmail.com"); toast.success("Email copiado!"); }}
-                  className="inline-flex items-center justify-center gap-1.5 bg-zinc-700 hover:bg-zinc-600 text-zinc-300 text-xs font-semibold px-3 py-2 rounded-md transition-colors"
-                >
-                  <Mail size={12} /> Copiar email
-                </button>
+                <Button onClick={saveKycMetadata} disabled={kycSavingMeta} className="bg-red-600 hover:bg-red-700 text-white">
+                  {kycSavingMeta ? <Loader2 className="animate-spin mr-2" size={14} /> : null}
+                  Guardar Dados de Identificação
+                </Button>
+                <div className="text-xs text-zinc-500 self-center">Formatos aceites: PDF, JPG e PNG. Máximo 5MB por ficheiro.</div>
+              </div>
+
+              <div className="rounded-xl border border-zinc-800 bg-zinc-950/60 p-4 space-y-3">
+                <div className="text-sm font-semibold text-white">Pré-verificação automática</div>
+                {kycLoading ? (
+                  <div className="text-xs text-zinc-500">A carregar estado do KYC...</div>
+                ) : (
+                  <>
+                    <div className={`text-xs leading-relaxed ${kycOverview?.automaticCheck.readyForManualReview ? "text-green-400" : "text-zinc-400"}`}>
+                      {kycOverview?.automaticCheck.summary ?? "Preencha os dados e envie os ficheiros obrigatórios para iniciar a pré-verificação."}
+                    </div>
+                    {!!kycOverview?.automaticCheck.missingItems.length && (
+                      <div className="text-xs text-amber-300">
+                        Em falta: {kycOverview.automaticCheck.missingItems.join(", ")}.
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+
+              <input
+                ref={kycFrontInputRef}
+                type="file"
+                accept="image/*,application/pdf"
+                className="hidden"
+                onChange={(e) => { if (e.target.files) uploadKycFiles("id_front", e.target.files); e.currentTarget.value = ""; }}
+              />
+              <input
+                ref={kycBackInputRef}
+                type="file"
+                accept="image/*,application/pdf"
+                className="hidden"
+                onChange={(e) => { if (e.target.files) uploadKycFiles("id_back", e.target.files); e.currentTarget.value = ""; }}
+              />
+              <input
+                ref={kycPassportInputRef}
+                type="file"
+                accept="image/*,application/pdf"
+                className="hidden"
+                onChange={(e) => { if (e.target.files) uploadKycFiles("passport", e.target.files); e.currentTarget.value = ""; }}
+              />
+              <input
+                ref={kycAddressInputRef}
+                type="file"
+                accept="image/*,application/pdf"
+                className="hidden"
+                onChange={(e) => { if (e.target.files) uploadKycFiles("address", e.target.files); e.currentTarget.value = ""; }}
+              />
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                {(kycDocType === "cc"
+                  ? [
+                      { key: "id_front" as const, title: "Frente do documento", description: "Envie a frente do Cartão de Cidadão ou BI.", ref: kycFrontInputRef },
+                      { key: "id_back" as const, title: "Verso do documento", description: "Envie o verso do documento com todos os dados legíveis.", ref: kycBackInputRef },
+                      { key: "address" as const, title: "Comprovativo de morada", description: "Fatura ou extrato recente com nome e morada.", ref: kycAddressInputRef },
+                    ]
+                  : [
+                      { key: "passport" as const, title: "Passaporte", description: "Envie a página principal do passaporte.", ref: kycPassportInputRef },
+                      { key: "address" as const, title: "Comprovativo de morada", description: "Fatura ou extrato recente com nome e morada.", ref: kycAddressInputRef },
+                    ]
+                ).map((slot) => {
+                  const slotState = kycSlots.find((item) => item.label === slot.title) ?? null;
+                  const statusText =
+                    slotState?.status === "approved"
+                      ? "Aprovado"
+                      : slotState?.status === "rejected"
+                        ? "Rejeitado"
+                        : slotState?.uploaded
+                          ? "Enviado"
+                          : "Pendente";
+                  return (
+                    <div key={slot.key} className="rounded-xl border border-zinc-800 bg-zinc-950/60 p-4 space-y-3">
+                      <div>
+                        <div className="text-sm font-semibold text-white">{slot.title}</div>
+                        <div className="text-xs text-zinc-500 leading-relaxed">{slot.description}</div>
+                      </div>
+                      <div className="text-xs text-zinc-400">
+                        Estado: <span className={slotState?.status === "approved" ? "text-green-400" : slotState?.status === "rejected" ? "text-red-400" : slotState?.uploaded ? "text-yellow-400" : "text-zinc-500"}>{statusText}</span>
+                      </div>
+                      <div className="text-xs text-zinc-500 truncate">
+                        {slotState?.fileName ? `Ficheiro atual: ${slotState.fileName}` : "Nenhum ficheiro enviado."}
+                      </div>
+                      <Button
+                        onClick={() => slot.ref.current?.click()}
+                        disabled={kycUploading !== null}
+                        variant="outline"
+                        className="w-full border-zinc-700 text-zinc-200 hover:bg-zinc-800"
+                      >
+                        {kycUploading === slot.key ? <Loader2 className="animate-spin mr-2" size={14} /> : <FileText className="mr-2" size={14} />}
+                        {slotState?.uploaded ? "Substituir ficheiro" : "Adicionar ficheiro"}
+                      </Button>
+                    </div>
+                  );
+                })}
               </div>
             </div>
           </SectionCard>
