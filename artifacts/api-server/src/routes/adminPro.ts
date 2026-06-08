@@ -2,6 +2,7 @@ import { Router, type IRouter, type Response } from "express";
 import {
   betsTable,
   competitionConfigsTable,
+  competitionsTable,
   db,
   paymentsTable,
   adminAuditLogTable,
@@ -434,6 +435,14 @@ router.put("/competitions/:id/config", adminMiddleware, async (req: AdminRequest
     const cleanUpdates = Object.fromEntries(
       Object.entries(updates).filter(([, value]) => value !== undefined),
     );
+    const competitionUpdates = {
+      isActive: boolValue("isActive"),
+      tier: textValue("tier"),
+      updatedAt: new Date(),
+    };
+    const cleanCompetitionUpdates = Object.fromEntries(
+      Object.entries(competitionUpdates).filter(([, value]) => value !== undefined),
+    );
 
     await db.insert(competitionConfigsTable).values({
       competitionId,
@@ -455,13 +464,23 @@ router.put("/competitions/:id/config", adminMiddleware, async (req: AdminRequest
       updatedAt: new Date(),
     }).onConflictDoNothing();
 
+    if (Object.keys(cleanCompetitionUpdates).length > 0) {
+      await db
+        .update(competitionsTable)
+        .set(cleanCompetitionUpdates)
+        .where(eq(competitionsTable.id, competitionId));
+    }
+
     const [updated] = await db
       .update(competitionConfigsTable)
       .set(cleanUpdates)
       .where(eq(competitionConfigsTable.competitionId, competitionId))
       .returning();
 
-    await auditLog(req, "competition.config.updated", "competition", String(competitionId), cleanUpdates);
+    await auditLog(req, "competition.config.updated", "competition", String(competitionId), {
+      ...cleanUpdates,
+      ...cleanCompetitionUpdates,
+    });
     res.json({ ok: true, config: updated ?? null });
   } catch (err) {
     logger.error({ err }, "Admin competition config update error");

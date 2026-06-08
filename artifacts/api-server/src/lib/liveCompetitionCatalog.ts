@@ -6,7 +6,7 @@ import {
   eventRuntimeStatesTable,
   providerCompetitionsTable,
 } from "@workspace/db";
-import { and, eq, sql } from "drizzle-orm";
+import { and, desc, eq, sql } from "drizzle-orm";
 
 type SeenCompetitionInput = {
   sport: string;
@@ -26,16 +26,74 @@ type SeenLiveEventInput = SeenCompetitionInput & {
 };
 
 const CATALOG_SYNC_INTERVAL_MS = 30_000;
+const CATALOG_SNAPSHOT_TTL_MS = 15_000;
 let lastCatalogSyncAt = 0;
 let catalogSyncInFlight: Promise<void> | null = null;
+let catalogSnapshotLoadedAt = 0;
+let catalogSnapshotInFlight: Promise<CompetitionCatalogSnapshot> | null = null;
+let catalogSnapshotCache: CompetitionCatalogSnapshot | null = null;
 
-function normalizeCatalogValue(value: string | null | undefined): string {
+type CompetitionCatalogRule = {
+  competitionId: number;
+  isActive: boolean;
+  liveEnabled: boolean;
+  prematchEnabled: boolean;
+  homeEnabled: boolean;
+  mobileEnabled: boolean;
+  featured: boolean;
+  priority: number;
+  displayOrder: number;
+  cashoutEnabled: boolean;
+  minFeedQualityScore: number;
+  allowUnstableFeedVisibility: boolean;
+  tradingMode: string;
+  stakeLimitMultiplier: number;
+};
+
+type EventRuntimeRule = {
+  eventId: string;
+  state: string;
+  visibilityStatus: string;
+  feedHealth: string;
+  tradingStatus: string;
+  suspensionReason: string | null;
+};
+
+type CompetitionCatalogSnapshot = {
+  competitionRulesByKey: Map<string, CompetitionCatalogRule>;
+  eventRuntimeByEventId: Map<string, EventRuntimeRule>;
+};
+
+export type CompetitionCatalogDecision = {
+  matched: boolean;
+  competitionId: number | null;
+  mode: "live" | "prematch";
+  visible: boolean;
+  featured: boolean;
+  priority: number | null;
+  reason: string | null;
+  feedHealth: string | null;
+  state: string | null;
+};
+
+type MatchCatalogInput = {
+  eventId: string;
+  sport: string;
+  league: string;
+  country?: string | null;
+};
+
+export function normalizeCatalogValue(value: string | null | undefined): string {
   return String(value ?? "")
     .trim()
     .toLowerCase()
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .replace(/\s+/g, " ");
+}
+
+function competitionRuleKey(sport: string, country: string | null | undefined, league: string): string {
+  return `${normalizeCatalogValue(sport)}|${normalizeCatalogValue(country || "unknown")}|${normalizeCatalogValue(league)}`;
 }
 
 function buildProviderCompetitionKey(input: SeenCompetitionInput): string {
@@ -214,6 +272,172 @@ async function syncCatalogInternal(events: SeenLiveEventInput[]): Promise<void> 
     }
     await ensureRuntimeState(event, competitionId);
   }
+}
+
+async function loadCompetitionCatalogSnapshot(): Promise<CompetitionCatalogSnapshot> {
+  const competitionRows = await db
+    .select({
+      competitionId: competitionsTable.id,
+      sport: competitionsTable.sport,
+      country: competitionsTable.country,
+      name: competitionsTable.name,
+      normalizedCountry: competitionsTable.normalizedCountry,
+      normalizedName: competitionsTable.normalizedName,
+      isActive: competitionsTable.isActive,
+      liveEnabled: competitionConfigsTable.liveEnabled,
+      prematchEnabled: competitionConfigsTable.prematchEnabled,
+      homeEnabled: competitionConfigsTable.homeEnabled,
+      mobileEnabled: competitionConfigsTable.mobileEnabled,
+      featured: competitionConfigsTable.featured,
+      priority: competitionConfigsTable.priority,
+      displayOrder: competitionConfigsTable.displayOrder,
+      cashoutEnabled: competitionConfigsTable.cashoutEnabled,
+      minFeedQualityScore: competitionConfigsTable.minFeedQualityScore,
+      allowUnstableFeedVisibility: competitionConfigsTable.allowUnstableFeedVisibility,
+      tradingMode: competitionConfigsTable.tradingMode,
+      stakeLimitMultiplier: competitionConfigsTable.stakeLimitMultiplier,
+    })
+    .from(competitionsTable)
+    .leftJoin(competitionConfigsTable, eq(competitionConfigsTable.competitionId, competitionsTable.id));
+
+  const aliasRows = await db
+    .select({
+      competitionId: competitionAliasesTable.competitionId,
+      normalizedAlias: competitionAliasesTable.normalizedAlias,
+    })
+    .from(competitionAliasesTable);
+
+  const runtimeRows = await db
+    .select({
+      eventId: eventRuntimeStatesTable.eventId,
+      state: eventRuntimeStatesTable.state,
+      visibilityStatus: eventRuntimeStatesTable.visibilityStatus,
+      feedHealth: eventRuntimeStatesTable.feedHealth,
+      tradingStatus: eventRuntimeStatesTable.tradingStatus,
+      suspensionReason: eventRuntimeStatesTable.suspensionReason,
+    })
+    .from(eventRuntimeStatesTable)
+    .orderBy(desc(eventRuntimeStatesTable.updatedAt))
+    .limit(5000);
+
+  const ruleByCompetitionId = new Map<number, CompetitionCatalogRule>();
+  const competitionRulesByKey = new Map<string, CompetitionCatalogRule>();
+  for (const row of competitionRows) {
+    const rule: CompetitionCatalogRule = {
+      competitionId: row.competitionId,
+      isActive: row.isActive ?? true,
+      liveEnabled: row.liveEnabled ?? true,
+      prematchEnabled: row.prematchEnabled ?? true,
+      homeEnabled: row.homeEnabled ?? false,
+      mobileEnabled: row.mobileEnabled ?? true,
+      featured: row.featured ?? false,
+      priority: row.priority ?? 100,
+      displayOrder: row.displayOrder ?? 100,
+      cashoutEnabled: row.cashoutEnabled ?? true,
+      minFeedQualityScore: row.minFeedQualityScore ?? 40,
+      allowUnstableFeedVisibility: row.allowUnstableFeedVisibility ?? true,
+      tradingMode: row.tradingMode ?? "automatic",
+      stakeLimitMultiplier: row.stakeLimitMultiplier ?? 100,
+    };
+    ruleByCompetitionId.set(row.competitionId, rule);
+    competitionRulesByKey.set(
+      competitionRuleKey(row.sport, row.normalizedCountry || row.country, row.normalizedName || row.name),
+      rule,
+    );
+  }
+
+  for (const alias of aliasRows) {
+    const rule = ruleByCompetitionId.get(alias.competitionId);
+    if (!rule) continue;
+    const source = competitionRows.find((row) => row.competitionId === alias.competitionId);
+    if (!source) continue;
+    competitionRulesByKey.set(
+      competitionRuleKey(source.sport, source.normalizedCountry || source.country, alias.normalizedAlias),
+      rule,
+    );
+  }
+
+  const eventRuntimeByEventId = new Map<string, EventRuntimeRule>();
+  for (const row of runtimeRows) {
+    if (eventRuntimeByEventId.has(row.eventId)) continue;
+    eventRuntimeByEventId.set(row.eventId, {
+      eventId: row.eventId,
+      state: row.state,
+      visibilityStatus: row.visibilityStatus,
+      feedHealth: row.feedHealth,
+      tradingStatus: row.tradingStatus,
+      suspensionReason: row.suspensionReason ?? null,
+    });
+  }
+
+  return { competitionRulesByKey, eventRuntimeByEventId };
+}
+
+async function getCompetitionCatalogSnapshot(): Promise<CompetitionCatalogSnapshot> {
+  const now = Date.now();
+  if (catalogSnapshotCache && now - catalogSnapshotLoadedAt < CATALOG_SNAPSHOT_TTL_MS) {
+    return catalogSnapshotCache;
+  }
+  if (catalogSnapshotInFlight) return catalogSnapshotInFlight;
+  catalogSnapshotInFlight = loadCompetitionCatalogSnapshot()
+    .then((snapshot) => {
+      catalogSnapshotCache = snapshot;
+      catalogSnapshotLoadedAt = Date.now();
+      return snapshot;
+    })
+    .finally(() => {
+      catalogSnapshotInFlight = null;
+    });
+  return catalogSnapshotInFlight;
+}
+
+export async function getCompetitionCatalogDecisions(
+  matches: MatchCatalogInput[],
+  mode: "live" | "prematch",
+): Promise<Map<string, CompetitionCatalogDecision>> {
+  const snapshot = await getCompetitionCatalogSnapshot();
+  const decisions = new Map<string, CompetitionCatalogDecision>();
+  for (const match of matches) {
+    const key = competitionRuleKey(match.sport, match.country, match.league);
+    const rule = snapshot.competitionRulesByKey.get(key);
+    const runtime = snapshot.eventRuntimeByEventId.get(String(match.eventId));
+    let visible = true;
+    let reason: string | null = null;
+    if (rule) {
+      visible = rule.isActive && (mode === "live" ? rule.liveEnabled : rule.prematchEnabled);
+      if (!rule.isActive) reason = "competition_inactive";
+      else if (!visible) reason = mode === "live" ? "competition_live_disabled" : "competition_prematch_disabled";
+    }
+    if (visible && runtime?.visibilityStatus === "HIDDEN") {
+      visible = false;
+      reason = "hidden_by_admin";
+    }
+    if (visible && runtime?.state === "HIDDEN_BY_ADMIN") {
+      visible = false;
+      reason = "hidden_by_admin";
+    }
+    if (
+      visible &&
+      runtime?.state === "UNSTABLE_FEED" &&
+      rule &&
+      !rule.allowUnstableFeedVisibility
+    ) {
+      visible = false;
+      reason = "unstable_feed_hidden";
+    }
+    decisions.set(String(match.eventId), {
+      matched: !!rule,
+      competitionId: rule?.competitionId ?? null,
+      mode,
+      visible,
+      featured: rule?.featured ?? false,
+      priority: rule?.priority ?? null,
+      reason,
+      feedHealth: runtime?.feedHealth ?? null,
+      state: runtime?.state ?? null,
+    });
+  }
+  return decisions;
 }
 
 export function syncLiveCompetitionCatalog(events: SeenLiveEventInput[]): void {

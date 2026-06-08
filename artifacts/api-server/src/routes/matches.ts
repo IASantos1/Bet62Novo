@@ -2,7 +2,7 @@ import { Router, type IRouter, type Request, type Response } from "express";
 import { WebSocketServer, type WebSocket as WsClient } from "ws";
 import { CONFIG, FOOTBALL_SUSP_KEYS, footballSuspensionDelayMs } from "../lib/config.js";
 import { logger } from "../lib/logger.js";
-import { syncLiveCompetitionCatalog } from "../lib/liveCompetitionCatalog.js";
+import { getCompetitionCatalogDecisions, syncLiveCompetitionCatalog } from "../lib/liveCompetitionCatalog.js";
 import { buildMatchSettlementJobId, enqueueMatchSettlement } from "../lib/settlementQueue.js";
 import { db, matchResultsTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
@@ -8477,7 +8477,60 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
     })),
   ]);
 
-  return { matches: [...livePart, ...promotedTennis, ...startingSoonFinal] };
+  const liveDecisions = await getCompetitionCatalogDecisions(
+    [...livePart, ...promotedTennis].map((m) => ({
+      eventId: String(m.id),
+      sport: m.sport,
+      league: m.league,
+      country: m.country,
+    })),
+    "live",
+  );
+  const prematchDecisions = await getCompetitionCatalogDecisions(
+    startingSoonFinal.map((m) => ({
+      eventId: String(m.id),
+      sport: m.sport,
+      league: m.league,
+      country: m.country,
+    })),
+    "prematch",
+  );
+
+  const sortByCatalogPriority = (
+    matches: LiveMatchState[],
+    decisions: Map<string, { priority: number | null }>,
+    fallbackSort?: (a: LiveMatchState, b: LiveMatchState) => number,
+  ): LiveMatchState[] => {
+    return matches
+      .map((match, index) => ({
+        match,
+        index,
+        priority: decisions.get(String(match.id))?.priority ?? null,
+      }))
+      .sort((a, b) => {
+        const aPrio = a.priority ?? 999;
+        const bPrio = b.priority ?? 999;
+        if (aPrio !== bPrio) return aPrio - bPrio;
+        if (fallbackSort) {
+          const fallback = fallbackSort(a.match, b.match);
+          if (fallback !== 0) return fallback;
+        }
+        return a.index - b.index;
+      })
+      .map((entry) => entry.match);
+  };
+
+  const filteredLive = sortByCatalogPriority(
+    [...livePart, ...promotedTennis].filter((m) => liveDecisions.get(String(m.id))?.visible ?? true),
+    liveDecisions,
+  );
+  const filteredPrematch = sortByCatalogPriority(
+    startingSoonFinal.filter((m) => prematchDecisions.get(String(m.id))?.visible ?? true),
+    prematchDecisions,
+    (a, b) => matchStartsInMinutes(a.date, a.time) - matchStartsInMinutes(b.date, b.time),
+  );
+
+  return { matches: [...filteredLive, ...filteredPrematch] };
 }
 
 // Broadcast payload to all connected SSE + WebSocket clients; prune dead connections.
