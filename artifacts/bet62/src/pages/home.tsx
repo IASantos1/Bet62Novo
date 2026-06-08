@@ -905,18 +905,6 @@ function isMatchOnOrAfterWC2026Start(match: {
     parseMatchKickoffTimestamp({ date: WC2026_MAIN_START_KEY });
 }
 
-function formatMatchKickoffLabel(match: {
-  date?: string | null;
-  time?: string | null;
-  scheduledDate?: string | null;
-  scheduledTime?: string | null;
-}): string {
-  const dateStr = match.date ?? match.scheduledDate;
-  const timeStr = match.time ?? match.scheduledTime;
-  if (dateStr && timeStr) return `${formatMatchDate(dateStr)} · ${timeStr}`;
-  if (dateStr) return formatMatchDate(dateStr);
-  return timeStr ?? "Por definir";
-}
 
 const RIVALRY_TAGS: Record<string, string> = {
   "Barcelona|Real Madrid": "⚡ El Clásico",
@@ -9661,12 +9649,6 @@ export default function Home() {
                 pushUnique(nextWeekPool);
                 return picked.slice(0, 3);
               })();
-              const homeFeaturedTitle = Date.now() >= parseMatchKickoffTimestamp({ date: WC2026_MAIN_START_KEY })
-                ? "Copa 2026 e Semana"
-                : "Futebol da Semana";
-              const homeFeaturedSubtitle = Date.now() >= parseMatchKickoffTimestamp({ date: WC2026_MAIN_START_KEY })
-                ? "A Copa ganhou prioridade, mas continuamos a misturar com o melhor futebol da semana."
-                : "A Copa 2026 arranca a 11/06. Até lá, destacamos os próximos jogos de futebol.";
 
               // Sport grouping for display
               const SPORT_GROUPS = [
@@ -9687,58 +9669,10 @@ export default function Home() {
               return (
                 <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
                   {!selectedLeague && !selectedCountry && (selectedSport === "all" || selectedSport === "football") && homeFeaturedMatches.length > 0 && (
-                    <div className="mb-5 rounded-2xl border border-zinc-800 bg-gradient-to-br from-zinc-950 via-zinc-900 to-zinc-950 p-4">
-                      <div className="flex items-start justify-between gap-3 mb-3">
-                        <div>
-                          <div className="text-[11px] font-black uppercase tracking-[0.22em] text-amber-400">Entre o topo e o carrossel</div>
-                          <h3 className="text-lg font-black text-white mt-1">{homeFeaturedTitle}</h3>
-                          <p className="text-xs text-zinc-400 mt-1 max-w-[42rem]">{homeFeaturedSubtitle}</p>
-                        </div>
-                        <div className="shrink-0 rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-1.5 text-[11px] font-bold text-amber-300">
-                          Próximos 3 jogos
-                        </div>
-                      </div>
-                      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                        {homeFeaturedMatches.map((match) => {
-                          const isWorldCup = isWC2026LeagueName(match.league);
-                          const isSelected = !!bets.find((b) => b.matchId === match.id && b.market === "result" && b.selection === "home");
-                          return (
-                            <button
-                              key={match.id}
-                              type="button"
-                              {...makeTap(() => setExpandedMatch(match))}
-                              className="text-left rounded-2xl border border-zinc-800 bg-zinc-900/70 hover:border-zinc-600 hover:bg-zinc-900 transition-all p-3"
-                            >
-                              <div className="flex items-center justify-between gap-2 mb-3">
-                                <span className={`inline-flex items-center gap-1 rounded-full px-2 py-1 text-[10px] font-bold uppercase tracking-wide ${isWorldCup ? "bg-blue-500/15 text-blue-300 border border-blue-400/30" : "bg-red-500/10 text-red-300 border border-red-500/20"}`}>
-                                  <span>{isWorldCup ? "🌍" : "⚽"}</span>
-                                  <span>{isWorldCup ? WC2026_FILTER_LABEL : "Semana"}</span>
-                                </span>
-                                <span className="text-[10px] text-zinc-500">{formatMatchKickoffLabel(match)}</span>
-                              </div>
-                              <div className="space-y-1">
-                                <div className="text-sm font-black text-white truncate">{match.home}</div>
-                                <div className="text-sm font-black text-zinc-300 truncate">{match.away}</div>
-                                <div className="text-[11px] text-zinc-500 truncate">{match.league}</div>
-                              </div>
-                              <div className="mt-3 flex items-center justify-between gap-3">
-                                <div className="text-[11px] text-zinc-400">
-                                  {match.odds.home > 0 ? `Casa ${match.odds.home.toFixed(2)}` : "Ver mercados"}
-                                </div>
-                                <div
-                                  className={`rounded-lg px-2.5 py-1.5 text-[11px] font-bold ${isSelected ? "bg-red-600/15 text-red-300 border border-red-500/30" : "bg-zinc-800 text-zinc-200 border border-zinc-700"}`}
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    if (match.odds.home > 0) toggleBet(match, "home", match.odds.home, "result", match.home);
-                                  }}
-                                >
-                                  {isSelected ? "Selecionado" : "Adicionar"}
-                                </div>
-                              </div>
-                            </button>
-                          );
-                        })}
-                      </div>
+                    <div className="mb-5 grid grid-cols-1 md:grid-cols-3 gap-3">
+                      {homeFeaturedMatches.map((match) => (
+                        <MatchCard key={match.id} match={match} />
+                      ))}
                     </div>
                   )}
                   {!selectedLeague && <PopularBanners />}
