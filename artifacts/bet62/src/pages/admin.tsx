@@ -1052,6 +1052,14 @@ export default function AdminPage() {
   const withdrawalAuditLogs = auditLogs.filter((log) =>
     log.targetType === "withdrawal" || log.action.startsWith("withdrawal_")
   );
+  const withdrawalSummary = {
+    pendingReview: withdrawals.filter((w) => w.status === "pending_review").length,
+    processing: withdrawals.filter((w) => w.status === "processing").length,
+    paid: withdrawals.filter((w) => w.status === "paid").length,
+    blockedHighRisk: withdrawals.filter((w) =>
+      getWithdrawalRiskFlags(w.riskFlags).some((flag) => flag.severity === "high")
+    ).length,
+  };
 
   const runtimeSummary = {
     total: runtimeEvents.length,
@@ -1642,6 +1650,24 @@ export default function AdminPage() {
             {/* ── LEVANTAMENTOS ── */}
             {activeTab === "withdrawals" && (
               <motion.div key="withdrawals" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} className="space-y-4">
+                <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+                  <StatCard icon={<Clock size={20} />} label="Em revisão" value={withdrawalSummary.pendingReview} color="yellow" />
+                  <StatCard icon={<RefreshCw size={20} />} label="Em processamento" value={withdrawalSummary.processing} color="blue" />
+                  <StatCard icon={<Wallet size={20} />} label="Pagos" value={withdrawalSummary.paid} color="green" />
+                  <StatCard icon={<ShieldAlert size={20} />} label="Risco alto" value={withdrawalSummary.blockedHighRisk} color="orange" alert={withdrawalSummary.blockedHighRisk > 0} />
+                </div>
+                <div className="bg-zinc-900 border border-yellow-700/40 rounded-xl px-4 py-3 flex items-start gap-3">
+                  <AlertTriangle size={16} className="text-yellow-400 shrink-0 mt-0.5" />
+                  <div className="text-xs text-zinc-300 leading-relaxed">
+                    <div className="font-bold text-yellow-300 mb-1">Modo operacional atual do levantamento</div>
+                    <div>
+                      Depósitos têm confirmação automática por callback/webhook da Ifthenpay.
+                      Levantamentos não têm webhook de payout configurado neste projeto neste momento:
+                      o fluxo atual é manual no backoffice, com `hold` de saldo, revisão operacional,
+                      referência do provedor e fecho por estado `paid`/`failed`/`rejected`.
+                    </div>
+                  </div>
+                </div>
                 <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_180px_180px]">
                   <div className="relative">
                     <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" />
