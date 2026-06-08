@@ -103,6 +103,45 @@ type FeedStatus = {
   checkedAt: string;
 };
 
+type EventRuntimeItem = {
+  event_id: string;
+  sport: string;
+  provider: string;
+  provider_event_id: string | null;
+  state: string;
+  visibility_status: string;
+  feed_health: string;
+  trading_status: string;
+  suspension_reason: string | null;
+  last_provider_update_at: string | null;
+  last_internal_update_at: string | null;
+  updated_at: string;
+  competition_id: number | null;
+  competition_name: string | null;
+  competition_country: string | null;
+  hidden_by_admin: boolean | null;
+  force_suspend: boolean | null;
+  force_cashout_disable: boolean | null;
+  override_priority: number | null;
+  override_state: string | null;
+  override_visibility_status: string | null;
+  override_trading_status: string | null;
+  override_note: string | null;
+  updated_by: string | null;
+  override_updated_at: string | null;
+};
+
+type EventOverrideDraft = {
+  hiddenByAdmin: boolean;
+  forceSuspend: boolean;
+  forceCashoutDisable: boolean;
+  overridePriority: string;
+  overrideState: string;
+  overrideVisibilityStatus: string;
+  overrideTradingStatus: string;
+  overrideNote: string;
+};
+
 const STATUS_BET: Record<string, { label: string; cls: string }> = {
   pending:    { label: "Pendente",  cls: "bg-zinc-800 text-zinc-400" },
   won:        { label: "Ganhou",    cls: "bg-green-900/60 text-green-400" },
@@ -221,6 +260,15 @@ export default function AdminPage() {
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
   const [feedStatus, setFeedStatus] = useState<FeedStatus | null>(null);
   const [feedLoading, setFeedLoading] = useState(false);
+  const [runtimeEvents, setRuntimeEvents] = useState<EventRuntimeItem[]>([]);
+  const [runtimeLoading, setRuntimeLoading] = useState(false);
+  const [runtimeSearch, setRuntimeSearch] = useState("");
+  const [runtimeSportFilter, setRuntimeSportFilter] = useState("all");
+  const [runtimeStateFilter, setRuntimeStateFilter] = useState("all");
+  const [overrideModalEvent, setOverrideModalEvent] = useState<EventRuntimeItem | null>(null);
+  const [overrideDraft, setOverrideDraft] = useState<EventOverrideDraft | null>(null);
+  const [savingOverride, setSavingOverride] = useState(false);
+  const [deletingOverride, setDeletingOverride] = useState(false);
   const [settlementLogs, setSettlementLogs] = useState<SettlementLogEntry[]>([]);
   const [suspendForm, setSuspendForm] = useState({ matchId: "", matchTitle: "", sport: "football", reason: "" });
   const [suspending, setSuspending] = useState(false);
@@ -357,6 +405,27 @@ export default function AdminPage() {
     catch { /* ignore */ } finally { setFeedLoading(false); }
   }, [token]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  const fetchEventRuntime = useCallback(async () => {
+    if (!token) return;
+    setRuntimeLoading(true);
+    try {
+      const params = new URLSearchParams();
+      if (runtimeSportFilter !== "all") params.set("sport", runtimeSportFilter);
+      if (runtimeStateFilter !== "all") params.set("state", runtimeStateFilter);
+      if (runtimeSearch.trim()) params.set("search", runtimeSearch.trim());
+      const qs = params.toString();
+      const res = await fetch(`/api/admin/events/runtime${qs ? `?${qs}` : ""}`, { headers: authHeader });
+      if (res.ok) {
+        const data = await res.json();
+        setRuntimeEvents(Array.isArray(data.events) ? data.events : []);
+      }
+    } catch {
+      /* ignore */
+    } finally {
+      setRuntimeLoading(false);
+    }
+  }, [token, runtimeSportFilter, runtimeStateFilter, runtimeSearch]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const fetchSettlementLogs = useCallback(async () => {
     if (!token) return;
     try { const res = await fetch("/api/admin/settlement-logs", { headers: authHeader }); if (res.ok) setSettlementLogs(await res.json()); }
@@ -372,10 +441,10 @@ export default function AdminPage() {
     else if (activeTab === "withdrawals") fetchWithdrawals();
     else if (activeTab === "risk") fetchRisk();
     else if (activeTab === "analytics") fetchAnalytics();
-    else if (activeTab === "events") { fetchSuspended(); fetchFeed(); }
+    else if (activeTab === "events") { fetchSuspended(); fetchFeed(); fetchEventRuntime(); }
     else if (activeTab === "settlement-logs") fetchSettlementLogs();
     else if (activeTab === "settings") { fetchSettings(); fetchAuditLogs(); }
-  }, [token, activeTab]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [token, activeTab, fetchEventRuntime]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => { if (activeTab === "bets") fetchBets(); }, [betStatusFilter]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -568,6 +637,106 @@ export default function AdminPage() {
     finally { setUnsuspending(null); }
   };
 
+  const hasEventOverride = (event: EventRuntimeItem) =>
+    !!(
+      event.hidden_by_admin
+      || event.force_suspend
+      || event.force_cashout_disable
+      || event.override_priority !== null
+      || event.override_state
+      || event.override_visibility_status
+      || event.override_trading_status
+      || event.override_note
+    );
+
+  const getEffectiveEventState = (event: EventRuntimeItem) => event.override_state || event.state || "ACTIVE";
+  const getEffectiveTradingStatus = (event: EventRuntimeItem) => event.override_trading_status || event.trading_status || "automatic";
+  const getEffectiveVisibilityStatus = (event: EventRuntimeItem) =>
+    event.override_visibility_status || (event.hidden_by_admin ? "HIDDEN" : event.visibility_status || "VISIBLE");
+
+  const openOverrideModal = (event: EventRuntimeItem) => {
+    setOverrideModalEvent(event);
+    setOverrideDraft({
+      hiddenByAdmin: event.hidden_by_admin ?? false,
+      forceSuspend: event.force_suspend ?? false,
+      forceCashoutDisable: event.force_cashout_disable ?? false,
+      overridePriority: event.override_priority != null ? String(event.override_priority) : "",
+      overrideState: event.override_state ?? "",
+      overrideVisibilityStatus: event.override_visibility_status ?? "",
+      overrideTradingStatus: event.override_trading_status ?? "",
+      overrideNote: event.override_note ?? "",
+    });
+  };
+
+  const closeOverrideModal = () => {
+    setOverrideModalEvent(null);
+    setOverrideDraft(null);
+  };
+
+  const handleSaveOverride = async () => {
+    if (!overrideModalEvent || !overrideDraft) return;
+    const priorityRaw = overrideDraft.overridePriority.trim();
+    if (priorityRaw !== "" && !Number.isFinite(Number(priorityRaw))) {
+      toast.error("Prioridade inválida");
+      return;
+    }
+
+    setSavingOverride(true);
+    try {
+      const payload: Record<string, unknown> = {
+        hiddenByAdmin: overrideDraft.hiddenByAdmin,
+        forceSuspend: overrideDraft.forceSuspend,
+        forceCashoutDisable: overrideDraft.forceCashoutDisable,
+      };
+      if (priorityRaw !== "") payload.overridePriority = Number(priorityRaw);
+      if (overrideDraft.overrideState.trim()) payload.overrideState = overrideDraft.overrideState.trim();
+      if (overrideDraft.overrideVisibilityStatus.trim()) payload.overrideVisibilityStatus = overrideDraft.overrideVisibilityStatus.trim();
+      if (overrideDraft.overrideTradingStatus.trim()) payload.overrideTradingStatus = overrideDraft.overrideTradingStatus.trim();
+      if (overrideDraft.overrideNote.trim()) payload.overrideNote = overrideDraft.overrideNote.trim();
+
+      const res = await fetch(`/api/admin/events/${encodeURIComponent(overrideModalEvent.event_id)}/override`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json", ...authHeader },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        toast.error((data as { error?: string }).error || "Erro ao guardar override");
+        return;
+      }
+      toast.success("Override do evento guardado");
+      closeOverrideModal();
+      fetchEventRuntime();
+    } catch {
+      toast.error("Erro ao guardar override");
+    } finally {
+      setSavingOverride(false);
+    }
+  };
+
+  const handleDeleteOverride = async () => {
+    if (!overrideModalEvent) return;
+    setDeletingOverride(true);
+    try {
+      const res = await fetch(`/api/admin/events/${encodeURIComponent(overrideModalEvent.event_id)}/override`, {
+        method: "DELETE",
+        headers: authHeader,
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        toast.error((data as { error?: string }).error || "Erro ao remover override");
+        return;
+      }
+      toast.success("Override removido");
+      closeOverrideModal();
+      fetchEventRuntime();
+    } catch {
+      toast.error("Erro ao remover override");
+    } finally {
+      setDeletingOverride(false);
+    }
+  };
+
   const handleSaveSetting = async (key: string) => {
     const value = settingsDraft[key];
     if (value === undefined) return;
@@ -607,6 +776,14 @@ export default function AdminPage() {
     p.orderId.toLowerCase().includes(paymentSearch.toLowerCase())
   );
 
+  const runtimeSummary = {
+    total: runtimeEvents.length,
+    overridden: runtimeEvents.filter(hasEventOverride).length,
+    suspended: runtimeEvents.filter(event => getEffectiveEventState(event) === "SUSPENDED").length,
+    cashoutDisabled: runtimeEvents.filter(event => event.force_cashout_disable).length,
+    hidden: runtimeEvents.filter(event => getEffectiveVisibilityStatus(event) === "HIDDEN").length,
+  };
+
   const fmtDate = (d: string) => new Date(d).toLocaleString("pt-PT", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
   const fmtEur = (v: string | number) => `€ ${parseFloat(String(v)).toFixed(2)}`;
 
@@ -618,7 +795,7 @@ export default function AdminPage() {
     else if (activeTab === "withdrawals") fetchWithdrawals();
     else if (activeTab === "risk") fetchRisk();
     else if (activeTab === "analytics") fetchAnalytics();
-    else if (activeTab === "events") { fetchSuspended(); fetchFeed(); }
+    else if (activeTab === "events") { fetchSuspended(); fetchFeed(); fetchEventRuntime(); }
     else if (activeTab === "settlement-logs") fetchSettlementLogs();
     else if (activeTab === "settings") { fetchSettings(); fetchAuditLogs(); }
   };
@@ -1445,6 +1622,186 @@ export default function AdminPage() {
             {activeTab === "events" && (
               <motion.div key="events" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} className="space-y-6">
 
+                {/* Runtime Operacional */}
+                <div className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden">
+                  <div className="px-5 py-4 border-b border-zinc-800 flex flex-col gap-3 lg:flex-row lg:items-center">
+                    <div className="flex items-center gap-2">
+                      <Zap size={16} className="text-yellow-400" />
+                      <span className="font-bold text-sm text-zinc-300">Runtime Operacional por Evento</span>
+                      <span className="text-xs text-zinc-600">catálogo + runtime + override manual</span>
+                    </div>
+                    <div className="flex flex-1 flex-col gap-3 sm:flex-row lg:justify-end">
+                      <div className="relative flex-1 max-w-md">
+                        <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" />
+                        <Input
+                          placeholder="Buscar por competição, país ou event ID..."
+                          value={runtimeSearch}
+                          onChange={e => setRuntimeSearch(e.target.value)}
+                          className="bg-zinc-800 border-zinc-700 text-white pl-9 h-9"
+                        />
+                      </div>
+                      <div className="flex gap-2">
+                        <select
+                          value={runtimeSportFilter}
+                          onChange={e => setRuntimeSportFilter(e.target.value)}
+                          className="h-9 bg-zinc-800 border border-zinc-700 rounded-md text-white text-sm px-3 focus:outline-none"
+                        >
+                          <option value="all">Todos os desportos</option>
+                          {Object.entries(SPORT_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+                        </select>
+                        <select
+                          value={runtimeStateFilter}
+                          onChange={e => setRuntimeStateFilter(e.target.value)}
+                          className="h-9 bg-zinc-800 border border-zinc-700 rounded-md text-white text-sm px-3 focus:outline-none"
+                        >
+                          <option value="all">Todos os estados</option>
+                          {["ACTIVE", "SUSPENDED", "TRADING_RESTRICTED", "UNSTABLE_FEED", "ENDED"].map(state => (
+                            <option key={state} value={state}>{state}</option>
+                          ))}
+                        </select>
+                        <Button
+                          size="sm"
+                          onClick={fetchEventRuntime}
+                          disabled={runtimeLoading}
+                          className="h-9 px-3 text-xs bg-zinc-800 hover:bg-zinc-700 text-zinc-300"
+                        >
+                          {runtimeLoading ? <Loader2 size={12} className="animate-spin mr-1" /> : <RefreshCw size={12} className="mr-1" />}
+                          Atualizar
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 xl:grid-cols-5 gap-3 p-5 border-b border-zinc-800 bg-zinc-950/30">
+                    <StatCard icon={<Activity size={18} />} label="Eventos no Runtime" value={runtimeSummary.total} color="blue" />
+                    <StatCard icon={<Settings size={18} />} label="Com Override" value={runtimeSummary.overridden} color="purple" />
+                    <StatCard icon={<Ban size={18} />} label="Suspensos" value={runtimeSummary.suspended} color="red" alert={runtimeSummary.suspended > 0} />
+                    <StatCard icon={<EyeOff size={18} />} label="Ocultos" value={runtimeSummary.hidden} color="yellow" alert={runtimeSummary.hidden > 0} />
+                    <StatCard icon={<Lock size={18} />} label="Cashout Off" value={runtimeSummary.cashoutDisabled} color="orange" alert={runtimeSummary.cashoutDisabled > 0} />
+                  </div>
+
+                  {runtimeLoading && runtimeEvents.length === 0 ? (
+                    <div className="p-10 text-center"><Loader2 className="animate-spin text-red-600 mx-auto" size={28} /></div>
+                  ) : runtimeEvents.length === 0 ? (
+                    <div className="p-10 text-center text-zinc-600 text-sm">
+                      Nenhum evento encontrado para os filtros atuais.
+                    </div>
+                  ) : (
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-sm">
+                        <thead>
+                          <tr className="border-b border-zinc-800 bg-zinc-950/50">
+                            <th className="text-left px-4 py-3 text-zinc-500 font-medium">Competição</th>
+                            <th className="text-left px-4 py-3 text-zinc-500 font-medium">Evento</th>
+                            <th className="text-left px-4 py-3 text-zinc-500 font-medium">Estado Efetivo</th>
+                            <th className="text-left px-4 py-3 text-zinc-500 font-medium">Trading</th>
+                            <th className="text-left px-4 py-3 text-zinc-500 font-medium">Feed</th>
+                            <th className="text-left px-4 py-3 text-zinc-500 font-medium">Flags</th>
+                            <th className="text-left px-4 py-3 text-zinc-500 font-medium">Atualização</th>
+                            <th className="text-right px-4 py-3 text-zinc-500 font-medium">Ações</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {runtimeEvents.map(event => {
+                            const effectiveState = getEffectiveEventState(event);
+                            const effectiveTrading = getEffectiveTradingStatus(event);
+                            const effectiveVisibility = getEffectiveVisibilityStatus(event);
+                            const hasOverride = hasEventOverride(event);
+                            return (
+                              <tr key={event.event_id} className="border-b border-zinc-800/50 hover:bg-zinc-800/25 transition-colors align-top">
+                                <td className="px-4 py-3 min-w-[220px]">
+                                  <div className="text-white text-sm font-medium">{event.competition_name || "Sem competição mapeada"}</div>
+                                  <div className="text-xs text-zinc-600 mt-1 flex items-center gap-2 flex-wrap">
+                                    <span>{SPORT_LABEL[event.sport] || event.sport}</span>
+                                    <span>•</span>
+                                    <span>{event.competition_country || "unknown"}</span>
+                                    <span>•</span>
+                                    <span>{event.provider}</span>
+                                  </div>
+                                </td>
+                                <td className="px-4 py-3 min-w-[220px]">
+                                  <div className="text-zinc-300 font-mono text-xs break-all">{event.event_id}</div>
+                                  {event.provider_event_id && (
+                                    <div className="text-xs text-zinc-600 mt-1">provider: {event.provider_event_id}</div>
+                                  )}
+                                  {event.suspension_reason && (
+                                    <div className="text-xs text-yellow-400 mt-2 italic">{event.suspension_reason}</div>
+                                  )}
+                                </td>
+                                <td className="px-4 py-3 min-w-[160px]">
+                                  <div className="flex flex-wrap gap-2">
+                                    <Badge
+                                      cls={
+                                        effectiveState === "ACTIVE" ? "bg-green-900/50 text-green-400"
+                                          : effectiveState === "ENDED" ? "bg-zinc-800 text-zinc-400"
+                                            : "bg-red-900/40 text-red-400"
+                                      }
+                                      label={effectiveState}
+                                    />
+                                    <Badge
+                                      cls={effectiveVisibility === "HIDDEN" ? "bg-yellow-900/40 text-yellow-400" : "bg-zinc-800 text-zinc-300"}
+                                      label={effectiveVisibility}
+                                    />
+                                  </div>
+                                  {hasOverride && (
+                                    <div className="text-xs text-purple-400 mt-2">
+                                      override manual {event.override_updated_at ? `• ${fmtDate(event.override_updated_at)}` : ""}
+                                    </div>
+                                  )}
+                                </td>
+                                <td className="px-4 py-3 min-w-[160px]">
+                                  <div className="text-sm text-zinc-300">{effectiveTrading}</div>
+                                  {event.override_priority !== null && (
+                                    <div className="text-xs text-zinc-500 mt-1">prioridade {event.override_priority}</div>
+                                  )}
+                                </td>
+                                <td className="px-4 py-3 min-w-[120px]">
+                                  <Badge
+                                    cls={
+                                      event.feed_health === "healthy" ? "bg-green-900/50 text-green-400"
+                                        : event.feed_health === "ended" ? "bg-zinc-800 text-zinc-400"
+                                          : "bg-yellow-900/40 text-yellow-400"
+                                    }
+                                    label={event.feed_health || "unknown"}
+                                  />
+                                </td>
+                                <td className="px-4 py-3 min-w-[180px]">
+                                  <div className="flex flex-wrap gap-2">
+                                    {event.hidden_by_admin ? <Badge cls="bg-yellow-900/40 text-yellow-400" label="Hidden" /> : null}
+                                    {event.force_suspend ? <Badge cls="bg-red-900/40 text-red-400" label="Force Suspend" /> : null}
+                                    {event.force_cashout_disable ? <Badge cls="bg-orange-900/40 text-orange-400" label="Cashout Off" /> : null}
+                                    {!event.hidden_by_admin && !event.force_suspend && !event.force_cashout_disable && !hasOverride ? (
+                                      <span className="text-xs text-zinc-600">Sem flags</span>
+                                    ) : null}
+                                  </div>
+                                </td>
+                                <td className="px-4 py-3 min-w-[180px]">
+                                  <div className="text-xs text-zinc-400">
+                                    feed: {event.last_provider_update_at ? fmtDate(event.last_provider_update_at) : "—"}
+                                  </div>
+                                  <div className="text-xs text-zinc-600 mt-1">
+                                    interno: {event.updated_at ? fmtDate(event.updated_at) : "—"}
+                                  </div>
+                                </td>
+                                <td className="px-4 py-3 text-right min-w-[120px]">
+                                  <Button
+                                    size="sm"
+                                    onClick={() => openOverrideModal(event)}
+                                    className="h-8 px-3 text-xs bg-red-600 hover:bg-red-700 text-white"
+                                  >
+                                    <Settings size={12} className="mr-1" />
+                                    Override
+                                  </Button>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+
                 {/* Feed de Dados */}
                 <div className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden">
                   <div className="px-5 py-4 border-b border-zinc-800 flex items-center gap-2">
@@ -1743,6 +2100,181 @@ export default function AdminPage() {
           </AnimatePresence>
         </div>
       </main>
+
+      {/* ── MODAL: Override de Evento ── */}
+      <AnimatePresence>
+        {overrideModalEvent && overrideDraft && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm"
+            onClick={closeOverrideModal}
+          >
+            <motion.div
+              initial={{ scale: 0.96, y: 10 }}
+              animate={{ scale: 1, y: 0 }}
+              exit={{ scale: 0.96, y: 10 }}
+              className="bg-zinc-900 border border-zinc-700 rounded-2xl w-full max-w-2xl max-h-[90vh] overflow-auto shadow-2xl"
+              onClick={e => e.stopPropagation()}
+            >
+              <div className="flex items-start justify-between gap-4 p-5 border-b border-zinc-800">
+                <div>
+                  <h2 className="font-bold text-white">Override Operacional</h2>
+                  <div className="text-xs text-zinc-500 mt-1">{overrideModalEvent.competition_name || "Sem competição mapeada"}</div>
+                  <div className="text-xs text-zinc-600 font-mono mt-1 break-all">{overrideModalEvent.event_id}</div>
+                </div>
+                <button onClick={closeOverrideModal} className="text-zinc-500 hover:text-white"><X size={18} /></button>
+              </div>
+
+              <div className="p-5 space-y-5">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div className="bg-zinc-800 rounded-xl p-3">
+                    <div className="text-xs text-zinc-500 mb-1">Estado atual</div>
+                    <div className="text-sm font-semibold text-white">{overrideModalEvent.state}</div>
+                  </div>
+                  <div className="bg-zinc-800 rounded-xl p-3">
+                    <div className="text-xs text-zinc-500 mb-1">Trading atual</div>
+                    <div className="text-sm font-semibold text-white">{overrideModalEvent.trading_status}</div>
+                  </div>
+                  <div className="bg-zinc-800 rounded-xl p-3">
+                    <div className="text-xs text-zinc-500 mb-1">Feed</div>
+                    <div className="text-sm font-semibold text-white">{overrideModalEvent.feed_health}</div>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  {([
+                    {
+                      key: "hiddenByAdmin",
+                      label: "Ocultar evento",
+                      desc: "Força visibilidade HIDDEN",
+                    },
+                    {
+                      key: "forceSuspend",
+                      label: "Forçar suspensão",
+                      desc: "Suspende mercados manualmente",
+                    },
+                    {
+                      key: "forceCashoutDisable",
+                      label: "Desativar cashout",
+                      desc: "Bloqueia cashout deste evento",
+                    },
+                  ] as const).map(item => (
+                    <button
+                      key={item.key}
+                      type="button"
+                      onClick={() => setOverrideDraft(prev => prev ? { ...prev, [item.key]: !prev[item.key] } : prev)}
+                      className={`rounded-xl border p-4 text-left transition-colors ${
+                        overrideDraft[item.key]
+                          ? "border-red-500/40 bg-red-900/20"
+                          : "border-zinc-700 bg-zinc-800 hover:bg-zinc-700"
+                      }`}
+                    >
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="text-sm font-semibold text-white">{item.label}</div>
+                        {overrideDraft[item.key] ? <CheckCircle size={16} className="text-red-400" /> : <XCircle size={16} className="text-zinc-600" />}
+                      </div>
+                      <div className="text-xs text-zinc-500 mt-2">{item.desc}</div>
+                    </button>
+                  ))}
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <Label className="text-zinc-500 text-xs mb-1 block">Override de estado</Label>
+                    <select
+                      value={overrideDraft.overrideState}
+                      onChange={e => setOverrideDraft(prev => prev ? { ...prev, overrideState: e.target.value } : prev)}
+                      className="w-full h-10 bg-zinc-800 border border-zinc-700 rounded-md text-white text-sm px-3 focus:outline-none"
+                    >
+                      <option value="">Sem override</option>
+                      {["ACTIVE", "SUSPENDED", "TRADING_RESTRICTED", "UNSTABLE_FEED", "ENDED"].map(state => (
+                        <option key={state} value={state}>{state}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <Label className="text-zinc-500 text-xs mb-1 block">Override de visibilidade</Label>
+                    <select
+                      value={overrideDraft.overrideVisibilityStatus}
+                      onChange={e => setOverrideDraft(prev => prev ? { ...prev, overrideVisibilityStatus: e.target.value } : prev)}
+                      className="w-full h-10 bg-zinc-800 border border-zinc-700 rounded-md text-white text-sm px-3 focus:outline-none"
+                    >
+                      <option value="">Sem override</option>
+                      {["VISIBLE", "HIDDEN"].map(state => (
+                        <option key={state} value={state}>{state}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <Label className="text-zinc-500 text-xs mb-1 block">Override de trading</Label>
+                    <select
+                      value={overrideDraft.overrideTradingStatus}
+                      onChange={e => setOverrideDraft(prev => prev ? { ...prev, overrideTradingStatus: e.target.value } : prev)}
+                      className="w-full h-10 bg-zinc-800 border border-zinc-700 rounded-md text-white text-sm px-3 focus:outline-none"
+                    >
+                      <option value="">Sem override</option>
+                      {["automatic", "manual_suspend", "trading_restricted", "restricted"].map(state => (
+                        <option key={state} value={state}>{state}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <Label className="text-zinc-500 text-xs mb-1 block">Prioridade manual</Label>
+                    <Input
+                      type="number"
+                      placeholder="ex: 1"
+                      value={overrideDraft.overridePriority}
+                      onChange={e => setOverrideDraft(prev => prev ? { ...prev, overridePriority: e.target.value } : prev)}
+                      className="bg-zinc-800 border-zinc-700 text-white h-10"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <Label className="text-zinc-500 text-xs mb-1 block">Nota operacional</Label>
+                  <textarea
+                    value={overrideDraft.overrideNote}
+                    onChange={e => setOverrideDraft(prev => prev ? { ...prev, overrideNote: e.target.value } : prev)}
+                    placeholder="Ex.: evento com feed instável, revisão manual do trading..."
+                    className="w-full min-h-28 bg-zinc-800 border border-zinc-700 rounded-lg text-sm text-white placeholder-zinc-600 p-3 resize-y focus:outline-none focus:border-zinc-500"
+                  />
+                </div>
+
+                <div className="flex flex-col-reverse sm:flex-row sm:items-center sm:justify-between gap-3 pt-2 border-t border-zinc-800">
+                  <div className="text-xs text-zinc-600">
+                    {hasEventOverride(overrideModalEvent)
+                      ? `Override atual por ${overrideModalEvent.updated_by || "admin"}${overrideModalEvent.override_updated_at ? ` em ${fmtDate(overrideModalEvent.override_updated_at)}` : ""}`
+                      : "Nenhum override manual ativo neste evento"}
+                  </div>
+                  <div className="flex gap-2 justify-end">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      disabled={deletingOverride || savingOverride || !hasEventOverride(overrideModalEvent)}
+                      onClick={handleDeleteOverride}
+                      className="border-red-800 text-red-400 hover:bg-red-900/20"
+                    >
+                      {deletingOverride ? <Loader2 size={14} className="animate-spin mr-2" /> : <Trash2 size={14} className="mr-2" />}
+                      Remover Override
+                    </Button>
+                    <Button
+                      type="button"
+                      disabled={savingOverride || deletingOverride}
+                      onClick={handleSaveOverride}
+                      className="bg-red-600 hover:bg-red-700 text-white"
+                    >
+                      {savingOverride ? <Loader2 size={14} className="animate-spin mr-2" /> : <CheckCircle size={14} className="mr-2" />}
+                      Guardar Override
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* ── MODAL: Ajustar Saldo ── */}
       <AnimatePresence>
