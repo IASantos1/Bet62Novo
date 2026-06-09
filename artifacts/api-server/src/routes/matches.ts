@@ -230,6 +230,9 @@ export type UpcomingMatch = {
   markets: AdvancedMarkets;
   leagueId?: string;
   isWomens?: boolean;
+  providerStatusGroup?: number;
+  providerStatusText?: string;
+  providerWinnerKnown?: boolean;
 };
 
 type StatpalMatchV2Event = {
@@ -2176,10 +2179,40 @@ function isTennisExcludedName(name: string): boolean {
   );
 }
 
-/** Live filter: allow all singles tennis tournaments. Excludes doubles/wheelchair/juniors. */
+function tennisTournamentSearchText(tournament: string | SAPIV2TournObj | undefined): string {
+  if (typeof tournament === "string") return tournament;
+  if (!tournament || typeof tournament !== "object") return "";
+  return [
+    tournament.name,
+    tournament.category?.name,
+    tournament.category?.country?.name,
+  ].filter((v): v is string => !!v && String(v).trim().length > 0).join(" ");
+}
+
+function isTennisFinishedStatusText(status: string | undefined): boolean {
+  const s = String(status ?? "").toLowerCase();
+  return (
+    s.includes("ended") ||
+    s.includes("finished") ||
+    s.includes("complete") ||
+    s.includes("retired") ||
+    s.includes("walkover") ||
+    s.includes("default") ||
+    s.includes("abandon") ||
+    s.includes("cancel") ||
+    s.includes("awarded")
+  );
+}
+
+function isTennisV1GameFinished(game: Pick<V1TennisGame, "statusGroup" | "statusText" | "homeCompetitor" | "awayCompetitor">): boolean {
+  if (game.statusGroup === 3) return true;
+  if (isTennisFinishedStatusText(game.statusText)) return true;
+  return !!game.homeCompetitor?.isWinner || !!game.awayCompetitor?.isWinner;
+}
+
+/** Live filter: allow all singles tournaments. Excludes doubles/wheelchair/juniors. */
 function isTennisElite(ev: SAPIV2Event): boolean {
-  const t = ev.tournament;
-  const searchText = tennisTournamentSearchText(t);
+  const searchText = tennisTournamentSearchText(ev.tournament);
   if (!searchText) return false;
   if (isTennisExcludedName(searchText)) return false;
   // Detect doubles by player name: any "/" in the name means "Player A / Player B" (doubles pair)
@@ -2189,13 +2222,10 @@ function isTennisElite(ev: SAPIV2Event): boolean {
   return true;
 }
 
-/** Upcoming filter: top-tier only (ATP/WTA/Challenger/WTA-125). No ITF in pre-match. */
+/** Upcoming filter: allow all singles tournaments. Excludes doubles/wheelchair/juniors. */
 function isTennisEliteUpcoming(ev: SAPIV2Event): boolean {
-  const t = ev.tournament;
-  const searchText = tennisTournamentSearchText(t);
+  const searchText = tennisTournamentSearchText(ev.tournament);
   if (!searchText) return false;
-  const tier = tennisTierRank(searchText);
-  if (tier === 999 && !isKnownTennisTour(searchText)) return false;
   return !isTennisExcludedName(searchText);
 }
 type SAPIV2TeamObj   = { id?: number; name: string };
@@ -8005,6 +8035,19 @@ function buildBaseballLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
   return result;
 }
 
+function rememberFinishedTennisState(id: string, state: LiveMatchState, finishedAt: number): void {
+  finishedMatchResults.set(id, {
+    home: state.homeScore,
+    away: state.awayScore,
+    homeTeam: state.home,
+    awayTeam: state.away,
+    extras: state._liveExtra?.sets
+      ? { tennis: { sets: state._liveExtra.sets, currentPoints: state._liveExtra.currentPoints } }
+      : undefined,
+    finishedAt,
+  });
+}
+
 /**
  * Returns the appropriate market suspension duration (ms) for a tennis point.
  * Based on real sportsbook behaviour: longer suspension at high-pressure moments.
@@ -8291,6 +8334,7 @@ function buildTennisLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
       v2Set2Odds = v2BaseExtras.set2;
     }
 
+    const v2Set3Games  = sets.length >= 3 ? (sets[2] ?? ([0, 0] as [number, number])) : ([0, 0] as [number, number]);
     let v2Set3Odds: { home: number; away: number };
     if (doneSets === 2 && sets.length >= 3) {
       const pS3 = v2SetWinProb(v2Set3Games[0], v2Set3Games[1], v2HomeP);
@@ -8336,10 +8380,23 @@ function buildTennisLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
   // disappear between polls) don't cause the match to vanish from the UI.
   for (const id of liveMatchState.keys()) {
     if (!id.startsWith("tennis-v2-")) continue;
+    const cached = liveMatchState.get(id);
+    if (!cached) {
+      _tennisMissingFrom.delete(id);
+      continue;
+    }
+    const tooOld = now - (cached._firstSeenAt ?? now) > MAX_LIVE_STATE_MS;
+    if (tooOld) {
+      rememberFinishedTennisState(id, cached, now);
+      liveMatchState.delete(id);
+      _tennisMissingFrom.delete(id);
+      continue;
+    }
     if (!currentIds.has(id)) {
       const firstMissing = _tennisMissingFrom.get(id) ?? now;
       _tennisMissingFrom.set(id, firstMissing);
       if (now - firstMissing > 45_000) {
+        rememberFinishedTennisState(id, cached, now);
         liveMatchState.delete(id);
         _tennisMissingFrom.delete(id);
       } else {
@@ -8347,18 +8404,13 @@ function buildTennisLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
         // This covers transient feed blips (1-4 polls) without surfacing finished matches
         // that have permanently left the feed.  State is retained for the full 45 s so
         // we can resume accurately if the match genuinely returns.
-        const cached = liveMatchState.get(id);
-        if (cached) {
-          const sLow = String(cached.status ?? "").toLowerCase();
-          const finished =
-            (cached.homeScore ?? 0) >= 2 || (cached.awayScore ?? 0) >= 2 ||
-            sLow.includes("ended") || sLow.includes("finished") || sLow.includes("complete");
-          if (finished) {
-            liveMatchState.delete(id);
-            _tennisMissingFrom.delete(id);
-          } else if ((now - firstMissing) < 8_000) {
-            result.push(cached);
-          }
+        const finished = isTennisFinishedStatusText(cached.status);
+        if (finished) {
+          rememberFinishedTennisState(id, cached, now);
+          liveMatchState.delete(id);
+          _tennisMissingFrom.delete(id);
+        } else if ((now - firstMissing) < 8_000) {
+          result.push(cached);
         }
       }
     } else {
@@ -8655,7 +8707,7 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
     tennis: 600,                     // tennis: 10 h — show all Challenger/ATP/WTA matches scheduled today
   };
   const DEFAULT_SOON_WINDOW = 240; // 4 h for volleyball, etc.
-  const startingSoon: LiveMatchState[] = allUpcoming
+  const startingSoonCandidates = allUpcoming
     .filter(m => {
       // Tennis always has computed odds even without a real bookmaker price — allow all.
       // Other sports require real odds to avoid showing matches with no betting context.
@@ -8667,8 +8719,70 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
         && !liveTeamPairs.has(`${m.home}|${m.away}`);
     })
     .sort((a, b) => matchStartsInMinutes(a.date, a.time) - matchStartsInMinutes(b.date, b.time))
-    .slice(0, 50)
-    .map(m => ({
+    .slice(0, 50);
+
+  // Promote tennis "Em Breve" matches that started >2 min ago into the live feed.
+  // The Statpal /live endpoint can lag 5-15 min for Challenger events; this bridges
+  // the gap by showing them as live (0-0, "1st set") until real data arrives.
+  const promotedTennis: LiveMatchState[] = [];
+  const startingSoonFinal: LiveMatchState[] = [];
+  for (const m of startingSoonCandidates) {
+    const startsIn = Math.max(0, Math.round(matchStartsInMinutes(m.date, m.time)));
+    if (m.sport === "tennis") {
+      const providerStatusGroup = m.providerStatusGroup;
+      const providerStatusText = m.providerStatusText ?? "";
+      const winnerKnown = m.providerWinnerKnown === true;
+      const tennisFinished = winnerKnown || isTennisFinishedStatusText(providerStatusText);
+      if (tennisFinished) continue;
+
+      if (providerStatusGroup === 1) {
+        promotedTennis.push({
+          id:            m.id,
+          home:          m.home,
+          away:          m.away,
+          league:        m.league,
+          country:       m.country,
+          sport:         m.sport,
+          homeScore: 0,
+          awayScore: 0,
+          minute: 20,
+          status: providerStatusText || "Em Jogo",
+          hasRealOdds: m.hasRealOdds,
+          odds: m.odds,
+          markets: m.markets,
+          events: [],
+          _liveExtra: { sets: [[0, 0]], currentPoints: ["0", "0"] },
+        });
+        continue;
+      }
+
+      if (providerStatusGroup !== undefined && providerStatusGroup !== 2) continue;
+
+      if (startsIn === 0) {
+        const realSi = matchStartsInMinutes(m.date, m.time);
+        if (isFinite(realSi) && realSi < -2 && realSi > -240) {
+          promotedTennis.push({
+            id:            m.id,
+            home:          m.home,
+            away:          m.away,
+            league:        m.league,
+            country:       m.country,
+            sport:         m.sport,
+            homeScore: 0,
+            awayScore: 0,
+            minute: 20,
+            status: "1st set",
+            hasRealOdds: m.hasRealOdds,
+            odds: m.odds,
+            markets: m.markets,
+            events: [],
+            _liveExtra: { sets: [[0, 0]], currentPoints: ["0", "0"] },
+          });
+          continue;
+        }
+      }
+    }
+    startingSoonFinal.push({
       id:            m.id,
       home:          m.home,
       away:          m.away,
@@ -8685,13 +8799,11 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
       events:        [],
       date:          m.date,
       time:          m.time,
-      startsIn:      Math.max(0, Math.round(matchStartsInMinutes(m.date, m.time))),
+      startsIn,
       scheduledTime: m.time,
       scheduledDate: m.date,
-    } satisfies LiveMatchState));
-
-  const promotedTennis: LiveMatchState[] = [];
-  const startingSoonFinal: LiveMatchState[] = startingSoon;
+    });
+  }
 
   syncLiveCompetitionCatalog([
     ...livePart.map((m) => ({
@@ -9024,12 +9136,12 @@ async function buildTennisLiveV1(): Promise<LiveMatchState[]> {
     const primary: Array<{ r: number; m: LiveMatchState }> = [];
     const itf: Array<{ r: number; m: LiveMatchState }> = [];
     for (const g of games) {
-      if (g.statusGroup === 3 || g.statusGroup === 2) continue;
+      if (g.statusGroup === 2 || isTennisV1GameFinished(g)) continue;
       const home = g.homeCompetitor?.name?.trim() ?? "";
       const away = g.awayCompetitor?.name?.trim() ?? "";
       if (!home || !away) continue;
       if (home.includes("/") || away.includes("/")) continue;
-      const compName = g.competitionDisplayName ?? "";
+      const compName = [g.competitionDisplayName, g.stageName, g.roundName].filter(Boolean).join(" ");
       if (/double|mixed/i.test(compName)) continue;
       const tier = tennisTierRank(compName);
       let homeScore = Math.max(0, g.homeCompetitor?.score ?? 0);
@@ -9065,9 +9177,9 @@ async function buildTennisLiveV1(): Promise<LiveMatchState[]> {
         events: [],
         _liveExtra: { sets: [[homeScore, awayScore]], currentPoints: ["0", "0"], ...(serving ? { serving } : {}) },
       };
-      const r = tier === 999 ? 6 : tier;
-      if (tier === 7) itf.push({ r, m: item });
-      else primary.push({ r, m: item });
+      const rank = tier === 999 ? 6 : tier;
+      if (tier === 7) itf.push({ r: rank, m: item });
+      else primary.push({ r: rank, m: item });
     }
     primary.sort((a, b) => a.r - b.r || a.m.league.localeCompare(b.m.league) || a.m.home.localeCompare(b.m.home));
     itf.sort((a, b) => a.m.league.localeCompare(b.m.league) || a.m.home.localeCompare(b.m.home));
@@ -9117,13 +9229,13 @@ async function buildTennisUpcoming(): Promise<UpcomingMatch[]> {
     const seen = new Set<string>();
 
     for (const g of games) {
-      if (g.statusGroup === 3) continue; // skip finished
+      if (isTennisV1GameFinished(g)) continue;
       const home = g.homeCompetitor?.name?.trim() ?? "";
       const away = g.awayCompetitor?.name?.trim() ?? "";
       if (!home || !away) continue;
       // Skip doubles (player pairs have " / " in name)
       if (home.includes("/") || away.includes("/")) continue;
-      const compName = g.competitionDisplayName ?? "";
+      const compName = [g.competitionDisplayName, g.stageName, g.roundName].filter(Boolean).join(" ");
       if (/double|mixed/i.test(compName)) continue;
       const tier = tennisTierRank(compName);
 
@@ -9154,6 +9266,9 @@ async function buildTennisUpcoming(): Promise<UpcomingMatch[]> {
         sport: "tennis" as const,
         hasRealOdds: false,
         odds: { home: compH!, draw: 0, away: compA! },
+        providerStatusGroup: g.statusGroup,
+        providerStatusText: g.statusText ?? "",
+        providerWinnerKnown: !!g.homeCompetitor?.isWinner || !!g.awayCompetitor?.isWinner,
         markets: {
           doubleChance: { homeOrDraw: 0, awayOrDraw: 0, homeOrAway: 0 },
           bothTeamsScore: { yes: 0, no: 0 },
@@ -9164,8 +9279,9 @@ async function buildTennisUpcoming(): Promise<UpcomingMatch[]> {
           tennisExtra: tennisExtras,
         } as unknown as AdvancedMarkets,
       };
-      if (tier === 7) itf.push({ r: tier, m: item });
-      else primary.push({ r: tier, m: item });
+      const rank = tier === 999 ? 6 : tier;
+      if (tier === 7) itf.push({ r: rank, m: item });
+      else primary.push({ r: rank, m: item });
     }
 
     const byTime = (a: UpcomingMatch, b: UpcomingMatch) => {
