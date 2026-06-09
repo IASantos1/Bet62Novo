@@ -1,0 +1,474 @@
+> ## Documentation Index
+> Fetch the complete documentation index at: https://docs.sportsapipro.com/llms.txt
+> Use this file to discover all available pages before exploring further.
+
+# Match Endpoints
+
+> V2 Football API: 37 match sub-endpoints covering scores, analytics, odds, lineups, shotmaps, AI insights, and more
+
+## Base URL
+
+```
+https://v2.football.sportsapipro.com
+```
+
+All match endpoints use the pattern `/api/match/{matchId}/...`
+
+<Info>
+  **Finding Match IDs:** Use `/api/live` for current matches, `/api/schedule/{date}` for scheduled matches, or `/api/search?q=team` to find matches by team name. Match IDs are numeric (e.g., `14025056`).
+</Info>
+
+***
+
+## Core Match Data
+
+### Get Match Details
+
+```bash theme={null}
+GET /api/match/{matchId}
+```
+
+Returns full match details including scores, teams, venue, status, timestamps, and entity IDs for players, referees, and venues.
+
+<ParamField path="matchId" type="number" required>
+  Numeric match ID. Discover via `/api/live`, `/api/schedule/{date}`, or `/api/search`.
+</ParamField>
+
+### Get Lineups
+
+```bash theme={null}
+GET /api/match/{matchId}/lineups
+```
+
+Returns confirmed starting lineups for both teams, including formation, player positions, jersey numbers, and substitutes.
+
+<Note>
+  **Availability:** Only available once lineups are confirmed — typically 30–60 minutes before kick-off. Returns empty for matches further in the future.
+</Note>
+
+### Get Statistics
+
+```bash theme={null}
+GET /api/match/{matchId}/statistics
+```
+
+Returns match statistics: possession, shots (on/off target), passes, fouls, corners, offsides, and more. Broken down by period (1st half, 2nd half, total).
+
+<Note>
+  **Availability:** Available during live matches and after full-time. Not available for pre-match.
+</Note>
+
+### Get Incidents
+
+```bash theme={null}
+GET /api/match/{matchId}/incidents
+```
+
+Returns all match events in chronological order: goals, cards (yellow/red), substitutions, VAR decisions, penalty shootout events.
+
+### Get Scores
+
+```bash theme={null}
+GET /api/match/{matchId}/scores
+```
+
+Returns detailed score breakdown including period scores (1st half, 2nd half), extra time, penalty shootout results, and aggregate scores for two-legged ties.
+
+### Get Referee
+
+```bash theme={null}
+GET /api/match/{matchId}/referee
+```
+
+Returns referee details assigned to the match. Use the returned `referee.id` to call referee-specific endpoints.
+
+### Get Venue
+
+```bash theme={null}
+GET /api/match/{matchId}/venue
+```
+
+Returns venue information: name, city, country, capacity, and coordinates. Use the returned `venue.id` for venue-specific endpoints.
+
+***
+
+## Match Status Codes
+
+Every match object includes a `status.code` field (numeric) and a `status.description` (text). Use the numeric code for programmatic logic.
+
+| Code  | Description            | Meaning                                       |
+| ----- | ---------------------- | --------------------------------------------- |
+| `0`   | Not started            | Match has not kicked off yet                  |
+| `6`   | 1st half               | First half in progress                        |
+| `7`   | 2nd half               | Second half in progress                       |
+| `31`  | Halftime               | Halftime break                                |
+| `40`  | Extra time — 1st half  | First half of extra time                      |
+| `41`  | Extra time — 2nd half  | Second half of extra time                     |
+| `50`  | Penalty shootout       | Penalty shootout in progress                  |
+| `60`  | Postponed              | Match postponed to a later date               |
+| `70`  | Canceled               | Match canceled and will not be played         |
+| `80`  | Interrupted            | Match interrupted (may resume)                |
+| `90`  | Abandoned              | Match abandoned and will not resume           |
+| `100` | Ended                  | Match ended in regulation (90 min + stoppage) |
+| `110` | Ended after extra time | Match ended after 120 minutes                 |
+| `120` | Ended after penalties  | Match ended after penalty shootout            |
+
+<Info>
+  **Detecting regulation vs. overtime (Ronen's question):**
+
+  * **Regulation ended:** `status.code === 100` — the match finished in normal time (90 min + stoppage).
+  * **Extra time started:** `status.code === 40` or `41` — the match is now in overtime.
+  * **Extra time ended:** `status.code === 110` — final result was decided in extra time.
+  * **Penalties:** `status.code === 50` (in progress) or `120` (ended after penalties).
+
+  To detect the transition from regulation to overtime, poll the match and watch for `status.code` changing from `7` (2nd half) → `31` (halftime, brief break) → `40` (extra time 1st half). If it jumps from `7` → `100`, regulation ended normally with no extra time.
+</Info>
+
+***
+
+## Advanced Analytics
+
+### Shotmap
+
+```bash theme={null}
+GET /api/match/{matchId}/shotmap
+```
+
+Returns shot map data with xG (expected goals) values for each shot, including coordinates, player, shot type (foot/header), and outcome (goal/saved/blocked/off-target).
+
+<Note>
+  **Availability:** Available during live matches (updates in real-time) and after full-time. Not available pre-match.
+</Note>
+
+### Momentum Graph
+
+```bash theme={null}
+GET /api/match/{matchId}/graph
+```
+
+Returns match momentum/pressure graph data over time. Each data point represents the attacking pressure at a given minute.
+
+### Average Positions
+
+```bash theme={null}
+GET /api/match/{matchId}/average-positions
+```
+
+Returns average player positions on the pitch for both teams. Useful for tactical analysis and formation visualization.
+
+<Note>
+  **Availability:** Available during live matches and after full-time only.
+</Note>
+
+### AI Insights
+
+```bash theme={null}
+GET /api/match/{matchId}/ai-insights?lang={lang}
+```
+
+Returns AI-generated post-match analysis with key talking points, tactical observations, and performance summaries.
+
+<ParamField query="lang" type="string" default="en">
+  Language code for the analysis (e.g., `en`, `es`, `de`, `fr`, `pt`).
+</ParamField>
+
+<Warning>
+  **Availability:** Post-match only (this is the `ai-insights-postmatch` variant internally). The pre-match/live `ai-insights` endpoint returns **403 Forbidden** and is not usable. Not available for all matches — primarily top-tier competitions. Returns 404 for matches without AI analysis.
+</Warning>
+
+### Team Heatmap
+
+```bash theme={null}
+GET /api/match/{matchId}/heatmap/{teamId}
+```
+
+Returns team heatmap data for the match, showing areas of the pitch where the team was most active.
+
+<ParamField path="teamId" type="number" required>
+  Numeric team ID. Get from the match details response (`homeTeam.id` or `awayTeam.id`).
+</ParamField>
+
+***
+
+## Player-Specific
+
+### Best Players / MOTM
+
+```bash theme={null}
+GET /api/match/{matchId}/best-players
+```
+
+Returns the best-performing players from the match with ratings and key statistics.
+
+### Award Details
+
+```bash theme={null}
+GET /api/match/{matchId}/award
+```
+
+Returns official man-of-the-match award details.
+
+### All Player Statistics
+
+```bash theme={null}
+GET /api/match/{matchId}/player-statistics
+```
+
+Returns comprehensive statistics for all players in the match: passes, tackles, shots, dribbles, duels, and ratings.
+
+### Specific Player Statistics
+
+```bash theme={null}
+GET /api/match/{matchId}/player/{playerId}/statistics
+```
+
+Returns detailed statistics for a specific player in the match.
+
+<ParamField path="playerId" type="number" required>
+  Numeric player ID. Get from lineups or match details.
+</ParamField>
+
+***
+
+## Betting & Odds
+
+### Featured Odds
+
+```bash theme={null}
+GET /api/match/{matchId}/odds?scope={scope}&provider={provider}
+```
+
+Returns odds for the match from a specific provider.
+
+<ParamField query="scope" type="string" default="featured">
+  `featured` for main markets or `all` for all available markets.
+</ParamField>
+
+<ParamField query="provider" type="number" default="1">
+  Odds provider ID. Use `/api/odds/providers/{countryCode}` to list available providers.
+</ParamField>
+
+### All Odds
+
+```bash theme={null}
+GET /api/match/{matchId}/odds/all
+```
+
+Returns odds from all available providers and markets.
+
+### Pre-Match Odds
+
+```bash theme={null}
+GET /api/match/{matchId}/odds/pre-match
+```
+
+Returns pre-match odds snapshot. Available before kick-off.
+
+<Warning>
+  **Availability:** Pre-match only. Returns 404 after the match has ended.
+</Warning>
+
+### Live Odds
+
+```bash theme={null}
+GET /api/match/{matchId}/odds/live
+```
+
+Returns live in-play odds that update during the match.
+
+<Warning>
+  **Availability:** Live matches only. Returns 404 for pre-match or finished matches.
+</Warning>
+
+### Winning Odds
+
+```bash theme={null}
+GET /api/match/{matchId}/winning-odds
+```
+
+Returns the winning odds movement for the match.
+
+### Team Streaks
+
+```bash theme={null}
+GET /api/match/{matchId}/streaks
+```
+
+Returns recent streak data for both teams (e.g., "5 wins in a row", "unbeaten in 10").
+
+### Streaks with Odds
+
+```bash theme={null}
+GET /api/match/{matchId}/streaks/odds
+```
+
+Returns streak data combined with relevant odds markets.
+
+***
+
+## Pre-Match Data
+
+<Warning>
+  The following endpoints are **pre-match only**. They return 404 for live or finished matches.
+</Warning>
+
+### Head to Head
+
+```bash theme={null}
+GET /api/match/{matchId}/h2h
+```
+
+Returns head-to-head history between the two teams: previous meetings, results, and statistics.
+
+### Pre-Game Form
+
+```bash theme={null}
+GET /api/match/{matchId}/pregame-form
+```
+
+Returns recent form for both teams going into the match (last 5–10 results).
+
+### Predicted Lineups
+
+```bash theme={null}
+GET /api/match/{matchId}/predicted-lineups
+```
+
+Returns AI-predicted lineups before the official lineups are announced.
+
+<Note>
+  Predicted lineups are replaced by confirmed lineups once available (typically 30–60 min before kick-off).
+</Note>
+
+***
+
+## Media & Social
+
+### Highlights
+
+```bash theme={null}
+GET /api/match/{matchId}/highlights
+```
+
+Returns video highlight links for the match (when available).
+
+### Media
+
+```bash theme={null}
+GET /api/match/{matchId}/media
+```
+
+Returns media content associated with the match (photos, videos).
+
+### Media Summary
+
+```bash theme={null}
+GET /api/match/{matchId}/media-summary?country={country}
+```
+
+Returns a localized media summary of the match.
+
+<ParamField query="country" type="string" default="GB">
+  Country code for localized content (e.g., `GB`, `US`, `DE`). Defaults to `GB`.
+</ParamField>
+
+### Tweets
+
+```bash theme={null}
+GET /api/match/{matchId}/tweets
+```
+
+Returns tweets related to the match from official team and league accounts.
+
+### Comments
+
+```bash theme={null}
+GET /api/match/{matchId}/comments
+```
+
+Returns user comments/discussions about the match.
+
+### Fan Votes
+
+```bash theme={null}
+GET /api/match/{matchId}/votes
+```
+
+Returns fan voting results (e.g., player of the match polls).
+
+***
+
+## Other
+
+### Managers
+
+```bash theme={null}
+GET /api/match/{matchId}/managers
+```
+
+Returns manager/head coach details for both teams. Use the returned `manager.id` for manager-specific endpoints.
+
+### Penalties
+
+```bash theme={null}
+GET /api/match/{matchId}/penalties
+```
+
+Returns penalty shootout details: order, takers, outcomes, and scores after each kick.
+
+<Note>
+  Only available for matches that went to a penalty shootout.
+</Note>
+
+### TV Channels
+
+```bash theme={null}
+GET /api/match/{matchId}/channels
+```
+
+Returns TV broadcast channels organized by country, including channel names and broadcast times.
+
+### Jerseys
+
+```bash theme={null}
+GET /api/match/{matchId}/jerseys
+```
+
+Returns home and away jersey details for both teams: colors, patterns, and goalkeeper kit.
+
+### Fantasy
+
+```bash theme={null}
+GET /api/match/{matchId}/fantasy
+```
+
+Returns fantasy-relevant data for the match: points, bonuses, and player ownership.
+
+***
+
+## Example Requests
+
+<CodeGroup>
+  ```bash cURL theme={null}
+  curl -X GET "https://v2.football.sportsapipro.com/api/match/14025056/statistics" \
+    -H "x-api-key: YOUR_API_KEY"
+  ```
+
+  ```javascript JavaScript theme={null}
+  const response = await fetch(
+    'https://v2.football.sportsapipro.com/api/match/14025056/statistics',
+    { headers: { 'x-api-key': 'YOUR_API_KEY' } }
+  );
+  const data = await response.json();
+  ```
+
+  ```python Python theme={null}
+  import requests
+
+  response = requests.get(
+      'https://v2.football.sportsapipro.com/api/match/14025056/statistics',
+      headers={'x-api-key': 'YOUR_API_KEY'}
+  )
+  data = response.json()
+  ```
+</CodeGroup>

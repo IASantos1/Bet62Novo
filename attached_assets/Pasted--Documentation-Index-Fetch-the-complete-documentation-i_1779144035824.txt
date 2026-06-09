@@ -1,0 +1,222 @@
+> ## Documentation Index
+> Fetch the complete documentation index at: https://docs.sportsapipro.com/llms.txt
+> Use this file to discover all available pages before exploring further.
+
+# Player Endpoints
+
+> V2 Basketball API: 18 player endpoints for profiles, statistics, transfer history, ratings, and more
+
+## Base URL
+
+```
+https://v2.basketball.sportsapipro.com
+```
+
+<Info>
+  **Finding Player IDs:** Use `/api/search?q=lebron` to find player IDs, or extract them from match lineups (`/api/match/{id}/lineups`) or team rosters (`/api/teams/{id}/players`). Example: LeBron James = `817181`.
+</Info>
+
+***
+
+## Player Profile
+
+### Player Details
+
+```bash theme={null}
+GET /api/players/{playerId}
+```
+
+Returns player profile: name, nationality, age, height, weight, position (G/F/C), current team, and jersey number.
+
+<ParamField path="playerId" type="number" required>
+  Numeric player ID (e.g., `817181` for LeBron James).
+</ParamField>
+
+### Player Image
+
+```bash theme={null}
+GET /api/players/{playerId}/image
+```
+
+Returns the player's profile photo URL.
+
+### Characteristics
+
+```bash theme={null}
+GET /api/players/{playerId}/characteristics
+```
+
+Returns player traits and playing style descriptions.
+
+### Attribute Overviews
+
+```bash theme={null}
+GET /api/players/{playerId}/attribute-overviews
+```
+
+Returns skill ratings for the player across various categories.
+
+### Last Year Summary
+
+```bash theme={null}
+GET /api/players/{playerId}/last-year-summary
+```
+
+Returns a summary of the player's performance over the previous season.
+
+***
+
+## Statistics
+
+### Overall Statistics
+
+```bash theme={null}
+GET /api/players/{playerId}/statistics
+```
+
+Returns career statistics: PPG, RPG, APG, FG%, 3PT%, FT%, and more.
+
+### Statistics Seasons
+
+```bash theme={null}
+GET /api/players/{playerId}/statistics/seasons
+```
+
+Returns all seasons with available statistics. **Use this to discover valid season IDs.**
+
+### Career Stats by Match Type
+
+```bash theme={null}
+GET /api/players/{playerId}/statistics/match-type?type={type}
+```
+
+Returns career statistics filtered by match type.
+
+### Tournament Season Statistics
+
+```bash theme={null}
+GET /api/players/{playerId}/tournament/{tournamentId}/season/{seasonId}/statistics?type={type}
+```
+
+Returns player statistics for a specific tournament and season.
+
+<ParamField query="type" type="string" default="overall">
+  Filter: `overall`, `home`, or `away`.
+</ParamField>
+
+### Season Ratings
+
+```bash theme={null}
+GET /api/players/{playerId}/tournament/{tournamentId}/season/{seasonId}/ratings?type={type}
+```
+
+Returns game-by-game player ratings throughout the season.
+
+### Season Summary
+
+```bash theme={null}
+GET /api/players/{playerId}/tournament/{tournamentId}/season/{seasonId}/summary
+```
+
+Returns a season summary for the player.
+
+### National Team Statistics
+
+```bash theme={null}
+GET /api/players/{playerId}/national-team-statistics
+```
+
+Returns international career statistics.
+
+***
+
+## Events
+
+### Last Events (Paginated)
+
+```bash theme={null}
+GET /api/players/{playerId}/events/last/{page}
+```
+
+Returns the player's most recent games with stats, paginated.
+
+<ParamField path="page" type="number" required>
+  Page number (0-indexed).
+</ParamField>
+
+### Next Events (Paginated)
+
+```bash theme={null}
+GET /api/players/{playerId}/events/next/{page}
+```
+
+Returns upcoming scheduled games for the player's team.
+
+***
+
+## Transfer & Career
+
+### Transfer History
+
+```bash theme={null}
+GET /api/players/{playerId}/transfer-history
+```
+
+Returns complete team history: trades, signings, and contract changes.
+
+### Unique Tournaments
+
+```bash theme={null}
+GET /api/players/{playerId}/unique-tournaments
+```
+
+Returns all competitions the player has participated in.
+
+***
+
+## Media
+
+### Media
+
+```bash theme={null}
+GET /api/players/{playerId}/media
+```
+
+Returns media content associated with the player.
+
+### Media Videos
+
+```bash theme={null}
+GET /api/players/{playerId}/media/videos
+```
+
+Returns video highlights and clips featuring the player.
+
+***
+
+## Example Requests
+
+<CodeGroup>
+  ```bash cURL theme={null}
+  curl -X GET "https://v2.basketball.sportsapipro.com/api/players/817181/statistics" \
+    -H "x-api-key: YOUR_API_KEY"
+  ```
+
+  ```javascript JavaScript theme={null}
+  const response = await fetch(
+    'https://v2.basketball.sportsapipro.com/api/players/817181/statistics',
+    { headers: { 'x-api-key': 'YOUR_API_KEY' } }
+  );
+  const stats = await response.json();
+  ```
+
+  ```python Python theme={null}
+  import requests
+
+  response = requests.get(
+      'https://v2.basketball.sportsapipro.com/api/players/817181/statistics',
+      headers={'x-api-key': 'YOUR_API_KEY'}
+  )
+  stats = response.json()
+  ```
+</CodeGroup>

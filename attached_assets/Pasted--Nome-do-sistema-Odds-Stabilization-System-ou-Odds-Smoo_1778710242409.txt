@@ -1,0 +1,136 @@
+🧠 Nome do sistema
+🟢 Odds Stabilization System
+
+ou
+
+🟢 Odds Smoothing System
+Outros nomes usados por sportsbooks
+Nome	Uso
+Odds Stabilizer	mais comum
+Market Smoothing	muito usado
+Odds Normalization	backend
+Tick Management	controle visual
+Price Throttling	controle de updates
+Market Inertia System	estabilidade
+Odds Rendering Layer	frontend
+Live Market Engine	sistema geral
+🧠 Como deve ser configurado (sem cálculos)
+🟢 1. Threshold de atualização
+
+Configuração:
+
+odds pequenas NÃO atualizam
+só mudanças relevantes aparecem
+🟢 2. Tick System
+
+Configuração:
+
+odds arredondadas
+movimentos padronizados
+
+Exemplo:
+
+1.40 → 1.41
+não:
+1.401
+1.398
+1.412
+🟢 3. Refresh Rate
+
+Configuração:
+
+mercados rápidos atualizam mais vezes
+mercados lentos atualizam menos
+🟢 4. Market Tiers
+
+Configuração:
+
+Tier 1 → mercados principais
+Tier 2 → mercados médios
+Tier 3 → mercados especiais
+🟢 5. Market Suspension
+
+Configuração:
+
+suspender mercados em:
+gol
+pênalti
+VAR
+cartão vermelho
+🟢 6. WebSocket Broadcast Layer
+
+Configuração:
+
+enviar apenas odds alteradas
+não enviar todos mercados constantemente
+🟢 7. Frontend Delay Layer
+
+Configuração:
+
+pequeno delay visual
+evitar flickering
+🟢 8. Odds Cache Layer
+
+Configuração:
+
+guardar últimas odds válidas
+evitar microoscilações do provider
+🟢 9. Provider Feed Normalization
+
+Configuração:
+
+padronizar feeds
+evitar diferenças entre providers
+🟢 10. Live Market Engine
+
+Sistema principal que:
+
+recebe feed
+estabiliza odds
+controla mercados
+envia updates
+🧠 Estrutura profissional do sistema
+Provider Feed
+↓
+Feed Normalizer
+↓
+Odds Stabilizer
+↓
+Tick Manager
+↓
+Market Suspension Layer
+↓
+WebSocket Broadcaster
+↓
+Frontend Renderer
+🟢 Nome ideal para teu backend
+
+Podes literalmente criar módulos com nomes assim:
+
+LiveOddsEngine
+OddsStabilizer
+MarketThrottleManager
+OddsNormalizer
+LiveMarketManager
+MarketSuspensionService
+OddsBroadcastService
+🧠 O mais importante
+
+O segredo NÃO é:
+
+calcular odds
+
+👉 é:
+
+estabilizar visualmente
+controlar frequência
+evitar flickering
+evitar microvariações
+
+É exatamente isso que faz:
+
+Betano
+Bet365
+Pinnacle
+Stake
+parecerem “suaves” e profissionais.

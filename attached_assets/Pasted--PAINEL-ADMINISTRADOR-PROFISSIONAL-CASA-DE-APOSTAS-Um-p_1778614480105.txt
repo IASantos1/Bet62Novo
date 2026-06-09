@@ -1,0 +1,291 @@
+⚙️ PAINEL ADMINISTRADOR PROFISSIONAL — CASA DE APOSTAS
+
+Um painel admin de sportsbook profissional precisa controlar:
+
+⚡ odds
+🎯 mercados
+👤 usuários
+💰 risco
+📊 exposição
+🔒 segurança
+🧠 traders
+📡 feeds
+🏦 pagamentos
+📈 analytics
+
+A arquitetura correta é:
+
+ADMIN PANEL
+    ↓
+TRADER ENGINE
+    ↓
+RISK ENGINE
+    ↓
+ODDS ENGINE
+    ↓
+SPORTSBOOK CORE
+🧠 PRINCIPAIS MÓDULOS
+⚽ 1. GERENCIAMENTO DE EVENTOS
+
+O operador precisa:
+
+✔ visualizar jogos
+✔ suspender jogos
+✔ editar mercados
+✔ fechar apostas
+✔ reabrir mercados
+✔ alterar odds
+Funcionalidades:
+Live Matches
+Prematch Matches
+Start Time
+Status
+Sport
+League
+Coverage
+Feed Status
+⚙️ Ações
+Suspend Event
+Close Event
+Manual Result
+Force Settlement
+Void Match
+Change Odds
+🎯 2. GERENCIAMENTO DE MERCADOS
+
+ESSENCIAL.
+
+O operador precisa:
+✔ abrir mercado
+✔ fechar mercado
+✔ suspender mercado
+✔ alterar linhas
+✔ alterar limites
+✔ alterar margem
+Mercados:
+1X2
+Over/Under
+Handicap
+Correct Score
+BTTS
+Player Props
+Corners
+Cards
+Set Markets
+Quarter Markets
+⚙️ Estados
+open
+suspended
+closed
+settled
+voided
+hidden
+💰 3. RISK MANAGEMENT
+
+Esse é o coração da sportsbook.
+
+O operador precisa ver:
+✔ exposição
+✔ liability
+✔ volume apostado
+✔ odds drift
+✔ arbitragem
+✔ surebets
+✔ usuários suspeitos
+Dashboard:
+Exposure per Market
+Exposure per Match
+Big Bets
+Sharp Bettors
+Risk Alerts
+Profit/Loss
+⚠️ ALERTAS IMPORTANTES
+High Exposure
+Odds Abuse
+Arbitrage Detection
+Multi Account
+Bonus Abuse
+Steam Moves
+👤 4. GERENCIAMENTO DE USUÁRIOS
+Operador precisa:
+✔ bloquear usuário
+✔ limitar usuário
+✔ verificar KYC
+✔ alterar limites
+✔ ver apostas
+✔ analisar comportamento
+Dados:
+Balance
+Bet History
+IP
+Device
+Country
+KYC Status
+Win Rate
+Limits
+🏦 5. FINANCEIRO
+Deve existir:
+✔ depósitos
+✔ saques
+✔ rollback
+✔ chargeback
+✔ bônus
+✔ afiliados
+Dashboard financeiro
+Deposits
+Withdrawals
+Pending Payments
+Revenue
+Bonus Cost
+Affiliate Cost
+📊 6. LIVE TRADER PANEL
+
+ESSENCIAL para ao vivo.
+
+Operador controla:
+✔ odds live
+✔ suspensões
+✔ delays
+✔ feed latency
+✔ auto/manual mode
+Controles:
+Suspend All
+Suspend Market
+Manual Odds
+Auto Pricing
+Manual Settlement
+⚡ 7. FEED MONITORING
+
+Você precisa monitorar:
+
+✔ StatPal
+✔ feed delay
+✔ API health
+✔ websocket health
+✔ missing events
+Dashboard
+Feed Status
+Latency
+Dropped Events
+Sync Status
+Provider Status
+🔒 8. SEGURANÇA
+Necessário:
+✔ 2FA
+✔ admin logs
+✔ permission system
+✔ role management
+✔ IP whitelist
+Roles:
+Super Admin
+Trader
+Risk Manager
+Support
+Finance
+Affiliate Manager
+📈 9. ANALYTICS
+Operador precisa ver:
+✔ lucro por esporte
+✔ lucro por mercado
+✔ ROI
+✔ hold %
+✔ usuários ativos
+Métricas
+Turnover
+GGR
+NGR
+Hold %
+Bet Count
+Live vs Prematch
+🎁 10. BÔNUS E PROMOÇÕES
+Painel precisa:
+✔ criar bônus
+✔ rollover
+✔ freebet
+✔ cashback
+✔ promo code
+⚙️ Configurações
+Bonus %
+Max Bonus
+Wagering
+Eligible Sports
+Expiration
+🧠 11. CONFIGURAÇÕES GLOBAIS
+Operador controla:
+✔ margem global
+✔ delay ao vivo
+✔ limites
+✔ esportes habilitados
+✔ feeds
+Exemplo:
+{
+  "live_delay": 5,
+
+  "max_bet": 5000,
+
+  "default_margin": 0.06
+}
+⚡ 12. SISTEMA DE AUDITORIA
+
+Muito importante.
+
+Deve registrar:
+✔ mudança de odds
+✔ login admin
+✔ suspensão
+✔ settlement
+✔ alteração de saldo
+Logs
+Admin Action
+Timestamp
+IP
+Previous Value
+New Value
+🧠 13. SISTEMA DE RESULTADOS
+Operador precisa:
+✔ confirmar resultados
+✔ corrigir settlement
+✔ void manual
+✔ resettlement
+⚙️ Ações
+Settle Bet
+Void Bet
+Resettle Bet
+Manual Score
+📡 14. SISTEMA DE NOTIFICAÇÕES
+Alertas:
+✔ high risk
+✔ API offline
+✔ high payout
+✔ suspicious user
+🚀 15. ESTRUTURA FINAL
+ADMIN PANEL
+    ↓
+RISK
+TRADER
+FINANCE
+USERS
+ODDS
+MARKETS
+FEEDS
+ANALYTICS
+🔥 O QUE UM PAINEL PROFISSIONAL PRECISA TER
+✔ Event Management
+✔ Market Management
+✔ Odds Control
+✔ Risk Management
+✔ User Management
+✔ Financial Control
+✔ Feed Monitoring
+✔ Settlement
+✔ Analytics
+✔ Security
+✔ Audit Logs
+🧠 O QUE BET365 / PINNACLE / 1XBET USAM
+✔ microserviços
+✔ trader dashboards
+✔ automated risk
+✔ real-time monitoring
+✔ odds engines
+✔ liability engines
+✔ admin hierarchy

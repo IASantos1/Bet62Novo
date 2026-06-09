@@ -1,0 +1,219 @@
+const express = require('express')
+const http = require('http')
+const { Server } = require('socket.io')
+
+const app = express()
+const server = http.createServer(app)
+
+const io = new Server(server, {
+   cors: {
+      origin: '*'
+   }
+})
+
+let liveEvents = []
+
+/*
+|--------------------------------------------------------------------------
+| Simulação API Provider
+|--------------------------------------------------------------------------
+*/
+
+async function fetchLiveGames() {
+
+   /*
+      Aqui você coloca sua API real
+
+      Exemplo:
+      const response = await axios.get(API_URL)
+
+      return response.data
+   */
+
+   return [
+      {
+         id: 1,
+         home: 'Benfica',
+         away: 'Porto',
+         minute: 75,
+         status: 'live'
+      },
+
+      {
+         id: 2,
+         home: 'Sporting',
+         away: 'Braga',
+         minute: 90,
+         status: 'finished'
+      }
+   ]
+}
+
+/*
+|--------------------------------------------------------------------------
+| Polling principal
+|--------------------------------------------------------------------------
+*/
+
+async function pollLiveGames() {
+
+   try {
+
+      const games = await fetchLiveGames()
+
+      const onlyLive = games.filter(game => {
+
+         /*
+            Remove jogos finalizados
+         */
+
+         if (
+            game.status === 'finished' ||
+            game.status === 'ended' ||
+            game.status === 'closed'
+         ) {
+            return false
+         }
+
+         /*
+            Segurança anti jogo preso
+         */
+
+         if (
+            game.minute >= 130
+         ) {
+            return false
+         }
+
+         return true
+      })
+
+      /*
+         Atualiza memória
+      */
+
+      liveEvents = onlyLive
+
+      /*
+         Envia para frontend
+      */
+
+      io.emit('live_games', liveEvents)
+
+      console.log(
+         `[POLL] ${liveEvents.length} jogos ao vivo`
+      )
+
+   } catch (err) {
+
+      console.error(
+         'Erro polling:',
+         err.message
+      )
+   }
+}
+
+/*
+|--------------------------------------------------------------------------
+| Polling automático
+|--------------------------------------------------------------------------
+*/
+
+setInterval(() => {
+
+   pollLiveGames()
+
+}, 5000)
+
+/*
+|--------------------------------------------------------------------------
+| Socket conexão
+|--------------------------------------------------------------------------
+*/
+
+io.on('connection', socket => {
+
+   console.log('Cliente conectado')
+
+   /*
+      Envia imediatamente
+   */
+
+   socket.emit('live_games', liveEvents)
+})
+
+/*
+|--------------------------------------------------------------------------
+| Front simples
+|--------------------------------------------------------------------------
+*/
+
+app.get('/', (req, res) => {
+
+   res.send(`
+<!DOCTYPE html>
+
+<html>
+<head>
+   <title>Live Betting</title>
+
+   <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+</head>
+
+<body>
+
+   <h1>Jogos Ao Vivo</h1>
+
+   <div id="games"></div>
+
+   <script>
+
+      const socket = io('http://localhost:3000')
+
+      socket.on('live_games', games => {
+
+         const container =
+            document.getElementById('games')
+
+         container.innerHTML = ''
+
+         games.forEach(game => {
+
+            container.innerHTML += \`
+               <div style="
+                  border:1px solid #ccc;
+                  margin:10px;
+                  padding:10px;
+               ">
+                  <b>\${game.home}</b>
+                  vs
+                  <b>\${game.away}</b>
+
+                  <br>
+
+                  Minuto:
+                  \${game.minute}
+               </div>
+            \`
+         })
+      })
+
+   </script>
+
+</body>
+</html>
+   `)
+})
+
+/*
+|--------------------------------------------------------------------------
+| Start
+|--------------------------------------------------------------------------
+*/
+
+server.listen(3000, () => {
+
+   console.log(
+      'Servidor rodando na porta 3000'
+   )
+})

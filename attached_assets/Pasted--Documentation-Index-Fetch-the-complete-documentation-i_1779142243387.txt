@@ -1,0 +1,386 @@
+> ## Documentation Index
+> Fetch the complete documentation index at: https://docs.sportsapipro.com/llms.txt
+> Use this file to discover all available pages before exploring further.
+
+# Tournament Endpoints
+
+> V2 Football API: 32 tournament endpoints for seasons, standings, statistics, brackets, team of the week, and more
+
+## Base URL
+
+```
+https://v2.football.sportsapipro.com
+```
+
+<Warning>
+  **Season IDs must be discovered dynamically.** Always call `/api/tournaments/{id}/seasons` first to get the numeric `seasonId`. The human-readable `name` field — `"24/25"` for European leagues or `"2024"` for calendar-year leagues like MLS and Brazilian Série A — is for display only and is **not** a valid URL parameter. See the [Season IDs guide](/api-reference/football-v2/season-ids) for full examples.
+</Warning>
+
+***
+
+## Seasons
+
+### Get Tournament Seasons
+
+```bash theme={null}
+GET /api/tournaments/{id}/seasons
+```
+
+Returns all available seasons for a tournament. **Call this first** to discover valid `seasonId` values for other endpoints.
+
+<ParamField path="id" type="number" required>
+  Numeric tournament ID. Use `/api/search?q=premier+league` or `/api/leagues` to discover.
+</ParamField>
+
+<Info>
+  **Season `name` vs `id`** — only the `id` is valid in downstream URLs. Sample response:
+
+  ```json theme={null}
+  {
+    "seasons": [
+      { "id": 61627, "name": "24/25", "year": "24/25" },
+      { "id": 61644, "name": "2024",  "year": "2024"  }
+    ]
+  }
+  ```
+
+  Pass `61627` (not `"24/25"`) and `61644` (not `"2024"`) to every `/season/{seasonId}/...` endpoint. See [Season IDs](/api-reference/football-v2/season-ids) for split-year vs calendar-year worked examples.
+</Info>
+
+***
+
+## Standings
+
+### Overall Standings
+
+```bash theme={null}
+GET /api/tournament/{tournamentId}/season/{seasonId}/standings
+```
+
+Returns the full league table with points, wins, draws, losses, goals for/against, and goal difference.
+
+### Home Standings
+
+```bash theme={null}
+GET /api/tournament/{tournamentId}/season/{seasonId}/standings/home
+```
+
+Returns standings based on home matches only.
+
+### Away Standings
+
+```bash theme={null}
+GET /api/tournament/{tournamentId}/season/{seasonId}/standings/away
+```
+
+Returns standings based on away matches only.
+
+***
+
+## Statistics & Rankings
+
+### Top Players
+
+```bash theme={null}
+GET /api/tournament/{tournamentId}/season/{seasonId}/top-players?type={type}
+```
+
+Returns top-performing players in the tournament season (top scorers, assists, etc.).
+
+<ParamField query="type" type="string" default="overall">
+  Filter by match location: `overall`, `home`, or `away`.
+</ParamField>
+
+### Top Teams
+
+```bash theme={null}
+GET /api/tournament/{tournamentId}/season/{seasonId}/top-teams?type={type}
+```
+
+Returns top-performing teams by various metrics.
+
+### Top Ratings
+
+```bash theme={null}
+GET /api/tournament/{tournamentId}/season/{seasonId}/top-ratings?type={type}
+```
+
+Returns player ratings leaderboard for the season.
+
+### Season Statistics
+
+```bash theme={null}
+GET /api/tournament/{tournamentId}/season/{seasonId}/statistics
+```
+
+Returns aggregate season statistics: total goals, cards, average goals per match, etc.
+
+### Statistics Info
+
+```bash theme={null}
+GET /api/tournament/{tournamentId}/season/{seasonId}/statistics/info
+```
+
+Returns metadata about available statistics types for the season.
+
+### Player Statistics Types
+
+```bash theme={null}
+GET /api/tournament/{tournamentId}/season/{seasonId}/player-statistics/types
+```
+
+Returns available player statistic categories (e.g., goals, assists, tackles, saves).
+
+### Team Statistics Types
+
+```bash theme={null}
+GET /api/tournament/{tournamentId}/season/{seasonId}/team-statistics/types
+```
+
+Returns available team statistic categories.
+
+### Player of the Season
+
+```bash theme={null}
+GET /api/tournament/{tournamentId}/season/{seasonId}/player-of-the-season
+```
+
+Returns the player of the season award details, including nominees and winner.
+
+***
+
+## Rounds & Events
+
+### All Rounds
+
+```bash theme={null}
+GET /api/tournament/{tournamentId}/season/{seasonId}/rounds
+```
+
+Returns all matchday rounds for the season with round numbers and status.
+
+### Round Matches
+
+```bash theme={null}
+GET /api/tournament/{tournamentId}/season/{seasonId}/round/{round}
+```
+
+Returns all matches in a specific round/matchday.
+
+### Events by Round
+
+```bash theme={null}
+GET /api/tournament/{tournamentId}/season/{seasonId}/events/round/{round}
+```
+
+Returns detailed event data for a specific round.
+
+### Events by Round & Slug
+
+```bash theme={null}
+GET /api/tournament/{tournamentId}/season/{seasonId}/events/round/{round}/slug/{slug}
+```
+
+Returns events filtered by round and slug identifier.
+
+### Last Events (Paginated)
+
+```bash theme={null}
+GET /api/tournament/{tournamentId}/season/{seasonId}/events/last/{page}
+```
+
+Returns recent completed matches in the tournament, paginated. Page `0` returns the most recent.
+
+<ParamField path="page" type="number" required>
+  Page number (0-indexed). Start with `0` for the most recent events.
+</ParamField>
+
+***
+
+## Brackets & Cup Tournaments
+
+### Knockout / Cup Tree
+
+```bash theme={null}
+GET /api/tournament/{tournamentId}/season/{seasonId}/knockout
+```
+
+Returns the bracket/knockout tree for cup tournaments (e.g., FA Cup, Champions League). Includes all rounds from Round of 32 to the Final.
+
+### Draw / Bracket (Alias)
+
+```bash theme={null}
+GET /api/tournament/{tournamentId}/season/{seasonId}/draw
+```
+
+Alias for the knockout endpoint — returns the same bracket/draw data.
+
+<Note>
+  Only available for cup/knockout tournaments. League tournaments will return empty data.
+</Note>
+
+***
+
+## Team of the Week
+
+### Available Periods
+
+```bash theme={null}
+GET /api/tournament/{tournamentId}/season/{seasonId}/team-of-the-week/periods
+```
+
+Returns available Team of the Week periods (matchdays). Use the returned `periodId` values to fetch specific team-of-the-week selections.
+
+### Team of the Week by Period
+
+```bash theme={null}
+GET /api/tournament/{tournamentId}/season/{seasonId}/team-of-the-week/{periodId}
+```
+
+Returns the best XI for a specific matchday period, including formation, player ratings, and key stats.
+
+<ParamField path="periodId" type="number" required>
+  Period ID from the `/team-of-the-week/periods` endpoint.
+</ParamField>
+
+***
+
+## Team Performance
+
+### Team Performance Graph
+
+```bash theme={null}
+GET /api/tournament/{tournamentId}/season/{seasonId}/team/{teamId}/performance-graph
+```
+
+Returns a team's performance trajectory over the season — position changes after each matchday.
+
+### Team Events
+
+```bash theme={null}
+GET /api/tournament/{tournamentId}/season/{seasonId}/team-events?type={type}
+```
+
+Returns all events for teams in the tournament season.
+
+<ParamField query="type" type="string" default="total">
+  Filter: `total`, `home`, or `away`.
+</ParamField>
+
+***
+
+## Tournament Info
+
+### Tournament Details
+
+```bash theme={null}
+GET /api/tournament/{tournamentId}/info
+```
+
+Returns tournament metadata: name, country, logo, tier, and current season.
+
+### Season Info
+
+```bash theme={null}
+GET /api/tournament/{tournamentId}/season/{seasonId}/info
+```
+
+Returns season-specific information: start/end dates, number of teams, current round.
+
+### Featured Events
+
+```bash theme={null}
+GET /api/tournament/{tournamentId}/featured-events
+```
+
+Returns highlighted/featured matches for the tournament (e.g., derbies, title deciders).
+
+### Tournament Image
+
+```bash theme={null}
+GET /api/tournament/{tournamentId}/image
+```
+
+Returns the tournament logo/badge image URL.
+
+### Tournament Media
+
+```bash theme={null}
+GET /api/tournament/{tournamentId}/media
+```
+
+Returns media content (photos, videos) for the tournament.
+
+<Note>
+  Not all tournaments have media content. Top-tier leagues are more likely to have media available.
+</Note>
+
+### Venues
+
+```bash theme={null}
+GET /api/tournament/{tournamentId}/season/{seasonId}/venues
+```
+
+Returns all venues used in the tournament season, with capacity, location, and coordinates.
+
+### Scheduled Events by Date
+
+```bash theme={null}
+GET /api/tournament/{tournamentId}/scheduled-events/{date}
+```
+
+Returns all events for this tournament on a specific date.
+
+<ParamField path="date" type="string" required>
+  Date in `YYYY-MM-DD` format (e.g., `2025-03-15`).
+</ParamField>
+
+***
+
+## Example Requests
+
+<CodeGroup>
+  ```bash cURL theme={null}
+  # Step 1: Discover seasons
+  curl -X GET "https://v2.football.sportsapipro.com/api/tournaments/17/seasons" \
+    -H "x-api-key: YOUR_API_KEY"
+
+  # Step 2: Use a valid seasonId from the response
+  curl -X GET "https://v2.football.sportsapipro.com/api/tournament/17/season/61627/standings" \
+    -H "x-api-key: YOUR_API_KEY"
+  ```
+
+  ```javascript JavaScript theme={null}
+  // Step 1: Discover seasons
+  const seasons = await fetch(
+    'https://v2.football.sportsapipro.com/api/tournaments/17/seasons',
+    { headers: { 'x-api-key': 'YOUR_API_KEY' } }
+  ).then(r => r.json());
+
+  // Step 2: Get standings with a valid season ID
+  const seasonId = seasons.seasons[0].id; // e.g., 61627
+  const standings = await fetch(
+    `https://v2.football.sportsapipro.com/api/tournament/17/season/${seasonId}/standings`,
+    { headers: { 'x-api-key': 'YOUR_API_KEY' } }
+  ).then(r => r.json());
+  ```
+
+  ```python Python theme={null}
+  import requests
+
+  headers = {'x-api-key': 'YOUR_API_KEY'}
+
+  # Step 1: Discover seasons
+  seasons = requests.get(
+      'https://v2.football.sportsapipro.com/api/tournaments/17/seasons',
+      headers=headers
+  ).json()
+
+  # Step 2: Get standings
+  season_id = seasons['seasons'][0]['id']  # e.g., 61627
+  standings = requests.get(
+      f'https://v2.football.sportsapipro.com/api/tournament/17/season/{season_id}/standings',
+      headers=headers
+  ).json()
+  ```
+</CodeGroup>

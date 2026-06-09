@@ -1,0 +1,67 @@
+Ok, vou te dar exemplos de como acessar algumas dessas estatísticas adicionais usando cURL (que é fácil de adaptar para qualquer linguagem de programação).
+
+Lembre-se de substituir YOUR_API_KEY pela sua chave real e ajustar o BASE_URL para o esporte desejado (neste exemplo, usaremos futebol).
+
+1. Estatísticas Detalhadas de Partidas (Game Statistics)
+Este endpoint fornece estatísticas agregadas da partida, como posse de bola, chutes, escanteios, etc.
+
+Endpoint: GET /api/match/:matchId/statistics
+Exemplo cURL:
+
+curl -H "x-api-key: YOUR_API_KEY" \
+  "https://v2.football.sportsapipro.com/api/match/4609057/statistics"
+2. Incidentes da Partida
+Lista de eventos importantes que aconteceram durante a partida (gols, cartões, substituições).
+
+Endpoint: GET /api/match/:matchId/incidents
+Exemplo cURL:
+
+curl -H "x-api-key: [redacted]_API_KEY" \
+  "https://v2.football.sportsapipro.com/api/match/4609057/incidents"
+3. Estatísticas de Jogadores por Partida
+Desempenho individual de cada jogador em uma partida específica.
+
+Endpoint: GET /api/match/:matchId/player-statistics
+Exemplo cURL:
+
+curl -H "x-api-key: [redacted] \
+  "https://v2.football.sportsapipro.com/api/match/4609057/player-statistics"
+4. Escalações (Lineups)
+As formações e jogadores que iniciaram e ficaram no banco.
+
+Endpoint: GET /api/match/:matchId/lineups
+Exemplo cURL:
+
+curl -H "x-api-key: [redacted] \
+  "https://v2.football.sportsapipro.com/api/match/4609057/lineups"
+5. Estatísticas de Jogador por Temporada
+Desempenho de um jogador em um torneio e temporada específicos.
+
+Endpoint: GET /api/players/:playerId/tournament/:tournamentId/season/:seasonId/statistics
+Exemplo cURL (Jogador Kylian Mbappé - ID 108390, Ligue 1 - ID 176, Temporada 2023/2024 - ID 57323):
+
+curl -H "x-api-key: [redacted]KEY" \
+  "https://v2.football.sportsapipro.com/api/players/108390/tournament/176/season/57323/statistics"
+Como encontrar IDs: Use /api/search para jogadores e torneios, e /api/tournaments/{tournamentId}/seasons para temporadas.
+6. Estatísticas de Equipe por Temporada
+Desempenho de uma equipe em um torneio e temporada específicos.
+
+Endpoint: GET /api/teams/:teamId/tournament/:tournamentId/season/:seasonId/statistics
+Exemplo cURL (Paris Saint-Germain - ID 106, Ligue 1 - ID 176, Temporada 2023/2024 - ID 57323):
+
+curl -H "x-api-key: [redacted] \
+  "https://v2.football.sportsapipro.com/api/teams/106/tournament/176/season/57323/statistics"
+7. Odds Detalhadas por Partida (Todos os Mercados)
+Todas as odds disponíveis de várias casas de apostas para uma partida.
+
+Endpoint: GET /api/match/:matchId/odds/all
+Exemplo cURL:
+
+curl -H "x-api-key: [redacted] \
+  "https://v2.football.sportsapipro.com/api/match/4609057/odds/all"
+Dicas Importantes:
+
+Descobrindo IDs: A chave para usar esses endpoints é sempre ter os IDs corretos (de partida, jogador, equipe, torneio, temporada). Use o endpoint /api/search para encontrar a maioria deles.
+Documentação: Para uma lista completa de todos os endpoints e seus parâmetros, consulte a documentação oficial. Ela é a fonte mais detalhada e atualizada.
+Esporte: Lembre-se de mudar v2.football.sportsapipro.com para o esporte que você precisa (ex: v2.basketball.sportsapipro.com, v2.tennis.sportsapipro.com, etc.).
+Esses exemplos devem te dar um bom ponto de partida para explorar a riqueza de dados que o SportsAPI Pro oferece!

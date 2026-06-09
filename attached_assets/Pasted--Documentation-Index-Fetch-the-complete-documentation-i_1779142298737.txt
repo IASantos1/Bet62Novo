@@ -1,0 +1,346 @@
+> ## Documentation Index
+> Fetch the complete documentation index at: https://docs.sportsapipro.com/llms.txt
+> Use this file to discover all available pages before exploring further.
+
+# Global, Search & Schedule Endpoints
+
+> V2 Football API: 33 endpoints for live scores, search, match schedules, trending events, countries, leagues, odds, fantasy, and news
+
+## Base URL
+
+```
+https://v2.football.sportsapipro.com
+```
+
+***
+
+## Live Data
+
+### Live Scores
+
+```bash theme={null}
+GET /api/live
+```
+
+Returns all currently live matches with **simplified flat format** — each event has string team names, integer scores, and a status string. **Use this as the primary source for discovering live match IDs.**
+
+<Accordion title="Example Response — /api/live">
+  ```json theme={null}
+  {
+    "success": true,
+    "count": 54,
+    "events": [
+      {
+        "id": 15269945,
+        "homeTeam": "Estudiantes de Río Cuarto",
+        "awayTeam": "Barracas Central",
+        "homeScore": 1,
+        "awayScore": 2,
+        "status": "2nd half",
+        "tournament": "Liga Profesional de Fútbol, Apertura",
+        "slug": "estudiantes-de-rio-cuarto-barracas-central",
+        "startTimestamp": 1775954700
+      }
+    ],
+    "timezone": { "name": "UTC", "source": "default", "utcOffset": "+00:00" }
+  }
+  ```
+</Accordion>
+
+<Note>
+  **Two response formats:** `/api/live` returns a **simplified flat format** (string team names, integer scores, status as a string). `/api/today` and `/api/schedule/{date}` return the **full detailed format** with nested team objects, score objects (`period1`, `period2`, `current`, `display`, `normaltime`), and detailed match metadata. Use the simplified format for quick score displays; use the full format when you need team IDs, colors, or period breakdowns.
+</Note>
+
+### All Live Events
+
+```bash theme={null}
+GET /api/live/all
+```
+
+Returns all live events unfiltered with full raw data (same structure as `/api/today`).
+
+### Today's Matches
+
+```bash theme={null}
+GET /api/today
+```
+
+Returns all matches scheduled for today across all competitions.
+
+### Trending Events
+
+```bash theme={null}
+GET /api/trending
+```
+
+Returns the top 20 events sorted by attendance and popularity — great for featuring "hot" matches.
+
+### Trending Players
+
+```bash theme={null}
+GET /api/trending-players
+```
+
+Returns currently trending players based on recent performance and media attention.
+
+### Live Tournaments
+
+```bash theme={null}
+GET /api/live-tournaments
+```
+
+Returns tournaments that currently have live matches in progress. Useful for building a sidebar of active competitions.
+
+### Newly Added Events
+
+```bash theme={null}
+GET /api/newly-added-events
+```
+
+Returns recently added fixtures that weren't previously in the schedule (e.g., rescheduled matches, cup draws).
+
+***
+
+## Search
+
+### Search All
+
+```bash theme={null}
+GET /api/search?q={query}
+```
+
+Search across teams, players, and tournaments simultaneously. Returns entity IDs that can be used with other endpoints.
+
+<ParamField query="q" type="string" required>
+  Search query (e.g., `arsenal`, `messi`, `premier league`). Minimum 2 characters.
+</ParamField>
+
+<Note>
+  This is the **primary way to discover entity IDs** for teams, players, and tournaments when you don't have them from another API call.
+</Note>
+
+<Accordion title="Example Response — /api/search?q=arsenal">
+  ```json theme={null}
+  {
+    "success": true,
+    "data": {
+      "results": [
+        {
+          "type": "team",
+          "score": 4923659,
+          "entity": {
+            "id": 42,
+            "name": "Arsenal",
+            "slug": "arsenal",
+            "shortName": "Arsenal",
+            "nameCode": "ARS",
+            "national": false,
+            "gender": "M",
+            "country": { "alpha2": "EN", "name": "England", "slug": "england" },
+            "sport": { "id": 1, "name": "Football", "slug": "football" },
+            "teamColors": { "primary": "#cc0000", "secondary": "#ffffff", "text": "#ffffff" },
+            "type": 0,
+            "userCount": 3303460
+          }
+        }
+      ]
+    }
+  }
+  ```
+</Accordion>
+
+<Info>
+  **Search result structure:** Each result has `type` (`"team"`, `"player"`, or `"tournament"`), a relevance `score`, and an `entity` object with the full details including the numeric `id` you need for other API calls.
+</Info>
+
+***
+
+## Schedule
+
+### Events by Date
+
+```bash theme={null}
+GET /api/schedule/{date}
+```
+
+Returns all matches for a specific date, grouped by tournament.
+
+<ParamField path="date" type="string" required>
+  Date in `YYYY-MM-DD` format (e.g., `2025-03-15`).
+</ParamField>
+
+### Scheduled Tournaments by Date
+
+```bash theme={null}
+GET /api/scheduled-tournaments/{date}?page={page}
+```
+
+Returns tournaments that have matches on a specific date — useful for building a competition filter. Supports pagination.
+
+<ParamField path="date" type="string" required>
+  Date in `YYYY-MM-DD` format.
+</ParamField>
+
+<ParamField query="page" type="number" default="1">
+  Page number for paginated results.
+</ParamField>
+
+### Event Count
+
+```bash theme={null}
+GET /api/event-count
+```
+
+Returns a global count of events across all sports and competitions.
+
+***
+
+## Countries & Categories
+
+### All Countries
+
+```bash theme={null}
+GET /api/countries
+```
+
+Returns all countries with basic info (name, code, flag URL).
+
+### All Countries (Extended)
+
+```bash theme={null}
+GET /api/countries/all
+```
+
+Returns all countries with subcategories and additional metadata.
+
+### Category Tournaments
+
+```bash theme={null}
+GET /api/categories/{categoryId}/tournaments
+```
+
+Returns all tournaments within a specific category (country or region).
+
+<ParamField path="categoryId" type="number" required>
+  Category ID from the countries endpoint.
+</ParamField>
+
+### Country Flag
+
+```bash theme={null}
+GET /api/country/{code}/flag
+```
+
+Returns the flag image URL for a country code.
+
+<ParamField path="code" type="string" required>
+  Two-letter country code in uppercase (e.g., `GB`, `US`, `DE`).
+</ParamField>
+
+***
+
+## Leagues
+
+### All Leagues
+
+```bash theme={null}
+GET /api/leagues?country={country}&refresh={refresh}
+```
+
+Returns all leagues grouped by country. Useful for building a competition browser.
+
+<ParamField query="country" type="string">
+  Optional country slug to filter leagues (e.g., `england`, `spain`).
+</ParamField>
+
+<ParamField query="refresh" type="boolean">
+  Set to `true` to bypass cache and get fresh data.
+</ParamField>
+
+### All Tournaments (Flat)
+
+```bash theme={null}
+GET /api/tournaments?refresh={refresh}
+```
+
+Returns all tournaments as a flat list (not grouped by country).
+
+### Tournament Seasons
+
+```bash theme={null}
+GET /api/tournaments/{id}/seasons
+```
+
+Returns all available seasons for a tournament. See [Tournament Endpoints](/api-reference/football-v2/tournament) for season-specific data.
+
+### Country Detection
+
+```bash theme={null}
+GET /api/country/detect
+```
+
+Returns the detected country based on the requester's IP address. Useful for geolocation-based content.
+
+***
+
+## Fantasy
+
+### Fantasy Competitions
+
+```bash theme={null}
+GET /api/fantasy/competitions
+```
+
+Returns a list of active fantasy competitions. Use the returned competition IDs for fantasy-specific endpoints.
+
+***
+
+## News
+
+### Sports News
+
+```bash theme={null}
+GET /api/news?lang={lang}
+```
+
+Returns the latest sports news articles.
+
+<ParamField query="lang" type="string" default="en">
+  Language code (e.g., `en`, `es`, `de`, `fr`, `pt`, `it`).
+</ParamField>
+
+***
+
+## Example Requests
+
+<CodeGroup>
+  ```bash cURL theme={null}
+  # Search for a team
+  curl -X GET "https://v2.football.sportsapipro.com/api/search?q=arsenal" \
+    -H "x-api-key: YOUR_API_KEY"
+
+  # Get today's schedule
+  curl -X GET "https://v2.football.sportsapipro.com/api/schedule/2025-03-15" \
+    -H "x-api-key: YOUR_API_KEY"
+  ```
+
+  ```javascript JavaScript theme={null}
+  // Search for a team
+  const results = await fetch(
+    'https://v2.football.sportsapipro.com/api/search?q=arsenal',
+    { headers: { 'x-api-key': 'YOUR_API_KEY' } }
+  ).then(r => r.json());
+  ```
+
+  ```python Python theme={null}
+  import requests
+
+  headers = {'x-api-key': 'YOUR_API_KEY'}
+
+  # Search for a team
+  results = requests.get(
+      'https://v2.football.sportsapipro.com/api/search?q=arsenal',
+      headers=headers
+  ).json()
+  ```
+</CodeGroup>

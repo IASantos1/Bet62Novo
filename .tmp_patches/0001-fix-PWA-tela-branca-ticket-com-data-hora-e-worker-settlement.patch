@@ -1,0 +1,394 @@
+From 229151d03210bae0b54794eb4d3b7d36690c04ab Mon Sep 17 00:00:00 2001
+From: traeagent <traeagent@users.noreply.github.com>
+Date: Mon, 8 Jun 2026 11:51:38 +0000
+Subject: [PATCH] fix: PWA tela branca, ticket com data/hora e worker
+ settlement
+
+---
+ artifacts/api-server/src/routes/matches.ts |  8 +--
+ artifacts/api-server/src/settlement.ts     | 30 ++++----
+ artifacts/bet62/index.html                 |  6 +-
+ artifacts/bet62/src/App.tsx                | 52 ++++++++++++--
+ artifacts/bet62/src/main.tsx               | 32 +++++++++
+ artifacts/bet62/src/pages/home.tsx         | 81 +++++++++++++++++++++-
+ 6 files changed, 178 insertions(+), 31 deletions(-)
+
+diff --git a/artifacts/api-server/src/routes/matches.ts b/artifacts/api-server/src/routes/matches.ts
+index a892e6a..98b1816 100644
+--- a/artifacts/api-server/src/routes/matches.ts
++++ b/artifacts/api-server/src/routes/matches.ts
+@@ -3148,8 +3148,8 @@ export async function scanDailyForFinished(): Promise<void> {
+       }
+     }
+     _pruneFinishedResults();
+-  } catch {
+-    // non-critical — settlement will retry on next cycle
++  } catch (err) {
++    logger.error({ err }, "scanDailyForFinished failed");
+   }
+ }
+ 
+@@ -5529,8 +5529,8 @@ export async function scanV2AllSportsForFinished(): Promise<void> {
+     }
+ 
+     _pruneFinishedResults();
+-  } catch {
+-    // non-critical — settlement will retry on next cycle
++  } catch (err) {
++    logger.error({ err }, "scanV2AllSportsForFinished failed");
+   }
+ }
+ 
+diff --git a/artifacts/api-server/src/settlement.ts b/artifacts/api-server/src/settlement.ts
+index 473ebf1..cf3358d 100644
+--- a/artifacts/api-server/src/settlement.ts
++++ b/artifacts/api-server/src/settlement.ts
+@@ -1486,26 +1486,24 @@ async function expireStalePendingBets(): Promise<void> {
+  * Fully independent of user sessions: runs server-side at all times.
+  */
+ export function startSettlementWorker(): void {
+-  const rawIntervalMs = process.env.SETTLEMENT_INTERVAL_MS ?? "15000";
+-  const intervalMs = Number(rawIntervalMs);
++  const parseMs = (raw: string | undefined, fallback: number, min: number, key: string): number => {
++    const n = Number(raw);
++    if (!Number.isFinite(n) || n < min) {
++      logger.error({ key, raw, fallback }, "Invalid worker interval env; using fallback");
++      return fallback;
++    }
++    return n;
++  };
+ 
+-  if (Number.isNaN(intervalMs) || intervalMs < 1_000) {
+-    throw new Error(`Invalid SETTLEMENT_INTERVAL_MS value: "${rawIntervalMs}"`);
+-  }
++  const rawIntervalMs = process.env.SETTLEMENT_INTERVAL_MS ?? "15000";
++  const intervalMs = parseMs(rawIntervalMs, 15_000, 1_000, "SETTLEMENT_INTERVAL_MS");
+ 
+   const rawInitialDelayMs = process.env.SETTLEMENT_INITIAL_DELAY_MS ?? "5000";
+-  const initialDelayMs = Number(rawInitialDelayMs);
+-
+-  if (Number.isNaN(initialDelayMs) || initialDelayMs < 0) {
+-    throw new Error(`Invalid SETTLEMENT_INITIAL_DELAY_MS value: "${rawInitialDelayMs}"`);
+-  }
++  const initialDelayMs = parseMs(rawInitialDelayMs, 5_000, 0, "SETTLEMENT_INITIAL_DELAY_MS");
+ 
+   const queueEnabled = typeof process.env["REDIS_URL"] === "string" && process.env["REDIS_URL"]!.trim() !== "";
+-  const rawCatchupMs = process.env.SETTLEMENT_CATCHUP_INTERVAL_MS ?? "300000";
+-  const catchupMs = Number(rawCatchupMs);
+-  if (Number.isNaN(catchupMs) || catchupMs < 10_000) {
+-    throw new Error(`Invalid SETTLEMENT_CATCHUP_INTERVAL_MS value: "${rawCatchupMs}"`);
+-  }
++  const rawCatchupMs = process.env.SETTLEMENT_CATCHUP_INTERVAL_MS ?? "60000";
++  const catchupMs = parseMs(rawCatchupMs, 60_000, 10_000, "SETTLEMENT_CATCHUP_INTERVAL_MS");
+   let lastCatchupAt = 0;
+ 
+   const run = async (): Promise<void> => {
+@@ -1540,5 +1538,5 @@ export function startSettlementWorker(): void {
+     void run().finally(schedule);
+   }, initialDelayMs);
+ 
+-  logger.info({ intervalMs }, "Bet auto-settlement worker started (self-scheduling, all sports)");
++  logger.info({ intervalMs, initialDelayMs, queueEnabled, catchupMs }, "Bet auto-settlement worker started (self-scheduling, all sports)");
+ }
+diff --git a/artifacts/bet62/index.html b/artifacts/bet62/index.html
+index fa082fe..99095ce 100644
+--- a/artifacts/bet62/index.html
++++ b/artifacts/bet62/index.html
+@@ -8,13 +8,13 @@
+     <meta name="robots" content="index, follow" />
+ 
+     <!-- PWA -->
+-    <link rel="manifest" href="/manifest.json" />
++    <link rel="manifest" href="%BASE_URL%manifest.json" />
+     <meta name="mobile-web-app-capable" content="yes" />
+     <meta name="apple-mobile-web-app-capable" content="yes" />
+     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+     <meta name="apple-mobile-web-app-title" content="Bet62" />
+     <meta name="theme-color" content="#dc2626" />
+-    <link rel="apple-touch-icon" href="/icon-192.svg" />
++    <link rel="apple-touch-icon" href="%BASE_URL%icon-192.svg" />
+ 
+     <!-- Open Graph -->
+     <meta property="og:title" content="Bet62 - Apostas Esportivas" />
+@@ -24,7 +24,7 @@
+     <meta name="twitter:title" content="Bet62 - Apostas Esportivas" />
+     <meta name="twitter:description" content="Plataforma de apostas esportivas ao vivo." />
+ 
+-    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
++    <link rel="icon" type="image/svg+xml" href="%BASE_URL%favicon.svg" />
+     <link rel="preconnect" href="https://fonts.googleapis.com">
+     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+diff --git a/artifacts/bet62/src/App.tsx b/artifacts/bet62/src/App.tsx
+index b3d1e13..e784c35 100644
+--- a/artifacts/bet62/src/App.tsx
++++ b/artifacts/bet62/src/App.tsx
+@@ -3,7 +3,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+ import { Toaster } from "@/components/ui/sonner";
+ import { TooltipProvider } from "@/components/ui/tooltip";
+ import { AuthProvider } from "@/hooks/use-auth";
+-import { useState, useEffect, lazy, Suspense } from "react";
++import { useState, useEffect, lazy, Suspense, Component, type ReactNode } from "react";
+ import NotFound from "@/pages/not-found";
+ import Home from "@/pages/home";
+ import SplashScreen from "@/components/SplashScreen";
+@@ -27,11 +27,51 @@ const queryClient = new QueryClient({
+   },
+ });
+ 
++class AppErrorBoundary extends Component<{ children: ReactNode }, { error: unknown | null }> {
++  state: { error: unknown | null } = { error: null };
++
++  static getDerivedStateFromError(error: unknown) {
++    return { error };
++  }
++
++  componentDidCatch(error: unknown) {
++    try { console.error("[app error]", error); } catch {}
++  }
++
++  render() {
++    if (this.state.error) {
++      return (
++        <div className="min-h-[100dvh] w-full flex items-center justify-center bg-zinc-950 text-white px-6">
++          <div className="max-w-md w-full rounded-2xl border border-zinc-800 bg-zinc-900/40 p-5">
++            <div className="text-lg font-black mb-2">O app não carregou</div>
++            <div className="text-sm text-zinc-400 mb-4">Toque para recarregar. Se continuar, limpe a cache do navegador/PWA.</div>
++            <button
++              className="w-full bg-red-600 hover:bg-red-500 text-white font-black text-sm rounded-xl py-3 transition-colors"
++              onClick={() => window.location.reload()}
++            >
++              Recarregar
++            </button>
++          </div>
++        </div>
++      );
++    }
++    return this.props.children;
++  }
++}
++
+ function Router() {
+   return (
+     <Switch>
+       <Route path="/" component={Home} />
+-      <Route path="/admin">{() => <Suspense fallback={null}><AdminPage /></Suspense>}</Route>
++      <Route path="/admin">{() => (
++        <Suspense fallback={
++          <div className="min-h-[100dvh] w-full flex items-center justify-center bg-zinc-950 text-white">
++            <div className="text-sm font-bold text-zinc-300">A carregar…</div>
++          </div>
++        }>
++          <AdminPage />
++        </Suspense>
++      )}</Route>
+       <Route component={NotFound} />
+     </Switch>
+   );
+@@ -54,9 +94,11 @@ function App() {
+       <QueryClientProvider client={queryClient}>
+         <AuthProvider>
+           <TooltipProvider>
+-            <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, "")}>
+-              <Router />
+-            </WouterRouter>
++            <AppErrorBoundary>
++              <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, "")}>
++                <Router />
++              </WouterRouter>
++            </AppErrorBoundary>
+             <Toaster theme="dark" richColors />
+           </TooltipProvider>
+         </AuthProvider>
+diff --git a/artifacts/bet62/src/main.tsx b/artifacts/bet62/src/main.tsx
+index 696e0d2..05ba492 100644
+--- a/artifacts/bet62/src/main.tsx
++++ b/artifacts/bet62/src/main.tsx
+@@ -2,4 +2,36 @@ import { createRoot } from "react-dom/client";
+ import App from "./App";
+ import "./index.css";
+ 
++const shouldReloadForMessage = (msg: string): boolean => {
++  const m = (msg ?? "").toLowerCase();
++  if (!m) return false;
++  if (m.includes("chunkloaderror")) return true;
++  if (m.includes("loading chunk")) return true;
++  if (m.includes("failed to fetch dynamically imported module")) return true;
++  if (m.includes("importing a module script failed")) return true;
++  return false;
++};
++
++const safeReloadOnce = (): void => {
++  try {
++    const key = "bet62_reload_once";
++    if (sessionStorage.getItem(key) === "1") return;
++    sessionStorage.setItem(key, "1");
++  } catch {}
++  window.location.reload();
++};
++
++window.addEventListener("error", (e) => {
++  const anyE = e as unknown as { message?: string; error?: any };
++  const msg = String(anyE?.message ?? anyE?.error?.message ?? "");
++  if (shouldReloadForMessage(msg)) safeReloadOnce();
++});
++
++window.addEventListener("unhandledrejection", (e) => {
++  const anyE = e as unknown as { reason?: any };
++  const reason = anyE?.reason;
++  const msg = String(reason?.message ?? reason ?? "");
++  if (shouldReloadForMessage(msg)) safeReloadOnce();
++});
++
+ createRoot(document.getElementById("root")!).render(<App />);
+diff --git a/artifacts/bet62/src/pages/home.tsx b/artifacts/bet62/src/pages/home.tsx
+index 3eb99d8..fb9a0b1 100644
+--- a/artifacts/bet62/src/pages/home.tsx
++++ b/artifacts/bet62/src/pages/home.tsx
+@@ -1221,6 +1221,13 @@ type Match = {
+ type BetSelection = {
+   matchId: string | number;
+   matchTitle: string;
++  league?: string;
++  country?: string;
++  sport?: string;
++  date?: string;
++  time?: string;
++  scheduledDate?: string;
++  scheduledTime?: string;
+   selection: string;
+   odd: number;
+   market?: string;
+@@ -1230,6 +1237,13 @@ type BetSelection = {
+ type StoredSelection = {
+   matchId?: string;
+   matchTitle: string;
++  league?: string;
++  country?: string;
++  sport?: string;
++  date?: string;
++  time?: string;
++  scheduledDate?: string;
++  scheduledTime?: string;
+   selection: string;
+   odd: number;
+   market?: string;
+@@ -3357,6 +3371,13 @@ export default function Home() {
+       return [...prev, {
+         matchId: match.id,
+         matchTitle: `${match.home} vs ${match.away}`,
++        league: match.league,
++        country: match.country,
++        sport: match.sport,
++        date: match.date,
++        time: match.time,
++        scheduledDate: (match as any).scheduledDate,
++        scheduledTime: (match as any).scheduledTime,
+         selection,
+         odd,
+         market,
+@@ -3552,7 +3573,21 @@ export default function Home() {
+             body: JSON.stringify({
+               matchId: String(bet.matchId),
+               matchTitle: bet.matchTitle,
+-              selections: [{ matchId: String(bet.matchId), matchTitle: bet.matchTitle, selection: bet.selection, odd: bet.odd, market: bet.market, label: bet.label || bet.selection }],
++              selections: [{
++                matchId: String(bet.matchId),
++                matchTitle: bet.matchTitle,
++                league: bet.league,
++                country: bet.country,
++                sport: bet.sport,
++                date: bet.date,
++                time: bet.time,
++                scheduledDate: bet.scheduledDate,
++                scheduledTime: bet.scheduledTime,
++                selection: bet.selection,
++                odd: bet.odd,
++                market: bet.market,
++                label: bet.label || bet.selection,
++              }],
+               stake: sNum.toFixed(2),
+               potentialWin,
+               totalOdds: bet.odd.toFixed(2),
+@@ -3585,7 +3620,21 @@ export default function Home() {
+         body: JSON.stringify({
+           matchId,
+           matchTitle,
+-          selections: bets.map(b => ({ matchId: String(b.matchId), matchTitle: b.matchTitle, selection: b.selection, odd: b.odd, market: b.market, label: b.label || b.selection })),
++          selections: bets.map(b => ({
++            matchId: String(b.matchId),
++            matchTitle: b.matchTitle,
++            league: b.league,
++            country: b.country,
++            sport: b.sport,
++            date: b.date,
++            time: b.time,
++            scheduledDate: b.scheduledDate,
++            scheduledTime: b.scheduledTime,
++            selection: b.selection,
++            odd: b.odd,
++            market: b.market,
++            label: b.label || b.selection,
++          })),
+           stake: stakeNum.toFixed(2),
+           potentialWin,
+           totalOdds,
+@@ -4562,6 +4611,12 @@ export default function Home() {
+             <AnimatePresence>
+               {bets.map((bet, betIdx) => {
+                 const isSusp = betSuspended[betIdx] === true;
++                const when = (() => {
++                  const d = bet.scheduledDate ?? bet.date;
++                  const t = bet.scheduledTime ?? bet.time;
++                  if (d && t) return `${d} • ${t}`;
++                  return t || d || null;
++                })();
+                 return (
+                   <motion.div
+                     key={`${bet.matchId}-${bet.market}-${bet.selection}`}
+@@ -4588,7 +4643,7 @@ export default function Home() {
+                       {/* Top row: sport/league + remove */}
+                       <div className="flex items-center justify-between mb-2">
+                         <span className="text-[10px] font-semibold uppercase tracking-wider truncate pr-2" style={{ color: "#dc2626" }}>
+-                          {bet.matchTitle.split(" vs ")[0]?.trim() || bet.matchTitle}
++                          {bet.league || bet.matchTitle.split(" vs ")[0]?.trim() || bet.matchTitle}
+                         </span>
+                         <button
+                           onClick={() => removeBet(bet.matchId, bet.market || "result", bet.selection)}
+@@ -4601,6 +4656,11 @@ export default function Home() {
+ 
+                       {/* Match title */}
+                       <div className="text-[11px] text-zinc-400 truncate mb-1.5">{bet.matchTitle}</div>
++                      {(bet.league || when) && (
++                        <div className="text-[10px] text-zinc-500 truncate mb-2">
++                          {[bet.league, when].filter(Boolean).join(" • ")}
++                        </div>
++                      )}
+ 
+                       {/* Selection + odd */}
+                       <div className="flex items-center justify-between">
+@@ -10829,6 +10889,21 @@ export default function Home() {
+                                         {i + 1}. {sel.matchTitle}
+                                       </div>
+                                       <div className={`text-[11px] mt-0.5 ${txtSub}`}>{getSelLabel(sel)}</div>
++                                      {(() => {
++                                        const when = (() => {
++                                          const d = (sel as any).scheduledDate ?? (sel as any).date;
++                                          const t = (sel as any).scheduledTime ?? (sel as any).time;
++                                          if (d && t) return `${d} • ${t}`;
++                                          return t || d || null;
++                                        })();
++                                        const lg = (sel as any).league as string | undefined;
++                                        if (!lg && !when) return null;
++                                        return (
++                                          <div className={`text-[10px] mt-0.5 ${txtSub} truncate`}>
++                                            {[lg, when].filter(Boolean).join(" • ")}
++                                          </div>
++                                        );
++                                      })()}
+                                       {/* Live / upcoming badge */}
+                                       {lm && lm.status !== "Not Started" && (lm.minute ?? 0) > 0 && (
+                                         <div className="flex items-center gap-2 mt-1.5 flex-wrap">
+-- 
+2.43.0
+

@@ -1,0 +1,169 @@
+> ## Documentation Index
+> Fetch the complete documentation index at: https://docs.sportsapipro.com/llms.txt
+> Use this file to discover all available pages before exploring further.
+
+# Manager, Referee & Venue Endpoints
+
+> V2 Football API: 10 endpoints for manager careers, referee statistics, and venue details
+
+## Base URL
+
+```
+https://v2.football.sportsapipro.com
+```
+
+<Info>
+  **Finding IDs:** Get manager, referee, and venue IDs from match details (`/api/match/{matchId}`). The response includes `referee.id`, `venue.id`, and manager data. You can also use `/api/match/{matchId}/managers` for manager IDs.
+</Info>
+
+***
+
+## Manager Endpoints
+
+### Manager Details
+
+```bash theme={null}
+GET /api/managers/{managerId}
+```
+
+Returns manager profile: name, nationality, age, date of birth, current team, and preferred formation.
+
+<ParamField path="managerId" type="number" required>
+  Numeric manager ID (e.g., `793451`). Discover from match details or match managers endpoint.
+</ParamField>
+
+### Manager Image
+
+```bash theme={null}
+GET /api/managers/{managerId}/image
+```
+
+Returns the manager's profile photo URL.
+
+### Manager Career
+
+```bash theme={null}
+GET /api/managers/{managerId}/career
+```
+
+Returns complete managerial career history: clubs managed, dates, win/loss/draw records, and trophies.
+
+### Manager Career History
+
+```bash theme={null}
+GET /api/managers/{managerId}/career-history
+```
+
+Returns full career history with teams and detailed performance stats. Provides more granular data than the `/career` endpoint.
+
+### Manager Last Events
+
+```bash theme={null}
+GET /api/managers/{managerId}/events/last/{page}
+```
+
+Returns recent matches managed, paginated with results and scores.
+
+<ParamField path="page" type="number" required>
+  Page number (0-indexed).
+</ParamField>
+
+### Manager Next Events
+
+```bash theme={null}
+GET /api/managers/{managerId}/events/next/{page}
+```
+
+Returns upcoming matches for the manager's current team, paginated.
+
+***
+
+## Referee Endpoints
+
+### Referee Details
+
+```bash theme={null}
+GET /api/referee/{refereeId}
+```
+
+Returns referee profile: name, nationality, age, and career stats summary.
+
+<ParamField path="refereeId" type="number" required>
+  Numeric referee ID. Discover from match details (`/api/match/{matchId}`).
+</ParamField>
+
+### Referee Image
+
+```bash theme={null}
+GET /api/referee/{refereeId}/image
+```
+
+Returns the referee's profile photo URL.
+
+### Referee Statistics
+
+```bash theme={null}
+GET /api/referee/{refereeId}/statistics
+```
+
+Returns referee statistics per tournament: matches officiated, cards given, penalties awarded.
+
+### Referee Last Events
+
+```bash theme={null}
+GET /api/referee/{refereeId}/events/last/{page}
+```
+
+Returns recent matches officiated by the referee, paginated.
+
+***
+
+## Venue Endpoints
+
+### Venue Details
+
+```bash theme={null}
+GET /api/venue/{venueId}
+```
+
+Returns venue information: name, city, country, capacity, surface type, coordinates, and photo.
+
+<ParamField path="venueId" type="number" required>
+  Numeric venue ID (e.g., `624` for Emirates Stadium). Discover from match details (`/api/match/{matchId}`) or team details.
+</ParamField>
+
+***
+
+## Example Requests
+
+<CodeGroup>
+  ```bash cURL theme={null}
+  # Get manager career
+  curl -X GET "https://v2.football.sportsapipro.com/api/managers/793451/career" \
+    -H "x-api-key: YOUR_API_KEY"
+
+  # Get venue details
+  curl -X GET "https://v2.football.sportsapipro.com/api/venue/624" \
+    -H "x-api-key: YOUR_API_KEY"
+  ```
+
+  ```javascript JavaScript theme={null}
+  // Get manager career
+  const career = await fetch(
+    'https://v2.football.sportsapipro.com/api/managers/793451/career',
+    { headers: { 'x-api-key': 'YOUR_API_KEY' } }
+  ).then(r => r.json());
+  ```
+
+  ```python Python theme={null}
+  import requests
+
+  headers = {'x-api-key': 'YOUR_API_KEY'}
+
+  # Get manager career
+  career = requests.get(
+      'https://v2.football.sportsapipro.com/api/managers/793451/career',
+      headers=headers
+  ).json()
+  ```
+</CodeGroup>

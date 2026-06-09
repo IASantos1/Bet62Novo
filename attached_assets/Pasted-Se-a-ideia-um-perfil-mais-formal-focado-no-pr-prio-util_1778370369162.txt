@@ -1,0 +1,69 @@
+Se a ideia é um perfil mais formal, focado no próprio utilizador (e não na casa de apostas), o conteúdo deve transmitir identidade, controlo e transparência pessoal, sem linguagem promocional. Pense nele quase como uma “área de gestão pessoal e conformidade”.
+
+Aqui vai uma estrutura sólida com descrições formais que pode usar:
+
+1. Informações Pessoais
+
+Descrição:
+
+Área destinada à gestão e atualização dos dados pessoais do utilizador, garantindo a exatidão e conformidade com os requisitos legais aplicáveis.
+
+2. Verificação de Identidade
+
+Descrição:
+
+Secção dedicada à validação da identidade do utilizador, assegurando a integridade da conta e o cumprimento das normas regulamentares.
+
+3. Definições de Segurança
+
+Descrição:
+
+Espaço para configuração de medidas de proteção da conta, incluindo autenticação e controlo de acessos.
+
+4. Preferências de Conta
+
+Descrição:
+
+Permite ao utilizador personalizar definições gerais da conta de acordo com as suas preferências individuais.
+
+5. Limites de Utilização
+
+Descrição:
+
+Área destinada à definição e gestão de limites pessoais relacionados com a utilização da conta, promovendo uma experiência controlada e responsável.
+
+6. Histórico de Atividade
+
+Descrição:
+
+Registo detalhado das atividades associadas à conta do utilizador, para fins de acompanhamento e consulta.
+
+7. Métodos de Pagamento
+
+Descrição:
+
+Secção para gestão dos métodos financeiros associados à conta, incluindo adição, remoção e atualização de dados.
+
+8. Notificações
+
+Descrição:
+
+Configuração das preferências de comunicação e alertas relacionados com a conta do utilizador.
+
+9. Sessões Ativas
+
+Descrição:
+
+Visualização e controlo das sessões atualmente iniciadas, permitindo ao utilizador encerrar acessos não reconhecidos.
+
+10. Suporte e Assistência
+
+Descrição:
+
+Acesso a recursos de apoio e canais de contacto para esclarecimento de dúvidas relacionadas com a conta.
+
+11. Configurações de Privacidade
+
+Descrição:
+
+Gestão das preferências relativas ao tratamento e proteção dos dados pessoais do utilizador.

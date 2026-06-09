@@ -1,0 +1,64 @@
+Para obter mercados de odds para os esportes que você mencionou, você usaria os endpoints específicos de cada esporte. A estrutura geral é a mesma, mas o subdomínio e os IDs podem mudar.
+
+Aqui estão os endpoints comuns para odds por esporte:
+
+⚽ Futebol (Football)
+Base URL: https://v2.football.sportsapipro.com
+Odds em destaque: GET /api/match/:matchId/odds
+Todas as odds: GET /api/match/:matchId/odds/all
+Odds pré-jogo: GET /api/match/:matchId/odds/pre-match
+Odds ao vivo: GET /api/match/:matchId/odds/live
+Probabilidade de vitória: GET /api/match/:matchId/winning-odds
+Exemplo em cURL (Futebol - Todas as Odds):
+
+
+curl -X GET "https://v2.football.sportsapipro.com/api/match/4609057/odds/all" \
+  -H "x-api-key: [redacted]
+🏀 Basquete (Basketball)
+Base URL: https://v2.basketball.sportsapipro.com
+Odds de um jogo: GET /api/game/:gameId/odds
+Linhas de apostas de um jogo: GET /api/game/:gameId/lines
+Tendências de odds de um jogo: GET /api/game/:gameId/trends
+Exemplo em cURL (Basquete - Odds de um jogo):
+
+
+curl -X GET "https://v2.basketball.sportsapipro.com/api/game/123456/odds" \
+  -H "x-api-key: [redacted]
+🎾 Tênis (Tennis)
+Base URL: https://v2.tennis.sportsapipro.com
+Odds de uma partida: GET /api/match/:matchId/odds
+Linhas de apostas de uma partida: GET /api/match/:matchId/lines
+Exemplo em cURL (Tênis - Odds de uma partida):
+
+
+curl -X GET "https://v2.tennis.sportsapipro.com/api/match/789012/odds" \
+  -H "x-api-key: [redacted]
+🏒 Hóquei no Gelo (Ice Hockey)
+Base URL: https://v2.icehockey.sportsapipro.com
+Odds de um jogo: GET /api/game/:gameId/odds
+Linhas de apostas de um jogo: GET /api/game/:gameId/lines
+Exemplo em cURL (Hóquei no Gelo - Odds de um jogo):
+
+
+curl -X GET "https://v2.icehockey.sportsapipro.com/api/game/345678/odds" \game/:gameId/odds`
+*   **Linhas de apostas de um jogo:** `GET /api/game/:gameId/lines`
+
+**Exemplo em cURL (Beisebol - Odds de um jogo):**
+```bash
+curl -X GET "https://v2.baseball.sportsapipro.com/api/game/901234/odds" \
+  -H "x-api-key: [redacted]
+🏐 Voleibol (Volleyball)
+Base URL: https://v2.volleyball.sportsapipro.com
+Odds de uma partida: GET /api/match/:matchId/odds
+Linhas de apostas de uma partida: GET /api/match/:matchId/lines
+Exemplo em cURL (Voleibol - Odds de uma partida):
+
+
+curl -X GET "https://v2.volleyball.sportsapipro.com/api/match/567890/odds" \
+  -H "x-api-key: [redacted]
+Observações importantes:
+
+Sempre substitua YOUR_API_KEY pela sua chave de API real.
+Substitua :matchId ou :gameId pelo ID da partida/jogo específico que você deseja consultar. Você pode obter esses IDs de outros endpoints, como games/allscores, games/fixtures ou schedule.
+A disponibilidade de odds pré-jogo, ao vivo e outros tipos pode variar dependendo do esporte e da cobertura da partida.
+Alguns endpoints podem ter parâmetros adicionais como topBookmaker para filtrar por uma casa de apostas específica. Consulte a documentação para detalhes.

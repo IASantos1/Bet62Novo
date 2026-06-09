@@ -1,0 +1,84 @@
+Para Beisebol, a SportsAPI Pro oferece mercados de odds que se concentram nos resultados da partida, corridas e handicaps, refletindo a natureza do esporte. A metodologia para integrar esses dados é consistente: faça uma requisição ao endpoint de odds do beisebol e processe a estrutura JSON.
+
+Base URL: https://v2.baseball.sportsapipro.com
+Endpoint de Odds: GET /api/game/:gameId/odds
+Endpoint de Linhas de Apostas: GET /api/game/:gameId/lines
+Aqui estão os mercados de odds mais comuns e populares que você provavelmente encontrará na API para Beisebol:
+
+Mercados Comuns e Populares em Beisebol:
+
+Moneyline (Vencedor da Partida):
+
+Time da Casa para Vencer
+Time Visitante para Vencer
+Este é o mercado mais básico, onde você aposta em qual time vencerá o jogo. No beisebol, a Moneyline geralmente inclui entradas extras.
+Run Line (Handicap de Corridas):
+
+Time da Casa com Handicap (ex: -1.5 corridas)
+Time Visitante com Handicap (ex: +1.5 corridas)
+Similar ao "Puck Line" no hóquei ou "Spread" no basquete. O -1.5 é o mais comum, significando que o time favorito precisa vencer por 2 ou mais corridas.
+Total Runs Over/Under (Total de Corridas Acima/Abaixo):
+
+Mais de X corridas (ex: Over 8.5 corridas)
+Menos de X corridas (ex: Under 8.5 corridas)
+Refere-se ao total combinado de corridas marcadas por ambas as equipes no jogo (geralmente incluindo entradas extras).
+Total Runs da Equipe Over/Under (Team Total Runs Over/Under):
+
+Mais de X corridas para o Time da Casa
+Menos de X corridas para o Time da Casa
+Mais de X corridas para o Time Visitante
+Menos de X corridas para o Time Visitante
+First 5 Innings Moneyline (Vencedor das Primeiras 5 Entradas):
+
+Time da Casa para Vencer as Primeiras 5 Entradas
+Time Visitante para Vencer as Primeiras 5 Entradas
+Empate nas Primeiras 5 Entradas
+Este mercado foca apenas no resultado após as cinco primeiras entradas.
+First 5 Innings Run Line (Handicap de Corridas nas Primeiras 5 Entradas):
+
+Handicap de corridas aplicado apenas às cinco primeiras entradas.
+First 5 Innings Total Runs Over/Under (Total de Corridas nas Primeiras 5 Entradas Acima/Abaixo):
+
+Over/Under corridas apenas para as cinco primeiras entradas.
+Odd/Even Runs (Ímpar/Par de Corridas):
+
+Total de corridas do jogo será ímpar ou par.
+Primeira Equipe a Marcar (First Team to Score):
+
+Time da Casa
+Time Visitante
+Para Marcar na 1ª Entrada (To Score in 1st Inning):
+
+Sim (Pelo menos uma corrida será marcada na 1ª entrada)
+Não (Nenhuma corrida será marcada na 1ª entrada)
+Mercados de Jogadores (Player Props):
+
+Total de Bases do Jogador (Over/Under)
+Total de Home Runs do Jogador (Over/Under)
+Total de Strikeouts do Arremessador (Over/Under)
+Nota: A disponibilidade desses mercados pode ser mais limitada e geralmente aparece para jogos de alto perfil.
+Como Identificar e Configurar (Beisebol):
+
+Faça a requisição:
+
+
+curl -X GET "https://v2.baseball.sportsapipro.com/api/game/:gameId/odds" \
+  -H "x-api-key: [redacted]]]]]
+Analise a resposta JSON: Percorra a lista de bookmakers e, dentro de cada um, a lista de markets.
+
+Use market.name e outcome.name: Para identificar os mercados específicos.
+
+Exemplo de Mapeamento para Beisebol:
+
+Mercado Comum	market.name Típico	outcome.name Típico
+Moneyline	"Moneyline", "Match Winner"	"Home", "Away"
+Run Line	"Run Line", "Handicap"	"Home -X.Y", "Away +X.Y"
+Total Runs Over/Under	"Total Runs Over/Under"	"Over X.Y", "Under X.Y"
+Total Runs da Equipe	"Team Total Runs Over/Under"	"Home Over X.Y", "Home Under X.Y", "Away Over X.Y", "Away Under X.Y"
+First 5 Innings Moneyline	"First 5 Innings Moneyline"	"Home", "Away", "Draw"
+First 5 Innings Run Line	"First 5 Innings Run Line"	"Home -X.Y", "Away +X.Y"
+First 5 Innings Total Runs	"First 5 Innings Total Runs Over/Under"	"Over X.Y", "Under X.Y"
+Odd/Even Runs	"Total Runs Odd/Even"	"Odd", "Even"
+Primeira Equipe a Marcar	"First Team to Score"	"Home", "Away"
+Para Marcar na 1ª Entrada	"To Score in 1st Inning", "1st Inning Run"	"Yes", "No"
+Como sempre, os nomes exatos podem ter pequenas variações entre os provedores de odds, mas esses são os termos mais comuns que você encontrará para os mercados de beisebol.

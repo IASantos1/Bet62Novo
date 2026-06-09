@@ -1,0 +1,107 @@
+
+
+Canvas
+
+Bet62 - Apostas Esportivas
+
+
+
+/
+
+
+feat: send deposit confirmation email when payment is confirmed.
+
+
+
+Show previous messages
+
+6 messages & 23 actions
+
+Worked for 7 minutes
+Samuelsantosalves275 started: Enviar notificações por e-mail ao aprovar/rejeitar levantamentos
+no login pede email nao user E-mail
+admin
+Senha ai nao da para colocar admin so email
+
+43 minutes ago
+
+2 messages & 3 actions
+
+Checkpoint made
+43 minutes ago
+
+Worked for 26 seconds
+
+Attached Image
+Aparece essa mensagem
+
+40 minutes ago
+
+1 task started, 1 completed
+
+1 message & 2 actions
+
+Checkpoint made
+40 minutes ago
+
+1 message & 1 action
+exclui todos senhas e logins e cria outra pois esta dando credencial errada
+
+31 minutes ago
+
+4 messages & 9 actions
+
+Worked for 41 seconds
+
+1 task started, 1 completed
+Updated environment
+
+Checkpoint made
+26 minutes ago
+
+Pasted--PAINEL-ADMINISTRADOR-PROFISSIONAL-CASA-DE-APOSTAS-Um-p_1778614480105.txt
+precisamos disso
+
+21 minutes ago
+Samuelsantosalves275 completed: Relatório financeiro exportável (CSV) para o admin
+
+Restarting API server, then planning features (15 seconds)
+Samuelsantosalves275 started: Notificar utilizadores por e-mail quando um depósito é confirmado
+
+1 message & 2 actions
+
+Checkpoint made
+20 minutes ago
+
+16 messages & 69 actions
+
+Worked for 13 minutes
+Completed: Notificar utilizadores por e-mail quando um depósito é confirmado
+Updated environment
+Started: Permitir ao admin enviar mensagens diretas aos utilizadores
+
+Checkpoint made
+7 minutes ago
+no painel nao esta aparecendo essas opçaos
+
+2 minutes ago
+
+Analyzing API server status
+Vou verificar o que aconteceu com o servidor e os logs:
+
+
+2 actions
+O servidor da API caiu por conflito de porta. Vou matar o processo e reiniciar:
+
+
+6 actions
+O servidor está a funcionar. Vou confirmar que os novos separadores aparecem após o login:
+
+
+2 actions
+O servidor estava em baixo — já está a funcionar novamente. O problema era um conflito de porta depois da última reinicialização. Os novos separadores estão todos no painel.
+
+Precisa de atualizar a página do admin e fazer login novamente. Após entrar vai ver na barra lateral dois grupos:
+
+Operações (existentes):
+

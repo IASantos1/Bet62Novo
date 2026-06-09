@@ -1,0 +1,270 @@
+> ## Documentation Index
+> Fetch the complete documentation index at: https://docs.sportsapipro.com/llms.txt
+> Use this file to discover all available pages before exploring further.
+
+# Troubleshooting
+
+> Common issues and solutions for SportsAPI Pro
+
+# Troubleshooting Guide
+
+This guide addresses common issues you may encounter when using SportsAPI Pro.
+
+***
+
+## Empty or Missing Data
+
+### "Match statistics are empty"
+
+**Symptom:** `/api/match/{matchId}/statistics` returns empty or minimal data
+
+**Cause:** Statistics are only populated during and after a match. Pre-match requests return empty objects. Additionally, stat types with zero values are omitted to reduce response size.
+
+**Solution:** Always check if the data exists before accessing:
+
+```javascript theme={null}
+const response = await fetch(
+  'https://v2.football.sportsapipro.com/api/match/12345678/statistics',
+  { headers: { 'x-api-key': 'YOUR_API_KEY' } }
+);
+const data = await response.json();
+
+// Safe way to extract statistics
+const stats = data?.statistics || [];
+
+// Check if match has statistics available
+if (stats.length === 0) {
+  console.log('Statistics not yet available — match may not have started.');
+}
+```
+
+<Info>
+  Statistics are populated live during matches and finalized post-match. Pre-match requests will return empty data — this is expected behavior.
+</Info>
+
+***
+
+### "Top players endpoint returns empty"
+
+**Symptom:** `/api/tournaments/{tournamentId}/seasons/{seasonId}/top-players` returns empty data
+
+**Cause:** The tournament/season combination doesn't have player ranking data available. This occurs for leagues outside the Premium and Full coverage tiers, or for cup competitions.
+
+**Solution:**
+
+1. Use `/top-players` only for major league competitions
+2. Verify you have the correct `tournamentId` and `seasonId`:
+
+```javascript theme={null}
+// Step 1: Get available seasons for a tournament
+const seasons = await fetch(
+  'https://v2.football.sportsapipro.com/api/tournaments/7/seasons',
+  { headers: { 'x-api-key': 'YOUR_API_KEY' } }
+).then(r => r.json());
+
+// Step 2: Use the latest season ID
+const latestSeason = seasons.seasons[0];
+
+// Step 3: Fetch top players with valid IDs
+const topPlayers = await fetch(
+  `https://v2.football.sportsapipro.com/api/tournament/7/season/${latestSeason.id}/top-players`,
+  { headers: { 'x-api-key': 'YOUR_API_KEY' } }
+).then(r => r.json());
+```
+
+**Tournaments with guaranteed top player data:**
+
+* Premier League (ID: 7)
+* La Liga (ID: 11)
+* Bundesliga (ID: 25)
+* Serie A (ID: 17)
+* Ligue 1 (ID: 35)
+* Champions League (ID: 572)
+* Europa League (ID: 573)
+
+***
+
+### "Lineups missing detailed metrics"
+
+**Symptom:** `/api/match/{matchId}/lineups` returns fewer stats than expected (e.g., no xG, limited passing data)
+
+**Cause:** Standard coverage leagues only include basic statistics. Detailed metrics like xG, tackles, and interceptions are only available for Premium tier competitions.
+
+**Solution:** For detailed metrics, query matches from Premium Coverage competitions:
+
+```javascript theme={null}
+// Premium tier competitions have 40+ stat types
+const premiumTournaments = [7, 11, 17, 25, 35, 572, 573];
+
+// Check if the match's tournament is premium before expecting detailed data
+const matchDetails = await fetch(
+  'https://v2.football.sportsapipro.com/api/match/12345678',
+  { headers: { 'x-api-key': 'YOUR_API_KEY' } }
+).then(r => r.json());
+
+const tournamentId = matchDetails?.event?.tournament?.uniqueTournament?.id;
+const hasDetailedStats = premiumTournaments.includes(tournamentId);
+
+if (hasDetailedStats) {
+  // Fetch detailed lineups — will include xG, tackles, interceptions, etc.
+  const lineups = await fetch(
+    'https://v2.football.sportsapipro.com/api/match/12345678/lineups',
+    { headers: { 'x-api-key': 'YOUR_API_KEY' } }
+  ).then(r => r.json());
+}
+```
+
+***
+
+## Data Coverage Questions
+
+### "Why do some leagues have less data?"
+
+Data completeness varies by competition tier due to data coverage levels:
+
+| Tier         | Example Competitions                       | Available Data                                |
+| ------------ | ------------------------------------------ | --------------------------------------------- |
+| **Premium**  | Premier League, La Liga, Champions League  | 40+ player metrics, xG, shotmaps, AI insights |
+| **Full**     | Eredivisie, Turkish Süper Lig, MLS         | 20+ metrics, basic xG, top player rankings    |
+| **Standard** | Greek Super League, lower domestic leagues | Basic stats, scores, lineups                  |
+| **Basic**    | Minor divisions, friendlies                | Scores and key events only                    |
+
+<Warning>
+  **Cup vs League Competitions**: The `/api/tournament/{id}/season/{seasonId}/top-players` endpoint returns player rankings only for **league competitions** (seasonal cumulative stats). Cup competitions like Champions League, FA Cup, Copa del Rey may return empty results — use `/api/match/{matchId}/lineups` for match-level stats instead.
+</Warning>
+
+<Tip>
+  See our [API Reference Overview](/api-reference/overview) for a complete breakdown of available endpoints and sports coverage.
+</Tip>
+
+***
+
+### "How do I know what data is available for a tournament?"
+
+Use the tournament detail and seasons endpoints to explore what's available:
+
+```javascript theme={null}
+// Get tournament details
+const tournament = await fetch(
+  'https://v2.football.sportsapipro.com/api/tournaments/7/seasons',
+  { headers: { 'x-api-key': 'YOUR_API_KEY' } }
+).then(r => r.json());
+
+console.log({
+  seasons: tournament.seasons,  // All available seasons
+});
+
+// Check if standings are available for a specific season
+const standings = await fetch(
+  'https://v2.football.sportsapipro.com/api/tournament/7/season/52162/standings',
+  { headers: { 'x-api-key': 'YOUR_API_KEY' } }
+).then(r => r.json());
+
+console.log({
+  hasStandings: !!standings?.standings,
+});
+```
+
+***
+
+### "404 on `/api/tournament/{id}/matches/{year}`"
+
+**Symptom:** Requests like `/api/tournament/242/matches/2024` or `/api/tournament/17/matches/24-25` return 404.
+
+**Cause:** There is no `/matches/{year}` shortcut. Season-scoped endpoints require a numeric `seasonId` resolved from `/api/tournaments/{id}/seasons` — never the human-readable year string. This trips up calendar-year leagues (MLS, Brazilian Série A) most often because `"2024"` *looks* like a valid path segment.
+
+**Solution:** Resolve the season first, then call the season-scoped endpoint:
+
+```javascript theme={null}
+const headers = { 'x-api-key': 'YOUR_API_KEY' };
+const base = 'https://v2.football.sportsapipro.com';
+
+// 1. Get the numeric seasonId
+const { seasons } = await fetch(
+  `${base}/api/tournaments/242/seasons`, { headers }
+).then(r => r.json());
+const seasonId = seasons[0].id; // e.g. 61644 — NOT "2024"
+
+// 2. Use it in the path
+const matches = await fetch(
+  `${base}/api/tournament/242/season/${seasonId}/events/last/0`, { headers }
+).then(r => r.json());
+```
+
+<Tip>
+  See the [Season IDs guide](/api-reference/football-v2/season-ids) for full split-year vs calendar-year worked examples and a historical-match recipe.
+</Tip>
+
+***
+
+## Authentication Issues
+
+### "401 Unauthorized"
+
+**Cause:** Missing or invalid API key.
+
+**Solution:**
+
+1. Verify your API key is correct (check for typos)
+2. Ensure you're using the `x-api-key` header (not `Authorization`)
+3. Check your API key hasn't expired
+
+```bash theme={null}
+# Correct header format
+curl -X GET "https://v2.football.sportsapipro.com/api/live" \
+  -H "x-api-key: YOUR_API_KEY"
+```
+
+### "403 Forbidden"
+
+**Cause:** Your subscription doesn't include access to this endpoint or you've exceeded your daily limit.
+
+**Solution:**
+
+1. Check your plan's included endpoints
+2. Verify your daily request quota
+3. Upgrade your plan if needed
+
+***
+
+## Rate Limiting
+
+### "429 Too Many Requests"
+
+**Cause:** You've exceeded the rate limit for your plan.
+
+**Solution:**
+
+1. Implement exponential backoff
+2. Cache responses where possible
+3. Use efficient polling patterns
+
+```javascript theme={null}
+// Exponential backoff example
+async function fetchWithRetry(url, options, maxRetries = 3) {
+  for (let i = 0; i < maxRetries; i++) {
+    const response = await fetch(url, options);
+    
+    if (response.status === 429) {
+      const waitTime = Math.pow(2, i) * 1000; // 1s, 2s, 4s
+      await new Promise(resolve => setTimeout(resolve, waitTime));
+      continue;
+    }
+    
+    return response;
+  }
+  throw new Error('Max retries exceeded');
+}
+```
+
+<Tip>
+  See our [Rate Limits](/rate-limits) documentation for plan-specific limits and optimization strategies.
+</Tip>
+
+***
+
+## Still Need Help?
+
+<Card title="Email Support" icon="envelope" href="mailto:support@sportsapipro.com">
+  Contact our support team for personalized assistance
+</Card>

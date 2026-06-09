@@ -1,0 +1,197 @@
+> ## Documentation Index
+> Fetch the complete documentation index at: https://docs.sportsapipro.com/llms.txt
+> Use this file to discover all available pages before exploring further.
+
+# One-Time ID Migration Guide
+
+> Build a name → id mapping table from /search results when migrating from another sports data provider
+
+## Why migrate IDs
+
+Entity IDs in SportsAPI Pro (players, teams, tournaments, countries) are **not portable** from other providers. If you previously used a different sports data API and stored their IDs, those IDs will not resolve against our endpoints — image and data calls will return `404`.
+
+The fix is a one-time migration: walk your existing entity names through `/search`, collect the canonical SportsAPI Pro IDs, and store them in a mapping table you control.
+
+<Info>
+  This guide uses football examples, but the same flow works for every sport — just call the corresponding sport subdomain (e.g. `v2.basketball.sportsapipro.com`).
+</Info>
+
+***
+
+## Step 1 — Export your existing names
+
+Pull the names you currently store. CSV is fine; so is a SQL export.
+
+```sql theme={null}
+-- Example: Postgres
+COPY (
+  SELECT id AS legacy_id, name, entity_type
+  FROM legacy_entities
+) TO '/tmp/legacy_entities.csv' WITH CSV HEADER;
+```
+
+You should end up with rows like:
+
+```
+legacy_id, name,                entity_type
+30981,     Lionel Messi,        player
+44835,     Erling Haaland,      player
+49,        FA Cup,              tournament
+131,       FC Barcelona,        team
+```
+
+## Step 2 — Call `/search` for each name
+
+For every row, call:
+
+```bash theme={null}
+GET https://v1.football.sportsapipro.com/search?query={name}&filter={all|athletes|competitors|competitions}
+```
+
+<Warning>
+  **Respect the rate limit.** Throttle to roughly **5 requests/second** with a small jitter, and debounce duplicate names client-side. A 10k-row migration finishes in well under an hour at 5 rps.
+</Warning>
+
+## Step 3 — Pick the right result type
+
+The response contains separate arrays — read the one matching the entity type:
+
+| Entity in your DB   | Read from response   | Store as canonical ID  |
+| ------------------- | -------------------- | ---------------------- |
+| Player              | `athletes[0].id`     | `athlete_id`           |
+| Team / club         | `competitors[0].id`  | `competitor_id`        |
+| Tournament / league | `competitions[0].id` | `unique_tournament_id` |
+| Country             | `countries[0].id`    | `country_id`           |
+
+<Warning>
+  For tournaments, **always store `competitions[].id` (the canonical league ID)** — never the per-season `tournament.id` returned from match endpoints. See [Canonical IDs](/api-reference/football-v2/canonical-ids) for the full explanation.
+</Warning>
+
+## Step 4 — Disambiguate common names
+
+A query like `Barcelona` returns multiple competitors:
+
+```json theme={null}
+{
+  "competitors": [
+    { "id": 131,  "name": "Barcelona",    "countryId": 2,  "popularityRank": 98500000 },
+    { "id": 5432, "name": "Barcelona SC", "countryId": 35, "popularityRank": 125000 }
+  ]
+}
+```
+
+Two reliable disambiguation strategies:
+
+1. **Rank by `popularityRank` descending** — the highest value is almost always the household-name entity.
+2. **Match on `countryId`** — if your legacy row carries country, filter to it before picking.
+
+Flag rows where the top result is more than 10× ahead of #2 as auto-confident; everything else goes into a manual review queue.
+
+## Step 5 — Persist to a mapping table
+
+```sql theme={null}
+CREATE TABLE entity_id_map (
+  legacy_id        TEXT NOT NULL,
+  entity_type      TEXT NOT NULL,           -- 'player' | 'team' | 'tournament' | 'country'
+  canonical_id     BIGINT NOT NULL,         -- SportsAPI Pro ID
+  canonical_name   TEXT NOT NULL,
+  confidence       TEXT NOT NULL,           -- 'auto' | 'manual'
+  migrated_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (legacy_id, entity_type)
+);
+
+CREATE INDEX ON entity_id_map (entity_type, canonical_id);
+```
+
+## Step 6 — Switch your app over and verify
+
+Update your read paths to JOIN through `entity_id_map`. Then verify with the image endpoint — it's the cheapest sanity check:
+
+```bash theme={null}
+# If this returns 200, the canonical ID is good.
+curl -I "https://v2.football.sportsapipro.com/images/players/{canonical_id}" \
+  -H "x-api-key: YOUR_API_KEY"
+```
+
+A `404` here means the canonical ID is wrong — re-run search for that row.
+
+***
+
+## Starter script — Node.js
+
+```javascript theme={null}
+import fs from "node:fs";
+
+const API_KEY = process.env.SPORTSAPI_KEY;
+const SLEEP   = (ms) => new Promise((r) => setTimeout(r, ms));
+
+const filterFor = { player: "athletes", team: "competitors", tournament: "competitions" };
+const arrayFor  = { player: "athletes", team: "competitors", tournament: "competitions" };
+
+const rows = fs.readFileSync("legacy_entities.csv", "utf8")
+  .trim().split("\n").slice(1)
+  .map((l) => { const [legacy_id, name, entity_type] = l.split(","); return { legacy_id, name, entity_type }; });
+
+const out = [];
+for (const row of rows) {
+  const url = `https://v1.football.sportsapipro.com/search?query=${encodeURIComponent(row.name)}&filter=${filterFor[row.entity_type]}`;
+  const res = await fetch(url, { headers: { "x-api-key": API_KEY } });
+  const data = await res.json();
+  const hit  = (data[arrayFor[row.entity_type]] || []).sort((a, b) => (b.popularityRank || 0) - (a.popularityRank || 0))[0];
+  out.push({ ...row, canonical_id: hit?.id ?? null, canonical_name: hit?.name ?? null });
+  await SLEEP(220); // ~4.5 rps
+}
+
+fs.writeFileSync("entity_id_map.json", JSON.stringify(out, null, 2));
+console.log(`Mapped ${out.filter((r) => r.canonical_id).length}/${out.length}`);
+```
+
+## Starter script — Python
+
+```python theme={null}
+import csv, json, os, time, requests
+
+API_KEY = os.environ["SPORTSAPI_KEY"]
+FILTER  = {"player": "athletes", "team": "competitors", "tournament": "competitions"}
+
+def lookup(name, entity_type):
+    r = requests.get(
+        "https://v1.football.sportsapipro.com/search",
+        params={"query": name, "filter": FILTER[entity_type]},
+        headers={"x-api-key": API_KEY},
+        timeout=10,
+    )
+    r.raise_for_status()
+    hits = r.json().get(FILTER[entity_type], [])
+    return max(hits, key=lambda h: h.get("popularityRank", 0)) if hits else None
+
+out = []
+with open("legacy_entities.csv") as f:
+    for row in csv.DictReader(f):
+        hit = lookup(row["name"], row["entity_type"])
+        out.append({**row, "canonical_id": hit and hit["id"], "canonical_name": hit and hit["name"]})
+        time.sleep(0.22)  # ~4.5 rps
+
+with open("entity_id_map.json", "w") as f:
+    json.dump(out, f, indent=2)
+
+print(f"Mapped {sum(1 for r in out if r['canonical_id'])}/{len(out)}")
+```
+
+***
+
+## Common pitfalls
+
+<Warning>
+  **Don't store `tournament.id`** from match endpoints — it changes every season. Store `uniqueTournament.id` (returned as `competitions[].id` in `/search`). See [Canonical IDs](/api-reference/football-v2/canonical-ids).
+</Warning>
+
+* **Don't trust the first result blindly** for short or generic names — always sort by `popularityRank` or filter by `countryId`.
+* **Don't migrate via the image endpoint.** Image `404` confirms a bad ID but won't tell you the right one. `/search` is the discovery tool.
+* **Cache `/search` responses** during migration — duplicate names are common.
+
+## Related
+
+* [Search endpoint reference](/api-reference/search/search)
+* [Canonical IDs (uniqueTournament.id vs tournament.id)](/api-reference/football-v2/canonical-ids)
+* [Image endpoint troubleshooting](/api-reference/images)

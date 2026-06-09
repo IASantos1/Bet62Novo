@@ -1,0 +1,31 @@
+kind = "web"
+previewPath = "/"
+title = "Bet62 - Apostas Esportivas"
+version = "1.0.0"
+id = "artifacts/bet62"
+router = "path"
+
+[[integratedSkills]]
+name = "react-vite"
+version = "1.0.0"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 19983
+
+[services.development]
+run = "pnpm --filter @workspace/bet62 run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/bet62", "run", "build" ]
+publicDir = "artifacts/bet62/dist/public"
+serve = "static"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "19983"
+BASE_PATH = "/"

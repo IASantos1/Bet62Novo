@@ -1,0 +1,257 @@
+⚙️ CONFIGURAÇÃO PROFISSIONAL DE BLOQUEIO POR MERCADO (GOL AO VIVO)
+
+Agora vamos criar a lógica correta de:
+
+⚽ GOL MARCADO
+🔒 quais mercados bloqueiam
+⏱ quanto tempo ficam suspensos
+🔁 quando reabrem
+🧠 quais recalculam odds
+
+Isso é exatamente como sportsbooks operam.
+
+🧠 REGRA PRINCIPAL
+
+Quando sai um gol:
+
+GOAL EVENT
+    ↓
+SUSPEND MARKETS
+    ↓
+UPDATE GAME STATE
+    ↓
+RECALCULATE ODDS
+    ↓
+VALIDATE RISK
+    ↓
+REOPEN MARKETS
+⚙️ CONFIGURAÇÃO POR MERCADO
+[
+  {
+    "market": "Resultado",
+    "lock_on_goal": true,
+    "reopen_delay": 8000,
+    "recalculate": true
+  },
+
+  {
+    "market": "Dupla Chance",
+    "lock_on_goal": true,
+    "reopen_delay": 7000,
+    "recalculate": true
+  },
+
+  {
+    "market": "Gols",
+    "lock_on_goal": true,
+    "reopen_delay": 10000,
+    "recalculate": true,
+    "auto_generate_new_lines": true
+  },
+
+  {
+    "market": "Handicap",
+    "lock_on_goal": true,
+    "reopen_delay": 10000,
+    "recalculate": true
+  },
+
+  {
+    "market": "1º Tempo",
+    "lock_on_goal": true,
+    "reopen_delay": 6000,
+    "recalculate": true
+  },
+
+  {
+    "market": "HT/FT",
+    "lock_on_goal": true,
+    "reopen_delay": 12000,
+    "recalculate": true
+  },
+
+  {
+    "market": "Placar Exato",
+    "lock_on_goal": true,
+    "reopen_delay": 15000,
+    "recalculate": true
+  },
+
+  {
+    "market": "Escanteios",
+    "lock_on_goal": false,
+    "reopen_delay": 0,
+    "recalculate": false
+  },
+
+  {
+    "market": "Cartões",
+    "lock_on_goal": false,
+    "reopen_delay": 0,
+    "recalculate": false
+  },
+
+  {
+    "market": "Asiático",
+    "lock_on_goal": true,
+    "reopen_delay": 12000,
+    "recalculate": true
+  }
+]
+🔒 COMPORTAMENTO REAL DE CADA MERCADO
+Mercado	Suspende no Gol?	Recalcula?	Delay
+Resultado	✔	✔	8s
+Dupla Chance	✔	✔	7s
+Gols	✔	✔	10s
+Handicap	✔	✔	10s
+1º Tempo	✔	✔	6s
+HT/FT	✔	✔	12s
+Placar Exato	✔	✔	15s
+Escanteios	❌	❌	—
+Cartões	❌	❌	—
+Asiático	✔	✔	12s
+⚡ SCRIPT PROFISSIONAL DE BLOQUEIO
+const MARKET_CONFIG = {
+
+  resultado: {
+    suspend: true,
+    delay: 8000
+  },
+
+  dupla_chance: {
+    suspend: true,
+    delay: 7000
+  },
+
+  gols: {
+    suspend: true,
+    delay: 10000,
+    autoLines: true
+  },
+
+  handicap: {
+    suspend: true,
+    delay: 10000
+  },
+
+  primeiro_tempo: {
+    suspend: true,
+    delay: 6000
+  },
+
+  htft: {
+    suspend: true,
+    delay: 12000
+  },
+
+  placar_exato: {
+    suspend: true,
+    delay: 15000
+  },
+
+  escanteios: {
+    suspend: false
+  },
+
+  cartoes: {
+    suspend: false
+  },
+
+  asiatico: {
+    suspend: true,
+    delay: 12000
+  }
+};
+⚙️ ENGINE DE SUSPENSÃO
+function suspendGoalMarkets(match) {
+
+  Object.entries(MARKET_CONFIG)
+    .forEach(([market, config]) => {
+
+      if (!config.suspend) return;
+
+      match.markets[market].status =
+        "suspended";
+
+      setTimeout(() => {
+
+        recalculateMarket(match, market);
+
+        match.markets[market].status =
+          "open";
+
+      }, config.delay);
+
+    });
+}
+🧠 AUTO GERAÇÃO DE LINHAS (OVER)
+
+Você pediu isso antes.
+
+Exemplo:
+jogo:
+4 gols
+
+Sistema cria:
+
+Over 4.5
+Over 5.5
+Over 6.5
+⚡ SCRIPT
+function generateGoalLines(goals) {
+
+  return [
+
+    `${goals + 0.5}`,
+    `${goals + 1.5}`,
+    `${goals + 2.5}`
+
+  ];
+}
+🔥 EXEMPLO REAL AO VIVO
+⚽ Gol aos 73'
+
+Antes:
+
+Over 2.5 → 1.95
+Resultado Casa → 2.10
+Evento:
+GOAL HOME TEAM
+Sistema:
+🔒 suspende mercados
+🧠 recalcula probabilidades
+⚡ gera novas linhas
+📊 reabre odds
+Depois:
+Over 2.5 → FECHADO
+Over 3.5 → 1.80
+Resultado Casa → 1.42
+⚠️ MERCADOS MAIS SENSÍVEIS
+Delay maior:
+Mercado	Delay
+Placar Exato	15s
+HT/FT	12s
+Asiático	12s
+🧠 SISTEMA PROFISSIONAL DE RISCO
+
+Se odd mover demais:
+
+if (Math.abs(newOdd - oldOdd) > 0.50) {
+
+   suspendMarket();
+
+}
+⚡ FRONTEND
+Suspenso:
+🔒 Suspenso
+Reaberto:
+⚡ Atualizado
+🚀 O QUE VOCÊ TEM AGORA
+
+✔ Sistema profissional de bloqueio
+✔ Delay por mercado
+✔ Reabertura automática
+✔ Auto geração de linhas
+✔ Risk engine
+✔ Goal-event handling
+✔ Live odds architecture

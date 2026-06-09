@@ -1,0 +1,477 @@
+/***********************************************************************
+ *
+ * SISTEMA COMPLETO DE APOSTA MÚLTIPLA (PARLAY)
+ *
+ * FUNCIONALIDADES:
+ *
+ * ✅ Detecta seleção perdida automaticamente
+ * ✅ Perde o bilhete inteiro instantaneamente
+ * ✅ Move de "Em Aberto" para "Resolvido"
+ * ✅ Mantém os outros jogos visíveis
+ * ✅ Mostra quais perderam/ganharam/pendentes
+ * ✅ Encerra cashout automaticamente
+ * ✅ Funciona com múltiplos eventos
+ * ✅ Atualiza status em tempo real
+ *
+ ***********************************************************************/
+
+
+/***********************************************************************
+ * STATUS
+ ***********************************************************************/
+
+const TICKET_STATUS = {
+    OPEN: 'open',
+    WON: 'won',
+    LOST: 'lost'
+};
+
+const SELECTION_STATUS = {
+    PENDING: 'pending',
+    WON: 'won',
+    LOST: 'lost'
+};
+
+const EVENT_STATUS = {
+    NOT_STARTED: 'not_started',
+    LIVE: 'live',
+    FINISHED: 'finished'
+};
+
+
+/***********************************************************************
+ * EVENTOS
+ ***********************************************************************/
+
+const events = [
+
+    {
+        id: 1,
+        homeTeam: 'Inter',
+        awayTeam: 'Verona',
+
+        homeScore: 1,
+        awayScore: 1,
+
+        status: EVENT_STATUS.FINISHED
+    },
+
+    {
+        id: 2,
+        homeTeam: 'Benfica',
+        awayTeam: 'Porto',
+
+        homeScore: 0,
+        awayScore: 0,
+
+        status: EVENT_STATUS.LIVE
+    },
+
+    {
+        id: 3,
+        homeTeam: 'Real Madrid',
+        awayTeam: 'Sevilla',
+
+        homeScore: 0,
+        awayScore: 0,
+
+        status: EVENT_STATUS.NOT_STARTED
+    },
+
+    {
+        id: 4,
+        homeTeam: 'PSG',
+        awayTeam: 'Lyon',
+
+        homeScore: 0,
+        awayScore: 0,
+
+        status: EVENT_STATUS.NOT_STARTED
+    }
+];
+
+
+/***********************************************************************
+ * BILHETE MÚLTIPLO
+ ***********************************************************************/
+
+const ticket = {
+
+    id: 999,
+
+    userId: 10,
+
+    type: 'multiple',
+
+    stake: 100,
+
+    totalOdds: 8.50,
+
+    possibleWin: 850,
+
+    status: TICKET_STATUS.OPEN,
+
+    isOpen: true,
+
+    isResolved: false,
+
+    cashout: {
+        enabled: true,
+        value: 70
+    },
+
+    selections: [
+
+        {
+            eventId: 1,
+
+            market: 'match_winner',
+
+            pick: 'home',
+
+            label: 'Inter vence',
+
+            status: SELECTION_STATUS.PENDING
+        },
+
+        {
+            eventId: 2,
+
+            market: 'match_winner',
+
+            pick: 'home',
+
+            label: 'Benfica vence',
+
+            status: SELECTION_STATUS.PENDING
+        },
+
+        {
+            eventId: 3,
+
+            market: 'match_winner',
+
+            pick: 'home',
+
+            label: 'Real Madrid vence',
+
+            status: SELECTION_STATUS.PENDING
+        },
+
+        {
+            eventId: 4,
+
+            market: 'match_winner',
+
+            pick: 'home',
+
+            label: 'PSG vence',
+
+            status: SELECTION_STATUS.PENDING
+        }
+    ]
+};
+
+
+/***********************************************************************
+ * PROCESSA CADA SELEÇÃO
+ ***********************************************************************/
+
+function processSelections(ticket) {
+
+    for (const selection of ticket.selections) {
+
+        const event = events.find(e => e.id === selection.eventId);
+
+        if (!event) continue;
+
+        /***************************************************************
+         * SE O JOGO AINDA NÃO TERMINOU
+         ***************************************************************/
+
+        if (event.status !== EVENT_STATUS.FINISHED) {
+            continue;
+        }
+
+        /***************************************************************
+         * EVITA REPROCESSAR
+         ***************************************************************/
+
+        if (
+            selection.status === SELECTION_STATUS.WON ||
+            selection.status === SELECTION_STATUS.LOST
+        ) {
+            continue;
+        }
+
+        /***************************************************************
+         * DEFINE RESULTADO DO JOGO
+         ***************************************************************/
+
+        let result;
+
+        if (event.homeScore > event.awayScore) {
+
+            result = 'home';
+
+        } 
+        
+        else if (event.homeScore < event.awayScore) {
+
+            result = 'away';
+
+        } 
+        
+        else {
+
+            result = 'draw';
+        }
+
+        /***************************************************************
+         * GANHOU OU PERDEU
+         ***************************************************************/
+
+        if (selection.pick === result) {
+
+            selection.status = SELECTION_STATUS.WON;
+
+        } 
+        
+        else {
+
+            selection.status = SELECTION_STATUS.LOST;
+        }
+    }
+}
+
+
+/***********************************************************************
+ * PROCESSA O BILHETE COMPLETO
+ ***********************************************************************/
+
+function processTicket(ticket) {
+
+    let hasLost = false;
+
+    let allWon = true;
+
+    /***************************************************************
+     * VERIFICA STATUS DAS SELEÇÕES
+     ***************************************************************/
+
+    for (const selection of ticket.selections) {
+
+        /***********************************************************
+         * SE UMA PERDEU
+         ***********************************************************/
+
+        if (selection.status === SELECTION_STATUS.LOST) {
+
+            hasLost = true;
+        }
+
+        /***********************************************************
+         * SE ALGUMA NÃO TERMINOU
+         ***********************************************************/
+
+        if (selection.status === SELECTION_STATUS.PENDING) {
+
+            allWon = false;
+        }
+    }
+
+    /***************************************************************
+     * BILHETE PERDIDO
+     ***************************************************************/
+
+    if (hasLost) {
+
+        ticket.status = TICKET_STATUS.LOST;
+
+        ticket.isOpen = false;
+
+        ticket.isResolved = true;
+
+        /***********************************************************
+         * ENCERRA CASHOUT
+         ***********************************************************/
+
+        ticket.cashout.enabled = false;
+
+        ticket.cashout.value = 0;
+
+        console.log('BILHETE PERDIDO');
+
+        return;
+    }
+
+    /***************************************************************
+     * BILHETE GANHO
+     ***************************************************************/
+
+    if (allWon) {
+
+        ticket.status = TICKET_STATUS.WON;
+
+        ticket.isOpen = false;
+
+        ticket.isResolved = true;
+
+        ticket.cashout.enabled = false;
+
+        ticket.cashout.value = 0;
+
+        console.log('BILHETE GANHO');
+
+        return;
+    }
+
+    /***************************************************************
+     * CONTINUA ABERTO
+     ***************************************************************/
+
+    ticket.status = TICKET_STATUS.OPEN;
+
+    ticket.isOpen = true;
+
+    ticket.isResolved = false;
+
+    /***************************************************************
+     * CASHOUT ATIVO
+     ***************************************************************/
+
+    ticket.cashout.enabled = true;
+
+    ticket.cashout.value = calculateCashout(ticket);
+
+    console.log('BILHETE AINDA ABERTO');
+}
+
+
+/***********************************************************************
+ * CÁLCULO SIMPLES DE CASHOUT
+ ***********************************************************************/
+
+function calculateCashout(ticket) {
+
+    let wonSelections = 0;
+
+    for (const selection of ticket.selections) {
+
+        if (selection.status === SELECTION_STATUS.WON) {
+
+            wonSelections++;
+        }
+    }
+
+    const percentage = wonSelections / ticket.selections.length;
+
+    const value = ticket.stake + (ticket.stake * percentage);
+
+    return Number(value.toFixed(2));
+}
+
+
+/***********************************************************************
+ * LISTA APOSTAS EM ABERTO
+ ***********************************************************************/
+
+function getOpenTickets(tickets) {
+
+    return tickets.filter(ticket => ticket.status === 'open');
+}
+
+
+/***********************************************************************
+ * LISTA APOSTAS RESOLVIDAS
+ ***********************************************************************/
+
+function getResolvedTickets(tickets) {
+
+    return tickets.filter(ticket =>
+        ticket.status === 'won' ||
+        ticket.status === 'lost'
+    );
+}
+
+
+/***********************************************************************
+ * EXECUÇÃO
+ ***********************************************************************/
+
+console.log('====================================');
+console.log('PROCESSANDO BILHETE');
+console.log('====================================');
+
+processSelections(ticket);
+
+processTicket(ticket);
+
+
+/***********************************************************************
+ * RESULTADO FINAL
+ ***********************************************************************/
+
+console.log('\n');
+console.log('====================================');
+console.log('STATUS FINAL DO BILHETE');
+console.log('====================================');
+
+console.log(`Bilhete ID: ${ticket.id}`);
+
+console.log(`Status: ${ticket.status}`);
+
+console.log(`Em aberto: ${ticket.isOpen}`);
+
+console.log(`Resolvido: ${ticket.isResolved}`);
+
+console.log(`Cashout ativo: ${ticket.cashout.enabled}`);
+
+console.log(`Cashout valor: ${ticket.cashout.value}`);
+
+
+console.log('\n');
+console.log('====================================');
+console.log('SELEÇÕES');
+console.log('====================================');
+
+for (const selection of ticket.selections) {
+
+    let icon = '⏳';
+
+    if (selection.status === 'won') {
+        icon = '✅';
+    }
+
+    if (selection.status === 'lost') {
+        icon = '❌';
+    }
+
+    console.log(`${icon} ${selection.label}`);
+}
+
+
+/***********************************************************************
+ * RESULTADO ESPERADO
+ ***********************************************************************/
+
+/*
+
+❌ Inter vence
+⏳ Benfica vence
+⏳ Real Madrid vence
+⏳ PSG vence
+
+STATUS FINAL:
+lost
+
+Em aberto:
+false
+
+Resolvido:
+true
+
+Cashout:
+desativado
+
+*/

@@ -1,0 +1,126 @@
+{
+  "injuries_suspensions": {
+    "updated": "26.11.2025 17:01:06",
+    "updated_ts": 1764176466,
+    "league": [
+      {
+        "id": "2974",
+        "name": "Brazil: Serie A Betano",
+        "sub_id": "",
+        "match": [
+          {
+            "main_id": "2025112614481",
+            "fallback_id_1": "6111795",
+            "fallback_id_2": "6619208",
+            "fallback_id_3": "8769818",
+            "date": "26.11.2025",
+            "time": "22:00",
+            "home": {
+              "id": "2339006",
+              "name": "Bragantino",
+              "sidelined": {
+                "to_miss": {
+                  "player": [
+                    {
+                      "id": "2983041",
+                      "name": "Bruninho",
+                      "status": "Heel Injury"
+                    },
+                    {
+                      "id": "2901492",
+                      "name": "Eric Ramires",
+                      "status": "Hamstring Injury"
+                    },
+                    {
+                      "id": "3002782",
+                      "name": "Fabinho",
+                      "status": "Inactive"
+                    },
+                    {
+                      "id": "2857795",
+                      "name": "Praxedes",
+                      "status": "Yellow Cards"
+                    },
+                    {
+                      "id": "2965276",
+                      "name": "G. Rodriguez",
+                      "status": "Knee Injury"
+                    },
+                    {
+                      "id": "2746355",
+                      "name": "A. Sant'Anna",
+                      "status": "Hamstring Injury"
+                    }
+                  ]
+                },
+                "questionable": {
+                  "player": [
+                    {
+                      "id": "3143001",
+                      "name": "H. Mosquera",
+                      "status": "Hamstring Injury"
+                    },
+                    {
+                      "id": "3252293",
+                      "name": "Vinicinho",
+                      "status": "Ankle Injury"
+                    }
+                  ]
+                }
+              }
+            },
+            "away": {
+              "id": "2339141",
+              "name": "Fortaleza",
+              "sidelined": {
+                "to_miss": {
+                  "player": [
+                    {
+                      "id": "2559503",
+                      "name": "Bruno Pacheco",
+                      "status": "Inactive"
+                    },
+                    {
+                      "id": "2503339",
+                      "name": "Joao Ricardo",
+                      "status": "Shoulder Injury"
+                    },
+                    {
+                      "id": "3160257",
+                      "name": "Lucca Prior",
+                      "status": "Inactive"
+                    },
+                    {
+                      "id": "2365059",
+                      "name": "Marinho",
+                      "status": "Ankle Injury"
+                    },
+                    {
+                      "id": "3436265",
+                      "name": "Rodrigo",
+                      "status": "Knee Injury"
+                    }
+                  ]
+                },
+                "questionable": {
+                  "player": [
+                    {
+                      "id": "2765467",
+                      "name": "Breno Lopes",
+                      "status": "Injury"
+                    },
+                    {
+                      "id": "2807098",
+                      "name": "Weverson",
+                      "status": "Hamstring Injury"
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

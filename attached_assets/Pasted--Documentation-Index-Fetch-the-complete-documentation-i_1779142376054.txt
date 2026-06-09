@@ -1,0 +1,92 @@
+> ## Documentation Index
+> Fetch the complete documentation index at: https://docs.sportsapipro.com/llms.txt
+> Use this file to discover all available pages before exploring further.
+
+# Odds Endpoints
+
+> V2 Football API: Featured events with odds, popular events, and odds provider discovery
+
+## Base URL
+
+```
+https://v2.football.sportsapipro.com
+```
+
+<Info>
+  For **match-specific odds** (pre-match, live, all markets), see [Match Endpoints → Betting & Odds](/api-reference/football-v2/match#betting--odds).
+</Info>
+
+***
+
+## Endpoints
+
+### Featured Events with Odds
+
+```bash theme={null}
+GET /api/odds/featured-events
+```
+
+Returns highlighted matches with pre-match odds from major bookmakers. Great for building a "Today's Best Odds" section.
+
+### Popular Events (Most Bet On)
+
+```bash theme={null}
+GET /api/odds/popular-events
+```
+
+Returns the most-bet-on events currently, ranked by betting volume and interest.
+
+### Odds Providers by Country
+
+```bash theme={null}
+GET /api/odds/providers/{countryCode}
+```
+
+Returns all available odds providers/bookmakers for a specific country.
+
+<ParamField path="countryCode" type="string" required>
+  Two-letter country code in uppercase (e.g., `GB`, `US`, `DE`, `NG`).
+</ParamField>
+
+### Featured Odds Providers
+
+```bash theme={null}
+GET /api/odds/providers/{countryCode}/featured
+```
+
+Returns the top/featured bookmakers for a country — the most popular and well-known providers.
+
+### Web Odds Providers
+
+```bash theme={null}
+GET /api/odds/providers/{countryCode}/odds
+```
+
+Returns odds providers with web/online presence for a country.
+
+***
+
+## Example Requests
+
+<CodeGroup>
+  ```bash cURL theme={null}
+  curl -X GET "https://v2.football.sportsapipro.com/api/odds/featured-events" \
+    -H "x-api-key: YOUR_API_KEY"
+  ```
+
+  ```javascript JavaScript theme={null}
+  const featured = await fetch(
+    'https://v2.football.sportsapipro.com/api/odds/featured-events',
+    { headers: { 'x-api-key': 'YOUR_API_KEY' } }
+  ).then(r => r.json());
+  ```
+
+  ```python Python theme={null}
+  import requests
+
+  featured = requests.get(
+      'https://v2.football.sportsapipro.com/api/odds/featured-events',
+      headers={'x-api-key': 'YOUR_API_KEY'}
+  ).json()
+  ```
+</CodeGroup>

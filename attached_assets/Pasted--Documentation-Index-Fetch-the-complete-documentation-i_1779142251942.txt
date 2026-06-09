@@ -1,0 +1,189 @@
+> ## Documentation Index
+> Fetch the complete documentation index at: https://docs.sportsapipro.com/llms.txt
+> Use this file to discover all available pages before exploring further.
+
+# Season IDs
+
+> How to resolve numeric seasonId values for both split-year (24/25) and calendar-year (2024) leagues. Avoid 404s on historical data lookups.
+
+## The two-step workflow
+
+Every season-scoped Football V2 endpoint takes a numeric `seasonId` — never a year string. Human-readable labels like `"24/25"` or `"2024"` are display names returned in the `name` and `year` fields. They are **not** valid URL parameters.
+
+Resolve the ID first, then use it everywhere else:
+
+```text theme={null}
+1. GET /api/tournaments/{tournamentId}/seasons
+      └─> returns [{ id: 61644, name: "2024", year: "2024" }, ...]
+
+2. GET /api/tournament/{tournamentId}/season/{seasonId}/...
+      └─> use the numeric `id` from step 1
+```
+
+<Warning>
+  `GET /api/tournament/242/matches/2024` returns **404**. There is no `/matches/{year}` shortcut. The path `season/{seasonId}` is the only correct form.
+</Warning>
+
+***
+
+## Why the label format varies
+
+Different leagues run on different calendars, so the upstream `name` field reflects the real-world season:
+
+| League type               | Example leagues                                      | `name` format | Example   |
+| ------------------------- | ---------------------------------------------------- | ------------- | --------- |
+| Split-year (Aug → May)    | Premier League, La Liga, Serie A, Bundesliga, UCL    | `YY/YY`       | `"24/25"` |
+| Calendar-year (Mar → Dec) | MLS, Brazilian Série A, J1 League, Argentine Primera | `YYYY`        | `"2024"`  |
+
+The `id` field is **always** numeric and **always** the right value to pass downstream. The format of `name` only matters when you want to display the season to a human user.
+
+***
+
+## Worked example: split-year league (Premier League)
+
+`uniqueTournament.id = 17`
+
+<CodeGroup>
+  ```bash cURL theme={null}
+  # Step 1 — list seasons
+  curl https://v2.football.sportsapipro.com/api/tournaments/17/seasons \
+    -H "x-api-key: YOUR_API_KEY"
+
+  # Response (trimmed):
+  # { "seasons": [
+  #     { "id": 61627, "name": "24/25", "year": "24/25" },
+  #     { "id": 52186, "name": "23/24", "year": "23/24" }
+  # ] }
+
+  # Step 2 — fetch matches using the numeric id
+  curl https://v2.football.sportsapipro.com/api/tournament/17/season/61627/events/last/0 \
+    -H "x-api-key: YOUR_API_KEY"
+  ```
+
+  ```javascript JavaScript theme={null}
+  const headers = { 'x-api-key': 'YOUR_API_KEY' };
+  const base = 'https://v2.football.sportsapipro.com';
+
+  const { seasons } = await fetch(
+    `${base}/api/tournaments/17/seasons`,
+    { headers }
+  ).then(r => r.json());
+
+  const current = seasons[0]; // most recent
+  const matches = await fetch(
+    `${base}/api/tournament/17/season/${current.id}/events/last/0`,
+    { headers }
+  ).then(r => r.json());
+  ```
+
+  ```python Python theme={null}
+  import requests
+
+  H = {"x-api-key": "YOUR_API_KEY"}
+  BASE = "https://v2.football.sportsapipro.com"
+
+  seasons = requests.get(f"{BASE}/api/tournaments/17/seasons", headers=H).json()["seasons"]
+  current = seasons[0]
+  matches = requests.get(
+      f"{BASE}/api/tournament/17/season/{current['id']}/events/last/0",
+      headers=H,
+  ).json()
+  ```
+</CodeGroup>
+
+***
+
+## Worked example: calendar-year league (MLS)
+
+`uniqueTournament.id = 242`
+
+The flow is identical — only the season `name` differs:
+
+```bash theme={null}
+# Step 1
+curl https://v2.football.sportsapipro.com/api/tournaments/242/seasons \
+  -H "x-api-key: YOUR_API_KEY"
+
+# Response (trimmed):
+# { "seasons": [
+#     { "id": 61644, "name": "2024", "year": "2024" },
+#     { "id": 52345, "name": "2023", "year": "2023" }
+# ] }
+
+# Step 2 — use the numeric id, NOT "2024"
+curl https://v2.football.sportsapipro.com/api/tournament/242/season/61644/standings \
+  -H "x-api-key: YOUR_API_KEY"
+
+curl https://v2.football.sportsapipro.com/api/tournament/242/season/61644/events/round/1 \
+  -H "x-api-key: YOUR_API_KEY"
+```
+
+<Warning>
+  `/api/tournament/242/matches/2024` and `/api/tournament/242/season/2024/...` both return 404. Always pass the numeric `id` (`61644`), never the year string.
+</Warning>
+
+***
+
+## Recipe: fetch a full season of historical matches
+
+Combine seasons → rounds → events to walk an entire competition:
+
+```javascript theme={null}
+const headers = { 'x-api-key': 'YOUR_API_KEY' };
+const base = 'https://v2.football.sportsapipro.com';
+const tournamentId = 17;
+
+// 1. Resolve season
+const { seasons } = await fetch(
+  `${base}/api/tournaments/${tournamentId}/seasons`, { headers }
+).then(r => r.json());
+const seasonId = seasons[0].id;
+
+// 2. Discover rounds for that season
+const { rounds } = await fetch(
+  `${base}/api/tournament/${tournamentId}/season/${seasonId}/rounds`, { headers }
+).then(r => r.json());
+
+// 3. Fetch each round's events
+const allMatches = [];
+for (const r of rounds) {
+  const { events } = await fetch(
+    `${base}/api/tournament/${tournamentId}/season/${seasonId}/events/round/${r.round}`,
+    { headers }
+  ).then(res => res.json());
+  allMatches.push(...events);
+}
+```
+
+The same shape works for calendar-year leagues — only `tournamentId` and the resulting `seasonId` change.
+
+***
+
+## Caching the resolution step
+
+`/seasons` is a low-volatility endpoint — the active season changes at most a few times per year. Cache the response client-side (24h TTL is safe) so you only pay the discovery cost once per league per day.
+
+```javascript theme={null}
+const seasonCache = new Map(); // tournamentId -> { id, expiresAt }
+
+async function currentSeasonId(tournamentId) {
+  const hit = seasonCache.get(tournamentId);
+  if (hit && hit.expiresAt > Date.now()) return hit.id;
+
+  const { seasons } = await fetch(
+    `${base}/api/tournaments/${tournamentId}/seasons`, { headers }
+  ).then(r => r.json());
+
+  const id = seasons[0].id;
+  seasonCache.set(tournamentId, { id, expiresAt: Date.now() + 86_400_000 });
+  return id;
+}
+```
+
+***
+
+## Related
+
+* [Canonical IDs](/api-reference/football-v2/canonical-ids) — `uniqueTournament.id` (store this) vs `tournament.id` (per-season variant)
+* [Tournament Endpoints](/api-reference/football-v2/tournament) — full list of season-scoped routes
+* [Troubleshooting](/troubleshooting) — common 404 patterns

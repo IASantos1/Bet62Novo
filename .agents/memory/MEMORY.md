@@ -1,0 +1,1 @@
+- [Live broadcast latency](live-broadcast-latency.md) — broadcastPending flag + 30s upcoming cache keeps score-to-client < 5ms

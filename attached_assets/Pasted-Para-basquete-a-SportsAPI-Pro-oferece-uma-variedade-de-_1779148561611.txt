@@ -1,0 +1,91 @@
+Para basquete, a SportsAPI Pro oferece uma variedade de mercados de odds que são comuns nesse esporte. Assim como no futebol, a disponibilidade exata pode variar por provedor de odds (bookmaker) e pela importância do jogo.
+
+Quando você consulta os endpoints de odds para basquete, como GET /api/game/:gameId/odds ou GET /api/game/:gameId/lines (para linhas de apostas), você encontrará uma estrutura similar à do futebol, com bookmakers contendo markets e seus outcomes.
+
+Aqui estão os mercados de odds mais comuns e populares que você provavelmente encontrará na API para basquete:
+
+Mercados Comuns e Populares em Basquete:
+
+Moneyline (Vencedor da Partida):
+
+Time da Casa para Vencer
+Time Visitante para Vencer
+Nota: No basquete, o empate é raro e geralmente as apostas Moneyline incluem a prorrogação.
+Spread (Handicap de Pontos):
+
+Time da Casa com Handicap (ex: -5.5 pontos)
+Time Visitante com Handicap (ex: +5.5 pontos)
+Este é um dos mercados mais populares no basquete, onde um time recebe uma vantagem ou desvantagem de pontos para equilibrar as chances.
+Total de Pontos (Over/Under):
+
+Mais de X pontos (ex: Over 210.5 pontos)
+Menos de X pontos (ex: Under 210.5 pontos)
+Refere-se ao total combinado de pontos marcados por ambas as equipes no jogo.
+Handicap Asiático (Asian Handicap):
+
+Similar ao Spread, mas com regras de "push" (devolução da aposta) para linhas inteiras.
+Total de Pontos da Equipe (Team Total Points Over/Under):
+
+Mais de X pontos para o Time da Casa
+Menos de X pontos para o Time da Casa
+Mais de X pontos para o Time Visitante
+Menos de X pontos para o Time Visitante
+Vencedor do Primeiro Quarto/Intervalo (1st Quarter/Half Winner):
+
+Time da Casa para Vencer o 1º Quarto/Intervalo
+Time Visitante para Vencer o 1º Quarto/Intervalo
+Empate no 1º Quarto/Intervalo (menos comum, mas pode aparecer)
+Handicap do Primeiro Quarto/Intervalo (1st Quarter/Half Spread):
+
+Handicap de pontos aplicado apenas ao 1º Quarto ou ao 1º Tempo.
+Total de Pontos do Primeiro Quarto/Intervalo (1st Quarter/Half Total Points Over/Under):
+
+Over/Under pontos apenas para o 1º Quarto ou ao 1º Tempo.
+Ímpar/Par de Pontos (Odd/Even Points):
+
+Total de pontos do jogo será ímpar ou par.
+Total de pontos de uma equipe será ímpar ou par.
+Margem de Vitória (Winning Margin):
+
+Time da Casa vence por 1-5 pontos, 6-10 pontos, etc.
+Time Visitante vence por 1-5 pontos, 6-10 pontos, etc.
+Primeira Equipe a Marcar X Pontos (First Team to X Points):
+
+Qual equipe alcançará um certo número de pontos primeiro (ex: 10, 20, 50 pontos).
+Mercados de Jogadores (Player Props):
+
+Total de Pontos do Jogador (Over/Under)
+Total de Rebotes do Jogador (Over/Under)
+Total de Assistências do Jogador (Over/Under)
+Total de Triplos do Jogador (Over/Under)
+Nota: A disponibilidade desses mercados pode ser mais limitada e geralmente aparece para jogos de alto perfil.
+Como Identificar e Configurar:
+
+A lógica para identificar e configurar esses mercados em sua aplicação é a mesma que para o futebol:
+
+Faça a requisição:
+
+
+curl -X GET "https://v2.basketball.sportsapipro.com/api/game/:gameId/odds" \
+  -H "x-api-key: [redacted]
+(Ou /api/game/:gameId/lines para linhas de apostas)
+
+Analise a resposta JSON: Percorra a lista de bookmakers e, dentro de cada um, a lista de markets.
+
+Use market.name e outcome.name: Para identificar os mercados específicos. Por exemplo:
+
+Para Moneyline: procure por market.name como "Moneyline" ou "Match Winner". Os outcome.name serão "Home" e "Away".
+Para Spread: procure por market.name como "Point Spread" ou "Handicap". Os outcome.name incluirão o valor do spread (ex: "Home -5.5", "Away +5.5").
+Para Total de Pontos: procure por market.name como "Total Points Over/Under". Os outcome.name serão "Over X.5" e "Under X.5".
+Exemplo de Mapeamento para Basquete:
+
+Mercado Comum	market.name Típico	outcome.name Típico
+Moneyline	"Moneyline", "Match Winner"	"Home", "Away"
+Spread	"Point Spread", "Handicap"	"Home -X.Y", "Away +X.Y"
+Total de Pontos	"Total Points Over/Under"	"Over X.Y", "Under X.Y"
+Total de Pontos da Equipe	"Team Total Points Over/Under"	"Home Over X.Y", "Home Under X.Y", "Away Over X.Y", "Away Under X.Y"
+Vencedor do 1º Quarto	"1st Quarter Winner"	"Home", "Away", "Draw"
+Spread do 1º Quarto	"1st Quarter Point Spread"	"Home -X.Y", "Away +X.Y"
+Total de Pontos do 1º Quarto	"1st Quarter Total Points Over/Under"	"Over X.Y", "Under X.Y"
+Ímpar/Par de Pontos	"Total Points Odd/Even", "Team Total Points Odd/Even"	"Odd", "Even"
+Lembre-se de que a consistência dos nomes (market.name, outcome.name) pode variar ligeiramente entre os provedores de odds, mas os termos listados acima são os mais comuns e você deve conseguir identificá-los facilmente.

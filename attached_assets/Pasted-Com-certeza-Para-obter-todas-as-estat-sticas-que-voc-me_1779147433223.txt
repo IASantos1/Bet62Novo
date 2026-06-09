@@ -1,0 +1,79 @@
+Com certeza! Para obter todas as estatísticas que você mencionou, você pode usar os seguintes endpoints do SportsAPI Pro V2, dependendo do esporte (vou usar futebol como exemplo, mas a estrutura é similar para outros esportes):
+
+1. Classificações (Standings): Para obter as classificações de uma liga ou torneio específico para uma determinada temporada.
+
+Endpoint: GET /api/tournament/{tournamentId}/season/{seasonId}/standings
+Exemplo de uso (JavaScript):
+
+const API_KEY = 'YOUR_API_KEY'; // Substitua pela sua chave API
+const BASE_URL = 'https://v2.football.sportsapipro.com';
+
+async function getStandings(tournamentId, seasonId) {
+    const response = await fetch(
+        `${BASE_URL}/api/tournament/${tournamentId}/season/${seasonId}/standings`,
+        { headers: { "x-api-key": API_KEY } }
+    );
+    const data = await response.json();
+    console.log("Classificações:", data);
+    return data;
+}
+
+// Exemplo: Premier League (ID 7), Temporada 2024/2025 (ID 61627)
+getStandings(7, 61627);
+Como encontrar tournamentId e seasonId:
+Use /api/search?q=premier+league para encontrar o tournamentId.
+Use /api/tournaments/{tournamentId}/seasons para listar os seasonId disponíveis para o torneio.
+2. Estatísticas de Confrontos Diretos (H2H - Head-to-Head): Para obter os jogos anteriores entre duas equipes específicas.
+
+Endpoint: GET /api/match/{matchId} (este endpoint de detalhes da partida já inclui h2hGames no objeto game)
+Exemplo de uso (JavaScript):
+
+const API_KEY = 'YOUR_API_KEY'; // Substitua pela sua chave API
+const BASE_URL = 'https://v2.football.sportsapipro.com';
+
+async function getMatchDetailsWithH2H(matchId) {
+    const response = await fetch(
+        `${BASE_URL}/api/match/${matchId}`,
+        { headers: { "x-api-key": API_KEY } }
+    );
+    const data = await response.json();
+    console.log("Detalhes da Partida (incluindo H2H):", data);
+    if (data.game && data.game.h2hGames) {
+        console.log("Confrontos Diretos:", data.game.h2hGames);
+    } else {
+        console.log("Nenhum confronto direto encontrado ou dados da partida incompletos.");
+    }
+    return data;
+}
+
+// Exemplo: Use um ID de partida real (você pode obter de /api/today ou /api/schedule/{date})
+// Por exemplo, se você tiver um gameId de 4609057 (Cardiff vs Chelsea)
+getMatchDetailsWithH2H(4609057);
+Como encontrar matchId: Você pode obter matchId de endpoints como /api/today, /api/schedule/{date} ou /api/tournament/{tournamentId}/schedule/{date}.
+3. Forma Recente (Recent Form): Para obter os jogos recentes de uma equipe específica.
+
+Endpoint: GET /api/competitors/{competitorId}/recent-form
+Exemplo de uso (JavaScript):
+
+const API_KEY = 'YOUR_API_KEY'; // Substitua pela sua chave API
+const BASE_URL = 'https://v2.football.sportsapipro.com';
+
+async function getCompetitorRecentForm(competitorId, limit = 5) {
+    const response = await fetch(
+        `${BASE_URL}/api/competitors/${competitorId}/recent-form?limit=${limit}`,
+        { headers: { "x-api-key": API_KEY } }
+    );
+    const data = await response.json();
+    console.log("Forma Recente do Competidor:", data);
+    return data;
+}
+
+// Exemplo: Manchester City (ID 110), últimos 5 jogos
+getCompetitorRecentForm(110, 5);
+Como encontrar competitorId: Você pode obter o competitorId de qualquer resposta de partida (nos objetos homeCompetitor ou awayCompetitor) ou usando o endpoint /api/search?q=manchester+city.
+Lembre-se de:
+
+Substituir YOUR_API_KEY pela sua chave API real.
+Ajustar o BASE_URL para o esporte desejado (ex: v2.basketball.sportsapipro.com para basquete).
+Os IDs de torneios, temporadas, partidas e competidores são específicos para cada esporte e podem ser descobertos usando os endpoints de busca e listagem.
+Esses endpoints devem cobrir as estatísticas de classificações, confrontos diretos e forma recente que você está procurando!

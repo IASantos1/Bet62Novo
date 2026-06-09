@@ -1,0 +1,673 @@
+> ## Documentation Index
+> Fetch the complete documentation index at: https://docs.sportsapipro.com/llms.txt
+> Use this file to discover all available pages before exploring further.
+
+# API Reference Overview
+
+> Complete reference for all SportsAPI Pro endpoints across 25+ sports
+
+## Base URLs
+
+Access our multi-sport API through dedicated sport-specific endpoints. The **V2 Enhanced API** is available for all 25+ sports:
+
+<CardGroup cols={3}>
+  <Card title="Football API (V2)" icon="futbol">
+    ```
+    https://v2.football.sportsapipro.com
+    ```
+  </Card>
+
+  <Card title="Basketball API (V2)" icon="basketball">
+    ```
+    https://v2.basketball.sportsapipro.com
+    ```
+  </Card>
+
+  <Card title="Any Sport (V2)" icon="globe">
+    ```
+    https://v2.{sport}.sportsapipro.com
+    ```
+  </Card>
+</CardGroup>
+
+<Tip>
+  **V2 Enhanced API** offers 120+ endpoints with advanced data: shotmaps, AI insights, player heatmaps, tournament brackets, manager/referee data, and WebSocket real-time support. [Explore V2 →](/api-reference/football-v2/overview)
+</Tip>
+
+<Info>
+  Legacy V1 endpoints remain available for backward compatibility. See the [V1 Legacy (Deprecated)](/api-reference/v1-legacy/overview) section for V1 documentation.
+</Info>
+
+## Quick Links
+
+<CardGroup cols={3}>
+  <Card title="Football V2" icon="futbol" href="/api-reference/football-v2/overview">
+    147+ endpoints — Premier League, La Liga, Champions League & 1000+ leagues
+  </Card>
+
+  <Card title="Basketball V2" icon="basketball" href="/api-reference/basketball-v2/overview">
+    115 endpoints: NBA, EuroLeague, WNBA & 50+ leagues
+  </Card>
+
+  <Card title="Tennis V2" icon="table-tennis-paddle-ball" href="/api-reference/tennis-v2/overview">
+    88 endpoints: ATP, WTA rankings, draws & point-by-point
+  </Card>
+
+  <Card title="Cricket V2" icon="baseball" href="/api-reference/cricket-v2/overview">
+    IPL, Test cricket, T20 leagues & live ball-by-ball
+  </Card>
+
+  <Card title="Ice Hockey V2" icon="hockey-puck" href="/api-reference/hockey-v2/overview">
+    NHL, KHL, SHL & 30+ leagues worldwide
+  </Card>
+
+  <Card title="Browse All 25 Sports ↓" icon="trophy" href="#browse-by-sport">
+    Team, racquet, combat, motorsport & more
+  </Card>
+</CardGroup>
+
+## Authentication
+
+All endpoints require authentication via the `x-api-key` header. The same API key works across **all 25+ sports APIs**:
+
+<CodeGroup>
+  ```bash Football API theme={null}
+  curl -X GET "https://v2.football.sportsapipro.com/competitions" \
+    -H "x-api-key: YOUR_API_KEY"
+  ```
+
+  ```bash Basketball API theme={null}
+  curl -X GET "https://v2.basketball.sportsapipro.com/competitions" \
+    -H "x-api-key: YOUR_API_KEY"
+  ```
+
+  ```bash Tennis API theme={null}
+  curl -X GET "https://v2.tennis.sportsapipro.com/competitions" \
+    -H "x-api-key: YOUR_API_KEY"
+  ```
+</CodeGroup>
+
+<Tip>
+  Your API key is shared across all sports. Rate limits and usage are tracked across your entire account, not per sport.
+</Tip>
+
+## Auto-Resolved Parameters
+
+<Info>
+  The API **automatically determines** the user's language, timezone, and country based on request context. You do not need to specify default values for these parameters—they are resolved automatically.
+</Info>
+
+The following parameters are auto-resolved but can be overridden if needed:
+
+| Parameter       | Auto-Resolved | Description                               |
+| --------------- | ------------- | ----------------------------------------- |
+| `appTypeId`     | Yes           | Application type identifier (default: 5)  |
+| `langId`        | Yes           | Language ID (1 = English)                 |
+| `timezoneName`  | Yes           | Timezone for date/time values (see below) |
+| `userCountryId` | Yes           | User's country for localization           |
+
+## Timezone Handling
+
+<Info>
+  **Timezone is automatically resolved** based on the user's country. You can also override it by passing the `timezoneName` query parameter.
+</Info>
+
+### How Auto-Resolution Works
+
+The V2 API uses a **country-based** mechanism to determine the user's timezone:
+
+1. **Country detection** — Cloudflare identifies the user's country from their IP address (via the `CF-IPCountry` header).
+2. **Country → Timezone mapping** — The backend maps the detected country code (e.g., `DE` → `Europe/Berlin`, `US` → `America/New_York`) to the primary IANA timezone for that country.
+3. **Applied to responses** — All date/time fields in the response use the resolved timezone offset.
+
+If the country cannot be determined (e.g., VPN, internal traffic), the API falls back to **UTC**.
+
+### Timezone `source` Field
+
+API responses include a `source` field in the timezone metadata indicating how the timezone was resolved:
+
+| Source      | Meaning                                                      |
+| ----------- | ------------------------------------------------------------ |
+| `"auto"`    | Timezone was auto-resolved from the user's detected country  |
+| `"manual"`  | Timezone was explicitly set via the `timezoneName` parameter |
+| `"default"` | Fallback to UTC (country could not be detected)              |
+
+### Manual Override
+
+You can override auto-resolution by passing the `timezoneName` query parameter with any valid [IANA timezone identifier](https://en.wikipedia.org/wiki/List_of_tz_database_time_zones):
+
+<CodeGroup>
+  ```bash Football — Auto-resolved theme={null}
+  curl -H "x-api-key: YOUR_API_KEY" \
+    "https://v2.football.sportsapipro.com/api/live"
+  ```
+
+  ```bash Football — Explicit timezone theme={null}
+  curl -H "x-api-key: YOUR_API_KEY" \
+    "https://v2.football.sportsapipro.com/api/live?timezoneName=America/New_York"
+  ```
+
+  ```bash Basketball — Auto-resolved theme={null}
+  curl -H "x-api-key: YOUR_API_KEY" \
+    "https://v2.basketball.sportsapipro.com/api/live"
+  ```
+
+  ```bash Basketball — Explicit timezone theme={null}
+  curl -H "x-api-key: YOUR_API_KEY" \
+    "https://v2.basketball.sportsapipro.com/api/live?timezoneName=Europe/Berlin"
+  ```
+
+  ```bash Tennis — Schedule with timezone theme={null}
+  curl -H "x-api-key: YOUR_API_KEY" \
+    "https://v2.tennis.sportsapipro.com/api/schedule/2026-07-01?timezoneName=Asia/Tokyo"
+  ```
+</CodeGroup>
+
+### Code Examples
+
+Use these examples to integrate timezone handling into your application. The API auto-resolves timezone from your IP, or you can override it manually.
+
+<CodeGroup>
+  ```javascript JavaScript / Node.js — Auto-resolved theme={null}
+  const API_KEY = 'YOUR_API_KEY';
+
+  // Timezone is auto-resolved from your IP location
+  const response = await fetch('https://v2.football.sportsapipro.com/api/live', {
+    headers: { 'x-api-key': API_KEY }
+  });
+
+  const data = await response.json();
+
+  // startTimestamp reflects your auto-detected timezone
+  data.events?.forEach(match => {
+    console.log(`${match.homeTeam} vs ${match.awayTeam}`);
+    console.log(`Kick-off: ${new Date(match.startTimestamp * 1000).toISOString()}`);
+  });
+  ```
+
+  ```javascript JavaScript / Node.js — Manual timezone theme={null}
+  const API_KEY = 'YOUR_API_KEY';
+  const timezone = 'America/New_York';
+
+  // Override timezone with the timezoneName query parameter
+  const response = await fetch(
+    `https://v2.football.sportsapipro.com/api/schedule/2026-07-01?timezoneName=${timezone}`,
+    { headers: { 'x-api-key': API_KEY } }
+  );
+
+  const data = await response.json();
+
+  data.events?.forEach(match => {
+    // startTimestamp is a Unix timestamp — convert to your desired display format
+    console.log(`${match.homeTeam} vs ${match.awayTeam}`);
+    console.log(`Kick-off (ET): ${new Date(match.startTimestamp * 1000).toLocaleString('en-US', { timeZone: timezone })}`);
+  });
+  ```
+
+  ```python Python — Auto-resolved theme={null}
+  import requests
+  from datetime import datetime
+
+  API_KEY = "YOUR_API_KEY"
+
+  # Timezone auto-resolved from your IP
+  response = requests.get(
+      "https://v2.football.sportsapipro.com/api/live",
+      headers={"x-api-key": API_KEY}
+  )
+
+  data = response.json()
+
+  for match in data.get("events", []):
+      home = match["homeTeam"]
+      away = match["awayTeam"]
+      kickoff = datetime.fromtimestamp(match["startTimestamp"])
+      print(f"{home} vs {away} — {kickoff}")
+  ```
+
+  ```python Python — Manual timezone theme={null}
+  import requests
+  from datetime import datetime
+
+  API_KEY = "YOUR_API_KEY"
+
+  # Override timezone to Europe/Berlin
+  response = requests.get(
+      "https://v2.basketball.sportsapipro.com/api/schedule/2026-07-01",
+      headers={"x-api-key": API_KEY},
+      params={"timezoneName": "Europe/Berlin"}
+  )
+
+  data = response.json()
+
+  for match in data.get("events", []):
+      home = match["homeTeam"]
+      away = match["awayTeam"]
+      kickoff = datetime.fromtimestamp(match["startTimestamp"])
+      print(f"{home} vs {away} — {kickoff}")
+  ```
+
+  ```php PHP — Auto-resolved theme={null}
+  <?php
+  $apiKey = 'YOUR_API_KEY';
+
+  $ch = curl_init();
+  curl_setopt($ch, CURLOPT_URL, 'https://v2.football.sportsapipro.com/api/live');
+  curl_setopt($ch, CURLOPT_HTTPHEADER, ['x-api-key: ' . $apiKey]);
+  curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+
+  $response = curl_exec($ch);
+  curl_close($ch);
+
+  $data = json_decode($response, true);
+
+  foreach ($data['events'] ?? [] as $match) {
+      echo $match['homeTeam'] . ' vs ' . $match['awayTeam'] . "\n";
+      echo 'Kick-off: ' . date('Y-m-d H:i:s', $match['startTimestamp']) . "\n";
+  }
+  ```
+
+  ```php PHP — Manual timezone theme={null}
+  <?php
+  $apiKey = 'YOUR_API_KEY';
+  $timezone = 'Asia/Tokyo';
+
+  $ch = curl_init();
+  curl_setopt($ch, CURLOPT_URL,
+      'https://v2.tennis.sportsapipro.com/api/schedule/2026-07-01?timezoneName=' . $timezone
+  );
+  curl_setopt($ch, CURLOPT_HTTPHEADER, ['x-api-key: ' . $apiKey]);
+  curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+
+  $response = curl_exec($ch);
+  curl_close($ch);
+
+  $data = json_decode($response, true);
+
+  foreach ($data['events'] ?? [] as $match) {
+      echo $match['homeTeam'] . ' vs ' . $match['awayTeam'] . "\n";
+      // startTimestamp is a Unix timestamp — format for display
+      $dt = new DateTime('@' . $match['startTimestamp']);
+      $dt->setTimezone(new DateTimeZone($timezone));
+      echo 'Start (JST): ' . $dt->format('Y-m-d H:i:s') . "\n";
+  }
+  ```
+</CodeGroup>
+
+### V1 Legacy: Parsing ISO 8601 Responses
+
+<Info>
+  **V2 uses Unix timestamps** (`startTimestamp`) — see the next section. This ISO 8601 parsing guide applies only to **V1 endpoints** which return date strings with timezone offsets.
+</Info>
+
+The V1 API returns ISO 8601 dates with timezone offsets (e.g., `2026-01-07T15:00:00-05:00`). Here's how to parse them correctly:
+
+<CodeGroup>
+  ```javascript JavaScript theme={null}
+  // The offset is embedded in the string — Date() handles it automatically
+  const startTime = '2026-01-07T15:00:00-05:00';
+  const date = new Date(startTime);
+
+  console.log(date.toISOString());           // "2026-01-07T20:00:00.000Z" (UTC)
+  console.log(date.toLocaleString('en-US')); // Localized to user's browser timezone
+
+  // Convert to a specific display timezone
+  console.log(date.toLocaleString('en-US', { timeZone: 'America/Chicago' }));
+  // "1/7/2026, 2:00:00 PM" (Central Time)
+  ```
+
+  ```python Python theme={null}
+  from datetime import datetime
+
+  start_time = "2026-01-07T15:00:00-05:00"
+  dt = datetime.fromisoformat(start_time)
+
+  print(dt)             # 2026-01-07 15:00:00-05:00
+  print(dt.utcoffset()) # -1 day, 19:00:00 (i.e., -5 hours)
+  print(dt.tzname())    # UTC-05:00
+
+  # Convert to UTC
+  from datetime import timezone
+  dt_utc = dt.astimezone(timezone.utc)
+  print(dt_utc)         # 2026-01-07 20:00:00+00:00
+  ```
+
+  ```php PHP theme={null}
+  <?php
+  $startTime = '2026-01-07T15:00:00-05:00';
+  $date = new DateTime($startTime);
+
+  echo $date->format('Y-m-d H:i:s P') . "\n"; // 2026-01-07 15:00:00 -05:00
+
+  // Convert to UTC
+  $date->setTimezone(new DateTimeZone('UTC'));
+  echo $date->format('Y-m-d H:i:s P') . "\n"; // 2026-01-07 20:00:00 +00:00
+
+  // Convert to Tokyo
+  $date->setTimezone(new DateTimeZone('Asia/Tokyo'));
+  echo $date->format('Y-m-d H:i:s P') . "\n"; // 2026-01-08 05:00:00 +09:00
+  ```
+</CodeGroup>
+
+<Warning>
+  **Don't strip the offset!** Always parse the full ISO 8601 string including the offset (e.g., `-05:00`). Stripping it and treating the time as UTC will give incorrect results.
+</Warning>
+
+### Date/Time Format in Responses
+
+The V2 API returns timestamps as **Unix epoch integers** (`startTimestamp`). Convert to your desired display format:
+
+```json theme={null}
+{
+  "startTimestamp": 1736280600
+}
+```
+
+Use the `timezoneName` query parameter to control how schedule endpoints group matches by date.
+
+### Example: Same Match in Different Timezones
+
+The same match returns the same `startTimestamp` regardless of timezone. The `timezoneName` parameter affects date-based grouping, not the timestamp value:
+
+<CodeGroup>
+  ```json Response (all timezones) theme={null}
+  {
+    "id": 4609057,
+    "tournament": "Premier League",
+    "startTimestamp": 1736280000,
+    "homeTeam": "Arsenal",
+    "awayTeam": "Chelsea"
+  }
+  ```
+</CodeGroup>
+
+Convert `startTimestamp` to display times in any timezone:
+
+| Timezone             | Display Time        |
+| -------------------- | ------------------- |
+| UTC                  | 2026-01-07 20:00:00 |
+| America/New\_York    | 2026-01-07 15:00:00 |
+| America/Los\_Angeles | 2026-01-07 12:00:00 |
+| Europe/Berlin        | 2026-01-07 21:00:00 |
+| Asia/Tokyo           | 2026-01-08 05:00:00 |
+
+<Tip>
+  The **same match** (8:00 PM UTC kickoff) displays as 3:00 PM in New York, 12:00 PM in Los Angeles, 9:00 PM in Berlin, and 5:00 AM the next day in Tokyo.
+</Tip>
+
+### Common Timezone Examples
+
+| Region           | timezoneName Value    |
+| ---------------- | --------------------- |
+| UTC/GMT          | `UTC` or `Etc/GMT`    |
+| US Eastern       | `America/New_York`    |
+| US Pacific       | `America/Los_Angeles` |
+| UK               | `Europe/London`       |
+| Central Europe   | `Europe/Berlin`       |
+| Japan            | `Asia/Tokyo`          |
+| Australia Sydney | `Australia/Sydney`    |
+| India            | `Asia/Kolkata`        |
+
+<Note>
+  **Best Practice**: For server-to-server integrations, explicitly specify `timezoneName` to ensure consistent behavior regardless of server location. For client-facing applications, rely on auto-resolution for the best user experience.
+</Note>
+
+<Info>
+  **V1 Legacy Note**: V1 endpoints also support the `timezoneName` parameter for manual override, but auto-resolution may behave differently. For the most reliable timezone handling, use the V2 API.
+</Info>
+
+## Response Structure
+
+### V2 API Response Format
+
+The V2 API returns data in a clean envelope with an `events` array:
+
+```json theme={null}
+{
+  "success": true,
+  "count": 48,
+  "events": [
+    {
+      "id": 12647890,
+      "slug": "arsenal-chelsea",
+      "tournament": { "name": "Premier League", "uniqueTournament": { "id": 17 } },
+      "homeTeam": { "id": 42, "name": "Arsenal" },
+      "awayTeam": { "id": 38, "name": "Chelsea" },
+      "homeScore": { "current": 2, "period1": 1, "period2": 1 },
+      "awayScore": { "current": 1, "period1": 0, "period2": 1 },
+      "status": { "code": 100, "type": "finished" },
+      "startTimestamp": 1720375200
+    }
+  ]
+}
+```
+
+### V1 Legacy Response Format
+
+V1 endpoints use a different envelope with `games`, `sports`, and `competitions` arrays:
+
+```json theme={null}
+{
+  "lastUpdateId": 5494749399,
+  "requestedUpdateId": -1,
+  "ttl": 300,
+  "sports": [...],
+  "countries": [...],
+  "competitions": [...],
+  "games": [...]
+}
+```
+
+### Common Response Fields
+
+| Field          | Version | Type    | Description                                          |
+| -------------- | ------- | ------- | ---------------------------------------------------- |
+| `success`      | V2      | boolean | Whether the request succeeded                        |
+| `count`        | V2      | number  | Number of items returned                             |
+| `events`       | V2      | array   | Array of event/match objects                         |
+| `lastUpdateId` | V1      | number  | Internal versioning ID for incremental updates       |
+| `ttl`          | V1      | number  | Time To Live in seconds — recommended cache duration |
+
+<Note>
+  Each endpoint has its own built-in cache with a defined TTL. **No manual caching or client-side caching is required.** The TTL value indicates the recommended cache duration.
+</Note>
+
+## Browse by Sport
+
+Explore all 25 V2 sports organized by category. Each sport has its own dedicated subdomain and full endpoint documentation.
+
+### Popular Sports
+
+<CardGroup cols={3}>
+  <Card title="Football" icon="futbol" href="/api-reference/football-v2/overview">
+    147+ endpoints — 1000+ leagues, shotmaps, AI insights, WebSocket
+  </Card>
+
+  <Card title="Basketball" icon="basketball" href="/api-reference/basketball-v2/overview">
+    115 endpoints: NBA, EuroLeague, box scores, playoff brackets
+  </Card>
+
+  <Card title="Tennis" icon="table-tennis-paddle-ball" href="/api-reference/tennis-v2/overview">
+    88 endpoints: ATP/WTA rankings, draws, point-by-point
+  </Card>
+
+  <Card title="Cricket" icon="baseball" href="/api-reference/cricket-v2/overview">
+    IPL, Test, T20 — ball-by-ball, scorecards, player stats
+  </Card>
+
+  <Card title="Ice Hockey" icon="hockey-puck" href="/api-reference/hockey-v2/overview">
+    NHL, KHL, SHL — period scoring, penalty stats, playoffs
+  </Card>
+</CardGroup>
+
+### Team Sports
+
+<CardGroup cols={3}>
+  <Card title="Baseball" icon="baseball" href="/api-reference/baseball-v2/overview">
+    MLB, NPB, KBO — innings, pitch stats, box scores
+  </Card>
+
+  <Card title="American Football" icon="football" href="/api-reference/american-football-v2/overview">
+    NFL, NCAA — quarter scoring, drive charts, player stats
+  </Card>
+
+  <Card title="Rugby" icon="football" href="/api-reference/rugby-v2/overview">
+    Six Nations, Rugby Championship, Super Rugby
+  </Card>
+
+  <Card title="Handball" icon="hand" href="/api-reference/handball-v2/overview">
+    Champions League, World Championship, Olympic handball
+  </Card>
+
+  <Card title="Volleyball" icon="volleyball" href="/api-reference/volleyball-v2/overview">
+    FIVB, Champions League — set-based scoring
+  </Card>
+
+  <Card title="Futsal" icon="futbol" href="/api-reference/futsal-v2/overview">
+    FIFA Futsal World Cup, continental leagues
+  </Card>
+
+  <Card title="Water Polo" icon="water" href="/api-reference/waterpolo-v2/overview">
+    Olympic water polo, European championships
+  </Card>
+</CardGroup>
+
+### Racquet & Precision Sports
+
+<CardGroup cols={3}>
+  <Card title="Table Tennis" icon="table-tennis-paddle-ball" href="/api-reference/table-tennis-v2/overview">
+    ITTF World Tour, Olympic table tennis
+  </Card>
+
+  <Card title="Badminton" icon="shuttlecock" href="/api-reference/badminton-v2/overview">
+    BWF World Tour, All England, Olympic badminton
+  </Card>
+
+  <Card title="Snooker" icon="circle" href="/api-reference/snooker-v2/overview">
+    World Championship, UK Championship, The Masters
+  </Card>
+
+  <Card title="Darts" icon="bullseye" href="/api-reference/darts-v2/overview">
+    PDC World Championship, Premier League Darts
+  </Card>
+
+  <Card title="Beach Volleyball" icon="volleyball" href="/api-reference/beach-volley-v2/overview">
+    FIVB Beach Pro Tour, Olympic beach volleyball
+  </Card>
+</CardGroup>
+
+### Specialty Sports
+
+<CardGroup cols={4}>
+  <Card title="MMA" icon="hand-fist" href="/api-reference/mma-v2/overview">
+    UFC, Bellator, PFL
+  </Card>
+
+  <Card title="Motorsport" icon="flag-checkered" href="/api-reference/motorsport-v2/overview">
+    F1, MotoGP, NASCAR
+  </Card>
+
+  <Card title="Cycling" icon="person-biking" href="/api-reference/cycling-v2/overview">
+    Tour de France, Giro, Vuelta
+  </Card>
+
+  <Card title="Esports" icon="gamepad" href="/api-reference/esports-v2/overview">
+    CS2, LoL, Dota 2, Valorant
+  </Card>
+
+  <Card title="Aussie Rules" icon="football" href="/api-reference/aussie-rules-v2/overview">
+    AFL, state leagues
+  </Card>
+
+  <Card title="Floorball" icon="hockey-puck" href="/api-reference/floorball-v2/overview">
+    IFF World Championship
+  </Card>
+
+  <Card title="Bandy" icon="hockey-puck" href="/api-reference/bandy-v2/overview">
+    World Championship, Elitserien
+  </Card>
+
+  <Card title="Minifootball" icon="futbol" href="/api-reference/minifootball-v2/overview">
+    WMF competitions
+  </Card>
+</CardGroup>
+
+## Rate Limiting
+
+<Note>
+  Rate limits are **shared across all 25+ sports APIs**. Your daily quota applies to your total usage across Football, Basketball, Tennis, and every other sport.
+</Note>
+
+Rate limit information is included in response headers:
+
+| Header                  | Description                      |
+| ----------------------- | -------------------------------- |
+| `X-RateLimit-Limit`     | Your daily request limit         |
+| `X-RateLimit-Remaining` | Remaining requests today         |
+| `X-RateLimit-Reset`     | Unix timestamp when limit resets |
+
+See [Rate Limits](/rate-limits) for more details.
+
+## Sport IDs Reference
+
+Use these IDs with the `sports` parameter to filter by sport type:
+
+| ID  | Sport             | API Status  |
+| --- | ----------------- | ----------- |
+| 1   | Football (Soccer) | ✅ Available |
+| 2   | Basketball        | ✅ Available |
+| 3   | Tennis            | ✅ Available |
+| 4   | Ice Hockey        | ✅ Available |
+| 5   | Handball          | ✅ Available |
+| 6   | American Football | ✅ Available |
+| 7   | Baseball          | ✅ Available |
+| 8   | Volleyball        | ✅ Available |
+| 10  | Cycling           | ✅ Available |
+| 11  | Motorsport        | ✅ Available |
+| 12  | Rugby             | ✅ Available |
+| 15  | Table Tennis      | ✅ Available |
+| 19  | Snooker           | ✅ Available |
+| 22  | Darts             | ✅ Available |
+| 26  | Water Polo        | ✅ Available |
+| 29  | Futsal            | ✅ Available |
+| 31  | Badminton         | ✅ Available |
+| 32  | Bandy             | ✅ Available |
+| 34  | Beach Volleyball  | ✅ Available |
+| 62  | Cricket           | ✅ Available |
+| 64  | Minifootball      | ✅ Available |
+| 71  | Aussie Rules      | ✅ Available |
+| 72  | Esports           | ✅ Available |
+| 74  | Floorball         | ✅ Available |
+| 117 | MMA               | ✅ Available |
+
+<Tip>
+  Each sport has its own dedicated API subdomain (e.g., `v2.football.sportsapipro.com`, `v2.basketball.sportsapipro.com`, `v2.tennis.sportsapipro.com`). The `sports` parameter is used for filtering within multi-sport endpoints like `/countries`.
+</Tip>
+
+## Next Steps
+
+<CardGroup cols={3}>
+  <Card title="Quickstart Guide" icon="rocket" href="/quickstart">
+    Get up and running in minutes
+  </Card>
+
+  <Card title="Football V2 API" icon="futbol" href="/api-reference/football-v2/overview">
+    Most popular — 147+ endpoints
+  </Card>
+
+  <Card title="Basketball V2 API" icon="basketball" href="/api-reference/basketball-v2/overview">
+    NBA, EuroLeague & 50+ leagues
+  </Card>
+
+  <Card title="Tennis V2 API" icon="table-tennis-paddle-ball" href="/api-reference/tennis-v2/overview">
+    Rankings, draws & point-by-point
+  </Card>
+
+  <Card title="Cricket V2 API" icon="baseball" href="/api-reference/cricket-v2/overview">
+    IPL, Test & T20 coverage
+  </Card>
+
+  <Card title="Ice Hockey V2 API" icon="hockey-puck" href="/api-reference/hockey-v2/overview">
+    NHL, KHL & 30+ leagues
+  </Card>
+</CardGroup>

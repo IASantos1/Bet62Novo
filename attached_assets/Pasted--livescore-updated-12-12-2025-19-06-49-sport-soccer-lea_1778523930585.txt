@@ -1,0 +1,76 @@
+{
+  "livescore": {
+    "updated": "12.12.2025 19:06:49",
+    "sport": "soccer",
+    "league": [
+      {
+        "country": "algeria",
+        "name": "Algeria: Algeria Cup",
+        "cup": "True",
+        "id": "4166",
+        "sub_id": "",
+        "match": [
+          {
+            "alternate_id": "6640082",
+            "alternate_id_2": "8826610",
+            "commentary": "False",
+            "date": "12.12.2025",
+            "id": "6132668",
+            "inj_minute": "",
+            "inj_time": "",
+            "static_id": "12122523590052337596",
+            "status": "FT",
+            "time": "13:30",
+            "venue": "",
+            "home": {
+              "agg": "false",
+              "goals": "0",
+              "id": "2359005",
+              "name": "Bechar Djedid"
+            },
+            "away": {
+              "agg": "true",
+              "goals": "4",
+              "id": "2337596",
+              "name": "ES Setif"
+            },
+            "events": {
+              "event": [
+                {
+                  "assist": "",
+                  "assistid": "",
+                  "extra_min": "",
+                  "id": "67279604",
+                  "minute": "6",
+                  "player": "A. Biramahire",
+                  "playerid": "2863849",
+                  "result": "[0 - 1]",
+                  "team": "away",
+                  "type": "goal"
+                },
+                {
+                  "assist": "",
+                  "assistid": "",
+                  "extra_min": "",
+                  "id": "67279605",
+                  "minute": "30",
+                  "player": "A. Djahnit",
+                  "playerid": "2525658",
+                  "result": "[0 - 2]",
+                  "team": "away",
+                  "type": "goal"
+                }
+              ]
+            },
+            "ht": {
+              "score": "[0-2]"
+            },
+            "ft": {
+              "score": "[0-4]"
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

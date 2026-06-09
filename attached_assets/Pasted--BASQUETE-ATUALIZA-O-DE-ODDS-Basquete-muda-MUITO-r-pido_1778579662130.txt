@@ -1,0 +1,211 @@
+🏀 BASQUETE — ATUALIZAÇÃO DE ODDS
+
+Basquete muda MUITO rápido.
+
+⚡ Frequência
+Estado	Polling
+Pré-jogo	30s
+Ao vivo	2s
+Últimos 2 min	1s
+🔒 Suspender em:
+Evento	Suspende
+Cesta	✔
+Lance livre	✔
+Timeout	✔
+Revisão	✔
+❌ Ocultar linhas
+Over 189.5 → oculta
+Abre 194.5
+⚙️ Configuração
+const basketballConfig = {
+
+  polling: 2000,
+
+  suspendOn: [
+    "basket",
+    "timeout",
+    "review"
+  ],
+
+  dynamicLines: true
+};
+🏒 HÓQUEI — ATUALIZAÇÃO DE ODDS
+⚡ Frequência
+Estado	Polling
+Pré-jogo	30s
+Ao vivo	4s
+Power Play	2s
+🔒 Suspender em:
+Evento	Suspende
+Goal	✔
+Penalty	✔
+Power Play	✔
+Shootout	✔
+❌ Ocultar linhas
+Over 3.5 → removido
+Abre Over 5.5
+⚙️ Configuração
+const hockeyConfig = {
+
+  polling: 4000,
+
+  suspendOn: [
+    "goal",
+    "penalty",
+    "power_play"
+  ],
+
+  dynamicLines: true
+};
+🎾 TÊNIS — ATUALIZAÇÃO DE ODDS
+
+Tênis precisa de atualização quase contínua.
+
+⚡ Frequência
+Estado	Polling
+Pré-jogo	30s
+Ao vivo	1s
+Break Point	500ms
+🔒 Suspender em:
+Evento	Suspende
+Point	✔
+Break Point	✔
+Set Point	✔
+Match Point	✔
+❌ Ocultar mercados
+Set 1 Winner → removido
+Set 2 Winner → aberto
+⚙️ Configuração
+const tennisConfig = {
+
+  polling: 1000,
+
+  suspendOn: [
+    "point",
+    "break_point",
+    "set_end"
+  ],
+
+  dynamicSetMarkets: true
+};
+🏐 VÔLEI — ATUALIZAÇÃO DE ODDS
+⚡ Frequência
+Estado	Polling
+Pré-jogo	30s
+Ao vivo	2s
+Set Point	1s
+🔒 Suspender em:
+Evento	Suspende
+Point	✔
+Set Point	✔
+Timeout	✔
+Challenge	✔
+❌ Ocultar mercados
+Set 1 Markets → removidos
+Set 2 Markets → abertos
+⚙️ Configuração
+const volleyballConfig = {
+
+  polling: 2000,
+
+  suspendOn: [
+    "point",
+    "timeout",
+    "challenge"
+  ],
+
+  dynamicLines: true
+};
+🧠 ENGINE CENTRAL DE POLLING
+
+Você deve ter:
+
+const SPORTS_CONFIG = {
+
+  football: footballConfig,
+
+  basketball: basketballConfig,
+
+  hockey: hockeyConfig,
+
+  tennis: tennisConfig,
+
+  volleyball: volleyballConfig
+};
+⚙️ LOOP CENTRAL
+setInterval(async () => {
+
+  const liveEvents =
+    await fetchEvents();
+
+  liveEvents.forEach(event => {
+
+    processMarkets(event);
+
+  });
+
+}, 1000);
+⚡ PROCESSAMENTO
+function processMarkets(event) {
+
+  const config =
+    SPORTS_CONFIG[event.sport];
+
+  if (
+    config.suspendOn.includes(
+      event.lastEvent
+    )
+  ) {
+
+    suspendMarkets(event.id);
+  }
+
+  updateOdds(event);
+
+  updateLines(event);
+
+  removeFinishedMarkets(event);
+}
+❌ REMOVER MERCADOS ENCERRADOS
+function removeFinishedMarkets(event) {
+
+  event.markets =
+    event.markets.filter(m => {
+
+      return !m.finished;
+
+    });
+}
+⚡ GERAR NOVAS LINHAS
+function updateLines(event) {
+
+  if (
+    event.totalGoals >= 2
+  ) {
+
+    addLine("3.5");
+
+    addLine("4.5");
+  }
+}
+🧠 SISTEMA FINAL
+POLLING
+   ↓
+CACHE
+   ↓
+MARKET ENGINE
+   ↓
+SUSPEND ENGINE
+   ↓
+ODDS ENGINE
+   ↓
+FRONTEND
+🚀 O QUE VOCÊ TEM AGORA
+
+✔ Atualização multi-esporte
+✔ Polling por esporte
+✔ Suspensão automática
+✔ Linhas dinâmicas
+✔ Ocultação de mercados
+✔ Reabertura automática
+✔ Engine profissional
