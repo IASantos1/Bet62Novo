@@ -7065,6 +7065,7 @@ async function buildFootballLiveV2(events: SAPIV2Event[]): Promise<LiveMatchStat
   })();
   const result: LiveMatchState[] = [];
   const currentIds = new Set<string>();
+  const providerPresentIds = new Set<string>();
 
   const pool = async <T>(items: T[], limit: number, fn: (item: T) => Promise<void>): Promise<void> => {
     let i = 0;
@@ -7106,18 +7107,27 @@ async function buildFootballLiveV2(events: SAPIV2Event[]): Promise<LiveMatchStat
 
     if (footballLeagueAllowedStrict(countryRaw, leagueName)) primary.push({ ev, prio, fromUpcoming });
     else if (!isLeagueUniversallyBlocked(`${leagueName} ${homeTeam} ${awayTeam}`)) fallback.push({ ev, prio: prio === 999 ? 500 : prio, fromUpcoming });
+    providerPresentIds.add(`football-v2-${ev.id}`);
   }
 
   primary.sort((a, b) => a.prio - b.prio);
   fallback.sort((a, b) => a.prio - b.prio);
 
   const source = primary.length > 0 ? primary : fallback;
-  const baseCap = primary.length > 0 ? 40 : 3;
+  const baseCap = primary.length > 0 ? 40 : 8;
   const chosen: SAPIV2Event[] = [];
   const chosenIds = new Set<number>();
   for (const entry of source) {
     if (chosenIds.has(entry.ev.id)) continue;
     if (!entry.fromUpcoming && chosen.length >= baseCap) continue;
+    chosen.push(entry.ev);
+    chosenIds.add(entry.ev.id);
+  }
+
+  for (const entry of source) {
+    if (chosen.length >= 70) break;
+    if (chosenIds.has(entry.ev.id)) continue;
+    if (!liveMatchState.has(`football-v2-${entry.ev.id}`)) continue;
     chosen.push(entry.ev);
     chosenIds.add(entry.ev.id);
   }
@@ -7478,7 +7488,12 @@ async function buildFootballLiveV2(events: SAPIV2Event[]): Promise<LiveMatchStat
       _v2StuckTracker.delete(id);
       continue;
     }
-    if (currentIds.has(id)) continue;
+    if (providerPresentIds.has(id)) {
+      if (state._missingSinceAt) {
+        liveMatchState.set(id, { ...state, _missingSinceAt: undefined, _suspensionReason: undefined });
+      }
+      continue;
+    }
     const missingSince = state._missingSinceAt ?? now;
     if (!state._missingSinceAt) {
       const updated: LiveMatchState = {
