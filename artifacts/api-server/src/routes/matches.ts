@@ -7228,6 +7228,7 @@ function isFootballV2LiveStatus(statusStr: string, statusCode?: number): boolean
   if (!s) return false;
   return (
     s === "ht" ||
+    s.includes("halftime") ||
     s.includes("1st half") ||
     s.includes("first half") ||
     s.includes("2nd half") ||
@@ -7299,7 +7300,7 @@ async function buildFootballLiveV2(events: SAPIV2Event[]): Promise<LiveMatchStat
     const isPriorityLeague = isCatalogPriorityLeague(prio);
     const fromUpcoming = hasRecentUpcomingFootballEligibility(ev.id);
     metaById.set(ev.id, { countryRaw, countryKey, leagueName, prio });
-    if (!liveMatchState.has(`football-v2-${ev.id}`) && evAgeSeconds > 5 * 60 && !isPriorityLeague && !fromUpcoming) continue;
+    if (!liveMatchState.has(`football-v2-${ev.id}`) && evAgeSeconds > 120 * 60 && !isPriorityLeague && !fromUpcoming) continue;
 
     if (footballLeagueAllowedStrict(countryRaw, leagueName)) primary.push({ ev, prio, fromUpcoming });
     else if (!isLeagueUniversallyBlocked(`${leagueName} ${homeTeam} ${awayTeam}`)) fallback.push({ ev, prio: prio === 999 ? 500 : prio, fromUpcoming });
