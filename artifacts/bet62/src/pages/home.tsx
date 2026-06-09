@@ -3040,6 +3040,9 @@ export default function Home() {
         if (s.includes("awarded")) return true;
         if (s.includes("default")) return true;
         if (s.includes("walk over") || s.includes("walkover") || s.includes("w/o")) return true;
+        if (s.includes("removed") || s.includes("remove")) return true;
+        if (s.includes("interrupted")) return true;
+        if (s.includes("suspended") && s.includes("match")) return true;
         return false;
       };
       const staleMatches = prev
@@ -3048,14 +3051,15 @@ export default function Home() {
           if (freshIds.has(id)) return false;
           if (isFinishedStatus(m.status)) return false;
           const lastSeen = matchLastSeenRef.current[id] ?? 0;
-          return (now - lastSeen) < 10_000;
+          // Keep stale matches for up to 30s after last seen (was 10s — too aggressive)
+          return (now - lastSeen) < 30_000;
         })
         .map(m => ({ ...m, marketSuspension: undefined, _suspensionReason: undefined, suspensionReason: undefined }));
 
-      // Live matches (startsIn === undefined) always show even without odds — the game is happening.
-      // "Em Breve" entries only show when there are real odds to bet on.
+      // Live matches (startsIn === undefined) always show.
+      // "Em Breve" entries show when there are real odds OR computed odds (home > 0 and away > 0).
       const freshMatches = matches
-        .filter(m => m.startsIn === undefined || m.hasRealOdds !== false)
+        .filter(m => m.startsIn === undefined || m.hasRealOdds !== false || (m.odds.home > 0 && m.odds.away > 0))
         .map(m => ({ ...m, isLive: true }));
 
       return [...staleMatches, ...freshMatches];
@@ -3829,7 +3833,8 @@ export default function Home() {
 
   // Compact league/meta row (no banner)
   const CompactLeagueRow = ({ match, rightSlot }: { match: Match; rightSlot?: ReactNode }) => {
-    const flag = COUNTRY_FLAGS[match.country?.toLowerCase() ?? ""] ?? sportEmoji(match.sport);
+    const countryFlag = COUNTRY_FLAGS[match.country?.toLowerCase() ?? ""];
+    const flag = countryFlag ?? sportEmoji(match.sport);
     // For live "Not Started" matches (tennis/volleyball): show scheduled time
     const timeStr = (match.isLive && match.status !== "Not Started") ? "" : [
       match.date ? formatMatchDate(match.date) : "",
@@ -3840,7 +3845,9 @@ export default function Home() {
         <div className="flex items-center gap-2 min-w-0">
           <div className="relative shrink-0 w-6 h-6 flex items-center justify-center rounded-full bg-zinc-800 text-sm leading-none">
             {flag}
-            <span className="absolute -bottom-0.5 -right-1 bg-zinc-950 rounded-full text-[9px] w-3.5 h-3.5 flex items-center justify-center border border-zinc-800">{sportEmoji(match.sport)}</span>
+            {countryFlag && (
+              <span className="absolute -bottom-0.5 -right-1 bg-zinc-950 rounded-full text-[9px] w-3.5 h-3.5 flex items-center justify-center border border-zinc-800">{sportEmoji(match.sport)}</span>
+            )}
           </div>
           <span className="text-[11px] text-zinc-500 truncate">{match.league}</span>
         </div>

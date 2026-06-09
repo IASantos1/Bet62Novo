@@ -2329,9 +2329,20 @@ function v2TournCountry(ev: SAPIV2Event): string {
   }
   return "";
 }
+function cleanLeagueName(raw: string): string {
+  // Remove duplicated round segments: "Ilkley - Round of 32 Round of 32 Round" → "Ilkley - Round of 32"
+  let s = raw.replace(/(Round of \d+)(?:\s+\1)+(?:\s+Round)?\b/gi, "$1");
+  // Remove orphan trailing " Round" after a dash/hyphen: "City - Round of 32 Round" → "City - Round of 32"
+  s = s.replace(/(\bRound of \d+)\s+Round\b/gi, "$1");
+  // Collapse multiple spaces
+  s = s.replace(/\s{2,}/g, " ").trim();
+  return s;
+}
+
 function v2TournName(t: string | SAPIV2TournObj | undefined): string {
   if (!t) return "Unknown";
-  return typeof t === "string" ? t : (t.name ?? "Unknown");
+  const raw = typeof t === "string" ? t : (t.name ?? "Unknown");
+  return cleanLeagueName(raw);
 }
 
 /**
