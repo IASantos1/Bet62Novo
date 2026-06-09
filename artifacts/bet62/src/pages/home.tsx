@@ -9379,6 +9379,7 @@ export default function Home() {
                       { p: ["australian open"], label: "Australian Open", logo: "https://upload.wikimedia.org/wikipedia/commons/thumb/b/b4/Australian_Open_Logo_2017.svg/120px-Australian_Open_Logo_2017.svg.png", color: "#00AEEF" },
                       { p: ["atp 1000","masters 1000","rolex masters","monte-carlo","monte carlo","madrid open"], label: "ATP Masters", logo: "https://media.api-sports.io/football/leagues/2.png", color: "#2C5F8B" },
                     ];
+                    const byLabel = new Map(ML.map(m => [m.label, m] as const));
                     const findML = (name: string) => {
                       const n = name.toLowerCase();
                       return ML.find(ml => ml.p.some(pt => n.includes(pt)));
@@ -9392,7 +9393,17 @@ export default function Home() {
                         if (ml && !seenLabels.has(ml.label)) { seenLabels.add(ml.label); chips.push({ label: ml.label, logo: ml.logo, color: ml.color }); }
                       }
                     }
-                    if (chips.length < 2) return null;
+                    if (selectedLeague && !seenLabels.has(selectedLeague)) {
+                      const ml = byLabel.get(selectedLeague);
+                      if (ml) {
+                        chips.push({ label: ml.label, logo: ml.logo, color: ml.color });
+                        seenLabels.add(ml.label);
+                      } else {
+                        chips.push({ label: selectedLeague, logo: "", color: "#dc2626" });
+                        seenLabels.add(selectedLeague);
+                      }
+                    }
+                    if (chips.length < 2 && !selectedLeague) return null;
                     return (
                       <div className="overflow-x-auto flex gap-2.5 pb-3 mb-5 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
                         {chips.length >= 2 && (
@@ -9412,25 +9423,35 @@ export default function Home() {
                               {...makeTap(() => setSelectedLeague(active ? null : c.label))}
                               className={`flex items-center gap-2.5 px-3.5 py-2.5 rounded-xl border whitespace-nowrap text-sm font-semibold transition-all flex-shrink-0 ${active ? "border-amber-500 bg-amber-500/10 text-white shadow-[0_0_10px_rgba(245,158,11,0.18)]" : "border-zinc-700 bg-zinc-900/60 text-zinc-300 hover:border-zinc-500 hover:text-white"}`}
                             >
-                              <img
-                                src={c.logo}
-                                alt={c.label}
-                                width={20}
-                                height={20}
-                                className="rounded object-contain shrink-0"
-                                style={{ background: "transparent" }}
-                                onError={(e) => {
-                                  const t = e.currentTarget;
-                                  t.style.display = "none";
-                                  const fb = t.nextElementSibling as HTMLElement | null;
-                                  if (fb) fb.style.display = "flex";
-                                }}
-                              />
-                              <span
-                                style={{ display: "none", width: 20, height: 20, borderRadius: 4, backgroundColor: c.color + "cc", alignItems: "center", justifyContent: "center", fontSize: 7, fontWeight: 700, color: "#fff", flexShrink: 0 }}
-                              >
-                                {c.label.slice(0, 3).toUpperCase()}
-                              </span>
+                              {c.logo ? (
+                                <>
+                                  <img
+                                    src={c.logo}
+                                    alt={c.label}
+                                    width={20}
+                                    height={20}
+                                    className="rounded object-contain shrink-0"
+                                    style={{ background: "transparent" }}
+                                    onError={(e) => {
+                                      const t = e.currentTarget;
+                                      t.style.display = "none";
+                                      const fb = t.nextElementSibling as HTMLElement | null;
+                                      if (fb) fb.style.display = "flex";
+                                    }}
+                                  />
+                                  <span
+                                    style={{ display: "none", width: 20, height: 20, borderRadius: 4, backgroundColor: c.color + "cc", alignItems: "center", justifyContent: "center", fontSize: 7, fontWeight: 700, color: "#fff", flexShrink: 0 }}
+                                  >
+                                    {c.label.slice(0, 3).toUpperCase()}
+                                  </span>
+                                </>
+                              ) : (
+                                <span
+                                  style={{ width: 20, height: 20, borderRadius: 4, backgroundColor: c.color + "cc", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 7, fontWeight: 700, color: "#fff", flexShrink: 0 }}
+                                >
+                                  {c.label.slice(0, 3).toUpperCase()}
+                                </span>
+                              )}
                               <span className="max-w-[140px] truncate">{c.label}</span>
                             </button>
                           );
