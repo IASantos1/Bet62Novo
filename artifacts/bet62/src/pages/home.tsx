@@ -1575,6 +1575,8 @@ export default function Home() {
   useEffect(() => { isIdleRef.current = isIdle; }, [isIdle]);
   const upcomingFetchCtrlRef = useRef<AbortController | null>(null);
   const liveFetchCtrlRef = useRef<AbortController | null>(null);
+  const liveFetchInFlightRef = useRef(false);
+  const sseReconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const [activeTab, setActiveTab] = useState<"sports" | "live" | "promos" | "mybets" | "wallet" | "profile">("sports");
   const activeTabRef = useRef(activeTab);
@@ -3063,10 +3065,11 @@ export default function Home() {
   const fetchLive = useCallback(async (showSpinner = false) => {
     if (document.visibilityState === "hidden") return;
     if (isIdleRef.current || isLockedRef.current) return;
+    if (liveFetchInFlightRef.current) return;
     if (showSpinner) setLiveLoading(true);
     let ctrl: AbortController | null = null;
+    liveFetchInFlightRef.current = true;
     try {
-      try { liveFetchCtrlRef.current?.abort(); } catch {}
       ctrl = new AbortController();
       const currentCtrl = ctrl;
       liveFetchCtrlRef.current = currentCtrl;
@@ -3084,6 +3087,7 @@ export default function Home() {
     } catch {
     } finally {
       if (ctrl && liveFetchCtrlRef.current === ctrl) liveFetchCtrlRef.current = null;
+      liveFetchInFlightRef.current = false;
       if (showSpinner) setLiveLoading(false);
     }
   }, [processLiveData, liveSnapshotKey, writeSnapshot]);
@@ -3140,6 +3144,15 @@ export default function Home() {
         try {
           const data = JSON.parse(evt.data) as any;
           if (data.type === "update" && data.matchId) {
+            const now = Date.now();
+            liveDataFetchedAt.current = now;
+            matchLastSeenRef.current[String(data.matchId)] = now;
+            if (typeof data.delta?.minute === "number") {
+              if (apiMinutesRef.current[String(data.matchId)] !== data.delta.minute) {
+                minuteChangedAtRef.current[String(data.matchId)] = now;
+              }
+              apiMinutesRef.current[String(data.matchId)] = data.delta.minute;
+            }
             // Sub-second delta — patch just the changed match
             setLiveMatches(prev => prev.map(m =>
               String(m.id) === String(data.matchId) ? { ...m, ...(data.delta ?? {}), isLive: true } : m
@@ -3156,8 +3169,11 @@ export default function Home() {
         // SSE dropped — close and fall back to polling
         es.close();
         if (sseRef.current === es) { sseRef.current = null; sseActiveRef.current = false; }
+        if (sseReconnectTimerRef.current) clearTimeout(sseReconnectTimerRef.current);
         // Reconnect in 4s
-        setTimeout(() => { if (sseRef.current === null && activeTabRef.current === "live") openSSE(); }, 4_000);
+        sseReconnectTimerRef.current = setTimeout(() => {
+          if (sseRef.current === null && activeTabRef.current === "live") openSSE();
+        }, 4_000);
       };
     };
     openSSE();
@@ -3167,11 +3183,14 @@ export default function Home() {
     fetchLive(!hasMatches);
     const pollId = setInterval(() => {
       if (!sseActiveRef.current) fetchLive(false); // only poll when SSE is down
-      else if (Date.now() - (liveDataFetchedAt.current ?? 0) > 3_000) fetchLive(false); // stale guard
-    }, 1_000);
+      else if (Date.now() - (liveDataFetchedAt.current ?? 0) > 12_000) fetchLive(false); // stale guard
+    }, 4_000);
 
     return () => {
       clearInterval(pollId);
+      if (sseReconnectTimerRef.current) { clearTimeout(sseReconnectTimerRef.current); sseReconnectTimerRef.current = null; }
+      if (liveFetchCtrlRef.current) { try { liveFetchCtrlRef.current.abort(); } catch {} liveFetchCtrlRef.current = null; }
+      liveFetchInFlightRef.current = false;
       if (sseRef.current) { sseRef.current.close(); sseRef.current = null; }
       sseActiveRef.current = false;
     };

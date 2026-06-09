@@ -8772,12 +8772,25 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
     };
   };
 
-  return {
+  const result = {
     matches: [
       ...filteredLive.map((match) => applyOperationalDecision(match, liveDecisions.get(String(match.id)))),
       ...filteredPrematch.map((match) => applyOperationalDecision(match, prematchDecisions.get(String(match.id)))),
     ],
   };
+  if (result.matches.length > 0) {
+    livePayloadFallbackCache = { payload: result, builtAt: Date.now() };
+  }
+  return result;
+}
+
+const LIVE_PAYLOAD_FALLBACK_TTL_MS = 45_000;
+let livePayloadFallbackCache: { payload: { matches: LiveMatchState[] }; builtAt: number } | null = null;
+
+function getLivePayloadFallback(): { matches: LiveMatchState[] } | null {
+  if (!livePayloadFallbackCache) return null;
+  if (Date.now() - livePayloadFallbackCache.builtAt > LIVE_PAYLOAD_FALLBACK_TTL_MS) return null;
+  return livePayloadFallbackCache.payload;
 }
 
 // Broadcast payload to all connected SSE + WebSocket clients; prune dead connections.
@@ -8794,14 +8807,15 @@ async function broadcastLive(): Promise<void> {
   broadcastPending = false;
   try {
     const payload = await buildLivePayload();
-    if (payload.matches.length === 0) {
+    const effectivePayload = payload.matches.length === 0 ? (getLivePayloadFallback() ?? payload) : payload;
+    if (effectivePayload.matches.length === 0) {
       consecutiveEmptyBroadcasts += 1;
       if (consecutiveEmptyBroadcasts < 3) return;
     } else {
       consecutiveEmptyBroadcasts = 0;
     }
     // Only serialize once
-    const wsMsgObj = { type: "snapshot", ...payload };
+    const wsMsgObj = { type: "snapshot", ...effectivePayload };
     const jsonStr = JSON.stringify(wsMsgObj);
 
     // SSE clients
@@ -8862,7 +8876,8 @@ router.get("/live", async (req: Request, res: Response) => {
   const limit = Number.isFinite(limitRaw) ? Math.max(0, Math.min(500, limitRaw)) : 0;
   try {
     const payload = await buildLivePayload();
-    const matches = limit > 0 ? payload.matches.slice(0, limit) : payload.matches;
+    const effectivePayload = payload.matches.length === 0 ? (getLivePayloadFallback() ?? payload) : payload;
+    const matches = limit > 0 ? effectivePayload.matches.slice(0, limit) : effectivePayload.matches;
     if (!lean) {
       res.json({ matches });
       return;
@@ -8875,7 +8890,7 @@ router.get("/live", async (req: Request, res: Response) => {
     res.json({ matches: out });
   } catch (err) {
     logger.error({ err }, "[live route] unexpected error");
-    res.json({ matches: [] });
+    res.json(getLivePayloadFallback() ?? { matches: [] });
   }
 });
 
@@ -8888,10 +8903,12 @@ router.get("/live-match/:id", async (req: Request, res: Response) => {
   }
   try {
     const payload = await buildLivePayload();
-    const match = payload.matches.find(m => String(m.id) === id) ?? null;
+    const effectivePayload = payload.matches.length === 0 ? (getLivePayloadFallback() ?? payload) : payload;
+    const match = effectivePayload.matches.find(m => String(m.id) === id) ?? null;
     res.json({ match });
   } catch {
-    res.json({ match: null });
+    const fallback = getLivePayloadFallback();
+    res.json({ match: fallback?.matches.find(m => String(m.id) === id) ?? null });
   }
 });
 
@@ -8942,9 +8959,14 @@ router.get("/live-stream", (req: Request, res: Response) => {
   // Send an initial event right away so the client doesn't wait for the next tick
   buildLivePayload()
     .then(p => {
-      try { res.write(`data: ${JSON.stringify(p)}\n\n`); } catch { /* ignore */ }
+      const effectivePayload = p.matches.length === 0 ? (getLivePayloadFallback() ?? p) : p;
+      try { res.write(`data: ${JSON.stringify(effectivePayload)}\n\n`); } catch { /* ignore */ }
     })
-    .catch(() => { /* ignore */ });
+    .catch(() => {
+      const fallback = getLivePayloadFallback();
+      if (!fallback) return;
+      try { res.write(`data: ${JSON.stringify(fallback)}\n\n`); } catch { /* ignore */ }
+    });
 
   // Keepalive comment every 20s so proxies don't close the connection
   const keepAlive = setInterval(() => {
