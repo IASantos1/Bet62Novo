@@ -2126,6 +2126,38 @@ function tennisTierRank(name: string): number {
   return 999;
 }
 
+function tennisTournamentSearchText(tournament: string | SAPIV2TournObj | undefined): string {
+  if (!tournament || typeof tournament !== "object") return "";
+  const uniqueTournament = (tournament as SAPIV2TournObj & {
+    uniqueTournament?: { name?: string; slug?: string };
+  }).uniqueTournament;
+  return [
+    tournament.name,
+    tournament.slug,
+    tournament.category?.name,
+    tournament.category?.slug,
+    uniqueTournament?.name,
+    uniqueTournament?.slug,
+  ]
+    .filter(Boolean)
+    .join(" ");
+}
+
+function isKnownTennisTour(name: string): boolean {
+  const n = String(name ?? "")
+    .toLowerCase()
+    .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+    .trim();
+  if (!n) return false;
+  return (
+    n.includes("atp") ||
+    n.includes("wta") ||
+    n.includes("challenger") ||
+    n.includes("itf") ||
+    n.includes("world tennis tour")
+  );
+}
+
 /** Tournament name patterns that are always excluded (doubles, wheelchair, juniors, etc.) */
 function isTennisExcludedName(name: string): boolean {
   const n = name.toLowerCase();
@@ -2147,9 +2179,10 @@ function isTennisExcludedName(name: string): boolean {
 function isTennisElite(ev: SAPIV2Event): boolean {
   const t = ev.tournament;
   if (typeof t !== "object") return false;
-  const tier = tennisTierRank(t.name ?? t.category?.name ?? "");
-  if (tier === 999) return false;
-  if (isTennisExcludedName(t.name ?? "")) return false;
+  const searchText = tennisTournamentSearchText(t);
+  const tier = tennisTierRank(searchText);
+  if (tier === 999 && !isKnownTennisTour(searchText)) return false;
+  if (isTennisExcludedName(searchText)) return false;
   // Detect doubles by player name: any "/" in the name means "Player A / Player B" (doubles pair)
   const homeName = typeof ev.homeTeam === "object" ? (ev.homeTeam.name ?? "") : (ev.homeTeam ?? "");
   const awayName = typeof ev.awayTeam === "object" ? (ev.awayTeam.name ?? "") : (ev.awayTeam ?? "");
@@ -2161,9 +2194,10 @@ function isTennisElite(ev: SAPIV2Event): boolean {
 function isTennisEliteUpcoming(ev: SAPIV2Event): boolean {
   const t = ev.tournament;
   if (typeof t !== "object") return false;
-  const tier = tennisTierRank(t.name ?? t.category?.name ?? "");
-  if (tier === 999) return false;
-  return !isTennisExcludedName(t.name ?? "");
+  const searchText = tennisTournamentSearchText(t);
+  const tier = tennisTierRank(searchText);
+  if (tier === 999 && !isKnownTennisTour(searchText)) return false;
+  return !isTennisExcludedName(searchText);
 }
 type SAPIV2TeamObj   = { id?: number; name: string };
 
