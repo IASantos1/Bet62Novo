@@ -8399,6 +8399,7 @@ async function rebuildUpcomingCache(): Promise<void> {
 
 // Shared payload builder — used by both /live HTTP route and SSE broadcast
 async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
+  const now = Date.now();
   // Warm the upcoming cache first so football matches recently seen in pre-match
   // are eligible to cross into the live feed even if the provider reports them late.
   if (_allUpcomingCacheBuiltAt === 0) {
@@ -8434,12 +8435,47 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
     (tennisTodayEvents ?? []).filter(ev => !allLiveIds.has(`tennis-v2-${ev.id}`))
   ).filter(m => !allLiveIds.has(String(m.id)));
   const tennisLivePart = [...tennisV2Part, ...tennisV1LivePart, ...todayStartedExtra];
+  const startedUpcomingTennisPart = (() => {
+    const existing = new Set(tennisLivePart.map(m => String(m.id)));
+    const out: LiveMatchState[] = [];
+    for (const up of allUpcoming) {
+      if (up.sport !== "tennis") continue;
+      if (!up.id || !String(up.id).startsWith("tennis-v2-")) continue;
+      const id = String(up.id);
+      if (existing.has(id)) continue;
+      const kickoffMs = parseUpcomingKickoffMs(up);
+      if (!kickoffMs) continue;
+      if (kickoffMs > now + 2 * 60_000) continue;
+      if (now - kickoffMs > 4 * 60 * 60_000) continue;
+      if (!up.home || !up.away) continue;
+      out.push({
+        id,
+        home: up.home,
+        away: up.away,
+        league: up.league ?? "Tennis",
+        country: up.country ?? "",
+        sport: "tennis",
+        homeScore: 0,
+        awayScore: 0,
+        minute: 1,
+        status: "Em Jogo",
+        hasRealOdds: !!up.hasRealOdds,
+        odds: up.odds ?? makeOddsFromTeams(up.home, up.away),
+        markets: (up.markets as AdvancedMarkets) ?? makeAdvancedMarketsFromTeams(up.home, up.away),
+        events: [],
+        _liveExtra: { sets: [[0, 0]], currentPoints: ["0", "0"] },
+      });
+      if (out.length >= 60) break;
+    }
+    return out;
+  })();
   const livePart = [
     ...(await buildFootballLiveV2(footballEvents)),
     ...buildBasketballLiveV2(basketballEvents),
     ...buildHockeyLiveV2(hockeyEvents),
     ...buildBaseballLiveV2(baseballEvents),
     ...tennisLivePart,
+    ...startedUpcomingTennisPart,
   ];
 
   const liveIds = new Set(livePart.map(m => String(m.id)));
@@ -9180,6 +9216,10 @@ const recentUpcomingV2Ids = new Map<string, number>();
 function parseUpcomingKickoffMs(match: Pick<UpcomingMatch, "date" | "time">): number | null {
   if (!match.date || !match.time) return null;
   try {
+    if (/^\d{4}-\d{2}-\d{2}$/.test(match.date)) {
+      const [hStr = "0", mStr = "0"] = match.time.split(":");
+      return new Date(`${match.date}T${String(parseInt(hStr, 10)).padStart(2, "0")}:${mStr}:00Z`).getTime();
+    }
     const [dd, mm, yyyy] = match.date.split(".");
     if (!dd || !mm || !yyyy) return null;
     const offsetH = lisbonOffsetHours();
