@@ -8380,14 +8380,16 @@ async function rebuildUpcomingCache(): Promise<void> {
   _upcomingRebuildInProgress = true;
   const empty: UpcomingMatch[] = [];
   try {
-    const [upFootball, upTennis, upBasketball, upHockey, upVolleyball, upBaseball] = await Promise.all([
+    const [upFootball, upTennisBase, tennisOdds, upBasketball, upHockey, upVolleyball, upBaseball] = await Promise.all([
       buildUpcomingMatches().catch(() => empty),
       buildTennisUpcoming().catch(() => empty),
+      getTennisOdds().catch(() => [] as TennisOddsEntry[]),
       buildBasketballUpcoming().catch(() => empty),
       buildHockeyUpcoming().catch(() => empty),
       buildVolleyballUpcoming().catch(() => empty),
       buildBaseballUpcoming().catch(() => empty),
     ]);
+    const upTennis = mergeTennisUpcomingSources(upTennisBase, buildTennisUpcomingFromOddsEntries(tennisOdds));
     rememberUpcomingFootballEligibility(upFootball);
     rememberUpcomingEligibility([...upFootball, ...upTennis, ...upBasketball, ...upHockey, ...upVolleyball, ...upBaseball]);
     _allUpcomingCache = [...upFootball, ...upTennis, ...upBasketball, ...upHockey, ...upVolleyball, ...upBaseball];
@@ -9200,6 +9202,46 @@ async function buildBaseballUpcoming(): Promise<UpcomingMatch[]> {
   }
 }
 
+function buildTennisUpcomingFromOddsEntries(odds: TennisOddsEntry[]): UpcomingMatch[] {
+  const seen = new Set<string>();
+  const out: UpcomingMatch[] = [];
+  for (const entry of odds) {
+    const home = entry.players?.[0]?.name?.trim() ?? "";
+    const away = entry.players?.[1]?.name?.trim() ?? "";
+    if (!home || !away) continue;
+    const id = `tennis-v2-${entry.matchId}`;
+    if (seen.has(id)) continue;
+    seen.add(id);
+    out.push({
+      id,
+      home,
+      away,
+      league: entry.tournamentName || "Tennis",
+      country: "",
+      date: entry.date,
+      time: entry.time,
+      sport: "tennis",
+      hasRealOdds: entry.matchOdds[0] > 0 && entry.matchOdds[1] > 0,
+      odds: { home: entry.matchOdds[0], draw: 0, away: entry.matchOdds[1] },
+      markets: (entry.markets as AdvancedMarkets) ?? makeAdvancedMarketsFromTeams(home, away),
+    });
+  }
+  return out;
+}
+
+function mergeTennisUpcomingSources(base: UpcomingMatch[], oddsBased: UpcomingMatch[]): UpcomingMatch[] {
+  const merged = new Map<string, UpcomingMatch>();
+  for (const match of base) merged.set(String(match.id), match);
+  for (const match of oddsBased) {
+    const key = String(match.id);
+    const prev = merged.get(key);
+    if (!prev || (!!match.hasRealOdds && !prev.hasRealOdds)) {
+      merged.set(key, match);
+    }
+  }
+  return [...merged.values()];
+}
+
 // ─── Top-level upcoming cache — 60s TTL so repeated 30s polls are instant ─────
 type UpcomingTopCache = {
   football: UpcomingMatch[]; tennis: UpcomingMatch[];
@@ -9291,14 +9333,16 @@ function hasRecentUpcomingEligibility(sport: SportKey, providerId: number | stri
 
 async function refreshUpcomingTop(): Promise<UpcomingTopCache> {
   const empty: UpcomingMatch[] = [];
-  const [football, tennis, basketball, hockey, volleyball, baseball] = await Promise.all([
+  const [football, tennisBase, tennisOdds, basketball, hockey, volleyball, baseball] = await Promise.all([
     buildUpcomingMatches().catch(() => empty),
     buildTennisUpcoming().catch(() => empty),
+    getTennisOdds().catch(() => [] as TennisOddsEntry[]),
     buildBasketballUpcoming().catch(() => empty),
     buildHockeyUpcoming().catch(() => empty),
     buildVolleyballUpcoming().catch(() => empty),
     buildBaseballUpcoming().catch(() => empty),
   ]);
+  const tennis = mergeTennisUpcomingSources(tennisBase, buildTennisUpcomingFromOddsEntries(tennisOdds));
   rememberUpcomingFootballEligibility(football);
   rememberUpcomingEligibility([...football, ...tennis, ...basketball, ...hockey, ...volleyball, ...baseball]);
   upcomingTopCache = { football, tennis, basketball, hockey, volleyball, baseball, fetchedAt: Date.now() };
