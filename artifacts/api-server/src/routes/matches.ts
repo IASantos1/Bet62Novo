@@ -7015,33 +7015,110 @@ function refreshTennisLiveOdds(matchIds: number[]): void {
 const _tennisServingCache = new Map<number, { serving: [boolean, boolean]; at: number }>();
 const _tennisServingInFlight = new Map<number, Promise<void>>();
 const TENNIS_SERVING_TTL = 5_000;
+type TennisLiveDetailSnapshot = {
+  status: string;
+  statusCode?: number;
+  sets: Array<[number, number]>;
+  currentPoints?: [number | string, number | string];
+  serving?: [boolean, boolean];
+  fetchedAt: number;
+};
+const _tennisLiveDetailCache = new Map<number, TennisLiveDetailSnapshot>();
+const _tennisLiveDetailInFlight = new Map<number, Promise<TennisLiveDetailSnapshot | null>>();
+
+function parseTennisPointValue(p: string | undefined): number | string | undefined {
+  if (p === undefined) return undefined;
+  if (p === "AD" || p === "D") return p;
+  const n = parseInt(p, 10);
+  return Number.isNaN(n) ? p : n;
+}
+
+function tennisSetLabel(n: number): string {
+  if (n === 1) return "1st set";
+  if (n === 2) return "2nd set";
+  if (n === 3) return "3rd set";
+  return `Set ${n}`;
+}
+
+function tennisDisplayStatus(status: string, statusCode: number | undefined, sets: Array<[number, number]>): string {
+  const raw = String(status ?? "").trim();
+  if (raw && raw.toLowerCase() !== "in progress") return raw;
+  if (typeof statusCode === "number" && statusCode >= 13) return tennisSetLabel(statusCode - 12);
+  return tennisSetLabel(Math.max(1, sets.length || 1));
+}
+
+async function getTennisMatchDetailV2(id: number): Promise<TennisLiveDetailSnapshot | null> {
+  const now = Date.now();
+  const cached = _tennisLiveDetailCache.get(id);
+  if (cached && now - cached.fetchedAt <= TENNIS_SERVING_TTL) return cached;
+  const inflight = _tennisLiveDetailInFlight.get(id);
+  if (inflight) return inflight;
+  const p = (async () => {
+    const toBool = (v: unknown): boolean | null => {
+      if (v === true || v === false) return v;
+      if (v == null) return null;
+      const s = String(v).trim().toLowerCase();
+      if (s === "true" || s === "1" || s === "yes" || s === "y") return true;
+      if (s === "false" || s === "0" || s === "no" || s === "n") return false;
+      return null;
+    };
+    try {
+      const res = await fetch(`${SAPI_V2_TENNIS}/match/${id}`, {
+        headers: sapiHeaders(),
+        signal: AbortSignal.timeout(6_000),
+      });
+      if (!res.ok) return null;
+      const j = await res.json();
+      const ev =
+        j?.event ??
+        j?.data?.event ??
+        j?.data?.match?.event ??
+        j?.data?.data?.event ??
+        null;
+      if (!ev) return null;
+      const hS = typeof ev.homeScore === "object" && ev.homeScore !== null ? ev.homeScore as SAPIV2ScoreObj : null;
+      const aS = typeof ev.awayScore === "object" && ev.awayScore !== null ? ev.awayScore as SAPIV2ScoreObj : null;
+      const sets: Array<[number, number]> = [];
+      if (hS && aS) {
+        (["period1", "period2", "period3", "period4", "period5"] as Array<keyof SAPIV2ScoreObj>).forEach((p) => {
+          const h = hS[p] as number | undefined;
+          const a = aS[p] as number | undefined;
+          if (h !== undefined && a !== undefined) sets.push([h, a]);
+        });
+      }
+      const points = hS?.point !== undefined && aS?.point !== undefined
+        ? [parseTennisPointValue(hS.point), parseTennisPointValue(aS.point)] as [number | string, number | string]
+        : undefined;
+      const h = ev.homeTeam ?? ev.home ?? ev.homeCompetitor ?? null;
+      const a = ev.awayTeam ?? ev.away ?? ev.awayCompetitor ?? null;
+      const hs = toBool(h?.serving ?? h?.serve ?? h?.isServing ?? h?.service);
+      const as = toBool(a?.serving ?? a?.serve ?? a?.isServing ?? a?.service);
+      const serving = hs === null && as === null ? undefined : [hs === true, as === true] as [boolean, boolean];
+      const statusCode = typeof ev.status === "object" && ev.status?.code !== undefined ? ev.status.code : ev.statusCode;
+      const status = tennisDisplayStatus(v2StatusStr(ev.status), statusCode, sets);
+      const snap: TennisLiveDetailSnapshot = {
+        status,
+        statusCode,
+        sets,
+        currentPoints: points,
+        serving,
+        fetchedAt: Date.now(),
+      };
+      _tennisLiveDetailCache.set(id, snap);
+      if (serving) _tennisServingCache.set(id, { serving, at: snap.fetchedAt });
+      return snap;
+    } catch {
+      return null;
+    } finally {
+      _tennisLiveDetailInFlight.delete(id);
+    }
+  })();
+  _tennisLiveDetailInFlight.set(id, p);
+  return p;
+}
 
 function refreshTennisServing(matchIds: number[]): void {
   const now = Date.now();
-  const toBool = (v: unknown): boolean | null => {
-    if (v === true || v === false) return v;
-    if (v == null) return null;
-    const s = String(v).trim().toLowerCase();
-    if (s === "true" || s === "1" || s === "yes" || s === "y") return true;
-    if (s === "false" || s === "0" || s === "no" || s === "n") return false;
-    return null;
-  };
-  const extract = (j: any): [boolean, boolean] | null => {
-    const ev =
-      j?.event ??
-      j?.data?.event ??
-      j?.data?.match?.event ??
-      j?.data?.data?.event ??
-      null;
-    if (!ev) return null;
-    const h = ev.homeTeam ?? ev.home ?? ev.homeCompetitor ?? null;
-    const a = ev.awayTeam ?? ev.away ?? ev.awayCompetitor ?? null;
-    const hs = toBool(h?.serving ?? h?.serve ?? h?.isServing ?? h?.service);
-    const as = toBool(a?.serving ?? a?.serve ?? a?.isServing ?? a?.service);
-    if (hs === null && as === null) return null;
-    return [hs === true, as === true];
-  };
-
   const toFetch = matchIds.filter((id) => {
     const cached = _tennisServingCache.get(id);
     if (cached && now - cached.at <= TENNIS_SERVING_TTL) return false;
@@ -7053,15 +7130,7 @@ function refreshTennisServing(matchIds: number[]): void {
   for (const id of toFetch) {
     const p = (async () => {
       try {
-        const res = await fetch(`${SAPI_V2_TENNIS}/match/${id}`, {
-          headers: sapiHeaders(),
-          signal: AbortSignal.timeout(6_000),
-        });
-        if (!res.ok) return;
-        const j = await res.json();
-        const s = extract(j);
-        if (!s) return;
-        _tennisServingCache.set(id, { serving: s, at: Date.now() });
+        await getTennisMatchDetailV2(id);
       } catch {
       }
     })().finally(() => {
@@ -8481,19 +8550,37 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
     (tennisTodayEvents ?? []).filter(ev => !allLiveIds.has(`tennis-v2-${ev.id}`))
   ).filter(m => !allLiveIds.has(String(m.id)));
   const tennisLivePart = [...tennisV2Part, ...tennisV1LivePart, ...todayStartedExtra];
+  const startedUpcomingTennisCandidates = allUpcoming.filter((up) => {
+    if (up.sport !== "tennis") return false;
+    if (!up.id || !String(up.id).startsWith("tennis-v2-")) return false;
+    const id = String(up.id);
+    if (allLiveIds.has(id)) return false;
+    const kickoffMs = parseUpcomingKickoffMs(up);
+    if (!kickoffMs) return false;
+    if (kickoffMs > now + 2 * 60_000) return false;
+    if (now - kickoffMs > 4 * 60 * 60_000) return false;
+    return !!up.home && !!up.away;
+  });
+  const startedUpcomingTennisDetails = new Map<number, TennisLiveDetailSnapshot>();
+  await Promise.all(
+    startedUpcomingTennisCandidates.slice(0, 16).map(async (up) => {
+      const providerId = Number(String(up.id).replace(/^tennis-v2-/, ""));
+      if (!Number.isFinite(providerId)) return;
+      const detail = await getTennisMatchDetailV2(providerId).catch(() => null);
+      if (detail) startedUpcomingTennisDetails.set(providerId, detail);
+    })
+  );
   const startedUpcomingTennisPart = (() => {
     const existing = new Set(tennisLivePart.map(m => String(m.id)));
     const out: LiveMatchState[] = [];
-    for (const up of allUpcoming) {
-      if (up.sport !== "tennis") continue;
-      if (!up.id || !String(up.id).startsWith("tennis-v2-")) continue;
+    for (const up of startedUpcomingTennisCandidates) {
       const id = String(up.id);
       if (existing.has(id)) continue;
-      const kickoffMs = parseUpcomingKickoffMs(up);
-      if (!kickoffMs) continue;
-      if (kickoffMs > now + 2 * 60_000) continue;
-      if (now - kickoffMs > 4 * 60 * 60_000) continue;
-      if (!up.home || !up.away) continue;
+      const providerId = Number(String(id).replace(/^tennis-v2-/, ""));
+      const detail = Number.isFinite(providerId) ? startedUpcomingTennisDetails.get(providerId) : undefined;
+      const sets = detail?.sets?.length ? detail.sets : [[0, 0]];
+      const currentPoints = detail?.currentPoints;
+      const currentSetNum = Math.max(1, sets.length);
       out.push({
         id,
         home: up.home,
@@ -8501,15 +8588,15 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
         league: up.league ?? "Tennis",
         country: up.country ?? "",
         sport: "tennis",
-        homeScore: 0,
-        awayScore: 0,
-        minute: 1,
-        status: "Em Jogo",
+        homeScore: sets[sets.length - 1]?.[0] ?? 0,
+        awayScore: sets[sets.length - 1]?.[1] ?? 0,
+        minute: currentSetNum * 20,
+        status: detail?.status ?? tennisSetLabel(currentSetNum),
         hasRealOdds: !!up.hasRealOdds,
         odds: up.odds ?? makeOddsFromTeams(up.home, up.away),
         markets: (up.markets as AdvancedMarkets) ?? makeAdvancedMarketsFromTeams(up.home, up.away),
         events: [],
-        _liveExtra: { sets: [[0, 0]], currentPoints: ["0", "0"] },
+        _liveExtra: { sets, ...(currentPoints ? { currentPoints } : {}), ...(detail?.serving ? { serving: detail.serving } : {}) },
       });
       if (out.length >= 60) break;
     }
