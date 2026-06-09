@@ -2086,6 +2086,7 @@ function tennisTierRank(name: string): number {
   const n = String(name ?? "")
     .toLowerCase()
     .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+    .replace(/-/g, " ")  // normalise slugs: "atp-250-s-hertogenbosch" → "atp 250 s hertogenbosch"
     .trim();
   if (!n) return 999;
 
@@ -2343,6 +2344,117 @@ function v2TournName(t: string | SAPIV2TournObj | undefined): string {
   if (!t) return "Unknown";
   const raw = typeof t === "string" ? t : (t.name ?? "Unknown");
   return cleanLeagueName(raw);
+}
+
+/**
+ * Builds a user-facing league label for a V2 tennis tournament object.
+ * Returns labels like "ATP 250 · S-Hertogenbosch", "WTA 500 · London", etc.
+ * Falls back to plain v2TournName when category info is missing.
+ */
+// City-based tier fallback for when the V2 API slugs don't encode tier explicitly.
+// Rank values match tennisTierRank: 3=1000, 4=500, 5=250, 6=Challenger.
+const ATP_CITY_TIER: Record<string, number> = {
+  // Masters 1000
+  "indian wells": 3, "miami": 3, "monte carlo": 3, "monte-carlo": 3, "madrid": 3,
+  "rome": 3, "canada": 3, "montreal": 3, "toronto": 3, "cincinnati": 3, "paris": 3,
+  "shanghai": 3,
+  // ATP 500
+  "rotterdam": 4, "dubai": 4, "acapulco": 4, "barcelona": 4, "halle": 4,
+  "queen": 4, "queens": 4, "hamburg": 4, "beijing": 4, "tokyo": 4,
+  "vienna": 4, "basel": 4, "washington": 4, "rio": 4, "rio de janeiro": 4,
+  // ATP 250
+  "s-hertogenbosch": 5, "hertogenbosch": 5, "eastbourne": 5, "nottingham": 5,
+  "stuttgart": 5, "lyon": 5, "geneva": 5, "munich": 5, "marrakech": 5,
+  "estoril": 5, "bucharest": 5, "umag": 5, "bastad": 5, "gstaad": 5,
+  "newport": 5, "kitzbuhel": 5, "winston-salem": 5, "winston salem": 5,
+  "chengdu": 5, "hangzhou": 5, "sofia": 5, "antwerp": 5, "montpellier": 5,
+  "cordoba": 5, "quito": 5, "dallas": 5, "auckland": 5, "adelaide": 5,
+  "doha": 5, "pune": 5, "newport beach": 5, "san jose": 5,
+};
+const WTA_CITY_TIER: Record<string, number> = {
+  // WTA 1000
+  "indian wells": 3, "miami": 3, "madrid": 3, "rome": 3,
+  "montreal": 3, "toronto": 3, "cincinnati": 3, "wuhan": 3, "beijing": 3,
+  // WTA 500
+  "abu dhabi": 4, "doha": 4, "dubai": 4, "strasbourg": 4, "berlin": 4,
+  "eastbourne": 4, "san jose": 4, "guangzhou": 4, "guangdong": 4,
+  "guadalajara": 4, "ostrava": 4, "london": 4,
+  // WTA 250
+  "s-hertogenbosch": 5, "hertogenbosch": 5, "nottingham": 5,
+  "birmingham": 5, "stuttgart": 5, "lyon": 5, "budapest": 5,
+  "bogota": 5, "lausanne": 5, "hamburg": 5, "palermo": 5,
+  "montreal wta": 5, "nanchang": 5,
+};
+
+function tennisTournLabel(tournament: string | SAPIV2TournObj | undefined): string {
+  const base = v2TournName(tournament);
+  if (!tournament || typeof tournament === "string") return base;
+  const t = tournament as SAPIV2TournObj;
+  const cat = t.category?.name ?? "";
+  if (cat !== "ATP" && cat !== "WTA") return base;
+
+  // Strip ", Country" suffix for a cleaner display name
+  // e.g. "S-Hertogenbosch, Netherlands" → "S-Hertogenbosch"
+  const displayBase = base.includes(",") ? base.split(",")[0]!.trim() : base;
+
+  const searchText = tennisTournamentSearchText(tournament);
+  let rank = tennisTierRank(searchText);
+
+  // Fallback: look up by normalised city name when tier not found in search text
+  if (rank === 999) {
+    const cityNorm = displayBase.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/-/g, " ").trim();
+    const cityMap = cat === "ATP" ? ATP_CITY_TIER : WTA_CITY_TIER;
+    for (const [city, r] of Object.entries(cityMap)) {
+      if (cityNorm.includes(city) || city.includes(cityNorm)) { rank = r; break; }
+    }
+  }
+
+  let tier = "";
+  if (rank === 1) tier = "Grand Slam";
+  else if (rank === 2) tier = `${cat} Finals`;
+  else if (rank === 3) tier = `${cat} 1000`;
+  else if (rank === 4) tier = `${cat} 500`;
+  else if (rank === 5) tier = `${cat} 250`;
+  else if (rank === 6) tier = "Challenger";
+  else tier = cat;
+  return tier ? `${tier} · ${displayBase}` : displayBase;
+}
+
+// ── V1 tennis league label cache ─────────────────────────────────────────────
+// Populated from V2 today/live events; maps normalized base name → full tier label.
+// Used to enrich V1 game league labels that only carry city names.
+const _tennisV2LeagueLabelByCompName = new Map<string, string>();
+
+function refreshTennisV2LeagueCache(events: SAPIV2Event[]): void {
+  for (const ev of events) {
+    if (!ev.tournament || typeof ev.tournament === "string") continue;
+    const label = tennisTournLabel(ev.tournament);
+    const base  = v2TournName(ev.tournament);
+    if (!base || base === "Unknown" || label === base) continue;
+    const norm = base.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
+    if (!_tennisV2LeagueLabelByCompName.has(norm)) {
+      _tennisV2LeagueLabelByCompName.set(norm, label);
+    }
+  }
+}
+
+/**
+ * Enriches a V1 competition display name with the ATP/WTA tier label
+ * by looking it up in the V2-populated cache.
+ * e.g. "S-Hertogenbosch, Netherlands" → "ATP 250 · S-Hertogenbosch"
+ */
+function enrichTennisV1League(compName: string): string {
+  if (!compName) return "Tennis";
+  const clean = cleanLeagueName(compName);
+  const norm = clean.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
+  // Direct match
+  const direct = _tennisV2LeagueLabelByCompName.get(norm);
+  if (direct) return direct;
+  // Partial match: V2 base name may be shorter than V1 display name (city, country)
+  for (const [k, v] of _tennisV2LeagueLabelByCompName) {
+    if (norm.includes(k) || k.includes(norm)) return v;
+  }
+  return clean || "Tennis";
 }
 
 /**
@@ -8363,7 +8475,7 @@ function buildTennisLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
     const state: LiveMatchState = {
       id,
       home: homeTeam, away: awayTeam,
-      league: v2TournName(ev.tournament), country: v2TournCountry(ev),
+      league: tennisTournLabel(ev.tournament), country: v2TournCountry(ev),
       sport: "tennis", homeScore, awayScore,
       minute: setNum * 20,
       status: displayStatus, hasRealOdds: true, odds: liveOdds,
@@ -8581,10 +8693,12 @@ async function rebuildUpcomingCache(): Promise<void> {
   _upcomingRebuildInProgress = true;
   const empty: UpcomingMatch[] = [];
   try {
-    const [upFootball, upTennisBase, tennisOdds, upBasketball, upHockey, upVolleyball, upBaseball] = await Promise.all([
+    // Fetch tennis odds first so refreshTennisV2LeagueCache populates city→ATP/WTA tier labels
+    // before buildTennisUpcoming() runs (enrichTennisV1League depends on the cache).
+    const tennisOdds = await getTennisOdds().catch(() => [] as TennisOddsEntry[]);
+    const [upFootball, upTennisBase, upBasketball, upHockey, upVolleyball, upBaseball] = await Promise.all([
       buildUpcomingMatches().catch(() => empty),
       buildTennisUpcoming().catch(() => empty),
-      getTennisOdds().catch(() => [] as TennisOddsEntry[]),
       buildBasketballUpcoming().catch(() => empty),
       buildHockeyUpcoming().catch(() => empty),
       buildVolleyballUpcoming().catch(() => empty),
@@ -8624,6 +8738,10 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
     getTennisLiveV2(),
     getTennisTodayV2(),
   ]);
+  // Populate V1 tennis league label cache from V2 today events (city → "ATP 250 · City")
+  if (tennisTodayEvents && tennisTodayEvents.length > 0) {
+    refreshTennisV2LeagueCache(tennisTodayEvents);
+  }
   // Fire-and-forget odds cache warmers — don't block the broadcast path
   getTennisOdds().catch(() => {});
   getMLBOdds().catch(() => {});
@@ -9193,7 +9311,7 @@ async function buildTennisLiveV1(): Promise<LiveMatchState[]> {
       const item: LiveMatchState = {
         id: `tennis-v2-${g.id}`,
         home, away,
-        league: cleanLeagueName(compName) || "Tennis",
+        league: enrichTennisV1League(compName),
         country: "",
         sport: "tennis" as const,
         homeScore, awayScore,
@@ -9287,7 +9405,7 @@ async function buildTennisUpcoming(): Promise<UpcomingMatch[]> {
         id: `tennis-v2-${g.id}`,
         home,
         away,
-        league: compName || "Tennis",
+        league: enrichTennisV1League(compName),
         country: "",
         date,
         time,
@@ -11431,6 +11549,8 @@ async function getTennisOdds(): Promise<TennisOddsEntry[]> {
   if (tennisOddsCache && now - tennisOddsFetchedAt < TENNIS_ODDS_TTL) return tennisOddsCache;
   try {
     const events = await getUpcomingLeagueEventsV2("tennis", 7);
+    // Populate V1 league label cache from these V2 events (they have ATP/WTA category info)
+    refreshTennisV2LeagueCache(events);
     const oddsResults = await Promise.all(
       events.map(ev => getPreMatchOddsV2("tennis", ev.id).catch(() => null))
     );
@@ -11456,7 +11576,7 @@ async function getTennisOdds(): Promise<TennisOddsEntry[]> {
       results.push({
         matchId: String(ev.id),
         date, time,
-        tournamentName: (ev.tournament as { name?: string } | undefined)?.name ?? "",
+        tournamentName: tennisTournLabel(ev.tournament),
         status: "Not Started",
         players: [{ id: "", name: p0Name }, { id: "", name: p1Name }],
         matchOdds: [h, a],
