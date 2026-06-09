@@ -3,7 +3,10 @@
     "baseUrl": ".",
     "strict": true,
     "jsx": "react-native",
-    "lib": ["esnext", "dom"],
+    "lib": [
+      "esnext",
+      "dom"
+    ],
     "target": "esnext",
     "moduleResolution": "bundler",
     "module": "esnext",
@@ -28,5 +31,6 @@
     {
       "path": "../../lib/api-client-react"
     }
-  ]
+  ],
+  "extends": "expo/tsconfig.base"
 }
