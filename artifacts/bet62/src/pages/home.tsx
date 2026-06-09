@@ -6762,32 +6762,8 @@ export default function Home() {
     }
     if (betStatus === "won") return "green";
     if (betStatus === "lost") return "pending";
-    // Pending: check live match for tentative state
-    const lm = findLiveMatchForSel(sel);
-    if (!lm) return "pending";
-    const s = sel.selection;
-    const homeScore = lm.homeScore ?? 0;
-    const awayScore = lm.awayScore ?? 0;
-    const total = homeScore + awayScore;
-    let winning: boolean | null = null;
-    if (s === "home") winning = homeScore > awayScore;
-    else if (s === "away") winning = awayScore > homeScore;
-    else if (s === "draw") winning = homeScore === awayScore;
-    else if (s === "homeOrDraw") winning = homeScore >= awayScore;
-    else if (s === "awayOrDraw") winning = awayScore >= homeScore;
-    else if (s === "homeOrAway") winning = homeScore !== awayScore;
-    else if (s === "bts-yes") winning = homeScore > 0 && awayScore > 0;
-    else if (s === "bts-no") winning = homeScore === 0 || awayScore === 0;
-    else {
-      const m = s.match(/^([ou])([\d.]+)$/);
-      if (m) {
-        const line = parseFloat(m[2]!);
-        if (m[1] === "o") winning = total > line ? true : null;
-        else winning = total >= line ? false : null;
-      }
-    }
-    if (winning === null) return "pending";
-    return winning ? "live-win" : "live-lose";
+    // Pending bets must stay neutral in the UI until the selection is actually settled.
+    return "pending";
   };
 
   const cashoutEstimate = (bet: UserBet) => {
