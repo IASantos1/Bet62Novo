@@ -3226,8 +3226,8 @@ export async function scanDailyForFinished(): Promise<void> {
       }
     }
     _pruneFinishedResults();
-  } catch {
-    // non-critical — settlement will retry on next cycle
+  } catch (err) {
+    logger.error({ err }, "scanDailyForFinished failed");
   }
 }
 
@@ -5631,8 +5631,8 @@ export async function scanV2AllSportsForFinished(): Promise<void> {
     }
 
     _pruneFinishedResults();
-  } catch {
-    // non-critical — settlement will retry on next cycle
+  } catch (err) {
+    logger.error({ err }, "scanV2AllSportsForFinished failed");
   }
 }
 
@@ -6206,8 +6206,6 @@ async function buildLiveMatches(): Promise<LiveMatchState[]> {
     .sort((a, b) => leaguePriority(a.name, a.country) - leaguePriority(b.name, b.country))
     .filter(l => leaguePriority(l.name, l.country) < 100);
 
-  const LIVE_DISAPPEAR_GRACE_MS = 12 * 60 * 1000;
-
   // ── Garbage-collect liveMatchState for IDs no longer in the Statpal response ──
   const currentMatchIds = new Set<string>();
   for (const league of sorted) {
@@ -6230,7 +6228,7 @@ async function buildLiveMatches(): Promise<LiveMatchState[]> {
       liveMatchState.set(id, { ...state, _missingSinceAt: missingSince });
       continue;
     }
-    if (Date.now() - missingSince > LIVE_DISAPPEAR_GRACE_MS) {
+    if (Date.now() - missingSince > getFootballLiveDisappearGraceMs(state)) {
       liveMatchState.delete(id);
     }
   }
@@ -7260,13 +7258,13 @@ async function buildFootballLiveV2(events: SAPIV2Event[]): Promise<LiveMatchStat
           ? (minute > 90 ? `90+${minute - 90}'` : minute > 0 ? `${String(minute).padStart(2, "0")}:${secStr}` : undefined)
           : (minute > 0 ? `${minute}'` : undefined);
 
-    // Zombie detector: if minute AND score are identical for > 20 min the feed is frozen.
+    // Zombie detector: if minute AND score are identical for too long the feed is frozen.
     // Exclude HT/ET/Penalties where minute naturally stays constant for legitimate breaks.
     if (!isHT && !isPen && !isET) {
       const scoreKey = `${homeScore}-${awayScore}`;
       const stuck = _v2StuckTracker.get(id);
       if (stuck && stuck.minute === minute && stuck.score === scoreKey) {
-        if (now - stuck.since > 20 * 60 * 1000) {
+        if (now - stuck.since > 45 * 60 * 1000) {
           // Mark finished so it doesn't reappear; clean up tracker and skip.
           finishedMatchResults.set(id, { home: homeScore, away: awayScore, homeTeam, awayTeam, finishedAt: now });
           liveMatchState.delete(id);
@@ -7276,16 +7274,6 @@ async function buildFootballLiveV2(events: SAPIV2Event[]): Promise<LiveMatchStat
       } else {
         _v2StuckTracker.set(id, { minute, score: scoreKey, since: now });
       }
-    }
-
-    // Late-game wall-clock cap: if we've been tracking this match for 28+ min AND the
-    // computed minute is 82+, the match has almost certainly ended even though the API
-    // never sent a "Finished" status (common with lower-tier leagues like Primera B).
-    if (existing && minute >= 82 && now - (existing._firstSeenAt ?? now) > 28 * 60 * 1000) {
-      finishedMatchResults.set(id, { home: homeScore, away: awayScore, homeTeam, awayTeam, finishedAt: now });
-      liveMatchState.delete(id);
-      _v2StuckTracker.delete(id);
-      continue;
     }
 
     if (existing) {

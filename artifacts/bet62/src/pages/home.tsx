@@ -1,5 +1,4 @@
-import React, { useState, useCallback, useEffect, useRef, useMemo, createContext, useContext, Children, type ReactNode } from "react";
-
+import { useState, useCallback, useEffect, useRef, useMemo, createContext, useContext, Children, type ReactNode } from "react";
 import { useIdle } from "@/hooks/use-idle";
 import { motion, AnimatePresence } from "framer-motion";
 import { toast } from "sonner";
@@ -8,7 +7,7 @@ import {
   LogOut, User, History, Loader2, Zap, TrendingUp,
   ChevronRight, ChevronLeft, ChevronDown, ChevronUp, AlertCircle, BarChart2, Wallet, ArrowDownCircle, ArrowUpCircle, Plus, Clock, Smartphone,
   Copy, Share2, CircleDollarSign, Lock, Trash2, Check, Fingerprint, ScanFace, ShieldCheck,
-  RefreshCw, Ticket, CalendarDays, ListOrdered, Search, ToggleLeft, ToggleRight, Sparkles,
+  RefreshCw, Ticket, CalendarDays, ListOrdered, Search,
 } from "lucide-react";
 import ProfileTab from "@/components/ProfileTab";
 import { Button } from "@/components/ui/button";
@@ -420,48 +419,32 @@ function teamNamePt(name: string): string {
 }
 
 const LEAGUE_FLAGS: Record<string, string> = {
-  "La Liga": "🇪🇸", "Laliga": "🇪🇸", "Laliga2": "🇪🇸", "Segunda": "🇪🇸", "LaLiga Hypermotion": "🇪🇸", "Copa del Rey": "🇪🇸", "Supercopa de España": "🇪🇸",
-  "Premier League": "🏴", "EFL Championship": "🏴", "Championship": "🏴", "League One": "🏴", "FA Cup": "🏴", "EFL Cup": "🏴", "Community Shield": "🏴",
-  "Champions League": "⭐", "UEFA Champions League": "⭐", "Europa League": "🌟", "UEFA Europa League": "🌟", "Conference League": "🟢", "UEFA Conference League": "🟢", "UEFA Super Cup": "⭐",
+  "La Liga": "🇪🇸", "Laliga": "🇪🇸", "Laliga2": "🇪🇸", "Segunda": "🇪🇸", "LaLiga Hypermotion": "🇪🇸", "Copa del Rey": "🇪🇸",
+  "Premier League": "🏴󠁧󠁢󠁥󠁮󠁧󠁿", "EFL Championship": "🏴󠁧󠁢󠁥󠁮󠁧󠁿", "Championship": "🏴󠁧󠁢󠁥󠁮󠁧󠁿", "League One": "🏴󠁧󠁢󠁥󠁮󠁧󠁿", "FA Cup": "🏴󠁧󠁢󠁥󠁮󠁧󠁿",
+  "Champions League": "⭐", "UEFA Champions League": "⭐", "Europa League": "🌟", "Conference League": "🟢",
   "UEFA Nations League": "⭐", "UEFA European Championship": "⭐",
   "FIFA World Cup": "🌍", "Copa América": "🌎", "Copa America": "🌎",
   "CONCACAF Gold Cup": "🏆", "Africa Cup of Nations": "🏆", "AFC Asian Cup": "🏆",
   "International Friendlies": "🤝", "International Friendly": "🤝", "Amistosos internacionais": "🤝",
-  "Serie A": "🇮🇹", "Serie B": "🇮🇹", "Coppa Italia": "🇮🇹", "Supercoppa Italiana": "🇮🇹",
-  "Bundesliga": "🇩🇪", "2. Bundesliga": "🇩🇪", "DFB-Pokal": "🇩🇪", "DFL-Supercup": "🇩🇪",
-  "Ligue 1": "🇫🇷", "Ligue 2": "🇫🇷", "Coupe de France": "🇫🇷", "Trophée des Champions": "🇫🇷",
-  "Liga Portugal": "🇵🇹", "Primeira Liga": "🇵🇹", "Segunda Liga": "🇵🇹", "Liga Portugal 2": "🇵🇹", "Taça de Portugal": "🇵🇹", "Taça da Liga": "🇵🇹", "Supertaça Cândido de Oliveira": "🇵🇹",
-  "Eredivisie": "🇳🇱", "Eerste Divisie": "🇳🇱", "KNVB Cup": "🇳🇱", "Johan Cruijff Schaal": "🇳🇱",
-  "Belgian Pro League": "🇧🇪", "Pro League": "🇧🇪", "Belgian Cup": "🇧🇪", "Jupiler Pro League": "🇧🇪", "Challenger Pro League": "🇧🇪", "Belgian Super Cup": "🇧🇪",
-  "Süper Lig": "🇹🇷", "Super Lig": "🇹🇷", "TFF First League": "🇹🇷", "Turkish Cup": "🇹🇷", "Turkish Super Cup": "🇹🇷",
-  "Super League Greece": "🇬🇷", "Super League 2": "🇬🇷", "Greek Cup": "🇬🇷", "Greek Super Cup": "🇬🇷",
-  "Austrian Bundesliga": "🇦🇹", "Austrian 2. Liga": "🇦🇹", "Austrian Cup": "🇦🇹",
-  "Scottish Premiership": "🏴", "Scottish Championship": "🏴", "Scottish Cup": "🏴", "Scottish League Cup": "🏴",
-  "Swiss Super League": "🇨🇭", "Challenge League": "🇨🇭", "Swiss Cup": "🇨🇭",
-  "Danish Superliga": "🇩🇰", "Danish 1st Division": "🇩🇰", "DBU Pokalen": "🇩🇰",
-  "Eliteserien": "🇳🇴", "Norwegian 1st Division": "🇳🇴", "Norwegian Cup": "🇳🇴",
-  "Allsvenskan": "🇸🇪", "Superettan": "🇸🇪", "Svenska Cupen": "🇸🇪",
-  "HNL": "🇭🇷", "Prva NL": "🇭🇷", "Croatian Football Cup": "🇭🇷",
-  "Serbian SuperLiga": "🇷🇸", "Serbian Prva Liga": "🇷🇸", "Serbian Cup": "🇷🇸",
-  "Ekstraklasa": "🇵🇱", "I liga": "🇵🇱", "Polish Cup": "🇵🇱", "Polish Super Cup": "🇵🇱",
-  "Czech First League": "🇨🇿", "FNL": "🇨🇿", "Czech Cup": "🇨🇿",
-  "Russian Premier League": "🇷🇺", "Russian First League": "🇷🇺", "Russian Cup": "🇷🇺", "Russian Super Cup": "🇷🇺",
-  "Ukrainian Premier League": "🇺🇦", "Ukrainian First League": "🇺🇦", "Ukrainian Cup": "🇺🇦",
-  "OTP Bank Liga": "🇭🇺", "Merkantil Bank Liga": "🇭🇺", "Magyar Kupa": "🇭🇺",
-  "Romanian Superliga": "🇷🇴", "Romanian Liga II": "🇷🇴", "Cupa României": "🇷🇴", "Supercupa României": "🇷🇴",
-  "Parva liga": "🇧🇬", "Vtora liga": "🇧🇬", "Bulgarian Cup": "🇧🇬", "Bulgarian Super Cup": "🇧🇬",
-  "Israeli Premier League": "🇮🇱", "Israeli National League": "🇮🇱", "State Cup": "🇮🇱", "Toto Cup": "🇮🇱",
-  "Brasileirao": "🇧🇷", "Brasileirão": "🇧🇷", "Brasileirão Série B": "🇧🇷", "Série A Brasil": "🇧🇷", "Campeonato Brasileiro": "🇧🇷", "Copa do Brasil": "🇧🇷", "Supercopa do Brasil": "🇧🇷", "Campeonato Paulista": "🇧🇷", "Campeonato Carioca": "🇧🇷",
-  "Primera División": "🇦🇷", "Primera Division": "🇦🇷", "Primera Nacional": "🇦🇷", "Liga Argentina": "🇦🇷", "Copa Argentina": "🇦🇷", "Supercopa Argentina": "🇦🇷", "Copa de la Liga Profesional": "🇦🇷",
-  "Liga MX": "🇲🇽", "Liga de Expansión MX": "🇲🇽", "Copa MX": "🇲🇽", "Campeón de Campeones": "🇲🇽",
-  "Primera División — Chile": "🇨🇱", "Primera B — Chile": "🇨🇱", "Copa Chile": "🇨🇱", "Supercopa de Chile": "🇨🇱",
-  "Categoría Primera A": "🇨🇴", "Categoría Primera B": "🇨🇴", "Copa Colombia": "🇨🇴", "Superliga Colombiana": "🇨🇴",
-  "MLS": "🇺🇸", "USL Championship": "🇺🇸", "US Open Cup": "🇺🇸", "Leagues Cup": "🇺🇸", "NBA": "🇺🇸", "NHL": "🇺🇸", "USA: MLB": "⚾", "MLB": "⚾",
-  "Saudi Pro League": "🇸🇦", "King Cup": "🇸🇦", "Saudi Super Cup": "🇸🇦",
-  "J1 League": "🇯🇵", "J2 League": "🇯🇵", "Emperor's Cup": "🇯🇵", "Japanese Super Cup": "🇯🇵",
-  "K League 1": "🇰🇷", "K League 2": "🇰🇷", "Korean FA Cup": "🇰🇷",
-  "Thai League 1": "🇹🇭", "Thai FA Cup": "🇹🇭", "Thai League Cup": "🇹🇭",
-  "Indian Super League": "🇮🇳", "Super Cup": "🇮🇳", "Durand Cup": "🇮🇳",
+  "Serie A": "🇮🇹", "Serie B": "🇮🇹", "Coppa Italia": "🇮🇹",
+  "Bundesliga": "🇩🇪", "2. Bundesliga": "🇩🇪", "DFB-Pokal": "🇩🇪",
+  "Ligue 1": "🇫🇷", "Ligue 2": "🇫🇷", "Coupe de France": "🇫🇷",
+  "Liga Portugal": "🇵🇹", "Primeira Liga": "🇵🇹", "Segunda Liga": "🇵🇹", "Liga Portugal 2": "🇵🇹", "Taça de Portugal": "🇵🇹",
+  "Eredivisie": "🇳🇱", "Eerste Divisie": "🇳🇱", "KNVB Cup": "🇳🇱",
+  "Belgian Pro League": "🇧🇪", "Pro League": "🇧🇪", "Belgian Cup": "🇧🇪", "Jupiler Pro League": "🇧🇪",
+  "Süper Lig": "🇹🇷", "Super Lig": "🇹🇷", "TFF First League": "🇹🇷", "Turkish Cup": "🇹🇷",
+  "Super League Greece": "🇬🇷", "Super League 2": "🇬🇷", "Greek Cup": "🇬🇷",
+  "Austrian Bundesliga": "🇦🇹", "Austrian Cup": "🇦🇹",
+  "Scottish Premiership": "🏴󠁧󠁢󠁳󠁣󠁴󠁿", "Scottish Championship": "🏴󠁧󠁢󠁳󠁣󠁴󠁿", "Scottish Cup": "🏴󠁧󠁢󠁳󠁣󠁴󠁿",
+  "Swiss Super League": "🇨🇭", "Challenge League": "🇨🇭",
+  "Danish Superliga": "🇩🇰", "Danish 1st Division": "🇩🇰",
+  "Eliteserien": "🇳🇴", "Norwegian Cup": "🇳🇴",
+  "Allsvenskan": "🇸🇪", "Superettan": "🇸🇪",
+  "HNL": "🇭🇷", "Croatian Football Cup": "🇭🇷",
+  "Serbian SuperLiga": "🇷🇸", "Serbian Cup": "🇷🇸",
+  "Brasileirao": "🇧🇷", "Brasileirão": "🇧🇷", "Série A Brasil": "🇧🇷", "Campeonato Brasileiro": "🇧🇷", "Copa do Brasil": "🇧🇷", "Campeonato Paulista": "🇧🇷", "Campeonato Carioca": "🇧🇷",
+  "Primera División": "🇦🇷", "Primera Division": "🇦🇷", "Liga Argentina": "🇦🇷", "Copa Argentina": "🇦🇷",
+  "MLS": "🇺🇸", "NBA": "🇺🇸", "NHL": "🇺🇸", "USA: MLB": "⚾", "MLB": "⚾",
   "EuroLeague": "⭐", "NBB — Brasil": "🇧🇷",
   "ATP 500": "🎾", "ATP 250": "🎾", "WTA 1000": "🎾", "WTA 250": "🎾", "Roland Garros": "🇫🇷",
   "NHL — Playoffs": "🏒", "KHL — Playoff": "🏒",
@@ -474,7 +457,6 @@ const LEAGUE_LOGOS: Record<string, string> = {
   "Europa League": "https://media.api-sports.io/football/leagues/3.png",
   "UEFA Europa League": "https://media.api-sports.io/football/leagues/3.png",
   "Conference League": "https://media.api-sports.io/football/leagues/848.png",
-  "UEFA Conference League": "https://media.api-sports.io/football/leagues/848.png",
   "UEFA Super Cup": "https://media.api-sports.io/football/leagues/531.png",
   "UEFA Nations League": "https://media.api-sports.io/football/leagues/5.png",
   "UEFA European Championship": "https://media.api-sports.io/football/leagues/4.png",
@@ -487,46 +469,6 @@ const LEAGUE_LOGOS: Record<string, string> = {
   "International Friendlies": "https://media.api-sports.io/football/leagues/10.png",
   "International Friendly": "https://media.api-sports.io/football/leagues/10.png",
   "Amistosos internacionais": "https://media.api-sports.io/football/leagues/10.png",
-  "Premier League": "https://media.api-sports.io/football/leagues/39.png",
-  "EFL Championship": "https://media.api-sports.io/football/leagues/40.png",
-  "FA Cup": "https://media.api-sports.io/football/leagues/45.png",
-  "EFL Cup": "https://media.api-sports.io/football/leagues/39.png",
-  "Community Shield": "https://media.api-sports.io/football/leagues/39.png",
-  "La Liga": "https://media.api-sports.io/football/leagues/140.png",
-  "LaLiga Hypermotion": "https://media.api-sports.io/football/leagues/141.png",
-  "Copa del Rey": "https://media.api-sports.io/football/leagues/143.png",
-  "Supercopa de España": "https://media.api-sports.io/football/leagues/143.png",
-  "Bundesliga": "https://media.api-sports.io/football/leagues/78.png",
-  "2. Bundesliga": "https://media.api-sports.io/football/leagues/79.png",
-  "DFB-Pokal": "https://media.api-sports.io/football/leagues/81.png",
-  "DFL-Supercup": "https://media.api-sports.io/football/leagues/81.png",
-  "Serie A": "https://media.api-sports.io/football/leagues/135.png",
-  "Serie B": "https://media.api-sports.io/football/leagues/136.png",
-  "Coppa Italia": "https://media.api-sports.io/football/leagues/137.png",
-  "Supercoppa Italiana": "https://media.api-sports.io/football/leagues/137.png",
-  "Ligue 1": "https://media.api-sports.io/football/leagues/61.png",
-  "Ligue 2": "https://media.api-sports.io/football/leagues/62.png",
-  "Coupe de France": "https://media.api-sports.io/football/leagues/61.png",
-  "Trophée des Champions": "https://media.api-sports.io/football/leagues/61.png",
-  "Liga Portugal": "https://media.api-sports.io/football/leagues/94.png",
-  "Liga Portugal 2": "https://media.api-sports.io/football/leagues/95.png",
-  "Taça de Portugal": "https://media.api-sports.io/football/leagues/94.png",
-  "Taça da Liga": "https://media.api-sports.io/football/leagues/94.png",
-  "Supertaça Cândido de Oliveira": "https://media.api-sports.io/football/leagues/94.png",
-  "Eredivisie": "https://media.api-sports.io/football/leagues/88.png",
-  "KNVB Cup": "https://media.api-sports.io/football/leagues/88.png",
-  "Johan Cruijff Schaal": "https://media.api-sports.io/football/leagues/88.png",
-  "Jupiler Pro League": "https://media.api-sports.io/football/leagues/144.png",
-  "Belgian Cup": "https://media.api-sports.io/football/leagues/144.png",
-  "Belgian Super Cup": "https://media.api-sports.io/football/leagues/144.png",
-  "Süper Lig": "https://media.api-sports.io/football/leagues/203.png",
-  "Turkish Cup": "https://media.api-sports.io/football/leagues/203.png",
-  "Turkish Super Cup": "https://media.api-sports.io/football/leagues/203.png",
-  "Brasileirão": "https://media.api-sports.io/football/leagues/71.png",
-  "Brasileirão Série B": "https://media.api-sports.io/football/leagues/72.png",
-  "Copa do Brasil": "https://media.api-sports.io/football/leagues/71.png",
-  "Supercopa do Brasil": "https://media.api-sports.io/football/leagues/71.png",
-  "MLS": "https://media.api-sports.io/football/leagues/253.png",
 };
 
 const TEAM_COUNTRY: Record<string, string> = {
@@ -681,10 +623,10 @@ function normalizeBannerTeamName(name: string): string {
     .trim();
 }
 
-function bannerCountryMatches(teamKey: string, country?: string): boolean {
-  const expectedCountry = TEAM_COUNTRY[teamKey];
+function bannerCountryMatches(teamName: string, country?: string): boolean {
+  const expectedCountry = TEAM_COUNTRY[teamName];
   if (!expectedCountry || !country) return true;
-  return expectedCountry === country.toLowerCase();
+  return normalizeBannerTeamName(expectedCountry) === normalizeBannerTeamName(country);
 }
 
 function getTeamBanner(teamName: string, country?: string): string | undefined {
@@ -694,8 +636,7 @@ function getTeamBanner(teamName: string, country?: string): string | undefined {
   const normalizedTarget = normalizeBannerTeamName(teamName);
   if (!normalizedTarget) return directBanner;
 
-  const entries = Object.entries(TEAM_BANNERS);
-  const exactNormalized = entries.find(([key]) =>
+  const exactNormalized = Object.entries(TEAM_BANNERS).find(([key]) =>
     normalizeBannerTeamName(key) === normalizedTarget && bannerCountryMatches(key, country),
   );
   if (exactNormalized) return exactNormalized[1];
@@ -860,45 +801,6 @@ function formatMatchDate(dateStr: string): string {
   return d.toLocaleDateString("pt-BR", { weekday: "short", day: "2-digit", month: "2-digit" });
 }
 
-const WC2026_MAIN_START_KEY = "11.06.2026";
-
-function formatDateKey(date: Date): string {
-  return `${String(date.getDate()).padStart(2, "0")}.${String(date.getMonth() + 1).padStart(2, "0")}.${date.getFullYear()}`;
-}
-
-function parseMatchKickoffTimestamp(match: {
-  date?: string | null;
-  time?: string | null;
-  scheduledDate?: string | null;
-  scheduledTime?: string | null;
-}): number {
-  const dateStr = match.date ?? match.scheduledDate;
-  if (!dateStr) return Number.POSITIVE_INFINITY;
-  const parts = dateStr.split(".");
-  if (parts.length !== 3) return Number.POSITIVE_INFINITY;
-  const [dayStr, monthStr, yearStr] = parts;
-  const timeStr = match.time ?? match.scheduledTime ?? "00:00";
-  const [hourStr = "0", minuteStr = "0"] = timeStr.split(":");
-  return new Date(
-    Number(yearStr),
-    Number(monthStr) - 1,
-    Number(dayStr),
-    Number(hourStr),
-    Number(minuteStr),
-    0,
-    0,
-  ).getTime();
-}
-
-function isMatchOnOrAfterWC2026Start(match: {
-  date?: string | null;
-  scheduledDate?: string | null;
-}): boolean {
-  return parseMatchKickoffTimestamp({ date: match.date, scheduledDate: match.scheduledDate }) >=
-    parseMatchKickoffTimestamp({ date: WC2026_MAIN_START_KEY });
-}
-
-
 const RIVALRY_TAGS: Record<string, string> = {
   "Barcelona|Real Madrid": "⚡ El Clásico",
   "Real Madrid|Barcelona": "⚡ El Clásico",
@@ -946,6 +848,7 @@ const RIVALRY_TAGS: Record<string, string> = {
 
 // ─── Sidebar tree data ────────────────────────────────────────────────────────
 
+/** Flexible league name matching — handles "Country: League" API prefixes and substring containment */
 function normalizeLeagueFilterName(value: string): string {
   return String(value ?? "")
     .toLowerCase()
@@ -961,7 +864,7 @@ const LEAGUE_FILTER_ALIASES: Record<string, string[]> = {
   champions: ["champions league", "uefa champions league"],
   "europa league": ["europa league", "uefa europa league"],
   conference: ["conference league", "uefa conference league"],
-  "copa do mundo 2026": ["fifa world cup", "world cup", "copa do mundo", "wc 2026", "mundial 2026"],
+  "fifa world cup": ["fifa world cup", "world cup", "copa do mundo", "wc 2026", "mundial 2026"],
   "international friendlies": ["international friendlies", "international friendly", "amistosos internacionais", "friendly", "friendlies"],
   "premier league": ["premier league"],
   "la liga": ["la liga", "laliga"],
@@ -970,18 +873,17 @@ const LEAGUE_FILTER_ALIASES: Record<string, string[]> = {
   "ligue 1": ["ligue 1", "ligue1"],
   "primeira liga": ["primeira liga", "liga portugal", "liga portugal betclic", "liga nos", "liga bwin"],
   eredivisie: ["eredivisie"],
-  "super lig": ["super lig", "super lig turkey", "superlig", "super lig turkiye", "super lig turquia", "super lig", "super ligue", "super lig turco", "super lig turca", "super lig tff", "super lig", "super lig 1", "super lig 2", "super lig a", "super lig b", "super lig c", "süper lig"],
+  "super lig": ["super lig", "superlig", "super liga", "super league", "super lig turkey", "super lig turkiye", "super lig türkiye", "super lig turquia", "super lig turkey"],
   "liga mx": ["liga mx"],
   mls: ["mls", "major league soccer"],
-  brasileirao: ["brasileirao", "campeonato brasileiro", "serie a brasil", "brasileirao serie a", "brasileirao assaí"],
+  brasileirao: ["brasileirao", "brasileirão", "campeonato brasileiro", "serie a brazil", "brasil serie a"],
   libertadores: ["copa libertadores", "libertadores"],
   "fa cup": ["fa cup"],
   "copa del rey": ["copa del rey"],
   "coppa italia": ["coppa italia"],
-  "dfb pokal": ["dfb pokal", "dfb-pokal"],
+  "dfb pokal": ["dfb pokal", "dfl pokal"],
 };
 
-/** Precise league matching — strips country prefixes and allows sponsor suffixes, but avoids cross-league false positives. */
 function leagueMatchesFilter(matchLeague: string, filterLeague: string): boolean {
   if (!filterLeague) return true;
   const matchNorm = normalizeLeagueFilterName(matchLeague);
@@ -995,67 +897,51 @@ function leagueMatchesFilter(matchLeague: string, filterLeague: string): boolean
 
   return aliases.some((alias) => {
     if (matchNorm === alias) return true;
-    // Allow sponsor suffixes like "liga portugal betclic" or "serie a tim",
-    // but do not match unrelated competitions such as "russian premier league".
     return matchNorm.startsWith(`${alias} `);
   });
 }
 
-const WC2026_FILTER_LABEL = "Copa do Mundo 2026";
-const WC2026_FILTER_PATTERNS = [
-  "fifa world cup",
-  "world cup",
-  "copa do mundo",
-  "wc 2026",
-  "mundial 2026",
-] as const;
-
-function isWC2026LeagueName(name: string): boolean {
-  const lower = String(name ?? "").toLowerCase();
-  return WC2026_FILTER_PATTERNS.some((pattern) => lower.includes(pattern));
-}
-
 const FOOTBALL_COUNTRIES: { name: string; flag: string; leagues: string[] }[] = [
-  { name: "Europa", flag: "⭐", leagues: ["UEFA Champions League", "UEFA Europa League", "UEFA Conference League", "UEFA Super Cup"] },
+  { name: "Europa", flag: "⭐", leagues: ["Champions League", "Europa League", "Conference League", "UEFA Super Cup"] },
   { name: "FIFA", flag: "🌍", leagues: ["Copa América", "CONCACAF Gold Cup", "Africa Cup of Nations", "AFC Asian Cup", "International Friendlies"] },
-  { name: "UEFA", flag: "⭐", leagues: ["UEFA Champions League", "UEFA Europa League", "UEFA Conference League", "UEFA Super Cup", "UEFA European Championship", "UEFA Nations League"] },
-  { name: "Inglaterra", flag: "🏴", leagues: ["Premier League", "EFL Championship", "FA Cup", "EFL Cup", "Community Shield"] },
+  { name: "UEFA", flag: "⭐", leagues: ["UEFA Champions League", "UEFA Europa League", "UEFA European Championship", "UEFA Nations League"] },
+  { name: "Inglaterra", flag: "🏴󠁧󠁢󠁥󠁮󠁧󠁿", leagues: ["Premier League", "EFL Championship", "League One", "League Two", "FA Cup", "EFL Cup", "Community Shield"] },
   { name: "Espanha", flag: "🇪🇸", leagues: ["La Liga", "LaLiga Hypermotion", "Copa del Rey", "Supercopa de España"] },
-  { name: "Alemanha", flag: "🇩🇪", leagues: ["Bundesliga", "2. Bundesliga", "DFB-Pokal", "DFL-Supercup"] },
-  { name: "Itália", flag: "🇮🇹", leagues: ["Serie A", "Serie B", "Coppa Italia", "Supercoppa Italiana"] },
-  { name: "França", flag: "🇫🇷", leagues: ["Ligue 1", "Ligue 2", "Coupe de France", "Trophée des Champions"] },
-  { name: "Portugal", flag: "🇵🇹", leagues: ["Liga Portugal", "Liga Portugal 2", "Taça de Portugal", "Taça da Liga", "Supertaça Cândido de Oliveira"] },
+  { name: "Alemanha", flag: "🇩🇪", leagues: ["Bundesliga", "2. Bundesliga", "3. Liga", "DFB-Pokal", "DFL-Supercup"] },
+  { name: "Itália", flag: "🇮🇹", leagues: ["Serie A", "Serie B", "Serie C", "Coppa Italia", "Supercoppa Italiana"] },
+  { name: "França", flag: "🇫🇷", leagues: ["Ligue 1", "Ligue 2", "National", "Coupe de France", "Trophée des Champions"] },
+  { name: "Portugal", flag: "🇵🇹", leagues: ["Liga Portugal", "Liga Portugal 2", "Taça de Portugal", "Supertaça Cândido de Oliveira"] },
   { name: "Holanda", flag: "🇳🇱", leagues: ["Eredivisie", "Eerste Divisie", "KNVB Cup", "Johan Cruijff Schaal"] },
-  { name: "Bélgica", flag: "🇧🇪", leagues: ["Jupiler Pro League", "Challenger Pro League", "Belgian Cup", "Belgian Super Cup"] },
-  { name: "Turquia", flag: "🇹🇷", leagues: ["Süper Lig", "TFF First League", "Turkish Cup", "Turkish Super Cup"] },
+  { name: "Bélgica", flag: "🇧🇪", leagues: ["Jupiler Pro League", "Belgian First Amateur", "Belgian Cup", "Belgian Super Cup"] },
+  { name: "Turquia", flag: "🇹🇷", leagues: ["Süper Lig", "TFF First League", "TFF Second League", "Turkish Cup", "Turkish Super Cup"] },
   { name: "Grécia", flag: "🇬🇷", leagues: ["Super League Greece", "Super League 2", "Greek Cup", "Greek Super Cup"] },
-  { name: "Áustria", flag: "🇦🇹", leagues: ["Austrian Bundesliga", "Austrian 2. Liga", "Austrian Cup"] },
-  { name: "Escócia", flag: "🏴", leagues: ["Scottish Premiership", "Scottish Championship", "Scottish Cup", "Scottish League Cup"] },
+  { name: "Áustria", flag: "🇦🇹", leagues: ["Austrian Bundesliga", "Austrian Football Second League", "Austrian Cup"] },
+  { name: "Escócia", flag: "🏴󠁧󠁢󠁳󠁣󠁴󠁿", leagues: ["Scottish Premiership", "Scottish Championship", "Scottish League One", "Scottish Cup"] },
   { name: "Suíça", flag: "🇨🇭", leagues: ["Swiss Super League", "Challenge League", "Swiss Cup"] },
   { name: "Dinamarca", flag: "🇩🇰", leagues: ["Danish Superliga", "Danish 1st Division", "DBU Pokalen"] },
   { name: "Noruega", flag: "🇳🇴", leagues: ["Eliteserien", "Norwegian 1st Division", "Norwegian Cup"] },
   { name: "Suécia", flag: "🇸🇪", leagues: ["Allsvenskan", "Superettan", "Svenska Cupen"] },
-  { name: "Croácia", flag: "🇭🇷", leagues: ["HNL", "Prva NL", "Croatian Football Cup"] },
-  { name: "Sérvia", flag: "🇷🇸", leagues: ["Serbian SuperLiga", "Serbian Prva Liga", "Serbian Cup"] },
-  { name: "Polónia", flag: "🇵🇱", leagues: ["Ekstraklasa", "I liga", "Polish Cup", "Polish Super Cup"] },
+  { name: "Croácia", flag: "🇭🇷", leagues: ["HNL", "Croatian Football Cup"] },
+  { name: "Sérvia", flag: "🇷🇸", leagues: ["Serbian SuperLiga", "Serbian Cup"] },
+  { name: "Polónia", flag: "🇵🇱", leagues: ["Ekstraklasa", "I liga", "Polish Cup"] },
   { name: "Rep. Checa", flag: "🇨🇿", leagues: ["Czech First League", "FNL", "Czech Cup"] },
-  { name: "Rússia", flag: "🇷🇺", leagues: ["Russian Premier League", "Russian First League", "Russian Cup", "Russian Super Cup"] },
-  { name: "Ucrânia", flag: "🇺🇦", leagues: ["Ukrainian Premier League", "Ukrainian First League", "Ukrainian Cup"] },
-  { name: "Hungria", flag: "🇭🇺", leagues: ["OTP Bank Liga", "Merkantil Bank Liga", "Magyar Kupa"] },
-  { name: "Roménia", flag: "🇷🇴", leagues: ["Romanian Superliga", "Romanian Liga II", "Cupa României", "Supercupa României"] },
-  { name: "Bulgária", flag: "🇧🇬", leagues: ["Parva liga", "Vtora liga", "Bulgarian Cup", "Bulgarian Super Cup"] },
-  { name: "Israel", flag: "🇮🇱", leagues: ["Israeli Premier League", "Israeli National League", "State Cup", "Toto Cup"] },
-  { name: "Brasil", flag: "🇧🇷", leagues: ["Brasileirão", "Brasileirão Série B", "Copa do Brasil", "Supercopa do Brasil"] },
-  { name: "Argentina", flag: "🇦🇷", leagues: ["Primera División", "Primera Nacional", "Copa Argentina", "Supercopa Argentina", "Copa de la Liga Profesional"] },
-  { name: "México", flag: "🇲🇽", leagues: ["Liga MX", "Liga de Expansión MX", "Copa MX", "Campeón de Campeones"] },
-  { name: "Chile", flag: "🇨🇱", leagues: ["Primera División — Chile", "Primera B — Chile", "Copa Chile", "Supercopa de Chile"] },
-  { name: "Colômbia", flag: "🇨🇴", leagues: ["Categoría Primera A", "Categoría Primera B", "Copa Colombia", "Superliga Colombiana"] },
-  { name: "EUA", flag: "🇺🇸", leagues: ["MLS", "USL Championship", "US Open Cup", "Leagues Cup"] },
-  { name: "Arábia Saudita", flag: "🇸🇦", leagues: ["Saudi Pro League", "King Cup", "Saudi Super Cup"] },
-  { name: "Japão", flag: "🇯🇵", leagues: ["J1 League", "J2 League", "Emperor's Cup", "Japanese Super Cup"] },
+  { name: "Rússia", flag: "🇷🇺", leagues: ["Russian Premier League", "Russian National League", "Russian Cup"] },
+  { name: "Ucrânia", flag: "🇺🇦", leagues: ["Ukrainian Premier League", "Ukrainian Cup"] },
+  { name: "Hungria", flag: "🇭🇺", leagues: ["OTP Bank Liga", "Merkantil Bank Liga"] },
+  { name: "Roménia", flag: "🇷🇴", leagues: ["Romanian Liga I", "Romanian Liga II"] },
+  { name: "Bulgária", flag: "🇧🇬", leagues: ["Parva liga", "Vtora liga"] },
+  { name: "Israel", flag: "🇮🇱", leagues: ["Israeli Premier League", "Israeli National League", "State Cup"] },
+  { name: "Brasil", flag: "🇧🇷", leagues: ["Brasileirão", "Brasileirão Série B", "Copa do Brasil", "Recopa Sudamericana", "Campeonato Paulista", "Campeonato Carioca", "Copa Sul-Americana"] },
+  { name: "Argentina", flag: "🇦🇷", leagues: ["Primera División", "Primera Nacional", "Copa Argentina", "Copa de la Liga Profesional"] },
+  { name: "México", flag: "🇲🇽", leagues: ["Liga MX", "Ascenso MX", "Copa MX", "Leagues Cup"] },
+  { name: "Chile", flag: "🇨🇱", leagues: ["Primera División — Chile", "Primera B — Chile"] },
+  { name: "Colômbia", flag: "🇨🇴", leagues: ["Categoría Primera A", "Categoría Primera B"] },
+  { name: "EUA", flag: "🇺🇸", leagues: ["MLS", "USL Championship", "US Open Cup"] },
+  { name: "Arábia Saudita", flag: "🇸🇦", leagues: ["Saudi Pro League", "First Division League", "King Cup"] },
+  { name: "Japão", flag: "🇯🇵", leagues: ["J1 League", "J2 League", "J3 League", "Emperor's Cup"] },
   { name: "Coreia do Sul", flag: "🇰🇷", leagues: ["K League 1", "K League 2", "Korean FA Cup"] },
-  { name: "Tailândia", flag: "🇹🇭", leagues: ["Thai League 1", "Thai FA Cup", "Thai League Cup"] },
-  { name: "Índia", flag: "🇮🇳", leagues: ["Indian Super League", "Super Cup", "Durand Cup"] },
+  { name: "Tailândia", flag: "🇹🇭", leagues: ["Thai League 1", "Thai League 2"] },
+  { name: "Índia", flag: "🇮🇳", leagues: ["Indian Super League", "I-League"] },
 ];
 
 const OTHER_SPORTS: { key: string; label: string; icon: string; leagues: string[] }[] = [
@@ -1396,10 +1282,13 @@ type Match = {
 type BetSelection = {
   matchId: string | number;
   matchTitle: string;
-  homeTeam?: string;
-  awayTeam?: string;
-  kickoffTime?: string;
+  league?: string;
+  country?: string;
   sport?: string;
+  date?: string;
+  time?: string;
+  scheduledDate?: string;
+  scheduledTime?: string;
   selection: string;
   odd: number;
   market?: string;
@@ -1409,11 +1298,13 @@ type BetSelection = {
 type StoredSelection = {
   matchId?: string;
   matchTitle: string;
-  homeTeam?: string;
-  awayTeam?: string;
-  kickoffTime?: string;
-  scheduledAt?: string;
+  league?: string;
+  country?: string;
   sport?: string;
+  date?: string;
+  time?: string;
+  scheduledDate?: string;
+  scheduledTime?: string;
   selection: string;
   odd: number;
   market?: string;
@@ -1430,7 +1321,6 @@ type UserBet = {
   stake: string;
   potentialWin: string;
   totalOdds: string;
-  isFreebet?: string | boolean;
   status: string;
   cashoutValue?: string | null;
   cashoutStatus?: string;
@@ -1816,7 +1706,6 @@ export default function Home() {
   const [liveMatches, setLiveMatches] = useState<Match[]>([]);
   const [liveLoading, setLiveLoading] = useState(false);
   const [liveSportFilter, setLiveSportFilter] = useState<string>("all");
-  const [liveLeagueFilter, setLiveLeagueFilter] = useState<string>("all");
   const [liveSearchQuery, setLiveSearchQuery] = useState<string>("");
   const prevLiveOdds = useRef<Record<string, Odds>>({});
   // Flat map of "market:sel" → previous odd value, for arrows in MarketOddsBtn
@@ -1835,10 +1724,9 @@ export default function Home() {
 
   // Upcoming matches
   const [upcomingMatches, setUpcomingMatches] = useState<Match[]>([]);
-  const [wc2026Matches, setWc2026Matches] = useState<Match[]>([]);
   const [upcomingLoading, setUpcomingLoading] = useState(true);
   const [selectedSport, setSelectedSport] = useState<string>("all");
-  const [upcomingSearchQuery, setUpcomingSearchQuery] = useState("");
+  const [upcomingSearchQuery, setUpcomingSearchQuery] = useState<string>("");
 
   // Recent tennis results (yesterday)
   type TennisResult = {
@@ -3018,29 +2906,6 @@ export default function Home() {
     return () => clearTimeout(tid);
   }, []);
 
-  useEffect(() => {
-    let cancelled = false;
-
-    const loadWC2026 = async () => {
-      try {
-        const r = await fetch("/api/matches/wc2026");
-        const data = r.ok ? await r.json() : { matches: [] };
-        if (cancelled) return;
-        const matches = Array.isArray(data.matches) ? data.matches : [];
-        setWc2026Matches(matches.map((m: Match) => ({ ...m, isLive: false })));
-      } catch {
-        if (!cancelled) setWc2026Matches([]);
-      }
-    };
-
-    loadWC2026();
-    const id = setInterval(loadWC2026, 15 * 60_000);
-    return () => {
-      cancelled = true;
-      clearInterval(id);
-    };
-  }, []);
-
   // Fetch upcoming matches — polls every 30s so new games appear automatically
   const fetchUpcoming = useCallback(async (showSpinner = false) => {
     if (document.visibilityState === "hidden") return;
@@ -3279,18 +3144,6 @@ export default function Home() {
             setLiveMatches(prev => prev.map(m =>
               String(m.id) === String(data.matchId) ? { ...m, ...(data.delta ?? {}), isLive: true } : m
             ));
-          } else if (data.type === "batch_update" && Array.isArray(data.updates)) {
-            // Multiple deltas in one message
-            setLiveMatches(prev => {
-              const next = [...prev];
-              for (const upd of data.updates) {
-                const idx = next.findIndex(m => String(m.id) === String(upd.matchId));
-                if (idx >= 0) {
-                  next[idx] = { ...next[idx]!, ...upd.delta, isLive: true };
-                }
-              }
-              return next;
-            });
           } else if (Array.isArray(data.matches)) {
             // Full snapshot from server broadcast
             writeSnapshot(liveSnapshotKey(), data.matches);
@@ -3580,10 +3433,13 @@ export default function Home() {
       return [...prev, {
         matchId: match.id,
         matchTitle: `${match.home} vs ${match.away}`,
-        homeTeam: match.home,
-        awayTeam: match.away,
-        kickoffTime: getMatchKickoffIso(match),
+        league: match.league,
+        country: match.country,
         sport: match.sport,
+        date: match.date,
+        time: match.time,
+        scheduledDate: (match as any).scheduledDate,
+        scheduledTime: (match as any).scheduledTime,
         selection,
         odd,
         market,
@@ -3600,17 +3456,9 @@ export default function Home() {
   const effectiveBetMode: "simples" | "multipla" = hasDuplicateMatches ? "simples" : betMode;
   const totalOdds = bets.reduce((acc, bet) => acc * bet.odd, 1).toFixed(2);
   const [stake, setStake] = useState<string>("");
-  const [useFreebet, setUseFreebet] = useState(false);
   const [betStakes, setBetStakes] = useState<Record<string, string>>({});
   const betKey = (b: BetSelection) => `${b.matchId}-${b.market}-${b.selection}`;
   const simplesPotential = bets.reduce((sum, b) => sum + b.odd * parseFloat(betStakes[betKey(b)] || "0"), 0).toFixed(2);
-  const realBalance = parseFloat(auth.user?.balance ?? "0");
-  const freebetBalance = parseFloat(auth.user?.freebetBalance ?? "0");
-  const activeBalance = useFreebet ? freebetBalance : realBalance;
-
-  useEffect(() => {
-    if (!auth.user || freebetBalance <= 0) setUseFreebet(false);
-  }, [auth.user, freebetBalance]);
 
   // ── Lock screen handlers ────────────────────────────────────────────────────
   const handlePasswordUnlock = async (e: React.FormEvent) => {
@@ -3752,7 +3600,6 @@ export default function Home() {
 
   const handlePlaceBet = async () => {
     if (!auth.user) { setAuthMode("login"); setAuthModalOpen(true); return; }
-    if (useFreebet && freebetBalance <= 0) { toast.error("Não tem freebets disponíveis"); return; }
 
     // Guard: block placement if any live selection has an active market suspension
     {
@@ -3775,7 +3622,7 @@ export default function Home() {
       const missing = bets.some(b => !betStakes[betKey(b)] || parseFloat(betStakes[betKey(b)] || "0") <= 0);
       if (missing) { toast.error("Insira o valor para cada aposta no boletim"); return; }
       const totalCost = bets.reduce((s, b) => s + parseFloat(betStakes[betKey(b)] || "0"), 0);
-      if (totalCost > activeBalance) { toast.error(useFreebet ? "Saldo de freebets insuficiente" : "Saldo insuficiente"); return; }
+      if (totalCost > parseFloat(auth.user.balance)) { toast.error("Saldo insuficiente"); return; }
       setIsPlacingBet(true);
       try {
         let allOk = true;
@@ -3791,9 +3638,13 @@ export default function Home() {
               selections: [{
                 matchId: String(bet.matchId),
                 matchTitle: bet.matchTitle,
-                homeTeam: bet.homeTeam,
-                awayTeam: bet.awayTeam,
-                kickoffTime: bet.kickoffTime,
+                league: bet.league,
+                country: bet.country,
+                sport: bet.sport,
+                date: bet.date,
+                time: bet.time,
+                scheduledDate: bet.scheduledDate,
+                scheduledTime: bet.scheduledTime,
                 selection: bet.selection,
                 odd: bet.odd,
                 market: bet.market,
@@ -3802,16 +3653,15 @@ export default function Home() {
               stake: sNum.toFixed(2),
               potentialWin,
               totalOdds: bet.odd.toFixed(2),
-              isFreebet: useFreebet,
             })
           });
           const data = await res.json();
           if (!res.ok) { toast.error(data.error || "Erro ao realizar aposta"); allOk = false; break; }
         }
         if (allOk) {
-          toast.success(`${bets.length} aposta${bets.length > 1 ? "s" : ""} realizada${bets.length > 1 ? "s" : ""}! Total: € ${totalCost.toFixed(2)}${useFreebet ? " em freebets" : ""}`);
+          toast.success(`${bets.length} aposta${bets.length > 1 ? "s" : ""} realizada${bets.length > 1 ? "s" : ""}! Total: € ${totalCost.toFixed(2)}`);
           setBetPlacedAnim(true);
-          setBets([]); setBetStakes({}); setStake(""); setBetSlipOpenMobile(false); setUseFreebet(false); auth.refreshUser();
+          setBets([]); setBetStakes({}); setStake(""); setBetSlipOpenMobile(false); auth.refreshUser();
         }
       } catch { toast.error("Erro ao realizar aposta"); } finally { setIsPlacingBet(false); }
       return;
@@ -3820,7 +3670,7 @@ export default function Home() {
     // Múltipla mode
     if (!stake) { toast.error("Insira um valor para apostar"); return; }
     const stakeNum = parseFloat(stake);
-    if (stakeNum > activeBalance) { toast.error(useFreebet ? "Saldo de freebets insuficiente" : "Saldo insuficiente"); return; }
+    if (stakeNum > parseFloat(auth.user.balance)) { toast.error("Saldo insuficiente"); return; }
     setIsPlacingBet(true);
     try {
       const matchId = bets.map(b => b.matchId).join("-");
@@ -3835,9 +3685,13 @@ export default function Home() {
           selections: bets.map(b => ({
             matchId: String(b.matchId),
             matchTitle: b.matchTitle,
-            homeTeam: b.homeTeam,
-            awayTeam: b.awayTeam,
-            kickoffTime: b.kickoffTime,
+            league: b.league,
+            country: b.country,
+            sport: b.sport,
+            date: b.date,
+            time: b.time,
+            scheduledDate: b.scheduledDate,
+            scheduledTime: b.scheduledTime,
             selection: b.selection,
             odd: b.odd,
             market: b.market,
@@ -3846,14 +3700,13 @@ export default function Home() {
           stake: stakeNum.toFixed(2),
           potentialWin,
           totalOdds,
-          isFreebet: useFreebet,
         })
       });
       const data = await res.json();
       if (!res.ok) { toast.error(data.error || "Erro ao realizar aposta"); return; }
-      toast.success(`Aposta múltipla realizada${useFreebet ? " com freebets" : ""}! Potencial de ganho: € ${potentialWin}`);
+      toast.success(`Aposta múltipla realizada! Potencial de ganho: € ${potentialWin}`);
       setBetPlacedAnim(true);
-      setBets([]); setBetStakes({}); setStake(""); setBetSlipOpenMobile(false); setUseFreebet(false); auth.refreshUser();
+      setBets([]); setBetStakes({}); setStake(""); setBetSlipOpenMobile(false); auth.refreshUser();
     } catch { toast.error("Erro ao realizar aposta"); } finally { setIsPlacingBet(false); }
   };
 
@@ -4717,9 +4570,6 @@ export default function Home() {
     const canSwitchMode = !hasDuplicateMatches && bets.length > 1;
     const stakeNum = parseFloat(stake || "0");
     const multipotential = (stakeNum * parseFloat(totalOdds)).toFixed(2);
-    const simpleTotalStake = bets.reduce((s, b) => s + parseFloat(betStakes[betKey(b)] || "0"), 0);
-    const isInsufficient = effectiveBetMode === "simples" ? simpleTotalStake > activeBalance : stakeNum > activeBalance;
-    const canUseFreebets = freebetBalance > 0;
 
     // Suspension detection
     const now = Date.now();
@@ -4761,26 +4611,6 @@ export default function Home() {
             </div>
 
             <div className="flex items-center gap-3">
-              {auth.user && (
-                <button
-                  onClick={() => canUseFreebets && setUseFreebet(prev => !prev)}
-                  disabled={!canUseFreebets}
-                  className={`flex items-center gap-2 rounded-xl px-3 py-2 transition-all ${!canUseFreebets ? "opacity-60 cursor-not-allowed" : ""}`}
-                  style={useFreebet
-                    ? { background: "rgba(124,58,237,0.18)", border: "1px solid rgba(167,139,250,0.42)" }
-                    : { background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.06)" }
-                  }
-                  title={canUseFreebets ? "Alternar entre saldo real e freebets" : "Sem freebets disponíveis"}
-                >
-                  {useFreebet ? <ToggleRight size={18} className="text-violet-300" /> : <ToggleLeft size={18} className="text-zinc-500" />}
-                  <div className="text-left hidden sm:block">
-                    <div className="text-[9px] uppercase tracking-wider text-zinc-500">Carteira</div>
-                    <div className={`text-[11px] font-black ${useFreebet ? "text-violet-300" : "text-white"}`}>
-                      {useFreebet ? "FREEBETS" : "SALDO"}
-                    </div>
-                  </div>
-                </button>
-              )}
               {bets.length > 0 && effectiveBetMode === "multipla" && (
                 <div className="text-right">
                   <div className="text-[10px] text-zinc-500 leading-none mb-0.5">ODDS COMBINADAS</div>
@@ -4827,38 +4657,6 @@ export default function Home() {
           {bets.length > 0 && hasDuplicateMatches && (
             <p className="text-[10px] text-zinc-600 mt-1.5 text-center">Duas seleções do mesmo evento — modo Simples obrigatório</p>
           )}
-          {auth.user && (
-            <div
-              className="mt-3 rounded-2xl px-3 py-2.5 flex items-center justify-between gap-3"
-              style={useFreebet
-                ? { background: "rgba(124,58,237,0.14)", border: "1px solid rgba(167,139,250,0.28)" }
-                : { background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.05)" }
-              }
-            >
-              <div className="flex items-center gap-2 min-w-0">
-                <div
-                  className="w-8 h-8 rounded-xl flex items-center justify-center shrink-0"
-                  style={useFreebet ? { background: "rgba(124,58,237,0.22)" } : { background: "rgba(255,255,255,0.05)" }}
-                >
-                  {useFreebet ? <Sparkles size={15} className="text-violet-300" /> : <Wallet size={15} className="text-zinc-400" />}
-                </div>
-                <div className="min-w-0">
-                  <div className="text-[10px] uppercase tracking-wider text-zinc-500">Saldo ativo</div>
-                  <div className={`text-sm font-black ${useFreebet ? "text-violet-300" : "text-white"}`}>
-                    {useFreebet ? "Freebets" : "Saldo em euro"}
-                  </div>
-                </div>
-              </div>
-              <div className="text-right shrink-0">
-                <div className={`text-lg font-black ${useFreebet ? "text-violet-300" : "text-green-400"}`}>
-                  € {activeBalance.toFixed(2)}
-                </div>
-                <div className="text-[10px] text-zinc-500">
-                  {useFreebet ? "crédito promocional" : "saldo disponível"}
-                </div>
-              </div>
-            </div>
-          )}
         </div>
 
         {/* ── BET CARDS ── */}
@@ -4875,6 +4673,12 @@ export default function Home() {
             <AnimatePresence>
               {bets.map((bet, betIdx) => {
                 const isSusp = betSuspended[betIdx] === true;
+                const when = (() => {
+                  const d = bet.scheduledDate ?? bet.date;
+                  const t = bet.scheduledTime ?? bet.time;
+                  if (d && t) return `${d} • ${t}`;
+                  return t || d || null;
+                })();
                 return (
                   <motion.div
                     key={`${bet.matchId}-${bet.market}-${bet.selection}`}
@@ -4901,7 +4705,7 @@ export default function Home() {
                       {/* Top row: sport/league + remove */}
                       <div className="flex items-center justify-between mb-2">
                         <span className="text-[10px] font-semibold uppercase tracking-wider truncate pr-2" style={{ color: "#dc2626" }}>
-                          {bet.matchTitle.split(" vs ")[0]?.trim() || bet.matchTitle}
+                          {bet.league || bet.matchTitle.split(" vs ")[0]?.trim() || bet.matchTitle}
                         </span>
                         <button
                           onClick={() => removeBet(bet.matchId, bet.market || "result", bet.selection)}
@@ -4914,6 +4718,11 @@ export default function Home() {
 
                       {/* Match title */}
                       <div className="text-[11px] text-zinc-400 truncate mb-1.5">{bet.matchTitle}</div>
+                      {(bet.league || when) && (
+                        <div className="text-[10px] text-zinc-500 truncate mb-2">
+                          {[bet.league, when].filter(Boolean).join(" • ")}
+                        </div>
+                      )}
 
                       {/* Selection + odd */}
                       <div className="flex items-center justify-between">
@@ -4936,7 +4745,7 @@ export default function Home() {
                                 onClick={() => setBetStakes(prev => ({ ...prev, [betKey(bet)]: String(amt) }))}
                                 className="flex-1 py-1 rounded-lg text-[11px] font-bold transition-all"
                                 style={parseFloat(betStakes[betKey(bet)] || "0") === amt
-                                  ? { background: useFreebet ? "#7c3aed" : "#dc2626", color: "#fff" }
+                                  ? { background: "#dc2626", color: "#fff" }
                                   : { background: "rgba(255,255,255,0.05)", color: "#a1a1aa", border: "1px solid rgba(255,255,255,0.07)" }
                                 }
                               >
@@ -4944,18 +4753,12 @@ export default function Home() {
                               </button>
                             ))}
                           </div>
-                          <div
-                            className="flex items-center rounded-xl overflow-hidden"
-                            style={useFreebet
-                              ? { background: "rgba(124,58,237,0.08)", border: "1px solid rgba(167,139,250,0.22)" }
-                              : { background: "rgba(0,0,0,0.4)", border: "1px solid rgba(255,255,255,0.08)" }
-                            }
-                          >
-                            <span className={`pl-3 text-sm font-bold ${useFreebet ? "text-violet-300" : "text-zinc-500"}`}>€</span>
+                          <div className="flex items-center rounded-xl overflow-hidden" style={{ background: "rgba(0,0,0,0.4)", border: "1px solid rgba(255,255,255,0.08)" }}>
+                            <span className="pl-3 text-zinc-500 text-sm font-bold">€</span>
                             <input
                               type="text"
                               inputMode="decimal"
-                              placeholder={useFreebet ? "Valor da freebet" : "Outro valor"}
+                              placeholder="Outro valor"
                               value={betStakes[betKey(bet)] || ""}
                               onChange={e => {
                                 const v = e.target.value.replace(/[^0-9.,]/g, "").replace(",", ".");
@@ -4997,9 +4800,7 @@ export default function Home() {
                       onClick={() => setStake(String(amt))}
                       className="flex-1 py-1.5 rounded-xl text-[12px] font-bold transition-all"
                       style={parseFloat(stake || "0") === amt
-                        ? useFreebet
-                          ? { background: "linear-gradient(135deg,#7c3aed,#5b21b6)", color: "#fff", boxShadow: "0 2px 8px rgba(124,58,237,0.35)" }
-                          : { background: "linear-gradient(135deg,#dc2626,#991b1b)", color: "#fff", boxShadow: "0 2px 8px rgba(220,38,38,0.3)" }
+                        ? { background: "linear-gradient(135deg,#dc2626,#991b1b)", color: "#fff", boxShadow: "0 2px 8px rgba(220,38,38,0.3)" }
                         : { background: "rgba(255,255,255,0.05)", color: "#a1a1aa", border: "1px solid rgba(255,255,255,0.07)" }
                       }
                     >
@@ -5007,18 +4808,12 @@ export default function Home() {
                     </button>
                   ))}
                 </div>
-                <div
-                  className="flex items-center rounded-xl overflow-hidden"
-                  style={useFreebet
-                    ? { background: "rgba(124,58,237,0.08)", border: "1px solid rgba(167,139,250,0.24)" }
-                    : { background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }
-                  }
-                >
-                  <span className={`pl-3 font-bold ${useFreebet ? "text-violet-300" : "text-zinc-500"}`}>€</span>
+                <div className="flex items-center rounded-xl overflow-hidden" style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }}>
+                  <span className="pl-3 text-zinc-500 font-bold">€</span>
                   <input
                     type="text"
                     inputMode="decimal"
-                    placeholder={useFreebet ? "Valor da freebet" : "Outro valor"}
+                    placeholder="Outro valor"
                     value={stake}
                     onChange={e => {
                       const v = e.target.value.replace(/[^0-9.,]/g, "").replace(",", ".");
@@ -5040,13 +4835,10 @@ export default function Home() {
                 <div className="text-[10px] text-zinc-500 uppercase tracking-wider mb-0.5">
                   {effectiveBetMode === "simples" ? "Total em jogo" : "Valor apostado"}
                 </div>
-                <div className={`font-black text-[15px] ${useFreebet ? "text-violet-300" : "text-white"}`}>
+                <div className="text-white font-black text-[15px]">
                   € {effectiveBetMode === "simples"
                     ? bets.reduce((s, b) => s + parseFloat(betStakes[betKey(b)] || "0"), 0).toFixed(2)
                     : (stakeNum || 0).toFixed(2)}
-                </div>
-                <div className="text-[10px] text-zinc-500 mt-0.5">
-                  {useFreebet ? "a debitar de freebets" : "a debitar do saldo real"}
                 </div>
               </div>
               <div className="w-px h-8 self-center" style={{ background: "rgba(255,255,255,0.08)" }} />
@@ -5060,14 +4852,6 @@ export default function Home() {
 
             {effectiveBetMode === "simples" && bets.length > 1 && (
               <p className="text-[10px] text-zinc-600 text-center">{bets.length} apostas independentes</p>
-            )}
-            {isInsufficient && (
-              <div className="flex items-center gap-2 px-3 py-2.5 rounded-xl" style={{ background: "rgba(220,38,38,0.08)", border: "1px solid rgba(220,38,38,0.25)" }}>
-                <AlertCircle size={13} className="text-red-400 flex-shrink-0" />
-                <p className="text-red-400 text-xs font-medium leading-tight">
-                  {useFreebet ? "Saldo de freebets insuficiente para este boletim." : "Saldo insuficiente para este boletim."}
-                </p>
-              </div>
             )}
 
             {/* Suspension warning */}
@@ -5083,23 +4867,19 @@ export default function Home() {
             {/* CTA */}
             <button
               onClick={handlePlaceBet}
-              disabled={isPlacingBet || anySuspended || isInsufficient}
+              disabled={isPlacingBet || anySuspended}
               className="w-full h-13 rounded-2xl font-black text-[14px] text-white flex items-center justify-center gap-2 transition-all active:scale-[0.98]"
-              style={(anySuspended || isInsufficient)
+              style={anySuspended
                 ? { background: "#27272a", cursor: "not-allowed" }
-                : useFreebet
-                  ? { background: "linear-gradient(135deg,#7c3aed 0%,#5b21b6 100%)", boxShadow: "0 4px 20px rgba(124,58,237,0.4)" }
-                  : { background: "linear-gradient(135deg,#dc2626 0%,#991b1b 100%)", boxShadow: "0 4px 20px rgba(220,38,38,0.4)" }
+                : { background: "linear-gradient(135deg,#dc2626 0%,#991b1b 100%)", boxShadow: "0 4px 20px rgba(220,38,38,0.4)" }
               }
             >
               {anySuspended ? (
                 <><Lock size={15} className="animate-pulse" /> APOSTAS BLOQUEADAS</>
-              ) : isInsufficient ? (
-                <><AlertCircle size={15} /> SALDO INSUFICIENTE</>
               ) : isPlacingBet ? (
                 <><Loader2 className="animate-spin" size={16} /> A PROCESSAR...</>
               ) : (
-                auth.user ? (useFreebet ? "APOSTAR COM FREEBETS" : "APOSTAR AGORA") : "ENTRAR PARA APOSTAR"
+                auth.user ? "APOSTAR AGORA" : "ENTRAR PARA APOSTAR"
               )}
             </button>
           </div>
@@ -6440,45 +6220,32 @@ export default function Home() {
                   getTeamBanner(fallbackTeamName) ??
                   getTeamBanner(team.teamName) ??
                   undefined;
-                return (
-                  <div key={team.teamId} className="mb-6 rounded-2xl overflow-hidden border border-zinc-800 bg-zinc-950/70">
-                    {teamBanner ? (
-                      <div className="relative h-24 sm:h-28 overflow-hidden border-b border-zinc-800">
-                        <img
-                          src={teamBanner}
-                          alt={`${team.teamName} banner`}
-                          className="absolute inset-0 w-full h-full object-cover"
-                          style={{ filter: "brightness(0.6) saturate(1.05)" }}
-                          loading="lazy"
-                          decoding="async"
-                        />
-                        <div className="absolute inset-0 bg-gradient-to-r from-zinc-950 via-zinc-950/70 to-transparent" />
-                        <div className="relative z-10 h-full flex items-end gap-2 px-3 py-3">
-                          <span className={`text-xs font-bold px-2 py-0.5 rounded ${isHome ? "bg-red-900/70 text-red-200 border border-red-500/30" : "bg-zinc-800/80 text-zinc-200 border border-zinc-600/50"}`}>
-                            {isHome ? "CASA" : "FORA"}
-                          </span>
-                          <span className="text-sm sm:text-base font-black text-white drop-shadow truncate">
-                            {team.teamName}
-                          </span>
-                        </div>
-                      </div>
-                    ) : (
-                      <div className="flex items-center gap-2 px-3 pt-3 mb-3 pb-2 border-b border-zinc-700">
-                        <span className={`text-xs font-bold px-2 py-0.5 rounded ${isHome ? "bg-red-900/60 text-red-300" : "bg-zinc-700 text-zinc-300"}`}>
-                          {isHome ? "CASA" : "FORA"}
-                        </span>
-                        <span className="text-sm font-bold text-white">{team.teamName}</span>
-                      </div>
-                    )}
 
-                    <div className="p-3 pt-3">
-                      {pmList(team.anytimeScorers,    "pm-gol", "marcadores",      "⚽ Marcador (Qualquer Momento)",  p => `${p.stat} gol(os) em ${p.appearances} jogos`)}
-                      {pmList(team.firstHalfScorers,  "pm-fh",  "marcador-1t",     "⚽ Marcador no 1.º Tempo",        p => `${p.stat} gol(os) em ${p.appearances} jogos`)}
-                      {pmList(team.secondHalfScorers, "pm-sh",  "marcador-2t",     "⚽ Marcador no 2.º Tempo",        p => `${p.stat} gol(os) em ${p.appearances} jogos`)}
-                      {pmList(team.scoreAndAssist,    "pm-sa",  "marcar-assistir", "🎯 Marcar e Dar Assistência",     p => `${p.stat} vez(es) em ${p.appearances} jogos`)}
-                      {pmList(team.bookings,          "pm-card","cartao-jogador",  "🟨🟥 Cartão (Amarelo ou Vermelho)", p => `${p.stat} cartão(ões) em ${p.appearances} jogos`)}
+                return (
+                <div key={team.teamId} className="mb-6">
+                  {teamBanner && (
+                    <div className="mb-3 overflow-hidden rounded-xl border border-zinc-800">
+                      <img
+                        src={teamBanner}
+                        alt={fallbackTeamName}
+                        className="h-28 w-full object-cover"
+                        loading="lazy"
+                      />
                     </div>
+                  )}
+                  <div className="flex items-center gap-2 px-1 mb-3 pb-2 border-b border-zinc-700">
+                    <span className={`text-xs font-bold px-2 py-0.5 rounded ${isHome ? "bg-red-900/60 text-red-300" : "bg-zinc-700 text-zinc-300"}`}>
+                      {isHome ? "CASA" : "FORA"}
+                    </span>
+                    <span className="text-sm font-bold text-white">{team.teamName}</span>
                   </div>
+
+                  {pmList(team.anytimeScorers,    "pm-gol", "marcadores",      "⚽ Marcador (Qualquer Momento)",  p => `${p.stat} gol(os) em ${p.appearances} jogos`)}
+                  {pmList(team.firstHalfScorers,  "pm-fh",  "marcador-1t",     "⚽ Marcador no 1.º Tempo",        p => `${p.stat} gol(os) em ${p.appearances} jogos`)}
+                  {pmList(team.secondHalfScorers, "pm-sh",  "marcador-2t",     "⚽ Marcador no 2.º Tempo",        p => `${p.stat} gol(os) em ${p.appearances} jogos`)}
+                  {pmList(team.scoreAndAssist,    "pm-sa",  "marcar-assistir", "🎯 Marcar e Dar Assistência",     p => `${p.stat} vez(es) em ${p.appearances} jogos`)}
+                  {pmList(team.bookings,          "pm-card","cartao-jogador",  "🟨🟥 Cartão (Amarelo ou Vermelho)", p => `${p.stat} cartão(ões) em ${p.appearances} jogos`)}
+                </div>
                 );
               };
 
@@ -6997,7 +6764,6 @@ export default function Home() {
     if (betStatus === "lost") return "pending";
     // Pending: check live match for tentative state
     const lm = findLiveMatchForSel(sel);
-    if (!hasSelectionStarted(sel, lm)) return "pending";
     if (!lm) return "pending";
     const s = sel.selection;
     const homeScore = lm.homeScore ?? 0;
@@ -7115,77 +6881,9 @@ export default function Home() {
     return t ? `${dayLabel} • ${t}` : dayLabel;
   };
 
-  const getMatchKickoffIso = (m: Pick<Match, "scheduledDate" | "date" | "scheduledTime" | "time">): string | undefined => {
-    const dateRaw = m.scheduledDate ?? m.date;
-    const timeRaw = m.scheduledTime ?? m.time;
-    const date = typeof dateRaw === "string" ? parseDMY(dateRaw) : null;
-    const time = typeof timeRaw === "string" ? timeRaw : null;
-    if (!date && !time) return undefined;
-    if (date && time && /^\d{1,2}:\d{2}$/.test(time)) {
-      const [hh, mm] = time.split(":").map(Number);
-      date.setHours(hh, mm, 0, 0);
-      return date.toISOString();
-    }
-    if (date) return date.toISOString();
-    return undefined;
-  };
-
-  const getSelectionKickoffDate = (sel: StoredSelection): Date | null => {
-    const raw = sel.kickoffTime ?? sel.scheduledAt;
-    if (!raw) return null;
-    const parsed = new Date(raw);
-    return Number.isNaN(parsed.getTime()) ? null : parsed;
-  };
-
-  const getTicketKickoffDate = (bet: UserBet): Date | null => {
-    const selections = getBetSelections(bet);
-    const dates = selections
-      .map(getSelectionKickoffDate)
-      .filter((value): value is Date => value instanceof Date);
-    if (dates.length === 0) return null;
-    return new Date(Math.min(...dates.map((value) => value.getTime())));
-  };
-
-  const formatTicketMoment = (value: Date | null): string | null => {
-    if (!value) return null;
-    return value.toLocaleDateString("pt-PT", {
-      day: "2-digit",
-      month: "2-digit",
-      year: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-    });
-  };
-
   const getBetSelections = (bet: UserBet): StoredSelection[] => {
     if (Array.isArray(bet.selections)) return bet.selections as StoredSelection[];
     return [{ matchTitle: bet.matchTitle, selection: "home", odd: parseFloat(bet.totalOdds), market: "result" }];
-  };
-
-  const hasSelectionStarted = (sel: StoredSelection, liveMatch: Match | null): boolean => {
-    const kickoffDate = getSelectionKickoffDate(sel);
-    if (kickoffDate && kickoffDate.getTime() > Date.now()) return false;
-    if (!liveMatch) return false;
-    if (liveMatch.status === "Not Started") return false;
-    if ((liveMatch.minute ?? 0) > 0) return true;
-    if (typeof liveMatch.status === "string") {
-      const status = liveMatch.status.toLowerCase();
-      if (status.includes("ht") || status.includes("live") || status.includes("jogo") || status.includes("set") || status.includes("period")) return true;
-    }
-    return (liveMatch.homeScore ?? 0) > 0 || (liveMatch.awayScore ?? 0) > 0;
-  };
-
-  const getStoredSelectionSport = (sel: StoredSelection, liveMatch?: Match | null): string | undefined => {
-    if (typeof sel.sport === "string" && sel.sport.trim() !== "") return sel.sport;
-    if (liveMatch?.sport) return liveMatch.sport;
-    const market = String(sel.market ?? "").toLowerCase();
-    const title = String(sel.matchTitle ?? "").toLowerCase();
-    if (market === "quartos" || title.includes("nba") || title.includes("basquete")) return "basketball";
-    if (market === "periodos" || market === "puckline" || title.includes("nhl") || title.includes("hóquei") || title.includes("hockey")) return "hockey";
-    if (market === "innings" || title.includes("mlb") || title.includes("beisebol") || title.includes("baseball")) return "baseball";
-    if (market === "sets" || title.includes("vôlei") || title.includes("volei") || title.includes("volley")) return "volleyball";
-    if (market === "jogos" || title.includes("tennis") || title.includes("tênis")) return "tennis";
-    return "football";
   };
 
   const toggleBetCollapse = (id: number) => {
@@ -7285,22 +6983,6 @@ export default function Home() {
           <div className="flex items-center gap-2">
             {auth.user ? (
               <>
-                <button
-                  onClick={() => freebetBalance > 0 && setUseFreebet(prev => !prev)}
-                  disabled={freebetBalance <= 0}
-                  className={`hidden sm:flex items-center gap-1.5 rounded-lg px-2 py-1 transition-all ${freebetBalance <= 0 ? "opacity-60 cursor-not-allowed" : ""}`}
-                  style={useFreebet
-                    ? { background: "rgba(124,58,237,0.18)", border: "1px solid rgba(167,139,250,0.42)" }
-                    : { background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }
-                  }
-                  title={freebetBalance > 0 ? "Alternar entre saldo e freebets" : "Sem freebets disponíveis"}
-                >
-                  {useFreebet ? <ToggleRight size={14} className="text-violet-300" /> : <ToggleLeft size={14} className="text-zinc-500" />}
-                  <span className={`text-[10px] font-black tracking-wide ${useFreebet ? "text-violet-300" : "text-zinc-300"}`}>
-                    {useFreebet ? "FREEBETS" : "SALDO"}
-                  </span>
-                </button>
-
                 {/* Free Bet balance pill — always visible */}
                 <div
                   className="hidden sm:flex items-center gap-1.5 bg-violet-900/60 border border-violet-500/40 rounded-lg px-2.5 py-1.5"
@@ -9283,10 +8965,7 @@ export default function Home() {
                                     if (!slip) {
                                       setBets(prev => [...prev.filter(b => !(b.matchId === expandedMatch.id && (b.market ?? "").startsWith(`all_${mi}_`))), {
                                         matchId: expandedMatch.id,
-                                        matchTitle: `${expandedMatch.home} vs ${expandedMatch.away}`,
-                                        homeTeam: expandedMatch.home,
-                                        awayTeam: expandedMatch.away,
-                                        kickoffTime: getMatchKickoffIso(expandedMatch),
+                                        matchTitle: `${expandedMatch.home} — ${expandedMatch.away}`,
                                         odd: choice.odds,
                                         market: mkKey,
                                         selection: `${market.name}: ${choice.label}`,
@@ -9556,14 +9235,7 @@ export default function Home() {
 
               // All upcoming: odds-based + all sports from /upcoming (deduped), filtered by league if active
               const allUpcoming = (() => {
-                const wcMatches = wc2026Matches.filter(
-                  (m) =>
-                    (m.sport ?? "football") === "football" &&
-                    !m.isWomens &&
-                    isWC2026LeagueName(m.league),
-                );
                 const combined = [
-                  ...wcMatches,
                   ...tennisOddsAsMatches,
                   ...volleyOddsAsMatches,
                   ...basketballAsMatches,
@@ -9574,15 +9246,7 @@ export default function Home() {
                     if (sport === "volleyball") return !volleyOddsAsMatches.some(v => v.home === m.home && v.away === m.away);
                     if (sport === "basketball") return !basketballAsMatches.some(b => b.home === m.home && b.away === m.away);
                     if (sport === "hockey")     return !hockeyAsMatches.some(h => h.home === m.home && h.away === m.away);
-                    return !wcMatches.some(w =>
-                      String(w.id) === String(m.id) ||
-                      (
-                        w.home === m.home &&
-                        w.away === m.away &&
-                        (w.date ?? "") === (m.date ?? "") &&
-                        (w.time ?? "") === (m.time ?? "")
-                      )
-                    );
+                    return true; // football always included
                   }),
                 ];
                 // Filter by country (all leagues of that country)
@@ -9597,22 +9261,10 @@ export default function Home() {
                 }
                 if (!selectedLeague) return combined;
                 // ML-aware filter: matches major-league label (from chips) OR legacy flexible matching (from sidebar)
-                if (selectedLeague === WC2026_FILTER_LABEL) {
-                  const seen = new Set<string>();
-                  return combined
-                    .filter(m => (m.sport ?? "football") === "football" && isWC2026LeagueName(m.league))
-                    .filter(m => {
-                      const k = String(m.id);
-                      if (seen.has(k)) return false;
-                      seen.add(k);
-                      return true;
-                    });
-                }
                 const _mlPats: Array<{p: string[], label: string}> = [
                   { p: ["champions league","liga dos campeões","liga campeões"], label: "Champions" },
                   { p: ["europa league","liga europa"], label: "Europa League" },
                   { p: ["conference league","liga conferência"], label: "Conference" },
-                  { p: ["fifa world cup","world cup","copa do mundo","wc 2026","mundial"], label: "FIFA World Cup" },
                   { p: ["international friendlies","international friendly","amistosos internacionais","amistosos","friendlies","friendly"], label: "International Friendlies" },
                   { p: ["premier league"], label: "Premier League" },
                   { p: ["la liga","laliga"], label: "La Liga" },
@@ -9654,42 +9306,6 @@ export default function Home() {
                   || m.away.toLowerCase().includes(q)
                   || (m.league ?? "").toLowerCase().includes(q);
               });
-              const homeFeaturedMatches = (() => {
-                const footballUpcoming = allUpcoming
-                  .filter((m) => (m.sport ?? "football") === "football" && !m.isWomens)
-                  .slice()
-                  .sort((a, b) => parseMatchKickoffTimestamp(a) - parseMatchKickoffTimestamp(b));
-                const tomorrow = new Date();
-                tomorrow.setDate(tomorrow.getDate() + 1);
-                const tomorrowKey = formatDateKey(tomorrow);
-                const nowTs = Date.now();
-                const weekLimitTs = nowTs + 7 * 24 * 60 * 60 * 1000;
-                const wcStarted = Date.now() >= parseMatchKickoffTimestamp({ date: WC2026_MAIN_START_KEY });
-                const nextWeekPool = footballUpcoming.filter((m) => {
-                  const kickoffTs = parseMatchKickoffTimestamp(m);
-                  return Number.isFinite(kickoffTs) && kickoffTs >= nowTs && kickoffTs <= weekLimitTs;
-                });
-                const tomorrowPool = nextWeekPool.filter((m) => (m.date ?? m.scheduledDate) === tomorrowKey);
-                const worldCupPool = nextWeekPool.filter((m) =>
-                  isWC2026LeagueName(m.league) && isMatchOnOrAfterWC2026Start(m),
-                );
-                const picked: Match[] = [];
-                const seen = new Set<string>();
-                const pushUnique = (pool: Match[], limit?: number) => {
-                  for (const match of pool) {
-                    if (picked.length >= 3) break;
-                    const id = String(match.id);
-                    if (seen.has(id)) continue;
-                    picked.push(match);
-                    seen.add(id);
-                    if (limit && picked.length >= limit) break;
-                  }
-                };
-                if (wcStarted) pushUnique(worldCupPool, 2);
-                pushUnique(tomorrowPool);
-                pushUnique(nextWeekPool);
-                return picked.slice(0, 3);
-              })();
 
               // Sport grouping for display
               const SPORT_GROUPS = [
@@ -9709,34 +9325,26 @@ export default function Home() {
 
               return (
                 <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
-                  {!selectedLeague && !selectedCountry && (selectedSport === "all" || selectedSport === "football") && homeFeaturedMatches.length > 0 && (
-                    <div className="mb-5 grid grid-cols-1 md:grid-cols-3 gap-3">
-                      {homeFeaturedMatches.map((match) => (
-                        <MatchCard key={match.id} match={match} />
-                      ))}
-                    </div>
-                  )}
-                  {filteredUpcoming.length > 0 && (
-                    <div className="relative mb-4">
-                      <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500 pointer-events-none" />
-                      <input
-                        type="text"
-                        value={upcomingSearchQuery}
-                        onChange={e => setUpcomingSearchQuery(e.target.value)}
-                        placeholder="Pesquisar equipa ou liga…"
-                        className="w-full bg-zinc-900 border border-zinc-700 rounded-lg pl-8 pr-8 py-2 text-sm text-white placeholder-zinc-500 focus:outline-none focus:border-red-500/60 transition-colors"
-                      />
-                      {upcomingSearchQuery && (
-                        <button
-                          onClick={() => setUpcomingSearchQuery("")}
-                          className="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-white transition-colors"
-                        >
-                          <X size={14} />
-                        </button>
-                      )}
-                    </div>
-                  )}
                   {!selectedLeague && <PopularBanners />}
+
+                  <div className="relative mb-4">
+                    <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500 pointer-events-none" />
+                    <input
+                      type="text"
+                      value={upcomingSearchQuery}
+                      onChange={e => setUpcomingSearchQuery(e.target.value)}
+                      placeholder="Pesquisar equipa ou liga…"
+                      className="w-full bg-zinc-900 border border-zinc-700 rounded-lg pl-8 pr-8 py-2 text-sm text-white placeholder-zinc-500 focus:outline-none focus:border-red-500/60 transition-colors"
+                    />
+                    {upcomingSearchQuery && (
+                      <button
+                        onClick={() => setUpcomingSearchQuery("")}
+                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-white transition-colors"
+                      >
+                        <X size={14} />
+                      </button>
+                    )}
+                  </div>
 
                   {/* ─── League filter chips (grandes ligas com logos oficiais) ── */}
                   {filteredUpcoming.length > 0 && (() => {
@@ -9744,7 +9352,6 @@ export default function Home() {
                       { p: ["champions league","liga dos campeões","liga campeões"], label: "Champions", logo: "https://media.api-sports.io/football/leagues/2.png", color: "#001489" },
                       { p: ["europa league","liga europa"], label: "Europa League", logo: "https://media.api-sports.io/football/leagues/3.png", color: "#F77F00" },
                       { p: ["conference league","liga conferência"], label: "Conference", logo: "https://media.api-sports.io/football/leagues/848.png", color: "#00B386" },
-                      { p: ["fifa world cup","world cup","copa do mundo","wc 2026","mundial"], label: "FIFA World Cup", logo: "https://media.api-sports.io/football/leagues/1.png", color: "#2563eb" },
                       { p: ["international friendlies","international friendly","amistosos internacionais","amistosos","friendlies","friendly"], label: "International Friendlies", logo: "https://media.api-sports.io/football/leagues/10.png", color: "#dc2626" },
                       { p: ["premier league"], label: "Premier League", logo: "https://media.api-sports.io/football/leagues/39.png", color: "#3D195B" },
                       { p: ["la liga","laliga"], label: "La Liga", logo: "https://media.api-sports.io/football/leagues/140.png", color: "#FF4B44" },
@@ -9777,47 +9384,23 @@ export default function Home() {
                     };
                     const seenLabels = new Set<string>();
                     const chips: Array<{ label: string; logo: string; color: string }> = [];
-                    const hasWC2026Chip = wc2026Matches.some((m) => isWC2026LeagueName(m.league));
                     for (const m of filteredUpcoming) {
                       const key = m.league ?? "";
                       if (key) {
                         const ml = findML(key);
-                        if (ml && ml.label !== "FIFA World Cup" && !seenLabels.has(ml.label)) {
-                          seenLabels.add(ml.label);
-                          chips.push({ label: ml.label, logo: ml.logo, color: ml.color });
-                        }
+                        if (ml && !seenLabels.has(ml.label)) { seenLabels.add(ml.label); chips.push({ label: ml.label, logo: ml.logo, color: ml.color }); }
                       }
                     }
-                    if (chips.length === 0 && !hasWC2026Chip) return null;
+                    if (chips.length < 2) return null;
                     return (
                       <div className="overflow-x-auto flex gap-2.5 pb-3 mb-5 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
-                        <button
-                          {...makeTap(() => {
-                            setSelectedCountry(null);
-                            setSelectedLeague(null);
-                          })}
-                          className={`flex items-center gap-2 px-3.5 py-2.5 rounded-xl border whitespace-nowrap text-sm font-semibold transition-all flex-shrink-0 ${!selectedLeague ? "border-amber-500 bg-amber-500/10 text-white shadow-[0_0_10px_rgba(245,158,11,0.18)]" : "border-zinc-700 bg-zinc-900/60 text-zinc-300 hover:border-zinc-500 hover:text-white"}`}
-                        >
-                          <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="shrink-0"><rect width="7" height="7" x="3" y="3" rx="1"/><rect width="7" height="7" x="14" y="3" rx="1"/><rect width="7" height="7" x="14" y="14" rx="1"/><rect width="7" height="7" x="3" y="14" rx="1"/></svg>
-                          <span>Todas</span>
-                        </button>
-                        {hasWC2026Chip && (
+                        {chips.length >= 2 && (
                           <button
-                            {...makeTap(() => {
-                              setSelectedCountry(null);
-                              setSelectedSport("all");
-                              setSelectedLeague(selectedLeague === WC2026_FILTER_LABEL ? null : WC2026_FILTER_LABEL);
-                            })}
-                            className={`flex items-center gap-2.5 px-3.5 py-2.5 rounded-xl border whitespace-nowrap text-sm font-semibold transition-all flex-shrink-0 ${selectedLeague === WC2026_FILTER_LABEL ? "border-amber-500 bg-amber-500/10 text-white shadow-[0_0_10px_rgba(245,158,11,0.18)]" : "border-zinc-700 bg-zinc-900/60 text-zinc-300 hover:border-zinc-500 hover:text-white"}`}
+                            {...makeTap(() => setSelectedLeague(null))}
+                            className={`flex items-center gap-2 px-3.5 py-2.5 rounded-xl border whitespace-nowrap text-sm font-semibold transition-all flex-shrink-0 ${!selectedLeague ? "border-amber-500 bg-amber-500/10 text-white shadow-[0_0_10px_rgba(245,158,11,0.18)]" : "border-zinc-700 bg-zinc-900/60 text-zinc-300 hover:border-zinc-500 hover:text-white"}`}
                           >
-                            <img
-                              src="https://media.api-sports.io/football/leagues/1.png"
-                              alt={WC2026_FILTER_LABEL}
-                              width={20}
-                              height={20}
-                              className="rounded object-contain shrink-0"
-                            />
-                            <span className="max-w-[160px] truncate">{WC2026_FILTER_LABEL}</span>
+                            <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="shrink-0"><rect width="7" height="7" x="3" y="3" rx="1"/><rect width="7" height="7" x="14" y="3" rx="1"/><rect width="7" height="7" x="14" y="14" rx="1"/><rect width="7" height="7" x="3" y="14" rx="1"/></svg>
+                            <span>Todas</span>
                           </button>
                         )}
                         {chips.map((c, i) => {
@@ -9825,10 +9408,7 @@ export default function Home() {
                           return (
                             <button
                               key={i}
-                              {...makeTap(() => {
-                                setSelectedCountry(null);
-                                setSelectedLeague(active ? null : c.label);
-                              })}
+                              {...makeTap(() => setSelectedLeague(active ? null : c.label))}
                               className={`flex items-center gap-2.5 px-3.5 py-2.5 rounded-xl border whitespace-nowrap text-sm font-semibold transition-all flex-shrink-0 ${active ? "border-amber-500 bg-amber-500/10 text-white shadow-[0_0_10px_rgba(245,158,11,0.18)]" : "border-zinc-700 bg-zinc-900/60 text-zinc-300 hover:border-zinc-500 hover:text-white"}`}
                             >
                               <img
@@ -10605,7 +10185,9 @@ export default function Home() {
                     <div className="py-20 text-center text-zinc-500 bg-zinc-900/50 rounded-xl border border-zinc-800">
                       <Trophy className="mx-auto mb-4 opacity-20" size={48} />
                       <p className="font-medium">
-                        {selectedCountry
+                        {upcomingSearchQuery.trim()
+                          ? "Nenhum evento encontrado para a pesquisa."
+                          : selectedCountry
                           ? `Nenhum evento para ${selectedCountry}.`
                           : selectedLeague
                             ? "Nenhum evento para esta liga."
@@ -11003,12 +10585,7 @@ export default function Home() {
                         return (
                           <button
                             key={s.key}
-                            {...makeTap(() => {
-                              setLiveSportFilter(s.key);
-                              if (s.key !== "all" && s.key !== "football" && liveLeagueFilter === WC2026_FILTER_LABEL) {
-                                setLiveLeagueFilter("all");
-                              }
-                            })}
+                            {...makeTap(() => setLiveSportFilter(s.key))}
                             className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap transition-all border ${
                               active
                                 ? "bg-red-600 border-red-500 text-white shadow-[0_0_8px_rgba(239,68,68,0.4)]"
@@ -11024,53 +10601,12 @@ export default function Home() {
                   );
                 })()}
 
-                {liveMatches.length > 0 && (
-                  <div className="flex gap-2 overflow-x-auto pb-1 mb-4 scrollbar-none">
-                    <button
-                      {...makeTap(() => setLiveLeagueFilter("all"))}
-                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap transition-all border ${
-                        liveLeagueFilter === "all"
-                          ? "bg-amber-500/15 border-amber-500/40 text-white shadow-[0_0_8px_rgba(245,158,11,0.25)]"
-                          : "bg-zinc-900 border-zinc-700 text-zinc-400 hover:border-zinc-500 hover:text-white"
-                      }`}
-                    >
-                      <span>🎯</span>
-                      <span>Todos</span>
-                    </button>
-                    <button
-                      {...makeTap(() => {
-                        setLiveSportFilter("football");
-                        setLiveLeagueFilter(liveLeagueFilter === WC2026_FILTER_LABEL ? "all" : WC2026_FILTER_LABEL);
-                      })}
-                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap transition-all border ${
-                        liveLeagueFilter === WC2026_FILTER_LABEL
-                          ? "bg-amber-500/15 border-amber-500/40 text-white shadow-[0_0_8px_rgba(245,158,11,0.25)]"
-                          : "bg-zinc-900 border-zinc-700 text-zinc-400 hover:border-zinc-500 hover:text-white"
-                      }`}
-                    >
-                      <img
-                        src="https://media.api-sports.io/football/leagues/1.png"
-                        alt={WC2026_FILTER_LABEL}
-                        width={14}
-                        height={14}
-                        className="rounded object-contain shrink-0"
-                      />
-                      <span>{WC2026_FILTER_LABEL}</span>
-                    </button>
-                  </div>
-                )}
-
                 {(() => {
                   const filterBySport = (m: Match) => {
                     const bySport = liveSportFilter === "all" || (m.sport ?? "football") === liveSportFilter;
                     const q = liveSearchQuery.trim().toLowerCase();
                     const bySearch = !q || m.home.toLowerCase().includes(q) || m.away.toLowerCase().includes(q) || (m.league ?? "").toLowerCase().includes(q);
-                    const byLeague = liveLeagueFilter === "all" || (
-                      (m.sport ?? "football") === "football" &&
-                      liveLeagueFilter === WC2026_FILTER_LABEL &&
-                      isWC2026LeagueName(m.league)
-                    );
-                    return bySport && bySearch && byLeague;
+                    return bySport && bySearch;
                   };
                   const actualLive = liveMatches.filter(m => m.startsIn === undefined && filterBySport(m));
                   const emBreve = liveMatches.filter(m => m.startsIn !== undefined && filterBySport(m));
@@ -11111,19 +10647,9 @@ export default function Home() {
                   if (actualLive.length === 0 && emBreve.length === 0) {
                     return (
                       <div className="py-12 text-center text-zinc-500 bg-zinc-900/50 rounded-xl border border-zinc-800">
-                        <p className="font-medium">
-                          {liveLeagueFilter === WC2026_FILTER_LABEL
-                            ? "Nenhum jogo da Copa do Mundo 2026 ao vivo neste momento."
-                            : "Nenhum jogo deste desporto ao vivo."}
-                        </p>
-                        <button
-                          {...makeTap(() => {
-                            setLiveSportFilter("all");
-                            setLiveLeagueFilter("all");
-                          })}
-                          className="mt-3 text-sm text-red-500 hover:text-red-400 underline"
-                        >
-                          Ver todos os jogos
+                        <p className="font-medium">Nenhum jogo deste desporto ao vivo.</p>
+                        <button {...makeTap(() => setLiveSportFilter("all"))} className="mt-3 text-sm text-red-500 hover:text-red-400 underline">
+                          Ver todos os desportos
                         </button>
                       </div>
                     );
@@ -11339,8 +10865,8 @@ export default function Home() {
                         const isVoided = bet.status === "voided";
                         const ticketCode = `BT62-${String(bet.id).padStart(6, "0")}`;
                         const betDate = new Date(bet.createdAt);
-                        const betPlacedStr = formatTicketMoment(betDate);
-                        const gameKickoffStr = formatTicketMoment(getTicketKickoffDate(bet));
+                        const dateStr = betDate.toLocaleDateString("pt-PT", { day: "2-digit", month: "2-digit", year: "numeric" });
+                        const timeStr = betDate.toLocaleTimeString("pt-PT", { hour: "2-digit", minute: "2-digit" });
                         const settledAt = bet.settledAt ? new Date(bet.settledAt) : null;
                         const settledDateStr = settledAt ? settledAt.toLocaleDateString("pt-PT", { day: "2-digit", month: "2-digit", year: "numeric" }) : null;
                         const settledTimeStr = settledAt ? settledAt.toLocaleTimeString("pt-PT", { hour: "2-digit", minute: "2-digit" }) : null;
@@ -11357,8 +10883,6 @@ export default function Home() {
                         const summDiv  = isLost ? "divide-[#a02020]/30" : "divide-gray-100";
                         const summTxt  = isLost ? "text-red-100"   : "text-gray-600";
 
-                        const wasFreebet = String(bet.isFreebet) === "true" || bet.isFreebet === true;
-
                         return (
                           <div key={bet.id} className={`rounded-2xl overflow-hidden shadow-xl ${cardBg}`} style={{ boxShadow: isLost ? "0 8px 32px rgba(120,0,0,0.5)" : "0 4px 20px rgba(0,0,0,0.35)" }}>
 
@@ -11370,20 +10894,9 @@ export default function Home() {
                                 </div>
                                 <div>
                                   <div className="font-black text-white text-[17px] leading-tight italic">Boletim de Aposta</div>
-                                  {wasFreebet && (
-                                    <div className="mt-1 inline-flex items-center gap-1.5 bg-violet-500/20 border border-violet-300/30 text-violet-100 text-[10px] font-black px-2.5 py-1 rounded-full uppercase tracking-wide">
-                                      <Sparkles size={10} />
-                                      Freebets
-                                    </div>
-                                  )}
-                                  {gameKickoffStr && (
-                                    <div className="flex items-center gap-1.5 text-red-100 text-[11px] font-semibold mt-0.5">
-                                      <CalendarDays size={11} />
-                                      Jogo: {gameKickoffStr}
-                                    </div>
-                                  )}
-                                  <div className="text-red-200 text-[11px] font-medium mt-0.5">
-                                    Apostada: {betPlacedStr}
+                                  <div className="flex items-center gap-1.5 text-red-200 text-[11px] font-medium mt-0.5">
+                                    <CalendarDays size={11} />
+                                    {dateStr} • {timeStr}
                                   </div>
                                   {!isPending && settledAt && (
                                     <div className="text-red-100 text-[11px] font-medium mt-0.5">
@@ -11424,7 +10937,6 @@ export default function Home() {
                             <div className={`${selsBg} divide-y ${divider}`}>
                               {sels.map((sel, i) => {
                                 const outcome = getSelOutcome(sel, bet.status);
-                                const liveOutcome = (sel as any).liveOutcome ?? null;
                                 const lm = isActivePending ? findLiveMatchForSel(sel) : null;
                                 const liveOdd = lm ? getLiveOddForSel(sel, lm) : null;
                                 const displayMin = lm ? (lm.status === "HT" ? "HT" : `${lm.minute ?? 0}'`) : null;
@@ -11445,8 +10957,6 @@ export default function Home() {
                                     : <div className="w-6 h-6 rounded-full bg-green-500 flex items-center justify-center shrink-0"><Check size={13} className="text-white" strokeWidth={3} /></div>;
                                 } else if (isCashedOut) {
                                   leftIcon = <div className="w-6 h-6 rounded-full bg-yellow-500/70 flex items-center justify-center shrink-0"><CircleDollarSign size={11} className="text-white" /></div>;
-                                } else if (liveOutcome === "won") {
-                                  leftIcon = <div className="w-6 h-6 rounded-full bg-green-500 flex items-center justify-center shrink-0 shadow-[0_0_8px_rgba(34,197,94,0.6)]"><TrendingUp size={11} className="text-white" strokeWidth={3} /></div>;
                                 } else {
                                   if (outcome === "live-win") {
                                     leftIcon = <div className="w-6 h-6 rounded-full bg-green-500 flex items-center justify-center shrink-0"><Check size={13} className="text-white" strokeWidth={3} /></div>;
@@ -11455,13 +10965,18 @@ export default function Home() {
                                   } else if (outcome === "void") {
                                     leftIcon = <div className="w-6 h-6 rounded-full bg-zinc-200 border border-zinc-300 flex items-center justify-center shrink-0"><span className="text-zinc-600 text-[11px] font-black leading-none">—</span></div>;
                                   } else {
-                                    leftIcon = <span className="text-xl shrink-0 leading-none">{sportEmoji(getStoredSelectionSport(sel, lm) ?? "football")}</span>;
+                                    const mkt = sel.market ?? "";
+                                    const mt  = (sel.matchTitle ?? "").toLowerCase();
+                                    const sportEmoji =
+                                      mkt === "quartos" || mkt === "totais" && mt.includes("nba") ? "🏀"
+                                      : mkt === "periodos" || mkt === "puckLine" || mt.includes("nhl") ? "🏒"
+                                      : mkt === "innings"  || mt.includes("mlb") ? "⚾"
+                                      : mkt === "sets"     || mt.includes("volei") || mt.includes("volley") ? "🏐"
+                                      : mkt === "jogos"    || mt.includes("tennis") || mt.includes("tênis") ? "🎾"
+                                      : "⚽";
+                                    leftIcon = <span className="text-xl shrink-0 leading-none">{sportEmoji}</span>;
                                   }
                                 }
-
-                                const kickoffStr = (sel as any).kickoffTime 
-                                  ? new Date((sel as any).kickoffTime).toLocaleDateString("pt-PT", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })
-                                  : null;
 
                                 // Final score for resolved bets
                                 const normT = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
@@ -11476,8 +10991,22 @@ export default function Home() {
                                       <div className={`font-bold text-[13px] leading-snug ${txtMain}`}>
                                         {i + 1}. {sel.matchTitle}
                                       </div>
-                                      {kickoffStr && <div className={`text-[10px] mt-0.5 font-medium ${txtSub}`}>📅 {kickoffStr}</div>}
                                       <div className={`text-[11px] mt-0.5 ${txtSub}`}>{getSelLabel(sel)}</div>
+                                      {(() => {
+                                        const when = (() => {
+                                          const d = (sel as any).scheduledDate ?? (sel as any).date;
+                                          const t = (sel as any).scheduledTime ?? (sel as any).time;
+                                          if (d && t) return `${d} • ${t}`;
+                                          return t || d || null;
+                                        })();
+                                        const lg = (sel as any).league as string | undefined;
+                                        if (!lg && !when) return null;
+                                        return (
+                                          <div className={`text-[10px] mt-0.5 ${txtSub} truncate`}>
+                                            {[lg, when].filter(Boolean).join(" • ")}
+                                          </div>
+                                        );
+                                      })()}
                                       {/* Live / upcoming badge */}
                                       {lm && lm.status !== "Not Started" && (lm.minute ?? 0) > 0 && (
                                         <div className="flex items-center gap-2 mt-1.5 flex-wrap">
@@ -11490,13 +11019,6 @@ export default function Home() {
                                               {liveOdd < sel.odd ? "▼" : "▲"} {liveOdd.toFixed(2)}
                                             </span>
                                           )}
-                                        </div>
-                                      )}
-                                      {/* Winning Signal badge */}
-                                      {isActivePending && liveOutcome === "won" && (
-                                        <div className="flex items-center gap-1.5 mt-2 bg-green-500/10 border border-green-500/20 px-2.5 py-1 rounded-md w-fit">
-                                          <TrendingUp size={11} className="text-green-500" strokeWidth={3} />
-                                          <span className="text-[10px] font-black text-green-500 uppercase tracking-tight">Vencendo agora</span>
                                         </div>
                                       )}
                                       {lm && (lm.status === "Not Started" || (lm.minute ?? 0) === 0) && (
@@ -11542,19 +11064,14 @@ export default function Home() {
                                   valueCls: "text-red-500 font-bold",
                                 },
                                 {
-                                  label: "Carteira usada:",
-                                  value: String(bet.isFreebet) === "true" || bet.isFreebet === true ? "Freebets" : "Saldo em euro",
-                                  valueCls: String(bet.isFreebet) === "true" || bet.isFreebet === true ? "text-violet-500 font-bold" : `font-semibold ${txtMain}`,
-                                },
-                                {
                                   label: "Total de odds:",
                                   value: parseFloat(bet.totalOdds).toFixed(2),
                                   valueCls: `font-semibold ${txtMain}`,
                                 },
                                 {
                                   label: "Valor apostado:",
-                                  value: `${String(bet.isFreebet) === "true" || bet.isFreebet === true ? "FB" : "€"}${parseFloat(bet.stake).toFixed(2)}`,
-                                  valueCls: String(bet.isFreebet) === "true" || bet.isFreebet === true ? "font-semibold text-violet-500" : `font-semibold ${txtMain}`,
+                                  value: `€${parseFloat(bet.stake).toFixed(2)}`,
+                                  valueCls: `font-semibold ${txtMain}`,
                                 },
                                 {
                                   label: isWon ? "Ganho confirmado:" : isCashedOut ? "Cash Out recebido:" : isLost ? "Retorno:" : isVoided ? "Reembolso:" : "Retorno potencial:",
@@ -11773,14 +11290,11 @@ export default function Home() {
 
               {/* Stake summary pill */}
               <div
-                className="flex items-center gap-1 rounded-full px-3 py-1"
-                style={useFreebet
-                  ? { background: "rgba(124,58,237,0.16)", border: "1px solid rgba(167,139,250,0.28)" }
-                  : { background: "rgba(255,255,255,0.07)", border: "1px solid rgba(255,255,255,0.1)" }
-                }
+                className="flex items-center gap-1.5 rounded-full px-4 py-1.5"
+                style={{ background: "rgba(255,255,255,0.07)", border: "1px solid rgba(255,255,255,0.1)" }}
               >
-                {useFreebet ? <Sparkles size={10} className="text-violet-300" /> : <Plus size={10} className="text-zinc-400" />}
-                <span className={`font-bold text-[12px] tabular-nums ${useFreebet ? "text-violet-200" : "text-white"}`}>
+                <Plus size={12} className="text-zinc-400" />
+                <span className="text-white font-bold text-[13px] tabular-nums">
                   {effectiveBetMode === "simples"
                     ? `${bets.reduce((s, b) => s + parseFloat(betStakes[betKey(b)] || "0"), 0).toFixed(2)} €`
                     : `${parseFloat(stake || "0").toFixed(2)} €`}
@@ -11813,33 +11327,6 @@ export default function Home() {
                 Múltipla ({bets.length})
               </button>
             </div>
-
-            {auth.user && (
-              <div className="px-4 py-2 border-b border-zinc-800/80 shrink-0" style={{ background: "#0a0a0a" }}>
-                <button
-                  {...makeTap(() => freebetBalance > 0 && setUseFreebet(prev => !prev))}
-                  disabled={freebetBalance <= 0}
-                  className={`w-full rounded-xl px-3 py-2 flex items-center justify-between transition-all ${freebetBalance <= 0 ? "opacity-60 cursor-not-allowed" : ""}`}
-                  style={useFreebet
-                    ? { background: "rgba(124,58,237,0.18)", border: "1px solid rgba(167,139,250,0.34)" }
-                    : { background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }
-                  }
-                >
-                  <div className="flex items-center gap-2.5 min-w-0">
-                    <div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ background: useFreebet ? "rgba(124,58,237,0.22)" : "rgba(255,255,255,0.06)" }}>
-                      {useFreebet ? <Sparkles size={14} className="text-violet-300" /> : <Wallet size={14} className="text-zinc-400" />}
-                    </div>
-                    <div className="text-left min-w-0">
-                      <div className="text-white font-bold text-[13px]">{useFreebet ? "Freebets ativadas" : "Usar Freebets"}</div>
-                      <div className="text-[11px] text-zinc-500 truncate">
-                        {freebetBalance > 0 ? `Disponível: € ${freebetBalance.toFixed(2)}` : "Sem freebets disponíveis"}
-                      </div>
-                    </div>
-                  </div>
-                  {useFreebet ? <ToggleRight size={20} className="text-violet-300 shrink-0" /> : <ToggleLeft size={20} className="text-zinc-500 shrink-0" />}
-                </button>
-              </div>
-            )}
 
             {/* Scrollable bet cards */}
             <div className="flex-1 overflow-y-auto px-3 py-3 space-y-2">
@@ -11911,25 +11398,19 @@ export default function Home() {
                                   {...makeTap(() => setBetStakes(prev => ({ ...prev, [betKey(bet)]: String(amt) })))}
                                   className="flex-1 py-1 rounded-lg text-[11px] font-bold transition-all"
                                   style={parseFloat(betStakes[betKey(bet)] || "0") === amt
-                                    ? { background: useFreebet ? "#7c3aed" : "#dc2626", color: "#fff" }
+                                    ? { background: "#dc2626", color: "#fff" }
                                     : { background: "rgba(255,255,255,0.05)", color: "#a1a1aa", border: "1px solid rgba(255,255,255,0.07)" }}
                                 >
                                   €{amt}
                                 </button>
                               ))}
                             </div>
-                            <div
-                              className="flex items-center rounded-xl overflow-hidden"
-                              style={useFreebet
-                                ? { background: "rgba(124,58,237,0.08)", border: "1px solid rgba(167,139,250,0.22)" }
-                                : { background: "rgba(0,0,0,0.4)", border: "1px solid rgba(255,255,255,0.08)" }
-                              }
-                            >
-                              <span className={`pl-3 text-sm font-bold ${useFreebet ? "text-violet-300" : "text-zinc-500"}`}>€</span>
+                            <div className="flex items-center rounded-xl overflow-hidden" style={{ background: "rgba(0,0,0,0.4)", border: "1px solid rgba(255,255,255,0.08)" }}>
+                              <span className="pl-3 text-zinc-500 text-sm font-bold">€</span>
                               <input
                                 type="text"
                                 inputMode="decimal"
-                                placeholder={useFreebet ? "Valor da freebet" : "Outro valor"}
+                                placeholder="Outro valor"
                                 value={betStakes[betKey(bet)] || ""}
                                 onChange={e => {
                                   const v = e.target.value.replace(/[^0-9.,]/g, "").replace(",", ".");
@@ -11966,12 +11447,9 @@ export default function Home() {
                 <div className="flex items-center gap-3 mb-3">
                   <div
                     className="flex-1 flex items-center rounded-xl overflow-hidden"
-                    style={useFreebet
-                      ? { background: "rgba(124,58,237,0.08)", border: "1px solid rgba(167,139,250,0.24)" }
-                      : { background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.1)" }
-                    }
+                    style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.1)" }}
                   >
-                    <span className={`pl-3 text-sm shrink-0 ${useFreebet ? "text-violet-300" : "text-zinc-600"}`}>Montante</span>
+                    <span className="pl-3 text-zinc-600 text-sm shrink-0">Montante</span>
                     <input
                       type="text"
                       inputMode="decimal"
@@ -12005,32 +11483,19 @@ export default function Home() {
                 </span>
               </div>
 
-              <div className="flex items-center justify-between mb-3 text-xs">
-                <span className="text-zinc-500">{useFreebet ? "Carteira ativa" : "Saldo ativo"}</span>
-                <span className={useFreebet ? "font-bold text-violet-300" : "font-bold text-white"}>
-                  {useFreebet ? `Freebets € ${freebetBalance.toFixed(2)}` : `Saldo € ${realBalance.toFixed(2)}`}
-                </span>
-              </div>
-
               {/* APOSTAR button */}
               <button
                 {...makeTap(handlePlaceBet)}
-                disabled={isPlacingBet || (effectiveBetMode === "simples"
-                  ? bets.reduce((s, b) => s + parseFloat(betStakes[betKey(b)] || "0"), 0) > activeBalance
-                  : parseFloat(stake || "0") > activeBalance)}
+                disabled={isPlacingBet}
                 className="w-full h-13 rounded-2xl font-black text-[15px] text-white flex items-center justify-center gap-2 transition-all active:scale-[0.98]"
                 style={{
-                  background: useFreebet
-                    ? "linear-gradient(135deg,#7c3aed 0%,#5b21b6 100%)"
-                    : "linear-gradient(135deg,#dc2626 0%,#991b1b 100%)",
-                  boxShadow: useFreebet
-                    ? "0 4px 20px rgba(124,58,237,0.4)"
-                    : "0 4px 20px rgba(220,38,38,0.4)",
+                  background: "linear-gradient(135deg,#dc2626 0%,#991b1b 100%)",
+                  boxShadow: "0 4px 20px rgba(220,38,38,0.4)",
                 }}
               >
                 {isPlacingBet
                   ? <><Loader2 className="animate-spin" size={16} /> A PROCESSAR...</>
-                  : auth.user ? (useFreebet ? "APOSTAR COM FREEBETS" : "APOSTAR") : "ENTRAR PARA APOSTAR"}
+                  : auth.user ? "APOSTAR" : "ENTRAR PARA APOSTAR"}
               </button>
             </div>
           </motion.div>
@@ -12252,7 +11717,7 @@ export default function Home() {
               animate={{ scale: 1, y: 0 }}
               exit={{ scale: 0.85, y: 40 }}
               className="relative overflow-hidden rounded-3xl max-w-md w-full border border-white/15 shadow-2xl"
-              onClick={(e: React.MouseEvent) => e.stopPropagation()}
+              onClick={e => e.stopPropagation()}
             >
               {promoNotif.type === "freebets10" && (
                 <>
@@ -12370,7 +11835,7 @@ export default function Home() {
               transition={{ type: "spring", stiffness: 380, damping: 22 }}
               className="relative z-10 rounded-3xl border border-white/20 shadow-[0_0_80px_rgba(34,197,94,0.45)] overflow-hidden max-w-sm w-full mx-4"
               style={{ background: "linear-gradient(135deg, #0a2a0a 0%, #052010 50%, #0a1a0a 100%)" }}
-              onClick={(e: React.MouseEvent) => e.stopPropagation()}
+              onClick={e => e.stopPropagation()}
             >
               <div className="absolute inset-0 opacity-20" style={{ background: "radial-gradient(circle at 50% 0%, #22c55e 0%, transparent 70%)" }} />
               <div className="relative z-10 p-8 text-center">
@@ -12482,149 +11947,6 @@ export default function Home() {
         )}
       </AnimatePresence>
 
-    </div>
-  );
-}
-
-// ─── WORLD CUP 3D BANNER ─────────────────────────────────────────────────────
-function WorldCupBanner3D({ onClick }: { onClick: () => void }) {
-  const containerRef = useRef<HTMLDivElement>(null);
-  const [mouse, setMouse] = useState({ x: 0, y: 0 });
-  const [isHovered, setIsHovered] = useState(false);
-  const handleMouseMove = (e: React.MouseEvent) => {
-    const rect = containerRef.current?.getBoundingClientRect();
-    if (!rect) return;
-    setMouse({ x: (e.clientX - rect.left) / rect.width - 0.5, y: (e.clientY - rect.top) / rect.height - 0.5 });
-  };
-  const particles = [
-    { size: 2, left: 12, top: 22, dur: 2.2, delay: 0 },
-    { size: 3, left: 26, top: 62, dur: 2.6, delay: 0.28 },
-    { size: 2, left: 40, top: 33, dur: 2.1, delay: 0.56 },
-    { size: 4, left: 55, top: 78, dur: 2.9, delay: 0.84 },
-    { size: 2, left: 64, top: 18, dur: 2.4, delay: 1.12 },
-    { size: 3, left: 74, top: 55, dur: 2.7, delay: 1.4 },
-    { size: 2, left: 82, top: 38, dur: 2.3, delay: 1.68 },
-    { size: 3, left: 91, top: 68, dur: 2.5, delay: 1.96 },
-  ];
-  return (
-    <div
-      ref={containerRef}
-      className="mb-4 relative overflow-hidden rounded-2xl cursor-pointer select-none"
-      style={{ height: 220, perspective: "1000px" }}
-      onClick={onClick}
-      onMouseMove={handleMouseMove}
-      onMouseEnter={() => setIsHovered(true)}
-      onMouseLeave={() => { setIsHovered(false); setMouse({ x: 0, y: 0 }); }}
-    >
-      {/* BG layer — moves slowest, opposite direction */}
-      <motion.div
-        className="absolute inset-0"
-        animate={{ x: mouse.x * -18, y: mouse.y * -10, scale: isHovered ? 1.07 : 1.03 }}
-        transition={{ type: "spring", stiffness: 100, damping: 18 }}
-      >
-        <img src="/copa-banner.jpeg" className="w-full h-full object-cover" alt="" />
-      </motion.div>
-
-      {/* Colour depth overlays */}
-      <div className="absolute inset-0 bg-gradient-to-r from-black/85 via-black/45 to-black/10 pointer-events-none" />
-      <div className="absolute inset-0 bg-gradient-to-t from-black/75 via-transparent to-transparent pointer-events-none" />
-      <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_70%_30%,rgba(220,38,38,0.30),transparent_55%)] pointer-events-none" />
-      <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_25%_80%,rgba(234,179,8,0.13),transparent_45%)] pointer-events-none" />
-
-      {/* Floating gold particles */}
-      {particles.map((p, i) => (
-        <motion.div
-          key={i}
-          className="absolute rounded-full bg-yellow-300/80 pointer-events-none"
-          style={{ width: p.size, height: p.size, left: `${p.left}%`, top: `${p.top}%`, filter: "blur(0.5px)" }}
-          animate={{ opacity: [0.3, 0.9, 0.3], scale: [1, 1.6, 1], y: [-4, 4, -4] }}
-          transition={{ duration: p.dur, repeat: Infinity, ease: "easeInOut", delay: p.delay }}
-        />
-      ))}
-
-      {/* Main content — slight 3D tilt */}
-      <motion.div
-        className="absolute inset-0 flex flex-col justify-center px-6 sm:px-8"
-        animate={{ rotateX: mouse.y * -4, rotateY: mouse.x * 6, x: mouse.x * 10, y: mouse.y * 5 }}
-        style={{ transformStyle: "preserve-3d" }}
-        transition={{ type: "spring", stiffness: 180, damping: 24 }}
-      >
-        <motion.div
-          className="flex items-center gap-2 mb-3"
-          animate={{ x: mouse.x * 6, y: mouse.y * 3 }}
-          transition={{ type: "spring", stiffness: 160, damping: 22 }}
-        >
-          <span className="bg-red-600/90 backdrop-blur-sm text-white text-[10px] font-black tracking-[0.2em] px-3 py-1 rounded-full border border-red-400/30 shadow-lg shadow-red-900/40">
-            🏆 COPA DO MUNDO
-          </span>
-          <span className="bg-yellow-500/20 backdrop-blur-sm text-yellow-300 text-[10px] font-black tracking-[0.12em] px-3 py-1 rounded-full border border-yellow-400/25">
-            USA · CAN · MEX 2026
-          </span>
-        </motion.div>
-
-        <motion.h2
-          className="text-white font-black leading-none tracking-tight"
-          style={{
-            fontSize: "clamp(1.4rem,3.8vw,2.4rem)",
-            textShadow: "0 4px 30px rgba(0,0,0,0.9), 0 0 60px rgba(220,38,38,0.35)",
-          }}
-          animate={{ x: mouse.x * 9, y: mouse.y * 4 }}
-          transition={{ type: "spring", stiffness: 145, damping: 20 }}
-        >
-          ANO DA{" "}
-          <span className="text-transparent bg-clip-text bg-gradient-to-r from-red-400 via-yellow-300 to-red-400">
-            COPA
-          </span>
-        </motion.h2>
-
-        <motion.p
-          className="text-white/80 text-sm sm:text-base mt-2 font-medium"
-          animate={{ x: mouse.x * 6, y: mouse.y * 3 }}
-          transition={{ type: "spring", stiffness: 130, damping: 18 }}
-        >
-          Viva a emoção do futebol com a{" "}
-          <span className="text-red-400 font-bold">Bet62</span>
-        </motion.p>
-      </motion.div>
-
-      {/* Trophy — moves most, creates parallax depth */}
-      <motion.div
-        className="absolute right-6 sm:right-12 top-1/2 -translate-y-1/2 pointer-events-none"
-        animate={{ x: mouse.x * 28, y: mouse.y * 16, rotateZ: mouse.x * 4, scale: isHovered ? 1.1 : 1 }}
-        transition={{ type: "spring", stiffness: 90, damping: 16 }}
-      >
-        <div className="relative">
-          <div className="absolute inset-0 blur-3xl bg-yellow-400/35 rounded-full" />
-          <Trophy
-            size={88}
-            className="text-yellow-400 relative z-10"
-            strokeWidth={1.1}
-            style={{ filter: "drop-shadow(0 0 24px rgba(251,191,36,0.75))" }}
-          />
-          <motion.div
-            className="absolute -bottom-1 left-1/2 -translate-x-1/2 w-14 h-2.5 bg-yellow-400/25 rounded-full"
-            style={{ filter: "blur(8px)" }}
-            animate={{ opacity: isHovered ? 1 : 0.6, scaleX: isHovered ? 1.3 : 1 }}
-            transition={{ duration: 0.4 }}
-          />
-        </div>
-      </motion.div>
-
-      {/* CTA button */}
-      <motion.button
-        className="absolute bottom-4 right-4 bg-red-600 text-white text-sm font-black px-5 py-2.5 rounded-xl border border-red-500/50 z-20"
-        animate={{ x: mouse.x * 14, y: mouse.y * 7, scale: isHovered ? 1.06 : 1 }}
-        style={{ boxShadow: "0 4px 20px rgba(220,38,38,0.45)" }}
-        whileTap={{ scale: 0.94 }}
-        transition={{ type: "spring", stiffness: 280, damping: 28 }}
-        onClick={(e: React.MouseEvent<HTMLButtonElement>) => { e.stopPropagation(); onClick(); }}
-      >
-        APOSTAR JÁ →
-      </motion.button>
-
-      {/* Rim light */}
-      <div className="absolute inset-0 rounded-2xl ring-1 ring-inset ring-white/[0.07] pointer-events-none" />
-      <div className="absolute top-0 left-12 right-12 h-px bg-gradient-to-r from-transparent via-white/30 to-transparent pointer-events-none" />
     </div>
   );
 }
@@ -12928,26 +12250,6 @@ function PromosPage({
 type PayMethod = "multibanco" | "mbway" | "card";
 
 type MbRef = { entity: string; reference: string; amount: string; expiresAt: string; orderId: string };
-type UserWithdrawalItem = {
-  id: number;
-  amount: string;
-  status: string;
-  createdAt: string;
-  reviewedAt?: string | null;
-  decisionReason?: string | null;
-  providerReference?: string | null;
-  processedAt?: string | null;
-  reversedAt?: string | null;
-  updatedAt?: string | null;
-};
-type WithdrawalEligibility = {
-  eligible: boolean;
-  code: "WITHDRAWAL_ALREADY_OPEN" | "KYC_REQUIRED" | "BET_REQUIRED" | null;
-  message: string | null;
-  kycStatus: string;
-  settledBetCount: number;
-  openWithdrawalStatus: string | null;
-};
 
 function DepositWithdrawModal({
   open, onClose, onSuccess, onPromoNotif, balance, token, kycStatus,
@@ -12980,136 +12282,13 @@ function DepositWithdrawModal({
   const [wName, setWName] = useState("");
   const [wNif, setWNif] = useState("");
   const [wDone, setWDone] = useState(false);
-  const [withdrawalHistory, setWithdrawalHistory] = useState<UserWithdrawalItem[]>([]);
-  const [withdrawalsLoading, setWithdrawalsLoading] = useState(false);
-  const [cancellingWithdrawalId, setCancellingWithdrawalId] = useState<number | null>(null);
-  const [withdrawalEligibility, setWithdrawalEligibility] = useState<WithdrawalEligibility | null>(null);
 
   // KYC form (shown before withdrawal when not submitted)
   const [kycDocType, setKycDocType] = useState<"cc" | "passport">("cc");
   const [kycDocNumber, setKycDocNumber] = useState("");
   const [kycNif, setKycNif] = useState("");
   const [kycDone, setKycDone] = useState(false);
-  const effectiveKycStatus = withdrawalEligibility?.kycStatus ?? kycStatus;
-  const needsKyc = effectiveKycStatus === "not_submitted" && !kycDone;
-  const latestOpenWithdrawal = withdrawalHistory.find((item) =>
-    item.status === "pending_review" || item.status === "approved" || item.status === "processing"
-  ) ?? null;
-  const latestWithdrawal = withdrawalHistory[0] ?? null;
-  const canUserCancelWithdrawal = latestOpenWithdrawal?.status === "pending_review" || latestOpenWithdrawal?.status === "approved";
-  const withdrawalBlockedByBetHistory = withdrawalEligibility?.code === "BET_REQUIRED";
-  const formatWithdrawalDate = (value?: string | null) => {
-    if (!value) return "sem data";
-    const dt = new Date(value);
-    if (Number.isNaN(dt.getTime())) return "sem data";
-    return dt.toLocaleDateString("pt-PT", {
-      day: "2-digit",
-      month: "2-digit",
-      year: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-    });
-  };
-
-  const getWithdrawalStatusMeta = (status: string) => {
-    switch (status) {
-      case "pending_review":
-        return {
-          label: "Em revisão",
-          badgeCls: "bg-yellow-500/15 text-yellow-300 border-yellow-500/30",
-          panelCls: "bg-yellow-900/20 border-yellow-600/40",
-          icon: <Clock size={16} className="text-yellow-300" />,
-          message: "O seu pedido foi recebido e está a aguardar revisão da nossa equipa.",
-        };
-      case "approved":
-        return {
-          label: "Aprovado",
-          badgeCls: "bg-emerald-500/15 text-emerald-300 border-emerald-500/30",
-          panelCls: "bg-emerald-900/20 border-emerald-600/40",
-          icon: <Check size={16} className="text-emerald-300" />,
-          message: "O seu levantamento foi aprovado e será enviado para processamento bancário.",
-        };
-      case "processing":
-        return {
-          label: "Em processamento",
-          badgeCls: "bg-blue-500/15 text-blue-300 border-blue-500/30",
-          panelCls: "bg-blue-900/20 border-blue-600/40",
-          icon: <RefreshCw size={16} className="text-blue-300" />,
-          message: "O seu levantamento está em processamento. Prazo estimado: 2 a 5 dias úteis.",
-        };
-      case "paid":
-        return {
-          label: "Pago",
-          badgeCls: "bg-green-500/15 text-green-300 border-green-500/30",
-          panelCls: "bg-green-900/20 border-green-600/40",
-          icon: <Wallet size={16} className="text-green-300" />,
-          message: "O levantamento foi concluído e enviado para a sua conta bancária.",
-        };
-      case "failed":
-        return {
-          label: "Falhou",
-          badgeCls: "bg-orange-500/15 text-orange-300 border-orange-500/30",
-          panelCls: "bg-orange-900/20 border-orange-600/40",
-          icon: <AlertCircle size={16} className="text-orange-300" />,
-          message: "O processamento falhou. A nossa equipa poderá rever ou pedir uma nova tentativa.",
-        };
-      case "rejected":
-        return {
-          label: "Rejeitado",
-          badgeCls: "bg-red-500/15 text-red-300 border-red-500/30",
-          panelCls: "bg-red-900/20 border-red-600/40",
-          icon: <X size={16} className="text-red-300" />,
-          message: "O pedido foi rejeitado e o valor foi devolvido ao seu saldo.",
-        };
-      case "cancelled":
-        return {
-          label: "Cancelado",
-          badgeCls: "bg-zinc-700/50 text-zinc-300 border-zinc-600/50",
-          panelCls: "bg-zinc-900/70 border-zinc-700/60",
-          icon: <X size={16} className="text-zinc-300" />,
-          message: "O pedido foi cancelado e o valor foi devolvido ao seu saldo.",
-        };
-      default:
-        return {
-          label: status,
-          badgeCls: "bg-zinc-800 text-zinc-300 border-zinc-700",
-          panelCls: "bg-zinc-900/70 border-zinc-700/60",
-          icon: <Clock size={16} className="text-zinc-300" />,
-          message: "Estado do levantamento atualizado.",
-        };
-    }
-  };
-
-  const fetchWithdrawalHistory = useCallback(async () => {
-    if (!token) return;
-    setWithdrawalsLoading(true);
-    try {
-      const r = await fetch("/api/withdrawals/mine", {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (!r.ok) return;
-      const data = await r.json() as UserWithdrawalItem[];
-      setWithdrawalHistory(Array.isArray(data) ? data : []);
-    } catch {
-      // Silent: this panel should not spam the user on background refresh.
-    } finally {
-      setWithdrawalsLoading(false);
-    }
-  }, [token]);
-
-  const fetchWithdrawalEligibility = useCallback(async () => {
-    if (!token) return;
-    try {
-      const r = await fetch("/api/withdrawals/eligibility", {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (!r.ok) return;
-      const data = await r.json() as WithdrawalEligibility;
-      setWithdrawalEligibility(data);
-    } catch {
-      // Silent: eligibility should not break the modal.
-    }
-  }, [token]);
+  const needsKyc = kycStatus === "not_submitted" && !kycDone;
 
   const amount = parseFloat(depositAmount.replace(",", "."));
   const amountValid = !isNaN(amount) && amount >= 10 && amount <= 5000;
@@ -13166,12 +12345,6 @@ function DepositWithdrawModal({
     return () => clearInterval(id);
   }, [mbRef?.orderId, token, onSuccess, onClose]);
 
-  useEffect(() => {
-    if (!open || mainTab !== "withdraw") return;
-    void fetchWithdrawalHistory();
-    void fetchWithdrawalEligibility();
-  }, [open, mainTab, fetchWithdrawalHistory, fetchWithdrawalEligibility]);
-
   function resetMethod(m: PayMethod) {
     setPayMethod(m);
     setMbRef(null);
@@ -13194,7 +12367,6 @@ function DepositWithdrawModal({
       if (!r.ok) { toast.error(data.error ?? "Erro ao submeter documentos."); return; }
       setKycDone(true);
       onSuccess();
-      void fetchWithdrawalEligibility();
       toast.success("Documentos submetidos! A verificação será feita em 1-2 dias úteis.");
     } catch { toast.error("Erro de ligação. Tente novamente."); }
     finally { setLoading(false); }
@@ -13217,44 +12389,14 @@ function DepositWithdrawModal({
       });
       const data = await r.json() as { withdrawal?: { id: number }; error?: string; code?: string };
       if (!r.ok) {
-        if (data.code === "KYC_REQUIRED" || data.code === "BET_REQUIRED" || data.code === "WITHDRAWAL_ALREADY_OPEN") {
-          void fetchWithdrawalEligibility();
-        }
         toast.error(data.error ?? "Erro ao submeter pedido.");
-        if (data.code === "WITHDRAWAL_ALREADY_OPEN") {
-          void fetchWithdrawalHistory();
-        }
         return;
       }
       setWDone(true);
       onSuccess();
-      void fetchWithdrawalHistory();
-      toast.success("Pedido de levantamento submetido! Estado inicial: em revisão.");
+      toast.success("Pedido de levantamento submetido! Processado em 2-5 dias úteis.");
     } catch { toast.error("Erro de ligação. Tente novamente."); }
     finally { setLoading(false); }
-  }
-
-  async function handleCancelWithdrawal(id: number) {
-    setCancellingWithdrawalId(id);
-    try {
-      const r = await fetch(`/api/withdrawals/${id}/cancel`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      const data = await r.json().catch(() => ({})) as { error?: string };
-      if (!r.ok) {
-        toast.error(data.error ?? "Não foi possível cancelar o levantamento.");
-        return;
-      }
-      toast.success("Levantamento cancelado e saldo devolvido.");
-      setWDone(false);
-      onSuccess();
-      await fetchWithdrawalHistory();
-    } catch {
-      toast.error("Erro de ligação. Tente novamente.");
-    } finally {
-      setCancellingWithdrawalId(null);
-    }
   }
 
   function triggerPromoNotif(depositAmount: number) {
@@ -13359,56 +12501,11 @@ function DepositWithdrawModal({
         {/* Withdrawal form */}
         {mainTab === "withdraw" && (
           <div className="p-5 space-y-4">
-            {withdrawalsLoading && (
-              <div className="flex items-center justify-center py-3 text-zinc-500 text-sm gap-2">
-                <Loader2 size={14} className="animate-spin" />
-                A carregar levantamentos...
-              </div>
-            )}
-            {latestWithdrawal && (() => {
-              const meta = getWithdrawalStatusMeta(latestWithdrawal.status);
-              return (
-                <div className={`border rounded-xl px-4 py-3 space-y-2 ${meta.panelCls}`}>
-                  <div className="flex items-center gap-2">
-                    {meta.icon}
-                    <div className="text-sm font-bold text-white">Último levantamento</div>
-                    <span className={`ml-auto inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-black uppercase tracking-wide ${meta.badgeCls}`}>
-                      {meta.label}
-                    </span>
-                  </div>
-                  <div className="text-sm text-white font-black">€ {parseFloat(latestWithdrawal.amount || "0").toFixed(2)}</div>
-                  <div className="text-xs text-zinc-300 leading-relaxed">{meta.message}</div>
-                  <div className="text-[11px] text-zinc-400">
-                    Pedido em {formatWithdrawalDate(latestWithdrawal.createdAt)}
-                    {latestWithdrawal.processedAt ? ` · Processamento em ${formatWithdrawalDate(latestWithdrawal.processedAt)}` : ""}
-                  </div>
-                  {latestWithdrawal.decisionReason && (
-                    <div className="text-[11px] text-zinc-300">Motivo: {latestWithdrawal.decisionReason}</div>
-                  )}
-                  {latestWithdrawal.providerReference && (
-                    <div className="text-[11px] text-zinc-300">Referência: {latestWithdrawal.providerReference}</div>
-                  )}
-                  {canUserCancelWithdrawal && latestOpenWithdrawal && (
-                    <Button
-                      onClick={() => handleCancelWithdrawal(latestOpenWithdrawal.id)}
-                      disabled={cancellingWithdrawalId === latestOpenWithdrawal.id}
-                      variant="outline"
-                      className="w-full border-red-700/60 text-red-300 hover:bg-red-950/50 hover:text-red-200"
-                    >
-                      {cancellingWithdrawalId === latestOpenWithdrawal.id
-                        ? <Loader2 size={14} className="animate-spin mr-2" />
-                        : <X size={14} className="mr-2" />}
-                      Cancelar levantamento
-                    </Button>
-                  )}
-                </div>
-              );
-            })()}
             {wDone ? (
               <div className="text-center py-8 space-y-3">
                 <div className="text-5xl">✅</div>
                 <div className="font-black text-white text-lg">Pedido submetido!</div>
-                <div className="text-sm text-zinc-400 leading-relaxed">O seu pedido de levantamento entrou em <strong className="text-white">revisão</strong>.<br />Depois seguirá para processamento e pagamento.</div>
+                <div className="text-sm text-zinc-400 leading-relaxed">O seu pedido de levantamento está em processamento.<br />Prazo estimado: <strong className="text-white">2 a 5 dias úteis</strong>.</div>
                 <Button onClick={() => { setWDone(false); setWAmount(""); }} variant="outline" className="border-zinc-700 text-zinc-400 mt-2">Novo pedido</Button>
               </div>
             ) : needsKyc ? (
@@ -13462,7 +12559,7 @@ function DepositWithdrawModal({
                   Submeter Documentos
                 </Button>
               </div>
-            ) : effectiveKycStatus === "pending" ? (
+            ) : kycStatus === "pending" && !kycDone ? (
               /* ── KYC PENDING NOTICE ── */
               <div className="space-y-4">
                 <div className="bg-yellow-900/20 border border-yellow-600/40 rounded-xl px-4 py-4 text-center space-y-2">
@@ -13472,38 +12569,6 @@ function DepositWithdrawModal({
                 </div>
                 <div className="bg-orange-900/20 border border-orange-800/40 rounded-xl px-4 py-3 text-xs text-orange-300 leading-relaxed">
                   Mínimo de levantamento: <strong className="text-white">€20</strong>. Processado por transferência bancária em 2–5 dias úteis.
-                </div>
-              </div>
-            ) : effectiveKycStatus === "rejected" ? (
-              <div className="space-y-4">
-                <div className="bg-red-900/20 border border-red-600/40 rounded-xl px-4 py-4 text-center space-y-2">
-                  <div className="text-3xl">❌</div>
-                  <div className="text-sm font-bold text-red-300">Verificação Rejeitada</div>
-                  <div className="text-xs text-red-200/70 leading-relaxed">
-                    A sua verificação foi rejeitada. Submeta novamente os documentos na área de Perfil para desbloquear levantamentos.
-                  </div>
-                </div>
-                <div className="bg-orange-900/20 border border-orange-800/40 rounded-xl px-4 py-3 text-xs text-orange-300 leading-relaxed">
-                  Mínimo de levantamento: <strong className="text-white">€20</strong>. Processado por transferência bancária em 2–5 dias úteis.
-                </div>
-              </div>
-            ) : withdrawalBlockedByBetHistory ? (
-              <div className="space-y-4">
-                <div className="bg-blue-900/20 border border-blue-600/40 rounded-xl px-4 py-4 text-center space-y-2">
-                  <div className="text-3xl">🎯</div>
-                  <div className="text-sm font-bold text-blue-300">Aposta Liquidada Necessária</div>
-                  <div className="text-xs text-blue-200/70 leading-relaxed">
-                    {withdrawalEligibility?.message ?? "Para efectuar um levantamento, é necessário ter pelo menos uma aposta liquidada."}
-                  </div>
-                </div>
-                <div className="bg-orange-900/20 border border-orange-800/40 rounded-xl px-4 py-3 text-xs text-orange-300 leading-relaxed">
-                  Depois de ter pelo menos uma aposta liquidada, o levantamento ficará disponível automaticamente.
-                </div>
-              </div>
-            ) : latestOpenWithdrawal ? (
-              <div className="space-y-4">
-                <div className="bg-orange-900/20 border border-orange-800/40 rounded-xl px-4 py-3 text-xs text-orange-300 leading-relaxed">
-                  Já existe um levantamento em curso nesta conta. Aguarde a conclusão do pedido atual antes de criar um novo.
                 </div>
               </div>
             ) : (

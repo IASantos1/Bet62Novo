@@ -3,7 +3,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { AuthProvider } from "@/hooks/use-auth";
-import { useState, useEffect, lazy, Suspense } from "react";
+import { useState, useEffect, lazy, Suspense, Component, type ReactNode } from "react";
 import NotFound from "@/pages/not-found";
 import Home from "@/pages/home";
 import SplashScreen from "@/components/SplashScreen";
@@ -27,11 +27,51 @@ const queryClient = new QueryClient({
   },
 });
 
+class AppErrorBoundary extends Component<{ children: ReactNode }, { error: unknown | null }> {
+  state: { error: unknown | null } = { error: null };
+
+  static getDerivedStateFromError(error: unknown) {
+    return { error };
+  }
+
+  componentDidCatch(error: unknown) {
+    try { console.error("[app error]", error); } catch {}
+  }
+
+  render() {
+    if (this.state.error) {
+      return (
+        <div className="min-h-[100dvh] w-full flex items-center justify-center bg-zinc-950 text-white px-6">
+          <div className="max-w-md w-full rounded-2xl border border-zinc-800 bg-zinc-900/40 p-5">
+            <div className="text-lg font-black mb-2">O app não carregou</div>
+            <div className="text-sm text-zinc-400 mb-4">Toque para recarregar. Se continuar, limpe a cache do navegador/PWA.</div>
+            <button
+              className="w-full bg-red-600 hover:bg-red-500 text-white font-black text-sm rounded-xl py-3 transition-colors"
+              onClick={() => window.location.reload()}
+            >
+              Recarregar
+            </button>
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 function Router() {
   return (
     <Switch>
       <Route path="/" component={Home} />
-      <Route path="/admin">{() => <Suspense fallback={null}><AdminPage /></Suspense>}</Route>
+      <Route path="/admin">{() => (
+        <Suspense fallback={
+          <div className="min-h-[100dvh] w-full flex items-center justify-center bg-zinc-950 text-white">
+            <div className="text-sm font-bold text-zinc-300">A carregar…</div>
+          </div>
+        }>
+          <AdminPage />
+        </Suspense>
+      )}</Route>
       <Route component={NotFound} />
     </Switch>
   );
@@ -54,9 +94,11 @@ function App() {
       <QueryClientProvider client={queryClient}>
         <AuthProvider>
           <TooltipProvider>
-            <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, "")}>
-              <Router />
-            </WouterRouter>
+            <AppErrorBoundary>
+              <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, "")}>
+                <Router />
+              </WouterRouter>
+            </AppErrorBoundary>
             <Toaster theme="dark" richColors />
           </TooltipProvider>
         </AuthProvider>
