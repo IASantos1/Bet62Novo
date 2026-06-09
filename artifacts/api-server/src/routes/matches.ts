@@ -5936,7 +5936,7 @@ function buildTennisLiveMatches(
         firstSetOdds = baseExtras.firstSet;
       }
 
-      // Set 2: in-progress → live-adjust; done → keep base (will be suspended)
+      // Set 2: only open once set 1 is finished; in-progress → live-adjust
       let set2Odds: { home: number; away: number };
       if (numDoneSets === 1 && sets.length >= 2) {
         const pS2 = liveSetWinProb(set2Games[0], set2Games[1], liveHomeP);
@@ -5946,14 +5946,25 @@ function buildTennisLiveMatches(
         set2Odds = baseExtras.set2;
       }
 
+      const set3Games = sets.length >= 3 ? (sets[2] ?? ([0, 0] as [number, number])) : ([0, 0] as [number, number]);
+      let set3Odds: { home: number; away: number };
+      if (numDoneSets === 2 && sets.length >= 3) {
+        const pS3 = liveSetWinProb(set3Games[0], set3Games[1], liveHomeP);
+        const [s3h, s3a] = probsToDecimalOdds([pS3, 1 - pS3], 1.09);
+        set3Odds = { home: s3h!, away: s3a! };
+      } else {
+        set3Odds = baseExtras.set3;
+      }
+
       // Completed set markets are permanently settled. Future set markets stay
       // locked until their respective set actually starts.
       const SETTLED = now + 30 * 24 * 60 * 60 * 1000;
       const settledSusp: Record<string, number> = {};
+      const phaseHoldSusp: Record<string, number> = {};
       if (numDoneSets >= 1) settledSusp["firstSet"] = SETTLED;
       if (numDoneSets >= 2) settledSusp["set2"]     = SETTLED;
-      if (numDoneSets < 1) settledSusp["set2"]      = SETTLED;
-      if (numDoneSets < 2) settledSusp["set3"]      = SETTLED;
+      if (setNum < 2) phaseHoldSusp["set2"]         = SETTLED;
+      if (setNum < 3) phaseHoldSusp["set3"]         = SETTLED;
 
       const currentPoints: [number | string, number | string] = [hPt, aPt];
       const serving: [boolean, boolean] = [p0Serving, p1Serving];
@@ -5974,11 +5985,17 @@ function buildTennisLiveMatches(
         );
 
       let marketSuspension: Record<string, number> | undefined = existing?.marketSuspension
-        ? Object.fromEntries(Object.entries(existing.marketSuspension).filter(([, ts]) => ts > now))
+        ? Object.fromEntries(Object.entries(existing.marketSuspension).filter(([key, ts]) => {
+            if (ts <= now) return false;
+            if ((key === "set2" || key === "set3") && ts > now + 60 * 60 * 1000 && settledSusp[key] === undefined && phaseHoldSusp[key] === undefined) {
+              return false;
+            }
+            return true;
+          }))
         : undefined;
 
-      if (Object.keys(settledSusp).length > 0) {
-        marketSuspension = { ...(marketSuspension ?? {}), ...settledSusp };
+      if (Object.keys(settledSusp).length > 0 || Object.keys(phaseHoldSusp).length > 0) {
+        marketSuspension = { ...(marketSuspension ?? {}), ...settledSusp, ...phaseHoldSusp };
       }
 
       let suspensionReason = existing?._suspensionReason;
@@ -5989,7 +6006,7 @@ function buildTennisLiveMatches(
           const pointSusp = Object.fromEntries(
             TENNIS_SUSP_KEYS.map((k) => [k, now + suspMs]),
           );
-          marketSuspension = { ...(marketSuspension ?? {}), ...pointSusp, ...settledSusp };
+          marketSuspension = { ...(marketSuspension ?? {}), ...pointSusp, ...settledSusp, ...phaseHoldSusp };
           suspensionReason = "PONTO EM JOGO";
         }
       } else if (marketSuspension && Object.keys(marketSuspension).length === 0) {
@@ -6010,7 +6027,7 @@ function buildTennisLiveMatches(
         handicap:        { homeMinusOne: 0, awayPlusOne: 0, homeMinusOneHalf: 0, awayPlusOneHalf: 0 },
         halfTime:        { home: 0, draw: 0, away: 0 },
         firstGoal:       { home: 0, noGoal: 0, away: 0 },
-        tennisExtra:     { ...baseExtras, firstSet: firstSetOdds, set2: set2Odds, setExactScore, currentSetNum: setNum,
+        tennisExtra:     { ...baseExtras, firstSet: firstSetOdds, set2: set2Odds, set3: set3Odds, setExactScore, currentSetNum: setNum,
           // Per-set exact score: live-updated for in-progress set, settled (single entry) for completed sets
           set1ExactScore: numDoneSets === 0
             ? setExactScore
@@ -8199,17 +8216,24 @@ function buildTennisLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
     }).length;
     const SETTLED = now + 30 * 24 * 60 * 60 * 1000;
     const settledSusp: Record<string, number> = {};
+    const phaseHoldSusp: Record<string, number> = {};
     if (doneSets >= 1) settledSusp["firstSet"] = SETTLED;
     if (doneSets >= 2) settledSusp["set2"]     = SETTLED;
-    if (doneSets < 1) settledSusp["set2"]      = SETTLED;
-    if (doneSets < 2) settledSusp["set3"]      = SETTLED;
+    if (setNum < 2) phaseHoldSusp["set2"]      = SETTLED;
+    if (setNum < 3) phaseHoldSusp["set3"]      = SETTLED;
 
     let marketSuspension: Record<string, number> | undefined = existing?.marketSuspension
-      ? Object.fromEntries(Object.entries(existing.marketSuspension).filter(([, ts]) => ts > now))
+      ? Object.fromEntries(Object.entries(existing.marketSuspension).filter(([key, ts]) => {
+          if (ts <= now) return false;
+          if ((key === "set2" || key === "set3") && ts > now + 60 * 60 * 1000 && settledSusp[key] === undefined && phaseHoldSusp[key] === undefined) {
+            return false;
+          }
+          return true;
+        }))
       : undefined;
     // Merge settled set suspensions (these are permanent — never expire)
-    if (Object.keys(settledSusp).length > 0) {
-      marketSuspension = { ...(marketSuspension ?? {}), ...settledSusp };
+    if (Object.keys(settledSusp).length > 0 || Object.keys(phaseHoldSusp).length > 0) {
+      marketSuspension = { ...(marketSuspension ?? {}), ...settledSusp, ...phaseHoldSusp };
     }
 
     let suspensionReason = existing?._suspensionReason;
@@ -8221,7 +8245,7 @@ function buildTennisLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
           TENNIS_SUSP_KEYS.map(k => [k, now + suspMs]),
         );
         // Merge: settled markets keep their permanent timestamp; point suspension overrides temporary ones
-        marketSuspension = { ...(marketSuspension ?? {}), ...pointSusp, ...settledSusp };
+        marketSuspension = { ...(marketSuspension ?? {}), ...pointSusp, ...settledSusp, ...phaseHoldSusp };
         suspensionReason = "PONTO EM JOGO";
       }
     } else if (marketSuspension && Object.keys(marketSuspension).length === 0) {
@@ -8245,6 +8269,7 @@ function buildTennisLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
     const v2BaseExtras = computeTennisExtras(v2HomeP);
     const v2Set1Games  = sets[0] ?? ([0, 0] as [number, number]);
     const v2Set2Games  = sets.length >= 2 ? (sets[1] ?? ([0, 0] as [number, number])) : ([0, 0] as [number, number]);
+    const v2Set3Games  = sets.length >= 3 ? (sets[2] ?? ([0, 0] as [number, number])) : ([0, 0] as [number, number]);
     const v2SetWinProb = (hG: number, aG: number, base: number): number =>
       Math.min(0.97, Math.max(0.03, 0.5 + (base - 0.5) * 0.55 + (hG - aG) * 0.055));
 
@@ -8266,10 +8291,20 @@ function buildTennisLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
       v2Set2Odds = v2BaseExtras.set2;
     }
 
+    let v2Set3Odds: { home: number; away: number };
+    if (doneSets === 2 && sets.length >= 3) {
+      const pS3 = v2SetWinProb(v2Set3Games[0], v2Set3Games[1], v2HomeP);
+      const [s3h, s3a] = probsToDecimalOdds([pS3, 1 - pS3], 1.09);
+      v2Set3Odds = { home: s3h!, away: s3a! };
+    } else {
+      v2Set3Odds = v2BaseExtras.set3;
+    }
+
     const v2TennisExtra = {
       ...v2BaseExtras,
       firstSet: v2FirstSetOdds,
       set2:     v2Set2Odds,
+      set3:     v2Set3Odds,
       currentSetNum: setNum,
     };
 
@@ -9036,11 +9071,9 @@ async function buildTennisLiveV1(): Promise<LiveMatchState[]> {
     }
     primary.sort((a, b) => a.r - b.r || a.m.league.localeCompare(b.m.league) || a.m.home.localeCompare(b.m.home));
     itf.sort((a, b) => a.m.league.localeCompare(b.m.league) || a.m.home.localeCompare(b.m.home));
-    const capPrimary = 30;
-    const capItf = primary.length > 0 ? 8 : 30;
     return [
-      ...primary.slice(0, capPrimary).map(x => x.m),
-      ...itf.slice(0, capItf).map(x => x.m),
+      ...primary.map(x => x.m),
+      ...itf.map(x => x.m),
     ];
   } catch {
     return [];
@@ -9093,7 +9126,6 @@ async function buildTennisUpcoming(): Promise<UpcomingMatch[]> {
       const compName = g.competitionDisplayName ?? "";
       if (/double|mixed/i.test(compName)) continue;
       const tier = tennisTierRank(compName);
-      if (tier === 999) continue;
 
       const startMs = new Date(g.startTime).getTime();
       if (startMs < now - 90 * 60 * 1000) continue; // 90-min grace
@@ -9134,8 +9166,6 @@ async function buildTennisUpcoming(): Promise<UpcomingMatch[]> {
       };
       if (tier === 7) itf.push({ r: tier, m: item });
       else primary.push({ r: tier, m: item });
-
-      if (primary.length >= 60) break;
     }
 
     const byTime = (a: UpcomingMatch, b: UpcomingMatch) => {
@@ -9145,11 +9175,9 @@ async function buildTennisUpcoming(): Promise<UpcomingMatch[]> {
     };
     primary.sort((a, b) => a.r - b.r || byTime(a.m, b.m));
     itf.sort((a, b) => byTime(a.m, b.m));
-    const capPrimary = 60;
-    const capItf = primary.length > 0 ? 12 : 60;
     return [
-      ...primary.slice(0, capPrimary).map(x => x.m),
-      ...itf.slice(0, capItf).map(x => x.m),
+      ...primary.map(x => x.m),
+      ...itf.map(x => x.m),
     ];
   } catch {
     return [];
