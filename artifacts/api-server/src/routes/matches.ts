@@ -5531,7 +5531,9 @@ async function getTennisAllV1(): Promise<V1TennisGame[]> {
   }
 }
 
-const TENNIS_LIVE_V1_TTL = 2000;
+// Increased from 2000ms: prevents hammering the V1 API (broadcast cadence ~900ms
+// means 2s TTL causes ~1 API call/s; at 8s the rate drops to ~0.1/s avoiding rate-limits)
+const TENNIS_LIVE_V1_TTL = 8000;
 let _tennisLiveV1Cache: { games: V1TennisGame[]; fetchedAt: number } | null = null;
 let _tennisLiveV1InFlight: Promise<V1TennisGame[]> | null = null;
 
@@ -8687,12 +8689,20 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
     }
     return out;
   })();
+  // Apply per-sport anti-flicker: if a sport's API temporarily returns empty,
+  // keep the last good data for up to SPORT_FALLBACK_TTL_MS (35s).
+  const footballLive  = sportWithFallback("football",   await buildFootballLiveV2(footballEvents));
+  const basketballLive = sportWithFallback("basketball", buildBasketballLiveV2(basketballEvents));
+  const hockeyLive    = sportWithFallback("hockey",     buildHockeyLiveV2(hockeyEvents));
+  const baseballLive  = sportWithFallback("baseball",   buildBaseballLiveV2(baseballEvents));
+  const tennisLive    = sportWithFallback("tennis",     tennisLivePart);
+
   const livePart = [
-    ...(await buildFootballLiveV2(footballEvents)),
-    ...buildBasketballLiveV2(basketballEvents),
-    ...buildHockeyLiveV2(hockeyEvents),
-    ...buildBaseballLiveV2(baseballEvents),
-    ...tennisLivePart,
+    ...footballLive,
+    ...basketballLive,
+    ...hockeyLive,
+    ...baseballLive,
+    ...tennisLive,
     ...startedUpcomingTennisPart,
   ];
 
@@ -8931,6 +8941,23 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
 
 const LIVE_PAYLOAD_FALLBACK_TTL_MS = 45_000;
 let livePayloadFallbackCache: { payload: { matches: LiveMatchState[] }; builtAt: number } | null = null;
+
+// Per-sport last-good-data anti-flicker caches.
+// When a sport's live API returns empty (transient failure/rate-limit), use the last
+// non-empty result for up to SPORT_FALLBACK_TTL_MS before showing an empty section.
+const SPORT_FALLBACK_TTL_MS = 35_000;
+const _lastGoodSport = new Map<string, { matches: LiveMatchState[]; savedAt: number }>();
+
+function sportWithFallback(sport: string, fresh: LiveMatchState[]): LiveMatchState[] {
+  const now = Date.now();
+  if (fresh.length > 0) {
+    _lastGoodSport.set(sport, { matches: fresh, savedAt: now });
+    return fresh;
+  }
+  const cached = _lastGoodSport.get(sport);
+  if (cached && now - cached.savedAt < SPORT_FALLBACK_TTL_MS) return cached.matches;
+  return fresh; // genuinely empty — nothing cached or cache expired
+}
 
 function getLivePayloadFallback(): { matches: LiveMatchState[] } | null {
   if (!livePayloadFallbackCache) return null;

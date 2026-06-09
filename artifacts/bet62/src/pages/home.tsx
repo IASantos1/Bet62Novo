@@ -1714,6 +1714,9 @@ export default function Home() {
   const prevLiveMarkets = useRef<Record<string, Record<string, number>>>({}); 
   // Grace period: track last time each match was seen in the API response (ms timestamp)
   const matchLastSeenRef = useRef<Record<string, number>>({});
+  // Consecutive miss count: how many full-sync responses each match was absent from.
+  // A match must be absent from 2+ consecutive responses before it can be removed.
+  const matchMissCountRef = useRef<Record<string, number>>({});
   const emptyLiveStreakRef = useRef(0);
   // Live minute ticker — interpolates clock between API refreshes
   const liveDataFetchedAt = useRef(0);
@@ -2992,6 +2995,7 @@ export default function Home() {
       apiMinutesRef.current = {};
       minuteChangedAtRef.current = {};
       matchLastSeenRef.current = {};
+      matchMissCountRef.current = {};
       setLiveMatches([]);
       return;
     }
@@ -3023,6 +3027,17 @@ export default function Home() {
       prevLiveMarkets.current = newPrevMkts;
 
       const freshIds = new Set(matches.map(m => String(m.id)));
+
+      // Update consecutive miss counts for every match in the previous state
+      for (const m of prev) {
+        const id = String(m.id);
+        if (freshIds.has(id)) {
+          matchMissCountRef.current[id] = 0; // present this response — reset
+        } else {
+          matchMissCountRef.current[id] = (matchMissCountRef.current[id] ?? 0) + 1;
+        }
+      }
+
       const isFinishedStatus = (st: string | undefined) => {
         const s = (st ?? "").trim().toLowerCase();
         if (!s) return false;
@@ -3051,8 +3066,10 @@ export default function Home() {
           if (freshIds.has(id)) return false;
           if (isFinishedStatus(m.status)) return false;
           const lastSeen = matchLastSeenRef.current[id] ?? 0;
-          // Keep stale matches for up to 30s after last seen (was 10s — too aggressive)
-          return (now - lastSeen) < 30_000;
+          const missCount = matchMissCountRef.current[id] ?? 0;
+          // Keep if: absent from fewer than 2 consecutive responses (transient miss)
+          // OR still within 30s window (belt-and-suspenders for very slow polls)
+          return missCount < 2 || (now - lastSeen) < 30_000;
         })
         .map(m => ({ ...m, marketSuspension: undefined, _suspensionReason: undefined, suspensionReason: undefined }));
 
