@@ -7532,7 +7532,8 @@ function buildBasketballLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
 
     const league = v2TournName(ev.tournament);
     const country = v2TournCountry(ev);
-    if (!basketballLeagueAllowed(country, league)) continue;
+    const fromUpcoming = hasRecentUpcomingEligibility("basketball", ev.id);
+    if (!fromUpcoming && !basketballLeagueAllowed(country, league)) continue;
 
     // Build quarters array from period1..4
     const quarters: Array<[number, number]> = [];
@@ -7949,7 +7950,8 @@ function buildTennisLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
        sLow.includes("set") || sLow.includes("playing") || sLow.includes("progress"));
     if (isZombie) continue;
     if (notLive) continue;
-    if (!existing && ev.startTimestamp !== undefined && matchAgeSeconds > 5 * 60) continue;
+    const fromUpcoming = hasRecentUpcomingEligibility("tennis", ev.id);
+    if (!existing && !fromUpcoming && ev.startTimestamp !== undefined && matchAgeSeconds > 5 * 60) continue;
     // Accept everything else: "Playing", "1st Set", "2nd Set", "In Progress",
     // "Break Time", "Advantage", "Tiebreak", "Suspended", "Paused", etc.
 
@@ -8328,15 +8330,17 @@ async function rebuildUpcomingCache(): Promise<void> {
   _upcomingRebuildInProgress = true;
   const empty: UpcomingMatch[] = [];
   try {
-    const [upFootball, upTennis, upBasketball, upHockey, upVolleyball] = await Promise.all([
+    const [upFootball, upTennis, upBasketball, upHockey, upVolleyball, upBaseball] = await Promise.all([
       buildUpcomingMatches().catch(() => empty),
       buildTennisUpcoming().catch(() => empty),
       buildBasketballUpcoming().catch(() => empty),
       buildHockeyUpcoming().catch(() => empty),
       buildVolleyballUpcoming().catch(() => empty),
+      buildBaseballUpcoming().catch(() => empty),
     ]);
     rememberUpcomingFootballEligibility(upFootball);
-    _allUpcomingCache = [...upFootball, ...upTennis, ...upBasketball, ...upHockey, ...upVolleyball];
+    rememberUpcomingEligibility([...upFootball, ...upTennis, ...upBasketball, ...upHockey, ...upVolleyball, ...upBaseball]);
+    _allUpcomingCache = [...upFootball, ...upTennis, ...upBasketball, ...upHockey, ...upVolleyball, ...upBaseball];
     _allUpcomingCacheBuiltAt = Date.now();
   } catch { /* keep stale */ } finally {
     _upcomingRebuildInProgress = false;
@@ -9119,6 +9123,7 @@ let upcomingTopInFlight: Promise<UpcomingTopCache> | null = null;
 const UPCOMING_TOP_TTL = 60_000;
 const UPCOMING_TO_LIVE_ELIGIBILITY_MS = 6 * 60 * 60 * 1000;
 const recentUpcomingFootballIds = new Map<string, number>();
+const recentUpcomingV2Ids = new Map<string, number>();
 
 function parseUpcomingKickoffMs(match: Pick<UpcomingMatch, "date" | "time">): number | null {
   if (!match.date || !match.time) return null;
@@ -9160,6 +9165,38 @@ function hasRecentUpcomingFootballEligibility(eventId: number | string): boolean
   return true;
 }
 
+function rememberUpcomingEligibility(matches: UpcomingMatch[]): void {
+  const now = Date.now();
+  for (const [k, expiryAt] of recentUpcomingV2Ids.entries()) {
+    if (expiryAt <= now) recentUpcomingV2Ids.delete(k);
+  }
+  for (const match of matches) {
+    const sport = (match.sport ?? "football") as SportKey;
+    const idRaw = String(match.id ?? "");
+    const m = idRaw.match(/^(fb-v2|football-v2|bball-v2|hockey-v2|tennis-v2|baseball-v2|mlb-v2|volley-odds|volley-live)-(.+)$/);
+    if (!m) continue;
+    const providerId = m[2] ?? "";
+    if (!providerId) continue;
+
+    const scheduledMs = parseUpcomingKickoffMs(match);
+    const expiryAt = scheduledMs
+      ? Math.max(now + 30 * 60 * 1000, scheduledMs + 4 * 60 * 60 * 1000)
+      : now + UPCOMING_TO_LIVE_ELIGIBILITY_MS;
+    recentUpcomingV2Ids.set(`${sport}:${providerId}`, expiryAt);
+  }
+}
+
+function hasRecentUpcomingEligibility(sport: SportKey, providerId: number | string): boolean {
+  const key = `${sport}:${String(providerId)}`;
+  const expiryAt = recentUpcomingV2Ids.get(key);
+  if (!expiryAt) return false;
+  if (expiryAt <= Date.now()) {
+    recentUpcomingV2Ids.delete(key);
+    return false;
+  }
+  return true;
+}
+
 async function refreshUpcomingTop(): Promise<UpcomingTopCache> {
   const empty: UpcomingMatch[] = [];
   const [football, tennis, basketball, hockey, volleyball, baseball] = await Promise.all([
@@ -9171,6 +9208,7 @@ async function refreshUpcomingTop(): Promise<UpcomingTopCache> {
     buildBaseballUpcoming().catch(() => empty),
   ]);
   rememberUpcomingFootballEligibility(football);
+  rememberUpcomingEligibility([...football, ...tennis, ...basketball, ...hockey, ...volleyball, ...baseball]);
   upcomingTopCache = { football, tennis, basketball, hockey, volleyball, baseball, fetchedAt: Date.now() };
   return upcomingTopCache;
 }
