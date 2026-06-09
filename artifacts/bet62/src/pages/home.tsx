@@ -9306,6 +9306,9 @@ export default function Home() {
                   || m.away.toLowerCase().includes(q)
                   || (m.league ?? "").toLowerCase().includes(q);
               });
+              const featuredUpcoming = visibleUpcoming.slice(0, 3);
+              const featuredIds = new Set(featuredUpcoming.map(m => String(m.id)));
+              const listUpcoming = visibleUpcoming.filter(m => !featuredIds.has(String(m.id)));
 
               // Sport grouping for display
               const SPORT_GROUPS = [
@@ -9316,7 +9319,7 @@ export default function Home() {
                 { key: "volleyball", emoji: "🏐", label: "Voleibol" },
               ] as const;
               const sportGroups = SPORT_GROUPS
-                .map(g => ({ ...g, matches: visibleUpcoming.filter(m => (m.sport ?? "football") === g.key) }))
+                .map(g => ({ ...g, matches: listUpcoming.filter(m => (m.sport ?? "football") === g.key) }))
                 .filter(g => g.matches.length > 0);
 
               // Derive tournament display label from raw API name
@@ -9325,8 +9328,6 @@ export default function Home() {
 
               return (
                 <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
-                  {!selectedLeague && <PopularBanners />}
-
                   <div className="relative mb-4">
                     <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500 pointer-events-none" />
                     <input
@@ -9437,6 +9438,14 @@ export default function Home() {
                       </div>
                     );
                   })()}
+
+                  {featuredUpcoming.length > 0 && (
+                    <div className="mb-5 space-y-2">
+                      {featuredUpcoming.map(match => <MatchCard key={`featured-${match.id}`} match={match} />)}
+                    </div>
+                  )}
+
+                  {!selectedLeague && <PopularBanners />}
 
                   {/* ─── Torneios em Curso (oculto) ─────────────────────────── */}
                   {false && (selectedSport === "all" || selectedSport === "tennis") && activeTournaments.length > 0 && !selectedLeague && (() => {
@@ -10222,7 +10231,7 @@ export default function Home() {
                         return date.toLocaleDateString("pt-PT", { weekday: "long", day: "2-digit", month: "short" });
                       };
                       // Sort by date then time
-                      const sorted = [...visibleUpcoming].sort((a, b) => {
+                      const sorted = [...listUpcoming].sort((a, b) => {
                         const dk = dateSortKey(a.date).localeCompare(dateSortKey(b.date));
                         if (dk !== 0) return dk;
                         return (a.time ?? "").localeCompare(b.time ?? "");

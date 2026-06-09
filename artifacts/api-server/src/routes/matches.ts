@@ -8808,7 +8808,8 @@ async function buildTennisLiveV1(): Promise<LiveMatchState[]> {
       const compName = g.competitionDisplayName ?? "";
       if (/double|mixed/i.test(compName)) continue;
       const tier = tennisTierRank(compName);
-      if (tier === 999) continue;
+      const fromUpcoming = typeof g.id === "number" ? hasRecentUpcomingEligibility("tennis", g.id) : false;
+      if (tier === 999 && !fromUpcoming) continue;
       let homeScore = Math.max(0, g.homeCompetitor?.score ?? 0);
       let awayScore = Math.max(0, g.awayCompetitor?.score ?? 0);
       const ws = tennisV1WsScore.get(String(g.id));
@@ -8842,8 +8843,9 @@ async function buildTennisLiveV1(): Promise<LiveMatchState[]> {
         events: [],
         _liveExtra: { sets: [[homeScore, awayScore]], currentPoints: ["0", "0"], ...(serving ? { serving } : {}) },
       };
-      if (tier === 7) itf.push({ r: tier, m: item });
-      else primary.push({ r: tier, m: item });
+      const r = tier === 999 ? 6 : tier;
+      if (tier === 7) itf.push({ r, m: item });
+      else primary.push({ r, m: item });
     }
     primary.sort((a, b) => a.r - b.r || a.m.league.localeCompare(b.m.league) || a.m.home.localeCompare(b.m.home));
     itf.sort((a, b) => a.m.league.localeCompare(b.m.league) || a.m.home.localeCompare(b.m.home));
