@@ -1,1 +1,2 @@
 - [Live broadcast latency](live-broadcast-latency.md) — broadcastPending flag + 30s upcoming cache keeps score-to-client < 5ms
+- [Live section stability](live-stability.md) — tennis V1 TTL was 2s causing rate-limit → empty responses; per-sport fallback + miss-count guard fix
