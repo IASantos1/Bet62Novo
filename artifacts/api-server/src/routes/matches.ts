@@ -2176,13 +2176,11 @@ function isTennisExcludedName(name: string): boolean {
   );
 }
 
-/** Live filter: ATP/WTA/Challenger + ITF singles. Excludes doubles/wheelchair/juniors. */
+/** Live filter: allow all singles tennis tournaments. Excludes doubles/wheelchair/juniors. */
 function isTennisElite(ev: SAPIV2Event): boolean {
   const t = ev.tournament;
   const searchText = tennisTournamentSearchText(t);
   if (!searchText) return false;
-  const tier = tennisTierRank(searchText);
-  if (tier === 999 && !isKnownTennisTour(searchText)) return false;
   if (isTennisExcludedName(searchText)) return false;
   // Detect doubles by player name: any "/" in the name means "Player A / Player B" (doubles pair)
   const homeName = typeof ev.homeTeam === "object" ? (ev.homeTeam.name ?? "") : (ev.homeTeam ?? "");
@@ -8999,8 +8997,6 @@ async function buildTennisLiveV1(): Promise<LiveMatchState[]> {
       const compName = g.competitionDisplayName ?? "";
       if (/double|mixed/i.test(compName)) continue;
       const tier = tennisTierRank(compName);
-      const fromUpcoming = typeof g.id === "number" ? hasRecentUpcomingEligibility("tennis", g.id) : false;
-      if (tier === 999 && !fromUpcoming) continue;
       let homeScore = Math.max(0, g.homeCompetitor?.score ?? 0);
       let awayScore = Math.max(0, g.awayCompetitor?.score ?? 0);
       const ws = tennisV1WsScore.get(String(g.id));
