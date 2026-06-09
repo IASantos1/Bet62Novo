@@ -8712,11 +8712,11 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
 
   // Max minutes ahead a match can be to appear as "Em Breve", per sport
   const SOON_WINDOW: Record<string, number> = {
-    football: 2160, soccer: 2160,   // football: up to 36 h (many fixtures spread over days)
-    basketball: 480, hockey: 480,    // NBA/NHL: up to 8 h (evening US games)
+    football: 120, soccer: 120,      // football: up to 2 h — only genuinely imminent matches
+    basketball: 180, hockey: 180,    // NBA/NHL: up to 3 h — US evening games visible ~3 h ahead
     tennis: 600,                     // tennis: 10 h — show all Challenger/ATP/WTA matches scheduled today
   };
-  const DEFAULT_SOON_WINDOW = 240; // 4 h for volleyball, etc.
+  const DEFAULT_SOON_WINDOW = 120; // 2 h for volleyball, baseball, etc.
   const startingSoonCandidates = allUpcoming
     .filter(m => {
       // Tennis always has computed odds even without a real bookmaker price — allow all.
