@@ -8680,7 +8680,7 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
         minute: currentSetNum * 20,
         status: detail?.status ?? tennisSetLabel(currentSetNum),
         hasRealOdds: !!up.hasRealOdds,
-        odds: up.odds ?? makeOddsFromTeams(up.home, up.away),
+        odds: (up.odds && up.odds.home > 0 && up.odds.away > 0) ? up.odds : makeOddsFromTeams(up.home, up.away),
         markets: (up.markets as AdvancedMarkets) ?? makeAdvancedMarketsFromTeams(up.home, up.away),
         events: [],
         _liveExtra: { sets, ...(currentPoints ? { currentPoints } : {}), ...(detail?.serving ? { serving: detail.serving } : {}) },
@@ -9192,7 +9192,7 @@ async function buildTennisLiveV1(): Promise<LiveMatchState[]> {
       const item: LiveMatchState = {
         id: `tennis-v2-${g.id}`,
         home, away,
-        league: compName || "Tennis",
+        league: cleanLeagueName(compName) || "Tennis",
         country: "",
         sport: "tennis" as const,
         homeScore, awayScore,
