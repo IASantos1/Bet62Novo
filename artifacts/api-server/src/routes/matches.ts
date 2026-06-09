@@ -2127,7 +2127,8 @@ function tennisTierRank(name: string): number {
 }
 
 function tennisTournamentSearchText(tournament: string | SAPIV2TournObj | undefined): string {
-  if (!tournament || typeof tournament !== "object") return "";
+  if (!tournament) return "";
+  if (typeof tournament === "string") return tournament;
   const uniqueTournament = (tournament as SAPIV2TournObj & {
     uniqueTournament?: { name?: string; slug?: string };
   }).uniqueTournament;
@@ -2178,8 +2179,8 @@ function isTennisExcludedName(name: string): boolean {
 /** Live filter: ATP/WTA/Challenger + ITF singles. Excludes doubles/wheelchair/juniors. */
 function isTennisElite(ev: SAPIV2Event): boolean {
   const t = ev.tournament;
-  if (typeof t !== "object") return false;
   const searchText = tennisTournamentSearchText(t);
+  if (!searchText) return false;
   const tier = tennisTierRank(searchText);
   if (tier === 999 && !isKnownTennisTour(searchText)) return false;
   if (isTennisExcludedName(searchText)) return false;
@@ -2193,8 +2194,8 @@ function isTennisElite(ev: SAPIV2Event): boolean {
 /** Upcoming filter: top-tier only (ATP/WTA/Challenger/WTA-125). No ITF in pre-match. */
 function isTennisEliteUpcoming(ev: SAPIV2Event): boolean {
   const t = ev.tournament;
-  if (typeof t !== "object") return false;
   const searchText = tennisTournamentSearchText(t);
+  if (!searchText) return false;
   const tier = tennisTierRank(searchText);
   if (tier === 999 && !isKnownTennisTour(searchText)) return false;
   return !isTennisExcludedName(searchText);
