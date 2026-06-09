@@ -7076,16 +7076,59 @@ export { buildLiveMatches, buildUpcomingMatches, getUpcomingAll };
 
 // ─── SportsAPI Pro V2 Live Build Functions ────────────────────────────────────
 
-const FOOTBALL_V2_FINISHED = new Set([
-  "Finished", "Ended", "FT", "After Extra Time", "After Penalties", "AP",
-  "AET", "Postponed", "Cancelled", "Abandoned", "Suspended",
-]);
-const FOOTBALL_V2_LIVE = new Set([
-  "1st half", "2nd half", "HT", "Extra Time", "1st extra time", "2nd extra time",
-  "Penalties", "Break Time", "Pause",
-  // VAR / video review — match stays live while review is in progress
-  "VAR Review", "Video Review", "VAR", "Awaiting Review", "Awaiting review",
-]);
+function normalizeLiveStatus(value: string | undefined): string {
+  return String(value ?? "")
+    .toLowerCase()
+    .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+    .trim();
+}
+
+function isFootballV2FinishedStatus(statusStr: string): boolean {
+  const s = normalizeLiveStatus(statusStr);
+  if (!s) return false;
+  return (
+    s === "ft" ||
+    s === "aet" ||
+    s === "ap" ||
+    s.includes("finished") ||
+    s.includes("ended") ||
+    s.includes("after extra time") ||
+    s.includes("after penalties") ||
+    s.includes("postpon") ||
+    s.includes("cancel") ||
+    s.includes("abandon") ||
+    s.includes("awarded")
+  );
+}
+
+function isFootballV2LiveStatus(statusStr: string, statusCode?: number): boolean {
+  const s = normalizeLiveStatus(statusStr);
+  if (isFootballV2FinishedStatus(statusStr)) return false;
+  if (typeof statusCode === "number") {
+    if (statusCode >= 100) return false;
+    if (statusCode > 0) return true;
+  }
+  if (!s) return false;
+  return (
+    s === "ht" ||
+    s.includes("1st half") ||
+    s.includes("first half") ||
+    s.includes("2nd half") ||
+    s.includes("second half") ||
+    s.includes("half time") ||
+    s.includes("extra time") ||
+    s.includes("1st extra time") ||
+    s.includes("2nd extra time") ||
+    s.includes("penalt") ||
+    s.includes("break time") ||
+    s.includes("pause") ||
+    s.includes("var") ||
+    s.includes("review") ||
+    s.includes("in progress") ||
+    s.includes("live") ||
+    s.includes("playing")
+  );
+}
 
 // Tracks the last time a match's minute+score changed.
 // If both are frozen for > 20 min the match is a zombie and gets evicted.
@@ -7119,8 +7162,9 @@ async function buildFootballLiveV2(events: SAPIV2Event[]): Promise<LiveMatchStat
 
   for (const ev of events) {
     const statusStr = v2StatusStr(ev.status);
-    if (FOOTBALL_V2_FINISHED.has(statusStr)) continue;
-    if (!FOOTBALL_V2_LIVE.has(statusStr)) continue;
+    const statusCode = v2StatusCode(ev);
+    if (isFootballV2FinishedStatus(statusStr)) continue;
+    if (!isFootballV2LiveStatus(statusStr, statusCode)) continue;
     const evAgeSeconds = ev.startTimestamp ? Date.now() / 1000 - ev.startTimestamp : 0;
     if (evAgeSeconds > 2.5 * 3600) continue;
     const homeTeam = v2TeamName(ev.homeTeam);
