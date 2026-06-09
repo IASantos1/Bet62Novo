@@ -11,6 +11,7 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   View,
 } from "react-native";
 import { useQuery } from "@tanstack/react-query";
@@ -442,6 +443,7 @@ export default function PreGameScreen() {
   const [slipVisible, setSlipVisible] = useState(false);
   const [selectedSport, setSelectedSport] = useState("all");
   const [selectedLeague, setSelectedLeague] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState("");
   const [depositVisible, setDepositVisible] = useState(false);
 
   const topPad = Platform.OS === "web" ? 67 : insets.top;
@@ -459,9 +461,18 @@ export default function PreGameScreen() {
 
   const allUpcoming: UpcomingMatch[] = data?.matches ?? [];
   const sportFiltered = allUpcoming.filter((m) => selectedSport === "all" || m.sport === selectedSport);
-  const filtered = selectedLeague
+  const leagueFiltered = selectedLeague
     ? sportFiltered.filter((m) => findMajorLeague(m.league ?? "")?.label === selectedLeague)
     : sportFiltered;
+  const searchLower = searchQuery.trim().toLowerCase();
+  const filtered = searchLower
+    ? leagueFiltered.filter((m) =>
+        m.home.toLowerCase().includes(searchLower) ||
+        m.away.toLowerCase().includes(searchLower) ||
+        (m.league ?? "").toLowerCase().includes(searchLower)
+      )
+    : leagueFiltered;
+  const featuredMatches = filtered.slice(0, 3);
 
   const s = StyleSheet.create({
     container: { flex: 1, backgroundColor: colors.background },
@@ -533,21 +544,6 @@ export default function PreGameScreen() {
           )}
         </View>
 
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 2 }}>
-          {SPORTS.map((sp) => {
-            const active = selectedSport === sp.key;
-            const col = SPORT_COLORS[sp.key] ?? colors.primary;
-            return (
-              <Pressable
-                key={sp.key}
-                style={[s.sportChip, { backgroundColor: active ? col : colors.muted, borderColor: active ? col : colors.border }]}
-                onPress={() => { setSelectedSport(sp.key); setSelectedLeague(null); Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); }}
-              >
-                <Text style={{ fontSize: 12, fontFamily: "Inter_600SemiBold", color: active ? "#ffffff" : colors.foreground }}>{sp.label}</Text>
-              </Pressable>
-            );
-          })}
-        </ScrollView>
       </View>
 
       {isLoading ? (
@@ -590,8 +586,76 @@ export default function PreGameScreen() {
           }
           ListHeaderComponent={
             <>
-              <PopularBanners matches={allUpcoming} />
+              <View style={{ paddingHorizontal: 14, paddingTop: 6, paddingBottom: 2 }}>
+                <View
+                  style={{
+                    flexDirection: "row",
+                    alignItems: "center",
+                    gap: 8,
+                    backgroundColor: colors.card,
+                    borderWidth: 1,
+                    borderColor: colors.border,
+                    borderRadius: 16,
+                    paddingHorizontal: 12,
+                    paddingVertical: Platform.OS === "ios" ? 12 : 10,
+                    marginBottom: 8,
+                  }}
+                >
+                  <Ionicons name="search-outline" size={18} color={colors.mutedForeground} />
+                  <TextInput
+                    value={searchQuery}
+                    onChangeText={setSearchQuery}
+                    placeholder="Pesquisar equipa ou liga..."
+                    placeholderTextColor={colors.mutedForeground}
+                    style={{
+                      flex: 1,
+                      fontSize: 16,
+                      fontFamily: "Inter_500Medium",
+                      color: colors.foreground,
+                      paddingVertical: 0,
+                    }}
+                  />
+                  {searchQuery ? (
+                    <Pressable onPress={() => setSearchQuery("")} hitSlop={8}>
+                      <Ionicons name="close-circle" size={18} color={colors.mutedForeground} />
+                    </Pressable>
+                  ) : null}
+                </View>
+
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 4 }}>
+                  {SPORTS.map((sp) => {
+                    const active = selectedSport === sp.key;
+                    const col = SPORT_COLORS[sp.key] ?? colors.primary;
+                    return (
+                      <Pressable
+                        key={sp.key}
+                        style={[s.sportChip, { backgroundColor: active ? col : colors.muted, borderColor: active ? col : colors.border }]}
+                        onPress={() => {
+                          setSelectedSport(active ? "all" : sp.key);
+                          setSelectedLeague(null);
+                          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                        }}
+                      >
+                        <Text style={{ fontSize: 12, fontFamily: "Inter_600SemiBold", color: active ? "#ffffff" : colors.foreground }}>
+                          {sp.label}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
+                </ScrollView>
+              </View>
+
               <LeagueChips matches={sportFiltered} selected={selectedLeague} onSelect={setSelectedLeague} />
+
+              {featuredMatches.length > 0 ? (
+                <View style={{ paddingHorizontal: 14, paddingTop: 6, paddingBottom: 6, gap: 10 }}>
+                  {featuredMatches.map((match) => (
+                    <UpcomingCard key={`featured-${match.id}`} match={match} />
+                  ))}
+                </View>
+              ) : null}
+
+              <PopularBanners matches={filtered} />
             </>
           }
           renderItem={({ item }) => {
