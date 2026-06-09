@@ -9349,6 +9349,58 @@ export default function Home() {
 
                   {/* ─── League filter chips (grandes ligas com logos oficiais) ── */}
                   {filteredUpcoming.length > 0 && (() => {
+                    if (selectedSport === "tennis") {
+                      const tennisMatches = filteredUpcoming.filter(m => (m.sport ?? "football") === "tennis");
+                      const seen = new Set<string>();
+                      const chips = tennisMatches
+                        .map(m => tournamentLabel(m.league ?? ""))
+                        .filter(Boolean)
+                        .filter((t) => { if (seen.has(t)) return false; seen.add(t); return true; })
+                        .slice(0, 24);
+
+                      const selectedLabel = selectedLeague ? tournamentLabel(selectedLeague) : "";
+                      if (selectedLabel && !seen.has(selectedLabel)) {
+                        chips.push(selectedLabel);
+                        seen.add(selectedLabel);
+                      }
+                      if (chips.length < 2 && !selectedLabel) return null;
+
+                      const chipMeta = (label: string): { label: string; flag: string; main: string; sub: string } => {
+                        const parts = label.split(",").map(x => x.trim()).filter(Boolean);
+                        const main = parts[0] ?? label;
+                        const sub = parts.length > 1 ? parts.slice(1).join(", ") : "";
+                        const flag = sub ? (COUNTRY_FLAGS[sub.toLowerCase()] ?? "") : "";
+                        return { label, flag, main, sub };
+                      };
+
+                      return (
+                        <div className="overflow-x-auto flex gap-2.5 pb-3 mb-5 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
+                          <button
+                            {...makeTap(() => setSelectedLeague(null))}
+                            className={`flex items-center gap-2 px-3.5 py-2.5 rounded-xl border whitespace-nowrap text-sm font-semibold transition-all flex-shrink-0 ${!selectedLabel ? "border-amber-500 bg-amber-500/10 text-white shadow-[0_0_10px_rgba(245,158,11,0.18)]" : "border-zinc-700 bg-zinc-900/60 text-zinc-300 hover:border-zinc-500 hover:text-white"}`}
+                          >
+                            <span className="shrink-0">🎾</span>
+                            <span>Todas</span>
+                          </button>
+                          {chips.map((raw, i) => {
+                            const { label, flag, main, sub } = chipMeta(raw);
+                            const active = selectedLabel === label;
+                            return (
+                              <button
+                                key={i}
+                                {...makeTap(() => setSelectedLeague(active ? null : label))}
+                                className={`flex items-center gap-2 px-3.5 py-2.5 rounded-xl border whitespace-nowrap text-sm font-semibold transition-all flex-shrink-0 ${active ? "border-amber-500 bg-amber-500/10 text-white shadow-[0_0_10px_rgba(245,158,11,0.18)]" : "border-zinc-700 bg-zinc-900/60 text-zinc-300 hover:border-zinc-500 hover:text-white"}`}
+                                title={sub ? `${main}, ${sub}` : main}
+                              >
+                                <span className="shrink-0">🎾</span>
+                                {flag && <span className="shrink-0">{flag}</span>}
+                                <span className="max-w-[180px] truncate">{main}</span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      );
+                    }
                     const ML = [
                       { p: ["champions league","liga dos campeões","liga campeões"], label: "Champions", logo: "https://media.api-sports.io/football/leagues/2.png", color: "#001489" },
                       { p: ["europa league","liga europa"], label: "Europa League", logo: "https://media.api-sports.io/football/leagues/3.png", color: "#F77F00" },
