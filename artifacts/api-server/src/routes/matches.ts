@@ -2179,16 +2179,6 @@ function isTennisExcludedName(name: string): boolean {
   );
 }
 
-function tennisTournamentSearchText(tournament: string | SAPIV2TournObj | undefined): string {
-  if (typeof tournament === "string") return tournament;
-  if (!tournament || typeof tournament !== "object") return "";
-  return [
-    tournament.name,
-    tournament.category?.name,
-    tournament.category?.country?.name,
-  ].filter((v): v is string => !!v && String(v).trim().length > 0).join(" ");
-}
-
 function isTennisFinishedStatusText(status: string | undefined): boolean {
   const s = String(status ?? "").toLowerCase();
   return (
@@ -8334,7 +8324,6 @@ function buildTennisLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
       v2Set2Odds = v2BaseExtras.set2;
     }
 
-    const v2Set3Games  = sets.length >= 3 ? (sets[2] ?? ([0, 0] as [number, number])) : ([0, 0] as [number, number]);
     let v2Set3Odds: { home: number; away: number };
     if (doneSets === 2 && sets.length >= 3) {
       const pS3 = v2SetWinProb(v2Set3Games[0], v2Set3Games[1], v2HomeP);
