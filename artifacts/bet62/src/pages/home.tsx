@@ -2223,6 +2223,8 @@ export default function Home() {
   const [v2Incidents, setV2Incidents] = useState<V2Incident[] | null>(null);
   const [v2IncidentsLoading, setV2IncidentsLoading] = useState(false);
   const [v2IncidentsFetchedAt, setV2IncidentsFetchedAt] = useState(0);
+  const v2StatsCacheRef = useRef<Record<string, V2StatsGroup[]>>({});
+  const v2IncidentsCacheRef = useRef<Record<string, V2Incident[]>>({});
   const [liveAdvancedTab, setLiveAdvancedTab] = useState<"all" | "goals" | "corners" | "cards">("all");
   const [livePollTick, setLivePollTick] = useState(0);
   const [standings, setStandings] = useState<StandingRow[] | null>(null);
@@ -2650,19 +2652,22 @@ export default function Home() {
     const wantsStatsData = matchViewTab === "stats" || (matchViewTab === "live" && !!expandedMatch?.isLive);
     if (!wantsStatsData || !expandedMatch) return;
     if (v2StatsLoading) return;
-    if (v2StatsGroups !== null && Date.now() - v2StatsFetchedAt < 6000) return;
+    if (v2StatsGroups !== null && Date.now() - v2StatsFetchedAt < 3000) return;
     const rawId = String(expandedMatch.id).replace(/^[a-z]+-v2-/, "");
     const sport = expandedMatch.sport ?? "football";
+    const cacheKey = `${sport}:${rawId}`;
     if (!rawId) return;
     setV2StatsLoading(true);
     fetch(`/api/matches/v2-statistics?sport=${sport}&matchId=${rawId}`)
       .then(r => r.ok ? r.json() : null)
       .then(d => {
-        setV2StatsGroups(d ? extractV2StatsGroups(d as any) : []);
+        const nextGroups = d ? extractV2StatsGroups(d as any) : [];
+        if (nextGroups.length > 0) v2StatsCacheRef.current[cacheKey] = nextGroups;
+        setV2StatsGroups(nextGroups.length > 0 ? nextGroups : (v2StatsCacheRef.current[cacheKey] ?? []));
         setV2StatsFetchedAt(Date.now());
       })
       .catch(() => {
-        setV2StatsGroups([]);
+        setV2StatsGroups(v2StatsCacheRef.current[cacheKey] ?? []);
         setV2StatsFetchedAt(Date.now());
       })
       .finally(() => setV2StatsLoading(false));
@@ -2672,19 +2677,22 @@ export default function Home() {
     const wantsIncidents = matchViewTab === "live" && !!expandedMatch?.isLive;
     if (!wantsIncidents || !expandedMatch) return;
     if (v2IncidentsLoading) return;
-    if (v2Incidents !== null && Date.now() - v2IncidentsFetchedAt < 6000) return;
+    if (v2Incidents !== null && Date.now() - v2IncidentsFetchedAt < 3000) return;
     const rawId = String(expandedMatch.id).replace(/^[a-z]+-v2-/, "");
     const sport = expandedMatch.sport ?? "football";
+    const cacheKey = `${sport}:${rawId}`;
     if (!rawId) return;
     setV2IncidentsLoading(true);
     fetch(`/api/matches/v2-incidents?sport=${sport}&matchId=${rawId}`)
       .then(r => r.ok ? r.json() : null)
       .then(d => {
-        setV2Incidents(d ? extractV2Incidents(d as any) : []);
+        const nextIncidents = d ? extractV2Incidents(d as any) : [];
+        if (nextIncidents.length > 0) v2IncidentsCacheRef.current[cacheKey] = nextIncidents;
+        setV2Incidents(nextIncidents.length > 0 ? nextIncidents : (v2IncidentsCacheRef.current[cacheKey] ?? []));
         setV2IncidentsFetchedAt(Date.now());
       })
       .catch(() => {
-        setV2Incidents([]);
+        setV2Incidents(v2IncidentsCacheRef.current[cacheKey] ?? []);
         setV2IncidentsFetchedAt(Date.now());
       })
       .finally(() => setV2IncidentsLoading(false));
@@ -2692,7 +2700,7 @@ export default function Home() {
 
   useEffect(() => {
     if (matchViewTab !== "live" || !expandedMatch?.isLive) return;
-    const tid = setInterval(() => setLivePollTick(t => t + 1), 6000);
+    const tid = setInterval(() => setLivePollTick(t => t + 1), 3000);
     return () => clearInterval(tid);
   }, [matchViewTab, expandedMatch?.id, !!expandedMatch?.isLive]);
 
@@ -3001,19 +3009,41 @@ export default function Home() {
     }
     emptyLiveStreakRef.current = 0;
     const newMins: Record<string, number> = {};
-    // Duplicate 'now' declaration removed
-    for (const m of matches) {
+    const normalizedMatches = matches.map((m) => {
       const id = String(m.id);
-      newMins[id] = m.minute;
-      // Only reset the clock when the API minute value actually advances
-      if (m.minute !== apiMinutesRef.current[id]) {
+      const prevMinute = apiMinutesRef.current[id];
+      const nextMinuteRaw = Number.isFinite(Number(m.minute ?? 0)) ? Number(m.minute ?? 0) : 0;
+      const status = String(m.status ?? "").trim().toLowerCase();
+      const isFootball = !m.sport || m.sport === "football";
+      const canLegitimatelyRephase =
+        status === "ht" ||
+        status.includes("half time") ||
+        status === "et" ||
+        status.includes("extra") ||
+        status.includes("pen");
+      const normalizedMinute =
+        typeof prevMinute === "number" &&
+        isFootball &&
+        nextMinuteRaw > 0 &&
+        prevMinute > 0 &&
+        nextMinuteRaw + 1 < prevMinute &&
+        !canLegitimatelyRephase
+          ? prevMinute
+          : nextMinuteRaw;
+      newMins[id] = normalizedMinute;
+      if (
+        typeof prevMinute !== "number" ||
+        normalizedMinute > prevMinute ||
+        (normalizedMinute < prevMinute && canLegitimatelyRephase)
+      ) {
         minuteChangedAtRef.current[id] = now;
       }
-    }
+      return normalizedMinute === nextMinuteRaw ? m : { ...m, minute: normalizedMinute };
+    });
     apiMinutesRef.current = newMins;
     liveDataFetchedAt.current = now;
     // Update last-seen timestamps for every match in this response
-    for (const m of matches) matchLastSeenRef.current[String(m.id)] = now;
+    for (const m of normalizedMatches) matchLastSeenRef.current[String(m.id)] = now;
 
     setLiveMatches(prev => {
       const newPrev: Record<string, Odds> = {};
@@ -3026,8 +3056,7 @@ export default function Home() {
       prevLiveOdds.current = newPrev;
       prevLiveMarkets.current = newPrevMkts;
 
-      const freshIds = new Set(matches.map(m => String(m.id)));
-
+      const freshIds = new Set(normalizedMatches.map(m => String(m.id)));
       // Update consecutive miss counts for every match in the previous state
       for (const m of prev) {
         const id = String(m.id);
@@ -3037,7 +3066,6 @@ export default function Home() {
           matchMissCountRef.current[id] = (matchMissCountRef.current[id] ?? 0) + 1;
         }
       }
-
       const isFinishedStatus = (st: string | undefined) => {
         const s = (st ?? "").trim().toLowerCase();
         if (!s) return false;
@@ -3073,9 +3101,9 @@ export default function Home() {
         })
         .map(m => ({ ...m, marketSuspension: undefined, _suspensionReason: undefined, suspensionReason: undefined }));
 
-      // Live matches (startsIn === undefined) always show.
-      // "Em Breve" entries show when there are real odds OR computed odds (home > 0 and away > 0).
-      const freshMatches = matches
+      const freshMatches = normalizedMatches
+        // Live matches (startsIn === undefined) always show.
+        // "Em Breve" entries show when there are real odds OR computed odds (home > 0 and away > 0).
         .filter(m => m.startsIn === undefined || m.hasRealOdds !== false || (m.odds.home > 0 && m.odds.away > 0))
         .map(m => ({ ...m, isLive: true }));
 
@@ -3175,8 +3203,22 @@ export default function Home() {
               apiMinutesRef.current[String(data.matchId)] = data.delta.minute;
             }
             // Sub-second delta — patch just the changed match
+            const matchId = String(data.matchId);
+            const now = Date.now();
+            liveDataFetchedAt.current = now;
+            matchLastSeenRef.current[matchId] = now;
+            const deltaMinuteRaw = data.delta?.minute;
+            if (typeof deltaMinuteRaw === "number" && Number.isFinite(deltaMinuteRaw)) {
+              const prevMinute = apiMinutesRef.current[matchId];
+              if (typeof prevMinute !== "number" || deltaMinuteRaw >= prevMinute) {
+                apiMinutesRef.current[matchId] = deltaMinuteRaw;
+                if (typeof prevMinute !== "number" || deltaMinuteRaw > prevMinute) {
+                  minuteChangedAtRef.current[matchId] = now;
+                }
+              }
+            }
             setLiveMatches(prev => prev.map(m =>
-              String(m.id) === String(data.matchId) ? { ...m, ...(data.delta ?? {}), isLive: true } : m
+              String(m.id) === matchId ? { ...m, ...(data.delta ?? {}), isLive: true } : m
             ));
           } else if (Array.isArray(data.matches)) {
             // Full snapshot from server broadcast
