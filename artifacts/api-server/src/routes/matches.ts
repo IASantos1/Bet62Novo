@@ -5506,21 +5506,52 @@ async function getScheduleV2(sport: SportKey, date: string): Promise<SAPIV2Event
   const cached = scheduleV2Cache.get(cacheKey);
   if (cached && Date.now() - cached.fetchedAt < SCHEDULE_V2_TTL) return cached.events;
   const domain = WS_DOMAINS[sport]; // "v2.football.sportsapipro.com" etc.
+
+  /** Try /api/today as fallback for today's date — returns flat format at top-level `events`. */
+  async function tryTodayFallback(): Promise<SAPIV2Event[]> {
+    const todayStr = new Date().toISOString().slice(0, 10);
+    if (date !== todayStr) return cached?.events ?? [];
+    try {
+      const r = await fetch(`https://${domain}/api/today`, {
+        signal: AbortSignal.timeout(9000),
+        headers: sapiHeaders(),
+      });
+      if (!r.ok) return cached?.events ?? [];
+      const d = (await r.json()) as { success?: boolean; events?: SAPIV2Event[] };
+      if (d.success === false || !d.events?.length) return cached?.events ?? [];
+      // Cache and return today's flat-format events
+      scheduleV2Cache.set(cacheKey, { events: d.events, fetchedAt: Date.now() });
+      return d.events;
+    } catch {
+      return cached?.events ?? [];
+    }
+  }
+
   try {
     const resp = await fetch(`https://${domain}/api/schedule/${date}`, {
       signal: AbortSignal.timeout(9000),
       headers: sapiHeaders(),
     });
-    if (!resp.ok) return cached?.events ?? [];
-    const data = (await resp.json()) as { success?: boolean; data?: { events?: SAPIV2Event[] } };
-    // If the API signals failure (success: false), do NOT overwrite good cached data with empty.
-    // Return stale cache if available so football/other sports don't vanish during transient outages.
-    if (data.success === false) return cached?.events ?? [];
-    const events = data.data?.events ?? [];
-    scheduleV2Cache.set(cacheKey, { events, fetchedAt: Date.now() });
-    return events;
+    if (!resp.ok) return tryTodayFallback();
+    const data = (await resp.json()) as {
+      success?: boolean;
+      data?: { events?: SAPIV2Event[] };
+      events?: SAPIV2Event[];  // /api/today and /api/live return events at top level
+    };
+    // If the API signals failure (success: false), try /api/today for today's date,
+    // then fall back to stale cache. Never overwrite good cached data with an empty response.
+    if (data.success === false) return tryTodayFallback();
+    // Support both response shapes: { data: { events } } and { events } (flat/today format)
+    const events = data.data?.events ?? data.events ?? [];
+    if (events.length > 0) {
+      scheduleV2Cache.set(cacheKey, { events, fetchedAt: Date.now() });
+    } else if (!cached) {
+      // Cache empty result only if there was no previous data (avoids wiping good stale data)
+      scheduleV2Cache.set(cacheKey, { events: [], fetchedAt: Date.now() });
+    }
+    return events.length > 0 ? events : (cached?.events ?? []);
   } catch {
-    return cached?.events ?? [];
+    return tryTodayFallback();
   }
 }
 
