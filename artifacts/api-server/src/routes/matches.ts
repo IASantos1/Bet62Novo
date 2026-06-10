@@ -8254,6 +8254,9 @@ function buildTennisLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
     // ATP/WTA/Challenger/WTA-125 + ITF singles; excludes doubles/wheelchair/UTR/juniors
     // isTennisElite also checks player names for " / " (doubles pair indicator)
     if (!isTennisElite(ev)) continue;
+    // Only show ATP/WTA/Grand Slam — exclude Challengers, ITF, WTA-125
+    const v2LeagueLabel = tennisTournLabel(ev.tournament);
+    if (!v2LeagueLabel.startsWith("ATP") && !v2LeagueLabel.startsWith("WTA") && !v2LeagueLabel.startsWith("Grand Slam")) continue;
     // finalResultOnly=true means the API is only showing the final score → match ended
     if (ev.finalResultOnly === true) continue;
     // Also deduplicate by player pair (API can return same match with different IDs).
