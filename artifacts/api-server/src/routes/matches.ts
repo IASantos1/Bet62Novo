@@ -9519,12 +9519,15 @@ async function buildTennisLiveV1(): Promise<LiveMatchState[]> {
         if (v === 15) return "15";
         return "0";
       };
-      const currentPoints: [string, string] = gameStage
+      // Only expose currentPoints when a game is actively in progress.
+      // Between games/sets the API has no live "Game" stage — hide PTS rather than show 0/0.
+      const currentPoints: [string, string] | undefined = gameStage
         ? [v1Point(gameStage.homeCompetitorScore), v1Point(gameStage.awayCompetitorScore)]
-        : ["0", "0"];
-      // Build sets array: completed + current set game scores
-      const sets: Array<[number, number]> = setStages.length > 0
-        ? setStages.map(s => [s.homeCompetitorScore, s.awayCompetitorScore] as [number, number])
+        : undefined;
+      // Build sets array — filter out sets the API hasn't started yet (score = -1).
+      const validSetStages = setStages.filter(s => s.homeCompetitorScore >= 0 && s.awayCompetitorScore >= 0);
+      const sets: Array<[number, number]> = validSetStages.length > 0
+        ? validSetStages.map(s => [s.homeCompetitorScore, s.awayCompetitorScore] as [number, number])
         : [[homeScore, awayScore]];
       // Serving from inPossession; fall back to V2 serving cache
       const homeIn = !!g.homeCompetitor?.inPossession;
