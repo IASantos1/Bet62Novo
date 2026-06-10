@@ -2458,15 +2458,42 @@ function enrichTennisV1League(compName: string): string {
   if (!compName) return "Tennis";
   const clean = cleanLeagueName(compName);
   const norm = clean.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
-  // Direct match
+  // Direct match in V2 label cache
   const direct = _tennisV2LeagueLabelByCompName.get(norm);
   if (direct) return direct;
-  // Partial match: V2 base name may be shorter than V1 display name (e.g. "city, country")
+  // Partial match: V2 base name may be shorter than V1 display name
   for (const [k, v] of _tennisV2LeagueLabelByCompName) {
     if (norm.includes(k) || k.includes(norm)) return v;
     // Also try key without leading single-char prefix (e.g. "s-hertogenbosch" → "hertogenbosch")
     const kStripped = k.replace(/^[a-z]-/, "");
     if (kStripped !== k && (norm.includes(kStripped) || kStripped.includes(norm))) return v;
+  }
+  // City-based fallback: V1 comp names are "City - Round of XX Round..."
+  // Extract city part (before the first " - ") and look up in ATP/WTA tier maps.
+  // This fires when the V2 today/live feed is empty or missing the event.
+  const cityRaw = norm.split(/\s+-\s+/)[0]?.trim() ?? "";
+  if (cityRaw) {
+    const toTierLabel = (cat: string, rank: number, city: string): string => {
+      const display = city.split(/\s+/).map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(" ");
+      if (rank === 1) return `Grand Slam · ${display}`;
+      if (rank === 3) return `${cat} 1000 · ${display}`;
+      if (rank === 4) return `${cat} 500 · ${display}`;
+      if (rank === 5) return `${cat} 250 · ${display}`;
+      return `${cat} · ${display}`;
+    };
+    const atpRank = ATP_CITY_TIER[cityRaw];
+    if (atpRank !== undefined) return toTierLabel("ATP", atpRank, cityRaw);
+    const wtaRank = WTA_CITY_TIER[cityRaw];
+    if (wtaRank !== undefined) return toTierLabel("WTA", wtaRank, cityRaw);
+    // Also try without dashes (e.g. "s-hertogenbosch" → "s hertogenbosch" / "hertogenbosch")
+    const cityNoDash = cityRaw.replace(/-/g, " ");
+    const cityStripped = cityNoDash.replace(/^[a-z] /, "");
+    for (const key of [cityNoDash, cityStripped]) {
+      const ar = ATP_CITY_TIER[key];
+      if (ar !== undefined) return toTierLabel("ATP", ar, key);
+      const wr = WTA_CITY_TIER[key];
+      if (wr !== undefined) return toTierLabel("WTA", wr, key);
+    }
   }
   return clean || "Tennis";
 }
