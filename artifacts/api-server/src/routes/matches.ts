@@ -2450,9 +2450,12 @@ function enrichTennisV1League(compName: string): string {
   // Direct match
   const direct = _tennisV2LeagueLabelByCompName.get(norm);
   if (direct) return direct;
-  // Partial match: V2 base name may be shorter than V1 display name (city, country)
+  // Partial match: V2 base name may be shorter than V1 display name (e.g. "city, country")
   for (const [k, v] of _tennisV2LeagueLabelByCompName) {
     if (norm.includes(k) || k.includes(norm)) return v;
+    // Also try key without leading single-char prefix (e.g. "s-hertogenbosch" → "hertogenbosch")
+    const kStripped = k.replace(/^[a-z]-/, "");
+    if (kStripped !== k && (norm.includes(kStripped) || kStripped.includes(norm))) return v;
   }
   return clean || "Tennis";
 }
@@ -9280,7 +9283,6 @@ async function buildTennisLiveV1(): Promise<LiveMatchState[]> {
     const games = await getTennisLiveV1();
     refreshTennisServing(games.map(g => g.id).filter(Boolean) as number[]);
     const primary: Array<{ r: number; m: LiveMatchState }> = [];
-    const itf: Array<{ r: number; m: LiveMatchState }> = [];
     for (const g of games) {
       if (g.statusGroup === 2 || isTennisV1GameFinished(g)) continue;
       const home = g.homeCompetitor?.name?.trim() ?? "";
@@ -9289,6 +9291,12 @@ async function buildTennisLiveV1(): Promise<LiveMatchState[]> {
       if (home.includes("/") || away.includes("/")) continue;
       const compName = [g.competitionDisplayName, g.stageName, g.roundName].filter(Boolean).join(" ");
       if (/double|mixed/i.test(compName)) continue;
+      // Only show ATP/WTA main-tour live matches — same filter as upcoming
+      const enrichedLiveLeague = enrichTennisV1League(compName);
+      const isMainTourLive = enrichedLiveLeague.startsWith("ATP") ||
+                             enrichedLiveLeague.startsWith("WTA") ||
+                             enrichedLiveLeague.startsWith("Grand Slam");
+      if (!isMainTourLive) continue;
       const tier = tennisTierRank(compName);
       let homeScore = Math.max(0, g.homeCompetitor?.score ?? 0);
       let awayScore = Math.max(0, g.awayCompetitor?.score ?? 0);
@@ -9311,7 +9319,7 @@ async function buildTennisLiveV1(): Promise<LiveMatchState[]> {
       const item: LiveMatchState = {
         id: `tennis-v2-${g.id}`,
         home, away,
-        league: enrichTennisV1League(compName),
+        league: enrichedLiveLeague,
         country: "",
         sport: "tennis" as const,
         homeScore, awayScore,
@@ -9323,16 +9331,11 @@ async function buildTennisLiveV1(): Promise<LiveMatchState[]> {
         events: [],
         _liveExtra: { sets: [[homeScore, awayScore]], currentPoints: ["0", "0"], ...(serving ? { serving } : {}) },
       };
-      const rank = tier === 999 ? 6 : tier;
-      if (tier === 7) itf.push({ r: rank, m: item });
-      else primary.push({ r: rank, m: item });
+      const rank = tier === 999 ? 5 : tier; // unknown-tier ATP/WTA → treat as 250 level
+      primary.push({ r: rank, m: item });
     }
     primary.sort((a, b) => a.r - b.r || a.m.league.localeCompare(b.m.league) || a.m.home.localeCompare(b.m.home));
-    itf.sort((a, b) => a.m.league.localeCompare(b.m.league) || a.m.home.localeCompare(b.m.home));
-    return [
-      ...primary.map(x => x.m),
-      ...itf.map(x => x.m),
-    ];
+    return primary.map(x => x.m);
   } catch {
     return [];
   }
@@ -9371,7 +9374,6 @@ async function buildTennisUpcoming(): Promise<UpcomingMatch[]> {
     const now = Date.now();
     const games = await getTennisAllV1();
     const primary: Array<{ r: number; m: UpcomingMatch }> = [];
-    const itf: Array<{ r: number; m: UpcomingMatch }> = [];
     const seen = new Set<string>();
 
     for (const g of games) {
@@ -9401,16 +9403,24 @@ async function buildTennisUpcoming(): Promise<UpcomingMatch[]> {
       const [compH, compA] = probsToDecimalOdds([pHome, 1 - pHome], 1.06);
       const tennisExtras = computeTennisExtras(pHome);
 
+      // Only include main-tour events (ATP/WTA/Grand Slam).
+      // Challengers and ITF are excluded — they clutter Ao Vivo and lack real odds.
+      const enrichedLeague = enrichTennisV1League(compName);
+      const isMainTour = enrichedLeague.startsWith("ATP") ||
+                         enrichedLeague.startsWith("WTA") ||
+                         enrichedLeague.startsWith("Grand Slam");
+      if (!isMainTour) continue;
+
       const item: UpcomingMatch = {
         id: `tennis-v2-${g.id}`,
         home,
         away,
-        league: enrichTennisV1League(compName),
+        league: enrichedLeague,
         country: "",
         date,
         time,
         sport: "tennis" as const,
-        hasRealOdds: false,
+        hasRealOdds: true,  // ATP/WTA matches always show markets (computed odds are sufficient)
         odds: { home: compH!, draw: 0, away: compA! },
         providerStatusGroup: g.statusGroup,
         providerStatusText: g.statusText ?? "",
@@ -9425,9 +9435,8 @@ async function buildTennisUpcoming(): Promise<UpcomingMatch[]> {
           tennisExtra: tennisExtras,
         } as unknown as AdvancedMarkets,
       };
-      const rank = tier === 999 ? 6 : tier;
-      if (tier === 7) itf.push({ r: rank, m: item });
-      else primary.push({ r: rank, m: item });
+      const rank = tier === 999 ? 5 : tier; // unknown-tier ATP/WTA → treat as 250 level
+      primary.push({ r: rank, m: item });
     }
 
     const byTime = (a: UpcomingMatch, b: UpcomingMatch) => {
@@ -9436,11 +9445,7 @@ async function buildTennisUpcoming(): Promise<UpcomingMatch[]> {
       return ta - tb;
     };
     primary.sort((a, b) => a.r - b.r || byTime(a.m, b.m));
-    itf.sort((a, b) => byTime(a.m, b.m));
-    return [
-      ...primary.map(x => x.m),
-      ...itf.map(x => x.m),
-    ];
+    return primary.map(x => x.m);
   } catch {
     return [];
   }
@@ -9668,16 +9673,29 @@ function buildTennisUpcomingFromOddsEntries(odds: TennisOddsEntry[]): UpcomingMa
   return out;
 }
 
+function _normTennisName(n: string): string {
+  return n.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/\s+/g, " ").trim();
+}
+
 function mergeTennisUpcomingSources(base: UpcomingMatch[], oddsBased: UpcomingMatch[]): UpcomingMatch[] {
   const merged = new Map<string, UpcomingMatch>();
-  for (const match of base) merged.set(String(match.id), match);
-  for (const match of oddsBased) {
-    const key = String(match.id);
-    const prev = merged.get(key);
-    if (!prev || (!!match.hasRealOdds && !prev.hasRealOdds)) {
-      merged.set(key, match);
-    }
+
+  // Build player-pair index from oddsBased (real odds — highest priority).
+  // Keys are sorted so "A|B" and "B|A" both match.
+  const oddsPlayerIndex = new Map<string, UpcomingMatch>();
+  for (const m of oddsBased) {
+    const pk = [_normTennisName(m.home), _normTennisName(m.away)].sort().join("|");
+    oddsPlayerIndex.set(pk, m);
+    merged.set(String(m.id), m);
   }
+
+  // Add V1 matches that have no V2 odds counterpart (same players on same day).
+  for (const m of base) {
+    const pk = [_normTennisName(m.home), _normTennisName(m.away)].sort().join("|");
+    if (oddsPlayerIndex.has(pk)) continue; // V2 odds version exists — skip V1 duplicate
+    merged.set(String(m.id), m);
+  }
+
   return [...merged.values()];
 }
 

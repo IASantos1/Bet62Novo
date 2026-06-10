@@ -1,3 +1,4 @@
 - [Football live gate](football-live-gate.md) — 5-min new-event gate was too aggressive; must use 120 min to allow late-joining fallback leagues
 - [V2 live API plain-string fields](v2-live-api-format.md) — SportsAPI Pro v2 /live returns tournament/homeTeam/awayTeam as plain strings (not objects); v2TournCountry returns "" for these
 - [Halftime status variant](halftime-status.md) — some events use "Halftime" (no space) not "HT"/"half time"; must include in isFootballV2LiveStatus
+- [Tennis ATP/WTA filter](tennis-atp-wta-filter.md) — filter Challengers/ITF from live+upcoming; dedup V1/V2 by player-pair; hasRealOdds=true for all ATP/WTA; frontend gates markets on tennisExtra too

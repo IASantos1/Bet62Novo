@@ -5341,7 +5341,9 @@ export default function Home() {
 
     const m = match.markets;
 
-    if (!match.hasRealOdds) {
+    // Show markets when hasRealOdds=true, OR when tennis has valid computed tennisExtra markets
+    const hasTennisMarkets = match.sport === "tennis" && !!(m?.tennisExtra?.firstSet?.home);
+    if (!match.hasRealOdds && !hasTennisMarkets) {
       return (
         <div className="mt-4 text-center py-10 text-zinc-500">
           <div className="text-3xl mb-3">📊</div>
