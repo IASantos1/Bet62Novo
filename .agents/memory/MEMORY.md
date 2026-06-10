@@ -2,3 +2,4 @@
 - [V2 live API plain-string fields](v2-live-api-format.md) — SportsAPI Pro v2 /live returns tournament/homeTeam/awayTeam as plain strings (not objects); v2TournCountry returns "" for these
 - [Halftime status variant](halftime-status.md) — some events use "Halftime" (no space) not "HT"/"half time"; must include in isFootballV2LiveStatus
 - [Tennis ATP/WTA filter](tennis-atp-wta-filter.md) — filter Challengers/ITF from live+upcoming; dedup V1/V2 by player-pair; hasRealOdds=true for all ATP/WTA; frontend gates markets on tennisExtra too
+- [Tennis V1 statusGroup mapping](tennis-v1-statusgroup.md) — V1 tennis /games/current: 2=Scheduled, 3=Live/in-play ("Set 1"/"Set 3"), 4=Finished/Cancelled; isTennisV1GameFinished must check statusGroup===4 (not 3)

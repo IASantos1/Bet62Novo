@@ -2207,8 +2207,13 @@ function isTennisFinishedStatusText(status: string | undefined): boolean {
 }
 
 function isTennisV1GameFinished(game: Pick<V1TennisGame, "statusGroup" | "statusText" | "homeCompetitor" | "awayCompetitor">): boolean {
-  if (game.statusGroup === 3) return true;
+  // V1 tennis statusGroup mapping (confirmed from live API data):
+  //   2 = Scheduled (not started)
+  //   3 = In-play / Live ("Set 1", "Set 2", "Set 3" …)
+  //   4 = Finished / Cancelled / Interrupted
+  if (game.statusGroup === 4) return true;   // finished/cancelled
   if (isTennisFinishedStatusText(game.statusText)) return true;
+  // isWinner is only set once a match truly ends
   return !!game.homeCompetitor?.isWinner || !!game.awayCompetitor?.isWinner;
 }
 
@@ -2765,7 +2770,7 @@ interface V1TennisGame {
   competitionId?: number;
   competitionDisplayName?: string;
   startTime: string;
-  statusGroup?: number; // 1=live, 2=scheduled, 3=finished
+  statusGroup?: number; // 2=scheduled, 3=live/in-play, 4=finished/cancelled
   statusText?: string;
   homeCompetitor?: { id?: number; name?: string; score?: number; isWinner?: boolean };
   awayCompetitor?: { id?: number; name?: string; score?: number; isWinner?: boolean };
