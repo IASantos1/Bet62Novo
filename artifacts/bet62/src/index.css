@@ -392,6 +392,17 @@ html.light-mode textarea::placeholder { color: #71717a !important; }
 html.light-mode ::-webkit-scrollbar-thumb { background-color: #c7c7cc; }
 html.light-mode ::-webkit-scrollbar-track { background-color: #f0f0f3; }
 
+/* Bet slip card items — visible on light background */
+html.light-mode .bet-slip-card {
+  background: rgba(0,0,0,0.055) !important;
+  border-color: rgba(0,0,0,0.10) !important;
+}
+
+/* Bet slip header gradient → neutral in light mode */
+html.light-mode .bg-zinc-900[style*="linear-gradient"] {
+  background: #e8e8ec !important;
+}
+
 /* Live odds change flash animations — button background glow */
 @keyframes oddsUp {
   0%   { background-color: rgba(34,197,94,0.35); box-shadow: 0 0 0 1.5px rgba(34,197,94,0.6); }
