@@ -1,0 +1,191 @@
+> ## Documentation Index
+> Fetch the complete documentation index at: https://docs.sportsapipro.com/llms.txt
+> Use this file to discover all available pages before exploring further.
+
+# Error Handling
+
+> HTTP status codes, error formats, and retry strategies
+
+<Note>
+  Error codes and handling are consistent across all 25+ sports APIs and all three API versions (V1, V2, V3).
+</Note>
+
+## Error Response Format
+
+```json theme={null}
+{
+  "success": false,
+  "error": {
+    "code": "ERROR_CODE",
+    "message": "Human-readable error description"
+  }
+}
+```
+
+## HTTP Status Codes
+
+| Status | Description                                    |
+| ------ | ---------------------------------------------- |
+| `200`  | Success                                        |
+| `400`  | Bad Request — invalid parameters               |
+| `401`  | Unauthorized — invalid or missing API key      |
+| `403`  | Forbidden — access denied or account suspended |
+| `404`  | Not Found — resource doesn't exist             |
+| `429`  | Too Many Requests — daily rate limit exceeded  |
+| `500`  | Internal Server Error                          |
+| `503`  | Service Unavailable — temporary outage         |
+
+## Common Errors
+
+### 401 — Missing or Invalid API Key
+
+```json theme={null}
+{
+  "success": false,
+  "error": {
+    "code": "UNAUTHORIZED",
+    "message": "Valid x-api-key header or Bearer token required"
+  }
+}
+```
+
+**Fix:** Include the `x-api-key` header in every request:
+
+```bash theme={null}
+curl -H "x-api-key: YOUR_API_KEY" \
+  "https://v2.football.sportsapipro.com/api/live"
+```
+
+### 429 — Rate Limit Exceeded
+
+```json theme={null}
+{
+  "success": false,
+  "error": {
+    "code": "RATE_LIMIT_EXCEEDED",
+    "message": "Daily quota exceeded. Resets at midnight UTC."
+  }
+}
+```
+
+**Fix:** Wait until reset, implement caching, or upgrade your plan. See [Rate Limits](/rate-limits).
+
+### 404 — Resource Not Found
+
+Returned when a match ID, team ID, or tournament ID doesn't exist for that sport.
+
+**Fix:** Verify the ID is correct and belongs to the sport you're querying. Use `/api/search` to find valid IDs.
+
+## Error Handling Examples
+
+<CodeGroup>
+  ```javascript JavaScript theme={null}
+  const SPORTS = {
+    football: 'https://v2.football.sportsapipro.com',
+    basketball: 'https://v2.basketball.sportsapipro.com',
+    tennis: 'https://v2.tennis.sportsapipro.com',
+    baseball: 'https://v2.baseball.sportsapipro.com',
+  };
+
+  async function fetchSport(sport, endpoint) {
+    const response = await fetch(`${SPORTS[sport]}${endpoint}`, {
+      headers: { 'x-api-key': process.env.SPORTSAPI_KEY }
+    });
+    
+    if (!response.ok) {
+      const data = await response.json().catch(() => ({}));
+      const code = data?.error?.code || response.status;
+      const msg = data?.error?.message || response.statusText;
+      
+      if (response.status === 429) {
+        const reset = response.headers.get('X-RateLimit-Reset');
+        throw new Error(`Rate limited. Resets at ${reset}`);
+      }
+      throw new Error(`${sport} API error ${code}: ${msg}`);
+    }
+    
+    return response.json();
+  }
+
+  // Multi-sport with graceful degradation
+  async function fetchAllSports() {
+    const results = {};
+    for (const sport of Object.keys(SPORTS)) {
+      try {
+        results[sport] = await fetchSport(sport, '/api/live');
+      } catch (err) {
+        console.error(`${sport}: ${err.message}`);
+        results[sport] = null;
+      }
+    }
+    return results;
+  }
+  ```
+
+  ```python Python theme={null}
+  import os, requests
+
+  API_KEY = os.environ["SPORTSAPI_KEY"]
+  HEADERS = {"x-api-key": API_KEY}
+
+  SPORTS = {
+      "football": "https://v2.football.sportsapipro.com",
+      "basketball": "https://v2.basketball.sportsapipro.com",
+      "tennis": "https://v2.tennis.sportsapipro.com",
+      "baseball": "https://v2.baseball.sportsapipro.com",
+  }
+
+  def fetch_sport(sport, endpoint):
+      url = f"{SPORTS[sport]}{endpoint}"
+      response = requests.get(url, headers=HEADERS)
+
+      if response.status_code == 429:
+          reset = response.headers.get("X-RateLimit-Reset", "unknown")
+          raise Exception(f"Rate limited. Resets at {reset}")
+
+      if not response.ok:
+          error = response.json().get("error", {})
+          code = error.get("code", response.status_code)
+          msg = error.get("message", response.reason)
+          raise Exception(f"{sport} API error {code}: {msg}")
+
+      return response.json()
+
+  # Multi-sport with graceful degradation
+  def fetch_all_sports():
+      results = {}
+      for sport in SPORTS:
+          try:
+              results[sport] = fetch_sport(sport, "/api/live")
+          except Exception as e:
+              print(f"{sport}: {e}")
+              results[sport] = None
+      return results
+  ```
+</CodeGroup>
+
+## Retry Strategy
+
+For transient errors (5xx), implement exponential backoff:
+
+```javascript theme={null}
+async function fetchWithRetry(url, options, maxRetries = 3) {
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    try {
+      const response = await fetch(url, options);
+      if (response.status >= 500) throw new Error(`Server error ${response.status}`);
+      return response;
+    } catch (error) {
+      if (attempt === maxRetries - 1) throw error;
+      const delay = Math.pow(2, attempt) * 1000;
+      await new Promise(r => setTimeout(r, delay));
+    }
+  }
+}
+```
+
+## Getting Help
+
+<Card title="Contact Support" icon="envelope" href="mailto:support@sportsapipro.com">
+  Get help from our team
+</Card>
