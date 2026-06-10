@@ -4633,10 +4633,10 @@ export default function Home() {
     const quickAmounts = [5, 10, 25, 50];
 
     return (
-      <div className="flex flex-col h-full" style={{ background: "#0a0a0a" }}>
+      <div className="flex flex-col h-full bg-zinc-950" style={{ background: "#0a0a0a" }}>
 
         {/* ── HEADER ── */}
-        <div className="relative px-5 pt-3 pb-4" style={{ background: "linear-gradient(160deg,#1a0505 0%,#0f0f0f 100%)", borderBottom: "1px solid rgba(220,38,38,0.15)" }}>
+        <div className="relative px-5 pt-3 pb-4 bg-zinc-900" style={{ background: "linear-gradient(160deg,#1a0505 0%,#0f0f0f 100%)", borderBottom: "1px solid rgba(220,38,38,0.15)" }}>
           {/* drag handle */}
           <div className="w-10 h-1 rounded-full mx-auto mb-4" style={{ background: "rgba(255,255,255,0.12)" }} />
 
@@ -4729,7 +4729,7 @@ export default function Home() {
                     animate={{ opacity: 1, y: 0 }}
                     exit={{ opacity: 0, x: -20, scale: 0.95 }}
                     transition={{ duration: 0.2 }}
-                    className="relative overflow-hidden rounded-2xl"
+                    className="relative overflow-hidden rounded-2xl bet-slip-card"
                     style={{
                       background: isSusp ? "rgba(120,53,15,0.3)" : "rgba(255,255,255,0.035)",
                       border: isSusp ? "1px solid rgba(245,158,11,0.4)" : "1px solid rgba(255,255,255,0.07)",
@@ -4831,7 +4831,7 @@ export default function Home() {
 
         {/* ── FOOTER ── */}
         {bets.length > 0 && (
-          <div className="px-4 pt-3 space-y-3" style={{ background: "#0a0a0a", borderTop: "1px solid rgba(255,255,255,0.06)", paddingBottom: "max(1.5rem, env(safe-area-inset-bottom, 1.5rem))" }} data-vaul-no-drag>
+          <div className="px-4 pt-3 space-y-3 bg-zinc-950" style={{ background: "#0a0a0a", borderTop: "1px solid rgba(255,255,255,0.06)", paddingBottom: "max(1.5rem, env(safe-area-inset-bottom, 1.5rem))" }} data-vaul-no-drag>
 
             {/* Múltipla stake input */}
             {effectiveBetMode === "multipla" && (
@@ -5341,9 +5341,11 @@ export default function Home() {
 
     const m = match.markets;
 
-    // Show markets when hasRealOdds=true, OR when tennis has valid computed tennisExtra markets
+    // Show markets when hasRealOdds=true, OR when tennis has valid computed tennisExtra markets,
+    // OR when the match has valid computed odds (football/basketball/hockey use computed odds)
     const hasTennisMarkets = match.sport === "tennis" && !!(m?.tennisExtra?.firstSet?.home);
-    if (!match.hasRealOdds && !hasTennisMarkets) {
+    const hasComputedOdds = match.odds.home > 0 && match.odds.away > 0;
+    if (!match.hasRealOdds && !hasTennisMarkets && !hasComputedOdds) {
       return (
         <div className="mt-4 text-center py-10 text-zinc-500">
           <div className="text-3xl mb-3">📊</div>
@@ -11375,12 +11377,12 @@ export default function Home() {
             animate={{ y: 0 }}
             exit={{ y: "100%" }}
             transition={{ type: "spring", bounce: 0, duration: 0.35 }}
-            className="lg:hidden fixed inset-0 z-[60] flex flex-col"
+            className="lg:hidden fixed inset-0 z-[60] flex flex-col bg-zinc-950"
             style={{ background: "#0f0f0f", paddingTop: "env(safe-area-inset-top, 0px)" }}
           >
             {/* Top bar */}
             <div
-              className="flex items-center justify-between px-4 py-2.5 border-b border-zinc-800/80 shrink-0"
+              className="flex items-center justify-between px-4 py-2.5 border-b border-zinc-800/80 shrink-0 bg-zinc-950"
               style={{ background: "#0a0a0a" }}
             >
               <button
@@ -11415,7 +11417,7 @@ export default function Home() {
             </div>
 
             {/* Tabs */}
-            <div className="flex border-b border-zinc-800 shrink-0" style={{ background: "#0a0a0a" }}>
+            <div className="flex border-b border-zinc-800 shrink-0 bg-zinc-950" style={{ background: "#0a0a0a" }}>
               <button
                 {...makeTap(() => { if (!hasDuplicateMatches) setBetMode("simples"); })}
                 className={`flex-1 py-3 text-[13px] font-bold transition-all ${effectiveBetMode === "simples" ? "text-white border-b-2 border-red-600" : "text-zinc-500"}`}
@@ -11448,7 +11450,7 @@ export default function Home() {
                       animate={{ opacity: 1, y: 0 }}
                       exit={{ opacity: 0, x: -20, scale: 0.95 }}
                       transition={{ duration: 0.2 }}
-                      className="relative rounded-2xl overflow-hidden"
+                      className="relative rounded-2xl overflow-hidden bet-slip-card"
                       style={{
                         background: isSusp ? "rgba(120,53,15,0.25)" : "rgba(255,255,255,0.04)",
                         border: isSusp ? "1px solid rgba(245,158,11,0.35)" : "1px solid rgba(255,255,255,0.08)",
@@ -11542,7 +11544,7 @@ export default function Home() {
 
             {/* Footer: stake input + summary + CTA */}
             <div
-              className="px-4 pt-3 shrink-0 border-t border-zinc-800"
+              className="px-4 pt-3 shrink-0 border-t border-zinc-800 bg-zinc-950"
               style={{ paddingBottom: "max(1rem, env(safe-area-inset-bottom, 1rem))", background: "#0a0a0a" }}
             >
               {/* Múltipla: Montante input + odds badge */}
