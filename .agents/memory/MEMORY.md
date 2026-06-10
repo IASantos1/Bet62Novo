@@ -3,3 +3,5 @@
 - [Halftime status variant](halftime-status.md) — some events use "Halftime" (no space) not "HT"/"half time"; must include in isFootballV2LiveStatus
 - [Tennis ATP/WTA filter](tennis-atp-wta-filter.md) — filter Challengers/ITF from live+upcoming; dedup V1/V2 by player-pair; hasRealOdds=true for all ATP/WTA; frontend gates markets on tennisExtra too
 - [Tennis V1 statusGroup mapping](tennis-v1-statusgroup.md) — V1 tennis /games/current: 2=Scheduled, 3=Live/in-play ("Set 1"/"Set 3"), 4=Finished/Cancelled; isTennisV1GameFinished must check statusGroup===4 (not 3)
+- [Tennis V1 stages field](tennis-v1-stages.md) — V1 /live game has `stages[]` with per-set game scores ("Set 1"/"Set 2"…), live game points ("Game"), total sets ("Sets"); also inPossession for serving
+- [Live payload cold-start bottlenecks](live-payload-perf.md) — all HTTP live/today fallback timeouts must be 3s max; buildTennisLiveV1Cached() must run inside the main Promise.all, not after it
