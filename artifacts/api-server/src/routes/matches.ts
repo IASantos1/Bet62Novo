@@ -7948,10 +7948,10 @@ function buildBasketballLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
     const statusChanged = prev != null && prev.status !== statusLabel;
 
     if (scoreChanged) {
-      marketSuspension = Object.fromEntries(BBALL_SUSP_KEYS.map(k => [k, now + 1_500]));
+      marketSuspension = Object.fromEntries(BBALL_SUSP_KEYS.map(k => [k, now + 5_000]));
       suspensionReason = "CESTA";
     } else if (statusChanged && (isHT || isPause)) {
-      marketSuspension = Object.fromEntries(BBALL_SUSP_KEYS.map(k => [k, now + 2_000]));
+      marketSuspension = Object.fromEntries(BBALL_SUSP_KEYS.map(k => [k, now + 8_000]));
       suspensionReason = "INTERVALO";
     }
 
@@ -8049,13 +8049,13 @@ function buildHockeyLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
     const statusChanged = prev != null && prev.status !== statusLabel;
 
     if (scoreChanged) {
-      marketSuspension = Object.fromEntries(HOCKEY_SUSP_KEYS.map(k => [k, now + 2_000]));
+      marketSuspension = Object.fromEntries(HOCKEY_SUSP_KEYS.map(k => [k, now + 12_000]));
       suspensionReason = "GOLO";
     } else if (statusChanged && isPause) {
-      marketSuspension = Object.fromEntries(HOCKEY_SUSP_KEYS.map(k => [k, now + 2_000]));
+      marketSuspension = Object.fromEntries(HOCKEY_SUSP_KEYS.map(k => [k, now + 10_000]));
       suspensionReason = "INTERVALO";
     } else if (statusChanged && code === 17) {
-      marketSuspension = Object.fromEntries(HOCKEY_SUSP_KEYS.map(k => [k, now + 2_000]));
+      marketSuspension = Object.fromEntries(HOCKEY_SUSP_KEYS.map(k => [k, now + 10_000]));
       suspensionReason = "PRORROGAÇÃO";
     }
 
@@ -8153,10 +8153,10 @@ function buildBaseballLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
     const inningChanged = prev != null && prevInningsLen !== innings.length;
 
     if (scoreChanged) {
-      marketSuspension = Object.fromEntries(BASEBALL_SUSP_KEYS.map(k => [k, now + 2_000]));
+      marketSuspension = Object.fromEntries(BASEBALL_SUSP_KEYS.map(k => [k, now + 12_000]));
       suspensionReason = "RUN";
     } else if (inningChanged) {
-      marketSuspension = Object.fromEntries(BASEBALL_SUSP_KEYS.map(k => [k, now + 1_500]));
+      marketSuspension = Object.fromEntries(BASEBALL_SUSP_KEYS.map(k => [k, now + 10_000]));
       suspensionReason = "TROCA DE INNING";
     }
 
@@ -8251,14 +8251,14 @@ function tennisSuspensionMs(
   const oneSetAway = (homeSets === setsNeeded - 1 || awaySets === setsNeeded - 1);
   const isMatchPoint = oneSetAway && (isSetPoint || isTiebreak);
 
-  if (isMatchPoint && (isBreakPoint || isAdv)) return 2_000;
-  if (isMatchPoint) return 2_000;
-  if (isSetPoint && isBreakPoint) return 2_000;
-  if (isSetPoint) return 1_500;
-  if (isBreakPoint) return 1_500;
-  if (isTiebreak) return 1_500;
-  if (isAdv || isDeuce) return 1_000;
-  return 1_000;
+  if (isMatchPoint && (isBreakPoint || isAdv)) return 25_000;
+  if (isMatchPoint) return 20_000;
+  if (isSetPoint && isBreakPoint) return 18_000;
+  if (isSetPoint) return 15_000;
+  if (isBreakPoint) return 12_000;
+  if (isTiebreak) return 12_000;
+  if (isAdv || isDeuce) return 10_000;
+  return 5_000;
 }
 
 // Tennis market keys to suspend after each point (flat keys used by frontend)
