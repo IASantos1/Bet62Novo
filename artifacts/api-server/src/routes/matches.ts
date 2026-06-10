@@ -4969,6 +4969,57 @@ const wsTimers = new Map<SportKey, ReturnType<typeof setTimeout>>();
 const wsRetryDelay = new Map<SportKey, number>();
 const wsLastMessageAt = new Map<SportKey, number>();
 const v1PatchedAt = new Map<string, number>();
+
+// ─── V2 WS refs — stored so we can send additional channel subscriptions ─────
+const wsRefs = new Map<SportKey, WebSocket>();
+
+// ─── V2 live odds — real bookmaker odds from match:{id}:odds WS channel ───────
+// Key: matchId as string → { home, draw, away } in decimal format
+const _v2LiveOdds = new Map<string, { home: number; draw: number; away: number }>();
+// Track which match odds channels are already subscribed
+const _v2OddsSubscribed = new Set<string>(); // "sport-matchId"
+
+// ─── V1 full game store — populated from V1 WS `games` array ─────────────────
+// Lets tennis skip HTTP polling and use WS data (1-2s vs 8s)
+const _v1LiveGamesStore = new Map<SportKey, unknown[]>();
+
+/** Subscribe to real live odds for a match via V2 WS (match:{id}:odds channel). */
+function subscribeV2MatchOdds(sport: SportKey, matchId: number | string): void {
+  const key = `${sport}-${matchId}`;
+  if (_v2OddsSubscribed.has(key)) return;
+  const ws = wsRefs.get(sport);
+  if (!ws || ws.readyState !== WebSocket.OPEN) return;
+  _v2OddsSubscribed.add(key);
+  try { ws.send(JSON.stringify({ action: "subscribe", channel: `match:${matchId}:odds` })); } catch { /* ignore */ }
+}
+
+/** Parse a V2 match:*:odds WS message and store real odds. */
+function parseV2OddsWsMsg(raw: Record<string, unknown>): void {
+  const channel = String(raw["channel"] ?? "");
+  const m = channel.match(/^match:(\d+):odds$/);
+  if (!m) return;
+  const matchId = m[1]!;
+  const payload = (raw["data"] ?? raw) as Record<string, unknown>;
+  // Navigate: payload.featured.fullTime.choices || payload.featured.default.choices
+  const featured = (payload["featured"] ?? payload) as Record<string, unknown>;
+  const block = (featured["fullTime"] ?? featured["default"] ?? featured) as Record<string, unknown>;
+  const choices = block["choices"] as unknown[] | undefined;
+  if (!Array.isArray(choices) || choices.length === 0) return;
+  let home = 0, draw = 0, away = 0;
+  for (const c of choices as Record<string, unknown>[]) {
+    const name = String(c["name"] ?? "");
+    const fv   = String(c["fractionalValue"] ?? "");
+    if (!fv || !fv.includes("/")) continue;
+    const dec = fractionalToDecimal(fv);
+    if (dec <= 1.0) continue; // skip invalid/suspended
+    if (name === "1" || name === "Home") home = dec;
+    else if (name === "X" || name === "Draw") draw = dec;
+    else if (name === "2" || name === "Away") away = dec;
+  }
+  if (home > 1.0 && away > 1.0) {
+    _v2LiveOdds.set(matchId, { home, draw, away });
+  }
+}
 const V1_PATCH_PREFER_WINDOW_MS = 15_000;
 const tennisV1WsScore = new Map<string, { home?: number; away?: number; status?: string; minute?: number; patchedAt: number }>();
 
@@ -5011,6 +5062,13 @@ function mergeIncomingPreferFastScore(sport: SportKey, incoming: SAPIV2Event[], 
 function applyV2WsMessage(sport: SportKey, raw: unknown): void {
   if (!raw || typeof raw !== "object") return;
   const msg = raw as Record<string, unknown>;
+
+  // Intercept match:*:odds messages — real live odds pushed by V2 WS
+  const wsChannel = String(msg["channel"] ?? "");
+  if (/^match:\d+:odds$/.test(wsChannel)) {
+    parseV2OddsWsMsg(msg);
+    return;
+  }
 
   // Extract event array from various possible message shapes
   let incoming: SAPIV2Event[] | null = null;
@@ -5096,6 +5154,11 @@ function applyV2WsMessage(sport: SportKey, raw: unknown): void {
       break;
   }
 
+  // Subscribe to real live odds for all matches in this update (V2 match:{id}:odds channel)
+  for (const ev of incoming) {
+    if (ev.id) subscribeV2MatchOdds(sport, ev.id as number);
+  }
+
   if (deltas.length > 0) {
     broadcastBatchDelta(deltas);
   }
@@ -5151,6 +5214,7 @@ function connectSportWS(sport: SportKey): void {
 
   ws.addEventListener("open", () => {
     wsConnected.add(sport);
+    wsRefs.set(sport, ws);
     wsRetryDelay.set(sport, 5_000);
     logger.info({ sport, version: "v2" }, "WS connected");
     ws.send(JSON.stringify({ action: "subscribe", channel: "live-scores" }));
@@ -5170,6 +5234,7 @@ function connectSportWS(sport: SportKey): void {
 
   ws.addEventListener("close", () => {
     wsConnected.delete(sport);
+    wsRefs.delete(sport);
     wsLastMessageAt.delete(sport);
     scheduleReconnect(sport);
   });
@@ -5177,6 +5242,7 @@ function connectSportWS(sport: SportKey): void {
   ws.addEventListener("error", (err) => {
     // error always precedes close; let the close handler reconnect
     wsConnected.delete(sport);
+    wsRefs.delete(sport);
     wsLastMessageAt.delete(sport);
     logger.error({ sport, version: "v2", err }, "WS error");
   });
@@ -5307,8 +5373,19 @@ function applyV1WsMessage(sport: SportKey, raw: unknown): void {
   if (!raw || typeof raw !== "object") return;
   const msg = raw as Record<string, unknown>;
 
+  // V1 WS sends a `games` array with full game objects (per docs: { type:"scores", games:[...] })
+  // Store the full game data so tennis can skip HTTP polling entirely (1-2s vs 8s)
+  if (Array.isArray(msg["games"])) {
+    const games = msg["games"] as unknown[];
+    if (games.length > 0) _v1LiveGamesStore.set(sport, games);
+    for (const g of games as V1ScoreEvent[]) applyV1ScorePatch(sport, g);
+    return;
+  }
+
   if (Array.isArray(msg["events"])) {
-    for (const ev of msg["events"] as V1ScoreEvent[]) applyV1ScorePatch(sport, ev);
+    const events = msg["events"] as unknown[];
+    if (events.length > 0) _v1LiveGamesStore.set(sport, events);
+    for (const ev of events as V1ScoreEvent[]) applyV1ScorePatch(sport, ev);
   } else if (msg["event"] && typeof msg["event"] === "object") {
     applyV1ScorePatch(sport, msg["event"] as V1ScoreEvent);
   } else if (Array.isArray(msg["data"])) {
@@ -7777,10 +7854,12 @@ async function buildFootballLiveV2(events: SAPIV2Event[]): Promise<LiveMatchStat
       result.push(liveMatchState.get(id)!);
     } else {
       // First seen — build initial state with score-filtered markets
-      const baseOdds = v2FootballOddsCache.get(String(ev.id)) ?? makeOddsFromTeams(homeTeam, awayTeam);
-      const liveOdds = (homeScore === 0 && awayScore === 0)
+      // Prefer real V2 live odds (from match:{id}:odds WS) over computed odds
+      const _fbV2RealOdds = _v2LiveOdds.get(String(ev.id));
+      const baseOdds = _fbV2RealOdds ?? v2FootballOddsCache.get(String(ev.id)) ?? makeOddsFromTeams(homeTeam, awayTeam);
+      const liveOdds = _fbV2RealOdds ?? ((homeScore === 0 && awayScore === 0)
         ? baseOdds
-        : calculateLive1x2({ minute, homeGoals: homeScore, awayGoals: awayScore, redCardsHome: rcHome, redCardsAway: rcAway, baseHome: baseOdds.home, baseDraw: baseOdds.draw, baseAway: baseOdds.away });
+        : calculateLive1x2({ minute, homeGoals: homeScore, awayGoals: awayScore, redCardsHome: rcHome, redCardsAway: rcAway, baseHome: baseOdds.home, baseDraw: baseOdds.draw, baseAway: baseOdds.away }));
       const rawMarkets = makeAdvancedMarketsFromTeams(homeTeam, awayTeam);
       const baseMarkets = filterLiveMarkets(rawMarkets, homeScore, awayScore, newStatus);
       // First time seen in penalties — store current score as base (0-0 penalties so far)
@@ -7919,16 +7998,23 @@ function buildBasketballLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
 
     const odds = makeOddsFromTeams(homeTeam, awayTeam);
     const diff = homeScore - awayScore;
-    let liveOdds = { ...odds, draw: 0 };
-    if (diff !== 0) {
-      // Basketball: each point ~2.5% probability swing; at 20pts lead → ~96% win chance
-      const absDiff = Math.abs(diff);
-      const winPct = Math.min(0.96, 0.5 + absDiff * 0.025);
-      const winnerOdds = Math.max(1.04, +(0.975 / winPct).toFixed(2));
-      const loserOdds  = Math.min(50,   +(0.975 / Math.max(0.04, 1 - winPct)).toFixed(2));
-      liveOdds = diff > 0
-        ? { home: winnerOdds, draw: 0, away: loserOdds }
-        : { home: loserOdds,  draw: 0, away: winnerOdds };
+    // Prefer real V2 live odds (from match:{id}:odds WS) over computed odds
+    const _bballV2RealOdds = _v2LiveOdds.get(String(ev.id));
+    let liveOdds: { home: number; draw: number; away: number };
+    if (_bballV2RealOdds) {
+      liveOdds = { ..._bballV2RealOdds, draw: 0 };
+    } else {
+      liveOdds = { ...odds, draw: 0 };
+      if (diff !== 0) {
+        // Basketball: each point ~2.5% probability swing; at 20pts lead → ~96% win chance
+        const absDiff = Math.abs(diff);
+        const winPct = Math.min(0.96, 0.5 + absDiff * 0.025);
+        const winnerOdds = Math.max(1.04, +(0.975 / winPct).toFixed(2));
+        const loserOdds  = Math.min(50,   +(0.975 / Math.max(0.04, 1 - winPct)).toFixed(2));
+        liveOdds = diff > 0
+          ? { home: winnerOdds, draw: 0, away: loserOdds }
+          : { home: loserOdds,  draw: 0, away: winnerOdds };
+      }
     }
 
     const id = `bball-v2-${ev.id}`;
@@ -8019,18 +8105,25 @@ function buildHockeyLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
 
     const odds = makeOddsFromTeams(homeTeam, awayTeam);
     const diff = homeScore - awayScore;
-    let liveOdds = { ...odds, draw: 0 };
-    if (diff !== 0) {
-      // Hockey: each goal ~17% probability swing; 3+ goal lead → decisive favourite
-      const absDiff = Math.abs(diff);
-      const winPct = Math.min(0.97, 0.5 + absDiff * 0.17);
-      const winnerOdds = Math.max(1.04, +(0.975 / winPct).toFixed(2));
-      const loserOdds  = Math.min(50,   +(0.975 / Math.max(0.03, 1 - winPct)).toFixed(2));
-      liveOdds = diff > 0
-        ? { home: winnerOdds, draw: 0, away: loserOdds }
-        : { home: loserOdds,  draw: 0, away: winnerOdds };
+    // Prefer real V2 live odds (from match:{id}:odds WS) over computed odds
+    const _hockeyV2RealOdds = _v2LiveOdds.get(String(ev.id));
+    let liveOdds: { home: number; draw: number; away: number };
+    if (_hockeyV2RealOdds) {
+      liveOdds = { ..._hockeyV2RealOdds, draw: 0 };
+    } else {
+      liveOdds = { ...odds, draw: 0 };
+      if (diff !== 0) {
+        // Hockey: each goal ~17% probability swing; 3+ goal lead → decisive favourite
+        const absDiff = Math.abs(diff);
+        const winPct = Math.min(0.97, 0.5 + absDiff * 0.17);
+        const winnerOdds = Math.max(1.04, +(0.975 / winPct).toFixed(2));
+        const loserOdds  = Math.min(50,   +(0.975 / Math.max(0.03, 1 - winPct)).toFixed(2));
+        liveOdds = diff > 0
+          ? { home: winnerOdds, draw: 0, away: loserOdds }
+          : { home: loserOdds,  draw: 0, away: winnerOdds };
+      }
+      liveOdds.draw = 0;
     }
-    liveOdds.draw = 0;
 
     const id = `hockey-v2-${ev.id}`;
     currentIds.add(id);
@@ -8123,16 +8216,23 @@ function buildBaseballLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
     const league = v2TournName(ev.tournament);
     const odds = makeBaseballBaseOdds(homeTeam, awayTeam);
     const diff = homeScore - awayScore;
-    let liveOdds = { ...odds, draw: 0 };
-    if (diff !== 0) {
-      // Baseball: each run ~14% probability swing; 5+ run lead → decisive favourite
-      const absDiff = Math.abs(diff);
-      const winPct = Math.min(0.97, 0.5 + absDiff * 0.14);
-      const winnerOdds = Math.max(1.04, +(0.975 / winPct).toFixed(2));
-      const loserOdds  = Math.min(50,   +(0.975 / Math.max(0.03, 1 - winPct)).toFixed(2));
-      liveOdds = diff > 0
-        ? { home: winnerOdds, draw: 0, away: loserOdds }
-        : { home: loserOdds,  draw: 0, away: winnerOdds };
+    // Prefer real V2 live odds (from match:{id}:odds WS) over computed odds
+    const _baseballV2RealOdds = _v2LiveOdds.get(String(ev.id));
+    let liveOdds: { home: number; draw: number; away: number };
+    if (_baseballV2RealOdds) {
+      liveOdds = { ..._baseballV2RealOdds, draw: 0 };
+    } else {
+      liveOdds = { ...odds, draw: 0 };
+      if (diff !== 0) {
+        // Baseball: each run ~14% probability swing; 5+ run lead → decisive favourite
+        const absDiff = Math.abs(diff);
+        const winPct = Math.min(0.97, 0.5 + absDiff * 0.14);
+        const winnerOdds = Math.max(1.04, +(0.975 / winPct).toFixed(2));
+        const loserOdds  = Math.min(50,   +(0.975 / Math.max(0.03, 1 - winPct)).toFixed(2));
+        liveOdds = diff > 0
+          ? { home: winnerOdds, draw: 0, away: loserOdds }
+          : { home: loserOdds,  draw: 0, away: winnerOdds };
+      }
     }
 
     const id = `baseball-v2-${ev.id}`;
@@ -9348,12 +9448,19 @@ async function buildTennisLiveV1(): Promise<LiveMatchState[]> {
       }
       const odds = makeOddsFromTeams(home, away);
       const diff = homeScore - awayScore;
-      let liveOdds = { ...odds, draw: 0 };
-      if (diff !== 0) {
-        const factor = Math.min(0.55, Math.abs(diff) * 0.22);
-        liveOdds = diff > 0
-          ? { home: Math.max(1.01, +(odds.home * (1 - factor)).toFixed(2)), draw: 0, away: Math.min(50, +(odds.away * (1 + factor)).toFixed(2)) }
-          : { home: Math.min(50, +(odds.home * (1 + factor)).toFixed(2)), draw: 0, away: Math.max(1.01, +(odds.away * (1 - factor)).toFixed(2)) };
+      // Prefer real V2 live odds (from match:{id}:odds WS) over computed odds
+      const _tennisV2RealOdds = _v2LiveOdds.get(String(g.id));
+      let liveOdds: { home: number; draw: number; away: number };
+      if (_tennisV2RealOdds) {
+        liveOdds = { ..._tennisV2RealOdds, draw: 0 };
+      } else {
+        liveOdds = { ...odds, draw: 0 };
+        if (diff !== 0) {
+          const factor = Math.min(0.55, Math.abs(diff) * 0.22);
+          liveOdds = diff > 0
+            ? { home: Math.max(1.01, +(odds.home * (1 - factor)).toFixed(2)), draw: 0, away: Math.min(50, +(odds.away * (1 + factor)).toFixed(2)) }
+            : { home: Math.min(50, +(odds.home * (1 + factor)).toFixed(2)), draw: 0, away: Math.max(1.01, +(odds.away * (1 - factor)).toFixed(2)) };
+        }
       }
       const setNum = homeScore + awayScore + 1;
       const serving = (typeof g.id === "number" ? _tennisServingCache.get(g.id)?.serving : undefined);
