@@ -5513,6 +5513,9 @@ async function getScheduleV2(sport: SportKey, date: string): Promise<SAPIV2Event
     });
     if (!resp.ok) return cached?.events ?? [];
     const data = (await resp.json()) as { success?: boolean; data?: { events?: SAPIV2Event[] } };
+    // If the API signals failure (success: false), do NOT overwrite good cached data with empty.
+    // Return stale cache if available so football/other sports don't vanish during transient outages.
+    if (data.success === false) return cached?.events ?? [];
     const events = data.data?.events ?? [];
     scheduleV2Cache.set(cacheKey, { events, fetchedAt: Date.now() });
     return events;
