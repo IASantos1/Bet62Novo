@@ -716,7 +716,18 @@ function isCatalogPriorityLeague(prio: number): boolean {
   return prio < 100;
 }
 
-function getFootballLiveDisappearGraceMs(state: Pick<LiveMatchState, "league" | "country">): number {
+function getFootballLiveDisappearGraceMs(state: Pick<LiveMatchState, "league" | "country" | "minute" | "status">): number {
+  // Matches clearly at/past full-time: short 3-minute grace so they disappear quickly.
+  // Covers both normal FT (90+) and extra-time (105+, 120+).
+  const statusLow = (state.status ?? "").toLowerCase();
+  const isLateGame =
+    (state.minute ?? 0) >= 88 &&
+    (statusLow.includes("2nd half") || statusLow.includes("2ª parte") ||
+     statusLow.includes("extra time") || statusLow.includes("tempo extra") ||
+     statusLow.includes("overtime") || statusLow.includes("penalties") ||
+     statusLow.includes("penalty"));
+  if (isLateGame) return 3 * 60 * 1000;
+
   const countryKey = normalizeCountryKey(state.country);
   const leagueKey = countryKey ? `${countryKey}: ${state.league}` : state.league;
   const prio = leaguePriority(leagueKey, countryKey);
