@@ -2765,6 +2765,19 @@ const v2FootballRedCardsCache = new Map<number, V2RedCardsEntry>();
 const V2_RED_CARDS_TTL_MS = 45_000;
 
 // V1 tennis native format (all endpoint — different schema from SAPIV2Event)
+interface V1TennisStage {
+  id: number;
+  name: string;        // "Game" | "Set 1" | "Set 2" | "Set 3" | "Sets"
+  shortName: string;
+  homeCompetitorScore: number;
+  awayCompetitorScore: number;
+  homeCompetitorExtraScore?: number; // tiebreak score
+  awayCompetitorExtraScore?: number;
+  time?: string;
+  isLive?: boolean;
+  isEnded?: boolean;
+  isCurrent?: boolean;
+}
 interface V1TennisGame {
   id: number;
   competitionId?: number;
@@ -2772,10 +2785,11 @@ interface V1TennisGame {
   startTime: string;
   statusGroup?: number; // 2=scheduled, 3=live/in-play, 4=finished/cancelled
   statusText?: string;
-  homeCompetitor?: { id?: number; name?: string; score?: number; isWinner?: boolean };
-  awayCompetitor?: { id?: number; name?: string; score?: number; isWinner?: boolean };
+  homeCompetitor?: { id?: number; name?: string; score?: number; isWinner?: boolean; inPossession?: boolean };
+  awayCompetitor?: { id?: number; name?: string; score?: number; isWinner?: boolean; inPossession?: boolean };
   stageName?: string;
   roundName?: string;
+  stages?: V1TennisStage[];
 }
 let _tennisAllV1Cache: V1TennisGame[] | null = null;
 let _tennisAllV1FetchedAt = 0;
@@ -4800,7 +4814,7 @@ const WS_PREFERRED_MAX_STALE_MS = 10_000;
 async function fetchLiveRace(v1Base: string, v2Base: string): Promise<SAPIV2Event[]> {
   const headers = sapiHeaders();
   const tryFetch = async (base: string): Promise<SAPIV2Event[]> => {
-    const resp = await fetch(`${base}/live`, { signal: AbortSignal.timeout(8000), headers });
+    const resp = await fetch(`${base}/live`, { signal: AbortSignal.timeout(3000), headers });
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     const data = (await resp.json()) as { events?: SAPIV2Event[]; data?: SAPIV2Event[] };
     const events = data.events ?? (data.data as SAPIV2Event[] | undefined) ?? [];
@@ -4859,7 +4873,7 @@ async function getHockeyLiveV2(): Promise<SAPIV2Event[]> {
   if ((wsConnected.has("hockey") || v1WsConnected.has("hockey")) && hockeyLiveV2Cache && now - hockeyLiveV2FetchedAt < WS_PREFERRED_MAX_STALE_MS && (wsLastMessageAt.get("hockey") ?? 0) > now - WS_PREFERRED_MAX_STALE_MS) return hockeyLiveV2Cache;
   if (hockeyLiveV2Cache && now - hockeyLiveV2FetchedAt < CONFIG.LIVE_CACHE_TTL) return hockeyLiveV2Cache;
   try {
-    const resp = await fetch(`${SAPI_V2_HOCKEY}/live`, { signal: AbortSignal.timeout(9000), headers: sapiHeaders() });
+    const resp = await fetch(`${SAPI_V2_HOCKEY}/live`, { signal: AbortSignal.timeout(3000), headers: sapiHeaders() });
     if (!resp.ok) return hockeyLiveV2Cache ?? [];
     const data = (await resp.json()) as { events?: SAPIV2Event[] };
     const events = data.events ?? [];
@@ -4885,7 +4899,7 @@ async function getBaseballLiveV2(): Promise<SAPIV2Event[]> {
   if ((wsConnected.has("baseball") || v1WsConnected.has("baseball")) && baseballLiveV2Cache && now - baseballLiveV2FetchedAt < WS_PREFERRED_MAX_STALE_MS && (wsLastMessageAt.get("baseball") ?? 0) > now - WS_PREFERRED_MAX_STALE_MS) return baseballLiveV2Cache;
   if (baseballLiveV2Cache && now - baseballLiveV2FetchedAt < CONFIG.LIVE_CACHE_TTL) return baseballLiveV2Cache;
   try {
-    const resp = await fetch(`${SAPI_V2_BASEBALL}/live`, { signal: AbortSignal.timeout(9000), headers: sapiHeaders() });
+    const resp = await fetch(`${SAPI_V2_BASEBALL}/live`, { signal: AbortSignal.timeout(3000), headers: sapiHeaders() });
     if (!resp.ok) return baseballLiveV2Cache ?? [];
     const data = (await resp.json()) as { events?: SAPIV2Event[] };
     const events = data.events ?? [];
@@ -4914,7 +4928,7 @@ async function getTennisLiveV2(): Promise<SAPIV2Event[]> {
     // Race V1 vs V2 — tennis endpoint shape varies, handle both formats
     const headers = sapiHeaders();
     const tryTennis = async (base: string): Promise<SAPIV2Event[]> => {
-      const resp = await fetch(`${base}/live`, { signal: AbortSignal.timeout(8000), headers });
+      const resp = await fetch(`${base}/live`, { signal: AbortSignal.timeout(3000), headers });
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
       const raw = (await resp.json()) as {
         events?: SAPIV2Event[];
@@ -5735,7 +5749,7 @@ async function getTennisTodayV2(): Promise<SAPIV2Event[]> {
   const now = Date.now();
   if (tennisTodayV2Cache && now - tennisTodayV2FetchedAt < TODAY_V2_TTL) return tennisTodayV2Cache;
   try {
-    const resp = await fetch(`${SAPI_V2_TENNIS}/today`, { signal: AbortSignal.timeout(9000), headers: sapiHeaders() });
+    const resp = await fetch(`${SAPI_V2_TENNIS}/today`, { signal: AbortSignal.timeout(3000), headers: sapiHeaders() });
     if (!resp.ok) return tennisTodayV2Cache ?? [];
     const data = (await resp.json()) as { events?: SAPIV2Event[] };
     tennisTodayV2Cache = data.events ?? [];
@@ -7348,7 +7362,7 @@ async function getTennisMatchDetailV2(id: number): Promise<TennisLiveDetailSnaps
     try {
       const res = await fetch(`${SAPI_V2_TENNIS}/match/${id}`, {
         headers: sapiHeaders(),
-        signal: AbortSignal.timeout(6_000),
+        signal: AbortSignal.timeout(2_000),
       });
       if (!res.ok) return null;
       const j = await res.json();
@@ -8863,22 +8877,43 @@ async function rebuildUpcomingCache(): Promise<void> {
   }
 }
 
+// ── Short-lived hot cache + in-flight dedup for buildLivePayload ─────────────
+// Prevents N concurrent requests (SSE connect, /live, /live-match/:id) from each
+// triggering a full 10-15s rebuild independently. All callers share one in-flight
+// promise; once the result is ready, it is reused for 1.5s before the next build.
+let _livePayloadHotCache: { result: { matches: LiveMatchState[] }; builtAt: number } | null = null;
+let _livePayloadInFlight: Promise<{ matches: LiveMatchState[] }> | null = null;
+const LIVE_PAYLOAD_HOT_TTL_MS = 1_500;
+
 // Shared payload builder — used by both /live HTTP route and SSE broadcast
 async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
   const now = Date.now();
-  // Warm the upcoming cache first so football matches recently seen in pre-match
-  // are eligible to cross into the live feed even if the provider reports them late.
-  if (_allUpcomingCacheBuiltAt === 0) {
-    await rebuildUpcomingCache();
-  } else if (Date.now() - _allUpcomingCacheBuiltAt > UPCOMING_CACHE_TTL_MS) {
-    rebuildUpcomingCache().catch(() => {}); // rebuild in background; use stale now
+  // Hot cache: return immediately if result is < 1.5s old
+  if (_livePayloadHotCache && now - _livePayloadHotCache.builtAt < LIVE_PAYLOAD_HOT_TTL_MS) {
+    return _livePayloadHotCache.result;
+  }
+  // In-flight dedup: join the existing build rather than starting a new one
+  if (_livePayloadInFlight) return _livePayloadInFlight;
+  _livePayloadInFlight = _buildLivePayloadImpl().finally(() => { _livePayloadInFlight = null; });
+  return _livePayloadInFlight;
+}
+
+async function _buildLivePayloadImpl(): Promise<{ matches: LiveMatchState[] }> {
+  const now = Date.now();
+  // Warm the upcoming cache so football matches recently seen in pre-match are
+  // eligible to cross into the live feed. Always fire-and-forget — never block
+  // the live build waiting for slow schedule endpoints (can take 16s on cold start).
+  if (_allUpcomingCacheBuiltAt === 0 || Date.now() - _allUpcomingCacheBuiltAt > UPCOMING_CACHE_TTL_MS) {
+    rebuildUpcomingCache().catch(() => {});
   }
   const allUpcoming = _allUpcomingCache;
 
   // ── Fast path: live data from in-memory WS caches (sub-ms each) ──────────
+  // buildTennisLiveV1Cached runs in parallel with V2 sports fetches to avoid
+  // sequential penalty (V1 HTTP cold fetch takes 3-4s; V2 sports take up to 3s).
   const [
     footballEvents, basketballEvents, hockeyEvents, baseballEvents, tennisEvents,
-    tennisTodayEvents,
+    tennisTodayEvents, tennisV1LivePart,
   ] = await Promise.all([
     getFootballLiveV2(),
     getBasketballLiveV2(),
@@ -8886,6 +8921,7 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
     getBaseballLiveV2(),
     getTennisLiveV2(),
     getTennisTodayV2(),
+    buildTennisLiveV1Cached(),
   ]);
   // Populate V1 tennis league label cache from V2 today events (city → "ATP 250 · City")
   if (tennisTodayEvents && tennisTodayEvents.length > 0) {
@@ -8899,7 +8935,6 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
   // Primary source: v1/tennis/live (buildTennisLiveV1). The v2 path is kept as
   // a fallback for any future API upgrade that enables a v2 tennis live endpoint.
   const tennisV2Part = buildTennisLiveV2(tennisEvents);
-  const tennisV1LivePart = await buildTennisLiveV1Cached();
   const allLiveIds = new Set([...tennisV2Part, ...tennisV1LivePart].map(m => String(m.id)));
   const todayStartedExtra = buildTennisLiveV2(
     (tennisTodayEvents ?? []).filter(ev => !allLiveIds.has(`tennis-v2-${ev.id}`))
@@ -9204,6 +9239,8 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
   if (result.matches.length > 0) {
     livePayloadFallbackCache = { payload: result, builtAt: Date.now() };
   }
+  // Store in hot cache so concurrent requests within 1.5s get this result instantly
+  _livePayloadHotCache = { result, builtAt: Date.now() };
   return result;
 }
 
@@ -9467,8 +9504,36 @@ async function buildTennisLiveV1(): Promise<LiveMatchState[]> {
             : { home: Math.min(50, +(odds.home * (1 + factor)).toFixed(2)), draw: 0, away: Math.max(1.01, +(odds.away * (1 - factor)).toFixed(2)) };
         }
       }
-      const setNum = homeScore + awayScore + 1;
-      const serving = (typeof g.id === "number" ? _tennisServingCache.get(g.id)?.serving : undefined);
+      // ── Parse stages for detailed per-set scores, game points, and serving ──
+      const stages = g.stages ?? [];
+      // Per-set game scores: stages named "Set N" sorted by set number
+      const setStages = stages
+        .filter(s => /^set\s*\d+$/i.test(s.name))
+        .sort((a, b) => parseInt(a.name.replace(/\D/g, ""), 10) - parseInt(b.name.replace(/\D/g, ""), 10));
+      // Current game points from the live "Game" stage
+      const gameStage = stages.find(s => s.name === "Game" && s.isLive);
+      const v1Point = (v: number): string => {
+        if (v >= 50) return "A";
+        if (v === 40) return "40";
+        if (v === 30) return "30";
+        if (v === 15) return "15";
+        return "0";
+      };
+      const currentPoints: [string, string] = gameStage
+        ? [v1Point(gameStage.homeCompetitorScore), v1Point(gameStage.awayCompetitorScore)]
+        : ["0", "0"];
+      // Build sets array: completed + current set game scores
+      const sets: Array<[number, number]> = setStages.length > 0
+        ? setStages.map(s => [s.homeCompetitorScore, s.awayCompetitorScore] as [number, number])
+        : [[homeScore, awayScore]];
+      // Serving from inPossession; fall back to V2 serving cache
+      const homeIn = !!g.homeCompetitor?.inPossession;
+      const awayIn = !!g.awayCompetitor?.inPossession;
+      const v1Serving: [boolean, boolean] | undefined = (homeIn || awayIn) ? [homeIn, awayIn] : undefined;
+      const cachedServing = typeof g.id === "number" ? _tennisServingCache.get(g.id)?.serving : undefined;
+      const serving = v1Serving ?? cachedServing;
+
+      const setNum = sets.length; // number of sets in play (current is last)
       const item: LiveMatchState = {
         id: `tennis-v2-${g.id}`,
         home, away,
@@ -9482,7 +9547,7 @@ async function buildTennisLiveV1(): Promise<LiveMatchState[]> {
         odds: liveOdds,
         markets: makeAdvancedMarketsFromTeams(home, away),
         events: [],
-        _liveExtra: { sets: [[homeScore, awayScore]], currentPoints: ["0", "0"], ...(serving ? { serving } : {}) },
+        _liveExtra: { sets, currentPoints, ...(serving ? { serving } : {}) },
       };
       const rank = tier === 999 ? 5 : tier; // unknown-tier ATP/WTA → treat as 250 level
       primary.push({ r: rank, m: item });
