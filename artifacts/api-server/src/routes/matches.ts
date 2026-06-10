@@ -9633,6 +9633,8 @@ async function buildTennisUpcoming(): Promise<UpcomingMatch[]> {
 
     for (const g of games) {
       if (isTennisV1GameFinished(g)) continue;
+      // statusGroup 3 = in-play (Set 1/2/3) — already live, exclude from pre-match
+      if (g.statusGroup === 3) continue;
       const home = g.homeCompetitor?.name?.trim() ?? "";
       const away = g.awayCompetitor?.name?.trim() ?? "";
       if (!home || !away) continue;
@@ -9643,7 +9645,7 @@ async function buildTennisUpcoming(): Promise<UpcomingMatch[]> {
       const tier = tennisTierRank(compName);
 
       const startMs = new Date(g.startTime).getTime();
-      if (startMs < now - 90 * 60 * 1000) continue; // 90-min grace
+      if (startMs < now - 5 * 60 * 1000) continue; // 5-min grace only (live matches excluded above)
       if (startMs > now + 3 * 86_400_000) continue;  // max 3 days ahead
 
       const pairKey = `${home}|${away}`;
