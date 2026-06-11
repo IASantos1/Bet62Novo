@@ -7427,7 +7427,8 @@ export default function Home() {
                 onClose={() => setShowWCPanel(false)}
                 onBet={(bet) => {
                   setBets(prev => {
-                    if (prev.some(b => b.matchId === bet.matchId && b.market === bet.market && b.selection === bet.selection)) return prev;
+                    const idx = prev.findIndex(b => b.matchId === bet.matchId && b.market === bet.market && b.selection === bet.selection);
+                    if (idx !== -1) return prev.filter((_, i) => i !== idx);
                     return [...prev, {
                       matchId: bet.matchId,
                       matchTitle: `${bet.home} vs ${bet.away}`,
