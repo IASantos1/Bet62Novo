@@ -3,14 +3,14 @@ import cors from "cors";
 import pinoHttp from "pino-http";
 import path from "path";
 import fs from "fs";
-import router from "./routes";
-import { logger } from "./lib/logger";
+import router from "./routes/index.js";
+import { logger } from "./lib/logger.js";
 import { initDb } from "@workspace/db";
 import Stripe from "stripe";
 import { db, paymentsTable, usersTable } from "@workspace/db";
 import { eq, sql, count } from "drizzle-orm";
-import { applyBalanceDelta } from "./lib/ledger";
-import { sendDepositConfirmed } from "./lib/mailer";
+import { applyBalanceDelta } from "./lib/ledger.js";
+import { sendDepositConfirmed } from "./lib/mailer.js";
 
 const app: Express = express();
 
@@ -37,7 +37,7 @@ app.post(
     }
     let event: Stripe.Event;
     try {
-      const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, { apiVersion: "2025-05-28.basil" });
+      const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, { apiVersion: "2026-05-27.dahlia" });
       event = stripe.webhooks.constructEvent(req.body as Buffer, sig as string, webhookSecret);
     } catch (err: unknown) {
       logger.warn({ msg: err instanceof Error ? err.message : String(err) }, "Stripe webhook verification failed");
