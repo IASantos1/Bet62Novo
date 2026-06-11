@@ -9646,7 +9646,7 @@ async function buildTennisUpcoming(): Promise<UpcomingMatch[]> {
 
       const startMs = new Date(g.startTime).getTime();
       if (startMs < now - 5 * 60 * 1000) continue; // 5-min grace only (live matches excluded above)
-      if (startMs > now + 3 * 86_400_000) continue;  // max 3 days ahead
+      if (startMs > now + 7 * 86_400_000) continue;  // max 7 days ahead
 
       const pairKey = `${home}|${away}`;
       if (seen.has(pairKey)) continue;
