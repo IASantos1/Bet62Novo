@@ -286,73 +286,46 @@ router.get("/status/:orderId", authMiddleware, async (req: AuthRequest, res: Res
 });
 
 // ─── GET /api/payments/card-return ───────────────────────────────────────────
-// Stripe redireciona aqui após checkout (sucesso ou cancelamento)
+// Stripe redireciona aqui após checkout.
+// SECURITY: never trust the URL status= param — always verify with Stripe API.
 router.get("/card-return", async (req: Request, res: Response): Promise<void> => {
-  const { status, orderId } = req.query as Record<string, string>;
+  const { orderId } = req.query as Record<string, string>;
 
   const domains = process.env.REPLIT_DOMAINS;
   const base = domains ? `https://${domains.split(",")[0]}` : "/";
 
-  if (status === "success" && orderId) {
+  if (orderId) {
     try {
-      await creditPayment(orderId);
+      const stripe = getStripe();
+      const [payment] = await db
+        .select({ requestId: paymentsTable.requestId, status: paymentsTable.status })
+        .from(paymentsTable)
+        .where(eq(paymentsTable.orderId, orderId))
+        .limit(1);
+
+      if (payment && payment.status !== "completed" && payment.requestId) {
+        // Retrieve the Stripe checkout session and verify payment_status
+        const session = await stripe.checkout.sessions.retrieve(payment.requestId);
+        if (session.payment_status === "paid") {
+          await creditPayment(orderId);
+          logger.info({ orderId }, "Card return: Stripe session verified, balance credited");
+          res.redirect(`${base}/?payment=success`);
+          return;
+        } else {
+          logger.warn({ orderId, stripeStatus: session.payment_status }, "Card return: Stripe session not paid");
+        }
+      }
     } catch (err) {
       logger.error({ err, orderId }, "Card return processing error");
     }
   }
 
-  res.redirect(`${base}/?payment=${status ?? "unknown"}`);
+  res.redirect(`${base}/?payment=pending`);
 });
 
-// ─── POST /api/payments/stripe-webhook ───────────────────────────────────────
-// IMPORTANT: This route must be registered BEFORE express.json() in app.ts
-// so that req.body is a raw Buffer (needed by stripe.webhooks.constructEvent)
-router.post("/stripe-webhook", async (req: Request, res: Response): Promise<void> => {
-  const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
-  const sig = req.headers["stripe-signature"];
-
-  if (!webhookSecret || !sig) {
-    res.status(400).json({ error: "Missing webhook secret or signature" });
-    return;
-  }
-
-  let event: Stripe.Event;
-  try {
-    const stripe = getStripe();
-    event = stripe.webhooks.constructEvent(req.body as Buffer, sig as string, webhookSecret);
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    logger.warn({ msg }, "Stripe webhook signature verification failed");
-    res.status(400).json({ error: `Webhook error: ${msg}` });
-    return;
-  }
-
-  try {
-    switch (event.type) {
-      case "checkout.session.completed": {
-        const session = event.data.object as Stripe.Checkout.Session;
-        const orderId = session.metadata?.orderId;
-        if (orderId && session.payment_status === "paid") {
-          await creditPayment(orderId);
-        }
-        break;
-      }
-      case "payment_intent.succeeded": {
-        const intent = event.data.object as Stripe.PaymentIntent;
-        const orderId = intent.metadata?.orderId;
-        if (orderId) {
-          await creditPayment(orderId);
-        }
-        break;
-      }
-      default:
-        break;
-    }
-    res.json({ received: true });
-  } catch (err) {
-    logger.error({ err, eventType: event.type }, "Stripe webhook processing error");
-    res.status(500).json({ error: "Webhook processing failed" });
-  }
-});
+// ─── Stripe webhook ───────────────────────────────────────────────────────────
+// Handled at the Express app level in app.ts (before express.json()) so that
+// req.body is a raw Buffer for signature verification. Do NOT duplicate here.
+// app.ts calls creditPayment() from this module via the exported helper below.
 
 export default router;
