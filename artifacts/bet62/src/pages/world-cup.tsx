@@ -1191,7 +1191,7 @@ export default function WorldCupPage() {
   useEffect(() => {
     let cancelled = false;
 
-    async function loadWC() {
+    async function load() {
       try {
         const wcData = await fetch("/api/matches/wc2026", { signal: AbortSignal.timeout(20_000) })
           .then(r => r.ok ? r.json() : { matches: [] }).catch(() => ({ matches: [] }));
@@ -1199,44 +1199,13 @@ export default function WorldCupPage() {
         const allWC = ((wcData.matches ?? []) as Record<string, unknown>[]).map(mapToWCMatch);
         const wcLive = allWC.filter(m => m.isLive);
         const wcUpcoming = allWC.filter(m => !m.isLive);
-        if (wcLive.length > 0) {
-          setLiveMatches(prev => {
-            // Merge: keep live-feed matches that aren't already in wc2026 live list (by team name)
-            const ids = new Set(wcLive.map(m => m.id));
-            const teamKeys = new Set(wcLive.map(m => `${m.home.toLowerCase()}|${m.away.toLowerCase()}`));
-            const fromFeed = prev.filter(m => !ids.has(m.id) && !teamKeys.has(`${m.home.toLowerCase()}|${m.away.toLowerCase()}`));
-            return [...wcLive, ...fromFeed];
-          });
-          setPageTab("live");
-        }
+        // Direct set — no accumulation, no race condition with a parallel loadLive.
+        // The /wc2026 endpoint always enriches with fresh liveMatchState on every request.
+        setLiveMatches(wcLive);
         setUpcomingMatches(wcUpcoming);
+        if (wcLive.length > 0) setPageTab("live");
       } catch { /* silent */ }
       if (!cancelled) setLoading(false);
-    }
-
-    async function loadLive() {
-      try {
-        const liveData = await fetch("/api/matches/live", { signal: AbortSignal.timeout(8_000) })
-          .then(r => r.ok ? r.json() : { matches: [] }).catch(() => ({ matches: [] }));
-        if (cancelled) return;
-        const live: WCMatch[] = ((liveData.matches ?? []) as Record<string, unknown>[])
-          .filter(m => isWCLeague(String(m.league ?? "")))
-          .map(mapToWCMatch);
-        setLiveMatches(prev => {
-          if (live.length === 0) return prev;
-          // Merge with wc2026-sourced live matches (they have richer data), dedup by team key
-          const existingKeys = new Set(prev.map(m => `${m.home.toLowerCase()}|${m.away.toLowerCase()}`));
-          const fresh = live.filter(m => !existingKeys.has(`${m.home.toLowerCase()}|${m.away.toLowerCase()}`));
-          return [...prev, ...fresh];
-        });
-        if (live.length > 0) setPageTab("live");
-      } catch { /* silent */ }
-    }
-
-    async function load() {
-      // Start both in parallel; wc2026 is primary (has live enrichment), live is supplement
-      void loadLive();
-      await loadWC();
     }
 
     load();

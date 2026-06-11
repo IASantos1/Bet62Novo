@@ -10288,27 +10288,26 @@ async function _rebuildWC2026(): Promise<void> {
     });
 
     // Enrich live matches from liveMatchState (WS feed) — covers cases where
-    // V1 competition/games doesn't return live scores but V1 WS does
+    // V1 competition/games doesn't return live scores but V1 WS does.
+    // NOTE: LiveMatchState uses .home/.away (not .homeTeam/.awayTeam)
     const normTeam = (s: string) => s.toLowerCase().replace(/[\s.'-]+/g, "");
     for (const result of results) {
       if (result.isLive) continue; // already enriched from V1
       const rH = normTeam(result.home);
       const rA = normTeam(result.away);
       for (const [, ls] of liveMatchState.entries()) {
-        if ((ls as any).sport !== "football") continue;
-        const league = String((ls as any).league ?? "").toLowerCase();
-        if (!league.includes("world cup") && !league.includes("copa") && !league.includes("fifa")) continue;
-        const lH = normTeam(String((ls as any).homeTeam ?? ""));
-        const lA = normTeam(String((ls as any).awayTeam ?? ""));
-        const matches =
+        if (ls.sport !== "football") continue;
+        const lH = normTeam(ls.home);
+        const lA = normTeam(ls.away);
+        const teamMatches =
           (lH === rH || lH.includes(rH) || rH.includes(lH)) &&
           (lA === rA || lA.includes(rA) || rA.includes(lA));
-        if (matches) {
+        if (teamMatches) {
           result.isLive = true;
-          result.homeScore = (ls as any).homeScore ?? 0;
-          result.awayScore = (ls as any).awayScore ?? 0;
-          result.minute = (ls as any).minute;
-          result.status = String((ls as any).status ?? "Live");
+          result.homeScore = ls.homeScore ?? 0;
+          result.awayScore = ls.awayScore ?? 0;
+          result.minute = ls.minute;
+          result.status = String(ls.status ?? "Live");
           break;
         }
       }
@@ -10466,9 +10465,39 @@ router.get("/wc2026", async (_req: Request, res: Response) => {
       buildWC2026Matches(),
       new Promise<never>((_, reject) => setTimeout(() => reject(new Error("timeout")), 25_000)),
     ]);
-    res.json({ matches });
+
+    // Always enrich with FRESH liveMatchState data — bypasses 15-min cache so live
+    // scores/status are current on every request. Uses team-name matching (not league
+    // name) so WC matches are found even when the WS feed uses a different league label.
+    const normT = (s: string) => s.toLowerCase().replace(/[\s.'-]+/g, "");
+    const enriched = matches.map(m => {
+      const rH = normT(m.home);
+      const rA = normT(m.away);
+      for (const [, ls] of liveMatchState.entries()) {
+        if (ls.sport !== "football") continue;
+        const lH = normT(ls.home);
+        const lA = normT(ls.away);
+        if (
+          (lH === rH || lH.includes(rH) || rH.includes(lH)) &&
+          (lA === rA || lA.includes(rA) || rA.includes(lA))
+        ) {
+          return {
+            ...m,
+            isLive: true,
+            homeScore: ls.homeScore ?? 0,
+            awayScore: ls.awayScore ?? 0,
+            minute: ls.minute,
+            status: String(ls.status ?? "Live"),
+          };
+        }
+      }
+      // No live state found — keep as-is (already enriched from V1 statusGroup=3
+      // during rebuild, or truly upcoming)
+      return m;
+    });
+
+    res.json({ matches: enriched });
   } catch {
-    // Return cached data if available, else empty list (never hang the browser)
     res.json({ matches: wc2026Cache?.matches ?? [] });
   }
 });
