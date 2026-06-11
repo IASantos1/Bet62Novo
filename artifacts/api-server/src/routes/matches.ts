@@ -10493,6 +10493,8 @@ router.get("/wc2026", async (_req: Request, res: Response) => {
             _liveExtra: ls._liveExtra,
             redCardsHome: ls.redCardsHome,
             redCardsAway: ls.redCardsAway,
+            odds: ls.odds ?? m.odds,
+            markets: ls.markets ?? m.markets,
           };
         }
       }
