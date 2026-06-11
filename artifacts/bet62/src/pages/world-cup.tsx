@@ -329,6 +329,18 @@ function fmtWCMin(minute: number | undefined, status: string | undefined): strin
 function OBtn({ label, odd, active, onClick, theme }: { label: string; odd: number; active: boolean; onClick: () => void; theme: Theme }) {
   if (!odd || odd <= 1.001) return null;
   const isDark = theme === "dark";
+  const isHot = odd <= 1.05;
+  if (isHot) {
+    return (
+      <button
+        onClick={e => { e.stopPropagation(); onClick(); }}
+        className="flex-1 flex flex-col items-center py-2.5 px-0.5 rounded-xl border transition-all min-w-0 bg-amber-900/20 border-amber-600/40 ring-1 ring-amber-500/20 animate-pulse"
+      >
+        <span className="text-[10px] leading-tight text-center w-full truncate px-0.5 mb-0.5 text-amber-400/70">{label}</span>
+        <span className="text-[9px] font-black text-amber-400 uppercase tracking-widest leading-tight">APOSTA JÁ</span>
+      </button>
+    );
+  }
   return (
     <button
       onClick={e => { e.stopPropagation(); onClick(); }}
@@ -600,33 +612,56 @@ function SLabel({ children, theme }: { children: React.ReactNode; theme: Theme }
   return <div className={`text-[9px] font-black tracking-widest mb-1.5 mt-3 first:mt-0 uppercase ${theme === "dark" ? "text-zinc-500" : "text-zinc-400"}`}>{children}</div>;
 }
 
-function MRow({ items, activeKey, onBet, theme }: {
+function MRow({ items, activeKey, onBet, theme, isSuspended }: {
   items: { k: string; label: string; odd: number }[];
   activeKey?: string;
   onBet: (k: string, label: string, odd: number) => void;
   theme: Theme;
+  isSuspended?: boolean;
 }) {
   const isDark = theme === "dark";
   const valid = items.filter(i => i.odd > 1.001);
   if (!valid.length) return null;
   return (
     <div className="flex gap-1.5 mb-2">
-      {valid.map(i => (
-        <button
-          key={i.k}
-          onClick={() => onBet(i.k, i.label, i.odd)}
-          className={`flex-1 flex flex-col items-center py-2.5 px-1 rounded-xl border transition-all min-w-0 ${
-            activeKey === i.k
-              ? "border-red-500 bg-red-600/15 ring-1 ring-red-400/30"
-              : isDark
-                ? "border-zinc-800 bg-zinc-900 hover:border-zinc-700"
-                : "border-zinc-200 bg-zinc-50 hover:border-zinc-300"
-          }`}
-        >
-          <span className={`text-[10px] mb-1 truncate w-full text-center px-0.5 ${isDark ? "text-zinc-500" : "text-zinc-500"}`}>{i.label}</span>
-          <span className={`text-sm font-black tabular-nums ${activeKey === i.k ? "text-red-400" : isDark ? "text-white" : "text-zinc-900"}`}>{i.odd.toFixed(2)}</span>
-        </button>
-      ))}
+      {valid.map(i => {
+        if (isSuspended) {
+          return (
+            <div key={i.k} className="flex-1 flex flex-col items-center py-2.5 px-1 rounded-xl border border-zinc-800 bg-zinc-900/60 min-w-0 opacity-60 cursor-not-allowed select-none">
+              <span className="text-[10px] mb-1 truncate w-full text-center px-0.5 text-zinc-600">{i.label}</span>
+              <svg className="text-zinc-600" width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zm-6 9c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2zm3.1-9H8.9V6c0-1.71 1.39-3.1 3.1-3.1 1.71 0 3.1 1.39 3.1 3.1v2z"/></svg>
+            </div>
+          );
+        }
+        if (i.odd <= 1.05) {
+          return (
+            <button
+              key={i.k}
+              onClick={() => onBet(i.k, i.label, i.odd)}
+              className="flex-1 flex flex-col items-center py-2.5 px-1 rounded-xl border bg-amber-900/20 border-amber-600/40 ring-1 ring-amber-500/20 min-w-0 animate-pulse"
+            >
+              <span className="text-[10px] mb-0.5 truncate w-full text-center px-0.5 text-amber-400/70">{i.label}</span>
+              <span className="text-[9px] font-black text-amber-400 uppercase tracking-widest leading-tight">APOSTA JÁ</span>
+            </button>
+          );
+        }
+        return (
+          <button
+            key={i.k}
+            onClick={() => onBet(i.k, i.label, i.odd)}
+            className={`flex-1 flex flex-col items-center py-2.5 px-1 rounded-xl border transition-all min-w-0 ${
+              activeKey === i.k
+                ? "border-red-500 bg-red-600/15 ring-1 ring-red-400/30"
+                : isDark
+                  ? "border-zinc-800 bg-zinc-900 hover:border-zinc-700"
+                  : "border-zinc-200 bg-zinc-50 hover:border-zinc-300"
+            }`}
+          >
+            <span className={`text-[10px] mb-1 truncate w-full text-center px-0.5 ${isDark ? "text-zinc-500" : "text-zinc-500"}`}>{i.label}</span>
+            <span className={`text-sm font-black tabular-nums ${activeKey === i.k ? "text-red-400" : isDark ? "text-white" : "text-zinc-900"}`}>{i.odd.toFixed(2)}</span>
+          </button>
+        );
+      })}
     </div>
   );
 }
@@ -652,6 +687,27 @@ function MarketsPage({ match, activeKeys, onBet, onClose, theme, displayMinute }
   const isDark = theme === "dark";
   const bet = (k: string, label: string, odd: number, market: string) => onBet(mid, k, label, odd, market);
   const dateStr = formatMatchDate(match.date);
+
+  const isSuspended = match.isLive && (
+    !!match._suspensionReason ||
+    (!!match.marketSuspension && Object.values(match.marketSuspension).some(ts => ts > Date.now()))
+  );
+  const suspRaw = (match._suspensionReason ?? "SUSPENSO").toUpperCase();
+  const suspIsVAR     = suspRaw.includes("VAR");
+  const suspIsPenalty = suspRaw.includes("PENAL");
+  const suspIsGoal    = suspRaw.includes("GOLO") || suspRaw.includes("GOAL");
+  const suspLabel = suspIsGoal
+    ? "⚽ GOLO — Todos os mercados suspensos"
+    : suspIsVAR
+      ? "📺 REVISÃO VAR — Mercados suspensos"
+      : suspIsPenalty
+        ? "🟡 PENÁLTI — Mercados suspensos"
+        : "🔒 LANCE CRÍTICO — Mercados suspensos";
+  const suspBg = suspIsGoal
+    ? "bg-green-600/20 border-green-500/40 text-green-300"
+    : suspIsVAR
+      ? "bg-purple-600/20 border-purple-500/40 text-purple-300"
+      : "bg-red-600/20 border-red-500/40 text-red-300";
 
   const hasDupla = !!(mk.doubleChance?.homeOrDraw);
   const hasGolos = !!(mk.totalGoals?.over25 || mk.bothTeamsScore?.yes || mk.exactGoals?.g0 !== undefined);
@@ -687,7 +743,7 @@ function MarketsPage({ match, activeKeys, onBet, onClose, theme, displayMinute }
             { k: "r:home", label: match.home, odd: odds.home },
             { k: "r:draw", label: "Empate", odd: odds.draw },
             { k: "r:away", label: match.away, odd: odds.away },
-          ]} activeKey={ak} onBet={(k, l, o) => bet(k, l, o, "resultado")} theme={theme} />
+          ]} activeKey={ak} onBet={(k, l, o) => bet(k, l, o, "resultado")} theme={theme} isSuspended={isSuspended} />
         </>
       )}
       {mk.halfTime && (mk.halfTime.home > 1.001 || mk.halfTime.draw > 1.001) && (
@@ -697,7 +753,7 @@ function MarketsPage({ match, activeKeys, onBet, onClose, theme, displayMinute }
             { k: "ht:home", label: match.home, odd: mk.halfTime.home },
             { k: "ht:draw", label: "Empate", odd: mk.halfTime.draw },
             { k: "ht:away", label: match.away, odd: mk.halfTime.away },
-          ]} activeKey={ak} onBet={(k, l, o) => bet(k, l, o, "intervalo")} theme={theme} />
+          ]} activeKey={ak} onBet={(k, l, o) => bet(k, l, o, "intervalo")} theme={theme} isSuspended={isSuspended} />
         </>
       )}
       {mk.secondHalf && mk.secondHalf.home > 1.001 && (
@@ -707,7 +763,7 @@ function MarketsPage({ match, activeKeys, onBet, onClose, theme, displayMinute }
             { k: "sh:home", label: match.home, odd: mk.secondHalf.home },
             { k: "sh:draw", label: "Empate", odd: mk.secondHalf.draw },
             { k: "sh:away", label: match.away, odd: mk.secondHalf.away },
-          ]} activeKey={ak} onBet={(k, l, o) => bet(k, l, o, "2a-parte")} theme={theme} />
+          ]} activeKey={ak} onBet={(k, l, o) => bet(k, l, o, "2a-parte")} theme={theme} isSuspended={isSuspended} />
         </>
       )}
       {mk.drawNoBet && mk.drawNoBet.home > 1.001 && (
@@ -716,7 +772,7 @@ function MarketsPage({ match, activeKeys, onBet, onClose, theme, displayMinute }
           <MRow items={[
             { k: "dnb:home", label: match.home, odd: mk.drawNoBet.home },
             { k: "dnb:away", label: match.away, odd: mk.drawNoBet.away },
-          ]} activeKey={ak} onBet={(k, l, o) => bet(k, l, o, "draw-no-bet")} theme={theme} />
+          ]} activeKey={ak} onBet={(k, l, o) => bet(k, l, o, "draw-no-bet")} theme={theme} isSuspended={isSuspended} />
         </>
       )}
       {mk.htft && Object.values(mk.htft).some(v => (v ?? 0) > 1.001) && (
@@ -755,7 +811,7 @@ function MarketsPage({ match, activeKeys, onBet, onClose, theme, displayMinute }
         { k: "dc:hd", label: `${match.home} ou Empate`, odd: mk.doubleChance.homeOrDraw },
         { k: "dc:ad", label: `${match.away} ou Empate`, odd: mk.doubleChance.awayOrDraw },
         { k: "dc:ha", label: `${match.home} ou ${match.away}`, odd: mk.doubleChance.homeOrAway },
-      ]} activeKey={ak} onBet={(k, l, o) => bet(k, l, o, "dupla-chance")} theme={theme} />
+      ]} activeKey={ak} onBet={(k, l, o) => bet(k, l, o, "dupla-chance")} theme={theme} isSuspended={isSuspended} />
     </>
   ) : null;
 
@@ -778,7 +834,7 @@ function MarketsPage({ match, activeKeys, onBet, onClose, theme, displayMinute }
               <MRow key={line} items={[
                 { k: `tg:o${line}`, label: `Acima ${line}`, odd: o ?? 0 },
                 { k: `tg:u${line}`, label: `Abaixo ${line}`, odd: u ?? 0 },
-              ]} activeKey={ak} onBet={(k, l, v) => bet(k, l, v, "golos")} theme={theme} />
+              ]} activeKey={ak} onBet={(k, l, v) => bet(k, l, v, "golos")} theme={theme} isSuspended={isSuspended} />
             ))}
         </>
       )}
@@ -788,7 +844,7 @@ function MarketsPage({ match, activeKeys, onBet, onClose, theme, displayMinute }
           <MRow items={[
             { k: "bts:y", label: "Sim", odd: mk.bothTeamsScore.yes },
             { k: "bts:n", label: "Não", odd: mk.bothTeamsScore.no },
-          ]} activeKey={ak} onBet={(k, l, o) => bet(k, l, o, "ambas-marcam")} theme={theme} />
+          ]} activeKey={ak} onBet={(k, l, o) => bet(k, l, o, "ambas-marcam")} theme={theme} isSuspended={isSuspended} />
         </>
       )}
       {mk.btts1H && mk.btts1H.yes > 1.001 && (
@@ -797,7 +853,7 @@ function MarketsPage({ match, activeKeys, onBet, onClose, theme, displayMinute }
           <MRow items={[
             { k: "bts1h:y", label: "Sim", odd: mk.btts1H.yes },
             { k: "bts1h:n", label: "Não", odd: mk.btts1H.no },
-          ]} activeKey={ak} onBet={(k, l, o) => bet(k, l, o, "ambas-1h")} theme={theme} />
+          ]} activeKey={ak} onBet={(k, l, o) => bet(k, l, o, "ambas-1h")} theme={theme} isSuspended={isSuspended} />
         </>
       )}
       {mk.btts2H && mk.btts2H.yes > 1.001 && (
@@ -806,7 +862,7 @@ function MarketsPage({ match, activeKeys, onBet, onClose, theme, displayMinute }
           <MRow items={[
             { k: "bts2h:y", label: "Sim", odd: mk.btts2H.yes },
             { k: "bts2h:n", label: "Não", odd: mk.btts2H.no },
-          ]} activeKey={ak} onBet={(k, l, o) => bet(k, l, o, "ambas-2h")} theme={theme} />
+          ]} activeKey={ak} onBet={(k, l, o) => bet(k, l, o, "ambas-2h")} theme={theme} isSuspended={isSuspended} />
         </>
       )}
       {mk.exactGoals && Object.values(mk.exactGoals).some(v => (v ?? 0) > 1.001) && (
@@ -836,14 +892,14 @@ function MarketsPage({ match, activeKeys, onBet, onClose, theme, displayMinute }
           <MRow items={[
             { k: "goe:o", label: "Ímpar", odd: mk.goalOddEven.odd },
             { k: "goe:e", label: "Par", odd: mk.goalOddEven.even },
-          ]} activeKey={ak} onBet={(k, l, o) => bet(k, l, o, "par-impar")} theme={theme} />
+          ]} activeKey={ak} onBet={(k, l, o) => bet(k, l, o, "par-impar")} theme={theme} isSuspended={isSuspended} />
         </>
       )}
       {mk.teamGoals && (mk.teamGoals.homeOver05 ?? 0) > 1.001 && (
         <>
           <SLabel theme={theme}>GOLOS {match.home.toUpperCase()}</SLabel>
           {([["0.5", mk.teamGoals.homeOver05, mk.teamGoals.homeUnder05], ["1.5", mk.teamGoals.homeOver15, mk.teamGoals.homeUnder15], ["2.5", mk.teamGoals.homeOver25, mk.teamGoals.homeUnder25]] as [string, number | undefined, number | undefined][]).filter(([, o]) => (o ?? 0) > 1.001).map(([line, o, u]) => (
-            <MRow key={`htg${line}`} items={[{ k: `htg:o${line}`, label: `Acima ${line}`, odd: o ?? 0 }, { k: `htg:u${line}`, label: `Abaixo ${line}`, odd: u ?? 0 }]} activeKey={ak} onBet={(k, l, v) => bet(k, l, v, "golos-equipa")} theme={theme} />
+            <MRow key={`htg${line}`} items={[{ k: `htg:o${line}`, label: `Acima ${line}`, odd: o ?? 0 }, { k: `htg:u${line}`, label: `Abaixo ${line}`, odd: u ?? 0 }]} activeKey={ak} onBet={(k, l, v) => bet(k, l, v, "golos-equipa")} theme={theme} isSuspended={isSuspended} />
           ))}
         </>
       )}
@@ -851,7 +907,7 @@ function MarketsPage({ match, activeKeys, onBet, onClose, theme, displayMinute }
         <>
           <SLabel theme={theme}>GOLOS {match.away.toUpperCase()}</SLabel>
           {([["0.5", mk.teamGoals.awayOver05, mk.teamGoals.awayUnder05], ["1.5", mk.teamGoals.awayOver15, mk.teamGoals.awayUnder15], ["2.5", mk.teamGoals.awayOver25, mk.teamGoals.awayUnder25]] as [string, number | undefined, number | undefined][]).filter(([, o]) => (o ?? 0) > 1.001).map(([line, o, u]) => (
-            <MRow key={`atg${line}`} items={[{ k: `atg:o${line}`, label: `Acima ${line}`, odd: o ?? 0 }, { k: `atg:u${line}`, label: `Abaixo ${line}`, odd: u ?? 0 }]} activeKey={ak} onBet={(k, l, v) => bet(k, l, v, "golos-equipa")} theme={theme} />
+            <MRow key={`atg${line}`} items={[{ k: `atg:o${line}`, label: `Acima ${line}`, odd: o ?? 0 }, { k: `atg:u${line}`, label: `Abaixo ${line}`, odd: u ?? 0 }]} activeKey={ak} onBet={(k, l, v) => bet(k, l, v, "golos-equipa")} theme={theme} isSuspended={isSuspended} />
           ))}
         </>
       )}
@@ -866,12 +922,12 @@ function MarketsPage({ match, activeKeys, onBet, onClose, theme, displayMinute }
           <MRow items={[
             { k: "hcp:-1", label: `${match.home} −1`, odd: mk.handicap.homeMinusOne ?? 0 },
             { k: "hcp:+1", label: `${match.away} +1`, odd: mk.handicap.awayPlusOne ?? 0 },
-          ]} activeKey={ak} onBet={(k, l, o) => bet(k, l, o, "handicap")} theme={theme} />
+          ]} activeKey={ak} onBet={(k, l, o) => bet(k, l, o, "handicap")} theme={theme} isSuspended={isSuspended} />
           {(mk.handicap.homeMinusOneHalf ?? 0) > 1.001 && (
             <MRow items={[
               { k: "hcp:-1.5", label: `${match.home} −1.5`, odd: mk.handicap.homeMinusOneHalf ?? 0 },
               { k: "hcp:+1.5", label: `${match.away} +1.5`, odd: mk.handicap.awayPlusOneHalf ?? 0 },
-            ]} activeKey={ak} onBet={(k, l, o) => bet(k, l, o, "handicap")} theme={theme} />
+            ]} activeKey={ak} onBet={(k, l, o) => bet(k, l, o, "handicap")} theme={theme} isSuspended={isSuspended} />
           )}
         </>
       )}
@@ -881,7 +937,7 @@ function MarketsPage({ match, activeKeys, onBet, onClose, theme, displayMinute }
           <MRow items={[
             { k: "ah:home", label: match.home, odd: mk.asianHandicap.home },
             { k: "ah:away", label: match.away, odd: mk.asianHandicap.away },
-          ]} activeKey={ak} onBet={(k, l, o) => bet(k, l, o, "handicap-asiatico")} theme={theme} />
+          ]} activeKey={ak} onBet={(k, l, o) => bet(k, l, o, "handicap-asiatico")} theme={theme} isSuspended={isSuspended} />
         </>
       )}
       {mk.toWinBothHalves && mk.toWinBothHalves.home > 1.001 && (
@@ -890,7 +946,7 @@ function MarketsPage({ match, activeKeys, onBet, onClose, theme, displayMinute }
           <MRow items={[
             { k: "twbh:h", label: match.home, odd: mk.toWinBothHalves.home },
             { k: "twbh:a", label: match.away, odd: mk.toWinBothHalves.away },
-          ]} activeKey={ak} onBet={(k, l, o) => bet(k, l, o, "ganhar-2-partes")} theme={theme} />
+          ]} activeKey={ak} onBet={(k, l, o) => bet(k, l, o, "ganhar-2-partes")} theme={theme} isSuspended={isSuspended} />
         </>
       )}
       {mk.highestScoringHalf && mk.highestScoringHalf.first > 1.001 && (
@@ -900,7 +956,7 @@ function MarketsPage({ match, activeKeys, onBet, onClose, theme, displayMinute }
             { k: "hsh:1", label: "1ª Parte", odd: mk.highestScoringHalf.first },
             { k: "hsh:eq", label: "Iguais", odd: mk.highestScoringHalf.equal },
             { k: "hsh:2", label: "2ª Parte", odd: mk.highestScoringHalf.second },
-          ]} activeKey={ak} onBet={(k, l, o) => bet(k, l, o, "parte-mais-golos")} theme={theme} />
+          ]} activeKey={ak} onBet={(k, l, o) => bet(k, l, o, "parte-mais-golos")} theme={theme} isSuspended={isSuspended} />
         </>
       )}
     </>
@@ -941,7 +997,7 @@ function MarketsPage({ match, activeKeys, onBet, onClose, theme, displayMinute }
             <MRow key={`cn${line}`} items={[
               { k: `cn:o${line}`, label: `Acima ${line}`, odd: o ?? 0 },
               { k: `cn:u${line}`, label: `Abaixo ${line}`, odd: u ?? 0 },
-            ]} activeKey={ak} onBet={(k, l, v) => bet(k, l, v, "cantos")} theme={theme} />
+            ]} activeKey={ak} onBet={(k, l, v) => bet(k, l, v, "cantos")} theme={theme} isSuspended={isSuspended} />
           ))}
         </>
       )}
@@ -956,7 +1012,7 @@ function MarketsPage({ match, activeKeys, onBet, onClose, theme, displayMinute }
             <MRow key={`cn1h${line}`} items={[
               { k: `cn1h:o${line}`, label: `Acima ${line}`, odd: o ?? 0 },
               { k: `cn1h:u${line}`, label: `Abaixo ${line}`, odd: u ?? 0 },
-            ]} activeKey={ak} onBet={(k, l, v) => bet(k, l, v, "cantos-1h")} theme={theme} />
+            ]} activeKey={ak} onBet={(k, l, v) => bet(k, l, v, "cantos-1h")} theme={theme} isSuspended={isSuspended} />
           ))}
         </>
       )}
@@ -971,7 +1027,7 @@ function MarketsPage({ match, activeKeys, onBet, onClose, theme, displayMinute }
             <MRow key={`cn2h${line}`} items={[
               { k: `cn2h:o${line}`, label: `Acima ${line}`, odd: o ?? 0 },
               { k: `cn2h:u${line}`, label: `Abaixo ${line}`, odd: u ?? 0 },
-            ]} activeKey={ak} onBet={(k, l, v) => bet(k, l, v, "cantos-2h")} theme={theme} />
+            ]} activeKey={ak} onBet={(k, l, v) => bet(k, l, v, "cantos-2h")} theme={theme} isSuspended={isSuspended} />
           ))}
         </>
       )}
@@ -991,7 +1047,7 @@ function MarketsPage({ match, activeKeys, onBet, onClose, theme, displayMinute }
             <MRow key={`cd${line}`} items={[
               { k: `cd:o${line}`, label: `Acima ${line}`, odd: o ?? 0 },
               { k: `cd:u${line}`, label: `Abaixo ${line}`, odd: u ?? 0 },
-            ]} activeKey={ak} onBet={(k, l, v) => bet(k, l, v, "cartoes")} theme={theme} />
+            ]} activeKey={ak} onBet={(k, l, v) => bet(k, l, v, "cartoes")} theme={theme} isSuspended={isSuspended} />
           ))}
         </>
       )}
@@ -1006,7 +1062,7 @@ function MarketsPage({ match, activeKeys, onBet, onClose, theme, displayMinute }
             <MRow key={`cd1h${line}`} items={[
               { k: `cd1h:o${line}`, label: `Acima ${line}`, odd: o ?? 0 },
               { k: `cd1h:u${line}`, label: `Abaixo ${line}`, odd: u ?? 0 },
-            ]} activeKey={ak} onBet={(k, l, v) => bet(k, l, v, "cartoes-1h")} theme={theme} />
+            ]} activeKey={ak} onBet={(k, l, v) => bet(k, l, v, "cartoes-1h")} theme={theme} isSuspended={isSuspended} />
           ))}
         </>
       )}
@@ -1021,7 +1077,7 @@ function MarketsPage({ match, activeKeys, onBet, onClose, theme, displayMinute }
             <MRow key={`cd2h${line}`} items={[
               { k: `cd2h:o${line}`, label: `Acima ${line}`, odd: o ?? 0 },
               { k: `cd2h:u${line}`, label: `Abaixo ${line}`, odd: u ?? 0 },
-            ]} activeKey={ak} onBet={(k, l, v) => bet(k, l, v, "cartoes-2h")} theme={theme} />
+            ]} activeKey={ak} onBet={(k, l, v) => bet(k, l, v, "cartoes-2h")} theme={theme} isSuspended={isSuspended} />
           ))}
         </>
       )}
@@ -1037,7 +1093,7 @@ function MarketsPage({ match, activeKeys, onBet, onClose, theme, displayMinute }
             { k: "fg:h", label: match.home, odd: mk.firstGoal.home },
             { k: "fg:no", label: "Sem Golos", odd: mk.firstGoal.noGoal },
             { k: "fg:a", label: match.away, odd: mk.firstGoal.away },
-          ]} activeKey={ak} onBet={(k, l, o) => bet(k, l, o, "1o-golo")} theme={theme} />
+          ]} activeKey={ak} onBet={(k, l, o) => bet(k, l, o, "1o-golo")} theme={theme} isSuspended={isSuspended} />
         </>
       )}
       {mk.winToNil && mk.winToNil.home > 1.001 && (
@@ -1046,7 +1102,7 @@ function MarketsPage({ match, activeKeys, onBet, onClose, theme, displayMinute }
           <MRow items={[
             { k: "wtn:h", label: match.home, odd: mk.winToNil.home },
             { k: "wtn:a", label: match.away, odd: mk.winToNil.away },
-          ]} activeKey={ak} onBet={(k, l, o) => bet(k, l, o, "win-to-nil")} theme={theme} />
+          ]} activeKey={ak} onBet={(k, l, o) => bet(k, l, o, "win-to-nil")} theme={theme} isSuspended={isSuspended} />
         </>
       )}
       {mk.cleanSheet && mk.cleanSheet.home > 1.001 && (
@@ -1055,7 +1111,7 @@ function MarketsPage({ match, activeKeys, onBet, onClose, theme, displayMinute }
           <MRow items={[
             { k: "csh:h", label: match.home, odd: mk.cleanSheet.home },
             { k: "csh:a", label: match.away, odd: mk.cleanSheet.away },
-          ]} activeKey={ak} onBet={(k, l, o) => bet(k, l, o, "clean-sheet")} theme={theme} />
+          ]} activeKey={ak} onBet={(k, l, o) => bet(k, l, o, "clean-sheet")} theme={theme} isSuspended={isSuspended} />
         </>
       )}
     </>
@@ -1289,6 +1345,13 @@ function MarketsPage({ match, activeKeys, onBet, onClose, theme, displayMinute }
             </motion.div>
           )}
         </AnimatePresence>
+
+        {/* Suspension banner */}
+        {match.isLive && isSuspended && (
+          <div className={`mx-4 mb-1 flex items-center justify-center gap-2 rounded-lg border px-3 py-2 ${suspBg}`}>
+            <span className="text-[11px] font-black tracking-wide">{suspLabel}</span>
+          </div>
+        )}
 
         {/* Market tabs */}
         <div className={`flex gap-1.5 px-4 py-2.5 overflow-x-auto scrollbar-hide border-t ${isDark ? "border-zinc-800/40" : "border-zinc-100"}`}>
