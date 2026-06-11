@@ -4834,25 +4834,32 @@ function v1GameToV2Event(g: V1LiveGame): SAPIV2Event {
 
 async function fetchLiveRace(v1Base: string, v2Base: string): Promise<SAPIV2Event[]> {
   const headers = sapiHeaders();
-  const tryFetch = async (base: string): Promise<SAPIV2Event[]> => {
-    const resp = await fetch(`${base}/live`, { signal: AbortSignal.timeout(8000), headers });
-    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+  // V1 fetch: treat any well-formed V1 response (even 0 games) as success.
+  // V1 is the reliable source when V2 is degraded; 0 games = genuinely no live matches.
+  const tryV1 = async (): Promise<SAPIV2Event[]> => {
+    const resp = await fetch(`${v1Base}/live`, { signal: AbortSignal.timeout(3000), headers });
+    if (!resp.ok) throw new Error(`V1 HTTP ${resp.status}`);
     const raw = await resp.json() as Record<string, unknown>;
-
-    // V1 format: { data: { games: V1LiveGame[] } }
     const v1Data = raw["data"] as { games?: V1LiveGame[] } | null | undefined;
-    if (v1Data && !Array.isArray(v1Data) && Array.isArray(v1Data.games) && v1Data.games.length > 0) {
+    if (v1Data && !Array.isArray(v1Data) && Array.isArray(v1Data.games)) {
+      // V1 responded — return mapped games even if empty (0 live games is valid)
       return v1Data.games.map(v1GameToV2Event);
     }
-
-    // V2 format: { events: SAPIV2Event[] } or { data: SAPIV2Event[] }
+    throw new Error("not V1 format");
+  };
+  // V2 fetch: only useful when it returns non-empty results.
+  const tryV2 = async (): Promise<SAPIV2Event[]> => {
+    const resp = await fetch(`${v2Base}/live`, { signal: AbortSignal.timeout(3000), headers });
+    if (!resp.ok) throw new Error(`V2 HTTP ${resp.status}`);
+    const raw = await resp.json() as Record<string, unknown>;
     const v2Events = (raw["events"] ??
       (Array.isArray(raw["data"]) ? raw["data"] : undefined) ??
       []) as SAPIV2Event[];
     if (v2Events.length === 0) throw new Error("empty");
     return v2Events;
   };
-  return Promise.any([tryFetch(v1Base), tryFetch(v2Base)]).catch(() => []);
+  // Race V1 vs V2 — V1 wins on any valid response (including empty); V2 only on non-empty.
+  return Promise.any([tryV1(), tryV2()]).catch(() => []);
 }
 
 async function getFootballLiveV2(): Promise<SAPIV2Event[]> {
@@ -4904,7 +4911,7 @@ async function getHockeyLiveV2(): Promise<SAPIV2Event[]> {
   if ((wsConnected.has("hockey") || v1WsConnected.has("hockey")) && hockeyLiveV2Cache && now - hockeyLiveV2FetchedAt < WS_PREFERRED_MAX_STALE_MS && (wsLastMessageAt.get("hockey") ?? 0) > now - WS_PREFERRED_MAX_STALE_MS) return hockeyLiveV2Cache;
   if (hockeyLiveV2Cache && now - hockeyLiveV2FetchedAt < CONFIG.LIVE_CACHE_TTL) return hockeyLiveV2Cache;
   try {
-    const resp = await fetch(`${SAPI_V2_HOCKEY}/live`, { signal: AbortSignal.timeout(9000), headers: sapiHeaders() });
+    const resp = await fetch(`${SAPI_V2_HOCKEY}/live`, { signal: AbortSignal.timeout(3000), headers: sapiHeaders() });
     if (!resp.ok) return hockeyLiveV2Cache ?? [];
     const data = (await resp.json()) as { events?: SAPIV2Event[] };
     const events = data.events ?? [];
@@ -4930,7 +4937,7 @@ async function getBaseballLiveV2(): Promise<SAPIV2Event[]> {
   if ((wsConnected.has("baseball") || v1WsConnected.has("baseball")) && baseballLiveV2Cache && now - baseballLiveV2FetchedAt < WS_PREFERRED_MAX_STALE_MS && (wsLastMessageAt.get("baseball") ?? 0) > now - WS_PREFERRED_MAX_STALE_MS) return baseballLiveV2Cache;
   if (baseballLiveV2Cache && now - baseballLiveV2FetchedAt < CONFIG.LIVE_CACHE_TTL) return baseballLiveV2Cache;
   try {
-    const resp = await fetch(`${SAPI_V2_BASEBALL}/live`, { signal: AbortSignal.timeout(9000), headers: sapiHeaders() });
+    const resp = await fetch(`${SAPI_V2_BASEBALL}/live`, { signal: AbortSignal.timeout(3000), headers: sapiHeaders() });
     if (!resp.ok) return baseballLiveV2Cache ?? [];
     const data = (await resp.json()) as { events?: SAPIV2Event[] };
     const events = data.events ?? [];
@@ -4959,7 +4966,7 @@ async function getTennisLiveV2(): Promise<SAPIV2Event[]> {
     // Race V1 vs V2 — tennis endpoint shape varies, handle both formats
     const headers = sapiHeaders();
     const tryTennis = async (base: string): Promise<SAPIV2Event[]> => {
-      const resp = await fetch(`${base}/live`, { signal: AbortSignal.timeout(8000), headers });
+      const resp = await fetch(`${base}/live`, { signal: AbortSignal.timeout(3000), headers });
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
       const raw = (await resp.json()) as {
         events?: SAPIV2Event[];
@@ -5684,7 +5691,7 @@ async function getFootballTodayV2(): Promise<SAPIV2Event[]> {
   const now = Date.now();
   if (footballTodayV2Cache && now - footballTodayV2FetchedAt < TODAY_V2_TTL) return footballTodayV2Cache;
   try {
-    const resp = await fetch(`${SAPI_V2_FOOTBALL}/today`, { signal: AbortSignal.timeout(9000), headers: sapiHeaders() });
+    const resp = await fetch(`${SAPI_V2_FOOTBALL}/today`, { signal: AbortSignal.timeout(3000), headers: sapiHeaders() });
     if (!resp.ok) return footballTodayV2Cache ?? [];
     const data = (await resp.json()) as { events?: SAPIV2Event[] };
     footballTodayV2Cache = data.events ?? [];
@@ -5697,7 +5704,7 @@ async function getBasketballTodayV2(): Promise<SAPIV2Event[]> {
   const now = Date.now();
   if (basketballTodayV2Cache && now - basketballTodayV2FetchedAt < TODAY_V2_TTL) return basketballTodayV2Cache;
   try {
-    const resp = await fetch(`${SAPI_V2_BASKETBALL}/today`, { signal: AbortSignal.timeout(9000), headers: sapiHeaders() });
+    const resp = await fetch(`${SAPI_V2_BASKETBALL}/today`, { signal: AbortSignal.timeout(3000), headers: sapiHeaders() });
     if (!resp.ok) return basketballTodayV2Cache ?? [];
     const data = (await resp.json()) as { events?: SAPIV2Event[] };
     basketballTodayV2Cache = data.events ?? [];
@@ -5710,7 +5717,7 @@ async function getHockeyTodayV2(): Promise<SAPIV2Event[]> {
   const now = Date.now();
   if (hockeyTodayV2Cache && now - hockeyTodayV2FetchedAt < TODAY_V2_TTL) return hockeyTodayV2Cache;
   try {
-    const resp = await fetch(`${SAPI_V2_HOCKEY}/today`, { signal: AbortSignal.timeout(9000), headers: sapiHeaders() });
+    const resp = await fetch(`${SAPI_V2_HOCKEY}/today`, { signal: AbortSignal.timeout(3000), headers: sapiHeaders() });
     if (!resp.ok) return hockeyTodayV2Cache ?? [];
     const data = (await resp.json()) as { events?: SAPIV2Event[] };
     hockeyTodayV2Cache = data.events ?? [];
@@ -5723,7 +5730,7 @@ async function getTennisTodayV2(): Promise<SAPIV2Event[]> {
   const now = Date.now();
   if (tennisTodayV2Cache && now - tennisTodayV2FetchedAt < TODAY_V2_TTL) return tennisTodayV2Cache;
   try {
-    const resp = await fetch(`${SAPI_V2_TENNIS}/today`, { signal: AbortSignal.timeout(9000), headers: sapiHeaders() });
+    const resp = await fetch(`${SAPI_V2_TENNIS}/today`, { signal: AbortSignal.timeout(3000), headers: sapiHeaders() });
     if (!resp.ok) return tennisTodayV2Cache ?? [];
     const data = (await resp.json()) as { events?: SAPIV2Event[] };
     tennisTodayV2Cache = data.events ?? [];
@@ -5797,7 +5804,7 @@ async function getBaseballTodayV2(): Promise<SAPIV2Event[]> {
   const now = Date.now();
   if (baseballTodayV2Cache && now - baseballTodayV2FetchedAt < TODAY_V2_TTL) return baseballTodayV2Cache;
   try {
-    const resp = await fetch(`${SAPI_V2_BASEBALL}/today`, { signal: AbortSignal.timeout(9000), headers: sapiHeaders() });
+    const resp = await fetch(`${SAPI_V2_BASEBALL}/today`, { signal: AbortSignal.timeout(3000), headers: sapiHeaders() });
     if (!resp.ok) return baseballTodayV2Cache ?? [];
     const data = (await resp.json()) as { events?: SAPIV2Event[] };
     baseballTodayV2Cache = data.events ?? [];
@@ -8835,12 +8842,11 @@ async function rebuildUpcomingCache(): Promise<void> {
 // Shared payload builder — used by both /live HTTP route and SSE broadcast
 async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
   const now = Date.now();
-  // Warm the upcoming cache first so football matches recently seen in pre-match
-  // are eligible to cross into the live feed even if the provider reports them late.
-  if (_allUpcomingCacheBuiltAt === 0) {
-    await rebuildUpcomingCache();
-  } else if (Date.now() - _allUpcomingCacheBuiltAt > UPCOMING_CACHE_TTL_MS) {
-    rebuildUpcomingCache().catch(() => {}); // rebuild in background; use stale now
+  // Warm the upcoming cache in the background — never block the live path.
+  // On cold start the cache is empty; upcoming-based fallbacks simply won't fire
+  // until the first background rebuild completes (~1-2 s later).
+  if (_allUpcomingCacheBuiltAt === 0 || Date.now() - _allUpcomingCacheBuiltAt > UPCOMING_CACHE_TTL_MS) {
+    rebuildUpcomingCache().catch(() => {});
   }
   const allUpcoming = _allUpcomingCache;
 
@@ -8934,14 +8940,17 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
   const baseballLive  = sportWithFallback("baseball",   buildBaseballLiveV2(baseballEvents));
   const tennisLive    = sportWithFallback("tennis",     tennisLivePart);
 
-  const livePart = [
+  // mergeStickyLive: re-injects any match seen in the last 5 min that the API
+  // temporarily omitted. Fresh data always wins; injected matches use last-known
+  // score/status so the match never disappears mid-game.
+  const livePart = mergeStickyLive([
     ...footballLive,
     ...basketballLive,
     ...hockeyLive,
     ...baseballLive,
     ...tennisLive,
     ...startedUpcomingTennisPart,
-  ];
+  ]);
 
   const liveIds = new Set(livePart.map(m => String(m.id)));
   // Deduplicate by team pair — prevents upcoming duplicating a match already in the live feed
@@ -9194,6 +9203,45 @@ function sportWithFallback(sport: string, fresh: LiveMatchState[]): LiveMatchSta
   const cached = _lastGoodSport.get(sport);
   if (cached && now - cached.savedAt < SPORT_FALLBACK_TTL_MS) return cached.matches;
   return fresh; // genuinely empty — nothing cached or cache expired
+}
+
+// ── Per-match sticky live cache ───────────────────────────────────────────────
+// Once a match enters the live feed it stays for STICKY_LIVE_TTL_MS even when
+// the API temporarily omits it (API hiccup, rate-limit, V1 rotation).
+// Score/status shown is the last known snapshot — better than making the match
+// disappear and reappear mid-game.
+const STICKY_LIVE_TTL_MS = 5 * 60_000; // 5 minutes since last seen
+const _stickyLive = new Map<string, { match: LiveMatchState; lastSeenAt: number }>();
+
+function mergeStickyLive(freshMatches: LiveMatchState[]): LiveMatchState[] {
+  const now = Date.now();
+
+  // Update sticky cache entries for every match in the fresh feed
+  for (const m of freshMatches) {
+    _stickyLive.set(String(m.id), { match: m, lastSeenAt: now });
+  }
+
+  // Evict expired entries (not seen for > STICKY_LIVE_TTL_MS)
+  for (const [id, entry] of _stickyLive) {
+    if (now - entry.lastSeenAt > STICKY_LIVE_TTL_MS) _stickyLive.delete(id);
+  }
+
+  // Build lookup sets for deduplication
+  const freshIds  = new Set(freshMatches.map(m => String(m.id)));
+  const freshPairs = new Set(
+    freshMatches.map(m => `${m.home.toLowerCase()}|${m.away.toLowerCase()}`)
+  );
+
+  // Re-inject matches that are sticky but not in the current fresh feed
+  const injected: LiveMatchState[] = [];
+  for (const [id, entry] of _stickyLive) {
+    if (freshIds.has(id)) continue; // already in fresh feed
+    const pair = `${entry.match.home.toLowerCase()}|${entry.match.away.toLowerCase()}`;
+    if (freshPairs.has(pair)) continue; // same game under different id (e.g. V1→V2 transition)
+    injected.push(entry.match);
+  }
+
+  return [...freshMatches, ...injected];
 }
 
 function getLivePayloadFallback(): { matches: LiveMatchState[] } | null {
