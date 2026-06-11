@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useRef, useMemo, createContext, useContext, Children, type ReactNode } from "react";
+import { useState, useCallback, useEffect, useRef, useMemo, createContext, useContext, Children, lazy, Suspense, type ReactNode } from "react";
 import trophyImg from "/trophy-wc-nobg.png";
 import { useLocation } from "wouter";
 import { useIdle } from "@/hooks/use-idle";
@@ -1581,9 +1581,14 @@ function sportEmoji(sport?: string): string {
   return "⚽";
 }
 
+const LazyWorldCupPage = lazy(() => import("@/pages/world-cup"));
+
 // ─── Animated Copa do Mundo 2026 Banner ──────────────────────────────────────
-function AnimatedCopaBanner() {
-  const [, navTo] = useLocation();
+function AnimatedCopaBanner({ onOpen }: { onOpen: () => void }) {
+  // Prefetch WC data when banner mounts so the panel opens instantly
+  useEffect(() => {
+    fetch("/api/matches/wc2026").catch(() => {});
+  }, []);
   return (
     <motion.div
       initial={{ opacity: 0, y: 12 }}
@@ -1595,7 +1600,7 @@ function AnimatedCopaBanner() {
         border: "1px solid rgba(255,100,0,0.25)",
         boxShadow: "0 0 40px rgba(120,0,255,0.15), inset 0 1px 0 rgba(255,255,255,0.06)",
       }}
-      onClick={() => navTo("/copa-do-mundo")}
+      onClick={onOpen}
       whileTap={{ scale: 0.98 }}
     >
       {/* animated gradient overlay */}
@@ -1777,6 +1782,7 @@ export default function Home() {
     };
   }, [tapMoveAt, tapStartAt, tapTouchMove, tapTouchStart]);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [showWCPanel, setShowWCPanel] = useState(false);
   const [bets, setBets] = useState<BetSelection[]>([]);
   const [authModalOpen, setAuthModalOpen] = useState(false);
   // Read pending bet from World Cup page (written to localStorage at /copa-do-mundo)
@@ -7392,8 +7398,37 @@ export default function Home() {
 
         <main className="flex-1 pb-32 lg:pb-8 overflow-hidden min-w-0">
 
+          {/* ── Copa do Mundo inline panel ────────────────────────────────── */}
+          {showWCPanel && (
+            <Suspense fallback={
+              <div className="flex items-center justify-center h-64">
+                <div className="w-7 h-7 border-2 border-zinc-800 border-t-red-500 rounded-full animate-spin" />
+              </div>
+            }>
+              <LazyWorldCupPage
+                onClose={() => setShowWCPanel(false)}
+                onBet={(bet) => {
+                  setBets(prev => {
+                    if (prev.some(b => b.matchId === bet.matchId && b.market === bet.market && b.selection === bet.selection)) return prev;
+                    return [...prev, {
+                      matchId: bet.matchId,
+                      matchTitle: `${bet.home} vs ${bet.away}`,
+                      league: "Copa do Mundo 2026",
+                      country: "Internacional",
+                      sport: bet.sport,
+                      date: "", time: "",
+                      selection: bet.selection,
+                      odd: bet.odd,
+                      market: bet.market,
+                      label: bet.label,
+                    }];
+                  });
+                }}
+              />
+            </Suspense>
+          )}
 
-          <div className="p-4 lg:p-8">
+          <div className="p-4 lg:p-8" style={showWCPanel ? { display: "none" } : undefined}>
             {/* Inline market detail view — replaces match list when a match is expanded */}
             {expandedMatch && (
               <div className="animate-in fade-in slide-in-from-bottom-4 duration-300">
@@ -9733,7 +9768,7 @@ export default function Home() {
                   })()}
 
                   {!selectedLeague && (selectedSport === "all" || selectedSport === "football") && (
-                    <AnimatedCopaBanner />
+                    <AnimatedCopaBanner onOpen={() => setShowWCPanel(true)} />
                   )}
 
                   {featuredUpcoming.length > 0 && (
