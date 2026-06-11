@@ -1853,6 +1853,8 @@ export default function Home() {
   // value without adding liveMatches / liveMatches.length to their dep arrays
   // (which would restart intervals on every 5-second poll response).
   const liveMatchesRef = useRef<Match[]>([]);
+  // WC live matches kept separate so bet ticket can show "AO VIVO" for WC bets
+  const wcLiveForTicketRef = useRef<Match[]>([]);
   // SSE connection for real-time live updates
   const sseRef = useRef<EventSource | null>(null);
   const sseActiveRef = useRef(false); // true when SSE is connected and receiving data
@@ -3174,6 +3176,19 @@ export default function Home() {
       const lg = (m.league ?? "").toLowerCase();
       return !_WC_LIVE_KW.some(k => lg.includes(k));
     });
+    // Capture WC live matches into ref so bet ticket can show "AO VIVO" for WC bets
+    const wcRawForTicket = rawMatches.filter(m => _WC_LIVE_KW.some(k => (m.league ?? "").toLowerCase().includes(k)));
+    if (wcRawForTicket.length > 0) {
+      wcLiveForTicketRef.current = wcRawForTicket.map(m => ({
+        id: String(m.id), home: String(m.home ?? ""), away: String(m.away ?? ""),
+        league: String(m.league ?? ""), country: "", sport: "football" as const,
+        minute: Number(m.minute ?? 0), status: String(m.status ?? ""),
+        homeScore: Number(m.homeScore ?? 0), awayScore: Number(m.awayScore ?? 0), isLive: true,
+        odds: (m.odds ?? { home: 0, draw: 0, away: 0 }) as { home: number; draw: number; away: number },
+        markets: (m.markets ?? {}) as Match["markets"], events: [],
+        hasRealOdds: !!m.hasRealOdds, _liveExtra: m._liveExtra as Match["_liveExtra"],
+      })) as unknown as Match[];
+    }
     if (matches.length === 0) {
       // Only clear live state when the raw API had NO matches at all.
       // If rawMatches > 0 but all were WC (filtered), keep existing non-WC live state intact.
@@ -6988,18 +7003,20 @@ export default function Home() {
   // Priority 2: fuzzy team-name match (fallback for older bets without stored matchId).
   const findLiveMatchForSel = (sel: StoredSelection): Match | null => {
     if (sel.matchId) {
-      const byId = liveMatches.find(m => String(m.id) === String(sel.matchId));
+      const byId = liveMatches.find(m => String(m.id) === String(sel.matchId))
+               ?? wcLiveForTicketRef.current.find(m => String(m.id) === String(sel.matchId));
       if (byId) return byId;
     }
     const [h = "", a = ""] = (sel.matchTitle ?? "").split(" vs ");
     const nh = normTeam(h); const na = normTeam(a);
     if (!nh) return null;
-    return liveMatches.find(m => {
+    const teamMatch = (list: Match[]) => list.find(m => {
       const mh = normTeam(m.home); const ma = normTeam(m.away);
       const homeMatch = mh === nh || (nh.length >= 4 && (mh.includes(nh.slice(0, 6)) || nh.includes(mh.slice(0, 6))));
       const awayMatch = ma === na || (na.length >= 4 && (ma.includes(na.slice(0, 6)) || na.includes(ma.slice(0, 6))));
       return homeMatch && awayMatch;
     }) ?? null;
+    return teamMatch(liveMatches) ?? teamMatch(wcLiveForTicketRef.current);
   };
 
   // Get live odd for a specific selection from a live match
