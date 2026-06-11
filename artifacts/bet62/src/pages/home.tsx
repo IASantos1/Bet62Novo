@@ -12855,11 +12855,16 @@ function DepositWithdrawModal({
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify({ amount, phone: phoneClean }),
       });
-      const data = await r.json() as { orderId?: string; requestId?: string; error?: string };
+      const data = await r.json() as { orderId?: string; paymentUrl?: string; error?: string };
       if (!r.ok) { toast.error(data.error ?? "Erro ao enviar pedido MB WAY."); return; }
       setMbwayDone(true);
       if (data.orderId) setMbwayOrderId(data.orderId);
-      toast.success("Pedido MB WAY enviado! Aceite na App MB WAY. O saldo será actualizado automaticamente.");
+      if (data.paymentUrl) {
+        toast.info("A redirecionar para pagamento seguro...");
+        window.open(data.paymentUrl, "_blank");
+      } else {
+        toast.success("Pedido MB WAY criado! O saldo será actualizado automaticamente após pagamento.");
+      }
       triggerPromoNotif(amount);
     } catch { toast.error("Erro de ligação. Tente novamente."); }
     finally { setLoading(false); }
@@ -12895,7 +12900,7 @@ function DepositWithdrawModal({
           </div>
           <div>
             <div className="font-black text-base">{mainTab === "deposit" ? "Depósito" : "Levantamento"}</div>
-            <div className="text-xs text-zinc-400">{mainTab === "deposit" ? <>Processado por <span className="text-white font-semibold">ifthenpay</span></> : "Transferência bancária · IBAN"}</div>
+            <div className="text-xs text-zinc-400">{mainTab === "deposit" ? <>Processado por <span className="text-white font-semibold">Stripe</span></> : "Transferência bancária · IBAN"}</div>
           </div>
           <div className="ml-auto text-right">
             <div className="text-[10px] text-zinc-500">Saldo actual</div>
