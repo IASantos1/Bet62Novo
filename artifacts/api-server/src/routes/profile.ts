@@ -2,7 +2,7 @@ import { Router, type IRouter, type Response } from "express";
 import { db } from "@workspace/db";
 import { kycDocumentsTable, usersTable } from "@workspace/db/schema";
 import { desc, eq } from "drizzle-orm";
-import { authMiddleware, type AuthRequest } from "../middlewares/auth";
+import { authMiddleware, type AuthRequest } from "../middlewares/auth.js";
 import fs from "fs";
 import path from "path";
 

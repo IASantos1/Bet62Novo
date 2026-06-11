@@ -3,7 +3,7 @@ import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import { db, usersTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
-import { logger } from "../lib/logger";
+import { logger } from "../lib/logger.js";
 
 const router: IRouter = Router();
 const SESSION_SECRET = process.env.SESSION_SECRET;
@@ -110,7 +110,7 @@ router.post("/login", async (req, res): Promise<void> => {
   }
 });
 
-import { authMiddleware, type AuthRequest } from "../middlewares/auth";
+import { authMiddleware, type AuthRequest } from "../middlewares/auth.js";
 import { type Response } from "express";
 import { sql } from "drizzle-orm";
 

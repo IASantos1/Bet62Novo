@@ -2412,7 +2412,7 @@ const WTA_CITY_TIER: Record<string, number> = {
   "bogota": 5, "lausanne": 5, "hamburg": 5, "palermo": 5,
   "montreal wta": 5, "nanchang": 5,
   "ilkley": 5, "bratislava": 5, "surbiton": 5, "rosmalen": 5,
-  "bad homburg": 5, "berlin": 5,
+  "bad homburg": 5,
 };
 
 function tennisTournLabel(tournament: string | SAPIV2TournObj | undefined): string {
@@ -8916,7 +8916,7 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
       if (existing.has(id)) continue;
       const providerId = Number(String(id).replace(/^tennis-v2-/, ""));
       const detail = Number.isFinite(providerId) ? startedUpcomingTennisDetails.get(providerId) : undefined;
-      const sets = detail?.sets?.length ? detail.sets : [[0, 0]];
+      const sets: [number, number][] = detail?.sets?.length ? detail.sets : [[0, 0]];
       const currentPoints = detail?.currentPoints;
       const currentSetNum = Math.max(1, sets.length);
       out.push({
@@ -9152,7 +9152,7 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
   const filteredPrematch = sortByCatalogPriority(
     startingSoonFinal.filter((m) => prematchDecisions.get(String(m.id))?.visible ?? true),
     prematchDecisions,
-    (a, b) => matchStartsInMinutes(a.date, a.time) - matchStartsInMinutes(b.date, b.time),
+    (a, b) => matchStartsInMinutes(a.date ?? "", a.time ?? "") - matchStartsInMinutes(b.date ?? "", b.time ?? ""),
   );
 
   const applyOperationalDecision = (
@@ -9465,6 +9465,7 @@ async function buildTennisLiveV1(): Promise<LiveMatchState[]> {
       // Show all live tennis (ATP, WTA, Challengers, ITF) — filter to main-tour only for upcoming
       const enrichedLiveLeague = enrichTennisV1League(compName);
       const tier = tennisTierRank(compName);
+      // Sets won — from homeCompetitor.score (V1 uses score for sets won)
       let homeScore = Math.max(0, g.homeCompetitor?.score ?? 0);
       let awayScore = Math.max(0, g.awayCompetitor?.score ?? 0);
       const ws = tennisV1WsScore.get(String(g.id));
@@ -9472,6 +9473,31 @@ async function buildTennisLiveV1(): Promise<LiveMatchState[]> {
         if (typeof ws.home === "number") homeScore = Math.max(0, ws.home);
         if (typeof ws.away === "number") awayScore = Math.max(0, ws.away);
       }
+
+      // ── Parse V1 stages for real per-set scores and game points ──────────────
+      type V1Stage = { id: number; name: string; shortName?: string; homeCompetitorScore: number; awayCompetitorScore: number; isLive?: boolean; isEnded?: boolean };
+      const stages: V1Stage[] = ((g as unknown as Record<string, unknown>)["stages"] as V1Stage[] | undefined) ?? [];
+
+      // Per-set game scores: stages named "Set 1", "Set 2", ...
+      const setSets: [number, number][] = stages
+        .filter(s => /^set \d+$/i.test(s.name) && s.homeCompetitorScore >= 0 && s.awayCompetitorScore >= 0)
+        .map(s => [Math.max(0, s.homeCompetitorScore), Math.max(0, s.awayCompetitorScore)]);
+      const sets: [number, number][] = setSets.length > 0 ? setSets : [[homeScore, awayScore]];
+
+      // Current game points from "Game" stage
+      const gamePtLabel = (n: number): number | string => {
+        if (n <= 0) return "0";
+        if (n === 15) return "15";
+        if (n === 30) return "30";
+        if (n === 40) return "40";
+        if (n >= 50) return "AD"; // advantage
+        return String(n);
+      };
+      const gameStage = stages.find(s => s.name === "Game" || s.shortName === "Game");
+      const hPt = gameStage ? gamePtLabel(gameStage.homeCompetitorScore) : "0";
+      const aPt = gameStage ? gamePtLabel(gameStage.awayCompetitorScore) : "0";
+      const currentPoints: [number | string, number | string] = [hPt, aPt];
+
       const odds = makeOddsFromTeams(home, away);
       const diff = homeScore - awayScore;
       let liveOdds = { ...odds, draw: 0 };
@@ -9496,7 +9522,7 @@ async function buildTennisLiveV1(): Promise<LiveMatchState[]> {
         odds: liveOdds,
         markets: makeAdvancedMarketsFromTeams(home, away),
         events: [],
-        _liveExtra: { sets: [[homeScore, awayScore]], currentPoints: ["0", "0"], ...(serving ? { serving } : {}) },
+        _liveExtra: { sets, currentPoints, ...(serving ? { serving } : {}) },
       };
       const rank = tier === 999 ? 5 : tier; // unknown-tier ATP/WTA → treat as 250 level
       primary.push({ r: rank, m: item });

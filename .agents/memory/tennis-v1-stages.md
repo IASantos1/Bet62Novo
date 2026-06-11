@@ -1,37 +1,36 @@
 ---
-name: Tennis V1 stages field
-description: V1 /live game object has a `stages` array with per-set scores, live game points, and serving info
+name: Tennis V1 stages parsing
+description: V1 /live returns stages[] with per-set scores and game points; how to parse them
 ---
 
-## The stages array
+# V1 Tennis stages[] structure
 
-Each live V1 tennis game (`statusGroup===3`) contains a `stages` array:
+Each live game from `/api/v1/tennis/live` includes a `stages` array:
 
 ```json
 [
-  { "name": "Game",  "homeCompetitorScore": 15, "awayCompetitorScore": 30, "isLive": true },
-  { "name": "Set 1", "homeCompetitorScore": 6,  "awayCompetitorScore": 7,  "isEnded": true, "homeCompetitorExtraScore": 5, "awayCompetitorExtraScore": 7 },
-  { "name": "Set 2", "homeCompetitorScore": 6,  "awayCompetitorScore": 4,  "isEnded": true },
-  { "name": "Set 3", "homeCompetitorScore": 4,  "awayCompetitorScore": 4,  "isLive": true },
-  { "name": "Sets",  "homeCompetitorScore": 1,  "awayCompetitorScore": 1,  "isCurrent": true }
+  {"id": 34, "name": "Game", "shortName": "Game", "homeCompetitorScore": 40, "awayCompetitorScore": 40, "isLive": true},
+  {"id": 27, "name": "Set 1", "shortName": "S1", "homeCompetitorScore": 7, "awayCompetitorScore": 6, "isEnded": true},
+  {"id": 28, "name": "Set 2", "shortName": "S2", "homeCompetitorScore": 4, "awayCompetitorScore": 4, "isLive": true},
+  {"id": 35, "name": "Sets", "shortName": "Sets", "homeCompetitorScore": 1, "awayCompetitorScore": 0, "isLive": true}
 ]
 ```
 
-- **"Set N"** entries (filter: `/^set\s*\d+$/i`): per-set game score; sort by set number to build `sets[]` array
-- **"Game"** entry (`isLive: true`): current game points — values 0/15/30/40/50(=Advantage)
-- **"Sets"** entry: same as homeCompetitor.score / awayCompetitor.score (sets won total)
-- **homeCompetitorExtraScore** / **awayCompetitorExtraScore**: tiebreak point scores when present
+- **"Game"**: current game points (0/15/30/40/50=AD)
+- **"Set N"** (regex `/^set \d+$/i`): per-set game scores
+- **"Sets"**: total sets won (same as `homeCompetitor.score`)
 
-## Serving
+**Note:** `homeCompetitor.score` = sets won overall (already correct for `homeScore/awayScore`).
+The `stages` field is NOT declared in `V1TennisGame` type — access via `(g as unknown as Record<string, unknown>)["stages"]`.
 
-`homeCompetitor.inPossession === true` or `awayCompetitor.inPossession === true` → who is currently serving.
-Map to `_liveExtra.serving: [boolean, boolean]`.
+## Parsing in buildTennisLiveV1
 
-## How buildTennisLiveV1 uses this
+```typescript
+const stages = ((g as unknown as Record<string, unknown>)["stages"] as V1Stage[] | undefined) ?? [];
+const setSets = stages.filter(s => /^set \d+$/i.test(s.name) && s.homeCompetitorScore >= 0).map(...);
+const sets = setSets.length > 0 ? setSets : [[homeScore, awayScore]];
+const gameStage = stages.find(s => s.name === "Game");
+const hPt = gamePtLabel(gameStage?.homeCompetitorScore ?? 0); // 40 → "40", 50 → "AD"
+```
 
-1. Filter stages by `/^set\s*\d+$/i` → sort by number → build `sets: Array<[number,number]>`
-2. Find stage with `name === "Game" && isLive` → convert scores (50→"A") → `currentPoints: [string, string]`
-3. Check `inPossession` on competitors → `serving: [boolean, boolean]`
-4. Fallback if no Set stages: `[[homeScore, awayScore]]` (just sets-won count)
-
-**Why:** The raw `homeCompetitor.score` only returns sets won (e.g. 1), not individual game scores per set. The `stages` field is the only source for detailed set scores.
+**Why:** V1 API doesn't include `stages` in its documented schema but includes it in the response. The type cast to `unknown` first is required by TypeScript strict mode.

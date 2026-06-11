@@ -1,6 +1,6 @@
 import { Queue, Worker } from "bullmq";
 import IORedis from "ioredis";
-import { logger } from "./logger";
+import { logger } from "./logger.js";
 
 type MatchSettlementJob = {
   matchId: string;

@@ -2,10 +2,10 @@ import { Router, type IRouter, type Request, type Response } from "express";
 import Stripe from "stripe";
 import { db, usersTable, paymentsTable } from "@workspace/db";
 import { eq, sql, count } from "drizzle-orm";
-import { authMiddleware, type AuthRequest } from "../middlewares/auth";
-import { logger } from "../lib/logger";
-import { sendDepositConfirmed } from "../lib/mailer";
-import { applyBalanceDelta } from "../lib/ledger";
+import { authMiddleware, type AuthRequest } from "../middlewares/auth.js";
+import { logger } from "../lib/logger.js";
+import { sendDepositConfirmed } from "../lib/mailer.js";
+import { applyBalanceDelta } from "../lib/ledger.js";
 import { randomUUID } from "crypto";
 
 const router: IRouter = Router();
@@ -13,7 +13,7 @@ const router: IRouter = Router();
 function getStripe(): Stripe {
   const key = process.env.STRIPE_SECRET_KEY;
   if (!key) throw new Error("STRIPE_SECRET_KEY not set");
-  return new Stripe(key, { apiVersion: "2025-05-28.basil" });
+  return new Stripe(key, { apiVersion: "2026-05-27.dahlia" });
 }
 
 function getBaseUrl(req: Request): string {

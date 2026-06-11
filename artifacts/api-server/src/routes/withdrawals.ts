@@ -1,11 +1,11 @@
 import { Router, type IRouter, type Request, type Response } from "express";
 import { db, usersTable, withdrawalsTable, betsTable, paymentsTable, adminAuditLogTable } from "@workspace/db";
 import { eq, desc, and, ne, inArray, sql, count, sum } from "drizzle-orm";
-import { authMiddleware, type AuthRequest } from "../middlewares/auth";
-import { adminMiddleware, type AdminRequest } from "../middlewares/adminAuth";
-import { logger } from "../lib/logger";
-import { sendWithdrawalApproved, sendWithdrawalRejected } from "../lib/mailer";
-import { applyBalanceDelta } from "../lib/ledger";
+import { authMiddleware, type AuthRequest } from "../middlewares/auth.js";
+import { adminMiddleware, type AdminRequest } from "../middlewares/adminAuth.js";
+import { logger } from "../lib/logger.js";
+import { sendWithdrawalApproved, sendWithdrawalRejected } from "../lib/mailer.js";
+import { applyBalanceDelta } from "../lib/ledger.js";
 
 const router: IRouter = Router();
 

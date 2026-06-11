@@ -4146,8 +4146,9 @@ export default function Home() {
       if (tag === "HT") return "Int.";
       if (tag === "PEN") return "PEN";
       const minLbl = extra?.clockStr ?? fmtFootballMin(minute, tag);
-      if (tag === "ET") return `${minLbl ? `${minLbl} · ` : ""}ET`;
-      if (tag) return `${minLbl} · ${tag}`.trim();
+      if (tag === "ET") return `ET${minLbl ? ` · ${minLbl}` : ""}`;
+      if (tag && minLbl) return `${tag} · ${minLbl}`;
+      if (tag) return tag;
       return minLbl || "AO VIVO";
     })();
 

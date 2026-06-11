@@ -1,9 +1,9 @@
 import { createServer } from "http";
-import app from "./app";
-import { logger } from "./lib/logger";
-import { getUpcomingAll, initSportWebSockets, initV1SportWebSockets, initLiveWsServer, primeSportLiveCaches } from "./routes/matches";
-import { startSettlementWorker, autoSettlePendingBets, regradeSettledBetsForMatch } from "./settlement";
-import { startSettlementQueueWorker } from "./lib/settlementQueue";
+import app from "./app.js";
+import { logger } from "./lib/logger.js";
+import { getUpcomingAll, initSportWebSockets, initV1SportWebSockets, initLiveWsServer, primeSportLiveCaches } from "./routes/matches.js";
+import { startSettlementWorker, autoSettlePendingBets, regradeSettledBetsForMatch } from "./settlement.js";
+import { startSettlementQueueWorker } from "./lib/settlementQueue.js";
 
 const rawPort = process.env["PORT"];
 

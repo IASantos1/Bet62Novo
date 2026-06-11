@@ -14,9 +14,9 @@ import {
   usersTable,
 } from "@workspace/db";
 import { eq, desc, count, sum, sql, ne } from "drizzle-orm";
-import { adminMiddleware, type AdminRequest } from "../middlewares/adminAuth";
-import { logger } from "../lib/logger";
-import { invalidateCompetitionCatalogSnapshot } from "../lib/liveCompetitionCatalog";
+import { adminMiddleware, type AdminRequest } from "../middlewares/adminAuth.js";
+import { logger } from "../lib/logger.js";
+import { invalidateCompetitionCatalogSnapshot } from "../lib/liveCompetitionCatalog.js";
 
 const router: IRouter = Router();
 

@@ -3,10 +3,10 @@ import jwt from "jsonwebtoken";
 import { db } from "@workspace/db";
 import { kycDocumentsTable, usersTable, betsTable, paymentsTable, withdrawalsTable, settlementLogsTable } from "@workspace/db/schema";
 import { eq, desc, count, sum, sql, gte, lte, and } from "drizzle-orm";
-import { adminMiddleware, type AdminRequest } from "../middlewares/adminAuth";
-import { rateLimit } from "../middlewares/rateLimit";
-import { logger } from "../lib/logger";
-import { applyBalanceDelta } from "../lib/ledger";
+import { adminMiddleware, type AdminRequest } from "../middlewares/adminAuth.js";
+import { rateLimit } from "../middlewares/rateLimit.js";
+import { logger } from "../lib/logger.js";
+import { applyBalanceDelta } from "../lib/ledger.js";
 import fs from "fs";
 import path from "path";
 
