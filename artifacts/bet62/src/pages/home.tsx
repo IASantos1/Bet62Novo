@@ -1779,6 +1779,34 @@ export default function Home() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [bets, setBets] = useState<BetSelection[]>([]);
   const [authModalOpen, setAuthModalOpen] = useState(false);
+  // Read pending bet from World Cup page (written to localStorage at /copa-do-mundo)
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem("wc_pending_bet");
+      if (!raw) return;
+      localStorage.removeItem("wc_pending_bet");
+      const pending = JSON.parse(raw) as {
+        matchId: string; home: string; away: string;
+        selection: string; market: string; label: string; odd: number; sport: string;
+      };
+      if (!pending?.matchId || !Number.isFinite(pending?.odd)) return;
+      setBets(prev => {
+        if (prev.some(b => b.matchId === pending.matchId && b.market === pending.market && b.selection === pending.selection)) return prev;
+        return [...prev, {
+          matchId: pending.matchId,
+          matchTitle: `${pending.home} vs ${pending.away}`,
+          league: "Copa do Mundo 2026",
+          country: "Internacional",
+          sport: pending.sport ?? "football",
+          date: "", time: "",
+          selection: pending.selection,
+          odd: pending.odd,
+          market: pending.market ?? "resultado",
+          label: pending.label ?? pending.selection,
+        }];
+      });
+    } catch { /* silent */ }
+  }, []);
   const [authMode, setAuthMode] = useState<"login" | "register">("login");
   const [expandedMatch, setExpandedMatch] = useState<Match | null>(null);
   const [betSlipOpenMobile, setBetSlipOpenMobile] = useState(false);

@@ -784,9 +784,19 @@ function findLiveResult(
 
 function liveDefinitiveOutcomeForSel(
   sel: SelectionRecord,
-  score: { home: number; away: number }
+  score: {
+    home: number;
+    away: number;
+    cornersTotal?: number;
+    cardsTotal?: number;
+    htScore?: [number, number] | null;
+    status?: string;
+  }
 ): "won" | "lost" | null {
-  const s = String(sel.selection ?? "");
+  // Key normalizations — mirror scoreOutcomeForSel so tg-o25, tg-u25, etc. are handled
+  let s = String(sel.selection ?? "");
+  if (/^tg-([ou][\d.]+)$/.test(s)) s = s.slice(3);  // tg-o25 → o25
+
   const home = score.home;
   const away = score.away;
   if (!Number.isFinite(home) || !Number.isFinite(away)) return null;
@@ -795,15 +805,41 @@ function liveDefinitiveOutcomeForSel(
   if (s === "bts-yes") return home > 0 && away > 0 ? "won" : null;
   if (s === "bts-no")  return home > 0 && away > 0 ? "lost" : null;
 
+  // Goals O/U — can settle mid-game as soon as threshold crossed (Over) or exceeded (Under→lost)
   const mOU = s.match(/^([ou])([\d.]+)$/);
   if (mOU) {
     const side = mOU[1]!;
     const line = parseFloat(mOU[2]!);
     if (!Number.isFinite(line)) return null;
     if (side === "o") return total > line ? "won" : null;
+    // Under goals: lost as soon as exceeded; won only at final whistle (scoreOutcomeForSel handles won)
     return total > line ? "lost" : null;
   }
 
+  // Corners O/U — settle mid-game when live cornersTotal is available
+  // Over: won as soon as threshold crossed; Under: lost as soon as exceeded
+  const mCorner = s.match(/^([ou])c(\d+)$/);
+  if (mCorner) {
+    if (score.cornersTotal == null) return null;
+    const line = parseInt(mCorner[2]!, 10) / 10;
+    if (!Number.isFinite(line)) return null;
+    const side = mCorner[1]!;
+    if (side === "o") return score.cornersTotal > line ? "won" : null;
+    return score.cornersTotal > line ? "lost" : null;
+  }
+
+  // Cards O/U — settle mid-game when live cardsTotal is available
+  const mCard = s.match(/^([ou])card(\d+)$/);
+  if (mCard) {
+    if (score.cardsTotal == null) return null;
+    const line = parseInt(mCard[2]!, 10) / 10;
+    if (!Number.isFinite(line)) return null;
+    const side = mCard[1]!;
+    if (side === "o") return score.cardsTotal > line ? "won" : null;
+    return score.cardsTotal > line ? "lost" : null;
+  }
+
+  // Home team goals O/U
   const mTgh = s.match(/^tgh-([ou])(\d+)$/);
   if (mTgh) {
     const side = mTgh[1]!;
@@ -813,6 +849,7 @@ function liveDefinitiveOutcomeForSel(
     return home > line ? "lost" : null;
   }
 
+  // Away team goals O/U
   const mTga = s.match(/^tga-([ou])(\d+)$/);
   if (mTga) {
     const side = mTga[1]!;
@@ -891,8 +928,16 @@ export async function autoSettlePendingBets(opts?: { matchIds?: string[] }): Pro
           const live = findLiveResult(sel, bet.matchId, isSingle);
           const homeScore = live ? Number((live as any).homeScore ?? 0) : NaN;
           const awayScore = live ? Number((live as any).awayScore ?? 0) : NaN;
+          const liveExtra = (live as any)?._liveExtra;
           const out = Number.isFinite(homeScore) && Number.isFinite(awayScore)
-            ? liveDefinitiveOutcomeForSel(sel, { home: homeScore, away: awayScore })
+            ? liveDefinitiveOutcomeForSel(sel, {
+                home: homeScore,
+                away: awayScore,
+                cornersTotal: liveExtra?.cornersTotal,
+                cardsTotal: liveExtra?.cardsTotal,
+                htScore: liveExtra?.htScore ?? null,
+                status: (live as any)?.status,
+              })
             : null;
           if (out === "lost") { liveLostDetected = true; break; }
         }
@@ -902,8 +947,16 @@ export async function autoSettlePendingBets(opts?: { matchIds?: string[] }): Pro
             const live = findLiveResult(sel, bet.matchId, isSingle);
             const homeScore = live ? Number((live as any).homeScore ?? 0) : NaN;
             const awayScore = live ? Number((live as any).awayScore ?? 0) : NaN;
+            const liveExtra = (live as any)?._liveExtra;
             const out = Number.isFinite(homeScore) && Number.isFinite(awayScore)
-              ? liveDefinitiveOutcomeForSel(sel, { home: homeScore, away: awayScore })
+              ? liveDefinitiveOutcomeForSel(sel, {
+                  home: homeScore,
+                  away: awayScore,
+                  cornersTotal: liveExtra?.cornersTotal,
+                  cardsTotal: liveExtra?.cardsTotal,
+                  htScore: liveExtra?.htScore ?? null,
+                  status: (live as any)?.status,
+                })
               : null;
             if (!out) return sel;
             return {
@@ -942,8 +995,16 @@ export async function autoSettlePendingBets(opts?: { matchIds?: string[] }): Pro
           const live = findLiveResult(sel, bet.matchId, true);
           const homeScore = live ? Number((live as any).homeScore ?? 0) : NaN;
           const awayScore = live ? Number((live as any).awayScore ?? 0) : NaN;
+          const liveExtraSingle = (live as any)?._liveExtra;
           const out = Number.isFinite(homeScore) && Number.isFinite(awayScore)
-            ? liveDefinitiveOutcomeForSel(sel, { home: homeScore, away: awayScore })
+            ? liveDefinitiveOutcomeForSel(sel, {
+                home: homeScore,
+                away: awayScore,
+                cornersTotal: liveExtraSingle?.cornersTotal,
+                cardsTotal: liveExtraSingle?.cardsTotal,
+                htScore: liveExtraSingle?.htScore ?? null,
+                status: (live as any)?.status,
+              })
             : null;
           if (out === "won" || out === "lost") {
             const updatedSel: SelectionRecord = {

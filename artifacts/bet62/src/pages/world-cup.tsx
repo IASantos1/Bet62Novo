@@ -1241,8 +1241,12 @@ export default function WorldCupPage() {
     try {
       const bet = { matchId, home: openMatch?.home ?? "", away: openMatch?.away ?? "", selection: k, market, label, odd, sport: "football" };
       const cur = JSON.parse(localStorage.getItem("wc_pending_bet") ?? "null");
-      if (cur?.matchId === matchId && cur?.selection === k) localStorage.removeItem("wc_pending_bet");
-      else localStorage.setItem("wc_pending_bet", JSON.stringify(bet));
+      if (cur?.matchId === matchId && cur?.selection === k) {
+        localStorage.removeItem("wc_pending_bet");
+      } else {
+        localStorage.setItem("wc_pending_bet", JSON.stringify(bet));
+        navigate("/");
+      }
     } catch { /* silent */ }
   };
 
