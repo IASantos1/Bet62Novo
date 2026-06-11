@@ -1232,12 +1232,11 @@ export default function WorldCupPage() {
   }, [liveMatches, upcomingMatches]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleBet = (matchId: string, k: string, label: string, odd: number, market: string) => {
-    const fullKey = `${market}:${label}`;
     setActiveKeys(prev => {
-      if (prev[matchId] === fullKey) {
+      if (prev[matchId] === k) {
         const n = { ...prev }; delete n[matchId]; return n;
       }
-      return { ...prev, [matchId]: fullKey };
+      return { ...prev, [matchId]: k };
     });
     try {
       const bet = { matchId, home: openMatch?.home ?? "", away: openMatch?.away ?? "", selection: k, market, label, odd, sport: "football" };
@@ -1380,7 +1379,7 @@ export default function WorldCupPage() {
                       <MatchCard
                         match={m}
                         onOpen={() => setOpenMatch(m)}
-                        activeSel={activeKeys[m.id] ? `${m.id}:${activeKeys[m.id]?.split(":")?.[0]}` : undefined}
+                        activeSel={activeKeys[m.id]}
                         onQuickBet={handleQuickBet}
                         theme={theme}
                       />
