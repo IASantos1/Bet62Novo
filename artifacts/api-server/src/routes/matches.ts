@@ -10110,7 +10110,7 @@ async function getUpcomingAll(): Promise<UpcomingTopCache> {
 
 // ─── WC 2026 Endpoint ──────────────────────────────────────────────────────────
 let wc2026Cache: { matches: UpcomingMatch[]; fetchedAt: number } | null = null;
-const WC2026_TTL = 15 * 60_000; // 15 min — shorter so real odds get picked up when API publishes them
+const WC2026_TTL = 3 * 60_000; // 3 min — short so finished games are removed quickly
 
 let _wc2026Rebuilding = false;
 
@@ -10249,6 +10249,22 @@ async function _rebuildWC2026(): Promise<void> {
     }
 
     // Build results from V1 games
+    // Try to fetch real V2 pre-match odds for upcoming V1 WC games (same provider, IDs may match)
+    const upcomingV1Ids = wcV1Games
+      .filter(g => (g.statusGroup ?? 0) !== 3) // non-live only
+      .map(g => g.id);
+    const v2OddsForV1 = new Map<number, V2PreMatchOdds | null>();
+    if (upcomingV1Ids.length > 0) {
+      const batchSize = 8;
+      for (let i = 0; i < upcomingV1Ids.length; i += batchSize) {
+        const batch = upcomingV1Ids.slice(i, i + batchSize);
+        const results2 = await Promise.all(
+          batch.map(id => getPreMatchOddsV2("football", id).catch(() => null))
+        );
+        batch.forEach((id, idx) => v2OddsForV1.set(id, results2[idx] ?? null));
+      }
+    }
+
     const results: UpcomingMatch[] = wcV1Games.map(g => {
       const home = g.homeCompetitor?.name ?? "Unknown";
       const away = g.awayCompetitor?.name ?? "Unknown";
@@ -10260,17 +10276,26 @@ async function _rebuildWC2026(): Promise<void> {
       const year  = dt.toLocaleDateString("pt-PT", { year: "numeric",  timeZone: "Europe/Lisbon" });
       const date  = `${day}.${month}.${year}`; // DD.MM.YYYY — matches parseMatchDate in frontend
       const time  = dt.toLocaleTimeString("pt-PT", { hour: "2-digit", minute: "2-digit", timeZone: "Europe/Lisbon" });
-      const odds = makeOddsFromTeams(home, away);
-      const markets = makeAdvancedMarketsFromTeams(home, away);
       // statusGroup 3 = Live/in-play — expose live data directly
       const isLiveGame = (g.statusGroup ?? 0) === 3;
+      // Try real V2 odds for this V1 game ID (same provider — IDs may match)
+      const realOdds = v2OddsForV1.get(g.id) ?? null;
+      const has1x2 = !!(realOdds && realOdds.home > 0 && realOdds.draw > 0 && realOdds.away > 0);
+      const baseOdds = makeOddsFromTeams(home, away);
+      const baseMarkets = makeAdvancedMarketsFromTeams(home, away);
+      const odds = has1x2 ? { home: realOdds!.home, draw: realOdds!.draw, away: realOdds!.away } : baseOdds;
+      const markets: AdvancedMarkets = {
+        ...baseMarkets,
+        ...(realOdds?.bttsYes ? { bothTeamsScore: { yes: realOdds.bttsYes, no: realOdds.bttsNo ?? 0 } } : {}),
+        ...(realOdds?.over25 ? { totalGoals: { ...baseMarkets.totalGoals, over25: realOdds.over25, under25: realOdds.under25 ?? 0 } } : {}),
+      };
       const entry: UpcomingMatch = {
         id: `fb-v1-${g.id}`,
         home, away, league,
         country: "World",
         time, date,
         sport: "football",
-        hasRealOdds: false,
+        hasRealOdds: has1x2,
         odds, markets,
         isWomens: false,
         leagueId: String(WC_COMP_ID),
@@ -10459,6 +10484,16 @@ async function buildWC2026Matches(): Promise<UpcomingMatch[]> {
   return cached ? cached.matches : [];
 }
 
+// Helper: parse a WC match start time (date = "DD.MM.YYYY", time = "HH:MM" in Lisbon/WEST = UTC+1)
+// Returns UTC milliseconds.
+function parseWCStartUtcMs(date: string, time: string): number {
+  try {
+    const [dd = "1", mm = "1", yyyy = "2026"] = date.split(".");
+    // Interpret as Lisbon WEST (UTC+1 in June); subtract 1h to get UTC
+    return new Date(`${yyyy}-${mm}-${dd}T${time}:00Z`).getTime() - 60 * 60_000;
+  } catch { return 0; }
+}
+
 router.get("/wc2026", async (_req: Request, res: Response) => {
   try {
     const matches = await Promise.race([
@@ -10466,10 +10501,12 @@ router.get("/wc2026", async (_req: Request, res: Response) => {
       new Promise<never>((_, reject) => setTimeout(() => reject(new Error("timeout")), 25_000)),
     ]);
 
-    // Always enrich with FRESH liveMatchState data — bypasses 15-min cache so live
-    // scores/status are current on every request. Uses team-name matching (not league
-    // name) so WC matches are found even when the WS feed uses a different league label.
+    // Always enrich with FRESH liveMatchState data — bypasses 3-min cache so live
+    // scores/status/suspensions are current on every request.
     const normT = (s: string) => s.toLowerCase().replace(/[\s.'-]+/g, "");
+    const nowMs = Date.now();
+    const foundInLive = new Set<string>(); // track which match IDs were found in liveMatchState
+
     const enriched = matches.map(m => {
       const rH = normT(m.home);
       const rA = normT(m.away);
@@ -10481,6 +10518,22 @@ router.get("/wc2026", async (_req: Request, res: Response) => {
           (lH === rH || lH.includes(rH) || rH.includes(lH)) &&
           (lA === rA || lA.includes(rA) || rA.includes(lA))
         ) {
+          foundInLive.add(m.id);
+          // Check if liveMatchState reports this as finished
+          const lsStatus = String(ls.status ?? "").toLowerCase();
+          const isFinished = lsStatus === "finished" || lsStatus === "ended" || lsStatus === "ft" || lsStatus === "aet";
+          if (isFinished) {
+            // Game just finished — mark as not live, keep final score
+            return {
+              ...m,
+              isLive: false,
+              status: "Finished",
+              homeScore: ls.homeScore ?? 0,
+              awayScore: ls.awayScore ?? 0,
+              marketSuspension: undefined,
+              _suspensionReason: undefined,
+            };
+          }
           return {
             ...m,
             isLive: true,
@@ -10498,12 +10551,29 @@ router.get("/wc2026", async (_req: Request, res: Response) => {
           };
         }
       }
-      // No live state found — keep as-is (already enriched from V1 statusGroup=3
-      // during rebuild, or truly upcoming)
+      // Not found in liveMatchState — auto-expire stale live matches
+      if (m.isLive && !foundInLive.has(m.id)) {
+        const startUtcMs = parseWCStartUtcMs(m.date, m.time);
+        const elapsedMin = (nowMs - startUtcMs) / 60_000;
+        // 120 min = 90 min game + 15 min stoppage + 15 min grace
+        if (startUtcMs > 0 && elapsedMin > 120) {
+          return {
+            ...m,
+            isLive: false,
+            status: "Finished",
+            minute: undefined,
+            marketSuspension: undefined,
+            _suspensionReason: undefined,
+          };
+        }
+      }
       return m;
     });
 
-    res.json({ matches: enriched });
+    // Filter: don't include finished matches in the response (they clutter live tab)
+    const visible = enriched.filter(m => m.status !== "Finished");
+
+    res.json({ matches: visible });
   } catch {
     res.json({ matches: wc2026Cache?.matches ?? [] });
   }
