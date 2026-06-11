@@ -9879,96 +9879,155 @@ async function _rebuildWC2026(): Promise<void> {
   if (_wc2026Rebuilding) return;
   _wc2026Rebuilding = true;
   try {
-    const nowMs = Date.now();
-    const dates: string[] = [];
-    for (let i = 0; i < 38; i++) {
-      dates.push(new Date(nowMs + i * 86_400_000).toISOString().slice(0, 10));
-    }
+    // ── V1 football (primary source — V2 schedule is 503 upstream) ──────────────
+    // FIFA World Cup 2026 competition ID in SportsAPI Pro V1: 5930
+    const V1_FOOT = "https://v1.football.sportsapipro.com/api/v1/football";
+    const WC_COMP_ID = 5930;
 
-    // Fetch V2 live + today in parallel with schedule (these endpoints work even when schedule is 503)
-    const fetchV2Direct = async (): Promise<SAPIV2Event[]> => {
-      const results: SAPIV2Event[] = [];
-      const tryUrl = async (url: string) => {
-        try {
-          const r = await fetch(url, { signal: AbortSignal.timeout(6_000), headers: sapiHeaders() });
-          if (!r.ok) return;
-          const j = (await r.json()) as { success?: boolean; events?: SAPIV2Event[]; data?: { events?: SAPIV2Event[] } };
-          const evs: SAPIV2Event[] = j.events ?? j.data?.events ?? [];
-          results.push(...evs);
-        } catch { /* silent */ }
-      };
-      await Promise.all([
-        tryUrl(`${SAPI_V2_FOOTBALL}/live`),
-        tryUrl(`${SAPI_V2_FOOTBALL}/today`),
-      ]);
-      return results;
+    type V1Game = {
+      id: number;
+      competitionId: number;
+      competitionDisplayName?: string;
+      groupName?: string;
+      startTime?: string;
+      statusGroup?: number;
+      statusText?: string;
+      homeCompetitor?: { name?: string; id?: number };
+      awayCompetitor?: { name?: string; id?: number };
+      hasBets?: boolean;
     };
 
-    const [dayResults, directEvents] = await Promise.all([
-      Promise.race([
-        Promise.all(dates.map(dt => getScheduleV2("football", dt).catch(() => [] as SAPIV2Event[]))),
-        new Promise<SAPIV2Event[][]>(resolve => setTimeout(() => resolve([]), 18_000)),
-      ]),
-      fetchV2Direct(),
+    const fetchV1Games = async (path: string): Promise<V1Game[]> => {
+      try {
+        const r = await fetch(`${V1_FOOT}/${path}`, { signal: AbortSignal.timeout(8_000), headers: sapiHeaders() });
+        if (!r.ok) return [];
+        const j = await r.json() as { data?: { games?: V1Game[] } };
+        return j.data?.games ?? [];
+      } catch { return []; }
+    };
+
+    // Fetch from 3 stable V1 sources: all (current round), live, and competition-specific games
+    // Avoid /current which is flaky (upstream 500 timeouts)
+    const [allGames, liveGames, compGames] = await Promise.all([
+      fetchV1Games("all"),
+      fetchV1Games("live"),
+      fetchV1Games(`competition/${WC_COMP_ID}/games`),
     ]);
-    const allEvents: SAPIV2Event[] = [
-      ...(Array.isArray(dayResults[0]) ? (dayResults as SAPIV2Event[][]).flat() : []),
-      ...directEvents,
-    ];
-    const seen = new Set<number>();
-    const wcEvents: SAPIV2Event[] = [];
-    for (const ev of allEvents) {
-      if (seen.has(ev.id)) continue;
-      seen.add(ev.id);
-      const home = v2TeamName(ev.homeTeam);
-      const away = v2TeamName(ev.awayTeam);
-      if (home === "Unknown" || away === "Unknown") continue;
-      const leagueName = normalizeLeagueName(v2TournName(ev.tournament), "");
-      const lg = leagueName.toLowerCase();
-      const isWCLg =
-        lg.includes("world cup") || lg.includes("copa do mundo") || lg.includes("copa mundial") ||
-        lg.includes("fifa world") || lg.includes("wc 2026") || lg.includes("worldcup") ||
-        lg.includes("mundial 2026") || lg.includes("coupe du monde");
-      if (!isWCLg) continue;
-      if (lg.includes("women") || lg.includes("qualification") || lg.includes("qualif") || lg.includes("feminino") || lg.includes("féminin")) continue;
-      wcEvents.push(ev);
-      if (wcEvents.length >= 300) break;
+
+    const seenV1 = new Set<number>();
+    const wcV1Games: V1Game[] = [];
+    for (const g of [...allGames, ...liveGames, ...compGames]) {
+      if (seenV1.has(g.id)) continue;
+      seenV1.add(g.id);
+      // statusGroup 4 = Ended — skip finished games
+      if ((g.statusGroup ?? 0) === 4) continue;
+      const isWC = g.competitionId === WC_COMP_ID || (g.competitionDisplayName ?? "").includes("World Cup");
+      if (isWC) wcV1Games.push(g);
     }
-    const oddsResults = await Promise.all(wcEvents.map(ev => getPreMatchOddsV2("football", ev.id).catch(() => null)));
-    const results: UpcomingMatch[] = [];
-    for (let i = 0; i < wcEvents.length; i++) {
-      const ev = wcEvents[i]!;
-      const home = v2TeamName(ev.homeTeam);
-      const away = v2TeamName(ev.awayTeam);
-      const leagueName = normalizeLeagueName(v2TournName(ev.tournament), "");
-      const { date, time } = v2EventDateTime(ev);
-      const realOdds = oddsResults[i] ?? null;
-      const baseOdds = makeOddsFromTeams(home, away);
-      const baseMarkets = makeAdvancedMarketsFromTeams(home, away);
-      const markets: AdvancedMarkets = {
-        ...baseMarkets,
-        ...(realOdds?.bttsYes ? { bothTeamsScore: { yes: realOdds.bttsYes, no: realOdds.bttsNo ?? 0 } } : {}),
-        ...(realOdds?.over25 ? { totalGoals: { ...baseMarkets.totalGoals, over25: realOdds.over25, under25: realOdds.under25 ?? 0 } } : {}),
-      };
-      const hasFull1x2 = !!(realOdds && realOdds.home > 0 && realOdds.draw > 0 && realOdds.away > 0);
-      const odds = hasFull1x2 ? { home: realOdds!.home, draw: realOdds!.draw, away: realOdds!.away } : baseOdds;
-      results.push({
-        id: `fb-v2-${ev.id}`,
-        home, away,
-        league: leagueName,
-        country: v2TournCountry(ev),
+
+    // Build results from V1 games
+    const results: UpcomingMatch[] = wcV1Games.map(g => {
+      const home = g.homeCompetitor?.name ?? "Unknown";
+      const away = g.awayCompetitor?.name ?? "Unknown";
+      const league = g.competitionDisplayName ?? "FIFA World Cup";
+      // Convert ISO start time to PT timezone (Lisbon)
+      const dt = g.startTime ? new Date(g.startTime) : new Date(Date.now() + 86_400_000);
+      const day   = dt.toLocaleDateString("pt-PT", { day: "2-digit",   timeZone: "Europe/Lisbon" });
+      const month = dt.toLocaleDateString("pt-PT", { month: "2-digit", timeZone: "Europe/Lisbon" });
+      const year  = dt.toLocaleDateString("pt-PT", { year: "numeric",  timeZone: "Europe/Lisbon" });
+      const date  = `${day}.${month}.${year}`; // DD.MM.YYYY — matches parseMatchDate in frontend
+      const time  = dt.toLocaleTimeString("pt-PT", { hour: "2-digit", minute: "2-digit", timeZone: "Europe/Lisbon" });
+      const odds = makeOddsFromTeams(home, away);
+      const markets = makeAdvancedMarketsFromTeams(home, away);
+      return {
+        id: `fb-v1-${g.id}`,
+        home, away, league,
+        country: "World",
         time, date,
         sport: "football",
-        hasRealOdds: hasFull1x2,
+        hasRealOdds: false,
         odds, markets,
         isWomens: false,
-        leagueId: ev.tournamentId ? String(ev.tournamentId) : undefined,
-      });
+        leagueId: String(WC_COMP_ID),
+        providerStatusGroup: g.statusGroup,
+        providerStatusText: g.statusText,
+      } satisfies UpcomingMatch;
+    });
+
+    // ── V2 schedule fallback (only if V1 returned nothing) ─────────────────────
+    let v2FallbackEvents: SAPIV2Event[] = [];
+    if (results.length === 0) {
+      const nowMs = Date.now();
+      const dates: string[] = [];
+      for (let i = 0; i < 38; i++) dates.push(new Date(nowMs + i * 86_400_000).toISOString().slice(0, 10));
+      const dayResults = await Promise.race([
+        Promise.all(dates.map(dt => getScheduleV2("football", dt).catch(() => [] as SAPIV2Event[]))),
+        new Promise<SAPIV2Event[][]>(resolve => setTimeout(() => resolve([]), 15_000)),
+      ]);
+      v2FallbackEvents = (Array.isArray(dayResults[0]) ? (dayResults as SAPIV2Event[][]).flat() : []);
     }
+
+    // ── V2 fallback processing (only runs when V1 returned nothing) ────────────
+    const v2Results: UpcomingMatch[] = [];
+    if (v2FallbackEvents.length > 0) {
+      const seenV2 = new Set<number>();
+      const wcEvents: SAPIV2Event[] = [];
+      for (const ev of v2FallbackEvents) {
+        if (seenV2.has(ev.id)) continue;
+        seenV2.add(ev.id);
+        const home = v2TeamName(ev.homeTeam);
+        const away = v2TeamName(ev.awayTeam);
+        if (home === "Unknown" || away === "Unknown") continue;
+        const leagueName = normalizeLeagueName(v2TournName(ev.tournament), "");
+        const lg = leagueName.toLowerCase();
+        const isWCLg =
+          lg.includes("world cup") || lg.includes("copa do mundo") || lg.includes("copa mundial") ||
+          lg.includes("fifa world") || lg.includes("wc 2026") || lg.includes("worldcup") ||
+          lg.includes("mundial 2026") || lg.includes("coupe du monde");
+        if (!isWCLg) continue;
+        if (lg.includes("women") || lg.includes("qualification") || lg.includes("qualif") || lg.includes("feminino") || lg.includes("féminin")) continue;
+        wcEvents.push(ev);
+        if (wcEvents.length >= 300) break;
+      }
+      const oddsResults = await Promise.all(wcEvents.map(ev => getPreMatchOddsV2("football", ev.id).catch(() => null)));
+      for (let i = 0; i < wcEvents.length; i++) {
+        const ev = wcEvents[i]!;
+        const home = v2TeamName(ev.homeTeam);
+        const away = v2TeamName(ev.awayTeam);
+        const leagueName = normalizeLeagueName(v2TournName(ev.tournament), "");
+        const { date, time } = v2EventDateTime(ev);
+        const realOdds = oddsResults[i] ?? null;
+        const baseOdds = makeOddsFromTeams(home, away);
+        const baseMarkets = makeAdvancedMarketsFromTeams(home, away);
+        const markets: AdvancedMarkets = {
+          ...baseMarkets,
+          ...(realOdds?.bttsYes ? { bothTeamsScore: { yes: realOdds.bttsYes, no: realOdds.bttsNo ?? 0 } } : {}),
+          ...(realOdds?.over25 ? { totalGoals: { ...baseMarkets.totalGoals, over25: realOdds.over25, under25: realOdds.under25 ?? 0 } } : {}),
+        };
+        const hasFull1x2 = !!(realOdds && realOdds.home > 0 && realOdds.draw > 0 && realOdds.away > 0);
+        const odds = hasFull1x2 ? { home: realOdds!.home, draw: realOdds!.draw, away: realOdds!.away } : baseOdds;
+        v2Results.push({
+          id: `fb-v2-${ev.id}`,
+          home, away,
+          league: leagueName,
+          country: v2TournCountry(ev),
+          time, date,
+          sport: "football",
+          hasRealOdds: hasFull1x2,
+          odds, markets,
+          isWomens: false,
+          leagueId: ev.tournamentId ? String(ev.tournamentId) : undefined,
+        });
+      }
+    }
+
+    // Merge: V1 is primary, V2 fallback supplements if V1 is empty
+    const finalResults: UpcomingMatch[] = results.length > 0 ? results : v2Results;
+
     // Always update cache (reset TTL) — even 0 results is a valid state
     // Only keep previous matches if new fetch returned nothing (API outage)
-    if (results.length > 0 || !wc2026Cache) {
-      wc2026Cache = { matches: results, fetchedAt: Date.now() };
+    if (finalResults.length > 0 || !wc2026Cache) {
+      wc2026Cache = { matches: finalResults, fetchedAt: Date.now() };
     } else {
       // Keep existing matches but bump fetchedAt so we don't hammer the API
       wc2026Cache = { matches: wc2026Cache.matches, fetchedAt: Date.now() };
@@ -9991,7 +10050,9 @@ async function buildWC2026Matches(): Promise<UpcomingMatch[]> {
   }
   // No cache at all → must wait (only happens on cold start, warm-up handles this)
   await _rebuildWC2026();
-  return wc2026Cache?.matches ?? [];
+  // Cast needed: TS narrows wc2026Cache to null above, but _rebuildWC2026 sets it
+  const cached = wc2026Cache as { matches: UpcomingMatch[]; fetchedAt: number } | null;
+  return cached ? cached.matches : [];
 }
 
 router.get("/wc2026", async (_req: Request, res: Response) => {
