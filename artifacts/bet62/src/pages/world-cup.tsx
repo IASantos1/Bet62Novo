@@ -1166,7 +1166,9 @@ function MarketsPage({ match, activeKeys, onBet, onClose, theme }: {
 
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
-export default function WorldCupPage() {
+type WCBetPayload = { matchId: string; home: string; away: string; selection: string; market: string; label: string; odd: number; sport: string };
+
+export default function WorldCupPage({ onClose, onBet: onBetProp }: { onClose?: () => void; onBet?: (bet: WCBetPayload) => void } = {}) {
   const [, navigate] = useLocation();
   const [liveMatches, setLiveMatches]       = useState<WCMatch[]>([]);
   const [upcomingMatches, setUpcomingMatches] = useState<WCMatch[]>([]);
@@ -1228,13 +1230,17 @@ export default function WorldCupPage() {
       return { ...prev, [matchId]: k };
     });
     try {
-      const bet = { matchId, home: openMatch?.home ?? "", away: openMatch?.away ?? "", selection: k, market, label, odd, sport: "football" };
-      const cur = JSON.parse(localStorage.getItem("wc_pending_bet") ?? "null");
-      if (cur?.matchId === matchId && cur?.selection === k) {
-        localStorage.removeItem("wc_pending_bet");
+      const bet: WCBetPayload = { matchId, home: openMatch?.home ?? "", away: openMatch?.away ?? "", selection: k, market, label, odd, sport: "football" };
+      if (onBetProp) {
+        onBetProp(bet);
       } else {
-        localStorage.setItem("wc_pending_bet", JSON.stringify(bet));
-        navigate("/");
+        const cur = JSON.parse(localStorage.getItem("wc_pending_bet") ?? "null");
+        if (cur?.matchId === matchId && cur?.selection === k) {
+          localStorage.removeItem("wc_pending_bet");
+        } else {
+          localStorage.setItem("wc_pending_bet", JSON.stringify(bet));
+          navigate("/");
+        }
       }
     } catch { /* silent */ }
   };
@@ -1268,7 +1274,7 @@ export default function WorldCupPage() {
 
   // ── Match list page ──────────────────────────────────────────────────────────
   return (
-    <div className={`min-h-[100dvh] ${isDark ? "bg-[#090909]" : "bg-zinc-50"}`}>
+    <div className={`${onClose ? "min-h-full" : "min-h-[100dvh]"} ${isDark ? "bg-[#090909]" : "bg-zinc-50"}`}>
       {/* ── Sticky Header ── */}
       <div
         className={`sticky top-0 z-30 flex items-center gap-3 px-4 py-3 ${isDark ? "border-zinc-800/40" : "border-zinc-200"}`}
@@ -1276,11 +1282,11 @@ export default function WorldCupPage() {
           background: isDark ? "rgba(9,9,9,0.95)" : "rgba(250,250,252,0.95)",
           backdropFilter: "blur(12px)",
           borderBottom: isDark ? "1px solid rgba(255,255,255,0.05)" : "1px solid rgba(0,0,0,0.08)",
-          paddingTop: "calc(env(safe-area-inset-top, 0px) + 12px)",
+          paddingTop: onClose ? "12px" : "calc(env(safe-area-inset-top, 0px) + 12px)",
         }}
       >
         <button
-          onClick={() => navigate("/")}
+          onClick={() => onClose ? onClose() : navigate("/")}
           className={`w-9 h-9 rounded-xl border flex items-center justify-center flex-shrink-0 active:scale-95 transition-transform ${isDark ? "bg-zinc-800 border-zinc-700/80" : "bg-white border-zinc-200"}`}
         >
           <ArrowLeft size={17} className={isDark ? "text-zinc-200" : "text-zinc-700"} />
