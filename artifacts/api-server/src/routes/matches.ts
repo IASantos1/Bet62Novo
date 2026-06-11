@@ -2383,6 +2383,7 @@ const ATP_CITY_TIER: Record<string, number> = {
   "chengdu": 5, "hangzhou": 5, "sofia": 5, "antwerp": 5, "montpellier": 5,
   "cordoba": 5, "quito": 5, "dallas": 5, "auckland": 5, "adelaide": 5,
   "doha": 5, "pune": 5, "newport beach": 5, "san jose": 5,
+  "ilkley": 5, "surbiton": 5, "rosmalen": 5,
 };
 const WTA_CITY_TIER: Record<string, number> = {
   // WTA 1000 / Grand Slam host cities
