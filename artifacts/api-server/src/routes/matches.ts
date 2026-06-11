@@ -245,7 +245,7 @@ export type UpcomingMatch = {
   status?: string;
 };
 
-type StatpalMatchV2Event = {
+type SAPIMatchEvent = {
   id?: string;
   type: string;
   team: string;
@@ -258,7 +258,7 @@ type StatpalMatchV2Event = {
   result?: string;    // score at time of event e.g. "[1 - 0]"
 };
 
-type StatpalPenaltyEvent = {
+type SAPIPenaltyEvent = {
   id: string;
   penalty_num: string;
   team: string;
@@ -268,7 +268,7 @@ type StatpalPenaltyEvent = {
   result: string;
 };
 
-type StatpalMatchV2 = {
+type SAPIMatchV2 = {
   main_id: string;
   fallback_id_1: string;
   fallback_id_2: string;
@@ -282,7 +282,7 @@ type StatpalMatchV2 = {
   home: { id: string; name: string; goals: string; win_on_agg?: string };
   away: { id: string; name: string; goals: string; win_on_agg?: string };
   events: null | {
-    event: StatpalMatchV2Event | StatpalMatchV2Event[];
+    event: SAPIMatchEvent | SAPIMatchEvent[];
   };
   ht?: { home_goals: number; away_goals: number };
   ft?: { home_goals: number; away_goals: number };
@@ -290,18 +290,18 @@ type StatpalMatchV2 = {
   penalties?: null | {
     home_pen: number;
     away_pen: number;
-    penalty_events: StatpalPenaltyEvent | StatpalPenaltyEvent[];
+    penalty_events: SAPIPenaltyEvent | SAPIPenaltyEvent[];
   };
   has_live_stats?: string;    // "True" | "False"
   inplay_odds_running: string;
 };
 
-type StatpalLeagueV2 = {
+type SAPILeagueV2 = {
   id: string;
   name: string;
   country: string;
   cup: string;
-  match: StatpalMatchV2 | StatpalMatchV2[];
+  match: SAPIMatchV2 | SAPIMatchV2[];
 };
 
 // v1 odds types
@@ -2552,7 +2552,7 @@ function isMainLeagueEventRaw(sport: SportKey, e: Record<string, unknown>): bool
 // ─── Caches ───────────────────────────────────────────────────────────────────
 
 // v2/live: cache 30s
-let liveCache: StatpalLeagueV2[] | null = null;
+let liveCache: SAPILeagueV2[] | null = null;
 let liveFetchedAt = 0;
 let liveIsFetching = false;
 // Track Statpal's own updated_ts so we can detect a frozen feed
@@ -2628,15 +2628,15 @@ setInterval(() => {
 }, 1000);
 
 // v2/daily today: cache 5min
-let dailyCache: StatpalLeagueV2[] | null = null;
+let dailyCache: SAPILeagueV2[] | null = null;
 let dailyFetchedAt = 0;
 
 // v2/daily tomorrow: cache 30min
-let dailyTomorrowCache: StatpalLeagueV2[] | null = null;
+let dailyTomorrowCache: SAPILeagueV2[] | null = null;
 let dailyTomorrowFetchedAt = 0;
 
 // v2/daily offsets 2–6 (days 3–7 ahead): cache 10min per slot
-const dailyFutureCache = new Map<number, { data: StatpalLeagueV2[]; fetchedAt: number }>();
+const dailyFutureCache = new Map<number, { data: SAPILeagueV2[]; fetchedAt: number }>();
 const DAILY_FUTURE_TTL = 10 * 60_000;
 
 // V2 /api/today caches — 60s TTL (includes not-started + live events for the current day)
@@ -3247,7 +3247,7 @@ export async function ensureFinishedMatchResult(matchId: string): Promise<boolea
       const st = (ev.status as Record<string, unknown> | null | undefined);
       const stType = typeof st?.["type"] === "string" ? (st["type"] as string).toLowerCase() : "";
       const code = v2StatusCode(ev);
-      const isFinished = stType === "finished" || code === 100 || (typeof st?.["short"] === "string" && STATPAL_FINISHED_STATUSES.has(st["short"]));
+      const isFinished = stType === "finished" || code === 100 || (typeof st?.["short"] === "string" && SAPI_FINISHED_STATUSES.has(st["short"]));
       if (!isFinished) return false;
 
       const hS = typeof ev.homeScore === "object" && ev.homeScore !== null
@@ -3401,9 +3401,9 @@ export async function scanDailyForFinished(): Promise<void> {
     for (const league of leagues) {
       const raw = league.match;
       if (!raw) continue;
-      const matches: StatpalMatchV2[] = Array.isArray(raw) ? raw : [raw];
+      const matches: SAPIMatchV2[] = Array.isArray(raw) ? raw : [raw];
       for (const m of matches) {
-        if (!STATPAL_FINISHED_STATUSES.has(m.status)) continue;
+        if (!SAPI_FINISHED_STATUSES.has(m.status)) continue;
         if (finishedMatchResults.has(m.main_id)) continue;
         const home = parseInt(m.home.goals) || 0;
         const away = parseInt(m.away.goals) || 0;
@@ -3471,20 +3471,20 @@ export async function scanDailyForFinished(): Promise<void> {
 
 // ─── Fetch helpers ────────────────────────────────────────────────────────────
 
-async function getLiveLeagues(): Promise<StatpalLeagueV2[]> {
+async function getLiveLeagues(): Promise<SAPILeagueV2[]> {
   return liveCache ?? [];
 }
 
-async function getDailyLeagues(): Promise<StatpalLeagueV2[]> {
+async function getDailyLeagues(): Promise<SAPILeagueV2[]> {
   return dailyCache ?? [];
 }
 
-async function getTomorrowLeagues(): Promise<StatpalLeagueV2[]> {
+async function getTomorrowLeagues(): Promise<SAPILeagueV2[]> {
   return dailyTomorrowCache ?? [];
 }
 
 // Fetch daily football leagues for offset N (days ahead, 2–6 = days 3–7 from today)
-async function getDailyLeaguesForFutureOffset(offset: number): Promise<StatpalLeagueV2[]> {
+async function getDailyLeaguesForFutureOffset(offset: number): Promise<SAPILeagueV2[]> {
   return dailyFutureCache.get(offset)?.data ?? [];
 }
 
@@ -4385,7 +4385,7 @@ function filterLiveMarkets(markets: AdvancedMarkets, homeScore: number, awayScor
 
 // Find real odds for a v2 match using fallback IDs; model-based fallback using team names
 function resolveOdds(
-  m: StatpalMatchV2,
+  m: SAPIMatchV2,
   map: Map<string, RealOdds>
 ): { odds: { home: number; draw: number; away: number }; markets: AdvancedMarkets; real: boolean } {
   const r = (n: number) => Math.round(n * 100) / 100;
@@ -5860,7 +5860,7 @@ export async function scanV2AllSportsForFinished(): Promise<void> {
         const st = (ev.status as Record<string, unknown> | null | undefined);
         const stType = typeof st?.["type"] === "string" ? (st["type"] as string).toLowerCase() : "";
         const code = v2StatusCode(ev);
-        const isFinished = stType === "finished" || code === 100 || (typeof st?.["short"] === "string" && STATPAL_FINISHED_STATUSES.has(st["short"]));
+        const isFinished = stType === "finished" || code === 100 || (typeof st?.["short"] === "string" && SAPI_FINISHED_STATUSES.has(st["short"]));
         if (!isFinished) continue;
 
         const hS = typeof ev.homeScore === "object" && ev.homeScore !== null
@@ -6514,7 +6514,7 @@ const MATCH_MAX_LIVE_MS  = 210 * 60 * 1000;
 // Max time a match may sit in "HT" status: 22 min (real HT is ≤15 min)
 const HT_MAX_DURATION_MS = 22 * 60 * 1000;
 // Additional FINISHED statuses Statpal may return when slow to update
-const STATPAL_FINISHED_STATUSES = new Set([
+const SAPI_FINISHED_STATUSES = new Set([
   "FT", "AET", "AP", "Pen", "Full Time", "After ET", "After Pens",
   "Finished", "Ended", "Abandoned", "Postponed", "Cancelled", "Susp",
   "Delayed", "Interrupted", "Cancl.", "Abd", "Postp.", "Susp.",
@@ -6530,7 +6530,7 @@ async function buildLiveMatches(): Promise<LiveMatchState[]> {
   // ── Garbage-collect liveMatchState for IDs no longer in the Statpal response ──
   const currentMatchIds = new Set<string>();
   for (const league of sorted) {
-    const ms: StatpalMatchV2[] = Array.isArray(league.match) ? league.match : [league.match];
+    const ms: SAPIMatchV2[] = Array.isArray(league.match) ? league.match : [league.match];
     for (const m of ms) currentMatchIds.add(m.main_id);
   }
   for (const id of liveMatchState.keys()) {
@@ -6560,13 +6560,13 @@ async function buildLiveMatches(): Promise<LiveMatchState[]> {
 
   for (const league of sorted) {
     if (count >= 30) break;
-    const matches: StatpalMatchV2[] = Array.isArray(league.match) ? league.match : [league.match];
+    const matches: SAPIMatchV2[] = Array.isArray(league.match) ? league.match : [league.match];
 
     for (const m of matches) {
       if (count >= 30) break;
 
       // ── Guard 0: explicitly finished statuses Statpal is slow to remove ───────
-      if (STATPAL_FINISHED_STATUSES.has(m.status)) continue;
+      if (SAPI_FINISHED_STATUSES.has(m.status)) continue;
 
       const isLiveMinute = /^\d{1,3}$/.test(m.status);
       const isHT = m.status === "HT";
@@ -9462,12 +9462,8 @@ async function buildTennisLiveV1(): Promise<LiveMatchState[]> {
       if (home.includes("/") || away.includes("/")) continue;
       const compName = [g.competitionDisplayName, g.stageName, g.roundName].filter(Boolean).join(" ");
       if (/double|mixed/i.test(compName)) continue;
-      // Only show ATP/WTA main-tour live matches — same filter as upcoming
+      // Show all live tennis (ATP, WTA, Challengers, ITF) — filter to main-tour only for upcoming
       const enrichedLiveLeague = enrichTennisV1League(compName);
-      const isMainTourLive = enrichedLiveLeague.startsWith("ATP") ||
-                             enrichedLiveLeague.startsWith("WTA") ||
-                             enrichedLiveLeague.startsWith("Grand Slam");
-      if (!isMainTourLive) continue;
       const tier = tennisTierRank(compName);
       let homeScore = Math.max(0, g.homeCompetitor?.score ?? 0);
       let awayScore = Math.max(0, g.awayCompetitor?.score ?? 0);
@@ -10244,6 +10240,11 @@ async function _rebuildWC2026(): Promise<void> {
       seenV1.add(g.id);
       // statusGroup 4 = Ended — skip finished games
       if ((g.statusGroup ?? 0) === 4) continue;
+      // Also skip statusGroup=3 (live) games that started >110 min ago — API can get stuck
+      if ((g.statusGroup ?? 0) === 3 && g.startTime) {
+        const elapsedMin = (Date.now() - new Date(g.startTime).getTime()) / 60_000;
+        if (elapsedMin > 110) continue;
+      }
       const isWC = g.competitionId === WC_COMP_ID || (g.competitionDisplayName ?? "").includes("World Cup");
       if (isWC) wcV1Games.push(g);
     }
