@@ -2402,6 +2402,8 @@ const WTA_CITY_TIER: Record<string, number> = {
   "birmingham": 5, "stuttgart": 5, "lyon": 5, "budapest": 5,
   "bogota": 5, "lausanne": 5, "hamburg": 5, "palermo": 5,
   "montreal wta": 5, "nanchang": 5,
+  "ilkley": 5, "bratislava": 5, "surbiton": 5, "rosmalen": 5,
+  "bad homburg": 5, "berlin": 5,
 };
 
 function tennisTournLabel(tournament: string | SAPIV2TournObj | undefined): string {
@@ -2479,6 +2481,31 @@ function enrichTennisV1League(compName: string): string {
     // Also try key without leading single-char prefix (e.g. "s-hertogenbosch" → "hertogenbosch")
     const kStripped = k.replace(/^[a-z]-/, "");
     if (kStripped !== k && (norm.includes(kStripped) || kStripped.includes(norm))) return v;
+  }
+  // City-based lookup when V2 cache is empty (V2 today endpoint unavailable).
+  // V1 competition names look like "Queen's - Round of 16" or "Hertogenbosch - Quarter Finals".
+  // Extract the city part (everything before " - ") and match against ATP/WTA tier maps.
+  const cityPart = (norm.split(" - ")[0] ?? norm).trim().replace(/'/g, "").replace(/\s+/g, " ");
+  const displayCity = (clean.split(" - ")[0] ?? clean).trim();
+  const _tierLabel = (rank: number, circuit: "ATP" | "WTA"): string => {
+    if (rank === 1) return "Grand Slam";
+    if (rank === 2) return `${circuit} Finals`;
+    if (rank === 3) return `${circuit} 1000`;
+    if (rank === 4) return `${circuit} 500`;
+    if (rank === 5) return `${circuit} 250`;
+    return circuit;
+  };
+  for (const [city, rank] of Object.entries(ATP_CITY_TIER)) {
+    const cn = city.replace(/-/g, " ");
+    if (cityPart === cn || cityPart.includes(cn) || cn.includes(cityPart)) {
+      return `${_tierLabel(rank, "ATP")} · ${displayCity}`;
+    }
+  }
+  for (const [city, rank] of Object.entries(WTA_CITY_TIER)) {
+    const cn = city.replace(/-/g, " ");
+    if (cityPart === cn || cityPart.includes(cn) || cn.includes(cityPart)) {
+      return `${_tierLabel(rank, "WTA")} · ${displayCity}`;
+    }
   }
   return clean || "Tennis";
 }
@@ -7036,6 +7063,7 @@ async function buildLiveMatches(): Promise<LiveMatchState[]> {
 
 async function buildUpcomingMatches(): Promise<UpcomingMatch[]> {
   const events = await getUpcomingEventsV2("football", 3);
+  if (events.length === 0) return buildFootballUpcomingV1();
   const seen = new Set<string>();
   const primary: SAPIV2Event[] = [];
   const fallback: SAPIV2Event[] = [];
@@ -9452,6 +9480,114 @@ async function buildTennisLiveV1Cached(): Promise<LiveMatchState[]> {
   ]);
 }
 
+// ─── V1 upcoming builders (fallback when V2 schedule/today is degraded) ──────
+
+async function buildFootballUpcomingV1(): Promise<UpcomingMatch[]> {
+  try {
+    const fetchGames = async (path: string): Promise<V1LiveGame[]> => {
+      const resp = await fetch(`${SAPI_V1_FOOTBALL}/${path}`, {
+        signal: AbortSignal.timeout(8000), headers: sapiHeaders(),
+      });
+      if (!resp.ok) return [];
+      const j = await resp.json() as { data?: { games?: V1LiveGame[] } };
+      return j.data?.games ?? [];
+    };
+    const [currentGames, allGames] = await Promise.all([
+      fetchGames("current").catch(() => [] as V1LiveGame[]),
+      fetchGames("all").catch(() => [] as V1LiveGame[]),
+    ]);
+    const seen = new Set<number>();
+    const results: UpcomingMatch[] = [];
+    for (const g of [...currentGames, ...allGames]) {
+      if (!g.id || seen.has(g.id)) continue;
+      seen.add(g.id);
+      if ((g.statusGroup ?? 0) !== 2) continue;
+      const home = g.homeCompetitor?.name?.trim() ?? "";
+      const away = g.awayCompetitor?.name?.trim() ?? "";
+      if (!home || !away || home === "Unknown" || away === "Unknown") continue;
+      if (isBlockedLeague(`${g.competitionDisplayName ?? ""} ${home} ${away}`)) continue;
+      const league = g.competitionDisplayName ?? "Football";
+      const startMs = g.startTime ? new Date(g.startTime).getTime() : Date.now() + 3_600_000;
+      if (startMs < Date.now() - 5 * 60_000) continue;
+      const { date, time } = v2EventDateTime({ startTimestamp: startMs / 1000 } as SAPIV2Event);
+      if (!date) continue;
+      results.push({
+        id: `fb-v1-${g.id}`,
+        home, away,
+        league, country: "",
+        date, time,
+        sport: "football" as const,
+        hasRealOdds: false,
+        odds: makeOddsFromTeams(home, away),
+        markets: makeAdvancedMarketsFromTeams(home, away),
+      } as UpcomingMatch);
+      if (results.length >= 40) break;
+    }
+    results.sort((a, b) => {
+      const ta = new Date(`${a.date.split(".").reverse().join("-")}T${a.time}`).getTime();
+      const tb = new Date(`${b.date.split(".").reverse().join("-")}T${b.time}`).getTime();
+      return ta - tb;
+    });
+    return results;
+  } catch {
+    return [];
+  }
+}
+
+async function buildBasketballUpcomingV1(): Promise<UpcomingMatch[]> {
+  try {
+    const fetchGames = async (path: string): Promise<V1LiveGame[]> => {
+      const resp = await fetch(`${SAPI_V1_BASKETBALL}/${path}`, {
+        signal: AbortSignal.timeout(8000), headers: sapiHeaders(),
+      });
+      if (!resp.ok) return [];
+      const j = await resp.json() as { data?: { games?: V1LiveGame[] } };
+      return j.data?.games ?? [];
+    };
+    const [currentGames, allGames] = await Promise.all([
+      fetchGames("current").catch(() => [] as V1LiveGame[]),
+      fetchGames("all").catch(() => [] as V1LiveGame[]),
+    ]);
+    const seen = new Set<number>();
+    const results: UpcomingMatch[] = [];
+    for (const g of [...currentGames, ...allGames]) {
+      if (!g.id || seen.has(g.id)) continue;
+      seen.add(g.id);
+      if ((g.statusGroup ?? 0) !== 2) continue;
+      const home = g.homeCompetitor?.name?.trim() ?? "";
+      const away = g.awayCompetitor?.name?.trim() ?? "";
+      if (!home || !away || home === "Unknown" || away === "Unknown") continue;
+      const league = g.competitionDisplayName ?? "Basketball";
+      const startMs = g.startTime ? new Date(g.startTime).getTime() : Date.now() + 3_600_000;
+      if (startMs < Date.now() - 5 * 60_000) continue;
+      const { date, time } = v2EventDateTime({ startTimestamp: startMs / 1000 } as SAPIV2Event);
+      if (!date) continue;
+      const sr = seededRng(`bball:${home}:${away}`);
+      const pHome = mc(0.5 + (sr(1) - 0.5) * 0.12, 0.25, 0.75);
+      const [compH, compA] = probsToDecimalOdds([pHome, 1 - pHome], 1.065);
+      results.push({
+        id: `bball-v1-${g.id}`,
+        home, away,
+        league, country: "",
+        date, time,
+        sport: "basketball" as const,
+        hasRealOdds: false,
+        odds: { home: compH!, draw: 0, away: compA! },
+        markets: makeBasketballMarketsFromTeams(home, away),
+      } as UpcomingMatch);
+      if (results.length >= 30) break;
+    }
+    results.sort((a, b) => {
+      const ta = new Date(`${a.date.split(".").reverse().join("-")}T${a.time}`).getTime();
+      const tb = new Date(`${b.date.split(".").reverse().join("-")}T${b.time}`).getTime();
+      return ta - tb;
+    });
+    return results;
+  } catch {
+    return [];
+  }
+}
+
 // ─── Tennis upcoming from V1 native API ───────────────────────────────────────
 // The tennis API does not have a v2 schedule endpoint (returns 404).
 // Instead we use v1/tennis/all which returns all today+tomorrow scheduled games.
@@ -9541,7 +9677,11 @@ async function buildTennisUpcoming(): Promise<UpcomingMatch[]> {
 
 async function buildBasketballUpcoming(): Promise<UpcomingMatch[]> {
   try {
+    // Try V1 first (fast, always available); fall back to V2 only if V1 returns nothing
+    const v1Games = await buildBasketballUpcomingV1().catch(() => [] as UpcomingMatch[]);
+    if (v1Games.length > 0) return v1Games;
     const events = await getUpcomingEventsV2("basketball", 3);
+    if (events.length === 0) return [];
     const seen = new Set<string>();
     const filtered: SAPIV2Event[] = [];
 
@@ -9593,6 +9733,7 @@ async function buildBasketballUpcoming(): Promise<UpcomingMatch[]> {
 async function buildHockeyUpcoming(): Promise<UpcomingMatch[]> {
   try {
     const events = await getUpcomingEventsV2("hockey", 3);
+    if (events.length === 0) return [];
     const seen = new Set<string>();
     const filtered: SAPIV2Event[] = [];
 
@@ -9682,6 +9823,7 @@ async function buildVolleyballUpcoming(): Promise<UpcomingMatch[]> {
 async function buildBaseballUpcoming(): Promise<UpcomingMatch[]> {
   try {
     const events = await getUpcomingEventsV2("baseball", 3);
+    if (events.length === 0) return [];
     const seen = new Set<string>();
     const filtered: SAPIV2Event[] = [];
 
@@ -9915,6 +10057,86 @@ const WC2026_TTL = 15 * 60_000; // 15 min — shorter so real odds get picked up
 
 let _wc2026Rebuilding = false;
 
+// ─── Static WC 2026 group-stage schedule (supplement when API returns near-term only) ──
+// UTC times; backend converts to Europe/Lisbon for display
+const WC2026_STATIC: Array<{ home: string; away: string; group: string; date: string; time: string; md: number }> = [
+  // MD1
+  { home: "Mexico", away: "South Africa", group: "A", date: "2026-06-11", time: "19:00", md: 1 },
+  { home: "South Korea", away: "Czechia", group: "A", date: "2026-06-11", time: "22:00", md: 1 },
+  { home: "Canada", away: "Switzerland", group: "B", date: "2026-06-12", time: "19:00", md: 1 },
+  { home: "Qatar", away: "Bosnia and Herzegovina", group: "B", date: "2026-06-12", time: "22:00", md: 1 },
+  { home: "Brazil", away: "Morocco", group: "C", date: "2026-06-13", time: "01:00", md: 1 },
+  { home: "Haiti", away: "Scotland", group: "C", date: "2026-06-13", time: "04:00", md: 1 },
+  { home: "United States", away: "Australia", group: "D", date: "2026-06-13", time: "19:00", md: 1 },
+  { home: "Paraguay", away: "Turkey", group: "D", date: "2026-06-13", time: "22:00", md: 1 },
+  { home: "Germany", away: "Ivory Coast", group: "E", date: "2026-06-14", time: "01:00", md: 1 },
+  { home: "Ecuador", away: "Curacao", group: "E", date: "2026-06-14", time: "04:00", md: 1 },
+  { home: "Netherlands", away: "Sweden", group: "F", date: "2026-06-14", time: "19:00", md: 1 },
+  { home: "Japan", away: "Tunisia", group: "F", date: "2026-06-14", time: "22:00", md: 1 },
+  { home: "Belgium", away: "Iran", group: "G", date: "2026-06-15", time: "01:00", md: 1 },
+  { home: "New Zealand", away: "Egypt", group: "G", date: "2026-06-15", time: "04:00", md: 1 },
+  { home: "Spain", away: "Saudi Arabia", group: "H", date: "2026-06-15", time: "19:00", md: 1 },
+  { home: "Uruguay", away: "Cape Verde", group: "H", date: "2026-06-15", time: "22:00", md: 1 },
+  { home: "France", away: "Senegal", group: "I", date: "2026-06-16", time: "01:00", md: 1 },
+  { home: "Iraq", away: "Norway", group: "I", date: "2026-06-16", time: "04:00", md: 1 },
+  { home: "Argentina", away: "Algeria", group: "J", date: "2026-06-16", time: "19:00", md: 1 },
+  { home: "Austria", away: "Jordan", group: "J", date: "2026-06-16", time: "22:00", md: 1 },
+  { home: "Portugal", away: "Colombia", group: "K", date: "2026-06-17", time: "01:00", md: 1 },
+  { home: "Uzbekistan", away: "DR Congo", group: "K", date: "2026-06-17", time: "04:00", md: 1 },
+  { home: "England", away: "Croatia", group: "L", date: "2026-06-17", time: "19:00", md: 1 },
+  { home: "Ghana", away: "Panama", group: "L", date: "2026-06-17", time: "22:00", md: 1 },
+  // MD2
+  { home: "South Korea", away: "South Africa", group: "A", date: "2026-06-17", time: "23:00", md: 2 },
+  { home: "Mexico", away: "Czechia", group: "A", date: "2026-06-18", time: "02:00", md: 2 },
+  { home: "Switzerland", away: "Qatar", group: "B", date: "2026-06-18", time: "19:00", md: 2 },
+  { home: "Canada", away: "Bosnia and Herzegovina", group: "B", date: "2026-06-18", time: "22:00", md: 2 },
+  { home: "Morocco", away: "Haiti", group: "C", date: "2026-06-19", time: "01:00", md: 2 },
+  { home: "Brazil", away: "Scotland", group: "C", date: "2026-06-19", time: "04:00", md: 2 },
+  { home: "Australia", away: "Paraguay", group: "D", date: "2026-06-19", time: "19:00", md: 2 },
+  { home: "United States", away: "Turkey", group: "D", date: "2026-06-19", time: "22:00", md: 2 },
+  { home: "Ivory Coast", away: "Ecuador", group: "E", date: "2026-06-20", time: "01:00", md: 2 },
+  { home: "Germany", away: "Curacao", group: "E", date: "2026-06-20", time: "04:00", md: 2 },
+  { home: "Sweden", away: "Japan", group: "F", date: "2026-06-20", time: "19:00", md: 2 },
+  { home: "Netherlands", away: "Tunisia", group: "F", date: "2026-06-20", time: "22:00", md: 2 },
+  { home: "Iran", away: "New Zealand", group: "G", date: "2026-06-21", time: "01:00", md: 2 },
+  { home: "Belgium", away: "Egypt", group: "G", date: "2026-06-21", time: "04:00", md: 2 },
+  { home: "Saudi Arabia", away: "Uruguay", group: "H", date: "2026-06-21", time: "19:00", md: 2 },
+  { home: "Spain", away: "Cape Verde", group: "H", date: "2026-06-21", time: "22:00", md: 2 },
+  { home: "Senegal", away: "Iraq", group: "I", date: "2026-06-22", time: "01:00", md: 2 },
+  { home: "France", away: "Norway", group: "I", date: "2026-06-22", time: "04:00", md: 2 },
+  { home: "Algeria", away: "Austria", group: "J", date: "2026-06-22", time: "19:00", md: 2 },
+  { home: "Argentina", away: "Jordan", group: "J", date: "2026-06-22", time: "22:00", md: 2 },
+  { home: "Colombia", away: "Uzbekistan", group: "K", date: "2026-06-23", time: "01:00", md: 2 },
+  { home: "Portugal", away: "DR Congo", group: "K", date: "2026-06-23", time: "04:00", md: 2 },
+  { home: "Croatia", away: "Ghana", group: "L", date: "2026-06-23", time: "19:00", md: 2 },
+  { home: "England", away: "Panama", group: "L", date: "2026-06-23", time: "22:00", md: 2 },
+  // MD3 (simultaneous within group)
+  { home: "South Africa", away: "South Korea", group: "A", date: "2026-06-24", time: "02:00", md: 3 },
+  { home: "Czechia", away: "Mexico", group: "A", date: "2026-06-24", time: "02:00", md: 3 },
+  { home: "Bosnia and Herzegovina", away: "Switzerland", group: "B", date: "2026-06-24", time: "19:00", md: 3 },
+  { home: "Qatar", away: "Canada", group: "B", date: "2026-06-24", time: "19:00", md: 3 },
+  { home: "Haiti", away: "Morocco", group: "C", date: "2026-06-25", time: "02:00", md: 3 },
+  { home: "Scotland", away: "Brazil", group: "C", date: "2026-06-25", time: "02:00", md: 3 },
+  { home: "Paraguay", away: "United States", group: "D", date: "2026-06-25", time: "19:00", md: 3 },
+  { home: "Turkey", away: "Australia", group: "D", date: "2026-06-25", time: "19:00", md: 3 },
+  { home: "Curacao", away: "Ivory Coast", group: "E", date: "2026-06-25", time: "23:00", md: 3 },
+  { home: "Ecuador", away: "Germany", group: "E", date: "2026-06-25", time: "23:00", md: 3 },
+  { home: "Tunisia", away: "Sweden", group: "F", date: "2026-06-26", time: "02:00", md: 3 },
+  { home: "Japan", away: "Netherlands", group: "F", date: "2026-06-26", time: "02:00", md: 3 },
+  { home: "Egypt", away: "Iran", group: "G", date: "2026-06-26", time: "19:00", md: 3 },
+  { home: "New Zealand", away: "Belgium", group: "G", date: "2026-06-26", time: "19:00", md: 3 },
+  { home: "Cape Verde", away: "Spain", group: "H", date: "2026-06-26", time: "23:00", md: 3 },
+  { home: "Uruguay", away: "Saudi Arabia", group: "H", date: "2026-06-26", time: "23:00", md: 3 },
+  { home: "Norway", away: "Senegal", group: "I", date: "2026-06-27", time: "02:00", md: 3 },
+  { home: "Iraq", away: "France", group: "I", date: "2026-06-27", time: "02:00", md: 3 },
+  { home: "Jordan", away: "Algeria", group: "J", date: "2026-06-27", time: "19:00", md: 3 },
+  { home: "Argentina", away: "Austria", group: "J", date: "2026-06-27", time: "19:00", md: 3 },
+  { home: "Uzbekistan", away: "Colombia", group: "K", date: "2026-06-27", time: "23:00", md: 3 },
+  { home: "DR Congo", away: "Portugal", group: "K", date: "2026-06-27", time: "23:00", md: 3 },
+  { home: "Ghana", away: "Croatia", group: "L", date: "2026-06-28", time: "02:00", md: 3 },
+  { home: "Panama", away: "England", group: "L", date: "2026-06-28", time: "02:00", md: 3 },
+];
+
 async function _rebuildWC2026(): Promise<void> {
   if (_wc2026Rebuilding) return;
   _wc2026Rebuilding = true;
@@ -10063,7 +10285,52 @@ async function _rebuildWC2026(): Promise<void> {
     }
 
     // Merge: V1 is primary, V2 fallback supplements if V1 is empty
-    const finalResults: UpcomingMatch[] = results.length > 0 ? results : v2Results;
+    const apiResults: UpcomingMatch[] = results.length > 0 ? results : v2Results;
+
+    // ── Supplement with static schedule for future games not yet returned by API ──
+    const now = Date.now();
+    // Build a set of matchups already covered by API (normalised lowercase)
+    const apiMatchups = new Set(apiResults.map(r => `${r.home.toLowerCase()}|${r.away.toLowerCase()}`));
+    const staticSupplements: UpcomingMatch[] = [];
+    for (const s of WC2026_STATIC) {
+      const startMs = new Date(`${s.date}T${s.time}:00Z`).getTime();
+      if (startMs < now - 5 * 60_000) continue; // skip past games
+      if (apiMatchups.has(`${s.home.toLowerCase()}|${s.away.toLowerCase()}`)) continue; // API already has it
+      const dt2 = new Date(startMs);
+      const sDay   = dt2.toLocaleDateString("pt-PT", { day: "2-digit",   timeZone: "Europe/Lisbon" });
+      const sMon   = dt2.toLocaleDateString("pt-PT", { month: "2-digit", timeZone: "Europe/Lisbon" });
+      const sYr    = dt2.toLocaleDateString("pt-PT", { year: "numeric",  timeZone: "Europe/Lisbon" });
+      const sDate  = `${sDay}.${sMon}.${sYr}`;
+      const sTime  = dt2.toLocaleTimeString("pt-PT", { hour: "2-digit", minute: "2-digit", timeZone: "Europe/Lisbon" });
+      const sOdds  = makeOddsFromTeams(s.home, s.away);
+      const sMkts  = makeAdvancedMarketsFromTeams(s.home, s.away);
+      staticSupplements.push({
+        id: `wc26-${s.home.toLowerCase().replace(/\s+/g, "-")}-${s.away.toLowerCase().replace(/\s+/g, "-")}-md${s.md}`,
+        home: s.home, away: s.away,
+        league: `FIFA World Cup - Group ${s.group}`,
+        country: "World",
+        time: sTime, date: sDate,
+        sport: "football",
+        hasRealOdds: false,
+        odds: sOdds, markets: sMkts,
+        isWomens: false,
+        leagueId: String(WC_COMP_ID),
+        providerStatusGroup: 2,
+        providerStatusText: "Not Started",
+      } satisfies UpcomingMatch);
+    }
+
+    const finalResults = [...apiResults, ...staticSupplements];
+    // Sort chronologically
+    finalResults.sort((a, b) => {
+      try {
+        const [adD = "1", adM = "1", adY = "2026"] = a.date.split(".");
+        const [bdD = "1", bdM = "1", bdY = "2026"] = b.date.split(".");
+        const ta = new Date(`${adY}-${adM}-${adD}T${a.time}:00`).getTime();
+        const tb = new Date(`${bdY}-${bdM}-${bdD}T${b.time}:00`).getTime();
+        return ta - tb;
+      } catch { return 0; }
+    });
 
     // Always update cache (reset TTL) — even 0 results is a valid state
     // Only keep previous matches if new fetch returned nothing (API outage)
@@ -10130,15 +10397,8 @@ router.get("/upcoming", async (req: Request, res: Response) => {
   else if (sport === "baseball") matches = cache.baseball;
   else matches = [...cache.football, ...cache.tennis, ...cache.basketball, ...cache.hockey, ...cache.volleyball, ...cache.baseball];
   const filtered = sport === "all"
-    ? matches.filter(m => {
-        const sp = m.sport ?? "football";
-        if (sp === "football") return m.odds?.home > 0 && m.odds?.away > 0;
-        if (sp === "tennis") return m.odds?.home > 0 && m.odds?.away > 0;
-        return !!m.hasRealOdds;
-      })
-    : sport === "football"
-      ? matches.filter(m => m.odds?.home > 0 && m.odds?.away > 0)
-      : matches.filter(m => m.hasRealOdds);
+    ? matches.filter(m => m.odds?.home > 0 && m.odds?.away > 0)
+    : matches.filter(m => m.odds?.home > 0 && m.odds?.away > 0);
   res.json({ matches: filtered });
 });
 
