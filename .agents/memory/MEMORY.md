@@ -5,3 +5,4 @@
 - [Tennis V1 statusGroup mapping](tennis-v1-statusgroup.md) — V1 tennis /games/current: 2=Scheduled, 3=Live/in-play ("Set 1"/"Set 3"), 4=Finished/Cancelled; isTennisV1GameFinished must check statusGroup===4 (not 3)
 - [Tennis V1 stages field](tennis-v1-stages.md) — V1 /live game has `stages[]` with per-set game scores ("Set 1"/"Set 2"…), live game points ("Game"), total sets ("Sets"); also inPossession for serving
 - [Live payload cold-start bottlenecks](live-payload-perf.md) — all HTTP live/today fallback timeouts must be 3s max; buildTennisLiveV1Cached() must run inside the main Promise.all, not after it
+- [V1 football API paths](v1-football-api-paths.md) — V1 football uses /api/v1/football/ prefix (NOT /api/); WC 2026 = competitionId 5930; use /all+/live+/competition/5930/games; /current is flaky
