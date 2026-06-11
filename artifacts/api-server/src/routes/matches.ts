@@ -709,8 +709,8 @@ function leaguePriority(name: string, country?: string): number {
   return 999;
 }
 
-const DEFAULT_FOOTBALL_LIVE_DISAPPEAR_GRACE_MS = 20 * 60 * 1000;
-const PRIORITY_FOOTBALL_LIVE_DISAPPEAR_GRACE_MS = 45 * 60 * 1000;
+const DEFAULT_FOOTBALL_LIVE_DISAPPEAR_GRACE_MS = 130 * 60 * 1000;
+const PRIORITY_FOOTBALL_LIVE_DISAPPEAR_GRACE_MS = 180 * 60 * 1000;
 
 function isCatalogPriorityLeague(prio: number): boolean {
   return prio < 100;
@@ -2207,13 +2207,8 @@ function isTennisFinishedStatusText(status: string | undefined): boolean {
 }
 
 function isTennisV1GameFinished(game: Pick<V1TennisGame, "statusGroup" | "statusText" | "homeCompetitor" | "awayCompetitor">): boolean {
-  // V1 tennis statusGroup mapping (confirmed from live API data):
-  //   2 = Scheduled (not started)
-  //   3 = In-play / Live ("Set 1", "Set 2", "Set 3" …)
-  //   4 = Finished / Cancelled / Interrupted
-  if (game.statusGroup === 4) return true;   // finished/cancelled
+  if (game.statusGroup === 3) return true;
   if (isTennisFinishedStatusText(game.statusText)) return true;
-  // isWinner is only set once a match truly ends
   return !!game.homeCompetitor?.isWinner || !!game.awayCompetitor?.isWinner;
 }
 
@@ -2388,6 +2383,10 @@ const ATP_CITY_TIER: Record<string, number> = {
   "doha": 5, "pune": 5, "newport beach": 5, "san jose": 5,
 };
 const WTA_CITY_TIER: Record<string, number> = {
+  // WTA 1000 / Grand Slam host cities
+  "wimbledon": 1,
+  // WTA 500 — named tournaments
+  "rothesay": 4, "cinch": 4,
   // WTA 1000
   "indian wells": 3, "miami": 3, "madrid": 3, "rome": 3,
   "montreal": 3, "toronto": 3, "cincinnati": 3, "wuhan": 3, "beijing": 3,
@@ -2406,7 +2405,12 @@ function tennisTournLabel(tournament: string | SAPIV2TournObj | undefined): stri
   const base = v2TournName(tournament);
   if (!tournament || typeof tournament === "string") return base;
   const t = tournament as SAPIV2TournObj;
-  const cat = t.category?.name ?? "";
+  const catRaw = (t.category?.name ?? "").trim().toUpperCase();
+  const catSlug = (t.category?.slug ?? "").toLowerCase();
+  const cat = catRaw === "ATP" ? "ATP" : catRaw === "WTA" ? "WTA"
+    : catSlug.startsWith("atp") ? "ATP"
+    : catSlug.startsWith("wta") ? "WTA"
+    : catRaw;
   if (cat !== "ATP" && cat !== "WTA") return base;
 
   // Strip ", Country" suffix for a cleaner display name
@@ -2463,42 +2467,15 @@ function enrichTennisV1League(compName: string): string {
   if (!compName) return "Tennis";
   const clean = cleanLeagueName(compName);
   const norm = clean.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
-  // Direct match in V2 label cache
+  // Direct match
   const direct = _tennisV2LeagueLabelByCompName.get(norm);
   if (direct) return direct;
-  // Partial match: V2 base name may be shorter than V1 display name
+  // Partial match: V2 base name may be shorter than V1 display name (e.g. "city, country")
   for (const [k, v] of _tennisV2LeagueLabelByCompName) {
     if (norm.includes(k) || k.includes(norm)) return v;
     // Also try key without leading single-char prefix (e.g. "s-hertogenbosch" → "hertogenbosch")
     const kStripped = k.replace(/^[a-z]-/, "");
     if (kStripped !== k && (norm.includes(kStripped) || kStripped.includes(norm))) return v;
-  }
-  // City-based fallback: V1 comp names are "City - Round of XX Round..."
-  // Extract city part (before the first " - ") and look up in ATP/WTA tier maps.
-  // This fires when the V2 today/live feed is empty or missing the event.
-  const cityRaw = norm.split(/\s+-\s+/)[0]?.trim() ?? "";
-  if (cityRaw) {
-    const toTierLabel = (cat: string, rank: number, city: string): string => {
-      const display = city.split(/\s+/).map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(" ");
-      if (rank === 1) return `Grand Slam · ${display}`;
-      if (rank === 3) return `${cat} 1000 · ${display}`;
-      if (rank === 4) return `${cat} 500 · ${display}`;
-      if (rank === 5) return `${cat} 250 · ${display}`;
-      return `${cat} · ${display}`;
-    };
-    const atpRank = ATP_CITY_TIER[cityRaw];
-    if (atpRank !== undefined) return toTierLabel("ATP", atpRank, cityRaw);
-    const wtaRank = WTA_CITY_TIER[cityRaw];
-    if (wtaRank !== undefined) return toTierLabel("WTA", wtaRank, cityRaw);
-    // Also try without dashes (e.g. "s-hertogenbosch" → "s hertogenbosch" / "hertogenbosch")
-    const cityNoDash = cityRaw.replace(/-/g, " ");
-    const cityStripped = cityNoDash.replace(/^[a-z] /, "");
-    for (const key of [cityNoDash, cityStripped]) {
-      const ar = ATP_CITY_TIER[key];
-      if (ar !== undefined) return toTierLabel("ATP", ar, key);
-      const wr = WTA_CITY_TIER[key];
-      if (wr !== undefined) return toTierLabel("WTA", wr, key);
-    }
   }
   return clean || "Tennis";
 }
@@ -2765,31 +2742,17 @@ const v2FootballRedCardsCache = new Map<number, V2RedCardsEntry>();
 const V2_RED_CARDS_TTL_MS = 45_000;
 
 // V1 tennis native format (all endpoint — different schema from SAPIV2Event)
-interface V1TennisStage {
-  id: number;
-  name: string;        // "Game" | "Set 1" | "Set 2" | "Set 3" | "Sets"
-  shortName: string;
-  homeCompetitorScore: number;
-  awayCompetitorScore: number;
-  homeCompetitorExtraScore?: number; // tiebreak score
-  awayCompetitorExtraScore?: number;
-  time?: string;
-  isLive?: boolean;
-  isEnded?: boolean;
-  isCurrent?: boolean;
-}
 interface V1TennisGame {
   id: number;
   competitionId?: number;
   competitionDisplayName?: string;
   startTime: string;
-  statusGroup?: number; // 2=scheduled, 3=live/in-play, 4=finished/cancelled
+  statusGroup?: number; // 1=live, 2=scheduled, 3=finished
   statusText?: string;
-  homeCompetitor?: { id?: number; name?: string; score?: number; isWinner?: boolean; inPossession?: boolean };
-  awayCompetitor?: { id?: number; name?: string; score?: number; isWinner?: boolean; inPossession?: boolean };
+  homeCompetitor?: { id?: number; name?: string; score?: number; isWinner?: boolean };
+  awayCompetitor?: { id?: number; name?: string; score?: number; isWinner?: boolean };
   stageName?: string;
   roundName?: string;
-  stages?: V1TennisStage[];
 }
 let _tennisAllV1Cache: V1TennisGame[] | null = null;
 let _tennisAllV1FetchedAt = 0;
@@ -4814,7 +4777,7 @@ const WS_PREFERRED_MAX_STALE_MS = 10_000;
 async function fetchLiveRace(v1Base: string, v2Base: string): Promise<SAPIV2Event[]> {
   const headers = sapiHeaders();
   const tryFetch = async (base: string): Promise<SAPIV2Event[]> => {
-    const resp = await fetch(`${base}/live`, { signal: AbortSignal.timeout(3000), headers });
+    const resp = await fetch(`${base}/live`, { signal: AbortSignal.timeout(8000), headers });
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     const data = (await resp.json()) as { events?: SAPIV2Event[]; data?: SAPIV2Event[] };
     const events = data.events ?? (data.data as SAPIV2Event[] | undefined) ?? [];
@@ -4873,7 +4836,7 @@ async function getHockeyLiveV2(): Promise<SAPIV2Event[]> {
   if ((wsConnected.has("hockey") || v1WsConnected.has("hockey")) && hockeyLiveV2Cache && now - hockeyLiveV2FetchedAt < WS_PREFERRED_MAX_STALE_MS && (wsLastMessageAt.get("hockey") ?? 0) > now - WS_PREFERRED_MAX_STALE_MS) return hockeyLiveV2Cache;
   if (hockeyLiveV2Cache && now - hockeyLiveV2FetchedAt < CONFIG.LIVE_CACHE_TTL) return hockeyLiveV2Cache;
   try {
-    const resp = await fetch(`${SAPI_V2_HOCKEY}/live`, { signal: AbortSignal.timeout(3000), headers: sapiHeaders() });
+    const resp = await fetch(`${SAPI_V2_HOCKEY}/live`, { signal: AbortSignal.timeout(9000), headers: sapiHeaders() });
     if (!resp.ok) return hockeyLiveV2Cache ?? [];
     const data = (await resp.json()) as { events?: SAPIV2Event[] };
     const events = data.events ?? [];
@@ -4899,7 +4862,7 @@ async function getBaseballLiveV2(): Promise<SAPIV2Event[]> {
   if ((wsConnected.has("baseball") || v1WsConnected.has("baseball")) && baseballLiveV2Cache && now - baseballLiveV2FetchedAt < WS_PREFERRED_MAX_STALE_MS && (wsLastMessageAt.get("baseball") ?? 0) > now - WS_PREFERRED_MAX_STALE_MS) return baseballLiveV2Cache;
   if (baseballLiveV2Cache && now - baseballLiveV2FetchedAt < CONFIG.LIVE_CACHE_TTL) return baseballLiveV2Cache;
   try {
-    const resp = await fetch(`${SAPI_V2_BASEBALL}/live`, { signal: AbortSignal.timeout(3000), headers: sapiHeaders() });
+    const resp = await fetch(`${SAPI_V2_BASEBALL}/live`, { signal: AbortSignal.timeout(9000), headers: sapiHeaders() });
     if (!resp.ok) return baseballLiveV2Cache ?? [];
     const data = (await resp.json()) as { events?: SAPIV2Event[] };
     const events = data.events ?? [];
@@ -4928,7 +4891,7 @@ async function getTennisLiveV2(): Promise<SAPIV2Event[]> {
     // Race V1 vs V2 — tennis endpoint shape varies, handle both formats
     const headers = sapiHeaders();
     const tryTennis = async (base: string): Promise<SAPIV2Event[]> => {
-      const resp = await fetch(`${base}/live`, { signal: AbortSignal.timeout(3000), headers });
+      const resp = await fetch(`${base}/live`, { signal: AbortSignal.timeout(8000), headers });
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
       const raw = (await resp.json()) as {
         events?: SAPIV2Event[];
@@ -4988,57 +4951,6 @@ const wsTimers = new Map<SportKey, ReturnType<typeof setTimeout>>();
 const wsRetryDelay = new Map<SportKey, number>();
 const wsLastMessageAt = new Map<SportKey, number>();
 const v1PatchedAt = new Map<string, number>();
-
-// ─── V2 WS refs — stored so we can send additional channel subscriptions ─────
-const wsRefs = new Map<SportKey, WebSocket>();
-
-// ─── V2 live odds — real bookmaker odds from match:{id}:odds WS channel ───────
-// Key: matchId as string → { home, draw, away } in decimal format
-const _v2LiveOdds = new Map<string, { home: number; draw: number; away: number }>();
-// Track which match odds channels are already subscribed
-const _v2OddsSubscribed = new Set<string>(); // "sport-matchId"
-
-// ─── V1 full game store — populated from V1 WS `games` array ─────────────────
-// Lets tennis skip HTTP polling and use WS data (1-2s vs 8s)
-const _v1LiveGamesStore = new Map<SportKey, unknown[]>();
-
-/** Subscribe to real live odds for a match via V2 WS (match:{id}:odds channel). */
-function subscribeV2MatchOdds(sport: SportKey, matchId: number | string): void {
-  const key = `${sport}-${matchId}`;
-  if (_v2OddsSubscribed.has(key)) return;
-  const ws = wsRefs.get(sport);
-  if (!ws || ws.readyState !== WebSocket.OPEN) return;
-  _v2OddsSubscribed.add(key);
-  try { ws.send(JSON.stringify({ action: "subscribe", channel: `match:${matchId}:odds` })); } catch { /* ignore */ }
-}
-
-/** Parse a V2 match:*:odds WS message and store real odds. */
-function parseV2OddsWsMsg(raw: Record<string, unknown>): void {
-  const channel = String(raw["channel"] ?? "");
-  const m = channel.match(/^match:(\d+):odds$/);
-  if (!m) return;
-  const matchId = m[1]!;
-  const payload = (raw["data"] ?? raw) as Record<string, unknown>;
-  // Navigate: payload.featured.fullTime.choices || payload.featured.default.choices
-  const featured = (payload["featured"] ?? payload) as Record<string, unknown>;
-  const block = (featured["fullTime"] ?? featured["default"] ?? featured) as Record<string, unknown>;
-  const choices = block["choices"] as unknown[] | undefined;
-  if (!Array.isArray(choices) || choices.length === 0) return;
-  let home = 0, draw = 0, away = 0;
-  for (const c of choices as Record<string, unknown>[]) {
-    const name = String(c["name"] ?? "");
-    const fv   = String(c["fractionalValue"] ?? "");
-    if (!fv || !fv.includes("/")) continue;
-    const dec = fractionalToDecimal(fv);
-    if (dec <= 1.0) continue; // skip invalid/suspended
-    if (name === "1" || name === "Home") home = dec;
-    else if (name === "X" || name === "Draw") draw = dec;
-    else if (name === "2" || name === "Away") away = dec;
-  }
-  if (home > 1.0 && away > 1.0) {
-    _v2LiveOdds.set(matchId, { home, draw, away });
-  }
-}
 const V1_PATCH_PREFER_WINDOW_MS = 15_000;
 const tennisV1WsScore = new Map<string, { home?: number; away?: number; status?: string; minute?: number; patchedAt: number }>();
 
@@ -5081,13 +4993,6 @@ function mergeIncomingPreferFastScore(sport: SportKey, incoming: SAPIV2Event[], 
 function applyV2WsMessage(sport: SportKey, raw: unknown): void {
   if (!raw || typeof raw !== "object") return;
   const msg = raw as Record<string, unknown>;
-
-  // Intercept match:*:odds messages — real live odds pushed by V2 WS
-  const wsChannel = String(msg["channel"] ?? "");
-  if (/^match:\d+:odds$/.test(wsChannel)) {
-    parseV2OddsWsMsg(msg);
-    return;
-  }
 
   // Extract event array from various possible message shapes
   let incoming: SAPIV2Event[] | null = null;
@@ -5173,11 +5078,6 @@ function applyV2WsMessage(sport: SportKey, raw: unknown): void {
       break;
   }
 
-  // Subscribe to real live odds for all matches in this update (V2 match:{id}:odds channel)
-  for (const ev of incoming) {
-    if (ev.id) subscribeV2MatchOdds(sport, ev.id as number);
-  }
-
   if (deltas.length > 0) {
     broadcastBatchDelta(deltas);
   }
@@ -5233,7 +5133,6 @@ function connectSportWS(sport: SportKey): void {
 
   ws.addEventListener("open", () => {
     wsConnected.add(sport);
-    wsRefs.set(sport, ws);
     wsRetryDelay.set(sport, 5_000);
     logger.info({ sport, version: "v2" }, "WS connected");
     ws.send(JSON.stringify({ action: "subscribe", channel: "live-scores" }));
@@ -5253,7 +5152,6 @@ function connectSportWS(sport: SportKey): void {
 
   ws.addEventListener("close", () => {
     wsConnected.delete(sport);
-    wsRefs.delete(sport);
     wsLastMessageAt.delete(sport);
     scheduleReconnect(sport);
   });
@@ -5261,7 +5159,6 @@ function connectSportWS(sport: SportKey): void {
   ws.addEventListener("error", (err) => {
     // error always precedes close; let the close handler reconnect
     wsConnected.delete(sport);
-    wsRefs.delete(sport);
     wsLastMessageAt.delete(sport);
     logger.error({ sport, version: "v2", err }, "WS error");
   });
@@ -5392,19 +5289,8 @@ function applyV1WsMessage(sport: SportKey, raw: unknown): void {
   if (!raw || typeof raw !== "object") return;
   const msg = raw as Record<string, unknown>;
 
-  // V1 WS sends a `games` array with full game objects (per docs: { type:"scores", games:[...] })
-  // Store the full game data so tennis can skip HTTP polling entirely (1-2s vs 8s)
-  if (Array.isArray(msg["games"])) {
-    const games = msg["games"] as unknown[];
-    if (games.length > 0) _v1LiveGamesStore.set(sport, games);
-    for (const g of games as V1ScoreEvent[]) applyV1ScorePatch(sport, g);
-    return;
-  }
-
   if (Array.isArray(msg["events"])) {
-    const events = msg["events"] as unknown[];
-    if (events.length > 0) _v1LiveGamesStore.set(sport, events);
-    for (const ev of events as V1ScoreEvent[]) applyV1ScorePatch(sport, ev);
+    for (const ev of msg["events"] as V1ScoreEvent[]) applyV1ScorePatch(sport, ev);
   } else if (msg["event"] && typeof msg["event"] === "object") {
     applyV1ScorePatch(sport, msg["event"] as V1ScoreEvent);
   } else if (Array.isArray(msg["data"])) {
@@ -5506,52 +5392,38 @@ async function getScheduleV2(sport: SportKey, date: string): Promise<SAPIV2Event
   const cached = scheduleV2Cache.get(cacheKey);
   if (cached && Date.now() - cached.fetchedAt < SCHEDULE_V2_TTL) return cached.events;
   const domain = WS_DOMAINS[sport]; // "v2.football.sportsapipro.com" etc.
-
-  /** Try /api/today as fallback for today's date — returns flat format at top-level `events`. */
-  async function tryTodayFallback(): Promise<SAPIV2Event[]> {
-    const todayStr = new Date().toISOString().slice(0, 10);
-    if (date !== todayStr) return cached?.events ?? [];
-    try {
-      const r = await fetch(`https://${domain}/api/today`, {
-        signal: AbortSignal.timeout(9000),
-        headers: sapiHeaders(),
-      });
-      if (!r.ok) return cached?.events ?? [];
-      const d = (await r.json()) as { success?: boolean; events?: SAPIV2Event[] };
-      if (d.success === false || !d.events?.length) return cached?.events ?? [];
-      // Cache and return today's flat-format events
-      scheduleV2Cache.set(cacheKey, { events: d.events, fetchedAt: Date.now() });
-      return d.events;
-    } catch {
-      return cached?.events ?? [];
-    }
-  }
-
+  const todayStr = new Date().toISOString().slice(0, 10);
   try {
     const resp = await fetch(`https://${domain}/api/schedule/${date}`, {
       signal: AbortSignal.timeout(9000),
       headers: sapiHeaders(),
     });
-    if (!resp.ok) return tryTodayFallback();
-    const data = (await resp.json()) as {
-      success?: boolean;
-      data?: { events?: SAPIV2Event[] };
-      events?: SAPIV2Event[];  // /api/today and /api/live return events at top level
-    };
-    // If the API signals failure (success: false), try /api/today for today's date,
-    // then fall back to stale cache. Never overwrite good cached data with an empty response.
-    if (data.success === false) return tryTodayFallback();
-    // Support both response shapes: { data: { events } } and { events } (flat/today format)
-    const events = data.data?.events ?? data.events ?? [];
-    if (events.length > 0) {
-      scheduleV2Cache.set(cacheKey, { events, fetchedAt: Date.now() });
-    } else if (!cached) {
-      // Cache empty result only if there was no previous data (avoids wiping good stale data)
-      scheduleV2Cache.set(cacheKey, { events: [], fetchedAt: Date.now() });
+    if (!resp.ok) {
+      // Fallback to /api/today when schedule endpoint fails, but only for today's date
+      if (date === todayStr) {
+        const todayResp = await fetch(`https://${domain}/api/today`, {
+          signal: AbortSignal.timeout(6000),
+          headers: sapiHeaders(),
+        }).catch(() => null);
+        if (todayResp?.ok) {
+          const todayData = (await todayResp.json()) as { success?: boolean; data?: { events?: SAPIV2Event[] }; events?: SAPIV2Event[] };
+          const todayEvents = todayData.data?.events ?? (todayData as any).events ?? [];
+          if (todayEvents.length > 0) {
+            scheduleV2Cache.set(cacheKey, { events: todayEvents, fetchedAt: Date.now() });
+            return todayEvents;
+          }
+        }
+      }
+      return cached?.events ?? [];
     }
-    return events.length > 0 ? events : (cached?.events ?? []);
+    const data = (await resp.json()) as { success?: boolean; data?: { events?: SAPIV2Event[] } };
+    // Only cache non-empty successful responses
+    if (data.success === false) return cached?.events ?? [];
+    const events = data.data?.events ?? [];
+    if (events.length > 0) scheduleV2Cache.set(cacheKey, { events, fetchedAt: Date.now() });
+    return events.length > 0 ? events : cached?.events ?? [];
   } catch {
-    return tryTodayFallback();
+    return cached?.events ?? [];
   }
 }
 
@@ -5560,7 +5432,7 @@ async function getScheduleV2(sport: SportKey, date: string): Promise<SAPIV2Event
  * for the given sport, sorted by startTimestamp ascending.
  * Filters out events with status.type === "finished" and startTimestamp <= now.
  */
-async function getUpcomingEventsV2(sport: SportKey, days = 3, graceSec = 5 * 60): Promise<SAPIV2Event[]> {
+async function getUpcomingEventsV2(sport: SportKey, days = 7, graceSec = 5 * 60): Promise<SAPIV2Event[]> {
   const dates: string[] = [];
   const nowMs = Date.now();
   for (let i = 0; i < days; i++) {
@@ -5783,7 +5655,7 @@ async function getTennisTodayV2(): Promise<SAPIV2Event[]> {
   const now = Date.now();
   if (tennisTodayV2Cache && now - tennisTodayV2FetchedAt < TODAY_V2_TTL) return tennisTodayV2Cache;
   try {
-    const resp = await fetch(`${SAPI_V2_TENNIS}/today`, { signal: AbortSignal.timeout(3000), headers: sapiHeaders() });
+    const resp = await fetch(`${SAPI_V2_TENNIS}/today`, { signal: AbortSignal.timeout(9000), headers: sapiHeaders() });
     if (!resp.ok) return tennisTodayV2Cache ?? [];
     const data = (await resp.json()) as { events?: SAPIV2Event[] };
     tennisTodayV2Cache = data.events ?? [];
@@ -7396,7 +7268,7 @@ async function getTennisMatchDetailV2(id: number): Promise<TennisLiveDetailSnaps
     try {
       const res = await fetch(`${SAPI_V2_TENNIS}/match/${id}`, {
         headers: sapiHeaders(),
-        signal: AbortSignal.timeout(2_000),
+        signal: AbortSignal.timeout(6_000),
       });
       if (!res.ok) return null;
       const j = await res.json();
@@ -7907,12 +7779,10 @@ async function buildFootballLiveV2(events: SAPIV2Event[]): Promise<LiveMatchStat
       result.push(liveMatchState.get(id)!);
     } else {
       // First seen — build initial state with score-filtered markets
-      // Prefer real V2 live odds (from match:{id}:odds WS) over computed odds
-      const _fbV2RealOdds = _v2LiveOdds.get(String(ev.id));
-      const baseOdds = _fbV2RealOdds ?? v2FootballOddsCache.get(String(ev.id)) ?? makeOddsFromTeams(homeTeam, awayTeam);
-      const liveOdds = _fbV2RealOdds ?? ((homeScore === 0 && awayScore === 0)
+      const baseOdds = v2FootballOddsCache.get(String(ev.id)) ?? makeOddsFromTeams(homeTeam, awayTeam);
+      const liveOdds = (homeScore === 0 && awayScore === 0)
         ? baseOdds
-        : calculateLive1x2({ minute, homeGoals: homeScore, awayGoals: awayScore, redCardsHome: rcHome, redCardsAway: rcAway, baseHome: baseOdds.home, baseDraw: baseOdds.draw, baseAway: baseOdds.away }));
+        : calculateLive1x2({ minute, homeGoals: homeScore, awayGoals: awayScore, redCardsHome: rcHome, redCardsAway: rcAway, baseHome: baseOdds.home, baseDraw: baseOdds.draw, baseAway: baseOdds.away });
       const rawMarkets = makeAdvancedMarketsFromTeams(homeTeam, awayTeam);
       const baseMarkets = filterLiveMarkets(rawMarkets, homeScore, awayScore, newStatus);
       // First time seen in penalties — store current score as base (0-0 penalties so far)
@@ -8051,23 +7921,16 @@ function buildBasketballLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
 
     const odds = makeOddsFromTeams(homeTeam, awayTeam);
     const diff = homeScore - awayScore;
-    // Prefer real V2 live odds (from match:{id}:odds WS) over computed odds
-    const _bballV2RealOdds = _v2LiveOdds.get(String(ev.id));
-    let liveOdds: { home: number; draw: number; away: number };
-    if (_bballV2RealOdds) {
-      liveOdds = { ..._bballV2RealOdds, draw: 0 };
-    } else {
-      liveOdds = { ...odds, draw: 0 };
-      if (diff !== 0) {
-        // Basketball: each point ~2.5% probability swing; at 20pts lead → ~96% win chance
-        const absDiff = Math.abs(diff);
-        const winPct = Math.min(0.96, 0.5 + absDiff * 0.025);
-        const winnerOdds = Math.max(1.04, +(0.975 / winPct).toFixed(2));
-        const loserOdds  = Math.min(50,   +(0.975 / Math.max(0.04, 1 - winPct)).toFixed(2));
-        liveOdds = diff > 0
-          ? { home: winnerOdds, draw: 0, away: loserOdds }
-          : { home: loserOdds,  draw: 0, away: winnerOdds };
-      }
+    let liveOdds = { ...odds, draw: 0 };
+    if (diff !== 0) {
+      // Basketball: each point ~2.5% probability swing; at 20pts lead → ~96% win chance
+      const absDiff = Math.abs(diff);
+      const winPct = Math.min(0.96, 0.5 + absDiff * 0.025);
+      const winnerOdds = Math.max(1.04, +(0.975 / winPct).toFixed(2));
+      const loserOdds  = Math.min(50,   +(0.975 / Math.max(0.04, 1 - winPct)).toFixed(2));
+      liveOdds = diff > 0
+        ? { home: winnerOdds, draw: 0, away: loserOdds }
+        : { home: loserOdds,  draw: 0, away: winnerOdds };
     }
 
     const id = `bball-v2-${ev.id}`;
@@ -8158,25 +8021,18 @@ function buildHockeyLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
 
     const odds = makeOddsFromTeams(homeTeam, awayTeam);
     const diff = homeScore - awayScore;
-    // Prefer real V2 live odds (from match:{id}:odds WS) over computed odds
-    const _hockeyV2RealOdds = _v2LiveOdds.get(String(ev.id));
-    let liveOdds: { home: number; draw: number; away: number };
-    if (_hockeyV2RealOdds) {
-      liveOdds = { ..._hockeyV2RealOdds, draw: 0 };
-    } else {
-      liveOdds = { ...odds, draw: 0 };
-      if (diff !== 0) {
-        // Hockey: each goal ~17% probability swing; 3+ goal lead → decisive favourite
-        const absDiff = Math.abs(diff);
-        const winPct = Math.min(0.97, 0.5 + absDiff * 0.17);
-        const winnerOdds = Math.max(1.04, +(0.975 / winPct).toFixed(2));
-        const loserOdds  = Math.min(50,   +(0.975 / Math.max(0.03, 1 - winPct)).toFixed(2));
-        liveOdds = diff > 0
-          ? { home: winnerOdds, draw: 0, away: loserOdds }
-          : { home: loserOdds,  draw: 0, away: winnerOdds };
-      }
-      liveOdds.draw = 0;
+    let liveOdds = { ...odds, draw: 0 };
+    if (diff !== 0) {
+      // Hockey: each goal ~17% probability swing; 3+ goal lead → decisive favourite
+      const absDiff = Math.abs(diff);
+      const winPct = Math.min(0.97, 0.5 + absDiff * 0.17);
+      const winnerOdds = Math.max(1.04, +(0.975 / winPct).toFixed(2));
+      const loserOdds  = Math.min(50,   +(0.975 / Math.max(0.03, 1 - winPct)).toFixed(2));
+      liveOdds = diff > 0
+        ? { home: winnerOdds, draw: 0, away: loserOdds }
+        : { home: loserOdds,  draw: 0, away: winnerOdds };
     }
+    liveOdds.draw = 0;
 
     const id = `hockey-v2-${ev.id}`;
     currentIds.add(id);
@@ -8269,23 +8125,16 @@ function buildBaseballLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
     const league = v2TournName(ev.tournament);
     const odds = makeBaseballBaseOdds(homeTeam, awayTeam);
     const diff = homeScore - awayScore;
-    // Prefer real V2 live odds (from match:{id}:odds WS) over computed odds
-    const _baseballV2RealOdds = _v2LiveOdds.get(String(ev.id));
-    let liveOdds: { home: number; draw: number; away: number };
-    if (_baseballV2RealOdds) {
-      liveOdds = { ..._baseballV2RealOdds, draw: 0 };
-    } else {
-      liveOdds = { ...odds, draw: 0 };
-      if (diff !== 0) {
-        // Baseball: each run ~14% probability swing; 5+ run lead → decisive favourite
-        const absDiff = Math.abs(diff);
-        const winPct = Math.min(0.97, 0.5 + absDiff * 0.14);
-        const winnerOdds = Math.max(1.04, +(0.975 / winPct).toFixed(2));
-        const loserOdds  = Math.min(50,   +(0.975 / Math.max(0.03, 1 - winPct)).toFixed(2));
-        liveOdds = diff > 0
-          ? { home: winnerOdds, draw: 0, away: loserOdds }
-          : { home: loserOdds,  draw: 0, away: winnerOdds };
-      }
+    let liveOdds = { ...odds, draw: 0 };
+    if (diff !== 0) {
+      // Baseball: each run ~14% probability swing; 5+ run lead → decisive favourite
+      const absDiff = Math.abs(diff);
+      const winPct = Math.min(0.97, 0.5 + absDiff * 0.14);
+      const winnerOdds = Math.max(1.04, +(0.975 / winPct).toFixed(2));
+      const loserOdds  = Math.min(50,   +(0.975 / Math.max(0.03, 1 - winPct)).toFixed(2));
+      liveOdds = diff > 0
+        ? { home: winnerOdds, draw: 0, away: loserOdds }
+        : { home: loserOdds,  draw: 0, away: winnerOdds };
     }
 
     const id = `baseball-v2-${ev.id}`;
@@ -8447,7 +8296,10 @@ function buildTennisLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
     if (!isTennisElite(ev)) continue;
     // Only show ATP/WTA/Grand Slam — exclude Challengers, ITF, WTA-125
     const v2LeagueLabel = tennisTournLabel(ev.tournament);
-    if (!v2LeagueLabel.startsWith("ATP") && !v2LeagueLabel.startsWith("WTA") && !v2LeagueLabel.startsWith("Grand Slam")) continue;
+    const isMainTourLabel = v2LeagueLabel.startsWith("ATP") || v2LeagueLabel.startsWith("WTA") || v2LeagueLabel.startsWith("Grand Slam");
+    const rawTournText = tennisTournamentSearchText(ev.tournament).toLowerCase();
+    const isMainTourRaw = rawTournText.includes("wta") || rawTournText.includes("atp") || rawTournText.includes("grand slam") || rawTournText.includes("wimbledon") || rawTournText.includes("roland") || rawTournText.includes("australian") || rawTournText.includes("us open");
+    if (!isMainTourLabel && !isMainTourRaw) continue;
     // finalResultOnly=true means the API is only showing the final score → match ended
     if (ev.finalResultOnly === true) continue;
     // Also deduplicate by player pair (API can return same match with different IDs).
@@ -8911,43 +8763,22 @@ async function rebuildUpcomingCache(): Promise<void> {
   }
 }
 
-// ── Short-lived hot cache + in-flight dedup for buildLivePayload ─────────────
-// Prevents N concurrent requests (SSE connect, /live, /live-match/:id) from each
-// triggering a full 10-15s rebuild independently. All callers share one in-flight
-// promise; once the result is ready, it is reused for 1.5s before the next build.
-let _livePayloadHotCache: { result: { matches: LiveMatchState[] }; builtAt: number } | null = null;
-let _livePayloadInFlight: Promise<{ matches: LiveMatchState[] }> | null = null;
-const LIVE_PAYLOAD_HOT_TTL_MS = 1_500;
-
 // Shared payload builder — used by both /live HTTP route and SSE broadcast
 async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
   const now = Date.now();
-  // Hot cache: return immediately if result is < 1.5s old
-  if (_livePayloadHotCache && now - _livePayloadHotCache.builtAt < LIVE_PAYLOAD_HOT_TTL_MS) {
-    return _livePayloadHotCache.result;
-  }
-  // In-flight dedup: join the existing build rather than starting a new one
-  if (_livePayloadInFlight) return _livePayloadInFlight;
-  _livePayloadInFlight = _buildLivePayloadImpl().finally(() => { _livePayloadInFlight = null; });
-  return _livePayloadInFlight;
-}
-
-async function _buildLivePayloadImpl(): Promise<{ matches: LiveMatchState[] }> {
-  const now = Date.now();
-  // Warm the upcoming cache so football matches recently seen in pre-match are
-  // eligible to cross into the live feed. Always fire-and-forget — never block
-  // the live build waiting for slow schedule endpoints (can take 16s on cold start).
-  if (_allUpcomingCacheBuiltAt === 0 || Date.now() - _allUpcomingCacheBuiltAt > UPCOMING_CACHE_TTL_MS) {
-    rebuildUpcomingCache().catch(() => {});
+  // Warm the upcoming cache first so football matches recently seen in pre-match
+  // are eligible to cross into the live feed even if the provider reports them late.
+  if (_allUpcomingCacheBuiltAt === 0) {
+    await rebuildUpcomingCache();
+  } else if (Date.now() - _allUpcomingCacheBuiltAt > UPCOMING_CACHE_TTL_MS) {
+    rebuildUpcomingCache().catch(() => {}); // rebuild in background; use stale now
   }
   const allUpcoming = _allUpcomingCache;
 
   // ── Fast path: live data from in-memory WS caches (sub-ms each) ──────────
-  // buildTennisLiveV1Cached runs in parallel with V2 sports fetches to avoid
-  // sequential penalty (V1 HTTP cold fetch takes 3-4s; V2 sports take up to 3s).
   const [
     footballEvents, basketballEvents, hockeyEvents, baseballEvents, tennisEvents,
-    tennisTodayEvents, tennisV1LivePart,
+    tennisTodayEvents,
   ] = await Promise.all([
     getFootballLiveV2(),
     getBasketballLiveV2(),
@@ -8955,7 +8786,6 @@ async function _buildLivePayloadImpl(): Promise<{ matches: LiveMatchState[] }> {
     getBaseballLiveV2(),
     getTennisLiveV2(),
     getTennisTodayV2(),
-    buildTennisLiveV1Cached(),
   ]);
   // Populate V1 tennis league label cache from V2 today events (city → "ATP 250 · City")
   if (tennisTodayEvents && tennisTodayEvents.length > 0) {
@@ -8969,6 +8799,7 @@ async function _buildLivePayloadImpl(): Promise<{ matches: LiveMatchState[] }> {
   // Primary source: v1/tennis/live (buildTennisLiveV1). The v2 path is kept as
   // a fallback for any future API upgrade that enables a v2 tennis live endpoint.
   const tennisV2Part = buildTennisLiveV2(tennisEvents);
+  const tennisV1LivePart = await buildTennisLiveV1Cached();
   const allLiveIds = new Set([...tennisV2Part, ...tennisV1LivePart].map(m => String(m.id)));
   const todayStartedExtra = buildTennisLiveV2(
     (tennisTodayEvents ?? []).filter(ev => !allLiveIds.has(`tennis-v2-${ev.id}`))
@@ -9273,8 +9104,6 @@ async function _buildLivePayloadImpl(): Promise<{ matches: LiveMatchState[] }> {
   if (result.matches.length > 0) {
     livePayloadFallbackCache = { payload: result, builtAt: Date.now() };
   }
-  // Store in hot cache so concurrent requests within 1.5s get this result instantly
-  _livePayloadHotCache = { result, builtAt: Date.now() };
   return result;
 }
 
@@ -9524,53 +9353,15 @@ async function buildTennisLiveV1(): Promise<LiveMatchState[]> {
       }
       const odds = makeOddsFromTeams(home, away);
       const diff = homeScore - awayScore;
-      // Prefer real V2 live odds (from match:{id}:odds WS) over computed odds
-      const _tennisV2RealOdds = _v2LiveOdds.get(String(g.id));
-      let liveOdds: { home: number; draw: number; away: number };
-      if (_tennisV2RealOdds) {
-        liveOdds = { ..._tennisV2RealOdds, draw: 0 };
-      } else {
-        liveOdds = { ...odds, draw: 0 };
-        if (diff !== 0) {
-          const factor = Math.min(0.55, Math.abs(diff) * 0.22);
-          liveOdds = diff > 0
-            ? { home: Math.max(1.01, +(odds.home * (1 - factor)).toFixed(2)), draw: 0, away: Math.min(50, +(odds.away * (1 + factor)).toFixed(2)) }
-            : { home: Math.min(50, +(odds.home * (1 + factor)).toFixed(2)), draw: 0, away: Math.max(1.01, +(odds.away * (1 - factor)).toFixed(2)) };
-        }
+      let liveOdds = { ...odds, draw: 0 };
+      if (diff !== 0) {
+        const factor = Math.min(0.55, Math.abs(diff) * 0.22);
+        liveOdds = diff > 0
+          ? { home: Math.max(1.01, +(odds.home * (1 - factor)).toFixed(2)), draw: 0, away: Math.min(50, +(odds.away * (1 + factor)).toFixed(2)) }
+          : { home: Math.min(50, +(odds.home * (1 + factor)).toFixed(2)), draw: 0, away: Math.max(1.01, +(odds.away * (1 - factor)).toFixed(2)) };
       }
-      // ── Parse stages for detailed per-set scores, game points, and serving ──
-      const stages = g.stages ?? [];
-      // Per-set game scores: stages named "Set N" sorted by set number
-      const setStages = stages
-        .filter(s => /^set\s*\d+$/i.test(s.name))
-        .sort((a, b) => parseInt(a.name.replace(/\D/g, ""), 10) - parseInt(b.name.replace(/\D/g, ""), 10));
-      // Current game points from the live "Game" stage
-      const gameStage = stages.find(s => s.name === "Game" && s.isLive);
-      const v1Point = (v: number): string => {
-        if (v >= 50) return "A";
-        if (v === 40) return "40";
-        if (v === 30) return "30";
-        if (v === 15) return "15";
-        return "0";
-      };
-      // Only expose currentPoints when a game is actively in progress.
-      // Between games/sets the API has no live "Game" stage — hide PTS rather than show 0/0.
-      const currentPoints: [string, string] | undefined = gameStage
-        ? [v1Point(gameStage.homeCompetitorScore), v1Point(gameStage.awayCompetitorScore)]
-        : undefined;
-      // Build sets array — filter out sets the API hasn't started yet (score = -1).
-      const validSetStages = setStages.filter(s => s.homeCompetitorScore >= 0 && s.awayCompetitorScore >= 0);
-      const sets: Array<[number, number]> = validSetStages.length > 0
-        ? validSetStages.map(s => [s.homeCompetitorScore, s.awayCompetitorScore] as [number, number])
-        : [[homeScore, awayScore]];
-      // Serving from inPossession; fall back to V2 serving cache
-      const homeIn = !!g.homeCompetitor?.inPossession;
-      const awayIn = !!g.awayCompetitor?.inPossession;
-      const v1Serving: [boolean, boolean] | undefined = (homeIn || awayIn) ? [homeIn, awayIn] : undefined;
-      const cachedServing = typeof g.id === "number" ? _tennisServingCache.get(g.id)?.serving : undefined;
-      const serving = v1Serving ?? cachedServing;
-
-      const setNum = sets.length; // number of sets in play (current is last)
+      const setNum = homeScore + awayScore + 1;
+      const serving = (typeof g.id === "number" ? _tennisServingCache.get(g.id)?.serving : undefined);
       const item: LiveMatchState = {
         id: `tennis-v2-${g.id}`,
         home, away,
@@ -9584,7 +9375,7 @@ async function buildTennisLiveV1(): Promise<LiveMatchState[]> {
         odds: liveOdds,
         markets: makeAdvancedMarketsFromTeams(home, away),
         events: [],
-        _liveExtra: { sets, currentPoints, ...(serving ? { serving } : {}) },
+        _liveExtra: { sets: [[homeScore, awayScore]], currentPoints: ["0", "0"], ...(serving ? { serving } : {}) },
       };
       const rank = tier === 999 ? 5 : tier; // unknown-tier ATP/WTA → treat as 250 level
       primary.push({ r: rank, m: item });
@@ -9645,8 +9436,8 @@ async function buildTennisUpcoming(): Promise<UpcomingMatch[]> {
       const tier = tennisTierRank(compName);
 
       const startMs = new Date(g.startTime).getTime();
-      if (startMs < now - 5 * 60 * 1000) continue; // 5-min grace only (live matches excluded above)
-      if (startMs > now + 3 * 86_400_000) continue;  // max 3 days ahead
+      if (startMs < now - 5 * 60 * 1000) continue; // 5-min grace (live matches excluded above)
+      if (startMs > now + 7 * 86_400_000) continue;  // max 7 days ahead
 
       const pairKey = `${home}|${away}`;
       if (seen.has(pairKey)) continue;
@@ -10082,114 +9873,106 @@ async function getUpcomingAll(): Promise<UpcomingTopCache> {
 let wc2026Cache: { matches: UpcomingMatch[]; fetchedAt: number } | null = null;
 const WC2026_TTL = 15 * 60_000; // 15 min — shorter so real odds get picked up when API publishes them
 
+let _wc2026Rebuilding = false;
+
+async function _rebuildWC2026(): Promise<void> {
+  if (_wc2026Rebuilding) return;
+  _wc2026Rebuilding = true;
+  try {
+    const nowMs = Date.now();
+    const dates: string[] = [];
+    for (let i = 0; i < 38; i++) {
+      dates.push(new Date(nowMs + i * 86_400_000).toISOString().slice(0, 10));
+    }
+    const dayResults = await Promise.race([
+      Promise.all(dates.map(dt => getScheduleV2("football", dt).catch(() => [] as SAPIV2Event[]))),
+      new Promise<SAPIV2Event[][]>(resolve => setTimeout(() => resolve([]), 18_000)),
+    ]);
+    const allEvents: SAPIV2Event[] = (Array.isArray(dayResults[0]) ? dayResults as SAPIV2Event[][] : []).flat();
+    const seen = new Set<number>();
+    const wcEvents: SAPIV2Event[] = [];
+    for (const ev of allEvents) {
+      if (seen.has(ev.id)) continue;
+      seen.add(ev.id);
+      const home = v2TeamName(ev.homeTeam);
+      const away = v2TeamName(ev.awayTeam);
+      if (home === "Unknown" || away === "Unknown") continue;
+      const leagueName = normalizeLeagueName(v2TournName(ev.tournament), "");
+      const lg = leagueName.toLowerCase();
+      const isWCLg =
+        lg.includes("world cup") || lg.includes("copa do mundo") || lg.includes("copa mundial") ||
+        lg.includes("fifa world") || lg.includes("wc 2026") || lg.includes("worldcup") ||
+        lg.includes("mundial 2026") || lg.includes("coupe du monde");
+      if (!isWCLg) continue;
+      if (lg.includes("women") || lg.includes("qualification") || lg.includes("qualif") || lg.includes("feminino") || lg.includes("féminin")) continue;
+      wcEvents.push(ev);
+      if (wcEvents.length >= 300) break;
+    }
+    const oddsResults = await Promise.all(wcEvents.map(ev => getPreMatchOddsV2("football", ev.id).catch(() => null)));
+    const results: UpcomingMatch[] = [];
+    for (let i = 0; i < wcEvents.length; i++) {
+      const ev = wcEvents[i]!;
+      const home = v2TeamName(ev.homeTeam);
+      const away = v2TeamName(ev.awayTeam);
+      const leagueName = normalizeLeagueName(v2TournName(ev.tournament), "");
+      const { date, time } = v2EventDateTime(ev);
+      const realOdds = oddsResults[i] ?? null;
+      const baseOdds = makeOddsFromTeams(home, away);
+      const baseMarkets = makeAdvancedMarketsFromTeams(home, away);
+      const markets: AdvancedMarkets = {
+        ...baseMarkets,
+        ...(realOdds?.bttsYes ? { bothTeamsScore: { yes: realOdds.bttsYes, no: realOdds.bttsNo ?? 0 } } : {}),
+        ...(realOdds?.over25 ? { totalGoals: { ...baseMarkets.totalGoals, over25: realOdds.over25, under25: realOdds.under25 ?? 0 } } : {}),
+      };
+      const hasFull1x2 = !!(realOdds && realOdds.home > 0 && realOdds.draw > 0 && realOdds.away > 0);
+      const odds = hasFull1x2 ? { home: realOdds!.home, draw: realOdds!.draw, away: realOdds!.away } : baseOdds;
+      results.push({
+        id: `fb-v2-${ev.id}`,
+        home, away,
+        league: leagueName,
+        country: v2TournCountry(ev),
+        time, date,
+        sport: "football",
+        hasRealOdds: hasFull1x2,
+        odds, markets,
+        isWomens: false,
+        leagueId: ev.tournamentId ? String(ev.tournamentId) : undefined,
+      });
+    }
+    if (results.length > 0 || !wc2026Cache) {
+      wc2026Cache = { matches: results, fetchedAt: Date.now() };
+    }
+  } finally {
+    _wc2026Rebuilding = false;
+  }
+}
+
 async function buildWC2026Matches(): Promise<UpcomingMatch[]> {
-  if (wc2026Cache && Date.now() - wc2026Cache.fetchedAt < WC2026_TTL) {
+  const now = Date.now();
+  // Fresh cache → return immediately
+  if (wc2026Cache && now - wc2026Cache.fetchedAt < WC2026_TTL) {
     return wc2026Cache.matches;
   }
-
-  // Fetch the next 45 days in batches of 8 to cover the full WC group stage
-  const nowMs = Date.now();
-  const dates: string[] = [];
-  for (let i = 0; i < 45; i++) {
-    dates.push(new Date(nowMs + i * 86_400_000).toISOString().slice(0, 10));
+  // Stale cache → return stale immediately, rebuild in background
+  if (wc2026Cache) {
+    _rebuildWC2026().catch(() => {});
+    return wc2026Cache.matches;
   }
-
-  const BATCH = 8;
-  const allEvents: SAPIV2Event[] = [];
-  for (let b = 0; b < dates.length; b += BATCH) {
-    const batch = dates.slice(b, b + BATCH);
-    const results = await Promise.all(batch.map(dt => getScheduleV2("football", dt).catch(() => [] as SAPIV2Event[])));
-    allEvents.push(...results.flat());
-  }
-
-  // Deduplicate and filter for WC matches
-  const seen = new Set<number>();
-  const wcEvents: SAPIV2Event[] = [];
-  for (const ev of allEvents) {
-    if (seen.has(ev.id)) continue;
-    seen.add(ev.id);
-    const home = v2TeamName(ev.homeTeam);
-    const away = v2TeamName(ev.awayTeam);
-    if (home === "Unknown" || away === "Unknown") continue;
-    const leagueName = normalizeLeagueName(v2TournName(ev.tournament), "");
-    const lg = leagueName.toLowerCase();
-    const isWCLeague =
-      lg.includes("world cup") ||
-      lg.includes("copa do mundo") ||
-      lg.includes("copa mundial") ||
-      lg.includes("fifa world") ||
-      lg.includes("wc 2026") ||
-      lg.includes("worldcup") ||
-      lg.includes("mundial 2026") ||
-      lg.includes("coupe du monde");
-    if (!isWCLeague) continue;
-    // Exclude Women's WC qualification — show only the main men's tournament
-    const isWomensOrQual =
-      lg.includes("women") ||
-      lg.includes("qualification") ||
-      lg.includes("qualif") ||
-      lg.includes("feminino") ||
-      lg.includes("féminin");
-    if (isWomensOrQual) continue;
-    wcEvents.push(ev);
-    if (wcEvents.length >= 300) break;
-  }
-
-  const oddsResults = await Promise.all(
-    wcEvents.map(ev => getPreMatchOddsV2("football", ev.id).catch(() => null))
-  );
-
-  const results: UpcomingMatch[] = [];
-  for (let i = 0; i < wcEvents.length; i++) {
-    const ev = wcEvents[i]!;
-    const home = v2TeamName(ev.homeTeam);
-    const away = v2TeamName(ev.awayTeam);
-    const leagueName = normalizeLeagueName(v2TournName(ev.tournament), "");
-    const { date, time } = v2EventDateTime(ev);
-    const realOdds = oddsResults[i] ?? null;
-
-    let odds: { home: number; draw: number; away: number };
-    let markets: AdvancedMarkets;
-    let hasRealOdds: boolean;
-
-    const baseOdds = makeOddsFromTeams(home, away);
-    const baseMarkets = makeAdvancedMarketsFromTeams(home, away);
-    markets = {
-      ...baseMarkets,
-      ...(realOdds?.bttsYes ? { bothTeamsScore: { yes: realOdds.bttsYes, no: realOdds.bttsNo ?? 0 } } : {}),
-      ...(realOdds?.over25 ? { totalGoals: { ...baseMarkets.totalGoals, over25: realOdds.over25, under25: realOdds.under25 ?? 0 } } : {}),
-    };
-    const hasFull1x2 = !!(realOdds && realOdds.home > 0 && realOdds.draw > 0 && realOdds.away > 0);
-    odds = hasFull1x2 ? { home: realOdds!.home, draw: realOdds!.draw, away: realOdds!.away } : baseOdds;
-    hasRealOdds = hasFull1x2;
-
-    results.push({
-      id: `fb-v2-${ev.id}`,
-      home,
-      away,
-      league: leagueName,
-      country: v2TournCountry(ev),
-      time,
-      date,
-      sport: "football",
-      hasRealOdds,
-      odds,
-      markets,
-      isWomens: false,
-      leagueId: ev.tournamentId ? String(ev.tournamentId) : undefined,
-    });
-  }
-
-  wc2026Cache = { matches: results, fetchedAt: Date.now() };
-  return results;
+  // No cache at all → must wait (only happens on cold start, warm-up handles this)
+  await _rebuildWC2026();
+  return wc2026Cache?.matches ?? [];
 }
 
 router.get("/wc2026", async (_req: Request, res: Response) => {
   try {
-    const matches = await buildWC2026Matches();
+    const matches = await Promise.race([
+      buildWC2026Matches(),
+      new Promise<never>((_, reject) => setTimeout(() => reject(new Error("timeout")), 25_000)),
+    ]);
     res.json({ matches });
   } catch {
-    res.status(500).json({ error: "Erro ao buscar jogos do Mundial 2026" });
+    // Return cached data if available, else empty list (never hang the browser)
+    res.json({ matches: wc2026Cache?.matches ?? [] });
   }
 });
 
@@ -14121,6 +13904,11 @@ router.get("/v2-standings", async (req: Request, res: Response) => {
 // Accepts native WebSocket connections and pushes the same live payload that
 // broadcastLive() sends to SSE clients (WS-triggered + 1–2s cadence), piggy-backed
 // on the market-drift engine. Mobile clients reconnect automatically on close/error.
+// Warm the WC 2026 cache 12s after server start so first user visit is instant
+setTimeout(() => {
+  buildWC2026Matches().catch(() => {});
+}, 12_000);
+
 export function initLiveWsServer(httpServer: http.Server): void {
   const wss = new WebSocketServer({ noServer: true });
 
