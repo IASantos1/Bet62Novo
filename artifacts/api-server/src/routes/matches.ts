@@ -1193,6 +1193,75 @@ function getTeamElo(name: string): number {
     "racing club": 1660, "san lorenzo": 1640,
     "america": 1690, "chivas": 1680, "cruz azul": 1650, "pumas": 1630,
     "leon": 1620, "monterrey": 1650, "tigres": 1660,
+    // ── Georgia — Erovnuli Liga ─────────────────────────────────────────────────
+    "dinamo tbilisi": 1730, "fc dinamo tbilisi": 1730,
+    "locomotive tbilisi": 1700, "lokomotivi": 1700, "fc lokomotivi": 1700,
+    "dinamo batumi": 1670, "fc dinamo batumi": 1670,
+    "saburtalo": 1650, "fc saburtalo": 1650,
+    "fc iberia 1999": 1800, "iberia 1999": 1800, "fc iberia": 1760,
+    "gagra": 1630, "fc gagra": 1630,
+    "telavi": 1610, "fc telavi": 1610,
+    "sioni bolnisi": 1590, "fc sioni": 1590,
+    "wit georgia": 1570, "fc wit georgia": 1570,
+    "rustavi": 1560, "fc rustavi": 1560,
+    "spaeri": 1430, "spaeri fc": 1430, "fc spaeri": 1430,
+    "merani martvili": 1520, "merani": 1520,
+    "dila gori": 1580, "fc dila": 1580,
+    // ── Tanzania — Ligi Kuu Bara ──────────────────────────────────────────────
+    "simba sc": 1710, "simba": 1700,
+    "young africans": 1700, "yanga": 1700,
+    "azam fc": 1660, "azam": 1650,
+    "namungo fc": 1570, "namungo": 1560,
+    "coastal union": 1550,
+    "fountain gate": 1520, "fountain gate fc": 1520,
+    "mbeya city": 1530, "ihefu fc": 1510, "geita gold": 1510,
+    "biashara united": 1540, "tanzania prisons": 1520,
+    // ── Lebanon — Premier League ──────────────────────────────────────────────
+    "ansar": 1650, "al ansar": 1650,
+    "nejmeh": 1640, "nejmeh sc": 1640,
+    "al ahed": 1660, "ahed": 1660,
+    "safa": 1600, "safa sc": 1600,
+    "al hikma": 1540, "hikma": 1540,
+    "al abbassieh": 1540, "abbassieh": 1540,
+    "shabab al sahel": 1570, "al sahel": 1570,
+    "racing beirut": 1560, "olympic beirut": 1550,
+    // ── Latvia — Virslīga ────────────────────────────────────────────────────
+    "fk riga": 1660, "riga fc": 1660,
+    "rfs": 1640, "riga fc rfs": 1640,
+    "fk liepaja": 1620, "liepaja": 1610,
+    "fk ventspils": 1590, "ventspils": 1590,
+    "riga united": 1550, "super nova": 1540, "super nova fc": 1540,
+    "fk jelgava": 1520, "jelgava": 1520,
+    // ── Lithuania — A Lyga ───────────────────────────────────────────────────
+    "zalgiris": 1660, "fk zalgiris": 1660,
+    "kauno zalgiris": 1620,
+    "panevezys": 1580, "fk panevezys": 1580,
+    "tauras taurage": 1530, "be1 nfa": 1570,
+    // ── Armenia — Premier League ─────────────────────────────────────────────
+    "alashkert": 1640, "fc alashkert": 1640,
+    "pyunik": 1660, "fc pyunik": 1660,
+    "urartu": 1620, "fc urartu": 1620,
+    "banants": 1580,
+    // ── Tajikistan ───────────────────────────────────────────────────────────
+    "fc istiqlol": 1640, "istiqlol": 1640,
+    "cska pomir": 1590, "fc cska pomir": 1590,
+    "parvoz": 1550, "fc parvoz": 1550,
+    // ── Morocco — Botola Pro ─────────────────────────────────────────────────
+    "wydad": 1690, "wac": 1690, "wydad athletic club": 1690,
+    "raja casablanca": 1680, "raja": 1680,
+    "fus rabat": 1660, "fus": 1660,
+    "renaissance berkane": 1640,
+    "maghreb fes": 1530, "moghreb fes": 1530,
+    "difaa el jadida": 1550, "el jadida": 1540,
+    "olympique dcheira": 1510, "dcheira": 1510,
+    // ── Peru — Liga 1 ────────────────────────────────────────────────────────
+    "universitario": 1670, "universitario de deportes": 1670,
+    "alianza lima": 1660,
+    "sporting cristal": 1650,
+    "melgar": 1610,
+    "adt tarma": 1530, "adt": 1530,
+    "union minas": 1560, "unión minas": 1560,
+    "foutoua": 1590, "al karamah": 1520,
     // ── National teams — FIFA World Cup 2026 participants (based on FIFA ranking) ─
     "argentina": 1965, "france": 1950, "england": 1940,
     "spain": 1935, "brazil": 1930, "portugal": 1915,
@@ -1217,7 +1286,7 @@ function getTeamElo(name: string): number {
   };
   if (known[n] !== undefined) return known[n]!;
   const h = hashStr(`elo:${n}`);
-  return Math.round(1500 + ((h % 1000) / 1000 - 0.5) * 400);
+  return Math.round(1500 + ((h % 1000) / 1000 - 0.5) * 700);
 }
 
 function soccerPoissonModel(homeName: string, awayName: string) {
