@@ -2676,11 +2676,21 @@ export default function Home() {
     const showET = !!match.markets?.etExtra || status.includes("extra") || status === "et";
     const showPen = !!match.markets?.penExtra || status.includes("pen") || status.includes("shootout");
     if (showPen) return "PEN";
-    if (status === "ht" || status.includes("half time")) return "HT";
+    if (status === "ht" || status.includes("half time") || status === "halftime") return "HT";
     if (showET) return "ET";
+    if (status.includes("2nd half") || status.includes("second half") || status.includes("2ª parte")) return "2P";
+    if (status.includes("1st half") || status.includes("first half") || status.includes("1ª parte")) return "1P";
     if (minute <= 0) return null;
     if (minute <= 45) return "1P";
     return "2P";
+  };
+
+  const fmtFootballMin = (min: number, tag: "1P" | "HT" | "2P" | "ET" | "PEN" | null): string => {
+    if (min <= 0) return "";
+    if (tag === "1P" && min > 45) return `45+${min - 45}'`;
+    if (tag === "2P" && min > 90) return `90+${min - 90}'`;
+    if (tag === "ET" && min > 120) return `120+${min - 120}'`;
+    return `${min}'`;
   };
 
   type Snapshot<T> = { savedAt: number; value: T };
@@ -3189,6 +3199,10 @@ export default function Home() {
       const canLegitimatelyRephase =
         status === "ht" ||
         status.includes("half time") ||
+        status === "halftime" ||
+        status.includes("2nd half") ||
+        status.includes("second half") ||
+        status.includes("2ª parte") ||
         status === "et" ||
         status.includes("extra") ||
         status.includes("pen");
@@ -4129,10 +4143,10 @@ export default function Home() {
       if (sport === "volleyball" && match.status) return match.status;
 
       const tag = getFootballPhaseTag(match, minute);
-      if (tag === "HT") return "HT";
-      if (tag === "ET") return `${minute > 0 ? `${minute}' · ` : ""}ET`;
+      if (tag === "HT") return "Int.";
       if (tag === "PEN") return "PEN";
-      const minLbl = extra?.clockStr ?? (minute > 0 ? `${minute}'` : "");
+      const minLbl = extra?.clockStr ?? fmtFootballMin(minute, tag);
+      if (tag === "ET") return `${minLbl ? `${minLbl} · ` : ""}ET`;
       if (tag) return `${minLbl} · ${tag}`.trim();
       return minLbl || "AO VIVO";
     })();
