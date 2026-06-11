@@ -8861,7 +8861,7 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
   // ── Fast path: live data from in-memory WS caches (sub-ms each) ──────────
   const [
     footballEvents, basketballEvents, hockeyEvents, baseballEvents, tennisEvents,
-    tennisTodayEvents,
+    tennisTodayEvents, tennisV1LivePart,
   ] = await Promise.all([
     getFootballLiveV2(),
     getBasketballLiveV2(),
@@ -8869,6 +8869,7 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
     getBaseballLiveV2(),
     getTennisLiveV2(),
     getTennisTodayV2(),
+    buildTennisLiveV1Cached(), // runs in parallel — does not depend on other results
   ]);
   // Populate V1 tennis league label cache from V2 today events (city → "ATP 250 · City")
   if (tennisTodayEvents && tennisTodayEvents.length > 0) {
@@ -8882,7 +8883,6 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
   // Primary source: v1/tennis/live (buildTennisLiveV1). The v2 path is kept as
   // a fallback for any future API upgrade that enables a v2 tennis live endpoint.
   const tennisV2Part = buildTennisLiveV2(tennisEvents);
-  const tennisV1LivePart = await buildTennisLiveV1Cached();
   const allLiveIds = new Set([...tennisV2Part, ...tennisV1LivePart].map(m => String(m.id)));
   const todayStartedExtra = buildTennisLiveV2(
     (tennisTodayEvents ?? []).filter(ev => !allLiveIds.has(`tennis-v2-${ev.id}`))
@@ -10488,6 +10488,11 @@ router.get("/wc2026", async (_req: Request, res: Response) => {
             awayScore: ls.awayScore ?? 0,
             minute: ls.minute,
             status: String(ls.status ?? "Live"),
+            marketSuspension: ls.marketSuspension,
+            _suspensionReason: ls._suspensionReason,
+            _liveExtra: ls._liveExtra,
+            redCardsHome: ls.redCardsHome,
+            redCardsAway: ls.redCardsAway,
           };
         }
       }

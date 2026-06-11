@@ -3159,11 +3159,15 @@ export default function Home() {
     const now = Date.now();
 
     const _WC_LIVE_KW = ["world cup","fifa world","mundial 2026","wc 2026","copa do mundo","copa mundial","coupe du monde"];
-    const matches = ((data.matches || []) as LiveMatchRaw[]).filter(m => {
+    const rawMatches = (data.matches || []) as LiveMatchRaw[];
+    const matches = rawMatches.filter(m => {
       const lg = (m.league ?? "").toLowerCase();
       return !_WC_LIVE_KW.some(k => lg.includes(k));
     });
     if (matches.length === 0) {
+      // Only clear live state when the raw API had NO matches at all.
+      // If rawMatches > 0 but all were WC (filtered), keep existing non-WC live state intact.
+      if (rawMatches.length > 0) return;
       emptyLiveStreakRef.current += 1;
       if (emptyLiveStreakRef.current < 3) return;
       emptyLiveStreakRef.current = 0;

@@ -77,6 +77,20 @@ type WCMatch = {
   hasRealOdds?: boolean;
   odds?: { home: number; draw: number; away: number };
   markets?: WCMarkets;
+  marketSuspension?: Record<string, number>;
+  _suspensionReason?: string;
+  redCardsHome?: number;
+  redCardsAway?: number;
+  _liveExtra?: {
+    htScore?: [number, number];
+    etScore?: [number, number];
+    penScore?: [number, number];
+    cornersTotal?: number;
+    cardsTotal?: number;
+    varReview?: boolean;
+    greatChance?: boolean;
+    goalCelebration?: boolean;
+  };
 };
 
 // ─── Date helpers ─────────────────────────────────────────────────────────────
@@ -274,6 +288,11 @@ function mapToWCMatch(m: Record<string, unknown>): WCMatch {
       return o && (o.home > 0 || o.away > 0) ? o : undefined;
     })(),
     markets: (m.markets ?? m.advancedMarkets ?? {}) as WCMarkets,
+    marketSuspension: m.marketSuspension as Record<string, number> | undefined,
+    _suspensionReason: m._suspensionReason as string | undefined,
+    redCardsHome: m.redCardsHome as number | undefined,
+    redCardsAway: m.redCardsAway as number | undefined,
+    _liveExtra: m._liveExtra as WCMatch["_liveExtra"] | undefined,
   };
 }
 
@@ -311,6 +330,29 @@ function MatchCard({ match, onOpen, activeSel, onQuickBet, theme }: {
   const { home, away, odds, isLive, homeScore, awayScore, minute, time, date } = match;
   const isDark = theme === "dark";
   const dateStr = formatMatchDate(date);
+  const now = Date.now();
+
+  // Suspension / live-event state
+  const isSuspended = !!match._suspensionReason ||
+    (match.marketSuspension && Object.values(match.marketSuspension).some(ts => ts > now));
+  const rawReason = (match._suspensionReason ?? "SUSPENSO").toUpperCase();
+  const isVAR = rawReason.includes("VAR");
+  const isGoal = rawReason.includes("GOLO") || rawReason.includes("GOAL") || rawReason.includes("PENÁLTI");
+  const isGreatChance = rawReason.includes("CHANCE") || match._liveExtra?.greatChance;
+  const isGoalCeleb = match._liveExtra?.goalCelebration;
+
+  // Determine suspension banner label and colour
+  const bannerLabel = isGoal ? "⚽ GOLO — Odds a atualizar…" :
+    isVAR ? "📺 REVISÃO AO VAR — Odds suspensas" :
+    isGreatChance ? "🔥 GRANDE CHANCE — Odds a atualizar…" :
+    "🔒 LANCE CRÍTICO — Odds suspensas";
+  const bannerBg = isGoal || isGoalCeleb ? "bg-green-600/20 border-green-500/40 text-green-300" :
+    isVAR ? "bg-purple-600/20 border-purple-500/40 text-purple-300" :
+    isGreatChance ? "bg-amber-600/20 border-amber-500/40 text-amber-300" :
+    "bg-red-600/20 border-red-500/40 text-red-300";
+
+  // Goal celebration colour ring
+  const showGoalRing = isGoal || isGoalCeleb;
 
   return (
     <motion.div
@@ -320,7 +362,13 @@ function MatchCard({ match, onOpen, activeSel, onQuickBet, theme }: {
         isDark ? "border-zinc-800/80 bg-zinc-900/95" : "border-zinc-200 bg-white"
       }`}
       onClick={onOpen}
-      style={{ boxShadow: isLive ? "0 0 0 1px rgba(239,68,68,0.2), 0 4px 20px rgba(0,0,0,0.4)" : "0 4px 20px rgba(0,0,0,0.15)" }}
+      style={{
+        boxShadow: showGoalRing
+          ? "0 0 0 2px rgba(34,197,94,0.5), 0 4px 20px rgba(0,0,0,0.4)"
+          : isLive
+            ? "0 0 0 1px rgba(239,68,68,0.2), 0 4px 20px rgba(0,0,0,0.4)"
+            : "0 4px 20px rgba(0,0,0,0.15)"
+      }}
     >
       {/* top accent */}
       <div className="absolute top-0 left-0 right-0 h-[2px] bg-gradient-to-r from-yellow-500 via-orange-500 to-red-600" />
@@ -334,20 +382,46 @@ function MatchCard({ match, onOpen, activeSel, onQuickBet, theme }: {
         </div>
       )}
 
+      {/* Suspension / live event banner */}
+      {isLive && isSuspended && (
+        <div className={`mx-3 mt-3 mb-0 flex items-center justify-center gap-1.5 rounded-lg border px-2 py-1.5 ${bannerBg}`}>
+          <span className="text-[10px] font-black tracking-wide">{bannerLabel}</span>
+        </div>
+      )}
+
       <div className="px-3.5 pt-3 pb-3">
-        {/* League */}
-        <div className={`text-[9px] font-black tracking-widest mb-3 truncate pr-20 ${isDark ? "text-zinc-600" : "text-zinc-400"}`}>🏆 {match.league}</div>
+        {/* League + live stats */}
+        <div className="flex items-center justify-between mb-3 pr-20">
+          <div className={`text-[9px] font-black tracking-widest truncate ${isDark ? "text-zinc-600" : "text-zinc-400"}`}>🏆 {match.league}</div>
+          {isLive && (match._liveExtra?.cornersTotal !== undefined || match._liveExtra?.cardsTotal !== undefined) && (
+            <div className="flex items-center gap-2 shrink-0">
+              {match._liveExtra?.cornersTotal !== undefined && (
+                <span className={`text-[9px] font-semibold ${isDark ? "text-zinc-500" : "text-zinc-400"}`}>🚩{match._liveExtra.cornersTotal}</span>
+              )}
+              {match._liveExtra?.cardsTotal !== undefined && (
+                <span className={`text-[9px] font-semibold ${isDark ? "text-zinc-500" : "text-zinc-400"}`}>🟨{match._liveExtra.cardsTotal}</span>
+              )}
+            </div>
+          )}
+        </div>
 
         {/* Teams row */}
         <div className="flex items-center justify-between gap-2 mb-3">
           <div className="flex-1 flex flex-col items-center gap-1.5 min-w-0">
             <FlagImg name={home} size={38} />
-            <span className={`text-[11px] font-black text-center leading-tight px-1 ${isDark ? "text-white" : "text-zinc-900"}`}>{home}</span>
+            <div className="flex items-center gap-1">
+              <span className={`text-[11px] font-black text-center leading-tight px-1 ${isDark ? "text-white" : "text-zinc-900"}`}>{home}</span>
+              {(match.redCardsHome ?? 0) > 0 && (
+                <span className="text-[9px]">{'🟥'.repeat(match.redCardsHome!)}</span>
+              )}
+            </div>
           </div>
 
           <div className="flex flex-col items-center min-w-[60px]">
             {isLive ? (
-              <div className={`text-2xl font-black tabular-nums leading-none ${isDark ? "text-white" : "text-zinc-900"}`}>{homeScore ?? 0}–{awayScore ?? 0}</div>
+              <div className={`text-2xl font-black tabular-nums leading-none ${showGoalRing ? "text-green-400" : isDark ? "text-white" : "text-zinc-900"}`}>
+                {homeScore ?? 0}–{awayScore ?? 0}
+              </div>
             ) : (
               <>
                 <span className={`text-xs font-black ${isDark ? "text-zinc-600" : "text-zinc-400"}`}>VS</span>
@@ -365,14 +439,30 @@ function MatchCard({ match, onOpen, activeSel, onQuickBet, theme }: {
 
           <div className="flex-1 flex flex-col items-center gap-1.5 min-w-0">
             <FlagImg name={away} size={38} />
-            <span className={`text-[11px] font-black text-center leading-tight px-1 ${isDark ? "text-white" : "text-zinc-900"}`}>{away}</span>
+            <div className="flex items-center gap-1">
+              {(match.redCardsAway ?? 0) > 0 && (
+                <span className="text-[9px]">{'🟥'.repeat(match.redCardsAway!)}</span>
+              )}
+              <span className={`text-[11px] font-black text-center leading-tight px-1 ${isDark ? "text-white" : "text-zinc-900"}`}>{away}</span>
+            </div>
           </div>
         </div>
 
         {/* Quick 1X2 odds */}
         {odds && (odds.home > 1.001 || odds.away > 1.001) && (
           <div className="flex flex-col gap-1">
-            <div className="flex gap-1.5">
+            {/* Liquidity indicator bar */}
+            {isLive && (
+              <div className="flex items-center gap-0.5 mb-1">
+                {[...Array(5)].map((_, i) => (
+                  <div key={i} className={`flex-1 h-0.5 rounded-full ${isSuspended ? "bg-zinc-700" : i < 3 ? "bg-green-500/60" : "bg-zinc-700"}`} />
+                ))}
+                <span className={`text-[8px] font-bold ml-1 ${isSuspended ? "text-zinc-600" : "text-green-500/70"}`}>
+                  {isSuspended ? "SUSPENSO" : "LIQUIDEZ ALTA"}
+                </span>
+              </div>
+            )}
+            <div className={`flex gap-1.5 ${isSuspended ? "opacity-40 pointer-events-none" : ""}`}>
               <OBtn label={home} odd={odds.home} active={activeSel === `${match.id}:home`} onClick={() => onQuickBet(`${match.id}:home`, home, odds.home)} theme={theme} />
               {odds.draw > 1.001 && <OBtn label="Empate" odd={odds.draw} active={activeSel === `${match.id}:draw`} onClick={() => onQuickBet(`${match.id}:draw`, "Empate", odds.draw)} theme={theme} />}
               <OBtn label={away} odd={odds.away} active={activeSel === `${match.id}:away`} onClick={() => onQuickBet(`${match.id}:away`, away, odds.away)} theme={theme} />
@@ -1189,13 +1279,19 @@ export default function WorldCupPage({ onClose, onBet: onBetProp }: { onClose?: 
 
   const isDark = theme === "dark";
 
-  // fetch — wc2026 resolves loading; live runs independently in background
+  // fetch — wc2026 resolves loading; live enrichment is always fresh on every request
+  // Poll at 5s when there are live matches for real-time updates, 30s otherwise.
+  const liveMatchesRef = useRef<WCMatch[]>([]);
+  useEffect(() => { liveMatchesRef.current = liveMatches; }, [liveMatches]);
+
   useEffect(() => {
     let cancelled = false;
+    let nextTimer: ReturnType<typeof setTimeout> | null = null;
 
     async function load() {
+      if (cancelled) return;
       try {
-        const wcData = await fetch("/api/matches/wc2026", { signal: AbortSignal.timeout(20_000) })
+        const wcData = await fetch("/api/matches/wc2026", { signal: AbortSignal.timeout(8_000) })
           .then(r => r.ok ? r.json() : { matches: [] }).catch(() => ({ matches: [] }));
         if (cancelled) return;
         const allWC = ((wcData.matches ?? []) as Record<string, unknown>[]).map(mapToWCMatch);
@@ -1208,11 +1304,19 @@ export default function WorldCupPage({ onClose, onBet: onBetProp }: { onClose?: 
         if (wcLive.length > 0) setPageTab("live");
       } catch { /* silent */ }
       if (!cancelled) setLoading(false);
+      // Schedule next poll: 5s if live, 30s if only upcoming
+      if (!cancelled) {
+        const delay = liveMatchesRef.current.length > 0 ? 5_000 : 30_000;
+        nextTimer = setTimeout(load, delay);
+      }
     }
 
     load();
-    intervalRef.current = setInterval(load, 30_000);
-    return () => { cancelled = true; if (intervalRef.current) clearInterval(intervalRef.current); };
+    return () => {
+      cancelled = true;
+      if (nextTimer !== null) clearTimeout(nextTimer);
+      if (intervalRef.current) clearInterval(intervalRef.current);
+    };
   }, []);
 
   // keep open match in sync with refreshed data
