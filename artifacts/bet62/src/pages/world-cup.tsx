@@ -348,14 +348,16 @@ function OBtn({ label, odd, active, onClick, theme }: { label: string; odd: numb
 
 // ─── Simple Match Card ────────────────────────────────────────────────────────
 
-function MatchCard({ match, onOpen, activeSel, onQuickBet, theme }: {
+function MatchCard({ match, onOpen, activeSel, onQuickBet, theme, displayMinute }: {
   match: WCMatch;
   onOpen: () => void;
   activeSel?: string;
   onQuickBet: (key: string, label: string, odd: number) => void;
   theme: Theme;
+  displayMinute?: number;
 }) {
   const { home, away, odds, isLive, homeScore, awayScore, minute, time, date } = match;
+  const dispMin = displayMinute ?? minute ?? 0;
   const isDark = theme === "dark";
   const dateStr = formatMatchDate(date);
   const now = Date.now();
@@ -406,8 +408,8 @@ function MatchCard({ match, onOpen, activeSel, onQuickBet, theme }: {
         <div className="absolute top-3 right-3 flex items-center gap-1 bg-red-600/20 border border-red-500/40 rounded-full px-2 py-0.5 z-10">
           <span className="w-1.5 h-1.5 rounded-full bg-red-400 animate-pulse" />
           {(() => {
-            const phase = wcPhaseTag(match.status, minute ?? 0);
-            const minLbl = fmtWCMin(minute, match.status);
+            const phase = wcPhaseTag(match.status, dispMin);
+            const minLbl = fmtWCMin(dispMin, match.status);
             if (phase === "Int.") return <span className="text-[9px] font-black text-red-400 tracking-widest">Int.</span>;
             return (
               <>
@@ -633,12 +635,13 @@ function MRow({ items, activeKey, onBet, theme }: {
 
 type MTabId = "todos" | "resultado" | "dupla" | "golos" | "handicap" | "marcador" | "cantos" | "cartoes" | "especiais" | "jogadores";
 
-function MarketsPage({ match, activeKeys, onBet, onClose, theme }: {
+function MarketsPage({ match, activeKeys, onBet, onClose, theme, displayMinute }: {
   match: WCMatch;
   activeKeys: Record<string, string>;
   onBet: (matchId: string, k: string, label: string, odd: number, market: string) => void;
   onClose: () => void;
   theme: Theme;
+  displayMinute?: number;
 }) {
   const [tab, setTab] = useState<MTabId>("todos");
   const [showStats, setShowStats] = useState(false);
@@ -1195,9 +1198,11 @@ function MarketsPage({ match, activeKeys, onBet, onClose, theme }: {
             <div className="flex items-center gap-1 bg-red-600/20 border border-red-500/35 rounded-full px-2 py-0.5 flex-shrink-0">
               <span className="w-1.5 h-1.5 rounded-full bg-red-400 animate-pulse" />
               <span className="text-[9px] font-black text-red-400">AO VIVO</span>
-              {(match.minute ?? 0) > 0 && (() => {
-                const phase = wcPhaseTag(match.status, match.minute ?? 0);
-                const minLbl = fmtWCMin(match.minute, match.status);
+              {(() => {
+                const dm = displayMinute ?? match.minute ?? 0;
+                if (dm <= 0) return null;
+                const phase = wcPhaseTag(match.status, dm);
+                const minLbl = fmtWCMin(dm, match.status);
                 if (phase === "Int.") return <span className="text-[9px] text-red-300 font-bold ml-0.5">Int.</span>;
                 return <span className="text-[9px] text-red-300 font-bold ml-0.5">{phase ? `${phase} ` : ""}{minLbl}</span>;
               })()}
@@ -1360,7 +1365,12 @@ export default function WorldCupPage({ onClose, onBet: onBetProp }: { onClose?: 
   const [openMatch, setOpenMatch]           = useState<WCMatch | null>(null);
   const [activeKeys, setActiveKeys]         = useState<Record<string, string>>({});
   const [theme, setTheme]                   = useState<Theme>(getAutoTheme);
-  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const intervalRef         = useRef<ReturnType<typeof setInterval> | null>(null);
+  // ── Live clock interpolation (1-second tick, same pattern as home.tsx) ──────
+  const [, setMinuteTick]    = useState(0);
+  const apiMinutesRef        = useRef<Record<string, number>>({});
+  const minuteChangedAtRef   = useRef<Record<string, number>>({});
+  const liveDataFetchedAt    = useRef<number | null>(null);
 
   // Automatic theme: light 08:00-19:00, dark otherwise
   useEffect(() => {
@@ -1388,6 +1398,22 @@ export default function WorldCupPage({ onClose, onBet: onBetProp }: { onClose?: 
         const allWC = ((wcData.matches ?? []) as Record<string, unknown>[]).map(mapToWCMatch);
         const wcLive = allWC.filter(m => m.isLive);
         const wcUpcoming = allWC.filter(m => !m.isLive);
+        // Update clock refs for interpolation
+        const fetchTs = Date.now();
+        liveDataFetchedAt.current = fetchTs;
+        for (const m of wcLive) {
+          const next = typeof m.minute === "number" && m.minute > 0 ? m.minute : 0;
+          if (next > 0) {
+            const prev = apiMinutesRef.current[m.id];
+            if (next !== prev) {
+              apiMinutesRef.current[m.id] = next;
+              minuteChangedAtRef.current[m.id] = fetchTs;
+            } else if (prev === undefined) {
+              apiMinutesRef.current[m.id] = next;
+              minuteChangedAtRef.current[m.id] = fetchTs;
+            }
+          }
+        }
         // Direct set — no accumulation, no race condition with a parallel loadLive.
         // The /wc2026 endpoint always enriches with fresh liveMatchState on every request.
         setLiveMatches(wcLive);
@@ -1414,6 +1440,25 @@ export default function WorldCupPage({ onClose, onBet: onBetProp }: { onClose?: 
       if (intervalRef.current) clearInterval(intervalRef.current);
     };
   }, []);
+
+  // 1-second tick to drive live clock interpolation
+  useEffect(() => {
+    const id = setInterval(() => setMinuteTick(t => t + 1), 1_000);
+    return () => clearInterval(id);
+  }, []);
+
+  // Interpolate match minute between API polls (max +3 min ahead of last known value)
+  function getWCDisplayMinute(match: WCMatch): number {
+    if (!match.isLive) return match.minute ?? 0;
+    const s = (match.status ?? "").toLowerCase();
+    const isHT = s === "ht" || s.includes("half time") || s === "halftime" || s.includes("intervalo");
+    const apiMin = apiMinutesRef.current[match.id] ?? (match.minute ?? 0);
+    if (apiMin <= 0 || isHT) return apiMin;
+    const changedAt = minuteChangedAtRef.current[match.id] ?? liveDataFetchedAt.current;
+    if (!changedAt) return apiMin;
+    const elapsed = Math.min(3, Math.floor((Date.now() - changedAt) / 60_000));
+    return Math.max(0, Math.min(130, apiMin + elapsed));
+  }
 
   // keep open match in sync with refreshed data
   useEffect(() => {
@@ -1467,6 +1512,7 @@ export default function WorldCupPage({ onClose, onBet: onBetProp }: { onClose?: 
           onBet={handleBet}
           onClose={() => setOpenMatch(null)}
           theme={theme}
+          displayMinute={openMatch.isLive ? getWCDisplayMinute(openMatch) : undefined}
         />
       </AnimatePresence>
     );
@@ -1581,6 +1627,7 @@ export default function WorldCupPage({ onClose, onBet: onBetProp }: { onClose?: 
                         activeSel={activeKeys[m.id]}
                         onQuickBet={handleQuickBet}
                         theme={theme}
+                        displayMinute={m.isLive ? getWCDisplayMinute(m) : undefined}
                       />
                     </motion.div>
                   ))}
