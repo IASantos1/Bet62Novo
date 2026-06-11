@@ -5507,9 +5507,11 @@ export default function Home() {
 
     const m = match.markets;
 
-    // Show markets when hasRealOdds=true, OR when tennis has valid computed tennisExtra markets
+    // Show markets when hasRealOdds=true, OR when tennis has valid computed tennisExtra markets,
+    // OR when the match has computed markets (V1-built football with doubleChance/totalGoals)
     const hasTennisMarkets = match.sport === "tennis" && !!(m?.tennisExtra?.firstSet?.home);
-    if (!match.hasRealOdds && !hasTennisMarkets) {
+    const hasComputedMarkets = !!(m?.doubleChance?.homeOrDraw) || !!(m?.totalGoals?.over25);
+    if (!match.hasRealOdds && !hasTennisMarkets && !hasComputedMarkets) {
       return (
         <div className="mt-4 text-center py-10 text-zinc-500">
           <div className="text-3xl mb-3">📊</div>
