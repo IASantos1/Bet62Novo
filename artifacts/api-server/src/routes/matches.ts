@@ -2209,7 +2209,8 @@ function isTennisFinishedStatusText(status: string | undefined): boolean {
 }
 
 function isTennisV1GameFinished(game: Pick<V1TennisGame, "statusGroup" | "statusText" | "homeCompetitor" | "awayCompetitor">): boolean {
-  if (game.statusGroup === 3) return true;
+  // V1 tennis statusGroup: 2=Scheduled, 3=Live/in-play ("Set 1"/"Set 3"), 4=Finished/Cancelled
+  if (game.statusGroup === 4) return true;
   if (isTennisFinishedStatusText(game.statusText)) return true;
   return !!game.homeCompetitor?.isWinner || !!game.awayCompetitor?.isWinner;
 }
