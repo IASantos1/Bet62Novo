@@ -1,4 +1,6 @@
 import { useState, useCallback, useEffect, useRef, useMemo, createContext, useContext, Children, type ReactNode } from "react";
+import trophyImg from "/trophy-wc-nobg.png";
+import { useLocation } from "wouter";
 import { useIdle } from "@/hooks/use-idle";
 import { motion, AnimatePresence } from "framer-motion";
 import { toast } from "sonner";
@@ -1217,6 +1219,17 @@ type AdvancedMarkets = {
   penExtra?: {
     winner: { home: number; away: number };
   };
+  // Tennis-specific live markets (injected server-side)
+  tennisExtra?: {
+    firstSet?: { home: number; away: number };
+    setHandicap?: { home: number; away: number };
+    gameHandicap?: { line: number; home: number; away: number };
+    setExactScore?: Record<string, number>;
+    set1ExactScore?: Record<string, number>;
+    set2ExactScore?: Record<string, number>;
+    currentSetNum?: number;
+    [key: string]: unknown;
+  };
 };
 
 type Match = {
@@ -1566,6 +1579,122 @@ function sportEmoji(sport?: string): string {
   if (sport === "baseball") return "⚾";
 
   return "⚽";
+}
+
+// ─── Animated Copa do Mundo 2026 Banner ──────────────────────────────────────
+function AnimatedCopaBanner() {
+  const [, navTo] = useLocation();
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 12 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.5 }}
+      className="relative overflow-hidden rounded-2xl mb-5 cursor-pointer select-none"
+      style={{
+        background: "linear-gradient(135deg, #0a0015 0%, #1a0030 25%, #2d0050 50%, #1a0015 75%, #0d000a 100%)",
+        border: "1px solid rgba(255,100,0,0.25)",
+        boxShadow: "0 0 40px rgba(120,0,255,0.15), inset 0 1px 0 rgba(255,255,255,0.06)",
+      }}
+      onClick={() => navTo("/copa-do-mundo")}
+      whileTap={{ scale: 0.98 }}
+    >
+      {/* animated gradient overlay */}
+      <motion.div
+        className="absolute inset-0 pointer-events-none"
+        animate={{ opacity: [0.4, 0.7, 0.4] }}
+        transition={{ duration: 3, repeat: Infinity, ease: "easeInOut" }}
+        style={{ background: "radial-gradient(ellipse at 80% 50%, rgba(255,90,0,0.18) 0%, transparent 60%), radial-gradient(ellipse at 20% 50%, rgba(120,0,255,0.20) 0%, transparent 60%)" }}
+      />
+
+      {/* top scan line */}
+      <motion.div
+        className="absolute top-0 left-0 right-0 h-px pointer-events-none"
+        style={{ background: "linear-gradient(90deg, transparent, rgba(255,165,0,0.8), rgba(255,50,50,0.8), rgba(160,0,255,0.8), transparent)" }}
+        animate={{ opacity: [0.4, 1, 0.4] }}
+        transition={{ duration: 2, repeat: Infinity }}
+      />
+
+      {/* floating orbs */}
+      {[
+        { cx: "88%", cy: "20%", r: 40, color: "rgba(255,100,0,0.12)", delay: 0 },
+        { cx: "10%", cy: "70%", r: 30, color: "rgba(140,0,255,0.14)", delay: 0.8 },
+        { cx: "60%", cy: "10%", r: 20, color: "rgba(255,220,0,0.10)", delay: 1.4 },
+      ].map((o, i) => (
+        <motion.div key={i} className="absolute rounded-full pointer-events-none"
+          style={{ width: o.r * 2, height: o.r * 2, background: o.color, left: o.cx, top: o.cy, transform: "translate(-50%,-50%)", filter: "blur(16px)" }}
+          animate={{ scale: [1, 1.3, 1], opacity: [0.6, 1, 0.6] }}
+          transition={{ duration: 3 + i, repeat: Infinity, delay: o.delay }}
+        />
+      ))}
+
+      {/* particle dots */}
+      {[...Array(8)].map((_, i) => (
+        <motion.div key={`p${i}`} className="absolute rounded-full pointer-events-none"
+          style={{ width: 2 + (i % 3), height: 2 + (i % 3), background: i % 3 === 0 ? "#FFD700" : i % 3 === 1 ? "#FF4500" : "#CC00FF", left: `${8 + i * 11}%`, top: `${20 + (i % 4) * 18}%`, filter: "blur(0.5px)" }}
+          animate={{ y: [-4, 4, -4], opacity: [0.3, 1, 0.3] }}
+          transition={{ duration: 1.8 + i * 0.3, repeat: Infinity, delay: i * 0.2 }}
+        />
+      ))}
+
+      <div className="relative z-10 flex items-center gap-3 px-4 py-3.5">
+        {/* trophy image */}
+        <div className="flex-shrink-0">
+          <motion.div
+            animate={{ y: [0, -5, 0], rotateY: [0, 12, -12, 0] }}
+            transition={{ duration: 3.5, repeat: Infinity, ease: "easeInOut" }}
+            style={{ filter: "drop-shadow(0 0 14px rgba(255,165,0,0.75)) drop-shadow(0 0 28px rgba(255,80,0,0.35))" }}
+          >
+            <img src={trophyImg} alt="Troféu Copa do Mundo" style={{ width: 82, height: 82, objectFit: "contain" }} />
+          </motion.div>
+        </div>
+
+        {/* text block */}
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 mb-0.5">
+            <motion.span
+              className="text-[9px] font-black tracking-[0.3em] text-orange-400/90"
+              animate={{ opacity: [0.6, 1, 0.6] }}
+              transition={{ duration: 2, repeat: Infinity }}
+            >
+              FIFA · 2026 · AO VIVO
+            </motion.span>
+            <motion.span
+              className="inline-flex items-center gap-1 bg-red-600/20 border border-red-500/40 rounded-full px-1.5 py-0.5"
+              animate={{ opacity: [0.7, 1, 0.7] }}
+              transition={{ duration: 1.5, repeat: Infinity }}
+            >
+              <span className="w-1 h-1 rounded-full bg-red-400 animate-pulse"/>
+              <span className="text-[8px] font-black text-red-300 tracking-wider">NOVO</span>
+            </motion.span>
+          </div>
+          <div className="font-black text-white leading-none" style={{ fontSize: "18px", letterSpacing: "-0.02em" }}>
+            Copa do{" "}
+            <span className="text-transparent bg-clip-text" style={{ backgroundImage: "linear-gradient(90deg,#FFD700,#FF6B00,#FF00AA)" }}>
+              Mundo
+            </span>
+          </div>
+          <div className="text-[10px] text-white/40 mt-0.5 font-medium tracking-wide">Canadá · México · EUA · 48 seleções</div>
+        </div>
+
+        {/* CTA */}
+        <div className="flex-shrink-0">
+          <motion.div
+            className="flex items-center gap-1.5 rounded-xl px-3 py-2 text-xs font-black text-white"
+            style={{ background: "linear-gradient(135deg,#FF4500,#CC0077)", boxShadow: "0 0 12px rgba(255,69,0,0.4)" }}
+            animate={{ boxShadow: ["0 0 10px rgba(255,69,0,0.3)", "0 0 20px rgba(255,69,0,0.6)", "0 0 10px rgba(255,69,0,0.3)"] }}
+            transition={{ duration: 2, repeat: Infinity }}
+            whileHover={{ scale: 1.05 }}
+          >
+            Apostar
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="m9 18 6-6-6-6"/></svg>
+          </motion.div>
+        </div>
+      </div>
+
+      {/* bottom scan line */}
+      <div className="absolute bottom-0 left-0 right-0 h-px" style={{ background: "linear-gradient(90deg, transparent, rgba(255,100,0,0.5), transparent)" }}/>
+    </motion.div>
+  );
 }
 
 export default function Home() {
@@ -2223,6 +2352,8 @@ export default function Home() {
   const [v2Incidents, setV2Incidents] = useState<V2Incident[] | null>(null);
   const [v2IncidentsLoading, setV2IncidentsLoading] = useState(false);
   const [v2IncidentsFetchedAt, setV2IncidentsFetchedAt] = useState(0);
+  const v2StatsCacheRef = useRef<Record<string, V2StatsGroup[]>>({});
+  const v2IncidentsCacheRef = useRef<Record<string, V2Incident[]>>({});
   const [liveAdvancedTab, setLiveAdvancedTab] = useState<"all" | "goals" | "corners" | "cards">("all");
   const [livePollTick, setLivePollTick] = useState(0);
   const [standings, setStandings] = useState<StandingRow[] | null>(null);
@@ -2448,9 +2579,9 @@ export default function Home() {
       .filter(Boolean) as Array<{ key: string; label: string; home: string; away: string }>;
   };
 
-  // Minute ticker — ticks every 10s so displayed clock updates visibly between API calls
+  // Minute ticker — ticks every 1s for real-time clock updates (football minutes, basketball/hockey clocks)
   useEffect(() => {
-    const interval = setInterval(() => setMinuteTick(t => t + 1), 10000);
+    const interval = setInterval(() => setMinuteTick(t => t + 1), 1000);
     return () => clearInterval(interval);
   }, []);
 
@@ -2650,19 +2781,22 @@ export default function Home() {
     const wantsStatsData = matchViewTab === "stats" || (matchViewTab === "live" && !!expandedMatch?.isLive);
     if (!wantsStatsData || !expandedMatch) return;
     if (v2StatsLoading) return;
-    if (v2StatsGroups !== null && Date.now() - v2StatsFetchedAt < 6000) return;
+    if (v2StatsGroups !== null && Date.now() - v2StatsFetchedAt < 3000) return;
     const rawId = String(expandedMatch.id).replace(/^[a-z]+-v2-/, "");
     const sport = expandedMatch.sport ?? "football";
+    const cacheKey = `${sport}:${rawId}`;
     if (!rawId) return;
     setV2StatsLoading(true);
     fetch(`/api/matches/v2-statistics?sport=${sport}&matchId=${rawId}`)
       .then(r => r.ok ? r.json() : null)
       .then(d => {
-        setV2StatsGroups(d ? extractV2StatsGroups(d as any) : []);
+        const nextGroups = d ? extractV2StatsGroups(d as any) : [];
+        if (nextGroups.length > 0) v2StatsCacheRef.current[cacheKey] = nextGroups;
+        setV2StatsGroups(nextGroups.length > 0 ? nextGroups : (v2StatsCacheRef.current[cacheKey] ?? []));
         setV2StatsFetchedAt(Date.now());
       })
       .catch(() => {
-        setV2StatsGroups([]);
+        setV2StatsGroups(v2StatsCacheRef.current[cacheKey] ?? []);
         setV2StatsFetchedAt(Date.now());
       })
       .finally(() => setV2StatsLoading(false));
@@ -2672,19 +2806,22 @@ export default function Home() {
     const wantsIncidents = matchViewTab === "live" && !!expandedMatch?.isLive;
     if (!wantsIncidents || !expandedMatch) return;
     if (v2IncidentsLoading) return;
-    if (v2Incidents !== null && Date.now() - v2IncidentsFetchedAt < 6000) return;
+    if (v2Incidents !== null && Date.now() - v2IncidentsFetchedAt < 3000) return;
     const rawId = String(expandedMatch.id).replace(/^[a-z]+-v2-/, "");
     const sport = expandedMatch.sport ?? "football";
+    const cacheKey = `${sport}:${rawId}`;
     if (!rawId) return;
     setV2IncidentsLoading(true);
     fetch(`/api/matches/v2-incidents?sport=${sport}&matchId=${rawId}`)
       .then(r => r.ok ? r.json() : null)
       .then(d => {
-        setV2Incidents(d ? extractV2Incidents(d as any) : []);
+        const nextIncidents = d ? extractV2Incidents(d as any) : [];
+        if (nextIncidents.length > 0) v2IncidentsCacheRef.current[cacheKey] = nextIncidents;
+        setV2Incidents(nextIncidents.length > 0 ? nextIncidents : (v2IncidentsCacheRef.current[cacheKey] ?? []));
         setV2IncidentsFetchedAt(Date.now());
       })
       .catch(() => {
-        setV2Incidents([]);
+        setV2Incidents(v2IncidentsCacheRef.current[cacheKey] ?? []);
         setV2IncidentsFetchedAt(Date.now());
       })
       .finally(() => setV2IncidentsLoading(false));
@@ -2692,7 +2829,7 @@ export default function Home() {
 
   useEffect(() => {
     if (matchViewTab !== "live" || !expandedMatch?.isLive) return;
-    const tid = setInterval(() => setLivePollTick(t => t + 1), 6000);
+    const tid = setInterval(() => setLivePollTick(t => t + 1), 3000);
     return () => clearInterval(tid);
   }, [matchViewTab, expandedMatch?.id, !!expandedMatch?.isLive]);
 
@@ -2987,7 +3124,11 @@ export default function Home() {
   const processLiveData = useCallback((data: any) => {
     const now = Date.now();
 
-    const matches = (data.matches || []) as LiveMatchRaw[];
+    const _WC_LIVE_KW = ["world cup","fifa world","mundial 2026","wc 2026","copa do mundo","copa mundial","coupe du monde"];
+    const matches = ((data.matches || []) as LiveMatchRaw[]).filter(m => {
+      const lg = (m.league ?? "").toLowerCase();
+      return !_WC_LIVE_KW.some(k => lg.includes(k));
+    });
     if (matches.length === 0) {
       emptyLiveStreakRef.current += 1;
       if (emptyLiveStreakRef.current < 3) return;
@@ -3001,19 +3142,41 @@ export default function Home() {
     }
     emptyLiveStreakRef.current = 0;
     const newMins: Record<string, number> = {};
-    // Duplicate 'now' declaration removed
-    for (const m of matches) {
+    const normalizedMatches = matches.map((m) => {
       const id = String(m.id);
-      newMins[id] = m.minute;
-      // Only reset the clock when the API minute value actually advances
-      if (m.minute !== apiMinutesRef.current[id]) {
+      const prevMinute = apiMinutesRef.current[id];
+      const nextMinuteRaw = Number.isFinite(Number(m.minute ?? 0)) ? Number(m.minute ?? 0) : 0;
+      const status = String(m.status ?? "").trim().toLowerCase();
+      const isFootball = !m.sport || m.sport === "football";
+      const canLegitimatelyRephase =
+        status === "ht" ||
+        status.includes("half time") ||
+        status === "et" ||
+        status.includes("extra") ||
+        status.includes("pen");
+      const normalizedMinute =
+        typeof prevMinute === "number" &&
+        isFootball &&
+        nextMinuteRaw > 0 &&
+        prevMinute > 0 &&
+        nextMinuteRaw + 1 < prevMinute &&
+        !canLegitimatelyRephase
+          ? prevMinute
+          : nextMinuteRaw;
+      newMins[id] = normalizedMinute;
+      if (
+        typeof prevMinute !== "number" ||
+        normalizedMinute > prevMinute ||
+        (normalizedMinute < prevMinute && canLegitimatelyRephase)
+      ) {
         minuteChangedAtRef.current[id] = now;
       }
-    }
+      return normalizedMinute === nextMinuteRaw ? m : { ...m, minute: normalizedMinute };
+    });
     apiMinutesRef.current = newMins;
     liveDataFetchedAt.current = now;
     // Update last-seen timestamps for every match in this response
-    for (const m of matches) matchLastSeenRef.current[String(m.id)] = now;
+    for (const m of normalizedMatches) matchLastSeenRef.current[String(m.id)] = now;
 
     setLiveMatches(prev => {
       const newPrev: Record<string, Odds> = {};
@@ -3026,8 +3189,7 @@ export default function Home() {
       prevLiveOdds.current = newPrev;
       prevLiveMarkets.current = newPrevMkts;
 
-      const freshIds = new Set(matches.map(m => String(m.id)));
-
+      const freshIds = new Set(normalizedMatches.map(m => String(m.id)));
       // Update consecutive miss counts for every match in the previous state
       for (const m of prev) {
         const id = String(m.id);
@@ -3037,7 +3199,6 @@ export default function Home() {
           matchMissCountRef.current[id] = (matchMissCountRef.current[id] ?? 0) + 1;
         }
       }
-
       const isFinishedStatus = (st: string | undefined) => {
         const s = (st ?? "").trim().toLowerCase();
         if (!s) return false;
@@ -3073,9 +3234,9 @@ export default function Home() {
         })
         .map(m => ({ ...m, marketSuspension: undefined, _suspensionReason: undefined, suspensionReason: undefined }));
 
-      // Live matches (startsIn === undefined) always show.
-      // "Em Breve" entries show when there are real odds OR computed odds (home > 0 and away > 0).
-      const freshMatches = matches
+      const freshMatches = normalizedMatches
+        // Live matches (startsIn === undefined) always show.
+        // "Em Breve" entries show when there are real odds OR computed odds (home > 0 and away > 0).
         .filter(m => m.startsIn === undefined || m.hasRealOdds !== false || (m.odds.home > 0 && m.odds.away > 0))
         .map(m => ({ ...m, isLive: true }));
 
@@ -3165,18 +3326,23 @@ export default function Home() {
         try {
           const data = JSON.parse(evt.data) as any;
           if (data.type === "update" && data.matchId) {
-            const now = Date.now();
-            liveDataFetchedAt.current = now;
-            matchLastSeenRef.current[String(data.matchId)] = now;
-            if (typeof data.delta?.minute === "number") {
-              if (apiMinutesRef.current[String(data.matchId)] !== data.delta.minute) {
-                minuteChangedAtRef.current[String(data.matchId)] = now;
-              }
-              apiMinutesRef.current[String(data.matchId)] = data.delta.minute;
-            }
             // Sub-second delta — patch just the changed match
+            const matchId = String(data.matchId);
+            const msgNow = Date.now();
+            liveDataFetchedAt.current = msgNow;
+            matchLastSeenRef.current[matchId] = msgNow;
+            const deltaMinuteRaw = data.delta?.minute;
+            if (typeof deltaMinuteRaw === "number" && Number.isFinite(deltaMinuteRaw)) {
+              const prevMinute = apiMinutesRef.current[matchId];
+              if (typeof prevMinute !== "number" || deltaMinuteRaw >= prevMinute) {
+                apiMinutesRef.current[matchId] = deltaMinuteRaw;
+                if (typeof prevMinute !== "number" || deltaMinuteRaw > prevMinute) {
+                  minuteChangedAtRef.current[matchId] = msgNow;
+                }
+              }
+            }
             setLiveMatches(prev => prev.map(m =>
-              String(m.id) === String(data.matchId) ? { ...m, ...(data.delta ?? {}), isLive: true } : m
+              String(m.id) === matchId ? { ...m, ...(data.delta ?? {}), isLive: true } : m
             ));
           } else if (Array.isArray(data.matches)) {
             // Full snapshot from server broadcast
@@ -4633,10 +4799,10 @@ export default function Home() {
     const quickAmounts = [5, 10, 25, 50];
 
     return (
-      <div className="flex flex-col h-full bg-zinc-950" style={{ background: "#0a0a0a" }}>
+      <div className="flex flex-col h-full" style={{ background: "#0a0a0a" }}>
 
         {/* ── HEADER ── */}
-        <div className="relative px-5 pt-3 pb-4 bg-zinc-900" style={{ background: "linear-gradient(160deg,#1a0505 0%,#0f0f0f 100%)", borderBottom: "1px solid rgba(220,38,38,0.15)" }}>
+        <div className="relative px-5 pt-3 pb-4" style={{ background: "linear-gradient(160deg,#1a0505 0%,#0f0f0f 100%)", borderBottom: "1px solid rgba(220,38,38,0.15)" }}>
           {/* drag handle */}
           <div className="w-10 h-1 rounded-full mx-auto mb-4" style={{ background: "rgba(255,255,255,0.12)" }} />
 
@@ -4729,7 +4895,7 @@ export default function Home() {
                     animate={{ opacity: 1, y: 0 }}
                     exit={{ opacity: 0, x: -20, scale: 0.95 }}
                     transition={{ duration: 0.2 }}
-                    className="relative overflow-hidden rounded-2xl bet-slip-card"
+                    className="relative overflow-hidden rounded-2xl"
                     style={{
                       background: isSusp ? "rgba(120,53,15,0.3)" : "rgba(255,255,255,0.035)",
                       border: isSusp ? "1px solid rgba(245,158,11,0.4)" : "1px solid rgba(255,255,255,0.07)",
@@ -4831,7 +4997,7 @@ export default function Home() {
 
         {/* ── FOOTER ── */}
         {bets.length > 0 && (
-          <div className="px-4 pt-3 space-y-3 bg-zinc-950" style={{ background: "#0a0a0a", borderTop: "1px solid rgba(255,255,255,0.06)", paddingBottom: "max(1.5rem, env(safe-area-inset-bottom, 1.5rem))" }} data-vaul-no-drag>
+          <div className="px-4 pt-3 space-y-3" style={{ background: "#0a0a0a", borderTop: "1px solid rgba(255,255,255,0.06)", paddingBottom: "max(1.5rem, env(safe-area-inset-bottom, 1.5rem))" }} data-vaul-no-drag>
 
             {/* Múltipla stake input */}
             {effectiveBetMode === "multipla" && (
@@ -5341,11 +5507,9 @@ export default function Home() {
 
     const m = match.markets;
 
-    // Show markets when hasRealOdds=true, OR when tennis has valid computed tennisExtra markets,
-    // OR when the match has valid computed odds (football/basketball/hockey use computed odds)
+    // Show markets when hasRealOdds=true, OR when tennis has valid computed tennisExtra markets
     const hasTennisMarkets = match.sport === "tennis" && !!(m?.tennisExtra?.firstSet?.home);
-    const hasComputedOdds = match.odds.home > 0 && match.odds.away > 0;
-    if (!match.hasRealOdds && !hasTennisMarkets && !hasComputedOdds) {
+    if (!match.hasRealOdds && !hasTennisMarkets) {
       return (
         <div className="mt-4 text-center py-10 text-zinc-500">
           <div className="text-3xl mb-3">📊</div>
@@ -9269,7 +9433,10 @@ export default function Home() {
                     if (sport === "volleyball") return !volleyOddsAsMatches.some(v => v.home === m.home && v.away === m.away);
                     if (sport === "basketball") return !basketballAsMatches.some(b => b.home === m.home && b.away === m.away);
                     if (sport === "hockey")     return !hockeyAsMatches.some(h => h.home === m.home && h.away === m.away);
-                    return true; // football always included
+                    // Football — exclude World Cup matches (dedicated Copa do Mundo page)
+                    const lg = (m.league ?? "").toLowerCase();
+                    const isWC = lg.includes("world cup") || lg.includes("fifa world") || lg.includes("mundial 2026") || lg.includes("wc 2026") || lg.includes("copa do mundo") || lg.includes("copa mundial");
+                    return !isWC;
                   }),
                 ];
                 // Filter by country (all leagues of that country)
@@ -9534,6 +9701,10 @@ export default function Home() {
                       </div>
                     );
                   })()}
+
+                  {!selectedLeague && (selectedSport === "all" || selectedSport === "football") && (
+                    <AnimatedCopaBanner />
+                  )}
 
                   {featuredUpcoming.length > 0 && (
                     <div className="mb-5 space-y-2">
@@ -11377,12 +11548,12 @@ export default function Home() {
             animate={{ y: 0 }}
             exit={{ y: "100%" }}
             transition={{ type: "spring", bounce: 0, duration: 0.35 }}
-            className="lg:hidden fixed inset-0 z-[60] flex flex-col bg-zinc-950"
+            className="lg:hidden fixed inset-0 z-[60] flex flex-col"
             style={{ background: "#0f0f0f", paddingTop: "env(safe-area-inset-top, 0px)" }}
           >
             {/* Top bar */}
             <div
-              className="flex items-center justify-between px-4 py-2.5 border-b border-zinc-800/80 shrink-0 bg-zinc-950"
+              className="flex items-center justify-between px-4 py-2.5 border-b border-zinc-800/80 shrink-0"
               style={{ background: "#0a0a0a" }}
             >
               <button
@@ -11417,7 +11588,7 @@ export default function Home() {
             </div>
 
             {/* Tabs */}
-            <div className="flex border-b border-zinc-800 shrink-0 bg-zinc-950" style={{ background: "#0a0a0a" }}>
+            <div className="flex border-b border-zinc-800 shrink-0" style={{ background: "#0a0a0a" }}>
               <button
                 {...makeTap(() => { if (!hasDuplicateMatches) setBetMode("simples"); })}
                 className={`flex-1 py-3 text-[13px] font-bold transition-all ${effectiveBetMode === "simples" ? "text-white border-b-2 border-red-600" : "text-zinc-500"}`}
@@ -11450,7 +11621,7 @@ export default function Home() {
                       animate={{ opacity: 1, y: 0 }}
                       exit={{ opacity: 0, x: -20, scale: 0.95 }}
                       transition={{ duration: 0.2 }}
-                      className="relative rounded-2xl overflow-hidden bet-slip-card"
+                      className="relative rounded-2xl overflow-hidden"
                       style={{
                         background: isSusp ? "rgba(120,53,15,0.25)" : "rgba(255,255,255,0.04)",
                         border: isSusp ? "1px solid rgba(245,158,11,0.35)" : "1px solid rgba(255,255,255,0.08)",
@@ -11544,7 +11715,7 @@ export default function Home() {
 
             {/* Footer: stake input + summary + CTA */}
             <div
-              className="px-4 pt-3 shrink-0 border-t border-zinc-800 bg-zinc-950"
+              className="px-4 pt-3 shrink-0 border-t border-zinc-800"
               style={{ paddingBottom: "max(1rem, env(safe-area-inset-bottom, 1rem))", background: "#0a0a0a" }}
             >
               {/* Múltipla: Montante input + odds badge */}
@@ -12062,6 +12233,9 @@ type PromoItem = {
   badge: string; image: string; gradient: string;
   highlight: string; highlightLabel: string;
   terms: string[]; cta: string; action: () => void;
+  cornerIcon?: string; alwaysActive?: boolean;
+  /** Optional PNG overlay (e.g. transparent trophy) rendered on top-right of the card */
+  overlayImg?: string;
 };
 
 function PromoCard3D({
@@ -12122,6 +12296,24 @@ function PromoCard3D({
         <div className={`absolute inset-0 bg-gradient-to-r ${promo.gradient}`} />
         <div className="absolute inset-0 bg-black/52" />
 
+        {/* Optional transparent overlay image (e.g. trophy without background) */}
+        {promo.overlayImg && (
+          <motion.img
+            src={promo.overlayImg}
+            alt=""
+            className="absolute right-4 bottom-0 pointer-events-none select-none"
+            style={{
+              height: 220,
+              width: "auto",
+              objectFit: "contain",
+              filter: "drop-shadow(0 0 28px rgba(255,185,0,0.80)) drop-shadow(0 0 60px rgba(255,100,0,0.40))",
+              opacity: 0.95,
+            }}
+            animate={{ y: hovered ? -10 : 0, rotate: hovered ? 3 : 0 }}
+            transition={{ duration: 0.55, ease: "easeOut" }}
+          />
+        )}
+
         {/* Dynamic glare */}
         <div
           className="absolute inset-0 pointer-events-none z-20 rounded-[28px]"
@@ -12132,6 +12324,14 @@ function PromoCard3D({
 
         {/* Top rim light */}
         <div className="absolute top-0 left-8 right-8 h-px bg-gradient-to-r from-transparent via-white/35 to-transparent pointer-events-none" />
+
+        {/* Corner icon (e.g. 🔥 for Boost card) */}
+        {promo.cornerIcon && (
+          <div className="absolute top-4 right-4 z-30 text-4xl leading-none pointer-events-none select-none drop-shadow-2xl"
+            style={{ filter: "drop-shadow(0 0 12px rgba(255,100,0,0.8))" }}>
+            {promo.cornerIcon}
+          </div>
+        )}
 
         {/* Content */}
         <div className="relative z-10 h-full flex items-center justify-between p-6 sm:p-8 gap-6">
@@ -12163,12 +12363,12 @@ function PromoCard3D({
               ))}
             </div>
             <motion.button
-              onClick={isLoggedIn || promo.id === "superodds" ? promo.action : () => {}}
+              onClick={isLoggedIn || promo.id === "superodds" || promo.alwaysActive ? promo.action : () => {}}
               className="mt-5 px-6 py-3 rounded-2xl bg-white text-black font-black text-sm tracking-wide shadow-lg"
               whileHover={{ scale: 1.04 }}
               whileTap={{ scale: 0.96 }}
             >
-              {!isLoggedIn && promo.id !== "superodds" ? "ENTRAR PARA ATIVAR" : promo.cta}
+              {!isLoggedIn && promo.id !== "superodds" && !promo.alwaysActive ? "ENTRAR PARA ATIVAR" : promo.cta}
             </motion.button>
           </div>
 
@@ -12205,9 +12405,42 @@ function PromosPage({
   onFetchCashback: () => void;
   onClaimCashback: () => void;
 }) {
+  const [, navigate] = useLocation();
   useEffect(() => { onFetchCashback(); }, []);
 
   const promos = [
+    {
+      id: "worldcup",
+      title: "FIFA WORLD CUP 2026",
+      subtitle: "CANADA · MÉXICO · USA — COMEÇA 11 JUN",
+      description: "A maior Copa do Mundo da história com 48 seleções. Aposte em todos os grupos, oitavas, quartas e finais com odds exclusivas.",
+      badge: "🏆 COPA DO MUNDO",
+      image: "https://images.unsplash.com/photo-1574629810360-7efbbe195018?q=80&w=1400&auto=format&fit=crop",
+      overlayImg: trophyImg,
+      gradient: "from-yellow-500/60 via-orange-600/40 to-purple-800/55",
+      highlight: "48",
+      highlightLabel: "seleções · 104 jogos",
+      terms: ["Disponível para todos os utilizadores.", "Odds ao vivo durante a Copa.", "Mercados: 1X2, Golos, Especiais.", "Apostas combinadas com boost disponíveis."],
+      cta: "VER JOGOS DA COPA",
+      alwaysActive: true,
+      action: () => navigate("/copa-do-mundo"),
+    },
+    {
+      id: "boost6x",
+      title: "BOOST 6% NA MÚLTIPLA",
+      subtitle: "6 SELEÇÕES · QUALQUER ESPORTE",
+      description: "Faça Múltiplas de 6 jogos e ganhe 6% extra na sua múltipla. Quanto mais seleções, maior o boost — até 100% de bónus!",
+      badge: "MÚLTIPLA BOOST",
+      image: "https://images.unsplash.com/photo-1522778119026-d647f0596c20?q=80&w=1400&auto=format&fit=crop",
+      gradient: "from-orange-500/60 to-red-700/60",
+      highlight: "+6%",
+      highlightLabel: "na múltipla de 6",
+      terms: ["Mínimo de 6 seleções na múltipla.", "Odds mínimas de 1.50 por seleção.", "Boost automático calculado no momento.", "Válido em todos os esportes da plataforma."],
+      cta: "APOSTAR MÚLTIPLA",
+      cornerIcon: "🔥",
+      alwaysActive: true,
+      action: () => {},
+    },
     {
       id: "bonus100",
       title: "100% BÓNUS DE BOAS‑VINDAS",

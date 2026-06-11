@@ -2,6 +2,7 @@ const SPORTSAPI_KEY =
   process.env["SPORTSAPIPRO_KEY"] ??
   process.env["SPORTSAPI_PRO_KEY"] ??
   process.env["SPORTSAPI_KEY"] ??
+  process.env["STATSPAL_API_KEY"] ??
   "";
 
 export const CONFIG = {
@@ -70,9 +71,37 @@ const FOOTBALL_LOW_RISK_KEYS = new Set([
   "drawNoBet2",
 ] as const);
 
-const FOOTBALL_GOAL_HIGH_MULT: Record<string, number> = {};
+const FOOTBALL_GOAL_HIGH_MULT: Record<string, number> = {
+  totalGoals: 28 / 25,
+  handicap: 28 / 25,
+  goalOddEven: 28 / 25,
+  toWinBothHalves: 28 / 25,
+  teamGoals: 28 / 25,
+  handicapPoints: 28 / 25,
+  htft: 30 / 25,
+  asianHandicap: 30 / 25,
+  asianTotals: 30 / 25,
+  exactGoals: 30 / 25,
+  correctScore: 35 / 25,
+  htCorrectScore: 35 / 25,
+  h2CorrectScore: 35 / 25,
+};
 
-const FOOTBALL_VAR_HIGH_MULT: Record<string, number> = {};
+const FOOTBALL_VAR_HIGH_MULT: Record<string, number> = {
+  totalGoals: 50 / 45,
+  handicap: 50 / 45,
+  goalOddEven: 50 / 45,
+  toWinBothHalves: 50 / 45,
+  teamGoals: 50 / 45,
+  handicapPoints: 50 / 45,
+  asianHandicap: 55 / 45,
+  asianTotals: 55 / 45,
+  exactGoals: 55 / 45,
+  htft: 60 / 45,
+  correctScore: 60 / 45,
+  htCorrectScore: 60 / 45,
+  h2CorrectScore: 60 / 45,
+};
 
 export function footballSuspensionDelayMs(event: FootballSuspensionEvent, marketKey: string): number {
   const low = FOOTBALL_LOW_RISK_KEYS.has(marketKey as any);
