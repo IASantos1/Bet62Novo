@@ -249,6 +249,7 @@ function mapToWCMatch(m: Record<string, unknown>): WCMatch {
   const statusStr = String(m.status ?? "");
   const isLive =
     !!(m.isLive) ||
+    m.providerStatusGroup === 3 ||
     /^\d{1,3}(\+\d+)?$/.test(statusStr) ||
     ["1st half","2nd half","halftime","ht","half time","extra time","et","penalties","live"].some(s =>
       statusStr.toLowerCase().includes(s)
@@ -1195,7 +1196,20 @@ export default function WorldCupPage() {
         const wcData = await fetch("/api/matches/wc2026", { signal: AbortSignal.timeout(20_000) })
           .then(r => r.ok ? r.json() : { matches: [] }).catch(() => ({ matches: [] }));
         if (cancelled) return;
-        setUpcomingMatches(((wcData.matches ?? []) as Record<string, unknown>[]).map(mapToWCMatch));
+        const allWC = ((wcData.matches ?? []) as Record<string, unknown>[]).map(mapToWCMatch);
+        const wcLive = allWC.filter(m => m.isLive);
+        const wcUpcoming = allWC.filter(m => !m.isLive);
+        if (wcLive.length > 0) {
+          setLiveMatches(prev => {
+            // Merge: keep live-feed matches that aren't already in wc2026 live list (by team name)
+            const ids = new Set(wcLive.map(m => m.id));
+            const teamKeys = new Set(wcLive.map(m => `${m.home.toLowerCase()}|${m.away.toLowerCase()}`));
+            const fromFeed = prev.filter(m => !ids.has(m.id) && !teamKeys.has(`${m.home.toLowerCase()}|${m.away.toLowerCase()}`));
+            return [...wcLive, ...fromFeed];
+          });
+          setPageTab("live");
+        }
+        setUpcomingMatches(wcUpcoming);
       } catch { /* silent */ }
       if (!cancelled) setLoading(false);
     }
@@ -1208,13 +1222,19 @@ export default function WorldCupPage() {
         const live: WCMatch[] = ((liveData.matches ?? []) as Record<string, unknown>[])
           .filter(m => isWCLeague(String(m.league ?? "")))
           .map(mapToWCMatch);
-        setLiveMatches(live);
+        setLiveMatches(prev => {
+          if (live.length === 0) return prev;
+          // Merge with wc2026-sourced live matches (they have richer data), dedup by team key
+          const existingKeys = new Set(prev.map(m => `${m.home.toLowerCase()}|${m.away.toLowerCase()}`));
+          const fresh = live.filter(m => !existingKeys.has(`${m.home.toLowerCase()}|${m.away.toLowerCase()}`));
+          return [...prev, ...fresh];
+        });
         if (live.length > 0) setPageTab("live");
       } catch { /* silent */ }
     }
 
     async function load() {
-      // Start both; don't block WC on live
+      // Start both in parallel; wc2026 is primary (has live enrichment), live is supplement
       void loadLive();
       await loadWC();
     }

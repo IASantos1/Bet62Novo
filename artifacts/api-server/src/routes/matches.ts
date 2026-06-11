@@ -238,6 +238,11 @@ export type UpcomingMatch = {
   providerStatusGroup?: number;
   providerStatusText?: string;
   providerWinnerKnown?: boolean;
+  isLive?: boolean;
+  homeScore?: number;
+  awayScore?: number;
+  minute?: string | number;
+  status?: string;
 };
 
 type StatpalMatchV2Event = {
@@ -10206,8 +10211,11 @@ async function _rebuildWC2026(): Promise<void> {
       startTime?: string;
       statusGroup?: number;
       statusText?: string;
-      homeCompetitor?: { name?: string; id?: number };
-      awayCompetitor?: { name?: string; id?: number };
+      homeCompetitor?: { name?: string; id?: number; score?: number };
+      awayCompetitor?: { name?: string; id?: number; score?: number };
+      homeScore?: number;
+      awayScore?: number;
+      minute?: number | string;
       hasBets?: boolean;
     };
 
@@ -10254,7 +10262,9 @@ async function _rebuildWC2026(): Promise<void> {
       const time  = dt.toLocaleTimeString("pt-PT", { hour: "2-digit", minute: "2-digit", timeZone: "Europe/Lisbon" });
       const odds = makeOddsFromTeams(home, away);
       const markets = makeAdvancedMarketsFromTeams(home, away);
-      return {
+      // statusGroup 3 = Live/in-play — expose live data directly
+      const isLiveGame = (g.statusGroup ?? 0) === 3;
+      const entry: UpcomingMatch = {
         id: `fb-v1-${g.id}`,
         home, away, league,
         country: "World",
@@ -10266,8 +10276,43 @@ async function _rebuildWC2026(): Promise<void> {
         leagueId: String(WC_COMP_ID),
         providerStatusGroup: g.statusGroup,
         providerStatusText: g.statusText,
-      } satisfies UpcomingMatch;
+      };
+      if (isLiveGame) {
+        entry.isLive = true;
+        entry.status = g.statusText ?? "Live";
+        entry.homeScore = g.homeCompetitor?.score ?? g.homeScore ?? 0;
+        entry.awayScore = g.awayCompetitor?.score ?? g.awayScore ?? 0;
+        if (g.minute != null) entry.minute = g.minute;
+      }
+      return entry;
     });
+
+    // Enrich live matches from liveMatchState (WS feed) — covers cases where
+    // V1 competition/games doesn't return live scores but V1 WS does
+    const normTeam = (s: string) => s.toLowerCase().replace(/[\s.'-]+/g, "");
+    for (const result of results) {
+      if (result.isLive) continue; // already enriched from V1
+      const rH = normTeam(result.home);
+      const rA = normTeam(result.away);
+      for (const [, ls] of liveMatchState.entries()) {
+        if ((ls as any).sport !== "football") continue;
+        const league = String((ls as any).league ?? "").toLowerCase();
+        if (!league.includes("world cup") && !league.includes("copa") && !league.includes("fifa")) continue;
+        const lH = normTeam(String((ls as any).homeTeam ?? ""));
+        const lA = normTeam(String((ls as any).awayTeam ?? ""));
+        const matches =
+          (lH === rH || lH.includes(rH) || rH.includes(lH)) &&
+          (lA === rA || lA.includes(rA) || rA.includes(lA));
+        if (matches) {
+          result.isLive = true;
+          result.homeScore = (ls as any).homeScore ?? 0;
+          result.awayScore = (ls as any).awayScore ?? 0;
+          result.minute = (ls as any).minute;
+          result.status = String((ls as any).status ?? "Live");
+          break;
+        }
+      }
+    }
 
     // ── V2 schedule fallback (only if V1 returned nothing) ─────────────────────
     let v2FallbackEvents: SAPIV2Event[] = [];
