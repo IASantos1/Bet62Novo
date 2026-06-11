@@ -74,6 +74,7 @@ type WCMatch = {
   minute?: number;
   status?: string;
   isLive?: boolean;
+  hasRealOdds?: boolean;
   odds?: { home: number; draw: number; away: number };
   markets?: WCMarkets;
 };
@@ -252,6 +253,7 @@ function mapToWCMatch(m: Record<string, unknown>): WCMatch {
     ["1st half","2nd half","halftime","ht","half time","extra time","et","penalties","live"].some(s =>
       statusStr.toLowerCase().includes(s)
     );
+  const hasRealOdds = m.hasRealOdds === true || m.isLive === true;
   return {
     id: String(m.id ?? m.matchId ?? Math.random()),
     home: String(m.home ?? m.homeTeam ?? ""),
@@ -265,6 +267,7 @@ function mapToWCMatch(m: Record<string, unknown>): WCMatch {
     homeScore: m.homeScore as number | undefined,
     awayScore: m.awayScore as number | undefined,
     isLive,
+    hasRealOdds,
     odds: (() => {
       const o = m.odds as { home: number; draw: number; away: number } | undefined;
       return o && (o.home > 0 || o.away > 0) ? o : undefined;
@@ -367,10 +370,18 @@ function MatchCard({ match, onOpen, activeSel, onQuickBet, theme }: {
 
         {/* Quick 1X2 odds */}
         {odds && (odds.home > 1.001 || odds.away > 1.001) && (
-          <div className="flex gap-1.5">
-            <OBtn label={home} odd={odds.home} active={activeSel === `${match.id}:home`} onClick={() => onQuickBet(`${match.id}:home`, home, odds.home)} theme={theme} />
-            {odds.draw > 1.001 && <OBtn label="Empate" odd={odds.draw} active={activeSel === `${match.id}:draw`} onClick={() => onQuickBet(`${match.id}:draw`, "Empate", odds.draw)} theme={theme} />}
-            <OBtn label={away} odd={odds.away} active={activeSel === `${match.id}:away`} onClick={() => onQuickBet(`${match.id}:away`, away, odds.away)} theme={theme} />
+          <div className="flex flex-col gap-1">
+            <div className="flex gap-1.5">
+              <OBtn label={home} odd={odds.home} active={activeSel === `${match.id}:home`} onClick={() => onQuickBet(`${match.id}:home`, home, odds.home)} theme={theme} />
+              {odds.draw > 1.001 && <OBtn label="Empate" odd={odds.draw} active={activeSel === `${match.id}:draw`} onClick={() => onQuickBet(`${match.id}:draw`, "Empate", odds.draw)} theme={theme} />}
+              <OBtn label={away} odd={odds.away} active={activeSel === `${match.id}:away`} onClick={() => onQuickBet(`${match.id}:away`, away, odds.away)} theme={theme} />
+            </div>
+            {!match.hasRealOdds && (
+              <div className="flex items-center justify-center gap-1">
+                <span className="w-1 h-1 rounded-full bg-amber-500/60" />
+                <span className={`text-[8px] font-semibold tracking-wide ${isDark ? "text-zinc-600" : "text-zinc-400"}`}>ODDS ESTIMADAS</span>
+              </div>
+            )}
           </div>
         )}
       </div>

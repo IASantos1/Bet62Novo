@@ -20,9 +20,11 @@ const SAPI_V2_BASEBALL   = "https://v2.baseball.sportsapipro.com/api";
 // No V2 volleyball domain is available
 
 // SportsAPI Pro V1 — lower-latency HTTP endpoints (1-2s vs V2's 3-5s)
-// Used as the primary source for /live; V2 is the fallback via Promise.any()
-const SAPI_V1_FOOTBALL   = "https://v1.football.sportsapipro.com/api";
-const SAPI_V1_BASKETBALL = "https://v1.basketball.sportsapipro.com/api";
+// IMPORTANT: V1 uses versioned paths /api/v1/{sport}/ — NOT /api/ (which returns 404)
+// Tennis is the exception: it still uses /api as base because its own functions
+// append /v1/tennis/ manually (e.g. ${SAPI_V1_TENNIS}/v1/tennis/live)
+const SAPI_V1_FOOTBALL   = "https://v1.football.sportsapipro.com/api/v1/football";
+const SAPI_V1_BASKETBALL = "https://v1.basketball.sportsapipro.com/api/v1/basketball";
 const SAPI_V1_TENNIS     = "https://v1.tennis.sportsapipro.com/api";
 
 // Auth headers helper
@@ -4774,15 +4776,52 @@ const V2_LIVE_MAX_STALE_MS = 30_000;
 const WS_PREFERRED_MAX_STALE_MS = 10_000;
 
 /** Race V1 vs V2 HTTP — whichever resolves first wins. V1 = 1-2s, V2 = 3-5s. */
+// V1 live game shape (football / basketball) — different from V2
+type V1LiveGame = {
+  id: number;
+  competitionDisplayName?: string;
+  competitionId?: number;
+  startTime?: string;
+  statusGroup?: number;
+  statusText?: string;
+  gameTime?: number;
+  homeCompetitor?: { name?: string; score?: number };
+  awayCompetitor?:  { name?: string; score?: number };
+};
+
+function v1GameToV2Event(g: V1LiveGame): SAPIV2Event {
+  return {
+    id: g.id,
+    homeTeam: g.homeCompetitor?.name ?? "Unknown",
+    awayTeam:  g.awayCompetitor?.name  ?? "Unknown",
+    tournament: g.competitionDisplayName ?? "",
+    homeScore:  g.homeCompetitor?.score  ?? 0,
+    awayScore:  g.awayCompetitor?.score  ?? 0,
+    status: g.statusText ?? "",
+    startTimestamp: g.startTime ? Math.floor(new Date(g.startTime).getTime() / 1000) : undefined,
+    tournamentId: g.competitionId,
+  };
+}
+
 async function fetchLiveRace(v1Base: string, v2Base: string): Promise<SAPIV2Event[]> {
   const headers = sapiHeaders();
   const tryFetch = async (base: string): Promise<SAPIV2Event[]> => {
     const resp = await fetch(`${base}/live`, { signal: AbortSignal.timeout(8000), headers });
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-    const data = (await resp.json()) as { events?: SAPIV2Event[]; data?: SAPIV2Event[] };
-    const events = data.events ?? (data.data as SAPIV2Event[] | undefined) ?? [];
-    if (events.length === 0) throw new Error("empty");
-    return events;
+    const raw = await resp.json() as Record<string, unknown>;
+
+    // V1 format: { data: { games: V1LiveGame[] } }
+    const v1Data = raw["data"] as { games?: V1LiveGame[] } | null | undefined;
+    if (v1Data && !Array.isArray(v1Data) && Array.isArray(v1Data.games) && v1Data.games.length > 0) {
+      return v1Data.games.map(v1GameToV2Event);
+    }
+
+    // V2 format: { events: SAPIV2Event[] } or { data: SAPIV2Event[] }
+    const v2Events = (raw["events"] ??
+      (Array.isArray(raw["data"]) ? raw["data"] : undefined) ??
+      []) as SAPIV2Event[];
+    if (v2Events.length === 0) throw new Error("empty");
+    return v2Events;
   };
   return Promise.any([tryFetch(v1Base), tryFetch(v2Base)]).catch(() => []);
 }
@@ -9881,7 +9920,7 @@ async function _rebuildWC2026(): Promise<void> {
   try {
     // ── V1 football (primary source — V2 schedule is 503 upstream) ──────────────
     // FIFA World Cup 2026 competition ID in SportsAPI Pro V1: 5930
-    const V1_FOOT = "https://v1.football.sportsapipro.com/api/v1/football";
+    // Uses the module-level SAPI_V1_FOOTBALL constant (correct versioned path)
     const WC_COMP_ID = 5930;
 
     type V1Game = {
@@ -9899,24 +9938,25 @@ async function _rebuildWC2026(): Promise<void> {
 
     const fetchV1Games = async (path: string): Promise<V1Game[]> => {
       try {
-        const r = await fetch(`${V1_FOOT}/${path}`, { signal: AbortSignal.timeout(8_000), headers: sapiHeaders() });
+        const r = await fetch(`${SAPI_V1_FOOTBALL}/${path}`, { signal: AbortSignal.timeout(8_000), headers: sapiHeaders() });
         if (!r.ok) return [];
         const j = await r.json() as { data?: { games?: V1Game[] } };
         return j.data?.games ?? [];
       } catch { return []; }
     };
 
-    // Fetch from 3 stable V1 sources: all (current round), live, and competition-specific games
-    // Avoid /current which is flaky (upstream 500 timeouts)
-    const [allGames, liveGames, compGames] = await Promise.all([
+    // Fetch from 4 V1 sources: all (current round), live, competition-specific games, and current
+    // /current returns ~99 games including upcoming WC fixtures beyond today
+    const [allGames, liveGames, compGames, currentGames] = await Promise.all([
       fetchV1Games("all"),
       fetchV1Games("live"),
       fetchV1Games(`competition/${WC_COMP_ID}/games`),
+      fetchV1Games("current"),
     ]);
 
     const seenV1 = new Set<number>();
     const wcV1Games: V1Game[] = [];
-    for (const g of [...allGames, ...liveGames, ...compGames]) {
+    for (const g of [...allGames, ...liveGames, ...compGames, ...currentGames]) {
       if (seenV1.has(g.id)) continue;
       seenV1.add(g.id);
       // statusGroup 4 = Ended — skip finished games
