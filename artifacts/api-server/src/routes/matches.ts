@@ -9884,11 +9884,37 @@ async function _rebuildWC2026(): Promise<void> {
     for (let i = 0; i < 38; i++) {
       dates.push(new Date(nowMs + i * 86_400_000).toISOString().slice(0, 10));
     }
-    const dayResults = await Promise.race([
-      Promise.all(dates.map(dt => getScheduleV2("football", dt).catch(() => [] as SAPIV2Event[]))),
-      new Promise<SAPIV2Event[][]>(resolve => setTimeout(() => resolve([]), 18_000)),
+
+    // Fetch V2 live + today in parallel with schedule (these endpoints work even when schedule is 503)
+    const fetchV2Direct = async (): Promise<SAPIV2Event[]> => {
+      const results: SAPIV2Event[] = [];
+      const tryUrl = async (url: string) => {
+        try {
+          const r = await fetch(url, { signal: AbortSignal.timeout(6_000), headers: sapiHeaders() });
+          if (!r.ok) return;
+          const j = (await r.json()) as { success?: boolean; events?: SAPIV2Event[]; data?: { events?: SAPIV2Event[] } };
+          const evs: SAPIV2Event[] = j.events ?? j.data?.events ?? [];
+          results.push(...evs);
+        } catch { /* silent */ }
+      };
+      await Promise.all([
+        tryUrl(`${SAPI_V2_FOOTBALL}/live`),
+        tryUrl(`${SAPI_V2_FOOTBALL}/today`),
+      ]);
+      return results;
+    };
+
+    const [dayResults, directEvents] = await Promise.all([
+      Promise.race([
+        Promise.all(dates.map(dt => getScheduleV2("football", dt).catch(() => [] as SAPIV2Event[]))),
+        new Promise<SAPIV2Event[][]>(resolve => setTimeout(() => resolve([]), 18_000)),
+      ]),
+      fetchV2Direct(),
     ]);
-    const allEvents: SAPIV2Event[] = (Array.isArray(dayResults[0]) ? dayResults as SAPIV2Event[][] : []).flat();
+    const allEvents: SAPIV2Event[] = [
+      ...(Array.isArray(dayResults[0]) ? (dayResults as SAPIV2Event[][]).flat() : []),
+      ...directEvents,
+    ];
     const seen = new Set<number>();
     const wcEvents: SAPIV2Event[] = [];
     for (const ev of allEvents) {
@@ -9939,8 +9965,13 @@ async function _rebuildWC2026(): Promise<void> {
         leagueId: ev.tournamentId ? String(ev.tournamentId) : undefined,
       });
     }
+    // Always update cache (reset TTL) — even 0 results is a valid state
+    // Only keep previous matches if new fetch returned nothing (API outage)
     if (results.length > 0 || !wc2026Cache) {
       wc2026Cache = { matches: results, fetchedAt: Date.now() };
+    } else {
+      // Keep existing matches but bump fetchedAt so we don't hammer the API
+      wc2026Cache = { matches: wc2026Cache.matches, fetchedAt: Date.now() };
     }
   } finally {
     _wc2026Rebuilding = false;

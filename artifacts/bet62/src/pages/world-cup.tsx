@@ -1,11 +1,15 @@
 import { useState, useEffect, useRef } from "react";
 import { useLocation } from "wouter";
 import { motion, AnimatePresence } from "framer-motion";
-import { ArrowLeft, X, BarChart2, Sun, Moon } from "lucide-react";
+import { ArrowLeft, X, BarChart2 } from "lucide-react";
 import trophyImg from "/trophy-wc-nobg.png";
 
-// ─── Theme context ────────────────────────────────────────────────────────────
+// ─── Theme helpers ─────────────────────────────────────────────────────────────
 type Theme = "dark" | "light";
+function getAutoTheme(): Theme {
+  const h = new Date().getHours();
+  return h >= 8 && h < 19 ? "light" : "dark";
+}
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -1158,8 +1162,16 @@ export default function WorldCupPage() {
   const [pageTab, setPageTab]               = useState<"live" | "upcoming" | "groups">("upcoming");
   const [openMatch, setOpenMatch]           = useState<WCMatch | null>(null);
   const [activeKeys, setActiveKeys]         = useState<Record<string, string>>({});
-  const [theme, setTheme]                   = useState<Theme>("dark");
+  const [theme, setTheme]                   = useState<Theme>(getAutoTheme);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // Automatic theme: light 08:00-19:00, dark otherwise
+  useEffect(() => {
+    const tick = () => setTheme(getAutoTheme());
+    tick();
+    const id = setInterval(tick, 60_000);
+    return () => clearInterval(id);
+  }, []);
 
   const isDark = theme === "dark";
 
@@ -1281,15 +1293,6 @@ export default function WorldCupPage() {
               <span className="text-[9px] font-black text-red-400">{liveCount} AO VIVO</span>
             </div>
           )}
-          <button
-            onClick={() => setTheme(t => t === "dark" ? "light" : "dark")}
-            className={`w-9 h-9 rounded-xl border flex items-center justify-center flex-shrink-0 active:scale-95 transition-all ${isDark ? "bg-zinc-800 border-zinc-700/80" : "bg-white border-zinc-200"}`}
-          >
-            {isDark
-              ? <Sun size={16} className="text-yellow-400" />
-              : <Moon size={16} className="text-zinc-600" />
-            }
-          </button>
         </div>
       </div>
 
