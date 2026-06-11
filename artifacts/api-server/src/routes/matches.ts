@@ -215,6 +215,9 @@ export type LiveMatchState = {
     penScore?: [number, number];         // football: penalty shootout [homePen, awayPen]
     penBaseScore?: [number, number];     // football: score at start of penalty phase (to compute pen goals)
     secondHalfKickoffSec?: number;
+    // Live stats — polled from /match/{id}/statistics (background, ~90s TTL)
+    cornersTotal?: number;               // football: total corners in match so far
+    cardsTotal?: number;                 // football: total cards (yellow+red) in match so far
   };
 };
 
