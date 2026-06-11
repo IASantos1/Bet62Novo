@@ -9,3 +9,4 @@
 - [V2 degradation V1-first pattern](v2-degradation-v1-first.md) — when V2 is degraded, builders that call getUpcomingEventsV2 first silently waste 54+ s on timeouts; always try V1 first for basketball/football upcoming
 - [Upcoming filter must check odds](upcoming-filter-odds.md) — /upcoming route used !!m.hasRealOdds for non-football/tennis, filtering out V1-built games; correct filter is m.odds?.home > 0 && m.odds?.away > 0 for all sports
 - [WC2026 static schedule](wc2026-static-schedule.md) — V1 competition/5930/games only returns near-term fixtures; WC2026_STATIC (72 matches Jun11–Jun28) supplements _rebuildWC2026(); API matchups dedup prevents doubles
+- [Stripe payments](stripe-payments.md) — Stripe replaced ifthenpay; MB WAY uses Checkout Session (not native); webhook must be BEFORE express.json(); bare stripe SDK (no stripe-replit-sync)
