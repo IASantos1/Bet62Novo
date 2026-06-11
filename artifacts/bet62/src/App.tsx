@@ -9,6 +9,7 @@ import Home from "@/pages/home";
 import SplashScreen from "@/components/SplashScreen";
 
 const AdminPage = lazy(() => import("@/pages/admin"));
+const WorldCupPage = lazy(() => import("@/pages/world-cup"));
 
 // 08:00–18:59 → light mode · 19:00–07:59 → dark mode
 function applyTheme() {
@@ -70,6 +71,15 @@ function Router() {
           </div>
         }>
           <AdminPage />
+        </Suspense>
+      )}</Route>
+      <Route path="/copa-do-mundo">{() => (
+        <Suspense fallback={
+          <div className="min-h-[100dvh] w-full flex items-center justify-center bg-[#090909]">
+            <div className="w-7 h-7 border-2 border-zinc-800 border-t-red-500 rounded-full animate-spin" />
+          </div>
+        }>
+          <WorldCupPage />
         </Suspense>
       )}</Route>
       <Route component={NotFound} />
