@@ -243,19 +243,39 @@ function FlagImg({ name, size = 32 }: { name: string; size?: number }) {
 
 // ─── FIFA WC 2026 Groups ──────────────────────────────────────────────────────
 
+const PT_DISPLAY_NAMES: Record<string, string> = {
+  "Mexico": "México", "South Korea": "Coreia do Sul", "South Africa": "África do Sul",
+  "Czechia": "Rep. Checa", "Canada": "Canadá", "Switzerland": "Suíça", "Qatar": "Catar",
+  "Bosnia & Herzegovina": "Bósnia", "Bosnia and Herzegovina": "Bósnia",
+  "Brazil": "Brasil", "Morocco": "Marrocos", "Scotland": "Escócia",
+  "United States": "EUA", "Australia": "Austrália", "Paraguay": "Paraguai",
+  "Turkey": "Turquia", "Turkiye": "Turquia",
+  "Germany": "Alemanha", "Ivory Coast": "Costa do Marfim", "Ecuador": "Equador",
+  "Curacao": "Curaçao", "Curaçao": "Curaçao",
+  "Netherlands": "Países Baixos", "Sweden": "Suécia", "Japan": "Japão",
+  "Tunisia": "Tunísia", "Belgium": "Bélgica", "Iran": "Irão",
+  "New Zealand": "Nova Zelândia", "Egypt": "Egito",
+  "Spain": "Espanha", "Saudi Arabia": "Arábia Saudita", "Uruguay": "Uruguai",
+  "Cape Verde": "Cabo Verde", "Cabo Verde": "Cabo Verde",
+  "France": "França", "Iraq": "Iraque", "Norway": "Noruega",
+  "Algeria": "Argélia", "Austria": "Áustria", "Jordan": "Jordânia",
+  "Colombia": "Colômbia", "Uzbekistan": "Uzbequistão", "DR Congo": "RD Congo",
+  "England": "Inglaterra", "Croatia": "Croácia", "Ghana": "Gana", "Panama": "Panamá",
+};
+
 const WC_GROUPS = [
-  { group: "A", teams: ["México","Coreia do Sul","África do Sul","Rep. Checa"] },
-  { group: "B", teams: ["Canadá","Suíça","Catar","Bósnia"] },
-  { group: "C", teams: ["Brasil","Marrocos","Haiti","Escócia"] },
-  { group: "D", teams: ["EUA","Austrália","Paraguai","Turquia"] },
-  { group: "E", teams: ["Alemanha","Costa do Marfim","Equador","Curaçao"] },
-  { group: "F", teams: ["Países Baixos","Suécia","Japão","Tunísia"] },
-  { group: "G", teams: ["Bélgica","Irão","Nova Zelândia","Egito"] },
-  { group: "H", teams: ["Espanha","Arábia Saudita","Uruguai","Cabo Verde"] },
-  { group: "I", teams: ["França","Senegal","Iraque","Noruega"] },
-  { group: "J", teams: ["Argentina","Argélia","Áustria","Jordânia"] },
-  { group: "K", teams: ["Portugal","Colômbia","Uzbequistão","RD Congo"] },
-  { group: "L", teams: ["Inglaterra","Croácia","Gana","Panamá"] },
+  { group: "A", teams: ["Mexico", "South Korea", "South Africa", "Czechia"] },
+  { group: "B", teams: ["Canada", "Switzerland", "Qatar", "Bosnia & Herzegovina"] },
+  { group: "C", teams: ["Brazil", "Morocco", "Haiti", "Scotland"] },
+  { group: "D", teams: ["United States", "Australia", "Paraguay", "Turkey"] },
+  { group: "E", teams: ["Germany", "Ivory Coast", "Ecuador", "Curacao"] },
+  { group: "F", teams: ["Netherlands", "Sweden", "Japan", "Tunisia"] },
+  { group: "G", teams: ["Belgium", "Iran", "New Zealand", "Egypt"] },
+  { group: "H", teams: ["Spain", "Saudi Arabia", "Uruguay", "Cape Verde"] },
+  { group: "I", teams: ["France", "Senegal", "Iraq", "Norway"] },
+  { group: "J", teams: ["Argentina", "Algeria", "Austria", "Jordan"] },
+  { group: "K", teams: ["Portugal", "Colombia", "Uzbekistan", "DR Congo"] },
+  { group: "L", teams: ["England", "Croatia", "Ghana", "Panama"] },
 ];
 
 // ─── Map API response → WCMatch ───────────────────────────────────────────────
@@ -591,7 +611,7 @@ function GroupCard({ group, teams, allMatches, theme }: { group: string; teams: 
           <div key={row.team} className="flex items-center px-2 py-1.5">
             <span className={`text-[9px] font-black w-4 text-center ${i < 2 ? "text-green-500" : isDark ? "text-zinc-600" : "text-zinc-400"}`}>{i + 1}</span>
             <FlagImg name={row.team} size={16} />
-            <span className={`flex-1 text-[10px] font-semibold truncate ml-1.5 ${isDark ? "text-zinc-300" : "text-zinc-700"}`}>{row.team}</span>
+            <span className={`flex-1 text-[10px] font-semibold truncate ml-1.5 ${isDark ? "text-zinc-300" : "text-zinc-700"}`}>{PT_DISPLAY_NAMES[row.team] ?? row.team}</span>
             <span className={`w-5 text-center text-[10px] ${isDark ? "text-zinc-500" : "text-zinc-500"}`}>{row.pld}</span>
             <span className={`w-5 text-center text-[10px] ${isDark ? "text-zinc-300" : "text-zinc-700"}`}>{row.w}</span>
             <span className={`w-5 text-center text-[10px] ${isDark ? "text-zinc-500" : "text-zinc-400"}`}>{row.d}</span>

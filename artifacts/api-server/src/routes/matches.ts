@@ -1224,13 +1224,13 @@ function soccerPoissonModel(homeName: string, awayName: string) {
   const homeElo = getTeamElo(homeName);
   const awayElo = getTeamElo(awayName);
   const diff = homeElo + 60 - awayElo;
-  const pHomeVsAway = 1 / (1 + Math.exp(-diff / 260));
-  const draw = mc(0.28 - Math.abs(diff) / 1400, 0.16, 0.30);
+  const pHomeVsAway = 1 / (1 + Math.exp(-diff / 200));
+  const draw = mc(0.25 - Math.abs(diff) / 1000, 0.11, 0.27);
   const rem = mc(1 - draw, 0.01, 0.99);
   const pHome = mc(rem * pHomeVsAway, 0.01, 0.98);
   const pAway = mc(1 - draw - pHome, 0.01, 0.98);
-  const goalDiff = mc(diff / 900, -0.6, 0.6);
-  const totalLambda = mc(2.65 + Math.min(0.25, Math.abs(goalDiff) * 0.12), 1.8, 3.8);
+  const goalDiff = mc(diff / 400, -1.2, 1.2);
+  const totalLambda = mc(2.55 + Math.min(0.45, Math.abs(goalDiff) * 0.22), 1.8, 3.8);
   const lambdaHome = mc(totalLambda / 2 + goalDiff / 2, 0.2, 3.2);
   const lambdaAway = mc(totalLambda / 2 - goalDiff / 2, 0.2, 3.2);
 
@@ -9520,7 +9520,12 @@ async function buildTennisLiveV1(): Promise<LiveMatchState[]> {
         status: ws?.status ?? g.statusText ?? "Em Jogo",
         hasRealOdds: true,
         odds: liveOdds,
-        markets: makeAdvancedMarketsFromTeams(home, away),
+        markets: (() => {
+          const adjH = liveOdds.home > 1 ? 1 / liveOdds.home : 0.5;
+          const adjA = liveOdds.away > 1 ? 1 / liveOdds.away : 0.5;
+          const pHome = mc(adjH + adjA > 0 ? adjH / (adjH + adjA) : 0.5, 0.08, 0.92);
+          return { ...makeAdvancedMarketsFromTeams(home, away), tennisExtra: computeTennisExtras(pHome) };
+        })(),
         events: [],
         _liveExtra: { sets, currentPoints, ...(serving ? { serving } : {}) },
       };
@@ -9706,13 +9711,7 @@ async function buildTennisUpcoming(): Promise<UpcomingMatch[]> {
       const [compH, compA] = probsToDecimalOdds([pHome, 1 - pHome], 1.06);
       const tennisExtras = computeTennisExtras(pHome);
 
-      // Only include main-tour events (ATP/WTA/Grand Slam).
-      // Challengers and ITF are excluded — they clutter Ao Vivo and lack real odds.
       const enrichedLeague = enrichTennisV1League(compName);
-      const isMainTour = enrichedLeague.startsWith("ATP") ||
-                         enrichedLeague.startsWith("WTA") ||
-                         enrichedLeague.startsWith("Grand Slam");
-      if (!isMainTour) continue;
 
       const item: UpcomingMatch = {
         id: `tennis-v2-${g.id}`,
