@@ -2,7 +2,9 @@ modules = ["nodejs-24", "postgresql-16", "python-3.11"]
 
 [deployment]
 router = "application"
-deploymentTarget = "gce"
+deploymentTarget = "vm"
+run = ["pnpm", "--filter", "@workspace/api-server", "run", "start"]
+build = ["bash", "-c", "pnpm --filter @workspace/bet62 run build && pnpm --filter @workspace/api-server run build"]
 
 [deployment.postBuild]
 args = ["pnpm", "store", "prune"]
