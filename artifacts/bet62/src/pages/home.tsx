@@ -10941,52 +10941,21 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
 
             {!expandedMatch && activeTab === "live" && (
               <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
-                <div className="flex flex-col gap-3 mb-4 sm:flex-row sm:items-start sm:justify-between">
-                  <div>
-                    <h2 className="text-2xl font-black italic uppercase tracking-tight flex items-center gap-2">
-                      <Activity className="text-red-600" /> Ao Vivo
-                      {liveMatches.length > 0 && (() => {
-                        const nLive = liveMatches.filter(m => m.startsIn === undefined).length;
-                        const nSoon = liveMatches.filter(m => m.startsIn !== undefined).length;
-                        return (
-                          <span className="text-sm font-normal text-zinc-400 ml-1">
-                            ({nLive > 0 ? `${nLive} ao vivo` : ""}
-                            {nLive > 0 && nSoon > 0 ? " · " : ""}
-                            {nSoon > 0 ? `${nSoon} em breve` : ""})
-                          </span>
-                        );
-                      })()}
-                    </h2>
-                    <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px]">
-                      {(() => {
-                        const meta = !browserOnline
-                          ? { label: "Offline", className: "border-zinc-700 bg-zinc-900 text-zinc-300" }
-                          : liveTransport === "sse"
-                            ? { label: "Tempo real SSE", className: "border-emerald-500/30 bg-emerald-500/10 text-emerald-300" }
-                            : liveTransport === "polling"
-                              ? { label: "Fallback HTTP", className: "border-amber-500/30 bg-amber-500/10 text-amber-300" }
-                              : liveTransport === "cache"
-                                ? { label: "Cache local", className: "border-sky-500/30 bg-sky-500/10 text-sky-300" }
-                                : { label: "A ligar", className: "border-zinc-700 bg-zinc-900 text-zinc-400" };
-                        return (
-                          <span className={`inline-flex items-center rounded-full border px-2 py-1 font-semibold ${meta.className}`}>
-                            {meta.label}
-                          </span>
-                        );
-                      })()}
-                      <span className="inline-flex items-center rounded-full border border-zinc-800 bg-zinc-900 px-2 py-1 text-zinc-400">
-                        PWA pronta
-                      </span>
-                    </div>
-                  </div>
-                  <button
-                    onClick={() => fetchLive(true)}
-                    disabled={false}
-                    className="text-xs text-zinc-500 hover:text-white transition-colors border border-zinc-800 hover:border-zinc-600 px-3 py-1.5 rounded-md flex items-center gap-1.5 self-start"
-                  >
-                    {liveLoading ? <Loader2 size={12} className="animate-spin" /> : <Activity size={12} />}
-                    Atualizar
-                  </button>
+                <div className="mb-4">
+                  <h2 className="text-2xl font-black italic uppercase tracking-tight flex items-center gap-2">
+                    <Activity className="text-red-600" /> Ao Vivo
+                    {liveMatches.length > 0 && (() => {
+                      const nLive = liveMatches.filter(m => m.startsIn === undefined).length;
+                      const nSoon = liveMatches.filter(m => m.startsIn !== undefined).length;
+                      return (
+                        <span className="text-sm font-normal text-zinc-400 ml-1">
+                          ({nLive > 0 ? `${nLive} ao vivo` : ""}
+                          {nLive > 0 && nSoon > 0 ? " · " : ""}
+                          {nSoon > 0 ? `${nSoon} em breve` : ""})
+                        </span>
+                      );
+                    })()}
+                  </h2>
                 </div>
 
                 {/* ── Search bar ── */}
