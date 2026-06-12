@@ -4035,6 +4035,13 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
   // Filters out micro-oscillations — server controls the real update cadence.
   const ODDS_ANIM_THRESHOLD = 0.02;
 
+  const hasBlockingSuspensionReason = (match: Match) => {
+    const rawReason = String(match._suspensionReason ?? "").trim().toUpperCase();
+    if (!rawReason) return false;
+    if (rawReason === "SINAL INSTÁVEL") return false;
+    return true;
+  };
+
   const OddsButton = ({ match, selection, odd, market = "result", label, grow }: {
     match: Match; selection: string; odd: number; market?: string; label: string; grow?: boolean;
   }) => {
@@ -4107,7 +4114,7 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
   const SuspensionBanner = ({ match }: { match: Match }) => {
     const now = Date.now();
     const isActive = (match.marketSuspension?.["result"] != null && match.marketSuspension["result"] > now)
-      || !!(match._suspensionReason);
+      || hasBlockingSuspensionReason(match);
     if (!isActive) return null;
     const rawReason = (match._suspensionReason ?? "SUSPENSO").toUpperCase();
     let label = "SUSPENSO";
@@ -4510,7 +4517,7 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
     // markets have far-future timestamps and must NOT count as "suspended" here.
     const isLiveSuspended = match.isLive && (
       (match.marketSuspension?.["result"] != null && match.marketSuspension["result"] > Date.now())
-      || !!(match._suspensionReason)
+      || hasBlockingSuspensionReason(match)
     );
 
     // Penalty shootout: only show winner market with VENCEDOR DA FINAL header
@@ -4637,7 +4644,7 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
 
     const isSuspendedMatch = match.isLive && (
       (!!match.marketSuspension && Object.values(match.marketSuspension).some(ts => ts > Date.now()))
-      || !!(match._suspensionReason)
+      || hasBlockingSuspensionReason(match)
     );
     const canShowOdds = !!(match.hasRealOdds || (match.odds.home > 0 && match.odds.away > 0));
     const OddsRow = () => canShowOdds ? (
@@ -5344,7 +5351,7 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
     if (market === "result" && odd <= 1.01) return null;
     const now = Date.now();
     const globalSusp = (match.marketSuspension?.["result"] != null && match.marketSuspension["result"] > now)
-      || !!(match._suspensionReason);
+      || hasBlockingSuspensionReason(match);
     const perMarketSusp = suspKey != null
       ? (match.marketSuspension?.[suspKey] != null && match.marketSuspension[suspKey]! > now)
       : false;
@@ -5679,7 +5686,7 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
         </div>
 
         {/* ── SUSPENSION BANNER (modal) ── */}
-        {((match.marketSuspension && Object.values(match.marketSuspension).some(ts => ts > Date.now())) || !!(match._suspensionReason)) && (
+        {((match.marketSuspension && Object.values(match.marketSuspension).some(ts => ts > Date.now())) || hasBlockingSuspensionReason(match)) && (
           <div className="mb-4">
             <SuspensionBanner match={match} />
           </div>
