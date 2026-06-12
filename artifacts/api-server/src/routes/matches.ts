@@ -7856,8 +7856,8 @@ async function buildFootballLiveV2(events: SAPIV2Event[]): Promise<LiveMatchStat
       const shKickoffSec =
         newStatus === "2nd half"
           ? (existing.status !== "2nd half"
-              ? Math.floor(now / 1000)
-              : (existing._liveExtra?.secondHalfKickoffSec ?? Math.floor(now / 1000)))
+              ? Math.floor(now / 1000) - Math.max(0, minute - 45) * 60
+              : (existing._liveExtra?.secondHalfKickoffSec ?? (Math.floor(now / 1000) - Math.max(0, minute - 45) * 60)))
           : existing._liveExtra?.secondHalfKickoffSec;
       const liveExtra = {
         ...(penLiveExtra ?? {}),
