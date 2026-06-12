@@ -3470,21 +3470,21 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
         if (sseRef.current === es) { sseRef.current = null; sseActiveRef.current = false; }
         setLiveTransport(browserOnline ? "polling" : "cache");
         if (sseReconnectTimerRef.current) clearTimeout(sseReconnectTimerRef.current);
-        // Reconnect in 4s
+        // Reconnect quickly when the live stream drops
         sseReconnectTimerRef.current = setTimeout(() => {
           if (sseRef.current === null && activeTabRef.current === "live") openSSE();
-        }, 4_000);
+        }, 2_000);
       };
     };
     openSSE();
 
-    // ── 3. HTTP fallback poll: fire once immediately, then every 8s ──────────
+    // ── 3. HTTP fallback poll: fire once immediately, then every 2s ──────────
     // Handles: first load before SSE delivers, SSE failure gaps, idle recovery.
     fetchLive(!hasMatches);
     const pollId = setInterval(() => {
       if (!sseActiveRef.current) fetchLive(false); // only poll when SSE is down
-      else if (Date.now() - (liveDataFetchedAt.current ?? 0) > 12_000) fetchLive(false); // stale guard
-    }, 4_000);
+      else if (Date.now() - (liveDataFetchedAt.current ?? 0) > 6_000) fetchLive(false); // stale guard
+    }, 2_000);
 
     return () => {
       clearInterval(pollId);
