@@ -9381,9 +9381,17 @@ function liveMatchIdentityKey(match: Pick<LiveMatchState, "sport" | "home" | "aw
 }
 
 function pickPreferredLiveMatch(current: LiveMatchState, candidate: LiveMatchState): LiveMatchState {
+  const currentIsV2 = String(current.id).includes("-v2-") ? 1 : 0;
+  const candidateIsV2 = String(candidate.id).includes("-v2-") ? 1 : 0;
+  if (candidateIsV2 !== currentIsV2) return candidateIsV2 > currentIsV2 ? candidate : current;
+
   const currentLive = current.startsIn === undefined ? 1 : 0;
   const candidateLive = candidate.startsIn === undefined ? 1 : 0;
   if (candidateLive !== currentLive) return candidateLive > currentLive ? candidate : current;
+
+  const currentLeagueId = current.leagueId ? 1 : 0;
+  const candidateLeagueId = candidate.leagueId ? 1 : 0;
+  if (candidateLeagueId !== currentLeagueId) return candidateLeagueId > currentLeagueId ? candidate : current;
 
   const currentScoreSignal = (current.homeScore ?? 0) + (current.awayScore ?? 0);
   const candidateScoreSignal = (candidate.homeScore ?? 0) + (candidate.awayScore ?? 0);

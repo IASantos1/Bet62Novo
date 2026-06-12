@@ -2806,9 +2806,17 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
     const order: string[] = [];
 
     const pickPreferred = (current: Match, candidate: Match) => {
+      const currentIsV2 = String(current.id).includes("-v2-") ? 1 : 0;
+      const candidateIsV2 = String(candidate.id).includes("-v2-") ? 1 : 0;
+      if (candidateIsV2 !== currentIsV2) return candidateIsV2 > currentIsV2 ? candidate : current;
+
       const currentLive = current.startsIn === undefined ? 1 : 0;
       const candidateLive = candidate.startsIn === undefined ? 1 : 0;
       if (candidateLive !== currentLive) return candidateLive > currentLive ? candidate : current;
+
+      const currentLeagueId = current.leagueId ? 1 : 0;
+      const candidateLeagueId = candidate.leagueId ? 1 : 0;
+      if (candidateLeagueId !== currentLeagueId) return candidateLeagueId > currentLeagueId ? candidate : current;
 
       const currentScoreSignal = (current.homeScore ?? 0) + (current.awayScore ?? 0);
       const candidateScoreSignal = (candidate.homeScore ?? 0) + (candidate.awayScore ?? 0);
@@ -7797,10 +7805,12 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
                 {/* Stats panel */}
                 {matchViewTab === "stats" && (
                   <div className="bg-zinc-900 rounded-xl border border-zinc-800 p-4 mb-2 animate-in fade-in duration-200">
-                    {matchStatsLoading || !matchStats ? (
+                    {matchStatsLoading ? (
                       <div className="flex items-center justify-center py-12">
                         <Loader2 className="animate-spin text-blue-400" size={28} />
                       </div>
+                    ) : !matchStats ? (
+                      <div className="text-center text-zinc-500 py-8 text-sm">Estatísticas indisponíveis para este jogo.</div>
                     ) : (
                       <div className="space-y-4">
                         <div className="flex items-start justify-between gap-3">
@@ -7980,11 +7990,12 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
                 {/* Standings panel */}
                 {matchViewTab === "standings" && (
                   <div className="bg-zinc-900 rounded-xl border border-zinc-800 p-4 mb-2 animate-in fade-in duration-200">
-                    {standingsLoading || !standings ? (
+                    {standingsLoading ? (
                       <div className="flex items-center justify-center py-12">
                         <Loader2 className="animate-spin text-blue-400" size={28} />
-                        {!standings && !standingsLoading && <p className="text-zinc-500 ml-3 text-sm">Classificação indisponível</p>}
                       </div>
+                    ) : !standings ? (
+                      <div className="text-center text-zinc-500 py-8 text-sm">Classificação indisponível para este jogo.</div>
                     ) : standings.length === 0 ? (
                       <div className="text-center text-zinc-500 py-8 text-sm">Classificação indisponível para esta liga.</div>
                     ) : (() => {
