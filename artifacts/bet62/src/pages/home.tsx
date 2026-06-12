@@ -2922,10 +2922,38 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
     if (activeTab !== "live") seenMatchIds.current.clear();
   }, [activeTab]);
 
+  const normalizeTeamName = (value: string | undefined) =>
+    String(value ?? "")
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, " ")
+      .trim();
+
+  const rowMatchesTeam = (rowName: string, teamName: string) => {
+    const row = normalizeTeamName(rowName);
+    const team = normalizeTeamName(teamName);
+    if (!row || !team) return false;
+    return row.includes(team) || team.includes(row) || row.includes(team.slice(0, Math.min(team.length, 8)));
+  };
+
+  const standingsBelongToMatch = (
+    rows: StandingRow[],
+    groups: Array<{ name: string; rows: StandingRow[] }> | null,
+    match: Pick<Match, "home" | "away">,
+  ) => {
+    const allRows = groups && groups.length > 0 ? groups.flatMap((group) => group.rows) : rows;
+    if (!allRows.length) return false;
+    const hasHome = allRows.some((row) => rowMatchesTeam(row.name, match.home));
+    const hasAway = allRows.some((row) => rowMatchesTeam(row.name, match.away));
+    return hasHome && hasAway;
+  };
+
   // Reset match view state when expanded match changes
   useEffect(() => {
     setMatchViewTab("markets");
     setMatchStats(null);
+    setMatchStatsLoading(false);
     setV2StatsGroups(null);
     setV2StatsLoading(false);
     setShowAllV2Stats(false);
@@ -2936,6 +2964,8 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
     setLiveAdvancedTab("all");
     setLivePollTick(0);
     setStandings(null);
+    setStandingsGroups(null);
+    setStandingsLoading(false);
     setStandingsLeague("");
     setPlayerMarkets(null);
     setPlayerMarketsMatchId(null);
@@ -3037,10 +3067,30 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
     setStandingsLoading(true);
     const league = expandedMatch.league ?? "";
     setStandingsLeague(league);
+    const acceptStandings = (
+      nextRows: StandingRow[] | null | undefined,
+      nextGroups: Array<{ name: string; rows: StandingRow[] }> | null = null,
+      nextLeague = league,
+    ) => {
+      const safeRows = Array.isArray(nextRows) ? nextRows : [];
+      const safeGroups = Array.isArray(nextGroups) && nextGroups.length > 0 ? nextGroups : null;
+      if (!standingsBelongToMatch(safeRows, safeGroups, expandedMatch)) return false;
+      setStandingsLeague(nextLeague);
+      setStandings(safeRows);
+      setStandingsGroups(safeGroups);
+      return true;
+    };
     const loadV1 = () =>
       fetch(`/api/matches/league-standings?league=${encodeURIComponent(league)}`)
         .then(r => r.ok ? r.json() : null)
-        .then(d => { if (d && Array.isArray(d.teams)) { setStandingsLeague(d.league ?? league); setStandings(d.teams as StandingRow[]); setStandingsGroups(null); } });
+        .then(d => {
+          if (!d || !Array.isArray(d.teams)) return;
+          if (!acceptStandings(d.teams as StandingRow[], null, d.league ?? league)) {
+            setStandings([]);
+            setStandingsGroups(null);
+            setStandingsLeague(d.league ?? league);
+          }
+        });
     const sport = expandedMatch.sport ?? "football";
     const idStr = String(expandedMatch.id);
     const rawId = idStr.replace(/^[a-z]+-v2-/, "");
@@ -3050,10 +3100,13 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
         .then(r => r.ok ? r.json() : null)
         .then(d => {
           if (d && Array.isArray(d.standings) && d.standings.length > 0) {
-            setStandingsLeague(d.league ?? league);
-            setStandings(d.standings as StandingRow[]);
-            setStandingsGroups(Array.isArray(d.groups) && d.groups.length > 0 ? d.groups as Array<{ name: string; rows: StandingRow[] }> : null);
-            return Promise.resolve();
+            if (acceptStandings(
+              d.standings as StandingRow[],
+              Array.isArray(d.groups) && d.groups.length > 0 ? d.groups as Array<{ name: string; rows: StandingRow[] }> : null,
+              d.league ?? league,
+            )) {
+              return Promise.resolve();
+            }
           }
           return loadV1();
         })
@@ -7832,11 +7885,11 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
                 {/* Stats panel */}
                 {matchViewTab === "stats" && (
                   <div className="bg-zinc-900 rounded-xl border border-zinc-800 p-4 mb-2 animate-in fade-in duration-200">
-                    {matchStatsLoading ? (
+                    {matchStatsLoading && !matchStats && !(v2StatsGroups && v2StatsGroups.length > 0) ? (
                       <div className="flex items-center justify-center py-12">
                         <Loader2 className="animate-spin text-blue-400" size={28} />
                       </div>
-                    ) : !matchStats ? (
+                    ) : !matchStats && !(v2StatsGroups && v2StatsGroups.length > 0) ? (
                       <div className="text-center text-zinc-500 py-8 text-sm">Estatísticas indisponíveis para este jogo.</div>
                     ) : (
                       <div className="space-y-4">
@@ -7851,106 +7904,115 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
                           </div>
                         </div>
 
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                          <div className="bg-zinc-950/60 rounded-lg border border-zinc-800 p-4">
-                            <div className="flex items-center justify-between mb-3">
-                              <div className="text-[10px] font-black text-red-500 uppercase tracking-widest">Probabilidade</div>
-                              <div className="text-[10px] text-zinc-600">Odds → %</div>
-                            </div>
-                            <div className="space-y-2.5 mb-4">
-                              {[
-                                { label: expandedMatch.home, pct: matchStats.winProb.home, color: "bg-blue-500" },
-                                { label: "Empate", pct: matchStats.winProb.draw, color: "bg-yellow-400" },
-                                { label: expandedMatch.away, pct: matchStats.winProb.away, color: "bg-red-500" },
-                              ].map(row => (
-                                <div key={row.label}>
-                                  <div className="flex justify-between text-xs mb-1">
-                                    <span className="text-zinc-300 truncate max-w-[140px]">{row.label}</span>
-                                    <span className="font-bold text-white shrink-0">{row.pct}%</span>
+                        {matchStats ? (
+                          <>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                              <div className="bg-zinc-950/60 rounded-lg border border-zinc-800 p-4">
+                                <div className="flex items-center justify-between mb-3">
+                                  <div className="text-[10px] font-black text-red-500 uppercase tracking-widest">Probabilidade</div>
+                                  <div className="text-[10px] text-zinc-600">Odds → %</div>
+                                </div>
+                                <div className="space-y-2.5 mb-4">
+                                  {[
+                                    { label: expandedMatch.home, pct: matchStats.winProb.home, color: "bg-blue-500" },
+                                    { label: "Empate", pct: matchStats.winProb.draw, color: "bg-yellow-400" },
+                                    { label: expandedMatch.away, pct: matchStats.winProb.away, color: "bg-red-500" },
+                                  ].map(row => (
+                                    <div key={row.label}>
+                                      <div className="flex justify-between text-xs mb-1">
+                                        <span className="text-zinc-300 truncate max-w-[140px]">{row.label}</span>
+                                        <span className="font-bold text-white shrink-0">{row.pct}%</span>
+                                      </div>
+                                      <div className="h-2 bg-zinc-800 rounded-full overflow-hidden">
+                                        <motion.div
+                                          initial={{ width: 0 }}
+                                          animate={{ width: `${row.pct}%` }}
+                                          transition={{ duration: 0.7, ease: "easeOut" }}
+                                          className={`h-full rounded-full ${row.color}`}
+                                        />
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                                <div className="grid grid-cols-3 gap-1 pt-3 border-t border-zinc-800 text-center">
+                                  <div>
+                                    <div className="text-xl font-black text-blue-400">{(confrontosData?.homeWins ?? matchStats.h2h.homeWins)}</div>
+                                    <div className="text-[10px] text-zinc-500">Vitórias</div>
                                   </div>
-                                  <div className="h-2 bg-zinc-800 rounded-full overflow-hidden">
-                                    <motion.div
-                                      initial={{ width: 0 }}
-                                      animate={{ width: `${row.pct}%` }}
-                                      transition={{ duration: 0.7, ease: "easeOut" }}
-                                      className={`h-full rounded-full ${row.color}`}
-                                    />
+                                  <div>
+                                    <div className="text-xl font-black text-yellow-400">{(confrontosData?.draws ?? matchStats.h2h.draws)}</div>
+                                    <div className="text-[10px] text-zinc-500">Empates</div>
+                                  </div>
+                                  <div>
+                                    <div className="text-xl font-black text-red-400">{(confrontosData?.awayWins ?? matchStats.h2h.awayWins)}</div>
+                                    <div className="text-[10px] text-zinc-500">Derrotas</div>
                                   </div>
                                 </div>
-                              ))}
-                            </div>
-                            <div className="grid grid-cols-3 gap-1 pt-3 border-t border-zinc-800 text-center">
-                              <div>
-                                <div className="text-xl font-black text-blue-400">{(confrontosData?.homeWins ?? matchStats.h2h.homeWins)}</div>
-                                <div className="text-[10px] text-zinc-500">Vitórias</div>
                               </div>
-                              <div>
-                                <div className="text-xl font-black text-yellow-400">{(confrontosData?.draws ?? matchStats.h2h.draws)}</div>
-                                <div className="text-[10px] text-zinc-500">Empates</div>
-                              </div>
-                              <div>
-                                <div className="text-xl font-black text-red-400">{(confrontosData?.awayWins ?? matchStats.h2h.awayWins)}</div>
-                                <div className="text-[10px] text-zinc-500">Derrotas</div>
-                              </div>
-                            </div>
-                          </div>
 
-                          <div className="bg-zinc-950/60 rounded-lg border border-zinc-800 p-4">
-                            <div className="flex items-center justify-between mb-3">
-                              <div className="text-[10px] font-black text-red-500 uppercase tracking-widest">Médias</div>
-                              <button
-                                onClick={() => setMatchViewTab("confrontos")}
-                                className="text-[10px] font-bold text-blue-400 hover:text-blue-300"
-                              >
-                                Ver H2H
-                              </button>
-                            </div>
-                            <div className="grid grid-cols-2 gap-y-3 gap-x-4">
-                              {[
-                                { label: "Golos Marcados", val: matchStats.avgStats.goalsScored.toFixed(2), sub: `Liga: ${matchStats.avgStats.leagueGoals.toFixed(2)}` },
-                                { label: "AEM", val: `${matchStats.avgStats.btts}%`, sub: `Liga: ${matchStats.avgStats.leagueBtts}%` },
-                                { label: "Mais de 1.5", val: `${matchStats.avgStats.over15}%`, sub: `Liga: ${matchStats.avgStats.leagueOver15}%` },
-                                { label: "Mais de 2.5", val: `${matchStats.avgStats.over25}%`, sub: `Liga: ${matchStats.avgStats.leagueOver25}%` },
-                                { label: "Cartões", val: matchStats.avgStats.cards.toFixed(2), sub: "" },
-                                { label: "Cantos", val: matchStats.avgStats.corners.toFixed(2), sub: "" },
-                              ].map(s => (
-                                <div key={s.label}>
-                                  <div className="text-[11px] text-zinc-400">{s.label}</div>
-                                  <div className="font-black text-white text-lg leading-tight">{s.val}</div>
-                                  {s.sub && <div className="text-[10px] text-zinc-600">{s.sub}</div>}
+                              <div className="bg-zinc-950/60 rounded-lg border border-zinc-800 p-4">
+                                <div className="flex items-center justify-between mb-3">
+                                  <div className="text-[10px] font-black text-red-500 uppercase tracking-widest">Médias</div>
+                                  <button
+                                    onClick={() => setMatchViewTab("confrontos")}
+                                    className="text-[10px] font-bold text-blue-400 hover:text-blue-300"
+                                  >
+                                    Ver H2H
+                                  </button>
                                 </div>
-                              ))}
-                            </div>
-                          </div>
-                        </div>
-
-                        {matchStats.formIsReal ? (
-                          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                            {[
-                              { title: `Últimos Jogos — ${expandedMatch.home}`, form: matchStats.homeForm },
-                              { title: `Últimos Jogos — ${expandedMatch.away}`, form: matchStats.awayForm },
-                            ].map(block => (
-                              <div key={block.title} className="bg-zinc-950/60 rounded-lg border border-zinc-800 p-4">
-                                <div className="text-[10px] font-black text-red-500 uppercase tracking-widest mb-3">{block.title}</div>
-                                <div className="space-y-2">
-                                  {block.form.map((f, i) => (
-                                    <div key={i} className="flex items-center gap-3">
-                                      <span className={`w-5 h-5 rounded text-[11px] font-black flex items-center justify-center shrink-0 ${f.result === "W" ? "bg-green-600 text-white" : f.result === "D" ? "bg-yellow-500 text-black" : "bg-red-600 text-white"}`}>
-                                        {f.result}
-                                      </span>
-                                      <span className="font-mono text-sm font-bold text-white shrink-0">{f.score}</span>
-                                      <span className="text-xs text-zinc-400 truncate">{f.home ? "vs" : "@"} {f.opponent}</span>
+                                <div className="grid grid-cols-2 gap-y-3 gap-x-4">
+                                  {[
+                                    { label: "Golos Marcados", val: matchStats.avgStats.goalsScored.toFixed(2), sub: `Liga: ${matchStats.avgStats.leagueGoals.toFixed(2)}` },
+                                    { label: "AEM", val: `${matchStats.avgStats.btts}%`, sub: `Liga: ${matchStats.avgStats.leagueBtts}%` },
+                                    { label: "Mais de 1.5", val: `${matchStats.avgStats.over15}%`, sub: `Liga: ${matchStats.avgStats.leagueOver15}%` },
+                                    { label: "Mais de 2.5", val: `${matchStats.avgStats.over25}%`, sub: `Liga: ${matchStats.avgStats.leagueOver25}%` },
+                                    { label: "Cartões", val: matchStats.avgStats.cards.toFixed(2), sub: "" },
+                                    { label: "Cantos", val: matchStats.avgStats.corners.toFixed(2), sub: "" },
+                                  ].map(s => (
+                                    <div key={s.label}>
+                                      <div className="text-[11px] text-zinc-400">{s.label}</div>
+                                      <div className="font-black text-white text-lg leading-tight">{s.val}</div>
+                                      {s.sub && <div className="text-[10px] text-zinc-600">{s.sub}</div>}
                                     </div>
                                   ))}
                                 </div>
                               </div>
-                            ))}
-                          </div>
+                            </div>
+
+                            {matchStats.formIsReal ? (
+                              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                {[
+                                  { title: `Últimos Jogos — ${expandedMatch.home}`, form: matchStats.homeForm },
+                                  { title: `Últimos Jogos — ${expandedMatch.away}`, form: matchStats.awayForm },
+                                ].map(block => (
+                                  <div key={block.title} className="bg-zinc-950/60 rounded-lg border border-zinc-800 p-4">
+                                    <div className="text-[10px] font-black text-red-500 uppercase tracking-widest mb-3">{block.title}</div>
+                                    <div className="space-y-2">
+                                      {block.form.map((f, i) => (
+                                        <div key={i} className="flex items-center gap-3">
+                                          <span className={`w-5 h-5 rounded text-[11px] font-black flex items-center justify-center shrink-0 ${f.result === "W" ? "bg-green-600 text-white" : f.result === "D" ? "bg-yellow-500 text-black" : "bg-red-600 text-white"}`}>
+                                            {f.result}
+                                          </span>
+                                          <span className="font-mono text-sm font-bold text-white shrink-0">{f.score}</span>
+                                          <span className="text-xs text-zinc-400 truncate">{f.home ? "vs" : "@"} {f.opponent}</span>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            ) : (
+                              <div className="bg-zinc-950/60 rounded-lg border border-zinc-800 p-5 text-center">
+                                <div className="text-zinc-600 text-2xl mb-2">📋</div>
+                                <div className="text-zinc-500 text-sm font-medium">Histórico de jogos não disponível</div>
+                                <div className="text-zinc-600 text-xs mt-1">Dados de forma indisponíveis para este jogo</div>
+                              </div>
+                            )}
+                          </>
                         ) : (
                           <div className="bg-zinc-950/60 rounded-lg border border-zinc-800 p-5 text-center">
-                            <div className="text-zinc-600 text-2xl mb-2">📋</div>
-                            <div className="text-zinc-500 text-sm font-medium">Histórico de jogos não disponível</div>
-                            <div className="text-zinc-600 text-xs mt-1">Dados de forma indisponíveis para este jogo</div>
+                            <div className="text-zinc-500 text-sm font-medium">Análise pré-jogo indisponível</div>
+                            <div className="text-zinc-600 text-xs mt-1">Abaixo continuam visíveis as estatísticas oficiais do jogo.</div>
                           </div>
                         )}
 

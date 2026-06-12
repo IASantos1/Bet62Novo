@@ -14637,6 +14637,8 @@ router.get("/v2-standings", async (req: Request, res: Response) => {
     if (!matchResp.ok) { res.json({ standings: [], league: "" }); return; }
     const matchData = await matchResp.json() as {
       match?: {
+        homeTeam?: { name?: string };
+        awayTeam?: { name?: string };
         tournament?: {
           name?: string;
           isGroup?: boolean;
@@ -14650,6 +14652,8 @@ router.get("/v2-standings", async (req: Request, res: Response) => {
     const tId = matchData.match?.tournament?.uniqueTournament?.id;
     const sId = matchData.match?.season?.id;
     const leagueName = matchData.match?.tournament?.uniqueTournament?.name ?? matchData.match?.tournament?.name ?? "";
+    const homeTeamName = matchData.match?.homeTeam?.name ?? "";
+    const awayTeamName = matchData.match?.awayTeam?.name ?? "";
     const isGroupTournament = matchData.match?.tournament?.isGroup ?? false;
     const rawGroupName = matchData.match?.tournament?.groupName ?? "";
     if (!tId || !sId) { res.json({ standings: [], league: leagueName }); return; }
@@ -14673,6 +14677,22 @@ router.get("/v2-standings", async (req: Request, res: Response) => {
         ga:     r.goalsAgainst ?? r.goals_against ?? r.conceded ?? 0,
         pts:    r.points  ?? 0,
       };
+    }
+
+    function normalizeTeamName(value: string | undefined) {
+      return String(value ?? "")
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, " ")
+        .trim();
+    }
+
+    function rowMatchesTeam(rowName: string, teamName: string) {
+      const row = normalizeTeamName(rowName);
+      const team = normalizeTeamName(teamName);
+      if (!row || !team) return false;
+      return row.includes(team) || team.includes(row) || row.includes(team.slice(0, Math.min(team.length, 8)));
     }
 
     // Detect group-stage competition: each item has a "group" key OR a nested rows/standings array
@@ -14711,6 +14731,13 @@ router.get("/v2-standings", async (req: Request, res: Response) => {
       } else {
         groups = undefined;
       }
+    }
+
+    const hasHomeTeam = rows.some((row) => rowMatchesTeam(row.name, homeTeamName));
+    const hasAwayTeam = rows.some((row) => rowMatchesTeam(row.name, awayTeamName));
+    if (homeTeamName && awayTeamName && (!hasHomeTeam || !hasAwayTeam)) {
+      res.json({ standings: [], groups: [], league: leagueName });
+      return;
     }
 
     const result = { standings: rows, groups, league: leagueName };
