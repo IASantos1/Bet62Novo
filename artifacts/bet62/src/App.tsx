@@ -6,6 +6,7 @@ import { AuthProvider } from "@/hooks/use-auth";
 import { useState, useEffect, lazy, Suspense, Component, type ReactNode } from "react";
 import NotFound from "@/pages/not-found";
 import Home from "@/pages/home";
+import LivePage from "@/pages/live";
 import SplashScreen from "@/components/SplashScreen";
 
 const AdminPage = lazy(() => import("@/pages/admin"));
@@ -63,7 +64,9 @@ class AppErrorBoundary extends Component<{ children: ReactNode }, { error: unkno
 function Router() {
   return (
     <Switch>
-      <Route path="/" component={Home} />
+      <Route path="/">{() => <Home />}</Route>
+      <Route path="/ao-vivo">{() => <LivePage />}</Route>
+      <Route path="/live">{() => <LivePage />}</Route>
       <Route path="/admin">{() => (
         <Suspense fallback={
           <div className="min-h-[100dvh] w-full flex items-center justify-center bg-zinc-950 text-white">
