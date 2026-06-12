@@ -20,6 +20,7 @@ type AuthContextType = {
   login: (email: string, password: string) => Promise<void>;
   register: (name: string, email: string, password: string, nif: string) => Promise<void>;
   logout: () => void;
+  invalidateSession: (message?: string) => void;
   token: string | null;
   refreshUser: () => Promise<void>;
 };
@@ -31,6 +32,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [token, setToken] = useState<string | null>(localStorage.getItem("bet62_token"));
   const [isLoading, setIsLoading] = useState(true);
 
+  const clearSession = () => {
+    setToken(null);
+    setUser(null);
+    localStorage.removeItem("bet62_token");
+  };
+
   const fetchUser = async (currentToken: string) => {
     try {
       const res = await fetch("/api/auth/me", {
@@ -40,8 +47,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         const data = await res.json();
         setUser(data.user);
       } else {
-        setToken(null);
-        localStorage.removeItem("bet62_token");
+        clearSession();
       }
     } catch (err) {
       console.error(err);
@@ -87,10 +93,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const logout = () => {
-    setToken(null);
-    setUser(null);
-    localStorage.removeItem("bet62_token");
+    clearSession();
     toast.success("Saiu com sucesso");
+  };
+
+  const invalidateSession = (message = "Sessão expirada. Entre novamente.") => {
+    clearSession();
+    toast.error(message);
   };
 
   const refreshUser = async () => {
@@ -98,7 +107,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <AuthContext.Provider value={{ user, isLoading, login, register, logout, token, refreshUser }}>
+    <AuthContext.Provider value={{ user, isLoading, login, register, logout, invalidateSession, token, refreshUser }}>
       {children}
     </AuthContext.Provider>
   );

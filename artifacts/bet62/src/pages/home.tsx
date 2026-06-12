@@ -3876,7 +3876,11 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
         headers: { Authorization: `Bearer ${auth.token}` }
       });
       const data = await res.json();
-      if (!res.ok) { toast.error(data.error || "Erro ao fazer cash out"); return; }
+      if (!res.ok) {
+        if (handleInvalidTokenError(res.status, data.error)) return;
+        toast.error(data.error || "Erro ao fazer cash out");
+        return;
+      }
       setCashoutAnim({ amount: parseFloat(data.cashoutValue) });
       auth.refreshUser();
       fetchMyBets();
@@ -3897,6 +3901,20 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
       if (r.ok) setCashbackData(await r.json());
     } catch { /* non-critical */ }
   }, [auth.user]);
+
+  const handleInvalidTokenError = (status?: number, error?: string) => {
+    const normalizedError = String(error ?? "").trim().toLowerCase();
+    const isInvalidToken =
+      status === 401 ||
+      normalizedError.includes("invalid token") ||
+      normalizedError.includes("jwt");
+    if (!isInvalidToken) return false;
+    auth.invalidateSession("Sessão expirada. Entre novamente para apostar ou pagar.");
+    setAuthMode("login");
+    setAuthModalOpen(true);
+    setDepositModalOpen(false);
+    return true;
+  };
 
 
   const toggleBet = (match: Match, selection: string, odd: number, market = "result", label?: string) => {
@@ -4135,7 +4153,12 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
             })
           });
           const data = await res.json();
-          if (!res.ok) { toast.error(data.error || "Erro ao realizar aposta"); allOk = false; break; }
+          if (!res.ok) {
+            if (handleInvalidTokenError(res.status, data.error)) { allOk = false; break; }
+            toast.error(data.error || "Erro ao realizar aposta");
+            allOk = false;
+            break;
+          }
         }
         if (allOk) {
           toast.success(`${bets.length} aposta${bets.length > 1 ? "s" : ""} realizada${bets.length > 1 ? "s" : ""}! Total: € ${totalCost.toFixed(2)}`);
@@ -4182,7 +4205,11 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
         })
       });
       const data = await res.json();
-      if (!res.ok) { toast.error(data.error || "Erro ao realizar aposta"); return; }
+      if (!res.ok) {
+        if (handleInvalidTokenError(res.status, data.error)) return;
+        toast.error(data.error || "Erro ao realizar aposta");
+        return;
+      }
       toast.success(`Aposta múltipla realizada! Potencial de ganho: € ${potentialWin}`);
       setBetPlacedAnim(true);
       setBets([]); setBetStakes({}); setStake(""); setBetSlipOpenMobile(false); auth.refreshUser();
@@ -12284,6 +12311,12 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
         onClose={() => setDepositModalOpen(false)}
         onSuccess={() => { auth.refreshUser(); }}
         onPromoNotif={(type) => { setDepositModalOpen(false); setTimeout(() => setPromoNotif({ type }), 350); }}
+        onAuthInvalid={(message) => {
+          auth.invalidateSession(message ?? "Sessão expirada. Entre novamente para continuar.");
+          setAuthMode("login");
+          setAuthModalOpen(true);
+          setDepositModalOpen(false);
+        }}
         balance={auth.user ? parseFloat(auth.user.balance) : 0}
         token={auth.token}
         kycStatus={auth.user?.kycStatus ?? "not_submitted"}
@@ -12901,12 +12934,13 @@ type PayMethod = "multibanco" | "mbway" | "card";
 type MbRef = { entity: string; reference: string; amount: string; expiresAt: string; orderId: string };
 
 function DepositWithdrawModal({
-  open, onClose, onSuccess, onPromoNotif, balance, token, kycStatus,
+  open, onClose, onSuccess, onPromoNotif, onAuthInvalid, balance, token, kycStatus,
 }: {
   open: boolean;
   onClose: () => void;
   onSuccess: () => void;
   onPromoNotif: (type: "freebets10" | "freebets20") => void;
+  onAuthInvalid: (message?: string) => void;
   balance: number;
   token: string | null;
   kycStatus: string;
@@ -12942,6 +12976,10 @@ function DepositWithdrawModal({
   const amount = parseFloat(depositAmount.replace(",", "."));
   const amountValid = !isNaN(amount) && amount >= 10 && amount <= 5000;
   const promoHint = amountValid && amount >= 20;
+  const isInvalidTokenError = (status?: number, error?: string) => {
+    const normalizedError = String(error ?? "").trim().toLowerCase();
+    return status === 401 || normalizedError.includes("invalid token") || normalizedError.includes("jwt");
+  };
 
   const METHODS: { id: PayMethod; label: string; logo: string; logo2?: string }[] = [
     { id: "multibanco", label: "Multibanco", logo: "/logo-multibanco.png" },
@@ -13013,7 +13051,11 @@ function DepositWithdrawModal({
         body: JSON.stringify({ documentType: kycDocType, documentNumber: kycDocNumber.trim(), nif: kycNif }),
       });
       const data = await r.json() as { kycStatus?: string; error?: string };
-      if (!r.ok) { toast.error(data.error ?? "Erro ao submeter documentos."); return; }
+      if (!r.ok) {
+        if (isInvalidTokenError(r.status, data.error)) { onAuthInvalid("Sessão expirada. Entre novamente para continuar."); return; }
+        toast.error(data.error ?? "Erro ao submeter documentos.");
+        return;
+      }
       setKycDone(true);
       onSuccess();
       toast.success("Documentos submetidos! A verificação será feita em 1-2 dias úteis.");
@@ -13038,6 +13080,7 @@ function DepositWithdrawModal({
       });
       const data = await r.json() as { withdrawal?: { id: number }; error?: string; code?: string };
       if (!r.ok) {
+        if (isInvalidTokenError(r.status, data.error)) { onAuthInvalid("Sessão expirada. Entre novamente para continuar."); return; }
         toast.error(data.error ?? "Erro ao submeter pedido.");
         return;
       }
@@ -13063,7 +13106,11 @@ function DepositWithdrawModal({
         body: JSON.stringify({ amount }),
       });
       const data = await r.json() as { entity?: string; reference?: string; amount?: string; expiresAt?: string; orderId?: string; error?: string };
-      if (!r.ok) { toast.error(data.error ?? "Erro ao gerar referência."); return; }
+      if (!r.ok) {
+        if (isInvalidTokenError(r.status, data.error)) { onAuthInvalid("Sessão expirada. Entre novamente para continuar."); return; }
+        toast.error(data.error ?? "Erro ao gerar referência.");
+        return;
+      }
       setMbRef({ entity: data.entity!, reference: data.reference!, amount: data.amount!, expiresAt: data.expiresAt!, orderId: data.orderId! });
       toast.success("Referência Multibanco gerada! Pague em qualquer ATM.");
       onSuccess();
@@ -13084,7 +13131,11 @@ function DepositWithdrawModal({
         body: JSON.stringify({ amount, phone: phoneClean }),
       });
       const data = await r.json() as { orderId?: string; paymentUrl?: string; error?: string };
-      if (!r.ok) { toast.error(data.error ?? "Erro ao enviar pedido MB WAY."); return; }
+      if (!r.ok) {
+        if (isInvalidTokenError(r.status, data.error)) { onAuthInvalid("Sessão expirada. Entre novamente para continuar."); return; }
+        toast.error(data.error ?? "Erro ao enviar pedido MB WAY.");
+        return;
+      }
       setMbwayDone(true);
       if (data.orderId) setMbwayOrderId(data.orderId);
       if (data.paymentUrl) {
@@ -13108,7 +13159,11 @@ function DepositWithdrawModal({
         body: JSON.stringify({ amount }),
       });
       const data = await r.json() as { paymentUrl?: string; error?: string };
-      if (!r.ok || !data.paymentUrl) { toast.error(data.error ?? "Erro ao iniciar pagamento por cartão."); return; }
+      if (!r.ok || !data.paymentUrl) {
+        if (isInvalidTokenError(r.status, data.error)) { onAuthInvalid("Sessão expirada. Entre novamente para continuar."); return; }
+        toast.error(data.error ?? "Erro ao iniciar pagamento por cartão.");
+        return;
+      }
       toast.info("A redirecionar para pagamento seguro...");
       window.open(data.paymentUrl, "_blank");
       onSuccess();
