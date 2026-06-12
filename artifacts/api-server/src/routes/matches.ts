@@ -7686,7 +7686,10 @@ async function buildFootballLiveV2(events: SAPIV2Event[]): Promise<LiveMatchStat
     const isPen = statusStr === "Penalties";
     const isET = !isPen && (statusStr.includes("extra") || statusStr === "Extra Time");
     const isBreak = statusStr === "Break Time" || statusStr === "Pause";
+    const existingStatus = String(existing?.status ?? "");
     let resolvedKickoffSec: number | undefined = existing?._liveExtra?.kickoffSec;
+    let elapsedClockMinutes: number | null = null;
+    let inferredSecondHalf = false;
     let minute: number;
     if (isHT) {
       minute = 45;
@@ -7713,11 +7716,23 @@ async function buildFootballLiveV2(events: SAPIV2Event[]): Promise<LiveMatchStat
       if (kickoffSec > 0) {
         resolvedKickoffSec = kickoffSec;
         const minsFromKickoff = Math.floor(((now / 1000 - kickoffSec) - clockSkewSec) / 60);
-        if (statusStr === "1st half") {
+        elapsedClockMinutes = Math.max(0, minsFromKickoff);
+        inferredSecondHalf =
+          !isHT &&
+          !isPen &&
+          !isET &&
+          !isBreak &&
+          (
+            statusStr === "2nd half" ||
+            existingStatus === "2nd half" ||
+            !!existing?._liveExtra?.secondHalfKickoffSec ||
+            minsFromKickoff >= 63
+          );
+        if (statusStr === "1st half" && !inferredSecondHalf) {
           // Keep the first-half clock running through stoppage time until the feed
           // explicitly flips to HT, instead of freezing at 49'.
           minute = Math.min(FIRST_HALF_CLOCK_CAP_MIN, Math.max(0, minsFromKickoff));
-        } else if (statusStr === "2nd half") {
+        } else if (statusStr === "2nd half" || inferredSecondHalf) {
           const shKickoff = existing?._liveExtra?.secondHalfKickoffSec;
           if (typeof shKickoff === "number" && Number.isFinite(shKickoff) && shKickoff > 0) {
             const minsFromSecondHalf = Math.floor(((now / 1000 - shKickoff) - clockSkewSec) / 60);
@@ -7735,7 +7750,13 @@ async function buildFootballLiveV2(events: SAPIV2Event[]): Promise<LiveMatchStat
     }
     const inferredHT = isBreak && !existing?._liveExtra?.secondHalfKickoffSec && minute >= 45 && minute <= 55;
     if (inferredHT) minute = 45;
-    const newStatus = inferredHT ? "HT" : isHT ? "HT" : isPen ? "Penalties" : isET ? "ET" : statusStr;
+    const newStatus =
+      inferredHT ? "HT"
+      : isHT ? "HT"
+      : isPen ? "Penalties"
+      : isET ? "ET"
+      : inferredSecondHalf ? "2nd half"
+      : statusStr;
 
     if (existing) {
       const diff = existing.minute - minute;
@@ -7746,11 +7767,16 @@ async function buildFootballLiveV2(events: SAPIV2Event[]): Promise<LiveMatchStat
 
     const clockNowSec = Math.floor(now / 1000);
     const clamp = (n: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, n));
-    const isFirstHalf = statusStr === "1st half";
-    const isSecondHalf = statusStr === "2nd half";
+    const isFirstHalf = newStatus === "1st half";
+    const isSecondHalf = newStatus === "2nd half";
     const isClockRunning = !!(resolvedKickoffSec && (isFirstHalf || isSecondHalf) && newStatus !== "HT");
     const shKickoffSec = isSecondHalf
-      ? (existing?._liveExtra?.secondHalfKickoffSec ?? 0)
+      ? (
+          existing?._liveExtra?.secondHalfKickoffSec ??
+          (resolvedKickoffSec && elapsedClockMinutes !== null && elapsedClockMinutes >= 45
+            ? Math.floor(now / 1000) - Math.max(0, minute - 45) * 60
+            : 0)
+        )
       : 0;
     const baseSec =
       !resolvedKickoffSec ? null
@@ -7828,7 +7854,7 @@ async function buildFootballLiveV2(events: SAPIV2Event[]): Promise<LiveMatchStat
         ? { ...(existing._liveExtra ?? {}), penBaseScore: penBase, penScore: penGoals }
         : existing._liveExtra;
       const shKickoffSec =
-        statusStr === "2nd half"
+        newStatus === "2nd half"
           ? (existing.status !== "2nd half"
               ? Math.floor(now / 1000)
               : (existing._liveExtra?.secondHalfKickoffSec ?? Math.floor(now / 1000)))
