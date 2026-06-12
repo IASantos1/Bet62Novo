@@ -1258,6 +1258,8 @@ type Match = {
   marketSuspension?: Record<string, number>;
   // reason for current suspension (GOLO!, PENÁLTI, REVISÃO AO VAR, etc.)
   _suspensionReason?: string;
+  // degraded feed signal; must not suspend markets by itself
+  _feedWarning?: string;
   // sport-specific live display
   _liveExtra?: {
     clockStr?: string;
@@ -1714,6 +1716,8 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
   const upcomingFetchCtrlRef = useRef<AbortController | null>(null);
   const liveFetchCtrlRef = useRef<AbortController | null>(null);
   const liveFetchInFlightRef = useRef(false);
+  const livePollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const livePollBackoffStepRef = useRef(0);
   const sseReconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const [activeTab, setActiveTab] = useState<MainTab>(initialTab);
@@ -3180,6 +3184,7 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
     events?: Array<{ type: string; team: string; minute: number; player: string }>;
     marketSuspension?: Record<string, number>;
     _suspensionReason?: string;
+    _feedWarning?: string;
     _liveExtra?: {
       clockStr?: string;
       sets?: Array<[number, number]>;
@@ -3335,7 +3340,7 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
           // OR still within 30s window (belt-and-suspenders for very slow polls)
           return missCount < 2 || (now - lastSeen) < 30_000;
         })
-        .map(m => ({ ...m, marketSuspension: undefined, _suspensionReason: undefined, suspensionReason: undefined }));
+        .map(m => ({ ...m, marketSuspension: undefined, _suspensionReason: undefined, _feedWarning: undefined, suspensionReason: undefined }));
 
       const freshMatches = normalizedMatches
         // Live matches (startsIn === undefined) always show.
@@ -3347,10 +3352,10 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
     });
   }, []);
 
-  const fetchLive = useCallback(async (showSpinner = false) => {
-    if (document.visibilityState === "hidden") return;
-    if (isIdleRef.current || isLockedRef.current) return;
-    if (liveFetchInFlightRef.current) return;
+  const fetchLive = useCallback(async (showSpinner = false): Promise<"success" | "skipped" | "failed"> => {
+    if (document.visibilityState === "hidden") return "skipped";
+    if (isIdleRef.current || isLockedRef.current) return "skipped";
+    if (liveFetchInFlightRef.current) return "skipped";
     if (showSpinner) setLiveLoading(true);
     let ctrl: AbortController | null = null;
     liveFetchInFlightRef.current = true;
@@ -3361,17 +3366,19 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
       const tid = setTimeout(() => currentCtrl.abort(), 20_000);
       try {
         const res = await fetch("/api/matches/live?lean=1&limit=200", { signal: currentCtrl.signal });
-        const data = res.ok ? await res.json() : { matches: [] };
-        if (res.ok && Array.isArray((data as any)?.matches)) {
-          writeSnapshot(liveSnapshotKey(), (data as any).matches);
-        }
+        if (!res.ok) throw new Error(`live_fetch_failed_${res.status}`);
+        const data = await res.json();
+        if (!Array.isArray((data as any)?.matches)) throw new Error("live_fetch_invalid_payload");
+        writeSnapshot(liveSnapshotKey(), (data as any).matches);
         processLiveData(data);
         setLiveTransport(sseActiveRef.current ? "sse" : "polling");
+        return "success";
       } finally {
         try { clearTimeout(tid); } catch {}
       }
     } catch {
       if (!browserOnline) setLiveTransport("cache");
+      return "failed";
     } finally {
       if (ctrl && liveFetchCtrlRef.current === ctrl) liveFetchCtrlRef.current = null;
       liveFetchInFlightRef.current = false;
@@ -3411,6 +3418,8 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
       // Leave live tab — close SSE
       if (sseRef.current) { sseRef.current.close(); sseRef.current = null; }
       sseActiveRef.current = false;
+      livePollBackoffStepRef.current = 0;
+      if (livePollTimerRef.current) { clearTimeout(livePollTimerRef.current); livePollTimerRef.current = null; }
       setLiveTransport("idle");
       return;
     }
@@ -3427,15 +3436,34 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
       }
     }
 
+    let cancelled = false;
+    const LIVE_FALLBACK_DELAYS_MS = [2_000, 3_500, 5_000, 8_000] as const;
+    const getFallbackDelay = () =>
+      LIVE_FALLBACK_DELAYS_MS[Math.min(livePollBackoffStepRef.current, LIVE_FALLBACK_DELAYS_MS.length - 1)]!;
+    const resetFallbackBackoff = () => {
+      livePollBackoffStepRef.current = 0;
+    };
+    const advanceFallbackBackoff = () => {
+      livePollBackoffStepRef.current = Math.min(
+        livePollBackoffStepRef.current + 1,
+        LIVE_FALLBACK_DELAYS_MS.length - 1,
+      );
+    };
+
     // ── 2. Open SSE for real-time push updates (<100ms latency) ─────────────
     const openSSE = () => {
       if (sseRef.current) return; // already open
       const es = new EventSource("/api/matches/live-stream");
       sseRef.current = es;
-      es.onopen = () => { sseActiveRef.current = true; setLiveTransport("sse"); };
+      es.onopen = () => {
+        sseActiveRef.current = true;
+        resetFallbackBackoff();
+        setLiveTransport("sse");
+      };
       es.onmessage = (evt) => {
         try {
           const data = JSON.parse(evt.data) as any;
+          resetFallbackBackoff();
           setLiveTransport("sse");
           if (data.type === "update" && data.matchId) {
             // Sub-second delta — patch just the changed match
@@ -3478,19 +3506,39 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
     };
     openSSE();
 
-    // ── 3. HTTP fallback poll: fire once immediately, then every 2s ──────────
+    // ── 3. HTTP fallback poll with progressive backoff while SSE is degraded ──
     // Handles: first load before SSE delivers, SSE failure gaps, idle recovery.
+    const scheduleFallbackPoll = (delayMs: number) => {
+      if (cancelled) return;
+      if (livePollTimerRef.current) clearTimeout(livePollTimerRef.current);
+      livePollTimerRef.current = setTimeout(async () => {
+        if (cancelled) return;
+        const streamAgeMs = Date.now() - (liveDataFetchedAt.current ?? 0);
+        const sseHealthy = sseActiveRef.current && streamAgeMs <= 6_000;
+
+        if (!sseHealthy) {
+          const result = await fetchLive(false);
+          if (result === "success" && sseActiveRef.current) resetFallbackBackoff();
+          else if (result !== "skipped") advanceFallbackBackoff();
+        } else {
+          resetFallbackBackoff();
+        }
+
+        if (!cancelled) scheduleFallbackPoll(getFallbackDelay());
+      }, delayMs);
+    };
+
+    resetFallbackBackoff();
     fetchLive(!hasMatches);
-    const pollId = setInterval(() => {
-      if (!sseActiveRef.current) fetchLive(false); // only poll when SSE is down
-      else if (Date.now() - (liveDataFetchedAt.current ?? 0) > 6_000) fetchLive(false); // stale guard
-    }, 2_000);
+    scheduleFallbackPoll(getFallbackDelay());
 
     return () => {
-      clearInterval(pollId);
+      cancelled = true;
+      if (livePollTimerRef.current) { clearTimeout(livePollTimerRef.current); livePollTimerRef.current = null; }
       if (sseReconnectTimerRef.current) { clearTimeout(sseReconnectTimerRef.current); sseReconnectTimerRef.current = null; }
       if (liveFetchCtrlRef.current) { try { liveFetchCtrlRef.current.abort(); } catch {} liveFetchCtrlRef.current = null; }
       liveFetchInFlightRef.current = false;
+      livePollBackoffStepRef.current = 0;
       if (sseRef.current) { sseRef.current.close(); sseRef.current = null; }
       sseActiveRef.current = false;
     };

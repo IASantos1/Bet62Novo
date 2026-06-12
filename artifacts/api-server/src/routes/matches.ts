@@ -164,6 +164,8 @@ export type LiveMatchState = {
   marketSuspension?: Record<string, number>;
   // Reason for current suspension (displayed in UI)
   _suspensionReason?: string;
+  // Feed health warning (must not be treated as a market suspension)
+  _feedWarning?: string;
   // Statpal league ID — used for player markets (football only)
   leagueId?: string;
   // Red cards per team (football only; 0 = none)
@@ -7995,7 +7997,7 @@ async function buildFootballLiveV2(events: SAPIV2Event[]): Promise<LiveMatchStat
     }
     if (providerPresentIds.has(id)) {
       if (state._missingSinceAt) {
-        liveMatchState.set(id, { ...state, _missingSinceAt: undefined, _suspensionReason: undefined });
+        liveMatchState.set(id, { ...state, _missingSinceAt: undefined, _suspensionReason: undefined, _feedWarning: undefined });
       }
       continue;
     }
@@ -8004,7 +8006,7 @@ async function buildFootballLiveV2(events: SAPIV2Event[]): Promise<LiveMatchStat
       const updated: LiveMatchState = {
         ...state,
         _missingSinceAt: missingSince,
-        _suspensionReason: "SINAL INSTÁVEL",
+        _feedWarning: "SINAL INSTÁVEL",
       };
       liveMatchState.set(id, updated);
       if (!resultIds.has(id)) {
@@ -9264,6 +9266,9 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
 
 const LIVE_PAYLOAD_FALLBACK_TTL_MS = 45_000;
 let livePayloadFallbackCache: { payload: { matches: LiveMatchState[] }; builtAt: number } | null = null;
+const LIVE_PAYLOAD_CACHE_TTL_MS = 1_500;
+let livePayloadCache: { payload: { matches: LiveMatchState[] }; builtAt: number } | null = null;
+let livePayloadInFlight: Promise<{ matches: LiveMatchState[] }> | null = null;
 
 // Per-sport last-good-data anti-flicker caches.
 // When a sport's live API returns empty (transient failure/rate-limit), use the last
@@ -9327,6 +9332,27 @@ function getLivePayloadFallback(): { matches: LiveMatchState[] } | null {
   return livePayloadFallbackCache.payload;
 }
 
+async function getLivePayloadCached(forceFresh = false): Promise<{ matches: LiveMatchState[] }> {
+  if (!forceFresh && livePayloadCache && Date.now() - livePayloadCache.builtAt < LIVE_PAYLOAD_CACHE_TTL_MS) {
+    return livePayloadCache.payload;
+  }
+
+  if (livePayloadInFlight) {
+    return livePayloadInFlight;
+  }
+
+  livePayloadInFlight = buildLivePayload()
+    .then((payload) => {
+      livePayloadCache = { payload, builtAt: Date.now() };
+      return payload;
+    })
+    .finally(() => {
+      livePayloadInFlight = null;
+    });
+
+  return livePayloadInFlight;
+}
+
 // Broadcast payload to all connected SSE + WebSocket clients; prune dead connections.
 // Guards: (1) skip if no clients, (2) if a broadcast is already in progress, set
 // broadcastPending so the update is sent immediately after — never silently dropped.
@@ -9340,7 +9366,7 @@ async function broadcastLive(): Promise<void> {
   broadcastInProgress = true;
   broadcastPending = false;
   try {
-    const payload = await buildLivePayload();
+    const payload = await getLivePayloadCached(true);
     const effectivePayload = payload.matches.length === 0 ? (getLivePayloadFallback() ?? payload) : payload;
     if (effectivePayload.matches.length === 0) {
       consecutiveEmptyBroadcasts += 1;
@@ -9409,7 +9435,7 @@ router.get("/live", async (req: Request, res: Response) => {
   const limitRaw = parseInt(String(req.query["limit"] ?? ""), 10);
   const limit = Number.isFinite(limitRaw) ? Math.max(0, Math.min(500, limitRaw)) : 0;
   try {
-    const payload = await buildLivePayload();
+    const payload = await getLivePayloadCached();
     const effectivePayload = payload.matches.length === 0 ? (getLivePayloadFallback() ?? payload) : payload;
     const matches = limit > 0 ? effectivePayload.matches.slice(0, limit) : effectivePayload.matches;
     if (!lean) {
@@ -9436,7 +9462,7 @@ router.get("/live-match/:id", async (req: Request, res: Response) => {
     return;
   }
   try {
-    const payload = await buildLivePayload();
+    const payload = await getLivePayloadCached();
     const effectivePayload = payload.matches.length === 0 ? (getLivePayloadFallback() ?? payload) : payload;
     const match = effectivePayload.matches.find(m => String(m.id) === id) ?? null;
     res.json({ match });
@@ -9491,7 +9517,7 @@ router.get("/live-stream", (req: Request, res: Response) => {
   sseClients.add(res);
 
   // Send an initial event right away so the client doesn't wait for the next tick
-  buildLivePayload()
+  getLivePayloadCached()
     .then(p => {
       const effectivePayload = p.matches.length === 0 ? (getLivePayloadFallback() ?? p) : p;
       try { res.write(`data: ${JSON.stringify(effectivePayload)}\n\n`); } catch { /* ignore */ }
@@ -14619,9 +14645,10 @@ export function initLiveWsServer(httpServer: http.Server): void {
     wsLiveClients.add(ws);
 
     // Send current live state immediately so the client isn't blank for the next tick
-    buildLivePayload()
+    getLivePayloadCached()
       .then((p) => {
-        try { if (ws.readyState === 1) ws.send(JSON.stringify(p)); } catch { /* ignore */ }
+        const effectivePayload = p.matches.length === 0 ? (getLivePayloadFallback() ?? p) : p;
+        try { if (ws.readyState === 1) ws.send(JSON.stringify(effectivePayload)); } catch { /* ignore */ }
       })
       .catch(() => { /* ignore */ });
 
