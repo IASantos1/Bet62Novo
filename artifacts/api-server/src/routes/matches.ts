@@ -9255,10 +9255,17 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
     };
   };
 
+  const dedupedLive = dedupeLiveMatchesByIdentity(
+    filteredLive.map((match) => applyOperationalDecision(match, liveDecisions.get(String(match.id)))),
+  );
+  const dedupedPrematch = dedupeLiveMatchesByIdentity(
+    filteredPrematch.map((match) => applyOperationalDecision(match, prematchDecisions.get(String(match.id)))),
+  ).filter((prematch) => !dedupedLive.some((live) => liveMatchIdentityKey(live) === liveMatchIdentityKey(prematch)));
+
   const result = {
     matches: [
-      ...filteredLive.map((match) => applyOperationalDecision(match, liveDecisions.get(String(match.id)))),
-      ...filteredPrematch.map((match) => applyOperationalDecision(match, prematchDecisions.get(String(match.id)))),
+      ...dedupedLive,
+      ...dedupedPrematch,
     ],
   };
   if (result.matches.length > 0) {
@@ -9327,6 +9334,66 @@ function mergeStickyLive(freshMatches: LiveMatchState[]): LiveMatchState[] {
   }
 
   return [...freshMatches, ...injected];
+}
+
+function normalizeMatchIdentityPart(value: string | undefined): string {
+  return String(value ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+function liveMatchIdentityKey(match: Pick<LiveMatchState, "sport" | "home" | "away" | "league">): string {
+  return [
+    normalizeMatchIdentityPart(match.sport),
+    normalizeMatchIdentityPart(match.home),
+    normalizeMatchIdentityPart(match.away),
+    normalizeMatchIdentityPart(match.league),
+  ].join("|");
+}
+
+function pickPreferredLiveMatch(current: LiveMatchState, candidate: LiveMatchState): LiveMatchState {
+  const currentLive = current.startsIn === undefined ? 1 : 0;
+  const candidateLive = candidate.startsIn === undefined ? 1 : 0;
+  if (candidateLive !== currentLive) return candidateLive > currentLive ? candidate : current;
+
+  const currentScoreSignal = (current.homeScore ?? 0) + (current.awayScore ?? 0);
+  const candidateScoreSignal = (candidate.homeScore ?? 0) + (candidate.awayScore ?? 0);
+  if (candidateScoreSignal !== currentScoreSignal) return candidateScoreSignal > currentScoreSignal ? candidate : current;
+
+  const currentMinute = Number(current.minute ?? 0);
+  const candidateMinute = Number(candidate.minute ?? 0);
+  if (candidateMinute !== currentMinute) return candidateMinute > currentMinute ? candidate : current;
+
+  const currentOdds = current.hasRealOdds ? 1 : 0;
+  const candidateOdds = candidate.hasRealOdds ? 1 : 0;
+  if (candidateOdds !== currentOdds) return candidateOdds > currentOdds ? candidate : current;
+
+  const currentEvents = current.events?.length ?? 0;
+  const candidateEvents = candidate.events?.length ?? 0;
+  if (candidateEvents !== currentEvents) return candidateEvents > currentEvents ? candidate : current;
+
+  return String(candidate.id) > String(current.id) ? candidate : current;
+}
+
+function dedupeLiveMatchesByIdentity(matches: LiveMatchState[]): LiveMatchState[] {
+  const byIdentity = new Map<string, LiveMatchState>();
+  const order: string[] = [];
+
+  for (const match of matches) {
+    const key = liveMatchIdentityKey(match);
+    const existing = byIdentity.get(key);
+    if (!existing) {
+      byIdentity.set(key, match);
+      order.push(key);
+      continue;
+    }
+    byIdentity.set(key, pickPreferredLiveMatch(existing, match));
+  }
+
+  return order.map((key) => byIdentity.get(key)!).filter(Boolean);
 }
 
 function getLivePayloadFallback(): { matches: LiveMatchState[] } | null {

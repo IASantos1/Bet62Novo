@@ -2785,6 +2785,60 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
     return extra?.clockStr ?? fmtFootballMin(minute, tag);
   };
 
+  const normalizeLiveIdentityPart = (value: string | undefined) =>
+    String(value ?? "")
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, " ")
+      .trim();
+
+  const getLiveMatchIdentityKey = (match: Pick<Match, "sport" | "home" | "away" | "league">) =>
+    [
+      normalizeLiveIdentityPart(match.sport),
+      normalizeLiveIdentityPart(match.home),
+      normalizeLiveIdentityPart(match.away),
+      normalizeLiveIdentityPart(match.league),
+    ].join("|");
+
+  const dedupeLiveMatches = (matches: Match[]) => {
+    const byIdentity = new Map<string, Match>();
+    const order: string[] = [];
+
+    const pickPreferred = (current: Match, candidate: Match) => {
+      const currentLive = current.startsIn === undefined ? 1 : 0;
+      const candidateLive = candidate.startsIn === undefined ? 1 : 0;
+      if (candidateLive !== currentLive) return candidateLive > currentLive ? candidate : current;
+
+      const currentScoreSignal = (current.homeScore ?? 0) + (current.awayScore ?? 0);
+      const candidateScoreSignal = (candidate.homeScore ?? 0) + (candidate.awayScore ?? 0);
+      if (candidateScoreSignal !== currentScoreSignal) return candidateScoreSignal > currentScoreSignal ? candidate : current;
+
+      const currentMinute = Number(current.minute ?? 0);
+      const candidateMinute = Number(candidate.minute ?? 0);
+      if (candidateMinute !== currentMinute) return candidateMinute > currentMinute ? candidate : current;
+
+      const currentOdds = current.hasRealOdds ? 1 : 0;
+      const candidateOdds = candidate.hasRealOdds ? 1 : 0;
+      if (candidateOdds !== currentOdds) return candidateOdds > currentOdds ? candidate : current;
+
+      return String(candidate.id) > String(current.id) ? candidate : current;
+    };
+
+    for (const match of matches) {
+      const key = getLiveMatchIdentityKey(match);
+      const existing = byIdentity.get(key);
+      if (!existing) {
+        byIdentity.set(key, match);
+        order.push(key);
+        continue;
+      }
+      byIdentity.set(key, pickPreferred(existing, match));
+    }
+
+    return order.map((key) => byIdentity.get(key)!).filter(Boolean);
+  };
+
   type Snapshot<T> = { savedAt: number; value: T };
   // Stable key generators — wrapped in useCallback so they never get a new reference
   // on re-render, which would cascade into useCallback/useEffect loops.
@@ -3398,7 +3452,7 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
         .filter(m => m.startsIn === undefined || m.hasRealOdds !== false || (m.odds.home > 0 && m.odds.away > 0))
         .map(m => ({ ...m, isLive: true }));
 
-      return [...staleMatches, ...freshMatches];
+      return dedupeLiveMatches([...staleMatches, ...freshMatches]);
     });
   }, []);
 
