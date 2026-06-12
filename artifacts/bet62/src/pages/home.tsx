@@ -3470,21 +3470,21 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
         if (sseRef.current === es) { sseRef.current = null; sseActiveRef.current = false; }
         setLiveTransport(browserOnline ? "polling" : "cache");
         if (sseReconnectTimerRef.current) clearTimeout(sseReconnectTimerRef.current);
-        // Reconnect in 4s
+        // Reconnect quickly when the live stream drops
         sseReconnectTimerRef.current = setTimeout(() => {
           if (sseRef.current === null && activeTabRef.current === "live") openSSE();
-        }, 4_000);
+        }, 2_000);
       };
     };
     openSSE();
 
-    // ── 3. HTTP fallback poll: fire once immediately, then every 8s ──────────
+    // ── 3. HTTP fallback poll: fire once immediately, then every 2s ──────────
     // Handles: first load before SSE delivers, SSE failure gaps, idle recovery.
     fetchLive(!hasMatches);
     const pollId = setInterval(() => {
       if (!sseActiveRef.current) fetchLive(false); // only poll when SSE is down
-      else if (Date.now() - (liveDataFetchedAt.current ?? 0) > 12_000) fetchLive(false); // stale guard
-    }, 4_000);
+      else if (Date.now() - (liveDataFetchedAt.current ?? 0) > 6_000) fetchLive(false); // stale guard
+    }, 2_000);
 
     return () => {
       clearInterval(pollId);
@@ -4035,6 +4035,13 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
   // Filters out micro-oscillations — server controls the real update cadence.
   const ODDS_ANIM_THRESHOLD = 0.02;
 
+  const hasBlockingSuspensionReason = (match: Match) => {
+    const rawReason = String(match._suspensionReason ?? "").trim().toUpperCase();
+    if (!rawReason) return false;
+    if (rawReason === "SINAL INSTÁVEL") return false;
+    return true;
+  };
+
   const OddsButton = ({ match, selection, odd, market = "result", label, grow }: {
     match: Match; selection: string; odd: number; market?: string; label: string; grow?: boolean;
   }) => {
@@ -4107,7 +4114,7 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
   const SuspensionBanner = ({ match }: { match: Match }) => {
     const now = Date.now();
     const isActive = (match.marketSuspension?.["result"] != null && match.marketSuspension["result"] > now)
-      || !!(match._suspensionReason);
+      || hasBlockingSuspensionReason(match);
     if (!isActive) return null;
     const rawReason = (match._suspensionReason ?? "SUSPENSO").toUpperCase();
     let label = "SUSPENSO";
@@ -4510,7 +4517,7 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
     // markets have far-future timestamps and must NOT count as "suspended" here.
     const isLiveSuspended = match.isLive && (
       (match.marketSuspension?.["result"] != null && match.marketSuspension["result"] > Date.now())
-      || !!(match._suspensionReason)
+      || hasBlockingSuspensionReason(match)
     );
 
     // Penalty shootout: only show winner market with VENCEDOR DA FINAL header
@@ -4637,7 +4644,7 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
 
     const isSuspendedMatch = match.isLive && (
       (!!match.marketSuspension && Object.values(match.marketSuspension).some(ts => ts > Date.now()))
-      || !!(match._suspensionReason)
+      || hasBlockingSuspensionReason(match)
     );
     const canShowOdds = !!(match.hasRealOdds || (match.odds.home > 0 && match.odds.away > 0));
     const OddsRow = () => canShowOdds ? (
@@ -5344,7 +5351,7 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
     if (market === "result" && odd <= 1.01) return null;
     const now = Date.now();
     const globalSusp = (match.marketSuspension?.["result"] != null && match.marketSuspension["result"] > now)
-      || !!(match._suspensionReason);
+      || hasBlockingSuspensionReason(match);
     const perMarketSusp = suspKey != null
       ? (match.marketSuspension?.[suspKey] != null && match.marketSuspension[suspKey]! > now)
       : false;
@@ -5679,7 +5686,7 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
         </div>
 
         {/* ── SUSPENSION BANNER (modal) ── */}
-        {((match.marketSuspension && Object.values(match.marketSuspension).some(ts => ts > Date.now())) || !!(match._suspensionReason)) && (
+        {((match.marketSuspension && Object.values(match.marketSuspension).some(ts => ts > Date.now())) || hasBlockingSuspensionReason(match)) && (
           <div className="mb-4">
             <SuspensionBanner match={match} />
           </div>
@@ -10941,52 +10948,21 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
 
             {!expandedMatch && activeTab === "live" && (
               <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
-                <div className="flex flex-col gap-3 mb-4 sm:flex-row sm:items-start sm:justify-between">
-                  <div>
-                    <h2 className="text-2xl font-black italic uppercase tracking-tight flex items-center gap-2">
-                      <Activity className="text-red-600" /> Ao Vivo
-                      {liveMatches.length > 0 && (() => {
-                        const nLive = liveMatches.filter(m => m.startsIn === undefined).length;
-                        const nSoon = liveMatches.filter(m => m.startsIn !== undefined).length;
-                        return (
-                          <span className="text-sm font-normal text-zinc-400 ml-1">
-                            ({nLive > 0 ? `${nLive} ao vivo` : ""}
-                            {nLive > 0 && nSoon > 0 ? " · " : ""}
-                            {nSoon > 0 ? `${nSoon} em breve` : ""})
-                          </span>
-                        );
-                      })()}
-                    </h2>
-                    <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px]">
-                      {(() => {
-                        const meta = !browserOnline
-                          ? { label: "Offline", className: "border-zinc-700 bg-zinc-900 text-zinc-300" }
-                          : liveTransport === "sse"
-                            ? { label: "Tempo real SSE", className: "border-emerald-500/30 bg-emerald-500/10 text-emerald-300" }
-                            : liveTransport === "polling"
-                              ? { label: "Fallback HTTP", className: "border-amber-500/30 bg-amber-500/10 text-amber-300" }
-                              : liveTransport === "cache"
-                                ? { label: "Cache local", className: "border-sky-500/30 bg-sky-500/10 text-sky-300" }
-                                : { label: "A ligar", className: "border-zinc-700 bg-zinc-900 text-zinc-400" };
-                        return (
-                          <span className={`inline-flex items-center rounded-full border px-2 py-1 font-semibold ${meta.className}`}>
-                            {meta.label}
-                          </span>
-                        );
-                      })()}
-                      <span className="inline-flex items-center rounded-full border border-zinc-800 bg-zinc-900 px-2 py-1 text-zinc-400">
-                        PWA pronta
-                      </span>
-                    </div>
-                  </div>
-                  <button
-                    onClick={() => fetchLive(true)}
-                    disabled={false}
-                    className="text-xs text-zinc-500 hover:text-white transition-colors border border-zinc-800 hover:border-zinc-600 px-3 py-1.5 rounded-md flex items-center gap-1.5 self-start"
-                  >
-                    {liveLoading ? <Loader2 size={12} className="animate-spin" /> : <Activity size={12} />}
-                    Atualizar
-                  </button>
+                <div className="mb-4">
+                  <h2 className="text-2xl font-black italic uppercase tracking-tight flex items-center gap-2">
+                    <Activity className="text-red-600" /> Ao Vivo
+                    {liveMatches.length > 0 && (() => {
+                      const nLive = liveMatches.filter(m => m.startsIn === undefined).length;
+                      const nSoon = liveMatches.filter(m => m.startsIn !== undefined).length;
+                      return (
+                        <span className="text-sm font-normal text-zinc-400 ml-1">
+                          ({nLive > 0 ? `${nLive} ao vivo` : ""}
+                          {nLive > 0 && nSoon > 0 ? " · " : ""}
+                          {nSoon > 0 ? `${nSoon} em breve` : ""})
+                        </span>
+                      );
+                    })()}
+                  </h2>
                 </div>
 
                 {/* ── Search bar ── */}
