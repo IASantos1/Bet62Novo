@@ -2684,10 +2684,30 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
       if (apiMin > maxKnownMin + 8) apiMin = maxKnownMin;
     }
 
-    const isHalfTimeBreak = status === "ht" || status.includes("half time");
+    const extra = (match as any)?._liveExtra;
+    const isHalfTimeBreak =
+      status === "ht" ||
+      status === "halftime" ||
+      status.includes("half time") ||
+      status.includes("break time") ||
+      status === "pause";
+    if (isFootball) {
+      const baseClockSec = Number(extra?.clockSec);
+      const clockAtMs = Number(extra?.clockAtMs ?? 0);
+      const isClockRunning = !!extra?.clockRunning;
+      if (Number.isFinite(baseClockSec) && baseClockSec >= 0) {
+        const elapsedSec =
+          isClockRunning && clockAtMs > 0
+            ? Math.max(0, Math.floor((Date.now() - clockAtMs) / 1000))
+            : 0;
+        const displaySec = baseClockSec + elapsedSec;
+        if (isHalfTimeBreak) return 45;
+        return Math.max(0, Math.min(130, Math.floor(displaySec / 60)));
+      }
+    }
     if (isHalfTimeBreak) return Math.max(0, apiMin);
 
-    if (isFootball && (match as any)?._liveExtra?.kickoffSec) return Math.max(0, apiMin);
+    if (isFootball && extra?.kickoffSec) return Math.max(0, apiMin);
 
     const looksNotStarted =
       apiMin <= 0 &&
@@ -2718,7 +2738,7 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
     const showET = !!match.markets?.etExtra || status.includes("extra") || status === "et";
     const showPen = !!match.markets?.penExtra || status.includes("pen") || status.includes("shootout");
     if (showPen) return "PEN";
-    if (status === "ht" || status.includes("half time") || status === "halftime") return "HT";
+    if (status === "ht" || status === "halftime" || status.includes("half time") || status.includes("break time") || status === "pause") return "HT";
     if (showET) return "ET";
     if (status.includes("2nd half") || status.includes("second half") || status.includes("2ª parte")) return "2P";
     if (status.includes("1st half") || status.includes("first half") || status.includes("1ª parte")) return "1P";
@@ -2733,6 +2753,36 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
     if (tag === "2P" && min > 90) return `90+${min - 90}'`;
     if (tag === "ET" && min > 120) return `120+${min - 120}'`;
     return `${min}'`;
+  };
+
+  const getFootballClockLabel = (match: Match, minute: number): string => {
+    const tag = getFootballPhaseTag(match, minute);
+    const extra = match._liveExtra;
+    if (tag === "HT") return "HT";
+
+    const baseClockSec = Number(extra?.clockSec);
+    const clockAtMs = Number(extra?.clockAtMs ?? 0);
+    const isClockRunning = !!extra?.clockRunning;
+    if (Number.isFinite(baseClockSec) && baseClockSec >= 0) {
+      const elapsedSec =
+        isClockRunning && clockAtMs > 0
+          ? Math.max(0, Math.floor((Date.now() - clockAtMs) / 1000))
+          : 0;
+      const displaySec = baseClockSec + elapsedSec;
+      const displayMin = Math.floor(displaySec / 60);
+      const seconds = String(Math.max(0, displaySec % 60)).padStart(2, "0");
+
+      if (tag === "1P") {
+        if (displayMin > 45) return `45+${displayMin - 45}'`;
+        return `${String(Math.max(0, displayMin)).padStart(2, "0")}:${seconds}`;
+      }
+      if (tag === "2P") {
+        if (displayMin > 90) return `90+${displayMin - 90}'`;
+        return `${String(Math.max(45, displayMin)).padStart(2, "0")}:${seconds}`;
+      }
+    }
+
+    return extra?.clockStr ?? fmtFootballMin(minute, tag);
   };
 
   type Snapshot<T> = { savedAt: number; value: T };
@@ -4259,9 +4309,9 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
       if (sport === "volleyball" && match.status) return match.status;
 
       const tag = getFootballPhaseTag(match, minute);
-      if (tag === "HT") return "Int.";
+      if (tag === "HT") return "HT";
       if (tag === "PEN") return "PEN";
-      const minLbl = extra?.clockStr ?? fmtFootballMin(minute, tag);
+      const minLbl = getFootballClockLabel(match, minute);
       if (tag === "ET") return `ET${minLbl ? ` · ${minLbl}` : ""}`;
       if (tag && minLbl) return `${tag} · ${minLbl}`;
       if (tag) return tag;
@@ -4273,7 +4323,7 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
     const countdownLabel = (() => {
       if (!isEmBreve) return "";
       const si = match.startsIn!;
-      if (si === 0) return "A Iniciar";
+      if (si <= 2) return "A Iniciar";
       if (si < 60) return `Em ${si}min`;
       const h = Math.floor(si / 60);
       const m = si % 60;
@@ -4297,7 +4347,7 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
       return `${match.scheduledDate} ${time}`;
     })();
 
-    const isStarting = isEmBreve && match.startsIn === 0;
+    const isStarting = isEmBreve && (match.startsIn ?? 999) <= 2;
     const liveBadge = isEmBreve ? (
       <div className="flex items-center gap-1.5">
         {isStarting ? (
@@ -4309,7 +4359,7 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
           <Clock size={10} className="text-amber-400 shrink-0" />
         )}
         <span className={`text-[10px] font-bold tabular-nums ${isStarting ? "text-amber-300" : "text-amber-400"}`}>
-          {scheduledDisplay ?? countdownLabel}
+          {isStarting ? countdownLabel : (scheduledDisplay ?? countdownLabel)}
         </span>
       </div>
     ) : isVolleyNonLive ? (
@@ -7595,6 +7645,7 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
                             const tag = isFootball ? getFootballPhaseTag(expandedMatch, m) : null;
                             if (m <= 0) return "AO VIVO (Atrasado)";
                             if (tag === "HT") return "AO VIVO HT";
+                            if (tag && isFootball) return `AO VIVO ${tag} · ${getFootballClockLabel(expandedMatch, m)}`;
                             if (tag) return `AO VIVO ${m}' · ${tag}`;
                             return `AO VIVO ${m}'`;
                           })()}

@@ -7561,6 +7561,8 @@ function isFootballV2LiveStatus(statusStr: string, statusCode?: number): boolean
 // Tracks the last time a match's minute+score changed.
 // If both are frozen for > 20 min the match is a zombie and gets evicted.
 const _v2StuckTracker = new Map<string, { minute: number; score: string; since: number }>();
+const FIRST_HALF_CLOCK_CAP_MIN = 59;
+const SECOND_HALF_CLOCK_CAP_MIN = 109;
 
 async function buildFootballLiveV2(events: SAPIV2Event[]): Promise<LiveMatchState[]> {
   const now = Date.now();
@@ -7712,18 +7714,19 @@ async function buildFootballLiveV2(events: SAPIV2Event[]): Promise<LiveMatchStat
         resolvedKickoffSec = kickoffSec;
         const minsFromKickoff = Math.floor(((now / 1000 - kickoffSec) - clockSkewSec) / 60);
         if (statusStr === "1st half") {
-          // Allow up to 49' for first-half stoppage time
-          minute = Math.min(49, Math.max(1, minsFromKickoff));
+          // Keep the first-half clock running through stoppage time until the feed
+          // explicitly flips to HT, instead of freezing at 49'.
+          minute = Math.min(FIRST_HALF_CLOCK_CAP_MIN, Math.max(0, minsFromKickoff));
         } else if (statusStr === "2nd half") {
           const shKickoff = existing?._liveExtra?.secondHalfKickoffSec;
           if (typeof shKickoff === "number" && Number.isFinite(shKickoff) && shKickoff > 0) {
             const minsFromSecondHalf = Math.floor(((now / 1000 - shKickoff) - clockSkewSec) / 60);
-            minute = Math.min(99, Math.max(46, 46 + minsFromSecondHalf));
+            minute = Math.min(SECOND_HALF_CLOCK_CAP_MIN, Math.max(45, 45 + minsFromSecondHalf));
           } else {
-            minute = Math.min(99, Math.max(46, minsFromKickoff - 15));
+            minute = Math.min(SECOND_HALF_CLOCK_CAP_MIN, Math.max(45, minsFromKickoff - 15));
           }
         } else {
-          minute = Math.min(49, Math.max(1, minsFromKickoff));
+          minute = Math.min(FIRST_HALF_CLOCK_CAP_MIN, Math.max(0, minsFromKickoff));
         }
       } else {
         // Last resort: no timestamp available at all — use mid-period defaults
@@ -7753,7 +7756,7 @@ async function buildFootballLiveV2(events: SAPIV2Event[]): Promise<LiveMatchStat
       !resolvedKickoffSec ? null
       : newStatus === "HT" ? 45 * 60
       : isFirstHalf
-        ? clamp(clockNowSec - resolvedKickoffSec - clockSkewSec, 0, 49 * 60)
+        ? clamp(clockNowSec - resolvedKickoffSec - clockSkewSec, 0, FIRST_HALF_CLOCK_CAP_MIN * 60)
         : isSecondHalf
           ? clamp(
               45 * 60 +
@@ -7761,7 +7764,7 @@ async function buildFootballLiveV2(events: SAPIV2Event[]): Promise<LiveMatchStat
                   ? (clockNowSec - shKickoffSec - clockSkewSec)
                   : Math.max(0, (clockNowSec - resolvedKickoffSec - clockSkewSec) - (15 * 60))),
               45 * 60,
-              99 * 60,
+              SECOND_HALF_CLOCK_CAP_MIN * 60,
             )
           : null;
     const secInMin = baseSec === null ? 0 : clamp(baseSec % 60, 0, 59);
@@ -7770,9 +7773,9 @@ async function buildFootballLiveV2(events: SAPIV2Event[]): Promise<LiveMatchStat
     const clockStr =
       newStatus === "HT" ? undefined
       : isFirstHalf
-        ? (minute > 45 ? `45+${minute - 45}'` : minute > 0 ? `${String(minute).padStart(2, "0")}:${secStr}` : undefined)
+        ? (minute > 45 ? `45+${minute - 45}'` : `${String(Math.max(0, minute)).padStart(2, "0")}:${secStr}`)
         : isSecondHalf
-          ? (minute > 90 ? `90+${minute - 90}'` : minute > 0 ? `${String(minute).padStart(2, "0")}:${secStr}` : undefined)
+          ? (minute > 90 ? `90+${minute - 90}'` : `${String(Math.max(45, minute)).padStart(2, "0")}:${secStr}`)
           : (minute > 0 ? `${minute}'` : undefined);
 
     // Zombie detector: if minute AND score are identical for too long the feed is frozen.
@@ -9062,7 +9065,8 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
   const promotedTennis: LiveMatchState[] = [];
   const startingSoonFinal: LiveMatchState[] = [];
   for (const m of startingSoonCandidates) {
-    const startsIn = Math.max(0, Math.round(matchStartsInMinutes(m.date, m.time)));
+    const realStartsIn = matchStartsInMinutes(m.date, m.time);
+    const startsIn = Math.max(0, Math.round(realStartsIn <= 2 ? 0 : realStartsIn));
     if (m.sport === "tennis") {
       const providerStatusGroup = m.providerStatusGroup;
       const providerStatusText = m.providerStatusText ?? "";
@@ -9094,8 +9098,7 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
       if (providerStatusGroup !== undefined && providerStatusGroup !== 2) continue;
 
       if (startsIn === 0) {
-        const realSi = matchStartsInMinutes(m.date, m.time);
-        if (isFinite(realSi) && realSi < -2 && realSi > -240) {
+        if (isFinite(realStartsIn) && realStartsIn < -2 && realStartsIn > -240) {
           promotedTennis.push({
             id:            m.id,
             home:          m.home,
