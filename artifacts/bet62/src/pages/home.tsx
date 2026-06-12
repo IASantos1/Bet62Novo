@@ -402,6 +402,9 @@ const TEAM_BANNERS: Record<string, string> = {
   "Go Ahead Eagles": goAheadEaglesBanner,
 };
 
+type MainTab = "sports" | "live" | "promos" | "mybets" | "wallet" | "profile";
+type LiveTransport = "idle" | "cache" | "sse" | "polling";
+
 const TEAM_NAME_PT: Record<string, string> = {
   Norway: "Noruega",
   Uruguay: "Uruguai",
@@ -1702,7 +1705,8 @@ function AnimatedCopaBanner({ onOpen }: { onOpen: () => void }) {
   );
 }
 
-export default function Home() {
+export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }) {
+  const [, navigate] = useLocation();
   const auth = useAuth();
   const { isIdle, resetIdle } = useIdle(120_000);
   const isIdleRef = useRef(false);
@@ -1712,9 +1716,21 @@ export default function Home() {
   const liveFetchInFlightRef = useRef(false);
   const sseReconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const [activeTab, setActiveTab] = useState<"sports" | "live" | "promos" | "mybets" | "wallet" | "profile">("sports");
+  const [activeTab, setActiveTab] = useState<MainTab>(initialTab);
   const activeTabRef = useRef(activeTab);
   useEffect(() => { activeTabRef.current = activeTab; }, [activeTab]);
+  useEffect(() => {
+    setActiveTab(initialTab);
+  }, [initialTab]);
+  useEffect(() => {
+    const currentPath = window.location.pathname.replace(/\/$/, "") || "/";
+    const isLiveRoute = currentPath === "/ao-vivo" || currentPath === "/live";
+    if (activeTab === "live") {
+      if (!isLiveRoute) navigate("/ao-vivo");
+      return;
+    }
+    if (isLiveRoute) navigate("/");
+  }, [activeTab, navigate]);
   const lastTouchAtRef = useRef(0);
   const lastPointerDownAtRef = useRef(0);
   const tapStateRef = useRef<{ x: number; y: number; startedAt: number; moved: boolean } | null>(null);
@@ -1872,6 +1888,10 @@ export default function Home() {
   // Live matches
   const [liveMatches, setLiveMatches] = useState<Match[]>([]);
   const [liveLoading, setLiveLoading] = useState(false);
+  const [liveTransport, setLiveTransport] = useState<LiveTransport>(initialTab === "live" ? "cache" : "idle");
+  const [browserOnline, setBrowserOnline] = useState(() =>
+    typeof navigator === "undefined" ? true : navigator.onLine,
+  );
   const [liveSportFilter, setLiveSportFilter] = useState<string>("all");
   const [liveSearchQuery, setLiveSearchQuery] = useState<string>("");
   const prevLiveOdds = useRef<Record<string, Odds>>({});
@@ -1891,6 +1911,22 @@ export default function Home() {
   const minuteChangedAtRef = useRef<Record<string, number>>({});
   const seenMatchIds = useRef(new Set<string>());
   const [, setMinuteTick] = useState(0);
+
+  useEffect(() => {
+    const handleOnline = () => setBrowserOnline(true);
+    const handleOffline = () => setBrowserOnline(false);
+    window.addEventListener("online", handleOnline);
+    window.addEventListener("offline", handleOffline);
+    return () => {
+      window.removeEventListener("online", handleOnline);
+      window.removeEventListener("offline", handleOffline);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (activeTab !== "live" || browserOnline) return;
+    setLiveTransport("cache");
+  }, [activeTab, browserOnline]);
 
   // Upcoming matches
   const [upcomingMatches, setUpcomingMatches] = useState<Match[]>([]);
@@ -3330,20 +3366,25 @@ export default function Home() {
           writeSnapshot(liveSnapshotKey(), (data as any).matches);
         }
         processLiveData(data);
+        setLiveTransport(sseActiveRef.current ? "sse" : "polling");
       } finally {
         try { clearTimeout(tid); } catch {}
       }
     } catch {
+      if (!browserOnline) setLiveTransport("cache");
     } finally {
       if (ctrl && liveFetchCtrlRef.current === ctrl) liveFetchCtrlRef.current = null;
       liveFetchInFlightRef.current = false;
       if (showSpinner) setLiveLoading(false);
     }
-  }, [processLiveData, liveSnapshotKey, writeSnapshot]);
+  }, [browserOnline, processLiveData, liveSnapshotKey, writeSnapshot]);
 
   const selectMainTab = useCallback((id: typeof activeTab, onSelect?: () => void) => {
     const prev = activeTabRef.current;
+    const currentPath = window.location.pathname.replace(/\/$/, "") || "/";
     if (prev !== id) setActiveTab(id);
+    if (id === "live") navigate("/ao-vivo");
+    else if (currentPath === "/ao-vivo" || currentPath === "/live") navigate("/");
     onSelect?.();
     if (id === "live" && prev !== "live") {
       const snap = readSnapshot<LiveMatchRaw[]>(liveSnapshotKey());
@@ -3353,10 +3394,11 @@ export default function Home() {
       if (snap && canUseSnap && !hasMatches) {
         setLiveMatches(snap.value.map(m => ({ ...(m as any), isLive: true })));
         setLiveLoading(false);
+        setLiveTransport("cache");
       }
       fetchLive(!(canUseSnap && hasMatches));
     }
-  }, [fetchLive, liveSnapshotKey, readSnapshot, setLiveMatches]); // liveMatchesRef is a ref — no dep needed
+  }, [fetchLive, liveSnapshotKey, navigate, readSnapshot, setLiveMatches]); // liveMatchesRef is a ref — no dep needed
 
   useEffect(() => {
     if (!liveLoading) return;
@@ -3369,6 +3411,7 @@ export default function Home() {
       // Leave live tab — close SSE
       if (sseRef.current) { sseRef.current.close(); sseRef.current = null; }
       sseActiveRef.current = false;
+      setLiveTransport("idle");
       return;
     }
 
@@ -3380,6 +3423,7 @@ export default function Home() {
       if (snap && canUseSnap) {
         setLiveMatches(snap.value.map(m => ({ ...(m as any), isLive: true })));
         setLiveLoading(false);
+        setLiveTransport("cache");
       }
     }
 
@@ -3388,10 +3432,11 @@ export default function Home() {
       if (sseRef.current) return; // already open
       const es = new EventSource("/api/matches/live-stream");
       sseRef.current = es;
-      es.onopen = () => { sseActiveRef.current = true; };
+      es.onopen = () => { sseActiveRef.current = true; setLiveTransport("sse"); };
       es.onmessage = (evt) => {
         try {
           const data = JSON.parse(evt.data) as any;
+          setLiveTransport("sse");
           if (data.type === "update" && data.matchId) {
             // Sub-second delta — patch just the changed match
             const matchId = String(data.matchId);
@@ -3423,6 +3468,7 @@ export default function Home() {
         // SSE dropped — close and fall back to polling
         es.close();
         if (sseRef.current === es) { sseRef.current = null; sseActiveRef.current = false; }
+        setLiveTransport(browserOnline ? "polling" : "cache");
         if (sseReconnectTimerRef.current) clearTimeout(sseReconnectTimerRef.current);
         // Reconnect in 4s
         sseReconnectTimerRef.current = setTimeout(() => {
@@ -3448,7 +3494,7 @@ export default function Home() {
       if (sseRef.current) { sseRef.current.close(); sseRef.current = null; }
       sseActiveRef.current = false;
     };
-  }, [activeTab, fetchLive, liveSnapshotKey, readSnapshot, processLiveData, writeSnapshot]); // all stable refs
+  }, [activeTab, browserOnline, fetchLive, liveSnapshotKey, readSnapshot, processLiveData, writeSnapshot]); // all stable refs
 
   useEffect(() => {
     if (activeTab !== "live") return;
@@ -10895,25 +10941,48 @@ export default function Home() {
 
             {!expandedMatch && activeTab === "live" && (
               <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
-                <div className="flex items-center justify-between mb-4">
-                  <h2 className="text-2xl font-black italic uppercase tracking-tight flex items-center gap-2">
-                    <Activity className="text-red-600" /> Ao Vivo
-                    {liveMatches.length > 0 && (() => {
-                      const nLive = liveMatches.filter(m => m.startsIn === undefined).length;
-                      const nSoon = liveMatches.filter(m => m.startsIn !== undefined).length;
-                      return (
-                        <span className="text-sm font-normal text-zinc-400 ml-1">
-                          ({nLive > 0 ? `${nLive} ao vivo` : ""}
-                          {nLive > 0 && nSoon > 0 ? " · " : ""}
-                          {nSoon > 0 ? `${nSoon} em breve` : ""})
-                        </span>
-                      );
-                    })()}
-                  </h2>
+                <div className="flex flex-col gap-3 mb-4 sm:flex-row sm:items-start sm:justify-between">
+                  <div>
+                    <h2 className="text-2xl font-black italic uppercase tracking-tight flex items-center gap-2">
+                      <Activity className="text-red-600" /> Ao Vivo
+                      {liveMatches.length > 0 && (() => {
+                        const nLive = liveMatches.filter(m => m.startsIn === undefined).length;
+                        const nSoon = liveMatches.filter(m => m.startsIn !== undefined).length;
+                        return (
+                          <span className="text-sm font-normal text-zinc-400 ml-1">
+                            ({nLive > 0 ? `${nLive} ao vivo` : ""}
+                            {nLive > 0 && nSoon > 0 ? " · " : ""}
+                            {nSoon > 0 ? `${nSoon} em breve` : ""})
+                          </span>
+                        );
+                      })()}
+                    </h2>
+                    <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px]">
+                      {(() => {
+                        const meta = !browserOnline
+                          ? { label: "Offline", className: "border-zinc-700 bg-zinc-900 text-zinc-300" }
+                          : liveTransport === "sse"
+                            ? { label: "Tempo real SSE", className: "border-emerald-500/30 bg-emerald-500/10 text-emerald-300" }
+                            : liveTransport === "polling"
+                              ? { label: "Fallback HTTP", className: "border-amber-500/30 bg-amber-500/10 text-amber-300" }
+                              : liveTransport === "cache"
+                                ? { label: "Cache local", className: "border-sky-500/30 bg-sky-500/10 text-sky-300" }
+                                : { label: "A ligar", className: "border-zinc-700 bg-zinc-900 text-zinc-400" };
+                        return (
+                          <span className={`inline-flex items-center rounded-full border px-2 py-1 font-semibold ${meta.className}`}>
+                            {meta.label}
+                          </span>
+                        );
+                      })()}
+                      <span className="inline-flex items-center rounded-full border border-zinc-800 bg-zinc-900 px-2 py-1 text-zinc-400">
+                        PWA pronta
+                      </span>
+                    </div>
+                  </div>
                   <button
                     onClick={() => fetchLive(true)}
                     disabled={false}
-                    className="text-xs text-zinc-500 hover:text-white transition-colors border border-zinc-800 hover:border-zinc-600 px-3 py-1.5 rounded-md flex items-center gap-1.5"
+                    className="text-xs text-zinc-500 hover:text-white transition-colors border border-zinc-800 hover:border-zinc-600 px-3 py-1.5 rounded-md flex items-center gap-1.5 self-start"
                   >
                     {liveLoading ? <Loader2 size={12} className="animate-spin" /> : <Activity size={12} />}
                     Atualizar

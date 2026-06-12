@@ -1,6 +1,7 @@
 import { createRoot } from "react-dom/client";
 import App from "./App";
 import "./index.css";
+import { registerAppServiceWorker } from "@/lib/pwa";
 
 const shouldReloadForMessage = (msg: string): boolean => {
   const m = (msg ?? "").toLowerCase();
@@ -33,5 +34,7 @@ window.addEventListener("unhandledrejection", (e) => {
   const msg = String(reason?.message ?? reason ?? "");
   if (shouldReloadForMessage(msg)) safeReloadOnce();
 });
+
+registerAppServiceWorker();
 
 createRoot(document.getElementById("root")!).render(<App />);
