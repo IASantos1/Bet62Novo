@@ -324,6 +324,65 @@ function mapToWCMatch(m: Record<string, unknown>): WCMatch {
   };
 }
 
+type WCMatchCollections = {
+  allMatches: WCMatch[];
+  liveMatches: WCMatch[];
+  upcomingMatches: WCMatch[];
+  initialTab: "live" | "upcoming";
+};
+
+const WC2026_CLIENT_CACHE_KEY = "wc2026_page_snapshot_v1";
+const WC2026_CLIENT_CACHE_MAX_AGE_MS = 2 * 60_000;
+
+function emptyWCMatchCollections(): WCMatchCollections {
+  return {
+    allMatches: [],
+    liveMatches: [],
+    upcomingMatches: [],
+    initialTab: "upcoming",
+  };
+}
+
+function buildWCMatchCollections(rawMatches: Record<string, unknown>[]): WCMatchCollections {
+  const allWC = rawMatches.map(mapToWCMatch);
+  const wcLive = allWC.filter(m => m.isLive);
+  const wcUpcoming = allWC.filter(m => !m.isLive);
+  return {
+    allMatches: allWC,
+    liveMatches: wcLive,
+    upcomingMatches: wcUpcoming,
+    initialTab: wcLive.length > 0 ? "live" : "upcoming",
+  };
+}
+
+function readWCClientSnapshot(): WCMatchCollections | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = JSON.parse(window.localStorage.getItem(WC2026_CLIENT_CACHE_KEY) ?? "null") as {
+      fetchedAt?: number;
+      matches?: unknown[];
+    } | null;
+    if (!raw || !Array.isArray(raw.matches)) return null;
+    if (typeof raw.fetchedAt !== "number") return null;
+    if (Date.now() - raw.fetchedAt > WC2026_CLIENT_CACHE_MAX_AGE_MS) return null;
+    return buildWCMatchCollections(raw.matches as Record<string, unknown>[]);
+  } catch {
+    return null;
+  }
+}
+
+function writeWCClientSnapshot(rawMatches: Record<string, unknown>[]) {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(
+      WC2026_CLIENT_CACHE_KEY,
+      JSON.stringify({ fetchedAt: Date.now(), matches: rawMatches }),
+    );
+  } catch {
+    // Ignore storage quota/private mode failures. Live refresh still works normally.
+  }
+}
+
 function wcPhaseTag(status: string | undefined, minute: number): "1P" | "Int." | "2P" | "ET" | "PEN" | null {
   const s = (status ?? "").toLowerCase();
   if (s.includes("pen") || s.includes("shootout")) return "PEN";
@@ -1440,11 +1499,16 @@ type WCBetPayload = { matchId: string; home: string; away: string; selection: st
 
 export default function WorldCupPage({ onClose, onBet: onBetProp }: { onClose?: () => void; onBet?: (bet: WCBetPayload) => void } = {}) {
   const [, navigate] = useLocation();
-  const [liveMatches, setLiveMatches]       = useState<WCMatch[]>([]);
-  const [upcomingMatches, setUpcomingMatches] = useState<WCMatch[]>([]);
-  const [allMatches, setAllMatches]         = useState<WCMatch[]>([]);
-  const [loading, setLoading]               = useState(true);
-  const [pageTab, setPageTab]               = useState<"live" | "upcoming" | "groups">("upcoming");
+  const initialSnapshotRef = useRef<WCMatchCollections | null>(null);
+  if (initialSnapshotRef.current === null) {
+    initialSnapshotRef.current = readWCClientSnapshot();
+  }
+  const initialSnapshot = initialSnapshotRef.current ?? emptyWCMatchCollections();
+  const [liveMatches, setLiveMatches]       = useState<WCMatch[]>(initialSnapshot.liveMatches);
+  const [upcomingMatches, setUpcomingMatches] = useState<WCMatch[]>(initialSnapshot.upcomingMatches);
+  const [allMatches, setAllMatches]         = useState<WCMatch[]>(initialSnapshot.allMatches);
+  const [loading, setLoading]               = useState(initialSnapshotRef.current === null);
+  const [pageTab, setPageTab]               = useState<"live" | "upcoming" | "groups">(initialSnapshot.initialTab);
   const [openMatch, setOpenMatch]           = useState<WCMatch | null>(null);
   const [activeKeys, setActiveKeys]         = useState<Record<string, string>>({});
   const [theme, setTheme]                   = useState<Theme>(getAutoTheme);
@@ -1478,13 +1542,14 @@ export default function WorldCupPage({ onClose, onBet: onBetProp }: { onClose?: 
         const wcData = await fetch("/api/matches/wc2026", { signal: AbortSignal.timeout(15_000) })
           .then(r => r.ok ? r.json() : { matches: [] }).catch(() => ({ matches: [] }));
         if (cancelled) return;
-        const allWC = ((wcData.matches ?? []) as Record<string, unknown>[]).map(mapToWCMatch);
-        const wcLive = allWC.filter(m => m.isLive);
-        const wcUpcoming = allWC.filter(m => !m.isLive);
+        const rawMatches = Array.isArray((wcData as { matches?: unknown[] }).matches)
+          ? (((wcData as { matches?: Record<string, unknown>[] }).matches) ?? [])
+          : [];
+        const nextCollections = buildWCMatchCollections(rawMatches);
         // Update clock refs for interpolation
         const fetchTs = Date.now();
         liveDataFetchedAt.current = fetchTs;
-        for (const m of wcLive) {
+        for (const m of nextCollections.liveMatches) {
           const next = typeof m.minute === "number" && m.minute > 0 ? m.minute : 0;
           if (next > 0) {
             const prev = apiMinutesRef.current[m.id];
@@ -1499,13 +1564,14 @@ export default function WorldCupPage({ onClose, onBet: onBetProp }: { onClose?: 
         }
         // Direct set — no accumulation, no race condition with a parallel loadLive.
         // The /wc2026 endpoint always enriches with fresh liveMatchState on every request.
-        setLiveMatches(wcLive);
-        setUpcomingMatches(wcUpcoming);
-        setAllMatches(allWC);
-        if (wcLive.length > 0) setPageTab("live");
+        setLiveMatches(nextCollections.liveMatches);
+        setUpcomingMatches(nextCollections.upcomingMatches);
+        setAllMatches(nextCollections.allMatches);
+        writeWCClientSnapshot(rawMatches);
+        if (nextCollections.liveMatches.length > 0) setPageTab(prev => (prev === "upcoming" ? "live" : prev));
         // Schedule next poll using local result (not stale ref)
         if (!cancelled) {
-          const delay = wcLive.length > 0 ? 5_000 : 30_000;
+          const delay = nextCollections.liveMatches.length > 0 ? 5_000 : 30_000;
           nextTimer = setTimeout(load, delay);
         }
       } catch {
