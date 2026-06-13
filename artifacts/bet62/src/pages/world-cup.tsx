@@ -1,9 +1,9 @@
 import { useState, useEffect, useRef } from "react";
 import { useLocation } from "wouter";
 import { motion, AnimatePresence } from "framer-motion";
-import { ArrowLeft, X, BarChart2, Sun, Moon } from "lucide-react";
+import { ArrowLeft, X, BarChart2 } from "lucide-react";
 import { fetchWithTimeout } from "@/lib/fetch-timeout";
-import { getResolvedTheme, getStoredThemePreference, subscribeThemeChange, toggleThemePreference, type ResolvedTheme } from "@/lib/theme";
+import { getResolvedTheme, subscribeThemeChange, type ResolvedTheme } from "@/lib/theme";
 import { readWCClientSnapshotRaw, writeWCClientSnapshotRaw } from "@/lib/world-cup-cache";
 import trophyImg from "/trophy-wc-nobg.png";
 
@@ -1487,7 +1487,7 @@ export default function WorldCupPage({ onClose, onBet: onBetProp }: { onClose?: 
   const [pageTab, setPageTab]               = useState<"live" | "upcoming" | "groups">(initialSnapshot.initialTab);
   const [openMatch, setOpenMatch]           = useState<WCMatch | null>(null);
   const [activeKeys, setActiveKeys]         = useState<Record<string, string>>({});
-  const [theme, setTheme]                   = useState<Theme>(() => getResolvedTheme());
+  const [theme, setTheme]                   = useState<Theme>(() => getResolvedTheme(null));
   const intervalRef         = useRef<ReturnType<typeof setInterval> | null>(null);
   // ── Live clock interpolation (1-second tick, same pattern as home.tsx) ──────
   const [, setMinuteTick]    = useState(0);
@@ -1496,12 +1496,10 @@ export default function WorldCupPage({ onClose, onBet: onBetProp }: { onClose?: 
   const liveDataFetchedAt    = useRef<number | null>(null);
 
   useEffect(() => {
-    const syncTheme = () => setTheme(getResolvedTheme(getStoredThemePreference()));
+    const syncTheme = () => setTheme(getResolvedTheme(null));
     syncTheme();
     const unsubscribe = subscribeThemeChange(setTheme);
-    const id = setInterval(() => {
-      if (!getStoredThemePreference()) syncTheme();
-    }, 60_000);
+    const id = setInterval(syncTheme, 60_000);
     return () => {
       unsubscribe();
       clearInterval(id);
@@ -1672,18 +1670,6 @@ export default function WorldCupPage({ onClose, onBet: onBetProp }: { onClose?: 
           <div className={`text-base font-black tracking-tight leading-tight ${isDark ? "text-white" : "text-zinc-900"}`}>Copa do Mundo 2026</div>
         </div>
         <div className="flex items-center gap-2">
-          <button
-            onClick={() => setTheme(toggleThemePreference())}
-            className={`h-9 rounded-xl border px-3 flex items-center gap-2 transition-colors ${
-              isDark ? "bg-zinc-800 border-zinc-700/80" : "bg-white border-zinc-200"
-            }`}
-            title={theme === "dark" ? "Ativar modo claro" : "Ativar modo escuro"}
-          >
-            {theme === "dark" ? <Sun size={15} className="text-amber-400" /> : <Moon size={15} className="text-zinc-600" />}
-            <span className={`text-xs font-bold ${isDark ? "text-white" : "text-zinc-900"}`}>
-              {theme === "dark" ? "Claro" : "Escuro"}
-            </span>
-          </button>
           {liveCount > 0 && (
             <div className="flex items-center gap-1 bg-red-600/15 border border-red-500/35 rounded-full px-2.5 py-1 flex-shrink-0">
               <span className="w-1.5 h-1.5 rounded-full bg-red-400 animate-pulse" />

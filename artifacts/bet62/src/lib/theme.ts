@@ -19,6 +19,13 @@ export function getStoredThemePreference(): ThemePreference | null {
   }
 }
 
+export function clearStoredThemePreference() {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.removeItem(THEME_STORAGE_KEY);
+  } catch {}
+}
+
 export function getResolvedTheme(preference: ThemePreference | null = getStoredThemePreference()): ResolvedTheme {
   return preference ?? getAutoTheme();
 }

@@ -9,7 +9,7 @@ import {
   LogOut, User, History, Loader2, Zap, TrendingUp,
   ChevronRight, ChevronLeft, ChevronDown, ChevronUp, AlertCircle, BarChart2, Wallet, ArrowDownCircle, ArrowUpCircle, Plus, Clock, Smartphone,
   Copy, Share2, CircleDollarSign, Lock, Trash2, Check, Fingerprint, ScanFace, ShieldCheck,
-  RefreshCw, Ticket, CalendarDays, ListOrdered, Search, Sun, Moon,
+  RefreshCw, Ticket, CalendarDays, ListOrdered, Search,
 } from "lucide-react";
 import ProfileTab from "@/components/ProfileTab";
 import { Button } from "@/components/ui/button";
@@ -24,7 +24,7 @@ import {
 import { useAuth } from "@/hooks/use-auth";
 import { Elements, PaymentElement, useElements, useStripe } from "@stripe/react-stripe-js";
 import { loadStripe, type StripeElementsOptions } from "@stripe/stripe-js";
-import { getResolvedTheme, subscribeThemeChange, toggleThemePreference, type ResolvedTheme } from "@/lib/theme";
+import { getResolvedTheme, subscribeThemeChange, type ResolvedTheme } from "@/lib/theme";
 
 import arsenalBanner from "@assets/file_1778342439847_1778342557288.jpeg";
 import manCityBanner from "@assets/file_1778342444770_1778342557288.jpeg";
@@ -1824,7 +1824,8 @@ function AnimatedCopaBanner({ onOpen }: { onOpen: () => void }) {
 export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }) {
   const [, navigate] = useLocation();
   const auth = useAuth();
-  const [resolvedTheme, setResolvedTheme] = useState<ResolvedTheme>(() => getResolvedTheme());
+  const [resolvedTheme, setResolvedTheme] = useState<ResolvedTheme>(() => getResolvedTheme(null));
+  const isDarkTheme = resolvedTheme === "dark";
   const { isIdle, resetIdle } = useIdle(120_000);
   const isIdleRef = useRef(false);
   useEffect(() => subscribeThemeChange(setResolvedTheme), []);
@@ -4488,18 +4489,18 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
 
     if (isSuspended) {
       return (
-        <div className={`relative ${baseBoxClass} ${isWCVariant ? "bg-zinc-100 border-zinc-200 opacity-75" : "bg-zinc-800/40 border-zinc-700/30 opacity-70"} select-none`}>
+        <div className={`relative ${baseBoxClass} ${isWCVariant ? (isDarkTheme ? "bg-zinc-950 border-zinc-800 opacity-75" : "bg-zinc-100 border-zinc-200 opacity-75") : "bg-zinc-800/40 border-zinc-700/30 opacity-70"} select-none`}>
           <span className={`${isWCVariant ? "text-[11px] font-medium text-zinc-500" : "text-[10px] leading-none opacity-60"}`}>{label}</span>
-          <span className={`${isWCVariant ? "mt-1 text-[18px] font-black text-zinc-400" : "font-bold text-sm leading-none text-zinc-300"} tabular-nums line-through`}>{odd.toFixed(2)}</span>
+          <span className={`${isWCVariant ? `mt-1 text-[18px] font-black ${isDarkTheme ? "text-zinc-600" : "text-zinc-400"}` : "font-bold text-sm leading-none text-zinc-300"} tabular-nums line-through`}>{odd.toFixed(2)}</span>
         </div>
       );
     }
 
     if (odd < 1.15 && market === "result") {
       return (
-        <div className={`relative ${baseBoxClass} ${isWCVariant ? "bg-zinc-100 border-zinc-200" : "bg-zinc-800/40 border-zinc-700/30"}`}>
+        <div className={`relative ${baseBoxClass} ${isWCVariant ? (isDarkTheme ? "bg-zinc-950 border-zinc-800" : "bg-zinc-100 border-zinc-200") : "bg-zinc-800/40 border-zinc-700/30"}`}>
           <span className={`${isWCVariant ? "text-[11px] font-medium text-zinc-500" : "text-[10px] leading-none opacity-40"}`}>{label}</span>
-          <span className={`${isWCVariant ? "mt-1 text-[20px] font-black text-zinc-400" : "font-bold text-base leading-none text-zinc-600"} tabular-nums`}>--</span>
+          <span className={`${isWCVariant ? `mt-1 text-[20px] font-black ${isDarkTheme ? "text-zinc-600" : "text-zinc-400"}` : "font-bold text-base leading-none text-zinc-600"} tabular-nums`}>--</span>
         </div>
       );
     }
@@ -4526,14 +4527,14 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
     return (
       <button
         {...makeTap(() => toggleBet(match, selection, odd, market, label))}
-        className={`relative ${baseBoxClass} transition-colors ${isWCVariant ? "text-zinc-900" : "text-xs"} ${
+        className={`relative ${baseBoxClass} transition-colors ${isWCVariant ? (isDarkTheme ? "text-white" : "text-zinc-900") : "text-xs"} ${
           isSelected
             ? (isWCVariant ? "bg-red-600 border-red-600 text-white" : "bg-red-600 text-white")
-            : (isWCVariant ? "bg-zinc-50 hover:bg-zinc-100 border-zinc-200" : "bg-zinc-800 hover:bg-zinc-700 text-zinc-300")
+            : (isWCVariant ? (isDarkTheme ? "bg-zinc-950 hover:bg-zinc-900 border-zinc-800" : "bg-zinc-50 hover:bg-zinc-100 border-zinc-200") : "bg-zinc-800 hover:bg-zinc-700 text-zinc-300")
         } ${flashClass}`}
       >
-        <span className={`${isWCVariant ? `text-[11px] font-medium ${isSelected ? "text-white/85" : "text-zinc-500"}` : "text-[10px] leading-none opacity-70"}`}>{label}</span>
-        <span className={`${isWCVariant ? "mt-1 text-[20px] font-black leading-none text-zinc-900" : "font-bold text-sm leading-none"} ${isSelected && isWCVariant ? "!text-white" : ""} tabular-nums flex items-center gap-0.5`}>
+        <span className={`${isWCVariant ? `text-[11px] font-medium ${isSelected ? "text-white/85" : isDarkTheme ? "text-zinc-400" : "text-zinc-500"}` : "text-[10px] leading-none opacity-70"}`}>{label}</span>
+        <span className={`${isWCVariant ? `mt-1 text-[20px] font-black leading-none ${isDarkTheme ? "text-white" : "text-zinc-900"}` : "font-bold text-sm leading-none"} ${isSelected && isWCVariant ? "!text-white" : ""} tabular-nums flex items-center gap-0.5`}>
           {odd.toFixed(2)}
           {oddsUp   && <span className="text-green-400 text-[9px] font-black leading-none shrink-0">▲</span>}
           {oddsDown && <span className="text-red-400  text-[9px] font-black leading-none shrink-0">▼</span>}
@@ -5004,14 +5005,18 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
       <motion.div
         {...motionProps}
         {...makeTap(() => setExpandedMatch(match))}
-        className="relative overflow-hidden rounded-[24px] border border-zinc-200 bg-white shadow-[0_10px_24px_rgba(0,0,0,0.08)] transition-transform cursor-pointer active:scale-[0.99]"
+        className={`relative overflow-hidden rounded-[24px] border transition-transform cursor-pointer active:scale-[0.99] ${
+          isDarkTheme
+            ? "border-slate-700 bg-slate-800 shadow-[0_12px_28px_rgba(0,0,0,0.30)]"
+            : "border-zinc-200 bg-white shadow-[0_10px_24px_rgba(0,0,0,0.08)]"
+        }`}
       >
         <div className="absolute top-0 left-0 right-0 h-[3px] bg-gradient-to-r from-yellow-400 via-orange-500 to-red-600" />
         <div className="px-3.5 pt-3.5 pb-3">
           <div className="flex items-center justify-between gap-3 mb-2.5">
             <div className="min-w-0 flex items-center gap-2">
               <span className="text-sm leading-none shrink-0">{sport === "football" ? "🏆" : flag}</span>
-              <span className="text-[11px] font-black tracking-[0.18em] uppercase text-zinc-500 truncate">{match.league}</span>
+              <span className={`text-[11px] font-black tracking-[0.18em] uppercase truncate ${isDarkTheme ? "text-zinc-300" : "text-zinc-500"}`}>{match.league}</span>
             </div>
             <div className="shrink-0">{liveBadge}</div>
           </div>
@@ -5020,7 +5025,7 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
               {rivalry}
             </div>
           )}
-          <div className="rounded-[20px] bg-zinc-950 px-3 py-3 border border-zinc-900/80">
+          <div className={`rounded-[20px] px-3 py-3 border ${isDarkTheme ? "bg-zinc-950 border-zinc-900/80" : "bg-zinc-950 border-zinc-900/80"}`}>
             <div className="flex items-center justify-between gap-2.5 mb-2">
               <div className="flex-1 flex flex-col items-center gap-1.5 min-w-0">
                 <EventTeamBadge name={homeName} badge={homeBadge} sport={sport} flag={flag} compact />
@@ -5123,7 +5128,11 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
 
     return (
       <div
-        className="relative overflow-hidden rounded-[24px] border border-zinc-200 bg-white shadow-[0_10px_24px_rgba(0,0,0,0.08)] transition-transform cursor-pointer active:scale-[0.99]"
+        className={`relative overflow-hidden rounded-[24px] border transition-transform cursor-pointer active:scale-[0.99] ${
+          isDarkTheme
+            ? "border-slate-700 bg-slate-800 shadow-[0_12px_28px_rgba(0,0,0,0.30)]"
+            : "border-zinc-200 bg-white shadow-[0_10px_24px_rgba(0,0,0,0.08)]"
+        }`}
         {...makeTap(() => setExpandedMatch(match))}
       >
         <div className="absolute top-0 left-0 right-0 h-[3px] bg-gradient-to-r from-yellow-400 via-orange-500 to-red-600" />
@@ -5131,11 +5140,11 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
           <div className="flex items-center justify-between gap-3 mb-2.5">
             <div className="min-w-0 flex items-center gap-2">
               <span className="text-sm leading-none shrink-0">{sport === "football" ? "🏆" : flag}</span>
-              <span className="text-[11px] font-black tracking-[0.18em] uppercase text-zinc-500 truncate">
+              <span className={`text-[11px] font-black tracking-[0.18em] uppercase truncate ${isDarkTheme ? "text-zinc-300" : "text-zinc-500"}`}>
                 {match.league}
               </span>
             </div>
-            <div className="text-[13px] font-medium text-zinc-500 shrink-0">
+            <div className={`text-[13px] font-medium shrink-0 ${isDarkTheme ? "text-zinc-300" : "text-zinc-500"}`}>
               {dateStr}{match.time ? ` • ${match.time}` : ""}
             </div>
           </div>
@@ -5144,21 +5153,21 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
               {rivalry}
             </div>
           )}
-          <div className="flex items-center justify-between gap-2.5 mb-2.5">
+          <div className={`flex items-center justify-between gap-2.5 mb-2.5 ${isDarkTheme ? "rounded-[20px] bg-zinc-950 border border-zinc-900/80 px-3 py-3" : ""}`}>
             <div className="flex-1 flex flex-col items-center gap-1.5 min-w-0">
               <EventTeamBadge name={homeName} badge={homeBadge} sport={sport} flag={flag} compact />
-              <span className="text-[14px] font-black text-zinc-900 text-center leading-tight px-1">
+              <span className={`text-[14px] font-black text-center leading-tight px-1 ${isDarkTheme ? "text-white" : "text-zinc-900"}`}>
                 {homeName}
               </span>
             </div>
             <div className="min-w-[68px] flex flex-col items-center">
               <span className="text-[16px] font-black text-zinc-500 tracking-wide">VS</span>
-              {match.time && <span className="mt-0.5 text-[16px] font-black text-zinc-900">{match.time}</span>}
-              {dateStr && <span className="mt-0.5 text-[11px] font-semibold text-zinc-500">{dateStr}</span>}
+              {match.time && <span className={`mt-0.5 text-[16px] font-black ${isDarkTheme ? "text-white" : "text-zinc-900"}`}>{match.time}</span>}
+              {dateStr && <span className={`mt-0.5 text-[11px] font-semibold ${isDarkTheme ? "text-zinc-400" : "text-zinc-500"}`}>{dateStr}</span>}
             </div>
             <div className="flex-1 flex flex-col items-center gap-1.5 min-w-0">
               <EventTeamBadge name={awayName} badge={awayBadge} sport={sport} flag={flag} compact />
-              <span className="text-[14px] font-black text-zinc-900 text-center leading-tight px-1">
+              <span className={`text-[14px] font-black text-center leading-tight px-1 ${isDarkTheme ? "text-white" : "text-zinc-900"}`}>
                 {awayName}
               </span>
             </div>
@@ -5827,9 +5836,11 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
     if (isSusp) {
       // Show a locked placeholder so section headers don't look empty
       return (
-        <div className="flex-1 flex flex-col items-center justify-center min-w-0 h-[64px] rounded-2xl border border-zinc-200 bg-zinc-100 opacity-70 cursor-not-allowed select-none px-2.5">
-          <span className="text-[11px] font-medium text-zinc-500 leading-tight text-center truncate w-full px-0.5">{label}</span>
-          <svg className="text-zinc-400 mt-1" width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zm-6 9c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2zm3.1-9H8.9V6c0-1.71 1.39-3.1 3.1-3.1 1.71 0 3.1 1.39 3.1 3.1v2z"/></svg>
+        <div className={`flex-1 flex flex-col items-center justify-center min-w-0 h-[64px] rounded-2xl border opacity-70 cursor-not-allowed select-none px-2.5 ${
+          isDarkTheme ? "border-zinc-800 bg-zinc-950" : "border-zinc-200 bg-zinc-100"
+        }`}>
+          <span className={`text-[11px] font-medium leading-tight text-center truncate w-full px-0.5 ${isDarkTheme ? "text-zinc-400" : "text-zinc-500"}`}>{label}</span>
+          <svg className={`${isDarkTheme ? "text-zinc-600" : "text-zinc-400"} mt-1`} width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zm-6 9c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2zm3.1-9H8.9V6c0-1.71 1.39-3.1 3.1-3.1 1.71 0 3.1 1.39 3.1 3.1v2z"/></svg>
         </div>
       );
     }
@@ -5846,11 +5857,11 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
         className={`flex-1 flex flex-col items-center justify-center min-w-0 h-[64px] px-2.5 rounded-2xl border transition-all ${
           active
             ? "border-red-600 bg-red-600 text-white shadow-[0_10px_20px_rgba(220,38,38,0.22)]"
-            : "border-zinc-200 bg-zinc-50 hover:bg-zinc-100"
+            : isDarkTheme ? "border-zinc-800 bg-zinc-950 hover:bg-zinc-900" : "border-zinc-200 bg-zinc-50 hover:bg-zinc-100"
         } ${flashClass}`}
       >
-        <span className={`text-[11px] font-medium leading-tight text-center truncate w-full px-0.5 ${active ? "text-white/85" : "text-zinc-500"}`}>{label}</span>
-        <span className={`mt-1 font-black text-[20px] leading-none tabular-nums flex items-center gap-0.5 ${active ? "text-white" : "text-zinc-900"}`}>
+        <span className={`text-[11px] font-medium leading-tight text-center truncate w-full px-0.5 ${active ? "text-white/85" : isDarkTheme ? "text-zinc-400" : "text-zinc-500"}`}>{label}</span>
+        <span className={`mt-1 font-black text-[20px] leading-none tabular-nums flex items-center gap-0.5 ${active ? "text-white" : isDarkTheme ? "text-white" : "text-zinc-900"}`}>
           {odd.toFixed(2)}
           {oddUp   && <span className="text-green-400 text-[9px] font-black leading-none shrink-0">▲</span>}
           {oddDown && <span className="text-red-400  text-[9px] font-black leading-none shrink-0">▼</span>}
@@ -7786,16 +7797,6 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
           </div>
 
           <div className="flex items-center gap-2">
-            <button
-              onClick={() => setResolvedTheme(toggleThemePreference())}
-              className="h-9 rounded-xl border border-zinc-700 bg-zinc-800 hover:border-zinc-500 px-3 flex items-center gap-2 transition-colors shrink-0"
-              title={resolvedTheme === "dark" ? "Ativar modo claro" : "Ativar modo escuro"}
-            >
-              {resolvedTheme === "dark" ? <Sun size={15} className="text-amber-400" /> : <Moon size={15} className="text-zinc-300" />}
-              <span className="hidden sm:inline text-xs font-bold text-white">
-                {resolvedTheme === "dark" ? "Claro" : "Escuro"}
-              </span>
-            </button>
             {auth.user ? (
               <>
                 {/* Free Bet balance pill — always visible */}

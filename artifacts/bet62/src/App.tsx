@@ -6,7 +6,7 @@ import { AuthProvider } from "@/hooks/use-auth";
 import { useState, useEffect, lazy, Suspense, Component, type ReactNode } from "react";
 import { fetchWithTimeout } from "@/lib/fetch-timeout";
 import { hardResetPwaAndReload } from "@/lib/pwa";
-import { applyThemePreference, getStoredThemePreference, getResolvedTheme, subscribeThemeChange, type ResolvedTheme } from "@/lib/theme";
+import { applyThemePreference, clearStoredThemePreference, getResolvedTheme, subscribeThemeChange, type ResolvedTheme } from "@/lib/theme";
 import { readWCClientSnapshotRaw, writeWCClientSnapshotRaw } from "@/lib/world-cup-cache";
 import NotFound from "@/pages/not-found";
 import Home from "@/pages/home";
@@ -90,15 +90,14 @@ function Router() {
 function App() {
   const isAdmin = window.location.pathname.replace(/\/$/, "").endsWith("/admin");
   const [splashDone, setSplashDone] = useState(isAdmin);
-  const [resolvedTheme, setResolvedTheme] = useState<ResolvedTheme>(() => getResolvedTheme());
+  const [resolvedTheme, setResolvedTheme] = useState<ResolvedTheme>(() => getResolvedTheme(null));
 
   useEffect(() => {
-    const syncTheme = () => setResolvedTheme(applyThemePreference(getStoredThemePreference()));
+    clearStoredThemePreference();
+    const syncTheme = () => setResolvedTheme(applyThemePreference(null));
     syncTheme();
     const unsubscribe = subscribeThemeChange(setResolvedTheme);
-    const id = setInterval(() => {
-      if (!getStoredThemePreference()) syncTheme();
-    }, 60_000);
+    const id = setInterval(syncTheme, 60_000);
     return () => {
       unsubscribe();
       clearInterval(id);
