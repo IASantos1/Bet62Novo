@@ -4944,32 +4944,44 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
     const isPenShootout = match.isLive && sport === "football" && !!match.markets?.penExtra;
 
     const canShowOdds = !!(match.hasRealOdds || (match.odds.home > 0 && match.odds.away > 0));
+    const stopLiveCardOpen = (e: { stopPropagation: () => void }) => e.stopPropagation();
+    const homeBadge = getTeamBanner(match.home, match.country);
+    const awayBadge = getTeamBanner(match.away, match.country);
     const oddsRow = (canShowOdds || match.isLive) ? (
-      <>
+      <div
+        className="flex flex-col gap-1.5 w-full mt-1.5"
+        onClick={stopLiveCardOpen}
+        onTouchStart={stopLiveCardOpen}
+        onTouchMove={stopLiveCardOpen}
+        onTouchEnd={stopLiveCardOpen}
+        onPointerDown={stopLiveCardOpen}
+        onPointerMove={stopLiveCardOpen}
+        onPointerUp={stopLiveCardOpen}
+      >
         {isPenShootout && !isLiveSuspended && (
-          <div className="text-[9px] font-black uppercase tracking-widest text-yellow-400 text-center mt-2">🎯 Vencedor da Final</div>
+          <div className="text-[9px] font-black uppercase tracking-widest text-amber-500 text-center">🎯 Vencedor da Final</div>
         )}
-        <div className="flex gap-2 w-full mt-1.5">
-          <SuspensionBanner match={match} />
+        <SuspensionBanner match={match} />
+        <div className="flex gap-2 w-full">
           {!isLiveSuspended && isPenShootout ? (<>
-            <OddsButton match={match} selection="pen-home" odd={match.markets!.penExtra!.winner.home} market="penaltis" label={homeName.split(" ").slice(-1)[0]!} grow />
-            <OddsButton match={match} selection="pen-away" odd={match.markets!.penExtra!.winner.away} market="penaltis" label={awayName.split(" ").slice(-1)[0]!} grow />
+            <OddsButton match={match} selection="pen-home" odd={match.markets!.penExtra!.winner.home} market="penaltis" label={homeName.split(" ").slice(-1)[0]!} grow variant="worldcup" />
+            <OddsButton match={match} selection="pen-away" odd={match.markets!.penExtra!.winner.away} market="penaltis" label={awayName.split(" ").slice(-1)[0]!} grow variant="worldcup" />
           </>) : !isLiveSuspended ? (
             isObviousLiveResult ? (
               <button
-                className="flex-1 flex flex-col items-center py-2.5 px-2 rounded-md text-xs bg-amber-900/20 border border-amber-600/30"
+                className="flex-1 flex flex-col items-center py-3 px-2 rounded-2xl text-xs border border-amber-200 bg-amber-50"
                 {...makeTap(() => setExpandedMatch(match))}
               >
-                <span className="font-bold text-[11px] text-amber-400 uppercase tracking-wider">Aposta Já</span>
+                <span className="font-black text-[11px] text-amber-600 uppercase tracking-widest">Aposta Já</span>
               </button>
             ) : (<>
-              <OddsButton match={match} selection="home" odd={match.odds.home} market="result" label="Casa" grow />
-              {match.odds.draw > 0 && <OddsButton match={match} selection="draw" odd={match.odds.draw} market="result" label="Emp." grow />}
-              <OddsButton match={match} selection="away" odd={match.odds.away} market="result" label="Fora" grow />
+              <OddsButton match={match} selection="home" odd={match.odds.home} market="result" label={homeName.split(" ").slice(-1)[0]!} grow variant="worldcup" />
+              {match.odds.draw > 0 && <OddsButton match={match} selection="draw" odd={match.odds.draw} market="result" label="Empate" grow variant="worldcup" />}
+              <OddsButton match={match} selection="away" odd={match.odds.away} market="result" label={awayName.split(" ").slice(-1)[0]!} grow variant="worldcup" />
             </>)
           ) : null}
         </div>
-      </>
+      </div>
     ) : null;
 
     if (bannerImg) {
@@ -5037,15 +5049,53 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
       <motion.div
         {...motionProps}
         {...makeTap(() => setExpandedMatch(match))}
-        className="bg-zinc-900 rounded-lg border border-zinc-800 hover:border-red-500/30 transition-colors cursor-pointer overflow-hidden"
+        className="relative overflow-hidden rounded-[24px] border border-zinc-200 bg-white shadow-[0_10px_24px_rgba(0,0,0,0.08)] transition-transform cursor-pointer active:scale-[0.99]"
       >
-        <CompactLeagueRow match={match} rightSlot={liveBadge} />
-        <div className="px-3 py-2.5" onClick={e => e.stopPropagation()} onTouchStart={e => e.stopPropagation()} onTouchMove={e => e.stopPropagation()} onTouchEnd={e => e.stopPropagation()} onPointerDown={e => e.stopPropagation()} onPointerMove={e => e.stopPropagation()} onPointerUp={e => e.stopPropagation()}>
-          {sport === "tennis"     ? <TennisScore /> :
-           sport === "volleyball" ? <VolleyScore /> :
-           sport === "hockey"     ? <HockeyScore /> :
-           sport === "baseball"   ? <BaseballScore /> :
-           <SimpleScore />}
+        <div className="absolute top-0 left-0 right-0 h-[3px] bg-gradient-to-r from-yellow-400 via-orange-500 to-red-600" />
+        <div className="px-3.5 pt-3.5 pb-3">
+          <div className="flex items-center justify-between gap-3 mb-2.5">
+            <div className="min-w-0 flex items-center gap-2">
+              <span className="text-sm leading-none shrink-0">{sport === "football" ? "🏆" : flag}</span>
+              <span className="text-[11px] font-black tracking-[0.18em] uppercase text-zinc-500 truncate">{match.league}</span>
+            </div>
+            <div className="shrink-0">{liveBadge}</div>
+          </div>
+          {rivalry && (
+            <div className="mb-2 text-[9px] font-black uppercase tracking-[0.2em] text-red-500 text-center">
+              {rivalry}
+            </div>
+          )}
+          <div className="rounded-[20px] bg-zinc-950 px-3 py-3 border border-zinc-900/80">
+            <div className="flex items-center justify-between gap-2.5 mb-2">
+              <div className="flex-1 flex flex-col items-center gap-1.5 min-w-0">
+                <EventTeamBadge name={homeName} badge={homeBadge} sport={sport} flag={flag} compact />
+                <span className="text-[13px] font-black text-white text-center leading-tight px-1">{homeName}</span>
+              </div>
+              <div className="min-w-[68px] flex flex-col items-center">
+                <span className="text-[16px] font-black text-zinc-500 tracking-wide">VS</span>
+                {isEmBreve ? (
+                  <>
+                    {match.time && <span className="mt-0.5 text-[16px] font-black text-white">{match.time}</span>}
+                    {dateStr && <span className="mt-0.5 text-[11px] font-semibold text-zinc-400">{dateStr}</span>}
+                  </>
+                ) : sport === "football" || sport === "basketball" ? (
+                  <span className="mt-1 text-[26px] font-black text-white tabular-nums">
+                    {match.homeScore ?? 0}<span className="text-zinc-500 mx-1">-</span>{match.awayScore ?? 0}
+                  </span>
+                ) : null}
+              </div>
+              <div className="flex-1 flex flex-col items-center gap-1.5 min-w-0">
+                <EventTeamBadge name={awayName} badge={awayBadge} sport={sport} flag={flag} compact />
+                <span className="text-[13px] font-black text-white text-center leading-tight px-1">{awayName}</span>
+              </div>
+            </div>
+            {sport === "tennis"     ? <TennisScore /> :
+             sport === "volleyball" ? <VolleyScore /> :
+             sport === "hockey"     ? <HockeyScore /> :
+             sport === "baseball"   ? <BaseballScore /> :
+             sport === "basketball" || sport === "football" ? null :
+             <SimpleScore />}
+          </div>
           {oddsRow}
         </div>
       </motion.div>
