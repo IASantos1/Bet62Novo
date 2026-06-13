@@ -11489,7 +11489,17 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
                                 const outcome = getSelOutcome(sel, bet.status);
                                 const lm = isActivePending ? findLiveMatchForSel(sel) : null;
                                 const liveOdd = lm ? getLiveOddForSel(sel, lm) : null;
-                                const displayMin = lm ? (lm.status === "HT" ? "HT" : `${lm.minute ?? 0}'`) : null;
+                                const isSelectionLive = !!lm && (
+                                  lm.isLive === true
+                                  || (!!lm.status && !["Not Started", "Encerrado", "Finished"].includes(lm.status))
+                                );
+                                const displayMin = lm
+                                  ? (lm.status === "HT"
+                                    ? "HT"
+                                    : lm.sport === "tennis"
+                                      ? (lm.status ?? "Em Jogo")
+                                      : `${lm.minute ?? 0}'`)
+                                  : null;
 
                                 // Per-selection left icon
                                 let leftIcon: ReactNode;
@@ -11558,7 +11568,7 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
                                         );
                                       })()}
                                       {/* Live / upcoming badge */}
-                                      {lm && lm.status !== "Not Started" && (lm.minute ?? 0) > 0 && (
+                                      {isSelectionLive && (
                                         <div className="flex items-center gap-2 mt-1.5 flex-wrap">
                                           <span className="flex items-center gap-1 bg-red-600 text-white text-[10px] font-black px-2 py-0.5 rounded-full">
                                             Ao vivo <span className="inline-block w-1.5 h-1.5 rounded-full bg-white animate-pulse ml-0.5" />
@@ -11571,7 +11581,7 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
                                           )}
                                         </div>
                                       )}
-                                      {lm && (lm.status === "Not Started" || (lm.minute ?? 0) === 0) && (
+                                      {lm && !isSelectionLive && (
                                         <div className="flex items-center gap-2 mt-1.5">
                                           <span className="flex items-center gap-1 bg-zinc-700 text-zinc-200 text-[10px] font-black px-2 py-0.5 rounded-full">
                                             <Clock size={9} />
