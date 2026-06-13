@@ -4984,67 +4984,6 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
       </div>
     ) : null;
 
-    if (bannerImg) {
-      return (
-        <motion.div
-          {...motionProps}
-          {...makeTap(() => setExpandedMatch(match))}
-          className="banner-card rounded-xl border border-zinc-800 hover:border-red-500/40 transition-colors cursor-pointer overflow-hidden"
-        >
-          {/* Image section — visible at top */}
-          <div className="relative w-full overflow-hidden" style={{ aspectRatio: "16/7" }}>
-            <img src={bannerImg} alt={`${match.home} contra ${match.away} — ${match.league}`} className="absolute inset-0 w-full h-full object-cover" style={{ filter: "brightness(0.7) saturate(1.1)" }} loading="lazy" decoding="async" />
-            <div className="absolute inset-0" style={{ background: "linear-gradient(to bottom, rgba(0,0,0,0.1) 0%, rgba(0,0,0,0.55) 100%)" }} />
-            <div className="absolute top-0 left-0 right-0 flex items-center justify-between px-3 pt-2.5">
-              <div className="flex items-center gap-1.5">
-                <div className="relative w-4 h-4 flex items-center justify-center leading-none text-xs">{flag}</div>
-                <span className="text-[11px] font-medium" style={{ color: '#ffffffcc', textShadow: "0 1px 3px rgba(0,0,0,1)" }}>{match.league}</span>
-              </div>
-              <div className="flex items-center gap-2">{liveBadge}</div>
-            </div>
-            {rivalry && (
-              <div className="absolute bottom-2 left-3 text-[10px] font-black uppercase tracking-widest" style={{ color: '#f87171', textShadow: "0 1px 3px rgba(0,0,0,1)" }}>{rivalry}</div>
-            )}
-          </div>
-          {/* Content below image */}
-          <div className="px-3 pt-2 pb-3" style={{ background: "#0f0f0f" }} onClick={e => e.stopPropagation()} onTouchStart={e => e.stopPropagation()} onTouchMove={e => e.stopPropagation()} onTouchEnd={e => e.stopPropagation()} onPointerDown={e => e.stopPropagation()} onPointerMove={e => e.stopPropagation()} onPointerUp={e => e.stopPropagation()}>
-            <div className="mb-2">
-              {sport === "tennis"     ? <TennisScore /> :
-               sport === "volleyball" ? <VolleyScore /> :
-               sport === "hockey"     ? <HockeyScore big /> :
-               sport === "baseball"   ? <BaseballScore big /> :
-               <SimpleScore big />}
-            </div>
-            {canShowOdds && (<>
-              {isPenShootout && !isLiveSuspended && (
-                <div className="text-[9px] font-black uppercase tracking-widest text-yellow-400 text-center mb-1">🎯 Vencedor da Final</div>
-              )}
-              <div className="flex gap-2 w-full">
-                <SuspensionBanner match={match} />
-                {!isLiveSuspended && isPenShootout ? (<>
-                  <OddsButton match={match} selection="pen-home" odd={match.markets!.penExtra!.winner.home} market="penaltis" label={match.home.split(" ").slice(-1)[0]!} grow />
-                  <OddsButton match={match} selection="pen-away" odd={match.markets!.penExtra!.winner.away} market="penaltis" label={match.away.split(" ").slice(-1)[0]!} grow />
-                </>) : !isLiveSuspended ? (
-                  isObviousLiveResult ? (
-                    <button
-                      className="flex-1 flex flex-col items-center py-2.5 px-2 rounded-md text-xs bg-amber-900/20 border border-amber-600/30"
-                      {...makeTap(() => setExpandedMatch(match))}
-                    >
-                      <span className="font-bold text-[11px] text-amber-400 uppercase tracking-wider">Aposta Já</span>
-                    </button>
-                  ) : (<>
-                    <OddsButton match={match} selection="home" odd={match.odds.home} market="result" label="Casa" grow />
-                    {match.odds.draw > 0 && <OddsButton match={match} selection="draw" odd={match.odds.draw} market="result" label="Emp." grow />}
-                    <OddsButton match={match} selection="away" odd={match.odds.away} market="result" label="Fora" grow />
-                  </>)
-                ) : null}
-              </div>
-            </>)}
-          </div>
-        </motion.div>
-      );
-    }
-
     return (
       <motion.div
         {...motionProps}
