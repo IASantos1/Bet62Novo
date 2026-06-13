@@ -94,23 +94,6 @@ type WCMatch = {
   };
 };
 
-type WCGroupStandingRow = {
-  pos: number;
-  name: string;
-  played: number;
-  won: number;
-  drawn: number;
-  lost: number;
-  gf: number;
-  ga: number;
-  pts: number;
-};
-
-type WCGroupStanding = {
-  name: string;
-  rows: WCGroupStandingRow[];
-};
-
 // ─── Date helpers ─────────────────────────────────────────────────────────────
 
 function parseMatchDate(date: string | undefined): Date | null {
@@ -295,17 +278,6 @@ const WC_GROUPS = [
   { group: "L", teams: ["England", "Croatia", "Ghana", "Panama"] },
 ];
 
-function normalizeWCGroupLabel(raw: string | undefined): string {
-  const value = String(raw ?? "").replace(/\s+/g, " ").trim();
-  if (!value) return "";
-  const explicit = value.match(/(?:^|\b)(?:grupo|group)\s*([A-L])(?:\b|$)/i);
-  if (explicit?.[1]) return `Grupo ${explicit[1].toUpperCase()}`;
-  const reversed = value.match(/^([A-L])\s*(?:grupo|group)\b/i);
-  if (reversed?.[1]) return `Grupo ${reversed[1].toUpperCase()}`;
-  if (/^[A-L]$/i.test(value)) return `Grupo ${value.toUpperCase()}`;
-  return value;
-}
-
 // ─── Map API response → WCMatch ───────────────────────────────────────────────
 
 function mapToWCMatch(m: Record<string, unknown>): WCMatch {
@@ -350,6 +322,65 @@ function mapToWCMatch(m: Record<string, unknown>): WCMatch {
     redCardsAway: m.redCardsAway as number | undefined,
     _liveExtra: m._liveExtra as WCMatch["_liveExtra"] | undefined,
   };
+}
+
+type WCMatchCollections = {
+  allMatches: WCMatch[];
+  liveMatches: WCMatch[];
+  upcomingMatches: WCMatch[];
+  initialTab: "live" | "upcoming";
+};
+
+const WC2026_CLIENT_CACHE_KEY = "wc2026_page_snapshot_v1";
+const WC2026_CLIENT_CACHE_MAX_AGE_MS = 2 * 60_000;
+
+function emptyWCMatchCollections(): WCMatchCollections {
+  return {
+    allMatches: [],
+    liveMatches: [],
+    upcomingMatches: [],
+    initialTab: "upcoming",
+  };
+}
+
+function buildWCMatchCollections(rawMatches: Record<string, unknown>[]): WCMatchCollections {
+  const allWC = rawMatches.map(mapToWCMatch);
+  const wcLive = allWC.filter(m => m.isLive);
+  const wcUpcoming = allWC.filter(m => !m.isLive);
+  return {
+    allMatches: allWC,
+    liveMatches: wcLive,
+    upcomingMatches: wcUpcoming,
+    initialTab: wcLive.length > 0 ? "live" : "upcoming",
+  };
+}
+
+function readWCClientSnapshot(): WCMatchCollections | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = JSON.parse(window.localStorage.getItem(WC2026_CLIENT_CACHE_KEY) ?? "null") as {
+      fetchedAt?: number;
+      matches?: unknown[];
+    } | null;
+    if (!raw || !Array.isArray(raw.matches)) return null;
+    if (typeof raw.fetchedAt !== "number") return null;
+    if (Date.now() - raw.fetchedAt > WC2026_CLIENT_CACHE_MAX_AGE_MS) return null;
+    return buildWCMatchCollections(raw.matches as Record<string, unknown>[]);
+  } catch {
+    return null;
+  }
+}
+
+function writeWCClientSnapshot(rawMatches: Record<string, unknown>[]) {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(
+      WC2026_CLIENT_CACHE_KEY,
+      JSON.stringify({ fetchedAt: Date.now(), matches: rawMatches }),
+    );
+  } catch {
+    // Ignore storage quota/private mode failures. Live refresh still works normally.
+  }
 }
 
 function wcPhaseTag(status: string | undefined, minute: number): "1P" | "Int." | "2P" | "ET" | "PEN" | null {
@@ -581,7 +612,7 @@ function MatchCard({ match, onOpen, activeSel, onQuickBet, theme, displayMinute 
 
 // ─── Group Standings Card ─────────────────────────────────────────────────────
 
-type GroupRow = { team: string; pld: number; w: number; d: number; l: number; gf: number; ga: number; pts: number; pos?: number };
+type GroupRow = { team: string; pld: number; w: number; d: number; l: number; gf: number; ga: number; pts: number };
 
 function computeGroupStandings(teams: string[], matches: WCMatch[]): GroupRow[] {
   const norm = (s: string) => s.toLowerCase().replace(/[\s.'-]+/g, "");
@@ -609,33 +640,9 @@ function computeGroupStandings(teams: string[], matches: WCMatch[]): GroupRow[] 
   );
 }
 
-function GroupCard({
-  group,
-  teams,
-  allMatches,
-  theme,
-  realRows,
-}: {
-  group: string;
-  teams: string[];
-  allMatches: WCMatch[];
-  theme: Theme;
-  realRows?: WCGroupStandingRow[];
-}) {
+function GroupCard({ group, teams, allMatches, theme }: { group: string; teams: string[]; allMatches: WCMatch[]; theme: Theme }) {
   const isDark = theme === "dark";
-  const rows = (realRows && realRows.length > 0)
-    ? realRows.map((row) => ({
-        team: row.name,
-        pld: row.played,
-        w: row.won,
-        d: row.drawn,
-        l: row.lost,
-        gf: row.gf,
-        ga: row.ga,
-        pts: row.pts,
-        pos: row.pos,
-      }))
-    : computeGroupStandings(teams, allMatches);
+  const rows = computeGroupStandings(teams, allMatches);
   return (
     <div className={`rounded-xl border overflow-hidden ${isDark ? "border-zinc-800 bg-zinc-900/80" : "border-zinc-200 bg-white"}`}>
       {/* Header */}
@@ -661,7 +668,7 @@ function GroupCard({
       <div className={`divide-y ${isDark ? "divide-zinc-800/30" : "divide-zinc-100"}`}>
         {rows.map((row, i) => (
           <div key={row.team} className="flex items-center px-2 py-1.5">
-            <span className={`text-[9px] font-black w-4 text-center ${i < 2 ? "text-green-500" : isDark ? "text-zinc-600" : "text-zinc-400"}`}>{row.pos ?? i + 1}</span>
+            <span className={`text-[9px] font-black w-4 text-center ${i < 2 ? "text-green-500" : isDark ? "text-zinc-600" : "text-zinc-400"}`}>{i + 1}</span>
             <FlagImg name={row.team} size={16} />
             <span className={`flex-1 text-[10px] font-semibold truncate ml-1.5 ${isDark ? "text-zinc-300" : "text-zinc-700"}`}>{PT_DISPLAY_NAMES[row.team] ?? row.team}</span>
             <span className={`w-5 text-center text-[10px] ${isDark ? "text-zinc-500" : "text-zinc-500"}`}>{row.pld}</span>
@@ -1492,12 +1499,16 @@ type WCBetPayload = { matchId: string; home: string; away: string; selection: st
 
 export default function WorldCupPage({ onClose, onBet: onBetProp }: { onClose?: () => void; onBet?: (bet: WCBetPayload) => void } = {}) {
   const [, navigate] = useLocation();
-  const [liveMatches, setLiveMatches]       = useState<WCMatch[]>([]);
-  const [upcomingMatches, setUpcomingMatches] = useState<WCMatch[]>([]);
-  const [allMatches, setAllMatches]         = useState<WCMatch[]>([]);
-  const [standingsGroups, setStandingsGroups] = useState<WCGroupStanding[]>([]);
-  const [loading, setLoading]               = useState(true);
-  const [pageTab, setPageTab]               = useState<"live" | "upcoming" | "groups">("upcoming");
+  const initialSnapshotRef = useRef<WCMatchCollections | null>(null);
+  if (initialSnapshotRef.current === null) {
+    initialSnapshotRef.current = readWCClientSnapshot();
+  }
+  const initialSnapshot = initialSnapshotRef.current ?? emptyWCMatchCollections();
+  const [liveMatches, setLiveMatches]       = useState<WCMatch[]>(initialSnapshot.liveMatches);
+  const [upcomingMatches, setUpcomingMatches] = useState<WCMatch[]>(initialSnapshot.upcomingMatches);
+  const [allMatches, setAllMatches]         = useState<WCMatch[]>(initialSnapshot.allMatches);
+  const [loading, setLoading]               = useState(initialSnapshotRef.current === null);
+  const [pageTab, setPageTab]               = useState<"live" | "upcoming" | "groups">(initialSnapshot.initialTab);
   const [openMatch, setOpenMatch]           = useState<WCMatch | null>(null);
   const [activeKeys, setActiveKeys]         = useState<Record<string, string>>({});
   const [theme, setTheme]                   = useState<Theme>(getAutoTheme);
@@ -1528,23 +1539,17 @@ export default function WorldCupPage({ onClose, onBet: onBetProp }: { onClose?: 
     async function load() {
       if (cancelled) return;
       try {
-        const [wcData, standingsData] = await Promise.all([
-          fetch("/api/matches/wc2026", { signal: AbortSignal.timeout(15_000) })
-            .then(r => r.ok ? r.json() : { matches: [] }).catch(() => ({ matches: [] })),
-          fetch("/api/matches/wc2026-standings", { signal: AbortSignal.timeout(15_000) })
-            .then(r => r.ok ? r.json() : { groups: [] }).catch(() => ({ groups: [] })),
-        ]);
+        const wcData = await fetch("/api/matches/wc2026", { signal: AbortSignal.timeout(15_000) })
+          .then(r => r.ok ? r.json() : { matches: [] }).catch(() => ({ matches: [] }));
         if (cancelled) return;
-        const allWC = ((wcData.matches ?? []) as Record<string, unknown>[]).map(mapToWCMatch);
-        const wcGroups = Array.isArray((standingsData as { groups?: unknown[] }).groups)
-          ? ((standingsData as { groups?: WCGroupStanding[] }).groups ?? [])
+        const rawMatches = Array.isArray((wcData as { matches?: unknown[] }).matches)
+          ? (((wcData as { matches?: Record<string, unknown>[] }).matches) ?? [])
           : [];
-        const wcLive = allWC.filter(m => m.isLive);
-        const wcUpcoming = allWC.filter(m => !m.isLive);
+        const nextCollections = buildWCMatchCollections(rawMatches);
         // Update clock refs for interpolation
         const fetchTs = Date.now();
         liveDataFetchedAt.current = fetchTs;
-        for (const m of wcLive) {
+        for (const m of nextCollections.liveMatches) {
           const next = typeof m.minute === "number" && m.minute > 0 ? m.minute : 0;
           if (next > 0) {
             const prev = apiMinutesRef.current[m.id];
@@ -1559,14 +1564,14 @@ export default function WorldCupPage({ onClose, onBet: onBetProp }: { onClose?: 
         }
         // Direct set — no accumulation, no race condition with a parallel loadLive.
         // The /wc2026 endpoint always enriches with fresh liveMatchState on every request.
-        setLiveMatches(wcLive);
-        setUpcomingMatches(wcUpcoming);
-        setAllMatches(allWC);
-        setStandingsGroups(wcGroups);
-        if (wcLive.length > 0) setPageTab("live");
+        setLiveMatches(nextCollections.liveMatches);
+        setUpcomingMatches(nextCollections.upcomingMatches);
+        setAllMatches(nextCollections.allMatches);
+        writeWCClientSnapshot(rawMatches);
+        if (nextCollections.liveMatches.length > 0) setPageTab(prev => (prev === "upcoming" ? "live" : prev));
         // Schedule next poll using local result (not stale ref)
         if (!cancelled) {
-          const delay = wcLive.length > 0 ? 5_000 : 30_000;
+          const delay = nextCollections.liveMatches.length > 0 ? 5_000 : 30_000;
           nextTimer = setTimeout(load, delay);
         }
       } catch {
@@ -1783,16 +1788,7 @@ export default function WorldCupPage({ onClose, onBet: onBetProp }: { onClose?: 
           {pageTab === "groups" && (
             <motion.div key="groups" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
               <div className="grid grid-cols-2 gap-3">
-                {WC_GROUPS.map(g => (
-                  <GroupCard
-                    key={g.group}
-                    group={g.group}
-                    teams={g.teams}
-                    allMatches={allMatches}
-                    theme={theme}
-                    realRows={standingsGroups.find(sg => normalizeWCGroupLabel(sg.name) === `Grupo ${g.group}`)?.rows}
-                  />
-                ))}
+                {WC_GROUPS.map(g => <GroupCard key={g.group} group={g.group} teams={g.teams} allMatches={allMatches} theme={theme} />)}
               </div>
             </motion.div>
           )}
