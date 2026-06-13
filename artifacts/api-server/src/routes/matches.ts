@@ -7331,11 +7331,13 @@ function _tennisPairKey(n0: string, n1: string): string {
 }
 
 // ─── Live odds cache: real bookmaker live odds fetched per-match ───────────────
-// Keyed by V2 match ID (number). TTL = 45 s. Fetched from:
+// Keyed by tennis match ID (number). Keep the TTL short enough for live tennis
+// so the UI does not sit on stale prices for half a minute or more.
 //   GET {SAPI_V2_TENNIS}/match/:id/odds  →  market "Full time" isLive:true
 // Populated by refreshTennisLiveOdds() (fire-and-forget, called from buildTennisLiveV2).
 const _tennisLiveOddsCache = new Map<number, { home: number; away: number; at: number }>();
-const TENNIS_LIVE_ODDS_TTL = 45_000;
+const _tennisLiveOddsInFlight = new Map<number, Promise<void>>();
+const TENNIS_LIVE_ODDS_TTL = 12_000;
 
 /** Convert fractional odd string (e.g. "7/2") to decimal (e.g. 4.50). */
 function parseFractionalOdd(frac: string): number {
@@ -7346,32 +7348,41 @@ function parseFractionalOdd(frac: string): number {
 
 /** Fire-and-forget: fetch live bookmaker odds for each match ID and store in cache. */
 function refreshTennisLiveOdds(matchIds: number[]): void {
-  const toFetch = matchIds.filter(id => {
+  const now = Date.now();
+  const toFetch = [...new Set(matchIds)].filter(id => {
     const cached = _tennisLiveOddsCache.get(id);
-    return !cached || Date.now() - cached.at > TENNIS_LIVE_ODDS_TTL;
+    if (cached && now - cached.at <= TENNIS_LIVE_ODDS_TTL) return false;
+    return !_tennisLiveOddsInFlight.has(id);
   });
   if (toFetch.length === 0) return;
-  void Promise.allSettled(toFetch.map(async id => {
-    try {
-      const res = await fetch(`${SAPI_V2_TENNIS}/match/${id}/odds`, {
-        headers: sapiHeaders(),
-        signal: AbortSignal.timeout(6_000),
-      });
-      if (!res.ok) return;
-      const j = await res.json() as { data?: { markets?: Array<{ marketName?: string; marketId?: number; isLive?: boolean; choices?: Array<{ name?: string; fractionalValue?: string }> }> } };
-      const markets = j.data?.markets ?? [];
-      // Pick the live Full time (match winner) market
-      const ft = markets.find(m => (m.marketName === "Full time" || m.marketId === 1) && m.isLive === true);
-      if (!ft) return;
-      const homeChoice = (ft.choices ?? []).find(c => c.name === "1");
-      const awayChoice = (ft.choices ?? []).find(c => c.name === "2");
-      if (!homeChoice?.fractionalValue || !awayChoice?.fractionalValue) return;
-      const home = parseFractionalOdd(homeChoice.fractionalValue);
-      const away = parseFractionalOdd(awayChoice.fractionalValue);
-      if (home <= 1 || away <= 1) return; // sanity — 1/1 or worse is a data error
-      _tennisLiveOddsCache.set(id, { home, away, at: Date.now() });
-    } catch { /* ignore */ }
-  }));
+  for (const id of toFetch) {
+    const request = (async () => {
+      try {
+        const res = await fetch(`${SAPI_V2_TENNIS}/match/${id}/odds`, {
+          headers: sapiHeaders(),
+          signal: AbortSignal.timeout(6_000),
+        });
+        if (!res.ok) return;
+        const j = await res.json() as { data?: { markets?: Array<{ marketName?: string; marketId?: number; isLive?: boolean; choices?: Array<{ name?: string; fractionalValue?: string }> }> } };
+        const markets = j.data?.markets ?? [];
+        // Pick the live Full time (match winner) market
+        const ft = markets.find(m => (m.marketName === "Full time" || m.marketId === 1) && m.isLive === true);
+        if (!ft) return;
+        const homeChoice = (ft.choices ?? []).find(c => c.name === "1");
+        const awayChoice = (ft.choices ?? []).find(c => c.name === "2");
+        if (!homeChoice?.fractionalValue || !awayChoice?.fractionalValue) return;
+        const home = parseFractionalOdd(homeChoice.fractionalValue);
+        const away = parseFractionalOdd(awayChoice.fractionalValue);
+        if (home <= 1 || away <= 1) return; // sanity — 1/1 or worse is a data error
+        _tennisLiveOddsCache.set(id, { home, away, at: Date.now() });
+      } catch {
+        /* ignore */
+      } finally {
+        _tennisLiveOddsInFlight.delete(id);
+      }
+    })();
+    _tennisLiveOddsInFlight.set(id, request);
+  }
 }
 
 const _tennisServingCache = new Map<number, { serving: [boolean, boolean]; at: number }>();
@@ -9655,7 +9666,9 @@ router.get("/live-stream", (req: Request, res: Response) => {
 async function buildTennisLiveV1(): Promise<LiveMatchState[]> {
   try {
     const games = await getTennisLiveV1();
-    refreshTennisServing(games.map(g => g.id).filter(Boolean) as number[]);
+    const liveIds = games.map(g => g.id).filter(Boolean) as number[];
+    refreshTennisServing(liveIds);
+    refreshTennisLiveOdds(liveIds);
     const primary: Array<{ r: number; m: LiveMatchState }> = [];
     for (const g of games) {
       if (g.statusGroup === 2 || isTennisV1GameFinished(g)) continue;
@@ -9701,10 +9714,15 @@ async function buildTennisLiveV1(): Promise<LiveMatchState[]> {
       const aPt = gameStage ? gamePtLabel(gameStage.awayCompetitorScore) : "0";
       const currentPoints: [number | string, number | string] = [hPt, aPt];
 
-      const odds = makeOddsFromTeams(home, away);
+      const pairKey = _tennisPairKey(home, away);
+      const realLiveOdds = typeof g.id === "number" ? _tennisLiveOddsCache.get(g.id) : undefined;
+      const seededOdds = _tennisPreMatchOdds.get(pairKey);
+      const odds = realLiveOdds
+        ? { home: realLiveOdds.home, away: realLiveOdds.away }
+        : (seededOdds ?? makeOddsFromTeams(home, away));
       const diff = homeScore - awayScore;
       let liveOdds = { ...odds, draw: 0 };
-      if (diff !== 0) {
+      if (!realLiveOdds && diff !== 0) {
         const factor = Math.min(0.55, Math.abs(diff) * 0.22);
         liveOdds = diff > 0
           ? { home: Math.max(1.01, +(odds.home * (1 - factor)).toFixed(2)), draw: 0, away: Math.min(50, +(odds.away * (1 + factor)).toFixed(2)) }
@@ -9721,7 +9739,7 @@ async function buildTennisLiveV1(): Promise<LiveMatchState[]> {
         homeScore, awayScore,
         minute: setNum * 20,
         status: ws?.status ?? g.statusText ?? "Em Jogo",
-        hasRealOdds: true,
+        hasRealOdds: !!realLiveOdds,
         odds: liveOdds,
         markets: (() => {
           const adjH = liveOdds.home > 1 ? 1 / liveOdds.home : 0.5;
