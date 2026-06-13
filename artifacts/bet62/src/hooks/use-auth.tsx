@@ -27,15 +27,35 @@ type AuthContextType = {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
+function readStoredToken(): string | null {
+  try {
+    return localStorage.getItem("bet62_token");
+  } catch {
+    return null;
+  }
+}
+
+function writeStoredToken(token: string) {
+  try {
+    localStorage.setItem("bet62_token", token);
+  } catch {}
+}
+
+function clearStoredToken() {
+  try {
+    localStorage.removeItem("bet62_token");
+  } catch {}
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
-  const [token, setToken] = useState<string | null>(localStorage.getItem("bet62_token"));
+  const [token, setToken] = useState<string | null>(() => readStoredToken());
   const [isLoading, setIsLoading] = useState(true);
 
   const clearSession = () => {
     setToken(null);
     setUser(null);
-    localStorage.removeItem("bet62_token");
+    clearStoredToken();
   };
 
   const fetchUser = async (currentToken: string) => {
@@ -74,7 +94,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (!res.ok) throw new Error(data.error || "Login failed");
     
     setToken(data.token);
-    localStorage.setItem("bet62_token", data.token);
+    writeStoredToken(data.token);
     setUser(data.user);
   };
 
@@ -88,7 +108,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (!res.ok) throw new Error(data.error || "Registration failed");
 
     setToken(data.token);
-    localStorage.setItem("bet62_token", data.token);
+    writeStoredToken(data.token);
     setUser(data.user);
   };
 

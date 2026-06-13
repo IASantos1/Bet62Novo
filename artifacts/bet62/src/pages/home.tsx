@@ -3751,7 +3751,19 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
     // ── 2. Open SSE for real-time push updates (<100ms latency) ─────────────
     const openSSE = () => {
       if (sseRef.current) return; // already open
-      const es = new EventSource("/api/matches/live-stream");
+      if (typeof window === "undefined" || !("EventSource" in window)) {
+        setLiveTransport(browserOnline ? "polling" : "cache");
+        return;
+      }
+
+      let es: EventSource;
+      try {
+        es = new EventSource("/api/matches/live-stream");
+      } catch {
+        setLiveTransport(browserOnline ? "polling" : "cache");
+        return;
+      }
+
       sseRef.current = es;
       es.onopen = () => {
         sseActiveRef.current = true;
