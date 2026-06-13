@@ -1719,6 +1719,53 @@ function computeTennisExtras(p: number, overrides?: {
   };
 }
 
+function computeTennisFallbackLiveOdds(
+  baseOdds: { home: number; draw: number; away: number },
+  sets: Array<[number, number]>,
+  homeScore: number,
+  awayScore: number,
+  currentPoints?: [number | string, number | string],
+  serving?: [boolean, boolean],
+): { home: number; draw: number; away: number } {
+  const currentSet = sets.length > 0 ? (sets[sets.length - 1] ?? [0, 0]) : [0, 0];
+  const gamesDiff = (currentSet[0] ?? 0) - (currentSet[1] ?? 0);
+  const setsDiff = homeScore - awayScore;
+
+  const pointValue = (value: number | string | undefined): number => {
+    const normalized = String(value ?? "").trim().toUpperCase();
+    if (normalized === "AD" || normalized === "A") return 4;
+    if (normalized === "D" || normalized === "40A") return 3;
+    if (normalized === "40") return 3;
+    if (normalized === "30") return 2;
+    if (normalized === "15") return 1;
+    return 0;
+  };
+
+  const hPt = pointValue(currentPoints?.[0]);
+  const aPt = pointValue(currentPoints?.[1]);
+  const ptDiff = hPt - aPt;
+  const servingBonus = serving?.[0] ? 0.5 : serving?.[1] ? -0.5 : 0;
+
+  // 1 set > several games > current points. This keeps live tennis prices moving
+  // on point-by-point progress without creating wild jumps every rally.
+  const advantage = setsDiff * 0.22 + gamesDiff * 0.042 + ptDiff * 0.012 + servingBonus * 0.008;
+  const factor = Math.min(0.55, Math.abs(advantage));
+
+  if (factor <= 0) return baseOdds;
+  if (advantage > 0) {
+    return {
+      home: Math.max(1.01, +(baseOdds.home * (1 - factor)).toFixed(2)),
+      draw: 0,
+      away: Math.min(50, +(baseOdds.away * (1 + factor)).toFixed(2)),
+    };
+  }
+  return {
+    home: Math.min(50, +(baseOdds.home * (1 + factor)).toFixed(2)),
+    draw: 0,
+    away: Math.max(1.01, +(baseOdds.away * (1 - factor)).toFixed(2)),
+  };
+}
+
 // ─── Tennis Set Exact Score helper ────────────────────────────────────────────
 // Computes exact-score odds for the CURRENT tennis set given the current game
 // score (hg home games won, ag away games won in this set).  Uses a negative-
@@ -8559,29 +8606,6 @@ function buildTennisLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
 
     const setNum = code !== undefined && code >= 13 ? code - 12 : sets.length + 1;
 
-    // ── Odds: prefer real bookmaker live odds (from cache), else fall back to
-    //    pre-match cached odds + drift, else seeded estimate + drift. ──────────
-    const realLiveOdds = ev.id ? _tennisLiveOddsCache.get(ev.id) : undefined;
-    let liveOdds: { home: number; draw: number; away: number };
-    if (realLiveOdds) {
-      // Real bookmaker live odds — use directly (already reflect current score)
-      liveOdds = { home: realLiveOdds.home, draw: 0, away: realLiveOdds.away };
-    } else {
-      // Fallback: pre-match odds (or seeded estimate) + score-based drift
-      const cachedOdds = _tennisPreMatchOdds.get(_tennisPairKey(homeTeam, awayTeam));
-      const baseOdds = cachedOdds
-        ? { home: cachedOdds.home, draw: 0, away: cachedOdds.away }
-        : makeOddsFromTeams(homeTeam, awayTeam);
-      const diff = homeScore - awayScore;
-      liveOdds = { ...baseOdds, draw: 0 };
-      if (diff !== 0) {
-        const factor = Math.min(0.55, Math.abs(diff) * 0.22);
-        liveOdds = diff > 0
-          ? { home: Math.max(1.01, +(baseOdds.home * (1 - factor)).toFixed(2)), draw: 0, away: Math.min(50, +(baseOdds.away * (1 + factor)).toFixed(2)) }
-          : { home: Math.min(50, +(baseOdds.home * (1 + factor)).toFixed(2)), draw: 0, away: Math.max(1.01, +(baseOdds.away * (1 - factor)).toFixed(2)) };
-      }
-    }
-
     // ── Game score: use real point score from API when available ───────────────
     // hS.point / aS.point = "0" | "15" | "30" | "40" | "AD" — provided by V2 live
     const parsePoint = (p: string | undefined): number | string => {
@@ -8598,6 +8622,21 @@ function buildTennisLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
         : advanceTennisGamePts(`tennis-v2-${ev.id}`);
 
     const serving = (ev.id ? _tennisServingCache.get(ev.id)?.serving : undefined) ?? existing?._liveExtra?.serving;
+
+    // ── Odds: prefer real bookmaker live odds (from cache), else fall back to
+    //    a reactive model that responds to sets, current-set games and points. ──
+    const realLiveOdds = ev.id ? _tennisLiveOddsCache.get(ev.id) : undefined;
+    let liveOdds: { home: number; draw: number; away: number };
+    if (realLiveOdds) {
+      // Real bookmaker live odds — use directly (already reflect current score)
+      liveOdds = { home: realLiveOdds.home, draw: 0, away: realLiveOdds.away };
+    } else {
+      const cachedOdds = _tennisPreMatchOdds.get(_tennisPairKey(homeTeam, awayTeam));
+      const baseOdds = cachedOdds
+        ? { home: cachedOdds.home, draw: 0, away: cachedOdds.away }
+        : makeOddsFromTeams(homeTeam, awayTeam);
+      liveOdds = computeTennisFallbackLiveOdds(baseOdds, sets, homeScore, awayScore, currentPoints, serving);
+    }
 
     // ── Market suspension: detect point played and compute duration ─────────────
     // A point is played when currentPoints or sets changes compared to last tick.
@@ -9717,19 +9756,14 @@ async function buildTennisLiveV1(): Promise<LiveMatchState[]> {
       const pairKey = _tennisPairKey(home, away);
       const realLiveOdds = typeof g.id === "number" ? _tennisLiveOddsCache.get(g.id) : undefined;
       const seededOdds = _tennisPreMatchOdds.get(pairKey);
-      const odds = realLiveOdds
-        ? { home: realLiveOdds.home, away: realLiveOdds.away }
-        : (seededOdds ?? makeOddsFromTeams(home, away));
-      const diff = homeScore - awayScore;
-      let liveOdds = { ...odds, draw: 0 };
-      if (!realLiveOdds && diff !== 0) {
-        const factor = Math.min(0.55, Math.abs(diff) * 0.22);
-        liveOdds = diff > 0
-          ? { home: Math.max(1.01, +(odds.home * (1 - factor)).toFixed(2)), draw: 0, away: Math.min(50, +(odds.away * (1 + factor)).toFixed(2)) }
-          : { home: Math.min(50, +(odds.home * (1 + factor)).toFixed(2)), draw: 0, away: Math.max(1.01, +(odds.away * (1 - factor)).toFixed(2)) };
-      }
-      const setNum = homeScore + awayScore + 1;
       const serving = (typeof g.id === "number" ? _tennisServingCache.get(g.id)?.serving : undefined);
+      const baseOdds = seededOdds
+        ? { home: seededOdds.home, draw: 0, away: seededOdds.away }
+        : makeOddsFromTeams(home, away);
+      const liveOdds = realLiveOdds
+        ? { home: realLiveOdds.home, draw: 0, away: realLiveOdds.away }
+        : computeTennisFallbackLiveOdds(baseOdds, sets, homeScore, awayScore, currentPoints, serving);
+      const setNum = homeScore + awayScore + 1;
       const item: LiveMatchState = {
         id: `tennis-v2-${g.id}`,
         home, away,
