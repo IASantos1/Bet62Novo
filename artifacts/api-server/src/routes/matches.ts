@@ -8604,7 +8604,6 @@ function buildTennisLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
       });
     }
 
-    const setNum = code !== undefined && code >= 13 ? code - 12 : sets.length + 1;
 
     // ── Game score: use real point score from API when available ───────────────
     // hS.point / aS.point = "0" | "15" | "30" | "40" | "AD" — provided by V2 live
@@ -8660,13 +8659,14 @@ function buildTennisLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
       const minG = Math.min(h, a);
       return (maxG >= 6 && maxG - minG >= 2) || maxG === 7;
     }).length;
+    const currentSetNum = Math.max(1, Math.min(3, doneSets + 1));
     const SETTLED = now + 30 * 24 * 60 * 60 * 1000;
     const settledSusp: Record<string, number> = {};
     const phaseHoldSusp: Record<string, number> = {};
     if (doneSets >= 1) settledSusp["firstSet"] = SETTLED;
     if (doneSets >= 2) settledSusp["set2"]     = SETTLED;
-    if (setNum < 2) phaseHoldSusp["set2"]      = SETTLED;
-    if (setNum < 3) phaseHoldSusp["set3"]      = SETTLED;
+    if (currentSetNum < 2) phaseHoldSusp["set2"]      = SETTLED;
+    if (currentSetNum < 3) phaseHoldSusp["set3"]      = SETTLED;
 
     let marketSuspension: Record<string, number> | undefined = existing?.marketSuspension
       ? Object.fromEntries(Object.entries(existing.marketSuspension).filter(([key, ts]) => {
@@ -8751,7 +8751,7 @@ function buildTennisLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
       firstSet: v2FirstSetOdds,
       set2:     v2Set2Odds,
       set3:     v2Set3Odds,
-      currentSetNum: setNum,
+      currentSetNum,
     };
 
     const v2Markets = {
@@ -8764,7 +8764,7 @@ function buildTennisLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
       home: homeTeam, away: awayTeam,
       league: tennisTournLabel(ev.tournament), country: v2TournCountry(ev),
       sport: "tennis", homeScore, awayScore,
-      minute: setNum * 20,
+      minute: currentSetNum * 20,
       status: displayStatus, hasRealOdds: true, odds: liveOdds,
       markets: v2Markets,
       events: [],
@@ -9779,7 +9779,13 @@ async function buildTennisLiveV1(): Promise<LiveMatchState[]> {
           const adjH = liveOdds.home > 1 ? 1 / liveOdds.home : 0.5;
           const adjA = liveOdds.away > 1 ? 1 / liveOdds.away : 0.5;
           const pHome = mc(adjH + adjA > 0 ? adjH / (adjH + adjA) : 0.5, 0.08, 0.92);
-          return { ...makeAdvancedMarketsFromTeams(home, away), tennisExtra: computeTennisExtras(pHome) };
+          return {
+            ...makeAdvancedMarketsFromTeams(home, away),
+            tennisExtra: {
+              ...computeTennisExtras(pHome),
+              currentSetNum: setNum,
+            },
+          };
         })(),
         events: [],
         _liveExtra: { sets, currentPoints, ...(serving ? { serving } : {}) },

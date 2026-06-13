@@ -4037,6 +4037,17 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab]);
 
+  // "Minhas Apostas" also needs a fresh live snapshot so open tickets can be
+  // marked as live even when the user is not on the dedicated "Ao Vivo" tab.
+  useEffect(() => {
+    if (activeTab !== "mybets") return;
+    void fetchLive(false);
+    const id = window.setInterval(() => {
+      void fetchLive(false);
+    }, 12_000);
+    return () => window.clearInterval(id);
+  }, [activeTab, fetchLive]);
+
   // Auto-dismiss win animation after 5s
   useEffect(() => {
     if (!winAnim) return;
@@ -6439,10 +6450,24 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
           <div>
             {(() => {
               const te = (m as any).tennisExtra as any;
-              const cur = te?.currentSetNum ?? match.minute ?? 1;
-              const showSet1 = cur <= 1;
+              const cur = (() => {
+                const rawCurrentSet = Number(te?.currentSetNum);
+                if (Number.isFinite(rawCurrentSet) && rawCurrentSet > 0) {
+                  return Math.max(1, Math.min(3, Math.trunc(rawCurrentSet)));
+                }
+                const scoreBased = (Number(match.homeScore ?? 0) + Number(match.awayScore ?? 0) + 1);
+                if (Number.isFinite(scoreBased) && scoreBased > 0) {
+                  return Math.max(1, Math.min(3, Math.trunc(scoreBased)));
+                }
+                const minuteBased = Number(match.minute ?? 20);
+                if (Number.isFinite(minuteBased) && minuteBased > 0) {
+                  return Math.max(1, Math.min(3, Math.round(minuteBased / 20)));
+                }
+                return 1;
+              })();
+              const showSet1 = cur === 1;
               const showSet2 = cur === 2;
-              const showSet3 = cur >= 3;
+              const showSet3 = cur === 3;
               return (
                 <>
                   {showSet1 && (te?.firstSet?.home > 0 ? (
