@@ -4468,7 +4468,7 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
     const oddsDown = !isSuspended && delta <= -ODDS_ANIM_THRESHOLD;
     const isWCVariant = variant === "worldcup";
     const baseBoxClass = isWCVariant
-      ? `${grow ? "flex-1" : ""} h-[72px] rounded-2xl border px-2.5 flex flex-col items-center justify-center`
+      ? `${grow ? "flex-1" : ""} h-[64px] rounded-2xl border px-2.5 flex flex-col items-center justify-center`
       : `${grow ? "flex-1" : ""} h-10 px-2 rounded-md text-xs flex flex-col items-center justify-center`;
 
     if (isSuspended) {
@@ -5052,6 +5052,26 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
     );
   };
 
+  const stopCardOpen = (e: { stopPropagation: () => void }) => e.stopPropagation();
+
+  const EventTeamBadge = ({ name, badge, sport, flag, compact = false }: {
+    name: string;
+    badge?: string;
+    sport: string;
+    flag: string;
+    compact?: boolean;
+  }) => (
+    <div className={`${compact ? "w-[46px] h-[46px]" : "w-[54px] h-[54px]"} rounded-full bg-white border border-zinc-200 shadow-[0_0_14px_rgba(234,179,8,0.28)] flex items-center justify-center overflow-hidden`}>
+      {badge ? (
+        <img src={badge} alt={name} className="w-full h-full object-cover" loading="lazy" decoding="async" />
+      ) : (
+        <span className={`${compact ? "text-[22px]" : "text-[26px]"} leading-none`}>
+          {sport === "tennis" ? "🎾" : sport === "basketball" ? "🏀" : sport === "hockey" ? "🏒" : sport === "volleyball" ? "🏐" : sport === "baseball" ? "⚾" : flag}
+        </span>
+      )}
+    </div>
+  );
+
   const MatchCard = ({ match }: { match: Match }) => {
     const sport = match.sport ?? "football";
     const flag = COUNTRY_FLAGS[match.country?.toLowerCase() ?? ""] ?? sportEmoji(match.sport);
@@ -5068,17 +5088,17 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
       || hasBlockingSuspensionReason(match)
     );
     const canShowOdds = !!(match.hasRealOdds || (match.odds.home > 0 && match.odds.away > 0));
-    const TeamBadge = ({ name, badge }: { name: string; badge?: string }) => (
-      <div className="w-[54px] h-[54px] rounded-full bg-white border border-zinc-200 shadow-[0_0_14px_rgba(234,179,8,0.28)] flex items-center justify-center overflow-hidden">
-        {badge ? (
-          <img src={badge} alt={name} className="w-full h-full object-cover" loading="lazy" decoding="async" />
-        ) : (
-          <span className="text-[26px] leading-none">{sport === "tennis" ? "🎾" : sport === "basketball" ? "🏀" : sport === "hockey" ? "🏒" : sport === "volleyball" ? "🏐" : sport === "baseball" ? "⚾" : flag}</span>
-        )}
-      </div>
-    );
     const OddsRow = () => canShowOdds ? (
-      <div className="flex flex-col gap-2 w-full">
+      <div
+        className="flex flex-col gap-1.5 w-full"
+        onClick={stopCardOpen}
+        onTouchStart={stopCardOpen}
+        onTouchMove={stopCardOpen}
+        onTouchEnd={stopCardOpen}
+        onPointerDown={stopCardOpen}
+        onPointerMove={stopCardOpen}
+        onPointerUp={stopCardOpen}
+      >
         <SuspensionBanner match={match} />
         {!isSuspendedMatch && (<>
           <div className="flex gap-2 w-full">
@@ -5098,21 +5118,12 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
 
     return (
       <div
-        className="relative overflow-hidden rounded-[28px] border border-zinc-200 bg-white shadow-[0_10px_30px_rgba(0,0,0,0.08)] transition-transform cursor-pointer active:scale-[0.99]"
+        className="relative overflow-hidden rounded-[24px] border border-zinc-200 bg-white shadow-[0_10px_24px_rgba(0,0,0,0.08)] transition-transform cursor-pointer active:scale-[0.99]"
         {...makeTap(() => setExpandedMatch(match))}
       >
         <div className="absolute top-0 left-0 right-0 h-[3px] bg-gradient-to-r from-yellow-400 via-orange-500 to-red-600" />
-        <div
-          className="px-4 pt-4 pb-4"
-          onClick={e => e.stopPropagation()}
-          onTouchStart={e => e.stopPropagation()}
-          onTouchMove={e => e.stopPropagation()}
-          onTouchEnd={e => e.stopPropagation()}
-          onPointerDown={e => e.stopPropagation()}
-          onPointerMove={e => e.stopPropagation()}
-          onPointerUp={e => e.stopPropagation()}
-        >
-          <div className="flex items-center justify-between gap-3 mb-4">
+        <div className="px-3.5 pt-3.5 pb-3">
+          <div className="flex items-center justify-between gap-3 mb-2.5">
             <div className="min-w-0 flex items-center gap-2">
               <span className="text-sm leading-none shrink-0">{sport === "football" ? "🏆" : flag}</span>
               <span className="text-[11px] font-black tracking-[0.18em] uppercase text-zinc-500 truncate">
@@ -5124,25 +5135,25 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
             </div>
           </div>
           {rivalry && (
-            <div className="mb-3 text-[10px] font-black uppercase tracking-[0.2em] text-red-500 text-center">
+            <div className="mb-2 text-[9px] font-black uppercase tracking-[0.2em] text-red-500 text-center">
               {rivalry}
             </div>
           )}
-          <div className="flex items-center justify-between gap-3 mb-4">
-            <div className="flex-1 flex flex-col items-center gap-2 min-w-0">
-              <TeamBadge name={homeName} badge={homeBadge} />
-              <span className="text-[15px] font-black text-zinc-900 text-center leading-tight px-1">
+          <div className="flex items-center justify-between gap-2.5 mb-2.5">
+            <div className="flex-1 flex flex-col items-center gap-1.5 min-w-0">
+              <EventTeamBadge name={homeName} badge={homeBadge} sport={sport} flag={flag} compact />
+              <span className="text-[14px] font-black text-zinc-900 text-center leading-tight px-1">
                 {homeName}
               </span>
             </div>
-            <div className="min-w-[72px] flex flex-col items-center">
-              <span className="text-[18px] font-black text-zinc-500 tracking-wide">VS</span>
-              {match.time && <span className="mt-1 text-[18px] font-black text-zinc-900">{match.time}</span>}
-              {dateStr && <span className="mt-1 text-[12px] font-semibold text-zinc-500">{dateStr}</span>}
+            <div className="min-w-[68px] flex flex-col items-center">
+              <span className="text-[16px] font-black text-zinc-500 tracking-wide">VS</span>
+              {match.time && <span className="mt-0.5 text-[16px] font-black text-zinc-900">{match.time}</span>}
+              {dateStr && <span className="mt-0.5 text-[11px] font-semibold text-zinc-500">{dateStr}</span>}
             </div>
-            <div className="flex-1 flex flex-col items-center gap-2 min-w-0">
-              <TeamBadge name={awayName} badge={awayBadge} />
-              <span className="text-[15px] font-black text-zinc-900 text-center leading-tight px-1">
+            <div className="flex-1 flex flex-col items-center gap-1.5 min-w-0">
+              <EventTeamBadge name={awayName} badge={awayBadge} sport={sport} flag={flag} compact />
+              <span className="text-[14px] font-black text-zinc-900 text-center leading-tight px-1">
                 {awayName}
               </span>
             </div>
@@ -7988,114 +7999,156 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
                 </button>
 
                 {/* Match header */}
-                <div className="bg-zinc-900 rounded-xl border border-zinc-800 overflow-hidden mb-2">
-                  <CompactLeagueRow match={expandedMatch} rightSlot={
-                    expandedMatch.isLive ? (
-                      <div className="flex items-center gap-1.5">
-                        <span className="relative flex h-1.5 w-1.5">
-                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-500 opacity-75"></span>
-                          <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-red-500"></span>
+                <div className="relative overflow-hidden rounded-[28px] border border-zinc-200 bg-white shadow-[0_12px_30px_rgba(0,0,0,0.08)] mb-3">
+                  <div className="absolute top-0 left-0 right-0 h-[3px] bg-gradient-to-r from-yellow-400 via-orange-500 to-red-600" />
+                  <div className="px-4 pt-4 pb-3">
+                    <div className="flex items-center justify-between gap-3 mb-4">
+                      <div className="min-w-0 flex items-center gap-2">
+                        <span className="text-sm leading-none shrink-0">
+                          {(expandedMatch.sport ?? "football") === "football" ? "🏆" : (COUNTRY_FLAGS[expandedMatch.country?.toLowerCase() ?? ""] ?? sportEmoji(expandedMatch.sport))}
                         </span>
-                        <span className="text-[10px] font-bold text-red-500">
-                          {(() => {
-                            const m = getDisplayMinute(expandedMatch);
-                            const isFootball = !expandedMatch.sport || expandedMatch.sport === "football";
-                            const tag = isFootball ? getFootballPhaseTag(expandedMatch, m) : null;
-                            if (m <= 0) return "AO VIVO (Atrasado)";
-                            if (tag === "HT") return "AO VIVO HT";
-                            if (tag && isFootball) return `AO VIVO ${tag} · ${getFootballClockLabel(expandedMatch, m)}`;
-                            if (tag) return `AO VIVO ${m}' · ${tag}`;
-                            return `AO VIVO ${m}'`;
-                          })()}
+                        <span className="text-[11px] font-black tracking-[0.18em] uppercase text-zinc-500 truncate">
+                          {expandedMatch.league}
                         </span>
                       </div>
-                    ) : undefined
-                  } />
-                  {expandedMatch.isLive ? (
-                    <div className="px-4 pt-3 pb-2">
-                      <div className="flex items-center gap-2 min-w-0 mb-2">
-                        <span className="font-bold text-white text-sm truncate flex-1 text-right">{expandedMatch.home}</span>
-                        <div className="flex items-center gap-1 shrink-0">
-                          <button
-                            onClick={() => setMatchViewTab(matchViewTab !== "markets" ? "markets" : "live")}
-                            className={`flex items-center gap-1 px-2 py-1.5 rounded-lg border text-[11px] font-bold transition-all ${matchViewTab !== "markets" && matchViewTab !== "live" ? "border-blue-500 bg-blue-500/10 text-blue-400" : "border-zinc-700 bg-zinc-800 text-zinc-400 hover:text-white hover:border-zinc-600"}`}
-                            title="Estatísticas"
-                          >
-                            <BarChart2 size={12} />
-                          </button>
-                          <button
-                            onClick={() => setMatchViewTab(matchViewTab === "live" ? "markets" : "live")}
-                            className={`flex items-center gap-1 px-2 py-1.5 rounded-lg border text-[11px] font-bold transition-all ${matchViewTab === "live" ? "border-red-500 bg-red-500/10 text-red-400" : "border-zinc-700 bg-zinc-800 text-zinc-400 hover:text-white hover:border-zinc-600"}`}
-                            title="Visualização Ao Vivo"
-                          >
-                            <Activity size={12} />
-                          </button>
-                        </div>
-                        <span className="font-bold text-white text-sm truncate flex-1">{expandedMatch.away}</span>
-                      </div>
-                      <div className="text-center">
-                        <span className="text-3xl font-black text-white tabular-nums">
-                          {expandedMatch.homeScore ?? 0}<span className="text-zinc-500 mx-1.5">-</span>{expandedMatch.awayScore ?? 0}
-                        </span>
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="px-4 py-3">
-                      <div className="flex items-center gap-2 min-w-0">
-                        <span className="font-bold text-white text-base truncate flex-1 text-right">{expandedMatch.home}</span>
+                      <div className="flex items-center gap-2 shrink-0">
+                        {expandedMatch.isLive && (
+                          <div className="flex items-center gap-1.5 rounded-full bg-red-50 border border-red-200 px-2.5 py-1">
+                            <span className="relative flex h-1.5 w-1.5">
+                              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-500 opacity-75" />
+                              <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-red-500" />
+                            </span>
+                            <span className="text-[10px] font-black text-red-500">
+                              {(() => {
+                                const m = getDisplayMinute(expandedMatch);
+                                const isFootball = !expandedMatch.sport || expandedMatch.sport === "football";
+                                const tag = isFootball ? getFootballPhaseTag(expandedMatch, m) : null;
+                                if (m <= 0) return "AO VIVO";
+                                if (tag === "HT") return "AO VIVO HT";
+                                if (tag && isFootball) return `${tag} · ${getFootballClockLabel(expandedMatch, m)}`;
+                                if (tag) return `${m}' · ${tag}`;
+                                return `${m}'`;
+                              })()}
+                            </span>
+                          </div>
+                        )}
                         <button
                           onClick={() => setMatchViewTab(matchViewTab === "markets" ? "stats" : "markets")}
-                          className={`shrink-0 flex items-center gap-1 px-2 py-1.5 rounded-lg border text-[11px] font-bold transition-all ${matchViewTab !== "markets" ? "border-blue-500 bg-blue-500/10 text-blue-400" : "border-zinc-700 bg-zinc-800 text-zinc-400 hover:text-white hover:border-zinc-600"}`}
+                          className={`flex items-center gap-1 px-2.5 py-1.5 rounded-xl border text-[11px] font-black transition-all ${
+                            matchViewTab !== "markets"
+                              ? "border-blue-200 bg-blue-50 text-blue-600"
+                              : "border-zinc-200 bg-zinc-50 text-zinc-500 hover:bg-zinc-100"
+                          }`}
                           title="Estatísticas"
                         >
                           <BarChart2 size={12} />
                           <span className="hidden sm:inline">Stats</span>
                         </button>
-                        <span className="text-zinc-600 text-[11px] shrink-0 font-medium">vs</span>
-                        <span className="font-bold text-white text-base truncate flex-1">{expandedMatch.away}</span>
+                        {expandedMatch.isLive && (
+                          <button
+                            onClick={() => setMatchViewTab(matchViewTab === "live" ? "markets" : "live")}
+                            className={`flex items-center gap-1 px-2.5 py-1.5 rounded-xl border text-[11px] font-black transition-all ${
+                              matchViewTab === "live"
+                                ? "border-red-200 bg-red-50 text-red-600"
+                                : "border-zinc-200 bg-zinc-50 text-zinc-500 hover:bg-zinc-100"
+                            }`}
+                            title="Visualização Ao Vivo"
+                          >
+                            <Activity size={12} />
+                          </button>
+                        )}
                       </div>
                     </div>
-                  )}
 
-                  {/* Stats/Standings/Live sub-tabs */}
-                  {matchViewTab !== "markets" && (
-                    <div className="flex border-t border-zinc-800 overflow-x-auto no-scrollbar">
-                      {(() => {
-                        const tabLabel = (tab: string) => {
-                          if (tab === "stats") return "Estatísticas";
-                          if (tab === "confrontos") return "⚔️ H2H";
-                          if (tab === "standings") return "Classificação";
-                          if (tab === "yesterday") return "📅 Ontem";
-                          if (tab === "ranking") return "Ranking";
-                          if (tab === "liga") return "⭐ Liga";
-                          if (tab === "odds") return "📊 Mercados";
-                          if (tab === "lineups") return "👥 Escalação";
-                          return "⚡ Ao Vivo";
-                        };
-                        const tabs: string[] = expandedMatch.sport === "tennis"
-                          ? (expandedMatch.isLive ? ["stats", "confrontos", "yesterday", "ranking", "live"] : ["stats", "confrontos", "yesterday", "ranking"])
-                          : expandedMatch.sport === "hockey"
-                          ? (expandedMatch.isLive ? ["stats", "confrontos", "standings", "yesterday", "live"] : ["stats", "confrontos", "standings", "yesterday"])
-                          : expandedMatch.sport === "basketball"
-                          ? (expandedMatch.isLive ? ["stats", "confrontos", "standings", "yesterday", "live"] : ["stats", "confrontos", "standings", "yesterday"])
-                          : expandedMatch.sport === "baseball"
-                          ? (expandedMatch.isLive ? ["stats", "confrontos", "standings", "yesterday", "liga", "live"] : ["stats", "confrontos", "standings", "yesterday", "liga"])
-                          : expandedMatch.sport === "volleyball"
-                          ? (expandedMatch.isLive ? ["stats", "confrontos", "standings", "live"] : ["stats", "confrontos", "standings"])
-                          : (expandedMatch.isLive ? ["stats", "confrontos", "standings", "lineups", "live"] : ["stats", "confrontos", "standings", "lineups"]);
-                        const orderedTabs = expandedMatch.isLive ? ["live", ...tabs.filter(t => t !== "live")] : tabs;
-                        return orderedTabs.map(tab => (
-                          <button
-                            key={tab}
-                            onClick={() => setMatchViewTab(tab as typeof matchViewTab)}
-                            className={`flex-1 py-2 text-xs font-bold transition-colors whitespace-nowrap px-1 ${matchViewTab === tab ? (tab === "live" ? "text-red-400 border-b-2 border-red-500" : "text-blue-400 border-b-2 border-blue-500") : "text-zinc-500 hover:text-white"}`}
-                          >
-                            {tabLabel(tab)}
-                          </button>
-                        ));
-                      })()}
+                    <div className="flex items-center justify-between gap-3 mb-4">
+                      <div className="flex-1 flex flex-col items-center gap-2 min-w-0">
+                        <EventTeamBadge
+                          name={teamNamePt(expandedMatch.home)}
+                          badge={getTeamBanner(expandedMatch.home, expandedMatch.country)}
+                          sport={expandedMatch.sport ?? "football"}
+                          flag={COUNTRY_FLAGS[expandedMatch.country?.toLowerCase() ?? ""] ?? sportEmoji(expandedMatch.sport)}
+                        />
+                        <span className="text-[16px] font-black text-zinc-900 text-center leading-tight px-1">
+                          {teamNamePt(expandedMatch.home)}
+                        </span>
+                      </div>
+
+                      <div className="min-w-[88px] flex flex-col items-center">
+                        <span className="text-[18px] font-black text-zinc-500 tracking-wide">VS</span>
+                        {expandedMatch.isLive ? (
+                          <span className="mt-1 text-[28px] font-black text-zinc-900 tabular-nums">
+                            {expandedMatch.homeScore ?? 0}
+                            <span className="text-zinc-400 mx-1.5">-</span>
+                            {expandedMatch.awayScore ?? 0}
+                          </span>
+                        ) : (
+                          <>
+                            {expandedMatch.time && <span className="mt-1 text-[22px] font-black text-zinc-900">{expandedMatch.time}</span>}
+                            {(expandedMatch.date || expandedMatch.time) && (
+                              <span className="mt-1 text-[12px] font-semibold text-zinc-500">
+                                {expandedMatch.date ? formatMatchDate(expandedMatch.date) : ""}
+                              </span>
+                            )}
+                          </>
+                        )}
+                      </div>
+
+                      <div className="flex-1 flex flex-col items-center gap-2 min-w-0">
+                        <EventTeamBadge
+                          name={teamNamePt(expandedMatch.away)}
+                          badge={getTeamBanner(expandedMatch.away, expandedMatch.country)}
+                          sport={expandedMatch.sport ?? "football"}
+                          flag={COUNTRY_FLAGS[expandedMatch.country?.toLowerCase() ?? ""] ?? sportEmoji(expandedMatch.sport)}
+                        />
+                        <span className="text-[16px] font-black text-zinc-900 text-center leading-tight px-1">
+                          {teamNamePt(expandedMatch.away)}
+                        </span>
+                      </div>
                     </div>
-                  )}
+
+                    {matchViewTab !== "markets" && (
+                      <div className="flex gap-2 overflow-x-auto no-scrollbar pt-1">
+                        {(() => {
+                          const tabLabel = (tab: string) => {
+                            if (tab === "stats") return "Estatísticas";
+                            if (tab === "confrontos") return "⚔️ H2H";
+                            if (tab === "standings") return "Classificação";
+                            if (tab === "yesterday") return "📅 Ontem";
+                            if (tab === "ranking") return "Ranking";
+                            if (tab === "liga") return "⭐ Liga";
+                            if (tab === "odds") return "📊 Mercados";
+                            if (tab === "lineups") return "👥 Escalação";
+                            return "⚡ Ao Vivo";
+                          };
+                          const tabs: string[] = expandedMatch.sport === "tennis"
+                            ? (expandedMatch.isLive ? ["stats", "confrontos", "yesterday", "ranking", "live"] : ["stats", "confrontos", "yesterday", "ranking"])
+                            : expandedMatch.sport === "hockey"
+                            ? (expandedMatch.isLive ? ["stats", "confrontos", "standings", "yesterday", "live"] : ["stats", "confrontos", "standings", "yesterday"])
+                            : expandedMatch.sport === "basketball"
+                            ? (expandedMatch.isLive ? ["stats", "confrontos", "standings", "yesterday", "live"] : ["stats", "confrontos", "standings", "yesterday"])
+                            : expandedMatch.sport === "baseball"
+                            ? (expandedMatch.isLive ? ["stats", "confrontos", "standings", "yesterday", "liga", "live"] : ["stats", "confrontos", "standings", "yesterday", "liga"])
+                            : expandedMatch.sport === "volleyball"
+                            ? (expandedMatch.isLive ? ["stats", "confrontos", "standings", "live"] : ["stats", "confrontos", "standings"])
+                            : (expandedMatch.isLive ? ["stats", "confrontos", "standings", "lineups", "live"] : ["stats", "confrontos", "standings", "lineups"]);
+                          const orderedTabs = expandedMatch.isLive ? ["live", ...tabs.filter(t => t !== "live")] : tabs;
+                          return orderedTabs.map(tab => (
+                            <button
+                              key={tab}
+                              onClick={() => setMatchViewTab(tab as typeof matchViewTab)}
+                              className={`shrink-0 px-3 py-2 rounded-xl border text-[11px] font-black whitespace-nowrap transition-all ${
+                                matchViewTab === tab
+                                  ? (tab === "live" ? "bg-red-50 border-red-200 text-red-600" : "bg-blue-50 border-blue-200 text-blue-600")
+                                  : "bg-zinc-50 border-zinc-200 text-zinc-500 hover:bg-zinc-100"
+                              }`}
+                            >
+                              {tabLabel(tab)}
+                            </button>
+                          ));
+                        })()}
+                      </div>
+                    )}
+                  </div>
                 </div>
 
                 {/* Stats panel */}
