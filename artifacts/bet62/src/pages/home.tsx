@@ -3782,6 +3782,34 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
             setLiveMatches(prev => prev.map(m =>
               String(m.id) === matchId ? { ...m, ...(data.delta ?? {}), isLive: true } : m
             ));
+          } else if (data.type === "batch_update" && Array.isArray(data.updates)) {
+            const msgNow = Date.now();
+            liveDataFetchedAt.current = msgNow;
+            setLiveMatches(prev => {
+              if (prev.length === 0) return prev;
+              const next = [...prev];
+              let changed = false;
+              for (const upd of data.updates as Array<{ matchId?: string; delta?: Partial<Match> }>) {
+                const matchId = String(upd?.matchId ?? "");
+                if (!matchId || !upd?.delta || typeof upd.delta !== "object") continue;
+                matchLastSeenRef.current[matchId] = msgNow;
+                const deltaMinuteRaw = (upd.delta as Match).minute;
+                if (typeof deltaMinuteRaw === "number" && Number.isFinite(deltaMinuteRaw)) {
+                  const prevMinute = apiMinutesRef.current[matchId];
+                  if (typeof prevMinute !== "number" || deltaMinuteRaw >= prevMinute) {
+                    apiMinutesRef.current[matchId] = deltaMinuteRaw;
+                    if (typeof prevMinute !== "number" || deltaMinuteRaw > prevMinute) {
+                      minuteChangedAtRef.current[matchId] = msgNow;
+                    }
+                  }
+                }
+                const idx = next.findIndex(m => String(m.id) === matchId);
+                if (idx < 0) continue;
+                next[idx] = { ...next[idx], ...(upd.delta as Partial<Match>), isLive: true };
+                changed = true;
+              }
+              return changed ? next : prev;
+            });
           } else if (Array.isArray(data.matches)) {
             // Full snapshot from server broadcast
             writeSnapshot(liveSnapshotKey(), data.matches);

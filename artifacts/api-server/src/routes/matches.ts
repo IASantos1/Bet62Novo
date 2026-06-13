@@ -5844,9 +5844,9 @@ async function getTennisAllV1(): Promise<V1TennisGame[]> {
   }
 }
 
-// Increased from 2000ms: prevents hammering the V1 API (broadcast cadence ~900ms
-// means 2s TTL causes ~1 API call/s; at 8s the rate drops to ~0.1/s avoiding rate-limits)
-const TENNIS_LIVE_V1_TTL = 8000;
+// Keep this short enough that tennis live snapshots can pick up new bookmaker odds
+// quickly, while still avoiding an API call on every broadcast tick.
+const TENNIS_LIVE_V1_TTL = 3000;
 let _tennisLiveV1Cache: { games: V1TennisGame[]; fetchedAt: number } | null = null;
 let _tennisLiveV1InFlight: Promise<V1TennisGame[]> | null = null;
 
