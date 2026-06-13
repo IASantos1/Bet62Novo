@@ -9,7 +9,7 @@ import {
   LogOut, User, History, Loader2, Zap, TrendingUp,
   ChevronRight, ChevronLeft, ChevronDown, ChevronUp, AlertCircle, BarChart2, Wallet, ArrowDownCircle, ArrowUpCircle, Plus, Clock, Smartphone,
   Copy, Share2, CircleDollarSign, Lock, Trash2, Check, Fingerprint, ScanFace, ShieldCheck,
-  RefreshCw, Ticket, CalendarDays, ListOrdered, Search,
+  RefreshCw, Ticket, CalendarDays, ListOrdered, Search, Sun, Moon,
 } from "lucide-react";
 import ProfileTab from "@/components/ProfileTab";
 import { Button } from "@/components/ui/button";
@@ -24,6 +24,7 @@ import {
 import { useAuth } from "@/hooks/use-auth";
 import { Elements, PaymentElement, useElements, useStripe } from "@stripe/react-stripe-js";
 import { loadStripe, type StripeElementsOptions } from "@stripe/stripe-js";
+import { getResolvedTheme, subscribeThemeChange, toggleThemePreference, type ResolvedTheme } from "@/lib/theme";
 
 import arsenalBanner from "@assets/file_1778342439847_1778342557288.jpeg";
 import manCityBanner from "@assets/file_1778342444770_1778342557288.jpeg";
@@ -1823,8 +1824,10 @@ function AnimatedCopaBanner({ onOpen }: { onOpen: () => void }) {
 export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }) {
   const [, navigate] = useLocation();
   const auth = useAuth();
+  const [resolvedTheme, setResolvedTheme] = useState<ResolvedTheme>(() => getResolvedTheme());
   const { isIdle, resetIdle } = useIdle(120_000);
   const isIdleRef = useRef(false);
+  useEffect(() => subscribeThemeChange(setResolvedTheme), []);
   useEffect(() => { isIdleRef.current = isIdle; }, [isIdle]);
   const upcomingFetchCtrlRef = useRef<AbortController | null>(null);
   const liveFetchCtrlRef = useRef<AbortController | null>(null);
@@ -7783,6 +7786,16 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
           </div>
 
           <div className="flex items-center gap-2">
+            <button
+              onClick={() => setResolvedTheme(toggleThemePreference())}
+              className="h-9 rounded-xl border border-zinc-700 bg-zinc-800 hover:border-zinc-500 px-3 flex items-center gap-2 transition-colors shrink-0"
+              title={resolvedTheme === "dark" ? "Ativar modo claro" : "Ativar modo escuro"}
+            >
+              {resolvedTheme === "dark" ? <Sun size={15} className="text-amber-400" /> : <Moon size={15} className="text-zinc-300" />}
+              <span className="hidden sm:inline text-xs font-bold text-white">
+                {resolvedTheme === "dark" ? "Claro" : "Escuro"}
+              </span>
+            </button>
             {auth.user ? (
               <>
                 {/* Free Bet balance pill — always visible */}

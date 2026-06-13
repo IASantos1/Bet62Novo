@@ -6,6 +6,7 @@ import { AuthProvider } from "@/hooks/use-auth";
 import { useState, useEffect, lazy, Suspense, Component, type ReactNode } from "react";
 import { fetchWithTimeout } from "@/lib/fetch-timeout";
 import { hardResetPwaAndReload } from "@/lib/pwa";
+import { applyThemePreference, getStoredThemePreference, getResolvedTheme, subscribeThemeChange, type ResolvedTheme } from "@/lib/theme";
 import { readWCClientSnapshotRaw, writeWCClientSnapshotRaw } from "@/lib/world-cup-cache";
 import NotFound from "@/pages/not-found";
 import Home from "@/pages/home";
@@ -15,14 +16,6 @@ import SplashScreen from "@/components/SplashScreen";
 const AdminPage = lazy(() => import("@/pages/admin"));
 const WorldCupPage = lazy(() => import("@/pages/world-cup"));
 const preloadWorldCupPage = () => import("@/pages/world-cup");
-
-// 08:00–18:59 → light mode · 19:00–07:59 → dark mode
-function applyTheme() {
-  const h = new Date().getHours();
-  const isDark = h < 8 || h >= 19;
-  document.documentElement.classList.toggle("dark", isDark);
-  document.documentElement.classList.toggle("light-mode", !isDark);
-}
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -97,12 +90,19 @@ function Router() {
 function App() {
   const isAdmin = window.location.pathname.replace(/\/$/, "").endsWith("/admin");
   const [splashDone, setSplashDone] = useState(isAdmin);
+  const [resolvedTheme, setResolvedTheme] = useState<ResolvedTheme>(() => getResolvedTheme());
 
   useEffect(() => {
-    applyTheme();
-    // Re-check every minute so it switches exactly at 08:00 / 19:00
-    const id = setInterval(applyTheme, 60_000);
-    return () => clearInterval(id);
+    const syncTheme = () => setResolvedTheme(applyThemePreference(getStoredThemePreference()));
+    syncTheme();
+    const unsubscribe = subscribeThemeChange(setResolvedTheme);
+    const id = setInterval(() => {
+      if (!getStoredThemePreference()) syncTheme();
+    }, 60_000);
+    return () => {
+      unsubscribe();
+      clearInterval(id);
+    };
   }, []);
 
   useEffect(() => {
@@ -153,7 +153,7 @@ function App() {
                 <Router />
               </WouterRouter>
             </AppErrorBoundary>
-            <Toaster theme="dark" richColors />
+            <Toaster theme={resolvedTheme} richColors />
           </TooltipProvider>
         </AuthProvider>
       </QueryClientProvider>
