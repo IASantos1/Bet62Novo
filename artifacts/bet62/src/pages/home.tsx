@@ -5801,9 +5801,9 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
     if (isSusp) {
       // Show a locked placeholder so section headers don't look empty
       return (
-        <div className="flex-1 flex flex-col items-center py-2.5 px-1 rounded-lg border border-zinc-800 bg-zinc-900/60 min-w-0 opacity-60 cursor-not-allowed select-none">
-          <span className="text-[10px] text-zinc-600 mb-1 leading-tight text-center truncate w-full px-0.5">{label}</span>
-          <svg className="text-zinc-600" width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zm-6 9c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2zm3.1-9H8.9V6c0-1.71 1.39-3.1 3.1-3.1 1.71 0 3.1 1.39 3.1 3.1v2z"/></svg>
+        <div className="flex-1 flex flex-col items-center justify-center min-w-0 h-[64px] rounded-2xl border border-zinc-200 bg-zinc-100 opacity-70 cursor-not-allowed select-none px-2.5">
+          <span className="text-[11px] font-medium text-zinc-500 leading-tight text-center truncate w-full px-0.5">{label}</span>
+          <svg className="text-zinc-400 mt-1" width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zm-6 9c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2zm3.1-9H8.9V6c0-1.71 1.39-3.1 3.1-3.1 1.71 0 3.1 1.39 3.1 3.1v2z"/></svg>
         </div>
       );
     }
@@ -5817,10 +5817,14 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
     return (
       <button
         {...makeTap(() => toggleBet(match, sel, odd, market, label))}
-        className={`flex-1 flex flex-col items-center py-2.5 px-1 rounded-lg border transition-all min-w-0 ${active ? "border-red-600 bg-red-600/15 ring-1 ring-red-500/40" : "border-zinc-800 bg-zinc-900/80 hover:border-red-500/40 hover:bg-zinc-800"} ${flashClass}`}
+        className={`flex-1 flex flex-col items-center justify-center min-w-0 h-[64px] px-2.5 rounded-2xl border transition-all ${
+          active
+            ? "border-red-600 bg-red-600 text-white shadow-[0_10px_20px_rgba(220,38,38,0.22)]"
+            : "border-zinc-200 bg-zinc-50 hover:bg-zinc-100"
+        } ${flashClass}`}
       >
-        <span className="text-[11px] text-zinc-400 mb-1 leading-tight text-center truncate w-full px-0.5">{label}</span>
-        <span className={`font-bold text-base tabular-nums flex items-center gap-0.5 ${active ? "text-red-400" : "text-white"}`}>
+        <span className={`text-[11px] font-medium leading-tight text-center truncate w-full px-0.5 ${active ? "text-white/85" : "text-zinc-500"}`}>{label}</span>
+        <span className={`mt-1 font-black text-[20px] leading-none tabular-nums flex items-center gap-0.5 ${active ? "text-white" : "text-zinc-900"}`}>
           {odd.toFixed(2)}
           {oddUp   && <span className="text-green-400 text-[9px] font-black leading-none shrink-0">▲</span>}
           {oddDown && <span className="text-red-400  text-[9px] font-black leading-none shrink-0">▼</span>}
