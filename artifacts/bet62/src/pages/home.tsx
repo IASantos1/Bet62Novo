@@ -4603,6 +4603,7 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
     const bannerImg = getMatchBannerStable(match);
     const homeName = teamNamePt(match.home);
     const awayName = teamNamePt(match.away);
+    const dateStr = (match.scheduledDate ?? match.date) ? formatMatchDate(match.scheduledDate ?? match.date ?? "") : "";
     const isNew     = !seenMatchIds.current.has(matchKey);
     if (isNew) seenMatchIds.current.add(matchKey);
 
@@ -5682,26 +5683,36 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
     // 1X2
     f["result:home"] = match.odds.home; f["result:draw"] = match.odds.draw; f["result:away"] = match.odds.away;
     // Dupla Chance + BTTS
-    f["dupla:homeOrDraw"] = m.doubleChance.homeOrDraw; f["dupla:awayOrDraw"] = m.doubleChance.awayOrDraw; f["dupla:homeOrAway"] = m.doubleChance.homeOrAway;
-    f["dupla:bts-yes"] = m.bothTeamsScore.yes; f["dupla:bts-no"] = m.bothTeamsScore.no;
-    f["especiais:bts-yes"] = m.bothTeamsScore.yes; f["especiais:bts-no"] = m.bothTeamsScore.no;
-    f["especiais:dc-hd"] = m.doubleChance.homeOrDraw; f["especiais:dc-ha"] = m.doubleChance.homeOrAway; f["especiais:dc-da"] = m.doubleChance.awayOrDraw;
+    if (m.doubleChance) {
+      f["dupla:homeOrDraw"] = m.doubleChance.homeOrDraw; f["dupla:awayOrDraw"] = m.doubleChance.awayOrDraw; f["dupla:homeOrAway"] = m.doubleChance.homeOrAway;
+      f["especiais:dc-hd"] = m.doubleChance.homeOrDraw; f["especiais:dc-ha"] = m.doubleChance.homeOrAway; f["especiais:dc-da"] = m.doubleChance.awayOrDraw;
+    }
+    if (m.bothTeamsScore) {
+      f["dupla:bts-yes"] = m.bothTeamsScore.yes; f["dupla:bts-no"] = m.bothTeamsScore.no;
+      f["especiais:bts-yes"] = m.bothTeamsScore.yes; f["especiais:bts-no"] = m.bothTeamsScore.no;
+    }
     // Total de Golos (gols / totais / 1tempo tabs)
     const tg = m.totalGoals;
-    const tgMap: Array<[string, number]> = [["o05",tg.over05],["u05",tg.under05],["o15",tg.over15],["u15",tg.under15],["o25",tg.over25],["u25",tg.under25],["o35",tg.over35],["u35",tg.under35],["o45",tg.over45],["u45",tg.under45],["o55",tg.over55],["u55",tg.under55],["o65",tg.over65],["u65",tg.under65]];
-    for (const [k, v] of tgMap) { f[`gols:${k}`] = v; f[`totais:${k}`] = v; f[`1tempo:${k}`] = v; }
-    // Sets (volleyball / tennis reuse totalGoals)
-    f["sets:osets"] = tg.over25; f["sets:usets"] = tg.under25;
-    f["sets:osets25"] = tg.over15; f["sets:usets25"] = tg.under15;
-    f["sets:osets35"] = tg.over25; f["sets:usets35"] = tg.under25;
-    f["sets:tie-yes"] = m.bothTeamsScore.yes; f["sets:tie-no"] = m.bothTeamsScore.no;
+    if (tg) {
+      const tgMap: Array<[string, number]> = [["o05",tg.over05],["u05",tg.under05],["o15",tg.over15],["u15",tg.under15],["o25",tg.over25],["u25",tg.under25],["o35",tg.over35],["u35",tg.under35],["o45",tg.over45],["u45",tg.under45],["o55",tg.over55],["u55",tg.under55],["o65",tg.over65],["u65",tg.under65]];
+      for (const [k, v] of tgMap) { f[`gols:${k}`] = v; f[`totais:${k}`] = v; f[`1tempo:${k}`] = v; }
+      // Sets (volleyball / tennis reuse totalGoals)
+      f["sets:osets"] = tg.over25; f["sets:usets"] = tg.under25;
+      f["sets:osets25"] = tg.over15; f["sets:usets25"] = tg.under15;
+      f["sets:osets35"] = tg.over25; f["sets:usets35"] = tg.under25;
+    }
+    if (m.bothTeamsScore) {
+      f["sets:tie-yes"] = m.bothTeamsScore.yes; f["sets:tie-no"] = m.bothTeamsScore.no;
+    }
     // Handicap
     const hc = m.handicap;
-    f["handicap:hm1"] = hc.homeMinusOne; f["handicap:hm1h"] = hc.homeMinusOneHalf;
-    f["handicap:ap1"] = hc.awayPlusOne; f["handicap:ap1h"] = hc.awayPlusOneHalf;
-    f["handicap:hcap-home"] = hc.homeMinusOne; f["handicap:hcap-away"] = hc.awayPlusOne;
-    f["spread:hm1"] = hc.homeMinusOne; f["spread:ap1"] = hc.awayPlusOne;
-    f["puckline:pl-home"] = hc.homeMinusOne; f["puckline:pl-away"] = hc.awayPlusOne;
+    if (hc) {
+      f["handicap:hm1"] = hc.homeMinusOne; f["handicap:hm1h"] = hc.homeMinusOneHalf;
+      f["handicap:ap1"] = hc.awayPlusOne; f["handicap:ap1h"] = hc.awayPlusOneHalf;
+      f["handicap:hcap-home"] = hc.homeMinusOne; f["handicap:hcap-away"] = hc.awayPlusOne;
+      f["spread:hm1"] = hc.homeMinusOne; f["spread:ap1"] = hc.awayPlusOne;
+      f["puckline:pl-home"] = hc.homeMinusOne; f["puckline:pl-away"] = hc.awayPlusOne;
+    }
     // Intervalo / HalfTime / Period 1
     if (m.halfTime) {
       f["1tempo:ht-home"] = m.halfTime.home; f["1tempo:ht-draw"] = m.halfTime.draw; f["1tempo:ht-away"] = m.halfTime.away;
@@ -5737,14 +5748,14 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
         f[`especiais:sog-u-${l}`] = hx.shotsOnGoal.under;
       }
     }
-    if ((m as any).mlbExtra && typeof (m as any)._total === "number") {
+    if ((m as any).mlbExtra && typeof (m as any)._total === "number" && tg && hc) {
       const tot = (m as any)._total as number;
       const lo = tot - 0.5;
       const hi = tot + 0.5;
-      f[`gols:mlb-tot-o-${lo}`] = m.totalGoals.over25; f[`gols:mlb-tot-u-${lo}`] = m.totalGoals.under25;
-      f[`gols:mlb-tot-o-${tot}`] = m.totalGoals.over35; f[`gols:mlb-tot-u-${tot}`] = m.totalGoals.under35;
-      f[`gols:mlb-tot-o-${hi}`] = m.totalGoals.over45; f[`gols:mlb-tot-u-${hi}`] = m.totalGoals.under45;
-      f["handicap:mlb-rl-home-1.5"] = m.handicap.homeMinusOne; f["handicap:mlb-rl-away-1.5"] = m.handicap.awayPlusOne;
+      f[`gols:mlb-tot-o-${lo}`] = tg.over25; f[`gols:mlb-tot-u-${lo}`] = tg.under25;
+      f[`gols:mlb-tot-o-${tot}`] = tg.over35; f[`gols:mlb-tot-u-${tot}`] = tg.under35;
+      f[`gols:mlb-tot-o-${hi}`] = tg.over45; f[`gols:mlb-tot-u-${hi}`] = tg.under45;
+      f["handicap:mlb-rl-home-1.5"] = hc.homeMinusOne; f["handicap:mlb-rl-away-1.5"] = hc.awayPlusOne;
       const mx = (m as any).mlbExtra as any;
       if (mx.f5Result) {
         f["gols:mlb-f5-home"] = mx.f5Result.home; f["gols:mlb-f5-away"] = mx.f5Result.away;
@@ -7089,7 +7100,7 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
         )}
 
         {/* ── HÓQUEI: PUCK LINE ── */}
-        {isHockey && (modalTab === "puckline" || modalTab === "todos") && m && m.handicap.homeMinusOne > 0 && (
+        {isHockey && (modalTab === "puckline" || modalTab === "todos") && m?.handicap?.homeMinusOne > 0 && (
           <div>
             <MarketGroup title="Puck Line (±1.5)">
               <MarketOddsBtn match={match} sel="pl-home" odd={m.handicap.homeMinusOne} market="puckline" label={`${match.home} −1.5`} suspKey="puckLine" />
@@ -7099,7 +7110,7 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
         )}
 
         {/* ── HÓQUEI: 1º PERÍODO — visible throughout match ── */}
-        {isHockey && (modalTab === "1periodo" || modalTab === "todos") && m && m.halfTime.home > 0 && (
+        {isHockey && (modalTab === "1periodo" || modalTab === "todos") && m?.halfTime?.home > 0 && (
           <div>
             <MarketGroup title="Resultado — 1º Período">
               <MarketOddsBtn match={match} sel="p1-home" odd={m.halfTime.home} market="1periodo" label={match.home} suspKey="halfTime" />
@@ -7134,13 +7145,13 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
         {/* ── VOLEIBOL: SETS ── */}
         {isVolleyball && (modalTab === "sets" || modalTab === "todos") && m && (
           <div>
-            {m.totalGoals.over15 > 0 && (
+            {m.totalGoals?.over15 > 0 && (
               <MarketGroup title="Total de Sets — O/U 2.5">
                 <MarketOddsBtn match={match} sel="osets25" odd={m.totalGoals.over15} market="sets" label="Mais de 2.5 sets" />
                 <MarketOddsBtn match={match} sel="usets25" odd={m.totalGoals.under15} market="sets" label="Menos de 2.5 sets" />
               </MarketGroup>
             )}
-            {m.totalGoals.over25 > 0 && (
+            {m.totalGoals?.over25 > 0 && (
               <MarketGroup title="Total de Sets — O/U 3.5">
                 <MarketOddsBtn match={match} sel="osets35" odd={m.totalGoals.over25} market="sets" label="Mais de 3.5 sets" />
                 <MarketOddsBtn match={match} sel="usets35" odd={m.totalGoals.under25} market="sets" label="Menos de 3.5 sets" />
@@ -7178,7 +7189,7 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
                 <MarketOddsBtn match={match} sel="hcap-vb-home" odd={(m as any).volleyballExtra.setHandicap.home} market="handicap" label={`${match.home} −1.5 sets`} />
                 <MarketOddsBtn match={match} sel="hcap-vb-away" odd={(m as any).volleyballExtra.setHandicap.away} market="handicap" label={`${match.away} +1.5 sets`} />
               </MarketGroup>
-            ) : m.totalGoals.over35 > 0 && (
+            ) : m.totalGoals?.over35 > 0 && (
               <MarketGroup title="Handicap de Sets — Casa −1.5">
                 <MarketOddsBtn match={match} sel="hcap-vb-home" odd={m.totalGoals.over35} market="handicap" label={`${match.home} −1.5 sets`} />
                 <MarketOddsBtn match={match} sel="hcap-vb-away" odd={m.totalGoals.under35} market="handicap" label={`${match.away} +1.5 sets`} />
@@ -7195,29 +7206,36 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
         )}
 
         {/* ── VOLEIBOL: POR SET ── */}
-        {isVolleyball && (modalTab === "perset" || modalTab === "todos") && m && (m as any).volleyballExtra && (
+        {isVolleyball && (modalTab === "perset" || modalTab === "todos") && (m as any).volleyballExtra && (
           <div>
+            {(() => {
+              const volleyballExtra = (m as any).volleyballExtra as any;
+              return (
+                <>
             {/* Set 1: visible throughout match (settled by server once set ends) */}
-            {((m as any).volleyballExtra as { set1: { home: number; away: number }; set2: { home: number; away: number }; set3: { home: number; away: number } }).set1.home > 0 && (
+            {volleyballExtra?.set1?.home > 0 && (
               <MarketGroup title="Vencedor do 1º Set">
-                <MarketOddsBtn match={match} sel="vs1h" odd={((m as any).volleyballExtra as any).set1.home} market="perset" label={match.home} />
-                <MarketOddsBtn match={match} sel="vs1a" odd={((m as any).volleyballExtra as any).set1.away} market="perset" label={match.away} />
+                <MarketOddsBtn match={match} sel="vs1h" odd={volleyballExtra.set1.home} market="perset" label={match.home} />
+                <MarketOddsBtn match={match} sel="vs1a" odd={volleyballExtra.set1.away} market="perset" label={match.away} />
               </MarketGroup>
             )}
             {/* Set 2: visible throughout match */}
-            {((m as any).volleyballExtra as any).set2.home > 0 && (
+            {volleyballExtra?.set2?.home > 0 && (
               <MarketGroup title="Vencedor do 2º Set">
-                <MarketOddsBtn match={match} sel="vs2h" odd={((m as any).volleyballExtra as any).set2.home} market="perset" label={match.home} />
-                <MarketOddsBtn match={match} sel="vs2a" odd={((m as any).volleyballExtra as any).set2.away} market="perset" label={match.away} />
+                <MarketOddsBtn match={match} sel="vs2h" odd={volleyballExtra.set2.home} market="perset" label={match.home} />
+                <MarketOddsBtn match={match} sel="vs2a" odd={volleyballExtra.set2.away} market="perset" label={match.away} />
               </MarketGroup>
             )}
             {/* Set 3: always show (upcoming or current) */}
-            {((m as any).volleyballExtra as any).set3.home > 0 && (
+            {volleyballExtra?.set3?.home > 0 && (
               <MarketGroup title="Vencedor do 3º Set (se disputado)">
-                <MarketOddsBtn match={match} sel="vs3h" odd={((m as any).volleyballExtra as any).set3.home} market="perset" label={match.home} />
-                <MarketOddsBtn match={match} sel="vs3a" odd={((m as any).volleyballExtra as any).set3.away} market="perset" label={match.away} />
+                <MarketOddsBtn match={match} sel="vs3h" odd={volleyballExtra.set3.home} market="perset" label={match.home} />
+                <MarketOddsBtn match={match} sel="vs3a" odd={volleyballExtra.set3.away} market="perset" label={match.away} />
               </MarketGroup>
             )}
+                </>
+              );
+            })()}
           </div>
         )}
 
@@ -7232,7 +7250,7 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
                   <MarketOddsBtn match={match} sel={`pt-u-${pl.line}`} odd={pl.under} market="pontos" label={`Menos de ${pl.line} pts`} />
                 </MarketGroup>
               ))
-            ) : m.bothTeamsScore.yes > 0 && (
+            ) : m.bothTeamsScore?.yes > 0 && (
               <MarketGroup title={`Total de Pontos — O/U ${m._total ?? "—"}`}>
                 <MarketOddsBtn match={match} sel="opts" odd={m.bothTeamsScore.yes} market="pontos" label={`Mais de ${m._total ?? "—"} pts`} />
                 <MarketOddsBtn match={match} sel="upts" odd={m.bothTeamsScore.no} market="pontos" label={`Menos de ${m._total ?? "—"} pts`} />
@@ -7251,7 +7269,7 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
         {isBasketball && (modalTab === "quartos" || modalTab === "todos") && m && (
           <div>
             {/* 1ª Metade = Q1+Q2; hide when already in Q3 or Q4 */}
-            {m.halfTime.home > 0 && (currentQ === 0 || currentQ <= 2) && (
+            {m.halfTime?.home > 0 && (currentQ === 0 || currentQ <= 2) && (
               <MarketGroup title="Vencedor — 1ª Metade">
                 <MarketOddsBtn match={match} sel="h1-home" odd={m.halfTime.home} market="quartos" label={match.home} suspKey="halfTime" />
                 <MarketOddsBtn match={match} sel="h1-away" odd={m.halfTime.away} market="quartos" label={match.away} suspKey="halfTime" />
@@ -7261,7 +7279,7 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
               const ex = (m as any).basketballExtra as any;
               const labels = ["1º Quarto","2º Quarto","3º Quarto","4º Quarto"];
               // All quarter markets remain visible throughout the match (settled by server once quarter ends)
-              return ex[q].home > 0 ? (
+              return ex?.[q]?.home > 0 ? (
                 <MarketGroup key={q} title={`Vencedor — ${labels[qi]}`}>
                   <MarketOddsBtn match={match} sel={`${q}-home`} odd={ex[q].home} market="quartos" label={match.home} suspKey="basketballExtra" />
                   <MarketOddsBtn match={match} sel={`${q}-away`} odd={ex[q].away} market="quartos" label={match.away} suspKey="basketballExtra" />
