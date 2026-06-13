@@ -295,6 +295,17 @@ const WC_GROUPS = [
   { group: "L", teams: ["England", "Croatia", "Ghana", "Panama"] },
 ];
 
+function normalizeWCGroupLabel(raw: string | undefined): string {
+  const value = String(raw ?? "").replace(/\s+/g, " ").trim();
+  if (!value) return "";
+  const explicit = value.match(/(?:^|\b)(?:grupo|group)\s*([A-L])(?:\b|$)/i);
+  if (explicit?.[1]) return `Grupo ${explicit[1].toUpperCase()}`;
+  const reversed = value.match(/^([A-L])\s*(?:grupo|group)\b/i);
+  if (reversed?.[1]) return `Grupo ${reversed[1].toUpperCase()}`;
+  if (/^[A-L]$/i.test(value)) return `Grupo ${value.toUpperCase()}`;
+  return value;
+}
+
 // ─── Map API response → WCMatch ───────────────────────────────────────────────
 
 function mapToWCMatch(m: Record<string, unknown>): WCMatch {
@@ -1779,7 +1790,7 @@ export default function WorldCupPage({ onClose, onBet: onBetProp }: { onClose?: 
                     teams={g.teams}
                     allMatches={allMatches}
                     theme={theme}
-                    realRows={standingsGroups.find(sg => sg.name === `Grupo ${g.group}`)?.rows}
+                    realRows={standingsGroups.find(sg => normalizeWCGroupLabel(sg.name) === `Grupo ${g.group}`)?.rows}
                   />
                 ))}
               </div>

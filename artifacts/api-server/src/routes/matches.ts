@@ -10532,8 +10532,12 @@ function wcStandingRowMatchesTeam(rowName: string, teamName: string): boolean {
 function normalizeWCGroupName(rawName: string): string {
   const raw = String(rawName ?? "").trim();
   if (!raw) return "Grupo";
-  if (/^[A-Z0-9]$/.test(raw)) return `Grupo ${raw}`;
-  if (/^group\s+/i.test(raw)) return raw.replace(/^group\s+/i, "Grupo ");
+  const compact = raw.replace(/\s+/g, " ").trim();
+  const explicit = compact.match(/(?:^|\b)(?:grupo|group)\s*([A-L])(?:\b|$)/i);
+  if (explicit?.[1]) return `Grupo ${explicit[1].toUpperCase()}`;
+  const reversed = compact.match(/^([A-L])\s*(?:grupo|group)\b/i);
+  if (reversed?.[1]) return `Grupo ${reversed[1].toUpperCase()}`;
+  if (/^[A-Z0-9]$/.test(compact)) return `Grupo ${compact}`;
   return raw;
 }
 
