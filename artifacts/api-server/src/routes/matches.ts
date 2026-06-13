@@ -10476,6 +10476,198 @@ const WC2026_STATIC: Array<{ home: string; away: string; group: string; date: st
   { home: "Panama", away: "England", group: "L", date: "2026-06-28", time: "02:00", md: 3 },
 ];
 
+const WC2026_GROUPS = [
+  { group: "A", teams: ["Mexico", "South Korea", "South Africa", "Czechia"] },
+  { group: "B", teams: ["Canada", "Switzerland", "Qatar", "Bosnia and Herzegovina"] },
+  { group: "C", teams: ["Brazil", "Morocco", "Haiti", "Scotland"] },
+  { group: "D", teams: ["United States", "Australia", "Paraguay", "Turkey"] },
+  { group: "E", teams: ["Germany", "Ivory Coast", "Ecuador", "Curacao"] },
+  { group: "F", teams: ["Netherlands", "Sweden", "Japan", "Tunisia"] },
+  { group: "G", teams: ["Belgium", "Iran", "New Zealand", "Egypt"] },
+  { group: "H", teams: ["Spain", "Saudi Arabia", "Uruguay", "Cape Verde"] },
+  { group: "I", teams: ["France", "Senegal", "Iraq", "Norway"] },
+  { group: "J", teams: ["Argentina", "Algeria", "Austria", "Jordan"] },
+  { group: "K", teams: ["Portugal", "Colombia", "Uzbekistan", "DR Congo"] },
+  { group: "L", teams: ["England", "Croatia", "Ghana", "Panama"] },
+] as const;
+
+type WC2026StandingRow = {
+  pos: number;
+  name: string;
+  played: number;
+  won: number;
+  drawn: number;
+  lost: number;
+  gf: number;
+  ga: number;
+  pts: number;
+};
+
+type WC2026StandingGroup = {
+  name: string;
+  rows: WC2026StandingRow[];
+};
+
+const wc2026StandingsCache = new Map<string, { data: { groups: WC2026StandingGroup[]; league: string }; fetchedAt: number }>();
+const WC2026_STANDINGS_TTL = 5 * 60_000;
+
+function normalizeWCStandingTeamName(name: string): string {
+  return String(name ?? "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\b(fc|cf|sc|ac|afc|fk|club|clube)\b/g, " ")
+    .replace(/[^a-z0-9 ]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function wcStandingRowMatchesTeam(rowName: string, teamName: string): boolean {
+  const row = normalizeWCStandingTeamName(rowName);
+  const team = normalizeWCStandingTeamName(teamName);
+  if (!row || !team) return false;
+  return row === team || row.includes(team) || team.includes(row) || row.includes(team.slice(0, Math.min(team.length, 8)));
+}
+
+function normalizeWCGroupName(rawName: string): string {
+  const raw = String(rawName ?? "").trim();
+  if (!raw) return "Grupo";
+  if (/^[A-Z0-9]$/.test(raw)) return `Grupo ${raw}`;
+  if (/^group\s+/i.test(raw)) return raw.replace(/^group\s+/i, "Grupo ");
+  return raw;
+}
+
+function assignWC2026Group(teamName: string): string | null {
+  for (const group of WC2026_GROUPS) {
+    if (group.teams.some(team => wcStandingRowMatchesTeam(teamName, team))) {
+      return `Grupo ${group.group}`;
+    }
+  }
+  return null;
+}
+
+async function getWC2026Standings(): Promise<{ groups: WC2026StandingGroup[]; league: string }> {
+  const cacheKey = "wc2026";
+  const cached = wc2026StandingsCache.get(cacheKey);
+  if (cached && Date.now() - cached.fetchedAt < WC2026_STANDINGS_TTL) return cached.data;
+
+  const parseStandingRow = (r: any, i: number): WC2026StandingRow => ({
+    pos:    r.position ?? r.rank ?? i + 1,
+    name:   r.teamName ?? r.team?.shortName ?? r.team?.name ?? "",
+    played: r.played ?? r.matches ?? 0,
+    won:    r.won ?? r.wins ?? 0,
+    drawn:  r.drawn ?? r.draws ?? 0,
+    lost:   r.lost ?? r.losses ?? 0,
+    gf:     r.goalsFor ?? r.goals_for ?? r.scored ?? 0,
+    ga:     r.goalsAgainst ?? r.goals_against ?? r.conceded ?? 0,
+    pts:    r.points ?? 0,
+  });
+
+  const WC_COMP_ID = 5930;
+  const nowMs = Date.now();
+  const dates: string[] = [];
+  for (let i = -2; i < 38; i++) {
+    dates.push(new Date(nowMs + i * 86_400_000).toISOString().slice(0, 10));
+  }
+
+  let tournamentId: number | undefined;
+  let seasonId: number | undefined;
+  let leagueName = "FIFA World Cup 2026";
+
+  const dayResults = await Promise.race([
+    Promise.all(dates.map(dt => getScheduleV2("football", dt).catch(() => [] as SAPIV2Event[]))),
+    new Promise<SAPIV2Event[][]>(resolve => setTimeout(() => resolve([]), 15_000)),
+  ]);
+  const events = (Array.isArray(dayResults) ? dayResults.flat() : []) as SAPIV2Event[];
+  const wcEvent = events.find((ev) => {
+    const league = normalizeLeagueName(v2TournName(ev.tournament), "").toLowerCase();
+    return (
+      league.includes("world cup") ||
+      league.includes("copa do mundo") ||
+      league.includes("fifa world") ||
+      league.includes("wc 2026")
+    ) && !league.includes("women") && !league.includes("qualification") && !league.includes("qualif");
+  });
+
+  if (wcEvent) {
+    leagueName = normalizeLeagueName(v2TournName(wcEvent.tournament), "") || leagueName;
+    tournamentId = wcEvent.tournamentId;
+    try {
+      const matchResp = await fetch(`${SAPI_V2_FOOTBALL}/match/${wcEvent.id}`, {
+        signal: AbortSignal.timeout(8_000),
+        headers: sapiHeaders(),
+      });
+      if (matchResp.ok) {
+        const matchData = await matchResp.json() as {
+          match?: {
+            season?: { id?: number };
+            tournament?: { uniqueTournament?: { id?: number; name?: string }; name?: string };
+          };
+        };
+        seasonId = matchData.match?.season?.id;
+        tournamentId = matchData.match?.tournament?.uniqueTournament?.id ?? tournamentId;
+        leagueName = matchData.match?.tournament?.uniqueTournament?.name ?? matchData.match?.tournament?.name ?? leagueName;
+      }
+    } catch {
+      // ignore and fall back below
+    }
+  }
+
+  if (!tournamentId) tournamentId = WC_COMP_ID;
+  if (!seasonId) {
+    throw new Error("Season da Copa do Mundo indisponivel");
+  }
+
+  const stdResp = await fetch(`${SAPI_V2_FOOTBALL}/tournament/${tournamentId}/season/${seasonId}/standings`, {
+    signal: AbortSignal.timeout(8_000),
+    headers: sapiHeaders(),
+  });
+  if (!stdResp.ok) throw new Error("Standings da Copa do Mundo indisponiveis");
+  const stdData = await stdResp.json() as { standings?: any[] };
+  const rawArr = stdData.standings ?? [];
+
+  const firstItem = rawArr[0];
+  const isGrouped = firstItem && (
+    typeof firstItem.group !== "undefined" ||
+    Array.isArray(firstItem.rows) ||
+    Array.isArray(firstItem.standings)
+  );
+
+  let groups: WC2026StandingGroup[];
+  if (isGrouped) {
+    groups = rawArr.map((g: any) => {
+      const rawName: string =
+        typeof g.group === "string" ? g.group :
+        (g.group?.name ?? g.name ?? "Grupo");
+      const nestedRows: any[] = g.rows ?? g.standings ?? [];
+      return {
+        name: normalizeWCGroupName(rawName),
+        rows: nestedRows.map((r: any, i: number) => parseStandingRow(r, i)),
+      };
+    }).filter((g: WC2026StandingGroup) => g.rows.length > 0);
+  } else {
+    const rows = rawArr.map((r: any, i: number) => parseStandingRow(r, i));
+    const grouped = new Map<string, WC2026StandingRow[]>();
+    for (const row of rows) {
+      const groupName = assignWC2026Group(row.name);
+      if (!groupName) continue;
+      const existing = grouped.get(groupName) ?? [];
+      existing.push(row);
+      grouped.set(groupName, existing);
+    }
+    groups = [...grouped.entries()]
+      .map(([name, rows]) => ({
+        name,
+        rows: rows.sort((a, b) => b.pts - a.pts || (b.gf - b.ga) - (a.gf - a.ga) || b.gf - a.gf || a.pos - b.pos),
+      }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  const result = { groups, league: leagueName };
+  wc2026StandingsCache.set(cacheKey, { data: result, fetchedAt: Date.now() });
+  return result;
+}
+
 async function _rebuildWC2026(): Promise<void> {
   if (_wc2026Rebuilding) return;
   _wc2026Rebuilding = true;
@@ -10863,6 +11055,18 @@ router.get("/wc2026", async (_req: Request, res: Response) => {
     res.json({ matches: visible });
   } catch {
     res.json({ matches: wc2026Cache?.matches ?? [] });
+  }
+});
+
+router.get("/wc2026-standings", async (_req: Request, res: Response) => {
+  try {
+    const data = await Promise.race([
+      getWC2026Standings(),
+      new Promise<never>((_, reject) => setTimeout(() => reject(new Error("timeout")), 20_000)),
+    ]);
+    res.json(data);
+  } catch {
+    res.json({ groups: [], league: "FIFA World Cup 2026" });
   }
 });
 

@@ -94,6 +94,23 @@ type WCMatch = {
   };
 };
 
+type WCGroupStandingRow = {
+  pos: number;
+  name: string;
+  played: number;
+  won: number;
+  drawn: number;
+  lost: number;
+  gf: number;
+  ga: number;
+  pts: number;
+};
+
+type WCGroupStanding = {
+  name: string;
+  rows: WCGroupStandingRow[];
+};
+
 // ─── Date helpers ─────────────────────────────────────────────────────────────
 
 function parseMatchDate(date: string | undefined): Date | null {
@@ -553,7 +570,7 @@ function MatchCard({ match, onOpen, activeSel, onQuickBet, theme, displayMinute 
 
 // ─── Group Standings Card ─────────────────────────────────────────────────────
 
-type GroupRow = { team: string; pld: number; w: number; d: number; l: number; gf: number; ga: number; pts: number };
+type GroupRow = { team: string; pld: number; w: number; d: number; l: number; gf: number; ga: number; pts: number; pos?: number };
 
 function computeGroupStandings(teams: string[], matches: WCMatch[]): GroupRow[] {
   const norm = (s: string) => s.toLowerCase().replace(/[\s.'-]+/g, "");
@@ -581,9 +598,33 @@ function computeGroupStandings(teams: string[], matches: WCMatch[]): GroupRow[] 
   );
 }
 
-function GroupCard({ group, teams, allMatches, theme }: { group: string; teams: string[]; allMatches: WCMatch[]; theme: Theme }) {
+function GroupCard({
+  group,
+  teams,
+  allMatches,
+  theme,
+  realRows,
+}: {
+  group: string;
+  teams: string[];
+  allMatches: WCMatch[];
+  theme: Theme;
+  realRows?: WCGroupStandingRow[];
+}) {
   const isDark = theme === "dark";
-  const rows = computeGroupStandings(teams, allMatches);
+  const rows = (realRows && realRows.length > 0)
+    ? realRows.map((row) => ({
+        team: row.name,
+        pld: row.played,
+        w: row.won,
+        d: row.drawn,
+        l: row.lost,
+        gf: row.gf,
+        ga: row.ga,
+        pts: row.pts,
+        pos: row.pos,
+      }))
+    : computeGroupStandings(teams, allMatches);
   return (
     <div className={`rounded-xl border overflow-hidden ${isDark ? "border-zinc-800 bg-zinc-900/80" : "border-zinc-200 bg-white"}`}>
       {/* Header */}
@@ -609,7 +650,7 @@ function GroupCard({ group, teams, allMatches, theme }: { group: string; teams: 
       <div className={`divide-y ${isDark ? "divide-zinc-800/30" : "divide-zinc-100"}`}>
         {rows.map((row, i) => (
           <div key={row.team} className="flex items-center px-2 py-1.5">
-            <span className={`text-[9px] font-black w-4 text-center ${i < 2 ? "text-green-500" : isDark ? "text-zinc-600" : "text-zinc-400"}`}>{i + 1}</span>
+            <span className={`text-[9px] font-black w-4 text-center ${i < 2 ? "text-green-500" : isDark ? "text-zinc-600" : "text-zinc-400"}`}>{row.pos ?? i + 1}</span>
             <FlagImg name={row.team} size={16} />
             <span className={`flex-1 text-[10px] font-semibold truncate ml-1.5 ${isDark ? "text-zinc-300" : "text-zinc-700"}`}>{PT_DISPLAY_NAMES[row.team] ?? row.team}</span>
             <span className={`w-5 text-center text-[10px] ${isDark ? "text-zinc-500" : "text-zinc-500"}`}>{row.pld}</span>
@@ -1443,6 +1484,7 @@ export default function WorldCupPage({ onClose, onBet: onBetProp }: { onClose?: 
   const [liveMatches, setLiveMatches]       = useState<WCMatch[]>([]);
   const [upcomingMatches, setUpcomingMatches] = useState<WCMatch[]>([]);
   const [allMatches, setAllMatches]         = useState<WCMatch[]>([]);
+  const [standingsGroups, setStandingsGroups] = useState<WCGroupStanding[]>([]);
   const [loading, setLoading]               = useState(true);
   const [pageTab, setPageTab]               = useState<"live" | "upcoming" | "groups">("upcoming");
   const [openMatch, setOpenMatch]           = useState<WCMatch | null>(null);
@@ -1475,10 +1517,17 @@ export default function WorldCupPage({ onClose, onBet: onBetProp }: { onClose?: 
     async function load() {
       if (cancelled) return;
       try {
-        const wcData = await fetch("/api/matches/wc2026", { signal: AbortSignal.timeout(15_000) })
-          .then(r => r.ok ? r.json() : { matches: [] }).catch(() => ({ matches: [] }));
+        const [wcData, standingsData] = await Promise.all([
+          fetch("/api/matches/wc2026", { signal: AbortSignal.timeout(15_000) })
+            .then(r => r.ok ? r.json() : { matches: [] }).catch(() => ({ matches: [] })),
+          fetch("/api/matches/wc2026-standings", { signal: AbortSignal.timeout(15_000) })
+            .then(r => r.ok ? r.json() : { groups: [] }).catch(() => ({ groups: [] })),
+        ]);
         if (cancelled) return;
         const allWC = ((wcData.matches ?? []) as Record<string, unknown>[]).map(mapToWCMatch);
+        const wcGroups = Array.isArray((standingsData as { groups?: unknown[] }).groups)
+          ? ((standingsData as { groups?: WCGroupStanding[] }).groups ?? [])
+          : [];
         const wcLive = allWC.filter(m => m.isLive);
         const wcUpcoming = allWC.filter(m => !m.isLive);
         // Update clock refs for interpolation
@@ -1502,6 +1551,7 @@ export default function WorldCupPage({ onClose, onBet: onBetProp }: { onClose?: 
         setLiveMatches(wcLive);
         setUpcomingMatches(wcUpcoming);
         setAllMatches(allWC);
+        setStandingsGroups(wcGroups);
         if (wcLive.length > 0) setPageTab("live");
         // Schedule next poll using local result (not stale ref)
         if (!cancelled) {
@@ -1722,7 +1772,16 @@ export default function WorldCupPage({ onClose, onBet: onBetProp }: { onClose?: 
           {pageTab === "groups" && (
             <motion.div key="groups" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
               <div className="grid grid-cols-2 gap-3">
-                {WC_GROUPS.map(g => <GroupCard key={g.group} group={g.group} teams={g.teams} allMatches={allMatches} theme={theme} />)}
+                {WC_GROUPS.map(g => (
+                  <GroupCard
+                    key={g.group}
+                    group={g.group}
+                    teams={g.teams}
+                    allMatches={allMatches}
+                    theme={theme}
+                    realRows={standingsGroups.find(sg => sg.name === `Grupo ${g.group}`)?.rows}
+                  />
+                ))}
               </div>
             </motion.div>
           )}
