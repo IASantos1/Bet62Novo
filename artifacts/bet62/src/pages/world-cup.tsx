@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { useLocation } from "wouter";
 import { motion, AnimatePresence } from "framer-motion";
 import { ArrowLeft, X, BarChart2 } from "lucide-react";
+import { readWCClientSnapshotRaw, writeWCClientSnapshotRaw } from "@/lib/world-cup-cache";
 import trophyImg from "/trophy-wc-nobg.png";
 
 // ─── Theme helpers ─────────────────────────────────────────────────────────────
@@ -331,9 +332,6 @@ type WCMatchCollections = {
   initialTab: "live" | "upcoming";
 };
 
-const WC2026_CLIENT_CACHE_KEY = "wc2026_page_snapshot_v1";
-const WC2026_CLIENT_CACHE_MAX_AGE_MS = 2 * 60_000;
-
 function emptyWCMatchCollections(): WCMatchCollections {
   return {
     allMatches: [],
@@ -356,31 +354,12 @@ function buildWCMatchCollections(rawMatches: Record<string, unknown>[]): WCMatch
 }
 
 function readWCClientSnapshot(): WCMatchCollections | null {
-  if (typeof window === "undefined") return null;
-  try {
-    const raw = JSON.parse(window.localStorage.getItem(WC2026_CLIENT_CACHE_KEY) ?? "null") as {
-      fetchedAt?: number;
-      matches?: unknown[];
-    } | null;
-    if (!raw || !Array.isArray(raw.matches)) return null;
-    if (typeof raw.fetchedAt !== "number") return null;
-    if (Date.now() - raw.fetchedAt > WC2026_CLIENT_CACHE_MAX_AGE_MS) return null;
-    return buildWCMatchCollections(raw.matches as Record<string, unknown>[]);
-  } catch {
-    return null;
-  }
+  const raw = readWCClientSnapshotRaw();
+  return raw ? buildWCMatchCollections(raw.matches) : null;
 }
 
 function writeWCClientSnapshot(rawMatches: Record<string, unknown>[]) {
-  if (typeof window === "undefined") return;
-  try {
-    window.localStorage.setItem(
-      WC2026_CLIENT_CACHE_KEY,
-      JSON.stringify({ fetchedAt: Date.now(), matches: rawMatches }),
-    );
-  } catch {
-    // Ignore storage quota/private mode failures. Live refresh still works normally.
-  }
+  writeWCClientSnapshotRaw(rawMatches);
 }
 
 function wcPhaseTag(status: string | undefined, minute: number): "1P" | "Int." | "2P" | "ET" | "PEN" | null {
