@@ -4,6 +4,7 @@ import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { AuthProvider } from "@/hooks/use-auth";
 import { useState, useEffect, lazy, Suspense, Component, type ReactNode } from "react";
+import { readWCClientSnapshotRaw, writeWCClientSnapshotRaw } from "@/lib/world-cup-cache";
 import NotFound from "@/pages/not-found";
 import Home from "@/pages/home";
 import LivePage from "@/pages/live";
@@ -11,6 +12,7 @@ import SplashScreen from "@/components/SplashScreen";
 
 const AdminPage = lazy(() => import("@/pages/admin"));
 const WorldCupPage = lazy(() => import("@/pages/world-cup"));
+const preloadWorldCupPage = () => import("@/pages/world-cup");
 
 // 08:00–18:59 → light mode · 19:00–07:59 → dark mode
 function applyTheme() {
@@ -100,6 +102,43 @@ function App() {
     const id = setInterval(applyTheme, 60_000);
     return () => clearInterval(id);
   }, []);
+
+  useEffect(() => {
+    if (isAdmin || !splashDone) return;
+    let cancelled = false;
+    let timerId: number | null = null;
+    const idle = window.requestIdleCallback?.bind(window);
+    const cancelIdle = window.cancelIdleCallback?.bind(window);
+    let idleId: number | null = null;
+
+    const prefetch = () => {
+      void preloadWorldCupPage();
+      const cached = readWCClientSnapshotRaw();
+      if (cached) return;
+      void fetch("/api/matches/wc2026", { signal: AbortSignal.timeout(8_000) })
+        .then(r => (r.ok ? r.json() : { matches: [] }))
+        .then((data) => {
+          if (cancelled) return;
+          const matches = Array.isArray((data as { matches?: unknown[] }).matches)
+            ? (((data as { matches?: Record<string, unknown>[] }).matches) ?? [])
+            : [];
+          writeWCClientSnapshotRaw(matches);
+        })
+        .catch(() => {});
+    };
+
+    if (idle) {
+      idleId = idle(() => { prefetch(); }, { timeout: 2_500 });
+    } else {
+      timerId = window.setTimeout(() => { prefetch(); }, 1_200);
+    }
+
+    return () => {
+      cancelled = true;
+      if (idleId !== null && cancelIdle) cancelIdle(idleId);
+      if (timerId !== null) window.clearTimeout(timerId);
+    };
+  }, [isAdmin, splashDone]);
 
   return (
     <>
