@@ -4454,8 +4454,8 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
     return true;
   };
 
-  const OddsButton = ({ match, selection, odd, market = "result", label, grow }: {
-    match: Match; selection: string; odd: number; market?: string; label: string; grow?: boolean;
+  const OddsButton = ({ match, selection, odd, market = "result", label, grow, variant = "default" }: {
+    match: Match; selection: string; odd: number; market?: string; label: string; grow?: boolean; variant?: "default" | "worldcup";
   }) => {
     const now = Date.now();
     const suspendedUntil = match.marketSuspension?.[market];
@@ -4466,21 +4466,25 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
     const delta = prevOdd !== undefined ? odd - prevOdd : 0;
     const oddsUp   = !isSuspended && delta >= ODDS_ANIM_THRESHOLD;
     const oddsDown = !isSuspended && delta <= -ODDS_ANIM_THRESHOLD;
+    const isWCVariant = variant === "worldcup";
+    const baseBoxClass = isWCVariant
+      ? `${grow ? "flex-1" : ""} h-[72px] rounded-2xl border px-2.5 flex flex-col items-center justify-center`
+      : `${grow ? "flex-1" : ""} h-10 px-2 rounded-md text-xs flex flex-col items-center justify-center`;
 
     if (isSuspended) {
       return (
-        <div className={`relative flex flex-col items-center justify-center h-10 px-2 rounded-md text-xs ${grow ? "flex-1" : ""} bg-zinc-800/40 border border-zinc-700/30 opacity-70 select-none`}>
-          <span className="text-[10px] leading-none opacity-60">{label}</span>
-          <span className="font-bold text-sm leading-none text-zinc-300 tabular-nums line-through">{odd.toFixed(2)}</span>
+        <div className={`relative ${baseBoxClass} ${isWCVariant ? "bg-zinc-100 border-zinc-200 opacity-75" : "bg-zinc-800/40 border-zinc-700/30 opacity-70"} select-none`}>
+          <span className={`${isWCVariant ? "text-[11px] font-medium text-zinc-500" : "text-[10px] leading-none opacity-60"}`}>{label}</span>
+          <span className={`${isWCVariant ? "mt-1 text-[18px] font-black text-zinc-400" : "font-bold text-sm leading-none text-zinc-300"} tabular-nums line-through`}>{odd.toFixed(2)}</span>
         </div>
       );
     }
 
     if (odd < 1.15 && market === "result") {
       return (
-        <div className={`relative flex flex-col items-center justify-center h-10 px-2 rounded-md text-xs ${grow ? "flex-1" : ""} bg-zinc-800/40 border border-zinc-700/30`}>
-          <span className="text-[10px] leading-none opacity-40">{label}</span>
-          <span className="font-bold text-base leading-none text-zinc-600 tabular-nums">--</span>
+        <div className={`relative ${baseBoxClass} ${isWCVariant ? "bg-zinc-100 border-zinc-200" : "bg-zinc-800/40 border-zinc-700/30"}`}>
+          <span className={`${isWCVariant ? "text-[11px] font-medium text-zinc-500" : "text-[10px] leading-none opacity-40"}`}>{label}</span>
+          <span className={`${isWCVariant ? "mt-1 text-[20px] font-black text-zinc-400" : "font-bold text-base leading-none text-zinc-600"} tabular-nums`}>--</span>
         </div>
       );
     }
@@ -4495,9 +4499,9 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
     })();
     if (isObviousResult) {
       return (
-        <div className={`relative flex flex-col items-center justify-center h-10 px-2 rounded-md text-xs ${grow ? "flex-1" : ""} bg-amber-900/20 border border-amber-600/30`}>
-          <span className="text-[10px] leading-none opacity-50">{label}</span>
-          <span className="font-bold text-[9px] leading-none text-amber-400 uppercase tracking-wider">Aposta Já</span>
+        <div className={`relative ${baseBoxClass} ${isWCVariant ? "bg-amber-50 border-amber-200" : "bg-amber-900/20 border-amber-600/30"}`}>
+          <span className={`${isWCVariant ? "text-[11px] font-medium text-amber-700" : "text-[10px] leading-none opacity-50"}`}>{label}</span>
+          <span className={`${isWCVariant ? "mt-1 text-[10px] font-black tracking-widest text-amber-600" : "font-bold text-[9px] leading-none text-amber-400 uppercase tracking-wider"} uppercase`}>Aposta Já</span>
         </div>
       );
     }
@@ -4507,10 +4511,14 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
     return (
       <button
         {...makeTap(() => toggleBet(match, selection, odd, market, label))}
-        className={`relative flex flex-col items-center justify-center h-10 px-2 rounded-md transition-colors text-xs ${grow ? "flex-1" : ""} ${isSelected ? "bg-red-600 text-white" : "bg-zinc-800 hover:bg-zinc-700 text-zinc-300"} ${flashClass}`}
+        className={`relative ${baseBoxClass} transition-colors ${isWCVariant ? "text-zinc-900" : "text-xs"} ${
+          isSelected
+            ? (isWCVariant ? "bg-red-600 border-red-600 text-white" : "bg-red-600 text-white")
+            : (isWCVariant ? "bg-zinc-50 hover:bg-zinc-100 border-zinc-200" : "bg-zinc-800 hover:bg-zinc-700 text-zinc-300")
+        } ${flashClass}`}
       >
-        <span className="text-[10px] leading-none opacity-70">{label}</span>
-        <span className="font-bold text-sm leading-none tabular-nums flex items-center gap-0.5">
+        <span className={`${isWCVariant ? `text-[11px] font-medium ${isSelected ? "text-white/85" : "text-zinc-500"}` : "text-[10px] leading-none opacity-70"}`}>{label}</span>
+        <span className={`${isWCVariant ? "mt-1 text-[20px] font-black leading-none text-zinc-900" : "font-bold text-sm leading-none"} ${isSelected && isWCVariant ? "!text-white" : ""} tabular-nums flex items-center gap-0.5`}>
           {odd.toFixed(2)}
           {oddsUp   && <span className="text-green-400 text-[9px] font-black leading-none shrink-0">▲</span>}
           {oddsDown && <span className="text-red-400  text-[9px] font-black leading-none shrink-0">▼</span>}
@@ -5048,74 +5056,96 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
     const sport = match.sport ?? "football";
     const flag = COUNTRY_FLAGS[match.country?.toLowerCase() ?? ""] ?? sportEmoji(match.sport);
     const dateStr = match.date ? formatMatchDate(match.date) : "";
-    const bannerImg = getMatchBannerStable(match);
     const rivalry = RIVALRY_TAGS[`${match.home}|${match.away}`];
     const hasDraw = match.odds.draw > 0;
     const homeName = teamNamePt(match.home);
     const awayName = teamNamePt(match.away);
+    const homeBadge = getTeamBanner(match.home, match.country);
+    const awayBadge = getTeamBanner(match.away, match.country);
 
     const isSuspendedMatch = match.isLive && (
       (!!match.marketSuspension && Object.values(match.marketSuspension).some(ts => ts > Date.now()))
       || hasBlockingSuspensionReason(match)
     );
     const canShowOdds = !!(match.hasRealOdds || (match.odds.home > 0 && match.odds.away > 0));
+    const TeamBadge = ({ name, badge }: { name: string; badge?: string }) => (
+      <div className="w-[54px] h-[54px] rounded-full bg-white border border-zinc-200 shadow-[0_0_14px_rgba(234,179,8,0.28)] flex items-center justify-center overflow-hidden">
+        {badge ? (
+          <img src={badge} alt={name} className="w-full h-full object-cover" loading="lazy" decoding="async" />
+        ) : (
+          <span className="text-[26px] leading-none">{sport === "tennis" ? "🎾" : sport === "basketball" ? "🏀" : sport === "hockey" ? "🏒" : sport === "volleyball" ? "🏐" : sport === "baseball" ? "⚾" : flag}</span>
+        )}
+      </div>
+    );
     const OddsRow = () => canShowOdds ? (
-      <div className="flex gap-2 w-full">
+      <div className="flex flex-col gap-2 w-full">
         <SuspensionBanner match={match} />
         {!isSuspendedMatch && (<>
-          <OddsButton match={match} selection="home" odd={match.odds.home} market="result" label={hasDraw ? "Casa" : homeName.split(" ").slice(-1)[0]} grow />
-          {hasDraw && <OddsButton match={match} selection="draw" odd={match.odds.draw} market="result" label="Emp." grow />}
-          <OddsButton match={match} selection="away" odd={match.odds.away} market="result" label={hasDraw ? "Fora" : awayName.split(" ").slice(-1)[0]} grow />
+          <div className="flex gap-2 w-full">
+            <OddsButton match={match} selection="home" odd={match.odds.home} market="result" label={hasDraw ? homeName : homeName.split(" ").slice(-1)[0]} grow variant="worldcup" />
+            {hasDraw && <OddsButton match={match} selection="draw" odd={match.odds.draw} market="result" label="Empate" grow variant="worldcup" />}
+            <OddsButton match={match} selection="away" odd={match.odds.away} market="result" label={hasDraw ? awayName : awayName.split(" ").slice(-1)[0]} grow variant="worldcup" />
+          </div>
+          {!match.hasRealOdds && (
+            <div className="flex items-center justify-center gap-1">
+              <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
+              <span className="text-[10px] font-semibold tracking-wide text-zinc-500">ODDS ESTIMADAS</span>
+            </div>
+          )}
         </>)}
       </div>
     ) : null;
 
-
-    if (bannerImg) {
-      return (
-        <div
-          className="banner-card rounded-xl border border-zinc-800 hover:border-red-500/40 transition-colors cursor-pointer overflow-hidden"
-          {...makeTap(() => setExpandedMatch(match))}
-        >
-          {/* Image section — visible at top */}
-          <div className="relative w-full overflow-hidden" style={{ aspectRatio: "16/7" }}>
-            <img src={bannerImg} alt={`${match.home} contra ${match.away} — ${match.league}`} className="absolute inset-0 w-full h-full object-cover" style={{ filter: "brightness(0.7) saturate(1.1)" }} loading="lazy" decoding="async" />
-            <div className="absolute inset-0" style={{ background: "linear-gradient(to bottom, rgba(0,0,0,0.05) 0%, rgba(0,0,0,0.5) 100%)" }} />
-            <div className="absolute top-0 left-0 right-0 flex items-center justify-between px-3 pt-2.5">
-              <div className="flex items-center gap-1.5">
-                <span className="text-sm leading-none">{flag}</span>
-                <span className="text-[11px] font-medium" style={{ color: '#ffffffcc', textShadow: "0 1px 3px rgba(0,0,0,1)" }}>{match.league}</span>
-              </div>
-              <span className="text-[11px]" style={{ color: 'rgba(255,255,255,0.7)', textShadow: "0 1px 3px rgba(0,0,0,1)" }}>{dateStr}{match.time ? ` • ${match.time}` : ""}</span>
-            </div>
-            {rivalry && (
-              <div className="absolute bottom-2 left-3 text-[10px] font-black uppercase tracking-widest" style={{ color: '#f87171', textShadow: "0 1px 3px rgba(0,0,0,1)" }}>{rivalry}</div>
-            )}
-          </div>
-          {/* Content below image */}
-          <div className="px-3 pt-2.5 pb-3" style={{ background: "#0f0f0f" }} onClick={e => e.stopPropagation()} onTouchStart={e => e.stopPropagation()} onTouchMove={e => e.stopPropagation()} onTouchEnd={e => e.stopPropagation()} onPointerDown={e => e.stopPropagation()} onPointerMove={e => e.stopPropagation()} onPointerUp={e => e.stopPropagation()}>
-            <div className="flex items-baseline gap-1.5 mb-2.5 min-w-0">
-              <span className="font-bold text-sm leading-tight truncate text-white">{homeName}</span>
-              <span className="text-xs shrink-0 text-zinc-500">vs</span>
-              <span className="font-bold text-sm leading-tight truncate text-white">{awayName}</span>
-            </div>
-            <OddsRow />
-          </div>
-        </div>
-      );
-    }
-
     return (
       <div
-        className="bg-zinc-900 rounded-lg border border-zinc-800 hover:border-red-500/30 transition-colors cursor-pointer overflow-hidden"
+        className="relative overflow-hidden rounded-[28px] border border-zinc-200 bg-white shadow-[0_10px_30px_rgba(0,0,0,0.08)] transition-transform cursor-pointer active:scale-[0.99]"
         {...makeTap(() => setExpandedMatch(match))}
       >
-        <CompactLeagueRow match={match} />
-        <div className="px-3 pb-3 pt-1" onClick={e => e.stopPropagation()} onTouchStart={e => e.stopPropagation()} onTouchMove={e => e.stopPropagation()} onTouchEnd={e => e.stopPropagation()} onPointerDown={e => e.stopPropagation()} onPointerMove={e => e.stopPropagation()} onPointerUp={e => e.stopPropagation()}>
-          <div className="flex items-baseline gap-1.5 mb-2 min-w-0">
-            <span className="font-bold text-sm truncate">{homeName}</span>
-            <span className="text-xs text-zinc-500 shrink-0">vs</span>
-            <span className="font-bold text-sm truncate">{awayName}</span>
+        <div className="absolute top-0 left-0 right-0 h-[3px] bg-gradient-to-r from-yellow-400 via-orange-500 to-red-600" />
+        <div
+          className="px-4 pt-4 pb-4"
+          onClick={e => e.stopPropagation()}
+          onTouchStart={e => e.stopPropagation()}
+          onTouchMove={e => e.stopPropagation()}
+          onTouchEnd={e => e.stopPropagation()}
+          onPointerDown={e => e.stopPropagation()}
+          onPointerMove={e => e.stopPropagation()}
+          onPointerUp={e => e.stopPropagation()}
+        >
+          <div className="flex items-center justify-between gap-3 mb-4">
+            <div className="min-w-0 flex items-center gap-2">
+              <span className="text-sm leading-none shrink-0">{sport === "football" ? "🏆" : flag}</span>
+              <span className="text-[11px] font-black tracking-[0.18em] uppercase text-zinc-500 truncate">
+                {match.league}
+              </span>
+            </div>
+            <div className="text-[13px] font-medium text-zinc-500 shrink-0">
+              {dateStr}{match.time ? ` • ${match.time}` : ""}
+            </div>
+          </div>
+          {rivalry && (
+            <div className="mb-3 text-[10px] font-black uppercase tracking-[0.2em] text-red-500 text-center">
+              {rivalry}
+            </div>
+          )}
+          <div className="flex items-center justify-between gap-3 mb-4">
+            <div className="flex-1 flex flex-col items-center gap-2 min-w-0">
+              <TeamBadge name={homeName} badge={homeBadge} />
+              <span className="text-[15px] font-black text-zinc-900 text-center leading-tight px-1">
+                {homeName}
+              </span>
+            </div>
+            <div className="min-w-[72px] flex flex-col items-center">
+              <span className="text-[18px] font-black text-zinc-500 tracking-wide">VS</span>
+              {match.time && <span className="mt-1 text-[18px] font-black text-zinc-900">{match.time}</span>}
+              {dateStr && <span className="mt-1 text-[12px] font-semibold text-zinc-500">{dateStr}</span>}
+            </div>
+            <div className="flex-1 flex flex-col items-center gap-2 min-w-0">
+              <TeamBadge name={awayName} badge={awayBadge} />
+              <span className="text-[15px] font-black text-zinc-900 text-center leading-tight px-1">
+                {awayName}
+              </span>
+            </div>
           </div>
           <OddsRow />
         </div>
