@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useRef, useMemo, createContext, useContext, Children, lazy, Suspense, type ReactNode } from "react";
+import { useState, useCallback, useEffect, useRef, useMemo, createContext, useContext, Children, lazy, Suspense, type ReactNode, type FormEvent } from "react";
 import trophyImg from "/trophy-wc-nobg.png";
 import { useLocation } from "wouter";
 import { useIdle } from "@/hooks/use-idle";
@@ -22,6 +22,8 @@ import {
   DropdownMenuSeparator, DropdownMenuTrigger
 } from "@/components/ui/dropdown-menu";
 import { useAuth } from "@/hooks/use-auth";
+import { Elements, PaymentElement, useElements, useStripe } from "@stripe/react-stripe-js";
+import { loadStripe, type StripeElementsOptions } from "@stripe/stripe-js";
 
 import arsenalBanner from "@assets/file_1778342439847_1778342557288.jpeg";
 import manCityBanner from "@assets/file_1778342444770_1778342557288.jpeg";
@@ -12834,6 +12836,86 @@ function PromosPage({
 type PayMethod = "multibanco" | "mbway" | "card";
 
 type MbRef = { entity: string; reference: string; amount: string; expiresAt: string; orderId: string };
+type CardIntentResponse = { orderId?: string; clientSecret?: string | null; publishableKey?: string | null; error?: string };
+
+function CardDepositInlineForm({
+  orderId,
+  onSucceeded,
+  onProcessing,
+}: {
+  orderId: string;
+  onSucceeded: () => void;
+  onProcessing: () => void;
+}) {
+  const stripe = useStripe();
+  const elements = useElements();
+  const [submitting, setSubmitting] = useState(false);
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!stripe || !elements || submitting) return;
+
+    setSubmitting(true);
+    try {
+      const result = await stripe.confirmPayment({
+        elements,
+        confirmParams: {
+          return_url: `${window.location.origin}/api/payments/card-return?orderId=${encodeURIComponent(orderId)}`,
+        },
+        redirect: "if_required",
+      });
+
+      if (result.error) {
+        toast.error(result.error.message ?? "Erro ao confirmar pagamento por cartão.");
+        return;
+      }
+
+      if (result.paymentIntent?.status === "succeeded") {
+        toast.success("Pagamento por cartão confirmado. O saldo será atualizado automaticamente.");
+        onSucceeded();
+        return;
+      }
+
+      if (result.paymentIntent?.status === "processing" || result.paymentIntent?.status === "requires_capture") {
+        toast.info("Pagamento em processamento. O saldo será atualizado automaticamente.");
+        onProcessing();
+        return;
+      }
+
+      toast.info("Confirmação adicional necessária. Complete a autenticação do banco.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <form onSubmit={handleSubmit} className="space-y-3">
+      <div className="rounded-xl border border-zinc-700 bg-zinc-950/70 p-3">
+        <PaymentElement
+          options={{
+            layout: "tabs",
+            fields: {
+              billingDetails: {
+                address: "never",
+                email: "auto",
+                name: "auto",
+                phone: "never",
+              },
+            },
+          }}
+        />
+      </div>
+      <Button
+        type="submit"
+        disabled={!stripe || !elements || submitting}
+        className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-black h-11 gap-2"
+      >
+        {submitting ? <Loader2 className="animate-spin" size={16} /> : <Lock size={16} />}
+        Confirmar Pagamento Seguro
+      </Button>
+    </form>
+  );
+}
 
 function DepositWithdrawModal({
   open, onClose, onSuccess, onPromoNotif, balance, token, kycStatus,
@@ -12856,6 +12938,10 @@ function DepositWithdrawModal({
   const [mbwayDone, setMbwayDone] = useState(false);
   const [mbwayOrderId, setMbwayOrderId] = useState<string | null>(null);
   const [mbwayConfirmed, setMbwayConfirmed] = useState(false);
+  const [cardClientSecret, setCardClientSecret] = useState<string | null>(null);
+  const [cardOrderId, setCardOrderId] = useState<string | null>(null);
+  const [cardPublishableKey, setCardPublishableKey] = useState<string | null>(null);
+  const [cardPreparedAmount, setCardPreparedAmount] = useState<number | null>(null);
 
   // Main tab: deposit vs withdraw
   const [mainTab, setMainTab] = useState<"deposit" | "withdraw">("deposit");
@@ -12876,7 +12962,26 @@ function DepositWithdrawModal({
 
   const amount = parseFloat(depositAmount.replace(",", "."));
   const amountValid = !isNaN(amount) && amount >= 10 && amount <= 5000;
-  const promoHint = amountValid && amount >= 20;
+  const stripePromise = useMemo(
+    () => (cardPublishableKey ? loadStripe(cardPublishableKey) : null),
+    [cardPublishableKey],
+  );
+  const stripeElementsOptions = useMemo<StripeElementsOptions | undefined>(() => {
+    if (!cardClientSecret) return undefined;
+    return {
+      clientSecret: cardClientSecret,
+      appearance: {
+        theme: "night",
+        variables: {
+          colorPrimary: "#10b981",
+          colorBackground: "#09090b",
+          colorText: "#ffffff",
+          colorDanger: "#ef4444",
+          borderRadius: "12px",
+        },
+      },
+    };
+  }, [cardClientSecret]);
 
   const METHODS: { id: PayMethod; label: string; logo: string; logo2?: string }[] = [
     { id: "multibanco", label: "Multibanco", logo: "/logo-multibanco.png" },
@@ -12929,12 +13034,19 @@ function DepositWithdrawModal({
     return () => clearInterval(id);
   }, [mbRef?.orderId, token, onSuccess, onClose]);
 
+  function resetCardFlow() {
+    setCardClientSecret(null);
+    setCardOrderId(null);
+    setCardPreparedAmount(null);
+  }
+
   function resetMethod(m: PayMethod) {
     setPayMethod(m);
     setMbRef(null);
     setMbwayDone(false);
     setMbwayOrderId(null);
     setMbwayConfirmed(false);
+    resetCardFlow();
   }
 
   async function handleKycSubmit() {
@@ -12999,10 +13111,12 @@ function DepositWithdrawModal({
       });
       const data = await r.json() as { entity?: string; reference?: string; amount?: string; expiresAt?: string; orderId?: string; error?: string };
       if (!r.ok) { toast.error(data.error ?? "Erro ao gerar referência."); return; }
+      if (!data.entity || !data.reference || !data.expiresAt || !data.orderId || !data.amount) {
+        toast.error("A Stripe não devolveu a entidade e referência Multibanco.");
+        return;
+      }
       setMbRef({ entity: data.entity!, reference: data.reference!, amount: data.amount!, expiresAt: data.expiresAt!, orderId: data.orderId! });
       toast.success("Referência Multibanco gerada! Pague em qualquer ATM.");
-      onSuccess();
-      triggerPromoNotif(amount);
     } catch { toast.error("Erro de ligação. Tente novamente."); }
     finally { setLoading(false); }
   }
@@ -13018,17 +13132,26 @@ function DepositWithdrawModal({
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify({ amount, phone: phoneClean }),
       });
-      const data = await r.json() as { orderId?: string; paymentUrl?: string; error?: string };
+      const data = await r.json() as { orderId?: string; amount?: string; status?: string; message?: string; error?: string };
       if (!r.ok) { toast.error(data.error ?? "Erro ao enviar pedido MB WAY."); return; }
-      setMbwayDone(true);
-      if (data.orderId) setMbwayOrderId(data.orderId);
-      if (data.paymentUrl) {
-        toast.info("A redirecionar para pagamento seguro...");
-        window.open(data.paymentUrl, "_blank");
-      } else {
-        toast.success("Pedido MB WAY criado! O saldo será actualizado automaticamente após pagamento.");
+      if (!data.orderId) {
+        toast.error("A Stripe não devolveu a ordem MB WAY.");
+        return;
       }
-      triggerPromoNotif(amount);
+      if (data.status === "completed") {
+        setMbwayConfirmed(true);
+        setMbwayDone(true);
+        setMbwayOrderId(null);
+        toast.success(`Pagamento MB WAY confirmado! € ${parseFloat(data.amount ?? String(amount)).toFixed(2)} adicionado ao seu saldo.`);
+        onSuccess();
+        triggerPromoNotif(amount);
+        onClose();
+      } else {
+        setMbwayDone(true);
+        setMbwayConfirmed(false);
+        setMbwayOrderId(data.orderId);
+        toast.success(data.message ?? "Pedido MB WAY enviado! Confirme na app MB WAY.");
+      }
     } catch { toast.error("Erro de ligação. Tente novamente."); }
     finally { setLoading(false); }
   }
@@ -13042,13 +13165,16 @@ function DepositWithdrawModal({
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify({ amount }),
       });
-      const data = await r.json() as { paymentUrl?: string; error?: string };
-      if (!r.ok || !data.paymentUrl) { toast.error(data.error ?? "Erro ao iniciar pagamento por cartão."); return; }
-      toast.info("A redirecionar para pagamento seguro...");
-      window.open(data.paymentUrl, "_blank");
-      onSuccess();
-      triggerPromoNotif(amount);
-      onClose();
+      const data = await r.json() as CardIntentResponse;
+      if (!r.ok || !data.clientSecret || !data.orderId || !data.publishableKey) {
+        toast.error(data.error ?? "Erro ao iniciar pagamento por cartão.");
+        return;
+      }
+      setCardClientSecret(data.clientSecret);
+      setCardOrderId(data.orderId);
+      setCardPublishableKey(data.publishableKey);
+      setCardPreparedAmount(amount);
+      toast.success("Pagamento por cartão preparado. Introduza os dados abaixo.");
     } catch { toast.error("Erro de ligação. Tente novamente."); }
     finally { setLoading(false); }
   }
@@ -13239,7 +13365,14 @@ function DepositWithdrawModal({
               {[10, 20, 50, 100, 200].map((v: number) => (
                   <button
                     key={v}
-                  onClick={() => { setDepositAmount(String(v)); setMbRef(null); setMbwayDone(false); }}
+                  onClick={() => {
+                    setDepositAmount(String(v));
+                    setMbRef(null);
+                    setMbwayDone(false);
+                    setMbwayOrderId(null);
+                    setMbwayConfirmed(false);
+                    resetCardFlow();
+                  }}
                   className={`py-2 rounded-lg border font-bold text-xs transition-colors ${depositAmount === String(v) ? "border-emerald-500 bg-emerald-500/10 text-emerald-400" : "border-zinc-700 hover:border-zinc-500 text-zinc-300"}`}
                 >
                   €{v}
@@ -13252,7 +13385,14 @@ function DepositWithdrawModal({
                 type="number" min={10} max={5000} placeholder="0,00"
                 className="pl-8 bg-zinc-900 border-zinc-700 text-white font-bold text-lg h-11"
                 value={depositAmount}
-                onChange={e => { setDepositAmount(e.target.value); setMbRef(null); setMbwayDone(false); }}
+                onChange={e => {
+                  setDepositAmount(e.target.value);
+                  setMbRef(null);
+                  setMbwayDone(false);
+                  setMbwayOrderId(null);
+                  setMbwayConfirmed(false);
+                  resetCardFlow();
+                }}
               />
             </div>
           </div>
@@ -13303,7 +13443,7 @@ function DepositWithdrawModal({
                     </div>
                   </div>
                   <div className="text-xs text-zinc-500 text-center leading-relaxed">
-                    Referência válida por <span className="text-zinc-300 font-semibold">24 horas</span>.<br />
+                    Referência válida até <span className="text-zinc-300 font-semibold">{new Date(mbRef.expiresAt).toLocaleString("pt-PT")}</span>.<br />
                     O saldo é creditado automaticamente após pagamento.
                   </div>
                   <Button variant="outline" className="w-full border-zinc-700 text-zinc-400 h-9 text-xs" onClick={() => setMbRef(null)}>
@@ -13353,7 +13493,15 @@ function DepositWithdrawModal({
                   </div>
                   <div className="text-xs text-zinc-500">Tem 4 minutos para aceitar. Valor: <span className="text-emerald-400 font-bold">€{amount.toFixed(2)}</span></div>
                   <div className="text-xs text-zinc-600 mt-2">O saldo é creditado automaticamente após confirmação.</div>
-                  <Button variant="outline" className="w-full border-zinc-700 text-zinc-400 h-9 text-xs" onClick={() => setMbwayDone(false)}>
+                  <Button
+                    variant="outline"
+                    className="w-full border-zinc-700 text-zinc-400 h-9 text-xs"
+                    onClick={() => {
+                      setMbwayDone(false);
+                      setMbwayOrderId(null);
+                      setMbwayConfirmed(false);
+                    }}
+                  >
                     Enviar novo pedido
                   </Button>
                 </div>
@@ -13365,25 +13513,49 @@ function DepositWithdrawModal({
           {payMethod === "card" && (
             <div className="space-y-3">
               <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-3 text-xs text-zinc-400 leading-relaxed">
-                Serás redireccionado para a página de pagamento seguro da <strong className="text-zinc-200">ifthenpay</strong> (3D Secure). O saldo é creditado após confirmação.
+                O pagamento com cartão é processado pela <strong className="text-zinc-200">Stripe</strong> no próprio modal. Só sairás desta página se o teu banco exigir autenticação adicional 3D Secure.
               </div>
-              <Button
-                onClick={handleCard}
-                disabled={loading || !amountValid}
-                className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-black h-11 gap-2"
-              >
-                {loading ? <Loader2 className="animate-spin" size={16} /> : (
-                  <div className="flex items-center gap-1">
-                    <img src="/logo-visa.png" alt="Visa" className="h-4 w-auto object-contain" />
-                    <img src="/logo-mastercard.png" alt="Mastercard" className="h-4 w-auto object-contain" />
-                  </div>
-                )}
-                Pagar €{amountValid ? amount.toFixed(2) : "0.00"} com Cartão
-              </Button>
+              {!cardClientSecret || !stripePromise || cardPreparedAmount !== amount ? (
+                <Button
+                  onClick={handleCard}
+                  disabled={loading || !amountValid}
+                  className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-black h-11 gap-2"
+                >
+                  {loading ? <Loader2 className="animate-spin" size={16} /> : (
+                    <div className="flex items-center gap-1">
+                      <img src="/logo-visa.png" alt="Visa" className="h-4 w-auto object-contain" />
+                      <img src="/logo-mastercard.png" alt="Mastercard" className="h-4 w-auto object-contain" />
+                    </div>
+                  )}
+                  Preparar Pagamento de €{amountValid ? amount.toFixed(2) : "0.00"}
+                </Button>
+              ) : (
+                <div className="space-y-3">
+                  {stripeElementsOptions && (
+                    <Elements stripe={stripePromise} options={stripeElementsOptions}>
+                      <CardDepositInlineForm
+                        orderId={cardOrderId ?? ""}
+                        onSucceeded={() => {
+                          onSuccess();
+                          triggerPromoNotif(amount);
+                          onClose();
+                        }}
+                        onProcessing={() => {
+                          onSuccess();
+                          onClose();
+                        }}
+                      />
+                    </Elements>
+                  )}
+                  <Button variant="outline" className="w-full border-zinc-700 text-zinc-400 h-9 text-xs" onClick={resetCardFlow}>
+                    Recriar pagamento
+                  </Button>
+                </div>
+              )}
               <div className="flex items-center justify-center gap-3 mt-1">
                 <img src="/logo-visa.png" alt="Visa" className="h-4 w-auto object-contain opacity-60" />
                 <img src="/logo-mastercard.png" alt="Mastercard" className="h-4 w-auto object-contain opacity-60" />
-                <span className="text-[10px] text-zinc-600">🔒 Pagamento seguro 3D Secure · ifthenpay</span>
+                <span className="text-[10px] text-zinc-600">🔒 Pagamento seguro 3D Secure · Stripe</span>
               </div>
             </div>
           )}
