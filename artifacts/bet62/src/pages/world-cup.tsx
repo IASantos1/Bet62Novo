@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { useLocation } from "wouter";
 import { motion, AnimatePresence } from "framer-motion";
 import { ArrowLeft, X, BarChart2 } from "lucide-react";
+import { fetchWithTimeout } from "@/lib/fetch-timeout";
 import { readWCClientSnapshotRaw, writeWCClientSnapshotRaw } from "@/lib/world-cup-cache";
 import trophyImg from "/trophy-wc-nobg.png";
 
@@ -1518,7 +1519,7 @@ export default function WorldCupPage({ onClose, onBet: onBetProp }: { onClose?: 
     async function load() {
       if (cancelled) return;
       try {
-        const wcData = await fetch("/api/matches/wc2026", { signal: AbortSignal.timeout(15_000) })
+        const wcData = await fetchWithTimeout("/api/matches/wc2026", {}, 15_000)
           .then(r => r.ok ? r.json() : { matches: [] }).catch(() => ({ matches: [] }));
         if (cancelled) return;
         const rawMatches = Array.isArray((wcData as { matches?: unknown[] }).matches)

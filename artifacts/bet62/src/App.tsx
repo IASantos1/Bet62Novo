@@ -4,6 +4,7 @@ import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { AuthProvider } from "@/hooks/use-auth";
 import { useState, useEffect, lazy, Suspense, Component, type ReactNode } from "react";
+import { fetchWithTimeout } from "@/lib/fetch-timeout";
 import { readWCClientSnapshotRaw, writeWCClientSnapshotRaw } from "@/lib/world-cup-cache";
 import NotFound from "@/pages/not-found";
 import Home from "@/pages/home";
@@ -115,7 +116,7 @@ function App() {
       void preloadWorldCupPage();
       const cached = readWCClientSnapshotRaw();
       if (cached) return;
-      void fetch("/api/matches/wc2026", { signal: AbortSignal.timeout(8_000) })
+      void fetchWithTimeout("/api/matches/wc2026", {}, 8_000)
         .then(r => (r.ok ? r.json() : { matches: [] }))
         .then((data) => {
           if (cancelled) return;
