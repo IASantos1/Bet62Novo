@@ -5,6 +5,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { AuthProvider } from "@/hooks/use-auth";
 import { useState, useEffect, lazy, Suspense, Component, type ReactNode } from "react";
 import { fetchWithTimeout } from "@/lib/fetch-timeout";
+import { hardResetPwaAndReload } from "@/lib/pwa";
 import { readWCClientSnapshotRaw, writeWCClientSnapshotRaw } from "@/lib/world-cup-cache";
 import NotFound from "@/pages/not-found";
 import Home from "@/pages/home";
@@ -52,7 +53,7 @@ class AppErrorBoundary extends Component<{ children: ReactNode }, { error: unkno
             <div className="text-sm text-zinc-400 mb-4">Toque para recarregar. Se continuar, limpe a cache do navegador/PWA.</div>
             <button
               className="w-full bg-red-600 hover:bg-red-500 text-white font-black text-sm rounded-xl py-3 transition-colors"
-              onClick={() => window.location.reload()}
+              onClick={() => { void hardResetPwaAndReload(); }}
             >
               Recarregar
             </button>

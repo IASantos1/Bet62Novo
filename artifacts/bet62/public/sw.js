@@ -1,4 +1,4 @@
-const VERSION = "v2026-06-12-1";
+const VERSION = "v2026-06-13-2";
 const SHELL_CACHE = `bet62-shell-${VERSION}`;
 const ASSET_CACHE = `bet62-assets-${VERSION}`;
 const DATA_CACHE = `bet62-data-${VERSION}`;
@@ -133,7 +133,12 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
-  if (["style", "script", "worker", "font", "image"].includes(request.destination)) {
+  if (["style", "script", "worker"].includes(request.destination)) {
+    event.respondWith(networkFirst(request, ASSET_CACHE));
+    return;
+  }
+
+  if (["font", "image"].includes(request.destination)) {
     event.respondWith(staleWhileRevalidate(request, ASSET_CACHE));
   }
 });
