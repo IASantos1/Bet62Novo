@@ -867,6 +867,112 @@ function normalizeLeagueFilterName(value: string): string {
     .trim();
 }
 
+function normalizeCountryFilterName(value: string): string {
+  const normalized = String(value ?? "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9 ]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  const aliases: Record<string, string> = {
+    "eua": "usa",
+    "estados unidos": "usa",
+    "usa": "usa",
+    "inglaterra": "england",
+    "espanha": "spain",
+    "alemanha": "germany",
+    "italia": "italy",
+    "franca": "france",
+    "holanda": "netherlands",
+    "belgica": "belgium",
+    "turquia": "turkey",
+    "austria": "austria",
+    "suica": "switzerland",
+    "suecia": "sweden",
+    "croacia": "croatia",
+    "servia": "serbia",
+    "polonia": "poland",
+    "rep checa": "czechia",
+    "republica checa": "czechia",
+    "russia": "russia",
+    "ucrania": "ukraine",
+    "hungria": "hungary",
+    "romenia": "romania",
+    "bulgaria": "bulgaria",
+    "mexico": "mexico",
+    "colombia": "colombia",
+    "arabia saudita": "saudi arabia",
+    "japao": "japan",
+    "coreia do sul": "south korea",
+    "tailandia": "thailand",
+    "india": "india",
+    "internacional": "international",
+    "fifa": "international",
+    "uefa": "international",
+    "europa": "international",
+  };
+
+  return aliases[normalized] ?? normalized;
+}
+
+function countryMatchesFilter(matchCountry?: string, filterCountry?: string, matchLeague?: string): boolean {
+  if (!filterCountry) return true;
+  const filterNorm = normalizeCountryFilterName(filterCountry);
+  if (!filterNorm) return true;
+
+  const matchCountryNorm = normalizeCountryFilterName(matchCountry ?? "");
+  if (matchCountryNorm && (matchCountryNorm === filterNorm || matchCountryNorm.includes(filterNorm) || filterNorm.includes(matchCountryNorm))) {
+    return true;
+  }
+
+  const rawLeagueNorm = String(matchLeague ?? "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9 ]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  return rawLeagueNorm.includes(filterNorm);
+}
+
+function normalizeTeamMatchName(value: string): string {
+  return String(value ?? "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\b(fc|cf|sc|ac|afc|fk|bc|basket|club|clube)\b/g, " ")
+    .replace(/[^a-z0-9 ]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function rowMatchesTeam(rowName: string, teamName: string): boolean {
+  const row = normalizeTeamMatchName(rowName);
+  const team = normalizeTeamMatchName(teamName);
+  if (!row || !team) return false;
+  if (row === team) return true;
+  if (row.includes(team) || team.includes(row)) return true;
+  return row.includes(team.slice(0, Math.min(team.length, 8)));
+}
+
+function standingsMetaForSport(sport?: string) {
+  switch (sport) {
+    case "basketball":
+      return { played: "J", won: "V", drawn: "OT", lost: "D", gf: "PF", ga: "PA", pts: "Pts" };
+    case "hockey":
+      return { played: "J", won: "V", drawn: "OT", lost: "D", gf: "GM", ga: "GS", pts: "Pts" };
+    case "baseball":
+      return { played: "J", won: "V", drawn: "OT", lost: "D", gf: "RF", ga: "RA", pts: "Pct" };
+    case "volleyball":
+      return { played: "J", won: "V", drawn: "Pts", lost: "D", gf: "Sets+", ga: "Sets-", pts: "Pts" };
+    default:
+      return { played: "J", won: "V", drawn: "E", lost: "D", gf: "GF", ga: "GC", pts: "Pts" };
+  }
+}
+
 const LEAGUE_FILTER_ALIASES: Record<string, string[]> = {
   champions: ["champions league", "uefa champions league"],
   "europa league": ["europa league", "uefa europa league"],
@@ -944,6 +1050,7 @@ const FOOTBALL_COUNTRIES: { name: string; flag: string; leagues: string[] }[] = 
   { name: "Chile", flag: "🇨🇱", leagues: ["Primera División — Chile", "Primera B — Chile"] },
   { name: "Colômbia", flag: "🇨🇴", leagues: ["Categoría Primera A", "Categoría Primera B"] },
   { name: "EUA", flag: "🇺🇸", leagues: ["MLS", "USL Championship", "US Open Cup"] },
+  { name: "Austrália", flag: "🇦🇺", leagues: ["A-League", "Australia Cup"] },
   { name: "Arábia Saudita", flag: "🇸🇦", leagues: ["Saudi Pro League", "First Division League", "King Cup"] },
   { name: "Japão", flag: "🇯🇵", leagues: ["J1 League", "J2 League", "J3 League", "Emperor's Cup"] },
   { name: "Coreia do Sul", flag: "🇰🇷", leagues: ["K League 1", "K League 2", "Korean FA Cup"] },
@@ -2307,7 +2414,7 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
     "Copa do Brasil", "Brasileirão", "Serie B",
     "Copa del Rey", "DFB-Pokal", "FA Cup",
     "Europa League", "UEFA Europa League",
-    "Conference League", "Liga MX",
+    "Conference League", "Liga MX", "A-League", "National Basketball League",
   ];
   const sidebarTopLeagues = (() => {
     const leagueMap = new Map<string, TopLeagueEntry>();
@@ -2876,6 +2983,7 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
     setLiveAdvancedTab("all");
     setLivePollTick(0);
     setStandings(null);
+    setStandingsGroups(null);
     setStandingsLeague("");
     setPlayerMarkets(null);
     setPlayerMarketsMatchId(null);
@@ -2899,6 +3007,7 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
   // Fetch match stats when stats tab is active
   useEffect(() => {
     if (matchViewTab !== "stats" || !expandedMatch || matchStats) return;
+    if ((expandedMatch.sport ?? "football") !== "football") return;
     setMatchStatsLoading(true);
     const p = new URLSearchParams({
       home: expandedMatch.home,
@@ -2995,12 +3104,30 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
             setStandingsGroups(Array.isArray(d.groups) && d.groups.length > 0 ? d.groups as Array<{ name: string; rows: StandingRow[] }> : null);
             return Promise.resolve();
           }
-          return loadV1();
+          if (sport === "football") {
+            return loadV1();
+          }
+          setStandings([]);
+          setStandingsGroups(null);
+          setStandingsLeague(d?.league ?? league);
+          return Promise.resolve();
         })
-        .catch(() => loadV1())
+        .catch(() => {
+          if (sport === "football") return loadV1();
+          setStandings([]);
+          setStandingsGroups(null);
+          setStandingsLeague(league);
+          return Promise.resolve();
+        })
         .finally(() => setStandingsLoading(false));
     } else {
-      loadV1().catch(() => {}).finally(() => setStandingsLoading(false));
+      if (sport === "football") {
+        loadV1().catch(() => {}).finally(() => setStandingsLoading(false));
+      } else {
+        setStandings([]);
+        setStandingsGroups(null);
+        setStandingsLoading(false);
+      }
     }
   }, [matchViewTab, expandedMatch?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -7709,7 +7836,7 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
                           if (tab === "stats") return "Estatísticas";
                           if (tab === "confrontos") return "⚔️ H2H";
                           if (tab === "standings") return "Classificação";
-                          if (tab === "yesterday") return expandedMatch.sport === "basketball" ? "📅 Ontem" : expandedMatch.sport === "hockey" || expandedMatch.sport === "baseball" ? "🏆 Classificação" : "Ontem";
+                          if (tab === "yesterday") return "📅 Ontem";
                           if (tab === "ranking") return "Ranking";
                           if (tab === "liga") return "⭐ Liga";
                           if (tab === "odds") return "📊 Mercados";
@@ -7719,13 +7846,13 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
                         const tabs: string[] = expandedMatch.sport === "tennis"
                           ? (expandedMatch.isLive ? ["stats", "confrontos", "yesterday", "ranking", "live"] : ["stats", "confrontos", "yesterday", "ranking"])
                           : expandedMatch.sport === "hockey"
-                          ? (expandedMatch.isLive ? ["stats", "confrontos", "yesterday", "live"] : ["stats", "confrontos", "yesterday"])
+                          ? (expandedMatch.isLive ? ["stats", "confrontos", "standings", "yesterday", "live"] : ["stats", "confrontos", "standings", "yesterday"])
                           : expandedMatch.sport === "basketball"
                           ? (expandedMatch.isLive ? ["stats", "confrontos", "standings", "yesterday", "live"] : ["stats", "confrontos", "standings", "yesterday"])
                           : expandedMatch.sport === "baseball"
-                          ? (expandedMatch.isLive ? ["stats", "confrontos", "yesterday", "liga", "live"] : ["stats", "confrontos", "yesterday", "liga"])
+                          ? (expandedMatch.isLive ? ["stats", "confrontos", "standings", "yesterday", "liga", "live"] : ["stats", "confrontos", "standings", "yesterday", "liga"])
                           : expandedMatch.sport === "volleyball"
-                          ? (expandedMatch.isLive ? ["stats", "confrontos", "live"] : ["stats", "confrontos"])
+                          ? (expandedMatch.isLive ? ["stats", "confrontos", "standings", "live"] : ["stats", "confrontos", "standings"])
                           : (expandedMatch.isLive ? ["stats", "confrontos", "standings", "lineups", "live"] : ["stats", "confrontos", "standings", "lineups"]);
                         const orderedTabs = expandedMatch.isLive ? ["live", ...tabs.filter(t => t !== "live")] : tabs;
                         return orderedTabs.map(tab => (
@@ -7745,7 +7872,7 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
                 {/* Stats panel */}
                 {matchViewTab === "stats" && (
                   <div className="bg-zinc-900 rounded-xl border border-zinc-800 p-4 mb-2 animate-in fade-in duration-200">
-                    {matchStatsLoading || !matchStats ? (
+                    {(expandedMatch.sport === "football" && (matchStatsLoading || !matchStats)) ? (
                       <div className="flex items-center justify-center py-12">
                         <Loader2 className="animate-spin text-blue-400" size={28} />
                       </div>
@@ -7754,7 +7881,9 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
                         <div className="flex items-start justify-between gap-3">
                           <div>
                             <div className="text-[10px] font-black text-red-500 uppercase tracking-widest">Centro de Estatísticas</div>
-                            <div className="text-xs text-zinc-500 mt-1">V2 (oficial) + análise</div>
+                            <div className="text-xs text-zinc-500 mt-1">
+                              {expandedMatch.sport === "football" ? "V2 (oficial) + análise" : "V2 (oficial) separado por esporte e liga"}
+                            </div>
                           </div>
                           <div className="text-right min-w-0">
                             <div className="text-[10px] font-bold text-zinc-300 truncate">{expandedMatch.league}</div>
@@ -7762,106 +7891,134 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
                           </div>
                         </div>
 
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                          <div className="bg-zinc-950/60 rounded-lg border border-zinc-800 p-4">
-                            <div className="flex items-center justify-between mb-3">
-                              <div className="text-[10px] font-black text-red-500 uppercase tracking-widest">Probabilidade</div>
-                              <div className="text-[10px] text-zinc-600">Odds → %</div>
-                            </div>
-                            <div className="space-y-2.5 mb-4">
-                              {[
-                                { label: expandedMatch.home, pct: matchStats.winProb.home, color: "bg-blue-500" },
-                                { label: "Empate", pct: matchStats.winProb.draw, color: "bg-yellow-400" },
-                                { label: expandedMatch.away, pct: matchStats.winProb.away, color: "bg-red-500" },
-                              ].map(row => (
-                                <div key={row.label}>
-                                  <div className="flex justify-between text-xs mb-1">
-                                    <span className="text-zinc-300 truncate max-w-[140px]">{row.label}</span>
-                                    <span className="font-bold text-white shrink-0">{row.pct}%</span>
+                        {expandedMatch.sport === "football" ? (
+                          <>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                              <div className="bg-zinc-950/60 rounded-lg border border-zinc-800 p-4">
+                                <div className="flex items-center justify-between mb-3">
+                                  <div className="text-[10px] font-black text-red-500 uppercase tracking-widest">Probabilidade</div>
+                                  <div className="text-[10px] text-zinc-600">Odds → %</div>
+                                </div>
+                                <div className="space-y-2.5 mb-4">
+                                  {[
+                                    { label: expandedMatch.home, pct: matchStats!.winProb.home, color: "bg-blue-500" },
+                                    { label: "Empate", pct: matchStats!.winProb.draw, color: "bg-yellow-400" },
+                                    { label: expandedMatch.away, pct: matchStats!.winProb.away, color: "bg-red-500" },
+                                  ].map(row => (
+                                    <div key={row.label}>
+                                      <div className="flex justify-between text-xs mb-1">
+                                        <span className="text-zinc-300 truncate max-w-[140px]">{row.label}</span>
+                                        <span className="font-bold text-white shrink-0">{row.pct}%</span>
+                                      </div>
+                                      <div className="h-2 bg-zinc-800 rounded-full overflow-hidden">
+                                        <motion.div
+                                          initial={{ width: 0 }}
+                                          animate={{ width: `${row.pct}%` }}
+                                          transition={{ duration: 0.7, ease: "easeOut" }}
+                                          className={`h-full rounded-full ${row.color}`}
+                                        />
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                                <div className="grid grid-cols-3 gap-1 pt-3 border-t border-zinc-800 text-center">
+                                  <div>
+                                    <div className="text-xl font-black text-blue-400">{(confrontosData?.homeWins ?? matchStats!.h2h.homeWins)}</div>
+                                    <div className="text-[10px] text-zinc-500">Vitórias</div>
                                   </div>
-                                  <div className="h-2 bg-zinc-800 rounded-full overflow-hidden">
-                                    <motion.div
-                                      initial={{ width: 0 }}
-                                      animate={{ width: `${row.pct}%` }}
-                                      transition={{ duration: 0.7, ease: "easeOut" }}
-                                      className={`h-full rounded-full ${row.color}`}
-                                    />
+                                  <div>
+                                    <div className="text-xl font-black text-yellow-400">{(confrontosData?.draws ?? matchStats!.h2h.draws)}</div>
+                                    <div className="text-[10px] text-zinc-500">Empates</div>
+                                  </div>
+                                  <div>
+                                    <div className="text-xl font-black text-red-400">{(confrontosData?.awayWins ?? matchStats!.h2h.awayWins)}</div>
+                                    <div className="text-[10px] text-zinc-500">Derrotas</div>
                                   </div>
                                 </div>
-                              ))}
-                            </div>
-                            <div className="grid grid-cols-3 gap-1 pt-3 border-t border-zinc-800 text-center">
-                              <div>
-                                <div className="text-xl font-black text-blue-400">{(confrontosData?.homeWins ?? matchStats.h2h.homeWins)}</div>
-                                <div className="text-[10px] text-zinc-500">Vitórias</div>
                               </div>
-                              <div>
-                                <div className="text-xl font-black text-yellow-400">{(confrontosData?.draws ?? matchStats.h2h.draws)}</div>
-                                <div className="text-[10px] text-zinc-500">Empates</div>
-                              </div>
-                              <div>
-                                <div className="text-xl font-black text-red-400">{(confrontosData?.awayWins ?? matchStats.h2h.awayWins)}</div>
-                                <div className="text-[10px] text-zinc-500">Derrotas</div>
-                              </div>
-                            </div>
-                          </div>
 
-                          <div className="bg-zinc-950/60 rounded-lg border border-zinc-800 p-4">
-                            <div className="flex items-center justify-between mb-3">
-                              <div className="text-[10px] font-black text-red-500 uppercase tracking-widest">Médias</div>
-                              <button
-                                onClick={() => setMatchViewTab("confrontos")}
-                                className="text-[10px] font-bold text-blue-400 hover:text-blue-300"
-                              >
-                                Ver H2H
-                              </button>
-                            </div>
-                            <div className="grid grid-cols-2 gap-y-3 gap-x-4">
-                              {[
-                                { label: "Golos Marcados", val: matchStats.avgStats.goalsScored.toFixed(2), sub: `Liga: ${matchStats.avgStats.leagueGoals.toFixed(2)}` },
-                                { label: "AEM", val: `${matchStats.avgStats.btts}%`, sub: `Liga: ${matchStats.avgStats.leagueBtts}%` },
-                                { label: "Mais de 1.5", val: `${matchStats.avgStats.over15}%`, sub: `Liga: ${matchStats.avgStats.leagueOver15}%` },
-                                { label: "Mais de 2.5", val: `${matchStats.avgStats.over25}%`, sub: `Liga: ${matchStats.avgStats.leagueOver25}%` },
-                                { label: "Cartões", val: matchStats.avgStats.cards.toFixed(2), sub: "" },
-                                { label: "Cantos", val: matchStats.avgStats.corners.toFixed(2), sub: "" },
-                              ].map(s => (
-                                <div key={s.label}>
-                                  <div className="text-[11px] text-zinc-400">{s.label}</div>
-                                  <div className="font-black text-white text-lg leading-tight">{s.val}</div>
-                                  {s.sub && <div className="text-[10px] text-zinc-600">{s.sub}</div>}
+                              <div className="bg-zinc-950/60 rounded-lg border border-zinc-800 p-4">
+                                <div className="flex items-center justify-between mb-3">
+                                  <div className="text-[10px] font-black text-red-500 uppercase tracking-widest">Médias</div>
+                                  <button
+                                    onClick={() => setMatchViewTab("confrontos")}
+                                    className="text-[10px] font-bold text-blue-400 hover:text-blue-300"
+                                  >
+                                    Ver H2H
+                                  </button>
                                 </div>
-                              ))}
-                            </div>
-                          </div>
-                        </div>
-
-                        {matchStats.formIsReal ? (
-                          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                            {[
-                              { title: `Últimos Jogos — ${expandedMatch.home}`, form: matchStats.homeForm },
-                              { title: `Últimos Jogos — ${expandedMatch.away}`, form: matchStats.awayForm },
-                            ].map(block => (
-                              <div key={block.title} className="bg-zinc-950/60 rounded-lg border border-zinc-800 p-4">
-                                <div className="text-[10px] font-black text-red-500 uppercase tracking-widest mb-3">{block.title}</div>
-                                <div className="space-y-2">
-                                  {block.form.map((f, i) => (
-                                    <div key={i} className="flex items-center gap-3">
-                                      <span className={`w-5 h-5 rounded text-[11px] font-black flex items-center justify-center shrink-0 ${f.result === "W" ? "bg-green-600 text-white" : f.result === "D" ? "bg-yellow-500 text-black" : "bg-red-600 text-white"}`}>
-                                        {f.result}
-                                      </span>
-                                      <span className="font-mono text-sm font-bold text-white shrink-0">{f.score}</span>
-                                      <span className="text-xs text-zinc-400 truncate">{f.home ? "vs" : "@"} {f.opponent}</span>
+                                <div className="grid grid-cols-2 gap-y-3 gap-x-4">
+                                  {[
+                                    { label: "Golos Marcados", val: matchStats!.avgStats.goalsScored.toFixed(2), sub: `Liga: ${matchStats!.avgStats.leagueGoals.toFixed(2)}` },
+                                    { label: "AEM", val: `${matchStats!.avgStats.btts}%`, sub: `Liga: ${matchStats!.avgStats.leagueBtts}%` },
+                                    { label: "Mais de 1.5", val: `${matchStats!.avgStats.over15}%`, sub: `Liga: ${matchStats!.avgStats.leagueOver15}%` },
+                                    { label: "Mais de 2.5", val: `${matchStats!.avgStats.over25}%`, sub: `Liga: ${matchStats!.avgStats.leagueOver25}%` },
+                                    { label: "Cartões", val: matchStats!.avgStats.cards.toFixed(2), sub: "" },
+                                    { label: "Cantos", val: matchStats!.avgStats.corners.toFixed(2), sub: "" },
+                                  ].map(s => (
+                                    <div key={s.label}>
+                                      <div className="text-[11px] text-zinc-400">{s.label}</div>
+                                      <div className="font-black text-white text-lg leading-tight">{s.val}</div>
+                                      {s.sub && <div className="text-[10px] text-zinc-600">{s.sub}</div>}
                                     </div>
                                   ))}
                                 </div>
                               </div>
-                            ))}
-                          </div>
+                            </div>
+
+                            {matchStats!.formIsReal ? (
+                              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                {[
+                                  { title: `Últimos Jogos — ${expandedMatch.home}`, form: matchStats!.homeForm },
+                                  { title: `Últimos Jogos — ${expandedMatch.away}`, form: matchStats!.awayForm },
+                                ].map(block => (
+                                  <div key={block.title} className="bg-zinc-950/60 rounded-lg border border-zinc-800 p-4">
+                                    <div className="text-[10px] font-black text-red-500 uppercase tracking-widest mb-3">{block.title}</div>
+                                    <div className="space-y-2">
+                                      {block.form.map((f, i) => (
+                                        <div key={i} className="flex items-center gap-3">
+                                          <span className={`w-5 h-5 rounded text-[11px] font-black flex items-center justify-center shrink-0 ${f.result === "W" ? "bg-green-600 text-white" : f.result === "D" ? "bg-yellow-500 text-black" : "bg-red-600 text-white"}`}>
+                                            {f.result}
+                                          </span>
+                                          <span className="font-mono text-sm font-bold text-white shrink-0">{f.score}</span>
+                                          <span className="text-xs text-zinc-400 truncate">{f.home ? "vs" : "@"} {f.opponent}</span>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            ) : (
+                              <div className="bg-zinc-950/60 rounded-lg border border-zinc-800 p-5 text-center">
+                                <div className="text-zinc-600 text-2xl mb-2">📋</div>
+                                <div className="text-zinc-500 text-sm font-medium">Histórico de jogos não disponível</div>
+                                <div className="text-zinc-600 text-xs mt-1">Dados de forma indisponíveis para este jogo</div>
+                              </div>
+                            )}
+                          </>
                         ) : (
-                          <div className="bg-zinc-950/60 rounded-lg border border-zinc-800 p-5 text-center">
-                            <div className="text-zinc-600 text-2xl mb-2">📋</div>
-                            <div className="text-zinc-500 text-sm font-medium">Histórico de jogos não disponível</div>
-                            <div className="text-zinc-600 text-xs mt-1">Dados de forma indisponíveis para este jogo</div>
+                          <div className="bg-zinc-950/60 rounded-lg border border-zinc-800 p-4">
+                            <div className="flex items-center justify-between gap-3">
+                              <div>
+                                <div className="text-[10px] font-black text-red-500 uppercase tracking-widest">Modo por Esporte</div>
+                                <div className="text-xs text-zinc-500 mt-1">
+                                  Esta aba mostra apenas dados oficiais do evento e da liga atual para {{
+                                    football: "Futebol",
+                                    basketball: "Basquete",
+                                    tennis: "Ténis",
+                                    hockey: "Hóquei no Gelo",
+                                    baseball: "Beisebol",
+                                    volleyball: "Voleibol",
+                                  }[expandedMatch.sport ?? "football"] ?? expandedMatch.sport}.
+                                </div>
+                              </div>
+                              <button
+                                onClick={() => setMatchViewTab("confrontos")}
+                                className="text-[10px] font-bold text-blue-400 hover:text-blue-300 shrink-0"
+                              >
+                                Ver H2H
+                              </button>
+                            </div>
                           </div>
                         )}
 
@@ -7936,25 +8093,26 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
                     ) : standings.length === 0 ? (
                       <div className="text-center text-zinc-500 py-8 text-sm">Classificação indisponível para esta liga.</div>
                     ) : (() => {
+                      const cols = standingsMetaForSport(expandedMatch.sport);
                       const StandingsTable = ({ rows }: { rows: StandingRow[] }) => (
                         <table className="w-full text-xs">
                           <thead>
                             <tr className="text-zinc-500 border-b border-zinc-800">
                               <th className="text-left py-1.5 pr-2 font-bold w-6">#</th>
                               <th className="text-left py-1.5 font-bold">Equipa</th>
-                              <th className="text-center py-1.5 px-1 font-bold">J</th>
-                              <th className="text-center py-1.5 px-1 font-bold">V</th>
-                              <th className="text-center py-1.5 px-1 font-bold">E</th>
-                              <th className="text-center py-1.5 px-1 font-bold">D</th>
-                              <th className="text-center py-1.5 px-1 font-bold">GF</th>
-                              <th className="text-center py-1.5 px-1 font-bold">GC</th>
-                              <th className="text-center py-1.5 px-1 font-bold text-white">Pts</th>
+                              <th className="text-center py-1.5 px-1 font-bold">{cols.played}</th>
+                              <th className="text-center py-1.5 px-1 font-bold">{cols.won}</th>
+                              <th className="text-center py-1.5 px-1 font-bold">{cols.drawn}</th>
+                              <th className="text-center py-1.5 px-1 font-bold">{cols.lost}</th>
+                              <th className="text-center py-1.5 px-1 font-bold">{cols.gf}</th>
+                              <th className="text-center py-1.5 px-1 font-bold">{cols.ga}</th>
+                              <th className="text-center py-1.5 px-1 font-bold text-white">{cols.pts}</th>
                             </tr>
                           </thead>
                           <tbody>
                             {rows.map((row, ri) => {
-                              const isHome = row.name.toLowerCase().includes(expandedMatch.home.toLowerCase().slice(0, 5));
-                              const isAway = row.name.toLowerCase().includes(expandedMatch.away.toLowerCase().slice(0, 5));
+                              const isHome = rowMatchesTeam(row.name, expandedMatch.home);
+                              const isAway = rowMatchesTeam(row.name, expandedMatch.away);
                               return (
                                 <tr key={ri} className={`border-b border-zinc-800/50 ${isHome ? "bg-blue-500/10" : isAway ? "bg-red-500/10" : ""}`}>
                                   <td className="py-2 pr-2 text-zinc-500">{row.pos}</td>
@@ -7998,7 +8156,7 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
                 )}
 
                 {/* Standings panel (basketball) */}
-                {matchViewTab === "standings" && expandedMatch.sport === "basketball" && (
+                {false && matchViewTab === "standings" && expandedMatch.sport === "basketball" && (
                   <div className="bg-zinc-900 rounded-xl border border-zinc-800 p-3 mb-2 animate-in fade-in duration-200">
                     <div className="flex items-center gap-2 mb-3">
                       <span className="text-[10px] font-black text-red-500 uppercase tracking-widest">🏆 Classificação NBA</span>
@@ -8311,7 +8469,7 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
                 )}
 
                 {/* Yesterday results panel (hockey) */}
-                {matchViewTab === "yesterday" && expandedMatch.sport === "hockey" && (
+                {false && matchViewTab === "yesterday" && expandedMatch.sport === "hockey" && (
                   <div className="bg-zinc-900 rounded-xl border border-zinc-800 p-3 mb-2 animate-in fade-in duration-200">
                     <div className="flex items-center gap-2 mb-3">
                       <span className="text-[10px] font-black text-red-500 uppercase tracking-widest">🏆 Classificação NHL</span>
@@ -9695,15 +9853,12 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
                     return !isWC;
                   }),
                 ];
-                // Filter by country (all leagues of that country)
+                // Filter by country across all sports, preferring the explicit match country.
                 if (selectedCountry) {
-                  const countryObj = FOOTBALL_COUNTRIES.find(c => c.name === selectedCountry);
-                  if (countryObj) {
-                    const seen2 = new Set<string>();
-                    return combined
-                      .filter(m => countryObj.leagues.some(l => leagueMatchesFilter(m.league, l)))
-                      .filter(m => { const k = String(m.id); if (seen2.has(k)) return false; seen2.add(k); return true; });
-                  }
+                  const seen2 = new Set<string>();
+                  return combined
+                    .filter(m => countryMatchesFilter(m.country, selectedCountry, m.league))
+                    .filter(m => { const k = String(m.id); if (seen2.has(k)) return false; seen2.add(k); return true; });
                 }
                 if (!selectedLeague) return combined;
                 // ML-aware filter: matches major-league label (from chips) OR legacy flexible matching (from sidebar)

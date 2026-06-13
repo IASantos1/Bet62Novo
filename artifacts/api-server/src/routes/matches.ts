@@ -456,6 +456,9 @@ const DOMESTIC_PRIORITY: Array<[string, number]> = [
   ["japan: j.league",                       46],
   ["south korea: k league 1",              47],
   ["korea: k league 1",                    47],
+  ["australia: a league",                  48],
+  ["australia: a-league",                  48],
+  ["australia: isuzu ute a league",        48],
 
   // ── MEDIUM LEAGUES — 2nd division ─────────────────────────────────────────
   ["netherlands: eerste divisie",           51],
@@ -641,11 +644,11 @@ const LIVE_FOOTBALL_COUNTRY_ALLOW = new Set([
   "greece", "austria", "scotland", "switzerland", "denmark", "norway", "sweden", "croatia", "serbia",
   "poland", "czechia", "russia", "ukraine", "hungary", "romania", "bulgaria", "israel",
   "brazil", "argentina", "mexico", "chile", "colombia", "usa", "saudi arabia", "japan", "south korea",
-  "thailand", "india",
+  "thailand", "india", "australia",
 ]);
 
 const LIVE_FOOTBALL_FIRST_DIV_ONLY = new Set([
-  "india", "thailand", "south korea", "japan", "saudi arabia", "colombia", "chile", "usa", "mexico",
+  "india", "thailand", "south korea", "japan", "saudi arabia", "colombia", "chile", "usa", "mexico", "australia",
 ]);
 
 const LIVE_FOOTBALL_FIRST_DIV_PATTERNS: Record<string, string[]> = {
@@ -658,6 +661,7 @@ const LIVE_FOOTBALL_FIRST_DIV_PATTERNS: Record<string, string[]> = {
   chile: ["chile: primera division", "chile: primera división"],
   usa: ["usa: mls", "usa: major league soccer"],
   mexico: ["mexico: liga mx"],
+  australia: ["australia: a league", "australia: a-league", "australia: isuzu ute a league"],
 };
 
 function isLeagueUniversallyBlocked(name: string): boolean {
@@ -14536,6 +14540,8 @@ router.get("/v2-standings", async (req: Request, res: Response) => {
     if (!matchResp.ok) { res.json({ standings: [], league: "" }); return; }
     const matchData = await matchResp.json() as {
       match?: {
+        homeTeam?: { name?: string };
+        awayTeam?: { name?: string };
         tournament?: {
           name?: string;
           isGroup?: boolean;
@@ -14551,6 +14557,8 @@ router.get("/v2-standings", async (req: Request, res: Response) => {
     const leagueName = matchData.match?.tournament?.uniqueTournament?.name ?? matchData.match?.tournament?.name ?? "";
     const isGroupTournament = matchData.match?.tournament?.isGroup ?? false;
     const rawGroupName = matchData.match?.tournament?.groupName ?? "";
+    const homeTeamName = matchData.match?.homeTeam?.name ?? "";
+    const awayTeamName = matchData.match?.awayTeam?.name ?? "";
     if (!tId || !sId) { res.json({ standings: [], league: leagueName }); return; }
 
     // Step 2: fetch standings
@@ -14572,6 +14580,24 @@ router.get("/v2-standings", async (req: Request, res: Response) => {
         ga:     r.goalsAgainst ?? r.goals_against ?? r.conceded ?? 0,
         pts:    r.points  ?? 0,
       };
+    }
+
+    function normalizeStandingTeamName(name: string) {
+      return String(name ?? "")
+        .toLowerCase()
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .replace(/\b(fc|cf|sc|ac|afc|fk|club|clube)\b/g, " ")
+        .replace(/[^a-z0-9 ]/g, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+    }
+
+    function standingRowMatchesTeam(rowName: string, teamName: string) {
+      const row = normalizeStandingTeamName(rowName);
+      const team = normalizeStandingTeamName(teamName);
+      if (!row || !team) return false;
+      return row === team || row.includes(team) || team.includes(row) || row.includes(team.slice(0, Math.min(team.length, 8)));
     }
 
     // Detect group-stage competition: each item has a "group" key OR a nested rows/standings array
@@ -14610,6 +14636,14 @@ router.get("/v2-standings", async (req: Request, res: Response) => {
       } else {
         groups = undefined;
       }
+    }
+
+    const allRows = groups && groups.length > 0 ? groups.flatMap((group) => group.rows) : rows;
+    const hasHomeTeam = homeTeamName ? allRows.some((row) => standingRowMatchesTeam(row.name, homeTeamName)) : true;
+    const hasAwayTeam = awayTeamName ? allRows.some((row) => standingRowMatchesTeam(row.name, awayTeamName)) : true;
+    if (!hasHomeTeam || !hasAwayTeam) {
+      res.json({ standings: [], groups: [], league: leagueName });
+      return;
     }
 
     const result = { standings: rows, groups, league: leagueName };
