@@ -2966,6 +2966,7 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
   const upcomingSnapshotKey = useCallback((sport: string) => `bet62_snapshot_upcoming_v1:${sport}`, []);
   const liveSnapshotKey     = useCallback(() => "bet62_snapshot_live_v1", []);
   const matchSnapshotKey    = useCallback((id: string) => `bet62_snapshot_match_v1:${id}`, []);
+  const LIVE_SNAPSHOT_MAX_AGE_MS = 20_000;
   const readSnapshot = useCallback(<T,>(key: string): Snapshot<T> | null => {
     try {
       const raw = localStorage.getItem(key);
@@ -3692,7 +3693,7 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
     onSelect?.();
     if (id === "live" && prev !== "live") {
       const snap = readSnapshot<LiveMatchRaw[]>(liveSnapshotKey());
-      const canUseSnap = !!(snap && (Date.now() - snap.savedAt) < 2 * 60_000 && Array.isArray(snap.value));
+      const canUseSnap = !!(snap && (Date.now() - snap.savedAt) < LIVE_SNAPSHOT_MAX_AGE_MS && Array.isArray(snap.value));
       // Use ref so this callback is not recreated on every live-data update
       const hasMatches = liveMatchesRef.current.length > 0;
       if (snap && canUseSnap && !hasMatches) {
@@ -3725,7 +3726,7 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
     const hasMatches = liveMatchesRef.current.length > 0;
     if (!hasMatches) {
       const snap = readSnapshot<LiveMatchRaw[]>(liveSnapshotKey());
-      const canUseSnap = !!(snap && (Date.now() - snap.savedAt) < 2 * 60_000 && Array.isArray(snap.value));
+      const canUseSnap = !!(snap && (Date.now() - snap.savedAt) < LIVE_SNAPSHOT_MAX_AGE_MS && Array.isArray(snap.value));
       if (snap && canUseSnap) {
         setLiveMatches(snap.value.map(m => ({ ...(m as any), isLive: true })));
         setLiveLoading(false);
@@ -3853,7 +3854,7 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
         if (ctrl.signal.aborted) return;
         if (livePrefetchingRef.current.has(id)) continue;
         const snap = readSnapshot<Match>(matchSnapshotKey(id));
-        const canUseSnap = !!(snap && (Date.now() - snap.savedAt) < 2 * 60_000 && snap.value);
+        const canUseSnap = !!(snap && (Date.now() - snap.savedAt) < LIVE_SNAPSHOT_MAX_AGE_MS && snap.value);
         if (canUseSnap) continue;
         livePrefetchingRef.current.add(id);
         try {
