@@ -11860,6 +11860,7 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
                         const isCO = bet.status === "cashed_out";
                         const isPending = bet.status === "pending";
                         const isVoided = bet.status === "voided";
+                        const previewStatus = isPending ? (bet.statusPreview ?? "pending") : null;
                         const credit = isWon
                           ? parseFloat(bet.potentialWin)
                           : isCO && bet.cashoutValue
