@@ -506,13 +506,14 @@ function OBtn({ label, odd, active, onClick, theme }: { label: string; odd: numb
 
 // ─── Simple Match Card ────────────────────────────────────────────────────────
 
-function MatchCard({ match, onOpen, activeSel, onQuickBet, theme, displayMinute }: {
+function MatchCard({ match, onOpen, activeSel, onQuickBet, theme, displayMinute, isFlashing }: {
   match: WCMatch;
   onOpen: () => void;
   activeSel?: string;
   onQuickBet: (key: string, label: string, odd: number) => void;
   theme: Theme;
   displayMinute?: number;
+  isFlashing?: boolean;
 }) {
   const { home, away, odds, isLive, homeScore, awayScore, minute, time, date } = match;
   const dispMin = displayMinute ?? minute ?? 0;
@@ -616,7 +617,9 @@ function MatchCard({ match, onOpen, activeSel, onQuickBet, theme, displayMinute 
 
           <div className="flex flex-col items-center min-w-[60px]">
             {isLive ? (
-              <div className={`text-2xl font-black tabular-nums leading-none ${showGoalRing ? "text-green-400" : isDark ? "text-white" : "text-zinc-900"}`}>
+              <div className={`text-2xl font-black tabular-nums leading-none transition-colors duration-300 ${
+                isFlashing || showGoalRing ? "text-green-400" : isDark ? "text-white" : "text-zinc-900"
+              }`}>
                 {homeScore ?? 0}–{awayScore ?? 0}
               </div>
             ) : (
@@ -1657,6 +1660,12 @@ export default function WorldCupPage({ onClose, onBet: onBetProp }: { onClose?: 
   const apiMinutesRef        = useRef<Record<string, number>>({});
   const minuteChangedAtRef   = useRef<Record<string, number>>({});
   const liveDataFetchedAt    = useRef<number | null>(null);
+  // ── SSE real-time score push ─────────────────────────────────────────────────
+  const sseWCRef             = useRef<EventSource | null>(null);
+  const sseIdToWCIdRef       = useRef<Map<string, string>>(new Map());
+  const liveMatchesRef       = useRef<WCMatch[]>([]);
+  const lastSseSnapshotRef   = useRef<Array<{ id: unknown; home: unknown; away: unknown; sport?: unknown }>>([]);
+  const [flashIds, setFlashIds] = useState<Record<string, number>>({});
 
   useEffect(() => {
     const syncTheme = () => setTheme(getResolvedTheme(null));
@@ -1666,6 +1675,124 @@ export default function WorldCupPage({ onClose, onBet: onBetProp }: { onClose?: 
     return () => {
       unsubscribe();
       clearInterval(id);
+    };
+  }, []);
+
+  // Keep liveMatchesRef in sync + rebuild SSE→WC ID mapping when matches refresh
+  useEffect(() => {
+    liveMatchesRef.current = liveMatches;
+    if (lastSseSnapshotRef.current.length === 0) return;
+    const norm = (s: string) => s.toLowerCase().replace(/[\s.''\-]+/g, "");
+    for (const sm of lastSseSnapshotRef.current) {
+      if (sm.sport && String(sm.sport) !== "football") continue;
+      const sId = String(sm.id ?? "");
+      if (!sId) continue;
+      const sH = norm(String(sm.home ?? ""));
+      const sA = norm(String(sm.away ?? ""));
+      for (const wc of liveMatches) {
+        const wH = norm(wc.home);
+        const wA = norm(wc.away);
+        if ((sH === wH || sH.includes(wH) || wH.includes(sH)) && (sA === wA || sA.includes(wA) || wA.includes(sA))) {
+          sseIdToWCIdRef.current.set(sId, wc.id);
+        }
+      }
+    }
+  }, [liveMatches]);
+
+  // SSE — real-time score/suspension/minute push (same stream as home page)
+  useEffect(() => {
+    const norm = (s: string) => s.toLowerCase().replace(/[\s.''\-]+/g, "");
+    function rebuildMapping(snapshot: Array<{ id: unknown; home: unknown; away: unknown; sport?: unknown }>) {
+      lastSseSnapshotRef.current = snapshot;
+      const wcs = liveMatchesRef.current;
+      for (const sm of snapshot) {
+        if (sm.sport && String(sm.sport) !== "football") continue;
+        const sId = String(sm.id ?? "");
+        if (!sId) continue;
+        const sH = norm(String(sm.home ?? ""));
+        const sA = norm(String(sm.away ?? ""));
+        for (const wc of wcs) {
+          const wH = norm(wc.home);
+          const wA = norm(wc.away);
+          if ((sH === wH || sH.includes(wH) || wH.includes(sH)) && (sA === wA || sA.includes(wA) || wA.includes(sA))) {
+            sseIdToWCIdRef.current.set(sId, wc.id);
+          }
+        }
+      }
+    }
+    function applyDelta(sseMatchId: string, delta: Record<string, unknown>) {
+      const wcId = sseIdToWCIdRef.current.get(sseMatchId);
+      if (!wcId) return;
+      let scored = false;
+      const patch = (m: WCMatch): WCMatch => {
+        if (m.id !== wcId) return m;
+        const u: WCMatch = { ...m };
+        if (typeof delta.homeScore === "number" && delta.homeScore !== m.homeScore) { u.homeScore = delta.homeScore; scored = true; }
+        if (typeof delta.awayScore === "number" && delta.awayScore !== m.awayScore) { u.awayScore = delta.awayScore; scored = true; }
+        if (typeof delta.minute === "number" && Number.isFinite(delta.minute)) {
+          const prev = apiMinutesRef.current[wcId];
+          if (delta.minute >= (prev ?? 0)) {
+            apiMinutesRef.current[wcId] = delta.minute;
+            if (delta.minute !== prev) minuteChangedAtRef.current[wcId] = Date.now();
+            u.minute = delta.minute;
+          }
+        }
+        if (typeof delta.status === "string") u.status = delta.status;
+        if (delta.isLive !== undefined) u.isLive = !!delta.isLive;
+        if (delta.marketSuspension !== undefined) u.marketSuspension = delta.marketSuspension as WCMatch["marketSuspension"];
+        if (delta._suspensionReason !== undefined) u._suspensionReason = delta._suspensionReason as string | undefined;
+        if (delta._liveExtra !== undefined) u._liveExtra = delta._liveExtra as WCMatch["_liveExtra"];
+        if (typeof delta.redCardsHome === "number") u.redCardsHome = delta.redCardsHome;
+        if (typeof delta.redCardsAway === "number") u.redCardsAway = delta.redCardsAway;
+        if (delta.odds && typeof delta.odds === "object") {
+          u.odds = { ...(m.odds as object), ...(delta.odds as object) } as WCMatch["odds"];
+        }
+        return u;
+      };
+      setLiveMatches(prev => prev.map(patch));
+      setOpenMatch(prev => (prev ? patch(prev) : prev));
+      if (scored) {
+        const ts = Date.now();
+        setFlashIds(prev => ({ ...prev, [wcId]: ts }));
+        setTimeout(() => setFlashIds(prev => (
+          prev[wcId] === ts ? (({ [wcId]: _removed, ...rest }) => rest)(prev) : prev
+        )), 2000);
+      }
+    }
+    function openSSE() {
+      if (sseWCRef.current) return;
+      if (typeof window === "undefined" || !("EventSource" in window)) return;
+      try {
+        const es = new EventSource("/api/matches/live-stream");
+        sseWCRef.current = es;
+        es.onmessage = (evt) => {
+          try {
+            liveDataFetchedAt.current = Date.now();
+            const data = JSON.parse(evt.data) as Record<string, unknown>;
+            if (data.type === "update" && data.matchId) {
+              applyDelta(String(data.matchId), (data.delta ?? {}) as Record<string, unknown>);
+            } else if (data.type === "batch_update" && Array.isArray(data.updates)) {
+              for (const upd of data.updates as Array<{ matchId?: unknown; delta?: Record<string, unknown> }>) {
+                if (upd?.matchId && upd?.delta) applyDelta(String(upd.matchId), upd.delta);
+              }
+            } else if (Array.isArray(data.matches)) {
+              rebuildMapping(data.matches as Array<{ id: unknown; home: unknown; away: unknown; sport?: unknown }>);
+            }
+          } catch {
+          }
+        };
+        es.onerror = () => {
+          es.close();
+          if (sseWCRef.current === es) sseWCRef.current = null;
+          setTimeout(openSSE, 3_000);
+        };
+      } catch {
+      }
+    }
+    openSSE();
+    return () => {
+      sseWCRef.current?.close();
+      sseWCRef.current = null;
     };
   }, []);
 
@@ -1964,6 +2091,7 @@ export default function WorldCupPage({ onClose, onBet: onBetProp }: { onClose?: 
                         onQuickBet={handleQuickBet}
                         theme={theme}
                         displayMinute={m.isLive ? getWCDisplayMinute(m) : undefined}
+                        isFlashing={!!flashIds[m.id]}
                       />
                     </motion.div>
                   ))}
