@@ -11472,8 +11472,6 @@ async function _rebuildWC2026(): Promise<void> {
     const results: UpcomingMatch[] = wcV1Games.map(g => {
       const home = g.homeCompetitor?.name ?? "Unknown";
       const away = g.awayCompetitor?.name ?? "Unknown";
-      const staticFixture = findWC2026StaticFixture(home, away, date, time);
-      const league = staticFixture ? `FIFA World Cup - Group ${staticFixture.group}` : (g.competitionDisplayName ?? "FIFA World Cup");
       // Convert ISO start time to PT timezone (Lisbon)
       const dt = g.startTime ? new Date(g.startTime) : new Date(Date.now() + 86_400_000);
       const day   = dt.toLocaleDateString("pt-PT", { day: "2-digit",   timeZone: "Europe/Lisbon" });
@@ -11481,6 +11479,8 @@ async function _rebuildWC2026(): Promise<void> {
       const year  = dt.toLocaleDateString("pt-PT", { year: "numeric",  timeZone: "Europe/Lisbon" });
       const date  = `${day}.${month}.${year}`; // DD.MM.YYYY — matches parseMatchDate in frontend
       const time  = dt.toLocaleTimeString("pt-PT", { hour: "2-digit", minute: "2-digit", timeZone: "Europe/Lisbon" });
+      const staticFixture = findWC2026StaticFixture(home, away, date, time);
+      const league = staticFixture ? `FIFA World Cup - Group ${staticFixture.group}` : (g.competitionDisplayName ?? "FIFA World Cup");
       // statusGroup 3 = Live/in-play — expose live data directly
       const isLiveGame = (g.statusGroup ?? 0) === 3;
       // Try real V2 odds for this V1 game ID (same provider — IDs may match)
