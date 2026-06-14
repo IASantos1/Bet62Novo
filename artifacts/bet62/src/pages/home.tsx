@@ -654,6 +654,30 @@ function getTeamBanner(teamName: string, country?: string): string | undefined {
 
 const ARENA_BANNER = "/arena-banner.png";
 
+function buildSportsApiTeamLogoUrl(sport: string | undefined, teamId?: string, imageVersion?: string): string | undefined {
+  const cleanId = String(teamId ?? "").trim();
+  const cleanSport = String(sport ?? "football").trim().toLowerCase();
+  if (!cleanId || cleanSport !== "football") return undefined;
+  const params = new URLSearchParams();
+  if (imageVersion) params.set("imageVersion", imageVersion);
+  const query = params.toString();
+  return `/api/matches/team-logo/${encodeURIComponent(cleanSport)}/${encodeURIComponent(cleanId)}${query ? `?${query}` : ""}`;
+}
+
+function getTeamBadgeAsset(
+  match: Pick<Match, "sport" | "country" | "home" | "away" | "homeTeamId" | "awayTeamId" | "homeImageVersion" | "awayImageVersion">,
+  side: "home" | "away",
+): { src?: string; fit: "cover" | "contain"; padded: boolean } {
+  const teamName = side === "home" ? match.home : match.away;
+  const localBanner = getTeamBanner(teamName, match.country);
+  if (localBanner) return { src: localBanner, fit: "cover", padded: false };
+  const teamId = side === "home" ? match.homeTeamId : match.awayTeamId;
+  const imageVersion = side === "home" ? match.homeImageVersion : match.awayImageVersion;
+  const officialLogo = buildSportsApiTeamLogoUrl(match.sport, teamId, imageVersion);
+  if (officialLogo) return { src: officialLogo, fit: "contain", padded: true };
+  return { fit: "cover", padded: false };
+}
+
 function isWomensMatch(match: { league?: string; isWomens?: boolean }): boolean {
   if (match.isWomens) return true;
   return /women|feminine|féminin|feminino|frauen|femenin|damall|nwsl|wsl/i.test(match.league ?? "");
@@ -1349,6 +1373,10 @@ type Match = {
   id: string | number;
   home: string;
   away: string;
+  homeTeamId?: string;
+  awayTeamId?: string;
+  homeImageVersion?: string;
+  awayImageVersion?: string;
   league: string;
   country?: string;
   time?: string;
@@ -3452,6 +3480,7 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
       const matches = (data.matches || []) as Array<{
         id: string; home: string; away: string; league: string; country?: string;
         time?: string; date?: string; sport?: string; hasRealOdds?: boolean; odds: Odds; markets?: AdvancedMarkets;
+        homeTeamId?: string; awayTeamId?: string; homeImageVersion?: string; awayImageVersion?: string;
       }>;
       setUpcomingMatches(matches.map(m => ({ ...m, isLive: false })));
       writeSnapshot(upcomingSnapshotKey(selectedSport), matches);
@@ -3480,6 +3509,7 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
   type LiveMatchRaw = {
     id: string; home: string; away: string; league: string;
     country?: string; sport?: string; status?: string;
+    homeTeamId?: string; awayTeamId?: string; homeImageVersion?: string; awayImageVersion?: string;
     homeScore: number; awayScore: number; minute: number;
     startsIn?: number;
     hasRealOdds?: boolean; odds: Odds; markets?: AdvancedMarkets;
@@ -4962,8 +4992,8 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
 
     const canShowOdds = !!(match.hasRealOdds || (match.odds.home > 0 && match.odds.away > 0));
     const stopLiveCardOpen = (e: { stopPropagation: () => void }) => e.stopPropagation();
-    const homeBadge = getTeamBanner(match.home, match.country);
-    const awayBadge = getTeamBanner(match.away, match.country);
+    const homeBadge = getTeamBadgeAsset(match, "home");
+    const awayBadge = getTeamBadgeAsset(match, "away");
     const oddsRow = (canShowOdds || match.isLive) ? (
       <div
         className="flex flex-col gap-1.5 w-full mt-1.5"
@@ -5028,7 +5058,7 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
           <div className={`rounded-[20px] px-3 py-3 border ${isDarkTheme ? "bg-zinc-950 border-zinc-900/80" : "bg-zinc-950 border-zinc-900/80"}`}>
             <div className="flex items-center justify-between gap-2.5 mb-2">
               <div className="flex-1 flex flex-col items-center gap-1.5 min-w-0">
-                <EventTeamBadge name={homeName} badge={homeBadge} sport={sport} flag={flag} compact />
+                <EventTeamBadge name={homeName} badge={homeBadge.src} badgeFit={homeBadge.fit} badgePadded={homeBadge.padded} sport={sport} flag={flag} compact />
                 <span className="text-[13px] font-black text-white text-center leading-tight px-1">{homeName}</span>
               </div>
               <div className="min-w-[68px] flex flex-col items-center">
@@ -5045,7 +5075,7 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
                 ) : null}
               </div>
               <div className="flex-1 flex flex-col items-center gap-1.5 min-w-0">
-                <EventTeamBadge name={awayName} badge={awayBadge} sport={sport} flag={flag} compact />
+                <EventTeamBadge name={awayName} badge={awayBadge.src} badgeFit={awayBadge.fit} badgePadded={awayBadge.padded} sport={sport} flag={flag} compact />
                 <span className="text-[13px] font-black text-white text-center leading-tight px-1">{awayName}</span>
               </div>
             </div>
@@ -5064,16 +5094,18 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
 
   const stopCardOpen = (e: { stopPropagation: () => void }) => e.stopPropagation();
 
-  const EventTeamBadge = ({ name, badge, sport, flag, compact = false }: {
+  const EventTeamBadge = ({ name, badge, badgeFit = "cover", badgePadded = false, sport, flag, compact = false }: {
     name: string;
     badge?: string;
+    badgeFit?: "cover" | "contain";
+    badgePadded?: boolean;
     sport: string;
     flag: string;
     compact?: boolean;
   }) => (
-    <div className={`${compact ? "w-[46px] h-[46px]" : "w-[54px] h-[54px]"} rounded-full bg-white border border-zinc-200 shadow-[0_0_14px_rgba(234,179,8,0.28)] flex items-center justify-center overflow-hidden`}>
+    <div className={`${compact ? "w-[46px] h-[46px]" : "w-[54px] h-[54px]"} rounded-full bg-white border border-zinc-200 shadow-[0_0_14px_rgba(234,179,8,0.28)] flex items-center justify-center overflow-hidden ${badgePadded ? "p-1.5" : ""}`}>
       {badge ? (
-        <img src={badge} alt={name} className="w-full h-full object-cover" loading="lazy" decoding="async" />
+        <img src={badge} alt={name} className={`w-full h-full ${badgeFit === "contain" ? "object-contain" : "object-cover"}`} loading="lazy" decoding="async" />
       ) : (
         <span className={`${compact ? "text-[22px]" : "text-[26px]"} leading-none`}>
           {sport === "tennis" ? "🎾" : sport === "basketball" ? "🏀" : sport === "hockey" ? "🏒" : sport === "volleyball" ? "🏐" : sport === "baseball" ? "⚾" : flag}
@@ -5090,8 +5122,8 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
     const hasDraw = match.odds.draw > 0;
     const homeName = teamNamePt(match.home);
     const awayName = teamNamePt(match.away);
-    const homeBadge = getTeamBanner(match.home, match.country);
-    const awayBadge = getTeamBanner(match.away, match.country);
+    const homeBadge = getTeamBadgeAsset(match, "home");
+    const awayBadge = getTeamBadgeAsset(match, "away");
 
     const isSuspendedMatch = match.isLive && (
       (!!match.marketSuspension && Object.values(match.marketSuspension).some(ts => ts > Date.now()))
@@ -5155,7 +5187,7 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
           )}
           <div className={`flex items-center justify-between gap-2.5 mb-2.5 ${isDarkTheme ? "rounded-[20px] bg-zinc-950 border border-zinc-900/80 px-3 py-3" : ""}`}>
             <div className="flex-1 flex flex-col items-center gap-1.5 min-w-0">
-              <EventTeamBadge name={homeName} badge={homeBadge} sport={sport} flag={flag} compact />
+              <EventTeamBadge name={homeName} badge={homeBadge.src} badgeFit={homeBadge.fit} badgePadded={homeBadge.padded} sport={sport} flag={flag} compact />
               <span className={`text-[14px] font-black text-center leading-tight px-1 ${isDarkTheme ? "text-white" : "text-zinc-900"}`}>
                 {homeName}
               </span>
@@ -5166,7 +5198,7 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
               {dateStr && <span className={`mt-0.5 text-[11px] font-semibold ${isDarkTheme ? "text-zinc-400" : "text-zinc-500"}`}>{dateStr}</span>}
             </div>
             <div className="flex-1 flex flex-col items-center gap-1.5 min-w-0">
-              <EventTeamBadge name={awayName} badge={awayBadge} sport={sport} flag={flag} compact />
+              <EventTeamBadge name={awayName} badge={awayBadge.src} badgeFit={awayBadge.fit} badgePadded={awayBadge.padded} sport={sport} flag={flag} compact />
               <span className={`text-[14px] font-black text-center leading-tight px-1 ${isDarkTheme ? "text-white" : "text-zinc-900"}`}>
                 {awayName}
               </span>
@@ -8098,10 +8130,17 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
                     </div>
 
                     <div className="flex items-center justify-between gap-3 mb-4">
+                      {(() => {
+                        const homeExpandedBadge = getTeamBadgeAsset(expandedMatch, "home");
+                        const awayExpandedBadge = getTeamBadgeAsset(expandedMatch, "away");
+                        return (
+                          <>
                       <div className="flex-1 flex flex-col items-center gap-2 min-w-0">
                         <EventTeamBadge
                           name={teamNamePt(expandedMatch.home)}
-                          badge={getTeamBanner(expandedMatch.home, expandedMatch.country)}
+                          badge={homeExpandedBadge.src}
+                          badgeFit={homeExpandedBadge.fit}
+                          badgePadded={homeExpandedBadge.padded}
                           sport={expandedMatch.sport ?? "football"}
                           flag={COUNTRY_FLAGS[expandedMatch.country?.toLowerCase() ?? ""] ?? sportEmoji(expandedMatch.sport)}
                         />
@@ -8133,7 +8172,9 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
                       <div className="flex-1 flex flex-col items-center gap-2 min-w-0">
                         <EventTeamBadge
                           name={teamNamePt(expandedMatch.away)}
-                          badge={getTeamBanner(expandedMatch.away, expandedMatch.country)}
+                          badge={awayExpandedBadge.src}
+                          badgeFit={awayExpandedBadge.fit}
+                          badgePadded={awayExpandedBadge.padded}
                           sport={expandedMatch.sport ?? "football"}
                           flag={COUNTRY_FLAGS[expandedMatch.country?.toLowerCase() ?? ""] ?? sportEmoji(expandedMatch.sport)}
                         />
@@ -8141,6 +8182,9 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
                           {teamNamePt(expandedMatch.away)}
                         </span>
                       </div>
+                          </>
+                        );
+                      })()}
                     </div>
 
                     {matchViewTab !== "markets" && (

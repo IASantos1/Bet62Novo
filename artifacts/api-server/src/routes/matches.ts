@@ -147,6 +147,10 @@ export type LiveMatchState = {
   id: string;
   home: string;
   away: string;
+  homeTeamId?: string;
+  awayTeamId?: string;
+  homeImageVersion?: string;
+  awayImageVersion?: string;
   league: string;
   country: string;
   sport: string;
@@ -4948,8 +4952,8 @@ type V1LiveGame = {
   statusGroup?: number;
   statusText?: string;
   gameTime?: number;
-  homeCompetitor?: { name?: string; score?: number };
-  awayCompetitor?:  { name?: string; score?: number };
+  homeCompetitor?: { id?: number; name?: string; score?: number; imageVersion?: number | string };
+  awayCompetitor?:  { id?: number; name?: string; score?: number; imageVersion?: number | string };
 };
 
 function v1GameToV2Event(g: V1LiveGame): SAPIV2Event {
@@ -7167,6 +7171,8 @@ async function buildLiveMatches(): Promise<LiveMatchState[]> {
         id: m.main_id,
         home: m.home.name,
         away: m.away.name,
+        homeTeamId: m.home.id ? String(m.home.id) : undefined,
+        awayTeamId: m.away.id ? String(m.away.id) : undefined,
         league: normalizeLeagueName(league.name, league.country),
         country: league.country,
         sport: "football",
@@ -7269,6 +7275,8 @@ async function buildUpcomingMatches(): Promise<UpcomingMatch[]> {
       id: `fb-v2-${ev.id}`,
       home,
       away,
+      homeTeamId: ev.homeTeamId != null ? String(ev.homeTeamId) : undefined,
+      awayTeamId: ev.awayTeamId != null ? String(ev.awayTeamId) : undefined,
       league: leagueName,
       country: countryRaw,
       time,
@@ -9494,6 +9502,73 @@ function getLivePayloadFallback(): { matches: LiveMatchState[] } | null {
   return livePayloadFallbackCache.payload;
 }
 
+router.get("/team-logo/:sport/:teamId", async (req: Request, res: Response) => {
+  const sport = String(req.params["sport"] ?? "").trim().toLowerCase();
+  const teamId = String(req.params["teamId"] ?? "").trim();
+  const imageVersion = String(req.query["imageVersion"] ?? "").trim();
+
+  if (!teamId) {
+    res.status(400).end();
+    return;
+  }
+
+  const v2ImageBase = (() => {
+    if (sport === "football") return "https://v2.football.sportsapipro.com/images/teams";
+    if (sport === "basketball") return "https://v2.basketball.sportsapipro.com/images/teams";
+    if (sport === "hockey") return "https://v2.hockey.sportsapipro.com/images/teams";
+    if (sport === "tennis") return "https://v2.tennis.sportsapipro.com/images/teams";
+    if (sport === "baseball") return "https://v2.baseball.sportsapipro.com/images/teams";
+    return null;
+  })();
+
+  if (sport === "football" && imageVersion) {
+    const url = new URL(`https://v1.football.sportsapipro.com/images/competitors/${encodeURIComponent(teamId)}`);
+    url.searchParams.set("imageVersion", imageVersion);
+    res.setHeader("Cache-Control", "public, max-age=21600, s-maxage=21600");
+    res.redirect(url.toString());
+    return;
+  }
+
+  if (!v2ImageBase) {
+    res.status(404).end();
+    return;
+  }
+
+  try {
+    const resp = await fetch(`${v2ImageBase}/${encodeURIComponent(teamId)}`, {
+      signal: AbortSignal.timeout(10_000),
+      headers: sapiHeaders(),
+    });
+
+    if (!resp.ok) {
+      if (sport === "football") {
+        const fallback = new URL(`https://v1.football.sportsapipro.com/images/competitors/${encodeURIComponent(teamId)}`);
+        if (imageVersion) fallback.searchParams.set("imageVersion", imageVersion);
+        res.setHeader("Cache-Control", "public, max-age=21600, s-maxage=21600");
+        res.redirect(fallback.toString());
+        return;
+      }
+      res.status(resp.status === 404 ? 404 : 502).end();
+      return;
+    }
+
+    const contentType = resp.headers.get("content-type") ?? "image/png";
+    const body = Buffer.from(await resp.arrayBuffer());
+    res.setHeader("Cache-Control", "public, max-age=21600, s-maxage=21600");
+    res.setHeader("Content-Type", contentType);
+    res.send(body);
+  } catch {
+    if (sport === "football") {
+      const fallback = new URL(`https://v1.football.sportsapipro.com/images/competitors/${encodeURIComponent(teamId)}`);
+      if (imageVersion) fallback.searchParams.set("imageVersion", imageVersion);
+      res.setHeader("Cache-Control", "public, max-age=21600, s-maxage=21600");
+      res.redirect(fallback.toString());
+      return;
+    }
+    res.status(502).end();
+  }
+});
+
 async function getLivePayloadCached(forceFresh = false): Promise<{ matches: LiveMatchState[] }> {
   if (!forceFresh && livePayloadCache && Date.now() - livePayloadCache.builtAt < LIVE_PAYLOAD_CACHE_TTL_MS) {
     return livePayloadCache.payload;
@@ -9863,6 +9938,10 @@ async function buildFootballUpcomingV1(): Promise<UpcomingMatch[]> {
       results.push({
         id: `fb-v1-${g.id}`,
         home, away,
+        homeTeamId: g.homeCompetitor?.id != null ? String(g.homeCompetitor.id) : undefined,
+        awayTeamId: g.awayCompetitor?.id != null ? String(g.awayCompetitor.id) : undefined,
+        homeImageVersion: g.homeCompetitor?.imageVersion != null ? String(g.homeCompetitor.imageVersion) : undefined,
+        awayImageVersion: g.awayCompetitor?.imageVersion != null ? String(g.awayCompetitor.imageVersion) : undefined,
         league, country: "",
         date, time,
         sport: "football" as const,
