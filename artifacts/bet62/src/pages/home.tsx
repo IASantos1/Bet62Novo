@@ -657,7 +657,10 @@ const ARENA_BANNER = "/arena-banner.png";
 function buildSportsApiTeamLogoUrl(sport: string | undefined, teamId?: string, imageVersion?: string): string | undefined {
   const cleanId = String(teamId ?? "").trim();
   const cleanSport = String(sport ?? "football").trim().toLowerCase();
-  if (!cleanId || cleanSport !== "football") return undefined;
+  if (!cleanId) return undefined;
+  if (!["football", "basketball", "hockey", "tennis", "baseball", "volleyball"].includes(cleanSport)) {
+    return undefined;
+  }
   const params = new URLSearchParams();
   if (imageVersion) params.set("imageVersion", imageVersion);
   const query = params.toString();
@@ -5139,7 +5142,7 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
           </span>
         ) : (
           <span className={`${compact ? "text-[12px]" : "text-[14px]"} font-black tracking-wide text-zinc-900`}>
-            {sport === "football" ? teamMonogram(name) : (sport === "tennis" ? "TN" : sport === "basketball" ? "BK" : sport === "hockey" ? "HK" : sport === "volleyball" ? "VB" : sport === "baseball" ? "BB" : "SP")}
+            {teamMonogram(name)}
           </span>
         )
       )}

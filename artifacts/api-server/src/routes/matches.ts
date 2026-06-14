@@ -8218,6 +8218,8 @@ function buildBasketballLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
     const state: LiveMatchState = {
       id,
       home: homeTeam, away: awayTeam,
+      homeTeamId: typeof ev.homeTeam === "object" && ev.homeTeam?.id != null ? String(ev.homeTeam.id) : (ev.homeTeamId != null ? String(ev.homeTeamId) : undefined),
+      awayTeamId: typeof ev.awayTeam === "object" && ev.awayTeam?.id != null ? String(ev.awayTeam.id) : (ev.awayTeamId != null ? String(ev.awayTeamId) : undefined),
       league, country,
       sport: "basketball", homeScore, awayScore, minute,
       status: statusLabel, hasRealOdds: true, odds: liveOdds,
@@ -8322,6 +8324,8 @@ function buildHockeyLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
     const state: LiveMatchState = {
       id,
       home: homeTeam, away: awayTeam,
+      homeTeamId: typeof ev.homeTeam === "object" && ev.homeTeam?.id != null ? String(ev.homeTeam.id) : (ev.homeTeamId != null ? String(ev.homeTeamId) : undefined),
+      awayTeamId: typeof ev.awayTeam === "object" && ev.awayTeam?.id != null ? String(ev.awayTeam.id) : (ev.awayTeamId != null ? String(ev.awayTeamId) : undefined),
       league: v2TournName(ev.tournament), country: v2TournCountry(ev),
       sport: "hockey", homeScore, awayScore, minute,
       status: statusLabel, hasRealOdds: true, odds: liveOdds,
@@ -8423,6 +8427,8 @@ function buildBaseballLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
     const state: LiveMatchState = {
       id,
       home: homeTeam, away: awayTeam,
+      homeTeamId: typeof ev.homeTeam === "object" && ev.homeTeam?.id != null ? String(ev.homeTeam.id) : (ev.homeTeamId != null ? String(ev.homeTeamId) : undefined),
+      awayTeamId: typeof ev.awayTeam === "object" && ev.awayTeam?.id != null ? String(ev.awayTeam.id) : (ev.awayTeamId != null ? String(ev.awayTeamId) : undefined),
       league, country: v2TournCountry(ev),
       sport: "baseball", homeScore, awayScore,
       minute: innings.length,
@@ -8774,6 +8780,8 @@ function buildTennisLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
     const state: LiveMatchState = {
       id,
       home: homeTeam, away: awayTeam,
+      homeTeamId: typeof ev.homeTeam === "object" && ev.homeTeam?.id != null ? String(ev.homeTeam.id) : (ev.homeTeamId != null ? String(ev.homeTeamId) : undefined),
+      awayTeamId: typeof ev.awayTeam === "object" && ev.awayTeam?.id != null ? String(ev.awayTeam.id) : (ev.awayTeamId != null ? String(ev.awayTeamId) : undefined),
       league: tennisTournLabel(ev.tournament), country: v2TournCountry(ev),
       sport: "tennis", homeScore, awayScore,
       minute: currentSetNum * 20,
@@ -9518,6 +9526,7 @@ router.get("/team-logo/:sport/:teamId", async (req: Request, res: Response) => {
     if (sport === "hockey") return "https://v2.hockey.sportsapipro.com/images/teams";
     if (sport === "tennis") return "https://v2.tennis.sportsapipro.com/images/teams";
     if (sport === "baseball") return "https://v2.baseball.sportsapipro.com/images/teams";
+    if (sport === "volleyball") return "https://v2.volleyball.sportsapipro.com/images/teams";
     return null;
   })();
 
@@ -9996,6 +10005,8 @@ async function buildBasketballUpcomingV1(): Promise<UpcomingMatch[]> {
       results.push({
         id: `bball-v1-${g.id}`,
         home, away,
+        homeTeamId: g.homeCompetitor?.id != null ? String(g.homeCompetitor.id) : undefined,
+        awayTeamId: g.awayCompetitor?.id != null ? String(g.awayCompetitor.id) : undefined,
         league, country: "",
         date, time,
         sport: "basketball" as const,
@@ -10061,6 +10072,8 @@ async function buildTennisUpcoming(): Promise<UpcomingMatch[]> {
         id: `tennis-v2-${g.id}`,
         home,
         away,
+        homeTeamId: g.homeCompetitor?.id != null ? String(g.homeCompetitor.id) : undefined,
+        awayTeamId: g.awayCompetitor?.id != null ? String(g.awayCompetitor.id) : undefined,
         league: enrichedLeague,
         country: "",
         date,
@@ -10135,6 +10148,8 @@ async function buildBasketballUpcoming(): Promise<UpcomingMatch[]> {
         id: `bball-v2-${ev.id}`,
         home,
         away,
+        homeTeamId: typeof ev.homeTeam === "object" && ev.homeTeam?.id != null ? String(ev.homeTeam.id) : (ev.homeTeamId != null ? String(ev.homeTeamId) : undefined),
+        awayTeamId: typeof ev.awayTeam === "object" && ev.awayTeam?.id != null ? String(ev.awayTeam.id) : (ev.awayTeamId != null ? String(ev.awayTeamId) : undefined),
         league: v2TournName(ev.tournament),
         country: "usa",
         date,
@@ -10188,6 +10203,8 @@ async function buildHockeyUpcoming(): Promise<UpcomingMatch[]> {
       results.push({
         id: `hockey-v2-${ev.id}`,
         home, away,
+        homeTeamId: typeof ev.homeTeam === "object" && ev.homeTeam?.id != null ? String(ev.homeTeam.id) : (ev.homeTeamId != null ? String(ev.homeTeamId) : undefined),
+        awayTeamId: typeof ev.awayTeam === "object" && ev.awayTeam?.id != null ? String(ev.awayTeam.id) : (ev.awayTeamId != null ? String(ev.awayTeamId) : undefined),
         league: v2TournName(ev.tournament),
         country: "usa",
         date, time,
@@ -10281,6 +10298,8 @@ async function buildBaseballUpcoming(): Promise<UpcomingMatch[]> {
         id: `mlb-v2-${ev.id}`,
         home,
         away,
+        homeTeamId: typeof ev.homeTeam === "object" && ev.homeTeam?.id != null ? String(ev.homeTeam.id) : (ev.homeTeamId != null ? String(ev.homeTeamId) : undefined),
+        awayTeamId: typeof ev.awayTeam === "object" && ev.awayTeam?.id != null ? String(ev.awayTeam.id) : (ev.awayTeamId != null ? String(ev.awayTeamId) : undefined),
         league: v2TournName(ev.tournament),
         country: "usa",
         date,
