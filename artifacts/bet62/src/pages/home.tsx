@@ -4682,7 +4682,6 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
     const sport  = match.sport ?? "football";
     const extra  = match._liveExtra;
     const flag   = COUNTRY_FLAGS[match.country?.toLowerCase() ?? ""] ?? sportEmoji(match.sport);
-    const isSelection = isSelectionMatch(match);
     const matchKey  = String(match.id);
     const bannerImg = getMatchBannerStable(match);
     const homeName = teamNamePt(match.home);
@@ -5042,8 +5041,6 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
 
     const canShowOdds = !!(match.hasRealOdds || (match.odds.home > 0 && match.odds.away > 0));
     const stopLiveCardOpen = (e: { stopPropagation: () => void }) => e.stopPropagation();
-    const homeBadge = getTeamBadgeAsset(match, "home");
-    const awayBadge = getTeamBadgeAsset(match, "away");
     const oddsRow = (canShowOdds || match.isLive) ? (
       <div
         className="flex flex-col gap-1.5 w-full mt-1.5"
@@ -5092,8 +5089,8 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
         }`}
       >
         <div className="absolute top-0 left-0 right-0 h-[3px] bg-gradient-to-r from-yellow-400 via-orange-500 to-red-600" />
-        <div className="px-3.5 pt-3.5 pb-3">
-          <div className="flex items-center justify-between gap-3 mb-2.5">
+        <div className="px-3.5 pt-3 pb-2.5">
+          <div className="flex items-center justify-between gap-3 mb-2">
             <div className="min-w-0 flex items-center gap-2">
               <span className="text-sm leading-none shrink-0">{sport === "football" ? "🏆" : flag}</span>
               <span className={`text-[11px] font-black tracking-[0.18em] uppercase truncate ${isDarkTheme ? "text-zinc-300" : "text-zinc-500"}`}>{match.league}</span>
@@ -5105,11 +5102,10 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
               {rivalry}
             </div>
           )}
-          <div className={`rounded-[20px] px-3 py-3 border ${isDarkTheme ? "bg-zinc-950 border-zinc-900/80" : "bg-zinc-950 border-zinc-900/80"}`}>
-            <div className="flex items-center justify-between gap-2.5 mb-2">
-              <div className="flex-1 flex flex-col items-center gap-1.5 min-w-0">
-                <EventTeamBadge name={homeName} badge={homeBadge.src} badgeFit={homeBadge.fit} badgePadded={homeBadge.padded} sport={sport} flag={flag} isSelection={isSelection} compact />
-                <span className="text-[13px] font-black text-white text-center leading-tight px-1">{homeName}</span>
+          <div className={`rounded-[20px] px-3 py-2.5 border ${isDarkTheme ? "bg-zinc-950 border-zinc-900/80" : "bg-zinc-950 border-zinc-900/80"}`}>
+            <div className="flex items-center justify-between gap-3 mb-1.5">
+              <div className="flex-1 min-w-0 text-right">
+                <span className="block text-[13px] font-black text-white leading-tight truncate">{homeName}</span>
               </div>
               <div className="min-w-[68px] flex flex-col items-center">
                 <span className="text-[16px] font-black text-zinc-500 tracking-wide">VS</span>
@@ -5124,9 +5120,8 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
                   </span>
                 ) : null}
               </div>
-              <div className="flex-1 flex flex-col items-center gap-1.5 min-w-0">
-                <EventTeamBadge name={awayName} badge={awayBadge.src} badgeFit={awayBadge.fit} badgePadded={awayBadge.padded} sport={sport} flag={flag} isSelection={isSelection} compact />
-                <span className="text-[13px] font-black text-white text-center leading-tight px-1">{awayName}</span>
+              <div className="flex-1 min-w-0 text-left">
+                <span className="block text-[13px] font-black text-white leading-tight truncate">{awayName}</span>
               </div>
             </div>
             {sport === "tennis"     ? <TennisScore /> :
@@ -5174,15 +5169,11 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
   const MatchCard = ({ match }: { match: Match }) => {
     const sport = match.sport ?? "football";
     const flag = COUNTRY_FLAGS[match.country?.toLowerCase() ?? ""] ?? sportEmoji(match.sport);
-    const isSelection = isSelectionMatch(match);
     const dateStr = match.date ? formatMatchDate(match.date) : "";
     const rivalry = RIVALRY_TAGS[`${match.home}|${match.away}`];
     const hasDraw = match.odds.draw > 0;
     const homeName = teamNamePt(match.home);
     const awayName = teamNamePt(match.away);
-    const homeBadge = getTeamBadgeAsset(match, "home");
-    const awayBadge = getTeamBadgeAsset(match, "away");
-
     const isSuspendedMatch = match.isLive && (
       (!!match.marketSuspension && Object.values(match.marketSuspension).some(ts => ts > Date.now()))
       || hasBlockingSuspensionReason(match)
@@ -5226,8 +5217,8 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
         {...makeTap(() => setExpandedMatch(match))}
       >
         <div className="absolute top-0 left-0 right-0 h-[3px] bg-gradient-to-r from-yellow-400 via-orange-500 to-red-600" />
-        <div className="px-3.5 pt-3.5 pb-3">
-          <div className="flex items-center justify-between gap-3 mb-2.5">
+        <div className="px-3.5 pt-3 pb-2.5">
+          <div className="flex items-center justify-between gap-3 mb-2">
             <div className="min-w-0 flex items-center gap-2">
               <span className="text-sm leading-none shrink-0">{sport === "football" ? "🏆" : flag}</span>
               <span className={`text-[11px] font-black tracking-[0.18em] uppercase truncate ${isDarkTheme ? "text-zinc-300" : "text-zinc-500"}`}>
@@ -5243,10 +5234,9 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
               {rivalry}
             </div>
           )}
-          <div className={`flex items-center justify-between gap-2.5 mb-2.5 ${isDarkTheme ? "rounded-[20px] bg-zinc-950 border border-zinc-900/80 px-3 py-3" : ""}`}>
-            <div className="flex-1 flex flex-col items-center gap-1.5 min-w-0">
-              <EventTeamBadge name={homeName} badge={homeBadge.src} badgeFit={homeBadge.fit} badgePadded={homeBadge.padded} sport={sport} flag={flag} isSelection={isSelection} compact />
-              <span className={`text-[14px] font-black text-center leading-tight px-1 ${isDarkTheme ? "text-white" : "text-zinc-900"}`}>
+          <div className={`flex items-center justify-between gap-3 mb-2 ${isDarkTheme ? "rounded-[20px] bg-zinc-950 border border-zinc-900/80 px-3 py-2.5" : "px-1 py-1"}`}>
+            <div className="flex-1 min-w-0 text-right">
+              <span className={`block text-[14px] font-black leading-tight truncate ${isDarkTheme ? "text-white" : "text-zinc-900"}`}>
                 {homeName}
               </span>
             </div>
@@ -5255,9 +5245,8 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
               {match.time && <span className={`mt-0.5 text-[16px] font-black ${isDarkTheme ? "text-white" : "text-zinc-900"}`}>{match.time}</span>}
               {dateStr && <span className={`mt-0.5 text-[11px] font-semibold ${isDarkTheme ? "text-zinc-400" : "text-zinc-500"}`}>{dateStr}</span>}
             </div>
-            <div className="flex-1 flex flex-col items-center gap-1.5 min-w-0">
-              <EventTeamBadge name={awayName} badge={awayBadge.src} badgeFit={awayBadge.fit} badgePadded={awayBadge.padded} sport={sport} flag={flag} isSelection={isSelection} compact />
-              <span className={`text-[14px] font-black text-center leading-tight px-1 ${isDarkTheme ? "text-white" : "text-zinc-900"}`}>
+            <div className="flex-1 min-w-0 text-left">
+              <span className={`block text-[14px] font-black leading-tight truncate ${isDarkTheme ? "text-white" : "text-zinc-900"}`}>
                 {awayName}
               </span>
             </div>

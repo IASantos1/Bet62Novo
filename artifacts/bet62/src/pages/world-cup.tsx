@@ -222,46 +222,50 @@ function buildCompetitorLogoUrl(teamId?: string, imageVersion?: string): string 
 }
 
 function FlagImg({ name, size = 32, teamId, imageVersion }: { name: string; size?: number; teamId?: string; imageVersion?: string }) {
-  const [err, setErr] = useState(false);
+  const [flagErr, setFlagErr] = useState(false);
+  const [logoErr, setLogoErr] = useState(false);
   const code = TEAM_CODES[name.toLowerCase()];
   const emoji = TEAM_EMOJI[name.toLowerCase()] ?? "🌐";
   const logoUrl = buildCompetitorLogoUrl(teamId, imageVersion);
   const s = size;
-  const border: React.CSSProperties = {
+  const shell: React.CSSProperties = {
     width: s, height: s, borderRadius: "50%", flexShrink: 0, overflow: "hidden",
     boxShadow: "0 0 8px 2px rgba(255,200,0,0.3), 0 2px 6px rgba(0,0,0,0.5)",
     border: "1.5px solid rgba(255,200,0,0.25)",
     position: "relative",
+    background: "#fff",
   };
-  if (logoUrl && !err) {
+  if (code && !flagErr) {
     return (
-      <div style={{ ...border, background: "#fff", padding: Math.max(2, Math.round(s * 0.12)) }}>
+      <div style={shell}>
+        <img
+          src={`https://flagcdn.com/w80/${code}.png`}
+          alt={name}
+          style={{ width: "100%", height: "100%", objectFit: "cover", borderRadius: "50%" }}
+          loading="lazy"
+          decoding="async"
+          onError={() => setFlagErr(true)}
+        />
+        <div style={{ position: "absolute", inset: 0, borderRadius: "50%", background: "linear-gradient(140deg,rgba(255,255,255,0.45) 0%,transparent 45%)", pointerEvents: "none" }} />
+      </div>
+    );
+  }
+  if (logoUrl && !logoErr) {
+    return (
+      <div style={{ ...shell, padding: Math.max(2, Math.round(s * 0.12)) }}>
         <img
           src={logoUrl}
           alt={name}
           style={{ width: "100%", height: "100%", objectFit: "contain" }}
           loading="lazy"
           decoding="async"
-          onError={() => setErr(true)}
+          onError={() => setLogoErr(true)}
         />
-      </div>
-    );
-  }
-  if (code && !err) {
-    return (
-      <div style={border}>
-        <img
-          src={`https://flagcdn.com/w80/${code}.png`}
-          alt={name}
-          style={{ width: "100%", height: "100%", objectFit: "cover" }}
-          onError={() => setErr(true)}
-        />
-        <div style={{ position: "absolute", inset: 0, borderRadius: "50%", background: "linear-gradient(140deg,rgba(255,255,255,0.45) 0%,transparent 45%)", pointerEvents: "none" }} />
       </div>
     );
   }
   return (
-    <div style={{ ...border, display: "flex", alignItems: "center", justifyContent: "center", background: "#1c1c22", fontSize: s * 0.52 }}>
+    <div style={{ ...shell, display: "flex", alignItems: "center", justifyContent: "center", background: "#1c1c22", fontSize: s * 0.52 }}>
       {emoji}
     </div>
   );
@@ -370,8 +374,59 @@ function emptyWCMatchCollections(): WCMatchCollections {
   };
 }
 
+function normalizeWCMatchTeamKey(name: string): string {
+  return String(name ?? "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, "");
+}
+
+function getWCMatchPriority(match: WCMatch): number {
+  let score = 0;
+  if (match.isLive) score += 1000;
+  if (match.isFinished) score += 500;
+  if (typeof match.homeScore === "number" || typeof match.awayScore === "number") score += 300;
+  if (String(match.id ?? "").startsWith("wc26-")) score += 250;
+  if (match.hasRealOdds) score += 50;
+  if (match.homeTeamId || match.awayTeamId) score += 20;
+  return score;
+}
+
+function dedupeWCMatches(matches: WCMatch[]): WCMatch[] {
+  const bestByPairAndSlot = new Map<string, WCMatch>();
+  for (const match of matches) {
+    const slot = `${match.date ?? ""}|${match.time ?? ""}`;
+    const pairKey = [normalizeWCMatchTeamKey(match.home), normalizeWCMatchTeamKey(match.away)].sort().join("|");
+    const uniqueKey = `${slot}|${pairKey}`;
+    const existing = bestByPairAndSlot.get(uniqueKey);
+    if (!existing || getWCMatchPriority(match) > getWCMatchPriority(existing)) {
+      bestByPairAndSlot.set(uniqueKey, match);
+    }
+  }
+
+  const occupancy = new Set<string>();
+  return [...bestByPairAndSlot.values()]
+    .sort((a, b) => getWCMatchPriority(b) - getWCMatchPriority(a))
+    .filter((match) => {
+      const slot = `${match.date ?? ""}|${match.time ?? ""}`;
+      const homeKey = `${slot}|${normalizeWCMatchTeamKey(match.home)}`;
+      const awayKey = `${slot}|${normalizeWCMatchTeamKey(match.away)}`;
+      if (occupancy.has(homeKey) || occupancy.has(awayKey)) return false;
+      occupancy.add(homeKey);
+      occupancy.add(awayKey);
+      return true;
+    })
+    .sort((a, b) => {
+      const ad = parseMatchDate(a.date)?.getTime() ?? 0;
+      const bd = parseMatchDate(b.date)?.getTime() ?? 0;
+      if (ad !== bd) return ad - bd;
+      return String(a.time ?? "").localeCompare(String(b.time ?? ""));
+    });
+}
+
 function buildWCMatchCollections(rawMatches: Record<string, unknown>[]): WCMatchCollections {
-  const allWC = rawMatches.map(mapToWCMatch);
+  const allWC = dedupeWCMatches(rawMatches.map(mapToWCMatch));
   const wcLive = allWC.filter(m => m.isLive);
   const wcUpcoming = allWC.filter(m => !m.isLive);
   return {

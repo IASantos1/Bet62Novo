@@ -10812,6 +10812,52 @@ const WC2026_GROUPS = [
   { group: "L", teams: ["England", "Croatia", "Ghana", "Panama"] },
 ] as const;
 
+function normalizeWC2026TeamKey(name: string): string {
+  return String(name ?? "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, "");
+}
+
+function getWC2026MatchPriority(match: UpcomingMatch): number {
+  let score = 0;
+  if (match.isLive) score += 1000;
+  if (typeof match.homeScore === "number" || typeof match.awayScore === "number") score += 400;
+  if (String(match.id ?? "").startsWith("wc26-")) score += 250;
+  if (match.hasRealOdds) score += 50;
+  if (match.homeTeamId || match.awayTeamId) score += 20;
+  return score;
+}
+
+function dedupeWC2026Matches(matches: UpcomingMatch[]): UpcomingMatch[] {
+  const bestByPairAndSlot = new Map<string, UpcomingMatch>();
+  for (const match of matches) {
+    const slot = `${match.date ?? ""}|${match.time ?? ""}`;
+    const pairKey = [normalizeWC2026TeamKey(match.home), normalizeWC2026TeamKey(match.away)].sort().join("|");
+    const uniqueKey = `${slot}|${pairKey}`;
+    const existing = bestByPairAndSlot.get(uniqueKey);
+    if (!existing || getWC2026MatchPriority(match) > getWC2026MatchPriority(existing)) {
+      bestByPairAndSlot.set(uniqueKey, match);
+    }
+  }
+
+  const occupancy = new Set<string>();
+  const resolved = [...bestByPairAndSlot.values()]
+    .sort((a, b) => getWC2026MatchPriority(b) - getWC2026MatchPriority(a))
+    .filter((match) => {
+      const slot = `${match.date ?? ""}|${match.time ?? ""}`;
+      const homeKey = `${slot}|${normalizeWC2026TeamKey(match.home)}`;
+      const awayKey = `${slot}|${normalizeWC2026TeamKey(match.away)}`;
+      if (occupancy.has(homeKey) || occupancy.has(awayKey)) return false;
+      occupancy.add(homeKey);
+      occupancy.add(awayKey);
+      return true;
+    });
+
+  return resolved;
+}
+
 type WC2026StandingRow = {
   pos: number;
   name: string;
@@ -11251,7 +11297,7 @@ async function _rebuildWC2026(): Promise<void> {
       } satisfies UpcomingMatch);
     }
 
-    const finalResults = [...apiResults, ...staticSupplements];
+    const finalResults = dedupeWC2026Matches([...apiResults, ...staticSupplements]);
     // Sort chronologically
     finalResults.sort((a, b) => {
       try {
