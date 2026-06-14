@@ -472,10 +472,21 @@ function fmtWCMin(minute: number | undefined, status: string | undefined): strin
 
 // ─── Odds button (used in match card quick odds) ──────────────────────────────
 
-function OBtn({ label, odd, active, onClick, theme }: { label: string; odd: number; active: boolean; onClick: () => void; theme: Theme }) {
+function OBtn({ label, odd, active, onClick, theme, prevOdd, isLive }: {
+  label: string;
+  odd: number;
+  active: boolean;
+  onClick: () => void;
+  theme: Theme;
+  prevOdd?: number;
+  isLive?: boolean;
+}) {
   if (!odd || odd <= 1.001) return null;
   const isDark = theme === "dark";
   const isHot = odd <= 1.05;
+  const delta = prevOdd !== undefined ? odd - prevOdd : 0;
+  const oddsUp = !!isLive && delta >= 0.02;
+  const oddsDown = !!isLive && delta <= -0.02;
   if (isHot) {
     return (
       <button
@@ -499,14 +510,18 @@ function OBtn({ label, odd, active, onClick, theme }: { label: string; odd: numb
       }`}
     >
       <span className={`text-[10px] leading-tight text-center w-full truncate px-0.5 mb-1 ${isDark ? "text-zinc-500" : "text-zinc-500"}`}>{label}</span>
-      <span className={`text-sm font-black tabular-nums ${active ? "text-red-400" : isDark ? "text-white" : "text-zinc-900"}`}>{odd.toFixed(2)}</span>
+      <span className={`text-sm font-black tabular-nums flex items-center gap-0.5 ${active ? "text-red-400" : isDark ? "text-white" : "text-zinc-900"}`}>
+        {odd.toFixed(2)}
+        {oddsUp && <span className="text-green-400 text-[9px] font-black leading-none shrink-0">▲</span>}
+        {oddsDown && <span className="text-red-400 text-[9px] font-black leading-none shrink-0">▼</span>}
+      </span>
     </button>
   );
 }
 
 // ─── Simple Match Card ────────────────────────────────────────────────────────
 
-function MatchCard({ match, onOpen, activeSel, onQuickBet, theme, displayMinute, isFlashing }: {
+function MatchCard({ match, onOpen, activeSel, onQuickBet, theme, displayMinute, isFlashing, prevOdds }: {
   match: WCMatch;
   onOpen: () => void;
   activeSel?: string;
@@ -514,6 +529,7 @@ function MatchCard({ match, onOpen, activeSel, onQuickBet, theme, displayMinute,
   theme: Theme;
   displayMinute?: number;
   isFlashing?: boolean;
+  prevOdds?: { home: number; draw: number; away: number };
 }) {
   const { home, away, odds, isLive, homeScore, awayScore, minute, time, date } = match;
   const dispMin = displayMinute ?? minute ?? 0;
@@ -663,9 +679,9 @@ function MatchCard({ match, onOpen, activeSel, onQuickBet, theme, displayMinute,
               </div>
             )}
             <div className={`flex gap-1.5 ${isSuspended ? "opacity-40 pointer-events-none" : ""}`}>
-              <OBtn label={home} odd={odds.home} active={activeSel === `${match.id}:home`} onClick={() => onQuickBet(`${match.id}:home`, home, odds.home)} theme={theme} />
-              {odds.draw > 1.001 && <OBtn label="Empate" odd={odds.draw} active={activeSel === `${match.id}:draw`} onClick={() => onQuickBet(`${match.id}:draw`, "Empate", odds.draw)} theme={theme} />}
-              <OBtn label={away} odd={odds.away} active={activeSel === `${match.id}:away`} onClick={() => onQuickBet(`${match.id}:away`, away, odds.away)} theme={theme} />
+              <OBtn label={home} odd={odds.home} prevOdd={prevOdds?.home} isLive={isLive} active={activeSel === `${match.id}:home`} onClick={() => onQuickBet(`${match.id}:home`, home, odds.home)} theme={theme} />
+              {odds.draw > 1.001 && <OBtn label="Empate" odd={odds.draw} prevOdd={prevOdds?.draw} isLive={isLive} active={activeSel === `${match.id}:draw`} onClick={() => onQuickBet(`${match.id}:draw`, "Empate", odds.draw)} theme={theme} />}
+              <OBtn label={away} odd={odds.away} prevOdd={prevOdds?.away} isLive={isLive} active={activeSel === `${match.id}:away`} onClick={() => onQuickBet(`${match.id}:away`, away, odds.away)} theme={theme} />
             </div>
             {!match.hasRealOdds && (
               <div className="flex items-center justify-center gap-1">
@@ -1664,6 +1680,7 @@ export default function WorldCupPage({ onClose, onBet: onBetProp }: { onClose?: 
   const sseWCRef             = useRef<EventSource | null>(null);
   const sseIdToWCIdRef       = useRef<Map<string, string>>(new Map());
   const liveMatchesRef       = useRef<WCMatch[]>([]);
+  const prevLiveOddsRef      = useRef<Record<string, { home: number; draw: number; away: number }>>({});
   const lastSseSnapshotRef   = useRef<Array<{ id: unknown; home: unknown; away: unknown; sport?: unknown }>>([]);
   const [flashIds, setFlashIds] = useState<Record<string, number>>({});
 
@@ -1727,6 +1744,13 @@ export default function WorldCupPage({ onClose, onBet: onBetProp }: { onClose?: 
       const patch = (m: WCMatch): WCMatch => {
         if (m.id !== wcId) return m;
         const u: WCMatch = { ...m };
+        if (delta.odds && typeof delta.odds === "object") {
+          prevLiveOddsRef.current[wcId] = {
+            home: m.odds?.home ?? 0,
+            draw: m.odds?.draw ?? 0,
+            away: m.odds?.away ?? 0,
+          };
+        }
         if (typeof delta.homeScore === "number" && delta.homeScore !== m.homeScore) { u.homeScore = delta.homeScore; scored = true; }
         if (typeof delta.awayScore === "number" && delta.awayScore !== m.awayScore) { u.awayScore = delta.awayScore; scored = true; }
         if (typeof delta.minute === "number" && Number.isFinite(delta.minute)) {
@@ -1744,9 +1768,7 @@ export default function WorldCupPage({ onClose, onBet: onBetProp }: { onClose?: 
         if (delta._liveExtra !== undefined) u._liveExtra = delta._liveExtra as WCMatch["_liveExtra"];
         if (typeof delta.redCardsHome === "number") u.redCardsHome = delta.redCardsHome;
         if (typeof delta.redCardsAway === "number") u.redCardsAway = delta.redCardsAway;
-        if (delta.odds && typeof delta.odds === "object") {
-          u.odds = { ...(m.odds as object), ...(delta.odds as object) } as WCMatch["odds"];
-        }
+        if (delta.odds && typeof delta.odds === "object") u.odds = { ...(m.odds as object), ...(delta.odds as object) } as WCMatch["odds"];
         return u;
       };
       setLiveMatches(prev => prev.map(patch));
@@ -1862,6 +1884,15 @@ export default function WorldCupPage({ onClose, onBet: onBetProp }: { onClose?: 
         // Update clock refs for interpolation
         const fetchTs = Date.now();
         liveDataFetchedAt.current = fetchTs;
+        const prevLiveOdds: Record<string, { home: number; draw: number; away: number }> = {};
+        for (const m of liveMatchesRef.current) {
+          prevLiveOdds[m.id] = {
+            home: m.odds?.home ?? 0,
+            draw: m.odds?.draw ?? 0,
+            away: m.odds?.away ?? 0,
+          };
+        }
+        prevLiveOddsRef.current = prevLiveOdds;
         for (const m of nextCollections.liveMatches) {
           const next = typeof m.minute === "number" && m.minute > 0 ? m.minute : 0;
           if (next > 0) {
@@ -2092,6 +2123,7 @@ export default function WorldCupPage({ onClose, onBet: onBetProp }: { onClose?: 
                         theme={theme}
                         displayMinute={m.isLive ? getWCDisplayMinute(m) : undefined}
                         isFlashing={!!flashIds[m.id]}
+                        prevOdds={prevLiveOddsRef.current[m.id]}
                       />
                     </motion.div>
                   ))}
