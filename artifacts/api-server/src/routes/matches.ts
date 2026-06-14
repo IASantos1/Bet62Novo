@@ -3344,33 +3344,68 @@ function _pruneFinishedResults(): void {
   }
 }
 
+function extractFinishedTennisSets(
+  hS: SAPIV2ScoreObj | null,
+  aS: SAPIV2ScoreObj | null,
+): Array<[number, number]> {
+  const sets: Array<[number, number]> = [];
+  if (!hS || !aS) return sets;
+  (["period1", "period2", "period3", "period4", "period5"] as Array<keyof SAPIV2ScoreObj>).forEach((p) => {
+    const h = hS[p] as number | undefined;
+    const a = aS[p] as number | undefined;
+    if (h !== undefined && a !== undefined) sets.push([h, a]);
+  });
+  return sets;
+}
+
+function extractFinishedBasketballQuarters(
+  hS: SAPIV2ScoreObj | null,
+  aS: SAPIV2ScoreObj | null,
+): Array<[number, number]> {
+  const quarters: Array<[number, number]> = [];
+  if (!hS || !aS) return quarters;
+  (["period1", "period2", "period3", "period4"] as Array<keyof SAPIV2ScoreObj>).forEach((p) => {
+    const h = hS[p] as number | undefined;
+    const a = aS[p] as number | undefined;
+    if ((h ?? 0) > 0 || (a ?? 0) > 0) quarters.push([h ?? 0, a ?? 0]);
+  });
+  return quarters;
+}
+
+function buildFinishedResultExtrasFromV2Event(
+  sport: SportKey,
+  ev: SAPIV2Event,
+  hS: SAPIV2ScoreObj | null,
+  aS: SAPIV2ScoreObj | null,
+): Record<string, unknown> {
+  const extras: Record<string, unknown> = {
+    homeScore: ev.homeScore,
+    awayScore: ev.awayScore,
+  };
+  if (sport === "tennis") {
+    const sets = extractFinishedTennisSets(hS, aS);
+    if (sets.length > 0) extras["tennis"] = { sets };
+  } else if (sport === "basketball") {
+    const quarters = extractFinishedBasketballQuarters(hS, aS);
+    if (quarters.length > 0) extras["basketball"] = { quarters };
+  }
+  return extras;
+}
+
+function finishedResultHasSettlementExtras(sport: SportKey, extras: unknown): boolean {
+  if (sport === "tennis") {
+    const tennis = (extras as Record<string, unknown> | undefined)?.["tennis"] as Record<string, unknown> | undefined;
+    return Array.isArray(tennis?.["sets"]);
+  }
+  if (sport === "basketball") {
+    const basketball = (extras as Record<string, unknown> | undefined)?.["basketball"] as Record<string, unknown> | undefined;
+    return Array.isArray(basketball?.["quarters"]);
+  }
+  return true;
+}
+
 export async function ensureFinishedMatchResult(matchId: string): Promise<boolean> {
   if (!matchId) return false;
-  if (finishedMatchResults.has(matchId)) return true;
-
-  try {
-    if (db) {
-      const [row] = await db.select().from(matchResultsTable).where(eq(matchResultsTable.matchId, matchId)).limit(1);
-      if (row && typeof row.home === "number" && typeof row.away === "number") {
-        finishedMatchResults.set(matchId, {
-          home: row.home,
-          away: row.away,
-          htHome: row.htHome ?? undefined,
-          htAway: row.htAway ?? undefined,
-          homeTeam: row.homeTeam ?? "",
-          awayTeam: row.awayTeam ?? "",
-          status: row.status ?? undefined,
-          cornersTotal: row.cornersTotal ?? undefined,
-          cardsTotal: row.cardsTotal ?? undefined,
-          firstGoal: (row.firstGoal as "home" | "away" | "none" | null) ?? undefined,
-          extras: row.extras ?? undefined,
-          finishedAt: row.finishedAt ? row.finishedAt.getTime() : Date.now(),
-        });
-        return true;
-      }
-    }
-  } catch {
-  }
 
   const fetchFootballExtras = async (id: number): Promise<{
     cornersTotal?: number;
@@ -3471,6 +3506,38 @@ export async function ensureFinishedMatchResult(matchId: string): Promise<boolea
 
   const parsed = parse();
   if (!parsed) return false;
+  const cached = finishedMatchResults.get(matchId);
+  let hadResult = false;
+  if (cached) {
+    hadResult = true;
+    if (finishedResultHasSettlementExtras(parsed.sport, cached.extras)) return true;
+  }
+
+  try {
+    if (db) {
+      const [row] = await db.select().from(matchResultsTable).where(eq(matchResultsTable.matchId, matchId)).limit(1);
+      if (row && typeof row.home === "number" && typeof row.away === "number") {
+        const record = {
+          home: row.home,
+          away: row.away,
+          htHome: row.htHome ?? undefined,
+          htAway: row.htAway ?? undefined,
+          homeTeam: row.homeTeam ?? "",
+          awayTeam: row.awayTeam ?? "",
+          status: row.status ?? undefined,
+          cornersTotal: row.cornersTotal ?? undefined,
+          cardsTotal: row.cardsTotal ?? undefined,
+          firstGoal: (row.firstGoal as "home" | "away" | "none" | null) ?? undefined,
+          extras: row.extras ?? undefined,
+          finishedAt: row.finishedAt ? row.finishedAt.getTime() : Date.now(),
+        };
+        finishedMatchResults.set(matchId, record);
+        hadResult = true;
+        if (finishedResultHasSettlementExtras(parsed.sport, record.extras)) return true;
+      }
+    }
+  } catch {
+  }
 
   const now = Date.now();
   const tryEvents = async (events: unknown[]): Promise<boolean> => {
@@ -3538,6 +3605,11 @@ export async function ensureFinishedMatchResult(matchId: string): Promise<boolea
       const penAway = parsed.sport === "football"
         ? Math.max(0, away - baseNoPensAway)
         : null;
+      const baseFinishedExtras = buildFinishedResultExtrasFromV2Event(parsed.sport, ev, hS, aS);
+      const baseBasketballExtras =
+        parsed.sport === "basketball"
+          ? ((baseFinishedExtras["basketball"] as Record<string, unknown> | undefined) ?? {})
+          : undefined;
 
       const fullRecord = {
         home,
@@ -3551,13 +3623,19 @@ export async function ensureFinishedMatchResult(matchId: string): Promise<boolea
         cardsTotal: extras?.cardsTotal,
         firstGoal: extras?.firstGoal,
         extras: {
-          homeScore: ev.homeScore,
-          awayScore: ev.awayScore,
+          ...baseFinishedExtras,
           ...(parsed.sport === "football"
             ? { football: { ftHome, ftAway, etHome, etAway, penHome, penAway } }
             : {}),
-          ...(parsed.sport === "basketball" && (basketballIncidentSummary?.scoringEvents.length ?? 0) > 0
-            ? { basketball: { scoringEvents: basketballIncidentSummary!.scoringEvents } }
+          ...(parsed.sport === "basketball"
+            ? {
+                basketball: {
+                  ...baseBasketballExtras,
+                  ...((basketballIncidentSummary?.scoringEvents.length ?? 0) > 0
+                    ? { scoringEvents: basketballIncidentSummary!.scoringEvents }
+                    : {}),
+                },
+              }
             : {}),
         },
         finishedAt: now,
@@ -6096,6 +6174,12 @@ export async function scanV2AllSportsForFinished(): Promise<void> {
     ];
 
     for (const { prefix, events, isFootball } of bundles) {
+      const sport: SportKey =
+        isFootball ? "football"
+        : prefix.includes("bball-v2") ? "basketball"
+        : prefix.includes("hockey-v2") ? "hockey"
+        : prefix.includes("tennis-v2") ? "tennis"
+        : "baseball";
       for (const ev of events) {
         const st = (ev.status as Record<string, unknown> | null | undefined);
         const stType = typeof st?.["type"] === "string" ? (st["type"] as string).toLowerCase() : "";
@@ -6119,7 +6203,7 @@ export async function scanV2AllSportsForFinished(): Promise<void> {
           htHome, htAway,
           homeTeam: v2TeamName(ev.homeTeam),
           awayTeam: v2TeamName(ev.awayTeam),
-          extras: { homeScore: ev.homeScore, awayScore: ev.awayScore },
+          extras: buildFinishedResultExtrasFromV2Event(sport, ev, hS, aS),
           finishedAt: now,
         };
 
@@ -6140,7 +6224,7 @@ export async function scanV2AllSportsForFinished(): Promise<void> {
             if (db) {
               await db.insert(matchResultsTable).values({
                 matchId: id,
-                sport: isFootball ? "football" : p.startsWith("bball") ? "basketball" : p.startsWith("hockey") ? "hockey" : p.startsWith("tennis") ? "tennis" : "baseball",
+                sport,
                 home: record.home,
                 away: record.away,
                 htHome: record.htHome ?? null,
