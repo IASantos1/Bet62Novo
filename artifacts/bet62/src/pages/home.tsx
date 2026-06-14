@@ -5821,6 +5821,33 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
       f["1periodo:p1-home"] = m.halfTime.home; f["1periodo:p1-draw"] = m.halfTime.draw; f["1periodo:p1-away"] = m.halfTime.away;
       f["quartos:h1-home"] = m.halfTime.home; f["quartos:h1-away"] = m.halfTime.away;
     }
+    if ((m as any).basketballExtra) {
+      const bx = (m as any).basketballExtra as any;
+      (["q1", "q2", "q3", "q4"] as const).forEach((q) => {
+        if (bx[q]) {
+          f[`quartos:${q}-home`] = bx[q].home;
+          f[`quartos:${q}-away`] = bx[q].away;
+        }
+        const tq = bx[`${q}Total`];
+        if (tq && Number.isFinite(tq.line)) {
+          f[`quartos:b-${q}t-o-${tq.line}`] = tq.over;
+          f[`quartos:b-${q}t-u-${tq.line}`] = tq.under;
+        }
+        const sq = bx[`${q}Spread`];
+        if (sq && Number.isFinite(sq.line)) {
+          f[`quartos:b-${q}s-home-${sq.line}`] = sq.home;
+          f[`quartos:b-${q}s-away-${sq.line}`] = sq.away;
+        }
+      });
+      if (bx.anyQuarter) {
+        f["quartos:b-anyq-home"] = bx.anyQuarter.home;
+        f["quartos:b-anyq-away"] = bx.anyQuarter.away;
+      }
+      if (bx.allQuarters) {
+        f["quartos:b-allq-home"] = bx.allQuarters.home;
+        f["quartos:b-allq-away"] = bx.allQuarters.away;
+      }
+    }
     if ((m as any).hockeyExtra) {
       const hx = (m as any).hockeyExtra as any;
       if (hx.period2) {
@@ -7384,12 +7411,38 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
               const labels = ["1º Quarto","2º Quarto","3º Quarto","4º Quarto"];
               // All quarter markets remain visible throughout the match (settled by server once quarter ends)
               return ex?.[q]?.home > 0 ? (
-                <MarketGroup key={q} title={`Vencedor — ${labels[qi]}`}>
-                  <MarketOddsBtn match={match} sel={`${q}-home`} odd={ex[q].home} market="quartos" label={match.home} suspKey="basketballExtra" />
-                  <MarketOddsBtn match={match} sel={`${q}-away`} odd={ex[q].away} market="quartos" label={match.away} suspKey="basketballExtra" />
-                </MarketGroup>
+                <div key={q}>
+                  <MarketGroup title={`Vencedor — ${labels[qi]}`}>
+                    <MarketOddsBtn match={match} sel={`${q}-home`} odd={ex[q].home} market="quartos" label={match.home} suspKey="basketballExtra" />
+                    <MarketOddsBtn match={match} sel={`${q}-away`} odd={ex[q].away} market="quartos" label={match.away} suspKey="basketballExtra" />
+                  </MarketGroup>
+                  {ex?.[`${q}Total`]?.over > 0 && (
+                    <MarketGroup title={`Total — ${labels[qi]} O/U ${ex[`${q}Total`].line}`}>
+                      <MarketOddsBtn match={match} sel={`b-${q}t-o-${ex[`${q}Total`].line}`} odd={ex[`${q}Total`].over} market="quartos" label={`Mais de ${ex[`${q}Total`].line}`} suspKey="basketballExtra" />
+                      <MarketOddsBtn match={match} sel={`b-${q}t-u-${ex[`${q}Total`].line}`} odd={ex[`${q}Total`].under} market="quartos" label={`Menos de ${ex[`${q}Total`].line}`} suspKey="basketballExtra" />
+                    </MarketGroup>
+                  )}
+                  {ex?.[`${q}Spread`]?.home > 0 && (
+                    <MarketGroup title={`Spread — ${labels[qi]} ${ex[`${q}Spread`].line > 0 ? `−${ex[`${q}Spread`].line}` : `+${Math.abs(ex[`${q}Spread`].line)}`}`}>
+                      <MarketOddsBtn match={match} sel={`b-${q}s-home-${ex[`${q}Spread`].line}`} odd={ex[`${q}Spread`].home} market="quartos" label={`${match.home} cobre`} suspKey="basketballExtra" />
+                      <MarketOddsBtn match={match} sel={`b-${q}s-away-${ex[`${q}Spread`].line}`} odd={ex[`${q}Spread`].away} market="quartos" label={`${match.away} cobre`} suspKey="basketballExtra" />
+                    </MarketGroup>
+                  )}
+                </div>
               ) : null;
             })}
+            {(m as any).basketballExtra?.anyQuarter?.home > 0 && (
+              <MarketGroup title="Vence Qualquer Quarto">
+                <MarketOddsBtn match={match} sel="b-anyq-home" odd={(m as any).basketballExtra.anyQuarter.home} market="quartos" label={match.home} suspKey="basketballExtra" />
+                <MarketOddsBtn match={match} sel="b-anyq-away" odd={(m as any).basketballExtra.anyQuarter.away} market="quartos" label={match.away} suspKey="basketballExtra" />
+              </MarketGroup>
+            )}
+            {(m as any).basketballExtra?.allQuarters?.home > 0 && (
+              <MarketGroup title="Vence Todos os Quartos">
+                <MarketOddsBtn match={match} sel="b-allq-home" odd={(m as any).basketballExtra.allQuarters.home} market="quartos" label={match.home} suspKey="basketballExtra" />
+                <MarketOddsBtn match={match} sel="b-allq-away" odd={(m as any).basketballExtra.allQuarters.away} market="quartos" label={match.away} suspKey="basketballExtra" />
+              </MarketGroup>
+            )}
           </div>
         )}
 

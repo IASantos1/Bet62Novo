@@ -614,8 +614,18 @@ function currentOddForSelection(sel: SelectionRecord, liveSt: LiveMatchState): n
       q2?: { home?: number; away?: number };
       q3?: { home?: number; away?: number };
       q4?: { home?: number; away?: number };
+      q1Total?: { line?: number; over?: number; under?: number };
+      q2Total?: { line?: number; over?: number; under?: number };
+      q3Total?: { line?: number; over?: number; under?: number };
+      q4Total?: { line?: number; over?: number; under?: number };
+      q1Spread?: { line?: number; home?: number; away?: number };
+      q2Spread?: { line?: number; home?: number; away?: number };
+      q3Spread?: { line?: number; home?: number; away?: number };
+      q4Spread?: { line?: number; home?: number; away?: number };
       teamTotalHome?: { line?: number; over?: number; under?: number };
       teamTotalAway?: { line?: number; over?: number; under?: number };
+      anyQuarter?: { home?: number; away?: number };
+      allQuarters?: { home?: number; away?: number };
       totalsRange?: Array<{ line?: number; over?: number; under?: number }>;
     } | undefined;
 
@@ -675,6 +685,35 @@ function currentOddForSelection(sel: SelectionRecord, liveSt: LiveMatchState): n
       const out = bx?.[qKey]?.[side];
       return Number.isFinite(out) ? (out as number) : null;
     }
+
+    const qTotal = s.match(/^b-q([1234])t-([ou])-(\d+(?:\.\d+)?)$/);
+    if (qTotal) {
+      const qKey = `q${qTotal[1]}Total` as "q1Total" | "q2Total" | "q3Total" | "q4Total";
+      const dir = qTotal[2]!;
+      const line = Number(qTotal[3]!);
+      if (!Number.isFinite(line)) return null;
+      const obj = bx?.[qKey];
+      if (!obj || !Number.isFinite(obj.line) || Math.abs((obj.line as number) - line) > 1e-9) return null;
+      const out = dir === "o" ? obj.over : obj.under;
+      return Number.isFinite(out) ? (out as number) : null;
+    }
+
+    const qSpread = s.match(/^b-q([1234])s-(home|away)-(\d+(?:\.\d+)?)$/);
+    if (qSpread) {
+      const qKey = `q${qSpread[1]}Spread` as "q1Spread" | "q2Spread" | "q3Spread" | "q4Spread";
+      const side = qSpread[2]!;
+      const line = Number(qSpread[3]!);
+      if (!Number.isFinite(line)) return null;
+      const obj = bx?.[qKey];
+      if (!obj || !Number.isFinite(obj.line) || Math.abs((obj.line as number) - line) > 1e-9) return null;
+      const out = side === "home" ? obj.home : obj.away;
+      return Number.isFinite(out) ? (out as number) : null;
+    }
+
+    if (s === "b-anyq-home") return Number.isFinite(bx?.anyQuarter?.home) ? bx!.anyQuarter!.home! : null;
+    if (s === "b-anyq-away") return Number.isFinite(bx?.anyQuarter?.away) ? bx!.anyQuarter!.away! : null;
+    if (s === "b-allq-home") return Number.isFinite(bx?.allQuarters?.home) ? bx!.allQuarters!.home! : null;
+    if (s === "b-allq-away") return Number.isFinite(bx?.allQuarters?.away) ? bx!.allQuarters!.away! : null;
 
     if (s === "h1-home") return Number.isFinite(mk.halfTime?.home) ? mk.halfTime!.home! : null;
     if (s === "h1-away") return Number.isFinite(mk.halfTime?.away) ? mk.halfTime!.away! : null;

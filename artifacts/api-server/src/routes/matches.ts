@@ -59,8 +59,19 @@ type AdvancedMarkets = {
     q2: { home: number; away: number };
     q3: { home: number; away: number };
     q4: { home: number; away: number };
+    q1Total?: { line: number; over: number; under: number };
+    q2Total?: { line: number; over: number; under: number };
+    q3Total?: { line: number; over: number; under: number };
+    q4Total?: { line: number; over: number; under: number };
+    q1Spread?: { line: number; home: number; away: number };
+    q2Spread?: { line: number; home: number; away: number };
+    q3Spread?: { line: number; home: number; away: number };
+    q4Spread?: { line: number; home: number; away: number };
     teamTotalHome: { line: number; over: number; under: number };
     teamTotalAway: { line: number; over: number; under: number };
+    anyQuarter?: { home: number; away: number };
+    allQuarters?: { home: number; away: number };
+    totalsRange?: Array<{ line: number; over: number; under: number }>;
   };
   // Tennis extended markets
   tennisExtra?: {
@@ -1960,6 +1971,38 @@ function makeBasketballMarketsFromTeams(home: string, away: string): AdvancedMar
   const [q2H, q2A] = probsToDecimalOdds([mc(0.5 + (pHomeML - 0.5) * 0.50, 0.25, 0.75), mc(0.5 - (pHomeML - 0.5) * 0.50, 0.25, 0.75)], 1.07);
   const [q3H, q3A] = probsToDecimalOdds([mc(0.5 + (pHomeML - 0.5) * 0.48, 0.25, 0.75), mc(0.5 - (pHomeML - 0.5) * 0.48, 0.25, 0.75)], 1.07);
   const [q4H, q4A] = probsToDecimalOdds([mc(0.5 + (pHomeML - 0.5) * 0.52, 0.25, 0.75), mc(0.5 - (pHomeML - 0.5) * 0.52, 0.25, 0.75)], 1.07);
+  const qHomeWinPs = [
+    mc(0.5 + (pHomeML - 0.5) * 0.55, 0.25, 0.75),
+    mc(0.5 + (pHomeML - 0.5) * 0.50, 0.25, 0.75),
+    mc(0.5 + (pHomeML - 0.5) * 0.48, 0.25, 0.75),
+    mc(0.5 + (pHomeML - 0.5) * 0.52, 0.25, 0.75),
+  ];
+
+  const quarterMean = mean / 4;
+  const quarterSd = mc(sd * 0.46, 5, 11);
+  const quarterTotalLine = Math.floor(quarterMean) + 0.5;
+  const quarterTotalLines = [quarterTotalLine, quarterTotalLine, quarterTotalLine, quarterTotalLine].map((line, idx) => {
+    const adjMean = quarterMean + (idx - 1.5) * 0.4;
+    const [over, under] = probsToDecimalOdds([
+      mc(1 - normalCdf((line - adjMean) / quarterSd), 0.05, 0.95),
+      mc(normalCdf((line - adjMean) / quarterSd), 0.05, 0.95),
+    ], 1.06);
+    return { line, over: over!, under: under! };
+  });
+
+  const quarterSpreadBase = Math.max(0.5, Math.round((Math.abs(marginMean) / 4) * 2) / 2);
+  const quarterSpreadLines = [quarterSpreadBase, quarterSpreadBase, quarterSpreadBase, quarterSpreadBase].map((line, idx) => {
+    const pHomeQuarter = qHomeWinPs[idx] ?? 0.5;
+    const [homeCover, awayCover] = probsToDecimalOdds([pHomeQuarter, 1 - pHomeQuarter], 1.06);
+    return { line, home: homeCover!, away: awayCover! };
+  });
+
+  const pHomeAnyQuarter = mc(1 - qHomeWinPs.reduce((acc, p) => acc * (1 - p), 1), 0.08, 0.98);
+  const pAwayAnyQuarter = mc(1 - qHomeWinPs.reduce((acc, p) => acc * p, 1), 0.08, 0.98);
+  const [anyQuarterHome, anyQuarterAway] = probsToDecimalOdds([pHomeAnyQuarter, pAwayAnyQuarter], 1.07);
+  const pHomeAllQuarters = mc(qHomeWinPs.reduce((acc, p) => acc * p, 1), 0.01, 0.75);
+  const pAwayAllQuarters = mc(qHomeWinPs.reduce((acc, p) => acc * (1 - p), 1), 0.01, 0.75);
+  const [allQuarterHome, allQuarterAway] = probsToDecimalOdds([pHomeAllQuarters, pAwayAllQuarters], 1.08);
 
   // Multiple game-total O/U lines: main line ±15 at 2.5-pt increments (13 lines)
   const totalsRange: { line: number; over: number; under: number }[] = [];
@@ -1992,8 +2035,18 @@ function makeBasketballMarketsFromTeams(home: string, away: string): AdvancedMar
       q2: { home: q2H!, away: q2A! },
       q3: { home: q3H!, away: q3A! },
       q4: { home: q4H!, away: q4A! },
+      q1Total: quarterTotalLines[0]!,
+      q2Total: quarterTotalLines[1]!,
+      q3Total: quarterTotalLines[2]!,
+      q4Total: quarterTotalLines[3]!,
+      q1Spread: quarterSpreadLines[0]!,
+      q2Spread: quarterSpreadLines[1]!,
+      q3Spread: quarterSpreadLines[2]!,
+      q4Spread: quarterSpreadLines[3]!,
       teamTotalHome: { line: teamTotalLine, over: oHT!, under: uHT! },
       teamTotalAway: { line: awayTotalLine, over: oAT!, under: uAT! },
+      anyQuarter: { home: anyQuarterHome!, away: anyQuarterAway! },
+      allQuarters: { home: allQuarterHome!, away: allQuarterAway! },
       totalsRange,
     },
     _extraUsed: { oTotal1H, uTotal1H, oAT, uAT },

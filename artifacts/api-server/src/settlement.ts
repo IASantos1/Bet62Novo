@@ -442,6 +442,49 @@ export function scoreOutcomeForSel(
       if (h1H === h1A) voided = true;
       else winning = s === "h1-home" ? h1H > h1A : h1A > h1H;
     }
+
+    const qTotal = s.match(/^b-q([1234])t-([ou])-(\d+(?:\.\d+)?)$/);
+    if (winning === null && qTotal) {
+      const qNum = Number(qTotal[1]!);
+      const dir = qTotal[2]!;
+      const line = parseLine(qTotal[3]!);
+      if (line === null) return null;
+      const qH = qNum === 1 ? q1H : qNum === 2 ? q2H : qNum === 3 ? q3H : q4H;
+      const qA = qNum === 1 ? q1A : qNum === 2 ? q2A : qNum === 3 ? q3A : q4A;
+      if (qH === null || qA === null) return null;
+      const totalQ = qH + qA;
+      if (totalQ === line) voided = true;
+      else winning = dir === "o" ? totalQ > line : totalQ < line;
+    }
+
+    const qSpread = s.match(/^b-q([1234])s-(home|away)-(\d+(?:\.\d+)?)$/);
+    if (winning === null && qSpread) {
+      const qNum = Number(qSpread[1]!);
+      const side = qSpread[2]!;
+      const line = parseLine(qSpread[3]!);
+      if (line === null) return null;
+      const qH = qNum === 1 ? q1H : qNum === 2 ? q2H : qNum === 3 ? q3H : q4H;
+      const qA = qNum === 1 ? q1A : qNum === 2 ? q2A : qNum === 3 ? q3A : q4A;
+      if (qH === null || qA === null) return null;
+      const diff = qH - qA;
+      const adj = diff - line;
+      if (adj === 0) voided = true;
+      else winning = side === "home" ? adj > 0 : adj < 0;
+    }
+
+    if (winning === null && (s === "b-anyq-home" || s === "b-anyq-away")) {
+      const side = s.endsWith("home") ? "home" : "away";
+      const firstFour = quarters.slice(0, 4);
+      if (firstFour.length === 0) return null;
+      winning = firstFour.some(([qh, qa]) => side === "home" ? qh > qa : qa > qh);
+    }
+
+    if (winning === null && (s === "b-allq-home" || s === "b-allq-away")) {
+      const side = s.endsWith("home") ? "home" : "away";
+      const firstFour = quarters.slice(0, 4);
+      if (firstFour.length < 4) return null;
+      winning = firstFour.every(([qh, qa]) => side === "home" ? qh > qa : qa > qh);
+    }
   }
 
   // ── Hockey (periods / period totals) ──────────────────────────────────────
@@ -1042,6 +1085,51 @@ function liveDefinitiveOutcomeForSel(
     return side === "home"
       ? (qScore[0] > qScore[1] ? "won" : "lost")
       : (qScore[1] > qScore[0] ? "won" : "lost");
+  }
+
+  const bQuarterTotal = s.match(/^b-q([1234])t-([ou])-(\d+(?:\.\d+)?)$/);
+  if (bQuarterTotal) {
+    const qNum = Number(bQuarterTotal[1]!);
+    const side = bQuarterTotal[2]!;
+    const line = Number(bQuarterTotal[3]!);
+    if (!Number.isFinite(line)) return null;
+    const qScore = basketballQuarters[qNum - 1] ?? null;
+    if (!qScore) return null;
+    const qTotal = qScore[0] + qScore[1];
+    if (side === "o") return qTotal > line ? "won" : null;
+    if (completedBasketballQuarters >= qNum) return qTotal < line ? "won" : "lost";
+    return null;
+  }
+
+  const bQuarterSpread = s.match(/^b-q([1234])s-(home|away)-(\d+(?:\.\d+)?)$/);
+  if (bQuarterSpread) {
+    const qNum = Number(bQuarterSpread[1]!);
+    if (completedBasketballQuarters < qNum) return null;
+    const side = bQuarterSpread[2]!;
+    const line = Number(bQuarterSpread[3]!);
+    if (!Number.isFinite(line)) return null;
+    const qScore = basketballQuarters[qNum - 1] ?? null;
+    if (!qScore) return null;
+    const diff = qScore[0] - qScore[1];
+    const adj = diff - line;
+    if (adj === 0) return "void";
+    return side === "home" ? (adj > 0 ? "won" : "lost") : (adj < 0 ? "won" : "lost");
+  }
+
+  if (s === "b-anyq-home" || s === "b-anyq-away") {
+    const side = s.endsWith("home") ? "home" : "away";
+    const firstFour = basketballQuarters.slice(0, Math.min(4, completedBasketballQuarters));
+    if (firstFour.some(([qh, qa]) => side === "home" ? qh > qa : qa > qh)) return "won";
+    if (completedBasketballQuarters >= 4) return "lost";
+    return null;
+  }
+
+  if (s === "b-allq-home" || s === "b-allq-away") {
+    const side = s.endsWith("home") ? "home" : "away";
+    const firstFour = basketballQuarters.slice(0, Math.min(4, completedBasketballQuarters));
+    if (firstFour.some(([qh, qa]) => side === "home" ? qh <= qa : qa <= qh)) return "lost";
+    if (completedBasketballQuarters >= 4) return "won";
+    return null;
   }
 
   if (s === "h1-home" || s === "h1-away") {
