@@ -1789,6 +1789,43 @@ function computeTennisFallbackLiveOdds(
   };
 }
 
+function computeTennisPointAdjustedOdds(
+  anchorOdds: { home: number; draw: number; away: number },
+  currentPoints?: [number | string, number | string],
+  serving?: [boolean, boolean],
+): { home: number; draw: number; away: number } {
+  const pointValue = (value: number | string | undefined): number => {
+    const normalized = String(value ?? "").trim().toUpperCase();
+    if (normalized === "AD" || normalized === "A") return 4;
+    if (normalized === "D" || normalized === "40A") return 3;
+    if (normalized === "40") return 3;
+    if (normalized === "30") return 2;
+    if (normalized === "15") return 1;
+    return 0;
+  };
+
+  const hPt = pointValue(currentPoints?.[0]);
+  const aPt = pointValue(currentPoints?.[1]);
+  const ptDiff = hPt - aPt;
+  const servingBonus = serving?.[0] ? 0.6 : serving?.[1] ? -0.6 : 0;
+  const pressure = (hPt >= 3 || aPt >= 3) ? 1.15 : 1;
+  const factor = Math.min(0.12, Math.abs(ptDiff * 0.018 + servingBonus * 0.01) * pressure);
+
+  if (factor <= 0) return anchorOdds;
+  if (ptDiff + servingBonus > 0) {
+    return {
+      home: Math.max(1.01, +(anchorOdds.home * (1 - factor)).toFixed(2)),
+      draw: 0,
+      away: Math.min(50, +(anchorOdds.away * (1 + factor)).toFixed(2)),
+    };
+  }
+  return {
+    home: Math.min(50, +(anchorOdds.home * (1 + factor)).toFixed(2)),
+    draw: 0,
+    away: Math.max(1.01, +(anchorOdds.away * (1 - factor)).toFixed(2)),
+  };
+}
+
 // ─── Tennis Set Exact Score helper ────────────────────────────────────────────
 // Computes exact-score odds for the CURRENT tennis set given the current game
 // score (hg home games won, ag away games won in this set).  Uses a negative-
@@ -5973,7 +6010,7 @@ async function getTennisAllV1(): Promise<V1TennisGame[]> {
 
 // Keep this short enough that tennis live snapshots can pick up new bookmaker odds
 // quickly, while still avoiding an API call on every broadcast tick.
-const TENNIS_LIVE_V1_TTL = 3000;
+const TENNIS_LIVE_V1_TTL = 1000;
 let _tennisLiveV1Cache: { games: V1TennisGame[]; fetchedAt: number } | null = null;
 let _tennisLiveV1InFlight: Promise<V1TennisGame[]> | null = null;
 
@@ -7468,7 +7505,7 @@ function _tennisPairKey(n0: string, n1: string): string {
 // Populated by refreshTennisLiveOdds() (fire-and-forget, called from buildTennisLiveV2).
 const _tennisLiveOddsCache = new Map<number, { home: number; away: number; at: number }>();
 const _tennisLiveOddsInFlight = new Map<number, Promise<void>>();
-const TENNIS_LIVE_ODDS_TTL = 12_000;
+const TENNIS_LIVE_ODDS_TTL = 2_500;
 
 /** Convert fractional odd string (e.g. "7/2") to decimal (e.g. 4.50). */
 function parseFractionalOdd(frac: string): number {
@@ -7518,7 +7555,7 @@ function refreshTennisLiveOdds(matchIds: number[]): void {
 
 const _tennisServingCache = new Map<number, { serving: [boolean, boolean]; at: number }>();
 const _tennisServingInFlight = new Map<number, Promise<void>>();
-const TENNIS_SERVING_TTL = 5_000;
+const TENNIS_SERVING_TTL = 1_500;
 type TennisLiveDetailSnapshot = {
   status: string;
   statusCode?: number;
@@ -8738,18 +8775,15 @@ function buildTennisLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
 
     // ── Odds: prefer real bookmaker live odds (from cache), else fall back to
     //    a reactive model that responds to sets, current-set games and points. ──
-    const realLiveOdds = ev.id ? _tennisLiveOddsCache.get(ev.id) : undefined;
-    let liveOdds: { home: number; draw: number; away: number };
-    if (realLiveOdds) {
-      // Real bookmaker live odds — use directly (already reflect current score)
-      liveOdds = { home: realLiveOdds.home, draw: 0, away: realLiveOdds.away };
-    } else {
+      const realLiveOdds = ev.id ? _tennisLiveOddsCache.get(ev.id) : undefined;
       const cachedOdds = _tennisPreMatchOdds.get(_tennisPairKey(homeTeam, awayTeam));
       const baseOdds = cachedOdds
         ? { home: cachedOdds.home, draw: 0, away: cachedOdds.away }
         : makeOddsFromTeams(homeTeam, awayTeam);
-      liveOdds = computeTennisFallbackLiveOdds(baseOdds, sets, homeScore, awayScore, currentPoints, serving);
-    }
+      const anchorOdds = realLiveOdds
+        ? { home: realLiveOdds.home, draw: 0, away: realLiveOdds.away }
+        : computeTennisFallbackLiveOdds(baseOdds, sets, homeScore, awayScore, currentPoints, serving);
+      const liveOdds = computeTennisPointAdjustedOdds(anchorOdds, currentPoints, serving);
 
     // ── Market suspension: detect point played and compute duration ─────────────
     // A point is played when currentPoints or sets changes compared to last tick.
@@ -9944,9 +9978,10 @@ async function buildTennisLiveV1(): Promise<LiveMatchState[]> {
       const baseOdds = seededOdds
         ? { home: seededOdds.home, draw: 0, away: seededOdds.away }
         : makeOddsFromTeams(home, away);
-      const liveOdds = realLiveOdds
+      const anchorOdds = realLiveOdds
         ? { home: realLiveOdds.home, draw: 0, away: realLiveOdds.away }
         : computeTennisFallbackLiveOdds(baseOdds, sets, homeScore, awayScore, currentPoints, serving);
+      const liveOdds = computeTennisPointAdjustedOdds(anchorOdds, currentPoints, serving);
       const setNum = homeScore + awayScore + 1;
       const item: LiveMatchState = {
         id: `tennis-v2-${g.id}`,
