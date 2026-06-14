@@ -1213,6 +1213,17 @@ function liveDefinitiveOutcomeForSel(
       : (h1Away > h1Home ? "won" : "lost");
   }
 
+  // Baseball totals: Over X.5 wins immediately on the next run threshold.
+  // Under totals, moneyline, and run line stay for official final settlement.
+  const mlbTotal = s.match(/^mlb-tot-([ou])-(\d+(?:\.\d+)?)$/) || s.match(/^mlb-([ou])(\d+(?:\.\d+)?)$/);
+  if (mlbTotal) {
+    const side = mlbTotal[1]!;
+    const line = Number(mlbTotal[2]!);
+    if (!Number.isFinite(line)) return null;
+    if (side === "o") return total > line ? "won" : null;
+    return null;
+  }
+
   // First goal / no goal — settle as soon as the first scorer is known.
   if (s === "fg-home" || s === "fg-away" || s === "fg-none") {
     const firstGoal = score.status === "Not Started" ? null : (
