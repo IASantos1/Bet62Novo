@@ -11034,8 +11034,15 @@ type WC2026StandingGroup = {
   rows: WC2026StandingRow[];
 };
 
+type WC2026CompetitionSection = {
+  title: string;
+  items: Array<{ name: string; odd: number }>;
+};
+
 const wc2026StandingsCache = new Map<string, { data: { groups: WC2026StandingGroup[]; league: string }; fetchedAt: number }>();
 const WC2026_STANDINGS_TTL = 5 * 60_000;
+const wc2026CompetitionCache = new Map<string, { data: { sections: WC2026CompetitionSection[] }; fetchedAt: number }>();
+const WC2026_COMPETITION_TTL = 5 * 60_000;
 
 function normalizeWCStandingTeamName(name: string): string {
   return String(name ?? "")
@@ -11053,6 +11060,58 @@ function wcStandingRowMatchesTeam(rowName: string, teamName: string): boolean {
   const team = normalizeWCStandingTeamName(teamName);
   if (!row || !team) return false;
   return row === team || row.includes(team) || team.includes(row) || row.includes(team.slice(0, Math.min(team.length, 8)));
+}
+
+function normalizeWCCompetitionText(value: string): string {
+  return String(value ?? "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function parseOutrightOddValue(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value) && value > 1) return Math.round(value * 100) / 100;
+  if (typeof value !== "string") return null;
+  const raw = value.trim();
+  if (!raw) return null;
+  if (/^\d+(\.\d+)?$/.test(raw)) {
+    const parsed = Number(raw);
+    return Number.isFinite(parsed) && parsed > 1 ? Math.round(parsed * 100) / 100 : null;
+  }
+  if (/^\d+\s*\/\s*\d+$/.test(raw)) return fractionalToDecimal(raw);
+  return null;
+}
+
+function looksLikeWorldCupContext(context: string): boolean {
+  const c = normalizeWCCompetitionText(context);
+  return c.includes("world cup") || c.includes("fifa world") || c.includes("copa do mundo") || c.includes("mundial 2026") || c.includes("world cup 2026");
+}
+
+function groupLetterFromMarketTitle(rawTitle: string): string | null {
+  const title = normalizeWCCompetitionText(rawTitle);
+  const m = title.match(/winner of the group\s*([a-l])\b|group winner\s*[-:]?\s*group\s*([a-l])\b|grupo\s*([a-l]).*vencedor|vencedor do grupo\s*[-:]?\s*grupo\s*([a-l])\b/);
+  const letter = m?.[1] ?? m?.[2] ?? m?.[3] ?? m?.[4] ?? null;
+  return letter ? letter.toUpperCase() : null;
+}
+
+function extractOutrightCandidateName(node: Record<string, unknown>): string | null {
+  const keys = ["name", "team", "team_name", "teamName", "competitor", "competitor_name", "participant", "participant_name", "option_name", "outcome_name", "selection_name", "label", "title"];
+  for (const key of keys) {
+    const value = node[key];
+    if (typeof value === "string" && value.trim()) return value.trim();
+  }
+  return null;
+}
+
+function extractOutrightCandidateOdd(node: Record<string, unknown>): number | null {
+  const keys = ["odd", "odds", "price", "value", "decimal_odds", "decimalOdds", "eu_odds", "europe_odds", "fractionalValue"];
+  for (const key of keys) {
+    const parsed = parseOutrightOddValue(node[key]);
+    if (parsed && parsed > 1) return parsed;
+  }
+  return null;
 }
 
 function normalizeWCGroupName(rawName: string): string {
@@ -11074,6 +11133,112 @@ function assignWC2026Group(teamName: string): string | null {
     }
   }
   return null;
+}
+
+function parseWC2026CompetitionSectionsFromPayload(payload: unknown): WC2026CompetitionSection[] {
+  const sectionMap = new Map<string, Map<string, number>>();
+  const titleKeys = ["name", "title", "marketName", "market_name", "betTypeName", "bet_type_name", "typeName", "type_name", "play_name", "playName"];
+
+  const commitCandidate = (rawTitle: string | null, items: Array<{ name: string; odd: number }>, context: string) => {
+    const group = rawTitle ? groupLetterFromMarketTitle(rawTitle) : null;
+    if (!group) return;
+    if (!looksLikeWorldCupContext(`${context} ${rawTitle}`)) return;
+    const groupDef = WC2026_GROUPS.find((entry) => entry.group === group);
+    if (!groupDef) return;
+    const bucket = sectionMap.get(group) ?? new Map<string, number>();
+    for (const item of items) {
+      const team = groupDef.teams.find((candidate) => wcStandingRowMatchesTeam(item.name, candidate));
+      if (!team) continue;
+      const prev = bucket.get(team);
+      if (prev == null || item.odd < prev) bucket.set(team, item.odd);
+    }
+    if (bucket.size > 0) sectionMap.set(group, bucket);
+  };
+
+  const walk = (node: unknown, inheritedTitle: string | null, context: string) => {
+    if (Array.isArray(node)) {
+      for (const item of node) walk(item, inheritedTitle, context);
+      return;
+    }
+    if (!node || typeof node !== "object") return;
+    const obj = node as Record<string, unknown>;
+    const localTitle =
+      titleKeys.map((key) => obj[key]).find((value): value is string => typeof value === "string" && value.trim().length > 0)
+      ?? inheritedTitle;
+    const localContext = `${context} ${titleKeys.map((key) => obj[key]).filter((value): value is string => typeof value === "string").join(" ")}`.trim();
+
+    const directName = extractOutrightCandidateName(obj);
+    const directOdd = extractOutrightCandidateOdd(obj);
+    if (localTitle && directName && directOdd) {
+      commitCandidate(localTitle, [{ name: directName, odd: directOdd }], localContext);
+    }
+
+    for (const value of Object.values(obj)) {
+      if (!Array.isArray(value)) continue;
+      const parsedItems = value
+        .filter((entry): entry is Record<string, unknown> => !!entry && typeof entry === "object")
+        .map((entry) => ({ name: extractOutrightCandidateName(entry), odd: extractOutrightCandidateOdd(entry) }))
+        .filter((entry): entry is { name: string; odd: number } => !!entry.name && !!entry.odd);
+      if (localTitle && parsedItems.length > 0) {
+        commitCandidate(localTitle, parsedItems, localContext);
+      }
+      for (const entry of value) walk(entry, localTitle, localContext);
+    }
+  };
+
+  walk(payload, null, "");
+
+  return WC2026_GROUPS
+    .map((group) => {
+      const bucket = sectionMap.get(group.group);
+      if (!bucket || bucket.size === 0) return null;
+      const items = group.teams
+        .map((team) => {
+          const odd = bucket.get(team);
+          return odd ? { name: team, odd } : null;
+        })
+        .filter((entry): entry is { name: string; odd: number } => !!entry)
+        .sort((a, b) => a.odd - b.odd);
+      if (items.length === 0) return null;
+      return { title: `Vencedor do grupo - Grupo ${group.group}`, items };
+    })
+    .filter((entry): entry is WC2026CompetitionSection => !!entry);
+}
+
+async function getWC2026CompetitionSections(): Promise<{ sections: WC2026CompetitionSection[] }> {
+  const cacheKey = "wc2026-competition";
+  const cached = wc2026CompetitionCache.get(cacheKey);
+  if (cached && Date.now() - cached.fetchedAt < WC2026_COMPETITION_TTL) return cached.data;
+  if (!CONFIG.SPORTSAPI_KEY) return { sections: [] };
+
+  const endpoints = [
+    (() => {
+      const url = new URL("https://api.isportsapi.com/sport/football/odds/outrights");
+      url.searchParams.set("api_key", CONFIG.SPORTSAPI_KEY);
+      return url.toString();
+    })(),
+    `${SAPI_V1_FOOTBALL}/odds/outrights`,
+  ];
+
+  for (const endpoint of endpoints) {
+    try {
+      const resp = await fetch(endpoint, {
+        signal: AbortSignal.timeout(8_000),
+        headers: { ...sapiHeaders(), Accept: "application/json" },
+      });
+      if (!resp.ok) continue;
+      const payload = await resp.json();
+      const sections = parseWC2026CompetitionSectionsFromPayload(payload);
+      if (sections.length > 0) {
+        const result = { sections };
+        wc2026CompetitionCache.set(cacheKey, { data: result, fetchedAt: Date.now() });
+        return result;
+      }
+    } catch {
+      // try next source
+    }
+  }
+  return { sections: [] };
 }
 
 async function getWC2026Standings(): Promise<{ groups: WC2026StandingGroup[]; league: string }> {
@@ -11635,6 +11800,18 @@ router.get("/wc2026-standings", async (_req: Request, res: Response) => {
     res.json(data);
   } catch {
     res.json({ groups: [], league: "FIFA World Cup 2026" });
+  }
+});
+
+router.get("/wc2026-competition", async (_req: Request, res: Response) => {
+  try {
+    const data = await Promise.race([
+      getWC2026CompetitionSections(),
+      new Promise<never>((_, reject) => setTimeout(() => reject(new Error("timeout")), 20_000)),
+    ]);
+    res.json(data);
+  } catch {
+    res.json({ sections: [] });
   }
 });
 

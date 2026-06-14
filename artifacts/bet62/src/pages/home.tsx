@@ -3181,6 +3181,13 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
     if (expandedMatch.markets?.etExtra  && modalTab === "todos")     { setModalTab("prolongamento"); setTimeout(() => scrollTabIntoView("prolongamento", "instant"), 0); }
   }, [!!(expandedMatch as any)?.markets?.etExtra, !!(expandedMatch as any)?.markets?.penExtra]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  useEffect(() => {
+    if ((expandedMatch?.sport ?? "football") !== "tennis") return;
+    if (modalTab !== "placar") return;
+    setModalTab("sets");
+    setTimeout(() => scrollTabIntoView("sets", "instant"), 0);
+  }, [expandedMatch?.id, expandedMatch?.sport, modalTab, scrollTabIntoView]);
+
   // Fetch match stats when stats tab is active
   useEffect(() => {
     if (matchViewTab !== "stats" || !expandedMatch || matchStats) return;
@@ -6155,7 +6162,6 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
             { key: "sets", label: "Sets" },
             { key: "handicap", label: "Handicap" },
             { key: "jogos", label: "Jogos" },
-            { key: "placar", label: "Placar Exato" },
             { key: "especiais", label: "Especiais" },
           ]
         : isHockey
@@ -6627,6 +6633,73 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
           <div>
             {(() => {
               const te = (m as any).tennisExtra as any;
+              const sortSetScoreEntries = (entries: Array<{ score: string; odd: number }>) => {
+                const homeWins = entries
+                  .filter((entry) => {
+                    const [h, a] = entry.score.split("-").map(Number);
+                    return (h ?? 0) > (a ?? 0);
+                  })
+                  .sort((a, b) => {
+                    const [ah, aa] = a.score.split("-").map(Number);
+                    const [bh, ba] = b.score.split("-").map(Number);
+                    return ((bh ?? 0) - (ah ?? 0)) || ((aa ?? 0) - (ba ?? 0));
+                  });
+                const awayWins = entries
+                  .filter((entry) => {
+                    const [h, a] = entry.score.split("-").map(Number);
+                    return (a ?? 0) > (h ?? 0);
+                  })
+                  .sort((a, b) => {
+                    const [ah, aa] = a.score.split("-").map(Number);
+                    const [bh, ba] = b.score.split("-").map(Number);
+                    return ((ba ?? 0) - (aa ?? 0)) || ((ah ?? 0) - (bh ?? 0));
+                  });
+                return { homeWins, awayWins };
+              };
+              const renderExactSetColumns = (
+                title: string,
+                entries: Array<{ score: string; odd: number }>,
+                selPrefix: string,
+                marketKey: string,
+                suspKey?: string,
+              ) => {
+                const { homeWins, awayWins } = sortSetScoreEntries(entries);
+                if (homeWins.length === 0 && awayWins.length === 0) return null;
+                return (
+                  <MarketGroup title={title}>
+                    <div className="grid grid-cols-2 gap-2 w-full col-span-full">
+                      <div className="space-y-2">
+                        <div className="text-[10px] font-black uppercase tracking-[0.18em] text-zinc-500 truncate">{match.home}</div>
+                        {homeWins.map((entry) => (
+                          <MarketOddsBtn
+                            key={`${selPrefix}-${entry.score}`}
+                            match={match}
+                            sel={`${selPrefix}-${entry.score}`}
+                            odd={entry.odd}
+                            market={marketKey}
+                            label={entry.score}
+                            suspKey={suspKey}
+                          />
+                        ))}
+                      </div>
+                      <div className="space-y-2">
+                        <div className="text-[10px] font-black uppercase tracking-[0.18em] text-zinc-500 truncate text-right">{match.away}</div>
+                        {awayWins.map((entry) => (
+                          <MarketOddsBtn
+                            key={`${selPrefix}-${entry.score}`}
+                            match={match}
+                            sel={`${selPrefix}-${entry.score}`}
+                            odd={entry.odd}
+                            market={marketKey}
+                            label={entry.score}
+                            suspKey={suspKey}
+                          />
+                        ))}
+                      </div>
+                    </div>
+                  </MarketGroup>
+                );
+              };
               const cur = (() => {
                 const rawCurrentSet = Number(te?.currentSetNum);
                 if (Number.isFinite(rawCurrentSet) && rawCurrentSet > 0) {
@@ -6645,6 +6718,17 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
               const showSet1 = cur === 1;
               const showSet2 = cur === 2;
               const showSet3 = cur === 3;
+              const activeCorrectScoreKey = cur === 1 ? "score1st" : cur === 2 ? "score2nd" : "score3rd";
+              const activeCorrectScore = Array.isArray(te?.[activeCorrectScoreKey])
+                ? (te[activeCorrectScoreKey] as Array<{ label: string; odds: number }>)
+                    .filter((entry) => entry && typeof entry.label === "string" && Number(entry.odds) > 1.001)
+                    .map((entry) => ({ score: entry.label, odd: Number(entry.odds) }))
+                : [];
+              const liveSetExactScore = te?.setExactScore && typeof te.setExactScore === "object"
+                ? Object.entries(te.setExactScore as Record<string, number>)
+                    .filter(([score, odd]) => typeof score === "string" && Number(odd) > 1.001)
+                    .map(([score, odd]) => ({ score, odd: Number(odd) }))
+                : [];
               return (
                 <>
                   {showSet1 && (te?.firstSet?.home > 0 ? (
@@ -6676,6 +6760,19 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
                       <MarketOddsBtn match={match} sel="usets" odd={m.totalGoals.under25} market="sets" label="Menos de 2.5 sets" suspKey="sets" />
                     </MarketGroup>
                   )}
+                  {((te?.exactSets?.h20 ?? 0) > 0 || (te?.exactSets?.a02 ?? 0) > 0) && (
+                    <MarketGroup title="Resultado Exato em Sets">
+                      {te.exactSets.h20 > 0 && <MarketOddsBtn match={match} sel="es-h20" odd={te.exactSets.h20} market="sets" label={`${match.home} 2-0`} suspKey="exactSets" />}
+                      {te.exactSets.h21 > 0 && <MarketOddsBtn match={match} sel="es-h21" odd={te.exactSets.h21} market="sets" label={`${match.home} 2-1`} suspKey="exactSets" />}
+                      {te.exactSets.a02 > 0 && <MarketOddsBtn match={match} sel="es-a02" odd={te.exactSets.a02} market="sets" label={`${match.away} 2-0`} suspKey="exactSets" />}
+                      {te.exactSets.a12 > 0 && <MarketOddsBtn match={match} sel="es-a12" odd={te.exactSets.a12} market="sets" label={`${match.away} 2-1`} suspKey="exactSets" />}
+                    </MarketGroup>
+                  )}
+                  {liveSetExactScore.length > 0
+                    ? renderExactSetColumns(`${cur}º Set — Resultado Correto`, liveSetExactScore, "ses", "sets", "setExactScore")
+                    : activeCorrectScore.length > 0
+                      ? renderExactSetColumns(`${cur}º Set — Resultado Correto`, activeCorrectScore, `sc${cur}`, "sets", cur === 1 ? "firstSet" : cur === 2 ? "set2" : "set3")
+                      : null}
                 </>
               );
             })()}
@@ -6870,7 +6967,7 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
         )}
 
         {/* ── TÉNIS: RESULTADO CORRETO DO SET ATUAL ───────────────────────────── */}
-        {isTennis && (modalTab === "placar" || modalTab === "todos") && m && (m as any).tennisExtra?.setExactScore && Object.keys((m as any).tennisExtra.setExactScore as Record<string, number>).length > 0 && (() => {
+        {isTennis && false && (modalTab === "placar" || modalTab === "todos") && m && (m as any).tennisExtra?.setExactScore && Object.keys((m as any).tennisExtra.setExactScore as Record<string, number>).length > 0 && (() => {
           const ses = (m as any).tennisExtra.setExactScore as Record<string, number>;
           const setNum = (m as any).tennisExtra.currentSetNum ?? match.minute;
           const homeWins = Object.entries(ses)
@@ -6916,7 +7013,7 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
         })()}
 
         {/* ── TÉNIS: PLACAR EXATO — 1º SET (só quando liquidado) ── */}
-        {isTennis && (modalTab === "placar" || modalTab === "todos") && m && false && (m as any).tennisExtra?.set1ExactScore && (() => {
+        {isTennis && false && (modalTab === "placar" || modalTab === "todos") && m && false && (m as any).tennisExtra?.set1ExactScore && (() => {
           const ses1 = (m as any).tennisExtra.set1ExactScore as Record<string, number>;
           const isSettled1 = Object.values(ses1).some(v => v === 1.01);
           if (!isSettled1) return null; // while set is live it's already shown in "setExactScore" above
@@ -6956,7 +7053,7 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
         })()}
 
         {/* ── TÉNIS: PLACAR EXATO — 2º SET (só quando liquidado) ── */}
-        {isTennis && (modalTab === "placar" || modalTab === "todos") && m && false && (m as any).tennisExtra?.set2ExactScore && (() => {
+        {isTennis && false && (modalTab === "placar" || modalTab === "todos") && m && false && (m as any).tennisExtra?.set2ExactScore && (() => {
           const ses2 = (m as any).tennisExtra.set2ExactScore as Record<string, number>;
           const isSettled2 = Object.values(ses2).some(v => v === 1.01);
           if (!isSettled2) return null;
@@ -7523,7 +7620,7 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
         )}
 
         {/* ── TÉNIS: PLACAR EXATO (SETS) ── */}
-        {isTennis && (modalTab === "placar" || modalTab === "todos") && m && (m as any).tennisExtra && (
+        {isTennis && false && (modalTab === "placar" || modalTab === "todos") && m && (m as any).tennisExtra && (
           <div>
             {/* Exact sets (Set Betting) */}
             {(((m as any).tennisExtra as any).exactSets?.h20 > 0 || ((m as any).tennisExtra as any).exactSets?.a02 > 0) && (
@@ -8231,60 +8328,71 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
 
                     <div className="flex items-center justify-between gap-3 mb-4">
                       {(() => {
-                        const homeExpandedBadge = getTeamBadgeAsset(expandedMatch, "home");
-                        const awayExpandedBadge = getTeamBadgeAsset(expandedMatch, "away");
-                        const isExpandedSelection = isSelectionMatch(expandedMatch);
+                        const isTennisHeader = expandedMatch.sport === "tennis";
+                        const tennisSets = expandedMatch._liveExtra?.sets ?? [];
+                        const currentGames = tennisSets.length > 0 ? tennisSets[tennisSets.length - 1]! : [0, 0];
+                        const currentPts = expandedMatch._liveExtra?.currentPoints;
+                        const gamesHome = isTennisHeader ? (currentGames?.[0] ?? 0) : (expandedMatch.homeScore ?? 0);
+                        const gamesAway = isTennisHeader ? (currentGames?.[1] ?? 0) : (expandedMatch.awayScore ?? 0);
+                        const setsHome = expandedMatch.homeScore ?? 0;
+                        const setsAway = expandedMatch.awayScore ?? 0;
+                        const ptsHome = currentPts?.[0] != null ? String(currentPts[0]) : "0";
+                        const ptsAway = currentPts?.[1] != null ? String(currentPts[1]) : "0";
                         return (
                           <>
-                      <div className="flex-1 flex flex-col items-center gap-2 min-w-0">
-                        <EventTeamBadge
-                          name={teamNamePt(expandedMatch.home)}
-                          badge={homeExpandedBadge.src}
-                          badgeFit={homeExpandedBadge.fit}
-                          badgePadded={homeExpandedBadge.padded}
-                          sport={expandedMatch.sport ?? "football"}
-                          flag={COUNTRY_FLAGS[expandedMatch.country?.toLowerCase() ?? ""] ?? sportEmoji(expandedMatch.sport)}
-                          isSelection={isExpandedSelection}
-                        />
-                        <span className="text-[16px] font-black text-zinc-900 text-center leading-tight px-1">
-                          {teamNamePt(expandedMatch.home)}
-                        </span>
-                      </div>
-
-                      <div className="min-w-[88px] flex flex-col items-center">
-                        <span className="text-[18px] font-black text-zinc-500 tracking-wide">VS</span>
-                        {expandedMatch.isLive ? (
-                          <span className="mt-1 text-[28px] font-black text-zinc-900 tabular-nums">
-                            {expandedMatch.homeScore ?? 0}
-                            <span className="text-zinc-400 mx-1.5">-</span>
-                            {expandedMatch.awayScore ?? 0}
-                          </span>
-                        ) : (
-                          <>
-                            {expandedMatch.time && <span className="mt-1 text-[22px] font-black text-zinc-900">{expandedMatch.time}</span>}
-                            {(expandedMatch.date || expandedMatch.time) && (
-                              <span className="mt-1 text-[12px] font-semibold text-zinc-500">
-                                {expandedMatch.date ? formatMatchDate(expandedMatch.date) : ""}
+                            <div className="flex-1 min-w-0 text-right">
+                              <span className="block text-[16px] font-black text-zinc-900 leading-tight px-1">
+                                {teamNamePt(expandedMatch.home)}
                               </span>
-                            )}
-                          </>
-                        )}
-                      </div>
+                            </div>
 
-                      <div className="flex-1 flex flex-col items-center gap-2 min-w-0">
-                        <EventTeamBadge
-                          name={teamNamePt(expandedMatch.away)}
-                          badge={awayExpandedBadge.src}
-                          badgeFit={awayExpandedBadge.fit}
-                          badgePadded={awayExpandedBadge.padded}
-                          sport={expandedMatch.sport ?? "football"}
-                          flag={COUNTRY_FLAGS[expandedMatch.country?.toLowerCase() ?? ""] ?? sportEmoji(expandedMatch.sport)}
-                          isSelection={isExpandedSelection}
-                        />
-                        <span className="text-[16px] font-black text-zinc-900 text-center leading-tight px-1">
-                          {teamNamePt(expandedMatch.away)}
-                        </span>
-                      </div>
+                            <div className="min-w-[108px] flex flex-col items-center">
+                              <span className="text-[28px] font-black text-zinc-900 tabular-nums">
+                                {gamesHome}
+                                <span className="text-zinc-400 mx-1.5">-</span>
+                                {gamesAway}
+                              </span>
+                              {isTennisHeader ? (
+                                <div className="mt-1.5 flex flex-col items-center gap-1">
+                                  <div className="flex items-center gap-2 text-[11px] font-black">
+                                    <span className="text-zinc-500 uppercase tracking-wide">Sets</span>
+                                    <span className="text-zinc-900 tabular-nums">{setsHome}-{setsAway}</span>
+                                  </div>
+                                  <div className="flex items-center gap-2 text-[11px] font-black">
+                                    <span className="text-zinc-500 uppercase tracking-wide">PTS</span>
+                                    <span className="text-zinc-900 tabular-nums">{ptsHome}-{ptsAway}</span>
+                                  </div>
+                                </div>
+                              ) : expandedMatch.isLive ? (
+                                <span className="mt-1 text-[12px] font-semibold text-zinc-500">
+                                  {(() => {
+                                    const m = getDisplayMinute(expandedMatch);
+                                    const isFootball = !expandedMatch.sport || expandedMatch.sport === "football";
+                                    const tag = isFootball ? getFootballPhaseTag(expandedMatch, m) : null;
+                                    if (m <= 0) return "AO VIVO";
+                                    if (tag === "HT") return "HT";
+                                    if (tag && isFootball) return `${tag} · ${getFootballClockLabel(expandedMatch, m)}`;
+                                    if (tag) return `${m}' · ${tag}`;
+                                    return `${m}'`;
+                                  })()}
+                                </span>
+                              ) : (
+                                <>
+                                  {expandedMatch.time && <span className="mt-1 text-[22px] font-black text-zinc-900">{expandedMatch.time}</span>}
+                                  {(expandedMatch.date || expandedMatch.time) && (
+                                    <span className="mt-1 text-[12px] font-semibold text-zinc-500">
+                                      {expandedMatch.date ? formatMatchDate(expandedMatch.date) : ""}
+                                    </span>
+                                  )}
+                                </>
+                              )}
+                            </div>
+
+                            <div className="flex-1 min-w-0 text-left">
+                              <span className="block text-[16px] font-black text-zinc-900 leading-tight px-1">
+                                {teamNamePt(expandedMatch.away)}
+                              </span>
+                            </div>
                           </>
                         );
                       })()}

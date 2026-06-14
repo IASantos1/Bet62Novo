@@ -1649,7 +1649,7 @@ export default function WorldCupPage({ onClose, onBet: onBetProp }: { onClose?: 
   const [openMatch, setOpenMatch]           = useState<WCMatch | null>(null);
   const [activeKeys, setActiveKeys]         = useState<Record<string, string>>({});
   const [officialGroups, setOfficialGroups] = useState<WCStandingGroup[]>([]);
-  const [competitionSections]               = useState<WCCompetitionSection[]>([]);
+  const [competitionSections, setCompetitionSections] = useState<WCCompetitionSection[]>([]);
   const [theme, setTheme]                   = useState<Theme>(() => getResolvedTheme(null));
   const intervalRef         = useRef<ReturnType<typeof setInterval> | null>(null);
   // ── Live clock interpolation (1-second tick, same pattern as home.tsx) ──────
@@ -1685,6 +1685,28 @@ export default function WorldCupPage({ onClose, onBet: onBetProp }: { onClose?: 
       }
     };
     loadStandings();
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const loadCompetition = async () => {
+      try {
+        const data = await fetchWithTimeout("/api/matches/wc2026-competition", {}, 12_000)
+          .then(r => r.ok ? r.json() : { sections: [] })
+          .catch(() => ({ sections: [] })) as { sections?: WCCompetitionSection[] };
+        if (!cancelled && Array.isArray(data.sections)) {
+          setCompetitionSections(data.sections);
+        }
+      } finally {
+        if (!cancelled) timer = setTimeout(loadCompetition, 5 * 60_000);
+      }
+    };
+    loadCompetition();
     return () => {
       cancelled = true;
       if (timer) clearTimeout(timer);
@@ -1955,19 +1977,36 @@ export default function WorldCupPage({ onClose, onBet: onBetProp }: { onClose?: 
               {competitionSections.length === 0 ? (
                 <div className="text-center py-16">
                   <div className="text-5xl mb-3">🏆</div>
-                  <div className={`font-bold text-sm ${isDark ? "text-zinc-400" : "text-zinc-600"}`}>Mercados de competição a preparar</div>
-                  <div className={`text-xs mt-1.5 ${isDark ? "text-zinc-600" : "text-zinc-400"}`}>Vou encaixar aqui os mercados da API assim que fechar os blocos que vais enviar nas próximas fotos.</div>
+                  <div className={`font-bold text-sm ${isDark ? "text-zinc-400" : "text-zinc-600"}`}>Mercados de competição indisponíveis</div>
+                  <div className={`text-xs mt-1.5 ${isDark ? "text-zinc-600" : "text-zinc-400"}`}>A aba carrega automaticamente os dados reais da API quando o provider responder.</div>
                 </div>
               ) : (
                 <div className="space-y-3">
                   {competitionSections.map((section) => (
                     <div key={section.title} className={`rounded-2xl border p-4 ${isDark ? "border-zinc-800 bg-zinc-900/80" : "border-zinc-200 bg-white"}`}>
-                      <div className={`text-sm font-black mb-3 ${isDark ? "text-white" : "text-zinc-900"}`}>{section.title}</div>
+                      <div className="flex items-center justify-between gap-3 mb-3">
+                        <div className={`text-sm font-black ${isDark ? "text-white" : "text-zinc-900"}`}>{section.title}</div>
+                        <div className={`text-[10px] font-black uppercase tracking-[0.18em] ${isDark ? "text-zinc-600" : "text-zinc-400"}`}>Grupo</div>
+                      </div>
                       <div className="space-y-2">
                         {section.items.map((item) => (
-                          <div key={`${section.title}:${item.name}`} className="flex items-center justify-between gap-3">
-                            <span className={`text-sm ${isDark ? "text-zinc-300" : "text-zinc-700"}`}>{item.name}</span>
-                            <span className={`text-sm font-black tabular-nums ${isDark ? "text-white" : "text-zinc-900"}`}>{item.odd.toFixed(2)}</span>
+                          <div
+                            key={`${section.title}:${item.name}`}
+                            className={`flex items-center justify-between gap-3 rounded-xl border px-3 py-2.5 ${
+                              isDark ? "border-zinc-800 bg-zinc-950/70" : "border-zinc-200 bg-zinc-50"
+                            }`}
+                          >
+                            <div className="flex items-center gap-2 min-w-0">
+                              <FlagImg name={PT_DISPLAY_NAMES[item.name] ?? item.name} size={28} />
+                              <span className={`text-sm font-semibold truncate ${isDark ? "text-zinc-200" : "text-zinc-800"}`}>
+                                {PT_DISPLAY_NAMES[item.name] ?? item.name}
+                              </span>
+                            </div>
+                            <div className={`min-w-[72px] rounded-xl px-3 py-2 text-center text-sm font-black tabular-nums ${
+                              isDark ? "bg-zinc-900 text-white border border-zinc-800" : "bg-white text-zinc-900 border border-zinc-200"
+                            }`}>
+                              {item.odd.toFixed(2)}
+                            </div>
                           </div>
                         ))}
                       </div>
