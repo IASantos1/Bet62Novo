@@ -6700,6 +6700,49 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
                   </MarketGroup>
                 );
               };
+              const renderSetResultColumns = (
+                title: string,
+                homeEntries: Array<{ sel: string; label: string; odd: number }>,
+                awayEntries: Array<{ sel: string; label: string; odd: number }>,
+                marketKey: string,
+                suspKey?: string,
+              ) => {
+                if (homeEntries.length === 0 && awayEntries.length === 0) return null;
+                return (
+                  <MarketGroup title={title}>
+                    <div className="grid grid-cols-2 gap-2 w-full col-span-full">
+                      <div className="space-y-2">
+                        <div className="text-[10px] font-black uppercase tracking-[0.18em] text-zinc-500 truncate">{match.home}</div>
+                        {homeEntries.map((entry) => (
+                          <MarketOddsBtn
+                            key={entry.sel}
+                            match={match}
+                            sel={entry.sel}
+                            odd={entry.odd}
+                            market={marketKey}
+                            label={entry.label}
+                            suspKey={suspKey}
+                          />
+                        ))}
+                      </div>
+                      <div className="space-y-2">
+                        <div className="text-[10px] font-black uppercase tracking-[0.18em] text-zinc-500 truncate text-right">{match.away}</div>
+                        {awayEntries.map((entry) => (
+                          <MarketOddsBtn
+                            key={entry.sel}
+                            match={match}
+                            sel={entry.sel}
+                            odd={entry.odd}
+                            market={marketKey}
+                            label={entry.label}
+                            suspKey={suspKey}
+                          />
+                        ))}
+                      </div>
+                    </div>
+                  </MarketGroup>
+                );
+              };
               const cur = (() => {
                 const rawCurrentSet = Number(te?.currentSetNum);
                 if (Number.isFinite(rawCurrentSet) && rawCurrentSet > 0) {
@@ -6760,13 +6803,18 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
                       <MarketOddsBtn match={match} sel="usets" odd={m.totalGoals.under25} market="sets" label="Menos de 2.5 sets" suspKey="sets" />
                     </MarketGroup>
                   )}
-                  {((te?.exactSets?.h20 ?? 0) > 0 || (te?.exactSets?.a02 ?? 0) > 0) && (
-                    <MarketGroup title="Resultado Exato em Sets">
-                      {te.exactSets.h20 > 0 && <MarketOddsBtn match={match} sel="es-h20" odd={te.exactSets.h20} market="sets" label={`${match.home} 2-0`} suspKey="exactSets" />}
-                      {te.exactSets.h21 > 0 && <MarketOddsBtn match={match} sel="es-h21" odd={te.exactSets.h21} market="sets" label={`${match.home} 2-1`} suspKey="exactSets" />}
-                      {te.exactSets.a02 > 0 && <MarketOddsBtn match={match} sel="es-a02" odd={te.exactSets.a02} market="sets" label={`${match.away} 2-0`} suspKey="exactSets" />}
-                      {te.exactSets.a12 > 0 && <MarketOddsBtn match={match} sel="es-a12" odd={te.exactSets.a12} market="sets" label={`${match.away} 2-1`} suspKey="exactSets" />}
-                    </MarketGroup>
+                  {renderSetResultColumns(
+                    "Resultado Exato em Sets",
+                    [
+                      ...(te?.exactSets?.h20 > 0 ? [{ sel: "es-h20", label: "2-0", odd: te.exactSets.h20 }] : []),
+                      ...(te?.exactSets?.h21 > 0 ? [{ sel: "es-h21", label: "2-1", odd: te.exactSets.h21 }] : []),
+                    ],
+                    [
+                      ...(te?.exactSets?.a02 > 0 ? [{ sel: "es-a02", label: "0-2", odd: te.exactSets.a02 }] : []),
+                      ...(te?.exactSets?.a12 > 0 ? [{ sel: "es-a12", label: "1-2", odd: te.exactSets.a12 }] : []),
+                    ],
+                    "sets",
+                    "exactSets",
                   )}
                   {liveSetExactScore.length > 0
                     ? renderExactSetColumns(`${cur}º Set — Resultado Correto`, liveSetExactScore, "ses", "sets", "setExactScore")
