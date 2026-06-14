@@ -1226,15 +1226,14 @@ function liveDefinitiveOutcomeForSel(
 
   // First goal / no goal — settle as soon as the first scorer is known.
   if (s === "fg-home" || s === "fg-away" || s === "fg-none") {
-    const firstGoal = score.status === "Not Started" ? null : (
-      home > 0 || away > 0
-        ? (home > 0 && away > 0
-            ? null
-            : home > 0
-              ? "home"
-              : "away")
-        : null
-    );
+    const firstGoal =
+      score.status === "Not Started"
+        ? null
+        : home > 0 && away === 0
+          ? "home"
+          : away > 0 && home === 0
+            ? "away"
+            : null;
     if (firstGoal === "home" || firstGoal === "away") {
       return s === `fg-${firstGoal}` ? "won" : "lost";
     }
