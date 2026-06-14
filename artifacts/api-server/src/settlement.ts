@@ -133,6 +133,43 @@ function tennisTotalGames(sets: Array<[number, number]>): number {
   return sets.reduce((acc, [homeGames, awayGames]) => acc + homeGames + awayGames, 0);
 }
 
+function getBasketballQuartersFromExtras(extras: unknown): Array<[number, number]> {
+  if (!extras || typeof extras !== "object") return [];
+  const ex = extras as Record<string, unknown>;
+  const nested = ex["basketball"];
+  if (nested && typeof nested === "object" && Array.isArray((nested as Record<string, unknown>)["quarters"])) {
+    return ((nested as Record<string, unknown>)["quarters"] as unknown[])
+      .map((entry) => Array.isArray(entry) && entry.length >= 2 ? [Number(entry[0]), Number(entry[1])] as [number, number] : null)
+      .filter((entry): entry is [number, number] => !!entry && Number.isFinite(entry[0]) && Number.isFinite(entry[1]));
+  }
+
+  const homePeriods = parseTennisPeriods(ex["homeScore"]);
+  const awayPeriods = parseTennisPeriods(ex["awayScore"]);
+  const len = Math.min(4, Math.max(homePeriods.length, awayPeriods.length));
+  const quarters: Array<[number, number]> = [];
+  for (let i = 0; i < len; i++) {
+    const h = homePeriods[i];
+    const a = awayPeriods[i];
+    if (!Number.isFinite(h) || !Number.isFinite(a)) continue;
+    quarters.push([h!, a!]);
+  }
+  return quarters;
+}
+
+function basketballCompletedQuarterCount(status: string | undefined, quarters: Array<[number, number]>): number {
+  const normalized = String(status ?? "").trim().toUpperCase();
+  if (normalized === "HT") return 2;
+  if (normalized === "Q1") return 0;
+  if (normalized === "Q2") return 1;
+  if (normalized === "Q3") return 2;
+  if (normalized === "Q4") return 3;
+  if (normalized === "OT") return 4;
+  if (normalized === "FINISHED" || normalized === "ENDED" || normalized === "FINAL" || normalized === "FT") {
+    return Math.max(4, quarters.length);
+  }
+  return Math.max(0, quarters.length - 1);
+}
+
 /**
  * Evaluate a single bet selection against a known final score + optional HT score.
  * Returns "won" | "lost" | null  (null = data not available yet, or void/push bet).
@@ -329,18 +366,11 @@ export function scoreOutcomeForSel(
     s.startsWith("q") && /^q[1234]-(home|away)$/.test(s) ||
     (s === "h1-home" || s === "h1-away")
   ) {
-    const hs = ex["homeScore"] as Record<string, unknown> | undefined;
-    const as = ex["awayScore"] as Record<string, unknown> | undefined;
-
-    const period = (obj: Record<string, unknown> | undefined, n: number): number | null => {
-      const v = obj?.[`period${n}`];
-      return typeof v === "number" && Number.isFinite(v) ? (v as number) : null;
-    };
-
-    const q1H = period(hs, 1); const q1A = period(as, 1);
-    const q2H = period(hs, 2); const q2A = period(as, 2);
-    const q3H = period(hs, 3); const q3A = period(as, 3);
-    const q4H = period(hs, 4); const q4A = period(as, 4);
+    const quarters = getBasketballQuartersFromExtras(extra?.extras);
+    const q1H = quarters[0]?.[0] ?? null; const q1A = quarters[0]?.[1] ?? null;
+    const q2H = quarters[1]?.[0] ?? null; const q2A = quarters[1]?.[1] ?? null;
+    const q3H = quarters[2]?.[0] ?? null; const q3A = quarters[2]?.[1] ?? null;
+    const q4H = quarters[3]?.[0] ?? null; const q4A = quarters[3]?.[1] ?? null;
 
     const regHome = (q1H ?? 0) + (q2H ?? 0) + (q3H ?? 0) + (q4H ?? 0);
     const regAway = (q1A ?? 0) + (q2A ?? 0) + (q3A ?? 0) + (q4A ?? 0);
@@ -918,6 +948,7 @@ function liveDefinitiveOutcomeForSel(
     htScore?: [number, number] | null;
     status?: string;
     tennisSets?: Array<[number, number]>;
+    basketballQuarters?: Array<[number, number]>;
   }
 ): "won" | "lost" | null {
   // Key normalizations — mirror scoreOutcomeForSel so tg-o25, cards-o35, etc. are handled
@@ -932,6 +963,10 @@ function liveDefinitiveOutcomeForSel(
   if (s === "bts-no")  return home > 0 && away > 0 ? "lost" : null;
 
   const tennisSets = Array.isArray(score.tennisSets) ? score.tennisSets : [];
+  const basketballQuarters = Array.isArray((score as { basketballQuarters?: Array<[number, number]> }).basketballQuarters)
+    ? ((score as { basketballQuarters?: Array<[number, number]> }).basketballQuarters as Array<[number, number]>)
+    : [];
+  const completedBasketballQuarters = basketballCompletedQuarterCount(score.status, basketballQuarters);
   if (/^set[123]-(home|away)$/.test(s) || /^vs[123][ha]$/.test(s)) {
     const setNum =
       s.startsWith("set") ? parseInt(s.slice(3, 4), 10)
@@ -963,6 +998,60 @@ function liveDefinitiveOutcomeForSel(
     const totalGames = tennisTotalGames(tennisSets);
     if (side === "o") return totalGames > line ? "won" : null;
     return totalGames > line ? "lost" : null;
+  }
+
+  const bTotal = s.match(/^b-pts-([ou])-(\d+(?:\.\d+)?)$/);
+  if (bTotal) {
+    const side = bTotal[1]!;
+    const line = Number(bTotal[2]!);
+    if (!Number.isFinite(line)) return null;
+    if (side === "o") return total > line ? "won" : null;
+    return null;
+  }
+
+  const bTeamTotal = s.match(/^b-tt-(home|away)-([ou])-(\d+(?:\.\d+)?)$/);
+  if (bTeamTotal) {
+    const team = bTeamTotal[1]!;
+    const side = bTeamTotal[2]!;
+    const line = Number(bTeamTotal[3]!);
+    if (!Number.isFinite(line)) return null;
+    const teamScore = team === "home" ? home : away;
+    if (side === "o") return teamScore > line ? "won" : null;
+    return null;
+  }
+
+  const bH1Total = s.match(/^b-h1-pts-([ou])-(\d+(?:\.\d+)?)$/);
+  if (bH1Total) {
+    const side = bH1Total[1]!;
+    const line = Number(bH1Total[2]!);
+    if (!Number.isFinite(line)) return null;
+    const h1Total = (basketballQuarters[0]?.[0] ?? 0) + (basketballQuarters[0]?.[1] ?? 0) + (basketballQuarters[1]?.[0] ?? 0) + (basketballQuarters[1]?.[1] ?? 0);
+    if (side === "o") return h1Total > line ? "won" : null;
+    if (completedBasketballQuarters >= 2) return h1Total < line ? "won" : "lost";
+    return null;
+  }
+
+  const bQuarter = s.match(/^q([1234])-(home|away)$/);
+  if (bQuarter) {
+    const qNum = Number(bQuarter[1]!);
+    if (completedBasketballQuarters < qNum) return null;
+    const side = bQuarter[2]!;
+    const qScore = basketballQuarters[qNum - 1] ?? null;
+    if (!qScore) return null;
+    if (qScore[0] === qScore[1]) return "void";
+    return side === "home"
+      ? (qScore[0] > qScore[1] ? "won" : "lost")
+      : (qScore[1] > qScore[0] ? "won" : "lost");
+  }
+
+  if (s === "h1-home" || s === "h1-away") {
+    if (completedBasketballQuarters < 2) return null;
+    const h1Home = (basketballQuarters[0]?.[0] ?? 0) + (basketballQuarters[1]?.[0] ?? 0);
+    const h1Away = (basketballQuarters[0]?.[1] ?? 0) + (basketballQuarters[1]?.[1] ?? 0);
+    if (h1Home === h1Away) return "void";
+    return s === "h1-home"
+      ? (h1Home > h1Away ? "won" : "lost")
+      : (h1Away > h1Home ? "won" : "lost");
   }
 
   // First goal / no goal — settle as soon as the first scorer is known.
@@ -1115,6 +1204,7 @@ export async function autoSettlePendingBets(opts?: { matchIds?: string[] }): Pro
                 htScore: liveExtra?.htScore ?? null,
                 status: (live as any)?.status,
                 tennisSets: Array.isArray(liveExtra?.sets) ? liveExtra.sets : undefined,
+                basketballQuarters: Array.isArray(liveExtra?.quarters) ? liveExtra.quarters : undefined,
               })
             : null;
           if (out === "lost") { liveLostDetected = true; break; }
@@ -1135,7 +1225,9 @@ export async function autoSettlePendingBets(opts?: { matchIds?: string[] }): Pro
                   htScore: liveExtra?.htScore ?? null,
                   status: (live as any)?.status,
                   tennisSets: Array.isArray(liveExtra?.sets) ? liveExtra.sets : undefined,
+                  basketballQuarters: Array.isArray(liveExtra?.quarters) ? liveExtra.quarters : undefined,
                 })
+              : null;
               : null;
             if (!out) return sel;
             return {
@@ -1184,6 +1276,7 @@ export async function autoSettlePendingBets(opts?: { matchIds?: string[] }): Pro
                 htScore: liveExtraSingle?.htScore ?? null,
                 status: (live as any)?.status,
                 tennisSets: Array.isArray(liveExtraSingle?.sets) ? liveExtraSingle.sets : undefined,
+                basketballQuarters: Array.isArray(liveExtraSingle?.quarters) ? liveExtraSingle.quarters : undefined,
               })
             : null;
           if (out === "won" || out === "lost") {
