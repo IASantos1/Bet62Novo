@@ -71,6 +71,9 @@ type AdvancedMarkets = {
     teamTotalAway: { line: number; over: number; under: number };
     anyQuarter?: { home: number; away: number };
     allQuarters?: { home: number; away: number };
+    firstPoint?: { home: number; away: number };
+    nextPoint?: { home: number; away: number };
+    nextThree?: { home: number; away: number };
     totalsRange?: Array<{ line: number; over: number; under: number }>;
   };
   // Tennis extended markets
@@ -220,6 +223,7 @@ export type LiveMatchState = {
     tennisStats?: [TennisStatData, TennisStatData]; // home / away match stats
     periods?: Array<[number, number]>;   // hockey: [[P1h,P1a],[P2h,P2a],[P3h,P3a],[OTh,OTa]]
     quarters?: Array<[number, number]>;  // basketball: [[Q1h,Q1a],[Q2h,Q2a],[Q3h,Q3a],[Q4h,Q4a],[OTh,OTa]]
+    basketballScoringEvents?: Array<{ seq: number; team: "home" | "away"; points: number; isThree: boolean }>;
     innings?: Array<[number, number]>;   // baseball: [[I1h,I1a],[I2h,I2a],...,[I9h,I9a]]
     outs?: number;                        // baseball: current outs (0-2)
     homeHits?: number;                   // baseball: home team hits
@@ -2003,6 +2007,12 @@ function makeBasketballMarketsFromTeams(home: string, away: string): AdvancedMar
   const pHomeAllQuarters = mc(qHomeWinPs.reduce((acc, p) => acc * p, 1), 0.01, 0.75);
   const pAwayAllQuarters = mc(qHomeWinPs.reduce((acc, p) => acc * (1 - p), 1), 0.01, 0.75);
   const [allQuarterHome, allQuarterAway] = probsToDecimalOdds([pHomeAllQuarters, pAwayAllQuarters], 1.08);
+  const pHomeFirstPoint = mc(0.5 + (pHomeML - 0.5) * 0.32, 0.18, 0.82);
+  const [firstPointHome, firstPointAway] = probsToDecimalOdds([pHomeFirstPoint, 1 - pHomeFirstPoint], 1.07);
+  const pHomeNextPoint = mc(0.5 + (pHomeML - 0.5) * 0.22, 0.20, 0.80);
+  const [nextPointHome, nextPointAway] = probsToDecimalOdds([pHomeNextPoint, 1 - pHomeNextPoint], 1.07);
+  const pHomeNextThree = mc(0.5 + (pHomeML - 0.5) * 0.16, 0.18, 0.82);
+  const [nextThreeHome, nextThreeAway] = probsToDecimalOdds([pHomeNextThree, 1 - pHomeNextThree], 1.08);
 
   // Multiple game-total O/U lines: main line ±15 at 2.5-pt increments (13 lines)
   const totalsRange: { line: number; over: number; under: number }[] = [];
@@ -2047,6 +2057,9 @@ function makeBasketballMarketsFromTeams(home: string, away: string): AdvancedMar
       teamTotalAway: { line: awayTotalLine, over: oAT!, under: uAT! },
       anyQuarter: { home: anyQuarterHome!, away: anyQuarterAway! },
       allQuarters: { home: allQuarterHome!, away: allQuarterAway! },
+      firstPoint: { home: firstPointHome!, away: firstPointAway! },
+      nextPoint: { home: nextPointHome!, away: nextPointAway! },
+      nextThree: { home: nextThreeHome!, away: nextThreeAway! },
       totalsRange,
     },
     _extraUsed: { oTotal1H, uTotal1H, oAT, uAT },
@@ -3445,6 +3458,9 @@ export async function ensureFinishedMatchResult(matchId: string): Promise<boolea
       const extras = parsed.sport === "football"
         ? await fetchFootballExtras(parsed.id)
         : null;
+      const basketballIncidentSummary = parsed.sport === "basketball"
+        ? await getBasketballIncidentSummaryV2(parsed.id).catch(() => null)
+        : null;
 
       const p = (obj: SAPIV2ScoreObj | null, n: number): number | null => {
         const v = obj?.[`period${n}` as keyof SAPIV2ScoreObj];
@@ -3502,6 +3518,9 @@ export async function ensureFinishedMatchResult(matchId: string): Promise<boolea
           awayScore: ev.awayScore,
           ...(parsed.sport === "football"
             ? { football: { ftHome, ftAway, etHome, etAway, penHome, penAway } }
+            : {}),
+          ...(parsed.sport === "basketball" && (basketballIncidentSummary?.scoringEvents.length ?? 0) > 0
+            ? { basketball: { scoringEvents: basketballIncidentSummary!.scoringEvents } }
             : {}),
         },
         finishedAt: now,
@@ -8190,10 +8209,17 @@ const HOCKEY_SUSP_KEYS = ["result", "totalGoals", "handicap", "halfTime", "hocke
 const BASEBALL_SUSP_KEYS = ["result", "totalGoals", "handicap", "mlbExtra"] as const;
 const MAX_LIVE_STATE_MS = 4 * 60 * 60 * 1000;
 
-function buildBasketballLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
+async function buildBasketballLiveV2(events: SAPIV2Event[]): Promise<LiveMatchState[]> {
   const result: LiveMatchState[] = [];
   const now = Date.now();
   const currentIds = new Set<string>();
+  const summaries = new Map<number, BasketballIncidentSummarySnapshot | null>();
+  await Promise.all(events.slice(0, 40).map(async (ev) => {
+    const idNum = Number(ev.id);
+    if (!Number.isFinite(idNum) || idNum <= 0) return;
+    const summary = await getBasketballIncidentSummaryV2(idNum).catch(() => null);
+    summaries.set(idNum, summary);
+  }));
   for (const ev of events) {
     const code = v2StatusCode(ev);
     // code 100 = ended; 0 = not started; undefined = keep
@@ -8246,6 +8272,7 @@ function buildBasketballLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
 
     const id = `bball-v2-${ev.id}`;
     currentIds.add(id);
+    const incidentSummary = summaries.get(Number(ev.id)) ?? null;
 
     const prev = liveMatchState.get(id);
     let marketSuspension = prev?.marketSuspension;
@@ -8277,11 +8304,22 @@ function buildBasketballLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
       sport: "basketball", homeScore, awayScore, minute,
       status: statusLabel, hasRealOdds: true, odds: liveOdds,
       markets: makeBasketballMarketsFromTeams(homeTeam, awayTeam),
-      events: [],
+      events: (incidentSummary?.scoringEvents ?? []).slice(-12).map((it) => ({
+        type: it.isThree ? "3PT" : `PTS${it.points}`,
+        team: it.team,
+        minute: 0,
+        player: "",
+      })),
       marketSuspension,
       _suspensionReason: suspensionReason,
       _firstSeenAt: prev?._firstSeenAt ?? now,
-      _liveExtra: quarters.length > 0 ? { quarters } : undefined,
+      _liveExtra:
+        quarters.length > 0 || (incidentSummary?.scoringEvents.length ?? 0) > 0
+          ? {
+              ...(quarters.length > 0 ? { quarters } : {}),
+              ...((incidentSummary?.scoringEvents.length ?? 0) > 0 ? { basketballScoringEvents: incidentSummary!.scoringEvents } : {}),
+            }
+          : undefined,
     };
     liveMatchState.set(id, state);
     result.push(state);
@@ -8293,7 +8331,12 @@ function buildBasketballLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
       finishedMatchResults.set(id, {
         home: state.homeScore, away: state.awayScore,
         homeTeam: state.home, awayTeam: state.away, finishedAt: now,
-        extras: state._liveExtra?.quarters ? { basketball: { quarters: state._liveExtra.quarters } } : undefined,
+        extras: state._liveExtra?.quarters || state._liveExtra?.basketballScoringEvents
+          ? { basketball: {
+              ...(state._liveExtra?.quarters ? { quarters: state._liveExtra.quarters } : {}),
+              ...(state._liveExtra?.basketballScoringEvents ? { scoringEvents: state._liveExtra.basketballScoringEvents } : {}),
+            } }
+          : undefined,
       });
       liveMatchState.delete(id);
     }
@@ -9170,7 +9213,7 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
   // Apply per-sport anti-flicker: if a sport's API temporarily returns empty,
   // keep the last good data for up to SPORT_FALLBACK_TTL_MS (35s).
   const footballLive  = sportWithFallback("football",   await buildFootballLiveV2(footballEvents));
-  const basketballLive = sportWithFallback("basketball", buildBasketballLiveV2(basketballEvents));
+  const basketballLive = sportWithFallback("basketball", await buildBasketballLiveV2(basketballEvents));
   const hockeyLive    = sportWithFallback("hockey",     buildHockeyLiveV2(hockeyEvents));
   const baseballLive  = sportWithFallback("baseball",   buildBaseballLiveV2(baseballEvents));
   const tennisLive    = sportWithFallback("tennis",     tennisLivePart);
@@ -14885,6 +14928,150 @@ router.get("/v2-lineups", async (req: Request, res: Response) => {
 
 const v2IncidentsCache = new Map<string, { data: unknown; fetchedAt: number }>();
 const V2_INCIDENTS_TTL = 2500;
+
+type BasketballScoringEvent = { seq: number; team: "home" | "away"; points: number; isThree: boolean };
+type BasketballIncidentSummarySnapshot = {
+  scoringEvents: BasketballScoringEvent[];
+  fetchedAt: number;
+};
+const basketballIncidentSummaryCache = new Map<number, BasketballIncidentSummarySnapshot>();
+const basketballIncidentSummaryInFlight = new Map<number, Promise<BasketballIncidentSummarySnapshot | null>>();
+const BASKETBALL_INCIDENT_SUMMARY_TTL = 2500;
+
+function extractV2IncidentArray(payload: unknown): unknown[] {
+  const root = (payload && typeof payload === "object" ? ((payload as Record<string, unknown>)["data"] ?? payload) : payload) as Record<string, unknown> | unknown;
+  const arr =
+    (root && typeof root === "object" ? (root as Record<string, unknown>)["incidents"] : undefined) ??
+    (root && typeof root === "object" ? (root as Record<string, unknown>)["events"] : undefined) ??
+    (root && typeof root === "object" ? (root as Record<string, unknown>)["timeline"] : undefined) ??
+    (root && typeof root === "object" ? ((root as Record<string, unknown>)["data"] as Record<string, unknown> | undefined)?.["incidents"] : undefined);
+  return Array.isArray(arr) ? arr : [];
+}
+
+function parseBasketballIncidentSummary(payload: unknown): BasketballIncidentSummarySnapshot {
+  const incidents = extractV2IncidentArray(payload);
+  const toNum = (v: unknown): number | null => {
+    if (typeof v === "number" && Number.isFinite(v)) return v;
+    if (typeof v === "string" && v.trim() !== "") {
+      const n = Number(v);
+      return Number.isFinite(n) ? n : null;
+    }
+    return null;
+  };
+  const toText = (v: unknown): string => {
+    if (v == null) return "";
+    if (typeof v === "string") return v;
+    if (typeof v === "number" && Number.isFinite(v)) return String(v);
+    return String(v);
+  };
+  const normalize = (s: string) =>
+    s
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/[^a-z0-9]+/g, " ")
+      .trim();
+
+  let prevHome = 0;
+  let prevAway = 0;
+  const scoringEvents: BasketballScoringEvent[] = [];
+
+  for (let i = 0; i < incidents.length; i++) {
+    const e = incidents[i] as Record<string, unknown>;
+    const title = toText(e["type"] ?? e["incidentType"] ?? e["name"] ?? e["title"]);
+    const detail = toText(e["text"] ?? e["description"] ?? e["reason"] ?? e["playerName"] ?? ((e["player"] as Record<string, unknown> | undefined)?.["name"]));
+    const sig = normalize(`${title} ${detail}`);
+
+    const homeScore =
+      toNum(((e["homeScore"] as Record<string, unknown> | undefined)?.["current"])) ??
+      toNum(e["homeScore"]) ??
+      toNum(((e["score"] as Record<string, unknown> | undefined)?.["home"])) ??
+      prevHome;
+    const awayScore =
+      toNum(((e["awayScore"] as Record<string, unknown> | undefined)?.["current"])) ??
+      toNum(e["awayScore"]) ??
+      toNum(((e["score"] as Record<string, unknown> | undefined)?.["away"])) ??
+      prevAway;
+
+    const dHome = Math.max(0, homeScore - prevHome);
+    const dAway = Math.max(0, awayScore - prevAway);
+
+    const hasBasketKeyword =
+      sig.includes("basket") ||
+      sig.includes("free throw") ||
+      sig.includes("three point") ||
+      sig.includes("3 point") ||
+      sig.includes("3pt") ||
+      sig.includes("jumper") ||
+      sig.includes("layup") ||
+      sig.includes("dunk");
+
+    const isScoreDelta = (dHome > 0 || dAway > 0) && (dHome + dAway <= 4);
+    if (isScoreDelta || hasBasketKeyword) {
+      const team: "home" | "away" | null =
+        dHome > 0 && dAway === 0 ? "home" :
+        dAway > 0 && dHome === 0 ? "away" :
+        (e["isHome"] === true || e["home"] === true || e["team"] === "home" || e["side"] === "home") ? "home" :
+        (e["isAway"] === true || e["away"] === true || e["team"] === "away" || e["side"] === "away") ? "away" :
+        null;
+      if (team) {
+        const inferredPoints =
+          team === "home" ? dHome : dAway;
+        const isThree = /\bthree\b|\b3 point\b|\b3pt\b|\b3-pointer\b|\b3 pointer\b/.test(sig);
+        const points =
+          inferredPoints > 0 ? inferredPoints :
+          isThree ? 3 :
+          sig.includes("free throw") ? 1 :
+          2;
+        scoringEvents.push({ seq: scoringEvents.length, team, points, isThree: isThree || points === 3 });
+      }
+    }
+
+    prevHome = homeScore;
+    prevAway = awayScore;
+  }
+
+  return { scoringEvents, fetchedAt: Date.now() };
+}
+
+async function fetchV2IncidentsRaw(sport: string, matchId: string): Promise<unknown> {
+  if (!matchId) return {};
+  const base = v2SportBase(sport);
+  if (!base) return {};
+  const cacheKey = `v2inc:${sport}:${matchId}`;
+  const cached = v2IncidentsCache.get(cacheKey);
+  if (cached && Date.now() - cached.fetchedAt < V2_INCIDENTS_TTL) return cached.data;
+  const resp = await fetch(`${base}/match/${matchId}/incidents`, {
+    signal: AbortSignal.timeout(8000),
+    headers: sapiHeaders(),
+  });
+  if (!resp.ok) return {};
+  const data = await resp.json() as unknown;
+  v2IncidentsCache.set(cacheKey, { data, fetchedAt: Date.now() });
+  return data;
+}
+
+async function getBasketballIncidentSummaryV2(matchId: number): Promise<BasketballIncidentSummarySnapshot | null> {
+  if (!Number.isFinite(matchId) || matchId <= 0) return null;
+  const cached = basketballIncidentSummaryCache.get(matchId);
+  if (cached && Date.now() - cached.fetchedAt < BASKETBALL_INCIDENT_SUMMARY_TTL) return cached;
+  const inflight = basketballIncidentSummaryInFlight.get(matchId);
+  if (inflight) return inflight;
+  const p = (async () => {
+    try {
+      const raw = await fetchV2IncidentsRaw("basketball", String(matchId));
+      const summary = parseBasketballIncidentSummary(raw);
+      basketballIncidentSummaryCache.set(matchId, summary);
+      return summary;
+    } catch {
+      return null;
+    } finally {
+      basketballIncidentSummaryInFlight.delete(matchId);
+    }
+  })();
+  basketballIncidentSummaryInFlight.set(matchId, p);
+  return p;
+}
 
 router.get("/v2-incidents", async (req: Request, res: Response) => {
   const sport   = String(req.query["sport"]   ?? "football");

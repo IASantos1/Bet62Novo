@@ -15,6 +15,8 @@ export type SelectionRecord = {
   odd?: number;
   market?: string;
   label?: string;
+  basketballScoreCursor?: number;
+  basketballThreeCursor?: number;
   finalScore?: { home: number; away: number };
   htScore?: { htHome: number; htAway: number };
   outcome?: "won" | "lost" | "void" | null;
@@ -154,6 +156,28 @@ function getBasketballQuartersFromExtras(extras: unknown): Array<[number, number
     quarters.push([h!, a!]);
   }
   return quarters;
+}
+
+function getBasketballScoringEventsFromExtras(extras: unknown): Array<{ seq: number; team: "home" | "away"; points: number; isThree: boolean }> {
+  if (!extras || typeof extras !== "object") return [];
+  const ex = extras as Record<string, unknown>;
+  const nested = ex["basketball"];
+  const raw = nested && typeof nested === "object"
+    ? (nested as Record<string, unknown>)["scoringEvents"]
+    : ex["basketballScoringEvents"];
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .map((entry, idx) => {
+      if (!entry || typeof entry !== "object") return null;
+      const e = entry as Record<string, unknown>;
+      const team = e["team"] === "home" || e["team"] === "away" ? e["team"] as "home" | "away" : null;
+      const points = typeof e["points"] === "number" ? e["points"] as number : Number(e["points"]);
+      const seq = typeof e["seq"] === "number" ? e["seq"] as number : idx;
+      const isThree = e["isThree"] === true || Number(points) === 3;
+      if (!team || !Number.isFinite(points) || !Number.isFinite(seq)) return null;
+      return { seq, team, points, isThree };
+    })
+    .filter((entry): entry is { seq: number; team: "home" | "away"; points: number; isThree: boolean } => !!entry);
 }
 
 function basketballCompletedQuarterCount(status: string | undefined, quarters: Array<[number, number]>): number {
@@ -367,6 +391,7 @@ export function scoreOutcomeForSel(
     (s === "h1-home" || s === "h1-away")
   ) {
     const quarters = getBasketballQuartersFromExtras(extra?.extras);
+    const scoringEvents = getBasketballScoringEventsFromExtras(extra?.extras);
     const q1H = quarters[0]?.[0] ?? null; const q1A = quarters[0]?.[1] ?? null;
     const q2H = quarters[1]?.[0] ?? null; const q2A = quarters[1]?.[1] ?? null;
     const q3H = quarters[2]?.[0] ?? null; const q3A = quarters[2]?.[1] ?? null;
@@ -484,6 +509,27 @@ export function scoreOutcomeForSel(
       const firstFour = quarters.slice(0, 4);
       if (firstFour.length < 4) return null;
       winning = firstFour.every(([qh, qa]) => side === "home" ? qh > qa : qa > qh);
+    }
+
+    if (winning === null && (s === "b-fp-home" || s === "b-fp-away")) {
+      const first = scoringEvents[0] ?? null;
+      if (!first) return null;
+      winning = first.team === (s.endsWith("home") ? "home" : "away");
+    }
+
+    if (winning === null && (s === "b-np-home" || s === "b-np-away")) {
+      const cursor = typeof (sel as SelectionRecord).basketballScoreCursor === "number" ? (sel as SelectionRecord).basketballScoreCursor! : 0;
+      const next = scoringEvents.find((ev) => ev.seq >= cursor) ?? null;
+      if (!next) return null;
+      winning = next.team === (s.endsWith("home") ? "home" : "away");
+    }
+
+    if (winning === null && (s === "b-n3-home" || s === "b-n3-away")) {
+      const cursor = typeof (sel as SelectionRecord).basketballThreeCursor === "number" ? (sel as SelectionRecord).basketballThreeCursor! : 0;
+      const threes = scoringEvents.filter((ev) => ev.isThree);
+      const next = threes[cursor] ?? null;
+      if (!next) return null;
+      winning = next.team === (s.endsWith("home") ? "home" : "away");
     }
   }
 
@@ -992,6 +1038,7 @@ function liveDefinitiveOutcomeForSel(
     status?: string;
     tennisSets?: Array<[number, number]>;
     basketballQuarters?: Array<[number, number]>;
+    basketballScoringEvents?: Array<{ seq: number; team: "home" | "away"; points: number; isThree: boolean }>;
   }
 ): "won" | "lost" | null {
   // Key normalizations — mirror scoreOutcomeForSel so tg-o25, cards-o35, etc. are handled
@@ -1008,6 +1055,9 @@ function liveDefinitiveOutcomeForSel(
   const tennisSets = Array.isArray(score.tennisSets) ? score.tennisSets : [];
   const basketballQuarters = Array.isArray((score as { basketballQuarters?: Array<[number, number]> }).basketballQuarters)
     ? ((score as { basketballQuarters?: Array<[number, number]> }).basketballQuarters as Array<[number, number]>)
+    : [];
+  const basketballScoringEvents = Array.isArray((score as { basketballScoringEvents?: Array<{ seq: number; team: "home" | "away"; points: number; isThree: boolean }> }).basketballScoringEvents)
+    ? ((score as { basketballScoringEvents?: Array<{ seq: number; team: "home" | "away"; points: number; isThree: boolean }> }).basketballScoringEvents as Array<{ seq: number; team: "home" | "away"; points: number; isThree: boolean }>)
     : [];
   const completedBasketballQuarters = basketballCompletedQuarterCount(score.status, basketballQuarters);
   if (/^set[123]-(home|away)$/.test(s) || /^vs[123][ha]$/.test(s)) {
@@ -1130,6 +1180,27 @@ function liveDefinitiveOutcomeForSel(
     if (firstFour.some(([qh, qa]) => side === "home" ? qh <= qa : qa <= qh)) return "lost";
     if (completedBasketballQuarters >= 4) return "won";
     return null;
+  }
+
+  if (s === "b-fp-home" || s === "b-fp-away") {
+    const first = basketballScoringEvents[0] ?? null;
+    if (!first) return null;
+    return first.team === (s.endsWith("home") ? "home" : "away") ? "won" : "lost";
+  }
+
+  if (s === "b-np-home" || s === "b-np-away") {
+    const cursor = typeof sel.basketballScoreCursor === "number" ? sel.basketballScoreCursor : 0;
+    const next = basketballScoringEvents.find((ev) => ev.seq >= cursor) ?? null;
+    if (!next) return null;
+    return next.team === (s.endsWith("home") ? "home" : "away") ? "won" : "lost";
+  }
+
+  if (s === "b-n3-home" || s === "b-n3-away") {
+    const cursor = typeof sel.basketballThreeCursor === "number" ? sel.basketballThreeCursor : 0;
+    const threes = basketballScoringEvents.filter((ev) => ev.isThree);
+    const next = threes[cursor] ?? null;
+    if (!next) return null;
+    return next.team === (s.endsWith("home") ? "home" : "away") ? "won" : "lost";
   }
 
   if (s === "h1-home" || s === "h1-away") {
@@ -1293,6 +1364,7 @@ export async function autoSettlePendingBets(opts?: { matchIds?: string[] }): Pro
                 status: (live as any)?.status,
                 tennisSets: Array.isArray(liveExtra?.sets) ? liveExtra.sets : undefined,
                 basketballQuarters: Array.isArray(liveExtra?.quarters) ? liveExtra.quarters : undefined,
+                basketballScoringEvents: Array.isArray(liveExtra?.basketballScoringEvents) ? liveExtra.basketballScoringEvents : undefined,
               })
             : null;
           if (out === "lost") { liveLostDetected = true; break; }
@@ -1314,8 +1386,8 @@ export async function autoSettlePendingBets(opts?: { matchIds?: string[] }): Pro
                   status: (live as any)?.status,
                   tennisSets: Array.isArray(liveExtra?.sets) ? liveExtra.sets : undefined,
                   basketballQuarters: Array.isArray(liveExtra?.quarters) ? liveExtra.quarters : undefined,
+                  basketballScoringEvents: Array.isArray(liveExtra?.basketballScoringEvents) ? liveExtra.basketballScoringEvents : undefined,
                 })
-              : null;
               : null;
             if (!out) return sel;
             return {
@@ -1365,6 +1437,7 @@ export async function autoSettlePendingBets(opts?: { matchIds?: string[] }): Pro
                 status: (live as any)?.status,
                 tennisSets: Array.isArray(liveExtraSingle?.sets) ? liveExtraSingle.sets : undefined,
                 basketballQuarters: Array.isArray(liveExtraSingle?.quarters) ? liveExtraSingle.quarters : undefined,
+                basketballScoringEvents: Array.isArray(liveExtraSingle?.basketballScoringEvents) ? liveExtraSingle.basketballScoringEvents : undefined,
               })
             : null;
           if (out === "won" || out === "lost") {

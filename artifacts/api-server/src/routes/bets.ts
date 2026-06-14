@@ -303,6 +303,29 @@ function enrichTennisSelectionForStorage(rawSelection: unknown): unknown {
   return { ...r, selection: nextSelection };
 }
 
+function enrichBasketballSelectionForStorage(rawSelection: unknown): unknown {
+  if (!rawSelection || typeof rawSelection !== "object") return rawSelection;
+  const r = rawSelection as Record<string, unknown>;
+  const selection = typeof r.selection === "string" ? r.selection : "";
+  const matchId = String(r.matchId ?? "").trim();
+  if (!selection || !matchId) return rawSelection;
+  const live = liveMatchState.get(matchId);
+  if (!live || live.sport !== "basketball") return rawSelection;
+  const extra = (live._liveExtra ?? {}) as Record<string, unknown>;
+  const scoringEvents = Array.isArray(extra["basketballScoringEvents"])
+    ? (extra["basketballScoringEvents"] as Array<Record<string, unknown>>)
+    : [];
+
+  if (selection === "b-np-home" || selection === "b-np-away") {
+    return { ...r, basketballScoreCursor: scoringEvents.length };
+  }
+  if (selection === "b-n3-home" || selection === "b-n3-away") {
+    const threeCount = scoringEvents.filter((ev) => ev?.["isThree"] === true).length;
+    return { ...r, basketballThreeCursor: threeCount };
+  }
+  return rawSelection;
+}
+
 function currentOddForSelection(sel: SelectionRecord, liveSt: LiveMatchState): number | null {
   const s = normalizeSelectionKey(String(sel.selection ?? ""));
   const m = (liveSt as { markets?: Record<string, unknown> }).markets as unknown as Record<string, unknown> | undefined;
@@ -626,6 +649,9 @@ function currentOddForSelection(sel: SelectionRecord, liveSt: LiveMatchState): n
       teamTotalAway?: { line?: number; over?: number; under?: number };
       anyQuarter?: { home?: number; away?: number };
       allQuarters?: { home?: number; away?: number };
+      firstPoint?: { home?: number; away?: number };
+      nextPoint?: { home?: number; away?: number };
+      nextThree?: { home?: number; away?: number };
       totalsRange?: Array<{ line?: number; over?: number; under?: number }>;
     } | undefined;
 
@@ -714,6 +740,12 @@ function currentOddForSelection(sel: SelectionRecord, liveSt: LiveMatchState): n
     if (s === "b-anyq-away") return Number.isFinite(bx?.anyQuarter?.away) ? bx!.anyQuarter!.away! : null;
     if (s === "b-allq-home") return Number.isFinite(bx?.allQuarters?.home) ? bx!.allQuarters!.home! : null;
     if (s === "b-allq-away") return Number.isFinite(bx?.allQuarters?.away) ? bx!.allQuarters!.away! : null;
+    if (s === "b-fp-home") return Number.isFinite(bx?.firstPoint?.home) ? bx!.firstPoint!.home! : null;
+    if (s === "b-fp-away") return Number.isFinite(bx?.firstPoint?.away) ? bx!.firstPoint!.away! : null;
+    if (s === "b-np-home") return Number.isFinite(bx?.nextPoint?.home) ? bx!.nextPoint!.home! : null;
+    if (s === "b-np-away") return Number.isFinite(bx?.nextPoint?.away) ? bx!.nextPoint!.away! : null;
+    if (s === "b-n3-home") return Number.isFinite(bx?.nextThree?.home) ? bx!.nextThree!.home! : null;
+    if (s === "b-n3-away") return Number.isFinite(bx?.nextThree?.away) ? bx!.nextThree!.away! : null;
 
     if (s === "h1-home") return Number.isFinite(mk.halfTime?.home) ? mk.halfTime!.home! : null;
     if (s === "h1-away") return Number.isFinite(mk.halfTime?.away) ? mk.halfTime!.away! : null;
@@ -1081,7 +1113,7 @@ router.post("/place", authMiddleware, async (req: Request, res: Response): Promi
 
   const useFreebets = isFreebet === true;
   const selectionsToStore = Array.isArray(selections)
-    ? selections.map((x) => enrichTennisSelectionForStorage(normalizeStoredSelection(x, { matchId: String(matchId), matchTitle, kickoffTime })))
+    ? selections.map((x) => enrichBasketballSelectionForStorage(enrichTennisSelectionForStorage(normalizeStoredSelection(x, { matchId: String(matchId), matchTitle, kickoffTime }))))
     : selections;
   const ticketKickoffIso = getTicketKickoffIso(selectionsToStore, kickoffTime);
 
