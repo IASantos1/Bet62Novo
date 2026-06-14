@@ -1696,7 +1696,7 @@ export default function WorldCupPage({ onClose, onBet: onBetProp }: { onClose?: 
     let timer: ReturnType<typeof setTimeout> | null = null;
     const loadCompetition = async () => {
       try {
-        const data = await fetchWithTimeout("/api/matches/wc2026-competition", {}, 12_000)
+        const data = await fetchWithTimeout("/api/matches/wc2026-competition", {}, 20_000)
           .then(r => r.ok ? r.json() : { sections: [] })
           .catch(() => ({ sections: [] })) as { sections?: WCCompetitionSection[] };
         if (!cancelled && Array.isArray(data.sections)) {

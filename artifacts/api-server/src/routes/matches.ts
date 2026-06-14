@@ -11043,6 +11043,8 @@ const wc2026StandingsCache = new Map<string, { data: { groups: WC2026StandingGro
 const WC2026_STANDINGS_TTL = 5 * 60_000;
 const wc2026CompetitionCache = new Map<string, { data: { sections: WC2026CompetitionSection[] }; fetchedAt: number }>();
 const WC2026_COMPETITION_TTL = 5 * 60_000;
+const WC2026_COMPETITION_DISCOVERY_TIMEOUT_MS = 4_000;
+const WC2026_COMPETITION_FETCH_TIMEOUT_MS = 3_500;
 
 function normalizeWCStandingTeamName(name: string): string {
   return String(name ?? "")
@@ -11223,12 +11225,12 @@ async function getWC2026CompetitionSections(): Promise<{ sections: WC2026Competi
   try {
     const nowMs = Date.now();
     const dates: string[] = [];
-    for (let i = -2; i < 38; i++) {
+    for (let i = -2; i < 24; i++) {
       dates.push(new Date(nowMs + i * 86_400_000).toISOString().slice(0, 10));
     }
     const dayResults = await Promise.race([
       Promise.all(dates.map(dt => getScheduleV2("football", dt).catch(() => [] as SAPIV2Event[]))),
-      new Promise<SAPIV2Event[][]>(resolve => setTimeout(() => resolve([]), 12_000)),
+      new Promise<SAPIV2Event[][]>(resolve => setTimeout(() => resolve([]), WC2026_COMPETITION_DISCOVERY_TIMEOUT_MS)),
     ]);
     const events = (Array.isArray(dayResults) ? dayResults.flat() : []) as SAPIV2Event[];
     const wcEvent = events.find((ev) => {
@@ -11246,7 +11248,7 @@ async function getWC2026CompetitionSections(): Promise<{ sections: WC2026Competi
       if (wcEvent.id) {
         try {
           const matchResp = await fetch(`${SAPI_V2_FOOTBALL}/match/${wcEvent.id}`, {
-            signal: AbortSignal.timeout(8_000),
+            signal: AbortSignal.timeout(WC2026_COMPETITION_FETCH_TIMEOUT_MS),
             headers: sapiHeaders(),
           });
           if (matchResp.ok) {
@@ -11287,23 +11289,25 @@ async function getWC2026CompetitionSections(): Promise<{ sections: WC2026Competi
     `${SAPI_V1_FOOTBALL}/odds/outrights`,
   ];
 
-  for (const endpoint of endpoints) {
-    try {
-      const resp = await fetch(endpoint, {
-        signal: AbortSignal.timeout(8_000),
-        headers: { ...sapiHeaders(), Accept: "application/json" },
-      });
-      if (!resp.ok) continue;
-      const payload = await resp.json();
-      const sections = parseWC2026CompetitionSectionsFromPayload(payload);
-      if (sections.length > 0) {
-        const result = { sections };
-        wc2026CompetitionCache.set(cacheKey, { data: result, fetchedAt: Date.now() });
-        return result;
-      }
-    } catch {
-      // try next source
-    }
+  const results = await Promise.allSettled(endpoints.map(async (endpoint) => {
+    const resp = await fetch(endpoint, {
+      signal: AbortSignal.timeout(WC2026_COMPETITION_FETCH_TIMEOUT_MS),
+      headers: { ...sapiHeaders(), Accept: "application/json" },
+    });
+    if (!resp.ok) return [] as WC2026CompetitionSection[];
+    const payload = await resp.json();
+    return parseWC2026CompetitionSectionsFromPayload(payload);
+  }));
+
+  let bestSections: WC2026CompetitionSection[] = [];
+  for (const result of results) {
+    if (result.status !== "fulfilled") continue;
+    if (result.value.length > bestSections.length) bestSections = result.value;
+  }
+  if (bestSections.length > 0) {
+    const result = { sections: bestSections };
+    wc2026CompetitionCache.set(cacheKey, { data: result, fetchedAt: Date.now() });
+    return result;
   }
   return { sections: [] };
 }
