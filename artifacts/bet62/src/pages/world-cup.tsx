@@ -999,12 +999,18 @@ function MarketsPage({ match, activeKeys, onBet, onClose, theme, displayMinute }
       : "bg-red-600/20 border-red-500/40 text-red-300";
 
   const hasDupla = !!(mk.doubleChance?.homeOrDraw);
-  const hasGolos = !!(mk.totalGoals?.over25 || mk.bothTeamsScore?.yes || mk.exactGoals?.g0 !== undefined);
+  const hasGolos = !!(
+    mk.totalGoals?.over25 ||
+    mk.bothTeamsScore?.yes ||
+    mk.exactGoals?.g0 !== undefined ||
+    (show1tempo && mk.btts1H?.yes) ||
+    (show2tempo && mk.btts2H?.yes)
+  );
   const hasHandicap = !!(mk.handicap?.homeMinusOne || mk.asianHandicap?.home);
   const hasMarcador = !!(mk.correctScore && Object.keys(mk.correctScore).length > 0);
   const hasCantos = !!(mk.corners?.o95 || (show1tempo && mk.corners1H?.o45) || (show2tempo && mk.corners2H?.o45));
   const hasCartoes = !!(mk.cards?.o35 || (show1tempo && mk.cards1H?.o15) || (show2tempo && mk.cards2H?.o05));
-  const hasEspeciais = !!(mk.firstGoal?.home || mk.winToNil?.home || mk.goalOddEven?.odd || mk.btts1H?.yes || mk.toWinBothHalves?.home);
+  const hasEspeciais = !!(mk.firstGoal?.home || mk.winToNil?.home || mk.goalOddEven?.odd || mk.toWinBothHalves?.home);
   const hasJogadores = !!(
     mk.playerGoals?.some(p => (p.anytime ?? 0) > 1.001 || (show1tempo && (p.firstHalf ?? 0) > 1.001) || (show2tempo && (p.secondHalf ?? 0) > 1.001)) ||
     mk.playerAssists?.some(p => (p.anytime ?? 0) > 1.001) ||
