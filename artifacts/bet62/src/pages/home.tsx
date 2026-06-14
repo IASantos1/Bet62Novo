@@ -5302,7 +5302,7 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
     const flag = COUNTRY_FLAGS[match.country?.toLowerCase() ?? ""] ?? sportEmoji(match.sport);
     const dateStr = match.date ? formatMatchDate(match.date) : "";
     const rivalry = RIVALRY_TAGS[`${match.home}|${match.away}`];
-    const hasDraw = match.odds.draw > 0;
+    const hasDraw = (match.sport ?? "football") !== "tennis" && match.odds.draw > 0;
     const homeName = teamNamePt(match.home);
     const awayName = teamNamePt(match.away);
     const isSuspendedMatch = match.isLive && (
@@ -5903,7 +5903,9 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
     const m = match.markets;
     if (!m) return f;
     // 1X2
-    f["result:home"] = match.odds.home; f["result:draw"] = match.odds.draw; f["result:away"] = match.odds.away;
+    f["result:home"] = match.odds.home;
+    if ((match.sport ?? "football") !== "tennis" && match.odds.draw > 0) f["result:draw"] = match.odds.draw;
+    f["result:away"] = match.odds.away;
     // Dupla Chance + BTTS
     if (m.doubleChance) {
       f["dupla:homeOrDraw"] = m.doubleChance.homeOrDraw; f["dupla:awayOrDraw"] = m.doubleChance.awayOrDraw; f["dupla:homeOrAway"] = m.doubleChance.homeOrAway;
@@ -6469,7 +6471,7 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
           return (
             <MarketGroup title={isBasketball ? "Vencedor da Partida" : isTennis ? "Vencedor do Jogo" : "Resultado Final"}>
               <MarketOddsBtn match={match} sel="home" odd={match.odds.home} market="result" label={match.home} />
-              {match.odds.draw > 0 && <MarketOddsBtn match={match} sel="draw" odd={match.odds.draw} market="result" label="Empate" />}
+              {!isTennis && match.odds.draw > 0 && <MarketOddsBtn match={match} sel="draw" odd={match.odds.draw} market="result" label="Empate" />}
               <MarketOddsBtn match={match} sel="away" odd={match.odds.away} market="result" label={match.away} />
             </MarketGroup>
           );
