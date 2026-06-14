@@ -2084,6 +2084,7 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
   const sseActiveRef = useRef(false); // true when SSE is connected and receiving data
   const liveExpandedFullFetchRef = useRef<string | null>(null);
   const livePrefetchingRef = useRef<Set<string>>(new Set());
+  const liveTennisHydratingRef = useRef<Set<string>>(new Set());
   const finishedMatchScores = useRef<Map<string, { home: number; away: number }>>(new Map());
 
   // Deposit modal
@@ -3784,6 +3785,39 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
     }
   }, [browserOnline, processLiveData, liveSnapshotKey, writeSnapshot]);
 
+  const refreshLiveMatchById = useCallback(async (
+    id: string,
+    options?: { forceFresh?: boolean; syncExpanded?: boolean },
+  ): Promise<void> => {
+    if (!id) return;
+    if (liveTennisHydratingRef.current.has(id)) return;
+    liveTennisHydratingRef.current.add(id);
+    try {
+      const qs = options?.forceFresh ? "?fresh=1" : "";
+      const r = await fetch(`/api/matches/live-match/${encodeURIComponent(id)}${qs}`);
+      const d = r.ok ? await r.json() : null;
+      const match = d?.match as Match | null | undefined;
+      if (!match) return;
+      writeSnapshot(matchSnapshotKey(id), match as any);
+      setLiveMatches(prev => prev.map((item) => {
+        if (String(item.id) !== id) return item;
+        prevLiveOdds.current[id] = item.odds;
+        prevLiveMarkets.current[id] = flattenMatchMarketsForArrows(item);
+        return { ...match, isLive: true };
+      }));
+      if (options?.syncExpanded !== false) {
+        setExpandedMatch(prev => (
+          prev && String(prev.id) === id
+            ? ({ ...match, isLive: true } as Match)
+            : prev
+        ));
+      }
+    } catch {
+    } finally {
+      liveTennisHydratingRef.current.delete(id);
+    }
+  }, [matchSnapshotKey, writeSnapshot]);
+
   const selectMainTab = useCallback((id: typeof activeTab, onSelect?: () => void) => {
     const prev = activeTabRef.current;
     const currentPath = window.location.pathname.replace(/\/$/, "") || "/";
@@ -3878,6 +3912,7 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
           if (data.type === "update" && data.matchId) {
             // Sub-second delta — patch just the changed match
             const matchId = String(data.matchId);
+            const isTennisDelta = matchId.includes("tennis");
             const msgNow = Date.now();
             liveDataFetchedAt.current = msgNow;
             matchLastSeenRef.current[matchId] = msgNow;
@@ -3894,6 +3929,9 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
             setLiveMatches(prev => prev.map(m =>
               String(m.id) === matchId ? { ...m, ...(data.delta ?? {}), isLive: true } : m
             ));
+            if (isTennisDelta) {
+              void refreshLiveMatchById(matchId, { forceFresh: true, syncExpanded: true });
+            }
           } else if (data.type === "batch_update" && Array.isArray(data.updates)) {
             const msgNow = Date.now();
             liveDataFetchedAt.current = msgNow;
@@ -3980,7 +4018,7 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
       if (sseRef.current) { sseRef.current.close(); sseRef.current = null; }
       sseActiveRef.current = false;
     };
-  }, [activeTab, browserOnline, fetchLive, liveSnapshotKey, readSnapshot, processLiveData, writeSnapshot]); // all stable refs
+  }, [activeTab, browserOnline, fetchLive, liveSnapshotKey, readSnapshot, processLiveData, refreshLiveMatchById, writeSnapshot]); // all stable refs
 
   useEffect(() => {
     if (activeTab !== "live") return;
@@ -6052,6 +6090,44 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
       f["asiatico:at-o275"] = m.asianTotals.o275; f["asiatico:at-u275"] = m.asianTotals.u275;
       f["asiatico:at-o45"] = m.asianTotals.o45; f["asiatico:at-u45"] = m.asianTotals.u45;
       f["asiatico:at-o55"] = m.asianTotals.o55; f["asiatico:at-u55"] = m.asianTotals.u55;
+    }
+    const te = (m as any).tennisExtra as any;
+    if (te) {
+      if (te.firstSet) { f["sets:set1-home"] = te.firstSet.home; f["sets:set1-away"] = te.firstSet.away; }
+      if (te.set2) { f["sets:set2-home"] = te.set2.home; f["sets:set2-away"] = te.set2.away; }
+      if (te.set3) { f["sets:set3-home"] = te.set3.home; f["sets:set3-away"] = te.set3.away; }
+      if (te.setHandicap) { f["handicap:sh15-home2"] = te.setHandicap.home; f["handicap:sh15-away2"] = te.setHandicap.away; }
+      if (te.gameHandicap) {
+        f["handicap:gh-home2"] = te.gameHandicap.home; f["handicap:gh-away2"] = te.gameHandicap.away;
+        f["jogos:gh-home"] = te.gameHandicap.home; f["jogos:gh-away"] = te.gameHandicap.away;
+      }
+      if (te.totalGames) { f["jogos:tg-o"] = te.totalGames.over; f["jogos:tg-u"] = te.totalGames.under; }
+      if (te.set1Games) { f["jogos:s1g-o"] = te.set1Games.over; f["jogos:s1g-u"] = te.set1Games.under; }
+      if (te.set2Games) { f["jogos:s2g-o"] = te.set2Games.over; f["jogos:s2g-u"] = te.set2Games.under; }
+      if (te.homePlayerGames) { f["jogos:hpg-o"] = te.homePlayerGames.over; f["jogos:hpg-u"] = te.homePlayerGames.under; }
+      if (te.awayPlayerGames) { f["jogos:apg-o"] = te.awayPlayerGames.over; f["jogos:apg-u"] = te.awayPlayerGames.under; }
+      if (te.exactSets) {
+        f["placar:es-h20"] = te.exactSets.h20; f["placar:es-h21"] = te.exactSets.h21;
+        f["placar:es-a02"] = te.exactSets.a02; f["placar:es-a12"] = te.exactSets.a12;
+      }
+      if (te.oddEvenGames) { f["especiais:oe-odd"] = te.oddEvenGames.odd; f["especiais:oe-even"] = te.oddEvenGames.even; }
+      if (te.oddEven1st) { f["especiais:oe1-odd"] = te.oddEven1st.odd; f["especiais:oe1-even"] = te.oddEven1st.even; }
+      if (te.oddEven2nd) { f["especiais:oe2-odd"] = te.oddEven2nd.odd; f["especiais:oe2-even"] = te.oddEven2nd.even; }
+      if (te.winAtLeast1P1) { f["especiais:wal1-yes"] = te.winAtLeast1P1.yes; f["especiais:wal1-no"] = te.winAtLeast1P1.no; }
+      if (te.winAtLeast1P2) { f["especiais:wal2-yes"] = te.winAtLeast1P2.yes; f["especiais:wal2-no"] = te.winAtLeast1P2.no; }
+      if (te.setMatch) {
+        f["especiais:sm2-11"] = te.setMatch.h11; f["especiais:sm2-12"] = te.setMatch.h12;
+        f["especiais:sm2-21"] = te.setMatch.a21; f["especiais:sm2-22"] = te.setMatch.a22;
+      }
+      if (te.setExactScore) {
+        for (const [k, v] of Object.entries(te.setExactScore as Record<string, number>)) f[`placar:set-${k}`] = v;
+      }
+      if (Array.isArray(te.score1st)) {
+        for (const entry of te.score1st as Array<{ label: string; odds: number }>) f[`placar:s1-${entry.label}`] = entry.odds;
+      }
+      if (Array.isArray(te.score2nd)) {
+        for (const entry of te.score2nd as Array<{ label: string; odds: number }>) f[`placar:s2-${entry.label}`] = entry.odds;
+      }
     }
     return f;
   }

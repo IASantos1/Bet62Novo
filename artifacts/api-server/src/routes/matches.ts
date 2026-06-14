@@ -102,6 +102,7 @@ type AdvancedMarkets = {
     setMatch?: { h11: number; h12: number; a21: number; a22: number };
     score1st?: Array<{ label: string; odds: number }>;
     score2nd?: Array<{ label: string; odds: number }>;
+    score3rd?: Array<{ label: string; odds: number }>;
   };
   // Hockey extended markets
   hockeyExtra?: {
@@ -1843,11 +1844,10 @@ function clampTennisSetCorrectScoreOdd(rawOdd: number): number {
   return Math.min(TENNIS_SET_CORRECT_SCORE_HARD_CAP, odd);
 }
 
-function computeSetExactScoreOdds(
+function computeSetExactScoreDistribution(
   hg: number,
   ag: number,
   pGame: number,
-  margin = 0.065,
 ): Record<string, number> {
   const qGame = 1 - pGame;
   const comb = (n: number, k: number): number => {
@@ -1858,8 +1858,8 @@ function computeSetExactScoreOdds(
     return r;
   };
   const validScores: [number, number][] = [
-    [6,0],[6,1],[6,2],[6,3],[6,4],[7,5],[7,6],
-    [0,6],[1,6],[2,6],[3,6],[4,6],[5,7],[6,7],
+    [6, 0], [6, 1], [6, 2], [6, 3], [6, 4], [7, 5], [7, 6],
+    [0, 6], [1, 6], [2, 6], [3, 6], [4, 6], [5, 7], [6, 7],
   ];
   const probs: Record<string, number> = {};
   let total = 0;
@@ -1879,11 +1879,255 @@ function computeSetExactScoreOdds(
     probs[`${H}-${A}`] = p;
     total += p;
   }
-  if (total === 0) return {};
+  if (total <= 0) return {};
+  return Object.fromEntries(Object.entries(probs).map(([label, prob]) => [label, prob / total]));
+}
+
+function computeLiveTennisExtras(
+  liveHomeP: number,
+  sets: Array<[number, number]>,
+  homeSetsWon: number,
+  awaySetsWon: number,
+  setNum: number,
+): AdvancedMarkets["tennisExtra"] {
+  const baseExtras = computeTennisExtras(liveHomeP);
+  const pFreshSetHome = Math.min(0.88, Math.max(0.12, 0.5 + (liveHomeP - 0.5) * 1.25));
+  const pGame = Math.min(0.85, Math.max(0.15, 0.5 + (liveHomeP - 0.5) * 0.8));
+  const liveSetWinProb = (hG: number, aG: number, base: number): number =>
+    Math.min(0.97, Math.max(0.03, 0.5 + (base - 0.5) * 0.55 + (hG - aG) * 0.055));
+  const probToHomeAway = (probHome: number, margin: number): { home: number; away: number } => {
+    const [home, away] = probsToDecimalOdds([mc(probHome, 0.02, 0.98), mc(1 - probHome, 0.02, 0.98)], margin);
+    return { home: home!, away: away! };
+  };
+  const probToYesNo = (probYes: number, margin: number): { yes: number; no: number } => {
+    const [yes, no] = probsToDecimalOdds([mc(probYes, 0.02, 0.98), mc(1 - probYes, 0.02, 0.98)], margin);
+    return { yes: yes!, no: no! };
+  };
+  const currentSetIndex = Math.max(0, Math.min(sets.length - 1, homeSetsWon + awaySetsWon));
+  const currentSetGames = sets[currentSetIndex] ?? ([0, 0] as [number, number]);
+  const currentSetDist = computeSetExactScoreDistribution(currentSetGames[0], currentSetGames[1], pGame);
+  const currentSetScore = computeSetExactScoreOdds(currentSetGames[0], currentSetGames[1], pGame);
+  const currentSetHomeWinProb = Object.keys(currentSetDist).length > 0
+    ? Object.entries(currentSetDist).reduce((acc, [label, prob]) => {
+        const [h, a] = label.split("-").map(Number);
+        return acc + ((h ?? 0) > (a ?? 0) ? prob : 0);
+      }, 0)
+    : liveSetWinProb(currentSetGames[0], currentSetGames[1], liveHomeP);
+  const expectedCurrentSetTotalGames = Object.keys(currentSetDist).length > 0
+    ? Object.entries(currentSetDist).reduce((acc, [label, prob]) => {
+        const [h, a] = label.split("-").map(Number);
+        return acc + (((h ?? 0) + (a ?? 0)) * prob);
+      }, 0)
+    : Math.max(currentSetGames[0] + currentSetGames[1] + 2, 9.5);
+  const expectedCurrentSetHomeGames = Object.keys(currentSetDist).length > 0
+    ? Object.entries(currentSetDist).reduce((acc, [label, prob]) => {
+        const [h] = label.split("-").map(Number);
+        return acc + ((h ?? 0) * prob);
+      }, 0)
+    : expectedCurrentSetTotalGames * (0.5 + (pFreshSetHome - 0.5) * 0.55);
+  const expectedCurrentSetAwayGames = Math.max(0, expectedCurrentSetTotalGames - expectedCurrentSetHomeGames);
+  const freshSetExpectedGames = Math.max(8.5, Number(baseExtras.set1Games.line) || 9.5);
+  const freshSetHomeGames = freshSetExpectedGames * (0.5 + (pFreshSetHome - 0.5) * 0.55);
+  const freshSetAwayGames = Math.max(0, freshSetExpectedGames - freshSetHomeGames);
+  const completedGamesBeforeCurrent = sets
+    .slice(0, Math.min(homeSetsWon + awaySetsWon, sets.length))
+    .reduce((acc, [h, a]) => acc + h + a, 0);
+  const completedHomeGames = sets
+    .slice(0, Math.min(homeSetsWon + awaySetsWon, sets.length))
+    .reduce((acc, [h]) => acc + h, 0);
+  const completedAwayGames = sets
+    .slice(0, Math.min(homeSetsWon + awaySetsWon, sets.length))
+    .reduce((acc, [, a]) => acc + a, 0);
+
+  let exactSetsProbs = { h20: 0, h21: 0, a02: 0, a12: 0 };
+  if (homeSetsWon >= 2) {
+    exactSetsProbs = awaySetsWon === 0 ? { h20: 1, h21: 0, a02: 0, a12: 0 } : { h20: 0, h21: 1, a02: 0, a12: 0 };
+  } else if (awaySetsWon >= 2) {
+    exactSetsProbs = homeSetsWon === 0 ? { h20: 0, h21: 0, a02: 1, a12: 0 } : { h20: 0, h21: 0, a02: 0, a12: 1 };
+  } else if (homeSetsWon === 0 && awaySetsWon === 0) {
+    const pc = currentSetHomeWinProb;
+    const pf = pFreshSetHome;
+    exactSetsProbs = {
+      h20: pc * pf,
+      h21: pc * (1 - pf) * pf + (1 - pc) * pf * pf,
+      a02: (1 - pc) * (1 - pf),
+      a12: pc * (1 - pf) * (1 - pf) + (1 - pc) * pf * (1 - pf),
+    };
+  } else if (homeSetsWon === 1 && awaySetsWon === 0) {
+    const pc = currentSetHomeWinProb;
+    const pf = pFreshSetHome;
+    exactSetsProbs = { h20: pc, h21: (1 - pc) * pf, a02: 0, a12: (1 - pc) * (1 - pf) };
+  } else if (homeSetsWon === 0 && awaySetsWon === 1) {
+    const pc = currentSetHomeWinProb;
+    const pf = pFreshSetHome;
+    exactSetsProbs = { h20: 0, h21: pc * pf, a02: 1 - pc, a12: pc * (1 - pf) };
+  } else if (homeSetsWon === 1 && awaySetsWon === 1) {
+    exactSetsProbs = { h20: 0, h21: currentSetHomeWinProb, a02: 0, a12: 1 - currentSetHomeWinProb };
+  }
+  const exactTotal = Object.values(exactSetsProbs).reduce((a, b) => a + b, 0) || 1;
+  const [xh20, xh21, xa02, xa12] = probsToDecimalOdds(
+    [
+      mc(exactSetsProbs.h20 / exactTotal, 0.001, 0.999),
+      mc(exactSetsProbs.h21 / exactTotal, 0.001, 0.999),
+      mc(exactSetsProbs.a02 / exactTotal, 0.001, 0.999),
+      mc(exactSetsProbs.a12 / exactTotal, 0.001, 0.999),
+    ],
+    1.10,
+  );
+
+  const futureSetsAfterCurrent =
+    homeSetsWon === 0 && awaySetsWon === 0
+      ? 1 + currentSetHomeWinProb * (1 - pFreshSetHome) + (1 - currentSetHomeWinProb) * pFreshSetHome
+      : homeSetsWon === 1 && awaySetsWon === 0
+        ? (1 - currentSetHomeWinProb)
+        : homeSetsWon === 0 && awaySetsWon === 1
+          ? currentSetHomeWinProb
+          : 0;
+  const expectedTotalGames = completedGamesBeforeCurrent + expectedCurrentSetTotalGames + futureSetsAfterCurrent * freshSetExpectedGames;
+  const expectedHomeGames = completedHomeGames + expectedCurrentSetHomeGames + futureSetsAfterCurrent * freshSetHomeGames;
+  const expectedAwayGames = completedAwayGames + expectedCurrentSetAwayGames + futureSetsAfterCurrent * freshSetAwayGames;
+  const totalGamesLines = baseExtras.totalGamesLines.map((entry) => {
+    const pUnder = 1 / (1 + Math.exp(-(entry.line - expectedTotalGames) / 2.15));
+    const [over, under] = probsToDecimalOdds([mc(1 - pUnder, 0.02, 0.98), mc(pUnder, 0.02, 0.98)], 1.07);
+    return { line: entry.line, over: over!, under: under! };
+  });
+  const totalGames = totalGamesLines.find((entry) => entry.line === 21.5) ?? totalGamesLines[Math.floor(totalGamesLines.length / 2)]!;
+  const set1GamesLine = Number(baseExtras.set1Games.line) || 9.5;
+  const set2GamesLine = Math.max(8.5, Math.round((freshSetExpectedGames - 0.5) * 2) / 2);
+  const set1GamesProbOver = currentSetIndex === 0
+    ? Object.entries(currentSetDist).reduce((acc, [label, prob]) => {
+        const [h, a] = label.split("-").map(Number);
+        return acc + (((h ?? 0) + (a ?? 0)) > set1GamesLine ? prob : 0);
+      }, 0.5)
+    : (sets[0] ? (((sets[0][0] + sets[0][1]) > set1GamesLine) ? 0.99 : 0.01) : 0.5);
+  const set2GamesProbOver = currentSetIndex === 1
+    ? Object.entries(currentSetDist).reduce((acc, [label, prob]) => {
+        const [h, a] = label.split("-").map(Number);
+        return acc + (((h ?? 0) + (a ?? 0)) > set2GamesLine ? prob : 0);
+      }, 0.5)
+    : (sets[1] ? (((sets[1][0] + sets[1][1]) > set2GamesLine) ? 0.99 : 0.01) : 0.5);
+  const [s1go, s1gu] = probsToDecimalOdds([mc(set1GamesProbOver, 0.02, 0.98), mc(1 - set1GamesProbOver, 0.02, 0.98)], 1.07);
+  const [s2go, s2gu] = probsToDecimalOdds([mc(set2GamesProbOver, 0.02, 0.98), mc(1 - set2GamesProbOver, 0.02, 0.98)], 1.07);
+
+  const homePlayerLine = Math.max(6.5, Math.round(expectedHomeGames * 2) / 2);
+  const awayPlayerLine = Math.max(6.5, Math.round(expectedAwayGames * 2) / 2);
+  const homePlayerProbOver = 1 / (1 + Math.exp(-(expectedHomeGames - homePlayerLine) / 1.4));
+  const awayPlayerProbOver = 1 / (1 + Math.exp(-(expectedAwayGames - awayPlayerLine) / 1.4));
+  const [hpgOver, hpgUnder] = probsToDecimalOdds([mc(homePlayerProbOver, 0.02, 0.98), mc(1 - homePlayerProbOver, 0.02, 0.98)], 1.07);
+  const [apgOver, apgUnder] = probsToDecimalOdds([mc(awayPlayerProbOver, 0.02, 0.98), mc(1 - awayPlayerProbOver, 0.02, 0.98)], 1.07);
+
+  const parityProb = (value: number): number => {
+    const rounded = Math.round(value);
+    const closeness = Math.max(0, 0.5 - Math.abs(value - rounded));
+    const bias = 0.04 + closeness * 0.18;
+    return mc(0.5 + ((rounded % 2 === 1) ? bias : -bias), 0.18, 0.82);
+  };
+  const oddEvenGamesProb = parityProb(expectedTotalGames);
+  const oddEven1stProb = parityProb(currentSetIndex === 0 ? expectedCurrentSetTotalGames : (sets[0]?.[0] ?? 0) + (sets[0]?.[1] ?? 0));
+  const oddEven2ndProb = parityProb(currentSetIndex === 1 ? expectedCurrentSetTotalGames : (sets[1]?.[0] ?? 0) + (sets[1]?.[1] ?? 0));
+
+  const winAtLeast1P1Prob = homeSetsWon >= 1 ? 0.99 : awaySetsWon >= 2 ? 0.01 : 1 - exactSetsProbs.a02;
+  const winAtLeast1P2Prob = awaySetsWon >= 1 ? 0.99 : homeSetsWon >= 2 ? 0.01 : 1 - exactSetsProbs.h20;
+
+  const firstSetCompleted = sets[0] && (((sets[0][0] >= 6 || sets[0][1] >= 6) && Math.abs(sets[0][0] - sets[0][1]) >= 2) || sets[0][0] === 7 || sets[0][1] === 7);
+  const firstSetHomeWon = firstSetCompleted ? (sets[0]![0] > sets[0]![1]) : null;
+  let setMatchProbs = { h11: 0, h12: 0, a21: 0, a22: 0 };
+  if (firstSetHomeWon === null) {
+    const pHomeAfterSet1 = pFreshSetHome * (2 - pFreshSetHome);
+    setMatchProbs = {
+      h11: currentSetHomeWinProb * pHomeAfterSet1,
+      h12: currentSetHomeWinProb * (1 - pHomeAfterSet1),
+      a21: (1 - currentSetHomeWinProb) * pFreshSetHome * pFreshSetHome,
+      a22: (1 - currentSetHomeWinProb) * (1 - pFreshSetHome * pFreshSetHome),
+    };
+  } else if (firstSetHomeWon) {
+    const pHomeMatch =
+      homeSetsWon >= 2 ? 0.99
+      : awaySetsWon >= 2 ? 0.01
+      : homeSetsWon === 1 && awaySetsWon === 1 ? currentSetHomeWinProb
+      : currentSetHomeWinProb + (1 - currentSetHomeWinProb) * pFreshSetHome;
+    setMatchProbs = { h11: pHomeMatch, h12: 1 - pHomeMatch, a21: 0, a22: 0 };
+  } else {
+    const pHomeMatch =
+      homeSetsWon >= 2 ? 0.99
+      : awaySetsWon >= 2 ? 0.01
+      : homeSetsWon === 1 && awaySetsWon === 1 ? currentSetHomeWinProb
+      : pFreshSetHome * currentSetHomeWinProb;
+    setMatchProbs = { h11: 0, h12: 0, a21: pHomeMatch, a22: 1 - pHomeMatch };
+  }
+  const setMatchTotal = Object.values(setMatchProbs).reduce((a, b) => a + b, 0) || 1;
+  const [smH11, smH12, smA21, smA22] = probsToDecimalOdds(
+    [
+      mc(setMatchProbs.h11 / setMatchTotal, 0.001, 0.999),
+      mc(setMatchProbs.h12 / setMatchTotal, 0.001, 0.999),
+      mc(setMatchProbs.a21 / setMatchTotal, 0.001, 0.999),
+      mc(setMatchProbs.a22 / setMatchTotal, 0.001, 0.999),
+    ],
+    1.08,
+  );
+
+  const scoreEntry = (setScore: [number, number] | undefined): Array<{ label: string; odds: number }> =>
+    setScore ? [{ label: `${setScore[0]}-${setScore[1]}`, odds: 1.01 }] : [];
+  const score1st = currentSetIndex === 0
+    ? canonicalTennisSetScoreOrder(Object.entries(currentSetScore).map(([label, odds]) => ({ label, odds })))
+    : scoreEntry(sets[0]);
+  const score2nd = currentSetIndex === 1
+    ? canonicalTennisSetScoreOrder(Object.entries(currentSetScore).map(([label, odds]) => ({ label, odds })))
+    : scoreEntry(sets[1]);
+  const score3rd = currentSetIndex === 2
+    ? canonicalTennisSetScoreOrder(Object.entries(currentSetScore).map(([label, odds]) => ({ label, odds })))
+    : scoreEntry(sets[2]);
+
+  return {
+    ...baseExtras,
+    firstSet: homeSetsWon + awaySetsWon === 0 ? probToHomeAway(currentSetHomeWinProb, 1.06) : baseExtras.firstSet,
+    set2: homeSetsWon + awaySetsWon === 1 ? probToHomeAway(currentSetHomeWinProb, 1.07) : baseExtras.set2,
+    set3: homeSetsWon + awaySetsWon === 2 ? probToHomeAway(currentSetHomeWinProb, 1.09) : baseExtras.set3,
+    exactSets: { h20: xh20!, h21: xh21!, a02: xa02!, a12: xa12! },
+    setHandicap: probToHomeAway(exactSetsProbs.h20, 1.06),
+    totalGames,
+    totalGamesLines,
+    set1Games: { line: set1GamesLine, over: s1go!, under: s1gu! },
+    set2Games: { line: set2GamesLine, over: s2go!, under: s2gu! },
+    gameHandicap: {
+      line: Math.round((expectedHomeGames - expectedAwayGames) * 2) / 2,
+      ...probToHomeAway(mc(0.5 + (expectedHomeGames - expectedAwayGames) * 0.025, 0.05, 0.95), 1.06),
+    },
+    homePlayerGames: { line: homePlayerLine, over: hpgOver!, under: hpgUnder! },
+    awayPlayerGames: { line: awayPlayerLine, over: apgOver!, under: apgUnder! },
+    oddEvenGames: { odd: probToYesNo(oddEvenGamesProb, 1.06).yes, even: probToYesNo(oddEvenGamesProb, 1.06).no },
+    oddEven1st: { odd: probToYesNo(oddEven1stProb, 1.06).yes, even: probToYesNo(oddEven1stProb, 1.06).no },
+    oddEven2nd: { odd: probToYesNo(oddEven2ndProb, 1.06).yes, even: probToYesNo(oddEven2ndProb, 1.06).no },
+    winAtLeast1P1: probToYesNo(winAtLeast1P1Prob, 1.06),
+    winAtLeast1P2: probToYesNo(winAtLeast1P2Prob, 1.06),
+    setMatch: { h11: smH11!, h12: smH12!, a21: smA21!, a22: smA22! },
+    setExactScore: currentSetScore,
+    set1ExactScore: currentSetIndex === 0 ? currentSetScore : (sets[0] ? { [`${sets[0][0]}-${sets[0][1]}`]: 1.01 } : undefined),
+    set2ExactScore: currentSetIndex === 1 ? currentSetScore : (sets[1] ? { [`${sets[1][0]}-${sets[1][1]}`]: 1.01 } : undefined),
+    currentSetNum: setNum,
+    score1st,
+    score2nd,
+    ...(score3rd.length > 0 ? { score3rd } : {}),
+  };
+}
+
+// ─── Tennis Set Exact Score helper ────────────────────────────────────────────
+// Computes exact-score odds for the CURRENT tennis set given the current game
+// score (hg home games won, ag away games won in this set).  Uses a negative-
+// binomial "race to win" model where each game is an independent Bernoulli
+// trial with P(home wins game) = pGame.  Scores already ruled out by the
+// current score are excluded and remaining probabilities are renormalised.
+function computeSetExactScoreOdds(
+  hg: number,
+  ag: number,
+  pGame: number,
+  margin = 0.065,
+): Record<string, number> {
+  const probs = computeSetExactScoreDistribution(hg, ag, pGame);
+  if (Object.keys(probs).length === 0) return {};
   const result: Record<string, number> = {};
   for (const [label, prob] of Object.entries(probs)) {
-    const fair = prob / total;
-    result[label] = clampTennisSetCorrectScoreOdd(1 / (fair * (1 - margin)));
+    result[label] = clampTennisSetCorrectScoreOdd(1 / (prob * (1 - margin)));
   }
   return result;
 }
@@ -6593,47 +6837,9 @@ function buildTennisLiveMatches(
       const pGame = Math.min(0.85, Math.max(0.15, 0.5 + (liveHomeP - 0.5) * 0.8));
       const setExactScore = computeSetExactScoreOdds(curSetH, curSetA, pGame);
 
-      // ── Per-set winner markets: live-adjust based on current game score ────
-      // numDoneSets = sets fully won by either side (homeScore + awayScore)
+      // ── Per-set winner markets: numDoneSets = sets fully won by either side ─
       const numDoneSets = homeScore + awayScore;
-      const baseExtras   = computeTennisExtras(liveHomeP);
-      const set1Games    = sets[0] ?? ([0, 0] as [number, number]);
-      const set2Games    = sets.length >= 2 ? (sets[1] ?? ([0, 0] as [number, number])) : ([0, 0] as [number, number]);
-
-      // Live probability for who wins a set given current game score within it.
-      // Each game lead shifts win probability ~5.5 pp from the base match prob.
-      const liveSetWinProb = (hG: number, aG: number, base: number): number =>
-        Math.min(0.97, Math.max(0.03, 0.5 + (base - 0.5) * 0.55 + (hG - aG) * 0.055));
-
-      // Set 1: in-progress → live-adjust; done → keep base (will be suspended)
-      let firstSetOdds: { home: number; away: number };
-      if (numDoneSets === 0 && sets.length >= 1) {
-        const pS1 = liveSetWinProb(set1Games[0], set1Games[1], liveHomeP);
-        const [s1h, s1a] = probsToDecimalOdds([pS1, 1 - pS1], 1.06);
-        firstSetOdds = { home: s1h!, away: s1a! };
-      } else {
-        firstSetOdds = baseExtras.firstSet;
-      }
-
-      // Set 2: only open once set 1 is finished; in-progress → live-adjust
-      let set2Odds: { home: number; away: number };
-      if (numDoneSets === 1 && sets.length >= 2) {
-        const pS2 = liveSetWinProb(set2Games[0], set2Games[1], liveHomeP);
-        const [s2h, s2a] = probsToDecimalOdds([pS2, 1 - pS2], 1.07);
-        set2Odds = { home: s2h!, away: s2a! };
-      } else {
-        set2Odds = baseExtras.set2;
-      }
-
-      const set3Games = sets.length >= 3 ? (sets[2] ?? ([0, 0] as [number, number])) : ([0, 0] as [number, number]);
-      let set3Odds: { home: number; away: number };
-      if (numDoneSets === 2 && sets.length >= 3) {
-        const pS3 = liveSetWinProb(set3Games[0], set3Games[1], liveHomeP);
-        const [s3h, s3a] = probsToDecimalOdds([pS3, 1 - pS3], 1.09);
-        set3Odds = { home: s3h!, away: s3a! };
-      } else {
-        set3Odds = baseExtras.set3;
-      }
+      const liveTennisExtras = computeLiveTennisExtras(liveHomeP, sets, homeScore, awayScore, setNum);
 
       // Completed set markets are permanently settled. Future set markets stay
       // locked until their respective set actually starts.
@@ -6706,17 +6912,7 @@ function buildTennisLiveMatches(
         handicap:        { homeMinusOne: 0, awayPlusOne: 0, homeMinusOneHalf: 0, awayPlusOneHalf: 0 },
         halfTime:        { home: 0, draw: 0, away: 0 },
         firstGoal:       { home: 0, noGoal: 0, away: 0 },
-        tennisExtra:     { ...baseExtras, firstSet: firstSetOdds, set2: set2Odds, set3: set3Odds, setExactScore, currentSetNum: setNum,
-          // Per-set exact score: live-updated for in-progress set, settled (single entry) for completed sets
-          set1ExactScore: numDoneSets === 0
-            ? setExactScore
-            : { [`${set1Games[0]}-${set1Games[1]}`]: 1.01 },
-          set2ExactScore: numDoneSets === 0
-            ? undefined
-            : numDoneSets === 1
-              ? setExactScore
-              : { [`${set2Games[0]}-${set2Games[1]}`]: 1.01 },
-        },
+        tennisExtra:     { ...liveTennisExtras, setExactScore },
       } as unknown as AdvancedMarkets;
 
       result.push({
@@ -9031,59 +9227,11 @@ function buildTennisLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
 
     const displayStatus = statusStr;
 
-    // ── Tennis set-winner markets for V2 matches ──────────────────────────────
-    // Compute liveHomeP from current odds so we can derive set markets.
+    // ── Tennis live markets for V2 matches ────────────────────────────────────
     const v2HomeP = liveOdds.home > 0 && liveOdds.away > 0
       ? (1 / liveOdds.home) / (1 / liveOdds.home + 1 / liveOdds.away)
       : 0.5;
-    const v2BaseExtras = computeTennisExtras(v2HomeP);
-    const v2Set1Games  = sets[0] ?? ([0, 0] as [number, number]);
-    const v2Set2Games  = sets.length >= 2 ? (sets[1] ?? ([0, 0] as [number, number])) : ([0, 0] as [number, number]);
-    const v2Set3Games  = sets.length >= 3 ? (sets[2] ?? ([0, 0] as [number, number])) : ([0, 0] as [number, number]);
-    const v2SetWinProb = (hG: number, aG: number, base: number): number =>
-      Math.min(0.97, Math.max(0.03, 0.5 + (base - 0.5) * 0.55 + (hG - aG) * 0.055));
-
-    let v2FirstSetOdds: { home: number; away: number };
-    if (doneSets === 0 && sets.length >= 1) {
-      const pS1 = v2SetWinProb(v2Set1Games[0], v2Set1Games[1], v2HomeP);
-      const [s1h, s1a] = probsToDecimalOdds([pS1, 1 - pS1], 1.06);
-      v2FirstSetOdds = { home: s1h!, away: s1a! };
-    } else {
-      v2FirstSetOdds = v2BaseExtras.firstSet;
-    }
-
-    let v2Set2Odds: { home: number; away: number };
-    if (doneSets === 1 && sets.length >= 2) {
-      const pS2 = v2SetWinProb(v2Set2Games[0], v2Set2Games[1], v2HomeP);
-      const [s2h, s2a] = probsToDecimalOdds([pS2, 1 - pS2], 1.07);
-      v2Set2Odds = { home: s2h!, away: s2a! };
-    } else {
-      v2Set2Odds = v2BaseExtras.set2;
-    }
-
-    let v2Set3Odds: { home: number; away: number };
-    if (doneSets === 2 && sets.length >= 3) {
-      const pS3 = v2SetWinProb(v2Set3Games[0], v2Set3Games[1], v2HomeP);
-      const [s3h, s3a] = probsToDecimalOdds([pS3, 1 - pS3], 1.09);
-      v2Set3Odds = { home: s3h!, away: s3a! };
-    } else {
-      v2Set3Odds = v2BaseExtras.set3;
-    }
-
-    const v2TennisExtra = {
-      ...v2BaseExtras,
-      firstSet: v2FirstSetOdds,
-      set2:     v2Set2Odds,
-      set3:     v2Set3Odds,
-      setExactScore: computeSetExactScoreOdds(
-        currentSetNum === 1 ? v2Set1Games[0] : currentSetNum === 2 ? v2Set2Games[0] : v2Set3Games[0],
-        currentSetNum === 1 ? v2Set1Games[1] : currentSetNum === 2 ? v2Set2Games[1] : v2Set3Games[1],
-        v2HomeP,
-      ),
-      currentSetNum,
-      ...(cachedSetScoreOdds?.score1st?.length ? { score1st: cachedSetScoreOdds.score1st } : {}),
-      ...(cachedSetScoreOdds?.score2nd?.length ? { score2nd: cachedSetScoreOdds.score2nd } : {}),
-    };
+    const v2TennisExtra = computeLiveTennisExtras(v2HomeP, sets, homeScore, awayScore, setNum);
 
     const v2Markets = {
       ...makeAdvancedMarketsFromTeams(homeTeam, awayTeam),
@@ -10016,12 +10164,13 @@ router.get("/live", async (req: Request, res: Response) => {
 router.get("/live-match/:id", async (req: Request, res: Response) => {
   res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0");
   const id = String(req.params["id"] ?? "");
+  const forceFresh = String(req.query["fresh"] ?? "0") === "1";
   if (!id) {
     res.json({ match: null });
     return;
   }
   try {
-    const payload = await getLivePayloadCached();
+    const payload = await getLivePayloadCached(forceFresh);
     const effectivePayload = payload.matches.length === 0 ? (getLivePayloadFallback() ?? payload) : payload;
     const match = effectivePayload.matches.find(m => String(m.id) === id) ?? null;
     res.json({ match });
