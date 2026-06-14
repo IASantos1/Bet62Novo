@@ -6869,7 +6869,7 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
           <div className="text-center text-zinc-600 py-6 text-sm">Mercado não disponível para esta partida.</div>
         )}
 
-        {/* ── TÉNIS: PLACAR EXATO DO SET — duas colunas (casa à esq. / fora à dir.) ── */}
+        {/* ── TÉNIS: RESULTADO CORRETO DO SET ATUAL ───────────────────────────── */}
         {isTennis && (modalTab === "placar" || modalTab === "todos") && m && (m as any).tennisExtra?.setExactScore && Object.keys((m as any).tennisExtra.setExactScore as Record<string, number>).length > 0 && (() => {
           const ses = (m as any).tennisExtra.setExactScore as Record<string, number>;
           const setNum = (m as any).tennisExtra.currentSetNum ?? match.minute;
@@ -6888,7 +6888,7 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
           const maxRows = Math.max(homeWins.length, awayWins.length);
           return (
             <div className="mb-4">
-              <p className="text-xs text-zinc-500 mb-3 font-medium">{setNum}º Set — Placar Exato</p>
+              <p className="text-xs text-zinc-500 mb-3 font-medium">{setNum}º Set — Resultado Correto</p>
               <div className="space-y-4">
                 <div>
                   <div className="text-xs text-zinc-400 font-semibold pb-1 border-b border-zinc-700 truncate">{match.home}</div>
@@ -7536,7 +7536,7 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
             )}
             {/* Correct Score 1st Set (top 8 most likely game scores) */}
             {((m as any).tennisExtra as any).score1st?.length > 0 && (
-              <MarketGroup title="Placar Exacto — 1º Set (Games)">
+              <MarketGroup title="Resultado Correto — 1º Set">
                 <div className="grid grid-cols-2 gap-1 w-full col-span-full">
                   {((m as any).tennisExtra as any).score1st.map((sc: { label: string; odds: number }) => (
                     <MarketOddsBtn key={`sc1-${sc.label}`} match={match} sel={`sc1-${sc.label}`} odd={sc.odds} market="placar" label={sc.label} suspKey="firstSet" />
@@ -7546,7 +7546,7 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
             )}
             {/* Correct Score 2nd Set */}
             {((m as any).tennisExtra as any).score2nd?.length > 0 && (
-              <MarketGroup title="Placar Exacto — 2º Set (Games)">
+              <MarketGroup title="Resultado Correto — 2º Set">
                 <div className="grid grid-cols-2 gap-1 w-full col-span-full">
                   {((m as any).tennisExtra as any).score2nd.map((sc: { label: string; odds: number }) => (
                     <MarketOddsBtn key={`sc2-${sc.label}`} match={match} sel={`sc2-${sc.label}`} odd={sc.odds} market="placar" label={sc.label} suspKey="set2" />

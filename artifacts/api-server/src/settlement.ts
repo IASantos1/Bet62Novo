@@ -303,6 +303,18 @@ export function scoreOutcomeForSel(
     if (h === a) return "void";
     winning = wantHome ? h > a : wantAway ? a > h : null;
   }
+  // ── Tennis exact set score ──────────────────────────────────────────────────
+  else if (/^sc([123])-(\d-\d)$/.test(s) || /^ses-(\d-\d)$/.test(s)) {
+    const exact = (s.match(/^sc([123])-(\d-\d)$/) || s.match(/^ses-(\d-\d)$/)) as RegExpMatchArray | null;
+    const setNum = s.startsWith("sc") ? Number(exact?.[1] ?? "0") : null;
+    const wanted = s.startsWith("sc") ? exact?.[2] : exact?.[1];
+    const sets = getTennisSetsFromExtras(extra?.extras);
+    const targetSet = setNum != null && setNum > 0
+      ? sets[setNum - 1] ?? null
+      : sets.length > 0 ? sets[sets.length - 1]! : null;
+    if (!wanted || !targetSet || !tennisSetFinished(targetSet)) return null;
+    winning = `${targetSet[0]}-${targetSet[1]}` === wanted;
+  }
   // ── Exact sets (tennis) ───────────────────────────────────────────────────
   else if (/^es-(h20|h21|a02|a12)$/.test(s)) {
     const score = `${home}-${away}`;
@@ -1071,6 +1083,22 @@ function liveDefinitiveOutcomeForSel(
     return wantHome
       ? (setScore[0] > setScore[1] ? "won" : "lost")
       : (setScore[1] > setScore[0] ? "won" : "lost");
+  }
+
+  if (/^sc([123])-(\d-\d)$/.test(s)) {
+    const m = s.match(/^sc([123])-(\d-\d)$/)!;
+    const setNum = Number(m[1]!);
+    const wanted = m[2]!;
+    const setScore = tennisSets[setNum - 1] ?? null;
+    if (!setScore || !tennisSetFinished(setScore)) return null;
+    return `${setScore[0]}-${setScore[1]}` === wanted ? "won" : "lost";
+  }
+
+  if (/^ses-(\d-\d)$/.test(s)) {
+    const wanted = s.slice(4);
+    const activeSet = tennisSets.length > 0 ? tennisSets[tennisSets.length - 1] : null;
+    if (!activeSet || !tennisSetFinished(activeSet)) return null;
+    return `${activeSet[0]}-${activeSet[1]}` === wanted ? "won" : "lost";
   }
 
   if (/^([ou])sets(15|25|35|45)?$/.test(s)) {

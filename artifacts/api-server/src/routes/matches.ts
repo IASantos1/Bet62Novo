@@ -5894,6 +5894,9 @@ type V2PreMatchOdds = {
   under25?: number;
   firstSetHome?: number;
   firstSetAway?: number;
+  score1st?: Array<{ label: string; odds: number }>;
+  score2nd?: Array<{ label: string; odds: number }>;
+  score3rd?: Array<{ label: string; odds: number }>;
 };
 
 function fractionalToDecimal(frac: string): number {
@@ -5905,15 +5908,69 @@ function fractionalToDecimal(frac: string): number {
   return Math.round((num / den + 1) * 100) / 100;
 }
 
+function normalizeOddsMarketText(value: string): string {
+  return String(value ?? "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function parseTennisSetOrdinal(value: string): number | null {
+  const normalized = normalizeOddsMarketText(value);
+  const numeric = normalized.match(/(?:^|\b)set\s*(\d)(?:\b|[^0-9])/);
+  if (numeric) return Number(numeric[1]);
+  if (normalized.includes("first set") || normalized.includes("1st set") || normalized.includes("set one")) return 1;
+  if (normalized.includes("second set") || normalized.includes("2nd set") || normalized.includes("set two")) return 2;
+  if (normalized.includes("third set") || normalized.includes("3rd set") || normalized.includes("set three")) return 3;
+  return null;
+}
+
+function canonicalTennisSetScoreOrder(entries: Array<{ label: string; odds: number }>): Array<{ label: string; odds: number }> {
+  const order = new Map([
+    ["6-0", 0], ["6-1", 1], ["6-2", 2], ["6-3", 3], ["6-4", 4], ["7-5", 5], ["7-6", 6],
+    ["0-6", 7], ["1-6", 8], ["2-6", 9], ["3-6", 10], ["4-6", 11], ["5-7", 12], ["6-7", 13],
+  ]);
+  return [...entries].sort((a, b) => (order.get(a.label) ?? 999) - (order.get(b.label) ?? 999));
+}
+
+function parseTennisSetCorrectScoreChoices(choices: Array<{ name: string; fractionalValue: string }>): Array<{ label: string; odds: number }> {
+  const out: Array<{ label: string; odds: number }> = [];
+  for (const choice of choices) {
+    const score = String(choice?.name ?? "").replace(/\s+/g, "");
+    if (!/^\d-\d$/.test(score)) continue;
+    const [homeGames, awayGames] = score.split("-").map(Number);
+    const maxGames = Math.max(homeGames, awayGames);
+    const minGames = Math.min(homeGames, awayGames);
+    const valid =
+      (maxGames === 6 && minGames <= 4) ||
+      (homeGames === 7 && awayGames === 5) ||
+      (homeGames === 7 && awayGames === 6) ||
+      (awayGames === 7 && homeGames === 5) ||
+      (awayGames === 7 && homeGames === 6);
+    if (!valid) continue;
+    const odds = fractionalToDecimal(choice.fractionalValue);
+    if (!(odds > 1.001)) continue;
+    out.push({ label: `${homeGames}-${awayGames}`, odds });
+  }
+  return canonicalTennisSetScoreOrder(out);
+}
+
 function parseV2PreMatchOdds(markets: V2RawMarket[]): V2PreMatchOdds | null {
   let home = 0, draw = 0, away = 0;
   let bttsYes = 0, bttsNo = 0, over25 = 0, under25 = 0;
   let firstSetHome = 0, firstSetAway = 0;
+  let score1st: Array<{ label: string; odds: number }> = [];
+  let score2nd: Array<{ label: string; odds: number }> = [];
+  let score3rd: Array<{ label: string; odds: number }> = [];
 
   for (const mkt of markets) {
     const grp = mkt.marketGroup ?? "";
     const name = mkt.marketName ?? "";
     const choices = mkt.choices ?? [];
+    const combinedText = `${grp} ${name}`;
+    const normalizedText = normalizeOddsMarketText(combinedText);
 
     if (grp === "1X2" && name === "Full time") {
       for (const c of choices) {
@@ -5950,6 +6007,19 @@ function parseV2PreMatchOdds(markets: V2RawMarket[]): V2PreMatchOdds | null {
         else if (c.name === "2") firstSetAway = v;
       }
     }
+
+    const looksLikeSetCorrectScore =
+      (normalizedText.includes("correct score") || normalizedText.includes("exact score") || normalizedText.includes("set score"))
+      && normalizedText.includes("set");
+    if (looksLikeSetCorrectScore) {
+      const parsedChoices = parseTennisSetCorrectScoreChoices(choices);
+      if (parsedChoices.length > 0) {
+        const setNum = parseTennisSetOrdinal(combinedText);
+        if (setNum === 1) score1st = parsedChoices;
+        else if (setNum === 2) score2nd = parsedChoices;
+        else if (setNum === 3) score3rd = parsedChoices;
+      }
+    }
   }
 
   const hasAny =
@@ -5961,9 +6031,12 @@ function parseV2PreMatchOdds(markets: V2RawMarket[]): V2PreMatchOdds | null {
     over25 > 0 ||
     under25 > 0 ||
     firstSetHome > 0 ||
-    firstSetAway > 0;
+    firstSetAway > 0 ||
+    score1st.length > 0 ||
+    score2nd.length > 0 ||
+    score3rd.length > 0;
   if (!hasAny) return null;
-  return { home, draw, away, bttsYes, bttsNo, over25, under25, firstSetHome, firstSetAway };
+  return { home, draw, away, bttsYes, bttsNo, over25, under25, firstSetHome, firstSetAway, ...(score1st.length > 0 ? { score1st } : {}), ...(score2nd.length > 0 ? { score2nd } : {}), ...(score3rd.length > 0 ? { score3rd } : {}) };
 }
 
 type PreMatchOddsEntry = { odds: V2PreMatchOdds; fetchedAt: number };
@@ -7578,6 +7651,11 @@ function shiftHour(dateStr: string, timeStr: string): { date: string; time: stri
 // Pre-match tennis odds cache: keyed by sorted-surname pair so live matches
 // can use the last known real odds even after status changes to "Set 1" etc.
 const _tennisPreMatchOdds = new Map<string, { home: number; away: number }>();
+const _tennisPreMatchSetScoreOdds = new Map<string, {
+  score1st?: Array<{ label: string; odds: number }>;
+  score2nd?: Array<{ label: string; odds: number }>;
+  score3rd?: Array<{ label: string; odds: number }>;
+}>();
 function _tennisPairKey(n0: string, n1: string): string {
   const sur = (n: string) => n.replace(/^([A-Z]\.\s*)+/, "").trim().toLowerCase();
   return [sur(n0), sur(n1)].sort().join("|");
@@ -8861,7 +8939,9 @@ function buildTennisLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
     // ── Odds: prefer real bookmaker live odds (from cache), else fall back to
     //    a reactive model that responds to sets, current-set games and points. ──
       const realLiveOdds = ev.id ? _tennisLiveOddsCache.get(ev.id) : undefined;
-      const cachedOdds = _tennisPreMatchOdds.get(_tennisPairKey(homeTeam, awayTeam));
+      const preMatchPairKey = _tennisPairKey(homeTeam, awayTeam);
+      const cachedOdds = _tennisPreMatchOdds.get(preMatchPairKey);
+      const cachedSetScoreOdds = _tennisPreMatchSetScoreOdds.get(preMatchPairKey);
       const baseOdds = cachedOdds
         ? { home: cachedOdds.home, draw: 0, away: cachedOdds.away }
         : makeOddsFromTeams(homeTeam, awayTeam);
@@ -8984,7 +9064,14 @@ function buildTennisLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
       firstSet: v2FirstSetOdds,
       set2:     v2Set2Odds,
       set3:     v2Set3Odds,
+      setExactScore: computeSetExactScoreOdds(
+        currentSetNum === 1 ? v2Set1Games[0] : currentSetNum === 2 ? v2Set2Games[0] : v2Set3Games[0],
+        currentSetNum === 1 ? v2Set1Games[1] : currentSetNum === 2 ? v2Set2Games[1] : v2Set3Games[1],
+        v2HomeP,
+      ),
       currentSetNum,
+      ...(cachedSetScoreOdds?.score1st?.length ? { score1st: cachedSetScoreOdds.score1st } : {}),
+      ...(cachedSetScoreOdds?.score2nd?.length ? { score2nd: cachedSetScoreOdds.score2nd } : {}),
     };
 
     const v2Markets = {
@@ -10059,6 +10146,7 @@ async function buildTennisLiveV1(): Promise<LiveMatchState[]> {
       const pairKey = _tennisPairKey(home, away);
       const realLiveOdds = typeof g.id === "number" ? _tennisLiveOddsCache.get(g.id) : undefined;
       const seededOdds = _tennisPreMatchOdds.get(pairKey);
+      const seededSetScoreOdds = _tennisPreMatchSetScoreOdds.get(pairKey);
       const serving = (typeof g.id === "number" ? _tennisServingCache.get(g.id)?.serving : undefined);
       const baseOdds = seededOdds
         ? { home: seededOdds.home, draw: 0, away: seededOdds.away }
@@ -10087,7 +10175,14 @@ async function buildTennisLiveV1(): Promise<LiveMatchState[]> {
             ...makeAdvancedMarketsFromTeams(home, away),
             tennisExtra: {
               ...computeTennisExtras(pHome),
+              setExactScore: computeSetExactScoreOdds(
+                sets[Math.max(0, Math.min(2, setNum - 1))]?.[0] ?? 0,
+                sets[Math.max(0, Math.min(2, setNum - 1))]?.[1] ?? 0,
+                pHome,
+              ),
               currentSetNum: setNum,
+              ...(seededSetScoreOdds?.score1st?.length ? { score1st: seededSetScoreOdds.score1st } : {}),
+              ...(seededSetScoreOdds?.score2nd?.length ? { score2nd: seededSetScoreOdds.score2nd } : {}),
             },
           };
         })(),
@@ -13086,15 +13181,25 @@ async function getTennisOdds(): Promise<TennisOddsEntry[]> {
       const { date, time } = v2EventDateTime(ev);
       const h = realOdds.home; const a = realOdds.away;
       if (p0Name && p1Name) {
-        _tennisPreMatchOdds.set(_tennisPairKey(p0Name, p1Name), { home: h, away: a });
+        const pairKey = _tennisPairKey(p0Name, p1Name);
+        _tennisPreMatchOdds.set(pairKey, { home: h, away: a });
+        _tennisPreMatchSetScoreOdds.set(pairKey, {
+          ...(Array.isArray(realOdds.score1st) && realOdds.score1st.length > 0 ? { score1st: realOdds.score1st } : {}),
+          ...(Array.isArray(realOdds.score2nd) && realOdds.score2nd.length > 0 ? { score2nd: realOdds.score2nd } : {}),
+          ...(Array.isArray(realOdds.score3rd) && realOdds.score3rd.length > 0 ? { score3rd: realOdds.score3rd } : {}),
+        });
       }
       const pHome = h > 0 && a > 0 ? (1 / h) / ((1 / h) + (1 / a)) : 0.5;
       const set1H = realOdds.firstSetHome ?? 0;
       const set1A = realOdds.firstSetAway ?? 0;
-      const tExtra = computeTennisExtras(pHome, {
+      const tExtra = {
+        ...computeTennisExtras(pHome, {
         set1H: set1H > 0 ? set1H : undefined,
         set1A: set1A > 0 ? set1A : undefined,
-      });
+        }),
+        ...(Array.isArray(realOdds.score1st) && realOdds.score1st.length > 0 ? { score1st: realOdds.score1st } : {}),
+        ...(Array.isArray(realOdds.score2nd) && realOdds.score2nd.length > 0 ? { score2nd: realOdds.score2nd } : {}),
+      };
       results.push({
         matchId: String(ev.id),
         date, time,

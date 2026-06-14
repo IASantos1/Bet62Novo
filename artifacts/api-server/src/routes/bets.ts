@@ -490,6 +490,24 @@ function currentOddForSelection(sel: SelectionRecord, liveSt: LiveMatchState): n
     return out;
   }
 
+  if (/^sc([123])-(\d-\d)$/.test(s)) {
+    const mScore = s.match(/^sc([123])-(\d-\d)$/)!;
+    const setNum = Number(mScore[1]!);
+    const wanted = mScore[2]!;
+    const vt = mk.tennisExtra as unknown as Record<string, unknown> | undefined;
+    const listKey = setNum === 1 ? "score1st" : setNum === 2 ? "score2nd" : "score3rd";
+    const list = Array.isArray(vt?.[listKey]) ? vt?.[listKey] as Array<Record<string, unknown>> : [];
+    const found = list.find((entry) => String(entry.label ?? "") === wanted);
+    return Number.isFinite(found?.odds as number) ? found!.odds as number : null;
+  }
+
+  if (/^ses-(\d-\d)$/.test(s)) {
+    const wanted = s.slice(4);
+    const vt = mk.tennisExtra as unknown as Record<string, unknown> | undefined;
+    const current = (vt?.["setExactScore"] as Record<string, unknown> | undefined)?.[wanted];
+    return Number.isFinite(current as number) ? current as number : null;
+  }
+
   if (/^vs[123][ha]$/.test(s)) {
     const setNum = parseInt(s.slice(2, 3), 10);
     const side = s.endsWith("h") ? "home" : "away";
