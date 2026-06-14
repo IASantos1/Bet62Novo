@@ -825,6 +825,23 @@ function liveDefinitiveOutcomeForSel(
   if (s === "bts-yes") return home > 0 && away > 0 ? "won" : null;
   if (s === "bts-no")  return home > 0 && away > 0 ? "lost" : null;
 
+  // First goal / no goal — settle as soon as the first scorer is known.
+  if (s === "fg-home" || s === "fg-away" || s === "fg-none") {
+    const firstGoal = score.status === "Not Started" ? null : (
+      home > 0 || away > 0
+        ? (home > 0 && away > 0
+            ? null
+            : home > 0
+              ? "home"
+              : "away")
+        : null
+    );
+    if (firstGoal === "home" || firstGoal === "away") {
+      return s === `fg-${firstGoal}` ? "won" : "lost";
+    }
+    return null;
+  }
+
   // Goals O/U — can settle mid-game as soon as threshold crossed (Over) or exceeded (Under→lost)
   const mOU = s.match(/^([ou])([\d.]+)$/);
   if (mOU) {
