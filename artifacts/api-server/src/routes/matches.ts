@@ -245,6 +245,10 @@ export type UpcomingMatch = {
   awayScore?: number;
   minute?: string | number;
   status?: string;
+  homeTeamId?: string;
+  awayTeamId?: string;
+  homeImageVersion?: string;
+  awayImageVersion?: string;
 };
 
 type SAPIMatchEvent = {
@@ -10689,8 +10693,8 @@ async function _rebuildWC2026(): Promise<void> {
       startTime?: string;
       statusGroup?: number;
       statusText?: string;
-      homeCompetitor?: { name?: string; id?: number; score?: number };
-      awayCompetitor?: { name?: string; id?: number; score?: number };
+      homeCompetitor?: { name?: string; id?: number; score?: number; imageVersion?: number | string };
+      awayCompetitor?: { name?: string; id?: number; score?: number; imageVersion?: number | string };
       homeScore?: number;
       awayScore?: number;
       minute?: number | string;
@@ -10784,6 +10788,10 @@ async function _rebuildWC2026(): Promise<void> {
         leagueId: String(WC_COMP_ID),
         providerStatusGroup: g.statusGroup,
         providerStatusText: g.statusText,
+        homeTeamId: g.homeCompetitor?.id != null ? String(g.homeCompetitor.id) : undefined,
+        awayTeamId: g.awayCompetitor?.id != null ? String(g.awayCompetitor.id) : undefined,
+        homeImageVersion: g.homeCompetitor?.imageVersion != null ? String(g.homeCompetitor.imageVersion) : undefined,
+        awayImageVersion: g.awayCompetitor?.imageVersion != null ? String(g.awayCompetitor.imageVersion) : undefined,
       };
       if (isLiveGame) {
         entry.isLive = true;
@@ -10884,6 +10892,8 @@ async function _rebuildWC2026(): Promise<void> {
           odds, markets,
           isWomens: false,
           leagueId: ev.tournamentId ? String(ev.tournamentId) : undefined,
+          homeTeamId: ev.homeTeamId != null ? String(ev.homeTeamId) : undefined,
+          awayTeamId: ev.awayTeamId != null ? String(ev.awayTeamId) : undefined,
         });
       }
     }

@@ -63,6 +63,10 @@ type WCMatch = {
   id: string;
   home: string;
   away: string;
+  homeTeamId?: string;
+  awayTeamId?: string;
+  homeImageVersion?: string;
+  awayImageVersion?: string;
   homeScore?: number;
   awayScore?: number;
   league: string;
@@ -208,10 +212,20 @@ const TEAM_EMOJI: Record<string, string> = {
   "países baixos": "🇳🇱", "netherlands": "🇳🇱",
 };
 
-function FlagImg({ name, size = 32 }: { name: string; size?: number }) {
+function buildCompetitorLogoUrl(teamId?: string, imageVersion?: string): string | null {
+  const cleanId = String(teamId ?? "").trim();
+  if (!cleanId) return null;
+  const url = new URL(`https://v1.football.sportsapipro.com/images/competitors/${encodeURIComponent(cleanId)}`);
+  const cleanVersion = String(imageVersion ?? "").trim();
+  if (cleanVersion) url.searchParams.set("imageVersion", cleanVersion);
+  return url.toString();
+}
+
+function FlagImg({ name, size = 32, teamId, imageVersion }: { name: string; size?: number; teamId?: string; imageVersion?: string }) {
   const [err, setErr] = useState(false);
   const code = TEAM_CODES[name.toLowerCase()];
   const emoji = TEAM_EMOJI[name.toLowerCase()] ?? "🌐";
+  const logoUrl = buildCompetitorLogoUrl(teamId, imageVersion);
   const s = size;
   const border: React.CSSProperties = {
     width: s, height: s, borderRadius: "50%", flexShrink: 0, overflow: "hidden",
@@ -219,6 +233,20 @@ function FlagImg({ name, size = 32 }: { name: string; size?: number }) {
     border: "1.5px solid rgba(255,200,0,0.25)",
     position: "relative",
   };
+  if (logoUrl && !err) {
+    return (
+      <div style={{ ...border, background: "#fff", padding: Math.max(2, Math.round(s * 0.12)) }}>
+        <img
+          src={logoUrl}
+          alt={name}
+          style={{ width: "100%", height: "100%", objectFit: "contain" }}
+          loading="lazy"
+          decoding="async"
+          onError={() => setErr(true)}
+        />
+      </div>
+    );
+  }
   if (code && !err) {
     return (
       <div style={border}>
@@ -298,6 +326,10 @@ function mapToWCMatch(m: Record<string, unknown>): WCMatch {
     id: String(m.id ?? m.matchId ?? Math.random()),
     home: String(m.home ?? m.homeTeam ?? ""),
     away: String(m.away ?? m.awayTeam ?? ""),
+    homeTeamId: m.homeTeamId != null ? String(m.homeTeamId) : undefined,
+    awayTeamId: m.awayTeamId != null ? String(m.awayTeamId) : undefined,
+    homeImageVersion: m.homeImageVersion != null ? String(m.homeImageVersion) : undefined,
+    awayImageVersion: m.awayImageVersion != null ? String(m.awayImageVersion) : undefined,
     league: String(m.league ?? "FIFA World Cup 2026"),
     country: String(m.country ?? ""),
     date: m.date as string | undefined,
@@ -514,7 +546,7 @@ function MatchCard({ match, onOpen, activeSel, onQuickBet, theme, displayMinute 
         {/* Teams row */}
         <div className="flex items-center justify-between gap-2 mb-3">
           <div className="flex-1 flex flex-col items-center gap-1.5 min-w-0">
-            <FlagImg name={home} size={38} />
+            <FlagImg name={home} size={38} teamId={match.homeTeamId} imageVersion={match.homeImageVersion} />
             <div className="flex items-center gap-1">
               <span className={`text-[11px] font-black text-center leading-tight px-1 ${isDark ? "text-white" : "text-zinc-900"}`}>{home}</span>
               {(match.redCardsHome ?? 0) > 0 && (
@@ -544,7 +576,7 @@ function MatchCard({ match, onOpen, activeSel, onQuickBet, theme, displayMinute 
           </div>
 
           <div className="flex-1 flex flex-col items-center gap-1.5 min-w-0">
-            <FlagImg name={away} size={38} />
+            <FlagImg name={away} size={38} teamId={match.awayTeamId} imageVersion={match.awayImageVersion} />
             <div className="flex items-center gap-1">
               {(match.redCardsAway ?? 0) > 0 && (
                 <span className="text-[9px]">{'🟥'.repeat(match.redCardsAway!)}</span>
@@ -589,6 +621,34 @@ function MatchCard({ match, onOpen, activeSel, onQuickBet, theme, displayMinute 
 // ─── Group Standings Card ─────────────────────────────────────────────────────
 
 type GroupRow = { team: string; pld: number; w: number; d: number; l: number; gf: number; ga: number; pts: number };
+
+function normalizeWCVisualName(name: string): string {
+  return String(name ?? "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/&/g, " and ")
+    .replace(/\b(fc|cf|sc|ac|afc|fk|club|clube)\b/g, " ")
+    .replace(/[^a-z0-9 ]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function getTeamVisualMeta(name: string, matches: WCMatch[]): { teamId?: string; imageVersion?: string } {
+  const target = normalizeWCVisualName(PT_DISPLAY_NAMES[name] ?? name);
+  if (!target) return {};
+  for (const match of matches) {
+    const home = normalizeWCVisualName(match.home);
+    if (home && (home === target || home.includes(target) || target.includes(home))) {
+      return { teamId: match.homeTeamId, imageVersion: match.homeImageVersion };
+    }
+    const away = normalizeWCVisualName(match.away);
+    if (away && (away === target || away.includes(target) || target.includes(away))) {
+      return { teamId: match.awayTeamId, imageVersion: match.awayImageVersion };
+    }
+  }
+  return {};
+}
 
 function computeGroupStandings(teams: string[], matches: WCMatch[]): GroupRow[] {
   const norm = (s: string) => s.toLowerCase().replace(/[\s.'-]+/g, "");
@@ -642,20 +702,23 @@ function GroupCard({ group, teams, allMatches, theme }: { group: string; teams: 
       </div>
       {/* Rows */}
       <div className={`divide-y ${isDark ? "divide-zinc-800/30" : "divide-zinc-100"}`}>
-        {rows.map((row, i) => (
-          <div key={row.team} className="flex items-center px-2 py-1.5">
-            <span className={`text-[9px] font-black w-4 text-center ${i < 2 ? "text-green-500" : isDark ? "text-zinc-600" : "text-zinc-400"}`}>{i + 1}</span>
-            <FlagImg name={row.team} size={16} />
-            <span className={`flex-1 text-[10px] font-semibold truncate ml-1.5 ${isDark ? "text-zinc-300" : "text-zinc-700"}`}>{PT_DISPLAY_NAMES[row.team] ?? row.team}</span>
-            <span className={`w-5 text-center text-[10px] ${isDark ? "text-zinc-500" : "text-zinc-500"}`}>{row.pld}</span>
-            <span className={`w-5 text-center text-[10px] ${isDark ? "text-zinc-300" : "text-zinc-700"}`}>{row.w}</span>
-            <span className={`w-5 text-center text-[10px] ${isDark ? "text-zinc-500" : "text-zinc-400"}`}>{row.d}</span>
-            <span className={`w-5 text-center text-[10px] ${isDark ? "text-zinc-500" : "text-zinc-400"}`}>{row.l}</span>
-            <span className={`w-6 text-center text-[10px] ${isDark ? "text-zinc-400" : "text-zinc-600"}`}>{row.gf}</span>
-            <span className={`w-6 text-center text-[10px] ${isDark ? "text-zinc-400" : "text-zinc-600"}`}>{row.ga}</span>
-            <span className={`w-7 text-center text-[10px] font-black ${i < 2 ? "text-green-400" : isDark ? "text-zinc-200" : "text-zinc-900"}`}>{row.pts}</span>
-          </div>
-        ))}
+        {rows.map((row, i) => {
+          const visual = getTeamVisualMeta(row.team, allMatches);
+          return (
+            <div key={row.team} className="flex items-center px-2 py-1.5">
+              <span className={`text-[9px] font-black w-4 text-center ${i < 2 ? "text-green-500" : isDark ? "text-zinc-600" : "text-zinc-400"}`}>{i + 1}</span>
+              <FlagImg name={row.team} size={16} teamId={visual.teamId} imageVersion={visual.imageVersion} />
+              <span className={`flex-1 text-[10px] font-semibold truncate ml-1.5 ${isDark ? "text-zinc-300" : "text-zinc-700"}`}>{PT_DISPLAY_NAMES[row.team] ?? row.team}</span>
+              <span className={`w-5 text-center text-[10px] ${isDark ? "text-zinc-500" : "text-zinc-500"}`}>{row.pld}</span>
+              <span className={`w-5 text-center text-[10px] ${isDark ? "text-zinc-300" : "text-zinc-700"}`}>{row.w}</span>
+              <span className={`w-5 text-center text-[10px] ${isDark ? "text-zinc-500" : "text-zinc-400"}`}>{row.d}</span>
+              <span className={`w-5 text-center text-[10px] ${isDark ? "text-zinc-500" : "text-zinc-400"}`}>{row.l}</span>
+              <span className={`w-6 text-center text-[10px] ${isDark ? "text-zinc-400" : "text-zinc-600"}`}>{row.gf}</span>
+              <span className={`w-6 text-center text-[10px] ${isDark ? "text-zinc-400" : "text-zinc-600"}`}>{row.ga}</span>
+              <span className={`w-7 text-center text-[10px] font-black ${i < 2 ? "text-green-400" : isDark ? "text-zinc-200" : "text-zinc-900"}`}>{row.pts}</span>
+            </div>
+          );
+        })}
       </div>
     </div>
   );
@@ -1324,7 +1387,7 @@ function MarketsPage({ match, activeKeys, onBet, onClose, theme, displayMinute }
         {/* Teams + score + stats button */}
         <div className="flex items-center justify-between gap-2 px-4 pb-3">
           <div className="flex-1 flex flex-col items-center gap-1 min-w-0">
-            <FlagImg name={match.home} size={44} />
+            <FlagImg name={match.home} size={44} teamId={match.homeTeamId} imageVersion={match.homeImageVersion} />
             <span className={`text-[12px] font-black text-center leading-tight ${isDark ? "text-white" : "text-zinc-900"}`}>{match.home}</span>
           </div>
 
@@ -1352,7 +1415,7 @@ function MarketsPage({ match, activeKeys, onBet, onClose, theme, displayMinute }
           </div>
 
           <div className="flex-1 flex flex-col items-center gap-1 min-w-0">
-            <FlagImg name={match.away} size={44} />
+            <FlagImg name={match.away} size={44} teamId={match.awayTeamId} imageVersion={match.awayImageVersion} />
             <span className={`text-[12px] font-black text-center leading-tight ${isDark ? "text-white" : "text-zinc-900"}`}>{match.away}</span>
           </div>
         </div>
