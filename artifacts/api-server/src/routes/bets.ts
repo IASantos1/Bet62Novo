@@ -144,6 +144,22 @@ function normalizeSelectionKey(sel: string): string {
   if      (s === "1x2-home")   s = "home";
   else if (s === "1x2-draw")   s = "draw";
   else if (s === "1x2-away")   s = "away";
+  else if (/^s([123])-(home|away)$/.test(s)) {
+    const m = s.match(/^s([123])-(home|away)$/);
+    s = `set${m![1]}-${m![2]}`;
+  }
+  else if (/^ts-([ou])(15|25|35|45)$/.test(s)) {
+    const m = s.match(/^ts-([ou])(15|25|35|45)$/);
+    s = `${m![1]}sets${m![2]}`;
+  }
+  else if (/^sh(\d+)-(home|away)\d*$/.test(s)) {
+    const m = s.match(/^sh(\d+)-(home|away)\d*$/);
+    s = `sh${m![1]}-${m![2]}`;
+  }
+  else if (/^gh-(home|away)\d*$/.test(s)) {
+    const m = s.match(/^gh-(home|away)\d*$/);
+    s = `gh-${m![1]}`;
+  }
   else if (/^tg-([ou][\d.]+)$/.test(s)) s = s.slice(3);
   else if (/^cards-([ou])(\d+)$/.test(s)) {
     const m = s.match(/^cards-([ou])(\d+)$/);
@@ -166,6 +182,14 @@ function normalizeSelectionKey(sel: string): string {
   else if (s === "et-tie-home") s = "et-tw-home";
   else if (s === "et-tie-away") s = "et-tw-away";
   return s;
+}
+
+function parseSelectionLabelLine(label: unknown): number | null {
+  if (typeof label !== "string") return null;
+  const match = label.match(/(\d+(?:[.,]\d+)?)/);
+  if (!match) return null;
+  const value = Number(match[1]!.replace(",", "."));
+  return Number.isFinite(value) ? value : null;
 }
 
 function extractTeamsFromTitle(title: string): { homeTeam?: string; awayTeam?: string } {
@@ -243,6 +267,40 @@ function normalizeStoredSelection(
     ...(homeTeam ? { homeTeam } : {}),
     ...(awayTeam ? { awayTeam } : {}),
   };
+}
+
+function enrichTennisSelectionForStorage(rawSelection: unknown): unknown {
+  if (!rawSelection || typeof rawSelection !== "object") return rawSelection;
+  const r = rawSelection as Record<string, unknown>;
+  const selection = typeof r.selection === "string" ? r.selection : "";
+  const matchId = String(r.matchId ?? "").trim();
+  if (!selection || !matchId) return rawSelection;
+  const live = liveMatchState.get(matchId);
+  if (!live || live.sport !== "tennis") return rawSelection;
+
+  const markets = (live as { markets?: Record<string, unknown> }).markets as Record<string, unknown> | undefined;
+  const tennisExtra = (markets?.["tennisExtra"] as Record<string, unknown> | undefined) ?? undefined;
+  if (!tennisExtra) return rawSelection;
+
+  let nextSelection = selection;
+
+  if (/^gh-(home|away)$/.test(selection)) {
+    const side = selection.endsWith("home") ? "home" : "away";
+    const line = Number((tennisExtra["gameHandicap"] as Record<string, unknown> | undefined)?.["line"]);
+    if (Number.isFinite(line)) nextSelection = `gh-${side}-${line}`;
+  } else if (/^tg-([ou])$/.test(selection)) {
+    const m = selection.match(/^tg-([ou])$/)!;
+    const line = Number((tennisExtra["totalGames"] as Record<string, unknown> | undefined)?.["line"]);
+    if (Number.isFinite(line)) nextSelection = `tg-${m[1]}-${line}`;
+  } else if (/^s([12])g-([ou])$/.test(selection)) {
+    const m = selection.match(/^s([12])g-([ou])$/)!;
+    const setKey = m[1] === "1" ? "set1Games" : "set2Games";
+    const line = Number((tennisExtra[setKey] as Record<string, unknown> | undefined)?.["line"]);
+    if (Number.isFinite(line)) nextSelection = `s${m[1]}g-${m[2]}-${line}`;
+  }
+
+  if (nextSelection === selection) return rawSelection;
+  return { ...r, selection: nextSelection };
 }
 
 function currentOddForSelection(sel: SelectionRecord, liveSt: LiveMatchState): number | null {
@@ -421,6 +479,68 @@ function currentOddForSelection(sel: SelectionRecord, liveSt: LiveMatchState): n
     const vt = mk.tennisExtra as unknown as Record<string, unknown> | undefined;
     const v = (vt?.["exactSets"] as Record<string, unknown> | undefined)?.[s.slice(3)];
     return Number.isFinite(v as number) ? (v as number) : null;
+  }
+
+  if (/^([ou])sets(15|25|35|45)?$/.test(s)) {
+    const vt = mk.tennisExtra as unknown as Record<string, unknown> | undefined;
+    const totalSets = (vt?.["totalSets"] as Record<string, unknown> | undefined) ?? undefined;
+    const mSets = s.match(/^([ou])sets(15|25|35|45)?$/)!;
+    const suffix = mSets[2] ?? "25";
+    const direct = totalSets?.[`${mSets[1]}${suffix}`];
+    if (Number.isFinite(direct as number)) return direct as number;
+    if (suffix === "25" && rawMarkets && typeof rawMarkets["totalGoals"] === "object") {
+      const tg = rawMarkets["totalGoals"] as Record<string, unknown>;
+      const legacyKey = mSets[1] === "o" ? "over25" : "under25";
+      const legacyValue = tg[legacyKey];
+      return Number.isFinite(legacyValue as number) ? legacyValue as number : null;
+    }
+  }
+
+  if (/^sh(\d+)-(home|away)$/.test(s)) {
+    const vt = mk.tennisExtra as unknown as Record<string, unknown> | undefined;
+    const side = s.endsWith("home") ? "home" : "away";
+    const v = (vt?.["setHandicap"] as Record<string, unknown> | undefined)?.[side];
+    return Number.isFinite(v as number) ? (v as number) : null;
+  }
+
+  if (/^gh-(home|away)(?:-(\d+(?:\.\d+)?))?$/.test(s)) {
+    const vt = mk.tennisExtra as unknown as Record<string, unknown> | undefined;
+    const side = s.startsWith("gh-home") ? "home" : "away";
+    const expectedLine = Number((vt?.["gameHandicap"] as Record<string, unknown> | undefined)?.["line"]);
+    const selectionLine = s.match(/^gh-(?:home|away)-(\d+(?:\.\d+)?)$/)?.[1];
+    if (selectionLine != null && Number.isFinite(expectedLine) && Math.abs(Number(selectionLine) - expectedLine) > 1e-9) return null;
+    const v = (vt?.["gameHandicap"] as Record<string, unknown> | undefined)?.[side];
+    return Number.isFinite(v as number) ? (v as number) : null;
+  }
+
+  if (/^tg-([ou])(?:-(\d+(?:\.\d+)?))?$/.test(s)) {
+    const vt = mk.tennisExtra as unknown as Record<string, unknown> | undefined;
+    const mm = s.match(/^tg-([ou])(?:-(\d+(?:\.\d+)?))?$/)!;
+    const dir = mm[1]!;
+    const selectionLine = mm[2] != null ? Number(mm[2]) : parseSelectionLabelLine(sel.label);
+    const ranges = Array.isArray(vt?.["totalGamesLines"]) ? vt?.["totalGamesLines"] as Array<Record<string, unknown>> : [];
+    if (selectionLine != null) {
+      const found = ranges.find((entry) => Number.isFinite(entry.line as number) && Math.abs(Number(entry.line) - selectionLine) < 1e-9);
+      if (found) {
+        const out = dir === "o" ? found.over : found.under;
+        return Number.isFinite(out as number) ? out as number : null;
+      }
+    }
+    const main = vt?.["totalGames"] as Record<string, unknown> | undefined;
+    const out = dir === "o" ? main?.["over"] : main?.["under"];
+    return Number.isFinite(out as number) ? out as number : null;
+  }
+
+  if (/^s([12])g-([ou])(?:-(\d+(?:\.\d+)?))?$/.test(s)) {
+    const vt = mk.tennisExtra as unknown as Record<string, unknown> | undefined;
+    const mm = s.match(/^s([12])g-([ou])(?:-(\d+(?:\.\d+)?))?$/)!;
+    const setKey = mm[1] === "1" ? "set1Games" : "set2Games";
+    const setObj = vt?.[setKey] as Record<string, unknown> | undefined;
+    const selectionLine = mm[3] != null ? Number(mm[3]) : parseSelectionLabelLine(sel.label);
+    const currentLine = Number(setObj?.["line"]);
+    if (selectionLine != null && Number.isFinite(currentLine) && Math.abs(selectionLine - currentLine) > 1e-9) return null;
+    const out = mm[2] === "o" ? setObj?.["over"] : setObj?.["under"];
+    return Number.isFinite(out as number) ? out as number : null;
   }
 
   if (/^vs-s(30|31|32|03|13|23)$/.test(s)) {
@@ -922,7 +1042,7 @@ router.post("/place", authMiddleware, async (req: Request, res: Response): Promi
 
   const useFreebets = isFreebet === true;
   const selectionsToStore = Array.isArray(selections)
-    ? selections.map((x) => normalizeStoredSelection(x, { matchId: String(matchId), matchTitle, kickoffTime }))
+    ? selections.map((x) => enrichTennisSelectionForStorage(normalizeStoredSelection(x, { matchId: String(matchId), matchTitle, kickoffTime })))
     : selections;
   const ticketKickoffIso = getTicketKickoffIso(selectionsToStore, kickoffTime);
 

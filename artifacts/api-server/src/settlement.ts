@@ -38,6 +38,22 @@ function normalizeSettlementSelectionKey(selection: string): string {
   if      (s === "1x2-home")    s = "home";
   else if (s === "1x2-draw")    s = "draw";
   else if (s === "1x2-away")    s = "away";
+  else if (/^s([123])-(home|away)$/.test(s)) {
+    const m = s.match(/^s([123])-(home|away)$/);
+    s = `set${m![1]}-${m![2]}`;
+  }
+  else if (/^ts-([ou])(15|25|35|45)$/.test(s)) {
+    const m = s.match(/^ts-([ou])(15|25|35|45)$/);
+    s = `${m![1]}sets${m![2]}`;
+  }
+  else if (/^sh(\d+)-(home|away)\d*$/.test(s)) {
+    const m = s.match(/^sh(\d+)-(home|away)\d*$/);
+    s = `sh${m![1]}-${m![2]}`;
+  }
+  else if (/^gh-(home|away)\d*$/.test(s)) {
+    const m = s.match(/^gh-(home|away)\d*$/);
+    s = `gh-${m![1]}`;
+  }
   else if (/^tg-([ou][\d.]+)$/.test(s)) s = s.slice(3);
   else if (/^cards-([ou])(\d+)$/.test(s)) {
     const m = s.match(/^cards-([ou])(\d+)$/);
@@ -60,6 +76,61 @@ function normalizeSettlementSelectionKey(selection: string): string {
   else if (s === "et-tie-home") s = "et-tw-home";
   else if (s === "et-tie-away") s = "et-tw-away";
   return s;
+}
+
+function parseSelectionLabelLine(label: unknown): number | null {
+  if (typeof label !== "string") return null;
+  const match = label.match(/(\d+(?:[.,]\d+)?)/);
+  if (!match) return null;
+  const value = Number(match[1]!.replace(",", "."));
+  return Number.isFinite(value) ? value : null;
+}
+
+function parseTennisPeriods(scoreObj: unknown): number[] {
+  if (!scoreObj || typeof scoreObj !== "object") return [];
+  const out: number[] = [];
+  for (let i = 1; i <= 5; i++) {
+    const value = (scoreObj as Record<string, unknown>)[`period${i}`];
+    if (typeof value === "number" && Number.isFinite(value)) out.push(value);
+  }
+  return out;
+}
+
+function getTennisSetsFromExtras(extras: unknown): Array<[number, number]> {
+  if (!extras || typeof extras !== "object") return [];
+  const ex = extras as Record<string, unknown>;
+  const nested = ex["tennis"];
+  if (nested && typeof nested === "object" && Array.isArray((nested as Record<string, unknown>)["sets"])) {
+    return ((nested as Record<string, unknown>)["sets"] as unknown[])
+      .map((entry) => Array.isArray(entry) && entry.length >= 2 ? [Number(entry[0]), Number(entry[1])] as [number, number] : null)
+      .filter((entry): entry is [number, number] => !!entry && Number.isFinite(entry[0]) && Number.isFinite(entry[1]));
+  }
+
+  const homePeriods = parseTennisPeriods(ex["homeScore"]);
+  const awayPeriods = parseTennisPeriods(ex["awayScore"]);
+  const len = Math.max(homePeriods.length, awayPeriods.length);
+  const sets: Array<[number, number]> = [];
+  for (let i = 0; i < len; i++) {
+    const h = homePeriods[i];
+    const a = awayPeriods[i];
+    if (!Number.isFinite(h) || !Number.isFinite(a)) continue;
+    if ((h ?? 0) === 0 && (a ?? 0) === 0) continue;
+    sets.push([h!, a!]);
+  }
+  return sets;
+}
+
+function tennisSetFinished(setScore: [number, number]): boolean {
+  const [homeGames, awayGames] = setScore;
+  if (!Number.isFinite(homeGames) || !Number.isFinite(awayGames)) return false;
+  const maxGames = Math.max(homeGames, awayGames);
+  const diff = Math.abs(homeGames - awayGames);
+  if (maxGames >= 7) return true;
+  return maxGames >= 6 && diff >= 2;
+}
+
+function tennisTotalGames(sets: Array<[number, number]>): number {
+  return sets.reduce((acc, [homeGames, awayGames]) => acc + homeGames + awayGames, 0);
 }
 
 /**
@@ -164,24 +235,16 @@ export function scoreOutcomeForSel(
     const wantHome = s.endsWith("home") || s.endsWith("h");
     const wantAway = s.endsWith("away") || s.endsWith("a");
     if (!Number.isFinite(setNum) || setNum <= 0) return null;
-    const ex = (extra?.extras ?? {}) as Record<string, unknown>;
-    const hs = ex["homeScore"] as Record<string, unknown> | undefined;
-    const as = ex["awayScore"] as Record<string, unknown> | undefined;
-    const h = typeof hs?.[`period${setNum}`] === "number" ? hs?.[`period${setNum}`] as number : null;
-    const a = typeof as?.[`period${setNum}`] === "number" ? as?.[`period${setNum}`] as number : null;
+    const tennisSet = getTennisSetsFromExtras(extra?.extras)[setNum - 1] ?? null;
+    const h = tennisSet?.[0] ?? null;
+    const a = tennisSet?.[1] ?? null;
     if (h === null || a === null) return null;
     if (h === a) return "void";
     winning = wantHome ? h > a : wantAway ? a > h : null;
   }
   // ── Exact sets (tennis) ───────────────────────────────────────────────────
   else if (/^es-(h20|h21|a02|a12)$/.test(s)) {
-    const ex = (extra?.extras ?? {}) as Record<string, unknown>;
-    const hs = ex["homeScore"] as Record<string, unknown> | undefined;
-    const as = ex["awayScore"] as Record<string, unknown> | undefined;
-    const hc = typeof hs?.["current"] === "number" ? hs["current"] as number : null;
-    const ac = typeof as?.["current"] === "number" ? as["current"] as number : null;
-    if (hc === null || ac === null) return null;
-    const score = `${hc}-${ac}`;
+    const score = `${home}-${away}`;
     const want =
       s === "es-h20" ? "2-0" :
       s === "es-h21" ? "2-1" :
@@ -190,20 +253,62 @@ export function scoreOutcomeForSel(
     winning = score === want;
   }
   // ── Total sets O/U (tennis) ───────────────────────────────────────────────
-  else if (/^([ou])sets(35|25)?$/.test(s)) {
-    const m = s.match(/^([ou])sets(35|25)?$/)!;
+  else if (/^([ou])sets(15|25|35|45)?$/.test(s)) {
+    const m = s.match(/^([ou])sets(15|25|35|45)?$/)!;
     const dir = m[1]!;
-    const suf = m[2] ?? "";
-    const line = suf === "35" ? 3.5 : 2.5;
-    const ex = (extra?.extras ?? {}) as Record<string, unknown>;
-    const hs = ex["homeScore"] as Record<string, unknown> | undefined;
-    const as = ex["awayScore"] as Record<string, unknown> | undefined;
-    const hc = typeof hs?.["current"] === "number" ? hs["current"] as number : null;
-    const ac = typeof as?.["current"] === "number" ? as["current"] as number : null;
-    if (hc === null || ac === null) return null;
-    const totalSets = hc + ac;
+    const suf = m[2] ?? "25";
+    const line = decodeCompactLine(suf);
+    const totalSets = home + away;
     if (totalSets === line) voided = true;
     else winning = dir === "o" ? totalSets > line : totalSets < line;
+  }
+  // ── Tennis total games O/U ────────────────────────────────────────────────
+  else if (/^tg-([ou])(?:-(\d+(?:\.\d+)?))?$/.test(s)) {
+    const m = s.match(/^tg-([ou])(?:-(\d+(?:\.\d+)?))?$/)!;
+    const dir = m[1]!;
+    const line = m[2] != null ? Number(m[2]) : parseSelectionLabelLine((sel as { label?: unknown }).label);
+    if (line == null || !Number.isFinite(line)) return null;
+    const sets = getTennisSetsFromExtras(extra?.extras);
+    if (sets.length === 0) return null;
+    const totalGames = tennisTotalGames(sets);
+    if (totalGames === line) voided = true;
+    else winning = dir === "o" ? totalGames > line : totalGames < line;
+  }
+  // ── Tennis set games O/U (completed set only) ─────────────────────────────
+  else if (/^s([12])g-([ou])(?:-(\d+(?:\.\d+)?))?$/.test(s)) {
+    const m = s.match(/^s([12])g-([ou])(?:-(\d+(?:\.\d+)?))?$/)!;
+    const setIndex = Number(m[1]!) - 1;
+    const dir = m[2]!;
+    const line = m[3] != null ? Number(m[3]) : parseSelectionLabelLine((sel as { label?: unknown }).label);
+    if (line == null || !Number.isFinite(line)) return null;
+    const setScore = getTennisSetsFromExtras(extra?.extras)[setIndex] ?? null;
+    if (!setScore || !tennisSetFinished(setScore)) return null;
+    const totalGames = setScore[0] + setScore[1];
+    if (totalGames === line) voided = true;
+    else winning = dir === "o" ? totalGames > line : totalGames < line;
+  }
+  // ── Tennis set handicap ────────────────────────────────────────────────────
+  else if (/^sh(\d+)-(home|away)$/.test(s)) {
+    const m = s.match(/^sh(\d+)-(home|away)$/)!;
+    const line = parseInt(m[1]!, 10) / 10;
+    if (!Number.isFinite(line)) return null;
+    const side = m[2]!;
+    const diff = home - away;
+    winning = side === "home" ? diff > line : diff < line;
+  }
+  // ── Tennis game handicap ───────────────────────────────────────────────────
+  else if (/^gh-(home|away)(?:-(\d+(?:\.\d+)?))?$/.test(s)) {
+    const m = s.match(/^gh-(home|away)(?:-(\d+(?:\.\d+)?))?$/)!;
+    const side = m[1]!;
+    const line = m[2] != null ? Number(m[2]) : parseSelectionLabelLine((sel as { label?: unknown }).label);
+    if (line == null || !Number.isFinite(line)) return null;
+    const sets = getTennisSetsFromExtras(extra?.extras);
+    if (sets.length === 0) return null;
+    const homeGames = sets.reduce((acc, [homeSet]) => acc + homeSet, 0);
+    const awayGames = sets.reduce((acc, [, awaySet]) => acc + awaySet, 0);
+    winning = side === "home"
+      ? (homeGames - line) > awayGames
+      : (awayGames + line) > homeGames;
   }
   // ── Volleyball exact score (best-of-5) ────────────────────────────────────
   else if (/^vs-s(30|31|32|03|13|23)$/.test(s)) {
@@ -812,6 +917,7 @@ function liveDefinitiveOutcomeForSel(
     cardsTotal?: number;
     htScore?: [number, number] | null;
     status?: string;
+    tennisSets?: Array<[number, number]>;
   }
 ): "won" | "lost" | null {
   // Key normalizations — mirror scoreOutcomeForSel so tg-o25, cards-o35, etc. are handled
@@ -824,6 +930,40 @@ function liveDefinitiveOutcomeForSel(
 
   if (s === "bts-yes") return home > 0 && away > 0 ? "won" : null;
   if (s === "bts-no")  return home > 0 && away > 0 ? "lost" : null;
+
+  const tennisSets = Array.isArray(score.tennisSets) ? score.tennisSets : [];
+  if (/^set[123]-(home|away)$/.test(s) || /^vs[123][ha]$/.test(s)) {
+    const setNum =
+      s.startsWith("set") ? parseInt(s.slice(3, 4), 10)
+      : parseInt(s.slice(2, 3), 10);
+    const wantHome = s.endsWith("-home") || s.endsWith("h");
+    const setScore = tennisSets[setNum - 1] ?? null;
+    if (!setScore || !tennisSetFinished(setScore)) return null;
+    if (setScore[0] === setScore[1]) return "void";
+    return wantHome
+      ? (setScore[0] > setScore[1] ? "won" : "lost")
+      : (setScore[1] > setScore[0] ? "won" : "lost");
+  }
+
+  if (/^([ou])sets(15|25|35|45)?$/.test(s)) {
+    const m = s.match(/^([ou])sets(15|25|35|45)?$/)!;
+    const side = m[1]!;
+    const suffix = m[2] ?? "25";
+    const line = decodeCompactLine(suffix);
+    if (!Number.isFinite(line)) return null;
+    if (side === "o") return tennisSets.length > line ? "won" : null;
+    return tennisSets.length > line ? "lost" : null;
+  }
+
+  if (/^tg-([ou])(?:-(\d+(?:\.\d+)?))?$/.test(s)) {
+    const m = s.match(/^tg-([ou])(?:-(\d+(?:\.\d+)?))?$/)!;
+    const side = m[1]!;
+    const line = m[2] != null ? Number(m[2]) : parseSelectionLabelLine(sel.label);
+    if (line == null || !Number.isFinite(line)) return null;
+    const totalGames = tennisTotalGames(tennisSets);
+    if (side === "o") return totalGames > line ? "won" : null;
+    return totalGames > line ? "lost" : null;
+  }
 
   // First goal / no goal — settle as soon as the first scorer is known.
   if (s === "fg-home" || s === "fg-away" || s === "fg-none") {
@@ -974,6 +1114,7 @@ export async function autoSettlePendingBets(opts?: { matchIds?: string[] }): Pro
                 cardsTotal: liveExtra?.cardsTotal,
                 htScore: liveExtra?.htScore ?? null,
                 status: (live as any)?.status,
+                tennisSets: Array.isArray(liveExtra?.sets) ? liveExtra.sets : undefined,
               })
             : null;
           if (out === "lost") { liveLostDetected = true; break; }
@@ -993,6 +1134,7 @@ export async function autoSettlePendingBets(opts?: { matchIds?: string[] }): Pro
                   cardsTotal: liveExtra?.cardsTotal,
                   htScore: liveExtra?.htScore ?? null,
                   status: (live as any)?.status,
+                  tennisSets: Array.isArray(liveExtra?.sets) ? liveExtra.sets : undefined,
                 })
               : null;
             if (!out) return sel;
@@ -1041,6 +1183,7 @@ export async function autoSettlePendingBets(opts?: { matchIds?: string[] }): Pro
                 cardsTotal: liveExtraSingle?.cardsTotal,
                 htScore: liveExtraSingle?.htScore ?? null,
                 status: (live as any)?.status,
+                tennisSets: Array.isArray(liveExtraSingle?.sets) ? liveExtraSingle.sets : undefined,
               })
             : null;
           if (out === "won" || out === "lost") {
