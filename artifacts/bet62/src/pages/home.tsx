@@ -678,6 +678,30 @@ function getTeamBadgeAsset(
   return { fit: "cover", padded: false };
 }
 
+function isNationalSideName(name: string): boolean {
+  const normalized = normalizeBannerTeamName(name);
+  if (!normalized) return false;
+  return Object.keys(COUNTRY_FLAGS).some((country) => normalizeBannerTeamName(country) === normalized);
+}
+
+function isSelectionMatch(match: Pick<Match, "sport" | "league" | "home" | "away">): boolean {
+  if ((match.sport ?? "football") !== "football") return false;
+  const league = String(match.league ?? "").toLowerCase();
+  if (
+    /world cup|copa do mundo|uefa nations|euro|european championship|copa america|gold cup|africa cup|asian cup|international|qualif|qualifica/i.test(league)
+  ) {
+    return true;
+  }
+  return isNationalSideName(match.home) && isNationalSideName(match.away);
+}
+
+function teamMonogram(name: string): string {
+  const words = String(name ?? "").trim().split(/\s+/).filter(Boolean);
+  if (words.length === 0) return "FC";
+  if (words.length === 1) return words[0]!.slice(0, 2).toUpperCase();
+  return `${words[0]![0] ?? ""}${words[words.length - 1]![0] ?? ""}`.toUpperCase();
+}
+
 function isWomensMatch(match: { league?: string; isWomens?: boolean }): boolean {
   if (match.isWomens) return true;
   return /women|feminine|féminin|feminino|frauen|femenin|damall|nwsl|wsl/i.test(match.league ?? "");
@@ -4633,6 +4657,7 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
     const sport  = match.sport ?? "football";
     const extra  = match._liveExtra;
     const flag   = COUNTRY_FLAGS[match.country?.toLowerCase() ?? ""] ?? sportEmoji(match.sport);
+    const isSelection = isSelectionMatch(match);
     const matchKey  = String(match.id);
     const bannerImg = getMatchBannerStable(match);
     const homeName = teamNamePt(match.home);
@@ -5058,7 +5083,7 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
           <div className={`rounded-[20px] px-3 py-3 border ${isDarkTheme ? "bg-zinc-950 border-zinc-900/80" : "bg-zinc-950 border-zinc-900/80"}`}>
             <div className="flex items-center justify-between gap-2.5 mb-2">
               <div className="flex-1 flex flex-col items-center gap-1.5 min-w-0">
-                <EventTeamBadge name={homeName} badge={homeBadge.src} badgeFit={homeBadge.fit} badgePadded={homeBadge.padded} sport={sport} flag={flag} compact />
+                <EventTeamBadge name={homeName} badge={homeBadge.src} badgeFit={homeBadge.fit} badgePadded={homeBadge.padded} sport={sport} flag={flag} isSelection={isSelection} compact />
                 <span className="text-[13px] font-black text-white text-center leading-tight px-1">{homeName}</span>
               </div>
               <div className="min-w-[68px] flex flex-col items-center">
@@ -5075,7 +5100,7 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
                 ) : null}
               </div>
               <div className="flex-1 flex flex-col items-center gap-1.5 min-w-0">
-                <EventTeamBadge name={awayName} badge={awayBadge.src} badgeFit={awayBadge.fit} badgePadded={awayBadge.padded} sport={sport} flag={flag} compact />
+                <EventTeamBadge name={awayName} badge={awayBadge.src} badgeFit={awayBadge.fit} badgePadded={awayBadge.padded} sport={sport} flag={flag} isSelection={isSelection} compact />
                 <span className="text-[13px] font-black text-white text-center leading-tight px-1">{awayName}</span>
               </div>
             </div>
@@ -5094,22 +5119,29 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
 
   const stopCardOpen = (e: { stopPropagation: () => void }) => e.stopPropagation();
 
-  const EventTeamBadge = ({ name, badge, badgeFit = "cover", badgePadded = false, sport, flag, compact = false }: {
+  const EventTeamBadge = ({ name, badge, badgeFit = "cover", badgePadded = false, sport, flag, isSelection = false, compact = false }: {
     name: string;
     badge?: string;
     badgeFit?: "cover" | "contain";
     badgePadded?: boolean;
     sport: string;
     flag: string;
+    isSelection?: boolean;
     compact?: boolean;
   }) => (
     <div className={`${compact ? "w-[46px] h-[46px]" : "w-[54px] h-[54px]"} rounded-full bg-white border border-zinc-200 shadow-[0_0_14px_rgba(234,179,8,0.28)] flex items-center justify-center overflow-hidden ${badgePadded ? "p-1.5" : ""}`}>
       {badge ? (
         <img src={badge} alt={name} className={`w-full h-full ${badgeFit === "contain" ? "object-contain" : "object-cover"}`} loading="lazy" decoding="async" />
       ) : (
-        <span className={`${compact ? "text-[22px]" : "text-[26px]"} leading-none`}>
-          {sport === "tennis" ? "🎾" : sport === "basketball" ? "🏀" : sport === "hockey" ? "🏒" : sport === "volleyball" ? "🏐" : sport === "baseball" ? "⚾" : flag}
-        </span>
+        isSelection ? (
+          <span className={`${compact ? "text-[22px]" : "text-[26px]"} leading-none`}>
+            {sport === "tennis" ? "🎾" : sport === "basketball" ? "🏀" : sport === "hockey" ? "🏒" : sport === "volleyball" ? "🏐" : sport === "baseball" ? "⚾" : flag}
+          </span>
+        ) : (
+          <span className={`${compact ? "text-[12px]" : "text-[14px]"} font-black tracking-wide text-zinc-900`}>
+            {sport === "football" ? teamMonogram(name) : (sport === "tennis" ? "TN" : sport === "basketball" ? "BK" : sport === "hockey" ? "HK" : sport === "volleyball" ? "VB" : sport === "baseball" ? "BB" : "SP")}
+          </span>
+        )
       )}
     </div>
   );
@@ -5117,6 +5149,8 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
   const MatchCard = ({ match }: { match: Match }) => {
     const sport = match.sport ?? "football";
     const flag = COUNTRY_FLAGS[match.country?.toLowerCase() ?? ""] ?? sportEmoji(match.sport);
+    const isSelection = isSelectionMatch(match);
+    const dateStr = match.date ? formatMatchDate(match.date) : "";
     const dateStr = match.date ? formatMatchDate(match.date) : "";
     const rivalry = RIVALRY_TAGS[`${match.home}|${match.away}`];
     const hasDraw = match.odds.draw > 0;
@@ -5187,7 +5221,7 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
           )}
           <div className={`flex items-center justify-between gap-2.5 mb-2.5 ${isDarkTheme ? "rounded-[20px] bg-zinc-950 border border-zinc-900/80 px-3 py-3" : ""}`}>
             <div className="flex-1 flex flex-col items-center gap-1.5 min-w-0">
-              <EventTeamBadge name={homeName} badge={homeBadge.src} badgeFit={homeBadge.fit} badgePadded={homeBadge.padded} sport={sport} flag={flag} compact />
+              <EventTeamBadge name={homeName} badge={homeBadge.src} badgeFit={homeBadge.fit} badgePadded={homeBadge.padded} sport={sport} flag={flag} isSelection={isSelection} compact />
               <span className={`text-[14px] font-black text-center leading-tight px-1 ${isDarkTheme ? "text-white" : "text-zinc-900"}`}>
                 {homeName}
               </span>
@@ -5198,7 +5232,7 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
               {dateStr && <span className={`mt-0.5 text-[11px] font-semibold ${isDarkTheme ? "text-zinc-400" : "text-zinc-500"}`}>{dateStr}</span>}
             </div>
             <div className="flex-1 flex flex-col items-center gap-1.5 min-w-0">
-              <EventTeamBadge name={awayName} badge={awayBadge.src} badgeFit={awayBadge.fit} badgePadded={awayBadge.padded} sport={sport} flag={flag} compact />
+              <EventTeamBadge name={awayName} badge={awayBadge.src} badgeFit={awayBadge.fit} badgePadded={awayBadge.padded} sport={sport} flag={flag} isSelection={isSelection} compact />
               <span className={`text-[14px] font-black text-center leading-tight px-1 ${isDarkTheme ? "text-white" : "text-zinc-900"}`}>
                 {awayName}
               </span>
@@ -8133,6 +8167,7 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
                       {(() => {
                         const homeExpandedBadge = getTeamBadgeAsset(expandedMatch, "home");
                         const awayExpandedBadge = getTeamBadgeAsset(expandedMatch, "away");
+                        const isExpandedSelection = isSelectionMatch(expandedMatch);
                         return (
                           <>
                       <div className="flex-1 flex flex-col items-center gap-2 min-w-0">
@@ -8143,6 +8178,7 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
                           badgePadded={homeExpandedBadge.padded}
                           sport={expandedMatch.sport ?? "football"}
                           flag={COUNTRY_FLAGS[expandedMatch.country?.toLowerCase() ?? ""] ?? sportEmoji(expandedMatch.sport)}
+                          isSelection={isExpandedSelection}
                         />
                         <span className="text-[16px] font-black text-zinc-900 text-center leading-tight px-1">
                           {teamNamePt(expandedMatch.home)}
@@ -8177,6 +8213,7 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
                           badgePadded={awayExpandedBadge.padded}
                           sport={expandedMatch.sport ?? "football"}
                           flag={COUNTRY_FLAGS[expandedMatch.country?.toLowerCase() ?? ""] ?? sportEmoji(expandedMatch.sport)}
+                          isSelection={isExpandedSelection}
                         />
                         <span className="text-[16px] font-black text-zinc-900 text-center leading-tight px-1">
                           {teamNamePt(expandedMatch.away)}
