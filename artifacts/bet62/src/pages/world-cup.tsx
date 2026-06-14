@@ -462,6 +462,34 @@ function wcPhaseTag(status: string | undefined, minute: number): "1P" | "Int." |
   return "2P";
 }
 
+function isWCHalftimeStatus(status: string | undefined): boolean {
+  const s = (status ?? "").toLowerCase();
+  return s === "ht" || s === "halftime" || s.includes("half time") || s.includes("intervalo");
+}
+
+function getWCLiveHalf(match: WCMatch, displayMinute?: number): 1 | 2 | 0 | null {
+  const s = (match.status ?? "").toLowerCase();
+  const minute = displayMinute ?? match.minute ?? 0;
+  if (isWCHalftimeStatus(match.status)) return 0;
+  if (
+    s.includes("2nd half") ||
+    s.includes("second half") ||
+    s.includes("2ª parte") ||
+    s.includes("extra") ||
+    s === "et" ||
+    s.includes("pen") ||
+    match.isFinished ||
+    minute > 45
+  ) return 2;
+  if (
+    s.includes("1st half") ||
+    s.includes("first half") ||
+    s.includes("1ª parte") ||
+    minute > 0
+  ) return 1;
+  return null;
+}
+
 function fmtWCMin(minute: number | undefined, status: string | undefined): string {
   if (!minute || minute <= 0) return "";
   const s = (status ?? "").toLowerCase();
@@ -558,6 +586,16 @@ function MatchCard({ match, onOpen, activeSel, onQuickBet, theme, displayMinute,
 
   // Goal celebration colour ring
   const showGoalRing = isGoal || isGoalCeleb;
+  const isObviousLiveResult = !!(isLive && odds && (() => {
+    const validOdds = [odds.home, odds.away].filter(v => v > 0);
+    if (validOdds.length === 0) return false;
+    const minOdd = Math.min(...validOdds);
+    if (minOdd <= 1.05) return true;
+    const diff = Math.abs((homeScore ?? 0) - (awayScore ?? 0));
+    if (dispMin >= 80 && diff >= 2) return true;
+    if (dispMin >= 85 && diff >= 1) return true;
+    return false;
+  })());
 
   return (
     <motion.div
@@ -678,12 +716,24 @@ function MatchCard({ match, onOpen, activeSel, onQuickBet, theme, displayMinute,
                 </span>
               </div>
             )}
-            <div className={`flex gap-1.5 ${isSuspended ? "opacity-40 pointer-events-none" : ""}`}>
-              <OBtn label={home} odd={odds.home} prevOdd={prevOdds?.home} isLive={isLive} active={activeSel === `${match.id}:home`} onClick={() => onQuickBet(`${match.id}:home`, home, odds.home)} theme={theme} />
-              {odds.draw > 1.001 && <OBtn label="Empate" odd={odds.draw} prevOdd={prevOdds?.draw} isLive={isLive} active={activeSel === `${match.id}:draw`} onClick={() => onQuickBet(`${match.id}:draw`, "Empate", odds.draw)} theme={theme} />}
-              <OBtn label={away} odd={odds.away} prevOdd={prevOdds?.away} isLive={isLive} active={activeSel === `${match.id}:away`} onClick={() => onQuickBet(`${match.id}:away`, away, odds.away)} theme={theme} />
-            </div>
-            {!match.hasRealOdds && (
+            {isObviousLiveResult && !isSuspended ? (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onOpen();
+                }}
+                className="flex-1 flex flex-col items-center justify-center py-3 px-2 rounded-xl text-xs border border-amber-200 bg-amber-50"
+              >
+                <span className="font-black text-[11px] text-amber-600 uppercase tracking-widest">Aposta Já</span>
+              </button>
+            ) : (
+              <div className={`flex gap-1.5 ${isSuspended ? "opacity-40 pointer-events-none" : ""}`}>
+                <OBtn label={home} odd={odds.home} prevOdd={prevOdds?.home} isLive={isLive} active={activeSel === `${match.id}:home`} onClick={() => onQuickBet(`${match.id}:home`, home, odds.home)} theme={theme} />
+                {odds.draw > 1.001 && <OBtn label="Empate" odd={odds.draw} prevOdd={prevOdds?.draw} isLive={isLive} active={activeSel === `${match.id}:draw`} onClick={() => onQuickBet(`${match.id}:draw`, "Empate", odds.draw)} theme={theme} />}
+                <OBtn label={away} odd={odds.away} prevOdd={prevOdds?.away} isLive={isLive} active={activeSel === `${match.id}:away`} onClick={() => onQuickBet(`${match.id}:away`, away, odds.away)} theme={theme} />
+              </div>
+            )}
+            {!isObviousLiveResult && !match.hasRealOdds && (
               <div className="flex items-center justify-center gap-1">
                 <span className="w-1 h-1 rounded-full bg-amber-500/60" />
                 <span className={`text-[8px] font-semibold tracking-wide ${isDark ? "text-zinc-600" : "text-zinc-400"}`}>ODDS ESTIMADAS</span>
@@ -922,6 +972,10 @@ function MarketsPage({ match, activeKeys, onBet, onClose, theme, displayMinute }
   const isDark = theme === "dark";
   const bet = (k: string, label: string, odd: number, market: string) => onBet(mid, k, label, odd, market);
   const dateStr = formatMatchDate(match.date);
+  const liveHalf = getWCLiveHalf(match, displayMinute);
+  const show1tempo = !match.isLive || liveHalf === null || liveHalf === 1;
+  const show2tempo = !match.isLive || liveHalf === 0 || liveHalf === 2;
+  const halftimeSettled = !!(match.isLive && !show1tempo && show2tempo);
 
   const isSuspended = match.isLive && (
     !!match._suspensionReason ||
@@ -948,10 +1002,14 @@ function MarketsPage({ match, activeKeys, onBet, onClose, theme, displayMinute }
   const hasGolos = !!(mk.totalGoals?.over25 || mk.bothTeamsScore?.yes || mk.exactGoals?.g0 !== undefined);
   const hasHandicap = !!(mk.handicap?.homeMinusOne || mk.asianHandicap?.home);
   const hasMarcador = !!(mk.correctScore && Object.keys(mk.correctScore).length > 0);
-  const hasCantos = !!(mk.corners?.o95 || mk.corners1H?.o45 || mk.corners2H?.o45);
-  const hasCartoes = !!(mk.cards?.o35 || mk.cards1H?.o15 || mk.cards2H?.o05);
+  const hasCantos = !!(mk.corners?.o95 || (show1tempo && mk.corners1H?.o45) || (show2tempo && mk.corners2H?.o45));
+  const hasCartoes = !!(mk.cards?.o35 || (show1tempo && mk.cards1H?.o15) || (show2tempo && mk.cards2H?.o05));
   const hasEspeciais = !!(mk.firstGoal?.home || mk.winToNil?.home || mk.goalOddEven?.odd || mk.btts1H?.yes || mk.toWinBothHalves?.home);
-  const hasJogadores = !!(mk.playerGoals?.length || mk.playerAssists?.length || mk.playerCards?.length);
+  const hasJogadores = !!(
+    mk.playerGoals?.some(p => (p.anytime ?? 0) > 1.001 || (show1tempo && (p.firstHalf ?? 0) > 1.001) || (show2tempo && (p.secondHalf ?? 0) > 1.001)) ||
+    mk.playerAssists?.some(p => (p.anytime ?? 0) > 1.001) ||
+    mk.playerCards?.some(p => (p.anytime ?? 0) > 1.001 || (show1tempo && (p.firstHalf ?? 0) > 1.001) || (show2tempo && (p.secondHalf ?? 0) > 1.001))
+  );
 
   const TABS: { id: MTabId; label: string }[] = [
     { id: "todos", label: "Todos" },
@@ -981,7 +1039,7 @@ function MarketsPage({ match, activeKeys, onBet, onClose, theme, displayMinute }
           ]} activeKey={ak} onBet={(k, l, o) => bet(k, l, o, "resultado")} theme={theme} isSuspended={isSuspended} />
         </>
       )}
-      {mk.halfTime && (mk.halfTime.home > 1.001 || mk.halfTime.draw > 1.001) && (
+      {show1tempo && mk.halfTime && (mk.halfTime.home > 1.001 || mk.halfTime.draw > 1.001) && (
         <>
           <SLabel theme={theme}>INTERVALO (1ª PARTE)</SLabel>
           <MRow items={[
@@ -991,7 +1049,7 @@ function MarketsPage({ match, activeKeys, onBet, onClose, theme, displayMinute }
           ]} activeKey={ak} onBet={(k, l, o) => bet(k, l, o, "intervalo")} theme={theme} isSuspended={isSuspended} />
         </>
       )}
-      {mk.secondHalf && mk.secondHalf.home > 1.001 && (
+      {show2tempo && mk.secondHalf && mk.secondHalf.home > 1.001 && (
         <>
           <SLabel theme={theme}>2ª PARTE</SLabel>
           <MRow items={[
@@ -1082,7 +1140,7 @@ function MarketsPage({ match, activeKeys, onBet, onClose, theme, displayMinute }
           ]} activeKey={ak} onBet={(k, l, o) => bet(k, l, o, "ambas-marcam")} theme={theme} isSuspended={isSuspended} />
         </>
       )}
-      {mk.btts1H && mk.btts1H.yes > 1.001 && (
+      {show1tempo && mk.btts1H && mk.btts1H.yes > 1.001 && (
         <>
           <SLabel theme={theme}>AMBAS MARCAM — 1ª PARTE</SLabel>
           <MRow items={[
@@ -1091,7 +1149,7 @@ function MarketsPage({ match, activeKeys, onBet, onClose, theme, displayMinute }
           ]} activeKey={ak} onBet={(k, l, o) => bet(k, l, o, "ambas-1h")} theme={theme} isSuspended={isSuspended} />
         </>
       )}
-      {mk.btts2H && mk.btts2H.yes > 1.001 && (
+      {show2tempo && mk.btts2H && mk.btts2H.yes > 1.001 && (
         <>
           <SLabel theme={theme}>AMBAS MARCAM — 2ª PARTE</SLabel>
           <MRow items={[
@@ -1236,7 +1294,7 @@ function MarketsPage({ match, activeKeys, onBet, onClose, theme, displayMinute }
           ))}
         </>
       )}
-      {mk.corners1H && Object.values(mk.corners1H).some(v => (v ?? 0) > 1.001) && (
+      {show1tempo && mk.corners1H && Object.values(mk.corners1H).some(v => (v ?? 0) > 1.001) && (
         <>
           <SLabel theme={theme}>CANTOS — 1ª PARTE</SLabel>
           {([
@@ -1251,7 +1309,7 @@ function MarketsPage({ match, activeKeys, onBet, onClose, theme, displayMinute }
           ))}
         </>
       )}
-      {mk.corners2H && Object.values(mk.corners2H).some(v => (v ?? 0) > 1.001) && (
+      {show2tempo && mk.corners2H && Object.values(mk.corners2H).some(v => (v ?? 0) > 1.001) && (
         <>
           <SLabel theme={theme}>CANTOS — 2ª PARTE</SLabel>
           {([
@@ -1286,7 +1344,7 @@ function MarketsPage({ match, activeKeys, onBet, onClose, theme, displayMinute }
           ))}
         </>
       )}
-      {mk.cards1H && Object.values(mk.cards1H).some(v => (v ?? 0) > 1.001) && (
+      {show1tempo && mk.cards1H && Object.values(mk.cards1H).some(v => (v ?? 0) > 1.001) && (
         <>
           <SLabel theme={theme}>CARTÕES — 1ª PARTE</SLabel>
           {([
@@ -1301,7 +1359,7 @@ function MarketsPage({ match, activeKeys, onBet, onClose, theme, displayMinute }
           ))}
         </>
       )}
-      {mk.cards2H && Object.values(mk.cards2H).some(v => (v ?? 0) > 1.001) && (
+      {show2tempo && mk.cards2H && Object.values(mk.cards2H).some(v => (v ?? 0) > 1.001) && (
         <>
           <SLabel theme={theme}>CARTÕES — 2ª PARTE</SLabel>
           {([
@@ -1366,7 +1424,7 @@ function MarketsPage({ match, activeKeys, onBet, onClose, theme, displayMinute }
               </button>
             ))}
           </div>
-          {mk.playerGoals.some(p => (p.firstHalf ?? 0) > 1.001) && (
+          {show1tempo && mk.playerGoals.some(p => (p.firstHalf ?? 0) > 1.001) && (
             <>
               <SLabel theme={theme}>MARCADOR — 1ª PARTE</SLabel>
               <div className="grid grid-cols-2 gap-1.5 mb-2">
@@ -1380,7 +1438,7 @@ function MarketsPage({ match, activeKeys, onBet, onClose, theme, displayMinute }
               </div>
             </>
           )}
-          {mk.playerGoals.some(p => (p.secondHalf ?? 0) > 1.001) && (
+          {show2tempo && mk.playerGoals.some(p => (p.secondHalf ?? 0) > 1.001) && (
             <>
               <SLabel theme={theme}>MARCADOR — 2ª PARTE</SLabel>
               <div className="grid grid-cols-2 gap-1.5 mb-2">
@@ -1422,7 +1480,7 @@ function MarketsPage({ match, activeKeys, onBet, onClose, theme, displayMinute }
               </button>
             ))}
           </div>
-          {mk.playerCards.some(p => (p.firstHalf ?? 0) > 1.001) && (
+          {show1tempo && mk.playerCards.some(p => (p.firstHalf ?? 0) > 1.001) && (
             <>
               <SLabel theme={theme}>CARTÃO — 1ª PARTE</SLabel>
               <div className="grid grid-cols-2 gap-1.5 mb-2">
@@ -1436,7 +1494,7 @@ function MarketsPage({ match, activeKeys, onBet, onClose, theme, displayMinute }
               </div>
             </>
           )}
-          {mk.playerCards.some(p => (p.secondHalf ?? 0) > 1.001) && (
+          {show2tempo && mk.playerCards.some(p => (p.secondHalf ?? 0) > 1.001) && (
             <>
               <SLabel theme={theme}>CARTÃO — 2ª PARTE</SLabel>
               <div className="grid grid-cols-2 gap-1.5 mb-2">
@@ -1610,6 +1668,11 @@ function MarketsPage({ match, activeKeys, onBet, onClose, theme, displayMinute }
 
       {/* ── Scrollable markets content ── */}
       <div className="flex-1 overflow-y-auto px-4 py-3 pb-24" style={{ overscrollBehavior: "contain" }}>
+        {halftimeSettled && (
+          <div className={`mb-3 rounded-xl border px-3 py-2 text-[11px] font-bold ${isDark ? "border-amber-500/25 bg-amber-500/10 text-amber-300" : "border-amber-200 bg-amber-50 text-amber-700"}`}>
+            1º tempo liquidado. Agora aparecem apenas os mercados da 2ª parte.
+          </div>
+        )}
 
         {/* TODOS — show all markets */}
         {activeTab === "todos" && (
