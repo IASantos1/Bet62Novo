@@ -365,6 +365,10 @@ type WCMatchCollections = {
   initialTab: "live" | "upcoming";
 };
 
+type WCStandingRow = { pos: number; name: string; played: number; won: number; drawn: number; lost: number; gf: number; ga: number; pts: number };
+type WCStandingGroup = { name: string; rows: WCStandingRow[] };
+type WCCompetitionSection = { title: string; items: Array<{ name: string; odd: number }> };
+
 function emptyWCMatchCollections(): WCMatchCollections {
   return {
     allMatches: [],
@@ -689,6 +693,25 @@ function normalizeWCVisualName(name: string): string {
     .trim();
 }
 
+function wcStandingRowMatchesTeam(rowName: string, teamName: string): boolean {
+  const row = normalizeWCVisualName(rowName);
+  const team = normalizeWCVisualName(teamName);
+  if (!row || !team) return false;
+  return row === team || row.includes(team) || team.includes(row) || row.includes(team.slice(0, Math.min(team.length, 8)));
+}
+
+function normalizeWCGroupName(rawName: string): string {
+  const raw = String(rawName ?? "").trim();
+  if (!raw) return "Grupo";
+  const compact = raw.replace(/\s+/g, " ").trim();
+  const explicit = compact.match(/(?:^|\b)(?:grupo|group)\s*([A-L])(?:\b|$)/i);
+  if (explicit?.[1]) return `Grupo ${explicit[1].toUpperCase()}`;
+  const reversed = compact.match(/^([A-L])\s*(?:grupo|group)\b/i);
+  if (reversed?.[1]) return `Grupo ${reversed[1].toUpperCase()}`;
+  if (/^[A-Z0-9]$/.test(compact)) return `Grupo ${compact}`;
+  return raw;
+}
+
 function getTeamVisualMeta(name: string, matches: WCMatch[]): { teamId?: string; imageVersion?: string } {
   const target = normalizeWCVisualName(PT_DISPLAY_NAMES[name] ?? name);
   if (!target) return {};
@@ -731,9 +754,29 @@ function computeGroupStandings(teams: string[], matches: WCMatch[]): GroupRow[] 
   );
 }
 
-function GroupCard({ group, teams, allMatches, theme }: { group: string; teams: string[]; allMatches: WCMatch[]; theme: Theme }) {
+function officialGroupRowsToDisplayRows(teams: string[], officialRows: WCStandingRow[] | undefined): GroupRow[] | null {
+  if (!officialRows || officialRows.length === 0) return null;
+  const rows = teams.map((team, idx) => {
+    const found = officialRows.find((row) => wcStandingRowMatchesTeam(row.name, team));
+    return found
+      ? {
+          team,
+          pld: found.played,
+          w: found.won,
+          d: found.drawn,
+          l: found.lost,
+          gf: found.gf,
+          ga: found.ga,
+          pts: found.pts,
+        }
+      : { team, pld: 0, w: 0, d: 0, l: 0, gf: 0, ga: 0, pts: 0 };
+  });
+  return rows.sort((a, b) => b.pts - a.pts || (b.gf - b.ga) - (a.gf - a.ga) || b.gf - a.gf);
+}
+
+function GroupCard({ group, teams, allMatches, theme, officialRows }: { group: string; teams: string[]; allMatches: WCMatch[]; theme: Theme; officialRows?: WCStandingRow[] }) {
   const isDark = theme === "dark";
-  const rows = computeGroupStandings(teams, allMatches);
+  const rows = officialGroupRowsToDisplayRows(teams, officialRows) ?? computeGroupStandings(teams, allMatches);
   return (
     <div className={`rounded-xl border overflow-hidden ${isDark ? "border-zinc-800 bg-zinc-900/80" : "border-zinc-200 bg-white"}`}>
       {/* Header */}
@@ -1602,9 +1645,11 @@ export default function WorldCupPage({ onClose, onBet: onBetProp }: { onClose?: 
   const [upcomingMatches, setUpcomingMatches] = useState<WCMatch[]>(initialSnapshot.upcomingMatches);
   const [allMatches, setAllMatches]         = useState<WCMatch[]>(initialSnapshot.allMatches);
   const [loading, setLoading]               = useState(initialSnapshotRef.current === null);
-  const [pageTab, setPageTab]               = useState<"live" | "upcoming" | "groups">(initialSnapshot.initialTab);
+  const [pageTab, setPageTab]               = useState<"live" | "competition" | "upcoming" | "groups">(initialSnapshot.initialTab);
   const [openMatch, setOpenMatch]           = useState<WCMatch | null>(null);
   const [activeKeys, setActiveKeys]         = useState<Record<string, string>>({});
+  const [officialGroups, setOfficialGroups] = useState<WCStandingGroup[]>([]);
+  const [competitionSections]               = useState<WCCompetitionSection[]>([]);
   const [theme, setTheme]                   = useState<Theme>(() => getResolvedTheme(null));
   const intervalRef         = useRef<ReturnType<typeof setInterval> | null>(null);
   // ── Live clock interpolation (1-second tick, same pattern as home.tsx) ──────
@@ -1621,6 +1666,28 @@ export default function WorldCupPage({ onClose, onBet: onBetProp }: { onClose?: 
     return () => {
       unsubscribe();
       clearInterval(id);
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const loadStandings = async () => {
+      try {
+        const data = await fetchWithTimeout("/api/matches/wc2026-standings", {}, 12_000)
+          .then(r => r.ok ? r.json() : { groups: [] })
+          .catch(() => ({ groups: [] })) as { groups?: WCStandingGroup[] };
+        if (!cancelled && Array.isArray(data.groups)) {
+          setOfficialGroups(data.groups);
+        }
+      } finally {
+        if (!cancelled) timer = setTimeout(loadStandings, 5 * 60_000);
+      }
+    };
+    loadStandings();
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
     };
   }, []);
 
@@ -1823,6 +1890,7 @@ export default function WorldCupPage({ onClose, onBet: onBetProp }: { onClose?: 
       <div className="flex gap-2 px-4 mb-4">
         {([
           { key: "live",     label: "🔴 Ao Vivo",  count: liveCount },
+          { key: "competition", label: "🏆 Competição", count: competitionSections.length },
           { key: "upcoming", label: "📅 Próximos",  count: upcomingCount },
           { key: "groups",   label: "🏆 Grupos",    count: WC_GROUPS.length },
         ] as const).map(({ key, label, count }) => (
@@ -1882,10 +1950,47 @@ export default function WorldCupPage({ onClose, onBet: onBetProp }: { onClose?: 
             </motion.div>
           )}
 
+          {pageTab === "competition" && (
+            <motion.div key="competition" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+              {competitionSections.length === 0 ? (
+                <div className="text-center py-16">
+                  <div className="text-5xl mb-3">🏆</div>
+                  <div className={`font-bold text-sm ${isDark ? "text-zinc-400" : "text-zinc-600"}`}>Mercados de competição a preparar</div>
+                  <div className={`text-xs mt-1.5 ${isDark ? "text-zinc-600" : "text-zinc-400"}`}>Vou encaixar aqui os mercados da API assim que fechar os blocos que vais enviar nas próximas fotos.</div>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {competitionSections.map((section) => (
+                    <div key={section.title} className={`rounded-2xl border p-4 ${isDark ? "border-zinc-800 bg-zinc-900/80" : "border-zinc-200 bg-white"}`}>
+                      <div className={`text-sm font-black mb-3 ${isDark ? "text-white" : "text-zinc-900"}`}>{section.title}</div>
+                      <div className="space-y-2">
+                        {section.items.map((item) => (
+                          <div key={`${section.title}:${item.name}`} className="flex items-center justify-between gap-3">
+                            <span className={`text-sm ${isDark ? "text-zinc-300" : "text-zinc-700"}`}>{item.name}</span>
+                            <span className={`text-sm font-black tabular-nums ${isDark ? "text-white" : "text-zinc-900"}`}>{item.odd.toFixed(2)}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </motion.div>
+          )}
+
           {pageTab === "groups" && (
             <motion.div key="groups" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
               <div className="grid grid-cols-2 gap-3">
-                {WC_GROUPS.map(g => <GroupCard key={g.group} group={g.group} teams={g.teams} allMatches={allMatches} theme={theme} />)}
+                {WC_GROUPS.map(g => (
+                  <GroupCard
+                    key={g.group}
+                    group={g.group}
+                    teams={g.teams}
+                    allMatches={allMatches}
+                    theme={theme}
+                    officialRows={officialGroups.find(entry => normalizeWCGroupName(entry.name) === `Grupo ${g.group}`)?.rows}
+                  />
+                ))}
               </div>
             </motion.div>
           )}

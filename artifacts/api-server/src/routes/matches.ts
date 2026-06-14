@@ -10907,6 +10907,70 @@ const WC2026_GROUPS = [
   { group: "L", teams: ["England", "Croatia", "Ghana", "Panama"] },
 ] as const;
 
+function normalizeWC2026PairKey(home: string, away: string): string {
+  return [normalizeWC2026TeamKey(home), normalizeWC2026TeamKey(away)].sort().join("|");
+}
+
+function parseWC2026DisplayKickoffMs(date: string | undefined, time: string | undefined): number | null {
+  if (!date || !time) return null;
+  const m = String(date).match(/^(\d{2})\.(\d{2})\.(\d{4})$/);
+  if (!m) return null;
+  const [, dd, mm, yyyy] = m;
+  const ms = new Date(`${yyyy}-${mm}-${dd}T${String(time).padStart(5, "0")}:00`).getTime();
+  return Number.isFinite(ms) ? ms : null;
+}
+
+const WC2026_STATIC_BY_PAIR = (() => {
+  const map = new Map<string, Array<{ home: string; away: string; group: string; date: string; time: string; md: number }>>();
+  for (const fixture of WC2026_STATIC) {
+    const key = normalizeWC2026PairKey(fixture.home, fixture.away);
+    const arr = map.get(key) ?? [];
+    arr.push(fixture);
+    map.set(key, arr);
+  }
+  return map;
+})();
+
+function findWC2026StaticFixture(home: string, away: string, date?: string, time?: string) {
+  const candidates = WC2026_STATIC_BY_PAIR.get(normalizeWC2026PairKey(home, away)) ?? [];
+  if (candidates.length === 0) return null;
+  const actualMs = parseWC2026DisplayKickoffMs(date, time);
+  if (actualMs == null) return candidates[0] ?? null;
+  let best: (typeof candidates)[number] | null = null;
+  let bestDiff = Number.POSITIVE_INFINITY;
+  for (const candidate of candidates) {
+    const dt = new Date(`${candidate.date}T${candidate.time}:00Z`);
+    const candidateDay = dt.toLocaleDateString("pt-PT", { day: "2-digit", timeZone: "Europe/Lisbon" });
+    const candidateMonth = dt.toLocaleDateString("pt-PT", { month: "2-digit", timeZone: "Europe/Lisbon" });
+    const candidateYear = dt.toLocaleDateString("pt-PT", { year: "numeric", timeZone: "Europe/Lisbon" });
+    const candidateTime = dt.toLocaleTimeString("pt-PT", { hour: "2-digit", minute: "2-digit", timeZone: "Europe/Lisbon" });
+    const candidateMs = parseWC2026DisplayKickoffMs(`${candidateDay}.${candidateMonth}.${candidateYear}`, candidateTime);
+    if (candidateMs == null) continue;
+    const diff = Math.abs(candidateMs - actualMs);
+    if (diff < bestDiff) {
+      bestDiff = diff;
+      best = candidate;
+    }
+  }
+  return best;
+}
+
+function isWC2026ApiFixtureConsistent(match: UpcomingMatch): boolean {
+  const fixture = findWC2026StaticFixture(match.home, match.away, match.date, match.time);
+  if (!fixture) return false;
+  if (String(match.id ?? "").startsWith("wc26-")) return true;
+  const actualMs = parseWC2026DisplayKickoffMs(match.date, match.time);
+  if (actualMs == null) return true;
+  const dt = new Date(`${fixture.date}T${fixture.time}:00Z`);
+  const fixtureDay = dt.toLocaleDateString("pt-PT", { day: "2-digit", timeZone: "Europe/Lisbon" });
+  const fixtureMonth = dt.toLocaleDateString("pt-PT", { month: "2-digit", timeZone: "Europe/Lisbon" });
+  const fixtureYear = dt.toLocaleDateString("pt-PT", { year: "numeric", timeZone: "Europe/Lisbon" });
+  const fixtureTime = dt.toLocaleTimeString("pt-PT", { hour: "2-digit", minute: "2-digit", timeZone: "Europe/Lisbon" });
+  const fixtureMs = parseWC2026DisplayKickoffMs(`${fixtureDay}.${fixtureMonth}.${fixtureYear}`, fixtureTime);
+  if (fixtureMs == null) return true;
+  return Math.abs(fixtureMs - actualMs) <= 6 * 60 * 60 * 1000;
+}
+
 function normalizeWC2026TeamKey(name: string): string {
   return String(name ?? "")
     .toLowerCase()
@@ -11058,21 +11122,26 @@ async function getWC2026Standings(): Promise<{ groups: WC2026StandingGroup[]; le
   if (wcEvent) {
     leagueName = normalizeLeagueName(v2TournName(wcEvent.tournament), "") || leagueName;
     tournamentId = wcEvent.tournamentId;
+    seasonId = Number((wcEvent as Record<string, unknown>)["seasonId"] ?? ((wcEvent as Record<string, unknown>)["season"] as Record<string, unknown> | undefined)?.["id"] ?? 0) || undefined;
     try {
       const matchResp = await fetch(`${SAPI_V2_FOOTBALL}/match/${wcEvent.id}`, {
         signal: AbortSignal.timeout(8_000),
         headers: sapiHeaders(),
       });
       if (matchResp.ok) {
-        const matchData = await matchResp.json() as {
-          match?: {
-            season?: { id?: number };
-            tournament?: { uniqueTournament?: { id?: number; name?: string }; name?: string };
-          };
-        };
-        seasonId = matchData.match?.season?.id;
-        tournamentId = matchData.match?.tournament?.uniqueTournament?.id ?? tournamentId;
-        leagueName = matchData.match?.tournament?.uniqueTournament?.name ?? matchData.match?.tournament?.name ?? leagueName;
+        const matchData = await matchResp.json() as Record<string, unknown>;
+        const matchRoot = (
+          (matchData["match"] as Record<string, unknown> | undefined) ??
+          ((matchData["data"] as Record<string, unknown> | undefined)?.["match"] as Record<string, unknown> | undefined) ??
+          (matchData["event"] as Record<string, unknown> | undefined) ??
+          ((matchData["data"] as Record<string, unknown> | undefined)?.["event"] as Record<string, unknown> | undefined)
+        );
+        const season = matchRoot?.["season"] as Record<string, unknown> | undefined;
+        const tournament = matchRoot?.["tournament"] as Record<string, unknown> | undefined;
+        const uniqueTournament = tournament?.["uniqueTournament"] as Record<string, unknown> | undefined;
+        seasonId = Number(season?.["id"] ?? seasonId ?? 0) || seasonId;
+        tournamentId = Number(uniqueTournament?.["id"] ?? tournament?.["id"] ?? tournamentId ?? 0) || tournamentId;
+        leagueName = String(uniqueTournament?.["name"] ?? tournament?.["name"] ?? leagueName);
       }
     } catch {
       // ignore and fall back below
@@ -11089,8 +11158,11 @@ async function getWC2026Standings(): Promise<{ groups: WC2026StandingGroup[]; le
     headers: sapiHeaders(),
   });
   if (!stdResp.ok) throw new Error("Standings da Copa do Mundo indisponiveis");
-  const stdData = await stdResp.json() as { standings?: any[] };
-  const rawArr = stdData.standings ?? [];
+  const stdData = await stdResp.json() as Record<string, unknown>;
+  const rawArr =
+    ((stdData["standings"] as any[] | undefined) ??
+    (((stdData["data"] as Record<string, unknown> | undefined)?.["standings"] as any[] | undefined)) ??
+    []);
 
   const firstItem = rawArr[0];
   const isGrouped = firstItem && (
@@ -11106,9 +11178,12 @@ async function getWC2026Standings(): Promise<{ groups: WC2026StandingGroup[]; le
         typeof g.group === "string" ? g.group :
         (g.group?.name ?? g.name ?? "Grupo");
       const nestedRows: any[] = g.rows ?? g.standings ?? [];
+      const normalizedRows = nestedRows
+        .map((r: any, i: number) => parseStandingRow(r, i))
+        .filter((row: WC2026StandingRow) => !!assignWC2026Group(row.name));
       return {
         name: normalizeWCGroupName(rawName),
-        rows: nestedRows.map((r: any, i: number) => parseStandingRow(r, i)),
+        rows: normalizedRows,
       };
     }).filter((g: WC2026StandingGroup) => g.rows.length > 0);
   } else {
@@ -11128,6 +11203,25 @@ async function getWC2026Standings(): Promise<{ groups: WC2026StandingGroup[]; le
       }))
       .sort((a, b) => a.name.localeCompare(b.name));
   }
+
+  groups = WC2026_GROUPS.map((group) => {
+    const official = groups.find((entry) => normalizeWCGroupName(entry.name) === `Grupo ${group.group}`);
+    const rows = group.teams.map((team, idx) => {
+      const found = official?.rows.find((row) => wcStandingRowMatchesTeam(row.name, team));
+      return found ?? {
+        pos: idx + 1,
+        name: team,
+        played: 0,
+        won: 0,
+        drawn: 0,
+        lost: 0,
+        gf: 0,
+        ga: 0,
+        pts: 0,
+      };
+    }).sort((a, b) => b.pts - a.pts || (b.gf - b.ga) - (a.gf - a.ga) || b.gf - a.gf || a.pos - b.pos);
+    return { name: `Grupo ${group.group}`, rows };
+  });
 
   const result = { groups, league: leagueName };
   wc2026StandingsCache.set(cacheKey, { data: result, fetchedAt: Date.now() });
@@ -11213,7 +11307,8 @@ async function _rebuildWC2026(): Promise<void> {
     const results: UpcomingMatch[] = wcV1Games.map(g => {
       const home = g.homeCompetitor?.name ?? "Unknown";
       const away = g.awayCompetitor?.name ?? "Unknown";
-      const league = g.competitionDisplayName ?? "FIFA World Cup";
+      const staticFixture = findWC2026StaticFixture(home, away, date, time);
+      const league = staticFixture ? `FIFA World Cup - Group ${staticFixture.group}` : (g.competitionDisplayName ?? "FIFA World Cup");
       // Convert ISO start time to PT timezone (Lisbon)
       const dt = g.startTime ? new Date(g.startTime) : new Date(Date.now() + 86_400_000);
       const day   = dt.toLocaleDateString("pt-PT", { day: "2-digit",   timeZone: "Europe/Lisbon" });
@@ -11339,10 +11434,11 @@ async function _rebuildWC2026(): Promise<void> {
         };
         const hasFull1x2 = !!(realOdds && realOdds.home > 0 && realOdds.draw > 0 && realOdds.away > 0);
         const odds = hasFull1x2 ? { home: realOdds!.home, draw: realOdds!.draw, away: realOdds!.away } : baseOdds;
+        const staticFixture = findWC2026StaticFixture(home, away, date, time);
         v2Results.push({
           id: `fb-v2-${ev.id}`,
           home, away,
-          league: leagueName,
+          league: staticFixture ? `FIFA World Cup - Group ${staticFixture.group}` : leagueName,
           country: v2TournCountry(ev),
           time, date,
           sport: "football",
@@ -11357,23 +11453,23 @@ async function _rebuildWC2026(): Promise<void> {
     }
 
     // Merge: V1 is primary, V2 fallback supplements if V1 is empty
-    const apiResults: UpcomingMatch[] = results.length > 0 ? results : v2Results;
+    const apiResults: UpcomingMatch[] = (results.length > 0 ? results : v2Results).filter(isWC2026ApiFixtureConsistent);
 
     // ── Supplement with static schedule for future games not yet returned by API ──
     const now = Date.now();
     // Build a set of matchups already covered by API (normalised lowercase)
-    const apiMatchups = new Set(apiResults.map(r => `${r.home.toLowerCase()}|${r.away.toLowerCase()}`));
+    const apiMatchups = new Set(apiResults.map(r => `${normalizeWC2026PairKey(r.home, r.away)}|${r.date ?? ""}|${r.time ?? ""}`));
     const staticSupplements: UpcomingMatch[] = [];
     for (const s of WC2026_STATIC) {
       const startMs = new Date(`${s.date}T${s.time}:00Z`).getTime();
       if (startMs < now - 5 * 60_000) continue; // skip past games
-      if (apiMatchups.has(`${s.home.toLowerCase()}|${s.away.toLowerCase()}`)) continue; // API already has it
       const dt2 = new Date(startMs);
       const sDay   = dt2.toLocaleDateString("pt-PT", { day: "2-digit",   timeZone: "Europe/Lisbon" });
       const sMon   = dt2.toLocaleDateString("pt-PT", { month: "2-digit", timeZone: "Europe/Lisbon" });
       const sYr    = dt2.toLocaleDateString("pt-PT", { year: "numeric",  timeZone: "Europe/Lisbon" });
       const sDate  = `${sDay}.${sMon}.${sYr}`;
       const sTime  = dt2.toLocaleTimeString("pt-PT", { hour: "2-digit", minute: "2-digit", timeZone: "Europe/Lisbon" });
+      if (apiMatchups.has(`${normalizeWC2026PairKey(s.home, s.away)}|${sDate}|${sTime}`)) continue; // API already has this exact slot
       const sOdds  = makeOddsFromTeams(s.home, s.away);
       const sMkts  = makeAdvancedMarketsFromTeams(s.home, s.away);
       staticSupplements.push({
