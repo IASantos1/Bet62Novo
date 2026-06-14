@@ -11218,7 +11218,67 @@ async function getWC2026CompetitionSections(): Promise<{ sections: WC2026Competi
   if (cached && Date.now() - cached.fetchedAt < WC2026_COMPETITION_TTL) return cached.data;
   if (!CONFIG.SPORTSAPI_KEY) return { sections: [] };
 
+  let tournamentId: number | undefined;
+  let seasonId: number | undefined;
+  try {
+    const nowMs = Date.now();
+    const dates: string[] = [];
+    for (let i = -2; i < 38; i++) {
+      dates.push(new Date(nowMs + i * 86_400_000).toISOString().slice(0, 10));
+    }
+    const dayResults = await Promise.race([
+      Promise.all(dates.map(dt => getScheduleV2("football", dt).catch(() => [] as SAPIV2Event[]))),
+      new Promise<SAPIV2Event[][]>(resolve => setTimeout(() => resolve([]), 12_000)),
+    ]);
+    const events = (Array.isArray(dayResults) ? dayResults.flat() : []) as SAPIV2Event[];
+    const wcEvent = events.find((ev) => {
+      const league = normalizeLeagueName(v2TournName(ev.tournament), "").toLowerCase();
+      return (
+        league.includes("world cup") ||
+        league.includes("copa do mundo") ||
+        league.includes("fifa world") ||
+        league.includes("wc 2026")
+      ) && !league.includes("women") && !league.includes("qualification") && !league.includes("qualif");
+    });
+    if (wcEvent) {
+      tournamentId = wcEvent.tournamentId;
+      seasonId = Number((wcEvent as Record<string, unknown>)["seasonId"] ?? ((wcEvent as Record<string, unknown>)["season"] as Record<string, unknown> | undefined)?.["id"] ?? 0) || undefined;
+      if (wcEvent.id) {
+        try {
+          const matchResp = await fetch(`${SAPI_V2_FOOTBALL}/match/${wcEvent.id}`, {
+            signal: AbortSignal.timeout(8_000),
+            headers: sapiHeaders(),
+          });
+          if (matchResp.ok) {
+            const matchData = await matchResp.json() as Record<string, unknown>;
+            const matchRoot = (
+              (matchData["match"] as Record<string, unknown> | undefined) ??
+              ((matchData["data"] as Record<string, unknown> | undefined)?.["match"] as Record<string, unknown> | undefined) ??
+              (matchData["event"] as Record<string, unknown> | undefined) ??
+              ((matchData["data"] as Record<string, unknown> | undefined)?.["event"] as Record<string, unknown> | undefined)
+            );
+            const season = (matchRoot?.["season"] as Record<string, unknown> | undefined) ?? undefined;
+            const tournament = (matchRoot?.["tournament"] as Record<string, unknown> | undefined) ?? undefined;
+            const uniqueTournament = (matchRoot?.["uniqueTournament"] as Record<string, unknown> | undefined) ?? undefined;
+            seasonId = Number(season?.["id"] ?? seasonId ?? 0) || seasonId;
+            tournamentId = Number(uniqueTournament?.["id"] ?? tournament?.["id"] ?? tournamentId ?? 0) || tournamentId;
+          }
+        } catch {
+          // keep schedule-derived ids
+        }
+      }
+    }
+  } catch {
+    // fallback to generic outrights endpoints below
+  }
+
   const endpoints = [
+    ...(tournamentId && seasonId ? [
+      `${SAPI_V2_FOOTBALL}/tournament/${tournamentId}/season/${seasonId}/odds`,
+      `${SAPI_V2_FOOTBALL}/tournament/${tournamentId}/season/${seasonId}/outrights`,
+      `${SAPI_V2_FOOTBALL}/odds?tournamentId=${tournamentId}&seasonId=${seasonId}`,
+      `${SAPI_V2_FOOTBALL}/outrights?tournamentId=${tournamentId}&seasonId=${seasonId}`,
+    ] : []),
     (() => {
       const url = new URL("https://api.isportsapi.com/sport/football/odds/outrights");
       url.searchParams.set("api_key", CONFIG.SPORTSAPI_KEY);
