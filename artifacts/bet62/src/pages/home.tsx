@@ -6671,29 +6671,31 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
                       <div className="space-y-2">
                         <div className="text-[10px] font-black uppercase tracking-[0.18em] text-zinc-500 truncate">{match.home}</div>
                         {homeWins.map((entry) => (
-                          <MarketOddsBtn
-                            key={`${selPrefix}-${entry.score}`}
-                            match={match}
-                            sel={`${selPrefix}-${entry.score}`}
-                            odd={entry.odd}
-                            market={marketKey}
-                            label={entry.score}
-                            suspKey={suspKey}
-                          />
+                          <div key={`${selPrefix}-${entry.score}`} className="flex w-full">
+                            <MarketOddsBtn
+                              match={match}
+                              sel={`${selPrefix}-${entry.score}`}
+                              odd={entry.odd}
+                              market={marketKey}
+                              label={entry.score}
+                              suspKey={suspKey}
+                            />
+                          </div>
                         ))}
                       </div>
                       <div className="space-y-2">
                         <div className="text-[10px] font-black uppercase tracking-[0.18em] text-zinc-500 truncate text-right">{match.away}</div>
                         {awayWins.map((entry) => (
-                          <MarketOddsBtn
-                            key={`${selPrefix}-${entry.score}`}
-                            match={match}
-                            sel={`${selPrefix}-${entry.score}`}
-                            odd={entry.odd}
-                            market={marketKey}
-                            label={entry.score}
-                            suspKey={suspKey}
-                          />
+                          <div key={`${selPrefix}-${entry.score}`} className="flex w-full">
+                            <MarketOddsBtn
+                              match={match}
+                              sel={`${selPrefix}-${entry.score}`}
+                              odd={entry.odd}
+                              market={marketKey}
+                              label={entry.score}
+                              suspKey={suspKey}
+                            />
+                          </div>
                         ))}
                       </div>
                     </div>
@@ -6714,29 +6716,31 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
                       <div className="space-y-2">
                         <div className="text-[10px] font-black uppercase tracking-[0.18em] text-zinc-500 truncate">{match.home}</div>
                         {homeEntries.map((entry) => (
-                          <MarketOddsBtn
-                            key={entry.sel}
-                            match={match}
-                            sel={entry.sel}
-                            odd={entry.odd}
-                            market={marketKey}
-                            label={entry.label}
-                            suspKey={suspKey}
-                          />
+                          <div key={entry.sel} className="flex w-full">
+                            <MarketOddsBtn
+                              match={match}
+                              sel={entry.sel}
+                              odd={entry.odd}
+                              market={marketKey}
+                              label={entry.label}
+                              suspKey={suspKey}
+                            />
+                          </div>
                         ))}
                       </div>
                       <div className="space-y-2">
                         <div className="text-[10px] font-black uppercase tracking-[0.18em] text-zinc-500 truncate text-right">{match.away}</div>
                         {awayEntries.map((entry) => (
-                          <MarketOddsBtn
-                            key={entry.sel}
-                            match={match}
-                            sel={entry.sel}
-                            odd={entry.odd}
-                            market={marketKey}
-                            label={entry.label}
-                            suspKey={suspKey}
-                          />
+                          <div key={entry.sel} className="flex w-full">
+                            <MarketOddsBtn
+                              match={match}
+                              sel={entry.sel}
+                              odd={entry.odd}
+                              market={marketKey}
+                              label={entry.label}
+                              suspKey={suspKey}
+                            />
+                          </div>
                         ))}
                       </div>
                     </div>
