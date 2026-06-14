@@ -25,6 +25,43 @@ type HTScore = { htHome: number; htAway: number };
 type FinishedResult = (typeof finishedMatchResults extends Map<string, infer V> ? V : never);
 type LiveResult = (typeof liveMatchState extends Map<string, infer V> ? V : never);
 
+function decodeCompactLine(token: string): number {
+  const raw = String(token ?? "").trim();
+  if (!raw) return Number.NaN;
+  if (raw.includes(".")) return parseFloat(raw);
+  if (/^\d+$/.test(raw) && raw.length >= 2) return parseInt(raw, 10) / 10;
+  return parseFloat(raw);
+}
+
+function normalizeSettlementSelectionKey(selection: string): string {
+  let s = String(selection ?? "");
+  if      (s === "1x2-home")    s = "home";
+  else if (s === "1x2-draw")    s = "draw";
+  else if (s === "1x2-away")    s = "away";
+  else if (/^tg-([ou][\d.]+)$/.test(s)) s = s.slice(3);
+  else if (/^cards-([ou])(\d+)$/.test(s)) {
+    const m = s.match(/^cards-([ou])(\d+)$/);
+    s = `${m![1]}card${m![2]}`;
+  }
+  else if (/^corners-([ou])(\d+)$/.test(s)) {
+    const m = s.match(/^corners-([ou])(\d+)$/);
+    s = `${m![1]}c${m![2]}`;
+  }
+  else if (s === "dc-12")       s = "homeOrAway";
+  else if (s === "eg-0")        s = "eg-g0";
+  else if (s === "eg-1")        s = "eg-g1";
+  else if (s === "eg-2")        s = "eg-g2";
+  else if (s === "eg-3")        s = "eg-g3";
+  else if (s === "eg-4")        s = "eg-g4";
+  else if (s === "eg-5p")       s = "eg-g5plus";
+  else if (s === "et-res-home") s = "et-home";
+  else if (s === "et-res-draw") s = "et-draw";
+  else if (s === "et-res-away") s = "et-away";
+  else if (s === "et-tie-home") s = "et-tw-home";
+  else if (s === "et-tie-away") s = "et-tw-away";
+  return s;
+}
+
 /**
  * Evaluate a single bet selection against a known final score + optional HT score.
  * Returns "won" | "lost" | null  (null = data not available yet, or void/push bet).
@@ -78,23 +115,7 @@ export function scoreOutcomeForSel(
   }
 
   // ── Key normalisation (ComprehensiveMarketsSheet keys → canonical keys) ────
-  let s = sel.selection;
-  if      (s === "1x2-home")   s = "home";
-  else if (s === "1x2-draw")   s = "draw";
-  else if (s === "1x2-away")   s = "away";
-  else if (/^tg-([ou][\d]+)$/.test(s))  s = s.slice(3);   // tg-o25 → o25
-  else if (s === "dc-12")      s = "homeOrAway";
-  else if (s === "eg-0")       s = "eg-g0";
-  else if (s === "eg-1")       s = "eg-g1";
-  else if (s === "eg-2")       s = "eg-g2";
-  else if (s === "eg-3")       s = "eg-g3";
-  else if (s === "eg-4")       s = "eg-g4";
-  else if (s === "eg-5p")      s = "eg-g5plus";
-  else if (s === "et-res-home") s = "et-home";
-  else if (s === "et-res-draw") s = "et-draw";
-  else if (s === "et-res-away") s = "et-away";
-  else if (s === "et-tie-home") s = "et-tw-home";
-  else if (s === "et-tie-away") s = "et-tw-away";
+  let s = normalizeSettlementSelectionKey(sel.selection);
   const ex = (extra?.extras ?? {}) as Record<string, unknown>;
   const fx = ex["football"] as Record<string, unknown> | undefined;
 
@@ -493,7 +514,7 @@ export function scoreOutcomeForSel(
 
   // ── Total Goals O/U  (o25, u35, o05, etc.) ────────────────────────────────
   else if (/^[ou][\d.]+$/.test(s)) {
-    const line = parseFloat(s.slice(1));
+    const line = decodeCompactLine(s.slice(1));
     if (!isNaN(line)) {
       if (total === line) voided = true;
       else winning = s[0] === "o" ? total > line : total < line;
@@ -793,9 +814,8 @@ function liveDefinitiveOutcomeForSel(
     status?: string;
   }
 ): "won" | "lost" | null {
-  // Key normalizations — mirror scoreOutcomeForSel so tg-o25, tg-u25, etc. are handled
-  let s = String(sel.selection ?? "");
-  if (/^tg-([ou][\d.]+)$/.test(s)) s = s.slice(3);  // tg-o25 → o25
+  // Key normalizations — mirror scoreOutcomeForSel so tg-o25, cards-o35, etc. are handled
+  const s = normalizeSettlementSelectionKey(String(sel.selection ?? ""));
 
   const home = score.home;
   const away = score.away;
@@ -809,7 +829,7 @@ function liveDefinitiveOutcomeForSel(
   const mOU = s.match(/^([ou])([\d.]+)$/);
   if (mOU) {
     const side = mOU[1]!;
-    const line = parseFloat(mOU[2]!);
+    const line = decodeCompactLine(mOU[2]!);
     if (!Number.isFinite(line)) return null;
     if (side === "o") return total > line ? "won" : null;
     // Under goals: lost as soon as exceeded; won only at final whistle (scoreOutcomeForSel handles won)
@@ -1452,7 +1472,7 @@ export async function regradeSettledBetsForMatch(matchId: string, jobId: string)
   }
 }
 
-async function hydrateSettledBetSelections(): Promise<void> {
+export async function hydrateSettledBetSelections(): Promise<void> {
   try {
     const cutoff = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
     const lostBets = await db

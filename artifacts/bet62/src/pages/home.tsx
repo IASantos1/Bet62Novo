@@ -821,11 +821,33 @@ const COUNTRY_FLAGS: Record<string, string> = {
 
 // Pure helper — compute if a selection won/lost based on a known final score.
 // Returns null when the result is still undeterminable (e.g. over/under line not yet crossed).
+function decodeCompactLine(token: string): number {
+  const raw = String(token ?? "").trim();
+  if (!raw) return Number.NaN;
+  if (raw.includes(".")) return parseFloat(raw);
+  if (/^\d+$/.test(raw) && raw.length >= 2) return parseInt(raw, 10) / 10;
+  return parseFloat(raw);
+}
+
+function normalizeTicketSelectionKey(selection: string): string {
+  let s = String(selection ?? "");
+  if (/^tg-([ou][\d.]+)$/.test(s)) s = s.slice(3);
+  else if (/^cards-([ou])(\d+)$/.test(s)) {
+    const m = s.match(/^cards-([ou])(\d+)$/);
+    s = `${m![1]}card${m![2]}`;
+  }
+  else if (/^corners-([ou])(\d+)$/.test(s)) {
+    const m = s.match(/^corners-([ou])(\d+)$/);
+    s = `${m![1]}c${m![2]}`;
+  }
+  return s;
+}
+
 function scoreOutcomeForSel(
   sel: { selection: string },
   score: { home: number; away: number }
 ): "won" | "lost" | null {
-  const s = sel.selection;
+  const s = normalizeTicketSelectionKey(sel.selection);
   const { home, away } = score;
   const total = home + away;
   let winning: boolean | null = null;
@@ -840,7 +862,7 @@ function scoreOutcomeForSel(
   else {
     const m = s.match(/^([ou])([\d.]+)$/);
     if (m) {
-      const line = parseFloat(m[2]!);
+      const line = decodeCompactLine(m[2]!);
       winning = m[1] === "o" ? total > line : total < line;
     }
   }
@@ -7659,7 +7681,7 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
   type SelOutcome = "green" | "red" | "cashout" | "live-win" | "live-lose" | "pending" | "void";
   const getSelOutcome = (sel: StoredSelection, betStatus: string): SelOutcome => {
     if (betStatus === "cashed_out") return "cashout";
-    if (betStatus === "voided") return "pending";
+    if (betStatus === "voided") return "void";
     if (sel.outcome === "won") return "green";
     if (sel.outcome === "lost") return "red";
     if (sel.outcome === "void") return "void";
@@ -7669,7 +7691,7 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
       if (out === "lost") return "red";
     }
     if (betStatus === "won") return "green";
-    if (betStatus === "lost") return "pending";
+    if (betStatus === "lost") return "red";
     // Pending bets must stay neutral in the UI until the selection is actually settled.
     return "pending";
   };

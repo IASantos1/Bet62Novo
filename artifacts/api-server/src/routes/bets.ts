@@ -5,7 +5,7 @@ import { authMiddleware, type AuthRequest } from "../middlewares/auth.js";
 import { logger } from "../lib/logger.js";
 import { applyBalanceDelta, insertLedgerEntry } from "../lib/ledger.js";
 import { liveMatchState, finishedMatchResults, type LiveMatchState } from "./matches.js";
-import { autoSettlePendingBets, scoreOutcomeForSel, type SelectionRecord } from "../settlement.js";
+import { autoSettlePendingBets, hydrateSettledBetSelections, scoreOutcomeForSel, type SelectionRecord } from "../settlement.js";
 
 const router: IRouter = Router();
 
@@ -144,7 +144,15 @@ function normalizeSelectionKey(sel: string): string {
   if      (s === "1x2-home")   s = "home";
   else if (s === "1x2-draw")   s = "draw";
   else if (s === "1x2-away")   s = "away";
-  else if (/^tg-([ou][\d]+)$/.test(s))  s = s.slice(3);
+  else if (/^tg-([ou][\d.]+)$/.test(s)) s = s.slice(3);
+  else if (/^cards-([ou])(\d+)$/.test(s)) {
+    const m = s.match(/^cards-([ou])(\d+)$/);
+    s = `${m![1]}card${m![2]}`;
+  }
+  else if (/^corners-([ou])(\d+)$/.test(s)) {
+    const m = s.match(/^corners-([ou])(\d+)$/);
+    s = `${m![1]}c${m![2]}`;
+  }
   else if (s === "dc-12")      s = "homeOrAway";
   else if (s === "eg-0")       s = "eg-g0";
   else if (s === "eg-1")       s = "eg-g1";
@@ -1027,6 +1035,7 @@ router.get("/my", authMiddleware, async (req: Request, res: Response): Promise<v
     if (pendingEventIds.length > 0) {
       await autoSettlePendingBets({ matchIds: pendingEventIds });
     }
+    await hydrateSettledBetSelections();
 
     const bets = pendingEventIds.length > 0
       ? await db.select().from(betsTable)
