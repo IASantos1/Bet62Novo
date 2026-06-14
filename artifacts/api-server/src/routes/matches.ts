@@ -11091,8 +11091,8 @@ function looksLikeWorldCupContext(context: string): boolean {
 
 function groupLetterFromMarketTitle(rawTitle: string): string | null {
   const title = normalizeWCCompetitionText(rawTitle);
-  const m = title.match(/winner of the group\s*([a-l])\b|group winner\s*[-:]?\s*group\s*([a-l])\b|grupo\s*([a-l]).*vencedor|vencedor do grupo\s*[-:]?\s*grupo\s*([a-l])\b/);
-  const letter = m?.[1] ?? m?.[2] ?? m?.[3] ?? m?.[4] ?? null;
+  const m = title.match(/winner of the group\s*([a-l])\b|group winner\s*[-:]?\s*group\s*([a-l])\b|group\s*([a-l])\s*winner\b|grupo\s*([a-l]).*vencedor|vencedor do grupo\s*[-:]?\s*grupo\s*([a-l])\b/);
+  const letter = m?.[1] ?? m?.[2] ?? m?.[3] ?? m?.[4] ?? m?.[5] ?? null;
   return letter ? letter.toUpperCase() : null;
 }
 
@@ -11137,16 +11137,23 @@ function assignWC2026Group(teamName: string): string | null {
 
 function parseWC2026CompetitionSectionsFromPayload(payload: unknown): WC2026CompetitionSection[] {
   const sectionMap = new Map<string, Map<string, number>>();
-  const titleKeys = ["name", "title", "marketName", "market_name", "betTypeName", "bet_type_name", "typeName", "type_name", "play_name", "playName"];
+  const titleKeys = ["name", "title", "marketName", "market_name", "betTypeName", "bet_type_name", "typeName", "type_name", "play_name", "playName", "group", "groupName", "category", "categoryName", "competitionName", "competition", "tournamentName", "tournament"];
+
+  const matchKnownTeams = (groupDef: (typeof WC2026_GROUPS)[number], items: Array<{ name: string; odd: number }>) =>
+    items.filter((item) => groupDef.teams.some((candidate) => wcStandingRowMatchesTeam(item.name, candidate)));
 
   const commitCandidate = (rawTitle: string | null, items: Array<{ name: string; odd: number }>, context: string) => {
     const group = rawTitle ? groupLetterFromMarketTitle(rawTitle) : null;
     if (!group) return;
-    if (!looksLikeWorldCupContext(`${context} ${rawTitle}`)) return;
     const groupDef = WC2026_GROUPS.find((entry) => entry.group === group);
     if (!groupDef) return;
+    const matchedItems = matchKnownTeams(groupDef, items);
+    const hasWorldCupSignal =
+      looksLikeWorldCupContext(`${context} ${rawTitle}`) ||
+      matchedItems.length >= 2;
+    if (!hasWorldCupSignal) return;
     const bucket = sectionMap.get(group) ?? new Map<string, number>();
-    for (const item of items) {
+    for (const item of matchedItems) {
       const team = groupDef.teams.find((candidate) => wcStandingRowMatchesTeam(item.name, candidate));
       if (!team) continue;
       const prev = bucket.get(team);
@@ -11324,37 +11331,68 @@ async function getWC2026Standings(): Promise<{ groups: WC2026StandingGroup[]; le
   });
   if (!stdResp.ok) throw new Error("Standings da Copa do Mundo indisponiveis");
   const stdData = await stdResp.json() as Record<string, unknown>;
-  const rawArr =
-    ((stdData["standings"] as any[] | undefined) ??
-    (((stdData["data"] as Record<string, unknown> | undefined)?.["standings"] as any[] | undefined)) ??
-    []);
+  const groupedCandidates: Array<{ name: string; rows: any[] }> = [];
+  const flatRows: any[] = [];
+  const seenNodes = new WeakSet<object>();
+  const walkStandingsNode = (node: unknown) => {
+    if (!node || typeof node !== "object") return;
+    if (seenNodes.has(node as object)) return;
+    seenNodes.add(node as object);
+    if (Array.isArray(node)) {
+      for (const item of node) walkStandingsNode(item);
+      return;
+    }
+    const obj = node as Record<string, unknown>;
+    const rawName =
+      typeof obj["group"] === "string" ? obj["group"] :
+      ((obj["group"] as Record<string, unknown> | undefined)?.["name"] as string | undefined) ??
+      (obj["name"] as string | undefined) ??
+      (obj["title"] as string | undefined);
+    const nestedRows =
+      (Array.isArray(obj["rows"]) ? obj["rows"] as any[] : undefined) ??
+      (Array.isArray(obj["standings"]) ? obj["standings"] as any[] : undefined) ??
+      (Array.isArray(obj["tableRows"]) ? obj["tableRows"] as any[] : undefined) ??
+      (Array.isArray(obj["table"]) ? obj["table"] as any[] : undefined);
+    if (typeof rawName === "string" && Array.isArray(nestedRows) && nestedRows.length > 0) {
+      groupedCandidates.push({ name: rawName, rows: nestedRows });
+    }
+    if (
+      typeof obj["teamName"] === "string" ||
+      typeof (obj["team"] as Record<string, unknown> | undefined)?.["name"] === "string" ||
+      typeof (obj["team"] as Record<string, unknown> | undefined)?.["shortName"] === "string"
+    ) {
+      flatRows.push(obj);
+    }
+    for (const value of Object.values(obj)) walkStandingsNode(value);
+  };
+  walkStandingsNode(stdData);
 
-  const firstItem = rawArr[0];
-  const isGrouped = firstItem && (
-    typeof firstItem.group !== "undefined" ||
-    Array.isArray(firstItem.rows) ||
-    Array.isArray(firstItem.standings)
-  );
-
-  let groups: WC2026StandingGroup[];
-  if (isGrouped) {
-    groups = rawArr.map((g: any) => {
-      const rawName: string =
-        typeof g.group === "string" ? g.group :
-        (g.group?.name ?? g.name ?? "Grupo");
-      const nestedRows: any[] = g.rows ?? g.standings ?? [];
-      const normalizedRows = nestedRows
+  let groups: WC2026StandingGroup[] = [];
+  if (groupedCandidates.length > 0) {
+    const groupedMap = new Map<string, WC2026StandingRow[]>();
+    for (const candidate of groupedCandidates) {
+      const name = normalizeWCGroupName(candidate.name);
+      const rows = candidate.rows
         .map((r: any, i: number) => parseStandingRow(r, i))
         .filter((row: WC2026StandingRow) => !!assignWC2026Group(row.name));
-      return {
-        name: normalizeWCGroupName(rawName),
-        rows: normalizedRows,
-      };
-    }).filter((g: WC2026StandingGroup) => g.rows.length > 0);
-  } else {
-    const rows = rawArr.map((r: any, i: number) => parseStandingRow(r, i));
+      if (rows.length === 0) continue;
+      const existing = groupedMap.get(name) ?? [];
+      const merged = [...existing];
+      for (const row of rows) {
+        if (!merged.some((entry) => wcStandingRowMatchesTeam(entry.name, row.name))) merged.push(row);
+      }
+      groupedMap.set(name, merged);
+    }
+    groups = [...groupedMap.entries()]
+      .map(([name, rows]) => ({
+        name,
+        rows: rows.sort((a, b) => b.pts - a.pts || (b.gf - b.ga) - (a.gf - a.ga) || b.gf - a.gf || a.pos - b.pos),
+      }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }
+  if (groups.length === 0 && flatRows.length > 0) {
     const grouped = new Map<string, WC2026StandingRow[]>();
-    for (const row of rows) {
+    for (const row of flatRows.map((r: any, i: number) => parseStandingRow(r, i))) {
       const groupName = assignWC2026Group(row.name);
       if (!groupName) continue;
       const existing = grouped.get(groupName) ?? [];
