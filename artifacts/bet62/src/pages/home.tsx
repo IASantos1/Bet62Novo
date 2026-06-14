@@ -1523,6 +1523,13 @@ type StoredSelection = {
   outcome?: "won" | "lost" | "void" | null;
 };
 
+type OpenBetSelectionState = {
+  matchId?: string;
+  outcome: "won" | "lost" | "void" | "pending";
+  finalScore?: { home: number; away: number };
+  htScore?: { htHome: number; htAway: number };
+};
+
 type UserBet = {
   id: number;
   matchTitle: string;
@@ -1540,6 +1547,7 @@ type UserBet = {
   settlementSeconds?: number | null;
   payout?: string | null;
   netProfit?: string | null;
+  statusPreview?: "pending" | "won" | "lost" | "void";
 };
 
 type PlatformStats = {
@@ -4114,6 +4122,55 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
     }
   }, [auth.token]);
 
+  const fetchOpenBetStates = useCallback(async () => {
+    if (!auth.token) return;
+    const pendingIds = myBets.filter((bet) => bet.status === "pending").map((bet) => bet.id);
+    if (pendingIds.length === 0) return;
+    try {
+      const res = await fetch("/api/bets/open-states", {
+        headers: { Authorization: `Bearer ${auth.token}` },
+      });
+      if (!res.ok) return;
+      const data = await res.json() as {
+        bets?: Array<{
+          betId: number;
+          statusPreview: "pending" | "won" | "lost" | "void";
+          selections: OpenBetSelectionState[];
+        }>;
+      };
+      const incoming = Array.isArray(data.bets) ? data.bets : [];
+      const incomingIds = new Set(incoming.map((bet) => bet.betId));
+      if (pendingIds.some((id) => !incomingIds.has(id))) {
+        void fetchMyBets(true);
+        return;
+      }
+      const stateMap = new Map(incoming.map((bet) => [bet.betId, bet] as const));
+      setMyBets((prev) => prev.map((bet) => {
+        if (bet.status !== "pending") return bet;
+        const next = stateMap.get(bet.id);
+        if (!next) return bet;
+        const baseSelections = getBetSelections(bet);
+        const mergedSelections = baseSelections.map((sel, index) => {
+          const update = next.selections[index];
+          if (!update) return sel;
+          return {
+            ...sel,
+            ...(update.finalScore ? { finalScore: update.finalScore } : {}),
+            ...(update.htScore ? { htScore: update.htScore } : {}),
+            outcome: update.outcome === "pending" ? (sel.outcome ?? null) : update.outcome,
+          };
+        });
+        return {
+          ...bet,
+          selections: mergedSelections,
+          statusPreview: next.statusPreview,
+        };
+      }));
+    } catch {
+      // non-critical lightweight refresh
+    }
+  }, [auth.token, myBets, fetchMyBets]);
+
   useEffect(() => {
     if (cashoutExpandedId == null) return;
     const bet = myBets.find(b => b.id === cashoutExpandedId);
@@ -4139,14 +4196,23 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab]);
 
-  // "Minhas Apostas" also needs a fresh live snapshot so open tickets can be
-  // marked as live even when the user is not on the dedicated "Ao Vivo" tab.
+  // Lightweight refresh focused only on the events inside pending tickets.
+  useEffect(() => {
+    if (activeTab !== "mybets" || !auth.token) return;
+    void fetchOpenBetStates();
+    const id = window.setInterval(() => {
+      void fetchOpenBetStates();
+    }, 5000);
+    return () => window.clearInterval(id);
+  }, [activeTab, auth.token, fetchOpenBetStates]);
+
+  // Keep a live snapshot in My Bets so ongoing events still show live badge/score.
   useEffect(() => {
     if (activeTab !== "mybets") return;
     void fetchLive(false);
     const id = window.setInterval(() => {
       void fetchLive(false);
-    }, 12_000);
+    }, 12000);
     return () => window.clearInterval(id);
   }, [activeTab, fetchLive]);
 
@@ -11752,8 +11818,32 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
                               <div className="min-w-0">
                                 <div className="text-sm font-medium truncate">{bet.matchTitle}</div>
                                 <div className="text-xs text-zinc-500 flex items-center gap-1.5">
-                                  <span className={`font-semibold ${isWon ? "text-green-500" : isCO ? "text-yellow-500" : isPending ? "text-zinc-400" : isVoided ? "text-blue-400" : "text-red-500"}`}>
-                                    {isWon ? "Ganhou" : isCO ? "Cash Out" : isPending ? "Pendente" : isVoided ? "Anulada" : "Perdeu"}
+                                  <span className={`font-semibold ${
+                                    isWon ? "text-green-500"
+                                    : isCO ? "text-yellow-500"
+                                    : isPending
+                                      ? previewStatus === "won" ? "text-green-500"
+                                        : previewStatus === "lost" ? "text-red-500"
+                                        : previewStatus === "void" ? "text-blue-400"
+                                        : "text-zinc-400"
+                                      : isVoided ? "text-blue-400"
+                                      : "text-red-500"
+                                  }`}>
+                                    {isWon
+                                      ? "Ganhou"
+                                      : isCO
+                                        ? "Cash Out"
+                                        : isPending
+                                          ? previewStatus === "won"
+                                            ? "A liquidar — Ganha"
+                                            : previewStatus === "lost"
+                                              ? "A liquidar — Perdida"
+                                              : previewStatus === "void"
+                                                ? "A liquidar — Anulada"
+                                                : "Pendente"
+                                          : isVoided
+                                            ? "Anulada"
+                                            : "Perdeu"}
                                   </span>
                                   · {new Date(bet.createdAt).toLocaleDateString("pt-PT", { day: "2-digit", month: "2-digit", year: "numeric" })}
                                 </div>
@@ -11848,6 +11938,7 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
                         const settledDateStr = settledAt ? settledAt.toLocaleDateString("pt-PT", { day: "2-digit", month: "2-digit", year: "numeric" }) : null;
                         const settledTimeStr = settledAt ? settledAt.toLocaleTimeString("pt-PT", { hour: "2-digit", minute: "2-digit" }) : null;
                         const settlementMins = typeof bet.settlementSeconds === "number" ? Math.max(0, Math.round(bet.settlementSeconds / 60)) : null;
+                        const previewStatus = isPending ? (bet.statusPreview ?? "pending") : null;
 
                         const isActivePending = isPending;
                         // Card & text colours

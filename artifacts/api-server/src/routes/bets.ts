@@ -1021,6 +1021,74 @@ function cashoutCalcForBet(args: {
   return { info: { cashoutStatus: "available", cashoutEstimate: estimate.toFixed(2) }, stateOp: existing != null && betId != null ? { type: "delete" } : { type: "none" } };
 }
 
+type PendingSelectionState = {
+  matchId?: string;
+  outcome: "won" | "lost" | "void" | "pending";
+  finalScore?: { home: number; away: number };
+  htScore?: { htHome: number; htAway: number };
+  live?: {
+    isLive: boolean;
+    status?: string;
+    homeScore: number;
+    awayScore: number;
+    minute?: number;
+  };
+};
+
+function buildPendingSelectionState(
+  sel: SelectionRecord,
+  fallbackMatchId?: string,
+): PendingSelectionState {
+  const matchId = String(sel.matchId ?? fallbackMatchId ?? "").trim() || undefined;
+  if (!matchId) return { outcome: "pending" };
+
+  const finished = finishedMatchResults.get(matchId);
+  if (finished) {
+    const ht =
+      typeof finished.htHome === "number" && typeof finished.htAway === "number"
+        ? { htHome: finished.htHome, htAway: finished.htAway }
+        : undefined;
+    const scored = scoreOutcomeForSel(sel, finished, ht, {
+      status: finished.status,
+      cornersTotal: finished.cornersTotal,
+      cardsTotal: finished.cardsTotal,
+      firstGoal: finished.firstGoal,
+      extras: finished.extras,
+      finishedAt: finished.finishedAt,
+    });
+    return {
+      matchId,
+      outcome: scored ?? "pending",
+      finalScore: { home: finished.home, away: finished.away },
+      ...(ht ? { htScore: ht } : {}),
+    };
+  }
+
+  const live = liveMatchState.get(matchId);
+  if (!live) return { matchId, outcome: "pending" };
+  return {
+    matchId,
+    outcome: "pending",
+    live: {
+      isLive: !!live.isLive,
+      ...(typeof live.status === "string" ? { status: live.status } : {}),
+      homeScore: Number(live.homeScore ?? 0),
+      awayScore: Number(live.awayScore ?? 0),
+      ...(typeof live.minute === "number" ? { minute: live.minute } : {}),
+    },
+  };
+}
+
+function summarizePendingBetState(selectionStates: PendingSelectionState[]): "pending" | "won" | "lost" | "void" {
+  const settled = selectionStates.filter((sel) => sel.outcome !== "pending");
+  if (settled.length === 0) return "pending";
+  if (settled.some((sel) => sel.outcome === "lost")) return "lost";
+  const decisive = selectionStates.filter((sel) => sel.outcome === "won" || sel.outcome === "void");
+  if (decisive.length !== selectionStates.length) return "pending";
+  if (decisive.every((sel) => sel.outcome === "void")) return "void";
+  return "won";
+}
+
 // ─── POST /api/bets/place ─────────────────────────────────────────────────────
 router.post("/place", authMiddleware, async (req: Request, res: Response): Promise<void> => {
   const authReq = req as AuthRequest;
@@ -1332,6 +1400,53 @@ router.get("/my", authMiddleware, async (req: Request, res: Response): Promise<v
     res.json(enriched);
   } catch (err) {
     logger.error({ err }, "Fetch bets error");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+router.get("/open-states", authMiddleware, async (req: Request, res: Response): Promise<void> => {
+  const authReq = req as AuthRequest;
+  try {
+    const pendingBets = await db.select().from(betsTable)
+      .where(and(eq(betsTable.userId, authReq.user!.id), eq(betsTable.status, "pending")))
+      .orderBy(desc(betsTable.createdAt));
+
+    const pendingEventIds = Array.from(new Set(
+      pendingBets
+        .flatMap((bet) =>
+          getBetEventIds(
+            bet as unknown as { matchId: string; matchTitle: string; selections: unknown; totalOdds: string },
+          ),
+        )
+        .map((id) => String(id).trim())
+        .filter(Boolean),
+    ));
+
+    if (pendingEventIds.length > 0) {
+      await autoSettlePendingBets({ matchIds: pendingEventIds });
+    }
+
+    const refreshedPendingBets = await db.select().from(betsTable)
+      .where(and(eq(betsTable.userId, authReq.user!.id), eq(betsTable.status, "pending")))
+      .orderBy(desc(betsTable.createdAt));
+
+    const payload = refreshedPendingBets.map((bet) => {
+      const selections = getBetSelections(
+        bet as unknown as { matchId: string; matchTitle: string; selections: unknown; totalOdds: string },
+      );
+      const selectionStates = selections.map((sel) =>
+        buildPendingSelectionState(sel, selections.length === 1 ? bet.matchId : undefined),
+      );
+      return {
+        betId: bet.id,
+        statusPreview: summarizePendingBetState(selectionStates),
+        selections: selectionStates,
+      };
+    });
+
+    res.json({ bets: payload });
+  } catch (err) {
+    logger.error({ err }, "Fetch open bet states error");
     res.status(500).json({ error: "Internal server error" });
   }
 });
