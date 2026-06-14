@@ -672,12 +672,12 @@ function getTeamBadgeAsset(
   side: "home" | "away",
 ): { src?: string; fit: "cover" | "contain"; padded: boolean } {
   const teamName = side === "home" ? match.home : match.away;
-  const localBanner = getTeamBanner(teamName, match.country);
-  if (localBanner) return { src: localBanner, fit: "cover", padded: false };
   const teamId = side === "home" ? match.homeTeamId : match.awayTeamId;
   const imageVersion = side === "home" ? match.homeImageVersion : match.awayImageVersion;
   const officialLogo = buildSportsApiTeamLogoUrl(match.sport, teamId, imageVersion);
   if (officialLogo) return { src: officialLogo, fit: "contain", padded: true };
+  const localBanner = getTeamBanner(teamName, match.country);
+  if (localBanner) return { src: localBanner, fit: "cover", padded: false };
   return { fit: "cover", padded: false };
 }
 
@@ -11803,16 +11803,18 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
                                   } else if (outcome === "void") {
                                     leftIcon = <div className="w-6 h-6 rounded-full bg-zinc-200 border border-zinc-300 flex items-center justify-center shrink-0"><span className="text-zinc-600 text-[11px] font-black leading-none">—</span></div>;
                                   } else {
-                                    const mkt = sel.market ?? "";
+                                    const storedSport = String(sel.sport ?? "").trim().toLowerCase();
+                                    const mkt = String(sel.market ?? "").trim();
                                     const mt  = (sel.matchTitle ?? "").toLowerCase();
-                                    const sportEmoji =
-                                      mkt === "quartos" || mkt === "totais" && mt.includes("nba") ? "🏀"
-                                      : mkt === "periodos" || mkt === "puckLine" || mt.includes("nhl") ? "🏒"
-                                      : mkt === "innings"  || mt.includes("mlb") ? "⚾"
-                                      : mkt === "sets"     || mt.includes("volei") || mt.includes("volley") ? "🏐"
-                                      : mkt === "jogos"    || mt.includes("tennis") || mt.includes("tênis") ? "🎾"
-                                      : "⚽";
-                                    leftIcon = <span className="text-xl shrink-0 leading-none">{sportEmoji}</span>;
+                                    const ticketSport =
+                                      storedSport ||
+                                      (mkt === "quartos" || (mkt === "totais" && mt.includes("nba")) ? "basketball"
+                                        : mkt === "periodos" || mkt === "puckLine" || mt.includes("nhl") ? "hockey"
+                                        : mkt === "innings" || mt.includes("mlb") ? "baseball"
+                                        : mkt === "sets" || mt.includes("volei") || mt.includes("volley") ? "volleyball"
+                                        : mkt === "jogos" || mt.includes("tennis") || mt.includes("tênis") ? "tennis"
+                                        : "football");
+                                    leftIcon = <span className="text-xl shrink-0 leading-none">{sportEmoji(ticketSport)}</span>;
                                   }
                                 }
 
@@ -11879,7 +11881,7 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
                                         {Number(sel.odd).toFixed(2)}
                                       </div>
                                       {isWon && (
-                                        <span className="text-[10px] font-black text-green-600 flex items-center gap-0.5">⚽ VENCIDO</span>
+                                        <span className="text-[10px] font-black text-green-600 flex items-center gap-0.5">{sportEmoji(sel.sport)} VENCIDO</span>
                                       )}
                                       {isActivePending && outcome === "live-win" && (
                                         <span className="text-[10px] font-black text-green-600">VENCIDO</span>
