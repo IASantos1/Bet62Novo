@@ -5,7 +5,7 @@ import { authMiddleware, type AuthRequest } from "../middlewares/auth.js";
 import { logger } from "../lib/logger.js";
 import { applyBalanceDelta, insertLedgerEntry } from "../lib/ledger.js";
 import { liveMatchState, finishedMatchResults, type LiveMatchState } from "./matches.js";
-import { scoreOutcomeForSel, type SelectionRecord } from "../settlement.js";
+import { autoSettlePendingBets, scoreOutcomeForSel, type SelectionRecord } from "../settlement.js";
 
 const router: IRouter = Router();
 
@@ -1008,9 +1008,31 @@ router.post("/place", authMiddleware, async (req: Request, res: Response): Promi
 router.get("/my", authMiddleware, async (req: Request, res: Response): Promise<void> => {
   const authReq = req as AuthRequest;
   try {
-    const bets = await db.select().from(betsTable)
+    const initialBets = await db.select().from(betsTable)
       .where(eq(betsTable.userId, authReq.user!.id))
       .orderBy(desc(betsTable.createdAt));
+
+    const pendingEventIds = Array.from(new Set(
+      initialBets
+        .filter((bet) => bet.status === "pending")
+        .flatMap((bet) =>
+          getBetEventIds(
+            bet as unknown as { matchId: string; matchTitle: string; selections: unknown; totalOdds: string },
+          ),
+        )
+        .map((id) => String(id).trim())
+        .filter(Boolean),
+    ));
+
+    if (pendingEventIds.length > 0) {
+      await autoSettlePendingBets({ matchIds: pendingEventIds });
+    }
+
+    const bets = pendingEventIds.length > 0
+      ? await db.select().from(betsTable)
+        .where(eq(betsTable.userId, authReq.user!.id))
+        .orderBy(desc(betsTable.createdAt))
+      : initialBets;
 
     const betIds = bets.map(b => b.id);
     const logs = betIds.length === 0
