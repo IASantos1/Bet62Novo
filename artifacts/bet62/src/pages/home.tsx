@@ -3107,7 +3107,8 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
     liveExpandedFullFetchRef.current = id;
     const ctrl = new AbortController();
     const tid = setTimeout(() => ctrl.abort(), 12_000);
-    fetch(`/api/matches/live-match/${encodeURIComponent(id)}`, { signal: ctrl.signal })
+    const qs = expandedMatch.sport === "tennis" ? "?fresh=1" : "";
+    fetch(`/api/matches/live-match/${encodeURIComponent(id)}${qs}`, { signal: ctrl.signal })
       .then(r => r.ok ? r.json() : null)
       .then(d => {
         const m = d?.match as Match | null | undefined;
@@ -3935,6 +3936,7 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
           } else if (data.type === "batch_update" && Array.isArray(data.updates)) {
             const msgNow = Date.now();
             liveDataFetchedAt.current = msgNow;
+            const tennisIds = new Set<string>();
             setLiveMatches(prev => {
               if (prev.length === 0) return prev;
               const next = [...prev];
@@ -3942,6 +3944,7 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
               for (const upd of data.updates as Array<{ matchId?: string; delta?: Partial<Match> }>) {
                 const matchId = String(upd?.matchId ?? "");
                 if (!matchId || !upd?.delta || typeof upd.delta !== "object") continue;
+                if (matchId.includes("tennis")) tennisIds.add(matchId);
                 matchLastSeenRef.current[matchId] = msgNow;
                 const deltaMinuteRaw = (upd.delta as Match).minute;
                 if (typeof deltaMinuteRaw === "number" && Number.isFinite(deltaMinuteRaw)) {
@@ -3960,6 +3963,9 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
               }
               return changed ? next : prev;
             });
+            for (const tennisId of tennisIds) {
+              void refreshLiveMatchById(tennisId, { forceFresh: true, syncExpanded: true });
+            }
           } else if (Array.isArray(data.matches)) {
             // Full snapshot from server broadcast
             writeSnapshot(liveSnapshotKey(), data.matches);
@@ -4036,7 +4042,9 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
         if (canUseSnap) continue;
         livePrefetchingRef.current.add(id);
         try {
-          const r = await fetch(`/api/matches/live-match/${encodeURIComponent(id)}`, { signal: ctrl.signal });
+          const isTennis = liveMatches.find(m => String(m.id) === id)?.sport === "tennis";
+          const qs = isTennis ? "?fresh=1" : "";
+          const r = await fetch(`/api/matches/live-match/${encodeURIComponent(id)}${qs}`, { signal: ctrl.signal });
           const d = r.ok ? await r.json() : null;
           const m = d?.match as Match | null | undefined;
           if (m) writeSnapshot(matchSnapshotKey(id), m as any);
@@ -4052,7 +4060,7 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
       clearTimeout(tid);
       ctrl.abort();
     };
-  }, [activeTab, liveMatches, matchSnapshotKey, readSnapshot, writeSnapshot]);
+  }, [activeTab, liveMatches, matchSnapshotKey, readSnapshot, refreshLiveMatchById, writeSnapshot]);
 
   // Keep liveMatchesRef always in sync so effects can read it without deps
   useEffect(() => { liveMatchesRef.current = liveMatches; }, [liveMatches]);
