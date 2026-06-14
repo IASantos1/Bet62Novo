@@ -5151,7 +5151,6 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
     const flag = COUNTRY_FLAGS[match.country?.toLowerCase() ?? ""] ?? sportEmoji(match.sport);
     const isSelection = isSelectionMatch(match);
     const dateStr = match.date ? formatMatchDate(match.date) : "";
-    const dateStr = match.date ? formatMatchDate(match.date) : "";
     const rivalry = RIVALRY_TAGS[`${match.home}|${match.away}`];
     const hasDraw = match.odds.draw > 0;
     const homeName = teamNamePt(match.home);
