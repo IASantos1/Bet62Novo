@@ -6008,8 +6008,9 @@ async function getTennisAllV1(): Promise<V1TennisGame[]> {
   }
 }
 
-// Keep this short enough that tennis live snapshots can pick up new bookmaker odds
-// quickly, while still avoiding an API call on every broadcast tick.
+// Tennis is point-by-point, so keep the V1 live cache close to 1s.
+// The SSE/broadcast layer already smooths fan-out; this TTL must stay tight
+// enough that our scoreboard does not trail the large books by several seconds.
 const TENNIS_LIVE_V1_TTL = 1000;
 let _tennisLiveV1Cache: { games: V1TennisGame[]; fetchedAt: number } | null = null;
 let _tennisLiveV1InFlight: Promise<V1TennisGame[]> | null = null;
@@ -6037,7 +6038,7 @@ async function getTennisLiveV1(): Promise<V1TennisGame[]> {
         .then(games => { _tennisLiveV1Cache = { games, fetchedAt: Date.now() }; return games; })
         .finally(() => { _tennisLiveV1InFlight = null; });
     }
-    return (await Promise.race([_tennisLiveV1InFlight, waitMs(1500).then(() => null)])) ?? _tennisLiveV1Cache.games;
+    return (await Promise.race([_tennisLiveV1InFlight, waitMs(700).then(() => null)])) ?? _tennisLiveV1Cache.games;
   }
   if (!_tennisLiveV1InFlight) {
     _tennisLiveV1InFlight = fetchTennisLiveV1()
@@ -10031,7 +10032,10 @@ async function buildTennisLiveV1Cached(): Promise<LiveMatchState[]> {
         .then(matches => { _tennisLiveV1StateCache = { matches, fetchedAt: Date.now() }; return matches; })
         .finally(() => { _tennisLiveV1StateInFlight = null; });
     }
-    return _tennisLiveV1StateCache.matches;
+    return (await Promise.race([
+      _tennisLiveV1StateInFlight,
+      waitMs(700).then(() => null),
+    ])) ?? _tennisLiveV1StateCache.matches;
   }
   if (!_tennisLiveV1StateInFlight) {
     _tennisLiveV1StateInFlight = buildTennisLiveV1()
