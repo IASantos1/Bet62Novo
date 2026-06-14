@@ -18,6 +18,10 @@ export interface AuthRequest extends Request {
   };
 }
 
+export function verifyAuthToken(token: string): { id: number; email: string } {
+  return jwt.verify(token, SESSION_SECRET) as { id: number; email: string };
+}
+
 export const authMiddleware = (req: AuthRequest, res: Response, next: NextFunction): void => {
   const authHeader = req.headers.authorization;
   if (!authHeader?.startsWith("Bearer ")) {
@@ -27,7 +31,7 @@ export const authMiddleware = (req: AuthRequest, res: Response, next: NextFuncti
 
   const token = authHeader.split(" ")[1];
   try {
-    const decoded = jwt.verify(token!, SESSION_SECRET) as { id: number; email: string };
+    const decoded = verifyAuthToken(token!);
     req.user = decoded;
     next();
   } catch (err) {

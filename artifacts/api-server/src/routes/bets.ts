@@ -1,7 +1,7 @@
 import { Router, type IRouter, type Request, type Response } from "express";
 import { db, betsTable, cashoutStatesTable, eventAdminOverridesTable, platformSettingsTable, settlementLogsTable, usersTable } from "@workspace/db";
 import { eq, desc, sql, and, inArray, asc } from "drizzle-orm";
-import { authMiddleware, type AuthRequest } from "../middlewares/auth.js";
+import { authMiddleware, type AuthRequest, verifyAuthToken } from "../middlewares/auth.js";
 import { logger } from "../lib/logger.js";
 import { applyBalanceDelta, insertLedgerEntry } from "../lib/ledger.js";
 import { liveMatchState, finishedMatchResults, type LiveMatchState } from "./matches.js";
@@ -1035,6 +1035,14 @@ type PendingSelectionState = {
   };
 };
 
+type OpenBetStatesPayload = {
+  bets: Array<{
+    betId: number;
+    statusPreview: "pending" | "won" | "lost" | "void";
+    selections: PendingSelectionState[];
+  }>;
+};
+
 function buildPendingSelectionState(
   sel: SelectionRecord,
   fallbackMatchId?: string,
@@ -1087,6 +1095,47 @@ function summarizePendingBetState(selectionStates: PendingSelectionState[]): "pe
   if (decisive.length !== selectionStates.length) return "pending";
   if (decisive.every((sel) => sel.outcome === "void")) return "void";
   return "won";
+}
+
+async function getOpenBetStatesPayloadForUser(userId: number, options?: { settle?: boolean }): Promise<OpenBetStatesPayload> {
+  const pendingBets = await db.select().from(betsTable)
+    .where(and(eq(betsTable.userId, userId), eq(betsTable.status, "pending")))
+    .orderBy(desc(betsTable.createdAt));
+
+  const pendingEventIds = Array.from(new Set(
+    pendingBets
+      .flatMap((bet) =>
+        getBetEventIds(
+          bet as unknown as { matchId: string; matchTitle: string; selections: unknown; totalOdds: string },
+        ),
+      )
+      .map((id) => String(id).trim())
+      .filter(Boolean),
+  ));
+
+  if ((options?.settle ?? true) && pendingEventIds.length > 0) {
+    await autoSettlePendingBets({ matchIds: pendingEventIds });
+  }
+
+  const refreshedPendingBets = await db.select().from(betsTable)
+    .where(and(eq(betsTable.userId, userId), eq(betsTable.status, "pending")))
+    .orderBy(desc(betsTable.createdAt));
+
+  return {
+    bets: refreshedPendingBets.map((bet) => {
+      const selections = getBetSelections(
+        bet as unknown as { matchId: string; matchTitle: string; selections: unknown; totalOdds: string },
+      );
+      const selectionStates = selections.map((sel) =>
+        buildPendingSelectionState(sel, selections.length === 1 ? bet.matchId : undefined),
+      );
+      return {
+        betId: bet.id,
+        statusPreview: summarizePendingBetState(selectionStates),
+        selections: selectionStates,
+      };
+    }),
+  };
 }
 
 // ─── POST /api/bets/place ─────────────────────────────────────────────────────
@@ -1407,48 +1456,70 @@ router.get("/my", authMiddleware, async (req: Request, res: Response): Promise<v
 router.get("/open-states", authMiddleware, async (req: Request, res: Response): Promise<void> => {
   const authReq = req as AuthRequest;
   try {
-    const pendingBets = await db.select().from(betsTable)
-      .where(and(eq(betsTable.userId, authReq.user!.id), eq(betsTable.status, "pending")))
-      .orderBy(desc(betsTable.createdAt));
-
-    const pendingEventIds = Array.from(new Set(
-      pendingBets
-        .flatMap((bet) =>
-          getBetEventIds(
-            bet as unknown as { matchId: string; matchTitle: string; selections: unknown; totalOdds: string },
-          ),
-        )
-        .map((id) => String(id).trim())
-        .filter(Boolean),
-    ));
-
-    if (pendingEventIds.length > 0) {
-      await autoSettlePendingBets({ matchIds: pendingEventIds });
-    }
-
-    const refreshedPendingBets = await db.select().from(betsTable)
-      .where(and(eq(betsTable.userId, authReq.user!.id), eq(betsTable.status, "pending")))
-      .orderBy(desc(betsTable.createdAt));
-
-    const payload = refreshedPendingBets.map((bet) => {
-      const selections = getBetSelections(
-        bet as unknown as { matchId: string; matchTitle: string; selections: unknown; totalOdds: string },
-      );
-      const selectionStates = selections.map((sel) =>
-        buildPendingSelectionState(sel, selections.length === 1 ? bet.matchId : undefined),
-      );
-      return {
-        betId: bet.id,
-        statusPreview: summarizePendingBetState(selectionStates),
-        selections: selectionStates,
-      };
-    });
-
-    res.json({ bets: payload });
+    const payload = await getOpenBetStatesPayloadForUser(authReq.user!.id, { settle: true });
+    res.json(payload);
   } catch (err) {
     logger.error({ err }, "Fetch open bet states error");
     res.status(500).json({ error: "Internal server error" });
   }
+});
+
+router.get("/open-states-stream", async (req: Request, res: Response): Promise<void> => {
+  const token = typeof req.query["token"] === "string" ? req.query["token"] : "";
+  if (!token) {
+    res.status(401).json({ error: "Missing token" });
+    return;
+  }
+
+  let user: { id: number; email: string };
+  try {
+    user = verifyAuthToken(token);
+  } catch (err) {
+    logger.error({ err }, "Open bet SSE token verification failed");
+    res.status(401).json({ error: "Invalid token" });
+    return;
+  }
+
+  res.setHeader("Content-Type", "text/event-stream");
+  res.setHeader("Cache-Control", "no-cache, no-transform");
+  res.setHeader("Connection", "keep-alive");
+  res.setHeader("X-Accel-Buffering", "no");
+  if (typeof (res as { flushHeaders?: () => void }).flushHeaders === "function") {
+    (res as { flushHeaders: () => void }).flushHeaders();
+  }
+  try { res.write(`:${" ".repeat(2048)}\n\n`); } catch { /* ignore */ }
+
+  let closed = false;
+  let polling = false;
+  let lastPayload = "";
+  const sendPayload = async () => {
+    if (closed || polling) return;
+    polling = true;
+    try {
+      const payload = await getOpenBetStatesPayloadForUser(user.id, { settle: true });
+      const serialized = JSON.stringify(payload);
+      if (serialized !== lastPayload) {
+        lastPayload = serialized;
+        try { res.write(`data: ${serialized}\n\n`); } catch { /* ignore */ }
+      }
+    } catch (err) {
+      logger.error({ err, userId: user.id }, "Open bet SSE push failed");
+    } finally {
+      polling = false;
+    }
+  };
+
+  await sendPayload();
+  const refreshTimer = setInterval(() => { void sendPayload(); }, 5000);
+  const keepAlive = setInterval(() => {
+    try { res.write(`: keepalive ${" ".repeat(128)}\n\n`); } catch { /* ignore */ }
+  }, 15000);
+
+  req.on("close", () => {
+    closed = true;
+    clearInterval(refreshTimer);
+    clearInterval(keepAlive);
+  });
 });
 
 // ─── POST /api/bets/:id/cashout ───────────────────────────────────────────────

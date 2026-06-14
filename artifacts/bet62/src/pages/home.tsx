@@ -2070,6 +2070,8 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
   const [cashoutAnim, setCashoutAnim] = useState<{ amount: number } | null>(null);
   const [betPlacedAnim, setBetPlacedAnim] = useState(false);
   const prevWonBetIds = useRef<Set<number> | null>(null);
+  const openBetsSseRef = useRef<EventSource | null>(null);
+  const openBetsSseReconnectRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const prevLiveMatchesRef = useRef<Match[]>([]);
   // Always-current mirror of liveMatches state — lets effects read the current
   // value without adding liveMatches / liveMatches.length to their dep arrays
@@ -4122,23 +4124,13 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
     }
   }, [auth.token]);
 
-  const fetchOpenBetStates = useCallback(async () => {
-    if (!auth.token) return;
-    const pendingIds = myBets.filter((bet) => bet.status === "pending").map((bet) => bet.id);
-    if (pendingIds.length === 0) return;
-    try {
-      const res = await fetch("/api/bets/open-states", {
-        headers: { Authorization: `Bearer ${auth.token}` },
-      });
-      if (!res.ok) return;
-      const data = await res.json() as {
-        bets?: Array<{
-          betId: number;
-          statusPreview: "pending" | "won" | "lost" | "void";
-          selections: OpenBetSelectionState[];
-        }>;
-      };
-      const incoming = Array.isArray(data.bets) ? data.bets : [];
+  const applyOpenBetStatePayload = useCallback((incoming: Array<{
+    betId: number;
+    statusPreview: "pending" | "won" | "lost" | "void";
+    selections: OpenBetSelectionState[];
+  }>) => {
+      const pendingIds = myBets.filter((bet) => bet.status === "pending").map((bet) => bet.id);
+      if (pendingIds.length === 0) return;
       const incomingIds = new Set(incoming.map((bet) => bet.betId));
       if (pendingIds.some((id) => !incomingIds.has(id))) {
         void fetchMyBets(true);
@@ -4166,10 +4158,29 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
           statusPreview: next.statusPreview,
         };
       }));
+  }, [myBets, fetchMyBets]);
+
+  const fetchOpenBetStates = useCallback(async () => {
+    if (!auth.token) return;
+    const pendingIds = myBets.filter((bet) => bet.status === "pending").map((bet) => bet.id);
+    if (pendingIds.length === 0) return;
+    try {
+      const res = await fetch("/api/bets/open-states", {
+        headers: { Authorization: `Bearer ${auth.token}` },
+      });
+      if (!res.ok) return;
+      const data = await res.json() as {
+        bets?: Array<{
+          betId: number;
+          statusPreview: "pending" | "won" | "lost" | "void";
+          selections: OpenBetSelectionState[];
+        }>;
+      };
+      applyOpenBetStatePayload(Array.isArray(data.bets) ? data.bets : []);
     } catch {
       // non-critical lightweight refresh
     }
-  }, [auth.token, myBets, fetchMyBets]);
+  }, [auth.token, myBets, applyOpenBetStatePayload]);
 
   useEffect(() => {
     if (cashoutExpandedId == null) return;
@@ -4196,14 +4207,61 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab]);
 
-  // Lightweight refresh focused only on the events inside pending tickets.
+  // Real-time stream for pending ticket states, with fetch fallback if SSE drops.
   useEffect(() => {
     if (activeTab !== "mybets" || !auth.token) return;
     void fetchOpenBetStates();
-    const id = window.setInterval(() => {
-      void fetchOpenBetStates();
-    }, 5000);
-    return () => window.clearInterval(id);
+    if (typeof window === "undefined" || !("EventSource" in window)) {
+      const fallbackId = window.setInterval(() => { void fetchOpenBetStates(); }, 5000);
+      return () => window.clearInterval(fallbackId);
+    }
+
+    let closed = false;
+    const openStream = () => {
+      if (openBetsSseRef.current || closed) return;
+      try {
+        const es = new EventSource(`/api/bets/open-states-stream?token=${encodeURIComponent(auth.token)}`);
+        openBetsSseRef.current = es;
+        es.onmessage = (evt) => {
+          try {
+            const data = JSON.parse(evt.data) as {
+              bets?: Array<{
+                betId: number;
+                statusPreview: "pending" | "won" | "lost" | "void";
+                selections: OpenBetSelectionState[];
+              }>;
+            };
+            applyOpenBetStatePayload(Array.isArray(data.bets) ? data.bets : []);
+          } catch {
+            // ignore malformed frames
+          }
+        };
+        es.onerror = () => {
+          es.close();
+          if (openBetsSseRef.current === es) openBetsSseRef.current = null;
+          void fetchOpenBetStates();
+          if (openBetsSseReconnectRef.current) clearTimeout(openBetsSseReconnectRef.current);
+          openBetsSseReconnectRef.current = setTimeout(() => {
+            if (!closed && activeTabRef.current === "mybets" && openBetsSseRef.current === null) openStream();
+          }, 2000);
+        };
+      } catch {
+        void fetchOpenBetStates();
+      }
+    };
+
+    openStream();
+    return () => {
+      closed = true;
+      if (openBetsSseReconnectRef.current) {
+        clearTimeout(openBetsSseReconnectRef.current);
+        openBetsSseReconnectRef.current = null;
+      }
+      if (openBetsSseRef.current) {
+        openBetsSseRef.current.close();
+        openBetsSseRef.current = null;
+      }
+    };
   }, [activeTab, auth.token, fetchOpenBetStates]);
 
   // Keep a live snapshot in My Bets so ongoing events still show live badge/score.
