@@ -1832,6 +1832,17 @@ function computeTennisPointAdjustedOdds(
 // binomial "race to win" model where each game is an independent Bernoulli
 // trial with P(home wins game) = pGame.  Scores already ruled out by the
 // current score are excluded and remaining probabilities are renormalised.
+const TENNIS_SET_CORRECT_SCORE_SOFT_CAP = 20;
+const TENNIS_SET_CORRECT_SCORE_EXTREME_THRESHOLD = 50;
+const TENNIS_SET_CORRECT_SCORE_HARD_CAP = 60;
+
+function clampTennisSetCorrectScoreOdd(rawOdd: number): number {
+  const odd = Math.max(1.01, +rawOdd.toFixed(2));
+  if (odd <= TENNIS_SET_CORRECT_SCORE_SOFT_CAP) return odd;
+  if (odd < TENNIS_SET_CORRECT_SCORE_EXTREME_THRESHOLD) return TENNIS_SET_CORRECT_SCORE_SOFT_CAP;
+  return Math.min(TENNIS_SET_CORRECT_SCORE_HARD_CAP, odd);
+}
+
 function computeSetExactScoreOdds(
   hg: number,
   ag: number,
@@ -1872,7 +1883,7 @@ function computeSetExactScoreOdds(
   const result: Record<string, number> = {};
   for (const [label, prob] of Object.entries(probs)) {
     const fair = prob / total;
-    result[label] = Math.max(1.01, +(1 / (fair * (1 - margin))).toFixed(2));
+    result[label] = clampTennisSetCorrectScoreOdd(1 / (fair * (1 - margin)));
   }
   return result;
 }
@@ -5952,7 +5963,7 @@ function parseTennisSetCorrectScoreChoices(choices: Array<{ name: string; fracti
     if (!valid) continue;
     const odds = fractionalToDecimal(choice.fractionalValue);
     if (!(odds > 1.001)) continue;
-    out.push({ label: `${homeGames}-${awayGames}`, odds });
+    out.push({ label: `${homeGames}-${awayGames}`, odds: clampTennisSetCorrectScoreOdd(odds) });
   }
   return canonicalTennisSetScoreOrder(out);
 }
