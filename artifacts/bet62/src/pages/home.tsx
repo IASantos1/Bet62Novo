@@ -4740,23 +4740,23 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
     const oddsDown = !isSuspended && delta <= -ODDS_ANIM_THRESHOLD;
     const isWCVariant = variant === "worldcup";
     const baseBoxClass = isWCVariant
-      ? `${grow ? "flex-1" : ""} h-[64px] rounded-2xl border px-2.5 flex flex-col items-center justify-center`
+      ? `${grow ? "flex-1" : ""} h-[64px] rounded-xl border px-1 flex flex-col items-center justify-center min-w-0`
       : `${grow ? "flex-1" : ""} h-10 px-2 rounded-md text-xs flex flex-col items-center justify-center`;
 
     if (isSuspended) {
       return (
-        <div className={`relative ${baseBoxClass} ${isWCVariant ? (isDarkTheme ? "bg-zinc-950 border-zinc-800 opacity-75" : "bg-zinc-100 border-zinc-200 opacity-75") : "bg-zinc-800/40 border-zinc-700/30 opacity-70"} select-none`}>
-          <span className={`${isWCVariant ? "text-[11px] font-medium text-zinc-500" : "text-[10px] leading-none opacity-60"}`}>{label}</span>
-          <span className={`${isWCVariant ? `mt-1 text-[18px] font-black ${isDarkTheme ? "text-zinc-600" : "text-zinc-400"}` : "font-bold text-sm leading-none text-zinc-300"} tabular-nums line-through`}>{odd.toFixed(2)}</span>
+        <div className={`relative ${baseBoxClass} ${isWCVariant ? (isDarkTheme ? "border-zinc-800 bg-transparent opacity-60" : "border-zinc-200 bg-transparent opacity-60") : "bg-zinc-800/40 border-zinc-700/30 opacity-70"} select-none`}>
+          <span className={`${isWCVariant ? "text-[10px] text-zinc-500" : "text-[10px] leading-none opacity-60"}`}>{label}</span>
+          <span className={`${isWCVariant ? `mt-1 text-sm font-black ${isDarkTheme ? "text-zinc-600" : "text-zinc-400"}` : "font-bold text-sm leading-none text-zinc-300"} tabular-nums line-through`}>{odd.toFixed(2)}</span>
         </div>
       );
     }
 
     if (odd < 1.15 && market === "result") {
       return (
-        <div className={`relative ${baseBoxClass} ${isWCVariant ? (isDarkTheme ? "bg-zinc-950 border-zinc-800" : "bg-zinc-100 border-zinc-200") : "bg-zinc-800/40 border-zinc-700/30"}`}>
-          <span className={`${isWCVariant ? "text-[11px] font-medium text-zinc-500" : "text-[10px] leading-none opacity-40"}`}>{label}</span>
-          <span className={`${isWCVariant ? `mt-1 text-[20px] font-black ${isDarkTheme ? "text-zinc-600" : "text-zinc-400"}` : "font-bold text-base leading-none text-zinc-600"} tabular-nums`}>--</span>
+        <div className={`relative ${baseBoxClass} ${isWCVariant ? (isDarkTheme ? "border-zinc-800 bg-transparent" : "border-zinc-200 bg-transparent") : "bg-zinc-800/40 border-zinc-700/30"}`}>
+          <span className={`${isWCVariant ? "text-[10px] text-zinc-500" : "text-[10px] leading-none opacity-40"}`}>{label}</span>
+          <span className={`${isWCVariant ? `mt-1 text-sm font-black ${isDarkTheme ? "text-zinc-600" : "text-zinc-400"}` : "font-bold text-base leading-none text-zinc-600"} tabular-nums`}>--</span>
         </div>
       );
     }
@@ -4778,19 +4778,19 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
       );
     }
 
-    const flashClass = !isSelected && oddsUp ? "odds-flash-up" : !isSelected && oddsDown ? "odds-flash-down" : "";
+    const flashClass = isWCVariant ? "" : (!isSelected && oddsUp ? "odds-flash-up" : !isSelected && oddsDown ? "odds-flash-down" : "");
 
     return (
       <button
         {...makeTap(() => toggleBet(match, selection, odd, market, label))}
-        className={`relative ${baseBoxClass} transition-colors ${isWCVariant ? (isDarkTheme ? "text-white" : "text-zinc-900") : "text-xs"} ${
+        className={`relative ${baseBoxClass} transition-colors ${isWCVariant ? "" : "text-xs"} ${
           isSelected
-            ? (isWCVariant ? "bg-red-600 border-red-600 text-white" : "bg-red-600 text-white")
-            : (isWCVariant ? (isDarkTheme ? "bg-zinc-950 hover:bg-zinc-900 border-zinc-800" : "bg-zinc-50 hover:bg-zinc-100 border-zinc-200") : "bg-zinc-800 hover:bg-zinc-700 text-zinc-300")
+            ? (isWCVariant ? "border-red-500 bg-red-600/15 ring-1 ring-red-400/30" : "bg-red-600 text-white")
+            : (isWCVariant ? (isDarkTheme ? "border-zinc-800 bg-transparent hover:border-zinc-700" : "border-zinc-200 bg-transparent hover:border-zinc-300") : "bg-zinc-800 hover:bg-zinc-700 text-zinc-300")
         } ${flashClass}`}
       >
-        <span className={`${isWCVariant ? `text-[11px] font-medium ${isSelected ? "text-white/85" : isDarkTheme ? "text-zinc-400" : "text-zinc-500"}` : "text-[10px] leading-none opacity-70"}`}>{label}</span>
-        <span className={`${isWCVariant ? `mt-1 text-[20px] font-black leading-none ${isDarkTheme ? "text-white" : "text-zinc-900"}` : "font-bold text-sm leading-none"} ${isSelected && isWCVariant ? "!text-white" : ""} tabular-nums flex items-center gap-0.5`}>
+        <span className={`${isWCVariant ? `text-[10px] mb-1 truncate w-full text-center px-0.5 ${isDarkTheme ? "text-zinc-500" : "text-zinc-500"}` : "text-[10px] leading-none opacity-70"}`}>{label}</span>
+        <span className={`${isWCVariant ? `text-sm font-black tabular-nums flex items-center gap-0.5 ${isSelected ? "text-red-400" : isDarkTheme ? "text-white" : "text-zinc-900"}` : "font-bold text-sm leading-none tabular-nums flex items-center gap-0.5"} ${isSelected && !isWCVariant ? "!text-white" : ""}`}>
           {odd.toFixed(2)}
           {oddsUp   && <span className="text-green-400 text-[9px] font-black leading-none shrink-0">▲</span>}
           {oddsDown && <span className="text-red-400  text-[9px] font-black leading-none shrink-0">▼</span>}
