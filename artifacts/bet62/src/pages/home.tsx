@@ -6100,13 +6100,6 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
   function flattenMatchMarketsForArrows(match: Match): Record<string, number> {
     const f: Record<string, number> = {};
     const m = match.markets;
-    const tennisExtra = isTennis ? ((m as any)?.tennisExtra as Record<string, any> | undefined) : undefined;
-    const hasTennisHandicapMarkets = !!(
-      tennisExtra?.setHandicap?.home > 0 ||
-      tennisExtra?.setHandicap?.away > 0 ||
-      tennisExtra?.gameHandicap?.home > 0 ||
-      tennisExtra?.gameHandicap?.away > 0
-    );
     if (!m) return f;
     // 1X2
     f["result:home"] = match.odds.home;
