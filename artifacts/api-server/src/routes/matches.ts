@@ -1827,6 +1827,35 @@ function computeTennisPointAdjustedOdds(
   };
 }
 
+function computeTennisLiveOdds(
+  baseOdds: { home: number; draw: number; away: number },
+  sets: Array<[number, number]>,
+  homeScore: number,
+  awayScore: number,
+  currentPoints?: [number | string, number | string],
+  serving?: [boolean, boolean],
+  realLiveOdds?: { home: number; away: number },
+): { odds: { home: number; draw: number; away: number }; hasRealOdds: boolean } {
+  if (realLiveOdds && realLiveOdds.home > 1.001 && realLiveOdds.away > 1.001) {
+    // Provider live odds already include current point/server context; do not
+    // apply the point-adjustment layer a second time or prices become distorted.
+    return {
+      odds: {
+        home: +realLiveOdds.home.toFixed(2),
+        draw: 0,
+        away: +realLiveOdds.away.toFixed(2),
+      },
+      hasRealOdds: true,
+    };
+  }
+
+  const anchorOdds = computeTennisFallbackLiveOdds(baseOdds, sets, homeScore, awayScore, currentPoints, serving);
+  return {
+    odds: computeTennisPointAdjustedOdds(anchorOdds, currentPoints, serving),
+    hasRealOdds: false,
+  };
+}
+
 // ─── Tennis Set Exact Score helper ────────────────────────────────────────────
 // Computes exact-score odds for the CURRENT tennis set given the current game
 // score (hg home games won, ag away games won in this set).  Uses a negative-
@@ -9152,10 +9181,16 @@ function buildTennisLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
       const baseOdds = cachedOdds
         ? { home: cachedOdds.home, draw: 0, away: cachedOdds.away }
         : makeOddsFromTeams(homeTeam, awayTeam);
-      const anchorOdds = realLiveOdds
-        ? { home: realLiveOdds.home, draw: 0, away: realLiveOdds.away }
-        : computeTennisFallbackLiveOdds(baseOdds, sets, homeScore, awayScore, currentPoints, serving);
-      const liveOdds = computeTennisPointAdjustedOdds(anchorOdds, currentPoints, serving);
+      const liveOddsState = computeTennisLiveOdds(
+        baseOdds,
+        sets,
+        homeScore,
+        awayScore,
+        currentPoints,
+        serving,
+        realLiveOdds,
+      );
+      const liveOdds = liveOddsState.odds;
 
     // ── Market suspension: detect point played and compute duration ─────────────
     // A point is played when currentPoints or sets changes compared to last tick.
@@ -9246,7 +9281,7 @@ function buildTennisLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
       league: tennisTournLabel(ev.tournament), country: v2TournCountry(ev),
       sport: "tennis", homeScore, awayScore,
       minute: currentSetNum * 20,
-      status: displayStatus, hasRealOdds: true, odds: liveOdds,
+      status: displayStatus, hasRealOdds: liveOddsState.hasRealOdds, odds: liveOdds,
       markets: v2Markets,
       events: [],
       _firstSeenAt: existing?._firstSeenAt ?? now,
@@ -9262,7 +9297,7 @@ function buildTennisLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
   // Grace period of 45 s: transient feed gaps (Tyler/Challenger matches that briefly
   // disappear between polls) don't cause the match to vanish from the UI.
   for (const id of liveMatchState.keys()) {
-    if (!id.startsWith("tennis-v2-")) continue;
+    if (!id.startsWith("tennis-v2-") && !id.startsWith("tennis-v1-")) continue;
     const cached = liveMatchState.get(id);
     if (!cached) {
       _tennisMissingFrom.delete(id);
@@ -9517,17 +9552,39 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
   // The tennis API does not support v2 live/today endpoints (returns 404).
   // Primary source: v1/tennis/live (buildTennisLiveV1). The v2 path is kept as
   // a fallback for any future API upgrade that enables a v2 tennis live endpoint.
+  const tennisSourceRank = (m: LiveMatchState): number => {
+    const id = String(m.id);
+    const prefixRank = id.startsWith("tennis-v2-") ? 3 : id.startsWith("tennis-v1-") ? 2 : 1;
+    const realOddsRank = m.hasRealOdds ? 2 : 0;
+    const liveDetailRank = (m._liveExtra?.currentPoints ? 1 : 0) + Math.min(3, m._liveExtra?.sets?.length ?? 0);
+    return prefixRank * 100 + realOddsRank * 10 + liveDetailRank;
+  };
+  const dedupeTennisLiveMatches = (matches: LiveMatchState[]): LiveMatchState[] => {
+    const bestByPair = new Map<string, LiveMatchState>();
+    for (const match of matches) {
+      const pairKey = _tennisPairKey(match.home, match.away);
+      const current = bestByPair.get(pairKey);
+      if (!current || tennisSourceRank(match) > tennisSourceRank(current)) {
+        bestByPair.set(pairKey, match);
+      }
+    }
+    return matches.filter(match => bestByPair.get(_tennisPairKey(match.home, match.away)) === match);
+  };
+
   const tennisV2Part = buildTennisLiveV2(tennisEvents);
+  const seededTennisLivePairs = new Set([...tennisV2Part, ...tennisV1LivePart].map(m => _tennisPairKey(m.home, m.away)));
   const allLiveIds = new Set([...tennisV2Part, ...tennisV1LivePart].map(m => String(m.id)));
   const todayStartedExtra = buildTennisLiveV2(
     (tennisTodayEvents ?? []).filter(ev => !allLiveIds.has(`tennis-v2-${ev.id}`))
-  ).filter(m => !allLiveIds.has(String(m.id)));
-  const tennisLivePart = [...tennisV2Part, ...tennisV1LivePart, ...todayStartedExtra];
+  ).filter(m => !allLiveIds.has(String(m.id)) && !seededTennisLivePairs.has(_tennisPairKey(m.home, m.away)));
+  const tennisLivePart = dedupeTennisLiveMatches([...tennisV2Part, ...tennisV1LivePart, ...todayStartedExtra]);
+  const tennisLivePairKeys = new Set(tennisLivePart.map(m => _tennisPairKey(m.home, m.away)));
   const startedUpcomingTennisCandidates = allUpcoming.filter((up) => {
     if (up.sport !== "tennis") return false;
     if (!up.id || !String(up.id).startsWith("tennis-v2-")) return false;
     const id = String(up.id);
     if (allLiveIds.has(id)) return false;
+    if (tennisLivePairKeys.has(_tennisPairKey(up.home, up.away))) return false;
     const kickoffMs = parseUpcomingKickoffMs(up);
     if (!kickoffMs) return false;
     if (kickoffMs > now + 2 * 60_000) return false;
@@ -9551,9 +9608,32 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
       if (existing.has(id)) continue;
       const providerId = Number(String(id).replace(/^tennis-v2-/, ""));
       const detail = Number.isFinite(providerId) ? startedUpcomingTennisDetails.get(providerId) : undefined;
-      const sets: [number, number][] = detail?.sets?.length ? detail.sets : [[0, 0]];
+      if (!detail || !detail.sets?.length) continue;
+      const sets: [number, number][] = detail.sets;
       const currentPoints = detail?.currentPoints;
+      const serving = detail?.serving;
       const currentSetNum = Math.max(1, sets.length);
+      const completedSets = Math.max(0, currentSetNum - 1);
+      const homeSetsWon = sets.slice(0, completedSets).filter(([homeGames, awayGames]) => homeGames > awayGames).length;
+      const awaySetsWon = sets.slice(0, completedSets).filter(([homeGames, awayGames]) => awayGames > homeGames).length;
+      const pairKey = _tennisPairKey(up.home, up.away);
+      const seededOdds = _tennisPreMatchOdds.get(pairKey);
+      const baseOdds = seededOdds
+        ? { home: seededOdds.home, draw: 0, away: seededOdds.away }
+        : makeOddsFromTeams(up.home, up.away);
+      const liveOddsState = computeTennisLiveOdds(
+        baseOdds,
+        sets,
+        homeSetsWon,
+        awaySetsWon,
+        currentPoints,
+        serving,
+        Number.isFinite(providerId) ? _tennisLiveOddsCache.get(providerId) : undefined,
+      );
+      const liveOdds = liveOddsState.odds;
+      const homeProb = liveOdds.home > 0 && liveOdds.away > 0
+        ? (1 / liveOdds.home) / ((1 / liveOdds.home) + (1 / liveOdds.away))
+        : 0.5;
       out.push({
         id,
         home: up.home,
@@ -9561,15 +9641,18 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
         league: up.league ?? "Tennis",
         country: up.country ?? "",
         sport: "tennis",
-        homeScore: sets[sets.length - 1]?.[0] ?? 0,
-        awayScore: sets[sets.length - 1]?.[1] ?? 0,
+        homeScore: homeSetsWon,
+        awayScore: awaySetsWon,
         minute: currentSetNum * 20,
         status: detail?.status ?? tennisSetLabel(currentSetNum),
-        hasRealOdds: !!up.hasRealOdds,
-        odds: (up.odds && up.odds.home > 0 && up.odds.away > 0) ? up.odds : makeOddsFromTeams(up.home, up.away),
-        markets: (up.markets as AdvancedMarkets) ?? makeAdvancedMarketsFromTeams(up.home, up.away),
+        hasRealOdds: liveOddsState.hasRealOdds,
+        odds: liveOdds,
+        markets: {
+          ...makeAdvancedMarketsFromTeams(up.home, up.away),
+          tennisExtra: computeLiveTennisExtras(homeProb, sets, homeSetsWon, awaySetsWon, currentSetNum),
+        } as AdvancedMarkets,
         events: [],
-        _liveExtra: { sets, ...(currentPoints ? { currentPoints } : {}), ...(detail?.serving ? { serving: detail.serving } : {}) },
+        _liveExtra: { sets, ...(currentPoints ? { currentPoints } : {}), ...(serving ? { serving } : {}) },
       });
       if (out.length >= 60) break;
     }
@@ -10311,13 +10394,19 @@ async function buildTennisLiveV1(): Promise<LiveMatchState[]> {
       const baseOdds = seededOdds
         ? { home: seededOdds.home, draw: 0, away: seededOdds.away }
         : makeOddsFromTeams(home, away);
-      const anchorOdds = realLiveOdds
-        ? { home: realLiveOdds.home, draw: 0, away: realLiveOdds.away }
-        : computeTennisFallbackLiveOdds(baseOdds, sets, homeScore, awayScore, currentPoints, serving);
-      const liveOdds = computeTennisPointAdjustedOdds(anchorOdds, currentPoints, serving);
+      const liveOddsState = computeTennisLiveOdds(
+        baseOdds,
+        sets,
+        homeScore,
+        awayScore,
+        currentPoints,
+        serving,
+        realLiveOdds,
+      );
+      const liveOdds = liveOddsState.odds;
       const setNum = homeScore + awayScore + 1;
       const item: LiveMatchState = {
-        id: `tennis-v2-${g.id}`,
+        id: `tennis-v1-${g.id}`,
         home, away,
         league: enrichedLiveLeague,
         country: "",
@@ -10325,7 +10414,7 @@ async function buildTennisLiveV1(): Promise<LiveMatchState[]> {
         homeScore, awayScore,
         minute: setNum * 20,
         status: ws?.status ?? g.statusText ?? "Em Jogo",
-        hasRealOdds: !!realLiveOdds,
+        hasRealOdds: liveOddsState.hasRealOdds,
         odds: liveOdds,
         markets: (() => {
           const adjH = liveOdds.home > 1 ? 1 / liveOdds.home : 0.5;
@@ -12060,8 +12149,16 @@ router.get("/wc2026", async (_req: Request, res: Response) => {
       return m;
     });
 
-    // Filter: don't include finished matches in the response (they clutter live tab)
-    const visible = enriched.filter(m => m.status !== "Finished");
+    // Filter: hide finished matches and also hide stale scheduled matches whose
+    // kickoff is already well in the past but the provider never flipped status.
+    const WC2026_STALE_UPCOMING_GRACE_MIN = 180;
+    const visible = enriched.filter(m => {
+      if (m.status === "Finished") return false;
+      if (m.isLive) return true;
+      const startUtcMs = parseWCStartUtcMs(m.date, m.time);
+      if (startUtcMs <= 0) return true;
+      return nowMs - startUtcMs <= WC2026_STALE_UPCOMING_GRACE_MIN * 60_000;
+    });
 
     res.json({ matches: visible });
   } catch {
