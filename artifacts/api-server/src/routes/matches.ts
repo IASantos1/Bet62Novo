@@ -14344,8 +14344,62 @@ function parseFootballStatsPlayer(p: FootballLeagueStatsPlayerRaw): FootballLeag
 
 async function getFootballLeagueStats(leagueId: string): Promise<{ teams: FootballLeagueStatsTeam[]; meta: { id: string; name: string; country: string } }> {
   const cached = footballLeagueStatsCache.get(leagueId);
-  if (cached) return { teams: cached.data, meta: cached.meta };
-  throw new Error("Estatísticas indisponíveis");
+  if (cached && Date.now() - cached.fetchedAt < FOOTBALL_LEAGUE_STATS_TTL) {
+    return { teams: cached.data, meta: cached.meta };
+  }
+
+  if (!CONFIG.SPORTSAPI_KEY) {
+    if (cached) return { teams: cached.data, meta: cached.meta };
+    throw new Error("Estatísticas indisponíveis");
+  }
+
+  const urls = [
+    `${SAPI_V2_FOOTBALL}/league/${encodeURIComponent(leagueId)}/stats`,
+    `${SAPI_V2_FOOTBALL}/leagues/${encodeURIComponent(leagueId)}/stats`,
+  ];
+
+  let payload: FootballLeagueStatsRaw | null = null;
+  for (const url of urls) {
+    try {
+      const resp = await fetch(url, {
+        signal: AbortSignal.timeout(8000),
+        headers: sapiHeaders(),
+      });
+      if (!resp.ok) continue;
+      payload = await resp.json() as FootballLeagueStatsRaw;
+      if (payload?.league_stats?.league) break;
+    } catch {
+      // Try the next candidate endpoint before failing.
+    }
+  }
+
+  const league = payload?.league_stats?.league;
+  if (!league) {
+    if (cached) return { teams: cached.data, meta: cached.meta };
+    throw new Error("Estatísticas indisponíveis");
+  }
+
+  const teams = toArr(league.team).map((team): FootballLeagueStatsTeam => ({
+    id: team.id,
+    name: team.name,
+    venue: team.venue ? { id: team.venue.id, name: team.venue.name } : null,
+    coach: team.coach ? { id: team.coach.id, name: team.coach.name } : null,
+    players: toArr(team.squad?.player).map(parseFootballStatsPlayer),
+  }));
+
+  const meta = {
+    id: league.id,
+    name: league.name,
+    country: league.country,
+  };
+
+  footballLeagueStatsCache.set(leagueId, {
+    data: teams,
+    meta,
+    fetchedAt: Date.now(),
+  });
+
+  return { teams, meta };
 }
 
 router.get("/football-league-stats/:id", async (req: Request, res: Response) => {
