@@ -8051,10 +8051,10 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
   type SelOutcome = "green" | "red" | "cashout" | "live-win" | "live-lose" | "pending" | "void";
   const getSelOutcome = (sel: StoredSelection, betStatus: string): SelOutcome => {
     if (betStatus === "cashed_out") return "cashout";
-    if (betStatus === "voided") return "void";
     if (sel.outcome === "won") return "green";
     if (sel.outcome === "lost") return "red";
     if (sel.outcome === "void") return "void";
+    if (betStatus === "voided") return "void";
     if (sel.finalScore) {
       const out = scoreOutcomeForSel(sel, sel.finalScore);
       if (out === "won") return "green";
@@ -12119,6 +12119,7 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
                             <div className={`${selsBg} divide-y ${divider}`}>
                               {sels.map((sel, i) => {
                                 const outcome = getSelOutcome(sel, bet.status);
+                                const displayedSelOdd = outcome === "void" ? 1 : Number(sel.odd);
                                 const lm = isActivePending ? findLiveMatchForSel(sel) : null;
                                 const liveOdd = lm ? getLiveOddForSel(sel, lm) : null;
                                 const isSelectionLive = !!lm && (
@@ -12232,7 +12233,7 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
                                     </div>
                                     <div className="flex flex-col items-end gap-1 shrink-0">
                                       <div className="bg-red-600 text-white font-black text-[13px] px-3 py-1 rounded-lg tabular-nums">
-                                        {Number(sel.odd).toFixed(2)}
+                                        {Number.isFinite(displayedSelOdd) ? displayedSelOdd.toFixed(2) : "1.00"}
                                       </div>
                                       {isWon && (
                                         <span className="text-[10px] font-black text-green-600 flex items-center gap-0.5">{sportEmoji(sel.sport)} VENCIDO</span>
@@ -12242,6 +12243,9 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
                                       )}
                                       {isActivePending && outcome === "live-lose" && (
                                         <span className="text-[10px] font-black text-red-600">PERDIDO</span>
+                                      )}
+                                      {outcome === "void" && (
+                                        <span className="text-[10px] font-black text-zinc-500">ANULADA</span>
                                       )}
                                     </div>
                                   </div>

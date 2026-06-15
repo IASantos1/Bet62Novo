@@ -22,6 +22,17 @@ export type SelectionRecord = {
   outcome?: "won" | "lost" | "void" | null;
 };
 
+function computeEffectiveOdds(
+  selections: SelectionRecord[],
+  outcomes: Array<"won" | "lost" | "void" | null>,
+): number {
+  return selections.reduce((acc, sel, idx) => {
+    const outcome = outcomes[idx];
+    if (outcome === "void") return acc;
+    return acc * Math.max(1.01, Number(sel.odd ?? 1));
+  }, 1);
+}
+
 type FTScore = { home: number; away: number };
 type HTScore = { htHome: number; htAway: number };
 type FinishedResult = (typeof finishedMatchResults extends Map<string, infer V> ? V : never);
@@ -1573,9 +1584,7 @@ export async function autoSettlePendingBets(opts?: { matchIds?: string[] }): Pro
             extras: result.extras,
             finishedAt: result.finishedAt,
           });
-
           outcomes.push(outcome);
-
           const needsOutcome = sel.outcome == null && outcome != null;
           const needsScore = sel.finalScore == null;
           const needsHT = sel.htScore == null && ht != null;
@@ -1589,10 +1598,26 @@ export async function autoSettlePendingBets(opts?: { matchIds?: string[] }): Pro
           };
         });
 
-        if (anySelectionUpdated) {
+        const effectiveOdds = computeEffectiveOdds(selections, outcomes);
+        const pendingOddsStr = Number(effectiveOdds.toFixed(2)).toFixed(2);
+        const pendingPotentialWinStr = Math.max(0, Number((parseFloat(bet.stake) * effectiveOdds).toFixed(2))).toFixed(2);
+        const shouldUpdatePendingTicket =
+          !outcomes.some(o => o === "lost") &&
+          outcomes.some(o => o === null || o === "void") &&
+          (
+            anySelectionUpdated ||
+            String(bet.totalOdds) !== pendingOddsStr ||
+            String(bet.potentialWin) !== pendingPotentialWinStr
+          );
+
+        if (shouldUpdatePendingTicket) {
           await db
             .update(betsTable)
-            .set({ selections: updatedSelections })
+            .set({
+              selections: updatedSelections,
+              totalOdds: pendingOddsStr,
+              potentialWin: pendingPotentialWinStr,
+            })
             .where(and(eq(betsTable.id, bet.id), eq(betsTable.status, "pending")));
         }
 
@@ -1630,7 +1655,7 @@ export async function autoSettlePendingBets(opts?: { matchIds?: string[] }): Pro
           await db.transaction(async (tx: any) => {
             const rows = await tx
               .update(betsTable)
-              .set({ status: "voided", selections: updatedSelections })
+              .set({ status: "voided", selections: updatedSelections, totalOdds: "1.00", potentialWin: Number(parseFloat(bet.stake).toFixed(2)).toFixed(2) })
               .where(and(eq(betsTable.id, bet.id), eq(betsTable.status, "pending")))
               .returning({ id: betsTable.id });
             if (rows.length === 0) return;
@@ -1662,11 +1687,6 @@ export async function autoSettlePendingBets(opts?: { matchIds?: string[] }): Pro
         const newStatus = "won";
 
         const stakeNum = parseFloat(bet.stake);
-        const effectiveOdds = selections.reduce((acc, sel, idx) => {
-          const o = outcomes[idx];
-          if (o === "won") return acc * Math.max(1.01, Number(sel.odd ?? 1));
-          return acc;
-        }, 1);
         const payoutNum = Math.max(0, Number((stakeNum * effectiveOdds).toFixed(2)));
         const payoutStr = payoutNum.toFixed(2);
         const oddsStr = Number(effectiveOdds.toFixed(2)).toFixed(2);
@@ -1778,10 +1798,12 @@ export async function regradeSettledBetsForMatch(matchId: string, jobId: string)
               : undefined;
 
           const outcome = scoreOutcomeForSel(sel, result, ht, {
+            status: (result as any).status,
             cornersTotal: result.cornersTotal,
             cardsTotal: result.cardsTotal,
             firstGoal: result.firstGoal,
             extras: result.extras,
+            finishedAt: result.finishedAt,
           });
           outcomes.push(outcome);
 
@@ -1813,11 +1835,7 @@ export async function regradeSettledBetsForMatch(matchId: string, jobId: string)
         } else {
           newStatus = "won";
 
-          const effectiveOdds = selections.reduce((acc, sel, idx) => {
-            const o = outcomes[idx];
-            if (o === "won") return acc * Math.max(1.01, Number(sel.odd ?? 1));
-            return acc;
-          }, 1);
+          const effectiveOdds = computeEffectiveOdds(selections, outcomes);
 
           const payoutNum = Math.max(0, Number((stakeNum * effectiveOdds).toFixed(2)));
           payoutStr = payoutNum.toFixed(2);
