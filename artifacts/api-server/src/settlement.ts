@@ -1552,12 +1552,12 @@ export async function autoSettlePendingBets(opts?: { matchIds?: string[] }): Pro
         }
 
         const outcomes: Array<"won" | "lost" | "void" | null> = [];
-
-        for (const sel of selections) {
+        let anySelectionUpdated = false;
+        const updatedSelections = selections.map((sel) => {
           const result = findResult(sel, bet.matchId, isSingle);
           if (!result) {
             outcomes.push(null);
-            continue;
+            return sel;
           }
 
           const ht: HTScore | undefined =
@@ -1565,38 +1565,43 @@ export async function autoSettlePendingBets(opts?: { matchIds?: string[] }): Pro
               ? { htHome: result.htHome, htAway: result.htAway }
               : undefined;
 
-          outcomes.push(scoreOutcomeForSel(sel, result, ht, {
+          const outcome = scoreOutcomeForSel(sel, result, ht, {
+            status: (result as any).status,
             cornersTotal: result.cornersTotal,
             cardsTotal: result.cardsTotal,
             firstGoal: result.firstGoal,
             extras: result.extras,
-          }));
+            finishedAt: result.finishedAt,
+          });
+
+          outcomes.push(outcome);
+
+          const needsOutcome = sel.outcome == null && outcome != null;
+          const needsScore = sel.finalScore == null;
+          const needsHT = sel.htScore == null && ht != null;
+          if (needsOutcome || needsScore || needsHT) anySelectionUpdated = true;
+
+          return {
+            ...sel,
+            ...(needsScore ? { finalScore: { home: result.home, away: result.away } } : {}),
+            ...(needsHT && ht ? { htScore: ht } : {}),
+            ...(needsOutcome ? { outcome } : {}),
+          };
+        });
+
+        if (anySelectionUpdated) {
+          await db
+            .update(betsTable)
+            .set({ selections: updatedSelections })
+            .where(and(eq(betsTable.id, bet.id), eq(betsTable.status, "pending")));
         }
 
         // ── Early loss: if any leg is definitively lost, settle immediately ──
         if (outcomes.some(o => o === "lost")) {
-          const updatedSelsLost = selections.map(sel => {
-            const r = findResult(sel, bet.matchId, isSingle);
-            if (!r) return sel;
-            const ht = typeof r.htHome === "number" && typeof r.htAway === "number"
-              ? { htHome: r.htHome, htAway: r.htAway }
-              : undefined;
-            return {
-              ...sel,
-              finalScore: { home: r.home, away: r.away },
-              htScore: ht,
-              outcome: scoreOutcomeForSel(sel, { home: r.home, away: r.away }, ht, {
-                cornersTotal: r.cornersTotal,
-                cardsTotal: r.cardsTotal,
-                firstGoal: r.firstGoal,
-                extras: r.extras,
-              }),
-            };
-          });
           await db.transaction(async (tx: any) => {
             const rows = await tx
               .update(betsTable)
-              .set({ status: "lost", selections: updatedSelsLost })
+              .set({ status: "lost", selections: updatedSelections })
               .where(and(eq(betsTable.id, bet.id), eq(betsTable.status, "pending")))
               .returning({ id: betsTable.id });
             if (rows.length === 0) return;
@@ -1625,7 +1630,7 @@ export async function autoSettlePendingBets(opts?: { matchIds?: string[] }): Pro
           await db.transaction(async (tx: any) => {
             const rows = await tx
               .update(betsTable)
-              .set({ status: "voided" })
+              .set({ status: "voided", selections: updatedSelections })
               .where(and(eq(betsTable.id, bet.id), eq(betsTable.status, "pending")))
               .returning({ id: betsTable.id });
             if (rows.length === 0) return;
@@ -1666,32 +1671,11 @@ export async function autoSettlePendingBets(opts?: { matchIds?: string[] }): Pro
         const payoutStr = payoutNum.toFixed(2);
         const oddsStr = Number(effectiveOdds.toFixed(2)).toFixed(2);
 
-        const updatedSelsWon = selections.map(sel => {
-          const r = findResult(sel, bet.matchId, isSingle);
-          if (!r) return sel;
-          const ht = typeof r.htHome === "number" && typeof r.htAway === "number"
-            ? { htHome: r.htHome, htAway: r.htAway }
-            : undefined;
-          return {
-            ...sel,
-            finalScore: { home: r.home, away: r.away },
-            htScore: ht,
-            outcome: scoreOutcomeForSel(sel, { home: r.home, away: r.away }, ht, {
-              status: (r as any).status,
-              cornersTotal: r.cornersTotal,
-              cardsTotal: r.cardsTotal,
-              firstGoal: r.firstGoal,
-              extras: r.extras,
-              finishedAt: r.finishedAt,
-            }),
-          };
-        });
-
         await db.transaction(async (tx: any) => {
           // Optimistic lock: only update if still pending
           const rows = await tx
             .update(betsTable)
-            .set({ status: newStatus, selections: updatedSelsWon, potentialWin: payoutStr, totalOdds: oddsStr })
+            .set({ status: newStatus, selections: updatedSelections, potentialWin: payoutStr, totalOdds: oddsStr })
             .where(and(eq(betsTable.id, bet.id), eq(betsTable.status, "pending")))
             .returning({ id: betsTable.id });
 

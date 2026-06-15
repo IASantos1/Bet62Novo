@@ -1339,7 +1339,7 @@ router.post("/place", authMiddleware, async (req: Request, res: Response): Promi
 });
 
 // ─── GET /api/bets/my ─────────────────────────────────────────────────────────
-router.get("/my", authMiddleware, async (req: Request, res: Response): Promise<void> => {
+async function handleGetMyBets(req: Request, res: Response): Promise<void> {
   const authReq = req as AuthRequest;
   try {
     const initialBets = await db.select().from(betsTable)
@@ -1451,7 +1451,10 @@ router.get("/my", authMiddleware, async (req: Request, res: Response): Promise<v
     logger.error({ err }, "Fetch bets error");
     res.status(500).json({ error: "Internal server error" });
   }
-});
+}
+
+router.get("/my", authMiddleware, handleGetMyBets);
+router.get("/", authMiddleware, handleGetMyBets);
 
 router.get("/open-states", authMiddleware, async (req: Request, res: Response): Promise<void> => {
   const authReq = req as AuthRequest;
