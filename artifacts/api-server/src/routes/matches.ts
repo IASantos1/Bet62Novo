@@ -15544,6 +15544,11 @@ type TeamPlayerMarkets = {
   redCards: PlayerMarketEntry[];
 };
 
+type TeamLineupEligibility = {
+  starters: Set<string>;
+  bench: Set<string>;
+};
+
 type ProviderPlayerOddsBucket = {
   anytime: Map<string, number>;
   first: Map<string, number>;
@@ -15994,18 +15999,23 @@ function scorerMarketBucket(rawMarketName: string): keyof ProviderPlayerOddsBuck
 const footballProviderPlayerOddsCache = new Map<string, { data: ProviderPlayerOddsBucket; fetchedAt: number }>();
 const FOOTBALL_PROVIDER_PLAYER_ODDS_TTL = 5 * 60_000;
 
+function sanitizeProviderMatchId(matchId: string | undefined | null): string {
+  return String(matchId ?? "").trim().replace(/^[a-z]+-v\d+-/, "");
+}
+
 async function getFootballProviderPlayerOdds(matchId: string): Promise<ProviderPlayerOddsBucket> {
-  const cacheKey = `football-player-odds:${matchId}`;
+  const providerMatchId = sanitizeProviderMatchId(matchId);
+  const cacheKey = `football-player-odds:${providerMatchId}`;
   const cached = footballProviderPlayerOddsCache.get(cacheKey);
   if (cached && Date.now() - cached.fetchedAt < FOOTBALL_PROVIDER_PLAYER_ODDS_TTL) {
     return cached.data;
   }
 
   const empty = createProviderPlayerOddsBucket();
-  if (!CONFIG.SPORTSAPI_KEY || !matchId) return empty;
+  if (!CONFIG.SPORTSAPI_KEY || !providerMatchId) return empty;
 
   try {
-    const resp = await fetch(`${SAPI_V2_FOOTBALL}/match/${matchId}/odds/all`, {
+    const resp = await fetch(`${SAPI_V2_FOOTBALL}/match/${providerMatchId}/odds/all`, {
       signal: AbortSignal.timeout(5000),
       headers: sapiHeaders(),
     });
@@ -16043,7 +16053,11 @@ async function getFootballProviderPlayerOdds(matchId: string): Promise<ProviderP
   }
 }
 
-function buildTeamMarkets(team: FootballLeagueStatsTeam, providerOdds?: ProviderPlayerOddsBucket | null): TeamPlayerMarkets {
+function buildTeamMarkets(
+  team: FootballLeagueStatsTeam,
+  providerOdds?: ProviderPlayerOddsBucket | null,
+  lineupEligibility?: TeamLineupEligibility | null,
+): TeamPlayerMarkets {
   const byOdds = (a: PlayerMarketEntry, b: PlayerMarketEntry) => a.odds - b.odds;
   const anytimeScorers:    PlayerMarketEntry[] = [];
   const firstScorers:      PlayerMarketEntry[] = [];
@@ -16065,6 +16079,7 @@ function buildTeamMarkets(team: FootballLeagueStatsTeam, providerOdds?: Provider
   const redCards:          PlayerMarketEntry[] = [];
 
   for (const p of team.players) {
+    if (!playerAllowedByLineup(p.name, lineupEligibility)) continue;
     const base = { id: p.id, name: p.name, team: team.name, teamId: team.id, appearances: p.appearances };
 
     // Anytime scorer + derived half-time markets
@@ -16245,6 +16260,79 @@ function buildTeamMarkets(team: FootballLeagueStatsTeam, providerOdds?: Provider
     bookingLines:      bookingLines.slice(0, 18),
     redCards:          redCards.slice(0, 10),
   };
+}
+
+function buildTeamLineupEligibility(lineup: { starters: LineupPlayerV2[]; bench: LineupPlayerV2[] } | undefined): TeamLineupEligibility | null {
+  if (!lineup) return null;
+  const starters = new Set<string>();
+  const bench = new Set<string>();
+  for (const player of lineup.starters ?? []) starters.add(normalizePersonName(player.name));
+  for (const player of lineup.bench ?? []) bench.add(normalizePersonName(player.name));
+  if (starters.size === 0 && bench.size === 0) return null;
+  return { starters, bench };
+}
+
+function playerAllowedByLineup(playerName: string, eligibility: TeamLineupEligibility | null | undefined): boolean {
+  if (!eligibility) return true;
+  const aliases = playerNameAliases(playerName);
+  if (aliases.length === 0) return false;
+  return aliases.some(alias => eligibility.starters.has(alias) || eligibility.bench.has(alias));
+}
+
+async function getFootballV2Lineups(matchId: string): Promise<LineupsResponseV2 | null> {
+  const providerMatchId = sanitizeProviderMatchId(matchId);
+  if (!CONFIG.SPORTSAPI_KEY || !providerMatchId) return null;
+
+  const cacheKey = `lineups:football:${providerMatchId}`;
+  const cached = lineupsV2Cache.get(cacheKey);
+  if (cached && Date.now() - cached.fetchedAt < ALL_MARKETS_TTL) {
+    return cached.data;
+  }
+
+  try {
+    const resp = await fetch(`${SAPI_V2_FOOTBALL}/match/${providerMatchId}/lineups`, {
+      signal: AbortSignal.timeout(8000),
+      headers: sapiHeaders(),
+    });
+    if (!resp.ok) return null;
+    const data = (await resp.json()) as {
+      data?: {
+        confirmed?: boolean;
+        home?: { formation?: string; players?: RawLineupsPlayer[] };
+        away?: { formation?: string; players?: RawLineupsPlayer[] };
+      };
+    };
+
+    const toPlayers = (arr: RawLineupsPlayer[] | undefined, isStarters: boolean): LineupPlayerV2[] =>
+      (arr ?? [])
+        .filter(p => p.player?.name && (isStarters ? !p.substitute : !!p.substitute))
+        .map(p => ({
+          name: p.player!.name!,
+          shortName: p.player!.shortName,
+          position: POSITION_PT[p.player!.position ?? ""] ?? (p.player!.position ?? ""),
+          number: p.player!.jerseyNumber ?? "",
+          rating: p.avgRating,
+        }));
+
+    const result: LineupsResponseV2 = {
+      confirmed: data.data?.confirmed ?? false,
+      home: {
+        formation: data.data?.home?.formation,
+        starters: toPlayers(data.data?.home?.players, true),
+        bench: toPlayers(data.data?.home?.players, false),
+      },
+      away: {
+        formation: data.data?.away?.formation,
+        starters: toPlayers(data.data?.away?.players, true),
+        bench: toPlayers(data.data?.away?.players, false),
+      },
+    };
+
+    lineupsV2Cache.set(cacheKey, { data: result, fetchedAt: Date.now() });
+    return result;
+  } catch {
+    return null;
+  }
 }
 
 // ─── V2 All-Markets Odds Proxy ──────────────────────────────────────────────
@@ -16444,7 +16532,7 @@ function v2SportBase(sport: string): string | null {
 
 router.get("/v2-match-odds", async (req: Request, res: Response) => {
   const sport   = String(req.query["sport"]   ?? "football");
-  const matchId = String(req.query["matchId"] ?? "");
+  const matchId = sanitizeProviderMatchId(String(req.query["matchId"] ?? ""));
   if (!matchId) { res.json({ markets: [] }); return; }
   const base = v2SportBase(sport);
   if (!base)  { res.json({ markets: [] }); return; }
@@ -16778,11 +16866,14 @@ router.get("/football-player-markets/:leagueId", async (req: Request, res: Respo
   const leagueId = String(req.params["leagueId"]);
   const homeTeam = String(req.query["homeTeam"] ?? "").trim();
   const awayTeam = String(req.query["awayTeam"] ?? "").trim();
-  const matchId = String(req.query["matchId"] ?? "").trim();
+  const matchId = sanitizeProviderMatchId(String(req.query["matchId"] ?? ""));
 
   try {
     const { teams, meta } = await getFootballLeagueStats(leagueId);
     const providerOdds = matchId ? await getFootballProviderPlayerOdds(matchId) : null;
+    const lineups = matchId ? await getFootballV2Lineups(matchId) : null;
+    const homeEligibility = buildTeamLineupEligibility(lineups?.home);
+    const awayEligibility = buildTeamLineupEligibility(lineups?.away);
 
     const homeData = homeTeam ? findMatchingTeam(teams, homeTeam) : undefined;
     const awayData = awayTeam ? findMatchingTeam(teams, awayTeam) : undefined;
@@ -16797,8 +16888,8 @@ router.get("/football-player-markets/:leagueId", async (req: Request, res: Respo
       leagueId: meta.id,
       leagueName: meta.name,
       country: meta.country,
-      home: homeData ? buildTeamMarkets(homeData, providerOdds) : null,
-      away: awayData ? buildTeamMarkets(awayData, providerOdds) : null,
+      home: homeData ? buildTeamMarkets(homeData, providerOdds, homeEligibility) : null,
+      away: awayData ? buildTeamMarkets(awayData, providerOdds, awayEligibility) : null,
     });
   } catch {
     res.status(500).json({ error: "Mercados de jogadores indisponíveis" });
