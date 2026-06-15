@@ -6662,22 +6662,48 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
         {/* ── FUTEBOL: GOLS POR EQUIPA (FT) ── */}
         {isFootball && !showET && !showPen && (modalTab === "gols" || modalTab === "todos") && m && (m as any).teamGoals?.homeOver05 > 0 && (
           <div>
-            <MarketGrid2Group title={`${match.home} — Golos`}>
-              {(m as any).teamGoals.homeOver05 > 0 && <MarketOddsBtn match={match} sel="tgh-o05" odd={(m as any).teamGoals.homeOver05} market="gols" label="Mais 0.5" />}
-              {(m as any).teamGoals.homeUnder05 > 0 && <MarketOddsBtn match={match} sel="tgh-u05" odd={(m as any).teamGoals.homeUnder05} market="gols" label="Menos 0.5" />}
-              {(m as any).teamGoals.homeOver15 > 0 && <MarketOddsBtn match={match} sel="tgh-o15" odd={(m as any).teamGoals.homeOver15} market="gols" label="Mais 1.5" />}
-              {(m as any).teamGoals.homeUnder15 > 0 && <MarketOddsBtn match={match} sel="tgh-u15" odd={(m as any).teamGoals.homeUnder15} market="gols" label="Menos 1.5" />}
-              {(m as any).teamGoals.homeOver25 > 0 && <MarketOddsBtn match={match} sel="tgh-o25" odd={(m as any).teamGoals.homeOver25} market="gols" label="Mais 2.5" />}
-              {(m as any).teamGoals.homeUnder25 > 0 && <MarketOddsBtn match={match} sel="tgh-u25" odd={(m as any).teamGoals.homeUnder25} market="gols" label="Menos 2.5" />}
-            </MarketGrid2Group>
-            <MarketGrid2Group title={`${match.away} — Golos`}>
-              {(m as any).teamGoals.awayOver05 > 0 && <MarketOddsBtn match={match} sel="tga-o05" odd={(m as any).teamGoals.awayOver05} market="gols" label="Mais 0.5" />}
-              {(m as any).teamGoals.awayUnder05 > 0 && <MarketOddsBtn match={match} sel="tga-u05" odd={(m as any).teamGoals.awayUnder05} market="gols" label="Menos 0.5" />}
-              {(m as any).teamGoals.awayOver15 > 0 && <MarketOddsBtn match={match} sel="tga-o15" odd={(m as any).teamGoals.awayOver15} market="gols" label="Mais 1.5" />}
-              {(m as any).teamGoals.awayUnder15 > 0 && <MarketOddsBtn match={match} sel="tga-u15" odd={(m as any).teamGoals.awayUnder15} market="gols" label="Menos 1.5" />}
-              {(m as any).teamGoals.awayOver25 > 0 && <MarketOddsBtn match={match} sel="tga-o25" odd={(m as any).teamGoals.awayOver25} market="gols" label="Mais 2.5" />}
-              {(m as any).teamGoals.awayUnder25 > 0 && <MarketOddsBtn match={match} sel="tga-u25" odd={(m as any).teamGoals.awayUnder25} market="gols" label="Menos 2.5" />}
-            </MarketGrid2Group>
+            <div className="mb-4 last:mb-0">
+              <div className="text-[10px] font-black text-zinc-500 uppercase tracking-widest mb-2 px-0.5">{match.home} — Golos</div>
+              {(((m as any).teamGoals.homeOver05 > 0) || ((m as any).teamGoals.homeUnder05 > 0)) && (
+                <MarketGroup title="">
+                  {(m as any).teamGoals.homeOver05 > 0 && <MarketOddsBtn match={match} sel="tgh-o05" odd={(m as any).teamGoals.homeOver05} market="gols" label="Mais 0.5" />}
+                  {(m as any).teamGoals.homeUnder05 > 0 && <MarketOddsBtn match={match} sel="tgh-u05" odd={(m as any).teamGoals.homeUnder05} market="gols" label="Menos 0.5" />}
+                </MarketGroup>
+              )}
+              {(((m as any).teamGoals.homeOver15 > 0) || ((m as any).teamGoals.homeUnder15 > 0)) && (
+                <MarketGroup title="">
+                  {(m as any).teamGoals.homeOver15 > 0 && <MarketOddsBtn match={match} sel="tgh-o15" odd={(m as any).teamGoals.homeOver15} market="gols" label="Mais 1.5" />}
+                  {(m as any).teamGoals.homeUnder15 > 0 && <MarketOddsBtn match={match} sel="tgh-u15" odd={(m as any).teamGoals.homeUnder15} market="gols" label="Menos 1.5" />}
+                </MarketGroup>
+              )}
+              {(((m as any).teamGoals.homeOver25 > 0) || ((m as any).teamGoals.homeUnder25 > 0)) && (
+                <MarketGroup title="">
+                  {(m as any).teamGoals.homeOver25 > 0 && <MarketOddsBtn match={match} sel="tgh-o25" odd={(m as any).teamGoals.homeOver25} market="gols" label="Mais 2.5" />}
+                  {(m as any).teamGoals.homeUnder25 > 0 && <MarketOddsBtn match={match} sel="tgh-u25" odd={(m as any).teamGoals.homeUnder25} market="gols" label="Menos 2.5" />}
+                </MarketGroup>
+              )}
+            </div>
+            <div className="mb-4 last:mb-0">
+              <div className="text-[10px] font-black text-zinc-500 uppercase tracking-widest mb-2 px-0.5">{match.away} — Golos</div>
+              {(((m as any).teamGoals.awayOver05 > 0) || ((m as any).teamGoals.awayUnder05 > 0)) && (
+                <MarketGroup title="">
+                  {(m as any).teamGoals.awayOver05 > 0 && <MarketOddsBtn match={match} sel="tga-o05" odd={(m as any).teamGoals.awayOver05} market="gols" label="Mais 0.5" />}
+                  {(m as any).teamGoals.awayUnder05 > 0 && <MarketOddsBtn match={match} sel="tga-u05" odd={(m as any).teamGoals.awayUnder05} market="gols" label="Menos 0.5" />}
+                </MarketGroup>
+              )}
+              {(((m as any).teamGoals.awayOver15 > 0) || ((m as any).teamGoals.awayUnder15 > 0)) && (
+                <MarketGroup title="">
+                  {(m as any).teamGoals.awayOver15 > 0 && <MarketOddsBtn match={match} sel="tga-o15" odd={(m as any).teamGoals.awayOver15} market="gols" label="Mais 1.5" />}
+                  {(m as any).teamGoals.awayUnder15 > 0 && <MarketOddsBtn match={match} sel="tga-u15" odd={(m as any).teamGoals.awayUnder15} market="gols" label="Menos 1.5" />}
+                </MarketGroup>
+              )}
+              {(((m as any).teamGoals.awayOver25 > 0) || ((m as any).teamGoals.awayUnder25 > 0)) && (
+                <MarketGroup title="">
+                  {(m as any).teamGoals.awayOver25 > 0 && <MarketOddsBtn match={match} sel="tga-o25" odd={(m as any).teamGoals.awayOver25} market="gols" label="Mais 2.5" />}
+                  {(m as any).teamGoals.awayUnder25 > 0 && <MarketOddsBtn match={match} sel="tga-u25" odd={(m as any).teamGoals.awayUnder25} market="gols" label="Menos 2.5" />}
+                </MarketGroup>
+              )}
+            </div>
           </div>
         )}
 
@@ -7099,22 +7125,48 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
         {/* ── FUTEBOL: GOLS POR EQUIPA — 1º TEMPO ── */}
         {isFootball && !showET && !showPen && show1tempo && (modalTab === "1tempo" || modalTab === "todos") && m && (m as any).teamGoals?.homeOver05 > 0 && (
           <div>
-            <MarketGroup title={`${match.home} — Golos`}>
-              {(m as any).teamGoals.homeOver05 > 0 && <MarketOddsBtn match={match} sel="tgh-o05" odd={(m as any).teamGoals.homeOver05} market="1tempo" label="Mais 0.5" />}
-              {(m as any).teamGoals.homeUnder05 > 0 && <MarketOddsBtn match={match} sel="tgh-u05" odd={(m as any).teamGoals.homeUnder05} market="1tempo" label="Menos 0.5" />}
-              {(m as any).teamGoals.homeOver15 > 0 && <MarketOddsBtn match={match} sel="tgh-o15" odd={(m as any).teamGoals.homeOver15} market="1tempo" label="Mais 1.5" />}
-              {(m as any).teamGoals.homeUnder15 > 0 && <MarketOddsBtn match={match} sel="tgh-u15" odd={(m as any).teamGoals.homeUnder15} market="1tempo" label="Menos 1.5" />}
-              {(m as any).teamGoals.homeOver25 > 0 && <MarketOddsBtn match={match} sel="tgh-o25" odd={(m as any).teamGoals.homeOver25} market="1tempo" label="Mais 2.5" />}
-              {(m as any).teamGoals.homeUnder25 > 0 && <MarketOddsBtn match={match} sel="tgh-u25" odd={(m as any).teamGoals.homeUnder25} market="1tempo" label="Menos 2.5" />}
-            </MarketGroup>
-            <MarketGroup title={`${match.away} — Golos`}>
-              {(m as any).teamGoals.awayOver05 > 0 && <MarketOddsBtn match={match} sel="tga-o05" odd={(m as any).teamGoals.awayOver05} market="1tempo" label="Mais 0.5" />}
-              {(m as any).teamGoals.awayUnder05 > 0 && <MarketOddsBtn match={match} sel="tga-u05" odd={(m as any).teamGoals.awayUnder05} market="1tempo" label="Menos 0.5" />}
-              {(m as any).teamGoals.awayOver15 > 0 && <MarketOddsBtn match={match} sel="tga-o15" odd={(m as any).teamGoals.awayOver15} market="1tempo" label="Mais 1.5" />}
-              {(m as any).teamGoals.awayUnder15 > 0 && <MarketOddsBtn match={match} sel="tga-u15" odd={(m as any).teamGoals.awayUnder15} market="1tempo" label="Menos 1.5" />}
-              {(m as any).teamGoals.awayOver25 > 0 && <MarketOddsBtn match={match} sel="tga-o25" odd={(m as any).teamGoals.awayOver25} market="1tempo" label="Mais 2.5" />}
-              {(m as any).teamGoals.awayUnder25 > 0 && <MarketOddsBtn match={match} sel="tga-u25" odd={(m as any).teamGoals.awayUnder25} market="1tempo" label="Menos 2.5" />}
-            </MarketGroup>
+            <div className="mb-4 last:mb-0">
+              <div className="text-[10px] font-black text-zinc-500 uppercase tracking-widest mb-2 px-0.5">{match.home} — Golos</div>
+              {(((m as any).teamGoals.homeOver05 > 0) || ((m as any).teamGoals.homeUnder05 > 0)) && (
+                <MarketGroup title="">
+                  {(m as any).teamGoals.homeOver05 > 0 && <MarketOddsBtn match={match} sel="tgh-o05" odd={(m as any).teamGoals.homeOver05} market="1tempo" label="Mais 0.5" />}
+                  {(m as any).teamGoals.homeUnder05 > 0 && <MarketOddsBtn match={match} sel="tgh-u05" odd={(m as any).teamGoals.homeUnder05} market="1tempo" label="Menos 0.5" />}
+                </MarketGroup>
+              )}
+              {(((m as any).teamGoals.homeOver15 > 0) || ((m as any).teamGoals.homeUnder15 > 0)) && (
+                <MarketGroup title="">
+                  {(m as any).teamGoals.homeOver15 > 0 && <MarketOddsBtn match={match} sel="tgh-o15" odd={(m as any).teamGoals.homeOver15} market="1tempo" label="Mais 1.5" />}
+                  {(m as any).teamGoals.homeUnder15 > 0 && <MarketOddsBtn match={match} sel="tgh-u15" odd={(m as any).teamGoals.homeUnder15} market="1tempo" label="Menos 1.5" />}
+                </MarketGroup>
+              )}
+              {(((m as any).teamGoals.homeOver25 > 0) || ((m as any).teamGoals.homeUnder25 > 0)) && (
+                <MarketGroup title="">
+                  {(m as any).teamGoals.homeOver25 > 0 && <MarketOddsBtn match={match} sel="tgh-o25" odd={(m as any).teamGoals.homeOver25} market="1tempo" label="Mais 2.5" />}
+                  {(m as any).teamGoals.homeUnder25 > 0 && <MarketOddsBtn match={match} sel="tgh-u25" odd={(m as any).teamGoals.homeUnder25} market="1tempo" label="Menos 2.5" />}
+                </MarketGroup>
+              )}
+            </div>
+            <div className="mb-4 last:mb-0">
+              <div className="text-[10px] font-black text-zinc-500 uppercase tracking-widest mb-2 px-0.5">{match.away} — Golos</div>
+              {(((m as any).teamGoals.awayOver05 > 0) || ((m as any).teamGoals.awayUnder05 > 0)) && (
+                <MarketGroup title="">
+                  {(m as any).teamGoals.awayOver05 > 0 && <MarketOddsBtn match={match} sel="tga-o05" odd={(m as any).teamGoals.awayOver05} market="1tempo" label="Mais 0.5" />}
+                  {(m as any).teamGoals.awayUnder05 > 0 && <MarketOddsBtn match={match} sel="tga-u05" odd={(m as any).teamGoals.awayUnder05} market="1tempo" label="Menos 0.5" />}
+                </MarketGroup>
+              )}
+              {(((m as any).teamGoals.awayOver15 > 0) || ((m as any).teamGoals.awayUnder15 > 0)) && (
+                <MarketGroup title="">
+                  {(m as any).teamGoals.awayOver15 > 0 && <MarketOddsBtn match={match} sel="tga-o15" odd={(m as any).teamGoals.awayOver15} market="1tempo" label="Mais 1.5" />}
+                  {(m as any).teamGoals.awayUnder15 > 0 && <MarketOddsBtn match={match} sel="tga-u15" odd={(m as any).teamGoals.awayUnder15} market="1tempo" label="Menos 1.5" />}
+                </MarketGroup>
+              )}
+              {(((m as any).teamGoals.awayOver25 > 0) || ((m as any).teamGoals.awayUnder25 > 0)) && (
+                <MarketGroup title="">
+                  {(m as any).teamGoals.awayOver25 > 0 && <MarketOddsBtn match={match} sel="tga-o25" odd={(m as any).teamGoals.awayOver25} market="1tempo" label="Mais 2.5" />}
+                  {(m as any).teamGoals.awayUnder25 > 0 && <MarketOddsBtn match={match} sel="tga-u25" odd={(m as any).teamGoals.awayUnder25} market="1tempo" label="Menos 2.5" />}
+                </MarketGroup>
+              )}
+            </div>
           </div>
         )}
 
