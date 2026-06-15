@@ -2046,7 +2046,21 @@ function buildTennisSetScoreTemplate(
   });
 }
 
-function computeSetExactScoreDistribution(
+function isFinishedTennisSetScore(homeGames: number, awayGames: number): boolean {
+  if (homeGames > 7 || awayGames > 7) return false;
+  if (homeGames === 7 || awayGames === 7) {
+    return (
+      (homeGames === 7 && (awayGames === 5 || awayGames === 6)) ||
+      (awayGames === 7 && (homeGames === 5 || homeGames === 6))
+    );
+  }
+  return (
+    (homeGames === 6 && awayGames <= 4) ||
+    (awayGames === 6 && homeGames <= 4)
+  );
+}
+
+function computeSetExactScoreTemplateDistribution(
   hg: number,
   ag: number,
   pSetHomeWin: number,
@@ -2080,6 +2094,112 @@ function computeSetExactScoreDistribution(
   return Object.fromEntries(Object.entries(probs).map(([label, prob]) => [label, prob / total]));
 }
 
+function computeSetExactScorePathDistribution(
+  hg: number,
+  ag: number,
+  pGameHomeWin: number,
+): Record<string, number> {
+  const pHome = mc(pGameHomeWin, 0.05, 0.95);
+  const memo = new Map<string, Record<string, number>>();
+
+  const solve = (homeGames: number, awayGames: number): Record<string, number> => {
+    if (isFinishedTennisSetScore(homeGames, awayGames)) {
+      return { [`${homeGames}-${awayGames}`]: 1 };
+    }
+    if (homeGames > 7 || awayGames > 7) return {};
+
+    const key = `${homeGames}-${awayGames}`;
+    const cached = memo.get(key);
+    if (cached) return cached;
+
+    const result: Record<string, number> = {};
+    const mergeWeighted = (dist: Record<string, number>, weight: number) => {
+      if (weight <= 0) return;
+      for (const [label, prob] of Object.entries(dist)) {
+        result[label] = (result[label] ?? 0) + prob * weight;
+      }
+    };
+
+    mergeWeighted(solve(homeGames + 1, awayGames), pHome);
+    mergeWeighted(solve(homeGames, awayGames + 1), 1 - pHome);
+
+    memo.set(key, result);
+    return result;
+  };
+
+  const probs = solve(hg, ag);
+  const total = Object.values(probs).reduce((acc, prob) => acc + prob, 0);
+  if (total <= 0) return {};
+  return Object.fromEntries(Object.entries(probs).map(([label, prob]) => [label, prob / total]));
+}
+
+function blendSetExactScoreDistributions(
+  templateDist: Record<string, number>,
+  pathDist: Record<string, number>,
+  hg: number,
+  ag: number,
+): Record<string, number> {
+  const labels = new Set([...Object.keys(templateDist), ...Object.keys(pathDist)]);
+  if (labels.size === 0) return {};
+
+  const gamesPlayed = hg + ag;
+  const leaderGames = Math.max(hg, ag);
+  const gameDiff = Math.abs(hg - ag);
+  const progress = mc(gamesPlayed / 12, 0, 1);
+  const lateSet = mc((leaderGames - 3) / 2, 0, 1);
+  const closeoutWindow = mc(leaderGames - 4, 0, 1);
+  const leadPressure = mc(gameDiff / 3, 0, 1);
+
+  const stateBias = mc(
+    progress * 0.24 +
+    lateSet * 0.32 +
+    closeoutWindow * 0.26 +
+    leadPressure * 0.18,
+    0,
+    1,
+  );
+
+  const pathWeight = leaderGames >= 5
+    ? mc(0.72 + stateBias * 0.18, 0.72, 0.92)
+    : leaderGames === 4
+      ? mc(0.50 + stateBias * 0.24, 0.50, 0.80)
+      : mc(0.18 + stateBias * 0.28, 0.18, 0.46);
+
+  const blended: Record<string, number> = {};
+  for (const label of labels) {
+    const templateProb = templateDist[label] ?? 0;
+    const pathProb = pathDist[label] ?? 0;
+    const prob = templateProb * (1 - pathWeight) + pathProb * pathWeight;
+    if (prob > 0) blended[label] = prob;
+  }
+
+  const total = Object.values(blended).reduce((acc, prob) => acc + prob, 0);
+  if (total <= 0) return {};
+  return Object.fromEntries(Object.entries(blended).map(([label, prob]) => [label, prob / total]));
+}
+
+function estimateTennisLiveGameWinProb(
+  liveHomeP: number,
+  currentPoints?: [number | string, number | string],
+  serving?: [boolean, boolean],
+): number {
+  const pointCtx = getTennisLivePointContext(currentPoints, serving);
+  return Math.min(0.85, Math.max(0.15, 0.5 + (liveHomeP - 0.5) * 0.8 + pointCtx.swing * 0.7));
+}
+
+function computeSetExactScoreDistribution(
+  hg: number,
+  ag: number,
+  pSetHomeWin: number,
+  pGameHomeWin?: number,
+): Record<string, number> {
+  const templateDist = computeSetExactScoreTemplateDistribution(hg, ag, pSetHomeWin);
+  if (pGameHomeWin == null) return templateDist;
+  const pathDist = computeSetExactScorePathDistribution(hg, ag, pGameHomeWin);
+  if (Object.keys(pathDist).length === 0) return templateDist;
+  return blendSetExactScoreDistributions(templateDist, pathDist, hg, ag);
+}
+
 function computeLiveTennisExtras(
   liveHomeP: number,
   sets: Array<[number, number]>,
@@ -2092,7 +2212,7 @@ function computeLiveTennisExtras(
   const baseExtras = computeTennisExtras(liveHomeP);
   const pointCtx = getTennisLivePointContext(currentPoints, serving);
   const pFreshSetHome = Math.min(0.88, Math.max(0.12, 0.5 + (liveHomeP - 0.5) * 1.25 + pointCtx.swing * 0.35));
-  const pGame = Math.min(0.85, Math.max(0.15, 0.5 + (liveHomeP - 0.5) * 0.8 + pointCtx.swing * 0.7));
+  const pGame = estimateTennisLiveGameWinProb(liveHomeP, currentPoints, serving);
   const liveSetWinProb = (hG: number, aG: number, base: number): number =>
     Math.min(0.97, Math.max(0.03, 0.5 + (base - 0.5) * 0.55 + (hG - aG) * 0.055 + pointCtx.swing * 0.45));
   const probToHomeAway = (probHome: number, margin: number): { home: number; away: number } => {
@@ -2106,8 +2226,8 @@ function computeLiveTennisExtras(
   const currentSetIndex = Math.max(0, Math.min(sets.length - 1, homeSetsWon + awaySetsWon));
   const currentSetGames = sets[currentSetIndex] ?? ([0, 0] as [number, number]);
   const currentSetHomeWinProb = liveSetWinProb(currentSetGames[0], currentSetGames[1], liveHomeP);
-  const currentSetDist = computeSetExactScoreDistribution(currentSetGames[0], currentSetGames[1], currentSetHomeWinProb);
-  const currentSetScore = computeSetExactScoreOdds(currentSetGames[0], currentSetGames[1], currentSetHomeWinProb);
+  const currentSetDist = computeSetExactScoreDistribution(currentSetGames[0], currentSetGames[1], currentSetHomeWinProb, pGame);
+  const currentSetScore = computeSetExactScoreOdds(currentSetGames[0], currentSetGames[1], currentSetHomeWinProb, 0.065, pGame);
   const expectedCurrentSetTotalGames = Object.keys(currentSetDist).length > 0
     ? Object.entries(currentSetDist).reduce((acc, [label, prob]) => {
         const [h, a] = label.split("-").map(Number);
@@ -2342,8 +2462,9 @@ function computeSetExactScoreOdds(
   ag: number,
   pSetHomeWin: number,
   margin = 0.065,
+  pGameHomeWin?: number,
 ): Record<string, number> {
-  const probs = computeSetExactScoreDistribution(hg, ag, pSetHomeWin);
+  const probs = computeSetExactScoreDistribution(hg, ag, pSetHomeWin, pGameHomeWin);
   if (Object.keys(probs).length === 0) return {};
   const result: Record<string, number> = {};
   for (const [label, prob] of Object.entries(probs)) {
@@ -7036,7 +7157,8 @@ function buildTennisLiveMatches(
       const curSetH = sets.length > 0 ? (sets[sets.length - 1]?.[0] ?? 0) : 0;
       const curSetA = sets.length > 0 ? (sets[sets.length - 1]?.[1] ?? 0) : 0;
       const currentSetHomeWinProb = Math.min(0.97, Math.max(0.03, 0.5 + (liveHomeP - 0.5) * 0.55 + (curSetH - curSetA) * 0.055));
-      const setExactScore = computeSetExactScoreOdds(curSetH, curSetA, currentSetHomeWinProb);
+      const pGameHomeWin = estimateTennisLiveGameWinProb(liveHomeP, currentPoints, serving);
+      const setExactScore = computeSetExactScoreOdds(curSetH, curSetA, currentSetHomeWinProb, 0.065, pGameHomeWin);
 
       // ── Per-set winner markets: numDoneSets = sets fully won by either side ─
       const numDoneSets = homeScore + awayScore;
