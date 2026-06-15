@@ -2040,6 +2040,37 @@ function buildTennisSetScoreTemplate(
   });
 }
 
+function getTennisCompletedSetMomentum(
+  sets: Array<[number, number]>,
+  completedSetCount: number,
+): number {
+  const completed = sets.slice(0, Math.min(completedSetCount, sets.length));
+  if (completed.length === 0) return 0;
+
+  let momentum = 0;
+  completed.forEach(([homeGames, awayGames], index) => {
+    const winner = homeGames > awayGames ? 1 : awayGames > homeGames ? -1 : 0;
+    if (winner === 0) return;
+
+    const maxGames = Math.max(homeGames, awayGames);
+    const minGames = Math.min(homeGames, awayGames);
+    const margin = maxGames - minGames;
+    const recencyWeight = 0.7 + (index / Math.max(1, completed.length - 1)) * 0.45;
+    const marginWeight =
+      minGames <= 1 ? 1.2 :
+      minGames === 2 ? 0.95 :
+      minGames === 3 ? 0.6 :
+      minGames === 4 ? 0.35 :
+      minGames === 5 ? 0.18 :
+      0.1;
+    const dominanceBoost = maxGames === 6 && minGames <= 2 ? 0.05 : maxGames === 6 && minGames === 3 ? 0.025 : 0;
+
+    momentum += winner * recencyWeight * (margin * 0.018 + marginWeight + dominanceBoost);
+  });
+
+  return mc(momentum, -0.18, 0.18);
+}
+
 function isFinishedTennisSetScore(homeGames: number, awayGames: number): boolean {
   if (homeGames > 7 || awayGames > 7) return false;
   if (homeGames === 7 || awayGames === 7) {
@@ -2205,10 +2236,11 @@ function computeLiveTennisExtras(
 ): AdvancedMarkets["tennisExtra"] {
   const baseExtras = computeTennisExtras(liveHomeP);
   const pointCtx = getTennisLivePointContext(currentPoints, serving);
-  const pFreshSetHome = Math.min(0.88, Math.max(0.12, 0.5 + (liveHomeP - 0.5) * 1.25 + pointCtx.swing * 0.35));
+  const completedSetMomentum = getTennisCompletedSetMomentum(sets, homeSetsWon + awaySetsWon);
+  const pFreshSetHome = Math.min(0.88, Math.max(0.12, 0.5 + (liveHomeP - 0.5) * 1.25 + pointCtx.swing * 0.35 + completedSetMomentum));
   const pGame = estimateTennisLiveGameWinProb(liveHomeP, currentPoints, serving);
   const liveSetWinProb = (hG: number, aG: number, base: number): number =>
-    Math.min(0.97, Math.max(0.03, 0.5 + (base - 0.5) * 0.55 + (hG - aG) * 0.055 + pointCtx.swing * 0.45));
+    Math.min(0.97, Math.max(0.03, 0.5 + (base - 0.5) * 0.55 + (hG - aG) * 0.055 + pointCtx.swing * 0.45 + completedSetMomentum * (hG === 0 && aG === 0 ? 0.7 : 0.35)));
   const probToHomeAway = (probHome: number, margin: number): { home: number; away: number } => {
     const [home, away] = probsToDecimalOdds([mc(probHome, 0.02, 0.98), mc(1 - probHome, 0.02, 0.98)], margin);
     return { home: home!, away: away! };
