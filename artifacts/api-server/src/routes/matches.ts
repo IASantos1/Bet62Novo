@@ -11812,20 +11812,30 @@ async function _rebuildWC2026(): Promise<void> {
       }
     }
 
-    // ── V2 schedule fallback (only if V1 returned nothing) ─────────────────────
+    // ── V2 schedule supplement (to extend upcoming days) ───────────────────────
     let v2FallbackEvents: SAPIV2Event[] = [];
-    if (results.length === 0) {
+    {
+      const WC2026_MAX_DATE_ISO = "2026-06-28";
       const nowMs = Date.now();
+      const endMs = new Date(`${WC2026_MAX_DATE_ISO}T23:59:59Z`).getTime();
       const dates: string[] = [];
-      for (let i = 0; i < 38; i++) dates.push(new Date(nowMs + i * 86_400_000).toISOString().slice(0, 10));
-      const dayResults = await Promise.race([
-        Promise.all(dates.map(dt => getScheduleV2("football", dt).catch(() => [] as SAPIV2Event[]))),
-        new Promise<SAPIV2Event[][]>(resolve => setTimeout(() => resolve([]), 15_000)),
-      ]);
-      v2FallbackEvents = (Array.isArray(dayResults[0]) ? (dayResults as SAPIV2Event[][]).flat() : []);
+      if (Number.isFinite(endMs) && nowMs <= endMs) {
+        const totalDays = Math.max(1, Math.floor((endMs - nowMs) / 86_400_000) + 1);
+        const daysToFetch = Math.min(20, totalDays);
+        for (let i = 0; i < daysToFetch; i++) {
+          dates.push(new Date(nowMs + i * 86_400_000).toISOString().slice(0, 10));
+        }
+      }
+      if (dates.length > 0) {
+        const dayResults = await Promise.race([
+          Promise.all(dates.map(dt => getScheduleV2("football", dt).catch(() => [] as SAPIV2Event[]))),
+          new Promise<SAPIV2Event[][]>(resolve => setTimeout(() => resolve([]), 15_000)),
+        ]);
+        v2FallbackEvents = (Array.isArray(dayResults) ? dayResults.flat() : []) as SAPIV2Event[];
+      }
     }
 
-    // ── V2 fallback processing (only runs when V1 returned nothing) ────────────
+    // ── V2 processing (supplement) ─────────────────────────────────────────────
     const v2Results: UpcomingMatch[] = [];
     if (v2FallbackEvents.length > 0) {
       const seenV2 = new Set<number>();
@@ -11839,10 +11849,12 @@ async function _rebuildWC2026(): Promise<void> {
         const leagueName = normalizeLeagueName(v2TournName(ev.tournament), "");
         const lg = leagueName.toLowerCase();
         const isWCLg =
-          (ev.tournamentId === WC_COMP_ID) ||
-          lg.includes("world cup") || lg.includes("copa do mundo") || lg.includes("copa mundial") ||
-          lg.includes("fifa world") || lg.includes("wc 2026") || lg.includes("worldcup") ||
-          lg.includes("mundial 2026") || lg.includes("coupe du monde");
+          (Number(ev.tournamentId ?? 0) === WC_COMP_ID) ||
+          (!ev.tournamentId && (
+            lg.includes("world cup") || lg.includes("copa do mundo") || lg.includes("copa mundial") ||
+            lg.includes("fifa world") || lg.includes("wc 2026") || lg.includes("worldcup") ||
+            lg.includes("mundial 2026") || lg.includes("coupe du monde"
+          )));
         if (!isWCLg) continue;
         if (lg.includes("women") || lg.includes("qualification") || lg.includes("qualif") || lg.includes("feminino") || lg.includes("féminin")) continue;
         if (/\bu\d{2}\b|\bunder\s*\d{2}\b|\bsub ?\d{2}\b|beach|futsal|club/i.test(lg)) continue;
@@ -11884,8 +11896,8 @@ async function _rebuildWC2026(): Promise<void> {
       }
     }
 
-    // Merge: V1 is primary, V2 fallback supplements if V1 is empty
-    const apiResults: UpcomingMatch[] = (results.length > 0 ? results : v2Results).filter(isWC2026ApiFixtureConsistent);
+    // Merge: V1 is primary, V2 supplements for future dates
+    const apiResults: UpcomingMatch[] = [...results, ...v2Results].filter(isWC2026ApiFixtureConsistent);
 
     const staticSupplements: UpcomingMatch[] = [];
     if (WC2026_ENABLE_STATIC) {
