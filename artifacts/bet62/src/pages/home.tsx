@@ -2647,6 +2647,7 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
   type LineupsV2 = { confirmed: boolean; home: { formation?: string; starters: LineupsV2Player[]; bench: LineupsV2Player[] }; away: { formation?: string; starters: LineupsV2Player[]; bench: LineupsV2Player[] } };
   const [allOddsData, setAllOddsData] = useState<AllOddsMarket[] | null>(null);
   const [allOddsLoading, setAllOddsLoading] = useState(false);
+  const [allOddsSectionOpen, setAllOddsSectionOpen] = useState<Record<string, boolean>>({});
   const allOddsSections = useMemo(() => {
     if (!allOddsData || allOddsData.length === 0) return [];
 
@@ -2668,6 +2669,16 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
       "Total de Cartões",
       "Resultado Exato",
     ];
+    const isFeaturedMarket = (market: AllOddsMarket): boolean => (
+      market.name.includes("Resultado Final") ||
+      market.name.includes("Dupla Hipótese") ||
+      market.name.includes("Empate Anula Aposta") ||
+      market.name.includes("Ambas Marcam") ||
+      market.name.includes("Total de Golos") ||
+      market.name.includes("Marcador a Qualquer Momento") ||
+      market.name.includes("Primeiro Marcador") ||
+      market.name.includes("Último Marcador")
+    );
     const inferSection = (market: AllOddsMarket): string => {
       const group = (market.group || "").toLowerCase();
       const name = (market.name || "").toLowerCase();
@@ -2709,9 +2720,22 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
           const groupOrder = a.market.group.localeCompare(b.market.group, "pt");
           if (groupOrder !== 0) return groupOrder;
           return a.market.name.localeCompare(b.market.name, "pt");
-        }),
+        }).map((entry) => ({
+          ...entry,
+          featured: isFeaturedMarket(entry.market),
+        })),
       }));
   }, [allOddsData]);
+  useEffect(() => {
+    if (allOddsSections.length === 0) return;
+    setAllOddsSectionOpen(prev => {
+      const next: Record<string, boolean> = {};
+      for (const section of allOddsSections) {
+        next[section.section] = prev[section.section] ?? ["Principal", "Golos", "Jogadores"].includes(section.section);
+      }
+      return next;
+    });
+  }, [allOddsSections]);
   const [lineupsData, setLineupsData] = useState<LineupsV2 | null>(null);
   const [lineupsLoading, setLineupsLoading] = useState(false);
   type H2HMeeting = { date: string; team1: string; team2: string; score1: number; score2: number; league: string; country?: string };
@@ -10231,21 +10255,57 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
                       </div>
                     ) : (
                       <div className="space-y-4">
-                        {allOddsSections.map(section => (
+                        <div className="flex flex-wrap items-center gap-2">
+                          <div className="rounded-full border border-zinc-800 bg-zinc-950/70 px-2.5 py-1 text-[10px] font-black text-zinc-400">
+                            {allOddsSections.length} secções
+                          </div>
+                          <div className="rounded-full border border-zinc-800 bg-zinc-950/70 px-2.5 py-1 text-[10px] font-black text-zinc-400">
+                            {allOddsData.length} mercados
+                          </div>
+                        </div>
+                        {allOddsSections.map(section => {
+                          const isSectionOpen = allOddsSectionOpen[section.section] ?? ["Principal", "Golos", "Jogadores"].includes(section.section);
+                          return (
                           <div key={section.section} className="space-y-3">
-                            <div className="flex items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() => setAllOddsSectionOpen(prev => ({ ...prev, [section.section]: !isSectionOpen }))}
+                              className="w-full flex items-center gap-2 rounded-xl border border-zinc-800 bg-zinc-950/60 px-3 py-2.5 text-left"
+                            >
                               <div className="h-px flex-1 bg-zinc-800" />
-                              <div className="text-[10px] font-black text-zinc-500 uppercase tracking-[0.18em]">{section.section}</div>
+                              <div className="text-[10px] font-black text-zinc-400 uppercase tracking-[0.18em]">{section.section}</div>
+                              <div className="rounded-full bg-zinc-800 px-2 py-0.5 text-[9px] font-black text-zinc-300">
+                                {section.markets.length}
+                              </div>
+                              <div className="text-zinc-500">
+                                {isSectionOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                              </div>
                               <div className="h-px flex-1 bg-zinc-800" />
-                            </div>
-                            {section.markets.map(({ market, originalIndex }) => (
-                              <div key={`${section.section}-${originalIndex}`} className="bg-zinc-950/60 rounded-lg border border-zinc-800 p-3">
-                                {market.group && market.group !== market.name && market.group !== section.section && (
-                                  <div className="text-[9px] font-black text-zinc-600 uppercase tracking-[0.18em] mb-1">
-                                    {market.group}
+                            </button>
+                            {isSectionOpen && section.markets.map(({ market, originalIndex, featured }) => (
+                              <div
+                                key={`${section.section}-${originalIndex}`}
+                                className={`rounded-lg border p-3 ${
+                                  featured
+                                    ? "bg-zinc-950/90 border-zinc-700 shadow-[inset_0_0_0_1px_rgba(239,68,68,0.08)]"
+                                    : "bg-zinc-950/60 border-zinc-800"
+                                }`}
+                              >
+                                <div className="flex items-start justify-between gap-3 mb-2">
+                                  <div className="min-w-0">
+                                    {market.group && market.group !== market.name && market.group !== section.section && (
+                                      <div className="text-[9px] font-black text-zinc-600 uppercase tracking-[0.18em] mb-1">
+                                        {market.group}
+                                      </div>
+                                    )}
+                                    <div className={`text-[10px] font-black uppercase tracking-wider ${featured ? "text-zinc-200" : "text-zinc-400"}`}>{market.name}</div>
                                   </div>
-                                )}
-                                <div className="text-[10px] font-black text-zinc-400 uppercase tracking-wider mb-2">{market.name}</div>
+                                  {featured && (
+                                    <div className="shrink-0 rounded-full border border-red-500/20 bg-red-500/10 px-2 py-0.5 text-[9px] font-black uppercase tracking-[0.16em] text-red-400">
+                                      Destaque
+                                    </div>
+                                  )}
+                                </div>
                                 <div className={`grid gap-2 ${market.choices.length === 2 ? "grid-cols-2" : market.choices.length === 3 ? "grid-cols-3" : "grid-cols-2"}`}>
                                   {market.choices.map((choice, ci) => (
                                     <button
@@ -10269,6 +10329,8 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
                                       className={`flex flex-col items-center py-2.5 px-2 rounded-md text-xs font-bold transition-all border ${
                                         bets.find(b => b.matchId === expandedMatch.id && b.market === `all_${originalIndex}_${ci}`)
                                           ? "bg-red-600 border-red-500 text-white"
+                                          : featured
+                                          ? "bg-zinc-800/90 border-zinc-600 text-zinc-100 hover:border-red-500/50 hover:text-white"
                                           : "bg-zinc-800 border-zinc-700 text-zinc-300 hover:border-zinc-500 hover:text-white"
                                       }`}
                                     >
@@ -10280,7 +10342,7 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
                               </div>
                             ))}
                           </div>
-                        ))}
+                        )})}
                       </div>
                     )}
                   </div>
