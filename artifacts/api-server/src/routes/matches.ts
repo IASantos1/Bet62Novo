@@ -15519,6 +15519,7 @@ type PlayerMarketEntry = {
   appearances: number; stat: number;
   odds: number;
   line?: number;
+  side?: "over" | "under";
 };
 
 type TeamPlayerMarkets = {
@@ -15550,10 +15551,10 @@ type ProviderPlayerOddsBucket = {
   notScore: Map<string, number>;
   assist: Map<string, number>;
   redCard: Map<string, number>;
-  shots: Array<{ name: string; line: number; odds: number }>;
-  shotsOnTarget: Array<{ name: string; line: number; odds: number }>;
-  passes: Array<{ name: string; line: number; odds: number }>;
-  tackles: Array<{ name: string; line: number; odds: number }>;
+  shots: Array<{ name: string; line: number; odds: number; side: "over" | "under" }>;
+  shotsOnTarget: Array<{ name: string; line: number; odds: number; side: "over" | "under" }>;
+  passes: Array<{ name: string; line: number; odds: number; side: "over" | "under" }>;
+  tackles: Array<{ name: string; line: number; odds: number; side: "over" | "under" }>;
 };
 
 function playerOdds(stat: number, appearances: number): number {
@@ -15713,7 +15714,7 @@ function matchProviderOddForPlayer(target: Map<string, number>, playerName: stri
 
 function normalizeProviderPlayerChoiceName(rawName: string): string {
   return String(rawName ?? "")
-    .replace(/\b(over|under|mais de|menos de|to record|to have|at least)\b/gi, " ")
+    .replace(/\b(over|under|mais de|menos de|to record|to have|at least|higher than|lower than)\b/gi, " ")
     .replace(/\b\d+(?:\.\d+)?\+?\b/g, " ")
     .replace(/[()[\]{}|:/\\-]+/g, " ")
     .replace(/\s+/g, " ")
@@ -15730,26 +15731,91 @@ function parseProviderLineValue(text: string): number | null {
   return null;
 }
 
+function parseProviderLineSide(text: string): "over" | "under" | null {
+  const n = normalizePersonName(text);
+  if (!n) return null;
+  if (
+    n === "over" ||
+    n.includes(" over") ||
+    n.startsWith("over ") ||
+    n.includes("mais de") ||
+    n.includes("higher than") ||
+    n.includes("at least")
+  ) return "over";
+  if (
+    n === "under" ||
+    n.includes(" under") ||
+    n.startsWith("under ") ||
+    n.includes("menos de") ||
+    n.includes("lower than")
+  ) return "under";
+  return null;
+}
+
+function extractPlayerNameFromLineMarketTitle(rawMarketName: string, marketKey: "shots" | "shotsOnTarget" | "passes" | "tackles"): string {
+  const raw = String(rawMarketName ?? "");
+  const normalized = raw
+    .replace(/\b\d+(?:\.\d+)?\b/g, " ")
+    .replace(/[()[\]{}|:/\\]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  const patterns: Record<typeof marketKey, RegExp[]> = {
+    shotsOnTarget: [
+      /\b(?:player\s+)?shots?\s+on\s+target\s+(.+)$/i,
+      /\b(?:remates?|chutes?)\s+(?:a\s+baliza|no\s+alvo)\s+(.+)$/i,
+      /^(.+?)\s+(?:shots?\s+on\s+target|remates?\s+a\s+baliza|chutes?\s+no\s+alvo)$/i,
+    ],
+    shots: [
+      /\bplayer\s+shots?\s+(.+)$/i,
+      /\b(?:remates?|chutes?)\s+(.+)$/i,
+      /^(.+?)\s+(?:player\s+shots?|remates?|chutes?)$/i,
+    ],
+    passes: [
+      /\bplayer\s+passes\s+(.+)$/i,
+      /\bpasses\s+(.+)$/i,
+      /^(.+?)\s+passes$/i,
+    ],
+    tackles: [
+      /\bplayer\s+tackles\s+(.+)$/i,
+      /\btackles\s+(.+)$/i,
+      /\bdesarmes\s+(.+)$/i,
+      /^(.+?)\s+(?:tackles|desarmes)$/i,
+    ],
+  };
+  for (const pattern of patterns[marketKey]) {
+    const hit = normalized.match(pattern)?.[1]?.trim();
+    if (hit) return hit;
+  }
+  return normalized;
+}
+
 function addProviderPlayerLineChoice(
-  target: Array<{ name: string; line: number; odds: number }>,
+  target: Array<{ name: string; line: number; odds: number; side: "over" | "under" }>,
+  rawMarketName: string,
+  marketKey: "shots" | "shotsOnTarget" | "passes" | "tackles",
   rawChoiceName: string,
   line: number | null,
   odds: number,
 ): void {
   if (!Number.isFinite(line) || !line || odds < 1.01) return;
+  const side = parseProviderLineSide(rawChoiceName) ?? parseProviderLineSide(rawMarketName);
+  if (!side) return;
   const cleanName = normalizeProviderPlayerChoiceName(rawChoiceName);
-  if (!isProviderPlayerChoiceName(cleanName)) return;
+  const fallbackName = extractPlayerNameFromLineMarketTitle(rawMarketName, marketKey);
+  const candidateName = cleanName || fallbackName;
+  if (!isProviderPlayerChoiceName(candidateName)) return;
   target.push({
-    name: normalizePersonName(cleanName),
+    name: normalizePersonName(candidateName),
     line,
     odds,
+    side,
   });
 }
 
 function matchProviderLinesForPlayer(
-  target: Array<{ name: string; line: number; odds: number }>,
+  target: Array<{ name: string; line: number; odds: number; side: "over" | "under" }>,
   playerName: string,
-) : Array<{ line: number; odds: number }> {
+) : Array<{ line: number; over?: number; under?: number }> {
   if (target.length === 0) return [];
   const aliases = playerNameAliases(playerName);
   const matches = target.filter((entry) =>
@@ -15757,18 +15823,40 @@ function matchProviderLinesForPlayer(
   );
   if (matches.length === 0) return [];
   matches.sort((a, b) => {
+    if (a.line !== b.line) return a.line - b.line;
     const aScore = Math.abs(a.odds - 1.85);
     const bScore = Math.abs(b.odds - 1.85);
     if (aScore !== bScore) return aScore - bScore;
-    if (a.line !== b.line) return a.line - b.line;
     return a.odds - b.odds;
   });
-  const picked: Array<{ line: number; odds: number }> = [];
-  const seenLines = new Set<number>();
+  const perLine = new Map<number, { line: number; over?: number; under?: number }>();
   for (const match of matches) {
+    const existing = perLine.get(match.line) ?? { line: match.line };
+    if (match.side === "over") {
+      if (!existing.over || Math.abs(match.odds - 1.85) < Math.abs(existing.over - 1.85)) existing.over = match.odds;
+    } else {
+      if (!existing.under || Math.abs(match.odds - 1.85) < Math.abs(existing.under - 1.85)) existing.under = match.odds;
+    }
+    perLine.set(match.line, existing);
+  }
+  const sorted = Array.from(perLine.values()).sort((a, b) => a.line - b.line);
+  const scored = sorted.map((entry) => ({
+    ...entry,
+    score: Math.min(
+      Math.abs((entry.over ?? 10) - 1.85),
+      Math.abs((entry.under ?? 10) - 1.85),
+    ),
+  }));
+  scored.sort((a, b) => {
+    if (a.score !== b.score) return a.score - b.score;
+    return a.line - b.line;
+  });
+  const picked: Array<{ line: number; over?: number; under?: number }> = [];
+  const seenLines = new Set<number>();
+  for (const match of scored) {
     if (seenLines.has(match.line)) continue;
     seenLines.add(match.line);
-    picked.push({ line: match.line, odds: match.odds });
+    picked.push({ line: match.line, over: match.over, under: match.under });
     if (picked.length >= 3) break;
   }
   return picked;
@@ -15892,7 +15980,7 @@ async function getFootballProviderPlayerOdds(matchId: string): Promise<ProviderP
         const choiceName = String(choice.name ?? "");
         const odds = fractionalToDecimal(choice.fractionalValue ?? "");
         if (key === "shots" || key === "shotsOnTarget" || key === "passes" || key === "tackles") {
-          addProviderPlayerLineChoice(bucket[key], choiceName, line ?? parseProviderLineValue(choiceName), odds);
+          addProviderPlayerLineChoice(bucket[key], market.marketName ?? "", key, choiceName, line ?? parseProviderLineValue(choiceName), odds);
         } else {
           addProviderPlayerChoice(bucket[key], choiceName, odds);
         }
@@ -15981,52 +16069,56 @@ function buildTeamMarkets(team: FootballLeagueStatsTeam, providerOdds?: Provider
     const providerShots = providerOdds ? matchProviderLinesForPlayer(providerOdds.shots, p.name) : [];
     if (providerShots.length > 0) {
       for (const item of providerShots) {
-        shots.push({ ...base, id: `${p.id}:shots:${item.line}`, stat: p.shotsTotal, odds: item.odds, line: item.line });
+        if (item.over) shots.push({ ...base, id: `${p.id}:shots:${item.line}:over`, stat: p.shotsTotal, odds: item.over, line: item.line, side: "over" });
+        if (item.under) shots.push({ ...base, id: `${p.id}:shots:${item.line}:under`, stat: p.shotsTotal, odds: item.under, line: item.line, side: "under" });
       }
     } else {
       const shotLine = pickPlayerStatLine(p.shotsTotal / Math.max(1, p.appearances), [0.5, 1.5, 2.5, 3.5, 4.5]);
       if (shotLine != null) {
         const shotOdds = playerLineOdds(p.shotsTotal, p.appearances, shotLine);
-        if (shotOdds > 0) shots.push({ ...base, id: `${p.id}:shots:${shotLine}`, stat: p.shotsTotal, odds: shotOdds, line: shotLine });
+        if (shotOdds > 0) shots.push({ ...base, id: `${p.id}:shots:${shotLine}:over`, stat: p.shotsTotal, odds: shotOdds, line: shotLine, side: "over" });
       }
     }
 
     const providerShotsOnTarget = providerOdds ? matchProviderLinesForPlayer(providerOdds.shotsOnTarget, p.name) : [];
     if (providerShotsOnTarget.length > 0) {
       for (const item of providerShotsOnTarget) {
-        shotsOnTarget.push({ ...base, id: `${p.id}:sot:${item.line}`, stat: p.shotsOn, odds: item.odds, line: item.line });
+        if (item.over) shotsOnTarget.push({ ...base, id: `${p.id}:sot:${item.line}:over`, stat: p.shotsOn, odds: item.over, line: item.line, side: "over" });
+        if (item.under) shotsOnTarget.push({ ...base, id: `${p.id}:sot:${item.line}:under`, stat: p.shotsOn, odds: item.under, line: item.line, side: "under" });
       }
     } else {
       const shotOnTargetLine = pickPlayerStatLine(p.shotsOn / Math.max(1, p.appearances), [0.5, 1.5, 2.5]);
       if (shotOnTargetLine != null) {
         const shotOnTargetOdds = playerLineOdds(p.shotsOn, p.appearances, shotOnTargetLine);
-        if (shotOnTargetOdds > 0) shotsOnTarget.push({ ...base, id: `${p.id}:sot:${shotOnTargetLine}`, stat: p.shotsOn, odds: shotOnTargetOdds, line: shotOnTargetLine });
+        if (shotOnTargetOdds > 0) shotsOnTarget.push({ ...base, id: `${p.id}:sot:${shotOnTargetLine}:over`, stat: p.shotsOn, odds: shotOnTargetOdds, line: shotOnTargetLine, side: "over" });
       }
     }
 
     const providerPasses = providerOdds ? matchProviderLinesForPlayer(providerOdds.passes, p.name) : [];
     if (providerPasses.length > 0) {
       for (const item of providerPasses) {
-        passes.push({ ...base, id: `${p.id}:passes:${item.line}`, stat: p.passAttempts, odds: item.odds, line: item.line });
+        if (item.over) passes.push({ ...base, id: `${p.id}:passes:${item.line}:over`, stat: p.passAttempts, odds: item.over, line: item.line, side: "over" });
+        if (item.under) passes.push({ ...base, id: `${p.id}:passes:${item.line}:under`, stat: p.passAttempts, odds: item.under, line: item.line, side: "under" });
       }
     } else {
       const passesLine = pickPlayerStatLine(p.passAttempts / Math.max(1, p.appearances), [9.5, 19.5, 29.5, 39.5, 49.5, 59.5, 69.5]);
       if (passesLine != null) {
         const passesOdds = playerLineOdds(p.passAttempts, p.appearances, passesLine);
-        if (passesOdds > 0) passes.push({ ...base, id: `${p.id}:passes:${passesLine}`, stat: p.passAttempts, odds: passesOdds, line: passesLine });
+        if (passesOdds > 0) passes.push({ ...base, id: `${p.id}:passes:${passesLine}:over`, stat: p.passAttempts, odds: passesOdds, line: passesLine, side: "over" });
       }
     }
 
     const providerTackles = providerOdds ? matchProviderLinesForPlayer(providerOdds.tackles, p.name) : [];
     if (providerTackles.length > 0) {
       for (const item of providerTackles) {
-        tackles.push({ ...base, id: `${p.id}:tackles:${item.line}`, stat: p.tackles, odds: item.odds, line: item.line });
+        if (item.over) tackles.push({ ...base, id: `${p.id}:tackles:${item.line}:over`, stat: p.tackles, odds: item.over, line: item.line, side: "over" });
+        if (item.under) tackles.push({ ...base, id: `${p.id}:tackles:${item.line}:under`, stat: p.tackles, odds: item.under, line: item.line, side: "under" });
       }
     } else {
       const tacklesLine = pickPlayerStatLine(p.tackles / Math.max(1, p.appearances), [0.5, 1.5, 2.5, 3.5, 4.5]);
       if (tacklesLine != null) {
         const tacklesOdds = playerLineOdds(p.tackles, p.appearances, tacklesLine);
-        if (tacklesOdds > 0) tackles.push({ ...base, id: `${p.id}:tackles:${tacklesLine}`, stat: p.tackles, odds: tacklesOdds, line: tacklesLine });
+        if (tacklesOdds > 0) tackles.push({ ...base, id: `${p.id}:tackles:${tacklesLine}:over`, stat: p.tackles, odds: tacklesOdds, line: tacklesLine, side: "over" });
       }
     }
 

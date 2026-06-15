@@ -7521,7 +7521,7 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
               <div className="text-center text-zinc-600 py-10 text-sm">Equipas não encontradas nas estatísticas desta liga.</div>
             )}
             {!playerMarketsLoading && playerMarkets && (playerMarkets.home || playerMarkets.away) && (() => {
-              type PMRow = { id: string; name: string; stat: number; appearances: number; odds: number; line?: number };
+              type PMRow = { id: string; name: string; stat: number; appearances: number; odds: number; line?: number; side?: "over" | "under" };
               const pmList = (rows: PMRow[], selPrefix: string, market: string, label: string, sublabel: (p: PMRow) => string) => {
                 if (rows.length === 0) return null;
                 const titleColor =
@@ -7555,7 +7555,12 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
                           grouped.set(row.name, existing);
                         }
                         return Array.from(grouped.entries()).map(([playerName, playerRows]) => {
-                          const sortedRows = [...playerRows].sort((a, b) => (a.line ?? 0) - (b.line ?? 0));
+                          const sortedRows = [...playerRows].sort((a, b) => {
+                            const lineCmp = (a.line ?? 0) - (b.line ?? 0);
+                            if (lineCmp !== 0) return lineCmp;
+                            if ((a.side ?? "over") === (b.side ?? "over")) return 0;
+                            return (a.side ?? "over") === "over" ? -1 : 1;
+                          });
                           const lead = sortedRows[0]!;
                           return (
                             <div key={`${selPrefix}-${playerName}`} className="py-2 px-2 border-b border-zinc-800/60 last:border-0">
@@ -7571,7 +7576,7 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
                                       sel={`${selPrefix}-${p.id}-${p.line ?? "na"}`}
                                       odd={p.odds}
                                       market={market}
-                                      label={p.line != null ? `Mais de ${p.line}` : label}
+                                      label={p.line != null ? `${p.side === "under" ? "Menos de" : "Mais de"} ${p.line}` : label}
                                     />
                                   </div>
                                 ))}
@@ -7585,7 +7590,7 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
                             <div className="text-sm font-medium text-white truncate">{p.name}</div>
                             <div className="text-xs text-zinc-500 mt-0.5">{sublabel(p)}</div>
                           </div>
-                          <MarketOddsBtn match={match} sel={`${selPrefix}-${p.id}-${p.line ?? "na"}`} odd={p.odds} market={market} label={p.line != null ? `${p.name} — ${label} (Mais de ${p.line})` : `${p.name} — ${label}`} />
+                          <MarketOddsBtn match={match} sel={`${selPrefix}-${p.id}-${p.line ?? "na"}`} odd={p.odds} market={market} label={p.line != null ? `${p.name} — ${label} (${p.side === "under" ? "Menos de" : "Mais de"} ${p.line})` : `${p.name} — ${label}`} />
                         </div>
                       ))}
                     </div>
