@@ -2655,7 +2655,7 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
   const [confrontosLoading, setConfrontosLoading] = useState(false);
 
   // Player markets (football "Jogadores" tab) — per-match, filtered to the two match teams
-  type PlayerMarket = { id: string; name: string; team: string; teamId: string; appearances: number; stat: number; odds: number };
+  type PlayerMarket = { id: string; name: string; team: string; teamId: string; appearances: number; stat: number; odds: number; line?: number };
   type TeamPlayerMarkets = {
     teamName: string; teamId: string;
     anytimeScorers: PlayerMarket[];
@@ -2663,11 +2663,17 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
     lastScorers: PlayerMarket[];
     twoPlusGoals: PlayerMarket[];
     hatTricks: PlayerMarket[];
+    notToScore: PlayerMarket[];
     firstHalfScorers: PlayerMarket[];
     secondHalfScorers: PlayerMarket[];
     assists: PlayerMarket[];
+    shots: PlayerMarket[];
+    shotsOnTarget: PlayerMarket[];
+    passes: PlayerMarket[];
+    tackles: PlayerMarket[];
     scoreAndAssist: PlayerMarket[];
     bookings: PlayerMarket[];
+    redCards: PlayerMarket[];
   };
   type PlayerMarketsData = { leagueName: string; country: string; home: TeamPlayerMarkets | null; away: TeamPlayerMarkets | null };
   const [playerMarkets, setPlayerMarkets] = useState<PlayerMarketsData | null>(null);
@@ -7515,7 +7521,7 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
               <div className="text-center text-zinc-600 py-10 text-sm">Equipas não encontradas nas estatísticas desta liga.</div>
             )}
             {!playerMarketsLoading && playerMarkets && (playerMarkets.home || playerMarkets.away) && (() => {
-              type PMRow = { id: string; name: string; stat: number; appearances: number; odds: number };
+              type PMRow = { id: string; name: string; stat: number; appearances: number; odds: number; line?: number };
               const pmList = (rows: PMRow[], selPrefix: string, market: string, label: string, sublabel: (p: PMRow) => string) => rows.length === 0 ? null : (
                 <div className="mb-3">
                   <div className={`text-xs font-semibold uppercase tracking-wider px-1 mb-1.5 ${
@@ -7523,11 +7529,17 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
                     selPrefix.startsWith("pm-last")  ? "text-violet-400"  :
                     selPrefix.startsWith("pm-2g")    ? "text-pink-400"    :
                     selPrefix.startsWith("pm-hat")   ? "text-cyan-400"    :
+                    selPrefix.startsWith("pm-noscore") ? "text-slate-300" :
                     selPrefix.startsWith("pm-gol")   ? "text-red-400"     :
                     selPrefix.startsWith("pm-fh")    ? "text-orange-400"  :
                     selPrefix.startsWith("pm-sh")    ? "text-amber-400"   :
                     selPrefix.startsWith("pm-ast")   ? "text-sky-400"     :
+                    selPrefix.startsWith("pm-shotot") ? "text-lime-400"   :
+                    selPrefix.startsWith("pm-shoton") ? "text-green-400"  :
+                    selPrefix.startsWith("pm-pass") ? "text-indigo-400"   :
+                    selPrefix.startsWith("pm-tkl")  ? "text-teal-400"     :
                     selPrefix.startsWith("pm-sa")    ? "text-emerald-400" :
+                    selPrefix.startsWith("pm-red") ? "text-rose-400"      :
                     "text-yellow-500"
                   }`}>{label}</div>
                   <div className="bg-zinc-900/60 rounded-lg overflow-hidden">
@@ -7537,7 +7549,7 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
                           <div className="text-sm font-medium text-white truncate">{p.name}</div>
                           <div className="text-xs text-zinc-500 mt-0.5">{sublabel(p)}</div>
                         </div>
-                        <MarketOddsBtn match={match} sel={`${selPrefix}-${p.id}`} odd={p.odds} market={market} label={`${p.name} — ${label}`} />
+                        <MarketOddsBtn match={match} sel={`${selPrefix}-${p.id}-${p.line ?? "na"}`} odd={p.odds} market={market} label={p.line != null ? `${p.name} — ${label} (Mais de ${p.line})` : `${p.name} — ${label}`} />
                       </div>
                     ))}
                   </div>
@@ -7576,12 +7588,18 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
                   {pmList(team.lastScorers,        "pm-last", "ultimo-marcador",  "🏁 Último Marcador",             p => `${p.stat} gol(os) em ${p.appearances} jogos`)}
                   {pmList(team.twoPlusGoals,       "pm-2g",   "2plus-golos-jogador","⚽⚽ Marcar 2+ Golos",         p => `${p.stat} gol(os) em ${p.appearances} jogos`)}
                   {pmList(team.hatTricks,          "pm-hat",  "hat-trick-jogador", "🎩 Hat-trick",                  p => `${p.stat} gol(os) em ${p.appearances} jogos`)}
+                  {pmList(team.notToScore,         "pm-noscore","nao-marcar-jogador","🚫 Não Marcar",              p => `${p.stat} jogo(s) sem marcar em ${p.appearances}`)}
                   {pmList(team.anytimeScorers,    "pm-gol", "marcadores",      "⚽ Marcador (Qualquer Momento)",  p => `${p.stat} gol(os) em ${p.appearances} jogos`)}
                   {pmList(team.firstHalfScorers,  "pm-fh",  "marcador-1t",     "⚽ Marcador no 1.º Tempo",        p => `${p.stat} gol(os) em ${p.appearances} jogos`)}
                   {pmList(team.secondHalfScorers, "pm-sh",  "marcador-2t",     "⚽ Marcador no 2.º Tempo",        p => `${p.stat} gol(os) em ${p.appearances} jogos`)}
                   {pmList(team.assists,           "pm-ast", "assist-jogador",  "🎯 Dar Assistência",              p => `${p.stat} assistência(s) em ${p.appearances} jogos`)}
+                  {pmList(team.shots,             "pm-shotot","remates-jogador","🎯 Remates",                      p => `${(p.stat / Math.max(1, p.appearances)).toFixed(1)} por jogo · linha ${p.line}`)}
+                  {pmList(team.shotsOnTarget,     "pm-shoton","remates-baliza-jogador","🥅 Remates à Baliza",     p => `${(p.stat / Math.max(1, p.appearances)).toFixed(1)} por jogo · linha ${p.line}`)}
+                  {pmList(team.passes,            "pm-pass","passes-jogador",  "🧠 Passes",                        p => `${(p.stat / Math.max(1, p.appearances)).toFixed(1)} por jogo · linha ${p.line}`)}
+                  {pmList(team.tackles,           "pm-tkl", "desarmes-jogador","🛡️ Desarmes",                      p => `${(p.stat / Math.max(1, p.appearances)).toFixed(1)} por jogo · linha ${p.line}`)}
                   {pmList(team.scoreAndAssist,    "pm-sa",  "marcar-assistir", "🎯 Marcar e Dar Assistência",     p => `${p.stat} vez(es) em ${p.appearances} jogos`)}
                   {pmList(team.bookings,          "pm-card","cartao-jogador",  "🟨🟥 Cartão (Amarelo ou Vermelho)", p => `${p.stat} cartão(ões) em ${p.appearances} jogos`)}
+                  {pmList(team.redCards,          "pm-red", "cartao-vermelho-jogador","🟥 Cartão Vermelho",        p => `${p.stat} expulsão(ões) em ${p.appearances} jogos`)}
                 </div>
                 );
               };

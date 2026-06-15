@@ -15518,6 +15518,7 @@ type PlayerMarketEntry = {
   team: string; teamId: string;
   appearances: number; stat: number;
   odds: number;
+  line?: number;
 };
 
 type TeamPlayerMarkets = {
@@ -15527,11 +15528,17 @@ type TeamPlayerMarkets = {
   lastScorers: PlayerMarketEntry[];
   twoPlusGoals: PlayerMarketEntry[];
   hatTricks: PlayerMarketEntry[];
+  notToScore: PlayerMarketEntry[];
   firstHalfScorers: PlayerMarketEntry[];
   secondHalfScorers: PlayerMarketEntry[];
   assists: PlayerMarketEntry[];
+  shots: PlayerMarketEntry[];
+  shotsOnTarget: PlayerMarketEntry[];
+  passes: PlayerMarketEntry[];
+  tackles: PlayerMarketEntry[];
   scoreAndAssist: PlayerMarketEntry[];
   bookings: PlayerMarketEntry[];
+  redCards: PlayerMarketEntry[];
 };
 
 type ProviderPlayerOddsBucket = {
@@ -15540,7 +15547,9 @@ type ProviderPlayerOddsBucket = {
   last: Map<string, number>;
   twoPlus: Map<string, number>;
   hatTrick: Map<string, number>;
+  notScore: Map<string, number>;
   assist: Map<string, number>;
+  redCard: Map<string, number>;
 };
 
 function playerOdds(stat: number, appearances: number): number {
@@ -15548,6 +15557,40 @@ function playerOdds(stat: number, appearances: number): number {
   const rate = stat / appearances;
   const fair = 1 / rate;
   return Math.min(40.0, Math.max(1.10, Math.round(fair * 0.975 * 100) / 100));
+}
+
+function priceProbability(probability: number, cap = 80): number {
+  if (!Number.isFinite(probability) || probability <= 0 || probability >= 0.985) return 0;
+  return Math.min(cap, Math.max(1.10, Math.round((1 / probability) * 0.975 * 100) / 100));
+}
+
+function poissonTailProbability(lambda: number, minHits: number): number {
+  if (!Number.isFinite(lambda) || lambda <= 0 || minHits <= 0) return 0;
+  let term = Math.exp(-lambda);
+  let cdf = term;
+  for (let k = 1; k < minHits; k++) {
+    term = (term * lambda) / k;
+    cdf += term;
+  }
+  return Math.max(0, Math.min(1, 1 - cdf));
+}
+
+function pickPlayerStatLine(avg: number, lines: number[]): number | null {
+  if (!Number.isFinite(avg) || avg <= 0) return null;
+  let chosen: number | null = null;
+  for (const line of lines) {
+    if (avg >= line + 0.2) chosen = line;
+  }
+  return chosen ?? (avg >= lines[0] * 0.65 ? lines[0] : null);
+}
+
+function playerLineOdds(total: number, appearances: number, line: number): number {
+  if (total <= 0 || appearances < 3 || !Number.isFinite(line)) return 0;
+  const lambda = total / appearances;
+  const threshold = Math.floor(line) + 1;
+  const probability = poissonTailProbability(lambda, threshold);
+  if (probability < 0.04 || probability > 0.92) return 0;
+  return priceProbability(probability, 65);
 }
 
 // Normalize a team name for fuzzy matching: lowercase, strip diacritics, strip
@@ -15627,7 +15670,9 @@ function createProviderPlayerOddsBucket(): ProviderPlayerOddsBucket {
     last: new Map<string, number>(),
     twoPlus: new Map<string, number>(),
     hatTrick: new Map<string, number>(),
+    notScore: new Map<string, number>(),
     assist: new Map<string, number>(),
+    redCard: new Map<string, number>(),
   };
 }
 
@@ -15699,6 +15744,12 @@ function scorerMarketBucket(rawMarketName: string): keyof ProviderPlayerOddsBuck
     market.includes("3+ goals")
   ) return "hatTrick";
   if (
+    market.includes("to not score") ||
+    market.includes("not to score") ||
+    market.includes("player not to score") ||
+    market.includes("to score no goals")
+  ) return "notScore";
+  if (
     market.includes("to provide an assist") ||
     market.includes("to provide assist") ||
     market.includes("player assists") ||
@@ -15706,6 +15757,12 @@ function scorerMarketBucket(rawMarketName: string): keyof ProviderPlayerOddsBuck
     market.includes("any time assist") ||
     market.includes("to assist")
   ) return "assist";
+  if (
+    market.includes("to be sent off") ||
+    market.includes("player red card") ||
+    market.includes("red card") ||
+    market.includes("sent off")
+  ) return "redCard";
   return null;
 }
 
@@ -15765,11 +15822,17 @@ function buildTeamMarkets(team: FootballLeagueStatsTeam, providerOdds?: Provider
   const lastScorers:       PlayerMarketEntry[] = [];
   const twoPlusGoals:      PlayerMarketEntry[] = [];
   const hatTricks:         PlayerMarketEntry[] = [];
+  const notToScore:        PlayerMarketEntry[] = [];
   const firstHalfScorers:  PlayerMarketEntry[] = [];
   const secondHalfScorers: PlayerMarketEntry[] = [];
   const assists:           PlayerMarketEntry[] = [];
+  const shots:             PlayerMarketEntry[] = [];
+  const shotsOnTarget:     PlayerMarketEntry[] = [];
+  const passes:            PlayerMarketEntry[] = [];
+  const tackles:           PlayerMarketEntry[] = [];
   const scoreAndAssist:    PlayerMarketEntry[] = [];
   const bookings:          PlayerMarketEntry[] = [];
+  const redCards:          PlayerMarketEntry[] = [];
 
   for (const p of team.players) {
     const base = { id: p.id, name: p.name, team: team.name, teamId: team.id, appearances: p.appearances };
@@ -15781,12 +15844,22 @@ function buildTeamMarkets(team: FootballLeagueStatsTeam, providerOdds?: Provider
     const lastOdds = providerOdds ? matchProviderOddForPlayer(providerOdds.last, p.name) : 0;
     const twoPlusOdds = providerOdds ? matchProviderOddForPlayer(providerOdds.twoPlus, p.name) : 0;
     const hatTrickOdds = providerOdds ? matchProviderOddForPlayer(providerOdds.hatTrick, p.name) : 0;
+    const notScoreOdds = providerOdds ? matchProviderOddForPlayer(providerOdds.notScore, p.name) : 0;
     const scoringBaseOdds = anytimeOdds > 0 ? anytimeOdds : derivedScorerOdds;
 
     if (firstOdds > 0) firstScorers.push({ ...base, stat: p.goals, odds: firstOdds });
     if (lastOdds > 0) lastScorers.push({ ...base, stat: p.goals, odds: lastOdds });
     if (twoPlusOdds > 0) twoPlusGoals.push({ ...base, stat: p.goals, odds: twoPlusOdds });
     if (hatTrickOdds > 0) hatTricks.push({ ...base, stat: p.goals, odds: hatTrickOdds });
+    if (notScoreOdds > 0) {
+      notToScore.push({ ...base, stat: Math.max(0, p.appearances - Math.min(p.goals, p.appearances)), odds: notScoreOdds });
+    } else if (p.appearances >= 3) {
+      const scoreRate = Math.min(0.92, Math.max(0, p.goals / p.appearances));
+      const noScoreOdds = priceProbability(Math.max(0.04, 1 - scoreRate), 20);
+      if (noScoreOdds > 0) {
+        notToScore.push({ ...base, stat: Math.max(0, p.appearances - Math.min(p.goals, p.appearances)), odds: noScoreOdds });
+      }
+    }
 
     if (scoringBaseOdds > 0) {
       anytimeScorers.push({ ...base, stat: p.goals, odds: scoringBaseOdds });
@@ -15814,10 +15887,43 @@ function buildTeamMarkets(team: FootballLeagueStatsTeam, providerOdds?: Provider
     const assistBaseOdds = assistOdds > 0 ? assistOdds : derivedAssistOdds;
     if (assistBaseOdds > 0) assists.push({ ...base, stat: p.assists, odds: assistBaseOdds });
 
+    const shotLine = pickPlayerStatLine(p.shotsTotal / Math.max(1, p.appearances), [0.5, 1.5, 2.5, 3.5, 4.5]);
+    if (shotLine != null) {
+      const shotOdds = playerLineOdds(p.shotsTotal, p.appearances, shotLine);
+      if (shotOdds > 0) shots.push({ ...base, stat: p.shotsTotal, odds: shotOdds, line: shotLine });
+    }
+
+    const shotOnTargetLine = pickPlayerStatLine(p.shotsOn / Math.max(1, p.appearances), [0.5, 1.5, 2.5]);
+    if (shotOnTargetLine != null) {
+      const shotOnTargetOdds = playerLineOdds(p.shotsOn, p.appearances, shotOnTargetLine);
+      if (shotOnTargetOdds > 0) shotsOnTarget.push({ ...base, stat: p.shotsOn, odds: shotOnTargetOdds, line: shotOnTargetLine });
+    }
+
+    const passesLine = pickPlayerStatLine(p.passAttempts / Math.max(1, p.appearances), [9.5, 19.5, 29.5, 39.5, 49.5, 59.5, 69.5]);
+    if (passesLine != null) {
+      const passesOdds = playerLineOdds(p.passAttempts, p.appearances, passesLine);
+      if (passesOdds > 0) passes.push({ ...base, stat: p.passAttempts, odds: passesOdds, line: passesLine });
+    }
+
+    const tacklesLine = pickPlayerStatLine(p.tackles / Math.max(1, p.appearances), [0.5, 1.5, 2.5, 3.5, 4.5]);
+    if (tacklesLine != null) {
+      const tacklesOdds = playerLineOdds(p.tackles, p.appearances, tacklesLine);
+      if (tacklesOdds > 0) tackles.push({ ...base, stat: p.tackles, odds: tacklesOdds, line: tacklesLine });
+    }
+
     // Booked: any card (yellow, yellow-red, or straight red)
     const cards = p.yellowCards + p.yellowRed + p.redCards;
     const bOdds = playerOdds(cards, p.appearances);
     if (bOdds > 0) bookings.push({ ...base, stat: cards, odds: bOdds });
+
+    const dismissals = p.redCards + p.yellowRed;
+    const sentOffOdds = providerOdds ? matchProviderOddForPlayer(providerOdds.redCard, p.name) : 0;
+    if (sentOffOdds > 0) {
+      redCards.push({ ...base, stat: dismissals, odds: sentOffOdds });
+    } else {
+      const derivedSentOffOdds = playerOdds(dismissals, p.appearances);
+      if (derivedSentOffOdds > 0) redCards.push({ ...base, stat: dismissals, odds: derivedSentOffOdds });
+    }
   }
 
   anytimeScorers.sort(byOdds);
@@ -15825,11 +15931,17 @@ function buildTeamMarkets(team: FootballLeagueStatsTeam, providerOdds?: Provider
   lastScorers.sort(byOdds);
   twoPlusGoals.sort(byOdds);
   hatTricks.sort(byOdds);
+  notToScore.sort(byOdds);
   firstHalfScorers.sort(byOdds);
   secondHalfScorers.sort(byOdds);
   assists.sort(byOdds);
+  shots.sort(byOdds);
+  shotsOnTarget.sort(byOdds);
+  passes.sort(byOdds);
+  tackles.sort(byOdds);
   scoreAndAssist.sort(byOdds);
   bookings.sort(byOdds);
+  redCards.sort(byOdds);
 
   return {
     teamName: team.name,
@@ -15839,11 +15951,17 @@ function buildTeamMarkets(team: FootballLeagueStatsTeam, providerOdds?: Provider
     lastScorers:       lastScorers.slice(0, 15),
     twoPlusGoals:      twoPlusGoals.slice(0, 12),
     hatTricks:         hatTricks.slice(0, 10),
+    notToScore:        notToScore.slice(0, 15),
     firstHalfScorers:  firstHalfScorers.slice(0, 15),
     secondHalfScorers: secondHalfScorers.slice(0, 15),
     assists:           assists.slice(0, 15),
+    shots:             shots.slice(0, 15),
+    shotsOnTarget:     shotsOnTarget.slice(0, 15),
+    passes:            passes.slice(0, 15),
+    tackles:           tackles.slice(0, 15),
     scoreAndAssist:    scoreAndAssist.slice(0, 10),
     bookings:          bookings.slice(0, 15),
+    redCards:          redCards.slice(0, 10),
   };
 }
 
