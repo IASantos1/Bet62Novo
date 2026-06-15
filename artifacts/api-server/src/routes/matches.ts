@@ -10972,6 +10972,8 @@ const WC2026_TTL = 3 * 60_000; // 3 min — short so finished games are removed 
 
 let _wc2026Rebuilding = false;
 
+const WC2026_ENABLE_STATIC = false;
+
 // ─── Static WC 2026 group-stage schedule (supplement when API returns near-term only) ──
 // UTC times; backend converts to Europe/Lisbon for display
 const WC2026_STATIC: Array<{ home: string; away: string; group: string; date: string; time: string; md: number }> = [
@@ -11116,8 +11118,9 @@ function findWC2026StaticFixture(home: string, away: string, date?: string, time
 }
 
 function isWC2026ApiFixtureConsistent(match: UpcomingMatch): boolean {
+  if (!WC2026_ENABLE_STATIC) return true;
   const fixture = findWC2026StaticFixture(match.home, match.away, match.date, match.time);
-  if (!fixture) return false;
+  if (!fixture) return true;
   if (String(match.id ?? "").startsWith("wc26-")) return true;
   const actualMs = parseWC2026DisplayKickoffMs(match.date, match.time);
   if (actualMs == null) return true;
@@ -11710,7 +11713,7 @@ async function _rebuildWC2026(): Promise<void> {
         const elapsedMin = (Date.now() - new Date(g.startTime).getTime()) / 60_000;
         if (elapsedMin > 110) continue;
       }
-      const isWC = g.competitionId === WC_COMP_ID || (g.competitionDisplayName ?? "").includes("World Cup");
+      const isWC = g.competitionId === WC_COMP_ID;
       if (isWC) wcV1Games.push(g);
     }
 
@@ -11741,7 +11744,7 @@ async function _rebuildWC2026(): Promise<void> {
       const year  = dt.toLocaleDateString("pt-PT", { year: "numeric",  timeZone: "Europe/Lisbon" });
       const date  = `${day}.${month}.${year}`; // DD.MM.YYYY — matches parseMatchDate in frontend
       const time  = dt.toLocaleTimeString("pt-PT", { hour: "2-digit", minute: "2-digit", timeZone: "Europe/Lisbon" });
-      const staticFixture = findWC2026StaticFixture(home, away, date, time);
+      const staticFixture = WC2026_ENABLE_STATIC ? findWC2026StaticFixture(home, away, date, time) : null;
       const league = staticFixture ? `FIFA World Cup - Group ${staticFixture.group}` : (g.competitionDisplayName ?? "FIFA World Cup");
       // statusGroup 3 = Live/in-play — expose live data directly
       const isLiveGame = (g.statusGroup ?? 0) === 3;
@@ -11836,11 +11839,13 @@ async function _rebuildWC2026(): Promise<void> {
         const leagueName = normalizeLeagueName(v2TournName(ev.tournament), "");
         const lg = leagueName.toLowerCase();
         const isWCLg =
+          (ev.tournamentId === WC_COMP_ID) ||
           lg.includes("world cup") || lg.includes("copa do mundo") || lg.includes("copa mundial") ||
           lg.includes("fifa world") || lg.includes("wc 2026") || lg.includes("worldcup") ||
           lg.includes("mundial 2026") || lg.includes("coupe du monde");
         if (!isWCLg) continue;
         if (lg.includes("women") || lg.includes("qualification") || lg.includes("qualif") || lg.includes("feminino") || lg.includes("féminin")) continue;
+        if (/\bu\d{2}\b|\bunder\s*\d{2}\b|\bsub ?\d{2}\b|beach|futsal|club/i.test(lg)) continue;
         wcEvents.push(ev);
         if (wcEvents.length >= 300) break;
       }
@@ -11861,7 +11866,7 @@ async function _rebuildWC2026(): Promise<void> {
         };
         const hasFull1x2 = !!(realOdds && realOdds.home > 0 && realOdds.draw > 0 && realOdds.away > 0);
         const odds = hasFull1x2 ? { home: realOdds!.home, draw: realOdds!.draw, away: realOdds!.away } : baseOdds;
-        const staticFixture = findWC2026StaticFixture(home, away, date, time);
+        const staticFixture = WC2026_ENABLE_STATIC ? findWC2026StaticFixture(home, away, date, time) : null;
         v2Results.push({
           id: `fb-v2-${ev.id}`,
           home, away,
@@ -11882,37 +11887,37 @@ async function _rebuildWC2026(): Promise<void> {
     // Merge: V1 is primary, V2 fallback supplements if V1 is empty
     const apiResults: UpcomingMatch[] = (results.length > 0 ? results : v2Results).filter(isWC2026ApiFixtureConsistent);
 
-    // ── Supplement with static schedule for future games not yet returned by API ──
-    const now = Date.now();
-    // Build a set of matchups already covered by API (normalised lowercase)
-    const apiMatchups = new Set(apiResults.map(r => `${normalizeWC2026PairKey(r.home, r.away)}|${r.date ?? ""}|${r.time ?? ""}`));
     const staticSupplements: UpcomingMatch[] = [];
-    for (const s of WC2026_STATIC) {
-      const startMs = new Date(`${s.date}T${s.time}:00Z`).getTime();
-      if (startMs < now - 5 * 60_000) continue; // skip past games
-      const dt2 = new Date(startMs);
-      const sDay   = dt2.toLocaleDateString("pt-PT", { day: "2-digit",   timeZone: "Europe/Lisbon" });
-      const sMon   = dt2.toLocaleDateString("pt-PT", { month: "2-digit", timeZone: "Europe/Lisbon" });
-      const sYr    = dt2.toLocaleDateString("pt-PT", { year: "numeric",  timeZone: "Europe/Lisbon" });
-      const sDate  = `${sDay}.${sMon}.${sYr}`;
-      const sTime  = dt2.toLocaleTimeString("pt-PT", { hour: "2-digit", minute: "2-digit", timeZone: "Europe/Lisbon" });
-      if (apiMatchups.has(`${normalizeWC2026PairKey(s.home, s.away)}|${sDate}|${sTime}`)) continue; // API already has this exact slot
-      const sOdds  = makeOddsFromTeams(s.home, s.away);
-      const sMkts  = makeAdvancedMarketsFromTeams(s.home, s.away);
-      staticSupplements.push({
-        id: `wc26-${s.home.toLowerCase().replace(/\s+/g, "-")}-${s.away.toLowerCase().replace(/\s+/g, "-")}-md${s.md}`,
-        home: s.home, away: s.away,
-        league: `FIFA World Cup - Group ${s.group}`,
-        country: "World",
-        time: sTime, date: sDate,
-        sport: "football",
-        hasRealOdds: false,
-        odds: sOdds, markets: sMkts,
-        isWomens: false,
-        leagueId: String(WC_COMP_ID),
-        providerStatusGroup: 2,
-        providerStatusText: "Not Started",
-      } satisfies UpcomingMatch);
+    if (WC2026_ENABLE_STATIC) {
+      const now = Date.now();
+      const apiMatchups = new Set(apiResults.map(r => `${normalizeWC2026PairKey(r.home, r.away)}|${r.date ?? ""}|${r.time ?? ""}`));
+      for (const s of WC2026_STATIC) {
+        const startMs = new Date(`${s.date}T${s.time}:00Z`).getTime();
+        if (startMs < now - 5 * 60_000) continue;
+        const dt2 = new Date(startMs);
+        const sDay   = dt2.toLocaleDateString("pt-PT", { day: "2-digit",   timeZone: "Europe/Lisbon" });
+        const sMon   = dt2.toLocaleDateString("pt-PT", { month: "2-digit", timeZone: "Europe/Lisbon" });
+        const sYr    = dt2.toLocaleDateString("pt-PT", { year: "numeric",  timeZone: "Europe/Lisbon" });
+        const sDate  = `${sDay}.${sMon}.${sYr}`;
+        const sTime  = dt2.toLocaleTimeString("pt-PT", { hour: "2-digit", minute: "2-digit", timeZone: "Europe/Lisbon" });
+        if (apiMatchups.has(`${normalizeWC2026PairKey(s.home, s.away)}|${sDate}|${sTime}`)) continue;
+        const sOdds  = makeOddsFromTeams(s.home, s.away);
+        const sMkts  = makeAdvancedMarketsFromTeams(s.home, s.away);
+        staticSupplements.push({
+          id: `wc26-${s.home.toLowerCase().replace(/\s+/g, "-")}-${s.away.toLowerCase().replace(/\s+/g, "-")}-md${s.md}`,
+          home: s.home, away: s.away,
+          league: `FIFA World Cup - Group ${s.group}`,
+          country: "World",
+          time: sTime, date: sDate,
+          sport: "football",
+          hasRealOdds: false,
+          odds: sOdds, markets: sMkts,
+          isWomens: false,
+          leagueId: String(WC_COMP_ID),
+          providerStatusGroup: 2,
+          providerStatusText: "Not Started",
+        } satisfies UpcomingMatch);
+      }
     }
 
     const finalResults = dedupeWC2026Matches([...apiResults, ...staticSupplements]);
@@ -11927,12 +11932,11 @@ async function _rebuildWC2026(): Promise<void> {
       } catch { return 0; }
     });
 
-    // Always update cache (reset TTL) — even 0 results is a valid state
-    // Only keep previous matches if new fetch returned nothing (API outage)
     if (finalResults.length > 0 || !wc2026Cache) {
       wc2026Cache = { matches: finalResults, fetchedAt: Date.now() };
+    } else if (!WC2026_ENABLE_STATIC) {
+      wc2026Cache = { matches: [], fetchedAt: Date.now() };
     } else {
-      // Keep existing matches but bump fetchedAt so we don't hammer the API
       wc2026Cache = { matches: wc2026Cache.matches, fetchedAt: Date.now() };
     }
   } finally {
