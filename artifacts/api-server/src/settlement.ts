@@ -1602,7 +1602,6 @@ export async function autoSettlePendingBets(opts?: { matchIds?: string[] }): Pro
           const needsOutcome = sel.outcome == null && outcome != null;
           const needsScore = sel.finalScore == null;
           const needsHT = sel.htScore == null && ht != null;
-          if (needsOutcome || needsScore || needsHT) anySelectionUpdated = true;
           const needsSettlementNote = sel.settlementNote !== settlementNote;
           if (needsOutcome || needsScore || needsHT || needsSettlementNote) anySelectionUpdated = true;
           return {
@@ -1610,8 +1609,8 @@ export async function autoSettlePendingBets(opts?: { matchIds?: string[] }): Pro
             ...(needsScore ? { finalScore: { home: result.home, away: result.away } } : {}),
             ...(needsHT && ht ? { htScore: ht } : {}),
             ...(needsOutcome ? { outcome } : {}),
-          };
             ...(needsSettlementNote ? { settlementNote } : {}),
+          };
         });
 
 
