@@ -4284,18 +4284,22 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
 
     if (isSuspended) {
       return (
-        <div className={`relative flex flex-col items-center justify-center h-10 px-2 rounded-md text-xs ${grow ? "flex-1" : ""} bg-zinc-800/40 border border-zinc-700/30 opacity-70 select-none`}>
-          <span className="text-[10px] leading-none opacity-60">{label}</span>
-          <span className="font-bold text-sm leading-none text-zinc-300 tabular-nums line-through">{odd.toFixed(2)}</span>
+        <div className={`flex flex-col items-center py-2.5 px-1 rounded-xl border min-w-0 opacity-60 cursor-not-allowed select-none ${
+          grow ? "flex-1" : ""
+        } ${isDarkTheme ? "border-zinc-800 bg-zinc-900/60" : "border-zinc-200 bg-white"}`}>
+          <span className={`text-[10px] mb-1 truncate w-full text-center px-0.5 ${isDarkTheme ? "text-zinc-600" : "text-zinc-500"}`}>{label}</span>
+          <span className={`text-sm font-black leading-none tabular-nums line-through ${isDarkTheme ? "text-zinc-500" : "text-zinc-400"}`}>{odd.toFixed(2)}</span>
         </div>
       );
     }
 
     if (odd < 1.15 && market === "result") {
       return (
-        <div className={`relative flex flex-col items-center justify-center h-10 px-2 rounded-md text-xs ${grow ? "flex-1" : ""} bg-zinc-800/40 border border-zinc-700/30`}>
-          <span className="text-[10px] leading-none opacity-40">{label}</span>
-          <span className="font-bold text-base leading-none text-zinc-600 tabular-nums">--</span>
+        <div className={`flex flex-col items-center py-2.5 px-1 rounded-xl border min-w-0 ${
+          grow ? "flex-1" : ""
+        } ${isDarkTheme ? "border-zinc-800 bg-zinc-900/60" : "border-zinc-200 bg-white"}`}>
+          <span className={`text-[10px] mb-1 truncate w-full text-center px-0.5 ${isDarkTheme ? "text-zinc-600" : "text-zinc-500"}`}>{label}</span>
+          <span className={`text-sm font-black leading-none tabular-nums ${isDarkTheme ? "text-zinc-600" : "text-zinc-400"}`}>--</span>
         </div>
       );
     }
@@ -4310,9 +4314,11 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
     })();
     if (isObviousResult) {
       return (
-        <div className={`relative flex flex-col items-center justify-center h-10 px-2 rounded-md text-xs ${grow ? "flex-1" : ""} bg-amber-900/20 border border-amber-600/30`}>
-          <span className="text-[10px] leading-none opacity-50">{label}</span>
-          <span className="font-bold text-[9px] leading-none text-amber-400 uppercase tracking-wider">Aposta Já</span>
+        <div className={`flex flex-col items-center py-2.5 px-1 rounded-xl border min-w-0 bg-amber-900/20 border-amber-600/40 ring-1 ring-amber-500/20 ${
+          grow ? "flex-1" : ""
+        }`}>
+          <span className="text-[10px] mb-0.5 truncate w-full text-center px-0.5 text-amber-400/70">{label}</span>
+          <span className="text-[9px] font-black leading-tight text-amber-400 uppercase tracking-widest">Aposta Já</span>
         </div>
       );
     }
@@ -4322,10 +4328,18 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
     return (
       <button
         {...makeTap(() => toggleBet(match, selection, odd, market, label))}
-        className={`relative flex flex-col items-center justify-center h-10 px-2 rounded-md transition-colors text-xs ${grow ? "flex-1" : ""} ${isSelected ? "bg-red-600 text-white" : "bg-zinc-800 hover:bg-zinc-700 text-zinc-300"} ${flashClass}`}
+        className={`flex flex-col items-center py-2.5 px-1 rounded-xl border transition-all min-w-0 ${
+          grow ? "flex-1" : ""
+        } ${
+          isSelected
+            ? "border-red-500 bg-red-600/15 ring-1 ring-red-400/30"
+            : isDarkTheme
+              ? "border-zinc-800 bg-zinc-900 hover:border-zinc-700 text-white"
+              : "border-zinc-200 bg-white hover:border-zinc-300 text-zinc-900"
+        } ${flashClass}`}
       >
-        <span className="text-[10px] leading-none opacity-70">{label}</span>
-        <span className="font-bold text-sm leading-none tabular-nums flex items-center gap-0.5">
+        <span className={`text-[10px] mb-1 truncate w-full text-center px-0.5 ${isDarkTheme ? "text-zinc-500" : "text-zinc-500"}`}>{label}</span>
+        <span className={`text-sm font-black leading-none tabular-nums flex items-center gap-0.5 ${isSelected ? "text-red-400" : isDarkTheme ? "text-white" : "text-zinc-900"}`}>
           {odd.toFixed(2)}
           {oddsUp   && <span className="text-green-400 text-[9px] font-black leading-none shrink-0">▲</span>}
           {oddsDown && <span className="text-red-400  text-[9px] font-black leading-none shrink-0">▼</span>}
@@ -4756,7 +4770,7 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
         {isPenShootout && !isLiveSuspended && (
           <div className="text-[9px] font-black uppercase tracking-widest text-yellow-400 text-center mt-2">🎯 Vencedor da Final</div>
         )}
-        <div className="flex gap-2 w-full mt-1.5">
+        <div className="flex gap-1.5 w-full mt-1.5">
           <SuspensionBanner match={match} />
           {!isLiveSuspended && isPenShootout ? (<>
             <OddsButton match={match} selection="pen-home" odd={match.markets!.penExtra!.winner.home} market="penaltis" label={homeName.split(" ").slice(-1)[0]!} grow />
@@ -4764,10 +4778,10 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
           </>) : !isLiveSuspended ? (
             isObviousLiveResult ? (
               <button
-                className="flex-1 flex flex-col items-center py-2.5 px-2 rounded-md text-xs bg-amber-900/20 border border-amber-600/30"
+                className="flex-1 flex flex-col items-center py-2.5 px-1 rounded-xl border bg-amber-900/20 border-amber-600/40 ring-1 ring-amber-500/20"
                 {...makeTap(() => setExpandedMatch(match))}
               >
-                <span className="font-bold text-[11px] text-amber-400 uppercase tracking-wider">Aposta Já</span>
+                <span className="text-[9px] font-black text-amber-400 uppercase tracking-widest leading-tight">Aposta Já</span>
               </button>
             ) : (<>
               <OddsButton match={match} selection="home" odd={match.odds.home} market="result" label="Casa" grow />
@@ -4814,7 +4828,7 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
               {isPenShootout && !isLiveSuspended && (
                 <div className="text-[9px] font-black uppercase tracking-widest text-yellow-400 text-center mb-1">🎯 Vencedor da Final</div>
               )}
-              <div className="flex gap-2 w-full">
+              <div className="flex gap-1.5 w-full">
                 <SuspensionBanner match={match} />
                 {!isLiveSuspended && isPenShootout ? (<>
                   <OddsButton match={match} selection="pen-home" odd={match.markets!.penExtra!.winner.home} market="penaltis" label={match.home.split(" ").slice(-1)[0]!} grow />
@@ -4822,10 +4836,10 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
                 </>) : !isLiveSuspended ? (
                   isObviousLiveResult ? (
                     <button
-                      className="flex-1 flex flex-col items-center py-2.5 px-2 rounded-md text-xs bg-amber-900/20 border border-amber-600/30"
+                      className="flex-1 flex flex-col items-center py-2.5 px-1 rounded-xl border bg-amber-900/20 border-amber-600/40 ring-1 ring-amber-500/20"
                       {...makeTap(() => setExpandedMatch(match))}
                     >
-                      <span className="font-bold text-[11px] text-amber-400 uppercase tracking-wider">Aposta Já</span>
+                      <span className="text-[9px] font-black text-amber-400 uppercase tracking-widest leading-tight">Aposta Já</span>
                     </button>
                   ) : (<>
                     <OddsButton match={match} selection="home" odd={match.odds.home} market="result" label="Casa" grow />
@@ -4875,7 +4889,7 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
     );
     const canShowOdds = !!(match.hasRealOdds || (match.odds.home > 0 && match.odds.away > 0));
     const OddsRow = () => canShowOdds ? (
-      <div className="flex gap-2 w-full">
+      <div className="flex gap-1.5 w-full">
         <SuspensionBanner match={match} />
         {!isSuspendedMatch && (<>
           <OddsButton match={match} selection="home" odd={match.odds.home} market="result" label={hasDraw ? "Casa" : homeName.split(" ").slice(-1)[0]} grow />
@@ -5586,9 +5600,11 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
     if (isSusp) {
       // Show a locked placeholder so section headers don't look empty
       return (
-        <div className="flex-1 flex flex-col items-center py-2.5 px-1 rounded-lg border border-zinc-800 bg-zinc-900/60 min-w-0 opacity-60 cursor-not-allowed select-none">
-          <span className="text-[10px] text-zinc-600 mb-1 leading-tight text-center truncate w-full px-0.5">{label}</span>
-          <svg className="text-zinc-600" width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zm-6 9c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2zm3.1-9H8.9V6c0-1.71 1.39-3.1 3.1-3.1 1.71 0 3.1 1.39 3.1 3.1v2z"/></svg>
+        <div className={`flex-1 flex flex-col items-center py-2.5 px-1 rounded-xl border min-w-0 opacity-60 cursor-not-allowed select-none ${
+          isDarkTheme ? "border-zinc-800 bg-zinc-900/60" : "border-zinc-200 bg-zinc-100"
+        }`}>
+          <span className={`text-[10px] mb-1 truncate w-full text-center px-0.5 ${isDarkTheme ? "text-zinc-600" : "text-zinc-500"}`}>{label}</span>
+          <svg className={`${isDarkTheme ? "text-zinc-600" : "text-zinc-400"}`} width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zm-6 9c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2zm3.1-9H8.9V6c0-1.71 1.39-3.1 3.1-3.1 1.71 0 3.1 1.39 3.1 3.1v2z"/></svg>
         </div>
       );
     }
@@ -5598,14 +5614,20 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
     const delta = prevOdd !== undefined ? odd - prevOdd : 0;
     const oddUp   = !active && delta >= ODDS_ANIM_THRESHOLD;
     const oddDown = !active && delta <= -ODDS_ANIM_THRESHOLD;
-    const flashClass = oddUp ? "odds-flash-up" : oddDown ? "odds-flash-down" : "";
+    const flashClass = "";
     return (
       <button
         {...makeTap(() => toggleBet(match, sel, odd, market, label))}
-        className={`flex-1 flex flex-col items-center py-2.5 px-1 rounded-lg border transition-all min-w-0 ${active ? "border-red-600 bg-red-600/15 ring-1 ring-red-500/40" : "border-zinc-800 bg-zinc-900/80 hover:border-red-500/40 hover:bg-zinc-800"} ${flashClass}`}
+        className={`flex-1 flex flex-col items-center py-2.5 px-1 rounded-xl border transition-all min-w-0 ${
+          active
+            ? "border-red-500 bg-red-600/15 ring-1 ring-red-400/30"
+            : isDarkTheme
+              ? "border-zinc-800 bg-zinc-900 hover:border-zinc-700"
+              : "border-zinc-200 bg-white hover:border-zinc-300"
+        } ${flashClass}`}
       >
-        <span className="text-[11px] text-zinc-400 mb-1 leading-tight text-center truncate w-full px-0.5">{label}</span>
-        <span className={`font-bold text-base tabular-nums flex items-center gap-0.5 ${active ? "text-red-400" : "text-white"}`}>
+        <span className={`text-[10px] mb-1 truncate w-full text-center px-0.5 ${isDarkTheme ? "text-zinc-500" : "text-zinc-500"}`}>{label}</span>
+        <span className={`text-sm font-black tabular-nums flex items-center gap-0.5 ${active ? "text-red-400" : isDarkTheme ? "text-white" : "text-zinc-900"}`}>
           {odd.toFixed(2)}
           {oddUp   && <span className="text-green-400 text-[9px] font-black leading-none shrink-0">▲</span>}
           {oddDown && <span className="text-red-400  text-[9px] font-black leading-none shrink-0">▼</span>}
@@ -5634,7 +5656,7 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
       return (
         <div className="mb-4 last:mb-0">
           <div className="text-[10px] font-black text-zinc-500 uppercase tracking-widest mb-2 px-0.5">{title}</div>
-          <div className="grid grid-cols-2 gap-2">{children}</div>
+          <div className="grid grid-cols-2 gap-1.5">{children}</div>
         </div>
       );
     }
@@ -5652,7 +5674,7 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
         </button>
         {open && (
           <div className="px-3 py-3">
-            <div className="grid grid-cols-2 gap-2">{children}</div>
+            <div className="grid grid-cols-2 gap-1.5">{children}</div>
           </div>
         )}
       </div>
@@ -5680,7 +5702,7 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
       return (
         <div className="mb-4 last:mb-0">
           <div className="text-[10px] font-black text-zinc-500 uppercase tracking-widest mb-2 px-0.5">{title}</div>
-          <div className="flex gap-2">{children}</div>
+          <div className="flex gap-1.5">{children}</div>
         </div>
       );
     }
@@ -5699,7 +5721,7 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
         </button>
         {open && (
           <div className="px-3 py-3">
-            <div className="flex flex-wrap gap-2">{children}</div>
+            <div className="flex flex-wrap gap-1.5">{children}</div>
           </div>
         )}
       </div>
