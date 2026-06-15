@@ -2661,8 +2661,11 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
     anytimeScorers: PlayerMarket[];
     firstScorers: PlayerMarket[];
     lastScorers: PlayerMarket[];
+    twoPlusGoals: PlayerMarket[];
+    hatTricks: PlayerMarket[];
     firstHalfScorers: PlayerMarket[];
     secondHalfScorers: PlayerMarket[];
+    assists: PlayerMarket[];
     scoreAndAssist: PlayerMarket[];
     bookings: PlayerMarket[];
   };
@@ -7518,9 +7521,12 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
                   <div className={`text-xs font-semibold uppercase tracking-wider px-1 mb-1.5 ${
                     selPrefix.startsWith("pm-first") ? "text-fuchsia-400" :
                     selPrefix.startsWith("pm-last")  ? "text-violet-400"  :
+                    selPrefix.startsWith("pm-2g")    ? "text-pink-400"    :
+                    selPrefix.startsWith("pm-hat")   ? "text-cyan-400"    :
                     selPrefix.startsWith("pm-gol")   ? "text-red-400"     :
                     selPrefix.startsWith("pm-fh")    ? "text-orange-400"  :
                     selPrefix.startsWith("pm-sh")    ? "text-amber-400"   :
+                    selPrefix.startsWith("pm-ast")   ? "text-sky-400"     :
                     selPrefix.startsWith("pm-sa")    ? "text-emerald-400" :
                     "text-yellow-500"
                   }`}>{label}</div>
@@ -7568,9 +7574,12 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
 
                   {pmList(team.firstScorers,       "pm-first","primeiro-marcador","🥇 Primeiro Marcador",            p => `${p.stat} gol(os) em ${p.appearances} jogos`)}
                   {pmList(team.lastScorers,        "pm-last", "ultimo-marcador",  "🏁 Último Marcador",             p => `${p.stat} gol(os) em ${p.appearances} jogos`)}
+                  {pmList(team.twoPlusGoals,       "pm-2g",   "2plus-golos-jogador","⚽⚽ Marcar 2+ Golos",         p => `${p.stat} gol(os) em ${p.appearances} jogos`)}
+                  {pmList(team.hatTricks,          "pm-hat",  "hat-trick-jogador", "🎩 Hat-trick",                  p => `${p.stat} gol(os) em ${p.appearances} jogos`)}
                   {pmList(team.anytimeScorers,    "pm-gol", "marcadores",      "⚽ Marcador (Qualquer Momento)",  p => `${p.stat} gol(os) em ${p.appearances} jogos`)}
                   {pmList(team.firstHalfScorers,  "pm-fh",  "marcador-1t",     "⚽ Marcador no 1.º Tempo",        p => `${p.stat} gol(os) em ${p.appearances} jogos`)}
                   {pmList(team.secondHalfScorers, "pm-sh",  "marcador-2t",     "⚽ Marcador no 2.º Tempo",        p => `${p.stat} gol(os) em ${p.appearances} jogos`)}
+                  {pmList(team.assists,           "pm-ast", "assist-jogador",  "🎯 Dar Assistência",              p => `${p.stat} assistência(s) em ${p.appearances} jogos`)}
                   {pmList(team.scoreAndAssist,    "pm-sa",  "marcar-assistir", "🎯 Marcar e Dar Assistência",     p => `${p.stat} vez(es) em ${p.appearances} jogos`)}
                   {pmList(team.bookings,          "pm-card","cartao-jogador",  "🟨🟥 Cartão (Amarelo ou Vermelho)", p => `${p.stat} cartão(ões) em ${p.appearances} jogos`)}
                 </div>
@@ -7581,7 +7590,7 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
                 <>
                   {playerMarkets.home && renderTeamSection(playerMarkets.home, true)}
                   {playerMarkets.away && renderTeamSection(playerMarkets.away, false)}
-                  <div className="text-center text-zinc-700 text-xs pt-1 pb-2">Odds do provider quando disponíveis; restantes mercados seguem a base estatística da época</div>
+                  <div className="text-center text-zinc-700 text-xs pt-1 pb-2">Odds do provider quando disponíveis; props sem feed direto continuam com apoio estatístico da época</div>
                 </>
               );
             })()}

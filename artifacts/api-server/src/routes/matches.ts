@@ -15525,8 +15525,11 @@ type TeamPlayerMarkets = {
   anytimeScorers: PlayerMarketEntry[];
   firstScorers: PlayerMarketEntry[];
   lastScorers: PlayerMarketEntry[];
+  twoPlusGoals: PlayerMarketEntry[];
+  hatTricks: PlayerMarketEntry[];
   firstHalfScorers: PlayerMarketEntry[];
   secondHalfScorers: PlayerMarketEntry[];
+  assists: PlayerMarketEntry[];
   scoreAndAssist: PlayerMarketEntry[];
   bookings: PlayerMarketEntry[];
 };
@@ -15535,6 +15538,9 @@ type ProviderPlayerOddsBucket = {
   anytime: Map<string, number>;
   first: Map<string, number>;
   last: Map<string, number>;
+  twoPlus: Map<string, number>;
+  hatTrick: Map<string, number>;
+  assist: Map<string, number>;
 };
 
 function playerOdds(stat: number, appearances: number): number {
@@ -15619,6 +15625,9 @@ function createProviderPlayerOddsBucket(): ProviderPlayerOddsBucket {
     anytime: new Map<string, number>(),
     first: new Map<string, number>(),
     last: new Map<string, number>(),
+    twoPlus: new Map<string, number>(),
+    hatTrick: new Map<string, number>(),
+    assist: new Map<string, number>(),
   };
 }
 
@@ -15673,6 +15682,30 @@ function scorerMarketBucket(rawMarketName: string): keyof ProviderPlayerOddsBuck
     market.includes("last scorer") ||
     market.includes("to score last")
   ) return "last";
+  if (
+    market.includes("score 2 goals") ||
+    market.includes("score 2 or more goals") ||
+    market.includes("score 2 or more") ||
+    market.includes("to score 2 or more goals") ||
+    market.includes("to score 2+") ||
+    market.includes("2+ goals") ||
+    market.includes("2 plus goals")
+  ) return "twoPlus";
+  if (
+    market.includes("hat trick") ||
+    market.includes("hattrick") ||
+    market.includes("to score a hat trick") ||
+    market.includes("to score 3 or more goals") ||
+    market.includes("3+ goals")
+  ) return "hatTrick";
+  if (
+    market.includes("to provide an assist") ||
+    market.includes("to provide assist") ||
+    market.includes("player assists") ||
+    market.includes("anytime assist") ||
+    market.includes("any time assist") ||
+    market.includes("to assist")
+  ) return "assist";
   return null;
 }
 
@@ -15730,8 +15763,11 @@ function buildTeamMarkets(team: FootballLeagueStatsTeam, providerOdds?: Provider
   const anytimeScorers:    PlayerMarketEntry[] = [];
   const firstScorers:      PlayerMarketEntry[] = [];
   const lastScorers:       PlayerMarketEntry[] = [];
+  const twoPlusGoals:      PlayerMarketEntry[] = [];
+  const hatTricks:         PlayerMarketEntry[] = [];
   const firstHalfScorers:  PlayerMarketEntry[] = [];
   const secondHalfScorers: PlayerMarketEntry[] = [];
+  const assists:           PlayerMarketEntry[] = [];
   const scoreAndAssist:    PlayerMarketEntry[] = [];
   const bookings:          PlayerMarketEntry[] = [];
 
@@ -15743,10 +15779,14 @@ function buildTeamMarkets(team: FootballLeagueStatsTeam, providerOdds?: Provider
     const anytimeOdds = providerOdds ? matchProviderOddForPlayer(providerOdds.anytime, p.name) : 0;
     const firstOdds = providerOdds ? matchProviderOddForPlayer(providerOdds.first, p.name) : 0;
     const lastOdds = providerOdds ? matchProviderOddForPlayer(providerOdds.last, p.name) : 0;
+    const twoPlusOdds = providerOdds ? matchProviderOddForPlayer(providerOdds.twoPlus, p.name) : 0;
+    const hatTrickOdds = providerOdds ? matchProviderOddForPlayer(providerOdds.hatTrick, p.name) : 0;
     const scoringBaseOdds = anytimeOdds > 0 ? anytimeOdds : derivedScorerOdds;
 
     if (firstOdds > 0) firstScorers.push({ ...base, stat: p.goals, odds: firstOdds });
     if (lastOdds > 0) lastScorers.push({ ...base, stat: p.goals, odds: lastOdds });
+    if (twoPlusOdds > 0) twoPlusGoals.push({ ...base, stat: p.goals, odds: twoPlusOdds });
+    if (hatTrickOdds > 0) hatTricks.push({ ...base, stat: p.goals, odds: hatTrickOdds });
 
     if (scoringBaseOdds > 0) {
       anytimeScorers.push({ ...base, stat: p.goals, odds: scoringBaseOdds });
@@ -15769,6 +15809,11 @@ function buildTeamMarkets(team: FootballLeagueStatsTeam, providerOdds?: Provider
       }
     }
 
+    const derivedAssistOdds = playerOdds(p.assists, p.appearances);
+    const assistOdds = providerOdds ? matchProviderOddForPlayer(providerOdds.assist, p.name) : 0;
+    const assistBaseOdds = assistOdds > 0 ? assistOdds : derivedAssistOdds;
+    if (assistBaseOdds > 0) assists.push({ ...base, stat: p.assists, odds: assistBaseOdds });
+
     // Booked: any card (yellow, yellow-red, or straight red)
     const cards = p.yellowCards + p.yellowRed + p.redCards;
     const bOdds = playerOdds(cards, p.appearances);
@@ -15778,8 +15823,11 @@ function buildTeamMarkets(team: FootballLeagueStatsTeam, providerOdds?: Provider
   anytimeScorers.sort(byOdds);
   firstScorers.sort(byOdds);
   lastScorers.sort(byOdds);
+  twoPlusGoals.sort(byOdds);
+  hatTricks.sort(byOdds);
   firstHalfScorers.sort(byOdds);
   secondHalfScorers.sort(byOdds);
+  assists.sort(byOdds);
   scoreAndAssist.sort(byOdds);
   bookings.sort(byOdds);
 
@@ -15789,8 +15837,11 @@ function buildTeamMarkets(team: FootballLeagueStatsTeam, providerOdds?: Provider
     anytimeScorers:    anytimeScorers.slice(0, 20),
     firstScorers:      firstScorers.slice(0, 15),
     lastScorers:       lastScorers.slice(0, 15),
+    twoPlusGoals:      twoPlusGoals.slice(0, 12),
+    hatTricks:         hatTricks.slice(0, 10),
     firstHalfScorers:  firstHalfScorers.slice(0, 15),
     secondHalfScorers: secondHalfScorers.slice(0, 15),
+    assists:           assists.slice(0, 15),
     scoreAndAssist:    scoreAndAssist.slice(0, 10),
     bookings:          bookings.slice(0, 15),
   };
