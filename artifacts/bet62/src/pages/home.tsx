@@ -2648,6 +2648,7 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
   const [allOddsData, setAllOddsData] = useState<AllOddsMarket[] | null>(null);
   const [allOddsLoading, setAllOddsLoading] = useState(false);
   const [allOddsSectionOpen, setAllOddsSectionOpen] = useState<Record<string, boolean>>({});
+  const [allOddsQuery, setAllOddsQuery] = useState("");
   const allOddsSections = useMemo(() => {
     if (!allOddsData || allOddsData.length === 0) return [];
 
@@ -2726,6 +2727,24 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
         })),
       }));
   }, [allOddsData]);
+  const filteredAllOddsSections = useMemo(() => {
+    const query = allOddsQuery.trim().toLowerCase();
+    if (!query) return allOddsSections;
+    return allOddsSections
+      .map(section => ({
+        ...section,
+        markets: section.markets.filter(({ market }) => {
+          const haystack = [
+            section.section,
+            market.group,
+            market.name,
+            ...market.choices.map(choice => choice.label),
+          ].join(" ").toLowerCase();
+          return haystack.includes(query);
+        }),
+      }))
+      .filter(section => section.markets.length > 0);
+  }, [allOddsQuery, allOddsSections]);
   useEffect(() => {
     if (allOddsSections.length === 0) return;
     setAllOddsSectionOpen(prev => {
@@ -10255,16 +10274,42 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
                       </div>
                     ) : (
                       <div className="space-y-4">
+                        <div className="relative">
+                          <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" size={15} />
+                          <Input
+                            value={allOddsQuery}
+                            onChange={(e) => setAllOddsQuery(e.target.value)}
+                            placeholder="Pesquisar mercados, grupos ou opções"
+                            className="pl-9 h-10 bg-zinc-950/70 border-zinc-800 text-zinc-100 placeholder:text-zinc-500"
+                          />
+                        </div>
                         <div className="flex flex-wrap items-center gap-2">
                           <div className="rounded-full border border-zinc-800 bg-zinc-950/70 px-2.5 py-1 text-[10px] font-black text-zinc-400">
-                            {allOddsSections.length} secções
+                            {filteredAllOddsSections.length} secções
                           </div>
                           <div className="rounded-full border border-zinc-800 bg-zinc-950/70 px-2.5 py-1 text-[10px] font-black text-zinc-400">
-                            {allOddsData.length} mercados
+                            {filteredAllOddsSections.reduce((acc, section) => acc + section.markets.length, 0)} mercados
                           </div>
+                          {allOddsQuery.trim() && (
+                            <button
+                              type="button"
+                              onClick={() => setAllOddsQuery("")}
+                              className="rounded-full border border-zinc-800 bg-zinc-950/70 px-2.5 py-1 text-[10px] font-black text-zinc-400 hover:text-white"
+                            >
+                              Limpar busca
+                            </button>
+                          )}
                         </div>
-                        {allOddsSections.map(section => {
-                          const isSectionOpen = allOddsSectionOpen[section.section] ?? ["Principal", "Golos", "Jogadores"].includes(section.section);
+                        {filteredAllOddsSections.length === 0 ? (
+                          <div className="text-center text-zinc-500 py-10">
+                            <div className="text-2xl mb-2">🔎</div>
+                            <div className="text-sm font-medium">Nenhum mercado encontrado</div>
+                            <div className="text-xs text-zinc-600 mt-1">Tenta outro nome de mercado, grupo ou opção</div>
+                          </div>
+                        ) : filteredAllOddsSections.map(section => {
+                          const isSectionOpen = allOddsQuery.trim()
+                            ? true
+                            : (allOddsSectionOpen[section.section] ?? ["Principal", "Golos", "Jogadores"].includes(section.section));
                           return (
                           <div key={section.section} className="space-y-3">
                             <button
