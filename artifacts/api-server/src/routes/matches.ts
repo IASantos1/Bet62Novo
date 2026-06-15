@@ -1912,28 +1912,20 @@ function capTennisLiveOddEvenOdds(
 
 function capTennisLiveScoreMap(
   scores: Record<string, number>,
-  homeExtended: boolean,
-  awayExtended: boolean,
+  _homeExtended: boolean,
+  _awayExtended: boolean,
 ): Record<string, number> {
   return Object.fromEntries(
-    Object.entries(scores).map(([label, odd]) => {
-      const [home, away] = label.split("-").map(Number);
-      const allowExtended = (home ?? 0) > (away ?? 0) ? homeExtended : awayExtended;
-      return [label, capTennisLiveOdd(odd, allowExtended)];
-    }),
+    Object.entries(scores).map(([label, odd]) => [label, clampTennisSetCorrectScoreOdd(odd)]),
   );
 }
 
 function capTennisLiveScoreList(
   scores: Array<{ label: string; odds: number }>,
-  homeExtended: boolean,
-  awayExtended: boolean,
+  _homeExtended: boolean,
+  _awayExtended: boolean,
 ): Array<{ label: string; odds: number }> {
-  return scores.map((entry) => {
-    const [home, away] = entry.label.split("-").map(Number);
-    const allowExtended = (home ?? 0) > (away ?? 0) ? homeExtended : awayExtended;
-    return { ...entry, odds: capTennisLiveOdd(entry.odds, allowExtended) };
-  });
+  return scores.map((entry) => ({ ...entry, odds: clampTennisSetCorrectScoreOdd(entry.odds) }));
 }
 
 function computeTennisLiveOdds(
