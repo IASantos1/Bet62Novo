@@ -6555,6 +6555,13 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
                 ];
 
     const m = match.markets;
+    const tennisExtra = isTennis ? ((m as any)?.tennisExtra as Record<string, any> | undefined) : undefined;
+    const hasTennisHandicapMarkets = !!(
+      tennisExtra?.setHandicap?.home > 0 ||
+      tennisExtra?.setHandicap?.away > 0 ||
+      tennisExtra?.gameHandicap?.home > 0 ||
+      tennisExtra?.gameHandicap?.away > 0
+    );
 
     // Show markets when hasRealOdds=true, OR when tennis has valid computed tennisExtra markets,
     // OR when the match has computed markets (V1-built football with doubleChance/totalGoals)
