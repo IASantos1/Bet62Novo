@@ -6159,11 +6159,9 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
     if (isSusp) {
       // Show a locked placeholder so section headers don't look empty
       return (
-        <div className={`flex-1 flex flex-col items-center justify-center min-w-0 h-[64px] rounded-xl border opacity-60 cursor-not-allowed select-none px-1 ${
-          isDarkTheme ? "border-zinc-800 bg-zinc-900/60" : "border-zinc-200 bg-zinc-100"
-        }`}>
-          <span className={`text-[10px] mb-1 truncate w-full text-center px-0.5 ${isDarkTheme ? "text-zinc-600" : "text-zinc-500"}`}>{label}</span>
-          <svg className={`${isDarkTheme ? "text-zinc-600" : "text-zinc-400"}`} width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zm-6 9c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2zm3.1-9H8.9V6c0-1.71 1.39-3.1 3.1-3.1 1.71 0 3.1 1.39 3.1 3.1v2z"/></svg>
+        <div className="flex-1 flex flex-col items-center justify-center min-w-0 h-[62px] px-0.5 rounded-[20px] border border-zinc-200 bg-white opacity-60 cursor-not-allowed select-none">
+          <span className="text-[10px] text-zinc-500 mb-0.5 leading-tight text-center truncate w-full px-0.5">{label}</span>
+          <svg className="text-zinc-400" width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zm-6 9c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2zm3.1-9H8.9V6c0-1.71 1.39-3.1 3.1-3.1 1.71 0 3.1 1.39 3.1 3.1v2z"/></svg>
         </div>
       );
     }
@@ -6177,14 +6175,10 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
     return (
       <button
         {...makeTap(() => toggleBet(match, sel, odd, market, label))}
-        className={`flex-1 flex flex-col items-center justify-center min-w-0 h-[64px] px-1 rounded-xl border transition-all ${
-          active
-            ? "border-red-500 bg-red-600/15 ring-1 ring-red-400/30"
-            : isDarkTheme ? "border-zinc-800 bg-zinc-900 hover:border-zinc-700" : "border-zinc-200 bg-white hover:border-zinc-300"
-        } ${flashClass}`}
+        className={`flex-1 flex flex-col items-center justify-center min-w-0 h-[62px] px-0.5 rounded-[20px] border transition-all ${active ? "border-red-300 bg-red-50 ring-1 ring-red-200" : "border-zinc-200 bg-white hover:border-zinc-300"} ${flashClass}`}
       >
-        <span className={`text-[10px] mb-1 truncate w-full text-center px-0.5 ${isDarkTheme ? "text-zinc-500" : "text-zinc-500"}`}>{label}</span>
-        <span className={`text-sm font-black tabular-nums flex items-center gap-0.5 ${active ? "text-red-400" : isDarkTheme ? "text-white" : "text-zinc-900"}`}>
+        <span className="text-[10px] text-zinc-500 mb-0.5 leading-tight text-center truncate w-full px-0.5">{label}</span>
+        <span className={`font-black text-[18px] leading-none tabular-nums flex items-center gap-0.5 ${active ? "text-red-500" : "text-zinc-900"}`}>
           {odd.toFixed(2)}
           {oddUp   && <span className="text-green-400 text-[9px] font-black leading-none shrink-0">▲</span>}
           {oddDown && <span className="text-red-400  text-[9px] font-black leading-none shrink-0">▼</span>}
@@ -6451,14 +6445,14 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
       <MarketTabCtx.Provider value={modalTab}>
       <MarketGroupOpenCtx.Provider value={{ matchId: String(match.id), getOpen: marketGroupOpenApi.getOpen, setOpen: marketGroupOpenApi.setOpen }}>
       <MarketGroupSeqCtx.Provider key={`mgrp:${match.id}:${modalTab}`} value={marketGroupSeqApi}>
-      <div className="mt-2">
-        <div ref={tabContainerRef} className="flex gap-1 overflow-x-auto no-scrollbar mb-4 pb-1 border-b border-zinc-800" style={{ scrollbarWidth: "none", touchAction: "pan-x pan-y", WebkitOverflowScrolling: "touch" } as React.CSSProperties}>
+      <div className="mt-0">
+        <div ref={tabContainerRef} className="flex gap-2 overflow-x-auto no-scrollbar mb-3 pb-1" style={{ scrollbarWidth: "none", touchAction: "pan-x pan-y", WebkitOverflowScrolling: "touch" } as React.CSSProperties}>
           {tabs.map(t => (
             <button
               key={t.key}
               data-tab={t.key}
               {...makeTap(() => { setModalTab(t.key); scrollTabIntoView(t.key); })}
-              className={`px-3 py-1.5 rounded-md text-xs font-bold whitespace-nowrap transition-colors flex-shrink-0 ${modalTab === t.key ? "bg-red-600 text-white" : "bg-zinc-800 text-zinc-400 hover:text-white"}`}
+              className={`px-4 py-2 rounded-[16px] text-[10px] font-black whitespace-nowrap transition-colors flex-shrink-0 border ${modalTab === t.key ? "bg-red-50 text-red-300 border-red-300" : "bg-zinc-100 text-zinc-500 border-zinc-200 hover:text-zinc-700"}`}
             >
               {t.label}
             </button>
@@ -10234,7 +10228,7 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
 
                 {/* Market tabs inline — only visible in markets view */}
                 {matchViewTab === "markets" && (
-                  <div className="bg-zinc-900 rounded-xl border border-zinc-800 p-4">
+                  <div className="px-4 pt-2 pb-4">
                     {renderMatchMarkets(expandedMatch)}
                   </div>
                 )}
