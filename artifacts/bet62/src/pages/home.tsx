@@ -7522,39 +7522,76 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
             )}
             {!playerMarketsLoading && playerMarkets && (playerMarkets.home || playerMarkets.away) && (() => {
               type PMRow = { id: string; name: string; stat: number; appearances: number; odds: number; line?: number };
-              const pmList = (rows: PMRow[], selPrefix: string, market: string, label: string, sublabel: (p: PMRow) => string) => rows.length === 0 ? null : (
-                <div className="mb-3">
-                  <div className={`text-xs font-semibold uppercase tracking-wider px-1 mb-1.5 ${
-                    selPrefix.startsWith("pm-first") ? "text-fuchsia-400" :
-                    selPrefix.startsWith("pm-last")  ? "text-violet-400"  :
-                    selPrefix.startsWith("pm-2g")    ? "text-pink-400"    :
-                    selPrefix.startsWith("pm-hat")   ? "text-cyan-400"    :
-                    selPrefix.startsWith("pm-noscore") ? "text-slate-300" :
-                    selPrefix.startsWith("pm-gol")   ? "text-red-400"     :
-                    selPrefix.startsWith("pm-fh")    ? "text-orange-400"  :
-                    selPrefix.startsWith("pm-sh")    ? "text-amber-400"   :
-                    selPrefix.startsWith("pm-ast")   ? "text-sky-400"     :
-                    selPrefix.startsWith("pm-shotot") ? "text-lime-400"   :
-                    selPrefix.startsWith("pm-shoton") ? "text-green-400"  :
-                    selPrefix.startsWith("pm-pass") ? "text-indigo-400"   :
-                    selPrefix.startsWith("pm-tkl")  ? "text-teal-400"     :
-                    selPrefix.startsWith("pm-sa")    ? "text-emerald-400" :
-                    selPrefix.startsWith("pm-red") ? "text-rose-400"      :
-                    "text-yellow-500"
-                  }`}>{label}</div>
-                  <div className="bg-zinc-900/60 rounded-lg overflow-hidden">
-                    {rows.map(p => (
-                      <div key={p.id} className="flex items-center justify-between py-2 px-2 border-b border-zinc-800/60 last:border-0">
-                        <div className="min-w-0 flex-1 mr-3">
-                          <div className="text-sm font-medium text-white truncate">{p.name}</div>
-                          <div className="text-xs text-zinc-500 mt-0.5">{sublabel(p)}</div>
+              const pmList = (rows: PMRow[], selPrefix: string, market: string, label: string, sublabel: (p: PMRow) => string) => {
+                if (rows.length === 0) return null;
+                const titleColor =
+                  selPrefix.startsWith("pm-first") ? "text-fuchsia-400" :
+                  selPrefix.startsWith("pm-last") ? "text-violet-400" :
+                  selPrefix.startsWith("pm-2g") ? "text-pink-400" :
+                  selPrefix.startsWith("pm-hat") ? "text-cyan-400" :
+                  selPrefix.startsWith("pm-noscore") ? "text-slate-300" :
+                  selPrefix.startsWith("pm-gol") ? "text-red-400" :
+                  selPrefix.startsWith("pm-fh") ? "text-orange-400" :
+                  selPrefix.startsWith("pm-sh") ? "text-amber-400" :
+                  selPrefix.startsWith("pm-ast") ? "text-sky-400" :
+                  selPrefix.startsWith("pm-shotot") ? "text-lime-400" :
+                  selPrefix.startsWith("pm-shoton") ? "text-green-400" :
+                  selPrefix.startsWith("pm-pass") ? "text-indigo-400" :
+                  selPrefix.startsWith("pm-tkl") ? "text-teal-400" :
+                  selPrefix.startsWith("pm-sa") ? "text-emerald-400" :
+                  selPrefix.startsWith("pm-red") ? "text-rose-400" :
+                  "text-yellow-500";
+                const hasLineMarkets = rows.some(r => r.line != null);
+
+                return (
+                  <div className="mb-3">
+                    <div className={`text-xs font-semibold uppercase tracking-wider px-1 mb-1.5 ${titleColor}`}>{label}</div>
+                    <div className="bg-zinc-900/60 rounded-lg overflow-hidden">
+                      {hasLineMarkets ? (() => {
+                        const grouped = new Map<string, PMRow[]>();
+                        for (const row of rows) {
+                          const existing = grouped.get(row.name) ?? [];
+                          existing.push(row);
+                          grouped.set(row.name, existing);
+                        }
+                        return Array.from(grouped.entries()).map(([playerName, playerRows]) => {
+                          const sortedRows = [...playerRows].sort((a, b) => (a.line ?? 0) - (b.line ?? 0));
+                          const lead = sortedRows[0]!;
+                          return (
+                            <div key={`${selPrefix}-${playerName}`} className="py-2 px-2 border-b border-zinc-800/60 last:border-0">
+                              <div className="min-w-0 mb-2">
+                                <div className="text-sm font-medium text-white truncate">{playerName}</div>
+                                <div className="text-xs text-zinc-500 mt-0.5">{sublabel(lead)}</div>
+                              </div>
+                              <div className="flex flex-wrap gap-2">
+                                {sortedRows.map(p => (
+                                  <div key={`${p.id}-${p.line ?? "na"}`} className="w-[92px]">
+                                    <MarketOddsBtn
+                                      match={match}
+                                      sel={`${selPrefix}-${p.id}-${p.line ?? "na"}`}
+                                      odd={p.odds}
+                                      market={market}
+                                      label={p.line != null ? `Mais de ${p.line}` : label}
+                                    />
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          );
+                        });
+                      })() : rows.map(p => (
+                        <div key={p.id} className="flex items-center justify-between py-2 px-2 border-b border-zinc-800/60 last:border-0">
+                          <div className="min-w-0 flex-1 mr-3">
+                            <div className="text-sm font-medium text-white truncate">{p.name}</div>
+                            <div className="text-xs text-zinc-500 mt-0.5">{sublabel(p)}</div>
+                          </div>
+                          <MarketOddsBtn match={match} sel={`${selPrefix}-${p.id}-${p.line ?? "na"}`} odd={p.odds} market={market} label={p.line != null ? `${p.name} — ${label} (Mais de ${p.line})` : `${p.name} — ${label}`} />
                         </div>
-                        <MarketOddsBtn match={match} sel={`${selPrefix}-${p.id}-${p.line ?? "na"}`} odd={p.odds} market={market} label={p.line != null ? `${p.name} — ${label} (Mais de ${p.line})` : `${p.name} — ${label}`} />
-                      </div>
-                    ))}
+                      ))}
+                    </div>
                   </div>
-                </div>
-              );
+                );
+              };
 
               const renderTeamSection = (team: TeamPlayerMarkets, isHome: boolean) => {
                 const fallbackTeamName = isHome ? match.home : match.away;

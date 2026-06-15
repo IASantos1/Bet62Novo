@@ -15746,16 +15746,16 @@ function addProviderPlayerLineChoice(
   });
 }
 
-function matchProviderLineForPlayer(
+function matchProviderLinesForPlayer(
   target: Array<{ name: string; line: number; odds: number }>,
   playerName: string,
-): { line: number; odds: number } | null {
-  if (target.length === 0) return null;
+) : Array<{ line: number; odds: number }> {
+  if (target.length === 0) return [];
   const aliases = playerNameAliases(playerName);
   const matches = target.filter((entry) =>
     aliases.some((alias) => entry.name === alias || entry.name.includes(alias) || alias.includes(entry.name)),
   );
-  if (matches.length === 0) return null;
+  if (matches.length === 0) return [];
   matches.sort((a, b) => {
     const aScore = Math.abs(a.odds - 1.85);
     const bScore = Math.abs(b.odds - 1.85);
@@ -15763,7 +15763,15 @@ function matchProviderLineForPlayer(
     if (a.line !== b.line) return a.line - b.line;
     return a.odds - b.odds;
   });
-  return { line: matches[0]!.line, odds: matches[0]!.odds };
+  const picked: Array<{ line: number; odds: number }> = [];
+  const seenLines = new Set<number>();
+  for (const match of matches) {
+    if (seenLines.has(match.line)) continue;
+    seenLines.add(match.line);
+    picked.push({ line: match.line, odds: match.odds });
+    if (picked.length >= 3) break;
+  }
+  return picked;
 }
 
 function scorerMarketBucket(rawMarketName: string): keyof ProviderPlayerOddsBucket | null {
@@ -15970,47 +15978,55 @@ function buildTeamMarkets(team: FootballLeagueStatsTeam, providerOdds?: Provider
     const assistBaseOdds = assistOdds > 0 ? assistOdds : derivedAssistOdds;
     if (assistBaseOdds > 0) assists.push({ ...base, stat: p.assists, odds: assistBaseOdds });
 
-    const providerShots = providerOdds ? matchProviderLineForPlayer(providerOdds.shots, p.name) : null;
-    if (providerShots) {
-      shots.push({ ...base, stat: p.shotsTotal, odds: providerShots.odds, line: providerShots.line });
+    const providerShots = providerOdds ? matchProviderLinesForPlayer(providerOdds.shots, p.name) : [];
+    if (providerShots.length > 0) {
+      for (const item of providerShots) {
+        shots.push({ ...base, id: `${p.id}:shots:${item.line}`, stat: p.shotsTotal, odds: item.odds, line: item.line });
+      }
     } else {
       const shotLine = pickPlayerStatLine(p.shotsTotal / Math.max(1, p.appearances), [0.5, 1.5, 2.5, 3.5, 4.5]);
       if (shotLine != null) {
         const shotOdds = playerLineOdds(p.shotsTotal, p.appearances, shotLine);
-        if (shotOdds > 0) shots.push({ ...base, stat: p.shotsTotal, odds: shotOdds, line: shotLine });
+        if (shotOdds > 0) shots.push({ ...base, id: `${p.id}:shots:${shotLine}`, stat: p.shotsTotal, odds: shotOdds, line: shotLine });
       }
     }
 
-    const providerShotsOnTarget = providerOdds ? matchProviderLineForPlayer(providerOdds.shotsOnTarget, p.name) : null;
-    if (providerShotsOnTarget) {
-      shotsOnTarget.push({ ...base, stat: p.shotsOn, odds: providerShotsOnTarget.odds, line: providerShotsOnTarget.line });
+    const providerShotsOnTarget = providerOdds ? matchProviderLinesForPlayer(providerOdds.shotsOnTarget, p.name) : [];
+    if (providerShotsOnTarget.length > 0) {
+      for (const item of providerShotsOnTarget) {
+        shotsOnTarget.push({ ...base, id: `${p.id}:sot:${item.line}`, stat: p.shotsOn, odds: item.odds, line: item.line });
+      }
     } else {
       const shotOnTargetLine = pickPlayerStatLine(p.shotsOn / Math.max(1, p.appearances), [0.5, 1.5, 2.5]);
       if (shotOnTargetLine != null) {
         const shotOnTargetOdds = playerLineOdds(p.shotsOn, p.appearances, shotOnTargetLine);
-        if (shotOnTargetOdds > 0) shotsOnTarget.push({ ...base, stat: p.shotsOn, odds: shotOnTargetOdds, line: shotOnTargetLine });
+        if (shotOnTargetOdds > 0) shotsOnTarget.push({ ...base, id: `${p.id}:sot:${shotOnTargetLine}`, stat: p.shotsOn, odds: shotOnTargetOdds, line: shotOnTargetLine });
       }
     }
 
-    const providerPasses = providerOdds ? matchProviderLineForPlayer(providerOdds.passes, p.name) : null;
-    if (providerPasses) {
-      passes.push({ ...base, stat: p.passAttempts, odds: providerPasses.odds, line: providerPasses.line });
+    const providerPasses = providerOdds ? matchProviderLinesForPlayer(providerOdds.passes, p.name) : [];
+    if (providerPasses.length > 0) {
+      for (const item of providerPasses) {
+        passes.push({ ...base, id: `${p.id}:passes:${item.line}`, stat: p.passAttempts, odds: item.odds, line: item.line });
+      }
     } else {
       const passesLine = pickPlayerStatLine(p.passAttempts / Math.max(1, p.appearances), [9.5, 19.5, 29.5, 39.5, 49.5, 59.5, 69.5]);
       if (passesLine != null) {
         const passesOdds = playerLineOdds(p.passAttempts, p.appearances, passesLine);
-        if (passesOdds > 0) passes.push({ ...base, stat: p.passAttempts, odds: passesOdds, line: passesLine });
+        if (passesOdds > 0) passes.push({ ...base, id: `${p.id}:passes:${passesLine}`, stat: p.passAttempts, odds: passesOdds, line: passesLine });
       }
     }
 
-    const providerTackles = providerOdds ? matchProviderLineForPlayer(providerOdds.tackles, p.name) : null;
-    if (providerTackles) {
-      tackles.push({ ...base, stat: p.tackles, odds: providerTackles.odds, line: providerTackles.line });
+    const providerTackles = providerOdds ? matchProviderLinesForPlayer(providerOdds.tackles, p.name) : [];
+    if (providerTackles.length > 0) {
+      for (const item of providerTackles) {
+        tackles.push({ ...base, id: `${p.id}:tackles:${item.line}`, stat: p.tackles, odds: item.odds, line: item.line });
+      }
     } else {
       const tacklesLine = pickPlayerStatLine(p.tackles / Math.max(1, p.appearances), [0.5, 1.5, 2.5, 3.5, 4.5]);
       if (tacklesLine != null) {
         const tacklesOdds = playerLineOdds(p.tackles, p.appearances, tacklesLine);
-        if (tacklesOdds > 0) tackles.push({ ...base, stat: p.tackles, odds: tacklesOdds, line: tacklesLine });
+        if (tacklesOdds > 0) tackles.push({ ...base, id: `${p.id}:tackles:${tacklesLine}`, stat: p.tackles, odds: tacklesOdds, line: tacklesLine });
       }
     }
 
