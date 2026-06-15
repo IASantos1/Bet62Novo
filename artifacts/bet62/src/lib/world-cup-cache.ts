@@ -3,7 +3,7 @@ export type WCRawSnapshot = {
   matches: Record<string, unknown>[];
 };
 
-export const WC2026_CLIENT_CACHE_KEY = "wc2026_page_snapshot_v1";
+export const WC2026_CLIENT_CACHE_KEY = "wc2026_page_snapshot_v2";
 export const WC2026_CLIENT_CACHE_MAX_AGE_MS = 2 * 60_000;
 
 export function readWCClientSnapshotRaw(): WCRawSnapshot | null {
