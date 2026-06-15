@@ -2648,6 +2648,36 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
   const getProviderMatchId = useCallback((matchId: string | number | undefined | null): string => {
     return String(matchId ?? "").replace(/^[a-z]+-v\d+-/, "");
   }, []);
+  const sanitizeAllOddsMarkets = useCallback((rawMarkets: unknown): AllOddsMarket[] => {
+    if (!Array.isArray(rawMarkets)) return [];
+    return rawMarkets
+      .map((market): AllOddsMarket | null => {
+        if (!market || typeof market !== "object") return null;
+        const rawMarket = market as Record<string, unknown>;
+        const choices = Array.isArray(rawMarket.choices)
+          ? rawMarket.choices
+              .map((choice) => {
+                if (!choice || typeof choice !== "object") return null;
+                const rawChoice = choice as Record<string, unknown>;
+                const odds = typeof rawChoice.odds === "number" ? rawChoice.odds : Number(rawChoice.odds);
+                if (!Number.isFinite(odds) || odds < 1.01) return null;
+                return {
+                  name: String(rawChoice.name ?? "").trim(),
+                  label: String(rawChoice.label ?? rawChoice.name ?? "").trim() || "Opção",
+                  odds,
+                };
+              })
+              .filter((choice): choice is { name: string; label: string; odds: number } => !!choice)
+          : [];
+        if (choices.length === 0) return null;
+        return {
+          name: String(rawMarket.name ?? "").trim() || "Mercado",
+          group: String(rawMarket.group ?? "").trim(),
+          choices,
+        };
+      })
+      .filter((market): market is AllOddsMarket => !!market);
+  }, []);
   const [allOddsData, setAllOddsData] = useState<AllOddsMarket[] | null>(null);
   const [allOddsLoading, setAllOddsLoading] = useState(false);
   const [allOddsSectionOpen, setAllOddsSectionOpen] = useState<Record<string, boolean>>({});
@@ -3533,17 +3563,27 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
   // Fetch all V2 odds markets (kept for future use / "odds" tab)
   useEffect(() => {
     if (matchViewTab !== "odds" || !expandedMatch) return;
-    if (allOddsData !== null) return;
     setAllOddsData(null);
     setAllOddsLoading(true);
+    setAllOddsQuery("");
+    setAllOddsSectionOpen({});
+    const ctrl = new AbortController();
     const rawId = getProviderMatchId(expandedMatch.id);
     const sport = expandedMatch.sport ?? "football";
-    fetch(`/api/matches/v2-match-odds?sport=${sport}&matchId=${rawId}`)
+    fetch(`/api/matches/v2-match-odds?sport=${sport}&matchId=${rawId}`, { signal: ctrl.signal })
       .then(r => r.ok ? r.json() : { markets: [] })
-      .then(d => setAllOddsData((d as { markets: AllOddsMarket[] }).markets ?? []))
-      .catch(() => setAllOddsData([]))
-      .finally(() => setAllOddsLoading(false));
-  }, [matchViewTab, expandedMatch?.id, getProviderMatchId]); // eslint-disable-line react-hooks/exhaustive-deps
+      .then(d => {
+        if (ctrl.signal.aborted) return;
+        setAllOddsData(sanitizeAllOddsMarkets((d as { markets?: unknown }).markets));
+      })
+      .catch(() => {
+        if (!ctrl.signal.aborted) setAllOddsData([]);
+      })
+      .finally(() => {
+        if (!ctrl.signal.aborted) setAllOddsLoading(false);
+      });
+    return () => ctrl.abort();
+  }, [matchViewTab, expandedMatch?.id, getProviderMatchId, sanitizeAllOddsMarkets]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Fetch lineups when "lineups" tab is selected
   useEffect(() => {
