@@ -2655,7 +2655,7 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
   const [confrontosLoading, setConfrontosLoading] = useState(false);
 
   // Player markets (football "Jogadores" tab) — per-match, filtered to the two match teams
-  type PlayerMarket = { id: string; name: string; team: string; teamId: string; appearances: number; stat: number; odds: number; line?: number };
+  type PlayerMarket = { id: string; name: string; team: string; teamId: string; appearances: number; stat: number; odds: number; line?: number; side?: "over" | "under" };
   type TeamPlayerMarkets = {
     teamName: string; teamId: string;
     anytimeScorers: PlayerMarket[];
@@ -2667,12 +2667,14 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
     firstHalfScorers: PlayerMarket[];
     secondHalfScorers: PlayerMarket[];
     assists: PlayerMarket[];
+    assistLines: PlayerMarket[];
     shots: PlayerMarket[];
     shotsOnTarget: PlayerMarket[];
     passes: PlayerMarket[];
     tackles: PlayerMarket[];
     scoreAndAssist: PlayerMarket[];
     bookings: PlayerMarket[];
+    bookingLines: PlayerMarket[];
     redCards: PlayerMarket[];
   };
   type PlayerMarketsData = { leagueName: string; country: string; home: TeamPlayerMarkets | null; away: TeamPlayerMarkets | null };
@@ -7635,12 +7637,14 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
                   {pmList(team.firstHalfScorers,  "pm-fh",  "marcador-1t",     "⚽ Marcador no 1.º Tempo",        p => `${p.stat} gol(os) em ${p.appearances} jogos`)}
                   {pmList(team.secondHalfScorers, "pm-sh",  "marcador-2t",     "⚽ Marcador no 2.º Tempo",        p => `${p.stat} gol(os) em ${p.appearances} jogos`)}
                   {pmList(team.assists,           "pm-ast", "assist-jogador",  "🎯 Dar Assistência",              p => `${p.stat} assistência(s) em ${p.appearances} jogos`)}
+                  {pmList(team.assistLines,       "pm-ast", "assistencias-jogador-ou", "🎯 Assistências O/U",      p => `${(p.stat / Math.max(1, p.appearances)).toFixed(1)} por jogo · linha ${p.line}`)}
                   {pmList(team.shots,             "pm-shotot","remates-jogador","🎯 Remates",                      p => `${(p.stat / Math.max(1, p.appearances)).toFixed(1)} por jogo · linha ${p.line}`)}
                   {pmList(team.shotsOnTarget,     "pm-shoton","remates-baliza-jogador","🥅 Remates à Baliza",     p => `${(p.stat / Math.max(1, p.appearances)).toFixed(1)} por jogo · linha ${p.line}`)}
                   {pmList(team.passes,            "pm-pass","passes-jogador",  "🧠 Passes",                        p => `${(p.stat / Math.max(1, p.appearances)).toFixed(1)} por jogo · linha ${p.line}`)}
                   {pmList(team.tackles,           "pm-tkl", "desarmes-jogador","🛡️ Desarmes",                      p => `${(p.stat / Math.max(1, p.appearances)).toFixed(1)} por jogo · linha ${p.line}`)}
                   {pmList(team.scoreAndAssist,    "pm-sa",  "marcar-assistir", "🎯 Marcar e Dar Assistência",     p => `${p.stat} vez(es) em ${p.appearances} jogos`)}
                   {pmList(team.bookings,          "pm-card","cartao-jogador",  "🟨🟥 Cartão (Amarelo ou Vermelho)", p => `${p.stat} cartão(ões) em ${p.appearances} jogos`)}
+                  {pmList(team.bookingLines,      "pm-card","cartoes-jogador-ou","🟨 Cartões O/U",                p => `${(p.stat / Math.max(1, p.appearances)).toFixed(1)} por jogo · linha ${p.line}`)}
                   {pmList(team.redCards,          "pm-red", "cartao-vermelho-jogador","🟥 Cartão Vermelho",        p => `${p.stat} expulsão(ões) em ${p.appearances} jogos`)}
                 </div>
                 );

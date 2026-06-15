@@ -15533,12 +15533,14 @@ type TeamPlayerMarkets = {
   firstHalfScorers: PlayerMarketEntry[];
   secondHalfScorers: PlayerMarketEntry[];
   assists: PlayerMarketEntry[];
+  assistLines: PlayerMarketEntry[];
   shots: PlayerMarketEntry[];
   shotsOnTarget: PlayerMarketEntry[];
   passes: PlayerMarketEntry[];
   tackles: PlayerMarketEntry[];
   scoreAndAssist: PlayerMarketEntry[];
   bookings: PlayerMarketEntry[];
+  bookingLines: PlayerMarketEntry[];
   redCards: PlayerMarketEntry[];
 };
 
@@ -15551,10 +15553,12 @@ type ProviderPlayerOddsBucket = {
   notScore: Map<string, number>;
   assist: Map<string, number>;
   redCard: Map<string, number>;
+  assistLines: Array<{ name: string; line: number; odds: number; side: "over" | "under" }>;
   shots: Array<{ name: string; line: number; odds: number; side: "over" | "under" }>;
   shotsOnTarget: Array<{ name: string; line: number; odds: number; side: "over" | "under" }>;
   passes: Array<{ name: string; line: number; odds: number; side: "over" | "under" }>;
   tackles: Array<{ name: string; line: number; odds: number; side: "over" | "under" }>;
+  bookingLines: Array<{ name: string; line: number; odds: number; side: "over" | "under" }>;
 };
 
 function playerOdds(stat: number, appearances: number): number {
@@ -15678,10 +15682,12 @@ function createProviderPlayerOddsBucket(): ProviderPlayerOddsBucket {
     notScore: new Map<string, number>(),
     assist: new Map<string, number>(),
     redCard: new Map<string, number>(),
+    assistLines: [],
     shots: [],
     shotsOnTarget: [],
     passes: [],
     tackles: [],
+    bookingLines: [],
   };
 }
 
@@ -15789,10 +15795,43 @@ function extractPlayerNameFromLineMarketTitle(rawMarketName: string, marketKey: 
   return normalized;
 }
 
+function extractPlayerNameFromExtendedLineMarketTitle(
+  rawMarketName: string,
+  marketKey: "shots" | "shotsOnTarget" | "passes" | "tackles" | "assistLines" | "bookingLines",
+): string {
+  if (marketKey === "assistLines") {
+    const raw = String(rawMarketName ?? "").replace(/\b\d+(?:\.\d+)?\b/g, " ").replace(/[()[\]{}|:/\\]+/g, " ").replace(/\s+/g, " ").trim();
+    const patterns = [
+      /\bplayer\s+assists?\s+(.+)$/i,
+      /\bassist[eê]ncias?\s+(.+)$/i,
+      /^(.+?)\s+(?:player\s+assists?|assist[eê]ncias?)$/i,
+    ];
+    for (const pattern of patterns) {
+      const hit = raw.match(pattern)?.[1]?.trim();
+      if (hit) return hit;
+    }
+    return raw;
+  }
+  if (marketKey === "bookingLines") {
+    const raw = String(rawMarketName ?? "").replace(/\b\d+(?:\.\d+)?\b/g, " ").replace(/[()[\]{}|:/\\]+/g, " ").replace(/\s+/g, " ").trim();
+    const patterns = [
+      /\bplayer\s+(?:bookings?|cards?|yellow cards?)\s+(.+)$/i,
+      /\b(?:cart[oõ]es?|amarelos?)\s+(.+)$/i,
+      /^(.+?)\s+(?:bookings?|cards?|yellow cards?|cart[oõ]es?|amarelos?)$/i,
+    ];
+    for (const pattern of patterns) {
+      const hit = raw.match(pattern)?.[1]?.trim();
+      if (hit) return hit;
+    }
+    return raw;
+  }
+  return extractPlayerNameFromLineMarketTitle(rawMarketName, marketKey);
+}
+
 function addProviderPlayerLineChoice(
   target: Array<{ name: string; line: number; odds: number; side: "over" | "under" }>,
   rawMarketName: string,
-  marketKey: "shots" | "shotsOnTarget" | "passes" | "tackles",
+  marketKey: "shots" | "shotsOnTarget" | "passes" | "tackles" | "assistLines" | "bookingLines",
   rawChoiceName: string,
   line: number | null,
   odds: number,
@@ -15801,7 +15840,7 @@ function addProviderPlayerLineChoice(
   const side = parseProviderLineSide(rawChoiceName) ?? parseProviderLineSide(rawMarketName);
   if (!side) return;
   const cleanName = normalizeProviderPlayerChoiceName(rawChoiceName);
-  const fallbackName = extractPlayerNameFromLineMarketTitle(rawMarketName, marketKey);
+  const fallbackName = extractPlayerNameFromExtendedLineMarketTitle(rawMarketName, marketKey);
   const candidateName = cleanName || fallbackName;
   if (!isProviderPlayerChoiceName(candidateName)) return;
   target.push({
@@ -15915,7 +15954,17 @@ function scorerMarketBucket(rawMarketName: string): keyof ProviderPlayerOddsBuck
     market.includes("anytime assist") ||
     market.includes("any time assist") ||
     market.includes("to assist")
-  ) return "assist";
+  ) return parseProviderLineValue(rawMarketName) != null ? "assistLines" : "assist";
+  if (
+    market.includes("player bookings") ||
+    market.includes("player cards") ||
+    market.includes("yellow cards") ||
+    market.includes("bookings") ||
+    market.includes("to be booked") ||
+    market.includes("cartoes") ||
+    market.includes("cartoes amarelos") ||
+    market.includes("cartao")
+  ) return parseProviderLineValue(rawMarketName) != null ? "bookingLines" : null;
   if (
     market.includes("to be sent off") ||
     market.includes("player red card") ||
@@ -15979,7 +16028,7 @@ async function getFootballProviderPlayerOdds(matchId: string): Promise<ProviderP
       for (const choice of market.choices ?? []) {
         const choiceName = String(choice.name ?? "");
         const odds = fractionalToDecimal(choice.fractionalValue ?? "");
-        if (key === "shots" || key === "shotsOnTarget" || key === "passes" || key === "tackles") {
+        if (key === "assistLines" || key === "bookingLines" || key === "shots" || key === "shotsOnTarget" || key === "passes" || key === "tackles") {
           addProviderPlayerLineChoice(bucket[key], market.marketName ?? "", key, choiceName, line ?? parseProviderLineValue(choiceName), odds);
         } else {
           addProviderPlayerChoice(bucket[key], choiceName, odds);
@@ -16005,12 +16054,14 @@ function buildTeamMarkets(team: FootballLeagueStatsTeam, providerOdds?: Provider
   const firstHalfScorers:  PlayerMarketEntry[] = [];
   const secondHalfScorers: PlayerMarketEntry[] = [];
   const assists:           PlayerMarketEntry[] = [];
+  const assistLines:       PlayerMarketEntry[] = [];
   const shots:             PlayerMarketEntry[] = [];
   const shotsOnTarget:     PlayerMarketEntry[] = [];
   const passes:            PlayerMarketEntry[] = [];
   const tackles:           PlayerMarketEntry[] = [];
   const scoreAndAssist:    PlayerMarketEntry[] = [];
   const bookings:          PlayerMarketEntry[] = [];
+  const bookingLines:      PlayerMarketEntry[] = [];
   const redCards:          PlayerMarketEntry[] = [];
 
   for (const p of team.players) {
@@ -16065,6 +16116,14 @@ function buildTeamMarkets(team: FootballLeagueStatsTeam, providerOdds?: Provider
     const assistOdds = providerOdds ? matchProviderOddForPlayer(providerOdds.assist, p.name) : 0;
     const assistBaseOdds = assistOdds > 0 ? assistOdds : derivedAssistOdds;
     if (assistBaseOdds > 0) assists.push({ ...base, stat: p.assists, odds: assistBaseOdds });
+
+    const providerAssistLines = providerOdds ? matchProviderLinesForPlayer(providerOdds.assistLines, p.name) : [];
+    if (providerAssistLines.length > 0) {
+      for (const item of providerAssistLines) {
+        if (item.over) assistLines.push({ ...base, id: `${p.id}:assists:${item.line}:over`, stat: p.assists, odds: item.over, line: item.line, side: "over" });
+        if (item.under) assistLines.push({ ...base, id: `${p.id}:assists:${item.line}:under`, stat: p.assists, odds: item.under, line: item.line, side: "under" });
+      }
+    }
 
     const providerShots = providerOdds ? matchProviderLinesForPlayer(providerOdds.shots, p.name) : [];
     if (providerShots.length > 0) {
@@ -16127,6 +16186,14 @@ function buildTeamMarkets(team: FootballLeagueStatsTeam, providerOdds?: Provider
     const bOdds = playerOdds(cards, p.appearances);
     if (bOdds > 0) bookings.push({ ...base, stat: cards, odds: bOdds });
 
+    const providerBookingLines = providerOdds ? matchProviderLinesForPlayer(providerOdds.bookingLines, p.name) : [];
+    if (providerBookingLines.length > 0) {
+      for (const item of providerBookingLines) {
+        if (item.over) bookingLines.push({ ...base, id: `${p.id}:bookings:${item.line}:over`, stat: cards, odds: item.over, line: item.line, side: "over" });
+        if (item.under) bookingLines.push({ ...base, id: `${p.id}:bookings:${item.line}:under`, stat: cards, odds: item.under, line: item.line, side: "under" });
+      }
+    }
+
     const dismissals = p.redCards + p.yellowRed;
     const sentOffOdds = providerOdds ? matchProviderOddForPlayer(providerOdds.redCard, p.name) : 0;
     if (sentOffOdds > 0) {
@@ -16146,12 +16213,14 @@ function buildTeamMarkets(team: FootballLeagueStatsTeam, providerOdds?: Provider
   firstHalfScorers.sort(byOdds);
   secondHalfScorers.sort(byOdds);
   assists.sort(byOdds);
+  assistLines.sort(byOdds);
   shots.sort(byOdds);
   shotsOnTarget.sort(byOdds);
   passes.sort(byOdds);
   tackles.sort(byOdds);
   scoreAndAssist.sort(byOdds);
   bookings.sort(byOdds);
+  bookingLines.sort(byOdds);
   redCards.sort(byOdds);
 
   return {
@@ -16166,12 +16235,14 @@ function buildTeamMarkets(team: FootballLeagueStatsTeam, providerOdds?: Provider
     firstHalfScorers:  firstHalfScorers.slice(0, 15),
     secondHalfScorers: secondHalfScorers.slice(0, 15),
     assists:           assists.slice(0, 15),
+    assistLines:       assistLines.slice(0, 18),
     shots:             shots.slice(0, 15),
     shotsOnTarget:     shotsOnTarget.slice(0, 15),
     passes:            passes.slice(0, 15),
     tackles:           tackles.slice(0, 15),
     scoreAndAssist:    scoreAndAssist.slice(0, 10),
     bookings:          bookings.slice(0, 15),
+    bookingLines:      bookingLines.slice(0, 18),
     redCards:          redCards.slice(0, 10),
   };
 }
