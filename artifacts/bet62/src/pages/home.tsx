@@ -1521,6 +1521,7 @@ type StoredSelection = {
   finalScore?: { home: number; away: number };
   htScore?: { htHome: number; htAway: number };
   outcome?: "won" | "lost" | "void" | null;
+  settlementNote?: string;
 };
 
 type OpenBetSelectionState = {
@@ -12228,6 +12229,11 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
                                       {fs && (
                                         <div className={`text-[11px] mt-1 font-semibold ${txtSub}`}>
                                           Resultado: {fs.home} - {fs.away}
+                                        </div>
+                                      )}
+                                      {sel.settlementNote && (
+                                        <div className="mt-1.5 inline-flex max-w-full rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-[10px] font-bold leading-snug text-amber-700">
+                                          {sel.settlementNote}
                                         </div>
                                       )}
                                     </div>

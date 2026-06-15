@@ -20,7 +20,23 @@ export type SelectionRecord = {
   finalScore?: { home: number; away: number };
   htScore?: { htHome: number; htAway: number };
   outcome?: "won" | "lost" | "void" | null;
+  settlementNote?: string;
 };
+
+const IMMEDIATE_VOID_STATUSES = new Set(["Cancelled", "Cancl.", "Abandoned", "Abd"]);
+const DELAYED_VOID_STATUSES = new Set(["Postponed", "Postp.", "Delayed", "Susp", "Susp.", "Interrupted"]);
+
+function getSelectionSettlementNote(status: string | undefined, outcome: "won" | "lost" | "void" | null): string | undefined {
+  if (outcome !== "void" || !status) return undefined;
+  if (IMMEDIATE_VOID_STATUSES.has(status)) {
+    if (status === "Abandoned" || status === "Abd") return "Evento abandonado. Esta seleção foi anulada e ficou com odd 1.00.";
+    return "Evento cancelado. Esta seleção foi anulada e ficou com odd 1.00.";
+  }
+  if (DELAYED_VOID_STATUSES.has(status)) {
+    return "Evento adiado/suspenso. Esta seleção foi anulada e ficou com odd 1.00.";
+  }
+  return undefined;
+}
 
 function computeEffectiveOdds(
   selections: SelectionRecord[],
@@ -239,9 +255,6 @@ export function scoreOutcomeForSel(
   extra?: { status?: string; cornersTotal?: number; cardsTotal?: number; firstGoal?: "home" | "away" | "none"; extras?: unknown; finishedAt?: number }
 ): "won" | "lost" | "void" | null {
   // ── Handle Postponed / Cancelled / Void statuses ──────────────────────────
-  const IMMEDIATE_VOID_STATUSES = new Set(["Cancelled", "Cancl.", "Abandoned", "Abd"]);
-  const DELAYED_VOID_STATUSES = new Set(["Postponed", "Postp.", "Delayed", "Susp", "Susp.", "Interrupted"]);
-
   if (extra?.status) {
     if (IMMEDIATE_VOID_STATUSES.has(extra.status)) {
       return "void";
@@ -1584,19 +1597,23 @@ export async function autoSettlePendingBets(opts?: { matchIds?: string[] }): Pro
             extras: result.extras,
             finishedAt: result.finishedAt,
           });
+          const settlementNote = getSelectionSettlementNote((result as any).status, outcome);
           outcomes.push(outcome);
           const needsOutcome = sel.outcome == null && outcome != null;
           const needsScore = sel.finalScore == null;
           const needsHT = sel.htScore == null && ht != null;
           if (needsOutcome || needsScore || needsHT) anySelectionUpdated = true;
-
+          const needsSettlementNote = sel.settlementNote !== settlementNote;
+          if (needsOutcome || needsScore || needsHT || needsSettlementNote) anySelectionUpdated = true;
           return {
             ...sel,
             ...(needsScore ? { finalScore: { home: result.home, away: result.away } } : {}),
             ...(needsHT && ht ? { htScore: ht } : {}),
             ...(needsOutcome ? { outcome } : {}),
           };
+            ...(needsSettlementNote ? { settlementNote } : {}),
         });
+
 
         const effectiveOdds = computeEffectiveOdds(selections, outcomes);
         const pendingOddsStr = Number(effectiveOdds.toFixed(2)).toFixed(2);
@@ -1805,6 +1822,7 @@ export async function regradeSettledBetsForMatch(matchId: string, jobId: string)
             extras: result.extras,
             finishedAt: result.finishedAt,
           });
+          const settlementNote = getSelectionSettlementNote((result as any).status, outcome);
           outcomes.push(outcome);
 
           return {
@@ -1812,6 +1830,7 @@ export async function regradeSettledBetsForMatch(matchId: string, jobId: string)
             finalScore: { home: result.home, away: result.away },
             htScore: ht,
             outcome,
+            settlementNote,
           };
         });
 
@@ -1954,29 +1973,32 @@ export async function hydrateSettledBetSelections(): Promise<void> {
         const r = findResult(sel, bet.matchId, isSingle);
         if (!r) return sel;
 
-        const needsOutcome = sel.outcome == null;
-        const needsScore = sel.finalScore == null;
-        if (!needsOutcome && !needsScore) return sel;
-
         const ht = typeof r.htHome === "number" && typeof r.htAway === "number"
           ? { htHome: r.htHome, htAway: r.htAway }
           : undefined;
+        const needsOutcome = sel.outcome == null;
+        const needsScore = sel.finalScore == null;
+        const nextOutcome = needsOutcome
+          ? scoreOutcomeForSel(sel, { home: r.home, away: r.away }, ht, {
+              status: (r as any).status,
+              cornersTotal: r.cornersTotal,
+              cardsTotal: r.cardsTotal,
+              firstGoal: r.firstGoal,
+              extras: r.extras,
+              finishedAt: r.finishedAt,
+            })
+          : sel.outcome;
+        const nextSettlementNote = getSelectionSettlementNote((r as any).status, nextOutcome ?? null);
+        const needsSettlementNote = sel.settlementNote !== nextSettlementNote;
+        if (!needsOutcome && !needsScore && !needsSettlementNote) return sel;
 
         changed = true;
         return {
           ...sel,
           finalScore: needsScore ? { home: r.home, away: r.away } : sel.finalScore,
           htScore: sel.htScore ?? ht,
-          outcome: needsOutcome
-            ? scoreOutcomeForSel(sel, { home: r.home, away: r.away }, ht, {
-                status: (r as any).status,
-                cornersTotal: r.cornersTotal,
-                cardsTotal: r.cardsTotal,
-                firstGoal: r.firstGoal,
-                extras: r.extras,
-                finishedAt: r.finishedAt,
-              })
-            : sel.outcome,
+          outcome: nextOutcome,
+          ...(needsSettlementNote ? { settlementNote: nextSettlementNote } : {}),
         };
       });
 
