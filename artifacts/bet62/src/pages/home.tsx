@@ -6195,7 +6195,7 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
     if (!collapsible) {
       return (
         <div className="mb-4 last:mb-0">
-          <div className="text-[10px] font-black text-zinc-500 uppercase tracking-widest mb-2 px-0.5">{title}</div>
+          {title ? <div className="text-[10px] font-black text-zinc-500 uppercase tracking-widest mb-2 px-0.5">{title}</div> : null}
           <div className="grid grid-cols-2 gap-1.5">{children}</div>
         </div>
       );
@@ -6239,7 +6239,7 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
     if (!collapsible) {
       return (
         <div className="mb-4 last:mb-0">
-          <div className="text-[10px] font-black text-zinc-500 uppercase tracking-widest mb-2 px-0.5">{title}</div>
+          {title ? <div className="text-[10px] font-black text-zinc-500 uppercase tracking-widest mb-2 px-0.5">{title}</div> : null}
           <div className="flex gap-2">{children}</div>
         </div>
       );
@@ -6570,7 +6570,7 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
               const line = tgMap[Math.min(lateGameGoals, tgMap.length - 1)]!;
               if (!line.o) return null;
               return (
-                <MarketGroup title={`Total de Gols — ${line.label}`}>
+                <MarketGroup title="">
                   <MarketOddsBtn match={match} sel={line.selO} odd={line.o} market="gols" label={`Mais de ${line.label}`} />
                   <MarketOddsBtn match={match} sel={line.selU} odd={line.u} market="gols" label={`Menos de ${line.label}`} />
                 </MarketGroup>
@@ -6578,41 +6578,41 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
             })() : (
               <>
                 {m.totalGoals.over05 > 0 && (
-                  <MarketGroup title="Total de Gols — 0.5">
+                  <MarketGroup title="">
                     <MarketOddsBtn match={match} sel="o05" odd={m.totalGoals.over05} market="gols" label="Mais de 0.5" />
                     <MarketOddsBtn match={match} sel="u05" odd={m.totalGoals.under05} market="gols" label="Menos de 0.5" />
                   </MarketGroup>
                 )}
                 {m.totalGoals.over15 > 0 && (
-                  <MarketGroup title="Total de Gols — 1.5">
+                  <MarketGroup title="">
                     <MarketOddsBtn match={match} sel="o15" odd={m.totalGoals.over15} market="gols" label="Mais de 1.5" />
                     <MarketOddsBtn match={match} sel="u15" odd={m.totalGoals.under15} market="gols" label="Menos de 1.5" />
                   </MarketGroup>
                 )}
-                <MarketGroup title="Total de Gols — 2.5">
+                <MarketGroup title="">
                   <MarketOddsBtn match={match} sel="o25" odd={m.totalGoals.over25} market="gols" label="Mais de 2.5" />
                   <MarketOddsBtn match={match} sel="u25" odd={m.totalGoals.under25} market="gols" label="Menos de 2.5" />
                 </MarketGroup>
                 {m.totalGoals.over35 > 0 && (
-                  <MarketGroup title="Total de Gols — 3.5">
+                  <MarketGroup title="">
                     <MarketOddsBtn match={match} sel="o35" odd={m.totalGoals.over35} market="gols" label="Mais de 3.5" />
                     <MarketOddsBtn match={match} sel="u35" odd={m.totalGoals.under35} market="gols" label="Menos de 3.5" />
                   </MarketGroup>
                 )}
                 {m.totalGoals.over45 > 0 && (
-                  <MarketGroup title="Total de Gols — 4.5">
+                  <MarketGroup title="">
                     <MarketOddsBtn match={match} sel="o45" odd={m.totalGoals.over45} market="gols" label="Mais de 4.5" />
                     <MarketOddsBtn match={match} sel="u45" odd={m.totalGoals.under45} market="gols" label="Menos de 4.5" />
                   </MarketGroup>
                 )}
                 {m.totalGoals.over55 > 0 && (
-                  <MarketGroup title="Total de Gols — 5.5">
+                  <MarketGroup title="">
                     <MarketOddsBtn match={match} sel="o55" odd={m.totalGoals.over55} market="gols" label="Mais de 5.5" />
                     <MarketOddsBtn match={match} sel="u55" odd={m.totalGoals.under55} market="gols" label="Menos de 5.5" />
                   </MarketGroup>
                 )}
                 {m.totalGoals.over65 > 0 && (
-                  <MarketGroup title="Total de Gols — 6.5">
+                  <MarketGroup title="">
                     <MarketOddsBtn match={match} sel="o65" odd={m.totalGoals.over65} market="gols" label="Mais de 6.5" />
                     <MarketOddsBtn match={match} sel="u65" odd={m.totalGoals.under65} market="gols" label="Menos de 6.5" />
                   </MarketGroup>
@@ -10231,7 +10231,7 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
 
                 {/* Market tabs inline — only visible in markets view */}
                 {matchViewTab === "markets" && (
-                  <div className="px-4 pt-2 pb-4">
+                  <div className="px-3 pt-2 pb-4">
                     {renderMatchMarkets(expandedMatch)}
                   </div>
                 )}
