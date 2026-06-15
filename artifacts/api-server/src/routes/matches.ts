@@ -1993,41 +1993,50 @@ function clampTennisSetCorrectScoreOdd(rawOdd: number): number {
   return Math.min(TENNIS_SET_CORRECT_SCORE_HARD_CAP, odd);
 }
 
+const TENNIS_SET_SCORE_HOME_TEMPLATE: Array<{ score: [number, number]; weight: number }> = [
+  { score: [6, 0], weight: 0.05 },
+  { score: [6, 1], weight: 0.10 },
+  { score: [6, 2], weight: 0.18 },
+  { score: [6, 3], weight: 0.22 },
+  { score: [6, 4], weight: 0.20 },
+  { score: [7, 5], weight: 0.15 },
+  { score: [7, 6], weight: 0.10 },
+];
+
+const TENNIS_SET_SCORE_AWAY_TEMPLATE: Array<{ score: [number, number]; weight: number }> =
+  TENNIS_SET_SCORE_HOME_TEMPLATE.map((entry) => ({
+    score: [entry.score[1], entry.score[0]],
+    weight: entry.weight,
+  }));
+
 function computeSetExactScoreDistribution(
   hg: number,
   ag: number,
-  pGame: number,
+  pSetHomeWin: number,
 ): Record<string, number> {
-  const qGame = 1 - pGame;
-  const comb = (n: number, k: number): number => {
-    if (k < 0 || k > n) return 0;
-    if (k === 0 || k === n) return 1;
-    let r = 1;
-    for (let i = 0; i < k; i++) r = r * (n - i) / (i + 1);
-    return r;
-  };
-  const validScores: [number, number][] = [
-    [6, 0], [6, 1], [6, 2], [6, 3], [6, 4], [7, 5], [7, 6],
-    [0, 6], [1, 6], [2, 6], [3, 6], [4, 6], [5, 7], [6, 7],
-  ];
   const probs: Record<string, number> = {};
-  let total = 0;
-  for (const [H, A] of validScores) {
-    if (H < hg || A < ag) continue;
-    const rh = H - hg;
-    const ra = A - ag;
-    let p: number;
-    if (H > A) {
-      if (rh === 0) continue;
-      p = comb(rh + ra - 1, ra) * Math.pow(pGame, rh) * Math.pow(qGame, ra);
-    } else {
-      if (ra === 0) continue;
-      p = comb(rh + ra - 1, rh) * Math.pow(pGame, rh) * Math.pow(qGame, ra);
-    }
-    if (p <= 0) continue;
-    probs[`${H}-${A}`] = p;
-    total += p;
+  const canStillFinishAs = ([homeFinal, awayFinal]: [number, number]): boolean =>
+    homeFinal >= hg && awayFinal >= ag;
+
+  const validHomeScores = TENNIS_SET_SCORE_HOME_TEMPLATE.filter((entry) => canStillFinishAs(entry.score));
+  const validAwayScores = TENNIS_SET_SCORE_AWAY_TEMPLATE.filter((entry) => canStillFinishAs(entry.score));
+  const homeWeightTotal = validHomeScores.reduce((acc, entry) => acc + entry.weight, 0);
+  const awayWeightTotal = validAwayScores.reduce((acc, entry) => acc + entry.weight, 0);
+  const homeBlockProb = mc(pSetHomeWin, 0.001, 0.999);
+  const awayBlockProb = 1 - homeBlockProb;
+
+  for (const entry of validHomeScores) {
+    if (homeWeightTotal <= 0) break;
+    const label = `${entry.score[0]}-${entry.score[1]}`;
+    probs[label] = homeBlockProb * (entry.weight / homeWeightTotal);
   }
+  for (const entry of validAwayScores) {
+    if (awayWeightTotal <= 0) break;
+    const label = `${entry.score[0]}-${entry.score[1]}`;
+    probs[label] = awayBlockProb * (entry.weight / awayWeightTotal);
+  }
+
+  const total = Object.values(probs).reduce((acc, prob) => acc + prob, 0);
   if (total <= 0) return {};
   return Object.fromEntries(Object.entries(probs).map(([label, prob]) => [label, prob / total]));
 }
@@ -2057,14 +2066,9 @@ function computeLiveTennisExtras(
   };
   const currentSetIndex = Math.max(0, Math.min(sets.length - 1, homeSetsWon + awaySetsWon));
   const currentSetGames = sets[currentSetIndex] ?? ([0, 0] as [number, number]);
-  const currentSetDist = computeSetExactScoreDistribution(currentSetGames[0], currentSetGames[1], pGame);
-  const currentSetScore = computeSetExactScoreOdds(currentSetGames[0], currentSetGames[1], pGame);
-  const currentSetHomeWinProb = Object.keys(currentSetDist).length > 0
-    ? Object.entries(currentSetDist).reduce((acc, [label, prob]) => {
-        const [h, a] = label.split("-").map(Number);
-        return acc + ((h ?? 0) > (a ?? 0) ? prob : 0);
-      }, 0)
-    : liveSetWinProb(currentSetGames[0], currentSetGames[1], liveHomeP);
+  const currentSetHomeWinProb = liveSetWinProb(currentSetGames[0], currentSetGames[1], liveHomeP);
+  const currentSetDist = computeSetExactScoreDistribution(currentSetGames[0], currentSetGames[1], currentSetHomeWinProb);
+  const currentSetScore = computeSetExactScoreOdds(currentSetGames[0], currentSetGames[1], currentSetHomeWinProb);
   const expectedCurrentSetTotalGames = Object.keys(currentSetDist).length > 0
     ? Object.entries(currentSetDist).reduce((acc, [label, prob]) => {
         const [h, a] = label.split("-").map(Number);
@@ -2297,10 +2301,10 @@ function computeLiveTennisExtras(
 function computeSetExactScoreOdds(
   hg: number,
   ag: number,
-  pGame: number,
+  pSetHomeWin: number,
   margin = 0.065,
 ): Record<string, number> {
-  const probs = computeSetExactScoreDistribution(hg, ag, pGame);
+  const probs = computeSetExactScoreDistribution(hg, ag, pSetHomeWin);
   if (Object.keys(probs).length === 0) return {};
   const result: Record<string, number> = {};
   for (const [label, prob] of Object.entries(probs)) {
@@ -6989,11 +6993,11 @@ function buildTennisLiveMatches(
         ? (1 / liveOdds.home) / (1 / liveOdds.home + 1 / liveOdds.away)
         : 0.5;
 
-      // Placar Exato do Set — negative-binomial model from current game score
+      // Placar Exato do Set — stable score-template model from set-win probability
       const curSetH = sets.length > 0 ? (sets[sets.length - 1]?.[0] ?? 0) : 0;
       const curSetA = sets.length > 0 ? (sets[sets.length - 1]?.[1] ?? 0) : 0;
-      const pGame = Math.min(0.85, Math.max(0.15, 0.5 + (liveHomeP - 0.5) * 0.8));
-      const setExactScore = computeSetExactScoreOdds(curSetH, curSetA, pGame);
+      const currentSetHomeWinProb = Math.min(0.97, Math.max(0.03, 0.5 + (liveHomeP - 0.5) * 0.55 + (curSetH - curSetA) * 0.055));
+      const setExactScore = computeSetExactScoreOdds(curSetH, curSetA, currentSetHomeWinProb);
 
       // ── Per-set winner markets: numDoneSets = sets fully won by either side ─
       const numDoneSets = homeScore + awayScore;
