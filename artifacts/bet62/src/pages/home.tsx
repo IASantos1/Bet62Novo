@@ -6100,6 +6100,13 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
   function flattenMatchMarketsForArrows(match: Match): Record<string, number> {
     const f: Record<string, number> = {};
     const m = match.markets;
+    const tennisExtra = isTennis ? ((m as any)?.tennisExtra as Record<string, any> | undefined) : undefined;
+    const hasTennisHandicapMarkets = !!(
+      tennisExtra?.setHandicap?.home > 0 ||
+      tennisExtra?.setHandicap?.away > 0 ||
+      tennisExtra?.gameHandicap?.home > 0 ||
+      tennisExtra?.gameHandicap?.away > 0
+    );
     if (!m) return f;
     // 1X2
     f["result:home"] = match.odds.home;
@@ -7192,7 +7199,7 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
         )}
 
         {/* ── HANDICAP (futebol + ténis) ── */}
-        {!isBasketball && !isVolleyball && (!isFootball || (!showET && !showPen)) && (modalTab === "handicap" || modalTab === "todos") && m && m.handicap.homeMinusOne > 0 && (
+        {!isBasketball && !isVolleyball && (!isFootball || (!showET && !showPen)) && (modalTab === "handicap" || modalTab === "todos") && m && (isTennis ? hasTennisHandicapMarkets || m.handicap.homeMinusOne > 0 : m.handicap.homeMinusOne > 0) && (
           <div>
             {isFootball ? (
               <>
@@ -7217,19 +7224,19 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
               </>
             ) : isTennis ? (
               <>
-                {(m as any).tennisExtra?.setHandicap?.home > 0 && (
+                {tennisExtra?.setHandicap?.home > 0 && (
                   <MarketGroup title={`Handicap de Sets — ${match.home} −1.5`}>
-                    <MarketOddsBtn match={match} sel="sh15-home2" odd={(m as any).tennisExtra.setHandicap.home} market="handicap" label={`${match.home} −1.5 sets`} suspKey="setHandicap" />
-                    <MarketOddsBtn match={match} sel="sh15-away2" odd={(m as any).tennisExtra.setHandicap.away} market="handicap" label={`${match.away} +1.5 sets`} suspKey="setHandicap" />
+                    <MarketOddsBtn match={match} sel="sh15-home2" odd={tennisExtra.setHandicap.home} market="handicap" label={`${match.home} −1.5 sets`} suspKey="setHandicap" />
+                    <MarketOddsBtn match={match} sel="sh15-away2" odd={tennisExtra.setHandicap.away} market="handicap" label={`${match.away} +1.5 sets`} suspKey="setHandicap" />
                   </MarketGroup>
                 )}
-                {(m as any).tennisExtra?.gameHandicap?.home > 0 && (
-                  <MarketGroup title={`Handicap de Games — Linha ${(m as any).tennisExtra.gameHandicap.line > 0 ? `−${(m as any).tennisExtra.gameHandicap.line}` : `+${Math.abs((m as any).tennisExtra.gameHandicap.line)}`}`}>
-                    <MarketOddsBtn match={match} sel={`gh-home-${(m as any).tennisExtra.gameHandicap.line}`} odd={(m as any).tennisExtra.gameHandicap.home} market="handicap" label={match.home} suspKey="gameHandicap" />
-                    <MarketOddsBtn match={match} sel={`gh-away-${(m as any).tennisExtra.gameHandicap.line}`} odd={(m as any).tennisExtra.gameHandicap.away} market="handicap" label={match.away} suspKey="gameHandicap" />
+                {tennisExtra?.gameHandicap?.home > 0 && (
+                  <MarketGroup title={`Handicap de Games — Linha ${tennisExtra.gameHandicap.line > 0 ? `−${tennisExtra.gameHandicap.line}` : `+${Math.abs(tennisExtra.gameHandicap.line)}`}`}>
+                    <MarketOddsBtn match={match} sel={`gh-home-${tennisExtra.gameHandicap.line}`} odd={tennisExtra.gameHandicap.home} market="handicap" label={match.home} suspKey="gameHandicap" />
+                    <MarketOddsBtn match={match} sel={`gh-away-${tennisExtra.gameHandicap.line}`} odd={tennisExtra.gameHandicap.away} market="handicap" label={match.away} suspKey="gameHandicap" />
                   </MarketGroup>
                 )}
-                {!(m as any).tennisExtra && (
+                {!tennisExtra && (
                   <MarketGroup title="Handicap de Games">
                     <MarketOddsBtn match={match} sel="hcap-home" odd={m.handicap.homeMinusOne} market="handicap" label={`${match.home} cobre`} />
                     <MarketOddsBtn match={match} sel="hcap-away" odd={m.handicap.awayPlusOne} market="handicap" label={`${match.away} cobre`} />
@@ -7249,7 +7256,7 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
             )}
           </div>
         )}
-        {!isBasketball && !isVolleyball && (!isFootball || (!showET && !showPen)) && modalTab === "handicap" && m && m.handicap.homeMinusOne === 0 && (
+        {!isBasketball && !isVolleyball && (!isFootball || (!showET && !showPen)) && modalTab === "handicap" && m && (isTennis ? !hasTennisHandicapMarkets && m.handicap.homeMinusOne === 0 : m.handicap.homeMinusOne === 0) && (
           <div className="text-center text-zinc-600 py-6 text-sm">Mercado não disponível para esta partida.</div>
         )}
 
