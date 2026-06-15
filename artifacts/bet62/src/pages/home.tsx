@@ -2659,6 +2659,8 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
   type TeamPlayerMarkets = {
     teamName: string; teamId: string;
     anytimeScorers: PlayerMarket[];
+    firstScorers: PlayerMarket[];
+    lastScorers: PlayerMarket[];
     firstHalfScorers: PlayerMarket[];
     secondHalfScorers: PlayerMarket[];
     scoreAndAssist: PlayerMarket[];
@@ -3359,7 +3361,8 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
     setPlayerMarketsLoading(true);
     setPlayerMarkets(null);
     setPlayerMarketsMatchId(mid);
-    const p = new URLSearchParams({ homeTeam: expandedMatch.home, awayTeam: expandedMatch.away });
+    const rawId = String(expandedMatch.id).replace(/^[a-z]+-v2-/, "");
+    const p = new URLSearchParams({ homeTeam: expandedMatch.home, awayTeam: expandedMatch.away, matchId: rawId });
     fetch(`/api/matches/football-player-markets/${encodeURIComponent(expandedMatch.leagueId)}?${p}`)
       .then(r => r.ok ? r.json() : null)
       .then(d => { if (d) setPlayerMarkets(d as PlayerMarketsData); })
@@ -7513,10 +7516,12 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
               const pmList = (rows: PMRow[], selPrefix: string, market: string, label: string, sublabel: (p: PMRow) => string) => rows.length === 0 ? null : (
                 <div className="mb-3">
                   <div className={`text-xs font-semibold uppercase tracking-wider px-1 mb-1.5 ${
-                    selPrefix.startsWith("pm-gol")  ? "text-red-400"    :
-                    selPrefix.startsWith("pm-fh")   ? "text-orange-400" :
-                    selPrefix.startsWith("pm-sh")   ? "text-amber-400"  :
-                    selPrefix.startsWith("pm-sa")   ? "text-emerald-400":
+                    selPrefix.startsWith("pm-first") ? "text-fuchsia-400" :
+                    selPrefix.startsWith("pm-last")  ? "text-violet-400"  :
+                    selPrefix.startsWith("pm-gol")   ? "text-red-400"     :
+                    selPrefix.startsWith("pm-fh")    ? "text-orange-400"  :
+                    selPrefix.startsWith("pm-sh")    ? "text-amber-400"   :
+                    selPrefix.startsWith("pm-sa")    ? "text-emerald-400" :
                     "text-yellow-500"
                   }`}>{label}</div>
                   <div className="bg-zinc-900/60 rounded-lg overflow-hidden">
@@ -7561,6 +7566,8 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
                     <span className="text-sm font-bold text-white">{team.teamName}</span>
                   </div>
 
+                  {pmList(team.firstScorers,       "pm-first","primeiro-marcador","🥇 Primeiro Marcador",            p => `${p.stat} gol(os) em ${p.appearances} jogos`)}
+                  {pmList(team.lastScorers,        "pm-last", "ultimo-marcador",  "🏁 Último Marcador",             p => `${p.stat} gol(os) em ${p.appearances} jogos`)}
                   {pmList(team.anytimeScorers,    "pm-gol", "marcadores",      "⚽ Marcador (Qualquer Momento)",  p => `${p.stat} gol(os) em ${p.appearances} jogos`)}
                   {pmList(team.firstHalfScorers,  "pm-fh",  "marcador-1t",     "⚽ Marcador no 1.º Tempo",        p => `${p.stat} gol(os) em ${p.appearances} jogos`)}
                   {pmList(team.secondHalfScorers, "pm-sh",  "marcador-2t",     "⚽ Marcador no 2.º Tempo",        p => `${p.stat} gol(os) em ${p.appearances} jogos`)}
@@ -7574,7 +7581,7 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
                 <>
                   {playerMarkets.home && renderTeamSection(playerMarkets.home, true)}
                   {playerMarkets.away && renderTeamSection(playerMarkets.away, false)}
-                  <div className="text-center text-zinc-700 text-xs pt-1 pb-2">Odds calculadas com base nas estatísticas da época</div>
+                  <div className="text-center text-zinc-700 text-xs pt-1 pb-2">Odds do provider quando disponíveis; restantes mercados seguem a base estatística da época</div>
                 </>
               );
             })()}
@@ -8709,7 +8716,7 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
                             ? (expandedMatch.isLive ? ["stats", "confrontos", "standings", "yesterday", "liga", "live"] : ["stats", "confrontos", "standings", "yesterday", "liga"])
                             : expandedMatch.sport === "volleyball"
                             ? (expandedMatch.isLive ? ["stats", "confrontos", "standings", "live"] : ["stats", "confrontos", "standings"])
-                            : (expandedMatch.isLive ? ["stats", "confrontos", "standings", "lineups", "live"] : ["stats", "confrontos", "standings", "lineups"]);
+                            : (expandedMatch.isLive ? ["stats", "confrontos", "standings", "odds", "lineups", "live"] : ["stats", "confrontos", "standings", "odds", "lineups"]);
                           const orderedTabs = expandedMatch.isLive ? ["live", ...tabs.filter(t => t !== "live")] : tabs;
                           return orderedTabs.map(tab => (
                             <button

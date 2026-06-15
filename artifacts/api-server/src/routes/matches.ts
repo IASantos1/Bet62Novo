@@ -15523,10 +15523,18 @@ type PlayerMarketEntry = {
 type TeamPlayerMarkets = {
   teamName: string; teamId: string;
   anytimeScorers: PlayerMarketEntry[];
+  firstScorers: PlayerMarketEntry[];
+  lastScorers: PlayerMarketEntry[];
   firstHalfScorers: PlayerMarketEntry[];
   secondHalfScorers: PlayerMarketEntry[];
   scoreAndAssist: PlayerMarketEntry[];
   bookings: PlayerMarketEntry[];
+};
+
+type ProviderPlayerOddsBucket = {
+  anytime: Map<string, number>;
+  first: Map<string, number>;
+  last: Map<string, number>;
 };
 
 function playerOdds(stat: number, appearances: number): number {
@@ -15561,9 +15569,167 @@ function findMatchingTeam(teams: FootballLeagueStatsTeam[], targetName: string):
   return found;
 }
 
-function buildTeamMarkets(team: FootballLeagueStatsTeam): TeamPlayerMarkets {
+function normalizePersonName(name: string): string {
+  return String(name ?? "")
+    .toLowerCase()
+    .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9 ]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function playerNameAliases(name: string): string[] {
+  const normalized = normalizePersonName(name);
+  if (!normalized) return [];
+  const parts = normalized.split(" ").filter(Boolean);
+  const aliases = new Set<string>([normalized]);
+  if (parts.length >= 2) {
+    aliases.add(`${parts[0]} ${parts[parts.length - 1]}`);
+    aliases.add(`${parts[0].slice(0, 1)} ${parts[parts.length - 1]}`);
+  }
+  if (parts.length >= 3) {
+    aliases.add(`${parts[0].slice(0, 1)} ${parts[1].slice(0, 1)} ${parts[parts.length - 1]}`);
+  }
+  return [...aliases].filter(Boolean);
+}
+
+function isProviderPlayerChoiceName(rawName: string): boolean {
+  const n = normalizePersonName(rawName);
+  if (!n) return false;
+  return !(
+    n === "yes" ||
+    n === "no" ||
+    n === "over" ||
+    n === "under" ||
+    n === "home" ||
+    n === "away" ||
+    n === "draw" ||
+    n === "1" ||
+    n === "x" ||
+    n === "2" ||
+    n.includes("no goalscorer") ||
+    n.includes("no goal scorer") ||
+    n.includes("no scorer") ||
+    n.includes("none")
+  );
+}
+
+function createProviderPlayerOddsBucket(): ProviderPlayerOddsBucket {
+  return {
+    anytime: new Map<string, number>(),
+    first: new Map<string, number>(),
+    last: new Map<string, number>(),
+  };
+}
+
+function addProviderPlayerChoice(target: Map<string, number>, rawChoiceName: string, odds: number): void {
+  if (!isProviderPlayerChoiceName(rawChoiceName) || odds < 1.01) return;
+  const normalized = normalizePersonName(rawChoiceName);
+  if (!normalized) return;
+  const prev = target.get(normalized);
+  if (!prev || odds < prev) target.set(normalized, odds);
+}
+
+function matchProviderOddForPlayer(target: Map<string, number>, playerName: string): number {
+  if (target.size === 0) return 0;
+  const aliases = playerNameAliases(playerName);
+  if (aliases.length === 0) return 0;
+
+  for (const alias of aliases) {
+    const direct = target.get(alias);
+    if (direct && direct >= 1.01) return direct;
+  }
+
+  let best = 0;
+  for (const [choiceName, odds] of target.entries()) {
+    if (aliases.some((alias) => choiceName.includes(alias) || alias.includes(choiceName))) {
+      if (!best || odds < best) best = odds;
+    }
+  }
+  return best;
+}
+
+function scorerMarketBucket(rawMarketName: string): keyof ProviderPlayerOddsBucket | null {
+  const market = normalizePersonName(rawMarketName);
+  if (!market) return null;
+  if (
+    market.includes("anytime goalscorer") ||
+    market.includes("any time goalscorer") ||
+    market.includes("anytime scorer") ||
+    market.includes("any time scorer") ||
+    market.includes("to score anytime")
+  ) return "anytime";
+  if (
+    market.includes("first goalscorer") ||
+    market.includes("first goal scorer") ||
+    market.includes("first scorer") ||
+    market.includes("1st goalscorer") ||
+    market.includes("1st scorer") ||
+    market.includes("to score first")
+  ) return "first";
+  if (
+    market.includes("last goalscorer") ||
+    market.includes("last goal scorer") ||
+    market.includes("last scorer") ||
+    market.includes("to score last")
+  ) return "last";
+  return null;
+}
+
+const footballProviderPlayerOddsCache = new Map<string, { data: ProviderPlayerOddsBucket; fetchedAt: number }>();
+const FOOTBALL_PROVIDER_PLAYER_ODDS_TTL = 5 * 60_000;
+
+async function getFootballProviderPlayerOdds(matchId: string): Promise<ProviderPlayerOddsBucket> {
+  const cacheKey = `football-player-odds:${matchId}`;
+  const cached = footballProviderPlayerOddsCache.get(cacheKey);
+  if (cached && Date.now() - cached.fetchedAt < FOOTBALL_PROVIDER_PLAYER_ODDS_TTL) {
+    return cached.data;
+  }
+
+  const empty = createProviderPlayerOddsBucket();
+  if (!CONFIG.SPORTSAPI_KEY || !matchId) return empty;
+
+  try {
+    const resp = await fetch(`${SAPI_V2_FOOTBALL}/match/${matchId}/odds/all`, {
+      signal: AbortSignal.timeout(5000),
+      headers: sapiHeaders(),
+    });
+    if (!resp.ok) return empty;
+
+    const data = (await resp.json()) as {
+      data?: {
+        markets?: Array<{
+          marketName?: string;
+          choices?: Array<{ name?: string; fractionalValue?: string }>;
+        }>;
+      };
+    };
+    const bucket = createProviderPlayerOddsBucket();
+
+    for (const market of data.data?.markets ?? []) {
+      const key = scorerMarketBucket(market.marketName ?? "");
+      if (!key) continue;
+      for (const choice of market.choices ?? []) {
+        addProviderPlayerChoice(
+          bucket[key],
+          String(choice.name ?? ""),
+          fractionalToDecimal(choice.fractionalValue ?? ""),
+        );
+      }
+    }
+
+    footballProviderPlayerOddsCache.set(cacheKey, { data: bucket, fetchedAt: Date.now() });
+    return bucket;
+  } catch {
+    return empty;
+  }
+}
+
+function buildTeamMarkets(team: FootballLeagueStatsTeam, providerOdds?: ProviderPlayerOddsBucket | null): TeamPlayerMarkets {
   const byOdds = (a: PlayerMarketEntry, b: PlayerMarketEntry) => a.odds - b.odds;
   const anytimeScorers:    PlayerMarketEntry[] = [];
+  const firstScorers:      PlayerMarketEntry[] = [];
+  const lastScorers:       PlayerMarketEntry[] = [];
   const firstHalfScorers:  PlayerMarketEntry[] = [];
   const secondHalfScorers: PlayerMarketEntry[] = [];
   const scoreAndAssist:    PlayerMarketEntry[] = [];
@@ -15573,14 +15739,22 @@ function buildTeamMarkets(team: FootballLeagueStatsTeam): TeamPlayerMarkets {
     const base = { id: p.id, name: p.name, team: team.name, teamId: team.id, appearances: p.appearances };
 
     // Anytime scorer + derived half-time markets
-    const gOdds = playerOdds(p.goals, p.appearances);
-    if (gOdds > 0) {
-      anytimeScorers.push({ ...base, stat: p.goals, odds: gOdds });
+    const derivedScorerOdds = playerOdds(p.goals, p.appearances);
+    const anytimeOdds = providerOdds ? matchProviderOddForPlayer(providerOdds.anytime, p.name) : 0;
+    const firstOdds = providerOdds ? matchProviderOddForPlayer(providerOdds.first, p.name) : 0;
+    const lastOdds = providerOdds ? matchProviderOddForPlayer(providerOdds.last, p.name) : 0;
+    const scoringBaseOdds = anytimeOdds > 0 ? anytimeOdds : derivedScorerOdds;
+
+    if (firstOdds > 0) firstScorers.push({ ...base, stat: p.goals, odds: firstOdds });
+    if (lastOdds > 0) lastScorers.push({ ...base, stat: p.goals, odds: lastOdds });
+
+    if (scoringBaseOdds > 0) {
+      anytimeScorers.push({ ...base, stat: p.goals, odds: scoringBaseOdds });
       // ~42% of goals scored in 1H → fair odds ≈ anytime × 2.38
-      const fhOdds = Math.min(50, Math.round(gOdds * 2.38 * 100) / 100);
+      const fhOdds = Math.min(50, Math.round(scoringBaseOdds * 2.38 * 100) / 100);
       firstHalfScorers.push({ ...base, stat: p.goals, odds: fhOdds });
       // ~58% of goals scored in 2H → fair odds ≈ anytime × 1.72
-      const shOdds = Math.min(50, Math.round(gOdds * 1.72 * 100) / 100);
+      const shOdds = Math.min(50, Math.round(scoringBaseOdds * 1.72 * 100) / 100);
       secondHalfScorers.push({ ...base, stat: p.goals, odds: shOdds });
     }
 
@@ -15590,7 +15764,7 @@ function buildTeamMarkets(team: FootballLeagueStatsTeam): TeamPlayerMarkets {
       const saBase = playerOdds(combinedStat, p.appearances);
       if (saBase > 0) {
         // Combined event is harder — apply ×1.5 penalty on top of anytime odds
-        const saOdds = Math.min(60, Math.round(Math.max(gOdds * 2.0, saBase * 1.5) * 100) / 100);
+        const saOdds = Math.min(60, Math.round(Math.max(scoringBaseOdds * 2.0, saBase * 1.5) * 100) / 100);
         scoreAndAssist.push({ ...base, stat: combinedStat, odds: saOdds });
       }
     }
@@ -15602,6 +15776,8 @@ function buildTeamMarkets(team: FootballLeagueStatsTeam): TeamPlayerMarkets {
   }
 
   anytimeScorers.sort(byOdds);
+  firstScorers.sort(byOdds);
+  lastScorers.sort(byOdds);
   firstHalfScorers.sort(byOdds);
   secondHalfScorers.sort(byOdds);
   scoreAndAssist.sort(byOdds);
@@ -15611,6 +15787,8 @@ function buildTeamMarkets(team: FootballLeagueStatsTeam): TeamPlayerMarkets {
     teamName: team.name,
     teamId: team.id,
     anytimeScorers:    anytimeScorers.slice(0, 20),
+    firstScorers:      firstScorers.slice(0, 15),
+    lastScorers:       lastScorers.slice(0, 15),
     firstHalfScorers:  firstHalfScorers.slice(0, 15),
     secondHalfScorers: secondHalfScorers.slice(0, 15),
     scoreAndAssist:    scoreAndAssist.slice(0, 10),
@@ -16052,9 +16230,11 @@ router.get("/football-player-markets/:leagueId", async (req: Request, res: Respo
   const leagueId = String(req.params["leagueId"]);
   const homeTeam = String(req.query["homeTeam"] ?? "").trim();
   const awayTeam = String(req.query["awayTeam"] ?? "").trim();
+  const matchId = String(req.query["matchId"] ?? "").trim();
 
   try {
     const { teams, meta } = await getFootballLeagueStats(leagueId);
+    const providerOdds = matchId ? await getFootballProviderPlayerOdds(matchId) : null;
 
     const homeData = homeTeam ? findMatchingTeam(teams, homeTeam) : undefined;
     const awayData = awayTeam ? findMatchingTeam(teams, awayTeam) : undefined;
@@ -16069,8 +16249,8 @@ router.get("/football-player-markets/:leagueId", async (req: Request, res: Respo
       leagueId: meta.id,
       leagueName: meta.name,
       country: meta.country,
-      home: homeData ? buildTeamMarkets(homeData) : null,
-      away: awayData ? buildTeamMarkets(awayData) : null,
+      home: homeData ? buildTeamMarkets(homeData, providerOdds) : null,
+      away: awayData ? buildTeamMarkets(awayData, providerOdds) : null,
     });
   } catch {
     res.status(500).json({ error: "Mercados de jogadores indisponíveis" });
