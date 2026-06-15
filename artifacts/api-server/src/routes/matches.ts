@@ -15994,18 +15994,23 @@ function scorerMarketBucket(rawMarketName: string): keyof ProviderPlayerOddsBuck
 const footballProviderPlayerOddsCache = new Map<string, { data: ProviderPlayerOddsBucket; fetchedAt: number }>();
 const FOOTBALL_PROVIDER_PLAYER_ODDS_TTL = 5 * 60_000;
 
+function sanitizeProviderMatchId(matchId: string | undefined | null): string {
+  return String(matchId ?? "").trim().replace(/^[a-z]+-v\d+-/, "");
+}
+
 async function getFootballProviderPlayerOdds(matchId: string): Promise<ProviderPlayerOddsBucket> {
-  const cacheKey = `football-player-odds:${matchId}`;
+  const providerMatchId = sanitizeProviderMatchId(matchId);
+  const cacheKey = `football-player-odds:${providerMatchId}`;
   const cached = footballProviderPlayerOddsCache.get(cacheKey);
   if (cached && Date.now() - cached.fetchedAt < FOOTBALL_PROVIDER_PLAYER_ODDS_TTL) {
     return cached.data;
   }
 
   const empty = createProviderPlayerOddsBucket();
-  if (!CONFIG.SPORTSAPI_KEY || !matchId) return empty;
+  if (!CONFIG.SPORTSAPI_KEY || !providerMatchId) return empty;
 
   try {
-    const resp = await fetch(`${SAPI_V2_FOOTBALL}/match/${matchId}/odds/all`, {
+    const resp = await fetch(`${SAPI_V2_FOOTBALL}/match/${providerMatchId}/odds/all`, {
       signal: AbortSignal.timeout(5000),
       headers: sapiHeaders(),
     });
@@ -16444,7 +16449,7 @@ function v2SportBase(sport: string): string | null {
 
 router.get("/v2-match-odds", async (req: Request, res: Response) => {
   const sport   = String(req.query["sport"]   ?? "football");
-  const matchId = String(req.query["matchId"] ?? "");
+  const matchId = sanitizeProviderMatchId(String(req.query["matchId"] ?? ""));
   if (!matchId) { res.json({ markets: [] }); return; }
   const base = v2SportBase(sport);
   if (!base)  { res.json({ markets: [] }); return; }
@@ -16778,7 +16783,7 @@ router.get("/football-player-markets/:leagueId", async (req: Request, res: Respo
   const leagueId = String(req.params["leagueId"]);
   const homeTeam = String(req.query["homeTeam"] ?? "").trim();
   const awayTeam = String(req.query["awayTeam"] ?? "").trim();
-  const matchId = String(req.query["matchId"] ?? "").trim();
+  const matchId = sanitizeProviderMatchId(String(req.query["matchId"] ?? ""));
 
   try {
     const { teams, meta } = await getFootballLeagueStats(leagueId);

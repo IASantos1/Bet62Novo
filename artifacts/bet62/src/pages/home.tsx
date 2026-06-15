@@ -2645,6 +2645,9 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
   type AllOddsMarket = { name: string; group: string; choices: Array<{ name: string; label: string; odds: number }> };
   type LineupsV2Player = { name: string; shortName?: string; position: string; number: string; rating?: number };
   type LineupsV2 = { confirmed: boolean; home: { formation?: string; starters: LineupsV2Player[]; bench: LineupsV2Player[] }; away: { formation?: string; starters: LineupsV2Player[]; bench: LineupsV2Player[] } };
+  const getProviderMatchId = useCallback((matchId: string | number | undefined | null): string => {
+    return String(matchId ?? "").replace(/^[a-z]+-v\d+-/, "");
+  }, []);
   const [allOddsData, setAllOddsData] = useState<AllOddsMarket[] | null>(null);
   const [allOddsLoading, setAllOddsLoading] = useState(false);
   const [allOddsSectionOpen, setAllOddsSectionOpen] = useState<Record<string, boolean>>({});
@@ -3373,7 +3376,7 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
     if (!wantsStatsData || !expandedMatch) return;
     if (v2StatsLoading) return;
     if (v2StatsGroups !== null && Date.now() - v2StatsFetchedAt < 3000) return;
-    const rawId = String(expandedMatch.id).replace(/^[a-z]+-v2-/, "");
+    const rawId = getProviderMatchId(expandedMatch.id);
     const sport = expandedMatch.sport ?? "football";
     const cacheKey = `${sport}:${rawId}`;
     if (!rawId) return;
@@ -3391,14 +3394,14 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
         setV2StatsFetchedAt(Date.now());
       })
       .finally(() => setV2StatsLoading(false));
-  }, [matchViewTab, expandedMatch?.id, v2StatsGroups, v2StatsLoading, v2StatsFetchedAt, livePollTick]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [matchViewTab, expandedMatch?.id, v2StatsGroups, v2StatsLoading, v2StatsFetchedAt, livePollTick, getProviderMatchId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     const wantsIncidents = matchViewTab === "live" && !!expandedMatch?.isLive;
     if (!wantsIncidents || !expandedMatch) return;
     if (v2IncidentsLoading) return;
     if (v2Incidents !== null && Date.now() - v2IncidentsFetchedAt < 3000) return;
-    const rawId = String(expandedMatch.id).replace(/^[a-z]+-v2-/, "");
+    const rawId = getProviderMatchId(expandedMatch.id);
     const sport = expandedMatch.sport ?? "football";
     const cacheKey = `${sport}:${rawId}`;
     if (!rawId) return;
@@ -3456,7 +3459,7 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
         });
     const sport = expandedMatch.sport ?? "football";
     const idStr = String(expandedMatch.id);
-    const rawId = idStr.replace(/^[a-z]+-v2-/, "");
+    const rawId = getProviderMatchId(idStr);
     const isV2 = rawId !== idStr && rawId.length > 0;
     if (isV2 && sport !== "tennis") {
       fetch(`/api/matches/v2-standings?sport=${sport}&matchId=${rawId}`)
@@ -3496,7 +3499,7 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
         setStandingsLoading(false);
       }
     }
-  }, [matchViewTab, expandedMatch?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [matchViewTab, expandedMatch?.id, getProviderMatchId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Fetch player markets when "Jogadores" tab is active (football only)
   useEffect(() => {
@@ -3506,14 +3509,14 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
     setPlayerMarketsLoading(true);
     setPlayerMarkets(null);
     setPlayerMarketsMatchId(mid);
-    const rawId = String(expandedMatch.id).replace(/^[a-z]+-v2-/, "");
+    const rawId = getProviderMatchId(expandedMatch.id);
     const p = new URLSearchParams({ homeTeam: expandedMatch.home, awayTeam: expandedMatch.away, matchId: rawId });
     fetch(`/api/matches/football-player-markets/${encodeURIComponent(expandedMatch.leagueId)}?${p}`)
       .then(r => r.ok ? r.json() : null)
       .then(d => { if (d) setPlayerMarkets(d as PlayerMarketsData); })
       .catch(() => {})
       .finally(() => setPlayerMarketsLoading(false));
-  }, [modalTab, expandedMatch?.id, expandedMatch?.leagueId]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [modalTab, expandedMatch?.id, expandedMatch?.leagueId, getProviderMatchId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Lazy-load MLB league stats when "liga" tab is active
   useEffect(() => {
@@ -3533,35 +3536,35 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
     if (allOddsData !== null) return;
     setAllOddsData(null);
     setAllOddsLoading(true);
-    const rawId = String(expandedMatch.id).replace(/^[a-z]+-v2-/, "");
+    const rawId = getProviderMatchId(expandedMatch.id);
     const sport = expandedMatch.sport ?? "football";
     fetch(`/api/matches/v2-match-odds?sport=${sport}&matchId=${rawId}`)
       .then(r => r.ok ? r.json() : { markets: [] })
       .then(d => setAllOddsData((d as { markets: AllOddsMarket[] }).markets ?? []))
       .catch(() => setAllOddsData([]))
       .finally(() => setAllOddsLoading(false));
-  }, [matchViewTab, expandedMatch?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [matchViewTab, expandedMatch?.id, getProviderMatchId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Fetch lineups when "lineups" tab is selected
   useEffect(() => {
     if (matchViewTab !== "lineups" || !expandedMatch) return;
     setLineupsData(null);
     setLineupsLoading(true);
-    const rawId = String(expandedMatch.id).replace(/^[a-z]+-v2-/, "");
+    const rawId = getProviderMatchId(expandedMatch.id);
     const sport = expandedMatch.sport ?? "football";
     fetch(`/api/matches/v2-lineups?sport=${sport}&matchId=${rawId}`)
       .then(r => r.ok ? r.json() : null)
       .then(d => setLineupsData(d as LineupsV2))
       .catch(() => setLineupsData(null))
       .finally(() => setLineupsLoading(false));
-  }, [matchViewTab, expandedMatch?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [matchViewTab, expandedMatch?.id, getProviderMatchId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Fetch H2H confrontos when "confrontos" tab is selected
   useEffect(() => {
     if (matchViewTab !== "confrontos" || !expandedMatch) return;
     setConfrontosData(null);
     setConfrontosLoading(true);
-    const rawId = String(expandedMatch.id).replace(/^[a-z]+-v2-/, "");
+    const rawId = getProviderMatchId(expandedMatch.id);
     const sport = expandedMatch.sport ?? "football";
     const p = new URLSearchParams({ sport, matchId: rawId, home: expandedMatch.home, away: expandedMatch.away });
     fetch(`/api/matches/confrontos?${p}`)
@@ -7709,7 +7712,7 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
                                   <div key={`${p.id}-${p.line ?? "na"}`} className="w-[92px]">
                                     <MarketOddsBtn
                                       match={match}
-                                      sel={`${selPrefix}-${p.id}-${p.line ?? "na"}`}
+                                      sel={`${selPrefix}-${p.id}-${p.line ?? "na"}-${p.side ?? "over"}`}
                                       odd={p.odds}
                                       market={market}
                                       label={p.line != null ? `${p.side === "under" ? "Menos de" : "Mais de"} ${p.line}` : label}
@@ -7726,7 +7729,7 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
                             <div className="text-sm font-medium text-white truncate">{p.name}</div>
                             <div className="text-xs text-zinc-500 mt-0.5">{sublabel(p)}</div>
                           </div>
-                          <MarketOddsBtn match={match} sel={`${selPrefix}-${p.id}-${p.line ?? "na"}`} odd={p.odds} market={market} label={p.line != null ? `${p.name} — ${label} (${p.side === "under" ? "Menos de" : "Mais de"} ${p.line})` : `${p.name} — ${label}`} />
+                          <MarketOddsBtn match={match} sel={`${selPrefix}-${p.id}-${p.line ?? "na"}-${p.side ?? "over"}`} odd={p.odds} market={market} label={p.line != null ? `${p.name} — ${label} (${p.side === "under" ? "Menos de" : "Mais de"} ${p.line})` : `${p.name} — ${label}`} />
                         </div>
                       ))}
                     </div>
