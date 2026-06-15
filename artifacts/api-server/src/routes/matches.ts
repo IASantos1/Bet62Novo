@@ -2009,6 +2009,43 @@ const TENNIS_SET_SCORE_AWAY_TEMPLATE: Array<{ score: [number, number]; weight: n
     weight: entry.weight,
   }));
 
+function buildTennisSetScoreTemplate(
+  baseTemplate: Array<{ score: [number, number]; weight: number }>,
+  pWinner: number,
+  currentGamesWon: number,
+  currentGamesLost: number,
+): Array<{ score: [number, number]; weight: number }> {
+  const dominance = mc(Math.abs(pWinner - 0.5) * 2, 0, 1);
+  const setProgress = mc((currentGamesWon + currentGamesLost) / 12, 0, 1);
+  const scoreTightness = mc(1 - Math.abs(currentGamesWon - currentGamesLost) / 4, 0, 1);
+  const closeSetBias = mc(scoreTightness * 0.65 + setProgress * 0.35, 0, 1);
+
+  return baseTemplate.map((entry) => {
+    const [winnerGames, loserGames] = entry.score;
+    const margin = winnerGames - loserGames;
+    const isTiebreak = winnerGames === 7 && loserGames === 6;
+    const isSevenFive = winnerGames === 7 && loserGames === 5;
+    const isStraightBeatdown = winnerGames === 6 && loserGames <= 2;
+    const isBalancedWin = winnerGames === 6 && (loserGames === 3 || loserGames === 4);
+
+    let multiplier = 1;
+    if (isStraightBeatdown) multiplier *= 1 + dominance * 0.95 - closeSetBias * 0.35;
+    else if (margin === 3) multiplier *= 1 + dominance * 0.45 - closeSetBias * 0.15;
+    else if (isBalancedWin) multiplier *= 1 + closeSetBias * 0.18;
+    else if (isSevenFive) multiplier *= 1 + closeSetBias * 0.45 - dominance * 0.12;
+    else if (isTiebreak) multiplier *= 1 + closeSetBias * 0.62 - dominance * 0.18;
+    else if (margin === 1) multiplier *= 1 + closeSetBias * 0.35 - dominance * 0.08;
+
+    if (currentGamesWon >= 4 && currentGamesLost >= 4) {
+      if (isSevenFive) multiplier *= 1.12;
+      if (isTiebreak) multiplier *= 1.18;
+      if (isStraightBeatdown) multiplier *= 0.9;
+    }
+
+    return { ...entry, weight: Math.max(0.0001, entry.weight * multiplier) };
+  });
+}
+
 function computeSetExactScoreDistribution(
   hg: number,
   ag: number,
@@ -2018,8 +2055,10 @@ function computeSetExactScoreDistribution(
   const canStillFinishAs = ([homeFinal, awayFinal]: [number, number]): boolean =>
     homeFinal >= hg && awayFinal >= ag;
 
-  const validHomeScores = TENNIS_SET_SCORE_HOME_TEMPLATE.filter((entry) => canStillFinishAs(entry.score));
-  const validAwayScores = TENNIS_SET_SCORE_AWAY_TEMPLATE.filter((entry) => canStillFinishAs(entry.score));
+  const homeTemplate = buildTennisSetScoreTemplate(TENNIS_SET_SCORE_HOME_TEMPLATE, pSetHomeWin, hg, ag);
+  const awayTemplate = buildTennisSetScoreTemplate(TENNIS_SET_SCORE_AWAY_TEMPLATE, 1 - pSetHomeWin, ag, hg);
+  const validHomeScores = homeTemplate.filter((entry) => canStillFinishAs(entry.score));
+  const validAwayScores = awayTemplate.filter((entry) => canStillFinishAs(entry.score));
   const homeWeightTotal = validHomeScores.reduce((acc, entry) => acc + entry.weight, 0);
   const awayWeightTotal = validAwayScores.reduce((acc, entry) => acc + entry.weight, 0);
   const homeBlockProb = mc(pSetHomeWin, 0.001, 0.999);
