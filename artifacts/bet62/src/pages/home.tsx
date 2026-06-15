@@ -3381,6 +3381,28 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
     setTimeout(() => scrollTabIntoView("sets", "instant"), 0);
   }, [expandedMatch?.id, expandedMatch?.sport, modalTab, scrollTabIntoView]);
 
+  useEffect(() => {
+    if (!expandedMatch?.isLive || (expandedMatch.sport ?? "football") !== "football") return;
+    if (expandedMatch.markets?.etExtra || expandedMatch.markets?.penExtra) return;
+    const minute = getDisplayMinute(expandedMatch);
+    if (minute < 85) return;
+    const allowedLateTabs = new Set(["todos", "resultado", "gols", "handicap"]);
+    if (!allowedLateTabs.has(modalTab)) {
+      setModalTab("todos");
+      setTimeout(() => scrollTabIntoView("todos", "instant"), 0);
+    }
+  }, [
+    expandedMatch?.id,
+    expandedMatch?.isLive,
+    expandedMatch?.sport,
+    expandedMatch?.minute,
+    expandedMatch?.status,
+    !!(expandedMatch as any)?.markets?.etExtra,
+    !!(expandedMatch as any)?.markets?.penExtra,
+    modalTab,
+    scrollTabIntoView,
+  ]);
+
   // Fetch match stats when stats tab is active
   useEffect(() => {
     if (matchViewTab !== "stats" || !expandedMatch || matchStats) return;
@@ -6513,9 +6535,9 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
     const show1tempo = liveHalf === null || liveHalf === 1;
     // show2tempo: show "2º Tempo" markets (at HT break OR during 2nd half)
     const show2tempo = liveHalf === 0 || liveHalf === 2;
-    // isLateGame: live 2nd-half football ≥80' → hide low-traffic markets, smart-filter lines
+    // isLateGame: live 2nd-half football ≥85' → keep only popular markets and most relevant lines
     const liveDisplayMin = isFootball && match.isLive ? getDisplayMinute(match) : 0;
-    const isLateGame = isFootball && match.isLive && liveHalf === 2 && liveDisplayMin >= 80 && !showET && !showPen;
+    const isLateGame = isFootball && match.isLive && liveHalf === 2 && liveDisplayMin >= 85 && !showET && !showPen;
     // Which total-goals line is most relevant late game = next line above current total goals
     const lateGameGoals = (match.homeScore ?? 0) + (match.awayScore ?? 0);
 
@@ -6576,23 +6598,30 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
                   { key: "todos",        label: "Todos" },
                   { key: "prolongamento", label: "⏱ Prorrogação" },
                 ]
-              // Regular time — all markets
-              : [
-                  { key: "todos",    label: "Todos" },
-                  { key: "resultado", label: "Resultado" },
-                  { key: "dupla",     label: "Dupla Chance" },
-                  { key: "gols",      label: "Gols" },
-                  { key: "especiais", label: "Especiais" },
-                  { key: "handicap",  label: "Handicap" },
-                  ...(show1tempo ? [{ key: "1tempo", label: "1º Tempo" }] : []),
-                  ...(show2tempo ? [{ key: "2tempo", label: "2º Tempo" }] : []),
-                  { key: "htft",       label: "HT/FT" },
-                  { key: "placar",     label: "Placar Exato" },
-                  { key: "escanteios", label: "Escanteios" },
-                  { key: "cartoes",    label: "Cartões" },
-                  { key: "asiatico",   label: "Asiático" },
-                  ...(match.leagueId ? [{ key: "jogadores", label: "⚽ Jogadores" }] : []),
-                ];
+              // Regular time — all markets, but only popular markets after 85'
+              : isLateGame
+                ? [
+                    { key: "todos", label: "Todos" },
+                    { key: "resultado", label: "Resultado" },
+                    { key: "gols", label: "Gols" },
+                    { key: "handicap", label: "Handicap" },
+                  ]
+                : [
+                    { key: "todos",    label: "Todos" },
+                    { key: "resultado", label: "Resultado" },
+                    { key: "dupla",     label: "Dupla Chance" },
+                    { key: "gols",      label: "Gols" },
+                    { key: "especiais", label: "Especiais" },
+                    { key: "handicap",  label: "Handicap" },
+                    ...(show1tempo ? [{ key: "1tempo", label: "1º Tempo" }] : []),
+                    ...(show2tempo ? [{ key: "2tempo", label: "2º Tempo" }] : []),
+                    { key: "htft",       label: "HT/FT" },
+                    { key: "placar",     label: "Placar Exato" },
+                    { key: "escanteios", label: "Escanteios" },
+                    { key: "cartoes",    label: "Cartões" },
+                    { key: "asiatico",   label: "Asiático" },
+                    ...(match.leagueId ? [{ key: "jogadores", label: "⚽ Jogadores" }] : []),
+                  ];
 
     const m = match.markets;
     const tennisExtra = isTennis ? ((m as any)?.tennisExtra as Record<string, any> | undefined) : undefined;
@@ -7372,13 +7401,6 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
         {/* ── FUTEBOL: 2º TEMPO — shown at HT and during 2nd half; hidden in late game ── */}
         {isFootball && !showET && !showPen && show2tempo && !isLateGame && (modalTab === "2tempo" || modalTab === "todos") && (
           <div>
-            {m?.secondHalf && m.secondHalf.home > 0 && (
-              <MarketGroup title="Resultado — 2º Tempo">
-                <MarketOddsBtn match={match} sel="2h-home" odd={m.secondHalf.home} market="2tempo" label={match.home} />
-                {m.secondHalf.draw > 0 && <MarketOddsBtn match={match} sel="2h-draw" odd={m.secondHalf.draw} market="2tempo" label="Empate" />}
-                <MarketOddsBtn match={match} sel="2h-away" odd={m.secondHalf.away} market="2tempo" label={match.away} />
-              </MarketGroup>
-            )}
             {m && m.totalGoals.over05 > 0 && (
               <MarketGroup title="Golos no 2º Tempo — 0.5">
                 <MarketOddsBtn match={match} sel="2h-o05g" odd={m.totalGoals.over05} market="2tempo" label="Mais de 0.5" />
@@ -7595,7 +7617,7 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
         )}
 
         {/* ── FUTEBOL: ESCANTEIOS ── */}
-        {isFootball && !showET && !showPen && (modalTab === "escanteios" || modalTab === "todos") && m && m.corners && (
+        {isFootball && !showET && !showPen && !isLateGame && (modalTab === "escanteios" || modalTab === "todos") && m && m.corners && (
           <div>
             {isLateGame ? (
               /* Late game: only the most relevant line (9.5) */
@@ -7621,7 +7643,7 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
             )}
           </div>
         )}
-        {isFootball && !showET && !showPen && modalTab === "escanteios" && m && !m.corners && (
+        {isFootball && !showET && !showPen && !isLateGame && modalTab === "escanteios" && m && !m.corners && (
           <div className="text-center text-zinc-600 py-6 text-sm">Mercado não disponível para esta partida.</div>
         )}
 
@@ -7643,7 +7665,7 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
         )}
 
         {/* ── FUTEBOL: ASIÁTICO ── */}
-        {isFootball && !showET && !showPen && (modalTab === "asiatico" || modalTab === "todos") && m && (
+        {isFootball && !showET && !showPen && !isLateGame && (modalTab === "asiatico" || modalTab === "todos") && m && (
           <div>
             {m.drawNoBet && m.drawNoBet.home > 0 && (
               <MarketGroup title="Draw No Bet (Empate Anulado)">
