@@ -4730,6 +4730,7 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
   const OddsButton = ({ match, selection, odd, market = "result", label, grow, variant = "default" }: {
     match: Match; selection: string; odd: number; market?: string; label: string; grow?: boolean; variant?: "default" | "worldcup";
   }) => {
+    if ((match.sport ?? "football") === "tennis" && selection === "draw") return null;
     const now = Date.now();
     const suspendedUntil = match.marketSuspension?.[market];
     const isSuspended = suspendedUntil !== undefined && suspendedUntil > now;
@@ -5234,7 +5235,7 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
           <div className="text-[9px] font-black uppercase tracking-widest text-amber-500 text-center">🎯 Vencedor da Final</div>
         )}
         <SuspensionBanner match={match} />
-        <div className="flex gap-2 w-full">
+        <div className="flex gap-1.5 w-full">
           {!isLiveSuspended && isPenShootout ? (<>
             <OddsButton match={match} selection="pen-home" odd={match.markets!.penExtra!.winner.home} market="penaltis" label={homeName.split(" ").slice(-1)[0]!} grow variant="worldcup" />
             <OddsButton match={match} selection="pen-away" odd={match.markets!.penExtra!.winner.away} market="penaltis" label={awayName.split(" ").slice(-1)[0]!} grow variant="worldcup" />
@@ -5248,7 +5249,7 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
               </button>
             ) : (<>
               <OddsButton match={match} selection="home" odd={match.odds.home} market="result" label={homeName.split(" ").slice(-1)[0]!} grow variant="worldcup" />
-              {match.odds.draw > 0 && <OddsButton match={match} selection="draw" odd={match.odds.draw} market="result" label="Empate" grow variant="worldcup" />}
+              {sport !== "tennis" && match.odds.draw > 0 && <OddsButton match={match} selection="draw" odd={match.odds.draw} market="result" label="Empate" grow variant="worldcup" />}
               <OddsButton match={match} selection="away" odd={match.odds.away} market="result" label={awayName.split(" ").slice(-1)[0]!} grow variant="worldcup" />
             </>)
           ) : null}
@@ -5370,7 +5371,7 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
       >
         <SuspensionBanner match={match} />
         {!isSuspendedMatch && (<>
-          <div className="flex gap-2 w-full">
+          <div className="flex gap-1.5 w-full">
             <OddsButton match={match} selection="home" odd={match.odds.home} market="result" label={hasDraw ? homeName : homeName.split(" ").slice(-1)[0]} grow variant="worldcup" />
             {hasDraw && <OddsButton match={match} selection="draw" odd={match.odds.draw} market="result" label="Empate" grow variant="worldcup" />}
             <OddsButton match={match} selection="away" odd={match.odds.away} market="result" label={hasDraw ? awayName : awayName.split(" ").slice(-1)[0]} grow variant="worldcup" />
@@ -6148,6 +6149,7 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
   // This prevents a settled set market (e.g. firstSet=SETTLED) from locking buttons
   // for ALL other markets on the same match.
   const MarketOddsBtn = ({ match, sel, odd, market, label, suspKey }: { match: Match; sel: string; odd: number; market: string; label: string; suspKey?: string }) => {
+    if ((match.sport ?? "football") === "tennis" && sel === "draw") return null;
     if (odd <= 0) return null; // settled/impossible market line — hide completely
     if (market === "result" && odd <= 1.01) return null;
     const now = Date.now();
@@ -6160,8 +6162,8 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
     if (isSusp) {
       // Show a locked placeholder so section headers don't look empty
       return (
-        <div className="flex-1 flex flex-col items-center justify-center min-w-0 h-[62px] px-0.5 rounded-[20px] border border-zinc-200 bg-white opacity-60 cursor-not-allowed select-none">
-          <span className="text-[10px] text-zinc-500 mb-0.5 leading-tight text-center truncate w-full px-0.5">{label}</span>
+        <div className="flex-1 flex flex-col items-center justify-center min-w-0 h-[62px] px-1 rounded-xl border border-zinc-200 bg-white opacity-60 cursor-not-allowed select-none">
+          <span className="text-[10px] text-zinc-500 mb-1 leading-tight text-center truncate w-full px-0.5">{label}</span>
           <svg className="text-zinc-400" width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zm-6 9c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2zm3.1-9H8.9V6c0-1.71 1.39-3.1 3.1-3.1 1.71 0 3.1 1.39 3.1 3.1v2z"/></svg>
         </div>
       );
@@ -6176,10 +6178,10 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
     return (
       <button
         {...makeTap(() => toggleBet(match, sel, odd, market, label))}
-        className={`flex-1 flex flex-col items-center justify-center min-w-0 h-[62px] px-0.5 rounded-[20px] border transition-all ${active ? "border-red-300 bg-red-50 ring-1 ring-red-200" : "border-zinc-200 bg-white hover:border-zinc-300"} ${flashClass}`}
+        className={`flex-1 flex flex-col items-center justify-center min-w-0 h-[62px] px-1 rounded-xl border transition-all ${active ? "border-red-300 bg-red-50 ring-1 ring-red-200" : "border-zinc-200 bg-white hover:border-zinc-300"} ${flashClass}`}
       >
-        <span className="text-[10px] text-zinc-500 mb-0.5 leading-tight text-center truncate w-full px-0.5">{label}</span>
-        <span className={`font-black text-[18px] leading-none tabular-nums flex items-center gap-0.5 ${active ? "text-red-500" : "text-zinc-900"}`}>
+        <span className="text-[10px] text-zinc-500 mb-1 leading-tight text-center truncate w-full px-0.5">{label}</span>
+        <span className={`text-sm font-black leading-none tabular-nums flex items-center gap-0.5 ${active ? "text-red-500" : "text-zinc-900"}`}>
           {odd.toFixed(2)}
           {oddUp   && <span className="text-green-400 text-[9px] font-black leading-none shrink-0">▲</span>}
           {oddDown && <span className="text-red-400  text-[9px] font-black leading-none shrink-0">▼</span>}
@@ -6194,7 +6196,7 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
       return (
         <div className="mb-4 last:mb-0">
           <div className="text-[10px] font-black text-zinc-500 uppercase tracking-widest mb-2 px-0.5">{title}</div>
-          <div className="grid grid-cols-2 gap-2">{children}</div>
+          <div className="grid grid-cols-2 gap-1.5">{children}</div>
         </div>
       );
     }
