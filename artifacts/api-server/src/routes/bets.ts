@@ -1048,7 +1048,13 @@ function buildPendingSelectionState(
   fallbackMatchId?: string,
 ): PendingSelectionState {
   const matchId = String(sel.matchId ?? fallbackMatchId ?? "").trim() || undefined;
-  if (!matchId) return { outcome: "pending" };
+  if (!matchId) {
+    return {
+      outcome: sel.outcome ?? "pending",
+      ...(sel.finalScore ? { finalScore: sel.finalScore } : {}),
+      ...(sel.htScore ? { htScore: sel.htScore } : {}),
+    };
+  }
 
   const finished = finishedMatchResults.get(matchId);
   if (finished) {
@@ -1073,10 +1079,19 @@ function buildPendingSelectionState(
   }
 
   const live = liveMatchState.get(matchId);
-  if (!live) return { matchId, outcome: "pending" };
+  if (!live) {
+    return {
+      matchId,
+      outcome: sel.outcome ?? "pending",
+      ...(sel.finalScore ? { finalScore: sel.finalScore } : {}),
+      ...(sel.htScore ? { htScore: sel.htScore } : {}),
+    };
+  }
   return {
     matchId,
-    outcome: "pending",
+    outcome: sel.outcome ?? "pending",
+    ...(sel.finalScore ? { finalScore: sel.finalScore } : {}),
+    ...(sel.htScore ? { htScore: sel.htScore } : {}),
     live: {
       isLive: !!live.isLive,
       ...(typeof live.status === "string" ? { status: live.status } : {}),
