@@ -2647,6 +2647,71 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
   type LineupsV2 = { confirmed: boolean; home: { formation?: string; starters: LineupsV2Player[]; bench: LineupsV2Player[] }; away: { formation?: string; starters: LineupsV2Player[]; bench: LineupsV2Player[] } };
   const [allOddsData, setAllOddsData] = useState<AllOddsMarket[] | null>(null);
   const [allOddsLoading, setAllOddsLoading] = useState(false);
+  const allOddsSections = useMemo(() => {
+    if (!allOddsData || allOddsData.length === 0) return [];
+
+    const sectionOrder = ["Principal", "Golos", "Jogadores", "Cantos", "Cartões", "Equipas", "Tempos", "Sets", "Games", "Outros"];
+    const marketOrderHints = [
+      "Resultado Final",
+      "Dupla Hipótese",
+      "Empate Anula Aposta",
+      "Handicap",
+      "Handicap Asiático",
+      "Ambas Marcam",
+      "Total de Golos",
+      "Primeira Equipa a Marcar",
+      "Última Equipa a Marcar",
+      "Marcador a Qualquer Momento",
+      "Primeiro Marcador",
+      "Último Marcador",
+      "Total de Cantos",
+      "Total de Cartões",
+      "Resultado Exato",
+    ];
+    const inferSection = (market: AllOddsMarket): string => {
+      const group = (market.group || "").toLowerCase();
+      const name = (market.name || "").toLowerCase();
+      if (group.includes("principal") || name.includes("resultado final") || name.includes("dupla hipótese") || name.includes("empate anula")) return "Principal";
+      if (group.includes("golo") || name.includes("golo") || name.includes("marcador")) return "Golos";
+      if (group.includes("jogador") || name.includes("jogador") || name.includes("assistências") || name.includes("remates") || name.includes("passes") || name.includes("desarmes") || name.includes("cartões do jogador")) return "Jogadores";
+      if (group.includes("cantos") || name.includes("cantos")) return "Cantos";
+      if (group.includes("cartões") || name.includes("cartões")) return "Cartões";
+      if (group.includes("equipas") || name.includes("equipa")) return "Equipas";
+      if (group.includes("tempos") || name.includes("tempo")) return "Tempos";
+      if (group.includes("sets") || name.includes("set")) return "Sets";
+      if (group.includes("games") || name.includes("game")) return "Games";
+      return "Outros";
+    };
+    const orderMarketName = (name: string): number => {
+      const idx = marketOrderHints.findIndex(hint => name.includes(hint));
+      return idx === -1 ? 999 : idx;
+    };
+
+    const grouped = new Map<string, Array<{ market: AllOddsMarket; originalIndex: number }>>();
+    allOddsData.forEach((market, originalIndex) => {
+      const section = inferSection(market);
+      const rows = grouped.get(section) ?? [];
+      rows.push({ market, originalIndex });
+      grouped.set(section, rows);
+    });
+
+    return Array.from(grouped.entries())
+      .sort((a, b) => {
+        const aIdx = sectionOrder.indexOf(a[0]);
+        const bIdx = sectionOrder.indexOf(b[0]);
+        return (aIdx === -1 ? 999 : aIdx) - (bIdx === -1 ? 999 : bIdx);
+      })
+      .map(([section, markets]) => ({
+        section,
+        markets: [...markets].sort((a, b) => {
+          const nameOrder = orderMarketName(a.market.name) - orderMarketName(b.market.name);
+          if (nameOrder !== 0) return nameOrder;
+          const groupOrder = a.market.group.localeCompare(b.market.group, "pt");
+          if (groupOrder !== 0) return groupOrder;
+          return a.market.name.localeCompare(b.market.name, "pt");
+        }),
+      }));
+  }, [allOddsData]);
   const [lineupsData, setLineupsData] = useState<LineupsV2 | null>(null);
   const [lineupsLoading, setLineupsLoading] = useState(false);
   type H2HMeeting = { date: string; team1: string; team2: string; score1: number; score2: number; league: string; country?: string };
@@ -10165,46 +10230,55 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
                         <div className="text-xs text-zinc-600 mt-1">Odds não disponíveis para este jogo</div>
                       </div>
                     ) : (
-                      <div className="space-y-3">
-                        {allOddsData.map((market, mi) => (
-                          <div key={mi} className="bg-zinc-950/60 rounded-lg border border-zinc-800 p-3">
-                            {market.group && market.group !== market.name && (
-                              <div className="text-[9px] font-black text-zinc-600 uppercase tracking-[0.18em] mb-1">
-                                {market.group}
-                              </div>
-                            )}
-                            <div className="text-[10px] font-black text-zinc-400 uppercase tracking-wider mb-2">{market.name}</div>
-                            <div className={`grid gap-2 ${market.choices.length === 2 ? "grid-cols-2" : market.choices.length === 3 ? "grid-cols-3" : "grid-cols-2"}`}>
-                              {market.choices.map((choice, ci) => (
-                                <button
-                                  key={ci}
-                                  onClick={() => {
-                                    const mkKey = `all_${mi}_${ci}`;
-                                    const slip = bets.find(b => b.matchId === expandedMatch.id && b.market === mkKey);
-                                    if (!slip) {
-                                      setBets(prev => [...prev.filter(b => !(b.matchId === expandedMatch.id && (b.market ?? "").startsWith(`all_${mi}_`))), {
-                                        matchId: expandedMatch.id,
-                                        matchTitle: `${expandedMatch.home} — ${expandedMatch.away}`,
-                                        odd: choice.odds,
-                                        market: mkKey,
-                                        selection: `${market.name}: ${choice.label}`,
-                                        label: choice.label,
-                                      }]);
-                                    } else {
-                                      setBets(prev => prev.filter(b => !(b.matchId === expandedMatch.id && b.market === mkKey)));
-                                    }
-                                  }}
-                                  className={`flex flex-col items-center py-2.5 px-2 rounded-md text-xs font-bold transition-all border ${
-                                    bets.find(b => b.matchId === expandedMatch.id && b.market === `all_${mi}_${ci}`)
-                                      ? "bg-red-600 border-red-500 text-white"
-                                      : "bg-zinc-800 border-zinc-700 text-zinc-300 hover:border-zinc-500 hover:text-white"
-                                  }`}
-                                >
-                                  <span className="text-[10px] text-inherit opacity-70 mb-0.5">{choice.label}</span>
-                                  <span className="font-black text-base tabular-nums">{choice.odds.toFixed(2)}</span>
-                                </button>
-                              ))}
+                      <div className="space-y-4">
+                        {allOddsSections.map(section => (
+                          <div key={section.section} className="space-y-3">
+                            <div className="flex items-center gap-2">
+                              <div className="h-px flex-1 bg-zinc-800" />
+                              <div className="text-[10px] font-black text-zinc-500 uppercase tracking-[0.18em]">{section.section}</div>
+                              <div className="h-px flex-1 bg-zinc-800" />
                             </div>
+                            {section.markets.map(({ market, originalIndex }) => (
+                              <div key={`${section.section}-${originalIndex}`} className="bg-zinc-950/60 rounded-lg border border-zinc-800 p-3">
+                                {market.group && market.group !== market.name && market.group !== section.section && (
+                                  <div className="text-[9px] font-black text-zinc-600 uppercase tracking-[0.18em] mb-1">
+                                    {market.group}
+                                  </div>
+                                )}
+                                <div className="text-[10px] font-black text-zinc-400 uppercase tracking-wider mb-2">{market.name}</div>
+                                <div className={`grid gap-2 ${market.choices.length === 2 ? "grid-cols-2" : market.choices.length === 3 ? "grid-cols-3" : "grid-cols-2"}`}>
+                                  {market.choices.map((choice, ci) => (
+                                    <button
+                                      key={ci}
+                                      onClick={() => {
+                                        const mkKey = `all_${originalIndex}_${ci}`;
+                                        const slip = bets.find(b => b.matchId === expandedMatch.id && b.market === mkKey);
+                                        if (!slip) {
+                                          setBets(prev => [...prev.filter(b => !(b.matchId === expandedMatch.id && (b.market ?? "").startsWith(`all_${originalIndex}_`))), {
+                                            matchId: expandedMatch.id,
+                                            matchTitle: `${expandedMatch.home} — ${expandedMatch.away}`,
+                                            odd: choice.odds,
+                                            market: mkKey,
+                                            selection: `${market.name}: ${choice.label}`,
+                                            label: choice.label,
+                                          }]);
+                                        } else {
+                                          setBets(prev => prev.filter(b => !(b.matchId === expandedMatch.id && b.market === mkKey)));
+                                        }
+                                      }}
+                                      className={`flex flex-col items-center py-2.5 px-2 rounded-md text-xs font-bold transition-all border ${
+                                        bets.find(b => b.matchId === expandedMatch.id && b.market === `all_${originalIndex}_${ci}`)
+                                          ? "bg-red-600 border-red-500 text-white"
+                                          : "bg-zinc-800 border-zinc-700 text-zinc-300 hover:border-zinc-500 hover:text-white"
+                                      }`}
+                                    >
+                                      <span className="text-[10px] text-inherit opacity-70 mb-0.5">{choice.label}</span>
+                                      <span className="font-black text-base tabular-nums">{choice.odds.toFixed(2)}</span>
+                                    </button>
+                                  ))}
+                                </div>
+                              </div>
+                            ))}
                           </div>
                         ))}
                       </div>
