@@ -89,6 +89,8 @@ type AdvancedMarkets = {
     gameHandicap: { line: number; home: number; away: number };
     // Live: exact score market for the current set in progress
     setExactScore?: Record<string, number>;
+    set1ExactScore?: Record<string, number>;
+    set2ExactScore?: Record<string, number>;
     currentSetNum?: number;
     // Extended pre-match odds fields
     set2Games?: { line: number; over: number; under: number };
@@ -1737,7 +1739,7 @@ function computeTennisExtras(p: number, overrides?: {
     exactSets:       { h20: overrides?.xh20 ?? es20!, h21: overrides?.xh21 ?? es21!, a02: overrides?.xa02 ?? es02!, a12: overrides?.xa12 ?? es12! },
     setHandicap:     { home: shhm15!, away: shaw15! },
     totalGames:      { line: overrides?.gamesLineRound ?? mainGamesLine.line, over: overrides?.oGames ?? mainGamesLine.over, under: overrides?.uGames ?? mainGamesLine.under },
-    totalGamesLines,
+    totalGamesLines: totalGamesLines.map((entry) => capTennisLiveOverUnderOdds(entry)),
     set1Games:       { line: set1LineApprox, over: s1go!, under: s1gu! },
     gameHandicap:    { line: overrides?.gamesLine ?? ghLine, home: overrides?.hcapH ?? ghH!, away: overrides?.hcapA ?? ghA! },
   };
@@ -1795,18 +1797,8 @@ function computeTennisPointAdjustedOdds(
   currentPoints?: [number | string, number | string],
   serving?: [boolean, boolean],
 ): { home: number; draw: number; away: number } {
-  const pointValue = (value: number | string | undefined): number => {
-    const normalized = String(value ?? "").trim().toUpperCase();
-    if (normalized === "AD" || normalized === "A") return 4;
-    if (normalized === "D" || normalized === "40A") return 3;
-    if (normalized === "40") return 3;
-    if (normalized === "30") return 2;
-    if (normalized === "15") return 1;
-    return 0;
-  };
-
-  const hPt = pointValue(currentPoints?.[0]);
-  const aPt = pointValue(currentPoints?.[1]);
+  const hPt = tennisPointValue(currentPoints?.[0]);
+  const aPt = tennisPointValue(currentPoints?.[1]);
   const ptDiff = hPt - aPt;
   const servingBonus = serving?.[0] ? 0.6 : serving?.[1] ? -0.6 : 0;
   const pressure = (hPt >= 3 || aPt >= 3) ? 1.15 : 1;
@@ -1827,6 +1819,123 @@ function computeTennisPointAdjustedOdds(
   };
 }
 
+function tennisPointValue(value: number | string | undefined): number {
+  const normalized = String(value ?? "").trim().toUpperCase();
+  if (normalized === "AD" || normalized === "A") return 4;
+  if (normalized === "D" || normalized === "40A") return 3;
+  if (normalized === "40") return 3;
+  if (normalized === "30") return 2;
+  if (normalized === "15") return 1;
+  return 0;
+}
+
+function getTennisLivePointContext(
+  currentPoints?: [number | string, number | string],
+  serving?: [boolean, boolean],
+): {
+  homePoints: number;
+  awayPoints: number;
+  pointDiff: number;
+  servingBias: number;
+  pressure: number;
+  swing: number;
+  homeTrailing: boolean;
+  awayTrailing: boolean;
+} {
+  const homePoints = tennisPointValue(currentPoints?.[0]);
+  const awayPoints = tennisPointValue(currentPoints?.[1]);
+  const pointDiff = homePoints - awayPoints;
+  const servingBias = serving?.[0] ? 0.35 : serving?.[1] ? -0.35 : 0;
+  const pressure = (homePoints >= 3 || awayPoints >= 3) ? 1.2 : (homePoints + awayPoints >= 4 ? 1.08 : 1);
+  const swing = mc((pointDiff * 0.052 + servingBias * 0.026) * pressure, -0.22, 0.22);
+  return {
+    homePoints,
+    awayPoints,
+    pointDiff,
+    servingBias,
+    pressure,
+    swing,
+    homeTrailing: pointDiff < 0,
+    awayTrailing: pointDiff > 0,
+  };
+}
+
+function capTennisLiveOdd(rawOdd: number, allowExtended = false): number {
+  if (!Number.isFinite(rawOdd) || rawOdd <= 0) return 0;
+  const odd = Math.max(1.01, +rawOdd.toFixed(2));
+  const cap = allowExtended ? 20 : 10;
+  return odd <= cap ? odd : cap;
+}
+
+function capTennisLiveHomeAwayOdds(
+  market: { home: number; away: number },
+  homeExtended: boolean,
+  awayExtended: boolean,
+): { home: number; away: number } {
+  return {
+    home: capTennisLiveOdd(market.home, homeExtended),
+    away: capTennisLiveOdd(market.away, awayExtended),
+  };
+}
+
+function capTennisLiveOverUnderOdds(
+  market: { line: number; over: number; under: number },
+  overExtended = false,
+  underExtended = false,
+): { line: number; over: number; under: number } {
+  return {
+    line: market.line,
+    over: capTennisLiveOdd(market.over, overExtended),
+    under: capTennisLiveOdd(market.under, underExtended),
+  };
+}
+
+function capTennisLiveYesNoOdds(
+  market: { yes: number; no: number },
+  yesExtended = false,
+  noExtended = false,
+): { yes: number; no: number } {
+  return {
+    yes: capTennisLiveOdd(market.yes, yesExtended),
+    no: capTennisLiveOdd(market.no, noExtended),
+  };
+}
+
+function capTennisLiveOddEvenOdds(
+  market: { odd: number; even: number },
+): { odd: number; even: number } {
+  return {
+    odd: capTennisLiveOdd(market.odd),
+    even: capTennisLiveOdd(market.even),
+  };
+}
+
+function capTennisLiveScoreMap(
+  scores: Record<string, number>,
+  homeExtended: boolean,
+  awayExtended: boolean,
+): Record<string, number> {
+  return Object.fromEntries(
+    Object.entries(scores).map(([label, odd]) => {
+      const [home, away] = label.split("-").map(Number);
+      const allowExtended = (home ?? 0) > (away ?? 0) ? homeExtended : awayExtended;
+      return [label, capTennisLiveOdd(odd, allowExtended)];
+    }),
+  );
+}
+
+function capTennisLiveScoreList(
+  scores: Array<{ label: string; odds: number }>,
+  homeExtended: boolean,
+  awayExtended: boolean,
+): Array<{ label: string; odds: number }> {
+  return scores.map((entry) => {
+    const [home, away] = entry.label.split("-").map(Number);
+    const allowExtended = (home ?? 0) > (away ?? 0) ? homeExtended : awayExtended;
+    return { ...entry, odds: capTennisLiveOdd(entry.odds, allowExtended) };
+  });
+}
+
 function computeTennisLiveOdds(
   baseOdds: { home: number; draw: number; away: number },
   sets: Array<[number, number]>,
@@ -1836,22 +1945,33 @@ function computeTennisLiveOdds(
   serving?: [boolean, boolean],
   realLiveOdds?: { home: number; away: number },
 ): { odds: { home: number; draw: number; away: number }; hasRealOdds: boolean } {
+  const pointCtx = getTennisLivePointContext(currentPoints, serving);
   if (realLiveOdds && realLiveOdds.home > 1.001 && realLiveOdds.away > 1.001) {
     // Provider live odds already include current point/server context; do not
     // apply the point-adjustment layer a second time or prices become distorted.
+    const cappedProviderOdds = capTennisLiveHomeAwayOdds(
+      {
+        home: +realLiveOdds.home.toFixed(2),
+        away: +realLiveOdds.away.toFixed(2),
+      },
+      pointCtx.homeTrailing,
+      pointCtx.awayTrailing,
+    );
     return {
       odds: {
-        home: +realLiveOdds.home.toFixed(2),
+        home: cappedProviderOdds.home,
         draw: 0,
-        away: +realLiveOdds.away.toFixed(2),
+        away: cappedProviderOdds.away,
       },
       hasRealOdds: true,
     };
   }
 
   const anchorOdds = computeTennisFallbackLiveOdds(baseOdds, sets, homeScore, awayScore, currentPoints, serving);
+  const adjustedOdds = computeTennisPointAdjustedOdds(anchorOdds, currentPoints, serving);
+  const cappedOdds = capTennisLiveHomeAwayOdds(adjustedOdds, pointCtx.homeTrailing, pointCtx.awayTrailing);
   return {
-    odds: computeTennisPointAdjustedOdds(anchorOdds, currentPoints, serving),
+    odds: { home: cappedOdds.home, draw: 0, away: cappedOdds.away },
     hasRealOdds: false,
   };
 }
@@ -1918,12 +2038,15 @@ function computeLiveTennisExtras(
   homeSetsWon: number,
   awaySetsWon: number,
   setNum: number,
+  currentPoints?: [number | string, number | string],
+  serving?: [boolean, boolean],
 ): AdvancedMarkets["tennisExtra"] {
   const baseExtras = computeTennisExtras(liveHomeP);
-  const pFreshSetHome = Math.min(0.88, Math.max(0.12, 0.5 + (liveHomeP - 0.5) * 1.25));
-  const pGame = Math.min(0.85, Math.max(0.15, 0.5 + (liveHomeP - 0.5) * 0.8));
+  const pointCtx = getTennisLivePointContext(currentPoints, serving);
+  const pFreshSetHome = Math.min(0.88, Math.max(0.12, 0.5 + (liveHomeP - 0.5) * 1.25 + pointCtx.swing * 0.35));
+  const pGame = Math.min(0.85, Math.max(0.15, 0.5 + (liveHomeP - 0.5) * 0.8 + pointCtx.swing * 0.7));
   const liveSetWinProb = (hG: number, aG: number, base: number): number =>
-    Math.min(0.97, Math.max(0.03, 0.5 + (base - 0.5) * 0.55 + (hG - aG) * 0.055));
+    Math.min(0.97, Math.max(0.03, 0.5 + (base - 0.5) * 0.55 + (hG - aG) * 0.055 + pointCtx.swing * 0.45));
   const probToHomeAway = (probHome: number, margin: number): { home: number; away: number } => {
     const [home, away] = probsToDecimalOdds([mc(probHome, 0.02, 0.98), mc(1 - probHome, 0.02, 0.98)], margin);
     return { home: home!, away: away! };
@@ -2107,36 +2230,61 @@ function computeLiveTennisExtras(
     ? canonicalTennisSetScoreOrder(Object.entries(currentSetScore).map(([label, odds]) => ({ label, odds })))
     : scoreEntry(sets[2]);
 
+  const liveFirstSet = homeSetsWon + awaySetsWon === 0 ? probToHomeAway(currentSetHomeWinProb, 1.06) : baseExtras.firstSet;
+  const liveSet2 = homeSetsWon + awaySetsWon === 1 ? probToHomeAway(currentSetHomeWinProb, 1.07) : baseExtras.set2;
+  const liveSet3 = homeSetsWon + awaySetsWon === 2 ? probToHomeAway(currentSetHomeWinProb, 1.09) : baseExtras.set3;
+  const liveSetHandicap = probToHomeAway(exactSetsProbs.h20, 1.06);
+  const liveGameHandicap = {
+    line: Math.round((expectedHomeGames - expectedAwayGames) * 2) / 2,
+    ...probToHomeAway(mc(0.5 + (expectedHomeGames - expectedAwayGames) * 0.025, 0.05, 0.95), 1.06),
+  };
+  const liveExactSets = {
+    h20: capTennisLiveOdd(xh20!, pointCtx.homeTrailing),
+    h21: capTennisLiveOdd(xh21!, pointCtx.homeTrailing),
+    a02: capTennisLiveOdd(xa02!, pointCtx.awayTrailing),
+    a12: capTennisLiveOdd(xa12!, pointCtx.awayTrailing),
+  };
+  const liveSetMatch = {
+    h11: capTennisLiveOdd(smH11!, pointCtx.homeTrailing),
+    h12: capTennisLiveOdd(smH12!, pointCtx.homeTrailing),
+    a21: capTennisLiveOdd(smA21!, pointCtx.awayTrailing),
+    a22: capTennisLiveOdd(smA22!, pointCtx.awayTrailing),
+  };
+
   return {
     ...baseExtras,
-    firstSet: homeSetsWon + awaySetsWon === 0 ? probToHomeAway(currentSetHomeWinProb, 1.06) : baseExtras.firstSet,
-    set2: homeSetsWon + awaySetsWon === 1 ? probToHomeAway(currentSetHomeWinProb, 1.07) : baseExtras.set2,
-    set3: homeSetsWon + awaySetsWon === 2 ? probToHomeAway(currentSetHomeWinProb, 1.09) : baseExtras.set3,
-    exactSets: { h20: xh20!, h21: xh21!, a02: xa02!, a12: xa12! },
-    setHandicap: probToHomeAway(exactSetsProbs.h20, 1.06),
-    totalGames,
+    firstSet: capTennisLiveHomeAwayOdds(liveFirstSet, pointCtx.homeTrailing, pointCtx.awayTrailing),
+    set2: capTennisLiveHomeAwayOdds(liveSet2, pointCtx.homeTrailing, pointCtx.awayTrailing),
+    set3: capTennisLiveHomeAwayOdds(liveSet3, pointCtx.homeTrailing, pointCtx.awayTrailing),
+    exactSets: liveExactSets,
+    setHandicap: capTennisLiveHomeAwayOdds(liveSetHandicap, pointCtx.homeTrailing, pointCtx.awayTrailing),
+    totalGames: capTennisLiveOverUnderOdds(totalGames),
     totalGamesLines,
-    set1Games: { line: set1GamesLine, over: s1go!, under: s1gu! },
-    set2Games: { line: set2GamesLine, over: s2go!, under: s2gu! },
+    set1Games: capTennisLiveOverUnderOdds({ line: set1GamesLine, over: s1go!, under: s1gu! }),
+    set2Games: capTennisLiveOverUnderOdds({ line: set2GamesLine, over: s2go!, under: s2gu! }),
     gameHandicap: {
-      line: Math.round((expectedHomeGames - expectedAwayGames) * 2) / 2,
-      ...probToHomeAway(mc(0.5 + (expectedHomeGames - expectedAwayGames) * 0.025, 0.05, 0.95), 1.06),
+      line: liveGameHandicap.line,
+      ...capTennisLiveHomeAwayOdds(liveGameHandicap, pointCtx.homeTrailing, pointCtx.awayTrailing),
     },
-    homePlayerGames: { line: homePlayerLine, over: hpgOver!, under: hpgUnder! },
-    awayPlayerGames: { line: awayPlayerLine, over: apgOver!, under: apgUnder! },
-    oddEvenGames: { odd: probToYesNo(oddEvenGamesProb, 1.06).yes, even: probToYesNo(oddEvenGamesProb, 1.06).no },
-    oddEven1st: { odd: probToYesNo(oddEven1stProb, 1.06).yes, even: probToYesNo(oddEven1stProb, 1.06).no },
-    oddEven2nd: { odd: probToYesNo(oddEven2ndProb, 1.06).yes, even: probToYesNo(oddEven2ndProb, 1.06).no },
-    winAtLeast1P1: probToYesNo(winAtLeast1P1Prob, 1.06),
-    winAtLeast1P2: probToYesNo(winAtLeast1P2Prob, 1.06),
-    setMatch: { h11: smH11!, h12: smH12!, a21: smA21!, a22: smA22! },
-    setExactScore: currentSetScore,
-    set1ExactScore: currentSetIndex === 0 ? currentSetScore : (sets[0] ? { [`${sets[0][0]}-${sets[0][1]}`]: 1.01 } : undefined),
-    set2ExactScore: currentSetIndex === 1 ? currentSetScore : (sets[1] ? { [`${sets[1][0]}-${sets[1][1]}`]: 1.01 } : undefined),
+    homePlayerGames: capTennisLiveOverUnderOdds({ line: homePlayerLine, over: hpgOver!, under: hpgUnder! }, pointCtx.homeTrailing, pointCtx.awayTrailing),
+    awayPlayerGames: capTennisLiveOverUnderOdds({ line: awayPlayerLine, over: apgOver!, under: apgUnder! }, pointCtx.awayTrailing, pointCtx.homeTrailing),
+    oddEvenGames: capTennisLiveOddEvenOdds({ odd: probToYesNo(oddEvenGamesProb, 1.06).yes, even: probToYesNo(oddEvenGamesProb, 1.06).no }),
+    oddEven1st: capTennisLiveOddEvenOdds({ odd: probToYesNo(oddEven1stProb, 1.06).yes, even: probToYesNo(oddEven1stProb, 1.06).no }),
+    oddEven2nd: capTennisLiveOddEvenOdds({ odd: probToYesNo(oddEven2ndProb, 1.06).yes, even: probToYesNo(oddEven2ndProb, 1.06).no }),
+    winAtLeast1P1: capTennisLiveYesNoOdds(probToYesNo(winAtLeast1P1Prob, 1.06), pointCtx.homeTrailing, pointCtx.awayTrailing),
+    winAtLeast1P2: capTennisLiveYesNoOdds(probToYesNo(winAtLeast1P2Prob, 1.06), pointCtx.awayTrailing, pointCtx.homeTrailing),
+    setMatch: liveSetMatch,
+    setExactScore: capTennisLiveScoreMap(currentSetScore, pointCtx.homeTrailing, pointCtx.awayTrailing),
+    set1ExactScore: currentSetIndex === 0
+      ? capTennisLiveScoreMap(currentSetScore, pointCtx.homeTrailing, pointCtx.awayTrailing)
+      : (sets[0] ? { [`${sets[0][0]}-${sets[0][1]}`]: 1.01 } : undefined),
+    set2ExactScore: currentSetIndex === 1
+      ? capTennisLiveScoreMap(currentSetScore, pointCtx.homeTrailing, pointCtx.awayTrailing)
+      : (sets[1] ? { [`${sets[1][0]}-${sets[1][1]}`]: 1.01 } : undefined),
     currentSetNum: setNum,
-    score1st,
-    score2nd,
-    ...(score3rd.length > 0 ? { score3rd } : {}),
+    score1st: capTennisLiveScoreList(score1st, pointCtx.homeTrailing, pointCtx.awayTrailing),
+    score2nd: capTennisLiveScoreList(score2nd, pointCtx.homeTrailing, pointCtx.awayTrailing),
+    ...(score3rd.length > 0 ? { score3rd: capTennisLiveScoreList(score3rd, pointCtx.homeTrailing, pointCtx.awayTrailing) } : {}),
   };
 }
 
@@ -6809,21 +6957,7 @@ function buildTennisLiveMatches(
       else if (aGs === "AD")              { hPt = 40;   aPt = "AD"; }
       else                                { hPt = hGs;  aPt = aGs; }
 
-      // ── Live odds: react to sets + games within set + current game points ──
-      const setsDiff  = homeScore - awayScore; // sets won difference
-
-      // Games in current set (last entry of sets array = set in progress)
-      const curSetH   = sets.length > 0 ? (sets[sets.length - 1]?.[0] ?? 0) : 0;
-      const curSetA   = sets.length > 0 ? (sets[sets.length - 1]?.[1] ?? 0) : 0;
-      const gamesDiff = curSetH - curSetA;
-
-      // Current game point values: 0→0, 15→1, 30→2, 40→3, AD→4
-      const PT: Record<string, number> = { "": 0, "0": 0, "15": 1, "30": 2, "40": 3, "AD": 4 };
-      const hPtN  = PT[p0.game_score] ?? 0;
-      const aPtN  = PT[p1.game_score] ?? 0;
-      const ptDiff = hPtN - aPtN;
-
-      // Serving advantage: server has a slight edge (~1 pt weight)
+      // Serving advantage: server has a slight edge in live tennis pricing.
       const isServeTrue = (v: unknown): boolean => {
         const s = String(v ?? "").trim().toLowerCase();
         return s === "true" || s === "1" || s === "yes";
@@ -6839,11 +6973,6 @@ function buildTennisLiveMatches(
       })();
       const p0Serving = serveFromMatch ? serveFromMatch[0] : isServeTrue(getServeVal(p0));
       const p1Serving = serveFromMatch ? serveFromMatch[1] : isServeTrue(getServeVal(p1));
-      const servingBonus = p0Serving ? 0.5 : p1Serving ? -0.5 : 0;
-
-      // Weighted composite: 1 set ≈ 6 games ≈ 24 pts; scale accordingly
-      const advantage = setsDiff * 0.22 + gamesDiff * 0.042 + ptDiff * 0.012 + servingBonus * 0.008;
-      const factor    = Math.min(0.55, Math.abs(advantage));
 
       // Use real pre-match odds from cache (populated by getTennisOdds) as base.
       // Fall back to a balanced model only if we have no cached data yet.
@@ -6851,24 +6980,24 @@ function buildTennisLiveMatches(
       const baseOdds = cached
         ? { home: cached.home, draw: 0, away: cached.away }
         : makeOddsFromTeams(p0.name, p1.name);
-
-      const liveOdds = advantage === 0
-        ? { home: baseOdds.home, draw: 0, away: baseOdds.away }
-        : advantage > 0
-          ? { home: Math.max(1.01, +(baseOdds.home * (1 - factor)).toFixed(2)), draw: 0, away: Math.min(50, +(baseOdds.away * (1 + factor)).toFixed(2)) }
-          : { home: Math.min(50, +(baseOdds.home * (1 + factor)).toFixed(2)), draw: 0, away: Math.max(1.01, +(baseOdds.away * (1 - factor)).toFixed(2)) };
+      const currentPoints: [number | string, number | string] = [hPt, aPt];
+      const serving: [boolean, boolean] = [p0Serving, p1Serving];
+      const liveOddsState = computeTennisLiveOdds(baseOdds, sets, homeScore, awayScore, currentPoints, serving);
+      const liveOdds = liveOddsState.odds;
 
       const liveHomeP = liveOdds.home > 0 && liveOdds.away > 0
         ? (1 / liveOdds.home) / (1 / liveOdds.home + 1 / liveOdds.away)
         : 0.5;
 
       // Placar Exato do Set — negative-binomial model from current game score
+      const curSetH = sets.length > 0 ? (sets[sets.length - 1]?.[0] ?? 0) : 0;
+      const curSetA = sets.length > 0 ? (sets[sets.length - 1]?.[1] ?? 0) : 0;
       const pGame = Math.min(0.85, Math.max(0.15, 0.5 + (liveHomeP - 0.5) * 0.8));
       const setExactScore = computeSetExactScoreOdds(curSetH, curSetA, pGame);
 
       // ── Per-set winner markets: numDoneSets = sets fully won by either side ─
       const numDoneSets = homeScore + awayScore;
-      const liveTennisExtras = computeLiveTennisExtras(liveHomeP, sets, homeScore, awayScore, setNum);
+      const liveTennisExtras = computeLiveTennisExtras(liveHomeP, sets, homeScore, awayScore, setNum, currentPoints, serving);
 
       // Completed set markets are permanently settled. Future set markets stay
       // locked until their respective set actually starts.
@@ -6880,8 +7009,6 @@ function buildTennisLiveMatches(
       if (setNum < 2) phaseHoldSusp["set2"]         = SETTLED;
       if (setNum < 3) phaseHoldSusp["set3"]         = SETTLED;
 
-      const currentPoints: [number | string, number | string] = [hPt, aPt];
-      const serving: [boolean, boolean] = [p0Serving, p1Serving];
       const suspPts: [number | string, number | string] = [
         hPt === "D" ? "40" : hPt,
         aPt === "D" ? "40" : aPt,
@@ -6955,7 +7082,7 @@ function buildTennisLiveMatches(
         awayScore,
         minute:           setNum,
         status:           m.status,
-        hasRealOdds:      !!cached,
+        hasRealOdds:      liveOddsState.hasRealOdds,
         odds:             liveOdds,
         markets:          tennisOnlyMarkets,
         events:           [],
@@ -9266,7 +9393,7 @@ function buildTennisLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
     const v2HomeP = liveOdds.home > 0 && liveOdds.away > 0
       ? (1 / liveOdds.home) / (1 / liveOdds.home + 1 / liveOdds.away)
       : 0.5;
-    const v2TennisExtra = computeLiveTennisExtras(v2HomeP, sets, homeScore, awayScore, setNum);
+    const v2TennisExtra = computeLiveTennisExtras(v2HomeP, sets, homeScore, awayScore, currentSetNum, currentPoints, serving);
 
     const v2Markets = {
       ...makeAdvancedMarketsFromTeams(homeTeam, awayTeam),
@@ -9649,7 +9776,7 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
         odds: liveOdds,
         markets: {
           ...makeAdvancedMarketsFromTeams(up.home, up.away),
-          tennisExtra: computeLiveTennisExtras(homeProb, sets, homeSetsWon, awaySetsWon, currentSetNum),
+          tennisExtra: computeLiveTennisExtras(homeProb, sets, homeSetsWon, awaySetsWon, currentSetNum, currentPoints, serving),
         } as AdvancedMarkets,
         events: [],
         _liveExtra: { sets, ...(currentPoints ? { currentPoints } : {}), ...(serving ? { serving } : {}) },
@@ -10422,17 +10549,7 @@ async function buildTennisLiveV1(): Promise<LiveMatchState[]> {
           const pHome = mc(adjH + adjA > 0 ? adjH / (adjH + adjA) : 0.5, 0.08, 0.92);
           return {
             ...makeAdvancedMarketsFromTeams(home, away),
-            tennisExtra: {
-              ...computeTennisExtras(pHome),
-              setExactScore: computeSetExactScoreOdds(
-                sets[Math.max(0, Math.min(2, setNum - 1))]?.[0] ?? 0,
-                sets[Math.max(0, Math.min(2, setNum - 1))]?.[1] ?? 0,
-                pHome,
-              ),
-              currentSetNum: setNum,
-              ...(seededSetScoreOdds?.score1st?.length ? { score1st: seededSetScoreOdds.score1st } : {}),
-              ...(seededSetScoreOdds?.score2nd?.length ? { score2nd: seededSetScoreOdds.score2nd } : {}),
-            },
+            tennisExtra: computeLiveTennisExtras(pHome, sets, homeScore, awayScore, setNum, currentPoints, serving),
           };
         })(),
         events: [],
