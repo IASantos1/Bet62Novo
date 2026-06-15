@@ -1986,13 +1986,15 @@ function clampTennisSetCorrectScoreOdd(rawOdd: number): number {
 }
 
 const TENNIS_SET_SCORE_HOME_TEMPLATE: Array<{ score: [number, number]; weight: number }> = [
-  { score: [6, 0], weight: 0.05 },
-  { score: [6, 1], weight: 0.10 },
-  { score: [6, 2], weight: 0.18 },
+  // Base winner-block distribution:
+  // 6-0 < 6-1 < 6-2 < 6-3 < 6-4, with 7-5 and 7-6 still meaningful.
+  { score: [6, 0], weight: 0.03 },
+  { score: [6, 1], weight: 0.08 },
+  { score: [6, 2], weight: 0.16 },
   { score: [6, 3], weight: 0.22 },
-  { score: [6, 4], weight: 0.20 },
+  { score: [6, 4], weight: 0.24 },
   { score: [7, 5], weight: 0.15 },
-  { score: [7, 6], weight: 0.10 },
+  { score: [7, 6], weight: 0.12 },
 ];
 
 const TENNIS_SET_SCORE_AWAY_TEMPLATE: Array<{ score: [number, number]; weight: number }> =
