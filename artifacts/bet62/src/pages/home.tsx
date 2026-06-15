@@ -6194,8 +6194,15 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
   };
 
   const MarketGrid2Group = ({ title, children }: { title: string; children: ReactNode }) => {
-    const tab = useContext(MarketTabCtx);
-    const collapsible = tab === "todos";
+    const collapsible = false;
+    if (!collapsible) {
+      return (
+        <div className="mb-4 last:mb-0">
+          <div className="text-[10px] font-black text-zinc-500 uppercase tracking-widest mb-2 px-0.5">{title}</div>
+          <div className="grid grid-cols-2 gap-2">{children}</div>
+        </div>
+      );
+    }
     const seq = useContext(MarketGroupSeqCtx);
     const idx = useMemo(() => seq?.next() ?? 9999, []); // eslint-disable-line react-hooks/exhaustive-deps
     const childCount = Children.count(children);
@@ -6209,14 +6216,6 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
       if (openCtx) openCtx.setOpen(key, next);
       else setLocalOpen(next);
     };
-    if (!collapsible) {
-      return (
-        <div className="mb-4 last:mb-0">
-          <div className="text-[10px] font-black text-zinc-500 uppercase tracking-widest mb-2 px-0.5">{title}</div>
-          <div className="grid grid-cols-2 gap-2">{children}</div>
-        </div>
-      );
-    }
     return (
       <div className="mb-1.5 last:mb-0 border border-zinc-800 rounded-lg overflow-hidden">
         <button
@@ -6239,8 +6238,15 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
   };
 
   const MarketGroup = ({ title, children }: { title: string; children: ReactNode }) => {
-    const tab = useContext(MarketTabCtx);
-    const collapsible = tab === "todos";
+    const collapsible = false;
+    if (!collapsible) {
+      return (
+        <div className="mb-4 last:mb-0">
+          <div className="text-[10px] font-black text-zinc-500 uppercase tracking-widest mb-2 px-0.5">{title}</div>
+          <div className="flex gap-2">{children}</div>
+        </div>
+      );
+    }
     const seq = useContext(MarketGroupSeqCtx);
     const idx = useMemo(() => seq?.next() ?? 9999, []); // eslint-disable-line react-hooks/exhaustive-deps
     const childCount = Children.count(children);
@@ -6254,15 +6260,6 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
       if (openCtx) openCtx.setOpen(key, next);
       else setLocalOpen(next);
     };
-
-    if (!collapsible) {
-      return (
-        <div className="mb-4 last:mb-0">
-          <div className="text-[10px] font-black text-zinc-500 uppercase tracking-widest mb-2 px-0.5">{title}</div>
-          <div className="flex gap-2">{children}</div>
-        </div>
-      );
-    }
 
     return (
       <div className="mb-1.5 last:mb-0 border border-zinc-800 rounded-lg overflow-hidden">
@@ -6286,32 +6283,10 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
   };
 
   const MarketAccordionSection = ({ title, defaultOpen = false, count, children }: { title: string; defaultOpen?: boolean; count?: number; children: ReactNode }) => {
-    const openCtx = useContext(MarketGroupOpenCtx);
-    const key = `${openCtx?.matchId ?? "x"}:acc:${title}`;
-    const [localOpen, setLocalOpen] = useState(defaultOpen);
-    const open = openCtx ? openCtx.getOpen(key, defaultOpen) : localOpen;
-    const setOpen = (updater: boolean | ((prev: boolean) => boolean)) => {
-      const next = typeof updater === "function" ? (updater as (p: boolean) => boolean)(open) : updater;
-      if (openCtx) openCtx.setOpen(key, next);
-      else setLocalOpen(next);
-    };
     return (
-      <div className="mb-1.5 last:mb-0 border border-zinc-800 rounded-lg overflow-hidden">
-        <button
-          className="w-full flex items-center justify-between px-3 py-2.5 text-left bg-zinc-800/60 hover:bg-zinc-800 active:bg-zinc-700 transition-colors"
-          {...makeTap(() => setOpen(o => !o))}
-        >
-          <span className="text-[10px] font-black text-zinc-300 uppercase tracking-widest">{title}</span>
-          <div className="flex items-center gap-2">
-            {count != null && <span className="text-[10px] font-bold text-zinc-500 tabular-nums">{count}</span>}
-            <ChevronDown size={14} className={`text-zinc-500 transition-transform duration-200 ${open ? "rotate-180" : ""}`} />
-          </div>
-        </button>
-        {open && (
-          <div className="px-3 py-3">
-            {children}
-          </div>
-        )}
+      <div className="mb-4 last:mb-0" data-count={count} data-default-open={defaultOpen ? "1" : undefined}>
+        <div className="text-[10px] font-black text-zinc-500 uppercase tracking-widest mb-2 px-0.5">{title}</div>
+        {children}
       </div>
     );
   };
