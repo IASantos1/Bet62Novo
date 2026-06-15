@@ -10168,6 +10168,11 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
                       <div className="space-y-3">
                         {allOddsData.map((market, mi) => (
                           <div key={mi} className="bg-zinc-950/60 rounded-lg border border-zinc-800 p-3">
+                            {market.group && market.group !== market.name && (
+                              <div className="text-[9px] font-black text-zinc-600 uppercase tracking-[0.18em] mb-1">
+                                {market.group}
+                              </div>
+                            )}
                             <div className="text-[10px] font-black text-zinc-400 uppercase tracking-wider mb-2">{market.name}</div>
                             <div className={`grid gap-2 ${market.choices.length === 2 ? "grid-cols-2" : market.choices.length === 3 ? "grid-cols-3" : "grid-cols-2"}`}>
                               {market.choices.map((choice, ci) => (

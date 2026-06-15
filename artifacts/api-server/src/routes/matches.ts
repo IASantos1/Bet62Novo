@@ -16310,6 +16310,30 @@ const MARKET_NAME_PT: Record<string, string> = {
   "Draw no bet":           "Empate Anula Aposta",
   "Both teams to score":   "Ambas Marcam",
   "Match goals":           "Total de Golos",
+  "Team goals":            "Golos da Equipa",
+  "First team to score":   "Primeira Equipa a Marcar",
+  "Last team to score":    "Última Equipa a Marcar",
+  "Method of first goal":  "Método do Primeiro Golo",
+  "Odd/even goals":        "Golos Ímpar/Par",
+  "Total corners":         "Total de Cantos",
+  "Corners":               "Cantos",
+  "Total cards":           "Total de Cartões",
+  "Cards":                 "Cartões",
+  "Asian handicap":        "Handicap Asiático",
+  "Handicap":              "Handicap",
+  "To qualify":            "Apura-se",
+  "Next goal":             "Próximo Golo",
+  "Next team to score":    "Próxima Equipa a Marcar",
+  "Goalscorer":            "Marcador",
+  "Anytime goalscorer":    "Marcador a Qualquer Momento",
+  "First goalscorer":      "Primeiro Marcador",
+  "Last goalscorer":       "Último Marcador",
+  "Player assists":        "Assistências do Jogador",
+  "Player shots":          "Remates do Jogador",
+  "Player shots on target":"Remates à Baliza do Jogador",
+  "Player passes":         "Passes do Jogador",
+  "Player tackles":        "Desarmes do Jogador",
+  "Player bookings":       "Cartões do Jogador",
   "1st quarter winner":    "Vencedor 1º Quarto",
   "1st half winner":       "Vencedor 1º Tempo",
   "Point spread":          "Handicap de Pontos",
@@ -16320,16 +16344,89 @@ const MARKET_NAME_PT: Record<string, string> = {
   "Correct score":         "Resultado Exato",
 };
 
+const MARKET_GROUP_PT: Record<string, string> = {
+  "Main": "Principal",
+  "Goals": "Golos",
+  "Goal Lines": "Linhas de Golos",
+  "Corners": "Cantos",
+  "Cards": "Cartões",
+  "Player Props": "Jogadores",
+  "Players": "Jogadores",
+  "Team Props": "Equipas",
+  "Halves": "Tempos",
+  "Sets": "Sets",
+  "Games": "Games",
+};
+
 const CHOICE_LABEL_PT: Record<string, string> = {
   "1": "Casa", "X": "Empate", "2": "Fora",
   "1X": "Casa/Empate", "X2": "Empate/Fora", "12": "Casa/Fora",
   "Yes": "Sim", "No": "Não",
   "Over": "Mais", "Under": "Menos",
   "Home": "Casa", "Away": "Fora",
+  "Odd": "Ímpar", "Even": "Par",
+  "No goalscorer": "Sem Marcador",
+  "No goal scorer": "Sem Marcador",
+  "Any other home win": "Outra Vitória Casa",
+  "Any other away win": "Outra Vitória Fora",
+  "Any other draw": "Outro Empate",
 };
 
+function titleCaseWords(raw: string): string {
+  return raw
+    .split(/\s+/)
+    .filter(Boolean)
+    .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(" ");
+}
+
 function translateMarketNamePT(raw: string): string {
-  return MARKET_NAME_PT[raw] ?? raw;
+  const exact = MARKET_NAME_PT[raw];
+  if (exact) return exact;
+
+  const trimmed = String(raw ?? "").trim();
+  if (!trimmed) return trimmed;
+
+  const patterns: Array<[RegExp, (m: RegExpMatchArray) => string]> = [
+    [/^Player shots on target (.+)$/i, m => `Remates à Baliza — ${m[1]}`],
+    [/^Player shots (.+)$/i, m => `Remates — ${m[1]}`],
+    [/^Player passes (.+)$/i, m => `Passes — ${m[1]}`],
+    [/^Player tackles (.+)$/i, m => `Desarmes — ${m[1]}`],
+    [/^Player assists (.+)$/i, m => `Assistências — ${m[1]}`],
+    [/^Player bookings (.+)$/i, m => `Cartões — ${m[1]}`],
+    [/^First goalscorer$/i, () => "Primeiro Marcador"],
+    [/^Last goalscorer$/i, () => "Último Marcador"],
+    [/^Anytime goalscorer$/i, () => "Marcador a Qualquer Momento"],
+    [/^Over\/Under (.+)$/i, m => `Mais/Menos — ${m[1]}`],
+    [/^Total goals (.+)$/i, m => `Total de Golos — ${m[1]}`],
+    [/^Total corners (.+)$/i, m => `Total de Cantos — ${m[1]}`],
+    [/^Total cards (.+)$/i, m => `Total de Cartões — ${m[1]}`],
+  ];
+
+  for (const [pattern, formatter] of patterns) {
+    const match = trimmed.match(pattern);
+    if (match) return formatter(match);
+  }
+
+  return trimmed;
+}
+
+function translateMarketGroupPT(raw: string): string {
+  const exact = MARKET_GROUP_PT[raw];
+  if (exact) return exact;
+  const trimmed = String(raw ?? "").trim();
+  if (!trimmed) return trimmed;
+  return titleCaseWords(trimmed);
+}
+
+function translateChoiceLabelPT(raw: string): string {
+  const exact = CHOICE_LABEL_PT[raw];
+  if (exact) return exact;
+  const trimmed = String(raw ?? "").trim();
+  if (!trimmed) return trimmed;
+  if (/^over\s+/i.test(trimmed)) return trimmed.replace(/^over\s+/i, "Mais de ");
+  if (/^under\s+/i.test(trimmed)) return trimmed.replace(/^under\s+/i, "Menos de ");
+  return trimmed;
 }
 
 function v2SportBase(sport: string): string | null {
@@ -16373,11 +16470,11 @@ router.get("/v2-match-odds", async (req: Request, res: Response) => {
       .filter(m => (m.choices?.length ?? 0) > 0)
       .map(m => ({
         name: translateMarketNamePT(m.marketName ?? ""),
-        group: m.marketGroup ?? "",
+        group: translateMarketGroupPT(m.marketGroup ?? ""),
         choices: (m.choices ?? [])
           .map(c => ({
             name: c.name ?? "",
-            label: CHOICE_LABEL_PT[c.name ?? ""] ?? (c.name ?? ""),
+            label: translateChoiceLabelPT(c.name ?? ""),
             odds: fractionalToDecimal(c.fractionalValue ?? ""),
           }))
           .filter(c => c.odds >= 1.01),
