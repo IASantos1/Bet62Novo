@@ -6556,6 +6556,7 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
         {/* ── FUTEBOL: GOLS ── */}
         {isFootball && !showET && !showPen && (modalTab === "gols" || modalTab === "todos") && m && m.totalGoals.over25 > 0 && (
           <div>
+            <div className="text-[10px] font-black text-zinc-500 uppercase tracking-widest mb-2 px-0.5">Totais de Golos</div>
             {isLateGame ? (() => {
               // Late game: show only the 1 most relevant open line (currentGoals + 0.5)
               const tgMap = [
