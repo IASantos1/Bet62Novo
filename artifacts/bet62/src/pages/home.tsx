@@ -7608,7 +7608,7 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
                 <>
                   {playerMarkets.home && renderTeamSection(playerMarkets.home, true)}
                   {playerMarkets.away && renderTeamSection(playerMarkets.away, false)}
-                  <div className="text-center text-zinc-700 text-xs pt-1 pb-2">Odds do provider quando disponíveis; props sem feed direto continuam com apoio estatístico da época</div>
+                  <div className="text-center text-zinc-700 text-xs pt-1 pb-2">Odds e linhas reais do provider quando disponíveis; props sem feed direto continuam com apoio estatístico da época</div>
                 </>
               );
             })()}
