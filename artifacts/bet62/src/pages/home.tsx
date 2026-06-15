@@ -2647,6 +2647,71 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
   type LineupsV2 = { confirmed: boolean; home: { formation?: string; starters: LineupsV2Player[]; bench: LineupsV2Player[] }; away: { formation?: string; starters: LineupsV2Player[]; bench: LineupsV2Player[] } };
   const [allOddsData, setAllOddsData] = useState<AllOddsMarket[] | null>(null);
   const [allOddsLoading, setAllOddsLoading] = useState(false);
+  const allOddsSections = useMemo(() => {
+    if (!allOddsData || allOddsData.length === 0) return [];
+
+    const sectionOrder = ["Principal", "Golos", "Jogadores", "Cantos", "Cartões", "Equipas", "Tempos", "Sets", "Games", "Outros"];
+    const marketOrderHints = [
+      "Resultado Final",
+      "Dupla Hipótese",
+      "Empate Anula Aposta",
+      "Handicap",
+      "Handicap Asiático",
+      "Ambas Marcam",
+      "Total de Golos",
+      "Primeira Equipa a Marcar",
+      "Última Equipa a Marcar",
+      "Marcador a Qualquer Momento",
+      "Primeiro Marcador",
+      "Último Marcador",
+      "Total de Cantos",
+      "Total de Cartões",
+      "Resultado Exato",
+    ];
+    const inferSection = (market: AllOddsMarket): string => {
+      const group = (market.group || "").toLowerCase();
+      const name = (market.name || "").toLowerCase();
+      if (group.includes("principal") || name.includes("resultado final") || name.includes("dupla hipótese") || name.includes("empate anula")) return "Principal";
+      if (group.includes("golo") || name.includes("golo") || name.includes("marcador")) return "Golos";
+      if (group.includes("jogador") || name.includes("jogador") || name.includes("assistências") || name.includes("remates") || name.includes("passes") || name.includes("desarmes") || name.includes("cartões do jogador")) return "Jogadores";
+      if (group.includes("cantos") || name.includes("cantos")) return "Cantos";
+      if (group.includes("cartões") || name.includes("cartões")) return "Cartões";
+      if (group.includes("equipas") || name.includes("equipa")) return "Equipas";
+      if (group.includes("tempos") || name.includes("tempo")) return "Tempos";
+      if (group.includes("sets") || name.includes("set")) return "Sets";
+      if (group.includes("games") || name.includes("game")) return "Games";
+      return "Outros";
+    };
+    const orderMarketName = (name: string): number => {
+      const idx = marketOrderHints.findIndex(hint => name.includes(hint));
+      return idx === -1 ? 999 : idx;
+    };
+
+    const grouped = new Map<string, Array<{ market: AllOddsMarket; originalIndex: number }>>();
+    allOddsData.forEach((market, originalIndex) => {
+      const section = inferSection(market);
+      const rows = grouped.get(section) ?? [];
+      rows.push({ market, originalIndex });
+      grouped.set(section, rows);
+    });
+
+    return Array.from(grouped.entries())
+      .sort((a, b) => {
+        const aIdx = sectionOrder.indexOf(a[0]);
+        const bIdx = sectionOrder.indexOf(b[0]);
+        return (aIdx === -1 ? 999 : aIdx) - (bIdx === -1 ? 999 : bIdx);
+      })
+      .map(([section, markets]) => ({
+        section,
+        markets: [...markets].sort((a, b) => {
+          const nameOrder = orderMarketName(a.market.name) - orderMarketName(b.market.name);
+          if (nameOrder !== 0) return nameOrder;
+          const groupOrder = a.market.group.localeCompare(b.market.group, "pt");
+          if (groupOrder !== 0) return groupOrder;
+          return a.market.name.localeCompare(b.market.name, "pt");
+        }),
+      }));
+  }, [allOddsData]);
   const [lineupsData, setLineupsData] = useState<LineupsV2 | null>(null);
   const [lineupsLoading, setLineupsLoading] = useState(false);
   type H2HMeeting = { date: string; team1: string; team2: string; score1: number; score2: number; league: string; country?: string };
@@ -2655,14 +2720,27 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
   const [confrontosLoading, setConfrontosLoading] = useState(false);
 
   // Player markets (football "Jogadores" tab) — per-match, filtered to the two match teams
-  type PlayerMarket = { id: string; name: string; team: string; teamId: string; appearances: number; stat: number; odds: number };
+  type PlayerMarket = { id: string; name: string; team: string; teamId: string; appearances: number; stat: number; odds: number; line?: number; side?: "over" | "under" };
   type TeamPlayerMarkets = {
     teamName: string; teamId: string;
     anytimeScorers: PlayerMarket[];
+    firstScorers: PlayerMarket[];
+    lastScorers: PlayerMarket[];
+    twoPlusGoals: PlayerMarket[];
+    hatTricks: PlayerMarket[];
+    notToScore: PlayerMarket[];
     firstHalfScorers: PlayerMarket[];
     secondHalfScorers: PlayerMarket[];
+    assists: PlayerMarket[];
+    assistLines: PlayerMarket[];
+    shots: PlayerMarket[];
+    shotsOnTarget: PlayerMarket[];
+    passes: PlayerMarket[];
+    tackles: PlayerMarket[];
     scoreAndAssist: PlayerMarket[];
     bookings: PlayerMarket[];
+    bookingLines: PlayerMarket[];
+    redCards: PlayerMarket[];
   };
   type PlayerMarketsData = { leagueName: string; country: string; home: TeamPlayerMarkets | null; away: TeamPlayerMarkets | null };
   const [playerMarkets, setPlayerMarkets] = useState<PlayerMarketsData | null>(null);
@@ -3359,7 +3437,8 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
     setPlayerMarketsLoading(true);
     setPlayerMarkets(null);
     setPlayerMarketsMatchId(mid);
-    const p = new URLSearchParams({ homeTeam: expandedMatch.home, awayTeam: expandedMatch.away });
+    const rawId = String(expandedMatch.id).replace(/^[a-z]+-v2-/, "");
+    const p = new URLSearchParams({ homeTeam: expandedMatch.home, awayTeam: expandedMatch.away, matchId: rawId });
     fetch(`/api/matches/football-player-markets/${encodeURIComponent(expandedMatch.leagueId)}?${p}`)
       .then(r => r.ok ? r.json() : null)
       .then(d => { if (d) setPlayerMarkets(d as PlayerMarketsData); })
@@ -7509,29 +7588,82 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
               <div className="text-center text-zinc-600 py-10 text-sm">Equipas não encontradas nas estatísticas desta liga.</div>
             )}
             {!playerMarketsLoading && playerMarkets && (playerMarkets.home || playerMarkets.away) && (() => {
-              type PMRow = { id: string; name: string; stat: number; appearances: number; odds: number };
-              const pmList = (rows: PMRow[], selPrefix: string, market: string, label: string, sublabel: (p: PMRow) => string) => rows.length === 0 ? null : (
-                <div className="mb-3">
-                  <div className={`text-xs font-semibold uppercase tracking-wider px-1 mb-1.5 ${
-                    selPrefix.startsWith("pm-gol")  ? "text-red-400"    :
-                    selPrefix.startsWith("pm-fh")   ? "text-orange-400" :
-                    selPrefix.startsWith("pm-sh")   ? "text-amber-400"  :
-                    selPrefix.startsWith("pm-sa")   ? "text-emerald-400":
-                    "text-yellow-500"
-                  }`}>{label}</div>
-                  <div className="bg-zinc-900/60 rounded-lg overflow-hidden">
-                    {rows.map(p => (
-                      <div key={p.id} className="flex items-center justify-between py-2 px-2 border-b border-zinc-800/60 last:border-0">
-                        <div className="min-w-0 flex-1 mr-3">
-                          <div className="text-sm font-medium text-white truncate">{p.name}</div>
-                          <div className="text-xs text-zinc-500 mt-0.5">{sublabel(p)}</div>
+              type PMRow = { id: string; name: string; stat: number; appearances: number; odds: number; line?: number; side?: "over" | "under" };
+              const pmList = (rows: PMRow[], selPrefix: string, market: string, label: string, sublabel: (p: PMRow) => string) => {
+                if (rows.length === 0) return null;
+                const titleColor =
+                  selPrefix.startsWith("pm-first") ? "text-fuchsia-400" :
+                  selPrefix.startsWith("pm-last") ? "text-violet-400" :
+                  selPrefix.startsWith("pm-2g") ? "text-pink-400" :
+                  selPrefix.startsWith("pm-hat") ? "text-cyan-400" :
+                  selPrefix.startsWith("pm-noscore") ? "text-slate-300" :
+                  selPrefix.startsWith("pm-gol") ? "text-red-400" :
+                  selPrefix.startsWith("pm-fh") ? "text-orange-400" :
+                  selPrefix.startsWith("pm-sh") ? "text-amber-400" :
+                  selPrefix.startsWith("pm-ast") ? "text-sky-400" :
+                  selPrefix.startsWith("pm-shotot") ? "text-lime-400" :
+                  selPrefix.startsWith("pm-shoton") ? "text-green-400" :
+                  selPrefix.startsWith("pm-pass") ? "text-indigo-400" :
+                  selPrefix.startsWith("pm-tkl") ? "text-teal-400" :
+                  selPrefix.startsWith("pm-sa") ? "text-emerald-400" :
+                  selPrefix.startsWith("pm-red") ? "text-rose-400" :
+                  "text-yellow-500";
+                const hasLineMarkets = rows.some(r => r.line != null);
+
+                return (
+                  <div className="mb-3">
+                    <div className={`text-xs font-semibold uppercase tracking-wider px-1 mb-1.5 ${titleColor}`}>{label}</div>
+                    <div className="bg-zinc-900/60 rounded-lg overflow-hidden">
+                      {hasLineMarkets ? (() => {
+                        const grouped = new Map<string, PMRow[]>();
+                        for (const row of rows) {
+                          const existing = grouped.get(row.name) ?? [];
+                          existing.push(row);
+                          grouped.set(row.name, existing);
+                        }
+                        return Array.from(grouped.entries()).map(([playerName, playerRows]) => {
+                          const sortedRows = [...playerRows].sort((a, b) => {
+                            const lineCmp = (a.line ?? 0) - (b.line ?? 0);
+                            if (lineCmp !== 0) return lineCmp;
+                            if ((a.side ?? "over") === (b.side ?? "over")) return 0;
+                            return (a.side ?? "over") === "over" ? -1 : 1;
+                          });
+                          const lead = sortedRows[0]!;
+                          return (
+                            <div key={`${selPrefix}-${playerName}`} className="py-2 px-2 border-b border-zinc-800/60 last:border-0">
+                              <div className="min-w-0 mb-2">
+                                <div className="text-sm font-medium text-white truncate">{playerName}</div>
+                                <div className="text-xs text-zinc-500 mt-0.5">{sublabel(lead)}</div>
+                              </div>
+                              <div className="flex flex-wrap gap-2">
+                                {sortedRows.map(p => (
+                                  <div key={`${p.id}-${p.line ?? "na"}`} className="w-[92px]">
+                                    <MarketOddsBtn
+                                      match={match}
+                                      sel={`${selPrefix}-${p.id}-${p.line ?? "na"}`}
+                                      odd={p.odds}
+                                      market={market}
+                                      label={p.line != null ? `${p.side === "under" ? "Menos de" : "Mais de"} ${p.line}` : label}
+                                    />
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          );
+                        });
+                      })() : rows.map(p => (
+                        <div key={p.id} className="flex items-center justify-between py-2 px-2 border-b border-zinc-800/60 last:border-0">
+                          <div className="min-w-0 flex-1 mr-3">
+                            <div className="text-sm font-medium text-white truncate">{p.name}</div>
+                            <div className="text-xs text-zinc-500 mt-0.5">{sublabel(p)}</div>
+                          </div>
+                          <MarketOddsBtn match={match} sel={`${selPrefix}-${p.id}-${p.line ?? "na"}`} odd={p.odds} market={market} label={p.line != null ? `${p.name} — ${label} (${p.side === "under" ? "Menos de" : "Mais de"} ${p.line})` : `${p.name} — ${label}`} />
                         </div>
-                        <MarketOddsBtn match={match} sel={`${selPrefix}-${p.id}`} odd={p.odds} market={market} label={`${p.name} — ${label}`} />
-                      </div>
-                    ))}
+                      ))}
+                    </div>
                   </div>
-                </div>
-              );
+                );
+              };
 
               const renderTeamSection = (team: TeamPlayerMarkets, isHome: boolean) => {
                 const fallbackTeamName = isHome ? match.home : match.away;
@@ -7561,11 +7693,24 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
                     <span className="text-sm font-bold text-white">{team.teamName}</span>
                   </div>
 
+                  {pmList(team.firstScorers,       "pm-first","primeiro-marcador","🥇 Primeiro Marcador",            p => `${p.stat} gol(os) em ${p.appearances} jogos`)}
+                  {pmList(team.lastScorers,        "pm-last", "ultimo-marcador",  "🏁 Último Marcador",             p => `${p.stat} gol(os) em ${p.appearances} jogos`)}
+                  {pmList(team.twoPlusGoals,       "pm-2g",   "2plus-golos-jogador","⚽⚽ Marcar 2+ Golos",         p => `${p.stat} gol(os) em ${p.appearances} jogos`)}
+                  {pmList(team.hatTricks,          "pm-hat",  "hat-trick-jogador", "🎩 Hat-trick",                  p => `${p.stat} gol(os) em ${p.appearances} jogos`)}
+                  {pmList(team.notToScore,         "pm-noscore","nao-marcar-jogador","🚫 Não Marcar",              p => `${p.stat} jogo(s) sem marcar em ${p.appearances}`)}
                   {pmList(team.anytimeScorers,    "pm-gol", "marcadores",      "⚽ Marcador (Qualquer Momento)",  p => `${p.stat} gol(os) em ${p.appearances} jogos`)}
                   {pmList(team.firstHalfScorers,  "pm-fh",  "marcador-1t",     "⚽ Marcador no 1.º Tempo",        p => `${p.stat} gol(os) em ${p.appearances} jogos`)}
                   {pmList(team.secondHalfScorers, "pm-sh",  "marcador-2t",     "⚽ Marcador no 2.º Tempo",        p => `${p.stat} gol(os) em ${p.appearances} jogos`)}
+                  {pmList(team.assists,           "pm-ast", "assist-jogador",  "🎯 Dar Assistência",              p => `${p.stat} assistência(s) em ${p.appearances} jogos`)}
+                  {pmList(team.assistLines,       "pm-ast", "assistencias-jogador-ou", "🎯 Assistências O/U",      p => `${(p.stat / Math.max(1, p.appearances)).toFixed(1)} por jogo · linha ${p.line}`)}
+                  {pmList(team.shots,             "pm-shotot","remates-jogador","🎯 Remates",                      p => `${(p.stat / Math.max(1, p.appearances)).toFixed(1)} por jogo · linha ${p.line}`)}
+                  {pmList(team.shotsOnTarget,     "pm-shoton","remates-baliza-jogador","🥅 Remates à Baliza",     p => `${(p.stat / Math.max(1, p.appearances)).toFixed(1)} por jogo · linha ${p.line}`)}
+                  {pmList(team.passes,            "pm-pass","passes-jogador",  "🧠 Passes",                        p => `${(p.stat / Math.max(1, p.appearances)).toFixed(1)} por jogo · linha ${p.line}`)}
+                  {pmList(team.tackles,           "pm-tkl", "desarmes-jogador","🛡️ Desarmes",                      p => `${(p.stat / Math.max(1, p.appearances)).toFixed(1)} por jogo · linha ${p.line}`)}
                   {pmList(team.scoreAndAssist,    "pm-sa",  "marcar-assistir", "🎯 Marcar e Dar Assistência",     p => `${p.stat} vez(es) em ${p.appearances} jogos`)}
                   {pmList(team.bookings,          "pm-card","cartao-jogador",  "🟨🟥 Cartão (Amarelo ou Vermelho)", p => `${p.stat} cartão(ões) em ${p.appearances} jogos`)}
+                  {pmList(team.bookingLines,      "pm-card","cartoes-jogador-ou","🟨 Cartões O/U",                p => `${(p.stat / Math.max(1, p.appearances)).toFixed(1)} por jogo · linha ${p.line}`)}
+                  {pmList(team.redCards,          "pm-red", "cartao-vermelho-jogador","🟥 Cartão Vermelho",        p => `${p.stat} expulsão(ões) em ${p.appearances} jogos`)}
                 </div>
                 );
               };
@@ -7574,7 +7719,7 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
                 <>
                   {playerMarkets.home && renderTeamSection(playerMarkets.home, true)}
                   {playerMarkets.away && renderTeamSection(playerMarkets.away, false)}
-                  <div className="text-center text-zinc-700 text-xs pt-1 pb-2">Odds calculadas com base nas estatísticas da época</div>
+                  <div className="text-center text-zinc-700 text-xs pt-1 pb-2">Odds e linhas reais do provider quando disponíveis; props sem feed direto continuam com apoio estatístico da época</div>
                 </>
               );
             })()}
@@ -8709,7 +8854,7 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
                             ? (expandedMatch.isLive ? ["stats", "confrontos", "standings", "yesterday", "liga", "live"] : ["stats", "confrontos", "standings", "yesterday", "liga"])
                             : expandedMatch.sport === "volleyball"
                             ? (expandedMatch.isLive ? ["stats", "confrontos", "standings", "live"] : ["stats", "confrontos", "standings"])
-                            : (expandedMatch.isLive ? ["stats", "confrontos", "standings", "lineups", "live"] : ["stats", "confrontos", "standings", "lineups"]);
+                            : (expandedMatch.isLive ? ["stats", "confrontos", "standings", "odds", "lineups", "live"] : ["stats", "confrontos", "standings", "odds", "lineups"]);
                           const orderedTabs = expandedMatch.isLive ? ["live", ...tabs.filter(t => t !== "live")] : tabs;
                           return orderedTabs.map(tab => (
                             <button
@@ -10085,41 +10230,55 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
                         <div className="text-xs text-zinc-600 mt-1">Odds não disponíveis para este jogo</div>
                       </div>
                     ) : (
-                      <div className="space-y-3">
-                        {allOddsData.map((market, mi) => (
-                          <div key={mi} className="bg-zinc-950/60 rounded-lg border border-zinc-800 p-3">
-                            <div className="text-[10px] font-black text-zinc-400 uppercase tracking-wider mb-2">{market.name}</div>
-                            <div className={`grid gap-2 ${market.choices.length === 2 ? "grid-cols-2" : market.choices.length === 3 ? "grid-cols-3" : "grid-cols-2"}`}>
-                              {market.choices.map((choice, ci) => (
-                                <button
-                                  key={ci}
-                                  onClick={() => {
-                                    const mkKey = `all_${mi}_${ci}`;
-                                    const slip = bets.find(b => b.matchId === expandedMatch.id && b.market === mkKey);
-                                    if (!slip) {
-                                      setBets(prev => [...prev.filter(b => !(b.matchId === expandedMatch.id && (b.market ?? "").startsWith(`all_${mi}_`))), {
-                                        matchId: expandedMatch.id,
-                                        matchTitle: `${expandedMatch.home} — ${expandedMatch.away}`,
-                                        odd: choice.odds,
-                                        market: mkKey,
-                                        selection: `${market.name}: ${choice.label}`,
-                                        label: choice.label,
-                                      }]);
-                                    } else {
-                                      setBets(prev => prev.filter(b => !(b.matchId === expandedMatch.id && b.market === mkKey)));
-                                    }
-                                  }}
-                                  className={`flex flex-col items-center py-2.5 px-2 rounded-md text-xs font-bold transition-all border ${
-                                    bets.find(b => b.matchId === expandedMatch.id && b.market === `all_${mi}_${ci}`)
-                                      ? "bg-red-600 border-red-500 text-white"
-                                      : "bg-zinc-800 border-zinc-700 text-zinc-300 hover:border-zinc-500 hover:text-white"
-                                  }`}
-                                >
-                                  <span className="text-[10px] text-inherit opacity-70 mb-0.5">{choice.label}</span>
-                                  <span className="font-black text-base tabular-nums">{choice.odds.toFixed(2)}</span>
-                                </button>
-                              ))}
+                      <div className="space-y-4">
+                        {allOddsSections.map(section => (
+                          <div key={section.section} className="space-y-3">
+                            <div className="flex items-center gap-2">
+                              <div className="h-px flex-1 bg-zinc-800" />
+                              <div className="text-[10px] font-black text-zinc-500 uppercase tracking-[0.18em]">{section.section}</div>
+                              <div className="h-px flex-1 bg-zinc-800" />
                             </div>
+                            {section.markets.map(({ market, originalIndex }) => (
+                              <div key={`${section.section}-${originalIndex}`} className="bg-zinc-950/60 rounded-lg border border-zinc-800 p-3">
+                                {market.group && market.group !== market.name && market.group !== section.section && (
+                                  <div className="text-[9px] font-black text-zinc-600 uppercase tracking-[0.18em] mb-1">
+                                    {market.group}
+                                  </div>
+                                )}
+                                <div className="text-[10px] font-black text-zinc-400 uppercase tracking-wider mb-2">{market.name}</div>
+                                <div className={`grid gap-2 ${market.choices.length === 2 ? "grid-cols-2" : market.choices.length === 3 ? "grid-cols-3" : "grid-cols-2"}`}>
+                                  {market.choices.map((choice, ci) => (
+                                    <button
+                                      key={ci}
+                                      onClick={() => {
+                                        const mkKey = `all_${originalIndex}_${ci}`;
+                                        const slip = bets.find(b => b.matchId === expandedMatch.id && b.market === mkKey);
+                                        if (!slip) {
+                                          setBets(prev => [...prev.filter(b => !(b.matchId === expandedMatch.id && (b.market ?? "").startsWith(`all_${originalIndex}_`))), {
+                                            matchId: expandedMatch.id,
+                                            matchTitle: `${expandedMatch.home} — ${expandedMatch.away}`,
+                                            odd: choice.odds,
+                                            market: mkKey,
+                                            selection: `${market.name}: ${choice.label}`,
+                                            label: choice.label,
+                                          }]);
+                                        } else {
+                                          setBets(prev => prev.filter(b => !(b.matchId === expandedMatch.id && b.market === mkKey)));
+                                        }
+                                      }}
+                                      className={`flex flex-col items-center py-2.5 px-2 rounded-md text-xs font-bold transition-all border ${
+                                        bets.find(b => b.matchId === expandedMatch.id && b.market === `all_${originalIndex}_${ci}`)
+                                          ? "bg-red-600 border-red-500 text-white"
+                                          : "bg-zinc-800 border-zinc-700 text-zinc-300 hover:border-zinc-500 hover:text-white"
+                                      }`}
+                                    >
+                                      <span className="text-[10px] text-inherit opacity-70 mb-0.5">{choice.label}</span>
+                                      <span className="font-black text-base tabular-nums">{choice.odds.toFixed(2)}</span>
+                                    </button>
+                                  ))}
+                                </div>
+                              </div>
+                            ))}
                           </div>
                         ))}
                       </div>

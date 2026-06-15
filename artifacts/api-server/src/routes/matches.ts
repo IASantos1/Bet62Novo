@@ -15518,15 +15518,47 @@ type PlayerMarketEntry = {
   team: string; teamId: string;
   appearances: number; stat: number;
   odds: number;
+  line?: number;
+  side?: "over" | "under";
 };
 
 type TeamPlayerMarkets = {
   teamName: string; teamId: string;
   anytimeScorers: PlayerMarketEntry[];
+  firstScorers: PlayerMarketEntry[];
+  lastScorers: PlayerMarketEntry[];
+  twoPlusGoals: PlayerMarketEntry[];
+  hatTricks: PlayerMarketEntry[];
+  notToScore: PlayerMarketEntry[];
   firstHalfScorers: PlayerMarketEntry[];
   secondHalfScorers: PlayerMarketEntry[];
+  assists: PlayerMarketEntry[];
+  assistLines: PlayerMarketEntry[];
+  shots: PlayerMarketEntry[];
+  shotsOnTarget: PlayerMarketEntry[];
+  passes: PlayerMarketEntry[];
+  tackles: PlayerMarketEntry[];
   scoreAndAssist: PlayerMarketEntry[];
   bookings: PlayerMarketEntry[];
+  bookingLines: PlayerMarketEntry[];
+  redCards: PlayerMarketEntry[];
+};
+
+type ProviderPlayerOddsBucket = {
+  anytime: Map<string, number>;
+  first: Map<string, number>;
+  last: Map<string, number>;
+  twoPlus: Map<string, number>;
+  hatTrick: Map<string, number>;
+  notScore: Map<string, number>;
+  assist: Map<string, number>;
+  redCard: Map<string, number>;
+  assistLines: Array<{ name: string; line: number; odds: number; side: "over" | "under" }>;
+  shots: Array<{ name: string; line: number; odds: number; side: "over" | "under" }>;
+  shotsOnTarget: Array<{ name: string; line: number; odds: number; side: "over" | "under" }>;
+  passes: Array<{ name: string; line: number; odds: number; side: "over" | "under" }>;
+  tackles: Array<{ name: string; line: number; odds: number; side: "over" | "under" }>;
+  bookingLines: Array<{ name: string; line: number; odds: number; side: "over" | "under" }>;
 };
 
 function playerOdds(stat: number, appearances: number): number {
@@ -15534,6 +15566,40 @@ function playerOdds(stat: number, appearances: number): number {
   const rate = stat / appearances;
   const fair = 1 / rate;
   return Math.min(40.0, Math.max(1.10, Math.round(fair * 0.975 * 100) / 100));
+}
+
+function priceProbability(probability: number, cap = 80): number {
+  if (!Number.isFinite(probability) || probability <= 0 || probability >= 0.985) return 0;
+  return Math.min(cap, Math.max(1.10, Math.round((1 / probability) * 0.975 * 100) / 100));
+}
+
+function poissonTailProbability(lambda: number, minHits: number): number {
+  if (!Number.isFinite(lambda) || lambda <= 0 || minHits <= 0) return 0;
+  let term = Math.exp(-lambda);
+  let cdf = term;
+  for (let k = 1; k < minHits; k++) {
+    term = (term * lambda) / k;
+    cdf += term;
+  }
+  return Math.max(0, Math.min(1, 1 - cdf));
+}
+
+function pickPlayerStatLine(avg: number, lines: number[]): number | null {
+  if (!Number.isFinite(avg) || avg <= 0) return null;
+  let chosen: number | null = null;
+  for (const line of lines) {
+    if (avg >= line + 0.2) chosen = line;
+  }
+  return chosen ?? (avg >= lines[0] * 0.65 ? lines[0] : null);
+}
+
+function playerLineOdds(total: number, appearances: number, line: number): number {
+  if (total <= 0 || appearances < 3 || !Number.isFinite(line)) return 0;
+  const lambda = total / appearances;
+  const threshold = Math.floor(line) + 1;
+  const probability = poissonTailProbability(lambda, threshold);
+  if (probability < 0.04 || probability > 0.92) return 0;
+  return priceProbability(probability, 65);
 }
 
 // Normalize a team name for fuzzy matching: lowercase, strip diacritics, strip
@@ -15561,26 +15627,477 @@ function findMatchingTeam(teams: FootballLeagueStatsTeam[], targetName: string):
   return found;
 }
 
-function buildTeamMarkets(team: FootballLeagueStatsTeam): TeamPlayerMarkets {
+function normalizePersonName(name: string): string {
+  return String(name ?? "")
+    .toLowerCase()
+    .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9 ]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function playerNameAliases(name: string): string[] {
+  const normalized = normalizePersonName(name);
+  if (!normalized) return [];
+  const parts = normalized.split(" ").filter(Boolean);
+  const aliases = new Set<string>([normalized]);
+  if (parts.length >= 2) {
+    aliases.add(`${parts[0]} ${parts[parts.length - 1]}`);
+    aliases.add(`${parts[0].slice(0, 1)} ${parts[parts.length - 1]}`);
+  }
+  if (parts.length >= 3) {
+    aliases.add(`${parts[0].slice(0, 1)} ${parts[1].slice(0, 1)} ${parts[parts.length - 1]}`);
+  }
+  return [...aliases].filter(Boolean);
+}
+
+function isProviderPlayerChoiceName(rawName: string): boolean {
+  const n = normalizePersonName(rawName);
+  if (!n) return false;
+  return !(
+    n === "yes" ||
+    n === "no" ||
+    n === "over" ||
+    n === "under" ||
+    n === "home" ||
+    n === "away" ||
+    n === "draw" ||
+    n === "1" ||
+    n === "x" ||
+    n === "2" ||
+    n.includes("no goalscorer") ||
+    n.includes("no goal scorer") ||
+    n.includes("no scorer") ||
+    n.includes("none")
+  );
+}
+
+function createProviderPlayerOddsBucket(): ProviderPlayerOddsBucket {
+  return {
+    anytime: new Map<string, number>(),
+    first: new Map<string, number>(),
+    last: new Map<string, number>(),
+    twoPlus: new Map<string, number>(),
+    hatTrick: new Map<string, number>(),
+    notScore: new Map<string, number>(),
+    assist: new Map<string, number>(),
+    redCard: new Map<string, number>(),
+    assistLines: [],
+    shots: [],
+    shotsOnTarget: [],
+    passes: [],
+    tackles: [],
+    bookingLines: [],
+  };
+}
+
+function addProviderPlayerChoice(target: Map<string, number>, rawChoiceName: string, odds: number): void {
+  if (!isProviderPlayerChoiceName(rawChoiceName) || odds < 1.01) return;
+  const normalized = normalizePersonName(rawChoiceName);
+  if (!normalized) return;
+  const prev = target.get(normalized);
+  if (!prev || odds < prev) target.set(normalized, odds);
+}
+
+function matchProviderOddForPlayer(target: Map<string, number>, playerName: string): number {
+  if (target.size === 0) return 0;
+  const aliases = playerNameAliases(playerName);
+  if (aliases.length === 0) return 0;
+
+  for (const alias of aliases) {
+    const direct = target.get(alias);
+    if (direct && direct >= 1.01) return direct;
+  }
+
+  let best = 0;
+  for (const [choiceName, odds] of target.entries()) {
+    if (aliases.some((alias) => choiceName.includes(alias) || alias.includes(choiceName))) {
+      if (!best || odds < best) best = odds;
+    }
+  }
+  return best;
+}
+
+function normalizeProviderPlayerChoiceName(rawName: string): string {
+  return String(rawName ?? "")
+    .replace(/\b(over|under|mais de|menos de|to record|to have|at least|higher than|lower than)\b/gi, " ")
+    .replace(/\b\d+(?:\.\d+)?\+?\b/g, " ")
+    .replace(/[()[\]{}|:/\\-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function parseProviderLineValue(text: string): number | null {
+  const matches = [...String(text ?? "").matchAll(/\d+(?:\.\d+)?/g)];
+  if (matches.length === 0) return null;
+  for (let i = matches.length - 1; i >= 0; i--) {
+    const value = Number(matches[i]?.[0] ?? "");
+    if (Number.isFinite(value) && value >= 0.5) return value;
+  }
+  return null;
+}
+
+function parseProviderLineSide(text: string): "over" | "under" | null {
+  const n = normalizePersonName(text);
+  if (!n) return null;
+  if (
+    n === "over" ||
+    n.includes(" over") ||
+    n.startsWith("over ") ||
+    n.includes("mais de") ||
+    n.includes("higher than") ||
+    n.includes("at least")
+  ) return "over";
+  if (
+    n === "under" ||
+    n.includes(" under") ||
+    n.startsWith("under ") ||
+    n.includes("menos de") ||
+    n.includes("lower than")
+  ) return "under";
+  return null;
+}
+
+function extractPlayerNameFromLineMarketTitle(rawMarketName: string, marketKey: "shots" | "shotsOnTarget" | "passes" | "tackles"): string {
+  const raw = String(rawMarketName ?? "");
+  const normalized = raw
+    .replace(/\b\d+(?:\.\d+)?\b/g, " ")
+    .replace(/[()[\]{}|:/\\]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  const patterns: Record<typeof marketKey, RegExp[]> = {
+    shotsOnTarget: [
+      /\b(?:player\s+)?shots?\s+on\s+target\s+(.+)$/i,
+      /\b(?:remates?|chutes?)\s+(?:a\s+baliza|no\s+alvo)\s+(.+)$/i,
+      /^(.+?)\s+(?:shots?\s+on\s+target|remates?\s+a\s+baliza|chutes?\s+no\s+alvo)$/i,
+    ],
+    shots: [
+      /\bplayer\s+shots?\s+(.+)$/i,
+      /\b(?:remates?|chutes?)\s+(.+)$/i,
+      /^(.+?)\s+(?:player\s+shots?|remates?|chutes?)$/i,
+    ],
+    passes: [
+      /\bplayer\s+passes\s+(.+)$/i,
+      /\bpasses\s+(.+)$/i,
+      /^(.+?)\s+passes$/i,
+    ],
+    tackles: [
+      /\bplayer\s+tackles\s+(.+)$/i,
+      /\btackles\s+(.+)$/i,
+      /\bdesarmes\s+(.+)$/i,
+      /^(.+?)\s+(?:tackles|desarmes)$/i,
+    ],
+  };
+  for (const pattern of patterns[marketKey]) {
+    const hit = normalized.match(pattern)?.[1]?.trim();
+    if (hit) return hit;
+  }
+  return normalized;
+}
+
+function extractPlayerNameFromExtendedLineMarketTitle(
+  rawMarketName: string,
+  marketKey: "shots" | "shotsOnTarget" | "passes" | "tackles" | "assistLines" | "bookingLines",
+): string {
+  if (marketKey === "assistLines") {
+    const raw = String(rawMarketName ?? "").replace(/\b\d+(?:\.\d+)?\b/g, " ").replace(/[()[\]{}|:/\\]+/g, " ").replace(/\s+/g, " ").trim();
+    const patterns = [
+      /\bplayer\s+assists?\s+(.+)$/i,
+      /\bassist[eê]ncias?\s+(.+)$/i,
+      /^(.+?)\s+(?:player\s+assists?|assist[eê]ncias?)$/i,
+    ];
+    for (const pattern of patterns) {
+      const hit = raw.match(pattern)?.[1]?.trim();
+      if (hit) return hit;
+    }
+    return raw;
+  }
+  if (marketKey === "bookingLines") {
+    const raw = String(rawMarketName ?? "").replace(/\b\d+(?:\.\d+)?\b/g, " ").replace(/[()[\]{}|:/\\]+/g, " ").replace(/\s+/g, " ").trim();
+    const patterns = [
+      /\bplayer\s+(?:bookings?|cards?|yellow cards?)\s+(.+)$/i,
+      /\b(?:cart[oõ]es?|amarelos?)\s+(.+)$/i,
+      /^(.+?)\s+(?:bookings?|cards?|yellow cards?|cart[oõ]es?|amarelos?)$/i,
+    ];
+    for (const pattern of patterns) {
+      const hit = raw.match(pattern)?.[1]?.trim();
+      if (hit) return hit;
+    }
+    return raw;
+  }
+  return extractPlayerNameFromLineMarketTitle(rawMarketName, marketKey);
+}
+
+function addProviderPlayerLineChoice(
+  target: Array<{ name: string; line: number; odds: number; side: "over" | "under" }>,
+  rawMarketName: string,
+  marketKey: "shots" | "shotsOnTarget" | "passes" | "tackles" | "assistLines" | "bookingLines",
+  rawChoiceName: string,
+  line: number | null,
+  odds: number,
+): void {
+  if (!Number.isFinite(line) || !line || odds < 1.01) return;
+  const side = parseProviderLineSide(rawChoiceName) ?? parseProviderLineSide(rawMarketName);
+  if (!side) return;
+  const cleanName = normalizeProviderPlayerChoiceName(rawChoiceName);
+  const fallbackName = extractPlayerNameFromExtendedLineMarketTitle(rawMarketName, marketKey);
+  const candidateName = cleanName || fallbackName;
+  if (!isProviderPlayerChoiceName(candidateName)) return;
+  target.push({
+    name: normalizePersonName(candidateName),
+    line,
+    odds,
+    side,
+  });
+}
+
+function matchProviderLinesForPlayer(
+  target: Array<{ name: string; line: number; odds: number; side: "over" | "under" }>,
+  playerName: string,
+) : Array<{ line: number; over?: number; under?: number }> {
+  if (target.length === 0) return [];
+  const aliases = playerNameAliases(playerName);
+  const matches = target.filter((entry) =>
+    aliases.some((alias) => entry.name === alias || entry.name.includes(alias) || alias.includes(entry.name)),
+  );
+  if (matches.length === 0) return [];
+  matches.sort((a, b) => {
+    if (a.line !== b.line) return a.line - b.line;
+    const aScore = Math.abs(a.odds - 1.85);
+    const bScore = Math.abs(b.odds - 1.85);
+    if (aScore !== bScore) return aScore - bScore;
+    return a.odds - b.odds;
+  });
+  const perLine = new Map<number, { line: number; over?: number; under?: number }>();
+  for (const match of matches) {
+    const existing = perLine.get(match.line) ?? { line: match.line };
+    if (match.side === "over") {
+      if (!existing.over || Math.abs(match.odds - 1.85) < Math.abs(existing.over - 1.85)) existing.over = match.odds;
+    } else {
+      if (!existing.under || Math.abs(match.odds - 1.85) < Math.abs(existing.under - 1.85)) existing.under = match.odds;
+    }
+    perLine.set(match.line, existing);
+  }
+  const sorted = Array.from(perLine.values()).sort((a, b) => a.line - b.line);
+  const scored = sorted.map((entry) => ({
+    ...entry,
+    score: Math.min(
+      Math.abs((entry.over ?? 10) - 1.85),
+      Math.abs((entry.under ?? 10) - 1.85),
+    ),
+  }));
+  scored.sort((a, b) => {
+    if (a.score !== b.score) return a.score - b.score;
+    return a.line - b.line;
+  });
+  const picked: Array<{ line: number; over?: number; under?: number }> = [];
+  const seenLines = new Set<number>();
+  for (const match of scored) {
+    if (seenLines.has(match.line)) continue;
+    seenLines.add(match.line);
+    picked.push({ line: match.line, over: match.over, under: match.under });
+    if (picked.length >= 3) break;
+  }
+  return picked;
+}
+
+function scorerMarketBucket(rawMarketName: string): keyof ProviderPlayerOddsBucket | null {
+  const market = normalizePersonName(rawMarketName);
+  if (!market) return null;
+  if (
+    market.includes("anytime goalscorer") ||
+    market.includes("any time goalscorer") ||
+    market.includes("anytime scorer") ||
+    market.includes("any time scorer") ||
+    market.includes("to score anytime")
+  ) return "anytime";
+  if (
+    market.includes("first goalscorer") ||
+    market.includes("first goal scorer") ||
+    market.includes("first scorer") ||
+    market.includes("1st goalscorer") ||
+    market.includes("1st scorer") ||
+    market.includes("to score first")
+  ) return "first";
+  if (
+    market.includes("last goalscorer") ||
+    market.includes("last goal scorer") ||
+    market.includes("last scorer") ||
+    market.includes("to score last")
+  ) return "last";
+  if (
+    market.includes("score 2 goals") ||
+    market.includes("score 2 or more goals") ||
+    market.includes("score 2 or more") ||
+    market.includes("to score 2 or more goals") ||
+    market.includes("to score 2+") ||
+    market.includes("2+ goals") ||
+    market.includes("2 plus goals")
+  ) return "twoPlus";
+  if (
+    market.includes("hat trick") ||
+    market.includes("hattrick") ||
+    market.includes("to score a hat trick") ||
+    market.includes("to score 3 or more goals") ||
+    market.includes("3+ goals")
+  ) return "hatTrick";
+  if (
+    market.includes("to not score") ||
+    market.includes("not to score") ||
+    market.includes("player not to score") ||
+    market.includes("to score no goals")
+  ) return "notScore";
+  if (
+    market.includes("to provide an assist") ||
+    market.includes("to provide assist") ||
+    market.includes("player assists") ||
+    market.includes("anytime assist") ||
+    market.includes("any time assist") ||
+    market.includes("to assist")
+  ) return parseProviderLineValue(rawMarketName) != null ? "assistLines" : "assist";
+  if (
+    market.includes("player bookings") ||
+    market.includes("player cards") ||
+    market.includes("yellow cards") ||
+    market.includes("bookings") ||
+    market.includes("to be booked") ||
+    market.includes("cartoes") ||
+    market.includes("cartoes amarelos") ||
+    market.includes("cartao")
+  ) return parseProviderLineValue(rawMarketName) != null ? "bookingLines" : null;
+  if (
+    market.includes("to be sent off") ||
+    market.includes("player red card") ||
+    market.includes("red card") ||
+    market.includes("sent off")
+  ) return "redCard";
+  if (
+    market.includes("shots on target") ||
+    market.includes("shot on target") ||
+    market.includes("remates a baliza") ||
+    market.includes("chutes no alvo")
+  ) return "shotsOnTarget";
+  if (
+    market.includes("player shots") ||
+    market.includes("shots") ||
+    market.includes("remates") ||
+    market.includes("chutes")
+  ) return "shots";
+  if (market.includes("passes")) return "passes";
+  if (
+    market.includes("tackles") ||
+    market.includes("desarmes")
+  ) return "tackles";
+  return null;
+}
+
+const footballProviderPlayerOddsCache = new Map<string, { data: ProviderPlayerOddsBucket; fetchedAt: number }>();
+const FOOTBALL_PROVIDER_PLAYER_ODDS_TTL = 5 * 60_000;
+
+async function getFootballProviderPlayerOdds(matchId: string): Promise<ProviderPlayerOddsBucket> {
+  const cacheKey = `football-player-odds:${matchId}`;
+  const cached = footballProviderPlayerOddsCache.get(cacheKey);
+  if (cached && Date.now() - cached.fetchedAt < FOOTBALL_PROVIDER_PLAYER_ODDS_TTL) {
+    return cached.data;
+  }
+
+  const empty = createProviderPlayerOddsBucket();
+  if (!CONFIG.SPORTSAPI_KEY || !matchId) return empty;
+
+  try {
+    const resp = await fetch(`${SAPI_V2_FOOTBALL}/match/${matchId}/odds/all`, {
+      signal: AbortSignal.timeout(5000),
+      headers: sapiHeaders(),
+    });
+    if (!resp.ok) return empty;
+
+    const data = (await resp.json()) as {
+      data?: {
+        markets?: Array<{
+          marketName?: string;
+          choices?: Array<{ name?: string; fractionalValue?: string }>;
+        }>;
+      };
+    };
+    const bucket = createProviderPlayerOddsBucket();
+
+    for (const market of data.data?.markets ?? []) {
+      const key = scorerMarketBucket(market.marketName ?? "");
+      if (!key) continue;
+      const line = parseProviderLineValue(market.marketName ?? "");
+      for (const choice of market.choices ?? []) {
+        const choiceName = String(choice.name ?? "");
+        const odds = fractionalToDecimal(choice.fractionalValue ?? "");
+        if (key === "assistLines" || key === "bookingLines" || key === "shots" || key === "shotsOnTarget" || key === "passes" || key === "tackles") {
+          addProviderPlayerLineChoice(bucket[key], market.marketName ?? "", key, choiceName, line ?? parseProviderLineValue(choiceName), odds);
+        } else {
+          addProviderPlayerChoice(bucket[key], choiceName, odds);
+        }
+      }
+    }
+
+    footballProviderPlayerOddsCache.set(cacheKey, { data: bucket, fetchedAt: Date.now() });
+    return bucket;
+  } catch {
+    return empty;
+  }
+}
+
+function buildTeamMarkets(team: FootballLeagueStatsTeam, providerOdds?: ProviderPlayerOddsBucket | null): TeamPlayerMarkets {
   const byOdds = (a: PlayerMarketEntry, b: PlayerMarketEntry) => a.odds - b.odds;
   const anytimeScorers:    PlayerMarketEntry[] = [];
+  const firstScorers:      PlayerMarketEntry[] = [];
+  const lastScorers:       PlayerMarketEntry[] = [];
+  const twoPlusGoals:      PlayerMarketEntry[] = [];
+  const hatTricks:         PlayerMarketEntry[] = [];
+  const notToScore:        PlayerMarketEntry[] = [];
   const firstHalfScorers:  PlayerMarketEntry[] = [];
   const secondHalfScorers: PlayerMarketEntry[] = [];
+  const assists:           PlayerMarketEntry[] = [];
+  const assistLines:       PlayerMarketEntry[] = [];
+  const shots:             PlayerMarketEntry[] = [];
+  const shotsOnTarget:     PlayerMarketEntry[] = [];
+  const passes:            PlayerMarketEntry[] = [];
+  const tackles:           PlayerMarketEntry[] = [];
   const scoreAndAssist:    PlayerMarketEntry[] = [];
   const bookings:          PlayerMarketEntry[] = [];
+  const bookingLines:      PlayerMarketEntry[] = [];
+  const redCards:          PlayerMarketEntry[] = [];
 
   for (const p of team.players) {
     const base = { id: p.id, name: p.name, team: team.name, teamId: team.id, appearances: p.appearances };
 
     // Anytime scorer + derived half-time markets
-    const gOdds = playerOdds(p.goals, p.appearances);
-    if (gOdds > 0) {
-      anytimeScorers.push({ ...base, stat: p.goals, odds: gOdds });
+    const derivedScorerOdds = playerOdds(p.goals, p.appearances);
+    const anytimeOdds = providerOdds ? matchProviderOddForPlayer(providerOdds.anytime, p.name) : 0;
+    const firstOdds = providerOdds ? matchProviderOddForPlayer(providerOdds.first, p.name) : 0;
+    const lastOdds = providerOdds ? matchProviderOddForPlayer(providerOdds.last, p.name) : 0;
+    const twoPlusOdds = providerOdds ? matchProviderOddForPlayer(providerOdds.twoPlus, p.name) : 0;
+    const hatTrickOdds = providerOdds ? matchProviderOddForPlayer(providerOdds.hatTrick, p.name) : 0;
+    const notScoreOdds = providerOdds ? matchProviderOddForPlayer(providerOdds.notScore, p.name) : 0;
+    const scoringBaseOdds = anytimeOdds > 0 ? anytimeOdds : derivedScorerOdds;
+
+    if (firstOdds > 0) firstScorers.push({ ...base, stat: p.goals, odds: firstOdds });
+    if (lastOdds > 0) lastScorers.push({ ...base, stat: p.goals, odds: lastOdds });
+    if (twoPlusOdds > 0) twoPlusGoals.push({ ...base, stat: p.goals, odds: twoPlusOdds });
+    if (hatTrickOdds > 0) hatTricks.push({ ...base, stat: p.goals, odds: hatTrickOdds });
+    if (notScoreOdds > 0) {
+      notToScore.push({ ...base, stat: Math.max(0, p.appearances - Math.min(p.goals, p.appearances)), odds: notScoreOdds });
+    } else if (p.appearances >= 3) {
+      const scoreRate = Math.min(0.92, Math.max(0, p.goals / p.appearances));
+      const noScoreOdds = priceProbability(Math.max(0.04, 1 - scoreRate), 20);
+      if (noScoreOdds > 0) {
+        notToScore.push({ ...base, stat: Math.max(0, p.appearances - Math.min(p.goals, p.appearances)), odds: noScoreOdds });
+      }
+    }
+
+    if (scoringBaseOdds > 0) {
+      anytimeScorers.push({ ...base, stat: p.goals, odds: scoringBaseOdds });
       // ~42% of goals scored in 1H → fair odds ≈ anytime × 2.38
-      const fhOdds = Math.min(50, Math.round(gOdds * 2.38 * 100) / 100);
+      const fhOdds = Math.min(50, Math.round(scoringBaseOdds * 2.38 * 100) / 100);
       firstHalfScorers.push({ ...base, stat: p.goals, odds: fhOdds });
       // ~58% of goals scored in 2H → fair odds ≈ anytime × 1.72
-      const shOdds = Math.min(50, Math.round(gOdds * 1.72 * 100) / 100);
+      const shOdds = Math.min(50, Math.round(scoringBaseOdds * 1.72 * 100) / 100);
       secondHalfScorers.push({ ...base, stat: p.goals, odds: shOdds });
     }
 
@@ -15590,8 +16107,77 @@ function buildTeamMarkets(team: FootballLeagueStatsTeam): TeamPlayerMarkets {
       const saBase = playerOdds(combinedStat, p.appearances);
       if (saBase > 0) {
         // Combined event is harder — apply ×1.5 penalty on top of anytime odds
-        const saOdds = Math.min(60, Math.round(Math.max(gOdds * 2.0, saBase * 1.5) * 100) / 100);
+        const saOdds = Math.min(60, Math.round(Math.max(scoringBaseOdds * 2.0, saBase * 1.5) * 100) / 100);
         scoreAndAssist.push({ ...base, stat: combinedStat, odds: saOdds });
+      }
+    }
+
+    const derivedAssistOdds = playerOdds(p.assists, p.appearances);
+    const assistOdds = providerOdds ? matchProviderOddForPlayer(providerOdds.assist, p.name) : 0;
+    const assistBaseOdds = assistOdds > 0 ? assistOdds : derivedAssistOdds;
+    if (assistBaseOdds > 0) assists.push({ ...base, stat: p.assists, odds: assistBaseOdds });
+
+    const providerAssistLines = providerOdds ? matchProviderLinesForPlayer(providerOdds.assistLines, p.name) : [];
+    if (providerAssistLines.length > 0) {
+      for (const item of providerAssistLines) {
+        if (item.over) assistLines.push({ ...base, id: `${p.id}:assists:${item.line}:over`, stat: p.assists, odds: item.over, line: item.line, side: "over" });
+        if (item.under) assistLines.push({ ...base, id: `${p.id}:assists:${item.line}:under`, stat: p.assists, odds: item.under, line: item.line, side: "under" });
+      }
+    }
+
+    const providerShots = providerOdds ? matchProviderLinesForPlayer(providerOdds.shots, p.name) : [];
+    if (providerShots.length > 0) {
+      for (const item of providerShots) {
+        if (item.over) shots.push({ ...base, id: `${p.id}:shots:${item.line}:over`, stat: p.shotsTotal, odds: item.over, line: item.line, side: "over" });
+        if (item.under) shots.push({ ...base, id: `${p.id}:shots:${item.line}:under`, stat: p.shotsTotal, odds: item.under, line: item.line, side: "under" });
+      }
+    } else {
+      const shotLine = pickPlayerStatLine(p.shotsTotal / Math.max(1, p.appearances), [0.5, 1.5, 2.5, 3.5, 4.5]);
+      if (shotLine != null) {
+        const shotOdds = playerLineOdds(p.shotsTotal, p.appearances, shotLine);
+        if (shotOdds > 0) shots.push({ ...base, id: `${p.id}:shots:${shotLine}:over`, stat: p.shotsTotal, odds: shotOdds, line: shotLine, side: "over" });
+      }
+    }
+
+    const providerShotsOnTarget = providerOdds ? matchProviderLinesForPlayer(providerOdds.shotsOnTarget, p.name) : [];
+    if (providerShotsOnTarget.length > 0) {
+      for (const item of providerShotsOnTarget) {
+        if (item.over) shotsOnTarget.push({ ...base, id: `${p.id}:sot:${item.line}:over`, stat: p.shotsOn, odds: item.over, line: item.line, side: "over" });
+        if (item.under) shotsOnTarget.push({ ...base, id: `${p.id}:sot:${item.line}:under`, stat: p.shotsOn, odds: item.under, line: item.line, side: "under" });
+      }
+    } else {
+      const shotOnTargetLine = pickPlayerStatLine(p.shotsOn / Math.max(1, p.appearances), [0.5, 1.5, 2.5]);
+      if (shotOnTargetLine != null) {
+        const shotOnTargetOdds = playerLineOdds(p.shotsOn, p.appearances, shotOnTargetLine);
+        if (shotOnTargetOdds > 0) shotsOnTarget.push({ ...base, id: `${p.id}:sot:${shotOnTargetLine}:over`, stat: p.shotsOn, odds: shotOnTargetOdds, line: shotOnTargetLine, side: "over" });
+      }
+    }
+
+    const providerPasses = providerOdds ? matchProviderLinesForPlayer(providerOdds.passes, p.name) : [];
+    if (providerPasses.length > 0) {
+      for (const item of providerPasses) {
+        if (item.over) passes.push({ ...base, id: `${p.id}:passes:${item.line}:over`, stat: p.passAttempts, odds: item.over, line: item.line, side: "over" });
+        if (item.under) passes.push({ ...base, id: `${p.id}:passes:${item.line}:under`, stat: p.passAttempts, odds: item.under, line: item.line, side: "under" });
+      }
+    } else {
+      const passesLine = pickPlayerStatLine(p.passAttempts / Math.max(1, p.appearances), [9.5, 19.5, 29.5, 39.5, 49.5, 59.5, 69.5]);
+      if (passesLine != null) {
+        const passesOdds = playerLineOdds(p.passAttempts, p.appearances, passesLine);
+        if (passesOdds > 0) passes.push({ ...base, id: `${p.id}:passes:${passesLine}:over`, stat: p.passAttempts, odds: passesOdds, line: passesLine, side: "over" });
+      }
+    }
+
+    const providerTackles = providerOdds ? matchProviderLinesForPlayer(providerOdds.tackles, p.name) : [];
+    if (providerTackles.length > 0) {
+      for (const item of providerTackles) {
+        if (item.over) tackles.push({ ...base, id: `${p.id}:tackles:${item.line}:over`, stat: p.tackles, odds: item.over, line: item.line, side: "over" });
+        if (item.under) tackles.push({ ...base, id: `${p.id}:tackles:${item.line}:under`, stat: p.tackles, odds: item.under, line: item.line, side: "under" });
+      }
+    } else {
+      const tacklesLine = pickPlayerStatLine(p.tackles / Math.max(1, p.appearances), [0.5, 1.5, 2.5, 3.5, 4.5]);
+      if (tacklesLine != null) {
+        const tacklesOdds = playerLineOdds(p.tackles, p.appearances, tacklesLine);
+        if (tacklesOdds > 0) tackles.push({ ...base, id: `${p.id}:tackles:${tacklesLine}:over`, stat: p.tackles, odds: tacklesOdds, line: tacklesLine, side: "over" });
       }
     }
 
@@ -15599,22 +16185,65 @@ function buildTeamMarkets(team: FootballLeagueStatsTeam): TeamPlayerMarkets {
     const cards = p.yellowCards + p.yellowRed + p.redCards;
     const bOdds = playerOdds(cards, p.appearances);
     if (bOdds > 0) bookings.push({ ...base, stat: cards, odds: bOdds });
+
+    const providerBookingLines = providerOdds ? matchProviderLinesForPlayer(providerOdds.bookingLines, p.name) : [];
+    if (providerBookingLines.length > 0) {
+      for (const item of providerBookingLines) {
+        if (item.over) bookingLines.push({ ...base, id: `${p.id}:bookings:${item.line}:over`, stat: cards, odds: item.over, line: item.line, side: "over" });
+        if (item.under) bookingLines.push({ ...base, id: `${p.id}:bookings:${item.line}:under`, stat: cards, odds: item.under, line: item.line, side: "under" });
+      }
+    }
+
+    const dismissals = p.redCards + p.yellowRed;
+    const sentOffOdds = providerOdds ? matchProviderOddForPlayer(providerOdds.redCard, p.name) : 0;
+    if (sentOffOdds > 0) {
+      redCards.push({ ...base, stat: dismissals, odds: sentOffOdds });
+    } else {
+      const derivedSentOffOdds = playerOdds(dismissals, p.appearances);
+      if (derivedSentOffOdds > 0) redCards.push({ ...base, stat: dismissals, odds: derivedSentOffOdds });
+    }
   }
 
   anytimeScorers.sort(byOdds);
+  firstScorers.sort(byOdds);
+  lastScorers.sort(byOdds);
+  twoPlusGoals.sort(byOdds);
+  hatTricks.sort(byOdds);
+  notToScore.sort(byOdds);
   firstHalfScorers.sort(byOdds);
   secondHalfScorers.sort(byOdds);
+  assists.sort(byOdds);
+  assistLines.sort(byOdds);
+  shots.sort(byOdds);
+  shotsOnTarget.sort(byOdds);
+  passes.sort(byOdds);
+  tackles.sort(byOdds);
   scoreAndAssist.sort(byOdds);
   bookings.sort(byOdds);
+  bookingLines.sort(byOdds);
+  redCards.sort(byOdds);
 
   return {
     teamName: team.name,
     teamId: team.id,
     anytimeScorers:    anytimeScorers.slice(0, 20),
+    firstScorers:      firstScorers.slice(0, 15),
+    lastScorers:       lastScorers.slice(0, 15),
+    twoPlusGoals:      twoPlusGoals.slice(0, 12),
+    hatTricks:         hatTricks.slice(0, 10),
+    notToScore:        notToScore.slice(0, 15),
     firstHalfScorers:  firstHalfScorers.slice(0, 15),
     secondHalfScorers: secondHalfScorers.slice(0, 15),
+    assists:           assists.slice(0, 15),
+    assistLines:       assistLines.slice(0, 18),
+    shots:             shots.slice(0, 15),
+    shotsOnTarget:     shotsOnTarget.slice(0, 15),
+    passes:            passes.slice(0, 15),
+    tackles:           tackles.slice(0, 15),
     scoreAndAssist:    scoreAndAssist.slice(0, 10),
     bookings:          bookings.slice(0, 15),
+    bookingLines:      bookingLines.slice(0, 18),
+    redCards:          redCards.slice(0, 10),
   };
 }
 
@@ -15681,6 +16310,30 @@ const MARKET_NAME_PT: Record<string, string> = {
   "Draw no bet":           "Empate Anula Aposta",
   "Both teams to score":   "Ambas Marcam",
   "Match goals":           "Total de Golos",
+  "Team goals":            "Golos da Equipa",
+  "First team to score":   "Primeira Equipa a Marcar",
+  "Last team to score":    "Última Equipa a Marcar",
+  "Method of first goal":  "Método do Primeiro Golo",
+  "Odd/even goals":        "Golos Ímpar/Par",
+  "Total corners":         "Total de Cantos",
+  "Corners":               "Cantos",
+  "Total cards":           "Total de Cartões",
+  "Cards":                 "Cartões",
+  "Asian handicap":        "Handicap Asiático",
+  "Handicap":              "Handicap",
+  "To qualify":            "Apura-se",
+  "Next goal":             "Próximo Golo",
+  "Next team to score":    "Próxima Equipa a Marcar",
+  "Goalscorer":            "Marcador",
+  "Anytime goalscorer":    "Marcador a Qualquer Momento",
+  "First goalscorer":      "Primeiro Marcador",
+  "Last goalscorer":       "Último Marcador",
+  "Player assists":        "Assistências do Jogador",
+  "Player shots":          "Remates do Jogador",
+  "Player shots on target":"Remates à Baliza do Jogador",
+  "Player passes":         "Passes do Jogador",
+  "Player tackles":        "Desarmes do Jogador",
+  "Player bookings":       "Cartões do Jogador",
   "1st quarter winner":    "Vencedor 1º Quarto",
   "1st half winner":       "Vencedor 1º Tempo",
   "Point spread":          "Handicap de Pontos",
@@ -15691,16 +16344,89 @@ const MARKET_NAME_PT: Record<string, string> = {
   "Correct score":         "Resultado Exato",
 };
 
+const MARKET_GROUP_PT: Record<string, string> = {
+  "Main": "Principal",
+  "Goals": "Golos",
+  "Goal Lines": "Linhas de Golos",
+  "Corners": "Cantos",
+  "Cards": "Cartões",
+  "Player Props": "Jogadores",
+  "Players": "Jogadores",
+  "Team Props": "Equipas",
+  "Halves": "Tempos",
+  "Sets": "Sets",
+  "Games": "Games",
+};
+
 const CHOICE_LABEL_PT: Record<string, string> = {
   "1": "Casa", "X": "Empate", "2": "Fora",
   "1X": "Casa/Empate", "X2": "Empate/Fora", "12": "Casa/Fora",
   "Yes": "Sim", "No": "Não",
   "Over": "Mais", "Under": "Menos",
   "Home": "Casa", "Away": "Fora",
+  "Odd": "Ímpar", "Even": "Par",
+  "No goalscorer": "Sem Marcador",
+  "No goal scorer": "Sem Marcador",
+  "Any other home win": "Outra Vitória Casa",
+  "Any other away win": "Outra Vitória Fora",
+  "Any other draw": "Outro Empate",
 };
 
+function titleCaseWords(raw: string): string {
+  return raw
+    .split(/\s+/)
+    .filter(Boolean)
+    .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(" ");
+}
+
 function translateMarketNamePT(raw: string): string {
-  return MARKET_NAME_PT[raw] ?? raw;
+  const exact = MARKET_NAME_PT[raw];
+  if (exact) return exact;
+
+  const trimmed = String(raw ?? "").trim();
+  if (!trimmed) return trimmed;
+
+  const patterns: Array<[RegExp, (m: RegExpMatchArray) => string]> = [
+    [/^Player shots on target (.+)$/i, m => `Remates à Baliza — ${m[1]}`],
+    [/^Player shots (.+)$/i, m => `Remates — ${m[1]}`],
+    [/^Player passes (.+)$/i, m => `Passes — ${m[1]}`],
+    [/^Player tackles (.+)$/i, m => `Desarmes — ${m[1]}`],
+    [/^Player assists (.+)$/i, m => `Assistências — ${m[1]}`],
+    [/^Player bookings (.+)$/i, m => `Cartões — ${m[1]}`],
+    [/^First goalscorer$/i, () => "Primeiro Marcador"],
+    [/^Last goalscorer$/i, () => "Último Marcador"],
+    [/^Anytime goalscorer$/i, () => "Marcador a Qualquer Momento"],
+    [/^Over\/Under (.+)$/i, m => `Mais/Menos — ${m[1]}`],
+    [/^Total goals (.+)$/i, m => `Total de Golos — ${m[1]}`],
+    [/^Total corners (.+)$/i, m => `Total de Cantos — ${m[1]}`],
+    [/^Total cards (.+)$/i, m => `Total de Cartões — ${m[1]}`],
+  ];
+
+  for (const [pattern, formatter] of patterns) {
+    const match = trimmed.match(pattern);
+    if (match) return formatter(match);
+  }
+
+  return trimmed;
+}
+
+function translateMarketGroupPT(raw: string): string {
+  const exact = MARKET_GROUP_PT[raw];
+  if (exact) return exact;
+  const trimmed = String(raw ?? "").trim();
+  if (!trimmed) return trimmed;
+  return titleCaseWords(trimmed);
+}
+
+function translateChoiceLabelPT(raw: string): string {
+  const exact = CHOICE_LABEL_PT[raw];
+  if (exact) return exact;
+  const trimmed = String(raw ?? "").trim();
+  if (!trimmed) return trimmed;
+  if (/^over\s+/i.test(trimmed)) return trimmed.replace(/^over\s+/i, "Mais de ");
+  if (/^under\s+/i.test(trimmed)) return trimmed.replace(/^under\s+/i, "Menos de ");
+  return trimmed;
 }
 
 function v2SportBase(sport: string): string | null {
@@ -15744,11 +16470,11 @@ router.get("/v2-match-odds", async (req: Request, res: Response) => {
       .filter(m => (m.choices?.length ?? 0) > 0)
       .map(m => ({
         name: translateMarketNamePT(m.marketName ?? ""),
-        group: m.marketGroup ?? "",
+        group: translateMarketGroupPT(m.marketGroup ?? ""),
         choices: (m.choices ?? [])
           .map(c => ({
             name: c.name ?? "",
-            label: CHOICE_LABEL_PT[c.name ?? ""] ?? (c.name ?? ""),
+            label: translateChoiceLabelPT(c.name ?? ""),
             odds: fractionalToDecimal(c.fractionalValue ?? ""),
           }))
           .filter(c => c.odds >= 1.01),
@@ -16052,9 +16778,11 @@ router.get("/football-player-markets/:leagueId", async (req: Request, res: Respo
   const leagueId = String(req.params["leagueId"]);
   const homeTeam = String(req.query["homeTeam"] ?? "").trim();
   const awayTeam = String(req.query["awayTeam"] ?? "").trim();
+  const matchId = String(req.query["matchId"] ?? "").trim();
 
   try {
     const { teams, meta } = await getFootballLeagueStats(leagueId);
+    const providerOdds = matchId ? await getFootballProviderPlayerOdds(matchId) : null;
 
     const homeData = homeTeam ? findMatchingTeam(teams, homeTeam) : undefined;
     const awayData = awayTeam ? findMatchingTeam(teams, awayTeam) : undefined;
@@ -16069,8 +16797,8 @@ router.get("/football-player-markets/:leagueId", async (req: Request, res: Respo
       leagueId: meta.id,
       leagueName: meta.name,
       country: meta.country,
-      home: homeData ? buildTeamMarkets(homeData) : null,
-      away: awayData ? buildTeamMarkets(awayData) : null,
+      home: homeData ? buildTeamMarkets(homeData, providerOdds) : null,
+      away: awayData ? buildTeamMarkets(awayData, providerOdds) : null,
     });
   } catch {
     res.status(500).json({ error: "Mercados de jogadores indisponíveis" });
