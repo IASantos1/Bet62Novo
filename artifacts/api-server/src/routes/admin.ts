@@ -922,4 +922,88 @@ router.get("/settlement-metrics", adminMiddleware, async (req: AdminRequest, res
   }
 });
 
+router.get("/settlement-pending-reasons", adminMiddleware, async (req: AdminRequest, res: Response): Promise<void> => {
+  try {
+    const limitParam = Number((req as unknown as Request).query["limit"] ?? 20);
+    const sampleLimit = Number((req as unknown as Request).query["samples"] ?? 3);
+    const topLimit = Number.isFinite(limitParam) && limitParam > 0 ? Math.min(limitParam, 100) : 20;
+    const samplesPerReason = Number.isFinite(sampleLimit) && sampleLimit > 0 ? Math.min(sampleLimit, 10) : 3;
+
+    const pendingBets = await db
+      .select({
+        id: betsTable.id,
+        userId: betsTable.userId,
+        matchId: betsTable.matchId,
+        status: betsTable.status,
+        createdAt: betsTable.createdAt,
+        selections: betsTable.selections,
+      })
+      .from(betsTable)
+      .where(eq(betsTable.status, "pending"))
+      .orderBy(desc(betsTable.createdAt))
+      .limit(2000);
+
+    type PendingSelection = {
+      selection?: string;
+      market?: string;
+      label?: string;
+      matchId?: string;
+      outcome?: string | null;
+      pendingReason?: string;
+    };
+
+    const buckets = new Map<string, {
+      reason: string;
+      count: number;
+      samples: Array<Record<string, unknown>>;
+    }>();
+
+    let unresolvedSelections = 0;
+
+    for (const bet of pendingBets) {
+      const selections = Array.isArray(bet.selections) ? bet.selections as PendingSelection[] : [];
+      for (const sel of selections) {
+        const outcome = typeof sel?.outcome === "string" ? sel.outcome : null;
+        if (outcome && outcome !== "pending") continue;
+
+        unresolvedSelections++;
+        const reason = String(sel?.pendingReason ?? "missing_pending_reason").trim() || "missing_pending_reason";
+        const bucket = buckets.get(reason) ?? {
+          reason,
+          count: 0,
+          samples: [],
+        };
+        bucket.count++;
+        if (bucket.samples.length < samplesPerReason) {
+          bucket.samples.push({
+            betId: bet.id,
+            userId: bet.userId,
+            matchId: sel?.matchId ?? bet.matchId,
+            selection: sel?.selection ?? null,
+            market: sel?.market ?? null,
+            label: sel?.label ?? null,
+            outcome,
+            createdAt: bet.createdAt,
+          });
+        }
+        buckets.set(reason, bucket);
+      }
+    }
+
+    const reasons = Array.from(buckets.values())
+      .sort((a, b) => b.count - a.count)
+      .slice(0, topLimit);
+
+    res.json({
+      pendingBetCount: pendingBets.length,
+      unresolvedSelectionCount: unresolvedSelections,
+      distinctReasons: buckets.size,
+      reasons,
+    });
+  } catch (err) {
+    logger.error({ err }, "Admin settlement-pending-reasons error");
+    res.status(500).json({ error: "Erro ao carregar pending reasons do settlement" });
+  }
+});
+
 export default router;
