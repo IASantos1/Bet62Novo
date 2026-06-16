@@ -33,6 +33,8 @@ export type SettlementResult = {
   detectedSport: string;
   providerSport?: string;
   ruleVersion: string;
+  resolutionSource?: SelectionSettlementResolution["resolutionSource"];
+  settlementNote?: string | null;
   updatedSel: SelectionRecord;
   result: FinishedResult | LiveResult | null;
   auditInfo: {
@@ -63,6 +65,15 @@ const settlementStats: Record<string, {
   already_settled: number;
   sport_not_identified: number;
 }> = {};
+
+const settlementFallbackMetrics: Record<
+  "fallback_tennis_winner" | "fallback_baseball_moneyline" | "fallback_football_1x2",
+  number
+> = {
+  fallback_tennis_winner: 0,
+  fallback_baseball_moneyline: 0,
+  fallback_football_1x2: 0,
+};
 
 export function resolveSelectionOutcome(
   sel: SelectionRecord,
@@ -154,6 +165,8 @@ export function resolveSelectionOutcome(
       detectedSport,
       providerSport: providerSport ?? undefined,
       ruleVersion,
+      resolutionSource: resolution.resolutionSource,
+      settlementNote: resolution.settlementNote ?? null,
       updatedSel,
       result,
       auditInfo,
@@ -214,6 +227,7 @@ export function resolveSelectionOutcome(
   });
 
   updateSettlementStats(normalizedKey, detectedSport, resolution.outcome, reason);
+  updateFallbackMetrics(resolution.resolutionSource);
   logStructuredSettlement({
     matchId: sel.matchId ?? betMatchId,
     selection: sel.selection,
@@ -235,6 +249,8 @@ export function resolveSelectionOutcome(
     detectedSport,
     providerSport: providerSport ?? undefined,
     ruleVersion,
+    resolutionSource: resolution.resolutionSource,
+    settlementNote: resolution.settlementNote ?? null,
     updatedSel,
     result,
     auditInfo,
@@ -242,7 +258,14 @@ export function resolveSelectionOutcome(
 }
 
 export function getSettlementStats(): Record<string, unknown> {
-  return settlementStats;
+  return {
+    byMarket: settlementStats,
+    fallbackMetrics: settlementFallbackMetrics,
+  };
+}
+
+export function getSettlementFallbackMetrics(): Record<string, number> {
+  return { ...settlementFallbackMetrics };
 }
 
 function buildSettlementOutput(
@@ -280,7 +303,8 @@ function buildSettlementOutput(
       pendingReason: resolution.pendingReason,
       finalScore: updatedSel.finalScore,
       htScore: updatedSel.htScore,
-      settlementNote: updatedSel.settlementNote,
+      settlementNote: resolution.settlementNote ?? null,
+      resolutionSource: resolution.resolutionSource ?? null,
     },
     timestamp: new Date().toISOString(),
     engineVersion: ENGINE_VERSION,
@@ -298,13 +322,12 @@ function buildUpdatedSelection(
   const now = new Date().toISOString();
   if (isLive) {
     const liveScore = buildLiveSettlementScore(result as LiveResult);
-    const settlementNote = resolution.outcome !== null ? (resolution.settlementNote ?? null) : undefined;
     return {
       ...sel,
       ...(liveScore ? { finalScore: { home: liveScore.home, away: liveScore.away } } : {}),
       ...(resolution.outcome !== null ? { outcome: resolution.outcome } : {}),
       ...(resolution.outcome !== null ? { pendingReason: null } : resolution.pendingReason ? { pendingReason: resolution.pendingReason } : {}),
-      ...(settlementNote !== undefined ? { settlementNote } : {}),
+      ...(resolution.outcome !== null ? { settlementNote: null } : {}),
       lastSettledAt: now,
       settlementRuleVersion: ENGINE_VERSION,
     };
@@ -316,11 +339,6 @@ function buildUpdatedSelection(
       ? { htHome: finished.htHome, htAway: finished.htAway }
       : undefined;
 
-  const settlementNote =
-    resolution.outcome !== null
-      ? (resolution.settlementNote ?? getSelectionSettlementNote((finished as any)?.status, resolution.outcome) ?? null)
-      : undefined;
-
   return {
     ...sel,
     ...(typeof finished.home === "number" && typeof finished.away === "number"
@@ -329,7 +347,7 @@ function buildUpdatedSelection(
     ...(ht ? { htScore: ht } : {}),
     ...(resolution.outcome !== null ? { outcome: resolution.outcome } : {}),
     ...(resolution.outcome !== null ? { pendingReason: null } : resolution.pendingReason ? { pendingReason: resolution.pendingReason } : {}),
-    ...(settlementNote !== undefined ? { settlementNote } : {}),
+    ...(resolution.outcome !== null ? { settlementNote: null } : {}),
     lastSettledAt: now,
     settlementRuleVersion: ENGINE_VERSION,
   };
@@ -439,6 +457,13 @@ function updateSettlementStats(
 
   if (reason !== "market_evaluated" && reason in stats) {
     stats[reason]++;
+  }
+}
+
+function updateFallbackMetrics(source: SelectionSettlementResolution["resolutionSource"] | undefined): void {
+  if (!source) return;
+  if (source in settlementFallbackMetrics) {
+    settlementFallbackMetrics[source as keyof typeof settlementFallbackMetrics]++;
   }
 }
 

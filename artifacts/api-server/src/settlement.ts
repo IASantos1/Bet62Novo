@@ -35,6 +35,7 @@ export type SelectionSettlementResolution = {
   outcome: SettlementOutcome;
   pendingReason?: string | null;
   settlementNote?: string | null;
+  resolutionSource?: "fallback_tennis_winner" | "fallback_baseball_moneyline" | "fallback_football_1x2" | "timeout_auto_void";
 };
 
 const SETTLEMENT_LOCK_TTL_SECONDS = 300;
@@ -260,7 +261,10 @@ function resolveSelectionMarketFallback(
       extra?.winner
       ?? (ft.home > ft.away ? "home" : ft.away > ft.home ? "away" : null);
     if (!winner) return null;
-    return { outcome: winner === side ? "won" : "lost" };
+    return {
+      outcome: winner === side ? "won" : "lost",
+      resolutionSource: "fallback_tennis_winner",
+    };
   }
 
   if (
@@ -270,7 +274,10 @@ function resolveSelectionMarketFallback(
   ) {
     if (!Number.isFinite(ft.home) || !Number.isFinite(ft.away) || ft.home === ft.away) return null;
     const winner = ft.home > ft.away ? "home" : "away";
-    return { outcome: winner === side ? "won" : "lost" };
+    return {
+      outcome: winner === side ? "won" : "lost",
+      resolutionSource: "fallback_baseball_moneyline",
+    };
   }
 
   if (
@@ -280,7 +287,10 @@ function resolveSelectionMarketFallback(
   ) {
     if (!Number.isFinite(ft.home) || !Number.isFinite(ft.away)) return null;
     const winner = ft.home > ft.away ? "home" : ft.away > ft.home ? "away" : "draw";
-    return { outcome: winner === side ? "won" : "lost" };
+    return {
+      outcome: winner === side ? "won" : "lost",
+      resolutionSource: "fallback_football_1x2",
+    };
   }
 
   return null;
@@ -683,6 +693,7 @@ export function resolveSelectionSettlement(
       outcome: "void",
       pendingReason: null,
       settlementNote: "auto_void_timeout",
+      resolutionSource: "timeout_auto_void",
     };
   }
 
@@ -1988,6 +1999,7 @@ export async function autoSettlePendingBets(opts?: { matchIds?: string[] }): Pro
           selections.map((sel) => resolveSelectionOutcomeViaHelper(sel, bet.matchId, false)),
         );
         const outcomes: SettlementOutcome[] = finalSettlementResults.map((result) => result.outcome);
+        const timedOutCount = finalSettlementResults.filter((result) => result.settlementNote === "auto_void_timeout").length;
 
         // ── Early loss: if any leg is definitively lost, settle immediately ──
         if (outcomes.some(o => o === "lost")) {
@@ -2077,7 +2089,9 @@ export async function autoSettlePendingBets(opts?: { matchIds?: string[] }): Pro
               oldStatus: "pending",
               newStatus: "voided",
               payout: bet.stake,
-              message: "Auto-settled: all selections voided — stake refunded",
+              message: timedOutCount > 0
+                ? "Auto void due settlement timeout"
+                : "Auto-settled: all selections voided — stake refunded",
             }).onConflictDoNothing();
           });
           settled++;
@@ -2137,7 +2151,9 @@ export async function autoSettlePendingBets(opts?: { matchIds?: string[] }): Pro
             oldStatus: "pending",
             newStatus: "won",
             payout: payoutStr,
-            message: `Auto-settled: settled with ${outcomes.filter(o => o === "void").length} void leg(s), ${outcomes.filter(o => o === "half_won").length} half-won leg(s) and ${outcomes.filter(o => o === "half_lost").length} half-lost leg(s)`,
+            message: timedOutCount > 0
+              ? "Auto void due settlement timeout"
+              : `Auto-settled: settled with ${outcomes.filter(o => o === "void").length} void leg(s), ${outcomes.filter(o => o === "half_won").length} half-won leg(s) and ${outcomes.filter(o => o === "half_lost").length} half-lost leg(s)`,
           }).onConflictDoNothing();
         });
 
