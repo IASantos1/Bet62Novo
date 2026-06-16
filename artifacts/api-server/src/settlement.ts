@@ -74,17 +74,6 @@ async function releaseBetSettlementLock(betId: number | string, owner: string): 
   }
 }
 
-async function resolveSelectionOutcomeViaHelper(
-  sel: SelectionRecord,
-  betMatchId: string | undefined,
-  isLive = false,
-  opts?: { forceReevaluate?: boolean },
-): Promise<UnifiedSettlementResult> {
-  settlementHelpersModulePromise ??= import("./lib/settlementHelpers.js");
-  const mod = await settlementHelpersModulePromise;
-  return mod.resolveSelectionOutcome(sel, betMatchId, isLive, opts);
-}
-
 async function ensureSettlementTransitionIdempotency(
   tx: any,
   args: {
@@ -1842,13 +1831,32 @@ export async function autoSettlePendingBets(opts?: { matchIds?: string[] }): Pro
           if (!touches) continue;
         }
 
-        const liveSettlementResults = await Promise.all(
-          selections.map((sel) => resolveSelectionOutcomeViaHelper(sel, bet.matchId, true)),
-        );
-        const liveLostDetected = liveSettlementResults.some((result) => result.outcome === "lost");
+        let liveLostDetected = false;
+        for (const sel of selections) {
+          const live = findLiveResult(sel, bet.matchId, isSingle);
+          const liveScore = buildLiveSettlementScore(live);
+          const resolution = liveScore ? resolveLiveSelectionSettlement(sel, liveScore) : { outcome: null as SettlementOutcome };
+          if (resolution.outcome === "lost") { liveLostDetected = true; break; }
+        }
 
         if (liveLostDetected) {
-          const updatedSelsLost = liveSettlementResults.map((result) => result.updatedSel);
+          const updatedSelsLost = selections.map(sel => {
+            const live = findLiveResult(sel, bet.matchId, isSingle);
+            const liveScore = buildLiveSettlementScore(live);
+            const resolution = liveScore ? resolveLiveSelectionSettlement(sel, liveScore) : { outcome: null as SettlementOutcome, pendingReason: "missing_live_score" };
+            if (!resolution.outcome) {
+              return {
+                ...sel,
+                pendingReason: resolution.pendingReason ?? sel.pendingReason,
+              };
+            }
+            return {
+              ...sel,
+              finalScore: { home: liveScore.home, away: liveScore.away },
+              outcome: resolution.outcome,
+              pendingReason: resolution.pendingReason,
+            };
+          });
 
           await db.transaction(async (tx) => {
             const canProceed = await ensureSettlementTransitionIdempotency(tx, {
@@ -1892,10 +1900,17 @@ export async function autoSettlePendingBets(opts?: { matchIds?: string[] }): Pro
 
         if (isSingle) {
           const sel = selections[0]!;
-          const liveResolution = liveSettlementResults[0]!;
-          const out = liveResolution.outcome;
-          if (out === "won" || out === "lost") {
-            const updatedSel: SelectionRecord = liveResolution.updatedSel;
+          const live = findLiveResult(sel, bet.matchId, true);
+          const liveScore = buildLiveSettlementScore(live);
+          const resolution = liveScore ? resolveLiveSelectionSettlement(sel, liveScore) : { outcome: null as SettlementOutcome, pendingReason: "missing_live_score" };
+          const out = resolution.outcome;
+          if (liveScore && (out === "won" || out === "lost")) {
+            const updatedSel: SelectionRecord = {
+              ...sel,
+              finalScore: { home: liveScore.home, away: liveScore.away },
+              outcome: out,
+              pendingReason: resolution.pendingReason,
+            };
 
             if (out === "won") {
               const stakeNum = parseFloat(bet.stake);
@@ -2003,7 +2018,28 @@ export async function autoSettlePendingBets(opts?: { matchIds?: string[] }): Pro
 
         // ── Early loss: if any leg is definitively lost, settle immediately ──
         if (outcomes.some(o => o === "lost")) {
-          const updatedSelsLost = finalSettlementResults.map((result) => result.updatedSel);
+          const updatedSelsLost = selections.map(sel => {
+            const r = findResult(sel, bet.matchId, isSingle);
+            if (!r) return sel;
+            const ht = typeof r.htHome === "number" && typeof r.htAway === "number"
+              ? { htHome: r.htHome, htAway: r.htAway }
+              : undefined;
+            const resolution = resolveSelectionSettlement(sel, { home: r.home, away: r.away }, ht, {
+              status: (r as any).status,
+              cornersTotal: r.cornersTotal,
+              cardsTotal: r.cardsTotal,
+              firstGoal: r.firstGoal,
+              extras: r.extras,
+              finishedAt: r.finishedAt,
+            });
+            return {
+              ...sel,
+              finalScore: { home: r.home, away: r.away },
+              htScore: ht,
+              outcome: resolution.outcome,
+              pendingReason: resolution.pendingReason,
+            };
+          });
           await db.transaction(async (tx: any) => {
             const canProceed = await ensureSettlementTransitionIdempotency(tx, {
               betId: bet.id,
@@ -2107,7 +2143,28 @@ export async function autoSettlePendingBets(opts?: { matchIds?: string[] }): Pro
         const payoutStr = payoutNum.toFixed(2);
         const oddsStr = Number(effectiveOdds.toFixed(2)).toFixed(2);
 
-        const updatedSelsWon = finalSettlementResults.map((result) => result.updatedSel);
+        const updatedSelsWon = selections.map(sel => {
+          const r = findResult(sel, bet.matchId, isSingle);
+          if (!r) return sel;
+          const ht = typeof r.htHome === "number" && typeof r.htAway === "number"
+            ? { htHome: r.htHome, htAway: r.htAway }
+            : undefined;
+          const resolution = resolveSelectionSettlement(sel, { home: r.home, away: r.away }, ht, {
+            status: (r as any).status,
+            cornersTotal: r.cornersTotal,
+            cardsTotal: r.cardsTotal,
+            firstGoal: r.firstGoal,
+            extras: r.extras,
+            finishedAt: r.finishedAt,
+          });
+          return {
+            ...sel,
+            finalScore: { home: r.home, away: r.away },
+            htScore: ht,
+            outcome: resolution.outcome,
+            pendingReason: resolution.pendingReason,
+          };
+        });
 
         await db.transaction(async (tx: any) => {
           const canProceed = await ensureSettlementTransitionIdempotency(tx, {
@@ -2222,11 +2279,37 @@ export async function regradeSettledBetsForMatch(matchId: string, jobId: string)
 
         const isSingle = selections.length === 1;
 
-        const regradeResults = await Promise.all(
-          selections.map((sel) => resolveSelectionOutcomeViaHelper(sel, bet.matchId, false, { forceReevaluate: true })),
-        );
-        const outcomes: SettlementOutcome[] = regradeResults.map((result) => result.outcome);
-        const updatedSelections = regradeResults.map((result) => result.updatedSel);
+        const outcomes: SettlementOutcome[] = [];
+        const updatedSelections = selections.map((sel) => {
+          const result = findResult(sel, bet.matchId, isSingle);
+          if (!result) {
+            outcomes.push(null);
+            return sel;
+          }
+
+          const ht: HTScore | undefined =
+            typeof result.htHome === "number" && typeof result.htAway === "number"
+              ? { htHome: result.htHome, htAway: result.htAway }
+              : undefined;
+
+          const resolution = resolveSelectionSettlement(sel, result, ht, {
+            status: (result as any).status,
+            cornersTotal: result.cornersTotal,
+            cardsTotal: result.cardsTotal,
+            firstGoal: result.firstGoal,
+            extras: result.extras,
+            finishedAt: result.finishedAt,
+          });
+          outcomes.push(resolution.outcome);
+
+          return {
+            ...sel,
+            finalScore: { home: result.home, away: result.away },
+            htScore: ht,
+            outcome: resolution.outcome,
+            pendingReason: resolution.pendingReason,
+          };
+        });
 
         if (outcomes.some((o) => o === null)) continue;
 
@@ -2378,32 +2461,38 @@ async function hydrateSettledBetSelections(): Promise<void> {
       const selections = bet.selections as SelectionRecord[];
       if (!Array.isArray(selections) || selections.length === 0) continue;
 
+      const isSingle = selections.length === 1;
       let changed = false;
 
-      const hydrateResults = await Promise.all(
-        selections.map((sel) => resolveSelectionOutcomeViaHelper(sel, bet.matchId, false, { forceReevaluate: true })),
-      );
+        const next = selections.map((sel) => {
+        const r = findResult(sel, bet.matchId, isSingle);
+        if (!r) return sel;
 
-      const next = selections.map((sel, idx) => {
-        const resolved = hydrateResults[idx]!;
         const needsOutcome = sel.outcome == null;
         const needsScore = sel.finalScore == null;
-        const needsHt = sel.htScore == null && resolved.updatedSel.htScore != null;
-        const canHydrateOutcome = needsOutcome && resolved.outcome != null;
-        const canHydrateScore = needsScore && resolved.updatedSel.finalScore != null;
-        const canHydrateHt = needsHt && resolved.updatedSel.htScore != null;
-        if (!canHydrateOutcome && !canHydrateScore && !canHydrateHt) return sel;
+        if (!needsOutcome && !needsScore) return sel;
+
+        const ht = typeof r.htHome === "number" && typeof r.htAway === "number"
+          ? { htHome: r.htHome, htAway: r.htAway }
+          : undefined;
 
         changed = true;
-        return {
+          const resolution = resolveSelectionSettlement(sel, { home: r.home, away: r.away }, ht, {
+            status: (r as any).status,
+            cornersTotal: r.cornersTotal,
+            cardsTotal: r.cardsTotal,
+            firstGoal: r.firstGoal,
+            extras: r.extras,
+            finishedAt: r.finishedAt,
+          });
+          return {
           ...sel,
-          finalScore: canHydrateScore ? resolved.updatedSel.finalScore : sel.finalScore,
-          htScore: canHydrateHt ? resolved.updatedSel.htScore : sel.htScore,
-          outcome: canHydrateOutcome ? resolved.outcome : sel.outcome,
-          pendingReason: resolved.updatedSel.pendingReason,
-          settlementNote: resolved.updatedSel.settlementNote ?? sel.settlementNote,
-          lastSettledAt: resolved.updatedSel.lastSettledAt ?? sel.lastSettledAt,
-          settlementRuleVersion: resolved.updatedSel.settlementRuleVersion ?? sel.settlementRuleVersion,
+          finalScore: needsScore ? { home: r.home, away: r.away } : sel.finalScore,
+          htScore: sel.htScore ?? ht,
+          outcome: needsOutcome
+            ? resolution.outcome
+            : sel.outcome,
+            pendingReason: resolution.pendingReason,
         };
       });
 
