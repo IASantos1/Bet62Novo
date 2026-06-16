@@ -1,5 +1,6 @@
-import { db, betsTable, cashoutStatesTable, usersTable, settlementLogsTable } from "@workspace/db";
+import { db, betsTable, cashoutStatesTable, usersTable, settlementLogsTable, settlementIdempotencyTable } from "@workspace/db";
 import { eq, and, lt, sql, gte, desc } from "drizzle-orm";
+import IORedis from "ioredis";
 import { logger } from "./lib/logger.js";
 import { applyBalanceDelta } from "./lib/ledger.js";
 import { ensureFinishedMatchResult, finishedMatchResults, liveMatchState, scanDailyForFinished, scanV2AllSportsForFinished } from "./routes/matches.js";
@@ -19,17 +20,93 @@ export type SelectionRecord = {
   htScore?: { htHome: number; htAway: number };
   outcome?: "won" | "lost" | "void" | "half_won" | "half_lost" | null;
   pendingReason?: string;
+  settlementNote?: string;
+  lastSettledAt?: string;
+  settlementRuleVersion?: string;
 };
 
-type FTScore = { home: number; away: number };
-type HTScore = { htHome: number; htAway: number };
-type FinishedResult = (typeof finishedMatchResults extends Map<string, infer V> ? V : never);
-type LiveResult = (typeof liveMatchState extends Map<string, infer V> ? V : never);
-type SettlementOutcome = "won" | "lost" | "void" | "half_won" | "half_lost" | null;
-type SelectionSettlementResolution = {
+export type FTScore = { home: number; away: number };
+export type HTScore = { htHome: number; htAway: number };
+export type FinishedResult = (typeof finishedMatchResults extends Map<string, infer V> ? V : never);
+export type LiveResult = (typeof liveMatchState extends Map<string, infer V> ? V : never);
+export type SettlementOutcome = "won" | "lost" | "void" | "half_won" | "half_lost" | null;
+export type SelectionSettlementResolution = {
   outcome: SettlementOutcome;
   pendingReason?: string;
 };
+
+const SETTLEMENT_LOCK_TTL_SECONDS = 300;
+
+let settlementRedis: IORedis | null | undefined;
+
+function getSettlementRedis(): IORedis | null {
+  if (settlementRedis !== undefined) return settlementRedis;
+  const url = process.env["REDIS_URL"];
+  if (typeof url !== "string" || url.trim() === "") {
+    settlementRedis = null;
+    return settlementRedis;
+  }
+  settlementRedis = new IORedis(url, { maxRetriesPerRequest: null });
+  return settlementRedis;
+}
+
+async function acquireBetSettlementLock(betId: number | string, owner: string): Promise<boolean> {
+  const redis = getSettlementRedis();
+  if (!redis) return true;
+  const key = `settlement:lock:bet:${String(betId)}`;
+  const result = await redis.set(key, owner, "NX", "EX", SETTLEMENT_LOCK_TTL_SECONDS);
+  return result === "OK";
+}
+
+async function releaseBetSettlementLock(betId: number | string, owner: string): Promise<void> {
+  const redis = getSettlementRedis();
+  if (!redis) return;
+  const key = `settlement:lock:bet:${String(betId)}`;
+  const currentOwner = await redis.get(key);
+  if (currentOwner === owner) {
+    await redis.del(key);
+  }
+}
+
+async function ensureSettlementTransitionIdempotency(
+  tx: any,
+  args: {
+    betId: number;
+    trigger: string;
+    oldStatus: string;
+    newStatus: string;
+    matchId?: string;
+    jobId?: string;
+  },
+): Promise<boolean> {
+  const idempotencyKey = [
+    "bet", String(args.betId),
+    "trigger", args.trigger,
+    "old", String(args.oldStatus ?? ""),
+    "new", String(args.newStatus ?? ""),
+    args.matchId ? `match:${String(args.matchId)}` : "",
+    args.jobId ? `job:${String(args.jobId)}` : "",
+  ]
+    .filter(Boolean)
+    .join(":");
+
+  const rows = await tx
+    .insert(settlementIdempotencyTable)
+    .values({
+      idempotencyKey,
+      betId: args.betId,
+      trigger: args.trigger,
+      oldStatus: args.oldStatus,
+      newStatus: args.newStatus,
+      matchId: args.matchId,
+      jobId: args.jobId,
+      engineVersion: "2025.06-v4",
+    })
+    .onConflictDoNothing()
+    .returning({ idempotencyKey: settlementIdempotencyTable.idempotencyKey });
+
+  return rows.length > 0;
+}
 
 function buildSettlementLogKey(args: {
   betId: number;
@@ -238,24 +315,6 @@ function scoreOutcomeForSelLastResort(
   const derivedHt = ht ?? getFootballHTScoreFromExtras(extra?.extras) ?? undefined;
 
   if (sport === "tennis") {
-    if (/^set[123]-(home|away)$/.test(s) || /^vs[123][ha]$/.test(s)) {
-      const setNum =
-        s.startsWith("set") ? Number.parseInt(s.slice(3, 4), 10)
-        : Number.parseInt(s.slice(2, 3), 10);
-      const setScore = getTennisSetsFromExtras(extra?.extras)[setNum - 1] ?? null;
-      if (!setScore || !tennisSetFinished(setScore)) return null;
-      if (setScore[0] === setScore[1]) return "void";
-      const wantHome = s.endsWith("home") || s.endsWith("h");
-      return wantHome ? (setScore[0] > setScore[1] ? "won" : "lost") : (setScore[1] > setScore[0] ? "won" : "lost");
-    }
-    if (/^sc([123])-(\d-\d)$/.test(s) || /^ses-(\d-\d)$/.test(s)) {
-      const match = s.match(/^sc([123])-(\d-\d)$/) || s.match(/^ses-(\d-\d)$/);
-      const setNum = s.startsWith("sc") ? Number(match?.[1] ?? 0) : getTennisSetsFromExtras(extra?.extras).length;
-      const wanted = s.startsWith("sc") ? match?.[2] : match?.[1];
-      const setScore = getTennisSetsFromExtras(extra?.extras)[setNum - 1] ?? null;
-      if (!wanted || !setScore || !tennisSetFinished(setScore)) return null;
-      return `${setScore[0]}-${setScore[1]}` === wanted ? "won" : "lost";
-    }
     if (/^es-(h20|h21|a02|a12)$/.test(s)) {
       const score = `${ft.home}-${ft.away}`;
       const want =
@@ -276,16 +335,11 @@ function scoreOutcomeForSelLastResort(
   }
 
   if (sport === "football") {
-    const ex = (extra?.extras ?? {}) as Record<string, unknown>;
-    const fx = ex["football"] as Record<string, unknown> | undefined;
     if ((s === "home" || s === "away" || s === "draw") && Number.isFinite(ft.home) && Number.isFinite(ft.away)) {
       if (s === "home") return ft.home > ft.away ? "won" : "lost";
       if (s === "away") return ft.away > ft.home ? "won" : "lost";
       return ft.home === ft.away ? "won" : "lost";
     }
-    if (s === "homeOrDraw" || s === "dc-hd") return ft.home >= ft.away ? "won" : "lost";
-    if (s === "awayOrDraw" || s === "dc-da") return ft.away >= ft.home ? "won" : "lost";
-    if (s === "homeOrAway" || s === "dc-ha") return ft.home !== ft.away ? "won" : "lost";
     if (derivedHt) {
       const htHome = derivedHt.htHome;
       const htAway = derivedHt.htAway;
@@ -296,14 +350,6 @@ function scoreOutcomeForSelLastResort(
       if (s === "ht-draw") return htHome === htAway ? "won" : "lost";
       if (s === "b1h-yes") return htHome > 0 && htAway > 0 ? "won" : "lost";
       if (s === "b1h-no") return htHome === 0 || htAway === 0 ? "won" : "lost";
-      if (s.startsWith("htcs-")) {
-        const body = s.slice(5);
-        if (body === "Outro") {
-          const common = ["0-0", "1-0", "0-1", "1-1", "2-0", "0-2", "2-1", "1-2"];
-          return !common.includes(`${htHome}-${htAway}`) ? "won" : "lost";
-        }
-        return `${htHome}-${htAway}` === body ? "won" : "lost";
-      }
       if (s === "2h-home") return h2Home > h2Away ? "won" : "lost";
       if (s === "2h-away") return h2Away > h2Home ? "won" : "lost";
       if (s === "2h-draw") return h2Home === h2Away ? "won" : "lost";
@@ -314,49 +360,6 @@ function scoreOutcomeForSelLastResort(
         if (total2h === line) return "void";
         return h2Total[1] === "o" ? (total2h > line ? "won" : "lost") : (total2h < line ? "won" : "lost");
       }
-      if (s.startsWith("h2cs-")) {
-        const body = s.slice(5);
-        return `${h2Home}-${h2Away}` === body ? "won" : "lost";
-      }
-      if (s === "wbh-h") return htHome > htAway && h2Home > h2Away ? "won" : "lost";
-      if (s === "wbh-a") return htAway > htHome && h2Away > h2Home ? "won" : "lost";
-      if (s === "hsf-1") return (htHome + htAway) > (h2Home + h2Away) ? "won" : "lost";
-      if (s === "hsf-2") return (h2Home + h2Away) > (htHome + htAway) ? "won" : "lost";
-      if (s === "hsf-e") return (htHome + htAway) === (h2Home + h2Away) ? "won" : "lost";
-      const htft = s.match(/^htft-([hda])([hda])$/);
-      if (htft) {
-        const htPick = htft[1] === "h" ? (htHome > htAway) : htft[1] === "a" ? (htAway > htHome) : (htHome === htAway);
-        const ftPick = htft[2] === "h" ? (ft.home > ft.away) : htft[2] === "a" ? (ft.away > ft.home) : (ft.home === ft.away);
-        return htPick && ftPick ? "won" : "lost";
-      }
-    }
-    if (/^[ou]c\d+$/.test(s) && extra?.cornersTotal != null) {
-      const line = decodeCompactLine(s.slice(2));
-      if (!Number.isFinite(line)) return null;
-      if (extra.cornersTotal === line) return "void";
-      return s[0] === "o" ? (extra.cornersTotal > line ? "won" : "lost") : (extra.cornersTotal < line ? "won" : "lost");
-    }
-    if (/^[ou]card\d+$/.test(s) && extra?.cardsTotal != null) {
-      const line = decodeCompactLine(s.slice(5));
-      if (!Number.isFinite(line)) return null;
-      if (extra.cardsTotal === line) return "void";
-      return s[0] === "o" ? (extra.cardsTotal > line ? "won" : "lost") : (extra.cardsTotal < line ? "won" : "lost");
-    }
-    if (s === "fg-home" || s === "fg-away" || s === "fg-none") {
-      if (!extra?.firstGoal) return null;
-      return s === `fg-${extra.firstGoal}` ? "won" : "lost";
-    }
-    if (/^at-([ou])(\d+)$/.test(s)) {
-      const m = s.match(/^at-([ou])(\d+)$/)!;
-      const side = m[1] === "o" ? "over" : "under";
-      const line = decodeCompactLine(m[2]!);
-      return settleAsianTotalOutcome(ft.home + ft.away, side, line);
-    }
-    if (s === "ah-home" || s === "ah-away") {
-      const side = s.endsWith("home") ? "home" : "away";
-      const line = parseSignedSelectionLabelLine(sel.label);
-      if (line == null || !Number.isFinite(line)) return null;
-      return settleAsianSideHandicapOutcome(ft.home, ft.away, side, line);
     }
     if (/^[ou][\d.]+$/.test(s)) {
       const line = decodeCompactLine(s.slice(1));
@@ -367,76 +370,6 @@ function scoreOutcomeForSelLastResort(
     }
     if (s === "bts-yes") return ft.home > 0 && ft.away > 0 ? "won" : "lost";
     if (s === "bts-no") return ft.home === 0 || ft.away === 0 ? "won" : "lost";
-    if (s === "goe-odd") return (ft.home + ft.away) % 2 === 1 ? "won" : "lost";
-    if (s === "goe-even") return (ft.home + ft.away) % 2 === 0 ? "won" : "lost";
-    if (/^tgh-([ou])(\d+)$/.test(s)) {
-      const m = s.match(/^tgh-([ou])(\d+)$/)!;
-      const line = decodeCompactLine(m[2]!);
-      if (ft.home === line) return "void";
-      return m[1] === "o" ? (ft.home > line ? "won" : "lost") : (ft.home < line ? "won" : "lost");
-    }
-    if (/^tga-([ou])(\d+)$/.test(s)) {
-      const m = s.match(/^tga-([ou])(\d+)$/)!;
-      const line = decodeCompactLine(m[2]!);
-      if (ft.away === line) return "void";
-      return m[1] === "o" ? (ft.away > line ? "won" : "lost") : (ft.away < line ? "won" : "lost");
-    }
-    if (s === "wtn-h") return ft.home > ft.away && ft.away === 0 ? "won" : "lost";
-    if (s === "wtn-a") return ft.away > ft.home && ft.home === 0 ? "won" : "lost";
-    if (s === "cs-h") return ft.away === 0 ? "won" : "lost";
-    if (s === "cs-a") return ft.home === 0 ? "won" : "lost";
-    if (s === "eg-g5plus") return (ft.home + ft.away) >= 5 ? "won" : "lost";
-    if (/^eg-g\d+$/.test(s)) return (ft.home + ft.away) === Number.parseInt(s.slice(4), 10) ? "won" : "lost";
-    if (s === "dnb-home") {
-      if (ft.home === ft.away) return "void";
-      return ft.home > ft.away ? "won" : "lost";
-    }
-    if (s === "dnb-away") {
-      if (ft.home === ft.away) return "void";
-      return ft.away > ft.home ? "won" : "lost";
-    }
-    if (s === "hc-hm1" || s === "hc-hm15") return (ft.home - ft.away) >= 2 ? "won" : "lost";
-    if (s === "hc-ap1" || s === "hc-ap15") return (ft.home - ft.away) <= 1 ? "won" : "lost";
-    if (s.startsWith("et-")) {
-      const etHome = typeof fx?.["etHome"] === "number" ? (fx["etHome"] as number) : null;
-      const etAway = typeof fx?.["etAway"] === "number" ? (fx["etAway"] as number) : null;
-      const ftHome = typeof fx?.["ftHome"] === "number" ? (fx["ftHome"] as number) : null;
-      const ftAway = typeof fx?.["ftAway"] === "number" ? (fx["ftAway"] as number) : null;
-      if (etHome === null || etAway === null) return null;
-      if (s === "et-home") return etHome > etAway ? "won" : "lost";
-      if (s === "et-draw") return etHome === etAway ? "won" : "lost";
-      if (s === "et-away") return etAway > etHome ? "won" : "lost";
-      if (s === "et-tw-home" || s === "et-tw-away") {
-        if (ftHome === null || ftAway === null) return null;
-        const totalDiff = (ftHome + etHome) - (ftAway + etAway);
-        if (totalDiff === 0) return null;
-        return s === "et-tw-home" ? (totalDiff > 0 ? "won" : "lost") : (totalDiff < 0 ? "won" : "lost");
-      }
-      const etTotal = s.match(/^et-([ou])(\d+)$/);
-      if (etTotal) {
-        const line = decodeCompactLine(etTotal[2]!);
-        const totalET = etHome + etAway;
-        if (totalET === line) return "void";
-        return etTotal[1] === "o" ? (totalET > line ? "won" : "lost") : (totalET < line ? "won" : "lost");
-      }
-    }
-    if (s === "pen-home" || s === "pen-away") {
-      const penHome = typeof fx?.["penHome"] === "number" ? (fx["penHome"] as number) : null;
-      const penAway = typeof fx?.["penAway"] === "number" ? (fx["penAway"] as number) : null;
-      if (penHome === null || penAway === null || penHome === penAway) return null;
-      return s === "pen-home" ? (penHome > penAway ? "won" : "lost") : (penAway > penHome ? "won" : "lost");
-    }
-    if (s.startsWith("cs-")) {
-      const body = s.slice(3);
-      if (body === "Outro") {
-        const common = [
-          "0-0", "1-0", "0-1", "1-1", "2-0", "0-2", "2-1", "1-2",
-          "2-2", "3-0", "0-3", "3-1", "1-3", "3-2", "2-3",
-        ];
-        return !common.includes(`${ft.home}-${ft.away}`) ? "won" : "lost";
-      }
-      return `${ft.home}-${ft.away}` === body ? "won" : "lost";
-    }
   }
 
   if (sport === "basketball") {
@@ -452,13 +385,11 @@ function scoreOutcomeForSelLastResort(
     if (q) {
       const qScore = quarters[Number(q[1]) - 1] ?? null;
       if (!qScore) return null;
-      if (qScore[0] === qScore[1]) return "void";
       return q[2] === "home" ? (qScore[0] > qScore[1] ? "won" : "lost") : (qScore[1] > qScore[0] ? "won" : "lost");
     }
     if ((s === "h1-home" || s === "h1-away") && quarters.length >= 2) {
       const h1Home = (quarters[0]?.[0] ?? 0) + (quarters[1]?.[0] ?? 0);
       const h1Away = (quarters[0]?.[1] ?? 0) + (quarters[1]?.[1] ?? 0);
-      if (h1Home === h1Away) return "void";
       return s === "h1-home" ? (h1Home > h1Away ? "won" : "lost") : (h1Away > h1Home ? "won" : "lost");
     }
     const h1Total = s.match(/^b-h1-pts-([ou])-(\d+(?:\.\d+)?)$/);
@@ -468,34 +399,10 @@ function scoreOutcomeForSelLastResort(
       if (totalH1 === line) return "void";
       return h1Total[1] === "o" ? (totalH1 > line ? "won" : "lost") : (totalH1 < line ? "won" : "lost");
     }
-    const spread = s.match(/^b-spread-(home|away)-(\d+(?:\.\d+)?)$/);
-    if (spread) {
-      const side = spread[1]!;
-      const line = Number(spread[2]!);
-      if (!Number.isFinite(line)) return null;
-      const adj = (ft.home - ft.away) - line;
-      if (adj === 0) return "void";
-      return side === "home" ? (adj > 0 ? "won" : "lost") : (adj < 0 ? "won" : "lost");
-    }
-    const teamTotal = s.match(/^b-tt-(home|away)-([ou])-(\d+(?:\.\d+)?)$/);
-    if (teamTotal) {
-      const side = teamTotal[1]!;
-      const dir = teamTotal[2]!;
-      const line = Number(teamTotal[3]!);
-      if (!Number.isFinite(line)) return null;
-      const score = side === "home" ? ft.home : ft.away;
-      if (score === line) return "void";
-      return dir === "o" ? (score > line ? "won" : "lost") : (score < line ? "won" : "lost");
-    }
   }
 
   if (sport === "hockey") {
     const periods = getHockeyPeriodsFromExtras(extra?.extras);
-    if (s === "pl-home" || s === "pl-away") {
-      const side = s.endsWith("home") ? "home" : "away";
-      const line = parseSignedSelectionLabelLine(sel.label) ?? (side === "home" ? -1.5 : 1.5);
-      return settleAsianSideHandicapOutcome(ft.home, ft.away, side, line);
-    }
     const per = s.match(/^p([123])-(home|draw|away)$/) || s.match(/^per([123])-(home|draw|away)$/);
     if (per) {
       const score = periods[Number(per[1]) - 1] ?? null;
@@ -527,15 +434,6 @@ function scoreOutcomeForSelLastResort(
     if (s === "winner" || s === "home" || s === "away") {
       if (s === "home") return ft.home > ft.away ? "won" : "lost";
       return ft.away > ft.home ? "won" : "lost";
-    }
-    const rl = s.match(/^mlb-rl-(home|away)-(\d+(?:\.\d+)?)$/) || s.match(/^rl-(home|away)$/);
-    if (rl) {
-      const side = rl[1]!;
-      const line = rl[2] != null ? Number(rl[2]) : parseSelectionLabelLine(sel.label) ?? 1.5;
-      if (!Number.isFinite(line)) return null;
-      const diff = ft.home - ft.away;
-      if (diff === line) return "void";
-      return side === "home" ? (diff > line ? "won" : "lost") : (diff < line ? "won" : "lost");
     }
     const f5res = s.match(/^mlb-f5-(home|away)$/) || s.match(/^f5-(home|away)$/);
     if (f5res && innings.length >= 5) {
@@ -595,7 +493,7 @@ function describePendingSettlementReason(
   return "market_known_but_unresolved";
 }
 
-function resolveLiveSelectionSettlement(
+export function resolveLiveSelectionSettlement(
   sel: SelectionRecord,
   score: {
     home: number;
@@ -631,7 +529,7 @@ function resolveLiveSelectionSettlement(
   };
 }
 
-function buildLiveSettlementScore(
+export function buildLiveSettlementScore(
   live: LiveResult | null,
 ): {
   home: number;
@@ -666,7 +564,7 @@ function buildLiveSettlementScore(
   };
 }
 
-function resolveSelectionSettlement(
+export function resolveSelectionSettlement(
   sel: { selection: string; label?: unknown },
   ft: FTScore,
   ht?: HTScore,
@@ -685,7 +583,7 @@ function resolveSelectionSettlement(
   };
 }
 
-function normalizeSettlementSelectionKey(selection: string): string {
+export function normalizeSettlementSelectionKey(selection: string): string {
   let s = String(selection ?? "");
   if (/^(?:handicap|asiatico|spread|puckline):/.test(s)) s = s.replace(/^[^:]+:/, "");
   if      (s === "1x2-home")    s = "home";
@@ -1571,7 +1469,7 @@ function getSelectionTeams(sel: SelectionRecord): { home: string; away: string }
  * Find the settled result for a selection.
  * Priority: per-selection matchId -> bet-level matchId (singles only).
  */
-function findResult(
+export function findResult(
   sel: SelectionRecord,
   betMatchId: string,
   isSingle: boolean
@@ -1609,7 +1507,7 @@ function findResult(
   return null;
 }
 
-function findLiveResult(
+export function findLiveResult(
   sel: SelectionRecord,
   betMatchId: string,
   isSingle: boolean
@@ -1765,6 +1663,7 @@ function liveDefinitiveOutcomeForSel(
  * Won bets credit potentialWin to the user's balance atomically.
  */
 export async function autoSettlePendingBets(opts?: { matchIds?: string[] }): Promise<void> {
+  const cycleId = `cycle:${Date.now()}`;
   try {
     const pendingBets = await db
       .select()
@@ -1807,6 +1706,8 @@ export async function autoSettlePendingBets(opts?: { matchIds?: string[] }): Pro
     let settled = 0;
 
     for (const bet of pendingBets) {
+      const locked = await acquireBetSettlementLock(bet.id, cycleId);
+      if (!locked) continue;
       try {
         const selections = bet.selections as SelectionRecord[];
         if (!Array.isArray(selections) || selections.length === 0) continue;
@@ -1849,6 +1750,15 @@ export async function autoSettlePendingBets(opts?: { matchIds?: string[] }): Pro
           });
 
           await db.transaction(async (tx) => {
+            const canProceed = await ensureSettlementTransitionIdempotency(tx, {
+              betId: bet.id,
+              trigger: "live_losing_leg",
+              oldStatus: "pending",
+              newStatus: "lost",
+              matchId: bet.matchId,
+            });
+            if (!canProceed) return;
+
             const rows = await tx
               .update(betsTable)
               .set({ status: "lost", selections: updatedSelsLost })
@@ -1901,6 +1811,15 @@ export async function autoSettlePendingBets(opts?: { matchIds?: string[] }): Pro
               const oddsStr = Number(effectiveOdds.toFixed(2)).toFixed(2);
 
               await db.transaction(async (tx) => {
+                const canProceed = await ensureSettlementTransitionIdempotency(tx, {
+                  betId: bet.id,
+                  trigger: "live_single_win",
+                  oldStatus: "pending",
+                  newStatus: "won",
+                  matchId: bet.matchId,
+                });
+                if (!canProceed) return;
+
                 const rows = await tx
                   .update(betsTable)
                   .set({ status: "won", selections: [updatedSel], potentialWin: payoutStr, totalOdds: oddsStr })
@@ -1942,6 +1861,15 @@ export async function autoSettlePendingBets(opts?: { matchIds?: string[] }): Pro
             }
 
             await db.transaction(async (tx) => {
+              const canProceed = await ensureSettlementTransitionIdempotency(tx, {
+                betId: bet.id,
+                trigger: "live_single_lost",
+                oldStatus: "pending",
+                newStatus: "lost",
+                matchId: bet.matchId,
+              });
+              if (!canProceed) return;
+
               const rows = await tx
                 .update(betsTable)
                 .set({ status: "lost", selections: [updatedSel] })
@@ -2023,6 +1951,15 @@ export async function autoSettlePendingBets(opts?: { matchIds?: string[] }): Pro
             };
           });
           await db.transaction(async (tx: any) => {
+            const canProceed = await ensureSettlementTransitionIdempotency(tx, {
+              betId: bet.id,
+              trigger: "early_lost_detected",
+              oldStatus: "pending",
+              newStatus: "lost",
+              matchId: bet.matchId,
+            });
+            if (!canProceed) return;
+
             const rows = await tx
               .update(betsTable)
               .set({ status: "lost", selections: updatedSelsLost })
@@ -2059,6 +1996,15 @@ export async function autoSettlePendingBets(opts?: { matchIds?: string[] }): Pro
 
         if (outcomes.every(o => o === "void")) {
           await db.transaction(async (tx: any) => {
+            const canProceed = await ensureSettlementTransitionIdempotency(tx, {
+              betId: bet.id,
+              trigger: "all_void_refund",
+              oldStatus: "pending",
+              newStatus: "voided",
+              matchId: bet.matchId,
+            });
+            if (!canProceed) return;
+
             const rows = await tx
               .update(betsTable)
               .set({ status: "voided" })
@@ -2129,6 +2075,15 @@ export async function autoSettlePendingBets(opts?: { matchIds?: string[] }): Pro
         });
 
         await db.transaction(async (tx: any) => {
+          const canProceed = await ensureSettlementTransitionIdempotency(tx, {
+            betId: bet.id,
+            trigger: "won_final",
+            oldStatus: "pending",
+            newStatus: newStatus,
+            matchId: bet.matchId,
+          });
+          if (!canProceed) return;
+
           // Optimistic lock: only update if still pending
           const rows = await tx
             .update(betsTable)
@@ -2172,6 +2127,8 @@ export async function autoSettlePendingBets(opts?: { matchIds?: string[] }): Pro
         settled++;
       } catch (err) {
         logger.error({ err, betId: bet.id }, "Error auto-settling bet");
+      } finally {
+        await releaseBetSettlementLock(bet.id, cycleId);
       }
     }
 
@@ -2304,6 +2261,16 @@ export async function regradeSettledBetsForMatch(matchId: string, jobId: string)
         if (!statusChanged && !payoutChanged && !selectionsChanged) continue;
 
         await db.transaction(async (tx) => {
+          const canProceed = await ensureSettlementTransitionIdempotency(tx, {
+            betId: bet.id,
+            trigger: "regrade_delta",
+            oldStatus,
+            newStatus,
+            matchId: mId,
+            jobId: jId,
+          });
+          if (!canProceed) return;
+
           const set: Partial<Record<keyof typeof betsTable.$inferSelect, unknown>> = {
             selections: updatedSelections,
           };
@@ -2457,6 +2424,7 @@ async function hydrateSettledBetSelections(): Promise<void> {
 const STALE_THRESHOLD_MS = 72 * 60 * 60 * 1000; // 72 hours
 
 async function expireStalePendingBets(): Promise<void> {
+  const cycleId = `stale:${Date.now()}`;
   try {
     const now = new Date();
     const cutoff = new Date(now.getTime() - STALE_THRESHOLD_MS);
@@ -2473,6 +2441,8 @@ async function expireStalePendingBets(): Promise<void> {
     if (staleBets.length === 0) return;
 
     for (const bet of staleBets) {
+      const locked = await acquireBetSettlementLock(bet.id, cycleId);
+      if (!locked) continue;
       try {
         // One last attempt to find the result before voiding
         const selections = bet.selections as SelectionRecord[];
@@ -2487,6 +2457,15 @@ async function expireStalePendingBets(): Promise<void> {
         if (hasResult) continue;
 
         await db.transaction(async (tx: any) => {
+          const canProceed = await ensureSettlementTransitionIdempotency(tx, {
+            betId: bet.id,
+            trigger: "stale_refund",
+            oldStatus: "pending",
+            newStatus: "voided",
+            matchId: bet.matchId,
+          });
+          if (!canProceed) return;
+
           const rows = await tx
             .update(betsTable)
             .set({ status: "voided" })
@@ -2528,6 +2507,8 @@ async function expireStalePendingBets(): Promise<void> {
         );
       } catch (err) {
         logger.error({ err, betId: bet.id }, "Error voiding stale bet");
+      } finally {
+        await releaseBetSettlementLock(bet.id, cycleId);
       }
     }
   } catch (err) {
