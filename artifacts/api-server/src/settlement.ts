@@ -44,6 +44,76 @@ function buildSettlementLogKey(args: {
     .join(":");
 }
 
+const IMMEDIATE_VOID_SETTLEMENT_STATUSES = new Set([
+  "cancelled",
+  "cancl",
+  "abandoned",
+  "abd",
+  "walkover",
+  "wo",
+  "retired",
+  "ret",
+]);
+
+const DELAYED_VOID_SETTLEMENT_STATUSES = new Set([
+  "postponed",
+  "postp",
+  "delayed",
+  "delay",
+  "susp",
+  "suspended",
+  "interrupted",
+  "rain delay",
+]);
+
+const BLOCKED_LIVE_SETTLEMENT_STATUSES = new Set([
+  "not started",
+  "scheduled",
+  "fixture",
+  "to be defined",
+  ...IMMEDIATE_VOID_SETTLEMENT_STATUSES,
+  ...DELAYED_VOID_SETTLEMENT_STATUSES,
+]);
+
+function normalizeSettlementStatus(status: string | undefined): string {
+  return String(status ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/[._-]+/g, " ")
+    .replace(/\s+/g, " ");
+}
+
+function matchesSettlementStatus(status: string | undefined, candidates: Set<string>): boolean {
+  const normalized = normalizeSettlementStatus(status);
+  if (!normalized) return false;
+  if (candidates.has(normalized)) return true;
+  for (const candidate of candidates) {
+    if (normalized.includes(candidate)) return true;
+  }
+  return false;
+}
+
+function resolveSettlementStatusOutcome(
+  status: string | undefined,
+  finishedAt?: number,
+): "void" | "pending" | null {
+  if (matchesSettlementStatus(status, IMMEDIATE_VOID_SETTLEMENT_STATUSES)) {
+    return "void";
+  }
+  if (matchesSettlementStatus(status, DELAYED_VOID_SETTLEMENT_STATUSES)) {
+    const threshold = 72 * 60 * 60 * 1000;
+    if (finishedAt && Date.now() - finishedAt > threshold) {
+      return "void";
+    }
+    return "pending";
+  }
+  return null;
+}
+
+function blocksLiveEarlySettlement(status: string | undefined): boolean {
+  return matchesSettlementStatus(status, BLOCKED_LIVE_SETTLEMENT_STATUSES);
+}
+
 /**
  * Evaluate a single bet selection against a known final score + optional HT score.
  * Returns "won" | "lost" | null  (null = data not available yet, or void/push bet).
@@ -77,23 +147,9 @@ export function scoreOutcomeForSel(
   ht?: HTScore,
   extra?: { status?: string; cornersTotal?: number; cardsTotal?: number; firstGoal?: "home" | "away" | "none"; extras?: unknown; finishedAt?: number }
 ): "won" | "lost" | "void" | null {
-  // ── Handle Postponed / Cancelled / Void statuses ──────────────────────────
-  const IMMEDIATE_VOID_STATUSES = new Set(["Cancelled", "Cancl.", "Abandoned", "Abd"]);
-  const DELAYED_VOID_STATUSES = new Set(["Postponed", "Postp.", "Delayed", "Susp", "Susp.", "Interrupted"]);
-
-  if (extra?.status) {
-    if (IMMEDIATE_VOID_STATUSES.has(extra.status)) {
-      return "void";
-    }
-    if (DELAYED_VOID_STATUSES.has(extra.status)) {
-      // Only void automatically if 72 hours have passed since it was marked as postponed/delayed
-      const threshold = 72 * 60 * 60 * 1000;
-      if (extra.finishedAt && Date.now() - extra.finishedAt > threshold) {
-        return "void";
-      }
-      // Otherwise keep it as null (pending) to see if it resumes/restarts within the window
-      return null;
-    }
+  const statusOutcome = resolveSettlementStatusOutcome(extra?.status, extra?.finishedAt);
+  if (statusOutcome) {
+    return statusOutcome === "pending" ? null : statusOutcome;
   }
 
   // ── Key normalisation (ComprehensiveMarketsSheet keys → canonical keys) ────
@@ -812,6 +868,8 @@ function liveDefinitiveOutcomeForSel(
     status?: string;
   }
 ): "won" | "lost" | null {
+  if (blocksLiveEarlySettlement(score.status)) return null;
+
   // Key normalizations — mirror scoreOutcomeForSel so tg-o25, tg-u25, etc. are handled
   let s = String(sel.selection ?? "");
   if (/^tg-([ou][\d.]+)$/.test(s)) s = s.slice(3);  // tg-o25 → o25
@@ -1134,10 +1192,12 @@ export async function autoSettlePendingBets(opts?: { matchIds?: string[] }): Pro
               : undefined;
 
           outcomes.push(scoreOutcomeForSel(sel, result, ht, {
+            status: (result as any).status,
             cornersTotal: result.cornersTotal,
             cardsTotal: result.cardsTotal,
             firstGoal: result.firstGoal,
             extras: result.extras,
+            finishedAt: result.finishedAt,
           }));
         }
 
@@ -1154,10 +1214,12 @@ export async function autoSettlePendingBets(opts?: { matchIds?: string[] }): Pro
               finalScore: { home: r.home, away: r.away },
               htScore: ht,
               outcome: scoreOutcomeForSel(sel, { home: r.home, away: r.away }, ht, {
+                status: (r as any).status,
                 cornersTotal: r.cornersTotal,
                 cardsTotal: r.cardsTotal,
                 firstGoal: r.firstGoal,
                 extras: r.extras,
+                finishedAt: r.finishedAt,
               }),
             };
           });
@@ -1383,10 +1445,12 @@ export async function regradeSettledBetsForMatch(matchId: string, jobId: string)
               : undefined;
 
           const outcome = scoreOutcomeForSel(sel, result, ht, {
+            status: (result as any).status,
             cornersTotal: result.cornersTotal,
             cardsTotal: result.cardsTotal,
             firstGoal: result.firstGoal,
             extras: result.extras,
+            finishedAt: result.finishedAt,
           });
           outcomes.push(outcome);
 
