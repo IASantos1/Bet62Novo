@@ -1,11 +1,11 @@
 import { Router, type IRouter, type Request, type Response } from "express";
 import { db, betsTable, cashoutStatesTable, eventAdminOverridesTable, platformSettingsTable, settlementLogsTable, usersTable } from "@workspace/db";
 import { eq, desc, sql, and, inArray, asc } from "drizzle-orm";
-import { authMiddleware, type AuthRequest, verifyAuthToken } from "../middlewares/auth.js";
+import { authMiddleware, type AuthRequest } from "../middlewares/auth.js";
 import { logger } from "../lib/logger.js";
 import { applyBalanceDelta, insertLedgerEntry } from "../lib/ledger.js";
 import { liveMatchState, finishedMatchResults, type LiveMatchState } from "./matches.js";
-import { autoSettlePendingBets, hydrateSettledBetSelections, scoreOutcomeForSel, type SelectionRecord } from "../settlement.js";
+import { scoreOutcomeForSel, type SelectionRecord } from "../settlement.js";
 
 const router: IRouter = Router();
 
@@ -144,31 +144,7 @@ function normalizeSelectionKey(sel: string): string {
   if      (s === "1x2-home")   s = "home";
   else if (s === "1x2-draw")   s = "draw";
   else if (s === "1x2-away")   s = "away";
-  else if (/^s([123])-(home|away)$/.test(s)) {
-    const m = s.match(/^s([123])-(home|away)$/);
-    s = `set${m![1]}-${m![2]}`;
-  }
-  else if (/^ts-([ou])(15|25|35|45)$/.test(s)) {
-    const m = s.match(/^ts-([ou])(15|25|35|45)$/);
-    s = `${m![1]}sets${m![2]}`;
-  }
-  else if (/^sh(\d+)-(home|away)\d*$/.test(s)) {
-    const m = s.match(/^sh(\d+)-(home|away)\d*$/);
-    s = `sh${m![1]}-${m![2]}`;
-  }
-  else if (/^gh-(home|away)\d*$/.test(s)) {
-    const m = s.match(/^gh-(home|away)\d*$/);
-    s = `gh-${m![1]}`;
-  }
-  else if (/^tg-([ou][\d.]+)$/.test(s)) s = s.slice(3);
-  else if (/^cards-([ou])(\d+)$/.test(s)) {
-    const m = s.match(/^cards-([ou])(\d+)$/);
-    s = `${m![1]}card${m![2]}`;
-  }
-  else if (/^corners-([ou])(\d+)$/.test(s)) {
-    const m = s.match(/^corners-([ou])(\d+)$/);
-    s = `${m![1]}c${m![2]}`;
-  }
+  else if (/^tg-([ou][\d]+)$/.test(s))  s = s.slice(3);
   else if (s === "dc-12")      s = "homeOrAway";
   else if (s === "eg-0")       s = "eg-g0";
   else if (s === "eg-1")       s = "eg-g1";
@@ -182,14 +158,6 @@ function normalizeSelectionKey(sel: string): string {
   else if (s === "et-tie-home") s = "et-tw-home";
   else if (s === "et-tie-away") s = "et-tw-away";
   return s;
-}
-
-function parseSelectionLabelLine(label: unknown): number | null {
-  if (typeof label !== "string") return null;
-  const match = label.match(/(\d+(?:[.,]\d+)?)/);
-  if (!match) return null;
-  const value = Number(match[1]!.replace(",", "."));
-  return Number.isFinite(value) ? value : null;
 }
 
 function extractTeamsFromTitle(title: string): { homeTeam?: string; awayTeam?: string } {
@@ -267,63 +235,6 @@ function normalizeStoredSelection(
     ...(homeTeam ? { homeTeam } : {}),
     ...(awayTeam ? { awayTeam } : {}),
   };
-}
-
-function enrichTennisSelectionForStorage(rawSelection: unknown): unknown {
-  if (!rawSelection || typeof rawSelection !== "object") return rawSelection;
-  const r = rawSelection as Record<string, unknown>;
-  const selection = typeof r.selection === "string" ? r.selection : "";
-  const matchId = String(r.matchId ?? "").trim();
-  if (!selection || !matchId) return rawSelection;
-  const live = liveMatchState.get(matchId);
-  if (!live || live.sport !== "tennis") return rawSelection;
-
-  const markets = (live as { markets?: Record<string, unknown> }).markets as Record<string, unknown> | undefined;
-  const tennisExtra = (markets?.["tennisExtra"] as Record<string, unknown> | undefined) ?? undefined;
-  if (!tennisExtra) return rawSelection;
-
-  let nextSelection = selection;
-
-  if (/^gh-(home|away)$/.test(selection)) {
-    const side = selection.endsWith("home") ? "home" : "away";
-    const line = Number((tennisExtra["gameHandicap"] as Record<string, unknown> | undefined)?.["line"]);
-    if (Number.isFinite(line)) nextSelection = `gh-${side}-${line}`;
-  } else if (/^tg-([ou])$/.test(selection)) {
-    const m = selection.match(/^tg-([ou])$/)!;
-    const line = Number((tennisExtra["totalGames"] as Record<string, unknown> | undefined)?.["line"]);
-    if (Number.isFinite(line)) nextSelection = `tg-${m[1]}-${line}`;
-  } else if (/^s([12])g-([ou])$/.test(selection)) {
-    const m = selection.match(/^s([12])g-([ou])$/)!;
-    const setKey = m[1] === "1" ? "set1Games" : "set2Games";
-    const line = Number((tennisExtra[setKey] as Record<string, unknown> | undefined)?.["line"]);
-    if (Number.isFinite(line)) nextSelection = `s${m[1]}g-${m[2]}-${line}`;
-  }
-
-  if (nextSelection === selection) return rawSelection;
-  return { ...r, selection: nextSelection };
-}
-
-function enrichBasketballSelectionForStorage(rawSelection: unknown): unknown {
-  if (!rawSelection || typeof rawSelection !== "object") return rawSelection;
-  const r = rawSelection as Record<string, unknown>;
-  const selection = typeof r.selection === "string" ? r.selection : "";
-  const matchId = String(r.matchId ?? "").trim();
-  if (!selection || !matchId) return rawSelection;
-  const live = liveMatchState.get(matchId);
-  if (!live || live.sport !== "basketball") return rawSelection;
-  const extra = (live._liveExtra ?? {}) as Record<string, unknown>;
-  const scoringEvents = Array.isArray(extra["basketballScoringEvents"])
-    ? (extra["basketballScoringEvents"] as Array<Record<string, unknown>>)
-    : [];
-
-  if (selection === "b-np-home" || selection === "b-np-away") {
-    return { ...r, basketballScoreCursor: scoringEvents.length };
-  }
-  if (selection === "b-n3-home" || selection === "b-n3-away") {
-    const threeCount = scoringEvents.filter((ev) => ev?.["isThree"] === true).length;
-    return { ...r, basketballThreeCursor: threeCount };
-  }
-  return rawSelection;
 }
 
 function currentOddForSelection(sel: SelectionRecord, liveSt: LiveMatchState): number | null {
@@ -490,24 +401,6 @@ function currentOddForSelection(sel: SelectionRecord, liveSt: LiveMatchState): n
     return out;
   }
 
-  if (/^sc([123])-(\d-\d)$/.test(s)) {
-    const mScore = s.match(/^sc([123])-(\d-\d)$/)!;
-    const setNum = Number(mScore[1]!);
-    const wanted = mScore[2]!;
-    const vt = mk.tennisExtra as unknown as Record<string, unknown> | undefined;
-    const listKey = setNum === 1 ? "score1st" : setNum === 2 ? "score2nd" : "score3rd";
-    const list = Array.isArray(vt?.[listKey]) ? vt?.[listKey] as Array<Record<string, unknown>> : [];
-    const found = list.find((entry) => String(entry.label ?? "") === wanted);
-    return Number.isFinite(found?.odds as number) ? found!.odds as number : null;
-  }
-
-  if (/^ses-(\d-\d)$/.test(s)) {
-    const wanted = s.slice(4);
-    const vt = mk.tennisExtra as unknown as Record<string, unknown> | undefined;
-    const current = (vt?.["setExactScore"] as Record<string, unknown> | undefined)?.[wanted];
-    return Number.isFinite(current as number) ? current as number : null;
-  }
-
   if (/^vs[123][ha]$/.test(s)) {
     const setNum = parseInt(s.slice(2, 3), 10);
     const side = s.endsWith("h") ? "home" : "away";
@@ -520,68 +413,6 @@ function currentOddForSelection(sel: SelectionRecord, liveSt: LiveMatchState): n
     const vt = mk.tennisExtra as unknown as Record<string, unknown> | undefined;
     const v = (vt?.["exactSets"] as Record<string, unknown> | undefined)?.[s.slice(3)];
     return Number.isFinite(v as number) ? (v as number) : null;
-  }
-
-  if (/^([ou])sets(15|25|35|45)?$/.test(s)) {
-    const vt = mk.tennisExtra as unknown as Record<string, unknown> | undefined;
-    const totalSets = (vt?.["totalSets"] as Record<string, unknown> | undefined) ?? undefined;
-    const mSets = s.match(/^([ou])sets(15|25|35|45)?$/)!;
-    const suffix = mSets[2] ?? "25";
-    const direct = totalSets?.[`${mSets[1]}${suffix}`];
-    if (Number.isFinite(direct as number)) return direct as number;
-    if (suffix === "25" && rawMarkets && typeof rawMarkets["totalGoals"] === "object") {
-      const tg = rawMarkets["totalGoals"] as Record<string, unknown>;
-      const legacyKey = mSets[1] === "o" ? "over25" : "under25";
-      const legacyValue = tg[legacyKey];
-      return Number.isFinite(legacyValue as number) ? legacyValue as number : null;
-    }
-  }
-
-  if (/^sh(\d+)-(home|away)$/.test(s)) {
-    const vt = mk.tennisExtra as unknown as Record<string, unknown> | undefined;
-    const side = s.endsWith("home") ? "home" : "away";
-    const v = (vt?.["setHandicap"] as Record<string, unknown> | undefined)?.[side];
-    return Number.isFinite(v as number) ? (v as number) : null;
-  }
-
-  if (/^gh-(home|away)(?:-(\d+(?:\.\d+)?))?$/.test(s)) {
-    const vt = mk.tennisExtra as unknown as Record<string, unknown> | undefined;
-    const side = s.startsWith("gh-home") ? "home" : "away";
-    const expectedLine = Number((vt?.["gameHandicap"] as Record<string, unknown> | undefined)?.["line"]);
-    const selectionLine = s.match(/^gh-(?:home|away)-(\d+(?:\.\d+)?)$/)?.[1];
-    if (selectionLine != null && Number.isFinite(expectedLine) && Math.abs(Number(selectionLine) - expectedLine) > 1e-9) return null;
-    const v = (vt?.["gameHandicap"] as Record<string, unknown> | undefined)?.[side];
-    return Number.isFinite(v as number) ? (v as number) : null;
-  }
-
-  if (/^tg-([ou])(?:-(\d+(?:\.\d+)?))?$/.test(s)) {
-    const vt = mk.tennisExtra as unknown as Record<string, unknown> | undefined;
-    const mm = s.match(/^tg-([ou])(?:-(\d+(?:\.\d+)?))?$/)!;
-    const dir = mm[1]!;
-    const selectionLine = mm[2] != null ? Number(mm[2]) : parseSelectionLabelLine(sel.label);
-    const ranges = Array.isArray(vt?.["totalGamesLines"]) ? vt?.["totalGamesLines"] as Array<Record<string, unknown>> : [];
-    if (selectionLine != null) {
-      const found = ranges.find((entry) => Number.isFinite(entry.line as number) && Math.abs(Number(entry.line) - selectionLine) < 1e-9);
-      if (found) {
-        const out = dir === "o" ? found.over : found.under;
-        return Number.isFinite(out as number) ? out as number : null;
-      }
-    }
-    const main = vt?.["totalGames"] as Record<string, unknown> | undefined;
-    const out = dir === "o" ? main?.["over"] : main?.["under"];
-    return Number.isFinite(out as number) ? out as number : null;
-  }
-
-  if (/^s([12])g-([ou])(?:-(\d+(?:\.\d+)?))?$/.test(s)) {
-    const vt = mk.tennisExtra as unknown as Record<string, unknown> | undefined;
-    const mm = s.match(/^s([12])g-([ou])(?:-(\d+(?:\.\d+)?))?$/)!;
-    const setKey = mm[1] === "1" ? "set1Games" : "set2Games";
-    const setObj = vt?.[setKey] as Record<string, unknown> | undefined;
-    const selectionLine = mm[3] != null ? Number(mm[3]) : parseSelectionLabelLine(sel.label);
-    const currentLine = Number(setObj?.["line"]);
-    if (selectionLine != null && Number.isFinite(currentLine) && Math.abs(selectionLine - currentLine) > 1e-9) return null;
-    const out = mm[2] === "o" ? setObj?.["over"] : setObj?.["under"];
-    return Number.isFinite(out as number) ? out as number : null;
   }
 
   if (/^vs-s(30|31|32|03|13|23)$/.test(s)) {
@@ -655,21 +486,8 @@ function currentOddForSelection(sel: SelectionRecord, liveSt: LiveMatchState): n
       q2?: { home?: number; away?: number };
       q3?: { home?: number; away?: number };
       q4?: { home?: number; away?: number };
-      q1Total?: { line?: number; over?: number; under?: number };
-      q2Total?: { line?: number; over?: number; under?: number };
-      q3Total?: { line?: number; over?: number; under?: number };
-      q4Total?: { line?: number; over?: number; under?: number };
-      q1Spread?: { line?: number; home?: number; away?: number };
-      q2Spread?: { line?: number; home?: number; away?: number };
-      q3Spread?: { line?: number; home?: number; away?: number };
-      q4Spread?: { line?: number; home?: number; away?: number };
       teamTotalHome?: { line?: number; over?: number; under?: number };
       teamTotalAway?: { line?: number; over?: number; under?: number };
-      anyQuarter?: { home?: number; away?: number };
-      allQuarters?: { home?: number; away?: number };
-      firstPoint?: { home?: number; away?: number };
-      nextPoint?: { home?: number; away?: number };
-      nextThree?: { home?: number; away?: number };
       totalsRange?: Array<{ line?: number; over?: number; under?: number }>;
     } | undefined;
 
@@ -729,41 +547,6 @@ function currentOddForSelection(sel: SelectionRecord, liveSt: LiveMatchState): n
       const out = bx?.[qKey]?.[side];
       return Number.isFinite(out) ? (out as number) : null;
     }
-
-    const qTotal = s.match(/^b-q([1234])t-([ou])-(\d+(?:\.\d+)?)$/);
-    if (qTotal) {
-      const qKey = `q${qTotal[1]}Total` as "q1Total" | "q2Total" | "q3Total" | "q4Total";
-      const dir = qTotal[2]!;
-      const line = Number(qTotal[3]!);
-      if (!Number.isFinite(line)) return null;
-      const obj = bx?.[qKey];
-      if (!obj || !Number.isFinite(obj.line) || Math.abs((obj.line as number) - line) > 1e-9) return null;
-      const out = dir === "o" ? obj.over : obj.under;
-      return Number.isFinite(out) ? (out as number) : null;
-    }
-
-    const qSpread = s.match(/^b-q([1234])s-(home|away)-(\d+(?:\.\d+)?)$/);
-    if (qSpread) {
-      const qKey = `q${qSpread[1]}Spread` as "q1Spread" | "q2Spread" | "q3Spread" | "q4Spread";
-      const side = qSpread[2]!;
-      const line = Number(qSpread[3]!);
-      if (!Number.isFinite(line)) return null;
-      const obj = bx?.[qKey];
-      if (!obj || !Number.isFinite(obj.line) || Math.abs((obj.line as number) - line) > 1e-9) return null;
-      const out = side === "home" ? obj.home : obj.away;
-      return Number.isFinite(out) ? (out as number) : null;
-    }
-
-    if (s === "b-anyq-home") return Number.isFinite(bx?.anyQuarter?.home) ? bx!.anyQuarter!.home! : null;
-    if (s === "b-anyq-away") return Number.isFinite(bx?.anyQuarter?.away) ? bx!.anyQuarter!.away! : null;
-    if (s === "b-allq-home") return Number.isFinite(bx?.allQuarters?.home) ? bx!.allQuarters!.home! : null;
-    if (s === "b-allq-away") return Number.isFinite(bx?.allQuarters?.away) ? bx!.allQuarters!.away! : null;
-    if (s === "b-fp-home") return Number.isFinite(bx?.firstPoint?.home) ? bx!.firstPoint!.home! : null;
-    if (s === "b-fp-away") return Number.isFinite(bx?.firstPoint?.away) ? bx!.firstPoint!.away! : null;
-    if (s === "b-np-home") return Number.isFinite(bx?.nextPoint?.home) ? bx!.nextPoint!.home! : null;
-    if (s === "b-np-away") return Number.isFinite(bx?.nextPoint?.away) ? bx!.nextPoint!.away! : null;
-    if (s === "b-n3-home") return Number.isFinite(bx?.nextThree?.home) ? bx!.nextThree!.home! : null;
-    if (s === "b-n3-away") return Number.isFinite(bx?.nextThree?.away) ? bx!.nextThree!.away! : null;
 
     if (s === "h1-home") return Number.isFinite(mk.halfTime?.home) ? mk.halfTime!.home! : null;
     if (s === "h1-away") return Number.isFinite(mk.halfTime?.away) ? mk.halfTime!.away! : null;
@@ -1021,138 +804,6 @@ function cashoutCalcForBet(args: {
   return { info: { cashoutStatus: "available", cashoutEstimate: estimate.toFixed(2) }, stateOp: existing != null && betId != null ? { type: "delete" } : { type: "none" } };
 }
 
-type PendingSelectionState = {
-  matchId?: string;
-  outcome: "won" | "lost" | "void" | "pending";
-  finalScore?: { home: number; away: number };
-  htScore?: { htHome: number; htAway: number };
-  live?: {
-    isLive: boolean;
-    status?: string;
-    homeScore: number;
-    awayScore: number;
-    minute?: number;
-  };
-};
-
-type OpenBetStatesPayload = {
-  bets: Array<{
-    betId: number;
-    statusPreview: "pending" | "won" | "lost" | "void";
-    selections: PendingSelectionState[];
-  }>;
-};
-
-function buildPendingSelectionState(
-  sel: SelectionRecord,
-  fallbackMatchId?: string,
-): PendingSelectionState {
-  const matchId = String(sel.matchId ?? fallbackMatchId ?? "").trim() || undefined;
-  if (!matchId) {
-    return {
-      outcome: sel.outcome ?? "pending",
-      ...(sel.finalScore ? { finalScore: sel.finalScore } : {}),
-      ...(sel.htScore ? { htScore: sel.htScore } : {}),
-    };
-  }
-
-  const finished = finishedMatchResults.get(matchId);
-  if (finished) {
-    const ht =
-      typeof finished.htHome === "number" && typeof finished.htAway === "number"
-        ? { htHome: finished.htHome, htAway: finished.htAway }
-        : undefined;
-    const scored = scoreOutcomeForSel(sel, finished, ht, {
-      status: finished.status,
-      cornersTotal: finished.cornersTotal,
-      cardsTotal: finished.cardsTotal,
-      firstGoal: finished.firstGoal,
-      extras: finished.extras,
-      finishedAt: finished.finishedAt,
-    });
-    return {
-      matchId,
-      outcome: scored ?? "pending",
-      finalScore: { home: finished.home, away: finished.away },
-      ...(ht ? { htScore: ht } : {}),
-    };
-  }
-
-  const live = liveMatchState.get(matchId);
-  if (!live) {
-    return {
-      matchId,
-      outcome: sel.outcome ?? "pending",
-      ...(sel.finalScore ? { finalScore: sel.finalScore } : {}),
-      ...(sel.htScore ? { htScore: sel.htScore } : {}),
-    };
-  }
-  return {
-    matchId,
-    outcome: sel.outcome ?? "pending",
-    ...(sel.finalScore ? { finalScore: sel.finalScore } : {}),
-    ...(sel.htScore ? { htScore: sel.htScore } : {}),
-    live: {
-      isLive: !!live.isLive,
-      ...(typeof live.status === "string" ? { status: live.status } : {}),
-      homeScore: Number(live.homeScore ?? 0),
-      awayScore: Number(live.awayScore ?? 0),
-      ...(typeof live.minute === "number" ? { minute: live.minute } : {}),
-    },
-  };
-}
-
-function summarizePendingBetState(selectionStates: PendingSelectionState[]): "pending" | "won" | "lost" | "void" {
-  const settled = selectionStates.filter((sel) => sel.outcome !== "pending");
-  if (settled.length === 0) return "pending";
-  if (settled.some((sel) => sel.outcome === "lost")) return "lost";
-  const decisive = selectionStates.filter((sel) => sel.outcome === "won" || sel.outcome === "void");
-  if (decisive.length !== selectionStates.length) return "pending";
-  if (decisive.every((sel) => sel.outcome === "void")) return "void";
-  return "won";
-}
-
-async function getOpenBetStatesPayloadForUser(userId: number, options?: { settle?: boolean }): Promise<OpenBetStatesPayload> {
-  const pendingBets = await db.select().from(betsTable)
-    .where(and(eq(betsTable.userId, userId), eq(betsTable.status, "pending")))
-    .orderBy(desc(betsTable.createdAt));
-
-  const pendingEventIds = Array.from(new Set(
-    pendingBets
-      .flatMap((bet) =>
-        getBetEventIds(
-          bet as unknown as { matchId: string; matchTitle: string; selections: unknown; totalOdds: string },
-        ),
-      )
-      .map((id) => String(id).trim())
-      .filter(Boolean),
-  ));
-
-  if ((options?.settle ?? true) && pendingEventIds.length > 0) {
-    await autoSettlePendingBets({ matchIds: pendingEventIds });
-  }
-
-  const refreshedPendingBets = await db.select().from(betsTable)
-    .where(and(eq(betsTable.userId, userId), eq(betsTable.status, "pending")))
-    .orderBy(desc(betsTable.createdAt));
-
-  return {
-    bets: refreshedPendingBets.map((bet) => {
-      const selections = getBetSelections(
-        bet as unknown as { matchId: string; matchTitle: string; selections: unknown; totalOdds: string },
-      );
-      const selectionStates = selections.map((sel) =>
-        buildPendingSelectionState(sel, selections.length === 1 ? bet.matchId : undefined),
-      );
-      return {
-        betId: bet.id,
-        statusPreview: summarizePendingBetState(selectionStates),
-        selections: selectionStates,
-      };
-    }),
-  };
-}
-
 // ─── POST /api/bets/place ─────────────────────────────────────────────────────
 router.post("/place", authMiddleware, async (req: Request, res: Response): Promise<void> => {
   const authReq = req as AuthRequest;
@@ -1263,7 +914,7 @@ router.post("/place", authMiddleware, async (req: Request, res: Response): Promi
 
   const useFreebets = isFreebet === true;
   const selectionsToStore = Array.isArray(selections)
-    ? selections.map((x) => enrichBasketballSelectionForStorage(enrichTennisSelectionForStorage(normalizeStoredSelection(x, { matchId: String(matchId), matchTitle, kickoffTime }))))
+    ? selections.map((x) => normalizeStoredSelection(x, { matchId: String(matchId), matchTitle, kickoffTime }))
     : selections;
   const ticketKickoffIso = getTicketKickoffIso(selectionsToStore, kickoffTime);
 
@@ -1354,35 +1005,12 @@ router.post("/place", authMiddleware, async (req: Request, res: Response): Promi
 });
 
 // ─── GET /api/bets/my ─────────────────────────────────────────────────────────
-async function handleGetMyBets(req: Request, res: Response): Promise<void> {
+router.get("/my", authMiddleware, async (req: Request, res: Response): Promise<void> => {
   const authReq = req as AuthRequest;
   try {
-    const initialBets = await db.select().from(betsTable)
+    const bets = await db.select().from(betsTable)
       .where(eq(betsTable.userId, authReq.user!.id))
       .orderBy(desc(betsTable.createdAt));
-
-    const pendingEventIds = Array.from(new Set(
-      initialBets
-        .filter((bet) => bet.status === "pending")
-        .flatMap((bet) =>
-          getBetEventIds(
-            bet as unknown as { matchId: string; matchTitle: string; selections: unknown; totalOdds: string },
-          ),
-        )
-        .map((id) => String(id).trim())
-        .filter(Boolean),
-    ));
-
-    if (pendingEventIds.length > 0) {
-      await autoSettlePendingBets({ matchIds: pendingEventIds });
-    }
-    await hydrateSettledBetSelections();
-
-    const bets = pendingEventIds.length > 0
-      ? await db.select().from(betsTable)
-        .where(eq(betsTable.userId, authReq.user!.id))
-        .orderBy(desc(betsTable.createdAt))
-      : initialBets;
 
     const betIds = bets.map(b => b.id);
     const logs = betIds.length === 0
@@ -1466,78 +1094,6 @@ async function handleGetMyBets(req: Request, res: Response): Promise<void> {
     logger.error({ err }, "Fetch bets error");
     res.status(500).json({ error: "Internal server error" });
   }
-}
-
-router.get("/my", authMiddleware, handleGetMyBets);
-router.get("/", authMiddleware, handleGetMyBets);
-
-router.get("/open-states", authMiddleware, async (req: Request, res: Response): Promise<void> => {
-  const authReq = req as AuthRequest;
-  try {
-    const payload = await getOpenBetStatesPayloadForUser(authReq.user!.id, { settle: true });
-    res.json(payload);
-  } catch (err) {
-    logger.error({ err }, "Fetch open bet states error");
-    res.status(500).json({ error: "Internal server error" });
-  }
-});
-
-router.get("/open-states-stream", async (req: Request, res: Response): Promise<void> => {
-  const token = typeof req.query["token"] === "string" ? req.query["token"] : "";
-  if (!token) {
-    res.status(401).json({ error: "Missing token" });
-    return;
-  }
-
-  let user: { id: number; email: string };
-  try {
-    user = verifyAuthToken(token);
-  } catch (err) {
-    logger.error({ err }, "Open bet SSE token verification failed");
-    res.status(401).json({ error: "Invalid token" });
-    return;
-  }
-
-  res.setHeader("Content-Type", "text/event-stream");
-  res.setHeader("Cache-Control", "no-cache, no-transform");
-  res.setHeader("Connection", "keep-alive");
-  res.setHeader("X-Accel-Buffering", "no");
-  if (typeof (res as { flushHeaders?: () => void }).flushHeaders === "function") {
-    (res as { flushHeaders: () => void }).flushHeaders();
-  }
-  try { res.write(`:${" ".repeat(2048)}\n\n`); } catch { /* ignore */ }
-
-  let closed = false;
-  let polling = false;
-  let lastPayload = "";
-  const sendPayload = async () => {
-    if (closed || polling) return;
-    polling = true;
-    try {
-      const payload = await getOpenBetStatesPayloadForUser(user.id, { settle: true });
-      const serialized = JSON.stringify(payload);
-      if (serialized !== lastPayload) {
-        lastPayload = serialized;
-        try { res.write(`data: ${serialized}\n\n`); } catch { /* ignore */ }
-      }
-    } catch (err) {
-      logger.error({ err, userId: user.id }, "Open bet SSE push failed");
-    } finally {
-      polling = false;
-    }
-  };
-
-  await sendPayload();
-  const refreshTimer = setInterval(() => { void sendPayload(); }, 5000);
-  const keepAlive = setInterval(() => {
-    try { res.write(`: keepalive ${" ".repeat(128)}\n\n`); } catch { /* ignore */ }
-  }, 15000);
-
-  req.on("close", () => {
-    closed = true;
-    clearInterval(refreshTimer);
-    clearInterval(keepAlive);
-  });
 });
 
 // ─── POST /api/bets/:id/cashout ───────────────────────────────────────────────
@@ -1675,13 +1231,14 @@ router.post("/:id/cashout", authMiddleware, async (req: Request, res: Response):
       });
 
       await tx.insert(settlementLogsTable).values({
+        settlementKey: `bet:${betId}:old:pending:new:cashed_out:event:cashout`,
         betId,
         userId: authReq.user!.id,
         oldStatus: "pending",
         newStatus: "cashed_out",
         payout: cashoutStr,
         message: "Cashout",
-      });
+      }).onConflictDoNothing();
 
       await tx.delete(cashoutStatesTable).where(eq(cashoutStatesTable.betId, betId));
 
