@@ -1,5 +1,5 @@
 import { Queue, Worker } from "bullmq";
-import IORedis from "ioredis";
+import Redis from "ioredis";
 import { logger } from "./logger.js";
 
 type MatchSettlementJob = {
@@ -11,7 +11,7 @@ const JOB_NAME = "match_settlement";
 
 let _queue: Queue | null = null;
 let _worker: Worker | null = null;
-let _redis: IORedis | null = null;
+let _redis: any | null = null;
 
 function getRedisUrl(): string | null {
   const url = process.env["REDIS_URL"];
@@ -26,7 +26,7 @@ function getQueue(): Queue | null {
     return null;
   }
 
-  _redis = new IORedis(url, { maxRetriesPerRequest: null });
+  _redis = new (Redis as any)(url, { maxRetriesPerRequest: null });
   _queue = new Queue(QUEUE_NAME, {
     connection: _redis,
     defaultJobOptions: {
@@ -88,7 +88,7 @@ export function startSettlementQueueWorker(handler: (args: { matchId: string; jo
     return;
   }
 
-  const redis = new IORedis(url, { maxRetriesPerRequest: null });
+  const redis = new (Redis as any)(url, { maxRetriesPerRequest: null });
   _worker = new Worker(
     QUEUE_NAME,
     async (job) => {

@@ -33,6 +33,8 @@ export type SettlementResult = {
   detectedSport: string;
   providerSport?: string;
   ruleVersion: string;
+  resolutionSource?: SelectionSettlementResolution["resolutionSource"];
+  settlementNote?: string | null;
   updatedSel: SelectionRecord;
   result: FinishedResult | LiveResult | null;
   auditInfo: {
@@ -55,12 +57,23 @@ const settlementStats: Record<string, {
   half_lost: number;
   pending: number;
   no_result: number;
+  market_pending: number;
   market_not_mapped: number;
   incomplete_data: number;
   status_pending: number;
   invalid_context: number;
   already_settled: number;
+  sport_not_identified: number;
 }> = {};
+
+const settlementFallbackMetrics: Record<
+  "fallback_tennis_winner" | "fallback_baseball_moneyline" | "fallback_football_1x2",
+  number
+> = {
+  fallback_tennis_winner: 0,
+  fallback_baseball_moneyline: 0,
+  fallback_football_1x2: 0,
+};
 
 export function resolveSelectionOutcome(
   sel: SelectionRecord,
@@ -116,7 +129,7 @@ export function resolveSelectionOutcome(
 
     const resolution = resolveLiveSelectionSettlement(sel, liveScore);
     const reason = determineReason(resolution, normalizedKey, true, liveScore.status);
-    const reasonDetail = getReasonDetail(reason, liveScore.status, normalizedKey, resolution.pendingReason);
+    const reasonDetail = getReasonDetail(reason, liveScore.status, normalizedKey, resolution.pendingReason ?? undefined);
     const { updatedSel, auditInfo } = buildSettlementOutput(sel, result, resolution, true, {
       beforeOutcome,
       normalizedKey,
@@ -151,6 +164,8 @@ export function resolveSelectionOutcome(
       detectedSport,
       providerSport: providerSport ?? undefined,
       ruleVersion,
+      resolutionSource: resolution.resolutionSource,
+      settlementNote: resolution.settlementNote ?? null,
       updatedSel,
       result,
       auditInfo,
@@ -190,10 +205,14 @@ export function resolveSelectionOutcome(
     sel,
     { home: finalContext.homeScore, away: finalContext.awayScore },
     finalContext.ht,
-    finalContext.extra,
+    {
+      ...finalContext.extra,
+      providerSport: detectedSport,
+      winner: finalContext.winner,
+    },
   );
   const reason = determineReason(resolution, normalizedKey, false, finalContext.status);
-  const reasonDetail = getReasonDetail(reason, finalContext.status, normalizedKey, resolution.pendingReason);
+  const reasonDetail = getReasonDetail(reason, finalContext.status, normalizedKey, resolution.pendingReason ?? undefined);
   const { updatedSel, auditInfo } = buildSettlementOutput(sel, result, resolution, false, {
     beforeOutcome,
     normalizedKey,
@@ -207,6 +226,7 @@ export function resolveSelectionOutcome(
   });
 
   updateSettlementStats(normalizedKey, detectedSport, resolution.outcome, reason);
+  updateFallbackMetrics(resolution.resolutionSource);
   logStructuredSettlement({
     matchId: sel.matchId ?? betMatchId,
     selection: sel.selection,
@@ -228,6 +248,8 @@ export function resolveSelectionOutcome(
     detectedSport,
     providerSport: providerSport ?? undefined,
     ruleVersion,
+    resolutionSource: resolution.resolutionSource,
+    settlementNote: resolution.settlementNote ?? null,
     updatedSel,
     result,
     auditInfo,
@@ -235,7 +257,14 @@ export function resolveSelectionOutcome(
 }
 
 export function getSettlementStats(): Record<string, unknown> {
-  return settlementStats;
+  return {
+    byMarket: settlementStats,
+    fallbackMetrics: settlementFallbackMetrics,
+  };
+}
+
+export function getSettlementFallbackMetrics(): Record<string, number> {
+  return { ...settlementFallbackMetrics };
 }
 
 function buildSettlementOutput(
@@ -273,7 +302,8 @@ function buildSettlementOutput(
       pendingReason: resolution.pendingReason,
       finalScore: updatedSel.finalScore,
       htScore: updatedSel.htScore,
-      settlementNote: updatedSel.settlementNote,
+      settlementNote: resolution.settlementNote ?? null,
+      resolutionSource: resolution.resolutionSource ?? null,
     },
     timestamp: new Date().toISOString(),
     engineVersion: ENGINE_VERSION,
@@ -295,7 +325,8 @@ function buildUpdatedSelection(
       ...sel,
       ...(liveScore ? { finalScore: { home: liveScore.home, away: liveScore.away } } : {}),
       ...(resolution.outcome !== null ? { outcome: resolution.outcome } : {}),
-      ...(resolution.pendingReason ? { pendingReason: resolution.pendingReason } : {}),
+      ...(resolution.outcome !== null ? { pendingReason: null } : resolution.pendingReason ? { pendingReason: resolution.pendingReason } : {}),
+      ...(resolution.outcome !== null ? { settlementNote: null } : {}),
       lastSettledAt: now,
       settlementRuleVersion: ENGINE_VERSION,
     };
@@ -314,8 +345,8 @@ function buildUpdatedSelection(
       : {}),
     ...(ht ? { htScore: ht } : {}),
     ...(resolution.outcome !== null ? { outcome: resolution.outcome } : {}),
-    ...(resolution.pendingReason ? { pendingReason: resolution.pendingReason } : {}),
-    settlementNote: getSelectionSettlementNote((finished as any)?.status, resolution.outcome),
+    ...(resolution.outcome !== null ? { pendingReason: null } : resolution.pendingReason ? { pendingReason: resolution.pendingReason } : {}),
+    ...(resolution.outcome !== null ? { settlementNote: null } : {}),
     lastSettledAt: now,
     settlementRuleVersion: ENGINE_VERSION,
   };
@@ -405,11 +436,13 @@ function updateSettlementStats(
       half_lost: 0,
       pending: 0,
       no_result: 0,
+      market_pending: 0,
       market_not_mapped: 0,
       incomplete_data: 0,
       status_pending: 0,
       invalid_context: 0,
       already_settled: 0,
+      sport_not_identified: 0,
     };
   }
 
@@ -423,6 +456,13 @@ function updateSettlementStats(
 
   if (reason !== "market_evaluated" && reason in stats) {
     stats[reason]++;
+  }
+}
+
+function updateFallbackMetrics(source: SelectionSettlementResolution["resolutionSource"] | undefined): void {
+  if (!source) return;
+  if (source in settlementFallbackMetrics) {
+    settlementFallbackMetrics[source as keyof typeof settlementFallbackMetrics]++;
   }
 }
 
@@ -465,11 +505,9 @@ function determineReason(
 ): SettlementReason {
   if (resolution.outcome !== null) return "market_evaluated";
   if (resolution.pendingReason === "status_delayed_window") return "status_pending";
-  if (normalizedKey === String(normalizedKey ?? "").trim()) {
-    if (!resolution.pendingReason && !isLive && isMatchStillPending(status)) return "status_pending";
-    return "market_pending";
-  }
-  return "market_not_mapped";
+  if (!resolution.pendingReason && !isLive && isMatchStillPending(status)) return "status_pending";
+  if (!normalizedKey) return "market_not_mapped";
+  return "market_pending";
 }
 
 function getReasonDetail(
@@ -503,6 +541,7 @@ function buildFinalContext(result: FinishedResult): {
   awayScore: number;
   ht?: HTScore;
   status?: string;
+  winner: "home" | "away" | null;
   extra: {
     status?: string;
     cornersTotal?: number;
@@ -525,6 +564,12 @@ function buildFinalContext(result: FinishedResult): {
     awayScore,
     ht,
     status,
+    winner:
+      homeScore > awayScore
+        ? "home"
+        : awayScore > homeScore
+          ? "away"
+          : null,
     extra: {
       status,
       cornersTotal: (result as any)?.cornersTotal,

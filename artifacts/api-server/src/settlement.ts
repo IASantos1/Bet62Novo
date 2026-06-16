@@ -1,6 +1,7 @@
 import { db, betsTable, cashoutStatesTable, usersTable, settlementLogsTable, settlementIdempotencyTable } from "@workspace/db";
 import { eq, and, lt, sql, gte, desc } from "drizzle-orm";
-import IORedis from "ioredis";
+import Redis from "ioredis";
+import type { SettlementResult as UnifiedSettlementResult } from "./lib/settlementHelpers.js";
 import { logger } from "./lib/logger.js";
 import { applyBalanceDelta } from "./lib/ledger.js";
 import { ensureFinishedMatchResult, finishedMatchResults, liveMatchState, scanDailyForFinished, scanV2AllSportsForFinished } from "./routes/matches.js";
@@ -19,8 +20,8 @@ export type SelectionRecord = {
   finalScore?: { home: number; away: number };
   htScore?: { htHome: number; htAway: number };
   outcome?: "won" | "lost" | "void" | "half_won" | "half_lost" | null;
-  pendingReason?: string;
-  settlementNote?: string;
+  pendingReason?: string | null;
+  settlementNote?: string | null;
   lastSettledAt?: string;
   settlementRuleVersion?: string;
 };
@@ -32,21 +33,26 @@ export type LiveResult = (typeof liveMatchState extends Map<string, infer V> ? V
 export type SettlementOutcome = "won" | "lost" | "void" | "half_won" | "half_lost" | null;
 export type SelectionSettlementResolution = {
   outcome: SettlementOutcome;
-  pendingReason?: string;
+  pendingReason?: string | null;
+  settlementNote?: string | null;
+  resolutionSource?: "fallback_tennis_winner" | "fallback_baseball_moneyline" | "fallback_football_1x2" | "timeout_auto_void";
 };
 
 const SETTLEMENT_LOCK_TTL_SECONDS = 300;
+export const SETTLEMENT_TIMEOUT_HOURS = 12;
+const SETTLEMENT_TIMEOUT_MS = SETTLEMENT_TIMEOUT_HOURS * 60 * 60 * 1000;
 
-let settlementRedis: IORedis | null | undefined;
+let settlementRedis: any | null | undefined;
+let settlementHelpersModulePromise: Promise<typeof import("./lib/settlementHelpers.js")> | null = null;
 
-function getSettlementRedis(): IORedis | null {
+function getSettlementRedis(): any | null {
   if (settlementRedis !== undefined) return settlementRedis;
   const url = process.env["REDIS_URL"];
   if (typeof url !== "string" || url.trim() === "") {
     settlementRedis = null;
     return settlementRedis;
   }
-  settlementRedis = new IORedis(url, { maxRetriesPerRequest: null });
+  settlementRedis = new (Redis as any)(url, { maxRetriesPerRequest: null });
   return settlementRedis;
 }
 
@@ -195,6 +201,88 @@ function resolveSettlementStatusOutcome(
 
 function blocksLiveEarlySettlement(status: string | undefined): boolean {
   return matchesSettlementStatus(status, BLOCKED_LIVE_SETTLEMENT_STATUSES);
+}
+
+function normalizeSettlementMarketKey(market: unknown): string {
+  return String(market ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/[.\s-]+/g, "_");
+}
+
+function normalizeSettlementProviderSport(sport: unknown): string {
+  return String(sport ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/[.\s-]+/g, "_");
+}
+
+function normalizeSettlementSide(selection: string): "home" | "away" | "draw" | null {
+  const normalized = normalizeSettlementSelectionKey(selection);
+  if (normalized === "home" || normalized === "away" || normalized === "draw") return normalized;
+
+  const raw = String(selection ?? "").trim().toLowerCase();
+  if (raw === "1") return "home";
+  if (raw === "x") return "draw";
+  if (raw === "2") return "away";
+  return null;
+}
+
+function hasSettlementTimedOut(finishedAt?: number): boolean {
+  return Number.isFinite(finishedAt) && Date.now() - Number(finishedAt) > SETTLEMENT_TIMEOUT_MS;
+}
+
+function resolveSelectionMarketFallback(
+  sel: { selection: string; market?: unknown },
+  ft: FTScore,
+  extra?: { providerSport?: string; winner?: "home" | "away" | null },
+): SelectionSettlementResolution | null {
+  const market = normalizeSettlementMarketKey(sel.market);
+  const sport = normalizeSettlementProviderSport(extra?.providerSport);
+  const side = normalizeSettlementSide(sel.selection);
+
+  if (
+    sport === "tennis" &&
+    (market === "winner" || market === "match_winner") &&
+    (side === "home" || side === "away")
+  ) {
+    const winner =
+      extra?.winner
+      ?? (ft.home > ft.away ? "home" : ft.away > ft.home ? "away" : null);
+    if (!winner) return null;
+    return {
+      outcome: winner === side ? "won" : "lost",
+      resolutionSource: "fallback_tennis_winner",
+    };
+  }
+
+  if (
+    sport === "baseball" &&
+    (market === "moneyline" || market === "match_winner" || market === "winner") &&
+    (side === "home" || side === "away")
+  ) {
+    if (!Number.isFinite(ft.home) || !Number.isFinite(ft.away) || ft.home === ft.away) return null;
+    const winner = ft.home > ft.away ? "home" : "away";
+    return {
+      outcome: winner === side ? "won" : "lost",
+      resolutionSource: "fallback_baseball_moneyline",
+    };
+  }
+
+  if (
+    sport === "football" &&
+    (market === "match_winner" || market === "full_time_result" || market === "winner" || market === "1x2") &&
+    side
+  ) {
+    if (!Number.isFinite(ft.home) || !Number.isFinite(ft.away)) return null;
+    const winner = ft.home > ft.away ? "home" : ft.away > ft.home ? "away" : "draw";
+    return {
+      outcome: winner === side ? "won" : "lost",
+      resolutionSource: "fallback_football_1x2",
+    };
+  }
+
+  return null;
 }
 
 function decodeCompactLine(token: string): number {
@@ -565,10 +653,19 @@ export function buildLiveSettlementScore(
 }
 
 export function resolveSelectionSettlement(
-  sel: { selection: string; label?: unknown },
+  sel: { selection: string; label?: unknown; market?: unknown },
   ft: FTScore,
   ht?: HTScore,
-  extra?: { status?: string; cornersTotal?: number; cardsTotal?: number; firstGoal?: "home" | "away" | "none"; extras?: unknown; finishedAt?: number },
+  extra?: {
+    status?: string;
+    cornersTotal?: number;
+    cardsTotal?: number;
+    firstGoal?: "home" | "away" | "none";
+    extras?: unknown;
+    finishedAt?: number;
+    providerSport?: string;
+    winner?: "home" | "away" | null;
+  },
 ): SelectionSettlementResolution {
   const derivedHt = ht ?? getFootballHTScoreFromExtras(extra?.extras) ?? undefined;
   const primary = scoreOutcomeForSel(sel, ft, derivedHt, extra);
@@ -576,6 +673,18 @@ export function resolveSelectionSettlement(
 
   const fallback = scoreOutcomeForSelLastResort(sel, ft, derivedHt, extra);
   if (fallback !== null) return { outcome: fallback };
+
+  const marketFallback = resolveSelectionMarketFallback(sel, ft, extra);
+  if (marketFallback !== null) return marketFallback;
+
+  if (hasSettlementTimedOut(extra?.finishedAt)) {
+    return {
+      outcome: "void",
+      pendingReason: null,
+      settlementNote: "auto_void_timeout",
+      resolutionSource: "timeout_auto_void",
+    };
+  }
 
   return {
     outcome: null,
@@ -1901,30 +2010,11 @@ export async function autoSettlePendingBets(opts?: { matchIds?: string[] }): Pro
           }
         }
 
-        const outcomes: SettlementOutcome[] = [];
-
-        for (const sel of selections) {
-          const result = findResult(sel, bet.matchId, isSingle);
-          if (!result) {
-            outcomes.push(null);
-            continue;
-          }
-
-          const ht: HTScore | undefined =
-            typeof result.htHome === "number" && typeof result.htAway === "number"
-              ? { htHome: result.htHome, htAway: result.htAway }
-              : undefined;
-
-          const resolution = resolveSelectionSettlement(sel, result, ht, {
-            status: (result as any).status,
-            cornersTotal: result.cornersTotal,
-            cardsTotal: result.cardsTotal,
-            firstGoal: result.firstGoal,
-            extras: result.extras,
-            finishedAt: result.finishedAt,
-          });
-          outcomes.push(resolution.outcome);
-        }
+        const finalSettlementResults = await Promise.all(
+          selections.map((sel) => resolveSelectionOutcomeViaHelper(sel, bet.matchId, false)),
+        );
+        const outcomes: SettlementOutcome[] = finalSettlementResults.map((result) => result.outcome);
+        const timedOutCount = finalSettlementResults.filter((result) => result.settlementNote === "auto_void_timeout").length;
 
         // ── Early loss: if any leg is definitively lost, settle immediately ──
         if (outcomes.some(o => o === "lost")) {
@@ -2035,7 +2125,9 @@ export async function autoSettlePendingBets(opts?: { matchIds?: string[] }): Pro
               oldStatus: "pending",
               newStatus: "voided",
               payout: bet.stake,
-              message: "Auto-settled: all selections voided — stake refunded",
+              message: timedOutCount > 0
+                ? "Auto void due settlement timeout"
+                : "Auto-settled: all selections voided — stake refunded",
             }).onConflictDoNothing();
           });
           settled++;
@@ -2116,7 +2208,9 @@ export async function autoSettlePendingBets(opts?: { matchIds?: string[] }): Pro
             oldStatus: "pending",
             newStatus: "won",
             payout: payoutStr,
-            message: `Auto-settled: settled with ${outcomes.filter(o => o === "void").length} void leg(s), ${outcomes.filter(o => o === "half_won").length} half-won leg(s) and ${outcomes.filter(o => o === "half_lost").length} half-lost leg(s)`,
+            message: timedOutCount > 0
+              ? "Auto void due settlement timeout"
+              : `Auto-settled: settled with ${outcomes.filter(o => o === "void").length} void leg(s), ${outcomes.filter(o => o === "half_won").length} half-won leg(s) and ${outcomes.filter(o => o === "half_lost").length} half-lost leg(s)`,
           }).onConflictDoNothing();
         });
 
@@ -2539,15 +2633,15 @@ export function startSettlementWorker(): void {
     return n;
   };
 
-  const rawIntervalMs = process.env.SETTLEMENT_INTERVAL_MS ?? "15000";
-  const intervalMs = parseMs(rawIntervalMs, 15_000, 1_000, "SETTLEMENT_INTERVAL_MS");
+  const rawIntervalMs = process.env.SETTLEMENT_INTERVAL_MS ?? "30000";
+  const intervalMs = parseMs(rawIntervalMs, 30_000, 1_000, "SETTLEMENT_INTERVAL_MS");
 
   const rawInitialDelayMs = process.env.SETTLEMENT_INITIAL_DELAY_MS ?? "5000";
   const initialDelayMs = parseMs(rawInitialDelayMs, 5_000, 0, "SETTLEMENT_INITIAL_DELAY_MS");
 
   const queueEnabled = typeof process.env["REDIS_URL"] === "string" && process.env["REDIS_URL"]!.trim() !== "";
-  const rawCatchupMs = process.env.SETTLEMENT_CATCHUP_INTERVAL_MS ?? "60000";
-  const catchupMs = parseMs(rawCatchupMs, 60_000, 10_000, "SETTLEMENT_CATCHUP_INTERVAL_MS");
+  const rawCatchupMs = process.env.SETTLEMENT_CATCHUP_INTERVAL_MS ?? "30000";
+  const catchupMs = parseMs(rawCatchupMs, 30_000, 10_000, "SETTLEMENT_CATCHUP_INTERVAL_MS");
   let lastCatchupAt = 0;
 
   const run = async (): Promise<void> => {
