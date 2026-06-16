@@ -1,7 +1,7 @@
 import { Router, type IRouter, type Request, type Response } from "express";
 import { db, betsTable, cashoutStatesTable, eventAdminOverridesTable, platformSettingsTable, settlementLogsTable, usersTable } from "@workspace/db";
 import { eq, desc, sql, and, inArray, asc } from "drizzle-orm";
-import { authMiddleware, type AuthRequest } from "../middlewares/auth.js";
+import { authMiddleware, type AuthRequest, verifyAuthToken } from "../middlewares/auth.js";
 import { logger } from "../lib/logger.js";
 import { applyBalanceDelta, insertLedgerEntry } from "../lib/ledger.js";
 import { liveMatchState, finishedMatchResults, type LiveMatchState } from "./matches.js";
@@ -683,6 +683,117 @@ function getBetSelections(bet: { matchId: string; matchTitle: string; selections
   return [{ matchId: bet.matchId, matchTitle: bet.matchTitle, selection: "home", odd: parseFloat(bet.totalOdds), market: "result", label: "home" }];
 }
 
+type OpenBetSelectionState = {
+  matchId?: string;
+  outcome: "won" | "lost" | "void" | "pending";
+  finalScore?: { home: number; away: number };
+  htScore?: { htHome: number; htAway: number };
+};
+
+type OpenBetStatePayload = {
+  betId: number;
+  statusPreview: "pending" | "won" | "lost" | "void";
+  selections: OpenBetSelectionState[];
+};
+
+function normalizeOpenBetOutcome(outcome: ReturnType<typeof scoreOutcomeForSel>): OpenBetSelectionState["outcome"] {
+  if (outcome === "won" || outcome === "half_won") return "won";
+  if (outcome === "lost" || outcome === "half_lost") return "lost";
+  if (outcome === "void") return "void";
+  return "pending";
+}
+
+function buildOpenBetStatePayload(
+  bet: { id: number; matchId: string; matchTitle: string; selections: unknown; totalOdds: string },
+): OpenBetStatePayload {
+  const selections = getBetSelections(bet);
+  const isSingleLeg = selections.length === 1;
+
+  const nextSelections = selections.map((sel): OpenBetSelectionState => {
+    const matchId = sel.matchId ?? (isSingleLeg ? bet.matchId : undefined);
+    const storedOutcome = normalizeOpenBetOutcome(sel.outcome ?? null);
+    if (!matchId) {
+      return {
+        ...(sel.matchId ? { matchId: sel.matchId } : {}),
+        outcome: storedOutcome,
+        ...(sel.finalScore ? { finalScore: sel.finalScore } : {}),
+        ...(sel.htScore ? { htScore: sel.htScore } : {}),
+      };
+    }
+
+    const result = finishedMatchResults.get(String(matchId));
+    if (!result) {
+      return {
+        matchId: String(matchId),
+        outcome: storedOutcome,
+        ...(sel.finalScore ? { finalScore: sel.finalScore } : {}),
+        ...(sel.htScore ? { htScore: sel.htScore } : {}),
+      };
+    }
+
+    const ht =
+      typeof result.htHome === "number" && typeof result.htAway === "number"
+        ? { htHome: result.htHome, htAway: result.htAway }
+        : undefined;
+
+    const outcome = scoreOutcomeForSel(sel, { home: result.home, away: result.away }, ht, {
+      status: result.status,
+      cornersTotal: result.cornersTotal,
+      cardsTotal: result.cardsTotal,
+      firstGoal: result.firstGoal,
+      extras: result.extras,
+      finishedAt: result.finishedAt,
+    });
+
+    return {
+      matchId: String(matchId),
+      outcome: normalizeOpenBetOutcome(outcome),
+      finalScore: { home: result.home, away: result.away },
+      ...(ht ? { htScore: ht } : {}),
+    };
+  });
+
+  const outcomes = nextSelections.map((sel) => sel.outcome);
+  const statusPreview =
+    outcomes.some((outcome) => outcome === "lost")
+      ? "lost"
+      : outcomes.length > 0 && outcomes.every((outcome) => outcome === "void")
+        ? "void"
+        : outcomes.length > 0 && outcomes.every((outcome) => outcome !== "pending")
+          ? "won"
+          : "pending";
+
+  return {
+    betId: bet.id,
+    statusPreview,
+    selections: nextSelections,
+  };
+}
+
+async function getOpenBetStatesForUser(userId: number): Promise<{ bets: OpenBetStatePayload[] }> {
+  const bets = await db
+    .select({
+      id: betsTable.id,
+      matchId: betsTable.matchId,
+      matchTitle: betsTable.matchTitle,
+      selections: betsTable.selections,
+      totalOdds: betsTable.totalOdds,
+    })
+    .from(betsTable)
+    .where(and(eq(betsTable.userId, userId), eq(betsTable.status, "pending")))
+    .orderBy(desc(betsTable.createdAt));
+
+  return {
+    bets: bets.map((bet) => buildOpenBetStatePayload({
+      id: bet.id,
+      matchId: bet.matchId,
+      matchTitle: bet.matchTitle,
+      selections: bet.selections,
+      totalOdds: bet.totalOdds,
+    })),
+  };
+}
+
 function getBetEventIds(bet: { matchId: string; matchTitle: string; selections: unknown; totalOdds: string }): string[] {
   const ids = new Set<string>();
   for (const sel of getBetSelections(bet)) {
@@ -1005,6 +1116,68 @@ router.post("/place", authMiddleware, async (req: Request, res: Response): Promi
 });
 
 // ─── GET /api/bets/my ─────────────────────────────────────────────────────────
+router.get("/open-states", authMiddleware, async (req: Request, res: Response): Promise<void> => {
+  const authReq = req as AuthRequest;
+  try {
+    const payload = await getOpenBetStatesForUser(authReq.user!.id);
+    res.json(payload);
+  } catch (err) {
+    logger.error({ err, userId: authReq.user?.id }, "Fetch open bet states error");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+router.get("/open-states-stream", async (req: Request, res: Response): Promise<void> => {
+  const token = String(req.query["token"] ?? "").trim();
+  if (!token) {
+    res.status(401).json({ error: "Missing token" });
+    return;
+  }
+
+  let user: { id: number; email: string };
+  try {
+    user = verifyAuthToken(token);
+  } catch (err) {
+    logger.error({ err }, "Open bet states stream auth failed");
+    res.status(401).json({ error: "Invalid token" });
+    return;
+  }
+
+  res.setHeader("Content-Type", "text/event-stream");
+  res.setHeader("Cache-Control", "no-cache, no-transform");
+  res.setHeader("Connection", "keep-alive");
+  res.setHeader("X-Accel-Buffering", "no");
+  if (typeof (res as any).flushHeaders === "function") (res as any).flushHeaders();
+
+  const writePayload = async (): Promise<void> => {
+    const payload = await getOpenBetStatesForUser(user.id);
+    res.write(`data: ${JSON.stringify(payload)}\n\n`);
+  };
+
+  try {
+    await writePayload();
+  } catch (err) {
+    logger.error({ err, userId: user.id }, "Initial open bet states stream write failed");
+    res.end();
+    return;
+  }
+
+  const interval = setInterval(() => {
+    void writePayload().catch((err) => {
+      logger.error({ err, userId: user.id }, "Open bet states stream push failed");
+    });
+  }, 5000);
+
+  const keepAlive = setInterval(() => {
+    try { res.write(`: keepalive\n\n`); } catch { /* ignore */ }
+  }, 5000);
+
+  req.on("close", () => {
+    clearInterval(interval);
+    clearInterval(keepAlive);
+  });
+});
+
 router.get("/my", authMiddleware, async (req: Request, res: Response): Promise<void> => {
   const authReq = req as AuthRequest;
   try {

@@ -2041,6 +2041,7 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
   const [betSlipOpenMobile, setBetSlipOpenMobile] = useState(false);
   const [isPlacingBet, setIsPlacingBet] = useState(false);
   const [betMode, setBetMode] = useState<"simples" | "multipla">("multipla");
+  const [betFundingMode, setBetFundingMode] = useState<"balance" | "freebet">("balance");
   const [selectedLeague, setSelectedLeague] = useState<string | null>(null);
   const [showAppBanner, setShowAppBanner] = useState(() => {
     try { return !localStorage.getItem("bet62_app_banner_dismissed"); } catch { return true; }
@@ -4667,6 +4668,58 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
   const [betStakes, setBetStakes] = useState<Record<string, string>>({});
   const betKey = (b: BetSelection) => `${b.matchId}-${b.market}-${b.selection}`;
   const simplesPotential = bets.reduce((sum, b) => sum + b.odd * parseFloat(betStakes[betKey(b)] || "0"), 0).toFixed(2);
+  const freebetBalance = parseFloat(auth.user?.freebetBalance ?? "0");
+  const cashBalance = parseFloat(auth.user?.balance ?? "0");
+  const hasFreebetBalance = freebetBalance > 0;
+  const isUsingFreebet = betFundingMode === "freebet" && hasFreebetBalance;
+
+  useEffect(() => {
+    if (!hasFreebetBalance && betFundingMode !== "balance") {
+      setBetFundingMode("balance");
+    }
+  }, [hasFreebetBalance, betFundingMode]);
+
+  const renderBetFundingToggle = () => {
+    if (!auth.user || !hasFreebetBalance) return null;
+
+    return (
+      <div
+        className="rounded-2xl px-3 py-3 space-y-2"
+        style={{ background: "rgba(139,92,246,0.08)", border: "1px solid rgba(139,92,246,0.24)" }}
+      >
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <div className="text-[10px] uppercase tracking-wider text-violet-300 font-black">Saldo da aposta</div>
+            <div className="text-[11px] text-zinc-400">Escolha entre saldo real e freebet</div>
+          </div>
+          <div className="text-right">
+            <div className="text-[10px] text-zinc-500">Freebet disponível</div>
+            <div className="text-[12px] font-black text-violet-200">€ {freebetBalance.toFixed(2)}</div>
+          </div>
+        </div>
+        <div className="grid grid-cols-2 gap-2">
+          <button
+            onClick={() => setBetFundingMode("balance")}
+            className="rounded-xl px-3 py-2 text-[12px] font-black transition-all"
+            style={betFundingMode === "balance"
+              ? { background: "linear-gradient(135deg,#dc2626,#991b1b)", color: "#fff" }
+              : { background: "rgba(255,255,255,0.05)", color: "#d4d4d8", border: "1px solid rgba(255,255,255,0.08)" }}
+          >
+            Saldo € {cashBalance.toFixed(2)}
+          </button>
+          <button
+            onClick={() => setBetFundingMode("freebet")}
+            className="rounded-xl px-3 py-2 text-[12px] font-black transition-all"
+            style={betFundingMode === "freebet"
+              ? { background: "linear-gradient(135deg,#8b5cf6,#6d28d9)", color: "#fff" }
+              : { background: "rgba(255,255,255,0.05)", color: "#d4d4d8", border: "1px solid rgba(255,255,255,0.08)" }}
+          >
+            Freebet € {freebetBalance.toFixed(2)}
+          </button>
+        </div>
+      </div>
+    );
+  };
 
   // ── Lock screen handlers ────────────────────────────────────────────────────
   const handlePasswordUnlock = async (e: React.FormEvent) => {
@@ -4830,7 +4883,10 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
       const missing = bets.some(b => !betStakes[betKey(b)] || parseFloat(betStakes[betKey(b)] || "0") <= 0);
       if (missing) { toast.error("Insira o valor para cada aposta no boletim"); return; }
       const totalCost = bets.reduce((s, b) => s + parseFloat(betStakes[betKey(b)] || "0"), 0);
-      if (totalCost > parseFloat(auth.user.balance)) { toast.error("Saldo insuficiente"); return; }
+      if (totalCost > (isUsingFreebet ? freebetBalance : cashBalance)) {
+        toast.error(isUsingFreebet ? "Saldo de freebets insuficiente" : "Saldo insuficiente");
+        return;
+      }
       setIsPlacingBet(true);
       try {
         let allOk = true;
@@ -4861,6 +4917,7 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
               stake: sNum.toFixed(2),
               potentialWin,
               totalOdds: bet.odd.toFixed(2),
+              isFreebet: isUsingFreebet,
             })
           });
           const data = await res.json();
@@ -4872,7 +4929,7 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
           }
         }
         if (allOk) {
-          toast.success(`${bets.length} aposta${bets.length > 1 ? "s" : ""} realizada${bets.length > 1 ? "s" : ""}! Total: € ${totalCost.toFixed(2)}`);
+          toast.success(`${bets.length} aposta${bets.length > 1 ? "s" : ""} realizada${bets.length > 1 ? "s" : ""}! Total: € ${totalCost.toFixed(2)}${isUsingFreebet ? " em freebets" : ""}`);
           setBetPlacedAnim(true);
           setBets([]); setBetStakes({}); setStake(""); setBetSlipOpenMobile(false); auth.refreshUser();
         }
@@ -4883,7 +4940,10 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
     // Múltipla mode
     if (!stake) { toast.error("Insira um valor para apostar"); return; }
     const stakeNum = parseFloat(stake);
-    if (stakeNum > parseFloat(auth.user.balance)) { toast.error("Saldo insuficiente"); return; }
+    if (stakeNum > (isUsingFreebet ? freebetBalance : cashBalance)) {
+      toast.error(isUsingFreebet ? "Saldo de freebets insuficiente" : "Saldo insuficiente");
+      return;
+    }
     setIsPlacingBet(true);
     try {
       const matchId = bets.map(b => b.matchId).join("-");
@@ -4913,6 +4973,7 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
           stake: stakeNum.toFixed(2),
           potentialWin,
           totalOdds,
+          isFreebet: isUsingFreebet,
         })
       });
       const data = await res.json();
@@ -4921,7 +4982,7 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
         toast.error(data.error || "Erro ao realizar aposta");
         return;
       }
-      toast.success(`Aposta múltipla realizada! Potencial de ganho: € ${potentialWin}`);
+      toast.success(`Aposta múltipla realizada${isUsingFreebet ? " com freebet" : ""}! Potencial de ganho: € ${potentialWin}`);
       setBetPlacedAnim(true);
       setBets([]); setBetStakes({}); setStake(""); setBetSlipOpenMobile(false); auth.refreshUser();
     } catch { toast.error("Erro ao realizar aposta"); } finally { setIsPlacingBet(false); }
@@ -6057,6 +6118,7 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
         {/* ── FOOTER ── */}
         {bets.length > 0 && (
           <div className="px-4 pt-3 space-y-3" style={{ background: "#0a0a0a", borderTop: "1px solid rgba(255,255,255,0.06)", paddingBottom: "max(1.5rem, env(safe-area-inset-bottom, 1.5rem))" }} data-vaul-no-drag>
+            {renderBetFundingToggle()}
 
             {/* Múltipla stake input */}
             {effectiveBetMode === "multipla" && (
@@ -13085,6 +13147,8 @@ export default function Home({ initialTab = "sports" }: { initialTab?: MainTab }
               className="px-4 pt-3 shrink-0 border-t border-zinc-800"
               style={{ paddingBottom: "max(1rem, env(safe-area-inset-bottom, 1rem))", background: "#0a0a0a" }}
             >
+              {renderBetFundingToggle()}
+
               {/* Múltipla: Montante input + odds badge */}
               {effectiveBetMode === "multipla" && (
                 <div className="flex items-center gap-3 mb-3">
