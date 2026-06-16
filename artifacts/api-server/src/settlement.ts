@@ -17,13 +17,14 @@ export type SelectionRecord = {
   label?: string;
   finalScore?: { home: number; away: number };
   htScore?: { htHome: number; htAway: number };
-  outcome?: "won" | "lost" | "void" | null;
+  outcome?: "won" | "lost" | "void" | "half_won" | "half_lost" | null;
 };
 
 type FTScore = { home: number; away: number };
 type HTScore = { htHome: number; htAway: number };
 type FinishedResult = (typeof finishedMatchResults extends Map<string, infer V> ? V : never);
 type LiveResult = (typeof liveMatchState extends Map<string, infer V> ? V : never);
+type SettlementOutcome = "won" | "lost" | "void" | "half_won" | "half_lost" | null;
 
 function buildSettlementLogKey(args: {
   betId: number;
@@ -151,15 +152,15 @@ function splitAsianLine(line: number): number[] {
   return [line];
 }
 
-function mergeAsianLegOutcomes(outcomes: Array<"won" | "lost" | "void">): "won" | "lost" | "void" | null {
+function mergeAsianLegOutcomes(outcomes: Array<"won" | "lost" | "void">): SettlementOutcome {
   if (outcomes.length === 0) return null;
   if (outcomes.every((outcome) => outcome === outcomes[0])) return outcomes[0]!;
-  if (outcomes.includes("won") && outcomes.includes("void")) return null;
-  if (outcomes.includes("lost") && outcomes.includes("void")) return null;
-  return null;
+  if (outcomes.includes("won") && outcomes.includes("void")) return "half_won";
+  if (outcomes.includes("lost") && outcomes.includes("void")) return "half_lost";
+  return "void";
 }
 
-function settleAsianTotalOutcome(total: number, side: "over" | "under", line: number): "won" | "lost" | "void" | null {
+function settleAsianTotalOutcome(total: number, side: "over" | "under", line: number): SettlementOutcome {
   const outcomes = splitAsianLine(line).map((part) => {
     if (total === part) return "void" as const;
     if (side === "over") return total > part ? "won" as const : "lost" as const;
@@ -173,13 +174,35 @@ function settleAsianSideHandicapOutcome(
   away: number,
   side: "home" | "away",
   line: number,
-): "won" | "lost" | "void" | null {
+): SettlementOutcome {
   const outcomes = splitAsianLine(line).map((part) => {
     const adjusted = side === "home" ? home + part - away : away + part - home;
     if (adjusted === 0) return "void" as const;
     return adjusted > 0 ? "won" as const : "lost" as const;
   });
   return mergeAsianLegOutcomes(outcomes);
+}
+
+function settlementOutcomeMultiplier(outcome: SettlementOutcome, odd: number | undefined): number | null {
+  const price = Number(odd ?? 1);
+  const normalizedOdd = Number.isFinite(price) ? price : 1;
+  if (outcome === null) return null;
+  if (outcome === "lost") return 0;
+  if (outcome === "void") return 1;
+  if (outcome === "won") return normalizedOdd;
+  if (outcome === "half_lost") return 0.5;
+  if (outcome === "half_won") return (normalizedOdd + 1) / 2;
+  return null;
+}
+
+function computeResolvedTicketOdds(
+  selections: SelectionRecord[],
+  outcomes: SettlementOutcome[],
+): number {
+  return selections.reduce((acc, sel, idx) => {
+    const multiplier = settlementOutcomeMultiplier(outcomes[idx] ?? null, sel.odd);
+    return acc * (multiplier ?? 1);
+  }, 1);
 }
 
 function normalizeSettlementSelectionKey(selection: string): string {
@@ -319,7 +342,7 @@ export function scoreOutcomeForSel(
   ft: FTScore,
   ht?: HTScore,
   extra?: { status?: string; cornersTotal?: number; cardsTotal?: number; firstGoal?: "home" | "away" | "none"; extras?: unknown; finishedAt?: number }
-): "won" | "lost" | "void" | null {
+): SettlementOutcome {
   const statusOutcome = resolveSettlementStatusOutcome(extra?.status, extra?.finishedAt);
   if (statusOutcome) {
     return statusOutcome === "pending" ? null : statusOutcome;
@@ -367,11 +390,7 @@ export function scoreOutcomeForSel(
     const m = s.match(/^at-([ou])(\d+)$/)!;
     const side = m[1] === "o" ? "over" : "under";
     const line = decodeCompactLine(m[2]!);
-    const outcome = settleAsianTotalOutcome(total, side, line);
-    if (outcome === "void") return "void";
-    if (outcome === "won") return "won";
-    if (outcome === "lost") return "lost";
-    return null;
+    return settleAsianTotalOutcome(total, side, line);
   }
   // ── First goal (requires stats) ───────────────────────────────────────────
   else if (s === "fg-home" || s === "fg-away" || s === "fg-none") {
@@ -399,11 +418,7 @@ export function scoreOutcomeForSel(
     const side = s.endsWith("home") ? "home" : "away";
     const line = parseSignedSelectionLabelLine(sel.label);
     if (line == null || !Number.isFinite(line)) return null;
-    const outcome = settleAsianSideHandicapOutcome(home, away, side, line);
-    if (outcome === "void") return "void";
-    if (outcome === "won") return "won";
-    if (outcome === "lost") return "lost";
-    return null;
+    return settleAsianSideHandicapOutcome(home, away, side, line);
   }
   // ── Exact sets (tennis) ───────────────────────────────────────────────────
   else if (/^es-(h20|h21|a02|a12)$/.test(s)) {
@@ -721,11 +736,7 @@ export function scoreOutcomeForSel(
   else if (s === "pl-home" || s === "pl-away") {
     const side = s.endsWith("home") ? "home" : "away";
     const line = parseSignedSelectionLabelLine(sel.label) ?? (side === "home" ? -1.5 : 1.5);
-    const outcome = settleAsianSideHandicapOutcome(home, away, side, line);
-    if (outcome === "void") return "void";
-    if (outcome === "won") return "won";
-    if (outcome === "lost") return "lost";
-    return null;
+    return settleAsianSideHandicapOutcome(home, away, side, line);
   }
 
   // ── 1X2 ───────────────────────────────────────────────────────────────────
@@ -1353,7 +1364,7 @@ export async function autoSettlePendingBets(opts?: { matchIds?: string[] }): Pro
           }
         }
 
-        const outcomes: Array<"won" | "lost" | "void" | null> = [];
+        const outcomes: SettlementOutcome[] = [];
 
         for (const sel of selections) {
           const result = findResult(sel, bet.matchId, isSingle);
@@ -1477,11 +1488,7 @@ export async function autoSettlePendingBets(opts?: { matchIds?: string[] }): Pro
         const newStatus = "won";
 
         const stakeNum = parseFloat(bet.stake);
-        const effectiveOdds = selections.reduce((acc, sel, idx) => {
-          const o = outcomes[idx];
-          if (o === "won") return acc * Math.max(1.01, Number(sel.odd ?? 1));
-          return acc;
-        }, 1);
+        const effectiveOdds = computeResolvedTicketOdds(selections, outcomes);
         const payoutNum = Math.max(0, Number((stakeNum * effectiveOdds).toFixed(2)));
         const payoutStr = payoutNum.toFixed(2);
         const oddsStr = Number(effectiveOdds.toFixed(2)).toFixed(2);
@@ -1540,7 +1547,7 @@ export async function autoSettlePendingBets(opts?: { matchIds?: string[] }): Pro
             oldStatus: "pending",
             newStatus: "won",
             payout: payoutStr,
-            message: `Auto-settled: settled with ${outcomes.filter(o => o === "void").length} void leg(s)`,
+            message: `Auto-settled: settled with ${outcomes.filter(o => o === "void").length} void leg(s), ${outcomes.filter(o => o === "half_won").length} half-won leg(s) and ${outcomes.filter(o => o === "half_lost").length} half-lost leg(s)`,
           }).onConflictDoNothing();
         });
 
@@ -1607,7 +1614,7 @@ export async function regradeSettledBetsForMatch(matchId: string, jobId: string)
 
         const isSingle = selections.length === 1;
 
-        const outcomes: Array<"won" | "lost" | "void" | null> = [];
+        const outcomes: SettlementOutcome[] = [];
         const updatedSelections = selections.map((sel) => {
           const result = findResult(sel, bet.matchId, isSingle);
           if (!result) {
@@ -1658,11 +1665,7 @@ export async function regradeSettledBetsForMatch(matchId: string, jobId: string)
         } else {
           newStatus = "won";
 
-          const effectiveOdds = selections.reduce((acc, sel, idx) => {
-            const o = outcomes[idx];
-            if (o === "won") return acc * Math.max(1.01, Number(sel.odd ?? 1));
-            return acc;
-          }, 1);
+          const effectiveOdds = computeResolvedTicketOdds(selections, outcomes);
 
           const payoutNum = Math.max(0, Number((stakeNum * effectiveOdds).toFixed(2)));
           payoutStr = payoutNum.toFixed(2);
