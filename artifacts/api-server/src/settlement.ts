@@ -19,14 +19,17 @@ export type SelectionRecord = {
   htScore?: { htHome: number; htAway: number };
   outcome?: "won" | "lost" | "void" | "half_won" | "half_lost" | null;
   pendingReason?: string;
+  settlementNote?: string;
+  lastSettledAt?: string;
+  settlementRuleVersion?: string;
 };
 
-type FTScore = { home: number; away: number };
-type HTScore = { htHome: number; htAway: number };
-type FinishedResult = (typeof finishedMatchResults extends Map<string, infer V> ? V : never);
-type LiveResult = (typeof liveMatchState extends Map<string, infer V> ? V : never);
-type SettlementOutcome = "won" | "lost" | "void" | "half_won" | "half_lost" | null;
-type SelectionSettlementResolution = {
+export type FTScore = { home: number; away: number };
+export type HTScore = { htHome: number; htAway: number };
+export type FinishedResult = (typeof finishedMatchResults extends Map<string, infer V> ? V : never);
+export type LiveResult = (typeof liveMatchState extends Map<string, infer V> ? V : never);
+export type SettlementOutcome = "won" | "lost" | "void" | "half_won" | "half_lost" | null;
+export type SelectionSettlementResolution = {
   outcome: SettlementOutcome;
   pendingReason?: string;
 };
@@ -416,7 +419,7 @@ function describePendingSettlementReason(
   return "market_known_but_unresolved";
 }
 
-function resolveLiveSelectionSettlement(
+export function resolveLiveSelectionSettlement(
   sel: SelectionRecord,
   score: {
     home: number;
@@ -452,7 +455,7 @@ function resolveLiveSelectionSettlement(
   };
 }
 
-function buildLiveSettlementScore(
+export function buildLiveSettlementScore(
   live: LiveResult | null,
 ): {
   home: number;
@@ -487,7 +490,7 @@ function buildLiveSettlementScore(
   };
 }
 
-function resolveSelectionSettlement(
+export function resolveSelectionSettlement(
   sel: { selection: string; label?: unknown },
   ft: FTScore,
   ht?: HTScore,
@@ -506,7 +509,7 @@ function resolveSelectionSettlement(
   };
 }
 
-function normalizeSettlementSelectionKey(selection: string): string {
+export function normalizeSettlementSelectionKey(selection: string): string {
   let s = String(selection ?? "");
   if (/^(?:handicap|asiatico|spread|puckline):/.test(s)) s = s.replace(/^[^:]+:/, "");
   if      (s === "1x2-home")    s = "home";
@@ -1392,7 +1395,7 @@ function getSelectionTeams(sel: SelectionRecord): { home: string; away: string }
  * Find the settled result for a selection.
  * Priority: per-selection matchId -> bet-level matchId (singles only).
  */
-function findResult(
+export function findResult(
   sel: SelectionRecord,
   betMatchId: string,
   isSingle: boolean
@@ -1430,7 +1433,7 @@ function findResult(
   return null;
 }
 
-function findLiveResult(
+export function findLiveResult(
   sel: SelectionRecord,
   betMatchId: string,
   isSingle: boolean
