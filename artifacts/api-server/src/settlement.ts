@@ -130,11 +130,74 @@ function parseSelectionLabelLine(label: unknown): number | null {
   return Number.isFinite(value) ? value : null;
 }
 
+function parseSignedSelectionLabelLine(label: unknown): number | null {
+  if (typeof label !== "string") return null;
+  const normalized = label.replace(/[−–]/g, "-").replace(/\s+/g, " ");
+  const signed = normalized.match(/([+-])\s*(\d+(?:[.,]\d+)?)/);
+  if (signed) {
+    const sign = signed[1] === "-" ? -1 : 1;
+    const value = Number(signed[2]!.replace(",", "."));
+    return Number.isFinite(value) ? sign * value : null;
+  }
+  return parseSelectionLabelLine(label);
+}
+
+function splitAsianLine(line: number): number[] {
+  if (!Number.isFinite(line)) return [];
+  const scaled = Math.round(line * 100);
+  const mod = Math.abs(scaled) % 100;
+  if (mod === 25) return [line - Math.sign(line || 1) * 0.25, line + Math.sign(line || 1) * 0.25];
+  if (mod === 75) return [line - Math.sign(line || 1) * 0.25, line + Math.sign(line || 1) * 0.25];
+  return [line];
+}
+
+function mergeAsianLegOutcomes(outcomes: Array<"won" | "lost" | "void">): "won" | "lost" | "void" | null {
+  if (outcomes.length === 0) return null;
+  if (outcomes.every((outcome) => outcome === outcomes[0])) return outcomes[0]!;
+  if (outcomes.includes("won") && outcomes.includes("void")) return null;
+  if (outcomes.includes("lost") && outcomes.includes("void")) return null;
+  return null;
+}
+
+function settleAsianTotalOutcome(total: number, side: "over" | "under", line: number): "won" | "lost" | "void" | null {
+  const outcomes = splitAsianLine(line).map((part) => {
+    if (total === part) return "void" as const;
+    if (side === "over") return total > part ? "won" as const : "lost" as const;
+    return total < part ? "won" as const : "lost" as const;
+  });
+  return mergeAsianLegOutcomes(outcomes);
+}
+
+function settleAsianSideHandicapOutcome(
+  home: number,
+  away: number,
+  side: "home" | "away",
+  line: number,
+): "won" | "lost" | "void" | null {
+  const outcomes = splitAsianLine(line).map((part) => {
+    const adjusted = side === "home" ? home + part - away : away + part - home;
+    if (adjusted === 0) return "void" as const;
+    return adjusted > 0 ? "won" as const : "lost" as const;
+  });
+  return mergeAsianLegOutcomes(outcomes);
+}
+
 function normalizeSettlementSelectionKey(selection: string): string {
   let s = String(selection ?? "");
+  if (/^(?:handicap|asiatico|spread|puckline):/.test(s)) s = s.replace(/^[^:]+:/, "");
   if      (s === "1x2-home")    s = "home";
   else if (s === "1x2-draw")    s = "draw";
   else if (s === "1x2-away")    s = "away";
+  else if (s === "hm1")         s = "hc-hm1";
+  else if (s === "ap1")         s = "hc-ap1";
+  else if (s === "hm1h")        s = "hc-hm15";
+  else if (s === "ap1h")        s = "hc-ap15";
+  else if (s === "hcap-home")   s = "hc-hm1";
+  else if (s === "hcap-away")   s = "hc-ap1";
+  else if (s === "ah:home")     s = "ah-home";
+  else if (s === "ah:away")     s = "ah-away";
+  else if (s === "pl:home")     s = "pl-home";
+  else if (s === "pl:away")     s = "pl-away";
   else if (/^s([123])-(home|away)$/.test(s)) {
     const m = s.match(/^s([123])-(home|away)$/);
     s = `set${m![1]}-${m![2]}`;
@@ -252,7 +315,7 @@ function tennisCompletedSetCount(extras: unknown): number | null {
  *       h2cs-{H}-{A}
  */
 export function scoreOutcomeForSel(
-  sel: { selection: string },
+  sel: { selection: string; label?: unknown },
   ft: FTScore,
   ht?: HTScore,
   extra?: { status?: string; cornersTotal?: number; cardsTotal?: number; firstGoal?: "home" | "away" | "none"; extras?: unknown; finishedAt?: number }
@@ -286,7 +349,7 @@ export function scoreOutcomeForSel(
   // ── Corners O/U (requires stats) ──────────────────────────────────────────
   if (/^[ou]c\d+$/.test(s)) {
     if (extra?.cornersTotal == null) return null;
-    const line = parseInt(s.slice(2), 10) / 10;
+    const line = decodeCompactLine(s.slice(2));
     if (!Number.isFinite(line)) return null;
     if (extra.cornersTotal === line) voided = true;
     else winning = s[0] === "o" ? extra.cornersTotal > line : extra.cornersTotal < line;
@@ -294,10 +357,21 @@ export function scoreOutcomeForSel(
   // ── Cards O/U (requires stats) ────────────────────────────────────────────
   else if (/^[ou]card\d+$/.test(s)) {
     if (extra?.cardsTotal == null) return null;
-    const line = parseInt(s.slice(5), 10) / 10;
+    const line = decodeCompactLine(s.slice(5));
     if (!Number.isFinite(line)) return null;
     if (extra.cardsTotal === line) voided = true;
     else winning = s[0] === "o" ? extra.cardsTotal > line : extra.cardsTotal < line;
+  }
+  // ── Asian totals (settle full win/loss/void; quarter split stays pending) ─
+  else if (/^at-([ou])(\d+)$/.test(s)) {
+    const m = s.match(/^at-([ou])(\d+)$/)!;
+    const side = m[1] === "o" ? "over" : "under";
+    const line = decodeCompactLine(m[2]!);
+    const outcome = settleAsianTotalOutcome(total, side, line);
+    if (outcome === "void") return "void";
+    if (outcome === "won") return "won";
+    if (outcome === "lost") return "lost";
+    return null;
   }
   // ── First goal (requires stats) ───────────────────────────────────────────
   else if (s === "fg-home" || s === "fg-away" || s === "fg-none") {
@@ -320,13 +394,22 @@ export function scoreOutcomeForSel(
     if (h === a) return "void";
     winning = wantHome ? h > a : wantAway ? a > h : null;
   }
+  // ── Asian handicap (settle full win/loss/void; quarter split stays pending)
+  else if (s === "ah-home" || s === "ah-away") {
+    const side = s.endsWith("home") ? "home" : "away";
+    const line = parseSignedSelectionLabelLine(sel.label);
+    if (line == null || !Number.isFinite(line)) return null;
+    const outcome = settleAsianSideHandicapOutcome(home, away, side, line);
+    if (outcome === "void") return "void";
+    if (outcome === "won") return "won";
+    if (outcome === "lost") return "lost";
+    return null;
+  }
   // ── Exact sets (tennis) ───────────────────────────────────────────────────
   else if (/^es-(h20|h21|a02|a12)$/.test(s)) {
-    const ex = (extra?.extras ?? {}) as Record<string, unknown>;
-    const hs = ex["homeScore"] as Record<string, unknown> | undefined;
-    const as = ex["awayScore"] as Record<string, unknown> | undefined;
-    const hc = typeof hs?.["current"] === "number" ? hs["current"] as number : null;
-    const ac = typeof as?.["current"] === "number" ? as["current"] as number : null;
+    const sets = getTennisSetsFromExtras(extra?.extras);
+    const hc = sets.filter(([h, a]) => tennisSetFinished([h, a]) && h > a).length;
+    const ac = sets.filter(([h, a]) => tennisSetFinished([h, a]) && a > h).length;
     if (hc === null || ac === null) return null;
     const score = `${hc}-${ac}`;
     const want =
@@ -412,7 +495,7 @@ export function scoreOutcomeForSel(
     const spread = s.match(/^b-spread-(home|away)-(\d+(?:\.\d+)?)$/);
     if (winning === null && spread) {
       const side = spread[1]!;
-      const line = parseLine(spread[2]!);
+      const line = parseLine(spread[2]!) ?? parseSelectionLabelLine(sel.label);
       if (line === null) return null;
       const diff = ft.home - ft.away;
       const adj = diff - line;
@@ -473,9 +556,7 @@ export function scoreOutcomeForSel(
       const n = Number(v);
       return Number.isFinite(n) ? n : null;
     };
-    const labelLine = typeof (sel as { label?: unknown }).label === "string"
-      ? parseLine((((sel as { label?: string }).label ?? "").match(/(\d+(?:\.\d+)?)/)?.[1]) ?? null)
-      : null;
+    const labelLine = parseSelectionLabelLine(sel.label);
 
     const perAlias = s.match(/^per([123])-(home|draw|away)$/);
     if (perAlias) s = `p${perAlias[1]}-${perAlias[2]}`;
@@ -536,9 +617,7 @@ export function scoreOutcomeForSel(
       const n = Number(v);
       return Number.isFinite(n) ? n : null;
     };
-    const labelLine = typeof (sel as { label?: unknown }).label === "string"
-      ? parseLine((((sel as { label?: string }).label ?? "").match(/(\d+(?:\.\d+)?)/)?.[1]) ?? null)
-      : null;
+    const labelLine = parseSelectionLabelLine(sel.label);
 
     const tot = s.match(/^mlb-tot-([ou])-(\d+(?:\.\d+)?)$/) || s.match(/^mlb-([ou])(\d+(?:\.\d+)?)$/);
     if (tot) {
@@ -611,7 +690,7 @@ export function scoreOutcomeForSel(
       winning = s === "et-tw-home" ? totalDiff > 0 : totalDiff < 0;
     } else if (/^et-([ou])(\d+)$/.test(s)) {
       const m = s.match(/^et-([ou])(\d+)$/)!;
-      const line = parseInt(m[2]!, 10) / 10;
+      const line = decodeCompactLine(m[2]!);
       const totalET = etHome + etAway;
       if (totalET === line) voided = true;
       else winning = m[1] === "o" ? totalET > line : totalET < line;
@@ -639,6 +718,15 @@ export function scoreOutcomeForSel(
   if      (winning !== null) { /* already resolved above */ }
   else if (s === "hc-hm1"  || s === "hc-hm15") { winning = (home - away) >= 2; }
   else if (s === "hc-ap1"  || s === "hc-ap15") { winning = (home - away) <= 1; }
+  else if (s === "pl-home" || s === "pl-away") {
+    const side = s.endsWith("home") ? "home" : "away";
+    const line = parseSignedSelectionLabelLine(sel.label) ?? (side === "home" ? -1.5 : 1.5);
+    const outcome = settleAsianSideHandicapOutcome(home, away, side, line);
+    if (outcome === "void") return "void";
+    if (outcome === "won") return "won";
+    if (outcome === "lost") return "lost";
+    return null;
+  }
 
   // ── 1X2 ───────────────────────────────────────────────────────────────────
   else if (s === "home")            winning = home > away;
@@ -712,7 +800,7 @@ export function scoreOutcomeForSel(
   // ── Home Team Goals O/U  (tgh-o05 = home scores > 0.5) ───────────────────
   else if (/^tgh-([ou])(\d+)$/.test(s)) {
     const m = s.match(/^tgh-([ou])(\d+)$/)!;
-    const line = parseInt(m[2]!, 10) / 10;
+    const line = decodeCompactLine(m[2]!);
     if (home === line) voided = true;
     else winning = m[1] === "o" ? home > line : home < line;
   }
@@ -720,7 +808,7 @@ export function scoreOutcomeForSel(
   // ── Away Team Goals O/U  (tga-o15 = away scores > 1.5) ───────────────────
   else if (/^tga-([ou])(\d+)$/.test(s)) {
     const m = s.match(/^tga-([ou])(\d+)$/)!;
-    const line = parseInt(m[2]!, 10) / 10;
+    const line = decodeCompactLine(m[2]!);
     if (away === line) voided = true;
     else winning = m[1] === "o" ? away > line : away < line;
   }
@@ -806,9 +894,10 @@ export function scoreOutcomeForSel(
     else if (/^2h-([ou])(\d+)g$/.test(s)) {
       if (h2H !== null && h2A !== null) {
         const m = s.match(/^2h-([ou])(\d+)g$/)!;
-        const line = parseInt(m[2]!, 10) / 10;
+        const line = decodeCompactLine(m[2]!);
         const total2h = h2H + h2A;
-        winning = m[1] === "o" ? total2h > line : total2h < line;
+        if (total2h === line) voided = true;
+        else winning = m[1] === "o" ? total2h > line : total2h < line;
       }
     }
 
