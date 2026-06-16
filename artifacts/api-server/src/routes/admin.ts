@@ -1006,4 +1006,94 @@ router.get("/settlement-pending-reasons", adminMiddleware, async (req: AdminRequ
   }
 });
 
+router.get("/settlement-pending-selections", adminMiddleware, async (req: AdminRequest, res: Response): Promise<void> => {
+  try {
+    const reasonFilter = String((req as unknown as Request).query["reason"] ?? "").trim();
+    const limitParam = Number((req as unknown as Request).query["limit"] ?? 100);
+    const limit = Number.isFinite(limitParam) && limitParam > 0 ? Math.min(limitParam, 500) : 100;
+
+    const pendingBets = await db
+      .select({
+        id: betsTable.id,
+        userId: betsTable.userId,
+        matchId: betsTable.matchId,
+        matchTitle: betsTable.matchTitle,
+        stake: betsTable.stake,
+        potentialWin: betsTable.potentialWin,
+        totalOdds: betsTable.totalOdds,
+        status: betsTable.status,
+        createdAt: betsTable.createdAt,
+        selections: betsTable.selections,
+        userName: usersTable.name,
+        userEmail: usersTable.email,
+      })
+      .from(betsTable)
+      .leftJoin(usersTable, eq(betsTable.userId, usersTable.id))
+      .where(eq(betsTable.status, "pending"))
+      .orderBy(desc(betsTable.createdAt))
+      .limit(2000);
+
+    type PendingSelection = {
+      selection?: string;
+      market?: string;
+      label?: string;
+      matchId?: string;
+      matchTitle?: string;
+      outcome?: string | null;
+      pendingReason?: string;
+      finalScore?: { home: number; away: number };
+      htScore?: { htHome: number; htAway: number };
+    };
+
+    const rows: Array<Record<string, unknown>> = [];
+
+    for (const bet of pendingBets) {
+      const selections = Array.isArray(bet.selections) ? bet.selections as PendingSelection[] : [];
+      for (let index = 0; index < selections.length; index++) {
+        const sel = selections[index]!;
+        const outcome = typeof sel?.outcome === "string" ? sel.outcome : null;
+        if (outcome && outcome !== "pending") continue;
+
+        const reason = String(sel?.pendingReason ?? "missing_pending_reason").trim() || "missing_pending_reason";
+        if (reasonFilter && reason !== reasonFilter) continue;
+
+        rows.push({
+          reason,
+          betId: bet.id,
+          userId: bet.userId,
+          userName: bet.userName,
+          userEmail: bet.userEmail,
+          matchId: sel?.matchId ?? bet.matchId,
+          matchTitle: sel?.matchTitle ?? bet.matchTitle,
+          selectionIndex: index,
+          selection: sel?.selection ?? null,
+          market: sel?.market ?? null,
+          label: sel?.label ?? null,
+          outcome,
+          pendingReason: reason,
+          finalScore: sel?.finalScore ?? null,
+          htScore: sel?.htScore ?? null,
+          stake: bet.stake,
+          totalOdds: bet.totalOdds,
+          potentialWin: bet.potentialWin,
+          createdAt: bet.createdAt,
+          selections,
+        });
+
+        if (rows.length >= limit) break;
+      }
+      if (rows.length >= limit) break;
+    }
+
+    res.json({
+      reasonFilter: reasonFilter || null,
+      count: rows.length,
+      rows,
+    });
+  } catch (err) {
+    logger.error({ err }, "Admin settlement-pending-selections error");
+    res.status(500).json({ error: "Erro ao carregar seleções pendentes do settlement" });
+  }
+});
+
 export default router;
