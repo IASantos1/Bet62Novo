@@ -263,6 +263,9 @@ function scoreOutcomeForSelLastResort(
       if (s === "away") return ft.away > ft.home ? "won" : "lost";
       return ft.home === ft.away ? "won" : "lost";
     }
+    if (s === "homeOrDraw" || s === "dc-hd") return ft.home >= ft.away ? "won" : "lost";
+    if (s === "awayOrDraw" || s === "dc-da") return ft.away >= ft.home ? "won" : "lost";
+    if (s === "homeOrAway" || s === "dc-ha") return ft.home !== ft.away ? "won" : "lost";
     if (derivedHt) {
       const htHome = derivedHt.htHome;
       const htAway = derivedHt.htAway;
@@ -307,6 +310,22 @@ function scoreOutcomeForSelLastResort(
         return htPick && ftPick ? "won" : "lost";
       }
     }
+    if (/^[ou]c\d+$/.test(s) && extra?.cornersTotal != null) {
+      const line = decodeCompactLine(s.slice(2));
+      if (!Number.isFinite(line)) return null;
+      if (extra.cornersTotal === line) return "void";
+      return s[0] === "o" ? (extra.cornersTotal > line ? "won" : "lost") : (extra.cornersTotal < line ? "won" : "lost");
+    }
+    if (/^[ou]card\d+$/.test(s) && extra?.cardsTotal != null) {
+      const line = decodeCompactLine(s.slice(5));
+      if (!Number.isFinite(line)) return null;
+      if (extra.cardsTotal === line) return "void";
+      return s[0] === "o" ? (extra.cardsTotal > line ? "won" : "lost") : (extra.cardsTotal < line ? "won" : "lost");
+    }
+    if (s === "fg-home" || s === "fg-away" || s === "fg-none") {
+      if (!extra?.firstGoal) return null;
+      return s === `fg-${extra.firstGoal}` ? "won" : "lost";
+    }
     if (/^[ou][\d.]+$/.test(s)) {
       const line = decodeCompactLine(s.slice(1));
       const total = ft.home + ft.away;
@@ -316,6 +335,33 @@ function scoreOutcomeForSelLastResort(
     }
     if (s === "bts-yes") return ft.home > 0 && ft.away > 0 ? "won" : "lost";
     if (s === "bts-no") return ft.home === 0 || ft.away === 0 ? "won" : "lost";
+    if (s === "goe-odd") return (ft.home + ft.away) % 2 === 1 ? "won" : "lost";
+    if (s === "goe-even") return (ft.home + ft.away) % 2 === 0 ? "won" : "lost";
+    if (s === "wtn-h") return ft.home > ft.away && ft.away === 0 ? "won" : "lost";
+    if (s === "wtn-a") return ft.away > ft.home && ft.home === 0 ? "won" : "lost";
+    if (s === "cs-h") return ft.away === 0 ? "won" : "lost";
+    if (s === "cs-a") return ft.home === 0 ? "won" : "lost";
+    if (s === "eg-g5plus") return (ft.home + ft.away) >= 5 ? "won" : "lost";
+    if (/^eg-g\d+$/.test(s)) return (ft.home + ft.away) === Number.parseInt(s.slice(4), 10) ? "won" : "lost";
+    if (s === "dnb-home") {
+      if (ft.home === ft.away) return "void";
+      return ft.home > ft.away ? "won" : "lost";
+    }
+    if (s === "dnb-away") {
+      if (ft.home === ft.away) return "void";
+      return ft.away > ft.home ? "won" : "lost";
+    }
+    if (s.startsWith("cs-")) {
+      const body = s.slice(3);
+      if (body === "Outro") {
+        const common = [
+          "0-0", "1-0", "0-1", "1-1", "2-0", "0-2", "2-1", "1-2",
+          "2-2", "3-0", "0-3", "3-1", "1-3", "3-2", "2-3",
+        ];
+        return !common.includes(`${ft.home}-${ft.away}`) ? "won" : "lost";
+      }
+      return `${ft.home}-${ft.away}` === body ? "won" : "lost";
+    }
   }
 
   if (sport === "basketball") {
@@ -345,10 +391,34 @@ function scoreOutcomeForSelLastResort(
       if (totalH1 === line) return "void";
       return h1Total[1] === "o" ? (totalH1 > line ? "won" : "lost") : (totalH1 < line ? "won" : "lost");
     }
+    const spread = s.match(/^b-spread-(home|away)-(\d+(?:\.\d+)?)$/);
+    if (spread) {
+      const side = spread[1]!;
+      const line = Number(spread[2]!);
+      if (!Number.isFinite(line)) return null;
+      const adj = (ft.home - ft.away) - line;
+      if (adj === 0) return "void";
+      return side === "home" ? (adj > 0 ? "won" : "lost") : (adj < 0 ? "won" : "lost");
+    }
+    const teamTotal = s.match(/^b-tt-(home|away)-([ou])-(\d+(?:\.\d+)?)$/);
+    if (teamTotal) {
+      const side = teamTotal[1]!;
+      const dir = teamTotal[2]!;
+      const line = Number(teamTotal[3]!);
+      if (!Number.isFinite(line)) return null;
+      const score = side === "home" ? ft.home : ft.away;
+      if (score === line) return "void";
+      return dir === "o" ? (score > line ? "won" : "lost") : (score < line ? "won" : "lost");
+    }
   }
 
   if (sport === "hockey") {
     const periods = getHockeyPeriodsFromExtras(extra?.extras);
+    if (s === "pl-home" || s === "pl-away") {
+      const side = s.endsWith("home") ? "home" : "away";
+      const line = parseSignedSelectionLabelLine(sel.label) ?? (side === "home" ? -1.5 : 1.5);
+      return settleAsianSideHandicapOutcome(ft.home, ft.away, side, line);
+    }
     const per = s.match(/^p([123])-(home|draw|away)$/) || s.match(/^per([123])-(home|draw|away)$/);
     if (per) {
       const score = periods[Number(per[1]) - 1] ?? null;
@@ -380,6 +450,15 @@ function scoreOutcomeForSelLastResort(
     if (s === "winner" || s === "home" || s === "away") {
       if (s === "home") return ft.home > ft.away ? "won" : "lost";
       return ft.away > ft.home ? "won" : "lost";
+    }
+    const rl = s.match(/^mlb-rl-(home|away)-(\d+(?:\.\d+)?)$/) || s.match(/^rl-(home|away)$/);
+    if (rl) {
+      const side = rl[1]!;
+      const line = rl[2] != null ? Number(rl[2]) : parseSelectionLabelLine(sel.label) ?? 1.5;
+      if (!Number.isFinite(line)) return null;
+      const diff = ft.home - ft.away;
+      if (diff === line) return "void";
+      return side === "home" ? (diff > line ? "won" : "lost") : (diff < line ? "won" : "lost");
     }
     const f5res = s.match(/^mlb-f5-(home|away)$/) || s.match(/^f5-(home|away)$/);
     if (f5res && innings.length >= 5) {
