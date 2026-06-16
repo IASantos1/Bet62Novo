@@ -1,5 +1,6 @@
 import { db, betsTable, cashoutStatesTable, usersTable, settlementLogsTable } from "@workspace/db";
 import { eq, and, lt, sql, gte, desc } from "drizzle-orm";
+import IORedis from "ioredis";
 import { logger } from "./lib/logger.js";
 import { applyBalanceDelta } from "./lib/ledger.js";
 import { ensureFinishedMatchResult, finishedMatchResults, liveMatchState, scanDailyForFinished, scanV2AllSportsForFinished } from "./routes/matches.js";
@@ -33,6 +34,39 @@ export type SelectionSettlementResolution = {
   outcome: SettlementOutcome;
   pendingReason?: string;
 };
+
+const SETTLEMENT_LOCK_TTL_SECONDS = 300;
+
+let settlementRedis: IORedis | null | undefined;
+
+function getSettlementRedis(): IORedis | null {
+  if (settlementRedis !== undefined) return settlementRedis;
+  const url = process.env["REDIS_URL"];
+  if (typeof url !== "string" || url.trim() === "") {
+    settlementRedis = null;
+    return settlementRedis;
+  }
+  settlementRedis = new IORedis(url, { maxRetriesPerRequest: null });
+  return settlementRedis;
+}
+
+async function acquireBetSettlementLock(betId: number | string, owner: string): Promise<boolean> {
+  const redis = getSettlementRedis();
+  if (!redis) return true;
+  const key = `settlement:lock:bet:${String(betId)}`;
+  const result = await redis.set(key, owner, "NX", "EX", SETTLEMENT_LOCK_TTL_SECONDS);
+  return result === "OK";
+}
+
+async function releaseBetSettlementLock(betId: number | string, owner: string): Promise<void> {
+  const redis = getSettlementRedis();
+  if (!redis) return;
+  const key = `settlement:lock:bet:${String(betId)}`;
+  const currentOwner = await redis.get(key);
+  if (currentOwner === owner) {
+    await redis.del(key);
+  }
+}
 
 function buildSettlementLogKey(args: {
   betId: number;
@@ -1589,6 +1623,7 @@ function liveDefinitiveOutcomeForSel(
  * Won bets credit potentialWin to the user's balance atomically.
  */
 export async function autoSettlePendingBets(opts?: { matchIds?: string[] }): Promise<void> {
+  const cycleId = `cycle:${Date.now()}`;
   try {
     const pendingBets = await db
       .select()
@@ -1631,6 +1666,8 @@ export async function autoSettlePendingBets(opts?: { matchIds?: string[] }): Pro
     let settled = 0;
 
     for (const bet of pendingBets) {
+      const locked = await acquireBetSettlementLock(bet.id, cycleId);
+      if (!locked) continue;
       try {
         const selections = bet.selections as SelectionRecord[];
         if (!Array.isArray(selections) || selections.length === 0) continue;
@@ -1996,6 +2033,8 @@ export async function autoSettlePendingBets(opts?: { matchIds?: string[] }): Pro
         settled++;
       } catch (err) {
         logger.error({ err, betId: bet.id }, "Error auto-settling bet");
+      } finally {
+        await releaseBetSettlementLock(bet.id, cycleId);
       }
     }
 
@@ -2281,6 +2320,7 @@ async function hydrateSettledBetSelections(): Promise<void> {
 const STALE_THRESHOLD_MS = 72 * 60 * 60 * 1000; // 72 hours
 
 async function expireStalePendingBets(): Promise<void> {
+  const cycleId = `stale:${Date.now()}`;
   try {
     const now = new Date();
     const cutoff = new Date(now.getTime() - STALE_THRESHOLD_MS);
@@ -2297,6 +2337,8 @@ async function expireStalePendingBets(): Promise<void> {
     if (staleBets.length === 0) return;
 
     for (const bet of staleBets) {
+      const locked = await acquireBetSettlementLock(bet.id, cycleId);
+      if (!locked) continue;
       try {
         // One last attempt to find the result before voiding
         const selections = bet.selections as SelectionRecord[];
@@ -2352,6 +2394,8 @@ async function expireStalePendingBets(): Promise<void> {
         );
       } catch (err) {
         logger.error({ err, betId: bet.id }, "Error voiding stale bet");
+      } finally {
+        await releaseBetSettlementLock(bet.id, cycleId);
       }
     }
   } catch (err) {
