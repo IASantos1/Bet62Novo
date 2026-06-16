@@ -235,6 +235,7 @@ function scoreOutcomeForSelLastResort(
 ): SettlementOutcome {
   const s = normalizeSettlementSelectionKey(sel.selection);
   const sport = inferSelectionSport(s);
+  const derivedHt = ht ?? getFootballHTScoreFromExtras(extra?.extras) ?? undefined;
 
   if (sport === "tennis") {
     if (/^es-(h20|h21|a02|a12)$/.test(s)) {
@@ -262,6 +263,27 @@ function scoreOutcomeForSelLastResort(
       if (s === "away") return ft.away > ft.home ? "won" : "lost";
       return ft.home === ft.away ? "won" : "lost";
     }
+    if (derivedHt) {
+      const htHome = derivedHt.htHome;
+      const htAway = derivedHt.htAway;
+      const h2Home = ft.home - htHome;
+      const h2Away = ft.away - htAway;
+      if (s === "ht-home") return htHome > htAway ? "won" : "lost";
+      if (s === "ht-away") return htAway > htHome ? "won" : "lost";
+      if (s === "ht-draw") return htHome === htAway ? "won" : "lost";
+      if (s === "b1h-yes") return htHome > 0 && htAway > 0 ? "won" : "lost";
+      if (s === "b1h-no") return htHome === 0 || htAway === 0 ? "won" : "lost";
+      if (s === "2h-home") return h2Home > h2Away ? "won" : "lost";
+      if (s === "2h-away") return h2Away > h2Home ? "won" : "lost";
+      if (s === "2h-draw") return h2Home === h2Away ? "won" : "lost";
+      const h2Total = s.match(/^2h-([ou])(\d+)g$/);
+      if (h2Total) {
+        const line = decodeCompactLine(h2Total[2]!);
+        const total2h = h2Home + h2Away;
+        if (total2h === line) return "void";
+        return h2Total[1] === "o" ? (total2h > line ? "won" : "lost") : (total2h < line ? "won" : "lost");
+      }
+    }
     if (/^[ou][\d.]+$/.test(s)) {
       const line = decodeCompactLine(s.slice(1));
       const total = ft.home + ft.away;
@@ -274,6 +296,7 @@ function scoreOutcomeForSelLastResort(
   }
 
   if (sport === "basketball") {
+    const quarters = getBasketballQuartersFromExtras(extra?.extras);
     if (/^b-pts-([ou])-(\d+(?:\.\d+)?)$/.test(s)) {
       const m = s.match(/^b-pts-([ou])-(\d+(?:\.\d+)?)$/)!;
       const line = Number(m[2]!);
@@ -281,9 +304,48 @@ function scoreOutcomeForSelLastResort(
       if (total === line) return "void";
       return m[1] === "o" ? (total > line ? "won" : "lost") : (total < line ? "won" : "lost");
     }
+    const q = s.match(/^q([1234])-(home|away)$/);
+    if (q) {
+      const qScore = quarters[Number(q[1]) - 1] ?? null;
+      if (!qScore) return null;
+      return q[2] === "home" ? (qScore[0] > qScore[1] ? "won" : "lost") : (qScore[1] > qScore[0] ? "won" : "lost");
+    }
+    if ((s === "h1-home" || s === "h1-away") && quarters.length >= 2) {
+      const h1Home = (quarters[0]?.[0] ?? 0) + (quarters[1]?.[0] ?? 0);
+      const h1Away = (quarters[0]?.[1] ?? 0) + (quarters[1]?.[1] ?? 0);
+      return s === "h1-home" ? (h1Home > h1Away ? "won" : "lost") : (h1Away > h1Home ? "won" : "lost");
+    }
+    const h1Total = s.match(/^b-h1-pts-([ou])-(\d+(?:\.\d+)?)$/);
+    if (h1Total && quarters.length >= 2) {
+      const totalH1 = (quarters[0]?.[0] ?? 0) + (quarters[0]?.[1] ?? 0) + (quarters[1]?.[0] ?? 0) + (quarters[1]?.[1] ?? 0);
+      const line = Number(h1Total[2]!);
+      if (totalH1 === line) return "void";
+      return h1Total[1] === "o" ? (totalH1 > line ? "won" : "lost") : (totalH1 < line ? "won" : "lost");
+    }
+  }
+
+  if (sport === "hockey") {
+    const periods = getHockeyPeriodsFromExtras(extra?.extras);
+    const per = s.match(/^p([123])-(home|draw|away)$/) || s.match(/^per([123])-(home|draw|away)$/);
+    if (per) {
+      const score = periods[Number(per[1]) - 1] ?? null;
+      if (!score) return null;
+      if (per[2] === "draw") return score[0] === score[1] ? "won" : "lost";
+      return per[2] === "home" ? (score[0] > score[1] ? "won" : "lost") : (score[1] > score[0] ? "won" : "lost");
+    }
+    const pt = s.match(/^p([123])t-([ou])(?:-(\d+(?:\.\d+)?))?$/);
+    if (pt) {
+      const score = periods[Number(pt[1]) - 1] ?? null;
+      const line = pt[3] != null ? Number(pt[3]) : parseSelectionLabelLine(sel.label);
+      if (!score || line == null) return null;
+      const total = score[0] + score[1];
+      if (total === line) return "void";
+      return pt[2] === "o" ? (total > line ? "won" : "lost") : (total < line ? "won" : "lost");
+    }
   }
 
   if (sport === "baseball") {
+    const innings = getBaseballInningsFromExtras(extra?.extras);
     if (/^mlb-tot-([ou])-(\d+(?:\.\d+)?)$/.test(s) || /^mlb-([ou])(\d+(?:\.\d+)?)$/.test(s)) {
       const m = s.match(/^mlb-tot-([ou])-(\d+(?:\.\d+)?)$/) || s.match(/^mlb-([ou])(\d+(?:\.\d+)?)$/);
       const line = Number(m?.[2] ?? Number.NaN);
@@ -295,6 +357,20 @@ function scoreOutcomeForSelLastResort(
     if (s === "winner" || s === "home" || s === "away") {
       if (s === "home") return ft.home > ft.away ? "won" : "lost";
       return ft.away > ft.home ? "won" : "lost";
+    }
+    const f5res = s.match(/^mlb-f5-(home|away)$/) || s.match(/^f5-(home|away)$/);
+    if (f5res && innings.length >= 5) {
+      const [h, a] = innings.slice(0, 5).reduce((acc, [ih, ia]) => [acc[0] + ih, acc[1] + ia] as [number, number], [0, 0] as [number, number]);
+      if (h === a) return "void";
+      return f5res[1] === "home" ? (h > a ? "won" : "lost") : (a > h ? "won" : "lost");
+    }
+    const f5t = s.match(/^mlb-f5t-([ou])-(\d+(?:\.\d+)?)$/) || s.match(/^f5t-([ou])$/);
+    if (f5t && innings.length >= 5) {
+      const total = innings.slice(0, 5).reduce((acc, [ih, ia]) => acc + ih + ia, 0);
+      const line = f5t[2] != null ? Number(f5t[2]) : parseSelectionLabelLine(sel.label);
+      if (line == null) return null;
+      if (total === line) return "void";
+      return f5t[1] === "o" ? (total > line ? "won" : "lost") : (total < line ? "won" : "lost");
     }
   }
 
@@ -577,6 +653,33 @@ function hasBaseballInnings(extras: unknown): boolean {
   const hs = ex["homeScore"] as Record<string, unknown> | undefined;
   const as = ex["awayScore"] as Record<string, unknown> | undefined;
   return !!hs?.["innings"] && !!as?.["innings"];
+}
+
+function getBaseballInningsFromExtras(extras: unknown): Array<[number, number]> {
+  if (!extras || typeof extras !== "object") return [];
+  const ex = extras as Record<string, unknown>;
+  const nested = ex["baseball"] as Record<string, unknown> | undefined;
+  const direct = Array.isArray(ex["innings"]) ? ex["innings"] : Array.isArray(nested?.["innings"]) ? nested?.["innings"] : null;
+  if (Array.isArray(direct)) {
+    return direct
+      .map((entry) => Array.isArray(entry) && entry.length >= 2 ? [Number(entry[0]), Number(entry[1])] as [number, number] : null)
+      .filter((entry): entry is [number, number] => !!entry && Number.isFinite(entry[0]) && Number.isFinite(entry[1]));
+  }
+  const hs = ex["homeScore"] as Record<string, unknown> | undefined;
+  const as = ex["awayScore"] as Record<string, unknown> | undefined;
+  const inningsH = (hs?.["innings"] as Record<string, unknown> | undefined) ?? undefined;
+  const inningsA = (as?.["innings"] as Record<string, unknown> | undefined) ?? undefined;
+  if (!inningsH || !inningsA) return [];
+  const out: Array<[number, number]> = [];
+  for (let i = 1; i <= 12; i++) {
+    const hInn = inningsH[`inning${i}`] as Record<string, unknown> | undefined;
+    const aInn = inningsA[`inning${i}`] as Record<string, unknown> | undefined;
+    const h = typeof hInn?.["run"] === "number" ? hInn["run"] as number : null;
+    const a = typeof aInn?.["run"] === "number" ? aInn["run"] as number : null;
+    if (h === null || a === null) continue;
+    out.push([h, a]);
+  }
+  return out;
 }
 
 function getTennisSetsFromExtras(extras: unknown): Array<[number, number]> {
