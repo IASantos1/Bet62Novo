@@ -1,4 +1,4 @@
-import { db, betsTable, cashoutStatesTable, usersTable, settlementLogsTable } from "@workspace/db";
+import { db, betsTable, cashoutStatesTable, usersTable, settlementLogsTable, settlementIdempotencyTable } from "@workspace/db";
 import { eq, and, lt, sql, gte, desc } from "drizzle-orm";
 import IORedis from "ioredis";
 import { logger } from "./lib/logger.js";
@@ -66,6 +66,46 @@ async function releaseBetSettlementLock(betId: number | string, owner: string): 
   if (currentOwner === owner) {
     await redis.del(key);
   }
+}
+
+async function ensureSettlementTransitionIdempotency(
+  tx: any,
+  args: {
+    betId: number;
+    trigger: string;
+    oldStatus: string;
+    newStatus: string;
+    matchId?: string;
+    jobId?: string;
+  },
+): Promise<boolean> {
+  const idempotencyKey = [
+    "bet", String(args.betId),
+    "trigger", args.trigger,
+    "old", String(args.oldStatus ?? ""),
+    "new", String(args.newStatus ?? ""),
+    args.matchId ? `match:${String(args.matchId)}` : "",
+    args.jobId ? `job:${String(args.jobId)}` : "",
+  ]
+    .filter(Boolean)
+    .join(":");
+
+  const rows = await tx
+    .insert(settlementIdempotencyTable)
+    .values({
+      idempotencyKey,
+      betId: args.betId,
+      trigger: args.trigger,
+      oldStatus: args.oldStatus,
+      newStatus: args.newStatus,
+      matchId: args.matchId,
+      jobId: args.jobId,
+      engineVersion: "2025.06-v4",
+    })
+    .onConflictDoNothing()
+    .returning({ idempotencyKey: settlementIdempotencyTable.idempotencyKey });
+
+  return rows.length > 0;
 }
 
 function buildSettlementLogKey(args: {
@@ -1710,6 +1750,15 @@ export async function autoSettlePendingBets(opts?: { matchIds?: string[] }): Pro
           });
 
           await db.transaction(async (tx) => {
+            const canProceed = await ensureSettlementTransitionIdempotency(tx, {
+              betId: bet.id,
+              trigger: "live_losing_leg",
+              oldStatus: "pending",
+              newStatus: "lost",
+              matchId: bet.matchId,
+            });
+            if (!canProceed) return;
+
             const rows = await tx
               .update(betsTable)
               .set({ status: "lost", selections: updatedSelsLost })
@@ -1762,6 +1811,15 @@ export async function autoSettlePendingBets(opts?: { matchIds?: string[] }): Pro
               const oddsStr = Number(effectiveOdds.toFixed(2)).toFixed(2);
 
               await db.transaction(async (tx) => {
+                const canProceed = await ensureSettlementTransitionIdempotency(tx, {
+                  betId: bet.id,
+                  trigger: "live_single_win",
+                  oldStatus: "pending",
+                  newStatus: "won",
+                  matchId: bet.matchId,
+                });
+                if (!canProceed) return;
+
                 const rows = await tx
                   .update(betsTable)
                   .set({ status: "won", selections: [updatedSel], potentialWin: payoutStr, totalOdds: oddsStr })
@@ -1803,6 +1861,15 @@ export async function autoSettlePendingBets(opts?: { matchIds?: string[] }): Pro
             }
 
             await db.transaction(async (tx) => {
+              const canProceed = await ensureSettlementTransitionIdempotency(tx, {
+                betId: bet.id,
+                trigger: "live_single_lost",
+                oldStatus: "pending",
+                newStatus: "lost",
+                matchId: bet.matchId,
+              });
+              if (!canProceed) return;
+
               const rows = await tx
                 .update(betsTable)
                 .set({ status: "lost", selections: [updatedSel] })
@@ -1884,6 +1951,15 @@ export async function autoSettlePendingBets(opts?: { matchIds?: string[] }): Pro
             };
           });
           await db.transaction(async (tx: any) => {
+            const canProceed = await ensureSettlementTransitionIdempotency(tx, {
+              betId: bet.id,
+              trigger: "early_lost_detected",
+              oldStatus: "pending",
+              newStatus: "lost",
+              matchId: bet.matchId,
+            });
+            if (!canProceed) return;
+
             const rows = await tx
               .update(betsTable)
               .set({ status: "lost", selections: updatedSelsLost })
@@ -1920,6 +1996,15 @@ export async function autoSettlePendingBets(opts?: { matchIds?: string[] }): Pro
 
         if (outcomes.every(o => o === "void")) {
           await db.transaction(async (tx: any) => {
+            const canProceed = await ensureSettlementTransitionIdempotency(tx, {
+              betId: bet.id,
+              trigger: "all_void_refund",
+              oldStatus: "pending",
+              newStatus: "voided",
+              matchId: bet.matchId,
+            });
+            if (!canProceed) return;
+
             const rows = await tx
               .update(betsTable)
               .set({ status: "voided" })
@@ -1990,6 +2075,15 @@ export async function autoSettlePendingBets(opts?: { matchIds?: string[] }): Pro
         });
 
         await db.transaction(async (tx: any) => {
+          const canProceed = await ensureSettlementTransitionIdempotency(tx, {
+            betId: bet.id,
+            trigger: "won_final",
+            oldStatus: "pending",
+            newStatus: newStatus,
+            matchId: bet.matchId,
+          });
+          if (!canProceed) return;
+
           // Optimistic lock: only update if still pending
           const rows = await tx
             .update(betsTable)
@@ -2167,6 +2261,16 @@ export async function regradeSettledBetsForMatch(matchId: string, jobId: string)
         if (!statusChanged && !payoutChanged && !selectionsChanged) continue;
 
         await db.transaction(async (tx) => {
+          const canProceed = await ensureSettlementTransitionIdempotency(tx, {
+            betId: bet.id,
+            trigger: "regrade_delta",
+            oldStatus,
+            newStatus,
+            matchId: mId,
+            jobId: jId,
+          });
+          if (!canProceed) return;
+
           const set: Partial<Record<keyof typeof betsTable.$inferSelect, unknown>> = {
             selections: updatedSelections,
           };
@@ -2353,6 +2457,15 @@ async function expireStalePendingBets(): Promise<void> {
         if (hasResult) continue;
 
         await db.transaction(async (tx: any) => {
+          const canProceed = await ensureSettlementTransitionIdempotency(tx, {
+            betId: bet.id,
+            trigger: "stale_refund",
+            oldStatus: "pending",
+            newStatus: "voided",
+            matchId: bet.matchId,
+          });
+          if (!canProceed) return;
+
           const rows = await tx
             .update(betsTable)
             .set({ status: "voided" })
