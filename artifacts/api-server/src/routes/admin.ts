@@ -1006,6 +1006,41 @@ router.get("/settlement-pending-reasons", adminMiddleware, async (req: AdminRequ
   }
 });
 
+router.get("/settlement/pending-reasons", adminMiddleware, async (_req: AdminRequest, res: Response): Promise<void> => {
+  try {
+    const pendingBets = await db
+      .select({
+        selections: betsTable.selections,
+      })
+      .from(betsTable)
+      .where(eq(betsTable.status, "pending"))
+      .limit(5000);
+
+    type PendingSelection = {
+      outcome?: string | null;
+      pendingReason?: string | null;
+    };
+
+    const counts: Record<string, number> = {};
+
+    for (const bet of pendingBets) {
+      const selections = Array.isArray(bet.selections) ? bet.selections as PendingSelection[] : [];
+      for (const sel of selections) {
+        const outcome = typeof sel?.outcome === "string" ? sel.outcome : null;
+        if (outcome && outcome !== "pending") continue;
+
+        const reason = String(sel?.pendingReason ?? "missing_pending_reason").trim() || "missing_pending_reason";
+        counts[reason] = (counts[reason] ?? 0) + 1;
+      }
+    }
+
+    res.json(counts);
+  } catch (err) {
+    logger.error({ err }, "Admin settlement/pending-reasons error");
+    res.status(500).json({ error: "Erro ao carregar resumo de pendencias do settlement" });
+  }
+});
+
 router.get("/settlement-pending-selections", adminMiddleware, async (req: AdminRequest, res: Response): Promise<void> => {
   try {
     const reasonFilter = String((req as unknown as Request).query["reason"] ?? "").trim();

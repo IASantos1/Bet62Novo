@@ -55,11 +55,13 @@ const settlementStats: Record<string, {
   half_lost: number;
   pending: number;
   no_result: number;
+  market_pending: number;
   market_not_mapped: number;
   incomplete_data: number;
   status_pending: number;
   invalid_context: number;
   already_settled: number;
+  sport_not_identified: number;
 }> = {};
 
 export function resolveSelectionOutcome(
@@ -117,7 +119,7 @@ export function resolveSelectionOutcome(
 
     const resolution = resolveLiveSelectionSettlement(sel, liveScore);
     const reason = determineReason(resolution, normalizedKey, true, liveScore.status);
-    const reasonDetail = getReasonDetail(reason, liveScore.status, normalizedKey, resolution.pendingReason);
+    const reasonDetail = getReasonDetail(reason, liveScore.status, normalizedKey, resolution.pendingReason ?? undefined);
     const { updatedSel, auditInfo } = buildSettlementOutput(sel, result, resolution, true, {
       beforeOutcome,
       normalizedKey,
@@ -191,10 +193,14 @@ export function resolveSelectionOutcome(
     sel,
     { home: finalContext.homeScore, away: finalContext.awayScore },
     finalContext.ht,
-    finalContext.extra,
+    {
+      ...finalContext.extra,
+      providerSport: detectedSport,
+      winner: finalContext.winner,
+    },
   );
   const reason = determineReason(resolution, normalizedKey, false, finalContext.status);
-  const reasonDetail = getReasonDetail(reason, finalContext.status, normalizedKey, resolution.pendingReason);
+  const reasonDetail = getReasonDetail(reason, finalContext.status, normalizedKey, resolution.pendingReason ?? undefined);
   const { updatedSel, auditInfo } = buildSettlementOutput(sel, result, resolution, false, {
     beforeOutcome,
     normalizedKey,
@@ -292,11 +298,13 @@ function buildUpdatedSelection(
   const now = new Date().toISOString();
   if (isLive) {
     const liveScore = buildLiveSettlementScore(result as LiveResult);
+    const settlementNote = resolution.outcome !== null ? (resolution.settlementNote ?? null) : undefined;
     return {
       ...sel,
       ...(liveScore ? { finalScore: { home: liveScore.home, away: liveScore.away } } : {}),
       ...(resolution.outcome !== null ? { outcome: resolution.outcome } : {}),
-      ...(resolution.pendingReason ? { pendingReason: resolution.pendingReason } : {}),
+      ...(resolution.outcome !== null ? { pendingReason: null } : resolution.pendingReason ? { pendingReason: resolution.pendingReason } : {}),
+      ...(settlementNote !== undefined ? { settlementNote } : {}),
       lastSettledAt: now,
       settlementRuleVersion: ENGINE_VERSION,
     };
@@ -308,6 +316,11 @@ function buildUpdatedSelection(
       ? { htHome: finished.htHome, htAway: finished.htAway }
       : undefined;
 
+  const settlementNote =
+    resolution.outcome !== null
+      ? (resolution.settlementNote ?? getSelectionSettlementNote((finished as any)?.status, resolution.outcome) ?? null)
+      : undefined;
+
   return {
     ...sel,
     ...(typeof finished.home === "number" && typeof finished.away === "number"
@@ -315,8 +328,8 @@ function buildUpdatedSelection(
       : {}),
     ...(ht ? { htScore: ht } : {}),
     ...(resolution.outcome !== null ? { outcome: resolution.outcome } : {}),
-    ...(resolution.pendingReason ? { pendingReason: resolution.pendingReason } : {}),
-    settlementNote: getSelectionSettlementNote((finished as any)?.status, resolution.outcome),
+    ...(resolution.outcome !== null ? { pendingReason: null } : resolution.pendingReason ? { pendingReason: resolution.pendingReason } : {}),
+    ...(settlementNote !== undefined ? { settlementNote } : {}),
     lastSettledAt: now,
     settlementRuleVersion: ENGINE_VERSION,
   };
@@ -406,11 +419,13 @@ function updateSettlementStats(
       half_lost: 0,
       pending: 0,
       no_result: 0,
+      market_pending: 0,
       market_not_mapped: 0,
       incomplete_data: 0,
       status_pending: 0,
       invalid_context: 0,
       already_settled: 0,
+      sport_not_identified: 0,
     };
   }
 
@@ -466,11 +481,9 @@ function determineReason(
 ): SettlementReason {
   if (resolution.outcome !== null) return "market_evaluated";
   if (resolution.pendingReason === "status_delayed_window") return "status_pending";
-  if (normalizedKey === String(normalizedKey ?? "").trim()) {
-    if (!resolution.pendingReason && !isLive && isMatchStillPending(status)) return "status_pending";
-    return "market_pending";
-  }
-  return "market_not_mapped";
+  if (!resolution.pendingReason && !isLive && isMatchStillPending(status)) return "status_pending";
+  if (!normalizedKey) return "market_not_mapped";
+  return "market_pending";
 }
 
 function getReasonDetail(
@@ -504,6 +517,7 @@ function buildFinalContext(result: FinishedResult): {
   awayScore: number;
   ht?: HTScore;
   status?: string;
+  winner: "home" | "away" | null;
   extra: {
     status?: string;
     cornersTotal?: number;
@@ -526,6 +540,12 @@ function buildFinalContext(result: FinishedResult): {
     awayScore,
     ht,
     status,
+    winner:
+      homeScore > awayScore
+        ? "home"
+        : awayScore > homeScore
+          ? "away"
+          : null,
     extra: {
       status,
       cornersTotal: (result as any)?.cornersTotal,
