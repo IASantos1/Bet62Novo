@@ -18,6 +18,7 @@ export type SelectionRecord = {
   finalScore?: { home: number; away: number };
   htScore?: { htHome: number; htAway: number };
   outcome?: "won" | "lost" | "void" | "half_won" | "half_lost" | null;
+  pendingReason?: string;
 };
 
 type FTScore = { home: number; away: number };
@@ -25,6 +26,10 @@ type HTScore = { htHome: number; htAway: number };
 type FinishedResult = (typeof finishedMatchResults extends Map<string, infer V> ? V : never);
 type LiveResult = (typeof liveMatchState extends Map<string, infer V> ? V : never);
 type SettlementOutcome = "won" | "lost" | "void" | "half_won" | "half_lost" | null;
+type SelectionSettlementResolution = {
+  outcome: SettlementOutcome;
+  pendingReason?: string;
+};
 
 function buildSettlementLogKey(args: {
   betId: number;
@@ -203,6 +208,158 @@ function computeResolvedTicketOdds(
     const multiplier = settlementOutcomeMultiplier(outcomes[idx] ?? null, sel.odd);
     return acc * (multiplier ?? 1);
   }, 1);
+}
+
+function inferSelectionSport(selection: string): "football" | "tennis" | "basketball" | "baseball" | "hockey" {
+  const s = normalizeSettlementSelectionKey(selection);
+  if (
+    s.startsWith("set") ||
+    s.startsWith("vs") ||
+    s.startsWith("es-") ||
+    s.startsWith("sh") ||
+    s.startsWith("gh-") ||
+    s.startsWith("ses-") ||
+    s.includes("sets")
+  ) return "tennis";
+  if (s.startsWith("b-") || /^q[1234]-/.test(s) || s === "h1-home" || s === "h1-away") return "basketball";
+  if (/^p[123]-/.test(s) || /^per[123]-/.test(s) || /^p[123]t-/.test(s) || s.startsWith("sog-") || s === "pl-home" || s === "pl-away") return "hockey";
+  if (s.startsWith("mlb-") || s.startsWith("f5-") || s.startsWith("f5t-") || s.startsWith("rl-")) return "baseball";
+  return "football";
+}
+
+function scoreOutcomeForSelLastResort(
+  sel: { selection: string; label?: unknown },
+  ft: FTScore,
+  ht?: HTScore,
+  extra?: { status?: string; cornersTotal?: number; cardsTotal?: number; firstGoal?: "home" | "away" | "none"; extras?: unknown; finishedAt?: number },
+): SettlementOutcome {
+  const s = normalizeSettlementSelectionKey(sel.selection);
+  const sport = inferSelectionSport(s);
+
+  if (sport === "tennis") {
+    if (/^es-(h20|h21|a02|a12)$/.test(s)) {
+      const score = `${ft.home}-${ft.away}`;
+      const want =
+        s === "es-h20" ? "2-0" :
+        s === "es-h21" ? "2-1" :
+        s === "es-a02" ? "0-2" :
+        "1-2";
+      return score === want ? "won" : "lost";
+    }
+    if (/^([ou])sets(35|25)?$/.test(s)) {
+      const m = s.match(/^([ou])sets(35|25)?$/)!;
+      const dir = m[1]!;
+      const line = (m[2] ?? "") === "35" ? 3.5 : 2.5;
+      const totalSets = ft.home + ft.away;
+      if (totalSets === line) return "void";
+      return dir === "o" ? (totalSets > line ? "won" : "lost") : (totalSets < line ? "won" : "lost");
+    }
+  }
+
+  if (sport === "football") {
+    if ((s === "home" || s === "away" || s === "draw") && Number.isFinite(ft.home) && Number.isFinite(ft.away)) {
+      if (s === "home") return ft.home > ft.away ? "won" : "lost";
+      if (s === "away") return ft.away > ft.home ? "won" : "lost";
+      return ft.home === ft.away ? "won" : "lost";
+    }
+    if (/^[ou][\d.]+$/.test(s)) {
+      const line = decodeCompactLine(s.slice(1));
+      const total = ft.home + ft.away;
+      if (!Number.isFinite(line)) return null;
+      if (total === line) return "void";
+      return s[0] === "o" ? (total > line ? "won" : "lost") : (total < line ? "won" : "lost");
+    }
+    if (s === "bts-yes") return ft.home > 0 && ft.away > 0 ? "won" : "lost";
+    if (s === "bts-no") return ft.home === 0 || ft.away === 0 ? "won" : "lost";
+  }
+
+  if (sport === "basketball") {
+    if (/^b-pts-([ou])-(\d+(?:\.\d+)?)$/.test(s)) {
+      const m = s.match(/^b-pts-([ou])-(\d+(?:\.\d+)?)$/)!;
+      const line = Number(m[2]!);
+      const total = ft.home + ft.away;
+      if (total === line) return "void";
+      return m[1] === "o" ? (total > line ? "won" : "lost") : (total < line ? "won" : "lost");
+    }
+  }
+
+  if (sport === "baseball") {
+    if (/^mlb-tot-([ou])-(\d+(?:\.\d+)?)$/.test(s) || /^mlb-([ou])(\d+(?:\.\d+)?)$/.test(s)) {
+      const m = s.match(/^mlb-tot-([ou])-(\d+(?:\.\d+)?)$/) || s.match(/^mlb-([ou])(\d+(?:\.\d+)?)$/);
+      const line = Number(m?.[2] ?? Number.NaN);
+      const total = ft.home + ft.away;
+      if (!Number.isFinite(line)) return null;
+      if (total === line) return "void";
+      return m?.[1] === "o" ? (total > line ? "won" : "lost") : (total < line ? "won" : "lost");
+    }
+    if (s === "winner" || s === "home" || s === "away") {
+      if (s === "home") return ft.home > ft.away ? "won" : "lost";
+      return ft.away > ft.home ? "won" : "lost";
+    }
+  }
+
+  return null;
+}
+
+function describePendingSettlementReason(
+  sel: { selection: string; label?: unknown },
+  ft: FTScore,
+  ht?: HTScore,
+  extra?: { status?: string; cornersTotal?: number; cardsTotal?: number; firstGoal?: "home" | "away" | "none"; extras?: unknown; finishedAt?: number },
+): string {
+  const statusOutcome = resolveSettlementStatusOutcome(extra?.status, extra?.finishedAt);
+  if (statusOutcome === "pending") return "status_delayed_window";
+
+  const s = normalizeSettlementSelectionKey(sel.selection);
+  const sport = inferSelectionSport(s);
+
+  if (/^[ou]c\d+$/.test(s) && extra?.cornersTotal == null) return "missing_corners_total";
+  if (/^[ou]card\d+$/.test(s) && extra?.cardsTotal == null) return "missing_cards_total";
+  if ((s === "fg-home" || s === "fg-away" || s === "fg-none") && !extra?.firstGoal) return "missing_first_goal_data";
+  if ((s.startsWith("ht-") || s.startsWith("htcs-") || s.startsWith("b1h-") || s.startsWith("wbh-") || s.startsWith("hsf-") || s.startsWith("htft-") || s.startsWith("2h-") || s.startsWith("h2cs-")) && (!ht || ht.htHome == null || ht.htAway == null)) {
+    return "missing_ht_score";
+  }
+  if (sport === "tennis") {
+    const sets = getTennisSetsFromExtras(extra?.extras);
+    if (sets.length === 0 && !(Number.isFinite(ft.home) && Number.isFinite(ft.away))) return "missing_tennis_sets";
+    if ((/^set[123]-/.test(s) || /^vs[123][ha]$/.test(s) || /^ses-/.test(s) || /^sc[123]-/.test(s)) && sets.length === 0) return "missing_tennis_set_breakdown";
+  }
+  if (sport === "basketball") {
+    const ex = (extra?.extras ?? {}) as Record<string, unknown>;
+    const hasPeriods = parsePeriodsFromScore(ex["homeScore"], 4).length > 0 || parsePeriodsFromScore(ex["awayScore"], 4).length > 0;
+    if ((/^q[1234]-/.test(s) || s === "h1-home" || s === "h1-away" || /^b-h1-pts-/.test(s)) && !hasPeriods) return "missing_basketball_periods";
+  }
+  if (sport === "hockey") {
+    const ex = (extra?.extras ?? {}) as Record<string, unknown>;
+    const hasPeriods = parsePeriodsFromScore(ex["homeScore"], 3).length > 0 || parsePeriodsFromScore(ex["awayScore"], 3).length > 0;
+    if ((/^p[123]-/.test(s) || /^per[123]-/.test(s) || /^p[123]t-/.test(s)) && !hasPeriods) return "missing_hockey_periods";
+  }
+  if (sport === "baseball" && (/^f5-/.test(s) || /^f5t-/.test(s) || /^mlb-f5-/.test(s) || /^mlb-f5t-/.test(s))) {
+    const ex = (extra?.extras ?? {}) as Record<string, unknown>;
+    const hs = ex["homeScore"] as Record<string, unknown> | undefined;
+    const as = ex["awayScore"] as Record<string, unknown> | undefined;
+    if (!hs?.["innings"] || !as?.["innings"]) return "missing_baseball_innings";
+  }
+
+  return "market_known_but_unresolved";
+}
+
+function resolveSelectionSettlement(
+  sel: { selection: string; label?: unknown },
+  ft: FTScore,
+  ht?: HTScore,
+  extra?: { status?: string; cornersTotal?: number; cardsTotal?: number; firstGoal?: "home" | "away" | "none"; extras?: unknown; finishedAt?: number },
+): SelectionSettlementResolution {
+  const primary = scoreOutcomeForSel(sel, ft, ht, extra);
+  if (primary !== null) return { outcome: primary };
+
+  const fallback = scoreOutcomeForSelLastResort(sel, ft, ht, extra);
+  if (fallback !== null) return { outcome: fallback };
+
+  return {
+    outcome: null,
+    pendingReason: describePendingSettlementReason(sel, ft, ht, extra),
+  };
 }
 
 function normalizeSettlementSelectionKey(selection: string): string {
@@ -1378,14 +1535,15 @@ export async function autoSettlePendingBets(opts?: { matchIds?: string[] }): Pro
               ? { htHome: result.htHome, htAway: result.htAway }
               : undefined;
 
-          outcomes.push(scoreOutcomeForSel(sel, result, ht, {
+          const resolution = resolveSelectionSettlement(sel, result, ht, {
             status: (result as any).status,
             cornersTotal: result.cornersTotal,
             cardsTotal: result.cardsTotal,
             firstGoal: result.firstGoal,
             extras: result.extras,
             finishedAt: result.finishedAt,
-          }));
+          });
+          outcomes.push(resolution.outcome);
         }
 
         // ── Early loss: if any leg is definitively lost, settle immediately ──
@@ -1396,18 +1554,20 @@ export async function autoSettlePendingBets(opts?: { matchIds?: string[] }): Pro
             const ht = typeof r.htHome === "number" && typeof r.htAway === "number"
               ? { htHome: r.htHome, htAway: r.htAway }
               : undefined;
+            const resolution = resolveSelectionSettlement(sel, { home: r.home, away: r.away }, ht, {
+              status: (r as any).status,
+              cornersTotal: r.cornersTotal,
+              cardsTotal: r.cardsTotal,
+              firstGoal: r.firstGoal,
+              extras: r.extras,
+              finishedAt: r.finishedAt,
+            });
             return {
               ...sel,
               finalScore: { home: r.home, away: r.away },
               htScore: ht,
-              outcome: scoreOutcomeForSel(sel, { home: r.home, away: r.away }, ht, {
-                status: (r as any).status,
-                cornersTotal: r.cornersTotal,
-                cardsTotal: r.cardsTotal,
-                firstGoal: r.firstGoal,
-                extras: r.extras,
-                finishedAt: r.finishedAt,
-              }),
+              outcome: resolution.outcome,
+              pendingReason: resolution.pendingReason,
             };
           });
           await db.transaction(async (tx: any) => {
@@ -1499,18 +1659,20 @@ export async function autoSettlePendingBets(opts?: { matchIds?: string[] }): Pro
           const ht = typeof r.htHome === "number" && typeof r.htAway === "number"
             ? { htHome: r.htHome, htAway: r.htAway }
             : undefined;
+          const resolution = resolveSelectionSettlement(sel, { home: r.home, away: r.away }, ht, {
+            status: (r as any).status,
+            cornersTotal: r.cornersTotal,
+            cardsTotal: r.cardsTotal,
+            firstGoal: r.firstGoal,
+            extras: r.extras,
+            finishedAt: r.finishedAt,
+          });
           return {
             ...sel,
             finalScore: { home: r.home, away: r.away },
             htScore: ht,
-            outcome: scoreOutcomeForSel(sel, { home: r.home, away: r.away }, ht, {
-              status: (r as any).status,
-              cornersTotal: r.cornersTotal,
-              cardsTotal: r.cardsTotal,
-              firstGoal: r.firstGoal,
-              extras: r.extras,
-              finishedAt: r.finishedAt,
-            }),
+            outcome: resolution.outcome,
+            pendingReason: resolution.pendingReason,
           };
         });
 
@@ -1627,7 +1789,7 @@ export async function regradeSettledBetsForMatch(matchId: string, jobId: string)
               ? { htHome: result.htHome, htAway: result.htAway }
               : undefined;
 
-          const outcome = scoreOutcomeForSel(sel, result, ht, {
+          const resolution = resolveSelectionSettlement(sel, result, ht, {
             status: (result as any).status,
             cornersTotal: result.cornersTotal,
             cardsTotal: result.cardsTotal,
@@ -1635,13 +1797,14 @@ export async function regradeSettledBetsForMatch(matchId: string, jobId: string)
             extras: result.extras,
             finishedAt: result.finishedAt,
           });
-          outcomes.push(outcome);
+          outcomes.push(resolution.outcome);
 
           return {
             ...sel,
             finalScore: { home: result.home, away: result.away },
             htScore: ht,
-            outcome,
+            outcome: resolution.outcome,
+            pendingReason: resolution.pendingReason,
           };
         });
 
@@ -1788,7 +1951,7 @@ async function hydrateSettledBetSelections(): Promise<void> {
       const isSingle = selections.length === 1;
       let changed = false;
 
-      const next = selections.map((sel) => {
+        const next = selections.map((sel) => {
         const r = findResult(sel, bet.matchId, isSingle);
         if (!r) return sel;
 
@@ -1801,20 +1964,22 @@ async function hydrateSettledBetSelections(): Promise<void> {
           : undefined;
 
         changed = true;
-        return {
+          const resolution = resolveSelectionSettlement(sel, { home: r.home, away: r.away }, ht, {
+            status: (r as any).status,
+            cornersTotal: r.cornersTotal,
+            cardsTotal: r.cardsTotal,
+            firstGoal: r.firstGoal,
+            extras: r.extras,
+            finishedAt: r.finishedAt,
+          });
+          return {
           ...sel,
           finalScore: needsScore ? { home: r.home, away: r.away } : sel.finalScore,
           htScore: sel.htScore ?? ht,
           outcome: needsOutcome
-            ? scoreOutcomeForSel(sel, { home: r.home, away: r.away }, ht, {
-                status: (r as any).status,
-                cornersTotal: r.cornersTotal,
-                cardsTotal: r.cardsTotal,
-                firstGoal: r.firstGoal,
-                extras: r.extras,
-                finishedAt: r.finishedAt,
-              })
+            ? resolution.outcome
             : sel.outcome,
+            pendingReason: resolution.pendingReason,
         };
       });
 
