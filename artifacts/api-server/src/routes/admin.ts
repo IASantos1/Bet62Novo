@@ -536,6 +536,7 @@ router.put("/bets/:id/status", adminMiddleware, async (req: AdminRequest, res: R
     if (!bet) { res.status(404).json({ error: "Aposta não encontrada" }); return; }
 
     const oldStatus = bet.status;
+    let changed = false;
 
     await db.transaction(async (tx) => {
       // Optimistic lock: only update if status actually changed
@@ -546,6 +547,7 @@ router.put("/bets/:id/status", adminMiddleware, async (req: AdminRequest, res: R
         .returning({ id: betsTable.id });
 
       if (rows.length === 0) return; // already at desired status — no-op
+      changed = true;
 
       // Credit balance atomically when marking won (only from non-won state)
       if (status === "won" && oldStatus !== "won") {
@@ -570,18 +572,23 @@ router.put("/bets/:id/status", adminMiddleware, async (req: AdminRequest, res: R
           refId: String(betId),
         });
       }
-
-      // Audit log
-      await tx.insert(settlementLogsTable).values({
-        settlementKey: `admin:bet:${betId}:old:${oldStatus}:new:${status}:event:manual_settlement`,
-        betId: bet.id,
-        userId: bet.userId,
-        oldStatus,
-        newStatus: status,
-        payout: status === "won" ? bet.potentialWin : status === "voided" ? bet.stake : "0.00",
-        message: `Manual settlement by admin`,
-      }).onConflictDoNothing();
     });
+
+    if (changed) {
+      try {
+        await db.insert(settlementLogsTable).values({
+          settlementKey: `admin:bet:${betId}:old:${oldStatus}:new:${status}:event:manual_settlement`,
+          betId: bet.id,
+          userId: bet.userId,
+          oldStatus,
+          newStatus: status,
+          payout: status === "won" ? bet.potentialWin : status === "voided" ? bet.stake : "0.00",
+          message: "Manual settlement by admin",
+        }).onConflictDoNothing();
+      } catch (auditErr) {
+        logger.error({ err: auditErr, betId, oldStatus, status }, "Admin bet status audit log failed");
+      }
+    }
 
     res.json({ id: betId, status });
   } catch (err) {
