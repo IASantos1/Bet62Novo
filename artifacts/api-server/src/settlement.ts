@@ -273,6 +273,14 @@ function scoreOutcomeForSelLastResort(
       if (s === "ht-draw") return htHome === htAway ? "won" : "lost";
       if (s === "b1h-yes") return htHome > 0 && htAway > 0 ? "won" : "lost";
       if (s === "b1h-no") return htHome === 0 || htAway === 0 ? "won" : "lost";
+      if (s.startsWith("htcs-")) {
+        const body = s.slice(5);
+        if (body === "Outro") {
+          const common = ["0-0", "1-0", "0-1", "1-1", "2-0", "0-2", "2-1", "1-2"];
+          return !common.includes(`${htHome}-${htAway}`) ? "won" : "lost";
+        }
+        return `${htHome}-${htAway}` === body ? "won" : "lost";
+      }
       if (s === "2h-home") return h2Home > h2Away ? "won" : "lost";
       if (s === "2h-away") return h2Away > h2Home ? "won" : "lost";
       if (s === "2h-draw") return h2Home === h2Away ? "won" : "lost";
@@ -282,6 +290,21 @@ function scoreOutcomeForSelLastResort(
         const total2h = h2Home + h2Away;
         if (total2h === line) return "void";
         return h2Total[1] === "o" ? (total2h > line ? "won" : "lost") : (total2h < line ? "won" : "lost");
+      }
+      if (s.startsWith("h2cs-")) {
+        const body = s.slice(5);
+        return `${h2Home}-${h2Away}` === body ? "won" : "lost";
+      }
+      if (s === "wbh-h") return htHome > htAway && h2Home > h2Away ? "won" : "lost";
+      if (s === "wbh-a") return htAway > htHome && h2Away > h2Home ? "won" : "lost";
+      if (s === "hsf-1") return (htHome + htAway) > (h2Home + h2Away) ? "won" : "lost";
+      if (s === "hsf-2") return (h2Home + h2Away) > (htHome + htAway) ? "won" : "lost";
+      if (s === "hsf-e") return (htHome + htAway) === (h2Home + h2Away) ? "won" : "lost";
+      const htft = s.match(/^htft-([hda])([hda])$/);
+      if (htft) {
+        const htPick = htft[1] === "h" ? (htHome > htAway) : htft[1] === "a" ? (htAway > htHome) : (htHome === htAway);
+        const ftPick = htft[2] === "h" ? (ft.home > ft.away) : htft[2] === "a" ? (ft.away > ft.home) : (ft.home === ft.away);
+        return htPick && ftPick ? "won" : "lost";
       }
     }
     if (/^[ou][\d.]+$/.test(s)) {
