@@ -7,6 +7,7 @@ import { adminMiddleware, type AdminRequest } from "../middlewares/adminAuth.js"
 import { rateLimit } from "../middlewares/rateLimit.js";
 import { logger } from "../lib/logger.js";
 import { applyBalanceDelta } from "../lib/ledger.js";
+import { getSettlementFallbackMetrics } from "../lib/settlementHelpers.js";
 import fs from "fs";
 import path from "path";
 
@@ -1038,6 +1039,15 @@ router.get("/settlement/pending-reasons", adminMiddleware, async (_req: AdminReq
   } catch (err) {
     logger.error({ err }, "Admin settlement/pending-reasons error");
     res.status(500).json({ error: "Erro ao carregar resumo de pendencias do settlement" });
+  }
+});
+
+router.get("/settlement/fallback-metrics", adminMiddleware, async (_req: AdminRequest, res: Response): Promise<void> => {
+  try {
+    res.json(getSettlementFallbackMetrics());
+  } catch (err) {
+    logger.error({ err }, "Admin settlement/fallback-metrics error");
+    res.status(500).json({ error: "Erro ao carregar metricas de fallback do settlement" });
   }
 });
 
