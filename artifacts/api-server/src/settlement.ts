@@ -434,11 +434,13 @@ function scoreOutcomeForSelLastResort(
     if (q) {
       const qScore = quarters[Number(q[1]) - 1] ?? null;
       if (!qScore) return null;
+      if (qScore[0] === qScore[1]) return "void";
       return q[2] === "home" ? (qScore[0] > qScore[1] ? "won" : "lost") : (qScore[1] > qScore[0] ? "won" : "lost");
     }
     if ((s === "h1-home" || s === "h1-away") && quarters.length >= 2) {
       const h1Home = (quarters[0]?.[0] ?? 0) + (quarters[1]?.[0] ?? 0);
       const h1Away = (quarters[0]?.[1] ?? 0) + (quarters[1]?.[1] ?? 0);
+      if (h1Home === h1Away) return "void";
       return s === "h1-home" ? (h1Home > h1Away ? "won" : "lost") : (h1Away > h1Home ? "won" : "lost");
     }
     const h1Total = s.match(/^b-h1-pts-([ou])-(\d+(?:\.\d+)?)$/);
