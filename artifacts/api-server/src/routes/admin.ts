@@ -1051,6 +1051,115 @@ router.get("/settlement/fallback-metrics", adminMiddleware, async (_req: AdminRe
   }
 });
 
+router.get("/settlement/overview", adminMiddleware, async (_req: AdminRequest, res: Response): Promise<void> => {
+  try {
+    const pendingBets = await db
+      .select({
+        selections: betsTable.selections,
+      })
+      .from(betsTable)
+      .where(eq(betsTable.status, "pending"))
+      .limit(5000);
+
+    type PendingSelection = {
+      outcome?: string | null;
+      pendingReason?: string | null;
+    };
+
+    const pendingReasons: Record<string, number> = {};
+    for (const bet of pendingBets) {
+      const selections = Array.isArray(bet.selections) ? bet.selections as PendingSelection[] : [];
+      for (const sel of selections) {
+        const outcome = typeof sel?.outcome === "string" ? sel.outcome : null;
+        if (outcome && outcome !== "pending") continue;
+        const reason = String(sel?.pendingReason ?? "missing_pending_reason").trim() || "missing_pending_reason";
+        pendingReasons[reason] = (pendingReasons[reason] ?? 0) + 1;
+      }
+    }
+
+    const [overall] = (await db.execute(sql`
+      WITH first_settlement AS (
+        SELECT DISTINCT ON (sl.bet_id)
+          sl.bet_id,
+          sl.new_status,
+          sl.created_at AS settled_at
+        FROM settlement_logs sl
+        WHERE sl.old_status = 'pending'
+        ORDER BY sl.bet_id, sl.created_at ASC
+      )
+      SELECT
+        COUNT(*)::int AS count,
+        AVG(EXTRACT(EPOCH FROM (fs.settled_at - b.created_at))) AS avg_seconds,
+        PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY EXTRACT(EPOCH FROM (fs.settled_at - b.created_at))) AS p50_seconds,
+        PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY EXTRACT(EPOCH FROM (fs.settled_at - b.created_at))) AS p95_seconds,
+        MIN(EXTRACT(EPOCH FROM (fs.settled_at - b.created_at))) AS min_seconds,
+        MAX(EXTRACT(EPOCH FROM (fs.settled_at - b.created_at))) AS max_seconds
+      FROM first_settlement fs
+      JOIN bets b ON b.id = fs.bet_id
+      LEFT JOIN match_results mr ON mr.match_id = b.match_id
+    `)).rows as Array<Record<string, unknown>>;
+
+    const bySport = (await db.execute(sql`
+      WITH first_settlement AS (
+        SELECT DISTINCT ON (sl.bet_id)
+          sl.bet_id,
+          sl.new_status,
+          sl.created_at AS settled_at
+        FROM settlement_logs sl
+        WHERE sl.old_status = 'pending'
+        ORDER BY sl.bet_id, sl.created_at ASC
+      )
+      SELECT
+        COALESCE(mr.sport, 'unknown') AS sport,
+        COUNT(*)::int AS count,
+        AVG(EXTRACT(EPOCH FROM (fs.settled_at - b.created_at))) AS avg_seconds,
+        PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY EXTRACT(EPOCH FROM (fs.settled_at - b.created_at))) AS p50_seconds,
+        PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY EXTRACT(EPOCH FROM (fs.settled_at - b.created_at))) AS p95_seconds
+      FROM first_settlement fs
+      JOIN bets b ON b.id = fs.bet_id
+      LEFT JOIN match_results mr ON mr.match_id = b.match_id
+      GROUP BY sport
+      ORDER BY count DESC
+    `)).rows as Array<Record<string, unknown>>;
+
+    const byStatus = (await db.execute(sql`
+      WITH first_settlement AS (
+        SELECT DISTINCT ON (sl.bet_id)
+          sl.bet_id,
+          sl.new_status,
+          sl.created_at AS settled_at
+        FROM settlement_logs sl
+        WHERE sl.old_status = 'pending'
+        ORDER BY sl.bet_id, sl.created_at ASC
+      )
+      SELECT
+        fs.new_status AS status,
+        COUNT(*)::int AS count,
+        AVG(EXTRACT(EPOCH FROM (fs.settled_at - b.created_at))) AS avg_seconds,
+        PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY EXTRACT(EPOCH FROM (fs.settled_at - b.created_at))) AS p50_seconds,
+        PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY EXTRACT(EPOCH FROM (fs.settled_at - b.created_at))) AS p95_seconds
+      FROM first_settlement fs
+      JOIN bets b ON b.id = fs.bet_id
+      LEFT JOIN match_results mr ON mr.match_id = b.match_id
+      GROUP BY fs.new_status
+      ORDER BY count DESC
+    `)).rows as Array<Record<string, unknown>>;
+
+    res.json({
+      fallbackMetrics: getSettlementFallbackMetrics(),
+      pendingReasons,
+      metrics: {
+        overall: overall ?? null,
+        bySport,
+        byStatus,
+      },
+    });
+  } catch (err) {
+    logger.error({ err }, "Admin settlement/overview error");
+    res.status(500).json({ error: "Erro ao carregar overview do settlement" });
+  }
+});
+
 router.get("/settlement-pending-selections", adminMiddleware, async (req: AdminRequest, res: Response): Promise<void> => {
   try {
     const reasonFilter = String((req as unknown as Request).query["reason"] ?? "").trim();
