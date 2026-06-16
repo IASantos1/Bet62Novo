@@ -114,6 +114,116 @@ function blocksLiveEarlySettlement(status: string | undefined): boolean {
   return matchesSettlementStatus(status, BLOCKED_LIVE_SETTLEMENT_STATUSES);
 }
 
+function decodeCompactLine(token: string): number {
+  const raw = String(token ?? "").trim();
+  if (!raw) return Number.NaN;
+  if (raw.includes(".")) return parseFloat(raw);
+  if (/^\d+$/.test(raw) && raw.length >= 2) return parseInt(raw, 10) / 10;
+  return parseFloat(raw);
+}
+
+function parseSelectionLabelLine(label: unknown): number | null {
+  if (typeof label !== "string") return null;
+  const match = label.match(/(\d+(?:[.,]\d+)?)/);
+  if (!match) return null;
+  const value = Number(match[1]!.replace(",", "."));
+  return Number.isFinite(value) ? value : null;
+}
+
+function normalizeSettlementSelectionKey(selection: string): string {
+  let s = String(selection ?? "");
+  if      (s === "1x2-home")    s = "home";
+  else if (s === "1x2-draw")    s = "draw";
+  else if (s === "1x2-away")    s = "away";
+  else if (/^s([123])-(home|away)$/.test(s)) {
+    const m = s.match(/^s([123])-(home|away)$/);
+    s = `set${m![1]}-${m![2]}`;
+  }
+  else if (/^ts-([ou])(15|25|35|45)$/.test(s)) {
+    const m = s.match(/^ts-([ou])(15|25|35|45)$/);
+    s = `${m![1]}sets${m![2]}`;
+  }
+  else if (/^sh(\d+)-(home|away)\d*$/.test(s)) {
+    const m = s.match(/^sh(\d+)-(home|away)\d*$/);
+    s = `sh${m![1]}-${m![2]}`;
+  }
+  else if (/^gh-(home|away)\d*$/.test(s)) {
+    const m = s.match(/^gh-(home|away)\d*$/);
+    s = `gh-${m![1]}`;
+  }
+  else if (/^tg-([ou][\d.]+)$/.test(s)) s = s.slice(3);
+  else if (/^cards-([ou])(\d+)$/.test(s)) {
+    const m = s.match(/^cards-([ou])(\d+)$/);
+    s = `${m![1]}card${m![2]}`;
+  }
+  else if (/^corners-([ou])(\d+)$/.test(s)) {
+    const m = s.match(/^corners-([ou])(\d+)$/);
+    s = `${m![1]}c${m![2]}`;
+  }
+  else if (s === "dc-12")       s = "homeOrAway";
+  else if (s === "eg-0")        s = "eg-g0";
+  else if (s === "eg-1")        s = "eg-g1";
+  else if (s === "eg-2")        s = "eg-g2";
+  else if (s === "eg-3")        s = "eg-g3";
+  else if (s === "eg-4")        s = "eg-g4";
+  else if (s === "eg-5p")       s = "eg-g5plus";
+  else if (s === "et-res-home") s = "et-home";
+  else if (s === "et-res-draw") s = "et-draw";
+  else if (s === "et-res-away") s = "et-away";
+  else if (s === "et-tie-home") s = "et-tw-home";
+  else if (s === "et-tie-away") s = "et-tw-away";
+  return s;
+}
+
+function parsePeriodsFromScore(scoreObj: unknown, maxPeriods = 5): number[] {
+  if (!scoreObj || typeof scoreObj !== "object") return [];
+  const out: number[] = [];
+  for (let i = 1; i <= maxPeriods; i++) {
+    const value = (scoreObj as Record<string, unknown>)[`period${i}`];
+    if (typeof value === "number" && Number.isFinite(value)) out.push(value);
+  }
+  return out;
+}
+
+function getTennisSetsFromExtras(extras: unknown): Array<[number, number]> {
+  if (!extras || typeof extras !== "object") return [];
+  const ex = extras as Record<string, unknown>;
+  const nested = ex["tennis"];
+  if (nested && typeof nested === "object" && Array.isArray((nested as Record<string, unknown>)["sets"])) {
+    return ((nested as Record<string, unknown>)["sets"] as unknown[])
+      .map((entry) => Array.isArray(entry) && entry.length >= 2 ? [Number(entry[0]), Number(entry[1])] as [number, number] : null)
+      .filter((entry): entry is [number, number] => !!entry && Number.isFinite(entry[0]) && Number.isFinite(entry[1]));
+  }
+
+  const homePeriods = parsePeriodsFromScore(ex["homeScore"]);
+  const awayPeriods = parsePeriodsFromScore(ex["awayScore"]);
+  const len = Math.max(homePeriods.length, awayPeriods.length);
+  const sets: Array<[number, number]> = [];
+  for (let i = 0; i < len; i++) {
+    const h = homePeriods[i];
+    const a = awayPeriods[i];
+    if (!Number.isFinite(h) || !Number.isFinite(a)) continue;
+    if ((h ?? 0) === 0 && (a ?? 0) === 0) continue;
+    sets.push([h!, a!]);
+  }
+  return sets;
+}
+
+function tennisSetFinished(setScore: [number, number]): boolean {
+  const [homeGames, awayGames] = setScore;
+  if (!Number.isFinite(homeGames) || !Number.isFinite(awayGames)) return false;
+  const maxGames = Math.max(homeGames, awayGames);
+  const diff = Math.abs(homeGames - awayGames);
+  if (maxGames >= 7) return true;
+  return maxGames >= 6 && diff >= 2;
+}
+
+function tennisCompletedSetCount(extras: unknown): number | null {
+  const sets = getTennisSetsFromExtras(extras);
+  if (sets.length === 0) return null;
+  return sets.filter(tennisSetFinished).length;
+}
+
 /**
  * Evaluate a single bet selection against a known final score + optional HT score.
  * Returns "won" | "lost" | null  (null = data not available yet, or void/push bet).
@@ -153,23 +263,7 @@ export function scoreOutcomeForSel(
   }
 
   // ── Key normalisation (ComprehensiveMarketsSheet keys → canonical keys) ────
-  let s = sel.selection;
-  if      (s === "1x2-home")   s = "home";
-  else if (s === "1x2-draw")   s = "draw";
-  else if (s === "1x2-away")   s = "away";
-  else if (/^tg-([ou][\d]+)$/.test(s))  s = s.slice(3);   // tg-o25 → o25
-  else if (s === "dc-12")      s = "homeOrAway";
-  else if (s === "eg-0")       s = "eg-g0";
-  else if (s === "eg-1")       s = "eg-g1";
-  else if (s === "eg-2")       s = "eg-g2";
-  else if (s === "eg-3")       s = "eg-g3";
-  else if (s === "eg-4")       s = "eg-g4";
-  else if (s === "eg-5p")      s = "eg-g5plus";
-  else if (s === "et-res-home") s = "et-home";
-  else if (s === "et-res-draw") s = "et-draw";
-  else if (s === "et-res-away") s = "et-away";
-  else if (s === "et-tie-home") s = "et-tw-home";
-  else if (s === "et-tie-away") s = "et-tw-away";
+  let s = normalizeSettlementSelectionKey(sel.selection);
   const ex = (extra?.extras ?? {}) as Record<string, unknown>;
   const fx = ex["football"] as Record<string, unknown> | undefined;
 
@@ -218,12 +312,11 @@ export function scoreOutcomeForSel(
     const wantHome = s.endsWith("home") || s.endsWith("h");
     const wantAway = s.endsWith("away") || s.endsWith("a");
     if (!Number.isFinite(setNum) || setNum <= 0) return null;
-    const ex = (extra?.extras ?? {}) as Record<string, unknown>;
-    const hs = ex["homeScore"] as Record<string, unknown> | undefined;
-    const as = ex["awayScore"] as Record<string, unknown> | undefined;
-    const h = typeof hs?.[`period${setNum}`] === "number" ? hs?.[`period${setNum}`] as number : null;
-    const a = typeof as?.[`period${setNum}`] === "number" ? as?.[`period${setNum}`] as number : null;
+    const setScore = getTennisSetsFromExtras(extra?.extras)[setNum - 1] ?? null;
+    const h = setScore?.[0] ?? null;
+    const a = setScore?.[1] ?? null;
     if (h === null || a === null) return null;
+    if (!tennisSetFinished([h, a])) return null;
     if (h === a) return "void";
     winning = wantHome ? h > a : wantAway ? a > h : null;
   }
@@ -249,13 +342,8 @@ export function scoreOutcomeForSel(
     const dir = m[1]!;
     const suf = m[2] ?? "";
     const line = suf === "35" ? 3.5 : 2.5;
-    const ex = (extra?.extras ?? {}) as Record<string, unknown>;
-    const hs = ex["homeScore"] as Record<string, unknown> | undefined;
-    const as = ex["awayScore"] as Record<string, unknown> | undefined;
-    const hc = typeof hs?.["current"] === "number" ? hs["current"] as number : null;
-    const ac = typeof as?.["current"] === "number" ? as["current"] as number : null;
-    if (hc === null || ac === null) return null;
-    const totalSets = hc + ac;
+    const totalSets = tennisCompletedSetCount(extra?.extras);
+    if (totalSets === null) return null;
     if (totalSets === line) voided = true;
     else winning = dir === "o" ? totalSets > line : totalSets < line;
   }
@@ -568,7 +656,7 @@ export function scoreOutcomeForSel(
 
   // ── Total Goals O/U  (o25, u35, o05, etc.) ────────────────────────────────
   else if (/^[ou][\d.]+$/.test(s)) {
-    const line = parseFloat(s.slice(1));
+    const line = decodeCompactLine(s.slice(1));
     if (!isNaN(line)) {
       if (total === line) voided = true;
       else winning = s[0] === "o" ? total > line : total < line;
@@ -871,8 +959,7 @@ function liveDefinitiveOutcomeForSel(
   if (blocksLiveEarlySettlement(score.status)) return null;
 
   // Key normalizations — mirror scoreOutcomeForSel so tg-o25, tg-u25, etc. are handled
-  let s = String(sel.selection ?? "");
-  if (/^tg-([ou][\d.]+)$/.test(s)) s = s.slice(3);  // tg-o25 → o25
+  const s = normalizeSettlementSelectionKey(String(sel.selection ?? ""));
 
   const home = score.home;
   const away = score.away;
@@ -886,7 +973,7 @@ function liveDefinitiveOutcomeForSel(
   const mOU = s.match(/^([ou])([\d.]+)$/);
   if (mOU) {
     const side = mOU[1]!;
-    const line = parseFloat(mOU[2]!);
+    const line = decodeCompactLine(mOU[2]!);
     if (!Number.isFinite(line)) return null;
     if (side === "o") return total > line ? "won" : null;
     // Under goals: lost as soon as exceeded; won only at final whistle (scoreOutcomeForSel handles won)
