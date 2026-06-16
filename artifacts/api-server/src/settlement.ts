@@ -344,6 +344,42 @@ function describePendingSettlementReason(
   return "market_known_but_unresolved";
 }
 
+function resolveLiveSelectionSettlement(
+  sel: SelectionRecord,
+  score: {
+    home: number;
+    away: number;
+    cornersTotal?: number;
+    cardsTotal?: number;
+    htScore?: [number, number] | null;
+    status?: string;
+    extras?: unknown;
+  },
+): SelectionSettlementResolution {
+  const liveOutcome = liveDefinitiveOutcomeForSel(sel, score);
+  if (liveOutcome !== null) return { outcome: liveOutcome };
+
+  const ht =
+    Array.isArray(score.htScore) && score.htScore.length >= 2
+      ? { htHome: Number(score.htScore[0]), htAway: Number(score.htScore[1]) }
+      : undefined;
+
+  return {
+    outcome: null,
+    pendingReason: describePendingSettlementReason(
+      sel,
+      { home: score.home, away: score.away },
+      ht,
+      {
+        status: score.status,
+        cornersTotal: score.cornersTotal,
+        cardsTotal: score.cardsTotal,
+        extras: score.extras,
+      },
+    ),
+  };
+}
+
 function resolveSelectionSettlement(
   sel: { selection: string; label?: unknown },
   ft: FTScore,
@@ -1211,6 +1247,9 @@ function liveDefinitiveOutcomeForSel(
     cardsTotal?: number;
     htScore?: [number, number] | null;
     status?: string;
+    tennisSets?: Array<[number, number]>;
+    basketballQuarters?: Array<[number, number]>;
+    hockeyPeriods?: Array<[number, number]>;
   }
 ): "won" | "lost" | null {
   if (blocksLiveEarlySettlement(score.status)) return null;
@@ -1222,9 +1261,50 @@ function liveDefinitiveOutcomeForSel(
   const away = score.away;
   if (!Number.isFinite(home) || !Number.isFinite(away)) return null;
   const total = home + away;
+  const tennisSets = Array.isArray(score.tennisSets) ? score.tennisSets : [];
+  const basketballQuarters = Array.isArray(score.basketballQuarters) ? score.basketballQuarters : [];
+  const hockeyPeriods = Array.isArray(score.hockeyPeriods) ? score.hockeyPeriods : [];
 
   if (s === "bts-yes") return home > 0 && away > 0 ? "won" : null;
   if (s === "bts-no")  return home > 0 && away > 0 ? "lost" : null;
+
+  if (/^set[123]-(home|away)$/.test(s) || /^vs[123][ha]$/.test(s)) {
+    const setNum =
+      s.startsWith("set") ? parseInt(s.slice(3, 4), 10)
+      : parseInt(s.slice(2, 3), 10);
+    const setScore = tennisSets[setNum - 1] ?? null;
+    if (!setScore || !tennisSetFinished(setScore)) return null;
+    const wantHome = s.endsWith("home") || s.endsWith("h");
+    return wantHome ? (setScore[0] > setScore[1] ? "won" : "lost") : (setScore[1] > setScore[0] ? "won" : "lost");
+  }
+
+  if (/^sc([123])-(\d-\d)$/.test(s) || /^ses-(\d-\d)$/.test(s)) {
+    const match = s.match(/^sc([123])-(\d-\d)$/) || s.match(/^ses-(\d-\d)$/);
+    const setNum = s.startsWith("sc") ? Number(match?.[1] ?? 0) : tennisSets.length;
+    const wanted = s.startsWith("sc") ? match?.[2] : match?.[1];
+    const setScore = tennisSets[setNum - 1] ?? null;
+    if (!wanted || !setScore || !tennisSetFinished(setScore)) return null;
+    return `${setScore[0]}-${setScore[1]}` === wanted ? "won" : "lost";
+  }
+
+  const qWinner = s.match(/^q([1234])-(home|away)$/);
+  if (qWinner) {
+    const qNum = Number(qWinner[1]!);
+    const q = basketballQuarters[qNum - 1] ?? null;
+    if (!q) return null;
+    if (q[0] === q[1]) return null;
+    return qWinner[2] === "home" ? (q[0] > q[1] ? "won" : "lost") : (q[1] > q[0] ? "won" : "lost");
+  }
+
+  const hPeriod = s.match(/^p([123])-(home|draw|away)$/) || s.match(/^per([123])-(home|draw|away)$/);
+  if (hPeriod) {
+    const pNum = Number(hPeriod[1]!);
+    const p = hockeyPeriods[pNum - 1] ?? null;
+    if (!p) return null;
+    const want = hPeriod[2]!;
+    if (want === "draw") return p[0] === p[1] ? "won" : "lost";
+    return want === "home" ? (p[0] > p[1] ? "won" : "lost") : (p[1] > p[0] ? "won" : "lost");
+  }
 
   // Goals O/U — can settle mid-game as soon as threshold crossed (Over) or exceeded (Under→lost)
   const mOU = s.match(/^([ou])([\d.]+)$/);
@@ -1242,7 +1322,7 @@ function liveDefinitiveOutcomeForSel(
   const mCorner = s.match(/^([ou])c(\d+)$/);
   if (mCorner) {
     if (score.cornersTotal == null) return null;
-    const line = parseInt(mCorner[2]!, 10) / 10;
+    const line = decodeCompactLine(mCorner[2]!);
     if (!Number.isFinite(line)) return null;
     const side = mCorner[1]!;
     if (side === "o") return score.cornersTotal > line ? "won" : null;
@@ -1253,7 +1333,7 @@ function liveDefinitiveOutcomeForSel(
   const mCard = s.match(/^([ou])card(\d+)$/);
   if (mCard) {
     if (score.cardsTotal == null) return null;
-    const line = parseInt(mCard[2]!, 10) / 10;
+    const line = decodeCompactLine(mCard[2]!);
     if (!Number.isFinite(line)) return null;
     const side = mCard[1]!;
     if (side === "o") return score.cardsTotal > line ? "won" : null;
@@ -1264,7 +1344,7 @@ function liveDefinitiveOutcomeForSel(
   const mTgh = s.match(/^tgh-([ou])(\d+)$/);
   if (mTgh) {
     const side = mTgh[1]!;
-    const line = parseInt(mTgh[2]!, 10) / 10;
+    const line = decodeCompactLine(mTgh[2]!);
     if (!Number.isFinite(line)) return null;
     if (side === "o") return home > line ? "won" : null;
     return home > line ? "lost" : null;
@@ -1274,7 +1354,7 @@ function liveDefinitiveOutcomeForSel(
   const mTga = s.match(/^tga-([ou])(\d+)$/);
   if (mTga) {
     const side = mTga[1]!;
-    const line = parseInt(mTga[2]!, 10) / 10;
+    const line = decodeCompactLine(mTga[2]!);
     if (!Number.isFinite(line)) return null;
     if (side === "o") return away > line ? "won" : null;
     return away > line ? "lost" : null;
