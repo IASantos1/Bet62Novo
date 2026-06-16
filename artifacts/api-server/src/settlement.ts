@@ -25,6 +25,25 @@ type HTScore = { htHome: number; htAway: number };
 type FinishedResult = (typeof finishedMatchResults extends Map<string, infer V> ? V : never);
 type LiveResult = (typeof liveMatchState extends Map<string, infer V> ? V : never);
 
+function buildSettlementLogKey(args: {
+  betId: number;
+  oldStatus: string;
+  newStatus: string;
+  event: string;
+  matchId?: string;
+  jobId?: string;
+}): string {
+  const betId = String(args.betId);
+  const oldStatus = String(args.oldStatus ?? "");
+  const newStatus = String(args.newStatus ?? "");
+  const event = String(args.event ?? "");
+  const matchId = args.matchId ? String(args.matchId) : "";
+  const jobId = args.jobId ? String(args.jobId) : "";
+  return ["bet", betId, "old", oldStatus, "new", newStatus, "event", event, matchId ? `match:${matchId}` : "", jobId ? `job:${jobId}` : ""]
+    .filter(Boolean)
+    .join(":");
+}
+
 /**
  * Evaluate a single bet selection against a known final score + optional HT score.
  * Returns "won" | "lost" | null  (null = data not available yet, or void/push bet).
@@ -977,13 +996,20 @@ export async function autoSettlePendingBets(opts?: { matchIds?: string[] }): Pro
             await tx.delete(cashoutStatesTable).where(eq(cashoutStatesTable.betId, bet.id));
 
             await tx.insert(settlementLogsTable).values({
+              settlementKey: buildSettlementLogKey({
+                betId: bet.id,
+                oldStatus: "pending",
+                newStatus: "lost",
+                event: "live_losing_leg",
+                matchId: bet.matchId,
+              }),
               betId: bet.id,
               userId: bet.userId,
               oldStatus: "pending",
               newStatus: "lost",
               payout: "0.00",
               message: "Auto-settled: losing leg resolved in-play",
-            });
+            }).onConflictDoNothing();
           });
 
           settled++;
@@ -1041,13 +1067,20 @@ export async function autoSettlePendingBets(opts?: { matchIds?: string[] }): Pro
                 });
 
                 await tx.insert(settlementLogsTable).values({
+                  settlementKey: buildSettlementLogKey({
+                    betId: bet.id,
+                    oldStatus: "pending",
+                    newStatus: "won",
+                    event: "live_single_win",
+                    matchId: bet.matchId,
+                  }),
                   betId: bet.id,
                   userId: bet.userId,
                   oldStatus: "pending",
                   newStatus: "won",
                   payout: payoutStr,
                   message: "Auto-settled early: market resolved in-play",
-                });
+                }).onConflictDoNothing();
               });
 
               settled++;
@@ -1065,13 +1098,20 @@ export async function autoSettlePendingBets(opts?: { matchIds?: string[] }): Pro
               await tx.delete(cashoutStatesTable).where(eq(cashoutStatesTable.betId, bet.id));
 
               await tx.insert(settlementLogsTable).values({
+                settlementKey: buildSettlementLogKey({
+                  betId: bet.id,
+                  oldStatus: "pending",
+                  newStatus: "lost",
+                  event: "live_single_lost",
+                  matchId: bet.matchId,
+                }),
                 betId: bet.id,
                 userId: bet.userId,
                 oldStatus: "pending",
                 newStatus: "lost",
                 payout: "0.00",
                 message: "Auto-settled early: market resolved in-play",
-              });
+              }).onConflictDoNothing();
             });
 
             settled++;
@@ -1130,13 +1170,20 @@ export async function autoSettlePendingBets(opts?: { matchIds?: string[] }): Pro
             if (rows.length === 0) return;
             await tx.delete(cashoutStatesTable).where(eq(cashoutStatesTable.betId, bet.id));
             await tx.insert(settlementLogsTable).values({
+              settlementKey: buildSettlementLogKey({
+                betId: bet.id,
+                oldStatus: "pending",
+                newStatus: "lost",
+                event: "early_lost_detected",
+                matchId: bet.matchId,
+              }),
               betId: bet.id,
               userId: bet.userId,
               oldStatus: "pending",
               newStatus: "lost",
               payout: "0.00",
               message: "Auto-settled: losing leg detected",
-            });
+            }).onConflictDoNothing();
           });
           logger.info(
             { betId: bet.id, userId: bet.userId, status: "lost" },
@@ -1169,13 +1216,20 @@ export async function autoSettlePendingBets(opts?: { matchIds?: string[] }): Pro
             });
 
             await tx.insert(settlementLogsTable).values({
+              settlementKey: buildSettlementLogKey({
+                betId: bet.id,
+                oldStatus: "pending",
+                newStatus: "voided",
+                event: "all_void_refund",
+                matchId: bet.matchId,
+              }),
               betId: bet.id,
               userId: bet.userId,
               oldStatus: "pending",
               newStatus: "voided",
               payout: bet.stake,
               message: "Auto-settled: all selections voided — stake refunded",
-            });
+            }).onConflictDoNothing();
           });
           settled++;
           continue;
@@ -1236,13 +1290,20 @@ export async function autoSettlePendingBets(opts?: { matchIds?: string[] }): Pro
           });
 
           await tx.insert(settlementLogsTable).values({
+            settlementKey: buildSettlementLogKey({
+              betId: bet.id,
+              oldStatus: "pending",
+              newStatus: "won",
+              event: "won_final",
+              matchId: bet.matchId,
+            }),
             betId: bet.id,
             userId: bet.userId,
             oldStatus: "pending",
             newStatus: "won",
             payout: payoutStr,
             message: `Auto-settled: settled with ${outcomes.filter(o => o === "void").length} void leg(s)`,
-          });
+          }).onConflictDoNothing();
         });
 
         logger.info(
@@ -1428,13 +1489,21 @@ export async function regradeSettledBetsForMatch(matchId: string, jobId: string)
             if (!applied) return;
 
             await tx.insert(settlementLogsTable).values({
+              settlementKey: buildSettlementLogKey({
+                betId: bet.id,
+                oldStatus,
+                newStatus,
+                event: "regrade_delta",
+                matchId: mId,
+                jobId: jId,
+              }),
               betId: bet.id,
               userId: bet.userId,
               oldStatus,
               newStatus,
               payout: payoutStr,
               message: `Regrade: match ${mId} corrected (job ${jId})`,
-            });
+            }).onConflictDoNothing();
           }
         });
 
@@ -1577,13 +1646,20 @@ async function expireStalePendingBets(): Promise<void> {
           });
 
           await tx.insert(settlementLogsTable).values({
+            settlementKey: buildSettlementLogKey({
+              betId: bet.id,
+              oldStatus: "pending",
+              newStatus: "voided",
+              event: "stale_refund",
+              matchId: bet.matchId,
+            }),
             betId: bet.id,
             userId: bet.userId,
             oldStatus: "pending",
             newStatus: "voided",
             payout: bet.stake,
             message: "Stale bet voided after 72h — stake refunded",
-          });
+          }).onConflictDoNothing();
         });
 
         logger.warn(

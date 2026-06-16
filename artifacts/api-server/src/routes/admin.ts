@@ -572,13 +572,14 @@ router.put("/bets/:id/status", adminMiddleware, async (req: AdminRequest, res: R
 
       // Audit log
       await tx.insert(settlementLogsTable).values({
+        settlementKey: `admin:bet:${betId}:old:${oldStatus}:new:${status}:event:manual_settlement`,
         betId: bet.id,
         userId: bet.userId,
         oldStatus,
         newStatus: status,
         payout: status === "won" ? bet.potentialWin : status === "voided" ? bet.stake : "0.00",
         message: `Manual settlement by admin`,
-      });
+      }).onConflictDoNothing();
     });
 
     res.json({ id: betId, status });

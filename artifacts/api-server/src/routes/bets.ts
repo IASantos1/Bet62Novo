@@ -1231,13 +1231,14 @@ router.post("/:id/cashout", authMiddleware, async (req: Request, res: Response):
       });
 
       await tx.insert(settlementLogsTable).values({
+        settlementKey: `bet:${betId}:old:pending:new:cashed_out:event:cashout`,
         betId,
         userId: authReq.user!.id,
         oldStatus: "pending",
         newStatus: "cashed_out",
         payout: cashoutStr,
         message: "Cashout",
-      });
+      }).onConflictDoNothing();
 
       await tx.delete(cashoutStatesTable).where(eq(cashoutStatesTable.betId, betId));
 
