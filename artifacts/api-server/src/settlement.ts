@@ -238,6 +238,24 @@ function scoreOutcomeForSelLastResort(
   const derivedHt = ht ?? getFootballHTScoreFromExtras(extra?.extras) ?? undefined;
 
   if (sport === "tennis") {
+    if (/^set[123]-(home|away)$/.test(s) || /^vs[123][ha]$/.test(s)) {
+      const setNum =
+        s.startsWith("set") ? Number.parseInt(s.slice(3, 4), 10)
+        : Number.parseInt(s.slice(2, 3), 10);
+      const setScore = getTennisSetsFromExtras(extra?.extras)[setNum - 1] ?? null;
+      if (!setScore || !tennisSetFinished(setScore)) return null;
+      if (setScore[0] === setScore[1]) return "void";
+      const wantHome = s.endsWith("home") || s.endsWith("h");
+      return wantHome ? (setScore[0] > setScore[1] ? "won" : "lost") : (setScore[1] > setScore[0] ? "won" : "lost");
+    }
+    if (/^sc([123])-(\d-\d)$/.test(s) || /^ses-(\d-\d)$/.test(s)) {
+      const match = s.match(/^sc([123])-(\d-\d)$/) || s.match(/^ses-(\d-\d)$/);
+      const setNum = s.startsWith("sc") ? Number(match?.[1] ?? 0) : getTennisSetsFromExtras(extra?.extras).length;
+      const wanted = s.startsWith("sc") ? match?.[2] : match?.[1];
+      const setScore = getTennisSetsFromExtras(extra?.extras)[setNum - 1] ?? null;
+      if (!wanted || !setScore || !tennisSetFinished(setScore)) return null;
+      return `${setScore[0]}-${setScore[1]}` === wanted ? "won" : "lost";
+    }
     if (/^es-(h20|h21|a02|a12)$/.test(s)) {
       const score = `${ft.home}-${ft.away}`;
       const want =
