@@ -316,7 +316,8 @@ function describePendingSettlementReason(
   if (/^[ou]c\d+$/.test(s) && extra?.cornersTotal == null) return "missing_corners_total";
   if (/^[ou]card\d+$/.test(s) && extra?.cardsTotal == null) return "missing_cards_total";
   if ((s === "fg-home" || s === "fg-away" || s === "fg-none") && !extra?.firstGoal) return "missing_first_goal_data";
-  if ((s.startsWith("ht-") || s.startsWith("htcs-") || s.startsWith("b1h-") || s.startsWith("wbh-") || s.startsWith("hsf-") || s.startsWith("htft-") || s.startsWith("2h-") || s.startsWith("h2cs-")) && (!ht || ht.htHome == null || ht.htAway == null)) {
+  const derivedHt = ht ?? getFootballHTScoreFromExtras(extra?.extras);
+  if ((s.startsWith("ht-") || s.startsWith("htcs-") || s.startsWith("b1h-") || s.startsWith("wbh-") || s.startsWith("hsf-") || s.startsWith("htft-") || s.startsWith("2h-") || s.startsWith("h2cs-")) && (!derivedHt || derivedHt.htHome == null || derivedHt.htAway == null)) {
     return "missing_ht_score";
   }
   if (sport === "tennis") {
@@ -325,20 +326,15 @@ function describePendingSettlementReason(
     if ((/^set[123]-/.test(s) || /^vs[123][ha]$/.test(s) || /^ses-/.test(s) || /^sc[123]-/.test(s)) && sets.length === 0) return "missing_tennis_set_breakdown";
   }
   if (sport === "basketball") {
-    const ex = (extra?.extras ?? {}) as Record<string, unknown>;
-    const hasPeriods = parsePeriodsFromScore(ex["homeScore"], 4).length > 0 || parsePeriodsFromScore(ex["awayScore"], 4).length > 0;
-    if ((/^q[1234]-/.test(s) || s === "h1-home" || s === "h1-away" || /^b-h1-pts-/.test(s)) && !hasPeriods) return "missing_basketball_periods";
+    const periods = getBasketballQuartersFromExtras(extra?.extras);
+    if ((/^q[1234]-/.test(s) || s === "h1-home" || s === "h1-away" || /^b-h1-pts-/.test(s)) && periods.length === 0) return "missing_basketball_periods";
   }
   if (sport === "hockey") {
-    const ex = (extra?.extras ?? {}) as Record<string, unknown>;
-    const hasPeriods = parsePeriodsFromScore(ex["homeScore"], 3).length > 0 || parsePeriodsFromScore(ex["awayScore"], 3).length > 0;
-    if ((/^p[123]-/.test(s) || /^per[123]-/.test(s) || /^p[123]t-/.test(s)) && !hasPeriods) return "missing_hockey_periods";
+    const periods = getHockeyPeriodsFromExtras(extra?.extras);
+    if ((/^p[123]-/.test(s) || /^per[123]-/.test(s) || /^p[123]t-/.test(s)) && periods.length === 0) return "missing_hockey_periods";
   }
   if (sport === "baseball" && (/^f5-/.test(s) || /^f5t-/.test(s) || /^mlb-f5-/.test(s) || /^mlb-f5t-/.test(s))) {
-    const ex = (extra?.extras ?? {}) as Record<string, unknown>;
-    const hs = ex["homeScore"] as Record<string, unknown> | undefined;
-    const as = ex["awayScore"] as Record<string, unknown> | undefined;
-    if (!hs?.["innings"] || !as?.["innings"]) return "missing_baseball_innings";
+    if (!hasBaseballInnings(extra?.extras)) return "missing_baseball_innings";
   }
 
   return "market_known_but_unresolved";
@@ -400,17 +396,18 @@ function buildLiveSettlementScore(
 
   const liveExtra = (live as any)?._liveExtra;
   const extras = liveExtra ?? {};
+  const derivedHt = getFootballHTScoreFromExtras(extras);
   return {
     home: homeScore,
     away: awayScore,
     cornersTotal: liveExtra?.cornersTotal,
     cardsTotal: liveExtra?.cardsTotal,
-    htScore: liveExtra?.htScore ?? null,
+    htScore: liveExtra?.htScore ?? (derivedHt ? [derivedHt.htHome, derivedHt.htAway] : null),
     status: (live as any)?.status,
     extras,
-    tennisSets: Array.isArray(liveExtra?.sets) ? liveExtra.sets : undefined,
-    basketballQuarters: Array.isArray(liveExtra?.quarters) ? liveExtra.quarters : undefined,
-    hockeyPeriods: Array.isArray(liveExtra?.periods) ? liveExtra.periods : undefined,
+    tennisSets: Array.isArray(liveExtra?.sets) ? liveExtra.sets : getTennisSetsFromExtras(extras),
+    basketballQuarters: Array.isArray(liveExtra?.quarters) ? liveExtra.quarters : getBasketballQuartersFromExtras(extras),
+    hockeyPeriods: Array.isArray(liveExtra?.periods) ? liveExtra.periods : getHockeyPeriodsFromExtras(extras),
   };
 }
 
@@ -420,15 +417,16 @@ function resolveSelectionSettlement(
   ht?: HTScore,
   extra?: { status?: string; cornersTotal?: number; cardsTotal?: number; firstGoal?: "home" | "away" | "none"; extras?: unknown; finishedAt?: number },
 ): SelectionSettlementResolution {
-  const primary = scoreOutcomeForSel(sel, ft, ht, extra);
+  const derivedHt = ht ?? getFootballHTScoreFromExtras(extra?.extras) ?? undefined;
+  const primary = scoreOutcomeForSel(sel, ft, derivedHt, extra);
   if (primary !== null) return { outcome: primary };
 
-  const fallback = scoreOutcomeForSelLastResort(sel, ft, ht, extra);
+  const fallback = scoreOutcomeForSelLastResort(sel, ft, derivedHt, extra);
   if (fallback !== null) return { outcome: fallback };
 
   return {
     outcome: null,
-    pendingReason: describePendingSettlementReason(sel, ft, ht, extra),
+    pendingReason: describePendingSettlementReason(sel, ft, derivedHt, extra),
   };
 }
 
@@ -496,6 +494,89 @@ function parsePeriodsFromScore(scoreObj: unknown, maxPeriods = 5): number[] {
     if (typeof value === "number" && Number.isFinite(value)) out.push(value);
   }
   return out;
+}
+
+function getFootballHTScoreFromExtras(extras: unknown): HTScore | null {
+  if (!extras || typeof extras !== "object") return null;
+  const ex = extras as Record<string, unknown>;
+  const football = ex["football"] as Record<string, unknown> | undefined;
+  const directTuple = ex["htScore"];
+  if (Array.isArray(directTuple) && directTuple.length >= 2) {
+    const htHome = Number(directTuple[0]);
+    const htAway = Number(directTuple[1]);
+    if (Number.isFinite(htHome) && Number.isFinite(htAway)) return { htHome, htAway };
+  }
+  const htHome = typeof football?.["htHome"] === "number" ? football["htHome"] as number : null;
+  const htAway = typeof football?.["htAway"] === "number" ? football["htAway"] as number : null;
+  if (htHome !== null && htAway !== null) return { htHome, htAway };
+  return null;
+}
+
+function getBasketballQuartersFromExtras(extras: unknown): Array<[number, number]> {
+  if (!extras || typeof extras !== "object") return [];
+  const ex = extras as Record<string, unknown>;
+  const nested = ex["basketball"] as Record<string, unknown> | undefined;
+  const direct = ex["quarters"];
+  if (Array.isArray(direct)) {
+    return direct
+      .map((entry) => Array.isArray(entry) && entry.length >= 2 ? [Number(entry[0]), Number(entry[1])] as [number, number] : null)
+      .filter((entry): entry is [number, number] => !!entry && Number.isFinite(entry[0]) && Number.isFinite(entry[1]));
+  }
+  if (nested && Array.isArray(nested["quarters"])) {
+    return (nested["quarters"] as unknown[])
+      .map((entry) => Array.isArray(entry) && entry.length >= 2 ? [Number(entry[0]), Number(entry[1])] as [number, number] : null)
+      .filter((entry): entry is [number, number] => !!entry && Number.isFinite(entry[0]) && Number.isFinite(entry[1]));
+  }
+  const homePeriods = parsePeriodsFromScore(ex["homeScore"], 5);
+  const awayPeriods = parsePeriodsFromScore(ex["awayScore"], 5);
+  const len = Math.min(5, Math.max(homePeriods.length, awayPeriods.length));
+  const quarters: Array<[number, number]> = [];
+  for (let i = 0; i < len; i++) {
+    const h = homePeriods[i];
+    const a = awayPeriods[i];
+    if (!Number.isFinite(h) || !Number.isFinite(a)) continue;
+    quarters.push([h!, a!]);
+  }
+  return quarters;
+}
+
+function getHockeyPeriodsFromExtras(extras: unknown): Array<[number, number]> {
+  if (!extras || typeof extras !== "object") return [];
+  const ex = extras as Record<string, unknown>;
+  const nested = ex["hockey"] as Record<string, unknown> | undefined;
+  const direct = ex["periods"];
+  if (Array.isArray(direct)) {
+    return direct
+      .map((entry) => Array.isArray(entry) && entry.length >= 2 ? [Number(entry[0]), Number(entry[1])] as [number, number] : null)
+      .filter((entry): entry is [number, number] => !!entry && Number.isFinite(entry[0]) && Number.isFinite(entry[1]));
+  }
+  if (nested && Array.isArray(nested["periods"])) {
+    return (nested["periods"] as unknown[])
+      .map((entry) => Array.isArray(entry) && entry.length >= 2 ? [Number(entry[0]), Number(entry[1])] as [number, number] : null)
+      .filter((entry): entry is [number, number] => !!entry && Number.isFinite(entry[0]) && Number.isFinite(entry[1]));
+  }
+  const homePeriods = parsePeriodsFromScore(ex["homeScore"], 5);
+  const awayPeriods = parsePeriodsFromScore(ex["awayScore"], 5);
+  const len = Math.min(5, Math.max(homePeriods.length, awayPeriods.length));
+  const periods: Array<[number, number]> = [];
+  for (let i = 0; i < len; i++) {
+    const h = homePeriods[i];
+    const a = awayPeriods[i];
+    if (!Number.isFinite(h) || !Number.isFinite(a)) continue;
+    periods.push([h!, a!]);
+  }
+  return periods;
+}
+
+function hasBaseballInnings(extras: unknown): boolean {
+  if (!extras || typeof extras !== "object") return false;
+  const ex = extras as Record<string, unknown>;
+  const nested = ex["baseball"] as Record<string, unknown> | undefined;
+  if (Array.isArray(ex["innings"])) return true;
+  if (nested && Array.isArray(nested["innings"])) return true;
+  const hs = ex["homeScore"] as Record<string, unknown> | undefined;
+  const as = ex["awayScore"] as Record<string, unknown> | undefined;
+  return !!hs?.["innings"] && !!as?.["innings"];
 }
 
 function getTennisSetsFromExtras(extras: unknown): Array<[number, number]> {
