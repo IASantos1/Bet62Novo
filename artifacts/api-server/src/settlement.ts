@@ -380,6 +380,40 @@ function resolveLiveSelectionSettlement(
   };
 }
 
+function buildLiveSettlementScore(
+  live: LiveResult | null,
+): {
+  home: number;
+  away: number;
+  cornersTotal?: number;
+  cardsTotal?: number;
+  htScore?: [number, number] | null;
+  status?: string;
+  extras?: unknown;
+  tennisSets?: Array<[number, number]>;
+  basketballQuarters?: Array<[number, number]>;
+  hockeyPeriods?: Array<[number, number]>;
+} | null {
+  const homeScore = live ? Number((live as any).homeScore ?? NaN) : NaN;
+  const awayScore = live ? Number((live as any).awayScore ?? NaN) : NaN;
+  if (!Number.isFinite(homeScore) || !Number.isFinite(awayScore)) return null;
+
+  const liveExtra = (live as any)?._liveExtra;
+  const extras = liveExtra ?? {};
+  return {
+    home: homeScore,
+    away: awayScore,
+    cornersTotal: liveExtra?.cornersTotal,
+    cardsTotal: liveExtra?.cardsTotal,
+    htScore: liveExtra?.htScore ?? null,
+    status: (live as any)?.status,
+    extras,
+    tennisSets: Array.isArray(liveExtra?.sets) ? liveExtra.sets : undefined,
+    basketballQuarters: Array.isArray(liveExtra?.quarters) ? liveExtra.quarters : undefined,
+    hockeyPeriods: Array.isArray(liveExtra?.periods) ? liveExtra.periods : undefined,
+  };
+}
+
 function resolveSelectionSettlement(
   sel: { selection: string; label?: unknown },
   ft: FTScore,
@@ -1427,43 +1461,27 @@ export async function autoSettlePendingBets(opts?: { matchIds?: string[] }): Pro
         let liveLostDetected = false;
         for (const sel of selections) {
           const live = findLiveResult(sel, bet.matchId, isSingle);
-          const homeScore = live ? Number((live as any).homeScore ?? 0) : NaN;
-          const awayScore = live ? Number((live as any).awayScore ?? 0) : NaN;
-          const liveExtra = (live as any)?._liveExtra;
-          const out = Number.isFinite(homeScore) && Number.isFinite(awayScore)
-            ? liveDefinitiveOutcomeForSel(sel, {
-                home: homeScore,
-                away: awayScore,
-                cornersTotal: liveExtra?.cornersTotal,
-                cardsTotal: liveExtra?.cardsTotal,
-                htScore: liveExtra?.htScore ?? null,
-                status: (live as any)?.status,
-              })
-            : null;
-          if (out === "lost") { liveLostDetected = true; break; }
+          const liveScore = buildLiveSettlementScore(live);
+          const resolution = liveScore ? resolveLiveSelectionSettlement(sel, liveScore) : { outcome: null as SettlementOutcome };
+          if (resolution.outcome === "lost") { liveLostDetected = true; break; }
         }
 
         if (liveLostDetected) {
           const updatedSelsLost = selections.map(sel => {
             const live = findLiveResult(sel, bet.matchId, isSingle);
-            const homeScore = live ? Number((live as any).homeScore ?? 0) : NaN;
-            const awayScore = live ? Number((live as any).awayScore ?? 0) : NaN;
-            const liveExtra = (live as any)?._liveExtra;
-            const out = Number.isFinite(homeScore) && Number.isFinite(awayScore)
-              ? liveDefinitiveOutcomeForSel(sel, {
-                  home: homeScore,
-                  away: awayScore,
-                  cornersTotal: liveExtra?.cornersTotal,
-                  cardsTotal: liveExtra?.cardsTotal,
-                  htScore: liveExtra?.htScore ?? null,
-                  status: (live as any)?.status,
-                })
-              : null;
-            if (!out) return sel;
+            const liveScore = buildLiveSettlementScore(live);
+            const resolution = liveScore ? resolveLiveSelectionSettlement(sel, liveScore) : { outcome: null as SettlementOutcome, pendingReason: "missing_live_score" };
+            if (!resolution.outcome) {
+              return {
+                ...sel,
+                pendingReason: resolution.pendingReason ?? sel.pendingReason,
+              };
+            }
             return {
               ...sel,
-              finalScore: { home: homeScore, away: awayScore },
-              outcome: out,
+              finalScore: { home: liveScore.home, away: liveScore.away },
+              outcome: resolution.outcome,
+              pendingReason: resolution.pendingReason,
             };
           });
 
@@ -1501,24 +1519,15 @@ export async function autoSettlePendingBets(opts?: { matchIds?: string[] }): Pro
         if (isSingle) {
           const sel = selections[0]!;
           const live = findLiveResult(sel, bet.matchId, true);
-          const homeScore = live ? Number((live as any).homeScore ?? 0) : NaN;
-          const awayScore = live ? Number((live as any).awayScore ?? 0) : NaN;
-          const liveExtraSingle = (live as any)?._liveExtra;
-          const out = Number.isFinite(homeScore) && Number.isFinite(awayScore)
-            ? liveDefinitiveOutcomeForSel(sel, {
-                home: homeScore,
-                away: awayScore,
-                cornersTotal: liveExtraSingle?.cornersTotal,
-                cardsTotal: liveExtraSingle?.cardsTotal,
-                htScore: liveExtraSingle?.htScore ?? null,
-                status: (live as any)?.status,
-              })
-            : null;
-          if (out === "won" || out === "lost") {
+          const liveScore = buildLiveSettlementScore(live);
+          const resolution = liveScore ? resolveLiveSelectionSettlement(sel, liveScore) : { outcome: null as SettlementOutcome, pendingReason: "missing_live_score" };
+          const out = resolution.outcome;
+          if (liveScore && (out === "won" || out === "lost")) {
             const updatedSel: SelectionRecord = {
               ...sel,
-              finalScore: { home: homeScore, away: awayScore },
+              finalScore: { home: liveScore.home, away: liveScore.away },
               outcome: out,
+              pendingReason: resolution.pendingReason,
             };
 
             if (out === "won") {
