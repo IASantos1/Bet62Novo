@@ -66,13 +66,14 @@ export function resolveSelectionOutcome(
   sel: SelectionRecord,
   betMatchId: string | undefined,
   isLive = false,
+  opts?: { forceReevaluate?: boolean },
 ): SettlementResult {
   const normalizedKey = normalizeSettlementSelectionKey(sel.selection);
   const providerSport = readProviderSport(sel);
   const beforeOutcome = sel.outcome ?? null;
   const detectedFromKey = detectSportFromKey(normalizedKey);
 
-  if (beforeOutcome && beforeOutcome !== null) {
+  if (!opts?.forceReevaluate && beforeOutcome && beforeOutcome !== null) {
     updateSettlementStats(normalizedKey, providerSport ?? detectedFromKey, beforeOutcome, "already_settled");
     return createAlreadySettledResult(sel, normalizedKey, providerSport, detectedFromKey);
   }
