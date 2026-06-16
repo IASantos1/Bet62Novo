@@ -328,6 +328,18 @@ function scoreOutcomeForSelLastResort(
       if (!extra?.firstGoal) return null;
       return s === `fg-${extra.firstGoal}` ? "won" : "lost";
     }
+    if (/^at-([ou])(\d+)$/.test(s)) {
+      const m = s.match(/^at-([ou])(\d+)$/)!;
+      const side = m[1] === "o" ? "over" : "under";
+      const line = decodeCompactLine(m[2]!);
+      return settleAsianTotalOutcome(ft.home + ft.away, side, line);
+    }
+    if (s === "ah-home" || s === "ah-away") {
+      const side = s.endsWith("home") ? "home" : "away";
+      const line = parseSignedSelectionLabelLine(sel.label);
+      if (line == null || !Number.isFinite(line)) return null;
+      return settleAsianSideHandicapOutcome(ft.home, ft.away, side, line);
+    }
     if (/^[ou][\d.]+$/.test(s)) {
       const line = decodeCompactLine(s.slice(1));
       const total = ft.home + ft.away;
