@@ -258,6 +258,8 @@ function scoreOutcomeForSelLastResort(
   }
 
   if (sport === "football") {
+    const ex = (extra?.extras ?? {}) as Record<string, unknown>;
+    const fx = ex["football"] as Record<string, unknown> | undefined;
     if ((s === "home" || s === "away" || s === "draw") && Number.isFinite(ft.home) && Number.isFinite(ft.away)) {
       if (s === "home") return ft.home > ft.away ? "won" : "lost";
       if (s === "away") return ft.away > ft.home ? "won" : "lost";
@@ -337,6 +339,18 @@ function scoreOutcomeForSelLastResort(
     if (s === "bts-no") return ft.home === 0 || ft.away === 0 ? "won" : "lost";
     if (s === "goe-odd") return (ft.home + ft.away) % 2 === 1 ? "won" : "lost";
     if (s === "goe-even") return (ft.home + ft.away) % 2 === 0 ? "won" : "lost";
+    if (/^tgh-([ou])(\d+)$/.test(s)) {
+      const m = s.match(/^tgh-([ou])(\d+)$/)!;
+      const line = decodeCompactLine(m[2]!);
+      if (ft.home === line) return "void";
+      return m[1] === "o" ? (ft.home > line ? "won" : "lost") : (ft.home < line ? "won" : "lost");
+    }
+    if (/^tga-([ou])(\d+)$/.test(s)) {
+      const m = s.match(/^tga-([ou])(\d+)$/)!;
+      const line = decodeCompactLine(m[2]!);
+      if (ft.away === line) return "void";
+      return m[1] === "o" ? (ft.away > line ? "won" : "lost") : (ft.away < line ? "won" : "lost");
+    }
     if (s === "wtn-h") return ft.home > ft.away && ft.away === 0 ? "won" : "lost";
     if (s === "wtn-a") return ft.away > ft.home && ft.home === 0 ? "won" : "lost";
     if (s === "cs-h") return ft.away === 0 ? "won" : "lost";
@@ -350,6 +364,37 @@ function scoreOutcomeForSelLastResort(
     if (s === "dnb-away") {
       if (ft.home === ft.away) return "void";
       return ft.away > ft.home ? "won" : "lost";
+    }
+    if (s === "hc-hm1" || s === "hc-hm15") return (ft.home - ft.away) >= 2 ? "won" : "lost";
+    if (s === "hc-ap1" || s === "hc-ap15") return (ft.home - ft.away) <= 1 ? "won" : "lost";
+    if (s.startsWith("et-")) {
+      const etHome = typeof fx?.["etHome"] === "number" ? (fx["etHome"] as number) : null;
+      const etAway = typeof fx?.["etAway"] === "number" ? (fx["etAway"] as number) : null;
+      const ftHome = typeof fx?.["ftHome"] === "number" ? (fx["ftHome"] as number) : null;
+      const ftAway = typeof fx?.["ftAway"] === "number" ? (fx["ftAway"] as number) : null;
+      if (etHome === null || etAway === null) return null;
+      if (s === "et-home") return etHome > etAway ? "won" : "lost";
+      if (s === "et-draw") return etHome === etAway ? "won" : "lost";
+      if (s === "et-away") return etAway > etHome ? "won" : "lost";
+      if (s === "et-tw-home" || s === "et-tw-away") {
+        if (ftHome === null || ftAway === null) return null;
+        const totalDiff = (ftHome + etHome) - (ftAway + etAway);
+        if (totalDiff === 0) return null;
+        return s === "et-tw-home" ? (totalDiff > 0 ? "won" : "lost") : (totalDiff < 0 ? "won" : "lost");
+      }
+      const etTotal = s.match(/^et-([ou])(\d+)$/);
+      if (etTotal) {
+        const line = decodeCompactLine(etTotal[2]!);
+        const totalET = etHome + etAway;
+        if (totalET === line) return "void";
+        return etTotal[1] === "o" ? (totalET > line ? "won" : "lost") : (totalET < line ? "won" : "lost");
+      }
+    }
+    if (s === "pen-home" || s === "pen-away") {
+      const penHome = typeof fx?.["penHome"] === "number" ? (fx["penHome"] as number) : null;
+      const penAway = typeof fx?.["penAway"] === "number" ? (fx["penAway"] as number) : null;
+      if (penHome === null || penAway === null || penHome === penAway) return null;
+      return s === "pen-home" ? (penHome > penAway ? "won" : "lost") : (penAway > penHome ? "won" : "lost");
     }
     if (s.startsWith("cs-")) {
       const body = s.slice(3);
