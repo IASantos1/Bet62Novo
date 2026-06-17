@@ -232,6 +232,22 @@ async function getCashoutPolicy(): Promise<CashoutPolicy> {
   }
 }
 
+function normalizeHumanTotalSelectionKey(sel: string): string | null {
+  const raw = String(sel ?? "")
+    .trim()
+    .toLowerCase();
+  if (!raw) return null;
+  const over = raw.match(
+    /\b(?:acima(?: de)?|mais de|over)\s+(\d+(?:[.,]\d+)?)\b/,
+  );
+  if (over) return `o${over[1]!.replace(/[.,]/g, "")}`;
+  const under = raw.match(
+    /\b(?:abaixo(?: de)?|menos de|under)\s+(\d+(?:[.,]\d+)?)\b/,
+  );
+  if (under) return `u${under[1]!.replace(/[.,]/g, "")}`;
+  return null;
+}
+
 function normalizeSelectionKey(sel: string): string {
   let s = sel;
   if (s === "1x2-home") s = "home";
@@ -254,6 +270,10 @@ function normalizeSelectionKey(sel: string): string {
   else if (s === "et-res-away") s = "et-away";
   else if (s === "et-tie-home") s = "et-tw-home";
   else if (s === "et-tie-away") s = "et-tw-away";
+  else {
+    const humanTotal = normalizeHumanTotalSelectionKey(s);
+    if (humanTotal) s = humanTotal;
+  }
   return s;
 }
 
@@ -431,7 +451,12 @@ function getTicketKickoffIso(
 
 function normalizeStoredSelection(
   rawSelection: unknown,
-  fallback: { matchId: string; matchTitle: string; kickoffTime?: unknown },
+  fallback: {
+    matchId: string;
+    matchTitle: string;
+    kickoffTime?: unknown;
+    sport?: unknown;
+  },
 ): unknown {
   if (!rawSelection || typeof rawSelection !== "object") return rawSelection;
   const r = rawSelection as Record<string, unknown>;
@@ -449,8 +474,14 @@ function normalizeStoredSelection(
   const { homeTeam, awayTeam } = extractTeamsFromTitle(matchTitle);
   return {
     ...r,
-    matchId: normalizeStoredMatchId(r.matchId ?? fallback.matchId, r.sport),
+    matchId: normalizeStoredMatchId(
+      r.matchId ?? fallback.matchId,
+      r.sport ?? fallback.sport,
+    ),
     matchTitle,
+    ...(normalizeStoredSport(r.sport ?? fallback.sport)
+      ? { sport: normalizeStoredSport(r.sport ?? fallback.sport) }
+      : {}),
     selection: normalizeSelectionKey(selection),
     ...(extractStoredMarketLine(
       (r as { marketLine?: unknown }).marketLine,
@@ -1581,8 +1612,28 @@ router.post(
     const stakeStr = betStake.toFixed(2);
     const oddsStr = betOdds.toFixed(2);
 
+    const selList: Array<{
+      matchId?: unknown;
+      market?: unknown;
+      sport?: unknown;
+    }> = Array.isArray(selections)
+      ? (selections as Array<{
+          matchId?: unknown;
+          market?: unknown;
+          sport?: unknown;
+        }>)
+      : [];
+    const topLevelSport =
+      normalizeStoredSport((authReq as any).body?.sport) ??
+      normalizeStoredSport(selList[0]?.["sport"]) ??
+      normalizeStoredSport(liveMatchState.get(String(matchId))?.sport);
+    const canonicalMatchId = normalizeStoredMatchId(matchId, topLevelSport);
+
     // Reject bets on matches that have already finished
-    if (finishedMatchResults.has(matchId)) {
+    if (
+      finishedMatchResults.has(String(matchId)) ||
+      finishedMatchResults.has(canonicalMatchId)
+    ) {
       res
         .status(400)
         .json({ error: "Este jogo já terminou. Aposta não aceite." });
@@ -1590,13 +1641,11 @@ router.post(
     }
 
     const now = Date.now();
-    const selList: Array<{ matchId?: unknown; market?: unknown }> =
-      Array.isArray(selections)
-        ? (selections as Array<{ matchId?: unknown; market?: unknown }>)
-        : [];
 
     if (selList.length === 0) {
-      const liveSt = liveMatchState.get(String(matchId));
+      const liveSt =
+        liveMatchState.get(String(matchId)) ??
+        liveMatchState.get(canonicalMatchId);
       if (
         liveSt?.sport === "tennis" ||
         liveSt?.sport === "football" ||
@@ -1632,7 +1681,10 @@ router.post(
     }
 
     for (const sel of selList) {
-      const mId = String(sel.matchId ?? matchId);
+      const mId = normalizeStoredMatchId(
+        sel.matchId ?? canonicalMatchId,
+        (sel as { sport?: unknown }).sport ?? topLevelSport,
+      );
       const liveSt = liveMatchState.get(mId);
       if (!liveSt) continue;
       if (
@@ -1682,9 +1734,10 @@ router.post(
     const selectionsToStore = Array.isArray(selections)
       ? selections.map((x) =>
           normalizeStoredSelection(x, {
-            matchId: String(matchId),
+            matchId: canonicalMatchId,
             matchTitle,
             kickoffTime,
+            sport: (x as { sport?: unknown }).sport ?? topLevelSport,
           }),
         )
       : selections;
@@ -1721,7 +1774,7 @@ router.post(
             .insert(betsTable)
             .values({
               userId: authReq.user!.id,
-              matchId,
+              matchId: canonicalMatchId,
               matchTitle,
               selections: selectionsToStore,
               stake: stakeStr,
@@ -1758,7 +1811,7 @@ router.post(
             .insert(betsTable)
             .values({
               userId: authReq.user!.id,
-              matchId,
+              matchId: canonicalMatchId,
               matchTitle,
               selections: selectionsToStore,
               stake: stakeStr,

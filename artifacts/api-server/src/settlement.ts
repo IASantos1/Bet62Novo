@@ -1088,6 +1088,22 @@ export function resolveSelectionSettlement(
   };
 }
 
+function normalizeHumanTotalSettlementKey(selection: string): string | null {
+  const raw = String(selection ?? "")
+    .trim()
+    .toLowerCase();
+  if (!raw) return null;
+  const over = raw.match(
+    /\b(?:acima(?: de)?|mais de|over)\s+(\d+(?:[.,]\d+)?)\b/,
+  );
+  if (over) return `o${over[1]!.replace(/[.,]/g, "")}`;
+  const under = raw.match(
+    /\b(?:abaixo(?: de)?|menos de|under)\s+(\d+(?:[.,]\d+)?)\b/,
+  );
+  if (under) return `u${under[1]!.replace(/[.,]/g, "")}`;
+  return null;
+}
+
 export function normalizeSettlementSelectionKey(selection: string): string {
   let s = String(selection ?? "");
   if (/^(?:handicap|asiatico|spread|puckline):/.test(s))
@@ -1140,6 +1156,10 @@ export function normalizeSettlementSelectionKey(selection: string): string {
   else if (s === "et-res-away") s = "et-away";
   else if (s === "et-tie-home") s = "et-tw-home";
   else if (s === "et-tie-away") s = "et-tw-away";
+  else {
+    const humanTotal = normalizeHumanTotalSettlementKey(s);
+    if (humanTotal) s = humanTotal;
+  }
   return s;
 }
 
