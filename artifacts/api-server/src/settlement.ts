@@ -16,6 +16,7 @@ import {
   finishedMatchResults,
   liveMatchState,
   scanDailyForFinished,
+  scanVolleyballForFinished,
   scanV2AllSportsForFinished,
 } from "./routes/matches.js";
 
@@ -503,11 +504,21 @@ function computeResolvedTicketOdds(
 
 function inferSelectionSport(
   selection: string,
-): "football" | "tennis" | "basketball" | "baseball" | "hockey" {
+): "football" | "tennis" | "basketball" | "baseball" | "hockey" | "volleyball" {
   const s = normalizeSettlementSelectionKey(selection);
   if (
+    /^vs[123][ha]$/.test(s) ||
+    /^vs-s(30|31|32|03|13|23)$/.test(s) ||
+    s === "hcap-vb-home" ||
+    s === "hcap-vb-away" ||
+    s === "pth" ||
+    s === "pta" ||
+    s === "pth2" ||
+    s === "pta2"
+  )
+    return "volleyball";
+  if (
     s.startsWith("set") ||
-    s.startsWith("vs") ||
     s.startsWith("es-") ||
     s.startsWith("sh") ||
     s.startsWith("gh-") ||
@@ -1465,6 +1476,19 @@ export function scoreOutcomeForSel(
     const score = `${hc}${ac}`;
     winning = score === want;
   }
+  // ── Volleyball set handicap (-1.5 / +1.5) ─────────────────────────────────
+  else if (s === "hcap-vb-home" || s === "hcap-vb-away") {
+    const ex = (extra?.extras ?? {}) as Record<string, unknown>;
+    const hs = ex["homeScore"] as Record<string, unknown> | undefined;
+    const as = ex["awayScore"] as Record<string, unknown> | undefined;
+    const homeSets =
+      typeof hs?.["current"] === "number" ? (hs["current"] as number) : ft.home;
+    const awaySets =
+      typeof as?.["current"] === "number" ? (as["current"] as number) : ft.away;
+    if (!Number.isFinite(homeSets) || !Number.isFinite(awaySets)) return null;
+    const diff = homeSets - awaySets;
+    winning = s === "hcap-vb-home" ? diff > 1.5 : diff < 1.5;
+  }
 
   // ── Basketball (totals / spread / team totals / halves / quarters) ─────────
   else if (
@@ -2062,7 +2086,14 @@ function getSelectionTeams(
 
 function normalizeSelectionSport(
   raw: unknown,
-): "football" | "tennis" | "basketball" | "baseball" | "hockey" | null {
+):
+  | "football"
+  | "tennis"
+  | "basketball"
+  | "baseball"
+  | "hockey"
+  | "volleyball"
+  | null {
   const value = String(raw ?? "")
     .trim()
     .toLowerCase();
@@ -2071,6 +2102,7 @@ function normalizeSelectionSport(
   if (value === "tennis") return "tennis";
   if (value === "basketball" || value === "nba" || value === "bball")
     return "basketball";
+  if (value === "volleyball" || value === "volley") return "volleyball";
   if (value === "baseball" || value === "mlb") return "baseball";
   if (value === "hockey" || value === "nhl") return "hockey";
   return null;
@@ -2078,12 +2110,25 @@ function normalizeSelectionSport(
 
 function readSelectionSport(
   sel: SelectionRecord,
-): "football" | "tennis" | "basketball" | "baseball" | "hockey" | null {
+):
+  | "football"
+  | "tennis"
+  | "basketball"
+  | "baseball"
+  | "hockey"
+  | "volleyball"
+  | null {
   return normalizeSelectionSport(sel.providerSport ?? sel.sport);
 }
 
 function providerMatchIdPrefixesForSport(
-  sport: "football" | "tennis" | "basketball" | "baseball" | "hockey",
+  sport:
+    | "football"
+    | "tennis"
+    | "basketball"
+    | "baseball"
+    | "hockey"
+    | "volleyball",
 ): string[] {
   switch (sport) {
     case "football":
@@ -2096,11 +2141,19 @@ function providerMatchIdPrefixesForSport(
       return ["baseball-v2", "mlb-v2"];
     case "hockey":
       return ["hockey-v2"];
+    case "volleyball":
+      return ["volley-live", "volley-odds"];
   }
 }
 
 function buildCanonicalMatchIds(
-  sport: "football" | "tennis" | "basketball" | "baseball" | "hockey",
+  sport:
+    | "football"
+    | "tennis"
+    | "basketball"
+    | "baseball"
+    | "hockey"
+    | "volleyball",
   providerId: string,
 ): string[] {
   const normalizedId = String(providerId ?? "").trim();
@@ -2130,7 +2183,7 @@ function canonicalizeSelectionMatchIds(
   }
 
   const syntheticMatch = raw.match(
-    /^(football|soccer|tennis|nba|bball|basketball|hockey|nhl|baseball|mlb)-(?:odds|live)-(\d+)$/i,
+    /^(football|soccer|tennis|nba|bball|basketball|hockey|nhl|baseball|mlb|volley|volleyball)-(?:odds|live)-(\d+)$/i,
   );
   if (syntheticMatch) {
     const syntheticSport = normalizeSelectionSport(syntheticMatch[1]);
@@ -2167,7 +2220,7 @@ function getSelectionLookupMatchIds(
 }
 
 function isProviderManagedMatchId(matchId: string): boolean {
-  return /^(football-v2|bball-v2|hockey-v2|tennis-v2|baseball-v2|mlb-v2)-\d+$/.test(
+  return /^(football-v2|bball-v2|hockey-v2|tennis-v2|baseball-v2|mlb-v2|volley-live|volley-odds)-\d+$/.test(
     String(matchId ?? "").trim(),
   );
 }
@@ -3610,9 +3663,10 @@ async function expireStalePendingBets(): Promise<void> {
  *
  * Each cycle (every ~60 s):
  *   1. scanDailyForFinished()       — football v1/v2 daily feed
- *   2. scanV2AllSportsForFinished() — V2 today feeds for ALL sports
- *   3. autoSettlePendingBets()      — settle bets with known results
- *   4. expireStalePendingBets()     — void bets pending >72 h (stake refunded)
+ *   2. scanV2AllSportsForFinished() — V2 today feeds for ALL core sports
+ *   3. scanVolleyballForFinished()  — volleyball finished matches from live feed
+ *   4. autoSettlePendingBets()      — settle bets with known results
+ *   5. expireStalePendingBets()     — void bets pending >72 h (stake refunded)
  *
  * Uses self-scheduling setTimeout (not setInterval) so each cycle only starts
  * after the previous one completes — prevents overlap on slow DB/API cycles.
@@ -3666,10 +3720,11 @@ export function startSettlementWorker(): void {
 
   const run = async (): Promise<void> => {
     try {
-      // Parallel scan: football daily feed + all V2 sports today feed
+      // Parallel scan: football daily feed + all V2 sports + volleyball finished feed
       await Promise.allSettled([
         scanDailyForFinished(),
         scanV2AllSportsForFinished(),
+        scanVolleyballForFinished(),
       ]);
       const now = Date.now();
       if (!queueEnabled || now - lastCatchupAt >= catchupMs) {

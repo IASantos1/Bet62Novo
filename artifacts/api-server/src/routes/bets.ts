@@ -314,7 +314,14 @@ function normalizeKickoffIso(value: unknown): string | undefined {
 
 function normalizeStoredSport(
   raw: unknown,
-): "football" | "tennis" | "basketball" | "baseball" | "hockey" | null {
+):
+  | "football"
+  | "tennis"
+  | "basketball"
+  | "baseball"
+  | "hockey"
+  | "volleyball"
+  | null {
   const value = String(raw ?? "")
     .trim()
     .toLowerCase();
@@ -325,6 +332,7 @@ function normalizeStoredSport(
     return "basketball";
   if (value === "baseball" || value === "mlb") return "baseball";
   if (value === "hockey" || value === "nhl") return "hockey";
+  if (value === "volleyball" || value === "volley") return "volleyball";
   return null;
 }
 
@@ -337,7 +345,7 @@ function normalizeStoredMatchId(
 
   const sport = normalizeStoredSport(sportRaw);
   const prefixedMatch = raw.match(
-    /^(football|soccer|tennis|nba|bball|basketball|hockey|nhl|baseball|mlb)-(?:odds|live)-(\d+)$/i,
+    /^(football|soccer|tennis|nba|bball|basketball|hockey|nhl|baseball|mlb|volley|volleyball)-(?:odds|live)-(\d+)$/i,
   );
   const simpleNumeric = /^\d+$/.test(raw) ? raw : null;
 
@@ -356,6 +364,8 @@ function normalizeStoredMatchId(
         return `baseball-v2-${providerId}`;
       case "hockey":
         return `hockey-v2-${providerId}`;
+      case "volleyball":
+        return `volley-odds-${providerId}`;
       default:
         return providerId;
     }

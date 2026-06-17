@@ -73,6 +73,7 @@ function normalizeAdminSport(raw: unknown): string {
   if (value === "nba" || value === "bball") return "basketball";
   if (value === "mlb") return "baseball";
   if (value === "nhl") return "hockey";
+  if (value === "volley") return "volleyball";
   return value;
 }
 
@@ -86,6 +87,8 @@ function inferAdminSportFromMatchId(matchId: unknown): string {
   if (value.startsWith("baseball-v2-") || value.startsWith("mlb-v2-"))
     return "baseball";
   if (value.startsWith("hockey-v2-")) return "hockey";
+  if (value.startsWith("volley-live-") || value.startsWith("volley-odds-"))
+    return "volleyball";
   return "unknown";
 }
 
