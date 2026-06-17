@@ -7078,7 +7078,43 @@ export default function Home({
         });
         if (res.ok) {
           const bets: UserBet[] = await res.json();
-          setMyBets(bets);
+          setMyBets((prev) => {
+            const prevMap = new Map(prev.map((bet) => [bet.id, bet] as const));
+            return bets.map((bet) => {
+              if (bet.status !== "pending") return bet;
+              const prevBet = prevMap.get(bet.id);
+              if (!prevBet || prevBet.status !== "pending") return bet;
+              const prevSelections = getBetSelections(prevBet);
+              const nextSelections = getBetSelections(bet);
+              const mergedSelections = nextSelections.map((sel, index) => {
+                const prevSel = prevSelections[index];
+                if (!prevSel) return sel;
+                return {
+                  ...sel,
+                  ...(sel.finalScore
+                    ? {}
+                    : prevSel.finalScore
+                      ? { finalScore: prevSel.finalScore }
+                      : {}),
+                  ...(sel.htScore
+                    ? {}
+                    : prevSel.htScore
+                      ? { htScore: prevSel.htScore }
+                      : {}),
+                  ...(sel.outcome != null
+                    ? {}
+                    : prevSel.outcome != null
+                      ? { outcome: prevSel.outcome }
+                      : {}),
+                };
+              });
+              return {
+                ...bet,
+                selections: mergedSelections,
+                statusPreview: bet.statusPreview ?? prevBet.statusPreview,
+              };
+            });
+          });
           myBetsInitialized.current = true;
           const currentWonIds = new Set(
             bets.filter((b) => b.status === "won").map((b) => b.id),
