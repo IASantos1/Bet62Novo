@@ -472,6 +472,30 @@ const TEAM_BANNERS: Record<string, string> = {
 type MainTab = "sports" | "live" | "promos" | "mybets" | "wallet" | "profile";
 type LiveTransport = "idle" | "cache" | "sse" | "polling";
 
+function normalizeMainTabPath(path: string): string {
+  const normalized = path.replace(/\/+$/, "");
+  return normalized === "" ? "/" : normalized;
+}
+
+function getPathForMainTab(tab: MainTab): string {
+  if (tab === "live") return "/ao-vivo";
+  if (tab === "promos") return "/promocoes";
+  if (tab === "wallet") return "/carteira";
+  if (tab === "mybets") return "/minhas-apostas";
+  if (tab === "profile") return "/perfil";
+  return "/";
+}
+
+function getMainTabForPath(path: string): MainTab {
+  const normalized = normalizeMainTabPath(path);
+  if (normalized === "/ao-vivo" || normalized === "/live") return "live";
+  if (normalized === "/promocoes") return "promos";
+  if (normalized === "/carteira") return "wallet";
+  if (normalized === "/minhas-apostas") return "mybets";
+  if (normalized === "/perfil") return "profile";
+  return "sports";
+}
+
 const TEAM_NAME_PT: Record<string, string> = {
   Norway: "Noruega",
   Uruguay: "Uruguai",
@@ -3341,13 +3365,9 @@ export default function Home({
     setActiveTab(initialTab);
   }, [initialTab]);
   useEffect(() => {
-    const currentPath = window.location.pathname.replace(/\/$/, "") || "/";
-    const isLiveRoute = currentPath === "/ao-vivo" || currentPath === "/live";
-    if (activeTab === "live") {
-      if (!isLiveRoute) navigate("/ao-vivo");
-      return;
-    }
-    if (isLiveRoute) navigate("/");
+    const currentPath = normalizeMainTabPath(window.location.pathname);
+    const targetPath = getPathForMainTab(activeTab);
+    if (currentPath !== targetPath) navigate(targetPath);
   }, [activeTab, navigate]);
   const lastTouchAtRef = useRef(0);
   const lastPointerDownAtRef = useRef(0);
@@ -3536,6 +3556,7 @@ export default function Home({
   );
   const [betPlacedAnim, setBetPlacedAnim] = useState(false);
   const prevWonBetIds = useRef<Set<number> | null>(null);
+  const myBetsRef = useRef<UserBet[]>([]);
   const openBetsSseRef = useRef<EventSource | null>(null);
   const openBetsSseReconnectRef = useRef<ReturnType<typeof setTimeout> | null>(
     null,
@@ -6396,7 +6417,14 @@ export default function Home({
       // If rawMatches > 0 but all were WC (filtered), keep existing non-WC live state intact.
       if (rawMatches.length > 0) return;
       emptyLiveStreakRef.current += 1;
-      if (emptyLiveStreakRef.current < 3) return;
+      const recentStreamActivity =
+        now - (liveDataFetchedAt.current ?? 0) < 45_000 || sseActiveRef.current;
+      if (
+        recentStreamActivity ||
+        prevLiveMatchesRef.current.length > 0 ||
+        emptyLiveStreakRef.current < 6
+      )
+        return;
       emptyLiveStreakRef.current = 0;
       apiMinutesRef.current = {};
       minuteChangedAtRef.current = {};
@@ -6510,9 +6538,9 @@ export default function Home({
           if (isFinishedStatus(m.status)) return false;
           const lastSeen = matchLastSeenRef.current[id] ?? 0;
           const missCount = matchMissCountRef.current[id] ?? 0;
-          // Keep if: absent from fewer than 2 consecutive responses (transient miss)
-          // OR still within 30s window (belt-and-suspenders for very slow polls)
-          return missCount < 2 || now - lastSeen < 30_000;
+          // Keep transiently missing matches around for longer so brief partial
+          // responses or feed reshuffles do not make live games disappear.
+          return missCount < 4 || now - lastSeen < 90_000;
         })
         .map((m) => ({
           ...m,
@@ -6551,7 +6579,7 @@ export default function Home({
         liveFetchCtrlRef.current = currentCtrl;
         const tid = setTimeout(() => currentCtrl.abort(), 20_000);
         try {
-          const res = await fetch("/api/matches/live?lean=1&limit=200", {
+          const res = await fetch("/api/matches/live?lean=1&limit=500", {
             signal: currentCtrl.signal,
           });
           if (!res.ok) throw new Error(`live_fetch_failed_${res.status}`);
@@ -6623,11 +6651,10 @@ export default function Home({
   const selectMainTab = useCallback(
     (id: typeof activeTab, onSelect?: () => void) => {
       const prev = activeTabRef.current;
-      const currentPath = window.location.pathname.replace(/\/$/, "") || "/";
       if (prev !== id) setActiveTab(id);
-      if (id === "live") navigate("/ao-vivo");
-      else if (currentPath === "/ao-vivo" || currentPath === "/live")
-        navigate("/");
+      const targetPath = getPathForMainTab(id);
+      const currentPath = normalizeMainTabPath(window.location.pathname);
+      if (currentPath !== targetPath) navigate(targetPath);
       onSelect?.();
       if (id === "live" && prev !== "live") {
         const snap = readSnapshot<LiveMatchRaw[]>(liveSnapshotKey());
@@ -6982,6 +7009,10 @@ export default function Home({
     liveMatchesRef.current = liveMatches;
   }, [liveMatches]);
 
+  useEffect(() => {
+    myBetsRef.current = myBets;
+  }, [myBets]);
+
   // Track disappearing live matches to store final scores
   useEffect(() => {
     const prev = prevLiveMatchesRef.current;
@@ -7146,7 +7177,7 @@ export default function Home({
         selections: OpenBetSelectionState[];
       }>,
     ) => {
-      const pendingIds = myBets
+      const pendingIds = myBetsRef.current
         .filter((bet) => bet.status === "pending")
         .map((bet) => bet.id);
       if (pendingIds.length === 0) return;
@@ -7185,12 +7216,12 @@ export default function Home({
         }),
       );
     },
-    [myBets, fetchMyBets],
+    [fetchMyBets],
   );
 
   const fetchOpenBetStates = useCallback(async () => {
     if (!auth.token) return;
-    const pendingIds = myBets
+    const pendingIds = myBetsRef.current
       .filter((bet) => bet.status === "pending")
       .map((bet) => bet.id);
     if (pendingIds.length === 0) return;
@@ -7210,7 +7241,7 @@ export default function Home({
     } catch {
       // non-critical lightweight refresh
     }
-  }, [auth.token, myBets, applyOpenBetStatePayload]);
+  }, [auth.token, applyOpenBetStatePayload]);
 
   useEffect(() => {
     if (cashoutExpandedId == null) return;
@@ -15975,15 +16006,16 @@ export default function Home({
                     <DropdownMenuSeparator className="bg-zinc-700" />
                     <DropdownMenuItem
                       className="hover:bg-zinc-800 cursor-pointer"
-                      onClick={() => setActiveTab("profile")}
+                      onClick={() => selectMainTab("profile")}
                     >
                       <User size={14} className="mr-2" /> Perfil
                     </DropdownMenuItem>
                     <DropdownMenuItem
                       className="hover:bg-zinc-800 cursor-pointer"
                       onClick={() => {
-                        setActiveTab("wallet");
-                        fetchMyBets();
+                        selectMainTab("wallet", () => {
+                          void fetchMyBets(true);
+                        });
                       }}
                     >
                       <Wallet size={14} className="mr-2" /> Carteira
@@ -15991,8 +16023,9 @@ export default function Home({
                     <DropdownMenuItem
                       className="hover:bg-zinc-800 cursor-pointer"
                       onClick={() => {
-                        setActiveTab("mybets");
-                        fetchMyBets();
+                        selectMainTab("mybets", () => {
+                          void fetchMyBets(true);
+                        });
                       }}
                     >
                       <History size={14} className="mr-2" /> Apostas
@@ -16061,8 +16094,9 @@ export default function Home({
           {auth.user && (
             <button
               {...makeTap(() => {
-                setActiveTab("wallet");
-                fetchMyBets();
+                selectMainTab("wallet", () => {
+                  void fetchMyBets(true);
+                });
               })}
               className={`py-3 font-semibold text-sm transition-colors border-b-2 whitespace-nowrap flex items-center gap-2 ${activeTab === "wallet" ? "border-red-600 text-white" : "border-transparent text-zinc-500 hover:text-zinc-300"}`}
             >
@@ -16073,8 +16107,9 @@ export default function Home({
           {auth.user && (
             <button
               {...makeTap(() => {
-                setActiveTab("mybets");
-                fetchMyBets();
+                selectMainTab("mybets", () => {
+                  void fetchMyBets(true);
+                });
               })}
               className={`py-3 font-semibold text-sm transition-colors border-b-2 whitespace-nowrap flex items-center gap-2 ${activeTab === "mybets" ? "border-red-600 text-white" : "border-transparent text-zinc-500 hover:text-zinc-300"}`}
             >
@@ -16084,7 +16119,7 @@ export default function Home({
           )}
           {auth.user && (
             <button
-              {...makeTap(() => setActiveTab("profile"))}
+              {...makeTap(() => selectMainTab("profile"))}
               className={`py-3 font-semibold text-sm transition-colors border-b-2 whitespace-nowrap flex items-center gap-2 ${activeTab === "profile" ? "border-red-600 text-white" : "border-transparent text-zinc-500 hover:text-zinc-300"}`}
             >
               <User size={16} />
