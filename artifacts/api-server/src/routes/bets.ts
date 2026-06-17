@@ -1610,9 +1610,9 @@ router.post(
                     ? "CESTA"
                     : liveSt.sport === "hockey"
                       ? "GOLO"
-                  : liveSt.sport === "baseball"
-                    ? "RUN"
-                    : "PONTO"),
+                      : liveSt.sport === "baseball"
+                        ? "RUN"
+                        : "PONTO"),
           });
           return;
         }

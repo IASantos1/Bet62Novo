@@ -486,16 +486,6 @@ function getPathForMainTab(tab: MainTab): string {
   return "/";
 }
 
-function getMainTabForPath(path: string): MainTab {
-  const normalized = normalizeMainTabPath(path);
-  if (normalized === "/ao-vivo" || normalized === "/live") return "live";
-  if (normalized === "/promocoes") return "promos";
-  if (normalized === "/carteira") return "wallet";
-  if (normalized === "/minhas-apostas") return "mybets";
-  if (normalized === "/perfil") return "profile";
-  return "sports";
-}
-
 const TEAM_NAME_PT: Record<string, string> = {
   Norway: "Noruega",
   Uruguay: "Uruguai",
