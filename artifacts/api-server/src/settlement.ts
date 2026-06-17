@@ -66,17 +66,21 @@ export type SelectionSettlementResolution = {
     | "fallback_tennis_winner"
     | "fallback_baseball_moneyline"
     | "fallback_football_1x2"
-    | "timeout_auto_void";
+    | "timeout_auto_void"
+    | "timeout_no_result_auto_void";
 };
 
 const SETTLEMENT_LOCK_TTL_SECONDS = 300;
 export const SETTLEMENT_TIMEOUT_HOURS = 12;
 const SETTLEMENT_TIMEOUT_MS = SETTLEMENT_TIMEOUT_HOURS * 60 * 60 * 1000;
+const LATE_PENDING_LOG_GRACE_MS = 3 * 60 * 60 * 1000;
+const LATE_PENDING_LOG_INTERVAL_MS = 15 * 60 * 1000;
 
 let settlementRedis: any | null | undefined;
 let settlementHelpersModulePromise: Promise<
   typeof import("./lib/settlementHelpers.js")
 > | null = null;
+const latePendingBetLogCache = new Map<number, number>();
 
 function getSettlementRedis(): any | null {
   if (settlementRedis !== undefined) return settlementRedis;
@@ -2168,7 +2172,9 @@ function isProviderManagedMatchId(matchId: string): boolean {
   );
 }
 
-function parseSelectionKickoffTimestamp(sel: SelectionRecord): number | null {
+export function parseSelectionKickoffTimestamp(
+  sel: SelectionRecord,
+): number | null {
   const isoCandidate = sel.kickoffTime ?? sel.scheduledAt;
   if (typeof isoCandidate === "string" && isoCandidate.trim() !== "") {
     const ts = new Date(isoCandidate).getTime();
@@ -2212,6 +2218,71 @@ function resultMatchesSelectionSport(
   if (!selectionSport) return true;
   return providerMatchIdPrefixesForSport(selectionSport).some((prefix) =>
     matchId.startsWith(`${prefix}-`),
+  );
+}
+
+function getBetKickoffTimestamp(bet: {
+  kickoffTime?: Date | string | null;
+  selections?: unknown;
+}): number | null {
+  const directKickoff = bet.kickoffTime;
+  if (directKickoff instanceof Date) {
+    return Number.isFinite(directKickoff.getTime())
+      ? directKickoff.getTime()
+      : null;
+  }
+  if (typeof directKickoff === "string" && directKickoff.trim() !== "") {
+    const ts = new Date(directKickoff).getTime();
+    if (Number.isFinite(ts)) return ts;
+  }
+
+  const selections = Array.isArray(bet.selections)
+    ? (bet.selections as SelectionRecord[])
+    : [];
+  const timestamps = selections
+    .map((sel) => parseSelectionKickoffTimestamp(sel))
+    .filter((value): value is number => Number.isFinite(value));
+  if (timestamps.length === 0) return null;
+  return Math.min(...timestamps);
+}
+
+function logLatePendingBet(
+  bet: {
+    id: number;
+    userId: number;
+    matchId: string;
+    kickoffTime?: Date | string | null;
+    selections?: unknown;
+  },
+  results: UnifiedSettlementResult[],
+): void {
+  const kickoffTs = getBetKickoffTimestamp(bet);
+  if (!Number.isFinite(kickoffTs)) return;
+  const ageMs = Date.now() - (kickoffTs as number);
+  if (ageMs < LATE_PENDING_LOG_GRACE_MS) return;
+
+  const lastLoggedAt = latePendingBetLogCache.get(bet.id) ?? 0;
+  if (Date.now() - lastLoggedAt < LATE_PENDING_LOG_INTERVAL_MS) return;
+  latePendingBetLogCache.set(bet.id, Date.now());
+
+  const unresolved = results
+    .filter((result) => result.outcome === null)
+    .map((result) => ({
+      selection: result.updatedSel.selection,
+      reason: result.reason,
+      detail: result.reasonDetail ?? null,
+      note: result.settlementNote ?? null,
+    }));
+
+  logger.warn(
+    {
+      betId: bet.id,
+      userId: bet.userId,
+      matchId: bet.matchId,
+      pendingForMinutes: Math.floor(ageMs / 60_000),
+      unresolvedSelections: unresolved,
+    },
+    "Bet still pending long after kickoff",
   );
 }
 
@@ -2821,8 +2892,8 @@ export async function autoSettlePendingBets(opts?: {
         const outcomes: SettlementOutcome[] = finalSettlementResults.map(
           (result) => result.outcome,
         );
-        const timedOutCount = finalSettlementResults.filter(
-          (result) => result.settlementNote === "auto_void_timeout",
+        const timedOutCount = finalSettlementResults.filter((result) =>
+          String(result.settlementNote ?? "").startsWith("auto_void_"),
         ).length;
 
         // ── Early loss: if any leg is definitively lost, settle immediately ──
@@ -2904,7 +2975,10 @@ export async function autoSettlePendingBets(opts?: {
         }
 
         // Only settle when every selection has a resolved outcome (no nulls)
-        if (outcomes.some((o) => o === null)) continue;
+        if (outcomes.some((o) => o === null)) {
+          logLatePendingBet(bet, finalSettlementResults);
+          continue;
+        }
 
         if (outcomes.every((o) => o === "void")) {
           await db.transaction(async (tx: any) => {
