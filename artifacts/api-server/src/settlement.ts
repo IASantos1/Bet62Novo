@@ -37,6 +37,7 @@ export type SelectionRecord = {
   odd?: number;
   market?: string;
   label?: string;
+  marketLine?: number;
   finalScore?: { home: number; away: number };
   htScore?: { htHome: number; htAway: number };
   outcome?: "won" | "lost" | "void" | "half_won" | "half_lost" | null;
@@ -416,6 +417,16 @@ function parseSignedSelectionLabelLine(label: unknown): number | null {
     return Number.isFinite(value) ? sign * value : null;
   }
   return parseSelectionLabelLine(label);
+}
+
+function readSelectionMarketLine(sel: {
+  label?: unknown;
+  marketLine?: unknown;
+}): number | null {
+  if (typeof sel.marketLine === "number" && Number.isFinite(sel.marketLine)) {
+    return sel.marketLine;
+  }
+  return parseSignedSelectionLabelLine(sel.label);
 }
 
 function splitAsianLine(line: number): number[] {
@@ -1426,7 +1437,7 @@ export function scoreOutcomeForSel(
   // ── Asian handicap (settle full win/loss/void; quarter split stays pending)
   else if (s === "ah-home" || s === "ah-away") {
     const side = s.endsWith("home") ? "home" : "away";
-    const line = parseSignedSelectionLabelLine(sel.label);
+    const line = readSelectionMarketLine(sel);
     if (line == null || !Number.isFinite(line)) return null;
     return settleAsianSideHandicapOutcome(home, away, side, line);
   }
@@ -1815,9 +1826,7 @@ export function scoreOutcomeForSel(
     winning = home - away <= 1;
   } else if (s === "pl-home" || s === "pl-away") {
     const side = s.endsWith("home") ? "home" : "away";
-    const line =
-      parseSignedSelectionLabelLine(sel.label) ??
-      (side === "home" ? -1.5 : 1.5);
+    const line = readSelectionMarketLine(sel) ?? (side === "home" ? -1.5 : 1.5);
     return settleAsianSideHandicapOutcome(home, away, side, line);
   }
 

@@ -312,6 +312,25 @@ function normalizeKickoffIso(value: unknown): string | undefined {
   return Number.isNaN(parsed.getTime()) ? undefined : parsed.toISOString();
 }
 
+function extractStoredMarketLine(
+  rawValue: unknown,
+  rawLabel: unknown,
+): number | undefined {
+  if (typeof rawValue === "number" && Number.isFinite(rawValue))
+    return rawValue;
+  if (typeof rawLabel !== "string") return undefined;
+  const normalized = rawLabel.replace(/[−–]/g, "-").replace(/\s+/g, " ");
+  const signed = normalized.match(/([+-])\s*(\d+(?:[.,]\d+)?)/);
+  if (signed) {
+    const value = Number(signed[2]!.replace(",", "."));
+    if (Number.isFinite(value)) return (signed[1] === "-" ? -1 : 1) * value;
+  }
+  const unsigned = normalized.match(/(\d+(?:[.,]\d+)?)/);
+  if (!unsigned) return undefined;
+  const value = Number(unsigned[1]!.replace(",", "."));
+  return Number.isFinite(value) ? value : undefined;
+}
+
 function normalizeStoredSport(
   raw: unknown,
 ):
@@ -426,6 +445,17 @@ function normalizeStoredSelection(
     matchId: normalizeStoredMatchId(r.matchId ?? fallback.matchId, r.sport),
     matchTitle,
     selection: normalizeSelectionKey(selection),
+    ...(extractStoredMarketLine(
+      (r as { marketLine?: unknown }).marketLine,
+      r.label,
+    ) !== undefined
+      ? {
+          marketLine: extractStoredMarketLine(
+            (r as { marketLine?: unknown }).marketLine,
+            r.label,
+          ),
+        }
+      : {}),
     ...(kickoffIso ? { kickoffTime: kickoffIso, scheduledAt: kickoffIso } : {}),
     ...(homeTeam ? { homeTeam } : {}),
     ...(awayTeam ? { awayTeam } : {}),
