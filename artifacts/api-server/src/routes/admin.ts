@@ -537,8 +537,12 @@ router.put(
             0,
             parseFloat(user.balance) - parseFloat(amount),
           ).toFixed(2);
-        } else if (balance !== undefined) {
-          newBalance = Math.max(0, parseFloat(balance)).toFixed(2);
+        } else if (
+          balance !== undefined ||
+          (operation === "set" && amount !== undefined)
+        ) {
+          const targetBalance = balance ?? amount;
+          newBalance = Math.max(0, parseFloat(targetBalance)).toFixed(2);
         } else {
           throw Object.assign(new Error("Operação inválida"), { status: 400 });
         }

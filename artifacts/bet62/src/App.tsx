@@ -62,6 +62,10 @@ function Router() {
   return (
     <Switch>
       <Route path="/">{() => <Home />}</Route>
+      <Route path="/promocoes">{() => <Home initialTab="promos" />}</Route>
+      <Route path="/carteira">{() => <Home initialTab="wallet" />}</Route>
+      <Route path="/minhas-apostas">{() => <Home initialTab="mybets" />}</Route>
+      <Route path="/perfil">{() => <Home initialTab="profile" />}</Route>
       <Route path="/ao-vivo">{() => <LivePage />}</Route>
       <Route path="/live">{() => <LivePage />}</Route>
       <Route path="/admin">{() => (

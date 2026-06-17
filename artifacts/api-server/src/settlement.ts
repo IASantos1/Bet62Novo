@@ -906,6 +906,7 @@ function describePendingSettlementReason(
     (s.startsWith("ht-") ||
       s.startsWith("htcs-") ||
       s.startsWith("b1h-") ||
+      s.startsWith("b2h-") ||
       s.startsWith("wbh-") ||
       s.startsWith("hsf-") ||
       s.startsWith("htft-") ||
@@ -2045,6 +2046,7 @@ export function scoreOutcomeForSel(
     s.startsWith("ht-") ||
     s.startsWith("htcs-") ||
     s.startsWith("b1h-") ||
+    s.startsWith("b2h-") ||
     s.startsWith("wbh-") ||
     s.startsWith("hsf-") ||
     s.startsWith("htft-") ||
@@ -2061,6 +2063,12 @@ export function scoreOutcomeForSel(
     // ── BTTS 1st Half ──────────────────────────────────────────────────────
     else if (s === "b1h-yes") winning = htH > 0 && htA > 0;
     else if (s === "b1h-no") winning = htH === 0 || htA === 0;
+    // ── BTTS 2nd Half ──────────────────────────────────────────────────────
+    else if (s === "b2h-yes") {
+      if (h2H !== null && h2A !== null) winning = h2H > 0 && h2A > 0;
+    } else if (s === "b2h-no") {
+      if (h2H !== null && h2A !== null) winning = h2H === 0 || h2A === 0;
+    }
     // ── HT Correct Score ───────────────────────────────────────────────────
     else if (s.startsWith("htcs-")) {
       const body = s.slice(5);

@@ -662,9 +662,13 @@ export default function AdminPage() {
   const handleUpdateBalance = async () => {
     if (!balanceModal || !balanceAmount) return; setUpdatingBalance(true);
     try {
+      const payload =
+        balanceOp === "set"
+          ? { operation: "set", balance: balanceAmount }
+          : { operation: balanceOp, amount: balanceAmount };
       const res = await fetch(`/api/admin/users/${balanceModal.id}/balance`, {
         method: "PUT", headers: { "Content-Type": "application/json", ...authHeader },
-        body: JSON.stringify({ operation: balanceOp, amount: balanceAmount }),
+        body: JSON.stringify(payload),
       });
       const data = await res.json();
       if (!res.ok) { toast.error(data.error); return; }

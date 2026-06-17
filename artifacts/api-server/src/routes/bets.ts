@@ -83,7 +83,8 @@ router.post(
         liveSt.sport === "football" ||
         liveSt.sport === "basketball" ||
         liveSt.sport === "hockey" ||
-        liveSt.sport === "baseball";
+        liveSt.sport === "baseball" ||
+        liveSt.sport === "volleyball";
       if (!allowed) {
         out.push({ matchId, market, odds: null, suspended: false });
         continue;
@@ -105,7 +106,9 @@ router.post(
                 ? "CESTA"
                 : liveSt.sport === "hockey"
                   ? "GOLO"
-                  : "RUN"))
+                  : liveSt.sport === "baseball"
+                    ? "RUN"
+                    : "PONTO"))
         : undefined;
 
       const curOdd = currentOddForSelection(
@@ -1587,7 +1590,8 @@ router.post(
         liveSt?.sport === "football" ||
         liveSt?.sport === "basketball" ||
         liveSt?.sport === "hockey" ||
-        liveSt?.sport === "baseball"
+        liveSt?.sport === "baseball" ||
+        liveSt?.sport === "volleyball"
       ) {
         const anySuspended =
           liveSt.marketSuspension != null &&
@@ -1606,7 +1610,9 @@ router.post(
                     ? "CESTA"
                     : liveSt.sport === "hockey"
                       ? "GOLO"
-                      : "RUN"),
+                  : liveSt.sport === "baseball"
+                    ? "RUN"
+                    : "PONTO"),
           });
           return;
         }
@@ -1622,7 +1628,8 @@ router.post(
         liveSt.sport !== "football" &&
         liveSt.sport !== "basketball" &&
         liveSt.sport !== "hockey" &&
-        liveSt.sport !== "baseball"
+        liveSt.sport !== "baseball" &&
+        liveSt.sport !== "volleyball"
       )
         continue;
 
@@ -1651,7 +1658,9 @@ router.post(
                   ? "CESTA"
                   : liveSt.sport === "hockey"
                     ? "GOLO"
-                    : "RUN"),
+                    : liveSt.sport === "baseball"
+                      ? "RUN"
+                      : "PONTO"),
         });
         return;
       }
