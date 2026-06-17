@@ -926,6 +926,10 @@ function describePendingSettlementReason(
     if (
       (/^set[123]-/.test(s) ||
         /^vs[123][ha]$/.test(s) ||
+        /^sh\d+-/.test(s) ||
+        /^gh-(home|away)-/.test(s) ||
+        /^tg-([ou])-/.test(s) ||
+        /^s[12]g-([ou])-/.test(s) ||
         /^ses-/.test(s) ||
         /^sc[123]-/.test(s)) &&
       sets.length === 0
@@ -936,6 +940,8 @@ function describePendingSettlementReason(
     const periods = getBasketballQuartersFromExtras(extra?.extras);
     if (
       (/^q[1234]-/.test(s) ||
+        /^b-anyq-/.test(s) ||
+        /^b-allq-/.test(s) ||
         s === "h1-home" ||
         s === "h1-away" ||
         /^b-h1-pts-/.test(s)) &&
@@ -1547,6 +1553,65 @@ export function scoreOutcomeForSel(
             : "1-2";
     winning = score === want;
   }
+  // ── Tennis set handicap / game handicap / game totals / correct set score ──
+  else if (/^sh(\d+)-(home|away)$/.test(s)) {
+    const m = s.match(/^sh(\d+)-(home|away)$/)!;
+    const line = decodeCompactLine(m[1]!);
+    if (!Number.isFinite(line)) return null;
+    const sets = getTennisSetsFromExtras(extra?.extras);
+    if (sets.length === 0) return null;
+    const homeSets = sets.filter(
+      ([h, a]) => tennisSetFinished([h, a]) && h > a,
+    ).length;
+    const awaySets = sets.filter(
+      ([h, a]) => tennisSetFinished([h, a]) && a > h,
+    ).length;
+    const diff = homeSets - awaySets;
+    if (diff === line) voided = true;
+    else winning = m[2] === "home" ? diff > line : diff < line;
+  } else if (/^gh-(home|away)-(\d+(?:\.\d+)?)$/.test(s)) {
+    const m = s.match(/^gh-(home|away)-(\d+(?:\.\d+)?)$/)!;
+    const line = Number(m[2]!);
+    if (!Number.isFinite(line)) return null;
+    const sets = getTennisSetsFromExtras(extra?.extras);
+    if (sets.length === 0) return null;
+    const completedSets = sets.filter(tennisSetFinished);
+    if (completedSets.length === 0) return null;
+    const homeGames = completedSets.reduce((sum, [h]) => sum + h, 0);
+    const awayGames = completedSets.reduce((sum, [, a]) => sum + a, 0);
+    const diff = homeGames - awayGames;
+    if (diff === line) voided = true;
+    else winning = m[1] === "home" ? diff > line : diff < line;
+  } else if (/^tg-([ou])-(\d+(?:\.\d+)?)$/.test(s)) {
+    const m = s.match(/^tg-([ou])-(\d+(?:\.\d+)?)$/)!;
+    const line = Number(m[2]!);
+    if (!Number.isFinite(line)) return null;
+    const sets = getTennisSetsFromExtras(extra?.extras);
+    if (sets.length === 0) return null;
+    const completedSets = sets.filter(tennisSetFinished);
+    if (completedSets.length === 0) return null;
+    const totalGames = completedSets.reduce((sum, [h, a]) => sum + h + a, 0);
+    if (totalGames === line) voided = true;
+    else winning = m[1] === "o" ? totalGames > line : totalGames < line;
+  } else if (/^s([12])g-([ou])-(\d+(?:\.\d+)?)$/.test(s)) {
+    const m = s.match(/^s([12])g-([ou])-(\d+(?:\.\d+)?)$/)!;
+    const setIndex = Number(m[1]!) - 1;
+    const line = Number(m[3]!);
+    if (!Number.isFinite(line) || setIndex < 0) return null;
+    const setScore = getTennisSetsFromExtras(extra?.extras)[setIndex] ?? null;
+    if (!setScore || !tennisSetFinished(setScore)) return null;
+    const totalGames = setScore[0] + setScore[1];
+    if (totalGames === line) voided = true;
+    else winning = m[2] === "o" ? totalGames > line : totalGames < line;
+  } else if (/^sc([12])-(\d+)-(\d+)$/.test(s)) {
+    const m = s.match(/^sc([12])-(\d+)-(\d+)$/)!;
+    const setIndex = Number(m[1]!) - 1;
+    const wantHome = Number(m[2]!);
+    const wantAway = Number(m[3]!);
+    const setScore = getTennisSetsFromExtras(extra?.extras)[setIndex] ?? null;
+    if (!setScore || !tennisSetFinished(setScore)) return null;
+    winning = setScore[0] === wantHome && setScore[1] === wantAway;
+  }
   // ── Total sets O/U (tennis) ───────────────────────────────────────────────
   else if (/^([ou])sets(35|25)?$/.test(s)) {
     const m = s.match(/^([ou])sets(35|25)?$/)!;
@@ -1720,6 +1785,40 @@ export function scoreOutcomeForSel(
       if (qH === null || qA === null) return null;
       if (qH === qA) voided = true;
       else winning = side === "home" ? qH > qA : qA > qH;
+    }
+
+    const anyQuarter = s.match(/^b-anyq-(home|away)$/);
+    if (winning === null && anyQuarter) {
+      const side = anyQuarter[1]!;
+      const quarters: Array<[number | null, number | null]> = [
+        [q1H, q1A],
+        [q2H, q2A],
+        [q3H, q3A],
+        [q4H, q4A],
+      ];
+      if (quarters.some(([h, a]) => h === null || a === null)) return null;
+      winning = quarters.some(([h, a]) =>
+        side === "home"
+          ? (h as number) > (a as number)
+          : (a as number) > (h as number),
+      );
+    }
+
+    const allQuarters = s.match(/^b-allq-(home|away)$/);
+    if (winning === null && allQuarters) {
+      const side = allQuarters[1]!;
+      const quarters: Array<[number | null, number | null]> = [
+        [q1H, q1A],
+        [q2H, q2A],
+        [q3H, q3A],
+        [q4H, q4A],
+      ];
+      if (quarters.some(([h, a]) => h === null || a === null)) return null;
+      winning = quarters.every(([h, a]) =>
+        side === "home"
+          ? (h as number) > (a as number)
+          : (a as number) > (h as number),
+      );
     }
 
     if (winning === null && (s === "h1-home" || s === "h1-away")) {
