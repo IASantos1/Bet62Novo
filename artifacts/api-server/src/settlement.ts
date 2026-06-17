@@ -1104,6 +1104,111 @@ function normalizeHumanTotalSettlementKey(selection: string): string | null {
   return null;
 }
 
+function normalizeCompactSelectionLine(rawLine: string): string {
+  return String(rawLine ?? "").replace(/[.,]/g, "");
+}
+
+function normalizeCompactFootballSelectionKey(
+  selection: string,
+): string | null {
+  const raw = String(selection ?? "")
+    .trim()
+    .toLowerCase();
+  if (!raw) return null;
+
+  const quickResult = raw.match(/^\d+:(home|draw|away)$/);
+  if (quickResult) return quickResult[1]!;
+
+  const result = raw.match(/^r:(home|draw|away)$/);
+  if (result) return result[1]!;
+
+  const halfTime = raw.match(/^ht:(home|draw|away)$/);
+  if (halfTime) return `ht-${halfTime[1]!}`;
+
+  const secondHalf = raw.match(/^sh:(home|draw|away)$/);
+  if (secondHalf) return `2h-${secondHalf[1]!}`;
+
+  const doubleChance = raw.match(/^dc:(hd|ad|ha)$/);
+  if (doubleChance)
+    return doubleChance[1] === "ad" ? "dc-da" : `dc-${doubleChance[1]!}`;
+
+  const totalGoals = raw.match(/^tg:([ou])(\d+(?:[.,]\d+)?)$/);
+  if (totalGoals)
+    return `${totalGoals[1]!}${normalizeCompactSelectionLine(totalGoals[2]!)}`;
+
+  const bothTeams = raw.match(/^bts(?:(1h|2h))?:(y|n)$/);
+  if (bothTeams) {
+    const period = bothTeams[1];
+    const outcome = bothTeams[2] === "y" ? "yes" : "no";
+    if (period === "1h") return `b1h-${outcome}`;
+    if (period === "2h") return `b2h-${outcome}`;
+    return `bts-${outcome}`;
+  }
+
+  const drawNoBet = raw.match(/^dnb:(home|away)$/);
+  if (drawNoBet) return `dnb-${drawNoBet[1]!}`;
+
+  const firstGoal = raw.match(/^fg:(h|a|no)$/);
+  if (firstGoal) {
+    if (firstGoal[1] === "h") return "fg-home";
+    if (firstGoal[1] === "a") return "fg-away";
+    return "fg-none";
+  }
+
+  const winToNil = raw.match(/^wtn:(h|a)$/);
+  if (winToNil) return `wtn-${winToNil[1]!}`;
+
+  const cleanSheet = raw.match(/^csh:(h|a)$/);
+  if (cleanSheet) return `cs-${cleanSheet[1]!}`;
+
+  const goalOddEven = raw.match(/^goe:(o|e)$/);
+  if (goalOddEven) return goalOddEven[1] === "o" ? "goe-odd" : "goe-even";
+
+  const exactGoals = raw.match(/^eg:(0|1|2|3|4|5\+)$/);
+  if (exactGoals)
+    return exactGoals[1] === "5+" ? "eg-g5plus" : `eg-g${exactGoals[1]!}`;
+
+  const teamGoals = raw.match(/^(htg|atg):([ou])(\d+(?:[.,]\d+)?)$/);
+  if (teamGoals) {
+    const side = teamGoals[1] === "htg" ? "tgh" : "tga";
+    return `${side}-${teamGoals[2]!}${normalizeCompactSelectionLine(teamGoals[3]!)}`;
+  }
+
+  const handicap = raw.match(/^hcp:([+-])(\d+(?:[.,]\d+)?)$/);
+  if (handicap) {
+    const normalizedLine = normalizeCompactSelectionLine(handicap[2]!);
+    if (handicap[1] === "-") {
+      if (normalizedLine === "10") return "hc-hm1";
+      if (normalizedLine === "15") return "hc-hm15";
+    } else {
+      if (normalizedLine === "10") return "hc-ap1";
+      if (normalizedLine === "15") return "hc-ap15";
+    }
+  }
+
+  const corners = raw.match(/^cn:([ou])(\d+(?:[.,]\d+)?)$/);
+  if (corners)
+    return `${corners[1]!}c${normalizeCompactSelectionLine(corners[2]!)}`;
+
+  const cards = raw.match(/^cd:([ou])(\d+(?:[.,]\d+)?)$/);
+  if (cards)
+    return `${cards[1]!}card${normalizeCompactSelectionLine(cards[2]!)}`;
+
+  const halfTimeFullTime = raw.match(/^htft:([hda]{2})$/);
+  if (halfTimeFullTime) return `htft-${halfTimeFullTime[1]!}`;
+
+  const winBothHalves = raw.match(/^twbh:(h|a)$/);
+  if (winBothHalves) return `wbh-${winBothHalves[1]!}`;
+
+  const highestScoringHalf = raw.match(/^hsh:(1|2|eq)$/);
+  if (highestScoringHalf) {
+    if (highestScoringHalf[1] === "eq") return "hsf-e";
+    return `hsf-${highestScoringHalf[1]!}`;
+  }
+
+  return null;
+}
+
 export function normalizeSettlementSelectionKey(selection: string): string {
   let s = String(selection ?? "");
   if (/^(?:handicap|asiatico|spread|puckline):/.test(s))
@@ -1157,6 +1262,8 @@ export function normalizeSettlementSelectionKey(selection: string): string {
   else if (s === "et-tie-home") s = "et-tw-home";
   else if (s === "et-tie-away") s = "et-tw-away";
   else {
+    const compactFootballKey = normalizeCompactFootballSelectionKey(s);
+    if (compactFootballKey) s = compactFootballKey;
     const humanTotal = normalizeHumanTotalSettlementKey(s);
     if (humanTotal) s = humanTotal;
   }
