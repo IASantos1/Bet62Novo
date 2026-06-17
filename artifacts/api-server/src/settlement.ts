@@ -883,6 +883,7 @@ function describePendingSettlementReason(
     finishedAt?: number;
   },
 ): string {
+  const rawSelection = String(sel.selection ?? "").trim();
   const statusOutcome = resolveSettlementStatusOutcome(
     extra?.status,
     extra?.finishedAt,
@@ -897,10 +898,28 @@ function describePendingSettlementReason(
   if (/^[ou]card\d+$/.test(s) && extra?.cardsTotal == null)
     return "missing_cards_total";
   if (
+    (/^1hcard-[ou]\d+$/.test(s) ||
+      /^2hcard-[ou]\d+$/.test(s) ||
+      /^cd1h:[ou]\d+(?:[.,]\d+)?$/i.test(rawSelection) ||
+      /^cd2h:[ou]\d+(?:[.,]\d+)?$/i.test(rawSelection)) &&
+    getFootballCardEventsFromExtras(extra?.extras) == null
+  ) {
+    return "missing_football_card_events";
+  }
+  if (
     (s === "fg-home" || s === "fg-away" || s === "fg-none") &&
     !extra?.firstGoal
   )
     return "missing_first_goal_data";
+  if (
+    parseSelectionPlayerMarket(rawSelection) &&
+    ((parseSelectionPlayerMarket(rawSelection)!.market === "card" &&
+      getFootballCardEventsFromExtras(extra?.extras) == null) ||
+      (parseSelectionPlayerMarket(rawSelection)!.market !== "card" &&
+        getFootballGoalEventsFromExtras(extra?.extras) == null))
+  ) {
+    return "missing_football_player_events";
+  }
   const derivedHt = ht ?? getFootballHTScoreFromExtras(extra?.extras);
   if (
     (s.startsWith("ht-") ||
@@ -1104,6 +1123,239 @@ function normalizeHumanTotalSettlementKey(selection: string): string | null {
   return null;
 }
 
+function normalizeParticipantName(raw: string): string {
+  return String(raw ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+function normalizeCompactSelectionLine(rawLine: string): string {
+  return String(rawLine ?? "").replace(/[.,]/g, "");
+}
+
+function normalizeCompactFootballSelectionKey(
+  selection: string,
+): string | null {
+  const raw = String(selection ?? "")
+    .trim()
+    .toLowerCase();
+  if (!raw) return null;
+
+  const quickResult = raw.match(/^\d+:(home|draw|away)$/);
+  if (quickResult) return quickResult[1]!;
+
+  const result = raw.match(/^r:(home|draw|away)$/);
+  if (result) return result[1]!;
+
+  const halfTime = raw.match(/^ht:(home|draw|away)$/);
+  if (halfTime) return `ht-${halfTime[1]!}`;
+
+  const secondHalf = raw.match(/^sh:(home|draw|away)$/);
+  if (secondHalf) return `2h-${secondHalf[1]!}`;
+
+  const doubleChance = raw.match(/^dc:(hd|ad|ha)$/);
+  if (doubleChance)
+    return doubleChance[1] === "ad" ? "dc-da" : `dc-${doubleChance[1]!}`;
+
+  const totalGoals = raw.match(/^tg:([ou])(\d+(?:[.,]\d+)?)$/);
+  if (totalGoals)
+    return `${totalGoals[1]!}${normalizeCompactSelectionLine(totalGoals[2]!)}`;
+
+  const bothTeams = raw.match(/^bts(?:(1h|2h))?:(y|n)$/);
+  if (bothTeams) {
+    const period = bothTeams[1];
+    const outcome = bothTeams[2] === "y" ? "yes" : "no";
+    if (period === "1h") return `b1h-${outcome}`;
+    if (period === "2h") return `b2h-${outcome}`;
+    return `bts-${outcome}`;
+  }
+
+  const drawNoBet = raw.match(/^dnb:(home|away)$/);
+  if (drawNoBet) return `dnb-${drawNoBet[1]!}`;
+
+  const firstGoal = raw.match(/^fg:(h|a|no)$/);
+  if (firstGoal) {
+    if (firstGoal[1] === "h") return "fg-home";
+    if (firstGoal[1] === "a") return "fg-away";
+    return "fg-none";
+  }
+
+  const winToNil = raw.match(/^wtn:(h|a)$/);
+  if (winToNil) return `wtn-${winToNil[1]!}`;
+
+  const cleanSheet = raw.match(/^csh:(h|a)$/);
+  if (cleanSheet) return `cs-${cleanSheet[1]!}`;
+
+  const goalOddEven = raw.match(/^goe:(o|e)$/);
+  if (goalOddEven) return goalOddEven[1] === "o" ? "goe-odd" : "goe-even";
+
+  const exactGoals = raw.match(/^eg:(0|1|2|3|4|5\+)$/);
+  if (exactGoals)
+    return exactGoals[1] === "5+" ? "eg-g5plus" : `eg-g${exactGoals[1]!}`;
+
+  const teamGoals = raw.match(/^(htg|atg):([ou])(\d+(?:[.,]\d+)?)$/);
+  if (teamGoals) {
+    const side = teamGoals[1] === "htg" ? "tgh" : "tga";
+    return `${side}-${teamGoals[2]!}${normalizeCompactSelectionLine(teamGoals[3]!)}`;
+  }
+
+  const handicap = raw.match(/^hcp:([+-])(\d+(?:[.,]\d+)?)$/);
+  if (handicap) {
+    const normalizedLine = normalizeCompactSelectionLine(handicap[2]!);
+    if (handicap[1] === "-") {
+      if (normalizedLine === "10") return "hc-hm1";
+      if (normalizedLine === "15") return "hc-hm15";
+    } else {
+      if (normalizedLine === "10") return "hc-ap1";
+      if (normalizedLine === "15") return "hc-ap15";
+    }
+  }
+
+  const corners = raw.match(/^cn:([ou])(\d+(?:[.,]\d+)?)$/);
+  if (corners)
+    return `${corners[1]!}c${normalizeCompactSelectionLine(corners[2]!)}`;
+
+  const cards = raw.match(/^cd:([ou])(\d+(?:[.,]\d+)?)$/);
+  if (cards)
+    return `${cards[1]!}card${normalizeCompactSelectionLine(cards[2]!)}`;
+
+  const firstHalfCards = raw.match(/^cd1h:([ou])(\d+(?:[.,]\d+)?)$/);
+  if (firstHalfCards)
+    return `1hcard-${firstHalfCards[1]!}${normalizeCompactSelectionLine(firstHalfCards[2]!)}`;
+
+  const secondHalfCards = raw.match(/^cd2h:([ou])(\d+(?:[.,]\d+)?)$/);
+  if (secondHalfCards)
+    return `2hcard-${secondHalfCards[1]!}${normalizeCompactSelectionLine(secondHalfCards[2]!)}`;
+
+  const halfTimeFullTime = raw.match(/^htft:([hda]{2})$/);
+  if (halfTimeFullTime) return `htft-${halfTimeFullTime[1]!}`;
+
+  const winBothHalves = raw.match(/^twbh:(h|a)$/);
+  if (winBothHalves) return `wbh-${winBothHalves[1]!}`;
+
+  const highestScoringHalf = raw.match(/^hsh:(1|2|eq)$/);
+  if (highestScoringHalf) {
+    if (highestScoringHalf[1] === "eq") return "hsf-e";
+    return `hsf-${highestScoringHalf[1]!}`;
+  }
+
+  return null;
+}
+
+function parseSelectionPlayerMarket(selection: string): {
+  market: "goal" | "assist" | "card";
+  period: "any" | "1h" | "2h";
+  playerName: string;
+} | null {
+  const raw = String(selection ?? "").trim();
+  if (!raw) return null;
+  const match = raw.match(/^(pg1h|pg2h|pg|pa|pc1h|pc2h|pc):(.+)$/i);
+  if (!match) return null;
+  const key = match[1]!.toLowerCase();
+  const playerName = match[2]!.trim();
+  if (!playerName) return null;
+  if (key === "pa") return { market: "assist", period: "any", playerName };
+  if (key === "pg") return { market: "goal", period: "any", playerName };
+  if (key === "pg1h") return { market: "goal", period: "1h", playerName };
+  if (key === "pg2h") return { market: "goal", period: "2h", playerName };
+  if (key === "pc") return { market: "card", period: "any", playerName };
+  if (key === "pc1h") return { market: "card", period: "1h", playerName };
+  if (key === "pc2h") return { market: "card", period: "2h", playerName };
+  return null;
+}
+
+function getFootballGoalEventsFromExtras(extras: unknown): Array<{
+  minute: number;
+  extraMinute?: number;
+  playerName?: string;
+  assistName?: string;
+  ownGoal?: boolean;
+  varCancelled?: boolean;
+}> | null {
+  if (!extras || typeof extras !== "object") return null;
+  const football = (extras as Record<string, unknown>)["football"] as
+    | Record<string, unknown>
+    | undefined;
+  const goals = football?.["goals"];
+  if (!Array.isArray(goals)) return null;
+  return goals
+    .filter((entry): entry is Record<string, unknown> => {
+      return !!entry && typeof entry === "object";
+    })
+    .map((entry) => {
+      const minute =
+        typeof entry["minute"] === "number" && Number.isFinite(entry["minute"])
+          ? (entry["minute"] as number)
+          : 0;
+      const extraMinute =
+        typeof entry["extraMinute"] === "number" &&
+        Number.isFinite(entry["extraMinute"])
+          ? (entry["extraMinute"] as number)
+          : undefined;
+      const playerName = String(entry["playerName"] ?? "").trim();
+      const assistName = String(entry["assistName"] ?? "").trim();
+      return {
+        minute,
+        ...(extraMinute != null ? { extraMinute } : {}),
+        ...(playerName ? { playerName } : {}),
+        ...(assistName ? { assistName } : {}),
+        ...(entry["ownGoal"] === true ? { ownGoal: true } : {}),
+        ...(entry["varCancelled"] === true ? { varCancelled: true } : {}),
+      };
+    });
+}
+
+function getFootballCardEventsFromExtras(extras: unknown): Array<{
+  minute: number;
+  extraMinute?: number;
+  playerName?: string;
+  cardType?: "yellow" | "red";
+}> | null {
+  if (!extras || typeof extras !== "object") return null;
+  const football = (extras as Record<string, unknown>)["football"] as
+    | Record<string, unknown>
+    | undefined;
+  const cards = football?.["cards"];
+  if (!Array.isArray(cards)) return null;
+  return cards
+    .filter((entry): entry is Record<string, unknown> => {
+      return !!entry && typeof entry === "object";
+    })
+    .map((entry) => {
+      const minute =
+        typeof entry["minute"] === "number" && Number.isFinite(entry["minute"])
+          ? (entry["minute"] as number)
+          : 0;
+      const extraMinute =
+        typeof entry["extraMinute"] === "number" &&
+        Number.isFinite(entry["extraMinute"])
+          ? (entry["extraMinute"] as number)
+          : undefined;
+      const playerName = String(entry["playerName"] ?? "").trim();
+      const cardType =
+        entry["cardType"] === "yellow" || entry["cardType"] === "red"
+          ? (entry["cardType"] as "yellow" | "red")
+          : undefined;
+      return {
+        minute,
+        ...(extraMinute != null ? { extraMinute } : {}),
+        ...(playerName ? { playerName } : {}),
+        ...(cardType ? { cardType } : {}),
+      };
+    });
+}
+
+function footballEventMatchesPeriod(
+  minute: number,
+  period: "any" | "1h" | "2h",
+): boolean {
+  if (period === "any") return true;
+  return period === "1h" ? minute <= 45 : minute > 45;
+}
+
 export function normalizeSettlementSelectionKey(selection: string): string {
   let s = String(selection ?? "");
   if (/^(?:handicap|asiatico|spread|puckline):/.test(s))
@@ -1157,6 +1409,8 @@ export function normalizeSettlementSelectionKey(selection: string): string {
   else if (s === "et-tie-home") s = "et-tw-home";
   else if (s === "et-tie-away") s = "et-tw-away";
   else {
+    const compactFootballKey = normalizeCompactFootballSelectionKey(s);
+    if (compactFootballKey) s = compactFootballKey;
     const humanTotal = normalizeHumanTotalSettlementKey(s);
     if (humanTotal) s = humanTotal;
   }
@@ -1459,6 +1713,7 @@ export function scoreOutcomeForSel(
     finishedAt?: number;
   },
 ): SettlementOutcome {
+  const rawSelection = String(sel.selection ?? "").trim();
   const statusOutcome = resolveSettlementStatusOutcome(
     extra?.status,
     extra?.finishedAt,
@@ -1516,6 +1771,65 @@ export function scoreOutcomeForSel(
     else
       winning =
         s[0] === "o" ? extra.cardsTotal > line : extra.cardsTotal < line;
+  }
+  // ── Cards by half O/U (requires football card events with minutes) ────────
+  else if (
+    /^1hcard-[ou]\d+$/.test(s) ||
+    /^2hcard-[ou]\d+$/.test(s) ||
+    /^cd1h:[ou]\d+(?:[.,]\d+)?$/i.test(rawSelection) ||
+    /^cd2h:[ou]\d+(?:[.,]\d+)?$/i.test(rawSelection)
+  ) {
+    const cards = getFootballCardEventsFromExtras(extra?.extras);
+    if (!cards) return null;
+    const normalizedKey =
+      /^1hcard-[ou]\d+$/.test(s) || /^2hcard-[ou]\d+$/.test(s)
+        ? s
+        : rawSelection
+            .toLowerCase()
+            .replace(/^cd1h:/, "1hcard-")
+            .replace(/^cd2h:/, "2hcard-")
+            .replace(/[.,]/g, "");
+    const period = normalizedKey.startsWith("1hcard-") ? "1h" : "2h";
+    const side = normalizedKey.includes("-o") ? "o" : "u";
+    const line = decodeCompactLine(normalizedKey.split("-")[1]!.slice(1));
+    if (!Number.isFinite(line)) return null;
+    const totalCards = cards.filter((card) =>
+      footballEventMatchesPeriod(card.minute, period),
+    ).length;
+    if (totalCards === line) voided = true;
+    else winning = side === "o" ? totalCards > line : totalCards < line;
+  }
+  // ── Player goals / assists / cards (requires football event summary) ──────
+  else if (parseSelectionPlayerMarket(rawSelection)) {
+    const playerSelection = parseSelectionPlayerMarket(rawSelection)!;
+    const wantedName = normalizeParticipantName(playerSelection.playerName);
+    if (!wantedName) return null;
+    if (playerSelection.market === "card") {
+      const cards = getFootballCardEventsFromExtras(extra?.extras);
+      if (!cards) return null;
+      winning = cards.some((card) => {
+        const playerName = normalizeParticipantName(card.playerName ?? "");
+        return (
+          !!playerName &&
+          playerName === wantedName &&
+          footballEventMatchesPeriod(card.minute, playerSelection.period)
+        );
+      });
+    } else {
+      const goals = getFootballGoalEventsFromExtras(extra?.extras);
+      if (!goals) return null;
+      winning = goals.some((goal) => {
+        if (goal.ownGoal || goal.varCancelled) return false;
+        if (!footballEventMatchesPeriod(goal.minute, playerSelection.period))
+          return false;
+        if (playerSelection.market === "goal") {
+          const playerName = normalizeParticipantName(goal.playerName ?? "");
+          return !!playerName && playerName === wantedName;
+        }
+        const assistName = normalizeParticipantName(goal.assistName ?? "");
+        return !!assistName && assistName === wantedName;
+      });
+    }
   }
   // ── Asian totals (settle full win/loss/void; quarter split stays pending) ─
   else if (/^at-([ou])(\d+)$/.test(s)) {

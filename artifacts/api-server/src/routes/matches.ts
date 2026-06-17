@@ -6475,6 +6475,25 @@ export async function ensureFinishedMatchResult(
     cornersTotal?: number;
     cardsTotal?: number;
     firstGoal?: "home" | "away" | "none";
+    football?: {
+      goals?: Array<{
+        team: "home" | "away";
+        minute: number;
+        extraMinute?: number;
+        playerName: string;
+        assistName?: string;
+        ownGoal?: boolean;
+        penalty?: boolean;
+        varCancelled?: boolean;
+      }>;
+      cards?: Array<{
+        team: "home" | "away";
+        minute: number;
+        extraMinute?: number;
+        playerName: string;
+        cardType: "yellow" | "red";
+      }>;
+    };
   } | null> => {
     try {
       const resp = await fetch(`${SAPI_V2_FOOTBALL}/match/${id}/statistics`, {
@@ -6498,6 +6517,13 @@ export async function ensureFinishedMatchResult(
           return Number.isFinite(n) ? n : undefined;
         }
         return undefined;
+      };
+      const toBool = (v: unknown): boolean => {
+        if (typeof v === "boolean") return v;
+        const raw = String(v ?? "")
+          .trim()
+          .toLowerCase();
+        return raw === "true" || raw === "1" || raw === "yes";
       };
       const cornersHome =
         toNum(get(data, ["team_stats", "home", "corners", "total"])) ?? 0;
@@ -6537,6 +6563,76 @@ export async function ensureFinishedMatchResult(
         const ex = toNum(e["extra_min"]) ?? 0;
         return m * 100 + ex;
       };
+      const mapGoalEvents = (
+        side: "home" | "away",
+      ): Array<{
+        team: "home" | "away";
+        minute: number;
+        extraMinute?: number;
+        playerName: string;
+        assistName?: string;
+        ownGoal?: boolean;
+        penalty?: boolean;
+        varCancelled?: boolean;
+      }> => {
+        const s = ev?.[side] as Record<string, unknown> | undefined;
+        const goals = toArr(
+          (s?.["goals"] as Record<string, unknown> | undefined)?.["event"],
+        );
+        return goals.map((goal) => {
+          const minute = toNum(goal["minute"]) ?? 0;
+          const extraMinute = toNum(goal["extra_min"]);
+          const playerName = String(
+            goal["player_name"] ?? goal["player"] ?? "",
+          ).trim();
+          const assistName = String(
+            goal["assist_player_name"] ?? goal["assist_player"] ?? "",
+          ).trim();
+          return {
+            team: side,
+            minute,
+            ...(extraMinute != null ? { extraMinute } : {}),
+            playerName,
+            ...(assistName ? { assistName } : {}),
+            ...(toBool(goal["own_goal"]) ? { ownGoal: true } : {}),
+            ...(toBool(goal["penalty"]) ? { penalty: true } : {}),
+            ...(toBool(goal["var_cancelled"]) ? { varCancelled: true } : {}),
+          };
+        });
+      };
+      const mapCardEvents = (
+        side: "home" | "away",
+        cardType: "yellow" | "red",
+      ): Array<{
+        team: "home" | "away";
+        minute: number;
+        extraMinute?: number;
+        playerName: string;
+        cardType: "yellow" | "red";
+      }> => {
+        const s = ev?.[side] as Record<string, unknown> | undefined;
+        const cards = toArr(
+          (
+            s?.[cardType === "yellow" ? "yellowcards" : "redcards"] as
+              | Record<string, unknown>
+              | undefined
+          )?.["event"],
+        );
+        return cards.map((card) => {
+          const minute = toNum(card["minute"]) ?? 0;
+          const extraMinute = toNum(card["extra_min"]);
+          const playerName = String(
+            card["player_name"] ?? card["player"] ?? "",
+          ).trim();
+          return {
+            team: side,
+            minute,
+            ...(extraMinute != null ? { extraMinute } : {}),
+            playerName,
+            cardType,
+          };
+        });
+      };
       const minOrNull = (vals: number[]): number | null =>
         vals.length ? vals.reduce((a, b) => Math.min(a, b), vals[0]!) : null;
       const homeGoalsArr = (() => {
@@ -6565,11 +6661,39 @@ export async function ensureFinishedMatchResult(
               : (fgH as number) <= (fgA as number)
                 ? "home"
                 : "away";
+      const goalEvents = [
+        ...mapGoalEvents("home"),
+        ...mapGoalEvents("away"),
+      ].sort(
+        (a, b) =>
+          a.minute * 100 +
+          (a.extraMinute ?? 0) -
+          (b.minute * 100 + (b.extraMinute ?? 0)),
+      );
+      const cardEvents = [
+        ...mapCardEvents("home", "yellow"),
+        ...mapCardEvents("away", "yellow"),
+        ...mapCardEvents("home", "red"),
+        ...mapCardEvents("away", "red"),
+      ].sort(
+        (a, b) =>
+          a.minute * 100 +
+          (a.extraMinute ?? 0) -
+          (b.minute * 100 + (b.extraMinute ?? 0)),
+      );
 
       return {
         cornersTotal: Number.isFinite(cornersTotal) ? cornersTotal : undefined,
         cardsTotal: Number.isFinite(cardsTotal) ? cardsTotal : undefined,
         firstGoal,
+        ...(goalEvents.length > 0 || cardEvents.length > 0
+          ? {
+              football: {
+                ...(goalEvents.length > 0 ? { goals: goalEvents } : {}),
+                ...(cardEvents.length > 0 ? { cards: cardEvents } : {}),
+              },
+            }
+          : {}),
       };
     } catch {
       return null;
@@ -6748,7 +6872,19 @@ export async function ensureFinishedMatchResult(
         extras: {
           ...baseFinishedExtras,
           ...(parsed.sport === "football"
-            ? { football: { ftHome, ftAway, etHome, etAway, penHome, penAway } }
+            ? {
+                football: {
+                  ftHome,
+                  ftAway,
+                  etHome,
+                  etAway,
+                  penHome,
+                  penAway,
+                  ...(((extras?.football as
+                    | Record<string, unknown>
+                    | undefined) ?? {}) as Record<string, unknown>),
+                },
+              }
             : {}),
           ...(parsed.sport === "basketball"
             ? {
