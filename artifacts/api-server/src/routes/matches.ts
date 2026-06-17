@@ -6239,6 +6239,8 @@ async function persistFinishedMatchRecord(
   record: {
     home: number;
     away: number;
+    htHome?: number | null;
+    htAway?: number | null;
     status?: string;
     homeTeam: string;
     awayTeam: string;
@@ -6255,8 +6257,14 @@ async function persistFinishedMatchRecord(
         sport,
         home: record.home,
         away: record.away,
-        htHome: null,
-        htAway: null,
+        htHome:
+          typeof record.htHome === "number" && Number.isFinite(record.htHome)
+            ? record.htHome
+            : null,
+        htAway:
+          typeof record.htAway === "number" && Number.isFinite(record.htAway)
+            ? record.htAway
+            : null,
         status: record.status ?? null,
         homeTeam: record.homeTeam,
         awayTeam: record.awayTeam,
@@ -6287,6 +6295,79 @@ async function persistFinishedMatchRecord(
         },
       });
   } catch {}
+}
+
+async function finalizeStaleLiveMatch(state: LiveMatchState): Promise<void> {
+  const finishedAt = Date.now();
+  const htScore = state._liveExtra?.htScore;
+  const footballExtras =
+    state.sport === "football"
+      ? {
+          football: {
+            ftHome: state.homeScore,
+            ftAway: state.awayScore,
+            ...(Array.isArray(htScore) &&
+            typeof htScore[0] === "number" &&
+            typeof htScore[1] === "number"
+              ? {
+                  htHome: htScore[0],
+                  htAway: htScore[1],
+                  htScore: [htScore[0], htScore[1]] as [number, number],
+                }
+              : {}),
+          },
+        }
+      : {};
+  const record = {
+    home: state.homeScore,
+    away: state.awayScore,
+    ...(Array.isArray(htScore) &&
+    typeof htScore[0] === "number" &&
+    typeof htScore[1] === "number"
+      ? { htHome: htScore[0], htAway: htScore[1] }
+      : {}),
+    status: "finished",
+    homeTeam: state.home,
+    awayTeam: state.away,
+    extras: {
+      ...(state.sport === "hockey" && state._liveExtra?.periods
+        ? { hockey: { periods: state._liveExtra.periods } }
+        : {}),
+      ...(state.sport === "basketball" && state._liveExtra?.quarters
+        ? { basketball: { quarters: state._liveExtra.quarters } }
+        : {}),
+      ...(state.sport === "baseball" && state._liveExtra?.innings
+        ? { baseball: { innings: state._liveExtra.innings } }
+        : {}),
+      ...(state.sport === "tennis" && state._liveExtra?.sets
+        ? { tennis: { sets: state._liveExtra.sets } }
+        : {}),
+      ...(state.sport === "volleyball" && state._liveExtra?.sets
+        ? {
+            volleyball: {
+              sets: state._liveExtra.sets,
+              ...(state._liveExtra.currentPoints
+                ? { currentPoints: state._liveExtra.currentPoints }
+                : {}),
+            },
+          }
+        : {}),
+      ...footballExtras,
+    },
+    finishedAt,
+  };
+  finishedMatchResults.set(state.id, record);
+  await enqueueMatchSettlement({
+    matchId: state.id,
+    jobId: buildMatchSettlementJobId({
+      matchId: state.id,
+      home: record.home,
+      away: record.away,
+      ...(typeof record.htHome === "number" ? { htHome: record.htHome } : {}),
+      ...(typeof record.htAway === "number" ? { htAway: record.htAway } : {}),
+    }),
+  });
+  await persistFinishedMatchRecord(state.id, state.sport, record);
 }
 
 function extractFinishedBasketballQuarters(
@@ -12930,12 +13011,29 @@ async function buildFootballLiveV2(
       if (stuck && stuck.minute === minute && stuck.score === scoreKey) {
         if (now - stuck.since > 45 * 60 * 1000) {
           // Mark finished so it doesn't reappear; clean up tracker and skip.
-          finishedMatchResults.set(id, {
-            home: homeScore,
-            away: awayScore,
-            homeTeam,
-            awayTeam,
-            finishedAt: now,
+          await finalizeStaleLiveMatch({
+            ...(existing ?? {
+              id,
+              home: homeTeam,
+              away: awayTeam,
+              league: leagueName,
+              country: countryName,
+              sport: "football",
+              homeScore,
+              awayScore,
+              minute,
+              status: newStatus,
+              hasRealOdds: false,
+              odds: { home: 0, draw: 0, away: 0 },
+              markets: {} as AdvancedMarkets,
+              events: [],
+            }),
+            home: homeTeam,
+            away: awayTeam,
+            homeScore,
+            awayScore,
+            minute,
+            status: newStatus,
           });
           liveMatchState.delete(id);
           _v2StuckTracker.delete(id);
@@ -13243,7 +13341,13 @@ async function buildFootballLiveV2(
     const blockedNow = isBlockedLeague(
       `${state.league} ${state.home} ${state.away}`,
     );
-    if (tooOld || blockedNow) {
+    if (tooOld) {
+      await finalizeStaleLiveMatch(state);
+      liveMatchState.delete(id);
+      _v2StuckTracker.delete(id);
+      continue;
+    }
+    if (blockedNow) {
       liveMatchState.delete(id);
       _v2StuckTracker.delete(id);
       continue;
@@ -13274,6 +13378,7 @@ async function buildFootballLiveV2(
       continue;
     }
     if (now - missingSince > getFootballLiveDisappearGraceMs(state)) {
+      await finalizeStaleLiveMatch(state);
       liveMatchState.delete(id);
       _v2StuckTracker.delete(id);
       continue;
@@ -13502,29 +13607,7 @@ async function buildBasketballLiveV2(
     if (!id.startsWith("bball-v2-")) continue;
     const tooOld = now - (state._firstSeenAt ?? now) > MAX_LIVE_STATE_MS;
     if (!currentIds.has(id) || tooOld) {
-      finishedMatchResults.set(id, {
-        home: state.homeScore,
-        away: state.awayScore,
-        homeTeam: state.home,
-        awayTeam: state.away,
-        finishedAt: now,
-        extras:
-          state._liveExtra?.quarters ||
-          state._liveExtra?.basketballScoringEvents
-            ? {
-                basketball: {
-                  ...(state._liveExtra?.quarters
-                    ? { quarters: state._liveExtra.quarters }
-                    : {}),
-                  ...(state._liveExtra?.basketballScoringEvents
-                    ? {
-                        scoringEvents: state._liveExtra.basketballScoringEvents,
-                      }
-                    : {}),
-                },
-              }
-            : undefined,
-      });
+      await finalizeStaleLiveMatch(state);
       liveMatchState.delete(id);
     }
   }
@@ -13690,16 +13773,7 @@ function buildHockeyLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
     if (!id.startsWith("hockey-v2-")) continue;
     const tooOld = now - (state._firstSeenAt ?? now) > MAX_LIVE_STATE_MS;
     if (!currentIds.has(id) || tooOld) {
-      finishedMatchResults.set(id, {
-        home: state.homeScore,
-        away: state.awayScore,
-        homeTeam: state.home,
-        awayTeam: state.away,
-        finishedAt: now,
-        extras: state._liveExtra?.periods
-          ? { hockey: { periods: state._liveExtra.periods } }
-          : undefined,
-      });
+      void finalizeStaleLiveMatch(state);
       liveMatchState.delete(id);
     }
   }
@@ -13845,16 +13919,7 @@ function buildBaseballLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
     if (!id.startsWith("baseball-v2-")) continue;
     const tooOld = now - (state._firstSeenAt ?? now) > MAX_LIVE_STATE_MS;
     if (!currentIds.has(id) || tooOld) {
-      finishedMatchResults.set(id, {
-        home: state.homeScore,
-        away: state.awayScore,
-        homeTeam: state.home,
-        awayTeam: state.away,
-        finishedAt: now,
-        extras: state._liveExtra?.innings
-          ? { baseball: { innings: state._liveExtra.innings } }
-          : undefined,
-      });
+      void finalizeStaleLiveMatch(state);
       liveMatchState.delete(id);
     }
   }
@@ -13880,6 +13945,30 @@ function rememberFinishedTennisState(
         }
       : undefined,
     finishedAt,
+  });
+  void persistFinishedMatchRecord(id, "tennis", {
+    home: state.homeScore,
+    away: state.awayScore,
+    status: "finished",
+    homeTeam: state.home,
+    awayTeam: state.away,
+    extras: state._liveExtra?.sets
+      ? {
+          tennis: {
+            sets: state._liveExtra.sets,
+            currentPoints: state._liveExtra.currentPoints,
+          },
+        }
+      : undefined,
+    finishedAt,
+  });
+  void enqueueMatchSettlement({
+    matchId: id,
+    jobId: buildMatchSettlementJobId({
+      matchId: id,
+      home: state.homeScore,
+      away: state.awayScore,
+    }),
   });
 }
 

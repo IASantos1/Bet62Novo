@@ -1386,6 +1386,7 @@ function cashoutCalcForBet(args: {
   let anyLive = false;
   let suspendedReason: string | null = null;
   let unfavorableReason: string | null = null;
+  let missingLiveOddReason: string | null = null;
   let currentOddsProduct = 1;
 
   for (const sel of selections) {
@@ -1432,10 +1433,12 @@ function cashoutCalcForBet(args: {
     }
 
     const curOdd = currentOddForSelection(sel, liveSt);
-    const useOdd =
-      Number.isFinite(curOdd) && (curOdd as number) > 1.0
-        ? Math.max(1.01, curOdd as number)
-        : baseOdd;
+    if (!Number.isFinite(curOdd) || (curOdd as number) <= 1.0) {
+      missingLiveOddReason =
+        missingLiveOddReason ?? "Mercado sem odd ao vivo confiável";
+      continue;
+    }
+    const useOdd = Math.max(1.01, curOdd as number);
     currentOddsProduct *= useOdd;
     if (
       !unfavorableReason &&
@@ -1453,6 +1456,11 @@ function cashoutCalcForBet(args: {
   if (suspendedReason)
     return {
       info: { cashoutStatus: "suspended", cashoutReason: suspendedReason },
+      stateOp: { type: "none" },
+    };
+  if (missingLiveOddReason)
+    return {
+      info: { cashoutStatus: "suspended", cashoutReason: missingLiveOddReason },
       stateOp: { type: "none" },
     };
 
