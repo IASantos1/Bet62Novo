@@ -1089,6 +1089,10 @@ export function normalizeSettlementSelectionKey(selection: string): string {
   if (s === "1x2-home") s = "home";
   else if (s === "1x2-draw") s = "draw";
   else if (s === "1x2-away") s = "away";
+  else if (s === "btts1h-y") s = "b1h-yes";
+  else if (s === "btts1h-n") s = "b1h-no";
+  else if (s === "btts2h-y") s = "b2h-yes";
+  else if (s === "btts2h-n") s = "b2h-no";
   else if (s === "hm1") s = "hc-hm1";
   else if (s === "ap1") s = "hc-ap1";
   else if (s === "hm1h") s = "hc-hm15";
