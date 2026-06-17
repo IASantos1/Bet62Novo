@@ -11354,6 +11354,7 @@ async function buildLiveMatches(): Promise<LiveMatchState[]> {
       continue;
     }
     if (Date.now() - missingSince > getFootballLiveDisappearGraceMs(state)) {
+      await finalizeStaleLiveMatch(state);
       liveMatchState.delete(id);
     }
   }
@@ -11371,8 +11372,27 @@ async function buildLiveMatches(): Promise<LiveMatchState[]> {
     for (const m of matches) {
       if (count >= 30) break;
 
+      const existing = liveMatchState.get(m.main_id);
+
       // ── Guard 0: explicitly finished statuses Statpal is slow to remove ───────
-      if (SAPI_FINISHED_STATUSES.has(m.status)) continue;
+      if (SAPI_FINISHED_STATUSES.has(m.status)) {
+        if (existing) {
+          await finalizeStaleLiveMatch({
+            ...existing,
+            homeScore:
+              m.home.goals === "?"
+                ? existing.homeScore
+                : parseInt(m.home.goals) || existing.homeScore,
+            awayScore:
+              m.away.goals === "?"
+                ? existing.awayScore
+                : parseInt(m.away.goals) || existing.awayScore,
+            status: m.status,
+          });
+          liveMatchState.delete(m.main_id);
+        }
+        continue;
+      }
 
       const isLiveMinute = /^\d{1,3}$/.test(m.status);
       const isHT = m.status === "HT";
@@ -11393,16 +11413,24 @@ async function buildLiveMatches(): Promise<LiveMatchState[]> {
           if (!isNaN(d) && !isNaN(h)) {
             const kickoffMs = Date.UTC(y, mo - 1, d, h, mi);
             const MAX_MATCH_DURATION_MS = 130 * 60 * 1000; // 130 min (90 + ET + buffer)
-            if (now - kickoffMs > MAX_MATCH_DURATION_MS) continue; // match is over
+            if (now - kickoffMs > MAX_MATCH_DURATION_MS) {
+              if (existing) {
+                await finalizeStaleLiveMatch({
+                  ...existing,
+                  status: m.status,
+                });
+                liveMatchState.delete(m.main_id);
+              }
+              continue; // match is over
+            }
           }
         }
       }
 
-      const existing = liveMatchState.get(m.main_id);
-
       // ── Guard 1: discard match that has been live longer than MATCH_MAX_LIVE_MS ─
       const firstSeenAt = existing?._firstSeenAt ?? now;
       if (now - firstSeenAt > MATCH_MAX_LIVE_MS) {
+        if (existing) await finalizeStaleLiveMatch(existing);
         liveMatchState.delete(m.main_id);
         continue;
       }
@@ -11418,6 +11446,7 @@ async function buildLiveMatches(): Promise<LiveMatchState[]> {
         htStartedAt !== undefined &&
         now - htStartedAt > HT_MAX_DURATION_MS
       ) {
+        if (existing) await finalizeStaleLiveMatch(existing);
         liveMatchState.delete(m.main_id);
         continue;
       }
