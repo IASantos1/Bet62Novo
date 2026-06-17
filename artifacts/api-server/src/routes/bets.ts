@@ -237,6 +237,10 @@ function normalizeSelectionKey(sel: string): string {
   if (s === "1x2-home") s = "home";
   else if (s === "1x2-draw") s = "draw";
   else if (s === "1x2-away") s = "away";
+  else if (s === "btts1h-y") s = "b1h-yes";
+  else if (s === "btts1h-n") s = "b1h-no";
+  else if (s === "btts2h-y") s = "b2h-yes";
+  else if (s === "btts2h-n") s = "b2h-no";
   else if (/^tg-([ou][\d]+)$/.test(s)) s = s.slice(3);
   else if (s === "dc-12") s = "homeOrAway";
   else if (s === "eg-0") s = "eg-g0";
