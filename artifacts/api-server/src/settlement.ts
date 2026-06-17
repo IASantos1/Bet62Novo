@@ -2379,6 +2379,23 @@ function readSelectionSport(
   return normalizeSelectionSport(sel.providerSport ?? sel.sport);
 }
 
+function inferSelectionLookupSport(
+  sel: SelectionRecord,
+):
+  | "football"
+  | "tennis"
+  | "basketball"
+  | "baseball"
+  | "hockey"
+  | "volleyball"
+  | null {
+  const explicitSport = readSelectionSport(sel);
+  if (explicitSport) return explicitSport;
+  return normalizeSelectionSport(
+    detectSportFromKey(normalizeSettlementSelectionKey(sel.selection)),
+  );
+}
+
 function providerMatchIdPrefixesForSport(
   sport:
     | "football"
@@ -2466,7 +2483,8 @@ function getSelectionLookupMatchIds(
   betMatchId: string,
   isSingle: boolean,
 ): string[] {
-  const sport = sel.providerSport ?? sel.sport;
+  const sport =
+    inferSelectionLookupSport(sel) ?? sel.providerSport ?? sel.sport;
   const ids = new Set<string>();
   for (const id of canonicalizeSelectionMatchIds(sel.matchId, sport))
     ids.add(id);

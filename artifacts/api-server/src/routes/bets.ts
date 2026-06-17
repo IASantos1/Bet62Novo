@@ -21,7 +21,11 @@ import {
   finishedMatchResults,
   type LiveMatchState,
 } from "./matches.js";
-import { scoreOutcomeForSel, type SelectionRecord } from "../settlement.js";
+import {
+  findResult,
+  scoreOutcomeForSel,
+  type SelectionRecord,
+} from "../settlement.js";
 
 const router: IRouter = Router();
 
@@ -1216,7 +1220,7 @@ function buildOpenBetStatePayload(bet: {
       };
     }
 
-    const result = finishedMatchResults.get(String(matchId));
+    const result = findResult(sel, bet.matchId, isSingleLeg);
     if (!result) {
       return {
         matchId: String(matchId),
