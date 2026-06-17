@@ -520,8 +520,11 @@ function inferSelectionSport(
   if (
     /^vs[123][ha]$/.test(s) ||
     /^vs-s(30|31|32|03|13|23)$/.test(s) ||
+    /^pt-[ou]-\d+(?:\.\d+)?$/.test(s) ||
     s === "hcap-vb-home" ||
     s === "hcap-vb-away" ||
+    s === "opts" ||
+    s === "upts" ||
     s === "pth" ||
     s === "pta" ||
     s === "pth2" ||
@@ -607,6 +610,51 @@ function scoreOutcomeForSelLastResort(
         : totalSets < line
           ? "won"
           : "lost";
+    }
+  }
+
+  if (sport === "volleyball") {
+    const sets = getVolleyballSetPointsFromExtras(extra?.extras);
+    const homePoints = sets.reduce((sum, [home]) => sum + home, 0);
+    const awayPoints = sets.reduce((sum, [, away]) => sum + away, 0);
+    const totalPoints = homePoints + awayPoints;
+
+    const total = s.match(/^pt-([ou])-(\d+(?:\.\d+)?)$/);
+    if (total) {
+      const line = Number(total[2]!);
+      if (!Number.isFinite(line)) return null;
+      if (totalPoints === line) return "void";
+      return total[1] === "o"
+        ? totalPoints > line
+          ? "won"
+          : "lost"
+        : totalPoints < line
+          ? "won"
+          : "lost";
+    }
+
+    if (s === "opts" || s === "upts") {
+      const line = readSelectionMarketLine(sel);
+      if (line == null) return null;
+      if (totalPoints === line) return "void";
+      return s === "opts"
+        ? totalPoints > line
+          ? "won"
+          : "lost"
+        : totalPoints < line
+          ? "won"
+          : "lost";
+    }
+
+    if (s === "pth" || s === "pta" || s === "pth2" || s === "pta2") {
+      const line = readSelectionMarketLine(sel);
+      if (line == null) return null;
+      const adjusted =
+        s === "pth" || s === "pth2"
+          ? homePoints + line - awayPoints
+          : awayPoints + line - homePoints;
+      if (adjusted === 0) return "void";
+      return adjusted > 0 ? "won" : "lost";
     }
   }
 
@@ -1203,6 +1251,38 @@ function getHockeyPeriodsFromExtras(extras: unknown): Array<[number, number]> {
   return periods;
 }
 
+function getVolleyballSetPointsFromExtras(
+  extras: unknown,
+): Array<[number, number]> {
+  if (!extras || typeof extras !== "object") return [];
+  const ex = extras as Record<string, unknown>;
+  const volleyball = ex["volleyball"] as Record<string, unknown> | undefined;
+  if (Array.isArray(volleyball?.["sets"])) {
+    return (volleyball["sets"] as unknown[])
+      .map((entry) =>
+        Array.isArray(entry) && entry.length >= 2
+          ? ([Number(entry[0]), Number(entry[1])] as [number, number])
+          : null,
+      )
+      .filter(
+        (entry): entry is [number, number] =>
+          !!entry && Number.isFinite(entry[0]) && Number.isFinite(entry[1]),
+      );
+  }
+
+  const homePeriods = parsePeriodsFromScore(ex["homeScore"], 5);
+  const awayPeriods = parsePeriodsFromScore(ex["awayScore"], 5);
+  const len = Math.min(5, Math.max(homePeriods.length, awayPeriods.length));
+  const sets: Array<[number, number]> = [];
+  for (let i = 0; i < len; i++) {
+    const home = homePeriods[i];
+    const away = awayPeriods[i];
+    if (!Number.isFinite(home) || !Number.isFinite(away)) continue;
+    sets.push([home!, away!] as [number, number]);
+  }
+  return sets;
+}
+
 function hasBaseballInnings(extras: unknown): boolean {
   if (!extras || typeof extras !== "object") return false;
   const ex = extras as Record<string, unknown>;
@@ -1499,6 +1579,44 @@ export function scoreOutcomeForSel(
     if (!Number.isFinite(homeSets) || !Number.isFinite(awaySets)) return null;
     const diff = homeSets - awaySets;
     winning = s === "hcap-vb-home" ? diff > 1.5 : diff < 1.5;
+  } else if (
+    /^pt-([ou])-(\d+(?:\.\d+)?)$/.test(s) ||
+    s === "opts" ||
+    s === "upts"
+  ) {
+    const sets = getVolleyballSetPointsFromExtras(extra?.extras);
+    if (sets.length === 0) return null;
+    const totalPoints = sets.reduce(
+      (sum, [home, away]) => sum + home + away,
+      0,
+    );
+
+    const explicitLine = s.match(/^pt-([ou])-(\d+(?:\.\d+)?)$/);
+    const dir = explicitLine ? explicitLine[1]! : s === "opts" ? "o" : "u";
+    const line = explicitLine
+      ? Number(explicitLine[2]!)
+      : readSelectionMarketLine(sel);
+    if (!Number.isFinite(line)) return null;
+    const normalizedLine = line as number;
+    if (totalPoints === normalizedLine) voided = true;
+    else
+      winning =
+        dir === "o"
+          ? totalPoints > normalizedLine
+          : totalPoints < normalizedLine;
+  } else if (s === "pth" || s === "pta" || s === "pth2" || s === "pta2") {
+    const sets = getVolleyballSetPointsFromExtras(extra?.extras);
+    if (sets.length === 0) return null;
+    const line = readSelectionMarketLine(sel);
+    if (line == null || !Number.isFinite(line)) return null;
+    const homePoints = sets.reduce((sum, [home]) => sum + home, 0);
+    const awayPoints = sets.reduce((sum, [, away]) => sum + away, 0);
+    const adjusted =
+      s === "pth" || s === "pth2"
+        ? homePoints + line - awayPoints
+        : awayPoints + line - homePoints;
+    if (adjusted === 0) voided = true;
+    else winning = adjusted > 0;
   }
 
   // ── Basketball (totals / spread / team totals / halves / quarters) ─────────
