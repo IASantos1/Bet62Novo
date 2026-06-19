@@ -101,8 +101,8 @@ async function acquireBetSettlementLock(
 ): Promise<boolean> {
   const redis = getSettlementRedis();
   if (!redis) {
-    logger.error({ betId }, "Redis unavailable - cannot acquire settlement lock, skipping settlement to avoid race conditions");
-    return false;
+    logger.warn({ betId }, "Redis unavailable - proceeding without lock (single instance mode)");
+    return true;
   }
   try {
     const key = `settlement:lock:bet:${String(betId)}`;
@@ -115,8 +115,8 @@ async function acquireBetSettlementLock(
     );
     return result === "OK";
   } catch (err) {
-    logger.error({ err, betId }, "Failed to acquire settlement lock due to Redis error");
-    return false;
+    logger.warn({ err, betId }, "Failed to acquire settlement lock due to Redis error - proceeding without lock (single instance mode)");
+    return true;
   }
 }
 
