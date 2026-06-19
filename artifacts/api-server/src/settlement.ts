@@ -100,16 +100,24 @@ async function acquireBetSettlementLock(
   owner: string,
 ): Promise<boolean> {
   const redis = getSettlementRedis();
-  if (!redis) return true;
-  const key = `settlement:lock:bet:${String(betId)}`;
-  const result = await redis.set(
-    key,
-    owner,
-    "NX",
-    "EX",
-    SETTLEMENT_LOCK_TTL_SECONDS,
-  );
-  return result === "OK";
+  if (!redis) {
+    logger.error({ betId }, "Redis unavailable - cannot acquire settlement lock, skipping settlement to avoid race conditions");
+    return false;
+  }
+  try {
+    const key = `settlement:lock:bet:${String(betId)}`;
+    const result = await redis.set(
+      key,
+      owner,
+      "NX",
+      "EX",
+      SETTLEMENT_LOCK_TTL_SECONDS,
+    );
+    return result === "OK";
+  } catch (err) {
+    logger.error({ err, betId }, "Failed to acquire settlement lock due to Redis error");
+    return false;
+  }
 }
 
 async function releaseBetSettlementLock(
@@ -118,10 +126,14 @@ async function releaseBetSettlementLock(
 ): Promise<void> {
   const redis = getSettlementRedis();
   if (!redis) return;
-  const key = `settlement:lock:bet:${String(betId)}`;
-  const currentOwner = await redis.get(key);
-  if (currentOwner === owner) {
-    await redis.del(key);
+  try {
+    const key = `settlement:lock:bet:${String(betId)}`;
+    const currentOwner = await redis.get(key);
+    if (currentOwner === owner) {
+      await redis.del(key);
+    }
+  } catch (err) {
+    logger.error({ err, betId }, "Failed to release settlement lock due to Redis error");
   }
 }
 

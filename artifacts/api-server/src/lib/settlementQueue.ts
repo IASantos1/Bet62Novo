@@ -116,14 +116,22 @@ export function startSettlementQueueWorker(handler: (args: { matchId: string; jo
   );
 
   _worker.on("failed", (job, err) => {
+    if (!job) return;
+    const attemptsMade = job.attemptsMade;
+    const maxAttempts = job.opts.attempts ?? 3;
+    
     logger.error(
       {
         err,
-        jobId: job?.id,
-        matchId: job?.data?.matchId,
+        jobId: job.id,
+        matchId: job.data?.matchId,
+        attemptsMade,
+        maxAttempts,
         error: err.message,
       },
-      "Settlement queue job failed",
+      attemptsMade >= maxAttempts 
+        ? "Settlement queue job failed permanently" 
+        : "Settlement queue job failed, will retry",
     );
   });
 
