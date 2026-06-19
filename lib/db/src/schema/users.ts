@@ -19,7 +19,7 @@ export const usersTable = pgTable("users", {
   kycDocumentNumber: text("kyc_document_number"),
   kycSubmittedAt: timestamp("kyc_submitted_at", { withTimezone: true }),
   firstDepositGranted: text("first_deposit_granted").default("none"),
-  version: serial("version").notNull().default(1),
+  version: serial("version"), // Optional for now, will be not null after migration
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
