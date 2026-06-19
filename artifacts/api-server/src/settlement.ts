@@ -2722,6 +2722,44 @@ function inferSelectionLookupSport(
   );
 }
 
+function detectSportFromKey(normalizedKey: string): string {
+  const s = normalizedKey;
+  if (
+    s.startsWith("set") ||
+    s.startsWith("vs") ||
+    s.startsWith("es-") ||
+    s.startsWith("sh") ||
+    s.startsWith("gh-") ||
+    s.startsWith("ses-") ||
+    s.includes("sets")
+  )
+    return "tennis";
+  if (
+    s.startsWith("b-") ||
+    /^q[1234]-/.test(s) ||
+    s === "h1-home" ||
+    s === "h1-away"
+  )
+    return "basketball";
+  if (
+    /^p[123]-/.test(s) ||
+    /^per[123]-/.test(s) ||
+    /^p[123]t-/.test(s) ||
+    s.startsWith("sog-") ||
+    s === "pl-home" ||
+    s === "pl-away"
+  )
+    return "hockey";
+  if (
+    s.startsWith("mlb-") ||
+    s.startsWith("f5-") ||
+    s.startsWith("f5t-") ||
+    s.startsWith("rl-")
+  )
+    return "baseball";
+  return "football";
+}
+
 function providerMatchIdPrefixesForSport(
   sport:
     | "football"
