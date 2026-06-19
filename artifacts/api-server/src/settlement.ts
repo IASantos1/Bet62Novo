@@ -1369,57 +1369,110 @@ function footballEventMatchesPeriod(
 }
 
 export function normalizeSettlementSelectionKey(selection: string): string {
-  let s = String(selection ?? "");
+  let s = String(selection ?? "").trim().toLowerCase();
+  
+  // Remove prefixes like handicap: / asiatico: / spread:
   if (/^(?:handicap|asiatico|spread|puckline):/.test(s))
     s = s.replace(/^[^:]+:/, "");
-  if (s === "1x2-home") s = "home";
-  else if (s === "1x2-draw") s = "draw";
-  else if (s === "1x2-away") s = "away";
-  else if (s === "btts1h-y") s = "b1h-yes";
-  else if (s === "btts1h-n") s = "b1h-no";
-  else if (s === "btts2h-y") s = "b2h-yes";
-  else if (s === "btts2h-n") s = "b2h-no";
-  else if (s === "hm1") s = "hc-hm1";
-  else if (s === "ap1") s = "hc-ap1";
-  else if (s === "hm1h") s = "hc-hm15";
-  else if (s === "ap1h") s = "hc-ap15";
+
+  // Portuguese key normalizations
+  if (s === "1x2-home" || s === "vencedor-home" || s === "vencedor-casa" || s === "home") s = "home";
+  else if (s === "1x2-draw" || s === "vencedor-empate" || s === "empate" || s === "draw") s = "draw";
+  else if (s === "1x2-away" || s === "vencedor-visitante" || s === "vencedor-fora" || s === "away") s = "away";
+  
+  // BTTS / Ambas Marcam
+  else if (s === "btts1h-y" || s === "ambas-marcam-1h-sim" || s === "ambas-marcam-primeiro-tempo-sim" || s === "b1h-yes") s = "b1h-yes";
+  else if (s === "btts1h-n" || s === "ambas-marcam-1h-nao" || s === "ambas-marcam-primeiro-tempo-nao" || s === "b1h-no") s = "b1h-no";
+  else if (s === "btts2h-y" || s === "ambas-marcam-2h-sim" || s === "ambas-marcam-segundo-tempo-sim" || s === "b2h-yes") s = "b2h-yes";
+  else if (s === "btts2h-n" || s === "ambas-marcam-2h-nao" || s === "ambas-marcam-segundo-tempo-nao" || s === "b2h-no") s = "b2h-no";
+  else if (s === "bts-yes" || s === "ambas-marcam-sim" || s === "btts-sim") s = "bts-yes";
+  else if (s === "bts-no" || s === "ambas-marcam-nao" || s === "btts-nao") s = "bts-no";
+
+  // Handicap
+  else if (s === "hm1" || s === "hc-hm1" || s === "handicap-home-1" || s === "handicap-casa-1") s = "hc-hm1";
+  else if (s === "ap1" || s === "hc-ap1" || s === "handicap-away-1" || s === "handicap-visitante-1") s = "hc-ap1";
+  else if (s === "hm1h" || s === "hc-hm15" || s === "handicap-home-1.5" || s === "handicap-casa-1.5") s = "hc-hm15";
+  else if (s === "ap1h" || s === "hc-ap15" || s === "handicap-away-1.5" || s === "handicap-visitante-1.5") s = "hc-ap15";
   else if (s === "hcap-home") s = "hc-hm1";
   else if (s === "hcap-away") s = "hc-ap1";
-  else if (s === "ah:home") s = "ah-home";
-  else if (s === "ah:away") s = "ah-away";
+  else if (s === "ah:home" || s === "asian-handicap-home" || s === "handicap-asiatico-casa") s = "ah-home";
+  else if (s === "ah:away" || s === "asian-handicap-away" || s === "handicap-asiatico-visitante") s = "ah-away";
   else if (s === "pl:home") s = "pl-home";
   else if (s === "pl:away") s = "pl-away";
-  else if (/^s([123])-(home|away)$/.test(s)) {
-    const m = s.match(/^s([123])-(home|away)$/);
-    s = `set${m![1]}-${m![2]}`;
-  } else if (/^ts-([ou])(15|25|35|45)$/.test(s)) {
-    const m = s.match(/^ts-([ou])(15|25|35|45)$/);
-    s = `${m![1]}sets${m![2]}`;
-  } else if (/^sh(\d+)-(home|away)\d*$/.test(s)) {
-    const m = s.match(/^sh(\d+)-(home|away)\d*$/);
-    s = `sh${m![1]}-${m![2]}`;
-  } else if (/^gh-(home|away)\d*$/.test(s)) {
-    const m = s.match(/^gh-(home|away)\d*$/);
-    s = `gh-${m![1]}`;
-  } else if (/^tg-([ou][\d.]+)$/.test(s)) s = s.slice(3);
-  else if (/^cards-([ou])(\d+)$/.test(s)) {
-    const m = s.match(/^cards-([ou])(\d+)$/);
+
+  // Tennis - Sets
+  else if (/^s([123])-(home|away)$/.test(s) || /^vencedor-set([123])-(home|away|casa|visitante|fora)$/.test(s)) {
+    const m = s.match(/^(?:s|vencedor-set)([123])-(home|away|casa|visitante|fora)$/);
+    const side = m![2] === "casa" ? "home" : (m![2] === "visitante" || m![2] === "fora") ? "away" : m![2];
+    s = `set${m![1]}-${side}`;
+  }
+  else if (/^ts-([ou])(15|25|35|45)$/.test(s) || /^total-sets-([ou])(1\.5|2\.5|3\.5|4\.5)$/.test(s)) {
+    const m = s.match(/^(?:ts|total-sets)-([ou])(?:(15|25|35|45)|(1\.5|2\.5|3\.5|4\.5))$/);
+    const line = m![2] || m![3]!.replace(".", "");
+    s = `${m![1]}sets${line}`;
+  }
+  else if (/^sh(\d+)-(home|away)\d*$/.test(s) || /^handicap-sets-(\d+)-(home|away|casa|visitante|fora)$/.test(s)) {
+    const m = s.match(/^(?:sh|handicap-sets-)(\d+)-(home|away|casa|visitante|fora)\d*$/);
+    const side = m![2] === "casa" ? "home" : (m![2] === "visitante" || m![2] === "fora") ? "away" : m![2];
+    s = `sh${m![1]}-${side}`;
+  }
+  else if (/^gh-(home|away)\d*$/.test(s) || /^handicap-jogos-(home|away|casa|visitante|fora)$/.test(s)) {
+    const m = s.match(/^(?:gh|handicap-jogos-)(home|away|casa|visitante|fora)\d*$/);
+    const side = m![1] === "casa" ? "home" : (m![1] === "visitante" || m![1] === "fora") ? "away" : m![1];
+    s = `gh-${side}`;
+  }
+  else if (/^tg-([ou][\d.]+)$/.test(s) || /^total-games-([ou])(\d+(?:\.\d+)?)$/.test(s)) {
+    const m = s.match(/^(?:tg|total-games)-([ou])([\d.]+)$/);
+    s = m![1] + m![2].replace(".", "");
+  }
+  else if (/^s([12])g-([ou])-(\d+(?:\.\d+)?)$/.test(s) || /^games-set([12])-([ou])-(\d+(?:\.\d+)?)$/.test(s)) {
+    const m = s.match(/^(?:s|games-set)([12])g?-([ou])-(\d+(?:\.\d+)?)$/);
+    s = `s${m![1]}g-${m![2]}-${m![3]}`;
+  }
+
+  // Cards / Escanteios
+  else if (/^cards-([ou])(\d+)$/.test(s) || /^total-cartoes-([ou])(\d+)$/.test(s)) {
+    const m = s.match(/^(?:cards|total-cartoes)-([ou])(\d+)$/);
     s = `${m![1]}card${m![2]}`;
-  } else if (/^corners-([ou])(\d+)$/.test(s)) {
-    const m = s.match(/^corners-([ou])(\d+)$/);
+  }
+  else if (/^corners-([ou])(\d+)$/.test(s) || /^total-escanteios-([ou])(\d+)$/.test(s)) {
+    const m = s.match(/^(?:corners|total-escanteios)-([ou])(\d+)$/);
     s = `${m![1]}c${m![2]}`;
-  } else if (s === "dc-12") s = "homeOrAway";
+  }
+
+  // Double Chance
+  else if (s === "dc-12" || s === "homeOrAway" || s === "dupla-chance-12" || s === "dupla-chance-casa-visitante") s = "homeOrAway";
+  else if (s === "dc-hd" || s === "homeOrDraw" || s === "dupla-chance-hd" || s === "dupla-chance-casa-empate") s = "dc-hd";
+  else if (s === "dc-da" || s === "awayOrDraw" || s === "dupla-chance-da" || s === "dupla-chance-visitante-empate") s = "dc-da";
+
+  // Exact Goals
   else if (s === "eg-0") s = "eg-g0";
   else if (s === "eg-1") s = "eg-g1";
   else if (s === "eg-2") s = "eg-g2";
   else if (s === "eg-3") s = "eg-g3";
   else if (s === "eg-4") s = "eg-g4";
-  else if (s === "eg-5p") s = "eg-g5plus";
-  else if (s === "et-res-home") s = "et-home";
-  else if (s === "et-res-draw") s = "et-draw";
-  else if (s === "et-res-away") s = "et-away";
+  else if (s === "eg-5p" || s === "eg-g5plus" || s === "gols-exatos-5+") s = "eg-g5plus";
+
+  // Extra Time
+  else if (s === "et-res-home" || s === "tempo-extra-vencedor-home" || s === "tempo-extra-casa") s = "et-home";
+  else if (s === "et-res-draw" || s === "tempo-extra-empate") s = "et-draw";
+  else if (s === "et-res-away" || s === "tempo-extra-vencedor-away" || s === "tempo-extra-visitante") s = "et-away";
   else if (s === "et-tie-home") s = "et-tw-home";
   else if (s === "et-tie-away") s = "et-tw-away";
+
+  // First Half / 1º Tempo
+  else if (s === "ht-home" || s === "1-tempo-home" || s === "primeiro-tempo-casa") s = "ht-home";
+  else if (s === "ht-draw" || s === "1-tempo-empate" || s === "primeiro-tempo-empate") s = "ht-draw";
+  else if (s === "ht-away" || s === "1-tempo-away" || s === "primeiro-tempo-visitante") s = "ht-away";
+
+  // Clean Sheet / Vitória a Zero
+  else if (s === "cs-h" || s === "casa-folha-limpa" || s === "vitoria-a-zero-casa" || s === "wtn-h") s = "cs-h";
+  else if (s === "cs-a" || s === "visitante-folha-limpa" || s === "vitoria-a-zero-visitante" || s === "wtn-a") s = "cs-a";
+
+  // Draw No Bet
+  else if (s === "dnb-home" || s === "empate-anulado-casa") s = "dnb-home";
+  else if (s === "dnb-away" || s === "empate-anulado-visitante") s = "dnb-away";
+
   else {
     const compactFootballKey = normalizeCompactFootballSelectionKey(s);
     if (compactFootballKey) s = compactFootballKey;
