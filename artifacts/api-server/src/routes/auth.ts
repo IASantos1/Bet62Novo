@@ -28,7 +28,8 @@ router.post("/register", async (req, res): Promise<void> => {
   }
 
   const nifClean = (nif ?? "").replace(/\s/g, "");
-  if (!validatePortugueseNif(nifClean)) {
+  // Optional NIF: if provided, validate it
+  if (nifClean && !validatePortugueseNif(nifClean)) {
     res.status(400).json({ error: "NIF inválido. Insira um NIF português válido com 9 dígitos." });
     return;
   }
@@ -45,7 +46,7 @@ router.post("/register", async (req, res): Promise<void> => {
       name,
       email,
       passwordHash,
-      nif: nifClean,
+      nif: nifClean || null,
       balance: "0.00",
       freebetBalance: "0.00",
     }).returning();

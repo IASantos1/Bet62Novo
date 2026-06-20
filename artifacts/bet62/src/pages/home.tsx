@@ -7806,7 +7806,8 @@ export default function Home({
       return;
     }
     const nifDigits = regNif.replace(/\s/g, "");
-    if (!validatePortugueseNif(nifDigits)) {
+    // Optional NIF: if provided, validate it
+    if (nifDigits && !validatePortugueseNif(nifDigits)) {
       toast.error(
         "NIF inválido. Insira um NIF português válido com 9 dígitos.",
       );
