@@ -20,16 +20,43 @@ type AuthContextType = {
   login: (email: string, password: string) => Promise<void>;
   register: (name: string, email: string, password: string, nif: string) => Promise<void>;
   logout: () => void;
+  invalidateSession: (message?: string) => void;
   token: string | null;
   refreshUser: () => Promise<void>;
 };
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
+function readStoredToken(): string | null {
+  try {
+    return localStorage.getItem("bet62_token");
+  } catch {
+    return null;
+  }
+}
+
+function writeStoredToken(token: string) {
+  try {
+    localStorage.setItem("bet62_token", token);
+  } catch {}
+}
+
+function clearStoredToken() {
+  try {
+    localStorage.removeItem("bet62_token");
+  } catch {}
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
-  const [token, setToken] = useState<string | null>(localStorage.getItem("bet62_token"));
+  const [token, setToken] = useState<string | null>(() => readStoredToken());
   const [isLoading, setIsLoading] = useState(true);
+
+  const clearSession = () => {
+    setToken(null);
+    setUser(null);
+    clearStoredToken();
+  };
 
   const fetchUser = async (currentToken: string) => {
     try {
@@ -40,8 +67,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         const data = await res.json();
         setUser(data.user);
       } else {
-        setToken(null);
-        localStorage.removeItem("bet62_token");
+        clearSession();
       }
     } catch (err) {
       console.error(err);
@@ -68,7 +94,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (!res.ok) throw new Error(data.error || "Login failed");
     
     setToken(data.token);
-    localStorage.setItem("bet62_token", data.token);
+    writeStoredToken(data.token);
     setUser(data.user);
   };
 
@@ -82,15 +108,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (!res.ok) throw new Error(data.error || "Registration failed");
 
     setToken(data.token);
-    localStorage.setItem("bet62_token", data.token);
+    writeStoredToken(data.token);
     setUser(data.user);
   };
 
   const logout = () => {
-    setToken(null);
-    setUser(null);
-    localStorage.removeItem("bet62_token");
+    clearSession();
     toast.success("Saiu com sucesso");
+  };
+
+  const invalidateSession = (message = "Sessão expirada. Entre novamente.") => {
+    clearSession();
+    toast.error(message);
   };
 
   const refreshUser = async () => {
@@ -98,7 +127,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <AuthContext.Provider value={{ user, isLoading, login, register, logout, token, refreshUser }}>
+    <AuthContext.Provider value={{ user, isLoading, login, register, logout, invalidateSession, token, refreshUser }}>
       {children}
     </AuthContext.Provider>
   );

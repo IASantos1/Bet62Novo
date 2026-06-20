@@ -17,11 +17,11 @@ export async function insertLedgerEntry(
     insert: typeof import("@workspace/db")["db"]["insert"];
   };
 
-  const amountNum = Number(args.amount);
-  if (!Number.isFinite(amountNum)) {
-    throw new Error("Invalid amount");
+  // Validate amount string directly (avoid floating point conversion)
+  const amountStr = args.amount;
+  if (!/^-?\d+(\.\d{1,2})?$/.test(amountStr)) {
+    throw new Error("Invalid amount format");
   }
-  const amountStr = amountNum.toFixed(2);
 
   const inserted = await txDb
     .insert(ledgerEntriesTable)
@@ -57,13 +57,14 @@ export async function applyBalanceDelta(
   const txDb = tx as {
     insert: typeof import("@workspace/db")["db"]["insert"];
     update: typeof import("@workspace/db")["db"]["update"];
+    select: typeof import("@workspace/db")["db"]["select"];
   };
 
-  const amountNum = Number(args.amount);
-  if (!Number.isFinite(amountNum)) {
-    throw new Error("Invalid amount");
+  // Validate amount string directly (avoid floating point conversion)
+  const amountStr = args.amount;
+  if (!/^-?\d+(\.\d{1,2})?$/.test(amountStr)) {
+    throw new Error("Invalid amount format");
   }
-  const amountStr = amountNum.toFixed(2);
 
   const inserted = await txDb
     .insert(ledgerEntriesTable)

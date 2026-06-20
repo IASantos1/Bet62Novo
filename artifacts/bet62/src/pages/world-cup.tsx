@@ -2,14 +2,12 @@ import { useState, useEffect, useRef } from "react";
 import { useLocation } from "wouter";
 import { motion, AnimatePresence } from "framer-motion";
 import { ArrowLeft, X, BarChart2 } from "lucide-react";
+import { fetchWithTimeout } from "@/lib/fetch-timeout";
+import { getResolvedTheme, subscribeThemeChange, type ResolvedTheme } from "@/lib/theme";
+import { readWCClientSnapshotRaw, writeWCClientSnapshotRaw } from "@/lib/world-cup-cache";
 import trophyImg from "/trophy-wc-nobg.png";
 
-// ─── Theme helpers ─────────────────────────────────────────────────────────────
-type Theme = "dark" | "light";
-function getAutoTheme(): Theme {
-  const h = new Date().getHours();
-  return h >= 8 && h < 19 ? "light" : "dark";
-}
+type Theme = ResolvedTheme;
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -65,6 +63,10 @@ type WCMatch = {
   id: string;
   home: string;
   away: string;
+  homeTeamId?: string;
+  awayTeamId?: string;
+  homeImageVersion?: string;
+  awayImageVersion?: string;
   homeScore?: number;
   awayScore?: number;
   league: string;
@@ -210,32 +212,60 @@ const TEAM_EMOJI: Record<string, string> = {
   "países baixos": "🇳🇱", "netherlands": "🇳🇱",
 };
 
-function FlagImg({ name, size = 32 }: { name: string; size?: number }) {
-  const [err, setErr] = useState(false);
+function buildCompetitorLogoUrl(teamId?: string, imageVersion?: string): string | null {
+  const cleanId = String(teamId ?? "").trim();
+  if (!cleanId) return null;
+  const url = new URL(`https://v1.football.sportsapipro.com/images/competitors/${encodeURIComponent(cleanId)}`);
+  const cleanVersion = String(imageVersion ?? "").trim();
+  if (cleanVersion) url.searchParams.set("imageVersion", cleanVersion);
+  return url.toString();
+}
+
+function FlagImg({ name, size = 32, teamId, imageVersion }: { name: string; size?: number; teamId?: string; imageVersion?: string }) {
+  const [flagErr, setFlagErr] = useState(false);
+  const [logoErr, setLogoErr] = useState(false);
   const code = TEAM_CODES[name.toLowerCase()];
   const emoji = TEAM_EMOJI[name.toLowerCase()] ?? "🌐";
+  const logoUrl = buildCompetitorLogoUrl(teamId, imageVersion);
   const s = size;
-  const border: React.CSSProperties = {
+  const shell: React.CSSProperties = {
     width: s, height: s, borderRadius: "50%", flexShrink: 0, overflow: "hidden",
     boxShadow: "0 0 8px 2px rgba(255,200,0,0.3), 0 2px 6px rgba(0,0,0,0.5)",
     border: "1.5px solid rgba(255,200,0,0.25)",
     position: "relative",
+    background: "#fff",
   };
-  if (code && !err) {
+  if (code && !flagErr) {
     return (
-      <div style={border}>
+      <div style={shell}>
         <img
           src={`https://flagcdn.com/w80/${code}.png`}
           alt={name}
-          style={{ width: "100%", height: "100%", objectFit: "cover" }}
-          onError={() => setErr(true)}
+          style={{ width: "100%", height: "100%", objectFit: "cover", borderRadius: "50%" }}
+          loading="lazy"
+          decoding="async"
+          onError={() => setFlagErr(true)}
         />
         <div style={{ position: "absolute", inset: 0, borderRadius: "50%", background: "linear-gradient(140deg,rgba(255,255,255,0.45) 0%,transparent 45%)", pointerEvents: "none" }} />
       </div>
     );
   }
+  if (logoUrl && !logoErr) {
+    return (
+      <div style={{ ...shell, padding: Math.max(2, Math.round(s * 0.12)) }}>
+        <img
+          src={logoUrl}
+          alt={name}
+          style={{ width: "100%", height: "100%", objectFit: "contain" }}
+          loading="lazy"
+          decoding="async"
+          onError={() => setLogoErr(true)}
+        />
+      </div>
+    );
+  }
   return (
-    <div style={{ ...border, display: "flex", alignItems: "center", justifyContent: "center", background: "#1c1c22", fontSize: s * 0.52 }}>
+    <div style={{ ...shell, display: "flex", alignItems: "center", justifyContent: "center", background: "#1c1c22", fontSize: s * 0.52 }}>
       {emoji}
     </div>
   );
@@ -300,6 +330,10 @@ function mapToWCMatch(m: Record<string, unknown>): WCMatch {
     id: String(m.id ?? m.matchId ?? Math.random()),
     home: String(m.home ?? m.homeTeam ?? ""),
     away: String(m.away ?? m.awayTeam ?? ""),
+    homeTeamId: m.homeTeamId != null ? String(m.homeTeamId) : undefined,
+    awayTeamId: m.awayTeamId != null ? String(m.awayTeamId) : undefined,
+    homeImageVersion: m.homeImageVersion != null ? String(m.homeImageVersion) : undefined,
+    awayImageVersion: m.awayImageVersion != null ? String(m.awayImageVersion) : undefined,
     league: String(m.league ?? "FIFA World Cup 2026"),
     country: String(m.country ?? ""),
     date: m.date as string | undefined,
@@ -324,6 +358,98 @@ function mapToWCMatch(m: Record<string, unknown>): WCMatch {
   };
 }
 
+type WCMatchCollections = {
+  allMatches: WCMatch[];
+  liveMatches: WCMatch[];
+  upcomingMatches: WCMatch[];
+  initialTab: "live" | "upcoming";
+};
+
+type WCStandingRow = { pos: number; name: string; played: number; won: number; drawn: number; lost: number; gf: number; ga: number; pts: number };
+type WCStandingGroup = { name: string; rows: WCStandingRow[] };
+type WCCompetitionSection = { title: string; items: Array<{ name: string; odd: number }> };
+
+function emptyWCMatchCollections(): WCMatchCollections {
+  return {
+    allMatches: [],
+    liveMatches: [],
+    upcomingMatches: [],
+    initialTab: "upcoming",
+  };
+}
+
+function normalizeWCMatchTeamKey(name: string): string {
+  return String(name ?? "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, "");
+}
+
+function getWCMatchPriority(match: WCMatch): number {
+  let score = 0;
+  if (match.isLive) score += 1000;
+  if (match.isFinished) score += 500;
+  if (typeof match.homeScore === "number" || typeof match.awayScore === "number") score += 300;
+  if (String(match.id ?? "").startsWith("wc26-")) score += 250;
+  if (match.hasRealOdds) score += 50;
+  if (match.homeTeamId || match.awayTeamId) score += 20;
+  return score;
+}
+
+function dedupeWCMatches(matches: WCMatch[]): WCMatch[] {
+  const bestByPairAndSlot = new Map<string, WCMatch>();
+  for (const match of matches) {
+    const slot = `${match.date ?? ""}|${match.time ?? ""}`;
+    const pairKey = [normalizeWCMatchTeamKey(match.home), normalizeWCMatchTeamKey(match.away)].sort().join("|");
+    const uniqueKey = `${slot}|${pairKey}`;
+    const existing = bestByPairAndSlot.get(uniqueKey);
+    if (!existing || getWCMatchPriority(match) > getWCMatchPriority(existing)) {
+      bestByPairAndSlot.set(uniqueKey, match);
+    }
+  }
+
+  const occupancy = new Set<string>();
+  return [...bestByPairAndSlot.values()]
+    .sort((a, b) => getWCMatchPriority(b) - getWCMatchPriority(a))
+    .filter((match) => {
+      const slot = `${match.date ?? ""}|${match.time ?? ""}`;
+      const homeKey = `${slot}|${normalizeWCMatchTeamKey(match.home)}`;
+      const awayKey = `${slot}|${normalizeWCMatchTeamKey(match.away)}`;
+      if (occupancy.has(homeKey) || occupancy.has(awayKey)) return false;
+      occupancy.add(homeKey);
+      occupancy.add(awayKey);
+      return true;
+    })
+    .sort((a, b) => {
+      const ad = parseMatchDate(a.date)?.getTime() ?? 0;
+      const bd = parseMatchDate(b.date)?.getTime() ?? 0;
+      if (ad !== bd) return ad - bd;
+      return String(a.time ?? "").localeCompare(String(b.time ?? ""));
+    });
+}
+
+function buildWCMatchCollections(rawMatches: Record<string, unknown>[]): WCMatchCollections {
+  const allWC = dedupeWCMatches(rawMatches.map(mapToWCMatch));
+  const wcLive = allWC.filter(m => m.isLive);
+  const wcUpcoming = allWC.filter(m => !m.isLive);
+  return {
+    allMatches: allWC,
+    liveMatches: wcLive,
+    upcomingMatches: wcUpcoming,
+    initialTab: wcLive.length > 0 ? "live" : "upcoming",
+  };
+}
+
+function readWCClientSnapshot(): WCMatchCollections | null {
+  const raw = readWCClientSnapshotRaw();
+  return raw ? buildWCMatchCollections(raw.matches) : null;
+}
+
+function writeWCClientSnapshot(rawMatches: Record<string, unknown>[]) {
+  writeWCClientSnapshotRaw(rawMatches);
+}
+
 function wcPhaseTag(status: string | undefined, minute: number): "1P" | "Int." | "2P" | "ET" | "PEN" | null {
   const s = (status ?? "").toLowerCase();
   if (s.includes("pen") || s.includes("shootout")) return "PEN";
@@ -336,6 +462,34 @@ function wcPhaseTag(status: string | undefined, minute: number): "1P" | "Int." |
   return "2P";
 }
 
+function isWCHalftimeStatus(status: string | undefined): boolean {
+  const s = (status ?? "").toLowerCase();
+  return s === "ht" || s === "halftime" || s.includes("half time") || s.includes("intervalo");
+}
+
+function getWCLiveHalf(match: WCMatch, displayMinute?: number): 1 | 2 | 0 | null {
+  const s = (match.status ?? "").toLowerCase();
+  const minute = displayMinute ?? match.minute ?? 0;
+  if (isWCHalftimeStatus(match.status)) return 0;
+  if (
+    s.includes("2nd half") ||
+    s.includes("second half") ||
+    s.includes("2ª parte") ||
+    s.includes("extra") ||
+    s === "et" ||
+    s.includes("pen") ||
+    match.isFinished ||
+    minute > 45
+  ) return 2;
+  if (
+    s.includes("1st half") ||
+    s.includes("first half") ||
+    s.includes("1ª parte") ||
+    minute > 0
+  ) return 1;
+  return null;
+}
+
 function fmtWCMin(minute: number | undefined, status: string | undefined): string {
   if (!minute || minute <= 0) return "";
   const s = (status ?? "").toLowerCase();
@@ -346,10 +500,21 @@ function fmtWCMin(minute: number | undefined, status: string | undefined): strin
 
 // ─── Odds button (used in match card quick odds) ──────────────────────────────
 
-function OBtn({ label, odd, active, onClick, theme }: { label: string; odd: number; active: boolean; onClick: () => void; theme: Theme }) {
+function OBtn({ label, odd, active, onClick, theme, prevOdd, isLive }: {
+  label: string;
+  odd: number;
+  active: boolean;
+  onClick: () => void;
+  theme: Theme;
+  prevOdd?: number;
+  isLive?: boolean;
+}) {
   if (!odd || odd <= 1.001) return null;
   const isDark = theme === "dark";
   const isHot = odd <= 1.05;
+  const delta = prevOdd !== undefined ? odd - prevOdd : 0;
+  const oddsUp = !!isLive && delta >= 0.02;
+  const oddsDown = !!isLive && delta <= -0.02;
   if (isHot) {
     return (
       <button
@@ -373,20 +538,26 @@ function OBtn({ label, odd, active, onClick, theme }: { label: string; odd: numb
       }`}
     >
       <span className={`text-[10px] leading-tight text-center w-full truncate px-0.5 mb-1 ${isDark ? "text-zinc-500" : "text-zinc-500"}`}>{label}</span>
-      <span className={`text-sm font-black tabular-nums ${active ? "text-red-400" : isDark ? "text-white" : "text-zinc-900"}`}>{odd.toFixed(2)}</span>
+      <span className={`text-sm font-black tabular-nums flex items-center gap-0.5 ${active ? "text-red-400" : isDark ? "text-white" : "text-zinc-900"}`}>
+        {odd.toFixed(2)}
+        {oddsUp && <span className="text-green-400 text-[9px] font-black leading-none shrink-0">▲</span>}
+        {oddsDown && <span className="text-red-400 text-[9px] font-black leading-none shrink-0">▼</span>}
+      </span>
     </button>
   );
 }
 
 // ─── Simple Match Card ────────────────────────────────────────────────────────
 
-function MatchCard({ match, onOpen, activeSel, onQuickBet, theme, displayMinute }: {
+function MatchCard({ match, onOpen, activeSel, onQuickBet, theme, displayMinute, isFlashing, prevOdds }: {
   match: WCMatch;
   onOpen: () => void;
   activeSel?: string;
   onQuickBet: (key: string, label: string, odd: number) => void;
   theme: Theme;
   displayMinute?: number;
+  isFlashing?: boolean;
+  prevOdds?: { home: number; draw: number; away: number };
 }) {
   const { home, away, odds, isLive, homeScore, awayScore, minute, time, date } = match;
   const dispMin = displayMinute ?? minute ?? 0;
@@ -415,6 +586,16 @@ function MatchCard({ match, onOpen, activeSel, onQuickBet, theme, displayMinute 
 
   // Goal celebration colour ring
   const showGoalRing = isGoal || isGoalCeleb;
+  const isObviousLiveResult = !!(isLive && odds && (() => {
+    const validOdds = [odds.home, odds.away].filter(v => v > 0);
+    if (validOdds.length === 0) return false;
+    const minOdd = Math.min(...validOdds);
+    if (minOdd <= 1.05) return true;
+    const diff = Math.abs((homeScore ?? 0) - (awayScore ?? 0));
+    if (dispMin >= 80 && diff >= 2) return true;
+    if (dispMin >= 85 && diff >= 1) return true;
+    return false;
+  })());
 
   return (
     <motion.div
@@ -479,7 +660,7 @@ function MatchCard({ match, onOpen, activeSel, onQuickBet, theme, displayMinute 
         {/* Teams row */}
         <div className="flex items-center justify-between gap-2 mb-3">
           <div className="flex-1 flex flex-col items-center gap-1.5 min-w-0">
-            <FlagImg name={home} size={38} />
+            <FlagImg name={home} size={38} teamId={match.homeTeamId} imageVersion={match.homeImageVersion} />
             <div className="flex items-center gap-1">
               <span className={`text-[11px] font-black text-center leading-tight px-1 ${isDark ? "text-white" : "text-zinc-900"}`}>{home}</span>
               {(match.redCardsHome ?? 0) > 0 && (
@@ -490,7 +671,9 @@ function MatchCard({ match, onOpen, activeSel, onQuickBet, theme, displayMinute 
 
           <div className="flex flex-col items-center min-w-[60px]">
             {isLive ? (
-              <div className={`text-2xl font-black tabular-nums leading-none ${showGoalRing ? "text-green-400" : isDark ? "text-white" : "text-zinc-900"}`}>
+              <div className={`text-2xl font-black tabular-nums leading-none transition-colors duration-300 ${
+                isFlashing || showGoalRing ? "text-green-400" : isDark ? "text-white" : "text-zinc-900"
+              }`}>
                 {homeScore ?? 0}–{awayScore ?? 0}
               </div>
             ) : (
@@ -509,7 +692,7 @@ function MatchCard({ match, onOpen, activeSel, onQuickBet, theme, displayMinute 
           </div>
 
           <div className="flex-1 flex flex-col items-center gap-1.5 min-w-0">
-            <FlagImg name={away} size={38} />
+            <FlagImg name={away} size={38} teamId={match.awayTeamId} imageVersion={match.awayImageVersion} />
             <div className="flex items-center gap-1">
               {(match.redCardsAway ?? 0) > 0 && (
                 <span className="text-[9px]">{'🟥'.repeat(match.redCardsAway!)}</span>
@@ -533,12 +716,24 @@ function MatchCard({ match, onOpen, activeSel, onQuickBet, theme, displayMinute 
                 </span>
               </div>
             )}
-            <div className={`flex gap-1.5 ${isSuspended ? "opacity-40 pointer-events-none" : ""}`}>
-              <OBtn label={home} odd={odds.home} active={activeSel === `${match.id}:home`} onClick={() => onQuickBet(`${match.id}:home`, home, odds.home)} theme={theme} />
-              {odds.draw > 1.001 && <OBtn label="Empate" odd={odds.draw} active={activeSel === `${match.id}:draw`} onClick={() => onQuickBet(`${match.id}:draw`, "Empate", odds.draw)} theme={theme} />}
-              <OBtn label={away} odd={odds.away} active={activeSel === `${match.id}:away`} onClick={() => onQuickBet(`${match.id}:away`, away, odds.away)} theme={theme} />
-            </div>
-            {!match.hasRealOdds && (
+            {isObviousLiveResult && !isSuspended ? (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onOpen();
+                }}
+                className="flex-1 flex flex-col items-center justify-center py-3 px-2 rounded-xl text-xs border border-amber-200 bg-amber-50"
+              >
+                <span className="font-black text-[11px] text-amber-600 uppercase tracking-widest">Aposta Já</span>
+              </button>
+            ) : (
+              <div className={`flex gap-1.5 ${isSuspended ? "opacity-40 pointer-events-none" : ""}`}>
+                <OBtn label={home} odd={odds.home} prevOdd={prevOdds?.home} isLive={isLive} active={activeSel === `${match.id}:home`} onClick={() => onQuickBet(`${match.id}:home`, home, odds.home)} theme={theme} />
+                {odds.draw > 1.001 && <OBtn label="Empate" odd={odds.draw} prevOdd={prevOdds?.draw} isLive={isLive} active={activeSel === `${match.id}:draw`} onClick={() => onQuickBet(`${match.id}:draw`, "Empate", odds.draw)} theme={theme} />}
+                <OBtn label={away} odd={odds.away} prevOdd={prevOdds?.away} isLive={isLive} active={activeSel === `${match.id}:away`} onClick={() => onQuickBet(`${match.id}:away`, away, odds.away)} theme={theme} />
+              </div>
+            )}
+            {!isObviousLiveResult && !match.hasRealOdds && (
               <div className="flex items-center justify-center gap-1">
                 <span className="w-1 h-1 rounded-full bg-amber-500/60" />
                 <span className={`text-[8px] font-semibold tracking-wide ${isDark ? "text-zinc-600" : "text-zinc-400"}`}>ODDS ESTIMADAS</span>
@@ -554,6 +749,53 @@ function MatchCard({ match, onOpen, activeSel, onQuickBet, theme, displayMinute 
 // ─── Group Standings Card ─────────────────────────────────────────────────────
 
 type GroupRow = { team: string; pld: number; w: number; d: number; l: number; gf: number; ga: number; pts: number };
+
+function normalizeWCVisualName(name: string): string {
+  return String(name ?? "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/&/g, " and ")
+    .replace(/\b(fc|cf|sc|ac|afc|fk|club|clube)\b/g, " ")
+    .replace(/[^a-z0-9 ]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function wcStandingRowMatchesTeam(rowName: string, teamName: string): boolean {
+  const row = normalizeWCVisualName(rowName);
+  const team = normalizeWCVisualName(teamName);
+  if (!row || !team) return false;
+  return row === team || row.includes(team) || team.includes(row) || row.includes(team.slice(0, Math.min(team.length, 8)));
+}
+
+function normalizeWCGroupName(rawName: string): string {
+  const raw = String(rawName ?? "").trim();
+  if (!raw) return "Grupo";
+  const compact = raw.replace(/\s+/g, " ").trim();
+  const explicit = compact.match(/(?:^|\b)(?:grupo|group)\s*([A-L])(?:\b|$)/i);
+  if (explicit?.[1]) return `Grupo ${explicit[1].toUpperCase()}`;
+  const reversed = compact.match(/^([A-L])\s*(?:grupo|group)\b/i);
+  if (reversed?.[1]) return `Grupo ${reversed[1].toUpperCase()}`;
+  if (/^[A-Z0-9]$/.test(compact)) return `Grupo ${compact}`;
+  return raw;
+}
+
+function getTeamVisualMeta(name: string, matches: WCMatch[]): { teamId?: string; imageVersion?: string } {
+  const target = normalizeWCVisualName(PT_DISPLAY_NAMES[name] ?? name);
+  if (!target) return {};
+  for (const match of matches) {
+    const home = normalizeWCVisualName(match.home);
+    if (home && (home === target || home.includes(target) || target.includes(home))) {
+      return { teamId: match.homeTeamId, imageVersion: match.homeImageVersion };
+    }
+    const away = normalizeWCVisualName(match.away);
+    if (away && (away === target || away.includes(target) || target.includes(away))) {
+      return { teamId: match.awayTeamId, imageVersion: match.awayImageVersion };
+    }
+  }
+  return {};
+}
 
 function computeGroupStandings(teams: string[], matches: WCMatch[]): GroupRow[] {
   const norm = (s: string) => s.toLowerCase().replace(/[\s.'-]+/g, "");
@@ -581,9 +823,29 @@ function computeGroupStandings(teams: string[], matches: WCMatch[]): GroupRow[] 
   );
 }
 
-function GroupCard({ group, teams, allMatches, theme }: { group: string; teams: string[]; allMatches: WCMatch[]; theme: Theme }) {
+function officialGroupRowsToDisplayRows(teams: string[], officialRows: WCStandingRow[] | undefined): GroupRow[] | null {
+  if (!officialRows || officialRows.length === 0) return null;
+  const rows = teams.map((team, idx) => {
+    const found = officialRows.find((row) => wcStandingRowMatchesTeam(row.name, team));
+    return found
+      ? {
+          team,
+          pld: found.played,
+          w: found.won,
+          d: found.drawn,
+          l: found.lost,
+          gf: found.gf,
+          ga: found.ga,
+          pts: found.pts,
+        }
+      : { team, pld: 0, w: 0, d: 0, l: 0, gf: 0, ga: 0, pts: 0 };
+  });
+  return rows.sort((a, b) => b.pts - a.pts || (b.gf - b.ga) - (a.gf - a.ga) || b.gf - a.gf);
+}
+
+function GroupCard({ group, teams, allMatches, theme, officialRows }: { group: string; teams: string[]; allMatches: WCMatch[]; theme: Theme; officialRows?: WCStandingRow[] }) {
   const isDark = theme === "dark";
-  const rows = computeGroupStandings(teams, allMatches);
+  const rows = officialGroupRowsToDisplayRows(teams, officialRows) ?? computeGroupStandings(teams, allMatches);
   return (
     <div className={`rounded-xl border overflow-hidden ${isDark ? "border-zinc-800 bg-zinc-900/80" : "border-zinc-200 bg-white"}`}>
       {/* Header */}
@@ -607,20 +869,23 @@ function GroupCard({ group, teams, allMatches, theme }: { group: string; teams: 
       </div>
       {/* Rows */}
       <div className={`divide-y ${isDark ? "divide-zinc-800/30" : "divide-zinc-100"}`}>
-        {rows.map((row, i) => (
-          <div key={row.team} className="flex items-center px-2 py-1.5">
-            <span className={`text-[9px] font-black w-4 text-center ${i < 2 ? "text-green-500" : isDark ? "text-zinc-600" : "text-zinc-400"}`}>{i + 1}</span>
-            <FlagImg name={row.team} size={16} />
-            <span className={`flex-1 text-[10px] font-semibold truncate ml-1.5 ${isDark ? "text-zinc-300" : "text-zinc-700"}`}>{PT_DISPLAY_NAMES[row.team] ?? row.team}</span>
-            <span className={`w-5 text-center text-[10px] ${isDark ? "text-zinc-500" : "text-zinc-500"}`}>{row.pld}</span>
-            <span className={`w-5 text-center text-[10px] ${isDark ? "text-zinc-300" : "text-zinc-700"}`}>{row.w}</span>
-            <span className={`w-5 text-center text-[10px] ${isDark ? "text-zinc-500" : "text-zinc-400"}`}>{row.d}</span>
-            <span className={`w-5 text-center text-[10px] ${isDark ? "text-zinc-500" : "text-zinc-400"}`}>{row.l}</span>
-            <span className={`w-6 text-center text-[10px] ${isDark ? "text-zinc-400" : "text-zinc-600"}`}>{row.gf}</span>
-            <span className={`w-6 text-center text-[10px] ${isDark ? "text-zinc-400" : "text-zinc-600"}`}>{row.ga}</span>
-            <span className={`w-7 text-center text-[10px] font-black ${i < 2 ? "text-green-400" : isDark ? "text-zinc-200" : "text-zinc-900"}`}>{row.pts}</span>
-          </div>
-        ))}
+        {rows.map((row, i) => {
+          const visual = getTeamVisualMeta(row.team, allMatches);
+          return (
+            <div key={row.team} className="flex items-center px-2 py-1.5">
+              <span className={`text-[9px] font-black w-4 text-center ${i < 2 ? "text-green-500" : isDark ? "text-zinc-600" : "text-zinc-400"}`}>{i + 1}</span>
+              <FlagImg name={row.team} size={16} teamId={visual.teamId} imageVersion={visual.imageVersion} />
+              <span className={`flex-1 text-[10px] font-semibold truncate ml-1.5 ${isDark ? "text-zinc-300" : "text-zinc-700"}`}>{PT_DISPLAY_NAMES[row.team] ?? row.team}</span>
+              <span className={`w-5 text-center text-[10px] ${isDark ? "text-zinc-500" : "text-zinc-500"}`}>{row.pld}</span>
+              <span className={`w-5 text-center text-[10px] ${isDark ? "text-zinc-300" : "text-zinc-700"}`}>{row.w}</span>
+              <span className={`w-5 text-center text-[10px] ${isDark ? "text-zinc-500" : "text-zinc-400"}`}>{row.d}</span>
+              <span className={`w-5 text-center text-[10px] ${isDark ? "text-zinc-500" : "text-zinc-400"}`}>{row.l}</span>
+              <span className={`w-6 text-center text-[10px] ${isDark ? "text-zinc-400" : "text-zinc-600"}`}>{row.gf}</span>
+              <span className={`w-6 text-center text-[10px] ${isDark ? "text-zinc-400" : "text-zinc-600"}`}>{row.ga}</span>
+              <span className={`w-7 text-center text-[10px] font-black ${i < 2 ? "text-green-400" : isDark ? "text-zinc-200" : "text-zinc-900"}`}>{row.pts}</span>
+            </div>
+          );
+        })}
       </div>
     </div>
   );
@@ -707,6 +972,10 @@ function MarketsPage({ match, activeKeys, onBet, onClose, theme, displayMinute }
   const isDark = theme === "dark";
   const bet = (k: string, label: string, odd: number, market: string) => onBet(mid, k, label, odd, market);
   const dateStr = formatMatchDate(match.date);
+  const liveHalf = getWCLiveHalf(match, displayMinute);
+  const show1tempo = !match.isLive || liveHalf === null || liveHalf === 1;
+  const show2tempo = !match.isLive || liveHalf === 0 || liveHalf === 2;
+  const halftimeSettled = !!(match.isLive && !show1tempo && show2tempo);
 
   const isSuspended = match.isLive && (
     !!match._suspensionReason ||
@@ -730,13 +999,23 @@ function MarketsPage({ match, activeKeys, onBet, onClose, theme, displayMinute }
       : "bg-red-600/20 border-red-500/40 text-red-300";
 
   const hasDupla = !!(mk.doubleChance?.homeOrDraw);
-  const hasGolos = !!(mk.totalGoals?.over25 || mk.bothTeamsScore?.yes || mk.exactGoals?.g0 !== undefined);
+  const hasGolos = !!(
+    mk.totalGoals?.over25 ||
+    mk.bothTeamsScore?.yes ||
+    mk.exactGoals?.g0 !== undefined ||
+    (show1tempo && mk.btts1H?.yes) ||
+    (show2tempo && mk.btts2H?.yes)
+  );
   const hasHandicap = !!(mk.handicap?.homeMinusOne || mk.asianHandicap?.home);
   const hasMarcador = !!(mk.correctScore && Object.keys(mk.correctScore).length > 0);
-  const hasCantos = !!(mk.corners?.o95 || mk.corners1H?.o45 || mk.corners2H?.o45);
-  const hasCartoes = !!(mk.cards?.o35 || mk.cards1H?.o15 || mk.cards2H?.o05);
-  const hasEspeciais = !!(mk.firstGoal?.home || mk.winToNil?.home || mk.goalOddEven?.odd || mk.btts1H?.yes || mk.toWinBothHalves?.home);
-  const hasJogadores = !!(mk.playerGoals?.length || mk.playerAssists?.length || mk.playerCards?.length);
+  const hasCantos = !!(mk.corners?.o95 || (show1tempo && mk.corners1H?.o45) || (show2tempo && mk.corners2H?.o45));
+  const hasCartoes = !!(mk.cards?.o35 || (show1tempo && mk.cards1H?.o15) || (show2tempo && mk.cards2H?.o05));
+  const hasEspeciais = !!(mk.firstGoal?.home || mk.winToNil?.home || mk.goalOddEven?.odd || mk.toWinBothHalves?.home);
+  const hasJogadores = !!(
+    mk.playerGoals?.some(p => (p.anytime ?? 0) > 1.001 || (show1tempo && (p.firstHalf ?? 0) > 1.001) || (show2tempo && (p.secondHalf ?? 0) > 1.001)) ||
+    mk.playerAssists?.some(p => (p.anytime ?? 0) > 1.001) ||
+    mk.playerCards?.some(p => (p.anytime ?? 0) > 1.001 || (show1tempo && (p.firstHalf ?? 0) > 1.001) || (show2tempo && (p.secondHalf ?? 0) > 1.001))
+  );
 
   const TABS: { id: MTabId; label: string }[] = [
     { id: "todos", label: "Todos" },
@@ -766,7 +1045,7 @@ function MarketsPage({ match, activeKeys, onBet, onClose, theme, displayMinute }
           ]} activeKey={ak} onBet={(k, l, o) => bet(k, l, o, "resultado")} theme={theme} isSuspended={isSuspended} />
         </>
       )}
-      {mk.halfTime && (mk.halfTime.home > 1.001 || mk.halfTime.draw > 1.001) && (
+      {show1tempo && mk.halfTime && (mk.halfTime.home > 1.001 || mk.halfTime.draw > 1.001) && (
         <>
           <SLabel theme={theme}>INTERVALO (1ª PARTE)</SLabel>
           <MRow items={[
@@ -776,7 +1055,7 @@ function MarketsPage({ match, activeKeys, onBet, onClose, theme, displayMinute }
           ]} activeKey={ak} onBet={(k, l, o) => bet(k, l, o, "intervalo")} theme={theme} isSuspended={isSuspended} />
         </>
       )}
-      {mk.secondHalf && mk.secondHalf.home > 1.001 && (
+      {show2tempo && mk.secondHalf && mk.secondHalf.home > 1.001 && (
         <>
           <SLabel theme={theme}>2ª PARTE</SLabel>
           <MRow items={[
@@ -867,7 +1146,7 @@ function MarketsPage({ match, activeKeys, onBet, onClose, theme, displayMinute }
           ]} activeKey={ak} onBet={(k, l, o) => bet(k, l, o, "ambas-marcam")} theme={theme} isSuspended={isSuspended} />
         </>
       )}
-      {mk.btts1H && mk.btts1H.yes > 1.001 && (
+      {show1tempo && mk.btts1H && mk.btts1H.yes > 1.001 && (
         <>
           <SLabel theme={theme}>AMBAS MARCAM — 1ª PARTE</SLabel>
           <MRow items={[
@@ -876,7 +1155,7 @@ function MarketsPage({ match, activeKeys, onBet, onClose, theme, displayMinute }
           ]} activeKey={ak} onBet={(k, l, o) => bet(k, l, o, "ambas-1h")} theme={theme} isSuspended={isSuspended} />
         </>
       )}
-      {mk.btts2H && mk.btts2H.yes > 1.001 && (
+      {show2tempo && mk.btts2H && mk.btts2H.yes > 1.001 && (
         <>
           <SLabel theme={theme}>AMBAS MARCAM — 2ª PARTE</SLabel>
           <MRow items={[
@@ -1021,7 +1300,7 @@ function MarketsPage({ match, activeKeys, onBet, onClose, theme, displayMinute }
           ))}
         </>
       )}
-      {mk.corners1H && Object.values(mk.corners1H).some(v => (v ?? 0) > 1.001) && (
+      {show1tempo && mk.corners1H && Object.values(mk.corners1H).some(v => (v ?? 0) > 1.001) && (
         <>
           <SLabel theme={theme}>CANTOS — 1ª PARTE</SLabel>
           {([
@@ -1036,7 +1315,7 @@ function MarketsPage({ match, activeKeys, onBet, onClose, theme, displayMinute }
           ))}
         </>
       )}
-      {mk.corners2H && Object.values(mk.corners2H).some(v => (v ?? 0) > 1.001) && (
+      {show2tempo && mk.corners2H && Object.values(mk.corners2H).some(v => (v ?? 0) > 1.001) && (
         <>
           <SLabel theme={theme}>CANTOS — 2ª PARTE</SLabel>
           {([
@@ -1071,7 +1350,7 @@ function MarketsPage({ match, activeKeys, onBet, onClose, theme, displayMinute }
           ))}
         </>
       )}
-      {mk.cards1H && Object.values(mk.cards1H).some(v => (v ?? 0) > 1.001) && (
+      {show1tempo && mk.cards1H && Object.values(mk.cards1H).some(v => (v ?? 0) > 1.001) && (
         <>
           <SLabel theme={theme}>CARTÕES — 1ª PARTE</SLabel>
           {([
@@ -1086,7 +1365,7 @@ function MarketsPage({ match, activeKeys, onBet, onClose, theme, displayMinute }
           ))}
         </>
       )}
-      {mk.cards2H && Object.values(mk.cards2H).some(v => (v ?? 0) > 1.001) && (
+      {show2tempo && mk.cards2H && Object.values(mk.cards2H).some(v => (v ?? 0) > 1.001) && (
         <>
           <SLabel theme={theme}>CARTÕES — 2ª PARTE</SLabel>
           {([
@@ -1151,7 +1430,7 @@ function MarketsPage({ match, activeKeys, onBet, onClose, theme, displayMinute }
               </button>
             ))}
           </div>
-          {mk.playerGoals.some(p => (p.firstHalf ?? 0) > 1.001) && (
+          {show1tempo && mk.playerGoals.some(p => (p.firstHalf ?? 0) > 1.001) && (
             <>
               <SLabel theme={theme}>MARCADOR — 1ª PARTE</SLabel>
               <div className="grid grid-cols-2 gap-1.5 mb-2">
@@ -1165,7 +1444,7 @@ function MarketsPage({ match, activeKeys, onBet, onClose, theme, displayMinute }
               </div>
             </>
           )}
-          {mk.playerGoals.some(p => (p.secondHalf ?? 0) > 1.001) && (
+          {show2tempo && mk.playerGoals.some(p => (p.secondHalf ?? 0) > 1.001) && (
             <>
               <SLabel theme={theme}>MARCADOR — 2ª PARTE</SLabel>
               <div className="grid grid-cols-2 gap-1.5 mb-2">
@@ -1207,7 +1486,7 @@ function MarketsPage({ match, activeKeys, onBet, onClose, theme, displayMinute }
               </button>
             ))}
           </div>
-          {mk.playerCards.some(p => (p.firstHalf ?? 0) > 1.001) && (
+          {show1tempo && mk.playerCards.some(p => (p.firstHalf ?? 0) > 1.001) && (
             <>
               <SLabel theme={theme}>CARTÃO — 1ª PARTE</SLabel>
               <div className="grid grid-cols-2 gap-1.5 mb-2">
@@ -1221,7 +1500,7 @@ function MarketsPage({ match, activeKeys, onBet, onClose, theme, displayMinute }
               </div>
             </>
           )}
-          {mk.playerCards.some(p => (p.secondHalf ?? 0) > 1.001) && (
+          {show2tempo && mk.playerCards.some(p => (p.secondHalf ?? 0) > 1.001) && (
             <>
               <SLabel theme={theme}>CARTÃO — 2ª PARTE</SLabel>
               <div className="grid grid-cols-2 gap-1.5 mb-2">
@@ -1289,7 +1568,7 @@ function MarketsPage({ match, activeKeys, onBet, onClose, theme, displayMinute }
         {/* Teams + score + stats button */}
         <div className="flex items-center justify-between gap-2 px-4 pb-3">
           <div className="flex-1 flex flex-col items-center gap-1 min-w-0">
-            <FlagImg name={match.home} size={44} />
+            <FlagImg name={match.home} size={44} teamId={match.homeTeamId} imageVersion={match.homeImageVersion} />
             <span className={`text-[12px] font-black text-center leading-tight ${isDark ? "text-white" : "text-zinc-900"}`}>{match.home}</span>
           </div>
 
@@ -1317,7 +1596,7 @@ function MarketsPage({ match, activeKeys, onBet, onClose, theme, displayMinute }
           </div>
 
           <div className="flex-1 flex flex-col items-center gap-1 min-w-0">
-            <FlagImg name={match.away} size={44} />
+            <FlagImg name={match.away} size={44} teamId={match.awayTeamId} imageVersion={match.awayImageVersion} />
             <span className={`text-[12px] font-black text-center leading-tight ${isDark ? "text-white" : "text-zinc-900"}`}>{match.away}</span>
           </div>
         </div>
@@ -1395,6 +1674,11 @@ function MarketsPage({ match, activeKeys, onBet, onClose, theme, displayMinute }
 
       {/* ── Scrollable markets content ── */}
       <div className="flex-1 overflow-y-auto px-4 py-3 pb-24" style={{ overscrollBehavior: "contain" }}>
+        {halftimeSettled && (
+          <div className={`mb-3 rounded-xl border px-3 py-2 text-[11px] font-bold ${isDark ? "border-amber-500/25 bg-amber-500/10 text-amber-300" : "border-amber-200 bg-amber-50 text-amber-700"}`}>
+            1º tempo liquidado. Agora aparecem apenas os mercados da 2ª parte.
+          </div>
+        )}
 
         {/* TODOS — show all markets */}
         {activeTab === "todos" && (
@@ -1440,27 +1724,211 @@ type WCBetPayload = { matchId: string; home: string; away: string; selection: st
 
 export default function WorldCupPage({ onClose, onBet: onBetProp }: { onClose?: () => void; onBet?: (bet: WCBetPayload) => void } = {}) {
   const [, navigate] = useLocation();
-  const [liveMatches, setLiveMatches]       = useState<WCMatch[]>([]);
-  const [upcomingMatches, setUpcomingMatches] = useState<WCMatch[]>([]);
-  const [allMatches, setAllMatches]         = useState<WCMatch[]>([]);
-  const [loading, setLoading]               = useState(true);
-  const [pageTab, setPageTab]               = useState<"live" | "upcoming" | "groups">("upcoming");
+  const initialSnapshotRef = useRef<WCMatchCollections | null>(null);
+  if (initialSnapshotRef.current === null) {
+    initialSnapshotRef.current = readWCClientSnapshot();
+  }
+  const initialSnapshot = initialSnapshotRef.current ?? emptyWCMatchCollections();
+  const [liveMatches, setLiveMatches]       = useState<WCMatch[]>(initialSnapshot.liveMatches);
+  const [upcomingMatches, setUpcomingMatches] = useState<WCMatch[]>(initialSnapshot.upcomingMatches);
+  const [allMatches, setAllMatches]         = useState<WCMatch[]>(initialSnapshot.allMatches);
+  const [loading, setLoading]               = useState(initialSnapshotRef.current === null);
+  const [pageTab, setPageTab]               = useState<"live" | "competition" | "upcoming" | "groups">(initialSnapshot.initialTab);
   const [openMatch, setOpenMatch]           = useState<WCMatch | null>(null);
   const [activeKeys, setActiveKeys]         = useState<Record<string, string>>({});
-  const [theme, setTheme]                   = useState<Theme>(getAutoTheme);
+  const [officialGroups, setOfficialGroups] = useState<WCStandingGroup[]>([]);
+  const [competitionSections, setCompetitionSections] = useState<WCCompetitionSection[]>([]);
+  const [theme, setTheme]                   = useState<Theme>(() => getResolvedTheme(null));
   const intervalRef         = useRef<ReturnType<typeof setInterval> | null>(null);
   // ── Live clock interpolation (1-second tick, same pattern as home.tsx) ──────
   const [, setMinuteTick]    = useState(0);
   const apiMinutesRef        = useRef<Record<string, number>>({});
   const minuteChangedAtRef   = useRef<Record<string, number>>({});
   const liveDataFetchedAt    = useRef<number | null>(null);
+  // ── SSE real-time score push ─────────────────────────────────────────────────
+  const sseWCRef             = useRef<EventSource | null>(null);
+  const sseIdToWCIdRef       = useRef<Map<string, string>>(new Map());
+  const liveMatchesRef       = useRef<WCMatch[]>([]);
+  const prevLiveOddsRef      = useRef<Record<string, { home: number; draw: number; away: number }>>({});
+  const lastSseSnapshotRef   = useRef<Array<{ id: unknown; home: unknown; away: unknown; sport?: unknown }>>([]);
+  const [flashIds, setFlashIds] = useState<Record<string, number>>({});
 
-  // Automatic theme: light 08:00-19:00, dark otherwise
   useEffect(() => {
-    const tick = () => setTheme(getAutoTheme());
-    tick();
-    const id = setInterval(tick, 60_000);
-    return () => clearInterval(id);
+    const syncTheme = () => setTheme(getResolvedTheme(null));
+    syncTheme();
+    const unsubscribe = subscribeThemeChange(setTheme);
+    const id = setInterval(syncTheme, 60_000);
+    return () => {
+      unsubscribe();
+      clearInterval(id);
+    };
+  }, []);
+
+  // Keep liveMatchesRef in sync + rebuild SSE→WC ID mapping when matches refresh
+  useEffect(() => {
+    liveMatchesRef.current = liveMatches;
+    if (lastSseSnapshotRef.current.length === 0) return;
+    const norm = (s: string) => s.toLowerCase().replace(/[\s.''\-]+/g, "");
+    for (const sm of lastSseSnapshotRef.current) {
+      if (sm.sport && String(sm.sport) !== "football") continue;
+      const sId = String(sm.id ?? "");
+      if (!sId) continue;
+      const sH = norm(String(sm.home ?? ""));
+      const sA = norm(String(sm.away ?? ""));
+      for (const wc of liveMatches) {
+        const wH = norm(wc.home);
+        const wA = norm(wc.away);
+        if ((sH === wH || sH.includes(wH) || wH.includes(sH)) && (sA === wA || sA.includes(wA) || wA.includes(sA))) {
+          sseIdToWCIdRef.current.set(sId, wc.id);
+        }
+      }
+    }
+  }, [liveMatches]);
+
+  // SSE — real-time score/suspension/minute push (same stream as home page)
+  useEffect(() => {
+    const norm = (s: string) => s.toLowerCase().replace(/[\s.''\-]+/g, "");
+    function rebuildMapping(snapshot: Array<{ id: unknown; home: unknown; away: unknown; sport?: unknown }>) {
+      lastSseSnapshotRef.current = snapshot;
+      const wcs = liveMatchesRef.current;
+      for (const sm of snapshot) {
+        if (sm.sport && String(sm.sport) !== "football") continue;
+        const sId = String(sm.id ?? "");
+        if (!sId) continue;
+        const sH = norm(String(sm.home ?? ""));
+        const sA = norm(String(sm.away ?? ""));
+        for (const wc of wcs) {
+          const wH = norm(wc.home);
+          const wA = norm(wc.away);
+          if ((sH === wH || sH.includes(wH) || wH.includes(sH)) && (sA === wA || sA.includes(wA) || wA.includes(sA))) {
+            sseIdToWCIdRef.current.set(sId, wc.id);
+          }
+        }
+      }
+    }
+    function applyDelta(sseMatchId: string, delta: Record<string, unknown>) {
+      const wcId = sseIdToWCIdRef.current.get(sseMatchId);
+      if (!wcId) return;
+      let scored = false;
+      const patch = (m: WCMatch): WCMatch => {
+        if (m.id !== wcId) return m;
+        const u: WCMatch = { ...m };
+        if (delta.odds && typeof delta.odds === "object") {
+          prevLiveOddsRef.current[wcId] = {
+            home: m.odds?.home ?? 0,
+            draw: m.odds?.draw ?? 0,
+            away: m.odds?.away ?? 0,
+          };
+        }
+        if (typeof delta.homeScore === "number" && delta.homeScore !== m.homeScore) { u.homeScore = delta.homeScore; scored = true; }
+        if (typeof delta.awayScore === "number" && delta.awayScore !== m.awayScore) { u.awayScore = delta.awayScore; scored = true; }
+        if (typeof delta.minute === "number" && Number.isFinite(delta.minute)) {
+          const prev = apiMinutesRef.current[wcId];
+          if (delta.minute >= (prev ?? 0)) {
+            apiMinutesRef.current[wcId] = delta.minute;
+            if (delta.minute !== prev) minuteChangedAtRef.current[wcId] = Date.now();
+            u.minute = delta.minute;
+          }
+        }
+        if (typeof delta.status === "string") u.status = delta.status;
+        if (delta.isLive !== undefined) u.isLive = !!delta.isLive;
+        if (delta.marketSuspension !== undefined) u.marketSuspension = delta.marketSuspension as WCMatch["marketSuspension"];
+        if (delta._suspensionReason !== undefined) u._suspensionReason = delta._suspensionReason as string | undefined;
+        if (delta._liveExtra !== undefined) u._liveExtra = delta._liveExtra as WCMatch["_liveExtra"];
+        if (typeof delta.redCardsHome === "number") u.redCardsHome = delta.redCardsHome;
+        if (typeof delta.redCardsAway === "number") u.redCardsAway = delta.redCardsAway;
+        if (delta.odds && typeof delta.odds === "object") u.odds = { ...(m.odds as object), ...(delta.odds as object) } as WCMatch["odds"];
+        return u;
+      };
+      setLiveMatches(prev => prev.map(patch));
+      setOpenMatch(prev => (prev ? patch(prev) : prev));
+      if (scored) {
+        const ts = Date.now();
+        setFlashIds(prev => ({ ...prev, [wcId]: ts }));
+        setTimeout(() => setFlashIds(prev => (
+          prev[wcId] === ts ? (({ [wcId]: _removed, ...rest }) => rest)(prev) : prev
+        )), 2000);
+      }
+    }
+    function openSSE() {
+      if (sseWCRef.current) return;
+      if (typeof window === "undefined" || !("EventSource" in window)) return;
+      try {
+        const es = new EventSource("/api/matches/live-stream");
+        sseWCRef.current = es;
+        es.onmessage = (evt) => {
+          try {
+            liveDataFetchedAt.current = Date.now();
+            const data = JSON.parse(evt.data) as Record<string, unknown>;
+            if (data.type === "update" && data.matchId) {
+              applyDelta(String(data.matchId), (data.delta ?? {}) as Record<string, unknown>);
+            } else if (data.type === "batch_update" && Array.isArray(data.updates)) {
+              for (const upd of data.updates as Array<{ matchId?: unknown; delta?: Record<string, unknown> }>) {
+                if (upd?.matchId && upd?.delta) applyDelta(String(upd.matchId), upd.delta);
+              }
+            } else if (Array.isArray(data.matches)) {
+              rebuildMapping(data.matches as Array<{ id: unknown; home: unknown; away: unknown; sport?: unknown }>);
+            }
+          } catch {
+          }
+        };
+        es.onerror = () => {
+          es.close();
+          if (sseWCRef.current === es) sseWCRef.current = null;
+          setTimeout(openSSE, 3_000);
+        };
+      } catch {
+      }
+    }
+    openSSE();
+    return () => {
+      sseWCRef.current?.close();
+      sseWCRef.current = null;
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const loadStandings = async () => {
+      try {
+        const data = await fetchWithTimeout("/api/matches/wc2026-standings", {}, 12_000)
+          .then(r => r.ok ? r.json() : { groups: [] })
+          .catch(() => ({ groups: [] })) as { groups?: WCStandingGroup[] };
+        if (!cancelled && Array.isArray(data.groups)) {
+          setOfficialGroups(data.groups);
+        }
+      } finally {
+        if (!cancelled) timer = setTimeout(loadStandings, 5 * 60_000);
+      }
+    };
+    loadStandings();
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const loadCompetition = async () => {
+      try {
+        const data = await fetchWithTimeout("/api/matches/wc2026-competition", {}, 20_000)
+          .then(r => r.ok ? r.json() : { sections: [] })
+          .catch(() => ({ sections: [] })) as { sections?: WCCompetitionSection[] };
+        if (!cancelled && Array.isArray(data.sections)) {
+          setCompetitionSections(data.sections);
+        }
+      } finally {
+        if (!cancelled) timer = setTimeout(loadCompetition, 5 * 60_000);
+      }
+    };
+    loadCompetition();
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+    };
   }, []);
 
   const isDark = theme === "dark";
@@ -1475,16 +1943,26 @@ export default function WorldCupPage({ onClose, onBet: onBetProp }: { onClose?: 
     async function load() {
       if (cancelled) return;
       try {
-        const wcData = await fetch("/api/matches/wc2026", { signal: AbortSignal.timeout(15_000) })
+        const wcData = await fetchWithTimeout("/api/matches/wc2026", {}, 15_000)
           .then(r => r.ok ? r.json() : { matches: [] }).catch(() => ({ matches: [] }));
         if (cancelled) return;
-        const allWC = ((wcData.matches ?? []) as Record<string, unknown>[]).map(mapToWCMatch);
-        const wcLive = allWC.filter(m => m.isLive);
-        const wcUpcoming = allWC.filter(m => !m.isLive);
+        const rawMatches = Array.isArray((wcData as { matches?: unknown[] }).matches)
+          ? (((wcData as { matches?: Record<string, unknown>[] }).matches) ?? [])
+          : [];
+        const nextCollections = buildWCMatchCollections(rawMatches);
         // Update clock refs for interpolation
         const fetchTs = Date.now();
         liveDataFetchedAt.current = fetchTs;
-        for (const m of wcLive) {
+        const prevLiveOdds: Record<string, { home: number; draw: number; away: number }> = {};
+        for (const m of liveMatchesRef.current) {
+          prevLiveOdds[m.id] = {
+            home: m.odds?.home ?? 0,
+            draw: m.odds?.draw ?? 0,
+            away: m.odds?.away ?? 0,
+          };
+        }
+        prevLiveOddsRef.current = prevLiveOdds;
+        for (const m of nextCollections.liveMatches) {
           const next = typeof m.minute === "number" && m.minute > 0 ? m.minute : 0;
           if (next > 0) {
             const prev = apiMinutesRef.current[m.id];
@@ -1499,13 +1977,14 @@ export default function WorldCupPage({ onClose, onBet: onBetProp }: { onClose?: 
         }
         // Direct set — no accumulation, no race condition with a parallel loadLive.
         // The /wc2026 endpoint always enriches with fresh liveMatchState on every request.
-        setLiveMatches(wcLive);
-        setUpcomingMatches(wcUpcoming);
-        setAllMatches(allWC);
-        if (wcLive.length > 0) setPageTab("live");
+        setLiveMatches(nextCollections.liveMatches);
+        setUpcomingMatches(nextCollections.upcomingMatches);
+        setAllMatches(nextCollections.allMatches);
+        writeWCClientSnapshot(rawMatches);
+        if (nextCollections.liveMatches.length > 0) setPageTab(prev => (prev === "upcoming" ? "live" : prev));
         // Schedule next poll using local result (not stale ref)
         if (!cancelled) {
-          const delay = wcLive.length > 0 ? 5_000 : 30_000;
+          const delay = nextCollections.liveMatches.length > 0 ? 5_000 : 30_000;
           nextTimer = setTimeout(load, delay);
         }
       } catch {
@@ -1660,6 +2139,7 @@ export default function WorldCupPage({ onClose, onBet: onBetProp }: { onClose?: 
       <div className="flex gap-2 px-4 mb-4">
         {([
           { key: "live",     label: "🔴 Ao Vivo",  count: liveCount },
+          { key: "competition", label: "🏆 Competição", count: competitionSections.length },
           { key: "upcoming", label: "📅 Próximos",  count: upcomingCount },
           { key: "groups",   label: "🏆 Grupos",    count: WC_GROUPS.length },
         ] as const).map(({ key, label, count }) => (
@@ -1711,8 +2191,55 @@ export default function WorldCupPage({ onClose, onBet: onBetProp }: { onClose?: 
                         onQuickBet={handleQuickBet}
                         theme={theme}
                         displayMinute={m.isLive ? getWCDisplayMinute(m) : undefined}
+                        isFlashing={!!flashIds[m.id]}
+                        prevOdds={prevLiveOddsRef.current[m.id]}
                       />
                     </motion.div>
+                  ))}
+                </div>
+              )}
+            </motion.div>
+          )}
+
+          {pageTab === "competition" && (
+            <motion.div key="competition" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+              {competitionSections.length === 0 ? (
+                <div className="text-center py-16">
+                  <div className="text-5xl mb-3">🏆</div>
+                  <div className={`font-bold text-sm ${isDark ? "text-zinc-400" : "text-zinc-600"}`}>Mercados de competição indisponíveis</div>
+                  <div className={`text-xs mt-1.5 ${isDark ? "text-zinc-600" : "text-zinc-400"}`}>A aba carrega automaticamente os dados reais da API quando o provider responder.</div>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {competitionSections.map((section) => (
+                    <div key={section.title} className={`rounded-2xl border p-4 ${isDark ? "border-zinc-800 bg-zinc-900/80" : "border-zinc-200 bg-white"}`}>
+                      <div className="flex items-center justify-between gap-3 mb-3">
+                        <div className={`text-sm font-black ${isDark ? "text-white" : "text-zinc-900"}`}>{section.title}</div>
+                        <div className={`text-[10px] font-black uppercase tracking-[0.18em] ${isDark ? "text-zinc-600" : "text-zinc-400"}`}>Grupo</div>
+                      </div>
+                      <div className="space-y-2">
+                        {section.items.map((item) => (
+                          <div
+                            key={`${section.title}:${item.name}`}
+                            className={`flex items-center justify-between gap-3 rounded-xl border px-3 py-2.5 ${
+                              isDark ? "border-zinc-800 bg-zinc-950/70" : "border-zinc-200 bg-zinc-50"
+                            }`}
+                          >
+                            <div className="flex items-center gap-2 min-w-0">
+                              <FlagImg name={PT_DISPLAY_NAMES[item.name] ?? item.name} size={28} />
+                              <span className={`text-sm font-semibold truncate ${isDark ? "text-zinc-200" : "text-zinc-800"}`}>
+                                {PT_DISPLAY_NAMES[item.name] ?? item.name}
+                              </span>
+                            </div>
+                            <div className={`min-w-[72px] rounded-xl px-3 py-2 text-center text-sm font-black tabular-nums ${
+                              isDark ? "bg-zinc-900 text-white border border-zinc-800" : "bg-white text-zinc-900 border border-zinc-200"
+                            }`}>
+                              {item.odd.toFixed(2)}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
                   ))}
                 </div>
               )}
@@ -1722,7 +2249,16 @@ export default function WorldCupPage({ onClose, onBet: onBetProp }: { onClose?: 
           {pageTab === "groups" && (
             <motion.div key="groups" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
               <div className="grid grid-cols-2 gap-3">
-                {WC_GROUPS.map(g => <GroupCard key={g.group} group={g.group} teams={g.teams} allMatches={allMatches} theme={theme} />)}
+                {WC_GROUPS.map(g => (
+                  <GroupCard
+                    key={g.group}
+                    group={g.group}
+                    teams={g.teams}
+                    allMatches={allMatches}
+                    theme={theme}
+                    officialRows={officialGroups.find(entry => normalizeWCGroupName(entry.name) === `Grupo ${g.group}`)?.rows}
+                  />
+                ))}
               </div>
             </motion.div>
           )}

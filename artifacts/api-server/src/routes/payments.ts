@@ -16,12 +16,11 @@ function getStripe(): Stripe {
   return new Stripe(key, { apiVersion: "2026-05-27.dahlia" });
 }
 
-function getBaseUrl(req: Request): string {
-  const domains = process.env.REPLIT_DOMAINS;
-  if (domains) return `https://${domains.split(",")[0]}`;
-  const host = req.get("host") || "localhost";
-  const proto = req.get("x-forwarded-proto") || "http";
-  return `${proto}://${host}`;
+function formatPtPhone(phone: string): string {
+  const digits = phone.replace(/\D/g, "");
+  if (!digits) return "";
+  if (digits.startsWith("351")) return `+${digits}`;
+  return `+351${digits}`;
 }
 
 // ─── Freebet grant helper ────────────────────────────────────────────────────
@@ -116,6 +115,13 @@ router.post("/multibanco", authMiddleware, async (req: AuthRequest, res: Respons
       amount: amountCents,
       currency: "eur",
       payment_method_types: ["multibanco"],
+      payment_method_data: {
+        type: "multibanco",
+        billing_details: {
+          email: user?.email ?? undefined,
+        },
+      },
+      confirm: true,
       metadata: { orderId, userId: String(req.user!.id) },
       receipt_email: user?.email ?? undefined,
     });
@@ -146,6 +152,7 @@ router.post("/multibanco", authMiddleware, async (req: AuthRequest, res: Respons
       amount: amount.toFixed(2),
       expiresAt: expiresAt.toISOString(),
       clientSecret: intent.client_secret,
+      hostedVoucherUrl: multibanco?.hosted_voucher_url ?? null,
     });
   } catch (err) {
     logger.error({ err }, "Multibanco payment error");
@@ -154,9 +161,7 @@ router.post("/multibanco", authMiddleware, async (req: AuthRequest, res: Respons
 });
 
 // ─── POST /api/payments/mbway ────────────────────────────────────────────────
-// MB WAY não é suportado nativamente pelo Stripe.
-// Implementamos via Stripe PaymentIntent com confirmação manual (link de pagamento).
-// O utilizador recebe um link para completar o pagamento via MB WAY num portal Stripe.
+// MB WAY nativo via Stripe PaymentIntent, confirmado com o telemóvel do cliente.
 router.post("/mbway", authMiddleware, async (req: AuthRequest, res: Response): Promise<void> => {
   const { amount, phone } = req.body as { amount?: number; phone?: string };
   if (!amount || typeof amount !== "number" || amount < 10 || amount > 5000) {
@@ -170,29 +175,25 @@ router.post("/mbway", authMiddleware, async (req: AuthRequest, res: Response): P
 
   const orderId = randomUUID();
   const amountCents = Math.round(amount * 100);
-  const base = getBaseUrl(req);
 
   try {
     const stripe = getStripe();
     const [user] = await db.select({ email: usersTable.email }).from(usersTable).where(eq(usersTable.id, req.user!.id)).limit(1);
 
-    // Stripe Payment Link para MB WAY: usar checkout session com método de pagamento card
-    // (MB WAY nativo não disponível via Stripe — usamos checkout session como alternativa)
-    const session = await stripe.checkout.sessions.create({
-      payment_method_types: ["card"],
-      line_items: [{
-        price_data: {
-          currency: "eur",
-          product_data: { name: `Depósito Bet62 — €${amount.toFixed(2)}` },
-          unit_amount: amountCents,
+    const intent = await stripe.paymentIntents.create({
+      amount: amountCents,
+      currency: "eur",
+      payment_method_types: ["mb_way"],
+      payment_method_data: {
+        type: "mb_way",
+        billing_details: {
+          phone: formatPtPhone(phone),
+          email: user?.email ?? undefined,
         },
-        quantity: 1,
-      }],
-      mode: "payment",
-      success_url: `${base}/api/payments/card-return?status=success&orderId=${orderId}`,
-      cancel_url:  `${base}/api/payments/card-return?status=cancel&orderId=${orderId}`,
-      customer_email: user?.email ?? undefined,
+      },
+      confirm: true,
       metadata: { orderId, userId: String(req.user!.id), method: "mbway" },
+      receipt_email: user?.email ?? undefined,
     });
 
     await db.insert(paymentsTable).values({
@@ -201,12 +202,27 @@ router.post("/mbway", authMiddleware, async (req: AuthRequest, res: Response): P
       amount: amount.toFixed(2),
       method: "mbway",
       status: "pending",
-      requestId: session.id,
-      paymentUrl: session.url ?? undefined,
+      requestId: intent.id,
       expiresAt: new Date(Date.now() + 30 * 60 * 1000),
     });
 
-    res.json({ orderId, paymentUrl: session.url, message: "Pedido MB WAY criado. Clique no link para concluir." });
+    if (intent.status === "succeeded") {
+      await creditPayment(orderId);
+      res.json({
+        orderId,
+        amount: amount.toFixed(2),
+        status: "completed",
+        message: "Pagamento MB WAY confirmado.",
+      });
+      return;
+    }
+
+    res.json({
+      orderId,
+      amount: amount.toFixed(2),
+      status: intent.status,
+      message: "Pedido MB WAY enviado. Confirme na app MB WAY.",
+    });
   } catch (err) {
     logger.error({ err }, "MB WAY payment error");
     res.status(500).json({ error: "Erro ao processar pagamento MB WAY. Tente novamente." });
@@ -214,7 +230,7 @@ router.post("/mbway", authMiddleware, async (req: AuthRequest, res: Response): P
 });
 
 // ─── POST /api/payments/card ─────────────────────────────────────────────────
-// Stripe Checkout Session para cartão de crédito/débito
+// Stripe PaymentIntent para cartão; os dados são recolhidos no frontend via Elements.
 router.post("/card", authMiddleware, async (req: AuthRequest, res: Response): Promise<void> => {
   const { amount } = req.body as { amount?: number };
   if (!amount || typeof amount !== "number" || amount < 10 || amount > 5000) {
@@ -224,27 +240,23 @@ router.post("/card", authMiddleware, async (req: AuthRequest, res: Response): Pr
 
   const orderId = randomUUID();
   const amountCents = Math.round(amount * 100);
-  const base = getBaseUrl(req);
+  const publishableKey = process.env.STRIPE_PUBLISHABLE_KEY ?? process.env.VITE_STRIPE_PUBLISHABLE_KEY ?? "";
+  if (!publishableKey) {
+    res.status(500).json({ error: "Stripe não configurada: falta STRIPE_PUBLISHABLE_KEY." });
+    return;
+  }
 
   try {
     const stripe = getStripe();
     const [user] = await db.select({ email: usersTable.email }).from(usersTable).where(eq(usersTable.id, req.user!.id)).limit(1);
 
-    const session = await stripe.checkout.sessions.create({
+    const intent = await stripe.paymentIntents.create({
+      amount: amountCents,
+      currency: "eur",
       payment_method_types: ["card"],
-      line_items: [{
-        price_data: {
-          currency: "eur",
-          product_data: { name: `Depósito Bet62 — €${amount.toFixed(2)}` },
-          unit_amount: amountCents,
-        },
-        quantity: 1,
-      }],
-      mode: "payment",
-      success_url: `${base}/api/payments/card-return?status=success&orderId=${orderId}`,
-      cancel_url:  `${base}/api/payments/card-return?status=cancel&orderId=${orderId}`,
-      customer_email: user?.email ?? undefined,
       metadata: { orderId, userId: String(req.user!.id), method: "card" },
+      receipt_email: user?.email ?? undefined,
+      description: `Depósito Bet62 — €${amount.toFixed(2)}`,
     });
 
     await db.insert(paymentsTable).values({
@@ -253,12 +265,15 @@ router.post("/card", authMiddleware, async (req: AuthRequest, res: Response): Pr
       amount: amount.toFixed(2),
       method: "card",
       status: "pending",
-      requestId: session.id,
-      paymentUrl: session.url ?? undefined,
+      requestId: intent.id,
       expiresAt: new Date(Date.now() + 30 * 60 * 1000),
     });
 
-    res.json({ orderId, paymentUrl: session.url });
+    res.json({
+      orderId,
+      clientSecret: intent.client_secret,
+      publishableKey,
+    });
   } catch (err) {
     logger.error({ err }, "Card payment error");
     res.status(500).json({ error: "Erro ao iniciar pagamento por cartão. Tente novamente." });
@@ -304,15 +319,24 @@ router.get("/card-return", async (req: Request, res: Response): Promise<void> =>
         .limit(1);
 
       if (payment && payment.status !== "completed" && payment.requestId) {
-        // Retrieve the Stripe checkout session and verify payment_status
-        const session = await stripe.checkout.sessions.retrieve(payment.requestId);
-        if (session.payment_status === "paid") {
-          await creditPayment(orderId);
-          logger.info({ orderId }, "Card return: Stripe session verified, balance credited");
-          res.redirect(`${base}/?payment=success`);
-          return;
-        } else {
+        if (payment.requestId.startsWith("cs_")) {
+          const session = await stripe.checkout.sessions.retrieve(payment.requestId);
+          if (session.payment_status === "paid") {
+            await creditPayment(orderId);
+            logger.info({ orderId }, "Card return: Stripe session verified, balance credited");
+            res.redirect(`${base}/?payment=success`);
+            return;
+          }
           logger.warn({ orderId, stripeStatus: session.payment_status }, "Card return: Stripe session not paid");
+        } else if (payment.requestId.startsWith("pi_")) {
+          const intent = await stripe.paymentIntents.retrieve(payment.requestId);
+          if (intent.status === "succeeded") {
+            await creditPayment(orderId);
+            logger.info({ orderId }, "Card return: Stripe payment intent verified, balance credited");
+            res.redirect(`${base}/?payment=success`);
+            return;
+          }
+          logger.warn({ orderId, stripeStatus: intent.status }, "Card return: Stripe payment intent not paid");
         }
       }
     } catch (err) {
