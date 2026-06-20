@@ -17738,6 +17738,27 @@ type WC2026StandingRow = {
   pts: number;
 };
 
+type H2HEvent = {
+  date: string;
+  home: string;
+  away: string;
+  homeScore: number | null;
+  awayScore: number | null;
+  tournament: string;
+  isH2H: boolean;
+};
+
+type WCH2HData = {
+  h2hEvents: H2HEvent[];
+  homeRecentForm: H2HEvent[];
+  awayRecentForm: H2HEvent[];
+  homeTeam: string;
+  awayTeam: string;
+};
+
+const wc2026H2HCache = new Map<string, { data: WCH2HData; fetchedAt: number }>();
+const WC2026_H2H_TTL = 5 * 60_000;
+
 type WC2026StandingGroup = {
   name: string;
   rows: WC2026StandingRow[];
@@ -19063,6 +19084,108 @@ router.get("/wc2026", async (_req: Request, res: Response) => {
     res.json({ matches: visible });
   } catch {
     res.json({ matches: wc2026Cache?.matches ?? [] });
+  }
+});
+
+async function getWCH2H(rawMatchId: string): Promise<WCH2HData> {
+  const cached = wc2026H2HCache.get(rawMatchId);
+  if (cached && Date.now() - cached.fetchedAt < WC2026_H2H_TTL) return cached.data;
+
+  const numericId = rawMatchId.replace(/^fb-(v1|v2)-/, "");
+
+  const parseEvent = (ev: any, isH2H: boolean): H2HEvent | null => {
+    try {
+      const home =
+        ev.homeTeam?.name ?? ev.home?.name ?? ev.home ?? "";
+      const away =
+        ev.awayTeam?.name ?? ev.away?.name ?? ev.away ?? "";
+      if (!home || !away) return null;
+      const homeScore =
+        ev.homeScore?.current ?? ev.homeScore?.normaltime ?? ev.score?.home ?? null;
+      const awayScore =
+        ev.awayScore?.current ?? ev.awayScore?.normaltime ?? ev.score?.away ?? null;
+      const dateRaw =
+        ev.startTimestamp ?? ev.startTime ?? ev.date ?? null;
+      let date = "";
+      if (typeof dateRaw === "number") {
+        date = new Date(dateRaw * 1000).toISOString().slice(0, 10);
+      } else if (typeof dateRaw === "string") {
+        date = dateRaw.slice(0, 10);
+      }
+      const tournament =
+        ev.tournament?.name ?? ev.league?.name ?? ev.competition?.name ?? "";
+      return { date, home, away, homeScore, awayScore, tournament, isH2H };
+    } catch {
+      return null;
+    }
+  };
+
+  try {
+    const resp = await fetch(
+      `${SAPI_V2_FOOTBALL}/match/${numericId}/h2h`,
+      { signal: AbortSignal.timeout(8_000), headers: sapiHeaders() },
+    );
+    if (!resp.ok) throw new Error(`H2H API error ${resp.status}`);
+    const raw = (await resp.json()) as Record<string, unknown>;
+
+    const root =
+      (raw["h2h"] as Record<string, unknown> | undefined) ??
+      (raw["data"] as Record<string, unknown> | undefined) ??
+      raw;
+
+    const eventsRaw: any[] =
+      (Array.isArray(root["events"]) ? root["events"] : undefined) ??
+      (Array.isArray(root["lastH2H"]) ? root["lastH2H"] : undefined) ??
+      (Array.isArray(root["h2hEvents"]) ? root["h2hEvents"] : undefined) ??
+      [];
+    const homeFormRaw: any[] =
+      (Array.isArray(root["homeTeamEvents"]) ? root["homeTeamEvents"] : undefined) ??
+      (Array.isArray(root["homeLastMatches"]) ? root["homeLastMatches"] : undefined) ??
+      [];
+    const awayFormRaw: any[] =
+      (Array.isArray(root["awayTeamEvents"]) ? root["awayTeamEvents"] : undefined) ??
+      (Array.isArray(root["awayLastMatches"]) ? root["awayLastMatches"] : undefined) ??
+      [];
+
+    const h2hEvents = eventsRaw
+      .map((e) => parseEvent(e, true))
+      .filter(Boolean)
+      .slice(0, 10) as H2HEvent[];
+    const homeRecentForm = homeFormRaw
+      .map((e) => parseEvent(e, false))
+      .filter(Boolean)
+      .slice(0, 5) as H2HEvent[];
+    const awayRecentForm = awayFormRaw
+      .map((e) => parseEvent(e, false))
+      .filter(Boolean)
+      .slice(0, 5) as H2HEvent[];
+
+    const homeTeam =
+      h2hEvents[0]?.home ?? homeRecentForm[0]?.home ?? "";
+    const awayTeam =
+      h2hEvents[0]?.away ?? awayRecentForm[0]?.away ?? "";
+
+    const result: WCH2HData = { h2hEvents, homeRecentForm, awayRecentForm, homeTeam, awayTeam };
+    wc2026H2HCache.set(rawMatchId, { data: result, fetchedAt: Date.now() });
+    return result;
+  } catch {
+    const empty: WCH2HData = { h2hEvents: [], homeRecentForm: [], awayRecentForm: [], homeTeam: "", awayTeam: "" };
+    return empty;
+  }
+}
+
+router.get("/wc2026-h2h/:matchId", async (req: Request, res: Response) => {
+  try {
+    const matchId = String(req.params["matchId"]);
+    const data = await Promise.race([
+      getWCH2H(matchId),
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error("timeout")), 12_000),
+      ),
+    ]);
+    res.json(data);
+  } catch {
+    res.json({ h2hEvents: [], homeRecentForm: [], awayRecentForm: [], homeTeam: "", awayTeam: "" });
   }
 });
 

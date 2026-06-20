@@ -961,7 +961,25 @@ function MRow({ items, activeKey, onBet, theme, isSuspended }: {
 
 // ─── Markets Full Page ────────────────────────────────────────────────────────
 
-type MTabId = "todos" | "resultado" | "dupla" | "golos" | "handicap" | "marcador" | "cantos" | "cartoes" | "especiais" | "jogadores" | "prorrogacao" | "penaltis";
+type MTabId = "todos" | "resultado" | "dupla" | "golos" | "handicap" | "marcador" | "cantos" | "cartoes" | "especiais" | "jogadores" | "prorrogacao" | "penaltis" | "h2h";
+
+type H2HEvent = {
+  date: string;
+  home: string;
+  away: string;
+  homeScore: number | null;
+  awayScore: number | null;
+  tournament: string;
+  isH2H: boolean;
+};
+
+type H2HData = {
+  h2hEvents: H2HEvent[];
+  homeRecentForm: H2HEvent[];
+  awayRecentForm: H2HEvent[];
+  homeTeam: string;
+  awayTeam: string;
+};
 
 function MarketsPage({ match, activeKeys, onBet, onClose, theme, displayMinute }: {
   match: WCMatch;
@@ -973,6 +991,8 @@ function MarketsPage({ match, activeKeys, onBet, onClose, theme, displayMinute }
 }) {
   const [tab, setTab] = useState<MTabId>("todos");
   const [showStats, setShowStats] = useState(false);
+  const [h2hData, setH2hData] = useState<H2HData | null>(null);
+  const [h2hLoading, setH2hLoading] = useState(false);
   const mk = match.markets ?? {};
   const odds = match.odds;
   const mid = match.id;
@@ -1041,19 +1061,36 @@ function MarketsPage({ match, activeKeys, onBet, onClose, theme, displayMinute }
     setPrevHasET(true);
   }
 
+  // Fetch H2H when tab is first opened
+  useEffect(() => {
+    if (tab !== "h2h" || h2hData !== null || h2hLoading) return;
+    setH2hLoading(true);
+    fetchWithTimeout(`/api/matches/wc2026-h2h/${match.id}`, {}, 12000)
+      .then(r => r.json())
+      .then((d: H2HData) => setH2hData(d))
+      .catch(() => setH2hData({ h2hEvents: [], homeRecentForm: [], awayRecentForm: [], homeTeam: match.home, awayTeam: match.away }))
+      .finally(() => setH2hLoading(false));
+  }, [tab, h2hData, h2hLoading, match.id, match.home, match.away]);
+
+  const isETOrPen = hasProrrogacao || hasPenaltis;
+
   const TABS: { id: MTabId; label: string }[] = [
     { id: "todos", label: "Todos" },
-    ...(hasPenaltis ? [{ id: "penaltis" as MTabId, label: "🥅 Penaltis" }] : []),
+    ...(hasPenaltis ? [{ id: "penaltis" as MTabId, label: "🥅 Penáltis" }] : []),
     ...(hasProrrogacao ? [{ id: "prorrogacao" as MTabId, label: "⏱ Prorrogação" }] : []),
-    { id: "resultado", label: "1X2" },
-    ...(!isLateGame && hasDupla ? [{ id: "dupla" as MTabId, label: "Dupla" }] : []),
-    ...(hasGolos ? [{ id: "golos" as MTabId, label: "Golos" }] : []),
-    ...(!isLateGame && hasHandicap ? [{ id: "handicap" as MTabId, label: "Handicap" }] : []),
-    ...(!isLateGame && hasMarcador ? [{ id: "marcador" as MTabId, label: "Marcador" }] : []),
-    ...(!isLateGame && hasCantos ? [{ id: "cantos" as MTabId, label: "Cantos" }] : []),
-    ...(!isLateGame && hasCartoes ? [{ id: "cartoes" as MTabId, label: "Cartões" }] : []),
-    ...(!isLateGame && hasEspeciais ? [{ id: "especiais" as MTabId, label: "Especiais" }] : []),
-    ...(!isLateGame && hasJogadores ? [{ id: "jogadores" as MTabId, label: "Jogadores" }] : []),
+    // Normal markets hidden during ET/Penalties
+    ...(!isETOrPen ? [
+      { id: "resultado" as MTabId, label: "1X2" },
+      ...(!isLateGame && hasDupla ? [{ id: "dupla" as MTabId, label: "Dupla" }] : []),
+      ...(hasGolos ? [{ id: "golos" as MTabId, label: "Golos" }] : []),
+      ...(!isLateGame && hasHandicap ? [{ id: "handicap" as MTabId, label: "Handicap" }] : []),
+      ...(!isLateGame && hasMarcador ? [{ id: "marcador" as MTabId, label: "Marcador" }] : []),
+      ...(!isLateGame && hasCantos ? [{ id: "cantos" as MTabId, label: "Cantos" }] : []),
+      ...(!isLateGame && hasCartoes ? [{ id: "cartoes" as MTabId, label: "Cartões" }] : []),
+      ...(!isLateGame && hasEspeciais ? [{ id: "especiais" as MTabId, label: "Especiais" }] : []),
+      ...(!isLateGame && hasJogadores ? [{ id: "jogadores" as MTabId, label: "Jogadores" }] : []),
+    ] : []),
+    { id: "h2h", label: "📊 H2H" },
   ];
 
   const activeTab = TABS.find(t => t.id === tab) ? tab : "todos";
@@ -1612,6 +1649,117 @@ function MarketsPage({ match, activeKeys, onBet, onClose, theme, displayMinute }
     </>
   );
 
+  const renderH2H = () => {
+    if (h2hLoading) return (
+      <div className="flex flex-col items-center gap-3 py-16">
+        <div className="w-7 h-7 border-2 border-red-500 border-t-transparent rounded-full animate-spin" />
+        <div className={`text-xs ${isDark ? "text-zinc-500" : "text-zinc-400"}`}>A carregar estatísticas...</div>
+      </div>
+    );
+    if (!h2hData) return (
+      <div className="text-center py-14">
+        <div className="text-3xl mb-2">📊</div>
+        <div className={`text-sm ${isDark ? "text-zinc-500" : "text-zinc-400"}`}>Seleciona o separador H2H para carregar</div>
+      </div>
+    );
+
+    const fmtDate = (d: string) => {
+      if (!d) return "";
+      const parts = d.split("-");
+      if (parts.length === 3) return `${parts[2]}/${parts[1]}/${parts[0].slice(2)}`;
+      return d;
+    };
+
+    const resultBadge = (ev: H2HEvent, forTeam: string) => {
+      const hs = ev.homeScore, as_ = ev.awayScore;
+      if (hs == null || as_ == null) return null;
+      const isHome = ev.home === forTeam || normalizeWCVisualName(ev.home) === normalizeWCVisualName(forTeam);
+      let res: "W" | "D" | "L";
+      if (hs === as_) res = "D";
+      else if ((isHome && hs > as_) || (!isHome && as_ > hs)) res = "W";
+      else res = "L";
+      const cls = res === "W"
+        ? "bg-green-600 text-white"
+        : res === "D"
+          ? "bg-zinc-500 text-white"
+          : "bg-red-600 text-white";
+      return <span className={`inline-flex items-center justify-center w-5 h-5 rounded-full text-[9px] font-black flex-shrink-0 ${cls}`}>{res}</span>;
+    };
+
+    const H2HRow = ({ ev, highlightHome, highlightAway }: { ev: H2HEvent; highlightHome?: string; highlightAway?: string }) => {
+      const hs = ev.homeScore, as_ = ev.awayScore;
+      const isHighHome = highlightHome && (ev.home === highlightHome || normalizeWCVisualName(ev.home) === normalizeWCVisualName(highlightHome));
+      const isHighAway = highlightAway && (ev.away === highlightAway || normalizeWCVisualName(ev.away) === normalizeWCVisualName(highlightAway));
+      return (
+        <div className={`flex items-center gap-2 py-2 px-3 rounded-xl mb-1.5 ${isDark ? "bg-zinc-800/50" : "bg-white border border-zinc-100"}`}>
+          <div className={`text-[10px] flex-shrink-0 w-12 ${isDark ? "text-zinc-500" : "text-zinc-400"}`}>{fmtDate(ev.date)}</div>
+          <div className={`flex-1 min-w-0 text-right text-[11px] font-semibold truncate ${isHighHome ? (isDark ? "text-red-300" : "text-red-600") : isDark ? "text-zinc-200" : "text-zinc-800"}`}>{ev.home}</div>
+          <div className={`flex-shrink-0 text-center text-[13px] font-black w-12 ${isDark ? "text-zinc-100" : "text-zinc-900"}`}>
+            {hs != null && as_ != null ? `${hs}–${as_}` : "vs"}
+          </div>
+          <div className={`flex-1 min-w-0 text-left text-[11px] font-semibold truncate ${isHighAway ? (isDark ? "text-red-300" : "text-red-600") : isDark ? "text-zinc-200" : "text-zinc-800"}`}>{ev.away}</div>
+        </div>
+      );
+    };
+
+    const FormRow = ({ ev, forTeam }: { ev: H2HEvent; forTeam: string }) => {
+      const hs = ev.homeScore, as_ = ev.awayScore;
+      const isHome = ev.home === forTeam || normalizeWCVisualName(ev.home) === normalizeWCVisualName(forTeam);
+      const opponent = isHome ? ev.away : ev.home;
+      return (
+        <div className={`flex items-center gap-2 py-1.5 px-3 rounded-xl mb-1 ${isDark ? "bg-zinc-800/50" : "bg-white border border-zinc-100"}`}>
+          <div className={`text-[10px] flex-shrink-0 w-12 ${isDark ? "text-zinc-500" : "text-zinc-400"}`}>{fmtDate(ev.date)}</div>
+          <div className={`flex-1 min-w-0 text-[11px] truncate ${isDark ? "text-zinc-300" : "text-zinc-700"}`}>{isHome ? "vs" : "@"} {opponent}</div>
+          <div className={`text-[11px] font-bold flex-shrink-0 ${isDark ? "text-zinc-400" : "text-zinc-600"}`}>
+            {hs != null && as_ != null ? `${hs}–${as_}` : "–"}
+          </div>
+          {resultBadge(ev, forTeam)}
+        </div>
+      );
+    };
+
+    return (
+      <div>
+        {/* H2H direct meetings */}
+        {h2hData.h2hEvents.length > 0 ? (
+          <>
+            <SLabel theme={theme}>CONFRONTOS DIRECTOS</SLabel>
+            {h2hData.h2hEvents.map((ev, i) => (
+              <H2HRow key={i} ev={ev} highlightHome={match.home} highlightAway={match.away} />
+            ))}
+          </>
+        ) : (
+          <div className={`text-center py-8 rounded-xl mb-4 ${isDark ? "bg-zinc-800/40" : "bg-zinc-50 border border-zinc-200"}`}>
+            <div className="text-2xl mb-1">🔍</div>
+            <div className={`text-xs ${isDark ? "text-zinc-500" : "text-zinc-400"}`}>Sem confrontos directos registados</div>
+          </div>
+        )}
+
+        {/* Recent form */}
+        <div className="grid grid-cols-2 gap-3 mt-4">
+          <div>
+            <div className={`text-[10px] font-black tracking-widest mb-2 ${isDark ? "text-zinc-500" : "text-zinc-400"}`}>
+              FORMA — {(h2hData.homeTeam || match.home).toUpperCase().slice(0, 12)}
+            </div>
+            {h2hData.homeRecentForm.length > 0
+              ? h2hData.homeRecentForm.map((ev, i) => <FormRow key={i} ev={ev} forTeam={h2hData.homeTeam || match.home} />)
+              : <div className={`text-[11px] ${isDark ? "text-zinc-600" : "text-zinc-400"}`}>Sem dados</div>
+            }
+          </div>
+          <div>
+            <div className={`text-[10px] font-black tracking-widest mb-2 ${isDark ? "text-zinc-500" : "text-zinc-400"}`}>
+              FORMA — {(h2hData.awayTeam || match.away).toUpperCase().slice(0, 12)}
+            </div>
+            {h2hData.awayRecentForm.length > 0
+              ? h2hData.awayRecentForm.map((ev, i) => <FormRow key={i} ev={ev} forTeam={h2hData.awayTeam || match.away} />)
+              : <div className={`text-[11px] ${isDark ? "text-zinc-600" : "text-zinc-400"}`}>Sem dados</div>
+            }
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   return (
     <motion.div
       key="markets-page"
@@ -1873,6 +2021,7 @@ function MarketsPage({ match, activeKeys, onBet, onClose, theme, displayMinute }
         {activeTab === "jogadores" && renderJogadores()}
         {activeTab === "prorrogacao" && renderProrrogacao()}
         {activeTab === "penaltis" && renderPenaltis()}
+        {activeTab === "h2h" && renderH2H()}
 
         <div className="h-8" />
       </div>
