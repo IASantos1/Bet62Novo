@@ -6288,13 +6288,13 @@ export default function Home({
         setUpcomingMatches((prev) => {
           if (prev.length === 0)
             return matches.map((m) => ({ ...m, isLive: false }));
-          const freshById = new Map(matches.map((m) => [m.id, m]));
+          const freshById = new Map(matches.map((m) => [String(m.id), m]));
           const merged: Match[] = [];
           for (const p of prev) {
-            const fresh = freshById.get(p.id);
+            const fresh = freshById.get(String(p.id));
             if (fresh) {
               merged.push({ ...fresh, isLive: false });
-              freshById.delete(p.id);
+              freshById.delete(String(p.id));
             }
           }
           for (const [, m] of freshById)
@@ -8152,8 +8152,8 @@ export default function Home({
     const oddsDown = !isSuspended && delta <= -ODDS_ANIM_THRESHOLD;
     const isWCVariant = variant === "worldcup";
     const baseBoxClass = isWCVariant
-      ? `${grow ? "flex-1" : ""} h-10 rounded-md border px-1 flex flex-col items-center justify-center min-w-0`
-      : `${grow ? "flex-1" : ""} h-10 px-2 rounded-md text-xs flex flex-col items-center justify-center`;
+      ? `${grow ? "flex-1" : ""} h-12 rounded-md border px-1 flex flex-col items-center justify-center min-w-0`
+      : `${grow ? "flex-1" : ""} h-12 px-2 rounded-md text-xs flex flex-col items-center justify-center`;
 
     if (isSuspended) {
       return (
@@ -8297,7 +8297,7 @@ export default function Home({
     return (
       <button
         disabled
-        className="w-full h-10 px-3 flex items-center justify-center rounded-md bg-red-950 border border-red-800/50 text-red-200 font-black text-sm tracking-widest cursor-not-allowed select-none animate-pulse"
+        className="w-full h-12 px-3 flex items-center justify-center rounded-md bg-red-950 border border-red-800/50 text-red-200 font-black text-sm tracking-widest cursor-not-allowed select-none animate-pulse"
         style={{ letterSpacing: "0.2em" }}
       >
         {prefix}

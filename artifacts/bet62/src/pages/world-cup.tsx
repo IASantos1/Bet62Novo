@@ -57,6 +57,14 @@ type WCMarkets = {
   playerGoals?: Array<{ name: string; anytime?: number; firstHalf?: number; secondHalf?: number }>;
   playerAssists?: Array<{ name: string; anytime?: number }>;
   playerCards?: Array<{ name: string; anytime?: number; firstHalf?: number; secondHalf?: number }>;
+  // Extra time & penalty shoot-out
+  etExtra?: {
+    tieWinner: { home: number; away: number };
+    etResult: { home: number; draw: number; away: number };
+    nextGoal?: { home: number; noGoal: number; away: number };
+    totalGoalsET?: { over05: number; under05: number; over15: number; under15: number };
+  };
+  penExtra?: { winner: { home: number; away: number } };
 };
 
 type WCMatch = {
@@ -432,7 +440,7 @@ function dedupeWCMatches(matches: WCMatch[]): WCMatch[] {
 function buildWCMatchCollections(rawMatches: Record<string, unknown>[]): WCMatchCollections {
   const allWC = dedupeWCMatches(rawMatches.map(mapToWCMatch));
   const wcLive = allWC.filter(m => m.isLive);
-  const wcUpcoming = allWC.filter(m => !m.isLive);
+  const wcUpcoming = allWC.filter(m => !m.isLive && !m.isFinished);
   return {
     allMatches: allWC,
     liveMatches: wcLive,
@@ -953,7 +961,7 @@ function MRow({ items, activeKey, onBet, theme, isSuspended }: {
 
 // ─── Markets Full Page ────────────────────────────────────────────────────────
 
-type MTabId = "todos" | "resultado" | "dupla" | "golos" | "handicap" | "marcador" | "cantos" | "cartoes" | "especiais" | "jogadores";
+type MTabId = "todos" | "resultado" | "dupla" | "golos" | "handicap" | "marcador" | "cantos" | "cartoes" | "especiais" | "jogadores" | "prorrogacao" | "penaltis";
 
 function MarketsPage({ match, activeKeys, onBet, onClose, theme, displayMinute }: {
   match: WCMatch;
@@ -976,6 +984,10 @@ function MarketsPage({ match, activeKeys, onBet, onClose, theme, displayMinute }
   const show1tempo = !match.isLive || liveHalf === null || liveHalf === 1;
   const show2tempo = !match.isLive || liveHalf === 0 || liveHalf === 2;
   const halftimeSettled = !!(match.isLive && !show1tempo && show2tempo);
+  const dispMinWC = displayMinute ?? match.minute ?? 0;
+  const isLateGame = !!(match.isLive && dispMinWC >= 85);
+  const hasProrrogacao = !!(mk.etExtra?.tieWinner?.home && mk.etExtra.tieWinner.home > 1.001);
+  const hasPenaltis = !!(mk.penExtra?.winner?.home && mk.penExtra.winner.home > 1.001);
 
   const isSuspended = match.isLive && (
     !!match._suspensionReason ||
@@ -1017,17 +1029,31 @@ function MarketsPage({ match, activeKeys, onBet, onClose, theme, displayMinute }
     mk.playerCards?.some(p => (p.anytime ?? 0) > 1.001 || (show1tempo && (p.firstHalf ?? 0) > 1.001) || (show2tempo && (p.secondHalf ?? 0) > 1.001))
   );
 
+  // Auto-switch tab when ET/penalty markets become available
+  const [prevHasPen, setPrevHasPen] = useState(hasPenaltis);
+  const [prevHasET,  setPrevHasET]  = useState(hasProrrogacao);
+  if (hasPenaltis && !prevHasPen) {
+    setTab("penaltis");
+    setPrevHasPen(true);
+  }
+  if (hasProrrogacao && !prevHasET && !hasPenaltis) {
+    setTab("prorrogacao");
+    setPrevHasET(true);
+  }
+
   const TABS: { id: MTabId; label: string }[] = [
     { id: "todos", label: "Todos" },
+    ...(hasPenaltis ? [{ id: "penaltis" as MTabId, label: "🥅 Penaltis" }] : []),
+    ...(hasProrrogacao ? [{ id: "prorrogacao" as MTabId, label: "⏱ Prorrogação" }] : []),
     { id: "resultado", label: "1X2" },
-    ...(hasDupla ? [{ id: "dupla" as MTabId, label: "Dupla" }] : []),
+    ...(!isLateGame && hasDupla ? [{ id: "dupla" as MTabId, label: "Dupla" }] : []),
     ...(hasGolos ? [{ id: "golos" as MTabId, label: "Golos" }] : []),
-    ...(hasHandicap ? [{ id: "handicap" as MTabId, label: "Handicap" }] : []),
-    ...(hasMarcador ? [{ id: "marcador" as MTabId, label: "Marcador" }] : []),
-    ...(hasCantos ? [{ id: "cantos" as MTabId, label: "Cantos" }] : []),
-    ...(hasCartoes ? [{ id: "cartoes" as MTabId, label: "Cartões" }] : []),
-    ...(hasEspeciais ? [{ id: "especiais" as MTabId, label: "Especiais" }] : []),
-    ...(hasJogadores ? [{ id: "jogadores" as MTabId, label: "Jogadores" }] : []),
+    ...(!isLateGame && hasHandicap ? [{ id: "handicap" as MTabId, label: "Handicap" }] : []),
+    ...(!isLateGame && hasMarcador ? [{ id: "marcador" as MTabId, label: "Marcador" }] : []),
+    ...(!isLateGame && hasCantos ? [{ id: "cantos" as MTabId, label: "Cantos" }] : []),
+    ...(!isLateGame && hasCartoes ? [{ id: "cartoes" as MTabId, label: "Cartões" }] : []),
+    ...(!isLateGame && hasEspeciais ? [{ id: "especiais" as MTabId, label: "Especiais" }] : []),
+    ...(!isLateGame && hasJogadores ? [{ id: "jogadores" as MTabId, label: "Jogadores" }] : []),
   ];
 
   const activeTab = TABS.find(t => t.id === tab) ? tab : "todos";
@@ -1519,6 +1545,73 @@ function MarketsPage({ match, activeKeys, onBet, onClose, theme, displayMinute }
     </>
   );
 
+  const renderProrrogacao = () => !mk.etExtra ? null : (
+    <>
+      <div className={`mb-3 rounded-xl border px-3 py-2 text-[11px] font-bold ${isDark ? "border-yellow-500/25 bg-yellow-500/8 text-yellow-300" : "border-yellow-200 bg-yellow-50 text-yellow-700"}`}>
+        ⏱ Prorrogação em curso. Apenas os mercados de prolongamento estão disponíveis.
+      </div>
+      {mk.etExtra.tieWinner && mk.etExtra.tieWinner.home > 1.001 && (
+        <>
+          <SLabel theme={theme}>QUEM AVANÇA (ELIMINATÓRIA)</SLabel>
+          <MRow items={[
+            { k: "et:tw:h", label: match.home, odd: mk.etExtra.tieWinner.home },
+            { k: "et:tw:a", label: match.away, odd: mk.etExtra.tieWinner.away },
+          ]} activeKey={ak} onBet={(k, l, o) => bet(k, l, o, "et-tie-winner")} theme={theme} isSuspended={isSuspended} />
+        </>
+      )}
+      {mk.etExtra.etResult && mk.etExtra.etResult.home > 1.001 && (
+        <>
+          <SLabel theme={theme}>RESULTADO DA PRORROGAÇÃO</SLabel>
+          <MRow items={[
+            { k: "et:r:h", label: match.home, odd: mk.etExtra.etResult.home },
+            { k: "et:r:d", label: "Empate → Penáltis", odd: mk.etExtra.etResult.draw },
+            { k: "et:r:a", label: match.away, odd: mk.etExtra.etResult.away },
+          ]} activeKey={ak} onBet={(k, l, o) => bet(k, l, o, "et-result")} theme={theme} isSuspended={isSuspended} />
+        </>
+      )}
+      {mk.etExtra.nextGoal && mk.etExtra.nextGoal.home > 1.001 && (
+        <>
+          <SLabel theme={theme}>PRÓXIMO GOLO</SLabel>
+          <MRow items={[
+            { k: "et:ng:h", label: match.home, odd: mk.etExtra.nextGoal.home },
+            { k: "et:ng:n", label: "Sem Golo", odd: mk.etExtra.nextGoal.noGoal },
+            { k: "et:ng:a", label: match.away, odd: mk.etExtra.nextGoal.away },
+          ]} activeKey={ak} onBet={(k, l, o) => bet(k, l, o, "et-next-goal")} theme={theme} isSuspended={isSuspended} />
+        </>
+      )}
+      {mk.etExtra.totalGoalsET && (
+        <>
+          <SLabel theme={theme}>GOLOS NA PRORROGAÇÃO</SLabel>
+          <MRow items={[
+            { k: "et:tg:o05", label: "Acima 0.5", odd: mk.etExtra.totalGoalsET.over05 },
+            { k: "et:tg:u05", label: "Abaixo 0.5", odd: mk.etExtra.totalGoalsET.under05 },
+          ]} activeKey={ak} onBet={(k, l, o) => bet(k, l, o, "et-total-goals")} theme={theme} isSuspended={isSuspended} />
+          <MRow items={[
+            { k: "et:tg:o15", label: "Acima 1.5", odd: mk.etExtra.totalGoalsET.over15 },
+            { k: "et:tg:u15", label: "Abaixo 1.5", odd: mk.etExtra.totalGoalsET.under15 },
+          ]} activeKey={ak} onBet={(k, l, o) => bet(k, l, o, "et-total-goals")} theme={theme} isSuspended={isSuspended} />
+        </>
+      )}
+    </>
+  );
+
+  const renderPenaltis = () => !mk.penExtra ? null : (
+    <>
+      <div className={`mb-3 rounded-xl border px-3 py-2 text-[11px] font-bold ${isDark ? "border-red-500/25 bg-red-500/8 text-red-300" : "border-red-200 bg-red-50 text-red-700"}`}>
+        🥅 Penáltis a decorrer. Aposta em quem avança para a próxima fase.
+      </div>
+      {mk.penExtra.winner && mk.penExtra.winner.home > 1.001 && (
+        <>
+          <SLabel theme={theme}>VENCEDOR DOS PENÁLTIS</SLabel>
+          <MRow items={[
+            { k: "pen:w:h", label: match.home, odd: mk.penExtra.winner.home },
+            { k: "pen:w:a", label: match.away, odd: mk.penExtra.winner.away },
+          ]} activeKey={ak} onBet={(k, l, o) => bet(k, l, o, "pen-winner")} theme={theme} isSuspended={isSuspended} />
+        </>
+      )}
+    </>
+  );
+
   return (
     <motion.div
       key="markets-page"
@@ -1612,7 +1705,72 @@ function MarketsPage({ match, activeKeys, onBet, onClose, theme, displayMinute }
             >
               <div className="px-4 py-3">
                 {match.isLive ? (
-                  <div className={`text-xs text-center ${isDark ? "text-zinc-500" : "text-zinc-500"}`}>Estatísticas ao vivo disponíveis em breve</div>
+                  <div className="space-y-1.5">
+                    <div className={`text-[9px] font-black tracking-widest text-center mb-2 ${isDark ? "text-zinc-600" : "text-zinc-400"}`}>ESTATÍSTICAS AO VIVO</div>
+                    {/* Score snapshot rows */}
+                    {match._liveExtra?.htScore && (
+                      <div className={`flex justify-between text-[11px] ${isDark ? "text-zinc-400" : "text-zinc-600"}`}>
+                        <span className={isDark ? "text-zinc-600" : "text-zinc-400"}>Intervalo</span>
+                        <span className="font-black tabular-nums">{match._liveExtra.htScore[0]} – {match._liveExtra.htScore[1]}</span>
+                      </div>
+                    )}
+                    {match._liveExtra?.etScore && (
+                      <div className={`flex justify-between text-[11px] ${isDark ? "text-zinc-400" : "text-zinc-600"}`}>
+                        <span className={isDark ? "text-zinc-600" : "text-zinc-400"}>Prorrogação</span>
+                        <span className="font-black tabular-nums">{match._liveExtra.etScore[0]} – {match._liveExtra.etScore[1]}</span>
+                      </div>
+                    )}
+                    {match._liveExtra?.penScore && (
+                      <div className={`flex justify-between text-[11px] ${isDark ? "text-zinc-400" : "text-zinc-600"}`}>
+                        <span className={isDark ? "text-zinc-600" : "text-zinc-400"}>Penáltis</span>
+                        <span className="font-black tabular-nums">{match._liveExtra.penScore[0]} – {match._liveExtra.penScore[1]}</span>
+                      </div>
+                    )}
+                    {/* Phase / minute */}
+                    <div className={`flex justify-between text-[11px] ${isDark ? "text-zinc-400" : "text-zinc-600"}`}>
+                      <span className={isDark ? "text-zinc-600" : "text-zinc-400"}>Fase</span>
+                      <span className="font-bold">
+                        {wcPhaseTag(match.status, dispMinWC) ?? "Ao Vivo"}
+                        {dispMinWC > 0 ? ` · ${fmtWCMin(dispMinWC, match.status)}` : ""}
+                      </span>
+                    </div>
+                    {/* Red cards */}
+                    {((match.redCardsHome ?? 0) > 0 || (match.redCardsAway ?? 0) > 0) && (
+                      <div className={`flex justify-between text-[11px] ${isDark ? "text-zinc-400" : "text-zinc-600"}`}>
+                        <span className={isDark ? "text-zinc-600" : "text-zinc-400"}>Cartões vermelhos</span>
+                        <span className="font-bold tabular-nums">
+                          <span className="text-red-400">{match.redCardsHome ?? 0}</span>
+                          <span className={isDark ? "text-zinc-600" : "text-zinc-400"}> – </span>
+                          <span className="text-red-400">{match.redCardsAway ?? 0}</span>
+                        </span>
+                      </div>
+                    )}
+                    {/* Corners */}
+                    {(match._liveExtra?.cornersTotal ?? 0) > 0 && (
+                      <div className={`flex justify-between text-[11px] ${isDark ? "text-zinc-400" : "text-zinc-600"}`}>
+                        <span className={isDark ? "text-zinc-600" : "text-zinc-400"}>Cantos</span>
+                        <span className="font-bold tabular-nums">{match._liveExtra!.cornersTotal}</span>
+                      </div>
+                    )}
+                    {/* Cards total */}
+                    {(match._liveExtra?.cardsTotal ?? 0) > 0 && (
+                      <div className={`flex justify-between text-[11px] ${isDark ? "text-zinc-400" : "text-zinc-600"}`}>
+                        <span className={isDark ? "text-zinc-600" : "text-zinc-400"}>Cartões totais</span>
+                        <span className="font-bold tabular-nums">{match._liveExtra!.cardsTotal}</span>
+                      </div>
+                    )}
+                    {/* VAR/chance indicators */}
+                    {match._liveExtra?.varReview && (
+                      <div className="flex items-center gap-1.5 mt-1 rounded-lg bg-purple-600/10 border border-purple-500/20 px-2.5 py-1.5">
+                        <span className="text-[10px] font-black text-purple-400 tracking-wide">📺 Revisão ao VAR em curso</span>
+                      </div>
+                    )}
+                    {match._liveExtra?.greatChance && (
+                      <div className="flex items-center gap-1.5 mt-1 rounded-lg bg-amber-600/10 border border-amber-500/20 px-2.5 py-1.5">
+                        <span className="text-[10px] font-black text-amber-400 tracking-wide">🔥 Grande oportunidade de golo</span>
+                      </div>
+                    )}
+                  </div>
                 ) : (
                   <div className="space-y-1.5">
                     <div className={`text-[9px] font-black tracking-widest text-center mb-2 ${isDark ? "text-zinc-600" : "text-zinc-400"}`}>INFORMAÇÃO DO JOGO</div>
@@ -1683,16 +1841,18 @@ function MarketsPage({ match, activeKeys, onBet, onClose, theme, displayMinute }
         {/* TODOS — show all markets */}
         {activeTab === "todos" && (
           <>
-            {renderResultado()}
-            {hasDupla && renderDupla()}
-            {hasGolos && renderGolos()}
-            {hasHandicap && renderHandicap()}
-            {hasMarcador && renderMarcador()}
-            {hasCantos && renderCantos()}
-            {hasCartoes && renderCartoes()}
-            {hasEspeciais && renderEspeciais()}
-            {hasJogadores && renderJogadores()}
-            {!odds && !hasDupla && !hasGolos && !hasHandicap && !hasMarcador && !hasCantos && !hasCartoes && !hasEspeciais && !hasJogadores && (
+            {hasPenaltis && renderPenaltis()}
+            {hasProrrogacao && !hasPenaltis && renderProrrogacao()}
+            {!hasPenaltis && !hasProrrogacao && renderResultado()}
+            {!isLateGame && !hasPenaltis && !hasProrrogacao && hasDupla && renderDupla()}
+            {!hasPenaltis && !hasProrrogacao && hasGolos && renderGolos()}
+            {!isLateGame && !hasPenaltis && !hasProrrogacao && hasHandicap && renderHandicap()}
+            {!isLateGame && !hasPenaltis && !hasProrrogacao && hasMarcador && renderMarcador()}
+            {!isLateGame && !hasPenaltis && !hasProrrogacao && hasCantos && renderCantos()}
+            {!isLateGame && !hasPenaltis && !hasProrrogacao && hasCartoes && renderCartoes()}
+            {!isLateGame && !hasPenaltis && !hasProrrogacao && hasEspeciais && renderEspeciais()}
+            {!isLateGame && !hasPenaltis && !hasProrrogacao && hasJogadores && renderJogadores()}
+            {!odds && !hasDupla && !hasGolos && !hasHandicap && !hasMarcador && !hasCantos && !hasCartoes && !hasEspeciais && !hasJogadores && !hasProrrogacao && !hasPenaltis && (
               <div className="text-center py-16">
                 <div className="text-4xl mb-3">📊</div>
                 <div className={`font-bold text-sm ${isDark ? "text-zinc-400" : "text-zinc-600"}`}>Mercados a carregar</div>
@@ -1711,6 +1871,8 @@ function MarketsPage({ match, activeKeys, onBet, onClose, theme, displayMinute }
         {activeTab === "cartoes" && renderCartoes()}
         {activeTab === "especiais" && renderEspeciais()}
         {activeTab === "jogadores" && renderJogadores()}
+        {activeTab === "prorrogacao" && renderProrrogacao()}
+        {activeTab === "penaltis" && renderPenaltis()}
 
         <div className="h-8" />
       </div>
