@@ -12,7 +12,7 @@ import {
   type ReactNode,
   type FormEvent,
 } from "react";
-import trophyImg from "/trophy-wc-nobg.png";
+import trophyImg from "/trophy-bet62.png";
 import { useLocation } from "wouter";
 import { useIdle } from "@/hooks/use-idle";
 import { motion, AnimatePresence } from "framer-motion";
