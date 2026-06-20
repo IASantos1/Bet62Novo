@@ -549,6 +549,17 @@ function inferSelectionSport(
     s.startsWith("sh") ||
     s.startsWith("gh-") ||
     s.startsWith("ses-") ||
+    s.startsWith("oe-") ||
+    s.startsWith("oe1-") ||
+    s.startsWith("oe2-") ||
+    s.startsWith("wal1-") ||
+    s.startsWith("wal2-") ||
+    s.startsWith("sm2-") ||
+    s.startsWith("sc1-") ||
+    s.startsWith("sc2-") ||
+    s.startsWith("tg-") ||
+    s.startsWith("s1g-") ||
+    s.startsWith("s2g-") ||
     s.includes("sets")
   )
     return "tennis";
@@ -992,6 +1003,10 @@ function describePendingSettlementReason(
   ) {
     return "missing_football_player_events";
   }
+  // pm-* player markets require manual admin settlement (player ID encoded, no name lookup available)
+  if (rawSelection.startsWith("pm-")) {
+    return "player_market_manual_settlement";
+  }
   const derivedHt = ht ?? getFootballHTScoreFromExtras(extra?.extras);
   if (
     (s.startsWith("ht-") ||
@@ -1022,7 +1037,9 @@ function describePendingSettlementReason(
         /^tg-([ou])-/.test(s) ||
         /^s[12]g-([ou])-/.test(s) ||
         /^ses-/.test(s) ||
-        /^sc[123]-/.test(s)) &&
+        /^sc[123]-/.test(s) ||
+        /^oe[12]?-(odd|even)$/.test(s) ||
+        /^sm2-(11|12|21|22)$/.test(s)) &&
       sets.length === 0
     )
       return "missing_tennis_set_breakdown";
@@ -1535,6 +1552,23 @@ export function normalizeSettlementSelectionKey(selection: string): string {
     const m = s.match(/^(?:s|games-set)([12])g?-([ou])-(\d+(?:\.\d+)?)$/);
     s = `s${m![1]}g-${m![2]}-${m![3]}`;
   }
+  // Tennis Par/Ímpar normalization
+  else if (s === "oe-odd" || s === "total-games-impar" || s === "impar-total") s = "oe-odd";
+  else if (s === "oe-even" || s === "total-games-par" || s === "par-total") s = "oe-even";
+  else if (s === "oe1-odd" || s === "set1-games-impar") s = "oe1-odd";
+  else if (s === "oe1-even" || s === "set1-games-par") s = "oe1-even";
+  else if (s === "oe2-odd" || s === "set2-games-impar") s = "oe2-odd";
+  else if (s === "oe2-even" || s === "set2-games-par") s = "oe2-even";
+  // Tennis Win at least 1 set normalization
+  else if (s === "wal1-yes" || s === "home-ganha-pelo-menos-1-set-sim") s = "wal1-yes";
+  else if (s === "wal1-no"  || s === "home-ganha-pelo-menos-1-set-nao") s = "wal1-no";
+  else if (s === "wal2-yes" || s === "away-ganha-pelo-menos-1-set-sim") s = "wal2-yes";
+  else if (s === "wal2-no"  || s === "away-ganha-pelo-menos-1-set-nao") s = "wal2-no";
+  // Tennis Set + Resultado Final normalization
+  else if (s === "sm2-11" || s === "set1-home-match-home") s = "sm2-11";
+  else if (s === "sm2-12" || s === "set1-home-match-away") s = "sm2-12";
+  else if (s === "sm2-21" || s === "set1-away-match-home") s = "sm2-21";
+  else if (s === "sm2-22" || s === "set1-away-match-away") s = "sm2-22";
 
   // Cards / Escanteios
   else if (/^cards-([ou])(\d+)$/.test(s) || /^total-cartoes-([ou])(\d+)$/.test(s)) {
@@ -1571,9 +1605,12 @@ export function normalizeSettlementSelectionKey(selection: string): string {
   else if (s === "ht-draw" || s === "1-tempo-empate" || s === "primeiro-tempo-empate") s = "ht-draw";
   else if (s === "ht-away" || s === "1-tempo-away" || s === "primeiro-tempo-visitante") s = "ht-away";
 
-  // Clean Sheet / Vitória a Zero
-  else if (s === "cs-h" || s === "casa-folha-limpa" || s === "vitoria-a-zero-casa" || s === "wtn-h") s = "cs-h";
-  else if (s === "cs-a" || s === "visitante-folha-limpa" || s === "vitoria-a-zero-visitante" || s === "wtn-a") s = "cs-a";
+  // Clean Sheet / Folha Limpa
+  else if (s === "cs-h" || s === "casa-folha-limpa") s = "cs-h";
+  else if (s === "cs-a" || s === "visitante-folha-limpa") s = "cs-a";
+  // Vitória a Zeros (win AND keep clean sheet) — diferente de folha limpa
+  else if (s === "vitoria-a-zero-casa") s = "wtn-h";
+  else if (s === "vitoria-a-zero-visitante") s = "wtn-a";
 
   // Draw No Bet
   else if (s === "dnb-home" || s === "empate-anulado-casa") s = "dnb-home";
@@ -2123,10 +2160,77 @@ export function scoreOutcomeForSel(
     const dir = m[1]!;
     const suf = m[2] ?? "";
     const line = suf === "35" ? 3.5 : 2.5;
-    const totalSets = tennisCompletedSetCount(extra?.extras);
+    // ft.home + ft.away is always the authoritative total sets played in tennis
+    // (each player's sets won summed = total sets in the match: 2 for straight sets, 3 for deciding set).
+    // Use it directly to avoid counting errors from tiebreak sets stored as [6,6]
+    // which tennisSetFinished() correctly rejects as unfinished.
+    const ftTotal =
+      Number.isFinite(ft.home) && Number.isFinite(ft.away) && ft.home + ft.away > 0
+        ? ft.home + ft.away
+        : null;
+    const fromSetData = tennisCompletedSetCount(extra?.extras);
+    // Prefer the higher of the two (ft authoritative; set breakdown can undercount tiebreaks)
+    const totalSets =
+      ftTotal !== null && fromSetData !== null
+        ? Math.max(ftTotal, fromSetData)
+        : ftTotal ?? fromSetData;
     if (totalSets === null) return null;
     if (totalSets === line) voided = true;
     else winning = dir === "o" ? totalSets > line : totalSets < line;
+  }
+  // ── Par/Ímpar — Total de Games ────────────────────────────────────────────
+  else if (s === "oe-odd" || s === "oe-even") {
+    const sets = getTennisSetsFromExtras(extra?.extras);
+    const completedSets = sets.filter(tennisSetFinished);
+    if (completedSets.length === 0) return null;
+    const totalGames = completedSets.reduce((sum, [h, a]) => sum + h + a, 0);
+    winning = s === "oe-odd" ? totalGames % 2 === 1 : totalGames % 2 === 0;
+  }
+  // ── Par/Ímpar — 1º Set ────────────────────────────────────────────────────
+  else if (s === "oe1-odd" || s === "oe1-even") {
+    const setScore = getTennisSetsFromExtras(extra?.extras)[0] ?? null;
+    if (!setScore || !tennisSetFinished(setScore)) return null;
+    const games = setScore[0] + setScore[1];
+    winning = s === "oe1-odd" ? games % 2 === 1 : games % 2 === 0;
+  }
+  // ── Par/Ímpar — 2º Set ────────────────────────────────────────────────────
+  else if (s === "oe2-odd" || s === "oe2-even") {
+    const setScore = getTennisSetsFromExtras(extra?.extras)[1] ?? null;
+    if (!setScore || !tennisSetFinished(setScore)) return null;
+    const games = setScore[0] + setScore[1];
+    winning = s === "oe2-odd" ? games % 2 === 1 : games % 2 === 0;
+  }
+  // ── Ganha pelo menos 1 Set — Jogador A (home) ─────────────────────────────
+  else if (s === "wal1-yes" || s === "wal1-no") {
+    // home won at least 1 set → away could not have won in straight sets (0-2)
+    // ft.home > 0 means home won at least one set
+    if (!Number.isFinite(ft.home) || !Number.isFinite(ft.away)) return null;
+    const homeWonSet = ft.home > 0;
+    winning = s === "wal1-yes" ? homeWonSet : !homeWonSet;
+  }
+  // ── Ganha pelo menos 1 Set — Jogador B (away) ─────────────────────────────
+  else if (s === "wal2-yes" || s === "wal2-no") {
+    if (!Number.isFinite(ft.home) || !Number.isFinite(ft.away)) return null;
+    const awayWonSet = ft.away > 0;
+    winning = s === "wal2-yes" ? awayWonSet : !awayWonSet;
+  }
+  // ── Set + Resultado Final (1º set winner × match winner) ──────────────────
+  // sm2-11 = home 1st set + home match
+  // sm2-12 = home 1st set + away match
+  // sm2-21 = away 1st set + home match
+  // sm2-22 = away 1st set + away match
+  else if (/^sm2-(11|12|21|22)$/.test(s)) {
+    const code = s.slice(4); // "11"|"12"|"21"|"22"
+    const set1 = getTennisSetsFromExtras(extra?.extras)[0] ?? null;
+    if (!set1 || !tennisSetFinished(set1)) return null;
+    if (!Number.isFinite(ft.home) || !Number.isFinite(ft.away) || ft.home === ft.away) return null;
+    const homeWonSet1 = set1[0] > set1[1];
+    const homeWonMatch = ft.home > ft.away;
+    winning =
+      code === "11" ? homeWonSet1 && homeWonMatch :
+      code === "12" ? homeWonSet1 && !homeWonMatch :
+      code === "21" ? !homeWonSet1 && homeWonMatch :
+      /* 22 */         !homeWonSet1 && !homeWonMatch;
   }
   // ── Volleyball exact score (best-of-5) ────────────────────────────────────
   else if (/^vs-s(30|31|32|03|13|23)$/.test(s)) {
@@ -2520,6 +2624,12 @@ export function scoreOutcomeForSel(
       const totalET = etHome + etAway;
       if (totalET === line) voided = true;
       else winning = m[1] === "o" ? totalET > line : totalET < line;
+    } else if (s === "et-ng-home") {
+      // Equipa da Casa a Marcar na Prorrogação
+      winning = etHome > 0;
+    } else if (s === "et-ng-away") {
+      // Equipa Visitante a Marcar na Prorrogação
+      winning = etAway > 0;
     } else {
       return null;
     }
