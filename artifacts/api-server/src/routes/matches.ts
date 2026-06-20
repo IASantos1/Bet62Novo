@@ -18558,6 +18558,13 @@ async function _rebuildWC2026(): Promise<void> {
           (Date.now() - new Date(g.startTime).getTime()) / 60_000;
         if (elapsedMin > 110) continue;
       }
+      // Skip statusGroup=2 (scheduled/not started) games whose kickoff was >110 min ago
+      // — API sometimes keeps games as "scheduled" after they've already finished
+      if ((g.statusGroup ?? 0) === 2 && g.startTime) {
+        const elapsedMin =
+          (Date.now() - new Date(g.startTime).getTime()) / 60_000;
+        if (elapsedMin > 110) continue;
+      }
       const isWC = g.competitionId === WC_COMP_ID;
       if (isWC) wcV1Games.push(g);
     }
