@@ -8152,7 +8152,7 @@ export default function Home({
     const oddsDown = !isSuspended && delta <= -ODDS_ANIM_THRESHOLD;
     const isWCVariant = variant === "worldcup";
     const baseBoxClass = isWCVariant
-      ? `${grow ? "flex-1" : ""} h-[64px] rounded-xl border px-1 flex flex-col items-center justify-center min-w-0`
+      ? `${grow ? "flex-1" : ""} h-10 rounded-md border px-1 flex flex-col items-center justify-center min-w-0`
       : `${grow ? "flex-1" : ""} h-10 px-2 rounded-md text-xs flex flex-col items-center justify-center`;
 
     if (isSuspended) {
@@ -8297,7 +8297,7 @@ export default function Home({
     return (
       <button
         disabled
-        className="w-full h-[64px] px-3 flex items-center justify-center rounded-xl bg-red-950 border border-red-800/50 text-red-200 font-black text-sm tracking-widest cursor-not-allowed select-none animate-pulse"
+        className="w-full h-10 px-3 flex items-center justify-center rounded-md bg-red-950 border border-red-800/50 text-red-200 font-black text-sm tracking-widest cursor-not-allowed select-none animate-pulse"
         style={{ letterSpacing: "0.2em" }}
       >
         {prefix}
