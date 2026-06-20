@@ -12141,7 +12141,7 @@ export default function Home({
                             const [ah, aa] = a.score.split("-").map(Number);
                             const [bh, ba] = b.score.split("-").map(Number);
                             return (
-                              (bh ?? 0) - (ah ?? 0) || (aa ?? 0) - (ba ?? 0)
+                              (ah ?? 0) - (bh ?? 0) || (aa ?? 0) - (ba ?? 0)
                             );
                           });
                         const awayWins = entries
@@ -12153,7 +12153,7 @@ export default function Home({
                             const [ah, aa] = a.score.split("-").map(Number);
                             const [bh, ba] = b.score.split("-").map(Number);
                             return (
-                              (ba ?? 0) - (aa ?? 0) || (ah ?? 0) - (bh ?? 0)
+                              (aa ?? 0) - (ba ?? 0) || (ah ?? 0) - (bh ?? 0)
                             );
                           });
                         return { homeWins, awayWins };
@@ -13203,7 +13203,7 @@ export default function Home({
                     .sort(([ka], [kb]) => {
                       const [ah, aa] = ka.split("-").map(Number);
                       const [bh, ba] = kb.split("-").map(Number);
-                      return (bh ?? 0) - (ah ?? 0) || (aa ?? 0) - (ba ?? 0);
+                      return (ah ?? 0) - (bh ?? 0) || (aa ?? 0) - (ba ?? 0);
                     });
                   const awayWins = Object.entries(ses)
                     .filter(([s]) => {
@@ -13213,7 +13213,7 @@ export default function Home({
                     .sort(([ka], [kb]) => {
                       const [ah, aa] = ka.split("-").map(Number);
                       const [bh, ba] = kb.split("-").map(Number);
-                      return (ba ?? 0) - (aa ?? 0) || (ah ?? 0) - (bh ?? 0);
+                      return (aa ?? 0) - (ba ?? 0) || (ah ?? 0) - (bh ?? 0);
                     });
                   const maxRows = Math.max(homeWins.length, awayWins.length);
                   return (
