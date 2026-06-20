@@ -2570,8 +2570,47 @@ function computeTennisExtras(
   const pGHHome = mc(0.5 + (sp - 0.5) * 0.3, 0.05, 0.95);
   const [ghH, ghA] = probsToDecimalOdds([pGHHome, 1 - pGHHome], 1.06);
 
+  // Calculate pGameHomeWin: given pSetHomeWin, estimate probability of winning a single game
+  // Using the relation between set win probability and game win probability
+  const calculatePGameFromPSet = (pSet: number): number => {
+    let low = 0.01, high = 0.99;
+    for (let i = 0; i < 100; i++) {
+      const mid = (low + high) / 2;
+      const prob = calculateSetWinProbability(mid);
+      if (prob < pSet) {
+        low = mid;
+      } else {
+        high = mid;
+      }
+    }
+    return (low + high) / 2;
+  };
+
+  const calculateSetWinProbability = (pGame: number): number => {
+    let p = 0;
+    // Probability of winning 6-0 to 6-4
+    for (let k = 0; k <= 4; k++) {
+      p += comb(5 + k, k) * Math.pow(pGame, 6) * Math.pow(1 - pGame, k);
+    }
+    // Probability of winning 7-5
+    // First reach 5-5, then win 2 games in a row
+    p += comb(10, 5) * Math.pow(pGame, 5) * Math.pow(1 - pGame, 5) * pGame * pGame;
+    // Probability of winning 7-6
+    // First reach 6-6 (each wins 6 out of first 12 games), then win the tiebreak
+    // For tiebreak, assume pGame is the probability of winning a tiebreak point, so overall
+    // probability of winning tiebreak is approximately (pGame^2) / (pGame^2 + (1-pGame)^2)
+    // but let's use a simple approximation: pGame (for simplicity)
+    const p66 = comb(12, 6) * Math.pow(pGame, 6) * Math.pow(1 - pGame, 6);
+    // Probability of winning tiebreak from 6-6: assume pTiebreak = pGame (simplified)
+    const pTiebreak = pGame;
+    p += p66 * pTiebreak;
+    return p;
+  };
+
+  const pGameHome = calculatePGameFromPSet(sp);
+
   // Pre-match exact set score odds
-  const preMatchSetExactScore = computeSetExactScoreOdds(0, 0, sp);
+  const preMatchSetExactScore = computeSetExactScoreOdds(0, 0, sp, 0.065, pGameHome);
   const preMatchScoreList = canonicalTennisSetScoreOrder(
     Object.entries(preMatchSetExactScore).map(([label, odds]) => ({
       label,
@@ -3045,6 +3084,20 @@ function isFinishedTennisSetScore(
   );
 }
 
+/**
+ * Calculate combination (n choose k)
+ */
+function comb(n: number, k: number): number {
+  if (k < 0 || k > n) return 0;
+  if (k === 0 || k === n) return 1;
+  k = Math.min(k, n - k);
+  let result = 1;
+  for (let i = 1; i <= k; i++) {
+    result = (result * (n - k + i)) / i;
+  }
+  return result;
+}
+
 function computeSetExactScoreTemplateDistribution(
   hg: number,
   ag: number,
@@ -3105,6 +3158,43 @@ function computeSetExactScoreTemplateDistribution(
   return Object.fromEntries(
     Object.entries(probs).map(([label, prob]) => [label, prob / total]),
   );
+}
+
+/**
+ * Calculate exact set score probabilities from first principles using game probabilities
+ */
+function calculateExactSetScoreProbs(
+  currentHg: number,
+  currentAg: number,
+  pGameHome: number,
+): Record<string, number> {
+  const memo = new Map<string, Record<string, number>>();
+
+  const dp = (hg: number, ag: number): Record<string, number> => {
+    const key = `${hg}-${ag}`;
+    if (memo.has(key)) return memo.get(key)!;
+
+    if (isFinishedTennisSetScore(hg, ag)) {
+      const res = { [`${hg}-${ag}`]: 1 };
+      memo.set(key, res);
+      return res;
+    }
+
+    const result: Record<string, number> = {};
+    const homeProbs = dp(hg + 1, ag);
+    for (const [score, prob] of Object.entries(homeProbs)) {
+      result[score] = (result[score] || 0) + prob * pGameHome;
+    }
+    const awayProbs = dp(hg, ag + 1);
+    for (const [score, prob] of Object.entries(awayProbs)) {
+      result[score] = (result[score] || 0) + prob * (1 - pGameHome);
+    }
+
+    memo.set(key, result);
+    return result;
+  };
+
+  return dp(currentHg, currentAg);
 }
 
 function computeSetExactScorePathDistribution(
@@ -3230,7 +3320,7 @@ function computeSetExactScoreDistribution(
     awayMomentum,
   );
   if (pGameHomeWin == null) return templateDist;
-  const pathDist = computeSetExactScorePathDistribution(hg, ag, pGameHomeWin);
+  const pathDist = calculateExactSetScoreProbs(hg, ag, mc(pGameHomeWin, 0.05, 0.95));
   if (Object.keys(pathDist).length === 0) return templateDist;
   return blendSetExactScoreDistributions(templateDist, pathDist, hg, ag);
 }
