@@ -1488,8 +1488,8 @@ export function normalizeSettlementSelectionKey(selection: string): string {
     s = `sog-${m![1]}-${m![2]}`;
   }
   // Baseball run line
-  else if (s === "mlb-rl-home-1.5") s = "mlb-rl-home";
-  else if (s === "mlb-rl-away-1.5") s = "mlb-rl-away";
+  else if (s === "mlb-rl-home-1.5" || s === "mlb-rl-home") s = "rl-home";
+  else if (s === "mlb-rl-away-1.5" || s === "mlb-rl-away") s = "rl-away";
   // Baseball f5 result/total
   else if (s === "mlb-f5-home") s = "f5-home";
   else if (s === "mlb-f5-away") s = "f5-away";
