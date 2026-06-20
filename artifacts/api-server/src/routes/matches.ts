@@ -2570,6 +2570,15 @@ function computeTennisExtras(
   const pGHHome = mc(0.5 + (sp - 0.5) * 0.3, 0.05, 0.95);
   const [ghH, ghA] = probsToDecimalOdds([pGHHome, 1 - pGHHome], 1.06);
 
+  // Pre-match exact set score odds
+  const preMatchSetExactScore = computeSetExactScoreOdds(0, 0, sp);
+  const preMatchScoreList = canonicalTennisSetScoreOrder(
+    Object.entries(preMatchSetExactScore).map(([label, odds]) => ({
+      label,
+      odds,
+    })),
+  );
+
   return {
     firstSet: {
       home: overrides?.set1H ?? fsh!,
@@ -2593,6 +2602,11 @@ function computeTennisExtras(
       capTennisLiveOverUnderOdds(entry),
     ),
     set1Games: { line: set1LineApprox, over: s1go!, under: s1gu! },
+    setExactScore: preMatchSetExactScore,
+    set1ExactScore: preMatchSetExactScore,
+    set2ExactScore: computeSetExactScoreOdds(0, 0, sp),
+    score1st: preMatchScoreList,
+    score2nd: preMatchScoreList,
     gameHandicap: {
       line: overrides?.gamesLine ?? ghLine,
       home: overrides?.hcapH ?? ghH!,
