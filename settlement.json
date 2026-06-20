@@ -1,0 +1,387 @@
+{
+  "metadata": {
+    "name": "settlement",
+    "source": "workspace bet settlement model",
+    "engineVersion": "2025.06-v4",
+    "generatedBy": "assistant",
+    "generatedAt": "2026-06-16T00:00:00.000Z",
+    "notes": [
+      "Nao existe um unico arquivo nativo settlement.json no projeto.",
+      "Este arquivo consolida os formatos JSON usados pelo sistema de settlement.",
+      "Os dados abaixo refletem os modelos e respostas encontrados no codigo atual."
+    ]
+  },
+  "selectionSchema": {
+    "type": "object",
+    "description": "Estrutura de uma selecao armazenada em bets.selections com campos de settlement.",
+    "fields": {
+      "matchId": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "required": false
+      },
+      "matchTitle": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "required": false
+      },
+      "homeTeam": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "required": false
+      },
+      "awayTeam": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "required": false
+      },
+      "kickoffTime": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "format": "date-time",
+        "required": false
+      },
+      "scheduledAt": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "format": "date-time",
+        "required": false
+      },
+      "selection": {
+        "type": "string",
+        "required": true
+      },
+      "odd": {
+        "type": [
+          "number",
+          "null"
+        ],
+        "required": false
+      },
+      "market": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "required": false
+      },
+      "label": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "required": false
+      },
+      "finalScore": {
+        "type": [
+          "object",
+          "null"
+        ],
+        "required": false,
+        "properties": {
+          "home": "number",
+          "away": "number"
+        }
+      },
+      "htScore": {
+        "type": [
+          "object",
+          "null"
+        ],
+        "required": false,
+        "properties": {
+          "htHome": "number",
+          "htAway": "number"
+        }
+      },
+      "outcome": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "required": false,
+        "enum": [
+          "won",
+          "lost",
+          "void",
+          "half_won",
+          "half_lost",
+          null
+        ]
+      },
+      "pendingReason": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "required": false
+      },
+      "settlementNote": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "required": false
+      },
+      "lastSettledAt": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "format": "date-time",
+        "required": false
+      },
+      "settlementRuleVersion": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "required": false
+      }
+    }
+  },
+  "selectionExample": {
+    "matchId": "fb-12345",
+    "matchTitle": "Benfica vs Porto",
+    "homeTeam": "Benfica",
+    "awayTeam": "Porto",
+    "kickoffTime": "2026-06-16T18:00:00.000Z",
+    "scheduledAt": "2026-06-16T18:00:00.000Z",
+    "selection": "o25",
+    "odd": 1.95,
+    "market": "total_goals",
+    "label": "Over 2.5",
+    "finalScore": {
+      "home": 2,
+      "away": 1
+    },
+    "htScore": {
+      "htHome": 1,
+      "htAway": 0
+    },
+    "outcome": "won",
+    "pendingReason": null,
+    "settlementNote": null,
+    "lastSettledAt": "2026-06-16T20:05:10.000Z",
+    "settlementRuleVersion": "2025.06-v4"
+  },
+  "pendingReasonCatalog": [
+    "status_delayed_window",
+    "missing_corners_total",
+    "missing_cards_total",
+    "missing_first_goal_data",
+    "missing_ht_score",
+    "missing_tennis_sets",
+    "missing_tennis_set_breakdown",
+    "missing_basketball_periods",
+    "missing_hockey_periods",
+    "missing_baseball_innings",
+    "market_known_but_unresolved",
+    "missing_pending_reason",
+    "no_result",
+    "incomplete_data",
+    "market_pending",
+    "status_pending"
+  ],
+  "settlementLogSchema": {
+    "type": "object",
+    "description": "Evento persistido em settlement_logs e retornado no admin settlement-logs.",
+    "fields": {
+      "id": "number",
+      "betId": "number",
+      "userId": "number",
+      "oldStatus": "string",
+      "newStatus": "string",
+      "payout": [
+        "string",
+        "null"
+      ],
+      "message": [
+        "string",
+        "null"
+      ],
+      "createdAt": "string",
+      "userName": [
+        "string",
+        "null"
+      ],
+      "userEmail": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "settlementLogExample": {
+    "id": 124,
+    "betId": 987,
+    "userId": 52,
+    "oldStatus": "pending",
+    "newStatus": "won",
+    "payout": "19.50",
+    "message": "Auto-settled: market resolved in-play",
+    "createdAt": "2026-06-16T20:05:10.000Z",
+    "userName": "Joao Silva",
+    "userEmail": "joao@email.com"
+  },
+  "idempotencySchema": {
+    "type": "object",
+    "description": "Registro de protecao contra settlement duplicado.",
+    "fields": {
+      "id": "number",
+      "idempotencyKey": "string",
+      "betId": "number",
+      "trigger": "string",
+      "oldStatus": [
+        "string",
+        "null"
+      ],
+      "newStatus": [
+        "string",
+        "null"
+      ],
+      "matchId": [
+        "string",
+        "null"
+      ],
+      "jobId": [
+        "string",
+        "null"
+      ],
+      "engineVersion": [
+        "string",
+        "null"
+      ],
+      "createdAt": "string"
+    }
+  },
+  "idempotencyExample": {
+    "id": 55,
+    "idempotencyKey": "bet:987:trigger:won_final:old:pending:new:won:match:fb-12345",
+    "betId": 987,
+    "trigger": "won_final",
+    "oldStatus": "pending",
+    "newStatus": "won",
+    "matchId": "fb-12345",
+    "jobId": null,
+    "engineVersion": "2025.06-v4",
+    "createdAt": "2026-06-16T20:05:10.000Z"
+  },
+  "apiExamples": {
+    "adminSettlementLogs": [
+      {
+        "id": 124,
+        "betId": 987,
+        "userId": 52,
+        "oldStatus": "pending",
+        "newStatus": "won",
+        "payout": "19.50",
+        "message": "Auto-settled: market resolved in-play",
+        "createdAt": "2026-06-16T20:05:10.000Z",
+        "userName": "Joao Silva",
+        "userEmail": "joao@email.com"
+      }
+    ],
+    "adminSettlementMetrics": {
+      "overall": {
+        "count": 120,
+        "avg_seconds": 42.5,
+        "p50_seconds": 15,
+        "p95_seconds": 180,
+        "min_seconds": 3,
+        "max_seconds": 720
+      },
+      "bySport": [
+        {
+          "sport": "football",
+          "count": 80,
+          "avg_seconds": 30,
+          "p50_seconds": 12,
+          "p95_seconds": 100
+        }
+      ],
+      "byStatus": [
+        {
+          "status": "won",
+          "count": 50,
+          "avg_seconds": 25,
+          "p50_seconds": 10,
+          "p95_seconds": 90
+        }
+      ]
+    },
+    "adminSettlementPendingReasons": {
+      "pendingBetCount": 120,
+      "unresolvedSelectionCount": 340,
+      "distinctReasons": 5,
+      "reasons": [
+        {
+          "reason": "missing_ht_score",
+          "count": 120,
+          "samples": [
+            {
+              "betId": 987,
+              "userId": 52,
+              "matchId": "fb-12345",
+              "selection": "ht-home",
+              "market": "half_time_result",
+              "label": "Home",
+              "outcome": null,
+              "createdAt": "2026-06-16T18:00:00.000Z"
+            }
+          ]
+        }
+      ]
+    },
+    "adminSettlementPendingSelections": {
+      "reasonFilter": "missing_ht_score",
+      "count": 1,
+      "rows": [
+        {
+          "reason": "missing_ht_score",
+          "betId": 987,
+          "userId": 52,
+          "userName": "Joao Silva",
+          "userEmail": "joao@email.com",
+          "matchId": "fb-12345",
+          "matchTitle": "Benfica vs Porto",
+          "selectionIndex": 0,
+          "selection": "ht-home",
+          "market": "half_time_result",
+          "label": "Home",
+          "outcome": null,
+          "pendingReason": "missing_ht_score",
+          "finalScore": null,
+          "htScore": null,
+          "stake": "10.00",
+          "totalOdds": "1.95",
+          "potentialWin": "19.50",
+          "createdAt": "2026-06-16T18:00:00.000Z",
+          "selections": [
+            {
+              "matchId": "fb-12345",
+              "matchTitle": "Benfica vs Porto",
+              "selection": "ht-home",
+              "odd": 1.95,
+              "market": "half_time_result",
+              "label": "Home",
+              "outcome": null,
+              "pendingReason": "missing_ht_score"
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

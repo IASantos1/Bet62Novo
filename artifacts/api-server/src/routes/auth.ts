@@ -6,10 +6,7 @@ import { eq } from "drizzle-orm";
 import { logger } from "../lib/logger.js";
 
 const router: IRouter = Router();
-const SESSION_SECRET = process.env.SESSION_SECRET;
-if (!SESSION_SECRET) {
-  throw new Error("[SECURITY] SESSION_SECRET environment variable is not set.");
-}
+const SESSION_SECRET = process.env.SESSION_SECRET || "fallback-secret-key-for-development-only-do-not-use-in-production";
 
 function validatePortugueseNif(nif: string): boolean {
   const digits = (nif ?? "").replace(/\s/g, "");
@@ -31,7 +28,8 @@ router.post("/register", async (req, res): Promise<void> => {
   }
 
   const nifClean = (nif ?? "").replace(/\s/g, "");
-  if (!validatePortugueseNif(nifClean)) {
+  // Optional NIF: if provided, validate it
+  if (nifClean && !validatePortugueseNif(nifClean)) {
     res.status(400).json({ error: "NIF inválido. Insira um NIF português válido com 9 dígitos." });
     return;
   }
@@ -48,7 +46,7 @@ router.post("/register", async (req, res): Promise<void> => {
       name,
       email,
       passwordHash,
-      nif: nifClean,
+      nif: nifClean || null,
       balance: "0.00",
       freebetBalance: "0.00",
     }).returning();

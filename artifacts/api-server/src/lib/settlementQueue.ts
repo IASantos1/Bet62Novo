@@ -1,5 +1,5 @@
 import { Queue, Worker } from "bullmq";
-import IORedis from "ioredis";
+import Redis from "ioredis";
 import { logger } from "./logger.js";
 
 type MatchSettlementJob = {
@@ -7,10 +7,11 @@ type MatchSettlementJob = {
 };
 
 const QUEUE_NAME = "bet_settlement";
+const JOB_NAME = "match_settlement";
 
 let _queue: Queue | null = null;
 let _worker: Worker | null = null;
-let _redis: IORedis | null = null;
+let _redis: any | null = null;
 
 function getRedisUrl(): string | null {
   const url = process.env["REDIS_URL"];
@@ -20,10 +21,24 @@ function getRedisUrl(): string | null {
 function getQueue(): Queue | null {
   if (_queue) return _queue;
   const url = getRedisUrl();
-  if (!url) return null;
+  if (!url) {
+    logger.warn("REDIS_URL not configured. Settlement queue disabled.");
+    return null;
+  }
 
-  _redis = new IORedis(url, { maxRetriesPerRequest: null });
-  _queue = new Queue(QUEUE_NAME, { connection: _redis });
+  _redis = new (Redis as any)(url, { maxRetriesPerRequest: null });
+  _queue = new Queue(QUEUE_NAME, {
+    connection: _redis,
+    defaultJobOptions: {
+      removeOnComplete: { age: 3600, count: 2000 },
+      removeOnFail: { age: 172800, count: 2000 },
+      attempts: 3,
+      backoff: {
+        type: "exponential",
+        delay: 5000,
+      },
+    },
+  });
   return _queue;
 }
 
@@ -41,6 +56,8 @@ export function buildMatchSettlementJobId(args: {
   return `match:${args.matchId}:score:${h}-${a}:ht:${hh}-${ha}`;
 }
 
+export const generateMatchSettlementJobId = buildMatchSettlementJobId;
+
 export async function enqueueMatchSettlement(args: {
   matchId: string;
   jobId: string;
@@ -50,12 +67,12 @@ export async function enqueueMatchSettlement(args: {
 
   try {
     await q.add(
-      "match_settlement",
+      JOB_NAME,
       { matchId: args.matchId } satisfies MatchSettlementJob,
       {
         jobId: args.jobId,
-        removeOnComplete: { age: 3600, count: 1000 },
-        removeOnFail: { age: 24 * 3600, count: 1000 },
+        removeOnComplete: true,
+        removeOnFail: true,
       },
     );
   } catch (err) {
@@ -66,21 +83,67 @@ export async function enqueueMatchSettlement(args: {
 export function startSettlementQueueWorker(handler: (args: { matchId: string; jobId: string }) => Promise<void>): void {
   if (_worker) return;
   const url = getRedisUrl();
-  if (!url) return;
+  if (!url) {
+    logger.warn("REDIS_URL not configured. Settlement queue worker not started.");
+    return;
+  }
 
-  const redis = new IORedis(url, { maxRetriesPerRequest: null });
+  const redis = new (Redis as any)(url, { maxRetriesPerRequest: null });
   _worker = new Worker(
     QUEUE_NAME,
     async (job) => {
       const data = job.data as MatchSettlementJob;
+      logger.info(
+        { jobId: job.id, matchId: data.matchId },
+        "Starting settlement queue job",
+      );
+
       await handler({ matchId: data.matchId, jobId: String(job.id ?? "") });
+
+      logger.info(
+        { jobId: job.id, matchId: data.matchId },
+        "Settlement queue job completed",
+      );
+
+      return { ok: true, matchId: data.matchId };
     },
-    { connection: redis, concurrency: 8 },
+    {
+      connection: redis,
+      concurrency: 8,
+      stalledInterval: 30000,
+      maxStalledCount: 2,
+    },
   );
 
   _worker.on("failed", (job, err) => {
-    logger.error({ err, jobId: job?.id }, "Settlement queue job failed");
+    if (!job) return;
+    const attemptsMade = job.attemptsMade;
+    const maxAttempts = job.opts.attempts ?? 3;
+    
+    logger.error(
+      {
+        err,
+        jobId: job.id,
+        matchId: job.data?.matchId,
+        attemptsMade,
+        maxAttempts,
+        error: err.message,
+      },
+      attemptsMade >= maxAttempts 
+        ? "Settlement queue job failed permanently" 
+        : "Settlement queue job failed, will retry",
+    );
   });
 
-  logger.info({ queue: QUEUE_NAME }, "Settlement queue worker started");
+  _worker.on("completed", (job) => {
+    logger.info(
+      {
+        jobId: job.id,
+        matchId: job.data?.matchId,
+      },
+      "Settlement queue job completed event",
+    );
+  });
+
+  logger.info({ queue: QUEUE_NAME, concurrency: 8 }, "Settlement queue worker started");
 }

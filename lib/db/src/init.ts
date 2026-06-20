@@ -116,12 +116,32 @@ export async function initDb(): Promise<void> {
         id         SERIAL PRIMARY KEY,
         bet_id     INTEGER NOT NULL REFERENCES bets(id),
         user_id    INTEGER NOT NULL,
+        settlement_key TEXT,
         old_status TEXT NOT NULL,
         new_status TEXT NOT NULL,
         payout     DECIMAL(12, 2),
         message    TEXT,
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       );
+
+      CREATE UNIQUE INDEX IF NOT EXISTS settlement_logs_settlement_key_idx
+        ON settlement_logs (settlement_key);
+
+      CREATE TABLE IF NOT EXISTS settlement_idempotency (
+        id              SERIAL PRIMARY KEY,
+        idempotency_key TEXT NOT NULL,
+        bet_id          INTEGER NOT NULL REFERENCES bets(id),
+        trigger         TEXT NOT NULL,
+        old_status      TEXT,
+        new_status      TEXT,
+        match_id        TEXT,
+        job_id          TEXT,
+        engine_version  TEXT,
+        created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+
+      CREATE UNIQUE INDEX IF NOT EXISTS settlement_idempotency_key_idx
+        ON settlement_idempotency (idempotency_key);
 
       CREATE TABLE IF NOT EXISTS ledger_entries (
         id              SERIAL PRIMARY KEY,
@@ -317,6 +337,8 @@ export async function initDb(): Promise<void> {
 
       ALTER TABLE kyc_documents ADD COLUMN IF NOT EXISTS reviewed_at        TIMESTAMPTZ;
       ALTER TABLE kyc_documents ADD COLUMN IF NOT EXISTS file_data          BYTEA;
+
+      ALTER TABLE settlement_logs ADD COLUMN IF NOT EXISTS settlement_key   TEXT;
     `);
 
     console.info("[db/init] Schema initialisation complete.");
