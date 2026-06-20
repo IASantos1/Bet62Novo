@@ -5,7 +5,7 @@ import { ArrowLeft, X, BarChart2 } from "lucide-react";
 import { fetchWithTimeout } from "@/lib/fetch-timeout";
 import { getResolvedTheme, subscribeThemeChange, type ResolvedTheme } from "@/lib/theme";
 import { readWCClientSnapshotRaw, writeWCClientSnapshotRaw } from "@/lib/world-cup-cache";
-import trophyImg from "/trophy-wc-nobg.png";
+import trophyImg from "/trophy-bet62.png";
 
 type Theme = ResolvedTheme;
 
@@ -2119,12 +2119,12 @@ export default function WorldCupPage({ onClose, onBet: onBetProp }: { onClose?: 
         <div className="h-[2px] bg-gradient-to-r from-transparent via-yellow-500/60 to-transparent" />
         <div className="flex items-center gap-3 px-4 py-3">
           <motion.div
-            animate={{ y: [0, -5, 0] }}
-            transition={{ duration: 3, repeat: Infinity, ease: "easeInOut" }}
-            style={{ filter: "drop-shadow(0 0 14px rgba(255,165,0,0.7))" }}
+            animate={{ y: [0, -6, 0], rotate: [-1, 1, -1] }}
+            transition={{ duration: 3.5, repeat: Infinity, ease: "easeInOut" }}
+            style={{ filter: "drop-shadow(0 0 20px rgba(255,180,0,0.85))" }}
             className="flex-shrink-0"
           >
-            <img src={trophyImg} alt="Troféu" style={{ width: 72, height: 72, objectFit: "contain" }} />
+            <img src={trophyImg} alt="Troféu" style={{ width: 90, height: 90, objectFit: "contain" }} />
           </motion.div>
           <div>
             <div className="text-[9px] font-black tracking-[0.28em] text-yellow-500/80 mb-0.5">FIFA · CAN · MEX · USA</div>
