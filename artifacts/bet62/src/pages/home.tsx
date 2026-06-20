@@ -5770,7 +5770,6 @@ export default function Home({
   // Fetch match stats when stats tab is active
   useEffect(() => {
     if (matchViewTab !== "stats" || !expandedMatch || matchStats) return;
-    if ((expandedMatch.sport ?? "football") !== "football") return;
     setMatchStatsLoading(true);
     const p = new URLSearchParams({
       home: expandedMatch.home,
@@ -16687,12 +16686,8 @@ export default function Home({
                 {/* Stats panel */}
                 {matchViewTab === "stats" && (
                   <div className="bg-zinc-900 rounded-xl border border-zinc-800 p-4 mb-2 animate-in fade-in duration-200">
-                    {((expandedMatch.sport ?? "football") === "football" &&
-                      matchStatsLoading &&
+                    {((matchStatsLoading || v2StatsLoading) &&
                       !matchStats &&
-                      !(v2StatsGroups && v2StatsGroups.length > 0)) ||
-                    ((expandedMatch.sport ?? "football") !== "football" &&
-                      v2StatsLoading &&
                       !(v2StatsGroups && v2StatsGroups.length > 0)) ? (
                       <div className="flex items-center justify-center py-12">
                         <Loader2
@@ -16700,8 +16695,7 @@ export default function Home({
                           size={28}
                         />
                       </div>
-                    ) : (expandedMatch.sport ?? "football") === "football" &&
-                      !matchStats &&
+                    ) : !matchStats &&
                       !(v2StatsGroups && v2StatsGroups.length > 0) ? (
                       <div className="text-center text-zinc-500 py-8 text-sm">
                         Estatísticas indisponíveis para este jogo.
@@ -17035,6 +17029,124 @@ export default function Home({
                                         <span className="text-red-400 font-bold tabular-nums">
                                           {r.away || "-"}
                                         </span>
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          ) : matchStats ? (
+                            <div className="space-y-3">
+                              <div className="bg-zinc-950/60 rounded-lg border border-zinc-800 p-4">
+                                <div className="text-[10px] font-black text-red-500 uppercase tracking-widest mb-3">
+                                  Probabilidade
+                                </div>
+                                <div className="space-y-2.5 mb-4">
+                                  {[
+                                    {
+                                      label: expandedMatch.home,
+                                      pct: matchStats.winProb.home,
+                                      color: "bg-blue-500",
+                                    },
+                                    ...(matchStats.winProb.draw > 0
+                                      ? [
+                                          {
+                                            label: "Empate",
+                                            pct: matchStats.winProb.draw,
+                                            color: "bg-yellow-400",
+                                          },
+                                        ]
+                                      : []),
+                                    {
+                                      label: expandedMatch.away,
+                                      pct: matchStats.winProb.away,
+                                      color: "bg-red-500",
+                                    },
+                                  ].map((row) => (
+                                    <div key={row.label}>
+                                      <div className="flex justify-between text-xs mb-1">
+                                        <span className="text-zinc-300 truncate max-w-[140px]">
+                                          {row.label}
+                                        </span>
+                                        <span className="font-bold text-white shrink-0">
+                                          {row.pct}%
+                                        </span>
+                                      </div>
+                                      <div className="h-2 bg-zinc-800 rounded-full overflow-hidden">
+                                        <motion.div
+                                          initial={{ width: 0 }}
+                                          animate={{ width: `${row.pct}%` }}
+                                          transition={{
+                                            duration: 0.7,
+                                            ease: "easeOut",
+                                          }}
+                                          className={`h-full rounded-full ${row.color}`}
+                                        />
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                                <div
+                                  className={`grid gap-1 pt-3 border-t border-zinc-800 text-center ${matchStats.winProb.draw > 0 ? "grid-cols-3" : "grid-cols-2"}`}
+                                >
+                                  <div>
+                                    <div className="text-xl font-black text-blue-400">
+                                      {matchStats.h2h.homeWins}
+                                    </div>
+                                    <div className="text-[10px] text-zinc-500">
+                                      Vitórias
+                                    </div>
+                                  </div>
+                                  {matchStats.winProb.draw > 0 && (
+                                    <div>
+                                      <div className="text-xl font-black text-yellow-400">
+                                        {matchStats.h2h.draws}
+                                      </div>
+                                      <div className="text-[10px] text-zinc-500">
+                                        Empates
+                                      </div>
+                                    </div>
+                                  )}
+                                  <div>
+                                    <div className="text-xl font-black text-red-400">
+                                      {matchStats.h2h.awayWins}
+                                    </div>
+                                    <div className="text-[10px] text-zinc-500">
+                                      Derrotas
+                                    </div>
+                                  </div>
+                                </div>
+                              </div>
+                              {[
+                                {
+                                  label: expandedMatch.home,
+                                  form: matchStats.homeForm,
+                                },
+                                {
+                                  label: expandedMatch.away,
+                                  form: matchStats.awayForm,
+                                },
+                              ].map((team) => (
+                                <div
+                                  key={team.label}
+                                  className="bg-zinc-950/60 rounded-lg border border-zinc-800 p-3"
+                                >
+                                  <div className="text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-2 truncate">
+                                    {teamNamePt(team.label)} — Forma Recente
+                                  </div>
+                                  <div className="flex gap-1.5 flex-wrap">
+                                    {team.form.map((f, i) => (
+                                      <div
+                                        key={i}
+                                        className={`w-7 h-7 rounded flex items-center justify-center text-xs font-black ${
+                                          f.result === "W"
+                                            ? "bg-green-600/30 text-green-400"
+                                            : f.result === "L"
+                                              ? "bg-red-600/30 text-red-400"
+                                              : "bg-yellow-600/30 text-yellow-400"
+                                        }`}
+                                      >
+                                        {f.result}
                                       </div>
                                     ))}
                                   </div>

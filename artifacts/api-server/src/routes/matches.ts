@@ -19169,12 +19169,21 @@ router.get("/stats", async (req: Request, res: Response) => {
   const drawOdd = parseFloat(String(req.query["drawOdd"] ?? "3.5")) || 3.5;
   const awayOdd = parseFloat(String(req.query["awayOdd"] ?? "3")) || 3;
 
+  const sportsWithoutDraw = [
+    "basketball",
+    "tennis",
+    "baseball",
+    "basebol",
+    "volleyball",
+  ];
+  const sportHasDraw = !sportsWithoutDraw.includes(sport);
+
   const rawHome = 1 / homeOdd;
-  const rawDraw = 1 / drawOdd;
+  const rawDraw = sportHasDraw ? 1 / drawOdd : 0;
   const rawAway = 1 / awayOdd;
   const tot = rawHome + rawDraw + rawAway;
   const homeProb = Math.round((rawHome / tot) * 100);
-  const drawProb = Math.round((rawDraw / tot) * 100);
+  const drawProb = sportHasDraw ? Math.round((rawDraw / tot) * 100) : 0;
   const awayProb = 100 - homeProb - drawProb;
 
   const seed = [...(home + away)].reduce((a, c) => a + c.charCodeAt(0), 0);
@@ -19398,22 +19407,30 @@ router.get("/stats", async (req: Request, res: Response) => {
 
   if (homeForm.length < 5) {
     homeForm = Array.from({ length: 5 }, (_, i) => {
-      const fp = cfg.pool[ri(0, cfg.pool.length - 1, i + 1.13)]!;
+      const fp =
+        cfg.pool[ri(0, cfg.pool.length - 1, i + 1.13) % cfg.pool.length]!;
       return {
         result: fp.result,
         score: fp.score,
-        opponent: cfg.opponents[ri(0, cfg.opponents.length - 1, i + 2.27)]!,
+        opponent:
+          cfg.opponents[
+            ri(0, cfg.opponents.length - 1, i + 2.27) % cfg.opponents.length
+          ]!,
         home: i % 2 === 0,
       };
     });
   }
   if (awayForm.length < 5) {
     awayForm = Array.from({ length: 5 }, (_, i) => {
-      const fp = cfg.pool[ri(0, cfg.pool.length - 1, i + 4.31)]!;
+      const fp =
+        cfg.pool[ri(0, cfg.pool.length - 1, i + 4.31) % cfg.pool.length]!;
       return {
         result: fp.result,
         score: fp.score,
-        opponent: cfg.opponents[ri(0, cfg.opponents.length - 1, i + 5.47)]!,
+        opponent:
+          cfg.opponents[
+            ri(0, cfg.opponents.length - 1, i + 5.47) % cfg.opponents.length
+          ]!,
         home: i % 2 === 1,
       };
     });
