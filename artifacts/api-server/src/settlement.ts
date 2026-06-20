@@ -1003,6 +1003,10 @@ function describePendingSettlementReason(
   ) {
     return "missing_football_player_events";
   }
+  // pm-* player markets require manual admin settlement (player ID encoded, no name lookup available)
+  if (rawSelection.startsWith("pm-")) {
+    return "player_market_manual_settlement";
+  }
   const derivedHt = ht ?? getFootballHTScoreFromExtras(extra?.extras);
   if (
     (s.startsWith("ht-") ||
@@ -1601,9 +1605,12 @@ export function normalizeSettlementSelectionKey(selection: string): string {
   else if (s === "ht-draw" || s === "1-tempo-empate" || s === "primeiro-tempo-empate") s = "ht-draw";
   else if (s === "ht-away" || s === "1-tempo-away" || s === "primeiro-tempo-visitante") s = "ht-away";
 
-  // Clean Sheet / Vitória a Zero
-  else if (s === "cs-h" || s === "casa-folha-limpa" || s === "vitoria-a-zero-casa" || s === "wtn-h") s = "cs-h";
-  else if (s === "cs-a" || s === "visitante-folha-limpa" || s === "vitoria-a-zero-visitante" || s === "wtn-a") s = "cs-a";
+  // Clean Sheet / Folha Limpa
+  else if (s === "cs-h" || s === "casa-folha-limpa") s = "cs-h";
+  else if (s === "cs-a" || s === "visitante-folha-limpa") s = "cs-a";
+  // Vitória a Zeros (win AND keep clean sheet) — diferente de folha limpa
+  else if (s === "vitoria-a-zero-casa") s = "wtn-h";
+  else if (s === "vitoria-a-zero-visitante") s = "wtn-a";
 
   // Draw No Bet
   else if (s === "dnb-home" || s === "empate-anulado-casa") s = "dnb-home";
@@ -2617,6 +2624,12 @@ export function scoreOutcomeForSel(
       const totalET = etHome + etAway;
       if (totalET === line) voided = true;
       else winning = m[1] === "o" ? totalET > line : totalET < line;
+    } else if (s === "et-ng-home") {
+      // Equipa da Casa a Marcar na Prorrogação
+      winning = etHome > 0;
+    } else if (s === "et-ng-away") {
+      // Equipa Visitante a Marcar na Prorrogação
+      winning = etAway > 0;
     } else {
       return null;
     }
