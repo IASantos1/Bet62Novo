@@ -5770,7 +5770,6 @@ export default function Home({
   // Fetch match stats when stats tab is active
   useEffect(() => {
     if (matchViewTab !== "stats" || !expandedMatch || matchStats) return;
-    if ((expandedMatch.sport ?? "football") !== "football") return;
     setMatchStatsLoading(true);
     const p = new URLSearchParams({
       home: expandedMatch.home,
@@ -8298,7 +8297,7 @@ export default function Home({
     return (
       <button
         disabled
-        className="w-full h-10 px-3 flex items-center justify-center rounded-md bg-red-950 border border-red-800/50 text-red-200 font-black text-sm tracking-widest cursor-not-allowed select-none animate-pulse"
+        className="w-full h-[64px] px-3 flex items-center justify-center rounded-xl bg-red-950 border border-red-800/50 text-red-200 font-black text-sm tracking-widest cursor-not-allowed select-none animate-pulse"
         style={{ letterSpacing: "0.2em" }}
       >
         {prefix}
@@ -9057,7 +9056,7 @@ export default function Home({
           <div className="flex items-center justify-between gap-3 mb-2">
             <div className="min-w-0 flex items-center gap-2">
               <span className="text-sm leading-none shrink-0">
-                {sport === "football" ? "🏆" : flag}
+                {flag}
               </span>
               <span
                 className={`text-[11px] font-black tracking-[0.18em] uppercase truncate ${isDarkTheme ? "text-zinc-300" : "text-zinc-500"}`}
@@ -9076,10 +9075,11 @@ export default function Home({
             className={`rounded-[20px] px-3 py-2.5 border ${isDarkTheme ? "bg-zinc-950 border-zinc-900/80" : "bg-zinc-950 border-zinc-900/80"}`}
           >
             <div className="flex items-center justify-between gap-3 mb-1.5">
-              <div className="flex-1 min-w-0 text-right">
-                <span className="block text-[13px] font-black text-white leading-tight truncate">
+              <div className="flex-1 min-w-0 flex items-center justify-end gap-1">
+                <span className="text-[13px] font-black text-white leading-tight truncate">
                   {homeName}
                 </span>
+                {rcH > 0 && <RcBadge count={rcH} />}
               </div>
               <div className="min-w-[68px] flex flex-col items-center">
                 <span className="text-[16px] font-black text-zinc-500 tracking-wide">
@@ -9106,8 +9106,9 @@ export default function Home({
                   </span>
                 ) : null}
               </div>
-              <div className="flex-1 min-w-0 text-left">
-                <span className="block text-[13px] font-black text-white leading-tight truncate">
+              <div className="flex-1 min-w-0 flex items-center justify-start gap-1">
+                {rcA > 0 && <RcBadge count={rcA} />}
+                <span className="text-[13px] font-black text-white leading-tight truncate">
                   {awayName}
                 </span>
               </div>
@@ -9282,7 +9283,7 @@ export default function Home({
           <div className="flex items-center justify-between gap-3 mb-2">
             <div className="min-w-0 flex items-center gap-2">
               <span className="text-sm leading-none shrink-0">
-                {sport === "football" ? "🏆" : flag}
+                {flag}
               </span>
               <span
                 className={`text-[11px] font-black tracking-[0.18em] uppercase truncate ${isDarkTheme ? "text-zinc-300" : "text-zinc-500"}`}
