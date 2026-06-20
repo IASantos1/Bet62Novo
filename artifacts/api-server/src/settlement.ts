@@ -623,6 +623,18 @@ function scoreOutcomeForSelLastResort(
           ? "won"
           : "lost";
     }
+    const exactSetMatch = s.match(/^set-(\d+)-(\d+)$/);
+    if (exactSetMatch) {
+      const sets = getTennisSetsFromExtras(extra?.extras);
+      const wantHome = Number(exactSetMatch[1]!);
+      const wantAway = Number(exactSetMatch[2]!);
+      if (sets.length === 0) return null;
+      // Check each set
+      const won = sets.some(
+        ([setHome, setAway]) => setHome === wantHome && setAway === wantAway,
+      );
+      return won ? "won" : "lost";
+    }
   }
 
   if (sport === "volleyball") {
@@ -1419,8 +1431,8 @@ function footballEventMatchesPeriod(
 export function normalizeSettlementSelectionKey(selection: string): string {
   let s = String(selection ?? "").trim().toLowerCase();
   
-  // Remove prefixes like handicap: / asiatico: / spread: / puckline: / quartos: / gols: / 1tempo: / 2periodo: / 3periodo: / especiais:
-  if (/^(?:handicap|asiatico|spread|puckline|quartos|gols|1tempo|2periodo|3periodo|especiais|times):/.test(s))
+  // Remove prefixes like handicap: / asiatico: / spread: / puckline: / quartos: / gols: / 1tempo: / 2periodo: / 3periodo: / especiais: / times: / placar:
+  if (/^(?:handicap|asiatico|spread|puckline|quartos|gols|1tempo|2periodo|3periodo|especiais|times|placar):/.test(s))
     s = s.replace(/^[^:]+:/, "");
 
   // Portuguese key normalizations
