@@ -5317,10 +5317,8 @@ function _executeBroadcastBatch(
 
 setInterval(() => {
   if (sseClients.size === 0 && wsLiveClients.size === 0) return;
-  const now = Date.now();
-  if (now - lastBroadcastAt < 900) return;
   broadcastLive().catch(() => {});
-}, 1000);
+}, CONFIG.LIVE_UPDATE_INTERVAL);
 
 // v2/daily today: cache 5min
 let dailyCache: SAPILeagueV2[] | null = null;
