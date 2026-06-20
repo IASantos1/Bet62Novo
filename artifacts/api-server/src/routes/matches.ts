@@ -2928,16 +2928,15 @@ function computeTennisLiveOdds(
 // binomial "race to win" model where each game is an independent Bernoulli
 // trial with P(home wins game) = pGame.  Scores already ruled out by the
 // current score are excluded and remaining probabilities are renormalised.
-const TENNIS_SET_CORRECT_SCORE_SOFT_CAP = 20;
-const TENNIS_SET_CORRECT_SCORE_EXTREME_THRESHOLD = 50;
 const TENNIS_SET_CORRECT_SCORE_HARD_CAP = 60;
 
 function clampTennisSetCorrectScoreOdd(rawOdd: number): number {
   const odd = Math.max(1.01, +rawOdd.toFixed(2));
-  if (odd <= TENNIS_SET_CORRECT_SCORE_SOFT_CAP) return odd;
-  if (odd < TENNIS_SET_CORRECT_SCORE_EXTREME_THRESHOLD)
-    return TENNIS_SET_CORRECT_SCORE_SOFT_CAP;
-  return Math.min(TENNIS_SET_CORRECT_SCORE_HARD_CAP, odd);
+  if (odd <= 20) return odd;
+  // Smooth hyperbolic compression above 20 — avoids the flat "20.00 zone"
+  // 25→22.2  30→25.0  40→29.1  60→34.3  100→41.2  200→52.0  500→59.1
+  const compressed = 20 + (odd - 20) * (40 / (40 + (odd - 20)));
+  return +Math.min(TENNIS_SET_CORRECT_SCORE_HARD_CAP, compressed).toFixed(2);
 }
 
 const TENNIS_SET_SCORE_HOME_TEMPLATE: Array<{
