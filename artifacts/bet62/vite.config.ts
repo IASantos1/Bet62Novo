@@ -22,6 +22,12 @@ export default defineConfig({
   plugins: [
     react(),
     tailwindcss(),
+    {
+      name: "replace-base-url",
+      transformIndexHtml(html) {
+        return html.replace(/%BASE_URL%/g, basePath);
+      },
+    },
     // Replit error overlay — only in Replit dev environment
     ...(isReplit && !isProduction
       ? [

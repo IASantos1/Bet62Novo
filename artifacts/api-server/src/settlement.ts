@@ -751,6 +751,38 @@ function scoreOutcomeForSelLastResort(
           ? "won"
           : "lost";
     }
+    const qTotal = s.match(/^q([1-4])t-([ou])-([\d.]+)$/);
+    if (qTotal) {
+      const qIndex = Number(qTotal[1]) - 1;
+      const qScore = quarters[qIndex] ?? null;
+      if (!qScore) return null;
+      const line = Number(qTotal[3]);
+      const qTotalScore = qScore[0] + qScore[1];
+      if (qTotalScore === line) return "void";
+      return qTotal[2] === "o"
+        ? qTotalScore > line
+          ? "won"
+          : "lost"
+        : qTotalScore < line
+          ? "won"
+          : "lost";
+    }
+    const qSpread = s.match(/^q([1-4])s-(home|away)-([\d.]+)$/);
+    if (qSpread) {
+      const qIndex = Number(qSpread[1]) - 1;
+      const qScore = quarters[qIndex] ?? null;
+      if (!qScore) return null;
+      const line = Number(qSpread[3]);
+      const side = qSpread[2];
+      const adjustedHome = side === "home" ? qScore[0] + line : qScore[0];
+      const adjustedAway = side === "away" ? qScore[1] + line : qScore[1];
+      if (adjustedHome === adjustedAway) return "void";
+      if (side === "home") {
+        return adjustedHome > qScore[1] ? "won" : "lost";
+      } else {
+        return adjustedAway > qScore[0] ? "won" : "lost";
+      }
+    }
     if ((s === "h1-home" || s === "h1-away") && quarters.length >= 2) {
       const h1Home = (quarters[0]?.[0] ?? 0) + (quarters[1]?.[0] ?? 0);
       const h1Away = (quarters[0]?.[1] ?? 0) + (quarters[1]?.[1] ?? 0);
@@ -778,6 +810,22 @@ function scoreOutcomeForSelLastResort(
         : totalH1 < line
           ? "won"
           : "lost";
+    }
+    if (s === "b-anyq-home" && quarters.length === 4) {
+      const homeWonAny = quarters.some(q => q[0] > q[1]);
+      return homeWonAny ? "won" : "lost";
+    }
+    if (s === "b-anyq-away" && quarters.length === 4) {
+      const awayWonAny = quarters.some(q => q[1] > q[0]);
+      return awayWonAny ? "won" : "lost";
+    }
+    if (s === "b-allq-home" && quarters.length === 4) {
+      const homeWonAll = quarters.every(q => q[0] > q[1]);
+      return homeWonAll ? "won" : "lost";
+    }
+    if (s === "b-allq-away" && quarters.length === 4) {
+      const awayWonAll = quarters.every(q => q[1] > q[0]);
+      return awayWonAll ? "won" : "lost";
     }
   }
 
@@ -1371,14 +1419,60 @@ function footballEventMatchesPeriod(
 export function normalizeSettlementSelectionKey(selection: string): string {
   let s = String(selection ?? "").trim().toLowerCase();
   
-  // Remove prefixes like handicap: / asiatico: / spread:
-  if (/^(?:handicap|asiatico|spread|puckline):/.test(s))
+  // Remove prefixes like handicap: / asiatico: / spread: / puckline: / quartos: / gols: / 1tempo: / 2periodo: / 3periodo: / especiais:
+  if (/^(?:handicap|asiatico|spread|puckline|quartos|gols|1tempo|2periodo|3periodo|especiais|times):/.test(s))
     s = s.replace(/^[^:]+:/, "");
 
   // Portuguese key normalizations
   if (s === "1x2-home" || s === "vencedor-home" || s === "vencedor-casa" || s === "home") s = "home";
   else if (s === "1x2-draw" || s === "vencedor-empate" || s === "empate" || s === "draw") s = "draw";
   else if (s === "1x2-away" || s === "vencedor-visitante" || s === "vencedor-fora" || s === "away") s = "away";
+
+  // Basketball quarter totals
+  else if (/^b-q([1-4])t-([ou])-([\d.]+)$/.test(s)) {
+    const m = s.match(/^b-q([1-4])t-([ou])-([\d.]+)$/);
+    s = `q${m![1]}t-${m![2]}-${m![3]}`;
+  }
+  // Basketball quarter spreads
+  else if (/^b-q([1-4])s-(home|away)-([\d.]+)$/.test(s)) {
+    const m = s.match(/^b-q([1-4])s-(home|away)-([\d.]+)$/);
+    s = `q${m![1]}s-${m![2]}-${m![3]}`;
+  }
+  // Basketball any/all quarters
+  else if (s === "b-anyq-home") s = "b-anyq-home";
+  else if (s === "b-anyq-away") s = "b-anyq-away";
+  else if (s === "b-allq-home") s = "b-allq-home";
+  else if (s === "b-allq-away") s = "b-allq-away";
+  // Hockey period 2/3
+  else if (/^p([2-3])-(home|draw|away)$/.test(s)) {
+    const m = s.match(/^p([2-3])-(home|draw|away)$/);
+    s = `p${m![1]}-${m![2]}`;
+  }
+  // Hockey period totals
+  else if (/^p([1-3])t-([ou])-([\d.]+)$/.test(s)) {
+    const m = s.match(/^p([1-3])t-([ou])-([\d.]+)$/);
+    s = `p${m![1]}t-${m![2]}-${m![3]}`;
+  }
+  // Hockey shots on goal
+  else if (/^sog-([ou])-([\d.]+)$/.test(s)) {
+    const m = s.match(/^sog-([ou])-([\d.]+)$/);
+    s = `sog-${m![1]}-${m![2]}`;
+  }
+  // Baseball run line
+  else if (s === "mlb-rl-home-1.5") s = "mlb-rl-home";
+  else if (s === "mlb-rl-away-1.5") s = "mlb-rl-away";
+  // Baseball f5 result/total
+  else if (s === "mlb-f5-home") s = "f5-home";
+  else if (s === "mlb-f5-away") s = "f5-away";
+  else if (/^mlb-f5t-([ou])-([\d.]+)$/.test(s)) {
+    const m = s.match(/^mlb-f5t-([ou])-([\d.]+)$/);
+    s = `f5t-${m![1]}-${m![2]}`;
+  }
+  // Baseball totals
+  else if (/^mlb-tot-([ou])-([\d.]+)$/.test(s)) {
+    const m = s.match(/^mlb-tot-([ou])-([\d.]+)$/);
+    s = `${m![1]}${m![2].replace(".", "")}`;
+  }
   
   // BTTS / Ambas Marcam
   else if (s === "btts1h-y" || s === "ambas-marcam-1h-sim" || s === "ambas-marcam-primeiro-tempo-sim" || s === "b1h-yes") s = "b1h-yes";

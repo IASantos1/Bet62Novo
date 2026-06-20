@@ -13113,8 +13113,7 @@ async function buildFootballLiveV2(
     const isSecondHalf = newStatus === "2nd half";
     const isClockRunning = !!(
       resolvedKickoffSec &&
-      (isFirstHalf || isSecondHalf) &&
-      newStatus !== "HT"
+      (isFirstHalf || isSecondHalf)
     );
     const shKickoffSec = isSecondHalf
       ? (existing?._liveExtra?.secondHalfKickoffSec ??
@@ -13181,8 +13180,8 @@ async function buildFootballLiveV2(
               id,
               home: homeTeam,
               away: awayTeam,
-              league: leagueName,
-              country: countryName,
+              league: meta?.leagueName ?? league,
+              country: meta?.countryKey ?? "",
               sport: "football",
               homeScore,
               awayScore,
@@ -17926,7 +17925,7 @@ function parseWC2026CompetitionSectionsFromPayload(
 
   walk(payload, null, "");
 
-  return WC2026_GROUPS.map((group) => {
+  const sections = WC2026_GROUPS.map((group) => {
     const bucket = sectionMap.get(group.group);
     if (!bucket || bucket.size === 0) return null;
     const items = group.teams
@@ -17934,11 +17933,12 @@ function parseWC2026CompetitionSectionsFromPayload(
         const odd = bucket.get(team);
         return odd ? { name: team, odd } : null;
       })
-      .filter((entry): entry is { name: string; odd: number } => !!entry)
-      .sort((a, b) => a.odd - b.odd);
+      .filter((entry) => !!entry)
+      .sort((a, b) => a!.odd - b!.odd);
     if (items.length === 0) return null;
     return { title: `Vencedor do grupo - Grupo ${group.group}`, items };
-  }).filter((entry): entry is WC2026CompetitionSection => !!entry);
+  }).filter((entry) => !!entry) as WC2026CompetitionSection[];
+  return sections;
 }
 
 async function getWC2026CompetitionSections(): Promise<{

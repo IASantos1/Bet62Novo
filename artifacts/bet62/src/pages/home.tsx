@@ -7299,10 +7299,10 @@ export default function Home({
     if (activeTab !== "mybets" || !auth.token) return;
     void fetchOpenBetStates();
     if (typeof window === "undefined" || !("EventSource" in window)) {
-      const fallbackId = window.setInterval(() => {
+      const fallbackId = setInterval(() => {
         void fetchOpenBetStates();
       }, 5000);
-      return () => window.clearInterval(fallbackId);
+      return () => clearInterval(fallbackId);
     }
 
     let closed = false;
@@ -7310,7 +7310,7 @@ export default function Home({
       if (openBetsSseRef.current || closed) return;
       try {
         const es = new EventSource(
-          `/api/bets/open-states-stream?token=${encodeURIComponent(auth.token)}`,
+          `/api/bets/open-states-stream?token=${encodeURIComponent(auth.token!)}`,
         );
         openBetsSseRef.current = es;
         es.onmessage = (evt) => {
@@ -12531,7 +12531,7 @@ export default function Home({
                             <MarketOddsBtn
                               match={match}
                               sel="sh15-home2"
-                              odd={tennisExtra.setHandicap.home}
+                              odd={tennisExtra!.setHandicap!.home}
                               market="handicap"
                               label={`${match.home} −1.5 sets`}
                               suspKey="setHandicap"
@@ -12539,7 +12539,7 @@ export default function Home({
                             <MarketOddsBtn
                               match={match}
                               sel="sh15-away2"
-                              odd={tennisExtra.setHandicap.away}
+                              odd={tennisExtra!.setHandicap!.away}
                               market="handicap"
                               label={`${match.away} +1.5 sets`}
                               suspKey="setHandicap"
@@ -12548,20 +12548,20 @@ export default function Home({
                         )}
                         {tennisExtra?.gameHandicap?.home > 0 && (
                           <MarketGroup
-                            title={`Handicap de Games — Linha ${tennisExtra.gameHandicap.line > 0 ? `−${tennisExtra.gameHandicap.line}` : `+${Math.abs(tennisExtra.gameHandicap.line)}`}`}
+                            title={`Handicap de Games — Linha ${tennisExtra!.gameHandicap!.line > 0 ? `−${tennisExtra!.gameHandicap!.line}` : `+${Math.abs(tennisExtra!.gameHandicap!.line)}`}`}
                           >
                             <MarketOddsBtn
                               match={match}
-                              sel={`gh-home-${tennisExtra.gameHandicap.line}`}
-                              odd={tennisExtra.gameHandicap.home}
+                              sel={`gh-home-${tennisExtra!.gameHandicap!.line}`}
+                              odd={tennisExtra!.gameHandicap!.home}
                               market="handicap"
                               label={match.home}
                               suspKey="gameHandicap"
                             />
                             <MarketOddsBtn
                               match={match}
-                              sel={`gh-away-${tennisExtra.gameHandicap.line}`}
-                              odd={tennisExtra.gameHandicap.away}
+                              sel={`gh-away-${tennisExtra!.gameHandicap!.line}`}
+                              odd={tennisExtra!.gameHandicap!.away}
                               market="handicap"
                               label={match.away}
                               suspKey="gameHandicap"
