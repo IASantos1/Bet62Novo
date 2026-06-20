@@ -36,6 +36,8 @@ const SAPI_V2_BASEBALL = "https://v2.baseball.sportsapipro.com/api";
 const SAPI_V1_FOOTBALL = "https://v1.football.sportsapipro.com/api/v1/football";
 const SAPI_V1_BASKETBALL =
   "https://v1.basketball.sportsapipro.com/api/v1/basketball";
+const SAPI_V1_HOCKEY = "https://v1.hockey.sportsapipro.com/api/v1/hockey";
+const SAPI_V1_BASEBALL = "https://v1.baseball.sportsapipro.com/api/v1/baseball";
 const SAPI_V1_TENNIS = "https://v1.tennis.sportsapipro.com/api";
 
 // Auth headers helper
@@ -9302,13 +9304,7 @@ async function getHockeyLiveV2(): Promise<SAPIV2Event[]> {
   if (hockeyLiveV2Cache && now - hockeyLiveV2FetchedAt < CONFIG.LIVE_CACHE_TTL)
     return hockeyLiveV2Cache;
   try {
-    const resp = await fetch(`${SAPI_V2_HOCKEY}/live`, {
-      signal: AbortSignal.timeout(3000),
-      headers: sapiHeaders(),
-    });
-    if (!resp.ok) return hockeyLiveV2Cache ?? [];
-    const data = (await resp.json()) as { events?: SAPIV2Event[] };
-    const events = data.events ?? [];
+    const events = await fetchLiveRace(SAPI_V1_HOCKEY, SAPI_V2_HOCKEY);
     if (events.length > 0) {
       hockeyLiveV2Cache = events;
       hockeyLiveV2FetchedAt = now;
@@ -9322,7 +9318,6 @@ async function getHockeyLiveV2(): Promise<SAPIV2Event[]> {
       hockeyLiveV2FetchedAt = now;
       return [];
     }
-    hockeyLiveV2FetchedAt = now;
     return hockeyLiveV2Cache ?? [];
   } catch {
     return hockeyLiveV2Cache ?? [];
@@ -9344,13 +9339,7 @@ async function getBaseballLiveV2(): Promise<SAPIV2Event[]> {
   )
     return baseballLiveV2Cache;
   try {
-    const resp = await fetch(`${SAPI_V2_BASEBALL}/live`, {
-      signal: AbortSignal.timeout(3000),
-      headers: sapiHeaders(),
-    });
-    if (!resp.ok) return baseballLiveV2Cache ?? [];
-    const data = (await resp.json()) as { events?: SAPIV2Event[] };
-    const events = data.events ?? [];
+    const events = await fetchLiveRace(SAPI_V1_BASEBALL, SAPI_V2_BASEBALL);
     if (events.length > 0) {
       baseballLiveV2Cache = events;
       baseballLiveV2FetchedAt = now;
@@ -9364,7 +9353,6 @@ async function getBaseballLiveV2(): Promise<SAPIV2Event[]> {
       baseballLiveV2FetchedAt = now;
       return [];
     }
-    baseballLiveV2FetchedAt = now;
     return baseballLiveV2Cache ?? [];
   } catch {
     return baseballLiveV2Cache ?? [];
