@@ -3627,9 +3627,38 @@ export default function Home({
     setLiveTransport("cache");
   }, [activeTab, browserOnline]);
 
-  // Upcoming matches
-  const [upcomingMatches, setUpcomingMatches] = useState<Match[]>([]);
-  const [upcomingLoading, setUpcomingLoading] = useState(true);
+  // Upcoming matches — initialise synchronously from localStorage cache so the
+  // first render already shows data (no spinner flash on repeat visits).
+  const [upcomingMatches, setUpcomingMatches] = useState<Match[]>(() => {
+    try {
+      const raw = JSON.parse(
+        localStorage.getItem("bet62_snapshot_upcoming_v1:all") ?? "null",
+      ) as { savedAt?: number; value?: unknown[] } | null;
+      if (
+        raw &&
+        Array.isArray(raw.value) &&
+        typeof raw.savedAt === "number" &&
+        Date.now() - raw.savedAt < 10 * 60_000
+      ) {
+        return (raw.value as any[]).map((m) => ({ ...m, isLive: false }));
+      }
+    } catch {}
+    return [];
+  });
+  const [upcomingLoading, setUpcomingLoading] = useState(() => {
+    try {
+      const raw = JSON.parse(
+        localStorage.getItem("bet62_snapshot_upcoming_v1:all") ?? "null",
+      ) as { savedAt?: number; value?: unknown[] } | null;
+      return !(
+        raw &&
+        Array.isArray(raw.value) &&
+        typeof raw.savedAt === "number" &&
+        Date.now() - raw.savedAt < 10 * 60_000
+      );
+    } catch {}
+    return true;
+  });
   const [selectedSport, setSelectedSport] = useState<string>("all");
   const [upcomingSearchQuery, setUpcomingSearchQuery] = useState<string>("");
 
@@ -6255,7 +6284,24 @@ export default function Home({
           homeImageVersion?: string;
           awayImageVersion?: string;
         }>;
-        setUpcomingMatches(matches.map((m) => ({ ...m, isLive: false })));
+        // Stable merge: update existing cards in-place, add new ones at the
+        // end, drop gone ones — prevents visible layout shift on re-fetch.
+        setUpcomingMatches((prev) => {
+          if (prev.length === 0)
+            return matches.map((m) => ({ ...m, isLive: false }));
+          const freshById = new Map(matches.map((m) => [m.id, m]));
+          const merged: Match[] = [];
+          for (const p of prev) {
+            const fresh = freshById.get(p.id);
+            if (fresh) {
+              merged.push({ ...fresh, isLive: false });
+              freshById.delete(p.id);
+            }
+          }
+          for (const [, m] of freshById)
+            merged.push({ ...m, isLive: false });
+          return merged;
+        });
         writeSnapshot(upcomingSnapshotKey(selectedSport), matches);
       } catch {
       } finally {
@@ -6673,6 +6719,35 @@ export default function Home({
     const id = setTimeout(() => setLiveLoading(false), 12_000);
     return () => clearTimeout(id);
   }, [liveLoading]);
+
+  // Background prefetch of live data while on the sports tab so that clicking
+  // "Ao Vivo" shows data instantly instead of waiting 3-5 s.
+  useEffect(() => {
+    let ctrl: AbortController | null = null;
+    const tid = setTimeout(() => {
+      if (activeTabRef.current === "live") return; // already live, handled there
+      const snapRaw = localStorage.getItem("bet62_snapshot_live_v1");
+      if (snapRaw) {
+        try {
+          const s = JSON.parse(snapRaw) as { savedAt?: number } | null;
+          if (s && typeof s.savedAt === "number" && Date.now() - s.savedAt < LIVE_SNAPSHOT_MAX_AGE_MS)
+            return; // already fresh
+        } catch {}
+      }
+      ctrl = new AbortController();
+      fetch("/api/matches/live?lean=1&limit=500", { signal: ctrl.signal })
+        .then((r) => (r.ok ? r.json() : null))
+        .then((data) => {
+          if (data?.matches) writeSnapshot(liveSnapshotKey(), data.matches);
+        })
+        .catch(() => {});
+    }, 1_500);
+    return () => {
+      clearTimeout(tid);
+      ctrl?.abort();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // once on mount
 
   useEffect(() => {
     if (activeTab !== "live") {
