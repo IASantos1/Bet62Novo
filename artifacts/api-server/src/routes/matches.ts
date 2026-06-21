@@ -13023,10 +13023,13 @@ async function buildFootballLiveV2(
     const isPriorityLeague = isCatalogPriorityLeague(prio);
     const fromUpcoming = hasRecentUpcomingFootballEligibility(ev.id);
     metaById.set(ev.id, { countryRaw, countryKey, leagueName, prio });
+    // Gate: block a match appearing for the first time if it's already more than
+    // 20 minutes old. Prevents games from suddenly entering the live section
+    // already mid-game (e.g. at 60'). fromUpcoming matches bypass this because
+    // they were pre-announced as upcoming.
     if (
       !liveMatchState.has(`football-v2-${ev.id}`) &&
-      evAgeSeconds > 120 * 60 &&
-      !isPriorityLeague &&
+      evAgeSeconds > 20 * 60 &&
       !fromUpcoming
     )
       continue;
@@ -13126,14 +13129,7 @@ async function buildFootballLiveV2(
     } else if (isET) {
       minute = 105;
     } else {
-      // For new matches (never seen before), reset the clock to now so the
-      // match always starts from minute 0 in our feed — regardless of how long
-      // the game has been running on the provider. Matches that enter the live
-      // section mid-game (e.g. at 60') will now display from 0' and count up.
-      // For existing matches, use the stored kickoff so the clock continues.
-      let kickoffSec: number = existing
-        ? (existing._liveExtra?.kickoffSec ?? ev.startTimestamp ?? 0)
-        : Math.floor(now / 1000);
+      let kickoffSec = existing?._liveExtra?.kickoffSec ?? ev.startTimestamp ?? 0;
       if (!kickoffSec) {
         const { date: sDate, time: sTime } = v2EventDateTime(ev);
         if (sDate && /^\d{2}:\d{2}$/.test(sTime)) {
