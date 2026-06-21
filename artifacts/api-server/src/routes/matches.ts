@@ -7078,6 +7078,37 @@ export async function ensureFinishedMatchResult(
   const schedY = await getScheduleV2(parsed.sport, y).catch(() => []);
   if (await tryEvents(schedY as unknown[])) return true;
 
+  // For tennis: also try the day before yesterday (matches that started late may have ended 2 days after)
+  // AND try a direct per-event fetch by V2 event ID as the final fallback
+  if (parsed.sport === "tennis") {
+    const y2 = new Date(Date.now() - 48 * 60 * 60 * 1000)
+      .toISOString()
+      .slice(0, 10);
+    const schedY2 = await getScheduleV2(parsed.sport, y2).catch(() => []);
+    if (await tryEvents(schedY2 as unknown[])) return true;
+
+    // Direct per-event fetch — SportsAPI Pro V2 exposes /api/event/{id} for all sports
+    try {
+      const tDomain = WS_DOMAINS["tennis"];
+      const evResp = await fetch(`https://${tDomain}/api/event/${parsed.id}`, {
+        signal: AbortSignal.timeout(5000),
+        headers: sapiHeaders(),
+      });
+      if (evResp.ok) {
+        const evData = (await evResp.json()) as Record<string, unknown>;
+        const rawEv: unknown =
+          evData["event"] ??
+          (evData["data"] as Record<string, unknown> | undefined)?.[
+            "event"
+          ] ??
+          (evData["data"] as unknown);
+        if (rawEv) {
+          if (await tryEvents([rawEv])) return true;
+        }
+      }
+    } catch {}
+  }
+
   return false;
 }
 

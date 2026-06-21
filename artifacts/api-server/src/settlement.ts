@@ -3447,6 +3447,21 @@ function liveDefinitiveOutcomeForSel(
         : "lost";
   }
 
+  // Over/Under total sets (tennis) — settle early once total sets confirm the threshold
+  // In live state, home+away = sets won by each player = total sets played so far
+  // Completed set count from tennisSets is used as a tiebreaker when home+away = 0
+  const mSets = s.match(/^([ou])sets(35|25)?$/);
+  if (mSets) {
+    const dir = mSets[1]!;
+    const suffix = mSets[2] ?? "";
+    const line = suffix === "35" ? 3.5 : 2.5;
+    const completedSets = tennisSets.filter(tennisSetFinished).length;
+    const totalSets = total > 0 ? total : completedSets;
+    if (totalSets === 0) return null;
+    if (dir === "o") return totalSets > line ? "won" : null;
+    return totalSets > line ? "lost" : null;
+  }
+
   // Goals O/U — can settle mid-game as soon as threshold crossed (Over) or exceeded (Under→lost)
   const mOU = s.match(/^([ou])([\d.]+)$/);
   if (mOU) {
