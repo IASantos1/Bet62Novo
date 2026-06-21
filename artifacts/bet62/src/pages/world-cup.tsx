@@ -499,7 +499,7 @@ function getWCLiveHalf(match: WCMatch, displayMinute?: number): 1 | 2 | 0 | null
 }
 
 function fmtWCMin(minute: number | undefined, status: string | undefined): string {
-  if (!minute || minute <= 0) return "";
+  if (minute === undefined || minute < 0) return "";
   const s = (status ?? "").toLowerCase();
   if (minute > 90) return `90+${minute - 90}'`;
   if (minute > 45 && (s.includes("1st half") || s.includes("first half") || s.includes("1ª parte"))) return `45+${minute - 45}'`;
@@ -1796,7 +1796,7 @@ function MarketsPage({ match, activeKeys, onBet, onClose, theme, displayMinute }
               <span className="text-[9px] font-black text-red-400">AO VIVO</span>
               {(() => {
                 const dm = displayMinute ?? match.minute ?? 0;
-                if (dm <= 0) return null;
+                if (dm < 0) return null;
                 const phase = wcPhaseTag(match.status, dm);
                 const minLbl = fmtWCMin(dm, match.status);
                 if (phase === "Int.") return <span className="text-[9px] text-red-300 font-bold ml-0.5">Int.</span>;
@@ -2326,7 +2326,8 @@ export default function WorldCupPage({ onClose, onBet: onBetProp }: { onClose?: 
     const s = (match.status ?? "").toLowerCase();
     const isHT = s === "ht" || s.includes("half time") || s === "halftime" || s.includes("intervalo");
     const apiMin = apiMinutesRef.current[match.id] ?? (match.minute ?? 0);
-    if (apiMin <= 0 || isHT) return apiMin;
+    if (isHT) return apiMin;
+    if (apiMin < 0) return 0;
     const changedAt = minuteChangedAtRef.current[match.id] ?? liveDataFetchedAt.current;
     if (!changedAt) return apiMin;
     const elapsed = Math.min(3, Math.floor((Date.now() - changedAt) / 60_000));
