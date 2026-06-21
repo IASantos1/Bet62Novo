@@ -20692,7 +20692,7 @@ export default function Home({
                       </div>
                     )}
 
-                    {!selectedLeague && <PopularBanners />}
+                    {!selectedLeague && PopularBanners()}
 
                     {/* ─── Torneios em Curso (oculto) ─────────────────────────── */}
                     {false &&
