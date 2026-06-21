@@ -13126,10 +13126,14 @@ async function buildFootballLiveV2(
     } else if (isET) {
       minute = 105;
     } else {
-      // Resolve kickoff timestamp: prefer the event's own startTimestamp; if absent or zero,
-      // fall back to the event's scheduled time so each game has its own independent clock.
-      let kickoffSec =
-        existing?._liveExtra?.kickoffSec ?? ev.startTimestamp ?? 0;
+      // For new matches (never seen before), reset the clock to now so the
+      // match always starts from minute 0 in our feed — regardless of how long
+      // the game has been running on the provider. Matches that enter the live
+      // section mid-game (e.g. at 60') will now display from 0' and count up.
+      // For existing matches, use the stored kickoff so the clock continues.
+      let kickoffSec: number = existing
+        ? (existing._liveExtra?.kickoffSec ?? ev.startTimestamp ?? 0)
+        : Math.floor(now / 1000);
       if (!kickoffSec) {
         const { date: sDate, time: sTime } = v2EventDateTime(ev);
         if (sDate && /^\d{2}:\d{2}$/.test(sTime)) {
