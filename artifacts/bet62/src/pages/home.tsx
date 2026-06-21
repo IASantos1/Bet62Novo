@@ -16315,7 +16315,7 @@ export default function Home({
           </div>
         </aside>
 
-        <main className="flex-1 pb-32 lg:pb-8 overflow-hidden min-w-0">
+        <main className="flex-1 pb-32 lg:pb-8 overflow-x-clip min-w-0">
           {/* ── Copa do Mundo inline panel ────────────────────────────────── */}
           {showWCPanel && (
             <Suspense
