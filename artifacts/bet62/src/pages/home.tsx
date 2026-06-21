@@ -9485,8 +9485,15 @@ export default function Home({
     return (
       <div className="mb-5">
         <div
-          className="flex gap-3 overflow-x-auto pb-1 snap-x snap-mandatory"
-          style={{ scrollbarWidth: "none" } as React.CSSProperties}
+          className="flex gap-3 overflow-x-auto pb-1 snap-x snap-proximity"
+          style={
+            {
+              scrollbarWidth: "none",
+              WebkitOverflowScrolling: "touch",
+              touchAction: "pan-x",
+              overscrollBehaviorX: "contain",
+            } as React.CSSProperties
+          }
         >
           {chunks.map((events, bi) => {
             const cfg = BANNER_CONFIGS[bi];
@@ -9501,6 +9508,7 @@ export default function Home({
               <div
                 key={bi}
                 className="snap-center shrink-0 w-[252px] rounded-2xl bg-zinc-900/80 border border-zinc-800 p-3.5 flex flex-col gap-2.5"
+                style={{ touchAction: "pan-x" }}
               >
                 {/* Header */}
                 <div className="flex items-center justify-between">
