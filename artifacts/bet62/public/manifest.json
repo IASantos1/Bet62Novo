@@ -1,25 +1,62 @@
 {
+  "id": "/",
   "name": "Bet62 - Apostas Esportivas",
   "short_name": "Bet62",
   "description": "Plataforma de apostas esportivas ao vivo com odds em tempo real",
-  "start_url": "./",
-  "scope": "./",
+  "lang": "pt",
+  "start_url": "/",
+  "scope": "/",
   "display": "standalone",
+  "display_override": ["standalone", "minimal-ui"],
   "background_color": "#09090b",
   "theme_color": "#dc2626",
   "orientation": "portrait-primary",
+  "categories": ["sports", "entertainment"],
   "icons": [
+    {
+      "src": "./icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "./icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "./icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "./icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
     {
       "src": "./icon-192.svg",
       "sizes": "192x192",
       "type": "image/svg+xml",
-      "purpose": "any maskable"
+      "purpose": "any"
     },
     {
       "src": "./icon-512.svg",
       "sizes": "512x512",
       "type": "image/svg+xml",
-      "purpose": "any maskable"
+      "purpose": "any"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Ao Vivo",
+      "short_name": "Ao Vivo",
+      "description": "Ver jogos ao vivo",
+      "url": "/?tab=live",
+      "icons": [{ "src": "./icon-192.png", "sizes": "192x192" }]
     }
   ]
 }
