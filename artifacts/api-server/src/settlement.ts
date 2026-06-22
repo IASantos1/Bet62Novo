@@ -1867,21 +1867,61 @@ function getTennisSetsFromExtras(extras: unknown): Array<[number, number]> {
 }
 
 function tennisSetFinished(setScore: [number, number]): boolean {
+  if (!setScore || !Array.isArray(setScore) || setScore.length !== 2) {
+    logger.warn({ setScore }, "tennisSetFinished: Invalid set score input");
+    return false;
+  }
+
   const [homeGames, awayGames] = setScore;
-  if (!Number.isFinite(homeGames) || !Number.isFinite(awayGames)) return false;
+
+  if (!Number.isFinite(homeGames) || !Number.isFinite(awayGames)) {
+    logger.debug({ homeGames, awayGames }, "tennisSetFinished: Set has non-finite game counts");
+    return false;
+  }
+
+  if (homeGames < 0 || awayGames < 0) {
+    logger.debug({ homeGames, awayGames }, "tennisSetFinished: Set has negative game counts");
+    return false;
+  }
+
   const maxGames = Math.max(homeGames, awayGames);
   const diff = Math.abs(homeGames - awayGames);
-  if (maxGames >= 7) return true;
-  return maxGames >= 6 && diff >= 2;
+  const isFinished = maxGames >= 7 || (maxGames >= 6 && diff >= 2);
+
+  return isFinished;
 }
 
 function calculateTotalGamesFromSets(sets: Array<[number, number]>): number {
-  let total = 0;
-  for (const [h, a] of sets) {
-    if (Number.isFinite(h) && Number.isFinite(a)) {
-      total += h + a;
-    }
+  if (!sets || !Array.isArray(sets)) {
+    logger.warn({ sets }, "calculateTotalGamesFromSets: Invalid sets input (not an array)");
+    return 0;
   }
+
+  let total = 0;
+  let invalidSets = 0;
+
+  for (let i = 0; i < sets.length; i++) {
+    const [h, a] = sets[i]!;
+
+    if (!Number.isFinite(h) || !Number.isFinite(a)) {
+      invalidSets++;
+      logger.debug({ index: i, home: h, away: a }, "calculateTotalGamesFromSets: Skipping invalid set");
+      continue;
+    }
+
+    if (h < 0 || a < 0) {
+      invalidSets++;
+      logger.debug({ index: i, home: h, away: a }, "calculateTotalGamesFromSets: Skipping set with negative games");
+      continue;
+    }
+
+    total += h + a;
+  }
+
+  if (invalidSets > 0) {
+    logger.warn({ totalProcessed: sets.length, invalidSets, totalGames: total }, "calculateTotalGamesFromSets: Processed with invalid sets");
+  }
+
   return total;
 }
 
