@@ -25076,7 +25076,7 @@ function parseScoreStr(
 
 let footballV1LiveCache: object[] | null = null;
 let footballV1LiveFetchedAt = 0;
-const FOOTBALL_V1_LIVE_TTL = 30 * 1000;
+const FOOTBALL_V1_LIVE_TTL = 5_000; // 5s — SportsAPI Pro updates every 1-3s
 
 router.get("/football-livescores", async (_req: Request, res: Response) => {
   res.json({ leagues: footballV1LiveCache ?? [] });
