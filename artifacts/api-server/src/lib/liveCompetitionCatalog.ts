@@ -8,6 +8,105 @@ import {
   providerCompetitionsTable,
 } from "@workspace/db";
 import { and, desc, eq, sql } from "drizzle-orm";
+import { logger } from "./logger.js";
+
+// --- Circuit Breaker for database operations ---
+class CircuitBreaker {
+  private state: "closed" | "open" | "half-open" = "closed";
+  private failureCount = 0;
+  private lastFailureTime = 0;
+  private readonly failureThreshold = 5;
+  private readonly resetTimeout = 30000; // 30 seconds
+  private readonly halfOpenMaxCalls = 2;
+  private halfOpenCalls = 0;
+
+  async execute<T>(fn: () => Promise<T>): Promise<T> {
+    if (this.state === "open") {
+      if (Date.now() - this.lastFailureTime > this.resetTimeout) {
+        this.state = "half-open";
+        this.halfOpenCalls = 0;
+        logger.info("Circuit breaker transitioning to half-open");
+      } else {
+        throw new Error("Circuit breaker is open");
+      }
+    }
+
+    if (this.state === "half-open" && this.halfOpenCalls >= this.halfOpenMaxCalls) {
+      throw new Error("Circuit breaker half-open limit reached");
+    }
+
+    try {
+      if (this.state === "half-open") this.halfOpenCalls++;
+      const result = await fn();
+      this.onSuccess();
+      return result;
+    } catch (error) {
+      this.onFailure(error);
+      throw error;
+    }
+  }
+
+  private onSuccess() {
+    if (this.state === "half-open") {
+      this.state = "closed";
+      this.failureCount = 0;
+      logger.info("Circuit breaker closed again");
+    }
+  }
+
+  private onFailure(error: unknown) {
+    this.failureCount++;
+    this.lastFailureTime = Date.now();
+    logger.error({ error, failureCount: this.failureCount }, "Circuit breaker failure");
+    if (this.failureCount >= this.failureThreshold && this.state === "closed") {
+      this.state = "open";
+      logger.warn("Circuit breaker opened");
+    }
+  }
+}
+
+const dbCircuitBreaker = new CircuitBreaker();
+
+// --- Valid event lifecycle states ---
+const VALID_EVENT_STATES = ["SCHEDULED", "PREMATCH", "ACTIVE", "LIVE", "HALFTIME", "ENDED", "SUSPENDED", "UNSTABLE_FEED", "HIDDEN_BY_ADMIN"] as const;
+type ValidEventState = typeof VALID_EVENT_STATES[number];
+
+// --- Valid state transitions map ---
+const VALID_TRANSITIONS: Record<string, readonly string[]> = {
+  SCHEDULED: ["PREMATCH", "LIVE", "SUSPENDED", "ENDED"],
+  PREMATCH: ["LIVE", "SUSPENDED", "ENDED"],
+  LIVE: ["HALFTIME", "SUSPENDED", "ENDED"],
+  HALFTIME: ["LIVE", "SUSPENDED", "ENDED"],
+  SUSPENDED: ["LIVE", "PREMATCH", "ENDED"],
+  UNSTABLE_FEED: ["LIVE", "PREMATCH", "SUSPENDED", "ENDED"],
+  ACTIVE: ["LIVE", "HALFTIME", "SUSPENDED", "ENDED"],
+};
+
+/**
+ * Validate event lifecycle transitions to prevent invalid state changes
+ */
+function validateEventLifecycle(currentState: string | null | undefined, newState: string): boolean {
+  const normalizedCurrent = currentState ? currentState.toUpperCase() : null;
+  const normalizedNew = newState.toUpperCase();
+
+  // Allow any state if current is unknown (new event)
+  if (!normalizedCurrent) return true;
+
+  const allowedTransitions = VALID_TRANSITIONS[normalizedCurrent];
+  if (!allowedTransitions) {
+    logger.warn({ currentState: normalizedCurrent, newState: normalizedNew }, "Unknown current state for lifecycle validation");
+    return true; // Allow if we don't know the current state's valid transitions
+  }
+
+  const isValid = allowedTransitions.includes(normalizedNew) || normalizedNew === "ENDED";
+  if (!isValid) {
+    logger.warn({
+      currentState: normalizedCurrent,
+      newState: normalizedNew,
+    }, "Invalid event state transition detected");
+  }
+  return isValid;
+}
 
 type SeenCompetitionInput = {
   sport: string;
@@ -134,138 +233,162 @@ function inferEventState(input: SeenLiveEventInput): string {
   if (status.includes("ended") || status === "ft" || status === "finished") return "ENDED";
   if (normalizeCatalogValue(input.suspensionReason)) return "SUSPENDED";
   if (status.includes("instavel") || status.includes("unstable")) return "UNSTABLE_FEED";
+  if (status.includes("breve") || status.includes("scheduled") || status.includes("prematch")) return "SCHEDULED";
+  if (status.includes("halftime") || status === "ht") return "HALFTIME";
+  if (status.includes("live") || status.includes("in play") || status.includes("em jogo")) return "LIVE";
   return "ACTIVE";
 }
 
 async function ensureCompetition(input: SeenCompetitionInput): Promise<number | null> {
-  const sport = normalizeCatalogValue(input.sport);
-  const name = String(input.name ?? "").trim();
-  if (!sport || !name) return null;
+  return dbCircuitBreaker.execute(async () => {
+    const sport = normalizeCatalogValue(input.sport);
+    const name = String(input.name ?? "").trim();
+    if (!sport || !name) {
+      logger.warn({ input }, "Invalid competition input - missing sport or name");
+      return null;
+    }
 
-  const country = String(input.country ?? "unknown").trim() || "unknown";
-  const normalizedName = normalizeCatalogValue(name);
-  const normalizedCountry = normalizeCatalogValue(country) || "unknown";
-  const provider = String(input.provider ?? "sportsapi").trim() || "sportsapi";
-  const providerCompetitionKey = buildProviderCompetitionKey(input);
+    const country = String(input.country ?? "unknown").trim() || "unknown";
+    const normalizedName = normalizeCatalogValue(name);
+    const normalizedCountry = normalizeCatalogValue(country) || "unknown";
+    const provider = String(input.provider ?? "sportsapi").trim() || "sportsapi";
+    const providerCompetitionKey = buildProviderCompetitionKey(input);
 
-  await db.insert(competitionsTable).values({
-    sport,
-    name,
-    country,
-    normalizedName,
-    normalizedCountry,
-    tier: "standard",
-    isActive: true,
-    updatedAt: new Date(),
-  }).onConflictDoUpdate({
-    target: [
-      competitionsTable.sport,
-      competitionsTable.normalizedCountry,
-      competitionsTable.normalizedName,
-    ],
-    set: {
+    logger.debug({ sport, name, country }, "Ensuring competition exists");
+
+    await db.insert(competitionsTable).values({
+      sport,
       name,
       country,
+      normalizedName,
+      normalizedCountry,
+      tier: "standard",
+      isActive: true,
       updatedAt: new Date(),
-    },
-  });
+    }).onConflictDoUpdate({
+      target: [
+        competitionsTable.sport,
+        competitionsTable.normalizedCountry,
+        competitionsTable.normalizedName,
+      ],
+      set: {
+        name,
+        country,
+        updatedAt: new Date(),
+      },
+    });
 
-  const [competition] = await db
-    .select({ id: competitionsTable.id })
-    .from(competitionsTable)
-    .where(and(
-      eq(competitionsTable.sport, sport),
-      eq(competitionsTable.normalizedCountry, normalizedCountry),
-      eq(competitionsTable.normalizedName, normalizedName),
-    ))
-    .limit(1);
-  if (!competition) return null;
+    const [competition] = await db
+      .select({ id: competitionsTable.id })
+      .from(competitionsTable)
+      .where(and(
+        eq(competitionsTable.sport, sport),
+        eq(competitionsTable.normalizedCountry, normalizedCountry),
+        eq(competitionsTable.normalizedName, normalizedName),
+      ))
+      .limit(1);
+    
+    if (!competition) {
+      logger.error({ sport, name, country }, "Failed to retrieve competition after upsert");
+      return null;
+    }
 
-  await db.insert(competitionConfigsTable).values({
-    competitionId: competition.id,
-    prematchEnabled: true,
-    liveEnabled: true,
-    homeEnabled: false,
-    mobileEnabled: true,
-    featured: false,
-    priority: input.priorityHint ?? 100,
-    displayOrder: input.priorityHint ?? 100,
-    maxMarkets: 50,
-    cashoutEnabled: true,
-    autoSettlementEnabled: true,
-    trackingEnabled: true,
-    minFeedQualityScore: 40,
-    allowUnstableFeedVisibility: true,
-    tradingMode: "automatic",
-    stakeLimitMultiplier: 100,
-    updatedAt: new Date(),
-  }).onConflictDoNothing();
+    await db.insert(competitionConfigsTable).values({
+      competitionId: competition.id,
+      prematchEnabled: true,
+      liveEnabled: true,
+      homeEnabled: false,
+      mobileEnabled: true,
+      featured: false,
+      priority: input.priorityHint ?? 100,
+      displayOrder: input.priorityHint ?? 100,
+      maxMarkets: 50,
+      cashoutEnabled: true,
+      autoSettlementEnabled: true,
+      trackingEnabled: true,
+      minFeedQualityScore: 40,
+      allowUnstableFeedVisibility: true,
+      tradingMode: "automatic",
+      stakeLimitMultiplier: 100,
+      updatedAt: new Date(),
+    }).onConflictDoNothing();
 
-  await db.insert(competitionAliasesTable).values({
-    competitionId: competition.id,
-    provider,
-    alias: name,
-    normalizedAlias: normalizedName,
-  }).onConflictDoNothing();
+    await db.insert(competitionAliasesTable).values({
+      competitionId: competition.id,
+      provider,
+      alias: name,
+      normalizedAlias: normalizedName,
+    }).onConflictDoNothing();
 
-  await db.insert(providerCompetitionsTable).values({
-    provider,
-    providerSport: sport,
-    providerCompetitionKey,
-    providerCompetitionId: input.providerCompetitionId?.trim() || null,
-    providerName: name,
-    providerCountry: country,
-    competitionId: competition.id,
-    mappingConfidence: "high",
-    firstSeenAt: new Date(),
-    lastSeenAt: new Date(),
-    updatedAt: new Date(),
-  }).onConflictDoUpdate({
-    target: [
-      providerCompetitionsTable.provider,
-      providerCompetitionsTable.providerSport,
-      providerCompetitionsTable.providerCompetitionKey,
-    ],
-    set: {
+    await db.insert(providerCompetitionsTable).values({
+      provider,
+      providerSport: sport,
+      providerCompetitionKey,
       providerCompetitionId: input.providerCompetitionId?.trim() || null,
       providerName: name,
       providerCountry: country,
       competitionId: competition.id,
+      mappingConfidence: "high",
+      firstSeenAt: new Date(),
       lastSeenAt: new Date(),
       updatedAt: new Date(),
-    },
-  });
+    }).onConflictDoUpdate({
+      target: [
+        providerCompetitionsTable.provider,
+        providerCompetitionsTable.providerSport,
+        providerCompetitionsTable.providerCompetitionKey,
+      ],
+      set: {
+        providerCompetitionId: input.providerCompetitionId?.trim() || null,
+        providerName: name,
+        providerCountry: country,
+        competitionId: competition.id,
+        lastSeenAt: new Date(),
+        updatedAt: new Date(),
+      },
+    });
 
-  return competition.id;
+    logger.info({ competitionId: competition.id, sport, name }, "Competition ensured");
+    return competition.id;
+  });
 }
 
 async function ensureRuntimeState(input: SeenLiveEventInput, competitionId: number | null): Promise<void> {
-  const eventId = String(input.eventId ?? "").trim();
-  if (!eventId) return;
+  return dbCircuitBreaker.execute(async () => {
+    const eventId = String(input.eventId ?? "").trim();
+    if (!eventId) {
+      logger.warn({ input }, "Invalid event input - missing eventId");
+      return;
+    }
 
-  await db.insert(eventRuntimeStatesTable).values({
-    eventId,
-    sport: normalizeCatalogValue(input.sport),
-    competitionId,
-    provider: String(input.provider ?? "sportsapi").trim() || "sportsapi",
-    providerEventId: input.providerEventId?.trim() || null,
-    state: inferEventState(input),
-    visibilityStatus: "VISIBLE",
-    feedHealth: inferFeedHealth(input.status),
-    tradingStatus: "automatic",
-    suspensionReason: input.suspensionReason?.trim() || null,
-    lastProviderUpdateAt: new Date(),
-    lastInternalUpdateAt: new Date(),
-    lastMarketRecalcAt: new Date(),
-    updatedAt: new Date(),
-  }).onConflictDoUpdate({
-    target: [eventRuntimeStatesTable.eventId],
-    set: {
+    // Get previous state for validation
+    const [prevState] = await db
+      .select({ state: eventRuntimeStatesTable.state })
+      .from(eventRuntimeStatesTable)
+      .where(eq(eventRuntimeStatesTable.eventId, eventId))
+      .limit(1);
+
+    const newState = inferEventState(input);
+
+    // Validate state transition
+    if (!validateEventLifecycle(prevState?.state, newState)) {
+      logger.warn({
+        eventId,
+        currentState: prevState?.state,
+        attemptedState: newState,
+      }, "Skipping invalid state transition for event");
+      return; // Skip this update if transition is invalid
+    }
+
+    logger.debug({ eventId, newState }, "Ensuring event runtime state");
+
+    await db.insert(eventRuntimeStatesTable).values({
+      eventId,
       sport: normalizeCatalogValue(input.sport),
       competitionId,
       provider: String(input.provider ?? "sportsapi").trim() || "sportsapi",
       providerEventId: input.providerEventId?.trim() || null,
-      state: inferEventState(input),
+      state: newState,
       visibilityStatus: "VISIBLE",
       feedHealth: inferFeedHealth(input.status),
       tradingStatus: "automatic",
@@ -273,154 +396,187 @@ async function ensureRuntimeState(input: SeenLiveEventInput, competitionId: numb
       lastProviderUpdateAt: new Date(),
       lastInternalUpdateAt: new Date(),
       lastMarketRecalcAt: new Date(),
-      version: sql`${eventRuntimeStatesTable.version} + 1`,
       updatedAt: new Date(),
-    },
+    }).onConflictDoUpdate({
+      target: [eventRuntimeStatesTable.eventId],
+      set: {
+        sport: normalizeCatalogValue(input.sport),
+        competitionId,
+        provider: String(input.provider ?? "sportsapi").trim() || "sportsapi",
+        providerEventId: input.providerEventId?.trim() || null,
+        state: newState,
+        visibilityStatus: "VISIBLE",
+        feedHealth: inferFeedHealth(input.status),
+        tradingStatus: "automatic",
+        suspensionReason: input.suspensionReason?.trim() || null,
+        lastProviderUpdateAt: new Date(),
+        lastInternalUpdateAt: new Date(),
+        lastMarketRecalcAt: new Date(),
+        version: sql`${eventRuntimeStatesTable.version} + 1`,
+        updatedAt: new Date(),
+      },
+    });
+
+    logger.info({ eventId, newState }, "Event runtime state ensured");
   });
 }
 
 async function syncCatalogInternal(events: SeenLiveEventInput[]): Promise<void> {
+  logger.info({ eventCount: events.length }, "Starting catalog sync");
   const competitionCache = new Map<string, number | null>();
+  
   for (const event of events) {
-    const key = `${normalizeCatalogValue(event.sport)}|${normalizeCatalogValue(event.country)}|${normalizeCatalogValue(event.name)}`;
-    let competitionId = competitionCache.get(key);
-    if (competitionId === undefined) {
-      competitionId = await ensureCompetition(event);
-      competitionCache.set(key, competitionId);
+    try {
+      const key = `${normalizeCatalogValue(event.sport)}|${normalizeCatalogValue(event.country)}|${normalizeCatalogValue(event.name)}`;
+      let competitionId = competitionCache.get(key);
+      if (competitionId === undefined) {
+        competitionId = await ensureCompetition(event);
+        competitionCache.set(key, competitionId);
+      }
+      await ensureRuntimeState(event, competitionId);
+    } catch (error) {
+      logger.error({ eventId: event.eventId, error }, "Failed to process event in catalog sync");
+      // Continue processing other events
     }
-    await ensureRuntimeState(event, competitionId);
   }
+
+  logger.info("Catalog sync completed");
 }
 
 async function loadCompetitionCatalogSnapshot(): Promise<CompetitionCatalogSnapshot> {
-  const competitionRows = await db
-    .select({
-      competitionId: competitionsTable.id,
-      sport: competitionsTable.sport,
-      country: competitionsTable.country,
-      name: competitionsTable.name,
-      normalizedCountry: competitionsTable.normalizedCountry,
-      normalizedName: competitionsTable.normalizedName,
-      isActive: competitionsTable.isActive,
-      liveEnabled: competitionConfigsTable.liveEnabled,
-      prematchEnabled: competitionConfigsTable.prematchEnabled,
-      homeEnabled: competitionConfigsTable.homeEnabled,
-      mobileEnabled: competitionConfigsTable.mobileEnabled,
-      featured: competitionConfigsTable.featured,
-      priority: competitionConfigsTable.priority,
-      displayOrder: competitionConfigsTable.displayOrder,
-      cashoutEnabled: competitionConfigsTable.cashoutEnabled,
-      minFeedQualityScore: competitionConfigsTable.minFeedQualityScore,
-      allowUnstableFeedVisibility: competitionConfigsTable.allowUnstableFeedVisibility,
-      tradingMode: competitionConfigsTable.tradingMode,
-      stakeLimitMultiplier: competitionConfigsTable.stakeLimitMultiplier,
-    })
-    .from(competitionsTable)
-    .leftJoin(competitionConfigsTable, eq(competitionConfigsTable.competitionId, competitionsTable.id));
+  return dbCircuitBreaker.execute(async () => {
+    logger.debug("Loading competition catalog snapshot");
 
-  const aliasRows = await db
-    .select({
-      competitionId: competitionAliasesTable.competitionId,
-      normalizedAlias: competitionAliasesTable.normalizedAlias,
-    })
-    .from(competitionAliasesTable);
+    const competitionRows = await db
+      .select({
+        competitionId: competitionsTable.id,
+        sport: competitionsTable.sport,
+        country: competitionsTable.country,
+        name: competitionsTable.name,
+        normalizedCountry: competitionsTable.normalizedCountry,
+        normalizedName: competitionsTable.normalizedName,
+        isActive: competitionsTable.isActive,
+        liveEnabled: competitionConfigsTable.liveEnabled,
+        prematchEnabled: competitionConfigsTable.prematchEnabled,
+        homeEnabled: competitionConfigsTable.homeEnabled,
+        mobileEnabled: competitionConfigsTable.mobileEnabled,
+        featured: competitionConfigsTable.featured,
+        priority: competitionConfigsTable.priority,
+        displayOrder: competitionConfigsTable.displayOrder,
+        cashoutEnabled: competitionConfigsTable.cashoutEnabled,
+        minFeedQualityScore: competitionConfigsTable.minFeedQualityScore,
+        allowUnstableFeedVisibility: competitionConfigsTable.allowUnstableFeedVisibility,
+        tradingMode: competitionConfigsTable.tradingMode,
+        stakeLimitMultiplier: competitionConfigsTable.stakeLimitMultiplier,
+      })
+      .from(competitionsTable)
+      .leftJoin(competitionConfigsTable, eq(competitionConfigsTable.competitionId, competitionsTable.id));
 
-  const runtimeRows = await db
-    .select({
-      eventId: eventRuntimeStatesTable.eventId,
-      state: eventRuntimeStatesTable.state,
-      visibilityStatus: eventRuntimeStatesTable.visibilityStatus,
-      feedHealth: eventRuntimeStatesTable.feedHealth,
-      tradingStatus: eventRuntimeStatesTable.tradingStatus,
-      suspensionReason: eventRuntimeStatesTable.suspensionReason,
-    })
-    .from(eventRuntimeStatesTable)
-    .orderBy(desc(eventRuntimeStatesTable.updatedAt))
-    .limit(5000);
+    const aliasRows = await db
+      .select({
+        competitionId: competitionAliasesTable.competitionId,
+        normalizedAlias: competitionAliasesTable.normalizedAlias,
+      })
+      .from(competitionAliasesTable);
 
-  const overrideRows = await db
-    .select({
-      eventId: eventAdminOverridesTable.eventId,
-      competitionId: eventAdminOverridesTable.competitionId,
-      hiddenByAdmin: eventAdminOverridesTable.hiddenByAdmin,
-      forceSuspend: eventAdminOverridesTable.forceSuspend,
-      forceCashoutDisable: eventAdminOverridesTable.forceCashoutDisable,
-      overridePriority: eventAdminOverridesTable.overridePriority,
-      overrideState: eventAdminOverridesTable.overrideState,
-      overrideVisibilityStatus: eventAdminOverridesTable.overrideVisibilityStatus,
-      overrideTradingStatus: eventAdminOverridesTable.overrideTradingStatus,
-      overrideNote: eventAdminOverridesTable.overrideNote,
-    })
-    .from(eventAdminOverridesTable)
-    .limit(5000);
+    const runtimeRows = await db
+      .select({
+        eventId: eventRuntimeStatesTable.eventId,
+        state: eventRuntimeStatesTable.state,
+        visibilityStatus: eventRuntimeStatesTable.visibilityStatus,
+        feedHealth: eventRuntimeStatesTable.feedHealth,
+        tradingStatus: eventRuntimeStatesTable.tradingStatus,
+        suspensionReason: eventRuntimeStatesTable.suspensionReason,
+      })
+      .from(eventRuntimeStatesTable)
+      .orderBy(desc(eventRuntimeStatesTable.updatedAt))
+      .limit(5000);
 
-  const ruleByCompetitionId = new Map<number, CompetitionCatalogRule>();
-  const competitionRulesByKey = new Map<string, CompetitionCatalogRule>();
-  for (const row of competitionRows) {
-    const rule: CompetitionCatalogRule = {
-      competitionId: row.competitionId,
-      isActive: row.isActive ?? true,
-      liveEnabled: row.liveEnabled ?? true,
-      prematchEnabled: row.prematchEnabled ?? true,
-      homeEnabled: row.homeEnabled ?? false,
-      mobileEnabled: row.mobileEnabled ?? true,
-      featured: row.featured ?? false,
-      priority: row.priority ?? 100,
-      displayOrder: row.displayOrder ?? 100,
-      cashoutEnabled: row.cashoutEnabled ?? true,
-      minFeedQualityScore: row.minFeedQualityScore ?? 40,
-      allowUnstableFeedVisibility: row.allowUnstableFeedVisibility ?? true,
-      tradingMode: row.tradingMode ?? "automatic",
-      stakeLimitMultiplier: row.stakeLimitMultiplier ?? 100,
-    };
-    ruleByCompetitionId.set(row.competitionId, rule);
-    competitionRulesByKey.set(
-      competitionRuleKey(row.sport, row.normalizedCountry || row.country, row.normalizedName || row.name),
-      rule,
-    );
-  }
+    const overrideRows = await db
+      .select({
+        eventId: eventAdminOverridesTable.eventId,
+        competitionId: eventAdminOverridesTable.competitionId,
+        hiddenByAdmin: eventAdminOverridesTable.hiddenByAdmin,
+        forceSuspend: eventAdminOverridesTable.forceSuspend,
+        forceCashoutDisable: eventAdminOverridesTable.forceCashoutDisable,
+        overridePriority: eventAdminOverridesTable.overridePriority,
+        overrideState: eventAdminOverridesTable.overrideState,
+        overrideVisibilityStatus: eventAdminOverridesTable.overrideVisibilityStatus,
+        overrideTradingStatus: eventAdminOverridesTable.overrideTradingStatus,
+        overrideNote: eventAdminOverridesTable.overrideNote,
+      })
+      .from(eventAdminOverridesTable)
+      .limit(5000);
 
-  for (const alias of aliasRows) {
-    const rule = ruleByCompetitionId.get(alias.competitionId);
-    if (!rule) continue;
-    const source = competitionRows.find((row) => row.competitionId === alias.competitionId);
-    if (!source) continue;
-    competitionRulesByKey.set(
-      competitionRuleKey(source.sport, source.normalizedCountry || source.country, alias.normalizedAlias),
-      rule,
-    );
-  }
+    const ruleByCompetitionId = new Map<number, CompetitionCatalogRule>();
+    const competitionRulesByKey = new Map<string, CompetitionCatalogRule>();
+    for (const row of competitionRows) {
+      const rule: CompetitionCatalogRule = {
+        competitionId: row.competitionId,
+        isActive: row.isActive ?? true,
+        liveEnabled: row.liveEnabled ?? true,
+        prematchEnabled: row.prematchEnabled ?? true,
+        homeEnabled: row.homeEnabled ?? false,
+        mobileEnabled: row.mobileEnabled ?? true,
+        featured: row.featured ?? false,
+        priority: row.priority ?? 100,
+        displayOrder: row.displayOrder ?? 100,
+        cashoutEnabled: row.cashoutEnabled ?? true,
+        minFeedQualityScore: row.minFeedQualityScore ?? 40,
+        allowUnstableFeedVisibility: row.allowUnstableFeedVisibility ?? true,
+        tradingMode: row.tradingMode ?? "automatic",
+        stakeLimitMultiplier: row.stakeLimitMultiplier ?? 100,
+      };
+      ruleByCompetitionId.set(row.competitionId, rule);
+      competitionRulesByKey.set(
+        competitionRuleKey(row.sport, row.normalizedCountry || row.country, row.normalizedName || row.name),
+        rule,
+      );
+    }
 
-  const eventRuntimeByEventId = new Map<string, EventRuntimeRule>();
-  for (const row of runtimeRows) {
-    if (eventRuntimeByEventId.has(row.eventId)) continue;
-    eventRuntimeByEventId.set(row.eventId, {
-      eventId: row.eventId,
-      state: row.state,
-      visibilityStatus: row.visibilityStatus,
-      feedHealth: row.feedHealth,
-      tradingStatus: row.tradingStatus,
-      suspensionReason: row.suspensionReason ?? null,
-    });
-  }
+    for (const alias of aliasRows) {
+      const rule = ruleByCompetitionId.get(alias.competitionId);
+      if (!rule) continue;
+      const source = competitionRows.find((row) => row.competitionId === alias.competitionId);
+      if (!source) continue;
+      competitionRulesByKey.set(
+        competitionRuleKey(source.sport, source.normalizedCountry || source.country, alias.normalizedAlias),
+        rule,
+      );
+    }
 
-  const eventOverrideByEventId = new Map<string, EventAdminOverrideRule>();
-  for (const row of overrideRows) {
-    eventOverrideByEventId.set(row.eventId, {
-      eventId: row.eventId,
-      competitionId: row.competitionId ?? null,
-      hiddenByAdmin: row.hiddenByAdmin ?? false,
-      forceSuspend: row.forceSuspend ?? false,
-      forceCashoutDisable: row.forceCashoutDisable ?? false,
-      overridePriority: row.overridePriority ?? null,
-      overrideState: row.overrideState ?? null,
-      overrideVisibilityStatus: row.overrideVisibilityStatus ?? null,
-      overrideTradingStatus: row.overrideTradingStatus ?? null,
-      overrideNote: row.overrideNote ?? null,
-    });
-  }
+    const eventRuntimeByEventId = new Map<string, EventRuntimeRule>();
+    for (const row of runtimeRows) {
+      if (eventRuntimeByEventId.has(row.eventId)) continue;
+      eventRuntimeByEventId.set(row.eventId, {
+        eventId: row.eventId,
+        state: row.state,
+        visibilityStatus: row.visibilityStatus,
+        feedHealth: row.feedHealth,
+        tradingStatus: row.tradingStatus,
+        suspensionReason: row.suspensionReason ?? null,
+      });
+    }
 
-  return { competitionRulesByKey, eventRuntimeByEventId, eventOverrideByEventId };
+    const eventOverrideByEventId = new Map<string, EventAdminOverrideRule>();
+    for (const row of overrideRows) {
+      eventOverrideByEventId.set(row.eventId, {
+        eventId: row.eventId,
+        competitionId: row.competitionId ?? null,
+        hiddenByAdmin: row.hiddenByAdmin ?? false,
+        forceSuspend: row.forceSuspend ?? false,
+        forceCashoutDisable: row.forceCashoutDisable ?? false,
+        overridePriority: row.overridePriority ?? null,
+        overrideState: row.overrideState ?? null,
+        overrideVisibilityStatus: row.overrideVisibilityStatus ?? null,
+        overrideTradingStatus: row.overrideTradingStatus ?? null,
+        overrideNote: row.overrideNote ?? null,
+      });
+    }
+
+    logger.info("Competition catalog snapshot loaded");
+    return { competitionRulesByKey, eventRuntimeByEventId, eventOverrideByEventId };
+  });
 }
 
 async function getCompetitionCatalogSnapshot(): Promise<CompetitionCatalogSnapshot> {
@@ -517,11 +673,20 @@ export async function getCompetitionCatalogDecisions(
 export function syncLiveCompetitionCatalog(events: SeenLiveEventInput[]): void {
   const now = Date.now();
   if (events.length === 0) return;
-  if (catalogSyncInFlight) return;
-  if (now - lastCatalogSyncAt < CATALOG_SYNC_INTERVAL_MS) return;
+  if (catalogSyncInFlight) {
+    logger.debug("Catalog sync already in flight, skipping");
+    return;
+  }
+  if (now - lastCatalogSyncAt < CATALOG_SYNC_INTERVAL_MS) {
+    logger.debug({ timeSinceLastSync: now - lastCatalogSyncAt }, "Catalog sync throttled");
+    return;
+  }
+
   lastCatalogSyncAt = now;
   catalogSyncInFlight = syncCatalogInternal(events)
-    .catch(() => {})
+    .catch((error) => {
+      logger.error({ error }, "Catalog sync failed");
+    })
     .finally(() => {
       catalogSyncInFlight = null;
     });
