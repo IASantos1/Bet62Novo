@@ -3485,8 +3485,8 @@ function liveDefinitiveOutcomeForSel(
       }
     }
 
-    // Over/Under games in specific set (tennis)
-    const mSetGames = s.match(/^s([12])g-([ou])-([\d.]+)$/);
+    // Over/Under games in specific set (tennis) — sets 1–3
+    const mSetGames = s.match(/^s([123])g-([ou])-([\d.]+)$/);
     if (mSetGames) {
       const setNum = Number(mSetGames[1]!);
       const setScore = tennisSets[setNum - 1];
