@@ -67,6 +67,10 @@ class CircuitBreaker {
 
 const dbCircuitBreaker = new CircuitBreaker();
 
+// --- Valid event lifecycle states ---
+const VALID_EVENT_STATES = ["SCHEDULED", "PREMATCH", "ACTIVE", "LIVE", "HALFTIME", "ENDED", "SUSPENDED", "UNSTABLE_FEED", "HIDDEN_BY_ADMIN"] as const;
+type ValidEventState = typeof VALID_EVENT_STATES[number];
+
 // --- Valid state transitions map ---
 const VALID_TRANSITIONS: Record<string, readonly string[]> = {
   SCHEDULED: ["PREMATCH", "LIVE", "SUSPENDED", "ENDED"],
