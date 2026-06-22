@@ -25492,7 +25492,7 @@ const footballLiveStatsCache = new Map<
   string,
   { data: object; fetchedAt: number }
 >();
-const FOOTBALL_LIVE_STATS_TTL = 30 * 1000; // 30s — live data
+const FOOTBALL_LIVE_STATS_TTL = 5_000; // 5s — SportsAPI Pro updates every 1-3s
 
 router.get(
   "/football-live-match-stats/:leagueSlug",
