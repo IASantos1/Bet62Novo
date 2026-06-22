@@ -6572,6 +6572,67 @@ export async function ensureFinishedMatchResult(
     return false;
   }
 
+  // ── Tennis V1 match IDs (tennis-v1-{id}) ──────────────────────────────────
+  const tennisV1Match = matchId.match(/^tennis-v1-(\d+)$/);
+  if (tennisV1Match) {
+    const providerId = Number(tennisV1Match[1]);
+    const cached = finishedMatchResults.get(matchId);
+    if (cached && typeof cached.home === "number" && typeof cached.away === "number" && cached.home + cached.away > 0)
+      return true;
+
+    // Check DB
+    try {
+      if (db) {
+        const [row] = await db
+          .select()
+          .from(matchResultsTable)
+          .where(eq(matchResultsTable.matchId, matchId))
+          .limit(1);
+        if (row && typeof row.home === "number" && typeof row.away === "number" && row.home + row.away > 0) {
+          finishedMatchResults.set(matchId, {
+            home: row.home,
+            away: row.away,
+            homeTeam: row.homeTeam ?? "",
+            awayTeam: row.awayTeam ?? "",
+            status: row.status ?? undefined,
+            extras: row.extras ?? undefined,
+            finishedAt: row.finishedAt ? row.finishedAt.getTime() : Date.now(),
+          });
+          return true;
+        }
+      }
+    } catch {}
+
+    // Fallback: call V1 live feed and look for this game (finished games stay in the live feed briefly)
+    try {
+      const games = await getTennisLiveV1();
+      for (const g of games) {
+        if (Number(g.id) !== providerId) continue;
+        if (!isTennisV1GameFinished(g)) return false;
+        const home = Math.max(0, g.homeCompetitor?.score ?? 0);
+        const away = Math.max(0, g.awayCompetitor?.score ?? 0);
+        if (home === 0 && away === 0) return false;
+        const record = {
+          home,
+          away,
+          homeTeam: g.homeCompetitor?.name?.trim() ?? "",
+          awayTeam: g.awayCompetitor?.name?.trim() ?? "",
+          status: "finished",
+          finishedAt: Date.now(),
+        };
+        finishedMatchResults.set(matchId, record);
+        await enqueueMatchSettlement({
+          matchId,
+          jobId: buildMatchSettlementJobId({ matchId, home, away }),
+        });
+        await persistFinishedMatchRecord(matchId, "tennis", record);
+        _pruneFinishedResults();
+        return true;
+      }
+    } catch {}
+    return false;
+  }
+
   const fetchFootballExtras = async (
     id: number,
   ): Promise<{
@@ -7361,6 +7422,44 @@ export async function scanVolleyballForFinished(): Promise<void> {
     _pruneFinishedResults();
   } catch (err) {
     logger.error({ err }, "scanVolleyballForFinished failed");
+  }
+}
+
+export async function scanTennisV1ForFinished(): Promise<void> {
+  try {
+    const games = await getTennisLiveV1();
+    for (const g of games) {
+      if (!isTennisV1GameFinished(g)) continue;
+      if (!g.id) continue;
+      const providerId = String(g.id);
+      const matchId = `tennis-v1-${providerId}`;
+      if (finishedMatchResults.has(matchId)) continue;
+
+      const home = Math.max(0, g.homeCompetitor?.score ?? 0);
+      const away = Math.max(0, g.awayCompetitor?.score ?? 0);
+      if (home === 0 && away === 0) continue; // no score data yet
+
+      const homeTeam = g.homeCompetitor?.name?.trim() ?? "";
+      const awayTeam = g.awayCompetitor?.name?.trim() ?? "";
+
+      const record = {
+        home,
+        away,
+        homeTeam,
+        awayTeam,
+        status: "finished",
+        finishedAt: Date.now(),
+      };
+      finishedMatchResults.set(matchId, record);
+      await enqueueMatchSettlement({
+        matchId,
+        jobId: buildMatchSettlementJobId({ matchId, home, away }),
+      });
+      await persistFinishedMatchRecord(matchId, "tennis", record);
+    }
+    _pruneFinishedResults();
+  } catch (err) {
+    logger.error({ err }, "scanTennisV1ForFinished failed");
   }
 }
 
@@ -15680,13 +15779,12 @@ function normalizeMatchIdentityPart(value: string | undefined): string {
 }
 
 function liveMatchIdentityKey(
-  match: Pick<LiveMatchState, "sport" | "home" | "away" | "league">,
+  match: Pick<LiveMatchState, "sport" | "home" | "away">,
 ): string {
   return [
     normalizeMatchIdentityPart(match.sport),
     normalizeMatchIdentityPart(match.home),
     normalizeMatchIdentityPart(match.away),
-    normalizeMatchIdentityPart(match.league),
   ].join("|");
 }
 
