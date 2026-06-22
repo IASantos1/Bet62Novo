@@ -8277,9 +8277,8 @@ export default function Home({
   const SuspensionBanner = ({ match }: { match: Match }) => {
     const now = Date.now();
     const isActive =
-      (match.marketSuspension?.["result"] != null &&
-        match.marketSuspension["result"] > now) ||
-      hasBlockingSuspensionReason(match);
+      match.marketSuspension?.["result"] != null &&
+      match.marketSuspension["result"] > now;
     if (!isActive) return null;
     const rawReason = (match._suspensionReason ?? "SUSPENSO").toUpperCase();
     let label = "SUSPENSO";

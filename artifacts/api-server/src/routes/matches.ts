@@ -12033,6 +12033,51 @@ async function buildLiveMatches(): Promise<LiveMatchState[]> {
           if (mkt !== updatedState.markets)
             (updatedState as LiveMatchState).markets = mkt;
         }
+        // VAR/penalty/card detection in score-unchanged ticks (V1 path)
+        // Without this, VAR events are only caught when score changes.
+        if (!matchMarketSuspension && m.events?.event) {
+          const rawEvts = Array.isArray(m.events.event)
+            ? m.events.event
+            : [m.events.event];
+          const recentMin = Math.max(1, minute - 2);
+          const V1_SUSP_TOKENS = [
+            "penalty", "var", "bigchance", "big_chance", "suspension", "expelled",
+          ];
+          const V1_SUSP_LABELS: Record<string, string> = {
+            penalty: "PENÁLTI",
+            var: "REVISÃO AO VAR",
+            bigchance: "GRANDE CHANCE",
+            big_chance: "GRANDE CHANCE",
+            suspension: "SUSPENSO",
+            expelled: "SUSPENSO",
+          };
+          const dangerEv = rawEvts.find((e: unknown) => {
+            const ev = e as Record<string, unknown>;
+            const t = String(ev["type"] ?? "").toLowerCase().replace(/[\s_-]/g, "");
+            const evMin = Number(ev["minute"] ?? 0);
+            if (evMin < recentMin) return false;
+            return V1_SUSP_TOKENS.some((tok) => t.includes(tok.replace("_", "")));
+          });
+          if (dangerEv) {
+            const now2 = Date.now();
+            const evType = String(
+              (dangerEv as Record<string, unknown>)["type"] ?? "",
+            ).toLowerCase().replace(/[\s_-]/g, "");
+            const rk = Object.keys(V1_SUSP_LABELS).find((k) =>
+              evType.includes(k),
+            );
+            const reason = rk ? V1_SUSP_LABELS[rk]! : "SUSPENSO";
+            matchMarketSuspension = Object.fromEntries(
+              FOOTBALL_SUSP_KEYS.map((k) => [
+                k,
+                now2 + footballSuspensionDelayMs("var", k),
+              ]),
+            ) as Record<string, number>;
+            (updatedState as LiveMatchState).marketSuspension =
+              matchMarketSuspension;
+            (updatedState as LiveMatchState)._suspensionReason = reason;
+          }
+        }
         liveMatchState.set(m.main_id, updatedState as LiveMatchState);
         result.push({
           ...(updatedState as LiveMatchState),
@@ -15775,6 +15820,10 @@ function normalizeMatchIdentityPart(value: string | undefined): string {
     .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, " ")
+    // strip common Spanish/Portuguese prepositions that differ between V1 and V2 feeds
+    // e.g. "9 de Julio Rafaela" (V1) vs "9 de Julio de Rafaela" (V2) → both become "9 julio rafaela"
+    .replace(/\b(de|do|da|di|del)\b/g, " ")
+    .replace(/\s+/g, " ")
     .trim();
 }
 
