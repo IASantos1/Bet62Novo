@@ -83,6 +83,7 @@ let settlementHelpersModulePromise: Promise<
   typeof import("./lib/settlementHelpers.js")
 > | null = null;
 const latePendingBetLogCache = new Map<number, number>();
+let _lastNoPendingLogAt = 0;
 
 function getSettlementRedis(): any | null {
   if (settlementRedis !== undefined) return settlementRedis;
@@ -3616,7 +3617,14 @@ export async function autoSettlePendingBets(opts?: {
       .from(betsTable)
       .where(eq(betsTable.status, "pending"));
 
-    if (pendingBets.length === 0) return;
+    if (pendingBets.length === 0) {
+      const _now = Date.now();
+      if (_now - _lastNoPendingLogAt > 60_000) {
+        _lastNoPendingLogAt = _now;
+        logger.debug("Auto-settlement cycle: no pending bets");
+      }
+      return;
+    }
 
     const matchIdSet =
       Array.isArray(opts?.matchIds) && opts!.matchIds!.length > 0

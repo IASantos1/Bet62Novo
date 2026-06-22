@@ -7109,6 +7109,134 @@ export async function ensureFinishedMatchResult(
     } catch {}
   }
 
+  // For all non-tennis sports: direct per-event fetch as final V2 fallback.
+  // SportsAPI Pro V2 exposes /api/event/{id} for all sports.
+  if (parsed.sport !== "tennis") {
+    try {
+      const domain = WS_DOMAINS[parsed.sport];
+      const evResp = await fetch(
+        `https://${domain}/api/event/${parsed.id}`,
+        { signal: AbortSignal.timeout(5000), headers: sapiHeaders() },
+      );
+      if (evResp.ok) {
+        const evData = (await evResp.json()) as Record<string, unknown>;
+        const rawEv: unknown =
+          evData["event"] ??
+          (evData["data"] as Record<string, unknown> | undefined)?.[
+            "event"
+          ] ??
+          (evData["data"] as unknown);
+        if (rawEv) {
+          if (await tryEvents([rawEv])) return true;
+        }
+      }
+    } catch {}
+  }
+
+  // For football: V1 daily-feed fallback matched by team names.
+  // Covers leagues absent from V2 schedule (Erovnuli Liga 2, Club Friendlies, etc.)
+  if (parsed.sport === "football") {
+    const liveState = liveMatchState.get(matchId);
+    if (liveState?.home && liveState?.away) {
+      try {
+        const norm = (s: string) =>
+          String(s ?? "")
+            .toLowerCase()
+            .replace(/[^a-z0-9]/g, "");
+        const normH = norm(liveState.home);
+        const normA = norm(liveState.away);
+        const leagues = await getDailyLeagues();
+        for (const league of leagues) {
+          const raw = league.match;
+          if (!raw) continue;
+          const dailyMatches: SAPIMatchV2[] = Array.isArray(raw)
+            ? raw
+            : [raw];
+          for (const m of dailyMatches) {
+            if (!SAPI_FINISHED_STATUSES.has(m.status)) continue;
+            const mH = norm(m.home.name);
+            const mA = norm(m.away.name);
+            if (
+              (mH.includes(normH) || normH.includes(mH)) &&
+              (mA.includes(normA) || normA.includes(mA))
+            ) {
+              const home = parseInt(m.home.goals) || 0;
+              const away = parseInt(m.away.goals) || 0;
+              const htHome =
+                typeof m.ht?.home_goals === "number"
+                  ? m.ht.home_goals
+                  : undefined;
+              const htAway =
+                typeof m.ht?.away_goals === "number"
+                  ? m.ht.away_goals
+                  : undefined;
+              const rec = {
+                home,
+                away,
+                htHome,
+                htAway,
+                homeTeam: m.home.name,
+                awayTeam: m.away.name,
+                status: m.status,
+                finishedAt: now,
+              };
+              finishedMatchResults.set(matchId, rec);
+              await enqueueMatchSettlement({
+                matchId,
+                jobId: buildMatchSettlementJobId({
+                  matchId,
+                  home: rec.home,
+                  away: rec.away,
+                  htHome: rec.htHome,
+                  htAway: rec.htAway,
+                }),
+              });
+              try {
+                if (db) {
+                  await db
+                    .insert(matchResultsTable)
+                    .values({
+                      matchId,
+                      sport: "football",
+                      home: rec.home,
+                      away: rec.away,
+                      htHome: rec.htHome ?? null,
+                      htAway: rec.htAway ?? null,
+                      status: rec.status ?? null,
+                      homeTeam: rec.homeTeam,
+                      awayTeam: rec.awayTeam,
+                      cornersTotal: null,
+                      cardsTotal: null,
+                      firstGoal: null,
+                      extras: null,
+                      finishedAt: new Date(rec.finishedAt),
+                      updatedAt: new Date(),
+                    })
+                    .onConflictDoUpdate({
+                      target: matchResultsTable.matchId,
+                      set: {
+                        home: rec.home,
+                        away: rec.away,
+                        htHome: rec.htHome ?? null,
+                        htAway: rec.htAway ?? null,
+                        status: rec.status ?? null,
+                        homeTeam: rec.homeTeam,
+                        awayTeam: rec.awayTeam,
+                        finishedAt: new Date(rec.finishedAt),
+                        updatedAt: new Date(),
+                      },
+                    });
+                }
+              } catch {}
+              _pruneFinishedResults();
+              return true;
+            }
+          }
+        }
+      } catch {}
+    }
+  }
+
   return false;
 }
 
