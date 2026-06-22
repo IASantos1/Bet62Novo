@@ -4614,10 +4614,10 @@ export function startSettlementWorker(): void {
     return n;
   };
 
-  const rawIntervalMs = process.env.SETTLEMENT_INTERVAL_MS ?? "30000";
+  const rawIntervalMs = process.env.SETTLEMENT_INTERVAL_MS ?? "15000";
   const intervalMs = parseMs(
     rawIntervalMs,
-    30_000,
+    15_000,
     1_000,
     "SETTLEMENT_INTERVAL_MS",
   );
@@ -4633,10 +4633,10 @@ export function startSettlementWorker(): void {
   const queueEnabled =
     typeof process.env["REDIS_URL"] === "string" &&
     process.env["REDIS_URL"]!.trim() !== "";
-  const rawCatchupMs = process.env.SETTLEMENT_CATCHUP_INTERVAL_MS ?? "30000";
+  const rawCatchupMs = process.env.SETTLEMENT_CATCHUP_INTERVAL_MS ?? "60000";
   const catchupMs = parseMs(
     rawCatchupMs,
-    30_000,
+    60_000,
     10_000,
     "SETTLEMENT_CATCHUP_INTERVAL_MS",
   );
