@@ -1875,6 +1875,16 @@ function tennisSetFinished(setScore: [number, number]): boolean {
   return maxGames >= 6 && diff >= 2;
 }
 
+function calculateTotalGamesFromSets(sets: Array<[number, number]>): number {
+  let total = 0;
+  for (const [h, a] of sets) {
+    if (Number.isFinite(h) && Number.isFinite(a)) {
+      total += h + a;
+    }
+  }
+  return total;
+}
+
 function tennisCompletedSetCount(extras: unknown): number | null {
   const sets = getTennisSetsFromExtras(extras);
   if (sets.length === 0) return null;
@@ -3460,6 +3470,39 @@ function liveDefinitiveOutcomeForSel(
     if (totalSets === 0) return null;
     if (dir === "o") return totalSets > line ? "won" : null;
     return totalSets > line ? "lost" : null;
+  }
+
+  // Over/Under total games (tennis) — settle early once total games confirm the threshold
+  const totalGames = calculateTotalGamesFromSets(tennisSets);
+  if (totalGames > 0) {
+    const mTennisOU = s.match(/^([ou])([\d.]+)$/);
+    if (mTennisOU) {
+      const side = mTennisOU[1]!;
+      const line = decodeCompactLine(mTennisOU[2]!);
+      if (Number.isFinite(line)) {
+        if (side === "o") return totalGames > line ? "won" : null;
+        return totalGames > line ? "lost" : null;
+      }
+    }
+
+    // Over/Under games in specific set (tennis)
+    const mSetGames = s.match(/^s([12])g-([ou])-([\d.]+)$/);
+    if (mSetGames) {
+      const setNum = Number(mSetGames[1]!);
+      const setScore = tennisSets[setNum - 1];
+      if (setScore) {
+        const [h, a] = setScore;
+        const setGames = Number.isFinite(h) && Number.isFinite(a) ? h + a : 0;
+        if (setGames > 0) {
+          const side = mSetGames[2]!;
+          const line = decodeCompactLine(mSetGames[3]!);
+          if (Number.isFinite(line)) {
+            if (side === "o") return setGames > line ? "won" : null;
+            return setGames > line ? "lost" : null;
+          }
+        }
+      }
+    }
   }
 
   // Goals O/U — can settle mid-game as soon as threshold crossed (Over) or exceeded (Under→lost)
