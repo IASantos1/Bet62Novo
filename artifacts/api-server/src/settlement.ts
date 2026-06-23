@@ -3642,6 +3642,52 @@ function liveDefinitiveOutcomeForSel(
     return null;
   }
 
+  // Basketball Quarter Totals (Over/Under)
+  const mQTotal = s.match(/^q([1-4])t-([ou])-([\d.]+)$/);
+  if (mQTotal) {
+    const qNum = Number(mQTotal[1]);
+    const side = mQTotal[2]!;
+    const line = decodeCompactLine(mQTotal[3]!);
+    const q = basketballQuarters[qNum - 1] ?? null;
+    if (!q || q[0] === null || q[1] === null) return null;
+    const totalQ = q[0] + q[1];
+    if (!Number.isFinite(totalQ)) return null;
+    if (side === "o") return totalQ > line ? "won" : null;
+    return totalQ > line ? "lost" : null;
+  }
+
+  // Basketball: Vencer Qualquer Quarter
+  if (s === "b-anyq-home" && basketballQuarters.length === 4) {
+    const allQHaveData = basketballQuarters.every(q => Number.isFinite(q[0]) && Number.isFinite(q[1]));
+    if (!allQHaveData) return null;
+    const homeWonAny = basketballQuarters.some(q => q[0] > q[1]);
+    return homeWonAny ? "won" : null;
+  }
+  if (s === "b-anyq-away" && basketballQuarters.length === 4) {
+    const allQHaveData = basketballQuarters.every(q => Number.isFinite(q[0]) && Number.isFinite(q[1]));
+    if (!allQHaveData) return null;
+    const awayWonAny = basketballQuarters.some(q => q[1] > q[0]);
+    return awayWonAny ? "won" : null;
+  }
+
+  // Basketball: Vencer Todos os Quarters
+  if (s === "b-allq-home" && basketballQuarters.length >= 1) {
+    // Verificar se o time já perdeu ou empatou qualquer quarter (liquidar como perdido imediatamente)
+    const homeLostOrDrewAny = basketballQuarters.some(q => Number.isFinite(q[0]) && Number.isFinite(q[1]) && (q[0] <= q[1]));
+    if (homeLostOrDrewAny) return "lost";
+    const allQHaveData = basketballQuarters.length === 4 && basketballQuarters.every(q => Number.isFinite(q[0]) && Number.isFinite(q[1]));
+    if (allQHaveData && basketballQuarters.every(q => q[0] > q[1])) return "won";
+    return null;
+  }
+  if (s === "b-allq-away" && basketballQuarters.length >= 1) {
+    // Verificar se o time já perdeu ou empatou qualquer quarter (liquidar como perdido imediatamente)
+    const awayLostOrDrewAny = basketballQuarters.some(q => Number.isFinite(q[0]) && Number.isFinite(q[1]) && (q[1] <= q[0]));
+    if (awayLostOrDrewAny) return "lost";
+    const allQHaveData = basketballQuarters.length === 4 && basketballQuarters.every(q => Number.isFinite(q[0]) && Number.isFinite(q[1]));
+    if (allQHaveData && basketballQuarters.every(q => q[1] > q[0])) return "won";
+    return null;
+  }
+
   return null;
 }
 
