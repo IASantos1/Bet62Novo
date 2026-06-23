@@ -1,6 +1,6 @@
 # Bet62 — Plataforma de Apostas Esportivas
 
-Bet62 é uma plataforma completa de apostas esportivas com dados ao vivo via Statpal API, sistema de Cash Out, odds avançadas, e painel administrativo.
+Bet62 é uma plataforma completa de apostas esportivas com dados ao vivo via SportsAPI Pro, sistema de Cash Out, odds avançadas, e painel administrativo.
 
 ## Run & Operate
 
@@ -8,7 +8,7 @@ Bet62 é uma plataforma completa de apostas esportivas com dados ao vivo via Sta
 - `pnpm run typecheck` — full typecheck across all packages
 - `pnpm run build` — typecheck + build all packages
 - `pnpm --filter @workspace/db run push` — push DB schema changes (dev only)
-- Required env: `DATABASE_URL`, `SESSION_SECRET`, `STATSPAL_API_KEY`
+- Required env: `DATABASE_URL`, `SESSION_SECRET`, `SPORTSAPIPRO_KEY`
 - Ifthenpay env: `IFTHENPAY_MBWAY_KEY`, `IFTHENPAY_MULTIBANCO_KEY`, `IFTHENPAY_CARD_KEY`, `IFTHENPAY_BACKOFFICE_KEY`
 - SMTP env (optional): `SMTP_HOST`, `SMTP_PORT` (default 587), `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM` (default noreply@bet62.com)
 
@@ -27,7 +27,7 @@ Bet62 é uma plataforma completa de apostas esportivas com dados ao vivo via Sta
 - `artifacts/bet62/src/pages/admin.tsx` — admin dashboard (login, stats, users, bets)
 - `artifacts/bet62/src/App.tsx` — router (/ = home, /admin = admin panel)
 - `artifacts/bet62/src/hooks/use-auth.tsx` — JWT auth context for regular users
-- `artifacts/api-server/src/routes/matches.ts` — Statpal live + upcoming match engine
+- `artifacts/api-server/src/routes/matches.ts` — SportsAPI Pro live + upcoming match engine
 - `artifacts/api-server/src/routes/bets.ts` — bet placement, history, cash out
 - `artifacts/api-server/src/routes/auth.ts` — register/login/me for regular users
 - `artifacts/api-server/src/routes/admin.ts` — admin login (username or email), stats, user/bet management
@@ -84,11 +84,11 @@ Bet62 é uma plataforma completa de apostas esportivas com dados ao vivo via Sta
 
 - Admin auth is separate from user auth — same SESSION_SECRET but JWT payload has `isAdmin: true`; no DB table needed for admin
 - Admin login accepts username (`admin`) OR email (`admin@bet62.com`) — configurable via env vars
-- Statpal live data is cached server-side for 30s to avoid rate limits; upcoming matches are static with computed advanced markets
+- SportsAPI Pro live data is cached server-side for 30s to avoid rate limits; upcoming matches are static with computed advanced markets
 - Real live endpoints: football v2/live, NBA v1/nba/livescores, NHL v1/nhl/livescores, tennis v1/tennis/livescores, volleyball v1/volleyball/livescores
 - Tennis extras: v1/tennis/livestats (match stats: aces/DF/1stServe/winners), v1/tennis/daily/d-1 (yesterday's results), v1/tennis/tournament-list/atp|wta (active tournaments), v1/tennis/tournament/{id} (full draw: all rounds, match-by-match results + schedule), v1/tennis/standings/atp|wta (top 100 rankings with movement), v1/tennis/odds (pre-match odds: Home/Away + 1st Set winner, 11 bookmakers averaged with 2.5% margin, 1 min cache)
 - Tennis odds matching: extractSurname strips ALL leading initials (regex `^([A-Z]\\. *)+`) to handle "T. A. Tirante" → "tirante"; keyed by `${date}-${surname0}-${surname1}` in both orders; odds floor at 1.01
-- Basketball has no Statpal endpoint — simulated with persistent state; tennis/volleyball fall back to simulation when no live matches
+- Basketball has no SportsAPI Pro endpoint — simulated with persistent state; tennis/volleyball fall back to simulation when no live matches
 - Simulated live state persists in module-level Maps (_bballMap, _tennisMap, _volleyMap, _hockeyMap) — scores advance incrementally, never jump
 - Cash out value = (stake × originalOdds) / currentOdds × 0.92 (8% house margin)
 - Admin bet settlement: marking a bet as "won" atomically credits the user's balance with potentialWin
@@ -97,7 +97,7 @@ Bet62 é uma plataforma completa de apostas esportivas com dados ao vivo via Sta
 
 ## Product
 
-- Betting platform with live scores (Statpal API), multiple odds markets, bet slip, and cash out
+- Betting platform with live scores (SportsAPI Pro), multiple odds markets, bet slip, and cash out
 - Admin dashboard at /admin: stats overview, user management with balance adjustments, bet settlement
 - Deposit via Multibanco, MB WAY, or Card (ifthenpay)
 - Markets: Football (standard), Basketball (quartos/times), Tennis (jogos/placar), Hockey (períodos/especiais), Volleyball (por set/pontos)
@@ -112,7 +112,7 @@ Bet62 é uma plataforma completa de apostas esportivas com dados ao vivo via Sta
 ## Gotchas
 
 - Always run `pnpm run typecheck:libs` before `api-server typecheck` (lib must be built first)
-- Statpal API base URL is `statpal.io` (not `statspal.io`) with `?access_key=` query param
+- SportsAPI Pro base URL is `statpal.io` (not `statspal.io`) with `?access_key=` query param (env var: `SPORTSAPIPRO_KEY`)
 - Admin credentials are required via env vars (`ADMIN_USERNAME`, `ADMIN_PASSWORD`, `ADMIN_EMAIL`)
 - `req.params.id` must be cast with `String(req.params["id"])` in Express 5 (TS union type)
 - ifthenpay callback URL must be configured in the ifthenpay backoffice portal pointing to `/api/payments/callback`

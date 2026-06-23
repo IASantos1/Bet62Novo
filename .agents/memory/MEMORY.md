@@ -10,3 +10,5 @@
 - [Upcoming filter must check odds](upcoming-filter-odds.md) — /upcoming route used !!m.hasRealOdds for non-football/tennis, filtering out V1-built games; correct filter is m.odds?.home > 0 && m.odds?.away > 0 for all sports
 - [WC2026 static schedule](wc2026-static-schedule.md) — V1 competition/5930/games only returns near-term fixtures; WC2026_STATIC (72 matches Jun11–Jun28) supplements _rebuildWC2026(); API matchups dedup prevents doubles
 - [Stripe payments](stripe-payments.md) — Stripe replaced ifthenpay; MB WAY uses Checkout Session (not native); webhook must be BEFORE express.json(); bare stripe SDK (no stripe-replit-sync)
+- [Tennis V1 settlement gap](tennis-v1-settlement.md) — ensureFinishedMatchResult only handles tennis-v2-* IDs; tennis-v1-* (ITF/Challenger) were silently skipped → bets never settled; fix: add tennis-v1 branch + scanTennisV1ForFinished in settlement cycle
+- [Live dedup key must omit league](live-dedup-league.md) — liveMatchIdentityKey must NOT include league; V1 and V2 return different league names for the same match → duplicates if league is part of the key

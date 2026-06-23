@@ -6572,6 +6572,67 @@ export async function ensureFinishedMatchResult(
     return false;
   }
 
+  // ── Tennis V1 match IDs (tennis-v1-{id}) ──────────────────────────────────
+  const tennisV1Match = matchId.match(/^tennis-v1-(\d+)$/);
+  if (tennisV1Match) {
+    const providerId = Number(tennisV1Match[1]);
+    const cached = finishedMatchResults.get(matchId);
+    if (cached && typeof cached.home === "number" && typeof cached.away === "number" && cached.home + cached.away > 0)
+      return true;
+
+    // Check DB
+    try {
+      if (db) {
+        const [row] = await db
+          .select()
+          .from(matchResultsTable)
+          .where(eq(matchResultsTable.matchId, matchId))
+          .limit(1);
+        if (row && typeof row.home === "number" && typeof row.away === "number" && row.home + row.away > 0) {
+          finishedMatchResults.set(matchId, {
+            home: row.home,
+            away: row.away,
+            homeTeam: row.homeTeam ?? "",
+            awayTeam: row.awayTeam ?? "",
+            status: row.status ?? undefined,
+            extras: row.extras ?? undefined,
+            finishedAt: row.finishedAt ? row.finishedAt.getTime() : Date.now(),
+          });
+          return true;
+        }
+      }
+    } catch {}
+
+    // Fallback: call V1 live feed and look for this game (finished games stay in the live feed briefly)
+    try {
+      const games = await getTennisLiveV1();
+      for (const g of games) {
+        if (Number(g.id) !== providerId) continue;
+        if (!isTennisV1GameFinished(g)) return false;
+        const home = Math.max(0, g.homeCompetitor?.score ?? 0);
+        const away = Math.max(0, g.awayCompetitor?.score ?? 0);
+        if (home === 0 && away === 0) return false;
+        const record = {
+          home,
+          away,
+          homeTeam: g.homeCompetitor?.name?.trim() ?? "",
+          awayTeam: g.awayCompetitor?.name?.trim() ?? "",
+          status: "finished",
+          finishedAt: Date.now(),
+        };
+        finishedMatchResults.set(matchId, record);
+        await enqueueMatchSettlement({
+          matchId,
+          jobId: buildMatchSettlementJobId({ matchId, home, away }),
+        });
+        await persistFinishedMatchRecord(matchId, "tennis", record);
+        _pruneFinishedResults();
+        return true;
+      }
+    } catch {}
+    return false;
+  }
+
   const fetchFootballExtras = async (
     id: number,
   ): Promise<{
@@ -7109,6 +7170,134 @@ export async function ensureFinishedMatchResult(
     } catch {}
   }
 
+  // For all non-tennis sports: direct per-event fetch as final V2 fallback.
+  // SportsAPI Pro V2 exposes /api/event/{id} for all sports.
+  if (parsed.sport !== "tennis") {
+    try {
+      const domain = WS_DOMAINS[parsed.sport];
+      const evResp = await fetch(
+        `https://${domain}/api/event/${parsed.id}`,
+        { signal: AbortSignal.timeout(5000), headers: sapiHeaders() },
+      );
+      if (evResp.ok) {
+        const evData = (await evResp.json()) as Record<string, unknown>;
+        const rawEv: unknown =
+          evData["event"] ??
+          (evData["data"] as Record<string, unknown> | undefined)?.[
+            "event"
+          ] ??
+          (evData["data"] as unknown);
+        if (rawEv) {
+          if (await tryEvents([rawEv])) return true;
+        }
+      }
+    } catch {}
+  }
+
+  // For football: V1 daily-feed fallback matched by team names.
+  // Covers leagues absent from V2 schedule (Erovnuli Liga 2, Club Friendlies, etc.)
+  if (parsed.sport === "football") {
+    const liveState = liveMatchState.get(matchId);
+    if (liveState?.home && liveState?.away) {
+      try {
+        const norm = (s: string) =>
+          String(s ?? "")
+            .toLowerCase()
+            .replace(/[^a-z0-9]/g, "");
+        const normH = norm(liveState.home);
+        const normA = norm(liveState.away);
+        const leagues = await getDailyLeagues();
+        for (const league of leagues) {
+          const raw = league.match;
+          if (!raw) continue;
+          const dailyMatches: SAPIMatchV2[] = Array.isArray(raw)
+            ? raw
+            : [raw];
+          for (const m of dailyMatches) {
+            if (!SAPI_FINISHED_STATUSES.has(m.status)) continue;
+            const mH = norm(m.home.name);
+            const mA = norm(m.away.name);
+            if (
+              (mH.includes(normH) || normH.includes(mH)) &&
+              (mA.includes(normA) || normA.includes(mA))
+            ) {
+              const home = parseInt(m.home.goals) || 0;
+              const away = parseInt(m.away.goals) || 0;
+              const htHome =
+                typeof m.ht?.home_goals === "number"
+                  ? m.ht.home_goals
+                  : undefined;
+              const htAway =
+                typeof m.ht?.away_goals === "number"
+                  ? m.ht.away_goals
+                  : undefined;
+              const rec = {
+                home,
+                away,
+                htHome,
+                htAway,
+                homeTeam: m.home.name,
+                awayTeam: m.away.name,
+                status: m.status,
+                finishedAt: now,
+              };
+              finishedMatchResults.set(matchId, rec);
+              await enqueueMatchSettlement({
+                matchId,
+                jobId: buildMatchSettlementJobId({
+                  matchId,
+                  home: rec.home,
+                  away: rec.away,
+                  htHome: rec.htHome,
+                  htAway: rec.htAway,
+                }),
+              });
+              try {
+                if (db) {
+                  await db
+                    .insert(matchResultsTable)
+                    .values({
+                      matchId,
+                      sport: "football",
+                      home: rec.home,
+                      away: rec.away,
+                      htHome: rec.htHome ?? null,
+                      htAway: rec.htAway ?? null,
+                      status: rec.status ?? null,
+                      homeTeam: rec.homeTeam,
+                      awayTeam: rec.awayTeam,
+                      cornersTotal: null,
+                      cardsTotal: null,
+                      firstGoal: null,
+                      extras: null,
+                      finishedAt: new Date(rec.finishedAt),
+                      updatedAt: new Date(),
+                    })
+                    .onConflictDoUpdate({
+                      target: matchResultsTable.matchId,
+                      set: {
+                        home: rec.home,
+                        away: rec.away,
+                        htHome: rec.htHome ?? null,
+                        htAway: rec.htAway ?? null,
+                        status: rec.status ?? null,
+                        homeTeam: rec.homeTeam,
+                        awayTeam: rec.awayTeam,
+                        finishedAt: new Date(rec.finishedAt),
+                        updatedAt: new Date(),
+                      },
+                    });
+                }
+              } catch {}
+              _pruneFinishedResults();
+              return true;
+            }
+          }
+        }
+      } catch {}
+    }
+  }
+
   return false;
 }
 
@@ -7233,6 +7422,44 @@ export async function scanVolleyballForFinished(): Promise<void> {
     _pruneFinishedResults();
   } catch (err) {
     logger.error({ err }, "scanVolleyballForFinished failed");
+  }
+}
+
+export async function scanTennisV1ForFinished(): Promise<void> {
+  try {
+    const games = await getTennisLiveV1();
+    for (const g of games) {
+      if (!isTennisV1GameFinished(g)) continue;
+      if (!g.id) continue;
+      const providerId = String(g.id);
+      const matchId = `tennis-v1-${providerId}`;
+      if (finishedMatchResults.has(matchId)) continue;
+
+      const home = Math.max(0, g.homeCompetitor?.score ?? 0);
+      const away = Math.max(0, g.awayCompetitor?.score ?? 0);
+      if (home === 0 && away === 0) continue; // no score data yet
+
+      const homeTeam = g.homeCompetitor?.name?.trim() ?? "";
+      const awayTeam = g.awayCompetitor?.name?.trim() ?? "";
+
+      const record = {
+        home,
+        away,
+        homeTeam,
+        awayTeam,
+        status: "finished",
+        finishedAt: Date.now(),
+      };
+      finishedMatchResults.set(matchId, record);
+      await enqueueMatchSettlement({
+        matchId,
+        jobId: buildMatchSettlementJobId({ matchId, home, away }),
+      });
+      await persistFinishedMatchRecord(matchId, "tennis", record);
+    }
+    _pruneFinishedResults();
+  } catch (err) {
+    logger.error({ err }, "scanTennisV1ForFinished failed");
   }
 }
 
@@ -11806,6 +12033,51 @@ async function buildLiveMatches(): Promise<LiveMatchState[]> {
           if (mkt !== updatedState.markets)
             (updatedState as LiveMatchState).markets = mkt;
         }
+        // VAR/penalty/card detection in score-unchanged ticks (V1 path)
+        // Without this, VAR events are only caught when score changes.
+        if (!matchMarketSuspension && m.events?.event) {
+          const rawEvts = Array.isArray(m.events.event)
+            ? m.events.event
+            : [m.events.event];
+          const recentMin = Math.max(1, minute - 2);
+          const V1_SUSP_TOKENS = [
+            "penalty", "var", "bigchance", "big_chance", "suspension", "expelled",
+          ];
+          const V1_SUSP_LABELS: Record<string, string> = {
+            penalty: "PENÁLTI",
+            var: "REVISÃO AO VAR",
+            bigchance: "GRANDE CHANCE",
+            big_chance: "GRANDE CHANCE",
+            suspension: "SUSPENSO",
+            expelled: "SUSPENSO",
+          };
+          const dangerEv = rawEvts.find((e: unknown) => {
+            const ev = e as Record<string, unknown>;
+            const t = String(ev["type"] ?? "").toLowerCase().replace(/[\s_-]/g, "");
+            const evMin = Number(ev["minute"] ?? 0);
+            if (evMin < recentMin) return false;
+            return V1_SUSP_TOKENS.some((tok) => t.includes(tok.replace("_", "")));
+          });
+          if (dangerEv) {
+            const now2 = Date.now();
+            const evType = String(
+              (dangerEv as Record<string, unknown>)["type"] ?? "",
+            ).toLowerCase().replace(/[\s_-]/g, "");
+            const rk = Object.keys(V1_SUSP_LABELS).find((k) =>
+              evType.includes(k),
+            );
+            const reason = rk ? V1_SUSP_LABELS[rk]! : "SUSPENSO";
+            matchMarketSuspension = Object.fromEntries(
+              FOOTBALL_SUSP_KEYS.map((k) => [
+                k,
+                now2 + footballSuspensionDelayMs("var", k),
+              ]),
+            ) as Record<string, number>;
+            (updatedState as LiveMatchState).marketSuspension =
+              matchMarketSuspension;
+            (updatedState as LiveMatchState)._suspensionReason = reason;
+          }
+        }
         liveMatchState.set(m.main_id, updatedState as LiveMatchState);
         result.push({
           ...(updatedState as LiveMatchState),
@@ -15548,17 +15820,20 @@ function normalizeMatchIdentityPart(value: string | undefined): string {
     .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, " ")
+    // strip common Spanish/Portuguese prepositions that differ between V1 and V2 feeds
+    // e.g. "9 de Julio Rafaela" (V1) vs "9 de Julio de Rafaela" (V2) → both become "9 julio rafaela"
+    .replace(/\b(de|do|da|di|del)\b/g, " ")
+    .replace(/\s+/g, " ")
     .trim();
 }
 
 function liveMatchIdentityKey(
-  match: Pick<LiveMatchState, "sport" | "home" | "away" | "league">,
+  match: Pick<LiveMatchState, "sport" | "home" | "away">,
 ): string {
   return [
     normalizeMatchIdentityPart(match.sport),
     normalizeMatchIdentityPart(match.home),
     normalizeMatchIdentityPart(match.away),
-    normalizeMatchIdentityPart(match.league),
   ].join("|");
 }
 
@@ -24948,7 +25223,7 @@ function parseScoreStr(
 
 let footballV1LiveCache: object[] | null = null;
 let footballV1LiveFetchedAt = 0;
-const FOOTBALL_V1_LIVE_TTL = 30 * 1000;
+const FOOTBALL_V1_LIVE_TTL = 5_000; // 5s — SportsAPI Pro updates every 1-3s
 
 router.get("/football-livescores", async (_req: Request, res: Response) => {
   res.json({ leagues: footballV1LiveCache ?? [] });
@@ -25364,7 +25639,7 @@ const footballLiveStatsCache = new Map<
   string,
   { data: object; fetchedAt: number }
 >();
-const FOOTBALL_LIVE_STATS_TTL = 30 * 1000; // 30s — live data
+const FOOTBALL_LIVE_STATS_TTL = 5_000; // 5s — SportsAPI Pro updates every 1-3s
 
 router.get(
   "/football-live-match-stats/:leagueSlug",
