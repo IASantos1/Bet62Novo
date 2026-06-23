@@ -16983,7 +16983,7 @@ async function buildBaseballUpcoming(): Promise<UpcomingMatch[]> {
         sport: "baseball",
         hasRealOdds: !!(realOdds && realOdds.home > 0),
         odds: { home: homeOdds, draw: 0, away: awayOdds },
-        markets: makeAdvancedMarketsFromTeams(home, away),
+        markets: makeMLBMarketsFromTeams(home, away, homeOdds, awayOdds),
       });
     }
 
