@@ -28532,6 +28532,95 @@ async function fetchV5Sports(): Promise<unknown> {
   }
 }
 
+// V5 Example: Get Event Details (including all markets and stats)
+async function fetchV5EventDetails(sport: string, eventId: number): Promise<unknown> {
+  try {
+    const baseUrl = sport === "football" ? SAPI_V5_FOOTBALL
+      : sport === "basketball" ? SAPI_V5_BASKETBALL
+      : sport === "hockey" ? SAPI_V5_HOCKEY
+      : sport === "tennis" ? SAPI_V5_TENNIS
+      : sport === "baseball" ? SAPI_V5_BASEBALL
+      : SAPI_V5_FOOTBALL;
+    const resp = await fetch(`${baseUrl}/api/v1/event/${eventId}`, {
+      headers: sapiHeaders(),
+      signal: AbortSignal.timeout(15_000),
+    });
+    if (!resp.ok) return null;
+    return await resp.json();
+  } catch {
+    return null;
+  }
+}
+
+// Test Routes for V5
+router.get("/v5-test/sports", async (_req: Request, res: Response) => {
+  try {
+    const data = await fetchV5Sports();
+    res.json(data);
+  } catch (err) {
+    res.status(500).json({ error: "Failed to fetch sports" });
+  }
+});
+
+router.get("/v5-test/top/:sport", async (req: Request, res: Response) => {
+  try {
+    const sport = req.params.sport;
+    let baseUrl: string;
+    switch (sport) {
+      case "football": baseUrl = SAPI_V5_FOOTBALL; break;
+      case "basketball": baseUrl = SAPI_V5_BASKETBALL; break;
+      case "hockey": baseUrl = SAPI_V5_HOCKEY; break;
+      case "tennis": baseUrl = SAPI_V5_TENNIS; break;
+      case "baseball": baseUrl = SAPI_V5_BASEBALL; break;
+      default: return res.status(400).json({ error: "Invalid sport" });
+    }
+    const resp = await fetch(`${baseUrl}/api/v1/top`, {
+      headers: sapiHeaders(),
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (!resp.ok) return res.status(resp.status).json({ error: "Failed to fetch top events" });
+    const data = await resp.json();
+    res.json(data);
+  } catch (err) {
+    res.status(500).json({ error: "Failed to fetch top events" });
+  }
+});
+
+router.get("/v5-test/live/:sport", async (req: Request, res: Response) => {
+  try {
+    const sport = req.params.sport;
+    let baseUrl: string;
+    switch (sport) {
+      case "football": baseUrl = SAPI_V5_FOOTBALL; break;
+      case "basketball": baseUrl = SAPI_V5_BASKETBALL; break;
+      case "hockey": baseUrl = SAPI_V5_HOCKEY; break;
+      case "tennis": baseUrl = SAPI_V5_TENNIS; break;
+      case "baseball": baseUrl = SAPI_V5_BASEBALL; break;
+      default: return res.status(400).json({ error: "Invalid sport" });
+    }
+    const resp = await fetch(`${baseUrl}/api/v1/live`, {
+      headers: sapiHeaders(),
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (!resp.ok) return res.status(resp.status).json({ error: "Failed to fetch live events" });
+    const data = await resp.json();
+    res.json(data);
+  } catch (err) {
+    res.status(500).json({ error: "Failed to fetch live events" });
+  }
+});
+
+router.get("/v5-test/event/:sport/:eventId", async (req: Request, res: Response) => {
+  try {
+    const { sport, eventId } = req.params;
+    const data = await fetchV5EventDetails(sport, parseInt(eventId, 10));
+    if (data === null) return res.status(404).json({ error: "Event not found" });
+    res.json(data);
+  } catch (err) {
+    res.status(500).json({ error: "Failed to fetch event details" });
+  }
+});
+
 export function initLiveWsServer(httpServer: http.Server): void {
   const wss = new WebSocketServer({ noServer: true });
 
