@@ -1125,6 +1125,7 @@ export function buildLiveSettlementScore(live: LiveResult | null): {
   tennisSets?: Array<[number, number]>;
   basketballQuarters?: Array<[number, number]>;
   hockeyPeriods?: Array<[number, number]>;
+  baseballInnings?: Array<[number, number]>;
   firstGoal?: "home" | "away" | "none";
 } | null {
   const homeScore = live ? Number((live as any).homeScore ?? NaN) : NaN;
@@ -1153,6 +1154,9 @@ export function buildLiveSettlementScore(live: LiveResult | null): {
     hockeyPeriods: Array.isArray(liveExtra?.periods)
       ? liveExtra.periods
       : getHockeyPeriodsFromExtras(extras),
+    baseballInnings: Array.isArray(liveExtra?.innings)
+      ? liveExtra.innings
+      : getBaseballInningsFromExtras(extras),
     firstGoal: liveExtra?.firstGoal,
   };
 }
@@ -3417,6 +3421,7 @@ function liveDefinitiveOutcomeForSel(
     tennisSets?: Array<[number, number]>;
     basketballQuarters?: Array<[number, number]>;
     hockeyPeriods?: Array<[number, number]>;
+    baseballInnings?: Array<[number, number]>;
     firstGoal?: "home" | "away" | "none";
   },
 ): "won" | "lost" | null {
@@ -3700,6 +3705,52 @@ function liveDefinitiveOutcomeForSel(
     const totalP = p[0] + p[1];
     if (side === "o") return totalP > line ? "won" : null;
     return totalP > line ? "lost" : null;
+  }
+
+  // Baseball Total Runs (Over/Under)
+  const mMLBTotal = s.match(/^mlb-tot-([ou])-([\d.]+)$/) || s.match(/^mlb-([ou])([\d.]+)$/);
+  if (mMLBTotal) {
+    const side = mMLBTotal[1]!;
+    const line = decodeCompactLine(mMLBTotal[2]!);
+    if (!Number.isFinite(line)) return null;
+    if (side === "o") return total > line ? "won" : null;
+    return total > line ? "lost" : null;
+  }
+
+  // Baseball F5 Markets (First 5 Innings)
+  const baseballInnings = Array.isArray(score.baseballInnings) ? score.baseballInnings : [];
+  if (baseballInnings.length >= 5) {
+    // Calculate F5 total and result
+    const [f5Home, f5Away] = baseballInnings
+      .slice(0, 5)
+      .reduce(
+        (acc, [ih, ia]) => [acc[0] + ih, acc[1] + ia] as [number, number],
+        [0, 0] as [number, number],
+      );
+    const f5Total = f5Home + f5Away;
+
+    // F5 Result
+    const mF5Result = s.match(/^mlb-f5-(home|away)$/) || s.match(/^f5-(home|away)$/);
+    if (mF5Result) {
+      if (f5Home === f5Away) return null; // Wait for final if tied
+      return mF5Result[1] === "home"
+        ? f5Home > f5Away ? "won" : "lost"
+        : f5Away > f5Home ? "won" : "lost";
+    }
+
+    // F5 Total
+    const mF5Total = s.match(/^mlb-f5t-([ou])-([\d.]+)$/) || s.match(/^f5t-([ou])$/);
+    if (mF5Total) {
+      const side = mF5Total[1]!;
+      // Get line from selection or parse label
+      let line: number | null = mF5Total[2] ? decodeCompactLine(mF5Total[2]) : null;
+      if (line == null) {
+        line = parseSelectionLabelLine(sel.label);
+      }
+      if (line == null || !Number.isFinite(line)) return null;
+      if (side === "o") return f5Total > line ? "won" : null;
+      return f5Total > line ? "lost" : null;
+    }
   }
 
   return null;
