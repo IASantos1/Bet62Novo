@@ -11979,6 +11979,10 @@ async function buildLiveMatches(): Promise<LiveMatchState[]> {
           matchMarketSuspension =
             Object.keys(active).length > 0 ? active : undefined;
         }
+        // Clear suspension reason if no active suspensions left
+        if (!matchMarketSuspension) {
+          matchSuspensionReason = undefined;
+        }
 
         // Re-apply filterLiveMarkets so settled lines (BTTS, Over/Under) stay zeroed
         // even if drift or initialization left them non-zero.
@@ -12004,7 +12008,7 @@ async function buildLiveMatches(): Promise<LiveMatchState[]> {
           _baseMarkets: safeBase,
           marketSuspension: matchMarketSuspension,
           _suspensionReason: matchMarketSuspension
-            ? existing._suspensionReason
+            ? matchSuspensionReason ?? existing._suspensionReason
             : undefined,
           _firstSeenAt: firstSeenAt,
           _htStartedAt: isHT ? htStartedAt : undefined,
