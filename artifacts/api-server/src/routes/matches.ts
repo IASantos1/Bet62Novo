@@ -4968,6 +4968,214 @@ async function getFootballV2RedCards(
   }
 }
 
+async function fetchFootballExtras(
+  id: number,
+): Promise<FootballExtras | null> {
+  try {
+    const resp = await fetch(`${SAPI_V2_FOOTBALL}/match/${id}/statistics`, {
+      signal: AbortSignal.timeout(9000),
+      headers: sapiHeaders(),
+    });
+    if (!resp.ok) return null;
+    const data = (await resp.json()) as Record<string, unknown>;
+    const get = (o: unknown, path: string[]): unknown => {
+      let cur: unknown = o;
+      for (const k of path) {
+        if (!cur || typeof cur !== "object") return undefined;
+        cur = (cur as Record<string, unknown>)[k];
+      }
+      return cur;
+    };
+    const toNum = (v: unknown): number | undefined => {
+      if (typeof v === "number" && Number.isFinite(v)) return v;
+      if (typeof v === "string" && v.trim() !== "") {
+        const n = Number(v);
+        return Number.isFinite(n) ? n : undefined;
+      }
+      return undefined;
+    };
+    const toBool = (v: unknown): boolean => {
+      if (typeof v === "boolean") return v;
+      const raw = String(v ?? "")
+        .trim()
+        .toLowerCase();
+      return raw === "true" || raw === "1" || raw === "yes";
+    };
+    const cornersHome =
+      toNum(get(data, ["team_stats", "home", "corners", "total"])) ?? 0;
+    const cornersAway =
+      toNum(get(data, ["team_stats", "away", "corners", "total"])) ?? 0;
+    const cornersTotal = cornersHome + cornersAway;
+
+    const ev = get(data, ["event_summary"]) as
+      | Record<string, unknown>
+      | undefined;
+    const toArr = (v: unknown): Record<string, unknown>[] => {
+      if (!v) return [];
+      if (Array.isArray(v))
+        return v.filter((x) => x && typeof x === "object") as Record<
+          string,
+          unknown
+        >[];
+      if (typeof v === "object") return [v as Record<string, unknown>];
+      return [];
+    };
+    const countCards = (side: "home" | "away"): number => {
+      const s = ev?.[side] as Record<string, unknown> | undefined;
+      const y = toArr(
+        (s?.["yellowcards"] as Record<string, unknown> | undefined)?.[
+          "event"
+        ],
+      );
+      const r = toArr(
+        (s?.["redcards"] as Record<string, unknown> | undefined)?.["event"],
+      );
+      return y.length + r.length;
+    };
+    const cardsTotal = countCards("home") + countCards("away");
+
+    const parseMinute = (e: Record<string, unknown>): number => {
+      const m = toNum(e["minute"]) ?? 0;
+      const ex = toNum(e["extra_min"]) ?? 0;
+      return m * 100 + ex;
+    };
+    const mapGoalEvents = (
+      side: "home" | "away",
+    ): Array<{
+      team: "home" | "away";
+      minute: number;
+      extraMinute?: number;
+      playerName: string;
+      assistName?: string;
+      ownGoal?: boolean;
+      penalty?: boolean;
+      varCancelled?: boolean;
+    }> => {
+      const s = ev?.[side] as Record<string, unknown> | undefined;
+      const goals = toArr(
+        (s?.["goals"] as Record<string, unknown> | undefined)?.["event"],
+      );
+      return goals.map((goal) => {
+        const minute = toNum(goal["minute"]) ?? 0;
+        const extraMinute = toNum(goal["extra_min"]);
+        const playerName = String(
+          goal["player_name"] ?? goal["player"] ?? "",
+        ).trim();
+        const assistName = String(
+          goal["assist_player_name"] ?? goal["assist_player"] ?? "",
+        ).trim();
+        return {
+          team: side,
+          minute,
+          ...(extraMinute != null ? { extraMinute } : {}),
+          playerName,
+          ...(assistName ? { assistName } : {}),
+          ...(toBool(goal["own_goal"]) ? { ownGoal: true } : {}),
+          ...(toBool(goal["penalty"]) ? { penalty: true } : {}),
+          ...(toBool(goal["var_cancelled"]) ? { varCancelled: true } : {}),
+        };
+      });
+    };
+    const mapCardEvents = (
+      side: "home" | "away",
+      cardType: "yellow" | "red",
+    ): Array<{
+      team: "home" | "away";
+      minute: number;
+      extraMinute?: number;
+      playerName: string;
+      cardType: "yellow" | "red";
+    }> => {
+      const s = ev?.[side] as Record<string, unknown> | undefined;
+      const cards = toArr(
+        (
+          s?.[cardType === "yellow" ? "yellowcards" : "redcards"] as
+            | Record<string, unknown>
+            | undefined
+        )?.["event"],
+      );
+      return cards.map((card) => {
+        const minute = toNum(card["minute"]) ?? 0;
+        const extraMinute = toNum(card["extra_min"]);
+        const playerName = String(
+          card["player_name"] ?? card["player"] ?? "",
+        ).trim();
+        return {
+          team: side,
+          minute,
+          ...(extraMinute != null ? { extraMinute } : {}),
+          playerName,
+          cardType,
+        };
+      });
+    };
+    const minOrNull = (vals: number[]): number | null =>
+      vals.length ? vals.reduce((a, b) => Math.min(a, b), vals[0]!) : null;
+    const homeGoalsArr = (() => {
+      const s = ev?.["home"] as Record<string, unknown> | undefined;
+      const goals = toArr(
+        (s?.["goals"] as Record<string, unknown> | undefined)?.["event"],
+      );
+      return goals.map(parseMinute).filter((n) => Number.isFinite(n));
+    })();
+    const awayGoalsArr = (() => {
+      const s = ev?.["away"] as Record<string, unknown> | undefined;
+      const goals = toArr(
+        (s?.["goals"] as Record<string, unknown> | undefined)?.["event"],
+      );
+      return goals.map(parseMinute).filter((n) => Number.isFinite(n));
+    })();
+    const fgH = minOrNull(homeGoalsArr);
+    const fgA = minOrNull(awayGoalsArr);
+    const firstGoal =
+      fgH == null && fgA == null
+        ? "none"
+        : fgH != null && fgA == null
+          ? "home"
+          : fgH == null && fgA != null
+            ? "away"
+            : (fgH as number) <= (fgA as number)
+              ? "home"
+              : "away";
+    const goalEvents = [
+      ...mapGoalEvents("home"),
+      ...mapGoalEvents("away"),
+    ].sort(
+      (a, b) =>
+        a.minute * 100 +
+        (a.extraMinute ?? 0) -
+        (b.minute * 100 + (b.extraMinute ?? 0)),
+    );
+    const cardEvents = [
+      ...mapCardEvents("home", "yellow"),
+      ...mapCardEvents("away", "yellow"),
+      ...mapCardEvents("home", "red"),
+      ...mapCardEvents("away", "red"),
+    ].sort(
+      (a, b) =>
+        a.minute * 100 +
+        (a.extraMinute ?? 0) -
+        (b.minute * 100 + (b.extraMinute ?? 0)),
+    );
+
+    return {
+      cornersTotal: Number.isFinite(cornersTotal) ? cornersTotal : undefined,
+      cardsTotal: Number.isFinite(cardsTotal) ? cardsTotal : undefined,
+      firstGoal,
+      ...(goalEvents.length > 0 || cardEvents.length > 0
+        ? {
+            football: {
+              ...(goalEvents.length > 0 ? { goals: goalEvents } : {}),
+              ...(cardEvents.length > 0 ? { cards: cardEvents } : {}),
+            },
+          }
+        : {}),
+    };
+  } catch {
+    return null;
+  }
+}
+
 // Normaliser helpers
 function v2TeamName(t: string | SAPIV2TeamObj | undefined): string {
   if (!t) return "Unknown";
@@ -5627,6 +5835,31 @@ type TennisStatData = {
   firstServePct: string; // e.g. "66%"
   winners: number;
   unforcedErrors: number;
+};
+
+type FootballExtras = {
+  cornersTotal?: number;
+  cardsTotal?: number;
+  firstGoal?: "home" | "away" | "none";
+  football?: {
+    goals?: Array<{
+      team: "home" | "away";
+      minute: number;
+      extraMinute?: number;
+      playerName: string;
+      assistName?: string;
+      ownGoal?: boolean;
+      penalty?: boolean;
+      varCancelled?: boolean;
+    }>;
+    cards?: Array<{
+      team: "home" | "away";
+      minute: number;
+      extraMinute?: number;
+      playerName: string;
+      cardType: "yellow" | "red";
+    }>;
+  };
 };
 type TennisStatsPlayerRaw = {
   id: string;
@@ -6648,236 +6881,7 @@ export async function ensureFinishedMatchResult(
     return false;
   }
 
-  const fetchFootballExtras = async (
-    id: number,
-  ): Promise<{
-    cornersTotal?: number;
-    cardsTotal?: number;
-    firstGoal?: "home" | "away" | "none";
-    football?: {
-      goals?: Array<{
-        team: "home" | "away";
-        minute: number;
-        extraMinute?: number;
-        playerName: string;
-        assistName?: string;
-        ownGoal?: boolean;
-        penalty?: boolean;
-        varCancelled?: boolean;
-      }>;
-      cards?: Array<{
-        team: "home" | "away";
-        minute: number;
-        extraMinute?: number;
-        playerName: string;
-        cardType: "yellow" | "red";
-      }>;
-    };
-  } | null> => {
-    try {
-      const resp = await fetch(`${SAPI_V2_FOOTBALL}/match/${id}/statistics`, {
-        signal: AbortSignal.timeout(9000),
-        headers: sapiHeaders(),
-      });
-      if (!resp.ok) return null;
-      const data = (await resp.json()) as Record<string, unknown>;
-      const get = (o: unknown, path: string[]): unknown => {
-        let cur: unknown = o;
-        for (const k of path) {
-          if (!cur || typeof cur !== "object") return undefined;
-          cur = (cur as Record<string, unknown>)[k];
-        }
-        return cur;
-      };
-      const toNum = (v: unknown): number | undefined => {
-        if (typeof v === "number" && Number.isFinite(v)) return v;
-        if (typeof v === "string" && v.trim() !== "") {
-          const n = Number(v);
-          return Number.isFinite(n) ? n : undefined;
-        }
-        return undefined;
-      };
-      const toBool = (v: unknown): boolean => {
-        if (typeof v === "boolean") return v;
-        const raw = String(v ?? "")
-          .trim()
-          .toLowerCase();
-        return raw === "true" || raw === "1" || raw === "yes";
-      };
-      const cornersHome =
-        toNum(get(data, ["team_stats", "home", "corners", "total"])) ?? 0;
-      const cornersAway =
-        toNum(get(data, ["team_stats", "away", "corners", "total"])) ?? 0;
-      const cornersTotal = cornersHome + cornersAway;
-
-      const ev = get(data, ["event_summary"]) as
-        | Record<string, unknown>
-        | undefined;
-      const toArr = (v: unknown): Record<string, unknown>[] => {
-        if (!v) return [];
-        if (Array.isArray(v))
-          return v.filter((x) => x && typeof x === "object") as Record<
-            string,
-            unknown
-          >[];
-        if (typeof v === "object") return [v as Record<string, unknown>];
-        return [];
-      };
-      const countCards = (side: "home" | "away"): number => {
-        const s = ev?.[side] as Record<string, unknown> | undefined;
-        const y = toArr(
-          (s?.["yellowcards"] as Record<string, unknown> | undefined)?.[
-            "event"
-          ],
-        );
-        const r = toArr(
-          (s?.["redcards"] as Record<string, unknown> | undefined)?.["event"],
-        );
-        return y.length + r.length;
-      };
-      const cardsTotal = countCards("home") + countCards("away");
-
-      const parseMinute = (e: Record<string, unknown>): number => {
-        const m = toNum(e["minute"]) ?? 0;
-        const ex = toNum(e["extra_min"]) ?? 0;
-        return m * 100 + ex;
-      };
-      const mapGoalEvents = (
-        side: "home" | "away",
-      ): Array<{
-        team: "home" | "away";
-        minute: number;
-        extraMinute?: number;
-        playerName: string;
-        assistName?: string;
-        ownGoal?: boolean;
-        penalty?: boolean;
-        varCancelled?: boolean;
-      }> => {
-        const s = ev?.[side] as Record<string, unknown> | undefined;
-        const goals = toArr(
-          (s?.["goals"] as Record<string, unknown> | undefined)?.["event"],
-        );
-        return goals.map((goal) => {
-          const minute = toNum(goal["minute"]) ?? 0;
-          const extraMinute = toNum(goal["extra_min"]);
-          const playerName = String(
-            goal["player_name"] ?? goal["player"] ?? "",
-          ).trim();
-          const assistName = String(
-            goal["assist_player_name"] ?? goal["assist_player"] ?? "",
-          ).trim();
-          return {
-            team: side,
-            minute,
-            ...(extraMinute != null ? { extraMinute } : {}),
-            playerName,
-            ...(assistName ? { assistName } : {}),
-            ...(toBool(goal["own_goal"]) ? { ownGoal: true } : {}),
-            ...(toBool(goal["penalty"]) ? { penalty: true } : {}),
-            ...(toBool(goal["var_cancelled"]) ? { varCancelled: true } : {}),
-          };
-        });
-      };
-      const mapCardEvents = (
-        side: "home" | "away",
-        cardType: "yellow" | "red",
-      ): Array<{
-        team: "home" | "away";
-        minute: number;
-        extraMinute?: number;
-        playerName: string;
-        cardType: "yellow" | "red";
-      }> => {
-        const s = ev?.[side] as Record<string, unknown> | undefined;
-        const cards = toArr(
-          (
-            s?.[cardType === "yellow" ? "yellowcards" : "redcards"] as
-              | Record<string, unknown>
-              | undefined
-          )?.["event"],
-        );
-        return cards.map((card) => {
-          const minute = toNum(card["minute"]) ?? 0;
-          const extraMinute = toNum(card["extra_min"]);
-          const playerName = String(
-            card["player_name"] ?? card["player"] ?? "",
-          ).trim();
-          return {
-            team: side,
-            minute,
-            ...(extraMinute != null ? { extraMinute } : {}),
-            playerName,
-            cardType,
-          };
-        });
-      };
-      const minOrNull = (vals: number[]): number | null =>
-        vals.length ? vals.reduce((a, b) => Math.min(a, b), vals[0]!) : null;
-      const homeGoalsArr = (() => {
-        const s = ev?.["home"] as Record<string, unknown> | undefined;
-        const goals = toArr(
-          (s?.["goals"] as Record<string, unknown> | undefined)?.["event"],
-        );
-        return goals.map(parseMinute).filter((n) => Number.isFinite(n));
-      })();
-      const awayGoalsArr = (() => {
-        const s = ev?.["away"] as Record<string, unknown> | undefined;
-        const goals = toArr(
-          (s?.["goals"] as Record<string, unknown> | undefined)?.["event"],
-        );
-        return goals.map(parseMinute).filter((n) => Number.isFinite(n));
-      })();
-      const fgH = minOrNull(homeGoalsArr);
-      const fgA = minOrNull(awayGoalsArr);
-      const firstGoal =
-        fgH == null && fgA == null
-          ? "none"
-          : fgH != null && fgA == null
-            ? "home"
-            : fgH == null && fgA != null
-              ? "away"
-              : (fgH as number) <= (fgA as number)
-                ? "home"
-                : "away";
-      const goalEvents = [
-        ...mapGoalEvents("home"),
-        ...mapGoalEvents("away"),
-      ].sort(
-        (a, b) =>
-          a.minute * 100 +
-          (a.extraMinute ?? 0) -
-          (b.minute * 100 + (b.extraMinute ?? 0)),
-      );
-      const cardEvents = [
-        ...mapCardEvents("home", "yellow"),
-        ...mapCardEvents("away", "yellow"),
-        ...mapCardEvents("home", "red"),
-        ...mapCardEvents("away", "red"),
-      ].sort(
-        (a, b) =>
-          a.minute * 100 +
-          (a.extraMinute ?? 0) -
-          (b.minute * 100 + (b.extraMinute ?? 0)),
-      );
-
-      return {
-        cornersTotal: Number.isFinite(cornersTotal) ? cornersTotal : undefined,
-        cardsTotal: Number.isFinite(cardsTotal) ? cardsTotal : undefined,
-        firstGoal,
-        ...(goalEvents.length > 0 || cardEvents.length > 0
-          ? {
-              football: {
-                ...(goalEvents.length > 0 ? { goals: goalEvents } : {}),
-                ...(cardEvents.length > 0 ? { cards: cardEvents } : {}),
-              },
-            }
-          : {}),
-      };
-    } catch {
-      return null;
-    }
-  };
+  // Fetching is done via top-level fetchFootballExtras function
 
   const parse = (): { sport: SportKey; prefix: string; id: number } | null => {
     const m = matchId.match(
@@ -12680,6 +12684,17 @@ async function buildLiveMatches(): Promise<LiveMatchState[]> {
       if (m.et) footballExtra.etScore = [m.et.home_goals, m.et.away_goals];
       if (m.penalties)
         footballExtra.penScore = [m.penalties.home_pen, m.penalties.away_pen];
+      
+      // Fetch live stats (corners, cards) and add to _liveExtra
+      try {
+        const extras = await fetchFootballExtras(Number(m.main_id));
+        if (extras) {
+          if (extras.cornersTotal !== undefined) footballExtra.cornersTotal = extras.cornersTotal;
+          if (extras.cardsTotal !== undefined) footballExtra.cardsTotal = extras.cardsTotal;
+        }
+      } catch {
+        // Ignore errors fetching stats
+      }
 
       const state: LiveMatchState = {
         id: m.main_id,
