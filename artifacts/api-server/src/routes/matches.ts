@@ -28565,6 +28565,7 @@ router.get("/v5-test/sports", async (_req: Request, res: Response) => {
 router.get("/v5-test/top/:sport", async (req: Request, res: Response) => {
   try {
     const sport = req.params.sport;
+    if (typeof sport !== "string") return res.status(400).json({ error: "Invalid sport" });
     let baseUrl: string;
     switch (sport) {
       case "football": baseUrl = SAPI_V5_FOOTBALL; break;
@@ -28589,6 +28590,7 @@ router.get("/v5-test/top/:sport", async (req: Request, res: Response) => {
 router.get("/v5-test/live/:sport", async (req: Request, res: Response) => {
   try {
     const sport = req.params.sport;
+    if (typeof sport !== "string") return res.status(400).json({ error: "Invalid sport" });
     let baseUrl: string;
     switch (sport) {
       case "football": baseUrl = SAPI_V5_FOOTBALL; break;
@@ -28612,8 +28614,12 @@ router.get("/v5-test/live/:sport", async (req: Request, res: Response) => {
 
 router.get("/v5-test/event/:sport/:eventId", async (req: Request, res: Response) => {
   try {
-    const { sport, eventId } = req.params;
-    const data = await fetchV5EventDetails(sport, parseInt(eventId, 10));
+    const sport = req.params.sport;
+    const eventId = req.params.eventId;
+    if (typeof sport !== "string" || typeof eventId !== "string") return res.status(400).json({ error: "Invalid params" });
+    const eventIdNum = parseInt(eventId, 10);
+    if (isNaN(eventIdNum)) return res.status(400).json({ error: "Invalid eventId" });
+    const data = await fetchV5EventDetails(sport, eventIdNum);
     if (data === null) return res.status(404).json({ error: "Event not found" });
     res.json(data);
   } catch (err) {
