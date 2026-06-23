@@ -3688,6 +3688,20 @@ function liveDefinitiveOutcomeForSel(
     return null;
   }
 
+  // Hockey Period Totals (Over/Under)
+  const mPTotal = s.match(/^p([1-3])t-([ou])(?:-([\d.]+))?$/);
+  if (mPTotal) {
+    const pNum = Number(mPTotal[1]);
+    const side = mPTotal[2]!;
+    const lineStr = mPTotal[3];
+    const line = decodeCompactLine(lineStr ?? "");
+    const p = hockeyPeriods[pNum - 1] ?? null;
+    if (!p || !Number.isFinite(p[0]) || !Number.isFinite(p[1]) || !Number.isFinite(line)) return null;
+    const totalP = p[0] + p[1];
+    if (side === "o") return totalP > line ? "won" : null;
+    return totalP > line ? "lost" : null;
+  }
+
   return null;
 }
 
