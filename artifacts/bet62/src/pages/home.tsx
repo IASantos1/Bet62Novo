@@ -2665,6 +2665,8 @@ type Match = {
     etScore?: [number, number];
     penScore?: [number, number];
     htScore?: [number, number];
+    cornersTotal?: number;
+    cardsTotal?: number;
   };
   // Red cards per team (football only)
   redCardsHome?: number;
@@ -6398,6 +6400,11 @@ export default function Home({
       awayHits?: number;
       homeErrors?: number;
       awayErrors?: number;
+      etScore?: [number, number];
+      penScore?: [number, number];
+      htScore?: [number, number];
+      cornersTotal?: number;
+      cardsTotal?: number;
     };
   };
 
@@ -8341,6 +8348,16 @@ export default function Home({
           </span>
         </div>
         <div className="flex items-center gap-2 shrink-0 ml-2">
+          {(match.isLive && match.sport === "football" && (match._liveExtra?.cornersTotal !== undefined || match._liveExtra?.cardsTotal !== undefined)) && (
+            <div className="flex items-center gap-2">
+              {match._liveExtra?.cornersTotal !== undefined && (
+                <span className="text-[9px] font-semibold text-zinc-500">🚩{match._liveExtra.cornersTotal}</span>
+              )}
+              {match._liveExtra?.cardsTotal !== undefined && (
+                <span className="text-[9px] font-semibold text-zinc-500">🟨{match._liveExtra.cardsTotal}</span>
+              )}
+            </div>
+          )}
           {rightSlot}
           {timeStr && (
             <span className="text-[11px] text-zinc-500">{timeStr}</span>
@@ -9063,7 +9080,19 @@ export default function Home({
                 {match.league}
               </span>
             </div>
-            <div className="shrink-0">{liveBadge}</div>
+            <div className="flex items-center gap-2 shrink-0">
+              {(match.isLive && match.sport === "football" && (match._liveExtra?.cornersTotal !== undefined || match._liveExtra?.cardsTotal !== undefined)) && (
+                <div className="flex items-center gap-2">
+                  {match._liveExtra?.cornersTotal !== undefined && (
+                    <span className={`text-[9px] font-semibold ${isDarkTheme ? "text-zinc-500" : "text-zinc-400"}`}>🚩{match._liveExtra.cornersTotal}</span>
+                  )}
+                  {match._liveExtra?.cardsTotal !== undefined && (
+                    <span className={`text-[9px] font-semibold ${isDarkTheme ? "text-zinc-500" : "text-zinc-400"}`}>🟨{match._liveExtra.cardsTotal}</span>
+                  )}
+                </div>
+              )}
+              {liveBadge}
+            </div>
           </div>
           {rivalry && (
             <div className="mb-2 text-[9px] font-black uppercase tracking-[0.2em] text-red-500 text-center">
