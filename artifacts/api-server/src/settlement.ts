@@ -1,4 +1,4 @@
-import {
+﻿import {
   db,
   betsTable,
   cashoutStatesTable,
@@ -1125,6 +1125,7 @@ export function buildLiveSettlementScore(live: LiveResult | null): {
   tennisSets?: Array<[number, number]>;
   basketballQuarters?: Array<[number, number]>;
   hockeyPeriods?: Array<[number, number]>;
+  firstGoal?: "home" | "away" | "none";
 } | null {
   const homeScore = live ? Number((live as any).homeScore ?? NaN) : NaN;
   const awayScore = live ? Number((live as any).awayScore ?? NaN) : NaN;
@@ -1152,6 +1153,7 @@ export function buildLiveSettlementScore(live: LiveResult | null): {
     hockeyPeriods: Array.isArray(liveExtra?.periods)
       ? liveExtra.periods
       : getHockeyPeriodsFromExtras(extras),
+    firstGoal: liveExtra?.firstGoal,
   };
 }
 
@@ -3415,6 +3417,7 @@ function liveDefinitiveOutcomeForSel(
     tennisSets?: Array<[number, number]>;
     basketballQuarters?: Array<[number, number]>;
     hockeyPeriods?: Array<[number, number]>;
+    firstGoal?: "home" | "away" | "none";
   },
 ): "won" | "lost" | null {
   if (blocksLiveEarlySettlement(score.status)) return null;
@@ -3599,6 +3602,46 @@ function liveDefinitiveOutcomeForSel(
     return away > line ? "lost" : null;
   }
 
+  // Exact Goals (Golos Exatos)
+  if (s === "eg-g0") {
+    // If any goals scored, lost immediately
+    return total > 0 ? "lost" : null;
+  }
+  if (s === "eg-g1") {
+    // If more than 1 goal, lost immediately
+    return total > 1 ? "lost" : null;
+  }
+  if (s === "eg-g2") {
+    return total > 2 ? "lost" : null;
+  }
+  if (s === "eg-g3") {
+    return total > 3 ? "lost" : null;
+  }
+  if (s === "eg-g4") {
+    return total > 4 ? "lost" : null;
+  }
+  if (s === "eg-g5plus") {
+    // If 5 or more goals, won immediately
+    return total >= 5 ? "won" : null;
+  }
+
+  // First Goal markets (requires firstGoal data)
+  if (s === "fg-home") {
+    if (score.firstGoal === "home") return "won";
+    if (score.firstGoal === "away" || score.firstGoal === "none") return "lost";
+    return null;
+  }
+  if (s === "fg-away") {
+    if (score.firstGoal === "away") return "won";
+    if (score.firstGoal === "home" || score.firstGoal === "none") return "lost";
+    return null;
+  }
+  if (s === "fg-none") {
+    if (score.firstGoal === "none") return "won";
+    if (score.firstGoal === "home" || score.firstGoal === "away") return "lost";
+    return null;
+  }
+
   return null;
 }
 
@@ -3705,6 +3748,7 @@ export async function autoSettlePendingBets(opts?: {
         }
 
         let liveLostDetected = false;
+        const liveOutcomes: SettlementOutcome[] = [];
         for (const sel of selections) {
           const live = findLiveResult(sel, bet.matchId, isSingle);
           const liveScore = buildLiveSettlementScore(live);
@@ -3713,8 +3757,8 @@ export async function autoSettlePendingBets(opts?: {
             : { outcome: null as SettlementOutcome };
           if (resolution.outcome === "lost") {
             liveLostDetected = true;
-            break;
           }
+          liveOutcomes.push(resolution.outcome);
         }
 
         if (liveLostDetected) {
@@ -3786,6 +3830,203 @@ export async function autoSettlePendingBets(opts?: {
               .onConflictDoNothing();
           });
 
+          settled++;
+          continue;
+        }
+
+        // Check if all legs have live outcomes (won/lost/void) for multi-leg bets
+        if (!isSingle && liveOutcomes.every(o => o !== null)) {
+          const updatedSels = selections.map((sel, idx) => {
+            const live = findLiveResult(sel, bet.matchId, isSingle);
+            const liveScore = buildLiveSettlementScore(live);
+            const resolution = liveScore
+              ? resolveLiveSelectionSettlement(sel, liveScore)
+              : {
+                  outcome: null as SettlementOutcome,
+                  pendingReason: "missing_live_score",
+                };
+            return {
+              ...sel,
+              finalScore: liveScore
+                ? { home: liveScore.home, away: liveScore.away }
+                : sel.finalScore,
+              outcome: resolution.outcome,
+              pendingReason: resolution.pendingReason,
+            };
+          });
+
+          const hasLost = liveOutcomes.some(o => o === "lost");
+          const allVoid = liveOutcomes.every(o => o === "void");
+
+          if (hasLost) {
+            await db.transaction(async (tx) => {
+              const canProceed = await ensureSettlementTransitionIdempotency(tx, {
+                betId: bet.id,
+                trigger: "live_all_resolved_lost",
+                oldStatus: "pending",
+                newStatus: "lost",
+                matchId: bet.matchId,
+              });
+              if (!canProceed) return;
+
+              const rows = await tx
+                .update(betsTable)
+                .set({ status: "lost", selections: updatedSels })
+                .where(
+                  and(eq(betsTable.id, bet.id), eq(betsTable.status, "pending")),
+                )
+                .returning({ id: betsTable.id });
+              if (rows.length === 0) return;
+
+              await tx
+                .delete(cashoutStatesTable)
+                .where(eq(cashoutStatesTable.betId, bet.id));
+
+              await tx
+                .insert(settlementLogsTable)
+                .values({
+                  settlementKey: buildSettlementLogKey({
+                    betId: bet.id,
+                    oldStatus: "pending",
+                    newStatus: "lost",
+                    event: "live_all_resolved_lost",
+                    matchId: bet.matchId,
+                  }),
+                  betId: bet.id,
+                  userId: bet.userId,
+                  oldStatus: "pending",
+                  newStatus: "lost",
+                  payout: "0.00",
+                  message: "Auto-settled: all legs resolved live and lost",
+                })
+                .onConflictDoNothing();
+            });
+            settled++;
+            continue;
+          }
+
+          if (allVoid) {
+            await db.transaction(async (tx) => {
+              const canProceed = await ensureSettlementTransitionIdempotency(tx, {
+                betId: bet.id,
+                trigger: "live_all_void",
+                oldStatus: "pending",
+                newStatus: "voided",
+                matchId: bet.matchId,
+              });
+              if (!canProceed) return;
+
+              const rows = await tx
+                .update(betsTable)
+                .set({ status: "voided", selections: updatedSels })
+                .where(
+                  and(eq(betsTable.id, bet.id), eq(betsTable.status, "pending")),
+                )
+                .returning({ id: betsTable.id });
+              if (rows.length === 0) return;
+
+              await tx
+                .delete(cashoutStatesTable)
+                .where(eq(cashoutStatesTable.betId, bet.id));
+
+              await applyBalanceDelta(tx, {
+                userId: bet.userId,
+                amount: bet.stake,
+                kind: "bet_settlement_void_refund",
+                idempotencyKey: `bet:${bet.id}:settlement:void_refund`,
+                refType: "bet",
+                refId: String(bet.id),
+              });
+
+              await tx
+                .insert(settlementLogsTable)
+                .values({
+                  settlementKey: buildSettlementLogKey({
+                    betId: bet.id,
+                    oldStatus: "pending",
+                    newStatus: "voided",
+                    event: "live_all_void",
+                    matchId: bet.matchId,
+                  }),
+                  betId: bet.id,
+                  userId: bet.userId,
+                  oldStatus: "pending",
+                  newStatus: "voided",
+                  payout: bet.stake,
+                  message: "Auto-settled live: all selections voided — stake refunded",
+                })
+                .onConflictDoNothing();
+            });
+            settled++;
+            continue;
+          }
+
+          // All resolved and not lost/void → won
+          const stakeNum = parseFloat(bet.stake);
+          const effectiveOdds = computeResolvedTicketOdds(selections, liveOutcomes);
+          const payoutNum = Math.max(
+            0,
+            Number((stakeNum * effectiveOdds).toFixed(2)),
+          );
+          const payoutStr = payoutNum.toFixed(2);
+          const oddsStr = Number(effectiveOdds.toFixed(2)).toFixed(2);
+
+          await db.transaction(async (tx) => {
+            const canProceed = await ensureSettlementTransitionIdempotency(tx, {
+              betId: bet.id,
+              trigger: "live_all_resolved_won",
+              oldStatus: "pending",
+              newStatus: "won",
+              matchId: bet.matchId,
+            });
+            if (!canProceed) return;
+
+            const rows = await tx
+              .update(betsTable)
+              .set({
+                status: "won",
+                selections: updatedSels,
+                potentialWin: payoutStr,
+                totalOdds: oddsStr,
+              })
+              .where(
+                and(eq(betsTable.id, bet.id), eq(betsTable.status, "pending")),
+              )
+              .returning({ id: betsTable.id });
+            if (rows.length === 0) return;
+
+            await tx
+              .delete(cashoutStatesTable)
+              .where(eq(cashoutStatesTable.betId, bet.id));
+
+            await applyBalanceDelta(tx, {
+              userId: bet.userId,
+              amount: payoutStr,
+              kind: "bet_settlement_payout",
+              idempotencyKey: `bet:${bet.id}:settlement:payout`,
+              refType: "bet",
+              refId: String(bet.id),
+            });
+
+            await tx
+              .insert(settlementLogsTable)
+              .values({
+                settlementKey: buildSettlementLogKey({
+                  betId: bet.id,
+                  oldStatus: "pending",
+                  newStatus: "won",
+                  event: "live_all_resolved_won",
+                  matchId: bet.matchId,
+                }),
+                betId: bet.id,
+                userId: bet.userId,
+                oldStatus: "pending",
+                newStatus: "won",
+                payout: payoutStr,
+                message: "Auto-settled live: all legs resolved and won",
+              })
+              .onConflictDoNothing();
+          });
           settled++;
           continue;
         }
