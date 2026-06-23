@@ -11999,6 +11999,21 @@ async function buildLiveMatches(): Promise<LiveMatchState[]> {
           gameStatus,
         );
 
+        // Collect red cards from events even when score hasn't changed
+        const rawEvents = m.events?.event
+          ? Array.isArray(m.events.event)
+            ? m.events.event
+            : [m.events.event]
+          : [];
+        const rcHome = countRedCards(
+          rawEvents.map((e) => ({ type: e.type ?? "", team: e.team ?? "" })),
+          "home",
+        );
+        const rcAway = countRedCards(
+          rawEvents.map((e) => ({ type: e.type ?? "", team: e.team ?? "" })),
+          "away",
+        );
+
         const updatedState = {
           ...existing,
           minute,
@@ -12012,6 +12027,8 @@ async function buildLiveMatches(): Promise<LiveMatchState[]> {
             : undefined,
           _firstSeenAt: firstSeenAt,
           _htStartedAt: isHT ? htStartedAt : undefined,
+          redCardsHome: rcHome > 0 ? rcHome : undefined,
+          redCardsAway: rcAway > 0 ? rcAway : undefined,
         };
         // Inject ET/pen markets if match is in extra time / penalties (always refresh in ET)
         {
