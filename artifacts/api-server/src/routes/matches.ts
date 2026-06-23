@@ -40,6 +40,21 @@ const SAPI_V1_HOCKEY = "https://v1.hockey.sportsapipro.com/api/v1/hockey";
 const SAPI_V1_BASEBALL = "https://v1.baseball.sportsapipro.com/api/v1/baseball";
 const SAPI_V1_TENNIS = "https://v1.tennis.sportsapipro.com/api";
 
+// SportsAPI Pro V3 — widest coverage (34 sports), string IDs, league-grouped response
+const SAPI_V3_FOOTBALL = "https://v3.football.sportsapipro.com";
+const SAPI_V3_BASKETBALL = "https://v3.basketball.sportsapipro.com";
+const SAPI_V3_HOCKEY = "https://v3.hockey.sportsapipro.com";
+const SAPI_V3_TENNIS = "https://v3.tennis.sportsapipro.com";
+const SAPI_V3_BASEBALL = "https://v3.baseball.sportsapipro.com";
+
+// SportsAPI Pro V5 — 1xBet data feed (58 sports, 1200+ markets per event, numeric IDs)
+const SAPI_V5_FOOTBALL = "https://v5.football.sportsapipro.com";
+const SAPI_V5_BASKETBALL = "https://v5.basketball.sportsapipro.com";
+const SAPI_V5_HOCKEY = "https://v5.hockey.sportsapipro.com";
+const SAPI_V5_TENNIS = "https://v5.tennis.sportsapipro.com";
+const SAPI_V5_BASEBALL = "https://v5.baseball.sportsapipro.com";
+const SAPI_V5_SPORTS = "https://1xbet.sportsapipro.com"; // For getting sports list
+
 // Auth headers helper
 const sapiHeaders = (): Record<string, string> => ({
   "x-api-key": CONFIG.SPORTSAPI_KEY,
@@ -28445,6 +28460,77 @@ router.get("/v2-standings", async (req: Request, res: Response) => {
 setTimeout(() => {
   buildWC2026Matches().catch(() => {});
 }, 12_000);
+
+// ─── SportsAPI Pro V3 and V5 Example Functions ─────────────────────────────────
+// V3 Example: Get Live Events for Football
+async function fetchV3LiveFootball(): Promise<unknown> {
+  try {
+    const resp = await fetch(`${SAPI_V3_FOOTBALL}/api/live`, {
+      headers: sapiHeaders(),
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (!resp.ok) return null;
+    return await resp.json();
+  } catch {
+    return null;
+  }
+}
+
+// V3 Example: Get Schedule for a specific date (Football)
+async function fetchV3FootballSchedule(date: string): Promise<unknown> {
+  try {
+    const resp = await fetch(`${SAPI_V3_FOOTBALL}/api/schedule/${date}`, {
+      headers: sapiHeaders(),
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (!resp.ok) return null;
+    return await resp.json();
+  } catch {
+    return null;
+  }
+}
+
+// V5 Example: Get Top (Prematch) Events for Football
+async function fetchV5TopFootball(): Promise<unknown> {
+  try {
+    const resp = await fetch(`${SAPI_V5_FOOTBALL}/api/v1/top`, {
+      headers: sapiHeaders(),
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (!resp.ok) return null;
+    return await resp.json();
+  } catch {
+    return null;
+  }
+}
+
+// V5 Example: Get Live Events for Football
+async function fetchV5LiveFootball(): Promise<unknown> {
+  try {
+    const resp = await fetch(`${SAPI_V5_FOOTBALL}/api/v1/live`, {
+      headers: sapiHeaders(),
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (!resp.ok) return null;
+    return await resp.json();
+  } catch {
+    return null;
+  }
+}
+
+// V5 Example: Get Sports List
+async function fetchV5Sports(): Promise<unknown> {
+  try {
+    const resp = await fetch(`${SAPI_V5_SPORTS}/api/v1/sports`, {
+      headers: sapiHeaders(),
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (!resp.ok) return null;
+    return await resp.json();
+  } catch {
+    return null;
+  }
+}
 
 export function initLiveWsServer(httpServer: http.Server): void {
   const wss = new WebSocketServer({ noServer: true });
