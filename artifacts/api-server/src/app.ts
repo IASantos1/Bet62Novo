@@ -1,4 +1,4 @@
-import express, { type Express } from "express";
+import express, { type Express, type Request, type Response } from "express";
 import cors from "cors";
 import pinoHttp from "pino-http";
 import path from "path";
@@ -28,7 +28,7 @@ initDb()
 app.post(
   "/api/payments/stripe-webhook",
   express.raw({ type: "application/json" }),
-  async (req, res) => {
+  async (req: Request, res: Response) => {
     const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
     const sig = req.headers["stripe-signature"];
     if (!webhookSecret || !sig) {
@@ -99,17 +99,17 @@ app.post(
 );
 
 app.use(
-  pinoHttp({
+  (pinoHttp as any)({
     logger,
     serializers: {
-      req(req) {
+      req(req: any) {
         return {
           id: req.id,
           method: req.method,
           url: req.url?.split("?")[0],
         };
       },
-      res(res) {
+      res(res: any) {
         return {
           statusCode: res.statusCode,
         };

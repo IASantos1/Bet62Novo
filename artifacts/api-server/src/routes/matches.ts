@@ -28582,8 +28582,10 @@ router.get("/v5-test/top/:sport", async (req: Request, res: Response) => {
     if (!resp.ok) return res.status(resp.status).json({ error: "Failed to fetch top events" });
     const data = await resp.json();
     res.json(data);
+    return;
   } catch (err) {
     res.status(500).json({ error: "Failed to fetch top events" });
+    return;
   }
 });
 
@@ -28607,8 +28609,10 @@ router.get("/v5-test/live/:sport", async (req: Request, res: Response) => {
     if (!resp.ok) return res.status(resp.status).json({ error: "Failed to fetch live events" });
     const data = await resp.json();
     res.json(data);
+    return;
   } catch (err) {
     res.status(500).json({ error: "Failed to fetch live events" });
+    return;
   }
 });
 
@@ -28622,8 +28626,10 @@ router.get("/v5-test/event/:sport/:eventId", async (req: Request, res: Response)
     const data = await fetchV5EventDetails(sport, eventIdNum);
     if (data === null) return res.status(404).json({ error: "Event not found" });
     res.json(data);
+    return;
   } catch (err) {
     res.status(500).json({ error: "Failed to fetch event details" });
+    return;
   }
 });
 

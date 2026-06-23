@@ -19,7 +19,7 @@ export interface AuthRequest extends Request {
 }
 
 export function verifyAuthToken(token: string): { id: number; email: string } {
-  return jwt.verify(token, SESSION_SECRET) as { id: number; email: string };
+  return jwt.verify(token, SESSION_SECRET as jwt.Secret) as unknown as { id: number; email: string };
 }
 
 export const authMiddleware = (req: AuthRequest, res: Response, next: NextFunction): void => {
