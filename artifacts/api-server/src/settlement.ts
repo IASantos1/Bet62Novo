@@ -932,7 +932,9 @@ function scoreOutcomeForSelLastResort(
           : "lost";
     }
     const f5t =
-      s.match(/^mlb-f5t-([ou])-(\d+(?:\.\d+)?)$/) || s.match(/^f5t-([ou])$/);
+      s.match(/^mlb-f5t-([ou])-(\d+(?:\.\d+)?)$/) ||
+      s.match(/^f5t-([ou])-([\d.]+)$/) ||
+      s.match(/^f5t-([ou])$/);
     if (f5t && innings.length >= 5) {
       const total = innings
         .slice(0, 5)
@@ -2567,6 +2569,7 @@ export function scoreOutcomeForSel(
     /^mlb-f5-(home|away)$/.test(s) ||
     /^f5-(home|away)$/.test(s) ||
     /^mlb-f5t-([ou])-(\d+(?:\.\d+)?)$/.test(s) ||
+    /^f5t-([ou])-([\d.]+)$/.test(s) ||
     /^f5t-([ou])$/.test(s)
   ) {
     const hs = ex["homeScore"] as Record<string, unknown> | undefined;
@@ -3694,6 +3697,42 @@ function liveDefinitiveOutcomeForSel(
     return null;
   }
 
+  // Basketball total points O/U — settle early once threshold crossed mid-game
+  const mBPts = s.match(/^b-pts-([ou])-([\d.]+)$/);
+  if (mBPts) {
+    const side = mBPts[1]!;
+    const line = decodeCompactLine(mBPts[2]!);
+    if (!Number.isFinite(line)) return null;
+    if (side === "o") return total > line ? "won" : null;
+    return total > line ? "lost" : null;
+  }
+
+  // Basketball first-half total points O/U — settle early once H1 threshold crossed
+  const mBH1Pts = s.match(/^b-h1-pts-([ou])-([\d.]+)$/);
+  if (mBH1Pts) {
+    const side = mBH1Pts[1]!;
+    const line = decodeCompactLine(mBH1Pts[2]!);
+    if (!Number.isFinite(line)) return null;
+    if (basketballQuarters.length < 2) return null;
+    const h1Home = (basketballQuarters[0]?.[0] ?? 0) + (basketballQuarters[1]?.[0] ?? 0);
+    const h1Away = (basketballQuarters[0]?.[1] ?? 0) + (basketballQuarters[1]?.[1] ?? 0);
+    const h1Total = h1Home + h1Away;
+    if (side === "o") return h1Total > line ? "won" : null;
+    return h1Total > line ? "lost" : null;
+  }
+
+  // Basketball team total O/U — settle early once team's running score passes threshold
+  const mBTT = s.match(/^b-tt-(home|away)-([ou])-([\d.]+)$/);
+  if (mBTT) {
+    const teamSide = mBTT[1]!;
+    const dir = mBTT[2]!;
+    const line = decodeCompactLine(mBTT[3]!);
+    if (!Number.isFinite(line)) return null;
+    const teamScore = teamSide === "home" ? score.home : score.away;
+    if (dir === "o") return teamScore > line ? "won" : null;
+    return teamScore > line ? "lost" : null;
+  }
+
   // Hockey Period Totals (Over/Under)
   const mPTotal = s.match(/^p([1-3])t-([ou])(?:-([\d.]+))?$/);
   if (mPTotal) {
@@ -3740,7 +3779,7 @@ function liveDefinitiveOutcomeForSel(
     }
 
     // F5 Total
-    const mF5Total = s.match(/^mlb-f5t-([ou])-([\d.]+)$/) || s.match(/^f5t-([ou])$/);
+    const mF5Total = s.match(/^mlb-f5t-([ou])-([\d.]+)$/) || s.match(/^f5t-([ou])-([\d.]+)$/) || s.match(/^f5t-([ou])$/);
     if (mF5Total) {
       const side = mF5Total[1]!;
       // Get line from selection or parse label

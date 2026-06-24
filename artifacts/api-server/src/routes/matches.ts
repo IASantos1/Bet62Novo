@@ -6901,6 +6901,22 @@ function extractFinishedBasketballQuarters(
   return quarters;
 }
 
+function extractFinishedBaseballInnings(
+  hS: SAPIV2ScoreObj | null,
+  aS: SAPIV2ScoreObj | null,
+): Array<[number, number]> {
+  const innings: Array<[number, number]> = [];
+  if (!hS || !aS) return innings;
+  for (let i = 1; i <= 12; i++) {
+    const key = `period${i}` as keyof SAPIV2ScoreObj;
+    const h = hS[key];
+    const a = aS[key];
+    if (typeof h !== "number" && typeof a !== "number") break;
+    innings.push([typeof h === "number" ? h : 0, typeof a === "number" ? a : 0]);
+  }
+  return innings;
+}
+
 function buildFinishedResultExtrasFromV2Event(
   sport: SportKey,
   ev: SAPIV2Event,
@@ -6917,6 +6933,9 @@ function buildFinishedResultExtrasFromV2Event(
   } else if (sport === "basketball") {
     const quarters = extractFinishedBasketballQuarters(hS, aS);
     if (quarters.length > 0) extras["basketball"] = { quarters };
+  } else if (sport === "baseball") {
+    const innings = extractFinishedBaseballInnings(hS, aS);
+    if (innings.length > 0) extras["baseball"] = { innings };
   }
   return extras;
 }
