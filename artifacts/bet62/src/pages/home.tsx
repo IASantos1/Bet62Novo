@@ -8106,33 +8106,43 @@ export default function Home({
   };
 
   // Returns a full-width animated suspension banner; null when no suspension.
-  // Only the `result` market key triggers the global banner — permanently-settled
-  // set/period markets (firstSet, set2, etc.) have a far-future timestamp and
-  // must NOT activate the banner, as they are settled rather than truly suspended.
+  // Shows in two modes:
+  //   CRITICAL (red, result market suspended): GOLO! / PENÁLTI / REVISÃO VAR / SUSPENSO
+  //   GENERIC  (grey, any other active suspension): 🔒 SUSPENSO — always visible, never blank
   const SuspensionBanner = ({ match }: { match: Match }) => {
     const now = Date.now();
-    const isActive =
+    const resultSuspended =
       match.marketSuspension?.["result"] != null &&
       match.marketSuspension["result"] > now;
+    const hasReason = match.isLive && hasBlockingSuspensionReason(match);
+    const isActive = resultSuspended || hasReason;
     if (!isActive) return null;
     const rawReason = (match._suspensionReason ?? "SUSPENSO").toUpperCase();
     let label = "SUSPENSO";
     let prefix = "";
-    if (rawReason.includes("GOLO") || rawReason.includes("GOAL")) {
-      label = "GOLO!";
-    } else if (rawReason.includes("VAR")) {
-      prefix = "🎥 ";
-      label = "REVISÃO VAR";
-    } else if (rawReason.includes("PENAL")) {
-      label = "PENÁLTI";
-    } else if (rawReason.includes("CHANCE")) {
-      label = "GRANDE CHANCE";
+    if (resultSuspended) {
+      if (rawReason.includes("GOLO") || rawReason.includes("GOAL")) {
+        label = "⚽ GOLO!";
+      } else if (rawReason.includes("VAR")) {
+        prefix = "🎥 ";
+        label = "REVISÃO VAR";
+      } else if (rawReason.includes("PENAL")) {
+        label = "🎯 PENÁLTI";
+      } else if (rawReason.includes("CHANCE")) {
+        label = "GRANDE CHANCE";
+      }
+    } else {
+      label = "🔒 SUSPENSO";
     }
     return (
       <button
         disabled
-        className="w-full h-12 px-3 flex items-center justify-center rounded-md bg-red-950 border border-red-800/50 text-red-200 font-black text-sm tracking-widest cursor-not-allowed select-none animate-pulse"
-        style={{ letterSpacing: "0.2em" }}
+        className={`w-full h-12 px-3 flex items-center justify-center rounded-md border font-black text-sm cursor-not-allowed select-none animate-pulse ${
+          resultSuspended
+            ? "bg-red-950 border-red-800/50 text-red-200"
+            : "bg-zinc-800/50 border-zinc-700/40 text-zinc-400"
+        }`}
+        style={{ letterSpacing: "0.18em" }}
       >
         {prefix}
         {label}
@@ -8779,9 +8789,8 @@ export default function Home({
     // markets have far-future timestamps and must NOT count as "suspended" here.
     const isLiveSuspended =
       match.isLive &&
-      ((match.marketSuspension?.["result"] != null &&
-        match.marketSuspension["result"] > Date.now()) ||
-        hasBlockingSuspensionReason(match));
+      (match.marketSuspension?.["result"] != null &&
+        match.marketSuspension["result"] > Date.now());
 
     // Penalty shootout: only show winner market with VENCEDOR DA FINAL header
     const isPenShootout =
@@ -9076,9 +9085,8 @@ export default function Home({
     const awayName = teamNamePt(match.away);
     const isSuspendedMatch =
       match.isLive &&
-      ((!!match.marketSuspension &&
-        Object.values(match.marketSuspension).some((ts) => ts > Date.now())) ||
-        hasBlockingSuspensionReason(match));
+      (match.marketSuspension?.["result"] != null &&
+        match.marketSuspension["result"] > Date.now());
     const canShowOdds = !!(
       match.hasRealOdds ||
       (match.odds.home > 0 && match.odds.away > 0)
@@ -10348,9 +10356,8 @@ export default function Home({
     if (market === "result" && odd <= 1.01) return null;
     const now = Date.now();
     const globalSusp =
-      (match.marketSuspension?.["result"] != null &&
-        match.marketSuspension["result"] > now) ||
-      hasBlockingSuspensionReason(match);
+      match.marketSuspension?.["result"] != null &&
+      match.marketSuspension["result"] > now;
     const perMarketSusp =
       suspKey != null
         ? match.marketSuspension?.[suspKey] != null &&
@@ -24046,7 +24053,7 @@ export default function Home({
               animate={{ scale: 1, y: 0 }}
               exit={{ scale: 0.85, y: 40 }}
               className="relative overflow-hidden rounded-3xl max-w-md w-full border border-white/15 shadow-2xl"
-              onClick={(e: React.MouseEvent<HTMLDivElement>) => e.stopPropagation()}
+              onClick={(e) => e.stopPropagation()}
             >
               {promoNotif.type === "freebets10" && (
                 <>
@@ -24287,7 +24294,7 @@ export default function Home({
                 background:
                   "linear-gradient(135deg, #0a2a0a 0%, #052010 50%, #0a1a0a 100%)",
               }}
-              onClick={(e: React.MouseEvent<HTMLDivElement>) => e.stopPropagation()}
+              onClick={(e) => e.stopPropagation()}
             >
               <div
                 className="absolute inset-0 opacity-20"
