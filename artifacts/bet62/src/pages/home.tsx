@@ -16035,10 +16035,11 @@ export default function Home({
                     {(() => {
                       if (!matchStats) return null;
                       const { avgStats, winProb } = matchStats;
-                      const insights: Array<{ market: string; odds: string; confidence: number; reason: string; tag: string; tagColor: string }> = [];
+                      const allPossibleInsights: Array<{ market: string; odds: string; confidence: number; reason: string; tag: string; tagColor: string }> = [];
 
+                      // Previsões principais
                       if (avgStats.over25 >= 50) {
-                        insights.push({
+                        allPossibleInsights.push({
                           market: "Mais de 2.5 Golos",
                           odds: (1 / (avgStats.over25 / 100) * 0.95).toFixed(2),
                           confidence: avgStats.over25,
@@ -16048,7 +16049,7 @@ export default function Home({
                         });
                       }
                       if (avgStats.btts >= 50) {
-                        insights.push({
+                        allPossibleInsights.push({
                           market: "Ambas Marcam — Sim",
                           odds: (1 / (avgStats.btts / 100) * 0.95).toFixed(2),
                           confidence: avgStats.btts,
@@ -16059,7 +16060,7 @@ export default function Home({
                       }
                       const topProb = Math.max(winProb.home, winProb.draw, winProb.away);
                       if (topProb === winProb.home && winProb.home >= 45) {
-                        insights.push({
+                        allPossibleInsights.push({
                           market: `${expandedMatch.home} — Vitória`,
                           odds: (1 / (winProb.home / 100) * 0.95).toFixed(2),
                           confidence: winProb.home,
@@ -16068,7 +16069,7 @@ export default function Home({
                           tagColor: "text-yellow-400",
                         });
                       } else if (topProb === winProb.away && winProb.away >= 40) {
-                        insights.push({
+                        allPossibleInsights.push({
                           market: `${expandedMatch.away} — Vitória`,
                           odds: (1 / (winProb.away / 100) * 0.95).toFixed(2),
                           confidence: winProb.away,
@@ -16078,13 +16079,56 @@ export default function Home({
                         });
                       }
 
-                      const filteredInsights = insights.filter(ins => {
+                      // Previsões adicionais (fallback)
+                      if (avgStats.over15 >= 50) {
+                        allPossibleInsights.push({
+                          market: "Mais de 1.5 Golos",
+                          odds: (1 / (avgStats.over15 / 100) * 0.95).toFixed(2),
+                          confidence: avgStats.over15,
+                          reason: `Alta probabilidade de pelo menos 2 golos no jogo.`,
+                          tag: "ALTA",
+                          tagColor: "text-emerald-400",
+                        });
+                      }
+                      if (avgStats.over25 < 50) {
+                        allPossibleInsights.push({
+                          market: "Menos de 2.5 Golos",
+                          odds: (1 / ((100 - avgStats.over25) / 100) * 0.95).toFixed(2),
+                          confidence: 100 - avgStats.over25,
+                          reason: `Baixa probabilidade de muitos golos no jogo.`,
+                          tag: "MODERADO",
+                          tagColor: "text-yellow-400",
+                        });
+                      }
+                      if (avgStats.btts < 50) {
+                        allPossibleInsights.push({
+                          market: "Ambas Marcam — Não",
+                          odds: (1 / ((100 - avgStats.btts) / 100) * 0.95).toFixed(2),
+                          confidence: 100 - avgStats.btts,
+                          reason: `Baixa probabilidade de ambas as equipas marcarem.`,
+                          tag: "MODERADO",
+                          tagColor: "text-yellow-400",
+                        });
+                      }
+
+                      const filteredInsights = allPossibleInsights.filter(ins => {
                         if (ins.market.includes("Mais de 2.5")) {
                           const total = (expandedMatch.homeScore ?? 0) + (expandedMatch.awayScore ?? 0);
                           if (total >= 3) return false;
                         }
-                        if (ins.market.includes("Ambas Marcam")) {
+                        if (ins.market.includes("Mais de 1.5")) {
+                          const total = (expandedMatch.homeScore ?? 0) + (expandedMatch.awayScore ?? 0);
+                          if (total >= 2) return false;
+                        }
+                        if (ins.market.includes("Menos de 2.5")) {
+                          const total = (expandedMatch.homeScore ?? 0) + (expandedMatch.awayScore ?? 0);
+                          if (total <= 2) return false;
+                        }
+                        if (ins.market.includes("Ambas Marcam — Sim")) {
                           if ((expandedMatch.homeScore ?? 0) > 0 && (expandedMatch.awayScore ?? 0) > 0) return false;
+                        }
+                        if (ins.market.includes("Ambas Marcam — Não")) {
+                          if ((expandedMatch.homeScore ?? 0) === 0 || (expandedMatch.awayScore ?? 0) === 0) return false;
                         }
                         return true;
                       }).slice(0, 3);
