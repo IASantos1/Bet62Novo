@@ -48,12 +48,27 @@ const SAPI_V3_TENNIS = "https://v3.tennis.sportsapipro.com";
 const SAPI_V3_BASEBALL = "https://v3.baseball.sportsapipro.com";
 
 // SportsAPI Pro V5 — 1xBet data feed (58 sports, 1200+ markets per event, numeric IDs)
-const SAPI_V5_FOOTBALL = "https://v5.football.sportsapipro.com";
-const SAPI_V5_BASKETBALL = "https://v5.basketball.sportsapipro.com";
-const SAPI_V5_HOCKEY = "https://v5.hockey.sportsapipro.com";
-const SAPI_V5_TENNIS = "https://v5.tennis.sportsapipro.com";
-const SAPI_V5_BASEBALL = "https://v5.baseball.sportsapipro.com";
-const SAPI_V5_SPORTS = "https://1xbet.sportsapipro.com"; // For getting sports list
+const SAPI_V5_BASE = "https://1xbet.sportsapipro.com"; // V5 1xBet API — single host for all sports
+
+// V5 sport IDs
+const V5_SPORT_ID_TO_NAME: Record<number, string> = {
+  1: "football",
+  2: "hockey",
+  3: "basketball",
+  4: "tennis",
+  5: "baseball",
+  6: "volleyball",
+};
+
+// V5 sport names to IDs
+const V5_SPORT_NAMES: Array<{ id: number; name: string; count: number }> = [
+  { id: 1, name: "football",   count: 200 },
+  { id: 3, name: "basketball", count: 100 },
+  { id: 2, name: "hockey",     count: 80  },
+  { id: 4, name: "tennis",     count: 80  },
+  { id: 5, name: "baseball",   count: 80  },
+  { id: 6, name: "volleyball", count: 60  },
+];
 
 // Auth headers helper
 const sapiHeaders = (): Record<string, string> => ({
@@ -67,6 +82,24 @@ type V5Odds1x2 = {
   home: number;
   draw: number;
   away: number;
+};
+
+// V5 quick-access odds included in the event list (prematch and live)
+// NOTE: actual API uses underscore keys, e.g. "double_chance", "draw_no_bet"
+// "totals" embeds the line in the value key: { "over_2.5": 2.04, "under_2.5": 1.85 }
+type V5QuickOdds = {
+  "1x2"?: V5Odds1x2;
+  // Double Chance — keys: "1X", "X2", "12"
+  "double_chance"?: { "1X"?: number | null; "X2"?: number | null; "12"?: number | null; [k: string]: number | null | undefined };
+  // Totals — keys embed the line: "over_2.5", "under_2.5", etc.
+  "totals"?: Record<string, number | null>;
+  // Both Teams To Score
+  "btts"?: { yes?: number | null; no?: number | null };
+  // Draw No Bet
+  "draw_no_bet"?: { home?: number | null; away?: number | null };
+  // Handicap — array of objects: [{type:"home",line:-1.5,odds:2.59},{type:"away",line:1.5,odds:1.54}]
+  "handicap"?: Array<{ type: "home" | "away"; line: number; odds: number | null }> | null;
+  [key: string]: any;
 };
 
 type V5PeriodScore = {
@@ -124,10 +157,7 @@ type V5LiveEvent = {
   round?: string;
   info?: string;
   stats?: V5LiveStat[];
-  odds: {
-    "1x2"?: V5Odds1x2;
-    [key: string]: any;
-  };
+  odds: V5QuickOdds;
   oddsGroups?: V5OddsGroup[];
 };
 
@@ -145,10 +175,8 @@ type V5TopEvent = {
   startTime: number;
   startTimeISO: string;
   marketCount?: number;
-  odds: {
-    "1x2"?: V5Odds1x2;
-    [key: string]: any;
-  };
+  // Quick-access odds — available in the list endpoint for all prematch events
+  odds: V5QuickOdds;
   oddsGroups?: V5OddsGroup[];
 };
 
@@ -191,10 +219,7 @@ type V5EventDetail = {
   }>;
   oddsGroups?: V5OddsGroup[];
   subGames?: any[];
-  odds: {
-    "1x2"?: V5Odds1x2;
-    [key: string]: any;
-  };
+  odds: V5QuickOdds;
 };
 
 type V5Response<T> = {
@@ -15384,6 +15409,13 @@ async function rebuildUpcomingCache(): Promise<void> {
       upHockey,
       upVolleyball,
       upBaseball,
+      // V5 prematch events — fetched in parallel, merged below
+      v5Football,
+      v5Basketball,
+      v5Hockey,
+      v5Tennis,
+      v5Baseball,
+      v5Volleyball,
     ] = await Promise.all([
       buildUpcomingMatches().catch(() => empty),
       buildTennisUpcoming().catch(() => empty),
@@ -15391,27 +15423,45 @@ async function rebuildUpcomingCache(): Promise<void> {
       buildHockeyUpcoming().catch(() => empty),
       buildVolleyballUpcoming().catch(() => empty),
       buildBaseballUpcoming().catch(() => empty),
+      // V5 — 1xBet prematch feed (real odds: 1x2 + DC + totals + BTTS + DNB + handicap)
+      buildV5Upcoming(1, 200).catch(() => empty), // football
+      buildV5Upcoming(3, 100).catch(() => empty), // basketball
+      buildV5Upcoming(2, 80).catch(() => empty),  // hockey
+      buildV5Upcoming(4, 80).catch(() => empty),  // tennis
+      buildV5Upcoming(5, 80).catch(() => empty),  // baseball
+      buildV5Upcoming(6, 60).catch(() => empty),  // volleyball
     ]);
     const upTennis = mergeTennisUpcomingSources(
       upTennisBase,
       buildTennisUpcomingFromOddsEntries(tennisOdds),
     );
-    rememberUpcomingFootballEligibility(upFootball);
+
+    // Merge V5 events into each sport's V1 list
+    // — matching events get real V5 odds injected
+    // — new V5-only events are appended
+    const finalFootball   = mergeV5IntoUpcoming(upFootball,   v5Football);
+    const finalBasketball = mergeV5IntoUpcoming(upBasketball, v5Basketball);
+    const finalHockey     = mergeV5IntoUpcoming(upHockey,     v5Hockey);
+    const finalTennis     = mergeV5IntoUpcoming(upTennis,     v5Tennis);
+    const finalBaseball   = mergeV5IntoUpcoming(upBaseball,   v5Baseball);
+    const finalVolleyball = mergeV5IntoUpcoming(upVolleyball, v5Volleyball);
+
+    rememberUpcomingFootballEligibility(finalFootball);
     rememberUpcomingEligibility([
-      ...upFootball,
-      ...upTennis,
-      ...upBasketball,
-      ...upHockey,
-      ...upVolleyball,
-      ...upBaseball,
+      ...finalFootball,
+      ...finalTennis,
+      ...finalBasketball,
+      ...finalHockey,
+      ...finalVolleyball,
+      ...finalBaseball,
     ]);
     _allUpcomingCache = [
-      ...upFootball,
-      ...upTennis,
-      ...upBasketball,
-      ...upHockey,
-      ...upVolleyball,
-      ...upBaseball,
+      ...finalFootball,
+      ...finalTennis,
+      ...finalBasketball,
+      ...finalHockey,
+      ...finalVolleyball,
+      ...finalBaseball,
     ];
     _allUpcomingCacheBuiltAt = Date.now();
   } catch {
@@ -17361,13 +17411,19 @@ function hasRecentUpcomingEligibility(
 async function refreshUpcomingTop(): Promise<UpcomingTopCache> {
   const empty: UpcomingMatch[] = [];
   const [
-    football,
+    footballV1,
     tennisBase,
     tennisOdds,
     basketball,
     hockey,
     volleyball,
     baseball,
+    v5Football,
+    v5Basketball,
+    v5Hockey,
+    v5Tennis,
+    v5Baseball,
+    v5Volleyball,
   ] = await Promise.all([
     buildUpcomingMatches().catch(() => empty),
     buildTennisUpcoming().catch(() => empty),
@@ -17376,27 +17432,39 @@ async function refreshUpcomingTop(): Promise<UpcomingTopCache> {
     buildHockeyUpcoming().catch(() => empty),
     buildVolleyballUpcoming().catch(() => empty),
     buildBaseballUpcoming().catch(() => empty),
+    buildV5Upcoming(1, 200).catch(() => empty),
+    buildV5Upcoming(3, 200).catch(() => empty),
+    buildV5Upcoming(2, 200).catch(() => empty),
+    buildV5Upcoming(4, 200).catch(() => empty),
+    buildV5Upcoming(5, 200).catch(() => empty),
+    buildV5Upcoming(6, 200).catch(() => empty),
   ]);
   const tennis = mergeTennisUpcomingSources(
     tennisBase,
     buildTennisUpcomingFromOddsEntries(tennisOdds),
   );
+  const football = mergeV5IntoUpcoming(footballV1, v5Football);
+  const basketballMerged = mergeV5IntoUpcoming(basketball, v5Basketball);
+  const hockeyMerged = mergeV5IntoUpcoming(hockey, v5Hockey);
+  const tennisMerged = mergeV5IntoUpcoming(tennis, v5Tennis);
+  const volleyballMerged = mergeV5IntoUpcoming(volleyball, v5Volleyball);
+  const baseballMerged = mergeV5IntoUpcoming(baseball, v5Baseball);
   rememberUpcomingFootballEligibility(football);
   rememberUpcomingEligibility([
     ...football,
-    ...tennis,
-    ...basketball,
-    ...hockey,
-    ...volleyball,
-    ...baseball,
+    ...tennisMerged,
+    ...basketballMerged,
+    ...hockeyMerged,
+    ...volleyballMerged,
+    ...baseballMerged,
   ]);
   upcomingTopCache = {
     football,
-    tennis,
-    basketball,
-    hockey,
-    volleyball,
-    baseball,
+    tennis: tennisMerged,
+    basketball: basketballMerged,
+    hockey: hockeyMerged,
+    volleyball: volleyballMerged,
+    baseball: baseballMerged,
     fetchedAt: Date.now(),
   };
   return upcomingTopCache;
@@ -28644,127 +28712,63 @@ async function fetchV3FootballSchedule(date: string): Promise<unknown> {
   }
 }
 
-// V5 Example: Get Top (Prematch) Events for Football
-async function fetchV5TopFootball(): Promise<unknown> {
-  try {
-    const resp = await fetch(`${SAPI_V5_FOOTBALL}/api/v1/top`, {
-      headers: sapiHeaders(),
-      signal: AbortSignal.timeout(10_000),
-    });
-    if (!resp.ok) return null;
-    return await resp.json();
-  } catch {
-    return null;
-  }
-}
-
-// V5 Example: Get Live Events for Football
-async function fetchV5LiveFootball(): Promise<unknown> {
-  try {
-    const resp = await fetch(`${SAPI_V5_FOOTBALL}/api/v1/live`, {
-      headers: sapiHeaders(),
-      signal: AbortSignal.timeout(10_000),
-    });
-    if (!resp.ok) return null;
-    return await resp.json();
-  } catch {
-    return null;
-  }
-}
-
-// V5 Example: Get Sports List
-async function fetchV5Sports(): Promise<unknown> {
-  try {
-    const resp = await fetch(`${SAPI_V5_SPORTS}/api/v1/sports`, {
-      headers: sapiHeaders(),
-      signal: AbortSignal.timeout(10_000),
-    });
-    if (!resp.ok) return null;
-    return await resp.json();
-  } catch {
-    return null;
-  }
-}
-
-// V5: Get Live Leagues Events (with full stats!)
-async function fetchV5LiveLeagues(sportId: number = 1): Promise<V5LiveEvent[] | null> {
-  try {
-    // First get all sports to confirm league IDs
-    const sportsResp = await fetch(`${SAPI_V5_SPORTS}/api/v1/sports`, {
-      headers: sapiHeaders(),
-      signal: AbortSignal.timeout(10_000),
-    });
-    let allEvents: V5LiveEvent[] = [];
-    if (sportsResp.ok) {
-      const sportsData = (await sportsResp.json()) as V5Response<{ id: number; name: string }[]>;
-      // For simplicity, let's fetch live events with stats via /live/events?sport={sportId}
-      // and then get league stats if needed
-    }
-
-    // Try /live/events?sport={sportId} (worked in our test script)
-    const resp = await fetch(`${SAPI_V5_SPORTS}/api/v1/live/events?sport=${sportId}`, {
-      headers: sapiHeaders(),
-      signal: AbortSignal.timeout(20_000),
-    });
-    if (resp.ok) {
-      const data = (await resp.json()) as V5Response<V5LiveEvent[]>;
-      allEvents = data.data;
-    }
-
-    // Also try /api/v1/live/leagues/{leagueId} for events with full stats
-    // Let's first get top leagues? Or just use the events we have
-    return allEvents;
-  } catch {
-    return null;
-  }
-}
-
-// V5 Example: Get Event Details (including all markets and stats)
-async function fetchV5EventDetails(eventId: number): Promise<V5EventDetail | null> {
-  try {
-    const resp = await fetch(`${SAPI_V5_SPORTS}/api/v1/event/${eventId}`, {
-      headers: sapiHeaders(),
-      signal: AbortSignal.timeout(20_000),
-    });
-    if (!resp.ok) return null;
-    const data = (await resp.json()) as V5Response<V5EventDetail>;
-    return data.data;
-  } catch {
-    return null;
-  }
-}
-
-// V5: Get Live Events (with optional stats)
+// V5: Get Live Events for a sport
 async function fetchV5LiveEvents(sportId: number = 1): Promise<V5LiveEvent[] | null> {
   try {
-    const resp = await fetch(`${SAPI_V5_SPORTS}/api/v1/live/events?sport=${sportId}`, {
+    const resp = await fetch(`${SAPI_V5_BASE}/api/v1/live/events?sport=${sportId}`, {
       headers: sapiHeaders(),
-      signal: AbortSignal.timeout(20_000),
+      signal: AbortSignal.timeout(12_000),
     });
     if (!resp.ok) return null;
     const data = (await resp.json()) as V5Response<V5LiveEvent[]>;
-    return data.data;
+    return Array.isArray(data.data) ? data.data : null;
   } catch {
     return null;
   }
 }
 
-// V5: Get Top (Prematch) Events
+// V5: Get Top (Prematch) Events for a sport
+// Endpoint: /api/v1/events/top?sport={sportId}&count={count}
+// Quick-access odds (1x2, double-chance, totals, btts, draw-no-bet, handicap) are included
+// in the event list without needing to fetch individual event details.
 async function fetchV5TopEvents(sportId: number = 1, count: number = 100): Promise<V5TopEvent[] | null> {
   try {
-    // For football, use /football/top?count=... as it worked
-    if (sportId === 1) {
-      const resp = await fetch(`${SAPI_V5_SPORTS}/api/v1/football/top?count=${count}`, {
-        headers: sapiHeaders(),
-        signal: AbortSignal.timeout(20_000),
-      });
-      if (!resp.ok) return null;
-      const data = (await resp.json()) as V5Response<V5TopEvent[]>;
-      return data.data;
-    } else {
-      // For other sports, maybe a generic endpoint?
-      return null;
-    }
+    const resp = await fetch(`${SAPI_V5_BASE}/api/v1/events/top?sport=${sportId}&count=${count}`, {
+      headers: sapiHeaders(),
+      signal: AbortSignal.timeout(12_000),
+    });
+    if (!resp.ok) return null;
+    const data = (await resp.json()) as V5Response<V5TopEvent[]>;
+    return Array.isArray(data.data) ? data.data : null;
+  } catch {
+    return null;
+  }
+}
+
+// V5: Get Event Details (full 1000+ markets — requires higher-tier plan)
+async function fetchV5EventDetails(eventId: number): Promise<V5EventDetail | null> {
+  try {
+    const resp = await fetch(`${SAPI_V5_BASE}/api/v1/event/${eventId}`, {
+      headers: sapiHeaders(),
+      signal: AbortSignal.timeout(12_000),
+    });
+    if (!resp.ok) return null;
+    const data = (await resp.json()) as V5Response<V5EventDetail>;
+    return data.data ?? null;
+  } catch {
+    return null;
+  }
+}
+
+// V5: Get Sports List
+async function fetchV5Sports(): Promise<unknown> {
+  try {
+    const resp = await fetch(`${SAPI_V5_BASE}/api/v1/sports`, {
+      headers: sapiHeaders(),
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (!resp.ok) return null;
+    return await resp.json();
   } catch {
     return null;
   }
@@ -28927,45 +28931,275 @@ function mapV5LiveEventToMatch(v5Event: V5LiveEvent) {
   };
 }
 
-// Convert V5 Top (Prematch) Event to Match type
-function mapV5TopEventToMatch(v5Event: V5TopEvent) {
-  // Build odds object
-  const odds = v5Event.odds["1x2"] ? {
-    home: v5Event.odds["1x2"].home,
-    draw: v5Event.odds["1x2"].draw,
-    away: v5Event.odds["1x2"].away
-  } : { home: 0, draw: 0, away: 0 };
+// ─── V5 quick-odds helpers ────────────────────────────────────────────────────
 
-  // Calculate startsIn (minutes from now)
-  const now = Date.now();
+/** Extract double-chance odds from V5 quick-access odds.
+ *  Actual key: "double_chance" with sub-keys "1X", "X2", "12". */
+function v5ExtractDC(o: V5QuickOdds): { homeOrDraw: number; awayOrDraw: number; homeOrAway: number } | null {
+  const dc = o["double_chance"];
+  if (!dc) return null;
+  const hd = dc["1X"];
+  const da = dc["X2"];
+  const ha = dc["12"];
+  if (!hd && !da && !ha) return null;
+  return { homeOrDraw: hd || 1.01, awayOrDraw: da || 1.01, homeOrAway: ha || 1.01 };
+}
+
+/** Extract over/under totals from V5 quick-access odds.
+ *  Actual format: "totals": { "over_2.5": 2.04, "under_2.5": 1.85 }
+ *  The line is embedded in the key string. */
+function v5ExtractTotals(o: V5QuickOdds): { line: number; over: number; under: number } | null {
+  const t = o["totals"];
+  if (!t || typeof t !== "object") return null;
+  // Find the first "over_X" key and its matching "under_X"
+  for (const k of Object.keys(t)) {
+    if (k.startsWith("over_")) {
+      const lineStr = k.slice(5); // e.g. "2.5"
+      const line = parseFloat(lineStr);
+      const over = t[k];
+      const under = t[`under_${lineStr}`];
+      if (over && under && !isNaN(line)) {
+        return { line, over, under };
+      }
+    }
+  }
+  return null;
+}
+
+/** Extract BTTS from V5 quick-access odds.
+ *  Actual key: "btts" with sub-keys "yes", "no" (may be null). */
+function v5ExtractBTTS(o: V5QuickOdds): { yes: number; no: number } | null {
+  const b = o["btts"];
+  if (!b) return null;
+  const yes = b.yes;
+  const no = b.no;
+  if (!yes || !no) return null;
+  return { yes, no };
+}
+
+/** Extract Draw No Bet from V5 quick-access odds.
+ *  Actual key: "draw_no_bet" with sub-keys "home", "away" (may be null). */
+function v5ExtractDNB(o: V5QuickOdds): { home: number; away: number } | null {
+  const d = o["draw_no_bet"];
+  if (!d) return null;
+  const home = d.home;
+  const away = d.away;
+  if (!home || !away) return null;
+  return { home, away };
+}
+
+/** Extract handicap from V5 quick-access odds.
+ *  Actual format: "handicap": [{type:"home",line:-1.5,odds:2.59},{type:"away",line:1.5,odds:1.54}] */
+function v5ExtractHandicap(o: V5QuickOdds): { line: number; home: number; away: number } | null {
+  const h = o["handicap"];
+  if (!Array.isArray(h) || h.length === 0) return null;
+  const homeEntry = h.find((e) => e.type === "home");
+  const awayEntry = h.find((e) => e.type === "away");
+  if (!homeEntry?.odds || !awayEntry?.odds) return null;
+  return {
+    line: homeEntry.line ?? -0.5,
+    home: homeEntry.odds,
+    away: awayEntry.odds,
+  };
+}
+
+// Convert V5 Top (Prematch) Event to UpcomingMatch — extracts all quick-access markets
+function mapV5TopEventToMatch(v5Event: V5TopEvent): UpcomingMatch {
+  const o = v5Event.odds ?? {};
+
+  // Base 1x2 odds
+  const x12 = o["1x2"];
+  const baseOdds = x12 && x12.home && x12.away
+    ? { home: x12.home, draw: x12.draw ?? 0, away: x12.away }
+    : { home: 0, draw: 0, away: 0 };
+
+  const hasReal = baseOdds.home > 1 && baseOdds.away > 1;
+
+  // Start with simulated markets as a safe base, then override with real V5 data
+  const sportName = V5_SPORT_ID_TO_NAME[v5Event.sportId] ?? "football";
+  const simMarkets = makeAdvancedMarketsFromTeams(v5Event.homeTeam, v5Event.awayTeam);
+
+  const dcReal = v5ExtractDC(o);
+  const totalsReal = v5ExtractTotals(o);
+  const bttsReal = v5ExtractBTTS(o);
+  const dnbReal = v5ExtractDNB(o);
+  const hcpReal = v5ExtractHandicap(o);
+
+  const markets: AdvancedMarkets = {
+    ...simMarkets,
+    // Override with real V5 data where available
+    doubleChance: dcReal ?? simMarkets.doubleChance,
+    bothTeamsScore: bttsReal ?? simMarkets.bothTeamsScore,
+    ...(dnbReal ? { drawNoBet: dnbReal } : simMarkets.drawNoBet ? { drawNoBet: simMarkets.drawNoBet } : {}),
+    ...(hcpReal ? {
+      asianHandicap: hcpReal,
+      // Also set European handicap approximation
+      handicap: {
+        homeMinusOne: hcpReal.line <= -0.5 ? hcpReal.home : simMarkets.handicap.homeMinusOne,
+        awayPlusOne: hcpReal.line <= -0.5 ? hcpReal.away : simMarkets.handicap.awayPlusOne,
+        homeMinusOneHalf: hcpReal.line <= -1.5 ? hcpReal.home : simMarkets.handicap.homeMinusOneHalf,
+        awayPlusOneHalf: hcpReal.line <= -1.5 ? hcpReal.away : simMarkets.handicap.awayPlusOneHalf,
+      },
+    } : {}),
+    ...(totalsReal ? {
+      totalGoals: {
+        ...simMarkets.totalGoals,
+        // Map the main line totals to the closest standard line
+        ...(Math.abs((totalsReal.line) - 0.5) < 0.26 ? { over05: totalsReal.over, under05: totalsReal.under } : {}),
+        ...(Math.abs((totalsReal.line) - 1.5) < 0.26 ? { over15: totalsReal.over, under15: totalsReal.under } : {}),
+        ...(Math.abs((totalsReal.line) - 2.5) < 0.26 ? { over25: totalsReal.over, under25: totalsReal.under } : {}),
+        ...(Math.abs((totalsReal.line) - 3.5) < 0.26 ? { over35: totalsReal.over, under35: totalsReal.under } : {}),
+        ...(Math.abs((totalsReal.line) - 4.5) < 0.26 ? { over45: totalsReal.over, under45: totalsReal.under } : {}),
+        ...(Math.abs((totalsReal.line) - 5.5) < 0.26 ? { over55: totalsReal.over, under55: totalsReal.under } : {}),
+        ...(Math.abs((totalsReal.line) - 6.5) < 0.26 ? { over65: totalsReal.over, under65: totalsReal.under } : {}),
+      },
+      _total: totalsReal.line,
+    } : {}),
+  };
+
+  // Date/time formatting
   const startTimeMs = v5Event.startTime * 1000;
-  const startsIn = Math.max(0, Math.floor((startTimeMs - now) / 60000));
-
-  // Format date and time
   const dateObj = new Date(startTimeMs);
-  const date = dateObj.toLocaleDateString('pt-PT', { day: '2-digit', month: '2-digit', year: 'numeric' }).replace(/\//g, '.');
-  const time = dateObj.toLocaleTimeString('pt-PT', { hour: '2-digit', minute: '2-digit' });
+  const date = dateObj.toLocaleDateString("pt-PT", { day: "2-digit", month: "2-digit", year: "numeric" }).replace(/\//g, ".");
+  const time = dateObj.toLocaleTimeString("pt-PT", { hour: "2-digit", minute: "2-digit" });
 
   return {
-    id: v5Event.id,
+    id: `v5-${sportName}-${v5Event.id}`,
     home: v5Event.homeTeam,
     away: v5Event.awayTeam,
     homeTeamId: v5Event.homeTeamId ? String(v5Event.homeTeamId) : undefined,
     awayTeamId: v5Event.awayTeamId ? String(v5Event.awayTeamId) : undefined,
     league: v5Event.leagueName,
     leagueId: String(v5Event.leagueId),
-    sport: v5Event.sportId === 1 ? "football" : (v5Event.sportId === 2 ? "basketball" : "football"),
-    odds: odds,
-    hasRealOdds: true,
-    date: date,
-    time: time,
-    startsIn: startsIn,
-    scheduledDate: date,
-    scheduledTime: time
+    country: "",
+    date,
+    time,
+    sport: sportName,
+    hasRealOdds: hasReal,
+    odds: baseOdds,
+    markets,
   };
 }
 
+// ─── V5 upcoming cache ────────────────────────────────────────────────────────
+
+type V5UpcomingCache = {
+  events: V5TopEvent[];
+  fetchedAt: number;
+};
+const _v5UpcomingCache = new Map<number, V5UpcomingCache>();
+const V5_UPCOMING_CACHE_TTL = 5 * 60_000; // 5 min
+
+/** Fetch + cache V5 prematch events for one sport. Returns empty array on error. */
+async function buildV5Upcoming(sportId: number, count: number): Promise<UpcomingMatch[]> {
+  try {
+    const cached = _v5UpcomingCache.get(sportId);
+    let events: V5TopEvent[] | null = null;
+    if (cached && Date.now() - cached.fetchedAt < V5_UPCOMING_CACHE_TTL) {
+      events = cached.events;
+    } else {
+      events = await fetchV5TopEvents(sportId, count);
+      if (events) {
+        _v5UpcomingCache.set(sportId, { events, fetchedAt: Date.now() });
+      } else if (cached) {
+        events = cached.events; // use stale cache on error
+      }
+    }
+    if (!events || events.length === 0) return [];
+
+    const now = Date.now();
+    return events
+      .filter((ev) => {
+        if (!ev.homeTeam || !ev.awayTeam) return false;
+        // Only upcoming (not started) events
+        const startMs = ev.startTime * 1000;
+        if (startMs < now - 5 * 60_000) return false;
+        // Must have real 1x2 odds
+        const x12 = ev.odds?.["1x2"];
+        return x12 && x12.home > 1 && x12.away > 1;
+      })
+      .map(mapV5TopEventToMatch);
+  } catch {
+    return [];
+  }
+}
+
+/** Normalise a team name for dedup comparison (lowercase, strip accents/punctuation) */
+function v5NormaliseTeam(name: string): string {
+  return name
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/** Merge V5 prematch events into an existing V1 list, deduplicating by team-pair + date. */
+function mergeV5IntoUpcoming(
+  v1Events: UpcomingMatch[],
+  v5Events: UpcomingMatch[],
+): UpcomingMatch[] {
+  // Build lookup: "normHome|normAway|date" → index in v1Events
+  const v1KeyToIdx = new Map<string, number>();
+  for (let i = 0; i < v1Events.length; i++) {
+    const m = v1Events[i]!;
+    const key = `${v5NormaliseTeam(m.home)}|${v5NormaliseTeam(m.away)}|${m.date}`;
+    v1KeyToIdx.set(key, i);
+    // Also reverse key (swap home/away) to catch neutral-venue flips
+    const keyRev = `${v5NormaliseTeam(m.away)}|${v5NormaliseTeam(m.home)}|${m.date}`;
+    v1KeyToIdx.set(keyRev, i);
+  }
+
+  const merged = [...v1Events] as UpcomingMatch[];
+
+  for (const v5m of v5Events) {
+    const key = `${v5NormaliseTeam(v5m.home)}|${v5NormaliseTeam(v5m.away)}|${v5m.date}`;
+    const keyRev = `${v5NormaliseTeam(v5m.away)}|${v5NormaliseTeam(v5m.home)}|${v5m.date}`;
+    const existIdx = v1KeyToIdx.get(key) ?? v1KeyToIdx.get(keyRev);
+    if (existIdx !== undefined) {
+      // Existing V1 event — upgrade odds/markets with V5 real data if available
+      const existing = merged[existIdx]!;
+      if (v5m.hasRealOdds && !existing.hasRealOdds) {
+        merged[existIdx] = {
+          ...existing,
+          odds: v5m.odds,
+          markets: v5m.markets,
+          hasRealOdds: true,
+        };
+      }
+    } else {
+      // New event not in V1 — add it
+      merged.push(v5m);
+      // Register keys so subsequent V5 events don't create a second dupe
+      v1KeyToIdx.set(key, merged.length - 1);
+      v1KeyToIdx.set(keyRev, merged.length - 1);
+    }
+  }
+
+  // Sort by date + time ascending
+  return merged.sort((a, b) => {
+    const ta = new Date(`${a.date.split(".").reverse().join("-")}T${a.time}`).getTime();
+    const tb = new Date(`${b.date.split(".").reverse().join("-")}T${b.time}`).getTime();
+    return ta - tb;
+  });
+}
+
 // Test Routes for V5
+router.get("/v5-test/upcoming-debug/:sport", async (req: Request, res: Response) => {
+  try {
+    const sport = String(req.params["sport"] ?? "football");
+    const sportId = V5_SPORT_NAMES.find((s) => s.name === sport)?.id ?? 1;
+    const sportDef = V5_SPORT_NAMES.find((s) => s.id === sportId)!;
+    const events = await buildV5Upcoming(sportId, sportDef.count);
+    res.json({ sport, sportId, count: events.length, events: events.slice(0, 5) });
+    return;
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+    return;
+  }
+});
+
 router.get("/v5-test/live-matches", async (req: Request, res: Response) => {
   try {
     const sportId = 1;
@@ -28994,24 +29228,13 @@ router.get("/v5-test/sports", async (_req: Request, res: Response) => {
 
 router.get("/v5-test/top/:sport", async (req: Request, res: Response) => {
   try {
-    const sport = req.params.sport;
-    if (typeof sport !== "string") return res.status(400).json({ error: "Invalid sport" });
-    let baseUrl: string;
-    switch (sport) {
-      case "football": baseUrl = SAPI_V5_FOOTBALL; break;
-      case "basketball": baseUrl = SAPI_V5_BASKETBALL; break;
-      case "hockey": baseUrl = SAPI_V5_HOCKEY; break;
-      case "tennis": baseUrl = SAPI_V5_TENNIS; break;
-      case "baseball": baseUrl = SAPI_V5_BASEBALL; break;
-      default: return res.status(400).json({ error: "Invalid sport" });
-    }
-    const resp = await fetch(`${baseUrl}/api/v1/top`, {
-      headers: sapiHeaders(),
-      signal: AbortSignal.timeout(10_000),
-    });
-    if (!resp.ok) return res.status(resp.status).json({ error: "Failed to fetch top events" });
-    const data = await resp.json();
-    res.json(data);
+    const sport = String(req.params["sport"] ?? "");
+    const sportId = V5_SPORT_NAMES.find((s) => s.name === sport)?.id;
+    if (!sportId) return res.status(400).json({ error: "Invalid sport. Use: football, basketball, hockey, tennis, baseball, volleyball" });
+    const count = parseInt(String(req.query["count"] ?? "20"), 10) || 20;
+    const events = await fetchV5TopEvents(sportId, count);
+    if (events === null) return res.status(502).json({ error: "V5 API unavailable" });
+    res.json({ count: events.length, events: events.slice(0, 5) });
     return;
   } catch (err) {
     res.status(500).json({ error: "Failed to fetch top events" });
@@ -29021,24 +29244,12 @@ router.get("/v5-test/top/:sport", async (req: Request, res: Response) => {
 
 router.get("/v5-test/live/:sport", async (req: Request, res: Response) => {
   try {
-    const sport = req.params.sport;
-    if (typeof sport !== "string") return res.status(400).json({ error: "Invalid sport" });
-    let baseUrl: string;
-    switch (sport) {
-      case "football": baseUrl = SAPI_V5_FOOTBALL; break;
-      case "basketball": baseUrl = SAPI_V5_BASKETBALL; break;
-      case "hockey": baseUrl = SAPI_V5_HOCKEY; break;
-      case "tennis": baseUrl = SAPI_V5_TENNIS; break;
-      case "baseball": baseUrl = SAPI_V5_BASEBALL; break;
-      default: return res.status(400).json({ error: "Invalid sport" });
-    }
-    const resp = await fetch(`${baseUrl}/api/v1/live`, {
-      headers: sapiHeaders(),
-      signal: AbortSignal.timeout(10_000),
-    });
-    if (!resp.ok) return res.status(resp.status).json({ error: "Failed to fetch live events" });
-    const data = await resp.json();
-    res.json(data);
+    const sport = String(req.params["sport"] ?? "");
+    const sportId = V5_SPORT_NAMES.find((s) => s.name === sport)?.id;
+    if (!sportId) return res.status(400).json({ error: "Invalid sport. Use: football, basketball, hockey, tennis, baseball, volleyball" });
+    const events = await fetchV5LiveEvents(sportId);
+    if (events === null) return res.status(502).json({ error: "V5 API unavailable" });
+    res.json({ count: events.length, events: events.slice(0, 5) });
     return;
   } catch (err) {
     res.status(500).json({ error: "Failed to fetch live events" });
