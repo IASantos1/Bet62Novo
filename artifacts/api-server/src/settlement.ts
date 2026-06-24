@@ -626,6 +626,7 @@ function scoreOutcomeForSelLastResort(
       const dir = m[1]!;
       const line = (m[2] ?? "") === "35" ? 3.5 : 2.5;
       const totalSets = ft.home + ft.away;
+      if (totalSets === 0) return null;
       if (totalSets === line) return "void";
       return dir === "o"
         ? totalSets > line
@@ -2136,13 +2137,13 @@ export function scoreOutcomeForSel(
   // ── Exact sets (tennis) ───────────────────────────────────────────────────
   else if (/^es-(h20|h21|a02|a12)$/.test(s)) {
     const sets = getTennisSetsFromExtras(extra?.extras);
+    if (sets.length === 0) return null;
     const hc = sets.filter(
       ([h, a]) => tennisSetFinished([h, a]) && h > a,
     ).length;
     const ac = sets.filter(
       ([h, a]) => tennisSetFinished([h, a]) && a > h,
     ).length;
-    if (hc === null || ac === null) return null;
     const score = `${hc}-${ac}`;
     const want =
       s === "es-h20"
