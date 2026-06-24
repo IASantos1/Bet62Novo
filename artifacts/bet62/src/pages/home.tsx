@@ -16021,6 +16021,7 @@ export default function Home({
                       toggleBet(expandedMatch, market, odds, "insight", market);
                       if (window.innerWidth < 1024) setBetSlipOpenMobile(true);
                     }}
+                    liveExtra={(expandedMatch as any)._liveExtra}
                   />
                 )}
 
@@ -18306,6 +18307,94 @@ export default function Home({
                                 </span>
                               )}
                             </div>
+                          </div>
+                        );
+                      })()}
+                    {/* Baseball live stats below chart */}
+                    {expandedMatch.sport === "baseball" &&
+                      (() => {
+                        const innings = expandedMatch._liveExtra?.innings ?? [];
+                        const outs = expandedMatch._liveExtra?.outs ?? 0;
+                        const homeHits = expandedMatch._liveExtra?.homeHits ?? 0;
+                        const awayHits = expandedMatch._liveExtra?.awayHits ?? 0;
+                        const homeErrors = expandedMatch._liveExtra?.homeErrors ?? 0;
+                        const awayErrors = expandedMatch._liveExtra?.awayErrors ?? 0;
+                        const INNING_LABELS = ["1", "2", "3", "4", "5", "6", "7", "8", "9"];
+                        if (innings.length === 0) return null;
+                        return (
+                          <div className="mt-4 pt-4 border-t border-zinc-700/60 space-y-4">
+                            <div>
+                              <div className="text-[10px] font-black text-red-500 uppercase tracking-widest mb-2">
+                                Placar por Entrada
+                              </div>
+                              <div className="rounded-lg border border-zinc-800 overflow-hidden">
+                                <div
+                                  className="grid text-[9px] font-bold text-zinc-500 px-3 py-1.5 border-b border-zinc-800"
+                                  style={{
+                                    gridTemplateColumns: `1fr repeat(${innings.length}, 2rem) 2rem 2rem 2rem`,
+                                  }}
+                                >
+                                  <div />
+                                  {innings.map((_, i) => (
+                                    <div key={i} className="text-center">
+                                      {INNING_LABELS[i] ?? `${i + 1}`}
+                                    </div>
+                                  ))}
+                                  <div className="text-center">R</div>
+                                  <div className="text-center">H</div>
+                                  <div className="text-center">E</div>
+                                </div>
+                                {[0, 1].map((idx) => {
+                                  const name =
+                                    idx === 0
+                                      ? expandedMatch.home
+                                      : expandedMatch.away;
+                                  const total =
+                                    idx === 0
+                                      ? expandedMatch.homeScore
+                                      : expandedMatch.awayScore;
+                                  const hits = idx === 0 ? homeHits : awayHits;
+                                  const errors = idx === 0 ? homeErrors : awayErrors;
+                                  return (
+                                    <div
+                                      key={idx}
+                                      className={`grid text-[10px] px-3 py-1.5 ${idx === 0 ? "border-b border-zinc-800/60" : ""}`}
+                                      style={{
+                                        gridTemplateColumns: `1fr repeat(${innings.length}, 2rem) 2rem 2rem 2rem`,
+                                      }}
+                                    >
+                                      <div className="text-zinc-300 font-bold truncate">
+                                        {name.split(" ").slice(-1)[0]}
+                                      </div>
+                                      {innings.map(
+                                        ([h, a]: [number, number], i: number) => (
+                                          <div
+                                            key={i}
+                                            className={`text-center font-black tabular-nums ${(idx === 0 ? h > a : a > h) ? "text-white" : "text-zinc-600"}`}
+                                          >
+                                            {idx === 0 ? h : a}
+                                          </div>
+                                        ),
+                                      )}
+                                      <div className="text-center font-black text-white tabular-nums">
+                                        {total ?? 0}
+                                      </div>
+                                      <div className="text-center font-black text-zinc-300 tabular-nums">
+                                        {hits}
+                                      </div>
+                                      <div className="text-center font-black text-zinc-300 tabular-nums">
+                                        {errors}
+                                      </div>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                            {outs > 0 && (
+                              <div className="text-center text-[10px] text-zinc-400">
+                                Outs: <span className="font-black text-white">{outs}</span>
+                              </div>
+                            )}
                           </div>
                         );
                       })()}

@@ -29,6 +29,41 @@ type H2HMeeting = { date: string; team1: string; team2: string; score1: number; 
 type ConfrontosData = { homeWins: number; awayWins: number; draws: number; recentMeetings: H2HMeeting[]; team1Name: string; team2Name: string; sport: string };
 type V2StatsGroup = { title: string; rows: Array<{ name: string; home: string; away: string }> };
 
+type LiveExtra = {
+  possession?: [number, number];
+  xg?: [number, number];
+  corners?: [number, number];
+  shots?: [number, number];
+  shotsOn?: [number, number];
+  fouls?: [number, number];
+  offsides?: [number, number];
+  yellows?: [number, number];
+  reds?: [number, number];
+  goals?: [number, number];
+  vollSets?: Array<[number, number]>;
+  currentPts?: [number, number];
+  quarters?: Array<[number, number]>;
+  periods?: Array<[number, number]>;
+  innings?: Array<[number, number]>;
+  outs?: number;
+  homeHits?: number;
+  awayHits?: number;
+  homeErrors?: number;
+  awayErrors?: number;
+  totalPoints?: [number, number];
+  fgPct?: [number, number];
+  threePct?: [number, number];
+  rebounds?: [number, number];
+  assists?: [number, number];
+  steals?: [number, number];
+  blocks?: [number, number];
+  turnovers?: [number, number];
+  tennisSets?: Array<[number, number]>;
+  currentGameScore?: string;
+  currentSet?: number;
+  games?: [number, number];
+};
+
 type Props = {
   homeTeam: string;
   awayTeam: string;
@@ -45,6 +80,7 @@ type Props = {
   onGoH2H: () => void;
   onGoLive: () => void;
   onAddInsight?: (market: string, odds: number) => void;
+  liveExtra?: LiveExtra | null;
 };
 
 // ── Momentum Chart ──────────────────────────────────────────────────────────
@@ -235,6 +271,7 @@ export default function MatchStatsPanel({
   matchStats, matchStatsLoading,
   v2StatsGroups, v2StatsLoading,
   confrontosData, onGoH2H, onGoLive, onAddInsight,
+  liveExtra,
 }: Props) {
   const isFootball = !sport || sport === "football";
 
@@ -407,14 +444,309 @@ export default function MatchStatsPanel({
           {/* ── ESTATÍSTICAS ── */}
           {activeTab === "stats" && (
             <div className="space-y-3">
-              {/* Momentum chart — always visible */}
-              <MomentumChart
+              {/* Live Extra Stats for Tennis, Basketball, Baseball, Hockey, etc. */}
+              {liveExtra && (
+                <>
+                  {/* Tennis Stats */}
+                  {(sport === "tennis" || liveExtra.tennisSets) && (
+                    <div className="bg-zinc-900 rounded-xl border border-zinc-800 p-4 space-y-4">
+                      <div className="text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-3">Estatísticas de Tênis</div>
+                      {liveExtra.tennisSets && liveExtra.tennisSets.length > 0 && (
+                        <div className="space-y-2">
+                          <div className="text-[10px] font-black text-red-500 uppercase tracking-widest">Sets</div>
+                          <div className="grid grid-cols-3 gap-1 text-[10px] font-bold text-zinc-500 mb-1">
+                            <div></div>
+                            {liveExtra.tennisSets.map((_, i) => (
+                              <div key={i} className="text-center">Set {i + 1}</div>
+                            ))}
+                          </div>
+                          {[0, 1].map((idx) => {
+                            const name = idx === 0 ? homeTeam : awayTeam;
+                            return (
+                              <div key={idx} className="grid grid-cols-3 gap-1 text-[11px] py-1.5">
+                                <div className="text-zinc-300 font-bold truncate">
+                                  {name.split(" ").slice(-1)[0]}
+                                </div>
+                                {liveExtra.tennisSets.map(([h, a], i) => (
+                                  <div
+                                    key={i}
+                                    className={`text-center font-black tabular-nums ${
+                                      (idx === 0 ? h > a : a > h) ? "text-white" : "text-zinc-600"
+                                    }`}
+                                  >
+                                    {idx === 0 ? h : a}
+                                  </div>
+                                ))}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                      {liveExtra.games && (
+                        <div className="text-center text-[11px] text-zinc-400">
+                          Games: <span className="font-black text-white">{liveExtra.games[0]} - {liveExtra.games[1]}</span>
+                        </div>
+                      )}
+                      {liveExtra.currentGameScore && (
+                        <div className="text-center text-[11px] text-yellow-400 font-bold">
+                          Game Atual: {liveExtra.currentGameScore}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Volleyball Stats */}
+                  {(sport === "volleyball" || liveExtra.vollSets) && (
+                    <div className="bg-zinc-900 rounded-xl border border-zinc-800 p-4 space-y-4">
+                      <div className="text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-3">Estatísticas de Vôlei</div>
+                      {liveExtra.vollSets && liveExtra.vollSets.length > 0 && (
+                        <div className="space-y-2">
+                          <div className="text-[10px] font-black text-red-500 uppercase tracking-widest">Placar dos Sets</div>
+                          <div className="grid grid-cols-3 gap-1 text-[10px] font-bold text-zinc-500 mb-1">
+                            <div></div>
+                            {liveExtra.vollSets.map((_, i) => (
+                              <div key={i} className="text-center">Set {i + 1}</div>
+                            ))}
+                          </div>
+                          {[0, 1].map((idx) => {
+                            const name = idx === 0 ? homeTeam : awayTeam;
+                            return (
+                              <div key={idx} className="grid grid-cols-3 gap-1 text-[11px] py-1.5">
+                                <div className="text-zinc-300 font-bold truncate">
+                                  {name.split(" ").slice(-1)[0]}
+                                </div>
+                                {liveExtra.vollSets.map(([h, a], i) => (
+                                  <div
+                                    key={i}
+                                    className={`text-center font-black tabular-nums ${
+                                      (idx === 0 ? h > a : a > h) ? "text-white" : "text-zinc-600"
+                                    }`}
+                                  >
+                                    {idx === 0 ? h : a}
+                                  </div>
+                                ))}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                      {liveExtra.currentPts && (
+                        <div className="text-center text-[11px] text-yellow-400 font-bold">
+                          Pontos Atuais: {liveExtra.currentPts[0]} - {liveExtra.currentPts[1]}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Basketball Stats */}
+                  {(sport === "basketball" || liveExtra.quarters) && (
+                    <div className="bg-zinc-900 rounded-xl border border-zinc-800 p-4 space-y-4">
+                      <div className="text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-3">Estatísticas de Basquete</div>
+                      {liveExtra.quarters && liveExtra.quarters.length > 0 && (
+                        <div className="space-y-2">
+                          <div className="text-[10px] font-black text-red-500 uppercase tracking-widest">Placar dos Quartos</div>
+                          <div className="grid grid-cols-3 gap-1 text-[10px] font-bold text-zinc-500 mb-1">
+                            <div></div>
+                            {liveExtra.quarters.map((_, i) => (
+                              <div key={i} className="text-center">Q{i + 1}</div>
+                            ))}
+                          </div>
+                          {[0, 1].map((idx) => {
+                            const name = idx === 0 ? homeTeam : awayTeam;
+                            return (
+                              <div key={idx} className="grid grid-cols-3 gap-1 text-[11px] py-1.5">
+                                <div className="text-zinc-300 font-bold truncate">
+                                  {name.split(" ").slice(-1)[0]}
+                                </div>
+                                {liveExtra.quarters.map(([h, a], i) => (
+                                  <div
+                                    key={i}
+                                    className={`text-center font-black tabular-nums ${
+                                      (idx === 0 ? h > a : a > h) ? "text-white" : "text-zinc-600"
+                                    }`}
+                                  >
+                                    {idx === 0 ? h : a}
+                                  </div>
+                                ))}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                      <div className="space-y-2">
+                        {liveExtra.totalPoints && (
+                          <div className="flex items-center justify-between text-[11px]">
+                            <span className="font-black text-white w-10 text-left tabular-nums">{liveExtra.totalPoints[0]}</span>
+                            <span className="text-zinc-400 text-center flex-1 text-[10px] uppercase tracking-wide">Total de Pontos</span>
+                            <span className="font-black text-white w-10 text-right tabular-nums">{liveExtra.totalPoints[1]}</span>
+                          </div>
+                        )}
+                        {liveExtra.fgPct && (
+                          <div className="flex items-center justify-between text-[11px]">
+                            <span className="font-black text-white w-10 text-left tabular-nums">{liveExtra.fgPct[0]}%</span>
+                            <span className="text-zinc-400 text-center flex-1 text-[10px] uppercase tracking-wide">FG%</span>
+                            <span className="font-black text-white w-10 text-right tabular-nums">{liveExtra.fgPct[1]}%</span>
+                          </div>
+                        )}
+                        {liveExtra.threePct && (
+                          <div className="flex items-center justify-between text-[11px]">
+                            <span className="font-black text-white w-10 text-left tabular-nums">{liveExtra.threePct[0]}%</span>
+                            <span className="text-zinc-400 text-center flex-1 text-[10px] uppercase tracking-wide">3PT%</span>
+                            <span className="font-black text-white w-10 text-right tabular-nums">{liveExtra.threePct[1]}%</span>
+                          </div>
+                        )}
+                        {liveExtra.rebounds && (
+                          <div className="flex items-center justify-between text-[11px]">
+                            <span className="font-black text-white w-10 text-left tabular-nums">{liveExtra.rebounds[0]}</span>
+                            <span className="text-zinc-400 text-center flex-1 text-[10px] uppercase tracking-wide">Rebotes</span>
+                            <span className="font-black text-white w-10 text-right tabular-nums">{liveExtra.rebounds[1]}</span>
+                          </div>
+                        )}
+                        {liveExtra.assists && (
+                          <div className="flex items-center justify-between text-[11px]">
+                            <span className="font-black text-white w-10 text-left tabular-nums">{liveExtra.assists[0]}</span>
+                            <span className="text-zinc-400 text-center flex-1 text-[10px] uppercase tracking-wide">Assistências</span>
+                            <span className="font-black text-white w-10 text-right tabular-nums">{liveExtra.assists[1]}</span>
+                          </div>
+                        )}
+                        {liveExtra.steals && (
+                          <div className="flex items-center justify-between text-[11px]">
+                            <span className="font-black text-white w-10 text-left tabular-nums">{liveExtra.steals[0]}</span>
+                            <span className="text-zinc-400 text-center flex-1 text-[10px] uppercase tracking-wide">Roubos</span>
+                            <span className="font-black text-white w-10 text-right tabular-nums">{liveExtra.steals[1]}</span>
+                          </div>
+                        )}
+                        {liveExtra.blocks && (
+                          <div className="flex items-center justify-between text-[11px]">
+                            <span className="font-black text-white w-10 text-left tabular-nums">{liveExtra.blocks[0]}</span>
+                            <span className="text-zinc-400 text-center flex-1 text-[10px] uppercase tracking-wide">Bloqueios</span>
+                            <span className="font-black text-white w-10 text-right tabular-nums">{liveExtra.blocks[1]}</span>
+                          </div>
+                        )}
+                        {liveExtra.turnovers && (
+                          <div className="flex items-center justify-between text-[11px]">
+                            <span className="font-black text-white w-10 text-left tabular-nums">{liveExtra.turnovers[0]}</span>
+                            <span className="text-zinc-400 text-center flex-1 text-[10px] uppercase tracking-wide">Turnovers</span>
+                            <span className="font-black text-white w-10 text-right tabular-nums">{liveExtra.turnovers[1]}</span>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Baseball Stats */}
+                  {(sport === "baseball" || liveExtra.innings) && (
+                    <div className="bg-zinc-900 rounded-xl border border-zinc-800 p-4 space-y-4">
+                      <div className="text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-3">Estatísticas de Beisebol</div>
+                      {liveExtra.innings && liveExtra.innings.length > 0 && (
+                        <div className="space-y-2">
+                          <div className="text-[10px] font-black text-red-500 uppercase tracking-widest">Placar das Entradas</div>
+                          <div className="rounded-lg border border-zinc-800 overflow-hidden">
+                            <div
+                              className="grid text-[10px] font-bold text-zinc-500 px-3 py-1.5 border-b border-zinc-800"
+                              style={{
+                                gridTemplateColumns: `1fr repeat(${liveExtra.innings.length}, 2rem) 2rem 2rem 2rem`,
+                              }}
+                            >
+                              <div></div>
+                              {liveExtra.innings.map((_, i) => (
+                                <div key={i} className="text-center">{i < 9 ? i + 1 : `${i + 1}º Extra`}</div>
+                              ))}
+                              <div className="text-center">R</div>
+                              <div className="text-center">H</div>
+                              <div className="text-center">E</div>
+                            </div>
+                            {[0, 1].map((idx) => {
+                              const name = idx === 0 ? homeTeam : awayTeam;
+                              const totalRuns = idx === 0 ? (liveExtra.totalPoints?.[0] ?? 0) : (liveExtra.totalPoints?.[1] ?? 0);
+                              const hits = idx === 0 ? (liveExtra.homeHits ?? 0) : (liveExtra.awayHits ?? 0);
+                              const errors = idx === 0 ? (liveExtra.homeErrors ?? 0) : (liveExtra.awayErrors ?? 0);
+                              return (
+                                <div
+                                  key={idx}
+                                  className={`grid text-[11px] px-3 py-1.5 ${idx === 0 ? "border-b border-zinc-800/60" : ""}`}
+                                  style={{
+                                    gridTemplateColumns: `1fr repeat(${liveExtra.innings.length}, 2rem) 2rem 2rem 2rem`,
+                                  }}
+                                >
+                                  <div className="text-zinc-300 font-bold truncate">
+                                    {name.split(" ").slice(-1)[0]}
+                                  </div>
+                                  {liveExtra.innings.map(([h, a], i) => (
+                                    <div
+                                      key={i}
+                                      className={`text-center font-black tabular-nums ${
+                                        (idx === 0 ? h > a : a > h) ? "text-white" : "text-zinc-600"
+                                      }`}
+                                    >
+                                      {idx === 0 ? h : a}
+                                    </div>
+                                  ))}
+                                  <div className="text-center font-black text-white tabular-nums">{totalRuns}</div>
+                                  <div className="text-center font-black text-zinc-300 tabular-nums">{hits}</div>
+                                  <div className="text-center font-black text-zinc-300 tabular-nums">{errors}</div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
+                      {liveExtra.outs !== undefined && (
+                        <div className="text-center text-[11px] text-zinc-400">
+                          Outs: <span className="font-black text-white">{liveExtra.outs}</span>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Hockey Stats */}
+                  {(sport === "hockey" || liveExtra.periods) && (
+                    <div className="bg-zinc-900 rounded-xl border border-zinc-800 p-4 space-y-4">
+                      <div className="text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-3">Estatísticas de Hóquei</div>
+                      {liveExtra.periods && liveExtra.periods.length > 0 && (
+                        <div className="space-y-2">
+                          <div className="text-[10px] font-black text-red-500 uppercase tracking-widest">Placar dos Períodos</div>
+                          <div className="grid grid-cols-3 gap-1 text-[10px] font-bold text-zinc-500 mb-1">
+                            <div></div>
+                            {liveExtra.periods.map((_, i) => (
+                              <div key={i} className="text-center">P{i + 1}</div>
+                            ))}
+                          </div>
+                          {[0, 1].map((idx) => {
+                            const name = idx === 0 ? homeTeam : awayTeam;
+                            return (
+                              <div key={idx} className="grid grid-cols-3 gap-1 text-[11px] py-1.5">
+                                <div className="text-zinc-300 font-bold truncate">
+                                  {name.split(" ").slice(-1)[0]}
+                                </div>
+                                {liveExtra.periods.map(([h, a], i) => (
+                                  <div
+                                    key={i}
+                                    className={`text-center font-black tabular-nums ${
+                                      (idx === 0 ? h > a : a > h) ? "text-white" : "text-zinc-600"
+                                    }`}
+                                  >
+                                    {idx === 0 ? h : a}
+                                  </div>
+                                ))}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </>
+              )}
+
+              {/* Momentum chart — always visible for football */}
+              {(isFootball || !liveExtra) && <MomentumChart
                 homeTeam={homeTeam}
                 awayTeam={awayTeam}
                 isLive={isLive}
                 liveMinute={liveMinute}
                 isHalfTime={isHalfTime}
-              />
+              />}
 
               {(v2StatsLoading && mainStats.length === 0) ? (
                 <div className="flex items-center justify-center py-6">
