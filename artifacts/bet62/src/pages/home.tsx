@@ -9466,12 +9466,12 @@ export default function Home({
     const quickAmounts = [5, 10, 25, 50];
 
     return (
-      <div className="flex flex-col h-full bg-zinc-950">
+      <div className="flex flex-col h-full bg-zinc-900">
         {/* ── HEADER ── */}
         <div
           className="relative px-5 pt-3 pb-4"
           style={{
-            background: "linear-gradient(160deg,#1a0505 0%,#0f0f0f 100%)",
+            background: "linear-gradient(160deg,#1a0505 0%,#18181b 100%)",
             borderBottom: "1px solid rgba(220,38,38,0.15)",
           }}
         >
@@ -10800,6 +10800,33 @@ export default function Home({
             value={marketGroupSeqApi}
           >
             <div className="mt-0">
+
+              {/* ── MARKET TABS BAR ── */}
+              {tabs.length > 1 && (
+                <div
+                  ref={tabContainerRef}
+                  className="flex gap-1.5 overflow-x-auto pb-2 mb-3 -mx-1 px-1"
+                  style={{ scrollbarWidth: "none", msOverflowStyle: "none" }}
+                >
+                  {tabs.map((tab) => (
+                    <button
+                      key={tab.key}
+                      data-tab={tab.key}
+                      onClick={() => {
+                        setModalTab(tab.key);
+                        setTimeout(() => scrollTabIntoView(tab.key), 0);
+                      }}
+                      className={`shrink-0 px-3 py-1.5 rounded-full text-[12px] font-bold transition-all whitespace-nowrap ${
+                        modalTab === tab.key
+                          ? "bg-red-600 text-white shadow-sm"
+                          : "bg-zinc-800 text-zinc-400 hover:text-white hover:bg-zinc-700"
+                      }`}
+                    >
+                      {tab.label}
+                    </button>
+                  ))}
+                </div>
+              )}
 
               {/* ── SUSPENSION BANNER (modal) ── */}
               {((match.marketSuspension &&
@@ -23215,7 +23242,7 @@ export default function Home({
         </main>
 
         {/* DESKTOP BET SLIP */}
-        <aside className="hidden lg:block w-96 border-l border-zinc-900 bg-zinc-950 sticky top-16 h-[calc(100vh-4rem)]">
+        <aside className="hidden lg:block w-96 border-l border-zinc-800/60 bg-zinc-900 sticky top-16 h-[calc(100vh-4rem)]">
           {BetSlipContent()}
         </aside>
       </div>
