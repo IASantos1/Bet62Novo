@@ -14420,8 +14420,14 @@ async function buildBasketballLiveV2(
   for (const [id, state] of liveMatchState.entries()) {
     if (!id.startsWith("bball-v2-")) continue;
     const tooOld = now - (state._firstSeenAt ?? now) > MAX_LIVE_STATE_MS;
-    if (!currentIds.has(id) || tooOld) {
-      await finalizeStaleLiveMatch(state);
+    if (tooOld) {
+      // Only auto-finalize on timeout if score looks complete (4 quarters played)
+      const quarters = state._liveExtra?.quarters;
+      const qCount = Array.isArray(quarters) ? quarters.length : 0;
+      if (qCount >= 4) await finalizeStaleLiveMatch(state);
+      liveMatchState.delete(id);
+    } else if (!currentIds.has(id)) {
+      // Game dropped from live feed — scanV2AllSportsForFinished handles proper detection
       liveMatchState.delete(id);
     }
   }
@@ -14586,8 +14592,14 @@ function buildHockeyLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
   for (const [id, state] of liveMatchState.entries()) {
     if (!id.startsWith("hockey-v2-")) continue;
     const tooOld = now - (state._firstSeenAt ?? now) > MAX_LIVE_STATE_MS;
-    if (!currentIds.has(id) || tooOld) {
-      void finalizeStaleLiveMatch(state);
+    if (tooOld) {
+      // Only auto-finalize on timeout if score looks complete (3+ periods played)
+      const periods = state._liveExtra?.periods;
+      const pCount = Array.isArray(periods) ? periods.length : 0;
+      if (pCount >= 3) void finalizeStaleLiveMatch(state);
+      liveMatchState.delete(id);
+    } else if (!currentIds.has(id)) {
+      // Game dropped from live feed — scanV2AllSportsForFinished handles proper detection
       liveMatchState.delete(id);
     }
   }
@@ -14732,8 +14744,16 @@ function buildBaseballLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
   for (const [id, state] of liveMatchState.entries()) {
     if (!id.startsWith("baseball-v2-")) continue;
     const tooOld = now - (state._firstSeenAt ?? now) > MAX_LIVE_STATE_MS;
-    if (!currentIds.has(id) || tooOld) {
-      void finalizeStaleLiveMatch(state);
+    if (tooOld) {
+      // Only auto-finalize on timeout if score looks complete (9+ innings played)
+      const innings = state._liveExtra?.innings;
+      const inningCount = Array.isArray(innings) ? innings.length : 0;
+      if (inningCount >= 9) void finalizeStaleLiveMatch(state);
+      liveMatchState.delete(id);
+    } else if (!currentIds.has(id)) {
+      // Game dropped from live feed — scanV2AllSportsForFinished handles proper detection.
+      // Do NOT finalize here: KBO/MLB games can briefly disappear mid-game due to API
+      // latency, causing premature settlement with in-progress scores.
       liveMatchState.delete(id);
     }
   }
@@ -15197,8 +15217,13 @@ function buildTennisLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
       continue;
     }
     const tooOld = now - (cached._firstSeenAt ?? now) > MAX_LIVE_STATE_MS;
+    // Helper: check if the cached live score indicates a tennis match is truly finished
+    // (at least one player has won 2+ sets, covering best-of-3 and most best-of-5 scenarios)
+    const tennisScoreLooksFinished =
+      cached.homeScore >= 2 || cached.awayScore >= 2;
     if (tooOld) {
-      rememberFinishedTennisState(id, cached, now);
+      // Safety-net eviction — only write to finishedMatchResults if score is plausible
+      if (tennisScoreLooksFinished) rememberFinishedTennisState(id, cached, now);
       liveMatchState.delete(id);
       _tennisMissingFrom.delete(id);
       continue;
@@ -15207,7 +15232,10 @@ function buildTennisLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
       const firstMissing = _tennisMissingFrom.get(id) ?? now;
       _tennisMissingFrom.set(id, firstMissing);
       if (now - firstMissing > 45_000) {
-        rememberFinishedTennisState(id, cached, now);
+        // Only finalize after 45 s if score shows the match has a proper result
+        if (tennisScoreLooksFinished) {
+          rememberFinishedTennisState(id, cached, now);
+        }
         liveMatchState.delete(id);
         _tennisMissingFrom.delete(id);
       } else {
@@ -15217,6 +15245,7 @@ function buildTennisLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
         // we can resume accurately if the match genuinely returns.
         const finished = isTennisFinishedStatusText(cached.status);
         if (finished) {
+          // Status explicitly says finished — trust it regardless of score
           rememberFinishedTennisState(id, cached, now);
           liveMatchState.delete(id);
           _tennisMissingFrom.delete(id);

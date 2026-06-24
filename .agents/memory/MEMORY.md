@@ -12,3 +12,4 @@
 - [Stripe payments](stripe-payments.md) — Stripe replaced ifthenpay; MB WAY uses Checkout Session (not native); webhook must be BEFORE express.json(); bare stripe SDK (no stripe-replit-sync)
 - [Tennis V1 settlement gap](tennis-v1-settlement.md) — ensureFinishedMatchResult only handles tennis-v2-* IDs; tennis-v1-* (ITF/Challenger) were silently skipped → bets never settled; fix: add tennis-v1 branch + scanTennisV1ForFinished in settlement cycle
 - [Live dedup key must omit league](live-dedup-league.md) — liveMatchIdentityKey must NOT include league; V1 and V2 return different league names for the same match → duplicates if league is part of the key
+- [Premature settlement via live GC](premature-settlement-live-gc.md) — buildBaseballLiveV2/HockeyLiveV2/BasketballLiveV2 called finalizeStaleLiveMatch immediately on feed-drop; fix: only auto-finalize on tooOld (4h) + innings≥9/periods≥3/quarters≥4 guard; feed-drop alone just deletes from liveMatchState
