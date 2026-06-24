@@ -2857,15 +2857,13 @@ const TennisBallIcon = ({ size = 16 }: { size?: number }) => (
   </svg>
 );
 
-function seededRng(seed: number) {
-  return (n: number) => {
-    const x = Math.sin(seed * 9301 + n * 49297 + 233) * 10000;
-    return x - Math.floor(x);
-  };
+function _seededBarH(a: number, b: number): number {
+  return Math.abs(Math.sin(a * 127.1 + b * 311.7) * 0.45 + Math.sin(a * 17.3 + b * 89.5) * 0.35 + 0.2);
 }
 
 function MomentumChart({
   match,
+  v2StatsGroups,
 }: {
   match: {
     id: string | number;
@@ -2874,176 +2872,256 @@ function MomentumChart({
     homeScore?: number;
     awayScore?: number;
     minute?: number;
-    events?: Array<{
-      type: string;
-      team: string;
-      minute: number;
-      player: string;
-    }>;
+    status?: string;
+    _liveExtra?: Record<string, unknown>;
   };
+  v2StatsGroups?: Array<{ title: string; rows: Array<{ name: string; home: string; away: string }> }> | null;
 }) {
   const minute = match.minute ?? 0;
-  const [tick, setTick] = useState(0);
+  const statusStr = String(match.status ?? "").toLowerCase();
+  const isHT =
+    statusStr === "ht" ||
+    statusStr === "halftime" ||
+    statusStr.includes("half time") ||
+    statusStr.includes("half-time");
+  const isET = minute > 90;
+
+  // Deterministic bar heights seeded by team names
+  const hs = match.home.split("").reduce((a, c) => a + c.charCodeAt(0), 7);
+  const as_ = match.away.split("").reduce((a, c) => a + c.charCodeAt(0), 13);
+
+  // Layout: 23 columns per half (each col ≈ 2 min → 46 min per half)
+  const HALF_COLS = 23;
+  const ET_COLS = 15;
+  const TOTAL_COLS = HALF_COLS * 2 + ET_COLS;
+
+  const getTargetCols = (m: number) => {
+    if (m <= 0) return 0;
+    if (m <= 45) return Math.ceil(m / 2);
+    if (m <= 90) return HALF_COLS + Math.ceil((m - 45) / 2);
+    return HALF_COLS * 2 + Math.min(Math.ceil((m - 90) / 2), ET_COLS);
+  };
+  const targetCols = getTargetCols(isHT ? 45 : minute);
+
+  // Progressive reveal: mount at current target, then advance 1 col/sec on new minutes
+  const [revealedCols, setRevealedCols] = useState(() => targetCols);
 
   useEffect(() => {
-    const interval = setInterval(() => setTick((t) => t + 1), 1800);
-    return () => clearInterval(interval);
-  }, []);
+    if (targetCols <= revealedCols) return;
+    const timer = setInterval(() => {
+      setRevealedCols((prev) => {
+        if (prev >= targetCols) return prev;
+        return prev + 1;
+      });
+    }, 950);
+    return () => clearInterval(timer);
+  }, [targetCols]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const seedNum = parseInt(
-    String(match.id).replace(/\D/g, "").slice(0, 7) || "1234567",
-    10,
-  );
-  const rng = seededRng(seedNum);
+  // SVG dimensions
+  const W = 600;
+  const H = 96;
+  const midY = H / 2;
+  const colW = W / TOTAL_COLS;
+  const bw = Math.max(colW - 1.2, 1.5);
+  const maxBarH = 40;
+  const htX = HALF_COLS * colW;
+  const etX = HALF_COLS * 2 * colW;
+  const cursorX = Math.min(revealedCols * colW, W - 2);
 
-  const totalBars = Math.max(4, Math.ceil((minute || 1) / 2));
-  const bars = Array.from({ length: totalBars }, (_, i) => {
-    const t = (i + 1) * 2;
-    const isHalf = t >= 44 && t <= 46;
-    const homeScore = match.homeScore ?? 0;
-    const awayScore = match.awayScore ?? 0;
-    const scoreBias = (homeScore - awayScore) * 0.06;
-    const homeBase = rng(i * 4) * 0.7 + 0.15 + scoreBias;
-    const awayBase = rng(i * 4 + 1) * 0.7 + 0.15 - scoreBias;
-    const isLast = i === totalBars - 1;
-    const pulse = isLast && tick % 3 === 0 ? 0.75 : 1;
-    return {
-      t,
-      isHalf,
-      home: isHalf ? 0.08 : Math.min(0.95, Math.max(0.08, homeBase)) * pulse,
-      away: isHalf ? 0.08 : Math.min(0.95, Math.max(0.08, awayBase)) * pulse,
+  // ── Extract stats for Força bars ─────────────────────────────────────────
+  type StatRow = { key: string; label: string; hVal: string; aVal: string; hPct: number };
+  const forceRows: StatRow[] = [];
+
+  const normStat = (s: string) =>
+    s.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]+/g, " ").trim();
+
+  if (v2StatsGroups && v2StatsGroups.length > 0) {
+    const flat = v2StatsGroups.flatMap((g) =>
+      g.rows.map((r) => ({ n: r.name, h: r.home, a: r.away })),
+    );
+    const pick = (label: string, key: string, pats: string[]): StatRow | null => {
+      const hit = flat.find((r) => pats.some((p) => normStat(r.n).includes(p)));
+      if (!hit || (!hit.h && !hit.a)) return null;
+      const hN = parseFloat((hit.h || "0").replace(/[^0-9.]/g, "")) || 0;
+      const aN = parseFloat((hit.a || "0").replace(/[^0-9.]/g, "")) || 0;
+      const tot = hN + aN;
+      return {
+        key,
+        label,
+        hVal: hit.h || "-",
+        aVal: hit.a || "-",
+        hPct: tot > 0 ? Math.round((hN / tot) * 100) : 50,
+      };
     };
-  });
+    for (const w of [
+      { key: "poss",    label: "Posse",      pats: ["possession", "posse de bola", "ball possession"] },
+      { key: "shots",   label: "Remates",    pats: ["shots total", "shots", "remates", "chutes"] },
+      { key: "shotson", label: "No Alvo",    pats: ["shots on target", "remates a baliza", "on target"] },
+      { key: "corners", label: "Cantos",     pats: ["corners", "cantos", "escanteios"] },
+      { key: "fouls",   label: "Faltas",     pats: ["fouls", "faltas"] },
+      { key: "danger",  label: "At. Perig.", pats: ["dangerous attacks", "ataques perigosos"] },
+    ]) {
+      const r = pick(w.label, w.key, w.pats.map(normStat));
+      if (r) forceRows.push(r);
+    }
+  }
 
-  const isHT = minute === 45;
-  const events = match.events ?? [];
+  // Fallback: V5 _liveExtra fields
+  if (forceRows.length === 0) {
+    const lx = (match._liveExtra ?? {}) as Record<string, unknown>;
+    const add = (key: string, label: string, hk: string, ak: string) => {
+      const hv = lx[hk];
+      const av = lx[ak];
+      if (hv == null && av == null) return;
+      const hN = parseFloat(String(hv ?? "0").replace(/[^0-9.]/g, "")) || 0;
+      const aN = parseFloat(String(av ?? "0").replace(/[^0-9.]/g, "")) || 0;
+      const tot = hN + aN;
+      forceRows.push({
+        key,
+        label,
+        hVal: String(hv ?? "-"),
+        aVal: String(av ?? "-"),
+        hPct: tot > 0 ? Math.round((hN / tot) * 100) : 50,
+      });
+    };
+    add("poss",    "Posse",      "possessionHome",        "possessionAway");
+    add("shotson", "No Alvo",    "shotsOnTargetHome",     "shotsOnTargetAway");
+    add("corners", "Cantos",     "cornersHome",           "cornersAway");
+    add("danger",  "At. Perig.", "dangerousAttacksHome",  "dangerousAttacksAway");
+    add("attacks", "Ataques",    "attacksHome",           "attacksAway");
+  }
 
-  const eventIcon = (type: string) =>
-    type === "goal"
-      ? "⚽"
-      : type === "yellow_card"
-        ? "🟨"
-        : type === "red_card"
-          ? "🟥"
-          : "⚡";
+  const mid = String(match.id).replace(/[^a-z0-9]/gi, "");
 
   return (
-    <div className="space-y-4">
-      <div className="text-[10px] font-black text-red-500 uppercase tracking-widest">
-        Pressão em Tempo Real
-      </div>
-
-      {/* Legend */}
-      <div className="flex justify-between text-xs font-bold">
-        <span className="text-red-400">{match.home}</span>
-        <span className="text-[10px] text-zinc-600 font-normal">{minute}'</span>
-        <span className="text-green-400">{match.away}</span>
-      </div>
-
-      {/* Chart */}
-      <div className="relative h-36">
-        {/* Center axis */}
-        <div className="absolute left-0 right-0 top-1/2 h-px bg-zinc-700" />
-        {/* Phase labels */}
-        <div className="absolute left-0 top-1/2 -translate-y-3 text-[9px] text-zinc-600">
-          1º Tempo
-        </div>
-        {minute > 46 && (
-          <div className="absolute right-0 top-1/2 -translate-y-3 text-[9px] text-zinc-600">
-            2º Tempo
+    <div className="space-y-3">
+      {/* ── SVG Momentum Chart ──────────────────────────────────────────────── */}
+      <div className="rounded-xl overflow-hidden" style={{ background: "#0f0f12", border: "1px solid #27272a" }}>
+        {/* Header */}
+        <div className="flex items-center justify-between px-3.5 pt-2.5 pb-1">
+          <div className="flex items-center gap-1.5 min-w-0">
+            <div className="w-2 h-2 rounded-full bg-red-600 shrink-0" />
+            <span className="text-[11px] font-black text-zinc-200 truncate max-w-[90px]">{match.home}</span>
           </div>
-        )}
+          <div className="flex flex-col items-center shrink-0 px-1">
+            <span className="text-[9px] font-bold text-zinc-600 uppercase tracking-widest">Momentum</span>
+            {(minute > 0 || isHT) && (
+              <span className="text-[9px] font-black text-zinc-400 tabular-nums leading-none mt-0.5">
+                {isHT ? "HT" : `${minute}'`}
+              </span>
+            )}
+          </div>
+          <div className="flex items-center gap-1.5 min-w-0 justify-end">
+            <span className="text-[11px] font-black text-zinc-200 truncate max-w-[90px] text-right">{match.away}</span>
+            <div className="w-2 h-2 rounded-full bg-zinc-500/50 shrink-0" />
+          </div>
+        </div>
 
-        <div className="flex h-full items-stretch gap-px overflow-hidden">
-          {bars.map((bar, i) => (
-            <div key={i} className="flex-1 flex flex-col items-center min-w-0">
-              {/* Home bar (top half) */}
-              <div className="flex-1 flex items-end justify-center w-full pb-px">
-                <motion.div
-                  animate={{ height: `${Math.round(bar.home * 100)}%` }}
-                  transition={{ duration: 0.6, ease: "easeOut" }}
-                  style={{ width: "70%" }}
-                  className={`rounded-t-sm ${bar.isHalf ? "bg-zinc-700/50" : "bg-red-500"}`}
-                />
+        {/* SVG */}
+        <svg viewBox={`0 0 ${W} ${H}`} className="w-full" style={{ height: 72, display: "block" }}>
+          <defs>
+            <linearGradient id={`mh-${mid}`} x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor="#dc2626" stopOpacity="0.95" />
+              <stop offset="100%" stopColor="#dc2626" stopOpacity="0.15" />
+            </linearGradient>
+            <linearGradient id={`ma-${mid}`} x1="0" y1="1" x2="0" y2="0">
+              <stop offset="0%" stopColor="rgba(255,255,255,0.78)" />
+              <stop offset="100%" stopColor="rgba(255,255,255,0.08)" />
+            </linearGradient>
+          </defs>
+
+          {/* Center axis */}
+          <line x1="0" y1={midY} x2={W} y2={midY} stroke="#3f3f46" strokeWidth="0.5" />
+
+          {/* All bars (future ones are dimmed) */}
+          {Array.from({ length: TOTAL_COLS }, (_, i) => {
+            const x = i * colW + 0.4;
+            const on = i < revealedCols;
+            const hH = _seededBarH(hs + i, i * 3 + 1) * maxBarH;
+            const aH = _seededBarH(as_ + i, i * 7 + 5) * maxBarH;
+            return (
+              <g key={i} opacity={on ? 1 : 0.07}>
+                {hH > 1.5 && (
+                  <rect x={x} y={midY - hH} width={bw} height={hH}
+                    fill={on ? `url(#mh-${mid})` : "#dc2626"} rx="0.5" />
+                )}
+                {aH > 1.5 && (
+                  <rect x={x} y={midY} width={bw} height={aH}
+                    fill={on ? `url(#ma-${mid})` : "rgba(255,255,255,0.3)"} rx="0.5" />
+                )}
+              </g>
+            );
+          })}
+
+          {/* HT separator */}
+          <line x1={htX} y1="3" x2={htX} y2={H - 3} stroke="#52525b" strokeWidth="1" strokeDasharray="3,2" />
+
+          {/* ET separator */}
+          {isET && (
+            <line x1={etX} y1="3" x2={etX} y2={H - 3}
+              stroke="#ca8a04" strokeWidth="0.8" strokeDasharray="2,3" opacity="0.5" />
+          )}
+
+          {/* Live cursor */}
+          {revealedCols > 0 && cursorX < W - 2 && (
+            <>
+              <line x1={cursorX} y1="2" x2={cursorX} y2={H - 2}
+                stroke="rgba(255,255,255,0.28)" strokeWidth="1.2" />
+              <rect
+                x={Math.min(cursorX - 13, W - 30)} y={midY - 9}
+                width={26} height={14} rx={3}
+                fill="#18181b" stroke="#52525b" strokeWidth="0.8"
+              />
+              <text
+                x={Math.min(cursorX, W - 17)} y={midY + 1.5}
+                fontSize="7.5" fill="white" fontFamily="monospace"
+                textAnchor="middle" fontWeight="bold"
+              >
+                {isHT ? "HT" : `${minute}'`}
+              </text>
+            </>
+          )}
+
+          {/* Timeline labels */}
+          <text x={2}       y={H - 2} fontSize="7" fill="#52525b" fontFamily="monospace">0'</text>
+          <text x={htX + 3} y={H - 2} fontSize="7" fill="#52525b" fontFamily="monospace">HT</text>
+          <text x={W - 2}   y={H - 2} fontSize="7" fill="#52525b" fontFamily="monospace" textAnchor="end">
+            {isET ? `${minute}'` : "FT"}
+          </text>
+        </svg>
+      </div>
+
+      {/* ── Força (live stat bars) ───────────────────────────────────────────── */}
+      {forceRows.length > 0 && (
+        <div className="rounded-xl border border-zinc-800 p-3 space-y-2.5" style={{ background: "#0f0f12" }}>
+          <div className="text-[10px] font-black text-red-500 uppercase tracking-widest">Força</div>
+          {forceRows.slice(0, 6).map((row, idx) => (
+            <div key={row.key} className="space-y-1">
+              <div className="flex items-center justify-between text-[11px]">
+                <span className="font-black text-white w-10 text-left tabular-nums">{row.hVal}</span>
+                <span className="text-[10px] text-zinc-500 uppercase tracking-wide flex-1 text-center">{row.label}</span>
+                <span className="font-black text-white w-10 text-right tabular-nums">{row.aVal}</span>
               </div>
-              {/* Away bar (bottom half) */}
-              <div className="flex-1 flex items-start justify-center w-full pt-px">
-                <motion.div
-                  animate={{ height: `${Math.round(bar.away * 100)}%` }}
-                  transition={{ duration: 0.6, ease: "easeOut" }}
-                  style={{ width: "70%" }}
-                  className={`rounded-b-sm ${bar.isHalf ? "bg-zinc-700/50" : "bg-green-500"}`}
-                />
+              <div className="flex items-center gap-1">
+                <div className="flex-1 h-1.5 bg-zinc-800 rounded-full overflow-hidden flex justify-end">
+                  <motion.div
+                    className="h-full bg-red-500 rounded-full"
+                    initial={{ width: 0 }}
+                    animate={{ width: `${row.hPct}%` }}
+                    transition={{ duration: 0.85, delay: idx * 0.07, ease: "easeOut" }}
+                  />
+                </div>
+                <div className="flex-1 h-1.5 bg-zinc-800 rounded-full overflow-hidden">
+                  <motion.div
+                    className="h-full bg-zinc-400 rounded-full"
+                    initial={{ width: 0 }}
+                    animate={{ width: `${100 - row.hPct}%` }}
+                    transition={{ duration: 0.85, delay: idx * 0.07, ease: "easeOut" }}
+                  />
+                </div>
               </div>
             </div>
           ))}
-        </div>
-
-        {/* HT overlay */}
-        {isHT && (
-          <div className="absolute inset-0 flex items-center justify-center">
-            <span className="text-yellow-400 text-sm font-black animate-pulse bg-zinc-900/90 px-3 py-1 rounded border border-yellow-500/30">
-              ● INTERVALO
-            </span>
-          </div>
-        )}
-      </div>
-
-      {/* Timeline */}
-      <div className="flex justify-between text-[10px] text-zinc-600 -mt-2">
-        <span>0'</span>
-        {minute > 45 && <span className="text-zinc-500 font-bold">HT</span>}
-        <span>{minute > 0 ? `${minute}'` : "90'"}</span>
-      </div>
-
-      {/* Legend colors */}
-      <div className="flex gap-4 text-[11px]">
-        <div className="flex items-center gap-1.5">
-          <div className="w-3 h-2.5 bg-red-500 rounded-sm" />
-          <span className="text-zinc-400">
-            Ataque {match.home.split(" ")[0]}
-          </span>
-        </div>
-        <div className="flex items-center gap-1.5">
-          <div className="w-3 h-2.5 bg-green-500 rounded-sm" />
-          <span className="text-zinc-400">
-            Ataque {match.away.split(" ")[0]}
-          </span>
-        </div>
-      </div>
-
-      {/* Events */}
-      {events.length > 0 && (
-        <div className="border-t border-zinc-800 pt-3">
-          <div className="text-[10px] font-black text-zinc-500 uppercase tracking-widest mb-2">
-            Eventos da Partida
-          </div>
-          <div className="space-y-1.5">
-            {events.map((ev, i) => (
-              <div key={i} className="flex items-center gap-2.5 text-xs">
-                <span className="text-base leading-none shrink-0">
-                  {eventIcon(ev.type)}
-                </span>
-                <span className="text-zinc-500 shrink-0 w-7 text-right font-mono">
-                  {ev.minute}'
-                </span>
-                <span
-                  className={`font-bold shrink-0 text-[11px] ${ev.team === "home" ? "text-red-400" : "text-green-400"}`}
-                >
-                  {ev.team === "home"
-                    ? match.home.split(" ")[0]
-                    : match.away.split(" ")[0]}
-                </span>
-                <span className="text-zinc-400 truncate">{ev.player}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {events.length === 0 && (
-        <div className="text-center text-zinc-600 text-xs py-1">
-          Nenhum evento registado neste momento.
         </div>
       )}
     </div>
@@ -4785,54 +4863,6 @@ export default function Home({
   );
   const [confrontosLoading, setConfrontosLoading] = useState(false);
 
-  // Player markets (football "Jogadores" tab) — per-match, filtered to the two match teams
-  type PlayerMarket = {
-    id: string;
-    name: string;
-    team: string;
-    teamId: string;
-    appearances: number;
-    stat: number;
-    odds: number;
-    line?: number;
-    side?: "over" | "under";
-  };
-  type TeamPlayerMarkets = {
-    teamName: string;
-    teamId: string;
-    anytimeScorers: PlayerMarket[];
-    firstScorers: PlayerMarket[];
-    lastScorers: PlayerMarket[];
-    twoPlusGoals: PlayerMarket[];
-    hatTricks: PlayerMarket[];
-    notToScore: PlayerMarket[];
-    firstHalfScorers: PlayerMarket[];
-    secondHalfScorers: PlayerMarket[];
-    assists: PlayerMarket[];
-    assistLines: PlayerMarket[];
-    shots: PlayerMarket[];
-    shotsOnTarget: PlayerMarket[];
-    passes: PlayerMarket[];
-    tackles: PlayerMarket[];
-    scoreAndAssist: PlayerMarket[];
-    bookings: PlayerMarket[];
-    bookingLines: PlayerMarket[];
-    redCards: PlayerMarket[];
-  };
-  type PlayerMarketsData = {
-    leagueName: string;
-    country: string;
-    home: TeamPlayerMarkets | null;
-    away: TeamPlayerMarkets | null;
-  };
-  const [playerMarkets, setPlayerMarkets] = useState<PlayerMarketsData | null>(
-    null,
-  );
-  const [playerMarketsLoading, setPlayerMarketsLoading] = useState(false);
-  const [playerMarketsMatchId, setPlayerMarketsMatchId] = useState<
-    string | null
-  >(null);
-
   const extractV2StatsGroups = (payload: any): V2StatsGroup[] => {
     const root = payload?.data ?? payload;
     const groups: any[] =
@@ -5535,8 +5565,6 @@ export default function Home({
     setStandingsGroups(null);
     setStandingsLoading(false);
     setStandingsLeague("");
-    setPlayerMarkets(null);
-    setPlayerMarketsMatchId(null);
     setConfrontosData(null);
     setConfrontosLoading(false);
     setAllOddsData(null);
@@ -5629,7 +5657,7 @@ export default function Home({
   useEffect(() => {
     if (!expandedMatch) return;
     if (v2StatsLoading) return;
-    if (v2StatsGroups !== null && Date.now() - v2StatsFetchedAt < 3000) return;
+    if (v2StatsGroups !== null && Date.now() - v2StatsFetchedAt < 30000) return;
     const rawId = getProviderMatchId(expandedMatch.id);
     const sport = expandedMatch.sport ?? "football";
     const cacheKey = `${sport}:${rawId}`;
@@ -5793,35 +5821,6 @@ export default function Home({
     }
   }, [matchViewTab, expandedMatch?.id, getProviderMatchId]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Fetch player markets when "Jogadores" tab is active (football only)
-  useEffect(() => {
-    const mid = String(expandedMatch?.id ?? "");
-    if (modalTab !== "jogadores" || !expandedMatch?.leagueId) return;
-    if (playerMarketsMatchId === mid) return; // already loaded for this match
-    setPlayerMarketsLoading(true);
-    setPlayerMarkets(null);
-    setPlayerMarketsMatchId(mid);
-    const rawId = getProviderMatchId(expandedMatch.id);
-    const p = new URLSearchParams({
-      homeTeam: expandedMatch.home,
-      awayTeam: expandedMatch.away,
-      matchId: rawId,
-    });
-    fetch(
-      `/api/matches/football-player-markets/${encodeURIComponent(expandedMatch.leagueId)}?${p}`,
-    )
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d) => {
-        if (d) setPlayerMarkets(d as PlayerMarketsData);
-      })
-      .catch(() => {})
-      .finally(() => setPlayerMarketsLoading(false));
-  }, [
-    modalTab,
-    expandedMatch?.id,
-    expandedMatch?.leagueId,
-    getProviderMatchId,
-  ]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Lazy-load MLB league stats when "liga" tab is active
   useEffect(() => {
@@ -10690,9 +10689,6 @@ export default function Home({
                         { key: "escanteios", label: "Escanteios" },
                         { key: "cartoes", label: "Cartões" },
                         { key: "asiatico", label: "Asiático" },
-                        ...(match.leagueId
-                          ? [{ key: "jogadores", label: "⚽ Jogadores" }]
-                          : []),
                       ];
 
     const m = match.markets;
@@ -13583,412 +13579,6 @@ export default function Home({
                     )}
                   </div>
                 )}
-
-              {/* ── FUTEBOL: JOGADORES ── */}
-              {isFootball && modalTab === "jogadores" && (
-                <div>
-                  {playerMarketsLoading && (
-                    <div className="flex items-center justify-center py-12 gap-3 text-zinc-400">
-                      <svg
-                        className="animate-spin h-5 w-5"
-                        fill="none"
-                        viewBox="0 0 24 24"
-                      >
-                        <circle
-                          className="opacity-25"
-                          cx="12"
-                          cy="12"
-                          r="10"
-                          stroke="currentColor"
-                          strokeWidth="4"
-                        />
-                        <path
-                          className="opacity-75"
-                          fill="currentColor"
-                          d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
-                        />
-                      </svg>
-                      <span className="text-sm">
-                        A carregar dados dos jogadores…
-                      </span>
-                    </div>
-                  )}
-                  {!playerMarketsLoading && !playerMarkets && (
-                    <div className="text-center text-zinc-600 py-10 text-sm">
-                      Dados de jogadores não disponíveis para esta partida.
-                    </div>
-                  )}
-                  {!playerMarketsLoading &&
-                    playerMarkets &&
-                    !playerMarkets.home &&
-                    !playerMarkets.away && (
-                      <div className="text-center text-zinc-600 py-10 text-sm">
-                        Equipas não encontradas nas estatísticas desta liga.
-                      </div>
-                    )}
-                  {!playerMarketsLoading &&
-                    playerMarkets &&
-                    (playerMarkets.home || playerMarkets.away) &&
-                    (() => {
-                      type PMRow = {
-                        id: string;
-                        name: string;
-                        stat: number;
-                        appearances: number;
-                        odds: number;
-                        line?: number;
-                        side?: "over" | "under";
-                      };
-                      const pmList = (
-                        rows: PMRow[],
-                        selPrefix: string,
-                        market: string,
-                        label: string,
-                        sublabel: (p: PMRow) => string,
-                      ) => {
-                        if (rows.length === 0) return null;
-                        const titleColor = selPrefix.startsWith("pm-first")
-                          ? "text-fuchsia-400"
-                          : selPrefix.startsWith("pm-last")
-                            ? "text-violet-400"
-                            : selPrefix.startsWith("pm-2g")
-                              ? "text-pink-400"
-                              : selPrefix.startsWith("pm-hat")
-                                ? "text-cyan-400"
-                                : selPrefix.startsWith("pm-noscore")
-                                  ? "text-slate-300"
-                                  : selPrefix.startsWith("pm-gol")
-                                    ? "text-red-400"
-                                    : selPrefix.startsWith("pm-fh")
-                                      ? "text-orange-400"
-                                      : selPrefix.startsWith("pm-sh")
-                                        ? "text-amber-400"
-                                        : selPrefix.startsWith("pm-ast")
-                                          ? "text-sky-400"
-                                          : selPrefix.startsWith("pm-shotot")
-                                            ? "text-lime-400"
-                                            : selPrefix.startsWith("pm-shoton")
-                                              ? "text-green-400"
-                                              : selPrefix.startsWith("pm-pass")
-                                                ? "text-indigo-400"
-                                                : selPrefix.startsWith("pm-tkl")
-                                                  ? "text-teal-400"
-                                                  : selPrefix.startsWith(
-                                                        "pm-sa",
-                                                      )
-                                                    ? "text-emerald-400"
-                                                    : selPrefix.startsWith(
-                                                          "pm-red",
-                                                        )
-                                                      ? "text-rose-400"
-                                                      : "text-yellow-500";
-                        const hasLineMarkets = rows.some((r) => r.line != null);
-
-                        return (
-                          <div className="mb-3">
-                            <div
-                              className={`text-xs font-semibold uppercase tracking-wider px-1 mb-1.5 ${titleColor}`}
-                            >
-                              {label}
-                            </div>
-                            <div className="bg-zinc-900/60 rounded-lg overflow-hidden">
-                              {hasLineMarkets
-                                ? (() => {
-                                    const grouped = new Map<string, PMRow[]>();
-                                    for (const row of rows) {
-                                      const existing =
-                                        grouped.get(row.name) ?? [];
-                                      existing.push(row);
-                                      grouped.set(row.name, existing);
-                                    }
-                                    return Array.from(grouped.entries()).map(
-                                      ([playerName, playerRows]) => {
-                                        const sortedRows = [...playerRows].sort(
-                                          (a, b) => {
-                                            const lineCmp =
-                                              (a.line ?? 0) - (b.line ?? 0);
-                                            if (lineCmp !== 0) return lineCmp;
-                                            if (
-                                              (a.side ?? "over") ===
-                                              (b.side ?? "over")
-                                            )
-                                              return 0;
-                                            return (a.side ?? "over") === "over"
-                                              ? -1
-                                              : 1;
-                                          },
-                                        );
-                                        const lead = sortedRows[0]!;
-                                        return (
-                                          <div
-                                            key={`${selPrefix}-${playerName}`}
-                                            className="py-2 px-2 border-b border-zinc-800/60 last:border-0"
-                                          >
-                                            <div className="min-w-0 mb-2">
-                                              <div className="text-sm font-medium text-white truncate">
-                                                {playerName}
-                                              </div>
-                                              <div className="text-xs text-zinc-500 mt-0.5">
-                                                {sublabel(lead)}
-                                              </div>
-                                            </div>
-                                            <div className="flex flex-wrap gap-2">
-                                              {sortedRows.map((p) => (
-                                                <div
-                                                  key={`${p.id}-${p.line ?? "na"}`}
-                                                  className="w-[92px]"
-                                                >
-                                                  <MarketOddsBtn
-                                                    match={match}
-                                                    sel={`${selPrefix}-${p.id}-${p.line ?? "na"}-${p.side ?? "over"}`}
-                                                    odd={p.odds}
-                                                    market={market}
-                                                    label={
-                                                      p.line != null
-                                                        ? `${p.side === "under" ? "Menos de" : "Mais de"} ${p.line}`
-                                                        : label
-                                                    }
-                                                  />
-                                                </div>
-                                              ))}
-                                            </div>
-                                          </div>
-                                        );
-                                      },
-                                    );
-                                  })()
-                                : rows.map((p) => (
-                                    <div
-                                      key={p.id}
-                                      className="flex items-center justify-between py-2 px-2 border-b border-zinc-800/60 last:border-0"
-                                    >
-                                      <div className="min-w-0 flex-1 mr-3">
-                                        <div className="text-sm font-medium text-white truncate">
-                                          {p.name}
-                                        </div>
-                                        <div className="text-xs text-zinc-500 mt-0.5">
-                                          {sublabel(p)}
-                                        </div>
-                                      </div>
-                                      <MarketOddsBtn
-                                        match={match}
-                                        sel={`${selPrefix}-${p.id}-${p.line ?? "na"}-${p.side ?? "over"}`}
-                                        odd={p.odds}
-                                        market={market}
-                                        label={
-                                          p.line != null
-                                            ? `${p.name} — ${label} (${p.side === "under" ? "Menos de" : "Mais de"} ${p.line})`
-                                            : `${p.name} — ${label}`
-                                        }
-                                      />
-                                    </div>
-                                  ))}
-                            </div>
-                          </div>
-                        );
-                      };
-
-                      const renderTeamSection = (
-                        team: TeamPlayerMarkets,
-                        isHome: boolean,
-                      ) => {
-                        const fallbackTeamName = isHome
-                          ? match.home
-                          : match.away;
-                        const teamBanner =
-                          getTeamBanner(fallbackTeamName, match.country) ??
-                          getTeamBanner(team.teamName, match.country) ??
-                          getTeamBanner(fallbackTeamName) ??
-                          getTeamBanner(team.teamName) ??
-                          undefined;
-
-                        return (
-                          <div key={team.teamId} className="mb-6">
-                            {teamBanner && (
-                              <div className="mb-3 overflow-hidden rounded-xl border border-zinc-800">
-                                <img
-                                  src={teamBanner}
-                                  alt={fallbackTeamName}
-                                  className="h-28 w-full object-cover"
-                                  loading="lazy"
-                                />
-                              </div>
-                            )}
-                            <div className="flex items-center gap-2 px-1 mb-3 pb-2 border-b border-zinc-700">
-                              <span
-                                className={`text-xs font-bold px-2 py-0.5 rounded ${isHome ? "bg-red-900/60 text-red-300" : "bg-zinc-700 text-zinc-300"}`}
-                              >
-                                {isHome ? "CASA" : "FORA"}
-                              </span>
-                              <span className="text-sm font-bold text-white">
-                                {team.teamName}
-                              </span>
-                            </div>
-
-                            {pmList(
-                              team.firstScorers,
-                              "pm-first",
-                              "primeiro-marcador",
-                              "🥇 Primeiro Marcador",
-                              (p) =>
-                                `${p.stat} gol(os) em ${p.appearances} jogos`,
-                            )}
-                            {pmList(
-                              team.lastScorers,
-                              "pm-last",
-                              "ultimo-marcador",
-                              "🏁 Último Marcador",
-                              (p) =>
-                                `${p.stat} gol(os) em ${p.appearances} jogos`,
-                            )}
-                            {pmList(
-                              team.twoPlusGoals,
-                              "pm-2g",
-                              "2plus-golos-jogador",
-                              "⚽⚽ Marcar 2+ Golos",
-                              (p) =>
-                                `${p.stat} gol(os) em ${p.appearances} jogos`,
-                            )}
-                            {pmList(
-                              team.hatTricks,
-                              "pm-hat",
-                              "hat-trick-jogador",
-                              "🎩 Hat-trick",
-                              (p) =>
-                                `${p.stat} gol(os) em ${p.appearances} jogos`,
-                            )}
-                            {pmList(
-                              team.notToScore,
-                              "pm-noscore",
-                              "nao-marcar-jogador",
-                              "🚫 Não Marcar",
-                              (p) =>
-                                `${p.stat} jogo(s) sem marcar em ${p.appearances}`,
-                            )}
-                            {pmList(
-                              team.anytimeScorers,
-                              "pm-gol",
-                              "marcadores",
-                              "⚽ Marcador (Qualquer Momento)",
-                              (p) =>
-                                `${p.stat} gol(os) em ${p.appearances} jogos`,
-                            )}
-                            {pmList(
-                              team.firstHalfScorers,
-                              "pm-fh",
-                              "marcador-1t",
-                              "⚽ Marcador no 1.º Tempo",
-                              (p) =>
-                                `${p.stat} gol(os) em ${p.appearances} jogos`,
-                            )}
-                            {pmList(
-                              team.secondHalfScorers,
-                              "pm-sh",
-                              "marcador-2t",
-                              "⚽ Marcador no 2.º Tempo",
-                              (p) =>
-                                `${p.stat} gol(os) em ${p.appearances} jogos`,
-                            )}
-                            {pmList(
-                              team.assists,
-                              "pm-ast",
-                              "assist-jogador",
-                              "🎯 Dar Assistência",
-                              (p) =>
-                                `${p.stat} assistência(s) em ${p.appearances} jogos`,
-                            )}
-                            {pmList(
-                              team.assistLines,
-                              "pm-ast",
-                              "assistencias-jogador-ou",
-                              "🎯 Assistências O/U",
-                              (p) =>
-                                `${(p.stat / Math.max(1, p.appearances)).toFixed(1)} por jogo · linha ${p.line}`,
-                            )}
-                            {pmList(
-                              team.shots,
-                              "pm-shotot",
-                              "remates-jogador",
-                              "🎯 Remates",
-                              (p) =>
-                                `${(p.stat / Math.max(1, p.appearances)).toFixed(1)} por jogo · linha ${p.line}`,
-                            )}
-                            {pmList(
-                              team.shotsOnTarget,
-                              "pm-shoton",
-                              "remates-baliza-jogador",
-                              "🥅 Remates à Baliza",
-                              (p) =>
-                                `${(p.stat / Math.max(1, p.appearances)).toFixed(1)} por jogo · linha ${p.line}`,
-                            )}
-                            {pmList(
-                              team.passes,
-                              "pm-pass",
-                              "passes-jogador",
-                              "🧠 Passes",
-                              (p) =>
-                                `${(p.stat / Math.max(1, p.appearances)).toFixed(1)} por jogo · linha ${p.line}`,
-                            )}
-                            {pmList(
-                              team.tackles,
-                              "pm-tkl",
-                              "desarmes-jogador",
-                              "🛡️ Desarmes",
-                              (p) =>
-                                `${(p.stat / Math.max(1, p.appearances)).toFixed(1)} por jogo · linha ${p.line}`,
-                            )}
-                            {pmList(
-                              team.scoreAndAssist,
-                              "pm-sa",
-                              "marcar-assistir",
-                              "🎯 Marcar e Dar Assistência",
-                              (p) =>
-                                `${p.stat} vez(es) em ${p.appearances} jogos`,
-                            )}
-                            {pmList(
-                              team.bookings,
-                              "pm-card",
-                              "cartao-jogador",
-                              "🟨🟥 Cartão (Amarelo ou Vermelho)",
-                              (p) =>
-                                `${p.stat} cartão(ões) em ${p.appearances} jogos`,
-                            )}
-                            {pmList(
-                              team.bookingLines,
-                              "pm-card",
-                              "cartoes-jogador-ou",
-                              "🟨 Cartões O/U",
-                              (p) =>
-                                `${(p.stat / Math.max(1, p.appearances)).toFixed(1)} por jogo · linha ${p.line}`,
-                            )}
-                            {pmList(
-                              team.redCards,
-                              "pm-red",
-                              "cartao-vermelho-jogador",
-                              "🟥 Cartão Vermelho",
-                              (p) =>
-                                `${p.stat} expulsão(ões) em ${p.appearances} jogos`,
-                            )}
-                          </div>
-                        );
-                      };
-
-                      return (
-                        <>
-                          {playerMarkets.home &&
-                            renderTeamSection(playerMarkets.home, true)}
-                          {playerMarkets.away &&
-                            renderTeamSection(playerMarkets.away, false)}
-                          <div className="text-center text-zinc-700 text-xs pt-1 pb-2">
-                            Odds e linhas reais do provider quando disponíveis;
-                            props sem feed direto continuam com apoio
-                            estatístico da época
-                          </div>
-                        </>
-                      );
-                    })()}
-                </div>
-              )}
 
               {/* ── HÓQUEI: TOTAIS ── */}
               {isHockey &&
@@ -17866,131 +17456,7 @@ export default function Home({
                 {/* Live momentum/pressure chart + tennis stats */}
                 {matchViewTab === "live" && expandedMatch.isLive && (
                   <div className="bg-zinc-900 rounded-xl border border-zinc-800 p-4 mb-2 animate-in fade-in duration-200">
-                    <MomentumChart match={expandedMatch} />
-                    {(!v2StatsGroups || v2StatsGroups.length === 0) &&
-                      (!v2Incidents || v2Incidents.length === 0) &&
-                      !v2StatsLoading &&
-                      !v2IncidentsLoading && (
-                        <div className="mt-4 pt-4 border-t border-zinc-700/60">
-                          <div className="text-center text-zinc-500 text-sm">
-                            Sem dados ao vivo da API para este jogo.
-                          </div>
-                          <div className="flex justify-center mt-3">
-                            <button
-                              onClick={() => {
-                                setV2StatsGroups(null);
-                                setV2Incidents(null);
-                                setV2StatsFetchedAt(0);
-                                setV2IncidentsFetchedAt(0);
-                                setLivePollTick((t) => t + 1);
-                              }}
-                              className="px-3 py-1.5 rounded-lg border border-zinc-700 bg-zinc-950/60 text-zinc-200 text-xs font-bold hover:border-zinc-500"
-                            >
-                              Atualizar
-                            </button>
-                          </div>
-                          <div className="text-center text-zinc-600 text-[10px] mt-2">
-                            Se continuar vazio, a SportsAPI pode não
-                            disponibilizar incidents/statistics para este jogo.
-                          </div>
-                        </div>
-                      )}
-                    {v2StatsGroups &&
-                      v2StatsGroups.length > 0 &&
-                      (() => {
-                        const rows = extractLiveKeyStats(v2StatsGroups);
-                        if (rows.length === 0) {
-                          const first = v2StatsGroups[0];
-                          return (
-                            <div className="mt-4 pt-4 border-t border-zinc-700/60">
-                              <div className="flex items-center justify-between mb-2">
-                                <div className="text-[10px] font-black text-red-500 uppercase tracking-widest">
-                                  Estatísticas ao Vivo
-                                </div>
-                                {v2StatsLoading && (
-                                  <Loader2
-                                    className="animate-spin text-blue-400"
-                                    size={14}
-                                  />
-                                )}
-                              </div>
-                              <div className="text-zinc-500 text-sm">
-                                A API retornou estatísticas, mas sem os campos
-                                “posse/remates” detectáveis.
-                              </div>
-                              {first && first.rows.length > 0 && (
-                                <div className="mt-3 rounded-lg border border-zinc-800 overflow-hidden">
-                                  <div className="bg-zinc-800/40 px-3 py-2 text-[9px] font-black text-zinc-500 uppercase tracking-widest">
-                                    {first.title}
-                                  </div>
-                                  <div className="divide-y divide-zinc-800">
-                                    {first.rows.slice(0, 8).map((r) => (
-                                      <div
-                                        key={r.name}
-                                        className="grid grid-cols-[1fr_auto_auto] gap-2 px-3 py-2 text-xs"
-                                      >
-                                        <div className="text-zinc-400 truncate">
-                                          {r.name}
-                                        </div>
-                                        <div className="text-blue-400 font-black tabular-nums">
-                                          {r.home || "-"}
-                                        </div>
-                                        <div className="text-red-400 font-black tabular-nums">
-                                          {r.away || "-"}
-                                        </div>
-                                      </div>
-                                    ))}
-                                  </div>
-                                </div>
-                              )}
-                            </div>
-                          );
-                        }
-                        return (
-                          <div className="mt-4 pt-4 border-t border-zinc-700/60">
-                            <div className="flex items-center justify-between mb-3">
-                              <div className="text-[10px] font-black text-red-500 uppercase tracking-widest">
-                                Estatísticas ao Vivo
-                              </div>
-                              {v2StatsLoading && (
-                                <Loader2
-                                  className="animate-spin text-blue-400"
-                                  size={14}
-                                />
-                              )}
-                            </div>
-                            <div className="rounded-lg border border-zinc-800 overflow-hidden">
-                              <div className="grid grid-cols-[1fr_4rem_4rem] px-3 py-2 bg-zinc-800/40 text-[9px] font-black text-zinc-500 uppercase tracking-widest">
-                                <div />
-                                <div className="text-center truncate">
-                                  {expandedMatch.home.split(" ").slice(-1)[0]}
-                                </div>
-                                <div className="text-center truncate">
-                                  {expandedMatch.away.split(" ").slice(-1)[0]}
-                                </div>
-                              </div>
-                              <div className="divide-y divide-zinc-800">
-                                {rows.map((r) => (
-                                  <div
-                                    key={r.key}
-                                    className="grid grid-cols-[1fr_4rem_4rem] gap-2 px-3 py-2 text-xs"
-                                  >
-                                    <div className="text-zinc-400 truncate">
-                                      {r.label}
-                                    </div>
-                                    <div className="text-center text-blue-400 font-black tabular-nums">
-                                      {r.home}
-                                    </div>
-                                    <div className="text-center text-red-400 font-black tabular-nums">
-                                      {r.away}
-                                    </div>
-                                  </div>
-                                ))}
-                              </div>
-                            </div>
-                          </div>
-                        );
-                      })()}
+                    <MomentumChart match={expandedMatch} v2StatsGroups={v2StatsGroups} />
 
                     {expandedMatch.sport === "football" && (
                       <div className="mt-4 pt-4 border-t border-zinc-700/60">
