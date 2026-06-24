@@ -7991,22 +7991,7 @@ export default function Home({
       : `${grow ? "flex-1" : ""} h-11 px-2 rounded-xl text-xs flex flex-col items-center justify-center`;
 
     if (isSuspended) {
-      return (
-        <div
-          className={`relative ${baseBoxClass} ${isWCVariant ? (isDarkTheme ? "border-zinc-800 bg-zinc-900/60 opacity-60" : "border-zinc-200 bg-zinc-100 opacity-60") : "bg-zinc-800/40 border-zinc-700/30 opacity-70"} select-none`}
-        >
-          <span
-            className={`${isWCVariant ? "text-[10px] text-zinc-500" : "text-[10px] leading-none opacity-60"}`}
-          >
-            {label}
-          </span>
-          <span
-            className={`${isWCVariant ? `mt-1 text-sm font-black ${isDarkTheme ? "text-zinc-600" : "text-zinc-400"}` : "font-bold text-sm leading-none text-zinc-300"} tabular-nums line-through`}
-          >
-            {odd.toFixed(2)}
-          </span>
-        </div>
-      );
+      return null;
     }
 
     if (odd < 1.15 && market === "result") {
@@ -8105,46 +8090,33 @@ export default function Home({
     );
   };
 
-  // Returns a full-width animated suspension banner; null when no suspension.
-  // Shows in two modes:
-  //   CRITICAL (red, result market suspended): GOLO! / PENÁLTI / REVISÃO VAR / SUSPENSO
-  //   GENERIC  (grey, any other active suspension): 🔒 SUSPENSO — always visible, never blank
+  // Returns a full-width suspension banner; null when result market not suspended.
+  // Always shows in red — grey mode removed (grey + odds visible was confusing).
+  // Gated exclusively on marketSuspension["result"] > now.
   const SuspensionBanner = ({ match }: { match: Match }) => {
     const now = Date.now();
     const resultSuspended =
+      match.isLive &&
       match.marketSuspension?.["result"] != null &&
       match.marketSuspension["result"] > now;
-    const hasReason = match.isLive && hasBlockingSuspensionReason(match);
-    const isActive = resultSuspended || hasReason;
-    if (!isActive) return null;
+    if (!resultSuspended) return null;
     const rawReason = (match._suspensionReason ?? "SUSPENSO").toUpperCase();
     let label = "SUSPENSO";
-    let prefix = "";
-    if (resultSuspended) {
-      if (rawReason.includes("GOLO") || rawReason.includes("GOAL")) {
-        label = "⚽ GOLO!";
-      } else if (rawReason.includes("VAR")) {
-        prefix = "🎥 ";
-        label = "REVISÃO VAR";
-      } else if (rawReason.includes("PENAL")) {
-        label = "🎯 PENÁLTI";
-      } else if (rawReason.includes("CHANCE")) {
-        label = "GRANDE CHANCE";
-      }
-    } else {
-      label = "🔒 SUSPENSO";
+    if (rawReason.includes("GOLO") || rawReason.includes("GOAL")) {
+      label = "⚽ GOLO!";
+    } else if (rawReason.includes("VAR")) {
+      label = "🎥 REVISÃO VAR";
+    } else if (rawReason.includes("PENAL")) {
+      label = "🎯 PENÁLTI";
+    } else if (rawReason.includes("CHANCE")) {
+      label = "GRANDE CHANCE";
     }
     return (
       <button
         disabled
-        className={`w-full h-12 px-3 flex items-center justify-center rounded-md border font-black text-sm cursor-not-allowed select-none animate-pulse ${
-          resultSuspended
-            ? "bg-red-950 border-red-800/50 text-red-200"
-            : "bg-zinc-800/50 border-zinc-700/40 text-zinc-400"
-        }`}
+        className="w-full h-12 px-3 flex items-center justify-center rounded-md border font-black text-sm cursor-not-allowed select-none animate-pulse bg-red-950 border-red-800/50 text-red-200"
         style={{ letterSpacing: "0.18em" }}
       >
-        {prefix}
         {label}
       </button>
     );

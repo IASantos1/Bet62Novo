@@ -12239,6 +12239,24 @@ async function buildLiveMatches(): Promise<LiveMatchState[]> {
         }
         // VAR/penalty/card detection in score-unchanged ticks (V1 path)
         // Without this, VAR events are only caught when score changes.
+        // Also check match status string for VAR keywords (V1 API may not use event types)
+        const v1StatusStr = String(m.status ?? "").toLowerCase();
+        const v1IsVARStatus =
+          v1StatusStr.includes("var") ||
+          v1StatusStr.includes("video review") ||
+          v1StatusStr.includes("under review") ||
+          v1StatusStr.includes("referee review") ||
+          v1StatusStr.includes("review") ||
+          v1StatusStr.includes("revision");
+        if (!matchMarketSuspension && v1IsVARStatus) {
+          const now2 = Date.now();
+          matchMarketSuspension = Object.fromEntries(
+            FOOTBALL_SUSP_KEYS.map((k) => [k, now2 + footballSuspensionDelayMs("var", k)]),
+          ) as Record<string, number>;
+          matchSuspensionReason = "REVISÃO AO VAR";
+          (updatedState as LiveMatchState).marketSuspension = matchMarketSuspension;
+          (updatedState as LiveMatchState)._suspensionReason = matchSuspensionReason;
+        }
         if (!matchMarketSuspension && m.events?.event) {
           const rawEvts = Array.isArray(m.events.event)
             ? m.events.event
@@ -12246,6 +12264,7 @@ async function buildLiveMatches(): Promise<LiveMatchState[]> {
           const recentMin = Math.max(1, minute - 2);
           const V1_SUSP_TOKENS = [
             "penalty", "var", "bigchance", "big_chance", "suspension", "expelled",
+            "video", "review", "offsidecheck",
           ];
           const V1_SUSP_LABELS: Record<string, string> = {
             penalty: "PENÁLTI",
@@ -13825,7 +13844,13 @@ async function buildFootballLiveV2(
         rawStatusDesc.includes("awaiting review") ||
         rawStatusDesc.includes("var check") ||
         rawStatusDesc.includes("awaiting var") ||
-        rawStatusDesc.includes("video assistant");
+        rawStatusDesc.includes("video assistant") ||
+        rawStatusDesc.includes("under review") ||
+        rawStatusDesc.includes("referee review") ||
+        rawStatusDesc.includes("review in progress") ||
+        rawStatusDesc.includes("checking") ||
+        rawStatusDesc.includes("arbitro") ||
+        rawStatusDesc.includes("revision");
 
       const scored =
         homeScore !== existing.homeScore || awayScore !== existing.awayScore;
