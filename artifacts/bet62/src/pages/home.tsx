@@ -36,6 +36,7 @@ import {
   ChevronUp,
   AlertCircle,
   BarChart2,
+  Lightbulb,
   Wallet,
   ArrowDownCircle,
   ArrowUpCircle,
@@ -44,6 +45,7 @@ import {
   Smartphone,
   Copy,
   Share2,
+  Circle,
   CircleDollarSign,
   Lock,
   Trash2,
@@ -4560,6 +4562,7 @@ export default function Home({
   const [matchViewTab, setMatchViewTab] = useState<
     | "markets"
     | "stats"
+    | "insight"
     | "standings"
     | "live"
     | "yesterday"
@@ -15888,6 +15891,15 @@ export default function Home({
                             </span>
                           </div>
                         )}
+                        {(!expandedMatch.sport || expandedMatch.sport === "football") && (
+                          <button
+                            onClick={() => setMatchViewTab(matchViewTab === "insight" ? "markets" : "insight")}
+                            className={`flex items-center gap-1 px-2.5 py-1 rounded-full border text-[10px] font-black transition-all ${matchViewTab === "insight" ? "bg-yellow-900/40 border-yellow-700/60 text-yellow-300" : "bg-zinc-800/60 border-zinc-700/60 text-zinc-400 hover:text-white hover:border-zinc-600"}`}
+                          >
+                            <Lightbulb size={11} />
+                            Previsão
+                          </button>
+                        )}
                         <button
                           onClick={() => setMatchViewTab(matchViewTab === "stats" ? "markets" : "stats")}
                           className={`flex items-center gap-1 px-2.5 py-1 rounded-full border text-[10px] font-black transition-all ${matchViewTab === "stats" ? "bg-blue-900/40 border-blue-700/60 text-blue-300" : "bg-zinc-800/60 border-zinc-700/60 text-zinc-400 hover:text-white hover:border-zinc-600"}`}
@@ -16010,6 +16022,134 @@ export default function Home({
                       if (window.innerWidth < 1024) setBetSlipOpenMobile(true);
                     }}
                   />
+                )}
+
+                {/* Insight/Previsão panel */}
+                {matchViewTab === "insight" && (
+                  <div className="mb-2 animate-in fade-in duration-200 space-y-3">
+                    <div className="flex items-center gap-2 px-1 mb-1">
+                      <Zap size={12} className="text-yellow-400" />
+                      <span className="text-[11px] font-black text-zinc-300">Análise baseada em dados e odds de mercado</span>
+                    </div>
+
+                    {(() => {
+                      if (!matchStats) return null;
+                      const { avgStats, winProb } = matchStats;
+                      const insights: Array<{ market: string; odds: string; confidence: number; reason: string; tag: string; tagColor: string }> = [];
+
+                      if (avgStats.over25 >= 50) {
+                        insights.push({
+                          market: "Mais de 2.5 Golos",
+                          odds: (1 / (avgStats.over25 / 100) * 0.95).toFixed(2),
+                          confidence: avgStats.over25,
+                          reason: `Média de ${avgStats.goalsScored.toFixed(1)} golos nos H2H. AEM: ${avgStats.btts}% das partidas.`,
+                          tag: avgStats.over25 >= 65 ? "VALOR" : "MODERADO",
+                          tagColor: avgStats.over25 >= 65 ? "text-emerald-400" : "text-yellow-400",
+                        });
+                      }
+                      if (avgStats.btts >= 50) {
+                        insights.push({
+                          market: "Ambas Marcam — Sim",
+                          odds: (1 / (avgStats.btts / 100) * 0.95).toFixed(2),
+                          confidence: avgStats.btts,
+                          reason: `Ambas as equipas marcaram em ${avgStats.btts}% dos jogos recentes. Média da liga: ${avgStats.leagueBtts}%.`,
+                          tag: avgStats.btts >= 60 ? "FAVORITO" : "MODERADO",
+                          tagColor: avgStats.btts >= 60 ? "text-blue-400" : "text-yellow-400",
+                        });
+                      }
+                      const topProb = Math.max(winProb.home, winProb.draw, winProb.away);
+                      if (topProb === winProb.home && winProb.home >= 45) {
+                        insights.push({
+                          market: `${expandedMatch.home} — Vitória`,
+                          odds: (1 / (winProb.home / 100) * 0.95).toFixed(2),
+                          confidence: winProb.home,
+                          reason: `Probabilidade de ${winProb.home}% calculada a partir das odds de mercado. Vantagem em casa.`,
+                          tag: "SEGURO",
+                          tagColor: "text-yellow-400",
+                        });
+                      } else if (topProb === winProb.away && winProb.away >= 40) {
+                        insights.push({
+                          market: `${expandedMatch.away} — Vitória`,
+                          odds: (1 / (winProb.away / 100) * 0.95).toFixed(2),
+                          confidence: winProb.away,
+                          reason: `Probabilidade de ${winProb.away}% calculada a partir das odds de mercado.`,
+                          tag: "FAVORITO",
+                          tagColor: "text-blue-400",
+                        });
+                      }
+
+                      const filteredInsights = insights.filter(ins => {
+                        if (ins.market.includes("Mais de 2.5")) {
+                          const total = (expandedMatch.homeScore ?? 0) + (expandedMatch.awayScore ?? 0);
+                          if (total >= 3) return false;
+                        }
+                        if (ins.market.includes("Ambas Marcam")) {
+                          if ((expandedMatch.homeScore ?? 0) > 0 && (expandedMatch.awayScore ?? 0) > 0) return false;
+                        }
+                        return true;
+                      }).slice(0, 3);
+
+                      if (filteredInsights.length === 0) {
+                        return (
+                          <div className="bg-zinc-900 rounded-xl border border-zinc-800 p-6 text-center text-zinc-500 text-sm">
+                            Dados insuficientes para gerar previsões.
+                          </div>
+                        );
+                      }
+
+                      return filteredInsights.map((ins, i) => (
+                        <motion.div
+                          key={ins.market}
+                          initial={{ opacity: 0, x: -10 }}
+                          animate={{ opacity: 1, x: 0 }}
+                          transition={{ delay: i * 0.1 }}
+                          className="bg-zinc-900 border border-zinc-800 rounded-xl p-4"
+                        >
+                          <div className="flex items-start justify-between gap-3 mb-3">
+                            <div className="flex-1 min-w-0">
+                              <div className={`text-[10px] font-black uppercase tracking-widest mb-1 ${ins.tagColor}`}>{ins.tag}</div>
+                              <div className="text-sm font-black text-white leading-tight">{ins.market}</div>
+                            </div>
+                            <div className="shrink-0 bg-zinc-800 border border-zinc-700 rounded-xl px-3 py-2 text-center">
+                              <div className="text-xs font-black text-white">{ins.odds}</div>
+                              <div className="text-[9px] text-zinc-500">odd</div>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-2 mb-3">
+                            <div className="text-[10px] text-zinc-500 shrink-0">Confiança</div>
+                            <div className="flex-1 h-1.5 bg-zinc-800 rounded-full overflow-hidden">
+                              <motion.div
+                                className="h-full bg-gradient-to-r from-yellow-500 to-emerald-500 rounded-full"
+                                initial={{ width: 0 }}
+                                animate={{ width: `${ins.confidence}%` }}
+                                transition={{ duration: 0.9, delay: i * 0.1 + 0.2 }}
+                              />
+                            </div>
+                            <div className="text-[10px] font-black text-zinc-300 shrink-0">{ins.confidence}%</div>
+                          </div>
+                          <div className="text-[11px] text-zinc-400 leading-relaxed">{ins.reason}</div>
+                          <button
+                            onClick={() => {
+                              if (!expandedMatch) return;
+                              toggleBet(expandedMatch, ins.market, parseFloat(ins.odds), "insight", ins.market);
+                              if (window.innerWidth < 1024) setBetSlipOpenMobile(true);
+                            }}
+                            className="mt-3 w-full flex items-center justify-center gap-1.5 bg-red-600 hover:bg-red-500 active:bg-red-700 text-white text-[12px] font-black py-2.5 rounded-xl transition-colors"
+                          >
+                            Adicionar à Aposta
+                            <ChevronRight size={13} />
+                          </button>
+                        </motion.div>
+                      ));
+                    })()}
+
+                    <div className="flex items-start gap-2 px-1 pt-1">
+                      <Circle size={8} className="text-zinc-600 mt-1 shrink-0" />
+                      <p className="text-[10px] text-zinc-600 leading-relaxed">
+                        As previsões são geradas automaticamente com base em dados históricos e odds de mercado. Aposte de forma responsável.
+                      </p>
+                    </div>
+                  </div>
                 )}
 
                 {/* Standings panel */}
