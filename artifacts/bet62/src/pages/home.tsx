@@ -9509,7 +9509,7 @@ export default function Home({
     const quickAmounts = [5, 10, 25, 50];
 
     return (
-      <div className="flex flex-col h-full bg-zinc-900">
+      <div className="flex flex-col h-full bg-background">
         {/* ── HEADER ── */}
         <div
           className="relative px-5 pt-3 pb-4"
@@ -22932,7 +22932,7 @@ export default function Home({
         </main>
 
         {/* DESKTOP BET SLIP */}
-        <aside className="hidden lg:block w-96 border-l border-zinc-800/60 bg-zinc-900 sticky top-16 h-[calc(100vh-4rem)]">
+        <aside className="hidden lg:block w-96 border-l border-zinc-800/60 bg-background sticky top-16 h-[calc(100vh-4rem)]">
           {BetSlipContent()}
         </aside>
       </div>
