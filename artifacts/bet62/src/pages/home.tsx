@@ -1468,29 +1468,90 @@ function normalizeTicketSelectionKey(selection: string): string {
   return s;
 }
 
+function inferSelectionSport(selection: string): "football" | "tennis" | "basketball" | "baseball" | "hockey" | "volleyball" {
+  const s = String(selection ?? "").toLowerCase();
+  if (/^vs[123][ha]$/.test(s) || /^vs-s(30|31|32|03|13|23)$/.test(s) || /^pt-[ou]-\d+(?:\.\d+)?$/.test(s) || s === "hcap-vb-home" || s === "hcap-vb-away" || s === "opts" || s === "upts" || s === "pth" || s === "pta" || s === "pth2" || s === "pta2")
+    return "volleyball";
+  if (s.startsWith("set") || s.startsWith("es-") || s.startsWith("sh") || s.startsWith("gh-") || s.startsWith("ses-") || s.startsWith("oe-") || s.startsWith("oe1-") || s.startsWith("oe2-") || s.startsWith("wal1-") || s.startsWith("wal2-") || s.startsWith("sm2-") || s.startsWith("sc1-") || s.startsWith("sc2-") || s.startsWith("tg-") || s.startsWith("s1g-") || s.startsWith("s2g-") || s.includes("sets"))
+    return "tennis";
+  if (s.startsWith("b-") || /^q[1234]-/.test(s) || s === "h1-home" || s === "h1-away")
+    return "basketball";
+  if (/^p[123]-/.test(s) || /^per[123]-/.test(s) || /^p[123]t-/.test(s) || s.startsWith("sog-") || s === "pl-home" || s === "pl-away")
+    return "hockey";
+  if (s.startsWith("mlb-") || s.startsWith("f5-") || s.startsWith("f5t-") || s.startsWith("rl-"))
+    return "baseball";
+  return "football";
+}
+
 function scoreOutcomeForSel(
-  sel: { selection: string },
-  score: { home: number; away: number },
+  sel: { selection: string; finalScore?: { home: number; away: number }; extras?: any },
+  score?: { home: number; away: number },
 ): "won" | "lost" | null {
   const s = normalizeTicketSelectionKey(sel.selection);
-  const { home, away } = score;
+  const actualScore = score ?? sel.finalScore;
+  if (!actualScore) return null;
+
+  const { home, away } = actualScore;
   const total = home + away;
   let winning: boolean | null = null;
-  if (s === "home") winning = home > away;
-  else if (s === "away") winning = away > home;
-  else if (s === "draw") winning = home === away;
-  else if (s === "homeOrDraw") winning = home >= away;
-  else if (s === "awayOrDraw") winning = away >= home;
-  else if (s === "homeOrAway") winning = home !== away;
-  else if (s === "bts-yes") winning = home > 0 && away > 0;
-  else if (s === "bts-no") winning = home === 0 || away === 0;
-  else {
-    const m = s.match(/^([ou])([\d.]+)$/);
-    if (m) {
-      const line = decodeCompactLine(m[2]!);
-      winning = m[1] === "o" ? total > line : total < line;
+  const sport = inferSelectionSport(sel.selection);
+
+  // Esportes específicos
+  if (sport === "tennis") {
+    if (/^es-(h20|h21|a02|a12)$/.test(s)) {
+      const scoreStr = `${home}-${away}`;
+      const want = s === "es-h20" ? "2-0" : s === "es-h21" ? "2-1" : s === "es-a02" ? "0-2" : "1-2";
+      winning = scoreStr === want;
+    } else if (s === "osets" || s === "usets" || /^([ou])sets(35|25)?$/.test(s)) {
+      const m = s.match(/^([ou])sets(35|25)?$/);
+      const dir = s.startsWith("o") ? "o" : "u";
+      const line = s.includes("35") ? 3.5 : 2.5;
+      const totalSets = home + away;
+      if (totalSets === 0) return null;
+      if (totalSets === line) return null;
+      winning = dir === "o" ? totalSets > line : totalSets < line;
+    }
+  } else if (sport === "baseball") {
+    if (s === "winner" || s === "home" || s === "away") {
+      winning = s === "home" ? home > away : away > home;
+    } else if (/^mlb-tot-([ou])-(\d+(?:\.\d+)?)$/.test(s) || /^mlb-([ou])(\d+(?:\.\d+)?)$/.test(s)) {
+      const m = s.match(/^mlb-tot-([ou])-(\d+(?:\.\d+)?)$/) || s.match(/^mlb-([ou])(\d+(?:\.\d+)?)$/);
+      const line = Number(m?.[2] ?? Number.NaN);
+      if (!Number.isFinite(line)) return null;
+      if (total === line) return null;
+      winning = m?.[1] === "o" ? total > line : total < line;
+    }
+  } else if (sport === "basketball") {
+    if (/^b-pts-([ou])-(\d+(?:\.\d+)?)$/.test(s)) {
+      const m = s.match(/^b-pts-([ou])-(\d+(?:\.\d+)?)$/);
+      const line = Number(m![2]!);
+      if (!Number.isFinite(line)) return null;
+      if (total === line) return null;
+      winning = m![1] === "o" ? total > line : total < line;
+    }
+  } else if (sport === "hockey") {
+    // Mercados básicos de hóquei
+  }
+
+  // Mercados genéricos de futebol (caso não seja esporte específico)
+  if (winning === null) {
+    if (s === "home") winning = home > away;
+    else if (s === "away") winning = away > home;
+    else if (s === "draw") winning = home === away;
+    else if (s === "homeOrDraw") winning = home >= away;
+    else if (s === "awayOrDraw") winning = away >= home;
+    else if (s === "homeOrAway") winning = home !== away;
+    else if (s === "bts-yes") winning = home > 0 && away > 0;
+    else if (s === "bts-no") winning = home === 0 || away === 0;
+    else {
+      const m = s.match(/^([ou])([\d.]+)$/);
+      if (m) {
+        const line = decodeCompactLine(m[2]!);
+        winning = m[1] === "o" ? total > line : total < line;
+      }
     }
   }
+
   return winning === null ? null : winning ? "won" : "lost";
 }
 
