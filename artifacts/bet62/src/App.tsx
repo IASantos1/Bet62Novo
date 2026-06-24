@@ -20,18 +20,12 @@ import {
   subscribeThemeChange,
   type ResolvedTheme,
 } from "@/lib/theme";
-import {
-  readWCClientSnapshotRaw,
-  writeWCClientSnapshotRaw,
-} from "@/lib/world-cup-cache";
 import NotFound from "@/pages/not-found";
 import Home from "@/pages/home";
 import LivePage from "@/pages/live";
 import SplashScreen from "@/components/SplashScreen";
 
 const AdminPage = lazy(() => import("@/pages/admin"));
-const WorldCupPage = lazy(() => import("@/pages/world-cup"));
-const preloadWorldCupPage = () => import("@/pages/world-cup");
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -109,19 +103,6 @@ function Router() {
           </Suspense>
         )}
       </Route>
-      <Route path="/copa-do-mundo">
-        {() => (
-          <Suspense
-            fallback={
-              <div className="min-h-[100dvh] w-full flex items-center justify-center bg-[#090909]">
-                <div className="w-7 h-7 border-2 border-zinc-800 border-t-red-500 rounded-full animate-spin" />
-              </div>
-            }
-          >
-            <WorldCupPage />
-          </Suspense>
-        )}
-      </Route>
       <Route component={NotFound} />
     </Switch>
   );
@@ -148,51 +129,6 @@ function App() {
     };
   }, []);
 
-  useEffect(() => {
-    if (isAdmin || !splashDone) return;
-    let cancelled = false;
-    let timerId: number | null = null;
-    const idle = window.requestIdleCallback?.bind(window);
-    const cancelIdle = window.cancelIdleCallback?.bind(window);
-    let idleId: number | null = null;
-
-    const prefetch = () => {
-      void preloadWorldCupPage();
-      const cached = readWCClientSnapshotRaw();
-      if (cached) return;
-      void fetchWithTimeout("/api/matches/wc2026", {}, 8_000)
-        .then((r) => (r.ok ? r.json() : { matches: [] }))
-        .then((data) => {
-          if (cancelled) return;
-          const matches = Array.isArray(
-            (data as { matches?: unknown[] }).matches,
-          )
-            ? ((data as { matches?: Record<string, unknown>[] }).matches ?? [])
-            : [];
-          writeWCClientSnapshotRaw(matches);
-        })
-        .catch(() => {});
-    };
-
-    if (idle) {
-      idleId = idle(
-        () => {
-          prefetch();
-        },
-        { timeout: 2_500 },
-      );
-    } else {
-      timerId = window.setTimeout(() => {
-        prefetch();
-      }, 1_200);
-    }
-
-    return () => {
-      cancelled = true;
-      if (idleId !== null && cancelIdle) cancelIdle(idleId);
-      if (timerId !== null) window.clearTimeout(timerId);
-    };
-  }, [isAdmin, splashDone]);
 
   return (
     <>

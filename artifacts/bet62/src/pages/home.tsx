@@ -158,6 +158,7 @@ import toulouseBanner from "@assets/file_1779019463945_1779019658504.jpeg";
 import parisFCBanner from "@assets/file_1779019459045_1779019658504.jpeg";
 import lorientBanner from "@assets/file_1779019450188_1779019658504.jpeg";
 import brestBanner from "@assets/file_1779019468348_1779019658504.jpeg";
+import MatchStatsPanel from "@/components/MatchStatsPanel";
 
 const TEAM_BANNERS: Record<string, string> = {
   // ── Liga Portugal ──
@@ -2665,32 +2666,6 @@ type Match = {
     etScore?: [number, number];
     penScore?: [number, number];
     htScore?: [number, number];
-    cornersTotal?: number;
-    cardsTotal?: number;
-    // V5 API extended stats
-    possessionHome?: string;
-    possessionAway?: string;
-    shotsOnTargetHome?: number;
-    shotsOnTargetAway?: number;
-    shotsOffTargetHome?: number;
-    shotsOffTargetAway?: number;
-    cornersHome?: number;
-    cornersAway?: number;
-    savesHome?: number;
-    savesAway?: number;
-    attacksHome?: number;
-    attacksAway?: number;
-    dangerousAttacksHome?: number;
-    dangerousAttacksAway?: number;
-    xGHome?: string;
-    xGAway?: string;
-    keyPassesHome?: number;
-    keyPassesAway?: number;
-    passingAccuracyHome?: string;
-    passingAccuracyAway?: string;
-    crossesHome?: number;
-    crossesAway?: number;
-    rawStats?: Record<string, { home?: string | number; away?: string | number }>;
   };
   // Red cards per team (football only)
   redCardsHome?: number;
@@ -3129,222 +3104,59 @@ function sportEmoji(sport?: string): string {
   return "⚽";
 }
 
-const LazyWorldCupPage = lazy(() => import("@/pages/world-cup"));
-
-// ─── Animated Copa do Mundo 2026 Banner ──────────────────────────────────────
-function AnimatedCopaBanner({ onOpen }: { onOpen: () => void }) {
-  // Prefetch WC data when banner mounts so the panel opens instantly
-  useEffect(() => {
-    fetch("/api/matches/wc2026").catch(() => {});
-  }, []);
-  return (
-    <motion.div
-      initial={{ opacity: 0, y: 12 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.5 }}
-      className="relative overflow-hidden rounded-2xl mb-5 cursor-pointer select-none"
-      style={{
-        background:
-          "linear-gradient(135deg, #0a0015 0%, #1a0030 25%, #2d0050 50%, #1a0015 75%, #0d000a 100%)",
-        border: "1px solid rgba(255,100,0,0.25)",
-        boxShadow:
-          "0 0 40px rgba(120,0,255,0.15), inset 0 1px 0 rgba(255,255,255,0.06)",
-      }}
-      onClick={onOpen}
-      whileTap={{ scale: 0.98 }}
-    >
-      {/* animated gradient overlay */}
-      <motion.div
-        className="absolute inset-0 pointer-events-none"
-        animate={{ opacity: [0.4, 0.7, 0.4] }}
-        transition={{ duration: 3, repeat: Infinity, ease: "easeInOut" }}
-        style={{
-          background:
-            "radial-gradient(ellipse at 80% 50%, rgba(255,90,0,0.18) 0%, transparent 60%), radial-gradient(ellipse at 20% 50%, rgba(120,0,255,0.20) 0%, transparent 60%)",
-        }}
-      />
-
-      {/* top scan line */}
-      <motion.div
-        className="absolute top-0 left-0 right-0 h-px pointer-events-none"
-        style={{
-          background:
-            "linear-gradient(90deg, transparent, rgba(255,165,0,0.8), rgba(255,50,50,0.8), rgba(160,0,255,0.8), transparent)",
-        }}
-        animate={{ opacity: [0.4, 1, 0.4] }}
-        transition={{ duration: 2, repeat: Infinity }}
-      />
-
-      {/* floating orbs */}
-      {[
-        {
-          cx: "88%",
-          cy: "20%",
-          r: 40,
-          color: "rgba(255,100,0,0.12)",
-          delay: 0,
-        },
-        {
-          cx: "10%",
-          cy: "70%",
-          r: 30,
-          color: "rgba(140,0,255,0.14)",
-          delay: 0.8,
-        },
-        {
-          cx: "60%",
-          cy: "10%",
-          r: 20,
-          color: "rgba(255,220,0,0.10)",
-          delay: 1.4,
-        },
-      ].map((o, i) => (
-        <motion.div
-          key={i}
-          className="absolute rounded-full pointer-events-none"
-          style={{
-            width: o.r * 2,
-            height: o.r * 2,
-            background: o.color,
-            left: o.cx,
-            top: o.cy,
-            transform: "translate(-50%,-50%)",
-            filter: "blur(16px)",
-          }}
-          animate={{ scale: [1, 1.3, 1], opacity: [0.6, 1, 0.6] }}
-          transition={{ duration: 3 + i, repeat: Infinity, delay: o.delay }}
-        />
-      ))}
-
-      {/* particle dots */}
-      {[...Array(8)].map((_, i) => (
-        <motion.div
-          key={`p${i}`}
-          className="absolute rounded-full pointer-events-none"
-          style={{
-            width: 2 + (i % 3),
-            height: 2 + (i % 3),
-            background:
-              i % 3 === 0 ? "#FFD700" : i % 3 === 1 ? "#FF4500" : "#CC00FF",
-            left: `${8 + i * 11}%`,
-            top: `${20 + (i % 4) * 18}%`,
-            filter: "blur(0.5px)",
-          }}
-          animate={{ y: [-4, 4, -4], opacity: [0.3, 1, 0.3] }}
-          transition={{
-            duration: 1.8 + i * 0.3,
-            repeat: Infinity,
-            delay: i * 0.2,
-          }}
-        />
-      ))}
-
-      <div className="relative z-10 flex items-center gap-3 px-4 py-3.5">
-        {/* trophy image */}
-        <div className="flex-shrink-0">
-          <motion.div
-            animate={{ y: [0, -5, 0], rotateY: [0, 12, -12, 0] }}
-            transition={{ duration: 3.5, repeat: Infinity, ease: "easeInOut" }}
-            style={{
-              filter:
-                "drop-shadow(0 0 14px rgba(255,165,0,0.75)) drop-shadow(0 0 28px rgba(255,80,0,0.35))",
-            }}
-          >
-            <img
-              src={trophyImg}
-              alt="Troféu Copa do Mundo"
-              style={{ width: 82, height: 82, objectFit: "contain" }}
-            />
-          </motion.div>
-        </div>
-
-        {/* text block */}
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 mb-0.5">
-            <motion.span
-              className="text-[9px] font-black tracking-[0.3em] text-orange-400/90"
-              animate={{ opacity: [0.6, 1, 0.6] }}
-              transition={{ duration: 2, repeat: Infinity }}
-            >
-              FIFA · 2026 · AO VIVO
-            </motion.span>
-            <motion.span
-              className="inline-flex items-center gap-1 bg-red-600/20 border border-red-500/40 rounded-full px-1.5 py-0.5"
-              animate={{ opacity: [0.7, 1, 0.7] }}
-              transition={{ duration: 1.5, repeat: Infinity }}
-            >
-              <span className="w-1 h-1 rounded-full bg-red-400 animate-pulse" />
-              <span className="text-[8px] font-black text-red-300 tracking-wider">
-                NOVO
-              </span>
-            </motion.span>
-          </div>
-          <div
-            className="font-black text-white leading-none"
-            style={{ fontSize: "18px", letterSpacing: "-0.02em" }}
-          >
-            Copa do{" "}
-            <span
-              className="text-transparent bg-clip-text"
-              style={{
-                backgroundImage:
-                  "linear-gradient(90deg,#FFD700,#FF6B00,#FF00AA)",
-              }}
-            >
-              Mundo
-            </span>
-          </div>
-          <div className="text-[10px] text-white/40 mt-0.5 font-medium tracking-wide">
-            Canadá · México · EUA · 48 seleções
-          </div>
-        </div>
-
-        {/* CTA */}
-        <div className="flex-shrink-0">
-          <motion.div
-            className="flex items-center gap-1.5 rounded-xl px-3 py-2 text-xs font-black text-white"
-            style={{
-              background: "linear-gradient(135deg,#FF4500,#CC0077)",
-              boxShadow: "0 0 12px rgba(255,69,0,0.4)",
-            }}
-            animate={{
-              boxShadow: [
-                "0 0 10px rgba(255,69,0,0.3)",
-                "0 0 20px rgba(255,69,0,0.6)",
-                "0 0 10px rgba(255,69,0,0.3)",
-              ],
-            }}
-            transition={{ duration: 2, repeat: Infinity }}
-            whileHover={{ scale: 1.05 }}
-          >
-            Apostar
-            <svg
-              width="12"
-              height="12"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2.5"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <path d="m9 18 6-6-6-6" />
-            </svg>
-          </motion.div>
-        </div>
-      </div>
-
-      {/* bottom scan line */}
-      <div
-        className="absolute bottom-0 left-0 right-0 h-px"
-        style={{
-          background:
-            "linear-gradient(90deg, transparent, rgba(255,100,0,0.5), transparent)",
-        }}
-      />
-    </motion.div>
-  );
+// ─── WC 2026 Team → ISO Flag Codes ───────────────────────────────────────────
+const WC_TEAM_FLAGS: Record<string, string> = {
+  "argentina": "ar", "australia": "au", "austria": "at",
+  "belgium": "be", "bélgica": "be", "brazil": "br", "brasil": "br",
+  "cameroon": "cm", "canada": "ca", "chile": "cl", "colombia": "co",
+  "costa rica": "cr", "croatia": "hr", "croácia": "hr",
+  "czechia": "cz", "república checa": "cz", "czech republic": "cz",
+  "denmark": "dk", "dinamarca": "dk", "ecuador": "ec",
+  "egypt": "eg", "egito": "eg", "england": "gb-eng",
+  "france": "fr", "frança": "fr", "germany": "de", "alemanha": "de",
+  "ghana": "gh", "greece": "gr", "grécia": "gr",
+  "honduras": "hn", "hungary": "hu", "hungria": "hu",
+  "iran": "ir", "iraq": "iq", "israel": "il", "italy": "it", "itália": "it",
+  "ivory coast": "ci", "côte d'ivoire": "ci", "jamaica": "jm",
+  "japan": "jp", "japão": "jp", "kenya": "ke", "korea republic": "kr",
+  "coreia do sul": "kr", "south korea": "kr", "kuwait": "kw",
+  "malaysia": "my", "mali": "ml", "mauritania": "mr",
+  "mexico": "mx", "méxico": "mx", "morocco": "ma", "marrocos": "ma",
+  "mozambique": "mz", "netherlands": "nl", "holanda": "nl", "países baixos": "nl",
+  "new zealand": "nz", "nigeria": "ng", "nigéria": "ng",
+  "norway": "no", "noruega": "no", "oman": "om",
+  "panama": "pa", "panamá": "pa", "paraguay": "py", "paraguai": "py",
+  "peru": "pe", "poland": "pl", "polónia": "pl",
+  "portugal": "pt", "qatar": "qa", "catar": "qa",
+  "romania": "ro", "roménia": "ro", "russia": "ru", "rússia": "ru",
+  "saudi arabia": "sa", "arábia saudita": "sa", "senegal": "sn",
+  "serbia": "rs", "sérvia": "rs", "slovakia": "sk", "eslováquia": "sk",
+  "south africa": "za", "áfrica do sul": "za", "spain": "es", "espanha": "es",
+  "sweden": "se", "suécia": "se", "switzerland": "ch", "suíça": "ch",
+  "syria": "sy", "síria": "sy", "thailand": "th", "tailândia": "th",
+  "tunisia": "tn", "tunísia": "tn", "turkey": "tr", "turquia": "tr",
+  "ukraine": "ua", "ucrânia": "ua",
+  "united states": "us", "usa": "us", "estados unidos": "us",
+  "uruguay": "uy", "uzbekistan": "uz", "venezuela": "ve",
+  "wales": "gb-wls", "zimbabwe": "zw",
+};
+function wcFlagUrl(teamName: string): string | null {
+  const k = teamName.toLowerCase().trim();
+  const code = WC_TEAM_FLAGS[k];
+  if (!code) {
+    for (const [key, val] of Object.entries(WC_TEAM_FLAGS)) {
+      if (k.includes(key) || key.includes(k)) return `https://flagcdn.com/w40/${val}.png`;
+    }
+    return null;
+  }
+  return `https://flagcdn.com/w40/${code}.png`;
 }
+function isWCMatch(league: string | null | undefined): boolean {
+  const lg = (league ?? "").toLowerCase();
+  return lg.includes("world cup") || lg.includes("copa do mundo") || lg.includes("mundial 2026") || lg.includes("wc 2026") || lg.includes("fifa world") || lg.includes("copa mundial");
+}
+
+function AnimatedCopaBanner(_?: { onOpen?: () => void }) { return null; }
 
 export default function Home({
   initialTab = "sports",
@@ -5795,7 +5607,7 @@ export default function Home({
 
   // Fetch match stats when stats tab is active
   useEffect(() => {
-    if (matchViewTab !== "stats" || !expandedMatch || matchStats) return;
+    if (!expandedMatch || matchStats) return;
     setMatchStatsLoading(true);
     const p = new URLSearchParams({
       home: expandedMatch.home,
@@ -5812,13 +5624,10 @@ export default function Home({
       })
       .catch(() => {})
       .finally(() => setMatchStatsLoading(false));
-  }, [matchViewTab, expandedMatch?.id]);
+  }, [expandedMatch?.id]);
 
   useEffect(() => {
-    const wantsStatsData =
-      matchViewTab === "stats" ||
-      (matchViewTab === "live" && !!expandedMatch?.isLive);
-    if (!wantsStatsData || !expandedMatch) return;
+    if (!expandedMatch) return;
     if (v2StatsLoading) return;
     if (v2StatsGroups !== null && Date.now() - v2StatsFetchedAt < 3000) return;
     const rawId = getProviderMatchId(expandedMatch.id);
@@ -6078,7 +5887,7 @@ export default function Home({
 
   // Fetch H2H confrontos when "confrontos" tab is selected
   useEffect(() => {
-    if (matchViewTab !== "confrontos" || !expandedMatch) return;
+    if (!expandedMatch) return;
     setConfrontosData(null);
     setConfrontosLoading(true);
     const rawId = getProviderMatchId(expandedMatch.id);
@@ -6094,7 +5903,7 @@ export default function Home({
       .then((d) => setConfrontosData(d as ConfrontosData))
       .catch(() => setConfrontosData(null))
       .finally(() => setConfrontosLoading(false));
-  }, [matchViewTab, expandedMatch?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [expandedMatch?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Handle ?payment= query param on return from card payment
   useEffect(() => {
@@ -6424,11 +6233,6 @@ export default function Home({
       awayHits?: number;
       homeErrors?: number;
       awayErrors?: number;
-      etScore?: [number, number];
-      penScore?: [number, number];
-      htScore?: [number, number];
-      cornersTotal?: number;
-      cardsTotal?: number;
     };
   };
 
@@ -8183,8 +7987,8 @@ export default function Home({
     const oddsDown = !isSuspended && delta <= -ODDS_ANIM_THRESHOLD;
     const isWCVariant = variant === "worldcup";
     const baseBoxClass = isWCVariant
-      ? `${grow ? "flex-1" : ""} h-12 rounded-md border px-1 flex flex-col items-center justify-center min-w-0`
-      : `${grow ? "flex-1" : ""} h-12 px-2 rounded-md text-xs flex flex-col items-center justify-center`;
+      ? `${grow ? "flex-1 min-w-[90px]" : ""} h-11 rounded-xl border px-2 flex flex-col items-center justify-center`
+      : `${grow ? "flex-1" : ""} h-11 px-2 rounded-xl text-xs flex flex-col items-center justify-center`;
 
     if (isSuspended) {
       return (
@@ -8265,25 +8069,25 @@ export default function Home({
     return (
       <button
         {...makeTap(() => toggleBet(match, selection, odd, market, label))}
-        className={`relative ${baseBoxClass} transition-colors ${isWCVariant ? "" : "text-xs"} ${
+        className={`relative ${baseBoxClass} transition-all ${isWCVariant ? "" : "text-xs"} ${
           isSelected
             ? isWCVariant
-              ? "border-red-500 bg-red-600/15 ring-1 ring-red-400/30"
+              ? "border-red-500 bg-red-600/20 shadow-sm shadow-red-900/30"
               : "bg-red-600 text-white"
             : isWCVariant
               ? isDarkTheme
-                ? "border-zinc-800 bg-zinc-900 hover:border-zinc-700"
+                ? "border-zinc-700/60 bg-zinc-800/80 hover:border-zinc-600 hover:bg-zinc-800"
                 : "border-zinc-200 bg-white hover:border-zinc-300"
               : "bg-zinc-800 hover:bg-zinc-700 text-zinc-300"
         } ${flashClass}`}
       >
         <span
-          className={`${isWCVariant ? `text-[10px] mb-1 truncate w-full text-center px-0.5 ${isDarkTheme ? "text-zinc-500" : "text-zinc-500"}` : "text-[10px] leading-none opacity-70"}`}
+          className={`${isWCVariant ? `text-[9px] font-bold mb-0.5 truncate w-full text-center uppercase tracking-wide ${isSelected ? "text-red-400" : isDarkTheme ? "text-zinc-500" : "text-zinc-500"}` : "text-[10px] leading-none opacity-70"}`}
         >
           {label}
         </span>
         <span
-          className={`${isWCVariant ? `text-sm font-black tabular-nums flex items-center gap-0.5 ${isSelected ? "text-red-400" : isDarkTheme ? "text-white" : "text-zinc-900"}` : "font-bold text-sm leading-none tabular-nums flex items-center gap-0.5"} ${isSelected && !isWCVariant ? "!text-white" : ""}`}
+          className={`${isWCVariant ? `text-[15px] font-black tabular-nums flex items-center gap-0.5 ${isSelected ? "text-red-400" : isDarkTheme ? "text-white" : "text-zinc-900"}` : "font-bold text-sm leading-none tabular-nums flex items-center gap-0.5"} ${isSelected && !isWCVariant ? "!text-white" : ""}`}
         >
           {odd.toFixed(2)}
           {oddsUp && (
@@ -8372,16 +8176,6 @@ export default function Home({
           </span>
         </div>
         <div className="flex items-center gap-2 shrink-0 ml-2">
-          {(match.isLive && match.sport === "football" && (match._liveExtra?.cornersTotal !== undefined || match._liveExtra?.cardsTotal !== undefined)) && (
-            <div className="flex items-center gap-2">
-              {match._liveExtra?.cornersTotal !== undefined && (
-                <span className="text-[9px] font-semibold text-zinc-500">🚩{match._liveExtra.cornersTotal}</span>
-              )}
-              {match._liveExtra?.cardsTotal !== undefined && (
-                <span className="text-[9px] font-semibold text-zinc-500">🟨{match._liveExtra.cardsTotal}</span>
-              )}
-            </div>
-          )}
           {rightSlot}
           {timeStr && (
             <span className="text-[11px] text-zinc-500">{timeStr}</span>
@@ -8870,13 +8664,18 @@ export default function Home({
         </span>
       );
 
+    const _isWC = isWCMatch(match.league);
+    const _hFlag = _isWC ? wcFlagUrl(match.home) : null;
+    const _aFlag = _isWC ? wcFlagUrl(match.away) : null;
+
     const SimpleScore = ({ big }: { big?: boolean }) =>
       isEmBreve ? (
         <div className="flex items-center gap-2 w-full">
           <span
-            className={`font-bold ${big ? "text-base" : "text-sm"} truncate flex-1 text-right`}
+            className={`font-bold ${big ? "text-base" : "text-sm"} truncate flex-1 text-right inline-flex items-center justify-end gap-1`}
             style={bannerImg ? { color: "#ffffff" } : undefined}
           >
+            {_hFlag && <img src={_hFlag} className="w-5 h-3.5 object-cover rounded-[3px] shrink-0 opacity-90" alt="" />}
             {homeName}
           </span>
           <div
@@ -8893,10 +8692,11 @@ export default function Home({
             –
           </div>
           <span
-            className={`font-bold ${big ? "text-base" : "text-sm"} truncate flex-1`}
+            className={`font-bold ${big ? "text-base" : "text-sm"} truncate flex-1 inline-flex items-center gap-1`}
             style={bannerImg ? { color: "#ffffff" } : undefined}
           >
             {awayName}
+            {_aFlag && <img src={_aFlag} className="w-5 h-3.5 object-cover rounded-[3px] shrink-0 opacity-90" alt="" />}
           </span>
         </div>
       ) : (
@@ -9085,99 +8885,120 @@ export default function Home({
       <motion.div
         {...motionProps}
         {...makeTap(() => setExpandedMatch(match))}
-        className={`relative overflow-hidden rounded-[24px] border transition-transform cursor-pointer active:scale-[0.99] ${
+        className={`relative overflow-hidden rounded-2xl border transition-transform cursor-pointer active:scale-[0.99] ${
           isDarkTheme
-            ? "border-slate-700 bg-slate-800 shadow-[0_12px_28px_rgba(0,0,0,0.30)]"
-            : "border-zinc-200 bg-white shadow-[0_10px_24px_rgba(0,0,0,0.08)]"
+            ? "border-zinc-700/60 bg-zinc-900 shadow-[0_6px_16px_rgba(0,0,0,0.24)]"
+            : "border-zinc-200 bg-white shadow-[0_4px_14px_rgba(0,0,0,0.07)]"
         }`}
       >
-        <div className="absolute top-0 left-0 right-0 h-[3px] bg-gradient-to-r from-yellow-400 via-orange-500 to-red-600" />
-        <div className="px-3.5 pt-3 pb-2.5">
-          <div className="flex items-center justify-between gap-3 mb-2">
-            <div className="min-w-0 flex items-center gap-2">
-              <span className="text-sm leading-none shrink-0">
-                {flag}
-              </span>
-              <span
-                className={`text-[11px] font-black tracking-[0.18em] uppercase truncate ${isDarkTheme ? "text-zinc-300" : "text-zinc-500"}`}
-              >
+        <div className="absolute top-0 left-0 right-0 h-[2px] bg-gradient-to-r from-yellow-400 via-orange-500 to-red-600" />
+        <div className="px-3 pt-2.5 pb-2.5">
+          {/* Header: league + live badge */}
+          <div className="flex items-center justify-between gap-2 mb-2">
+            <div className="min-w-0 flex items-center gap-1.5">
+              <span className="text-xs leading-none shrink-0">{flag}</span>
+              <span className={`text-[10px] font-black tracking-[0.14em] uppercase truncate ${isDarkTheme ? "text-zinc-400" : "text-zinc-500"}`}>
                 {match.league}
               </span>
             </div>
-            <div className="flex items-center gap-2 shrink-0">
-              {(match.isLive && match.sport === "football" && (match._liveExtra?.cornersTotal !== undefined || match._liveExtra?.cardsTotal !== undefined)) && (
-                <div className="flex items-center gap-2">
-                  {match._liveExtra?.cornersTotal !== undefined && (
-                    <span className={`text-[9px] font-semibold ${isDarkTheme ? "text-zinc-500" : "text-zinc-400"}`}>🚩{match._liveExtra.cornersTotal}</span>
-                  )}
-                  {match._liveExtra?.cardsTotal !== undefined && (
-                    <span className={`text-[9px] font-semibold ${isDarkTheme ? "text-zinc-500" : "text-zinc-400"}`}>🟨{match._liveExtra.cardsTotal}</span>
-                  )}
-                </div>
-              )}
-              {liveBadge}
-            </div>
+            <div className="shrink-0">{liveBadge}</div>
           </div>
           {rivalry && (
             <div className="mb-2 text-[9px] font-black uppercase tracking-[0.2em] text-red-500 text-center">
               {rivalry}
             </div>
           )}
-          <div
-            className={`rounded-[20px] px-3 py-2.5 border ${isDarkTheme ? "bg-zinc-950 border-zinc-900/80" : "bg-zinc-950 border-zinc-900/80"}`}
-          >
-            <div className="flex items-center justify-between gap-3 mb-1.5">
-              <div className="flex-1 min-w-0 flex items-center justify-end gap-1">
-                <span className="text-[13px] font-black text-white leading-tight truncate">
-                  {homeName}
-                </span>
-                {rcH > 0 && <RcBadge count={rcH} />}
-              </div>
-              <div className="min-w-[68px] flex flex-col items-center">
-                <span className="text-[16px] font-black text-zinc-500 tracking-wide">
-                  VS
-                </span>
-                {isEmBreve ? (
-                  <>
-                    {match.time && (
-                      <span className="mt-0.5 text-[16px] font-black text-white">
-                        {match.time}
-                      </span>
+          {/* Main body: teams+score LEFT, odds RIGHT */}
+          <div className="flex flex-col sm:flex-row sm:items-center gap-2">
+            <div className="flex-1 min-w-0">
+              {sport === "tennis" ? (
+                <TennisScore />
+              ) : sport === "volleyball" ? (
+                <VolleyScore />
+              ) : sport === "hockey" ? (
+                <HockeyScore />
+              ) : sport === "baseball" || sport !== "baseball" ? (
+                <>
+                  <div className="flex items-center gap-2 mb-1.5">
+                    {rcH > 0 && <RcBadge count={rcH} />}
+                    <span className={`text-[13px] font-black leading-tight truncate flex-1 ${isDarkTheme ? "text-white" : "text-zinc-900"}`}>
+                      {homeName}
+                    </span>
+                    {!isEmBreve && (
+                      <span className="text-[15px] font-black text-white tabular-nums shrink-0">{match.homeScore ?? 0}</span>
                     )}
-                    {dateStr && (
-                      <span className="mt-0.5 text-[11px] font-semibold text-zinc-400">
-                        {dateStr}
-                      </span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {rcA > 0 && <RcBadge count={rcA} />}
+                    <span className={`text-[12px] font-semibold leading-tight truncate flex-1 ${isDarkTheme ? "text-zinc-400" : "text-zinc-600"}`}>
+                      {awayName}
+                    </span>
+                    {!isEmBreve && (
+                      <span className="text-[15px] font-black text-zinc-400 tabular-nums shrink-0">{match.awayScore ?? 0}</span>
                     )}
-                  </>
-                ) : sport === "football" || sport === "basketball" ? (
-                  <span className="mt-1 text-[26px] font-black text-white tabular-nums">
-                    {match.homeScore ?? 0}
-                    <span className="text-zinc-500 mx-1">-</span>
-                    {match.awayScore ?? 0}
-                  </span>
-                ) : null}
-              </div>
-              <div className="flex-1 min-w-0 flex items-center justify-start gap-1">
-                {rcA > 0 && <RcBadge count={rcA} />}
-                <span className="text-[13px] font-black text-white leading-tight truncate">
-                  {awayName}
-                </span>
-              </div>
+                  </div>
+                  {isEmBreve && (match.time || dateStr) && (
+                    <div className="mt-1 text-[11px] font-semibold text-zinc-500">
+                      {dateStr ? `${dateStr}${match.time ? ` · ${match.time}` : ""}` : match.time}
+                    </div>
+                  )}
+                </>
+              ) : (
+                <></>
+              )}
             </div>
-            {sport === "tennis" ? (
-              <TennisScore />
-            ) : sport === "volleyball" ? (
-              <VolleyScore />
-            ) : sport === "hockey" ? (
-              <HockeyScore />
-            ) : sport === "baseball" ? (
-              <BaseballScore />
-            ) : sport === "basketball" || sport === "football" ? null : (
-              <SimpleScore />
+            {/* Odds */}
+            {(canShowOdds || match.isLive) && (
+              <div
+                className="flex flex-col gap-1 sm:w-[280px] sm:shrink-0"
+                onClick={stopLiveCardOpen}
+                onTouchStart={stopLiveCardOpen}
+                onTouchMove={stopLiveCardOpen}
+                onTouchEnd={stopLiveCardOpen}
+                onPointerDown={stopLiveCardOpen}
+                onPointerMove={stopLiveCardOpen}
+                onPointerUp={stopLiveCardOpen}
+              >
+                {isPenShootout && !isLiveSuspended && (
+                  <div className="text-[9px] font-black uppercase tracking-widest text-amber-500 text-center">
+                    🎯 Vencedor da Final
+                  </div>
+                )}
+                <SuspensionBanner match={match} />
+                <div className="flex gap-1.5 w-full">
+                  {!isLiveSuspended && isPenShootout ? (
+                    <>
+                      <OddsButton match={match} selection="pen-home" odd={match.markets!.penExtra!.winner.home} market="penaltis" label={homeName.split(" ").slice(-1)[0]!} grow variant="worldcup" />
+                      <OddsButton match={match} selection="pen-away" odd={match.markets!.penExtra!.winner.away} market="penaltis" label={awayName.split(" ").slice(-1)[0]!} grow variant="worldcup" />
+                    </>
+                  ) : !isLiveSuspended ? (
+                    isObviousLiveResult ? (
+                      <button
+                        className="flex-1 flex flex-col items-center py-3 px-2 rounded-2xl text-xs border border-amber-200 bg-amber-50"
+                        {...makeTap(() => setExpandedMatch(match))}
+                      >
+                        <span className="font-black text-[11px] text-amber-600 uppercase tracking-widest">Aposta Já</span>
+                      </button>
+                    ) : (
+                      <>
+                        <OddsButton match={match} selection="home" odd={match.odds.home} market="result" label={homeName.split(" ").slice(-1)[0]!} grow variant="worldcup" />
+                        {sport !== "tennis" && match.odds.draw > 0 && (
+                          <OddsButton match={match} selection="draw" odd={match.odds.draw} market="result" label="Empate" grow variant="worldcup" />
+                        )}
+                        <OddsButton match={match} selection="away" odd={match.odds.away} market="result" label={awayName.split(" ").slice(-1)[0]!} grow variant="worldcup" />
+                      </>
+                    )
+                  ) : null}
+                </div>
+              </div>
             )}
           </div>
-          {oddsRow}
+          {/* Progress bar */}
+          {!isEmBreve && !isVolleyNonLive && progress > 0 && (
+            <div className="mt-2 w-full h-0.5 bg-zinc-800 rounded-full overflow-hidden">
+              <div className="h-full bg-red-600/60 rounded-full" style={{ width: `${progress}%` }} />
+            </div>
+          )}
         </div>
       </motion.div>
     );
@@ -9265,7 +9086,7 @@ export default function Home({
     const OddsRow = () =>
       canShowOdds ? (
         <div
-          className="flex flex-col gap-1.5 w-full"
+          className="flex flex-col gap-1 sm:w-[280px] sm:shrink-0"
           onClick={stopCardOpen}
           onTouchStart={stopCardOpen}
           onTouchMove={stopCardOpen}
@@ -9277,13 +9098,13 @@ export default function Home({
           <SuspensionBanner match={match} />
           {!isSuspendedMatch && (
             <>
-              <div className="flex gap-1.5 w-full">
+              <div className="flex gap-1 w-full">
                 <OddsButton
                   match={match}
                   selection="home"
                   odd={match.odds.home}
                   market="result"
-                  label={hasDraw ? homeName : homeName.split(" ").slice(-1)[0]}
+                  label="1"
                   grow
                   variant="worldcup"
                 />
@@ -9293,7 +9114,7 @@ export default function Home({
                     selection="draw"
                     odd={match.odds.draw}
                     market="result"
-                    label="Empate"
+                    label="X"
                     grow
                     variant="worldcup"
                   />
@@ -9303,7 +9124,7 @@ export default function Home({
                   selection="away"
                   odd={match.odds.away}
                   market="result"
-                  label={hasDraw ? awayName : awayName.split(" ").slice(-1)[0]}
+                  label="2"
                   grow
                   variant="worldcup"
                 />
@@ -9311,8 +9132,8 @@ export default function Home({
               {!match.hasRealOdds && (
                 <div className="flex items-center justify-center gap-1">
                   <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
-                  <span className="text-[10px] font-semibold tracking-wide text-zinc-500">
-                    ODDS ESTIMADAS
+                  <span className="text-[9px] font-semibold tracking-wide text-zinc-600">
+                    EST.
                   </span>
                 </div>
               )}
@@ -9323,76 +9144,44 @@ export default function Home({
 
     return (
       <div
-        className={`relative overflow-hidden rounded-[24px] border transition-transform cursor-pointer active:scale-[0.99] ${
+        className={`relative overflow-hidden rounded-2xl border transition-transform cursor-pointer active:scale-[0.99] ${
           isDarkTheme
-            ? "border-slate-700 bg-slate-800 shadow-[0_12px_28px_rgba(0,0,0,0.30)]"
-            : "border-zinc-200 bg-white shadow-[0_10px_24px_rgba(0,0,0,0.08)]"
+            ? "border-zinc-700/60 bg-zinc-900 shadow-[0_6px_16px_rgba(0,0,0,0.24)]"
+            : "border-zinc-200 bg-white shadow-[0_4px_14px_rgba(0,0,0,0.07)]"
         }`}
         {...makeTap(() => setExpandedMatch(match))}
       >
-        <div className="absolute top-0 left-0 right-0 h-[3px] bg-gradient-to-r from-yellow-400 via-orange-500 to-red-600" />
-        <div className="px-3.5 pt-3 pb-2.5">
-          <div className="flex items-center justify-between gap-3 mb-2">
-            <div className="min-w-0 flex items-center gap-2">
-              <span className="text-sm leading-none shrink-0">
-                {flag}
-              </span>
-              <span
-                className={`text-[11px] font-black tracking-[0.18em] uppercase truncate ${isDarkTheme ? "text-zinc-300" : "text-zinc-500"}`}
-              >
-                {match.league}
-              </span>
-            </div>
-            <div
-              className={`text-[13px] font-medium shrink-0 ${isDarkTheme ? "text-zinc-300" : "text-zinc-500"}`}
-            >
-              {dateStr}
-              {match.time ? ` • ${match.time}` : ""}
-            </div>
+        <div className="absolute top-0 left-0 right-0 h-[2px] bg-gradient-to-r from-yellow-400 via-orange-500 to-red-600" />
+        <div className="px-3 pt-2.5 pb-2.5">
+          {/* Competition header */}
+          <div className="flex items-center gap-1.5 mb-2">
+            <span className="text-xs leading-none shrink-0">{flag}</span>
+            <span className={`text-[10px] font-black tracking-[0.14em] uppercase truncate flex-1 ${isDarkTheme ? "text-zinc-400" : "text-zinc-500"}`}>
+              {match.league}
+            </span>
+            {rivalry && (
+              <span className="text-[9px] font-black text-red-500 shrink-0">{rivalry}</span>
+            )}
+            <span className={`text-[10px] font-semibold shrink-0 ml-1 ${isDarkTheme ? "text-zinc-500" : "text-zinc-400"}`}>
+              {dateStr}{match.time ? ` · ${match.time}` : ""}
+            </span>
           </div>
-          {rivalry && (
-            <div className="mb-2 text-[9px] font-black uppercase tracking-[0.2em] text-red-500 text-center">
-              {rivalry}
-            </div>
-          )}
-          <div
-            className={`flex items-center justify-between gap-3 mb-2 ${isDarkTheme ? "rounded-[20px] bg-zinc-950 border border-zinc-900/80 px-3 py-2.5" : "px-1 py-1"}`}
-          >
-            <div className="flex-1 min-w-0 text-right">
-              <span
-                className={`block text-[14px] font-black leading-tight truncate ${isDarkTheme ? "text-white" : "text-zinc-900"}`}
-              >
-                {homeName}
-              </span>
-            </div>
-            <div className="min-w-[68px] flex flex-col items-center">
-              <span className="text-[16px] font-black text-zinc-500 tracking-wide">
-                VS
-              </span>
-              {match.time && (
-                <span
-                  className={`mt-0.5 text-[16px] font-black ${isDarkTheme ? "text-white" : "text-zinc-900"}`}
-                >
-                  {match.time}
+          {/* Teams + odds — side by side on sm+, stacked on mobile */}
+          <div className="flex flex-col sm:flex-row sm:items-center gap-2">
+            <div className="flex-1 min-w-0">
+              <div className="mb-1.5">
+                <span className={`text-[13px] font-black leading-tight truncate block ${isDarkTheme ? "text-white" : "text-zinc-900"}`}>
+                  {homeName}
                 </span>
-              )}
-              {dateStr && (
-                <span
-                  className={`mt-0.5 text-[11px] font-semibold ${isDarkTheme ? "text-zinc-400" : "text-zinc-500"}`}
-                >
-                  {dateStr}
+              </div>
+              <div>
+                <span className={`text-[12px] font-semibold leading-tight truncate block ${isDarkTheme ? "text-zinc-400" : "text-zinc-600"}`}>
+                  {awayName}
                 </span>
-              )}
+              </div>
             </div>
-            <div className="flex-1 min-w-0 text-left">
-              <span
-                className={`block text-[14px] font-black leading-tight truncate ${isDarkTheme ? "text-white" : "text-zinc-900"}`}
-              >
-                {awayName}
-              </span>
-            </div>
+            <OddsRow />
           </div>
-          <OddsRow />
         </div>
       </div>
     );
@@ -9677,7 +9466,7 @@ export default function Home({
     const quickAmounts = [5, 10, 25, 50];
 
     return (
-      <div className="flex flex-col h-full" style={{ background: "#0a0a0a" }}>
+      <div className="flex flex-col h-full bg-zinc-950">
         {/* ── HEADER ── */}
         <div
           className="relative px-5 pt-3 pb-4"
@@ -10014,7 +9803,7 @@ export default function Home({
           <div
             className="px-4 pt-3 space-y-3"
             style={{
-              background: "#0a0a0a",
+              background: "#09090b",
               borderTop: "1px solid rgba(255,255,255,0.06)",
               paddingBottom: "max(1.5rem, env(safe-area-inset-bottom, 1.5rem))",
             }}
@@ -10571,7 +10360,7 @@ export default function Home({
     if (isSusp) {
       // Show a locked placeholder so section headers don't look empty
       return (
-        <div className="flex-1 flex flex-col items-center justify-center min-w-0 h-[62px] px-1 rounded-xl border border-zinc-200 bg-white opacity-60 cursor-not-allowed select-none">
+        <div className={`flex-1 flex flex-col items-center justify-center min-w-0 h-[58px] px-1 rounded-xl border opacity-60 cursor-not-allowed select-none ${isDarkTheme ? "border-zinc-700 bg-zinc-800/60" : "border-zinc-200 bg-white"}`}>
           <span className="text-[10px] text-zinc-500 mb-1 leading-tight text-center truncate w-full px-0.5">
             {label}
           </span>
@@ -10602,13 +10391,13 @@ export default function Home({
     return (
       <button
         {...makeTap(() => toggleBet(match, sel, odd, market, label))}
-        className={`flex-1 flex flex-col items-center justify-center min-w-0 h-[62px] px-1 rounded-xl border transition-all ${active ? "border-red-300 bg-red-50 ring-1 ring-red-200" : "border-zinc-200 bg-white hover:border-zinc-300"} ${flashClass}`}
+        className={`flex-1 flex flex-col items-center justify-center min-w-0 h-[58px] px-1 rounded-xl border transition-all ${active ? isDarkTheme ? "border-red-500 bg-red-600/20 shadow-sm shadow-red-900/30" : "border-red-300 bg-red-50 ring-1 ring-red-200" : isDarkTheme ? "border-zinc-700/60 bg-zinc-800/80 hover:border-zinc-600 hover:bg-zinc-800" : "border-zinc-200 bg-white hover:border-zinc-300"} ${flashClass}`}
       >
         <span className="text-[10px] text-zinc-500 mb-1 leading-tight text-center truncate w-full px-0.5">
           {label}
         </span>
         <span
-          className={`text-sm font-black leading-none tabular-nums flex items-center gap-0.5 ${active ? "text-red-500" : "text-zinc-900"}`}
+          className={`text-sm font-black leading-none tabular-nums flex items-center gap-0.5 ${active ? "text-red-400" : isDarkTheme ? "text-white" : "text-zinc-900"}`}
         >
           {odd.toFixed(2)}
           {oddUp && (
@@ -11011,31 +10800,6 @@ export default function Home({
             value={marketGroupSeqApi}
           >
             <div className="mt-0">
-              <div
-                ref={tabContainerRef}
-                className="flex gap-2 overflow-x-auto no-scrollbar mb-3 pb-1"
-                style={
-                  {
-                    scrollbarWidth: "none",
-                    touchAction: "pan-x pan-y",
-                    WebkitOverflowScrolling: "touch",
-                  } as React.CSSProperties
-                }
-              >
-                {tabs.map((t) => (
-                  <button
-                    key={t.key}
-                    data-tab={t.key}
-                    {...makeTap(() => {
-                      setModalTab(t.key);
-                      scrollTabIntoView(t.key);
-                    })}
-                    className={`px-4 py-2 rounded-[16px] text-[10px] font-black whitespace-nowrap transition-colors flex-shrink-0 border ${modalTab === t.key ? "bg-red-50 text-red-300 border-red-300" : "bg-zinc-100 text-zinc-500 border-zinc-200 hover:text-zinc-700"}`}
-                  >
-                    {t.label}
-                  </button>
-                ))}
-              </div>
 
               {/* ── SUSPENSION BANNER (modal) ── */}
               {((match.marketSuspension &&
@@ -16065,7 +15829,7 @@ export default function Home({
 
       {/* HEADER */}
       <header
-        className="sticky top-0 z-40 bg-zinc-950 border-b border-zinc-900"
+        className="sticky top-0 z-40 bg-background border-b border-zinc-800/60"
         style={{ paddingTop: "env(safe-area-inset-top)" }}
       >
         <div className="flex items-center justify-between px-4 h-16 max-w-[1600px] mx-auto">
@@ -16079,6 +15843,39 @@ export default function Home({
             <div className="font-black text-2xl tracking-tighter italic">
               <span className="text-white">BET</span>
               <span className="text-red-600">62</span>
+            </div>
+
+            {/* Desktop inline nav — hidden on mobile (uses tab strip below) */}
+            <div className="hidden lg:flex items-center ml-12 h-16">
+              {[
+                { id: "sports", icon: <Trophy size={15} />, label: "ESPORTES" },
+                { id: "live", icon: <Activity size={15} />, label: "AO VIVO", badge: true },
+                { id: "promos", icon: <Gift size={15} />, label: "PROMOÇÕES", onSelect: fetchCashback },
+              ].map((tab) => (
+                <button
+                  key={tab.id}
+                  {...makeTap(() => selectMainTab(tab.id as typeof activeTab, (tab as { onSelect?: () => void }).onSelect))}
+                  className={`h-full px-4 font-semibold text-sm transition-colors border-b-2 whitespace-nowrap flex items-center gap-2 ${activeTab === tab.id ? "border-red-600 text-white" : "border-transparent text-zinc-500 hover:text-zinc-300"}`}
+                >
+                  {tab.icon}
+                  {tab.label}
+                  {tab.badge && (
+                    <span className="relative flex h-2 w-2 ml-1">
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-500 opacity-75"></span>
+                      <span className="relative inline-flex rounded-full h-2 w-2 bg-red-500"></span>
+                    </span>
+                  )}
+                </button>
+              ))}
+              {auth.user && (
+                <button
+                  {...makeTap(() => selectMainTab("wallet", () => { void fetchMyBets(true); }))}
+                  className={`h-full px-4 font-semibold text-sm transition-colors border-b-2 whitespace-nowrap flex items-center gap-2 ${activeTab === "wallet" ? "border-red-600 text-white" : "border-transparent text-zinc-500 hover:text-zinc-300"}`}
+                >
+                  <Wallet size={15} />
+                  CARTEIRA
+                </button>
+              )}
             </div>
           </div>
 
@@ -16217,8 +16014,8 @@ export default function Home({
           </div>
         </div>
 
-        {/* TABS */}
-        <div className="px-4 max-w-[1600px] mx-auto flex gap-6 overflow-x-auto no-scrollbar">
+        {/* TABS — hidden on desktop (shown inline in header above) */}
+        <div className="lg:hidden px-4 max-w-[1600px] mx-auto flex gap-6 overflow-x-auto no-scrollbar">
           {[
             { id: "sports", icon: <Trophy size={16} />, label: "ESPORTES" },
             {
@@ -16308,7 +16105,7 @@ export default function Home({
               animate={{ x: 0 }}
               exit={{ x: "-100%" }}
               transition={{ type: "spring", bounce: 0, duration: 0.4 }}
-              className="fixed top-0 left-0 bottom-0 w-72 bg-zinc-950 border-r border-zinc-800 z-50 flex flex-col lg:hidden"
+              className="fixed top-0 left-0 bottom-0 w-72 bg-background border-r border-zinc-800/60 z-50 flex flex-col lg:hidden"
             >
               <div className="flex items-center justify-between p-4 border-b border-zinc-800">
                 <div className="font-black text-xl tracking-tighter italic">
@@ -16347,7 +16144,7 @@ export default function Home({
       {/* MAIN — 3-column desktop layout */}
       <div className="flex-1 flex max-w-[1600px] w-full mx-auto">
         {/* DESKTOP LEFT SIDEBAR — always visible on lg+ */}
-        <aside className="hidden lg:flex flex-col w-56 shrink-0 border-r border-zinc-900 bg-zinc-950 sticky top-16 h-[calc(100vh-4rem)] overflow-y-auto">
+        <aside className="hidden lg:flex flex-col w-56 shrink-0 border-r border-zinc-800/60 bg-background sticky top-16 h-[calc(100vh-4rem)] overflow-y-auto">
           <div className="p-3">
             <SidebarTreeContent
               selectedSport={selectedSport}
@@ -16368,52 +16165,7 @@ export default function Home({
         </aside>
 
         <main className="flex-1 pb-32 lg:pb-8 overflow-x-clip min-w-0">
-          {/* ── Copa do Mundo inline panel ────────────────────────────────── */}
-          {showWCPanel && (
-            <Suspense
-              fallback={
-                <div className="flex items-center justify-center h-64">
-                  <div className="w-7 h-7 border-2 border-zinc-800 border-t-red-500 rounded-full animate-spin" />
-                </div>
-              }
-            >
-              <LazyWorldCupPage
-                onClose={() => setShowWCPanel(false)}
-                onBet={(bet) => {
-                  setBets((prev) => {
-                    const idx = prev.findIndex(
-                      (b) =>
-                        b.matchId === bet.matchId &&
-                        b.market === bet.market &&
-                        b.selection === bet.selection,
-                    );
-                    if (idx !== -1) return prev.filter((_, i) => i !== idx);
-                    return [
-                      ...prev,
-                      {
-                        matchId: bet.matchId,
-                        matchTitle: `${bet.home} vs ${bet.away}`,
-                        league: "Copa do Mundo 2026",
-                        country: "Internacional",
-                        sport: bet.sport,
-                        date: "",
-                        time: "",
-                        selection: bet.selection,
-                        odd: bet.odd,
-                        market: bet.market,
-                        label: bet.label,
-                      },
-                    ];
-                  });
-                }}
-              />
-            </Suspense>
-          )}
-
-          <div
-            className="p-4 lg:p-8"
-            style={showWCPanel ? { display: "none" } : undefined}
-          >
+          <div className="p-4 lg:p-8">
             {/* Inline market detail view — replaces match list when a match is expanded */}
             {expandedMatch && (
               <div className="animate-in fade-in slide-in-from-bottom-4 duration-300">
@@ -16437,7 +16189,7 @@ export default function Home({
                 </button>
 
                 {/* Match header */}
-                <div className="relative overflow-hidden rounded-[28px] border border-zinc-200 bg-white shadow-[0_12px_30px_rgba(0,0,0,0.08)] mb-3">
+                <div className="relative overflow-hidden rounded-[28px] border border-zinc-800/60 bg-zinc-900 shadow-[0_4px_20px_rgba(0,0,0,0.4)] mb-3">
                   <div className="absolute top-0 left-0 right-0 h-[3px] bg-gradient-to-r from-yellow-400 via-orange-500 to-red-600" />
                   <div className="px-4 pt-4 pb-3">
                     <div className="flex items-center justify-between gap-3 mb-4">
@@ -16455,12 +16207,12 @@ export default function Home({
                       </div>
                       <div className="flex items-center gap-2 shrink-0">
                         {expandedMatch.isLive && (
-                          <div className="flex items-center gap-1.5 rounded-full bg-red-50 border border-red-200 px-2.5 py-1">
+                          <div className="flex items-center gap-1.5 rounded-full bg-red-900/30 border border-red-800/60 px-2.5 py-1">
                             <span className="relative flex h-1.5 w-1.5">
                               <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-500 opacity-75" />
                               <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-red-500" />
                             </span>
-                            <span className="text-[10px] font-black text-red-500">
+                            <span className="text-[10px] font-black text-red-400">
                               {(() => {
                                 const m = getDisplayMinute(expandedMatch);
                                 const isFootball =
@@ -16470,7 +16222,7 @@ export default function Home({
                                   ? getFootballPhaseTag(expandedMatch, m)
                                   : null;
                                 if (m <= 0) return "AO VIVO";
-                                if (tag === "HT") return "AO VIVO HT";
+                                if (tag === "HT") return "HT";
                                 if (tag && isFootball)
                                   return `${tag} · ${getFootballClockLabel(expandedMatch, m)}`;
                                 if (tag) return `${m}' · ${tag}`;
@@ -16480,38 +16232,12 @@ export default function Home({
                           </div>
                         )}
                         <button
-                          onClick={() =>
-                            setMatchViewTab(
-                              matchViewTab === "markets" ? "stats" : "markets",
-                            )
-                          }
-                          className={`flex items-center gap-1 px-2.5 py-1.5 rounded-xl border text-[11px] font-black transition-all ${
-                            matchViewTab !== "markets"
-                              ? "border-blue-200 bg-blue-50 text-blue-600"
-                              : "border-zinc-200 bg-zinc-50 text-zinc-500 hover:bg-zinc-100"
-                          }`}
-                          title="Estatísticas"
+                          onClick={() => setMatchViewTab(matchViewTab === "stats" ? "markets" : "stats")}
+                          className={`flex items-center gap-1 px-2.5 py-1 rounded-full border text-[10px] font-black transition-all ${matchViewTab === "stats" ? "bg-blue-900/40 border-blue-700/60 text-blue-300" : "bg-zinc-800/60 border-zinc-700/60 text-zinc-400 hover:text-white hover:border-zinc-600"}`}
                         >
-                          <BarChart2 size={12} />
-                          <span className="hidden sm:inline">Stats</span>
+                          <BarChart2 size={11} />
+                          Stats
                         </button>
-                        {expandedMatch.isLive && (
-                          <button
-                            onClick={() =>
-                              setMatchViewTab(
-                                matchViewTab === "live" ? "markets" : "live",
-                              )
-                            }
-                            className={`flex items-center gap-1 px-2.5 py-1.5 rounded-xl border text-[11px] font-black transition-all ${
-                              matchViewTab === "live"
-                                ? "border-red-200 bg-red-50 text-red-600"
-                                : "border-zinc-200 bg-zinc-50 text-zinc-500 hover:bg-zinc-100"
-                            }`}
-                            title="Visualização Ao Vivo"
-                          >
-                            <Activity size={12} />
-                          </button>
-                        )}
                       </div>
                     </div>
 
@@ -16540,13 +16266,13 @@ export default function Home({
                         return (
                           <>
                             <div className="flex-1 min-w-0 text-right">
-                              <span className="block text-[16px] font-black text-zinc-900 leading-tight px-1">
+                              <span className="block text-[16px] font-black text-white leading-tight px-1">
                                 {teamNamePt(expandedMatch.home)}
                               </span>
                             </div>
 
                             <div className="min-w-[108px] flex flex-col items-center">
-                              <span className="text-[28px] font-black text-zinc-900 tabular-nums">
+                              <span className="text-[28px] font-black text-white tabular-nums">
                                 {gamesHome}
                                 <span className="text-zinc-400 mx-1.5">-</span>
                                 {gamesAway}
@@ -16557,7 +16283,7 @@ export default function Home({
                                     <span className="text-zinc-500 uppercase tracking-wide">
                                       Sets
                                     </span>
-                                    <span className="text-zinc-900 tabular-nums">
+                                    <span className="text-white tabular-nums">
                                       {setsHome}-{setsAway}
                                     </span>
                                   </div>
@@ -16565,33 +16291,17 @@ export default function Home({
                                     <span className="text-zinc-500 uppercase tracking-wide">
                                       PTS
                                     </span>
-                                    <span className="text-zinc-900 tabular-nums">
+                                    <span className="text-white tabular-nums">
                                       {ptsHome}-{ptsAway}
                                     </span>
                                   </div>
                                 </div>
                               ) : expandedMatch.isLive ? (
-                                <span className="mt-1 text-[12px] font-semibold text-zinc-500">
-                                  {(() => {
-                                    const m = getDisplayMinute(expandedMatch);
-                                    const isFootball =
-                                      !expandedMatch.sport ||
-                                      expandedMatch.sport === "football";
-                                    const tag = isFootball
-                                      ? getFootballPhaseTag(expandedMatch, m)
-                                      : null;
-                                    if (m <= 0) return "AO VIVO";
-                                    if (tag === "HT") return "HT";
-                                    if (tag && isFootball)
-                                      return `${tag} · ${getFootballClockLabel(expandedMatch, m)}`;
-                                    if (tag) return `${m}' · ${tag}`;
-                                    return `${m}'`;
-                                  })()}
-                                </span>
+                                null
                               ) : (
                                 <>
                                   {expandedMatch.time && (
-                                    <span className="mt-1 text-[22px] font-black text-zinc-900">
+                                    <span className="mt-1 text-[22px] font-black text-white">
                                       {expandedMatch.time}
                                     </span>
                                   )}
@@ -16608,7 +16318,7 @@ export default function Home({
                             </div>
 
                             <div className="flex-1 min-w-0 text-left">
-                              <span className="block text-[16px] font-black text-zinc-900 leading-tight px-1">
+                              <span className="block text-[16px] font-black text-white leading-tight px-1">
                                 {teamNamePt(expandedMatch.away)}
                               </span>
                             </div>
@@ -16617,513 +16327,32 @@ export default function Home({
                       })()}
                     </div>
 
-                    {matchViewTab !== "markets" && (
-                      <div className="flex gap-2 overflow-x-auto no-scrollbar pt-1">
-                        {(() => {
-                          const tabLabel = (tab: string) => {
-                            if (tab === "stats") return "Estatísticas";
-                            if (tab === "confrontos") return "⚔️ H2H";
-                            if (tab === "standings") return "Classificação";
-                            if (tab === "yesterday") return "📅 Ontem";
-                            if (tab === "ranking") return "Ranking";
-                            if (tab === "liga") return "⭐ Liga";
-                            if (tab === "odds") return "📊 Mercados";
-                            if (tab === "lineups") return "👥 Escalação";
-                            return "⚡ Ao Vivo";
-                          };
-                          const tabs: string[] =
-                            expandedMatch.sport === "tennis"
-                              ? expandedMatch.isLive
-                                ? [
-                                    "stats",
-                                    "confrontos",
-                                    "yesterday",
-                                    "ranking",
-                                    "live",
-                                  ]
-                                : [
-                                    "stats",
-                                    "confrontos",
-                                    "yesterday",
-                                    "ranking",
-                                  ]
-                              : expandedMatch.sport === "hockey"
-                                ? expandedMatch.isLive
-                                  ? [
-                                      "stats",
-                                      "confrontos",
-                                      "standings",
-                                      "yesterday",
-                                      "live",
-                                    ]
-                                  : [
-                                      "stats",
-                                      "confrontos",
-                                      "standings",
-                                      "yesterday",
-                                    ]
-                                : expandedMatch.sport === "basketball"
-                                  ? expandedMatch.isLive
-                                    ? [
-                                        "stats",
-                                        "confrontos",
-                                        "standings",
-                                        "yesterday",
-                                        "live",
-                                      ]
-                                    : [
-                                        "stats",
-                                        "confrontos",
-                                        "standings",
-                                        "yesterday",
-                                      ]
-                                  : expandedMatch.sport === "baseball"
-                                    ? expandedMatch.isLive
-                                      ? [
-                                          "stats",
-                                          "confrontos",
-                                          "standings",
-                                          "yesterday",
-                                          "liga",
-                                          "live",
-                                        ]
-                                      : [
-                                          "stats",
-                                          "confrontos",
-                                          "standings",
-                                          "yesterday",
-                                          "liga",
-                                        ]
-                                    : expandedMatch.sport === "volleyball"
-                                      ? expandedMatch.isLive
-                                        ? [
-                                            "stats",
-                                            "confrontos",
-                                            "standings",
-                                            "live",
-                                          ]
-                                        : ["stats", "confrontos", "standings"]
-                                      : expandedMatch.isLive
-                                        ? [
-                                            "stats",
-                                            "confrontos",
-                                            "standings",
-                                            "odds",
-                                            "lineups",
-                                            "live",
-                                          ]
-                                        : [
-                                            "stats",
-                                            "confrontos",
-                                            "standings",
-                                            "odds",
-                                            "lineups",
-                                          ];
-                          const orderedTabs = expandedMatch.isLive
-                            ? ["live", ...tabs.filter((t) => t !== "live")]
-                            : tabs;
-                          return orderedTabs.map((tab) => (
-                            <button
-                              key={tab}
-                              onClick={() =>
-                                setMatchViewTab(tab as typeof matchViewTab)
-                              }
-                              className={`shrink-0 px-3 py-2 rounded-xl border text-[11px] font-black whitespace-nowrap transition-all ${
-                                matchViewTab === tab
-                                  ? tab === "live"
-                                    ? "bg-red-50 border-red-200 text-red-600"
-                                    : "bg-blue-50 border-blue-200 text-blue-600"
-                                  : "bg-zinc-50 border-zinc-200 text-zinc-500 hover:bg-zinc-100"
-                              }`}
-                            >
-                              {tabLabel(tab)}
-                            </button>
-                          ));
-                        })()}
-                      </div>
-                    )}
                   </div>
                 </div>
 
                 {/* Stats panel */}
                 {matchViewTab === "stats" && (
-                  <div className="bg-zinc-900 rounded-xl border border-zinc-800 p-4 mb-2 animate-in fade-in duration-200">
-                    {((expandedMatch.sport ?? "football") === "football" &&
-                      matchStatsLoading &&
-                      !matchStats &&
-                      !(v2StatsGroups && v2StatsGroups.length > 0)) ||
-                    ((expandedMatch.sport ?? "football") !== "football" &&
-                      v2StatsLoading &&
-                      !(v2StatsGroups && v2StatsGroups.length > 0)) ? (
-                      <div className="flex items-center justify-center py-12">
-                        <Loader2
-                          className="animate-spin text-blue-400"
-                          size={28}
-                        />
-                      </div>
-                    ) : (expandedMatch.sport ?? "football") === "football" &&
-                      !matchStats &&
-                      !(v2StatsGroups && v2StatsGroups.length > 0) ? (
-                      <div className="text-center text-zinc-500 py-8 text-sm">
-                        Estatísticas indisponíveis para este jogo.
-                      </div>
-                    ) : (
-                      <div className="space-y-4">
-                        <div className="flex items-start justify-between gap-3">
-                          <div>
-                            <div className="text-[10px] font-black text-red-500 uppercase tracking-widest">
-                              Centro de Estatísticas
-                            </div>
-                            <div className="text-xs text-zinc-500 mt-1">
-                              {expandedMatch.sport === "football"
-                                ? "V2 (oficial) + análise"
-                                : "V2 (oficial) separado por esporte e liga"}
-                            </div>
-                          </div>
-                          <div className="text-right min-w-0">
-                            <div className="text-[10px] font-bold text-zinc-300 truncate">
-                              {expandedMatch.league}
-                            </div>
-                            <div className="text-[10px] text-zinc-600 truncate">
-                              {expandedMatch.country ?? ""}
-                            </div>
-                          </div>
-                        </div>
-
-                        {expandedMatch.sport === "football" ? (
-                          <>
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                              <div className="bg-zinc-950/60 rounded-lg border border-zinc-800 p-4">
-                                <div className="flex items-center justify-between mb-3">
-                                  <div className="text-[10px] font-black text-red-500 uppercase tracking-widest">
-                                    Probabilidade
-                                  </div>
-                                  <div className="text-[10px] text-zinc-600">
-                                    Odds → %
-                                  </div>
-                                </div>
-                                <div className="space-y-2.5 mb-4">
-                                  {[
-                                    {
-                                      label: expandedMatch.home,
-                                      pct: matchStats!.winProb.home,
-                                      color: "bg-blue-500",
-                                    },
-                                    {
-                                      label: "Empate",
-                                      pct: matchStats!.winProb.draw,
-                                      color: "bg-yellow-400",
-                                    },
-                                    {
-                                      label: expandedMatch.away,
-                                      pct: matchStats!.winProb.away,
-                                      color: "bg-red-500",
-                                    },
-                                  ].map((row) => (
-                                    <div key={row.label}>
-                                      <div className="flex justify-between text-xs mb-1">
-                                        <span className="text-zinc-300 truncate max-w-[140px]">
-                                          {row.label}
-                                        </span>
-                                        <span className="font-bold text-white shrink-0">
-                                          {row.pct}%
-                                        </span>
-                                      </div>
-                                      <div className="h-2 bg-zinc-800 rounded-full overflow-hidden">
-                                        <motion.div
-                                          initial={{ width: 0 }}
-                                          animate={{ width: `${row.pct}%` }}
-                                          transition={{
-                                            duration: 0.7,
-                                            ease: "easeOut",
-                                          }}
-                                          className={`h-full rounded-full ${row.color}`}
-                                        />
-                                      </div>
-                                    </div>
-                                  ))}
-                                </div>
-                                <div className="grid grid-cols-3 gap-1 pt-3 border-t border-zinc-800 text-center">
-                                  <div>
-                                    <div className="text-xl font-black text-blue-400">
-                                      {confrontosData?.homeWins ??
-                                        matchStats!.h2h.homeWins}
-                                    </div>
-                                    <div className="text-[10px] text-zinc-500">
-                                      Vitórias
-                                    </div>
-                                  </div>
-                                  <div>
-                                    <div className="text-xl font-black text-yellow-400">
-                                      {confrontosData?.draws ??
-                                        matchStats!.h2h.draws}
-                                    </div>
-                                    <div className="text-[10px] text-zinc-500">
-                                      Empates
-                                    </div>
-                                  </div>
-                                  <div>
-                                    <div className="text-xl font-black text-red-400">
-                                      {confrontosData?.awayWins ??
-                                        matchStats!.h2h.awayWins}
-                                    </div>
-                                    <div className="text-[10px] text-zinc-500">
-                                      Derrotas
-                                    </div>
-                                  </div>
-                                </div>
-                              </div>
-
-                              <div className="bg-zinc-950/60 rounded-lg border border-zinc-800 p-4">
-                                <div className="flex items-center justify-between mb-3">
-                                  <div className="text-[10px] font-black text-red-500 uppercase tracking-widest">
-                                    Médias
-                                  </div>
-                                  <button
-                                    onClick={() =>
-                                      setMatchViewTab("confrontos")
-                                    }
-                                    className="text-[10px] font-bold text-blue-400 hover:text-blue-300"
-                                  >
-                                    Ver H2H
-                                  </button>
-                                </div>
-                                <div className="grid grid-cols-2 gap-y-3 gap-x-4">
-                                  {[
-                                    {
-                                      label: "Golos Marcados",
-                                      val: matchStats!.avgStats.goalsScored.toFixed(
-                                        2,
-                                      ),
-                                      sub: `Liga: ${matchStats!.avgStats.leagueGoals.toFixed(2)}`,
-                                    },
-                                    {
-                                      label: "AEM",
-                                      val: `${matchStats!.avgStats.btts}%`,
-                                      sub: `Liga: ${matchStats!.avgStats.leagueBtts}%`,
-                                    },
-                                    {
-                                      label: "Mais de 1.5",
-                                      val: `${matchStats!.avgStats.over15}%`,
-                                      sub: `Liga: ${matchStats!.avgStats.leagueOver15}%`,
-                                    },
-                                    {
-                                      label: "Mais de 2.5",
-                                      val: `${matchStats!.avgStats.over25}%`,
-                                      sub: `Liga: ${matchStats!.avgStats.leagueOver25}%`,
-                                    },
-                                    {
-                                      label: "Cartões",
-                                      val: matchStats!.avgStats.cards.toFixed(
-                                        2,
-                                      ),
-                                      sub: "",
-                                    },
-                                    {
-                                      label: "Cantos",
-                                      val: matchStats!.avgStats.corners.toFixed(
-                                        2,
-                                      ),
-                                      sub: "",
-                                    },
-                                  ].map((s) => (
-                                    <div key={s.label}>
-                                      <div className="text-[11px] text-zinc-400">
-                                        {s.label}
-                                      </div>
-                                      <div className="font-black text-white text-lg leading-tight">
-                                        {s.val}
-                                      </div>
-                                      {s.sub && (
-                                        <div className="text-[10px] text-zinc-600">
-                                          {s.sub}
-                                        </div>
-                                      )}
-                                    </div>
-                                  ))}
-                                </div>
-                              </div>
-                            </div>
-
-                            {matchStats!.formIsReal ? (
-                              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                                {[
-                                  {
-                                    title: `Últimos Jogos — ${expandedMatch.home}`,
-                                    form: matchStats!.homeForm,
-                                  },
-                                  {
-                                    title: `Últimos Jogos — ${expandedMatch.away}`,
-                                    form: matchStats!.awayForm,
-                                  },
-                                ].map((block) => (
-                                  <div
-                                    key={block.title}
-                                    className="bg-zinc-950/60 rounded-lg border border-zinc-800 p-4"
-                                  >
-                                    <div className="text-[10px] font-black text-red-500 uppercase tracking-widest mb-3">
-                                      {block.title}
-                                    </div>
-                                    <div className="space-y-2">
-                                      {block.form.map((f, i) => (
-                                        <div
-                                          key={i}
-                                          className="flex items-center gap-3"
-                                        >
-                                          <span
-                                            className={`w-5 h-5 rounded text-[11px] font-black flex items-center justify-center shrink-0 ${f.result === "W" ? "bg-green-600 text-white" : f.result === "D" ? "bg-yellow-500 text-black" : "bg-red-600 text-white"}`}
-                                          >
-                                            {f.result}
-                                          </span>
-                                          <span className="font-mono text-sm font-bold text-white shrink-0">
-                                            {f.score}
-                                          </span>
-                                          <span className="text-xs text-zinc-400 truncate">
-                                            {f.home ? "vs" : "@"} {f.opponent}
-                                          </span>
-                                        </div>
-                                      ))}
-                                    </div>
-                                  </div>
-                                ))}
-                              </div>
-                            ) : (
-                              <div className="bg-zinc-950/60 rounded-lg border border-zinc-800 p-5 text-center">
-                                <div className="text-zinc-600 text-2xl mb-2">
-                                  📋
-                                </div>
-                                <div className="text-zinc-500 text-sm font-medium">
-                                  Histórico de jogos não disponível
-                                </div>
-                                <div className="text-zinc-600 text-xs mt-1">
-                                  Dados de forma indisponíveis para este jogo
-                                </div>
-                              </div>
-                            )}
-                          </>
-                        ) : (
-                          <div className="bg-zinc-950/60 rounded-lg border border-zinc-800 p-4">
-                            <div className="flex items-center justify-between gap-3">
-                              <div>
-                                <div className="text-[10px] font-black text-red-500 uppercase tracking-widest">
-                                  Modo por Esporte
-                                </div>
-                                <div className="text-xs text-zinc-500 mt-1">
-                                  Esta aba mostra apenas dados oficiais do
-                                  evento e da liga atual para{" "}
-                                  {{
-                                    football: "Futebol",
-                                    basketball: "Basquete",
-                                    tennis: "Ténis",
-                                    hockey: "Hóquei no Gelo",
-                                    baseball: "Beisebol",
-                                    volleyball: "Voleibol",
-                                  }[expandedMatch.sport ?? "football"] ??
-                                    expandedMatch.sport}
-                                  .
-                                </div>
-                              </div>
-                              <button
-                                onClick={() => setMatchViewTab("confrontos")}
-                                className="text-[10px] font-bold text-blue-400 hover:text-blue-300 shrink-0"
-                              >
-                                Ver H2H
-                              </button>
-                            </div>
-                          </div>
-                        )}
-
-                        <div className="bg-zinc-950/60 rounded-lg border border-zinc-800 p-4">
-                          <div className="flex items-center justify-between mb-3 gap-2">
-                            <div className="text-[10px] font-black text-red-500 uppercase tracking-widest">
-                              Estatísticas do Jogo
-                            </div>
-                            <div className="flex items-center gap-2 shrink-0">
-                              {v2StatsLoading ? (
-                                <Loader2
-                                  className="animate-spin text-blue-400"
-                                  size={14}
-                                />
-                              ) : (
-                                <div className="text-[10px] text-zinc-600">
-                                  {v2StatsGroups
-                                    ? `${v2StatsGroups.length} grupos`
-                                    : "—"}
-                                </div>
-                              )}
-                              {v2StatsGroups && v2StatsGroups.length > 3 && (
-                                <button
-                                  onClick={() => setShowAllV2Stats((v) => !v)}
-                                  className="text-[10px] font-bold text-blue-400 hover:text-blue-300"
-                                >
-                                  {showAllV2Stats ? "Ver menos" : "Ver mais"}
-                                </button>
-                              )}
-                            </div>
-                          </div>
-                          {v2StatsLoading ? (
-                            <div className="flex items-center justify-center py-10">
-                              <Loader2
-                                className="animate-spin text-blue-400"
-                                size={22}
-                              />
-                            </div>
-                          ) : v2StatsGroups && v2StatsGroups.length > 0 ? (
-                            <div className="space-y-3">
-                              {(showAllV2Stats
-                                ? v2StatsGroups
-                                : v2StatsGroups.slice(0, 3)
-                              ).map((g) => (
-                                <div
-                                  key={g.title}
-                                  className="border border-zinc-800 rounded-lg overflow-hidden"
-                                >
-                                  <div className="bg-zinc-900/50 px-3 py-2 text-[10px] font-black text-zinc-300">
-                                    {g.title}
-                                  </div>
-                                  <div className="divide-y divide-zinc-800">
-                                    {g.rows.map((r) => (
-                                      <div
-                                        key={r.name}
-                                        className="grid grid-cols-[1fr_auto_auto] gap-2 px-3 py-2 text-xs"
-                                      >
-                                        <span className="text-zinc-400 truncate">
-                                          {r.name}
-                                        </span>
-                                        <span className="text-blue-400 font-bold tabular-nums">
-                                          {r.home || "-"}
-                                        </span>
-                                        <span className="text-red-400 font-bold tabular-nums">
-                                          {r.away || "-"}
-                                        </span>
-                                      </div>
-                                    ))}
-                                  </div>
-                                </div>
-                              ))}
-                            </div>
-                          ) : (
-                            <div className="text-center text-zinc-500 text-sm py-8">
-                              Estatísticas indisponíveis
-                            </div>
-                          )}
-                          {expandedMatch.isLive && (
-                            <div className="mt-3 pt-3 border-t border-zinc-800 flex items-center justify-between">
-                              <div className="text-[10px] text-zinc-600">
-                                Para estatísticas ao vivo (posse, remates, etc.)
-                              </div>
-                              <button
-                                onClick={() => setMatchViewTab("live")}
-                                className="text-[10px] font-bold text-red-400 hover:text-red-300"
-                              >
-                                Abrir Ao Vivo
-                              </button>
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    )}
-                  </div>
+                  <MatchStatsPanel
+                    homeTeam={expandedMatch.home}
+                    awayTeam={expandedMatch.away}
+                    league={expandedMatch.league ?? ""}
+                    sport={expandedMatch.sport ?? "football"}
+                    isLive={expandedMatch.isLive}
+                    liveMinute={expandedMatch.isLive ? (expandedMatch as any)._liveExtra?.minute ?? (expandedMatch as any).minute ?? undefined : undefined}
+                    isHalfTime={expandedMatch.isLive ? (expandedMatch as any)._liveExtra?.status === "HT" || (expandedMatch as any).status === "HT" || (expandedMatch as any).status === "Halftime" : false}
+                    matchStats={matchStats}
+                    matchStatsLoading={matchStatsLoading}
+                    v2StatsGroups={v2StatsGroups}
+                    v2StatsLoading={v2StatsLoading}
+                    confrontosData={confrontosData}
+                    onGoH2H={() => setMatchViewTab("confrontos")}
+                    onGoLive={() => setMatchViewTab("live")}
+                    onAddInsight={(market, odds) => {
+                      if (!expandedMatch) return;
+                      toggleBet(expandedMatch, market, odds, "insight", market);
+                      if (window.innerWidth < 1024) setBetSlipOpenMobile(true);
+                    }}
+                  />
                 )}
 
                 {/* Standings panel */}
@@ -20064,16 +19293,7 @@ export default function Home({
                         return !hockeyAsMatches.some(
                           (h) => h.home === m.home && h.away === m.away,
                         );
-                      // Football — exclude World Cup matches (dedicated Copa do Mundo page)
-                      const lg = (m.league ?? "").toLowerCase();
-                      const isWC =
-                        lg.includes("world cup") ||
-                        lg.includes("fifa world") ||
-                        lg.includes("mundial 2026") ||
-                        lg.includes("wc 2026") ||
-                        lg.includes("copa do mundo") ||
-                        lg.includes("copa mundial");
-                      return !isWC;
+                      return true;
                     }),
                   ];
                   // Filter by country across all sports, preferring the explicit match country.
@@ -20097,6 +19317,10 @@ export default function Home({
                   if (!selectedLeague) return combined;
                   // ML-aware filter: matches major-league label (from chips) OR legacy flexible matching (from sidebar)
                   const _mlPats: Array<{ p: string[]; label: string }> = [
+                    {
+                      p: ["world cup", "copa do mundo", "mundial 2026", "wc 2026", "fifa world cup", "copa mundial"],
+                      label: "Copa do Mundo 2026",
+                    },
                     {
                       p: [
                         "champions league",
@@ -20229,16 +19453,19 @@ export default function Home({
                 // Sport grouping for display
                 const SPORT_GROUPS = [
                   { key: "football", emoji: "⚽", label: "Futebol" },
+                  { key: "wc2026", emoji: "🏆", label: "Copa do Mundo" },
                   { key: "tennis", emoji: "🎾", label: "Ténis" },
                   { key: "basketball", emoji: "🏀", label: "Basquete" },
                   { key: "hockey", emoji: "🏒", label: "Hóquei" },
                   { key: "volleyball", emoji: "🏐", label: "Voleibol" },
-                ] as const;
+                ];
                 const sportGroups = SPORT_GROUPS.map((g) => ({
                   ...g,
-                  matches: listUpcoming.filter(
-                    (m) => (m.sport ?? "football") === g.key,
-                  ),
+                  matches: listUpcoming.filter((m) => {
+                    if (g.key === "wc2026") return isWCMatch(m.league);
+                    if (g.key === "football") return (m.sport ?? "football") === "football" && !isWCMatch(m.league);
+                    return (m.sport ?? "football") === g.key;
+                  }),
                 })).filter((g) => g.matches.length > 0);
 
                 // Derive tournament display label from raw API name
@@ -20725,13 +19952,6 @@ export default function Home({
                         );
                       })()}
 
-                    {!selectedLeague &&
-                      (selectedSport === "all" ||
-                        selectedSport === "football") && (
-                        <AnimatedCopaBanner
-                          onOpen={() => setShowWCPanel(true)}
-                        />
-                      )}
 
                     {featuredUpcoming.length > 0 && (
                       <div className="mb-5 space-y-2">
@@ -24077,7 +23297,7 @@ export default function Home({
             {/* Top bar */}
             <div
               className="flex items-center justify-between px-4 py-2.5 border-b border-zinc-800/80 shrink-0"
-              style={{ background: "#0a0a0a" }}
+              style={{ background: "#09090b" }}
             >
               <button
                 {...makeTap(() => setBetSlipOpenMobile(false))}
@@ -24124,7 +23344,7 @@ export default function Home({
             {/* Tabs */}
             <div
               className="flex border-b border-zinc-800 shrink-0"
-              style={{ background: "#0a0a0a" }}
+              style={{ background: "#09090b" }}
             >
               <button
                 {...makeTap(() => {
@@ -24329,7 +23549,7 @@ export default function Home({
               className="px-4 pt-3 shrink-0 border-t border-zinc-800"
               style={{
                 paddingBottom: "max(1rem, env(safe-area-inset-bottom, 1rem))",
-                background: "#0a0a0a",
+                background: "#09090b",
               }}
             >
               {renderBetFundingToggle()}
@@ -24799,7 +24019,7 @@ export default function Home({
               animate={{ scale: 1, y: 0 }}
               exit={{ scale: 0.85, y: 40 }}
               className="relative overflow-hidden rounded-3xl max-w-md w-full border border-white/15 shadow-2xl"
-              onClick={(e: React.MouseEvent) => e.stopPropagation()}
+              onClick={(e) => e.stopPropagation()}
             >
               {promoNotif.type === "freebets10" && (
                 <>
@@ -25040,7 +24260,7 @@ export default function Home({
                 background:
                   "linear-gradient(135deg, #0a2a0a 0%, #052010 50%, #0a1a0a 100%)",
               }}
-              onClick={(e: React.MouseEvent) => e.stopPropagation()}
+              onClick={(e) => e.stopPropagation()}
             >
               <div
                 className="absolute inset-0 opacity-20"
