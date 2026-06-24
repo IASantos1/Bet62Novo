@@ -2667,6 +2667,30 @@ type Match = {
     htScore?: [number, number];
     cornersTotal?: number;
     cardsTotal?: number;
+    // V5 API extended stats
+    possessionHome?: string;
+    possessionAway?: string;
+    shotsOnTargetHome?: number;
+    shotsOnTargetAway?: number;
+    shotsOffTargetHome?: number;
+    shotsOffTargetAway?: number;
+    cornersHome?: number;
+    cornersAway?: number;
+    savesHome?: number;
+    savesAway?: number;
+    attacksHome?: number;
+    attacksAway?: number;
+    dangerousAttacksHome?: number;
+    dangerousAttacksAway?: number;
+    xGHome?: string;
+    xGAway?: string;
+    keyPassesHome?: number;
+    keyPassesAway?: number;
+    passingAccuracyHome?: string;
+    passingAccuracyAway?: string;
+    crossesHome?: number;
+    crossesAway?: number;
+    rawStats?: Record<string, { home?: string | number; away?: string | number }>;
   };
   // Red cards per team (football only)
   redCardsHome?: number;

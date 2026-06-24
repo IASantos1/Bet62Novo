@@ -62,6 +62,145 @@ const sapiHeaders = (): Record<string, string> => ({
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
+// V5 Types
+type V5Odds1x2 = {
+  home: number;
+  draw: number;
+  away: number;
+};
+
+type V5PeriodScore = {
+  period: number;
+  name: string;
+  home: number;
+  away: number;
+};
+
+type V5LiveStat = {
+  id: number;
+  name: string;
+  home?: string;
+  away?: string;
+};
+
+type V5Market = {
+  type: number;
+  odds: number;
+  param?: number;
+  isMainLine: boolean;
+};
+
+type V5OddsGroup = {
+  id: number;
+  name: string;
+  markets: V5Market[];
+};
+
+type V5LiveEvent = {
+  id: number;
+  sportId: number;
+  leagueId: number;
+  leagueName: string;
+  homeTeam: string;
+  awayTeam: string;
+  homeTeamId?: number;
+  awayTeamId?: number;
+  homeImage?: string;
+  awayImage?: string;
+  startTime: number;
+  startTimeISO: string;
+  isLive: boolean;
+  score: { home: number; away: number };
+  periodScores?: V5PeriodScore[];
+  currentPeriod?: number;
+  currentPeriodName?: string;
+  timerSeconds?: number;
+  timerMinutes?: number;
+  hasVideo?: boolean;
+  videoId?: string | null;
+  marketCount?: number;
+  winProbability?: { P1: number; P2: number; PX: number };
+  venue?: string;
+  round?: string;
+  info?: string;
+  stats?: V5LiveStat[];
+  odds: {
+    "1x2"?: V5Odds1x2;
+    [key: string]: any;
+  };
+  oddsGroups?: V5OddsGroup[];
+};
+
+type V5TopEvent = {
+  id: number;
+  sportId: number;
+  leagueId: number;
+  leagueName: string;
+  homeTeam: string;
+  awayTeam: string;
+  homeTeamId?: number;
+  awayTeamId?: number;
+  homeImage?: string;
+  awayImage?: string;
+  startTime: number;
+  startTimeISO: string;
+  marketCount?: number;
+  odds: {
+    "1x2"?: V5Odds1x2;
+    [key: string]: any;
+  };
+  oddsGroups?: V5OddsGroup[];
+};
+
+type V5EventDetail = {
+  id: number;
+  sportId: number;
+  leagueId: number;
+  leagueName: string;
+  homeTeam: string;
+  awayTeam: string;
+  homeTeamId?: number;
+  awayTeamId?: number;
+  homeImage?: string;
+  awayImage?: string;
+  startTime: number;
+  startTimeISO: string;
+  marketCount: number;
+  winProbability?: {
+    P1: number;
+    P2: number;
+    PX: number;
+  };
+  venue?: string;
+  round?: string;
+  matchInfo?: {
+    round?: string;
+    venue?: string;
+    temperature?: string;
+    weatherDesc?: string;
+    windSpeed?: string;
+    windDirection?: string;
+    pressure?: string;
+    humidity?: string;
+    precipitation?: string;
+  };
+  marketCategories?: Array<{
+    id: number;
+    name: string;
+    count: number;
+  }>;
+  oddsGroups?: V5OddsGroup[];
+  subGames?: any[];
+  odds: {
+    "1x2"?: V5Odds1x2;
+    [key: string]: any;
+  };
+};
+
+type V5Response<T> = {
+  data: T;
+};
+
 type AdvancedMarkets = {
   doubleChance: { homeOrDraw: number; awayOrDraw: number; homeOrAway: number };
   bothTeamsScore: { yes: number; no: number };
@@ -28547,27 +28686,304 @@ async function fetchV5Sports(): Promise<unknown> {
   }
 }
 
-// V5 Example: Get Event Details (including all markets and stats)
-async function fetchV5EventDetails(sport: string, eventId: number): Promise<unknown> {
+// V5: Get Live Leagues Events (with full stats!)
+async function fetchV5LiveLeagues(sportId: number = 1): Promise<V5LiveEvent[] | null> {
   try {
-    const baseUrl = sport === "football" ? SAPI_V5_FOOTBALL
-      : sport === "basketball" ? SAPI_V5_BASKETBALL
-      : sport === "hockey" ? SAPI_V5_HOCKEY
-      : sport === "tennis" ? SAPI_V5_TENNIS
-      : sport === "baseball" ? SAPI_V5_BASEBALL
-      : SAPI_V5_FOOTBALL;
-    const resp = await fetch(`${baseUrl}/api/v1/event/${eventId}`, {
+    // First get all sports to confirm league IDs
+    const sportsResp = await fetch(`${SAPI_V5_SPORTS}/api/v1/sports`, {
       headers: sapiHeaders(),
-      signal: AbortSignal.timeout(15_000),
+      signal: AbortSignal.timeout(10_000),
     });
-    if (!resp.ok) return null;
-    return await resp.json();
+    let allEvents: V5LiveEvent[] = [];
+    if (sportsResp.ok) {
+      const sportsData = (await sportsResp.json()) as V5Response<{ id: number; name: string }[]>;
+      // For simplicity, let's fetch live events with stats via /live/events?sport={sportId}
+      // and then get league stats if needed
+    }
+
+    // Try /live/events?sport={sportId} (worked in our test script)
+    const resp = await fetch(`${SAPI_V5_SPORTS}/api/v1/live/events?sport=${sportId}`, {
+      headers: sapiHeaders(),
+      signal: AbortSignal.timeout(20_000),
+    });
+    if (resp.ok) {
+      const data = (await resp.json()) as V5Response<V5LiveEvent[]>;
+      allEvents = data.data;
+    }
+
+    // Also try /api/v1/live/leagues/{leagueId} for events with full stats
+    // Let's first get top leagues? Or just use the events we have
+    return allEvents;
   } catch {
     return null;
   }
 }
 
+// V5 Example: Get Event Details (including all markets and stats)
+async function fetchV5EventDetails(eventId: number): Promise<V5EventDetail | null> {
+  try {
+    const resp = await fetch(`${SAPI_V5_SPORTS}/api/v1/event/${eventId}`, {
+      headers: sapiHeaders(),
+      signal: AbortSignal.timeout(20_000),
+    });
+    if (!resp.ok) return null;
+    const data = (await resp.json()) as V5Response<V5EventDetail>;
+    return data.data;
+  } catch {
+    return null;
+  }
+}
+
+// V5: Get Live Events (with optional stats)
+async function fetchV5LiveEvents(sportId: number = 1): Promise<V5LiveEvent[] | null> {
+  try {
+    const resp = await fetch(`${SAPI_V5_SPORTS}/api/v1/live/events?sport=${sportId}`, {
+      headers: sapiHeaders(),
+      signal: AbortSignal.timeout(20_000),
+    });
+    if (!resp.ok) return null;
+    const data = (await resp.json()) as V5Response<V5LiveEvent[]>;
+    return data.data;
+  } catch {
+    return null;
+  }
+}
+
+// V5: Get Top (Prematch) Events
+async function fetchV5TopEvents(sportId: number = 1, count: number = 100): Promise<V5TopEvent[] | null> {
+  try {
+    // For football, use /football/top?count=... as it worked
+    if (sportId === 1) {
+      const resp = await fetch(`${SAPI_V5_SPORTS}/api/v1/football/top?count=${count}`, {
+        headers: sapiHeaders(),
+        signal: AbortSignal.timeout(20_000),
+      });
+      if (!resp.ok) return null;
+      const data = (await resp.json()) as V5Response<V5TopEvent[]>;
+      return data.data;
+    } else {
+      // For other sports, maybe a generic endpoint?
+      return null;
+    }
+  } catch {
+    return null;
+  }
+}
+
+// Convert V5 Live Event to Match type
+function mapV5LiveEventToMatch(v5Event: V5LiveEvent) {
+  // Extract all stats from V5 API
+  const extractedStats: Record<string, { home?: string | number; away?: string | number }> = {};
+  let cornersTotal: number | undefined;
+  let cardsTotal: number | undefined;
+  let redCardsHome: number = 0;
+  let redCardsAway: number = 0;
+  let yellowCardsHome: number = 0;
+  let yellowCardsAway: number = 0;
+  let possessionHome: string | undefined;
+  let possessionAway: string | undefined;
+  let shotsOnTargetHome: number | undefined;
+  let shotsOnTargetAway: number | undefined;
+  let shotsOffTargetHome: number | undefined;
+  let shotsOffTargetAway: number | undefined;
+  let cornersHome: number | undefined;
+  let cornersAway: number | undefined;
+  let savesHome: number | undefined;
+  let savesAway: number | undefined;
+  let attacksHome: number | undefined;
+  let attacksAway: number | undefined;
+  let dangerousAttacksHome: number | undefined;
+  let dangerousAttacksAway: number | undefined;
+  let xGHome: string | undefined;
+  let xGAway: string | undefined;
+  let keyPassesHome: number | undefined;
+  let keyPassesAway: number | undefined;
+  let passingAccuracyHome: string | undefined;
+  let passingAccuracyAway: string | undefined;
+  let crossesHome: number | undefined;
+  let crossesAway: number | undefined;
+
+  if (v5Event.stats) {
+    for (const stat of v5Event.stats) {
+      const name = stat.name.toLowerCase();
+      const homeVal = stat.home;
+      const awayVal = stat.away;
+      extractedStats[stat.name] = { home: homeVal, away: awayVal };
+
+      if (name.includes("corner")) {
+        cornersHome = homeVal ? (parseInt(homeVal) || 0) : undefined;
+        cornersAway = awayVal ? (parseInt(awayVal) || 0) : undefined;
+        if (cornersHome !== undefined && cornersAway !== undefined) {
+          cornersTotal = cornersHome + cornersAway;
+        }
+      } else if (name.includes("yellow")) {
+        yellowCardsHome = homeVal ? (parseInt(homeVal) || 0) : 0;
+        yellowCardsAway = awayVal ? (parseInt(awayVal) || 0) : 0;
+        cardsTotal = (cardsTotal || 0) + yellowCardsHome + yellowCardsAway;
+      } else if (name.includes("red")) {
+        redCardsHome = homeVal ? (parseInt(homeVal) || 0) : 0;
+        redCardsAway = awayVal ? (parseInt(awayVal) || 0) : 0;
+        cardsTotal = (cardsTotal || 0) + redCardsHome + redCardsAway;
+      } else if (name.includes("possession")) {
+        possessionHome = homeVal;
+        possessionAway = awayVal;
+      } else if (name.includes("shots on target")) {
+        shotsOnTargetHome = homeVal ? (parseInt(homeVal) || 0) : undefined;
+        shotsOnTargetAway = awayVal ? (parseInt(awayVal) || 0) : undefined;
+      } else if (name.includes("shots off target")) {
+        shotsOffTargetHome = homeVal ? (parseInt(homeVal) || 0) : undefined;
+        shotsOffTargetAway = awayVal ? (parseInt(awayVal) || 0) : undefined;
+      } else if (name.includes("saves")) {
+        savesHome = homeVal ? (parseInt(homeVal) || 0) : undefined;
+        savesAway = awayVal ? (parseInt(awayVal) || 0) : undefined;
+      } else if (name.includes("attacks")) {
+        attacksHome = homeVal ? (parseInt(homeVal) || 0) : undefined;
+        attacksAway = awayVal ? (parseInt(awayVal) || 0) : undefined;
+      } else if (name.includes("dangerous attacks")) {
+        dangerousAttacksHome = homeVal ? (parseInt(homeVal) || 0) : undefined;
+        dangerousAttacksAway = awayVal ? (parseInt(awayVal) || 0) : undefined;
+      } else if (name.includes("xg")) {
+        xGHome = homeVal;
+        xGAway = awayVal;
+      } else if (name.includes("key passes")) {
+        keyPassesHome = homeVal ? (parseInt(homeVal) || 0) : undefined;
+        keyPassesAway = awayVal ? (parseInt(awayVal) || 0) : undefined;
+      } else if (name.includes("passing accuracy")) {
+        passingAccuracyHome = homeVal;
+        passingAccuracyAway = awayVal;
+      } else if (name.includes("crosses")) {
+        crossesHome = homeVal ? (parseInt(homeVal) || 0) : undefined;
+        crossesAway = awayVal ? (parseInt(awayVal) || 0) : undefined;
+      }
+    }
+  }
+
+  // Get HT score from periodScores (if available)
+  let htScore: [number, number] | undefined;
+  let periods: Array<[number, number]> = [];
+  if (v5Event.periodScores) {
+    const firstPeriod = v5Event.periodScores.find(p => p.period === 1 || p.name.toLowerCase().includes("half"));
+    if (firstPeriod) {
+      htScore = [firstPeriod.home, firstPeriod.away];
+    }
+    periods = v5Event.periodScores.map(p => [p.home, p.away]);
+  }
+
+  // Build odds object
+  const odds = v5Event.odds["1x2"] ? {
+    home: v5Event.odds["1x2"].home,
+    draw: v5Event.odds["1x2"].draw,
+    away: v5Event.odds["1x2"].away
+  } : { home: 0, draw: 0, away: 0 };
+
+  return {
+    id: v5Event.id,
+    home: v5Event.homeTeam,
+    away: v5Event.awayTeam,
+    homeTeamId: v5Event.homeTeamId ? String(v5Event.homeTeamId) : undefined,
+    awayTeamId: v5Event.awayTeamId ? String(v5Event.awayTeamId) : undefined,
+    league: v5Event.leagueName,
+    leagueId: String(v5Event.leagueId),
+    sport: v5Event.sportId === 1 ? "football" : (v5Event.sportId === 2 ? "basketball" : "football"),
+    odds: odds,
+    hasRealOdds: true,
+    isLive: v5Event.isLive,
+    homeScore: v5Event.score.home,
+    awayScore: v5Event.score.away,
+    minute: v5Event.timerMinutes,
+    _liveExtra: {
+      clockSec: v5Event.timerSeconds,
+      clockAtMs: Date.now(),
+      htScore: htScore,
+      periods: periods.length > 0 ? periods : undefined,
+      cornersTotal: cornersTotal,
+      cardsTotal: cardsTotal,
+      possessionHome,
+      possessionAway,
+      shotsOnTargetHome,
+      shotsOnTargetAway,
+      shotsOffTargetHome,
+      shotsOffTargetAway,
+      cornersHome,
+      cornersAway,
+      savesHome,
+      savesAway,
+      attacksHome,
+      attacksAway,
+      dangerousAttacksHome,
+      dangerousAttacksAway,
+      xGHome,
+      xGAway,
+      keyPassesHome,
+      keyPassesAway,
+      passingAccuracyHome,
+      passingAccuracyAway,
+      crossesHome,
+      crossesAway,
+      rawStats: extractedStats
+    },
+    redCardsHome: redCardsHome > 0 ? redCardsHome : undefined,
+    redCardsAway: redCardsAway > 0 ? redCardsAway : undefined
+  };
+}
+
+// Convert V5 Top (Prematch) Event to Match type
+function mapV5TopEventToMatch(v5Event: V5TopEvent) {
+  // Build odds object
+  const odds = v5Event.odds["1x2"] ? {
+    home: v5Event.odds["1x2"].home,
+    draw: v5Event.odds["1x2"].draw,
+    away: v5Event.odds["1x2"].away
+  } : { home: 0, draw: 0, away: 0 };
+
+  // Calculate startsIn (minutes from now)
+  const now = Date.now();
+  const startTimeMs = v5Event.startTime * 1000;
+  const startsIn = Math.max(0, Math.floor((startTimeMs - now) / 60000));
+
+  // Format date and time
+  const dateObj = new Date(startTimeMs);
+  const date = dateObj.toLocaleDateString('pt-PT', { day: '2-digit', month: '2-digit', year: 'numeric' }).replace(/\//g, '.');
+  const time = dateObj.toLocaleTimeString('pt-PT', { hour: '2-digit', minute: '2-digit' });
+
+  return {
+    id: v5Event.id,
+    home: v5Event.homeTeam,
+    away: v5Event.awayTeam,
+    homeTeamId: v5Event.homeTeamId ? String(v5Event.homeTeamId) : undefined,
+    awayTeamId: v5Event.awayTeamId ? String(v5Event.awayTeamId) : undefined,
+    league: v5Event.leagueName,
+    leagueId: String(v5Event.leagueId),
+    sport: v5Event.sportId === 1 ? "football" : (v5Event.sportId === 2 ? "basketball" : "football"),
+    odds: odds,
+    hasRealOdds: true,
+    date: date,
+    time: time,
+    startsIn: startsIn,
+    scheduledDate: date,
+    scheduledTime: time
+  };
+}
+
 // Test Routes for V5
+router.get("/v5-test/live-matches/:sportId?", async (req: Request, res: Response) => {
+  try {
+    const sportIdParam = req.params.sportId;
+    const sportId = sportIdParam ? (Array.isArray(sportIdParam) ? parseInt(sportIdParam[0], 10) : parseInt(sportIdParam, 10)) : 1;
+    const v5LiveEvents = await fetchV5LiveEvents(sportId);
+    if (!v5LiveEvents) {
+      res.json([]);
+      return;
+    }
+    const mapped = v5LiveEvents.map(mapV5LiveEventToMatch);
+    res.json(mapped);
+    return;
+  } catch (err) {
+    res.status(500).json({ error: "Failed to fetch live matches from V5" });
+    return;
+  }
+});
+
 router.get("/v5-test/sports", async (_req: Request, res: Response) => {
   try {
     const data = await fetchV5Sports();
@@ -28631,14 +29047,13 @@ router.get("/v5-test/live/:sport", async (req: Request, res: Response) => {
   }
 });
 
-router.get("/v5-test/event/:sport/:eventId", async (req: Request, res: Response) => {
+router.get("/v5-test/event/:eventId", async (req: Request, res: Response) => {
   try {
-    const sport = req.params.sport;
     const eventId = req.params.eventId;
-    if (typeof sport !== "string" || typeof eventId !== "string") return res.status(400).json({ error: "Invalid params" });
+    if (typeof eventId !== "string") return res.status(400).json({ error: "Invalid params" });
     const eventIdNum = parseInt(eventId, 10);
     if (isNaN(eventIdNum)) return res.status(400).json({ error: "Invalid eventId" });
-    const data = await fetchV5EventDetails(sport, eventIdNum);
+    const data = await fetchV5EventDetails(eventIdNum);
     if (data === null) return res.status(404).json({ error: "Event not found" });
     res.json(data);
     return;
