@@ -23491,7 +23491,7 @@ export default function Home({
               animate={{ scale: 1, y: 0 }}
               exit={{ scale: 0.85, y: 40 }}
               className="relative overflow-hidden rounded-3xl max-w-md w-full border border-white/15 shadow-2xl"
-              onClick={(e) => e.stopPropagation()}
+              onClick={(e: React.MouseEvent) => e.stopPropagation()}
             >
               {promoNotif.type === "freebets10" && (
                 <>
@@ -23732,7 +23732,7 @@ export default function Home({
                 background:
                   "linear-gradient(135deg, #0a2a0a 0%, #052010 50%, #0a1a0a 100%)",
               }}
-              onClick={(e) => e.stopPropagation()}
+              onClick={(e: React.MouseEvent) => e.stopPropagation()}
             >
               <div
                 className="absolute inset-0 opacity-20"
