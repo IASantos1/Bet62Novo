@@ -28966,10 +28966,9 @@ function mapV5TopEventToMatch(v5Event: V5TopEvent) {
 }
 
 // Test Routes for V5
-router.get("/v5-test/live-matches/:sportId?", async (req: Request, res: Response) => {
+router.get("/v5-test/live-matches", async (req: Request, res: Response) => {
   try {
-    const sportIdParam = req.params.sportId;
-    const sportId = sportIdParam ? (Array.isArray(sportIdParam) ? parseInt(sportIdParam[0], 10) : parseInt(sportIdParam, 10)) : 1;
+    const sportId = 1;
     const v5LiveEvents = await fetchV5LiveEvents(sportId);
     if (!v5LiveEvents) {
       res.json([]);
