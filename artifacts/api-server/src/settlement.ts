@@ -18,6 +18,7 @@ import {
   scanDailyForFinished,
   scanVolleyballForFinished,
   scanV2AllSportsForFinished,
+  scanTennisV1ForFinished,
 } from "./routes/matches.js";
 
 export type SelectionRecord = {
@@ -5079,11 +5080,12 @@ export function startSettlementWorker(): void {
 
   const run = async (): Promise<void> => {
     try {
-      // Parallel scan: football daily feed + all V2 sports + volleyball finished feed
+      // Parallel scan: football daily feed + all V2 sports + volleyball + tennis V1 finished feed
       await Promise.allSettled([
         scanDailyForFinished(),
         scanV2AllSportsForFinished(),
         scanVolleyballForFinished(),
+        scanTennisV1ForFinished(),
       ]);
       const now = Date.now();
       if (!queueEnabled || now - lastCatchupAt >= catchupMs) {
