@@ -3105,7 +3105,7 @@ function providerMatchIdPrefixesForSport(
     case "football":
       return ["football-v2"];
     case "tennis":
-      return ["tennis-v2"];
+      return ["tennis-v2", "tennis-v1"];
     case "basketball":
       return ["bball-v2"];
     case "baseball":
@@ -3192,7 +3192,7 @@ function getSelectionLookupMatchIds(
 }
 
 function isProviderManagedMatchId(matchId: string): boolean {
-  return /^(football-v2|bball-v2|hockey-v2|tennis-v2|baseball-v2|mlb-v2|volley-live|volley-odds)-\d+$/.test(
+  return /^(football-v2|bball-v2|hockey-v2|tennis-v2|tennis-v1|baseball-v2|mlb-v2|volley-live|volley-odds)-\d+$/.test(
     String(matchId ?? "").trim(),
   );
 }

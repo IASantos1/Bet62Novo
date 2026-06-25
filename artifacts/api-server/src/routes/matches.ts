@@ -15274,10 +15274,16 @@ function buildTennisLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
       continue;
     }
     const tooOld = now - (cached._firstSeenAt ?? now) > MAX_LIVE_STATE_MS;
-    // Helper: check if the cached live score indicates a tennis match is truly finished
-    // (at least one player has won 2+ sets, covering best-of-3 and most best-of-5 scenarios)
+    // Grand Slams (Wimbledon, Roland Garros, US Open, Australian Open) are best-of-5 for men:
+    // a player needs 3 sets to win, so threshold=3 avoids premature finalization at 2-0 or 2-1.
+    // All other ATP/WTA events are best-of-3 (threshold=2).
+    const isGrandSlam = /grand.?slam|wimbledon|roland.?garros|australian.?open|us.?open/i.test(
+      String(cached.league ?? ""),
+    );
+    const tennisFinishedThreshold = isGrandSlam ? 3 : 2;
     const tennisScoreLooksFinished =
-      cached.homeScore >= 2 || cached.awayScore >= 2;
+      cached.homeScore >= tennisFinishedThreshold ||
+      cached.awayScore >= tennisFinishedThreshold;
     if (tooOld) {
       // Safety-net eviction — only write to finishedMatchResults if score is plausible
       if (tennisScoreLooksFinished) rememberFinishedTennisState(id, cached, now);
