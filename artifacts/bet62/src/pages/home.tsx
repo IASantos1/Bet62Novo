@@ -6473,7 +6473,7 @@ export default function Home({
           const missCount = matchMissCountRef.current[id] ?? 0;
           // Keep transiently missing matches around for longer so brief partial
           // responses or feed reshuffles do not make live games disappear.
-          return missCount < 4 || now - lastSeen < 90_000;
+          return missCount < 10 || now - lastSeen < 300_000;
         })
         .map((m) => ({
           ...m,
@@ -7516,6 +7516,7 @@ export default function Home({
           scheduledTime: (match as any).scheduledTime,
           selection,
           odd,
+          originalOdd: odd, // Salva a odd original quando a aposta é adicionada
           market,
           label: normalizedLabel,
           ...(marketLine !== undefined ? { marketLine } : {}),
@@ -7540,6 +7541,89 @@ export default function Home({
       ),
     );
   };
+
+  // Função para pegar a odd atual de uma seleção em um jogo
+  const getCurrentOddForSelection = (match: Match, market: string | undefined, selection: string): number | null => {
+    const m = match.markets;
+    if (!m) return null;
+    if (!market || market === "result") {
+      if (selection === "home") return match.odds.home;
+      if (selection === "draw") return match.odds.draw;
+      if (selection === "away") return match.odds.away;
+    }
+    if (market === "dupla" || market === "especiais") {
+      if (selection === "homeOrDraw" || selection === "dc-hd") return m.doubleChance?.homeOrDraw ?? null;
+      if (selection === "awayOrDraw" || selection === "dc-da") return m.doubleChance?.awayOrDraw ?? null;
+      if (selection === "homeOrAway" || selection === "dc-ha") return m.doubleChance?.homeOrAway ?? null;
+      if (selection === "bts-yes") return m.bothTeamsScore?.yes ?? null;
+      if (selection === "bts-no") return m.bothTeamsScore?.no ?? null;
+    }
+    if (market === "gols" || market === "totais" || market === "1tempo") {
+      if (m.totalGoals) {
+        const tg = m.totalGoals;
+        const tgMap: Record<string, number> = {
+          o05: tg.over05, u05: tg.under05,
+          o15: tg.over15, u15: tg.under15,
+          o25: tg.over25, u25: tg.under25,
+          o35: tg.over35, u35: tg.under35,
+          o45: tg.over45, u45: tg.under45,
+          o55: tg.over55, u55: tg.under55,
+          o65: tg.over65, u65: tg.under65,
+        };
+        if (tgMap[selection] !== undefined) return tgMap[selection];
+      }
+    }
+    return null;
+  };
+
+  // Estado para controlar quais odds mudaram
+  const [oddsChanged, setOddsChanged] = useState<Record<string, boolean>>({});
+
+  // Verifica se alguma odd mudou
+  const anyOddChanged = useMemo(
+    () => bets.some((bet) => oddsChanged[betKey(bet)]),
+    [bets, oddsChanged]
+  );
+
+  // useEffect para monitorar mudanças de odds no boletim
+  useEffect(() => {
+    if (bets.length === 0) {
+      setOddsChanged({});
+      return;
+    }
+
+    const updatedBets: typeof bets = [];
+    const newOddsChanged: Record<string, boolean> = {};
+    let hasChanges = false;
+
+    bets.forEach((bet) => {
+      const key = betKey(bet);
+      // Encontra o jogo atual
+      const match = [...liveMatches, ...upcomingMatches].find(
+        m => String(m.id) === String(bet.matchId)
+      );
+      
+      if (match) {
+        const currentOdd = getCurrentOddForSelection(match, bet.market, bet.selection);
+        if (currentOdd !== null && currentOdd !== bet.odd) {
+          hasChanges = true;
+          updatedBets.push({ ...bet, odd: currentOdd });
+          newOddsChanged[key] = true;
+        } else {
+          updatedBets.push(bet);
+          newOddsChanged[key] = false;
+        }
+      } else {
+        updatedBets.push(bet);
+        newOddsChanged[key] = false;
+      }
+    });
+
+    if (hasChanges) {
+      setBets(updatedBets);
+    }
+    setOddsChanged(newOddsChanged);
+  }, [liveMatches, upcomingMatches]); // Reexecuta quando os dados dos jogos são atualizados
 
   const hasDuplicateMatches =
     bets.length > 1 &&
@@ -7810,6 +7894,16 @@ export default function Home({
       setAuthMode("login");
       setAuthModalOpen(true);
       return;
+    }
+
+    // Confirmar se odds foram ajustadas
+    if (anyOddChanged) {
+      const confirmed = window.confirm(
+        "As odds foram ajustadas! Deseja continuar com a aposta usando os novos valores?"
+      );
+      if (!confirmed) {
+        return;
+      }
     }
 
     // Guard: block placement if any live selection has an active market suspension
@@ -9581,6 +9675,22 @@ export default function Home({
             </div>
           </div>
 
+          {/* Aviso de odds ajustadas */}
+          {anyOddChanged && (
+            <div
+              className="flex items-center gap-2 px-3 py-2.5 rounded-xl mt-3"
+              style={{
+                background: "rgba(22, 163, 74, 0.1)",
+                border: "1px solid rgba(22, 163, 74, 0.3)",
+              }}
+            >
+              <Zap size={14} className="text-green-400" />
+              <p className="text-green-400 text-xs font-medium leading-tight">
+                Odds ajustadas! Confira os valores antes de apostar.
+              </p>
+            </div>
+          )}
+
           {/* Simples / Múltipla toggle */}
           {bets.length > 0 && (
             <div
@@ -9743,12 +9853,42 @@ export default function Home({
                         <span className="text-white font-bold text-[13px] leading-tight flex-1 pr-3 truncate">
                           {bet.label}
                         </span>
-                        <span
-                          className="font-black text-[18px] leading-none flex-shrink-0"
-                          style={{ color: isSusp ? "#f59e0b" : "#dc2626" }}
-                        >
-                          {bet.odd.toFixed(2)}
-                        </span>
+                        <div className="flex items-center gap-2">
+                          {/* Odd original (riscada) se mudou */}
+                          {oddsChanged[betKey(bet)] && (
+                            <span
+                              className="font-bold text-[14px] leading-none line-through text-zinc-500"
+                            >
+                              {(bet as any).originalOdd.toFixed(2)}
+                            </span>
+                          )}
+                          {/* Seta indicando aumento/diminuição */}
+                          {oddsChanged[betKey(bet)] && (
+                            <span
+                              className="font-bold text-[16px]"
+                              style={{
+                                color: bet.odd > (bet as any).originalOdd ? "#22c55e" : "#f43f5e",
+                              }}
+                            >
+                              {bet.odd > (bet as any).originalOdd ? "▲" : "▼"}
+                            </span>
+                          )}
+                          {/* Odd atual */}
+                          <span
+                            className="font-black text-[18px] leading-none flex-shrink-0"
+                            style={{
+                              color: isSusp
+                                ? "#f59e0b"
+                                : oddsChanged[betKey(bet)]
+                                ? bet.odd > (bet as any).originalOdd
+                                  ? "#22c55e"
+                                  : "#f43f5e"
+                                : "#dc2626",
+                            }}
+                          >
+                            {bet.odd.toFixed(2)}
+                          </span>
+                        </div>
                       </div>
 
                       {/* Simples: individual stake input */}
