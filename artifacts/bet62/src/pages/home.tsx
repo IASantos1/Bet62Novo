@@ -610,6 +610,98 @@ const LEAGUE_FLAGS: Record<string, string> = {
   "Superliga — Brasil": "🏐",
 };
 
+// ISO 3166-1 alpha-2 codes for flagcdn.com flag images
+const COUNTRY_ISO: Record<string, string> = {
+  // Europe
+  england: "gb-eng", "united kingdom": "gb", uk: "gb", gb: "gb",
+  scotland: "gb-sct", wales: "gb-wls", "northern ireland": "gb-nir",
+  spain: "es", germany: "de", france: "fr", italy: "it",
+  portugal: "pt", netherlands: "nl", belgium: "be", turkey: "tr",
+  greece: "gr", austria: "at", switzerland: "ch", denmark: "dk",
+  norway: "no", sweden: "se", finland: "fi", croatia: "hr",
+  serbia: "rs", ukraine: "ua", russia: "ru", poland: "pl",
+  "czech republic": "cz", czechia: "cz", slovakia: "sk",
+  hungary: "hu", romania: "ro", bulgaria: "bg", albania: "al",
+  "north macedonia": "mk", slovenia: "si", belarus: "by",
+  moldova: "md", israel: "il", cyprus: "cy", ireland: "ie",
+  iceland: "is", luxembourg: "lu", malta: "mt", estonia: "ee",
+  latvia: "lv", lithuania: "lt", georgia: "ge", armenia: "am",
+  azerbaijan: "az", kazakhstan: "kz",
+  // Americas
+  brazil: "br", argentina: "ar", usa: "us", "united states": "us",
+  mexico: "mx", colombia: "co", chile: "cl", uruguay: "uy",
+  peru: "pe", venezuela: "ve", bolivia: "bo", ecuador: "ec",
+  paraguay: "py", panama: "pa", "costa rica": "cr", honduras: "hn",
+  guatemala: "gt", "el salvador": "sv", nicaragua: "ni",
+  "dominican republic": "do", cuba: "cu", haiti: "ht",
+  jamaica: "jm", canada: "ca", "trinidad and tobago": "tt",
+  // Asia & Oceania
+  japan: "jp", "south korea": "kr", korea: "kr", china: "cn",
+  australia: "au", "new zealand": "nz", india: "in",
+  "saudi arabia": "sa", "united arab emirates": "ae", uae: "ae",
+  qatar: "qa", iran: "ir", iraq: "iq", thailand: "th",
+  vietnam: "vn", indonesia: "id", malaysia: "my", singapore: "sg",
+  // Africa
+  morocco: "ma", egypt: "eg", "south africa": "za", nigeria: "ng",
+  ghana: "gh", senegal: "sn", cameroon: "cm", "ivory coast": "ci",
+  algeria: "dz", tunisia: "tn", kenya: "ke", ethiopia: "et",
+  // International / multi-country (no single flag)
+  international: "un", world: "un",
+};
+
+// Per-league ISO overrides (when match.country is missing or generic)
+const LEAGUE_ISO: Record<string, string> = {
+  "Premier League": "gb-eng", "EFL Championship": "gb-eng",
+  Championship: "gb-eng", "League One": "gb-eng", "FA Cup": "gb-eng",
+  "La Liga": "es", Laliga: "es", "LaLiga Hypermotion": "es", "Copa del Rey": "es",
+  "Serie A": "it", "Serie B": "it", "Coppa Italia": "it",
+  Bundesliga: "de", "2. Bundesliga": "de", "DFB-Pokal": "de",
+  "Ligue 1": "fr", "Ligue 2": "fr", "Coupe de France": "fr",
+  "Liga Portugal": "pt", "Primeira Liga": "pt", "Segunda Liga": "pt",
+  "Liga Portugal 2": "pt", "Taça de Portugal": "pt",
+  Eredivisie: "nl", "Eerste Divisie": "nl", "KNVB Cup": "nl",
+  "Belgian Pro League": "be", "Jupiler Pro League": "be", "Pro League": "be",
+  "Süper Lig": "tr", "Super Lig": "tr", "TFF First League": "tr",
+  "Scottish Premiership": "gb-sct", "Scottish Championship": "gb-sct",
+  "Swiss Super League": "ch", "Danish Superliga": "dk",
+  Eliteserien: "no", Allsvenskan: "se", Superettan: "se",
+  HNL: "hr", "Serbian SuperLiga": "rs",
+  Brasileirao: "br", Brasileirão: "br", "Campeonato Brasileiro": "br",
+  "Copa do Brasil": "br", "Serie C": "br", "Serie D": "br",
+  "Série A Brasil": "br", "Campeonato Paulista": "br",
+  "Primera División": "ar", "Liga Argentina": "ar", "Copa Argentina": "ar",
+  MLS: "us", "MLS Next Pro": "us", "National League": "us",
+  "USL Championship": "us", "USL League One": "us",
+  NBA: "us", NHL: "us", MLB: "us", "USA: MLB": "us", "USA: NHL": "us", "USA: NBA": "us",
+  "Liga MX": "mx", "Copa MX": "mx",
+  "Scottish Premiership": "gb-sct",
+  "Austrian Bundesliga": "at",
+  "Super League Greece": "gr",
+  "Copa Simón Bolívar": "ve", "Liga FUTVE": "ve",
+  "Chilean Cup": "cl", "Primera División Chile": "cl",
+  Brasileirao: "br",
+  ATP: "un", WTA: "un", "ATP 500": "un", "ATP 250": "un",
+  "WTA 1000": "un", "WTA 250": "un",
+  "Champions League": "eu", "UEFA Champions League": "eu",
+  "Europa League": "eu", "UEFA Europa League": "eu",
+  "Conference League": "eu", "UEFA Nations League": "eu",
+  "FIFA World Cup": "un", "Copa América": "un",
+};
+
+function getCountryFlagUrl(country?: string, league?: string): string | null {
+  // 1. Try league-specific override first
+  const leagueIso = league ? LEAGUE_ISO[league] : undefined;
+  if (leagueIso && leagueIso !== "eu" && leagueIso !== "un") {
+    return `https://flagcdn.com/w40/${leagueIso}.png`;
+  }
+  // 2. Try country name mapping
+  const iso = country ? COUNTRY_ISO[country.toLowerCase().trim()] : undefined;
+  if (iso && iso !== "un") {
+    return `https://flagcdn.com/w40/${iso}.png`;
+  }
+  return null;
+}
+
 const LEAGUE_LOGOS: Record<string, string> = {
   "Champions League": "https://media.api-sports.io/football/leagues/2.png",
   "UEFA Champions League": "https://media.api-sports.io/football/leagues/2.png",
@@ -9294,18 +9386,33 @@ export default function Home({
         <div className="px-3 pt-2.5 pb-2.5">
           {/* Competition header */}
           <div className="flex items-center gap-1.5 mb-2">
-            {/* Round sport icon */}
-            <div className="w-[18px] h-[18px] rounded-full bg-zinc-800 border border-zinc-700/60 flex items-center justify-center shrink-0 overflow-hidden">
-              {LEAGUE_LOGOS[match.league ?? ""] ? (
-                <img src={LEAGUE_LOGOS[match.league ?? ""]} alt="" className="w-full h-full object-contain p-[2px]" loading="lazy" decoding="async" />
-              ) : (
-                <span className="text-[9px] leading-none">{sportEmoji(sport)}</span>
-              )}
-            </div>
-            {/* Round country flag */}
-            <div className="w-[18px] h-[18px] rounded-full bg-zinc-800 border border-zinc-700/60 flex items-center justify-center shrink-0 overflow-hidden">
-              <span className="text-[10px] leading-none">{flag}</span>
-            </div>
+            {/* Round country flag + sport icon badge */}
+            {(() => {
+              const flagUrl = getCountryFlagUrl(match.country, match.league ?? undefined);
+              return (
+                <div className="relative shrink-0 w-[22px] h-[22px]">
+                  {/* Country flag — round */}
+                  <div className="w-[22px] h-[22px] rounded-full overflow-hidden border border-zinc-700/70 bg-zinc-800">
+                    {flagUrl ? (
+                      <img
+                        src={flagUrl}
+                        alt={match.country ?? ""}
+                        className="w-full h-full object-cover"
+                        loading="lazy"
+                        decoding="async"
+                        onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; }}
+                      />
+                    ) : (
+                      <span className="flex items-center justify-center w-full h-full text-[11px] leading-none">{flag}</span>
+                    )}
+                  </div>
+                  {/* Sport icon badge — top-right, overlapping the flag */}
+                  <div className="absolute -top-[5px] -right-[5px] w-[13px] h-[13px] rounded-full bg-zinc-900 border border-zinc-700 flex items-center justify-center shadow-sm">
+                    <span className="text-[7px] leading-none">{sportEmoji(sport)}</span>
+                  </div>
+                </div>
+              );
+            })()}
             <span className={`text-[10px] font-black tracking-[0.14em] uppercase truncate flex-1 ${isDarkTheme ? "text-zinc-400" : "text-zinc-500"}`}>
               {match.league}
             </span>
