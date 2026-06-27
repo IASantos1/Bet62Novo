@@ -1,4 +1,4 @@
-const VERSION = "v2026-06-21-1";
+const VERSION = "v2026-06-27-1";
 const SHELL_CACHE = `bet62-shell-${VERSION}`;
 const ASSET_CACHE = `bet62-assets-${VERSION}`;
 const DATA_CACHE = `bet62-data-${VERSION}`;
