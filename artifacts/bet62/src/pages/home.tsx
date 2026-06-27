@@ -7576,6 +7576,9 @@ export default function Home({
     return null;
   };
 
+  // betKey must be defined BEFORE any useMemo/useEffect that uses it
+  const betKey = (b: BetSelection) => `${b.matchId}-${b.market}-${b.selection}`;
+
   // Estado para controlar quais odds mudaram
   const [oddsChanged, setOddsChanged] = useState<Record<string, boolean>>({});
 
@@ -7634,7 +7637,6 @@ export default function Home({
   const totalOdds = bets.reduce((acc, bet) => acc * bet.odd, 1).toFixed(2);
   const [stake, setStake] = useState<string>("");
   const [betStakes, setBetStakes] = useState<Record<string, string>>({});
-  const betKey = (b: BetSelection) => `${b.matchId}-${b.market}-${b.selection}`;
   const simplesPotential = bets
     .reduce(
       (sum, b) => sum + b.odd * parseFloat(betStakes[betKey(b)] || "0"),
