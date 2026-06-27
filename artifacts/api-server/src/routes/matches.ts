@@ -13591,19 +13591,6 @@ async function buildFootballLiveV2(
   }
 
   const prefetchRedCards = new Map<number, V2RedCards>();
-  const incidentSummaries = new Map<number, FootballIncidentSummary | null>();
-
-  // Pre-fetch incident summaries for all football matches
-  await Promise.all(
-    chosen.map(async (ev) => {
-      const idNum = Number(ev.id);
-      if (!Number.isFinite(idNum) || idNum <= 0) return;
-      const summary = await getFootballIncidentSummaryV2(idNum).catch(
-        () => null,
-      );
-      incidentSummaries.set(idNum, summary);
-    }),
-  );
 
   const firstSeenMatchIds = chosen
     .filter((ev) => !liveMatchState.has(`football-v2-${ev.id}`))
@@ -13643,7 +13630,6 @@ async function buildFootballLiveV2(
     };
     const rcHome = rc.home ?? 0;
     const rcAway = rc.away ?? 0;
-    const incidentSummary = incidentSummaries.get(Number(ev.id)) ?? null;
 
     // Block youth matches: check league name AND team names (e.g. "Pergolettese U19")
     if (isBlockedLeague(`${league} ${homeTeam} ${awayTeam}`)) continue;
@@ -13870,7 +13856,7 @@ async function buildFootballLiveV2(
       minute = Math.max(existing.minute, minute);
       // Pre-compute VAR status once, used in both scored and non-scored branches
       const rawStatusDesc = v2StatusStr(ev.status).toLowerCase();
-      const isStatusVAR =
+      const isVARStatus =
         rawStatusDesc.includes("var") ||
         rawStatusDesc.includes("video review") ||
         rawStatusDesc.includes("awaiting review") ||
@@ -13883,8 +13869,6 @@ async function buildFootballLiveV2(
         rawStatusDesc.includes("checking") ||
         rawStatusDesc.includes("arbitro") ||
         rawStatusDesc.includes("revision");
-      const isIncidentVAR = incidentSummary?.hasVAR ?? false;
-      const isVARStatus = isStatusVAR || isIncidentVAR;
 
       const scored =
         homeScore !== existing.homeScore || awayScore !== existing.awayScore;
@@ -14436,29 +14420,9 @@ async function buildBasketballLiveV2(
   for (const [id, state] of liveMatchState.entries()) {
     if (!id.startsWith("bball-v2-")) continue;
     const tooOld = now - (state._firstSeenAt ?? now) > MAX_LIVE_STATE_MS;
-    const missingSince = state._missingSinceAt ?? now;
-    
-    if (tooOld) {
-      // Only auto-finalize on timeout if score looks complete (4 quarters played)
-      const quarters = state._liveExtra?.quarters;
-      const qCount = Array.isArray(quarters) ? quarters.length : 0;
-      if (qCount >= 4) await finalizeStaleLiveMatch(state);
+    if (!currentIds.has(id) || tooOld) {
+      await finalizeStaleLiveMatch(state);
       liveMatchState.delete(id);
-    } else if (!currentIds.has(id)) {
-      // Game dropped from live feed - use grace period before removing
-      if (!state._missingSinceAt) {
-        liveMatchState.set(id, {
-          ...state,
-          _missingSinceAt: missingSince,
-          _feedWarning: "SINAL INSTÁVEL",
-        });
-        result.push(state);
-      } else if (now - missingSince > 130 * 60 * 1000) { // 130 minutes grace period (same as football default)
-        await finalizeStaleLiveMatch(state);
-        liveMatchState.delete(id);
-      } else {
-        result.push(state);
-      }
     }
   }
   return result;
@@ -14622,29 +14586,9 @@ function buildHockeyLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
   for (const [id, state] of liveMatchState.entries()) {
     if (!id.startsWith("hockey-v2-")) continue;
     const tooOld = now - (state._firstSeenAt ?? now) > MAX_LIVE_STATE_MS;
-    const missingSince = state._missingSinceAt ?? now;
-    
-    if (tooOld) {
-      // Only auto-finalize on timeout if score looks complete (3+ periods played)
-      const periods = state._liveExtra?.periods;
-      const pCount = Array.isArray(periods) ? periods.length : 0;
-      if (pCount >= 3) void finalizeStaleLiveMatch(state);
+    if (!currentIds.has(id) || tooOld) {
+      void finalizeStaleLiveMatch(state);
       liveMatchState.delete(id);
-    } else if (!currentIds.has(id)) {
-      // Game dropped from live feed - use grace period before removing
-      if (!state._missingSinceAt) {
-        liveMatchState.set(id, {
-          ...state,
-          _missingSinceAt: missingSince,
-          _feedWarning: "SINAL INSTÁVEL",
-        });
-        result.push(state);
-      } else if (now - missingSince > 130 * 60 * 1000) { // 130 minutes grace period
-        void finalizeStaleLiveMatch(state);
-        liveMatchState.delete(id);
-      } else {
-        result.push(state);
-      }
     }
   }
   return result;
@@ -14788,30 +14732,9 @@ function buildBaseballLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
   for (const [id, state] of liveMatchState.entries()) {
     if (!id.startsWith("baseball-v2-")) continue;
     const tooOld = now - (state._firstSeenAt ?? now) > MAX_LIVE_STATE_MS;
-    const missingSince = state._missingSinceAt ?? now;
-    
-    if (tooOld) {
-      // Only auto-finalize on timeout if score looks complete (9+ innings played)
-      const innings = state._liveExtra?.innings;
-      const inningCount = Array.isArray(innings) ? innings.length : 0;
-      if (inningCount >= 9) void finalizeStaleLiveMatch(state);
+    if (!currentIds.has(id) || tooOld) {
+      void finalizeStaleLiveMatch(state);
       liveMatchState.delete(id);
-    } else if (!currentIds.has(id)) {
-      // Game dropped from live feed - use grace period before removing
-      // KBO/MLB games can briefly disappear mid-game due to API latency
-      if (!state._missingSinceAt) {
-        liveMatchState.set(id, {
-          ...state,
-          _missingSinceAt: missingSince,
-          _feedWarning: "SINAL INSTÁVEL",
-        });
-        result.push(state);
-      } else if (now - missingSince > 180 * 60 * 1000) { // 3 hours grace period for baseball
-        void finalizeStaleLiveMatch(state);
-        liveMatchState.delete(id);
-      } else {
-        result.push(state);
-      }
     }
   }
   return result;
@@ -15274,19 +15197,8 @@ function buildTennisLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
       continue;
     }
     const tooOld = now - (cached._firstSeenAt ?? now) > MAX_LIVE_STATE_MS;
-    // Grand Slams (Wimbledon, Roland Garros, US Open, Australian Open) are best-of-5 for men:
-    // a player needs 3 sets to win, so threshold=3 avoids premature finalization at 2-0 or 2-1.
-    // All other ATP/WTA events are best-of-3 (threshold=2).
-    const isGrandSlam = /grand.?slam|wimbledon|roland.?garros|australian.?open|us.?open/i.test(
-      String(cached.league ?? ""),
-    );
-    const tennisFinishedThreshold = isGrandSlam ? 3 : 2;
-    const tennisScoreLooksFinished =
-      cached.homeScore >= tennisFinishedThreshold ||
-      cached.awayScore >= tennisFinishedThreshold;
     if (tooOld) {
-      // Safety-net eviction — only write to finishedMatchResults if score is plausible
-      if (tennisScoreLooksFinished) rememberFinishedTennisState(id, cached, now);
+      rememberFinishedTennisState(id, cached, now);
       liveMatchState.delete(id);
       _tennisMissingFrom.delete(id);
       continue;
@@ -15295,10 +15207,7 @@ function buildTennisLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
       const firstMissing = _tennisMissingFrom.get(id) ?? now;
       _tennisMissingFrom.set(id, firstMissing);
       if (now - firstMissing > 45_000) {
-        // Only finalize after 45 s if score shows the match has a proper result
-        if (tennisScoreLooksFinished) {
-          rememberFinishedTennisState(id, cached, now);
-        }
+        rememberFinishedTennisState(id, cached, now);
         liveMatchState.delete(id);
         _tennisMissingFrom.delete(id);
       } else {
@@ -15308,7 +15217,6 @@ function buildTennisLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
         // we can resume accurately if the match genuinely returns.
         const finished = isTennisFinishedStatusText(cached.status);
         if (finished) {
-          // Status explicitly says finished — trust it regardless of score
           rememberFinishedTennisState(id, cached, now);
           liveMatchState.delete(id);
           _tennisMissingFrom.delete(id);
@@ -26742,19 +26650,6 @@ const basketballIncidentSummaryInFlight = new Map<
 >();
 const BASKETBALL_INCIDENT_SUMMARY_TTL = 2500;
 
-type FootballIncidentSummary = {
-  hasVAR: boolean;
-  hasGoal: boolean;
-  hasPenalty: boolean;
-  fetchedAt: number;
-};
-const footballIncidentSummaryCache = new Map<number, FootballIncidentSummary>();
-const footballIncidentSummaryInFlight = new Map<
-  number,
-  Promise<FootballIncidentSummary | null>
->();
-const FOOTBALL_INCIDENT_SUMMARY_TTL = 2500;
-
 function extractV2IncidentArray(payload: unknown): unknown[] {
   const root = (
     payload && typeof payload === "object"
@@ -26897,85 +26792,6 @@ function parseBasketballIncidentSummary(
   }
 
   return { scoringEvents, fetchedAt: Date.now() };
-}
-
-function parseFootballIncidentSummary(payload: unknown): FootballIncidentSummary {
-  const incidents = extractV2IncidentArray(payload);
-  let hasVAR = false;
-  let hasGoal = false;
-  let hasPenalty = false;
-
-  for (const incident of incidents) {
-    if (!incident || typeof incident !== "object") continue;
-    const inc = incident as Record<string, unknown>;
-    const type = String(inc["type"] || inc["incidentType"] || inc["name"] || inc["title"] || "").toLowerCase();
-    const text = String(inc["text"] || inc["description"] || inc["comment"] || "").toLowerCase();
-    const fullText = `${type} ${text}`;
-
-    // Detectar VAR
-    if (
-      fullText.includes("var") ||
-      fullText.includes("video") ||
-      fullText.includes("review") ||
-      fullText.includes("check") ||
-      fullText.includes("disallowed") ||
-      fullText.includes("anulado") ||
-      fullText.includes("revisão") ||
-      fullText.includes("arbitro") ||
-      fullText.includes("video assistant")
-    ) {
-      hasVAR = true;
-    }
-
-    // Detectar gol
-    if (
-      fullText.includes("goal") ||
-      fullText.includes("gol")
-    ) {
-      hasGoal = true;
-    }
-
-    // Detectar pênalti
-    if (
-      fullText.includes("penalty") ||
-      fullText.includes("pênalti") ||
-      fullText.includes("penalt")
-    ) {
-      hasPenalty = true;
-    }
-  }
-
-  return {
-    hasVAR,
-    hasGoal,
-    hasPenalty,
-    fetchedAt: Date.now(),
-  };
-}
-
-async function getFootballIncidentSummaryV2(
-  matchId: number,
-): Promise<FootballIncidentSummary | null> {
-  if (!Number.isFinite(matchId) || matchId <= 0) return null;
-  const cached = footballIncidentSummaryCache.get(matchId);
-  if (cached && Date.now() - cached.fetchedAt < FOOTBALL_INCIDENT_SUMMARY_TTL)
-    return cached;
-  const inflight = footballIncidentSummaryInFlight.get(matchId);
-  if (inflight) return inflight;
-  const p = (async () => {
-    try {
-      const raw = await fetchV2IncidentsRaw("football", String(matchId));
-      const summary = parseFootballIncidentSummary(raw);
-      footballIncidentSummaryCache.set(matchId, summary);
-      return summary;
-    } catch {
-      return null;
-    } finally {
-      footballIncidentSummaryInFlight.delete(matchId);
-    }
-  })();
-  footballIncidentSummaryInFlight.set(matchId, p);
-  return p;
 }
 
 async function fetchV2IncidentsRaw(
