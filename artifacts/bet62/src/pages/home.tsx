@@ -650,56 +650,146 @@ const COUNTRY_ISO: Record<string, string> = {
 };
 
 // Per-league ISO overrides (when match.country is missing or generic)
-const LEAGUE_ISO: Record<string, string> = {
-  "Premier League": "gb-eng", "EFL Championship": "gb-eng",
-  Championship: "gb-eng", "League One": "gb-eng", "FA Cup": "gb-eng",
-  "La Liga": "es", Laliga: "es", "LaLiga Hypermotion": "es", "Copa del Rey": "es",
-  "Serie A": "it", "Serie B": "it", "Coppa Italia": "it",
-  Bundesliga: "de", "2. Bundesliga": "de", "DFB-Pokal": "de",
-  "Ligue 1": "fr", "Ligue 2": "fr", "Coupe de France": "fr",
-  "Liga Portugal": "pt", "Primeira Liga": "pt", "Segunda Liga": "pt",
-  "Liga Portugal 2": "pt", "Taça de Portugal": "pt",
-  Eredivisie: "nl", "Eerste Divisie": "nl", "KNVB Cup": "nl",
-  "Belgian Pro League": "be", "Jupiler Pro League": "be", "Pro League": "be",
-  "Süper Lig": "tr", "Super Lig": "tr", "TFF First League": "tr",
-  "Scottish Premiership": "gb-sct", "Scottish Championship": "gb-sct",
-  "Swiss Super League": "ch", "Danish Superliga": "dk",
-  Eliteserien: "no", Allsvenskan: "se", Superettan: "se",
-  HNL: "hr", "Serbian SuperLiga": "rs",
-  Brasileirao: "br", Brasileirão: "br", "Campeonato Brasileiro": "br",
-  "Copa do Brasil": "br", "Serie C": "br", "Serie D": "br",
-  "Série A Brasil": "br", "Campeonato Paulista": "br",
-  "Primera División": "ar", "Liga Argentina": "ar", "Copa Argentina": "ar",
-  MLS: "us", "MLS Next Pro": "us", "National League": "us",
-  "USL Championship": "us", "USL League One": "us",
-  NBA: "us", NHL: "us", MLB: "us", "USA: MLB": "us", "USA: NHL": "us", "USA: NBA": "us",
-  "Liga MX": "mx", "Copa MX": "mx",
-  "Scottish Premiership": "gb-sct",
-  "Austrian Bundesliga": "at",
-  "Super League Greece": "gr",
-  "Copa Simón Bolívar": "ve", "Liga FUTVE": "ve",
-  "Chilean Cup": "cl", "Primera División Chile": "cl",
-  Brasileirao: "br",
-  ATP: "un", WTA: "un", "ATP 500": "un", "ATP 250": "un",
-  "WTA 1000": "un", "WTA 250": "un",
-  "Champions League": "eu", "UEFA Champions League": "eu",
-  "Europa League": "eu", "UEFA Europa League": "eu",
-  "Conference League": "eu", "UEFA Nations League": "eu",
-  "FIFA World Cup": "un", "Copa América": "un",
-};
+// League patterns → ISO code (matched by exact, prefix, or contains — in order)
+// Empty string = international/multi-country (no flag shown)
+const LEAGUE_ISO_MAP: Array<[string, string]> = [
+  // International → no flag
+  ["fifa world cup", ""], ["copa america", ""], ["copa libertadores", ""],
+  ["copa sudamericana", ""], ["uefa champions league", ""], ["champions league", ""],
+  ["uefa europa league", ""], ["europa league", ""], ["conference league", ""],
+  ["uefa nations league", ""], ["atp", ""], ["wta", ""],
+  // England
+  ["premier league", "gb-eng"], ["efl championship", "gb-eng"],
+  ["league one", "gb-eng"], ["league two", "gb-eng"], ["fa cup", "gb-eng"],
+  ["carabao cup", "gb-eng"], ["league cup", "gb-eng"],
+  ["championship (w)", "gb-eng"], ["championship", "gb-eng"],
+  // Spain
+  ["laliga hypermotion", "es"], ["la liga", "es"], ["laliga", "es"],
+  ["segunda division", "es"], ["copa del rey", "es"],
+  ["tercera division", "es"], ["tercera liga", "es"],
+  // Germany
+  ["2. bundesliga", "de"], ["bundesliga", "de"], ["dfb-pokal", "de"],
+  // Italy
+  ["serie a", "it"], ["serie b", "it"], ["coppa italia", "it"],
+  // France
+  ["ligue 1", "fr"], ["ligue 2", "fr"], ["coupe de france", "fr"],
+  ["lnb", "fr"], ["lfb", "fr"], ["pro a", "fr"],
+  // Portugal
+  ["liga portugal", "pt"], ["primeira liga", "pt"], ["segunda liga", "pt"],
+  ["taça de portugal", "pt"], ["taca de portugal", "pt"],
+  // Netherlands
+  ["eredivisie", "nl"], ["eerste divisie", "nl"], ["knvb cup", "nl"],
+  // Belgium
+  ["jupiler pro league", "be"], ["belgian pro league", "be"],
+  // Turkey
+  ["süper lig", "tr"], ["super lig", "tr"], ["tff", "tr"],
+  // Scotland
+  ["scottish premiership", "gb-sct"], ["scottish championship", "gb-sct"],
+  // Switzerland
+  ["swiss super league", "ch"], ["challenge league", "ch"],
+  // Greece
+  ["super league greece", "gr"], ["super league", "gr"],
+  // Denmark
+  ["danish superliga", "dk"], ["superliga", "dk"],
+  // Norway
+  ["eliteserien", "no"], ["norwegian", "no"],
+  // Sweden
+  ["allsvenskan", "se"], ["superettan", "se"], ["svenska", "se"],
+  // Croatia
+  ["hnl", "hr"], ["croatian", "hr"],
+  // Serbia
+  ["serbian superliga", "rs"], ["serbian", "rs"],
+  // Poland
+  ["ekstraklasa", "pl"],
+  // Czech
+  ["czech first league", "cz"],
+  // Russia
+  ["russian premier league", "ru"], ["fnl", "ru"],
+  // Ukraine
+  ["ukrainian premier league", "ua"],
+  // Austria
+  ["austrian bundesliga", "at"], ["admiral bundesliga", "at"],
+  // Israel
+  ["ligat ha'al", "il"],
+  // Brazil — Serie C/D are Brazil, not Italy
+  ["serie d", "br"], ["serie c", "br"],
+  ["campeonato brasileiro", "br"], ["campeonato paulista", "br"],
+  ["campeonato carioca", "br"], ["copa do brasil", "br"],
+  ["brasileirao", "br"], ["brasileirão", "br"], ["série a brasil", "br"],
+  // Argentina
+  ["primera division argentina", "ar"], ["liga argentina", "ar"],
+  ["copa argentina", "ar"], ["torneo binance", "ar"],
+  // Chile
+  ["chilean cup", "cl"], ["copa chile", "cl"], ["primera division chile", "cl"],
+  // Colombia
+  ["liga betplay", "co"], ["primera a", "co"],
+  // Venezuela
+  ["copa simon bolivar", "ve"], ["copa simón bolívar", "ve"], ["liga futve", "ve"],
+  // Bolivia
+  ["division profesional bolivia", "bo"],
+  // Ecuador
+  ["liga pro", "ec"],
+  // Peru
+  ["liga 1 peru", "pe"],
+  // Uruguay
+  ["primera division uruguay", "uy"],
+  // USA
+  ["mls next pro", "us"], ["mls", "us"], ["wnba", "us"], ["nba", "us"],
+  ["nhl", "us"], ["mlb", "us"], ["usl championship", "us"], ["usl league", "us"],
+  ["nwsl", "us"], ["national league", "us"],
+  // Canada
+  ["cebl", "ca"], ["canadian premier league", "ca"],
+  // Puerto Rico
+  ["bsn", "pr"],
+  // Mexico
+  ["liga mx", "mx"], ["copa mx", "mx"], ["liga expansion", "mx"],
+  // Japan
+  ["j1 league", "jp"], ["j2 league", "jp"], ["j.league", "jp"],
+  // South Korea
+  ["k league", "kr"],
+  // Australia
+  ["a-league", "au"], ["a league", "au"], ["australia cup", "au"],
+  // Saudi Arabia
+  ["saudi pro league", "sa"], ["saudi professional league", "sa"],
+  // UAE
+  ["uae pro league", "ae"],
+  // China
+  ["chinese super league", "cn"],
+  // India
+  ["indian super league", "in"], ["i-league", "in"],
+  // Thailand
+  ["thai league", "th"],
+];
+
+function getCountryFlagIso(country?: string, league?: string): string {
+  const lk = (league ?? "").toLowerCase().trim();
+  const ck = (country ?? "").toLowerCase().trim();
+  // 1. Exact match
+  for (const [pat, iso] of LEAGUE_ISO_MAP) {
+    if (lk === pat) return iso;
+  }
+  // 2. Prefix match (pattern ≥ 4 chars)
+  for (const [pat, iso] of LEAGUE_ISO_MAP) {
+    if (pat.length >= 4 && lk.startsWith(pat)) return iso;
+  }
+  // 3. Contains match (pattern ≥ 6 chars)
+  for (const [pat, iso] of LEAGUE_ISO_MAP) {
+    if (pat.length >= 6 && lk.includes(pat)) return iso;
+  }
+  // 4. Country name fallback
+  if (ck) return COUNTRY_ISO[ck] ?? "";
+  return "";
+}
 
 function getCountryFlagUrl(country?: string, league?: string): string | null {
-  // 1. Try league-specific override first
-  const leagueIso = league ? LEAGUE_ISO[league] : undefined;
-  if (leagueIso && leagueIso !== "eu" && leagueIso !== "un") {
-    return `https://flagcdn.com/w40/${leagueIso}.png`;
-  }
-  // 2. Try country name mapping
-  const iso = country ? COUNTRY_ISO[country.toLowerCase().trim()] : undefined;
-  if (iso && iso !== "un") {
-    return `https://flagcdn.com/w40/${iso}.png`;
-  }
-  return null;
+  const iso = getCountryFlagIso(country, league);
+  if (!iso) return null;
+  return `https://flagcdn.com/w40/${iso}.png`;
+}
+
+function flagBgStyle(url: string | null): React.CSSProperties {
+  if (!url) return {};
+  return { backgroundImage: `url(${url})`, backgroundSize: "cover", backgroundPosition: "center" };
 }
 
 const LEAGUE_LOGOS: Record<string, string> = {
@@ -8396,14 +8486,22 @@ export default function Home({
     return (
       <div className="flex items-center justify-between px-3 pt-2.5 pb-1.5">
         <div className="flex items-center gap-2 min-w-0">
-          <div className="relative shrink-0 w-6 h-6 flex items-center justify-center rounded-full bg-zinc-800 text-sm leading-none">
-            {flag}
-            {countryFlag && (
-              <span className="absolute -bottom-0.5 -right-1 bg-zinc-950 rounded-full text-[9px] w-3.5 h-3.5 flex items-center justify-center border border-zinc-800">
-                {sportEmoji(match.sport)}
-              </span>
-            )}
-          </div>
+          {(() => {
+            const fUrl = getCountryFlagUrl(match.country, match.league ?? undefined);
+            return (
+              <div className="relative shrink-0 w-[22px] h-[22px]">
+                <div
+                  className="w-[22px] h-[22px] rounded-full border border-zinc-700/70 bg-zinc-800"
+                  style={fUrl ? flagBgStyle(fUrl) : undefined}
+                >
+                  {!fUrl && <span className="flex items-center justify-center w-full h-full text-[11px] leading-none">{flag}</span>}
+                </div>
+                <div className="absolute -top-[5px] -right-[5px] w-[13px] h-[13px] rounded-full bg-zinc-900 border border-zinc-700 flex items-center justify-center shadow-sm">
+                  <span className="text-[7px] leading-none">{sportEmoji(match.sport)}</span>
+                </div>
+              </div>
+            );
+          })()}
           <span className="text-[11px] text-zinc-500 truncate">
             {match.league}
           </span>
@@ -9128,7 +9226,22 @@ export default function Home({
           {/* Header: league + live badge */}
           <div className="flex items-center justify-between gap-2 mb-2">
             <div className="min-w-0 flex items-center gap-1.5">
-              <span className="text-xs leading-none shrink-0">{flag}</span>
+              {(() => {
+                const fUrl = getCountryFlagUrl(match.country, match.league ?? undefined);
+                return (
+                  <div className="relative shrink-0 w-[20px] h-[20px]">
+                    <div
+                      className="w-[20px] h-[20px] rounded-full border border-zinc-700/70 bg-zinc-800"
+                      style={fUrl ? flagBgStyle(fUrl) : undefined}
+                    >
+                      {!fUrl && <span className="flex items-center justify-center w-full h-full text-[9px] leading-none">{flag}</span>}
+                    </div>
+                    <div className="absolute -top-[4px] -right-[4px] w-[11px] h-[11px] rounded-full bg-zinc-900 border border-zinc-700 flex items-center justify-center">
+                      <span className="text-[6px] leading-none">{sportEmoji(sport)}</span>
+                    </div>
+                  </div>
+                );
+              })()}
               <span className={`text-[10px] font-black tracking-[0.14em] uppercase truncate ${isDarkTheme ? "text-zinc-400" : "text-zinc-500"}`}>
                 {match.league}
               </span>
@@ -9391,22 +9504,14 @@ export default function Home({
               const flagUrl = getCountryFlagUrl(match.country, match.league ?? undefined);
               return (
                 <div className="relative shrink-0 w-[22px] h-[22px]">
-                  {/* Country flag — round */}
-                  <div className="w-[22px] h-[22px] rounded-full overflow-hidden border border-zinc-700/70 bg-zinc-800">
-                    {flagUrl ? (
-                      <img
-                        src={flagUrl}
-                        alt={match.country ?? ""}
-                        className="w-full h-full object-cover"
-                        loading="lazy"
-                        decoding="async"
-                        onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; }}
-                      />
-                    ) : (
+                  <div
+                    className="w-[22px] h-[22px] rounded-full border border-zinc-700/70 bg-zinc-800"
+                    style={flagUrl ? flagBgStyle(flagUrl) : undefined}
+                  >
+                    {!flagUrl && (
                       <span className="flex items-center justify-center w-full h-full text-[11px] leading-none">{flag}</span>
                     )}
                   </div>
-                  {/* Sport icon badge — top-right, overlapping the flag */}
                   <div className="absolute -top-[5px] -right-[5px] w-[13px] h-[13px] rounded-full bg-zinc-900 border border-zinc-700 flex items-center justify-center shadow-sm">
                     <span className="text-[7px] leading-none">{sportEmoji(sport)}</span>
                   </div>
