@@ -1,4 +1,4 @@
-import {
+﻿import {
   db,
   betsTable,
   cashoutStatesTable,
@@ -626,7 +626,6 @@ function scoreOutcomeForSelLastResort(
       const dir = m[1]!;
       const line = (m[2] ?? "") === "35" ? 3.5 : 2.5;
       const totalSets = ft.home + ft.away;
-      if (totalSets === 0) return null;
       if (totalSets === line) return "void";
       return dir === "o"
         ? totalSets > line
@@ -1131,7 +1130,6 @@ export function buildLiveSettlementScore(live: LiveResult | null): {
   hockeyPeriods?: Array<[number, number]>;
   baseballInnings?: Array<[number, number]>;
   firstGoal?: "home" | "away" | "none";
-  marketSuspension?: Record<string, number>;
 } | null {
   const homeScore = live ? Number((live as any).homeScore ?? NaN) : NaN;
   const awayScore = live ? Number((live as any).awayScore ?? NaN) : NaN;
@@ -1163,7 +1161,6 @@ export function buildLiveSettlementScore(live: LiveResult | null): {
       ? liveExtra.innings
       : getBaseballInningsFromExtras(extras),
     firstGoal: liveExtra?.firstGoal,
-    marketSuspension: (live as any)?.marketSuspension,
   };
 }
 
@@ -2139,13 +2136,13 @@ export function scoreOutcomeForSel(
   // ── Exact sets (tennis) ───────────────────────────────────────────────────
   else if (/^es-(h20|h21|a02|a12)$/.test(s)) {
     const sets = getTennisSetsFromExtras(extra?.extras);
-    if (sets.length === 0) return null;
     const hc = sets.filter(
       ([h, a]) => tennisSetFinished([h, a]) && h > a,
     ).length;
     const ac = sets.filter(
       ([h, a]) => tennisSetFinished([h, a]) && a > h,
     ).length;
+    if (hc === null || ac === null) return null;
     const score = `${hc}-${ac}`;
     const want =
       s === "es-h20"
@@ -3105,7 +3102,7 @@ function providerMatchIdPrefixesForSport(
     case "football":
       return ["football-v2"];
     case "tennis":
-      return ["tennis-v2", "tennis-v1"];
+      return ["tennis-v2"];
     case "basketball":
       return ["bball-v2"];
     case "baseball":
@@ -3192,7 +3189,7 @@ function getSelectionLookupMatchIds(
 }
 
 function isProviderManagedMatchId(matchId: string): boolean {
-  return /^(football-v2|bball-v2|hockey-v2|tennis-v2|tennis-v1|baseball-v2|mlb-v2|volley-live|volley-odds)-\d+$/.test(
+  return /^(football-v2|bball-v2|hockey-v2|tennis-v2|baseball-v2|mlb-v2|volley-live|volley-odds)-\d+$/.test(
     String(matchId ?? "").trim(),
   );
 }
@@ -3425,26 +3422,14 @@ function liveDefinitiveOutcomeForSel(
     cardsTotal?: number;
     htScore?: [number, number] | null;
     status?: string;
-    extras?: unknown;
     tennisSets?: Array<[number, number]>;
     basketballQuarters?: Array<[number, number]>;
     hockeyPeriods?: Array<[number, number]>;
     baseballInnings?: Array<[number, number]>;
     firstGoal?: "home" | "away" | "none";
-    marketSuspension?: Record<string, number>;
   },
 ): "won" | "lost" | null {
   if (blocksLiveEarlySettlement(score.status)) return null;
-
-  // Check if any markets are currently suspended - if yes, don't settle yet
-  const now = Date.now();
-  if (score.marketSuspension) {
-    for (const [, ts] of Object.entries(score.marketSuspension)) {
-      if (ts > now) {
-        return null;
-      }
-    }
-  }
 
   // Key normalizations — mirror scoreOutcomeForSel so tg-o25, tg-u25, etc. are handled
   const s = normalizeSettlementSelectionKey(String(sel.selection ?? ""));
@@ -3452,39 +3437,7 @@ function liveDefinitiveOutcomeForSel(
   const home = score.home;
   const away = score.away;
   if (!Number.isFinite(home) || !Number.isFinite(away)) return null;
-  
-  // Calculate valid total by excluding varCancelled goals
-  let validHome = home;
-  let validAway = away;
-  let hasVarCancelledGoals = false;
-  
-  // Try to get football goal events from extras
-  if (score.extras && typeof score.extras === "object") {
-    const football = (score.extras as Record<string, unknown>)["football"] as
-      | Record<string, unknown>
-      | undefined;
-    const goals = football?.["goals"];
-    if (Array.isArray(goals)) {
-      // Count how many varCancelled goals there are for each team
-      let homeCancelled = 0;
-      let awayCancelled = 0;
-      for (const goal of goals) {
-        if (goal && typeof goal === "object") {
-          if ((goal as Record<string, unknown>)["varCancelled"] === true) {
-            hasVarCancelledGoals = true;
-            const team = (goal as Record<string, unknown>)["team"];
-            if (team === "home") homeCancelled++;
-            else if (team === "away") awayCancelled++;
-          }
-        }
-      }
-      // Adjust scores by subtracting cancelled goals
-      validHome = Math.max(0, home - homeCancelled);
-      validAway = Math.max(0, away - awayCancelled);
-    }
-  }
-  
-  const total = validHome + validAway;
+  const total = home + away;
   const tennisSets = Array.isArray(score.tennisSets) ? score.tennisSets : [];
   const basketballQuarters = Array.isArray(score.basketballQuarters)
     ? score.basketballQuarters
@@ -3493,8 +3446,8 @@ function liveDefinitiveOutcomeForSel(
     ? score.hockeyPeriods
     : [];
 
-  if (s === "bts-yes") return validHome > 0 && validAway > 0 ? "won" : null;
-  if (s === "bts-no") return validHome > 0 && validAway > 0 ? "lost" : null;
+  if (s === "bts-yes") return home > 0 && away > 0 ? "won" : null;
+  if (s === "bts-no") return home > 0 && away > 0 ? "lost" : null;
 
   if (/^set[123]-(home|away)$/.test(s) || /^vs[123][ha]$/.test(s)) {
     const setNum = s.startsWith("set")
@@ -3644,8 +3597,8 @@ function liveDefinitiveOutcomeForSel(
     const side = mTgh[1]!;
     const line = decodeCompactLine(mTgh[2]!);
     if (!Number.isFinite(line)) return null;
-    if (side === "o") return validHome > line ? "won" : null;
-    return validHome > line ? "lost" : null;
+    if (side === "o") return home > line ? "won" : null;
+    return home > line ? "lost" : null;
   }
 
   // Away team goals O/U
@@ -3654,8 +3607,8 @@ function liveDefinitiveOutcomeForSel(
     const side = mTga[1]!;
     const line = decodeCompactLine(mTga[2]!);
     if (!Number.isFinite(line)) return null;
-    if (side === "o") return validAway > line ? "won" : null;
-    return validAway > line ? "lost" : null;
+    if (side === "o") return away > line ? "won" : null;
+    return away > line ? "lost" : null;
   }
 
   // Exact Goals (Golos Exatos)
