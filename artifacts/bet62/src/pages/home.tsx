@@ -9294,7 +9294,18 @@ export default function Home({
         <div className="px-3 pt-2.5 pb-2.5">
           {/* Competition header */}
           <div className="flex items-center gap-1.5 mb-2">
-            <span className="text-xs leading-none shrink-0">{flag}</span>
+            {/* Round sport icon */}
+            <div className="w-[18px] h-[18px] rounded-full bg-zinc-800 border border-zinc-700/60 flex items-center justify-center shrink-0 overflow-hidden">
+              {LEAGUE_LOGOS[match.league ?? ""] ? (
+                <img src={LEAGUE_LOGOS[match.league ?? ""]} alt="" className="w-full h-full object-contain p-[2px]" loading="lazy" decoding="async" />
+              ) : (
+                <span className="text-[9px] leading-none">{sportEmoji(sport)}</span>
+              )}
+            </div>
+            {/* Round country flag */}
+            <div className="w-[18px] h-[18px] rounded-full bg-zinc-800 border border-zinc-700/60 flex items-center justify-center shrink-0 overflow-hidden">
+              <span className="text-[10px] leading-none">{flag}</span>
+            </div>
             <span className={`text-[10px] font-black tracking-[0.14em] uppercase truncate flex-1 ${isDarkTheme ? "text-zinc-400" : "text-zinc-500"}`}>
               {match.league}
             </span>
@@ -16178,105 +16189,205 @@ export default function Home({
                     {(() => {
                       if (!matchStats) return null;
                       const { avgStats, winProb } = matchStats;
-                      const allPossibleInsights: Array<{ market: string; odds: string; confidence: number; reason: string; tag: string; tagColor: string }> = [];
 
-                      // Previsões principais
-                      if (avgStats.over25 >= 50) {
-                        allPossibleInsights.push({
+                      const hscore = expandedMatch.homeScore ?? 0;
+                      const ascore = expandedMatch.awayScore ?? 0;
+                      const totalGoals = hscore + ascore;
+                      const bothScored = hscore > 0 && ascore > 0;
+                      const isLive = expandedMatch.isLive ?? false;
+
+                      // +5% boost applied to every preview odd
+                      const boosted = (odds: number) => Math.max(1.01, +(odds * 1.05).toFixed(2));
+
+                      type InsightEntry = {
+                        market: string;
+                        odds: string;
+                        baseOdds: string;
+                        confidence: number;
+                        reason: string;
+                        tag: string;
+                        tagColor: string;
+                        cascadeFrom?: string;
+                        settled?: boolean;
+                        settledLabel?: string;
+                      };
+
+                      const insights: InsightEntry[] = [];
+
+                      // ── Over / Under goals cascade ────────────────────────────
+                      const over15Settled = isLive && totalGoals >= 2;
+                      const over25Settled = isLive && totalGoals >= 3;
+                      const over35Settled = isLive && totalGoals >= 4;
+
+                      if (!over15Settled && avgStats.over15 >= 50) {
+                        const base = 1 / (avgStats.over15 / 100) * 0.95;
+                        insights.push({
+                          market: "Mais de 1.5 Golos",
+                          odds: boosted(base).toFixed(2),
+                          baseOdds: base.toFixed(2),
+                          confidence: avgStats.over15,
+                          reason: `Alta probabilidade de pelo menos 2 golos. Média H2H: ${avgStats.goalsScored.toFixed(1)} golos.`,
+                          tag: "ALTA",
+                          tagColor: "text-emerald-400",
+                        });
+                      } else if (over15Settled && !over25Settled && avgStats.over25 >= 40) {
+                        const base = 1 / (Math.max(35, avgStats.over25) / 100) * 0.95;
+                        insights.push({
                           market: "Mais de 2.5 Golos",
-                          odds: (1 / (avgStats.over25 / 100) * 0.95).toFixed(2),
+                          odds: boosted(base).toFixed(2),
+                          baseOdds: base.toFixed(2),
+                          confidence: Math.max(35, avgStats.over25),
+                          reason: `Mercado 1.5 liquidado (${totalGoals} golos). Próximo nível desbloqueado automaticamente.`,
+                          tag: "DESBLOQUEADO",
+                          tagColor: "text-orange-400",
+                          cascadeFrom: "Mais de 1.5",
+                        });
+                      }
+
+                      if (!over25Settled && avgStats.over25 >= 50) {
+                        const base = 1 / (avgStats.over25 / 100) * 0.95;
+                        insights.push({
+                          market: "Mais de 2.5 Golos",
+                          odds: boosted(base).toFixed(2),
+                          baseOdds: base.toFixed(2),
                           confidence: avgStats.over25,
-                          reason: `Média de ${avgStats.goalsScored.toFixed(1)} golos nos H2H. AEM: ${avgStats.btts}% das partidas.`,
+                          reason: `Média de ${avgStats.goalsScored.toFixed(1)} golos nos H2H. BTTS em ${avgStats.btts}% das partidas.`,
                           tag: avgStats.over25 >= 65 ? "VALOR" : "MODERADO",
                           tagColor: avgStats.over25 >= 65 ? "text-emerald-400" : "text-yellow-400",
                         });
+                      } else if (over25Settled && !over35Settled) {
+                        const conf = Math.max(30, avgStats.over25 - 20);
+                        const base = 1 / (conf / 100) * 0.95;
+                        insights.push({
+                          market: "Mais de 3.5 Golos",
+                          odds: boosted(base).toFixed(2),
+                          baseOdds: base.toFixed(2),
+                          confidence: conf,
+                          reason: `Mercado 2.5 liquidado (${totalGoals} golos). Mercado de 3.5 desbloqueado!`,
+                          tag: "DESBLOQUEADO",
+                          tagColor: "text-orange-400",
+                          cascadeFrom: "Mais de 2.5",
+                        });
+                      } else if (over35Settled) {
+                        const conf = Math.max(20, avgStats.over25 - 38);
+                        const base = 1 / (conf / 100) * 0.95;
+                        insights.push({
+                          market: "Mais de 4.5 Golos",
+                          odds: boosted(base).toFixed(2),
+                          baseOdds: base.toFixed(2),
+                          confidence: conf,
+                          reason: `Mercados 2.5 e 3.5 ambos liquidados (${totalGoals} golos). Jogo de muitos golos!`,
+                          tag: "DESBLOQUEADO",
+                          tagColor: "text-orange-400",
+                          cascadeFrom: "Mais de 3.5",
+                        });
                       }
-                      if (avgStats.btts >= 50) {
-                        allPossibleInsights.push({
+
+                      // Under goals (only if not already liquidated above)
+                      if (!isLive && avgStats.over25 < 50) {
+                        const conf = 100 - avgStats.over25;
+                        const base = 1 / (conf / 100) * 0.95;
+                        insights.push({
+                          market: "Menos de 2.5 Golos",
+                          odds: boosted(base).toFixed(2),
+                          baseOdds: base.toFixed(2),
+                          confidence: conf,
+                          reason: `Baixa probabilidade de muitos golos neste encontro.`,
+                          tag: "MODERADO",
+                          tagColor: "text-yellow-400",
+                        });
+                      }
+
+                      // ── BTTS cascade ─────────────────────────────────────────
+                      if (!bothScored && avgStats.btts >= 50) {
+                        const base = 1 / (avgStats.btts / 100) * 0.95;
+                        insights.push({
                           market: "Ambas Marcam — Sim",
-                          odds: (1 / (avgStats.btts / 100) * 0.95).toFixed(2),
+                          odds: boosted(base).toFixed(2),
+                          baseOdds: base.toFixed(2),
                           confidence: avgStats.btts,
                           reason: `Ambas as equipas marcaram em ${avgStats.btts}% dos jogos recentes. Média da liga: ${avgStats.leagueBtts}%.`,
                           tag: avgStats.btts >= 60 ? "FAVORITO" : "MODERADO",
                           tagColor: avgStats.btts >= 60 ? "text-blue-400" : "text-yellow-400",
                         });
-                      }
-                      const topProb = Math.max(winProb.home, winProb.draw, winProb.away);
-                      if (topProb === winProb.home && winProb.home >= 45) {
-                        allPossibleInsights.push({
-                          market: `${expandedMatch.home} — Vitória`,
-                          odds: (1 / (winProb.home / 100) * 0.95).toFixed(2),
-                          confidence: winProb.home,
-                          reason: `Probabilidade de ${winProb.home}% calculada a partir das odds de mercado. Vantagem em casa.`,
-                          tag: "SEGURO",
-                          tagColor: "text-yellow-400",
+                      } else if (bothScored && isLive) {
+                        // Ambas Marcam settled → cascade to Placar Exato + Cantos + Cartões
+                        const exactScore = `${hscore}-${ascore}`;
+                        insights.push({
+                          market: `Placar Exato ${exactScore}`,
+                          odds: boosted(7.50).toFixed(2),
+                          baseOdds: "7.50",
+                          confidence: 38,
+                          reason: `Ambas Marcam liquidada. Placar atual ${exactScore}. Mercado de placar exato desbloqueado!`,
+                          tag: "DESBLOQUEADO",
+                          tagColor: "text-orange-400",
+                          cascadeFrom: "Ambas Marcam — Sim",
                         });
-                      } else if (topProb === winProb.away && winProb.away >= 40) {
-                        allPossibleInsights.push({
-                          market: `${expandedMatch.away} — Vitória`,
-                          odds: (1 / (winProb.away / 100) * 0.95).toFixed(2),
-                          confidence: winProb.away,
-                          reason: `Probabilidade de ${winProb.away}% calculada a partir das odds de mercado.`,
-                          tag: "FAVORITO",
-                          tagColor: "text-blue-400",
+                        insights.push({
+                          market: "Acima de 7.5 Cantos",
+                          odds: boosted(1.85).toFixed(2),
+                          baseOdds: "1.85",
+                          confidence: 54,
+                          reason: `Com ambas a marcar, o jogo é mais aberto e gera mais cantos. Mercado desbloqueado.`,
+                          tag: "DESBLOQUEADO",
+                          tagColor: "text-orange-400",
+                          cascadeFrom: "Ambas Marcam — Sim",
+                        });
+                        insights.push({
+                          market: "Acima de 3.5 Cartões",
+                          odds: boosted(1.70).toFixed(2),
+                          baseOdds: "1.70",
+                          confidence: 51,
+                          reason: `Jogos com golos de ambas as equipas tendem a ter mais faltas e cartões.`,
+                          tag: "DESBLOQUEADO",
+                          tagColor: "text-orange-400",
+                          cascadeFrom: "Ambas Marcam — Sim",
                         });
                       }
 
-                      // Previsões adicionais (fallback)
-                      if (avgStats.over15 >= 50) {
-                        allPossibleInsights.push({
-                          market: "Mais de 1.5 Golos",
-                          odds: (1 / (avgStats.over15 / 100) * 0.95).toFixed(2),
-                          confidence: avgStats.over15,
-                          reason: `Alta probabilidade de pelo menos 2 golos no jogo.`,
-                          tag: "ALTA",
-                          tagColor: "text-emerald-400",
-                        });
-                      }
-                      if (avgStats.over25 < 50) {
-                        allPossibleInsights.push({
-                          market: "Menos de 2.5 Golos",
-                          odds: (1 / ((100 - avgStats.over25) / 100) * 0.95).toFixed(2),
-                          confidence: 100 - avgStats.over25,
-                          reason: `Baixa probabilidade de muitos golos no jogo.`,
-                          tag: "MODERADO",
-                          tagColor: "text-yellow-400",
-                        });
-                      }
-                      if (avgStats.btts < 50) {
-                        allPossibleInsights.push({
+                      if (!isLive && avgStats.btts < 50) {
+                        const conf = 100 - avgStats.btts;
+                        const base = 1 / (conf / 100) * 0.95;
+                        insights.push({
                           market: "Ambas Marcam — Não",
-                          odds: (1 / ((100 - avgStats.btts) / 100) * 0.95).toFixed(2),
-                          confidence: 100 - avgStats.btts,
+                          odds: boosted(base).toFixed(2),
+                          baseOdds: base.toFixed(2),
+                          confidence: conf,
                           reason: `Baixa probabilidade de ambas as equipas marcarem.`,
                           tag: "MODERADO",
                           tagColor: "text-yellow-400",
                         });
                       }
 
-                      const filteredInsights = allPossibleInsights.filter(ins => {
-                        if (ins.market.includes("Mais de 2.5")) {
-                          const total = (expandedMatch.homeScore ?? 0) + (expandedMatch.awayScore ?? 0);
-                          if (total >= 3) return false;
-                        }
-                        if (ins.market.includes("Mais de 1.5")) {
-                          const total = (expandedMatch.homeScore ?? 0) + (expandedMatch.awayScore ?? 0);
-                          if (total >= 2) return false;
-                        }
-                        if (ins.market.includes("Menos de 2.5")) {
-                          const total = (expandedMatch.homeScore ?? 0) + (expandedMatch.awayScore ?? 0);
-                          if (total <= 2) return false;
-                        }
-                        if (ins.market.includes("Ambas Marcam — Sim")) {
-                          if ((expandedMatch.homeScore ?? 0) > 0 && (expandedMatch.awayScore ?? 0) > 0) return false;
-                        }
-                        if (ins.market.includes("Ambas Marcam — Não")) {
-                          if ((expandedMatch.homeScore ?? 0) === 0 || (expandedMatch.awayScore ?? 0) === 0) return false;
-                        }
-                        return true;
-                      }).slice(0, 3);
+                      // ── Win prediction ────────────────────────────────────────
+                      const topProb = Math.max(winProb.home, winProb.draw, winProb.away);
+                      if (topProb === winProb.home && winProb.home >= 45) {
+                        const base = 1 / (winProb.home / 100) * 0.95;
+                        insights.push({
+                          market: `${expandedMatch.home} — Vitória`,
+                          odds: boosted(base).toFixed(2),
+                          baseOdds: base.toFixed(2),
+                          confidence: winProb.home,
+                          reason: `Probabilidade de ${winProb.home}% calculada a partir das odds. Vantagem em casa.`,
+                          tag: "SEGURO",
+                          tagColor: "text-yellow-400",
+                        });
+                      } else if (topProb === winProb.away && winProb.away >= 40) {
+                        const base = 1 / (winProb.away / 100) * 0.95;
+                        insights.push({
+                          market: `${expandedMatch.away} — Vitória`,
+                          odds: boosted(base).toFixed(2),
+                          baseOdds: base.toFixed(2),
+                          confidence: winProb.away,
+                          reason: `Probabilidade de ${winProb.away}% calculada a partir das odds.`,
+                          tag: "FAVORITO",
+                          tagColor: "text-blue-400",
+                        });
+                      }
 
-                      if (filteredInsights.length === 0) {
+                      const displayed = insights.slice(0, 4);
+
+                      if (displayed.length === 0) {
                         return (
                           <div className="bg-zinc-900 rounded-xl border border-zinc-800 p-6 text-center text-zinc-500 text-sm">
                             Dados insuficientes para gerar previsões.
@@ -16284,29 +16395,47 @@ export default function Home({
                         );
                       }
 
-                      return filteredInsights.map((ins, i) => (
+                      return displayed.map((ins, i) => (
                         <motion.div
                           key={ins.market}
                           initial={{ opacity: 0, x: -10 }}
                           animate={{ opacity: 1, x: 0 }}
                           transition={{ delay: i * 0.1 }}
-                          className="bg-zinc-900 border border-zinc-800 rounded-xl p-4"
+                          className={`border rounded-xl p-4 ${ins.cascadeFrom ? "bg-zinc-800/70 border-orange-500/30" : "bg-zinc-900 border-zinc-800"}`}
                         >
+                          {/* Cascade unlock banner */}
+                          {ins.cascadeFrom && (
+                            <div className="flex items-center gap-1.5 mb-2.5 bg-orange-500/10 rounded-lg px-2.5 py-1.5">
+                              <Zap size={10} className="text-orange-400 shrink-0" />
+                              <span className="text-[9px] font-black text-orange-400 uppercase tracking-wide">
+                                🔓 {ins.cascadeFrom} liquidado — novo mercado
+                              </span>
+                            </div>
+                          )}
+
                           <div className="flex items-start justify-between gap-3 mb-3">
                             <div className="flex-1 min-w-0">
                               <div className={`text-[10px] font-black uppercase tracking-widest mb-1 ${ins.tagColor}`}>{ins.tag}</div>
                               <div className="text-sm font-black text-white leading-tight">{ins.market}</div>
                             </div>
-                            <div className="shrink-0 bg-zinc-800 border border-zinc-700 rounded-xl px-3 py-2 text-center">
-                              <div className="text-xs font-black text-white">{ins.odds}</div>
-                              <div className="text-[9px] text-zinc-500">odd</div>
+                            {/* Odds box with boost badge */}
+                            <div className="shrink-0 flex flex-col items-center gap-1">
+                              <div className="bg-zinc-800 border border-zinc-700 rounded-xl px-3 py-2 text-center">
+                                <div className="text-xs font-black text-white">{ins.odds}</div>
+                                <div className="text-[9px] text-zinc-500">odd</div>
+                              </div>
+                              <div className="flex items-center gap-0.5 bg-yellow-500/20 border border-yellow-500/40 rounded-full px-1.5 py-0.5">
+                                <Zap size={7} className="text-yellow-400" />
+                                <span className="text-[8px] font-black text-yellow-400">+5%</span>
+                              </div>
                             </div>
                           </div>
+
                           <div className="flex items-center gap-2 mb-3">
                             <div className="text-[10px] text-zinc-500 shrink-0">Confiança</div>
                             <div className="flex-1 h-1.5 bg-zinc-800 rounded-full overflow-hidden">
                               <motion.div
-                                className="h-full bg-gradient-to-r from-yellow-500 to-emerald-500 rounded-full"
+                                className={`h-full rounded-full ${ins.cascadeFrom ? "bg-gradient-to-r from-orange-500 to-yellow-400" : "bg-gradient-to-r from-yellow-500 to-emerald-500"}`}
                                 initial={{ width: 0 }}
                                 animate={{ width: `${ins.confidence}%` }}
                                 transition={{ duration: 0.9, delay: i * 0.1 + 0.2 }}
@@ -16314,14 +16443,16 @@ export default function Home({
                             </div>
                             <div className="text-[10px] font-black text-zinc-300 shrink-0">{ins.confidence}%</div>
                           </div>
-                          <div className="text-[11px] text-zinc-400 leading-relaxed">{ins.reason}</div>
+
+                          <div className="text-[11px] text-zinc-400 leading-relaxed mb-3">{ins.reason}</div>
+
                           <button
                             onClick={() => {
                               if (!expandedMatch) return;
                               toggleBet(expandedMatch, ins.market, parseFloat(ins.odds), "insight", ins.market);
                               if (window.innerWidth < 1024) setBetSlipOpenMobile(true);
                             }}
-                            className="mt-3 w-full flex items-center justify-center gap-1.5 bg-red-600 hover:bg-red-500 active:bg-red-700 text-white text-[12px] font-black py-2.5 rounded-xl transition-colors"
+                            className="w-full flex items-center justify-center gap-1.5 bg-red-600 hover:bg-red-500 active:bg-red-700 text-white text-[12px] font-black py-2.5 rounded-xl transition-colors"
                           >
                             Adicionar à Aposta
                             <ChevronRight size={13} />
