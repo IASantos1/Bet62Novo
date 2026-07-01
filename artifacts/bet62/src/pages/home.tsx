@@ -490,21 +490,346 @@ function getPathForMainTab(tab: MainTab): string {
 }
 
 const TEAM_NAME_PT: Record<string, string> = {
-  Norway: "Noruega",
-  Uruguay: "Uruguai",
-  Senegal: "Senegal",
-  France: "França",
-  Iraq: "Iraque",
-  Noruega: "Noruega",
-  Uruguai: "Uruguai",
-  França: "França",
-  Iraque: "Iraque",
+  // ── Europa ──
+  Norway: "Noruega", Sweden: "Suécia", Denmark: "Dinamarca",
+  Finland: "Finlândia", Iceland: "Islândia", Ireland: "Irlanda",
+  "Northern Ireland": "Irlanda do Norte",
+  France: "França", Germany: "Alemanha", Spain: "Espanha",
+  Italy: "Itália", Portugal: "Portugal", England: "Inglaterra",
+  Netherlands: "Holanda", Belgium: "Bélgica", Switzerland: "Suíça",
+  Austria: "Áustria", Poland: "Polónia",
+  "Czech Republic": "Rep. Checa", Czechia: "Chéquia",
+  Slovakia: "Eslováquia", Hungary: "Hungria", Romania: "Roménia",
+  Croatia: "Croácia", Serbia: "Sérvia", Slovenia: "Eslovénia",
+  "Bosnia and Herzegovina": "Bósnia e Herzegovina",
+  "Bosnia & Herzegovina": "Bósnia e Herzegovina",
+  "North Macedonia": "Macedónia do Norte",
+  Albania: "Albânia", Bulgaria: "Bulgária", Ukraine: "Ucrânia",
+  Russia: "Rússia", Turkey: "Turquia", Greece: "Grécia",
+  Scotland: "Escócia", Wales: "País de Gales",
+  Georgia: "Geórgia", Israel: "Israel", Belarus: "Bielorrússia",
+  Kosovo: "Kosovo", Luxembourg: "Luxemburgo", Moldova: "Moldávia",
+  Estonia: "Estónia", Latvia: "Letónia", Lithuania: "Lituânia",
+  Armenia: "Arménia", Azerbaijan: "Azerbaijão", Kazakhstan: "Cazaquistão",
+  Montenegro: "Montenegro", "Faroe Islands": "Ilhas Faroé",
+  Gibraltar: "Gibraltar", "San Marino": "São Marinho",
+  Andorra: "Andorra", Malta: "Malta", Cyprus: "Chipre",
+  // ── Américas ──
+  Brazil: "Brasil", Argentina: "Argentina", Uruguay: "Uruguai",
+  Chile: "Chile", Colombia: "Colômbia", Paraguay: "Paraguai",
+  Bolivia: "Bolívia", Peru: "Peru", Venezuela: "Venezuela",
+  Ecuador: "Equador",
+  Mexico: "México", USA: "EUA", "United States": "EUA",
+  Canada: "Canadá", "Costa Rica": "Costa Rica", Panama: "Panamá",
+  Honduras: "Honduras", Guatemala: "Guatemala",
+  "El Salvador": "El Salvador",
+  "Trinidad and Tobago": "Trinidad e Tobago",
+  Jamaica: "Jamaica", Haiti: "Haiti", Cuba: "Cuba",
+  Suriname: "Suriname", Guyana: "Guiana",
+  // ── África ──
+  Morocco: "Marrocos", Egypt: "Egito", Algeria: "Argélia",
+  Tunisia: "Tunísia", Nigeria: "Nigéria", Cameroon: "Camarões",
+  Senegal: "Senegal", Ghana: "Gana",
+  "Ivory Coast": "Costa do Marfim", "Cote d'Ivoire": "Costa do Marfim",
+  "South Africa": "África do Sul", Kenya: "Quénia",
+  Ethiopia: "Etiópia", Tanzania: "Tanzânia", Uganda: "Uganda",
+  Angola: "Angola", Zambia: "Zâmbia", Zimbabwe: "Zimbabué",
+  Mozambique: "Moçambique", Mali: "Mali",
+  "Burkina Faso": "Burkina Faso", Benin: "Benim", Togo: "Togo",
+  Congo: "Congo", "DR Congo": "RD Congo", Gabon: "Gabão",
+  "Equatorial Guinea": "Guiné Equatorial",
+  "Cape Verde": "Cabo Verde", "Guinea-Bissau": "Guiné-Bissau",
+  Libya: "Líbia", Sudan: "Sudão",
+  // ── Ásia ──
+  Japan: "Japão", "South Korea": "Coreia do Sul",
+  "Korea Republic": "Coreia do Sul", "Korea DPR": "Coreia do Norte",
+  "North Korea": "Coreia do Norte",
+  China: "China", "China PR": "China",
+  Australia: "Austrália", "New Zealand": "Nova Zelândia",
+  "Saudi Arabia": "Arábia Saudita", Iran: "Irão", Iraq: "Iraque",
+  Qatar: "Catar", "United Arab Emirates": "EAU", UAE: "EAU",
+  Kuwait: "Koweit", Bahrain: "Barém", Jordan: "Jordânia",
+  Syria: "Síria", Lebanon: "Líbano", Oman: "Omã",
+  India: "Índia", Thailand: "Tailândia", Vietnam: "Vietname",
+  Indonesia: "Indonésia", Malaysia: "Malásia",
+  Singapore: "Singapura", Philippines: "Filipinas",
+  Uzbekistan: "Usbequistão", Tajikistan: "Tajiquistão",
+  Afghanistan: "Afeganistão", Pakistan: "Paquistão",
+  // ── já em PT (idempotente) ──
+  Noruega: "Noruega", Suécia: "Suécia", Dinamarca: "Dinamarca",
+  Finlândia: "Finlândia", Islândia: "Islândia", França: "França",
+  Alemanha: "Alemanha", Espanha: "Espanha", Itália: "Itália",
+  Holanda: "Holanda", Bélgica: "Bélgica", Suíça: "Suíça",
+  Áustria: "Áustria", Polónia: "Polónia",
+  Grécia: "Grécia", Turquia: "Turquia", Croácia: "Croácia",
+  Sérvia: "Sérvia", Ucrânia: "Ucrânia", Rússia: "Rússia",
+  Hungria: "Hungria", Roménia: "Roménia", Bulgária: "Bulgária",
+  Brasil: "Brasil",
+  Uruguai: "Uruguai", Paraguai: "Paraguai", Bolívia: "Bolívia",
+  "Colômbia": "Colômbia", Equador: "Equador",
+  México: "México", Canadá: "Canadá", Panamá: "Panamá",
+  Marrocos: "Marrocos", Egito: "Egito",
+  Argélia: "Argélia", Tunísia: "Tunísia",
+  Nigéria: "Nigéria", Camarões: "Camarões",
+  Japão: "Japão", Austrália: "Austrália",
+  Irão: "Irão", Iraque: "Iraque",
+  "Arábia Saudita": "Arábia Saudita", Catar: "Catar",
+  Tailândia: "Tailândia", Índia: "Índia",
 };
 
 function teamNamePt(name: string): string {
   const n = (name ?? "").trim();
   if (!n) return n;
   return TEAM_NAME_PT[n] ?? n;
+}
+
+const LEAGUE_NAME_PT: Record<string, string> = {
+  // ── Internacional ──
+  "FIFA World Cup": "Copa do Mundo FIFA",
+  "FIFA World Cup 2026": "Copa do Mundo 2026",
+  "World Cup 2026": "Copa do Mundo 2026",
+  "World Cup": "Copa do Mundo",
+  "International Friendlies": "Amistosos Internacionais",
+  "International Friendly": "Amistoso Internacional",
+  "Amistosos internacionais": "Amistosos Internacionais",
+  "Club Friendlies": "Amistosos de Clubes",
+  "Club Friendly": "Amistoso de Clubes",
+  "UEFA Nations League": "Liga das Nações UEFA",
+  "UEFA Champions League": "Liga dos Campeões UEFA",
+  "Champions League": "Liga dos Campeões",
+  "UEFA Europa League": "Liga Europa UEFA",
+  "Europa League": "Liga Europa",
+  "UEFA Conference League": "Conference League UEFA",
+  "Conference League": "Conference League",
+  "UEFA European Championship": "Campeonato Europeu UEFA",
+  "UEFA Super Cup": "Supertaça UEFA",
+  "Copa América": "Copa América",
+  "Copa America": "Copa América",
+  "CONCACAF Gold Cup": "Copa Ouro CONCACAF",
+  "CONCACAF Nations League": "Liga das Nações CONCACAF",
+  "CONCACAF Champions Cup": "Copa dos Campeões CONCACAF",
+  "Africa Cup of Nations": "Taça das Nações Africanas",
+  "AFC Asian Cup": "Copa Asiática AFC",
+  "AFC Champions League": "Liga dos Campeões AFC",
+  "Copa Libertadores": "Copa Libertadores",
+  "Copa Sudamericana": "Copa Sul-Americana",
+  "Recopa Sudamericana": "Recopa Sul-Americana",
+  "Leagues Cup": "Leagues Cup",
+  // ── Inglaterra ──
+  "Premier League": "Premier League",
+  "EFL Championship": "Championship",
+  "League One": "League One",
+  "League Two": "League Two",
+  "FA Cup": "Taça FA",
+  "EFL Cup": "Taça da Liga EFL",
+  "Carabao Cup": "Taça Carabao",
+  "Community Shield": "Community Shield",
+  // ── Espanha ──
+  "La Liga": "La Liga",
+  "LaLiga Hypermotion": "LaLiga Hypermotion",
+  "Segunda Division": "Segunda División",
+  "Copa del Rey": "Copa del Rey",
+  "Supercopa de España": "Supertaça de Espanha",
+  // ── Alemanha ──
+  "Bundesliga": "Bundesliga",
+  "2. Bundesliga": "2ª Bundesliga",
+  "3. Liga": "3ª Liga",
+  "DFB-Pokal": "Taça DFB",
+  "DFL-Supercup": "Supertaça DFL",
+  // ── Itália ──
+  "Serie A": "Serie A",
+  "Serie B": "Serie B",
+  "Serie C": "Serie C",
+  "Coppa Italia": "Taça de Itália",
+  "Supercoppa Italiana": "Supertaça Italiana",
+  // ── França ──
+  "Ligue 1": "Ligue 1",
+  "Ligue 2": "Ligue 2",
+  "National": "Nacional (França)",
+  "Coupe de France": "Taça de França",
+  "Trophée des Champions": "Troféu dos Campeões",
+  // ── Portugal ──
+  "Liga Portugal": "Liga Portugal",
+  "Liga Portugal 2": "Liga Portugal 2",
+  "Taça de Portugal": "Taça de Portugal",
+  "Supertaça Cândido de Oliveira": "Supertaça de Portugal",
+  // ── Holanda ──
+  "Eredivisie": "Eredivisie",
+  "Eerste Divisie": "Eerste Divisie",
+  "KNVB Cup": "Taça KNVB",
+  // ── Bélgica ──
+  "Jupiler Pro League": "Jupiler Pro League",
+  "Belgian Pro League": "Pro League Belga",
+  "Belgian Cup": "Taça da Bélgica",
+  // ── Turquia ──
+  "Süper Lig": "Süper Lig",
+  "Super Lig": "Süper Lig",
+  "TFF First League": "1ª Liga TFF",
+  "TFF Second League": "2ª Liga TFF",
+  "Turkish Cup": "Taça da Turquia",
+  "Turkish Super Cup": "Supertaça da Turquia",
+  // ── Grécia ──
+  "Super League Greece": "Super League Grécia",
+  "Super League 2": "Super League 2",
+  "Greek Cup": "Taça da Grécia",
+  // ── Áustria ──
+  "Austrian Bundesliga": "Bundesliga Austríaca",
+  "Austrian Football Second League": "2ª Liga Austríaca",
+  "Austrian Cup": "Taça da Áustria",
+  // ── Escócia ──
+  "Scottish Premiership": "Premiership Escocesa",
+  "Scottish Championship": "Championship Escocesa",
+  "Scottish League One": "League One Escocesa",
+  "Scottish Cup": "Taça Escocesa",
+  // ── Suíça ──
+  "Swiss Super League": "Super League Suíça",
+  "Challenge League": "Challenge League",
+  "Swiss Cup": "Taça da Suíça",
+  // ── Dinamarca ──
+  "Danish Superliga": "Superliga Dinamarquesa",
+  "Danish 1st Division": "1ª Divisão Dinamarquesa",
+  // ── Noruega ──
+  "Eliteserien": "Eliteserien",
+  "Norwegian Cup": "Taça da Noruega",
+  // ── Suécia ──
+  "Allsvenskan": "Allsvenskan",
+  "Superettan": "Superettan",
+  "Svenska Cupen": "Taça da Suécia",
+  // ── Croácia ──
+  "HNL": "HNL (Croácia)",
+  "Croatian Football Cup": "Taça da Croácia",
+  // ── Sérvia ──
+  "Serbian SuperLiga": "SuperLiga Sérvia",
+  "Serbian Cup": "Taça da Sérvia",
+  // ── Polónia ──
+  "Ekstraklasa": "Ekstraklasa",
+  "I liga": "1ª Liga Polónia",
+  // ── Rep. Checa ──
+  "Czech First League": "1ª Liga Checa",
+  "FNL": "Liga Nacional Checa",
+  // ── Rússia ──
+  "Russian Premier League": "Liga Premier Russa",
+  "Russian National League": "Liga Nacional Russa",
+  "Russian Cup": "Taça da Rússia",
+  // ── Ucrânia ──
+  "Ukrainian Premier League": "Liga Premier Ucraniana",
+  "Ukrainian Cup": "Taça da Ucrânia",
+  // ── Brasil ──
+  "Brasileirão": "Brasileirão",
+  "Brasileirão Série B": "Brasileirão Série B",
+  "Copa do Brasil": "Copa do Brasil",
+  "Campeonato Paulista": "Campeonato Paulista",
+  "Campeonato Carioca": "Campeonato Carioca",
+  "Copa Sul-Americana": "Copa Sul-Americana",
+  // ── Argentina ──
+  "Primera División": "Primera División",
+  "Primera Nacional": "Primera Nacional",
+  "Copa Argentina": "Copa Argentina",
+  "Copa de la Liga Profesional": "Copa de la Liga",
+  // ── México ──
+  "Liga MX": "Liga MX",
+  "Ascenso MX": "Ascenso MX",
+  "Copa MX": "Copa MX",
+  // ── Chile ──
+  "Primera División — Chile": "Primeira Divisão Chile",
+  "Primera B — Chile": "Primeira B Chile",
+  // ── Colômbia ──
+  "Categoría Primera A": "Primeira Categoria A",
+  "Categoría Primera B": "Primeira Categoria B",
+  // ── EUA ──
+  "MLS": "MLS",
+  "USL Championship": "Championship USL",
+  "US Open Cup": "US Open Cup",
+  // ── Canadá ──
+  "Canadian Premier League": "Liga Premier Canadiana",
+  // ── Arábia Saudita ──
+  "Saudi Pro League": "Liga Pro Saudita",
+  "Saudi Professional League": "Liga Profissional Saudita",
+  "King Cup": "Taça do Rei",
+  // ── Japão ──
+  "J1 League": "J1 League",
+  "J2 League": "J2 League",
+  "J3 League": "J3 League",
+  // ── Coreia do Sul ──
+  "K League 1": "K League 1",
+  "K League 2": "K League 2",
+  "Korean FA Cup": "Taça FA Coreana",
+  // ── Austrália ──
+  "A-League": "A-League",
+  "Australia Cup": "Taça da Austrália",
+  // ── China ──
+  "Chinese Super League": "Super Liga Chinesa",
+  // ── Índia ──
+  "Indian Super League": "Super Liga Indiana",
+  // ── Basquete ──
+  "National Basketball Association": "NBA",
+  "NBA": "NBA",
+  "EuroLeague": "EuroLeague",
+  "Liga ACB": "Liga ACB (Espanha)",
+  "Lega Basket Serie A": "Lega Basket (Itália)",
+  "LNB Pro A": "Pro A (França)",
+  "Novo Basquete Brasil": "NBB (Brasil)",
+  "VTB United League": "Liga VTB",
+  // ── Hóquei no Gelo ──
+  "NHL": "NHL",
+  "KHL": "KHL",
+  "AHL": "AHL",
+  "Champions Hockey League": "Liga dos Campeões de Hóquei",
+  // ── Ténis ──
+  "Australian Open": "Open da Austrália",
+  "Roland Garros": "Roland Garros",
+  "Wimbledon": "Wimbledon",
+  "US Open": "US Open",
+  "ATP Finals": "ATP Finals",
+  "WTA Finals": "WTA Finals",
+  "Davis Cup": "Taça Davis",
+  "Billie Jean King Cup": "Copa Billie Jean King",
+  "ATP 500": "ATP 500",
+  "ATP 250": "ATP 250",
+  "WTA 1000": "WTA 1000",
+  "WTA 500": "WTA 500",
+  "WTA 250": "WTA 250",
+  // ── Voleibol ──
+  "Volleyball Nations League": "Liga das Nações de Voleibol",
+  "SuperLega": "SuperLega (Itália)",
+  "Superliga Série A": "Superliga Brasil",
+  // ── Basebol ──
+  "USA: MLB": "MLB",
+  "MLB": "MLB",
+};
+
+
+function leaguePt(name: string): string {
+  const n = (name ?? "").trim();
+  if (!n) return n;
+  if (LEAGUE_NAME_PT[n]) return LEAGUE_NAME_PT[n]!;
+  const lower = n.toLowerCase();
+  for (const [k, v] of Object.entries(LEAGUE_NAME_PT)) {
+    if (k.toLowerCase() === lower) return v;
+  }
+  if (/world cup|copa do mundo|copa mundial|fifa world/i.test(n)) {
+    let r = n
+      .replace(/FIFA World Cup \d{4}/i, "Copa do Mundo")
+      .replace(/FIFA World Cup/i, "Copa do Mundo")
+      .replace(/World Cup \d{4}/i, "Copa do Mundo")
+      .replace(/World Cup/i, "Copa do Mundo");
+    r = r.replace(/Round of (\d+)/i, (_: string, num: string) => {
+      const n2 = parseInt(num, 10);
+      if (n2 === 16) return "Oitavos de Final";
+      if (n2 === 8) return "Quartos de Final";
+      if (n2 === 4) return "Meias-Finais";
+      if (n2 === 2) return "Final";
+      return `Fase de ${num}`;
+    });
+    r = r
+      .replace(/Quarter[ -]?Final/i, "Quartos de Final")
+      .replace(/Semi[ -]?Final/i, "Meias-Finais")
+      .replace(/3rd Place/i, "3º Lugar")
+      .replace(/Group Stage/i, "Fase de Grupos")
+      .replace(/Group ([A-Z])/i, "Grupo $1");
+    return r;
+  }
+  return n;
 }
 
 const LEAGUE_FLAGS: Record<string, string> = {
@@ -803,6 +1128,12 @@ const LEAGUE_LOGOS: Record<string, string> = {
   "UEFA European Championship":
     "https://media.api-sports.io/football/leagues/4.png",
   "FIFA World Cup": "https://media.api-sports.io/football/leagues/1.png",
+  "FIFA World Cup 2026": "https://media.api-sports.io/football/leagues/1.png",
+  "World Cup 2026": "https://media.api-sports.io/football/leagues/1.png",
+  "World Cup": "https://media.api-sports.io/football/leagues/1.png",
+  "Copa do Mundo 2026": "https://media.api-sports.io/football/leagues/1.png",
+  "Copa do Mundo FIFA": "https://media.api-sports.io/football/leagues/1.png",
+  "Copa do Mundo": "https://media.api-sports.io/football/leagues/1.png",
   "Copa América": "https://media.api-sports.io/football/leagues/9.png",
   "Copa America": "https://media.api-sports.io/football/leagues/9.png",
   "CONCACAF Gold Cup": "https://media.api-sports.io/football/leagues/22.png",
@@ -8487,14 +8818,19 @@ export default function Home({
       <div className="flex items-center justify-between px-3 pt-2.5 pb-1.5">
         <div className="flex items-center gap-2 min-w-0">
           {(() => {
-            const fUrl = getCountryFlagUrl(match.country, match.league ?? undefined);
+            const leagueLogo = LEAGUE_LOGOS[match.league ?? ""];
+            const fUrl = !leagueLogo ? getCountryFlagUrl(match.country, match.league ?? undefined) : null;
             return (
               <div className="relative shrink-0 w-[22px] h-[22px]">
                 <div
-                  className="w-[22px] h-[22px] rounded-full border border-zinc-700/70 bg-zinc-800"
-                  style={fUrl ? flagBgStyle(fUrl) : undefined}
+                  className="w-[22px] h-[22px] rounded-full border border-zinc-700/70 bg-zinc-800 overflow-hidden"
+                  style={!leagueLogo && fUrl ? flagBgStyle(fUrl) : undefined}
                 >
-                  {!fUrl && <span className="flex items-center justify-center w-full h-full text-[11px] leading-none">{flag}</span>}
+                  {leagueLogo ? (
+                    <img src={leagueLogo} alt="" className="w-full h-full object-contain p-[2px]" loading="lazy" />
+                  ) : !fUrl ? (
+                    <span className="flex items-center justify-center w-full h-full text-[11px] leading-none">{flag}</span>
+                  ) : null}
                 </div>
                 <div className="absolute -top-[5px] -right-[5px] w-[13px] h-[13px] rounded-full bg-zinc-900 border border-zinc-700 flex items-center justify-center shadow-sm">
                   <span className="text-[7px] leading-none">{sportEmoji(match.sport)}</span>
@@ -8503,7 +8839,7 @@ export default function Home({
             );
           })()}
           <span className="text-[11px] text-zinc-500 truncate">
-            {match.league}
+            {leaguePt(match.league ?? "")}
           </span>
         </div>
         <div className="flex items-center gap-2 shrink-0 ml-2">
@@ -8527,6 +8863,9 @@ export default function Home({
     const bannerImg = getMatchBannerStable(match);
     const homeName = teamNamePt(match.home);
     const awayName = teamNamePt(match.away);
+    const isNationalMatch = isSelectionMatch(match);
+    const homeFlag = isNationalMatch ? getCountryFlagUrl(match.home.toLowerCase()) : null;
+    const awayFlag = isNationalMatch ? getCountryFlagUrl(match.away.toLowerCase()) : null;
     const dateStr =
       (match.scheduledDate ?? match.date)
         ? formatMatchDate(match.scheduledDate ?? match.date ?? "")
@@ -9227,14 +9566,19 @@ export default function Home({
           <div className="flex items-center justify-between gap-2 mb-2">
             <div className="min-w-0 flex items-center gap-1.5">
               {(() => {
-                const fUrl = getCountryFlagUrl(match.country, match.league ?? undefined);
+                const leagueLogo = LEAGUE_LOGOS[match.league ?? ""];
+                const fUrl = !leagueLogo ? getCountryFlagUrl(match.country, match.league ?? undefined) : null;
                 return (
                   <div className="relative shrink-0 w-[20px] h-[20px]">
                     <div
-                      className="w-[20px] h-[20px] rounded-full border border-zinc-700/70 bg-zinc-800"
-                      style={fUrl ? flagBgStyle(fUrl) : undefined}
+                      className="w-[20px] h-[20px] rounded-full border border-zinc-700/70 bg-zinc-800 overflow-hidden"
+                      style={!leagueLogo && fUrl ? flagBgStyle(fUrl) : undefined}
                     >
-                      {!fUrl && <span className="flex items-center justify-center w-full h-full text-[9px] leading-none">{flag}</span>}
+                      {leagueLogo ? (
+                        <img src={leagueLogo} alt="" className="w-full h-full object-contain p-[2px]" loading="lazy" />
+                      ) : !fUrl ? (
+                        <span className="flex items-center justify-center w-full h-full text-[9px] leading-none">{flag}</span>
+                      ) : null}
                     </div>
                     <div className="absolute -top-[4px] -right-[4px] w-[11px] h-[11px] rounded-full bg-zinc-900 border border-zinc-700 flex items-center justify-center">
                       <span className="text-[6px] leading-none">{sportEmoji(sport)}</span>
@@ -9243,7 +9587,7 @@ export default function Home({
                 );
               })()}
               <span className={`text-[10px] font-black tracking-[0.14em] uppercase truncate ${isDarkTheme ? "text-zinc-400" : "text-zinc-500"}`}>
-                {match.league}
+                {leaguePt(match.league ?? "")}
               </span>
             </div>
             <div className="shrink-0">{liveBadge}</div>
@@ -9266,6 +9610,9 @@ export default function Home({
                 <>
                   <div className="flex items-center gap-2 mb-1.5">
                     {rcH > 0 && <RcBadge count={rcH} />}
+                    {homeFlag && (
+                      <img src={homeFlag} alt="" className="w-3.5 h-3.5 rounded-[2px] object-cover shrink-0" loading="lazy" />
+                    )}
                     <span className={`text-[13px] font-black leading-tight truncate flex-1 ${isDarkTheme ? "text-white" : "text-zinc-900"}`}>
                       {homeName}
                     </span>
@@ -9275,6 +9622,9 @@ export default function Home({
                   </div>
                   <div className="flex items-center gap-2">
                     {rcA > 0 && <RcBadge count={rcA} />}
+                    {awayFlag && (
+                      <img src={awayFlag} alt="" className="w-3.5 h-3.5 rounded-[2px] object-cover shrink-0" loading="lazy" />
+                    )}
                     <span className={`text-[12px] font-semibold leading-tight truncate flex-1 ${isDarkTheme ? "text-zinc-400" : "text-zinc-600"}`}>
                       {awayName}
                     </span>
@@ -9419,6 +9769,9 @@ export default function Home({
       (match.sport ?? "football") !== "tennis" && match.odds.draw > 0;
     const homeName = teamNamePt(match.home);
     const awayName = teamNamePt(match.away);
+    const isNationalMatch = isSelectionMatch(match);
+    const homeFlag = isNationalMatch ? getCountryFlagUrl(match.home.toLowerCase()) : null;
+    const awayFlag = isNationalMatch ? getCountryFlagUrl(match.away.toLowerCase()) : null;
     const isSuspendedMatch =
       match.isLive &&
       (match.marketSuspension?.["result"] != null &&
@@ -9501,16 +9854,19 @@ export default function Home({
           <div className="flex items-center gap-1.5 mb-2">
             {/* Round country flag + sport icon badge */}
             {(() => {
-              const flagUrl = getCountryFlagUrl(match.country, match.league ?? undefined);
+              const leagueLogo = LEAGUE_LOGOS[match.league ?? ""];
+              const flagUrl = !leagueLogo ? getCountryFlagUrl(match.country, match.league ?? undefined) : null;
               return (
                 <div className="relative shrink-0 w-[22px] h-[22px]">
                   <div
-                    className="w-[22px] h-[22px] rounded-full border border-zinc-700/70 bg-zinc-800"
-                    style={flagUrl ? flagBgStyle(flagUrl) : undefined}
+                    className="w-[22px] h-[22px] rounded-full border border-zinc-700/70 bg-zinc-800 overflow-hidden"
+                    style={!leagueLogo && flagUrl ? flagBgStyle(flagUrl) : undefined}
                   >
-                    {!flagUrl && (
+                    {leagueLogo ? (
+                      <img src={leagueLogo} alt="" className="w-full h-full object-contain p-[2px]" loading="lazy" />
+                    ) : !flagUrl ? (
                       <span className="flex items-center justify-center w-full h-full text-[11px] leading-none">{flag}</span>
-                    )}
+                    ) : null}
                   </div>
                   <div className="absolute -top-[5px] -right-[5px] w-[13px] h-[13px] rounded-full bg-zinc-900 border border-zinc-700 flex items-center justify-center shadow-sm">
                     <span className="text-[7px] leading-none">{sportEmoji(sport)}</span>
@@ -9519,7 +9875,7 @@ export default function Home({
               );
             })()}
             <span className={`text-[10px] font-black tracking-[0.14em] uppercase truncate flex-1 ${isDarkTheme ? "text-zinc-400" : "text-zinc-500"}`}>
-              {match.league}
+              {leaguePt(match.league ?? "")}
             </span>
             {rivalry && (
               <span className="text-[9px] font-black text-red-500 shrink-0">{rivalry}</span>
@@ -9531,12 +9887,18 @@ export default function Home({
           {/* Teams + odds — side by side on sm+, stacked on mobile */}
           <div className="flex flex-col sm:flex-row sm:items-center gap-2">
             <div className="flex-1 min-w-0">
-              <div className="mb-1.5">
+              <div className="mb-1.5 flex items-center gap-1.5">
+                {homeFlag && (
+                  <img src={homeFlag} alt="" className="w-3.5 h-3.5 rounded-[2px] object-cover shrink-0" loading="lazy" />
+                )}
                 <span className={`text-[13px] font-black leading-tight truncate block ${isDarkTheme ? "text-white" : "text-zinc-900"}`}>
                   {homeName}
                 </span>
               </div>
-              <div>
+              <div className="flex items-center gap-1.5">
+                {awayFlag && (
+                  <img src={awayFlag} alt="" className="w-3.5 h-3.5 rounded-[2px] object-cover shrink-0" loading="lazy" />
+                )}
                 <span className={`text-[12px] font-semibold leading-tight truncate block ${isDarkTheme ? "text-zinc-400" : "text-zinc-600"}`}>
                   {awayName}
                 </span>
