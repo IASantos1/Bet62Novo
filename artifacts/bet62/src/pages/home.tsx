@@ -1009,6 +1009,34 @@ const LEAGUE_ISO_MAP: Array<[string, string]> = [
   ["uefa europa league", ""], ["europa league", ""], ["conference league", ""],
   ["uefa nations league", ""], ["atp", ""], ["wta", ""],
   ["international friendl", ""], ["amistosos internacion", ""],
+  // ── Specific leagues missing from country fallback ──────────────────────
+  // Latvia
+  ["virsliga", "lv"], ["optibet futbola", "lv"], ["latvijas futbola", "lv"],
+  // Finland
+  ["veikkausliiga", "fi"], ["ykkönen", "fi"], ["suomen cup", "fi"],
+  ["suomi cup", "fi"], ["liiga cup", "fi"], ["kolmonen", "fi"],
+  // Georgia (country)
+  ["erovnuli liga", "ge"], ["georgian national league", "ge"],
+  // Paraguay
+  ["copa paraguay", "py"], ["apf primera", "py"], ["division intermedia", "py"],
+  ["liga paraguaya", "py"], ["torneo clausura paraguay", "py"],
+  ["torneo apertura paraguay", "py"], ["primera division paraguay", "py"],
+  // Brazil state championships
+  ["campeonato mineiro", "br"], ["mineiro", "br"], ["campeonato goiano", "br"],
+  ["campeonato paranaense", "br"], ["campeonato gaúcho", "br"], ["campeonato gaucho", "br"],
+  ["campeonato baiano", "br"], ["campeonato cearense", "br"], ["campeonato alagoano", "br"],
+  ["campeonato paraense", "br"], ["campeonato paraibano", "br"],
+  ["campeonato pernambucano", "br"], ["campeonato catarinense", "br"],
+  ["campeonato matogrossense", "br"], ["campeonato sergipano", "br"],
+  ["campeonato amazonense", "br"], ["copa verde", "br"], ["copa paulista", "br"],
+  // Bosnia
+  ["premijer liga", "ba"], ["bosnia cup", "ba"],
+  // Kosovo
+  ["superliga kosova", "xk"], ["kosovo cup", "xk"],
+  // Armenia
+  ["armenian premier league", "am"], ["armenian first league", "am"],
+  // Mexico state/lower
+  ["liga de expansión mx", "mx"], ["copa mx femenil", "mx"],
   // ── "premier league" variants — SPECIFIC must come before generic ──
   ["english premier league", "gb-eng"],
   ["efl championship", "gb-eng"], ["league one", "gb-eng"],
@@ -1187,21 +1215,31 @@ const LEAGUE_ISO_MAP: Array<[string, string]> = [
 function getCountryFlagIso(country?: string, league?: string): string {
   const lk = (league ?? "").toLowerCase().trim();
   const ck = (country ?? "").toLowerCase().trim();
+  // ISO from match.country — used as tiebreaker for ambiguous league patterns.
+  // E.g. "Serie B" maps to Italy in LEAGUE_ISO_MAP, but if match.country = "Ecuador"
+  // we prefer Ecuador. "un" = international placeholder (no real country flag).
+  const countryIso = ck ? (COUNTRY_ISO[ck] ?? "") : "";
+
+  const prefer = (leagueIso: string): string => {
+    if (leagueIso === "") return ""; // international → always no flag
+    if (countryIso && countryIso !== leagueIso && countryIso !== "un") return countryIso;
+    return leagueIso;
+  };
+
   // 1. Exact match
   for (const [pat, iso] of LEAGUE_ISO_MAP) {
-    if (lk === pat) return iso;
+    if (lk === pat) return prefer(iso);
   }
   // 2. Prefix match (pattern ≥ 4 chars)
   for (const [pat, iso] of LEAGUE_ISO_MAP) {
-    if (pat.length >= 4 && lk.startsWith(pat)) return iso;
+    if (pat.length >= 4 && lk.startsWith(pat)) return prefer(iso);
   }
   // 3. Contains match (pattern ≥ 6 chars)
   for (const [pat, iso] of LEAGUE_ISO_MAP) {
-    if (pat.length >= 6 && lk.includes(pat)) return iso;
+    if (pat.length >= 6 && lk.includes(pat)) return prefer(iso);
   }
   // 4. Country name fallback
-  if (ck) return COUNTRY_ISO[ck] ?? "";
-  return "";
+  return countryIso;
 }
 
 function getCountryFlagUrl(country?: string, league?: string): string | null {
@@ -8920,15 +8958,23 @@ export default function Home({
             const fUrl = !leagueLogo ? getCountryFlagUrl(match.country, match.league ?? undefined) : null;
             return (
               <div className="relative shrink-0 w-[22px] h-[22px]">
-                <div
-                  className="w-[22px] h-[22px] rounded-full border border-zinc-700/70 bg-zinc-800 overflow-hidden"
-                  style={!leagueLogo && fUrl ? flagBgStyle(fUrl) : undefined}
-                >
+                <div className="w-[22px] h-[22px] rounded-full border border-zinc-700/70 bg-zinc-800 overflow-hidden relative">
                   {leagueLogo ? (
                     <img src={leagueLogo} alt="" className="w-full h-full object-contain p-[2px]" loading="lazy" />
-                  ) : !fUrl ? (
-                    <span className="flex items-center justify-center w-full h-full text-[11px] leading-none">{flag}</span>
-                  ) : null}
+                  ) : (
+                    <>
+                      <span className="absolute inset-0 flex items-center justify-center text-[11px] leading-none">{flag}</span>
+                      {fUrl && (
+                        <img
+                          src={fUrl}
+                          alt=""
+                          className="absolute inset-0 w-full h-full object-cover"
+                          loading="lazy"
+                          onError={(e) => e.currentTarget.remove()}
+                        />
+                      )}
+                    </>
+                  )}
                 </div>
                 <div className="absolute -top-[5px] -right-[5px] w-[13px] h-[13px] rounded-full bg-zinc-900 border border-zinc-700 flex items-center justify-center shadow-sm">
                   <span className="text-[7px] leading-none">{sportEmoji(match.sport)}</span>
