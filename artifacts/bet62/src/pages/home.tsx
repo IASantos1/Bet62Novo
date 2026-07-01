@@ -951,7 +951,15 @@ const COUNTRY_ISO: Record<string, string> = {
   moldova: "md", israel: "il", cyprus: "cy", ireland: "ie",
   iceland: "is", luxembourg: "lu", malta: "mt", estonia: "ee",
   latvia: "lv", lithuania: "lt", georgia: "ge", armenia: "am",
-  azerbaijan: "az", kazakhstan: "kz",
+  azerbaijan: "az", kazakhstan: "kz", kosovo: "xk",
+  montenegro: "me", "bosnia and herzegovina": "ba", "bosnia & herzegovina": "ba",
+  "faroe islands": "fo", andorra: "ad", "san marino": "sm",
+  liechtenstein: "li", monaco: "mc",
+  // Middle East
+  syria: "sy", jordan: "jo", lebanon: "lb", oman: "om",
+  bahrain: "bh", kuwait: "kw", palestine: "ps", yemen: "ye",
+  "saudi arabia": "sa", "united arab emirates": "ae", uae: "ae",
+  qatar: "qa", iran: "ir", iraq: "iq",
   // Americas
   brazil: "br", argentina: "ar", usa: "us", "united states": "us",
   mexico: "mx", colombia: "co", chile: "cl", uruguay: "uy",
@@ -960,108 +968,198 @@ const COUNTRY_ISO: Record<string, string> = {
   guatemala: "gt", "el salvador": "sv", nicaragua: "ni",
   "dominican republic": "do", cuba: "cu", haiti: "ht",
   jamaica: "jm", canada: "ca", "trinidad and tobago": "tt",
+  barbados: "bb", guyana: "gy", suriname: "sr",
   // Asia & Oceania
   japan: "jp", "south korea": "kr", korea: "kr", china: "cn",
   australia: "au", "new zealand": "nz", india: "in",
-  "saudi arabia": "sa", "united arab emirates": "ae", uae: "ae",
-  qatar: "qa", iran: "ir", iraq: "iq", thailand: "th",
-  vietnam: "vn", indonesia: "id", malaysia: "my", singapore: "sg",
+  thailand: "th", vietnam: "vn", indonesia: "id", malaysia: "my",
+  singapore: "sg", philippines: "ph", myanmar: "mm", cambodia: "kh",
+  laos: "la", pakistan: "pk", bangladesh: "bd", "sri lanka": "lk",
+  nepal: "np", "north korea": "kp", mongolia: "mn",
+  "hong kong": "hk", taiwan: "tw", macau: "mo",
+  uzbekistan: "uz", kyrgyzstan: "kg", tajikistan: "tj", turkmenistan: "tm",
   // Africa
   morocco: "ma", egypt: "eg", "south africa": "za", nigeria: "ng",
   ghana: "gh", senegal: "sn", cameroon: "cm", "ivory coast": "ci",
-  algeria: "dz", tunisia: "tn", kenya: "ke", ethiopia: "et",
+  "côte d'ivoire": "ci", algeria: "dz", tunisia: "tn", kenya: "ke",
+  ethiopia: "et", tanzania: "tz", uganda: "ug", rwanda: "rw",
+  zimbabwe: "zw", zambia: "zm", mozambique: "mz", angola: "ao",
+  namibia: "na", botswana: "bw", malawi: "mw", madagascar: "mg",
+  libya: "ly", sudan: "sd", somalia: "so", "south sudan": "ss",
+  mali: "ml", "burkina faso": "bf", niger: "ne", chad: "td",
+  guinea: "gn", "sierra leone": "sl", liberia: "lr", togo: "tg",
+  benin: "bj", gabon: "ga", "equatorial guinea": "gq",
+  "republic of congo": "cg", "democratic republic of congo": "cd",
+  "dr congo": "cd", congo: "cg", "cape verde": "cv",
+  mauritius: "mu", seychelles: "sc", "burkina": "bf",
   // International / multi-country (no single flag)
   international: "un", world: "un",
 };
 
 // Per-league ISO overrides (when match.country is missing or generic)
 // League patterns → ISO code (matched by exact, prefix, or contains — in order)
+// IMPORTANT: In the "contains" pass, ORDER MATTERS — more specific patterns must come
+// BEFORE generic ones (e.g. "russian premier league" BEFORE "premier league").
 // Empty string = international/multi-country (no flag shown)
 const LEAGUE_ISO_MAP: Array<[string, string]> = [
   // International → no flag
   ["fifa world cup", ""], ["copa america", ""], ["copa libertadores", ""],
-  ["copa sudamericana", ""], ["uefa champions league", ""], ["champions league", ""],
+  ["copa sudamericana", ""], ["conmebol", ""], ["concacaf", ""],
+  ["uefa champions league", ""], ["champions league", ""],
   ["uefa europa league", ""], ["europa league", ""], ["conference league", ""],
   ["uefa nations league", ""], ["atp", ""], ["wta", ""],
-  // England
-  ["premier league", "gb-eng"], ["efl championship", "gb-eng"],
-  ["league one", "gb-eng"], ["league two", "gb-eng"], ["fa cup", "gb-eng"],
-  ["carabao cup", "gb-eng"], ["league cup", "gb-eng"],
-  ["championship (w)", "gb-eng"], ["championship", "gb-eng"],
+  ["international friendl", ""], ["amistosos internacion", ""],
+  // ── "premier league" variants — SPECIFIC must come before generic ──
+  ["english premier league", "gb-eng"],
+  ["efl championship", "gb-eng"], ["league one", "gb-eng"],
+  ["league two", "gb-eng"], ["fa cup", "gb-eng"],
+  ["carabao cup", "gb-eng"], ["efl league", "gb-eng"],
+  ["scottish premiership", "gb-sct"], ["scottish championship", "gb-sct"],
+  ["scottish cup", "gb-sct"], ["scottish league cup", "gb-sct"],
+  ["welsh premier league", "gb-wls"],
+  ["russian premier league", "ru"], ["fnl", "ru"], ["rpfl", "ru"],
+  ["ukrainian premier league", "ua"], ["upl", "ua"],
+  ["belarusian premier league", "by"],
+  ["kazakh premier league", "kz"],
+  ["georgian premier league", "ge"],
+  ["armenian premier league", "am"],
+  ["azerbaijani premier league", "az"],
+  ["czech premier league", "cz"],
+  ["slovak super liga", "sk"], ["slovak premier league", "sk"],
+  ["romanian premier league", "ro"], ["superliga romania", "ro"],
+  ["bulgarian premier league", "bg"],
+  ["hungarian premier league", "hu"],
+  ["moldovan national division", "md"],
+  ["latvian higher league", "lv"], ["latvian premier league", "lv"],
+  ["a lyga", "lt"], ["i lyga", "lt"], ["i liga", "lt"], ["lff cup", "lt"],
+  ["estonian premier league", "ee"],
+  ["icelandic premier league", "is"],
+  ["faroese premier league", "fo"],
+  ["maltese premier league", "mt"],
+  ["cypriot premier league", "cy"],
+  ["israeli premier league", "il"],
+  ["albanian superliga", "al"],
+  ["serbian superliga", "rs"],
+  ["slovenian premier league", "si"],
+  ["north macedonian premier league", "mk"],
+  ["bosnian premier league", "ba"],
+  ["montenegrin premier league", "me"],
+  ["kosovo premier league", "xk"],
+  ["saudi pro league", "sa"], ["saudi premier league", "sa"], ["saudi professional league", "sa"],
+  ["qatari stars league", "qa"], ["qatar stars league", "qa"],
+  ["uae pro league", "ae"],
+  ["bahrain premier league", "bh"],
+  ["kuwaiti premier league", "kw"],
+  ["oman professional league", "om"],
+  ["jordan premier league", "jo"], ["jordanian premier league", "jo"],
+  ["lebanese premier league", "lb"],
+  ["syrian premier league", "sy"],
+  ["iraqi premier league", "iq"],
+  ["iranian premier league", "ir"], ["persian gulf pro league", "ir"],
+  ["yemeni premier league", "ye"],
+  ["african premier league", "za"],
+  ["nigerian premier league", "ng"],
+  ["ghanaian premier league", "gh"],
+  ["ugandan premier league", "ug"],
+  ["tanzanian premier league", "tz"],
+  ["zambian super league", "zm"],
+  ["zimbabwean premier league", "zw"],
+  ["kenyan premier league", "ke"],
+  ["algerian ligue professionnelle", "dz"],
+  ["tunisian ligue professionnelle", "tn"],
+  ["moroccan botola pro", "ma"],
+  ["egyptian premier league", "eg"],
+  ["libyan premier league", "ly"],
+  ["australian premier league", "au"],
+  ["new zealand premier league", "nz"],
+  ["vietnam premier league", "vn"],
+  ["cambodian premier league", "kh"],
+  ["myanmar premier league", "mm"],
+  ["philippines premier league", "ph"],
+  ["pakistan premier league", "pk"],
+  ["bangladesh premier league", "bd"],
+  ["nepali premier league", "np"],
+  // After all specific "premier league" variants:
+  ["premier league", "gb-eng"],
+  // ── "super league" variants — SPECIFIC before generic ──
+  ["swiss super league", "ch"], ["challenge league", "ch"],
+  ["chinese super league", "cn"],
+  ["greek super league", "gr"], ["super league greece", "gr"],
+  ["north macedonian super league", "mk"],
+  // After all specific "super league" variants:
+  ["super league", "gr"],
   // Spain
   ["laliga hypermotion", "es"], ["la liga", "es"], ["laliga", "es"],
   ["segunda division", "es"], ["copa del rey", "es"],
   ["tercera division", "es"], ["tercera liga", "es"],
   // Germany
   ["2. bundesliga", "de"], ["bundesliga", "de"], ["dfb-pokal", "de"],
+  ["3. liga", "de"],
   // Italy
-  ["serie a", "it"], ["serie b", "it"], ["coppa italia", "it"],
+  ["serie a", "it"], ["serie b", "it"], ["coppa italia", "it"], ["lega pro", "it"],
   // France
   ["ligue 1", "fr"], ["ligue 2", "fr"], ["coupe de france", "fr"],
-  ["lnb", "fr"], ["lfb", "fr"], ["pro a", "fr"],
+  ["lnb", "fr"], ["lfb", "fr"], ["pro a", "fr"], ["national 1", "fr"],
   // Portugal
   ["liga portugal", "pt"], ["primeira liga", "pt"], ["segunda liga", "pt"],
-  ["taça de portugal", "pt"], ["taca de portugal", "pt"],
+  ["taça de portugal", "pt"], ["taca de portugal", "pt"], ["liga nos", "pt"],
   // Netherlands
   ["eredivisie", "nl"], ["eerste divisie", "nl"], ["knvb cup", "nl"],
   // Belgium
-  ["jupiler pro league", "be"], ["belgian pro league", "be"],
+  ["jupiler pro league", "be"], ["belgian pro league", "be"], ["pro league belgium", "be"],
   // Turkey
-  ["süper lig", "tr"], ["super lig", "tr"], ["tff", "tr"],
-  // Scotland
-  ["scottish premiership", "gb-sct"], ["scottish championship", "gb-sct"],
-  // Switzerland
-  ["swiss super league", "ch"], ["challenge league", "ch"],
-  // Greece
-  ["super league greece", "gr"], ["super league", "gr"],
-  // Denmark
-  ["danish superliga", "dk"], ["superliga", "dk"],
-  // Norway
-  ["eliteserien", "no"], ["norwegian", "no"],
-  // Sweden
-  ["allsvenskan", "se"], ["superettan", "se"], ["svenska", "se"],
-  // Croatia
-  ["hnl", "hr"], ["croatian", "hr"],
-  // Serbia
-  ["serbian superliga", "rs"], ["serbian", "rs"],
-  // Poland
-  ["ekstraklasa", "pl"],
-  // Czech
-  ["czech first league", "cz"],
-  // Russia
-  ["russian premier league", "ru"], ["fnl", "ru"],
-  // Ukraine
-  ["ukrainian premier league", "ua"],
+  ["süper lig", "tr"], ["super lig", "tr"], ["tff", "tr"], ["türkiye kupası", "tr"],
   // Austria
-  ["austrian bundesliga", "at"], ["admiral bundesliga", "at"],
+  ["austrian bundesliga", "at"], ["admiral bundesliga", "at"], ["österreichische bundesliga", "at"],
+  // Denmark
+  ["danish superliga", "dk"], ["superliga", "dk"], ["1. division denmark", "dk"],
+  // Norway
+  ["eliteserien", "no"], ["tippeligaen", "no"], ["norwegian premier", "no"],
+  // Sweden
+  ["allsvenskan", "se"], ["superettan", "se"], ["svenska cupen", "se"],
+  // Croatia
+  ["hnl", "hr"], ["croatian football league", "hr"],
+  // Serbia
+  ["serbian liga", "rs"],
+  // Poland
+  ["ekstraklasa", "pl"], ["i liga poland", "pl"],
+  // Czech
+  ["czech first league", "cz"], ["fortuna liga", "cz"],
   // Israel
-  ["ligat ha'al", "il"],
+  ["ligat ha'al", "il"], ["israeli premier", "il"],
+  // Hungary
+  ["nemzeti bajnokság", "hu"],
+  // Romania
+  ["liga 1 romania", "ro"], ["liga i", "ro"],
   // Brazil — Serie C/D are Brazil, not Italy
-  ["serie d", "br"], ["serie c", "br"],
+  ["série d", "br"], ["serie d", "br"], ["série c", "br"], ["serie c", "br"],
   ["campeonato brasileiro", "br"], ["campeonato paulista", "br"],
   ["campeonato carioca", "br"], ["copa do brasil", "br"],
   ["brasileirao", "br"], ["brasileirão", "br"], ["série a brasil", "br"],
+  ["carioca", "br"], ["paulista", "br"], ["paranaense", "br"],
+  ["gaucho", "br"], ["gaúcho", "br"], ["pernambucano", "br"],
   // Argentina
   ["primera division argentina", "ar"], ["liga argentina", "ar"],
-  ["copa argentina", "ar"], ["torneo binance", "ar"],
+  ["copa argentina", "ar"], ["torneo binance", "ar"], ["liga profesional", "ar"],
   // Chile
   ["chilean cup", "cl"], ["copa chile", "cl"], ["primera division chile", "cl"],
+  ["campeonato chileno", "cl"],
   // Colombia
-  ["liga betplay", "co"], ["primera a", "co"],
+  ["liga betplay", "co"], ["primera a", "co"], ["dimayor", "co"],
   // Venezuela
   ["copa simon bolivar", "ve"], ["copa simón bolívar", "ve"], ["liga futve", "ve"],
   // Bolivia
-  ["division profesional bolivia", "bo"],
+  ["division profesional bolivia", "bo"], ["liga boliviana", "bo"],
   // Ecuador
-  ["liga pro", "ec"],
+  ["liga pro", "ec"], ["serie a ecuador", "ec"],
   // Peru
-  ["liga 1 peru", "pe"],
+  ["liga 1 peru", "pe"], ["liga 1 bicentenario", "pe"],
   // Uruguay
-  ["primera division uruguay", "uy"],
+  ["primera division uruguay", "uy"], ["apertura uruguay", "uy"],
   // USA
   ["mls next pro", "us"], ["mls", "us"], ["wnba", "us"], ["nba", "us"],
   ["nhl", "us"], ["mlb", "us"], ["usl championship", "us"], ["usl league", "us"],
-  ["nwsl", "us"], ["national league", "us"],
+  ["nwsl", "us"], ["usl super league", "us"],
   // Canada
   ["cebl", "ca"], ["canadian premier league", "ca"],
   // Puerto Rico

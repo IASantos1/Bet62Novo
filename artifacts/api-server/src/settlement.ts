@@ -73,7 +73,7 @@ export type SelectionSettlementResolution = {
     | "timeout_no_result_auto_void";
 };
 
-const SETTLEMENT_LOCK_TTL_SECONDS = 300;
+const SETTLEMENT_LOCK_TTL_SECONDS = 60 * 60 * 6; // 6 h safety TTL (lock released immediately on success)
 export const SETTLEMENT_TIMEOUT_HOURS = 12;
 const SETTLEMENT_TIMEOUT_MS = SETTLEMENT_TIMEOUT_HOURS * 60 * 60 * 1000;
 const LATE_PENDING_LOG_GRACE_MS = 3 * 60 * 60 * 1000;
@@ -114,9 +114,14 @@ async function acquireBetSettlementLock(
       "EX",
       SETTLEMENT_LOCK_TTL_SECONDS,
     );
-    return result === "OK";
+    if (result !== "OK") {
+      logger.warn({ betId, owner }, "Settlement bloqueado por lock");
+      return false;
+    }
+    logger.info({ betId, owner }, "Settlement lock acquired");
+    return true;
   } catch (err) {
-    logger.warn({ err, betId }, "Failed to acquire settlement lock due to Redis error - proceeding without lock (single instance mode)");
+    logger.error({ err, betId }, "Failed to acquire settlement lock");
     return true;
   }
 }
