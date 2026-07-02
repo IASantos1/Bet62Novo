@@ -9714,15 +9714,23 @@ export default function Home({
                 const fUrl = !leagueLogo ? getCountryFlagUrl(match.country, match.league ?? undefined) : null;
                 return (
                   <div className="relative shrink-0 w-[20px] h-[20px]">
-                    <div
-                      className="w-[20px] h-[20px] rounded-full border border-zinc-700/70 bg-zinc-800 overflow-hidden"
-                      style={!leagueLogo && fUrl ? flagBgStyle(fUrl) : undefined}
-                    >
+                    <div className="w-[20px] h-[20px] rounded-full border border-zinc-700/70 bg-zinc-800 overflow-hidden relative">
                       {leagueLogo ? (
                         <img src={leagueLogo} alt="" className="w-full h-full object-contain p-[2px]" loading="lazy" />
-                      ) : !fUrl ? (
-                        <span className="flex items-center justify-center w-full h-full text-[9px] leading-none">{flag}</span>
-                      ) : null}
+                      ) : (
+                        <>
+                          <span className="absolute inset-0 flex items-center justify-center text-[9px] leading-none">{flag}</span>
+                          {fUrl && (
+                            <img
+                              src={fUrl}
+                              alt=""
+                              className="absolute inset-0 w-full h-full object-cover"
+                              loading="lazy"
+                              onError={(e) => e.currentTarget.remove()}
+                            />
+                          )}
+                        </>
+                      )}
                     </div>
                     <div className="absolute -top-[4px] -right-[4px] w-[11px] h-[11px] rounded-full bg-zinc-900 border border-zinc-700 flex items-center justify-center">
                       <span className="text-[6px] leading-none">{sportEmoji(sport)}</span>
@@ -10002,15 +10010,23 @@ export default function Home({
               const flagUrl = !leagueLogo ? getCountryFlagUrl(match.country, match.league ?? undefined) : null;
               return (
                 <div className="relative shrink-0 w-[22px] h-[22px]">
-                  <div
-                    className="w-[22px] h-[22px] rounded-full border border-zinc-700/70 bg-zinc-800 overflow-hidden"
-                    style={!leagueLogo && flagUrl ? flagBgStyle(flagUrl) : undefined}
-                  >
+                  <div className="w-[22px] h-[22px] rounded-full border border-zinc-700/70 bg-zinc-800 overflow-hidden relative">
                     {leagueLogo ? (
                       <img src={leagueLogo} alt="" className="w-full h-full object-contain p-[2px]" loading="lazy" />
-                    ) : !flagUrl ? (
-                      <span className="flex items-center justify-center w-full h-full text-[11px] leading-none">{flag}</span>
-                    ) : null}
+                    ) : (
+                      <>
+                        <span className="absolute inset-0 flex items-center justify-center text-[11px] leading-none">{flag}</span>
+                        {flagUrl && (
+                          <img
+                            src={flagUrl}
+                            alt=""
+                            className="absolute inset-0 w-full h-full object-cover"
+                            loading="lazy"
+                            onError={(e) => e.currentTarget.remove()}
+                          />
+                        )}
+                      </>
+                    )}
                   </div>
                   <div className="absolute -top-[5px] -right-[5px] w-[13px] h-[13px] rounded-full bg-zinc-900 border border-zinc-700 flex items-center justify-center shadow-sm">
                     <span className="text-[7px] leading-none">{sportEmoji(sport)}</span>
@@ -20249,8 +20265,8 @@ export default function Home({
 
                 // Sport grouping for display
                 const SPORT_GROUPS = [
-                  { key: "football", emoji: "⚽", label: "Futebol" },
                   { key: "wc2026", emoji: "🏆", label: "Copa do Mundo" },
+                  { key: "football", emoji: "⚽", label: "Futebol" },
                   { key: "tennis", emoji: "🎾", label: "Ténis" },
                   { key: "basketball", emoji: "🏀", label: "Basquete" },
                   { key: "hockey", emoji: "🏒", label: "Hóquei" },
