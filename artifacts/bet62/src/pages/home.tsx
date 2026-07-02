@@ -16909,9 +16909,9 @@ export default function Home({
                         {(!expandedMatch.sport || expandedMatch.sport === "football") && (
                           <button
                             onClick={() => setMatchViewTab(matchViewTab === "insight" ? "markets" : "insight")}
-                            className={`flex items-center gap-1 px-2.5 py-1 rounded-full border text-[10px] font-black transition-all ${matchViewTab === "insight" ? "bg-yellow-900/40 border-yellow-700/60 text-yellow-300" : "bg-zinc-800/60 border-zinc-700/60 text-zinc-400 hover:text-white hover:border-zinc-600"}`}
+                            className={`flex items-center gap-1 px-2.5 py-1 rounded-full border text-[10px] font-black transition-all ${matchViewTab === "insight" ? "bg-orange-950/60 border-orange-600/60 text-orange-200 shadow-[0_0_8px_rgba(249,115,22,0.35)]" : "bg-zinc-800/60 border-zinc-700/60 text-zinc-400 hover:text-white hover:border-zinc-600"}`}
                           >
-                            <Lightbulb size={11} />
+                            <span className="text-[13px] leading-none" style={{ filter: "drop-shadow(0 0 4px rgba(249,115,22,0.9)) drop-shadow(0 2px 3px rgba(239,68,68,0.7))" }}>🔥</span>
                             Previsão
                           </button>
                         )}
@@ -17044,7 +17044,7 @@ export default function Home({
                 {matchViewTab === "insight" && (
                   <div className="mb-2 animate-in fade-in duration-200 space-y-3">
                     <div className="flex items-center gap-2 px-1 mb-1">
-                      <Zap size={12} className="text-yellow-400" />
+                      <span className="text-[15px] leading-none" style={{ filter: "drop-shadow(0 0 5px rgba(249,115,22,0.9)) drop-shadow(0 2px 4px rgba(239,68,68,0.8))" }}>🔥</span>
                       <span className="text-[11px] font-black text-zinc-300">Análise baseada em dados e odds de mercado</span>
                     </div>
 
@@ -17314,10 +17314,11 @@ export default function Home({
                               toggleBet(expandedMatch, ins.market, parseFloat(ins.odds), "insight", ins.market);
                               if (window.innerWidth < 1024) setBetSlipOpenMobile(true);
                             }}
-                            className="w-full flex items-center justify-center gap-1.5 bg-red-600 hover:bg-red-500 active:bg-red-700 text-white text-[12px] font-black py-2.5 rounded-xl transition-colors"
+                            className="w-full flex items-center justify-center gap-1.5 bg-gradient-to-r from-red-700 via-red-600 to-orange-600 hover:from-red-600 hover:to-orange-500 active:from-red-800 text-white text-[12px] font-black py-2.5 rounded-xl transition-all shadow-[0_2px_10px_rgba(239,68,68,0.4)]"
                           >
+                            <span className="text-[14px] leading-none" style={{ filter: "drop-shadow(0 0 4px rgba(249,115,22,0.9)) drop-shadow(0 2px 3px rgba(239,68,68,0.7))" }}>🔥</span>
                             Adicionar à Aposta
-                            <ChevronRight size={13} />
+                            <span className="text-[14px] leading-none" style={{ filter: "drop-shadow(0 0 4px rgba(249,115,22,0.9)) drop-shadow(0 2px 3px rgba(239,68,68,0.7))" }}>🔥</span>
                           </button>
                         </motion.div>
                       ));
