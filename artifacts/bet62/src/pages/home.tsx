@@ -1013,8 +1013,20 @@ const LEAGUE_ISO_MAP: Array<[string, string]> = [
   // Latvia
   ["virsliga", "lv"], ["optibet futbola", "lv"], ["latvijas futbola", "lv"],
   // Finland
-  ["veikkausliiga", "fi"], ["ykkönen", "fi"], ["suomen cup", "fi"],
+  ["veikkausliiga", "fi"], ["ykkönen", "fi"], ["ykkonen", "fi"], ["suomen cup", "fi"],
   ["suomi cup", "fi"], ["liiga cup", "fi"], ["kolmonen", "fi"],
+  // Estonia
+  ["meistriliiga", "ee"], ["esiliiga", "ee"], ["eesti cup", "ee"], ["estonian cup", "ee"],
+  // Iceland
+  ["besta-deild karla", "is"], ["besta-deild", "is"], ["1. deild karla", "is"],
+  // Belarus
+  ["vysshaya liga", "by"], ["pershaya liga", "by"],
+  // Norway
+  ["obos-ligaen", "no"], ["norsk tipping-ligaen", "no"], ["toppserien", "no"],
+  // Sweden
+  ["damallsvenskan", "se"], ["superettan", "se"],
+  // Yemen
+  ["yemeni league", "ye"], ["yemeni premier", "ye"],
   // Georgia (country)
   ["erovnuli liga", "ge"], ["georgian national league", "ge"],
   // Paraguay
@@ -1212,7 +1224,7 @@ const LEAGUE_ISO_MAP: Array<[string, string]> = [
   ["thai league", "th"],
 ];
 
-function getCountryFlagIso(country?: string, league?: string): string {
+function getCountryFlagIso(country?: string, league?: string, homeTeam?: string): string {
   const lk = (league ?? "").toLowerCase().trim();
   const ck = (country ?? "").toLowerCase().trim();
   // ISO from match.country — used as tiebreaker for ambiguous league patterns.
@@ -1223,6 +1235,15 @@ function getCountryFlagIso(country?: string, league?: string): string {
   const prefer = (leagueIso: string): string => {
     if (leagueIso === "") return ""; // international → always no flag
     if (countryIso && countryIso !== leagueIso && countryIso !== "un") return countryIso;
+    // 5. Team name fallback — when country is empty and league is ambiguous,
+    //    use TEAM_COUNTRY to identify the real country from the home team name
+    if (!countryIso && homeTeam) {
+      const tc = TEAM_COUNTRY[homeTeam];
+      if (tc) {
+        const teamIso = COUNTRY_ISO[tc] ?? "";
+        if (teamIso && teamIso !== leagueIso) return teamIso;
+      }
+    }
     return leagueIso;
   };
 
@@ -1239,11 +1260,17 @@ function getCountryFlagIso(country?: string, league?: string): string {
     if (pat.length >= 6 && lk.includes(pat)) return prefer(iso);
   }
   // 4. Country name fallback
-  return countryIso;
+  if (countryIso) return countryIso;
+  // 5. Team name fallback (no league match at all)
+  if (homeTeam) {
+    const tc = TEAM_COUNTRY[homeTeam];
+    if (tc) return COUNTRY_ISO[tc] ?? "";
+  }
+  return "";
 }
 
-function getCountryFlagUrl(country?: string, league?: string): string | null {
-  const iso = getCountryFlagIso(country, league);
+function getCountryFlagUrl(country?: string, league?: string, homeTeam?: string): string | null {
+  const iso = getCountryFlagIso(country, league, homeTeam);
   if (!iso) return null;
   return `https://flagcdn.com/w40/${iso}.png`;
 }
@@ -1636,6 +1663,62 @@ const TEAM_COUNTRY: Record<string, string> = {
   Mazatlán: "mexico",
   Mazatlan: "mexico",
   "Mazatlán FC": "mexico",
+  // Ethiopian Premier League
+  "Awassa Kenema": "ethiopia",
+  "Adama Kenema": "ethiopia",
+  "Welwalo Adigrat Uni": "ethiopia",
+  "Kedus Giorgis": "ethiopia",
+  "Saint George FC": "ethiopia",
+  "Ethiopia Coffee": "ethiopia",
+  "Ethiopian Coffee": "ethiopia",
+  "Sidama Coffee": "ethiopia",
+  "Fasil Ketema": "ethiopia",
+  "Arba Minch City": "ethiopia",
+  "Wolkite City": "ethiopia",
+  "Jimma Aba Jifar": "ethiopia",
+  "Hadiya Hossana": "ethiopia",
+  "Dire Dawa Ketema": "ethiopia",
+  "Sebeta Kenema": "ethiopia",
+  "Legetafo Legedadi": "ethiopia",
+  "Bahir Dar Kenema": "ethiopia",
+  "Debrebrihan Kenema": "ethiopia",
+  // Ecuadorian Serie B
+  "Cumbaya": "ecuador",
+  "22 de Julio": "ecuador",
+  "El Nacional": "ecuador",
+  "Atlético FC": "ecuador",
+  "Deportivo Quito": "ecuador",
+  // Moroccan Botola
+  "Raja Casablanca": "morocco",
+  "Wydad AC": "morocco",
+  "Wydad Casablanca": "morocco",
+  "Hassania Agadir": "morocco",
+  "FUS Rabat": "morocco",
+  "RSB Berkane": "morocco",
+  "Maghreb Fès": "morocco",
+  "Kawkab Marrakech": "morocco",
+  "CODM Meknes": "morocco",
+  "AS Far Rabat": "morocco",
+  "Ittihad Tanger": "morocco",
+  "US Touarga": "morocco",
+  // Belarusian Vysshaya Liga
+  "BATE Borisov": "belarus",
+  "FC BATE Borisov": "belarus",
+  "Dinamo Minsk": "belarus",
+  "FC Minsk": "belarus",
+  "Gomel": "belarus",
+  "FC Gomel": "belarus",
+  "Shakhtyor Soligorsk": "belarus",
+  "Neman Grodno": "belarus",
+  // Yemeni League
+  "Hilal Hudaydah": "yemen",
+  "Mukallah FC": "yemen",
+  "Al Orouba FC": "yemen",
+  "Alsadd FC": "qatar",
+  // Norwegian OBOS-ligaen
+  "Lyn Oslo": "norway",
+  "Asane": "norway",
+  "Asane FK": "norway",
 };
 
 function normalizeBannerTeamName(name: string): string {
@@ -8955,7 +9038,7 @@ export default function Home({
         <div className="flex items-center gap-2 min-w-0">
           {(() => {
             const leagueLogo = LEAGUE_LOGOS[match.league ?? ""];
-            const fUrl = !leagueLogo ? getCountryFlagUrl(match.country, match.league ?? undefined) : null;
+            const fUrl = !leagueLogo ? getCountryFlagUrl(match.country, match.league ?? undefined, match.home) : null;
             return (
               <div className="relative shrink-0 w-[22px] h-[22px]">
                 <div className="w-[22px] h-[22px] rounded-full border border-zinc-700/70 bg-zinc-800 overflow-hidden relative">
@@ -9711,7 +9794,7 @@ export default function Home({
             <div className="min-w-0 flex items-center gap-1.5">
               {(() => {
                 const leagueLogo = LEAGUE_LOGOS[match.league ?? ""];
-                const fUrl = !leagueLogo ? getCountryFlagUrl(match.country, match.league ?? undefined) : null;
+                const fUrl = !leagueLogo ? getCountryFlagUrl(match.country, match.league ?? undefined, match.home) : null;
                 return (
                   <div className="relative shrink-0 w-[20px] h-[20px]">
                     <div className="w-[20px] h-[20px] rounded-full border border-zinc-700/70 bg-zinc-800 overflow-hidden relative">
@@ -10007,7 +10090,7 @@ export default function Home({
             {/* Round country flag + sport icon badge */}
             {(() => {
               const leagueLogo = LEAGUE_LOGOS[match.league ?? ""];
-              const flagUrl = !leagueLogo ? getCountryFlagUrl(match.country, match.league ?? undefined) : null;
+              const flagUrl = !leagueLogo ? getCountryFlagUrl(match.country, match.league ?? undefined, match.home) : null;
               return (
                 <div className="relative shrink-0 w-[22px] h-[22px]">
                   <div className="w-[22px] h-[22px] rounded-full border border-zinc-700/70 bg-zinc-800 overflow-hidden relative">
