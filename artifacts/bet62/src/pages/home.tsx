@@ -1292,6 +1292,26 @@ const LEAGUE_LOGOS: Record<string, string> = {
     "https://media.api-sports.io/football/leagues/4.png",
   "FIFA World Cup": "https://media.api-sports.io/football/leagues/1.png",
   "FIFA World Cup 2026": "https://media.api-sports.io/football/leagues/1.png",
+  "FIFA World Cup - Group A": "https://media.api-sports.io/football/leagues/1.png",
+  "FIFA World Cup - Group B": "https://media.api-sports.io/football/leagues/1.png",
+  "FIFA World Cup - Group C": "https://media.api-sports.io/football/leagues/1.png",
+  "FIFA World Cup - Group D": "https://media.api-sports.io/football/leagues/1.png",
+  "FIFA World Cup - Group E": "https://media.api-sports.io/football/leagues/1.png",
+  "FIFA World Cup - Group F": "https://media.api-sports.io/football/leagues/1.png",
+  "FIFA World Cup - Group G": "https://media.api-sports.io/football/leagues/1.png",
+  "FIFA World Cup - Group H": "https://media.api-sports.io/football/leagues/1.png",
+  "FIFA World Cup - Group I": "https://media.api-sports.io/football/leagues/1.png",
+  "FIFA World Cup - Group J": "https://media.api-sports.io/football/leagues/1.png",
+  "FIFA World Cup - Group K": "https://media.api-sports.io/football/leagues/1.png",
+  "FIFA World Cup - Group L": "https://media.api-sports.io/football/leagues/1.png",
+  "FIFA World Cup - Round of 32": "https://media.api-sports.io/football/leagues/1.png",
+  "FIFA World Cup - Round of 16": "https://media.api-sports.io/football/leagues/1.png",
+  "FIFA World Cup - Quarter-Finals": "https://media.api-sports.io/football/leagues/1.png",
+  "FIFA World Cup - Quarter Finals": "https://media.api-sports.io/football/leagues/1.png",
+  "FIFA World Cup - Semi-Finals": "https://media.api-sports.io/football/leagues/1.png",
+  "FIFA World Cup - Semi Finals": "https://media.api-sports.io/football/leagues/1.png",
+  "FIFA World Cup - 3rd Place": "https://media.api-sports.io/football/leagues/1.png",
+  "FIFA World Cup - Final": "https://media.api-sports.io/football/leagues/1.png",
   "World Cup 2026": "https://media.api-sports.io/football/leagues/1.png",
   "World Cup": "https://media.api-sports.io/football/leagues/1.png",
   "Copa do Mundo 2026": "https://media.api-sports.io/football/leagues/1.png",
@@ -1309,6 +1329,17 @@ const LEAGUE_LOGOS: Record<string, string> = {
   "Amistosos internacionais":
     "https://media.api-sports.io/football/leagues/10.png",
 };
+
+/** Exact match first, then prefix match for dynamically-named competitions (e.g. "FIFA World Cup - Round of 32"). */
+function getLeagueLogo(league: string | null | undefined): string | undefined {
+  const l = league ?? "";
+  if (LEAGUE_LOGOS[l]) return LEAGUE_LOGOS[l];
+  // Prefix match — handles "FIFA World Cup - Round of 32", "Copa do Mundo - Grupo A", etc.
+  for (const [key, url] of Object.entries(LEAGUE_LOGOS)) {
+    if (key.length >= 6 && l.startsWith(key)) return url;
+  }
+  return undefined;
+}
 
 const TEAM_COUNTRY: Record<string, string> = {
   // Liga Portugal
@@ -1719,6 +1750,16 @@ const TEAM_COUNTRY: Record<string, string> = {
   "Lyn Oslo": "norway",
   "Asane": "norway",
   "Asane FK": "norway",
+  // Palestinian Premier League
+  "Jwaya": "palestine",
+  "Shabab Al Sahel": "palestine",
+  "Jawaya": "palestine",
+  "Hilal Al-Quds": "palestine",
+  "Ittihad Hebron": "palestine",
+  "Ahli Al-Khalil": "palestine",
+  "Balata": "palestine",
+  "Khadamat Rafah": "palestine",
+  "Samia Nablus": "palestine",
 };
 
 function normalizeBannerTeamName(name: string): string {
@@ -3191,7 +3232,7 @@ function SidebarTreeContent({
                   <div className="ml-2 mt-0.5 space-y-0.5 border-l border-zinc-800 pl-2">
                     {leagues.map((league) => {
                       const active = selectedLeague === league;
-                      const logo = LEAGUE_LOGOS[league];
+                      const logo = getLeagueLogo(league);
                       return (
                         <button
                           key={league}
@@ -3247,7 +3288,7 @@ function SidebarTreeContent({
             <div className="ml-2 mt-0.5 space-y-0.5 border-l border-zinc-800 pl-2">
               {leagues.map((league) => {
                 const active = selectedLeague === league;
-                const logo = LEAGUE_LOGOS[league];
+                const logo = getLeagueLogo(league);
                 return (
                   <button
                     key={league}
@@ -9037,7 +9078,7 @@ export default function Home({
       <div className="flex items-center justify-between px-3 pt-2.5 pb-1.5">
         <div className="flex items-center gap-2 min-w-0">
           {(() => {
-            const leagueLogo = LEAGUE_LOGOS[match.league ?? ""];
+            const leagueLogo = getLeagueLogo(match.league);
             const fUrl = !leagueLogo ? getCountryFlagUrl(match.country, match.league ?? undefined, match.home) : null;
             return (
               <div className="relative shrink-0 w-[22px] h-[22px]">
@@ -9049,11 +9090,12 @@ export default function Home({
                       <span className="absolute inset-0 flex items-center justify-center text-[11px] leading-none">{flag}</span>
                       {fUrl && (
                         <img
+                          key={fUrl}
                           src={fUrl}
                           alt=""
                           className="absolute inset-0 w-full h-full object-cover"
-                          loading="lazy"
-                          onError={(e) => e.currentTarget.remove()}
+                          loading="eager"
+                          onError={(e) => { e.currentTarget.style.display = 'none'; }}
                         />
                       )}
                     </>
@@ -9793,7 +9835,7 @@ export default function Home({
           <div className="flex items-center justify-between gap-2 mb-2">
             <div className="min-w-0 flex items-center gap-1.5">
               {(() => {
-                const leagueLogo = LEAGUE_LOGOS[match.league ?? ""];
+                const leagueLogo = getLeagueLogo(match.league);
                 const fUrl = !leagueLogo ? getCountryFlagUrl(match.country, match.league ?? undefined, match.home) : null;
                 return (
                   <div className="relative shrink-0 w-[20px] h-[20px]">
@@ -9805,11 +9847,12 @@ export default function Home({
                           <span className="absolute inset-0 flex items-center justify-center text-[9px] leading-none">{flag}</span>
                           {fUrl && (
                             <img
+                              key={fUrl}
                               src={fUrl}
                               alt=""
                               className="absolute inset-0 w-full h-full object-cover"
-                              loading="lazy"
-                              onError={(e) => e.currentTarget.remove()}
+                              loading="eager"
+                              onError={(e) => { e.currentTarget.style.display = 'none'; }}
                             />
                           )}
                         </>
@@ -10089,7 +10132,7 @@ export default function Home({
           <div className="flex items-center gap-1.5 mb-2">
             {/* Round country flag + sport icon badge */}
             {(() => {
-              const leagueLogo = LEAGUE_LOGOS[match.league ?? ""];
+              const leagueLogo = getLeagueLogo(match.league);
               const flagUrl = !leagueLogo ? getCountryFlagUrl(match.country, match.league ?? undefined, match.home) : null;
               return (
                 <div className="relative shrink-0 w-[22px] h-[22px]">
@@ -10101,11 +10144,12 @@ export default function Home({
                         <span className="absolute inset-0 flex items-center justify-center text-[11px] leading-none">{flag}</span>
                         {flagUrl && (
                           <img
+                            key={flagUrl}
                             src={flagUrl}
                             alt=""
                             className="absolute inset-0 w-full h-full object-cover"
-                            loading="lazy"
-                            onError={(e) => e.currentTarget.remove()}
+                            loading="eager"
+                            onError={(e) => { e.currentTarget.style.display = 'none'; }}
                           />
                         )}
                       </>
