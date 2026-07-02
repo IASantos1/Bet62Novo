@@ -815,11 +815,12 @@ function leaguePt(name: string): string {
       .replace(/World Cup/i, "Copa do Mundo");
     r = r.replace(/Round of (\d+)/i, (_: string, num: string) => {
       const n2 = parseInt(num, 10);
+      if (n2 === 32) return "32 Avos de Final";
       if (n2 === 16) return "Oitavos de Final";
       if (n2 === 8) return "Quartos de Final";
       if (n2 === 4) return "Meias-Finais";
       if (n2 === 2) return "Final";
-      return `Fase de ${num}`;
+      return `${num} Avos de Final`;
     });
     r = r
       .replace(/Quarter[ -]?Final/i, "Quartos de Final")
@@ -20373,7 +20374,13 @@ export default function Home({
                     : allUpcoming.filter(
                         (m) => (m.sport ?? "football") === selectedSport,
                       );
-                const visibleUpcoming = filteredUpcoming.filter((m) => {
+                // Pin WC2026 matches at the top (regardless of kick-off time)
+                const sortedUpcoming = [...filteredUpcoming].sort((a, b) => {
+                  const aIsWC = isWCMatch(a.league) ? 0 : 1;
+                  const bIsWC = isWCMatch(b.league) ? 0 : 1;
+                  return aIsWC - bIsWC;
+                });
+                const visibleUpcoming = sortedUpcoming.filter((m) => {
                   const q = upcomingSearchQuery.trim().toLowerCase();
                   if (!q) return true;
                   return (
