@@ -1,3 +1,4 @@
+import "dotenv/config";
 import {
   scanDailyForFinished,
   scanV2AllSportsForFinished,

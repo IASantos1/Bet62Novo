@@ -1,0 +1,1 @@
+export const SETTLEMENT_LOCK_TTL_SECONDS = 60 * 60 * 6;
