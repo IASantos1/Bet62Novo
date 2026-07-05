@@ -219,7 +219,7 @@ function stopSettlementLockHeartbeat(
   }
 }
 
-async function ensureSettlementTransitionIdempotency(
+export async function ensureSettlementTransitionIdempotency(
   tx: any,
   args: {
     betId: number;

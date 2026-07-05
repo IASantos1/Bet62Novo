@@ -1,4 +1,10 @@
-import { db, betsTable, cashoutStatesTable, settlementLogsTable } from "@workspace/db";
+import { settleSelection } from "../../engine/settlement/core/settleSelection";
+import {
+  db,
+  betsTable,
+  cashoutStatesTable,
+  settlementLogsTable,
+} from "@workspace/db";
 import { and, eq, sql } from "drizzle-orm";
 import { logger } from "../../lib/logger.js";
 import { applyBalanceDelta } from "../../lib/ledger.js";
@@ -6,35 +12,42 @@ import { ensureSettlementTransitionIdempotency } from "../../settlement.js";
 
 export type SettleBetInput = {
   bet: any;
-  newStatus: "won" | "lost" | "voided";
   trigger: string;
-  payout?: string;
   selections: any[];
   cycleId: string;
 };
 
 export async function settleBet(input: SettleBetInput) {
-  const { bet, newStatus, trigger, payout, selections, cycleId } = input;
+  const { bet, trigger, selections } = input;
 
   return db.transaction(async (tx) => {
-    // 1. Idempotência (anti duplicate event)
+    // 1. IDEMPOTÊNCIA (anti double processing)
     const canProceed = await ensureSettlementTransitionIdempotency(tx, {
       betId: bet.id,
       trigger,
       oldStatus: "pending",
-      newStatus,
+      newStatus: "settling",
       matchId: bet.matchId,
     });
 
-    if (!canProceed) return;
+    if (!canProceed) {
+      logger.warn({ betId: bet.id }, "Settlement blocked by idempotency");
+      return;
+    }
 
-    // 2. Optimistic Lock (versão + status)
+    // 2. ENGINE DECISION (NUNCA vem de fora)
+    const outcome = settleSelection({
+      betId: bet.id,
+      match: bet.match,
+      selection: selections[0],
+      ruleVersion: "2025.06-v4",
+    });
+
+    // 3. OPTIMISTIC LOCK (evita dupla execução concorrente)
     const rows = await tx
       .update(betsTable)
       .set({
-        status: newStatus,
-        selections,
-        potentialWin: payout ?? bet.potentialWin,
+        status: outcome,
         updatedAt: new Date(),
         version: sql`${betsTable.version} + 1`,
       })
@@ -52,57 +65,59 @@ export async function settleBet(input: SettleBetInput) {
     if (rows.length === 0) {
       logger.warn(
         { betId: bet.id },
-        "Optimistic lock failed - bet already processed",
+        "Optimistic lock failed (already processed)"
       );
       return;
     }
 
-    // 3. Cleanup cashout state
+    // 4. CLEANUP CASHOUT STATE
     await tx
       .delete(cashoutStatesTable)
       .where(eq(cashoutStatesTable.betId, bet.id));
 
-    // 4. Ledger (SÓ UMA FONTE DE VERDADE FINANCEIRA)
-    if (newStatus === "won") {
+    // 5. LEDGER (SINGLE SOURCE OF TRUTH FINANCEIRO)
+
+    if (outcome === "won") {
       await applyBalanceDelta(tx, {
         userId: bet.userId,
-        amount: payout!,
+        amount: bet.potentialWin,
         kind: "bet_settlement_payout",
-        idempotencyKey: `bet:${bet.id}:settle:win`,
+        idempotencyKey: `bet:${bet.id}:win`,
         refType: "bet",
         refId: String(bet.id),
       });
     }
 
-    if (newStatus === "voided") {
+    if (outcome === "void") {
       await applyBalanceDelta(tx, {
         userId: bet.userId,
         amount: bet.stake,
         kind: "bet_settlement_void_refund",
-        idempotencyKey: `bet:${bet.id}:settle:void`,
+        idempotencyKey: `bet:${bet.id}:void`,
         refType: "bet",
         refId: String(bet.id),
       });
     }
 
-    // 5. Log auditável
+    // 6. AUDIT LOG (imutável)
     await tx.insert(settlementLogsTable).values({
-      settlementKey: `${bet.id}:${trigger}:${newStatus}`,
+      settlementKey: `${bet.id}:${trigger}:${outcome}`,
       betId: bet.id,
       userId: bet.userId,
       oldStatus: "pending",
-      newStatus,
-      payout: payout ?? "0.00",
-      message: `settled via ${trigger}`,
+      newStatus: outcome,
+      payout: bet.potentialWin ?? "0.00",
+      message: `engine-settled via ${trigger}`,
+      createdAt: new Date(),
     });
 
     logger.info(
       {
         betId: bet.id,
-        status: newStatus,
+        outcome,
         trigger,
       },
-      "Bet settled successfully",
+      "Bet settled successfully"
     );
   });
 }
