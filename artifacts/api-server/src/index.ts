@@ -1,3 +1,7 @@
+import {
+  scanDailyForFinished,
+  scanV2AllSportsForFinished,
+} from "./routes/matches.js";
 import { createServer } from "http";
 import app from "./app.js";
 import { logger } from "./lib/logger.js";
@@ -47,3 +51,12 @@ server.listen(port, (err?: Error) => {
   });
   startSettlementWorker();
 });
+  setInterval(() => {
+    scanDailyForFinished().catch((err) =>
+      logger.error({ err }, "scanDailyForFinished failed")
+    );
+
+    scanV2AllSportsForFinished().catch((err) =>
+      logger.error({ err }, "scanV2AllSportsForFinished failed")
+    );
+  }, 60_000);

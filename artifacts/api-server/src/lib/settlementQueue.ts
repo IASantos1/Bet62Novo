@@ -53,7 +53,15 @@ export function buildMatchSettlementJobId(args: {
   const a = typeof args.away === "number" ? args.away : "x";
   const hh = typeof args.htHome === "number" ? args.htHome : "x";
   const ha = typeof args.htAway === "number" ? args.htAway : "x";
-  return `match:${args.matchId}:score:${h}-${a}:ht:${hh}-${ha}`;
+
+  return [
+    "match",
+    args.matchId,
+    "score",
+    `${h}-${a}`,
+    "ht",
+    `${hh}-${ha}`,
+  ].join("_");
 }
 
 export const generateMatchSettlementJobId = buildMatchSettlementJobId;

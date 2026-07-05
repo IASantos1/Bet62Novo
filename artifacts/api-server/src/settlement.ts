@@ -1,4 +1,5 @@
-﻿import {
+﻿import { SETTLEMENT_LOCK_TTL_SECONDS } from "./lib/settlement/lock.js";
+import {
   db,
   betsTable,
   cashoutStatesTable,
@@ -99,14 +100,20 @@ function getSettlementRedis(): any | null {
 async function acquireBetSettlementLock(
   betId: number | string,
   owner: string,
-): Promise<boolean> {
+): Promise<{ ok: boolean; heartbeat: NodeJS.Timeout | null }> {
   const redis = getSettlementRedis();
+
   if (!redis) {
-    logger.warn({ betId }, "Redis unavailable - proceeding without lock (single instance mode)");
-    return true;
+    logger.warn(
+      { betId },
+      "Redis unavailable - proceeding without lock (single instance mode)",
+    );
+    return { ok: true, heartbeat: null };
   }
+
   try {
     const key = `settlement:lock:bet:${String(betId)}`;
+
     const result = await redis.set(
       key,
       owner,
@@ -114,32 +121,101 @@ async function acquireBetSettlementLock(
       "EX",
       SETTLEMENT_LOCK_TTL_SECONDS,
     );
+
     if (result !== "OK") {
       logger.warn({ betId, owner }, "Settlement bloqueado por lock");
-      return false;
+      return { ok: false, heartbeat: null };
     }
+
+    const heartbeat = startSettlementLockHeartbeat(betId, owner);
+
     logger.info({ betId, owner }, "Settlement lock acquired");
-    return true;
+
+    return { ok: true, heartbeat };
+
   } catch (err) {
     logger.error({ err, betId }, "Failed to acquire settlement lock");
-    return true;
+    return { ok: true, heartbeat: null };
   }
 }
 
-async function releaseBetSettlementLock(
+async function updateBetOptimistic(
+  tx: any,
+  bet: typeof betsTable.$inferSelect,
+  values: Record<string, any>,
+) {
+  const rows = await tx
+    .update(betsTable)
+    .set({
+      ...values,
+      version: sql`${betsTable.version} + 1`,
+      updatedAt: new Date(),
+    })
+    .where(
+      and(
+        eq(betsTable.id, bet.id),
+        eq(betsTable.version, bet.version),
+      ),
+    )
+    .returning({
+      id: betsTable.id,
+      version: betsTable.version,
+    });
+
+  if (rows.length === 0) {
+    logger.warn(
+      {
+        betId: bet.id,
+        expectedVersion: bet.version,
+      },
+      "Optimistic lock failed",
+    );
+  }
+
+  return rows;
+}
+
+function startSettlementLockHeartbeat(
   betId: number | string,
   owner: string,
-): Promise<void> {
+): NodeJS.Timeout | null {
   const redis = getSettlementRedis();
-  if (!redis) return;
-  try {
-    const key = `settlement:lock:bet:${String(betId)}`;
-    const currentOwner = await redis.get(key);
-    if (currentOwner === owner) {
-      await redis.del(key);
+
+  if (!redis) return null;
+
+  const key = `settlement:lock:bet:${String(betId)}`;
+
+  return setInterval(async () => {
+    try {
+      const lua = `
+        if redis.call("get", KEYS[1]) == ARGV[1] then
+          return redis.call("expire", KEYS[1], ARGV[2])
+        else
+          return 0
+        end
+      `;
+
+      await redis.eval(
+        lua,
+        1,
+        key,
+        owner,
+        String(SETTLEMENT_LOCK_TTL_SECONDS),
+      );
+    } catch (err) {
+      logger.error(
+        { err, betId },
+        "Settlement lock heartbeat failed",
+      );
     }
-  } catch (err) {
-    logger.error({ err, betId }, "Failed to release settlement lock due to Redis error");
+  }, (SETTLEMENT_LOCK_TTL_SECONDS * 1000) / 3);
+}
+
+function stopSettlementLockHeartbeat(
+  timer: NodeJS.Timeout | null,
+) {
+  if (timer) {
+    clearInterval(timer);
   }
 }
 
@@ -3865,8 +3941,10 @@ export async function autoSettlePendingBets(opts?: {
     let settled = 0;
 
     for (const bet of pendingBets) {
-      const locked = await acquireBetSettlementLock(bet.id, cycleId);
-      if (!locked) continue;
+      const { ok: locked, heartbeat } =
+        await acquireBetSettlementLock(bet.id, cycleId);
+
+      if (!locked) return;
       try {
         const selections = bet.selections as SelectionRecord[];
         if (!Array.isArray(selections) || selections.length === 0) continue;
@@ -3953,15 +4031,13 @@ export async function autoSettlePendingBets(opts?: {
             });
             if (!canProceed) return;
 
-            const rows = await tx
-              .update(betsTable)
-              .set({ status: "lost", selections: updatedSelsLost })
-              .where(
-                and(eq(betsTable.id, bet.id), eq(betsTable.status, "pending")),
-              )
-              .returning({ id: betsTable.id });
-            if (rows.length === 0) return;
+            const rows = await updateBetOptimistic(tx, bet, {
+               status: "lost",
+                selections: updatedSelsLost,
+            });
 
+            if (rows.length === 0) return;
+ 
             await tx
               .delete(cashoutStatesTable)
               .where(eq(cashoutStatesTable.betId, bet.id));
@@ -4025,13 +4101,11 @@ export async function autoSettlePendingBets(opts?: {
               });
               if (!canProceed) return;
 
-              const rows = await tx
-                .update(betsTable)
-                .set({ status: "lost", selections: updatedSels })
-                .where(
-                  and(eq(betsTable.id, bet.id), eq(betsTable.status, "pending")),
-                )
-                .returning({ id: betsTable.id });
+              const rows = await updateBetOptimistic(tx, bet, {
+                 status: "lost",
+                 selections: updatedSels,
+              });
+
               if (rows.length === 0) return;
 
               await tx
@@ -4072,14 +4146,12 @@ export async function autoSettlePendingBets(opts?: {
               });
               if (!canProceed) return;
 
-              const rows = await tx
-                .update(betsTable)
-                .set({ status: "voided", selections: updatedSels })
-                .where(
-                  and(eq(betsTable.id, bet.id), eq(betsTable.status, "pending")),
-                )
-                .returning({ id: betsTable.id });
-              if (rows.length === 0) return;
+              const rows = await updateBetOptimistic(tx, bet, {
+                 status: "voided",
+                 selections: updatedSels,
+              });
+
+              if (rows.length === 0) return; 
 
               await tx
                 .delete(cashoutStatesTable)
@@ -4137,18 +4209,13 @@ export async function autoSettlePendingBets(opts?: {
             });
             if (!canProceed) return;
 
-            const rows = await tx
-              .update(betsTable)
-              .set({
-                status: "won",
-                selections: updatedSels,
-                potentialWin: payoutStr,
-                totalOdds: oddsStr,
-              })
-              .where(
-                and(eq(betsTable.id, bet.id), eq(betsTable.status, "pending")),
-              )
-              .returning({ id: betsTable.id });
+            const rows = await updateBetOptimistic(tx, bet, {
+               status: "won",
+               selections: updatedSels,
+               potentialWin: payoutStr,
+               totalOdds: oddsStr,
+            });
+
             if (rows.length === 0) return;
 
             await tx
@@ -4229,21 +4296,13 @@ export async function autoSettlePendingBets(opts?: {
                 );
                 if (!canProceed) return;
 
-                const rows = await tx
-                  .update(betsTable)
-                  .set({
-                    status: "won",
-                    selections: [updatedSel],
-                    potentialWin: payoutStr,
-                    totalOdds: oddsStr,
-                  })
-                  .where(
-                    and(
-                      eq(betsTable.id, bet.id),
-                      eq(betsTable.status, "pending"),
-                    ),
-                  )
-                  .returning({ id: betsTable.id });
+                const rows = await updateBetOptimistic(tx, bet, {
+                   status: "won",
+                   selections: [updatedSel],
+                   potentialWin: payoutStr,
+                   totalOdds: oddsStr,
+                });
+
                 if (rows.length === 0) return;
 
                 await tx
@@ -4300,16 +4359,11 @@ export async function autoSettlePendingBets(opts?: {
               );
               if (!canProceed) return;
 
-              const rows = await tx
-                .update(betsTable)
-                .set({ status: "lost", selections: [updatedSel] })
-                .where(
-                  and(
-                    eq(betsTable.id, bet.id),
-                    eq(betsTable.status, "pending"),
-                  ),
-                )
-                .returning({ id: betsTable.id });
+              const rows = await updateBetOptimistic(tx, bet, {
+                 status: "lost",
+                 selections: [updatedSel],
+              });
+
               if (rows.length === 0) return;
 
               await tx
@@ -4393,14 +4447,13 @@ export async function autoSettlePendingBets(opts?: {
             });
             if (!canProceed) return;
 
-            const rows = await tx
-              .update(betsTable)
-              .set({ status: "lost", selections: updatedSelsLost })
-              .where(
-                and(eq(betsTable.id, bet.id), eq(betsTable.status, "pending")),
-              )
-              .returning({ id: betsTable.id });
+            const rows = await updateBetOptimistic(tx, bet, {
+               status: "lost",
+               selections: updatedSelsLost,
+            });
+
             if (rows.length === 0) return;
+
             await tx
               .delete(cashoutStatesTable)
               .where(eq(cashoutStatesTable.betId, bet.id));
@@ -4448,14 +4501,12 @@ export async function autoSettlePendingBets(opts?: {
             });
             if (!canProceed) return;
 
-            const rows = await tx
-              .update(betsTable)
-              .set({ status: "voided" })
-              .where(
-                and(eq(betsTable.id, bet.id), eq(betsTable.status, "pending")),
-              )
-              .returning({ id: betsTable.id });
+            const rows = await updateBetOptimistic(tx, bet, {
+               status: "voided",
+            });
+
             if (rows.length === 0) return;
+
             await tx
               .delete(cashoutStatesTable)
               .where(eq(cashoutStatesTable.betId, bet.id));
@@ -4547,20 +4598,16 @@ export async function autoSettlePendingBets(opts?: {
           if (!canProceed) return;
 
           // Optimistic lock: only update if still pending
-          const rows = await tx
-            .update(betsTable)
-            .set({
-              status: newStatus,
-              selections: updatedSelsWon,
-              potentialWin: payoutStr,
-              totalOdds: oddsStr,
-            })
-            .where(
-              and(eq(betsTable.id, bet.id), eq(betsTable.status, "pending")),
-            )
-            .returning({ id: betsTable.id });
 
-          if (rows.length === 0) return; // already settled elsewhere
+          const rows = await updateBetOptimistic(tx, bet, {
+             status: newStatus,
+             selections: updatedSelsWon,
+             potentialWin: payoutStr,
+             totalOdds: oddsStr,
+          });
+
+          if (rows.length === 0) return;
+
           await tx
             .delete(cashoutStatesTable)
             .where(eq(cashoutStatesTable.betId, bet.id));
@@ -4610,8 +4657,9 @@ export async function autoSettlePendingBets(opts?: {
       } catch (err) {
         logger.error({ err, betId: bet.id }, "Error auto-settling bet");
       } finally {
-        await releaseBetSettlementLock(bet.id, cycleId);
-      }
+  stopSettlementLockHeartbeat(heartbeat);
+  await releaseBetSettlementLock(bet.id, cycleId);
+}
     }
 
     if (settled > 0) {
@@ -4790,13 +4838,11 @@ export async function regradeSettledBetsForMatch(
             }
           }
 
-          const rows = await tx
-            .update(betsTable)
-            .set(set as never)
-            .where(
-              and(eq(betsTable.id, bet.id), eq(betsTable.status, oldStatus)),
-            )
-            .returning({ id: betsTable.id });
+          const rows = await updateBetOptimistic(
+             tx,
+             bet,
+             set as Record<string, any>,
+          );
 
           if (rows.length === 0) return;
 
@@ -4932,10 +4978,14 @@ async function hydrateSettledBetSelections(): Promise<void> {
 
       if (!changed) continue;
 
-      await db
-        .update(betsTable)
-        .set({ selections: next })
-        .where(eq(betsTable.id, bet.id));
+     await db
+  .update(betsTable)
+  .set({
+    selections: next,
+    version: sql`${betsTable.version} + 1`,
+    updatedAt: new Date(),
+  })
+  .where(eq(betsTable.id, bet.id));
     }
   } catch (err) {
     logger.error({ err }, "Hydrate settled bet selections error");
@@ -4971,92 +5021,88 @@ async function expireStalePendingBets(): Promise<void> {
     if (staleBets.length === 0) return;
 
     for (const bet of staleBets) {
-      const locked = await acquireBetSettlementLock(bet.id, cycleId);
-      if (!locked) continue;
-      try {
-        // One last attempt to find the result before voiding
-        const selections = bet.selections as SelectionRecord[];
-        const isSingle = Array.isArray(selections) && selections.length === 1;
-        const hasResult =
-          Array.isArray(selections) &&
-          selections.some((sel) => {
-            if (sel.matchId && finishedMatchResults.has(sel.matchId))
-              return true;
-            if (isSingle && finishedMatchResults.has(bet.matchId)) return true;
-            return false;
-          });
+  const { ok: locked, heartbeat } =
+    await acquireBetSettlementLock(bet.id, cycleId);
 
-        // If result just became available, skip — next settlement cycle handles it
-        if (hasResult) continue;
+  if (!locked) continue;
 
-        await db.transaction(async (tx: any) => {
-          const canProceed = await ensureSettlementTransitionIdempotency(tx, {
-            betId: bet.id,
-            trigger: "stale_refund",
-            oldStatus: "pending",
-            newStatus: "voided",
-            matchId: bet.matchId,
-          });
-          if (!canProceed) return;
+  try {
+    const selections = bet.selections as SelectionRecord[];
+    const isSingle = Array.isArray(selections) && selections.length === 1;
 
-          const rows = await tx
-            .update(betsTable)
-            .set({ status: "voided" })
-            .where(
-              and(eq(betsTable.id, bet.id), eq(betsTable.status, "pending")),
-            )
-            .returning({ id: betsTable.id });
+    const hasResult =
+      Array.isArray(selections) &&
+      selections.some((sel) => {
+        if (sel.matchId && finishedMatchResults.has(sel.matchId)) return true;
+        if (isSingle && finishedMatchResults.has(bet.matchId)) return true;
+        return false;
+      });
 
-          if (rows.length === 0) return; // already settled elsewhere
-          await tx
-            .delete(cashoutStatesTable)
-            .where(eq(cashoutStatesTable.betId, bet.id));
+    if (hasResult) continue;
 
-          await applyBalanceDelta(tx, {
-            userId: bet.userId,
-            amount: bet.stake,
-            kind: "bet_settlement_stale_refund",
-            idempotencyKey: `bet:${bet.id}:settlement:stale_refund`,
-            refType: "bet",
-            refId: String(bet.id),
-          });
+    await db.transaction(async (tx: any) => {
+      const canProceed = await ensureSettlementTransitionIdempotency(tx, {
+        betId: bet.id,
+        trigger: "stale_refund",
+        oldStatus: "pending",
+        newStatus: "voided",
+        matchId: bet.matchId,
+      });
 
-          await tx
-            .insert(settlementLogsTable)
-            .values({
-              settlementKey: buildSettlementLogKey({
-                betId: bet.id,
-                oldStatus: "pending",
-                newStatus: "voided",
-                event: "stale_refund",
-                matchId: bet.matchId,
-              }),
-              betId: bet.id,
-              userId: bet.userId,
-              oldStatus: "pending",
-              newStatus: "voided",
-              payout: bet.stake,
-              message: "Stale bet voided after 72h — stake refunded",
-            })
-            .onConflictDoNothing();
-        });
+      if (!canProceed) return;
 
-        logger.warn(
-          {
-            betId: bet.id,
-            userId: bet.userId,
-            stake: bet.stake,
-            createdAt: bet.createdAt,
-            matchId: bet.matchId,
-          },
-          "Stale bet voided — pending >72 h without result, stake refunded",
-        );
-      } catch (err) {
-        logger.error({ err, betId: bet.id }, "Error voiding stale bet");
-      } finally {
-        await releaseBetSettlementLock(bet.id, cycleId);
-      }
-    }
+      const rows = await updateBetOptimistic(tx, bet, {
+        status: "voided",
+      });
+
+      if (rows.length === 0) return;
+
+      await tx.delete(cashoutStatesTable)
+        .where(eq(cashoutStatesTable.betId, bet.id));
+
+      await applyBalanceDelta(tx, {
+        userId: bet.userId,
+        amount: bet.stake,
+        kind: "bet_settlement_stale_refund",
+        idempotencyKey: `bet:${bet.id}:settlement:stale_refund`,
+        refType: "bet",
+        refId: String(bet.id),
+      });
+
+      await tx.insert(settlementLogsTable).values({
+        settlementKey: buildSettlementLogKey({
+          betId: bet.id,
+          oldStatus: "pending",
+          newStatus: "voided",
+          event: "stale_refund",
+          matchId: bet.matchId,
+        }),
+        betId: bet.id,
+        userId: bet.userId,
+        oldStatus: "pending",
+        newStatus: "voided",
+        payout: bet.stake,
+        message: "Stale bet voided after 72h — stake refunded",
+      }).onConflictDoNothing();
+    });
+
+    logger.warn(
+      {
+        betId: bet.id,
+        userId: bet.userId,
+        stake: bet.stake,
+      },
+      "Stale bet voided",
+    );
+
+  } catch (err) {
+    logger.error({ err, betId: bet.id }, "Error voiding stale bet");
+
+  } finally {
+    stopSettlementLockHeartbeat?.(heartbeat);
+    await releaseBetSettlementLock(bet.id, cycleId);
+  }
+}
   } catch (err) {
     logger.error({ err }, "Error scanning for stale bets");
   }

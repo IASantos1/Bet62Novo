@@ -16,9 +16,24 @@ export const betsTable = pgTable("bets", {
   status: text("status").notNull().default("pending"), // pending, won, lost, cashed_out, voided
   kickoffTime: timestamp("kickoff_time", { withTimezone: true }),
   cashoutValue: decimal("cashout_value", { precision: 10, scale: 2 }),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+
+  // Controle de concorrência otimista
+  version: integer("version").notNull().default(1),
+
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+
+  // Atualizado sempre que a aposta é alterada
+  updatedAt: timestamp("updated_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
 });
 
-export const insertBetSchema = createInsertSchema(betsTable).omit({ id: true, createdAt: true });
+export const insertBetSchema = createInsertSchema(betsTable).omit({
+  id: true,
+  createdAt: true,
+});
+
 export type InsertBet = z.infer<typeof insertBetSchema>;
 export type Bet = typeof betsTable.$inferSelect;
