@@ -2055,39 +2055,53 @@ router.get(
         .orderBy(desc(betsTable.createdAt));
 
       const betIds = bets.map((b) => b.id);
-      const logs =
-        betIds.length === 0
-          ? []
-          : await db
-              .select({
-                betId: settlementLogsTable.betId,
-                createdAt: settlementLogsTable.createdAt,
-              })
-              .from(settlementLogsTable)
-              .where(
-                and(
-                  eq(settlementLogsTable.oldStatus, "pending"),
-                  inArray(settlementLogsTable.betId, betIds),
-                ),
-              )
-              .orderBy(asc(settlementLogsTable.createdAt));
+      let logs: Array<{ betId: number; createdAt: Date }> = [];
+      if (betIds.length > 0) {
+        try {
+          logs = await db
+            .select({
+              betId: settlementLogsTable.betId,
+              createdAt: settlementLogsTable.createdAt,
+            })
+            .from(settlementLogsTable)
+            .where(
+              and(
+                eq(settlementLogsTable.oldStatus, "pending"),
+                inArray(settlementLogsTable.betId, betIds),
+              ),
+            )
+            .orderBy(asc(settlementLogsTable.createdAt));
+        } catch (err) {
+          logger.warn({ err }, "Settlement logs fetch failed");
+          logs = [];
+        }
+      }
       const firstSettleMap = new Map<number, Date>();
       for (const l of logs) {
         if (!firstSettleMap.has(l.betId))
           firstSettleMap.set(l.betId, l.createdAt);
       }
       const policy = await getCashoutPolicy();
-      const states =
-        betIds.length === 0
-          ? []
-          : await db
-              .select({
-                betId: cashoutStatesTable.betId,
-                unfavorableSince: cashoutStatesTable.unfavorableSince,
-                reason: cashoutStatesTable.reason,
-              })
-              .from(cashoutStatesTable)
-              .where(inArray(cashoutStatesTable.betId, betIds));
+      let states: Array<{
+        betId: number;
+        unfavorableSince: Date;
+        reason?: string | null;
+      }> = [];
+      if (betIds.length > 0) {
+        try {
+          states = await db
+            .select({
+              betId: cashoutStatesTable.betId,
+              unfavorableSince: cashoutStatesTable.unfavorableSince,
+              reason: cashoutStatesTable.reason,
+            })
+            .from(cashoutStatesTable)
+            .where(inArray(cashoutStatesTable.betId, betIds));
+        } catch (err) {
+          logger.warn({ err }, "Cashout states fetch failed");
+          states = [];
+        }
+      }
       const stateMap = new Map<
         number,
         { unfavorableSince: Date; reason?: string | null }
@@ -2097,14 +2111,20 @@ router.get(
           unfavorableSince: s.unfavorableSince,
           reason: s.reason,
         });
-      const cashoutDisabledEventIds = await getCashoutDisabledEventIdsForBets(
-        bets as Array<{
-          matchId: string;
-          matchTitle: string;
-          selections: unknown;
-          totalOdds: string;
-        }>,
-      );
+      let cashoutDisabledEventIds = new Set<string>();
+      try {
+        cashoutDisabledEventIds = await getCashoutDisabledEventIdsForBets(
+          bets as Array<{
+            matchId: string;
+            matchTitle: string;
+            selections: unknown;
+            totalOdds: string;
+          }>,
+        );
+      } catch (err) {
+        logger.warn({ err }, "Cashout disabled events fetch failed");
+        cashoutDisabledEventIds = new Set<string>();
+      }
 
       const inserts: Array<{
         betId: number;
@@ -2191,22 +2211,26 @@ router.get(
         };
       });
 
-      if (deletes.length > 0) {
-        await db
-          .delete(cashoutStatesTable)
-          .where(inArray(cashoutStatesTable.betId, deletes));
-      }
-      if (inserts.length > 0) {
-        await db
-          .insert(cashoutStatesTable)
-          .values(inserts)
-          .onConflictDoNothing();
-      }
-      for (const u of updates) {
-        await db
-          .update(cashoutStatesTable)
-          .set({ reason: u.reason, updatedAt: u.updatedAt })
-          .where(eq(cashoutStatesTable.betId, u.betId));
+      try {
+        if (deletes.length > 0) {
+          await db
+            .delete(cashoutStatesTable)
+            .where(inArray(cashoutStatesTable.betId, deletes));
+        }
+        if (inserts.length > 0) {
+          await db
+            .insert(cashoutStatesTable)
+            .values(inserts)
+            .onConflictDoNothing();
+        }
+        for (const u of updates) {
+          await db
+            .update(cashoutStatesTable)
+            .set({ reason: u.reason, updatedAt: u.updatedAt })
+            .where(eq(cashoutStatesTable.betId, u.betId));
+        }
+      } catch (err) {
+        logger.warn({ err }, "Cashout state persistence failed");
       }
 
       res.json(enriched);
