@@ -16,7 +16,7 @@ async function buildAll() {
 
   await esbuild({
     entryPoints: {
-      "api/index": path.resolve(artifactDir, "src/api/index.ts"),
+      "index": path.resolve(artifactDir, "src/api/index.ts"),
       "workers/settlement.worker": path.resolve(
         artifactDir,
         "src/workers/settlement.worker.ts",
