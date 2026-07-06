@@ -77,7 +77,7 @@ export function registerAppServiceWorker() {
 
         setInterval(() => {
           registration.update().catch(() => {});
-        }, 60_000);
+        }, 21_600_000);
       })
       .catch(() => {});
   });
