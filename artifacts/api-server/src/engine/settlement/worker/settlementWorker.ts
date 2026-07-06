@@ -1,35 +1,61 @@
-import { db, betsTable } from "@workspace/db";
-import { eq, sql } from "drizzle-orm";
+import { settlementEngine } from "../core/SettlementEngine.js";
 import { settleBet } from "../../../services/settlement/settleBet";
 import { logger } from "../../../lib/logger.js";
+import { getPendingSelectionsByMatch } from "../repository/selectionRepository";
 
-const BATCH_SIZE = 50;
+const TEST_MATCH_ID = process.env.SETTLEMENT_MATCH_ID ?? "";
 
 export async function runSettlementWorker() {
   try {
-    const bets = await db
-      .select()
-      .from(betsTable)
-      .where(eq(betsTable.status, "pending"))
-      .limit(BATCH_SIZE);
-
-    if (bets.length === 0) {
-      logger.info("Settlement worker: no bets to process");
+    if (!TEST_MATCH_ID) {
+      logger.warn(
+        "SETTLEMENT_MATCH_ID not configured. Worker is waiting.",
+      );
       return;
     }
 
-    logger.info({ count: bets.length }, "Settlement batch started");
+    const selections = await getPendingSelectionsByMatch(TEST_MATCH_ID);
 
-    for (const bet of bets) {
+    if (selections.length === 0) {
+      logger.info(
+        { matchId: TEST_MATCH_ID },
+        "No pending selections",
+      );
+      return;
+    }
+
+    logger.info(
+      {
+        matchId: TEST_MATCH_ID,
+        selections: selections.length,
+      },
+      "Settlement batch started",
+    );
+
+    for (const item of selections) {
       try {
         await settleBet({
-          bet,
+          bet: {
+            id: item.betId,
+            userId: item.userId,
+            matchId: item.matchId,
+            status: item.status,
+            version: item.version,
+            stake: item.stake,
+            potentialWin: item.potentialWin,
+          },
           trigger: "worker_batch",
-          selections: bet.selections || [],
+          selections: item.selections,
           cycleId: `worker-${Date.now()}`,
         });
       } catch (err) {
-        logger.error({ err, betId: bet.id }, "Settlement failed for bet");
+        logger.error(
+          {
+            err,
+            betId: item.betId,
+          },
+          "Settlement failed",
+        );
       }
     }
 

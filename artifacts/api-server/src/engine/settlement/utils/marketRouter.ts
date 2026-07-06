@@ -1,13 +1,16 @@
-import { settleFootball } from "../rules/football";
+import { footballRouter } from "../router/footballRouter";
 
 export function routeMarket(input: any) {
-  const { match } = input;
+  const sport = String(
+    input.match.sport ??
+    ""
+  ).toLowerCase();
 
-  switch (match.sport) {
+  switch (sport) {
     case "football":
-      return settleFootball(input);
+        return footballRouter(input);
 
     default:
-      return "pending";
+        return "pending";
   }
 }
