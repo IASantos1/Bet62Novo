@@ -60,6 +60,7 @@ import {
   Search,
 } from "lucide-react";
 import ProfileTab from "@/components/ProfileTab";
+import StableImage from "@/components/StableImage";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -9089,16 +9090,11 @@ export default function Home({
                   ) : (
                     <>
                       <span className="absolute inset-0 flex items-center justify-center text-[11px] leading-none">{flag}</span>
-                      {fUrl && (
-                        <img
-                          key={fUrl}
-                          src={fUrl}
-                          alt=""
-                          className="absolute inset-0 w-full h-full object-cover"
-                          loading="eager"
-                          onError={(e) => { e.currentTarget.style.display = 'none'; }}
-                        />
-                      )}
+                      <StableImage
+                        src={fUrl}
+                        alt=""
+                        className="absolute inset-0 w-full h-full object-cover"
+                      />
                     </>
                   )}
                 </div>
@@ -9846,16 +9842,11 @@ export default function Home({
                       ) : (
                         <>
                           <span className="absolute inset-0 flex items-center justify-center text-[9px] leading-none">{flag}</span>
-                          {fUrl && (
-                            <img
-                              key={fUrl}
-                              src={fUrl}
-                              alt=""
-                              className="absolute inset-0 w-full h-full object-cover"
-                              loading="eager"
-                              onError={(e) => { e.currentTarget.style.display = 'none'; }}
-                            />
-                          )}
+                          <StableImage
+                            src={fUrl}
+                            alt=""
+                            className="absolute inset-0 w-full h-full object-cover"
+                          />
                         </>
                       )}
                     </div>
@@ -10143,16 +10134,11 @@ export default function Home({
                     ) : (
                       <>
                         <span className="absolute inset-0 flex items-center justify-center text-[11px] leading-none">{flag}</span>
-                        {flagUrl && (
-                          <img
-                            key={flagUrl}
-                            src={flagUrl}
-                            alt=""
-                            className="absolute inset-0 w-full h-full object-cover"
-                            loading="eager"
-                            onError={(e) => { e.currentTarget.style.display = 'none'; }}
-                          />
-                        )}
+                        <StableImage
+                          src={flagUrl}
+                          alt=""
+                          className="absolute inset-0 w-full h-full object-cover"
+                        />
                       </>
                     )}
                   </div>
