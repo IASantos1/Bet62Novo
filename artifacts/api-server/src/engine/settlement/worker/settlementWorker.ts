@@ -7,7 +7,6 @@ const BATCH_SIZE = 50;
 
 export async function runSettlementWorker() {
   try {
-    // 1. Pega bets pendentes com lock seguro
     const bets = await db
       .select()
       .from(betsTable)
@@ -21,7 +20,6 @@ export async function runSettlementWorker() {
 
     logger.info({ count: bets.length }, "Settlement batch started");
 
-    // 2. Processamento sequencial seguro (primeiro modo)
     for (const bet of bets) {
       try {
         await settleBet({

@@ -74,7 +74,6 @@ export type SelectionSettlementResolution = {
     | "timeout_no_result_auto_void";
 };
 
-const SETTLEMENT_LOCK_TTL_SECONDS = 60 * 60 * 6; // 6 h safety TTL (lock released immediately on success)
 export const SETTLEMENT_TIMEOUT_HOURS = 12;
 const SETTLEMENT_TIMEOUT_MS = SETTLEMENT_TIMEOUT_HOURS * 60 * 60 * 1000;
 const LATE_PENDING_LOG_GRACE_MS = 3 * 60 * 60 * 1000;
@@ -219,6 +218,28 @@ function stopSettlementLockHeartbeat(
   }
 }
 
+async function releaseBetSettlementLock(
+  betId: number | string,
+  owner: string,
+): Promise<void> {
+  const redis = getSettlementRedis();
+  if (!redis) return;
+
+  const key = `settlement:lock:bet:${String(betId)}`;
+  try {
+    const lua = `
+      if redis.call("get", KEYS[1]) == ARGV[1] then
+        return redis.call("del", KEYS[1])
+      else
+        return 0
+      end
+    `;
+    await redis.eval(lua, 1, key, owner);
+  } catch (err) {
+    logger.error({ err, betId }, "Failed to release settlement lock");
+  }
+}
+
 export async function ensureSettlementTransitionIdempotency(
   tx: any,
   args: {
@@ -248,17 +269,16 @@ export async function ensureSettlementTransitionIdempotency(
   const rows = await tx
     .insert(settlementIdempotencyTable)
     .values({
-      idempotencyKey,
+      jobId: idempotencyKey,
       betId: args.betId,
       trigger: args.trigger,
       oldStatus: args.oldStatus,
       newStatus: args.newStatus,
       matchId: args.matchId,
-      jobId: args.jobId,
       engineVersion: "2025.06-v4",
     })
     .onConflictDoNothing()
-    .returning({ idempotencyKey: settlementIdempotencyTable.idempotencyKey });
+    .returning({ jobId: settlementIdempotencyTable.jobId });
 
   return rows.length > 0;
 }

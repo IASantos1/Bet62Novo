@@ -21,12 +21,21 @@ export async function settleBet(input: SettleBetInput) {
   const { bet, trigger, selections } = input;
 
   return db.transaction(async (tx) => {
-    // 1. IDEMPOTÊNCIA (anti double processing)
+    // 1. ENGINE DECISION (NUNCA vem de fora)
+    const outcome = settleSelection({
+      betId: bet.id,
+      match: bet.match,
+      selection: selections[0],
+      ruleVersion: "2025.06-v4",
+    });
+    const betStatus = outcome === "void" ? "voided" : outcome;
+
+    // 2. IDEMPOTÊNCIA (anti double processing)
     const canProceed = await ensureSettlementTransitionIdempotency(tx, {
       betId: bet.id,
       trigger,
       oldStatus: "pending",
-      newStatus: "settling",
+      newStatus: betStatus,
       matchId: bet.matchId,
     });
 
@@ -35,19 +44,11 @@ export async function settleBet(input: SettleBetInput) {
       return;
     }
 
-    // 2. ENGINE DECISION (NUNCA vem de fora)
-    const outcome = settleSelection({
-      betId: bet.id,
-      match: bet.match,
-      selection: selections[0],
-      ruleVersion: "2025.06-v4",
-    });
-
     // 3. OPTIMISTIC LOCK (evita dupla execução concorrente)
     const rows = await tx
       .update(betsTable)
       .set({
-        status: outcome,
+        status: betStatus,
         updatedAt: new Date(),
         version: sql`${betsTable.version} + 1`,
       })
@@ -105,7 +106,7 @@ export async function settleBet(input: SettleBetInput) {
       betId: bet.id,
       userId: bet.userId,
       oldStatus: "pending",
-      newStatus: outcome,
+      newStatus: betStatus,
       payout: bet.potentialWin ?? "0.00",
       message: `engine-settled via ${trigger}`,
       createdAt: new Date(),

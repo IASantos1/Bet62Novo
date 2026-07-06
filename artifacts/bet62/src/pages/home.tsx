@@ -9087,15 +9087,10 @@ export default function Home({
                 <div className="w-[22px] h-[22px] rounded-full border border-zinc-700/70 bg-zinc-800 overflow-hidden relative">
                   {leagueLogo ? (
                     <img src={leagueLogo} alt="" className="w-full h-full object-contain p-[2px]" loading="lazy" />
+                  ) : fUrl ? (
+                    <StableImage src={fUrl} alt="" className="w-full h-full object-cover" />
                   ) : (
-                    <>
-                      <span className="absolute inset-0 flex items-center justify-center text-[11px] leading-none">{flag}</span>
-                      <StableImage
-                        src={fUrl}
-                        alt=""
-                        className="absolute inset-0 w-full h-full object-cover"
-                      />
-                    </>
+                    <span className="w-full h-full flex items-center justify-center text-[11px] leading-none">{flag}</span>
                   )}
                 </div>
                 <div className="absolute -top-[5px] -right-[5px] w-[13px] h-[13px] rounded-full bg-zinc-900 border border-zinc-700 flex items-center justify-center shadow-sm">
@@ -10131,15 +10126,10 @@ export default function Home({
                   <div className="w-[22px] h-[22px] rounded-full border border-zinc-700/70 bg-zinc-800 overflow-hidden relative">
                     {leagueLogo ? (
                       <img src={leagueLogo} alt="" className="w-full h-full object-contain p-[2px]" loading="lazy" />
+                    ) : flagUrl ? (
+                      <StableImage src={flagUrl} alt="" className="w-full h-full object-cover" />
                     ) : (
-                      <>
-                        <span className="absolute inset-0 flex items-center justify-center text-[11px] leading-none">{flag}</span>
-                        <StableImage
-                          src={flagUrl}
-                          alt=""
-                          className="absolute inset-0 w-full h-full object-cover"
-                        />
-                      </>
+                      <span className="w-full h-full flex items-center justify-center text-[11px] leading-none">{flag}</span>
                     )}
                   </div>
                   <div className="absolute -top-[5px] -right-[5px] w-[13px] h-[13px] rounded-full bg-zinc-900 border border-zinc-700 flex items-center justify-center shadow-sm">

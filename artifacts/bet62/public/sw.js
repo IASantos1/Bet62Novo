@@ -128,6 +128,11 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
+  if (["font", "image"].includes(request.destination)) {
+    event.respondWith(staleWhileRevalidate(request, ASSET_CACHE));
+    return;
+  }
+
   if (url.pathname.includes("/api/")) {
     event.respondWith(networkFirst(request, DATA_CACHE));
     return;
@@ -136,9 +141,5 @@ self.addEventListener("fetch", (event) => {
   if (["style", "script", "worker"].includes(request.destination)) {
     event.respondWith(networkFirst(request, ASSET_CACHE));
     return;
-  }
-
-  if (["font", "image"].includes(request.destination)) {
-    event.respondWith(staleWhileRevalidate(request, ASSET_CACHE));
   }
 });
