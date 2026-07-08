@@ -17319,27 +17319,34 @@ export default function Home({
                       }
 
                       return (
-                        <div className="overflow-x-auto flex gap-3 pb-2 snap-x snap-mandatory -mx-1 px-1">
-                          {combos.map((combo) => {
+                        // Break out of the parent's overflow-x-clip with -mx-4 so the horizontal scroll works
+                        <div
+                          className="-mx-4 px-4 flex gap-3 pb-2 snap-x snap-mandatory"
+                          style={{ overflowX: "scroll", scrollbarWidth: "none", WebkitOverflowScrolling: "touch" } as React.CSSProperties}
+                        >
+                          {combos.map((combo, ci) => {
                             const comboOdds = calcComboOdds(combo.sels);
                             return (
                               <motion.div
                                 key={combo.id}
                                 initial={{ opacity: 0, x: 10 }}
                                 animate={{ opacity: 1, x: 0 }}
-                                transition={{ delay: combos.indexOf(combo) * 0.08 }}
+                                transition={{ delay: ci * 0.08 }}
                                 className={`snap-start shrink-0 w-[255px] border rounded-xl p-4 bg-zinc-900 ${combo.borderClass}`}
                               >
-                                {/* Header */}
-                                <div className="flex items-center justify-between mb-3">
+                                {/* Header: combo name + múltipla tag + combined odd */}
+                                <div className="flex items-center justify-between mb-1">
                                   <div className={`flex items-center gap-1.5 px-2 py-1 rounded-lg ${combo.badgeClass}`}>
                                     <span className="text-[13px] leading-none">{combo.emoji}</span>
                                     <span className={`text-[9px] font-black uppercase tracking-wider ${combo.tagColor}`}>{combo.name}</span>
                                   </div>
-                                  <div className="bg-zinc-800 border border-zinc-700 rounded-lg px-2.5 py-1 text-center min-w-[46px]">
-                                    <div className="text-[12px] font-black text-white">{comboOdds}</div>
-                                    <div className="text-[7px] text-zinc-500 uppercase tracking-wide">odd</div>
-                                  </div>
+                                  <span className="text-[8px] font-black text-zinc-500 uppercase tracking-widest border border-zinc-700 rounded px-1.5 py-0.5">Múltipla</span>
+                                </div>
+
+                                {/* Combined odds */}
+                                <div className="flex items-baseline gap-1 mb-3">
+                                  <span className="text-[22px] font-black text-white leading-none">{comboOdds}</span>
+                                  <span className="text-[9px] text-zinc-500">odd combinada</span>
                                 </div>
 
                                 {/* Selections */}
@@ -17355,19 +17362,38 @@ export default function Home({
                                   ))}
                                 </div>
 
-                                {/* Add combo button */}
+                                {/* Add combo — bypass toggleBet to keep múltipla mode */}
                                 <button
                                   onClick={() => {
                                     if (!expandedMatch) return;
-                                    combo.sels.forEach(sel =>
-                                      toggleBet(expandedMatch, sel.selection, sel.odds, sel.market, sel.label)
-                                    );
+                                    setBets((prev: any[]) => {
+                                      const withoutThis = prev.filter((b: any) => b.matchId !== expandedMatch.id);
+                                      return [
+                                        ...withoutThis,
+                                        ...combo.sels.map((sel) => ({
+                                          matchId: expandedMatch.id,
+                                          matchTitle: `${expandedMatch.home} vs ${expandedMatch.away}`,
+                                          league: expandedMatch.league,
+                                          country: expandedMatch.country,
+                                          sport: expandedMatch.sport,
+                                          date: expandedMatch.date,
+                                          time: expandedMatch.time,
+                                          scheduledDate: (expandedMatch as any).scheduledDate,
+                                          scheduledTime: (expandedMatch as any).scheduledTime,
+                                          selection: sel.selection,
+                                          odd: sel.odds,
+                                          originalOdd: sel.odds,
+                                          market: sel.market,
+                                          label: sel.label,
+                                        })),
+                                      ];
+                                    });
                                     setBetMode("multipla");
                                     if (window.innerWidth < 1024) setBetSlipOpenMobile(true);
                                   }}
                                   className="w-full py-2 rounded-xl text-[11px] font-black text-white bg-gradient-to-r from-red-700 to-orange-600 hover:from-red-600 hover:to-orange-500 active:opacity-80 transition-all shadow-[0_2px_8px_rgba(239,68,68,0.35)]"
                                 >
-                                  Adicionar Combo
+                                  Adicionar Múltipla
                                 </button>
                               </motion.div>
                             );
