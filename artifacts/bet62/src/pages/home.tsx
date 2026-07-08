@@ -9087,10 +9087,11 @@ export default function Home({
                 <div className="w-[22px] h-[22px] rounded-full border border-zinc-700/70 bg-zinc-800 overflow-hidden relative">
                   {leagueLogo ? (
                     <img src={leagueLogo} alt="" className="w-full h-full object-contain p-[2px]" loading="lazy" />
-                  ) : fUrl ? (
-                    <StableImage src={fUrl} alt="" className="w-full h-full object-cover" />
                   ) : (
-                    <span className="w-full h-full flex items-center justify-center text-[11px] leading-none">{flag}</span>
+                    <>
+                      <span className="absolute inset-0 flex items-center justify-center text-[10px] leading-none">{flag}</span>
+                      {fUrl && <StableImage src={fUrl} alt="" className="absolute inset-0 w-full h-full object-cover" />}
+                    </>
                   )}
                 </div>
                 <div className="absolute -top-[5px] -right-[5px] w-[13px] h-[13px] rounded-full bg-zinc-900 border border-zinc-700 flex items-center justify-center shadow-sm">
@@ -10126,10 +10127,11 @@ export default function Home({
                   <div className="w-[22px] h-[22px] rounded-full border border-zinc-700/70 bg-zinc-800 overflow-hidden relative">
                     {leagueLogo ? (
                       <img src={leagueLogo} alt="" className="w-full h-full object-contain p-[2px]" loading="lazy" />
-                    ) : flagUrl ? (
-                      <StableImage src={flagUrl} alt="" className="w-full h-full object-cover" />
                     ) : (
-                      <span className="w-full h-full flex items-center justify-center text-[11px] leading-none">{flag}</span>
+                      <>
+                        <span className="absolute inset-0 flex items-center justify-center text-[10px] leading-none">{flag}</span>
+                        {flagUrl && <StableImage src={flagUrl} alt="" className="absolute inset-0 w-full h-full object-cover" />}
+                      </>
                     )}
                   </div>
                   <div className="absolute -top-[5px] -right-[5px] w-[13px] h-[13px] rounded-full bg-zinc-900 border border-zinc-700 flex items-center justify-center shadow-sm">
@@ -17223,9 +17225,92 @@ export default function Home({
                         });
                       }
 
-                      const displayed = insights.slice(0, 4);
+                      // ── Build 3 múltipla combo packages ──────────────────────
+                      const mk = expandedMatch?.markets;
+                      const favIsHome = winProb.home >= winProb.away;
+                      const favOdds = favIsHome ? expandedMatch.odds.home : expandedMatch.odds.away;
+                      const favLabel = favIsHome
+                        ? `${expandedMatch.home} — Vitória`
+                        : `${expandedMatch.away} — Vitória`;
+                      const favSel = favIsHome ? "home" : "away";
 
-                      if (displayed.length === 0) {
+                      const dcSel = favIsHome ? "homeOrDraw" : "awayOrDraw";
+                      const dcLabel = favIsHome
+                        ? `${expandedMatch.home} ou Empate`
+                        : `${expandedMatch.away} ou Empate`;
+                      const dcOdds = favIsHome
+                        ? (mk?.doubleChance?.homeOrDraw && mk.doubleChance.homeOrDraw > 1.01 ? mk.doubleChance.homeOrDraw : +(Math.max(1.05, favOdds * 0.62)).toFixed(2))
+                        : (mk?.doubleChance?.awayOrDraw && mk.doubleChance.awayOrDraw > 1.01 ? mk.doubleChance.awayOrDraw : +(Math.max(1.05, favOdds * 0.62)).toFixed(2));
+
+                      const bttsOdds = mk?.bothTeamsScore?.yes && mk.bothTeamsScore.yes > 1.01
+                        ? mk.bothTeamsScore.yes
+                        : +(Math.max(1.30, 1 / (Math.max(35, avgStats.btts) / 100) * 0.95)).toFixed(2);
+
+                      const o15Odds = mk?.totalGoals?.over15 && mk.totalGoals.over15 > 1.01
+                        ? mk.totalGoals.over15
+                        : +(Math.max(1.05, 1 / (Math.max(55, avgStats.over15) / 100) * 0.95)).toFixed(2);
+
+                      const o25Odds = mk?.totalGoals?.over25 && mk.totalGoals.over25 > 1.01
+                        ? mk.totalGoals.over25
+                        : +(Math.max(1.20, 1 / (Math.max(42, avgStats.over25) / 100) * 0.95)).toFixed(2);
+
+                      const u25Odds = mk?.totalGoals?.under25 && mk.totalGoals.under25 > 1.01
+                        ? mk.totalGoals.under25
+                        : +(Math.max(1.20, 1 / (Math.max(40, 100 - avgStats.over25) / 100) * 0.95)).toFixed(2);
+
+                      type ComboSel = { label: string; selection: string; market: string; odds: number };
+                      type Combo = {
+                        id: string; name: string; emoji: string;
+                        tagColor: string; borderClass: string; badgeClass: string;
+                        sels: ComboSel[];
+                      };
+
+                      const calcComboOdds = (sels: ComboSel[]) =>
+                        +(sels.reduce((acc, s) => acc * s.odds, 1) * 0.98).toFixed(2);
+
+                      const combos: Combo[] = [
+                        {
+                          id: "golo",
+                          name: "Golo Garantido",
+                          emoji: "⚡",
+                          tagColor: "text-orange-400",
+                          borderClass: "border-orange-500/30",
+                          badgeClass: "bg-orange-500/10",
+                          sels: [
+                            { label: favLabel, selection: favSel, market: "result", odds: favOdds },
+                            { label: "Ambas Marcam — Sim", selection: "bts-yes", market: "dupla", odds: bttsOdds },
+                            { label: "Acima de 1.5 Golos", selection: "o15", market: "gols", odds: o15Odds },
+                          ],
+                        },
+                        {
+                          id: "intens",
+                          name: "Alta Intensidade",
+                          emoji: "🔥",
+                          tagColor: "text-red-400",
+                          borderClass: "border-red-500/30",
+                          badgeClass: "bg-red-500/10",
+                          sels: [
+                            { label: "Ambas Marcam — Sim", selection: "bts-yes", market: "dupla", odds: bttsOdds },
+                            { label: "Acima de 2.5 Golos", selection: "o25", market: "gols", odds: o25Odds },
+                            { label: dcLabel, selection: dcSel, market: "dupla", odds: dcOdds },
+                          ],
+                        },
+                        {
+                          id: "seguro",
+                          name: "Jogo Seguro",
+                          emoji: "🛡️",
+                          tagColor: "text-blue-400",
+                          borderClass: "border-blue-500/20",
+                          badgeClass: "bg-blue-500/10",
+                          sels: [
+                            { label: dcLabel, selection: dcSel, market: "dupla", odds: dcOdds },
+                            { label: "Acima de 1.5 Golos", selection: "o15", market: "gols", odds: o15Odds },
+                            { label: "Abaixo de 2.5 Golos", selection: "u25", market: "gols", odds: u25Odds },
+                          ],
+                        },
+                      ];
+
+                      if (!expandedMatch || favOdds <= 1.01) {
                         return (
                           <div className="bg-zinc-900 rounded-xl border border-zinc-800 p-6 text-center text-zinc-500 text-sm">
                             Dados insuficientes para gerar previsões.
@@ -17233,71 +17318,62 @@ export default function Home({
                         );
                       }
 
-                      return displayed.map((ins, i) => (
-                        <motion.div
-                          key={ins.market}
-                          initial={{ opacity: 0, x: -10 }}
-                          animate={{ opacity: 1, x: 0 }}
-                          transition={{ delay: i * 0.1 }}
-                          className={`border rounded-xl p-4 ${ins.cascadeFrom ? "bg-zinc-800/70 border-orange-500/30" : "bg-zinc-900 border-zinc-800"}`}
-                        >
-                          {/* Cascade unlock banner */}
-                          {ins.cascadeFrom && (
-                            <div className="flex items-center gap-1.5 mb-2.5 bg-orange-500/10 rounded-lg px-2.5 py-1.5">
-                              <Zap size={10} className="text-orange-400 shrink-0" />
-                              <span className="text-[9px] font-black text-orange-400 uppercase tracking-wide">
-                                🔓 {ins.cascadeFrom} liquidado — novo mercado
-                              </span>
-                            </div>
-                          )}
-
-                          <div className="flex items-start justify-between gap-3 mb-3">
-                            <div className="flex-1 min-w-0">
-                              <div className={`text-[10px] font-black uppercase tracking-widest mb-1 ${ins.tagColor}`}>{ins.tag}</div>
-                              <div className="text-sm font-black text-white leading-tight">{ins.market}</div>
-                            </div>
-                            {/* Odds box with boost badge */}
-                            <div className="shrink-0 flex flex-col items-center gap-1">
-                              <div className="bg-zinc-800 border border-zinc-700 rounded-xl px-3 py-2 text-center">
-                                <div className="text-xs font-black text-white">{ins.odds}</div>
-                                <div className="text-[9px] text-zinc-500">odd</div>
-                              </div>
-                              <div className="flex items-center gap-0.5 bg-yellow-500/20 border border-yellow-500/40 rounded-full px-1.5 py-0.5">
-                                <Zap size={7} className="text-yellow-400" />
-                                <span className="text-[8px] font-black text-yellow-400">+5%</span>
-                              </div>
-                            </div>
-                          </div>
-
-                          <div className="flex items-center gap-2 mb-3">
-                            <div className="text-[10px] text-zinc-500 shrink-0">Confiança</div>
-                            <div className="flex-1 h-1.5 bg-zinc-800 rounded-full overflow-hidden">
+                      return (
+                        <div className="overflow-x-auto flex gap-3 pb-2 snap-x snap-mandatory -mx-1 px-1">
+                          {combos.map((combo) => {
+                            const comboOdds = calcComboOdds(combo.sels);
+                            return (
                               <motion.div
-                                className={`h-full rounded-full ${ins.cascadeFrom ? "bg-gradient-to-r from-orange-500 to-yellow-400" : "bg-gradient-to-r from-yellow-500 to-emerald-500"}`}
-                                initial={{ width: 0 }}
-                                animate={{ width: `${ins.confidence}%` }}
-                                transition={{ duration: 0.9, delay: i * 0.1 + 0.2 }}
-                              />
-                            </div>
-                            <div className="text-[10px] font-black text-zinc-300 shrink-0">{ins.confidence}%</div>
-                          </div>
+                                key={combo.id}
+                                initial={{ opacity: 0, x: 10 }}
+                                animate={{ opacity: 1, x: 0 }}
+                                transition={{ delay: combos.indexOf(combo) * 0.08 }}
+                                className={`snap-start shrink-0 w-[255px] border rounded-xl p-4 bg-zinc-900 ${combo.borderClass}`}
+                              >
+                                {/* Header */}
+                                <div className="flex items-center justify-between mb-3">
+                                  <div className={`flex items-center gap-1.5 px-2 py-1 rounded-lg ${combo.badgeClass}`}>
+                                    <span className="text-[13px] leading-none">{combo.emoji}</span>
+                                    <span className={`text-[9px] font-black uppercase tracking-wider ${combo.tagColor}`}>{combo.name}</span>
+                                  </div>
+                                  <div className="bg-zinc-800 border border-zinc-700 rounded-lg px-2.5 py-1 text-center min-w-[46px]">
+                                    <div className="text-[12px] font-black text-white">{comboOdds}</div>
+                                    <div className="text-[7px] text-zinc-500 uppercase tracking-wide">odd</div>
+                                  </div>
+                                </div>
 
-                          <div className="text-[11px] text-zinc-400 leading-relaxed mb-3">{ins.reason}</div>
+                                {/* Selections */}
+                                <div className="space-y-2 mb-3">
+                                  {combo.sels.map((sel, si) => (
+                                    <div key={si} className="flex items-center justify-between gap-2">
+                                      <div className="flex items-center gap-1.5 min-w-0">
+                                        <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${combo.tagColor.replace("text-", "bg-")}`} />
+                                        <span className="text-[10px] text-zinc-300 leading-tight truncate">{sel.label}</span>
+                                      </div>
+                                      <span className="text-[10px] font-black text-zinc-200 shrink-0">{sel.odds.toFixed(2)}</span>
+                                    </div>
+                                  ))}
+                                </div>
 
-                          <button
-                            onClick={() => {
-                              if (!expandedMatch) return;
-                              toggleBet(expandedMatch, ins.market, parseFloat(ins.odds), "insight", ins.market);
-                              if (window.innerWidth < 1024) setBetSlipOpenMobile(true);
-                            }}
-                            className="w-full flex items-center justify-center gap-1.5 bg-gradient-to-r from-red-700 via-red-600 to-orange-600 hover:from-red-600 hover:to-orange-500 active:from-red-800 text-white text-[12px] font-black py-2.5 rounded-xl transition-all shadow-[0_2px_10px_rgba(239,68,68,0.4)]"
-                          >
-                            <span className="text-[14px] leading-none" style={{ filter: "drop-shadow(0 0 4px rgba(249,115,22,0.9)) drop-shadow(0 2px 3px rgba(239,68,68,0.7))" }}>🔥</span>
-                            Adicionar à Aposta
-                            <span className="text-[14px] leading-none" style={{ filter: "drop-shadow(0 0 4px rgba(249,115,22,0.9)) drop-shadow(0 2px 3px rgba(239,68,68,0.7))" }}>🔥</span>
-                          </button>
-                        </motion.div>
-                      ));
+                                {/* Add combo button */}
+                                <button
+                                  onClick={() => {
+                                    if (!expandedMatch) return;
+                                    combo.sels.forEach(sel =>
+                                      toggleBet(expandedMatch, sel.selection, sel.odds, sel.market, sel.label)
+                                    );
+                                    setBetMode("multipla");
+                                    if (window.innerWidth < 1024) setBetSlipOpenMobile(true);
+                                  }}
+                                  className="w-full py-2 rounded-xl text-[11px] font-black text-white bg-gradient-to-r from-red-700 to-orange-600 hover:from-red-600 hover:to-orange-500 active:opacity-80 transition-all shadow-[0_2px_8px_rgba(239,68,68,0.35)]"
+                                >
+                                  Adicionar Combo
+                                </button>
+                              </motion.div>
+                            );
+                          })}
+                        </div>
+                      );
                     })()}
 
                     <div className="flex items-start gap-2 px-1 pt-1">

@@ -19870,10 +19870,23 @@ router.get("/upcoming", async (req: Request, res: Response) => {
       ...cache.volleyball,
       ...cache.baseball,
     ];
-  const filtered =
-    sport === "all"
-      ? matches.filter((m) => m.odds?.home > 0 && m.odds?.away > 0)
-      : matches.filter((m) => m.odds?.home > 0 && m.odds?.away > 0);
+  const isPlaceholderTeamName = (name: string): boolean => {
+    const n = String(name ?? "").trim();
+    if (!n) return true;
+    // Knockout placeholder patterns: "1st teams", "2nd teams", "Winner Group A", "TBD", etc.
+    if (/^\d+(st|nd|rd|th)\s*(team|place|group)?s?$/i.test(n)) return true;
+    if (/^winner\s*(of\s*)?(group|matchday|round|match)?\s*[A-Za-z0-9]*$/i.test(n) && n.length < 20) return true;
+    if (/^group\s*[A-Za-z]\s*(winner|1st|2nd|runner)/i.test(n)) return true;
+    if (/^(tbd|to be determined|tba)$/i.test(n)) return true;
+    return false;
+  };
+  const filtered = matches.filter(
+    (m) =>
+      m.odds?.home > 0 &&
+      m.odds?.away > 0 &&
+      !isPlaceholderTeamName(m.home) &&
+      !isPlaceholderTeamName(m.away),
+  );
   res.json({ matches: filtered });
 });
 

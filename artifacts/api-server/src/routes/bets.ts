@@ -1952,8 +1952,12 @@ router.post(
         res.status(400).json({ error: e.message });
         return;
       }
-      logger.error({ err }, "Bet placement error");
-      res.status(500).json({ error: "Internal server error" });
+      const e2 = err as Error & { code?: string };
+      logger.error({ err, message: e2?.message, code: e2?.code }, "Bet placement error");
+      const detail = process.env.NODE_ENV !== "production" && e2?.message
+        ? `: ${e2.message}`
+        : "";
+      res.status(500).json({ error: `Internal server error${detail}` });
     }
   },
 );
