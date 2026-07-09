@@ -17567,12 +17567,23 @@ export default function Home({
                                         ))}
                                       </div>
 
-                                      {/* Add combo — bypassa toggleBet; comboTag permite a
-                                          múltipla mesmo com 2 mercados do mesmo evento */}
+                                      {/* Add/remove combo — bypassa toggleBet; comboTag permite a
+                                          múltipla mesmo com 2 mercados do mesmo evento. Só um combo
+                                          de previsão pode estar ativo por jogo (senão comboTags
+                                          diferentes no mesmo matchId forçam "Simples"). */}
                                       <button
                                         onClick={() => {
+                                          const matchComboPrefix = `pred-${expandedMatch.id}-`;
+                                          if (isActive) {
+                                            // Toggle off: remove só este combo
+                                            setBets((prev) => prev.filter((b) => b.comboTag !== comboTag));
+                                            return;
+                                          }
                                           setBets((prev) => {
-                                            const withoutThisCombo = prev.filter((b) => b.comboTag !== comboTag);
+                                            // Remove qualquer combo de previsão anterior deste jogo
+                                            const withoutThisCombo = prev.filter(
+                                              (b) => !(b.comboTag && b.comboTag.startsWith(matchComboPrefix)),
+                                            );
                                             return [
                                               ...withoutThisCombo,
                                               ...combo.sels.map((sel) => ({
