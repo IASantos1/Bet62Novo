@@ -1330,15 +1330,124 @@ const LEAGUE_LOGOS: Record<string, string> = {
     "https://media.api-sports.io/football/leagues/10.png",
   "Amistosos internacionais":
     "https://media.api-sports.io/football/leagues/10.png",
+  // ── Major domestic football leagues ──────────────────────────────────
+  "Premier League": "https://media.api-sports.io/football/leagues/39.png",
+  "English Premier League": "https://media.api-sports.io/football/leagues/39.png",
+  "Championship": "https://media.api-sports.io/football/leagues/40.png",
+  "EFL Championship": "https://media.api-sports.io/football/leagues/40.png",
+  "League One": "https://media.api-sports.io/football/leagues/41.png",
+  "League Two": "https://media.api-sports.io/football/leagues/42.png",
+  "FA Cup": "https://media.api-sports.io/football/leagues/45.png",
+  "Carabao Cup": "https://media.api-sports.io/football/leagues/48.png",
+  "La Liga": "https://media.api-sports.io/football/leagues/140.png",
+  "LaLiga": "https://media.api-sports.io/football/leagues/140.png",
+  "Segunda División": "https://media.api-sports.io/football/leagues/141.png",
+  "Segunda Division": "https://media.api-sports.io/football/leagues/141.png",
+  "Bundesliga": "https://media.api-sports.io/football/leagues/78.png",
+  "2. Bundesliga": "https://media.api-sports.io/football/leagues/79.png",
+  "DFB Pokal": "https://media.api-sports.io/football/leagues/81.png",
+  "Serie A": "https://media.api-sports.io/football/leagues/135.png",
+  "Serie B": "https://media.api-sports.io/football/leagues/136.png",
+  "Coppa Italia": "https://media.api-sports.io/football/leagues/137.png",
+  "Ligue 1": "https://media.api-sports.io/football/leagues/61.png",
+  "Ligue 2": "https://media.api-sports.io/football/leagues/62.png",
+  "Coupe de France": "https://media.api-sports.io/football/leagues/66.png",
+  "Eredivisie": "https://media.api-sports.io/football/leagues/88.png",
+  "Primeira Liga": "https://media.api-sports.io/football/leagues/94.png",
+  "Liga Portugal": "https://media.api-sports.io/football/leagues/94.png",
+  "Liga NOS": "https://media.api-sports.io/football/leagues/94.png",
+  "Liga Portugal Betclic": "https://media.api-sports.io/football/leagues/94.png",
+  "Taça de Portugal": "https://media.api-sports.io/football/leagues/96.png",
+  "Pro League": "https://media.api-sports.io/football/leagues/144.png",
+  "Belgian Pro League": "https://media.api-sports.io/football/leagues/144.png",
+  "Süper Lig": "https://media.api-sports.io/football/leagues/203.png",
+  "Super Lig": "https://media.api-sports.io/football/leagues/203.png",
+  "Turkish Super Lig": "https://media.api-sports.io/football/leagues/203.png",
+  "Scottish Premiership": "https://media.api-sports.io/football/leagues/179.png",
+  "Allsvenskan": "https://media.api-sports.io/football/leagues/113.png",
+  "Eliteserien": "https://media.api-sports.io/football/leagues/103.png",
+  "Superliga": "https://media.api-sports.io/football/leagues/119.png",
+  "Veikkausliiga": "https://media.api-sports.io/football/leagues/244.png",
+  "Ekstraklasa": "https://media.api-sports.io/football/leagues/106.png",
+  "Czech First League": "https://media.api-sports.io/football/leagues/345.png",
+  "Fortuna Liga": "https://media.api-sports.io/football/leagues/345.png",
+  "Slovak Super Liga": "https://media.api-sports.io/football/leagues/332.png",
+  "Superliga Romania": "https://media.api-sports.io/football/leagues/283.png",
+  "Romanian Superliga": "https://media.api-sports.io/football/leagues/283.png",
+  "Super League Greece": "https://media.api-sports.io/football/leagues/197.png",
+  "Super League 1": "https://media.api-sports.io/football/leagues/197.png",
+  "Austrian Football Bundesliga": "https://media.api-sports.io/football/leagues/218.png",
+  "Austrian Bundesliga": "https://media.api-sports.io/football/leagues/218.png",
+  "Swiss Super League": "https://media.api-sports.io/football/leagues/207.png",
+  "Ukrainian Premier League": "https://media.api-sports.io/football/leagues/333.png",
+  "Russian Premier League": "https://media.api-sports.io/football/leagues/235.png",
+  "RPL": "https://media.api-sports.io/football/leagues/235.png",
+  "HNL": "https://media.api-sports.io/football/leagues/210.png",
+  "Croatian Football League": "https://media.api-sports.io/football/leagues/210.png",
+  "Super Liga Serbia": "https://media.api-sports.io/football/leagues/286.png",
+  "Serbian Super Liga": "https://media.api-sports.io/football/leagues/286.png",
+  "Premijer Liga": "https://media.api-sports.io/football/leagues/213.png",
+  "Israeli Premier League": "https://media.api-sports.io/football/leagues/271.png",
+  "Cypriot First Division": "https://media.api-sports.io/football/leagues/262.png",
+  // ── Americas ──────────────────────────────────────────────────────────
+  "Brasileirao Serie A": "https://media.api-sports.io/football/leagues/71.png",
+  "Brasileirão": "https://media.api-sports.io/football/leagues/71.png",
+  "Campeonato Brasileiro": "https://media.api-sports.io/football/leagues/71.png",
+  "Serie A Brasil": "https://media.api-sports.io/football/leagues/71.png",
+  "Serie B Brasil": "https://media.api-sports.io/football/leagues/72.png",
+  "Copa do Brasil": "https://media.api-sports.io/football/leagues/73.png",
+  "Primera División Argentina": "https://media.api-sports.io/football/leagues/128.png",
+  "Liga Profesional Argentina": "https://media.api-sports.io/football/leagues/128.png",
+  "Copa de la Liga Argentina": "https://media.api-sports.io/football/leagues/130.png",
+  "MLS": "https://media.api-sports.io/football/leagues/253.png",
+  "Major League Soccer": "https://media.api-sports.io/football/leagues/253.png",
+  "USL Championship": "https://media.api-sports.io/football/leagues/254.png",
+  "CONCACAF Champions Cup": "https://media.api-sports.io/football/leagues/26.png",
+  "Liga MX": "https://media.api-sports.io/football/leagues/262.png",
+  "Copa Libertadores": "https://media.api-sports.io/football/leagues/13.png",
+  "Copa Sudamericana": "https://media.api-sports.io/football/leagues/11.png",
+  "CONMEBOL Libertadores": "https://media.api-sports.io/football/leagues/13.png",
+  "CONMEBOL Sudamericana": "https://media.api-sports.io/football/leagues/11.png",
+  "Recopa Sudamericana": "https://media.api-sports.io/football/leagues/12.png",
+  "Chilean Primera División": "https://media.api-sports.io/football/leagues/265.png",
+  "Clausura Chile": "https://media.api-sports.io/football/leagues/265.png",
+  "Apertura Chile": "https://media.api-sports.io/football/leagues/265.png",
+  "Liga 1 Peru": "https://media.api-sports.io/football/leagues/281.png",
+  "Primera División Uruguay": "https://media.api-sports.io/football/leagues/268.png",
+  "Primera División Colombia": "https://media.api-sports.io/football/leagues/239.png",
+  "Liga BetPlay": "https://media.api-sports.io/football/leagues/239.png",
+  "Primera División Ecuador": "https://media.api-sports.io/football/leagues/240.png",
+  "Liga Pro Ecuador": "https://media.api-sports.io/football/leagues/240.png",
+  // ── Asia / Middle East / Africa ───────────────────────────────────────
+  "J1 League": "https://media.api-sports.io/football/leagues/98.png",
+  "J. League": "https://media.api-sports.io/football/leagues/98.png",
+  "K League 1": "https://media.api-sports.io/football/leagues/292.png",
+  "Saudi Pro League": "https://media.api-sports.io/football/leagues/307.png",
+  "Saudi Professional League": "https://media.api-sports.io/football/leagues/307.png",
+  "UAE Pro League": "https://media.api-sports.io/football/leagues/435.png",
+  "Chinese Super League": "https://media.api-sports.io/football/leagues/169.png",
+  "Indian Super League": "https://media.api-sports.io/football/leagues/323.png",
+  "A-League": "https://media.api-sports.io/football/leagues/188.png",
+  "Thai League 1": "https://media.api-sports.io/football/leagues/290.png",
+  "Egyptian Premier League": "https://media.api-sports.io/football/leagues/233.png",
+  "South African Premier Division": "https://media.api-sports.io/football/leagues/288.png",
+  "CAFCL": "https://media.api-sports.io/football/leagues/20.png",
+  "CAF Champions League": "https://media.api-sports.io/football/leagues/20.png",
 };
 
-/** Exact match first, then prefix match for dynamically-named competitions (e.g. "FIFA World Cup - Round of 32"). */
+/** Exact match first, then prefix match, then contains match for dynamically-named competitions (e.g. "FIFA World Cup - Round of 32"). */
 function getLeagueLogo(league: string | null | undefined): string | undefined {
   const l = league ?? "";
+  if (!l) return undefined;
   if (LEAGUE_LOGOS[l]) return LEAGUE_LOGOS[l];
+  const lLower = l.toLowerCase();
   // Prefix match — handles "FIFA World Cup - Round of 32", "Copa do Mundo - Grupo A", etc.
   for (const [key, url] of Object.entries(LEAGUE_LOGOS)) {
     if (key.length >= 6 && l.startsWith(key)) return url;
+  }
+  // Case-insensitive contains match — catches suffixed/prefixed league name variants
+  for (const [key, url] of Object.entries(LEAGUE_LOGOS)) {
+    if (key.length >= 6 && lLower.includes(key.toLowerCase())) return url;
   }
   return undefined;
 }
@@ -17225,92 +17334,21 @@ export default function Home({
                         });
                       }
 
-                      // ── Build 3 múltipla combo packages ──────────────────────
+                      // ── Both-team market preview cards ────────────────────────
                       const mk = expandedMatch?.markets;
-                      const favIsHome = winProb.home >= winProb.away;
-                      const favOdds = favIsHome ? expandedMatch.odds.home : expandedMatch.odds.away;
-                      const favLabel = favIsHome
-                        ? `${expandedMatch.home} — Vitória`
-                        : `${expandedMatch.away} — Vitória`;
-                      const favSel = favIsHome ? "home" : "away";
-
-                      const dcSel = favIsHome ? "homeOrDraw" : "awayOrDraw";
-                      const dcLabel = favIsHome
-                        ? `${expandedMatch.home} ou Empate`
-                        : `${expandedMatch.away} ou Empate`;
-                      const dcOdds = favIsHome
-                        ? (mk?.doubleChance?.homeOrDraw && mk.doubleChance.homeOrDraw > 1.01 ? mk.doubleChance.homeOrDraw : +(Math.max(1.05, favOdds * 0.62)).toFixed(2))
-                        : (mk?.doubleChance?.awayOrDraw && mk.doubleChance.awayOrDraw > 1.01 ? mk.doubleChance.awayOrDraw : +(Math.max(1.05, favOdds * 0.62)).toFixed(2));
+                      const homeOdd = expandedMatch.odds?.home ?? 0;
+                      const awayOdd = expandedMatch.odds?.away ?? 0;
+                      const drawOdd = expandedMatch.odds?.draw ?? 0;
 
                       const bttsOdds = mk?.bothTeamsScore?.yes && mk.bothTeamsScore.yes > 1.01
                         ? mk.bothTeamsScore.yes
                         : +(Math.max(1.30, 1 / (Math.max(35, avgStats.btts) / 100) * 0.95)).toFixed(2);
 
-                      const o15Odds = mk?.totalGoals?.over15 && mk.totalGoals.over15 > 1.01
-                        ? mk.totalGoals.over15
-                        : +(Math.max(1.05, 1 / (Math.max(55, avgStats.over15) / 100) * 0.95)).toFixed(2);
-
                       const o25Odds = mk?.totalGoals?.over25 && mk.totalGoals.over25 > 1.01
                         ? mk.totalGoals.over25
                         : +(Math.max(1.20, 1 / (Math.max(42, avgStats.over25) / 100) * 0.95)).toFixed(2);
 
-                      const u25Odds = mk?.totalGoals?.under25 && mk.totalGoals.under25 > 1.01
-                        ? mk.totalGoals.under25
-                        : +(Math.max(1.20, 1 / (Math.max(40, 100 - avgStats.over25) / 100) * 0.95)).toFixed(2);
-
-                      type ComboSel = { label: string; selection: string; market: string; odds: number };
-                      type Combo = {
-                        id: string; name: string; emoji: string;
-                        tagColor: string; borderClass: string; badgeClass: string;
-                        sels: ComboSel[];
-                      };
-
-                      const calcComboOdds = (sels: ComboSel[]) =>
-                        +(sels.reduce((acc, s) => acc * s.odds, 1) * 0.98).toFixed(2);
-
-                      const combos: Combo[] = [
-                        {
-                          id: "golo",
-                          name: "Golo Garantido",
-                          emoji: "⚡",
-                          tagColor: "text-orange-400",
-                          borderClass: "border-orange-500/30",
-                          badgeClass: "bg-orange-500/10",
-                          sels: [
-                            { label: favLabel, selection: favSel, market: "result", odds: favOdds },
-                            { label: "Ambas Marcam — Sim", selection: "bts-yes", market: "dupla", odds: bttsOdds },
-                            { label: "Acima de 1.5 Golos", selection: "o15", market: "gols", odds: o15Odds },
-                          ],
-                        },
-                        {
-                          id: "intens",
-                          name: "Alta Intensidade",
-                          emoji: "🔥",
-                          tagColor: "text-red-400",
-                          borderClass: "border-red-500/30",
-                          badgeClass: "bg-red-500/10",
-                          sels: [
-                            { label: "Ambas Marcam — Sim", selection: "bts-yes", market: "dupla", odds: bttsOdds },
-                            { label: "Acima de 2.5 Golos", selection: "o25", market: "gols", odds: o25Odds },
-                            { label: dcLabel, selection: dcSel, market: "dupla", odds: dcOdds },
-                          ],
-                        },
-                        {
-                          id: "seguro",
-                          name: "Jogo Seguro",
-                          emoji: "🛡️",
-                          tagColor: "text-blue-400",
-                          borderClass: "border-blue-500/20",
-                          badgeClass: "bg-blue-500/10",
-                          sels: [
-                            { label: dcLabel, selection: dcSel, market: "dupla", odds: dcOdds },
-                            { label: "Acima de 1.5 Golos", selection: "o15", market: "gols", odds: o15Odds },
-                            { label: "Abaixo de 2.5 Golos", selection: "u25", market: "gols", odds: u25Odds },
-                          ],
-                        },
-                      ];
-
-                      if (!expandedMatch || favOdds <= 1.01) {
+                      if (!expandedMatch || (homeOdd <= 1.01 && awayOdd <= 1.01)) {
                         return (
                           <div className="bg-zinc-900 rounded-xl border border-zinc-800 p-6 text-center text-zinc-500 text-sm">
                             Dados insuficientes para gerar previsões.
@@ -17318,86 +17356,242 @@ export default function Home({
                         );
                       }
 
+                      // Individual market cards — always show BOTH teams
+                      const marketCards = [
+                        {
+                          key: "home",
+                          label: `${teamNamePt(expandedMatch.home)} — Vitória`,
+                          sel: "home", mkt: "result", odds: homeOdd,
+                          prob: winProb.home, emoji: "🏠",
+                          color: "text-emerald-400", border: "border-emerald-500/20",
+                        },
+                        ...(drawOdd > 1.01 ? [{
+                          key: "draw",
+                          label: "Empate",
+                          sel: "draw", mkt: "result", odds: drawOdd,
+                          prob: winProb.draw, emoji: "🤝",
+                          color: "text-zinc-300", border: "border-zinc-600/30",
+                        }] : []),
+                        {
+                          key: "away",
+                          label: `${teamNamePt(expandedMatch.away)} — Vitória`,
+                          sel: "away", mkt: "result", odds: awayOdd,
+                          prob: winProb.away, emoji: "✈️",
+                          color: "text-blue-400", border: "border-blue-500/20",
+                        },
+                        {
+                          key: "btts",
+                          label: "Ambas Marcam — Sim",
+                          sel: "bts-yes", mkt: "dupla", odds: bttsOdds,
+                          prob: avgStats.btts, emoji: "⚽",
+                          color: "text-orange-400", border: "border-orange-500/20",
+                        },
+                        {
+                          key: "o25",
+                          label: "Acima de 2.5 Golos",
+                          sel: "o25", mkt: "gols", odds: o25Odds,
+                          prob: avgStats.over25, emoji: "📈",
+                          color: "text-red-400", border: "border-red-500/20",
+                        },
+                      ];
+
+                      // ── Multi-match múltipla combos — pick DIFFERENT matches so
+                      // hasDuplicateMatches stays false and betMode="multipla" sticks.
+                      const otherMatchPool = [...liveMatches, ...upcomingMatches].filter(
+                        (m) =>
+                          String(m.id) !== String(expandedMatch.id) &&
+                          (m.odds?.home ?? 0) > 1.01 &&
+                          (m.odds?.away ?? 0) > 1.01,
+                      );
+
+                      type MCInfo = {
+                        match: Match;
+                        favLabel: string; favSel: string; favOdds: number;
+                        dcLabel: string; dcSel: string; dcOdds: number;
+                      };
+                      const buildMCInfo = (m: Match): MCInfo => {
+                        const mFavHome = (m.odds?.home ?? 99) <= (m.odds?.away ?? 99);
+                        const mFavOdds = mFavHome ? (m.odds?.home ?? 1.5) : (m.odds?.away ?? 1.5);
+                        const mMk = (m as any).markets;
+                        return {
+                          match: m,
+                          favLabel: mFavHome ? `${teamNamePt(m.home)} — Vitória` : `${teamNamePt(m.away)} — Vitória`,
+                          favSel: mFavHome ? "home" : "away",
+                          favOdds: mFavOdds,
+                          dcLabel: mFavHome ? `${teamNamePt(m.home)} ou Empate` : `${teamNamePt(m.away)} ou Empate`,
+                          dcSel: mFavHome ? "homeOrDraw" : "awayOrDraw",
+                          dcOdds: mFavHome
+                            ? (mMk?.doubleChance?.homeOrDraw > 1.01 ? mMk.doubleChance.homeOrDraw : +(Math.max(1.05, mFavOdds * 0.65)).toFixed(2))
+                            : (mMk?.doubleChance?.awayOrDraw > 1.01 ? mMk.doubleChance.awayOrDraw : +(Math.max(1.05, mFavOdds * 0.65)).toFixed(2)),
+                        };
+                      };
+
+                      const m0 = buildMCInfo(expandedMatch);
+                      const m1 = otherMatchPool[0] ? buildMCInfo(otherMatchPool[0]!) : null;
+                      const m2 = otherMatchPool[1] ? buildMCInfo(otherMatchPool[1]!) : null;
+                      const hasMultiMatch = m1 !== null;
+
+                      type MultiSel = { match: Match; label: string; selection: string; market: string; odds: number };
+                      type MultiCombo = { id: string; name: string; emoji: string; tagColor: string; borderClass: string; badgeClass: string; sels: MultiSel[] };
+
+                      const calcMultiOdds = (sels: MultiSel[]) => +(sels.reduce((a, s) => a * s.odds, 1) * 0.98).toFixed(2);
+
+                      const multiCombos: MultiCombo[] = !hasMultiMatch ? [] : [
+                        {
+                          id: "vit", name: "Tripla Vitória", emoji: "⚡",
+                          tagColor: "text-orange-400", borderClass: "border-orange-500/30", badgeClass: "bg-orange-500/10",
+                          sels: [
+                            { match: m0.match, label: m0.favLabel, selection: m0.favSel, market: "result", odds: m0.favOdds },
+                            { match: m1!.match, label: m1!.favLabel, selection: m1!.favSel, market: "result", odds: m1!.favOdds },
+                            ...(m2 ? [{ match: m2.match, label: m2.favLabel, selection: m2.favSel, market: "result", odds: m2.favOdds }] : []),
+                          ],
+                        },
+                        {
+                          id: "dup", name: "Duplas Seguras", emoji: "🔥",
+                          tagColor: "text-red-400", borderClass: "border-red-500/30", badgeClass: "bg-red-500/10",
+                          sels: [
+                            { match: m0.match, label: m0.dcLabel, selection: m0.dcSel, market: "dupla", odds: m0.dcOdds },
+                            { match: m1!.match, label: m1!.dcLabel, selection: m1!.dcSel, market: "dupla", odds: m1!.dcOdds },
+                            ...(m2 ? [{ match: m2.match, label: m2.dcLabel, selection: m2.dcSel, market: "dupla", odds: m2.dcOdds }] : []),
+                          ],
+                        },
+                        {
+                          id: "mix", name: "Jogo Seguro", emoji: "🛡️",
+                          tagColor: "text-blue-400", borderClass: "border-blue-500/20", badgeClass: "bg-blue-500/10",
+                          sels: [
+                            { match: m0.match, label: m0.favLabel, selection: m0.favSel, market: "result", odds: m0.favOdds },
+                            { match: m1!.match, label: m1!.dcLabel, selection: m1!.dcSel, market: "dupla", odds: m1!.dcOdds },
+                            ...(m2 ? [{ match: m2.match, label: m2.dcLabel, selection: m2.dcSel, market: "dupla", odds: m2.dcOdds }] : []),
+                          ],
+                        },
+                      ];
+
                       return (
-                        // Break out of the parent's overflow-x-clip with -mx-4 so the horizontal scroll works
-                        <div
-                          className="-mx-4 px-4 flex gap-3 pb-2 snap-x snap-mandatory"
-                          style={{ overflowX: "scroll", scrollbarWidth: "none", WebkitOverflowScrolling: "touch" } as React.CSSProperties}
-                        >
-                          {combos.map((combo, ci) => {
-                            const comboOdds = calcComboOdds(combo.sels);
-                            return (
-                              <motion.div
-                                key={combo.id}
-                                initial={{ opacity: 0, x: 10 }}
-                                animate={{ opacity: 1, x: 0 }}
-                                transition={{ delay: ci * 0.08 }}
-                                className={`snap-start shrink-0 w-[255px] border rounded-xl p-4 bg-zinc-900 ${combo.borderClass}`}
-                              >
-                                {/* Header: combo name + múltipla tag + combined odd */}
-                                <div className="flex items-center justify-between mb-1">
-                                  <div className={`flex items-center gap-1.5 px-2 py-1 rounded-lg ${combo.badgeClass}`}>
-                                    <span className="text-[13px] leading-none">{combo.emoji}</span>
-                                    <span className={`text-[9px] font-black uppercase tracking-wider ${combo.tagColor}`}>{combo.name}</span>
-                                  </div>
-                                  <span className="text-[8px] font-black text-zinc-500 uppercase tracking-widest border border-zinc-700 rounded px-1.5 py-0.5">Múltipla</span>
-                                </div>
-
-                                {/* Combined odds */}
-                                <div className="flex items-baseline gap-1 mb-3">
-                                  <span className="text-[22px] font-black text-white leading-none">{comboOdds}</span>
-                                  <span className="text-[9px] text-zinc-500">odd combinada</span>
-                                </div>
-
-                                {/* Selections */}
-                                <div className="space-y-2 mb-3">
-                                  {combo.sels.map((sel, si) => (
-                                    <div key={si} className="flex items-center justify-between gap-2">
-                                      <div className="flex items-center gap-1.5 min-w-0">
-                                        <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${combo.tagColor.replace("text-", "bg-")}`} />
-                                        <span className="text-[10px] text-zinc-300 leading-tight truncate">{sel.label}</span>
-                                      </div>
-                                      <span className="text-[10px] font-black text-zinc-200 shrink-0">{sel.odds.toFixed(2)}</span>
+                        <div className="space-y-4">
+                          {/* ── Both-team market cards ─────────────────────────── */}
+                          <div>
+                            <div className="text-[9px] font-black text-zinc-500 uppercase tracking-widest mb-2 px-1">Previsão por Mercado</div>
+                            <div className="grid grid-cols-2 gap-2">
+                              {marketCards.map((c) => {
+                                const isSelected = bets.some(
+                                  (b) => String(b.matchId) === String(expandedMatch.id) && b.market === c.mkt && b.selection === c.sel,
+                                );
+                                return (
+                                  <button
+                                    key={c.key}
+                                    onClick={() => {
+                                      toggleBet(expandedMatch, c.sel, c.odds, c.mkt, c.label);
+                                      if (window.innerWidth < 1024) setBetSlipOpenMobile(true);
+                                    }}
+                                    className={`flex flex-col gap-1 p-3 rounded-xl border text-left transition-all ${
+                                      isSelected ? "bg-red-600/20 border-red-500/60" : `bg-zinc-900 ${c.border} hover:border-zinc-600`
+                                    }`}
+                                  >
+                                    <div className="flex items-center justify-between">
+                                      <span className="text-[11px]">{c.emoji}</span>
+                                      <span className={`text-[13px] font-black ${isSelected ? "text-red-400" : c.color}`}>{c.odds.toFixed(2)}</span>
                                     </div>
-                                  ))}
-                                </div>
+                                    <div className="text-[10px] font-bold text-white leading-tight">{c.label}</div>
+                                    <div className="flex items-center gap-1 mt-0.5">
+                                      <div className="flex-1 h-1 bg-zinc-800 rounded-full overflow-hidden">
+                                        <div className={`h-full rounded-full ${isSelected ? "bg-red-500" : "bg-zinc-500"}`} style={{ width: `${Math.min(100, c.prob)}%` }} />
+                                      </div>
+                                      <span className="text-[9px] text-zinc-500 shrink-0">{c.prob}%</span>
+                                    </div>
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          </div>
 
-                                {/* Add combo — bypass toggleBet to keep múltipla mode */}
-                                <button
-                                  onClick={() => {
-                                    if (!expandedMatch) return;
-                                    setBets((prev: any[]) => {
-                                      const withoutThis = prev.filter((b: any) => b.matchId !== expandedMatch.id);
-                                      return [
-                                        ...withoutThis,
-                                        ...combo.sels.map((sel) => ({
-                                          matchId: expandedMatch.id,
-                                          matchTitle: `${expandedMatch.home} vs ${expandedMatch.away}`,
-                                          league: expandedMatch.league,
-                                          country: expandedMatch.country,
-                                          sport: expandedMatch.sport,
-                                          date: expandedMatch.date,
-                                          time: expandedMatch.time,
-                                          scheduledDate: (expandedMatch as any).scheduledDate,
-                                          scheduledTime: (expandedMatch as any).scheduledTime,
-                                          selection: sel.selection,
-                                          odd: sel.odds,
-                                          originalOdd: sel.odds,
-                                          market: sel.market,
-                                          label: sel.label,
-                                        })),
-                                      ];
-                                    });
-                                    setBetMode("multipla");
-                                    if (window.innerWidth < 1024) setBetSlipOpenMobile(true);
-                                  }}
-                                  className="w-full py-2 rounded-xl text-[11px] font-black text-white bg-gradient-to-r from-red-700 to-orange-600 hover:from-red-600 hover:to-orange-500 active:opacity-80 transition-all shadow-[0_2px_8px_rgba(239,68,68,0.35)]"
-                                >
-                                  Adicionar Múltipla
-                                </button>
-                              </motion.div>
-                            );
-                          })}
+                          {/* ── Multi-match múltipla combo carousel ───────────── */}
+                          {hasMultiMatch && (
+                            <div>
+                              <div className="text-[9px] font-black text-zinc-500 uppercase tracking-widest mb-2 px-1">Múltiplas Sugeridas</div>
+                              <div
+                                className="-mx-4 px-4 flex gap-3 pb-2 snap-x snap-mandatory"
+                                style={{ overflowX: "scroll", scrollbarWidth: "none", WebkitOverflowScrolling: "touch" } as React.CSSProperties}
+                              >
+                                {multiCombos.map((combo, ci) => {
+                                  const comboOdds = calcMultiOdds(combo.sels);
+                                  return (
+                                    <motion.div
+                                      key={combo.id}
+                                      initial={{ opacity: 0, x: 10 }}
+                                      animate={{ opacity: 1, x: 0 }}
+                                      transition={{ delay: ci * 0.08 }}
+                                      className={`snap-start shrink-0 w-[255px] border rounded-xl p-4 bg-zinc-900 ${combo.borderClass}`}
+                                    >
+                                      {/* Header: combo name + múltipla tag + combined odd */}
+                                      <div className="flex items-center justify-between mb-1">
+                                        <div className={`flex items-center gap-1.5 px-2 py-1 rounded-lg ${combo.badgeClass}`}>
+                                          <span className="text-[13px] leading-none">{combo.emoji}</span>
+                                          <span className={`text-[9px] font-black uppercase tracking-wider ${combo.tagColor}`}>{combo.name}</span>
+                                        </div>
+                                        <span className="text-[8px] font-black text-zinc-500 uppercase tracking-widest border border-zinc-700 rounded px-1.5 py-0.5">Múltipla</span>
+                                      </div>
+
+                                      {/* Combined odds */}
+                                      <div className="flex items-baseline gap-1 mb-3">
+                                        <span className="text-[22px] font-black text-white leading-none">{comboOdds}</span>
+                                        <span className="text-[9px] text-zinc-500">odd combinada</span>
+                                      </div>
+
+                                      {/* Selections — each from a different match */}
+                                      <div className="space-y-2 mb-3">
+                                        {combo.sels.map((sel, si) => (
+                                          <div key={si} className="flex items-start gap-2">
+                                            <div className={`w-1.5 h-1.5 rounded-full shrink-0 mt-1 ${combo.tagColor.replace("text-", "bg-")}`} />
+                                            <div className="min-w-0 flex-1">
+                                              <div className="text-[9px] text-zinc-500 leading-none mb-0.5 truncate">
+                                                {teamNamePt(sel.match.home)} vs {teamNamePt(sel.match.away)}
+                                              </div>
+                                              <div className="text-[10px] text-zinc-200 leading-tight truncate">{sel.label}</div>
+                                            </div>
+                                            <span className="text-[10px] font-black text-zinc-200 shrink-0">{sel.odds.toFixed(2)}</span>
+                                          </div>
+                                        ))}
+                                      </div>
+
+                                      {/* Add combo — bypasses toggleBet so betMode="multipla" sticks */}
+                                      <button
+                                        onClick={() => {
+                                          const matchIds = new Set(combo.sels.map((s) => String(s.match.id)));
+                                          setBets((prev: any[]) => {
+                                            const withoutThese = prev.filter((b: any) => !matchIds.has(String(b.matchId)));
+                                            return [
+                                              ...withoutThese,
+                                              ...combo.sels.map((sel) => ({
+                                                matchId: sel.match.id,
+                                                matchTitle: `${sel.match.home} vs ${sel.match.away}`,
+                                                league: sel.match.league,
+                                                country: sel.match.country,
+                                                sport: sel.match.sport,
+                                                date: sel.match.date,
+                                                time: sel.match.time,
+                                                scheduledDate: (sel.match as any).scheduledDate,
+                                                scheduledTime: (sel.match as any).scheduledTime,
+                                                selection: sel.selection,
+                                                odd: sel.odds,
+                                                originalOdd: sel.odds,
+                                                market: sel.market,
+                                                label: sel.label,
+                                              })),
+                                            ];
+                                          });
+                                          setBetMode("multipla");
+                                          if (window.innerWidth < 1024) setBetSlipOpenMobile(true);
+                                        }}
+                                        className="w-full py-2 rounded-xl text-[11px] font-black text-white bg-gradient-to-r from-red-700 to-orange-600 hover:from-red-600 hover:to-orange-500 active:opacity-80 transition-all shadow-[0_2px_8px_rgba(239,68,68,0.35)]"
+                                      >
+                                        Adicionar Múltipla
+                                      </button>
+                                    </motion.div>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          )}
                         </div>
                       );
                     })()}
