@@ -3642,6 +3642,7 @@ type BetSelection = {
   market?: string;
   label?: string;
   marketLine?: number;
+  comboTag?: string;
 };
 
 type StoredSelection = {
@@ -8512,9 +8513,23 @@ export default function Home({
     setOddsChanged(newOddsChanged);
   }, [liveMatches, upcomingMatches]); // Reexecuta quando os dados dos jogos são atualizados
 
-  const hasDuplicateMatches =
-    bets.length > 1 &&
-    new Set(bets.map((b) => String(b.matchId))).size < bets.length;
+  const hasDuplicateMatches = (() => {
+    if (bets.length <= 1) return false;
+    const byMatch: Record<string, BetSelection[]> = {};
+    bets.forEach((b) => {
+      const key = String(b.matchId);
+      (byMatch[key] ||= []).push(b);
+    });
+    return Object.values(byMatch).some((group) => {
+      if (group.length <= 1) return false;
+      // A same-match group is allowed as a genuine múltipla ONLY when every
+      // bet in it came from the same prediction combo (shares comboTag).
+      // Manually picking 2+ markets for one match on the markets page (no
+      // comboTag) must still force "Simples".
+      const tags = group.map((b) => b.comboTag);
+      return !(tags.every((t) => !!t) && new Set(tags).size === 1);
+    });
+  })();
   const effectiveBetMode: "simples" | "multipla" = hasDuplicateMatches
     ? "simples"
     : betMode;
@@ -17395,76 +17410,68 @@ export default function Home({
                         },
                       ];
 
-                      // ── Multi-match múltipla combos — pick DIFFERENT matches so
-                      // hasDuplicateMatches stays false and betMode="multipla" sticks.
-                      const otherMatchPool = [...liveMatches, ...upcomingMatches].filter(
-                        (m) =>
-                          String(m.id) !== String(expandedMatch.id) &&
-                          (m.odds?.home ?? 0) > 1.01 &&
-                          (m.odds?.away ?? 0) > 1.01,
-                      );
+                      // ── Múltiplas de previsão — SEMPRE do mesmo evento (expandedMatch).
+                      // Cada combo junta 2 mercados sobre a MESMA equipa (não pode
+                      // misturar mercados de resultado de equipas opostas — seriam
+                      // contraditórios). O comboTag permite que hasDuplicateMatches
+                      // trate estas seleções como uma múltipla válida em vez de forçar
+                      // "Simples", mantendo essa exceção só para combos de previsão.
+                      const homeDcOdds = mk?.doubleChance?.homeOrDraw && mk.doubleChance.homeOrDraw > 1.01
+                        ? mk.doubleChance.homeOrDraw
+                        : +(Math.max(1.05, homeOdd * 0.65)).toFixed(2);
+                      const awayDcOdds = mk?.doubleChance?.awayOrDraw && mk.doubleChance.awayOrDraw > 1.01
+                        ? mk.doubleChance.awayOrDraw
+                        : +(Math.max(1.05, awayOdd * 0.65)).toFixed(2);
 
-                      type MCInfo = {
-                        match: Match;
-                        favLabel: string; favSel: string; favOdds: number;
-                        dcLabel: string; dcSel: string; dcOdds: number;
-                      };
-                      const buildMCInfo = (m: Match): MCInfo => {
-                        const mFavHome = (m.odds?.home ?? 99) <= (m.odds?.away ?? 99);
-                        const mFavOdds = mFavHome ? (m.odds?.home ?? 1.5) : (m.odds?.away ?? 1.5);
-                        const mMk = (m as any).markets;
-                        return {
-                          match: m,
-                          favLabel: mFavHome ? `${teamNamePt(m.home)} — Vitória` : `${teamNamePt(m.away)} — Vitória`,
-                          favSel: mFavHome ? "home" : "away",
-                          favOdds: mFavOdds,
-                          dcLabel: mFavHome ? `${teamNamePt(m.home)} ou Empate` : `${teamNamePt(m.away)} ou Empate`,
-                          dcSel: mFavHome ? "homeOrDraw" : "awayOrDraw",
-                          dcOdds: mFavHome
-                            ? (mMk?.doubleChance?.homeOrDraw > 1.01 ? mMk.doubleChance.homeOrDraw : +(Math.max(1.05, mFavOdds * 0.65)).toFixed(2))
-                            : (mMk?.doubleChance?.awayOrDraw > 1.01 ? mMk.doubleChance.awayOrDraw : +(Math.max(1.05, mFavOdds * 0.65)).toFixed(2)),
-                        };
+                      type ComboSel = { label: string; selection: string; market: string; odds: number };
+                      type Combo = {
+                        id: string; name: string; emoji: string;
+                        tagColor: string; borderClass: string; badgeClass: string;
+                        sels: ComboSel[];
                       };
 
-                      const m0 = buildMCInfo(expandedMatch);
-                      const m1 = otherMatchPool[0] ? buildMCInfo(otherMatchPool[0]!) : null;
-                      const m2 = otherMatchPool[1] ? buildMCInfo(otherMatchPool[1]!) : null;
-                      const hasMultiMatch = m1 !== null;
+                      const calcComboOdds = (sels: ComboSel[]) =>
+                        +(sels.reduce((acc, s) => acc * s.odds, 1) * 0.98).toFixed(2);
 
-                      type MultiSel = { match: Match; label: string; selection: string; market: string; odds: number };
-                      type MultiCombo = { id: string; name: string; emoji: string; tagColor: string; borderClass: string; badgeClass: string; sels: MultiSel[] };
-
-                      const calcMultiOdds = (sels: MultiSel[]) => +(sels.reduce((a, s) => a * s.odds, 1) * 0.98).toFixed(2);
-
-                      const multiCombos: MultiCombo[] = !hasMultiMatch ? [] : [
+                      // 2 previsões da equipa da casa + 2 previsões da equipa visitante
+                      const combos: Combo[] = [
                         {
-                          id: "vit", name: "Tripla Vitória", emoji: "⚡",
-                          tagColor: "text-orange-400", borderClass: "border-orange-500/30", badgeClass: "bg-orange-500/10",
+                          id: "home-safe",
+                          name: `Dupla ${teamNamePt(expandedMatch.home)}`,
+                          emoji: "🏠",
+                          tagColor: "text-emerald-400",
+                          borderClass: "border-emerald-500/30",
+                          badgeClass: "bg-emerald-500/10",
                           sels: [
-                            { match: m0.match, label: m0.favLabel, selection: m0.favSel, market: "result", odds: m0.favOdds },
-                            { match: m1!.match, label: m1!.favLabel, selection: m1!.favSel, market: "result", odds: m1!.favOdds },
-                            ...(m2 ? [{ match: m2.match, label: m2.favLabel, selection: m2.favSel, market: "result", odds: m2.favOdds }] : []),
+                            { label: `${teamNamePt(expandedMatch.home)} — Vitória`, selection: "home", market: "result", odds: homeOdd },
+                            { label: "Acima de 2.5 Golos", selection: "o25", market: "gols", odds: o25Odds },
                           ],
                         },
                         {
-                          id: "dup", name: "Duplas Seguras", emoji: "🔥",
-                          tagColor: "text-red-400", borderClass: "border-red-500/30", badgeClass: "bg-red-500/10",
+                          id: "away-safe",
+                          name: `Dupla ${teamNamePt(expandedMatch.away)}`,
+                          emoji: "✈️",
+                          tagColor: "text-blue-400",
+                          borderClass: "border-blue-500/30",
+                          badgeClass: "bg-blue-500/10",
                           sels: [
-                            { match: m0.match, label: m0.dcLabel, selection: m0.dcSel, market: "dupla", odds: m0.dcOdds },
-                            { match: m1!.match, label: m1!.dcLabel, selection: m1!.dcSel, market: "dupla", odds: m1!.dcOdds },
-                            ...(m2 ? [{ match: m2.match, label: m2.dcLabel, selection: m2.dcSel, market: "dupla", odds: m2.dcOdds }] : []),
+                            { label: `${teamNamePt(expandedMatch.away)} — Vitória`, selection: "away", market: "result", odds: awayOdd },
+                            { label: "Ambas Marcam — Sim", selection: "bts-yes", market: "dupla", odds: bttsOdds },
                           ],
                         },
                         {
-                          id: "mix", name: "Jogo Seguro", emoji: "🛡️",
-                          tagColor: "text-blue-400", borderClass: "border-blue-500/20", badgeClass: "bg-blue-500/10",
+                          id: "safe-mix",
+                          name: "Jogo Seguro",
+                          emoji: "🛡️",
+                          tagColor: "text-orange-400",
+                          borderClass: "border-orange-500/20",
+                          badgeClass: "bg-orange-500/10",
                           sels: [
-                            { match: m0.match, label: m0.favLabel, selection: m0.favSel, market: "result", odds: m0.favOdds },
-                            { match: m1!.match, label: m1!.dcLabel, selection: m1!.dcSel, market: "dupla", odds: m1!.dcOdds },
-                            ...(m2 ? [{ match: m2.match, label: m2.dcLabel, selection: m2.dcSel, market: "dupla", odds: m2.dcOdds }] : []),
+                            { label: `${teamNamePt(expandedMatch.home)} ou Empate`, selection: "homeOrDraw", market: "dupla", odds: homeDcOdds },
+                            { label: `${teamNamePt(expandedMatch.away)} ou Empate`, selection: "awayOrDraw", market: "dupla", odds: awayDcOdds },
                           ],
                         },
-                      ];
+                      ].filter((c) => c.sels.every((s) => s.odds > 1.01));
 
                       return (
                         <div className="space-y-4">
@@ -17504,23 +17511,33 @@ export default function Home({
                             </div>
                           </div>
 
-                          {/* ── Multi-match múltipla combo carousel ───────────── */}
-                          {hasMultiMatch && (
+                          {/* ── Múltiplas de previsão — sempre do mesmo evento ── */}
+                          {combos.length > 0 && (
                             <div>
                               <div className="text-[9px] font-black text-zinc-500 uppercase tracking-widest mb-2 px-1">Múltiplas Sugeridas</div>
                               <div
                                 className="-mx-4 px-4 flex gap-3 pb-2 snap-x snap-mandatory"
                                 style={{ overflowX: "scroll", scrollbarWidth: "none", WebkitOverflowScrolling: "touch" } as React.CSSProperties}
                               >
-                                {multiCombos.map((combo, ci) => {
-                                  const comboOdds = calcMultiOdds(combo.sels);
+                                {combos.map((combo, ci) => {
+                                  const comboOdds = calcComboOdds(combo.sels);
+                                  const comboTag = `pred-${expandedMatch.id}-${combo.id}`;
+                                  const isActive = combo.sels.every((sel) =>
+                                    bets.some(
+                                      (b) =>
+                                        String(b.matchId) === String(expandedMatch.id) &&
+                                        b.market === sel.market &&
+                                        b.selection === sel.selection &&
+                                        b.comboTag === comboTag,
+                                    ),
+                                  );
                                   return (
                                     <motion.div
                                       key={combo.id}
                                       initial={{ opacity: 0, x: 10 }}
                                       animate={{ opacity: 1, x: 0 }}
                                       transition={{ delay: ci * 0.08 }}
-                                      className={`snap-start shrink-0 w-[255px] border rounded-xl p-4 bg-zinc-900 ${combo.borderClass}`}
+                                      className={`snap-start shrink-0 w-[220px] border rounded-xl p-4 bg-zinc-900 ${combo.borderClass}`}
                                     >
                                       {/* Header: combo name + múltipla tag + combined odd */}
                                       <div className="flex items-center justify-between mb-1">
@@ -17537,54 +17554,56 @@ export default function Home({
                                         <span className="text-[9px] text-zinc-500">odd combinada</span>
                                       </div>
 
-                                      {/* Selections — each from a different match */}
+                                      {/* Selections — ambas do mesmo jogo */}
                                       <div className="space-y-2 mb-3">
                                         {combo.sels.map((sel, si) => (
-                                          <div key={si} className="flex items-start gap-2">
-                                            <div className={`w-1.5 h-1.5 rounded-full shrink-0 mt-1 ${combo.tagColor.replace("text-", "bg-")}`} />
-                                            <div className="min-w-0 flex-1">
-                                              <div className="text-[9px] text-zinc-500 leading-none mb-0.5 truncate">
-                                                {teamNamePt(sel.match.home)} vs {teamNamePt(sel.match.away)}
-                                              </div>
-                                              <div className="text-[10px] text-zinc-200 leading-tight truncate">{sel.label}</div>
+                                          <div key={si} className="flex items-center justify-between gap-2">
+                                            <div className="flex items-center gap-1.5 min-w-0">
+                                              <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${combo.tagColor.replace("text-", "bg-")}`} />
+                                              <span className="text-[10px] text-zinc-300 leading-tight truncate">{sel.label}</span>
                                             </div>
                                             <span className="text-[10px] font-black text-zinc-200 shrink-0">{sel.odds.toFixed(2)}</span>
                                           </div>
                                         ))}
                                       </div>
 
-                                      {/* Add combo — bypasses toggleBet so betMode="multipla" sticks */}
+                                      {/* Add combo — bypassa toggleBet; comboTag permite a
+                                          múltipla mesmo com 2 mercados do mesmo evento */}
                                       <button
                                         onClick={() => {
-                                          const matchIds = new Set(combo.sels.map((s) => String(s.match.id)));
-                                          setBets((prev: any[]) => {
-                                            const withoutThese = prev.filter((b: any) => !matchIds.has(String(b.matchId)));
+                                          setBets((prev) => {
+                                            const withoutThisCombo = prev.filter((b) => b.comboTag !== comboTag);
                                             return [
-                                              ...withoutThese,
+                                              ...withoutThisCombo,
                                               ...combo.sels.map((sel) => ({
-                                                matchId: sel.match.id,
-                                                matchTitle: `${sel.match.home} vs ${sel.match.away}`,
-                                                league: sel.match.league,
-                                                country: sel.match.country,
-                                                sport: sel.match.sport,
-                                                date: sel.match.date,
-                                                time: sel.match.time,
-                                                scheduledDate: (sel.match as any).scheduledDate,
-                                                scheduledTime: (sel.match as any).scheduledTime,
+                                                matchId: expandedMatch.id,
+                                                matchTitle: `${expandedMatch.home} vs ${expandedMatch.away}`,
+                                                league: expandedMatch.league,
+                                                country: expandedMatch.country,
+                                                sport: expandedMatch.sport,
+                                                date: expandedMatch.date,
+                                                time: expandedMatch.time,
+                                                scheduledDate: (expandedMatch as any).scheduledDate,
+                                                scheduledTime: (expandedMatch as any).scheduledTime,
                                                 selection: sel.selection,
                                                 odd: sel.odds,
                                                 originalOdd: sel.odds,
                                                 market: sel.market,
                                                 label: sel.label,
+                                                comboTag,
                                               })),
                                             ];
                                           });
                                           setBetMode("multipla");
                                           if (window.innerWidth < 1024) setBetSlipOpenMobile(true);
                                         }}
-                                        className="w-full py-2 rounded-xl text-[11px] font-black text-white bg-gradient-to-r from-red-700 to-orange-600 hover:from-red-600 hover:to-orange-500 active:opacity-80 transition-all shadow-[0_2px_8px_rgba(239,68,68,0.35)]"
+                                        className={`w-full py-2 rounded-xl text-[11px] font-black text-white transition-all shadow-[0_2px_8px_rgba(239,68,68,0.35)] ${
+                                          isActive
+                                            ? "bg-zinc-800 border border-red-500/60"
+                                            : "bg-gradient-to-r from-red-700 to-orange-600 hover:from-red-600 hover:to-orange-500 active:opacity-80"
+                                        }`}
                                       >
-                                        Adicionar Múltipla
+                                        {isActive ? "Múltipla Adicionada" : "Adicionar Múltipla"}
                                       </button>
                                     </motion.div>
                                   );
