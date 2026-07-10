@@ -1,0 +1,1 @@
+- [Bet62 GitHub import](bet62-import.md) — imported web-only from an external multi-artifact repo; mobile app was intentionally dropped per user request.
