@@ -4472,7 +4472,6 @@ export default function Home({
   // Per-match: timestamp when the API minute value last CHANGED (not just when SSE arrived).
   // Used so elapsed grows correctly between events (API only updates minute on goals/cards).
   const minuteChangedAtRef = useRef<Record<string, number>>({});
-  const seenMatchIds = useRef(new Set<string>());
   const [, setMinuteTick] = useState(0);
 
   useEffect(() => {
@@ -6471,11 +6470,6 @@ export default function Home({
       ctrl.abort();
     };
   }, [expandedMatch?.id, matchSnapshotKey, readSnapshot, writeSnapshot]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Clear seenMatchIds when leaving live tab so new entries animate on return
-  useEffect(() => {
-    if (activeTab !== "live") seenMatchIds.current.clear();
-  }, [activeTab]);
 
   const normalizeTeamName = (value: string | undefined) =>
     String(value ?? "")
@@ -9273,9 +9267,6 @@ export default function Home({
       (match.scheduledDate ?? match.date)
         ? formatMatchDate(match.scheduledDate ?? match.date ?? "")
         : "";
-    const isNew = !seenMatchIds.current.has(matchKey);
-    if (isNew) seenMatchIds.current.add(matchKey);
-
     // ── Progress bar width per sport ──────────────────────────────────────────
     const progress = (() => {
       if (sport === "basketball") return Math.min(100, (minute / 48) * 100);
@@ -9831,9 +9822,6 @@ export default function Home({
       );
 
     const rivalry = RIVALRY_TAGS[`${match.home}|${match.away}`];
-    const motionProps = isNew
-      ? { initial: { opacity: 0, y: 10 }, animate: { opacity: 1, y: 0 } }
-      : {};
 
     const isObviousLiveResult =
       match.isLive &&
@@ -9956,7 +9944,6 @@ export default function Home({
     return (
       <motion.div
         key={matchKey}
-        {...motionProps}
         {...makeTap(() => setExpandedMatch(match))}
         className={`relative overflow-hidden rounded-2xl border transition-transform cursor-pointer active:scale-[0.99] ${
           isDarkTheme
