@@ -1,0 +1,115 @@
+const { Pool } = require('pg');
+
+const pool = new Pool({
+    host: 'localhost',
+    user: 'postgres',
+    password: '123456',
+    database: 'sportsbook',
+    port: 5432
+});
+
+async function settleBets() {
+
+    const client = await pool.connect();
+
+    try {
+
+        await client.query('BEGIN');
+
+        // pega eventos terminados
+        const events = await client.query(`
+            SELECT *
+            FROM events
+            WHERE status = 'finished'
+        `);
+
+        for (const event of events.rows) {
+
+            // lock evita pagamento duplo
+            const bets = await client.query(`
+                SELECT *
+                FROM bets
+                WHERE event_id = $1
+                AND status = 'open'
+                FOR UPDATE
+            `, [event.id]);
+
+            for (const bet of bets.rows) {
+
+                let result = 'lost';
+                let payout = 0;
+
+                // MERCADO 1X2
+                if (bet.market_type === 'match_winner') {
+
+                    const homeWin = event.home_score > event.away_score;
+                    const awayWin = event.away_score > event.home_score;
+                    const draw = event.home_score === event.away_score;
+
+                    if (
+                        (bet.selection === 'home' && homeWin) ||
+                        (bet.selection === 'away' && awayWin) ||
+                        (bet.selection === 'draw' && draw)
+                    ) {
+                        result = 'won';
+                        payout = bet.stake * bet.odds;
+                    }
+                }
+
+                // atualiza aposta
+                await client.query(`
+                    UPDATE bets
+                    SET status = $1,
+                        payout = $2,
+                        settled_at = NOW()
+                    WHERE id = $3
+                `, [result, payout, bet.id]);
+
+                // credita usuário
+                if (result === 'won') {
+
+                    await client.query(`
+                        UPDATE wallets
+                        SET balance = balance + $1
+                        WHERE user_id = $2
+                    `, [payout, bet.user_id]);
+                }
+
+                // log
+                await client.query(`
+                    INSERT INTO settlement_logs
+                    (bet_id, old_status, new_status, message)
+                    VALUES ($1, $2, $3, $4)
+                `, [
+                    bet.id,
+                    'open',
+                    result,
+                    `Bet settled automatically`
+                ]);
+
+                console.log(`Bet ${bet.id} -> ${result}`);
+            }
+
+            // marca evento como liquidado
+            await client.query(`
+                UPDATE events
+                SET status = 'settled'
+                WHERE id = $1
+            `, [event.id]);
+        }
+
+        await client.query('COMMIT');
+
+    } catch (err) {
+
+        await client.query('ROLLBACK');
+
+        console.error(err);
+
+    } finally {
+
+        client.release();
+    }
+}
+
+settleBets();

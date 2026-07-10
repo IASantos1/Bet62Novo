@@ -1,0 +1,191 @@
+> ## Documentation Index
+> Fetch the complete documentation index at: https://docs.sportsapipro.com/llms.txt
+> Use this file to discover all available pages before exploring further.
+
+# Manager, Referee & Venue Endpoints
+
+> V2 Basketball API: Coach careers and stats, referee statistics, arena details and event history
+
+## Base URL
+
+```
+https://v2.basketball.sportsapipro.com
+```
+
+<Info>
+  **Finding IDs:** Get manager, referee, and venue IDs from match details (`/api/match/{matchId}`). You can also use `/api/match/{matchId}/managers` for coach IDs and `/api/match/{matchId}/referee` for referee IDs.
+</Info>
+
+***
+
+## Manager / Coach Endpoints
+
+### Manager Details
+
+```bash theme={null}
+GET /api/managers/{managerId}
+```
+
+Returns coach profile: name, nationality, age, current team, and preferred formation/style.
+
+<ParamField path="managerId" type="number" required>
+  Numeric manager ID. Discover from match details or match managers endpoint.
+</ParamField>
+
+### Manager Image
+
+```bash theme={null}
+GET /api/managers/{managerId}/image
+```
+
+Returns the coach's profile photo URL.
+
+### Manager Career
+
+```bash theme={null}
+GET /api/managers/{managerId}/career
+```
+
+Returns complete coaching career history: teams managed, dates, and win/loss records.
+
+### Manager Last Events
+
+```bash theme={null}
+GET /api/managers/{managerId}/events/last/{page}
+```
+
+Returns recent games coached, paginated.
+
+<ParamField path="page" type="number" required>
+  Page number (0-indexed).
+</ParamField>
+
+### Manager Next Events
+
+```bash theme={null}
+GET /api/managers/{managerId}/events/next/{page}
+```
+
+Returns upcoming games for the coach's current team.
+
+### Manager Tournament Statistics
+
+```bash theme={null}
+GET /api/managers/{managerId}/tournament/{tournamentId}/season/{seasonId}/statistics
+```
+
+Returns the coach's statistics in a specific tournament season: wins, losses, points per game.
+
+***
+
+## Referee Endpoints
+
+### Referee Details
+
+```bash theme={null}
+GET /api/referee/{refereeId}
+```
+
+Returns referee profile and career summary.
+
+<ParamField path="refereeId" type="number" required>
+  Numeric referee ID. Discover from match details.
+</ParamField>
+
+### Referee Image
+
+```bash theme={null}
+GET /api/referee/{refereeId}/image
+```
+
+Returns the referee's profile photo URL.
+
+### Referee Tournament Statistics
+
+```bash theme={null}
+GET /api/referee/{refereeId}/tournament/{tournamentId}/season/{seasonId}/statistics
+```
+
+Returns referee statistics for a specific tournament season: games officiated, fouls called.
+
+### Referee Last Events
+
+```bash theme={null}
+GET /api/referee/{refereeId}/events/last/{page}
+```
+
+Returns recent games officiated by the referee.
+
+### Referee Next Events
+
+```bash theme={null}
+GET /api/referee/{refereeId}/events/next/{page}
+```
+
+Returns upcoming games assigned to the referee.
+
+***
+
+## Venue / Arena Endpoints
+
+### Venue Details
+
+```bash theme={null}
+GET /api/venue/{venueId}
+```
+
+Returns arena information: name, city, country, capacity, and location.
+
+<ParamField path="venueId" type="number" required>
+  Numeric venue ID. Discover from match details or team details.
+</ParamField>
+
+### Venue Last Events
+
+```bash theme={null}
+GET /api/venue/{venueId}/events/last/{page}
+```
+
+Returns recent games played at the arena.
+
+### Venue Next Events
+
+```bash theme={null}
+GET /api/venue/{venueId}/events/next/{page}
+```
+
+Returns upcoming games scheduled at the arena.
+
+***
+
+## Example Requests
+
+<CodeGroup>
+  ```bash cURL theme={null}
+  # Get coach career
+  curl -X GET "https://v2.basketball.sportsapipro.com/api/managers/12345/career" \
+    -H "x-api-key: YOUR_API_KEY"
+
+  # Get arena details
+  curl -X GET "https://v2.basketball.sportsapipro.com/api/venue/1000" \
+    -H "x-api-key: YOUR_API_KEY"
+  ```
+
+  ```javascript JavaScript theme={null}
+  const career = await fetch(
+    'https://v2.basketball.sportsapipro.com/api/managers/12345/career',
+    { headers: { 'x-api-key': 'YOUR_API_KEY' } }
+  ).then(r => r.json());
+  ```
+
+  ```python Python theme={null}
+  import requests
+
+  headers = {'x-api-key': 'YOUR_API_KEY'}
+
+  career = requests.get(
+      'https://v2.basketball.sportsapipro.com/api/managers/12345/career',
+      headers=headers
+  ).json()
+  ```
+</CodeGroup>

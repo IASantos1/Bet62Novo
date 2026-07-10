@@ -1,0 +1,74 @@
+{
+  "livescore": {
+    "updated": "12.12.2025 18:05:08",
+    "sport": "soccer",
+    "league": [
+      {
+        "country": "algeria",
+        "name": "Algeria: Algeria Cup",
+        "cup": "True",
+        "id": "4166",
+        "sub_id": "",
+        "match": [
+          {
+            "alternate_id": "6640079",
+            "alternate_id_2": "8826607",
+            "commentary": "False",
+            "date": "11.12.2025",
+            "id": "6132665",
+            "static_id": "11122523757272337574",
+            "status": "FT",
+            "time": "13:00",
+            "venue": "",
+            "home": {
+              "agg": "false",
+              "goals": "0",
+              "id": "2375727",
+              "name": "Ain Kercha"
+            },
+            "away": {
+              "agg": "true",
+              "goals": "2",
+              "id": "2337574",
+              "name": "ASM Oran"
+            },
+            "events": {
+              "event": [
+                {
+                  "assist": "",
+                  "assistid": "",
+                  "extra_min": "",
+                  "id": "67279574",
+                  "minute": "75",
+                  "player": "Y. Fektour",
+                  "playerid": "3275383",
+                  "result": "[0 - 1]",
+                  "team": "away",
+                  "type": "goal"
+                },
+                {
+                  "assist": "",
+                  "assistid": "",
+                  "extra_min": "",
+                  "id": "67279575",
+                  "minute": "78",
+                  "player": "A. Qasmi",
+                  "playerid": "",
+                  "result": "[0 - 2]",
+                  "team": "away",
+                  "type": "goal"
+                }
+              ]
+            },
+            "ht": {
+              "score": "[0-0]"
+            },
+            "ft": {
+              "score": "[0-2]"
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

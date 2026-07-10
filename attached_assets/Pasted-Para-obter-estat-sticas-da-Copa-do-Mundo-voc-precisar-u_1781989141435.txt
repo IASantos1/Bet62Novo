@@ -1,0 +1,45 @@
+Para obter estatísticas da Copa do Mundo, você precisará usar os endpoints da API de Futebol (Football V2) e identificar os IDs corretos para a competição da Copa do Mundo e suas temporadas.
+Aqui está como você pode abordar isso:
+1. Encontrar o ID da Copa do Mundo:
+Primeiro, você pode usar o endpoint de pesquisa ou o endpoint de torneios para encontrar o ID da Copa do Mundo.
+Usando o endpoint de pesquisa (V2): ```Isso deve retornar resultados que incluem a Copa do Mundo (FIFA World Cup) e seu id.
+Usando o endpoint de torneios (V2): Você pode listar todos os torneios e filtrar por nome, mas a pesquisa é geralmente mais direta.
+Uma vez que você tenha o id da Copa do Mundo (por exemplo, digamos que seja 1 para a Copa do Mundo FIFA), você pode prosseguir.
+2. Obter estatísticas da Copa do Mundo:
+Com o ID do torneio, você pode acessar vários tipos de estatísticas:
+Classificações (Standings): Para ver as classificações dos grupos ou fases eliminatórias de uma temporada específica da Copa do Mundo.
+
+curl -H "x-api-key: [redacted]API_KEY" \
+  "https://v2.football.sportsapipro.com/api/tournament/{worldCupId}/season/{seasonId}/standings"
+Você precisará do seasonId para a Copa do Mundo específica (ex: 2022, 2018). Você pode obter os seasonIds disponíveis para um torneio usando o endpoint /api/tournaments/{id}/seasons.
+Artilheiros (Top Players/Scorers): Para obter os principais artilheiros ou outros jogadores de destaque de uma temporada da Copa do Mundo.
+
+curl -H "x-api-key: [redacted] \
+  "https://v2.football.sportsapipro.com/api/tournament/{worldCupId}/season/{seasonId}/top-players"
+Importante: Conforme a documentação, este endpoint retorna classificações de jogadores apenas para competições de liga. Para competições de copa como a Copa do Mundo, pode retornar resultados vazios. Para estatísticas de jogadores em partidas individuais, você precisaria usar /api/match/{matchId}/player-statistics.
+Resultados e Calendário (Schedule/Results): Para obter todos os jogos de uma temporada da Copa do Mundo.
+
+curl -H "x-api-key: [redacted] \
+  "https://v2.football.sportsapipro.com/api/tournament/{worldCupId}/season/{seasonId}/schedule"
+Estatísticas de Partida Individual: Para estatísticas detalhadas de uma partida específica da Copa do Mundo (posse de bola, chutes, cartões, etc.).
+
+curl -H "x-api-key: [redacted] \
+  "https://v2.football.sportsapipro.com/api/match/{matchId}/statistics"
+Você obterá os matchIds do endpoint de calendário.
+Exemplo completo (encontrar ID da Copa do Mundo e depois uma temporada):
+Encontrar o ID da Copa do Mundo:
+
+curl -H "x-api-key: [redacted] "https://v2.football.sportsapipro.com/api/search?q=World%20Cup"
+Procure por um objeto no array tournaments com name como "FIFA World Cup" ou similar. Digamos que o id seja 1.
+Listar temporadas da Copa do Mundo (ID 1):
+
+curl -H "x-api-key: [redacted] "https://v2.football.sportsapipro.com/api/tournaments/1/seasons"
+Isso retornará uma lista de temporadas, como "2022", "2018", etc., com seus respectivos ids. Digamos que o seasonId para 2022 seja 12345.
+Obter o calendário da Copa do Mundo de 2022:
+
+curl -H "x-api-key: [redacted] "https://v2.football.sportsapipro.com/api/tournament/1/season/12345/schedule"
+Isso lhe dará todos os jogos da Copa do Mundo de 2022, incluindo seus ids de partida.
+Obter estatísticas de uma partida específica da Copa do Mundo (usando um matchId do calendário):
+
+curl -H "x-api-key: YOUR_API_KEY" "https://v2.football.sportsapipro.com/api/match/{um_matchId_da_copa}/statistics"
+Lembre-se de substituir YOUR_API_KEY pela sua chave de API real.

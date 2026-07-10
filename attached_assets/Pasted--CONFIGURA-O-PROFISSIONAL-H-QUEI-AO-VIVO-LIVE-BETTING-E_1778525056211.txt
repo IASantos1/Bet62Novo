@@ -1,0 +1,285 @@
+🏒 CONFIGURAÇÃO PROFISSIONAL — HÓQUEI AO VIVO (LIVE BETTING ENGINE)
+
+Agora vamos estruturar o funcionamento profissional do hóquei ao vivo, igual sportsbooks reais.
+
+Você quer:
+
+⚡ atualização de odds em tempo real
+🔒 bloqueio automático de mercados
+🧠 suspensão em eventos críticos
+❌ ocultar linhas atingidas
+🔁 abrir novas linhas automaticamente
+⏱ transição entre períodos
+📡 websocket live
+⚙️ ARQUITETURA DO HÓQUEI AO VIVO
+LIVE FEED
+    ↓
+PUCK EVENT
+    ↓
+GAME STATE
+    ↓
+MARKET SUSPEND
+    ↓
+ODDS RECALCULATION
+    ↓
+PERIOD VALIDATION
+    ↓
+MARKET CLOSE / OPEN
+    ↓
+WEBSOCKET PUSH
+🧠 1. MATCH STATE
+
+Você precisa armazenar:
+
+{
+  "match_id": "nhl_001",
+
+  "period": 2,
+
+  "clock": "08:21",
+
+  "score": {
+    "home": 2,
+    "away": 1
+  },
+
+  "shots": {
+    "home": 27,
+    "away": 19
+  },
+
+  "power_play": {
+    "active": true,
+    "team": "home"
+  }
+}
+⚡ 2. EVENTOS QUE ALTERAM ODDS
+
+No hóquei:
+
+Evento	Suspende
+Goal	✔
+Power Play	✔
+Penalty	✔
+Empty Net	✔
+Period End	✔
+Overtime	✔
+Shootout	✔
+🔒 3. BLOQUEIO DE ODDS
+Fluxo:
+GOAL
+   ↓
+LOCK MARKETS
+   ↓
+UPDATE GAME STATE
+   ↓
+RECALCULATE ODDS
+   ↓
+REOPEN
+⚙️ SCRIPT
+function onGoal(match) {
+
+  suspendMarkets(match.id);
+
+  updateScore(match);
+
+  const odds =
+    calculateHockeyOdds(match);
+
+  setTimeout(() => {
+
+    reopenMarkets(match.id, odds);
+
+  }, 4000);
+}
+🧠 4. CONFIGURAÇÃO DOS MERCADOS
+🏒 Moneyline
+{
+  "market": "moneyline",
+
+  "suspend_on_goal": true,
+
+  "recalculate_every_goal": true,
+
+  "delay": 4000
+}
+🏒 Puck Line
+{
+  "market": "puck_line",
+
+  "dynamic_lines": true,
+
+  "recalculate_every_goal": true
+}
+🏒 Totals
+{
+  "market": "totals",
+
+  "hide_completed_lines": true,
+
+  "auto_generate_new_lines": true
+}
+🏒 Period Markets
+{
+  "market": "period",
+
+  "close_after_period_end": true,
+
+  "open_next_period_markets": true
+}
+🏒 Player Props
+{
+  "market": "player_points",
+
+  "recalculate_on_goal": true
+}
+⚡ 5. FINAL DE PERÍODO
+
+Você quer:
+
+quando acabar o período → os mercados daquele período somem.
+
+Exatamente.
+
+Fluxo:
+PERIOD END
+     ↓
+CLOSE PERIOD MARKETS
+     ↓
+REMOVE OLD MARKETS
+     ↓
+OPEN NEXT PERIOD MARKETS
+     ↓
+RECALCULATE ODDS
+⚙️ SCRIPT
+function onPeriodEnd(match) {
+
+  closeMarkets(
+    match.id,
+    `P${match.period}`
+  );
+
+  match.period += 1;
+
+  openMarkets(
+    match.id,
+    `P${match.period}`
+  );
+
+  recalculateAllOdds(match);
+}
+❌ 6. OCULTAR MERCADOS ENCERRADOS
+Antes
+1P Winner
+1P Totals
+1P Puck Line
+Depois
+❌ 1P Winner removido
+❌ 1P Totals removido
+
+✔ 2P Winner aberto
+✔ 2P Totals aberto
+✔ 2P Puck Line aberto
+⚡ 7. LINHAS DINÂMICAS
+Totais
+
+Antes:
+
+Over 3.5
+Over 4.5
+Over 5.5
+Sai gol
+❌ Over 3.5 removido
+
+✔ Over 5.5
+✔ Over 6.5
+⚙️ SCRIPT
+function updateGoalLines(match) {
+
+  const totalGoals =
+    match.score.home +
+    match.score.away;
+
+  match.markets.totals.lines =
+    match.markets.totals.lines
+      .filter(line => line.value > totalGoals);
+
+  const nextLines = [
+
+    totalGoals + 0.5,
+    totalGoals + 1.5
+
+  ];
+
+  nextLines.forEach(line => {
+
+    addLineIfMissing(match, line);
+
+  });
+}
+🔒 8. DELAYS PROFISSIONAIS
+Evento	Delay
+Goal	4s
+Penalty	2s
+Power Play	3s
+Period End	5s
+OT Start	8s
+⚡ 9. WEBSOCKET AO VIVO
+Backend
+io.emit("nhl_update", {
+
+  matchId: match.id,
+
+  markets: match.markets
+
+});
+Frontend
+socket.on("nhl_update", data => {
+
+  renderMarkets(data.markets);
+
+});
+🧠 10. MERCADOS QUE SOMEM
+✔ 1P Winner
+✔ 1P Totals
+✔ 1P Puck Line
+✔ Props encerrados
+✔ Linhas atingidas
+⚡ 11. MERCADOS QUE CONTINUAM
+✔ Moneyline
+✔ Full Game Totals
+✔ Live Puck Line
+✔ Player Props ativos
+🧠 12. EVENTOS CRÍTICOS
+🔴 Hard Suspend
+Goal
+OT Start
+Shootout
+Goal Review
+🟡 Soft Suspend
+Penalty
+Power Play
+Timeout
+⚙️ 13. ENGINE FINAL
+GOAL EVENT
+    ↓
+SUSPEND
+    ↓
+UPDATE GAME STATE
+    ↓
+RECALCULATE ODDS
+    ↓
+REMOVE INVALID MARKETS
+    ↓
+OPEN NEXT PERIOD MARKETS
+    ↓
+WEBSOCKET PUSH
+🚀 O QUE VOCÊ TEM AGORA
+
+✔ Hockey live engine
+✔ Goal-based pricing
+✔ Period transitions
+✔ Dynamic totals
+✔ Market hiding
+✔ Auto market creation
+✔ Professional sportsbook logic

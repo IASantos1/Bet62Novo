@@ -1,0 +1,110 @@
+import asyncio
+import json
+import re
+from datetime import datetime
+import redis.asyncio as redis
+from playwright.async_api import async_playwright
+
+class SofaScoreTracker:
+    def __init__(self):
+        self.redis = None
+        self.page = None
+        self.tracking_data = {}  # Cache por match_id
+
+    async def init(self):
+        self.redis = await redis.from_url("redis://localhost:6379")
+        playwright = await async_playwright().start()
+        browser = await playwright.chromium.launch(headless=True)
+        context = await browser.new_context(
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+        )
+        self.page = await context.new_page()
+
+        # Intercepta todas as respostas de rede
+        await self.page.route("**/*", self.handle_response)
+
+    async def handle_response(self, route):
+        """Captura respostas JSON com tracking/posições"""
+        try:
+            url = route.request.url
+            if any(keyword in url for keyword in ["live-match-tracker", "incidents", "shotmap", "heatmap", "position"]):
+                response = await route.fetch()
+                body = await response.text()
+                
+                if "{" in body:  # É JSON
+                    data = json.loads(body)
+                    await self.process_tracking_data(data, url)
+                
+                await route.continue_()
+            else:
+                await route.continue_()
+        except:
+            await route.continue_()
+
+    async def process_tracking_data(self, data: dict, url: str):
+        """Processa e normaliza dados de posições"""
+        match_id = self.extract_match_id(url)
+        if not match_id:
+            return
+
+        # Exemplo de extração (adapte conforme estrutura real)
+        positions = {
+            "timestamp": datetime.now().isoformat(),
+            "ball": None,           # {x: 52.3, y: 48.1}
+            "home_players": [],     # lista de {player_id, x, y, speed?}
+            "away_players": [],
+            "events": []
+        }
+
+        # Tente capturar ball position e player positions (depende da resposta)
+        if "ball" in str(data).lower() or "position" in str(data).lower():
+            # Lógica específica - inspecione o JSON no browser dev tools primeiro
+            positions["ball"] = self.extract_ball_position(data)
+            positions["home_players"] = self.extract_players(data, "home")
+            positions["away_players"] = self.extract_players(data, "away")
+
+        # Salva e publica
+        key = f"tracking:{match_id}"
+        await self.redis.set(key, json.dumps(positions), ex=60)
+        await self.redis.publish("live_tracking", json.dumps({
+            "match_id": match_id,
+            "positions": positions
+        }))
+
+    def extract_ball_position(self, data):
+        # Implemente conforme o JSON real que você encontrar
+        # Exemplo placeholder
+        try:
+            return {"x": 50.0, "y": 50.0}  # normalize 0-100
+        except:
+            return None
+
+    def extract_players(self, data, team):
+        # Similar - extraia lista de jogadores com coordenadas
+        return []
+
+    def extract_match_id(self, url):
+        match = re.search(r'/event/(\d+)', url)
+        return match.group(1) if match else None
+
+    async def open_match(self, match_url: str):
+        """Abre uma partida e começa a monitorar"""
+        await self.page.goto(match_url, wait_until="networkidle")
+        print(f"Monitorando tracking: {match_url}")
+
+    async def close(self):
+        await self.redis.close()
+
+
+# Uso
+async def main():
+    tracker = SofaScoreTracker()
+    await tracker.init()
+    
+    # Exemplo de URL de partida ao vivo
+    await tracker.open_match("https://www.sofascore.com/football/match/seu-time-vs-outro/ID-AQUI")
+    
+    # Mantém rodando
+    await asyncio.sleep(3600)  # 1 hora ou use while True com tasks
+
+asyncio.run(main())

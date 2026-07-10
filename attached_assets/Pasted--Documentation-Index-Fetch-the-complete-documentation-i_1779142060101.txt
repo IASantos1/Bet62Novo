@@ -1,0 +1,160 @@
+> ## Documentation Index
+> Fetch the complete documentation index at: https://docs.sportsapipro.com/llms.txt
+> Use this file to discover all available pages before exploring further.
+
+# AI Tools Setup
+
+> Connect Cursor, Codex, Windsurf, Claude Desktop and other AI coding tools to SportsAPI Pro documentation
+
+## Use AI Tools with SportsAPI Pro
+
+SportsAPI Pro documentation is optimized for AI-assisted development. Connect your favorite AI coding tool so it understands all endpoints, authentication, base URLs, rate limits, and data structures automatically.
+
+<CardGroup cols={3}>
+  <Card title="MCP Server" icon="plug">
+    For tools that support Model Context Protocol
+
+    ```
+    https://docs.sportsapipro.com/mcp
+    ```
+  </Card>
+
+  <Card title="Full Context File" icon="file-lines">
+    Complete documentation for deep AI context
+
+    ```
+    https://docs.sportsapipro.com/llms-full.txt
+    ```
+  </Card>
+
+  <Card title="Short Context File" icon="file">
+    Concise summary of endpoints and key info
+
+    ```
+    https://docs.sportsapipro.com/llms.txt
+    ```
+  </Card>
+</CardGroup>
+
+## What This Enables
+
+Once connected, your AI assistant will understand:
+
+* All **154+ V2 endpoints** across 25 sports
+* **Authentication** requirements (`x-api-key` header)
+* **Base URL patterns** (`https://v2.{sport}.sportsapipro.com`)
+* **Rate limits** and error handling
+* **WebSocket** connections for real-time data
+* **Request/response schemas** for every endpoint
+
+***
+
+## Setup by Tool
+
+<AccordionGroup>
+  <Accordion title="Cursor" icon="code">
+    Add to your project's `.cursor/mcp.json`:
+
+    ```json theme={null}
+    {
+      "mcpServers": {
+        "sportsapi-pro-docs": {
+          "url": "https://docs.sportsapipro.com/mcp"
+        }
+      }
+    }
+    ```
+
+    Restart Cursor after saving. The MCP server will appear in your tool list.
+  </Accordion>
+
+  <Accordion title="Windsurf" icon="wind">
+    1. Open **Settings** → **MCP Servers**
+    2. Add a new server with the URL:
+
+    ```
+    https://docs.sportsapipro.com/mcp
+    ```
+
+    3. Save and restart Windsurf.
+  </Accordion>
+
+  <Accordion title="OpenAI Codex" icon="terminal">
+    Add to your `.codex/config.json`:
+
+    ```json theme={null}
+    {
+      "mcpServers": {
+        "sportsapi-pro-docs": {
+          "url": "https://docs.sportsapipro.com/mcp"
+        }
+      }
+    }
+    ```
+
+    Or pass it via CLI:
+
+    ```bash theme={null}
+    codex --mcp-server "https://docs.sportsapipro.com/mcp"
+    ```
+  </Accordion>
+
+  <Accordion title="Claude Desktop" icon="message-bot">
+    Add to your `claude_desktop_config.json` (located in `~/Library/Application Support/Claude/` on macOS or `%APPDATA%\Claude\` on Windows):
+
+    ```json theme={null}
+    {
+      "mcpServers": {
+        "sportsapi-pro-docs": {
+          "url": "https://docs.sportsapipro.com/mcp"
+        }
+      }
+    }
+    ```
+
+    Restart Claude Desktop after saving.
+  </Accordion>
+
+  <Accordion title="Any MCP-Compatible Client" icon="puzzle-piece">
+    Use the following MCP server URL in any tool that supports the Model Context Protocol:
+
+    ```
+    https://docs.sportsapipro.com/mcp
+    ```
+
+    This is a Streamable HTTP MCP server — no API key is required to connect.
+  </Accordion>
+</AccordionGroup>
+
+***
+
+## Using the LLM Context Files
+
+If your tool doesn't support MCP, you can use our documentation context files instead. We offer two versions:
+
+| File              | URL                                           | Best for                                              |
+| ----------------- | --------------------------------------------- | ----------------------------------------------------- |
+| **Full context**  | `https://docs.sportsapipro.com/llms-full.txt` | Deep integration — complete docs, schemas, and guides |
+| **Short summary** | `https://docs.sportsapipro.com/llms.txt`      | Quick reference — concise endpoint list and key info  |
+
+### How to use them
+
+* **Custom instructions**: Paste the URL (or its contents) into your AI tool's system prompt or custom instructions
+* **ChatGPT / Claude**: Paste the content into the conversation for full API context. Use `llms-full.txt` for detailed questions or `llms.txt` for a quick overview
+* **RAG pipelines**: Fetch and index `llms-full.txt` for retrieval-augmented generation
+
+<Tip>
+  Both files are automatically kept in sync with the documentation, so they always reflect the latest endpoints and guides.
+</Tip>
+
+## Need Help?
+
+<CardGroup cols={2}>
+  <Card title="Email Support" icon="envelope" href="mailto:support@sportsapipro.com">
+    Get help setting up your AI tools
+  </Card>
+
+  <Card title="API Reference" icon="book" href="/api-reference/overview">
+    Browse the full endpoint documentation
+  </Card>
+</CardGroup>

@@ -1,0 +1,90 @@
+> ## Documentation Index
+> Fetch the complete documentation index at: https://docs.sportsapipro.com/llms.txt
+> Use this file to discover all available pages before exploring further.
+
+# Rankings Endpoints
+
+> V2 Football API: FIFA world rankings, regional rankings, and featured ranking events
+
+## Base URL
+
+```
+https://v2.football.sportsapipro.com
+```
+
+***
+
+## Endpoints
+
+### FIFA World Rankings
+
+```bash theme={null}
+GET /api/rankings
+```
+
+Returns the current FIFA world rankings (type 1 by default). Includes rank, team, points, and previous rank.
+
+### Rankings by ID
+
+```bash theme={null}
+GET /api/rankings/{rankingId}
+```
+
+Returns a specific ranking edition by its ID.
+
+<ParamField path="rankingId" type="number" required>
+  Numeric ranking ID.
+</ParamField>
+
+### Rankings by Type
+
+```bash theme={null}
+GET /api/rankings/type/{typeId}
+```
+
+Returns rankings filtered by type/confederation.
+
+<ParamField path="typeId" type="number" required>
+  Ranking type ID.
+</ParamField>
+
+| Type ID | Description         |
+| ------- | ------------------- |
+| `1`     | FIFA World Rankings |
+| `2`     | UEFA Rankings       |
+| `3`     | AFC Rankings        |
+
+### Rankings Featured Events
+
+```bash theme={null}
+GET /api/rankings/type/{typeId}/featured-events
+```
+
+Returns featured international events associated with a ranking type (e.g., World Cup qualifiers for FIFA rankings).
+
+***
+
+## Example Requests
+
+<CodeGroup>
+  ```bash cURL theme={null}
+  curl -X GET "https://v2.football.sportsapipro.com/api/rankings" \
+    -H "x-api-key: YOUR_API_KEY"
+  ```
+
+  ```javascript JavaScript theme={null}
+  const rankings = await fetch(
+    'https://v2.football.sportsapipro.com/api/rankings',
+    { headers: { 'x-api-key': 'YOUR_API_KEY' } }
+  ).then(r => r.json());
+  ```
+
+  ```python Python theme={null}
+  import requests
+
+  rankings = requests.get(
+      'https://v2.football.sportsapipro.com/api/rankings',
+      headers={'x-api-key': 'YOUR_API_KEY'}
+  ).json()
+  ```
+</CodeGroup>

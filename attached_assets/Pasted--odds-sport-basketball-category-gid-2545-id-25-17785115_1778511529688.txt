@@ -1,0 +1,75 @@
+{
+  "odds": {
+    "sport": "basketball",
+    "category": {
+      "gid": "2545",
+      "id": "2545",
+      "name": "USA: NBA",
+      "matches": {
+        "match": [
+          {
+            "date": "12.12.2025",
+            "time": "01:00",
+            "status": "Not Started",
+            "id": "1012269",
+            "home": {
+              "id": "2692",
+              "name": "Houston Rockets",
+              "q1": "",
+              "q2": "",
+              "q3": "",
+              "q4": "",
+              "ot": "",
+              "totalscore": ""
+            },
+            "away": {
+              "id": "2670",
+              "name": "Los Angeles Clippers",
+              "q1": "",
+              "q2": "",
+              "q3": "",
+              "q4": "",
+              "ot": "",
+              "totalscore": ""
+            },
+            "odds": {
+              "ts": "1765446769",
+              "type": [
+                {
+                  "id": "1500",
+                  "value": "3Way Result",
+                  "stop": "False",
+                  "bookmaker": [
+                    {
+                      "id": "1516",
+                      "name": "Marathon",
+                      "ts": "1765441940",
+                      "stop": "False",
+                      "odd": [
+                        {
+                          "id": "910283517115671567",
+                          "name": "Home",
+                          "value": "1.25"
+                        },
+                        {
+                          "id": "910283517115691569",
+                          "name": "Draw",
+                          "value": "15.25"
+                        },
+                        {
+                          "id": "910283517115701570",
+                          "name": "Away",
+                          "value": "4.40"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        ]
+      }
+    }
+  }
+}

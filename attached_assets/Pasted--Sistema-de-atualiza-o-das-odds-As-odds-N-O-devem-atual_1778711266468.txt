@@ -1,0 +1,318 @@
+🧠 Sistema de atualização das odds
+As odds NÃO devem atualizar todas juntas.
+O sistema deve utilizar:
+
+
+atualização parcial
+
+
+renderização gradual
+
+
+delay entre odds
+
+
+fila de atualização
+
+
+estabilização visual
+
+
+
+🟢 Configuração correta
+1. Partial Odds Update
+Quando uma odd mudar:
+
+
+atualizar apenas aquela odd
+
+
+NÃO atualizar o mercado inteiro
+
+
+Exemplo:
+Se apenas:
+
+
+Casa mudou
+
+
+Então:
+
+
+Empate continua igual
+
+
+Fora continua igual
+
+
+
+🟢 2. Staggered Rendering
+As odds devem atualizar separadamente.
+Ordem recomendada:
+
+
+Casa
+
+
+Empate
+
+
+Fora
+
+
+Com pequenos delays entre elas.
+
+🟢 3. Delay de atualização
+Adicionar pequenos intervalos:
+
+
+Casa → instantâneo
+
+
+Empate → 150ms depois
+
+
+Fora → 300ms depois
+
+
+Isso cria:
+
+
+sensação natural
+
+
+estabilidade
+
+
+aparência profissional
+
+
+
+🟢 4. Market Queue System
+As atualizações devem entrar em uma fila.
+A fila controla:
+
+
+prioridade
+
+
+ordem
+
+
+frequência
+
+
+estabilidade visual
+
+
+
+🟢 5. Priority Markets
+Mercados principais atualizam primeiro.
+Tier 1:
+
+
+Resultado Final
+
+
+Over/Under
+
+
+Handicap
+
+
+Tier 2:
+
+
+HT/FT
+
+
+Correct Score
+
+
+Tier 3:
+
+
+Escanteios
+
+
+Cartões
+
+
+Especiais
+
+
+
+🟢 6. Odds Threshold
+Pequenas mudanças NÃO devem atualizar a tela.
+Exemplo:
+
+
+1.40 → 1.41
+não atualiza
+
+
+1.40 → 1.45
+atualiza
+
+
+
+🟢 7. Tick System
+As odds devem ser arredondadas.
+Exemplo:
+
+
+1.437 → 1.44
+
+
+1.442 → continua 1.44
+
+
+Isso evita:
+
+
+microoscilações
+
+
+flickering
+
+
+movimentos excessivos
+
+
+
+🟢 8. Frontend Animation Layer
+As odds devem atualizar com animação leve.
+Utilizar:
+
+
+fade suave
+
+
+blink pequeno
+
+
+transição curta
+
+
+Evitar:
+
+
+troca instantânea agressiva
+
+
+piscadas fortes
+
+
+
+🟢 9. WebSocket Broadcast
+O backend NÃO deve enviar todos os mercados constantemente.
+Enviar apenas:
+
+
+odds alteradas
+
+
+mercados ativos
+
+
+seleções modificadas
+
+
+
+🟢 10. Market Stabilization System
+Antes de enviar para o frontend:
+o sistema deve:
+
+
+estabilizar odds
+
+
+remover microvariações
+
+
+controlar frequência
+
+
+suavizar movimentos
+
+
+
+🟢 Fluxo correto
+Provider Feed
+↓
+Feed Normalizer
+↓
+Odds Stabilizer
+↓
+Market Queue
+↓
+Partial Update Engine
+↓
+Staggered Renderer
+↓
+Frontend Animation
+↓
+Usuário visualiza odds
+
+🟢 Resultado esperado
+As odds:
+
+
+parecem naturais
+
+
+atualizam suavemente
+
+
+não piscam todas juntas
+
+
+não mudam agressivamente
+
+
+ficam com aparência profissional
+
+
+Igual:
+
+
+Betano
+
+
+Bet365
+
+
+Pinnacle
+
+
+Stake
+
+
+1xBet
+
+
+
+🟢 Nomes recomendados para os módulos
+
+
+OddsStabilizer
+
+
+MarketUpdateQueue
+
+
+IncrementalOddsRenderer
+
+
+OddsNormalizer
+
+
+OddsAnimationManager
+
+
+LiveMarketEngine
+
+
+PartialMarketUpdater
+

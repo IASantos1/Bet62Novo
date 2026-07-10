@@ -1,0 +1,121 @@
+> ## Documentation Index
+> Fetch the complete documentation index at: https://docs.sportsapipro.com/llms.txt
+> Use this file to discover all available pages before exploring further.
+
+# Football V2 API Overview
+
+> Enhanced Football API with ~154 endpoints: shotmaps, AI insights, player heatmaps, tournament brackets, WebSocket live scores, and more
+
+## Base URL
+
+```
+https://v2.football.sportsapipro.com
+```
+
+## What's Different in V2?
+
+The V2 Football API provides **enhanced data coverage** with significantly more endpoints and richer data compared to V1:
+
+<CardGroup cols={2}>
+  <Card title="~154 Endpoints" icon="layer-group">
+    Match, Tournament, Team, Player, Manager, Referee, Venue, Rankings, Odds, Fantasy
+  </Card>
+
+  <Card title="Advanced Analytics" icon="chart-mixed">
+    Shotmaps with xG, heatmaps, momentum graphs, AI-generated match insights
+  </Card>
+
+  <Card title="Path Parameters" icon="route">
+    RESTful path parameters instead of query strings (e.g., `/api/match/12345`)
+  </Card>
+
+  <Card title="WebSocket Support" icon="bolt">
+    Real-time live scores via WebSocket at `wss://v2.football.sportsapipro.com/ws`
+  </Card>
+</CardGroup>
+
+## Authentication
+
+Same `x-api-key` header as V1 — your existing API key works for both versions:
+
+```bash theme={null}
+curl -X GET "https://v2.football.sportsapipro.com/api/live" \
+  -H "x-api-key: YOUR_API_KEY"
+```
+
+## V1 vs V2 Comparison
+
+| Feature              | V1                             | V2                                 |
+| -------------------- | ------------------------------ | ---------------------------------- |
+| Base URL             | `v1.football.sportsapipro.com` | `v2.football.sportsapipro.com`     |
+| Parameter style      | Query strings (`?gameId=123`)  | Path parameters (`/api/match/123`) |
+| Match endpoints      | 12                             | 37                                 |
+| Player endpoints     | 6                              | 24                                 |
+| Team endpoints       | 8                              | 18                                 |
+| Tournament endpoints | 5                              | 32                                 |
+| Shotmaps & xG        | ❌                              | ✅                                  |
+| AI Insights          | ❌                              | ✅                                  |
+| Player Heatmaps      | ❌                              | ✅                                  |
+| Manager/Referee Data | ❌                              | ✅                                  |
+| Venue Data           | ❌                              | ✅                                  |
+| WebSocket Live       | ❌                              | ✅                                  |
+| Fantasy Data         | ❌                              | ✅                                  |
+
+## Important: Entity ID Discovery
+
+<Warning>
+  Entity IDs (players, matches, teams, venues, referees) are **numeric** and must be discovered dynamically — never hardcode them.
+
+  **Discovery flow:**
+
+  1. Use `/api/search?q=arsenal` to find team/player IDs
+  2. Use `/api/live` or `/api/schedule/{date}` to find match IDs
+  3. Use `/api/match/{id}` to extract venue, referee, and player IDs from the response
+  4. Use `/api/tournaments/{id}/seasons` to discover valid season IDs
+</Warning>
+
+## Endpoint Categories
+
+<CardGroup cols={2}>
+  <Card title="Match (37 endpoints)" icon="futbol" href="/api-reference/football-v2/match">
+    Lineups, statistics, shotmaps, AI insights, odds, heatmaps, penalties, highlights
+  </Card>
+
+  <Card title="Tournament (32 endpoints)" icon="trophy" href="/api-reference/football-v2/tournament">
+    Standings, top players/teams, brackets, team of the week, media, venues
+  </Card>
+
+  <Card title="Team (18 endpoints)" icon="users" href="/api-reference/football-v2/team">
+    Squad, transfers, performance, goal distributions, statistics, media, featured events
+  </Card>
+
+  <Card title="Player (24 endpoints)" icon="user" href="/api-reference/football-v2/player">
+    Statistics, heatmaps, transfer history, characteristics, penalty history, ratings
+  </Card>
+
+  <Card title="Manager / Referee / Venue (10 endpoints)" icon="whistle" href="/api-reference/football-v2/manager">
+    Manager careers & stats, referee statistics, venue details and events
+  </Card>
+
+  <Card title="Global & Search (33 endpoints)" icon="magnifying-glass" href="/api-reference/football-v2/global">
+    Live scores, search, schedule, trending, countries, leagues, fantasy, news
+  </Card>
+
+  <Card title="Rankings" icon="ranking-star" href="/api-reference/football-v2/rankings">
+    FIFA rankings, rankings by type, featured events
+  </Card>
+
+  <Card title="Odds" icon="chart-line" href="/api-reference/football-v2/odds">
+    Featured events with odds, popular events, odds providers
+  </Card>
+
+  <Card title="Fantasy" icon="star" href="/api-reference/football-v2/fantasy">
+    Fantasy player data, fixtures, player of the season awards
+  </Card>
+</CardGroup>
+
+## WebSocket Real-Time
+
+Real-time live scores, match events, statistics, and odds are available via WebSocket with sub-second latency.
+
+For full WebSocket documentation including channels, response types, delivery modes, and code examples, see the **[WebSocket Real-Time API](/api-reference/football-v2/websocket)** page.

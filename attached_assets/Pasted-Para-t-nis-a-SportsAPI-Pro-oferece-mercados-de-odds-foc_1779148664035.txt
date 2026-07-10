@@ -1,0 +1,70 @@
+Para tênis, a SportsAPI Pro oferece mercados de odds focados na natureza individual do esporte e nos sets. A lógica para acessar e processar esses dados é a mesma dos outros esportes: você fará uma requisição para o endpoint de odds do tênis e analisará a estrutura JSON.
+
+Base URL: https://v2.tennis.sportsapipro.com
+Endpoint de Odds: GET /api/match/:matchId/odds
+Endpoint de Linhas de Apostas: GET /api/match/:matchId/lines
+Aqui estão os mercados de odds mais comuns e populares que você provavelmente encontrará na API para tênis:
+
+Mercados Comuns e Populares em Tênis:
+
+Match Winner (Vencedor da Partida):
+
+Jogador A para Vencer
+Jogador B para Vencer
+Este é o mercado mais fundamental no tênis.
+Set Handicap (Handicap de Sets):
+
+Jogador A com Handicap de Sets (ex: -1.5 sets)
+Jogador B com Handicap de Sets (ex: +1.5 sets)
+Isso significa que o jogador com -1.5 sets precisa vencer por uma margem de 2 sets ou mais (ex: 2-0 ou 3-1, dependendo do formato da partida), enquanto o jogador com +1.5 sets pode perder por 1 set e ainda "cobrir" o handicap (ex: perder por 1-2 ou 2-3).
+Total Games Over/Under (Total de Games Acima/Abaixo):
+
+Mais de X games (ex: Over 22.5 games)
+Menos de X games (ex: Under 22.5 games)
+Refere-se ao número total de games jogados na partida inteira.
+Correct Score (Placar Correto - Sets):
+
+Prever o placar exato em sets (ex: 2-0 para Jogador A, 2-1 para Jogador A, 0-2 para Jogador B, etc.).
+A disponibilidade de 2-0, 2-1, 3-0, 3-1, 3-2 dependerá do formato da partida (melhor de 3 ou melhor de 5 sets).
+Set Winner (Vencedor do Set):
+
+Vencedor do 1º Set: Jogador A / Jogador B
+Vencedor do 2º Set: Jogador A / Jogador B
+E assim por diante para sets subsequentes.
+Total Games in Set (Total de Games no Set - Over/Under):
+
+Mais de X games no 1º Set (ex: Over 9.5 games no 1º Set)
+Menos de X games no 1º Set (ex: Under 9.5 games no 1º Set)
+Pode ser oferecido para sets específicos.
+Player to Win at Least One Set (Jogador para Vencer Pelo Menos Um Set):
+
+Jogador A para vencer pelo menos um set: Sim / Não
+Jogador B para vencer pelo menos um set: Sim / Não
+Tie Break in Match (Tie Break na Partida):
+
+Haverá um tie break na partida: Sim / Não
+Odd/Even Games (Ímpar/Par de Games):
+
+Total de games na partida será ímpar ou par.
+Como Identificar e Configurar (Tênis):
+
+Faça a requisição:
+
+
+curl -X GET "https://v2.tennis.sportsapipro.com/api/match/:matchId/odds" \
+  -H "x-api-key: [redacted]]]
+Analise a resposta JSON: Percorra a lista de bookmakers e, dentro de cada um, a lista de markets.
+
+Use market.name e outcome.name: Para identificar os mercados específicos.
+
+Exemplo de Mapeamento para Tênis:
+
+Mercado Comum	market.name Típico	outcome.name Típico
+Match Winner	"Match Winner"	"Player A", "Player B"
+Set Handicap	"Set Handicap"	"Player A -X.Y", "Player B +X.Y"
+Total Games Over/Under	"Total Games Over/Under"	"Over X.Y", "Under X.Y"
+Correct Score (Sets)	"Correct Score"	"2-0", "2-1", "0-2", "1-2", "3-0", "3-1", "3-2", etc.
+1st Set Winner	"1st Set Winner"	"Player A", "Player B"
+Total Games in 1st Set	"1st Set Total Games Over/Under"	"Over X.Y", "Under X.Y"
+Tie Break in Match	"Tie Break in Match"	"Yes", "No"
+Lembre-se de que os nomes exatos podem variar ligeiramente entre os provedores de odds, mas os termos listados são os mais comuns e você deve conseguir identificá-los para exibir em sua aplicação.

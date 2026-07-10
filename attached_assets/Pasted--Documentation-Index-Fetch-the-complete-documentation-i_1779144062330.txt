@@ -1,0 +1,245 @@
+> ## Documentation Index
+> Fetch the complete documentation index at: https://docs.sportsapipro.com/llms.txt
+> Use this file to discover all available pages before exploring further.
+
+# Global, Search & Schedule Endpoints
+
+> V2 Basketball API: Live scores, search, match schedules, trending players, countries, and news
+
+## Base URL
+
+```
+https://v2.basketball.sportsapipro.com
+```
+
+***
+
+## Live Data
+
+### Live Scores
+
+```bash theme={null}
+GET /api/live
+```
+
+Returns all currently live basketball matches with quarter-by-quarter scores, teams, and status. **Use this as the primary source for discovering live match IDs.**
+
+<Accordion title="Example Response — /api/live">
+  ```json theme={null}
+  {
+    "success": true,
+    "count": 18,
+    "events": [
+      {
+        "id": 15972577,
+        "homeTeam": "Admirals Basketball Academy U20",
+        "homeTeamId": 1157137,
+        "awayTeam": "TEAM 7 U20",
+        "awayTeamId": 1137861,
+        "homeScore": {
+          "current": 96,
+          "display": 96,
+          "period1": 20,
+          "period2": 31,
+          "period3": 21,
+          "period4": 24
+        },
+        "awayScore": {
+          "current": 74,
+          "display": 74,
+          "period1": 15,
+          "period2": 14,
+          "period3": 27,
+          "period4": 18
+        },
+        "status": "Pause",
+        "statusCode": 30,
+        "tournament": "EYBL U20, CHALLENGE CUP",
+        "tournamentId": 29909,
+        "season": "25/26",
+        "seasonId": 83999,
+        "startTimestamp": 1775892600
+      }
+    ],
+    "timezone": { "name": "UTC", "source": "default", "utcOffset": "+00:00" }
+  }
+  ```
+</Accordion>
+
+<Note>
+  **Basketball-specific fields:** Score objects include `period1`-`period4` for quarters, plus `current` and `display` totals. The `statusCode` field is a numeric status (e.g., `30` = Pause). Team IDs (`homeTeamId`, `awayTeamId`) and tournament/season IDs are included in the live response for easy cross-referencing.
+</Note>
+
+### All Live Events
+
+```bash theme={null}
+GET /api/live/all
+```
+
+Returns all live events unfiltered with full raw data (nested team objects, detailed match metadata).
+
+### Today's Games
+
+```bash theme={null}
+GET /api/today
+```
+
+Returns all basketball games scheduled for today.
+
+### Trending Players
+
+```bash theme={null}
+GET /api/trending-players
+```
+
+Returns currently trending basketball players based on recent performance.
+
+### Live Tournaments
+
+```bash theme={null}
+GET /api/live-tournaments
+```
+
+Returns tournaments that currently have live games in progress.
+
+***
+
+## Search
+
+### Search All
+
+```bash theme={null}
+GET /api/search?q={query}
+```
+
+Search across teams, players, and tournaments simultaneously. Returns entity IDs for use with other endpoints.
+
+<ParamField query="q" type="string" required>
+  Search query (e.g., `lakers`, `lebron`, `nba`). Minimum 2 characters.
+</ParamField>
+
+<Note>
+  This is the **primary way to discover entity IDs** for teams, players, and tournaments.
+</Note>
+
+***
+
+## Schedule
+
+### Events by Date
+
+```bash theme={null}
+GET /api/schedule/{date}
+```
+
+Returns all basketball games for a specific date, grouped by tournament.
+
+<ParamField path="date" type="string" required>
+  Date in `YYYY-MM-DD` format (e.g., `2025-03-15`).
+</ParamField>
+
+### Scheduled Tournaments by Date
+
+```bash theme={null}
+GET /api/scheduled-tournaments/{date}
+```
+
+Returns tournaments that have games on a specific date — useful for building a competition filter.
+
+<ParamField path="date" type="string" required>
+  Date in `YYYY-MM-DD` format.
+</ParamField>
+
+***
+
+## Countries & Categories
+
+### All Countries
+
+```bash theme={null}
+GET /api/countries
+```
+
+Returns all basketball categories/countries.
+
+### All Countries (Extended)
+
+```bash theme={null}
+GET /api/countries/all
+```
+
+Returns extended categories list with additional metadata.
+
+### Category Tournaments
+
+```bash theme={null}
+GET /api/categories/{categoryId}/tournaments
+```
+
+Returns all tournaments within a specific category (country or region).
+
+<ParamField path="categoryId" type="number" required>
+  Category ID from the countries endpoint.
+</ParamField>
+
+### Country Flag
+
+```bash theme={null}
+GET /api/country/{code}/flag
+```
+
+Returns the flag image URL for a country code.
+
+<ParamField path="code" type="string" required>
+  Two-letter country code (e.g., `US`, `ES`, `TR`).
+</ParamField>
+
+***
+
+## News
+
+### Basketball News
+
+```bash theme={null}
+GET /api/news?lang={lang}
+```
+
+Returns the latest basketball news articles.
+
+<ParamField query="lang" type="string" default="en">
+  Language code (e.g., `en`, `es`).
+</ParamField>
+
+***
+
+## Example Requests
+
+<CodeGroup>
+  ```bash cURL theme={null}
+  # Search for a team
+  curl -X GET "https://v2.basketball.sportsapipro.com/api/search?q=lakers" \
+    -H "x-api-key: YOUR_API_KEY"
+
+  # Get today's schedule
+  curl -X GET "https://v2.basketball.sportsapipro.com/api/schedule/2025-03-15" \
+    -H "x-api-key: YOUR_API_KEY"
+  ```
+
+  ```javascript JavaScript theme={null}
+  const results = await fetch(
+    'https://v2.basketball.sportsapipro.com/api/search?q=lakers',
+    { headers: { 'x-api-key': 'YOUR_API_KEY' } }
+  ).then(r => r.json());
+  ```
+
+  ```python Python theme={null}
+  import requests
+
+  headers = {'x-api-key': 'YOUR_API_KEY'}
+
+  results = requests.get(
+      'https://v2.basketball.sportsapipro.com/api/search?q=lakers',
+      headers=headers
+  ).json()
+  ```
+</CodeGroup>
