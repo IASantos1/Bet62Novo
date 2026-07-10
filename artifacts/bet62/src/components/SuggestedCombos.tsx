@@ -30,9 +30,9 @@ type BetSelection = {
   scheduledTime?: string;
   selection: string;
   odd: number;
-  originalOdd: number;
-  market: string;
-  label: string;
+  market?: string;
+  label?: string;
+  marketLine?: number;
   comboTag?: string;
 };
 
@@ -91,18 +91,42 @@ export default function SuggestedCombos({
     return () => { cancelled = true; };
   }, [match?.id]);
 
+  const matchComboPrefix = `pred-${match.id}-`;
+
   if (loading) {
     return (
-      <div className="flex items-center gap-2 px-4 py-3 mb-2">
-        <Loader2 size={13} className="animate-spin text-zinc-500" />
-        <span className="text-[11px] text-zinc-500">A carregar sugestões…</span>
+      <div className="mb-3">
+        <div className="flex items-center gap-2 px-1 mb-2">
+          <Zap size={13} className="text-yellow-400 shrink-0" />
+          <span className="text-[11px] font-black text-zinc-300 uppercase tracking-widest">
+            Biblioteca de Combinações
+          </span>
+        </div>
+        <div className="flex items-center gap-2 px-4 py-3 rounded-xl bg-zinc-900/60 border border-zinc-800/60">
+          <Loader2 size={13} className="animate-spin text-zinc-500" />
+          <span className="text-[11px] text-zinc-500">A calcular combinações…</span>
+        </div>
       </div>
     );
   }
 
-  if (!combos || combos.length === 0) return null;
-
-  const matchComboPrefix = `pred-${match.id}-`;
+  if (!combos || combos.length === 0) {
+    return (
+      <div className="mb-3">
+        <div className="flex items-center gap-2 px-1 mb-2">
+          <Zap size={13} className="text-yellow-400 shrink-0" />
+          <span className="text-[11px] font-black text-zinc-300 uppercase tracking-widest">
+            Biblioteca de Combinações
+          </span>
+        </div>
+        <div className="px-4 py-3 rounded-xl bg-zinc-900/60 border border-zinc-800/60">
+          <span className="text-[11px] text-zinc-500">
+            Sem combinações compatíveis com este jogo neste momento.
+          </span>
+        </div>
+      </div>
+    );
+  }
 
   const isComboActive = (combo: PublishedCombo) => {
     const tag = `${matchComboPrefix}${combo.id}`;
@@ -122,24 +146,6 @@ export default function SuggestedCombos({
       const withoutPrevious = prev.filter(
         (b) => !(b.comboTag && b.comboTag.startsWith(matchComboPrefix)),
       );
-      const newSels: BetSelection[] = combo.legs.map((leg) => ({
-        matchId: match.id,
-        matchTitle: `${match.home} vs ${match.away}`,
-        league: match.league,
-        country: match.country,
-        sport: match.sport,
-        date: match.date,
-        time: match.time,
-        scheduledDate: match.scheduledDate,
-        scheduledTime: match.scheduledTime,
-        selection: leg.code,
-        odd: combo.odd / combo.legs.length, // placeholder — real combined odd on the card
-        originalOdd: combo.odd / combo.legs.length,
-        market: "prediction",
-        label: leg.label,
-        comboTag: tag,
-      }));
-      // Rewrite all new sels with the full combo odd on each (so slip shows correct total)
       const sels: BetSelection[] = combo.legs.map((leg) => ({
         matchId: match.id,
         matchTitle: `${match.home} vs ${match.away}`,
@@ -169,7 +175,7 @@ export default function SuggestedCombos({
       <div className="flex items-center gap-2 px-1 mb-2">
         <Zap size={13} className="text-yellow-400 shrink-0" />
         <span className="text-[11px] font-black text-zinc-300 uppercase tracking-widest">
-          Múltiplas Sugeridas
+          Biblioteca de Combinações
         </span>
         <span className="text-[10px] text-zinc-600 ml-auto">
           {combos.length} combo{combos.length !== 1 ? "s" : ""}
