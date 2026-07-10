@@ -341,6 +341,16 @@ export async function initDb(): Promise<void> {
 
       ALTER TABLE bets ADD COLUMN IF NOT EXISTS version     INTEGER   NOT NULL DEFAULT 1;
       ALTER TABLE bets ADD COLUMN IF NOT EXISTS updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW();
+
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS freebet_balance       DECIMAL(10, 2) NOT NULL DEFAULT 0.00;
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS withdrawal_iban       TEXT;
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS withdrawal_name       TEXT;
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS self_excluded_until   TIMESTAMPTZ;
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS kyc_status            TEXT DEFAULT 'not_submitted';
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS kyc_document_type     TEXT;
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS kyc_document_number   TEXT;
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS kyc_submitted_at      TIMESTAMPTZ;
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS first_deposit_granted TEXT DEFAULT 'none';
     `);
 
     console.info("[db/init] Schema initialisation complete.");
