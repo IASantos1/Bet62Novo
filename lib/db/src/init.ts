@@ -338,6 +338,9 @@ export async function initDb(): Promise<void> {
       ALTER TABLE kyc_documents ADD COLUMN IF NOT EXISTS file_data          BYTEA;
 
       ALTER TABLE settlement_logs ADD COLUMN IF NOT EXISTS settlement_key   TEXT;
+
+      ALTER TABLE bets ADD COLUMN IF NOT EXISTS version     INTEGER   NOT NULL DEFAULT 1;
+      ALTER TABLE bets ADD COLUMN IF NOT EXISTS updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW();
     `);
 
     console.info("[db/init] Schema initialisation complete.");
