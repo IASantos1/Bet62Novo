@@ -10,6 +10,7 @@ import paymentsRouter from "./payments.js";
 import profileRouter from "./profile.js";
 import withdrawalsRouter from "./withdrawals.js";
 import trackingRouter from "./tracking.js";
+import predictionsRouter from "./predictions.js";
 
 const router: IRouter = Router();
 
@@ -24,5 +25,6 @@ router.use("/payments", paymentsRouter);
 router.use("/profile", profileRouter);
 router.use("/withdrawals", withdrawalsRouter);
 router.use("/tracking", trackingRouter);
+router.use("/predictions", predictionsRouter);
 
 export default router;

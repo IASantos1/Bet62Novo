@@ -162,6 +162,7 @@ import parisFCBanner from "@assets/file_1779019459045_1779019658504.jpeg";
 import lorientBanner from "@assets/file_1779019450188_1779019658504.jpeg";
 import brestBanner from "@assets/file_1779019468348_1779019658504.jpeg";
 import MatchStatsPanel from "@/components/MatchStatsPanel";
+import SuggestedCombos from "@/components/SuggestedCombos";
 
 const TEAM_BANNERS: Record<string, string> = {
   // ── Liga Portugal ──
@@ -20377,6 +20378,28 @@ export default function Home({
                       </div>
                     )}
                   </div>
+                )}
+
+                {/* ── Múltiplas Sugeridas — entre o card do jogo e as abas de mercados ── */}
+                {matchViewTab === "markets" && (!expandedMatch.sport || expandedMatch.sport === "football") && (
+                  <SuggestedCombos
+                    match={{
+                      id: String(expandedMatch.id),
+                      home: expandedMatch.home,
+                      away: expandedMatch.away,
+                      league: expandedMatch.league,
+                      country: expandedMatch.country,
+                      sport: expandedMatch.sport,
+                      date: expandedMatch.date,
+                      time: expandedMatch.time,
+                      scheduledDate: (expandedMatch as any).scheduledDate,
+                      scheduledTime: (expandedMatch as any).scheduledTime,
+                    }}
+                    bets={bets}
+                    setBets={setBets}
+                    setBetMode={setBetMode}
+                    setBetSlipOpenMobile={setBetSlipOpenMobile}
+                  />
                 )}
 
                 {/* Market tabs inline — only visible in markets view */}
