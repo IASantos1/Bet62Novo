@@ -4,8 +4,9 @@ A sports betting (PWA) platform for Brazilian/Portuguese-speaking users — live
 
 ## Run & Operate
 
-- `pnpm --filter @workspace/api-server run dev` — run the API server (port 8080, mounted at `/api`)
-- `pnpm --filter @workspace/bet62 run dev` — run the web app (port 19983, mounted at `/`)
+- Running via two Replit workflows: `artifacts/api-server: API Server` (port 8080, mounted at `/api`) and `artifacts/bet62: web` (port 5173, mounted at `/`). Restart them from the Workflows pane after server-side code changes.
+- `pnpm --filter @workspace/api-server run dev` — run the API server directly (port 8080, mounted at `/api`)
+- `pnpm --filter @workspace/bet62 run dev` — run the web app directly (port 5173, mounted at `/`)
 - `pnpm run typecheck` — full typecheck across all packages
 - `pnpm run build` — typecheck + build all packages
 - `pnpm --filter @workspace/api-spec run codegen` — regenerate API hooks and Zod schemas from the OpenAPI spec

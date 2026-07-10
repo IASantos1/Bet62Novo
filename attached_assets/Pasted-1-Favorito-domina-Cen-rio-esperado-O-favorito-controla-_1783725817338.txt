@@ -1,0 +1,154 @@
+1. Favorito domina
+
+Cenário esperado
+
+O favorito controla o jogo e vence com tranquilidade.
+
+Combinações:
+
+Casa vence + Over 2.5 + Ambas Marcam Não
+Casa vence + Casa +1.5 gols + Over 8.5 escanteios
+Casa vence + Casa marca primeiro + Over 1.5
+Casa vence + Under 4.5 gols + Casa mais escanteios
+Casa vence + Jogador A marca + Over 2.5
+2. Favorito vence sofrendo
+
+Cenário
+
+Placar esperado:
+
+2-1
+
+Combinações:
+
+Casa vence + Ambas Marcam + Over 2.5
+Casa vence + Jogador A marca + Ambas Marcam
+Casa vence + Over 9.5 escanteios + Ambas Marcam
+Casa vence + Gol no segundo tempo + Ambas Marcam
+3. Jogo aberto
+
+Placar esperado:
+
+3-2
+
+Combinações:
+
+Ambas Marcam + Over 2.5 + Over 9.5 escanteios
+Ambas Marcam + Over 3.5 + Jogador marca
+Ambas Marcam + Mais gols no 2º tempo + Over 10.5 cantos
+Ambas Marcam + Casa marca primeiro + Over 3.5
+4. Jogo fechado
+
+Placar:
+
+1-0
+
+Combinações:
+
+Casa vence + Under 2.5 + Ambas Não
+Under 2.5 + Under 9.5 cantos + Empate HT
+Under 3.5 + Casa vence + Menos de 1.5 gols HT
+5. Primeiro tempo movimentado
+
+Mercados HT.
+
+Combinações:
+
+Over 0.5 HT + Casa vence HT + Casa marca primeiro
+Over 1.5 HT + Ambas Marcam HT + Over 8.5 cantos FT
+Casa vence HT + Over 1.5 HT + Jogador marca
+Empate HT + Over 2.5 FT + Ambas Marcam
+6. Primeiro tempo equilibrado
+
+Combinações:
+
+Empate HT + Casa vence FT + Over 1.5
+Under 1.5 HT + Over 2.5 FT + Ambas Marcam
+Empate HT + Mais gols no 2º tempo + Casa vence
+7. Segundo tempo decisivo
+
+Combinações:
+
+Empate HT + Casa vence FT + Jogador marca
+Under 0.5 HT + Over 1.5 2T + Ambas Marcam
+Empate HT + Over 2.5 FT + Casa vence
+8. Muitos escanteios
+
+Combinações:
+
+Over 10.5 cantos + Over 2.5 + Ambas Marcam
+Casa vence + Over 9.5 cantos + Casa mais escanteios
+Ambas Marcam + Over 11.5 cantos + Jogador marca
+9. Mercado de jogador
+
+Combinações:
+
+Jogador marca + Casa vence + Over 2.5
+Jogador marca + Ambas Marcam + Over 3.5
+Jogador marca 2+ gols + Casa vence + Over 2.5
+Jogador marca + Casa marca primeiro + Casa vence
+10. Mercado HT + FT
+
+Combinações:
+
+Casa vence HT + Casa vence FT + Over 2.5
+Empate HT + Casa vence FT + Ambas Marcam
+Visitante vence HT + Casa vence FT + Over 3.5
+Empate HT + Over 1.5 2T + Casa vence
+Biblioteca por categoria
+Favorito
+Casa vence + Over 2.5 + Ambas Não
+Casa vence + Jogador marca + Over 2.5
+Casa vence + Casa +1.5 gols
+Casa vence + Casa marca primeiro + Over 1.5
+Equilibrado
+Ambas Marcam + Over 2.5 + Over 9.5 cantos
+Empate HT + Ambas Marcam + Over 2.5
+Empate + Under 3.5 + Ambas Marcam
+Goleada
+Casa vence + Over 3.5 + Jogador marca
+Casa vence + Handicap -1 + Over 2.5
+Casa vence + Casa 2+ gols + Over 3.5
+Primeiro Tempo
+Casa vence HT + Over 1.5 HT + Casa marca primeiro
+Empate HT + Casa vence FT + Over 2.5
+Over 0.5 HT + Ambas Marcam FT + Over 2.5
+Escanteios
+Over 10.5 cantos + Over 2.5 + Ambas Marcam
+Casa vence + Over 9.5 cantos + Casa mais cantos
+Over 11.5 cantos + Jogador marca + Over 2.5
+Uma recomendação de arquitetura
+
+Em vez de cadastrar essas combinações manualmente, modele cada uma como um template. Exemplo:
+
+{
+  "id": "favorite_open_game",
+  "title": "Favorito em jogo aberto",
+  "legs": [
+    "HOME_WIN",
+    "OVER_2_5",
+    "BTTS_YES"
+  ],
+  "conditions": {
+    "home_win_probability": ">=0.55",
+    "expected_goals": ">=2.6"
+  }
+}
+
+E outro:
+
+{
+  "id": "slow_first_half",
+  "title": "Primeiro tempo equilibrado",
+  "legs": [
+    "HT_DRAW",
+    "FT_HOME_WIN",
+    "OVER_2_5"
+  ],
+  "conditions": {
+    "first_half_goals": "<=1.0",
+    "home_win_probability": ">=0.50"
+  }
+}
+
+Com essa abordagem, você consegue ter uma biblioteca de dezenas ou centenas de combinações, e o sistema publica apenas as que são compatíveis com as probabilidades e regras de cada partida. Isso escala muito melhor do que criar mercados específicos jogo a jogo.
