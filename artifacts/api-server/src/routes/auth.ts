@@ -26,7 +26,8 @@ function validatePortugueseNif(nif: string): boolean {
 }
 
 router.post("/register", async (req, res): Promise<void> => {
-  const { name, email, password, nif } = req.body as { name?: string; email?: string; password?: string; nif?: string };
+  const { name, password, nif } = req.body as { name?: string; email?: string; password?: string; nif?: string };
+  const email = typeof req.body.email === "string" ? req.body.email.trim().toLowerCase() : undefined;
 
   if (!name || !email || !password) {
     res.status(400).json({ error: "Missing name, email or password" });
@@ -76,7 +77,8 @@ router.post("/register", async (req, res): Promise<void> => {
 });
 
 router.post("/login", async (req, res): Promise<void> => {
-  const { email, password } = req.body;
+  const { password } = req.body;
+  const email = typeof req.body.email === "string" ? req.body.email.trim().toLowerCase() : undefined;
 
   if (!email || !password) {
     res.status(400).json({ error: "Missing email or password" });
