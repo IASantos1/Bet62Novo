@@ -1,0 +1,68 @@
+scheduling build on Metal builder "builder-mrfece"
+unpacking archive
+820 MB
+2.9s
+using build driver railpack-v0.30.1
+ INFO No package manager inferred, using npm default
+                   
+╭─────────────────╮
+│ Railpack 0.30.1 │
+╰─────────────────╯
+ 
+  ↳ Detected Node
+  ↳ Custom start command detected, skipping Caddy start
+  ↳ Custom start command detected, skipping Caddy start
+  ↳ Using npm package manager
+  ↳ Found workspace with 8 packages
+  ↳ Custom start command detected, skipping Caddy start
+            
+  Packages  
+  ──────────
+  node  │  22.23.1  │  railpack default (22)
+            
+  Steps     
+  ──────────
+  ▸ install
+    $ npm install
+         
+  ▸ build
+    $ pnpm --filter @workspace/bet62 run build && pnpm --filter @workspace/api-server run build
+            
+  Deploy    
+  ──────────
+    $ NODE_ENV=production pnpm --filter @workspace/api-server run start
+ 
+
+load build definition from ./railpack-plan.json
+0ms
+
+install apt packages: libatomic1 cached
+35ms
+
+copy /mise/shims cached
+0ms
+
+install mise packages: node cached
+0ms
+
+copy /root/.local/state/mise, /etc/mise/config.toml, /usr/local/bin/mise, /mise/installs cached
+9ms
+
+mkdir -p /app/node_modules/.cache cached
+1ms
+
+copy / /app cached
+0ms
+
+npm install
+2s
+npm warn config production Use `--omit=dev` instead.
+> workspace@0.0.0 preinstall
+> sh -c 'rm -f package-lock.json yarn.lock; case "$npm_config_user_agent" in pnpm/*) ;; *) echo "Use pnpm instead" >&2; exit 1 ;; esac'
+Use pnpm instead
+npm error code 1
+npm error path /app
+npm error command failed
+npm error command sh -c sh -c 'rm -f package-lock.json yarn.lock; case "$npm_config_user_agent" in pnpm/*) ;; *) echo "Use pnpm instead" >&2; exit 1 ;; esac'
+npm error A complete log of this run can be found in: /root/.npm/_logs/2026-07-10T22_20_18_857Z-debug-0.log
+Build Failed: build daemon returned an error < failed to solve: process "npm install" did not complete successfully: exit code: 1 >
