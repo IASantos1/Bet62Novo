@@ -1,6 +1,7 @@
 {
   "$schema": "https://railway.com/railway.schema.json",
   "build": {
+    "installCommand": "pnpm install",
     "buildCommand": "pnpm --filter @workspace/bet62 run build && pnpm --filter @workspace/api-server run build"
   },
   "deploy": {
