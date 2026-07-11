@@ -28,8 +28,44 @@ export type PublishedCombo = {
   id: string;
   title: string;
   category: string;
-  legs: Array<{ code: LegId; label: string }>;
+  legs: Array<{ code: LegId; label: string; selectionKey: string }>;
   odd: number;
+};
+
+// ── Chaves de seleção reconhecidas pelo motor de liquidação (settlement.ts) ─
+// Cada leg precisa mapear para um código compacto que o motor de liquidação
+// real já entende (normalizeCompactFootballSelectionKey), senão a aposta
+// nunca liquida — fica pendente para sempre. Legs sem mercado de liquidação
+// disponível (HT_OVER_0_5/1_5, CORNERS_OVER_11_5) não devem ser publicados
+// hoje (ver getLegOdd, que já retorna null para eles).
+export const LEG_SELECTION_KEY: Record<LegId, string> = {
+  HOME_WIN:               "r:home",
+  AWAY_WIN:               "r:away",
+  DRAW:                   "r:draw",
+  OVER_1_5:               "tg:o1.5",
+  OVER_2_5:               "tg:o2.5",
+  OVER_3_5:               "tg:o3.5",
+  UNDER_2_5:              "tg:u2.5",
+  UNDER_3_5:              "tg:u3.5",
+  BTTS_YES:               "bts:y",
+  BTTS_NO:                "bts:n",
+  HOME_HANDICAP_MINUS_1:  "hcp:-1",
+  HOME_OVER_1_5_GOALS:    "htg:o1.5",
+  AWAY_OVER_0_5_GOALS:    "atg:o0.5",
+  FIRST_GOAL_HOME:        "fg:h",
+  HT_HOME_WIN:            "ht:home",
+  HT_DRAW:                "ht:draw",
+  HT_AWAY_WIN:            "ht:away",
+  HT_OVER_0_5:            "bts1h:y",
+  HT_OVER_1_5:            "bts1h:y",
+  SECOND_HALF_MORE_GOALS: "hsh:2",
+  CORNERS_OVER_8_5:       "cn:o8.5",
+  CORNERS_OVER_9_5:       "cn:o9.5",
+  CORNERS_OVER_10_5:      "cn:o10.5",
+  CORNERS_OVER_11_5:      "cn:o11.5",
+  HT_FT_HOME_HOME:        "htft:hh",
+  HT_FT_DRAW_HOME:        "htft:dh",
+  HT_FT_AWAY_HOME:        "htft:ah",
 };
 
 // ── Rótulos em português para cada leg ───────────────────────────────────
@@ -270,7 +306,7 @@ export function publishCombosForMatch(match: Markets): PublishedCombo[] {
       id: template.id,
       title: template.title,
       category: template.category,
-      legs: template.legs.map((l) => ({ code: l, label: LEG_LABELS[l] })),
+      legs: template.legs.map((l) => ({ code: l, label: LEG_LABELS[l], selectionKey: LEG_SELECTION_KEY[l] })),
       odd: finalOdd,
     });
   }

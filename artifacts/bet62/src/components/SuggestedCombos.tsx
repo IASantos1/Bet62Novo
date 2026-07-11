@@ -8,7 +8,7 @@ import { useEffect, useState } from "react";
 import { Loader2, Zap } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 
-type LegInfo = { code: string; label: string };
+type LegInfo = { code: string; label: string; selectionKey?: string };
 
 export type PublishedCombo = {
   id: string;
@@ -146,7 +146,11 @@ export default function SuggestedCombos({
       const withoutPrevious = prev.filter(
         (b) => !(b.comboTag && b.comboTag.startsWith(matchComboPrefix)),
       );
-      const sels: BetSelection[] = combo.legs.map((leg) => ({
+      // The bet slip's total multi odd is the product of every selection's `odd`.
+      // A combo already carries its own combined odd (with correlation + margin
+      // applied), so only ONE leg row may carry that value — the rest must be
+      // neutral (1) or the slip would multiply the combo odd once per leg.
+      const sels: BetSelection[] = combo.legs.map((leg, idx) => ({
         matchId: match.id,
         matchTitle: `${match.home} vs ${match.away}`,
         league: match.league,
@@ -156,9 +160,8 @@ export default function SuggestedCombos({
         time: match.time,
         scheduledDate: match.scheduledDate,
         scheduledTime: match.scheduledTime,
-        selection: `pred-${leg.code}`,
-        odd: combo.odd,
-        originalOdd: combo.odd,
+        selection: leg.selectionKey ?? `pred-${leg.code}`,
+        odd: idx === 0 ? combo.odd : 1,
         market: "prediction",
         label: `${combo.title}: ${leg.label}`,
         comboTag: tag,

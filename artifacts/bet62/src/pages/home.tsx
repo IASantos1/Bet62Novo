@@ -24708,12 +24708,18 @@ export default function Home({
                               Seleção
                             </div>
                           </div>
-                          <span
-                            className="font-black text-[22px] leading-none shrink-0"
-                            style={{ color: isSusp ? "#f59e0b" : "#dc2626" }}
-                          >
-                            {bet.odd.toFixed(2)}
-                          </span>
+                          {bet.market === "prediction" && bet.odd === 1 ? (
+                            <span className="text-[10px] font-bold text-zinc-600 uppercase tracking-wide shrink-0">
+                              Combo
+                            </span>
+                          ) : (
+                            <span
+                              className="font-black text-[22px] leading-none shrink-0"
+                              style={{ color: isSusp ? "#f59e0b" : "#dc2626" }}
+                            >
+                              {bet.odd.toFixed(2)}
+                            </span>
+                          )}
                         </div>
                         {/* Simples: individual stake */}
                         {effectiveBetMode === "simples" && (

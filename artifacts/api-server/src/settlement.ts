@@ -1,4 +1,4 @@
-﻿import { SETTLEMENT_LOCK_TTL_SECONDS } from "./lib/settlement/lock.js";
+import { SETTLEMENT_LOCK_TTL_SECONDS } from "./lib/settlement/lock.js";
 import {
   db,
   betsTable,
@@ -3549,6 +3549,34 @@ function liveDefinitiveOutcomeForSel(
 
   if (s === "bts-yes") return home > 0 && away > 0 ? "won" : null;
   if (s === "bts-no") return home > 0 && away > 0 ? "lost" : null;
+
+  // ── HT-scoped markets — resolve as soon as the half-time score is known,
+  // instead of waiting for full time. HT score is final once the half ends,
+  // so ht-home/ht-away/ht-draw and 1H BTTS can be fully settled immediately.
+  const htScoreTuple = Array.isArray(score.htScore) ? score.htScore : null;
+  if (htScoreTuple && htScoreTuple.length >= 2) {
+    const htH = Number(htScoreTuple[0]);
+    const htA = Number(htScoreTuple[1]);
+    if (Number.isFinite(htH) && Number.isFinite(htA)) {
+      if (s === "ht-home") return htH > htA ? "won" : "lost";
+      if (s === "ht-away") return htA > htH ? "won" : "lost";
+      if (s === "ht-draw") return htH === htA ? "won" : "lost";
+      if (s === "b1h-yes") return htH > 0 && htA > 0 ? "won" : "lost";
+      if (s === "b1h-no") return htH === 0 || htA === 0 ? "won" : "lost";
+
+      // HT/FT combo (htft-xy): the HT half is locked in at half-time. If the
+      // actual HT result doesn't match the required HT leg, the bet is
+      // already unwinnable — settle it as lost right away instead of
+      // waiting for full time. If the HT leg matches, still pending (FT
+      // outcome is unknown), so return null.
+      const htftMatch = s.match(/^htft-([hda])([hda])$/);
+      if (htftMatch) {
+        const htPart = htftMatch[1]!;
+        const htActual = htH > htA ? "h" : htH < htA ? "a" : "d";
+        if (htPart !== htActual) return "lost";
+      }
+    }
+  }
 
   if (/^set[123]-(home|away)$/.test(s) || /^vs[123][ha]$/.test(s)) {
     const setNum = s.startsWith("set")
