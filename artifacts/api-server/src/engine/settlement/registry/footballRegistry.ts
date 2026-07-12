@@ -1,5 +1,5 @@
-import { MarketRegistry } from "./marketRegistry";
-import { footballMarkets } from "../sports/football";
+import { MarketRegistry } from "./marketRegistry.js";
+import { footballMarkets } from "../sports/football/index.js";
 
 export const footballRegistry = new MarketRegistry();
 

@@ -2,7 +2,7 @@ import {
   MatchResult,
   Selection,
   Outcome,
-} from "../../types/settlement.types";
+} from "../../types/settlement.types.js";
 
 export function settleFootballResult(input: {
   match: MatchResult;

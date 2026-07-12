@@ -1,4 +1,4 @@
-import { footballRegistry } from "../registry/footballRegistry";
+import { footballRegistry } from "../registry/footballRegistry.js";
 
 export function footballRouter(input: any) {
   const market = String(

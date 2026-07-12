@@ -4,7 +4,7 @@ export class WalletExecutor {
 
     async execute(result: SettlementResult): Promise<void> {
 
-        if (result.decision !== "won")
+        if (result.status !== "won")
             return;
 
         // próxima etapa:

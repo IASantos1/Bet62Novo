@@ -96,7 +96,7 @@ function getSettlementRedis(): any | null {
   return settlementRedis;
 }
 
-async function acquireBetSettlementLock(
+export async function acquireBetSettlementLock(
   betId: number | string,
   owner: string,
 ): Promise<{ ok: boolean; heartbeat: NodeJS.Timeout | null }> {
@@ -210,7 +210,7 @@ function startSettlementLockHeartbeat(
   }, (SETTLEMENT_LOCK_TTL_SECONDS * 1000) / 3);
 }
 
-function stopSettlementLockHeartbeat(
+export function stopSettlementLockHeartbeat(
   timer: NodeJS.Timeout | null,
 ) {
   if (timer) {
@@ -218,7 +218,7 @@ function stopSettlementLockHeartbeat(
   }
 }
 
-async function releaseBetSettlementLock(
+export async function releaseBetSettlementLock(
   betId: number | string,
   owner: string,
 ): Promise<void> {
@@ -301,7 +301,7 @@ async function resolveSelectionOutcomeViaHelper(
   return helpers.resolveSelectionOutcome(sel, betMatchId, isLive);
 }
 
-function buildSettlementLogKey(args: {
+export function buildSettlementLogKey(args: {
   betId: number;
   oldStatus: string;
   newStatus: string;
@@ -614,7 +614,7 @@ function settlementOutcomeMultiplier(
   return null;
 }
 
-function computeResolvedTicketOdds(
+export function computeResolvedTicketOdds(
   selections: SelectionRecord[],
   outcomes: SettlementOutcome[],
 ): number {
@@ -956,6 +956,7 @@ function scoreOutcomeForSelLastResort(
 
   if (sport === "hockey") {
     const periods = getHockeyPeriodsFromExtras(extra?.extras);
+    const shotsOnGoalTotal = getHockeyShotsOnGoalTotalFromExtras(extra?.extras);
     const per =
       s.match(/^p([123])-(home|draw|away)$/) ||
       s.match(/^per([123])-(home|draw|away)$/);
@@ -984,6 +985,20 @@ function scoreOutcomeForSelLastResort(
           ? "won"
           : "lost"
         : total < line
+          ? "won"
+          : "lost";
+    }
+    const sog = s.match(/^sog-([ou])(?:-(\d+(?:\.\d+)?))?$/);
+    if (sog) {
+      const line =
+        sog[2] != null ? Number(sog[2]) : parseSelectionLabelLine(sel.label);
+      if (shotsOnGoalTotal == null || line == null) return null;
+      if (shotsOnGoalTotal === line) return "void";
+      return sog[1] === "o"
+        ? shotsOnGoalTotal > line
+          ? "won"
+          : "lost"
+        : shotsOnGoalTotal < line
           ? "won"
           : "lost";
     }
@@ -1229,6 +1244,7 @@ export function buildLiveSettlementScore(live: LiveResult | null): {
   tennisSets?: Array<[number, number]>;
   basketballQuarters?: Array<[number, number]>;
   hockeyPeriods?: Array<[number, number]>;
+  hockeyShotsOnGoalTotal?: number | null;
   baseballInnings?: Array<[number, number]>;
   firstGoal?: "home" | "away" | "none";
 } | null {
@@ -1258,6 +1274,7 @@ export function buildLiveSettlementScore(live: LiveResult | null): {
     hockeyPeriods: Array.isArray(liveExtra?.periods)
       ? liveExtra.periods
       : getHockeyPeriodsFromExtras(extras),
+    hockeyShotsOnGoalTotal: getHockeyShotsOnGoalTotalFromExtras(extras),
     baseballInnings: Array.isArray(liveExtra?.innings)
       ? liveExtra.innings
       : getBaseballInningsFromExtras(extras),
@@ -1852,6 +1869,56 @@ function getHockeyPeriodsFromExtras(extras: unknown): Array<[number, number]> {
     periods.push([h!, a!]);
   }
   return periods;
+}
+
+function getHockeyShotsOnGoalTotalFromExtras(extras: unknown): number | null {
+  if (!extras || typeof extras !== "object") return null;
+  const ex = extras as Record<string, unknown>;
+  const hockey = ex["hockey"] as Record<string, unknown> | undefined;
+
+  const readShots = (value: unknown): number | null => {
+    if (typeof value === "number" && Number.isFinite(value)) return value;
+    if (typeof value === "string") {
+      const parsed = Number(value);
+      return Number.isFinite(parsed) ? parsed : null;
+    }
+    return null;
+  };
+
+  const tryTeamStats = (
+    source: Record<string, unknown> | undefined,
+  ): number | null => {
+    if (!source) return null;
+    const homeStats = source["home"] as Record<string, unknown> | undefined;
+    const awayStats = source["away"] as Record<string, unknown> | undefined;
+    const homeShots = readShots(homeStats?.["shotsOnGoal"]);
+    const awayShots = readShots(awayStats?.["shotsOnGoal"]);
+    if (homeShots === null || awayShots === null) return null;
+    return homeShots + awayShots;
+  };
+
+  const directTotal =
+    readShots(ex["shotsOnGoalTotal"]) ??
+    readShots(hockey?.["shotsOnGoalTotal"]) ??
+    readShots((ex["shotsOnGoal"] as Record<string, unknown> | undefined)?.["total"]) ??
+    readShots((hockey?.["shotsOnGoal"] as Record<string, unknown> | undefined)?.["total"]);
+  if (directTotal !== null) return directTotal;
+
+  const nestedTeamStats =
+    tryTeamStats(
+      ex["teamStats"] as Record<string, unknown> | undefined,
+    ) ??
+    tryTeamStats(
+      hockey?.["teamStats"] as Record<string, unknown> | undefined,
+    ) ??
+    tryTeamStats(
+      ex["shotsOnGoal"] as Record<string, unknown> | undefined,
+    ) ??
+    tryTeamStats(
+      hockey?.["shotsOnGoal"] as Record<string, unknown> | undefined,
+    );
+
+  return nestedTeamStats;
 }
 
 function getVolleyballSetPointsFromExtras(
@@ -3526,6 +3593,7 @@ function liveDefinitiveOutcomeForSel(
     tennisSets?: Array<[number, number]>;
     basketballQuarters?: Array<[number, number]>;
     hockeyPeriods?: Array<[number, number]>;
+    hockeyShotsOnGoalTotal?: number | null;
     baseballInnings?: Array<[number, number]>;
     firstGoal?: "home" | "away" | "none";
   },
@@ -3546,6 +3614,11 @@ function liveDefinitiveOutcomeForSel(
   const hockeyPeriods = Array.isArray(score.hockeyPeriods)
     ? score.hockeyPeriods
     : [];
+  const hockeyShotsOnGoalTotal =
+    typeof score.hockeyShotsOnGoalTotal === "number" &&
+    Number.isFinite(score.hockeyShotsOnGoalTotal)
+      ? score.hockeyShotsOnGoalTotal
+      : null;
 
   if (s === "bts-yes") return home > 0 && away > 0 ? "won" : null;
   if (s === "bts-no") return home > 0 && away > 0 ? "lost" : null;
@@ -3874,6 +3947,15 @@ function liveDefinitiveOutcomeForSel(
     const totalP = p[0] + p[1];
     if (side === "o") return totalP > line ? "won" : null;
     return totalP > line ? "lost" : null;
+  }
+
+  const mHSog = s.match(/^sog-([ou])(?:-([\d.]+))?$/);
+  if (mHSog) {
+    const side = mHSog[1]!;
+    const line = decodeCompactLine(mHSog[2] ?? "");
+    if (hockeyShotsOnGoalTotal == null || !Number.isFinite(line)) return null;
+    if (side === "o") return hockeyShotsOnGoalTotal > line ? "won" : null;
+    return hockeyShotsOnGoalTotal > line ? "lost" : null;
   }
 
   // Baseball Total Runs (Over/Under)

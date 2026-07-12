@@ -1,4 +1,4 @@
-import { Outcome } from "../types/settlement.types";
+import type { Outcome } from "../types/settlement.types.js";
 
 export type MarketHandler = (input: any) => Outcome;
 

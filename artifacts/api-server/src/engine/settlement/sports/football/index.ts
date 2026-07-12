@@ -1,5 +1,5 @@
-import { settleFootballResult } from "../../rules/football/result";
-import { MarketHandler } from "../../registry/marketRegistry";
+import { settleFootballResult } from "../../rules/football/result.js";
+import type { MarketHandler } from "../../registry/marketRegistry.js";
 
 export interface MarketDefinition {
   code: string;

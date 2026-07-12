@@ -1,4 +1,4 @@
-import { runSettlementWorker } from "./settlementWorker";
+import { runSettlementWorker } from "./settlementWorker.js";
 
 const INTERVAL = 5000; // 5s
 

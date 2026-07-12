@@ -7,9 +7,11 @@ export function mapSelection(
 
     return {
 
-        market: pending.marketId,
+        market: pending.marketId ?? "",
 
-        selection: pending.selectionId,
+        selection: pending.selectionId ?? "",
+
+        odds: pending.odds ?? 1,
 
     };
 

@@ -1,8 +1,8 @@
-import { footballRouter } from "../router/footballRouter";
+import { footballRouter } from "../router/footballRouter.js";
 
 export function routeMarket(input: any) {
   const sport = String(
-    input.match.sport ??
+    input.match?.sport ??
     ""
   ).toLowerCase();
 

@@ -8,10 +8,10 @@ export type Outcome =
 
 export type MatchResult = {
   matchId: string;
-  sport: "football" | "basketball" | "tennis" | "baseball" | "hockey";
+  sport: "football" | "basketball" | "tennis" | "baseball" | "hockey" | "volleyball" | string;
   homeScore?: number;
   awayScore?: number;
-  status: "live" | "finished" | "postponed";
+  status: "live" | "finished" | "postponed" | "cancelled" | "abandoned" | string;
   periods?: any;
 };
 
@@ -24,7 +24,8 @@ export type Selection = {
 
 export type SettlementInput = {
   betId: number;
-  match: MatchResult;
+  betMatchId?: string;
+  match?: MatchResult | null;
   selection: Selection;
   ruleVersion: string;
 };

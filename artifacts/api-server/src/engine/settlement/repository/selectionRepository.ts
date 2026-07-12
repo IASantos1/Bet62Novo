@@ -1,12 +1,13 @@
 import { db, betsTable } from "@workspace/db";
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 
-export type PendingSelection = {
+export type PendingBetSettlement = {
   betId: number;
   userId: number;
   matchId: string;
-  marketId: string;
-  selectionId: string;
+  marketId?: string;
+  selectionId?: string;
+  odds?: number;
   selections: any[];
   status: string;
   version: number;
@@ -14,9 +15,11 @@ export type PendingSelection = {
   potentialWin: string;
 };
 
+export type PendingSelection = PendingBetSettlement;
+
 export async function getPendingSelectionsByMatch(
   matchId: string,
-): Promise<PendingSelection[]> {
+): Promise<PendingBetSettlement[]> {
   const rows = await db
     .select({
       betId: betsTable.id,
@@ -36,37 +39,44 @@ export async function getPendingSelectionsByMatch(
       ),
     );
 
-  const result: PendingSelection[] = [];
+  return rows.map((bet) => {
+    const selections = Array.isArray(bet.selections) ? bet.selections : [];
+    const firstSelection =
+      selections.find((selection) => selection && typeof selection === "object") ??
+      null;
 
-  for (const bet of rows) {
-    const selections = Array.isArray(bet.selections)
-      ? bet.selections
-      : [];
-
-    for (const selection of selections) {
-      result.push({
-        betId: bet.betId,
-        userId: bet.userId,
-        matchId,
-        marketId: String(selection.marketId ?? ""),
-        selectionId: String(selection.selectionId ?? ""),
-        selections,
-        status: bet.status,
-        version: bet.version,
-        stake: bet.stake,
-        potentialWin: bet.potentialWin,
-      });
-    }
-  }
-
-  return result;
+    return {
+      betId: bet.betId,
+      userId: bet.userId,
+      matchId,
+      marketId: firstSelection
+        ? String(firstSelection.marketId ?? firstSelection.market ?? "")
+        : undefined,
+      selectionId: firstSelection
+        ? String(firstSelection.selectionId ?? firstSelection.selection ?? "")
+        : undefined,
+      odds: firstSelection
+        ? Number(firstSelection.odd ?? firstSelection.odds ?? 1)
+        : undefined,
+      selections,
+      status: bet.status,
+      version: bet.version,
+      stake: bet.stake,
+      potentialWin: bet.potentialWin,
+    };
+  });
 }
 
 export async function getPendingSelectionsByMarket(
   matchId: string,
   marketId: string,
-): Promise<PendingSelection[]> {
-  const selections = await getPendingSelectionsByMatch(matchId);
+): Promise<PendingBetSettlement[]> {
+  const bets = await getPendingSelectionsByMatch(matchId);
 
-  return selections.filter((s) => s.marketId === marketId);
+  return bets.filter((bet) =>
+    bet.selections.some(
+      (selection) =>
+        String(selection.marketId ?? selection.market ?? "") === marketId,
+    ),
+  );
 }

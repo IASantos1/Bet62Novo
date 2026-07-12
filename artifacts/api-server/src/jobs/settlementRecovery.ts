@@ -1,17 +1,36 @@
 import { db, betsTable } from "@workspace/db";
 import { and, eq, lt } from "drizzle-orm";
-import { acquireBetSettlementLock, releaseBetSettlementLock } from "../lib/settlement/lock.js";
+import {
+  acquireBetSettlementLock,
+  releaseBetSettlementLock,
+  stopSettlementLockHeartbeat,
+} from "../settlement.js";
 import { logger } from "../lib/logger.js";
+import { settleBet } from "../services/settlement/settleBet.js";
 
 const RECOVERY_THRESHOLD_MS = 3 * 60 * 60 * 1000; // 3h
 
-export async function runSettlementRecovery() {
-  const cycleId = `recovery:${Date.now()}`;
+type SettlementLockResult = Awaited<ReturnType<typeof acquireBetSettlementLock>>;
 
-  try {
-    const cutoff = new Date(Date.now() - RECOVERY_THRESHOLD_MS);
+export type SettlementRecoveryDeps = {
+  logger: Pick<typeof logger, "warn" | "error">;
+  settleBet: typeof settleBet;
+  acquireBetSettlementLock: typeof acquireBetSettlementLock;
+  releaseBetSettlementLock: typeof releaseBetSettlementLock;
+  stopSettlementLockHeartbeat: typeof stopSettlementLockHeartbeat;
+  listRecoverableBets: (cutoff: Date) => Promise<(typeof betsTable.$inferSelect)[]>;
+  recoveryThresholdMs: number;
+  now: () => number;
+};
 
-    const stuckBets = await db
+const defaultSettlementRecoveryDeps: SettlementRecoveryDeps = {
+  logger,
+  settleBet,
+  acquireBetSettlementLock,
+  releaseBetSettlementLock,
+  stopSettlementLockHeartbeat,
+  listRecoverableBets: async (cutoff) =>
+    db
       .select()
       .from(betsTable)
       .where(
@@ -19,27 +38,48 @@ export async function runSettlementRecovery() {
           eq(betsTable.status, "pending"),
           lt(betsTable.updatedAt, cutoff)
         )
-      );
+      ),
+  recoveryThresholdMs: RECOVERY_THRESHOLD_MS,
+  now: () => Date.now(),
+};
+
+export async function runSettlementRecovery(
+  deps: SettlementRecoveryDeps = defaultSettlementRecoveryDeps,
+) {
+  const cycleId = `recovery:${deps.now()}`;
+
+  try {
+    const cutoff = new Date(deps.now() - deps.recoveryThresholdMs);
+    const stuckBets = await deps.listRecoverableBets(cutoff);
 
     for (const bet of stuckBets) {
-      const { ok } = await acquireBetSettlementLock(bet.id, cycleId);
+      const { ok, heartbeat } = (await deps.acquireBetSettlementLock(
+        bet.id,
+        cycleId,
+      )) as SettlementLockResult;
 
       if (!ok) continue;
 
       try {
-        logger.warn({ betId: bet.id }, "Recovering stuck bet settlement");
+        deps.logger.warn({ betId: bet.id }, "Recovering stuck bet settlement");
 
-        // await settleBet(bet)
+        await deps.settleBet({
+          bet,
+          trigger: "recovery",
+          selections: Array.isArray(bet.selections) ? bet.selections : [],
+          cycleId: `${cycleId}:${bet.id}`,
+        });
 
       } catch (err) {
-        logger.error({ err, betId: bet.id }, "Recovery failed");
+        deps.logger.error({ err, betId: bet.id }, "Recovery failed");
 
       } finally {
-        await releaseBetSettlementLock(bet.id, cycleId);
+        deps.stopSettlementLockHeartbeat(heartbeat);
+        await deps.releaseBetSettlementLock(bet.id, cycleId);
       }
     }
 
   } catch (err) {
-    logger.error({ err }, "Recovery job failed");
+    deps.logger.error({ err }, "Recovery job failed");
   }
 }

@@ -37,7 +37,7 @@ app.post(
     }
     let event: Stripe.Event;
     try {
-      const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, { apiVersion: "2026-05-27.dahlia" });
+      const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, { apiVersion: "2026-06-24.dahlia" });
       event = stripe.webhooks.constructEvent(req.body as Buffer, sig as string, webhookSecret);
     } catch (err: unknown) {
       logger.warn({ msg: err instanceof Error ? err.message : String(err) }, "Stripe webhook verification failed");

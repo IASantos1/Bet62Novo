@@ -16,3 +16,15 @@ async function request(path: string) {
 
   return res.json();
 }
+
+export async function getMatches(): Promise<any[]> {
+  return request("/matches");
+}
+
+export async function getLiveMatches(): Promise<any[]> {
+  return request("/matches/live");
+}
+
+export async function getOdds(matchId: string): Promise<unknown> {
+  return request(`/matches/${matchId}/odds`);
+}

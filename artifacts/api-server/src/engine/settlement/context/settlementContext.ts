@@ -1,7 +1,7 @@
 import {
   MatchResult,
   Selection,
-} from "../types/settlement.types";
+} from "../types/settlement.types.js";
 
 export interface SettlementContext {
   cycleId: string;

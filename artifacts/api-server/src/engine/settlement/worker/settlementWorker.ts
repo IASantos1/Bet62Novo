@@ -1,40 +1,57 @@
-import { settlementEngine } from "../core/SettlementEngine.js";
-import { settleBet } from "../../../services/settlement/settleBet";
+import { settleBet } from "../../../services/settlement/settleBet.js";
 import { logger } from "../../../lib/logger.js";
-import { getPendingSelectionsByMatch } from "../repository/selectionRepository";
+import { getPendingSelectionsByMatch } from "../repository/selectionRepository.js";
 
 const TEST_MATCH_ID = process.env.SETTLEMENT_MATCH_ID ?? "";
 
-export async function runSettlementWorker() {
+export type SettlementWorkerDeps = {
+  settleBet: typeof settleBet;
+  getPendingSelectionsByMatch: typeof getPendingSelectionsByMatch;
+  logger: Pick<typeof logger, "info" | "warn" | "error">;
+  testMatchId: string;
+  now: () => number;
+};
+
+const defaultSettlementWorkerDeps: SettlementWorkerDeps = {
+  settleBet,
+  getPendingSelectionsByMatch,
+  logger,
+  testMatchId: TEST_MATCH_ID,
+  now: () => Date.now(),
+};
+
+export async function runSettlementWorker(
+  deps: SettlementWorkerDeps = defaultSettlementWorkerDeps,
+) {
   try {
-    if (!TEST_MATCH_ID) {
-      logger.warn(
+    if (!deps.testMatchId) {
+      deps.logger.warn(
         "SETTLEMENT_MATCH_ID not configured. Worker is waiting.",
       );
       return;
     }
 
-    const selections = await getPendingSelectionsByMatch(TEST_MATCH_ID);
+    const bets = await deps.getPendingSelectionsByMatch(deps.testMatchId);
 
-    if (selections.length === 0) {
-      logger.info(
-        { matchId: TEST_MATCH_ID },
-        "No pending selections",
+    if (bets.length === 0) {
+      deps.logger.info(
+        { matchId: deps.testMatchId },
+        "No pending bets",
       );
       return;
     }
 
-    logger.info(
+    deps.logger.info(
       {
-        matchId: TEST_MATCH_ID,
-        selections: selections.length,
+        matchId: deps.testMatchId,
+        bets: bets.length,
       },
       "Settlement batch started",
     );
 
-    for (const item of selections) {
+    for (const item of bets) {
       try {
-        await settleBet({
+        await deps.settleBet({
           bet: {
             id: item.betId,
             userId: item.userId,
@@ -46,10 +63,10 @@ export async function runSettlementWorker() {
           },
           trigger: "worker_batch",
           selections: item.selections,
-          cycleId: `worker-${Date.now()}`,
+          cycleId: `worker-${deps.now()}`,
         });
       } catch (err) {
-        logger.error(
+        deps.logger.error(
           {
             err,
             betId: item.betId,
@@ -59,8 +76,8 @@ export async function runSettlementWorker() {
       }
     }
 
-    logger.info("Settlement batch finished");
+    deps.logger.info("Settlement batch finished");
   } catch (err) {
-    logger.error({ err }, "Settlement worker crashed");
+    deps.logger.error({ err }, "Settlement worker crashed");
   }
 }
