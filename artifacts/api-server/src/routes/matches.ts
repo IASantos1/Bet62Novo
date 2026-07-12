@@ -9369,8 +9369,40 @@ function resolveOdds(
 }
 
 async function getNHLLive(): Promise<NHLTournament[]> {
+  const now = Date.now();
+  if (nhlLiveCache && now - nhlLiveFetchedAt < 30_000) return nhlLiveCache;
+  if (!CONFIG.STATPAL_API_KEY) return nhlLiveCache ?? [];
+
+  try {
+    const resp = await fetch(buildStatpalUrl("/v1/nhl/livescores"), {
+      signal: AbortSignal.timeout(8_000),
+      headers: statpalHeaders(),
+    });
+    if (!resp.ok) return nhlLiveCache ?? [];
+    const payload = (await resp.json()) as {
+      livescores?: { tournament?: NHLTournament | NHLTournament[] };
+    };
+    nhlLiveCache = statpalList(payload.livescores?.tournament);
+    nhlLiveFetchedAt = now;
+    return nhlLiveCache;
+  } catch {
+    return nhlLiveCache ?? [];
+  }
+
   return nhlLiveCache ?? [];
 }
+
+router.get("/hockey-livescores", async (_req: Request, res: Response) => {
+  try {
+    const tournaments = await getNHLLive();
+    res.json({
+      tournaments,
+      matches: buildNHLLiveMatches(tournaments),
+    });
+  } catch {
+    res.status(500).json({ error: "Livescores de hockey indisponíveis" });
+  }
+});
 
 function buildNHLLiveMatches(tournaments: NHLTournament[]): LiveMatchState[] {
   const NHL_LIVE_STATUSES = new Set([
@@ -22214,6 +22246,64 @@ async function getHockeyDailyResults(): Promise<HockeyDailyResult[]> {
   const now = Date.now();
   if (hockeyResultsCache && now - hockeyResultsFetchedAt < RESULTS_CACHE_TTL)
     return hockeyResultsCache;
+
+  const parsePeriodScore = (score: string | undefined): [number, number] | null => {
+    if (!score || !score.trim()) return null;
+    const parts = score.split(" - ");
+    if (parts.length !== 2) return null;
+    const home = Number.parseInt(parts[0] ?? "", 10);
+    const away = Number.parseInt(parts[1] ?? "", 10);
+    if (!Number.isFinite(home) || !Number.isFinite(away)) return null;
+    return [home, away];
+  };
+
+  if (CONFIG.STATPAL_API_KEY) {
+    try {
+      const resp = await fetch(buildStatpalUrl("/v1/nhl/daily/d-1"), {
+        signal: AbortSignal.timeout(8_000),
+        headers: statpalHeaders(),
+      });
+      if (resp.ok) {
+        const payload = (await resp.json()) as {
+          scores?: { tournament?: NHLTournament | NHLTournament[] };
+        };
+        const tournaments = statpalList(payload.scores?.tournament);
+        const results = tournaments.flatMap((tournament) =>
+          statpalList(tournament.match).map((match) => {
+            const periods = [
+              parsePeriodScore(match.events?.firstperiod?.score),
+              parsePeriodScore(match.events?.secondperiod?.score),
+              parsePeriodScore(match.events?.thirdperiod?.score),
+              parsePeriodScore(match.events?.overtime?.score),
+              parsePeriodScore(match.events?.penalties?.score),
+            ].filter((score): score is [number, number] => !!score);
+
+            return {
+              id: match.id,
+              home: match.home.name,
+              away: match.away.name,
+              homeScore: Number.parseInt(match.home.totalscore, 10) || 0,
+              awayScore: Number.parseInt(match.away.totalscore, 10) || 0,
+              periods,
+              homeWon:
+                (Number.parseInt(match.home.totalscore, 10) || 0) >
+                (Number.parseInt(match.away.totalscore, 10) || 0),
+              league: tournament.league,
+              country: tournament.country,
+              date: match.date ?? "",
+              time: match.time,
+            } satisfies HockeyDailyResult;
+          }),
+        );
+        hockeyResultsCache = results;
+        hockeyResultsFetchedAt = now;
+        return results;
+      }
+    } catch (err) {
+      logger.warn({ err, provider: "statpal" }, "NHL daily results provider failed");
+    }
+  }
+
   try {
     const events = await getV2EventsLast("hockey", 20);
     const yd = new Date(Date.now() - 86400000);
@@ -22530,16 +22620,156 @@ async function getHockeySchedule(): Promise<HockeyScheduleData> {
     now - hockeyScheduleFetchedAt < HOCKEY_SCHEDULE_TTL
   )
     return hockeyScheduleCache;
+
+  const parsePeriodScore = (score: string | undefined): [number, number] | null => {
+    if (!score || !score.trim()) return null;
+    const parts = score.split(" - ");
+    if (parts.length !== 2) return null;
+    const home = Number.parseInt(parts[0] ?? "", 10);
+    const away = Number.parseInt(parts[1] ?? "", 10);
+    if (!Number.isFinite(home) || !Number.isFinite(away)) return null;
+    return [home, away];
+  };
+  const dateKey = (s: string) => {
+    const [d, mo, y] = s.split(".");
+    return `${y ?? ""}${mo ?? ""}${d ?? ""}`;
+  };
+
+  if (CONFIG.STATPAL_API_KEY) {
+    try {
+      const resp = await fetch(buildStatpalUrl("/v1/nhl/season-schedule"), {
+        signal: AbortSignal.timeout(8_000),
+        headers: statpalHeaders(),
+      });
+      if (resp.ok) {
+        const payload = (await resp.json()) as {
+          scores?: {
+            tournament?: {
+              country: string;
+              id: string;
+              league: string;
+              season: string;
+              match: NHLMatch | NHLMatch[];
+            };
+          };
+        };
+        const tournament = payload.scores?.tournament;
+        if (tournament) {
+          const matches = statpalList(tournament.match);
+          const upcomingMatches: HockeyScheduleMatch[] = [];
+          const recentMatches: HockeyScheduleMatch[] = [];
+
+          for (const match of matches) {
+            const periods = [
+              parsePeriodScore(match.events?.firstperiod?.score),
+              parsePeriodScore(match.events?.secondperiod?.score),
+              parsePeriodScore(match.events?.thirdperiod?.score),
+              parsePeriodScore(match.events?.overtime?.score),
+              parsePeriodScore(match.events?.penalties?.score),
+            ].filter((score): score is [number, number] => !!score);
+
+            const mapped = {
+              id: match.id,
+              date: match.date ?? "",
+              time: match.time,
+              status: match.status,
+              venue: (match as NHLMatch & { venue?: string }).venue,
+              home: match.home.name,
+              away: match.away.name,
+              homeScore: Number.parseInt(match.home.totalscore, 10) || 0,
+              awayScore: Number.parseInt(match.away.totalscore, 10) || 0,
+              periods,
+              homeWon:
+                (Number.parseInt(match.home.totalscore, 10) || 0) >
+                (Number.parseInt(match.away.totalscore, 10) || 0),
+              teamStats: (() => {
+                const stats = (match as NHLMatch & {
+                  team_stats?: {
+                    home?: {
+                      shots?: { ongoal?: string };
+                      saves?: { saves_pct?: string };
+                      goals?: {
+                        pp_goals?: string;
+                        pp_pct?: string;
+                        pen_kill_pct?: string;
+                      };
+                      faceoffs?: { pct?: string };
+                      penalties?: { minutes?: string };
+                    };
+                    away?: {
+                      shots?: { ongoal?: string };
+                      saves?: { saves_pct?: string };
+                      goals?: {
+                        pp_goals?: string;
+                        pp_pct?: string;
+                        pen_kill_pct?: string;
+                      };
+                      faceoffs?: { pct?: string };
+                      penalties?: { minutes?: string };
+                    };
+                  };
+                }).team_stats;
+                if (!stats?.home || !stats?.away) return undefined;
+                const parsePct = (value: string | undefined) =>
+                  Number.parseFloat(value ?? "0") || 0;
+                const parseIntSafe = (value: string | undefined) =>
+                  Number.parseInt(value ?? "0", 10) || 0;
+                return {
+                  home: {
+                    shotsOnGoal: parseIntSafe(stats.home.shots?.ongoal),
+                    savesPct: parsePct(stats.home.saves?.saves_pct),
+                    ppGoals: parseIntSafe(stats.home.goals?.pp_goals),
+                    ppPct: parsePct(stats.home.goals?.pp_pct),
+                    penKillPct: parsePct(stats.home.goals?.pen_kill_pct),
+                    faceoffPct: parsePct(stats.home.faceoffs?.pct),
+                    penaltyMinutes: parseIntSafe(stats.home.penalties?.minutes),
+                  },
+                  away: {
+                    shotsOnGoal: parseIntSafe(stats.away.shots?.ongoal),
+                    savesPct: parsePct(stats.away.saves?.saves_pct),
+                    ppGoals: parseIntSafe(stats.away.goals?.pp_goals),
+                    ppPct: parsePct(stats.away.goals?.pp_pct),
+                    penKillPct: parsePct(stats.away.goals?.pen_kill_pct),
+                    faceoffPct: parsePct(stats.away.faceoffs?.pct),
+                    penaltyMinutes: parseIntSafe(stats.away.penalties?.minutes),
+                  },
+                };
+              })(),
+            } satisfies HockeyScheduleMatch;
+
+            if (
+              String(match.status).toLowerCase().includes("not started") ||
+              String(match.status).toLowerCase().includes("scheduled")
+            ) {
+              upcomingMatches.push({ ...mapped, homeScore: 0, awayScore: 0 });
+            } else {
+              recentMatches.push(mapped);
+            }
+          }
+
+          recentMatches.sort((a, b) => dateKey(b.date).localeCompare(dateKey(a.date)));
+          upcomingMatches.sort((a, b) => dateKey(a.date).localeCompare(dateKey(b.date)));
+          hockeyScheduleCache = {
+            league: tournament.league,
+            season: tournament.season,
+            upcomingMatches: upcomingMatches.slice(0, 40),
+            recentMatches: recentMatches.slice(0, 15),
+          };
+          hockeyScheduleFetchedAt = now;
+          return hockeyScheduleCache;
+        }
+      }
+    } catch (err) {
+      logger.warn({ err, provider: "statpal" }, "NHL season schedule provider failed");
+    }
+  }
+
   try {
     const [upcomingEvents, lastEvents] = await Promise.all([
       getUpcomingLeagueEventsV2("hockey", 21),
       getV2EventsLast("hockey", 60),
     ]);
     const cutoff14 = Date.now() - 14 * 86400000;
-    const dateKey = (s: string) => {
-      const [d, mo, y] = s.split(".");
-      return `${y ?? ""}${mo ?? ""}${d ?? ""}`;
-    };
 
     const upcomingMatches: HockeyScheduleMatch[] = upcomingEvents
       .slice(0, 40)
@@ -22893,6 +23123,87 @@ async function getHockeyStandings(): Promise<NHLStandingsData> {
     now - hockeyStandingsFetchedAt < HOCKEY_STANDINGS_TTL
   )
     return hockeyStandingsCache;
+
+  if (CONFIG.STATPAL_API_KEY) {
+    try {
+      const resp = await fetch(buildStatpalUrl("/v1/nhl/standings"), {
+        signal: AbortSignal.timeout(8_000),
+        headers: statpalHeaders(),
+      });
+      if (resp.ok) {
+        const payload = (await resp.json()) as {
+          standings?: {
+            tournament?: {
+              season: string;
+              league?: Array<{
+                name: string;
+                division?: Array<{
+                  name: string;
+                  team?: Array<{
+                    difference: string;
+                    games_played: string;
+                    goals_against: string;
+                    goals_for: string;
+                    home_record: string;
+                    id: string;
+                    last_ten: string;
+                    lost: string;
+                    name: string;
+                    ot_losses: string;
+                    points: string;
+                    position: string;
+                    road_record: string;
+                    streak: string;
+                    won: string;
+                  }>;
+                }>;
+              }>;
+            };
+          };
+        };
+        const tournament = payload.standings?.tournament;
+        if (tournament) {
+          const conferences = statpalList(tournament.league).map((league) => ({
+            name: league.name,
+            divisions: statpalList(league.division).map((division) => ({
+              name: division.name,
+              teams: statpalList(division.team)
+                .map((team) => ({
+                  id: team.id,
+                  name: team.name,
+                  abbr:
+                    NHL_ABBR[team.name] ??
+                    team.name.slice(0, 3).toLowerCase(),
+                  position: Number.parseInt(team.position, 10) || 0,
+                  gp: Number.parseInt(team.games_played, 10) || 0,
+                  won: Number.parseInt(team.won, 10) || 0,
+                  lost: Number.parseInt(team.lost, 10) || 0,
+                  otLosses: Number.parseInt(team.ot_losses, 10) || 0,
+                  points: Number.parseInt(team.points, 10) || 0,
+                  gf: Number.parseInt(team.goals_for, 10) || 0,
+                  ga: Number.parseInt(team.goals_against, 10) || 0,
+                  diff: team.difference,
+                  streak: team.streak,
+                  lastTen: team.last_ten,
+                  homeRecord: team.home_record,
+                  roadRecord: team.road_record,
+                }))
+                .sort((a, b) => a.position - b.position),
+            })),
+          }));
+          hockeyStandingsCache = {
+            season: tournament.season,
+            conferences,
+          };
+          hockeyStandingsFetchedAt = now;
+          return hockeyStandingsCache;
+        }
+      }
+    } catch (err) {
+      logger.warn({ err, provider: "statpal" }, "NHL standings provider failed");
+    }
+  }
+
   try {
     const rows = await getV2StandingRows("hockey");
     if (!rows.length)
@@ -23310,7 +23621,70 @@ router.get(
 );
 
 async function getHockeyRoster(abbr: string): Promise<NHLRosterData | null> {
-  return hockeyRosterCache.get(abbr) ?? null;
+  const cached = hockeyRosterCache.get(abbr);
+  const fetchedAt = hockeyRosterFetchedAt.get(abbr) ?? 0;
+  if (cached && Date.now() - fetchedAt < HOCKEY_ROSTER_TTL) return cached;
+  if (!CONFIG.STATPAL_API_KEY) return cached ?? null;
+
+  try {
+    const resp = await fetch(
+      buildStatpalUrl(`/v1/nhl/rosters/${encodeURIComponent(abbr)}`),
+      {
+        signal: AbortSignal.timeout(8_000),
+        headers: statpalHeaders(),
+      },
+    );
+    if (!resp.ok) return cached ?? null;
+    const payload = (await resp.json()) as {
+      team?: {
+        abbreviation: string;
+        id: string;
+        name: string;
+        season: string;
+        position?: Array<{
+          name: string;
+          player?: Array<{
+            id: string;
+            name: string;
+            number: string;
+            age: string;
+            birth_place: string;
+            height: string;
+            weight: string;
+            shot: string;
+            salarycap: string;
+          }>;
+        }>;
+      };
+    };
+    const team = payload.team;
+    if (!team) return cached ?? null;
+    const data = {
+      teamName: team.name,
+      abbreviation: String(team.abbreviation ?? abbr).toLowerCase(),
+      season: team.season,
+      positions: statpalList(team.position).map((position) => ({
+        name: position.name,
+        players: statpalList(position.player).map((player) => ({
+          id: player.id,
+          name: player.name,
+          number: player.number,
+          age: Number.parseInt(player.age, 10) || 0,
+          birthPlace: player.birth_place,
+          height: player.height,
+          weight: player.weight,
+          shot: player.shot,
+          salary: player.salarycap,
+        })),
+      })),
+    } satisfies NHLRosterData;
+    hockeyRosterCache.set(abbr, data);
+    hockeyRosterFetchedAt.set(abbr, Date.now());
+    return data;
+  } catch (err) {
+    logger.warn({ err, provider: "statpal", abbr }, "NHL roster provider failed");
+    return cached ?? null;
+  }
 }
 
 router.get("/hockey-roster/:team", async (req: Request, res: Response) => {
@@ -26668,6 +27042,101 @@ async function getFootballLeagueOdds(leagueId: string): Promise<{
   meta: { id: string; name: string; country: string };
 }> {
   const cached = footballOddsCache.get(leagueId);
+  if (cached && Date.now() - cached.fetchedAt < FOOTBALL_ODDS_TTL) {
+    return { odds: cached.data, meta: cached.meta };
+  }
+
+  if (
+    CONFIG.STATPAL_API_KEY &&
+    canUseFootballProvider(CONFIG.FOOTBALL_REFERENCE_PROVIDER, "statpal")
+  ) {
+    try {
+      const resp = await fetch(
+        buildStatpalUrl(
+          `/v2/soccer/leagues/${encodeURIComponent(leagueId)}/odds/prematch`,
+        ),
+        {
+          signal: AbortSignal.timeout(8_000),
+          headers: statpalHeaders(),
+        },
+      );
+      if (resp.ok) {
+        const payload = (await resp.json()) as FootballPrematchOddsRaw;
+        const league = payload.prematch_odds?.league;
+        if (league) {
+          const averageOdds = (
+            bookmakers: FootballOddsBookmakerRaw[],
+            outcome: "Home" | "Draw" | "Away",
+          ) => {
+            const values = bookmakers
+              .map((bookmaker) => {
+                const odd = statpalList(bookmaker.odd).find(
+                  (entry) => entry.name === outcome,
+                );
+                return Number.parseFloat(odd?.value ?? "0");
+              })
+              .filter((value) => Number.isFinite(value) && value > 1);
+            if (!values.length) return 0;
+            return Math.round(
+              (values.reduce((sum, value) => sum + value, 0) / values.length) *
+                100,
+            ) / 100;
+          };
+
+          const odds = statpalList(league.match)
+            .map((match): FootballOddsEntry | null => {
+              const market = statpalList(match.odds).find((entry) => {
+                const name = String(entry.name ?? "").toLowerCase();
+                return name === "1x2" || name === "fulltime result";
+              });
+              if (!market) return null;
+              const bookmakers = statpalList(market.bookmaker).filter(
+                (bookmaker) => String(bookmaker.stop ?? "False") !== "True",
+              );
+              const homeOdds = averageOdds(bookmakers, "Home");
+              const drawOdds = averageOdds(bookmakers, "Draw");
+              const awayOdds = averageOdds(bookmakers, "Away");
+              if (!homeOdds || !drawOdds || !awayOdds) return null;
+              return {
+                matchId: match.main_id,
+                date: match.date,
+                time: match.time,
+                homeTeam: {
+                  id: match.home.id,
+                  name: match.home.name,
+                },
+                awayTeam: {
+                  id: match.away.id,
+                  name: match.away.name,
+                },
+                homeOdds,
+                drawOdds,
+                awayOdds,
+              };
+            })
+            .filter((entry): entry is FootballOddsEntry => !!entry);
+
+          const meta = {
+            id: league.id,
+            name: league.name,
+            country: league.country,
+          };
+          footballOddsCache.set(leagueId, {
+            data: odds,
+            meta,
+            fetchedAt: Date.now(),
+          });
+          return { odds, meta };
+        }
+      }
+    } catch (err) {
+      logger.warn(
+        { err, provider: "statpal", leagueId },
+        "Football prematch odds provider failed",
+      );
+    }
+  }
+
   if (cached) return { odds: cached.data, meta: cached.meta };
   throw new Error("Odds indisponíveis");
 }
@@ -26739,6 +27208,94 @@ let footballLiveOddsFetchedAt = 0;
 const FOOTBALL_LIVE_ODDS_TTL = 10 * 1000; // 10s — in-play data, very fresh
 
 async function getFootballLiveOdds(): Promise<object[]> {
+  const now = Date.now();
+  if (
+    footballLiveOddsCache &&
+    now - footballLiveOddsFetchedAt < FOOTBALL_LIVE_ODDS_TTL
+  ) {
+    return footballLiveOddsCache;
+  }
+
+  if (
+    CONFIG.STATPAL_API_KEY &&
+    canUseFootballProvider(CONFIG.FOOTBALL_REFERENCE_PROVIDER, "statpal")
+  ) {
+    try {
+      const resp = await fetch(buildStatpalUrl("/v2/soccer/odds/live"), {
+        signal: AbortSignal.timeout(8_000),
+        headers: statpalHeaders(),
+      });
+      if (resp.ok) {
+        const payload = (await resp.json()) as FootballLiveOddsRaw;
+        const matches = statpalList(payload.live_matches).map((match) => {
+          const matchInfo = match.match_info;
+          const home = match.team_info?.home;
+          const away = match.team_info?.away;
+          const [homeScore, awayScore] = String(matchInfo?.score ?? "0:0")
+            .split(":")
+            .map((value) => Number.parseInt(value, 10) || 0);
+
+          return {
+            id: matchInfo?.main_id ?? "",
+            leagueId: matchInfo?.league_id ?? "",
+            league: matchInfo?.league ?? "",
+            name: matchInfo?.name ?? "",
+            date: matchInfo?.start_date ?? "",
+            time: matchInfo?.start_time ?? "",
+            startTs: matchInfo?.start_ts ?? 0,
+            startTsUtc: matchInfo?.start_ts_utc ?? 0,
+            period: matchInfo?.period ?? "",
+            minute: Number.parseInt(matchInfo?.minute ?? "0", 10) || 0,
+            seconds: matchInfo?.seconds ?? "",
+            state: {
+              code: matchInfo?.state_code ?? "",
+              name: matchInfo?.state_name ?? "",
+              details: matchInfo?.state_details ?? "",
+              ballPosition: matchInfo?.ball_pos ?? "",
+            },
+            status: {
+              stopped: match.status?.stopped === "1",
+              blocked: match.status?.blocked === "1",
+              finished: match.status?.finished === "1",
+              updated: match.status?.updated ?? "",
+              updatedTs: Number.parseInt(match.status?.updated_ts ?? "0", 10) || 0,
+            },
+            homeTeam: {
+              id: home?.id ?? "",
+              name: home?.name ?? "",
+              score: Number.parseInt(home?.score ?? "0", 10) || homeScore,
+              kitColors: String(home?.kit_color ?? "")
+                .split(",")
+                .map((value) => value.trim())
+                .filter(Boolean),
+            },
+            awayTeam: {
+              id: away?.id ?? "",
+              name: away?.name ?? "",
+              score: Number.parseInt(away?.score ?? "0", 10) || awayScore,
+              kitColors: String(away?.kit_color ?? "")
+                .split(",")
+                .map((value) => value.trim())
+                .filter(Boolean),
+            },
+            stats: Object.values(match.stats ?? {}).map((entry) => ({
+              name: entry.name,
+              home: entry.home,
+              away: entry.away,
+            })),
+            matchEvents: match.match_events ?? [],
+            odds: match.odds ?? [],
+          };
+        });
+        footballLiveOddsCache = matches;
+        footballLiveOddsFetchedAt = now;
+        return matches;
+      }
+    } catch (err) {
+      logger.warn({ err, provider: "statpal" }, "Football live odds provider failed");
+    }
+  }
+
   return footballLiveOddsCache ?? [];
 }
 
@@ -26760,6 +27317,31 @@ let footballLiveMarketsFetchedAt = 0;
 const FOOTBALL_LIVE_MARKETS_TTL = 60 * 60 * 1000; // 1h — catalogue rarely changes
 
 router.get("/football-live-markets", async (_req: Request, res: Response) => {
+  const now = Date.now();
+  if (
+    footballLiveMarketsCache &&
+    now - footballLiveMarketsFetchedAt < FOOTBALL_LIVE_MARKETS_TTL
+  ) {
+    res.json({ markets: footballLiveMarketsCache });
+    return;
+  }
+
+  if (CONFIG.STATPAL_API_KEY) {
+    try {
+      const resp = await fetch(buildStatpalUrl("/v2/soccer/odds/live/markets"), {
+        signal: AbortSignal.timeout(8_000),
+        headers: statpalHeaders(),
+      });
+      if (resp.ok) {
+        const payload = (await resp.json()) as Array<{ id: number; name: string }>;
+        footballLiveMarketsCache = payload;
+        footballLiveMarketsFetchedAt = now;
+      }
+    } catch (err) {
+      logger.warn({ err, provider: "statpal" }, "Football live markets provider failed");
+    }
+  }
+
   res.json({ markets: footballLiveMarketsCache ?? [] });
 });
 
@@ -26774,6 +27356,40 @@ const FOOTBALL_LIVE_STATES_TTL = 60 * 60 * 1000; // 1h — static catalogue
 router.get(
   "/football-live-match-states",
   async (_req: Request, res: Response) => {
+    const now = Date.now();
+    if (
+      footballLiveStatesCache &&
+      now - footballLiveStatesFetchedAt < FOOTBALL_LIVE_STATES_TTL
+    ) {
+      res.json({ states: footballLiveStatesCache });
+      return;
+    }
+
+    if (CONFIG.STATPAL_API_KEY) {
+      try {
+        const resp = await fetch(
+          buildStatpalUrl("/v2/soccer/odds/live/match-states"),
+          {
+            signal: AbortSignal.timeout(8_000),
+            headers: statpalHeaders(),
+          },
+        );
+        if (resp.ok) {
+          const payload = (await resp.json()) as Array<{
+            id: number;
+            name: string;
+          }>;
+          footballLiveStatesCache = payload;
+          footballLiveStatesFetchedAt = now;
+        }
+      } catch (err) {
+        logger.warn(
+          { err, provider: "statpal" },
+          "Football live match states provider failed",
+        );
+      }
+    }
+
     res.json({ states: footballLiveStatesCache ?? [] });
   },
 );
