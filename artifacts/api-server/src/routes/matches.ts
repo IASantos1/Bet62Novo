@@ -13981,6 +13981,11 @@ async function buildFootballLiveV2(
       ? Date.now() / 1000 - ev.startTimestamp
       : 0;
     if (evAgeSeconds > 2.5 * 3600) continue;
+    // Guard against providers (Statpal in particular) reporting not-yet-started
+    // fixtures as "live" with a fake 0' status. If the scheduled kickoff is
+    // still in the future beyond the allowed clock-skew window, it hasn't
+    // actually started — do not show it in the live feed.
+    if (ev.startTimestamp && -evAgeSeconds > clockSkewSec) continue;
     const homeTeam = v2TeamName(ev.homeTeam);
     const awayTeam = v2TeamName(ev.awayTeam);
     if (homeTeam === "Unknown" || awayTeam === "Unknown") continue;
