@@ -1,0 +1,173 @@
+curl --request GET \
+  --url ' `https://statpal.io/api/v1/tennis/livescores?access_key=b5b07a3f-b019-4a18-8969-6045169feda9` ' \
+  --header 'Accept: application/json'                                                                           {
+  "livescores": {
+    "sport": "tennis",
+    "tournament": [
+      {
+        "id": "17741",
+        "name": "Wta - Singles: Australian Open (Australia), Hard",
+        "match": {
+          "date": "25.01.2025",
+          "id": "2476379",
+          "status": "Finished",
+          "tb": "False",
+          "time": "08:45",
+          "player": [
+            {
+              "game_score": "",
+              "id": "35576",
+              "name": "A. Sabalenka",
+              "s1": "3",
+              "s2": "6",
+              "s3": "5",
+              "s4": "",
+              "s5": "",
+              "serve": "False",
+              "totalscore": "1",
+              "winner": "False"
+            },
+            {
+              "game_score": "",
+              "id": "6377",
+              "name": "M. Keys",
+              "s1": "6",
+              "s2": "2",
+              "s3": "7",
+              "s4": "",
+              "s5": "",
+              "serve": "False",
+              "totalscore": "2",
+              "winner": "True"
+            }
+          ]
+        }
+      },
+      {
+        "id": "17531",
+        "name": "Wta - Singles: Singapore (Singapore) - Qualification, Hard (Indoor)",
+        "match": [
+          {
+            "date": "25.01.2025",
+            "id": "2476509",
+            "status": "Finished",
+            "tb": "False",
+            "time": "02:10",
+            "player": [
+              {
+                "game_score": "",
+                "id": "171497",
+                "name": "M. Joint",
+                "s1": "7",
+                "s2": "6",
+                "s3": "",
+                "s4": "",
+                "s5": "",
+                "serve": "False",
+                "totalscore": "2",
+                "winner": "True"
+              },
+              {
+                "game_score": "",
+                "id": "35954",
+                "name": "M. Hontama",
+                "s1": "5",
+                "s2": "2",
+                "s3": "",
+                "s4": "",
+                "s5": "",
+                "serve": "False",
+                "totalscore": "0",
+                "winner": "False"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "17742",
+        "name": "Atp - Doubles: Australian Open (Australia), Hard",
+        "match": {
+          "date": "25.01.2025",
+          "id": "2476337",
+          "status": "Finished",
+          "tb": "False",
+          "time": "11:40",
+          "player": [
+            {
+              "dp1": "1744",
+              "dp2": "26279",
+              "game_score": "",
+              "id": "117869",
+              "name": "Bolelli/ Vavassori",
+              "s1": "7.18",
+              "s2": "6.5",
+              "s3": "3",
+              "s4": "",
+              "s5": "",
+              "serve": "False",
+              "totalscore": "1",
+              "winner": "False"
+            },
+            {
+              "dp1": "3182",
+              "dp2": "85385",
+              "game_score": "",
+              "id": "254558",
+              "name": "Heliovaara/ Patten",
+              "s1": "6.16",
+              "s2": "7.7",
+              "s3": "6",
+              "s4": "",
+              "s5": "",
+              "serve": "False",
+              "totalscore": "2",
+              "winner": "True"
+            }
+          ]
+        }
+      }
+    ]
+  } 
+}                                                                                                                            curl --request GET \
+  --url ' `https://statpal.io/api/v1/tennis/livestats?access_key=b5b07a3f-b019-4a18-8969-6045169feda9` ' \
+  --header 'Accept: application/json'                                                                 {
+  "livestats": {
+    "sport": "tennis",
+    "tournament": [
+      {
+        "id": "17741",
+        "name": "Wta - Singles: Australian Open (Australia), Hard",
+        "match": {
+          "date": "25.01.2025",
+          "id": "2476379",
+          "time": "08:45",
+          "player": [
+            {
+              "id": "35576",
+              "name": "A. Sabalenka",
+              "stats": {
+                "period": [
+                  {
+                    "name": "match",
+                    "type": [
+                      {
+                        "name": "Service",
+                        "stat": [
+                          {
+                            "name": "Aces",
+                            "total": "",
+                            "value": "3",
+                            "won": ""
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            },
+            {
+              "id": "6377",
+              "name": "M. Keys",
+              "sta...
