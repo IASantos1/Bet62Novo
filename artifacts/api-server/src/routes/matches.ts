@@ -3687,6 +3687,15 @@ function calculateExactSetScoreProbs(
       return res;
     }
 
+    // Safety valve: a set can never reach 8+ games without being finished
+    // (isFinishedTennisSetScore always resolves by 7-6). Malformed/unexpected
+    // provider input (fractional or out-of-range scores) must never recurse
+    // unbounded and crash the process — bail out with an empty distribution.
+    if (hg > 7 || ag > 7) {
+      memo.set(key, {});
+      return {};
+    }
+
     const result: Record<string, number> = {};
     const homeProbs = dp(hg + 1, ag);
     for (const [score, prob] of Object.entries(homeProbs)) {
@@ -10102,8 +10111,15 @@ function buildStatpalTennisLiveStates(
       if (!home || !away) continue;
       if (home.includes("/") || away.includes("/")) continue; // doubles team names
 
+      // Statpal sometimes encodes a set's games as a decimal (e.g. "6.4", "7.7")
+      // to embed tiebreak info — truncate to whole games so downstream odds
+      // math (which recurses on integer set scores) never receives fractions.
+      const toGames = (raw: string | undefined): number => {
+        const n = Math.trunc(Number(raw) || 0);
+        return Number.isFinite(n) && n >= 0 ? Math.min(n, 7) : 0;
+      };
       const rawSets: [number, number][] = SET_KEYS.map(
-        (k) => [Number(homeP[k]) || 0, Number(awayP[k]) || 0] as [number, number],
+        (k) => [toGames(homeP[k]), toGames(awayP[k])] as [number, number],
       ).filter(([h, a]) => h > 0 || a > 0);
       const sets: [number, number][] = rawSets.length > 0 ? rawSets : [[0, 0]];
 
