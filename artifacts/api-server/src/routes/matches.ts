@@ -14991,6 +14991,15 @@ async function buildBasketballLiveV2(
       statusStr === "Finished"
     )
       continue;
+    // Guard against providers (Statpal in particular) reporting not-yet-started
+    // fixtures as "live" with a stale/fake in-progress status code. If the
+    // scheduled tip-off is still more than a small clock-skew window in the
+    // future, it hasn't actually started — do not show it in the live feed.
+    if (
+      ev.startTimestamp !== undefined &&
+      ev.startTimestamp - now / 1000 > 30
+    )
+      continue;
 
     const homeTeam = v2TeamName(ev.homeTeam);
     const awayTeam = v2TeamName(ev.awayTeam);
@@ -15177,6 +15186,15 @@ function buildHockeyLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
       statusStr === "Finished"
     )
       continue;
+    // Guard against providers (Statpal in particular) reporting not-yet-started
+    // fixtures as "live" with a stale/fake in-progress status code. If the
+    // scheduled puck-drop is still more than a small clock-skew window in the
+    // future, it hasn't actually started — do not show it in the live feed.
+    if (
+      ev.startTimestamp !== undefined &&
+      ev.startTimestamp - now / 1000 > 30
+    )
+      continue;
 
     const homeTeam = v2TeamName(ev.homeTeam);
     const awayTeam = v2TeamName(ev.awayTeam);
@@ -15344,6 +15362,15 @@ function buildBaseballLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
       statusType !== "inprogress" &&
       !statusStr.toLowerCase().includes("inning") &&
       !statusStr.toLowerCase().includes("progress")
+    )
+      continue;
+    // Guard against providers (Statpal in particular) reporting not-yet-started
+    // fixtures as "live" with a stale/fake in-progress status. If the
+    // scheduled first pitch is still more than a small clock-skew window in
+    // the future, it hasn't actually started — do not show it in the live feed.
+    if (
+      ev.startTimestamp !== undefined &&
+      ev.startTimestamp - now / 1000 > 30
     )
       continue;
 
