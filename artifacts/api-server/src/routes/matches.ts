@@ -6423,6 +6423,7 @@ type VolleyTournament = {
 };
 let volleyLiveCache: VolleyTournament[] | null = null;
 let volleyLiveFetchedAt = 0;
+const VOLLEY_LIVE_TTL = 30 * 1000;
 
 // SportsAPI Pro V2 live caches (30s each sport)
 let footballLiveV2Cache: SAPIV2Event[] | null = null;
@@ -6949,6 +6950,7 @@ const volleyStandingsCache = new Map<
   string,
   { data: VolleyStandingsData; at: number }
 >();
+const VOLLEY_STANDINGS_TTL = 15 * 60 * 1000;
 
 // Tennis tournament list (ATP + WTA) — active tournaments today
 type TournamentRaw = {
@@ -10013,8 +10015,40 @@ async function getTennisLive(): Promise<TennisTournament[]> {
 }
 
 async function getVolleyballLive(): Promise<VolleyTournament[]> {
-  return volleyLiveCache ?? [];
+  const now = Date.now();
+  if (volleyLiveCache && now - volleyLiveFetchedAt < VOLLEY_LIVE_TTL)
+    return volleyLiveCache;
+  if (!CONFIG.STATPAL_API_KEY) return volleyLiveCache ?? [];
+
+  try {
+    const resp = await fetch(buildStatpalUrl("/v1/volleyball/livescores"), {
+      signal: AbortSignal.timeout(8_000),
+      headers: statpalHeaders(),
+    });
+    if (!resp.ok) return volleyLiveCache ?? [];
+    const payload = (await resp.json()) as {
+      livescores?: { tournament?: VolleyTournament | VolleyTournament[] };
+    };
+    volleyLiveCache = statpalList(payload.livescores?.tournament);
+    volleyLiveFetchedAt = now;
+    return volleyLiveCache;
+  } catch (err) {
+    logger.warn({ err, provider: "statpal" }, "Volleyball livescores provider failed");
+    return volleyLiveCache ?? [];
+  }
 }
+
+router.get("/volleyball-livescores", async (_req: Request, res: Response) => {
+  try {
+    const tournaments = await getVolleyballLive();
+    res.json({
+      tournaments,
+      matches: buildVolleyballLiveMatches(tournaments),
+    });
+  } catch {
+    res.status(500).json({ error: "Livescores de voleibol indisponíveis" });
+  }
+});
 
 // ─── SportsAPI Pro V2 Live Fetch Functions ────────────────────────────────────
 const V2_LIVE_MAX_STALE_MS = 30_000;
@@ -22211,13 +22245,122 @@ async function getActiveTournaments(): Promise<ActiveTournament[]> {
 }
 
 async function getVolleyballDailyResults(): Promise<VolleyDailyResult[]> {
-  return volleyResultsCache ?? [];
+  const now = Date.now();
+  if (volleyResultsCache && now - volleyResultsFetchedAt < RESULTS_CACHE_TTL)
+    return volleyResultsCache;
+  if (!CONFIG.STATPAL_API_KEY) return volleyResultsCache ?? [];
+
+  const extractSets = (
+    home: Pick<VolleyTeam, "s1" | "s2" | "s3" | "s4" | "s5">,
+    away: Pick<VolleyTeam, "s1" | "s2" | "s3" | "s4" | "s5">,
+  ): Array<[number, number]> => {
+    const sets: Array<[number, number]> = [];
+    for (const key of ["s1", "s2", "s3", "s4", "s5"] as const) {
+      const homeValue = Number.parseInt(String(home[key] ?? "").trim(), 10);
+      const awayValue = Number.parseInt(String(away[key] ?? "").trim(), 10);
+      if (!Number.isFinite(homeValue) || !Number.isFinite(awayValue)) continue;
+      sets.push([homeValue, awayValue]);
+    }
+    return sets;
+  };
+
+  try {
+    const resp = await fetch(buildStatpalUrl("/v1/volleyball/daily/d-1"), {
+      signal: AbortSignal.timeout(8_000),
+      headers: statpalHeaders(),
+    });
+    if (!resp.ok) return volleyResultsCache ?? [];
+    const payload = (await resp.json()) as {
+      livescores?: { tournament?: VolleyTournament | VolleyTournament[] };
+      scores?: { tournament?: VolleyTournament | VolleyTournament[] };
+    };
+    const tournaments = statpalList(
+      payload.livescores?.tournament ?? payload.scores?.tournament,
+    );
+    const results = tournaments.flatMap((tournament) =>
+      statpalList(tournament.match).map((match) => {
+        const sets = extractSets(match.home, match.away);
+        const homeSets =
+          Number.parseInt(match.home.totalscore, 10) ||
+          sets.filter(([home, away]) => home > away).length;
+        const awaySets =
+          Number.parseInt(match.away.totalscore, 10) ||
+          sets.filter(([home, away]) => away > home).length;
+        return {
+          id: match.id,
+          home: match.home.name,
+          away: match.away.name,
+          homeSets,
+          awaySets,
+          sets,
+          homeWon: homeSets > awaySets,
+          league: tournament.league,
+          country: tournament.country,
+          date: match.date,
+          time: match.time,
+        } satisfies VolleyDailyResult;
+      }),
+    );
+    volleyResultsCache = results;
+    volleyResultsFetchedAt = now;
+    return results;
+  } catch (err) {
+    logger.warn({ err, provider: "statpal" }, "Volleyball daily results provider failed");
+    return volleyResultsCache ?? [];
+  }
 }
 
 async function getVolleyballStandings(
   leagueId: string,
 ): Promise<VolleyStandingsData | null> {
-  return volleyStandingsCache.get(leagueId)?.data ?? null;
+  const cached = volleyStandingsCache.get(leagueId);
+  if (cached && Date.now() - cached.at < VOLLEY_STANDINGS_TTL) return cached.data;
+  if (!CONFIG.STATPAL_API_KEY) return cached?.data ?? null;
+
+  try {
+    const resp = await fetch(
+      buildStatpalUrl(`/v1/volleyball/standings/${encodeURIComponent(leagueId)}`),
+      {
+        signal: AbortSignal.timeout(8_000),
+        headers: statpalHeaders(),
+      },
+    );
+    if (!resp.ok) return cached?.data ?? null;
+    const payload = (await resp.json()) as {
+      standings?: {
+        country?: string;
+        category?: {
+          id?: string;
+          name?: string;
+          season?: string;
+          league?: { team?: VolleyStandingTeam | VolleyStandingTeam[] };
+        };
+      };
+    };
+    const category = payload.standings?.category;
+    if (!category) return cached?.data ?? null;
+    const data = {
+      id: String(category.id ?? leagueId),
+      name: category.name ?? "",
+      season: category.season ?? "",
+      country: payload.standings?.country ?? "",
+      teams: statpalList(category.league?.team).map((team) => ({
+        ...team,
+        description:
+          typeof team.description === "string"
+            ? { value: team.description }
+            : team.description,
+      })),
+    } satisfies VolleyStandingsData;
+    volleyStandingsCache.set(leagueId, { data, at: Date.now() });
+    return data;
+  } catch (err) {
+    logger.warn(
+      { err, provider: "statpal", leagueId },
+      "Volleyball standings provider failed",
+    );
+    return cached?.data ?? null;
+  }
 }
 
 async function getVolleyballActiveLeagues(): Promise<VolleyLeague[]> {
@@ -22240,7 +22383,141 @@ async function getVolleyballActiveLeagues(): Promise<VolleyLeague[]> {
 async function getVolleyballSchedule(
   leagueId: string,
 ): Promise<VolleyScheduleData | null> {
-  return volleyScheduleCache.get(leagueId)?.data ?? null;
+  const cached = volleyScheduleCache.get(leagueId);
+  if (cached && Date.now() - cached.at < VOLLEY_SCHEDULE_TTL) return cached.data;
+  if (!CONFIG.STATPAL_API_KEY) return cached?.data ?? null;
+
+  const extractSets = (match: VolleyScheduleMatch): Array<[number, number]> => {
+    const sets: Array<[number, number]> = [];
+    for (const key of ["s1", "s2", "s3", "s4", "s5"] as const) {
+      const homeValue = Number.parseInt(String(match.home[key] ?? "").trim(), 10);
+      const awayValue = Number.parseInt(String(match.away[key] ?? "").trim(), 10);
+      if (!Number.isFinite(homeValue) || !Number.isFinite(awayValue)) continue;
+      sets.push([homeValue, awayValue]);
+    }
+    return sets;
+  };
+  const parseDate = (value: string): string => {
+    const [day = "", month = "", year = ""] = String(value ?? "").split(".");
+    return day && month && year ? `${year}-${month}-${day}` : "";
+  };
+  const isUpcomingStatus = (status: string): boolean => {
+    const normalized = String(status ?? "").trim().toLowerCase();
+    return (
+      normalized === "" ||
+      normalized.includes("not started") ||
+      normalized.includes("scheduled")
+    );
+  };
+
+  try {
+    const resp = await fetch(
+      buildStatpalUrl(
+        `/v1/volleyball/season-schedule/${encodeURIComponent(leagueId)}`,
+      ),
+      {
+        signal: AbortSignal.timeout(8_000),
+        headers: statpalHeaders(),
+      },
+    );
+    if (!resp.ok) return cached?.data ?? null;
+    const payload = (await resp.json()) as {
+      scores?: {
+        country?: string;
+        tournament?: {
+          id?: string;
+          league?: string;
+          season?: string;
+          week?: VolleyScheduleWeek | VolleyScheduleWeek[];
+        };
+      };
+    };
+    const tournament = payload.scores?.tournament;
+    if (!tournament) return cached?.data ?? null;
+
+    const rawWeeks = statpalList(tournament.week).map((week) => ({
+      number: String(week.number ?? ""),
+      matches: statpalList(week.match),
+    }));
+    const weeks = rawWeeks.map((week) => ({
+      number: week.number,
+      matches: week.matches.map((match) => {
+        const sets = extractSets(match);
+        const homeSets =
+          Number.parseInt(match.home.totalscore, 10) ||
+          sets.filter(([home, away]) => home > away).length;
+        const awaySets =
+          Number.parseInt(match.away.totalscore, 10) ||
+          sets.filter(([home, away]) => away > home).length;
+        return {
+          id: match.id,
+          home: match.home.name,
+          away: match.away.name,
+          homeSets,
+          awaySets,
+          sets,
+          homeWon: homeSets > awaySets,
+          date: match.date,
+          time: match.time,
+        } satisfies VolleyScheduleEntry;
+      }),
+    }));
+
+    const today = new Date().toISOString().slice(0, 10);
+    const recentWeeks = weeks
+      .filter(
+        (week, index) =>
+          week.matches.length > 0 &&
+          rawWeeks[index]?.matches.every(
+            (match) =>
+              parseDate(match.date) !== "" &&
+              parseDate(match.date) <= today &&
+              !isUpcomingStatus(match.status),
+          ),
+      )
+      .slice(-3);
+
+    const nextRawWeek =
+      rawWeeks.find((week) =>
+        week.matches.some(
+          (match) => isUpcomingStatus(match.status) || parseDate(match.date) >= today,
+        ),
+      ) ?? null;
+    const nextWeek = nextRawWeek
+      ? {
+          number: nextRawWeek.number,
+          matches: nextRawWeek.matches
+            .filter(
+              (match) =>
+                isUpcomingStatus(match.status) || parseDate(match.date) >= today,
+            )
+            .map((match) => ({
+              id: match.id,
+              home: match.home.name,
+              away: match.away.name,
+              date: match.date,
+              time: match.time,
+            })),
+        }
+      : null;
+
+    const data = {
+      id: String(tournament.id ?? leagueId),
+      league: tournament.league ?? "",
+      season: tournament.season ?? "",
+      country: payload.scores?.country ?? "",
+      recentWeeks,
+      nextWeek,
+    } satisfies VolleyScheduleData;
+    volleyScheduleCache.set(leagueId, { data, at: Date.now() });
+    return data;
+  } catch (err) {
+    logger.warn(
+      { err, provider: "statpal", leagueId },
+      "Volleyball schedule provider failed",
+    );
+    return cached?.data ?? null;
+  }
 }
 
 async function getTennisDailyResults(): Promise<TennisDailyResult[]> {
@@ -23749,6 +24026,50 @@ type NHLTeamStatsData = {
   skaters: NHLSkaterStat[];
   goalies: NHLGoalieStat[];
 };
+type NHLRawSkaterStat = {
+  assists?: string;
+  faceoffs_pct?: string;
+  game_winning_goals?: string;
+  games_played?: string;
+  goals?: string;
+  id?: string;
+  name?: string;
+  penalty_minutes?: string;
+  plus_minus?: string;
+  points?: string;
+  pos?: string;
+  pp_assists?: string;
+  pp_goals?: string;
+  rank?: string;
+  sh_assists?: string;
+  sh_goals?: string;
+  shots?: string;
+  toi_per_game?: string;
+};
+type NHLRawGoalieStat = {
+  id?: string;
+  games_played?: string;
+  goals_against_diff?: string;
+  gaa?: string;
+  losses?: string;
+  name?: string;
+  ot_losses?: string;
+  rank?: string;
+  saves?: string;
+  saves_pct?: string;
+  shutouts?: string;
+  time_on_ice?: string;
+  total_goals_against?: string;
+  total_shots_against?: string;
+  wins?: string;
+};
+type NHLRawInjuryReport = {
+  date?: string;
+  description?: string;
+  player_id?: string;
+  player_name?: string;
+  status?: string;
+};
 const hockeyTeamStatsCache = new Map<string, NHLTeamStatsData>();
 const hockeyTeamStatsFetchedAt = new Map<string, number>();
 const HOCKEY_TEAM_STATS_TTL = 30 * 60 * 1000;
@@ -23756,7 +24077,106 @@ const HOCKEY_TEAM_STATS_TTL = 30 * 60 * 1000;
 async function getHockeyTeamStats(
   abbr: string,
 ): Promise<NHLTeamStatsData | null> {
-  return hockeyTeamStatsCache.get(abbr) ?? null;
+  const cached = hockeyTeamStatsCache.get(abbr);
+  const fetchedAt = hockeyTeamStatsFetchedAt.get(abbr) ?? 0;
+  if (cached && Date.now() - fetchedAt < HOCKEY_TEAM_STATS_TTL) return cached;
+  if (!CONFIG.STATPAL_API_KEY) return cached ?? null;
+
+  try {
+    const resp = await fetch(
+      buildStatpalUrl(`/v1/nhl/team-stats/${encodeURIComponent(abbr)}`),
+      {
+        signal: AbortSignal.timeout(8_000),
+        headers: statpalHeaders(),
+      },
+    );
+    if (!resp.ok) return cached ?? null;
+    const payload = (await resp.json()) as {
+      statistics?: {
+        season?: string;
+        team?:
+          | Array<
+              | string
+              | {
+                  player?: NHLRawSkaterStat[];
+                }
+            >
+          | {
+              name?: string;
+              player?: NHLRawSkaterStat[];
+            };
+        goalkeepers?: {
+          player?: NHLRawGoalieStat | NHLRawGoalieStat[];
+        };
+      };
+    };
+    const statistics = payload.statistics;
+    if (!statistics) return cached ?? null;
+
+    const teamParts = Array.isArray(statistics.team)
+      ? statistics.team
+      : statistics.team
+        ? [statistics.team]
+        : [];
+    const teamName =
+      (typeof teamParts[0] === "string" ? teamParts[0] : "") ||
+      (statistics.team &&
+      !Array.isArray(statistics.team) &&
+      typeof statistics.team === "object"
+        ? statistics.team.name ?? ""
+        : "");
+    const skaterNode = teamParts.find(
+      (entry) => !!entry && typeof entry === "object" && !Array.isArray(entry),
+    ) as { player?: NHLRawSkaterStat[] } | undefined;
+
+    const data = {
+      teamName,
+      season: statistics.season ?? "",
+      skaters: statpalList(skaterNode?.player).map((player) => ({
+        id: String(player.id ?? ""),
+        rank: Number.parseInt(player.rank ?? "", 10) || 0,
+        name: String(player.name ?? ""),
+        pos: String(player.pos ?? ""),
+        gp: Number.parseInt(player.games_played ?? "", 10) || 0,
+        goals: Number.parseInt(player.goals ?? "", 10) || 0,
+        assists: Number.parseInt(player.assists ?? "", 10) || 0,
+        points: Number.parseInt(player.points ?? "", 10) || 0,
+        plusMinus: Number.parseInt(player.plus_minus ?? "", 10) || 0,
+        pim: Number.parseInt(player.penalty_minutes ?? "", 10) || 0,
+        ppg: Number.parseInt(player.pp_goals ?? "", 10) || 0,
+        ppa: Number.parseInt(player.pp_assists ?? "", 10) || 0,
+        shg: Number.parseInt(player.sh_goals ?? "", 10) || 0,
+        sha: Number.parseInt(player.sh_assists ?? "", 10) || 0,
+        shots: Number.parseInt(player.shots ?? "", 10) || 0,
+        gwg: Number.parseInt(player.game_winning_goals ?? "", 10) || 0,
+        toiPerGame: String(player.toi_per_game ?? ""),
+        faceoffPct: String(player.faceoffs_pct ?? ""),
+      })),
+      goalies: statpalList(statistics.goalkeepers?.player).map((player) => ({
+        id: String(player.id ?? ""),
+        rank: Number.parseInt(player.rank ?? "", 10) || 0,
+        name: String(player.name ?? ""),
+        gp: Number.parseInt(player.games_played ?? "", 10) || 0,
+        wins: Number.parseInt(player.wins ?? "", 10) || 0,
+        losses: Number.parseInt(player.losses ?? "", 10) || 0,
+        otLosses: Number.parseInt(player.ot_losses ?? "", 10) || 0,
+        saves: Number.parseInt(player.saves ?? "", 10) || 0,
+        savesPct: String(player.saves_pct ?? ""),
+        gaa: String(player.gaa ?? player.goals_against_diff ?? ""),
+        shotsAgainst: Number.parseInt(player.total_shots_against ?? "", 10) || 0,
+        goalsAgainst:
+          Number.parseInt(player.total_goals_against ?? "", 10) || 0,
+        shutouts: Number.parseInt(player.shutouts ?? "", 10) || 0,
+        toi: String(player.time_on_ice ?? ""),
+      })),
+    } satisfies NHLTeamStatsData;
+    hockeyTeamStatsCache.set(abbr, data);
+    hockeyTeamStatsFetchedAt.set(abbr, Date.now());
+    return data;
+  } catch (err) {
+    logger.warn({ err, provider: "statpal", abbr }, "NHL team stats provider failed");
+    return cached ?? null;
+  }
 }
 
 router.get("/hockey-team-stats/:team", async (req: Request, res: Response) => {
@@ -23789,7 +24209,44 @@ const HOCKEY_INJURIES_TTL = 15 * 60 * 1000; // 15 min — injuries change more o
 async function getHockeyInjuries(
   abbr: string,
 ): Promise<NHLInjuriesData | null> {
-  return hockeyInjuriesCache.get(abbr) ?? null;
+  const cached = hockeyInjuriesCache.get(abbr);
+  const fetchedAt = hockeyInjuriesFetchedAt.get(abbr) ?? 0;
+  if (cached && Date.now() - fetchedAt < HOCKEY_INJURIES_TTL) return cached;
+  if (!CONFIG.STATPAL_API_KEY) return cached ?? null;
+
+  try {
+    const resp = await fetch(
+      buildStatpalUrl(`/v1/nhl/injuries/${encodeURIComponent(abbr)}`),
+      {
+        signal: AbortSignal.timeout(8_000),
+        headers: statpalHeaders(),
+      },
+    );
+    if (!resp.ok) return cached ?? null;
+    const payload = (await resp.json()) as {
+      team?: {
+        name?: string;
+        report?: NHLRawInjuryReport | NHLRawInjuryReport[];
+      };
+    };
+    if (!payload.team) return cached ?? null;
+    const data = {
+      teamName: payload.team.name ?? "",
+      report: statpalList(payload.team.report).map((entry) => ({
+        playerName: String(entry.player_name ?? ""),
+        playerId: String(entry.player_id ?? ""),
+        status: String(entry.status ?? ""),
+        description: String(entry.description ?? ""),
+        date: String(entry.date ?? ""),
+      })),
+    } satisfies NHLInjuriesData;
+    hockeyInjuriesCache.set(abbr, data);
+    hockeyInjuriesFetchedAt.set(abbr, Date.now());
+    return data;
+  } catch (err) {
+    logger.warn({ err, provider: "statpal", abbr }, "NHL injuries provider failed");
+    return cached ?? null;
+  }
 }
 
 router.get("/hockey-injuries/:team", async (req: Request, res: Response) => {
@@ -23946,7 +24403,105 @@ let volleyOddsFetchedAt = 0;
 const VOLLEY_ODDS_TTL = 60 * 1000;
 
 async function getVolleyballOdds(): Promise<VolleyOddsEntry[]> {
-  return volleyOddsCache ?? [];
+  const now = Date.now();
+  if (volleyOddsCache && now - volleyOddsFetchedAt < VOLLEY_ODDS_TTL)
+    return volleyOddsCache;
+  if (!CONFIG.STATPAL_API_KEY) return volleyOddsCache ?? [];
+
+  try {
+    const resp = await fetch(buildStatpalUrl("/v1/volleyball/odds"), {
+      signal: AbortSignal.timeout(8_000),
+      headers: statpalHeaders(),
+    });
+    if (!resp.ok) return volleyOddsCache ?? [];
+    const payload = (await resp.json()) as {
+      odds?: { tournament?: VolleyOddsTour | VolleyOddsTour[] };
+    };
+    const tournaments = statpalList(payload.odds?.tournament);
+    const odds = tournaments.flatMap((tournament) =>
+      statpalList(tournament.matches?.match).flatMap((match) => {
+        const types = statpalList(match.odds?.type);
+        const moneyline = types.find((entry) =>
+          String(entry.value ?? "")
+            .trim()
+            .toLowerCase()
+            .includes("home/away"),
+        );
+        const moneylineBookmakers = statpalList(moneyline?.bookmaker).filter(
+          (bookmaker) => String(bookmaker.stop ?? "False") !== "True",
+        );
+        const moneylineOdds = moneylineBookmakers
+          .map((bookmaker) => {
+            const home = statpalList(bookmaker.odd).find(
+              (odd) => String(odd.name ?? "").trim().toLowerCase() === "home",
+            );
+            const away = statpalList(bookmaker.odd).find(
+              (odd) => String(odd.name ?? "").trim().toLowerCase() === "away",
+            );
+            return {
+              home: Number.parseFloat(home?.value ?? ""),
+              away: Number.parseFloat(away?.value ?? ""),
+            };
+          })
+          .find((entry) => entry.home > 1 && entry.away > 1);
+        if (!moneylineOdds) return [];
+
+        const totalType = types.find((entry) =>
+          String(entry.value ?? "")
+            .trim()
+            .toLowerCase()
+            .includes("over/under"),
+        );
+        const totalBookmaker = statpalList(totalType?.bookmaker).find(
+          (bookmaker) =>
+            String(bookmaker.stop ?? "False") !== "True" &&
+            statpalList(bookmaker.total).length > 0,
+        );
+        const overUnder =
+          statpalList(totalBookmaker?.total)
+            .map((total) => {
+              const over = statpalList(total.odd).find(
+                (odd) => String(odd.name ?? "").trim().toLowerCase() === "over",
+              );
+              const under = statpalList(total.odd).find(
+                (odd) => String(odd.name ?? "").trim().toLowerCase() === "under",
+              );
+              return {
+                line: String(total.name ?? ""),
+                over: Number.parseFloat(over?.value ?? ""),
+                under: Number.parseFloat(under?.value ?? ""),
+              };
+            })
+            .find((total) => total.over > 1 && total.under > 1) ?? null;
+
+        return [
+          {
+            matchId: String(match.id ?? ""),
+            date: String(match.date ?? ""),
+            time: String(match.time ?? ""),
+            league: String(tournament.league ?? ""),
+            homeTeam: {
+              id: String(match.home?.id ?? ""),
+              name: String(match.home?.name ?? ""),
+            },
+            awayTeam: {
+              id: String(match.away?.id ?? ""),
+              name: String(match.away?.name ?? ""),
+            },
+            homeOdds: moneylineOdds.home,
+            awayOdds: moneylineOdds.away,
+            overUnder,
+          } satisfies VolleyOddsEntry,
+        ];
+      }),
+    );
+    volleyOddsCache = odds;
+    volleyOddsFetchedAt = now;
+    return odds;
+  } catch (err) {
+    logger.warn({ err, provider: "statpal" }, "Volleyball odds provider failed");
+    return volleyOddsCache ?? [];
+  }
 }
 
 router.get("/volleyball-odds", async (_req: Request, res: Response) => {
@@ -24170,6 +24725,88 @@ async function getHockeyOdds(): Promise<HockeyOddsEntry[]> {
   const now = Date.now();
   if (hockeyOddsCache && now - hockeyOddsFetchedAt < HOCKEY_ODDS_TTL)
     return hockeyOddsCache;
+  if (CONFIG.STATPAL_API_KEY) {
+    try {
+      const resp = await fetch(buildStatpalUrl("/v1/nhl/odds"), {
+        signal: AbortSignal.timeout(8_000),
+        headers: statpalHeaders(),
+      });
+      if (resp.ok) {
+        const payload = (await resp.json()) as {
+          odds?: {
+            category?: {
+              name?: string;
+              matches?: { match?: HockeyOddsMatch | HockeyOddsMatch[] };
+            };
+          };
+        };
+        const category = payload.odds?.category;
+        const results = statpalList(category?.matches?.match).flatMap((match) => {
+          const types = statpalList(match.odds?.type);
+          const resultType = types.find((entry) =>
+            String(entry.value ?? "")
+              .trim()
+              .toLowerCase()
+              .includes("3way result"),
+          );
+          const bookmakers = statpalList(resultType?.bookmaker).filter(
+            (bookmaker) => String(bookmaker.stop ?? "False") !== "True",
+          );
+          const prices = bookmakers
+            .map((bookmaker) => {
+              const home = statpalList(bookmaker.odd).find(
+                (odd) => String(odd.name ?? "").trim().toLowerCase() === "home",
+              );
+              const draw = statpalList(bookmaker.odd).find(
+                (odd) => String(odd.name ?? "").trim().toLowerCase() === "draw",
+              );
+              const away = statpalList(bookmaker.odd).find(
+                (odd) => String(odd.name ?? "").trim().toLowerCase() === "away",
+              );
+              return {
+                home: Number.parseFloat(home?.value ?? ""),
+                draw: Number.parseFloat(draw?.value ?? ""),
+                away: Number.parseFloat(away?.value ?? ""),
+              };
+            })
+            .find((entry) => entry.home > 1 && entry.draw > 1 && entry.away > 1);
+          if (!prices) return [];
+
+          const homeName = String(match.home?.name ?? "");
+          const awayName = String(match.away?.name ?? "");
+          const markets = makeHockeyMarketsFromTeams(
+            homeName,
+            awayName,
+          ) as Record<string, unknown>;
+          markets["odds"] = prices;
+          return [
+            {
+              matchId: String(match.id ?? ""),
+              date: String(match.date ?? ""),
+              time: String(match.time ?? ""),
+              homeTeam: {
+                id: String(match.home?.id ?? ""),
+                name: homeName,
+              },
+              awayTeam: {
+                id: String(match.away?.id ?? ""),
+                name: awayName,
+              },
+              homeOdds: prices.home,
+              drawOdds: prices.draw,
+              awayOdds: prices.away,
+              markets,
+            } satisfies HockeyOddsEntry,
+          ];
+        });
+        hockeyOddsCache = results;
+        hockeyOddsFetchedAt = now;
+        return results;
+      }
+    } catch (err) {
+      logger.warn({ err, provider: "statpal" }, "NHL odds provider failed; falling back");
+    }
+  }
   if (hockeyOddsCache) {
     if (!hockeyOddsInFlight) {
       hockeyOddsInFlight = (async () => {
