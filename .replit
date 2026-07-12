@@ -58,3 +58,9 @@ timeoutMs = 20000
 
 [nix]
 channel = "stable-25_05"
+
+[userenv]
+
+[userenv.shared]
+ADMIN_EMAIL = "suportebet62@gmail.com"
+ADMIN_USERNAME = "Israel"
