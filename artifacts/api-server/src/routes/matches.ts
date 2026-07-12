@@ -17416,6 +17416,52 @@ function parseUpcomingKickoffMs(
   }
 }
 
+function normalizeUpcomingVisibilityKey(
+  match: Pick<UpcomingMatch, "sport" | "home" | "away" | "league">,
+): string {
+  const norm = (value: string | undefined) =>
+    String(value ?? "")
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, " ")
+      .trim();
+
+  return [
+    norm(match.sport),
+    norm(match.home),
+    norm(match.away),
+    norm(match.league),
+  ].join("|");
+}
+
+function isFinishedVisibilityStatus(status: string | undefined): boolean {
+  const s = String(status ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim()
+    .toLowerCase();
+  if (!s) return false;
+  return (
+    s === "ft" ||
+    s === "aet" ||
+    s === "ap" ||
+    s.includes("fin") ||
+    s.includes("final") ||
+    s.includes("finished") ||
+    s.includes("ended") ||
+    s.includes("complete") ||
+    s.includes("full time") ||
+    s.includes("after extra") ||
+    s.includes("after penalties") ||
+    s.includes("retired") ||
+    s.includes("abandon") ||
+    s.includes("cancel") ||
+    s.includes("awarded") ||
+    s.includes("default")
+  );
+}
+
 function rememberUpcomingFootballEligibility(matches: UpcomingMatch[]): void {
   const now = Date.now();
   for (const [id, expiryAt] of recentUpcomingFootballIds.entries()) {
@@ -19716,7 +19762,7 @@ router.get("/wc2026", async (_req: Request, res: Response) => {
 
     // Filter: hide finished matches and also hide stale scheduled matches whose
     // kickoff is already well in the past but the provider never flipped status.
-    const WC2026_STALE_UPCOMING_GRACE_MIN = 180;
+    const WC2026_STALE_UPCOMING_GRACE_MIN = 30;
     const visible = enriched.filter((m) => {
       if (m.status === "Finished") return false;
       if (m.isLive) return true;
@@ -19910,12 +19956,36 @@ router.get("/upcoming", async (req: Request, res: Response) => {
     if (/^(tbd|to be determined|tba)$/i.test(n)) return true;
     return false;
   };
+  const liveIds = new Set<string>();
+  const liveIdentityKeys = new Set<string>();
+  for (const state of liveMatchState.values()) {
+    if (!state || isFinishedVisibilityStatus(state.status)) continue;
+    liveIds.add(String(state.id));
+    liveIdentityKeys.add(
+      normalizeUpcomingVisibilityKey({
+        sport: state.sport,
+        home: state.home,
+        away: state.away,
+        league: state.league,
+      }),
+    );
+  }
+  const UPCOMING_POST_KICKOFF_GRACE_MS = 30 * 60 * 1000;
+  const now = Date.now();
   const filtered = matches.filter(
     (m) =>
       m.odds?.home > 0 &&
       m.odds?.away > 0 &&
       !isPlaceholderTeamName(m.home) &&
-      !isPlaceholderTeamName(m.away),
+      !isPlaceholderTeamName(m.away) &&
+      !finishedMatchResults.has(String(m.id)) &&
+      !liveIds.has(String(m.id)) &&
+      !liveIdentityKeys.has(normalizeUpcomingVisibilityKey(m)) &&
+      (() => {
+        const kickoffMs = parseUpcomingKickoffMs(m);
+        if (kickoffMs == null) return true;
+        return now - kickoffMs <= UPCOMING_POST_KICKOFF_GRACE_MS;
+      })(),
   );
   res.json({ matches: filtered });
 });

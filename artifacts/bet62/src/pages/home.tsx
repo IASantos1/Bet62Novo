@@ -6321,6 +6321,112 @@ export default function Home({
       normalizeLiveIdentityPart(match.league),
     ].join("|");
 
+  const normalizeMatchStatus = (value: string | undefined) =>
+    String(value ?? "")
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .trim()
+      .toLowerCase();
+
+  const isFinishedMatchStatus = (status: string | undefined) => {
+    const s = normalizeMatchStatus(status);
+    if (!s) return false;
+    return (
+      s === "ft" ||
+      s === "aet" ||
+      s === "ap" ||
+      s.includes("fin") ||
+      s.includes("final") ||
+      s.includes("finished") ||
+      s.includes("ended") ||
+      s.includes("complete") ||
+      s.includes("full time") ||
+      s.includes("after extra") ||
+      s.includes("after penalties") ||
+      s.includes("retired") ||
+      s.includes("abandon") ||
+      s.includes("cancel") ||
+      s.includes("awarded") ||
+      s.includes("default")
+    );
+  };
+
+  const parseMatchKickoffMs = (
+    match: Pick<Match, "scheduledDate" | "scheduledTime" | "date" | "time">,
+  ): number | null => {
+    const dateRaw = match.scheduledDate ?? match.date;
+    const timeRaw = match.scheduledTime ?? match.time;
+    if (!dateRaw || !timeRaw || !/^\d{1,2}:\d{2}$/.test(timeRaw)) return null;
+
+    try {
+      const [hh, mm] = timeRaw.split(":").map(Number);
+      const dmy = /^(\d{2})\.(\d{2})\.(\d{4})$/.exec(dateRaw);
+      if (dmy) {
+        return new Date(
+          Number(dmy[3]),
+          Number(dmy[2]) - 1,
+          Number(dmy[1]),
+          hh,
+          mm,
+          0,
+          0,
+        ).getTime();
+      }
+
+      const iso = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateRaw);
+      if (iso) {
+        return new Date(
+          Number(iso[1]),
+          Number(iso[2]) - 1,
+          Number(iso[3]),
+          hh,
+          mm,
+          0,
+          0,
+        ).getTime();
+      }
+    } catch {
+      return null;
+    }
+
+    return null;
+  };
+
+  const pruneUpcomingMatches = useCallback((matches: Match[]) => {
+    if (matches.length === 0) return matches;
+
+    const now = Date.now();
+    const liveIdentityKeys = new Set(
+      liveMatchesRef.current
+        .filter((match) => !!match.isLive && !isFinishedMatchStatus(match.status))
+        .map((match) => getLiveMatchIdentityKey(match)),
+    );
+    const UPCOMING_POST_KICKOFF_GRACE_MS = 30 * 60 * 1000;
+    let changed = false;
+
+    const filtered = matches.filter((match) => {
+      if (liveIdentityKeys.has(getLiveMatchIdentityKey(match))) {
+        changed = true;
+        return false;
+      }
+
+      if (isFinishedMatchStatus(match.status)) {
+        changed = true;
+        return false;
+      }
+
+      const kickoffMs = parseMatchKickoffMs(match);
+      if (kickoffMs != null && now - kickoffMs > UPCOMING_POST_KICKOFF_GRACE_MS) {
+        changed = true;
+        return false;
+      }
+
+      return true;
+    });
+
+    return changed ? filtered : matches;
+  }, []);
+
   const dedupeLiveMatches = (matches: Match[]) => {
     const byIdentity = new Map<string, Match>();
     const order: string[] = [];
@@ -7080,7 +7186,9 @@ export default function Home({
         // end, drop gone ones — prevents visible layout shift on re-fetch.
         setUpcomingMatches((prev) => {
           if (prev.length === 0)
-            return matches.map((m) => ({ ...m, isLive: false }));
+            return pruneUpcomingMatches(
+              matches.map((m) => ({ ...m, isLive: false })),
+            );
           const freshById = new Map(matches.map((m) => [String(m.id), m]));
           const merged: Match[] = [];
           for (const p of prev) {
@@ -7092,7 +7200,7 @@ export default function Home({
           }
           for (const [, m] of freshById)
             merged.push({ ...m, isLive: false });
-          return merged;
+          return pruneUpcomingMatches(merged);
         });
         writeSnapshot(upcomingSnapshotKey(selectedSport), matches);
       } catch {
@@ -7115,7 +7223,9 @@ export default function Home({
     );
     if (canUseSnap) {
       setUpcomingMatches(
-        snap.value.map((m) => ({ ...(m as any), isLive: false })),
+        pruneUpcomingMatches(
+          snap.value.map((m) => ({ ...(m as any), isLive: false })),
+        ),
       );
       setUpcomingLoading(false);
     }
@@ -7129,7 +7239,12 @@ export default function Home({
     selectedSport,
     upcomingSnapshotKey,
     activeTab,
+    pruneUpcomingMatches,
   ]);
+
+  useEffect(() => {
+    setUpcomingMatches((prev) => pruneUpcomingMatches(prev));
+  }, [liveMatches, pruneUpcomingMatches]);
 
   // Fetch live matches — polls every 5s
   type LiveMatchRaw = {
@@ -7366,9 +7481,10 @@ export default function Home({
           if (isFinishedStatus(m.status)) return false;
           const lastSeen = matchLastSeenRef.current[id] ?? 0;
           const missCount = matchMissCountRef.current[id] ?? 0;
-          // Keep transiently missing matches around for longer so brief partial
-          // responses or feed reshuffles do not make live games disappear.
-          return missCount < 10 || now - lastSeen < 300_000;
+          // The server already applies a grace window for transient feed gaps.
+          // Keep a much shorter client-side hold so matches don't stay stuck
+          // in "Ao Vivo" for several minutes after leaving the provider feed.
+          return missCount < 3 || now - lastSeen < 20_000;
         })
         .map((m) => ({
           ...m,

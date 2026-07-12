@@ -93,6 +93,10 @@ type WCMatch = {
   redCardsHome?: number;
   redCardsAway?: number;
   _liveExtra?: {
+    clockStr?: string;
+    clockSec?: number;
+    clockAtMs?: number;
+    clockRunning?: boolean;
     htScore?: [number, number];
     etScore?: [number, number];
     penScore?: [number, number];
@@ -318,22 +322,62 @@ const WC_GROUPS = [
 
 // ─── Map API response → WCMatch ───────────────────────────────────────────────
 
+function normalizeWCStatus(value: unknown): string {
+  return String(value ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim()
+    .toLowerCase();
+}
+
+function isWCFinishedStatus(value: unknown): boolean {
+  const status = normalizeWCStatus(value);
+  if (!status) return false;
+  return (
+    status === "ft" ||
+    status === "aet" ||
+    status === "ap" ||
+    status.includes("fin") ||
+    status.includes("finished") ||
+    status.includes("ended") ||
+    status.includes("complete") ||
+    status.includes("full time") ||
+    status.includes("after extra") ||
+    status.includes("after penalties") ||
+    status.includes("cancel") ||
+    status.includes("abandon")
+  );
+}
+
+function isWCLiveStatus(value: unknown): boolean {
+  const status = normalizeWCStatus(value);
+  if (!status || isWCFinishedStatus(status)) return false;
+  return (
+    /^\d{1,3}(\+\d+)?$/.test(String(value ?? "")) ||
+    [
+      "1st half",
+      "2nd half",
+      "halftime",
+      "ht",
+      "half time",
+      "extra time",
+      "et",
+      "penalties",
+      "live",
+      "in play",
+    ].some((token) => status.includes(token))
+  );
+}
+
 function mapToWCMatch(m: Record<string, unknown>): WCMatch {
   const statusStr = String(m.status ?? "");
-  const statusLow = statusStr.toLowerCase();
-  const isLive =
-    !!(m.isLive) ||
-    m.providerStatusGroup === 3 ||
-    /^\d{1,3}(\+\d+)?$/.test(statusStr) ||
-    ["1st half","2nd half","halftime","ht","half time","extra time","et","penalties","live"].some(s =>
-      statusLow.includes(s)
-    );
+  const isLive = !!m.isLive || m.providerStatusGroup === 3 || isWCLiveStatus(statusStr);
   const isFinished =
     !isLive &&
     typeof m.homeScore === "number" && typeof m.awayScore === "number" &&
     (m.homeScore as number) >= 0 && (m.awayScore as number) >= 0 &&
-    ["ft","fin","full time","finished","ended","complete","aet","after extra"].some(f => statusLow.includes(f));
-  const hasRealOdds = m.hasRealOdds === true || m.isLive === true;
+    isWCFinishedStatus(statusStr);
+  const hasRealOdds = m.hasRealOdds === true || isLive;
   return {
     id: String(m.id ?? m.matchId ?? Math.random()),
     home: String(m.home ?? m.homeTeam ?? ""),
@@ -2326,6 +2370,20 @@ export default function WorldCupPage({ onClose, onBet: onBetProp }: { onClose?: 
     const s = (match.status ?? "").toLowerCase();
     const isHT = s === "ht" || s.includes("half time") || s === "halftime" || s.includes("intervalo");
     const apiMin = apiMinutesRef.current[match.id] ?? (match.minute ?? 0);
+    const extra = match._liveExtra;
+    const baseClockSec = Number(extra?.clockSec);
+    const clockAtMs = Number(extra?.clockAtMs ?? 0);
+    const isClockRunning = !!extra?.clockRunning;
+    if (Number.isFinite(baseClockSec) && baseClockSec >= 0) {
+      const rawElapsedSec =
+        isClockRunning && clockAtMs > 0
+          ? Math.max(0, Math.floor((Date.now() - clockAtMs) / 1000))
+          : 0;
+      const elapsedSec = Math.min(rawElapsedSec, 180);
+      const displaySec = baseClockSec + elapsedSec;
+      if (isHT) return 45;
+      return Math.max(0, Math.min(130, Math.floor(displaySec / 60)));
+    }
     if (isHT) return apiMin;
     if (apiMin < 0) return 0;
     const changedAt = minuteChangedAtRef.current[match.id] ?? liveDataFetchedAt.current;
