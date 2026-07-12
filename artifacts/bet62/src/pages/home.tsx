@@ -6254,7 +6254,8 @@ export default function Home({
     min: number,
     tag: "1P" | "HT" | "2P" | "ET" | "PEN" | null,
   ): string => {
-    if (min < 0) return "";
+    // When the live feed has no reliable minute yet, avoid rendering a fake "0'".
+    if (min <= 0) return "";
     if (tag === "1P" && min > 45) return `45+${min - 45}'`;
     if (tag === "2P" && min > 90) return `90+${min - 90}'`;
     if (tag === "ET" && min > 120) return `120+${min - 120}'`;
