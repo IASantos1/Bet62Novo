@@ -16541,13 +16541,13 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
 
   // Max minutes ahead a match can be to appear as "Em Breve", per sport
   const SOON_WINDOW: Record<string, number> = {
-    football: 120,
-    soccer: 120, // football: up to 2 h — only genuinely imminent matches
-    basketball: 180,
-    hockey: 180, // NBA/NHL: up to 3 h — US evening games visible ~3 h ahead
-    tennis: 600, // tennis: 10 h — show all Challenger/ATP/WTA matches scheduled today
+    football: 3,
+    soccer: 3,   // só aparecem em "Em Breve" a ≤ 3 min do início
+    basketball: 3,
+    hockey: 3,
+    tennis: 3,   // jogos já iniciados são promovidos via startedUpcomingTennisCandidates
   };
-  const DEFAULT_SOON_WINDOW = 120; // 2 h for volleyball, baseball, etc.
+  const DEFAULT_SOON_WINDOW = 3; // ≤ 3 min antes do início para todos os desportos
   const startingSoonCandidates = allUpcoming
     .filter((m) => {
       // Tennis always has computed odds even without a real bookmaker price — allow all.
