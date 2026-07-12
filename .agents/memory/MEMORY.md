@@ -1,1 +1,2 @@
 - [Bet62 GitHub import](bet62-import.md) — imported web-only from an external multi-artifact repo; mobile app was intentionally dropped per user request.
+- [Statpal tennis decimal set scores](statpal-tennis-quirk.md) — statpal's tennis livescores API sometimes encodes a set's games as a decimal; must truncate before any odds/score math.
