@@ -14178,8 +14178,13 @@ async function buildFootballLiveV2(
 ): Promise<LiveMatchState[]> {
   const now = Date.now();
   const clockSkewSec = (() => {
-    const v = Number(process.env.FOOTBALL_CLOCK_SKEW_SEC ?? "180");
-    if (!Number.isFinite(v)) return 180;
+    // Default: 30 s — only allow a match into the live feed up to 30 seconds
+    // before its scheduled kickoff (tolerates minor API clock drift). The old
+    // default of 180 s (3 min) caused Statpal's pre-game fixtures (reported as
+    // "1st half 0'" before kickoff) to appear in the live section with a
+    // running clock up to 3 minutes early.
+    const v = Number(process.env.FOOTBALL_CLOCK_SKEW_SEC ?? "30");
+    if (!Number.isFinite(v)) return 30;
     return Math.min(600, Math.max(0, Math.trunc(v)));
   })();
   const result: LiveMatchState[] = [];
@@ -14454,10 +14459,6 @@ async function buildFootballLiveV2(
       Math.min(hi, Math.max(lo, n));
     const isFirstHalf = newStatus === "1st half";
     const isSecondHalf = newStatus === "2nd half";
-    const isClockRunning = !!(
-      resolvedKickoffSec &&
-      (isFirstHalf || isSecondHalf)
-    );
     const shKickoffSec = isSecondHalf
       ? (existing?._liveExtra?.secondHalfKickoffSec ??
         (resolvedKickoffSec &&
@@ -14492,6 +14493,17 @@ async function buildFootballLiveV2(
                 SECOND_HALF_CLOCK_CAP_MIN * 60,
               )
             : null;
+    // Clock is only running if the game has actually started (baseSec > 0).
+    // Previously this was computed before baseSec, which caused pre-kickoff
+    // fixtures (status="1st half", baseSec=0 due to clamp) to send
+    // clockRunning:true to the frontend, making the client-side timer tick
+    // from 00:00 before the match had started.
+    const isClockRunning = !!(
+      resolvedKickoffSec &&
+      (isFirstHalf || isSecondHalf) &&
+      baseSec !== null &&
+      baseSec > 0
+    );
     const secInMin = baseSec === null ? 0 : clamp(baseSec % 60, 0, 59);
     const secStr = String(secInMin).padStart(2, "0");
 

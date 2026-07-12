@@ -10709,14 +10709,18 @@ export default function Home({
         <div
           className="relative px-5 pt-3 pb-4"
           style={{
-            background: "linear-gradient(160deg,#1a0505 0%,#18181b 100%)",
-            borderBottom: "1px solid rgba(220,38,38,0.15)",
+            background: isDarkTheme
+              ? "linear-gradient(160deg,#1a0505 0%,#18181b 100%)"
+              : "linear-gradient(160deg,#fff5f5 0%,#f4f4f5 100%)",
+            borderBottom: isDarkTheme
+              ? "1px solid rgba(220,38,38,0.15)"
+              : "1px solid rgba(220,38,38,0.25)",
           }}
         >
           {/* drag handle */}
           <div
             className="w-10 h-1 rounded-full mx-auto mb-4"
-            style={{ background: "rgba(255,255,255,0.12)" }}
+            style={{ background: isDarkTheme ? "rgba(255,255,255,0.12)" : "rgba(0,0,0,0.12)" }}
           />
 
           <div className="flex items-start justify-between">
@@ -10728,7 +10732,7 @@ export default function Home({
                 >
                   {bets.length}
                 </div>
-                <span className="text-white font-black text-[17px] tracking-tight">
+                <span className={`font-black text-[17px] tracking-tight ${isDarkTheme ? "text-white" : "text-zinc-900"}`}>
                   Boletim
                 </span>
               </div>
@@ -10744,11 +10748,11 @@ export default function Home({
             <div className="flex items-center gap-3">
               {bets.length > 0 && effectiveBetMode === "multipla" && (
                 <div className="text-right">
-                  <div className="text-[10px] text-zinc-500 leading-none mb-0.5">
+                  <div className={`text-[10px] leading-none mb-0.5 ${isDarkTheme ? "text-zinc-500" : "text-zinc-400"}`}>
                     ODDS COMBINADAS
                   </div>
                   <div
-                    className="text-white font-black text-[22px] leading-none"
+                    className={`font-black text-[22px] leading-none ${isDarkTheme ? "text-white" : "text-zinc-900"}`}
                     style={{ color: "#dc2626" }}
                   >
                     {totalOdds}
