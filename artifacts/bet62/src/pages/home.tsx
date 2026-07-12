@@ -24672,33 +24672,38 @@ export default function Home({
             transition={{ type: "spring", bounce: 0, duration: 0.35 }}
             className="lg:hidden fixed inset-0 z-[60] flex flex-col"
             style={{
-              background: "#0f0f0f",
+              background: isDarkTheme ? "#0f0f0f" : "#f5f5f7",
               paddingTop: "env(safe-area-inset-top, 0px)",
             }}
           >
             {/* Top bar */}
             <div
-              className="flex items-center justify-between px-4 py-2.5 border-b border-zinc-800/80 shrink-0"
-              style={{ background: "#09090b" }}
+              className="flex items-center justify-between px-4 py-2.5 shrink-0"
+              style={{
+                background: isDarkTheme ? "#09090b" : "#ffffff",
+                borderBottom: isDarkTheme
+                  ? "1px solid rgba(255,255,255,0.08)"
+                  : "1px solid rgba(0,0,0,0.08)",
+              }}
             >
               <button
                 {...makeTap(() => setBetSlipOpenMobile(false))}
                 className="w-9 h-9 flex items-center justify-center rounded-full"
-                style={{ background: "rgba(255,255,255,0.07)" }}
+                style={{ background: isDarkTheme ? "rgba(255,255,255,0.07)" : "rgba(0,0,0,0.06)" }}
               >
-                <ChevronDown size={20} className="text-white" />
+                <ChevronDown size={20} className={isDarkTheme ? "text-white" : "text-zinc-700"} />
               </button>
 
               {/* Stake summary pill */}
               <div
                 className="flex items-center gap-1.5 rounded-full px-4 py-1.5"
                 style={{
-                  background: "rgba(255,255,255,0.07)",
-                  border: "1px solid rgba(255,255,255,0.1)",
+                  background: isDarkTheme ? "rgba(255,255,255,0.07)" : "rgba(0,0,0,0.06)",
+                  border: isDarkTheme ? "1px solid rgba(255,255,255,0.1)" : "1px solid rgba(0,0,0,0.1)",
                 }}
               >
                 <Plus size={12} className="text-zinc-400" />
-                <span className="text-white font-bold text-[13px] tabular-nums">
+                <span className={`font-bold text-[13px] tabular-nums ${isDarkTheme ? "text-white" : "text-zinc-800"}`}>
                   {effectiveBetMode === "simples"
                     ? `${bets.reduce((s, b) => s + parseFloat(betStakes[betKey(b)] || "0"), 0).toFixed(2)} €`
                     : `${parseFloat(stake || "0").toFixed(2)} €`}
@@ -24725,14 +24730,19 @@ export default function Home({
 
             {/* Tabs */}
             <div
-              className="flex border-b border-zinc-800 shrink-0"
-              style={{ background: "#09090b" }}
+              className="flex shrink-0"
+              style={{
+                background: isDarkTheme ? "#09090b" : "#ffffff",
+                borderBottom: isDarkTheme
+                  ? "1px solid rgba(255,255,255,0.07)"
+                  : "1px solid rgba(0,0,0,0.08)",
+              }}
             >
               <button
                 {...makeTap(() => {
                   if (!hasDuplicateMatches) setBetMode("simples");
                 })}
-                className={`flex-1 py-3 text-[13px] font-bold transition-all ${effectiveBetMode === "simples" ? "text-white border-b-2 border-red-600" : "text-zinc-500"}`}
+                className={`flex-1 py-3 text-[13px] font-bold transition-all ${effectiveBetMode === "simples" ? `border-b-2 border-red-600 ${isDarkTheme ? "text-white" : "text-zinc-900"}` : "text-zinc-500"}`}
               >
                 Simples
               </button>
@@ -24741,7 +24751,7 @@ export default function Home({
                   if (!hasDuplicateMatches) setBetMode("multipla");
                 })}
                 disabled={hasDuplicateMatches}
-                className={`flex-1 py-3 text-[13px] font-bold transition-all ${effectiveBetMode === "multipla" ? "text-white border-b-2 border-red-600" : hasDuplicateMatches ? "text-zinc-700" : "text-zinc-500"}`}
+                className={`flex-1 py-3 text-[13px] font-bold transition-all ${effectiveBetMode === "multipla" ? `border-b-2 border-red-600 ${isDarkTheme ? "text-white" : "text-zinc-900"}` : hasDuplicateMatches ? "text-zinc-700" : "text-zinc-500"}`}
               >
                 Múltipla ({bets.length})
               </button>
@@ -24771,10 +24781,14 @@ export default function Home({
                       style={{
                         background: isSusp
                           ? "rgba(120,53,15,0.25)"
-                          : "rgba(255,255,255,0.04)",
+                          : isDarkTheme
+                          ? "rgba(255,255,255,0.04)"
+                          : "rgba(0,0,0,0.04)",
                         border: isSusp
                           ? "1px solid rgba(245,158,11,0.35)"
-                          : "1px solid rgba(255,255,255,0.08)",
+                          : isDarkTheme
+                          ? "1px solid rgba(255,255,255,0.08)"
+                          : "1px solid rgba(0,0,0,0.08)",
                       }}
                     >
                       {isSusp && (
@@ -24821,7 +24835,7 @@ export default function Home({
                         {/* Selection + odd */}
                         <div className="flex items-center justify-between">
                           <div className="flex-1 pr-3">
-                            <div className="text-white font-bold text-[14px] leading-tight">
+                            <div className={`font-bold text-[14px] leading-tight ${isDarkTheme ? "text-white" : "text-zinc-900"}`}>
                               {bet.label}
                             </div>
                             <div className="text-zinc-600 text-[11px] mt-0.5">
@@ -24860,11 +24874,16 @@ export default function Home({
                                       betStakes[betKey(bet)] || "0",
                                     ) === amt
                                       ? { background: "#dc2626", color: "#fff" }
-                                      : {
+                                      : isDarkTheme
+                                      ? {
                                           background: "rgba(255,255,255,0.05)",
                                           color: "#a1a1aa",
-                                          border:
-                                            "1px solid rgba(255,255,255,0.07)",
+                                          border: "1px solid rgba(255,255,255,0.07)",
+                                        }
+                                      : {
+                                          background: "rgba(0,0,0,0.05)",
+                                          color: "#71717a",
+                                          border: "1px solid rgba(0,0,0,0.07)",
                                         }
                                   }
                                 >
@@ -24874,10 +24893,10 @@ export default function Home({
                             </div>
                             <div
                               className="flex items-center rounded-xl overflow-hidden"
-                              style={{
-                                background: "rgba(0,0,0,0.4)",
-                                border: "1px solid rgba(255,255,255,0.08)",
-                              }}
+                              style={isDarkTheme
+                                ? { background: "rgba(0,0,0,0.4)", border: "1px solid rgba(255,255,255,0.08)" }
+                                : { background: "rgba(0,0,0,0.05)", border: "1px solid rgba(0,0,0,0.1)" }
+                              }
                             >
                               <span className="pl-3 text-zinc-500 text-sm font-bold">
                                 €
@@ -24907,7 +24926,7 @@ export default function Home({
                                     350,
                                   );
                                 }}
-                                className="flex-1 bg-transparent text-white text-sm font-mono px-2 py-2 outline-none placeholder-zinc-600"
+                                className={`flex-1 bg-transparent text-sm font-mono px-2 py-2 outline-none placeholder-zinc-600 ${isDarkTheme ? "text-white" : "text-zinc-900"}`}
                               />
                               {parseFloat(betStakes[betKey(bet)] || "0") >
                                 0 && (
@@ -24934,10 +24953,13 @@ export default function Home({
 
             {/* Footer: stake input + summary + CTA */}
             <div
-              className="px-4 pt-3 shrink-0 border-t border-zinc-800"
+              className="px-4 pt-3 shrink-0"
               style={{
                 paddingBottom: "max(1rem, env(safe-area-inset-bottom, 1rem))",
-                background: "#09090b",
+                background: isDarkTheme ? "#09090b" : "#ffffff",
+                borderTop: isDarkTheme
+                  ? "1px solid rgba(255,255,255,0.07)"
+                  : "1px solid rgba(0,0,0,0.08)",
               }}
             >
               {renderBetFundingToggle()}
@@ -24947,10 +24969,10 @@ export default function Home({
                 <div className="flex items-center gap-3 mb-3">
                   <div
                     className="flex-1 flex items-center rounded-xl overflow-hidden"
-                    style={{
-                      background: "rgba(255,255,255,0.04)",
-                      border: "1px solid rgba(255,255,255,0.1)",
-                    }}
+                    style={isDarkTheme
+                      ? { background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.1)" }
+                      : { background: "rgba(0,0,0,0.05)", border: "1px solid rgba(0,0,0,0.1)" }
+                    }
                   >
                     <span className="pl-3 text-zinc-600 text-sm shrink-0">
                       Montante
@@ -24977,7 +24999,7 @@ export default function Home({
                           350,
                         );
                       }}
-                      className="flex-1 bg-transparent text-white font-mono px-2 py-3 outline-none placeholder-zinc-700 text-sm text-right"
+                      className={`flex-1 bg-transparent font-mono px-2 py-3 outline-none placeholder-zinc-700 text-sm text-right ${isDarkTheme ? "text-white" : "text-zinc-900"}`}
                     />
                     <span className="pr-3 text-zinc-600 text-sm shrink-0">
                       €
