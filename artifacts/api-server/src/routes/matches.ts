@@ -9370,7 +9370,17 @@ function resolveOdds(
     };
   }
 
-  // Fallback: ELO + Poisson model using actual team names
+  // Fallback 1: V5 pre-match real odds from upcoming cache (avoids the
+  // ELO hash for club teams not in the known-ELO table).
+  const upcomingOdds = getUpcomingPreMatchOdds(m.home.name, m.away.name);
+  if (upcomingOdds) {
+    return {
+      odds: upcomingOdds,
+      markets: makeAdvancedMarketsFromTeams(m.home.name, m.away.name),
+      real: true,
+    };
+  }
+  // Fallback 2: ELO + Poisson model using actual team names
   const generated = makeOddsFromTeams(m.home.name, m.away.name);
   return {
     odds: generated,
@@ -10138,10 +10148,7 @@ function buildStatpalTennisLiveStates(
       const enrichedLeague = enrichTennisV1League(compName);
       const tier = tennisTierRank(compName);
       const pairKey = _tennisPairKey(home, away);
-      const seededOdds = _tennisPreMatchOdds.get(pairKey);
-      const baseOdds = seededOdds
-        ? { home: seededOdds.home, draw: 0, away: seededOdds.away }
-        : makeOddsFromTeams(home, away);
+      const baseOdds = makeTennisBaseOdds(home, away);
       const liveOddsState = computeTennisLiveOdds(
         baseOdds,
         sets,
@@ -12195,10 +12202,7 @@ function buildTennisLiveMatches(
 
       // Use real pre-match odds from cache (populated by getTennisOdds) as base.
       // Fall back to a balanced model only if we have no cached data yet.
-      const cached = _tennisPreMatchOdds.get(_tennisPairKey(p0.name, p1.name));
-      const baseOdds = cached
-        ? { home: cached.home, draw: 0, away: cached.away }
-        : makeOddsFromTeams(p0.name, p1.name);
+      const baseOdds = makeTennisBaseOdds(p0.name, p1.name);
       const currentPoints: [number | string, number | string] = [hPt, aPt];
       const serving: [boolean, boolean] = [p0Serving, p1Serving];
       const liveOddsState = computeTennisLiveOdds(
@@ -13863,6 +13867,25 @@ function _tennisPairKey(n0: string, n1: string): string {
   return [sur(n0), sur(n1)].sort().join("|");
 }
 
+/**
+ * Returns base 1x2 odds for a tennis match.
+ * Priority: real pre-match bookmaker odds from cache → neutral 1.85/1.85.
+ * 1.85/1.85 (≈50/50 with ~8% margin) is far more accurate than applying the
+ * soccer Poisson model to player name hashes, which produces arbitrary prices.
+ */
+function makeTennisBaseOdds(
+  home: string,
+  away: string,
+): { home: number; draw: number; away: number } {
+  const key = _tennisPairKey(home, away);
+  const cached = _tennisPreMatchOdds.get(key);
+  if (cached && cached.home > 1.01 && cached.away > 1.01) {
+    return { home: cached.home, draw: 0, away: cached.away };
+  }
+  // Neutral tennis odds — better than a soccer Poisson model on player name hashes
+  return { home: 1.85, draw: 0, away: 1.85 };
+}
+
 // ─── Live odds cache: real bookmaker live odds fetched per-match ───────────────
 // Keyed by tennis match ID (number). Keep the TTL short enough for live tennis
 // so the UI does not sit on stale prices for half a minute or more.
@@ -14777,6 +14800,7 @@ async function buildFootballLiveV2(
       // First seen — build initial state with score-filtered markets
       const baseOdds =
         v2FootballOddsCache.get(String(ev.id)) ??
+        getUpcomingPreMatchOdds(homeTeam, awayTeam) ??
         makeOddsFromTeams(homeTeam, awayTeam);
       const liveOdds =
         homeScore === 0 && awayScore === 0
@@ -15722,11 +15746,8 @@ function buildTennisLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
     //    a reactive model that responds to sets, current-set games and points. ──
     const realLiveOdds = ev.id ? _tennisLiveOddsCache.get(ev.id) : undefined;
     const preMatchPairKey = _tennisPairKey(homeTeam, awayTeam);
-    const cachedOdds = _tennisPreMatchOdds.get(preMatchPairKey);
     const cachedSetScoreOdds = _tennisPreMatchSetScoreOdds.get(preMatchPairKey);
-    const baseOdds = cachedOdds
-      ? { home: cachedOdds.home, draw: 0, away: cachedOdds.away }
-      : makeOddsFromTeams(homeTeam, awayTeam);
+    const baseOdds = makeTennisBaseOdds(homeTeam, awayTeam);
     const liveOddsState = computeTennisLiveOdds(
       baseOdds,
       sets,
@@ -16146,6 +16167,43 @@ let _allUpcomingCacheBuiltAt = 0;
 const UPCOMING_CACHE_TTL_MS = 30_000;
 let _upcomingRebuildInProgress = false;
 
+/**
+ * Normalise a team/player name for fuzzy lookup (lowercase, alphanumeric only).
+ */
+function _normTeam(n: string): string {
+  return n.toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+/**
+ * Look up real V5 pre-match 1x2 odds for a football match in the upcoming
+ * cache (rebuilt every 30 s).  Returns null when not found.
+ * Used as a fallback between the bookmaker odds API and the ELO/Poisson model
+ * so club teams not in the ELO table (e.g. Bodø/Glimt, KFUM Oslo) get
+ * sensible, market-based prices instead of arbitrary hash-ELO values.
+ */
+function getUpcomingPreMatchOdds(
+  home: string,
+  away: string,
+): { home: number; draw: number; away: number } | null {
+  if (_allUpcomingCache.length === 0) return null;
+  const hn = _normTeam(home);
+  const an = _normTeam(away);
+  for (const m of _allUpcomingCache) {
+    if (!m.hasRealOdds) continue;
+    if (m.sport !== "football") continue;
+    if (
+      _normTeam(m.home) === hn &&
+      _normTeam(m.away) === an &&
+      m.odds.home > 1.01 &&
+      m.odds.draw > 1.01 &&
+      m.odds.away > 1.01
+    ) {
+      return { home: m.odds.home, draw: m.odds.draw, away: m.odds.away };
+    }
+  }
+  return null;
+}
+
 async function rebuildUpcomingCache(): Promise<void> {
   if (_upcomingRebuildInProgress) return;
   _upcomingRebuildInProgress = true;
@@ -16392,10 +16450,7 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
         .slice(0, completedSets)
         .filter(([homeGames, awayGames]) => awayGames > homeGames).length;
       const pairKey = _tennisPairKey(up.home, up.away);
-      const seededOdds = _tennisPreMatchOdds.get(pairKey);
-      const baseOdds = seededOdds
-        ? { home: seededOdds.home, draw: 0, away: seededOdds.away }
-        : makeOddsFromTeams(up.home, up.away);
+      const baseOdds = makeTennisBaseOdds(up.home, up.away);
       const liveOddsState = computeTennisLiveOdds(
         baseOdds,
         sets,
@@ -17382,15 +17437,12 @@ async function buildTennisLiveV1(): Promise<LiveMatchState[]> {
       const pairKey = _tennisPairKey(home, away);
       const realLiveOdds =
         typeof g.id === "number" ? _tennisLiveOddsCache.get(g.id) : undefined;
-      const seededOdds = _tennisPreMatchOdds.get(pairKey);
       const seededSetScoreOdds = _tennisPreMatchSetScoreOdds.get(pairKey);
       const serving =
         typeof g.id === "number"
           ? _tennisServingCache.get(g.id)?.serving
           : undefined;
-      const baseOdds = seededOdds
-        ? { home: seededOdds.home, draw: 0, away: seededOdds.away }
-        : makeOddsFromTeams(home, away);
+      const baseOdds = makeTennisBaseOdds(home, away);
       const liveOddsState = computeTennisLiveOdds(
         baseOdds,
         sets,

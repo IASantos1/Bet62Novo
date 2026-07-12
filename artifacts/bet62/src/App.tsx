@@ -119,7 +119,16 @@ function App() {
 
   useEffect(() => {
     clearStoredThemePreference();
-    const syncTheme = () => setResolvedTheme(applyThemePreference(null));
+    const syncTheme = () => {
+      const resolved = applyThemePreference(null);
+      setResolvedTheme(resolved);
+      // Update the PWA theme-color meta so the mobile status bar follows the
+      // auto-theme (dark 19h–8h, light 8h–19h) instead of the hardcoded red.
+      try {
+        const tcMeta = document.querySelector<HTMLMetaElement>('meta[name="theme-color"]');
+        if (tcMeta) tcMeta.content = resolved === "dark" ? "#0a0a0a" : "#ffffff";
+      } catch {}
+    };
     syncTheme();
     const unsubscribe = subscribeThemeChange(setResolvedTheme);
     const id = setInterval(syncTheme, 60_000);
