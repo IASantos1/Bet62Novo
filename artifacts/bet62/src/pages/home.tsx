@@ -6512,9 +6512,13 @@ export default function Home({
     } catch {}
   }, []);
 
-  // Sync expandedMatch with live data silently (score/odds update without closing panel)
+  // Sync expandedMatch with live data silently (score/odds update without closing panel).
+  // Also handles the case where the match was opened *before* it went live (e.g. from
+  // "Em Breve"/upcoming with isLive:false, showing the pre-match scheduled time) and the
+  // live feed later starts reporting it as in-progress — without this, the detail panel
+  // would stay frozen on the stale pre-match snapshot forever since it never re-checks.
   useEffect(() => {
-    if (!expandedMatch?.isLive) return;
+    if (!expandedMatch) return;
     const updated = liveMatches.find(
       (m) => String(m.id) === String(expandedMatch.id),
     );
