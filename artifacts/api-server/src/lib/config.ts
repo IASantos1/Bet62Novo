@@ -5,8 +5,30 @@ const SPORTSAPI_KEY =
   process.env["STATSPAL_API_KEY"] ??
   "";
 
+const STATPAL_API_KEY =
+  process.env["STATPAL_API_KEY"] ??
+  process.env["STATSPAL_API_KEY"] ??
+  "";
+
+const STATPAL_BASE_URL =
+  process.env["STATPAL_BASE_URL"]?.trim() || "https://statpal.io/api";
+
+const FOOTBALL_LIVE_PROVIDER =
+  process.env["FOOTBALL_LIVE_PROVIDER"]?.trim() || "auto";
+
+const FOOTBALL_DAILY_PROVIDER =
+  process.env["FOOTBALL_DAILY_PROVIDER"]?.trim() || "auto";
+
+const FOOTBALL_REFERENCE_PROVIDER =
+  process.env["FOOTBALL_REFERENCE_PROVIDER"]?.trim() || "auto";
+
 export const CONFIG = {
   SPORTSAPI_KEY,
+  STATPAL_API_KEY,
+  STATPAL_BASE_URL,
+  FOOTBALL_LIVE_PROVIDER,
+  FOOTBALL_DAILY_PROVIDER,
+  FOOTBALL_REFERENCE_PROVIDER,
   LIVE_UPDATE_INTERVAL: 1000,
   PREMATCH_UPDATE_INTERVAL: 300_000,
   REOPEN_DELAY_GOAL_LOW: 12_000,

@@ -75,6 +75,54 @@ const sapiHeaders = (): Record<string, string> => ({
   "x-api-key": CONFIG.SPORTSAPI_KEY,
 });
 
+type FootballProviderMode = "auto" | "sportsapipro" | "statpal";
+
+function normalizeFootballProviderMode(
+  value: string | undefined,
+): FootballProviderMode {
+  const raw = String(value ?? "")
+    .trim()
+    .toLowerCase();
+  if (raw === "sportsapipro" || raw === "sportsapi") return "sportsapipro";
+  if (raw === "statpal" || raw === "statspal") return "statpal";
+  return "auto";
+}
+
+function statpalHeaders(): Record<string, string> {
+  return { Accept: "application/json" };
+}
+
+function buildStatpalUrl(
+  path: string,
+  params?: Record<string, string | number | undefined>,
+): string {
+  const base = CONFIG.STATPAL_BASE_URL.replace(/\/+$/, "");
+  const cleanPath = path.startsWith("/") ? path : `/${path}`;
+  const url = new URL(`${base}${cleanPath}`);
+  url.searchParams.set("access_key", CONFIG.STATPAL_API_KEY);
+  for (const [key, value] of Object.entries(params ?? {})) {
+    if (value === undefined || value === null || value === "") continue;
+    url.searchParams.set(key, String(value));
+  }
+  return url.toString();
+}
+
+function statpalList<T>(raw: T | T[] | null | undefined): T[] {
+  if (!raw) return [];
+  return Array.isArray(raw) ? raw : [raw];
+}
+
+function canUseFootballProvider(
+  configured: string | undefined,
+  target: "statpal" | "sportsapipro",
+): boolean {
+  const mode = normalizeFootballProviderMode(configured);
+  if (target === "statpal") {
+    return mode === "auto" || mode === "statpal";
+  }
+  return mode === "auto" || mode === "sportsapipro" || mode === "statpal";
+}
+
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 // V5 Types
@@ -604,6 +652,285 @@ type SAPILeagueV2 = {
   cup: string;
   match: SAPIMatchV2 | SAPIMatchV2[];
 };
+
+type StatpalLeagueFeedEnvelope = {
+  updated?: string;
+  updated_ts?: number;
+  league?: SAPILeagueV2 | SAPILeagueV2[];
+};
+
+function normalizeStatpalMatch(raw: Partial<SAPIMatchV2>): SAPIMatchV2 {
+  const home =
+    raw.home && typeof raw.home === "object"
+      ? raw.home
+      : { id: "", name: "Unknown", goals: "0" };
+  const away =
+    raw.away && typeof raw.away === "object"
+      ? raw.away
+      : { id: "", name: "Unknown", goals: "0" };
+
+  return {
+    main_id: String(raw.main_id ?? ""),
+    fallback_id_1: String(raw.fallback_id_1 ?? ""),
+    fallback_id_2: String(raw.fallback_id_2 ?? ""),
+    fallback_id_3: String(raw.fallback_id_3 ?? ""),
+    status: String(raw.status ?? ""),
+    date: String(raw.date ?? ""),
+    time: String(raw.time ?? ""),
+    inj_time: String(raw.inj_time ?? ""),
+    inj_minute: String(raw.inj_minute ?? ""),
+    venue: raw.venue,
+    home: {
+      id: String(home.id ?? ""),
+      name: String(home.name ?? "Unknown"),
+      goals: String(home.goals ?? "0"),
+      win_on_agg: home.win_on_agg,
+    },
+    away: {
+      id: String(away.id ?? ""),
+      name: String(away.name ?? "Unknown"),
+      goals: String(away.goals ?? "0"),
+      win_on_agg: away.win_on_agg,
+    },
+    events: raw.events ?? null,
+    ht: raw.ht,
+    ft: raw.ft,
+    et: raw.et ?? null,
+    penalties: raw.penalties ?? null,
+    has_live_stats: raw.has_live_stats,
+    inplay_odds_running: String(raw.inplay_odds_running ?? "False"),
+  };
+}
+
+function normalizeStatpalLeagues(
+  leaguesRaw: SAPILeagueV2 | SAPILeagueV2[] | null | undefined,
+): SAPILeagueV2[] {
+  return statpalList(leaguesRaw)
+    .filter((league): league is SAPILeagueV2 => !!league)
+    .map((league) => ({
+      id: String(league.id ?? ""),
+      name: String(league.name ?? ""),
+      country: String(league.country ?? ""),
+      cup: String(league.cup ?? "False"),
+      match: statpalList(league.match).map((match) =>
+        normalizeStatpalMatch(match),
+      ),
+    }));
+}
+
+function extractStatpalLeagueFeed(
+  raw: Record<string, unknown>,
+  preferredRoot?: string,
+): { leagues: SAPILeagueV2[]; updatedTs: number } {
+  const preferred =
+    preferredRoot &&
+    raw[preferredRoot] &&
+    typeof raw[preferredRoot] === "object" &&
+    !Array.isArray(raw[preferredRoot])
+      ? (raw[preferredRoot] as StatpalLeagueFeedEnvelope)
+      : undefined;
+
+  const dynamic = preferred
+    ? undefined
+    : (Object.entries(raw).find(
+        ([key, value]) =>
+          /^matches_/i.test(key) &&
+          !!value &&
+          typeof value === "object" &&
+          !Array.isArray(value),
+      )?.[1] as StatpalLeagueFeedEnvelope | undefined);
+
+  const payload = preferred ?? dynamic;
+  return {
+    leagues: normalizeStatpalLeagues(payload?.league),
+    updatedTs:
+      typeof payload?.updated_ts === "number" && Number.isFinite(payload.updated_ts)
+        ? payload.updated_ts
+        : 0,
+  };
+}
+
+function parseStatpalStartTimestamp(dateRaw: string, timeRaw: string): number | undefined {
+  if (!/^\d{2}\.\d{2}\.\d{4}$/.test(dateRaw) || !/^\d{1,2}:\d{2}$/.test(timeRaw)) {
+    return undefined;
+  }
+  const [dayStr, monthStr, yearStr] = dateRaw.split(".");
+  const [hourStr, minuteStr] = timeRaw.split(":");
+  const day = Number(dayStr);
+  const month = Number(monthStr);
+  const year = Number(yearStr);
+  const hour = Number(hourStr);
+  const minute = Number(minuteStr);
+  if (
+    !Number.isFinite(day) ||
+    !Number.isFinite(month) ||
+    !Number.isFinite(year) ||
+    !Number.isFinite(hour) ||
+    !Number.isFinite(minute)
+  ) {
+    return undefined;
+  }
+
+  const utcMs =
+    Date.UTC(year, month - 1, day, hour, minute, 0, 0) -
+    lisbonOffsetHours() * 60 * 60 * 1000;
+  return Math.floor(utcMs / 1000);
+}
+
+function mapStatpalFootballStatus(
+  match: SAPIMatchV2,
+): { description: string; code?: number; round?: number } {
+  const rawStatus = String(match.status ?? "").trim();
+  const minute = parseInt(rawStatus, 10);
+  const extraMinute = parseInt(String(match.inj_minute ?? ""), 10);
+  const round = Number.isFinite(minute)
+    ? minute + (Number.isFinite(extraMinute) ? extraMinute : 0)
+    : undefined;
+
+  if (Number.isFinite(minute)) {
+    return {
+      description: minute <= 45 ? "1st half" : "2nd half",
+      code: 1,
+      round,
+    };
+  }
+
+  const normalized = rawStatus.toLowerCase();
+  if (normalized === "ht" || normalized.includes("half time")) {
+    return { description: "HT", code: 1, round: 45 };
+  }
+  if (normalized === "et" || normalized.includes("extra")) {
+    return { description: "Extra Time", code: 1, round: 105 };
+  }
+  if (normalized.includes("pen")) {
+    return { description: "Penalties", code: 1, round: 120 };
+  }
+
+  return { description: rawStatus, round };
+}
+
+function statpalMatchToV2Event(
+  league: SAPILeagueV2,
+  match: SAPIMatchV2,
+): SAPIV2Event {
+  const id = Number(match.main_id);
+  const homeTeamId = Number(match.home.id);
+  const awayTeamId = Number(match.away.id);
+  const tournamentId = Number(league.id);
+  const status = mapStatpalFootballStatus(match);
+
+  return {
+    id: Number.isFinite(id) ? id : 0,
+    tournament: {
+      id: Number.isFinite(tournamentId) ? tournamentId : undefined,
+      name: league.name,
+      category: {
+        name: league.country,
+        country: { name: league.country },
+      },
+    },
+    homeTeam: {
+      id: Number.isFinite(homeTeamId) ? homeTeamId : undefined,
+      name: match.home.name,
+    },
+    awayTeam: {
+      id: Number.isFinite(awayTeamId) ? awayTeamId : undefined,
+      name: match.away.name,
+    },
+    homeScore: Number.parseInt(match.home.goals, 10) || 0,
+    awayScore: Number.parseInt(match.away.goals, 10) || 0,
+    status: {
+      code: status.code,
+      description: status.description,
+    },
+    statusCode: status.code,
+    startTimestamp: parseStatpalStartTimestamp(match.date, match.time),
+    tournamentId: Number.isFinite(tournamentId) ? tournamentId : undefined,
+    homeTeamId: Number.isFinite(homeTeamId) ? homeTeamId : undefined,
+    awayTeamId: Number.isFinite(awayTeamId) ? awayTeamId : undefined,
+    roundInfo: status.round ? { round: status.round } : undefined,
+    finalResultOnly: SAPI_FINISHED_STATUSES.has(match.status),
+    feedLocked: SAPI_FINISHED_STATUSES.has(match.status),
+  };
+}
+
+async function fetchStatpalFootballLiveV2(): Promise<{
+  events: SAPIV2Event[];
+  updatedTs: number;
+}> {
+  if (!CONFIG.STATPAL_API_KEY) throw new Error("STATPAL_API_KEY is not configured");
+
+  const resp = await fetch(buildStatpalUrl("/v2/soccer/matches/live"), {
+    signal: AbortSignal.timeout(5_000),
+    headers: statpalHeaders(),
+  });
+  if (!resp.ok) throw new Error(`Statpal live HTTP ${resp.status}`);
+
+  const raw = (await resp.json()) as Record<string, unknown>;
+  const { leagues, updatedTs } = extractStatpalLeagueFeed(raw, "live_matches");
+  const events = leagues.flatMap((league) =>
+    statpalList(league.match).map((match) => statpalMatchToV2Event(league, match)),
+  );
+  return { events, updatedTs };
+}
+
+async function fetchStatpalFootballDailyLeagues(): Promise<SAPILeagueV2[]> {
+  if (!CONFIG.STATPAL_API_KEY) throw new Error("STATPAL_API_KEY is not configured");
+
+  const mergeLeagues = (target: Map<string, SAPILeagueV2>, incoming: SAPILeagueV2[]) => {
+    for (const league of incoming) {
+      const key = `${league.id}|${league.country}|${league.name}`;
+      const existing = target.get(key);
+      const incomingMatches = statpalList(league.match);
+      if (!existing) {
+        target.set(key, { ...league, match: incomingMatches });
+        continue;
+      }
+      const seenIds = new Set(statpalList(existing.match).map((match) => match.main_id));
+      const mergedMatches = [...statpalList(existing.match)];
+      for (const match of incomingMatches) {
+        if (seenIds.has(match.main_id)) continue;
+        seenIds.add(match.main_id);
+        mergedMatches.push(match);
+      }
+      target.set(key, { ...existing, match: mergedMatches });
+    }
+  };
+
+  const merged = new Map<string, SAPILeagueV2>();
+  for (const offset of [0, -1]) {
+    try {
+      const resp = await fetch(
+        buildStatpalUrl("/v2/soccer/matches/daily", { offset }),
+        {
+          signal: AbortSignal.timeout(8_000),
+          headers: statpalHeaders(),
+        },
+      );
+      if (!resp.ok) continue;
+      const raw = (await resp.json()) as Record<string, unknown>;
+      mergeLeagues(merged, extractStatpalLeagueFeed(raw).leagues);
+    } catch {}
+  }
+
+  return Array.from(merged.values());
+}
+
+async function fetchSportsApiFootballDailyLeagues(): Promise<SAPILeagueV2[]> {
+  if (!CONFIG.SPORTSAPI_KEY) throw new Error("SPORTSAPI_KEY is not configured");
+
+  const resp = await fetch(
+    `${SAPI_V2_FOOTBALL}/v2/soccer/matches/daily?offset=-1`,
+    {
+      signal: AbortSignal.timeout(8_000),
+      headers: sapiHeaders(),
+    },
+  );
+  if (!resp.ok) throw new Error(`SportsApiPro daily HTTP ${resp.status}`);
+
+  const raw = (await resp.json()) as Record<string, unknown>;
+  return extractStatpalLeagueFeed(raw).leagues;
+}
 
 // v1 odds types
 // Root double-wrapper: response is { example: { odds_feed: {...} } } OR { odds_feed: {...} }
@@ -7688,6 +8015,49 @@ async function getLiveLeagues(): Promise<SAPILeagueV2[]> {
 }
 
 async function getDailyLeagues(): Promise<SAPILeagueV2[]> {
+  const now = Date.now();
+  if (dailyCache && now - dailyFetchedAt < CONFIG.DAILY_CACHE_TTL) {
+    return dailyCache;
+  }
+
+  const dailyProvider = normalizeFootballProviderMode(
+    CONFIG.FOOTBALL_DAILY_PROVIDER,
+  );
+  const canUseStatpal =
+    !!CONFIG.STATPAL_API_KEY &&
+    (dailyProvider === "auto" || dailyProvider === "statpal");
+  const canUseSportsApi =
+    !!CONFIG.SPORTSAPI_KEY &&
+    (dailyProvider === "auto" ||
+      dailyProvider === "sportsapipro" ||
+      dailyProvider === "statpal");
+
+  if (canUseStatpal) {
+    try {
+      dailyCache = await fetchStatpalFootballDailyLeagues();
+      dailyFetchedAt = now;
+      return dailyCache;
+    } catch (err) {
+      logger.warn(
+        { err, provider: "statpal" },
+        "Football daily provider failed; falling back",
+      );
+    }
+  }
+
+  if (canUseSportsApi) {
+    try {
+      dailyCache = await fetchSportsApiFootballDailyLeagues();
+      dailyFetchedAt = now;
+      return dailyCache;
+    } catch (err) {
+      logger.warn(
+        { err, provider: "sportsapipro" },
+        "Football daily fallback failed",
+      );
+    }
+  }
+
   return dailyCache ?? [];
 }
 
@@ -9711,13 +10081,45 @@ async function getFootballLiveV2(): Promise<SAPIV2Event[]> {
     now - footballLiveV2FetchedAt < CONFIG.LIVE_CACHE_TTL
   )
     return footballLiveV2Cache;
+
+  const liveProvider = normalizeFootballProviderMode(
+    CONFIG.FOOTBALL_LIVE_PROVIDER,
+  );
+  const canUseStatpal =
+    !!CONFIG.STATPAL_API_KEY &&
+    (liveProvider === "auto" || liveProvider === "statpal");
+  const canUseSportsApi =
+    !!CONFIG.SPORTSAPI_KEY &&
+    (liveProvider === "auto" ||
+      liveProvider === "sportsapipro" ||
+      liveProvider === "statpal");
+
   try {
-    const events = await fetchLiveRace(SAPI_V1_FOOTBALL, SAPI_V2_FOOTBALL);
-    if (events.length > 0) {
-      footballLiveV2Cache = events;
-      footballLiveV2FetchedAt = now;
-      return footballLiveV2Cache;
+    if (canUseStatpal) {
+      try {
+        const statpal = await fetchStatpalFootballLiveV2();
+        footballLiveV2Cache = statpal.events;
+        footballLiveV2FetchedAt = now;
+        liveFeedUpdatedTs = statpal.updatedTs;
+        return footballLiveV2Cache;
+      } catch (err) {
+        logger.warn(
+          { err, provider: "statpal" },
+          "Football live provider failed; falling back",
+        );
+      }
     }
+
+    if (canUseSportsApi) {
+      const events = await fetchLiveRace(SAPI_V1_FOOTBALL, SAPI_V2_FOOTBALL);
+      liveFeedUpdatedTs = 0;
+      if (events.length > 0) {
+        footballLiveV2Cache = events;
+        footballLiveV2FetchedAt = now;
+        return footballLiveV2Cache;
+      }
+    }
+
     if (
       footballLiveV2Cache &&
       now - footballLiveV2FetchedAt > V2_LIVE_MAX_STALE_MS
@@ -24025,6 +24427,54 @@ async function getFootballSchedule(id: string): Promise<{
   meta: { league: string; season: string; country: string };
 }> {
   const cached = footballScheduleCache.get(id);
+  if (cached && Date.now() - cached.fetchedAt < FOOTBALL_SCHEDULE_TTL) {
+    return { weeks: cached.data, meta: cached.meta };
+  }
+
+  if (
+    CONFIG.STATPAL_API_KEY &&
+    canUseFootballProvider(CONFIG.FOOTBALL_REFERENCE_PROVIDER, "statpal")
+  ) {
+    try {
+      const resp = await fetch(
+        buildStatpalUrl(
+          `/v2/soccer/leagues/${encodeURIComponent(id)}/matches`,
+        ),
+        {
+          signal: AbortSignal.timeout(8_000),
+          headers: statpalHeaders(),
+        },
+      );
+      if (resp.ok) {
+        const payload = (await resp.json()) as FootballScheduleRaw;
+        const matchesRoot = payload.matches;
+        const tournament = matchesRoot?.tournament;
+        if (tournament) {
+          const weeks = statpalList(tournament.week).map((week) => ({
+            number: parseInt(week.number) || 0,
+            matches: statpalList(week.match).map(parseFootballMatch),
+          }));
+          const meta = {
+            league: tournament.league,
+            season: tournament.season,
+            country: matchesRoot?.country ?? "",
+          };
+          footballScheduleCache.set(id, {
+            data: weeks,
+            meta,
+            fetchedAt: Date.now(),
+          });
+          return { weeks, meta };
+        }
+      }
+    } catch (err) {
+      logger.warn(
+        { err, provider: "statpal", leagueId: id },
+        "Football schedule provider failed; falling back",
+      );
+    }
+  }
+
   if (cached) return { weeks: cached.data, meta: cached.meta };
   throw new Error("Calendário indisponível");
 }
@@ -24282,6 +24732,161 @@ function normMatchStatsList<T>(raw: T | T[] | undefined | null): T[] {
 
 async function getFootballMatchStats(leagueId: string): Promise<object> {
   const cached = footballMatchStatsCache.get(leagueId);
+  if (cached && Date.now() - cached.fetchedAt < FOOTBALL_MATCH_STATS_TTL) {
+    return cached.data as object;
+  }
+
+  if (
+    CONFIG.STATPAL_API_KEY &&
+    canUseFootballProvider(CONFIG.FOOTBALL_REFERENCE_PROVIDER, "statpal")
+  ) {
+    try {
+      const resp = await fetch(
+        buildStatpalUrl(
+          `/v2/soccer/leagues/${encodeURIComponent(leagueId)}/matches/stats`,
+        ),
+        {
+          signal: AbortSignal.timeout(8_000),
+          headers: statpalHeaders(),
+        },
+      );
+      if (resp.ok) {
+        const payload = (await resp.json()) as FootballMatchStatsRaw;
+        const root = payload["match-stats"];
+        const tournament = root?.tournament;
+        const match = tournament?.matches;
+        if (tournament && match) {
+          const num = (value: string | undefined) => {
+            const n = Number(value ?? "");
+            return Number.isFinite(n) ? n : 0;
+          };
+          const bool = (value: string | undefined) =>
+            String(value ?? "").toLowerCase() === "true";
+          const events = <T,>(
+            raw:
+              | { event?: T | T[] }
+              | string
+              | undefined,
+          ): T[] => {
+            if (!raw || typeof raw === "string") return [];
+            return normMatchStatsList(raw.event);
+          };
+
+          const data = {
+            updated: root.updated,
+            updatedTs: root.updated_ts ?? 0,
+            tournament: {
+              id: tournament.id,
+              name: tournament.name,
+            },
+            match: {
+              id: match.main_id,
+              fallbackIds: [
+                match.fallback_id_1,
+                match.fallback_id_2,
+              ].filter(Boolean),
+              date: match.date,
+              time: match.time,
+              status: match.status,
+              stadium: match.match_info?.stadium?.name ?? "",
+              referee: match.match_info?.referee?.name ?? "",
+              addedTime: {
+                firstHalf: num(match.match_info?.time?.added_time_period_1),
+                secondHalf: num(match.match_info?.time?.added_time_period_2),
+              },
+              home: {
+                id: match.home.id,
+                name: match.home.name,
+                goals: num(match.home.goals),
+                formation: match.lineups?.home?.formation ?? "",
+                lineup: normMatchStatsList(match.lineups?.home?.player),
+                bench: normMatchStatsList(match.bench?.home?.player),
+                substitutions: normMatchStatsList(
+                  match.substitutions?.home?.substitution,
+                ),
+                stats: match.team_stats?.home ?? {},
+                playerStats: normMatchStatsList(match.player_stats?.home?.player),
+                summary: {
+                  goals: events(match.event_summary?.home?.goals).map((event) => ({
+                    ...event,
+                    own_goal: bool(event.own_goal),
+                    penalty: bool(event.penalty),
+                    penalty_missed: bool(event.penalty_missed),
+                    var_cancelled: bool(event.var_cancelled),
+                  })),
+                  yellowcards: events(match.event_summary?.home?.yellowcards),
+                  redcards: events(match.event_summary?.home?.redcards),
+                  var: events(match.event_summary?.home?.var),
+                },
+              },
+              away: {
+                id: match.away.id,
+                name: match.away.name,
+                goals: num(match.away.goals),
+                formation: match.lineups?.away?.formation ?? "",
+                lineup: normMatchStatsList(match.lineups?.away?.player),
+                bench: normMatchStatsList(match.bench?.away?.player),
+                substitutions: normMatchStatsList(
+                  match.substitutions?.away?.substitution,
+                ),
+                stats: match.team_stats?.away ?? {},
+                playerStats: normMatchStatsList(match.player_stats?.away?.player),
+                summary: {
+                  goals: events(match.event_summary?.away?.goals).map((event) => ({
+                    ...event,
+                    own_goal: bool(event.own_goal),
+                    penalty: bool(event.penalty),
+                    penalty_missed: bool(event.penalty_missed),
+                    var_cancelled: bool(event.var_cancelled),
+                  })),
+                  yellowcards: events(match.event_summary?.away?.yellowcards),
+                  redcards: events(match.event_summary?.away?.redcards),
+                  var: events(match.event_summary?.away?.var),
+                },
+              },
+              ht: match.ht
+                ? {
+                    home: num(match.ht.home_goals),
+                    away: num(match.ht.away_goals),
+                  }
+                : null,
+              ft: match.ft
+                ? {
+                    home: num(match.ft.home_goals),
+                    away: num(match.ft.away_goals),
+                  }
+                : null,
+              et: match.et
+                ? {
+                    home: num(match.et.home_goals),
+                    away: num(match.et.away_goals),
+                  }
+                : null,
+              penalties: match.penalties
+                ? {
+                    home: num(match.penalties.home_pen),
+                    away: num(match.penalties.away_pen),
+                  }
+                : null,
+              teamColors: match.team_colors ?? null,
+            },
+          };
+
+          footballMatchStatsCache.set(leagueId, {
+            data,
+            fetchedAt: Date.now(),
+          });
+          return data;
+        }
+      }
+    } catch (err) {
+      logger.warn(
+        { err, provider: "statpal", leagueId },
+        "Football match stats provider failed",
+      );
+    }
+  }
+
   if (cached) return cached.data as object;
   throw new Error("Estatísticas indisponíveis");
 }
@@ -24399,6 +25004,89 @@ async function getFootballStandings(leagueId: string): Promise<{
   meta: { id: string; league: string; season: string; country: string };
 }> {
   const cached = footballStandingsCache.get(leagueId);
+  if (cached && Date.now() - cached.fetchedAt < FOOTBALL_STANDINGS_TTL) {
+    return { teams: cached.data, meta: cached.meta };
+  }
+
+  if (
+    CONFIG.STATPAL_API_KEY &&
+    canUseFootballProvider(CONFIG.FOOTBALL_REFERENCE_PROVIDER, "statpal")
+  ) {
+    try {
+      const resp = await fetch(
+        buildStatpalUrl(
+          `/v2/soccer/leagues/${encodeURIComponent(leagueId)}/standings`,
+        ),
+        {
+          signal: AbortSignal.timeout(8_000),
+          headers: statpalHeaders(),
+        },
+      );
+      if (resp.ok) {
+        const payload = (await resp.json()) as FootballStandingsRaw;
+        const root = payload.standings;
+        const tournament = root?.tournament;
+        if (root && tournament) {
+          const num = (value: string | undefined) => parseInt(value ?? "") || 0;
+          const teams = statpalList(tournament.team).map(
+            (team): FootballStandingsTeam => ({
+              position: num(team.position),
+              name: team.name,
+              id: team.id,
+              status: team.status,
+              recentForm: team.recent_form,
+              gp: num(team.overall?.games_played),
+              wins: num(team.overall?.wins),
+              draws: num(team.overall?.draws),
+              losses: num(team.overall?.losses),
+              goalsFor: num(team.overall?.goals_scored),
+              goalsAgainst: num(team.overall?.goals_allowed),
+              goalDiff: num(team.total?.goal_difference),
+              points: num(team.total?.points),
+              home: {
+                gp: num(team.home?.games_played),
+                wins: num(team.home?.wins),
+                draws: num(team.home?.draws),
+                losses: num(team.home?.losses),
+                goalsFor: num(team.home?.goals_scored),
+                goalsAgainst: num(team.home?.goals_allowed),
+              },
+              away: {
+                gp: num(team.away?.games_played),
+                wins: num(team.away?.wins),
+                draws: num(team.away?.draws),
+                losses: num(team.away?.losses),
+                goalsFor: num(team.away?.goals_scored),
+                goalsAgainst: num(team.away?.goals_allowed),
+              },
+              description: team.description?.value ?? "",
+            }),
+          );
+
+          const meta = {
+            id: tournament.id,
+            league: tournament.league,
+            season: tournament.season,
+            country: root.country ?? "",
+          };
+
+          footballStandingsCache.set(leagueId, {
+            data: teams,
+            meta,
+            fetchedAt: Date.now(),
+          });
+
+          return { teams, meta };
+        }
+      }
+    } catch (err) {
+      logger.warn(
+        { err, provider: "statpal", leagueId },
+        "Football standings provider failed",
+      );
+    }
+  }
+
   if (cached) return { teams: cached.data, meta: cached.meta };
   throw new Error("Classificação indisponível");
 }
@@ -24609,28 +25297,53 @@ async function getFootballLeagueStats(leagueId: string): Promise<{
     return { teams: cached.data, meta: cached.meta };
   }
 
-  if (!CONFIG.SPORTSAPI_KEY) {
-    if (cached) return { teams: cached.data, meta: cached.meta };
-    throw new Error("Estatísticas indisponíveis");
+  let payload: FootballLeagueStatsRaw | null = null;
+
+  if (
+    CONFIG.STATPAL_API_KEY &&
+    canUseFootballProvider(CONFIG.FOOTBALL_REFERENCE_PROVIDER, "statpal")
+  ) {
+    try {
+      const resp = await fetch(
+        buildStatpalUrl(`/v2/soccer/leagues/${encodeURIComponent(leagueId)}/stats`),
+        {
+          signal: AbortSignal.timeout(8_000),
+          headers: statpalHeaders(),
+        },
+      );
+      if (resp.ok) {
+        payload = (await resp.json()) as FootballLeagueStatsRaw;
+      }
+    } catch (err) {
+      logger.warn(
+        { err, provider: "statpal", leagueId },
+        "Football league stats provider failed; falling back",
+      );
+    }
   }
 
-  const urls = [
-    `${SAPI_V2_FOOTBALL}/league/${encodeURIComponent(leagueId)}/stats`,
-    `${SAPI_V2_FOOTBALL}/leagues/${encodeURIComponent(leagueId)}/stats`,
-  ];
+  if (
+    !payload?.league_stats?.league &&
+    CONFIG.SPORTSAPI_KEY &&
+    canUseFootballProvider(CONFIG.FOOTBALL_REFERENCE_PROVIDER, "sportsapipro")
+  ) {
+    const urls = [
+      `${SAPI_V2_FOOTBALL}/league/${encodeURIComponent(leagueId)}/stats`,
+      `${SAPI_V2_FOOTBALL}/leagues/${encodeURIComponent(leagueId)}/stats`,
+    ];
 
-  let payload: FootballLeagueStatsRaw | null = null;
-  for (const url of urls) {
-    try {
-      const resp = await fetch(url, {
-        signal: AbortSignal.timeout(8000),
-        headers: sapiHeaders(),
-      });
-      if (!resp.ok) continue;
-      payload = (await resp.json()) as FootballLeagueStatsRaw;
-      if (payload?.league_stats?.league) break;
-    } catch {
-      // Try the next candidate endpoint before failing.
+    for (const url of urls) {
+      try {
+        const resp = await fetch(url, {
+          signal: AbortSignal.timeout(8000),
+          headers: sapiHeaders(),
+        });
+        if (!resp.ok) continue;
+        payload = (await resp.json()) as FootballLeagueStatsRaw;
+        if (payload?.league_stats?.league) break;
+      } catch {
+        // Try the next candidate endpoint before failing.
+      }
     }
   }
 
@@ -24782,6 +25495,105 @@ const FOOTBALL_H2H_TTL = 10 * 60 * 1000; // 10 min
 async function getFootballH2H(team1: string, team2: string): Promise<object> {
   const key = `${team1}-${team2}`;
   const cached = footballH2HCache.get(key);
+  if (cached && Date.now() - cached.fetchedAt < FOOTBALL_H2H_TTL) {
+    return cached.data;
+  }
+
+  if (
+    CONFIG.STATPAL_API_KEY &&
+    canUseFootballProvider(CONFIG.FOOTBALL_REFERENCE_PROVIDER, "statpal")
+  ) {
+    try {
+      const resp = await fetch(
+        buildStatpalUrl("/v2/soccer/head-to-head", {
+          team1_id: team1,
+          team2_id: team2,
+        }),
+        {
+          signal: AbortSignal.timeout(8_000),
+          headers: statpalHeaders(),
+        },
+      );
+      if (resp.ok) {
+        const payload = (await resp.json()) as FootballH2HRaw;
+        const root = payload["head-to-head"];
+        if (root) {
+          const data = {
+            team1Id: root.team1_id,
+            team2Id: root.team2_id,
+            recentMeetings: statpalList(root.recent_meetings?.match).map(
+              normaliseH2HMatch,
+            ),
+            overallRecord: {
+              total: mergeH2HArray(root.overall_record?.total?.total ?? []),
+              home: {
+                team1: mergeH2HArray(root.overall_record?.home?.team1 ?? []),
+                team2: mergeH2HArray(root.overall_record?.home?.team2 ?? []),
+              },
+              away: {
+                team1: mergeH2HArray(root.overall_record?.away?.team1 ?? []),
+                team2: mergeH2HArray(root.overall_record?.away?.team2 ?? []),
+              },
+            },
+            leagues: statpalList(root.leagues?.league).map((league) => ({
+              name: league.name,
+              id: league.id,
+              games: parseInt(league.games) || 0,
+              team1Won: parseInt(league.team1_won) || 0,
+              team2Won: parseInt(league.team2_won) || 0,
+              draws: parseInt(league.draw) || 0,
+            })),
+            goals: {
+              total: mergeH2HArray(root.goals?.total?.total ?? []),
+              home: mergeH2HArray(root.goals?.home?.home ?? []),
+              away: mergeH2HArray(root.goals?.away?.away ?? []),
+            },
+            biggestVictory: {
+              team1: root.biggest_victory?.team1?.match
+                ? normaliseH2HMatch(root.biggest_victory.team1.match)
+                : null,
+              team2: root.biggest_victory?.team2?.match
+                ? normaliseH2HMatch(root.biggest_victory.team2.match)
+                : null,
+            },
+            biggestDefeat: {
+              team1: root.biggest_defeat?.team1?.match
+                ? normaliseH2HMatch(root.biggest_defeat.team1.match)
+                : null,
+              team2: root.biggest_defeat?.team2?.match
+                ? normaliseH2HMatch(root.biggest_defeat.team2.match)
+                : null,
+            },
+            last5Home: {
+              team1: statpalList(root.last5_home?.team1?.match).map(
+                normaliseH2HMatch,
+              ),
+              team2: statpalList(root.last5_home?.team2?.match).map(
+                normaliseH2HMatch,
+              ),
+            },
+            last5Away: {
+              team1: statpalList(root.last5_away?.team1?.match).map(
+                normaliseH2HMatch,
+              ),
+              team2: statpalList(root.last5_away?.team2?.match).map(
+                normaliseH2HMatch,
+              ),
+            },
+          };
+
+          footballH2HCache.set(key, { data, fetchedAt: Date.now() });
+          return data;
+        }
+      }
+    } catch (err) {
+      logger.warn(
+        { err, provider: "statpal", team1, team2 },
+        "Football H2H provider failed",
+      );
+    }
+  }
+
   if (cached) return cached.data;
   throw new Error("H2H indisponível");
 }
@@ -24886,6 +25698,52 @@ function parseInjuryTeam(t: FootballInjuryTeamRaw): FootballInjuryTeam {
 }
 
 async function getFootballInjuries(): Promise<FootballInjuryLeague[]> {
+  if (
+    footballInjuriesCache &&
+    Date.now() - footballInjuriesFetchedAt < FOOTBALL_INJURIES_TTL
+  ) {
+    return footballInjuriesCache;
+  }
+
+  if (
+    CONFIG.STATPAL_API_KEY &&
+    canUseFootballProvider(CONFIG.FOOTBALL_REFERENCE_PROVIDER, "statpal")
+  ) {
+    try {
+      const resp = await fetch(
+        buildStatpalUrl("/v2/soccer/injuries-suspensions"),
+        {
+          signal: AbortSignal.timeout(8_000),
+          headers: statpalHeaders(),
+        },
+      );
+      if (resp.ok) {
+        const payload = (await resp.json()) as FootballInjuriesRaw;
+        const leagues = statpalList(payload.injuries_suspensions?.league).map(
+          (league): FootballInjuryLeague => ({
+            id: league.id,
+            name: league.name,
+            matches: statpalList(league.match).map((match) => ({
+              id: match.main_id,
+              date: match.date,
+              time: match.time,
+              home: parseInjuryTeam(match.home),
+              away: parseInjuryTeam(match.away),
+            })),
+          }),
+        );
+        footballInjuriesCache = leagues;
+        footballInjuriesFetchedAt = Date.now();
+        return leagues;
+      }
+    } catch (err) {
+      logger.warn(
+        { err, provider: "statpal" },
+        "Football injuries provider failed",
+      );
+    }
+  }
+
   return footballInjuriesCache ?? [];
 }
 
@@ -25076,6 +25934,160 @@ function parseTeamPeriods(
 
 async function getFootballTeam(teamId: string): Promise<object> {
   const cached = footballTeamCache.get(teamId);
+  if (cached && Date.now() - cached.fetchedAt < FOOTBALL_TEAM_TTL) {
+    return cached.data;
+  }
+
+  if (
+    CONFIG.STATPAL_API_KEY &&
+    canUseFootballProvider(CONFIG.FOOTBALL_REFERENCE_PROVIDER, "statpal")
+  ) {
+    try {
+      const resp = await fetch(
+        buildStatpalUrl(`/v2/soccer/teams/${encodeURIComponent(teamId)}`),
+        {
+          signal: AbortSignal.timeout(8_000),
+          headers: statpalHeaders(),
+        },
+      );
+      if (resp.ok) {
+        const payload = (await resp.json()) as FootballTeamProfileRaw;
+        const team = payload.team;
+        if (team) {
+          const pi = (s: string | undefined) => parseInt(s ?? "") || 0;
+          const pf = (s: string | undefined) => parseFloat(s ?? "") || 0;
+          const parseTeamPlayer = (player: FootballTeamPlayerRaw) => ({
+            id: player.id,
+            name: player.name,
+            number: player.number,
+            age: pi(player.age),
+            position: player.position,
+            isCaptain:
+              player.is_captain === "1" || player.is_captain === "True",
+            injured: player.injured === "True",
+            minutesPlayed: pi(player.minutes_played),
+            startingLineups: pi(player.starting_lineups),
+            subIn: pi(player.substitute_in),
+            subOut: pi(player.substitute_out),
+            onBench: pi(player.on_bench),
+            appearances: pi(player.appearences),
+            assists: pi(player.assists),
+            goals: pi(player.goals),
+            rating: pf(player.rating),
+            yellowCards: pi(player.yellowcards),
+            yellowRed: pi(player.yellowred),
+            redCards: pi(player.redcards),
+            saves: pi(player.saves),
+            goalsConceded: pi(player.goals_conceded),
+            insideBoxSaves: pi(player.inside_box_saves),
+            penSaved: pi(player.pen_saved),
+            penScored: pi(player.pen_scored),
+            penMissed: pi(player.pen_missed),
+            penCommitted: pi(player.pen_committed),
+            penWon: pi(player.pen_won),
+            shotsTotal: pi(player.shots_total),
+            shotsOnTarget: pi(player.shots_on_target),
+            shotsWoodwork: pi(player.shots_woodwork),
+            passAttempts: pi(player.pass_attempts),
+            passSuccess: pi(player.pass_success),
+            keyPasses: pi(player.key_passes),
+            dribbleAttempts: pi(player.dribble_attempts),
+            dribbleSuccess: pi(player.dribble_success),
+            dispossessed: pi(player.dispossesed),
+            duelsTotal: pi(player.duels_total),
+            duelsWon: pi(player.duels_won),
+            foulsCommitted: pi(player.fouls_committed),
+            foulsDrawn: pi(player.fouls_drawn),
+            tackles: pi(player.tackles),
+            blocks: pi(player.blocks),
+            clearances: pi(player.clearances),
+            interceptions: pi(player.interceptions),
+            crossesTotal: pi(player.crosses_total),
+            crossesAccurate: pi(player.crosses_accurate),
+          });
+
+          const parseTransferPlayer = (player: FootballTeamTransferPlayerRaw) => ({
+            id: player.id,
+            name: player.name,
+            date: player.date,
+            age: pi(player.age),
+            position: player.position ?? "",
+            from: player.from ?? "",
+            to: player.to ?? "",
+            teamId: player.team_id ?? "",
+            type: player.type,
+            price: player.price ?? "",
+          });
+
+          const data = {
+            updated: payload.updated,
+            updatedTs: payload.updated_ts ?? 0,
+            team: {
+              id: team.id,
+              name: team.name,
+              country: team.country,
+              founded: pi(team.founded),
+              isNationalTeam: team.is_national_team === "True",
+              isWomen: team.is_women === "True",
+              leagueIds: statpalList(team.leagues?.league_id),
+              venue: {
+                name: team.venue_name ?? "",
+                id: team.venue_id ?? "",
+                surface: team.venue_surface ?? "",
+                capacity: pi(team.venue_capacity),
+                address: team.venue_address ?? "",
+                city: team.venue_city ?? "",
+              },
+              coach: team.coach
+                ? { id: team.coach.id, name: team.coach.name }
+                : null,
+              squad: statpalList(team.squad?.player).map(parseTeamPlayer),
+              transfers: {
+                in: statpalList(team.transfers?.in?.player).map(
+                  parseTransferPlayer,
+                ),
+                out: statpalList(team.transfers?.out?.player).map(
+                  parseTransferPlayer,
+                ),
+              },
+              trophies: statpalList(team.trophies?.trophy).map((trophy) => ({
+                country: trophy.country,
+                league: trophy.league,
+                status: trophy.status,
+                count: pi(trophy.count),
+                seasons: trophy.seasons,
+              })),
+              leagueStats: statpalList(team.league_stats?.league).map((league) => ({
+                id: league.id,
+                name: league.name,
+                season: league.season,
+                fulltime: parseTeamHalfRecord(league.fulltime),
+                firsthalf: parseTeamHalfRecord(league.firsthalf),
+                secondhalf: parseTeamHalfRecord(league.secondhalf),
+                scoringMinutes: parseTeamPeriods(league.scoring_minutes?.period),
+                goalsConcededMinutes: parseTeamPeriods(
+                  league.goals_conceded_minutes?.period,
+                ),
+                yellowcardMinutes: parseTeamPeriods(
+                  league.yellowcard_minutes?.period,
+                ),
+                redcardMinutes: parseTeamPeriods(league.redcard_minutes?.period),
+              })),
+            },
+          };
+
+          footballTeamCache.set(teamId, { data, fetchedAt: Date.now() });
+          return data;
+        }
+      }
+    } catch (err) {
+      logger.warn(
+        { err, provider: "statpal", teamId },
+        "Football team provider failed",
+      );
+    }
+  }
+
   if (cached) return cached.data;
   throw new Error("Equipa indisponível");
 }
@@ -25313,6 +26325,83 @@ function toClubStats(
 
 async function getFootballPlayer(playerId: string): Promise<object> {
   const cached = footballPlayerCache.get(playerId);
+  if (cached && Date.now() - cached.fetchedAt < FOOTBALL_PLAYER_TTL) {
+    return cached.data;
+  }
+
+  if (
+    CONFIG.STATPAL_API_KEY &&
+    canUseFootballProvider(CONFIG.FOOTBALL_REFERENCE_PROVIDER, "statpal")
+  ) {
+    try {
+      const resp = await fetch(
+        buildStatpalUrl(`/v2/soccer/players/${encodeURIComponent(playerId)}`),
+        {
+          signal: AbortSignal.timeout(8_000),
+          headers: statpalHeaders(),
+        },
+      );
+      if (resp.ok) {
+        const payload = (await resp.json()) as FootballPlayerProfileRaw;
+        const player = payload.player;
+        if (player) {
+          const pi = (s: string | undefined) => parseInt(s ?? "") || 0;
+          const pf = (s: string | undefined) => parseFloat(s ?? "") || 0;
+          const data = {
+            updated: payload.updated,
+            updatedTs: payload.updated_ts ?? 0,
+            player: {
+              id: player.id,
+              name: player.name,
+              firstName: player.firstname,
+              lastName: player.lastname,
+              age: pi(player.age),
+              birthdate: player.birthdate,
+              nationality: player.nationality,
+              birthplace: player.birthplace,
+              birthcountry: player.birthcountry,
+              position: player.position,
+              height: pi(player.height),
+              weight: pi(player.weight),
+              preferredFoot: player.preferred_foot,
+              team: player.team,
+              teamId: player.team_id,
+              nationalTeamId: player.national_team_id ?? "",
+              marketValueEur: pi(player.market_value_eur),
+              clubLeagueStatistics: toClubStats(
+                player.club_league_statistics?.club,
+              ),
+              clubDomesticCupStatistics: toClubStats(
+                player.club_domestic_cup_statistics?.club,
+              ),
+              clubIntlCupStatistics: toClubStats(
+                player.club_intl_cup_statistics?.club,
+              ),
+              overallClubStatistics: player.overall_club_statistics
+                ? parsePlayerOverall(player.overall_club_statistics)
+                : null,
+              nationalTeamStatistics: player.national_team_statistics ?? null,
+              transfers: player.transfers ?? [],
+              trophies: player.trophies ?? {},
+              sidelinedHistory: player.sidelined_history ?? [],
+              currentRating: player.overall_club_statistics
+                ? pf(player.overall_club_statistics.rating)
+                : 0,
+            },
+          };
+
+          footballPlayerCache.set(playerId, { data, fetchedAt: Date.now() });
+          return data;
+        }
+      }
+    } catch (err) {
+      logger.warn(
+        { err, provider: "statpal", playerId },
+        "Football player provider failed",
+      );
+    }
+  }
+
   if (cached) return cached.data;
   throw new Error("Jogador indisponível");
 }
@@ -25363,6 +26452,75 @@ const FOOTBALL_COACH_TTL = 30 * 60 * 1000;
 
 async function getFootballCoach(coachId: string): Promise<object> {
   const cached = footballCoachCache.get(coachId);
+  if (cached && Date.now() - cached.fetchedAt < FOOTBALL_COACH_TTL) {
+    return cached.data;
+  }
+
+  if (
+    CONFIG.STATPAL_API_KEY &&
+    canUseFootballProvider(CONFIG.FOOTBALL_REFERENCE_PROVIDER, "statpal")
+  ) {
+    try {
+      const resp = await fetch(
+        buildStatpalUrl(`/v2/soccer/coaches/${encodeURIComponent(coachId)}`),
+        {
+          signal: AbortSignal.timeout(8_000),
+          headers: statpalHeaders(),
+        },
+      );
+      if (resp.ok) {
+        const payload = (await resp.json()) as FootballCoachProfileRaw;
+        const coach = payload.coach;
+        if (coach) {
+          const pi = (s: string | undefined) => parseInt(s ?? "") || 0;
+          const trophies = statpalList(coach.trophies?.trophy).map((trophy) => ({
+            country: trophy.country,
+            league: trophy.league,
+            status: trophy.status,
+            count: pi(trophy.count),
+            seasons: trophy.seasons,
+          }));
+          const career = statpalList(coach.career_stats?.team).map((team) => ({
+            id: team.id,
+            name: team.name,
+            from: team.from,
+            to: team.to,
+          }));
+
+          const data = {
+            updated: payload.updated,
+            updatedTs: payload.updated_ts ?? 0,
+            coach: {
+              id: coach.id,
+              name: coach.name,
+              firstName: coach.firstname,
+              lastName: coach.lastname,
+              team: coach.team,
+              teamId: coach.team_id,
+              nationality: coach.nationality,
+              birthdate: coach.birthdate,
+              age: pi(coach.age),
+              birthcountry: coach.birthcountry,
+              birthplace: coach.birthplace,
+              height: coach.height,
+              weight: coach.weight,
+              trophies,
+              careerStats: career,
+            },
+          };
+
+          footballCoachCache.set(coachId, { data, fetchedAt: Date.now() });
+          return data;
+        }
+      }
+    } catch (err) {
+      logger.warn(
+        { err, provider: "statpal", coachId },
+        "Football coach provider failed",
+      );
+    }
+  }
+
   if (cached) return cached.data;
   throw new Error("Treinador indisponível");
 }
@@ -25385,8 +26543,62 @@ router.get("/football-coach/:id", async (req: Request, res: Response) => {
 const imageCache = new Map<string, { buf: Buffer; fetchedAt: number }>();
 const IMAGE_TTL = 7 * 24 * 60 * 60 * 1000; // 7 days
 
-router.get("/football-image", (_req: Request, res: Response) => {
-  res.status(404).json({ error: "Imagens indisponíveis" });
+router.get("/football-image", async (req: Request, res: Response) => {
+  if (!CONFIG.STATPAL_API_KEY) {
+    res.status(404).json({ error: "Imagens indisponíveis" });
+    return;
+  }
+
+  const type = String(req.query["type"] ?? "").trim().toLowerCase();
+  const id = String(req.query["id"] ?? "").trim();
+  if (!type || !id) {
+    res.status(400).json({ error: "Parâmetros type e id são obrigatórios" });
+    return;
+  }
+
+  const cacheKey = `${type}:${id}`;
+  const cached = imageCache.get(cacheKey);
+  if (cached && Date.now() - cached.fetchedAt < IMAGE_TTL) {
+    res.setHeader("Content-Type", "image/png");
+    res.setHeader("Cache-Control", "public, max-age=604800");
+    res.send(cached.buf);
+    return;
+  }
+
+  try {
+    const url = buildStatpalUrl("/v2/soccer/images", { type, id });
+    const upstream = await fetch(url, {
+      signal: AbortSignal.timeout(8_000),
+      headers: {
+        Accept: "image/png, application/json",
+      },
+    });
+
+    if (!upstream.ok) {
+      res.status(404).json({ error: "Imagem indisponível" });
+      return;
+    }
+
+    const contentType = upstream.headers.get("content-type") ?? "";
+    if (!contentType.toLowerCase().includes("image/")) {
+      const payload = await upstream.text();
+      logger.warn(
+        { type, id, contentType, payload: payload.slice(0, 400) },
+        "Football image upstream returned non-image payload",
+      );
+      res.status(404).json({ error: "Imagem indisponível" });
+      return;
+    }
+
+    const buf = Buffer.from(await upstream.arrayBuffer());
+    imageCache.set(cacheKey, { buf, fetchedAt: Date.now() });
+    res.setHeader("Content-Type", contentType || "image/png");
+    res.setHeader("Cache-Control", "public, max-age=604800");
+    res.send(buf);
+  } catch (err) {
+    logger.warn({ err, type, id }, "Football image provider failed");
+    res.status(500).json({ error: "Imagens indisponíveis" });
+  }
 });
 
 // ─── Football Pre-match Odds (per league, v2) ──────────────────────────────────
