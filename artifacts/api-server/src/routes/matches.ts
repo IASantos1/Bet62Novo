@@ -771,9 +771,13 @@ function parseStatpalStartTimestamp(dateRaw: string, timeRaw: string): number | 
     return undefined;
   }
 
-  const utcMs =
-    Date.UTC(year, month - 1, day, hour, minute, 0, 0) -
-    lisbonOffsetHours() * 60 * 60 * 1000;
+  // Statpal's raw `date`/`time` fields for football are already UTC (same
+  // convention as every other sport in this file — see `addOneHour`'s doc
+  // comment: "UTC -> Portugal UTC+1"). Do NOT subtract the Lisbon offset here;
+  // that previously double-applied a timezone shift and made every match's
+  // ground-truth kickoff appear up to 1 hour (DST) early, which defeated the
+  // too-early live guard exactly when it mattered most.
+  const utcMs = Date.UTC(year, month - 1, day, hour, minute, 0, 0);
   return Math.floor(utcMs / 1000);
 }
 
