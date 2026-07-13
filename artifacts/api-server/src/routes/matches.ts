@@ -874,6 +874,31 @@ async function fetchStatpalFootballLiveV2(): Promise<{
   return { events, updatedTs };
 }
 
+// Refresh the ground-truth kickoff map from Statpal's *daily* fixture feed
+// (via getDailyLeagues, which shares the exact same `main_id`-based id space as
+// the Statpal *live* feed used by buildFootballLiveV2 — unlike SportsAPI Pro's
+// schedule endpoint, whose ids belong to a completely different provider and
+// never line up with Statpal's live event ids). The daily feed is fetched once
+// per day and cached (see CONFIG.DAILY_CACHE_TTL), so it is far less likely to
+// be corrupted by the transient "fake early live status + fake early kickoff
+// time" glitch sometimes seen when continuously polling the live feed.
+async function refreshFootballGroundTruthKickoffs(): Promise<void> {
+  try {
+    const leagues = await getDailyLeagues();
+    for (const league of leagues) {
+      for (const match of statpalList(league.match)) {
+        if (!match?.main_id) continue;
+        const ev = statpalMatchToV2Event(league, match);
+        if (ev.id && ev.startTimestamp) {
+          footballScheduledKickoffSec.set(ev.id, ev.startTimestamp);
+        }
+      }
+    }
+  } catch {
+    /* keep whatever ground-truth data we already have */
+  }
+}
+
 async function fetchStatpalFootballDailyLeagues(): Promise<SAPILeagueV2[]> {
   if (!CONFIG.STATPAL_API_KEY) throw new Error("STATPAL_API_KEY is not configured");
 
@@ -14226,6 +14251,11 @@ async function buildFootballLiveV2(
     if (!Number.isFinite(v)) return 30;
     return Math.min(600, Math.max(0, Math.trunc(v)));
   })();
+  // Keep the ground-truth kickoff map fresh before evaluating any "too early"
+  // guard below — getDailyLeagues() is internally cached, so this is a no-op
+  // fetch-wise on most calls.
+  await refreshFootballGroundTruthKickoffs();
+
   const result: LiveMatchState[] = [];
   const currentIds = new Set<string>();
   const providerPresentIds = new Set<string>();
@@ -15021,9 +15051,27 @@ async function buildBasketballLiveV2(
     // fixtures as "live" with a stale/fake in-progress status code. If the
     // scheduled tip-off is still more than a small clock-skew window in the
     // future, it hasn't actually started — do not show it in the live feed.
+    // A fixture that was recently seen in the upcoming list (fromUpcoming) is
+    // trusted to bypass a missing startTimestamp; anything else with no
+    // startTimestamp at all is treated cautiously and skipped, mirroring the
+    // stricter football guard.
+    const fromUpcoming = hasRecentUpcomingEligibility("basketball", ev.id);
+    if (ev.startTimestamp !== undefined) {
+      if (ev.startTimestamp - now / 1000 > 30) continue;
+    } else if (!fromUpcoming) {
+      continue;
+    }
+    const evAgeSeconds = ev.startTimestamp
+      ? now / 1000 - ev.startTimestamp
+      : 0;
+    // Block a fixture appearing for the first time if it's already more than
+    // 20 minutes old — prevents games from suddenly entering the live section
+    // already mid-game. fromUpcoming matches bypass this since they were
+    // pre-announced as upcoming.
     if (
-      ev.startTimestamp !== undefined &&
-      ev.startTimestamp - now / 1000 > 30
+      !liveMatchState.has(`bball-v2-${ev.id}`) &&
+      evAgeSeconds > 20 * 60 &&
+      !fromUpcoming
     )
       continue;
 
@@ -15042,7 +15090,6 @@ async function buildBasketballLiveV2(
 
     const league = v2TournName(ev.tournament);
     const country = v2TournCountry(ev);
-    const fromUpcoming = hasRecentUpcomingEligibility("basketball", ev.id);
     if (!fromUpcoming && !basketballLeagueAllowed(country, league)) continue;
 
     // Build quarters array from period1..4
@@ -15216,9 +15263,26 @@ function buildHockeyLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
     // fixtures as "live" with a stale/fake in-progress status code. If the
     // scheduled puck-drop is still more than a small clock-skew window in the
     // future, it hasn't actually started — do not show it in the live feed.
+    // A fixture recently seen in the upcoming list (fromUpcoming) is trusted to
+    // bypass a missing startTimestamp; anything else with no startTimestamp at
+    // all is treated cautiously and skipped, mirroring the stricter football guard.
+    const fromUpcoming = hasRecentUpcomingEligibility("hockey", ev.id);
+    if (ev.startTimestamp !== undefined) {
+      if (ev.startTimestamp - now / 1000 > 30) continue;
+    } else if (!fromUpcoming) {
+      continue;
+    }
+    const evAgeSeconds = ev.startTimestamp
+      ? now / 1000 - ev.startTimestamp
+      : 0;
+    // Block a fixture appearing for the first time if it's already more than
+    // 20 minutes old — prevents games from suddenly entering the live section
+    // already mid-game. fromUpcoming matches bypass this since they were
+    // pre-announced as upcoming.
     if (
-      ev.startTimestamp !== undefined &&
-      ev.startTimestamp - now / 1000 > 30
+      !liveMatchState.has(`hockey-v2-${ev.id}`) &&
+      evAgeSeconds > 20 * 60 &&
+      !fromUpcoming
     )
       continue;
 
@@ -15394,9 +15458,26 @@ function buildBaseballLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
     // fixtures as "live" with a stale/fake in-progress status. If the
     // scheduled first pitch is still more than a small clock-skew window in
     // the future, it hasn't actually started — do not show it in the live feed.
+    // A fixture recently seen in the upcoming list (fromUpcoming) is trusted to
+    // bypass a missing startTimestamp; anything else with no startTimestamp at
+    // all is treated cautiously and skipped, mirroring the stricter football guard.
+    const fromUpcoming = hasRecentUpcomingEligibility("baseball", ev.id);
+    if (ev.startTimestamp !== undefined) {
+      if (ev.startTimestamp - now / 1000 > 30) continue;
+    } else if (!fromUpcoming) {
+      continue;
+    }
+    const evAgeSeconds = ev.startTimestamp
+      ? now / 1000 - ev.startTimestamp
+      : 0;
+    // Block a fixture appearing for the first time if it's already more than
+    // 20 minutes old — prevents games from suddenly entering the live section
+    // already mid-game. fromUpcoming matches bypass this since they were
+    // pre-announced as upcoming.
     if (
-      ev.startTimestamp !== undefined &&
-      ev.startTimestamp - now / 1000 > 30
+      !liveMatchState.has(`baseball-v2-${ev.id}`) &&
+      evAgeSeconds > 20 * 60 &&
+      !fromUpcoming
     )
       continue;
 
