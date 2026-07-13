@@ -6154,6 +6154,16 @@ setInterval(() => {
 let dailyCache: SAPILeagueV2[] | null = null;
 let dailyFetchedAt = 0;
 
+// Ground-truth scheduled kickoff (epoch seconds) per football event id, captured
+// from the pre-match schedule feed (getUpcomingEventsV2) *before* the match ever
+// appears live. The live feed's own self-reported startTimestamp can be wrong —
+// some providers report a fixture's date/time as already-past in lockstep with a
+// fake early "live" status, which defeats a guard that only trusts the live feed.
+// This map is populated purely from the schedule/upcoming source, so it can't be
+// corrupted by a bad live-status glitch, and is used to gate when a match is
+// allowed to actually enter the live list.
+const footballScheduledKickoffSec = new Map<number, number>();
+
 // v2/daily tomorrow: cache 30min
 let dailyTomorrowCache: SAPILeagueV2[] | null = null;
 let dailyTomorrowFetchedAt = 0;
@@ -13642,6 +13652,12 @@ async function buildLiveMatches(): Promise<LiveMatchState[]> {
 async function buildUpcomingMatches(): Promise<UpcomingMatch[]> {
   const events = await getUpcomingEventsV2("football", 3);
   if (events.length === 0) return buildFootballUpcomingV1();
+  // Capture ground-truth scheduled kickoff for every fixture seen here, before
+  // any league/team filtering — this is our only trustworthy source, since it
+  // comes from the schedule feed rather than the live feed's self-reported time.
+  for (const ev of events) {
+    if (ev.startTimestamp) footballScheduledKickoffSec.set(ev.id, ev.startTimestamp);
+  }
   const seen = new Set<string>();
   const primary: SAPIV2Event[] = [];
   const fallback: SAPIV2Event[] = [];
@@ -14249,15 +14265,21 @@ async function buildFootballLiveV2(
     const statusCode = v2StatusCode(ev);
     if (isFootballV2FinishedStatus(statusStr)) continue;
     if (!isFootballV2LiveStatus(statusStr, statusCode)) continue;
-    const evAgeSeconds = ev.startTimestamp
-      ? Date.now() / 1000 - ev.startTimestamp
+    // Prefer the ground-truth kickoff captured from the pre-match schedule feed
+    // over the live feed's own self-reported startTimestamp: some providers
+    // report a fixture's date/time as already-past in lockstep with a fake
+    // early "live"/0' status, which would otherwise defeat this guard entirely.
+    const groundTruthStart = footballScheduledKickoffSec.get(ev.id);
+    const effectiveStart = groundTruthStart ?? ev.startTimestamp;
+    const evAgeSeconds = effectiveStart
+      ? Date.now() / 1000 - effectiveStart
       : 0;
     if (evAgeSeconds > 2.5 * 3600) continue;
     // Guard against providers (Statpal in particular) reporting not-yet-started
     // fixtures as "live" with a fake 0' status. If the scheduled kickoff is
     // still in the future beyond the allowed clock-skew window, it hasn't
     // actually started — do not show it in the live feed.
-    if (ev.startTimestamp && -evAgeSeconds > clockSkewSec) continue;
+    if (effectiveStart && -evAgeSeconds > clockSkewSec) continue;
     const homeTeam = v2TeamName(ev.homeTeam);
     const awayTeam = v2TeamName(ev.awayTeam);
     if (homeTeam === "Unknown" || awayTeam === "Unknown") continue;
@@ -14380,7 +14402,11 @@ async function buildFootballLiveV2(
     } else if (isET) {
       minute = 105;
     } else {
-      let kickoffSec = existing?._liveExtra?.kickoffSec ?? ev.startTimestamp ?? 0;
+      let kickoffSec =
+        existing?._liveExtra?.kickoffSec ??
+        footballScheduledKickoffSec.get(ev.id) ??
+        ev.startTimestamp ??
+        0;
       if (!kickoffSec) {
         const { date: sDate, time: sTime } = v2EventDateTime(ev);
         if (sDate && /^\d{2}:\d{2}$/.test(sTime)) {
