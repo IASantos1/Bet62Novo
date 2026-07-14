@@ -15777,9 +15777,9 @@ function buildTennisLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
     if (ev.finalResultOnly === true) continue;
     // Also deduplicate by player pair (API can return same match with different IDs).
     // Keep the entry with the HIGHER status code (later in the match = more authoritative).
-    const h = v2TeamName(ev.homeTeam).toLowerCase();
-    const a = v2TeamName(ev.awayTeam).toLowerCase();
-    const pairKey = `${h}|${a}`;
+    const homeTeam = v2TeamName(ev.homeTeam);
+    const awayTeam = v2TeamName(ev.awayTeam);
+    const pairKey = _tennisPairKey(homeTeam, awayTeam);
     if (seenPairs.has(pairKey)) continue;
     seenPairs.add(pairKey);
     const id = `tennis-v2-${ev.id}`;
@@ -15834,8 +15834,6 @@ function buildTennisLiveV2(events: SAPIV2Event[]): LiveMatchState[] {
     // Accept everything else: "Playing", "1st Set", "2nd Set", "In Progress",
     // "Break Time", "Advantage", "Tiebreak", "Suspended", "Paused", etc.
 
-    const homeTeam = v2TeamName(ev.homeTeam);
-    const awayTeam = v2TeamName(ev.awayTeam);
     const hS =
       typeof ev.homeScore === "object" && ev.homeScore !== null
         ? (ev.homeScore as SAPIV2ScoreObj)
@@ -25530,13 +25528,21 @@ async function getTennisOdds(): Promise<TennisOddsEntry[]> {
   if (tennisOddsCache && now - tennisOddsFetchedAt < TENNIS_ODDS_TTL)
     return tennisOddsCache;
   try {
-    const events = await getUpcomingLeagueEventsV2("tennis", 7);
+    const eventsRaw = await getUpcomingLeagueEventsV2("tennis", 7);
+    const seenEventIds = new Set<number>();
+    const events = eventsRaw.filter((ev) => {
+      if (typeof ev.id !== "number") return true;
+      if (seenEventIds.has(ev.id)) return false;
+      seenEventIds.add(ev.id);
+      return true;
+    });
     // Populate V1 league label cache from these V2 events (they have ATP/WTA category info)
     refreshTennisV2LeagueCache(events);
     const oddsResults = await Promise.all(
       events.map((ev) => getPreMatchOddsV2("tennis", ev.id).catch(() => null)),
     );
     const results: TennisOddsEntry[] = [];
+    const seenResultKeys = new Set<string>();
     for (let i = 0; i < events.length; i++) {
       const ev = events[i]!;
       const realOdds = oddsResults[i];
@@ -25544,6 +25550,12 @@ async function getTennisOdds(): Promise<TennisOddsEntry[]> {
       const p0Name = v2TeamName(ev.homeTeam);
       const p1Name = v2TeamName(ev.awayTeam);
       const { date, time } = v2EventDateTime(ev);
+      const dedupeKey =
+        p0Name && p1Name
+          ? `${_tennisPairKey(p0Name, p1Name)}|${ev.startTimestamp ?? `${date}|${time}`}`
+          : String(ev.id);
+      if (seenResultKeys.has(dedupeKey)) continue;
+      seenResultKeys.add(dedupeKey);
       const h = realOdds.home;
       const a = realOdds.away;
       if (p0Name && p1Name) {
