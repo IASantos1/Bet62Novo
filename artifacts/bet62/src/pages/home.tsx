@@ -3186,6 +3186,50 @@ const OTHER_SPORTS: {
       "Volleyball Nations League",
     ],
   },
+  {
+    key: "mma",
+    label: "MMA",
+    icon: "🥊",
+    leagues: ["UFC", "Bellator", "PFL", "ONE Championship", "Rizin"],
+  },
+  {
+    key: "cricket",
+    label: "Críquete",
+    icon: "🏏",
+    leagues: [
+      "ICC Cricket World Cup",
+      "Indian Premier League",
+      "Big Bash League",
+      "The Hundred",
+      "Pakistan Super League",
+      "Caribbean Premier League",
+    ],
+  },
+  {
+    key: "formula1",
+    label: "Fórmula 1",
+    icon: "🏎️",
+    leagues: [
+      "Australian Grand Prix",
+      "Monaco Grand Prix",
+      "British Grand Prix",
+      "Italian Grand Prix",
+      "Sao Paulo Grand Prix",
+      "Abu Dhabi Grand Prix",
+    ],
+  },
+  {
+    key: "handball",
+    label: "Handebol",
+    icon: "🤾",
+    leagues: [
+      "EHF Champions League",
+      "IHF World Championship",
+      "Handball-Bundesliga",
+      "Liga ASOBAL",
+      "Ligue Nationale de Handball",
+    ],
+  },
 ];
 
 type TopLeagueEntry = { league: string; country: string; sport: string };
@@ -20861,7 +20905,12 @@ export default function Home({
                   { key: "tennis", emoji: "🎾", label: "Ténis" },
                   { key: "basketball", emoji: "🏀", label: "Basquete" },
                   { key: "hockey", emoji: "🏒", label: "Hóquei" },
+                  { key: "baseball", emoji: "⚾", label: "Beisebol" },
                   { key: "volleyball", emoji: "🏐", label: "Voleibol" },
+                  { key: "mma", emoji: "🥊", label: "MMA" },
+                  { key: "cricket", emoji: "🏏", label: "Críquete" },
+                  { key: "formula1", emoji: "🏎️", label: "Fórmula 1" },
+                  { key: "handball", emoji: "🤾", label: "Handebol" },
                 ];
                 const sportGroups = SPORT_GROUPS.map((g) => ({
                   ...g,
@@ -23469,6 +23518,10 @@ export default function Home({
                       { key: "hockey", label: "Hóquei", icon: "🏒" },
                       { key: "baseball", label: "Basebol", icon: "⚾" },
                       { key: "volleyball", label: "Voleibol", icon: "🏐" },
+                      { key: "mma", label: "MMA", icon: "🥊" },
+                      { key: "cricket", label: "Críquete", icon: "🏏" },
+                      { key: "formula1", label: "Fórmula 1", icon: "🏎️" },
+                      { key: "handball", label: "Handebol", icon: "🤾" },
                     ];
                     const presentSports = new Set(
                       liveMatches.map((m) => m.sport ?? "football"),
