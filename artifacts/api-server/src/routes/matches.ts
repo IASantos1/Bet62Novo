@@ -8073,9 +8073,12 @@ async function getDailyLeagues(): Promise<SAPILeagueV2[]> {
   const dailyProvider = normalizeFootballProviderMode(
     CONFIG.FOOTBALL_DAILY_PROVIDER,
   );
+  const sportsApiMissing = !CONFIG.SPORTSAPI_KEY;
   const canUseStatpal =
     !!CONFIG.STATPAL_API_KEY &&
-    (dailyProvider === "auto" || dailyProvider === "statpal");
+    (dailyProvider === "auto" ||
+      dailyProvider === "statpal" ||
+      (dailyProvider === "sportsapipro" && sportsApiMissing));
   const canUseSportsApi =
     !!CONFIG.SPORTSAPI_KEY &&
     (dailyProvider === "auto" ||
@@ -10398,9 +10401,12 @@ async function getFootballLiveV2(): Promise<SAPIV2Event[]> {
   const liveProvider = normalizeFootballProviderMode(
     CONFIG.FOOTBALL_LIVE_PROVIDER,
   );
+  const sportsApiMissing = !CONFIG.SPORTSAPI_KEY;
   const canUseStatpal =
     !!CONFIG.STATPAL_API_KEY &&
-    (liveProvider === "auto" || liveProvider === "statpal");
+    (liveProvider === "auto" ||
+      liveProvider === "statpal" ||
+      (liveProvider === "sportsapipro" && sportsApiMissing));
   const canUseSportsApi =
     !!CONFIG.SPORTSAPI_KEY &&
     (liveProvider === "auto" ||
