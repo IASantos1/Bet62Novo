@@ -11273,22 +11273,22 @@ async function getUpcomingEventsV2(
     .sort((a, b) => (a.startTimestamp ?? 0) - (b.startTimestamp ?? 0));
 }
 
-type ExtraV2Sport = "mma" | "cricket" | "handball";
+type ExtraV2Sport = "boxing" | "cricket" | "handball";
 
 const EXTRA_V2_BASE_URL: Record<ExtraV2Sport, string> = {
-  mma: "https://api.sportsapipro.com/v2/mma",
+  boxing: "https://api.sportsapipro.com/v2/boxing",
   cricket: "https://api.sportsapipro.com/v2/cricket",
   handball: "https://api.sportsapipro.com/v2/handball",
 };
 
 const EXTRA_V2_ID_PREFIX: Record<ExtraV2Sport, string> = {
-  mma: "mma-v2",
+  boxing: "boxing-v2",
   cricket: "cricket-v2",
   handball: "handball-v2",
 };
 
 const EXTRA_V2_LABEL: Record<ExtraV2Sport, string> = {
-  mma: "MMA",
+  boxing: "Boxing",
   cricket: "Cricket",
   handball: "Handball",
 };
@@ -16749,7 +16749,7 @@ async function rebuildUpcomingCache(): Promise<void> {
       buildHockeyUpcoming().catch(() => empty),
       buildVolleyballUpcoming().catch(() => empty),
       buildBaseballUpcoming().catch(() => empty),
-      getExtraUpcomingEventsV2("mma").then((events) => buildExtraUpcomingV2("mma", events)).catch(() => empty),
+      getExtraUpcomingEventsV2("boxing").then((events) => buildExtraUpcomingV2("boxing", events)).catch(() => empty),
       getExtraUpcomingEventsV2("cricket").then((events) => buildExtraUpcomingV2("cricket", events)).catch(() => empty),
       getExtraUpcomingEventsV2("handball").then((events) => buildExtraUpcomingV2("handball", events)).catch(() => empty),
       getFormula1Upcoming().catch(() => empty),
@@ -16844,7 +16844,7 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
     getTennisLiveV2(),
     getTennisTodayV2(),
     buildTennisLiveV1Cached(), // runs in parallel — does not depend on other results
-    getExtraLiveEventsV2("mma"),
+    getExtraLiveEventsV2("boxing"),
     getExtraLiveEventsV2("cricket"),
     getExtraLiveEventsV2("handball"),
     getFormula1Live(),
@@ -17035,7 +17035,10 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
     buildBaseballLiveV2(baseballEvents),
   );
   const tennisLive = sportWithFallback("tennis", tennisLivePart);
-  const mmaLive = sportWithFallback("mma", buildExtraLiveV2("mma", mmaEvents));
+  const boxingLive = sportWithFallback(
+    "boxing",
+    buildExtraLiveV2("boxing", mmaEvents),
+  );
   const cricketLive = sportWithFallback(
     "cricket",
     buildExtraLiveV2("cricket", cricketEvents),
@@ -17055,7 +17058,7 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
     ...hockeyLive,
     ...baseballLive,
     ...tennisLive,
-    ...mmaLive,
+    ...boxingLive,
     ...cricketLive,
     ...handballLive,
     ...formula1Live,
@@ -18678,7 +18681,7 @@ type UpcomingTopCache = {
   hockey: UpcomingMatch[];
   volleyball: UpcomingMatch[];
   baseball: UpcomingMatch[];
-  mma: UpcomingMatch[];
+  boxing: UpcomingMatch[];
   cricket: UpcomingMatch[];
   handball: UpcomingMatch[];
   formula1: UpcomingMatch[];
@@ -18798,7 +18801,7 @@ function rememberUpcomingEligibility(matches: UpcomingMatch[]): void {
     const sport = String(match.sport ?? "football");
     const idRaw = String(match.id ?? "");
     const m = idRaw.match(
-      /^(fb-v2|football-v2|bball-v2|hockey-v2|tennis-v2|baseball-v2|mlb-v2|volley-odds|volley-live|mma-v2|cricket-v2|handball-v2|formula1-statpal)-(.+)$/,
+      /^(fb-v2|football-v2|bball-v2|hockey-v2|tennis-v2|baseball-v2|mlb-v2|volley-odds|volley-live|boxing-v2|cricket-v2|handball-v2|formula1-statpal)-(.+)$/,
     );
     if (!m) continue;
     const providerId = m[2] ?? "";
@@ -18836,7 +18839,7 @@ async function refreshUpcomingTop(): Promise<UpcomingTopCache> {
     hockey,
     volleyball,
     baseball,
-    mma,
+    boxing,
     cricket,
     handball,
     formula1,
@@ -18854,7 +18857,7 @@ async function refreshUpcomingTop(): Promise<UpcomingTopCache> {
     buildHockeyUpcoming().catch(() => empty),
     buildVolleyballUpcoming().catch(() => empty),
     buildBaseballUpcoming().catch(() => empty),
-    getExtraUpcomingEventsV2("mma").then((events) => buildExtraUpcomingV2("mma", events)).catch(() => empty),
+    getExtraUpcomingEventsV2("boxing").then((events) => buildExtraUpcomingV2("boxing", events)).catch(() => empty),
     getExtraUpcomingEventsV2("cricket").then((events) => buildExtraUpcomingV2("cricket", events)).catch(() => empty),
     getExtraUpcomingEventsV2("handball").then((events) => buildExtraUpcomingV2("handball", events)).catch(() => empty),
     getFormula1Upcoming().catch(() => empty),
@@ -18883,7 +18886,7 @@ async function refreshUpcomingTop(): Promise<UpcomingTopCache> {
     ...hockeyMerged,
     ...volleyballMerged,
     ...baseballMerged,
-    ...mma,
+      ...boxing,
     ...cricket,
     ...handball,
     ...formula1,
@@ -18895,7 +18898,7 @@ async function refreshUpcomingTop(): Promise<UpcomingTopCache> {
     hockey: hockeyMerged,
     volleyball: volleyballMerged,
     baseball: baseballMerged,
-    mma,
+    boxing,
     cricket,
     handball,
     formula1,
@@ -21241,7 +21244,7 @@ router.get("/upcoming", async (req: Request, res: Response) => {
               hockey: [],
               volleyball: [],
               baseball: [],
-              mma: [],
+              boxing: [],
               cricket: [],
               handball: [],
               formula1: [],
@@ -21256,7 +21259,7 @@ router.get("/upcoming", async (req: Request, res: Response) => {
   else if (sport === "hockey") matches = cache.hockey;
   else if (sport === "volleyball") matches = cache.volleyball;
   else if (sport === "baseball") matches = cache.baseball;
-  else if (sport === "mma") matches = cache.mma;
+  else if (sport === "boxing") matches = cache.boxing;
   else if (sport === "cricket") matches = cache.cricket;
   else if (sport === "handball") matches = cache.handball;
   else if (sport === "formula1") matches = cache.formula1;
@@ -21268,7 +21271,7 @@ router.get("/upcoming", async (req: Request, res: Response) => {
       ...cache.hockey,
       ...cache.volleyball,
       ...cache.baseball,
-      ...cache.mma,
+      ...cache.boxing,
       ...cache.cricket,
       ...cache.handball,
       ...cache.formula1,
