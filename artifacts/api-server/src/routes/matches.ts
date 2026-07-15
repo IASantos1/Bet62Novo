@@ -10255,21 +10255,6 @@ function buildStatpalTennisLiveStates(
   return out.map((x) => x.m);
 }
 
-/** Fetches statpal tennis livescores + livestats in parallel and builds LiveMatchState[]. */
-async function buildStatpalTennisLive(): Promise<LiveMatchState[]> {
-  if (!CONFIG.STATPAL_API_KEY) return [];
-  try {
-    const [tournaments, statsMap] = await Promise.all([
-      getTennisLive(),
-      getTennisStatsMap(),
-    ]);
-    return buildStatpalTennisLiveStates(tournaments, statsMap);
-  } catch (err) {
-    logger.warn({ err, provider: "statpal" }, "Statpal tennis live build failed");
-    return [];
-  }
-}
-
 async function getVolleyballLive(): Promise<VolleyTournament[]> {
   const now = Date.now();
   if (volleyLiveCache && now - volleyLiveFetchedAt < VOLLEY_LIVE_TTL)
@@ -16450,7 +16435,6 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
     tennisEvents,
     tennisTodayEvents,
     tennisV1LivePart,
-    tennisStatpalPart,
   ] = await Promise.all([
     getFootballLiveV2(),
     getBasketballLiveV2(),
@@ -16459,7 +16443,6 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
     getTennisLiveV2(),
     getTennisTodayV2(),
     buildTennisLiveV1Cached(), // runs in parallel — does not depend on other results
-    buildStatpalTennisLive(), // statpal: low-latency alternate tennis source, runs in parallel
   ]);
   // Populate V1 tennis league label cache from V2 today events (city → "ATP 250 · City")
   if (tennisTodayEvents && tennisTodayEvents.length > 0) {
@@ -16478,9 +16461,7 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
       ? 4
       : id.startsWith("tennis-v1-")
         ? 3
-        : id.startsWith("tennis-statpal-")
-          ? 2
-          : 1;
+        : 1;
     const realOddsRank = m.hasRealOdds ? 2 : 0;
     const liveDetailRank =
       (m._liveExtra?.currentPoints ? 1 : 0) +
@@ -16506,14 +16487,12 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
 
   const tennisV2Part = buildTennisLiveV2(tennisEvents);
   const seededTennisLivePairs = new Set(
-    [...tennisV2Part, ...tennisV1LivePart, ...tennisStatpalPart].map((m) =>
+    [...tennisV2Part, ...tennisV1LivePart].map((m) =>
       _tennisPairKey(m.home, m.away),
     ),
   );
   const allLiveIds = new Set(
-    [...tennisV2Part, ...tennisV1LivePart, ...tennisStatpalPart].map((m) =>
-      String(m.id),
-    ),
+    [...tennisV2Part, ...tennisV1LivePart].map((m) => String(m.id)),
   );
   const todayStartedExtra = buildTennisLiveV2(
     (tennisTodayEvents ?? []).filter(
@@ -16524,26 +16503,11 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
       !allLiveIds.has(String(m.id)) &&
       !seededTennisLivePairs.has(_tennisPairKey(m.home, m.away)),
   );
-  // statpal is low-latency but only exposes score/points/stats, not the richer
-  // bookmaker odds v1/v2 carry — dedup picks the best-ranked source per match,
-  // then we still borrow statpal's per-player stats onto whichever match won.
-  const tennisStatpalByPair = new Map<string, LiveMatchState>();
-  for (const m of tennisStatpalPart) {
-    tennisStatpalByPair.set(_tennisPairKey(m.home, m.away), m);
-  }
   const tennisLivePart = dedupeTennisLiveMatches([
     ...tennisV2Part,
     ...tennisV1LivePart,
-    ...tennisStatpalPart,
     ...todayStartedExtra,
-  ]).map((m) => {
-    if (m._liveExtra?.tennisStats) return m;
-    const stats = tennisStatpalByPair.get(
-      _tennisPairKey(m.home, m.away),
-    )?._liveExtra?.tennisStats;
-    if (!stats) return m;
-    return { ...m, _liveExtra: { ...m._liveExtra, tennisStats: stats } };
-  });
+  ]);
   const tennisLivePairKeys = new Set(
     tennisLivePart.map((m) => _tennisPairKey(m.home, m.away)),
   );

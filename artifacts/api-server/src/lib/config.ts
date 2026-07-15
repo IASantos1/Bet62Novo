@@ -2,7 +2,6 @@ const SPORTSAPI_KEY =
   process.env["SPORTSAPIPRO_KEY"] ??
   process.env["SPORTSAPI_PRO_KEY"] ??
   process.env["SPORTSAPI_KEY"] ??
-  process.env["STATSPAL_API_KEY"] ??
   "";
 
 const STATPAL_API_KEY =
