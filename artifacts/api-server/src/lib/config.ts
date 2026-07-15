@@ -14,13 +14,13 @@ const STATPAL_BASE_URL =
   process.env["STATPAL_BASE_URL"]?.trim() || "https://statpal.io/api";
 
 const FOOTBALL_LIVE_PROVIDER =
-  process.env["FOOTBALL_LIVE_PROVIDER"]?.trim() || "auto";
+  process.env["FOOTBALL_LIVE_PROVIDER"]?.trim() || "sportsapipro";
 
 const FOOTBALL_DAILY_PROVIDER =
-  process.env["FOOTBALL_DAILY_PROVIDER"]?.trim() || "auto";
+  process.env["FOOTBALL_DAILY_PROVIDER"]?.trim() || "sportsapipro";
 
 const FOOTBALL_REFERENCE_PROVIDER =
-  process.env["FOOTBALL_REFERENCE_PROVIDER"]?.trim() || "auto";
+  process.env["FOOTBALL_REFERENCE_PROVIDER"]?.trim() || "sportsapipro";
 
 export const CONFIG = {
   SPORTSAPI_KEY,
