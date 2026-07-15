@@ -11273,6 +11273,387 @@ async function getUpcomingEventsV2(
     .sort((a, b) => (a.startTimestamp ?? 0) - (b.startTimestamp ?? 0));
 }
 
+type ExtraV2Sport = "mma" | "cricket" | "handball";
+
+const EXTRA_V2_BASE_URL: Record<ExtraV2Sport, string> = {
+  mma: "https://api.sportsapipro.com/v2/mma",
+  cricket: "https://api.sportsapipro.com/v2/cricket",
+  handball: "https://api.sportsapipro.com/v2/handball",
+};
+
+const EXTRA_V2_ID_PREFIX: Record<ExtraV2Sport, string> = {
+  mma: "mma-v2",
+  cricket: "cricket-v2",
+  handball: "handball-v2",
+};
+
+const EXTRA_V2_LABEL: Record<ExtraV2Sport, string> = {
+  mma: "MMA",
+  cricket: "Cricket",
+  handball: "Handball",
+};
+
+type F1StatpalRace = {
+  date?: string;
+  time?: string;
+  city?: string;
+  track?: string;
+  status?: string;
+  results?: {
+    driver?: Array<{
+      name?: string;
+      pos?: string;
+      time?: string;
+    }>;
+  } | null;
+};
+
+type F1StatpalTournament = {
+  id?: string;
+  name?: string;
+  race?: F1StatpalRace | null;
+};
+
+function extractV2EventsPayload(raw: unknown): SAPIV2Event[] {
+  const data = raw as
+    | {
+        events?: SAPIV2Event[];
+        data?: { events?: SAPIV2Event[] } | SAPIV2Event[];
+      }
+    | null
+    | undefined;
+  const nested = data?.data;
+  return (
+    data?.events ??
+    (Array.isArray(nested)
+      ? nested
+      : ((nested as { events?: SAPIV2Event[] } | undefined)?.events ?? []))
+  );
+}
+
+function normalizeProviderStatus(status: string | undefined): string {
+  return String(status ?? "")
+    .trim()
+    .toLowerCase();
+}
+
+function isFinishedProviderStatus(status: string | undefined): boolean {
+  const s = normalizeProviderStatus(status);
+  if (!s) return false;
+  return (
+    s === "finished" ||
+    s === "ended" ||
+    s === "ft" ||
+    s === "full time" ||
+    s === "not started" ||
+    s === "canceled" ||
+    s === "cancelled" ||
+    s === "postponed"
+  );
+}
+
+function isLiveProviderStatus(status: string | undefined): boolean {
+  const s = normalizeProviderStatus(status);
+  if (!s) return true;
+  return !isFinishedProviderStatus(status);
+}
+
+const extraV2ScheduleCache = new Map<string, ScheduleV2Entry>();
+const EXTRA_V2_LIVE_TTL = 3000;
+const extraV2LiveCache = new Map<
+  ExtraV2Sport,
+  { events: SAPIV2Event[]; fetchedAt: number }
+>();
+
+async function getExtraV2Schedule(
+  sport: ExtraV2Sport,
+  date: string,
+): Promise<SAPIV2Event[]> {
+  const cacheKey = `${sport}:${date}`;
+  const cached = extraV2ScheduleCache.get(cacheKey);
+  if (cached && Date.now() - cached.fetchedAt < SCHEDULE_V2_TTL) {
+    return cached.events;
+  }
+  try {
+    const resp = await fetch(`${EXTRA_V2_BASE_URL[sport]}/schedule/${date}`, {
+      signal: AbortSignal.timeout(9000),
+      headers: sapiHeaders(),
+    });
+    if (!resp.ok) return cached?.events ?? [];
+    const events = extractV2EventsPayload(await resp.json());
+    if (events.length > 0) {
+      extraV2ScheduleCache.set(cacheKey, { events, fetchedAt: Date.now() });
+    }
+    return events.length > 0 ? events : (cached?.events ?? []);
+  } catch {
+    return cached?.events ?? [];
+  }
+}
+
+async function getExtraUpcomingEventsV2(
+  sport: ExtraV2Sport,
+  days = 7,
+  graceSec = 5 * 60,
+): Promise<SAPIV2Event[]> {
+  const dates: string[] = [];
+  const nowMs = Date.now();
+  for (let i = 0; i < days; i++) {
+    const d = new Date(nowMs + i * 86_400_000);
+    dates.push(d.toISOString().slice(0, 10));
+  }
+  const allDays = await Promise.all(
+    dates.map((dt) => getExtraV2Schedule(sport, dt).catch(() => [] as SAPIV2Event[])),
+  );
+  const nowSec = nowMs / 1000;
+  return allDays
+    .flat()
+    .filter((ev) => {
+      if (!ev.startTimestamp || ev.startTimestamp < nowSec - graceSec) return false;
+      const status = v2StatusStr(ev.status);
+      if (!status) return true;
+      const s = normalizeProviderStatus(status);
+      if (s === "live" || s === "in progress" || s === "inprogress") return false;
+      if (s === "finished" || s === "ended") return false;
+      return true;
+    })
+    .sort((a, b) => (a.startTimestamp ?? 0) - (b.startTimestamp ?? 0));
+}
+
+async function getExtraLiveEventsV2(sport: ExtraV2Sport): Promise<SAPIV2Event[]> {
+  const cached = extraV2LiveCache.get(sport);
+  if (cached && Date.now() - cached.fetchedAt < EXTRA_V2_LIVE_TTL) {
+    return cached.events;
+  }
+  try {
+    const resp = await fetch(`${EXTRA_V2_BASE_URL[sport]}/live`, {
+      signal: AbortSignal.timeout(5000),
+      headers: sapiHeaders(),
+    });
+    if (!resp.ok) return cached?.events ?? [];
+    const events = extractV2EventsPayload(await resp.json());
+    extraV2LiveCache.set(sport, { events, fetchedAt: Date.now() });
+    return events;
+  } catch {
+    return cached?.events ?? [];
+  }
+}
+
+function buildExtraUpcomingV2(sport: ExtraV2Sport, events: SAPIV2Event[]): UpcomingMatch[] {
+  const seen = new Set<string>();
+  const results: UpcomingMatch[] = [];
+  for (const ev of events) {
+    const home = v2TeamName(ev.homeTeam);
+    const away = v2TeamName(ev.awayTeam);
+    if (home === "Unknown" || away === "Unknown") continue;
+    const key = `${home}|${away}|${v2TournName(ev.tournament)}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const { date, time } = v2EventDateTime(ev);
+    const country = v2TournCountry(ev);
+    results.push({
+      id: `${EXTRA_V2_ID_PREFIX[sport]}-${ev.id}`,
+      home,
+      away,
+      league: v2TournName(ev.tournament) || EXTRA_V2_LABEL[sport],
+      country,
+      time,
+      date,
+      sport,
+      hasRealOdds: false,
+      odds: makeOddsFromTeams(home, away),
+      markets: makeAdvancedMarketsFromTeams(home, away),
+      leagueId: ev.tournamentId ? String(ev.tournamentId) : undefined,
+      homeTeamId: ev.homeTeamId != null ? String(ev.homeTeamId) : undefined,
+      awayTeamId: ev.awayTeamId != null ? String(ev.awayTeamId) : undefined,
+    });
+  }
+  return results;
+}
+
+function buildExtraLiveV2(sport: ExtraV2Sport, events: SAPIV2Event[]): LiveMatchState[] {
+  const result: LiveMatchState[] = [];
+  const now = Date.now();
+  const currentIds = new Set<string>();
+  for (const ev of events) {
+    const status = v2StatusStr(ev.status);
+    if (!isLiveProviderStatus(status)) continue;
+    if (ev.startTimestamp !== undefined && ev.startTimestamp - now / 1000 > 30) continue;
+    const home = v2TeamName(ev.homeTeam);
+    const away = v2TeamName(ev.awayTeam);
+    if (home === "Unknown" || away === "Unknown") continue;
+    const id = `${EXTRA_V2_ID_PREFIX[sport]}-${ev.id}`;
+    currentIds.add(id);
+    const state: LiveMatchState = {
+      id,
+      home,
+      away,
+      league: v2TournName(ev.tournament) || EXTRA_V2_LABEL[sport],
+      country: v2TournCountry(ev),
+      sport,
+      homeScore: v2CurrentScore(ev.homeScore),
+      awayScore: v2CurrentScore(ev.awayScore),
+      minute: 0,
+      status: status || "LIVE",
+      hasRealOdds: false,
+      odds: makeOddsFromTeams(home, away),
+      markets: makeAdvancedMarketsFromTeams(home, away),
+      events: [],
+      date: v2EventDateTime(ev).date,
+      time: v2EventDateTime(ev).time,
+      homeTeamId: ev.homeTeamId != null ? String(ev.homeTeamId) : undefined,
+      awayTeamId: ev.awayTeamId != null ? String(ev.awayTeamId) : undefined,
+      _firstSeenAt: liveMatchState.get(id)?._firstSeenAt ?? now,
+    };
+    liveMatchState.set(id, state);
+    result.push(state);
+  }
+  for (const [id, state] of liveMatchState.entries()) {
+    if (!id.startsWith(`${EXTRA_V2_ID_PREFIX[sport]}-`)) continue;
+    const tooOld = now - (state._firstSeenAt ?? now) > MAX_LIVE_STATE_MS;
+    if (!currentIds.has(id) || tooOld) {
+      liveMatchState.delete(id);
+    }
+  }
+  return result;
+}
+
+const F1_SCHEDULE_TTL_MS = 30 * 60_000;
+const F1_LIVE_TTL_MS = 15_000;
+let f1UpcomingCache: { matches: UpcomingMatch[]; fetchedAt: number } | null = null;
+let f1LiveCache: { matches: LiveMatchState[]; fetchedAt: number } | null = null;
+
+function statpalTournamentList<T>(
+  raw: T | T[] | null | undefined,
+): T[] {
+  if (!raw) return [];
+  return Array.isArray(raw) ? raw : [raw];
+}
+
+function buildFormula1UpcomingFromTournaments(
+  tournaments: F1StatpalTournament[],
+): UpcomingMatch[] {
+  return tournaments
+    .map((tournament) => {
+      const race = tournament.race;
+      if (!race?.date || !race?.time || !tournament.id || !tournament.name) return null;
+      const home = tournament.name;
+      const away = race.city || race.track || "Race";
+      return {
+        id: `formula1-statpal-${tournament.id}`,
+        home,
+        away,
+        league: "Fórmula 1",
+        country: race.city || "",
+        time: race.time,
+        date: race.date,
+        sport: "formula1",
+        hasRealOdds: false,
+        odds: makeOddsFromTeams(home, away),
+        markets: makeAdvancedMarketsFromTeams(home, away),
+      } satisfies UpcomingMatch;
+    })
+    .filter((match): match is UpcomingMatch => !!match);
+}
+
+function buildFormula1LiveFromTournaments(
+  tournaments: F1StatpalTournament[],
+): LiveMatchState[] {
+  const out: LiveMatchState[] = [];
+  const now = Date.now();
+  const currentIds = new Set<string>();
+  for (const tournament of tournaments) {
+    const race = tournament.race;
+    if (!race || !tournament.id || !tournament.name) continue;
+    const status = String(race.status ?? "").trim();
+    const normalized = normalizeProviderStatus(status);
+    if (!normalized || normalized === "not started" || normalized === "finished") continue;
+    const drivers = race.results?.driver ?? [];
+    const leader = drivers[0]?.name?.trim() || tournament.name;
+    const chaser = drivers[1]?.name?.trim() || race.track || "Race";
+    const id = `formula1-statpal-${tournament.id}`;
+    currentIds.add(id);
+    const state: LiveMatchState = {
+      id,
+      home: leader,
+      away: chaser,
+      league: tournament.name,
+      country: race.city || "",
+      sport: "formula1",
+      homeScore: Number.parseInt(drivers[0]?.pos ?? "1", 10) || 1,
+      awayScore: Number.parseInt(drivers[1]?.pos ?? "2", 10) || 2,
+      minute: 0,
+      status,
+      hasRealOdds: false,
+      odds: makeOddsFromTeams(leader, chaser),
+      markets: makeAdvancedMarketsFromTeams(leader, chaser),
+      events: [],
+      date: race.date,
+      time: race.time,
+      _firstSeenAt: liveMatchState.get(id)?._firstSeenAt ?? now,
+    };
+    liveMatchState.set(id, state);
+    out.push(state);
+  }
+  for (const [id, state] of liveMatchState.entries()) {
+    if (!id.startsWith("formula1-statpal-")) continue;
+    const tooOld = now - (state._firstSeenAt ?? now) > MAX_LIVE_STATE_MS;
+    if (!currentIds.has(id) || tooOld) {
+      liveMatchState.delete(id);
+    }
+  }
+  return out;
+}
+
+async function getFormula1Upcoming(): Promise<UpcomingMatch[]> {
+  const now = Date.now();
+  if (f1UpcomingCache && now - f1UpcomingCache.fetchedAt < F1_SCHEDULE_TTL_MS) {
+    return f1UpcomingCache.matches;
+  }
+  if (!CONFIG.STATPAL_API_KEY) return f1UpcomingCache?.matches ?? [];
+  try {
+    const resp = await fetch(buildStatpalUrl("/v1/f1/schedule"), {
+      signal: AbortSignal.timeout(8000),
+      headers: statpalHeaders(),
+    });
+    if (!resp.ok) return f1UpcomingCache?.matches ?? [];
+    const payload = (await resp.json()) as {
+      fixtures?: { tournament?: F1StatpalTournament | F1StatpalTournament[] };
+    };
+    const matches = buildFormula1UpcomingFromTournaments(
+      statpalTournamentList(payload.fixtures?.tournament),
+    );
+    f1UpcomingCache = { matches, fetchedAt: now };
+    return matches;
+  } catch {
+    return f1UpcomingCache?.matches ?? [];
+  }
+}
+
+async function getFormula1Live(): Promise<LiveMatchState[]> {
+  const now = Date.now();
+  if (f1LiveCache && now - f1LiveCache.fetchedAt < F1_LIVE_TTL_MS) {
+    return f1LiveCache.matches;
+  }
+  if (!CONFIG.STATPAL_API_KEY) return f1LiveCache?.matches ?? [];
+  try {
+    const resp = await fetch(buildStatpalUrl("/v1/f1/livescores"), {
+      signal: AbortSignal.timeout(5000),
+      headers: statpalHeaders(),
+    });
+    if (!resp.ok) return f1LiveCache?.matches ?? [];
+    const payload = (await resp.json()) as {
+      livescore?: { tournament?: F1StatpalTournament | F1StatpalTournament[] };
+    };
+    const matches = buildFormula1LiveFromTournaments(
+      statpalTournamentList(payload.livescore?.tournament),
+    );
+    f1LiveCache = { matches, fetchedAt: now };
+    return matches;
+  } catch {
+    return f1LiveCache?.matches ?? [];
+  }
+}
+
 /**
  * Like getUpcomingEventsV2 but filtered to the primary competition for this sport:
  * NBA (basketball), NHL (hockey), MLB (baseball), ATP/WTA main draw (tennis).
@@ -16350,6 +16731,10 @@ async function rebuildUpcomingCache(): Promise<void> {
       upHockey,
       upVolleyball,
       upBaseball,
+      upMma,
+      upCricket,
+      upHandball,
+      upFormula1,
       // V5 prematch events — fetched in parallel, merged below
       v5Football,
       v5Basketball,
@@ -16364,6 +16749,10 @@ async function rebuildUpcomingCache(): Promise<void> {
       buildHockeyUpcoming().catch(() => empty),
       buildVolleyballUpcoming().catch(() => empty),
       buildBaseballUpcoming().catch(() => empty),
+      getExtraUpcomingEventsV2("mma").then((events) => buildExtraUpcomingV2("mma", events)).catch(() => empty),
+      getExtraUpcomingEventsV2("cricket").then((events) => buildExtraUpcomingV2("cricket", events)).catch(() => empty),
+      getExtraUpcomingEventsV2("handball").then((events) => buildExtraUpcomingV2("handball", events)).catch(() => empty),
+      getFormula1Upcoming().catch(() => empty),
       // V5 — 1xBet prematch feed (real odds: 1x2 + DC + totals + BTTS + DNB + handicap)
       buildV5Upcoming(1, 200).catch(() => empty), // football
       buildV5Upcoming(3, 100).catch(() => empty), // basketball
@@ -16395,6 +16784,10 @@ async function rebuildUpcomingCache(): Promise<void> {
       ...finalHockey,
       ...finalVolleyball,
       ...finalBaseball,
+      ...upMma,
+      ...upCricket,
+      ...upHandball,
+      ...upFormula1,
     ]);
     _allUpcomingCache = [
       ...finalFootball,
@@ -16403,6 +16796,10 @@ async function rebuildUpcomingCache(): Promise<void> {
       ...finalHockey,
       ...finalVolleyball,
       ...finalBaseball,
+      ...upMma,
+      ...upCricket,
+      ...upHandball,
+      ...upFormula1,
     ];
     _allUpcomingCacheBuiltAt = Date.now();
   } catch {
@@ -16435,6 +16832,10 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
     tennisEvents,
     tennisTodayEvents,
     tennisV1LivePart,
+    mmaEvents,
+    cricketEvents,
+    handballEvents,
+    formula1Fresh,
   ] = await Promise.all([
     getFootballLiveV2(),
     getBasketballLiveV2(),
@@ -16443,6 +16844,10 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
     getTennisLiveV2(),
     getTennisTodayV2(),
     buildTennisLiveV1Cached(), // runs in parallel — does not depend on other results
+    getExtraLiveEventsV2("mma"),
+    getExtraLiveEventsV2("cricket"),
+    getExtraLiveEventsV2("handball"),
+    getFormula1Live(),
   ]);
   // Populate V1 tennis league label cache from V2 today events (city → "ATP 250 · City")
   if (tennisTodayEvents && tennisTodayEvents.length > 0) {
@@ -16630,6 +17035,16 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
     buildBaseballLiveV2(baseballEvents),
   );
   const tennisLive = sportWithFallback("tennis", tennisLivePart);
+  const mmaLive = sportWithFallback("mma", buildExtraLiveV2("mma", mmaEvents));
+  const cricketLive = sportWithFallback(
+    "cricket",
+    buildExtraLiveV2("cricket", cricketEvents),
+  );
+  const handballLive = sportWithFallback(
+    "handball",
+    buildExtraLiveV2("handball", handballEvents),
+  );
+  const formula1Live = sportWithFallback("formula1", formula1Fresh);
 
   // mergeStickyLive: re-injects any match seen in the last 5 min that the API
   // temporarily omitted. Fresh data always wins; injected matches use last-known
@@ -16640,6 +17055,10 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
     ...hockeyLive,
     ...baseballLive,
     ...tennisLive,
+    ...mmaLive,
+    ...cricketLive,
+    ...handballLive,
+    ...formula1Live,
     ...startedUpcomingTennisPart,
   ]);
 
@@ -18259,6 +18678,10 @@ type UpcomingTopCache = {
   hockey: UpcomingMatch[];
   volleyball: UpcomingMatch[];
   baseball: UpcomingMatch[];
+  mma: UpcomingMatch[];
+  cricket: UpcomingMatch[];
+  handball: UpcomingMatch[];
+  formula1: UpcomingMatch[];
   fetchedAt: number;
 };
 let upcomingTopCache: UpcomingTopCache | null = null;
@@ -18372,10 +18795,10 @@ function rememberUpcomingEligibility(matches: UpcomingMatch[]): void {
     if (expiryAt <= now) recentUpcomingV2Ids.delete(k);
   }
   for (const match of matches) {
-    const sport = (match.sport ?? "football") as SportKey;
+    const sport = String(match.sport ?? "football");
     const idRaw = String(match.id ?? "");
     const m = idRaw.match(
-      /^(fb-v2|football-v2|bball-v2|hockey-v2|tennis-v2|baseball-v2|mlb-v2|volley-odds|volley-live)-(.+)$/,
+      /^(fb-v2|football-v2|bball-v2|hockey-v2|tennis-v2|baseball-v2|mlb-v2|volley-odds|volley-live|mma-v2|cricket-v2|handball-v2|formula1-statpal)-(.+)$/,
     );
     if (!m) continue;
     const providerId = m[2] ?? "";
@@ -18413,6 +18836,10 @@ async function refreshUpcomingTop(): Promise<UpcomingTopCache> {
     hockey,
     volleyball,
     baseball,
+    mma,
+    cricket,
+    handball,
+    formula1,
     v5Football,
     v5Basketball,
     v5Hockey,
@@ -18427,6 +18854,10 @@ async function refreshUpcomingTop(): Promise<UpcomingTopCache> {
     buildHockeyUpcoming().catch(() => empty),
     buildVolleyballUpcoming().catch(() => empty),
     buildBaseballUpcoming().catch(() => empty),
+    getExtraUpcomingEventsV2("mma").then((events) => buildExtraUpcomingV2("mma", events)).catch(() => empty),
+    getExtraUpcomingEventsV2("cricket").then((events) => buildExtraUpcomingV2("cricket", events)).catch(() => empty),
+    getExtraUpcomingEventsV2("handball").then((events) => buildExtraUpcomingV2("handball", events)).catch(() => empty),
+    getFormula1Upcoming().catch(() => empty),
     buildV5Upcoming(1, 200).catch(() => empty),
     buildV5Upcoming(3, 200).catch(() => empty),
     buildV5Upcoming(2, 200).catch(() => empty),
@@ -18452,6 +18883,10 @@ async function refreshUpcomingTop(): Promise<UpcomingTopCache> {
     ...hockeyMerged,
     ...volleyballMerged,
     ...baseballMerged,
+    ...mma,
+    ...cricket,
+    ...handball,
+    ...formula1,
   ]);
   upcomingTopCache = {
     football,
@@ -18460,6 +18895,10 @@ async function refreshUpcomingTop(): Promise<UpcomingTopCache> {
     hockey: hockeyMerged,
     volleyball: volleyballMerged,
     baseball: baseballMerged,
+    mma,
+    cricket,
+    handball,
+    formula1,
     fetchedAt: Date.now(),
   };
   return upcomingTopCache;
@@ -20802,6 +21241,10 @@ router.get("/upcoming", async (req: Request, res: Response) => {
               hockey: [],
               volleyball: [],
               baseball: [],
+              mma: [],
+              cricket: [],
+              handball: [],
+              formula1: [],
               fetchedAt: Date.now(),
             },
         ),
@@ -20813,6 +21256,10 @@ router.get("/upcoming", async (req: Request, res: Response) => {
   else if (sport === "hockey") matches = cache.hockey;
   else if (sport === "volleyball") matches = cache.volleyball;
   else if (sport === "baseball") matches = cache.baseball;
+  else if (sport === "mma") matches = cache.mma;
+  else if (sport === "cricket") matches = cache.cricket;
+  else if (sport === "handball") matches = cache.handball;
+  else if (sport === "formula1") matches = cache.formula1;
   else
     matches = [
       ...cache.football,
@@ -20821,6 +21268,10 @@ router.get("/upcoming", async (req: Request, res: Response) => {
       ...cache.hockey,
       ...cache.volleyball,
       ...cache.baseball,
+      ...cache.mma,
+      ...cache.cricket,
+      ...cache.handball,
+      ...cache.formula1,
     ];
   const isPlaceholderTeamName = (name: string): boolean => {
     const n = String(name ?? "").trim();
