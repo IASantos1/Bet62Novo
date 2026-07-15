@@ -33,6 +33,7 @@ const MIN_STAKE = 0.1;
 const MAX_STAKE = 2000.0;
 const MIN_ODDS = 1.01;
 const MAX_ODDS = 500.0;
+const MAX_PAYOUT = 150000.0;
 
 router.post(
   "/quote",
@@ -146,6 +147,14 @@ type CashoutPolicy = {
   feeMult: number;
 };
 
+type BetLimitsPolicy = {
+  enabled: boolean;
+  minStake: number;
+  maxStake: number;
+  maxOdds: number;
+  maxPayout: number;
+};
+
 const DEFAULT_CASHOUT_POLICY: CashoutPolicy = {
   enabled: true,
   unfavorableCycleMs: 60000,
@@ -157,6 +166,8 @@ const DEFAULT_CASHOUT_POLICY: CashoutPolicy = {
 const CASHOUT_POLICY_TTL_MS = 30000;
 let cashoutPolicyCache: { fetchedAt: number; value: CashoutPolicy } | null =
   null;
+const BET_LIMITS_TTL_MS = 30000;
+let betLimitsCache: { fetchedAt: number; value: BetLimitsPolicy } | null = null;
 
 function parseBool(v: string | null | undefined, fallback: boolean): boolean {
   if (v == null) return fallback;
@@ -233,6 +244,67 @@ async function getCashoutPolicy(): Promise<CashoutPolicy> {
   } catch {
     cashoutPolicyCache = { fetchedAt: now, value: DEFAULT_CASHOUT_POLICY };
     return DEFAULT_CASHOUT_POLICY;
+  }
+}
+
+async function getBetLimits(): Promise<BetLimitsPolicy> {
+  const now = Date.now();
+  if (betLimitsCache && now - betLimitsCache.fetchedAt < BET_LIMITS_TTL_MS) {
+    return betLimitsCache.value;
+  }
+
+  const keys = [
+    "bet_limits_enabled",
+    "min_bet",
+    "max_bet",
+    "max_odds",
+    "max_payout",
+  ];
+
+  try {
+    const rows = await db
+      .select()
+      .from(platformSettingsTable)
+      .where(inArray(platformSettingsTable.key, keys));
+    const map = new Map<string, string>();
+    for (const r of rows) map.set(r.key, r.value);
+
+    const minStake = Math.max(
+      MIN_STAKE,
+      parseNum(map.get("min_bet"), MIN_STAKE),
+    );
+    const maxStake = Math.max(
+      minStake,
+      parseNum(map.get("max_bet"), MAX_STAKE),
+    );
+    const maxOdds = Math.max(
+      MIN_ODDS,
+      parseNum(map.get("max_odds"), MAX_ODDS),
+    );
+    const maxPayout = Math.max(
+      0,
+      parseNum(map.get("max_payout"), MAX_PAYOUT),
+    );
+
+    const value: BetLimitsPolicy = {
+      enabled: parseBool(map.get("bet_limits_enabled"), true),
+      minStake,
+      maxStake,
+      maxOdds,
+      maxPayout,
+    };
+    betLimitsCache = { fetchedAt: now, value };
+    return value;
+  } catch {
+    const value: BetLimitsPolicy = {
+      enabled: true,
+      minStake: MIN_STAKE,
+      maxStake: MAX_STAKE,
+      maxOdds: MAX_ODDS,
+      maxPayout: MAX_PAYOUT,
+    };
+    betLimitsCache = { fetchedAt: now, value };
+    return value;
   }
 }
 
@@ -1698,26 +1770,46 @@ router.post(
 
     const betStake = parseFloat(stake);
     const betOdds = parseFloat(totalOdds);
+    const betLimits = await getBetLimits();
 
-    if (
-      !Number.isFinite(betStake) ||
-      betStake < MIN_STAKE ||
-      betStake > MAX_STAKE
-    ) {
+    if (!Number.isFinite(betStake) || betStake <= 0) {
       res.status(400).json({
-        error: `Valor de aposta inválido. Mínimo €${MIN_STAKE.toFixed(2)}, máximo €${MAX_STAKE.toFixed(2)}.`,
+        error: "Valor de aposta inválido.",
       });
       return;
     }
-    if (!Number.isFinite(betOdds) || betOdds < MIN_ODDS || betOdds > MAX_ODDS) {
+    if (!Number.isFinite(betOdds) || betOdds < MIN_ODDS) {
       res
         .status(400)
         .json({ error: "Odds inválidas. Fora do intervalo permitido." });
       return;
     }
 
+    if (
+      betLimits.enabled &&
+      (betStake < betLimits.minStake || betStake > betLimits.maxStake)
+    ) {
+      res.status(400).json({
+        error: `Valor de aposta inválido. Mínimo €${betLimits.minStake.toFixed(2)}, máximo €${betLimits.maxStake.toFixed(2)}.`,
+      });
+      return;
+    }
+    if (betLimits.enabled && betOdds > betLimits.maxOdds) {
+      res.status(400).json({
+        error: `Odds inválidas. Máximo permitido: ${betLimits.maxOdds.toFixed(2)}.`,
+      });
+      return;
+    }
+
     // Server-side recalculation of potentialWin — never trust the client value
-    const potentialWin = (betStake * betOdds).toFixed(2);
+    const potentialWinValue = Number((betStake * betOdds).toFixed(2));
+    if (betLimits.enabled && potentialWinValue > betLimits.maxPayout) {
+      res.status(400).json({
+        error: `Ganho potencial excede o limite máximo de €${betLimits.maxPayout.toFixed(2)}.`,
+      });
+      return;
+    }
+    const potentialWin = potentialWinValue.toFixed(2);
     const stakeStr = betStake.toFixed(2);
     const oddsStr = betOdds.toFixed(2);
 

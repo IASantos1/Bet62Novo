@@ -10355,8 +10355,8 @@ async function fetchLiveRace(
   v2Base: string,
 ): Promise<SAPIV2Event[]> {
   const headers = sapiHeaders();
-  // V1 fetch: treat any well-formed V1 response (even 0 games) as success.
-  // V1 is the reliable source when V2 is degraded; 0 games = genuinely no live matches.
+  // V1 fetch: accept a well-formed response, including 0 games.
+  // We still check V2 in parallel so an empty V1 does not hide a non-empty V2 feed.
   const tryV1 = async (): Promise<SAPIV2Event[]> => {
     const resp = await fetch(`${v1Base}/live`, {
       signal: AbortSignal.timeout(3000),
@@ -10385,8 +10385,14 @@ async function fetchLiveRace(
     if (v2Events.length === 0) throw new Error("empty");
     return v2Events;
   };
-  // Race V1 vs V2 — V1 wins on any valid response (including empty); V2 only on non-empty.
-  return Promise.any([tryV1(), tryV2()]).catch(() => []);
+  const [v1Result, v2Result] = await Promise.allSettled([tryV1(), tryV2()]);
+  if (v2Result.status === "fulfilled" && v2Result.value.length > 0) {
+    return v2Result.value;
+  }
+  if (v1Result.status === "fulfilled") {
+    return v1Result.value;
+  }
+  return [];
 }
 
 async function getFootballLiveV2(): Promise<SAPIV2Event[]> {

@@ -41,6 +41,7 @@ const DEFAULT_SETTINGS: Record<string, string> = {
   max_bet: "5000",
   min_bet: "1",
   max_odds: "50",
+  max_payout: "150000",
   live_delay: "5",
   default_margin: "0.06",
   bet_limits_enabled: "true",

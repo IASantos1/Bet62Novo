@@ -516,6 +516,12 @@ const SETTING_META: Record<
     desc: "Odd máxima aceite em aposta",
     type: "number",
   },
+  max_payout: {
+    label: "Ganho Máximo",
+    desc: "Ganho potencial máximo por aposta",
+    type: "number",
+    unit: "€",
+  },
   live_delay: {
     label: "Atraso Live (s)",
     desc: "Segundos de atraso no feed ao vivo",
