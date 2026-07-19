@@ -7016,6 +7016,12 @@ let tourListCache: ActiveTournament[] | null = null;
 let tourListFetchedAt = 0;
 const TOUR_CACHE_TTL = 30 * 60 * 1000; // 30 min
 
+// Timestamp of when this server process started — used to implement a cold-start
+// grace period so that live matches already in progress on a fresh deploy are not
+// silently discarded by the "never-seen-before + >20 min old" gate.
+const SERVER_BOOT_AT = Date.now();
+const COLD_START_GRACE_MS = 5 * 60 * 1000; // 5 minutes
+
 // Live state: stable odds across refreshes
 export const liveMatchState = new Map<string, LiveMatchState>();
 
@@ -14712,11 +14718,16 @@ async function buildFootballLiveV2(
     // Gate: block a match appearing for the first time if it's already more than
     // 20 minutes old. Prevents games from suddenly entering the live section
     // already mid-game (e.g. at 60'). fromUpcoming matches bypass this because
-    // they were pre-announced as upcoming.
+    // they were pre-announced as upcoming. Cold-start grace period (first 5 min
+    // after process boot) also bypasses this gate so that a fresh deploy (e.g.
+    // on Railway) immediately surfaces all currently-live matches rather than
+    // waiting up to 20 minutes for them to appear.
+    const isColdStart = Date.now() - SERVER_BOOT_AT < COLD_START_GRACE_MS;
     if (
       !liveMatchState.has(`football-v2-${ev.id}`) &&
       evAgeSeconds > 20 * 60 &&
-      !fromUpcoming
+      !fromUpcoming &&
+      !isColdStart
     )
       continue;
 
