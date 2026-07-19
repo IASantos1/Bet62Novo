@@ -31595,6 +31595,44 @@ router.get("/v5-test/event/:eventId", async (req: Request, res: Response) => {
   }
 });
 
+// ─── Diagnostic: raw Statpal live response (protected by admin password) ───────
+router.get("/statpal-live-debug", async (req: Request, res: Response) => {
+  const adminPass = process.env["ADMIN_PASSWORD"];
+  if (!adminPass || req.query["key"] !== adminPass) {
+    res.status(403).json({ error: "Forbidden" });
+    return;
+  }
+  if (!CONFIG.STATPAL_API_KEY) {
+    res.json({ error: "STATPAL_API_KEY not set" });
+    return;
+  }
+  try {
+    const resp = await fetch(buildStatpalUrl("/v2/soccer/matches/live"), {
+      signal: AbortSignal.timeout(8_000),
+      headers: statpalHeaders(),
+    });
+    const body = (await resp.json()) as Record<string, unknown>;
+    const topKeys = Object.keys(body);
+    const { leagues } = extractStatpalLeagueFeed(body, "live_matches");
+    const eventCount = leagues.reduce((n, l) => n + statpalList(l.match).length, 0);
+    res.json({
+      httpStatus: resp.status,
+      topKeys,
+      leagueCount: leagues.length,
+      eventCount,
+      // include first 3 leagues for inspection
+      sampleLeagues: leagues.slice(0, 3).map((l) => ({
+        name: l.name,
+        country: l.country,
+        matchCount: statpalList(l.match).length,
+        firstMatch: statpalList(l.match)[0] ?? null,
+      })),
+    });
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
 export function initLiveWsServer(httpServer: http.Server): void {
   const wss = new WebSocketServer({ noServer: true });
 
