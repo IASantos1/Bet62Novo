@@ -20,6 +20,8 @@ import { applyBalanceDelta } from "../lib/ledger.js";
 import { getSettlementFallbackMetrics } from "../lib/settlementHelpers.js";
 import fs from "fs";
 import path from "path";
+import manualReviewRouter from "./manualReview.js";
+import { replayEngine } from "../lib/replayEngine.js";
 
 function escapeCsv(val: unknown): string {
   if (val === null || val === undefined) return "";
@@ -1997,4 +1999,64 @@ router.get(
   },
 );
 
+// Mount manual review sub-router
+router.use("/review", manualReviewRouter);
+
+// POST /api/admin/replay/:matchId — trigger a settlement replay for a match
+router.post(
+  "/replay/:matchId",
+  adminMiddleware,
+  async (req: AdminRequest, res) => {
+    try {
+      const { matchId } = req.params;
+      if (!matchId) {
+        res.status(400).json({ error: "matchId é obrigatório" });
+        return;
+      }
+
+      const reason: string = req.body?.reason ?? "Manual admin replay";
+      const triggeredBy = req.admin!.username;
+
+      const result = await replayEngine.replayMatch(matchId, triggeredBy, reason);
+
+      logger.info(
+        { matchId, triggeredBy, ...result },
+        "Admin triggered settlement replay",
+      );
+
+      res.json({
+        success: true,
+        matchId,
+        ...result,
+      });
+    } catch (err) {
+      logger.error({ err }, "POST /api/admin/replay/:matchId error");
+      res.status(500).json({ error: "Erro ao executar replay do settlement" });
+    }
+  },
+);
+
+// GET /api/admin/replay/:matchId/history — get replay history for a match
+router.get(
+  "/replay/:matchId/history",
+  adminMiddleware,
+  async (req: AdminRequest, res) => {
+    try {
+      const { matchId } = req.params;
+      if (!matchId) {
+        res.status(400).json({ error: "matchId é obrigatório" });
+        return;
+      }
+
+      const history = await replayEngine.getReplayHistory(matchId);
+
+      res.json({ matchId, history });
+    } catch (err) {
+      logger.error({ err }, "GET /api/admin/replay/:matchId/history error");
+      res.status(500).json({ error: "Erro ao carregar histórico de replays" });
+    }
+  },
+);
+
 export default router;
+

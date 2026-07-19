@@ -1,4 +1,6 @@
 import { SETTLEMENT_LOCK_TTL_SECONDS } from "./lib/settlement/lock.js";
+import { dataValidator } from "./lib/dataValidation.js";
+import { matchStateEngine } from "./lib/matchStateEngine.js";
 import {
   db,
   betsTable,
@@ -4078,6 +4080,23 @@ export async function autoSettlePendingBets(opts?: {
       try {
         const selections = bet.selections as SelectionRecord[];
         if (!Array.isArray(selections) || selections.length === 0) continue;
+
+        // Skip suspended matches and validate data integrity before settling
+        const primaryMatchId = String(bet.matchId ?? "");
+        if (primaryMatchId && matchStateEngine.isSuspended(primaryMatchId)) {
+          logger.warn({ betId: bet.id, matchId: primaryMatchId }, "Skipping bet: match is suspended");
+          continue;
+        }
+        const matchData: Record<string, unknown> = {
+          matchId: primaryMatchId,
+          status: "pending",
+          ...(bet.selections as Record<string, unknown>),
+        };
+        const validation = dataValidator.validateIntegrity(matchData);
+        if (!validation.valid) {
+          logger.warn({ matchId: primaryMatchId, errors: validation.errors }, "Data validation failed, skipping");
+          continue;
+        }
 
         const isSingle = selections.length === 1;
         if (matchIdSet) {

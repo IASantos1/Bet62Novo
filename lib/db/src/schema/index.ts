@@ -36,3 +36,5 @@ export * from "./competitionAliases";
 export * from "./eventRuntimeStates";
 export * from "./eventAdminOverrides";
 export * from "./settlementIdempotency";
+export * from "./manualReviewQueue";
+export * from "./settlementReplayLog";

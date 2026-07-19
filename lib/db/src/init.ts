@@ -351,6 +351,34 @@ export async function initDb(): Promise<void> {
       ALTER TABLE users ADD COLUMN IF NOT EXISTS kyc_document_number   TEXT;
       ALTER TABLE users ADD COLUMN IF NOT EXISTS kyc_submitted_at      TIMESTAMPTZ;
       ALTER TABLE users ADD COLUMN IF NOT EXISTS first_deposit_granted TEXT DEFAULT 'none';
+
+      CREATE TABLE IF NOT EXISTS manual_review_queue (
+        id                 SERIAL PRIMARY KEY,
+        bet_id             INTEGER NOT NULL,
+        match_id           TEXT NOT NULL,
+        reason             TEXT NOT NULL,
+        priority           TEXT NOT NULL DEFAULT 'normal',
+        status             TEXT NOT NULL DEFAULT 'pending',
+        settlement_result  JSONB,
+        reviewed_by        TEXT,
+        reviewed_at        TIMESTAMPTZ,
+        notes              TEXT,
+        created_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at         TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+
+      CREATE TABLE IF NOT EXISTS settlement_replay_log (
+        id            SERIAL PRIMARY KEY,
+        match_id      TEXT NOT NULL,
+        triggered_by  TEXT NOT NULL,
+        reason        TEXT NOT NULL,
+        bets_affected INTEGER,
+        status        TEXT NOT NULL DEFAULT 'pending',
+        started_at    TIMESTAMPTZ,
+        completed_at  TIMESTAMPTZ,
+        error         TEXT,
+        created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
     `);
 
     console.info("[db/init] Schema initialisation complete.");

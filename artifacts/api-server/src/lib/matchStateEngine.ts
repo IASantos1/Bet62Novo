@@ -1,0 +1,200 @@
+import { logger } from "./logger.js";
+
+export type MatchStatus =
+  | "scheduled"
+  | "live"
+  | "halftime"
+  | "suspended"
+  | "finished"
+  | "cancelled"
+  | "postponed";
+
+export type MatchState = {
+  matchId: string;
+  status: MatchStatus;
+  homeScore: number;
+  awayScore: number;
+  minute?: number;
+  period?: string;
+  suspendedAt?: Date;
+  suspendedReason?: string;
+  lastUpdated: Date;
+};
+
+const MAX_STATES = 20_000;
+const STALE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
+
+class MatchStateEngine {
+  private readonly states = new Map<string, MatchState>();
+
+  /** Update or create state for a match. Returns the merged state. */
+  updateState(matchId: string, update: Partial<MatchState>): MatchState {
+    const existing = this.states.get(matchId);
+    const next: MatchState = {
+      matchId,
+      status: "scheduled",
+      homeScore: 0,
+      awayScore: 0,
+      ...existing,
+      ...update,
+      lastUpdated: new Date(),
+    };
+    // Ensure matchId is always authoritative (not overridden by update spread)
+    next.matchId = matchId;
+
+    if (!this.states.has(matchId) && this.states.size >= MAX_STATES) {
+      // Evict oldest entry
+      const firstKey = this.states.keys().next().value;
+      if (firstKey !== undefined) this.states.delete(firstKey);
+    }
+
+    this.states.set(matchId, next);
+    return next;
+  }
+
+  /** Get current state for a match, or undefined if unknown. */
+  getState(matchId: string): MatchState | undefined {
+    return this.states.get(matchId);
+  }
+
+  /** Mark a match as suspended (blocks new bets). */
+  suspend(matchId: string, reason: string): void {
+    const existing = this.states.get(matchId);
+    const next: MatchState = {
+      matchId,
+      homeScore: 0,
+      awayScore: 0,
+      ...existing,
+      status: "suspended",
+      suspendedAt: new Date(),
+      suspendedReason: reason,
+      lastUpdated: new Date(),
+    };
+    this.states.set(matchId, next);
+    logger.info({ matchId, reason }, "MatchStateEngine: match suspended");
+  }
+
+  /** Lift suspension and restore previous live status (or 'live' by default). */
+  unsuspend(matchId: string): void {
+    const existing = this.states.get(matchId);
+    if (!existing) {
+      logger.warn({ matchId }, "MatchStateEngine: unsuspend called on unknown match");
+      return;
+    }
+    const next: MatchState = {
+      ...existing,
+      status: "live",
+      suspendedAt: undefined,
+      suspendedReason: undefined,
+      lastUpdated: new Date(),
+    };
+    this.states.set(matchId, next);
+    logger.info({ matchId }, "MatchStateEngine: match unsuspended");
+  }
+
+  /** Returns true if the match is currently suspended. */
+  isSuspended(matchId: string): boolean {
+    return this.states.get(matchId)?.status === "suspended";
+  }
+
+  /** Returns all matches whose status is 'live'. */
+  getLiveMatches(): MatchState[] {
+    const result: MatchState[] = [];
+    for (const state of this.states.values()) {
+      if (state.status === "live") result.push(state);
+    }
+    return result;
+  }
+
+  /**
+   * Normalizes a raw status string from various feed providers into an
+   * internal MatchStatus value.
+   */
+  normalizeStatus(raw: string): MatchStatus {
+    const s = raw.toLowerCase().trim();
+
+    if (
+      s === "live" ||
+      s === "inprogress" ||
+      s === "in_progress" ||
+      s === "in progress" ||
+      s === "playing" ||
+      s === "ongoing" ||
+      s === "1h" ||
+      s === "2h" ||
+      s === "et" ||
+      s === "ot" ||
+      s === "overtime"
+    ) {
+      return "live";
+    }
+
+    if (s === "ht" || s === "halftime" || s === "half_time" || s === "half time") {
+      return "halftime";
+    }
+
+    if (
+      s === "finished" ||
+      s === "ft" ||
+      s === "fulltime" ||
+      s === "full_time" ||
+      s === "full time" ||
+      s === "ended" ||
+      s === "complete" ||
+      s === "completed" ||
+      s === "aet" ||
+      s === "pen"
+    ) {
+      return "finished";
+    }
+
+    if (
+      s === "cancelled" ||
+      s === "canceled" ||
+      s === "abandoned" ||
+      s === "void"
+    ) {
+      return "cancelled";
+    }
+
+    if (s === "postponed" || s === "delayed") {
+      return "postponed";
+    }
+
+    if (s === "suspended" || s === "interrupted" || s === "paused") {
+      return "suspended";
+    }
+
+    if (
+      s === "scheduled" ||
+      s === "not_started" ||
+      s === "not started" ||
+      s === "ns" ||
+      s === "tbd" ||
+      s === "upcoming" ||
+      s === "fixture"
+    ) {
+      return "scheduled";
+    }
+
+    logger.debug({ raw }, "MatchStateEngine: unknown status, defaulting to scheduled");
+    return "scheduled";
+  }
+
+  /** Remove match states that haven't been updated in over 24 hours. */
+  cleanup(): void {
+    const cutoff = Date.now() - STALE_TTL_MS;
+    let evicted = 0;
+    for (const [matchId, state] of this.states) {
+      if (state.lastUpdated.getTime() < cutoff) {
+        this.states.delete(matchId);
+        evicted++;
+      }
+    }
+    if (evicted > 0) {
+      logger.debug({ evicted }, "MatchStateEngine: evicted stale match states");
+    }
+  }
+}
+
+export const matchStateEngine = new MatchStateEngine();
