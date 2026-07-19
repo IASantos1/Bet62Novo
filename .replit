@@ -64,3 +64,5 @@ channel = "stable-25_05"
 [userenv.shared]
 ADMIN_EMAIL = "suportebet62@gmail.com"
 ADMIN_USERNAME = "Israel"
+FOOTBALL_DAILY_PROVIDER = "statpal"
+FOOTBALL_LIVE_PROVIDER = "statpal"

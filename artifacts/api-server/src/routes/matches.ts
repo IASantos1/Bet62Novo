@@ -23513,6 +23513,61 @@ async function getMLBDailyResults(): Promise<MLBDailyResult[]> {
   const now = Date.now();
   if (mlbResultsCache && now - mlbResultsFetchedAt < RESULTS_CACHE_TTL)
     return mlbResultsCache;
+
+  if (CONFIG.STATPAL_API_KEY) {
+    try {
+      const resp = await fetch(buildStatpalUrl("/v1/mlb/daily/d-1"), {
+        signal: AbortSignal.timeout(8_000),
+        headers: statpalHeaders(),
+      });
+      if (resp.ok) {
+        const payload = (await resp.json()) as {
+          scores?: { tournament?: MLBTournament | MLBTournament[] };
+        };
+        const tournaments = statpalList(payload.scores?.tournament);
+        const results = tournaments.flatMap((tournament) =>
+          statpalList(tournament.match).map((match) => {
+            const innings: Array<[number | null, number | null]> = [];
+            for (const key of ["in1","in2","in3","in4","in5","in6","in7","in8","in9"] as const) {
+              const hv = match.home[key];
+              const av = match.away[key];
+              if (!hv && !av) break;
+              innings.push([
+                hv ? Number.parseInt(hv, 10) : null,
+                av ? Number.parseInt(av, 10) : null,
+              ]);
+            }
+            const homeScore = Number.parseInt(match.home.r || match.home.totalscore, 10) || 0;
+            const awayScore = Number.parseInt(match.away.r || match.away.totalscore, 10) || 0;
+            return {
+              id: match.id,
+              home: match.home.name,
+              away: match.away.name,
+              homeScore,
+              awayScore,
+              homeHits: Number.parseInt(match.home.hits, 10) || 0,
+              awayHits: Number.parseInt(match.away.hits, 10) || 0,
+              homeErrors: Number.parseInt(match.home.errors, 10) || 0,
+              awayErrors: Number.parseInt(match.away.errors, 10) || 0,
+              innings,
+              hasExtra: false,
+              homeWon: homeScore > awayScore,
+              league: tournament.league,
+              country: tournament.country,
+              date: match.date ?? "",
+              time: match.time,
+            } satisfies MLBDailyResult;
+          }),
+        );
+        mlbResultsCache = results;
+        mlbResultsFetchedAt = now;
+        return results;
+      }
+    } catch (err) {
+      logger.warn({ err, provider: "statpal" }, "MLB daily results provider failed");
+    }
+  }
+
   try {
     const events = await getV2EventsLast("baseball", 20);
     const yd = new Date(Date.now() - 86400000);
@@ -23592,6 +23647,92 @@ async function getBasketballSchedule(): Promise<BasketballScheduleData> {
     now - basketballScheduleFetchedAt < BBALL_SCHEDULE_TTL
   )
     return basketballScheduleCache;
+
+  const bballDateKey = (s: string) => {
+    const [d, mo, y] = s.split(".");
+    return `${y ?? ""}${mo ?? ""}${d ?? ""}`;
+  };
+
+  if (CONFIG.STATPAL_API_KEY) {
+    try {
+      const resp = await fetch(buildStatpalUrl("/v1/nba/season-schedule"), {
+        signal: AbortSignal.timeout(10_000),
+        headers: statpalHeaders(),
+      });
+      if (resp.ok) {
+        const payload = (await resp.json()) as {
+          scores?: {
+            tournament?: {
+              country: string;
+              id: string;
+              league: string;
+              season: string;
+              match: NBAMatch | NBAMatch[];
+            };
+          };
+        };
+        const tournament = payload.scores?.tournament;
+        if (tournament) {
+          const matches = statpalList(tournament.match);
+          const upcomingMatches: BasketballScheduleMatch[] = [];
+          const recentMatches: BasketballScheduleMatch[] = [];
+
+          for (const match of matches) {
+            const quarters: Array<[number, number]> = [];
+            for (const [hv, av] of [
+              [match.home.q1, match.away.q1],
+              [match.home.q2, match.away.q2],
+              [match.home.q3, match.away.q3],
+              [match.home.q4, match.away.q4],
+            ] as [string | undefined, string | undefined][]) {
+              const h = Number.parseInt(hv ?? "", 10);
+              const a = Number.parseInt(av ?? "", 10);
+              if (Number.isFinite(h) && Number.isFinite(a)) quarters.push([h, a]);
+            }
+            const homeOT = match.home.ot ? Number.parseInt(match.home.ot, 10) : NaN;
+            const awayOT = match.away.ot ? Number.parseInt(match.away.ot, 10) : NaN;
+            if (!isNaN(homeOT) && !isNaN(awayOT)) quarters.push([homeOT, awayOT]);
+            const homeScore = Number.parseInt(match.home.totalscore, 10) || 0;
+            const awayScore = Number.parseInt(match.away.totalscore, 10) || 0;
+            const mapped: BasketballScheduleMatch = {
+              id: match.id,
+              date: match.date ?? "",
+              time: match.time,
+              status: match.status,
+              home: match.home.name,
+              away: match.away.name,
+              homeScore,
+              awayScore,
+              quarters,
+              homeWon: homeScore > awayScore,
+            };
+            if (
+              String(match.status).toLowerCase().includes("not started") ||
+              String(match.status).toLowerCase().includes("scheduled")
+            ) {
+              upcomingMatches.push({ ...mapped, homeScore: 0, awayScore: 0, quarters: [] });
+            } else {
+              recentMatches.push(mapped);
+            }
+          }
+
+          recentMatches.sort((a, b) => bballDateKey(b.date).localeCompare(bballDateKey(a.date)));
+          upcomingMatches.sort((a, b) => bballDateKey(a.date).localeCompare(bballDateKey(b.date)));
+          basketballScheduleCache = {
+            league: tournament.league,
+            season: tournament.season,
+            upcomingMatches: upcomingMatches.slice(0, 40),
+            recentMatches: recentMatches.slice(0, 15),
+          };
+          basketballScheduleFetchedAt = now;
+          return basketballScheduleCache;
+        }
+      }
+    } catch (err) {
+      logger.warn({ err, provider: "statpal" }, "NBA season schedule provider failed");
+    }
+  }
+
   try {
     const [upcomingEvents, lastEvents] = await Promise.all([
       getUpcomingLeagueEventsV2("basketball", 21),
@@ -23698,6 +23839,60 @@ async function getBasketballDailyResults(): Promise<BasketballDailyResult[]> {
     now - basketballResultsFetchedAt < RESULTS_CACHE_TTL
   )
     return basketballResultsCache;
+
+  if (CONFIG.STATPAL_API_KEY) {
+    try {
+      const resp = await fetch(buildStatpalUrl("/v1/nba/daily/d-1"), {
+        signal: AbortSignal.timeout(8_000),
+        headers: statpalHeaders(),
+      });
+      if (resp.ok) {
+        const payload = (await resp.json()) as {
+          scores?: { tournament?: NBATournament | NBATournament[] };
+        };
+        const tournaments = statpalList(payload.scores?.tournament);
+        const results = tournaments.flatMap((tournament) =>
+          statpalList(tournament.match).map((match) => {
+            const quarters: Array<[number, number]> = [];
+            for (const [hv, av] of [
+              [match.home.q1, match.away.q1],
+              [match.home.q2, match.away.q2],
+              [match.home.q3, match.away.q3],
+              [match.home.q4, match.away.q4],
+            ] as [string | undefined, string | undefined][]) {
+              const h = Number.parseInt(hv ?? "", 10);
+              const a = Number.parseInt(av ?? "", 10);
+              if (Number.isFinite(h) && Number.isFinite(a)) quarters.push([h, a]);
+            }
+            const homeOT = match.home.ot ? Number.parseInt(match.home.ot, 10) : NaN;
+            const awayOT = match.away.ot ? Number.parseInt(match.away.ot, 10) : NaN;
+            if (!isNaN(homeOT) && !isNaN(awayOT)) quarters.push([homeOT, awayOT]);
+            const homeScore = Number.parseInt(match.home.totalscore, 10) || 0;
+            const awayScore = Number.parseInt(match.away.totalscore, 10) || 0;
+            return {
+              id: match.id,
+              home: match.home.name,
+              away: match.away.name,
+              homeScore,
+              awayScore,
+              quarters,
+              homeWon: homeScore > awayScore,
+              league: tournament.league,
+              country: tournament.country,
+              date: match.date ?? "",
+              time: match.time,
+            } satisfies BasketballDailyResult;
+          }),
+        );
+        basketballResultsCache = results;
+        basketballResultsFetchedAt = now;
+        return results;
+      }
+    } catch (err) {
+      logger.warn({ err, provider: "statpal" }, "NBA daily results provider failed");
+    }
+  }
+
   try {
     const events = await getV2EventsLast("basketball", 20);
     const yd = new Date(Date.now() - 86400000);
@@ -24014,6 +24209,78 @@ async function getMLBSchedule(): Promise<MLBScheduleData> {
     upcomingMatches: [],
     recentMatches: [],
   };
+
+  const mlbDateKey = (s: string) => {
+    const [d, mo, y] = s.split(".");
+    return `${y ?? ""}${mo ?? ""}${d ?? ""}`;
+  };
+
+  if (CONFIG.STATPAL_API_KEY) {
+    try {
+      const resp = await fetch(buildStatpalUrl("/v1/mlb/season-schedule"), {
+        signal: AbortSignal.timeout(10_000),
+        headers: statpalHeaders(),
+      });
+      if (resp.ok) {
+        const payload = (await resp.json()) as {
+          scores?: {
+            tournament?: {
+              country: string;
+              id: string;
+              league: string;
+              season: string;
+              match: MLBMatch | MLBMatch[];
+            };
+          };
+        };
+        const tournament = payload.scores?.tournament;
+        if (tournament) {
+          const matches = statpalList(tournament.match);
+          const upcomingMatches: MLBScheduleMatch[] = [];
+          const recentMatches: MLBScheduleMatch[] = [];
+
+          for (const match of matches) {
+            const homeScore = Number.parseInt(match.home.r || match.home.totalscore, 10) || 0;
+            const awayScore = Number.parseInt(match.away.r || match.away.totalscore, 10) || 0;
+            const mapped: MLBScheduleMatch = {
+              id: match.id,
+              date: match.date ?? "",
+              time: match.time,
+              status: match.status,
+              venue: match.venue_name,
+              home: match.home.name,
+              away: match.away.name,
+              homeScore,
+              awayScore,
+              homeWon: homeScore > awayScore,
+            };
+            if (
+              String(match.status).toLowerCase().includes("not started") ||
+              String(match.status).toLowerCase().includes("scheduled")
+            ) {
+              upcomingMatches.push({ ...mapped, homeScore: 0, awayScore: 0 });
+            } else {
+              recentMatches.push(mapped);
+            }
+          }
+
+          recentMatches.sort((a, b) => mlbDateKey(b.date).localeCompare(mlbDateKey(a.date)));
+          upcomingMatches.sort((a, b) => mlbDateKey(a.date).localeCompare(mlbDateKey(b.date)));
+          mlbScheduleCache = {
+            league: tournament.league,
+            season: tournament.season,
+            upcomingMatches: upcomingMatches.slice(0, 50),
+            recentMatches: recentMatches.slice(0, 20),
+          };
+          mlbScheduleFetchedAt = now;
+          return mlbScheduleCache;
+        }
+      }
+    } catch (err) {
+      logger.warn({ err, provider: "statpal" }, "MLB season schedule provider failed");
+    }
+  }
+
   try {
     const [upcomingEvents, lastEvents] = await Promise.all([
       getUpcomingLeagueEventsV2("baseball", 21),
