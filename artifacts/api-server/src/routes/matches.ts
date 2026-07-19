@@ -722,22 +722,28 @@ function extractStatpalLeagueFeed(
   raw: Record<string, unknown>,
   preferredRoot?: string,
 ): { leagues: SAPILeagueV2[]; updatedTs: number } {
+  const isLeagueFeedEnvelope = (v: unknown): v is StatpalLeagueFeedEnvelope =>
+    !!v && typeof v === "object" && !Array.isArray(v);
+
+  // 1. Try the preferred root key (e.g. "live_matches")
   const preferred =
-    preferredRoot &&
-    raw[preferredRoot] &&
-    typeof raw[preferredRoot] === "object" &&
-    !Array.isArray(raw[preferredRoot])
+    preferredRoot && isLeagueFeedEnvelope(raw[preferredRoot])
       ? (raw[preferredRoot] as StatpalLeagueFeedEnvelope)
       : undefined;
 
+  // 2. Fallback: scan all top-level keys for a league-feed envelope.
+  //    Previously this only matched /^matches_/i — widened to also catch
+  //    keys like "live_matches", "matches", "livescores", etc. so that a
+  //    Statpal response-shape change doesn't silently return zero leagues.
   const dynamic = preferred
     ? undefined
     : (Object.entries(raw).find(
         ([key, value]) =>
-          /^matches_/i.test(key) &&
-          !!value &&
-          typeof value === "object" &&
-          !Array.isArray(value),
+          (/^matches_/i.test(key) ||
+            /^live_/i.test(key) ||
+            key === "matches" ||
+            key === "livescores") &&
+          isLeagueFeedEnvelope(value),
       )?.[1] as StatpalLeagueFeedEnvelope | undefined);
 
   const payload = preferred ?? dynamic;
@@ -871,9 +877,14 @@ async function fetchStatpalFootballLiveV2(): Promise<{
   if (!resp.ok) throw new Error(`Statpal live HTTP ${resp.status}`);
 
   const raw = (await resp.json()) as Record<string, unknown>;
+  const topKeys = Object.keys(raw);
   const { leagues, updatedTs } = extractStatpalLeagueFeed(raw, "live_matches");
   const events = leagues.flatMap((league) =>
     statpalList(league.match).map((match) => statpalMatchToV2Event(league, match)),
+  );
+  logger.info(
+    { topKeys, leagueCount: leagues.length, eventCount: events.length },
+    "[statpal-football-live] raw response shape",
   );
   return { events, updatedTs };
 }
