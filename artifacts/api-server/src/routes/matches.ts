@@ -864,27 +864,163 @@ function statpalMatchToV2Event(
   };
 }
 
+// ─── Statpal live odds → SAPIV2Event converter ───────────────────────────────
+// The Statpal /v2/soccer/odds/live endpoint returns Portuguese field names
+// ("partidas_ao_vivo", "informação_da_partida", "lar", "ausente", etc.).
+// This helper maps that structure to the SAPIV2Event shape used everywhere else.
+
+function mapStatpalPtPeriodToStatus(
+  period: string,
+  minute: number,
+): { description: string; code?: number } {
+  const p = period.toLowerCase();
+  if ((p.includes("1") || p.includes("primeiro")) && (p.includes("metade") || p.includes("half")))
+    return { description: "1st half", code: 1 };
+  if ((p.includes("2") || p.includes("segundo")) && (p.includes("metade") || p.includes("half")))
+    return { description: "2nd half", code: 1 };
+  if (p.includes("intervalo") || p === "ht" || p.includes("half time"))
+    return { description: "HT", code: 1 };
+  if (p.includes("extra") || p.includes("prorrogação"))
+    return { description: "Extra Time", code: 1 };
+  if (p.includes("penalt") || p.includes("pênalt"))
+    return { description: "Penalties", code: 1 };
+  if (minute > 0)
+    return { description: minute <= 45 ? "1st half" : "2nd half", code: 1 };
+  return { description: period };
+}
+
+function statpalOddsMatchToV2Event(
+  m: Record<string, unknown>,
+): SAPIV2Event | null {
+  // Support both Portuguese ("informação_da_partida") and English ("match_info") keys
+  const info = (m["informação_da_partida"] ?? m["match_info"]) as
+    | Record<string, unknown>
+    | undefined;
+  const teamsRaw = (m["informações_da_equipe"] ?? m["team_info"]) as
+    | Record<string, unknown>
+    | undefined;
+  const statusRaw = m["status"] as Record<string, unknown> | undefined;
+
+  if (!info || !teamsRaw) return null;
+
+  const id = Number(info["main_id"]);
+  if (!Number.isFinite(id) || id === 0) return null;
+
+  // Portuguese: lar/ausente; English: home/away
+  const homeRaw = (teamsRaw["lar"] ?? teamsRaw["home"]) as
+    | Record<string, unknown>
+    | undefined;
+  const awayRaw = (teamsRaw["ausente"] ?? teamsRaw["away"]) as
+    | Record<string, unknown>
+    | undefined;
+
+  const homeName = String(homeRaw?.["nome"] ?? homeRaw?.["name"] ?? "").trim();
+  const awayName = String(awayRaw?.["nome"] ?? awayRaw?.["name"] ?? "").trim();
+  if (!homeName || !awayName) return null;
+
+  // Score from per-team pontuação/score or placar/score string "1:1"
+  const scoreParts = String(info["placar"] ?? info["score"] ?? "0:0").split(":");
+  const homeScore =
+    parseInt(String(homeRaw?.["pontuação"] ?? homeRaw?.["score"] ?? scoreParts[0] ?? "0"), 10) || 0;
+  const awayScore =
+    parseInt(String(awayRaw?.["pontuação"] ?? awayRaw?.["score"] ?? scoreParts[1] ?? "0"), 10) || 0;
+
+  const period = String(info["período"] ?? info["period"] ?? "").trim();
+  const minute = parseInt(String(info["minuto"] ?? info["minute"] ?? "0"), 10) || 0;
+  const { description, code } = mapStatpalPtPeriodToStatus(period, minute);
+
+  // Skip finished matches
+  if (
+    statusRaw?.["concluído"] === "1" ||
+    statusRaw?.["finished"] === "1"
+  )
+    return null;
+
+  const leagueName = String(info["liga"] ?? info["league"] ?? "").trim();
+  const leagueId = Number(info["league_id"]);
+  const startTs = Number(info["start_ts"]);
+
+  return {
+    id,
+    tournament: {
+      id: Number.isFinite(leagueId) && leagueId > 0 ? leagueId : undefined,
+      name: leagueName,
+      category: { name: "", country: { name: "" } },
+    },
+    homeTeam: {
+      id: Number.isFinite(Number(homeRaw?.["id"])) ? Number(homeRaw?.["id"]) : undefined,
+      name: homeName,
+    },
+    awayTeam: {
+      id: Number.isFinite(Number(awayRaw?.["id"])) ? Number(awayRaw?.["id"]) : undefined,
+      name: awayName,
+    },
+    homeScore,
+    awayScore,
+    status: { code, description },
+    statusCode: code,
+    startTimestamp:
+      Number.isFinite(startTs) && startTs > 0 ? startTs : undefined,
+    roundInfo: minute > 0 ? { round: minute } : undefined,
+    finalResultOnly: false,
+    feedLocked: false,
+  };
+}
+
 async function fetchStatpalFootballLiveV2(): Promise<{
   events: SAPIV2Event[];
   updatedTs: number;
 }> {
   if (!CONFIG.STATPAL_API_KEY) throw new Error("STATPAL_API_KEY is not configured");
 
-  const resp = await fetch(buildStatpalUrl("/v2/soccer/matches/live"), {
-    signal: AbortSignal.timeout(5_000),
+  // 1. Try the standard matches/live endpoint (some Statpal subscriptions include it)
+  try {
+    const resp = await fetch(buildStatpalUrl("/v2/soccer/matches/live"), {
+      signal: AbortSignal.timeout(5_000),
+      headers: statpalHeaders(),
+    });
+    if (resp.ok) {
+      const raw = (await resp.json()) as Record<string, unknown>;
+      const topKeys = Object.keys(raw);
+      const { leagues, updatedTs } = extractStatpalLeagueFeed(raw, "live_matches");
+      const events = leagues.flatMap((league) =>
+        statpalList(league.match).map((match) => statpalMatchToV2Event(league, match)),
+      );
+      logger.info(
+        { topKeys, leagueCount: leagues.length, eventCount: events.length, source: "matches/live" },
+        "[statpal-football-live] raw response shape",
+      );
+      if (events.length > 0) return { events, updatedTs };
+      // Falls through to odds endpoint when matches/live returns empty
+    }
+  } catch (err) {
+    logger.warn({ err }, "[statpal-football-live] matches/live failed — trying odds/live");
+  }
+
+  // 2. Fallback: /v2/soccer/odds/live — confirmed to work with this subscription.
+  //    Returns Portuguese field names: partidas_ao_vivo, informação_da_partida, etc.
+  const oddsResp = await fetch(buildStatpalUrl("/v2/soccer/odds/live"), {
+    signal: AbortSignal.timeout(8_000),
     headers: statpalHeaders(),
   });
-  if (!resp.ok) throw new Error(`Statpal live HTTP ${resp.status}`);
+  if (!oddsResp.ok) throw new Error(`Statpal odds/live HTTP ${oddsResp.status}`);
 
-  const raw = (await resp.json()) as Record<string, unknown>;
-  const topKeys = Object.keys(raw);
-  const { leagues, updatedTs } = extractStatpalLeagueFeed(raw, "live_matches");
-  const events = leagues.flatMap((league) =>
-    statpalList(league.match).map((match) => statpalMatchToV2Event(league, match)),
+  const oddsRaw = (await oddsResp.json()) as Record<string, unknown>;
+  const updatedTs =
+    typeof oddsRaw["updated_ts"] === "number" ? oddsRaw["updated_ts"] : 0;
+
+  // Root key may be Portuguese ("partidas_ao_vivo") or English ("live_matches")
+  const matchList = statpalList(
+    (oddsRaw["partidas_ao_vivo"] ?? oddsRaw["live_matches"]) as unknown[] | null | undefined,
   );
+  const events = matchList.flatMap((m) => {
+    const ev = statpalOddsMatchToV2Event(m as Record<string, unknown>);
+    return ev ? [ev] : [];
+  });
+
   logger.info(
-    { topKeys, leagueCount: leagues.length, eventCount: events.length },
-    "[statpal-football-live] raw response shape",
+    { eventCount: events.length, source: "odds/live" },
+    "[statpal-football-live] odds/live response",
   );
   return { events, updatedTs };
 }
@@ -28953,48 +29089,19 @@ router.get("/football-odds/:leagueId", async (req: Request, res: Response) => {
 //   • status.stopped/blocked/finished as "0"/"1" strings
 //   • kit_color as comma-separated hex list
 
-type FootballLiveOddsMatchRaw = {
-  match_info?: {
-    name: string;
-    main_id: string;
-    fallback_id_1?: string;
-    fallback_id_2?: string;
-    fallback_id_3?: string;
-    league_id: string;
-    league: string;
-    start_date: string;
-    start_time: string;
-    start_ts: number;
-    start_ts_utc: number;
-    score: string; // "1:1"
-    period: string; // "2nd Half"
-    minute: string; // "67"
-    seconds: string; // "67:23"
-    state_code?: string;
-    state_name?: string;
-    state_details?: string;
-    ball_pos?: string; // "0.38,0.25"
-  };
-  status?: {
-    stopped: string;
-    blocked: string;
-    finished: string;
-    updated: string;
-    updated_ts: string; // milliseconds as string
-  };
-  team_info?: {
-    home?: { name: string; id: string; score: string; kit_color?: string };
-    away?: { name: string; id: string; score: string; kit_color?: string };
-  };
-  stats?: Record<string, { name: string; home: string; away: string }>;
-  match_events?: unknown[];
-  odds?: unknown[];
-};
+// Statpal /v2/soccer/odds/live returns Portuguese field names.
+// All fields are read via the statpalOddsMatchToV2Event helper which handles
+// both Portuguese and English variants, so this type just documents the shape.
+type FootballLiveOddsMatchRaw = Record<string, unknown>;
 
 type FootballLiveOddsRaw = {
-  updated?: string;
-  updated_ts?: number; // milliseconds
+  // Portuguese root key
+  partidas_ao_vivo?: FootballLiveOddsMatchRaw[];
+  // English root key (kept for forward-compatibility)
   live_matches?: FootballLiveOddsMatchRaw[];
+  updated?: string;
+  atualizado?: string;
+  updated_ts?: number; // milliseconds
 };
 
 let footballLiveOddsCache: object[] | null = null;
@@ -29021,64 +29128,103 @@ async function getFootballLiveOdds(): Promise<object[]> {
       });
       if (resp.ok) {
         const payload = (await resp.json()) as FootballLiveOddsRaw;
-        const matches = statpalList(payload.live_matches).map((match) => {
-          const matchInfo = match.match_info;
-          const home = match.team_info?.home;
-          const away = match.team_info?.away;
-          const [homeScore, awayScore] = String(matchInfo?.score ?? "0:0")
+        // Root key: Portuguese "partidas_ao_vivo" or English "live_matches"
+        const rawList = statpalList(
+          payload.partidas_ao_vivo ?? payload.live_matches,
+        );
+        const matches = rawList.map((m) => {
+          // Portuguese field names: informação_da_partida / informações_da_equipe / lar / ausente
+          const matchInfo = (m["informação_da_partida"] ?? m["match_info"]) as
+            | Record<string, unknown>
+            | undefined;
+          const teamsRaw = (m["informações_da_equipe"] ?? m["team_info"]) as
+            | Record<string, unknown>
+            | undefined;
+          const statusRaw = m["status"] as Record<string, unknown> | undefined;
+
+          const homeRaw = (teamsRaw?.["lar"] ?? teamsRaw?.["home"]) as
+            | Record<string, unknown>
+            | undefined;
+          const awayRaw = (teamsRaw?.["ausente"] ?? teamsRaw?.["away"]) as
+            | Record<string, unknown>
+            | undefined;
+
+          const scoreStr = String(matchInfo?.["placar"] ?? matchInfo?.["score"] ?? "0:0");
+          const [homeScore, awayScore] = scoreStr
             .split(":")
-            .map((value) => Number.parseInt(value, 10) || 0);
+            .map((v) => Number.parseInt(v, 10) || 0);
+
+          const kitColors = (raw: string | undefined) =>
+            String(raw ?? "")
+              .split(",")
+              .map((v) => v.trim())
+              .filter(Boolean);
 
           return {
-            id: matchInfo?.main_id ?? "",
-            leagueId: matchInfo?.league_id ?? "",
-            league: matchInfo?.league ?? "",
-            name: matchInfo?.name ?? "",
-            date: matchInfo?.start_date ?? "",
-            time: matchInfo?.start_time ?? "",
-            startTs: matchInfo?.start_ts ?? 0,
-            startTsUtc: matchInfo?.start_ts_utc ?? 0,
-            period: matchInfo?.period ?? "",
-            minute: Number.parseInt(matchInfo?.minute ?? "0", 10) || 0,
-            seconds: matchInfo?.seconds ?? "",
+            id: String(matchInfo?.["main_id"] ?? ""),
+            leagueId: String(matchInfo?.["league_id"] ?? ""),
+            // Portuguese: liga; English: league
+            league: String(matchInfo?.["liga"] ?? matchInfo?.["league"] ?? ""),
+            name: String(matchInfo?.["nome"] ?? matchInfo?.["name"] ?? ""),
+            date: String(matchInfo?.["data_de_início"] ?? matchInfo?.["start_date"] ?? ""),
+            time: String(matchInfo?.["start_time"] ?? ""),
+            startTs: Number(matchInfo?.["start_ts"] ?? 0),
+            startTsUtc: Number(matchInfo?.["start_ts_utc"] ?? 0),
+            // Portuguese: período; English: period
+            period: String(matchInfo?.["período"] ?? matchInfo?.["period"] ?? ""),
+            minute:
+              Number.parseInt(
+                String(matchInfo?.["minuto"] ?? matchInfo?.["minute"] ?? "0"),
+                10,
+              ) || 0,
+            seconds: String(matchInfo?.["segundos"] ?? matchInfo?.["seconds"] ?? ""),
             state: {
-              code: matchInfo?.state_code ?? "",
-              name: matchInfo?.state_name ?? "",
-              details: matchInfo?.state_details ?? "",
-              ballPosition: matchInfo?.ball_pos ?? "",
+              code: String(matchInfo?.["código_do_estado"] ?? matchInfo?.["state_code"] ?? ""),
+              name: String(matchInfo?.["state_name"] ?? ""),
+              details: String(matchInfo?.["state_details"] ?? ""),
+              ballPosition: String(matchInfo?.["ball_pos"] ?? ""),
             },
             status: {
-              stopped: match.status?.stopped === "1",
-              blocked: match.status?.blocked === "1",
-              finished: match.status?.finished === "1",
-              updated: match.status?.updated ?? "",
-              updatedTs: Number.parseInt(match.status?.updated_ts ?? "0", 10) || 0,
+              // Portuguese: parado/bloqueado/concluído; English: stopped/blocked/finished
+              stopped:
+                statusRaw?.["parado"] === "1" || statusRaw?.["stopped"] === "1",
+              blocked:
+                statusRaw?.["bloqueado"] === "1" || statusRaw?.["blocked"] === "1",
+              finished:
+                statusRaw?.["concluído"] === "1" || statusRaw?.["finished"] === "1",
+              updated: String(statusRaw?.["atualizado"] ?? statusRaw?.["updated"] ?? ""),
+              updatedTs:
+                Number.parseInt(String(statusRaw?.["updated_ts"] ?? "0"), 10) || 0,
             },
             homeTeam: {
-              id: home?.id ?? "",
-              name: home?.name ?? "",
-              score: Number.parseInt(home?.score ?? "0", 10) || homeScore,
-              kitColors: String(home?.kit_color ?? "")
-                .split(",")
-                .map((value) => value.trim())
-                .filter(Boolean),
+              id: String(homeRaw?.["id"] ?? ""),
+              name: String(homeRaw?.["nome"] ?? homeRaw?.["name"] ?? ""),
+              score:
+                Number.parseInt(
+                  String(homeRaw?.["pontuação"] ?? homeRaw?.["score"] ?? "0"),
+                  10,
+                ) || homeScore,
+              kitColors: kitColors(homeRaw?.["kit_color"] as string | undefined),
             },
             awayTeam: {
-              id: away?.id ?? "",
-              name: away?.name ?? "",
-              score: Number.parseInt(away?.score ?? "0", 10) || awayScore,
-              kitColors: String(away?.kit_color ?? "")
-                .split(",")
-                .map((value) => value.trim())
-                .filter(Boolean),
+              id: String(awayRaw?.["id"] ?? ""),
+              name: String(awayRaw?.["nome"] ?? awayRaw?.["name"] ?? ""),
+              score:
+                Number.parseInt(
+                  String(awayRaw?.["pontuação"] ?? awayRaw?.["score"] ?? "0"),
+                  10,
+                ) || awayScore,
+              kitColors: kitColors(awayRaw?.["kit_color"] as string | undefined),
             },
-            stats: Object.values(match.stats ?? {}).map((entry) => ({
-              name: entry.name,
-              home: entry.home,
-              away: entry.away,
-            })),
-            matchEvents: match.match_events ?? [],
-            odds: match.odds ?? [],
+            stats: Object.values((m["estatísticas"] ?? m["stats"] ?? {}) as Record<string, Record<string, string>>).map(
+              (entry) => ({
+                name: String(entry?.["nome"] ?? entry?.["name"] ?? ""),
+                home: String(entry?.["casa"] ?? entry?.["home"] ?? ""),
+                away: String(entry?.["fora"] ?? entry?.["away"] ?? ""),
+              }),
+            ),
+            matchEvents: (m["match_events"] ?? []) as unknown[],
+            odds: (m["chances"] ?? m["odds"] ?? []) as unknown[],
           };
         });
         footballLiveOddsCache = matches;
