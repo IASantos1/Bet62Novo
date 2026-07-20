@@ -10578,9 +10578,8 @@ async function getFootballLiveV2(): Promise<SAPIV2Event[]> {
       (liveProvider === "sportsapipro" && sportsApiMissing));
   const canUseSportsApi =
     !!CONFIG.SPORTSAPI_KEY &&
-    (liveProvider === "auto" ||
-      liveProvider === "sportsapipro" ||
-      liveProvider === "statpal");
+    !CONFIG.STATPAL_ONLY &&
+    (liveProvider === "auto" || liveProvider === "sportsapipro");
 
   try {
     if (canUseStatpal) {
@@ -10630,6 +10629,7 @@ async function getFootballLiveV2(): Promise<SAPIV2Event[]> {
 }
 
 async function getBasketballLiveV2(): Promise<SAPIV2Event[]> {
+  if (CONFIG.STATPAL_ONLY) return basketballLiveV2Cache ?? [];
   const now = Date.now();
   if (
     (wsConnected.has("basketball") || v1WsConnected.has("basketball")) &&
@@ -10665,6 +10665,7 @@ async function getBasketballLiveV2(): Promise<SAPIV2Event[]> {
 }
 
 async function getHockeyLiveV2(): Promise<SAPIV2Event[]> {
+  if (CONFIG.STATPAL_ONLY) return hockeyLiveV2Cache ?? [];
   const now = Date.now();
   if (
     (wsConnected.has("hockey") || v1WsConnected.has("hockey")) &&
@@ -10697,6 +10698,7 @@ async function getHockeyLiveV2(): Promise<SAPIV2Event[]> {
 }
 
 async function getBaseballLiveV2(): Promise<SAPIV2Event[]> {
+  if (CONFIG.STATPAL_ONLY) return baseballLiveV2Cache ?? [];
   const now = Date.now();
   if (
     (wsConnected.has("baseball") || v1WsConnected.has("baseball")) &&
@@ -10732,6 +10734,7 @@ async function getBaseballLiveV2(): Promise<SAPIV2Event[]> {
 }
 
 async function getTennisLiveV2(): Promise<SAPIV2Event[]> {
+  if (CONFIG.STATPAL_ONLY) return tennisLiveV2Cache ?? [];
   const now = Date.now();
   if (
     (wsConnected.has("tennis") || v1WsConnected.has("tennis")) &&
@@ -11048,7 +11051,7 @@ function connectSportWS(sport: SportKey): void {
   if (wsConnected.has(sport)) return;
 
   const key = CONFIG.SPORTSAPI_KEY;
-  if (!key) return; // no API key — skip WS entirely
+  if (!key || CONFIG.STATPAL_ONLY) return; // no API key or Statpal-only mode
 
   const url = `wss://${WS_DOMAINS[sport]}/ws?x-api-key=${key}`;
 
@@ -11262,7 +11265,7 @@ function connectV1SportWS(sport: SportKey): void {
   if (v1WsConnected.has(sport)) return;
 
   const key = CONFIG.SPORTSAPI_KEY;
-  if (!key) return;
+  if (!key || CONFIG.STATPAL_ONLY) return; // no API key or Statpal-only mode
 
   const url = `wss://${V1_WS_DOMAINS[sport]}/ws?x-api-key=${key}`;
   let ws: WebSocket;
@@ -11335,7 +11338,7 @@ export function initV1SportWebSockets(): void {
 }
 
 export async function primeSportLiveCaches(): Promise<void> {
-  if (!CONFIG.SPORTSAPI_KEY) return;
+  if (!CONFIG.SPORTSAPI_KEY || CONFIG.STATPAL_ONLY) return;
   await Promise.all([
     getFootballLiveV2().catch(() => []),
     getBasketballLiveV2().catch(() => []),

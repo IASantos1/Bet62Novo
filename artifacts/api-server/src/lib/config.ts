@@ -12,17 +12,24 @@ const STATPAL_API_KEY =
 const STATPAL_BASE_URL =
   process.env["STATPAL_BASE_URL"]?.trim() || "https://statpal.io/api";
 
-// Default to "auto" so the server uses whichever API key is present —
-// Statpal is tried first (live odds feed), SportsAPI Pro is the fallback.
-// Override with FOOTBALL_LIVE_PROVIDER=sportsapipro to force one provider.
+// Default to "statpal" — Statpal is the primary and only live data source.
+// Set FOOTBALL_LIVE_PROVIDER=auto to also try SportsAPI Pro as fallback,
+// or FOOTBALL_LIVE_PROVIDER=sportsapipro to use only SportsAPI Pro.
 const FOOTBALL_LIVE_PROVIDER =
-  process.env["FOOTBALL_LIVE_PROVIDER"]?.trim() || "auto";
+  process.env["FOOTBALL_LIVE_PROVIDER"]?.trim() || "statpal";
 
 const FOOTBALL_DAILY_PROVIDER =
-  process.env["FOOTBALL_DAILY_PROVIDER"]?.trim() || "auto";
+  process.env["FOOTBALL_DAILY_PROVIDER"]?.trim() || "statpal";
 
 const FOOTBALL_REFERENCE_PROVIDER =
-  process.env["FOOTBALL_REFERENCE_PROVIDER"]?.trim() || "auto";
+  process.env["FOOTBALL_REFERENCE_PROVIDER"]?.trim() || "statpal";
+
+// When true, ALL SportsAPI Pro calls are disabled (WebSockets, HTTP fetches,
+// basketball/baseball/tennis live). This avoids consuming quota when the
+// subscription is Statpal-only. Automatically true when provider = "statpal".
+const STATPAL_ONLY =
+  FOOTBALL_LIVE_PROVIDER === "statpal" ||
+  process.env["STATPAL_ONLY"] === "true";
 
 export const CONFIG = {
   SPORTSAPI_KEY,
@@ -31,6 +38,7 @@ export const CONFIG = {
   FOOTBALL_LIVE_PROVIDER,
   FOOTBALL_DAILY_PROVIDER,
   FOOTBALL_REFERENCE_PROVIDER,
+  STATPAL_ONLY,
   LIVE_UPDATE_INTERVAL: 1000,
   PREMATCH_UPDATE_INTERVAL: 300_000,
   REOPEN_DELAY_GOAL_LOW: 12_000,
