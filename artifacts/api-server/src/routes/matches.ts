@@ -1023,8 +1023,13 @@ async function fetchStatpalFootballLiveV2(): Promise<{
     return ev ? [ev] : [];
   });
 
+  // Mark every successfully converted event as "confirmed live" so buildFootballLiveV2
+  // can bypass the 20-min new-match gate for them. Bookmakers only price live odds on
+  // matches in progress, so these IDs are guaranteed to be genuinely live.
+  for (const ev of events) oddsLiveKnownIds.add(ev.id);
+
   logger.info(
-    { eventCount: events.length, source: "odds/live" },
+    { eventCount: events.length, source: "odds/live", knownLiveIds: oddsLiveKnownIds.size },
     "[statpal-football-live] odds/live response",
   );
   return { events, updatedTs };
@@ -7173,6 +7178,12 @@ const TOUR_CACHE_TTL = 30 * 60 * 1000; // 30 min
 // silently discarded by the "never-seen-before + >20 min old" gate.
 const SERVER_BOOT_AT = Date.now();
 const COLD_START_GRACE_MS = 5 * 60 * 1000; // 5 minutes
+
+// IDs of matches confirmed live via the Statpal /v2/soccer/odds/live endpoint.
+// Bookmakers only price live odds for matches actually in progress, so any ID
+// that has ever appeared in this feed is guaranteed to be a real live match —
+// it bypasses the "never-seen + >20 min old" gate in buildFootballLiveV2.
+const oddsLiveKnownIds = new Set<number>();
 
 // Live state: stable odds across refreshes
 export const liveMatchState = new Map<string, LiveMatchState>();
@@ -14875,11 +14886,16 @@ async function buildFootballLiveV2(
     // on Railway) immediately surfaces all currently-live matches rather than
     // waiting up to 20 minutes for them to appear.
     const isColdStart = Date.now() - SERVER_BOOT_AT < COLD_START_GRACE_MS;
+    // oddsLiveKnownIds: IDs confirmed live via /v2/soccer/odds/live — bookmakers only
+    // price live odds on matches in progress, so these bypass the "never seen + >20min"
+    // gate that exists to block Statpal pre-match fixtures faking a live status.
+    const isConfirmedOddsLive = oddsLiveKnownIds.has(ev.id);
     if (
       !liveMatchState.has(`football-v2-${ev.id}`) &&
       evAgeSeconds > 20 * 60 &&
       !fromUpcoming &&
-      !isColdStart
+      !isColdStart &&
+      !isConfirmedOddsLive
     )
       continue;
 
