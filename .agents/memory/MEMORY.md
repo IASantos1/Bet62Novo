@@ -1,3 +1,4 @@
 - [Bet62 GitHub import](bet62-import.md) — imported web-only from an external multi-artifact repo; mobile app was intentionally dropped per user request.
 - [Statpal tennis decimal set scores](statpal-tennis-quirk.md) — statpal's tennis livescores API sometimes encodes a set's games as a decimal; must truncate before any odds/score math.
 - [Football live guard provider ids](football-live-guard-provider-ids.md) — a ground-truth cross-check must share the same provider's id space as the feed it checks, or it silently no-ops.
+- [Football live provider config defaults](football-live-provider-config.md) — FOOTBALL_LIVE/DAILY/REFERENCE_PROVIDER must default to "auto"; "sportsapipro" silently blocks Statpal when both keys are set.
