@@ -10586,10 +10586,17 @@ async function getFootballLiveV2(): Promise<SAPIV2Event[]> {
     if (canUseStatpal) {
       try {
         const statpal = await fetchStatpalFootballLiveV2();
-        footballLiveV2Cache = statpal.events;
-        footballLiveV2FetchedAt = now;
-        liveFeedUpdatedTs = statpal.updatedTs;
-        return footballLiveV2Cache;
+        if (statpal.events.length > 0) {
+          footballLiveV2Cache = statpal.events;
+          footballLiveV2FetchedAt = now;
+          liveFeedUpdatedTs = statpal.updatedTs;
+          return footballLiveV2Cache;
+        }
+        // Statpal returned 0 events — fall through to SportsAPI Pro
+        logger.warn(
+          { provider: "statpal" },
+          "Football live provider returned 0 events; falling back to SportsAPI Pro",
+        );
       } catch (err) {
         logger.warn(
           { err, provider: "statpal" },

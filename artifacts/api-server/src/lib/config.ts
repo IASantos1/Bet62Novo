@@ -12,14 +12,17 @@ const STATPAL_API_KEY =
 const STATPAL_BASE_URL =
   process.env["STATPAL_BASE_URL"]?.trim() || "https://statpal.io/api";
 
+// Default to "auto" so the server uses whichever API key is present —
+// Statpal is tried first (live odds feed), SportsAPI Pro is the fallback.
+// Override with FOOTBALL_LIVE_PROVIDER=sportsapipro to force one provider.
 const FOOTBALL_LIVE_PROVIDER =
-  process.env["FOOTBALL_LIVE_PROVIDER"]?.trim() || "sportsapipro";
+  process.env["FOOTBALL_LIVE_PROVIDER"]?.trim() || "auto";
 
 const FOOTBALL_DAILY_PROVIDER =
-  process.env["FOOTBALL_DAILY_PROVIDER"]?.trim() || "sportsapipro";
+  process.env["FOOTBALL_DAILY_PROVIDER"]?.trim() || "auto";
 
 const FOOTBALL_REFERENCE_PROVIDER =
-  process.env["FOOTBALL_REFERENCE_PROVIDER"]?.trim() || "sportsapipro";
+  process.env["FOOTBALL_REFERENCE_PROVIDER"]?.trim() || "auto";
 
 export const CONFIG = {
   SPORTSAPI_KEY,
