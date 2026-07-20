@@ -938,7 +938,13 @@ function statpalOddsMatchToV2Event(
 
   const leagueName = String(info["liga"] ?? info["league"] ?? "").trim();
   const leagueId = Number(info["league_id"]);
-  const startTs = Number(info["start_ts"]);
+  const rawTs = Number(info["start_ts"]);
+  // Statpal returns start_ts in seconds; values > 1e11 suggest milliseconds — normalise.
+  // Without a valid timestamp, leave it undefined so time-guards don't misfire.
+  let startTimestamp: number | undefined;
+  if (Number.isFinite(rawTs) && rawTs > 1_000_000_000) {
+    startTimestamp = rawTs > 1e11 ? Math.round(rawTs / 1000) : rawTs;
+  }
 
   return {
     id,
@@ -959,8 +965,7 @@ function statpalOddsMatchToV2Event(
     awayScore,
     status: { code, description },
     statusCode: code,
-    startTimestamp:
-      Number.isFinite(startTs) && startTs > 0 ? startTs : undefined,
+    startTimestamp,
     roundInfo: minute > 0 ? { round: minute } : undefined,
     finalResultOnly: false,
     feedLocked: false,
@@ -31752,31 +31757,83 @@ router.get("/statpal-live-debug", async (req: Request, res: Response) => {
     res.json({ error: "STATPAL_API_KEY not set" });
     return;
   }
-  try {
-    const resp = await fetch(buildStatpalUrl("/v2/soccer/matches/live"), {
-      signal: AbortSignal.timeout(8_000),
-      headers: statpalHeaders(),
-    });
-    const body = (await resp.json()) as Record<string, unknown>;
-    const topKeys = Object.keys(body);
-    const { leagues } = extractStatpalLeagueFeed(body, "live_matches");
-    const eventCount = leagues.reduce((n, l) => n + statpalList(l.match).length, 0);
-    res.json({
-      httpStatus: resp.status,
-      topKeys,
-      leagueCount: leagues.length,
-      eventCount,
-      // include first 3 leagues for inspection
-      sampleLeagues: leagues.slice(0, 3).map((l) => ({
-        name: l.name,
-        country: l.country,
-        matchCount: statpalList(l.match).length,
-        firstMatch: statpalList(l.match)[0] ?? null,
-      })),
-    });
-  } catch (err) {
-    res.status(500).json({ error: String(err) });
-  }
+
+  // Test both endpoints in parallel and report the raw shape of each
+  const [matchesResult, oddsResult] = await Promise.allSettled([
+    (async () => {
+      const resp = await fetch(buildStatpalUrl("/v2/soccer/matches/live"), {
+        signal: AbortSignal.timeout(8_000),
+        headers: statpalHeaders(),
+      });
+      const body = (await resp.json()) as Record<string, unknown>;
+      const topKeys = Object.keys(body);
+      const { leagues } = extractStatpalLeagueFeed(body, "live_matches");
+      const eventCount = leagues.reduce((n, l) => n + statpalList(l.match).length, 0);
+      return {
+        httpStatus: resp.status,
+        topKeys,
+        leagueCount: leagues.length,
+        eventCount,
+        sampleLeagues: leagues.slice(0, 3).map((l) => ({
+          name: l.name,
+          country: l.country,
+          matchCount: statpalList(l.match).length,
+          firstMatch: statpalList(l.match)[0] ?? null,
+        })),
+      };
+    })(),
+    (async () => {
+      const resp = await fetch(buildStatpalUrl("/v2/soccer/odds/live"), {
+        signal: AbortSignal.timeout(8_000),
+        headers: statpalHeaders(),
+      });
+      const body = (await resp.json()) as Record<string, unknown>;
+      const topKeys = Object.keys(body);
+      // Portuguese root key or English fallback
+      const rawList = statpalList(
+        (body["partidas_ao_vivo"] ?? body["live_matches"]) as unknown[] | null | undefined,
+      );
+      const converted = rawList.flatMap((m) => {
+        const ev = statpalOddsMatchToV2Event(m as Record<string, unknown>);
+        return ev ? [ev] : [];
+      });
+      return {
+        httpStatus: resp.status,
+        topKeys,
+        rawMatchCount: rawList.length,
+        convertedEventCount: converted.length,
+        // First raw match and first converted event for shape inspection
+        firstRawMatch: rawList[0] ?? null,
+        firstConverted: converted[0] ?? null,
+        // Diagnose why conversion may return null
+        nullConversionSamples: rawList
+          .slice(0, 5)
+          .filter((m) => !statpalOddsMatchToV2Event(m as Record<string, unknown>))
+          .map((m) => {
+            const rec = m as Record<string, unknown>;
+            const info = (rec["informação_da_partida"] ?? rec["match_info"]) as Record<string, unknown> | undefined;
+            const teams = (rec["informações_da_equipe"] ?? rec["team_info"]) as Record<string, unknown> | undefined;
+            return { topKeys: Object.keys(rec), infoKeys: info ? Object.keys(info) : [], teamsKeys: teams ? Object.keys(teams) : [] };
+          }),
+      };
+    })(),
+  ]);
+
+  res.json({
+    matchesLive:
+      matchesResult.status === "fulfilled"
+        ? matchesResult.value
+        : { error: String(matchesResult.reason) },
+    oddsLive:
+      oddsResult.status === "fulfilled"
+        ? oddsResult.value
+        : { error: String(oddsResult.reason) },
+    // Quick summary of what fetchStatpalFootballLiveV2 would actually return
+    fetchResult: await fetchStatpalFootballLiveV2().then(
+      ({ events, updatedTs }) => ({ eventCount: events.length, updatedTs, firstEvent: events[0] ?? null }),
+      (err: unknown) => ({ error: String(err) }),
+    ),
+  });
 });
 
 export function initLiveWsServer(httpServer: http.Server): void {
