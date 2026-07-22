@@ -15,7 +15,7 @@ import {
   enqueueMatchSettlement,
 } from "../lib/settlementQueue.js";
 import { db, matchResultsTable } from "@workspace/db";
-import { eq } from "drizzle-orm";
+import { eq, and, gte, sql } from "drizzle-orm";
 import * as http from "http";
 import * as net from "net";
 
@@ -8793,17 +8793,33 @@ export async function scanVolleyballForFinished(): Promise<void> {
 
 export async function scanTennisV1ForFinished(): Promise<void> {
   try {
-    const games = await getTennisLiveV1();
+    // 1. Check BOTH the live feed (in-progress/just-finished) AND the /all feed
+    //    (all of today's games — finished matches remain here for hours).
+    const [liveGames, allGames] = await Promise.all([
+      getTennisLiveV1(),
+      getTennisAllV1(),
+    ]);
+
+    // Deduplicate by game id (live feed may subset all feed)
+    const seenIds = new Set<string>();
+    const games: V1TennisGame[] = [];
+    for (const g of [...liveGames, ...allGames]) {
+      if (!g?.id) continue;
+      const id = String(g.id);
+      if (seenIds.has(id)) continue;
+      seenIds.add(id);
+      games.push(g);
+    }
+
     for (const g of games) {
       if (!isTennisV1GameFinished(g)) continue;
-      if (!g.id) continue;
       const providerId = String(g.id);
       const matchId = `tennis-v1-${providerId}`;
       if (finishedMatchResults.has(matchId)) continue;
 
       const home = Math.max(0, g.homeCompetitor?.score ?? 0);
       const away = Math.max(0, g.awayCompetitor?.score ?? 0);
-      if (home === 0 && away === 0) continue; // no score data yet
+      if (home === 0 && away === 0) continue; // score data not yet available
 
       const homeTeam = g.homeCompetitor?.name?.trim() ?? "";
       const awayTeam = g.awayCompetitor?.name?.trim() ?? "";
@@ -8823,6 +8839,48 @@ export async function scanTennisV1ForFinished(): Promise<void> {
       });
       await persistFinishedMatchRecord(matchId, "tennis", record);
     }
+
+    // 2. DB recovery pass — reload tennis results that were stored before the current
+    //    server session (e.g. after a restart). Finished matches leave the live feed
+    //    within minutes, so without this, pending bets from yesterday or earlier
+    //    would never settle even though the result is in the DB.
+    if (db) {
+      try {
+        const cutoff = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000); // last 7 days
+        const rows = await db
+          .select()
+          .from(matchResultsTable)
+          .where(
+            and(
+              sql`${matchResultsTable.sport} = 'tennis'`,
+              gte(matchResultsTable.finishedAt, cutoff),
+            ),
+          )
+          .limit(500);
+
+        for (const row of rows) {
+          if (finishedMatchResults.has(row.matchId)) continue;
+          if (typeof row.home !== "number" || typeof row.away !== "number") continue;
+          finishedMatchResults.set(row.matchId, {
+            home: row.home,
+            away: row.away,
+            homeTeam: row.homeTeam ?? "",
+            awayTeam: row.awayTeam ?? "",
+            status: row.status ?? "finished",
+            extras: row.extras ?? undefined,
+            finishedAt: row.finishedAt ? row.finishedAt.getTime() : Date.now(),
+          });
+          // Re-enqueue so the settlement worker picks it up for any pending bets
+          await enqueueMatchSettlement({
+            matchId: row.matchId,
+            jobId: buildMatchSettlementJobId({ matchId: row.matchId, home: row.home, away: row.away }),
+          });
+        }
+      } catch (dbErr) {
+        logger.warn({ err: dbErr }, "scanTennisV1ForFinished: DB recovery failed");
+      }
+    }
+
     _pruneFinishedResults();
   } catch (err) {
     logger.error({ err }, "scanTennisV1ForFinished failed");
