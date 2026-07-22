@@ -753,6 +753,13 @@ export default function AdminPage() {
   const [unsuspending, setUnsuspending] = useState<string | null>(null);
   const [savingSetting, setSavingSetting] = useState<string | null>(null);
 
+  // Statpal API usage
+  const [statpalUsage, setStatpalUsage] = useState<{
+    date: string | null;
+    requestCount: number | null;
+  } | null>(null);
+  const [statpalUsageLoading, setStatpalUsageLoading] = useState(false);
+
   // Filters/UI
   const [userSearch, setUserSearch] = useState("");
   const [betSearch, setBetSearch] = useState("");
@@ -847,6 +854,19 @@ export default function AdminPage() {
       else if (res.status === 401) handleLogout();
     } catch {
       /* ignore */
+    }
+  }, [token]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const fetchStatpalUsage = useCallback(async () => {
+    if (!token) return;
+    setStatpalUsageLoading(true);
+    try {
+      const res = await fetch("/api/admin/statpal-usage", { headers: authHeader });
+      if (res.ok) setStatpalUsage(await res.json());
+    } catch {
+      /* ignore */
+    } finally {
+      setStatpalUsageLoading(false);
     }
   }, [token]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -1048,7 +1068,8 @@ export default function AdminPage() {
   useEffect(() => {
     if (!token) return;
     fetchStats();
-    if (activeTab === "users") fetchUsers();
+    if (activeTab === "dashboard") fetchStatpalUsage();
+    else if (activeTab === "users") fetchUsers();
     else if (activeTab === "bets") fetchBets();
     else if (activeTab === "payments") fetchPayments();
     else if (activeTab === "withdrawals") {
@@ -2289,6 +2310,88 @@ export default function AdminPage() {
                         </div>
                       </div>
                     )}
+
+                    {/* ── Statpal API Usage ── */}
+                    <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-5">
+                      <div className="flex items-center justify-between mb-4">
+                        <h3 className="font-bold text-sm text-zinc-300 flex items-center gap-2">
+                          <Activity size={16} className="text-orange-400" />
+                          Statpal API — Utilização
+                        </h3>
+                        <button
+                          onClick={fetchStatpalUsage}
+                          disabled={statpalUsageLoading}
+                          className="text-zinc-500 hover:text-zinc-300 transition-colors"
+                          title="Atualizar"
+                        >
+                          <RefreshCw size={14} className={statpalUsageLoading ? "animate-spin" : ""} />
+                        </button>
+                      </div>
+
+                      {statpalUsageLoading && !statpalUsage ? (
+                        <div className="flex items-center justify-center py-6">
+                          <Loader2 size={22} className="animate-spin text-orange-400" />
+                        </div>
+                      ) : statpalUsage ? (
+                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+                          {/* Request counter */}
+                          <div className="col-span-2 sm:col-span-1 bg-zinc-800/60 rounded-xl p-4 flex flex-col items-center justify-center">
+                            <div className="text-3xl font-black text-orange-400 tabular-nums">
+                              {statpalUsage.requestCount !== null
+                                ? Number(statpalUsage.requestCount).toLocaleString("pt-PT")
+                                : "—"}
+                            </div>
+                            <div className="text-xs text-zinc-400 mt-1">Pedidos hoje</div>
+                          </div>
+
+                          {/* Date */}
+                          <div className="bg-zinc-800/60 rounded-xl p-4 flex flex-col items-center justify-center">
+                            <div className="text-base font-black text-white tabular-nums">
+                              {statpalUsage.date
+                                ? (() => {
+                                    const [y, m, d] = String(statpalUsage.date).split("-");
+                                    return `${d}/${m}/${y}`;
+                                  })()
+                                : "—"}
+                            </div>
+                            <div className="text-xs text-zinc-400 mt-1">Data</div>
+                          </div>
+
+                          {/* Visual bar — assumes 100k daily limit */}
+                          <div className="col-span-2 sm:col-span-1 bg-zinc-800/60 rounded-xl p-4 flex flex-col justify-center gap-2">
+                            {(() => {
+                              const count = Number(statpalUsage.requestCount ?? 0);
+                              const limit = 100_000;
+                              const pct = Math.min((count / limit) * 100, 100);
+                              const color =
+                                pct >= 80 ? "bg-red-500" : pct >= 50 ? "bg-yellow-500" : "bg-emerald-500";
+                              return (
+                                <>
+                                  <div className="flex justify-between text-[10px] text-zinc-500">
+                                    <span>0</span>
+                                    <span>{pct.toFixed(1)}%</span>
+                                    <span>100k</span>
+                                  </div>
+                                  <div className="h-2 bg-zinc-700 rounded-full overflow-hidden">
+                                    <motion.div
+                                      className={`h-full rounded-full ${color}`}
+                                      initial={{ width: 0 }}
+                                      animate={{ width: `${pct}%` }}
+                                      transition={{ duration: 0.8, ease: "easeOut" }}
+                                    />
+                                  </div>
+                                  <div className="text-[10px] text-zinc-500 text-center">do limite estimado diário</div>
+                                </>
+                              );
+                            })()}
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="text-center text-zinc-600 text-sm py-4">
+                          Não foi possível obter dados da Statpal.
+                        </div>
+                      )}
+                    </div>
 
                     <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
                       <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-5">

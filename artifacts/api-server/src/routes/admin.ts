@@ -2058,5 +2058,58 @@ router.get(
   },
 );
 
+// ── Statpal API usage ─────────────────────────────────────────────────────────
+// Cached so the dashboard card can refresh every 60 s without hammering Statpal.
+let statpalUsageCache: { data: Record<string, unknown>; at: number } | null = null;
+const STATPAL_USAGE_TTL_MS = 60_000;
+
+router.get("/statpal-usage", adminMiddleware, async (_req, res) => {
+  try {
+    const key = process.env.STATPAL_API_KEY;
+    if (!key) {
+      res.status(503).json({ error: "STATPAL_API_KEY não configurada" });
+      return;
+    }
+
+    // Serve from cache if fresh
+    if (statpalUsageCache && Date.now() - statpalUsageCache.at < STATPAL_USAGE_TTL_MS) {
+      res.json(statpalUsageCache.data);
+      return;
+    }
+
+    const url = new URL("https://statpal.io/api/user-request-count");
+    url.searchParams.set("access_key", key);
+
+    const resp = await fetch(url.toString(), {
+      signal: AbortSignal.timeout(8000),
+      headers: { Accept: "application/json" },
+    });
+
+    if (!resp.ok) {
+      res.status(502).json({ error: `Statpal devolveu ${resp.status}` });
+      return;
+    }
+
+    const raw = await resp.json() as Record<string, unknown>;
+
+    // Normalize field names (Statpal uses Portuguese keys)
+    const data = {
+      accessKey: raw["access_key"] ?? raw["accessKey"] ?? null,
+      date: raw["data_atual"] ?? raw["date"] ?? null,
+      requestCount:
+        raw["contagem_de_solicitações"] ??
+        raw["request_count"] ??
+        raw["requestCount"] ??
+        null,
+    };
+
+    statpalUsageCache = { data, at: Date.now() };
+    res.json(data);
+  } catch (err) {
+    logger.error({ err }, "GET /api/admin/statpal-usage error");
+    res.status(500).json({ error: "Erro ao consultar Statpal" });
+  }
+});
+
 export default router;
 
