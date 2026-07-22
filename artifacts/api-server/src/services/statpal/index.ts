@@ -151,6 +151,51 @@ export class StatpalClient {
     return this.get(`/v1/mlb/league-stats/${encodeURIComponent(category)}`);
   }
 
+  // ── MLB odds ──────────────────────────────────────────────────────────────
+
+  /** `/v1/mlb/odds` — upcoming MLB games with 3Way Result bookmaker odds (H/D/A) */
+  async getMLBOdds(): Promise<Record<string, unknown>> {
+    return this.get("/v1/mlb/odds");
+  }
+
+  // ── NBA (Basketball) ──────────────────────────────────────────────────────
+
+  /** `/v1/nba/livescores` — real-time quarter-by-quarter scores with OT support */
+  async getNBALivescores(): Promise<Record<string, unknown>> {
+    return this.get("/v1/nba/livescores");
+  }
+
+  /** `/v1/nba/daily/d-{offset}` — d-0=today, d-1=yesterday */
+  async getNBADaily(offset: number = 1): Promise<Record<string, unknown>> {
+    return this.get(`/v1/nba/daily/d-${offset}`);
+  }
+
+  /** `/v1/nba/season-schedule` — full-season schedule (upcoming + completed) with q1–q4 scores */
+  async getNBASeasonSchedule(): Promise<Record<string, unknown>> {
+    return this.get("/v1/nba/season-schedule");
+  }
+
+  /** `/v1/nba/standings` — standings by conference and division (W/L, pct, streak, last 10) */
+  async getNBAStandings(): Promise<Record<string, unknown>> {
+    return this.get("/v1/nba/standings");
+  }
+
+  /**
+   * `/v1/nba/rosters/{abbr}` — active roster with player bio and base64 team logo.
+   * Abbreviations are 2-3 letters (e.g. `"mem"`, `"lal"`, `"bos"`).
+   */
+  async getNBARosters(teamAbbr: string): Promise<Record<string, unknown>> {
+    return this.get(`/v1/nba/rosters/${encodeURIComponent(teamAbbr.toLowerCase())}`);
+  }
+
+  /**
+   * `/v1/nba/team-stats/{abbr}` — per-player stats broken into categories:
+   * Game (pts/reb/ast/stl/blk), Shooting (FG%/3P%/FT%).
+   */
+  async getNBATeamStats(teamAbbr: string): Promise<Record<string, unknown>> {
+    return this.get(`/v1/nba/team-stats/${encodeURIComponent(teamAbbr.toLowerCase())}`);
+  }
+
   // ── Football V2 ───────────────────────────────────────────────────────────
 
   async getFootballLive(): Promise<Record<string, unknown>> {

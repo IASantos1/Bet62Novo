@@ -10098,7 +10098,36 @@ function buildMLBLiveMatches(tournaments: MLBTournament[]): LiveMatchState[] {
   return result;
 }
 
+// Statpal /v1/nba/livescores — quarter-by-quarter scores with OT support
+const NBA_LIVE_TTL = 15_000; // 15 s — quarter transitions happen every ~12 min
+
 async function getNBALive(): Promise<NBATournament[]> {
+  const now = Date.now();
+  if (nbaLiveCache && now - nbaLiveFetchedAt < NBA_LIVE_TTL)
+    return nbaLiveCache;
+
+  if (CONFIG.STATPAL_API_KEY) {
+    try {
+      const resp = await fetch(buildStatpalUrl("/v1/nba/livescores"), {
+        signal: AbortSignal.timeout(8_000),
+        headers: statpalHeaders(),
+      });
+      if (resp.ok) {
+        const payload = (await resp.json()) as {
+          livescores?: { tournament?: NBATournament | NBATournament[] };
+        };
+        const tournaments = statpalList(payload.livescores?.tournament);
+        if (tournaments.length > 0 || nbaLiveCache == null) {
+          nbaLiveCache = tournaments;
+          nbaLiveFetchedAt = now;
+        }
+        return nbaLiveCache ?? [];
+      }
+    } catch (err) {
+      logger.warn({ err, provider: "statpal" }, "NBA livescores fetch failed");
+    }
+  }
+
   return nbaLiveCache ?? [];
 }
 
@@ -17186,6 +17215,7 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
     handballEvents,
     formula1Fresh,
     mlbLiveTournaments,
+    nbaLiveTournaments,
   ] = await Promise.all([
     getFootballLiveV2(),
     getBasketballLiveV2(),
@@ -17198,7 +17228,8 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
     getExtraLiveEventsV2("cricket"),
     getExtraLiveEventsV2("handball"),
     getFormula1Live(),
-    getMLBLive(),             // Statpal /v1/mlb/livescores — innings, hits, errors, outs
+    getMLBLive(),   // Statpal /v1/mlb/livescores — innings, hits, errors, outs
+    getNBALive(),   // Statpal /v1/nba/livescores — quarter-by-quarter scores
   ]);
   // Populate V1 tennis league label cache from V2 today events (city → "ATP 250 · City")
   if (tennisTodayEvents && tennisTodayEvents.length > 0) {
@@ -17373,10 +17404,21 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
     "football",
     await buildFootballLiveV2(footballEvents),
   );
-  const basketballLive = sportWithFallback(
-    "basketball",
-    await buildBasketballLiveV2(basketballEvents),
+  // Basketball live: merge Statpal NBA livescores + SportsAPI V2.
+  // Statpal wins when it has quarter detail (q1–q4, OT).
+  // SportsAPI V2 fills games not yet flipped to live by Statpal.
+  const statpalNBALive = buildNBALiveMatches(nbaLiveTournaments);
+  const sapiv2NBALive = await buildBasketballLiveV2(basketballEvents);
+  const statpalNBAPairs = new Set(
+    statpalNBALive.map((m) => `${m.home}|${m.away}`),
   );
+  const mergedBasketballLive = [
+    ...statpalNBALive,
+    ...sapiv2NBALive.filter(
+      (m) => !statpalNBAPairs.has(`${m.home}|${m.away}`),
+    ),
+  ];
+  const basketballLive = sportWithFallback("basketball", mergedBasketballLive);
   const hockeyLive = sportWithFallback(
     "hockey",
     buildHockeyLiveV2(hockeyEvents),
@@ -26455,6 +26497,71 @@ let mlbOddsCache: MLBOddsEntry[] | null = null;
 let mlbOddsFetchedAt = 0;
 let mlbOddsInFlight: Promise<MLBOddsEntry[]> | null = null;
 
+// ── Statpal /v1/mlb/odds parser ───────────────────────────────────────────────
+// Returns an array of MLBOddsEntry built from Statpal's 3Way Result market.
+// Much cheaper than the SportsAPI V2 path (1 request vs N per-match requests).
+async function fetchStatpalMLBOdds(): Promise<MLBOddsEntry[] | null> {
+  if (!CONFIG.STATPAL_API_KEY) return null;
+  try {
+    const resp = await fetch(buildStatpalUrl("/v1/mlb/odds"), {
+      signal: AbortSignal.timeout(8_000),
+      headers: statpalHeaders(),
+    });
+    if (!resp.ok) return null;
+    const payload = (await resp.json()) as {
+      odds?: {
+        category?: {
+          matches?: {
+            match?: unknown | unknown[];
+          };
+        };
+      };
+    };
+    type StatpalOddsOdd = { name: string; value: string };
+    type StatpalOddsBm = { odd: StatpalOddsOdd | StatpalOddsOdd[] };
+    type StatpalOddsType = { id: string; value: string; bookmaker: StatpalOddsBm | StatpalOddsBm[] };
+    type StatpalOddsMatch = {
+      id: string; mlbid: string; date: string; time: string; status: string;
+      home: { id: string; name: string };
+      away: { id: string; name: string };
+      odds?: { type?: StatpalOddsType | StatpalOddsType[] };
+    };
+    const matches = statpalList(payload.odds?.category?.matches?.match as StatpalOddsMatch | StatpalOddsMatch[] | undefined);
+    const results: MLBOddsEntry[] = [];
+    for (const m of matches) {
+      if (!m?.home?.name || !m?.away?.name) continue;
+      const types = statpalList(m.odds?.type);
+      const threeWay = types.find(
+        (t) => t.id === "1" || t.value?.toLowerCase().includes("result"),
+      );
+      if (!threeWay) continue;
+      const bms = statpalList(threeWay.bookmaker);
+      if (!bms.length) continue;
+      const odds = statpalList(bms[0]!.odd);
+      const homeOdds = parseFloat(odds.find((o) => o.name === "Home")?.value ?? "0");
+      const awayOdds = parseFloat(odds.find((o) => o.name === "Away")?.value ?? "0");
+      const drawOdds = parseFloat(odds.find((o) => o.name === "Draw")?.value ?? "0");
+      if (homeOdds <= 1 || awayOdds <= 1) continue;
+      const entry: MLBOddsEntry = {
+        matchId: m.mlbid || m.id,
+        date: m.date ?? "",
+        time: m.time ?? "",
+        homeTeam: { id: m.home.id, name: m.home.name },
+        awayTeam: { id: m.away.id, name: m.away.name },
+        homeOdds,
+        drawOdds: drawOdds > 1 ? drawOdds : 0,
+        awayOdds,
+        markets: makeMLBMarketsFromTeams(m.home.name, m.away.name, homeOdds, awayOdds),
+      };
+      results.push(entry);
+    }
+    return results.length > 0 ? results : null;
+  } catch (err) {
+    logger.warn({ err, provider: "statpal" }, "MLB odds fetch failed");
+    return null;
+  }
+}
+
 async function getMLBOdds(): Promise<MLBOddsEntry[]> {
   const now = Date.now();
   if (mlbOddsCache && now - mlbOddsFetchedAt < MLB_ODDS_TTL)
@@ -26463,6 +26570,19 @@ async function getMLBOdds(): Promise<MLBOddsEntry[]> {
     if (!mlbOddsInFlight) {
       mlbOddsInFlight = (async () => {
         try {
+          // Try Statpal first (1 request) before falling back to per-match SportsAPI V2
+          const statpalResults = await fetchStatpalMLBOdds();
+          if (statpalResults) {
+            for (const r of statpalResults) {
+              const normH = r.homeTeam.name.toLowerCase().trim();
+              const normA = r.awayTeam.name.toLowerCase().trim();
+              mlbRawOddsMap.set(`${normH}|${normA}`, { h: r.homeOdds, a: r.awayOdds });
+              mlbRawOddsMap.set(`${normA}|${normH}`, { h: r.awayOdds, a: r.homeOdds });
+            }
+            mlbOddsCache = statpalResults;
+            mlbOddsFetchedAt = Date.now();
+            return statpalResults;
+          }
           const events = (await getUpcomingLeagueEventsV2("baseball", 7)).slice(
             0,
             20,
@@ -26512,6 +26632,23 @@ async function getMLBOdds(): Promise<MLBOddsEntry[]> {
       });
     }
     return mlbOddsCache;
+  }
+  // Cold-start: try Statpal first (1 request), fall back to SportsAPI V2 (N requests)
+  try {
+    const statpalResults = await fetchStatpalMLBOdds();
+    if (statpalResults) {
+      for (const r of statpalResults) {
+        const normH = r.homeTeam.name.toLowerCase().trim();
+        const normA = r.awayTeam.name.toLowerCase().trim();
+        mlbRawOddsMap.set(`${normH}|${normA}`, { h: r.homeOdds, a: r.awayOdds });
+        mlbRawOddsMap.set(`${normA}|${normH}`, { h: r.awayOdds, a: r.homeOdds });
+      }
+      mlbOddsCache = statpalResults;
+      mlbOddsFetchedAt = now;
+      return statpalResults;
+    }
+  } catch {
+    /* fall through to SportsAPI V2 */
   }
   try {
     const events = (await getUpcomingLeagueEventsV2("baseball", 7)).slice(
