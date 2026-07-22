@@ -10342,31 +10342,14 @@ export default function Home({
               </div>
             )}
           </div>
-          {/* Progress bar + goal markers */}
-          {!isEmBreve && !isVolleyNonLive && progress > 0 && (() => {
-            const allGoals = [
-              ...(extra?.homeGoalMinutes ?? []).map((m: number) => ({ m, isHome: true })),
-              ...(extra?.awayGoalMinutes ?? []).map((m: number) => ({ m, isHome: false })),
-            ];
-            const maxMin = sport === "basketball" ? 48 : sport === "hockey" ? 60 : sport === "baseball" ? 9 : 90;
-            return (
-              <div className="mt-2 w-full relative" style={{ height: "6px" }}>
-                <div className="absolute inset-0 bg-zinc-800 rounded-full overflow-hidden">
-                  <div className="h-full bg-red-600/60 rounded-full" style={{ width: `${progress}%` }} />
-                </div>
-                {allGoals.map(({ m, isHome }, i) => (
-                  <div
-                    key={i}
-                    className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 text-[7px] leading-none pointer-events-none select-none"
-                    style={{ left: `${Math.min(97, (m / maxMin) * 100)}%` }}
-                    title={`Golo ${isHome ? "casa" : "fora"} min ${m}'`}
-                  >
-                    ⚽
-                  </div>
-                ))}
+          {/* Progress bar */}
+          {!isEmBreve && !isVolleyNonLive && progress > 0 && (
+            <div className="mt-2 w-full relative" style={{ height: "6px" }}>
+              <div className="absolute inset-0 bg-zinc-800 rounded-full overflow-hidden">
+                <div className="h-full bg-red-600/60 rounded-full" style={{ width: `${progress}%` }} />
               </div>
-            );
-          })()}
+            </div>
+          )}
         </div>
       </motion.div>
     );
