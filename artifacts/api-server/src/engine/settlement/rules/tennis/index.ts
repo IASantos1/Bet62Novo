@@ -120,19 +120,55 @@ export function settleSetHandicap(input: { match: MatchResult; selection: Select
 
 // ─── 4. Set Winner ───────────────────────────────────────────────────────────
 // selection: "home_set1" | "away_set2"
+// Also accepts compact format: "set1-home" | "set2-away"
+
+function parseSetWinnerSelection(sel: string): { side: "home" | "away"; setNum: string } | null {
+  // Format 1: "home_set1" / "away_set2"
+  const m1 = sel.match(/^(home|away)_set([1-5])$/);
+  if (m1) return { side: m1[1] as "home" | "away", setNum: m1[2]! };
+  // Format 2: "set1-home" / "set1-away" (compact live key)
+  const m2 = sel.match(/^set([1-5])-(home|away)$/);
+  if (m2) return { side: m2[2] as "home" | "away", setNum: m2[1]! };
+  // Format 3: "s1-home" / "s2-away" (shorter compact)
+  const m3 = sel.match(/^s([1-5])-(home|away)$/);
+  if (m3) return { side: m3[2] as "home" | "away", setNum: m3[1]! };
+  return null;
+}
+
+/** Determine if a set score is conclusive (i.e. the set has finished). */
+function tennisSetIsComplete(s: TennisSetScore): boolean {
+  const { home, away } = s;
+  if (home === away) return false; // tie-break pending or error
+  const winner = home > away ? home : away;
+  const loser = home > away ? away : home;
+  // Normal win: 6-0..6-4, or 7-5 (no tb), or 7-6 (tb)
+  if (winner >= 6 && loser <= 4) return true;
+  if (winner === 7 && (loser === 5 || loser === 6)) return true;
+  // Match tie-break (10-point): winner >= 10 with 2+ gap
+  if (winner >= 10 && winner - loser >= 2) return true;
+  return false;
+}
 
 export function settleTennisSetWinner(input: { match: MatchResult; selection: Selection }): Outcome {
   const { match, selection } = input;
-  if (match.status !== "finished") return "pending";
 
   const extras = getExtras(match);
   const sel = selection.selection.toLowerCase();
-  const m = sel.match(/^(home|away)_set([1-5])$/);
-  if (!m) return "void";
+  const parsed = parseSetWinnerSelection(sel);
+  if (!parsed) return "void";
 
-  const side = m[1];
-  const setNum = m[2];
+  const { side, setNum } = parsed;
   const s = getSet(extras, setNum);
+
+  // For live matches, settle as soon as the set has a conclusive result
+  if (match.status === "live") {
+    if (!s || !tennisSetIsComplete(s)) return "pending";
+    return side === "home"
+      ? (s.home > s.away ? "won" : "lost")
+      : (s.away > s.home ? "won" : "lost");
+  }
+
+  if (match.status !== "finished") return "pending";
   if (!s) return "pending";
   if (s.home === s.away) return "lost"; // sets can't tie, but guard anyway
   return side === "home" ? (s.home > s.away ? "won" : "lost") : (s.away > s.home ? "won" : "lost");
@@ -143,7 +179,6 @@ export function settleTennisSetWinner(input: { match: MatchResult; selection: Se
 
 export function settleCorrectSetScore(input: { match: MatchResult; selection: Selection }): Outcome {
   const { match, selection } = input;
-  if (match.status !== "finished") return "pending";
 
   const extras = getExtras(match);
   const sel = selection.selection.toLowerCase();
@@ -156,6 +191,14 @@ export function settleCorrectSetScore(input: { match: MatchResult; selection: Se
 
   const s = getSet(extras, setNum);
   if (!s) return "pending";
+
+  // For live matches, settle as soon as the specific set has a conclusive result
+  if (match.status === "live") {
+    if (!tennisSetIsComplete(s)) return "pending";
+    return s.home === selHome && s.away === selAway ? "won" : "lost";
+  }
+
+  if (match.status !== "finished") return "pending";
   return s.home === selHome && s.away === selAway ? "won" : "lost";
 }
 

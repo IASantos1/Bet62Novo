@@ -1745,6 +1745,20 @@ export function normalizeSettlementSelectionKey(selection: string): string {
   else if (s === "dnb-home" || s === "empate-anulado-casa") s = "dnb-home";
   else if (s === "dnb-away" || s === "empate-anulado-visitante") s = "dnb-away";
 
+  // Tennis set winner: "home_set1" / "away_set2" → "set1-home" / "set2-away"
+  else if (/^(home|away)_set([1-5])$/.test(s)) {
+    const m = s.match(/^(home|away)_set([1-5])$/);
+    s = `set${m![2]}-${m![1]}`;
+  }
+
+  // Football / Tennis Over/Under verbose format: "over_2.5" / "under_1.5" → "o25" / "u15"
+  else if (/^(over|under)[_\s](\d+(?:\.\d+)?)$/.test(s)) {
+    const m = s.match(/^(over|under)[_\s](\d+(?:\.\d+)?)$/);
+    const dir = m![1] === "over" ? "o" : "u";
+    const digits = m![2]!.replace(".", "");
+    s = `${dir}${digits}`;
+  }
+
   else {
     const compactFootballKey = normalizeCompactFootballSelectionKey(s);
     if (compactFootballKey) s = compactFootballKey;

@@ -1,0 +1,311 @@
+curl --request GET \
+  --url 'https://statpal.io/api/v2/soccer/head-to-head?access_key=b5b07a3f-b019-4a18-8969-6045169feda9' \ 
+  --header 'Accept: application/json'
+{
+  "cara a cara" : { 
+    "team1_id" : "2341082" , 
+    "team2_id" : "2341092" , 
+    "reuniões_recentes" : { 
+      "corresponder" : [ 
+        {
+          "main_id" : "2025110918508" , 
+          "fallback_id_1" : "6014271" , 
+          "país" : "Inglaterra " 
+          "liga" : "Premier League" , 
+          "league_id" : "3037" , 
+          "data" : "09.11.2025 " 
+          "nome_do_time1" : "Manchester City" , 
+          "team2_name" : "Liverpool" , 
+          "team1_id" : "2341092" , 
+          "team2_id" : "2341082" , 
+          "pontuação_equipe1" : "3" , 
+          "team2_score" : "0" 
+        }
+      ]
+    } ,
+    "registro_geral" : { 
+      "total" : { 
+        "total" : [ 
+          {
+            "jogos" : "180" 
+          } ,
+          {
+            "team1_won" : "83" 
+          } ,
+          {
+            "team2_won" : "48" 
+          } ,
+          {
+            "empates" : "48" 
+          }
+        ]
+      } ,
+      "lar" : { 
+        "equipe1" : [ 
+          {
+            "jogos" : "90" 
+          } ,
+          {
+            "ganhou" : "52" 
+          } ,
+          {
+            "perdido" : "14" 
+          } ,
+          {
+            "empates" : "23" 
+          }
+        ] ,
+        "equipe2" : [ 
+          {
+            "jogos" : "90" 
+          } ,
+          {
+            "ganhou" : "34" 
+          } ,
+          {
+            "perdido" : "31" 
+          } ,
+          {
+            "empates" : "25" 
+          }
+        ]
+      } ,
+      "ausente" : { 
+        "equipe1" : [ 
+          {
+            "jogos" : "90" 
+          } ,
+          {
+            "ganhou" : "31" 
+          } ,
+          {
+            "perdido" : "34" 
+          } ,
+          {
+            "empates" : "25" 
+          }
+        ] ,
+        "equipe2" : [ 
+          {
+            "jogos" : "90" 
+          } ,
+          {
+            "ganhou" : "14" 
+          } ,
+          {
+            "perdido" : "52" 
+          } ,
+          {
+            "empates" : "23" 
+          }
+        ]
+      }
+    } ,
+    "ligas" : { 
+      "liga" : [ 
+        {
+          "nome" : "Liga dos Campeões da UEFA" , 
+          "id" : "2838" , 
+          "jogos" : "2" , 
+          "team1_won" : "2" , 
+          "team2_won" : "0" , 
+          "empate" : "0" 
+        }
+      ]
+    } ,
+    "metas" : { 
+      "total" : { 
+        "total" : [ 
+          {
+            "team1_scored" : "306" 
+          } ,
+          {
+            "team1_conceded" : "248" 
+          } ,
+          {
+            "team2_scored" : "248" 
+          } ,
+          {
+            "team2_conceded" : "306" 
+          }
+        ]
+      } ,
+      "lar" : { 
+        "lar" : [ 
+          {
+            "team1_scored" : "176" 
+          } ,
+          {
+            "team1_conceded" : "108" 
+          } ,
+          {
+            "team2_scored" : "140" 
+          } ,
+          {
+            "team2_conceded" : "130" 
+          }
+        ]
+      } ,
+      "ausente" : { 
+        "ausente" : [ 
+          {
+            "team1_scored" : "130" 
+          } ,
+          {
+            "team1_conceded" : "140" 
+          } ,
+          {
+            "team2_scored" : "108" 
+          } ,
+          {
+            "team2_conceded" : "176" 
+          }
+        ]
+      }
+    } ,
+    "maior_vitória" : { 
+      "equipe1" : { 
+        "corresponder" : { 
+          "main_id" : "1995102718508" , 
+          "fallback_id_1" : "2350096" , 
+          "país" : "Inglaterra " 
+          "liga" : "Premier League" , 
+          "league_id" : "3037" , 
+          "data" : "27.10.1995 " 
+          "nome_do_time1" : "Liverpool" , 
+          "nome_do_time2" : "Manchester City" , 
+          "team1_id" : "2341082" , 
+          "team2_id" : "2341092" , 
+          "pontuação_equipe1" : "6" , 
+          "team2_score" : "0" 
+        }
+      } ,
+      "equipe2" : { 
+        "corresponder" : { 
+          "main_id" : "1935091018508" , 
+          "fallback_id_1" : "2933802" , 
+          "país" : "Inglaterra " 
+          "liga" : "Premier League" , 
+          "league_id" : "3037" , 
+          "data" : "10.09.1935 " 
+          "nome_do_time1" : "Manchester City" , 
+          "team2_name" : "Liverpool" , 
+          "team1_id" : "2341092" , 
+          "team2_id" : "2341082" , 
+          "pontuação_equipe1" : "6" , 
+          "team2_score" : "0" 
+        }
+      }
+    } ,
+    "maior_derrota" : { 
+      "equipe1" : { 
+        "corresponder" : { 
+          "main_id" : "1935091018508" , 
+          "fallback_id_1" : "2933802" , 
+          "país" : "Inglaterra " 
+          "liga" : "Premier League" , 
+          "league_id" : "3037" , 
+          "data" : "10.09.1935 " 
+          "nome_do_time1" : "Manchester City" , 
+          "team2_name" : "Liverpool" , 
+          "team1_id" : "2341092" , 
+          "team2_id" : "2341082" , 
+          "pontuação_equipe1" : "6" , 
+          "team2_score" : "0" 
+        }
+      } ,
+      "equipe2" : { 
+        "corresponder" : { 
+          "main_id" : "1995102718508" , 
+          "fallback_id_1" : "2350096" , 
+          "país" : "Inglaterra " 
+          "liga" : "Premier League" , 
+          "league_id" : "3037" , 
+          "data" : "27.10.1995 " 
+          "nome_do_time1" : "Liverpool" , 
+          "nome_do_time2" : "Manchester City" , 
+          "team1_id" : "2341082" , 
+          "team2_id" : "2341092" , 
+          "pontuação_equipe1" : "6" , 
+          "team2_score" : "0" 
+        }
+      }
+    } ,
+    "last5_home" : { 
+      "equipe1" : { 
+        "corresponder" : [ 
+          {
+            "main_id" : "2025120318633" , 
+            "fallback_id_1" : "6014305" , 
+            "país" : "Inglaterra " 
+            "liga" : "Premier League" , 
+            "league_id" : "3037" , 
+            "data" : "03.12.2025 " 
+            "nome_do_time1" : "Liverpool" , 
+            "nome_do_time2" : "Sunderland" , 
+            "team1_id" : "2341082" , 
+            "team2_id" : "2341217" , 
+            "team1_score" : "1" , 
+            "team2_score" : "1" 
+          }
+        ]
+      } ,
+      "equipe2" : { 
+        "corresponder" : [ 
+          {
+            "main_id" : "2025120618643" , 
+            "fallback_id_1" : "6024479" , 
+            "país" : "Inglaterra " 
+            "liga" : "Premier League" , 
+            "league_id" : "3037" , 
+            "data" : "06.12.2025 " 
+            "nome_do_time1" : "Manchester City" , 
+            "nome_do_time2" : "Sunderland" , 
+            "team1_id" : "2341092" , 
+            "team2_id" : "2341217" , 
+            "pontuação_equipe1" : "3" , 
+            "team2_score" : "0" 
+          }
+        ]
+      }
+    } ,
+    "last5_away" : { 
+      "equipe1" : { 
+        "corresponder" : [ 
+          {
+            "main_id" : "2025120618487" , 
+            "fallback_id_1" : "6014311" , 
+            "país" : "Inglaterra " 
+            "liga" : "Premier League" , 
+            "league_id" : "3037" , 
+            "data" : "06.12.2025 " 
+            "nome_do_time1" : "Leeds United" , 
+            "team2_name" : "Liverpool" , 
+            "team1_id" : "2341071" , 
+            "team2_id" : "2341082" , 
+            "pontuação_equipe1" : "3" , 
+            "team2_score" : "3" 
+          }
+        ]
+      } ,
+      "equipe2" : { 
+        "corresponder" : [ 
+          {
+            "main_id" : "2025120218434" , 
+            "fallback_id_1" : "6014306" , 
+            "país" : "Inglaterra " 
+            "liga" : "Premier League" , 
+            "league_id" : "3037" , 
+            "data" : "02.12.2025 " 
+            "nome_do_time1" : "Fulham" , 
+            "nome_do_time2" : "Manchester City" , 
+            "team1_id" : "2341008" , 
+            "team2_id" : "2341092" , 
+            "pontuação_equipe1" : "4" , 
+            "team2_score" : "5" 
+          }
+        ]
+      }
+    }
+  }
+}
