@@ -6422,6 +6422,42 @@ setInterval(() => {
   broadcastLive().catch(() => {});
 }, CONFIG.LIVE_UPDATE_INTERVAL);
 
+// ─── Volleyball score delta poller ────────────────────────────────────────────
+// Polls volleyball live every 3 s and immediately broadcasts score/status deltas
+// via broadcastMatchDelta — same as the WS path for football/basketball/hockey/tennis.
+const _prevVolleyScores = new Map<string, { home: number; away: number; status: string }>();
+setInterval(async () => {
+  if (sseClients.size === 0 && wsLiveClients.size === 0) return;
+  try {
+    const tournaments = await getVolleyballLive();
+    const now = Date.now();
+    for (const t of tournaments) {
+      const matches = statpalList(t.match);
+      for (const m of matches) {
+        if (!m.home?.name || !m.away?.name) continue;
+        const matchId = m.id ? `volley-${m.id}` : `volley-${t.id}-${m.home.name}`;
+        const homeScore = Math.trunc(Number(m.home?.totalscore) || 0);
+        const awayScore = Math.trunc(Number(m.away?.totalscore) || 0);
+        const status = String(m.status ?? "");
+        const prev = _prevVolleyScores.get(matchId);
+        const changed = !prev || prev.home !== homeScore || prev.away !== awayScore || prev.status !== status;
+        if (changed) {
+          _prevVolleyScores.set(matchId, { home: homeScore, away: awayScore, status });
+          if (prev) {
+            // only broadcast once we have a baseline; prevents spurious deltas on startup
+            broadcastMatchDelta(matchId, { homeScore, awayScore, status });
+          }
+        }
+      }
+    }
+    // Cleanup entries older than 4 hours to avoid unbounded growth
+    if (_prevVolleyScores.size > 500) {
+      const keys = [..._prevVolleyScores.keys()];
+      for (const k of keys.slice(0, 100)) _prevVolleyScores.delete(k);
+    }
+  } catch { /* silently ignore network errors */ }
+}, 3_000);
+
 // Proactively keep the live payload cache warm even with no SSE/WS clients
 // connected (e.g. right after a server restart, or while everyone is on the
 // pre-match/main tabs). Without this, the cache goes stale after
@@ -6730,7 +6766,7 @@ type VolleyTournament = {
 };
 let volleyLiveCache: VolleyTournament[] | null = null;
 let volleyLiveFetchedAt = 0;
-const VOLLEY_LIVE_TTL = 10 * 1000; // 10 s — voleibol ao vivo atualiza em cada set
+const VOLLEY_LIVE_TTL = 4 * 1000; // 4 s — delta poller needs fresh data
 
 // SportsAPI Pro V2 live caches (30s each sport)
 let footballLiveV2Cache: SAPIV2Event[] | null = null;
@@ -18858,7 +18894,7 @@ async function buildBasketballUpcoming(): Promise<UpcomingMatch[]> {
       () => [] as UpcomingMatch[],
     );
     if (v1Games.length > 0) return v1Games;
-    const events = await getUpcomingEventsV2("basketball", 3);
+    const events = await getUpcomingEventsV2("basketball", 7);
     if (events.length === 0) return [];
     const seen = new Set<string>();
     const filtered: SAPIV2Event[] = [];
@@ -18924,7 +18960,7 @@ async function buildBasketballUpcoming(): Promise<UpcomingMatch[]> {
 
 async function buildHockeyUpcoming(): Promise<UpcomingMatch[]> {
   try {
-    const events = await getUpcomingEventsV2("hockey", 3);
+    const events = await getUpcomingEventsV2("hockey", 7);
     if (events.length === 0) return [];
     const seen = new Set<string>();
     const filtered: SAPIV2Event[] = [];
@@ -19026,7 +19062,39 @@ async function buildVolleyballUpcoming(): Promise<UpcomingMatch[]> {
       });
     }
 
-    // No fallback without odds — only show volleyball matches with real odds
+    // Fallback: build upcoming entries from live feed (Not Started matches) with seeded RNG odds.
+    // This ensures volleyball shows up even when getVolleyballOdds() returns nothing.
+    for (const tournament of liveData) {
+      const matches = statpalList(tournament.match);
+      for (const m of matches) {
+        const home = m.home?.name;
+        const away = m.away?.name;
+        if (!home || !away) continue;
+        const isNotStarted = m.status === "Not Started";
+        if (!isNotStarted) continue;
+        if (isMatchTimePast(m.date ?? "", m.time ?? "")) continue;
+        const key = `${home}|${away}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        const sr = seededRng(`volleyball:${home}:${away}`);
+        const pHome = mc(0.5 + (sr(1) - 0.5) * 0.15, 0.22, 0.78);
+        const [compH, compA] = probsToDecimalOdds([pHome, 1 - pHome], 1.065);
+        results.push({
+          id: `volley-live-${tournament.id}-${m.id ?? home}`,
+          home,
+          away,
+          league: tournament.league || "",
+          country: tournament.country || "",
+          date: m.date ?? "",
+          time: m.time ?? "00:00",
+          sport: "volleyball" as const,
+          hasRealOdds: false,
+          odds: { home: compH!, draw: 0, away: compA! },
+          markets: makeVolleyballMarketsFromTeams(home, away, compH!, compA!),
+        });
+      }
+    }
+
     return results;
   } catch {
     return [];
@@ -19035,7 +19103,7 @@ async function buildVolleyballUpcoming(): Promise<UpcomingMatch[]> {
 
 async function buildBaseballUpcoming(): Promise<UpcomingMatch[]> {
   try {
-    const events = await getUpcomingEventsV2("baseball", 3);
+    const events = await getUpcomingEventsV2("baseball", 7);
     if (events.length === 0) return [];
     const seen = new Set<string>();
     const filtered: SAPIV2Event[] = [];

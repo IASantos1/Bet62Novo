@@ -4548,6 +4548,7 @@ export default function Home({
   });
   const [selectedSport, setSelectedSport] = useState<string>("all");
   const [upcomingSearchQuery, setUpcomingSearchQuery] = useState<string>("");
+  const [showAllLeagues, setShowAllLeagues] = useState<boolean>(false);
 
   // Recent tennis results (yesterday)
   type TennisResult = {
@@ -20870,7 +20871,26 @@ export default function Home({
                     (m.league ?? "").toLowerCase().includes(q)
                   );
                 });
-                const featuredUpcoming = visibleUpcoming.slice(0, 3);
+                // Top 3 featured: pick from major-league matches first,
+                // fall back to first 3 if fewer than 3 major-league matches exist.
+                const _FEATURED_KW = [
+                  "champions league","premier league","la liga","bundesliga",
+                  "serie a","ligue 1","primeira liga","liga portugal","eredivisie",
+                  "super lig","süper lig","liga mx","mls","brasileirao","brasileirão",
+                  "campeonato brasileiro","libertadores","copa america","copa del rey",
+                  "coppa italia","fa cup","dfb pokal","nations league","world cup",
+                  "copa do mundo","nba","nhl","mlb","wimbledon","roland garros",
+                  "us open","australian open","atp finals","wta finals",
+                  "atp 1000","masters 1000","rolex masters","champions trophy",
+                ];
+                const _isMajorLeague = (lg: string) => {
+                  const l = (lg ?? "").toLowerCase();
+                  return _FEATURED_KW.some((k) => l.includes(k));
+                };
+                const _majorPool = visibleUpcoming.filter((m) => _isMajorLeague(m.league ?? ""));
+                const featuredUpcoming = _majorPool.length >= 3
+                  ? _majorPool.slice(0, 3)
+                  : visibleUpcoming.slice(0, 3);
                 const featuredIds = new Set(
                   featuredUpcoming.map((m) => String(m.id)),
                 );
@@ -20893,14 +20913,19 @@ export default function Home({
                   { key: "formula1", emoji: "🏎️", label: "Fórmula 1" },
                   { key: "handball", emoji: "🤾", label: "Handebol" },
                 ];
-                const sportGroups = SPORT_GROUPS.map((g) => ({
-                  ...g,
-                  matches: listUpcoming.filter((m) => {
+                // Limit matches per sport group to top N by default (highest-priority leagues first
+                // since the backend already sorts by league priority). Toggle shows all.
+                const _PER_SPORT_LIMIT = 20;
+                const _shouldLimit = !showAllLeagues && selectedSport === "all" && !selectedLeague && !upcomingSearchQuery;
+                const sportGroups = SPORT_GROUPS.map((g) => {
+                  const all = listUpcoming.filter((m) => {
                     if (g.key === "wc2026") return isWCMatch(m.league);
                     if (g.key === "football") return (m.sport ?? "football") === "football" && !isWCMatch(m.league);
                     return (m.sport ?? "football") === g.key;
-                  }),
-                })).filter((g) => g.matches.length > 0);
+                  });
+                  const matches = _shouldLimit ? all.slice(0, _PER_SPORT_LIMIT) : all;
+                  return { ...g, matches, totalCount: all.length };
+                }).filter((g) => g.matches.length > 0);
 
                 // Derive tournament display label from raw API name
                 const tournamentLabel = (raw: string) =>
@@ -22938,7 +22963,7 @@ export default function Home({
                                 {group.emoji} {group.label}
                               </span>
                               <span className="text-[10px] font-bold bg-zinc-800 text-zinc-500 rounded px-1.5 py-0.5 tabular-nums">
-                                {group.matches.length}
+                                {group.totalCount}
                               </span>
                               <div className="flex-1 h-px bg-zinc-800 ml-1" />
                             </div>
@@ -22947,6 +22972,15 @@ export default function Home({
                             </div>
                           </div>
                         ))}
+                        {/* ─── Ver todas / Ver menos ─────────────────────────── */}
+                        {selectedSport === "all" && !selectedLeague && !upcomingSearchQuery && (
+                          <button
+                            onClick={() => setShowAllLeagues((v) => !v)}
+                            className="w-full py-2.5 rounded-lg border border-zinc-700 hover:border-red-500/60 text-xs font-semibold text-zinc-400 hover:text-white transition-colors bg-zinc-900/60 hover:bg-zinc-800"
+                          >
+                            {showAllLeagues ? "Ver menos ligas ↑" : "Ver todas as ligas ↓"}
+                          </button>
+                        )}
                       </div>
                     )}
 
@@ -23551,9 +23585,34 @@ export default function Home({
                   const actualLive = liveMatches.filter(
                     (m) => m.startsIn === undefined && filterBySport(m),
                   );
-                  const emBreve = liveMatches.filter(
+                  // Em Breve: live-feed entries + ALL upcoming matches within 7 days
+                  const _emBreveFromLive = liveMatches.filter(
                     (m) => m.startsIn !== undefined && filterBySport(m),
                   );
+                  const _liveBreveKeys = new Set(
+                    _emBreveFromLive.map((m) => `${m.home}|${m.away}`),
+                  );
+                  const _minsUntil = (date?: string, time?: string): number => {
+                    if (!date || !time) return Infinity;
+                    try {
+                      const [d, mo, y] = date.split(".");
+                      return (new Date(`${y}-${mo}-${d}T${time}:00`).getTime() - Date.now()) / 60_000;
+                    } catch { return Infinity; }
+                  };
+                  const _emBreveFromUpcoming = upcomingMatches
+                    .filter((m) => {
+                      if (!filterBySport(m)) return false;
+                      if (_liveBreveKeys.has(`${m.home}|${m.away}`)) return false;
+                      const mins = _minsUntil(m.date, m.time);
+                      return mins >= -30 && mins <= 7 * 24 * 60;
+                    })
+                    .sort((a, b) => _minsUntil(a.date, a.time) - _minsUntil(b.date, b.time))
+                    .slice(0, 300)
+                    .map((m) => ({
+                      ...m,
+                      startsIn: Math.max(0, Math.round(_minsUntil(m.date, m.time))),
+                    }));
+                  const emBreve = [..._emBreveFromLive, ...(_emBreveFromUpcoming as typeof _emBreveFromLive)];
                   if (liveLoading && liveMatches.length === 0) {
                     return (
                       <div className="space-y-3 py-2">
