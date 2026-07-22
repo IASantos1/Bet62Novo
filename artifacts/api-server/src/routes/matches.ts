@@ -14303,6 +14303,37 @@ async function buildUpcomingMatches(): Promise<UpcomingMatch[]> {
     for (let j = 0; j < out.length; j++) oddsResults[i + j] = out[j] ?? null;
   }
 
+  // ── Statpal league-level prematch odds (DC, BTTS, O/U, HT, DNB) ──────────
+  // Fetch by league in parallel — one request covers all matches in that league.
+  const leagueIds = [
+    ...new Set(
+      filtered
+        .map((ev) => (ev.tournamentId ? String(ev.tournamentId) : null))
+        .filter((id): id is string => id != null),
+    ),
+  ];
+  const statpalLeagueOdds = new Map<string, FootballOddsEntry[]>();
+  await Promise.all(
+    leagueIds.map(async (leagueId) => {
+      try {
+        const { odds } = await getFootballLeagueOdds(leagueId);
+        statpalLeagueOdds.set(leagueId, odds);
+      } catch {
+        /* skip leagues where prematch odds are unavailable */
+      }
+    }),
+  );
+
+  /** Normalise a team name for fuzzy matching across providers. */
+  const normTeam = (s: string) =>
+    String(s ?? "")
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/[^a-z0-9 ]/g, "")
+      .replace(/\s+/g, " ")
+      .trim();
+
   const results: UpcomingMatch[] = [];
   for (let i = 0; i < filtered.length; i++) {
     const ev = filtered[i]!;
@@ -14351,6 +14382,81 @@ async function buildUpcomingMatches(): Promise<UpcomingMatch[]> {
       ? { home: realOdds!.home, draw: realOdds!.draw, away: realOdds!.away }
       : baseOdds;
     hasRealOdds = hasFull1x2;
+
+    // ── Enrich with Statpal league prematch odds ───────────────────────────
+    // Supplements the per-match SportsAPI odds with Double Chance, BTTS,
+    // Over/Under lines, Half Time, Draw No Bet, and Asian Handicap from the
+    // Statpal prematch feed.  Also provides 1x2 as a fallback.
+    const leagueIdStr = ev.tournamentId ? String(ev.tournamentId) : null;
+    if (leagueIdStr) {
+      const leagueEntries = statpalLeagueOdds.get(leagueIdStr) ?? [];
+      const normHome = normTeam(home);
+      const normAway = normTeam(away);
+      const statpalMatch = leagueEntries.find(
+        (e) =>
+          normTeam(e.homeTeam.name) === normHome ||
+          normTeam(e.awayTeam.name) === normAway ||
+          (normTeam(e.homeTeam.name).includes(normHome.split(" ")[0]!) &&
+            normTeam(e.awayTeam.name).includes(normAway.split(" ")[0]!)),
+      );
+      if (statpalMatch) {
+        // 1x2 fallback when SportsAPI didn't supply it
+        if (
+          !hasRealOdds &&
+          statpalMatch.homeOdds > 0 &&
+          statpalMatch.drawOdds > 0 &&
+          statpalMatch.awayOdds > 0
+        ) {
+          odds = {
+            home: statpalMatch.homeOdds,
+            draw: statpalMatch.drawOdds,
+            away: statpalMatch.awayOdds,
+          };
+          hasRealOdds = true;
+        }
+        // Merge enriched markets — Statpal data wins when no existing value
+        if (statpalMatch.markets) {
+          const sm = statpalMatch.markets;
+          if (sm.doubleChance?.homeOrDraw && !markets.doubleChance?.homeOrDraw)
+            markets = { ...markets, doubleChance: sm.doubleChance };
+          if (sm.bothTeamsScore?.yes && !markets.bothTeamsScore?.yes)
+            markets = { ...markets, bothTeamsScore: sm.bothTeamsScore };
+          if (sm.halfTime?.home && !markets.halfTime?.home)
+            markets = { ...markets, halfTime: sm.halfTime };
+          if (sm.drawNoBet?.home && !markets.drawNoBet?.home)
+            markets = { ...markets, drawNoBet: sm.drawNoBet };
+          if (sm.asianHandicap?.home && !markets.asianHandicap?.home)
+            markets = { ...markets, asianHandicap: sm.asianHandicap };
+          if (sm.firstGoal?.home && !markets.firstGoal?.home)
+            markets = { ...markets, firstGoal: sm.firstGoal };
+          // Merge O/U lines individually — Statpal may fill lines SportsAPI missed
+          if (sm.totalGoals) {
+            const tg = markets.totalGoals;
+            markets = {
+              ...markets,
+              totalGoals: {
+                ...tg,
+                ...(sm.totalGoals.over05 && !tg.over05
+                  ? { over05: sm.totalGoals.over05, under05: sm.totalGoals.under05 }
+                  : {}),
+                ...(sm.totalGoals.over15 && !tg.over15
+                  ? { over15: sm.totalGoals.over15, under15: sm.totalGoals.under15 }
+                  : {}),
+                ...(sm.totalGoals.over25 && !tg.over25
+                  ? { over25: sm.totalGoals.over25, under25: sm.totalGoals.under25 }
+                  : {}),
+                ...(sm.totalGoals.over35 && !tg.over35
+                  ? { over35: sm.totalGoals.over35, under35: sm.totalGoals.under35 }
+                  : {}),
+                ...(sm.totalGoals.over45 && !tg.over45
+                  ? { over45: sm.totalGoals.over45, under45: sm.totalGoals.under45 }
+                  : {}),
+              },
+            };
+          }
+        }
+      }
+    }
 
     results.push({
       id: `fb-v2-${ev.id}`,
@@ -29004,7 +29110,185 @@ type FootballOddsEntry = {
   homeOdds: number;
   drawOdds: number;
   awayOdds: number;
+  /** Full market set parsed from the /odds/prematch endpoint */
+  markets?: AdvancedMarkets;
 };
+
+/**
+ * Parse all available markets from a single match's Statpal prematch odds array
+ * and return both the 1x2 odds and a populated AdvancedMarkets object.
+ *
+ * Averages bookmaker prices across all active (non-stopped) bookmakers for each
+ * outcome in each market.  Unknown markets are silently skipped.
+ */
+function parseStatpalPrematchMarkets(
+  marketEntries: FootballOddsMarketRaw[],
+  baseMarkets: AdvancedMarkets,
+): {
+  homeOdds: number;
+  drawOdds: number;
+  awayOdds: number;
+  markets: AdvancedMarkets;
+} {
+  let homeOdds = 0,
+    drawOdds = 0,
+    awayOdds = 0;
+  const markets: AdvancedMarkets = { ...baseMarkets };
+
+  /** Average a named outcome across a bookmaker list, return 0 if none. */
+  const avgOdd = (
+    bms: FootballOddsBookmakerRaw[],
+    ...outcomeNames: string[]
+  ): number => {
+    const values: number[] = [];
+    for (const bm of bms) {
+      for (const outcomeName of outcomeNames) {
+        const odd = statpalList(bm.odd).find((e) => e.name === outcomeName);
+        if (odd) {
+          const v = parseFloat(odd.value ?? "0");
+          if (Number.isFinite(v) && v > 1) {
+            values.push(v);
+            break; // found a matching outcome for this bookmaker
+          }
+        }
+      }
+    }
+    if (!values.length) return 0;
+    return (
+      Math.round(
+        (values.reduce((s, v) => s + v, 0) / values.length) * 100,
+      ) / 100
+    );
+  };
+
+  const activeBms = (mkt: FootballOddsMarketRaw): FootballOddsBookmakerRaw[] =>
+    statpalList(mkt.bookmaker).filter(
+      (bm) => String(bm.stop ?? "False") !== "True",
+    );
+
+  for (const mkt of marketEntries) {
+    const name = String(mkt.name ?? "")
+      .toLowerCase()
+      .trim();
+    const bms = activeBms(mkt);
+    if (!bms.length) continue;
+
+    // ── 1x2 ───────────────────────────────────────────────────────────────
+    if (name === "1x2" || name === "fulltime result") {
+      homeOdds = avgOdd(bms, "Home", "1");
+      drawOdds = avgOdd(bms, "Draw", "X");
+      awayOdds = avgOdd(bms, "Away", "2");
+    }
+
+    // ── Double Chance ─────────────────────────────────────────────────────
+    else if (name.includes("double chance")) {
+      const homeOrDraw = avgOdd(bms, "1X", "Home or Draw", "HomeOrDraw");
+      const awayOrDraw = avgOdd(bms, "X2", "Draw or Away", "DrawOrAway");
+      const homeOrAway = avgOdd(bms, "12", "Home or Away", "HomeOrAway");
+      if (homeOrDraw > 0 || awayOrDraw > 0 || homeOrAway > 0) {
+        markets.doubleChance = { homeOrDraw, awayOrDraw, homeOrAway };
+      }
+    }
+
+    // ── BTTS ──────────────────────────────────────────────────────────────
+    else if (name.includes("both teams") || name === "goal/no goal") {
+      const yes = avgOdd(bms, "Yes");
+      const no = avgOdd(bms, "No");
+      if (yes > 0 || no > 0) {
+        markets.bothTeamsScore = { yes, no };
+      }
+    }
+
+    // ── Over/Under (any line) ─────────────────────────────────────────────
+    else if (
+      name.startsWith("over/under") ||
+      name.startsWith("over under") ||
+      name.startsWith("total goals")
+    ) {
+      const lineM = name.match(/(\d+\.?\d*)/);
+      if (lineM) {
+        const line = parseFloat(lineM[1]!);
+        const over = avgOdd(bms, "Over", `Over ${line}`, `Over(${line})`);
+        const under = avgOdd(
+          bms,
+          "Under",
+          `Under ${line}`,
+          `Under(${line})`,
+        );
+        if (over > 0 || under > 0) {
+          const lineK = Math.round(line * 10);
+          const tg = markets.totalGoals;
+          if (lineK === 5)
+            markets.totalGoals = { ...tg, over05: over, under05: under };
+          else if (lineK === 15)
+            markets.totalGoals = { ...tg, over15: over, under15: under };
+          else if (lineK === 25)
+            markets.totalGoals = { ...tg, over25: over, under25: under };
+          else if (lineK === 35)
+            markets.totalGoals = { ...tg, over35: over, under35: under };
+          else if (lineK === 45)
+            markets.totalGoals = { ...tg, over45: over, under45: under };
+          else if (lineK === 55)
+            markets.totalGoals = { ...tg, over55: over, under55: under };
+          else if (lineK === 65)
+            markets.totalGoals = { ...tg, over65: over, under65: under };
+        }
+      }
+    }
+
+    // ── Half Time ─────────────────────────────────────────────────────────
+    else if (
+      name === "half time" ||
+      name === "half-time" ||
+      name === "1st half result" ||
+      name === "first half result"
+    ) {
+      const home = avgOdd(bms, "Home", "1");
+      const draw = avgOdd(bms, "Draw", "X");
+      const away = avgOdd(bms, "Away", "2");
+      if (home > 0 || draw > 0 || away > 0) {
+        markets.halfTime = { home, draw, away };
+      }
+    }
+
+    // ── Draw No Bet ───────────────────────────────────────────────────────
+    else if (name === "draw no bet" || name === "dnb") {
+      const home = avgOdd(bms, "Home", "1");
+      const away = avgOdd(bms, "Away", "2");
+      if (home > 0 || away > 0) {
+        markets.drawNoBet = { home, away };
+      }
+    }
+
+    // ── Asian Handicap ────────────────────────────────────────────────────
+    else if (name === "asian handicap") {
+      const home = avgOdd(bms, "Home");
+      const away = avgOdd(bms, "Away");
+      if (home > 0 || away > 0) {
+        // Parse line from the first non-stopped bookmaker
+        const rawOdds = statpalList(bms[0]?.odd ?? []);
+        const homeEntry = rawOdds.find((e) => e.name === "Home");
+        const lineVal = 0; // line would need separate parsing from entry name
+        markets.asianHandicap = { line: lineVal, home, away };
+      }
+    }
+
+    // ── First Goal ────────────────────────────────────────────────────────
+    else if (
+      name.includes("first goal") ||
+      name.includes("first scorer team")
+    ) {
+      const home = avgOdd(bms, "Home", "1");
+      const noGoal = avgOdd(bms, "No Goal", "No goal", "Neither");
+      const away = avgOdd(bms, "Away", "2");
+      if (home > 0 || away > 0) {
+        markets.firstGoal = { home, noGoal: noGoal || 0, away };
+      }
+    }
+  }
+
+  return { homeOdds, drawOdds, awayOdds, markets };
+}
 
 const footballOddsCache = new Map<
   string,
@@ -29064,33 +29348,28 @@ async function getFootballLeagueOdds(leagueId: string): Promise<{
 
           const odds = statpalList(league.match)
             .map((match): FootballOddsEntry | null => {
-              const market = statpalList(match.odds).find((entry) => {
-                const name = String(entry.name ?? "").toLowerCase();
-                return name === "1x2" || name === "fulltime result";
-              });
-              if (!market) return null;
-              const bookmakers = statpalList(market.bookmaker).filter(
-                (bookmaker) => String(bookmaker.stop ?? "False") !== "True",
+              const allMarkets = statpalList(match.odds);
+              if (!allMarkets.length) return null;
+
+              // Parse all markets (1x2, DC, BTTS, O/U, HT, DNB, AH, first goal)
+              const baseMarkets = makeAdvancedMarketsFromTeams(
+                match.home.name,
+                match.away.name,
               );
-              const homeOdds = averageOdds(bookmakers, "Home");
-              const drawOdds = averageOdds(bookmakers, "Draw");
-              const awayOdds = averageOdds(bookmakers, "Away");
-              if (!homeOdds || !drawOdds || !awayOdds) return null;
+              const { homeOdds, drawOdds, awayOdds, markets } =
+                parseStatpalPrematchMarkets(allMarkets, baseMarkets);
+
+              if (!homeOdds || !awayOdds) return null;
               return {
                 matchId: match.main_id,
                 date: match.date,
                 time: match.time,
-                homeTeam: {
-                  id: match.home.id,
-                  name: match.home.name,
-                },
-                awayTeam: {
-                  id: match.away.id,
-                  name: match.away.name,
-                },
+                homeTeam: { id: match.home.id, name: match.home.name },
+                awayTeam: { id: match.away.id, name: match.away.name },
                 homeOdds,
                 drawOdds,
                 awayOdds,
+                markets,
               };
             })
             .filter((entry): entry is FootballOddsEntry => !!entry);

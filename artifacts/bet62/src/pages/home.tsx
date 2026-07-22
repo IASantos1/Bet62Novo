@@ -10356,6 +10356,7 @@ export default function Home({
           <SuspensionBanner match={match} />
           {!isSuspendedMatch && (
             <>
+              {/* ── 1X2 ─────────────────────────────────────────────── */}
               <div className="flex gap-1 w-full">
                 <OddsButton
                   match={match}
@@ -10387,6 +10388,100 @@ export default function Home({
                   variant="worldcup"
                 />
               </div>
+              {/* ── Dupla Chance ─────────────────────────────────────── */}
+              {hasDraw &&
+                (match.markets?.doubleChance?.homeOrDraw ?? 0) > 0 && (
+                  <div className="flex items-center gap-1 w-full">
+                    <span
+                      className={`text-[8px] font-black tracking-wider shrink-0 w-[18px] text-center ${isDarkTheme ? "text-zinc-500" : "text-zinc-400"}`}
+                    >
+                      DC
+                    </span>
+                    <OddsButton
+                      match={match}
+                      selection="homeOrDraw"
+                      odd={match.markets!.doubleChance!.homeOrDraw}
+                      market="dupla"
+                      label="1X"
+                      grow
+                      variant="worldcup"
+                    />
+                    <OddsButton
+                      match={match}
+                      selection="awayOrDraw"
+                      odd={match.markets!.doubleChance!.awayOrDraw}
+                      market="dupla"
+                      label="X2"
+                      grow
+                      variant="worldcup"
+                    />
+                    <OddsButton
+                      match={match}
+                      selection="homeOrAway"
+                      odd={match.markets!.doubleChance!.homeOrAway}
+                      market="dupla"
+                      label="12"
+                      grow
+                      variant="worldcup"
+                    />
+                  </div>
+                )}
+              {/* ── Ambas Marcam ──────────────────────────────────────── */}
+              {(match.markets?.bothTeamsScore?.yes ?? 0) > 0 && (
+                <div className="flex items-center gap-1 w-full">
+                  <span
+                    className={`text-[8px] font-black tracking-wider shrink-0 w-[18px] text-center ${isDarkTheme ? "text-zinc-500" : "text-zinc-400"}`}
+                  >
+                    MM
+                  </span>
+                  <OddsButton
+                    match={match}
+                    selection="bts-yes"
+                    odd={match.markets!.bothTeamsScore!.yes}
+                    market="ambas"
+                    label="Sim"
+                    grow
+                    variant="worldcup"
+                  />
+                  <OddsButton
+                    match={match}
+                    selection="bts-no"
+                    odd={match.markets!.bothTeamsScore!.no}
+                    market="ambas"
+                    label="Não"
+                    grow
+                    variant="worldcup"
+                  />
+                </div>
+              )}
+              {/* ── Over/Under 2.5 ─────────────────────────────────────── */}
+              {(match.markets?.totalGoals?.over25 ?? 0) > 0 && (
+                <div className="flex items-center gap-1 w-full">
+                  <span
+                    className={`text-[8px] font-black tracking-wider shrink-0 w-[18px] text-center ${isDarkTheme ? "text-zinc-500" : "text-zinc-400"}`}
+                  >
+                    2.5
+                  </span>
+                  <OddsButton
+                    match={match}
+                    selection="over25"
+                    odd={match.markets!.totalGoals!.over25!}
+                    market="total"
+                    label="Mais"
+                    grow
+                    variant="worldcup"
+                  />
+                  <OddsButton
+                    match={match}
+                    selection="under25"
+                    odd={match.markets!.totalGoals!.under25!}
+                    market="total"
+                    label="Menos"
+                    grow
+                    variant="worldcup"
+                  />
+                </div>
+              )}
               {!match.hasRealOdds && (
                 <div className="flex items-center justify-center gap-1">
                   <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
