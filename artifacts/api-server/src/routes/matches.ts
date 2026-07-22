@@ -26086,6 +26086,63 @@ let nbaOddsFetchedAt = 0;
 const NBA_ODDS_TTL = 60 * 1000;
 let nbaOddsInFlight: Promise<NBAOddsEntry[]> | null = null;
 
+// ── Statpal /v1/nba/odds parser ───────────────────────────────────────────────
+// 1 request vs N per-match SportsAPI calls — same approach as fetchStatpalMLBOdds.
+async function fetchStatpalNBAOdds(): Promise<NBAOddsEntry[] | null> {
+  if (!CONFIG.STATPAL_API_KEY) return null;
+  try {
+    const resp = await fetch(buildStatpalUrl("/v1/nba/odds"), {
+      signal: AbortSignal.timeout(8_000),
+      headers: statpalHeaders(),
+    });
+    if (!resp.ok) return null;
+    const payload = (await resp.json()) as {
+      odds?: { category?: { matches?: { match?: unknown | unknown[] } } };
+    };
+    const matches = statpalList(
+      payload.odds?.category?.matches?.match as NBAOddsMatch | NBAOddsMatch[] | undefined,
+    );
+    const results: NBAOddsEntry[] = [];
+    for (const m of matches) {
+      if (!m?.home?.name || !m?.away?.name) continue;
+      const types = statpalList(m.odds?.type);
+      // Statpal NBA uses id "1500" for 3Way Result (vs "1" for MLB)
+      const threeWay = types.find(
+        (t) =>
+          t.id === "1500" ||
+          t.id === "1" ||
+          String(t.value ?? "").toLowerCase().includes("result"),
+      );
+      if (!threeWay) continue;
+      const bms = statpalList(threeWay.bookmaker);
+      if (!bms.length) continue;
+      const odds = statpalList(bms[0]!.odd);
+      const homeOdds = parseFloat(odds.find((o) => o.name === "Home")?.value ?? "0");
+      const awayOdds = parseFloat(odds.find((o) => o.name === "Away")?.value ?? "0");
+      if (homeOdds <= 1 || awayOdds <= 1) continue;
+      const mkt = makeBasketballMarketsFromTeams(
+        m.home.name ?? "",
+        m.away.name ?? "",
+      ) as Record<string, unknown>;
+      mkt["odds"] = { home: homeOdds, draw: 0, away: awayOdds };
+      results.push({
+        matchId: String(m.id ?? ""),
+        date: String(m.date ?? ""),
+        time: String(m.time ?? ""),
+        homeTeam: { id: String(m.home.id ?? ""), name: m.home.name ?? "" },
+        awayTeam: { id: String(m.away.id ?? ""), name: m.away.name ?? "" },
+        homeOdds,
+        awayOdds,
+        markets: mkt,
+      });
+    }
+    return results.length > 0 ? results : null;
+  } catch (err) {
+    logger.warn({ err, provider: "statpal" }, "NBA odds fetch failed");
+    return null;
+  }
+}
+
 async function getBasketballOdds(): Promise<NBAOddsEntry[]> {
   const now = Date.now();
   if (nbaOddsCache && now - nbaOddsFetchedAt < NBA_ODDS_TTL)
@@ -26094,6 +26151,13 @@ async function getBasketballOdds(): Promise<NBAOddsEntry[]> {
     if (!nbaOddsInFlight) {
       nbaOddsInFlight = (async () => {
         try {
+          // Try Statpal first (1 request) before N per-match SportsAPI V2 calls
+          const statpalResults = await fetchStatpalNBAOdds();
+          if (statpalResults) {
+            nbaOddsCache = statpalResults;
+            nbaOddsFetchedAt = Date.now();
+            return statpalResults;
+          }
           const events = (
             await getUpcomingLeagueEventsV2("basketball", 7)
           ).slice(0, 20);
@@ -26146,6 +26210,17 @@ async function getBasketballOdds(): Promise<NBAOddsEntry[]> {
       });
     }
     return nbaOddsCache;
+  }
+  // Cold-start: try Statpal first (1 request), fall back to SportsAPI V2
+  try {
+    const statpalResults = await fetchStatpalNBAOdds();
+    if (statpalResults) {
+      nbaOddsCache = statpalResults;
+      nbaOddsFetchedAt = now;
+      return statpalResults;
+    }
+  } catch {
+    /* fall through */
   }
   try {
     const events = (await getUpcomingLeagueEventsV2("basketball", 7)).slice(

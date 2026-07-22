@@ -196,6 +196,55 @@ export class StatpalClient {
     return this.get(`/v1/nba/team-stats/${encodeURIComponent(teamAbbr.toLowerCase())}`);
   }
 
+  /** `/v1/nba/injuries/{abbr}` — injury and suspension report for a team */
+  async getNBAInjuries(teamAbbr: string): Promise<Record<string, unknown>> {
+    return this.get(`/v1/nba/injuries/${encodeURIComponent(teamAbbr.toLowerCase())}`);
+  }
+
+  /**
+   * `/v1/nba/odds` — upcoming NBA games with 3Way Result bookmaker odds.
+   * Market id "1500" = 3Way Result (Home / Draw / Away decimal prices).
+   */
+  async getNBAOdds(): Promise<Record<string, unknown>> {
+    return this.get("/v1/nba/odds");
+  }
+
+  // ── Volleyball ────────────────────────────────────────────────────────────
+
+  /** `/v1/volleyball/livescores` — live set-by-set scores (s1–s5) across all active leagues */
+  async getVolleyballLivescores(): Promise<Record<string, unknown>> {
+    return this.get("/v1/volleyball/livescores");
+  }
+
+  /** `/v1/volleyball/daily/d-{offset}` — d-0=today, d-1=yesterday */
+  async getVolleyballDaily(offset: number = 1): Promise<Record<string, unknown>> {
+    return this.get(`/v1/volleyball/daily/d-${offset}`);
+  }
+
+  /**
+   * `/v1/volleyball/standings/{league_id}` — table by pos, W/L, pts, recent form.
+   * Use a Statpal league id (e.g. `"4390"` for France Ligue A).
+   */
+  async getVolleyballStandings(leagueId: string): Promise<Record<string, unknown>> {
+    return this.get(`/v1/volleyball/standings/${encodeURIComponent(leagueId)}`);
+  }
+
+  /**
+   * `/v1/volleyball/season-schedule/{league_id}` — full season organised by week;
+   * each week has an array of matches with s1–s5 set scores.
+   */
+  async getVolleyballSeasonSchedule(leagueId: string): Promise<Record<string, unknown>> {
+    return this.get(`/v1/volleyball/season-schedule/${encodeURIComponent(leagueId)}`);
+  }
+
+  /**
+   * `/v1/volleyball/odds` — upcoming matches with Home/Away moneyline + O/U set
+   * totals (line 3.5, 4, …) across all available leagues.
+   */
+  async getVolleyballOdds(): Promise<Record<string, unknown>> {
+    return this.get("/v1/volleyball/odds");
+  }
+
   // ── Football V2 ───────────────────────────────────────────────────────────
 
   async getFootballLive(): Promise<Record<string, unknown>> {
