@@ -9236,6 +9236,15 @@ export default function Home({
         const diff = Math.abs((match.homeScore ?? 0) - (match.awayScore ?? 0));
         if (min >= 80 && diff >= 2) return true;
         if (min >= 85 && diff >= 1) return true;
+        // Late draw with extreme odds and no draw price — both home/away buttons
+        // would show absurd values like 9.87 / 10.00; replace with "Aposta Já"
+        if (
+          min >= 70 &&
+          diff === 0 &&
+          match.odds.draw <= 0 &&
+          match.odds.home >= 7.0 &&
+          match.odds.away >= 7.0
+        ) return true;
         return false;
       })();
     if (isObviousResult) {
@@ -9978,6 +9987,15 @@ export default function Home({
         const diff = Math.abs((match.homeScore ?? 0) - (match.awayScore ?? 0));
         if (min >= 80 && diff >= 2) return true;
         if (min >= 85 && diff >= 1) return true;
+        // Late draw with extreme odds and missing draw odds → show "Aposta Já"
+        // e.g. 1-1 aos 80': casa 9.87, empate --, fora 10.00
+        if (
+          min >= 70 &&
+          diff === 0 &&
+          match.odds.draw <= 0 &&
+          match.odds.home >= 7.0 &&
+          match.odds.away >= 7.0
+        ) return true;
         return false;
       })();
 
