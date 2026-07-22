@@ -103,6 +103,54 @@ export class StatpalClient {
     return Array.isArray(raw) ? raw : [raw];
   }
 
+  // ── MLB (Baseball) ────────────────────────────────────────────────────────
+
+  /** `/v1/mlb/livescores` — real-time scores with inning-by-inning, hits, errors, outs, starting pitchers */
+  async getMLBLivescores(): Promise<Record<string, unknown>> {
+    return this.get("/v1/mlb/livescores");
+  }
+
+  /** `/v1/mlb/daily/d-{offset}` — d-0=today, d-1=yesterday, d-2=two days ago */
+  async getMLBDaily(offset: number = 1): Promise<Record<string, unknown>> {
+    return this.get(`/v1/mlb/daily/d-${offset}`);
+  }
+
+  /** `/v1/mlb/season-schedule` — full 2025 season schedule (upcoming + completed) */
+  async getMLBSeasonSchedule(): Promise<Record<string, unknown>> {
+    return this.get("/v1/mlb/season-schedule");
+  }
+
+  /** `/v1/mlb/standings` — standings by division and league (AL East/Central/West, NL …) */
+  async getMLBStandings(): Promise<Record<string, unknown>> {
+    return this.get("/v1/mlb/standings");
+  }
+
+  /** `/v1/mlb/rosters/{abbr}` — active roster with player bio and base64 team image */
+  async getMLBRosters(teamAbbr: string): Promise<Record<string, unknown>> {
+    return this.get(`/v1/mlb/rosters/${encodeURIComponent(teamAbbr.toLowerCase())}`);
+  }
+
+  /** `/v1/mlb/team-stats/{abbr}` — batting / pitching / fielding stats per player */
+  async getMLBTeamStats(teamAbbr: string): Promise<Record<string, unknown>> {
+    return this.get(`/v1/mlb/team-stats/${encodeURIComponent(teamAbbr.toLowerCase())}`);
+  }
+
+  /** `/v1/mlb/injuries/{abbr}` — injury and suspension report for a team */
+  async getMLBInjuries(teamAbbr: string): Promise<Record<string, unknown>> {
+    return this.get(`/v1/mlb/injuries/${encodeURIComponent(teamAbbr.toLowerCase())}`);
+  }
+
+  /**
+   * `/v1/mlb/league-stats/{category}` — league-wide player leaderboards.
+   *
+   * Known categories:
+   *   `mlb_player_batting`, `mlb_player_pitching`, `mlb_player_fielding`,
+   *   `mlb_team_batting`, `mlb_team_pitching`
+   */
+  async getMLBLeagueStats(category: string): Promise<Record<string, unknown>> {
+    return this.get(`/v1/mlb/league-stats/${encodeURIComponent(category)}`);
+  }
+
   // ── Football V2 ───────────────────────────────────────────────────────────
 
   async getFootballLive(): Promise<Record<string, unknown>> {

@@ -9789,7 +9789,37 @@ function buildNHLLiveMatches(tournaments: NHLTournament[]): LiveMatchState[] {
 }
 
 // ─── MLB live feed ────────────────────────────────────────────────────────────
+// Statpal /v1/mlb/livescores — real-time MLB scores with inning-by-inning
+// breakdown, starting pitchers, venue info, hits, errors, outs.
+const MLB_LIVE_TTL = 15_000; // 15 s — inning transitions happen ~3–5 min apart
+
 async function getMLBLive(): Promise<MLBTournament[]> {
+  const now = Date.now();
+  if (mlbLiveCache && now - mlbLiveFetchedAt < MLB_LIVE_TTL)
+    return mlbLiveCache;
+
+  if (CONFIG.STATPAL_API_KEY) {
+    try {
+      const resp = await fetch(buildStatpalUrl("/v1/mlb/livescores"), {
+        signal: AbortSignal.timeout(8_000),
+        headers: statpalHeaders(),
+      });
+      if (resp.ok) {
+        const payload = (await resp.json()) as {
+          livescores?: { tournament?: MLBTournament | MLBTournament[] };
+        };
+        const tournaments = statpalList(payload.livescores?.tournament);
+        if (tournaments.length > 0 || mlbLiveCache == null) {
+          mlbLiveCache = tournaments;
+          mlbLiveFetchedAt = now;
+        }
+        return mlbLiveCache ?? [];
+      }
+    } catch (err) {
+      logger.warn({ err, provider: "statpal" }, "MLB livescores fetch failed");
+    }
+  }
+
   return mlbLiveCache ?? [];
 }
 
@@ -17155,6 +17185,7 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
     cricketEvents,
     handballEvents,
     formula1Fresh,
+    mlbLiveTournaments,
   ] = await Promise.all([
     getFootballLiveV2(),
     getBasketballLiveV2(),
@@ -17167,6 +17198,7 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
     getExtraLiveEventsV2("cricket"),
     getExtraLiveEventsV2("handball"),
     getFormula1Live(),
+    getMLBLive(),             // Statpal /v1/mlb/livescores — innings, hits, errors, outs
   ]);
   // Populate V1 tennis league label cache from V2 today events (city → "ATP 250 · City")
   if (tennisTodayEvents && tennisTodayEvents.length > 0) {
@@ -17349,10 +17381,23 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
     "hockey",
     buildHockeyLiveV2(hockeyEvents),
   );
-  const baseballLive = sportWithFallback(
-    "baseball",
-    buildBaseballLiveV2(baseballEvents),
+  // Baseball live: merge SportsAPI V2 + Statpal livescores.
+  // Statpal wins when it has inning detail (innings, hits, errors, outs).
+  // SportsAPI V2 wins for games Statpal hasn't yet flipped to live (sticky guard).
+  const statpalMLBLive = buildMLBLiveMatches(mlbLiveTournaments);
+  const sapiv2MLBLive = buildBaseballLiveV2(baseballEvents);
+  // Deduplicate: a game seen in both feeds → prefer the Statpal entry (richer
+  // inning data).  Games only in SportsAPI V2 are kept as fallback.
+  const statpalMLBPairs = new Set(
+    statpalMLBLive.map((m) => `${m.home}|${m.away}`),
   );
+  const mergedBaseballLive = [
+    ...statpalMLBLive,
+    ...sapiv2MLBLive.filter(
+      (m) => !statpalMLBPairs.has(`${m.home}|${m.away}`),
+    ),
+  ];
+  const baseballLive = sportWithFallback("baseball", mergedBaseballLive);
   const tennisLive = sportWithFallback("tennis", tennisLivePart);
   const boxingLive = sportWithFallback(
     "boxing",
