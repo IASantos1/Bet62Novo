@@ -5579,6 +5579,7 @@ export default function Home({
   );
   const [matchStats, setMatchStats] = useState<MatchStatsData | null>(null);
   const [matchStatsLoading, setMatchStatsLoading] = useState(false);
+  const [matchStoryline, setMatchStoryline] = useState<string | null>(null);
   type V2StatsGroup = {
     title: string;
     rows: Array<{ name: string; home: string; away: string }>;
@@ -7046,6 +7047,20 @@ export default function Home({
       .catch(() => setLineupsData(null))
       .finally(() => setLineupsLoading(false));
   }, [matchViewTab, expandedMatch?.id, getProviderMatchId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Fetch live storyline when a live football match is expanded
+  useEffect(() => {
+    if (!expandedMatch?.isLive || (expandedMatch.sport ?? "football") !== "football") {
+      setMatchStoryline(null);
+      return;
+    }
+    const rawId = getProviderMatchId(expandedMatch.id);
+    if (!rawId) { setMatchStoryline(null); return; }
+    fetch(`/api/matches/storylines/${rawId}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => setMatchStoryline(d?.storyline ?? null))
+      .catch(() => setMatchStoryline(null));
+  }, [expandedMatch?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Fetch H2H confrontos when "confrontos" tab is selected
   useEffect(() => {
@@ -17403,6 +17418,7 @@ export default function Home({
                       if (window.innerWidth < 1024) setBetSlipOpenMobile(true);
                     }}
                     liveExtra={(expandedMatch as any)._liveExtra}
+                    storyline={matchStoryline}
                   />
                 )}
 

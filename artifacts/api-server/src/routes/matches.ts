@@ -16182,6 +16182,16 @@ async function buildFootballLiveV2(
         "cornersTotal","cardsTotal","dangerousAttacksHome","dangerousAttacksAway",
         "attacksHome","attacksAway","xgHome","xgAway"] as const).forEach(mergeStatNum);
 
+      // Persist goal/card events with player names across live ticks.
+      // fetchStatpalMatchStats may include { football: { goals, cards } } — merge
+      // into statsOverlay so player names survive when the next tick returns no events.
+      const freshFootball = statpalStats?.football;
+      const prevFootball = prevLx?.football as { goals?: unknown[]; cards?: unknown[] } | undefined;
+      const mergedFootball = freshFootball ?? prevFootball;
+      if (mergedFootball && ((mergedFootball.goals?.length ?? 0) > 0 || (mergedFootball.cards?.length ?? 0) > 0)) {
+        (statsOverlay as Record<string, unknown>).football = mergedFootball;
+      }
+
       const liveExtra = {
         ...(penLiveExtra ?? {}),
         ...(shKickoffSec ? { secondHalfKickoffSec: shKickoffSec } : {}),
@@ -32419,9 +32429,63 @@ router.get("/confrontos", async (req: Request, res: Response) => {
   let team1Name = home,
     team2Name = away;
 
-  // V2 h2h aggregate (works for all sports)
+  // ── Statpal H2H (football only) — most accurate since match IDs come from Statpal ──
+  if (sport === "football" && CONFIG.STATPAL_API_KEY && matchId) {
+    const liveEntry = liveMatchState.get(matchId);
+    const t1id = liveEntry?.homeTeamId;
+    const t2id = liveEntry?.awayTeamId;
+    if (t1id && t2id) {
+      try {
+        const h2hUrl = buildStatpalUrl("/v2/soccer/head-to-head");
+        h2hUrl.searchParams.set("team1_id", t1id);
+        h2hUrl.searchParams.set("team2_id", t2id);
+        const h2hResp = await fetch(h2hUrl.toString(), {
+          signal: AbortSignal.timeout(8000),
+          headers: statpalHeaders(),
+        });
+        if (h2hResp.ok) {
+          const h2hData = (await h2hResp.json()) as Record<string, unknown>;
+          // Statpal H2H response: { head_to_head: { matches: [...], summary: { team1_wins, team2_wins, draws } } }
+          const h2h = (h2hData["head_to_head"] ?? h2hData["h2h"] ?? h2hData) as Record<string, unknown>;
+          const summary = (h2h["summary"] ?? h2h["record"] ?? {}) as Record<string, unknown>;
+          const toN = (v: unknown) => typeof v === "number" ? v : typeof v === "string" ? parseInt(v, 10) || 0 : 0;
+          const sw = toN(summary["team1_wins"] ?? summary["home_wins"] ?? summary["team1_win"]);
+          const sa = toN(summary["team2_wins"] ?? summary["away_wins"] ?? summary["team2_win"]);
+          const sd = toN(summary["draws"] ?? summary["draw"]);
+          if (sw + sa + sd > 0) {
+            homeWins = sw;
+            awayWins = sa;
+            draws = sd;
+          }
+          const matchList: Record<string, unknown>[] = Array.isArray(h2h["matches"])
+            ? h2h["matches"] as Record<string, unknown>[]
+            : Array.isArray(h2hData["matches"])
+              ? h2hData["matches"] as Record<string, unknown>[]
+              : [];
+          for (const m of matchList.slice(0, 10)) {
+            try {
+              const dateRaw = String(m["date"] ?? m["match_date"] ?? "");
+              const dt = dateRaw.slice(0, 10);
+              const hTeam = String((m["home_team"] as Record<string,unknown>)?.["name"] ?? m["home_team"] ?? m["team1"] ?? "");
+              const aTeam = String((m["away_team"] as Record<string,unknown>)?.["name"] ?? m["away_team"] ?? m["team2"] ?? "");
+              const score = String(m["score"] ?? m["result"] ?? "0-0");
+              const parts = score.split(/[-:]/).map((s) => parseInt(s.trim(), 10));
+              const s1 = isNaN(parts[0] ?? NaN) ? 0 : parts[0]!;
+              const s2 = isNaN(parts[1] ?? NaN) ? 0 : parts[1]!;
+              const league = String(m["league"] ?? m["competition"] ?? m["tournament"] ?? "");
+              if (hTeam || aTeam) {
+                recentMeetings.push({ date: dt, team1: hTeam || home, team2: aTeam || away, score1: s1, score2: s2, league });
+              }
+            } catch { /* skip */ }
+          }
+        }
+      } catch { /* ignore — fall through to SportsAPI Pro */ }
+    }
+  }
+
+  // V2 h2h aggregate (works for all sports) — skip if Statpal already found data
   const base = v2SportBase(sport);
-  if (base && matchId) {
+  if (base && matchId && homeWins === 0 && awayWins === 0 && draws === 0 && recentMeetings.length === 0) {
     try {
       const resp = await fetch(`${base}/match/${matchId}/h2h`, {
         signal: AbortSignal.timeout(8000),
@@ -32525,6 +32589,68 @@ router.get("/confrontos", async (req: Request, res: Response) => {
   };
   confrontosCache.set(cacheKey, { data: result, fetchedAt: Date.now() });
   res.json(result);
+});
+
+// ─── Statpal Live Storylines ──────────────────────────────────────────────────
+
+const statpalStorylinesCache = new Map<string, { data: string | null; fetchedAt: number }>();
+const STORYLINES_TTL_MS = 60_000; // 1 minute — storylines change as the match evolves
+
+router.get("/storylines/:matchId", async (req: Request, res: Response) => {
+  if (!CONFIG.STATPAL_API_KEY) {
+    res.json({ storyline: null });
+    return;
+  }
+  const matchId = String(req.params["matchId"] ?? "");
+  if (!matchId) {
+    res.json({ storyline: null });
+    return;
+  }
+  const cached = statpalStorylinesCache.get(matchId);
+  if (cached && Date.now() - cached.fetchedAt < STORYLINES_TTL_MS) {
+    res.json({ storyline: cached.data });
+    return;
+  }
+  try {
+    const url = buildStatpalUrl("/v2/soccer/live-storylines");
+    const resp = await fetch(url.toString(), {
+      signal: AbortSignal.timeout(10_000),
+      headers: statpalHeaders(),
+    });
+    if (!resp.ok) {
+      statpalStorylinesCache.set(matchId, { data: null, fetchedAt: Date.now() });
+      res.json({ storyline: null });
+      return;
+    }
+    const data = (await resp.json()) as Record<string, unknown>;
+    // Statpal live-storylines: top-level "matches" array; each item has main_id + storyline/context/narrative
+    const allMatches = Array.isArray(data["matches"])
+      ? (data["matches"] as Record<string, unknown>[])
+      : Array.isArray(data["data"])
+        ? (data["data"] as Record<string, unknown>[])
+        : [];
+    const match = allMatches.find(
+      (m) =>
+        String(m["main_id"] ?? m["id"] ?? m["match_id"]) === matchId,
+    );
+    const storyline = match
+      ? String(
+          match["storyline"] ??
+          match["context"] ??
+          match["narrative"] ??
+          match["story"] ??
+          "",
+        ).trim()
+      : null;
+    statpalStorylinesCache.set(matchId, {
+      data: storyline || null,
+      fetchedAt: Date.now(),
+    });
+    res.json({ storyline: storyline || null });
+  } catch {
+    statpalStorylinesCache.set(matchId, { data: null, fetchedAt: Date.now() });
+    res.json({ storyline: null });
+  }
 });
 
 // ─── V2 Tournament Standings (match-specific) ────────────────────────────────

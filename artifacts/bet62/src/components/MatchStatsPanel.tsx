@@ -139,6 +139,7 @@ type Props = {
   onGoLive: () => void;
   onAddInsight?: (market: string, odds: number) => void;
   liveExtra?: LiveExtra | null;
+  storyline?: string | null;
 };
 
 // ── Momentum Chart ──────────────────────────────────────────────────────────
@@ -267,7 +268,7 @@ function MomentumChart({ homeTeam, awayTeam, isLive, liveMinute, isHalfTime, goa
   );
 }
 
-type TabId = "prob" | "stats" | "h2h" | "forma" | "insight";
+type TabId = "prob" | "stats" | "h2h" | "forma" | "eventos" | "insight";
 
 function AnimatedBar({ pct, color, delay = 0 }: { pct: number; color: string; delay?: number }) {
   return (
@@ -382,9 +383,11 @@ export default function MatchStatsPanel({
   matchStats, matchStatsLoading,
   v2StatsGroups, v2StatsLoading,
   confrontosData, onGoH2H, onGoLive, onAddInsight,
-  liveExtra,
+  liveExtra, storyline,
 }: Props) {
   const isFootball = !sport || sport === "football";
+
+  const hasEvents = (liveExtra?.football?.goals?.length ?? 0) > 0 || (liveExtra?.football?.cards?.length ?? 0) > 0;
 
   const availableTabs = useMemo((): Array<{ id: TabId; label: string; icon: React.ReactNode }> => {
     const tabs: Array<{ id: TabId; label: string; icon: React.ReactNode }> = [];
@@ -392,14 +395,20 @@ export default function MatchStatsPanel({
       tabs.push({ id: "prob", label: "Probabilidade", icon: <BarChart2 size={12} /> });
     }
     tabs.push({ id: "stats", label: "Estatísticas", icon: <Activity size={12} /> });
+    if (hasEvents) {
+      tabs.push({ id: "eventos", label: "Eventos", icon: <Zap size={12} /> });
+    }
     if (confrontosData) {
       tabs.push({ id: "h2h", label: "H2H", icon: <Users size={12} /> });
     }
     if (isFootball && matchStats?.formIsReal) {
       tabs.push({ id: "forma", label: "Forma", icon: <TrendingUp size={12} /> });
     }
+    if (storyline) {
+      tabs.push({ id: "insight", label: "Storyline", icon: <Lightbulb size={12} /> });
+    }
     return tabs;
-  }, [isFootball, matchStats, confrontosData]);
+  }, [isFootball, matchStats, confrontosData, hasEvents, storyline]);
 
   const defaultTab: TabId = isFootball && matchStats ? "prob" : "stats";
   const [tab, setTab] = useState<TabId>(defaultTab);
@@ -413,7 +422,7 @@ export default function MatchStatsPanel({
 
   const isLoading = (isFootball && matchStatsLoading && !matchStats && !(v2StatsGroups && v2StatsGroups.length > 0))
     || (!isFootball && v2StatsLoading && !(v2StatsGroups && v2StatsGroups.length > 0));
-  const isEmpty = !isLoading && !matchStats && !(v2StatsGroups && v2StatsGroups.length > 0) && !confrontosData;
+  const isEmpty = !isLoading && !matchStats && !(v2StatsGroups && v2StatsGroups.length > 0) && !confrontosData && !hasEvents && !storyline;
 
 
 
@@ -1040,6 +1049,83 @@ export default function MatchStatsPanel({
                   </div>
                 ) : null
               )}
+            </div>
+          )}
+
+          {/* ── EVENTOS ── */}
+          {activeTab === "eventos" && hasEvents && (() => {
+            const goals = liveExtra?.football?.goals ?? [];
+            const cards = liveExtra?.football?.cards ?? [];
+            const all = [
+              ...goals.map(g => ({ kind: "goal" as const, minute: g.minute, extraMinute: g.extraMinute, team: g.team, playerName: g.playerName, assistName: g.assistName, ownGoal: g.ownGoal, penalty: g.penalty, varCancelled: g.varCancelled })),
+              ...cards.map(c => ({ kind: "card" as const, minute: c.minute, extraMinute: c.extraMinute, team: c.team, playerName: c.playerName, cardType: c.cardType })),
+            ].sort((a, b) => (a.minute * 100 + (a.extraMinute ?? 0)) - (b.minute * 100 + (b.extraMinute ?? 0)));
+            return (
+              <div className="space-y-1.5">
+                <div className="text-[10px] font-black text-zinc-400 uppercase tracking-widest px-1 mb-2">Linha do Tempo</div>
+                {all.length === 0 ? (
+                  <div className="text-center text-zinc-600 py-8 text-sm">Sem eventos registados.</div>
+                ) : all.map((ev, i) => {
+                  const isHome = ev.team === "home";
+                  const minStr = ev.extraMinute ? `${ev.minute}+${ev.extraMinute}'` : `${ev.minute}'`;
+                  const cancelled = ev.kind === "goal" && ev.varCancelled;
+                  return (
+                    <div
+                      key={i}
+                      className={`flex items-center gap-3 px-3 py-2.5 rounded-lg ${cancelled ? "opacity-40" : ""} ${ev.kind === "goal" ? "bg-zinc-900 border border-zinc-800" : "bg-zinc-950 border border-zinc-800/50"}`}
+                    >
+                      {/* Home side */}
+                      <div className="flex-1 text-right min-w-0">
+                        {isHome && (
+                          <div>
+                            <div className={`text-[12px] font-black truncate ${cancelled ? "line-through text-zinc-500" : "text-white"}`}>{ev.playerName || "—"}</div>
+                            {ev.kind === "goal" && ev.assistName && (
+                              <div className="text-[10px] text-zinc-500 truncate">assist: {ev.assistName}</div>
+                            )}
+                            {ev.kind === "goal" && ev.ownGoal && <div className="text-[10px] text-orange-400">Autogolo</div>}
+                            {ev.kind === "goal" && ev.penalty && <div className="text-[10px] text-yellow-400">Penálti</div>}
+                            {cancelled && <div className="text-[10px] text-red-400">VAR Anulado</div>}
+                          </div>
+                        )}
+                      </div>
+                      {/* Centre — minute + icon */}
+                      <div className="flex flex-col items-center gap-0.5 shrink-0 w-14">
+                        <div className="text-[10px] font-black text-zinc-400">{minStr}</div>
+                        <div className="text-base leading-none">
+                          {ev.kind === "goal" ? (cancelled ? "❌" : "⚽") : ev.kind === "card" && "cardType" in ev ? (ev.cardType === "red" ? "🟥" : "🟨") : "📋"}
+                        </div>
+                      </div>
+                      {/* Away side */}
+                      <div className="flex-1 min-w-0">
+                        {!isHome && (
+                          <div>
+                            <div className={`text-[12px] font-black truncate ${cancelled ? "line-through text-zinc-500" : "text-white"}`}>{ev.playerName || "—"}</div>
+                            {ev.kind === "goal" && ev.assistName && (
+                              <div className="text-[10px] text-zinc-500 truncate">assist: {ev.assistName}</div>
+                            )}
+                            {ev.kind === "goal" && ev.ownGoal && <div className="text-[10px] text-orange-400">Autogolo</div>}
+                            {ev.kind === "goal" && ev.penalty && <div className="text-[10px] text-yellow-400">Penálti</div>}
+                            {cancelled && <div className="text-[10px] text-red-400">VAR Anulado</div>}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          })()}
+
+          {/* ── STORYLINE ── */}
+          {activeTab === "insight" && storyline && (
+            <div className="space-y-3">
+              <div className="bg-zinc-900 rounded-xl border border-zinc-800 p-4">
+                <div className="flex items-center gap-2 mb-3">
+                  <Lightbulb size={14} className="text-yellow-400 shrink-0" />
+                  <div className="text-[10px] font-black text-zinc-400 uppercase tracking-widest">Análise ao Vivo</div>
+                </div>
+                <p className="text-sm text-zinc-300 leading-relaxed whitespace-pre-wrap">{storyline}</p>
+              </div>
             </div>
           )}
 
