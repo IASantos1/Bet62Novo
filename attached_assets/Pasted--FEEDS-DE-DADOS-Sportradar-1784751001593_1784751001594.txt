@@ -1,0 +1,77 @@
+                    FEEDS DE DADOS
+        ┌──────────────────────────────────┐
+        │ Sportradar                       │
+        │ Stats Perform                    │
+        │ API-Football                     │
+        │ Feed próprio / Scout             │
+        └──────────────┬───────────────────┘
+                       │
+                       ▼
+             Feed Ingestion Service
+                       │
+                       ▼
+            Normalização dos Dados
+                       │
+                       ▼
+             Data Validation Engine
+          ├── Integridade
+          ├── Eventos duplicados
+          ├── Ordem cronológica
+          ├── Consistência
+          └── Qualidade do feed
+                       │
+                       ▼
+            Match State Engine
+          ├── Estado do jogo
+          ├── Relógio oficial
+          ├── Placar
+          ├── Estatísticas
+          ├── Eventos
+          └── Suspensões
+                       │
+                       ▼
+           Market Resolution Engine
+          ├── Futebol
+          ├── Basquete
+          ├── Tênis
+          ├── Vôlei
+          ├── Hóquei
+          ├── MMA
+          └── Outros esportes
+                       │
+                       ▼
+              Settlement Engine
+          ├── 1X2
+          ├── Over/Under
+          ├── Handicap
+          ├── Asian Handicap
+          ├── BTTS
+          ├── Escanteios
+          ├── Cartões
+          ├── Jogador
+          ├── Sets
+          ├── Games
+          ├── Pontos
+          ├── Props
+          └── Especiais
+                       │
+          ┌────────────┴─────────────┐
+          ▼                          ▼
+ Automatic Settlement         Manual Review Queue
+          │                          │
+          ▼                          ▼
+ Balance/Ledger Engine      Operador/Admin
+          │                          │
+          └────────────┬─────────────┘
+                       ▼
+             Wallet / Finance
+                       │
+                       ▼
+             Notification Service
+          ├── Push
+          ├── Email
+          ├── SMS
+          └── WebSocket
+                       │
+                       ▼
+          Logs + Auditoria + Replay
