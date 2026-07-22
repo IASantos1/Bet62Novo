@@ -7254,6 +7254,16 @@ const v2FootballRedCardsCache = new Map<number, V2RedCardsEntry>();
 const V2_RED_CARDS_TTL_MS = 45_000;
 
 // V1 tennis native format (all endpoint — different schema from SAPIV2Event)
+interface V1TennisStage {
+  id: number;
+  name: string;
+  shortName?: string;
+  homeCompetitorScore: number;
+  awayCompetitorScore: number;
+  isLive?: boolean;
+  isEnded?: boolean;
+}
+
 interface V1TennisGame {
   id: number;
   competitionId?: number;
@@ -7275,6 +7285,8 @@ interface V1TennisGame {
   };
   stageName?: string;
   roundName?: string;
+  // stages: per-set (and game-level) breakdown — present when API returns detail
+  stages?: V1TennisStage[];
 }
 let _tennisAllV1Cache: V1TennisGame[] | null = null;
 let _tennisAllV1FetchedAt = 0;
@@ -8824,6 +8836,24 @@ export async function scanTennisV1ForFinished(): Promise<void> {
       const homeTeam = g.homeCompetitor?.name?.trim() ?? "";
       const awayTeam = g.awayCompetitor?.name?.trim() ?? "";
 
+      // Extract per-set game scores from stages (e.g. "Set 1": [6,3], "Set 2": [4,6])
+      // Required to settle correct-score-of-set markets (sc1-, sc2-, sc3-, ses-)
+      const stages = g.stages ?? [];
+      const setSets: [number, number][] = stages
+        .filter(
+          (s) =>
+            /^set \d+$/i.test(s.name) &&
+            s.homeCompetitorScore >= 0 &&
+            s.awayCompetitorScore >= 0,
+        )
+        .map((s): [number, number] => [
+          Math.max(0, s.homeCompetitorScore),
+          Math.max(0, s.awayCompetitorScore),
+        ]);
+
+      const extras: Record<string, unknown> | undefined =
+        setSets.length > 0 ? { tennis: { sets: setSets } } : undefined;
+
       const record = {
         home,
         away,
@@ -8831,6 +8861,7 @@ export async function scanTennisV1ForFinished(): Promise<void> {
         awayTeam,
         status: "finished",
         finishedAt: Date.now(),
+        extras,
       };
       finishedMatchResults.set(matchId, record);
       await enqueueMatchSettlement({
@@ -19315,19 +19346,7 @@ async function buildTennisLiveV1(): Promise<LiveMatchState[]> {
       }
 
       // ── Parse V1 stages for real per-set scores and game points ──────────────
-      type V1Stage = {
-        id: number;
-        name: string;
-        shortName?: string;
-        homeCompetitorScore: number;
-        awayCompetitorScore: number;
-        isLive?: boolean;
-        isEnded?: boolean;
-      };
-      const stages: V1Stage[] =
-        ((g as unknown as Record<string, unknown>)["stages"] as
-          | V1Stage[]
-          | undefined) ?? [];
+      const stages: V1TennisStage[] = g.stages ?? [];
 
       // Per-set game scores: stages named "Set 1", "Set 2", ...
       const setSets: [number, number][] = stages
