@@ -1,0 +1,407 @@
+Sim. Para uma plataforma como a BET62, o ideal é que cada mercado tenha sua própria função de Settlement, e as combinações apenas reutilizem essas funções. Abaixo está uma estrutura praticamente completa dos mercados que você mostrou e como cada um deve ser liquidado.
+
+Mercado	Settlement	Base de Liquidação
+Resultado Final (1X2)	settleMatchWinner()	Gols finais
+Dupla Chance	settleDoubleChance()	Gols finais
+Draw No Bet	settleDrawNoBet()	Gols finais + VOID no empate
+Ambas Marcam	settleBTTS()	Gols de ambas as equipes
+Ambas Marcam 1º Tempo	settleBTTSFirstHalf()	Gols HT
+Total de Gols	settleTotals()	Total de gols
+Total Asiático	settleAsianTotals()	Total de gols
+Gols Exatos	settleExactGoals()	Total de gols
+Ímpar/Par	settleOddEvenGoals()	Total de gols
+Gols Casa	settleHomeGoals()	Gols da casa
+Gols Visitante	settleAwayGoals()	Gols visitante
+Vitória a Zero	settleWinToNil()	Resultado + gols sofridos
+Folha Limpa	settleCleanSheet()	Gols sofridos
+Vencer Ambos os Tempos	settleWinBothHalves()	Resultado HT e 2ºT
+Tempo com Mais Gols	settleHighestScoringHalf()	HT x 2ºT
+Resultado 1º Tempo	settleHalfTimeWinner()	Placar HT
+Resultado 2º Tempo	settleSecondHalfWinner()	Apenas gols do 2ºT
+Intervalo/Final (HT/FT)	settleHTFT()	HT + FT
+Primeiro Gol	settleFirstGoal()	Ordem dos gols
+Último Gol	settleLastGoal()	Último evento de gol
+Placar Exato	settleCorrectScore()	Placar FT
+Handicap Europeu	settleEuropeanHandicap()	Ajuste de gols
+Handicap Asiático	settleAsianHandicap()	Handicap asiático completo
+Escanteios Totais	settleCornerTotals()	Total de escanteios
+Escanteios Handicap	settleCornerHandicap()	Handicap de escanteios
+Escanteios Casa	settleHomeCorners()	Escanteios casa
+Escanteios Visitante	settleAwayCorners()	Escanteios visitante
+Cartões Totais	settleCardTotals()	Cartões
+Cartões Handicap	settleCardHandicap()	Handicap cartões
+Cartões Casa	settleHomeCards()	Cartões casa
+Cartões Visitante	settleAwayCards()	Cartões visitante
+Settlement das Combinações
+
+Depois que todos os mercados acima forem liquidados, o Combo Settlement apenas lê os resultados.
+
+Exemplo 1
+Casa vence ✅
+Over 2.5 ✅
+BTTS Sim ✅
+
+Resultado:
+
+WIN
+Exemplo 2
+Casa vence ✅
+Over 2.5 ❌
+BTTS Sim ✅
+
+Resultado:
+
+LOSE
+Exemplo 3
+Draw No Bet → VOID
+Over 2.5 → WIN
+
+Resultado:
+
+Recalcular odd
+Exemplo 4
+Handicap Asiático → HALF WIN
+Over 2.5 → WIN
+
+Resultado:
+
+HALF WIN
+Estados que todo Settlement deve retornar
+
+Todos os mercados da BET62 deveriam retornar apenas um destes estados:
+
+WIN
+LOSE
+VOID
+HALF_WIN
+HALF_LOSE
+PENDING
+CANCELLED
+REFUNDED
+Estrutura recomendada para o seu Settlement Engine
+Settlement Engine
+│
+├── Resultado
+│   ├── 1X2
+│   ├── Double Chance
+│   ├── Draw No Bet
+│   ├── HT/FT
+│   ├── Correct Score
+│
+├── Gols
+│   ├── BTTS
+│   ├── Over/Under
+│   ├── Asian Totals
+│   ├── Team Goals
+│   ├── Odd/Even
+│   ├── Exact Goals
+│   ├── Win to Nil
+│   ├── Clean Sheet
+│   ├── First Goal
+│   ├── Last Goal
+│   ├── Highest Scoring Half
+│
+├── Handicap
+│   ├── Europeu
+│   └── Asiático
+│
+├── Tempos
+│   ├── 1º Tempo
+│   ├── 2º Tempo
+│   ├── Resultado HT
+│   ├── Resultado 2ºT
+│   └── Vencer Ambos os Tempos
+│
+├── Escanteios
+│   ├── Totais
+│   ├── Handicap
+│   ├── Casa
+│   └── Visitante
+│
+├── Cartões
+│   ├── Totais
+│   ├── Handicap
+│   ├── Casa
+│   └── Visitante
+│
+└── Combo Settlement
+    ├── 2 seleções
+    ├── 3 seleções
+    ├── 4 seleções
+    ├── 5+ seleções
+    └── Bet Builder
+
+Essa arquitetura é escalável e compatível com o modelo usado por grandes plataformas de apostas (como Kambi, OpenBet, Altenar e outros fornecedores): cada mercado possui sua própria lógica de liquidação, enquanto qualquer combinação ou Bet Builder apenas reutiliza os resultados desses mercados, sem precisar de regras específicas para cada combinação.
+
+Sim qual seria a lógica 
+
+A lógica mais robusta é separar o Settlement em três camadas. Assim, qualquer mercado novo ou combinação passa a funcionar automaticamente.
+
+Camada 1 – Match Result (Dados Oficiais)
+
+Primeiro você recebe o resultado oficial do fornecedor.
+
+MatchResult
+
+status = FINISHED
+
+FT
+homeGoals = 2
+awayGoals = 1
+
+HT
+homeGoals = 1
+awayGoals = 0
+
+2T
+homeGoals = 1
+awayGoals = 1
+
+Corners
+home = 6
+away = 5
+
+Cards
+home = 2
+away = 3
+
+Events
+Goal 12'
+Goal 60'
+Goal 85'
+...
+
+Esse objeto é a única fonte de verdade.
+
+Camada 2 – Settlement dos mercados
+
+Cada mercado recebe esse MatchResult e retorna um estado padronizado.
+
+Exemplo:
+
+settleBTTS()
+
+Entrada
+
+2 x 1
+
+↓
+
+Resultado
+
+WIN
+
+Outro:
+
+settleOver25()
+
+2 x 1
+
+↓
+
+WIN
+
+Outro:
+
+settleCorrectScore(2-1)
+
+↓
+
+WIN
+
+Outro:
+
+settleFirstGoal(Home)
+
+↓
+
+WIN
+
+No final dessa camada, você terá algo assim:
+
+BTTS = WIN
+
+OVER_2_5 = WIN
+
+HOME_WIN = WIN
+
+FIRST_GOAL_HOME = WIN
+
+CORNERS_OVER_9_5 = WIN
+
+CARDS_OVER_4_5 = WIN
+Camada 3 – Settlement do Bilhete
+
+Agora o sistema não olha mais para o placar.
+
+Ele olha apenas para os resultados dos mercados.
+
+Exemplo:
+
+Bilhete
+
+Casa vence
+
+Over 2.5
+
+BTTS
+
+O Engine encontra:
+
+Casa vence
+
+WIN
+
+Over 2.5
+
+WIN
+
+BTTS
+
+WIN
+
+Resultado:
+
+Ticket = WIN
+
+Outro exemplo
+
+Casa vence
+
+WIN
+
+Over 2.5
+
+LOSE
+
+BTTS
+
+WIN
+
+Resultado
+
+Ticket = LOSE
+Bilhete com VOID
+Draw No Bet
+
+VOID
+
+Over 2.5
+
+WIN
+
+O algoritmo detecta:
+
+Existe VOID
+
+↓
+
+Remove a seleção
+
+↓
+
+Recalcula odd
+
+↓
+
+Bilhete continua válido
+Bilhete Asiático
+Handicap +0.25
+
+HALF_WIN
+
+Over 2.5
+
+WIN
+
+O Settlement devolve
+
+HALF_WIN
+
+Depois o motor financeiro calcula o retorno parcial.
+
+Algoritmo geral
+Receber MatchResult
+        │
+        ▼
+Liquidar TODOS os mercados
+        │
+        ▼
+Salvar resultado de cada mercado
+        │
+        ▼
+Percorrer cada bilhete aberto
+        │
+        ▼
+Para cada seleção
+        │
+        ▼
+Buscar resultado do mercado
+        │
+        ▼
+Existe LOSE?
+        │
+      Sim
+        │
+        ▼
+Bilhete Perdido
+        │
+      Não
+        │
+        ▼
+Existe HALF_LOSE?
+        │
+      Sim
+        ▼
+Calcular metade
+        │
+      Não
+        │
+        ▼
+Existe VOID?
+        │
+      Sim
+        ▼
+Remover odd
+        │
+      Não
+        │
+        ▼
+Todos WIN?
+        │
+      Sim
+        ▼
+Bilhete Ganhou
+Para os Combos (Biblioteca de Combinações)
+
+A lógica é exatamente a mesma.
+
+Exemplo:
+
+Combo "Jogo Aberto"
+
+BTTS = Sim
+
+Over 2.5
+
+O Settlement consulta os resultados já calculados:
+
+BTTS = WIN
+
+OVER_2_5 = WIN
+
+Então:
+
+WIN + WIN = WIN
+
+Outro exemplo:
+
+BTTS = LOSE
+
+OVER_2_5 = WIN
+
+Então:
+
+LOSE + WIN = LOSE
+
+O Combo Settlement não conhece futebol, não calcula gols, escanteios ou cartões. Ele apenas lê o estado final de cada mercado (WIN, LOSE, VOID, HALF_WIN, HALF_LOSE) e aplica as regras gerais do bilhete. Isso torna o sistema extremamente escalável: se amanhã você adicionar um novo mercado, como "Casa marca no 2º tempo", basta implementar a função de settlement desse mercado. Todas as combinações que o utilizarem passarão a funcionar automaticamente, sem alterar o motor de liquidação dos combos.
