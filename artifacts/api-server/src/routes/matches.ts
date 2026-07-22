@@ -1198,6 +1198,10 @@ const INTL_TOURNAMENTS = [
   "international friendly",
   "international friendlies",
   "amistosos internacionais",
+  "club friendly",
+  "amistoso de clubes",
+  "amistosos de clubes",
+  "club friendlies",
 ];
 
 function isIntlTournamentName(leagueName: string): boolean {
