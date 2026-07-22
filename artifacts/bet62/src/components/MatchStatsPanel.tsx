@@ -29,7 +29,30 @@ type H2HMeeting = { date: string; team1: string; team2: string; score1: number; 
 type ConfrontosData = { homeWins: number; awayWins: number; draws: number; recentMeetings: H2HMeeting[]; team1Name: string; team2Name: string; sport: string };
 type V2StatsGroup = { title: string; rows: Array<{ name: string; home: string; away: string }> };
 
+type GoalEvent = {
+  team: "home" | "away";
+  minute: number;
+  extraMinute?: number;
+  playerName: string;
+  assistName?: string;
+  ownGoal?: boolean;
+  penalty?: boolean;
+  varCancelled?: boolean;
+};
+type CardEvent = {
+  team: "home" | "away";
+  minute: number;
+  extraMinute?: number;
+  playerName: string;
+  cardType: "yellow" | "red";
+};
+
 type LiveExtra = {
+  // Live football events (goals, cards)
+  football?: {
+    goals?: GoalEvent[];
+    cards?: CardEvent[];
+  };
   // Legacy tuple fields (kept for backwards compat)
   possession?: [number, number];
   xg?: [number, number];
@@ -123,22 +146,37 @@ function seededBar(a: number, b: number): number {
   return Math.abs(Math.sin(a * 127.1 + b * 311.7) * 0.45 + Math.sin(a * 17.3 + b * 89.5) * 0.35 + 0.2);
 }
 
-function MomentumChart({ homeTeam, awayTeam, isLive, liveMinute, isHalfTime }: {
+function MomentumChart({ homeTeam, awayTeam, isLive, liveMinute, isHalfTime, goalEvents }: {
   homeTeam: string; awayTeam: string; isLive?: boolean; liveMinute?: number; isHalfTime?: boolean;
+  goalEvents?: GoalEvent[];
 }) {
   const hs = homeTeam.split("").reduce((a, c) => a + c.charCodeAt(0), 7);
   const as_ = awayTeam.split("").reduce((a, c) => a + c.charCodeAt(0), 13);
   const COLS = 45;
   const curMin = isHalfTime ? 45 : (liveMinute ?? (isLive ? 65 : 90));
   const activeCols = Math.min(Math.floor(curMin / 2), COLS);
-  const W = 600; const H = 100; const midY = H / 2;
+  const W = 600; const H = 110; const midY = H / 2;
   const bw = (W / COLS) - 1;
-  const maxBarH = 42;
+  const maxBarH = 38;
+
   const bars = Array.from({ length: COLS }, (_, i) => ({
     h: seededBar(hs + i, i * 3 + 1) * maxBarH,
     a: seededBar(as_ + i, i * 7 + 5) * maxBarH,
     on: i < activeCols,
   }));
+
+  // Goal markers: one per non-cancelled goal
+  const goals = (goalEvents ?? []).filter((g) => !g.varCancelled);
+  // Group by column so we can stack multiple goals at the same minute
+  const goalsByCol = new Map<number, GoalEvent[]>();
+  for (const g of goals) {
+    const col = Math.max(0, Math.min(Math.floor(g.minute / 2), COLS - 1));
+    if (!goalsByCol.has(col)) goalsByCol.set(col, []);
+    goalsByCol.get(col)!.push(g);
+  }
+
+  const colW = W / COLS;
+
   return (
     <div className="rounded-xl overflow-hidden mb-1" style={{ background: "#0f0f12", border: "1px solid #27272a" }}>
       <div className="flex items-center justify-between px-4 pt-2.5 pb-1">
@@ -152,7 +190,7 @@ function MomentumChart({ homeTeam, awayTeam, isLive, liveMinute, isHalfTime }: {
           <div className="w-2 h-2 rounded-full bg-white/40" />
         </div>
       </div>
-      <svg viewBox={`0 0 ${W} ${H}`} className="w-full" style={{ height: 76, display: "block" }}>
+      <svg viewBox={`0 0 ${W} ${H}`} className="w-full" style={{ height: 84, display: "block" }}>
         <defs>
           <linearGradient id="mg-home" x1="0" y1="0" x2="0" y2="1">
             <stop offset="0%" stopColor="#dc2626" stopOpacity="0.95" />
@@ -165,7 +203,7 @@ function MomentumChart({ homeTeam, awayTeam, isLive, liveMinute, isHalfTime }: {
         </defs>
         <line x1="0" y1={midY} x2={W} y2={midY} stroke="#3f3f46" strokeWidth="0.5" />
         {bars.map(({ h, a, on }, i) => {
-          const x = i * (W / COLS) + 0.5;
+          const x = i * colW + 0.5;
           return (
             <g key={i} opacity={on ? 1 : 0.1}>
               {h > 1.5 && <rect x={x} y={midY - h} width={bw} height={h} fill={on ? "url(#mg-home)" : "#dc2626"} rx="0.5" />}
@@ -173,13 +211,51 @@ function MomentumChart({ homeTeam, awayTeam, isLive, liveMinute, isHalfTime }: {
             </g>
           );
         })}
-        <line x1={W / 2} y1="2" x2={W / 2} y2={H - 2} stroke="#3f3f46" strokeWidth="1" strokeDasharray="3,2" />
+
+        {/* Goal markers */}
+        {Array.from(goalsByCol.entries()).map(([col, colGoals]) => {
+          const cx = col * colW + bw / 2 + 0.5;
+          const homeGoals = colGoals.filter((g) => g.team === "home");
+          const awayGoals = colGoals.filter((g) => g.team === "away");
+          return (
+            <g key={`gm-${col}`}>
+              {homeGoals.length > 0 && (
+                <>
+                  {/* dotted line from midY up to ball */}
+                  <line x1={cx} y1={midY - 2} x2={cx} y2={9} stroke="#fbbf24" strokeWidth="0.8" strokeDasharray="2,1.5" opacity={0.7} />
+                  {/* amber circle behind emoji */}
+                  <circle cx={cx} cy={6} r={7} fill="#1a1a0e" stroke="#fbbf24" strokeWidth="1.2" opacity={0.9} />
+                  <text x={cx} y={6} textAnchor="middle" dominantBaseline="central" fontSize="8">
+                    ⚽
+                  </text>
+                  {homeGoals.length > 1 && (
+                    <text x={cx + 6} y={2} textAnchor="start" fontSize="6" fill="#fbbf24" fontWeight="bold">{homeGoals.length}</text>
+                  )}
+                </>
+              )}
+              {awayGoals.length > 0 && (
+                <>
+                  <line x1={cx} y1={midY + 2} x2={cx} y2={H - 9} stroke="#fbbf24" strokeWidth="0.8" strokeDasharray="2,1.5" opacity={0.7} />
+                  <circle cx={cx} cy={H - 6} r={7} fill="#1a1a0e" stroke="#fbbf24" strokeWidth="1.2" opacity={0.9} />
+                  <text x={cx} y={H - 6} textAnchor="middle" dominantBaseline="central" fontSize="8">
+                    ⚽
+                  </text>
+                  {awayGoals.length > 1 && (
+                    <text x={cx + 6} y={H - 2} textAnchor="start" fontSize="6" fill="#fbbf24" fontWeight="bold">{awayGoals.length}</text>
+                  )}
+                </>
+              )}
+            </g>
+          );
+        })}
+
+        <line x1={W / 2} y1="14" x2={W / 2} y2={H - 14} stroke="#3f3f46" strokeWidth="1" strokeDasharray="3,2" />
         <text x={W / 2 + 3} y={H - 3} fontSize="8" fill="#52525b" fontFamily="monospace">HT</text>
         <text x={W - 2} y={H - 3} fontSize="8" fill="#52525b" fontFamily="monospace" textAnchor="end">FT</text>
         {isLive && activeCols > 0 && (() => {
-          const lx = activeCols * (W / COLS);
+          const lx = activeCols * colW;
           return <>
-            <line x1={lx} y1="2" x2={lx} y2={H - 2} stroke="rgba(255,255,255,0.3)" strokeWidth="1.2" />
+            <line x1={lx} y1="14" x2={lx} y2={H - 14} stroke="rgba(255,255,255,0.3)" strokeWidth="1.2" />
             <rect x={lx - 15} y={midY - 9} width={30} height={14} rx={3} fill="#1a1a1f" stroke="#52525b" strokeWidth="0.8" />
             <text x={lx} y={midY + 1} fontSize="8" fill="white" fontFamily="monospace" textAnchor="middle" fontWeight="bold">
               {isHalfTime ? "HT" : `${curMin}'`}
@@ -785,6 +861,7 @@ export default function MatchStatsPanel({
                 isLive={isLive}
                 liveMinute={liveMinute}
                 isHalfTime={isHalfTime}
+                goalEvents={liveExtra?.football?.goals}
               />}
 
               {/* Football live per-team stats from /match/{id}/statistics */}
@@ -929,9 +1006,9 @@ export default function MatchStatsPanel({
                   )}
                 </>
               ) : (
-                <div className="bg-zinc-900 rounded-xl border border-zinc-800 p-4">
-                  {/* fallback: raw V2 groups table */}
-                  {v2StatsGroups && v2StatsGroups.length > 0 ? (
+                // Only render the fallback card if there's content to show
+                v2StatsGroups && v2StatsGroups.length > 0 ? (
+                  <div className="bg-zinc-900 rounded-xl border border-zinc-800 p-4">
                     <div className="space-y-3">
                       <div className="flex items-center justify-between mb-1">
                         <div className="text-[10px] font-black text-zinc-400 uppercase tracking-widest">Estatísticas do Jogo</div>
@@ -954,14 +1031,14 @@ export default function MatchStatsPanel({
                         </div>
                       ))}
                     </div>
-                  ) : (
-                    !isLive ? (
-                      <div className="text-center text-zinc-600 py-4 text-sm">
-                        Estatísticas detalhadas não disponíveis.
-                      </div>
-                    ) : null
-                  )}
-                </div>
+                  </div>
+                ) : !isLive ? (
+                  <div className="bg-zinc-900 rounded-xl border border-zinc-800 p-4">
+                    <div className="text-center text-zinc-600 py-4 text-sm">
+                      Estatísticas detalhadas não disponíveis.
+                    </div>
+                  </div>
+                ) : null
               )}
             </div>
           )}
