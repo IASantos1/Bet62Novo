@@ -16594,6 +16594,94 @@ export default function Home({
     return teamMatch(liveMatches) ?? teamMatch(wcLiveForTicketRef.current);
   };
 
+  // Returns the live score formatted specifically for the market of this selection.
+  // For set-specific tennis markets, shows games within that set.
+  // For O/U sets, shows sets-won count. For quarters/periods, shows period score.
+  const getContextualBetScore = (sel: StoredSelection, lm: Match): string => {
+    const rawSel = String(sel.selection ?? "");
+    const sport = String(sel.sport ?? lm.sport ?? "").toLowerCase();
+    const ex = (lm as any)._liveExtra as {
+      sets?: Array<[number, number]>;
+      quarters?: Array<[number, number]>;
+      periods?: Array<[number, number]>;
+      innings?: Array<[number, number]>;
+    } | undefined;
+    const sets = ex?.sets ?? [];
+    const h = lm.homeScore ?? 0;
+    const a = lm.awayScore ?? 0;
+
+    const isTennis =
+      sport === "tennis" ||
+      /^(set[123]-|sc[123]-|s[12]g-|tg-[ou]|gh-|sh\d|[ou]sets|ses-|es-)/.test(rawSel);
+
+    if (isTennis) {
+      // Set-specific: winner, correct score, or games O/U for a single set
+      const setM = rawSel.match(/^(?:set|sc)([123])/);
+      if (setM) {
+        const idx = Number(setM[1]) - 1;
+        const sv = sets[idx];
+        return sv ? `${sv[0]}-${sv[1]}` : "0-0";
+      }
+      const sgM = rawSel.match(/^s([12])g-/);
+      if (sgM) {
+        const idx = Number(sgM[1]) - 1;
+        const sv = sets[idx];
+        return sv ? `${sv[0]}-${sv[1]}` : "0-0";
+      }
+      // Total games / game handicap: show running total of games played
+      if (/^(tg-|gh-)/.test(rawSel)) {
+        const total = sets.reduce((sum, [sh, sa]) => sum + sh + sa, 0);
+        return `${total} jogos`;
+      }
+      // Total sets O/U, set handicap, exact sets result: show sets-won score
+      if (/^[ou]sets|^sh\d|^ses-|^es-/.test(rawSel)) {
+        return `${h}-${a} sets`;
+      }
+      // Match winner or anything else tennis: sets-won score
+      return `${h}-${a}`;
+    }
+
+    // Basketball: for quarter-winner bets, show that quarter's score
+    if ((sport === "basketball" || sport === "nba") && ex?.quarters) {
+      const qM = rawSel.match(/^q([1234])-(home|away|draw)$/);
+      if (qM) {
+        const q = ex.quarters[Number(qM[1]) - 1];
+        if (q) return `Q${qM[1]}: ${q[0]}-${q[1]}`;
+      }
+    }
+
+    // Hockey / NHL: for period bets, show that period's score
+    if ((sport === "hockey" || sport === "nhl") && ex?.periods) {
+      const pM = rawSel.match(/^(?:p|per)([123])-(home|away|draw)$/);
+      if (pM) {
+        const p = ex.periods[Number(pM[1]) - 1];
+        if (p) return `P${pM[1]}: ${p[0]}-${p[1]}`;
+      }
+    }
+
+    // Baseball: show innings score for inning-specific bets
+    if ((sport === "baseball" || sport === "mlb") && ex?.innings) {
+      const inM = rawSel.match(/^(?:f5|mlb-f5)/);
+      if (inM) {
+        const f5 = ex.innings.slice(0, 5);
+        const fh = f5.reduce((s, [hi]) => s + hi, 0);
+        const fa = f5.reduce((s, [, ai]) => s + ai, 0);
+        return `F5: ${fh}-${fa}`;
+      }
+    }
+
+    // Football HT: prefer HT score for first-half markets
+    if (/^(ht-|b1h-|htft-)/.test(rawSel)) {
+      const ht = Array.isArray((lm as any).htScore)
+        ? ((lm as any).htScore as [number, number])
+        : null;
+      if (ht) return `HT: ${ht[0]}-${ht[1]}`;
+    }
+
+    // Default: raw match score
+    return `${h}-${a}`;
+  };
+
   // Get live odd for a specific selection from a live match
   const getLiveOddForSel = (sel: StoredSelection, lm: Match): number => {
     const s = sel.selection;
@@ -24508,8 +24596,7 @@ export default function Home({
                                               <span className="inline-block w-1.5 h-1.5 rounded-full bg-white animate-pulse ml-0.5" />
                                             </span>
                                             <span className="text-[11px] font-black text-gray-700 tabular-nums">
-                                              {displayMin} • {lm.homeScore ?? 0}
-                                              –{lm.awayScore ?? 0}
+                                              {displayMin} • {getContextualBetScore(sel, lm)}
                                             </span>
                                             {liveOdd !== null &&
                                               Math.abs(liveOdd - sel.odd) >
