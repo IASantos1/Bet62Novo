@@ -1,0 +1,78 @@
+curl --request GET \
+  --url 'https://statpal.io/api/v1/volleyball/season-schedule/{league_id}?access_key=b5b07a3f-b019-4a18-8969-6045169feda9' \
+  --header 'Accept: application/json'
+{
+  "scores": {
+    "country": "france",
+    "sport": "volleyball",
+    "tournament": {
+      "id": "4390",
+      "league": "Ligue A",
+      "season": "2025/2026",
+      "week": [
+        {
+          "number": "1",
+          "match": [
+            {
+              "date": "21.10.2025",
+              "id": "460077",
+              "status": "Finished",
+              "time": "18:00",
+              "home": {
+                "id": "2622",
+                "name": "Tours",
+                "s1": "25",
+                "s2": "25",
+                "s3": "25",
+                "s4": "",
+                "s5": "",
+                "totalscore": "3"
+              },
+              "away": {
+                "id": "2626",
+                "name": "Ajaccio",
+                "s1": "22",
+                "s2": "23",
+                "s3": "20",
+                "s4": "",
+                "s5": "",
+                "totalscore": "0"
+              }
+            }
+          ]
+        },
+        {
+          "number": "2",
+          "match": [
+            {
+              "date": "23.10.2025",
+              "id": "460082",
+              "status": "Finished",
+              "time": "18:00",
+              "home": {
+                "id": "2625",
+                "name": "Poitiers",
+                "s1": "23",
+                "s2": "22",
+                "s3": "24",
+                "s4": "",
+                "s5": "",
+                "totalscore": "0"
+              },
+              "away": {
+                "id": "2630",
+                "name": "Montpellier",
+                "s1": "25",
+                "s2": "25",
+                "s3": "26",
+                "s4": "",
+                "s5": "",
+                "totalscore": "3"
+              }
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

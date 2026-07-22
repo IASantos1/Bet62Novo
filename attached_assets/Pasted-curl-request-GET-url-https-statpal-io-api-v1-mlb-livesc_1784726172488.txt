@@ -1,0 +1,81 @@
+curl --request GET \
+  --url 'https://statpal.io/api/v1/mlb/livescores?access_key=b5b07a3f-b019-4a18-8969-6045169feda9' \
+  --header 'Accept: application/json'
+{
+  "livescores": {
+    "sport": "baseball",
+    "tournament": {
+      "country": "usa",
+      "id": "2499",
+      "league": "USA: MLB",
+      "match": [
+        {
+          "attendance": "",
+          "date": "21.04.2025",
+          "datetime_utc": "21.04.2025 15:10",
+          "formatted_date": "21.04.2025",
+          "id": "1329182974",
+          "oddsid": "337953",
+          "outs": "",
+          "status": "Not Started",
+          "time": "11:10",
+          "timezone": "ET",
+          "venue_id": "1294",
+          "venue_name": "Fenway Park, Boston, Massachusetts",
+          "home": {
+            "errors": "-",
+            "hits": "-",
+            "id": "2501",
+            "in1": "-",
+            "in2": "-",
+            "in3": "-",
+            "in4": "-",
+            "in5": "-",
+            "in6": "-",
+            "in7": "-",
+            "in8": "-",
+            "in9": "-",
+            "name": "Boston Red Sox",
+            "r": "-",
+            "totalscore": "0"
+          },
+          "away": {
+            "errors": "-",
+            "hits": "-",
+            "id": "2510",
+            "in1": "-",
+            "in2": "-",
+            "in3": "-",
+            "in4": "-",
+            "in5": "-",
+            "in6": "-",
+            "in7": "-",
+            "in8": "-",
+            "in9": "-",
+            "name": "Chicago White Sox",
+            "r": "-",
+            "totalscore": "0"
+          },
+          "headline": null,
+          "events": null,
+          "stats": null,
+          "starting_pitchers": {
+            "home": {
+              "player": {
+                "id": "40750",
+                "name": "Walker Buehler"
+              }
+            },
+            "away": {
+              "player": {
+                "id": "4621897",
+                "name": "Jonathan Cannon"
+              }
+            }
+          },
+          "umpires": null
+        }
+      ]
+    }
+  }
+}
