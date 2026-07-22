@@ -3882,6 +3882,7 @@ function MomentumChart({
     minute?: number;
     status?: string;
     _liveExtra?: Record<string, unknown>;
+    events?: Array<{ type: string; team: string; minute: number; player: string }>;
   };
   v2StatsGroups?: Array<{ title: string; rows: Array<{ name: string; home: string; away: string }> }> | null;
 }) {
@@ -4093,8 +4094,34 @@ function MomentumChart({
           {/* Goal minute markers ⚽ */}
           {(() => {
             const lx = (match._liveExtra ?? {}) as Record<string, unknown>;
-            const homeGoalMins = (lx.homeGoalMinutes as number[] | undefined) ?? [];
-            const awayGoalMins = (lx.awayGoalMinutes as number[] | undefined) ?? [];
+            let homeGoalMins = (lx.homeGoalMinutes as number[] | undefined) ?? [];
+            let awayGoalMins = (lx.awayGoalMinutes as number[] | undefined) ?? [];
+            // Fallback: derive goal minutes from match.events if _liveExtra tracking is empty
+            if (homeGoalMins.length === 0 && awayGoalMins.length === 0 && match.events?.length) {
+              for (const ev of match.events) {
+                if (!["goal", "score", "golo", "gol"].includes(String(ev.type).toLowerCase())) continue;
+                const teamLower = String(ev.team ?? "").toLowerCase();
+                const homeLower = match.home.toLowerCase();
+                if (teamLower === homeLower || teamLower === "home" || teamLower === "1") {
+                  homeGoalMins = [...homeGoalMins, ev.minute];
+                } else {
+                  awayGoalMins = [...awayGoalMins, ev.minute];
+                }
+              }
+            }
+            // Second fallback: synthesize from homeScore/awayScore when events also have nothing
+            // (spread goals evenly — better than showing nothing)
+            if (homeGoalMins.length === 0 && awayGoalMins.length === 0) {
+              const hS = match.homeScore ?? 0;
+              const aS = match.awayScore ?? 0;
+              const totalMins = match.minute ?? 0;
+              if (hS > 0 && totalMins > 0) {
+                for (let g = 0; g < hS; g++) homeGoalMins = [...homeGoalMins, Math.round(((g + 1) / (hS + 1)) * totalMins)];
+              }
+              if (aS > 0 && totalMins > 0) {
+                for (let g = 0; g < aS; g++) awayGoalMins = [...awayGoalMins, Math.round(((g + 1) / (aS + 1)) * totalMins)];
+              }
+            }
             if (homeGoalMins.length === 0 && awayGoalMins.length === 0) return null;
             // Offset the minute label left/right depending on position to avoid chart edges
             const labelOffset = (gx: number) => (gx > W - 22 ? -7 : 7);
@@ -17835,15 +17862,27 @@ export default function Home({
                           ],
                         },
                         {
-                          id: "safe-mix",
-                          name: "Jogo Seguro",
+                          id: "home-jogo-seguro",
+                          name: `Jogo Seguro — ${teamNamePt(expandedMatch.home)}`,
                           emoji: "🛡️",
                           tagColor: "text-orange-400",
                           borderClass: "border-orange-500/20",
                           badgeClass: "bg-orange-500/10",
                           sels: [
                             { label: `${teamNamePt(expandedMatch.home)} ou Empate`, selection: "homeOrDraw", market: "dupla", odds: homeDcOdds },
+                            { label: "Ambas Marcam — Sim", selection: "bts-yes", market: "dupla", odds: bttsOdds },
+                          ],
+                        },
+                        {
+                          id: "away-jogo-seguro",
+                          name: `Jogo Seguro — ${teamNamePt(expandedMatch.away)}`,
+                          emoji: "🛡️",
+                          tagColor: "text-sky-400",
+                          borderClass: "border-sky-500/20",
+                          badgeClass: "bg-sky-500/10",
+                          sels: [
                             { label: `${teamNamePt(expandedMatch.away)} ou Empate`, selection: "awayOrDraw", market: "dupla", odds: awayDcOdds },
+                            { label: "Acima de 2.5 Golos", selection: "o25", market: "gols", odds: o25Odds },
                           ],
                         },
                       ].filter((c) => c.sels.every((s) => s.odds > 1.01));

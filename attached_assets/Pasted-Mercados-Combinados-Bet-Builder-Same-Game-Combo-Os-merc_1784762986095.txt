@@ -1,0 +1,15 @@
+Mercados Combinados (Bet Builder / Same Game Combo)
+
+Os mercados combinados permitem que o apostador selecione dois ou mais mercados do mesmo evento e os reúna em uma única aposta. O sistema calcula uma odd única para a combinação, considerando não apenas as odds individuais, mas também a relação estatística entre os mercados selecionados.
+
+O funcionamento inicia quando o utilizador escolhe um evento e adiciona várias seleções compatíveis ao bilhete. O motor de mercados verifica se a combinação é permitida. Combinações contraditórias, como “Vitória da Equipe A” e “Vitória da Equipe B”, ou “Mais de 2.5 gols” e “Menos de 2.5 gols”, são automaticamente rejeitadas.
+
+Após a validação, o motor de probabilidades calcula a probabilidade conjunta da combinação. Para isso, considera a correlação entre os mercados, evitando simplesmente multiplicar as odds individuais quando existe dependência estatística entre elas. Esse processo gera uma odd final mais precisa e reduz o risco operacional da casa de apostas.
+
+Antes da aceitação da aposta, o sistema realiza uma análise de risco, verificando limites de exposição, regras internas e eventuais restrições para determinadas combinações. Se todas as verificações forem aprovadas, a aposta é registada e fica disponível para acompanhamento.
+
+Durante o evento, todas as seleções permanecem sincronizadas com os dados em tempo real. Caso algum mercado seja suspenso, anulado ou alterado, o sistema aplica automaticamente as regras definidas para o mercado combinado.
+
+A liquidação ocorre apenas após a definição do resultado de todas as seleções incluídas na combinação. Se todas forem vencedoras, a aposta é considerada ganha e o pagamento é efetuado utilizando a odd final calculada. Se pelo menos uma seleção perder, a aposta é considerada perdida. Caso uma seleção seja anulada, a odd da combinação é recalculada de acordo com as regras da plataforma.
+
+Este modelo pode ser aplicado a todos os desportos suportados pela plataforma, incluindo futebol, basquetebol, ténis, voleibol, hóquei, basebol, râguebi, MMA e outros, desde que existam mercados compatíveis para combinação. O objetivo é oferecer ao utilizador maior flexibilidade na criação das suas apostas, mantendo um controlo rigoroso sobre a precificação e a gestão de risco da casa de apostas.
