@@ -978,6 +978,39 @@ async function fetchStatpalFootballLiveV2(): Promise<{
 }> {
   if (!CONFIG.STATPAL_API_KEY) throw new Error("STATPAL_API_KEY is not configured");
 
+  // Always fire odds/live in parallel so oddsLiveKnownIds is kept current regardless
+  // of which primary path succeeds. Bookmakers only price live odds on matches actually
+  // in progress — these IDs are guaranteed genuine and bypass the "never-seen + >20 min"
+  // gate in buildFootballLiveV2, which is critical after a fresh server deploy when
+  // liveMatchState is empty and cold-start grace (5 min) has expired.
+  const oddsLivePromise = (async () => {
+    try {
+      const oddsResp = await fetch(buildStatpalUrl("/v2/soccer/odds/live"), {
+        signal: AbortSignal.timeout(8_000),
+        headers: statpalHeaders(),
+      });
+      if (!oddsResp.ok) return;
+      const oddsRaw = (await oddsResp.json()) as Record<string, unknown>;
+      const updatedTs =
+        typeof oddsRaw["updated_ts"] === "number" ? oddsRaw["updated_ts"] : 0;
+      const matchList = statpalList(
+        (oddsRaw["partidas_ao_vivo"] ?? oddsRaw["live_matches"]) as unknown[] | null | undefined,
+      );
+      const oddsEvents = matchList.flatMap((m) => {
+        const ev = statpalOddsMatchToV2Event(m as Record<string, unknown>);
+        return ev ? [ev] : [];
+      });
+      for (const ev of oddsEvents) oddsLiveKnownIds.add(ev.id);
+      logger.info(
+        { eventCount: oddsEvents.length, source: "odds/live", knownLiveIds: oddsLiveKnownIds.size },
+        "[statpal-football-live] odds/live confirmed-live ids updated",
+      );
+      return { events: oddsEvents, updatedTs };
+    } catch (err) {
+      logger.warn({ err }, "[statpal-football-live] odds/live parallel fetch failed (non-fatal)");
+    }
+  })();
+
   // 1. Try the standard matches/live endpoint (some Statpal subscriptions include it)
   try {
     const resp = await fetch(buildStatpalUrl("/v2/soccer/matches/live"), {
@@ -995,7 +1028,12 @@ async function fetchStatpalFootballLiveV2(): Promise<{
         { topKeys, leagueCount: leagues.length, eventCount: events.length, source: "matches/live" },
         "[statpal-football-live] raw response shape",
       );
-      if (events.length > 0) return { events, updatedTs };
+      if (events.length > 0) {
+        // Wait for the parallel odds/live fetch so oddsLiveKnownIds is populated
+        // before buildFootballLiveV2 runs its 20-min gate check.
+        await oddsLivePromise;
+        return { events, updatedTs };
+      }
       // Falls through to odds endpoint when matches/live returns empty
     }
   } catch (err) {
@@ -1003,36 +1041,12 @@ async function fetchStatpalFootballLiveV2(): Promise<{
   }
 
   // 2. Fallback: /v2/soccer/odds/live — confirmed to work with this subscription.
-  //    Returns Portuguese field names: partidas_ao_vivo, informação_da_partida, etc.
-  const oddsResp = await fetch(buildStatpalUrl("/v2/soccer/odds/live"), {
-    signal: AbortSignal.timeout(8_000),
-    headers: statpalHeaders(),
-  });
-  if (!oddsResp.ok) throw new Error(`Statpal odds/live HTTP ${oddsResp.status}`);
-
-  const oddsRaw = (await oddsResp.json()) as Record<string, unknown>;
-  const updatedTs =
-    typeof oddsRaw["updated_ts"] === "number" ? oddsRaw["updated_ts"] : 0;
-
-  // Root key may be Portuguese ("partidas_ao_vivo") or English ("live_matches")
-  const matchList = statpalList(
-    (oddsRaw["partidas_ao_vivo"] ?? oddsRaw["live_matches"]) as unknown[] | null | undefined,
-  );
-  const events = matchList.flatMap((m) => {
-    const ev = statpalOddsMatchToV2Event(m as Record<string, unknown>);
-    return ev ? [ev] : [];
-  });
-
-  // Mark every successfully converted event as "confirmed live" so buildFootballLiveV2
-  // can bypass the 20-min new-match gate for them. Bookmakers only price live odds on
-  // matches in progress, so these IDs are guaranteed to be genuinely live.
-  for (const ev of events) oddsLiveKnownIds.add(ev.id);
-
-  logger.info(
-    { eventCount: events.length, source: "odds/live", knownLiveIds: oddsLiveKnownIds.size },
-    "[statpal-football-live] odds/live response",
-  );
-  return { events, updatedTs };
+  const oddsResult = await oddsLivePromise;
+  if (oddsResult && oddsResult.events.length > 0) {
+    return oddsResult;
+  }
+  // If both failed, throw so the caller can return cached data
+  throw new Error("Both matches/live and odds/live returned no events");
 }
 
 // Refresh the ground-truth kickoff map from Statpal's *daily* fixture feed
