@@ -3734,9 +3734,17 @@ function liveDefinitiveOutcomeForSel(
         : "lost";
   }
 
-  // Over/Under total sets (tennis) — settle early once total sets confirm the threshold
-  // In live state, home+away = sets won by each player = total sets played so far
-  // Completed set count from tennisSets is used as a tiebreaker when home+away = 0
+  // Over/Under total sets (tennis/volleyball) — early settlement
+  // In the live state, home+away = sets won by each player = total completed sets.
+  //
+  // Early settlement rules for O/U 2.5:
+  //   • total ≥ 3 sets played                    → Over: won  / Under: lost
+  //   • score 1-1 (tie): 3rd set guaranteed       → Over: won  / Under: lost  (settle BEFORE 3rd set starts)
+  //   • score 2-0 or 0-2: match over in 2 sets    → Over: lost / Under: won
+  //
+  // Early settlement rules for O/U 3.5 (best-of-5):
+  //   • total ≥ 4 sets played                    → Over: won  / Under: lost
+  //   • score 2-2 (tie): 5th set guaranteed       → Over: won  / Under: lost
   const mSets = s.match(/^([ou])sets(35|25)?$/);
   if (mSets) {
     const dir = mSets[1]!;
@@ -3745,6 +3753,26 @@ function liveDefinitiveOutcomeForSel(
     const completedSets = tennisSets.filter(tennisSetFinished).length;
     const totalSets = total > 0 ? total : completedSets;
     if (totalSets === 0) return null;
+
+    if (line === 2.5) {
+      // Definitive: 3 or more sets already played
+      if (totalSets >= 3) return dir === "o" ? "won" : "lost";
+      // Score 1-1 in sets: third set is guaranteed → settle over as won, under as lost
+      if (home === 1 && away === 1) return dir === "o" ? "won" : "lost";
+      // Score 2-0 or 0-2: match ended in 2 sets → settle over as lost, under as won
+      if ((home === 2 && away === 0) || (home === 0 && away === 2)) return dir === "o" ? "lost" : "won";
+      return null;
+    }
+
+    if (line === 3.5) {
+      // Definitive: 4 or more sets already played
+      if (totalSets >= 4) return dir === "o" ? "won" : "lost";
+      // Score 2-2: fifth set is guaranteed → over wins, under loses
+      if (home === 2 && away === 2) return dir === "o" ? "won" : "lost";
+      return null;
+    }
+
+    // Generic fallback for any other line
     if (dir === "o") return totalSets > line ? "won" : null;
     return totalSets > line ? "lost" : null;
   }
