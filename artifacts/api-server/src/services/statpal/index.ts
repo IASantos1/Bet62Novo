@@ -1,14 +1,18 @@
 /**
  * StatpalClient — centralised typed service for all Statpal API calls.
  *
+ * Architecture:
+ *   StatPal API → StatpalClient (Redis cache) → BET62 API → Frontend
+ *
+ * Every public method is cached via Redis (with in-memory fallback).
+ * TTLs are set per endpoint category using STATPAL_TTL presets.
+ *
  * Usage:
  *   import { statpal } from "../services/statpal/index.js";
- *   const live = await statpal.getFootballOddsLive();
- *
- * The singleton uses STATPAL_API_KEY and STATPAL_BASE_URL from the environment
- * (same vars already consumed by matches.ts). Every method throws on non-2xx
- * HTTP responses — callers should try/catch.
+ *   const live = await statpal.getFootballLive();
  */
+
+import { statpalCache, STATPAL_TTL } from "./cache.js";
 
 export type StatpalConfig = {
   apiKey: string;
@@ -105,283 +109,297 @@ export class StatpalClient {
 
   // ── MLB (Baseball) ────────────────────────────────────────────────────────
 
-  /** `/v1/mlb/livescores` — real-time scores with inning-by-inning, hits, errors, outs, starting pitchers */
+  /** `/v1/mlb/livescores` */
   async getMLBLivescores(): Promise<Record<string, unknown>> {
-    return this.get("/v1/mlb/livescores");
+    return this.cachedGet("/v1/mlb/livescores", {}, STATPAL_TTL.LIVE);
   }
 
-  /** `/v1/mlb/daily/d-{offset}` — d-0=today, d-1=yesterday, d-2=two days ago */
+  /** `/v1/mlb/daily/d-{offset}` — d-0=today, d-1=yesterday */
   async getMLBDaily(offset: number = 1): Promise<Record<string, unknown>> {
-    return this.get(`/v1/mlb/daily/d-${offset}`);
+    return this.cachedGet(`/v1/mlb/daily/d-${offset}`, {}, STATPAL_TTL.FIXTURES);
   }
 
-  /** `/v1/mlb/season-schedule` — full 2025 season schedule (upcoming + completed) */
+  /** `/v1/mlb/season-schedule` */
   async getMLBSeasonSchedule(): Promise<Record<string, unknown>> {
-    return this.get("/v1/mlb/season-schedule");
+    return this.cachedGet("/v1/mlb/season-schedule", {}, STATPAL_TTL.FIXTURES);
   }
 
-  /** `/v1/mlb/standings` — standings by division and league (AL East/Central/West, NL …) */
+  /** `/v1/mlb/standings` */
   async getMLBStandings(): Promise<Record<string, unknown>> {
-    return this.get("/v1/mlb/standings");
+    return this.cachedGet("/v1/mlb/standings", {}, STATPAL_TTL.STANDINGS);
   }
 
-  /** `/v1/mlb/rosters/{abbr}` — active roster with player bio and base64 team image */
+  /** `/v1/mlb/rosters/{abbr}` */
   async getMLBRosters(teamAbbr: string): Promise<Record<string, unknown>> {
-    return this.get(`/v1/mlb/rosters/${encodeURIComponent(teamAbbr.toLowerCase())}`);
+    return this.cachedGet(`/v1/mlb/rosters/${encodeURIComponent(teamAbbr.toLowerCase())}`, {}, STATPAL_TTL.TEAM_STATS);
   }
 
-  /** `/v1/mlb/team-stats/{abbr}` — batting / pitching / fielding stats per player */
+  /** `/v1/mlb/team-stats/{abbr}` */
   async getMLBTeamStats(teamAbbr: string): Promise<Record<string, unknown>> {
-    return this.get(`/v1/mlb/team-stats/${encodeURIComponent(teamAbbr.toLowerCase())}`);
+    return this.cachedGet(`/v1/mlb/team-stats/${encodeURIComponent(teamAbbr.toLowerCase())}`, {}, STATPAL_TTL.TEAM_STATS);
   }
 
-  /** `/v1/mlb/injuries/{abbr}` — injury and suspension report for a team */
+  /** `/v1/mlb/injuries/{abbr}` */
   async getMLBInjuries(teamAbbr: string): Promise<Record<string, unknown>> {
-    return this.get(`/v1/mlb/injuries/${encodeURIComponent(teamAbbr.toLowerCase())}`);
+    return this.cachedGet(`/v1/mlb/injuries/${encodeURIComponent(teamAbbr.toLowerCase())}`, {}, STATPAL_TTL.TEAM_STATS);
   }
 
-  /**
-   * `/v1/mlb/league-stats/{category}` — league-wide player leaderboards.
-   *
-   * Known categories:
-   *   `mlb_player_batting`, `mlb_player_pitching`, `mlb_player_fielding`,
-   *   `mlb_team_batting`, `mlb_team_pitching`
-   */
+  /** `/v1/mlb/league-stats/{category}` */
   async getMLBLeagueStats(category: string): Promise<Record<string, unknown>> {
-    return this.get(`/v1/mlb/league-stats/${encodeURIComponent(category)}`);
+    return this.cachedGet(`/v1/mlb/league-stats/${encodeURIComponent(category)}`, {}, STATPAL_TTL.STANDINGS);
   }
 
-  // ── MLB odds ──────────────────────────────────────────────────────────────
-
-  /** `/v1/mlb/odds` — upcoming MLB games with 3Way Result bookmaker odds (H/D/A) */
+  /** `/v1/mlb/odds` */
   async getMLBOdds(): Promise<Record<string, unknown>> {
-    return this.get("/v1/mlb/odds");
+    return this.cachedGet("/v1/mlb/odds", {}, STATPAL_TTL.PREMATCH);
   }
 
   // ── NBA (Basketball) ──────────────────────────────────────────────────────
 
-  /** `/v1/nba/livescores` — real-time quarter-by-quarter scores with OT support */
+  /** `/v1/nba/livescores` */
   async getNBALivescores(): Promise<Record<string, unknown>> {
-    return this.get("/v1/nba/livescores");
+    return this.cachedGet("/v1/nba/livescores", {}, STATPAL_TTL.LIVE);
   }
 
-  /** `/v1/nba/daily/d-{offset}` — d-0=today, d-1=yesterday */
+  /** `/v1/nba/daily/d-{offset}` */
   async getNBADaily(offset: number = 1): Promise<Record<string, unknown>> {
-    return this.get(`/v1/nba/daily/d-${offset}`);
+    return this.cachedGet(`/v1/nba/daily/d-${offset}`, {}, STATPAL_TTL.FIXTURES);
   }
 
-  /** `/v1/nba/season-schedule` — full-season schedule (upcoming + completed) with q1–q4 scores */
+  /** `/v1/nba/season-schedule` */
   async getNBASeasonSchedule(): Promise<Record<string, unknown>> {
-    return this.get("/v1/nba/season-schedule");
+    return this.cachedGet("/v1/nba/season-schedule", {}, STATPAL_TTL.FIXTURES);
   }
 
-  /** `/v1/nba/standings` — standings by conference and division (W/L, pct, streak, last 10) */
+  /** `/v1/nba/standings` */
   async getNBAStandings(): Promise<Record<string, unknown>> {
-    return this.get("/v1/nba/standings");
+    return this.cachedGet("/v1/nba/standings", {}, STATPAL_TTL.STANDINGS);
   }
 
-  /**
-   * `/v1/nba/rosters/{abbr}` — active roster with player bio and base64 team logo.
-   * Abbreviations are 2-3 letters (e.g. `"mem"`, `"lal"`, `"bos"`).
-   */
+  /** `/v1/nba/rosters/{abbr}` */
   async getNBARosters(teamAbbr: string): Promise<Record<string, unknown>> {
-    return this.get(`/v1/nba/rosters/${encodeURIComponent(teamAbbr.toLowerCase())}`);
+    return this.cachedGet(`/v1/nba/rosters/${encodeURIComponent(teamAbbr.toLowerCase())}`, {}, STATPAL_TTL.TEAM_STATS);
   }
 
-  /**
-   * `/v1/nba/team-stats/{abbr}` — per-player stats broken into categories:
-   * Game (pts/reb/ast/stl/blk), Shooting (FG%/3P%/FT%).
-   */
+  /** `/v1/nba/team-stats/{abbr}` */
   async getNBATeamStats(teamAbbr: string): Promise<Record<string, unknown>> {
-    return this.get(`/v1/nba/team-stats/${encodeURIComponent(teamAbbr.toLowerCase())}`);
+    return this.cachedGet(`/v1/nba/team-stats/${encodeURIComponent(teamAbbr.toLowerCase())}`, {}, STATPAL_TTL.TEAM_STATS);
   }
 
-  /** `/v1/nba/injuries/{abbr}` — injury and suspension report for a team */
+  /** `/v1/nba/injuries/{abbr}` */
   async getNBAInjuries(teamAbbr: string): Promise<Record<string, unknown>> {
-    return this.get(`/v1/nba/injuries/${encodeURIComponent(teamAbbr.toLowerCase())}`);
+    return this.cachedGet(`/v1/nba/injuries/${encodeURIComponent(teamAbbr.toLowerCase())}`, {}, STATPAL_TTL.TEAM_STATS);
   }
 
-  /**
-   * `/v1/nba/odds` — upcoming NBA games with 3Way Result bookmaker odds.
-   * Market id "1500" = 3Way Result (Home / Draw / Away decimal prices).
-   */
+  /** `/v1/nba/odds` */
   async getNBAOdds(): Promise<Record<string, unknown>> {
-    return this.get("/v1/nba/odds");
+    return this.cachedGet("/v1/nba/odds", {}, STATPAL_TTL.PREMATCH);
   }
 
   // ── Volleyball ────────────────────────────────────────────────────────────
 
-  /** `/v1/volleyball/livescores` — live set-by-set scores (s1–s5) across all active leagues */
+  /** `/v1/volleyball/livescores` */
   async getVolleyballLivescores(): Promise<Record<string, unknown>> {
-    return this.get("/v1/volleyball/livescores");
+    return this.cachedGet("/v1/volleyball/livescores", {}, STATPAL_TTL.LIVE);
   }
 
-  /** `/v1/volleyball/daily/d-{offset}` — d-0=today, d-1=yesterday */
+  /** `/v1/volleyball/daily/d-{offset}` */
   async getVolleyballDaily(offset: number = 1): Promise<Record<string, unknown>> {
-    return this.get(`/v1/volleyball/daily/d-${offset}`);
+    return this.cachedGet(`/v1/volleyball/daily/d-${offset}`, {}, STATPAL_TTL.FIXTURES);
   }
 
-  /**
-   * `/v1/volleyball/standings/{league_id}` — table by pos, W/L, pts, recent form.
-   * Use a Statpal league id (e.g. `"4390"` for France Ligue A).
-   */
+  /** `/v1/volleyball/standings/{league_id}` */
   async getVolleyballStandings(leagueId: string): Promise<Record<string, unknown>> {
-    return this.get(`/v1/volleyball/standings/${encodeURIComponent(leagueId)}`);
+    return this.cachedGet(`/v1/volleyball/standings/${encodeURIComponent(leagueId)}`, {}, STATPAL_TTL.STANDINGS);
   }
 
-  /**
-   * `/v1/volleyball/season-schedule/{league_id}` — full season organised by week;
-   * each week has an array of matches with s1–s5 set scores.
-   */
+  /** `/v1/volleyball/season-schedule/{league_id}` */
   async getVolleyballSeasonSchedule(leagueId: string): Promise<Record<string, unknown>> {
-    return this.get(`/v1/volleyball/season-schedule/${encodeURIComponent(leagueId)}`);
+    return this.cachedGet(`/v1/volleyball/season-schedule/${encodeURIComponent(leagueId)}`, {}, STATPAL_TTL.FIXTURES);
   }
 
-  /**
-   * `/v1/volleyball/odds` — upcoming matches with Home/Away moneyline + O/U set
-   * totals (line 3.5, 4, …) across all available leagues.
-   */
+  /** `/v1/volleyball/odds` */
   async getVolleyballOdds(): Promise<Record<string, unknown>> {
-    return this.get("/v1/volleyball/odds");
+    return this.cachedGet("/v1/volleyball/odds", {}, STATPAL_TTL.PREMATCH);
   }
 
-  // ── Football V2 ───────────────────────────────────────────────────────────
+  // ── Football V2 — Live ────────────────────────────────────────────────────
 
+  /** `/v2/soccer/matches/live` — Live Stats */
   async getFootballLive(): Promise<Record<string, unknown>> {
-    return this.get("/v2/soccer/matches/live");
+    return this.cachedGet("/v2/soccer/matches/live", {}, STATPAL_TTL.LIVE);
   }
 
+  /** `/v2/soccer/odds/live` — Live odds */
   async getFootballOddsLive(): Promise<Record<string, unknown>> {
-    return this.get("/v2/soccer/odds/live");
+    return this.cachedGet("/v2/soccer/odds/live", {}, STATPAL_TTL.LIVE);
   }
 
-  async getFootballDaily(
-    offset: number = 0,
-  ): Promise<Record<string, unknown>> {
-    return this.get("/v2/soccer/matches/daily", { offset });
-  }
-
-  /** `/v2/soccer/leagues/{id}/odds/prematch` */
-  async getFootballPrematchOdds(
-    leagueId: string,
-  ): Promise<StatpalPrematchOddsResponse> {
-    return this.get(
-      `/v2/soccer/leagues/${encodeURIComponent(leagueId)}/odds/prematch`,
-    );
-  }
-
-  /** `/v2/soccer/odds/live/markets` — list of available live market IDs/names */
+  /** `/v2/soccer/odds/live/markets` */
   async getFootballLiveMarkets(): Promise<StatpalLiveMarket[]> {
-    const data = await this.get("/v2/soccer/odds/live/markets");
+    const data = await this.cachedGet("/v2/soccer/odds/live/markets", {}, STATPAL_TTL.PREMATCH);
     return Array.isArray(data) ? (data as StatpalLiveMarket[]) : [];
   }
 
-  /** `/v2/soccer/odds/live/match-states` — list of in-play state IDs/names */
+  /** `/v2/soccer/odds/live/match-states` */
   async getFootballLiveMatchStates(): Promise<StatpalLiveMatchState[]> {
-    const data = await this.get("/v2/soccer/odds/live/match-states");
+    const data = await this.cachedGet("/v2/soccer/odds/live/match-states", {}, STATPAL_TTL.PREMATCH);
     return Array.isArray(data) ? (data as StatpalLiveMatchState[]) : [];
+  }
+
+  // ── Football V2 — Fixtures ────────────────────────────────────────────────
+
+  /** `/v2/soccer/matches/daily` — Fixtures */
+  async getFootballDaily(offset: number = 0): Promise<Record<string, unknown>> {
+    return this.cachedGet("/v2/soccer/matches/daily", { offset }, STATPAL_TTL.FIXTURES);
   }
 
   /** `/v2/soccer/leagues` */
   async getFootballLeagues(): Promise<Record<string, unknown>> {
-    return this.get("/v2/soccer/leagues");
+    return this.cachedGet("/v2/soccer/leagues", {}, STATPAL_TTL.STANDINGS);
   }
 
-  /** `/v2/soccer/leagues/{id}/standings` */
-  async getFootballStandings(
-    leagueId: string,
-  ): Promise<Record<string, unknown>> {
-    return this.get(
-      `/v2/soccer/leagues/${encodeURIComponent(leagueId)}/standings`,
+  /** `/v2/soccer/leagues/{id}/matches` — Fixtures per league */
+  async getFootballLeagueMatches(leagueId: string): Promise<Record<string, unknown>> {
+    return this.cachedGet(`/v2/soccer/leagues/${encodeURIComponent(leagueId)}/matches`, {}, STATPAL_TTL.FIXTURES);
+  }
+
+  /** `/v2/soccer/leagues/{id}/odds/prematch` */
+  async getFootballPrematchOdds(leagueId: string): Promise<StatpalPrematchOddsResponse> {
+    return this.cachedGet(
+      `/v2/soccer/leagues/${encodeURIComponent(leagueId)}/odds/prematch`,
+      {},
+      STATPAL_TTL.PREMATCH,
     );
   }
 
-  /** `/v2/soccer/leagues/{id}/matches` */
-  async getFootballLeagueMatches(
-    leagueId: string,
-  ): Promise<Record<string, unknown>> {
-    return this.get(
-      `/v2/soccer/leagues/${encodeURIComponent(leagueId)}/matches`,
-    );
+  // ── Football V2 — Events & Live Stats ────────────────────────────────────
+
+  /**
+   * `/v2/soccer/match/{id}/statistics` — Live Stats + Events (goals, cards).
+   * Called per-match; short TTL since it updates every ~30s during a game.
+   */
+  async getFootballMatchStats(matchId: string): Promise<Record<string, unknown>> {
+    return this.cachedGet(`/v2/soccer/match/${encodeURIComponent(matchId)}/statistics`, {}, STATPAL_TTL.EVENTS);
   }
 
-  /** `/v2/soccer/leagues/{id}/stats` */
-  async getFootballLeagueStats(
-    leagueId: string,
-  ): Promise<Record<string, unknown>> {
-    return this.get(
-      `/v2/soccer/leagues/${encodeURIComponent(leagueId)}/stats`,
-    );
+  /** `/v2/soccer/live-storylines` — AI narrative for a live match */
+  async getFootballLiveStorylines(matchId: string): Promise<Record<string, unknown>> {
+    return this.cachedGet("/v2/soccer/live-storylines", { match_id: matchId }, STATPAL_TTL.EVENTS);
   }
 
-  /** `/v2/soccer/teams/{id}` */
+  // ── Football V2 — Lineups ─────────────────────────────────────────────────
+
+  /**
+   * `/v2/soccer/team-lineups` — Starting XI + bench + formation.
+   * Set at kickoff; stable for the rest of the match (only subs change).
+   */
+  async getFootballLineups(matchId: string): Promise<Record<string, unknown>> {
+    return this.cachedGet("/v2/soccer/team-lineups", { match_id: matchId }, STATPAL_TTL.LINEUPS);
+  }
+
+  /** `/v2/soccer/injuries-suspensions` — pre-match injury/suspension report */
+  async getFootballInjuriesSuspensions(matchId: string): Promise<Record<string, unknown>> {
+    return this.cachedGet("/v2/soccer/injuries-suspensions", { match_id: matchId }, STATPAL_TTL.LINEUPS);
+  }
+
+  // ── Football V2 — H2H ─────────────────────────────────────────────────────
+
+  /**
+   * `/v2/soccer/head-to-head` — Historical head-to-head record.
+   * Fully static once populated; 1-hour TTL.
+   */
+  async getFootballHeadToHead(team1Id: string, team2Id: string): Promise<Record<string, unknown>> {
+    return this.cachedGet("/v2/soccer/head-to-head", { team1_id: team1Id, team2_id: team2Id }, STATPAL_TTL.H2H);
+  }
+
+  // ── Football V2 — Team Stats ──────────────────────────────────────────────
+
+  /** `/v2/soccer/teams/{id}` — Team profile + season stats */
   async getFootballTeam(teamId: string): Promise<Record<string, unknown>> {
-    return this.get(`/v2/soccer/teams/${encodeURIComponent(teamId)}`);
+    return this.cachedGet(`/v2/soccer/teams/${encodeURIComponent(teamId)}`, {}, STATPAL_TTL.TEAM_STATS);
   }
 
-  /** `/v2/soccer/players/{id}` */
-  async getFootballPlayer(
-    playerId: string,
-  ): Promise<Record<string, unknown>> {
-    return this.get(`/v2/soccer/players/${encodeURIComponent(playerId)}`);
+  /** `/v2/soccer/leagues/{id}/stats` — League-wide team stats */
+  async getFootballLeagueStats(leagueId: string): Promise<Record<string, unknown>> {
+    return this.cachedGet(`/v2/soccer/leagues/${encodeURIComponent(leagueId)}/stats`, {}, STATPAL_TTL.TEAM_STATS);
+  }
+
+  // ── Football V2 — Player Stats ────────────────────────────────────────────
+
+  /** `/v2/soccer/players/{id}` — Player profile + season stats */
+  async getFootballPlayer(playerId: string): Promise<Record<string, unknown>> {
+    return this.cachedGet(`/v2/soccer/players/${encodeURIComponent(playerId)}`, {}, STATPAL_TTL.PLAYER_STATS);
   }
 
   /** `/v2/soccer/coaches/{id}` */
   async getFootballCoach(coachId: string): Promise<Record<string, unknown>> {
-    return this.get(`/v2/soccer/coaches/${encodeURIComponent(coachId)}`);
+    return this.cachedGet(`/v2/soccer/coaches/${encodeURIComponent(coachId)}`, {}, STATPAL_TTL.PLAYER_STATS);
   }
 
-  /** `/v2/soccer/head-to-head` */
-  async getFootballHeadToHead(
-    team1Id: string,
-    team2Id: string,
-  ): Promise<Record<string, unknown>> {
-    return this.get("/v2/soccer/head-to-head", {
-      team1_id: team1Id,
-      team2_id: team2Id,
-    });
+  // ── Football V2 — Standings ───────────────────────────────────────────────
+
+  /** `/v2/soccer/leagues/{id}/standings` — League table */
+  async getFootballStandings(leagueId: string): Promise<Record<string, unknown>> {
+    return this.cachedGet(`/v2/soccer/leagues/${encodeURIComponent(leagueId)}/standings`, {}, STATPAL_TTL.STANDINGS);
   }
 
-  /** `/v2/soccer/injuries-suspensions` — requires match_id param */
-  async getFootballInjuriesSuspensions(
-    matchId: string,
-  ): Promise<Record<string, unknown>> {
-    return this.get("/v2/soccer/injuries-suspensions", {
-      match_id: matchId,
-    });
+  // ── Football V2 — Other ───────────────────────────────────────────────────
+
+  /** `/v2/soccer/predictions` */
+  async getFootballPredictions(matchId: string): Promise<Record<string, unknown>> {
+    return this.cachedGet("/v2/soccer/predictions", { match_id: matchId }, STATPAL_TTL.PREMATCH);
   }
 
-  /** `/v2/soccer/weather-forecast` — requires match_id param */
-  async getFootballWeatherForecast(
-    matchId: string,
-  ): Promise<Record<string, unknown>> {
-    return this.get("/v2/soccer/weather-forecast", { match_id: matchId });
+  /** `/v2/soccer/weather-forecast` */
+  async getFootballWeatherForecast(matchId: string): Promise<Record<string, unknown>> {
+    return this.cachedGet("/v2/soccer/weather-forecast", { match_id: matchId }, STATPAL_TTL.PREMATCH);
   }
 
-  /** `/v2/soccer/predictions` — requires match_id param */
-  async getFootballPredictions(
-    matchId: string,
-  ): Promise<Record<string, unknown>> {
-    return this.get("/v2/soccer/predictions", { match_id: matchId });
+  // ── Cache-aware fetch ─────────────────────────────────────────────────────
+
+  /**
+   * Fetch with Redis (or in-memory) caching.
+   * Cache key: `statpal:{path}:{sorted-params-json}`
+   */
+  async cachedGet(
+    path: string,
+    params: Record<string, string | number | undefined> = {},
+    ttlSeconds: number,
+  ): Promise<any> {
+    if (!this.config.apiKey) {
+      throw new Error(`StatpalClient: apiKey not set (path=${path})`);
+    }
+
+    // Build a stable cache key from path + sorted params (excluding access_key)
+    const paramStr = Object.entries(params)
+      .filter(([, v]) => v != null && v !== "")
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([k, v]) => `${k}=${v}`)
+      .join("&");
+    const cacheKey = `statpal:${path}${paramStr ? `:${paramStr}` : ""}`;
+
+    // Cache hit?
+    const cached = await statpalCache.get(cacheKey);
+    if (cached) {
+      try {
+        return JSON.parse(cached);
+      } catch {
+        // corrupted entry — fall through to fetch
+      }
+    }
+
+    // Cache miss — fetch from API
+    const data = await this.rawGet(path, params);
+
+    // Store in cache (don't await — fire-and-forget)
+    statpalCache.set(cacheKey, JSON.stringify(data), ttlSeconds).catch(() => {});
+
+    return data;
   }
 
-  /** `/v2/soccer/live-storylines` — requires match_id param */
-  async getFootballLiveStorylines(
-    matchId: string,
-  ): Promise<Record<string, unknown>> {
-    return this.get("/v2/soccer/live-storylines", { match_id: matchId });
-  }
-
-  /** `/v2/soccer/team-lineups` — requires match_id param */
-  async getFootballTeamLineups(
-    matchId: string,
-  ): Promise<Record<string, unknown>> {
-    return this.get("/v2/soccer/team-lineups", { match_id: matchId });
-  }
-
-  // ── Private ───────────────────────────────────────────────────────────────
-
-  private async get(
+  /** Bypass cache — direct API call. Use for one-off debug checks. */
+  async rawGet(
     path: string,
     params?: Record<string, string | number | undefined>,
   ): Promise<any> {
@@ -398,10 +416,17 @@ export class StatpalClient {
     }
     return resp.json();
   }
+
+  /** @deprecated Use rawGet() for uncached calls. */
+  private async get(
+    path: string,
+    params?: Record<string, string | number | undefined>,
+  ): Promise<any> {
+    return this.rawGet(path, params);
+  }
 }
 
-// ── Singleton ────────────────────────────────────────────────────────────────
-// Lazily initialised so the module can be imported before env-vars are set.
+// ── Singleton ─────────────────────────────────────────────────────────────────
 
 let _instance: StatpalClient | null = null;
 
@@ -415,16 +440,40 @@ export function getStatpalClient(): StatpalClient {
   return _instance;
 }
 
-/** Default singleton export — prefer named `getStatpalClient()` in tests. */
+/** Default singleton export. */
 export const statpal = {
   get client(): StatpalClient {
     return getStatpalClient();
   },
-  /** Convenience passthrough for the most common call. */
-  getPrematchOdds: (leagueId: string) =>
-    getStatpalClient().getFootballPrematchOdds(leagueId),
-  getLiveMarkets: () => getStatpalClient().getFootballLiveMarkets(),
-  getLiveMatchStates: () => getStatpalClient().getFootballLiveMatchStates(),
+  // ── Fixtures ──
+  getFootballDaily:        (offset?: number)                  => getStatpalClient().getFootballDaily(offset),
+  getFootballLeagueMatches:(leagueId: string)                 => getStatpalClient().getFootballLeagueMatches(leagueId),
+  // ── Live Stats ──
+  getFootballLive:         ()                                  => getStatpalClient().getFootballLive(),
+  getFootballOddsLive:     ()                                  => getStatpalClient().getFootballOddsLive(),
+  // ── Events + Live Stats per match ──
+  getFootballMatchStats:   (matchId: string)                  => getStatpalClient().getFootballMatchStats(matchId),
+  getFootballLiveStorylines:(matchId: string)                 => getStatpalClient().getFootballLiveStorylines(matchId),
+  // ── Lineups ──
+  getFootballLineups:      (matchId: string)                  => getStatpalClient().getFootballLineups(matchId),
+  getFootballInjuries:     (matchId: string)                  => getStatpalClient().getFootballInjuriesSuspensions(matchId),
+  // ── H2H ──
+  getFootballH2H:          (team1Id: string, team2Id: string) => getStatpalClient().getFootballHeadToHead(team1Id, team2Id),
+  // ── Team Stats ──
+  getFootballTeam:         (teamId: string)                   => getStatpalClient().getFootballTeam(teamId),
+  getFootballLeagueStats:  (leagueId: string)                 => getStatpalClient().getFootballLeagueStats(leagueId),
+  // ── Player Stats ──
+  getFootballPlayer:       (playerId: string)                 => getStatpalClient().getFootballPlayer(playerId),
+  getFootballCoach:        (coachId: string)                  => getStatpalClient().getFootballCoach(coachId),
+  // ── Standings ──
+  getFootballStandings:    (leagueId: string)                 => getStatpalClient().getFootballStandings(leagueId),
+  getFootballLeagues:      ()                                  => getStatpalClient().getFootballLeagues(),
+  // ── Prematch ──
+  getPrematchOdds:         (leagueId: string)                 => getStatpalClient().getFootballPrematchOdds(leagueId),
+  getFootballPredictions:  (matchId: string)                  => getStatpalClient().getFootballPredictions(matchId),
+  // ── Legacy passthrough ──
+  getLiveMarkets:      () => getStatpalClient().getFootballLiveMarkets(),
+  getLiveMatchStates:  () => getStatpalClient().getFootballLiveMatchStates(),
 };
 
 export default statpal;

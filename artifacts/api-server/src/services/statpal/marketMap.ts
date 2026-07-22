@@ -158,7 +158,7 @@ export const STATPAL_MARKET_NAME_MAP: Record<string, string> = {
   "total cartoes": "cards",
 
   // ── Tênis ─────────────────────────────────────────────────────────────────
-  "match winner": "match_winner",
+  // "match winner" already mapped above (football section)
   "set winner": "set_winner",
   "total sets": "total_sets",
   "set handicap": "set_handicap",
