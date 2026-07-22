@@ -841,6 +841,17 @@ function mapStatpalFootballStatus(
   match: SAPIMatchV2,
 ): { description: string; code?: number; round?: number } {
   const rawStatus = String(match.status ?? "").trim();
+
+  // ── Guard: "HH:MM" is a scheduled kickoff time, NOT a match minute. ────────
+  // parseInt("18:00", 10) returns 18 (stops at ':'), which would incorrectly
+  // classify a pre-match fixture as "1st half 18'" and make it pass the live
+  // filter with goals "?" → score 0-0 displayed to the user.
+  // Reject any status that looks like a clock time before trying parseInt.
+  if (/^\d{1,2}:\d{2}(:\d{2})?$/.test(rawStatus)) {
+    // Return with no code so isFootballV2LiveStatus() treats it as not-live.
+    return { description: `Scheduled ${rawStatus}` };
+  }
+
   const minute = parseInt(rawStatus, 10);
   const extraMinute = parseInt(String(match.inj_minute ?? ""), 10);
   const round = Number.isFinite(minute)
