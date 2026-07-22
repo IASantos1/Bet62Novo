@@ -19406,138 +19406,128 @@ async function buildVolleyballUpcoming(): Promise<UpcomingMatch[]> {
 
 async function buildBaseballUpcoming(): Promise<UpcomingMatch[]> {
   try {
-    const events = await getUpcomingEventsV2("baseball", 7);
-    if (events.length > 0) {
-      const seen = new Set<string>();
-      const filtered: SAPIV2Event[] = [];
-
-      for (const ev of events) {
-        const home = v2TeamName(ev.homeTeam);
-        const away = v2TeamName(ev.awayTeam);
-        if (home === "Unknown" || away === "Unknown") continue;
-        const key = `${home}|${away}`;
-        if (seen.has(key)) continue;
-        seen.add(key);
-        filtered.push(ev);
-        if (filtered.length >= 20) break;
-      }
-
-      const oddsResults = await Promise.all(
-        filtered.map((ev) =>
-          getPreMatchOddsV2("baseball", ev.id).catch(() => null),
-        ),
-      );
-
-      const results: UpcomingMatch[] = [];
-      for (let i = 0; i < filtered.length; i++) {
-        const ev = filtered[i]!;
-        const home = v2TeamName(ev.homeTeam);
-        const away = v2TeamName(ev.awayTeam);
-        const { date, time } = v2EventDateTime(ev);
-        const realOdds = oddsResults[i] ?? null;
-        const sr = seededRng(`baseball:${home}:${away}`);
-        const pHome = mc(0.5 + (sr(1) - 0.5) * 0.12, 0.25, 0.75);
-        const [compH, compA] = probsToDecimalOdds([pHome, 1 - pHome], 1.065);
-        const homeOdds = realOdds && realOdds.home > 0 ? realOdds.home : compH!;
-        const awayOdds = realOdds && realOdds.away > 0 ? realOdds.away : compA!;
-
-        results.push({
-          id: `mlb-v2-${ev.id}`,
-          home,
-          away,
-          homeTeamId:
-            typeof ev.homeTeam === "object" && ev.homeTeam?.id != null
-              ? String(ev.homeTeam.id)
-              : ev.homeTeamId != null
-                ? String(ev.homeTeamId)
-                : undefined,
-          awayTeamId:
-            typeof ev.awayTeam === "object" && ev.awayTeam?.id != null
-              ? String(ev.awayTeam.id)
-              : ev.awayTeamId != null
-                ? String(ev.awayTeamId)
-                : undefined,
-          league: v2TournName(ev.tournament),
-          country: "usa",
-          date,
-          time,
-          sport: "baseball",
-          hasRealOdds: !!(realOdds && realOdds.home > 0),
-          odds: { home: homeOdds, draw: 0, away: awayOdds },
-          markets: makeMLBMarketsFromTeams(home, away, homeOdds, awayOdds),
-        });
-      }
-      if (results.length > 0) return results;
-    }
-
-    // Fallback: build from Statpal MLB schedule + MLB odds (active when SportsAPI V2 returns nothing)
-    const [scheduleData, mlbOdds] = await Promise.all([
-      getMLBSchedule().catch(() => null),
+    // Primary: Statpal MLB season-schedule + odds (1 request each, reliable)
+    const [schedule, oddsEntries] = await Promise.all([
+      getMLBSchedule().catch(() => ({ upcomingMatches: [] as MLBScheduleMatch[], recentMatches: [] as MLBScheduleMatch[], league: "MLB", season: "" })),
       getMLBOdds().catch(() => [] as MLBOddsEntry[]),
     ]);
-    const upcoming = scheduleData?.upcomingMatches ?? [];
-    if (upcoming.length === 0) return [];
 
-    // Build a fast lookup by normalised team pair → odds
-    const normName = (n: string) => n.toLowerCase().replace(/[^a-z0-9]/g, "");
+    const normTeam = (n: string) => n.toLowerCase().replace(/[^a-z0-9]/g, "");
+    // Build odds map: normalised "home|away" → odds entry
     const oddsMap = new Map<string, MLBOddsEntry>();
-    for (const o of mlbOdds) {
-      const h = normName(o.homeTeam.name);
-      const a = normName(o.awayTeam.name);
+    for (const o of oddsEntries) {
+      const h = normTeam(o.homeTeam.name);
+      const a = normTeam(o.awayTeam.name);
       oddsMap.set(`${h}|${a}`, o);
-      oddsMap.set(`${a}|${h}`, { ...o, homeTeam: o.awayTeam, awayTeam: o.homeTeam, homeOdds: o.awayOdds, awayOdds: o.homeOdds });
+      // Also store reversed key to handle neutral-venue or swapped home/away
+      oddsMap.set(`${a}|${h}`, {
+        ...o,
+        homeTeam: o.awayTeam,
+        awayTeam: o.homeTeam,
+        homeOdds: o.awayOdds,
+        awayOdds: o.homeOdds,
+        markets: makeMLBMarketsFromTeams(o.awayTeam.name, o.homeTeam.name, o.awayOdds, o.homeOdds),
+      });
     }
 
-    // Determine date window: keep games within 7 days from now
-    const nowMs = Date.now();
-    const cutoffMs = nowMs + 7 * 86_400_000;
-    const mlbDateToMs = (d: string) => {
-      // d is "DD.MM.YYYY"
-      const [day, mo, yr] = d.split(".");
-      return new Date(`${yr}-${mo}-${day}`).getTime();
-    };
+    const now = Date.now();
+    const seen = new Set<string>();
+    const results: UpcomingMatch[] = [];
 
-    const seen2 = new Set<string>();
-    const results2: UpcomingMatch[] = [];
-    for (const g of upcoming) {
-      if (!g.home || !g.away) continue;
-      const matchMs = mlbDateToMs(g.date);
-      if (Number.isNaN(matchMs) || matchMs < nowMs - 3_600_000 || matchMs > cutoffMs) continue;
-      const key = `${normName(g.home)}|${normName(g.away)}`;
-      if (seen2.has(key)) continue;
-      seen2.add(key);
+    for (const m of schedule.upcomingMatches) {
+      if (!m.home || !m.away) continue;
+      const key = `${m.home}|${m.away}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
 
-      const o = oddsMap.get(key);
-      let homeOdds: number, awayOdds: number, hasRealOdds: boolean;
-      if (o && o.homeOdds > 0 && o.awayOdds > 0) {
-        homeOdds = o.homeOdds;
-        awayOdds = o.awayOdds;
-        hasRealOdds = true;
-      } else {
-        const sr = seededRng(`baseball:${g.home}:${g.away}`);
-        const pHome = mc(0.5 + (sr(1) - 0.5) * 0.12, 0.25, 0.75);
-        const [cH, cA] = probsToDecimalOdds([pHome, 1 - pHome], 1.065);
-        homeOdds = cH!;
-        awayOdds = cA!;
-        hasRealOdds = false;
-      }
+      // Parse "DD.MM.YYYY" date and "HH:MM" time into a start timestamp
+      const [d, mo, y] = (m.date ?? "").split(".");
+      const [hh, mm] = (m.time ?? "00:00").split(":");
+      const startMs = new Date(
+        Number(y), Number(mo) - 1, Number(d),
+        Number(hh ?? 0), Number(mm ?? 0),
+      ).getTime();
+      if (Number.isNaN(startMs) || startMs < now - 5 * 60_000) continue;
+      if (startMs > now + 7 * 86_400_000) continue;
 
-      results2.push({
-        id: `mlb-sched-${g.id}`,
-        home: g.home,
-        away: g.away,
+      const realOdds = oddsMap.get(`${normTeam(m.home)}|${normTeam(m.away)}`);
+      const sr = seededRng(`baseball:${m.home}:${m.away}`);
+      const pHome = mc(0.5 + (sr(1) - 0.5) * 0.12, 0.25, 0.75);
+      const [compH, compA] = probsToDecimalOdds([pHome, 1 - pHome], 1.065);
+      const homeOdds = realOdds && realOdds.homeOdds > 1 ? realOdds.homeOdds : compH!;
+      const awayOdds = realOdds && realOdds.awayOdds > 1 ? realOdds.awayOdds : compA!;
+
+      results.push({
+        id: `mlb-sched-${m.id}`,
+        home: m.home,
+        away: m.away,
         league: "USA: MLB",
         country: "usa",
-        date: g.date,
-        time: g.time || "00:00",
+        date: m.date,
+        time: m.time,
         sport: "baseball",
-        hasRealOdds,
+        hasRealOdds: !!realOdds,
         odds: { home: homeOdds, draw: 0, away: awayOdds },
-        markets: makeMLBMarketsFromTeams(g.home, g.away, homeOdds, awayOdds),
-      });
-      if (results2.length >= 20) break;
+        markets: realOdds?.markets ?? makeMLBMarketsFromTeams(m.home, m.away, homeOdds, awayOdds),
+      } as UpcomingMatch);
+
+      if (results.length >= 20) break;
     }
-    return results2;
+
+    if (results.length > 0) return results;
+
+    // Fallback: SportsAPI V2 schedule (kept for when Statpal is unavailable)
+    const events = await getUpcomingEventsV2("baseball", 7);
+    const seen2 = new Set<string>();
+    const filtered: SAPIV2Event[] = [];
+    for (const ev of events) {
+      const home = v2TeamName(ev.homeTeam);
+      const away = v2TeamName(ev.awayTeam);
+      if (home === "Unknown" || away === "Unknown") continue;
+      const k = `${home}|${away}`;
+      if (seen2.has(k)) continue;
+      seen2.add(k);
+      filtered.push(ev);
+      if (filtered.length >= 20) break;
+    }
+    const oddsResults = await Promise.all(
+      filtered.map((ev) => getPreMatchOddsV2("baseball", ev.id).catch(() => null)),
+    );
+    const v2Results: UpcomingMatch[] = [];
+    for (let i = 0; i < filtered.length; i++) {
+      const ev = filtered[i]!;
+      const home = v2TeamName(ev.homeTeam);
+      const away = v2TeamName(ev.awayTeam);
+      const { date, time } = v2EventDateTime(ev);
+      const realOdds2 = oddsResults[i] ?? null;
+      const sr = seededRng(`baseball:${home}:${away}`);
+      const pHome = mc(0.5 + (sr(1) - 0.5) * 0.12, 0.25, 0.75);
+      const [compH, compA] = probsToDecimalOdds([pHome, 1 - pHome], 1.065);
+      const homeOdds = realOdds2 && realOdds2.home > 0 ? realOdds2.home : compH!;
+      const awayOdds = realOdds2 && realOdds2.away > 0 ? realOdds2.away : compA!;
+      v2Results.push({
+        id: `mlb-v2-${ev.id}`,
+        home,
+        away,
+        homeTeamId:
+          typeof ev.homeTeam === "object" && ev.homeTeam?.id != null
+            ? String(ev.homeTeam.id)
+            : ev.homeTeamId != null ? String(ev.homeTeamId) : undefined,
+        awayTeamId:
+          typeof ev.awayTeam === "object" && ev.awayTeam?.id != null
+            ? String(ev.awayTeam.id)
+            : ev.awayTeamId != null ? String(ev.awayTeamId) : undefined,
+        league: v2TournName(ev.tournament),
+        country: "usa",
+        date,
+        time,
+        sport: "baseball",
+        hasRealOdds: !!(realOdds2 && realOdds2.home > 0),
+        odds: { home: homeOdds, draw: 0, away: awayOdds },
+        markets: makeMLBMarketsFromTeams(home, away, homeOdds, awayOdds),
+      });
+    }
+    return v2Results;
   } catch {
     return [];
   }
