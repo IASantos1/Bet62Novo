@@ -659,15 +659,65 @@ type StatpalLeagueFeedEnvelope = {
   league?: SAPILeagueV2 | SAPILeagueV2[];
 };
 
+/**
+ * Extracts the goal count from a raw team object returned by any Statpal
+ * football endpoint.  Different endpoints/subscriptions use different field
+ * names for the same datum, so we try all known variants in priority order:
+ *
+ *   goals       — standard SportsAPI Pro / Statpal v2 field
+ *   score       — alternate English name used by some Statpal plans
+ *   pontuação   — Portuguese (with accent, UTF-8)
+ *   pontuacao   — Portuguese (without accent, ASCII-safe)
+ *   gols        — Portuguese word for "goals"
+ *   goal        — singular variant
+ *
+ * If none are found the match-level `placar` / `score` / `resultado` string
+ * ("2:1") is split and the correct half is returned.
+ */
+function extractStatpalTeamGoals(
+  team: Record<string, unknown>,
+  matchRaw: Record<string, unknown>,
+  side: "home" | "away",
+): string {
+  const direct =
+    team["goals"] ??
+    team["score"] ??
+    team["pontuação"] ??
+    team["pontuacao"] ??
+    team["gols"] ??
+    team["goal"];
+  if (direct !== undefined && direct !== null && String(direct).trim() !== "") {
+    return String(direct);
+  }
+  // Fall back to a match-level "placar"/"score" string like "2:1"
+  const placar = String(
+    matchRaw["placar"] ?? matchRaw["score"] ?? matchRaw["resultado"] ?? "",
+  );
+  if (placar && /\d/.test(placar)) {
+    const sep = placar.includes(":") ? ":" : placar.includes("-") ? "-" : null;
+    if (sep) {
+      const parts = placar.split(sep);
+      return side === "home"
+        ? (parts[0]?.trim() ?? "0")
+        : (parts[1]?.trim() ?? "0");
+    }
+  }
+  return "0";
+}
+
 function normalizeStatpalMatch(raw: Partial<SAPIMatchV2>): SAPIMatchV2 {
+  const rawMap = raw as Record<string, unknown>;
   const home =
     raw.home && typeof raw.home === "object"
-      ? raw.home
-      : { id: "", name: "Unknown", goals: "0" };
+      ? (raw.home as Record<string, unknown>)
+      : ({ id: "", name: "Unknown", goals: "0" } as Record<string, unknown>);
   const away =
     raw.away && typeof raw.away === "object"
-      ? raw.away
-      : { id: "", name: "Unknown", goals: "0" };
+      ? (raw.away as Record<string, unknown>)
+      : ({ id: "", name: "Unknown", goals: "0" } as Record<string, unknown>);
+
+  const homeGoals = extractStatpalTeamGoals(home, rawMap, "home");
+  const awayGoals = extractStatpalTeamGoals(away, rawMap, "away");
 
   return {
     main_id: String(raw.main_id ?? ""),
@@ -681,16 +731,16 @@ function normalizeStatpalMatch(raw: Partial<SAPIMatchV2>): SAPIMatchV2 {
     inj_minute: String(raw.inj_minute ?? ""),
     venue: raw.venue,
     home: {
-      id: String(home.id ?? ""),
-      name: String(home.name ?? "Unknown"),
-      goals: String(home.goals ?? "0"),
-      win_on_agg: home.win_on_agg,
+      id: String(home["id"] ?? ""),
+      name: String(home["name"] ?? "Unknown"),
+      goals: homeGoals,
+      win_on_agg: home["win_on_agg"] as string | undefined,
     },
     away: {
-      id: String(away.id ?? ""),
-      name: String(away.name ?? "Unknown"),
-      goals: String(away.goals ?? "0"),
-      win_on_agg: away.win_on_agg,
+      id: String(away["id"] ?? ""),
+      name: String(away["name"] ?? "Unknown"),
+      goals: awayGoals,
+      win_on_agg: away["win_on_agg"] as string | undefined,
     },
     events: raw.events ?? null,
     ht: raw.ht,
@@ -1024,8 +1074,31 @@ async function fetchStatpalFootballLiveV2(): Promise<{
       const events = leagues.flatMap((league) =>
         statpalList(league.match).map((match) => statpalMatchToV2Event(league, match)),
       );
+      // Diagnostic: log the raw home/away object from the first match of the first
+      // league so we can see which field names the API actually uses for the score.
+      const firstLeague = leagues[0];
+      const firstMatch = firstLeague ? statpalList(firstLeague.match)[0] : undefined;
+      const firstMatchRaw = firstLeague
+        ? statpalList((firstLeague as unknown as Record<string, unknown>)["match"] as unknown)[0]
+        : undefined;
       logger.info(
-        { topKeys, leagueCount: leagues.length, eventCount: events.length, source: "matches/live" },
+        {
+          topKeys,
+          leagueCount: leagues.length,
+          eventCount: events.length,
+          source: "matches/live",
+          // Show what the first match's home/away objects look like so we can
+          // identify the correct field name for the score.
+          firstMatchHome: firstMatchRaw
+            ? (firstMatchRaw as Record<string, unknown>)["home"]
+            : undefined,
+          firstMatchAway: firstMatchRaw
+            ? (firstMatchRaw as Record<string, unknown>)["away"]
+            : undefined,
+          firstMatchNormalized: firstMatch
+            ? { home: firstMatch.home, away: firstMatch.away, status: firstMatch.status }
+            : undefined,
+        },
         "[statpal-football-live] raw response shape",
       );
       if (events.length > 0) {
