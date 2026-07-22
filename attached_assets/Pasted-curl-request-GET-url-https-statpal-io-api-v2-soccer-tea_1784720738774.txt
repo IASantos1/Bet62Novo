@@ -1,0 +1,280 @@
+curl --request GET \
+  --url 'https://statpal.io/api/v2/soccer/team-lineups?access_key=b5b07a3f-b019-4a18-8969-6045169feda9' \
+  --header 'Accept: application/json'
+{
+  "main_id": "2026061822389",
+  "status": "projected",
+  "updated": "06.17.2026 12:31:15",
+  "updated_ts": 1781699475314,
+  "home": {
+    "team_id": "2339730",
+    "team_name": "Canada",
+    "coach": {
+      "name": "Jesse Marsch",
+      "id": "3381958"
+    },
+    "team_formation": "4-4-2",
+    "starting_xi": [
+      {
+        "id": "2504652",
+        "name": "Maxime Crepeau",
+        "number": "16",
+        "position": "goalkeeper"
+      },
+      {
+        "id": "2620857",
+        "name": "Derek Cornelius",
+        "number": "13",
+        "position": "defender"
+      },
+      {
+        "id": "3093632",
+        "name": "Luc De Fougerolles",
+        "number": "4",
+        "position": "defender"
+      },
+      {
+        "id": "2942515",
+        "name": "Alistair Johnston",
+        "number": "2",
+        "position": "defender"
+      },
+      {
+        "id": "2769389",
+        "name": "Richie Laryea",
+        "number": "22",
+        "position": "defender"
+      },
+      {
+        "id": "2848086",
+        "name": "Tajon Buchanan",
+        "number": "17",
+        "position": "midfielder"
+      },
+      {
+        "id": "2737304",
+        "name": "Stephen Eustaquio",
+        "number": "7",
+        "position": "midfielder"
+      },
+      {
+        "id": "3093520",
+        "name": "Ismael Kone",
+        "number": "8",
+        "position": "midfielder"
+      },
+      {
+        "id": "2813361",
+        "name": "Jonathan David",
+        "number": "10",
+        "position": "attacker"
+      },
+      {
+        "id": "2786251",
+        "name": "Liam Millar",
+        "number": "11",
+        "position": "attacker"
+      },
+      {
+        "id": "3143877",
+        "name": "Tanitoluwa Oluwaseyi",
+        "number": "12",
+        "position": "attacker"
+      }
+    ],
+    "bench": [
+      {
+        "id": "3002838",
+        "name": "Owen Goodman",
+        "number": "18",
+        "position": "goalkeeper"
+      },
+      {
+        "id": "2786071",
+        "name": "Alfie Jones",
+        "number": "3",
+        "position": "defender"
+      },
+      {
+        "id": "2778577",
+        "name": "Joel Waterman",
+        "number": "5",
+        "position": "defender"
+      },
+      {
+        "id": "3157051",
+        "name": "Ali Ahmed",
+        "number": "20",
+        "position": "midfielder"
+      },
+      {
+        "id": "2830832",
+        "name": "Mathieu Choiniere",
+        "number": "6",
+        "position": "midfielder"
+      },
+      {
+        "id": "3032309",
+        "name": "Promise David",
+        "number": "24",
+        "position": "attacker"
+      },
+      {
+        "id": "2674550",
+        "name": "Cyle Larin",
+        "number": "9",
+        "position": "attacker"
+      }
+    ],
+    "sidelined": [
+      {
+        "id": "3224437",
+        "name": "Moise Bombito",
+        "number": "15",
+        "position": "defender",
+        "status": "doubtful",
+        "reason": "injury"
+      },
+      {
+        "id": "2773229",
+        "name": "Alphonso Davies",
+        "number": "19",
+        "position": "defender",
+        "status": "out",
+        "reason": "injury"
+      },
+      {
+        "id": "2929138",
+        "name": "Jacob Shaffelburg",
+        "number": "14",
+        "position": "attacker",
+        "status": "out",
+        "reason": null
+      }
+    ],
+    "confidence": 45
+  },
+  "away": {
+    "team_id": "2346325",
+    "team_name": "Qatar",
+    "coach": {
+      "name": "Julen Lopetegui",
+      "id": "2529722"
+    },
+    "team_formation": "4-3-3",
+    "starting_xi": [
+      {
+        "id": "2923575",
+        "name": "Mahmoud Abunada",
+        "number": "1",
+        "position": "goalkeeper"
+      },
+      {
+        "id": "2797538",
+        "name": "Homam Al Amin",
+        "number": "14",
+        "position": "defender"
+      },
+      {
+        "id": "2541016",
+        "name": "Miguel Pedro",
+        "number": "2",
+        "position": "defender"
+      },
+      {
+        "id": "2488517",
+        "name": "Boualem Khoukhi",
+        "number": "16",
+        "position": "defender"
+      },
+      {
+        "id": "2979490",
+        "name": "Jassem Gaber",
+        "number": "5",
+        "position": "defender"
+      },
+      {
+        "id": "3459575",
+        "name": "Issa Laye",
+        "number": "4",
+        "position": "midfielder"
+      },
+      {
+        "id": "2599375",
+        "name": "Ahmed Fathi",
+        "number": "20",
+        "position": "midfielder"
+      },
+      {
+        "id": "2443346",
+        "name": "Abdulaziz Hatem",
+        "number": "6",
+        "position": "midfielder"
+      },
+      {
+        "id": "2675572",
+        "name": "Akram Afif",
+        "number": "11",
+        "position": "attacker"
+      },
+      {
+        "id": "2589428",
+        "name": "Junior Edmilson",
+        "number": "8",
+        "position": "attacker"
+      },
+      {
+        "id": "3432836",
+        "name": "Yusuf Abdurisag",
+        "number": "15",
+        "position": "attacker"
+      }
+    ],
+    "bench": [
+      {
+        "id": "2838938",
+        "name": "Meshaal Barsham",
+        "number": "22",
+        "position": "goalkeeper"
+      },
+      {
+        "id": "2675582",
+        "name": "Omer Madibo Assim",
+        "number": "23",
+        "position": "defender"
+      },
+      {
+        "id": "3459578",
+        "name": "Ayoub Al Oui",
+        "number": "13",
+        "position": "defender"
+      },
+      {
+        "id": "2908020",
+        "name": "Ahmed Al Ganehi",
+        "number": "17",
+        "position": "midfielder"
+      },
+      {
+        "id": "2485356",
+        "name": "Karim Boudiaf",
+        "number": "12",
+        "position": "midfielder"
+      },
+      {
+        "id": "2657765",
+        "name": "Almoez Ali",
+        "number": "19",
+        "position": "attacker"
+      },
+      {
+        "id": "2617852",
+        "name": "Mohammed Muntari",
+        "number": "9",
+        "position": "attacker"
+      }
+    ],
+    "sidelined": [],
+    "confidence": 45
+  }
+}

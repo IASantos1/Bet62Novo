@@ -1,0 +1,85 @@
+curl --request GET \
+  --url 'https://statpal.io/api/v2/soccer/live-storylines?access_key=b5b07a3f-b019-4a18-8969-6045169feda9' \
+  --header 'Accept: application/json'
+{
+  "meta": {
+    "updated": "06.17.2026 23:21:58",
+    "updated_ts": 1781738518401,
+    "main_id": "2026061914762",
+    "fallback_ids": {
+      "fallback_id_1": "6163430",
+      "fallback_id_2": "6670855",
+      "fallback_id_3": "9323529"
+    },
+    "date": "19-06-2026",
+    "time": "00:00",
+    "home_team": {
+      "id": "2339454",
+      "name": "Sport Recife"
+    },
+    "away_team": {
+      "id": "2338974",
+      "name": "Atletico GO"
+    },
+    "league": {
+      "id": "2950",
+      "name": "Brazil: Serie B",
+      "is_cup": false
+    },
+    "country": {
+      "name": "brazil"
+    },
+    "venue": {
+      "name": "Estadio Adelmar da Costa Carvalho",
+      "city": "Recife",
+      "is_neutral_ground": false
+    }
+  },
+  "live_storylines": {
+    "match_context": [
+      {
+        "type": "insight",
+        "summary": "Sport Recife is focused on the fight for promotion to Serie A, with the upcoming match against São Bernardo being decisive in the league standings."
+      },
+      {
+        "type": "quote",
+        "quote": "This is the kind of fixture that can shape a promotion race, and both teams know exactly what is at stake.",
+        "speaker": "Match analyst",
+        "context": "Serie B promotion race preview",
+        "translated_from": "portuguese"
+      }
+    ],
+    "home": [
+      {
+        "type": "insight",
+        "summary": "Sport Recife will be without right-back Madson for the match against Atletico GO due to suspension after receiving his third yellow card. Augusto Pucci is expected to replace him in the starting lineup. This suspension affects the team's defensive options for the home fixture at Ilha do Retiro."
+      },
+      {
+        "type": "quote",
+        "quote": "A joy to be back home. I was able to see people who were part of my journey and are still here at the club. Whenever I am in Brazil, it is part of my vacation to come here.",
+        "speaker": "Joelinton, midfielder",
+        "context": "Statement during visit and training at Sport Recife's training center during vacation",
+        "translated_from": "portuguese"
+      }
+    ],
+    "away": [
+      {
+        "type": "insight",
+        "summary": "Atletico GO came from behind to draw 3-3 with CRB at their home stadium, Estádio Antônio Accioly, in the 13th round of the Série B. They were down 3-0 at halftime but scored three goals in the second half to equalize. Their next match is against Sport Recife at Ilha do Retiro in Recife."
+      },
+      {
+        "type": "quote",
+        "quote": "Atlético-GO is not in a bad moment. The team has lost only one of the last seven matches in Serie B.",
+        "speaker": "Souza Eduardo, manager of Atletico GO",
+        "context": "Team form and confidence — press conference",
+        "translated_from": "portuguese"
+      }
+    ],
+    "rivalry": {
+      "same_city": false,
+      "is_named_derby": false,
+      "derby_name": null,
+      "derby_name_localized": null
+    }
+  }
+}

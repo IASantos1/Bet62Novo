@@ -1,0 +1,271 @@
+Para Tênis, a melhor prática é criar um Settlement Engine separado, porque a lógica é baseada em sets e games, não em gols.
+
+A estrutura pode ser assim:
+
+Tennis Settlement Engine
+│
+├── Match Winner
+├── Set Winner
+├── Exact Sets
+├── Set Handicap
+├── Game Handicap
+├── Total Games
+├── Set Total Games
+├── Correct Score
+├── Tie-break
+├── Specials
+└── Combo Settlement
+1. Vencedor do Jogo
+
+Mercado
+
+Alina Charaeva
+Sinja Kraus
+
+Função
+
+settleMatchWinner()
+
+Lógica
+
+Se setsAlina > setsSinja
+
+↓
+
+Alina = WIN
+
+Sinja = LOSE
+2. Vencedor do 1º Set
+
+Função
+
+settleSetWinner(set=1)
+
+Lógica
+
+Set1
+
+6-4
+
+↓
+
+Alina WIN
+
+Sinja LOSE
+3. Resultado Exato em Sets
+
+Função
+
+settleExactSets()
+
+Exemplo
+
+Resultado
+
+2 x 0
+
+Liquidação
+
+Mercado	Resultado
+2-0	WIN
+2-1	LOSE
+1-2	LOSE
+0-2	LOSE
+4. Resultado Correto do 1º Set
+
+Função
+
+settleCorrectSetScore()
+
+Exemplo
+
+Resultado
+
+6-3
+
+Liquidação
+
+6-3
+
+WIN
+
+Todos os outros
+
+LOSE
+5. Handicap de Sets
+
+Função
+
+settleSetHandicap()
+
+Exemplo
+
+Handicap
+
+Alina -1.5
+
+Resultado
+
+2-0
+
+Após aplicar o handicap
+
+2-0
+
+↓
+
+0.5 x 0
+
+↓
+
+WIN
+
+Resultado
+
+2-1
+
+Após handicap
+
+0.5 x 1
+
+↓
+
+LOSE
+6. Handicap de Games
+
+Função
+
+settleGameHandicap()
+
+Exemplo
+
+Resultado
+
+6-3
+
+6-4
+
+Total
+
+12 x 7
+
+Handicap
+
+Alina -0.5
+
+Aplicando
+
+11.5 x 7
+
+↓
+
+WIN
+7. Total de Games
+
+Função
+
+settleTotalGames()
+
+Resultado
+
+6-4
+
+6-4
+
+=
+
+20 Games
+
+Mercado
+
+Over 19.5
+
+WIN
+
+Under 19.5
+
+LOSE
+8. Games do 1º Set
+
+Função
+
+settleSetTotalGames(set=1)
+
+Resultado
+
+7-5
+
+=
+
+12 Games
+
+Mercado
+
+Over 11
+
+WIN
+Estados retornados
+
+Todas as funções retornam apenas:
+
+WIN
+LOSE
+VOID
+HALF_WIN
+HALF_LOSE
+PENDING
+CANCELLED
+Estrutura recomendada
+Tennis Settlement
+
+├── Match
+│   ├── Match Winner
+│   ├── Exact Sets
+│   └── Match Handicap
+│
+├── Sets
+│   ├── Set Winner
+│   ├── Correct Set Score
+│   ├── Set Handicap
+│   ├── Set Totals
+│   └── Tie-break
+│
+├── Games
+│   ├── Total Games
+│   ├── Game Handicap
+│   ├── Player Games
+│   └── Odd/Even Games
+│
+├── Specials
+│   ├── First Break
+│   ├── Number of Breaks
+│   ├── Tie-break Yes/No
+│   └── Race to X Games
+│
+└── Combo Settlement
+Fluxo do Settlement
+Feed Oficial do Tênis
+        │
+        ▼
+Resultado Final
+        │
+        ▼
+Liquida todos os mercados individuais
+        │
+        ├── Match Winner
+        ├── Set Winner
+        ├── Exact Sets
+        ├── Correct Score
+        ├── Handicap Sets
+        ├── Handicap Games
+        ├── Total Games
+        ├── Set Totals
+        └── Especiais
+        │
+        ▼
+Grava WIN / LOSE / VOID / HALF_WIN / HALF_LOSE
+        │
+        ▼
+Liquida os bilhetes e combinações
+
+Essa arquitetura cobre os mercados que você mostrou e também facilita adicionar novos mercados de tênis (como tie-break, break point, race to games e especiais) sem alterar o núcleo do Settlement Engine.
