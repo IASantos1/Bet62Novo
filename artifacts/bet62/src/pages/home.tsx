@@ -3057,34 +3057,13 @@ const FOOTBALL_COUNTRIES: { name: string; flag: string; leagues: string[] }[] =
     { name: "Índia", flag: "🇮🇳", leagues: ["Indian Super League", "I-League"] },
   ];
 
+// Ordem dos desportos: Ténis → Hóquei → Basquete → Voleibol → Beisebol → outros
 const OTHER_SPORTS: {
   key: string;
   label: string;
   icon: string;
   leagues: string[];
 }[] = [
-  {
-    key: "basketball",
-    label: "Basquete",
-    icon: "🏀",
-    leagues: [
-      "National Basketball Association",
-      "EuroLeague",
-      "Liga ACB",
-      "Basketball Bundesliga",
-      "Lega Basket Serie A",
-      "LNB Pro A",
-      "Chinese Basketball Association",
-      "B.League",
-      "National Basketball League",
-      "Novo Basquete Brasil",
-      "VTB United League",
-      "Basketball Super League",
-      "Liga Nacional de Básquet",
-      "Korean Basketball League",
-      "Philippine Basketball Association",
-    ],
-  },
   {
     key: "tennis",
     label: "Ténis",
@@ -20900,14 +20879,15 @@ export default function Home({
                 );
 
                 // Sport grouping for display
+                // Ordem: Futebol → Ténis → Hóquei → Basquete → Voleibol → Beisebol → outros
                 const SPORT_GROUPS = [
                   { key: "wc2026", emoji: "🏆", label: "Copa do Mundo" },
                   { key: "football", emoji: "⚽", label: "Futebol" },
                   { key: "tennis", emoji: "🎾", label: "Ténis" },
+                  { key: "hockey", emoji: "🏒", label: "Hóquei no Gelo" },
                   { key: "basketball", emoji: "🏀", label: "Basquete" },
-                  { key: "hockey", emoji: "🏒", label: "Hóquei" },
-                  { key: "baseball", emoji: "⚾", label: "Beisebol" },
                   { key: "volleyball", emoji: "🏐", label: "Voleibol" },
+                  { key: "baseball", emoji: "⚾", label: "Beisebol" },
                   { key: "boxing", emoji: "🥊", label: "Boxing" },
                   { key: "cricket", emoji: "🏏", label: "Críquete" },
                   { key: "formula1", emoji: "🏎️", label: "Fórmula 1" },
@@ -23512,13 +23492,14 @@ export default function Home({
                       label: string;
                       icon: string;
                     }[] = [
+                      // Ordem Ao Vivo: Futebol → Ténis → Hóquei → Basquete → Voleibol → Beisebol → outros
                       { key: "all", label: "Todos", icon: "⚡" },
                       { key: "football", label: "Futebol", icon: "⚽" },
-                      { key: "basketball", label: "Basquete", icon: "🏀" },
                       { key: "tennis", label: "Ténis", icon: "🎾" },
                       { key: "hockey", label: "Hóquei", icon: "🏒" },
-                      { key: "baseball", label: "Basebol", icon: "⚾" },
+                      { key: "basketball", label: "Basquete", icon: "🏀" },
                       { key: "volleyball", label: "Voleibol", icon: "🏐" },
+                      { key: "baseball", label: "Beisebol", icon: "⚾" },
                       { key: "boxing", label: "Boxing", icon: "🥊" },
                       { key: "cricket", label: "Críquete", icon: "🏏" },
                       { key: "formula1", label: "Fórmula 1", icon: "🏎️" },

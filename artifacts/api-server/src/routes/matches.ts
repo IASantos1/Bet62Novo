@@ -6730,7 +6730,7 @@ type VolleyTournament = {
 };
 let volleyLiveCache: VolleyTournament[] | null = null;
 let volleyLiveFetchedAt = 0;
-const VOLLEY_LIVE_TTL = 30 * 1000;
+const VOLLEY_LIVE_TTL = 10 * 1000; // 10 s — voleibol ao vivo atualiza em cada set
 
 // SportsAPI Pro V2 live caches (30s each sport)
 let footballLiveV2Cache: SAPIV2Event[] | null = null;
@@ -17251,11 +17251,12 @@ async function rebuildUpcomingCache(): Promise<void> {
       ...upHandball,
       ...upFormula1,
     ]);
+    // Upcoming order: Futebol → Ténis → Hóquei → Basquete → Voleibol → Beisebol → outros
     _allUpcomingCache = [
       ...finalFootball,
       ...finalTennis,
-      ...finalBasketball,
       ...finalHockey,
+      ...finalBasketball,
       ...finalVolleyball,
       ...finalBaseball,
       ...upMma,
@@ -17300,6 +17301,7 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
     formula1Fresh,
     mlbLiveTournaments,
     nbaLiveTournaments,
+    volleyballLiveTournaments,
   ] = await Promise.all([
     getFootballLiveV2(),
     getBasketballLiveV2(),
@@ -17312,8 +17314,9 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
     getExtraLiveEventsV2("cricket"),
     getExtraLiveEventsV2("handball"),
     getFormula1Live(),
-    getMLBLive(),   // Statpal /v1/mlb/livescores — innings, hits, errors, outs
-    getNBALive(),   // Statpal /v1/nba/livescores — quarter-by-quarter scores
+    getMLBLive(),          // Statpal /v1/mlb/livescores — innings, hits, errors, outs
+    getNBALive(),          // Statpal /v1/nba/livescores — quarter-by-quarter scores
+    getVolleyballLive(),   // Statpal /v1/volleyball/livescores
   ]);
   // Populate V1 tennis league label cache from V2 today events (city → "ATP 250 · City")
   if (tennisTodayEvents && tennisTodayEvents.length > 0) {
@@ -17524,6 +17527,10 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
     ),
   ];
   const baseballLive = sportWithFallback("baseball", mergedBaseballLive);
+  const volleyballLiveItems = sportWithFallback(
+    "volleyball",
+    buildVolleyballLiveMatches(volleyballLiveTournaments),
+  );
   const tennisLive = sportWithFallback("tennis", tennisLivePart);
   const boxingLive = sportWithFallback(
     "boxing",
@@ -17539,15 +17546,17 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
   );
   const formula1Live = sportWithFallback("formula1", formula1Fresh);
 
+  // ── Live feed order: Futebol → Ténis → Hóquei → Basquete → Voleibol → Beisebol → outros
   // mergeStickyLive: re-injects any match seen in the last 5 min that the API
   // temporarily omitted. Fresh data always wins; injected matches use last-known
   // score/status so the match never disappears mid-game.
   const livePart = mergeStickyLive([
     ...footballLive,
-    ...basketballLive,
-    ...hockeyLive,
-    ...baseballLive,
     ...tennisLive,
+    ...hockeyLive,
+    ...basketballLive,
+    ...volleyballLiveItems,
+    ...baseballLive,
     ...boxingLive,
     ...cricketLive,
     ...handballLive,
