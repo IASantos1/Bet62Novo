@@ -4096,27 +4096,38 @@ function MomentumChart({
             const homeGoalMins = (lx.homeGoalMinutes as number[] | undefined) ?? [];
             const awayGoalMins = (lx.awayGoalMinutes as number[] | undefined) ?? [];
             if (homeGoalMins.length === 0 && awayGoalMins.length === 0) return null;
+            // Offset the minute label left/right depending on position to avoid chart edges
+            const labelOffset = (gx: number) => (gx > W - 22 ? -7 : 7);
+            const labelAnchor = (gx: number) => (gx > W - 22 ? "end" : "start");
             return (
               <>
                 {homeGoalMins.map((gMin, i) => {
                   const col = Math.min(getTargetCols(gMin), TOTAL_COLS - 1);
                   const gx = col * colW + colW / 2;
+                  const lx2 = labelOffset(gx);
+                  const la = labelAnchor(gx);
                   return (
                     <g key={`hg-${i}`}>
                       <line x1={gx} y1={4} x2={gx} y2={midY - 1}
                         stroke="#ef4444" strokeWidth="0.9" strokeDasharray="2,2" opacity="0.9" />
-                      <text x={gx} y={10} fontSize="9" textAnchor="middle">⚽</text>
+                      <text x={gx} y={11} fontSize="9" textAnchor="middle">⚽</text>
+                      <text x={gx + lx2} y={11} fontSize="6.5" fill="#fca5a5"
+                        textAnchor={la} fontFamily="monospace" fontWeight="bold">{gMin}'</text>
                     </g>
                   );
                 })}
                 {awayGoalMins.map((gMin, i) => {
                   const col = Math.min(getTargetCols(gMin), TOTAL_COLS - 1);
                   const gx = col * colW + colW / 2;
+                  const lx2 = labelOffset(gx);
+                  const la = labelAnchor(gx);
                   return (
                     <g key={`ag-${i}`}>
-                      <line x1={gx} y1={midY + 1} x2={gx} y2={H - 5}
+                      <line x1={gx} y1={midY + 1} x2={gx} y2={H - 6}
                         stroke="#a1a1aa" strokeWidth="0.9" strokeDasharray="2,2" opacity="0.9" />
                       <text x={gx} y={H - 3} fontSize="9" textAnchor="middle">⚽</text>
+                      <text x={gx + lx2} y={H - 3} fontSize="6.5" fill="#d4d4d8"
+                        textAnchor={la} fontFamily="monospace" fontWeight="bold">{gMin}'</text>
                     </g>
                   );
                 })}
@@ -16633,8 +16644,21 @@ export default function Home({
         const total = sets.reduce((sum, [sh, sa]) => sum + sh + sa, 0);
         return `${total} jogos`;
       }
+      // ses- can be either "exact sets result" (ses-2-0) OR "correct score of a set" (ses-6-3).
+      // Distinguish by value: game scores have at least one number > 3 (max sets in a match is 3).
+      if (/^ses-/.test(rawSel)) {
+        const sesM = rawSel.match(/^ses-(\d+)-(\d+)$/);
+        if (sesM && (Number(sesM[1]) > 3 || Number(sesM[2]) > 3)) {
+          // Game-score format (e.g. ses-6-3): show the most recent set's game score
+          // (the set being played when this bet was placed, or the last completed set)
+          const sv = sets.length > 0 ? sets[sets.length - 1] : undefined;
+          return sv ? `${sv[0]}-${sv[1]}` : "0-0";
+        }
+        // Exact sets-won result (e.g. ses-2-0, ses-0-2, ses-2-1, ses-1-2)
+        return `${h}-${a} sets`;
+      }
       // Total sets O/U, set handicap, exact sets result: show sets-won score
-      if (/^[ou]sets|^sh\d|^ses-|^es-/.test(rawSel)) {
+      if (/^[ou]sets|^sh\d|^es-/.test(rawSel)) {
         return `${h}-${a} sets`;
       }
       // Match winner or anything else tennis: sets-won score
