@@ -27,20 +27,28 @@ The frontend proxies `/api` and `/ws` to the API server at port 8080.
 
 ## Required secrets / environment variables
 
-| Variable | Purpose | Where set |
+| Variable | Purpose | Status |
 |---|---|---|
-| `SESSION_SECRET` | JWT-like signing for auth tokens | Replit Secret |
-| `ADMIN_PASSWORD` | Admin panel login password | Replit Secret |
-| `DATABASE_URL` | PostgreSQL connection string | Replit-managed (auto-provided) |
-| `REDIS_URL` | BullMQ settlement queue (optional) | Replit Secret (if Redis available) |
-| `STRIPE_SECRET_KEY` | Stripe payments backend | Replit Secret (optional) |
-| `STRIPE_WEBHOOK_SECRET` | Stripe webhook verification | Replit Secret (optional) |
-| `SPORTSAPI_KEY` | SportsAPI Pro live match data | Replit Secret (optional) |
-| `STATPAL_API_KEY` | Statpal live scores | Replit Secret (optional) |
+| `SESSION_SECRET` | JWT-like signing for auth tokens | ✅ Configured |
+| `ADMIN_PASSWORD` | Admin panel login password | ✅ Configured |
+| `DATABASE_URL` | PostgreSQL connection string | ✅ Replit-managed (auto-provided) |
+| `REDIS_URL` | BullMQ settlement queue | ✅ Configured |
+| `STATPAL_API_KEY` | Statpal live scores (primary data source) | ✅ Configured |
+| `STRIPE_SECRET_KEY` | Stripe payments backend | ✅ Configured |
+| `STRIPE_PUBLISHABLE_KEY` | Stripe frontend key | ✅ Configured |
+| `STRIPE_WEBHOOK_SECRET` | Stripe webhook verification | ✅ Configured |
+| `SMTP_HOST` | Email delivery host | ✅ Configured |
+| `SMTP_USER` | Email delivery username | ✅ Configured |
+| `SMTP_PASS` | Email delivery password | ✅ Configured |
 
-**Already set as env vars:**
+**Set as env vars (non-secret):**
 - `ADMIN_USERNAME=Israel`
 - `ADMIN_EMAIL=suportebet62@gmail.com`
+- `SMTP_PORT=587`
+- `SMTP_FROM=suportebet62@gmail.com`
+- `FOOTBALL_LIVE_PROVIDER=statpal`
+- `FOOTBALL_DAILY_PROVIDER=statpal`
+- `NODE_ENV=development`
 
 ## Database
 Replit's built-in PostgreSQL is used. Schema is auto-initialised on API server startup via `lib/db/src/init.ts` (all statements use `IF NOT EXISTS` — fully idempotent). No manual migration step needed in development.
