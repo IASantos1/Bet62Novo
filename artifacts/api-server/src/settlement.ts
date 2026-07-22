@@ -1,6 +1,7 @@
 import { SETTLEMENT_LOCK_TTL_SECONDS } from "./lib/settlement/lock.js";
 import { dataValidator } from "./lib/dataValidation.js";
 import { matchStateEngine } from "./lib/matchStateEngine.js";
+import { sendBetSettled } from "./lib/mailer.js";
 import {
   db,
   betsTable,
@@ -20,8 +21,10 @@ import {
   liveMatchState,
   scanDailyForFinished,
   scanVolleyballForFinished,
-  scanV2AllSportsForFinished,
   scanTennisV1ForFinished,
+  scanNHLForFinished,
+  scanNBAForFinished,
+  scanMLBForFinished,
 } from "./routes/matches.js";
 
 export type SelectionRecord = {
@@ -5162,6 +5165,78 @@ async function hydrateSettledBetSelections(): Promise<void> {
  *
  * Status is set to "voided". Stake is refunded to user balance.
  */
+
+// ── Post-cycle settlement email notifications ─────────────────────────────────
+const NOTIFY_LOOKBACK_MS = 90_000; // bets settled in last 90 s
+/** Track bets we've already notified so we don't send duplicates across cycles */
+const _notifiedBetIds = new Set<number>();
+
+async function notifySettledBetsInBackground(): Promise<void> {
+  if (!db) return;
+  try {
+    const since = new Date(Date.now() - NOTIFY_LOOKBACK_MS);
+    const recentlySettled = await db
+      .select({
+        id: betsTable.id,
+        userId: betsTable.userId,
+        status: betsTable.status,
+        stake: betsTable.stake,
+        potentialWin: betsTable.potentialWin,
+        matchTitle: betsTable.matchTitle,
+        updatedAt: betsTable.updatedAt,
+      })
+      .from(betsTable)
+      .where(
+        and(
+          sql`${betsTable.status} IN ('won', 'lost', 'voided')`,
+          gte(betsTable.updatedAt, since),
+        ),
+      );
+
+    if (recentlySettled.length === 0) return;
+
+    // Filter out already-notified bets
+    const fresh = recentlySettled.filter((b) => !_notifiedBetIds.has(b.id));
+    if (fresh.length === 0) return;
+
+    // Batch-fetch user emails
+    const userIds = [...new Set(fresh.map((b) => b.userId))];
+    const users = await db
+      .select({ id: usersTable.id, email: usersTable.email, name: usersTable.name })
+      .from(usersTable)
+      .where(sql`${usersTable.id} = ANY(${userIds})`);
+
+    const userMap = new Map(users.map((u) => [u.id, u]));
+
+    for (const bet of fresh) {
+      _notifiedBetIds.add(bet.id);
+      const user = userMap.get(bet.userId);
+      if (!user?.email) continue;
+
+      const outcome =
+        bet.status === "won" ? "won"
+        : bet.status === "voided" ? "voided"
+        : "lost";
+
+      sendBetSettled(user.email, user.name ?? "Jogador", {
+        betId: bet.id,
+        outcome,
+        stake: String(bet.stake),
+        payout: bet.status === "won" ? String(bet.potentialWin ?? bet.stake) : undefined,
+        matchTitle: bet.matchTitle ?? undefined,
+      }).catch(() => {});
+    }
+
+    // Prune the notified set periodically (keep last 50k entries max)
+    if (_notifiedBetIds.size > 50_000) {
+      const iter = _notifiedBetIds.values();
+      for (let i = 0; i < 10_000; i++) iter.next();
+    }
+  } catch (err) {
+    logger.warn({ err }, "notifySettledBetsInBackground failed");
+  }
+}
+
 const STALE_THRESHOLD_MS = 72 * 60 * 60 * 1000; // 72 hours
 
 async function expireStalePendingBets(): Promise<void> {
@@ -5276,7 +5351,9 @@ async function expireStalePendingBets(): Promise<void> {
  *
  * Each cycle (every ~60 s):
  *   1. scanDailyForFinished()       — football v1/v2 daily feed
- *   2. scanV2AllSportsForFinished() — V2 today feeds for ALL core sports
+ *   2. scanNHLForFinished()         — NHL finished matches (Statpal live + daily)
+ *      scanNBAForFinished()         — NBA finished matches (Statpal live + daily)
+ *      scanMLBForFinished()         — MLB finished matches (Statpal live + daily)
  *   3. scanVolleyballForFinished()  — volleyball finished matches from live feed
  *   4. autoSettlePendingBets()      — settle bets with known results
  *   5. expireStalePendingBets()     — void bets pending >72 h (stake refunded)
@@ -5333,17 +5410,23 @@ export function startSettlementWorker(): void {
 
   const run = async (): Promise<void> => {
     try {
-      // Parallel scan: football daily feed + all V2 sports + volleyball + tennis V1 finished feed
+      // Parallel scan: Statpal-only — football, volleyball, tennis, NHL, NBA, MLB
       await Promise.allSettled([
-        scanDailyForFinished(),
-        scanV2AllSportsForFinished(),
-        scanVolleyballForFinished(),
-        scanTennisV1ForFinished(),
+        scanDailyForFinished(),       // football (Statpal daily)
+        scanVolleyballForFinished(),   // volleyball (Statpal live)
+        scanTennisV1ForFinished(),     // tennis (Statpal V1)
+        scanNHLForFinished(),          // hockey (Statpal live + daily)
+        scanNBAForFinished(),          // basketball (Statpal live + daily)
+        scanMLBForFinished(),          // baseball (Statpal live + daily)
       ]);
       const now = Date.now();
       if (!queueEnabled || now - lastCatchupAt >= catchupMs) {
         await autoSettlePendingBets();
         lastCatchupAt = now;
+        // Fire-and-forget post-cycle email notifications for settled bets
+        notifySettledBetsInBackground().catch((err) =>
+          logger.warn({ err }, "Settlement email notification failed"),
+        );
       }
       // Enrich early-loss bets with per-leg scores/outcomes when remaining matches finish
       await hydrateSettledBetSelections();

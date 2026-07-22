@@ -8829,6 +8829,196 @@ export async function scanTennisV1ForFinished(): Promise<void> {
   }
 }
 
+// ─── Statpal-only scan functions: NHL / NBA / MLB ─────────────────────────────
+// These replace the old scanV2AllSportsForFinished() which relied on SportsAPI Pro.
+// They use the same Statpal live feeds already powering the live match display,
+// plus the daily (d-1) results feed for yesterday's completed games.
+// matchId format must match the live match IDs: `nhl-${id}`, `nba-${id}`, `mlb-${id}`
+
+const NHL_FINISHED_STATUSES = new Set([
+  "FT", "Finished", "Final", "Ended", "Complete", "Closed",
+  "After OT", "After SO", "AET", "AOT",
+  "Awarded",
+]);
+const NBA_FINISHED_STATUSES = new Set([
+  "Finished", "Final", "Ended", "Closed", "Complete",
+  "After OT", "After SO", "FT", "AET", "AOT",
+]);
+const MLB_FINISHED_STATUSES = new Set([
+  "Final", "Game Over", "Complete", "Finished", "Ended", "Closed",
+  "Completed Early", "F",
+]);
+
+export async function scanNHLForFinished(): Promise<void> {
+  if (!CONFIG.STATPAL_API_KEY) return;
+  try {
+    // 1. Live feed — catches matches that just ended
+    const tournaments = await getNHLLive();
+    const parseScore = (s?: string): [number, number] | null => {
+      if (!s?.trim()) return null;
+      const parts = s.split(" - ");
+      if (parts.length !== 2) return null;
+      const h = parseInt(parts[0]!), a = parseInt(parts[1]!);
+      return isNaN(h) || isNaN(a) ? null : [h, a];
+    };
+    for (const t of tournaments) {
+      const matches: NHLMatch[] = Array.isArray(t.match) ? t.match : [t.match];
+      for (const m of matches) {
+        if (!m?.status || !NHL_FINISHED_STATUSES.has(m.status)) continue;
+        const matchId = `nhl-${m.id}`;
+        if (finishedMatchResults.has(matchId)) continue;
+        const home = parseInt(m.home.totalscore) || 0;
+        const away = parseInt(m.away.totalscore) || 0;
+        const periods: Array<[number, number]> = [];
+        for (const pd of [m.events?.firstperiod, m.events?.secondperiod, m.events?.thirdperiod, m.events?.overtime, m.events?.penalties]) {
+          const sc = parseScore(pd?.score);
+          if (sc) periods.push(sc);
+        }
+        const record = {
+          home, away,
+          homeTeam: m.home.name, awayTeam: m.away.name,
+          status: "finished",
+          extras: periods.length > 0 ? { hockey: { periods } } : {},
+          finishedAt: Date.now(),
+        };
+        finishedMatchResults.set(matchId, record);
+        await enqueueMatchSettlement({ matchId, jobId: buildMatchSettlementJobId({ matchId, home, away }) });
+        await persistFinishedMatchRecord(matchId, "hockey", record);
+      }
+    }
+    // 2. Daily results feed (yesterday's games)
+    const daily = await getHockeyDailyResults();
+    for (const r of daily) {
+      const matchId = `nhl-${r.id}`;
+      if (finishedMatchResults.has(matchId)) continue;
+      const record = {
+        home: r.homeScore, away: r.awayScore,
+        homeTeam: r.home, awayTeam: r.away,
+        status: "finished",
+        extras: r.periods.length > 0 ? { hockey: { periods: r.periods } } : {},
+        finishedAt: Date.now(),
+      };
+      finishedMatchResults.set(matchId, record);
+      await enqueueMatchSettlement({ matchId, jobId: buildMatchSettlementJobId({ matchId, home: r.homeScore, away: r.awayScore }) });
+      await persistFinishedMatchRecord(matchId, "hockey", record);
+    }
+    _pruneFinishedResults();
+  } catch (err) {
+    logger.error({ err }, "scanNHLForFinished failed");
+  }
+}
+
+export async function scanNBAForFinished(): Promise<void> {
+  if (!CONFIG.STATPAL_API_KEY) return;
+  try {
+    // 1. Live feed — catches matches that just ended
+    const tournaments = await getNBALive();
+    for (const t of tournaments) {
+      const matches: NBAMatch[] = Array.isArray(t.match) ? t.match : [t.match];
+      for (const m of matches) {
+        if (!m?.status || !NBA_FINISHED_STATUSES.has(m.status)) continue;
+        const matchId = `nba-${m.id}`;
+        if (finishedMatchResults.has(matchId)) continue;
+        const home = parseInt(m.home.totalscore) || 0;
+        const away = parseInt(m.away.totalscore) || 0;
+        const quarters: Array<[number, number]> = [];
+        for (const [hv, av] of [
+          [m.home.q1, m.away.q1], [m.home.q2, m.away.q2],
+          [m.home.q3, m.away.q3], [m.home.q4, m.away.q4],
+          [m.home.ot, m.away.ot],
+        ] as [string|undefined, string|undefined][]) {
+          const h = parseInt(hv ?? ""), a = parseInt(av ?? "");
+          if (!isNaN(h) && !isNaN(a) && (h > 0 || a > 0)) quarters.push([h, a]);
+        }
+        const record = {
+          home, away,
+          homeTeam: m.home.name, awayTeam: m.away.name,
+          status: "finished",
+          extras: quarters.length > 0 ? { basketball: { quarters } } : {},
+          finishedAt: Date.now(),
+        };
+        finishedMatchResults.set(matchId, record);
+        await enqueueMatchSettlement({ matchId, jobId: buildMatchSettlementJobId({ matchId, home, away }) });
+        await persistFinishedMatchRecord(matchId, "basketball", record);
+      }
+    }
+    // 2. Daily results feed (yesterday's games)
+    const daily = await getBasketballDailyResults();
+    for (const r of daily) {
+      const matchId = `nba-${r.id}`;
+      if (finishedMatchResults.has(matchId)) continue;
+      const record = {
+        home: r.homeScore, away: r.awayScore,
+        homeTeam: r.home, awayTeam: r.away,
+        status: "finished",
+        extras: r.quarters.length > 0 ? { basketball: { quarters: r.quarters } } : {},
+        finishedAt: Date.now(),
+      };
+      finishedMatchResults.set(matchId, record);
+      await enqueueMatchSettlement({ matchId, jobId: buildMatchSettlementJobId({ matchId, home: r.homeScore, away: r.awayScore }) });
+      await persistFinishedMatchRecord(matchId, "basketball", record);
+    }
+    _pruneFinishedResults();
+  } catch (err) {
+    logger.error({ err }, "scanNBAForFinished failed");
+  }
+}
+
+export async function scanMLBForFinished(): Promise<void> {
+  if (!CONFIG.STATPAL_API_KEY) return;
+  try {
+    // 1. Live feed — catches matches that just ended
+    const tournaments = await getMLBLive();
+    for (const t of tournaments) {
+      const matches: MLBMatch[] = Array.isArray(t.match) ? t.match : [t.match];
+      for (const m of matches) {
+        if (!m?.status || !MLB_FINISHED_STATUSES.has(m.status)) continue;
+        const matchId = `mlb-${m.id}`;
+        if (finishedMatchResults.has(matchId)) continue;
+        const home = parseInt(m.home.r || m.home.totalscore) || 0;
+        const away = parseInt(m.away.r || m.away.totalscore) || 0;
+        const innings: Array<[number, number]> = [];
+        const inKeys = ["in1","in2","in3","in4","in5","in6","in7","in8","in9"] as const;
+        for (const key of inKeys) {
+          const h = parseInt(m.home[key]), a = parseInt(m.away[key]);
+          if (!isNaN(h) && !isNaN(a)) innings.push([h, a]);
+        }
+        const record = {
+          home, away,
+          homeTeam: m.home.name, awayTeam: m.away.name,
+          status: "finished",
+          extras: innings.length > 0 ? { baseball: { innings } } : {},
+          finishedAt: Date.now(),
+        };
+        finishedMatchResults.set(matchId, record);
+        await enqueueMatchSettlement({ matchId, jobId: buildMatchSettlementJobId({ matchId, home, away }) });
+        await persistFinishedMatchRecord(matchId, "baseball", record);
+      }
+    }
+    // 2. Daily results feed (yesterday's games)
+    const daily = await getMLBDailyResults();
+    for (const r of daily) {
+      const matchId = `mlb-${r.id}`;
+      if (finishedMatchResults.has(matchId)) continue;
+      const record = {
+        home: r.homeScore, away: r.awayScore,
+        homeTeam: r.home, awayTeam: r.away,
+        status: "finished",
+        extras: r.innings.length > 0
+          ? { baseball: { innings: r.innings.map(([h, a]) => [h ?? 0, a ?? 0] as [number, number]) } }
+          : {},
+        finishedAt: Date.now(),
+      };
+      finishedMatchResults.set(matchId, record);
+      await enqueueMatchSettlement({ matchId, jobId: buildMatchSettlementJobId({ matchId, home: r.homeScore, away: r.awayScore }) });
+      await persistFinishedMatchRecord(matchId, "baseball", record);
+    }
+    _pruneFinishedResults();
+  } catch (err) {
+    logger.error({ err }, "scanMLBForFinished failed");
+  }
+}
+
 // ─── Fetch helpers ────────────────────────────────────────────────────────────
 
 async function getLiveLeagues(): Promise<SAPILeagueV2[]> {

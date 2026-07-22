@@ -5,3 +5,4 @@
 - [Football live goal tracking](football-live-goal-tracking.md) — goal minutes tracked in buildFootballLiveV2 via score-change detection; stats empty without SPORTSAPI_KEY; fallbacks implemented.
 - [Football stats — Statpal limitations](football-stats-statpal.md) — Statpal has no per-match stats endpoint (404); fallback uses estimated possession from _baseOdds; buildFootballLiveStatpal is dead code.
 - [Settlement worker startup](settlement-worker-not-started.md) — startSettlementWorker() must be called in api/index.ts; was never called before, so no bets settled automatically.
+- [Settlement Statpal-only migration](settlement-statpal-only.md) — SportsAPI Pro removed; NHL/NBA/MLB now use Statpal-native scans; standalone worker guarded by ENABLE_STANDALONE_WORKER env var.

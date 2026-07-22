@@ -11,10 +11,19 @@ export type MatchStatus =
 
 export type MatchState = {
   matchId: string;
+  sport?: string;
   status: MatchStatus;
+  /** FT / regular-time score */
   homeScore: number;
   awayScore: number;
+  /** Half-time score (football/hockey) */
+  htHomeScore?: number;
+  htAwayScore?: number;
+  /** Match clock in minutes (football, basketball) or inning/set number */
   minute?: number;
+  /** Display clock string e.g. "45+2", "Q3 08:34", "Top 7th" */
+  clockStr?: string;
+  /** Period/phase label e.g. "1H", "HT", "Q2", "OT", "S3" */
   period?: string;
   suspendedAt?: Date;
   suspendedReason?: string;
@@ -106,6 +115,53 @@ class MatchStateEngine {
     return result;
   }
 
+  /** Returns all matches for a given sport. */
+  getMatchesBySport(sport: string): MatchState[] {
+    const result: MatchState[] = [];
+    for (const state of this.states.values()) {
+      if (state.sport === sport) result.push(state);
+    }
+    return result;
+  }
+
+  /**
+   * Convenience: update only the live score + clock.
+   * Use this from feed ingestion instead of calling updateState with full payload.
+   */
+  updateScore(
+    matchId: string,
+    homeScore: number,
+    awayScore: number,
+    opts?: { minute?: number; clockStr?: string; period?: string; sport?: string },
+  ): MatchState {
+    return this.updateState(matchId, {
+      homeScore,
+      awayScore,
+      ...opts,
+      status: "live",
+    });
+  }
+
+  /**
+   * Mark a match as finished with final score.
+   * Keeps the state for 24 h for post-match lookups.
+   */
+  finishMatch(
+    matchId: string,
+    homeScore: number,
+    awayScore: number,
+    opts?: { htHomeScore?: number; htAwayScore?: number; sport?: string },
+  ): MatchState {
+    return this.updateState(matchId, {
+      homeScore,
+      awayScore,
+      status: "finished",
+      minute: undefined,
+      clockStr: undefined,
+      ...opts,
+    });
+  }
+
   /**
    * Normalizes a raw status string from various feed providers into an
    * internal MatchStatus value.
@@ -124,12 +180,15 @@ class MatchStateEngine {
       s === "2h" ||
       s === "et" ||
       s === "ot" ||
-      s === "overtime"
+      s === "overtime" ||
+      s === "q1" || s === "q2" || s === "q3" || s === "q4" ||
+      s === "1p" || s === "2p" || s === "3p" ||
+      s.startsWith("top ") || s.startsWith("bottom ")  // MLB innings
     ) {
       return "live";
     }
 
-    if (s === "ht" || s === "halftime" || s === "half_time" || s === "half time") {
+    if (s === "ht" || s === "halftime" || s === "half_time" || s === "half time" || s === "break") {
       return "halftime";
     }
 
@@ -142,8 +201,15 @@ class MatchStateEngine {
       s === "ended" ||
       s === "complete" ||
       s === "completed" ||
+      s === "final" ||
+      s === "closed" ||
       s === "aet" ||
-      s === "pen"
+      s === "pen" ||
+      s === "after ot" ||
+      s === "after so" ||
+      s === "aot" ||
+      s === "game over" ||
+      s === "f"
     ) {
       return "finished";
     }

@@ -156,6 +156,81 @@ export async function sendWithdrawalApproved(
   }
 }
 
+// ── Bet Settlement Notification ────────────────────────────────────────────────
+
+export async function sendBetSettled(
+  email: string,
+  name: string,
+  opts: {
+    betId: number;
+    outcome: "won" | "lost" | "voided";
+    stake: string;
+    payout?: string;
+    matchTitle?: string;
+  },
+): Promise<void> {
+  const transporter = createTransporter();
+  if (!transporter) return; // SMTP not configured — silent skip
+
+  const { betId, outcome, stake, payout, matchTitle } = opts;
+
+  const outcomeLabel =
+    outcome === "won"
+      ? `<span class="status-approved">GANHOU 🏆</span>`
+      : outcome === "voided"
+        ? `<span style="color:#facc15;font-weight:600;">ANULADA</span>`
+        : `<span class="status-rejected">PERDIDA</span>`;
+
+  const amountSection =
+    outcome === "won" && payout
+      ? `<div class="amount-box">
+           <div class="label">Ganhos</div>
+           <div class="value">€${formatAmount(payout)}</div>
+         </div>`
+      : outcome === "voided"
+        ? `<div class="amount-box">
+             <div class="label">Valor devolvido</div>
+             <div class="value">€${formatAmount(stake)}</div>
+           </div>`
+        : `<div class="amount-box">
+             <div class="label">Aposta</div>
+             <div class="value" style="color:#f87171;">€${formatAmount(stake)}</div>
+           </div>`;
+
+  const ctaMsg =
+    outcome === "won"
+      ? `<p>Os seus ganhos foram creditados no saldo da sua conta BET62. Continue com boas apostas!</p>`
+      : outcome === "voided"
+        ? `<p>A aposta foi anulada e o valor da sua aposta foi devolvido ao saldo da sua conta.</p>`
+        : `<p>Não foi desta vez! Continue apostando — a sorte pode estar na próxima aposta.</p>`;
+
+  const matchLine = matchTitle
+    ? `<p><strong>Jogo:</strong> ${escapeHtml(matchTitle)}</p>`
+    : "";
+
+  const subject =
+    outcome === "won"
+      ? `🏆 Aposta #${betId} ganhou €${formatAmount(payout ?? stake)} — BET62`
+      : outcome === "voided"
+        ? `↩️ Aposta #${betId} foi anulada — BET62`
+        : `Aposta #${betId} foi perdida — BET62`;
+
+  const html = baseTemplate(`
+    <p>Olá <strong>${escapeHtml(name)}</strong>,</p>
+    <p>A sua aposta <strong>#${betId}</strong> foi resolvida: ${outcomeLabel}</p>
+    ${matchLine}
+    ${amountSection}
+    ${ctaMsg}
+  `);
+
+  try {
+    await transporter.sendMail({ from: FROM, to: email, subject, html });
+    logger.info({ email, betId, outcome }, "Bet settlement email sent");
+  } catch (err) {
+    logger.error({ err, email, betId }, "Failed to send bet settlement email");
+  }
+}
+
 export async function sendWithdrawalRejected(
   email: string,
   name: string,
