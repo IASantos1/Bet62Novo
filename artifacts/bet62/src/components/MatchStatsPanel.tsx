@@ -218,6 +218,12 @@ function MomentumChart({ homeTeam, awayTeam, isLive, liveMinute, isHalfTime, goa
           const cx = col * colW + bw / 2 + 0.5;
           const homeGoals = colGoals.filter((g) => g.team === "home");
           const awayGoals = colGoals.filter((g) => g.team === "away");
+          // minute label: place to right for cols < 36, to left for cols ≥ 36
+          const labelAnchor = col >= 36 ? "end" : "start";
+          const labelXHome = col >= 36 ? cx - 9 : cx + 9;
+          const labelXAway = col >= 36 ? cx - 9 : cx + 9;
+          const minLabel = (g: GoalEvent) =>
+            g.extraMinute ? `${g.minute}+${g.extraMinute}'` : `${g.minute}'`;
           return (
             <g key={`gm-${col}`}>
               {homeGoals.length > 0 && (
@@ -229,9 +235,10 @@ function MomentumChart({ homeTeam, awayTeam, isLive, liveMinute, isHalfTime, goa
                   <text x={cx} y={6} textAnchor="middle" dominantBaseline="central" fontSize="8">
                     ⚽
                   </text>
-                  {homeGoals.length > 1 && (
-                    <text x={cx + 6} y={2} textAnchor="start" fontSize="6" fill="#fbbf24" fontWeight="bold">{homeGoals.length}</text>
-                  )}
+                  {/* minute label beside the ball */}
+                  <text x={labelXHome} y={10} textAnchor={labelAnchor} fontSize="5.5" fill="#fbbf24" fontFamily="monospace" fontWeight="bold" opacity={0.9}>
+                    {homeGoals.length > 1 ? `×${homeGoals.length}` : minLabel(homeGoals[0])}
+                  </text>
                 </>
               )}
               {awayGoals.length > 0 && (
@@ -241,9 +248,10 @@ function MomentumChart({ homeTeam, awayTeam, isLive, liveMinute, isHalfTime, goa
                   <text x={cx} y={H - 6} textAnchor="middle" dominantBaseline="central" fontSize="8">
                     ⚽
                   </text>
-                  {awayGoals.length > 1 && (
-                    <text x={cx + 6} y={H - 2} textAnchor="start" fontSize="6" fill="#fbbf24" fontWeight="bold">{awayGoals.length}</text>
-                  )}
+                  {/* minute label beside the ball */}
+                  <text x={labelXAway} y={H - 2} textAnchor={labelAnchor} fontSize="5.5" fill="#fbbf24" fontFamily="monospace" fontWeight="bold" opacity={0.9}>
+                    {awayGoals.length > 1 ? `×${awayGoals.length}` : minLabel(awayGoals[0])}
+                  </text>
                 </>
               )}
             </g>
@@ -279,6 +287,41 @@ function AnimatedBar({ pct, color, delay = 0 }: { pct: number; color: string; de
         animate={{ width: `${pct}%` }}
         transition={{ duration: 0.8, delay, ease: "easeOut" }}
       />
+    </div>
+  );
+}
+
+function SplitGauge({ homeVal, awayVal, label }: { homeVal: number; awayVal: number; label: string }) {
+  const total = homeVal + awayVal;
+  const homePct = total > 0 ? Math.round((homeVal / total) * 100) : 50;
+  const r = 26;
+  const circ = 2 * Math.PI * r;
+  const homeDash = (homePct / 100) * circ;
+  return (
+    <div className="flex flex-col items-center gap-1">
+      <div className="relative w-[60px] h-[60px]">
+        <svg className="w-full h-full -rotate-90" viewBox="0 0 64 64">
+          <circle cx="32" cy="32" r={r} fill="none" stroke="#ef4444" strokeWidth="6" strokeOpacity="0.35" />
+          <motion.circle
+            cx="32" cy="32" r={r} fill="none"
+            stroke="#3b82f6" strokeWidth="6"
+            strokeLinecap="butt"
+            strokeDasharray={`${circ}`}
+            initial={{ strokeDashoffset: circ }}
+            animate={{ strokeDashoffset: circ - homeDash }}
+            transition={{ duration: 1, ease: "easeOut" }}
+          />
+        </svg>
+        <div className="absolute inset-0 flex items-center justify-center">
+          <span className="text-[13px] font-black text-white leading-none">{total}</span>
+        </div>
+      </div>
+      <div className="flex items-center gap-1.5">
+        <span className="text-[12px] font-black text-blue-400">{homeVal}</span>
+        <span className="text-[9px] text-zinc-600">vs</span>
+        <span className="text-[12px] font-black text-red-400">{awayVal}</span>
+      </div>
+      <div className="text-[9px] text-zinc-500 text-center leading-tight max-w-[64px]">{label}</div>
     </div>
   );
 }
@@ -873,85 +916,183 @@ export default function MatchStatsPanel({
                 goalEvents={liveExtra?.football?.goals}
               />}
 
-              {/* Football live per-team stats from /match/{id}/statistics */}
+              {/* Football live per-team stats — reference-image layout */}
               {isFootball && isLive && liveExtra && (() => {
-                type StatDef = { key: string; label: string; h: number | undefined; a: number | undefined; isPct?: boolean; fmt?: (n: number) => string };
-                const rows: StatDef[] = [
-                  { key: "possession", label: "Posse de Bola", h: liveExtra.possessionHome, a: liveExtra.possessionAway, isPct: true },
-                  { key: "shots", label: "Remates", h: liveExtra.shotsTotalHome, a: liveExtra.shotsTotalAway },
-                  { key: "shotsOn", label: "No Alvo", h: liveExtra.shotsOnTargetHome, a: liveExtra.shotsOnTargetAway },
-                  // corners only available as total — skip per-team bar (no split available from Statpal)
-                  { key: "fouls", label: "Faltas", h: liveExtra.foulsHome, a: liveExtra.foulsAway },
-                  { key: "yellow", label: "Cart. Amarelos", h: liveExtra.yellowCardsHome, a: liveExtra.yellowCardsAway },
-                  { key: "red", label: "Cart. Vermelhos", h: liveExtra.redCardsHomeCount, a: liveExtra.redCardsAwayCount },
-                  { key: "offsides", label: "Foras de Jogo", h: liveExtra.offsidesHome, a: liveExtra.offsidesAway },
-                  { key: "saves", label: "Defesas", h: liveExtra.savesHome, a: liveExtra.savesAway },
-                  { key: "dangerous", label: "Ataques Perig.", h: liveExtra.dangerousAttacksHome, a: liveExtra.dangerousAttacksAway },
-                  { key: "attacks", label: "Ataques", h: liveExtra.attacksHome, a: liveExtra.attacksAway },
-                  { key: "crosses", label: "Cruzamentos", h: liveExtra.crossesHome, a: liveExtra.crossesAway },
-                  { key: "passes", label: "Passes", h: liveExtra.passesHome, a: liveExtra.passesAway },
-                  { key: "passAcc", label: "Precisão Passes", h: liveExtra.passAccuracyHome, a: liveExtra.passAccuracyAway, isPct: true },
-                  { key: "throwins", label: "Lançamentos", h: liveExtra.throwInsHome, a: liveExtra.throwInsAway },
+                const hPoss    = liveExtra.possessionHome      ?? liveExtra.possession?.[0];
+                const aPoss    = liveExtra.possessionAway      ?? liveExtra.possession?.[1];
+                const hShots   = liveExtra.shotsTotalHome      ?? liveExtra.shots?.[0];
+                const aShots   = liveExtra.shotsTotalAway      ?? liveExtra.shots?.[1];
+                const hShotsOn = liveExtra.shotsOnTargetHome   ?? liveExtra.shotsOn?.[0];
+                const aShotsOn = liveExtra.shotsOnTargetAway   ?? liveExtra.shotsOn?.[1];
+                const hFouls   = liveExtra.foulsHome           ?? liveExtra.fouls?.[0];
+                const aFouls   = liveExtra.foulsAway           ?? liveExtra.fouls?.[1];
+                const hYellow  = liveExtra.yellowCardsHome     ?? liveExtra.yellows?.[0];
+                const aYellow  = liveExtra.yellowCardsAway     ?? liveExtra.yellows?.[1];
+                const hRed     = liveExtra.redCardsHomeCount   ?? liveExtra.reds?.[0];
+                const aRed     = liveExtra.redCardsAwayCount   ?? liveExtra.reds?.[1];
+                const hOff     = liveExtra.offsidesHome        ?? liveExtra.offsides?.[0];
+                const aOff     = liveExtra.offsidesAway        ?? liveExtra.offsides?.[1];
+                const hAttacks = liveExtra.attacksHome;
+                const aAttacks = liveExtra.attacksAway;
+                const hDanger  = liveExtra.dangerousAttacksHome;
+                const aDanger  = liveExtra.dangerousAttacksAway;
+                const hSaves   = liveExtra.savesHome;
+                const aSaves   = liveExtra.savesAway;
+                const hCorners = liveExtra.corners?.[0];
+                const aCorners = liveExtra.corners?.[1];
+
+                const ratioPct = (h?: number, a?: number) => {
+                  const t = (h ?? 0) + (a ?? 0);
+                  return t > 0 ? Math.round(((h ?? 0) / t) * 100) : 50;
+                };
+
+                const hasAny = [hShots, aShots, hShotsOn, aShotsOn, hAttacks, aAttacks, hDanger, aDanger, hFouls, aFouls].some(v => v !== undefined);
+                if (!hasAny) return null;
+
+                const iconSummary = [
+                  { icon: "🟥", label: "V. Verm", h: hRed,     a: aRed     },
+                  { icon: "🟨", label: "V. Amar", h: hYellow,  a: aYellow  },
+                  { icon: "⛳",  label: "Cantos",  h: hCorners, a: aCorners },
+                  { icon: "🎯", label: "No Alvo", h: hShotsOn, a: aShotsOn },
+                  { icon: "↗",  label: "Fora J.", h: hOff,     a: aOff     },
+                  { icon: "🧤", label: "Defesas", h: hSaves,   a: aSaves   },
                 ];
-                // filter rows that have at least one defined value
-                const visible = rows.filter(r => r.h !== undefined || r.a !== undefined);
-                if (visible.length === 0) return null;
+
+                const atacanteRows = [
+                  { key: "shots",   label: "Total de Remates",    h: hShots,   a: aShots   },
+                  { key: "shotsOn", label: "Remates à Baliza",    h: hShotsOn, a: aShotsOn },
+                  { key: "corners", label: "Cantos no Jogo",      h: hCorners, a: aCorners },
+                  { key: "offs",    label: "Foras de Jogo",       h: hOff,     a: aOff     },
+                  { key: "attacks", label: "Ataques",             h: hAttacks, a: aAttacks },
+                  { key: "danger",  label: "Ataques Perigosos",   h: hDanger,  a: aDanger  },
+                ].filter(r => r.h !== undefined || r.a !== undefined);
+
+                const defesaRows = [
+                  { key: "fouls",  label: "Faltas",             h: hFouls,   a: aFouls   },
+                  { key: "yellow", label: "Cartões Amarelos",   h: hYellow,  a: aYellow  },
+                  { key: "red",    label: "Cartões Vermelhos",  h: hRed,     a: aRed     },
+                ].filter(r => r.h !== undefined || r.a !== undefined);
+
+                const showGauges = (hAttacks !== undefined && aAttacks !== undefined) ||
+                                   (hShotsOn !== undefined && aShotsOn !== undefined) ||
+                                   (hDanger  !== undefined && aDanger  !== undefined);
+
                 return (
-                  <div className="bg-zinc-900 rounded-xl border border-zinc-800 overflow-hidden">
-                    <div className="flex items-center px-4 py-2.5 border-b border-zinc-800">
-                      <div className="flex-1 flex items-center gap-1.5">
-                        <div className="w-2 h-2 rounded-full bg-blue-500" />
-                        <span className="text-[11px] font-black text-zinc-200 truncate max-w-[90px]">{homeTeam}</span>
-                      </div>
-                      <span className="text-[10px] text-zinc-500 font-bold uppercase tracking-widest">Ao Vivo</span>
-                      <div className="flex-1 flex items-center gap-1.5 justify-end">
-                        <span className="text-[11px] font-black text-zinc-200 truncate max-w-[90px]">{awayTeam}</span>
-                        <div className="w-2 h-2 rounded-full bg-red-500" />
-                      </div>
-                    </div>
-                    <div className="px-4 py-4 space-y-4">
-                      {visible.map(row => {
-                        const hv = row.h ?? 0;
-                        const av = row.a ?? 0;
-                        const total = hv + av;
-                        const homePct = row.isPct ? hv : (total > 0 ? Math.round((hv / total) * 100) : 50);
-                        const hLabel = row.isPct ? `${Math.round(hv)}%` : String(Math.round(hv));
-                        const aLabel = row.isPct ? `${Math.round(av)}%` : String(Math.round(av));
-                        return (
-                          <StatBar
-                            key={row.key}
-                            label={row.label}
-                            home={row.h !== undefined ? hLabel : "-"}
-                            away={row.a !== undefined ? aLabel : "-"}
-                            homePct={homePct}
-                          />
-                        );
-                      })}
-                      {/* xG if available */}
-                      {(liveExtra.xgHome !== undefined || liveExtra.xgAway !== undefined) && (
-                        <div className="pt-2 border-t border-zinc-800 space-y-2">
-                          <div className="text-[10px] font-black text-zinc-500 uppercase tracking-widest">Golos Esperados (xG)</div>
-                          <div className="flex items-center justify-between">
-                            <span className="text-2xl font-black text-blue-400">{(liveExtra.xgHome ?? 0).toFixed(2)}</span>
-                            <div className="text-center">
-                              <div className="text-[9px] text-zinc-500 uppercase tracking-wide">xG Total</div>
-                              <div className="text-sm font-black text-zinc-300">{((liveExtra.xgHome ?? 0) + (liveExtra.xgAway ?? 0)).toFixed(2)}</div>
-                            </div>
-                            <span className="text-2xl font-black text-red-400">{(liveExtra.xgAway ?? 0).toFixed(2)}</span>
+                  <div className="space-y-3">
+                    {/* Summary icon row */}
+                    <div className="bg-zinc-900 rounded-xl border border-zinc-800 p-3">
+                      <div className="grid grid-cols-6 gap-0.5">
+                        {iconSummary.map(({ icon, label, h, a }) => (
+                          <div key={label} className="flex flex-col items-center gap-0.5 py-1">
+                            <span className="text-[15px] leading-none">{icon}</span>
+                            <span className="text-[12px] font-black text-blue-400 tabular-nums leading-tight">{h ?? "—"}</span>
+                            <span className="text-[8px] text-zinc-500 leading-tight text-center">{label}</span>
+                            <span className="text-[12px] font-black text-red-400 tabular-nums leading-tight">{a ?? "—"}</span>
                           </div>
-                          {(() => {
-                            const h = liveExtra.xgHome ?? 0; const a = liveExtra.xgAway ?? 0;
-                            const t = h + a; const pct = t > 0 ? Math.round((h / t) * 100) : 50;
-                            return (
-                              <div className="flex items-center gap-1.5">
-                                <AnimatedBar pct={pct} color="bg-blue-500" delay={0.2} />
-                                <AnimatedBar pct={100 - pct} color="bg-red-500" delay={0.2} />
-                              </div>
-                            );
-                          })()}
-                        </div>
-                      )}
+                        ))}
+                      </div>
                     </div>
+
+                    {/* Three split-ring gauges */}
+                    {showGauges && (
+                      <div className="bg-zinc-900 rounded-xl border border-zinc-800 p-4">
+                        <div className="flex items-start justify-around">
+                          {hAttacks !== undefined && aAttacks !== undefined && (
+                            <SplitGauge homeVal={hAttacks} awayVal={aAttacks} label="Ataques" />
+                          )}
+                          {hShotsOn !== undefined && aShotsOn !== undefined && (
+                            <SplitGauge homeVal={hShotsOn} awayVal={aShotsOn} label="Remates à Baliza" />
+                          )}
+                          {hDanger !== undefined && aDanger !== undefined && (
+                            <SplitGauge homeVal={hDanger} awayVal={aDanger} label="Ataques Perig." />
+                          )}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Possession bar */}
+                    {hPoss !== undefined && aPoss !== undefined && (
+                      <div className="bg-zinc-900 rounded-xl border border-zinc-800 px-4 py-3">
+                        <StatBar
+                          label="Posse de Bola"
+                          home={`${Math.round(hPoss)}%`}
+                          away={`${Math.round(aPoss)}%`}
+                          homePct={Math.round(hPoss)}
+                        />
+                      </div>
+                    )}
+
+                    {/* Atacante section */}
+                    {atacanteRows.length > 0 && (
+                      <div className="bg-zinc-900 rounded-xl border border-zinc-800 overflow-hidden">
+                        <div className="flex items-center justify-between px-4 py-2.5 border-b border-zinc-800">
+                          <span className="text-[11px] font-black text-zinc-200 uppercase tracking-widest">Atacante</span>
+                          <div className="flex items-center gap-2">
+                            <div className="w-2 h-2 rounded-full bg-blue-500" />
+                            <span className="text-[10px] font-bold text-zinc-400 truncate max-w-[70px]">{homeTeam}</span>
+                            <span className="text-[9px] text-zinc-600">vs</span>
+                            <span className="text-[10px] font-bold text-zinc-400 truncate max-w-[70px]">{awayTeam}</span>
+                            <div className="w-2 h-2 rounded-full bg-red-500" />
+                          </div>
+                        </div>
+                        <div className="px-4 py-3 space-y-3.5">
+                          {atacanteRows.map(row => (
+                            <StatBar
+                              key={row.key}
+                              label={row.label}
+                              home={row.h ?? "—"}
+                              away={row.a ?? "—"}
+                              homePct={ratioPct(row.h, row.a)}
+                            />
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Defesa section */}
+                    {defesaRows.length > 0 && (
+                      <div className="bg-zinc-900 rounded-xl border border-zinc-800 overflow-hidden">
+                        <div className="px-4 py-2.5 border-b border-zinc-800">
+                          <span className="text-[11px] font-black text-zinc-200 uppercase tracking-widest">Defesa</span>
+                        </div>
+                        <div className="px-4 py-3 space-y-3.5">
+                          {defesaRows.map(row => (
+                            <StatBar
+                              key={row.key}
+                              label={row.label}
+                              home={row.h ?? "—"}
+                              away={row.a ?? "—"}
+                              homePct={ratioPct(row.h, row.a)}
+                            />
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* xG section */}
+                    {(liveExtra.xgHome !== undefined || liveExtra.xgAway !== undefined) && (
+                      <div className="bg-zinc-900 rounded-xl border border-zinc-800 p-4">
+                        <div className="text-[10px] font-black text-zinc-500 uppercase tracking-widest mb-3">Golos Esperados (xG)</div>
+                        <div className="flex items-center justify-between mb-2">
+                          <span className="text-2xl font-black text-blue-400">{(liveExtra.xgHome ?? 0).toFixed(2)}</span>
+                          <div className="text-center">
+                            <div className="text-[9px] text-zinc-500 uppercase tracking-wide">xG Total</div>
+                            <div className="text-sm font-black text-zinc-300">{((liveExtra.xgHome ?? 0) + (liveExtra.xgAway ?? 0)).toFixed(2)}</div>
+                          </div>
+                          <span className="text-2xl font-black text-red-400">{(liveExtra.xgAway ?? 0).toFixed(2)}</span>
+                        </div>
+                        {(() => {
+                          const h = liveExtra.xgHome ?? 0; const a = liveExtra.xgAway ?? 0;
+                          const t = h + a; const pct = t > 0 ? Math.round((h / t) * 100) : 50;
+                          return (
+                            <div className="flex items-center gap-1.5">
+                              <AnimatedBar pct={pct} color="bg-blue-500" delay={0.2} />
+                              <AnimatedBar pct={100 - pct} color="bg-red-500" delay={0.2} />
+                            </div>
+                          );
+                        })()}
+                      </div>
+                    )}
                   </div>
                 );
               })()}
