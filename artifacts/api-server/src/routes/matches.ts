@@ -31260,9 +31260,35 @@ setInterval(() => {
       if (allCoresSuspended) continue;
     }
     const updated = applyTieredMarketDrift(state, now);
-    if (updated !== state) {
-      liveMatchState.set(id, updated);
-      // Trigger a delta broadcast immediately if something changed
+    // applyTieredMarketDrift always returns a new object (due to _driftPhase /
+    // _marketNextUpdate advancing), so reference equality is never a useful
+    // change detector here. Instead compare the value-carrying fields that
+    // clients actually care about.
+    //
+    // When a market is NOT due for update, applyTieredMarketDrift returns the
+    // SAME reference for that field (e.g. `updated.odds === state.odds`), so
+    // reference equality on the individual fields correctly tells us whether
+    // anything meaningful actually changed.
+    const oddsChanged = updated.odds !== state.odds;
+    const marketsChanged =
+      updated.markets.totalGoals !== state.markets.totalGoals ||
+      updated.markets.handicap !== state.markets.handicap ||
+      updated.markets.doubleChance !== state.markets.doubleChance ||
+      updated.markets.drawNoBet !== state.markets.drawNoBet ||
+      updated.markets.bothTeamsScore !== state.markets.bothTeamsScore ||
+      updated.markets.halfTime !== state.markets.halfTime ||
+      updated.markets.htft !== state.markets.htft ||
+      updated.markets.correctScore !== state.markets.correctScore ||
+      updated.markets.htCorrectScore !== state.markets.htCorrectScore ||
+      updated.markets.h2CorrectScore !== state.markets.h2CorrectScore ||
+      updated.markets.corners !== state.markets.corners ||
+      updated.markets.cards !== state.markets.cards ||
+      updated.markets.teamGoals !== state.markets.teamGoals;
+
+    // Always advance state so _driftPhase / _marketNextUpdate are current
+    liveMatchState.set(id, updated);
+
+    if (oddsChanged || marketsChanged) {
       broadcastMatchDelta(id, {
         odds: updated.odds,
         markets: updated.markets,
@@ -31271,7 +31297,8 @@ setInterval(() => {
       anyChange = true;
     }
   }
-  // Push full snapshot to SSE/WS clients periodically or on any change
+  // Push a full snapshot when any value actually changed so that clients
+  // which missed the delta (e.g. connected mid-cycle) see fresh data.
   if (anyChange) {
     broadcastLive().catch(() => {
       /* ignore */
