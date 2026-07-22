@@ -594,6 +594,9 @@ export type LiveMatchState = {
     passesAway?: number;
     passAccuracyHome?: number;
     passAccuracyAway?: number;
+    // Football goal minute tracking (scored across refreshes)
+    homeGoalMinutes?: number[]; // minutes when home team scored
+    awayGoalMinutes?: number[]; // minutes when away team scored
   };
 };
 
@@ -14311,6 +14314,24 @@ async function buildLiveMatches(): Promise<LiveMatchState[]> {
           });
         }
       }
+      // ── Goal minute extraction from Statpal events ──────────────────────────
+      const _dedupMin = (arr: number[]) =>
+        [...new Set(arr)].filter(n => n > 0).sort((a, b) => a - b);
+      // Goals scored BY home team (own-goals by away also count for home)
+      const _evHomeGoals = events
+        .filter(e => /goal/i.test(e.type) && !/missed|cancelled/i.test(e.type))
+        .filter(e => {
+          const isOwnGoal = /own.?goal/i.test(e.type);
+          return isOwnGoal ? e.team === "away" : e.team === "home";
+        })
+        .map(e => e.minute);
+      const _evAwayGoals = events
+        .filter(e => /goal/i.test(e.type) && !/missed|cancelled/i.test(e.type))
+        .filter(e => {
+          const isOwnGoal = /own.?goal/i.test(e.type);
+          return isOwnGoal ? e.team === "home" : e.team === "away";
+        })
+        .map(e => e.minute);
       // Red card counts derived from the fully-parsed events (available in both branches)
       const stateRcHome = countRedCards(events, "home");
       const stateRcAway = countRedCards(events, "away");
@@ -14621,7 +14642,34 @@ async function buildLiveMatches(): Promise<LiveMatchState[]> {
       if (m.et) footballExtra.etScore = [m.et.home_goals, m.et.away_goals];
       if (m.penalties)
         footballExtra.penScore = [m.penalties.home_pen, m.penalties.away_pen];
-      
+
+      // ── Goal minute tracking ─────────────────────────────────────────────────
+      // Priority 1: Statpal events (when available)
+      // Priority 2: Score-change inference (tracks each tick where score jumps)
+      {
+        const prevHome = existing?._liveExtra?.homeGoalMinutes ?? [];
+        const prevAway = existing?._liveExtra?.awayGoalMinutes ?? [];
+        if (_evHomeGoals.length > 0 || _evAwayGoals.length > 0) {
+          // Statpal provided event-level data — use directly
+          const merged = _dedupMin([..._evHomeGoals]);
+          if (merged.length > 0) footballExtra.homeGoalMinutes = merged;
+          const mergedA = _dedupMin([..._evAwayGoals]);
+          if (mergedA.length > 0) footballExtra.awayGoalMinutes = mergedA;
+        } else {
+          // Score-change detection: append current minute when score increases
+          const mergedH = [...prevHome];
+          const mergedA = [...prevAway];
+          if (existing && minute > 0) {
+            if (homeScore > existing.homeScore) mergedH.push(minute);
+            if (awayScore > existing.awayScore) mergedA.push(minute);
+          }
+          const dH = _dedupMin(mergedH);
+          const dA = _dedupMin(mergedA);
+          if (dH.length > 0) footballExtra.homeGoalMinutes = dH;
+          if (dA.length > 0) footballExtra.awayGoalMinutes = dA;
+        }
+      }
+
       // Fetch live stats (corners, cards, possession, shots, etc.) and add to _liveExtra
       try {
         const extras = await fetchFootballExtras(Number(m.main_id));
@@ -15859,6 +15907,20 @@ async function buildFootballLiveV2(
             : (existing._liveExtra?.secondHalfKickoffSec ??
               Math.floor(now / 1000) - Math.max(0, minute - 45) * 60)
           : existing._liveExtra?.secondHalfKickoffSec;
+      // ── Goal minute tracking for football-v2 matches ───────────────────────
+      // Accumulate per-team goal minutes across refreshes via score-change detection.
+      // Only during regular time + ET (not penalty shootout — tracked separately).
+      const _prevHGoals = (existing._liveExtra?.homeGoalMinutes as number[] | undefined) ?? [];
+      const _prevAGoals = (existing._liveExtra?.awayGoalMinutes as number[] | undefined) ?? [];
+      const _goalDedup = (arr: number[]) =>
+        [...new Set(arr)].filter(n => n > 0).sort((a, b) => a - b);
+      const _newHGoals = [..._prevHGoals];
+      const _newAGoals = [..._prevAGoals];
+      if (!isPen && homeScore > existing.homeScore)
+        for (let _g = 0; _g < homeScore - existing.homeScore; _g++) _newHGoals.push(minute);
+      if (!isPen && awayScore > existing.awayScore)
+        for (let _g = 0; _g < awayScore - existing.awayScore; _g++) _newAGoals.push(minute);
+
       const liveExtra = {
         ...(penLiveExtra ?? {}),
         ...(shKickoffSec ? { secondHalfKickoffSec: shKickoffSec } : {}),
@@ -15867,6 +15929,8 @@ async function buildFootballLiveV2(
           ? { clockSec: baseSec, clockAtMs: now, clockRunning: isClockRunning }
           : {}),
         clockStr,
+        ...(_newHGoals.length > 0 ? { homeGoalMinutes: _goalDedup(_newHGoals) } : {}),
+        ...(_newAGoals.length > 0 ? { awayGoalMinutes: _goalDedup(_newAGoals) } : {}),
       };
 
       // Helper: patch penExtra with real penalty odds into markets
@@ -31885,14 +31949,43 @@ router.get("/v2-incidents", async (req: Request, res: Response) => {
       signal: AbortSignal.timeout(8000),
       headers: sapiHeaders(),
     });
-    if (!resp.ok) {
-      res.json({});
-      return;
-    }
+    if (!resp.ok) throw new Error(`incidents ${resp.status}`);
     const data = (await resp.json()) as unknown;
     v2IncidentsCache.set(cacheKey, { data, fetchedAt: Date.now() });
     res.json(data);
   } catch {
+    // Fallback: build incidents from liveMatchState events + tracked goal minutes
+    const liveState =
+      liveMatchState.get(matchId) ?? liveMatchState.get(`football-v2-${matchId}`);
+    const incidents: Array<Record<string, unknown>> = [];
+    if (liveState?.events?.length) {
+      liveState.events.forEach((e, i) => {
+        incidents.push({
+          id: i,
+          type: e.type,
+          minute: e.minute,
+          team: e.team,
+          player: { name: e.player },
+        });
+      });
+    } else if (liveState?._liveExtra) {
+      const lx = liveState._liveExtra;
+      const hGoals = (lx.homeGoalMinutes as number[] | undefined) ?? [];
+      const aGoals = (lx.awayGoalMinutes as number[] | undefined) ?? [];
+      hGoals.forEach((min, i) =>
+        incidents.push({ id: i, type: "Goal", minute: min, team: "home", player: { name: "" } }),
+      );
+      aGoals.forEach((min, i) =>
+        incidents.push({ id: 100 + i, type: "Goal", minute: min, team: "away", player: { name: "" } }),
+      );
+      incidents.sort((a, b) => (a.minute as number) - (b.minute as number));
+    }
+    if (incidents.length > 0) {
+      const fallback = { data: { incidents } };
+      v2IncidentsCache.set(cacheKey, { data: fallback, fetchedAt: Date.now() });
+      res.json(fallback);
+      return;
+    }
     res.json({});
   }
 });
@@ -31928,14 +32021,48 @@ router.get("/v2-statistics", async (req: Request, res: Response) => {
       signal: AbortSignal.timeout(8000),
       headers: sapiHeaders(),
     });
-    if (!resp.ok) {
-      res.json({});
-      return;
-    }
+    if (!resp.ok) throw new Error(`statistics ${resp.status}`);
     const data = (await resp.json()) as unknown;
     v2StatisticsCache.set(cacheKey, { data, fetchedAt: Date.now() });
     res.json(data);
   } catch {
+    // Fallback: synthesize stats from liveMatchState._liveExtra
+    const liveState =
+      liveMatchState.get(matchId) ?? liveMatchState.get(`football-v2-${matchId}`);
+    if (liveState?._liveExtra) {
+      const lx = liveState._liveExtra;
+      const rows: Array<{ name: string; home: string; away: string }> = [];
+      if (lx.possessionHome != null)
+        rows.push({
+          name: "Posse de Bola",
+          home: `${lx.possessionHome}%`,
+          away: `${lx.possessionAway ?? 100 - (lx.possessionHome as number)}%`,
+        });
+      if (lx.shotsTotalHome != null)
+        rows.push({ name: "Remates", home: String(lx.shotsTotalHome), away: String(lx.shotsTotalAway ?? 0) });
+      if (lx.shotsOnTargetHome != null)
+        rows.push({ name: "Remates a Baliza", home: String(lx.shotsOnTargetHome), away: String(lx.shotsOnTargetAway ?? 0) });
+      if (lx.dangerousAttacksHome != null)
+        rows.push({ name: "Ataques Perigosos", home: String(lx.dangerousAttacksHome), away: String(lx.dangerousAttacksAway ?? 0) });
+      if (lx.attacksHome != null)
+        rows.push({ name: "Ataques", home: String(lx.attacksHome), away: String(lx.attacksAway ?? 0) });
+      if (lx.foulsHome != null)
+        rows.push({ name: "Faltas", home: String(lx.foulsHome), away: String(lx.foulsAway ?? 0) });
+      if (lx.yellowCardsHome != null)
+        rows.push({ name: "Cartões Amarelos", home: String(lx.yellowCardsHome), away: String(lx.yellowCardsAway ?? 0) });
+      if (lx.xgHome != null)
+        rows.push({
+          name: "xG",
+          home: (lx.xgHome as number).toFixed(2),
+          away: ((lx.xgAway as number) ?? 0).toFixed(2),
+        });
+      if (rows.length > 0) {
+        const synth = { data: { statistics: [{ title: "Estatísticas", rows }] } };
+        v2StatisticsCache.set(cacheKey, { data: synth, fetchedAt: Date.now() });
+        res.json(synth);
+        return;
+      }
+    }
     res.json({});
   }
 });

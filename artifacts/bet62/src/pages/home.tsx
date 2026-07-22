@@ -3670,6 +3670,9 @@ type Match = {
     passesAway?: number;
     passAccuracyHome?: number;
     passAccuracyAway?: number;
+    // Football goal minute tracking
+    homeGoalMinutes?: number[];
+    awayGoalMinutes?: number[];
   };
   // Red cards per team (football only)
   redCardsHome?: number;
@@ -4086,6 +4089,40 @@ function MomentumChart({
               </text>
             </>
           )}
+
+          {/* Goal minute markers ⚽ */}
+          {(() => {
+            const lx = (match._liveExtra ?? {}) as Record<string, unknown>;
+            const homeGoalMins = (lx.homeGoalMinutes as number[] | undefined) ?? [];
+            const awayGoalMins = (lx.awayGoalMinutes as number[] | undefined) ?? [];
+            if (homeGoalMins.length === 0 && awayGoalMins.length === 0) return null;
+            return (
+              <>
+                {homeGoalMins.map((gMin, i) => {
+                  const col = Math.min(getTargetCols(gMin), TOTAL_COLS - 1);
+                  const gx = col * colW + colW / 2;
+                  return (
+                    <g key={`hg-${i}`}>
+                      <line x1={gx} y1={4} x2={gx} y2={midY - 1}
+                        stroke="#ef4444" strokeWidth="0.9" strokeDasharray="2,2" opacity="0.9" />
+                      <text x={gx} y={10} fontSize="9" textAnchor="middle">⚽</text>
+                    </g>
+                  );
+                })}
+                {awayGoalMins.map((gMin, i) => {
+                  const col = Math.min(getTargetCols(gMin), TOTAL_COLS - 1);
+                  const gx = col * colW + colW / 2;
+                  return (
+                    <g key={`ag-${i}`}>
+                      <line x1={gx} y1={midY + 1} x2={gx} y2={H - 5}
+                        stroke="#a1a1aa" strokeWidth="0.9" strokeDasharray="2,2" opacity="0.9" />
+                      <text x={gx} y={H - 3} fontSize="9" textAnchor="middle">⚽</text>
+                    </g>
+                  );
+                })}
+              </>
+            );
+          })()}
 
           {/* Timeline labels */}
           <text x={2}       y={H - 2} fontSize="7" fill="#52525b" fontFamily="monospace">0'</text>
@@ -10279,12 +10316,31 @@ export default function Home({
               </div>
             )}
           </div>
-          {/* Progress bar */}
-          {!isEmBreve && !isVolleyNonLive && progress > 0 && (
-            <div className="mt-2 w-full h-0.5 bg-zinc-800 rounded-full overflow-hidden">
-              <div className="h-full bg-red-600/60 rounded-full" style={{ width: `${progress}%` }} />
-            </div>
-          )}
+          {/* Progress bar + goal markers */}
+          {!isEmBreve && !isVolleyNonLive && progress > 0 && (() => {
+            const allGoals = [
+              ...(extra?.homeGoalMinutes ?? []).map((m: number) => ({ m, isHome: true })),
+              ...(extra?.awayGoalMinutes ?? []).map((m: number) => ({ m, isHome: false })),
+            ];
+            const maxMin = sport === "basketball" ? 48 : sport === "hockey" ? 60 : sport === "baseball" ? 9 : 90;
+            return (
+              <div className="mt-2 w-full relative" style={{ height: "6px" }}>
+                <div className="absolute inset-0 bg-zinc-800 rounded-full overflow-hidden">
+                  <div className="h-full bg-red-600/60 rounded-full" style={{ width: `${progress}%` }} />
+                </div>
+                {allGoals.map(({ m, isHome }, i) => (
+                  <div
+                    key={i}
+                    className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 text-[7px] leading-none pointer-events-none select-none"
+                    style={{ left: `${Math.min(97, (m / maxMin) * 100)}%` }}
+                    title={`Golo ${isHome ? "casa" : "fora"} min ${m}'`}
+                  >
+                    ⚽
+                  </div>
+                ))}
+              </div>
+            );
+          })()}
         </div>
       </motion.div>
     );

@@ -2,3 +2,4 @@
 - [Statpal tennis decimal set scores](statpal-tennis-quirk.md) — statpal's tennis livescores API sometimes encodes a set's games as a decimal; must truncate before any odds/score math.
 - [Football live guard provider ids](football-live-guard-provider-ids.md) — a ground-truth cross-check must share the same provider's id space as the feed it checks, or it silently no-ops.
 - [Football live provider config defaults](football-live-provider-config.md) — FOOTBALL_LIVE/DAILY/REFERENCE_PROVIDER must default to "auto"; "sportsapipro" silently blocks Statpal when both keys are set.
+- [Football live goal tracking](football-live-goal-tracking.md) — goal minutes tracked in buildFootballLiveV2 via score-change detection; stats empty without SPORTSAPI_KEY; fallbacks implemented.
