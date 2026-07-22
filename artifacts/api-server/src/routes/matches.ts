@@ -563,6 +563,37 @@ export type LiveMatchState = {
     // Live stats — polled from /match/{id}/statistics (background, ~90s TTL)
     cornersTotal?: number; // football: total corners in match so far
     cardsTotal?: number; // football: total cards (yellow+red) in match so far
+    // Per-team football stats
+    possessionHome?: number;
+    possessionAway?: number;
+    shotsTotalHome?: number;
+    shotsTotalAway?: number;
+    shotsOnTargetHome?: number;
+    shotsOnTargetAway?: number;
+    foulsHome?: number;
+    foulsAway?: number;
+    yellowCardsHome?: number;
+    yellowCardsAway?: number;
+    redCardsHomeCount?: number;
+    redCardsAwayCount?: number;
+    offsidesHome?: number;
+    offsidesAway?: number;
+    savesHome?: number;
+    savesAway?: number;
+    dangerousAttacksHome?: number;
+    dangerousAttacksAway?: number;
+    attacksHome?: number;
+    attacksAway?: number;
+    xgHome?: number;
+    xgAway?: number;
+    throwInsHome?: number;
+    throwInsAway?: number;
+    crossesHome?: number;
+    crossesAway?: number;
+    passesHome?: number;
+    passesAway?: number;
+    passAccuracyHome?: number;
+    passAccuracyAway?: number;
   };
 };
 
@@ -5789,11 +5820,152 @@ async function fetchFootballExtras(
         .toLowerCase();
       return raw === "true" || raw === "1" || raw === "yes";
     };
+    // Helper: try multiple paths and return first numeric hit
+    const getNum = (paths: string[][]): number | undefined => {
+      for (const path of paths) {
+        const v = toNum(get(data, path));
+        if (v !== undefined) return v;
+      }
+      return undefined;
+    };
+
     const cornersHome =
-      toNum(get(data, ["team_stats", "home", "corners", "total"])) ?? 0;
+      getNum([["team_stats", "home", "corners", "total"], ["team_stats", "home", "corners"]]) ?? 0;
     const cornersAway =
-      toNum(get(data, ["team_stats", "away", "corners", "total"])) ?? 0;
+      getNum([["team_stats", "away", "corners", "total"], ["team_stats", "away", "corners"]]) ?? 0;
     const cornersTotal = cornersHome + cornersAway;
+
+    // Possession
+    const possessionHome = getNum([
+      ["team_stats", "home", "possession", "percentage"],
+      ["team_stats", "home", "ball_possession", "percentage"],
+      ["team_stats", "home", "possession"],
+    ]);
+    const possessionAway = getNum([
+      ["team_stats", "away", "possession", "percentage"],
+      ["team_stats", "away", "ball_possession", "percentage"],
+      ["team_stats", "away", "possession"],
+    ]);
+
+    // Shots
+    const shotsTotalHome = getNum([
+      ["team_stats", "home", "shots", "total"],
+      ["team_stats", "home", "shots_total"],
+    ]);
+    const shotsTotalAway = getNum([
+      ["team_stats", "away", "shots", "total"],
+      ["team_stats", "away", "shots_total"],
+    ]);
+    const shotsOnTargetHome = getNum([
+      ["team_stats", "home", "shots", "ontarget"],
+      ["team_stats", "home", "shots", "on_target"],
+      ["team_stats", "home", "shots_on_target"],
+    ]);
+    const shotsOnTargetAway = getNum([
+      ["team_stats", "away", "shots", "ontarget"],
+      ["team_stats", "away", "shots", "on_target"],
+      ["team_stats", "away", "shots_on_target"],
+    ]);
+
+    // Fouls
+    const foulsHome = getNum([
+      ["team_stats", "home", "fouls", "committed"],
+      ["team_stats", "home", "fouls", "total"],
+      ["team_stats", "home", "fouls"],
+    ]);
+    const foulsAway = getNum([
+      ["team_stats", "away", "fouls", "committed"],
+      ["team_stats", "away", "fouls", "total"],
+      ["team_stats", "away", "fouls"],
+    ]);
+
+    // Offsides
+    const offsidesHome = getNum([
+      ["team_stats", "home", "offsides", "total"],
+      ["team_stats", "home", "offsides"],
+    ]);
+    const offsidesAway = getNum([
+      ["team_stats", "away", "offsides", "total"],
+      ["team_stats", "away", "offsides"],
+    ]);
+
+    // Saves
+    const savesHome = getNum([
+      ["team_stats", "home", "saves", "total"],
+      ["team_stats", "home", "saves"],
+    ]);
+    const savesAway = getNum([
+      ["team_stats", "away", "saves", "total"],
+      ["team_stats", "away", "saves"],
+    ]);
+
+    // Attacks / Dangerous attacks
+    const dangerousAttacksHome = getNum([
+      ["team_stats", "home", "dangerous_attacks", "total"],
+      ["team_stats", "home", "dangerous_attacks"],
+    ]);
+    const dangerousAttacksAway = getNum([
+      ["team_stats", "away", "dangerous_attacks", "total"],
+      ["team_stats", "away", "dangerous_attacks"],
+    ]);
+    const attacksHome = getNum([
+      ["team_stats", "home", "attacks", "total"],
+      ["team_stats", "home", "attacks"],
+    ]);
+    const attacksAway = getNum([
+      ["team_stats", "away", "attacks", "total"],
+      ["team_stats", "away", "attacks"],
+    ]);
+
+    // xG
+    const xgHome = getNum([
+      ["team_stats", "home", "xg", "total"],
+      ["team_stats", "home", "expected_goals", "total"],
+      ["team_stats", "home", "xg"],
+    ]);
+    const xgAway = getNum([
+      ["team_stats", "away", "xg", "total"],
+      ["team_stats", "away", "expected_goals", "total"],
+      ["team_stats", "away", "xg"],
+    ]);
+
+    // Throw-ins
+    const throwInsHome = getNum([
+      ["team_stats", "home", "throw_ins", "total"],
+      ["team_stats", "home", "throw_ins"],
+    ]);
+    const throwInsAway = getNum([
+      ["team_stats", "away", "throw_ins", "total"],
+      ["team_stats", "away", "throw_ins"],
+    ]);
+
+    // Crosses
+    const crossesHome = getNum([
+      ["team_stats", "home", "crosses", "total"],
+      ["team_stats", "home", "crosses"],
+    ]);
+    const crossesAway = getNum([
+      ["team_stats", "away", "crosses", "total"],
+      ["team_stats", "away", "crosses"],
+    ]);
+
+    // Passes
+    const passesHome = getNum([
+      ["team_stats", "home", "passes", "total"],
+      ["team_stats", "home", "passes"],
+    ]);
+    const passesAway = getNum([
+      ["team_stats", "away", "passes", "total"],
+      ["team_stats", "away", "passes"],
+    ]);
+    const passAccuracyHome = getNum([
+      ["team_stats", "home", "passes", "accuracy"],
+      ["team_stats", "home", "pass_accuracy"],
+    ]);
+    const passAccuracyAway = getNum([
+      ["team_stats", "away", "passes", "accuracy"],
+      ["team_stats", "away", "pass_accuracy"],
+    ]);
 
     const ev = get(data, ["event_summary"]) as
       | Record<string, unknown>
@@ -5808,19 +5980,22 @@ async function fetchFootballExtras(
       if (typeof v === "object") return [v as Record<string, unknown>];
       return [];
     };
-    const countCards = (side: "home" | "away"): number => {
+    const countYellowCards = (side: "home" | "away"): number => {
       const s = ev?.[side] as Record<string, unknown> | undefined;
-      const y = toArr(
-        (s?.["yellowcards"] as Record<string, unknown> | undefined)?.[
-          "event"
-        ],
-      );
-      const r = toArr(
-        (s?.["redcards"] as Record<string, unknown> | undefined)?.["event"],
-      );
-      return y.length + r.length;
+      return toArr((s?.["yellowcards"] as Record<string, unknown> | undefined)?.["event"]).length;
     };
+    const countRedCards = (side: "home" | "away"): number => {
+      const s = ev?.[side] as Record<string, unknown> | undefined;
+      return toArr((s?.["redcards"] as Record<string, unknown> | undefined)?.["event"]).length;
+    };
+    const countCards = (side: "home" | "away"): number =>
+      countYellowCards(side) + countRedCards(side);
     const cardsTotal = countCards("home") + countCards("away");
+
+    const yellowCardsHome = countYellowCards("home");
+    const yellowCardsAway = countYellowCards("away");
+    const redCardsHomeCount = countRedCards("home");
+    const redCardsAwayCount = countRedCards("away");
 
     const parseMinute = (e: Record<string, unknown>): number => {
       const m = toNum(e["minute"]) ?? 0;
@@ -5946,10 +6121,44 @@ async function fetchFootballExtras(
         (b.minute * 100 + (b.extraMinute ?? 0)),
     );
 
+    const maybeNum = (n: number | undefined): number | undefined =>
+      n !== undefined && Number.isFinite(n) ? n : undefined;
+
     return {
-      cornersTotal: Number.isFinite(cornersTotal) ? cornersTotal : undefined,
-      cardsTotal: Number.isFinite(cardsTotal) ? cardsTotal : undefined,
+      cornersTotal: maybeNum(cornersTotal),
+      cardsTotal: maybeNum(cardsTotal),
       firstGoal,
+      // Per-team stats
+      possessionHome: maybeNum(possessionHome),
+      possessionAway: maybeNum(possessionAway),
+      shotsTotalHome: maybeNum(shotsTotalHome),
+      shotsTotalAway: maybeNum(shotsTotalAway),
+      shotsOnTargetHome: maybeNum(shotsOnTargetHome),
+      shotsOnTargetAway: maybeNum(shotsOnTargetAway),
+      foulsHome: maybeNum(foulsHome),
+      foulsAway: maybeNum(foulsAway),
+      yellowCardsHome: maybeNum(yellowCardsHome),
+      yellowCardsAway: maybeNum(yellowCardsAway),
+      redCardsHomeCount: maybeNum(redCardsHomeCount),
+      redCardsAwayCount: maybeNum(redCardsAwayCount),
+      offsidesHome: maybeNum(offsidesHome),
+      offsidesAway: maybeNum(offsidesAway),
+      savesHome: maybeNum(savesHome),
+      savesAway: maybeNum(savesAway),
+      dangerousAttacksHome: maybeNum(dangerousAttacksHome),
+      dangerousAttacksAway: maybeNum(dangerousAttacksAway),
+      attacksHome: maybeNum(attacksHome),
+      attacksAway: maybeNum(attacksAway),
+      xgHome: maybeNum(xgHome),
+      xgAway: maybeNum(xgAway),
+      throwInsHome: maybeNum(throwInsHome),
+      throwInsAway: maybeNum(throwInsAway),
+      crossesHome: maybeNum(crossesHome),
+      crossesAway: maybeNum(crossesAway),
+      passesHome: maybeNum(passesHome),
+      passesAway: maybeNum(passesAway),
+      passAccuracyHome: maybeNum(passAccuracyHome),
+      passAccuracyAway: maybeNum(passAccuracyAway),
       ...(goalEvents.length > 0 || cardEvents.length > 0
         ? {
             football: {
@@ -6691,6 +6900,37 @@ type FootballExtras = {
   cornersTotal?: number;
   cardsTotal?: number;
   firstGoal?: "home" | "away" | "none";
+  // per-team live stats from /match/{id}/statistics
+  possessionHome?: number;
+  possessionAway?: number;
+  shotsTotalHome?: number;
+  shotsTotalAway?: number;
+  shotsOnTargetHome?: number;
+  shotsOnTargetAway?: number;
+  foulsHome?: number;
+  foulsAway?: number;
+  yellowCardsHome?: number;
+  yellowCardsAway?: number;
+  redCardsHomeCount?: number;
+  redCardsAwayCount?: number;
+  offsidesHome?: number;
+  offsidesAway?: number;
+  savesHome?: number;
+  savesAway?: number;
+  dangerousAttacksHome?: number;
+  dangerousAttacksAway?: number;
+  attacksHome?: number;
+  attacksAway?: number;
+  xgHome?: number;
+  xgAway?: number;
+  throwInsHome?: number;
+  throwInsAway?: number;
+  crossesHome?: number;
+  crossesAway?: number;
+  passesHome?: number;
+  passesAway?: number;
+  passAccuracyHome?: number;
+  passAccuracyAway?: number;
   football?: {
     goals?: Array<{
       team: "home" | "away";
@@ -14378,12 +14618,45 @@ async function buildLiveMatches(): Promise<LiveMatchState[]> {
       if (m.penalties)
         footballExtra.penScore = [m.penalties.home_pen, m.penalties.away_pen];
       
-      // Fetch live stats (corners, cards) and add to _liveExtra
+      // Fetch live stats (corners, cards, possession, shots, etc.) and add to _liveExtra
       try {
         const extras = await fetchFootballExtras(Number(m.main_id));
         if (extras) {
-          if (extras.cornersTotal !== undefined) footballExtra.cornersTotal = extras.cornersTotal;
-          if (extras.cardsTotal !== undefined) footballExtra.cardsTotal = extras.cardsTotal;
+          const setIfDef = <K extends keyof typeof footballExtra>(
+            key: K, val: typeof footballExtra[K]
+          ) => { if (val !== undefined) (footballExtra as any)[key] = val; };
+          setIfDef("cornersTotal", extras.cornersTotal);
+          setIfDef("cardsTotal", extras.cardsTotal);
+          setIfDef("possessionHome", extras.possessionHome);
+          setIfDef("possessionAway", extras.possessionAway);
+          setIfDef("shotsTotalHome", extras.shotsTotalHome);
+          setIfDef("shotsTotalAway", extras.shotsTotalAway);
+          setIfDef("shotsOnTargetHome", extras.shotsOnTargetHome);
+          setIfDef("shotsOnTargetAway", extras.shotsOnTargetAway);
+          setIfDef("foulsHome", extras.foulsHome);
+          setIfDef("foulsAway", extras.foulsAway);
+          setIfDef("yellowCardsHome", extras.yellowCardsHome);
+          setIfDef("yellowCardsAway", extras.yellowCardsAway);
+          setIfDef("redCardsHomeCount", extras.redCardsHomeCount);
+          setIfDef("redCardsAwayCount", extras.redCardsAwayCount);
+          setIfDef("offsidesHome", extras.offsidesHome);
+          setIfDef("offsidesAway", extras.offsidesAway);
+          setIfDef("savesHome", extras.savesHome);
+          setIfDef("savesAway", extras.savesAway);
+          setIfDef("dangerousAttacksHome", extras.dangerousAttacksHome);
+          setIfDef("dangerousAttacksAway", extras.dangerousAttacksAway);
+          setIfDef("attacksHome", extras.attacksHome);
+          setIfDef("attacksAway", extras.attacksAway);
+          setIfDef("xgHome", extras.xgHome);
+          setIfDef("xgAway", extras.xgAway);
+          setIfDef("throwInsHome", extras.throwInsHome);
+          setIfDef("throwInsAway", extras.throwInsAway);
+          setIfDef("crossesHome", extras.crossesHome);
+          setIfDef("crossesAway", extras.crossesAway);
+          setIfDef("passesHome", extras.passesHome);
+          setIfDef("passesAway", extras.passesAway);
+          setIfDef("passAccuracyHome", extras.passAccuracyHome);
+          setIfDef("passAccuracyAway", extras.passAccuracyAway);
         }
       } catch {
         // Ignore errors fetching stats

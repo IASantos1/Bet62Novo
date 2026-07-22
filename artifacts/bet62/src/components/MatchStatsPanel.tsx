@@ -30,6 +30,7 @@ type ConfrontosData = { homeWins: number; awayWins: number; draws: number; recen
 type V2StatsGroup = { title: string; rows: Array<{ name: string; home: string; away: string }> };
 
 type LiveExtra = {
+  // Legacy tuple fields (kept for backwards compat)
   possession?: [number, number];
   xg?: [number, number];
   corners?: [number, number];
@@ -40,6 +41,7 @@ type LiveExtra = {
   yellows?: [number, number];
   reds?: [number, number];
   goals?: [number, number];
+  // Non-football sports
   vollSets?: Array<[number, number]>;
   currentPts?: [number, number];
   quarters?: Array<[number, number]>;
@@ -62,6 +64,39 @@ type LiveExtra = {
   currentGameScore?: string;
   currentSet?: number;
   games?: [number, number];
+  // Football per-team live stats (from /match/{id}/statistics)
+  cornersTotal?: number;
+  cardsTotal?: number;
+  possessionHome?: number;
+  possessionAway?: number;
+  shotsTotalHome?: number;
+  shotsTotalAway?: number;
+  shotsOnTargetHome?: number;
+  shotsOnTargetAway?: number;
+  foulsHome?: number;
+  foulsAway?: number;
+  yellowCardsHome?: number;
+  yellowCardsAway?: number;
+  redCardsHomeCount?: number;
+  redCardsAwayCount?: number;
+  offsidesHome?: number;
+  offsidesAway?: number;
+  savesHome?: number;
+  savesAway?: number;
+  dangerousAttacksHome?: number;
+  dangerousAttacksAway?: number;
+  attacksHome?: number;
+  attacksAway?: number;
+  xgHome?: number;
+  xgAway?: number;
+  throwInsHome?: number;
+  throwInsAway?: number;
+  crossesHome?: number;
+  crossesAway?: number;
+  passesHome?: number;
+  passesAway?: number;
+  passAccuracyHome?: number;
+  passAccuracyAway?: number;
 };
 
 type Props = {
@@ -751,6 +786,89 @@ export default function MatchStatsPanel({
                 liveMinute={liveMinute}
                 isHalfTime={isHalfTime}
               />}
+
+              {/* Football live per-team stats from /match/{id}/statistics */}
+              {isFootball && isLive && liveExtra && (() => {
+                type StatDef = { key: string; label: string; h: number | undefined; a: number | undefined; isPct?: boolean; fmt?: (n: number) => string };
+                const rows: StatDef[] = [
+                  { key: "possession", label: "Posse de Bola", h: liveExtra.possessionHome, a: liveExtra.possessionAway, isPct: true },
+                  { key: "shots", label: "Remates", h: liveExtra.shotsTotalHome, a: liveExtra.shotsTotalAway },
+                  { key: "shotsOn", label: "No Alvo", h: liveExtra.shotsOnTargetHome, a: liveExtra.shotsOnTargetAway },
+                  // corners only available as total — skip per-team bar (no split available from Statpal)
+                  { key: "fouls", label: "Faltas", h: liveExtra.foulsHome, a: liveExtra.foulsAway },
+                  { key: "yellow", label: "Cart. Amarelos", h: liveExtra.yellowCardsHome, a: liveExtra.yellowCardsAway },
+                  { key: "red", label: "Cart. Vermelhos", h: liveExtra.redCardsHomeCount, a: liveExtra.redCardsAwayCount },
+                  { key: "offsides", label: "Foras de Jogo", h: liveExtra.offsidesHome, a: liveExtra.offsidesAway },
+                  { key: "saves", label: "Defesas", h: liveExtra.savesHome, a: liveExtra.savesAway },
+                  { key: "dangerous", label: "Ataques Perig.", h: liveExtra.dangerousAttacksHome, a: liveExtra.dangerousAttacksAway },
+                  { key: "attacks", label: "Ataques", h: liveExtra.attacksHome, a: liveExtra.attacksAway },
+                  { key: "crosses", label: "Cruzamentos", h: liveExtra.crossesHome, a: liveExtra.crossesAway },
+                  { key: "passes", label: "Passes", h: liveExtra.passesHome, a: liveExtra.passesAway },
+                  { key: "passAcc", label: "Precisão Passes", h: liveExtra.passAccuracyHome, a: liveExtra.passAccuracyAway, isPct: true },
+                  { key: "throwins", label: "Lançamentos", h: liveExtra.throwInsHome, a: liveExtra.throwInsAway },
+                ];
+                // filter rows that have at least one defined value
+                const visible = rows.filter(r => r.h !== undefined || r.a !== undefined);
+                if (visible.length === 0) return null;
+                return (
+                  <div className="bg-zinc-900 rounded-xl border border-zinc-800 overflow-hidden">
+                    <div className="flex items-center px-4 py-2.5 border-b border-zinc-800">
+                      <div className="flex-1 flex items-center gap-1.5">
+                        <div className="w-2 h-2 rounded-full bg-blue-500" />
+                        <span className="text-[11px] font-black text-zinc-200 truncate max-w-[90px]">{homeTeam}</span>
+                      </div>
+                      <span className="text-[10px] text-zinc-500 font-bold uppercase tracking-widest">Ao Vivo</span>
+                      <div className="flex-1 flex items-center gap-1.5 justify-end">
+                        <span className="text-[11px] font-black text-zinc-200 truncate max-w-[90px]">{awayTeam}</span>
+                        <div className="w-2 h-2 rounded-full bg-red-500" />
+                      </div>
+                    </div>
+                    <div className="px-4 py-4 space-y-4">
+                      {visible.map(row => {
+                        const hv = row.h ?? 0;
+                        const av = row.a ?? 0;
+                        const total = hv + av;
+                        const homePct = row.isPct ? hv : (total > 0 ? Math.round((hv / total) * 100) : 50);
+                        const hLabel = row.isPct ? `${Math.round(hv)}%` : String(Math.round(hv));
+                        const aLabel = row.isPct ? `${Math.round(av)}%` : String(Math.round(av));
+                        return (
+                          <StatBar
+                            key={row.key}
+                            label={row.label}
+                            home={row.h !== undefined ? hLabel : "-"}
+                            away={row.a !== undefined ? aLabel : "-"}
+                            homePct={homePct}
+                          />
+                        );
+                      })}
+                      {/* xG if available */}
+                      {(liveExtra.xgHome !== undefined || liveExtra.xgAway !== undefined) && (
+                        <div className="pt-2 border-t border-zinc-800 space-y-2">
+                          <div className="text-[10px] font-black text-zinc-500 uppercase tracking-widest">Golos Esperados (xG)</div>
+                          <div className="flex items-center justify-between">
+                            <span className="text-2xl font-black text-blue-400">{(liveExtra.xgHome ?? 0).toFixed(2)}</span>
+                            <div className="text-center">
+                              <div className="text-[9px] text-zinc-500 uppercase tracking-wide">xG Total</div>
+                              <div className="text-sm font-black text-zinc-300">{((liveExtra.xgHome ?? 0) + (liveExtra.xgAway ?? 0)).toFixed(2)}</div>
+                            </div>
+                            <span className="text-2xl font-black text-red-400">{(liveExtra.xgAway ?? 0).toFixed(2)}</span>
+                          </div>
+                          {(() => {
+                            const h = liveExtra.xgHome ?? 0; const a = liveExtra.xgAway ?? 0;
+                            const t = h + a; const pct = t > 0 ? Math.round((h / t) * 100) : 50;
+                            return (
+                              <div className="flex items-center gap-1.5">
+                                <AnimatedBar pct={pct} color="bg-blue-500" delay={0.2} />
+                                <AnimatedBar pct={100 - pct} color="bg-red-500" delay={0.2} />
+                              </div>
+                            );
+                          })()}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })()}
 
               {(v2StatsLoading && mainStats.length === 0) ? (
                 <div className="flex items-center justify-center py-6">
