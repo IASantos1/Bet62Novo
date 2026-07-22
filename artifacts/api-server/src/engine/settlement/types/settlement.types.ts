@@ -6,21 +6,47 @@ export type Outcome =
   | "half_lost"
   | "pending";
 
+/** Score for a single tennis set, optionally with tiebreak game scores */
+export type TennisSetScore = {
+  home: number;
+  away: number;
+  /** Tiebreak points (only present when set ended 7-6) */
+  tiebreak?: { home: number; away: number };
+};
+
 export type MatchResultExtras = {
-  /** Corners */
+  // ── Football: Corners ──────────────────────────────────────────────────
   cornersTotal?: number;
   homeCorners?: number;
   awayCorners?: number;
-  /** Cards */
+  // ── Football: Cards ───────────────────────────────────────────────────
   cardsTotal?: number;
   homeCards?: number;
   awayCards?: number;
-  /** Goal events — populated from the match events feed */
+  // ── Football: Goal events — populated from the match events feed ───────
   firstGoal?: "home" | "away" | "no_goal" | string;
   lastGoal?: "home" | "away" | string;
-  /** Half-time scores (alternative path for providers that put them in extras) */
+  // ── Football: Half-time scores (alternative path for some providers) ───
   htHome?: number;
   htAway?: number;
+
+  // ── Tennis: Per-set scores ─────────────────────────────────────────────
+  set1?: TennisSetScore;
+  set2?: TennisSetScore;
+  set3?: TennisSetScore;
+  set4?: TennisSetScore;
+  set5?: TennisSetScore;
+  // ── Tennis: Aggregated games across all sets ───────────────────────────
+  /** Total games won by the home player / player 1 */
+  homeGames?: number;
+  /** Total games won by the away player / player 2 */
+  awayGames?: number;
+  // ── Tennis: Service breaks ─────────────────────────────────────────────
+  homeBreaks?: number;
+  awayBreaks?: number;
+  totalBreaks?: number;
+  /** Which side broke serve first in the match */
+  firstBreak?: "home" | "away";
 };
 
 export type MatchResult = {
