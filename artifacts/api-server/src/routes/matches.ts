@@ -6654,6 +6654,10 @@ setInterval(async () => {
           _prevVolleyScores.set(matchId, { home: homeScore, away: awayScore, status });
           if (prev) {
             // only broadcast once we have a baseline; prevents spurious deltas on startup
+            logger.info(
+              { matchId, prev, homeScore, awayScore, status },
+              "[volley-delta] volleyball score changed — broadcasting delta",
+            );
             broadcastMatchDelta(matchId, { homeScore, awayScore, status });
           }
         }
