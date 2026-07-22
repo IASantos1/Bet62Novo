@@ -3,3 +3,4 @@
 - [Football live guard provider ids](football-live-guard-provider-ids.md) — a ground-truth cross-check must share the same provider's id space as the feed it checks, or it silently no-ops.
 - [Football live provider config defaults](football-live-provider-config.md) — FOOTBALL_LIVE/DAILY/REFERENCE_PROVIDER must default to "auto"; "sportsapipro" silently blocks Statpal when both keys are set.
 - [Football live goal tracking](football-live-goal-tracking.md) — goal minutes tracked in buildFootballLiveV2 via score-change detection; stats empty without SPORTSAPI_KEY; fallbacks implemented.
+- [Football stats — Statpal limitations](football-stats-statpal.md) — Statpal has no per-match stats endpoint (404); fallback uses estimated possession from _baseOdds; buildFootballLiveStatpal is dead code.

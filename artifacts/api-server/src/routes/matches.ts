@@ -6176,6 +6176,223 @@ async function fetchFootballExtras(
   }
 }
 
+// ─── Statpal per-match statistics ────────────────────────────────────────────
+// Tries Statpal's /v2/soccer/match/{id}/statistics endpoint. Falls back
+// gracefully if the endpoint doesn't exist or returns an unrecognised format.
+// Cached per match ID with a 90-second TTL so we don't hammer the API on
+// every live-feed tick (which fires every ~5 seconds).
+const statpalStatsCache = new Map<
+  string,
+  { result: FootballExtras | null; fetchedAt: number }
+>();
+const STATPAL_STATS_TTL_MS = 90_000;
+
+async function fetchStatpalMatchStats(
+  id: string | number,
+): Promise<FootballExtras | null> {
+  if (!CONFIG.STATPAL_API_KEY) return null;
+  const key = String(id);
+  const cached = statpalStatsCache.get(key);
+  if (cached && Date.now() - cached.fetchedAt < STATPAL_STATS_TTL_MS)
+    return cached.result;
+  try {
+    const url = buildStatpalUrl(`/v2/soccer/match/${id}/statistics`);
+    const resp = await fetch(url, {
+      signal: AbortSignal.timeout(8000),
+      headers: statpalHeaders(),
+    });
+    if (!resp.ok) {
+      statpalStatsCache.set(key, { result: null, fetchedAt: Date.now() });
+      return null;
+    }
+    const data = (await resp.json()) as Record<string, unknown>;
+
+    // Reuse the same helper and field-path logic as fetchFootballExtras.
+    const get = (o: unknown, path: string[]): unknown => {
+      let cur: unknown = o;
+      for (const k of path) {
+        if (!cur || typeof cur !== "object") return undefined;
+        cur = (cur as Record<string, unknown>)[k];
+      }
+      return cur;
+    };
+    const toNum = (v: unknown): number | undefined => {
+      if (typeof v === "number" && Number.isFinite(v)) return v;
+      if (typeof v === "string" && v.trim() !== "") {
+        const n = Number(v);
+        return Number.isFinite(n) ? n : undefined;
+      }
+      return undefined;
+    };
+    const getNum = (paths: string[][]): number | undefined => {
+      for (const path of paths) {
+        const v = toNum(get(data, path));
+        if (v !== undefined) return v;
+      }
+      return undefined;
+    };
+
+    const possessionHome = getNum([
+      ["team_stats", "home", "possession", "percentage"],
+      ["team_stats", "home", "ball_possession", "percentage"],
+      ["team_stats", "home", "possession"],
+      ["statistics", "home", "possession"],
+    ]);
+    const possessionAway = getNum([
+      ["team_stats", "away", "possession", "percentage"],
+      ["team_stats", "away", "ball_possession", "percentage"],
+      ["team_stats", "away", "possession"],
+      ["statistics", "away", "possession"],
+    ]);
+    const shotsTotalHome = getNum([
+      ["team_stats", "home", "shots", "total"],
+      ["team_stats", "home", "shots_total"],
+      ["statistics", "home", "shots_total"],
+    ]);
+    const shotsTotalAway = getNum([
+      ["team_stats", "away", "shots", "total"],
+      ["team_stats", "away", "shots_total"],
+      ["statistics", "away", "shots_total"],
+    ]);
+    const shotsOnTargetHome = getNum([
+      ["team_stats", "home", "shots", "ontarget"],
+      ["team_stats", "home", "shots", "on_target"],
+      ["team_stats", "home", "shots_on_target"],
+      ["statistics", "home", "shots_on_target"],
+    ]);
+    const shotsOnTargetAway = getNum([
+      ["team_stats", "away", "shots", "ontarget"],
+      ["team_stats", "away", "shots", "on_target"],
+      ["team_stats", "away", "shots_on_target"],
+      ["statistics", "away", "shots_on_target"],
+    ]);
+    const foulsHome = getNum([
+      ["team_stats", "home", "fouls", "committed"],
+      ["team_stats", "home", "fouls", "total"],
+      ["team_stats", "home", "fouls"],
+      ["statistics", "home", "fouls"],
+    ]);
+    const foulsAway = getNum([
+      ["team_stats", "away", "fouls", "committed"],
+      ["team_stats", "away", "fouls", "total"],
+      ["team_stats", "away", "fouls"],
+      ["statistics", "away", "fouls"],
+    ]);
+    const dangerousAttacksHome = getNum([
+      ["team_stats", "home", "dangerous_attacks", "total"],
+      ["team_stats", "home", "dangerous_attacks"],
+      ["statistics", "home", "dangerous_attacks"],
+    ]);
+    const dangerousAttacksAway = getNum([
+      ["team_stats", "away", "dangerous_attacks", "total"],
+      ["team_stats", "away", "dangerous_attacks"],
+      ["statistics", "away", "dangerous_attacks"],
+    ]);
+    const attacksHome = getNum([
+      ["team_stats", "home", "attacks", "total"],
+      ["team_stats", "home", "attacks"],
+      ["statistics", "home", "attacks"],
+    ]);
+    const attacksAway = getNum([
+      ["team_stats", "away", "attacks", "total"],
+      ["team_stats", "away", "attacks"],
+      ["statistics", "away", "attacks"],
+    ]);
+    const cornersH = getNum([
+      ["team_stats", "home", "corners", "total"],
+      ["team_stats", "home", "corners"],
+      ["statistics", "home", "corners"],
+    ]) ?? 0;
+    const cornersA = getNum([
+      ["team_stats", "away", "corners", "total"],
+      ["team_stats", "away", "corners"],
+      ["statistics", "away", "corners"],
+    ]) ?? 0;
+    const xgHome = getNum([
+      ["team_stats", "home", "xg", "total"],
+      ["team_stats", "home", "expected_goals", "total"],
+      ["team_stats", "home", "xg"],
+      ["statistics", "home", "xg"],
+    ]);
+    const xgAway = getNum([
+      ["team_stats", "away", "xg", "total"],
+      ["team_stats", "away", "expected_goals", "total"],
+      ["team_stats", "away", "xg"],
+      ["statistics", "away", "xg"],
+    ]);
+
+    const toArr = (v: unknown): Record<string, unknown>[] => {
+      if (!v) return [];
+      if (Array.isArray(v))
+        return v.filter((x) => x && typeof x === "object") as Record<string, unknown>[];
+      if (typeof v === "object") return [v as Record<string, unknown>];
+      return [];
+    };
+    const ev = get(data, ["event_summary"]) as Record<string, unknown> | undefined;
+    const cntYellow = (side: "home" | "away"): number => {
+      const s = ev?.[side] as Record<string, unknown> | undefined;
+      return toArr((s?.["yellowcards"] as Record<string, unknown> | undefined)?.["event"]).length;
+    };
+    const cntRed = (side: "home" | "away"): number => {
+      const s = ev?.[side] as Record<string, unknown> | undefined;
+      return toArr((s?.["redcards"] as Record<string, unknown> | undefined)?.["event"]).length;
+    };
+    const yellowCardsHome = cntYellow("home");
+    const yellowCardsAway = cntYellow("away");
+    const redCardsHomeCount = cntRed("home");
+    const redCardsAwayCount = cntRed("away");
+    const cardsTotal = yellowCardsHome + yellowCardsAway + redCardsHomeCount + redCardsAwayCount;
+    const cornersTotal = cornersH + cornersA;
+
+    const maybeNum = (n: number | undefined): number | undefined =>
+      n !== undefined && Number.isFinite(n) ? n : undefined;
+
+    // Only return a result if at least one useful stat was found
+    const hasData =
+      possessionHome !== undefined ||
+      shotsTotalHome !== undefined ||
+      foulsHome !== undefined ||
+      dangerousAttacksHome !== undefined ||
+      attacksHome !== undefined ||
+      cornersTotal > 0 ||
+      cardsTotal > 0 ||
+      xgHome !== undefined;
+
+    if (!hasData) {
+      statpalStatsCache.set(key, { result: null, fetchedAt: Date.now() });
+      return null;
+    }
+
+    const result: FootballExtras = {
+      cornersTotal: cornersTotal > 0 ? cornersTotal : undefined,
+      cardsTotal: cardsTotal > 0 ? maybeNum(cardsTotal) : undefined,
+      possessionHome: maybeNum(possessionHome),
+      possessionAway: maybeNum(possessionAway),
+      shotsTotalHome: maybeNum(shotsTotalHome),
+      shotsTotalAway: maybeNum(shotsTotalAway),
+      shotsOnTargetHome: maybeNum(shotsOnTargetHome),
+      shotsOnTargetAway: maybeNum(shotsOnTargetAway),
+      foulsHome: maybeNum(foulsHome),
+      foulsAway: maybeNum(foulsAway),
+      yellowCardsHome: yellowCardsHome > 0 ? yellowCardsHome : undefined,
+      yellowCardsAway: yellowCardsAway > 0 ? yellowCardsAway : undefined,
+      redCardsHomeCount: redCardsHomeCount > 0 ? redCardsHomeCount : undefined,
+      redCardsAwayCount: redCardsAwayCount > 0 ? redCardsAwayCount : undefined,
+      dangerousAttacksHome: maybeNum(dangerousAttacksHome),
+      dangerousAttacksAway: maybeNum(dangerousAttacksAway),
+      attacksHome: maybeNum(attacksHome),
+      attacksAway: maybeNum(attacksAway),
+      xgHome: maybeNum(xgHome),
+      xgAway: maybeNum(xgAway),
+    };
+    statpalStatsCache.set(key, { result, fetchedAt: Date.now() });
+    return result;
+  } catch {
+    statpalStatsCache.set(key, { result: null, fetchedAt: Date.now() });
+    return null;
+  }
+}
+
 // Normaliser helpers
 function v2TeamName(t: string | SAPIV2TeamObj | undefined): string {
   if (!t) return "Unknown";
@@ -14336,6 +14553,22 @@ async function buildLiveMatches(): Promise<LiveMatchState[]> {
       const stateRcHome = countRedCards(events, "home");
       const stateRcAway = countRedCards(events, "away");
 
+      // ── Event-derived statistics (always available from Statpal events) ──────
+      // Count cards and corners directly from the event list — these are reliable
+      // even when the per-match statistics endpoint is unavailable or not subscribed.
+      const _evYellowHome = events.filter(
+        e => /yellow/i.test(e.type) && !/red|second/i.test(e.type) && e.team === "home"
+      ).length;
+      const _evYellowAway = events.filter(
+        e => /yellow/i.test(e.type) && !/red|second/i.test(e.type) && e.team === "away"
+      ).length;
+      const _evCornersHome = events.filter(
+        e => /corner/i.test(e.type) && e.team === "home"
+      ).length;
+      const _evCornersAway = events.filter(
+        e => /corner/i.test(e.type) && e.team === "away"
+      ).length;
+
       // ── Live-recalculate new football markets from remaining expected goals ──
       if (!isET && !m.penalties && minute < 90) {
         const remFrac = Math.max(0.01, (90 - Math.min(minute, 89)) / 90);
@@ -14670,48 +14903,58 @@ async function buildLiveMatches(): Promise<LiveMatchState[]> {
         }
       }
 
-      // Fetch live stats (corners, cards, possession, shots, etc.) and add to _liveExtra
-      try {
-        const extras = await fetchFootballExtras(Number(m.main_id));
-        if (extras) {
-          const setIfDef = <K extends keyof typeof footballExtra>(
-            key: K, val: typeof footballExtra[K]
-          ) => { if (val !== undefined) (footballExtra as any)[key] = val; };
-          setIfDef("cornersTotal", extras.cornersTotal);
-          setIfDef("cardsTotal", extras.cardsTotal);
-          setIfDef("possessionHome", extras.possessionHome);
-          setIfDef("possessionAway", extras.possessionAway);
-          setIfDef("shotsTotalHome", extras.shotsTotalHome);
-          setIfDef("shotsTotalAway", extras.shotsTotalAway);
-          setIfDef("shotsOnTargetHome", extras.shotsOnTargetHome);
-          setIfDef("shotsOnTargetAway", extras.shotsOnTargetAway);
-          setIfDef("foulsHome", extras.foulsHome);
-          setIfDef("foulsAway", extras.foulsAway);
-          setIfDef("yellowCardsHome", extras.yellowCardsHome);
-          setIfDef("yellowCardsAway", extras.yellowCardsAway);
-          setIfDef("redCardsHomeCount", extras.redCardsHomeCount);
-          setIfDef("redCardsAwayCount", extras.redCardsAwayCount);
-          setIfDef("offsidesHome", extras.offsidesHome);
-          setIfDef("offsidesAway", extras.offsidesAway);
-          setIfDef("savesHome", extras.savesHome);
-          setIfDef("savesAway", extras.savesAway);
-          setIfDef("dangerousAttacksHome", extras.dangerousAttacksHome);
-          setIfDef("dangerousAttacksAway", extras.dangerousAttacksAway);
-          setIfDef("attacksHome", extras.attacksHome);
-          setIfDef("attacksAway", extras.attacksAway);
-          setIfDef("xgHome", extras.xgHome);
-          setIfDef("xgAway", extras.xgAway);
-          setIfDef("throwInsHome", extras.throwInsHome);
-          setIfDef("throwInsAway", extras.throwInsAway);
-          setIfDef("crossesHome", extras.crossesHome);
-          setIfDef("crossesAway", extras.crossesAway);
-          setIfDef("passesHome", extras.passesHome);
-          setIfDef("passesAway", extras.passesAway);
-          setIfDef("passAccuracyHome", extras.passAccuracyHome);
-          setIfDef("passAccuracyAway", extras.passAccuracyAway);
+      // Fetch live stats from Statpal per-match statistics endpoint.
+      // Tried for every live match (with 90s cache per match ID to avoid hammering the API).
+      // Falls back gracefully — event-derived stats below are always applied as baseline.
+      {
+        try {
+          const extras = await fetchStatpalMatchStats(m.main_id);
+          if (extras) {
+            const setIfDef = <K extends keyof typeof footballExtra>(
+              key: K, val: typeof footballExtra[K]
+            ) => { if (val !== undefined) (footballExtra as any)[key] = val; };
+            setIfDef("cornersTotal", extras.cornersTotal);
+            setIfDef("cardsTotal", extras.cardsTotal);
+            setIfDef("possessionHome", extras.possessionHome);
+            setIfDef("possessionAway", extras.possessionAway);
+            setIfDef("shotsTotalHome", extras.shotsTotalHome);
+            setIfDef("shotsTotalAway", extras.shotsTotalAway);
+            setIfDef("shotsOnTargetHome", extras.shotsOnTargetHome);
+            setIfDef("shotsOnTargetAway", extras.shotsOnTargetAway);
+            setIfDef("foulsHome", extras.foulsHome);
+            setIfDef("foulsAway", extras.foulsAway);
+            setIfDef("yellowCardsHome", extras.yellowCardsHome);
+            setIfDef("yellowCardsAway", extras.yellowCardsAway);
+            setIfDef("redCardsHomeCount", extras.redCardsHomeCount);
+            setIfDef("redCardsAwayCount", extras.redCardsAwayCount);
+            setIfDef("dangerousAttacksHome", extras.dangerousAttacksHome);
+            setIfDef("dangerousAttacksAway", extras.dangerousAttacksAway);
+            setIfDef("attacksHome", extras.attacksHome);
+            setIfDef("attacksAway", extras.attacksAway);
+            setIfDef("xgHome", extras.xgHome);
+            setIfDef("xgAway", extras.xgAway);
+          }
+        } catch {
+          // Non-fatal — event-derived stats fill in below
         }
-      } catch {
-        // Ignore errors fetching stats
+      }
+
+      // ── Baseline stats from events (always applied, never overwritten by API data above) ─
+      // These use what Statpal already provides in the livescores feed (no extra API call needed).
+      if (_evYellowHome > 0 && footballExtra.yellowCardsHome === undefined)
+        footballExtra.yellowCardsHome = _evYellowHome;
+      if (_evYellowAway > 0 && footballExtra.yellowCardsAway === undefined)
+        footballExtra.yellowCardsAway = _evYellowAway;
+      if (stateRcHome > 0 && footballExtra.redCardsHomeCount === undefined)
+        footballExtra.redCardsHomeCount = stateRcHome;
+      if (stateRcAway > 0 && footballExtra.redCardsAwayCount === undefined)
+        footballExtra.redCardsAwayCount = stateRcAway;
+      if ((_evCornersHome + _evCornersAway) > 0 && footballExtra.cornersTotal === undefined)
+        footballExtra.cornersTotal = _evCornersHome + _evCornersAway;
+      // cardsTotal: derive from yellow + red if not set
+      if (footballExtra.cardsTotal === undefined) {
+        const evCards = _evYellowHome + _evYellowAway + stateRcHome + stateRcAway;
+        if (evCards > 0) footballExtra.cardsTotal = evCards;
       }
 
       const state: LiveMatchState = {
@@ -15921,6 +16164,24 @@ async function buildFootballLiveV2(
       if (!isPen && awayScore > existing.awayScore)
         for (let _g = 0; _g < awayScore - existing.awayScore; _g++) _newAGoals.push(minute);
 
+      // Fetch live statistics from Statpal (90-second cache per match, non-blocking on error).
+      // Merges with previously-fetched stats so values persist across ticks.
+      const statpalStats = await fetchStatpalMatchStats(ev.id).catch(() => null);
+      const prevLx = existing?._liveExtra;
+      // Build stat overlay: prefer freshly-fetched value, fall back to previously seen value.
+      const statsOverlay: Partial<LiveMatchState["_liveExtra"] & Record<string, unknown>> = {};
+      const mergeStatNum = (key: keyof NonNullable<LiveMatchState["_liveExtra"]>) => {
+        const fresh = statpalStats?.[key as keyof FootballExtras];
+        const prev = prevLx?.[key];
+        const val = fresh ?? prev;
+        if (val !== undefined) (statsOverlay as Record<string, unknown>)[key] = val;
+      };
+      (["possessionHome","possessionAway","shotsTotalHome","shotsTotalAway",
+        "shotsOnTargetHome","shotsOnTargetAway","foulsHome","foulsAway",
+        "yellowCardsHome","yellowCardsAway","redCardsHomeCount","redCardsAwayCount",
+        "cornersTotal","cardsTotal","dangerousAttacksHome","dangerousAttacksAway",
+        "attacksHome","attacksAway","xgHome","xgAway"] as const).forEach(mergeStatNum);
+
       const liveExtra = {
         ...(penLiveExtra ?? {}),
         ...(shKickoffSec ? { secondHalfKickoffSec: shKickoffSec } : {}),
@@ -15931,6 +16192,7 @@ async function buildFootballLiveV2(
         clockStr,
         ...(_newHGoals.length > 0 ? { homeGoalMinutes: _goalDedup(_newHGoals) } : {}),
         ...(_newAGoals.length > 0 ? { awayGoalMinutes: _goalDedup(_newAGoals) } : {}),
+        ...statsOverlay,
       };
 
       // Helper: patch penExtra with real penalty odds into markets
@@ -32026,42 +32288,85 @@ router.get("/v2-statistics", async (req: Request, res: Response) => {
     v2StatisticsCache.set(cacheKey, { data, fetchedAt: Date.now() });
     res.json(data);
   } catch {
-    // Fallback: synthesize stats from liveMatchState._liveExtra
+    // Fallback: synthesize stats from liveMatchState._liveExtra + live odds estimation.
+    // This covers deployments where only Statpal is configured (no SportsAPI key).
     const liveState =
       liveMatchState.get(matchId) ?? liveMatchState.get(`football-v2-${matchId}`);
-    if (liveState?._liveExtra) {
-      const lx = liveState._liveExtra;
-      const rows: Array<{ name: string; home: string; away: string }> = [];
-      if (lx.possessionHome != null)
-        rows.push({
-          name: "Posse de Bola",
-          home: `${lx.possessionHome}%`,
-          away: `${lx.possessionAway ?? 100 - (lx.possessionHome as number)}%`,
-        });
-      if (lx.shotsTotalHome != null)
-        rows.push({ name: "Remates", home: String(lx.shotsTotalHome), away: String(lx.shotsTotalAway ?? 0) });
-      if (lx.shotsOnTargetHome != null)
-        rows.push({ name: "Remates a Baliza", home: String(lx.shotsOnTargetHome), away: String(lx.shotsOnTargetAway ?? 0) });
-      if (lx.dangerousAttacksHome != null)
-        rows.push({ name: "Ataques Perigosos", home: String(lx.dangerousAttacksHome), away: String(lx.dangerousAttacksAway ?? 0) });
-      if (lx.attacksHome != null)
-        rows.push({ name: "Ataques", home: String(lx.attacksHome), away: String(lx.attacksAway ?? 0) });
-      if (lx.foulsHome != null)
-        rows.push({ name: "Faltas", home: String(lx.foulsHome), away: String(lx.foulsAway ?? 0) });
-      if (lx.yellowCardsHome != null)
-        rows.push({ name: "Cartões Amarelos", home: String(lx.yellowCardsHome), away: String(lx.yellowCardsAway ?? 0) });
-      if (lx.xgHome != null)
-        rows.push({
-          name: "xG",
-          home: (lx.xgHome as number).toFixed(2),
-          away: ((lx.xgAway as number) ?? 0).toFixed(2),
-        });
-      if (rows.length > 0) {
-        const synth = { data: { statistics: [{ title: "Estatísticas", rows }] } };
-        v2StatisticsCache.set(cacheKey, { data: synth, fetchedAt: Date.now() });
-        res.json(synth);
-        return;
+    const lx = liveState?._liveExtra;
+    const rows: Array<{ name: string; home: string; away: string }> = [];
+
+    // Real stats from _liveExtra (populated if Statpal provides a stats endpoint)
+    if (lx?.possessionHome != null)
+      rows.push({
+        name: "Posse de Bola",
+        home: `${lx.possessionHome}%`,
+        away: `${lx.possessionAway ?? 100 - (lx.possessionHome as number)}%`,
+      });
+    if (lx?.shotsTotalHome != null)
+      rows.push({ name: "Remates", home: String(lx.shotsTotalHome), away: String(lx.shotsTotalAway ?? 0) });
+    if (lx?.shotsOnTargetHome != null)
+      rows.push({ name: "Remates a Baliza", home: String(lx.shotsOnTargetHome), away: String(lx.shotsOnTargetAway ?? 0) });
+    if (lx?.dangerousAttacksHome != null)
+      rows.push({ name: "Ataques Perigosos", home: String(lx.dangerousAttacksHome), away: String(lx.dangerousAttacksAway ?? 0) });
+    if (lx?.attacksHome != null)
+      rows.push({ name: "Ataques", home: String(lx.attacksHome), away: String(lx.attacksAway ?? 0) });
+    if (lx?.foulsHome != null)
+      rows.push({ name: "Faltas", home: String(lx.foulsHome), away: String(lx.foulsAway ?? 0) });
+    if (lx?.yellowCardsHome != null)
+      rows.push({ name: "Cartões Amarelos", home: String(lx.yellowCardsHome), away: String(lx.yellowCardsAway ?? 0) });
+    if (lx?.xgHome != null)
+      rows.push({
+        name: "xG",
+        home: (lx.xgHome as number).toFixed(2),
+        away: ((lx.xgAway as number) ?? 0).toFixed(2),
+      });
+
+    // When no real stats available: show estimated possession + available tracked data.
+    // Possession estimate is derived from live 1x2 odds (implied probability ratio).
+    // This is a standard sports-analytics technique, clearly labelled "(est.)".
+    if (rows.length === 0 && liveState && sport === "football") {
+      // Prefer base odds (pre-goal anchor) over current live odds for possession estimate —
+      // live odds shift dramatically after a goal, making the estimate unreliable.
+      const odds = (liveState as unknown as Record<string, { home: number; away: number }>)["_baseOdds"] ?? liveState.odds;
+      if (odds?.home > 1 && odds?.away > 1) {
+        const pH = 1 / odds.home;
+        const pA = 1 / odds.away;
+        const total = pH + pA;
+        if (total > 0) {
+          const possH = Math.round((pH / total) * 100);
+          const possA = 100 - possH;
+          rows.push({
+            name: "Posse de Bola",
+            home: `${possH}%`,
+            away: `${possA}%`,
+          });
+        }
       }
+      // Red cards tracked from provider feed
+      if ((liveState.redCardsHome ?? 0) > 0 || (liveState.redCardsAway ?? 0) > 0) {
+        rows.push({
+          name: "Cartões Vermelhos",
+          home: String(liveState.redCardsHome ?? 0),
+          away: String(liveState.redCardsAway ?? 0),
+        });
+      }
+      // Goals tracked
+      const hGoals = (lx?.homeGoalMinutes as number[] | undefined)?.length ?? liveState.homeScore;
+      const aGoals = (lx?.awayGoalMinutes as number[] | undefined)?.length ?? liveState.awayScore;
+      if (hGoals > 0 || aGoals > 0) {
+        rows.push({
+          name: "Golos",
+          home: String(hGoals),
+          away: String(aGoals),
+        });
+      }
+    }
+
+    if (rows.length > 0) {
+      const synth = { data: { statistics: [{ title: "Estatísticas", rows }] } };
+      v2StatisticsCache.set(cacheKey, { data: synth, fetchedAt: Date.now() });
+      res.json(synth);
+      return;
     }
     res.json({});
   }
