@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { motion, AnimatePresence } from "framer-motion";
 import { toast } from "sonner";
 import {
@@ -686,19 +687,10 @@ export default function AdminPage() {
   const [showPass, setShowPass] = useState(false);
   const [loginLoading, setLoginLoading] = useState(false);
 
-  // Core data
-  const [stats, setStats] = useState<AdminStats | null>(null);
-  const [users, setUsers] = useState<AdminUser[]>([]);
-  const [bets, setBets] = useState<AdminBet[]>([]);
-  const [payments, setPayments] = useState<AdminPayment[]>([]);
-  const [withdrawals, setWithdrawals] = useState<AdminWithdrawal[]>([]);
-  const [loading, setLoading] = useState(false);
+  // Core data — fetched via TanStack Query further below (stats, users,
+  // bets, payments, withdrawals, riskData, analyticsData).
 
   // Pro data
-  const [riskData, setRiskData] = useState<RiskData | null>(null);
-  const [analyticsData, setAnalyticsData] = useState<AnalyticsData | null>(
-    null,
-  );
   const [suspendedMatches, setSuspendedMatches] = useState<SuspendedMatch[]>(
     [],
   );
@@ -846,16 +838,20 @@ export default function AdminPage() {
     sessionStorage.removeItem("admin_username");
   };
 
-  const fetchStats = useCallback(async () => {
-    if (!token) return;
-    try {
+  const statsQuery = useQuery({
+    queryKey: ["admin", "stats"],
+    queryFn: async (): Promise<AdminStats> => {
       const res = await fetch("/api/admin/stats", { headers: authHeader });
-      if (res.ok) setStats(await res.json());
-      else if (res.status === 401) handleLogout();
-    } catch {
-      /* ignore */
-    }
-  }, [token]); // eslint-disable-line react-hooks/exhaustive-deps
+      if (!res.ok) {
+        if (res.status === 401) handleLogout();
+        throw new Error("Failed to load stats");
+      }
+      return res.json();
+    },
+    enabled: !!token,
+  });
+  const stats = statsQuery.data ?? null;
+  const refetchStats = statsQuery.refetch;
 
   const fetchStatpalUsage = useCallback(async () => {
     if (!token) return;
@@ -870,89 +866,89 @@ export default function AdminPage() {
     }
   }, [token]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const fetchUsers = useCallback(async () => {
-    if (!token) return;
-    setLoading(true);
-    try {
+  const usersQuery = useQuery({
+    queryKey: ["admin", "users"],
+    queryFn: async (): Promise<AdminUser[]> => {
       const res = await fetch("/api/admin/users", { headers: authHeader });
-      if (res.ok) setUsers(await res.json());
-    } catch {
-      /* ignore */
-    } finally {
-      setLoading(false);
-    }
-  }, [token]); // eslint-disable-line react-hooks/exhaustive-deps
+      if (!res.ok) throw new Error("Failed to load users");
+      return res.json();
+    },
+    enabled: !!token && activeTab === "users",
+  });
+  const users = usersQuery.data ?? [];
+  const usersLoading = usersQuery.isLoading;
+  const refetchUsers = usersQuery.refetch;
 
-  const fetchBets = useCallback(async () => {
-    if (!token) return;
-    setLoading(true);
-    try {
+  const betsQuery = useQuery({
+    queryKey: ["admin", "bets", betStatusFilter],
+    queryFn: async (): Promise<AdminBet[]> => {
       const url =
         betStatusFilter !== "all"
           ? `/api/admin/bets?status=${betStatusFilter}`
           : "/api/admin/bets";
       const res = await fetch(url, { headers: authHeader });
-      if (res.ok) setBets(await res.json());
-    } catch {
-      /* ignore */
-    } finally {
-      setLoading(false);
-    }
-  }, [token, betStatusFilter]); // eslint-disable-line react-hooks/exhaustive-deps
+      if (!res.ok) throw new Error("Failed to load bets");
+      return res.json();
+    },
+    enabled: !!token && activeTab === "bets",
+  });
+  const bets = betsQuery.data ?? [];
+  const betsLoading = betsQuery.isLoading;
+  const refetchBets = betsQuery.refetch;
 
-  const fetchPayments = useCallback(async () => {
-    if (!token) return;
-    setLoading(true);
-    try {
+  const paymentsQuery = useQuery({
+    queryKey: ["admin", "payments"],
+    queryFn: async (): Promise<AdminPayment[]> => {
       const res = await fetch("/api/admin/payments", { headers: authHeader });
-      if (res.ok) setPayments(await res.json());
-    } catch {
-      /* ignore */
-    } finally {
-      setLoading(false);
-    }
-  }, [token]); // eslint-disable-line react-hooks/exhaustive-deps
+      if (!res.ok) throw new Error("Failed to load payments");
+      return res.json();
+    },
+    enabled: !!token && activeTab === "payments",
+  });
+  const payments = paymentsQuery.data ?? [];
+  const paymentsLoading = paymentsQuery.isLoading;
+  const refetchPayments = paymentsQuery.refetch;
 
-  const fetchWithdrawals = useCallback(async () => {
-    if (!token) return;
-    setLoading(true);
-    try {
+  const withdrawalsQuery = useQuery({
+    queryKey: ["admin", "withdrawals"],
+    queryFn: async (): Promise<AdminWithdrawal[]> => {
       const res = await fetch("/api/withdrawals/admin/all", {
         headers: authHeader,
       });
-      if (res.ok) setWithdrawals(await res.json());
-    } catch {
-      /* ignore */
-    } finally {
-      setLoading(false);
-    }
-  }, [token]); // eslint-disable-line react-hooks/exhaustive-deps
+      if (!res.ok) throw new Error("Failed to load withdrawals");
+      return res.json();
+    },
+    enabled: !!token && activeTab === "withdrawals",
+  });
+  const withdrawals = withdrawalsQuery.data ?? [];
+  const withdrawalsLoading = withdrawalsQuery.isLoading;
+  const refetchWithdrawals = withdrawalsQuery.refetch;
 
-  const fetchRisk = useCallback(async () => {
-    if (!token) return;
-    setLoading(true);
-    try {
+  const riskQuery = useQuery({
+    queryKey: ["admin", "risk"],
+    queryFn: async (): Promise<RiskData> => {
       const res = await fetch("/api/admin/risk", { headers: authHeader });
-      if (res.ok) setRiskData(await res.json());
-    } catch {
-      /* ignore */
-    } finally {
-      setLoading(false);
-    }
-  }, [token]); // eslint-disable-line react-hooks/exhaustive-deps
+      if (!res.ok) throw new Error("Failed to load risk data");
+      return res.json();
+    },
+    enabled: !!token && activeTab === "risk",
+  });
+  const riskData = riskQuery.data ?? null;
+  const riskLoading = riskQuery.isLoading;
+  const refetchRisk = riskQuery.refetch;
 
-  const fetchAnalytics = useCallback(async () => {
-    if (!token) return;
-    setLoading(true);
-    try {
+  const analyticsQuery = useQuery({
+    queryKey: ["admin", "analytics"],
+    queryFn: async (): Promise<AnalyticsData> => {
       const res = await fetch("/api/admin/analytics", { headers: authHeader });
-      if (res.ok) setAnalyticsData(await res.json());
-    } catch {
-      /* ignore */
-    } finally {
-      setLoading(false);
-    }
-  }, [token]); // eslint-disable-line react-hooks/exhaustive-deps
+      if (!res.ok) throw new Error("Failed to load analytics");
+      return res.json();
+    },
+    enabled: !!token && activeTab === "analytics",
+  });
+  const analyticsData = analyticsQuery.data ?? null;
+  const analyticsLoading = analyticsQuery.isLoading;
+  const refetchAnalytics = analyticsQuery.refetch;
 
   const fetchSuspended = useCallback(async () => {
     if (!token) return;
@@ -1067,17 +1063,12 @@ export default function AdminPage() {
 
   useEffect(() => {
     if (!token) return;
-    fetchStats();
+    // stats/users/bets/payments/withdrawals/riskData/analyticsData fetch
+    // themselves via useQuery's `enabled` above, reacting to token/activeTab.
     if (activeTab === "dashboard") fetchStatpalUsage();
-    else if (activeTab === "users") fetchUsers();
-    else if (activeTab === "bets") fetchBets();
-    else if (activeTab === "payments") fetchPayments();
     else if (activeTab === "withdrawals") {
-      fetchWithdrawals();
       fetchAuditLogs();
-    } else if (activeTab === "risk") fetchRisk();
-    else if (activeTab === "analytics") fetchAnalytics();
-    else if (activeTab === "events") {
+    } else if (activeTab === "events") {
       fetchSuspended();
       fetchFeed();
       fetchEventRuntime();
@@ -1088,10 +1079,6 @@ export default function AdminPage() {
       fetchCompetitions();
     }
   }, [token, activeTab, fetchEventRuntime, fetchCompetitions]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  useEffect(() => {
-    if (activeTab === "bets") fetchBets();
-  }, [betStatusFilter]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const openUserDetail = async (user: AdminUser) => {
     setDetailLoading(true);
@@ -1179,7 +1166,7 @@ export default function AdminPage() {
           },
         };
       });
-      fetchUsers();
+      refetchUsers();
     } catch {
       toast.error("Erro ao atualizar documento");
     } finally {
@@ -1210,8 +1197,8 @@ export default function AdminPage() {
       );
       setBalanceModal(null);
       setBalanceAmount("");
-      fetchUsers();
-      fetchStats();
+      refetchUsers();
+      refetchStats();
     } catch {
       toast.error("Erro ao atualizar saldo");
     } finally {
@@ -1238,7 +1225,7 @@ export default function AdminPage() {
       );
       setFreebetModal(null);
       setFreebetAmount("");
-      fetchUsers();
+      refetchUsers();
     } catch {
       toast.error("Erro ao atribuir freebet");
     } finally {
@@ -1263,7 +1250,7 @@ export default function AdminPage() {
           ? `${user.name} banido da plataforma`
           : `${user.name} desbloqueado`,
       );
-      fetchUsers();
+      refetchUsers();
     } catch {
       toast.error("Erro ao banir utilizador");
     }
@@ -1283,8 +1270,8 @@ export default function AdminPage() {
         return;
       }
       toast.success(`Aposta marcada como: ${STATUS_BET[status]?.label}`);
-      fetchBets();
-      fetchStats();
+      refetchBets();
+      refetchStats();
     } catch {
       toast.error("Erro ao atualizar aposta");
     } finally {
@@ -1326,8 +1313,8 @@ export default function AdminPage() {
         return;
       }
       toast.success(WITHDRAWAL_SUCCESS_MESSAGE[status]);
-      fetchWithdrawals();
-      fetchStats();
+      refetchWithdrawals();
+      refetchStats();
     } catch {
       toast.error("Erro ao processar levantamento");
     } finally {
@@ -1348,8 +1335,8 @@ export default function AdminPage() {
         return;
       }
       toast.success("Pagamento creditado manualmente");
-      fetchPayments();
-      fetchStats();
+      refetchPayments();
+      refetchStats();
     } catch {
       toast.error("Erro ao creditar pagamento");
     } finally {
@@ -1799,15 +1786,15 @@ export default function AdminPage() {
     `€ ${parseFloat(String(v)).toFixed(2)}`;
 
   const refreshCurrentTab = () => {
-    fetchStats();
-    if (activeTab === "users") fetchUsers();
-    else if (activeTab === "bets") fetchBets();
-    else if (activeTab === "payments") fetchPayments();
+    refetchStats();
+    if (activeTab === "users") refetchUsers();
+    else if (activeTab === "bets") refetchBets();
+    else if (activeTab === "payments") refetchPayments();
     else if (activeTab === "withdrawals") {
-      fetchWithdrawals();
+      refetchWithdrawals();
       fetchAuditLogs();
-    } else if (activeTab === "risk") fetchRisk();
-    else if (activeTab === "analytics") fetchAnalytics();
+    } else if (activeTab === "risk") refetchRisk();
+    else if (activeTab === "analytics") refetchAnalytics();
     else if (activeTab === "events") {
       fetchSuspended();
       fetchFeed();
@@ -2549,7 +2536,7 @@ export default function AdminPage() {
                     className="bg-zinc-900 border-zinc-700 text-white pl-9"
                   />
                 </div>
-                {loading ? (
+                {usersLoading ? (
                   <div className="flex items-center justify-center py-20">
                     <Loader2 className="animate-spin text-red-600" size={32} />
                   </div>
@@ -2855,7 +2842,7 @@ export default function AdminPage() {
                     )}
                   </div>
                 </div>
-                {loading ? (
+                {betsLoading ? (
                   <div className="flex items-center justify-center py-20">
                     <Loader2 className="animate-spin text-red-600" size={32} />
                   </div>
@@ -3023,7 +3010,7 @@ export default function AdminPage() {
                     className="bg-zinc-900 border-zinc-700 text-white pl-9"
                   />
                 </div>
-                {loading ? (
+                {paymentsLoading ? (
                   <div className="flex items-center justify-center py-20">
                     <Loader2 className="animate-spin text-red-600" size={32} />
                   </div>
@@ -3248,7 +3235,7 @@ export default function AdminPage() {
                   {filteredWithdrawals.length} de {withdrawals.length}{" "}
                   levantamento(s) visível(is)
                 </div>
-                {loading ? (
+                {withdrawalsLoading ? (
                   <div className="flex items-center justify-center py-20">
                     <Loader2 className="animate-spin text-red-600" size={32} />
                   </div>
@@ -3553,7 +3540,7 @@ export default function AdminPage() {
                 exit={{ opacity: 0 }}
                 className="space-y-6"
               >
-                {loading || !riskData ? (
+                {riskLoading || !riskData ? (
                   <div className="flex items-center justify-center py-20">
                     <Loader2 className="animate-spin text-red-600" size={32} />
                   </div>
@@ -3789,7 +3776,7 @@ export default function AdminPage() {
                 exit={{ opacity: 0 }}
                 className="space-y-6"
               >
-                {loading || !analyticsData ? (
+                {analyticsLoading || !analyticsData ? (
                   <div className="flex items-center justify-center py-20">
                     <Loader2 className="animate-spin text-red-600" size={32} />
                   </div>

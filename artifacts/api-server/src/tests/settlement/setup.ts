@@ -9,7 +9,10 @@ if (!globalThis.__bet62SettlementTestCleanupRegistered) {
 
   after(() => {
     // Importing the settlement module initializes background timers in this repo.
-    process.exit(0);
+    // Defer the forced exit so the test runner finishes tallying results (and
+    // setting process.exitCode) before we kill the process, otherwise failing
+    // assertions get silently reported as a pass.
+    setImmediate(() => process.exit(process.exitCode ?? 0));
   });
 }
 

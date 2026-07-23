@@ -8,6 +8,7 @@
     "typecheck:libs": "tsc --build",
     "typecheck": "pnpm run typecheck:libs && pnpm -r --filter \"./artifacts/**\" --filter \"./scripts\" --if-present run typecheck",
     "test:settlement": "pnpm --filter @workspace/api-server test:settlement",
+    "test:core": "pnpm --filter @workspace/api-server test:core",
     "settlement:coverage": "pnpm --filter @workspace/scripts settlement:coverage"
   },
   "private": true,

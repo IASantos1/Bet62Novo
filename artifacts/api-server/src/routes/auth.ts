@@ -4,8 +4,23 @@ import jwt from "jsonwebtoken";
 import { db, usersTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import { logger } from "../lib/logger.js";
+import { rateLimit } from "../middlewares/rateLimit.js";
 
 const router: IRouter = Router();
+
+const registerRateLimit = rateLimit({
+  name: "auth-register",
+  windowMs: 60 * 60_000,
+  max: 10,
+  message: "Muitas tentativas de registo. Tente novamente mais tarde.",
+});
+
+const loginRateLimit = rateLimit({
+  name: "auth-login",
+  windowMs: 15 * 60_000,
+  max: 10,
+  message: "Muitas tentativas de login. Tente novamente mais tarde.",
+});
 const SESSION_SECRET = process.env.SESSION_SECRET;
 if (!SESSION_SECRET) {
   throw new Error(
@@ -14,7 +29,7 @@ if (!SESSION_SECRET) {
   );
 }
 
-function validatePortugueseNif(nif: string): boolean {
+export function validatePortugueseNif(nif: string): boolean {
   const digits = (nif ?? "").replace(/\s/g, "");
   if (!/^\d{9}$/.test(digits)) return false;
   if (!["1","2","3","5","6","7","8","9"].includes(digits[0]!)) return false;
@@ -25,7 +40,7 @@ function validatePortugueseNif(nif: string): boolean {
   return check === parseInt(digits[8]!);
 }
 
-router.post("/register", async (req, res): Promise<void> => {
+router.post("/register", registerRateLimit, async (req, res): Promise<void> => {
   const { name, password, nif } = req.body as { name?: string; email?: string; password?: string; nif?: string };
   const email = typeof req.body.email === "string" ? req.body.email.trim().toLowerCase() : undefined;
 
@@ -76,7 +91,7 @@ router.post("/register", async (req, res): Promise<void> => {
   }
 });
 
-router.post("/login", async (req, res): Promise<void> => {
+router.post("/login", loginRateLimit, async (req, res): Promise<void> => {
   const { password } = req.body;
   const email = typeof req.body.email === "string" ? req.body.email.trim().toLowerCase() : undefined;
 

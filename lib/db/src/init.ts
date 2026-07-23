@@ -3,9 +3,23 @@ import { pool } from "./index";
 /**
  * Initialises the database schema on first deployment.
  *
- * All statements use CREATE TABLE IF NOT EXISTS so the function is fully
- * idempotent — safe to call on every startup without side-effects when the
- * tables already exist.
+ * All statements use CREATE TABLE IF NOT EXISTS / ADD COLUMN IF NOT EXISTS
+ * so the function is fully idempotent — safe to call on every startup
+ * without side-effects when the tables/columns already exist.
+ *
+ * This file is the single source of truth for the LIVE schema (both in
+ * development and production — see src/api/index.ts, which calls initDb()
+ * on every boot). The Drizzle table definitions under ./schema/*.ts exist
+ * purely for type-safe query building; they are not applied to the database
+ * directly. Do not add `drizzle-kit push`/`migrate` to any deploy or git
+ * hook — a second schema-application path can drift from what's actually
+ * live (this file only ever adds columns/tables, never renames or drops),
+ * and `drizzle-kit push` can also prompt interactively for ambiguous
+ * changes, which hangs indefinitely in a non-interactive hook.
+ *
+ * When adding a column: add it here first (as an idempotent ALTER TABLE ...
+ * ADD COLUMN IF NOT EXISTS), then mirror it in the matching ./schema/*.ts
+ * file so queries stay type-safe.
  */
 export async function initDb(): Promise<void> {
   if (!pool) {
