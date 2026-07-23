@@ -3730,6 +3730,8 @@ type StoredSelection = {
   htScore?: { htHome: number; htAway: number };
   outcome?: "won" | "lost" | "void" | null;
   settlementNote?: string;
+  /** Per-selection extras stored at settlement (set scores etc.) for rich result display. */
+  selExtras?: { tennis?: { sets: [number, number][] } };
 };
 
 type OpenBetSelectionState = {
@@ -3737,6 +3739,7 @@ type OpenBetSelectionState = {
   outcome: "won" | "lost" | "void" | "pending";
   finalScore?: { home: number; away: number };
   htScore?: { htHome: number; htAway: number };
+  selExtras?: { tennis?: { sets: [number, number][] } };
 };
 
 type UserBet = {
@@ -8299,6 +8302,11 @@ export default function Home({
                     : prevSel.outcome != null
                       ? { outcome: prevSel.outcome }
                       : {}),
+                  ...(sel.selExtras
+                    ? {}
+                    : prevSel.selExtras
+                      ? { selExtras: prevSel.selExtras }
+                      : {}),
                 };
               });
               return {
@@ -8421,6 +8429,7 @@ export default function Home({
               ...sel,
               ...(update.finalScore ? { finalScore: update.finalScore } : {}),
               ...(update.htScore ? { htScore: update.htScore } : {}),
+              ...(update.selExtras ? { selExtras: update.selExtras } : {}),
               outcome:
                 update.outcome === "pending"
                   ? (sel.outcome ?? null)
@@ -16957,6 +16966,81 @@ export default function Home({
     firstGoal: "1.º Golo",
   };
 
+  /** Returns a market-specific result string for a settled tennis selection.
+   *  Falls back to null for markets where no meaningful label can be derived. */
+  const getTennisResultDisplay = (sel: StoredSelection): string | null => {
+    const raw = String(sel.selection ?? "");
+    const fs = sel.finalScore;
+    const sets = (sel.selExtras as { tennis?: { sets: [number, number][] } } | undefined)?.tennis?.sets;
+
+    // Exact set-score / current-set markets — label is already self-explanatory
+    if (/^(sc[1-5]-|ses-)/.test(raw)) return null;
+
+    // Match winner (h, a, home, away and variants)
+    if (/^(h|a|home|away|1|2|draw|homeOrDraw|awayOrDraw|homeOrAway)$/.test(raw)) {
+      if (!fs) return null;
+      return `Final: ${fs.home} - ${fs.away} em sets`;
+    }
+
+    // Exact sets (es-h20, es-h21, es-a02, es-a12)
+    if (/^es-(h|a)/.test(raw)) {
+      if (!fs) return null;
+      return `Sets: ${fs.home} - ${fs.away}`;
+    }
+
+    // Total sets O/U (osets25, usets25 etc.)
+    if (/^[ou]sets/.test(raw)) {
+      if (!fs) return null;
+      return `Total: ${fs.home + fs.away} sets`;
+    }
+
+    // Set handicap (sh1-home, sh1-away etc.)
+    if (/^sh/.test(raw)) {
+      if (!fs) return null;
+      return `Sets: ${fs.home} - ${fs.away}`;
+    }
+
+    // Set winner (set1-home, set2-away, set3-home)
+    const setWinM = raw.match(/^set([123])-(home|away)$/);
+    if (setWinM) {
+      const idx = parseInt(setWinM[1]!) - 1;
+      const sc = sets?.[idx];
+      if (sc) return `${setWinM[1]}º Set: ${sc[0]} - ${sc[1]}`;
+      if (fs) return `Sets: ${fs.home} - ${fs.away}`;
+      return null;
+    }
+
+    // Game handicap (gh-home-0.5, gh-away-1.5)
+    if (/^gh-(home|away)/.test(raw)) {
+      if (sets && sets.length > 0) {
+        const h = sets.reduce((s, sc) => s + sc[0], 0);
+        const a = sets.reduce((s, sc) => s + sc[1], 0);
+        return `Games: ${h} - ${a}`;
+      }
+      return null;
+    }
+
+    // Total games O/U (tg-o-21.5, tg-u-23.5)
+    if (/^tg-[ou]-/.test(raw)) {
+      if (sets && sets.length > 0) {
+        const total = sets.reduce((s, sc) => s + sc[0] + sc[1], 0);
+        return `Total: ${total} games`;
+      }
+      return null;
+    }
+
+    // Set games O/U (s1g-o-11, s2g-u-10)
+    const sgM = raw.match(/^s([12])g-[ou]-/);
+    if (sgM) {
+      const idx = parseInt(sgM[1]!) - 1;
+      const sc = sets?.[idx];
+      if (sc) return `${sgM[1]}º Set: ${sc[0] + sc[1]} games`;
+      return null;
+    }
+
+    return null;
+  };
+
   const getSelLabel = (sel: StoredSelection): string => {
     // For set-score bets, derive compact label directly from the selection key
     const rawSel = String(sel.selection ?? "");
@@ -24953,16 +25037,29 @@ export default function Home({
                                             </span>
                                           </div>
                                         )}
-                                        {/* Final score — hidden for set-score markets (sc1-/sc2-/sc3-/ses-)
-                                            because fs.home/away is the match-level set count,
-                                            which is irrelevant and confusing for exact-set bets */}
-                                        {fs && !(/^sc[123]-|^ses-/.test(sel.selection ?? "")) && (
-                                          <div
-                                            className={`text-[11px] mt-1 font-semibold ${txtSub}`}
-                                          >
-                                            Resultado: {fs.home} - {fs.away}
-                                          </div>
-                                        )}
+                                        {/* Market-specific result display for settled bets */}
+                                        {(() => {
+                                          const isTennis =
+                                            sel.sport === "tennis" ||
+                                            inferSelectionSport(sel.selection ?? "") === "tennis";
+                                          if (isTennis) {
+                                            const label = getTennisResultDisplay(sel);
+                                            if (!label) return null;
+                                            return (
+                                              <div className={`text-[11px] mt-1 font-semibold ${txtSub}`}>
+                                                {label}
+                                              </div>
+                                            );
+                                          }
+                                          if (fs && !(/^sc[123]-|^ses-/.test(sel.selection ?? ""))) {
+                                            return (
+                                              <div className={`text-[11px] mt-1 font-semibold ${txtSub}`}>
+                                                Resultado: {fs.home} - {fs.away}
+                                              </div>
+                                            );
+                                          }
+                                          return null;
+                                        })()}
                                         {sel.settlementNote && (
                                           <div className="mt-1.5 inline-flex max-w-full rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-[10px] font-bold leading-snug text-amber-700">
                                             {sel.settlementNote}

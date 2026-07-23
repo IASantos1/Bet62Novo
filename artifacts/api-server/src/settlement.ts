@@ -52,6 +52,9 @@ export type SelectionRecord = {
   settlementNote?: string | null;
   lastSettledAt?: string;
   settlementRuleVersion?: string;
+  /** Per-selection extras stored at settlement time for rich ticket display.
+   *  Not used for any settlement logic — purely for frontend result presentation. */
+  selExtras?: { tennis?: { sets: [number, number][] } };
 };
 
 export type FTScore = { home: number; away: number };
@@ -4216,6 +4219,10 @@ export async function autoSettlePendingBets(opts?: {
                 : sel.finalScore,
               outcome: resolution.outcome,
               pendingReason: resolution.pendingReason,
+              selExtras:
+                liveScore?.tennisSets && liveScore.tennisSets.length > 0
+                  ? { tennis: { sets: liveScore.tennisSets } }
+                  : (sel.selExtras ?? undefined),
             };
           });
 
@@ -4282,6 +4289,10 @@ export async function autoSettlePendingBets(opts?: {
                 : sel.finalScore,
               outcome: resolution.outcome,
               pendingReason: resolution.pendingReason,
+              selExtras:
+                liveScore?.tennisSets && liveScore.tennisSets.length > 0
+                  ? { tennis: { sets: liveScore.tennisSets } }
+                  : (sel.selExtras ?? undefined),
             };
           });
 
@@ -4469,6 +4480,10 @@ export async function autoSettlePendingBets(opts?: {
               finalScore: { home: liveScore.home, away: liveScore.away },
               outcome: out,
               pendingReason: resolution.pendingReason,
+              selExtras:
+                liveScore.tennisSets && liveScore.tennisSets.length > 0
+                  ? { tennis: { sets: liveScore.tennisSets } }
+                  : (sel.selExtras ?? undefined),
             };
 
             if (out === "won") {
@@ -4627,12 +4642,17 @@ export async function autoSettlePendingBets(opts?: {
                 finishedAt: r.finishedAt,
               },
             );
+            const _finSets1 = getTennisSetsFromExtras(r.extras);
             return {
               ...sel,
               finalScore: { home: r.home, away: r.away },
               htScore: ht,
               outcome: resolution.outcome,
               pendingReason: resolution.pendingReason,
+              selExtras:
+                _finSets1.length > 0
+                  ? { tennis: { sets: _finSets1 } }
+                  : (sel.selExtras ?? undefined),
             };
           });
           await db.transaction(async (tx: any) => {
@@ -4776,12 +4796,17 @@ export async function autoSettlePendingBets(opts?: {
               finishedAt: r.finishedAt,
             },
           );
+          const _finSets2 = getTennisSetsFromExtras(r.extras);
           return {
             ...sel,
             finalScore: { home: r.home, away: r.away },
             htScore: ht,
             outcome: resolution.outcome,
             pendingReason: resolution.pendingReason,
+            selExtras:
+              _finSets2.length > 0
+                ? { tennis: { sets: _finSets2 } }
+                : (sel.selExtras ?? undefined),
           };
         });
 
