@@ -8844,9 +8844,8 @@ export default function Home({
       return !(tags.every((t) => !!t) && new Set(tags).size === 1);
     });
   })();
-  const effectiveBetMode: "simples" | "multipla" = hasDuplicateMatches
-    ? "simples"
-    : betMode;
+  const effectiveBetMode: "simples" | "multipla" =
+    hasDuplicateMatches || bets.length <= 1 ? "simples" : betMode;
   const totalOdds = bets.reduce((acc, bet) => acc * bet.odd, 1).toFixed(2);
   const [stake, setStake] = useState<string>("");
   const [betStakes, setBetStakes] = useState<Record<string, string>>({});
@@ -14576,7 +14575,7 @@ export default function Home({
                                   sel={`ses-${score}`}
                                   odd={odd}
                                   market="placar"
-                                  label={score}
+                                  label={`${setNum}º Set — ${score}`}
                                 />
                               </div>
                             ))}
@@ -14594,7 +14593,7 @@ export default function Home({
                                   sel={`ses-${score}`}
                                   odd={odd}
                                   market="placar"
-                                  label={score}
+                                  label={`${setNum}º Set — ${score}`}
                                 />
                               </div>
                             ))}
@@ -16157,7 +16156,7 @@ export default function Home({
                                 sel={`sc1-${sc.label}`}
                                 odd={sc.odds}
                                 market="placar"
-                                label={sc.label}
+                                label={`1º Set — ${sc.label}`}
                                 suspKey="firstSet"
                               />
                             ),
@@ -16177,7 +16176,7 @@ export default function Home({
                                 sel={`sc2-${sc.label}`}
                                 odd={sc.odds}
                                 market="placar"
-                                label={sc.label}
+                                label={`2º Set — ${sc.label}`}
                                 suspKey="set2"
                               />
                             ),
