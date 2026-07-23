@@ -18733,7 +18733,8 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
       const maxSi = SOON_WINDOW[m.sport] ?? DEFAULT_SOON_WINDOW;
       return (
         isFinite(si) &&
-        si >= -60 &&
+        si >= -180 && // extended from -60: keeps matches visible for up to 3 h after kickoff
+                      // so API lag can't cause them to vanish without ever going live
         si <= maxSi &&
         !liveIds.has(String(m.id)) &&
         !liveTeamPairs.has(`${m.home}|${m.away}`)
@@ -18816,6 +18817,38 @@ async function buildLivePayload(): Promise<{ matches: LiveMatchState[] }> {
         }
       }
     }
+    // ── API-lag bridge for non-tennis sports ──────────────────────────────────
+    // If a match started >10 min ago but is still absent from every live feed
+    // (liveIds + liveTeamPairs filtered it out above), promote it to the live
+    // section with a 0-0 placeholder so it never silently vanishes from the UI.
+    // Cap at 180 min (the outer window) so truly-unlisted matches eventually go.
+    if (
+      m.sport !== "tennis" &&
+      startsIn === 0 &&
+      isFinite(realStartsIn) &&
+      realStartsIn < -10 &&
+      realStartsIn > -180
+    ) {
+      const elapsedMin = Math.min(120, Math.round(Math.abs(realStartsIn)));
+      promotedTennis.push({
+        id: m.id,
+        home: m.home,
+        away: m.away,
+        league: m.league,
+        country: m.country,
+        sport: m.sport,
+        homeScore: 0,
+        awayScore: 0,
+        minute: elapsedMin,
+        status: "Em Jogo",
+        hasRealOdds: m.hasRealOdds,
+        odds: m.odds,
+        markets: m.markets,
+        events: [],
+      });
+      continue;
+    }
+
     startingSoonFinal.push({
       id: m.id,
       home: m.home,
