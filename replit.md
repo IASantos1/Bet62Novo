@@ -62,3 +62,4 @@ Replit's built-in PostgreSQL is used. Schema is auto-initialised on API server s
 
 ## User preferences
 - Keep the existing monorepo structure and stack.
+- After every change (no matter how small), always do `git add -A && git commit` and then `git push origin main` automatically — no need to ask.
