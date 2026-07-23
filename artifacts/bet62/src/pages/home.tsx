@@ -4582,6 +4582,8 @@ export default function Home({
   // Live matches
   const [liveMatches, setLiveMatches] = useState<Match[]>([]);
   const [liveLoading, setLiveLoading] = useState(false);
+  const [fillerMatches, setFillerMatches] = useState<Match[]>([]);
+  const fillerFetchedRef = useRef(false);
   const [liveTransport, setLiveTransport] = useState<LiveTransport>(
     initialTab === "live" ? "cache" : "idle",
   );
@@ -7779,6 +7781,38 @@ export default function Home({
     const id = setTimeout(() => setLiveLoading(false), 12_000);
     return () => clearTimeout(id);
   }, [liveLoading]);
+
+  // When live tab has 0 actual live matches: alert backend and fetch 3 filler games
+  // so the tab is never empty. Re-checks every 30s while on the live tab.
+  useEffect(() => {
+    if (activeTab !== "live") return;
+    if (liveLoading) return;
+
+    let cancelled = false;
+    const tryFiller = async () => {
+      // Only fetch filler when there are truly no live matches
+      const hasLive = liveMatches.some((m) => m.startsIn === undefined);
+      if (hasLive) {
+        setFillerMatches([]);
+        fillerFetchedRef.current = false;
+        return;
+      }
+      try {
+        const r = await fetch("/api/matches/live-filler");
+        const data = r.ok ? await r.json() : null;
+        if (!cancelled && data?.isFillerMode && Array.isArray(data.matches)) {
+          setFillerMatches(data.matches.map((m: any) => ({ ...m, isLive: false })));
+        }
+      } catch { /* non-critical */ }
+    };
+
+    tryFiller();
+    const interval = setInterval(tryFiller, 30_000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [activeTab, liveLoading, liveMatches]);
 
   // Background prefetch of live data while on the sports tab so that clicking
   // "Ao Vivo" shows data instantly instead of waiting 3-5 s. Runs immediately
@@ -23960,6 +23994,22 @@ export default function Home({
                       startsIn: Math.max(0, Math.round(_minsUntil(m.date, m.time))),
                     }));
                   const emBreve = [..._emBreveFromLive, ...(_emBreveFromUpcoming as typeof _emBreveFromLive)];
+                  // Filler matches from backend (only when no live AND emBreve is thin)
+                  const _fillerKeys = new Set([
+                    ..._emBreveFromLive.map((m) => `${m.home}|${m.away}`),
+                    ...(_emBreveFromUpcoming as any[]).map((m: any) => `${m.home}|${m.away}`),
+                  ]);
+                  const emBreveWithFillers = [
+                    ...emBreve,
+                    ...fillerMatches
+                      .filter(
+                        (m) =>
+                          filterBySport(m) &&
+                          !_fillerKeys.has(`${m.home}|${m.away}`),
+                      )
+                      .map((m) => ({ ...m, startsIn: (m as any).startsIn ?? 0 })),
+                  ] as typeof emBreve;
+
                   if (liveLoading && liveMatches.length === 0) {
                     return (
                       <div className="space-y-3 py-2">
@@ -23988,38 +24038,33 @@ export default function Home({
                       </div>
                     );
                   }
-                  if (liveMatches.length === 0) {
+
+                  // Only show true empty state if we have zero em breve AND zero fillers
+                  if (actualLive.length === 0 && emBreveWithFillers.length === 0) {
+                    if (liveSportFilter !== "all") {
+                      return (
+                        <div className="py-12 text-center text-zinc-500 bg-zinc-900/50 rounded-xl border border-zinc-800">
+                          <p className="font-medium">
+                            Nenhum jogo deste desporto ao vivo.
+                          </p>
+                          <button
+                            {...makeTap(() => setLiveSportFilter("all"))}
+                            className="mt-3 text-sm text-red-500 hover:text-red-400 underline"
+                          >
+                            Ver todos os desportos
+                          </button>
+                        </div>
+                      );
+                    }
                     return (
                       <div className="py-20 text-center text-zinc-500 bg-zinc-900/50 rounded-xl border border-zinc-800">
-                        <Activity
-                          className="mx-auto mb-4 opacity-20"
-                          size={48}
-                        />
-                        <p className="font-medium">
-                          Nenhum jogo ao vivo no momento.
-                        </p>
-                        <p className="text-sm mt-1">
-                          Volte em breve para acompanhar as partidas em tempo
-                          real.
-                        </p>
+                        <Activity className="mx-auto mb-4 opacity-20" size={48} />
+                        <p className="font-medium">Nenhum jogo ao vivo no momento.</p>
+                        <p className="text-sm mt-1">Os jogos Em Breve aparecerão aqui assim que estiverem disponíveis.</p>
                       </div>
                     );
                   }
-                  if (actualLive.length === 0 && emBreve.length === 0) {
-                    return (
-                      <div className="py-12 text-center text-zinc-500 bg-zinc-900/50 rounded-xl border border-zinc-800">
-                        <p className="font-medium">
-                          Nenhum jogo deste desporto ao vivo.
-                        </p>
-                        <button
-                          {...makeTap(() => setLiveSportFilter("all"))}
-                          className="mt-3 text-sm text-red-500 hover:text-red-400 underline"
-                        >
-                          Ver todos os desportos
-                        </button>
-                      </div>
-                    );
-                  }
+
                   return (
                     <div className="space-y-5">
                       {actualLive.length > 0 && (
@@ -24039,7 +24084,7 @@ export default function Home({
                           {actualLive.map((match) => renderLiveMatchCard(match))}
                         </div>
                       )}
-                      {emBreve.length > 0 && (
+                      {emBreveWithFillers.length > 0 && (
                         <div className="space-y-2">
                           <div className="flex items-center gap-2 mb-3">
                             <Clock size={12} className="text-amber-400" />
@@ -24047,10 +24092,10 @@ export default function Home({
                               Em Breve
                             </span>
                             <span className="text-xs text-zinc-600">
-                              ({emBreve.length})
+                              ({emBreveWithFillers.length})
                             </span>
                           </div>
-                          {emBreve.map((match) => renderLiveMatchCard(match))}
+                          {emBreveWithFillers.map((match) => renderLiveMatchCard(match))}
                         </div>
                       )}
                     </div>

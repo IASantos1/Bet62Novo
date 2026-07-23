@@ -19190,6 +19190,70 @@ router.get("/live", async (req: Request, res: Response) => {
   }
 });
 
+// ─── live-filler: called by frontend when there are 0 live matches ──────────
+// Returns up to 3 upcoming matches that start soonest so the Ao Vivo tab
+// is never empty. These are real upcoming matches with odds — not mocks.
+router.get("/live-filler", async (_req: Request, res: Response) => {
+  res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0");
+  try {
+    // Count real live matches (exclude finished)
+    const liveCt = Array.from(liveMatchState.values()).filter(
+      (s) => s && !isFinishedVisibilityStatus(s.status),
+    ).length;
+    if (liveCt > 0) {
+      // There are live games — no filler needed
+      res.json({ matches: [], isFillerMode: false });
+      return;
+    }
+
+    // Pull from upcoming cache and pick 3 that start soonest (within 24h)
+    const cache = upcomingTopCache;
+    if (!cache) {
+      res.json({ matches: [], isFillerMode: true });
+      return;
+    }
+
+    const all: UpcomingMatch[] = [
+      ...cache.football,
+      ...cache.basketball,
+      ...cache.tennis,
+      ...cache.hockey,
+      ...cache.volleyball,
+      ...cache.baseball,
+    ].filter(
+      (m) => m.hasRealOdds && m.odds?.home > 1.01 && m.odds?.away > 1.01,
+    );
+
+    const now = Date.now();
+    const withKickoff = all
+      .map((m) => ({ m, ms: parseUpcomingKickoffMs(m) ?? Infinity }))
+      .filter(({ ms }) => ms > now && ms - now < 24 * 3600 * 1000)
+      .sort((a, b) => a.ms - b.ms)
+      .slice(0, 3);
+
+    // Fallback: no match starts within 24h → just take the next 3 soonest
+    const picks = withKickoff.length >= 1
+      ? withKickoff
+      : all
+          .map((m) => ({ m, ms: parseUpcomingKickoffMs(m) ?? Infinity }))
+          .filter(({ ms }) => ms > now)
+          .sort((a, b) => a.ms - b.ms)
+          .slice(0, 3);
+
+    const matches = picks.map(({ m, ms }) => ({
+      ...m,
+      startsIn: Math.max(0, Math.round((ms - now) / 60_000)),
+      isLive: false,
+      isFiller: true,
+    }));
+
+    res.json({ matches, isFillerMode: true });
+  } catch (err) {
+    logger.warn({ err }, "[live-filler] error");
+    res.json({ matches: [], isFillerMode: true });
+  }
+});
+
 router.get("/live-match/:id", async (req: Request, res: Response) => {
   res.setHeader(
     "Cache-Control",
