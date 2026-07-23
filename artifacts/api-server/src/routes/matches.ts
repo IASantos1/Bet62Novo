@@ -8219,6 +8219,13 @@ export async function ensureFinishedMatchResult(
         const home = Math.max(0, g.homeCompetitor?.score ?? 0);
         const away = Math.max(0, g.awayCompetitor?.score ?? 0);
         if (home === 0 && away === 0) return false;
+        // Extract per-set scores so sc1-/sc2-/sc3- bets can settle in the finished-match path
+        const _stages = (g as any).stages ?? [];
+        const _setSets: [number, number][] = _stages
+          .filter((s: any) => /^set \d+$/i.test(String(s.name ?? "")) && s.homeCompetitorScore >= 0 && s.awayCompetitorScore >= 0)
+          .map((s: any): [number, number] => [Math.max(0, s.homeCompetitorScore), Math.max(0, s.awayCompetitorScore)]);
+        const _extras: Record<string, unknown> | undefined =
+          _setSets.length > 0 ? { tennis: { sets: _setSets } } : undefined;
         const record = {
           home,
           away,
@@ -8226,6 +8233,7 @@ export async function ensureFinishedMatchResult(
           awayTeam: g.awayCompetitor?.name?.trim() ?? "",
           status: "finished",
           finishedAt: Date.now(),
+          extras: _extras,
         };
         finishedMatchResults.set(matchId, record);
         await enqueueMatchSettlement({

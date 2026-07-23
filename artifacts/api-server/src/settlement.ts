@@ -2391,8 +2391,8 @@ export function scoreOutcomeForSel(
     const totalGames = setScore[0] + setScore[1];
     if (totalGames === line) voided = true;
     else winning = m[2] === "o" ? totalGames > line : totalGames < line;
-  } else if (/^sc([12])-(\d+)-(\d+)$/.test(s)) {
-    const m = s.match(/^sc([12])-(\d+)-(\d+)$/)!;
+  } else if (/^sc([123])-(\d+)-(\d+)$/.test(s)) {
+    const m = s.match(/^sc([123])-(\d+)-(\d+)$/)!;
     const setIndex = Number(m[1]!) - 1;
     const wantHome = Number(m[2]!);
     const wantAway = Number(m[3]!);

@@ -16837,13 +16837,22 @@ export default function Home({
   };
 
   const getSelLabel = (sel: StoredSelection): string => {
+    // For set-score bets, derive compact label directly from the selection key
+    const rawSel = String(sel.selection ?? "");
+    const scM = rawSel.match(/^sc([1-5])-(\d+)-(\d+)$/);
+    if (scM) return `${scM[1]}Set ${scM[2]}-${scM[3]}`;
+    // ses-X-Y: current-set exact score — try to get set num from stored label
+    const sesM = rawSel.match(/^ses-(\d+)-(\d+)$/);
+    if (sesM) {
+      const lbl = String(sel.label ?? "");
+      const setNumM = lbl.match(/^(\d+)º?\s*[Ss]et/);
+      if (setNumM) return `${setNumM[1]}Set ${sesM[1]}-${sesM[2]}`;
+      return `${sesM[1]}-${sesM[2]}`;
+    }
     if (sel.label && sel.label !== sel.selection) {
-      // Ensure set prefix is present for sc1-/sc2- even in old stored bets
-      const rawSel = String(sel.selection ?? "");
-      if (rawSel.startsWith("sc1-") && !/set/i.test(sel.label))
-        return `1º Set — ${sel.label}`;
-      if (rawSel.startsWith("sc2-") && !/set/i.test(sel.label))
-        return `2º Set — ${sel.label}`;
+      // Strip old "Xº Set — score" prefix and re-render as "XSet score"
+      const oldFmt = String(sel.label).match(/^(\d+)º\s*Set\s*[—-]\s*(.+)$/);
+      if (oldFmt) return `${oldFmt[1]}Set ${oldFmt[2]}`;
       return sel.label;
     }
     const [home = "", away = ""] = (sel.matchTitle ?? "").split(" vs ");
@@ -24744,25 +24753,7 @@ export default function Home({
                                       key={i}
                                       className="px-5 py-3.5 flex items-start gap-3"
                                     >
-                                      {(() => {
-                                        const _rawSel = String(sel.selection ?? "");
-                                        let _setLabel = "";
-                                        if (_rawSel.startsWith("sc1-")) _setLabel = "Set 1";
-                                        else if (_rawSel.startsWith("sc2-")) _setLabel = "Set 2";
-                                        else if (_rawSel.startsWith("ses-")) {
-                                          const _m = String(sel.label ?? "").match(/^(\d+)[^\d]/);
-                                          if (_m) _setLabel = `Set ${_m[1]}`;
-                                        }
-                                        if (!_setLabel) return leftIcon;
-                                        return (
-                                          <div className="flex flex-col items-center gap-0.5 shrink-0">
-                                            {leftIcon}
-                                            <span className="text-[9px] font-black bg-amber-400 text-amber-900 px-1.5 py-0.5 rounded-full leading-none whitespace-nowrap">
-                                              {_setLabel}
-                                            </span>
-                                          </div>
-                                        );
-                                      })()}
+                                      {leftIcon}
                                       <div className="flex-1 min-w-0">
                                         <div
                                           className={`font-bold text-[13px] leading-snug ${txtMain}`}
