@@ -17,10 +17,6 @@ async function buildAll() {
   await esbuild({
     entryPoints: {
       "index": path.resolve(artifactDir, "src/api/index.ts"),
-      "workers/settlement.worker": path.resolve(
-        artifactDir,
-        "src/workers/settlement.worker.ts",
-      ),
     },
     platform: "node",
     bundle: true,
