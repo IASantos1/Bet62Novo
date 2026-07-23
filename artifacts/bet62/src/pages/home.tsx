@@ -24008,7 +24008,12 @@ export default function Home({
                           !_fillerKeys.has(`${m.home}|${m.away}`),
                       )
                       .map((m) => ({ ...m, startsIn: (m as any).startsIn ?? 0 })),
-                  ] as typeof emBreve;
+                  ]
+                    .sort((a, b) => {
+                      const minsA = a.date && a.time ? _minsUntil(a.date, a.time) : (a.startsIn ?? Infinity);
+                      const minsB = b.date && b.time ? _minsUntil(b.date, b.time) : (b.startsIn ?? Infinity);
+                      return minsA - minsB;
+                    }) as typeof emBreve;
 
                   if (liveLoading && liveMatches.length === 0) {
                     return (
