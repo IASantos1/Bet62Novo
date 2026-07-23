@@ -598,6 +598,14 @@ export type LiveMatchState = {
     homeGoalMinutes?: number[]; // minutes when home team scored
     awayGoalMinutes?: number[]; // minutes when away team scored
   };
+  /** Formula 1 only — race winner + podium odds per driver */
+  f1Extra?: F1ExtraData;
+};
+
+export type F1DriverOdd = { name: string; shortName: string; team: string; pos: number; odd: number };
+export type F1ExtraData = {
+  raceWinner: F1DriverOdd[];
+  podium: F1DriverOdd[];
 };
 
 export type UpcomingMatch = {
@@ -626,6 +634,8 @@ export type UpcomingMatch = {
   awayTeamId?: string;
   homeImageVersion?: string;
   awayImageVersion?: string;
+  /** Formula 1 only — race winner + podium odds per driver */
+  f1Extra?: F1ExtraData;
 };
 
 type SAPIMatchEvent = {
@@ -8196,6 +8206,44 @@ export async function ensureFinishedMatchResult(
           .where(eq(matchResultsTable.matchId, matchId))
           .limit(1);
         if (row && typeof row.home === "number" && typeof row.away === "number" && row.home + row.away > 0) {
+          const dbExtras = row.extras as Record<string, unknown> | null | undefined;
+          const hasSetData =
+            dbExtras != null &&
+            Array.isArray((dbExtras["tennis"] as Record<string, unknown> | undefined)?.["sets"]) &&
+            ((dbExtras["tennis"] as Record<string, unknown>)["sets"] as unknown[]).length > 0;
+
+          if (!hasSetData) {
+            // DB record has no per-set scores — try to get them from the live feed
+            // (finished matches linger briefly; stages carry set-by-set data needed for sc1-/sc2-/sc3-)
+            try {
+              const games = await getTennisLiveV1();
+              for (const g of games) {
+                if (Number(g.id) !== providerId) continue;
+                const _stages = (g as any).stages ?? [];
+                const _setSets: [number, number][] = _stages
+                  .filter((s: any) => /^set \d+$/i.test(String(s.name ?? "")) && s.homeCompetitorScore >= 0 && s.awayCompetitorScore >= 0)
+                  .map((s: any): [number, number] => [Math.max(0, s.homeCompetitorScore), Math.max(0, s.awayCompetitorScore)]);
+                if (_setSets.length > 0) {
+                  const refreshedExtras = { tennis: { sets: _setSets } };
+                  const record = {
+                    home: row.home,
+                    away: row.away,
+                    homeTeam: row.homeTeam ?? "",
+                    awayTeam: row.awayTeam ?? "",
+                    status: row.status ?? "finished",
+                    finishedAt: row.finishedAt ? row.finishedAt.getTime() : Date.now(),
+                    extras: refreshedExtras,
+                  };
+                  finishedMatchResults.set(matchId, record);
+                  // Persist updated record so future server restarts retain set data
+                  await persistFinishedMatchRecord(matchId, "tennis", record);
+                  return true;
+                }
+                break; // found the game but no stage data available yet
+              }
+            } catch { /* live feed unavailable — fall through with DB record as-is */ }
+          }
+
           finishedMatchResults.set(matchId, {
             home: row.home,
             away: row.away,
@@ -12650,10 +12698,122 @@ function buildExtraLiveV2(sport: ExtraV2Sport, events: SAPIV2Event[]): LiveMatch
   return result;
 }
 
+// ─── Formula 1 — data types ──────────────────────────────────────────────────
+
+type F1DriverEntry = {
+  driver_id?: string;
+  nome?: string;
+  pontos?: string | number;
+  pos?: string | number;
+  equipe?: string;
+  team_id?: string;
+};
+
+// Fallback top-10 2025 season drivers (used when standings API is unavailable)
+const F1_DEFAULT_DRIVERS: F1DriverEntry[] = [
+  { nome: "Lando Norris (GBR)", pontos: "423", pos: "1", equipe: "McLaren" },
+  { nome: "Max Verstappen (NED)", pontos: "421", pos: "2", equipe: "Red Bull" },
+  { nome: "Oscar Piastri (AUS)", pontos: "410", pos: "3", equipe: "McLaren" },
+  { nome: "Charles Leclerc (MON)", pontos: "356", pos: "4", equipe: "Ferrari" },
+  { nome: "Lewis Hamilton (GBR)", pontos: "348", pos: "5", equipe: "Mercedes" },
+  { nome: "George Russell (GBR)", pontos: "320", pos: "6", equipe: "Mercedes" },
+  { nome: "Carlos Sainz (SPA)", pontos: "290", pos: "7", equipe: "Ferrari" },
+  { nome: "Fernando Alonso (SPA)", pontos: "162", pos: "8", equipe: "Aston Martin" },
+  { nome: "Lance Stroll (CAN)", pontos: "74", pos: "9", equipe: "Aston Martin" },
+  { nome: "Nico Hulkenberg (GER)", pontos: "70", pos: "10", equipe: "Haas" },
+];
+
+// Grand Prix circuit city/name → ISO-2 country code for flag display
+const F1_GP_COUNTRY_MAP: Record<string, string> = {
+  "melbourne": "au", "albert park": "au",
+  "monaco": "mc",
+  "baku": "az",
+  "miami": "us", "austin": "us", "las vegas": "us", "cota": "us",
+  "barcelona": "es", "catal": "es",
+  "montreal": "ca", "montréal": "ca", "gilles villeneuve": "ca",
+  "spielberg": "at", "red bull ring": "at",
+  "silverstone": "gb",
+  "budapest": "hu", "hungaroring": "hu",
+  "spa": "be",
+  "zandvoort": "nl",
+  "monza": "it", "imola": "it",
+  "singapore": "sg", "marina bay": "sg",
+  "suzuka": "jp",
+  "shanghai": "cn",
+  "lusail": "qa", "qatar": "qa",
+  "mexico city": "mx", "hermanos rodriguez": "mx",
+  "são paulo": "br", "sao paulo": "br", "interlagos": "br",
+  "abu dhabi": "ae", "yas marina": "ae",
+  "jeddah": "sa", "saudi": "sa",
+  "sakhir": "bh", "bahrain": "bh",
+};
+
+function f1GpCountry(city: string, track: string): string {
+  const check = (s: string) => s.toLowerCase().trim();
+  for (const [key, iso] of Object.entries(F1_GP_COUNTRY_MAP)) {
+    if (check(city).includes(key) || check(track).includes(key)) return iso;
+  }
+  return "";
+}
+
+/** "Lando Norris (GBR)" → "Norris" */
+function f1ShortName(nome: string): string {
+  const withoutCode = nome.replace(/\s*\([A-Z]{2,3}\)\s*$/, "").trim();
+  const parts = withoutCode.split(" ");
+  return parts[parts.length - 1] ?? nome;
+}
+
+/** Generate F1 race winner + podium markets from driver standings */
+function makeF1Markets(drivers: F1DriverEntry[]): F1ExtraData & { odds: { home: number; draw: number; away: number } } {
+  const sorted = [...drivers]
+    .sort((a, b) => Number(a.pos ?? 99) - Number(b.pos ?? 99))
+    .slice(0, 10);
+  const pts = sorted.map(d => Math.max(1, Number(d.pontos ?? 1)));
+  const total = pts.reduce((s, p) => s + p, 0) || 1;
+  const probs = pts.map(p => p / total);
+  const margin = 1.18;
+
+  const raceWinner: F1DriverOdd[] = sorted.map((d, i) => {
+    const prob = probs[i] ?? 0.01;
+    return {
+      name: String(d.nome ?? "").trim(),
+      shortName: f1ShortName(String(d.nome ?? "")),
+      team: String(d.equipe ?? "").trim().replace(/\s+$/, ""),
+      pos: Number(d.pos ?? i + 1),
+      odd: Math.round(Math.max(1.10, (1 / prob) * margin) * 100) / 100,
+    };
+  });
+
+  // Podium: ~2.8× win probability, capped 90 %
+  const podium: F1DriverOdd[] = sorted.slice(0, 8).map((d, i) => {
+    const pWin = probs[i] ?? 0.01;
+    const pPod = Math.min(0.90, Math.max(0.03, pWin * 2.8));
+    return {
+      name: String(d.nome ?? "").trim(),
+      shortName: f1ShortName(String(d.nome ?? "")),
+      team: String(d.equipe ?? "").trim().replace(/\s+$/, ""),
+      pos: Number(d.pos ?? i + 1),
+      odd: Math.round(Math.max(1.04, (1 / pPod) * 1.10) * 100) / 100,
+    };
+  });
+
+  return {
+    raceWinner,
+    podium,
+    odds: {
+      home: raceWinner[0]?.odd ?? 2.50,
+      draw: 0,
+      away: raceWinner[1]?.odd ?? 3.00,
+    },
+  };
+}
+
 const F1_SCHEDULE_TTL_MS = 30 * 60_000;
 const F1_LIVE_TTL_MS = 15_000;
+const F1_STANDINGS_TTL_MS = 4 * 60 * 60_000; // 4 h
 let f1UpcomingCache: { matches: UpcomingMatch[]; fetchedAt: number } | null = null;
 let f1LiveCache: { matches: LiveMatchState[]; fetchedAt: number } | null = null;
+let f1DriverStandingsCache: { drivers: F1DriverEntry[]; fetchedAt: number } | null = null;
 
 function statpalTournamentList<T>(
   raw: T | T[] | null | undefined,
@@ -12662,27 +12822,59 @@ function statpalTournamentList<T>(
   return Array.isArray(raw) ? raw : [raw];
 }
 
+async function getF1DriverStandings(): Promise<F1DriverEntry[]> {
+  const now = Date.now();
+  if (f1DriverStandingsCache && now - f1DriverStandingsCache.fetchedAt < F1_STANDINGS_TTL_MS)
+    return f1DriverStandingsCache.drivers;
+  if (!CONFIG.STATPAL_API_KEY) return f1DriverStandingsCache?.drivers ?? F1_DEFAULT_DRIVERS;
+  try {
+    const resp = await fetch(buildStatpalUrl("/v1/f1/driver-standings"), {
+      signal: AbortSignal.timeout(8000),
+      headers: statpalHeaders(),
+    });
+    if (!resp.ok) return f1DriverStandingsCache?.drivers ?? F1_DEFAULT_DRIVERS;
+    const payload = (await resp.json()) as Record<string, unknown>;
+    const classificacoes = payload["classificações"] as Record<string, unknown> | undefined;
+    const motoristas = classificacoes?.["motoristas"] as Record<string, unknown> | undefined;
+    const raw = motoristas?.["motorista"];
+    const drivers = (Array.isArray(raw) ? raw : raw ? [raw] : []) as F1DriverEntry[];
+    if (drivers.length > 0) {
+      f1DriverStandingsCache = { drivers, fetchedAt: now };
+      return drivers;
+    }
+  } catch { /* ignore */ }
+  return f1DriverStandingsCache?.drivers ?? F1_DEFAULT_DRIVERS;
+}
+
 function buildFormula1UpcomingFromTournaments(
   tournaments: F1StatpalTournament[],
+  f1MarketsData: ReturnType<typeof makeF1Markets>,
 ): UpcomingMatch[] {
   return tournaments
     .map((tournament) => {
-      const race = tournament.race;
+      const race = tournament.race as F1StatpalRace & { cidade?: string };
       if (!race?.date || !race?.time || !tournament.id || !tournament.name) return null;
-      const home = tournament.name;
-      const away = race.city || race.track || "Race";
+      const gpName = String(tournament.name).trim();
+      const city = String((race as Record<string, unknown>)["cidade"] ?? race.city ?? "").trim();
+      const track = String(race.track ?? "").trim();
+      const country = f1GpCountry(city, track);
+      const away = track ? `${track}${city ? ` • ${city}` : ""}` : (city || "Grand Prix");
       return {
         id: `formula1-statpal-${tournament.id}`,
-        home,
+        home: gpName,
         away,
         league: "Fórmula 1",
-        country: race.city || "",
-        time: race.time,
-        date: race.date,
+        country,
+        time: String(race.time).trim(),
+        date: String(race.date).trim(),
         sport: "formula1",
         hasRealOdds: false,
-        odds: makeOddsFromTeams(home, away),
-        markets: makeAdvancedMarketsFromTeams(home, away),
+        odds: { home: f1MarketsData.odds.home, draw: 0, away: f1MarketsData.odds.away },
+        markets: makeAdvancedMarketsFromTeams(
+          f1MarketsData.raceWinner[0]?.name ?? "F1 A",
+          f1MarketsData.raceWinner[1]?.name ?? "F1 B",
+        ),
+        f1Extra: { raceWinner: f1MarketsData.raceWinner, podium: f1MarketsData.podium },
       } satisfies UpcomingMatch;
     })
     .filter((match): match is UpcomingMatch => !!match);
@@ -12690,35 +12882,44 @@ function buildFormula1UpcomingFromTournaments(
 
 function buildFormula1LiveFromTournaments(
   tournaments: F1StatpalTournament[],
+  f1MarketsData: ReturnType<typeof makeF1Markets>,
 ): LiveMatchState[] {
   const out: LiveMatchState[] = [];
   const now = Date.now();
   const currentIds = new Set<string>();
   for (const tournament of tournaments) {
-    const race = tournament.race;
+    const race = tournament.race as F1StatpalRace & { cidade?: string };
     if (!race || !tournament.id || !tournament.name) continue;
     const status = String(race.status ?? "").trim();
     const normalized = normalizeProviderStatus(status);
-    if (!normalized || normalized === "not started" || normalized === "finished") continue;
+    if (!normalized || normalized === "not started" || normalized === "finished" || normalized === "concluído" || normalized === "concluido") continue;
     const drivers = race.results?.driver ?? [];
-    const leader = drivers[0]?.name?.trim() || tournament.name;
-    const chaser = drivers[1]?.name?.trim() || race.track || "Race";
+    // home = GP name, away = circuit (for consistent display)
+    const gpName = String(tournament.name).trim();
+    const city = String((race as Record<string, unknown>)["cidade"] ?? race.city ?? "").trim();
+    const track = String(race.track ?? "").trim();
+    const country = f1GpCountry(city, track);
+    const away = track ? `${track}${city ? ` • ${city}` : ""}` : (city || "Grand Prix");
     const id = `formula1-statpal-${tournament.id}`;
     currentIds.add(id);
     const state: LiveMatchState = {
       id,
-      home: leader,
-      away: chaser,
-      league: tournament.name,
-      country: race.city || "",
+      home: gpName,
+      away,
+      league: "Fórmula 1",
+      country,
       sport: "formula1",
       homeScore: Number.parseInt(drivers[0]?.pos ?? "1", 10) || 1,
       awayScore: Number.parseInt(drivers[1]?.pos ?? "2", 10) || 2,
       minute: 0,
       status,
       hasRealOdds: false,
-      odds: makeOddsFromTeams(leader, chaser),
-      markets: makeAdvancedMarketsFromTeams(leader, chaser),
+      odds: { home: f1MarketsData.odds.home, draw: 0, away: f1MarketsData.odds.away },
+      markets: makeAdvancedMarketsFromTeams(
+        f1MarketsData.raceWinner[0]?.name ?? "F1 A",
+        f1MarketsData.raceWinner[1]?.name ?? "F1 B",
+      ),
+      f1Extra: { raceWinner: f1MarketsData.raceWinner, podium: f1MarketsData.podium },
       events: [],
       date: race.date,
       time: race.time,
@@ -12744,16 +12945,21 @@ async function getFormula1Upcoming(): Promise<UpcomingMatch[]> {
   }
   if (!CONFIG.STATPAL_API_KEY) return f1UpcomingCache?.matches ?? [];
   try {
-    const resp = await fetch(buildStatpalUrl("/v1/f1/schedule"), {
-      signal: AbortSignal.timeout(8000),
-      headers: statpalHeaders(),
-    });
-    if (!resp.ok) return f1UpcomingCache?.matches ?? [];
-    const payload = (await resp.json()) as {
-      fixtures?: { tournament?: F1StatpalTournament | F1StatpalTournament[] };
-    };
+    const [scheduleResp, drivers] = await Promise.all([
+      fetch(buildStatpalUrl("/v1/f1/schedule"), {
+        signal: AbortSignal.timeout(8000),
+        headers: statpalHeaders(),
+      }),
+      getF1DriverStandings(),
+    ]);
+    if (!scheduleResp.ok) return f1UpcomingCache?.matches ?? [];
+    const payload = (await scheduleResp.json()) as Record<string, unknown>;
+    const acessorios = payload["acessórios"] as Record<string, unknown> | undefined;
+    const tournament = acessorios?.["torneio"] ?? (payload["fixtures"] as Record<string, unknown> | undefined)?.["tournament"];
+    const f1MarketsData = makeF1Markets(drivers);
     const matches = buildFormula1UpcomingFromTournaments(
-      statpalTournamentList(payload.fixtures?.tournament),
+      statpalTournamentList(tournament as F1StatpalTournament | F1StatpalTournament[]),
+      f1MarketsData,
     );
     f1UpcomingCache = { matches, fetchedAt: now };
     return matches;
@@ -12769,16 +12975,21 @@ async function getFormula1Live(): Promise<LiveMatchState[]> {
   }
   if (!CONFIG.STATPAL_API_KEY) return f1LiveCache?.matches ?? [];
   try {
-    const resp = await fetch(buildStatpalUrl("/v1/f1/livescores"), {
-      signal: AbortSignal.timeout(5000),
-      headers: statpalHeaders(),
-    });
-    if (!resp.ok) return f1LiveCache?.matches ?? [];
-    const payload = (await resp.json()) as {
-      livescore?: { tournament?: F1StatpalTournament | F1StatpalTournament[] };
-    };
+    const [liveResp, drivers] = await Promise.all([
+      fetch(buildStatpalUrl("/v1/f1/livescores"), {
+        signal: AbortSignal.timeout(5000),
+        headers: statpalHeaders(),
+      }),
+      getF1DriverStandings(),
+    ]);
+    if (!liveResp.ok) return f1LiveCache?.matches ?? [];
+    const payload = (await liveResp.json()) as Record<string, unknown>;
+    const livescore = payload["livescore"] as Record<string, unknown> | undefined;
+    const tournament = livescore?.["tournament"];
+    const f1MarketsData = makeF1Markets(drivers);
     const matches = buildFormula1LiveFromTournaments(
-      statpalTournamentList(payload.livescore?.tournament),
+      statpalTournamentList(tournament as F1StatpalTournament | F1StatpalTournament[]),
+      f1MarketsData,
     );
     f1LiveCache = { matches, fetchedAt: now };
     return matches;

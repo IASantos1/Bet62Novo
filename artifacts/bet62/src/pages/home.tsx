@@ -3686,6 +3686,11 @@ type Match = {
   scheduledDate?: string;
   // SportsApiPro league ID — used to fetch player markets (football only)
   leagueId?: string;
+  /** Formula 1 only — race winner and podium odds by driver */
+  f1Extra?: {
+    raceWinner: Array<{ name: string; shortName: string; team: string; pos: number; odd: number }>;
+    podium: Array<{ name: string; shortName: string; team: string; pos: number; odd: number }>;
+  };
 };
 
 type BetSelection = {
@@ -4259,8 +4264,25 @@ function sportEmoji(sport?: string): string {
   if (sport === "hockey") return "🏒";
   if (sport === "volleyball") return "🏐";
   if (sport === "baseball") return "⚾";
-
+  if (sport === "formula1") return "🏎️";
+  if (sport === "boxing") return "🥊";
+  if (sport === "cricket") return "🏏";
+  if (sport === "handball") return "🤾";
   return "⚽";
+}
+
+// Grand Prix circuit country → ISO flag code (mirrors backend F1_GP_COUNTRY_MAP)
+const F1_GP_COUNTRY_ISO: Record<string, string> = {
+  "au": "au", "mc": "mc", "az": "az", "us": "us", "es": "es",
+  "ca": "ca", "at": "at", "gb": "gb", "hu": "hu", "be": "be",
+  "nl": "nl", "it": "it", "sg": "sg", "jp": "jp", "cn": "cn",
+  "qa": "qa", "mx": "mx", "br": "br", "ae": "ae", "sa": "sa", "bh": "bh",
+};
+
+function getF1CircuitFlagUrl(country: string): string | null {
+  const iso = F1_GP_COUNTRY_ISO[country?.toLowerCase()];
+  if (!iso) return null;
+  return `https://flagcdn.com/w40/${iso}.png`;
 }
 
 // ─── WC 2026 Team → ISO Flag Codes ───────────────────────────────────────────
@@ -10315,7 +10337,29 @@ export default function Home({
           {/* Main body: teams+score LEFT, odds RIGHT */}
           <div className="flex flex-col sm:flex-row sm:items-center gap-2">
             <div className="flex-1 min-w-0">
-              {sport === "tennis" ? (
+              {sport === "formula1" ? (
+                /* F1: show Grand Prix name + circuit, then top race drivers */
+                <div className="w-full">
+                  <div className={`text-[13px] font-black leading-tight truncate ${isDarkTheme ? "text-white" : "text-zinc-900"}`}>
+                    {match.home}
+                  </div>
+                  <div className={`text-[11px] font-medium leading-tight truncate mt-0.5 ${isDarkTheme ? "text-zinc-500" : "text-zinc-400"}`}>
+                    🏁 {match.away}
+                  </div>
+                  {(match.f1Extra?.raceWinner ?? []).slice(0, 3).map((d, i) => (
+                    <div key={d.name} className={`flex items-center gap-1.5 mt-1 text-xs ${isDarkTheme ? "text-zinc-300" : "text-zinc-700"}`}>
+                      <span className="text-[10px] font-black text-amber-400 tabular-nums w-4 shrink-0">#{i + 1}</span>
+                      <span className="font-bold truncate">{d.shortName}</span>
+                      <span className={`text-[10px] truncate ${isDarkTheme ? "text-zinc-500" : "text-zinc-400"}`}>{d.team}</span>
+                    </div>
+                  ))}
+                  {(match.time || dateStr) && (
+                    <div className="mt-1 text-[11px] font-semibold text-zinc-500">
+                      {dateStr ? `${dateStr}${match.time ? ` · ${match.time}` : ""}` : match.time}
+                    </div>
+                  )}
+                </div>
+              ) : sport === "tennis" ? (
                 <TennisScore />
               ) : sport === "volleyball" ? (
                 <VolleyScore />
@@ -10382,7 +10426,23 @@ export default function Home({
                       <OddsButton match={match} selection="pen-away" odd={match.markets!.penExtra!.winner.away} market="penaltis" label={awayName.split(" ").slice(-1)[0]!} grow variant="worldcup" />
                     </>
                   ) : !isLiveSuspended ? (
-                    isObviousLiveResult ? (
+                    sport === "formula1" ? (
+                      /* F1 live: race winner driver buttons */
+                      <div className="flex gap-1 flex-wrap w-full">
+                        {(match.f1Extra?.raceWinner ?? []).slice(0, 4).map((d) => (
+                          <OddsButton
+                            key={d.name}
+                            match={match}
+                            selection={`f1w-${d.name}`}
+                            odd={d.odd}
+                            market="f1_race_winner"
+                            label={d.shortName}
+                            grow
+                            variant="worldcup"
+                          />
+                        ))}
+                      </div>
+                    ) : isObviousLiveResult ? (
                       <button
                         className="flex-1 flex flex-col items-center py-3 px-2 rounded-2xl text-xs border border-amber-200 bg-amber-50"
                         {...makeTap(() => setExpandedMatch(match))}
@@ -10498,8 +10558,49 @@ export default function Home({
       match.hasRealOdds ||
       (match.odds.home > 0 && match.odds.away > 0)
     );
-    const OddsRow = () =>
-      canShowOdds ? (
+    const OddsRow = () => {
+      // ── Formula 1: race winner driver buttons ────────────────────────────────
+      if (sport === "formula1") {
+        const f1 = match.f1Extra;
+        const topDrivers = f1?.raceWinner?.slice(0, 5) ?? [];
+        if (topDrivers.length === 0) return null;
+        return (
+          <div
+            className="flex flex-col gap-1.5 w-full"
+            onClick={stopCardOpen}
+            onTouchStart={stopCardOpen}
+            onTouchMove={stopCardOpen}
+            onTouchEnd={stopCardOpen}
+            onPointerDown={stopCardOpen}
+            onPointerMove={stopCardOpen}
+            onPointerUp={stopCardOpen}
+          >
+            <span className={`text-[9px] font-black tracking-[0.12em] uppercase ${isDarkTheme ? "text-zinc-500" : "text-zinc-400"}`}>
+              🏆 Vencedor da Corrida
+            </span>
+            <div className="flex gap-1 flex-wrap">
+              {topDrivers.map((d) => (
+                <OddsButton
+                  key={d.name}
+                  match={match}
+                  selection={`f1w-${d.name}`}
+                  odd={d.odd}
+                  market="f1_race_winner"
+                  label={d.shortName}
+                  grow
+                  variant="worldcup"
+                />
+              ))}
+            </div>
+            <div className="flex items-center justify-center gap-1">
+              <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
+              <span className="text-[9px] font-semibold tracking-wide text-zinc-600">EST.</span>
+            </div>
+          </div>
+        );
+      }
+      // ── Standard sports: 1X2 ────────────────────────────────────────────────
+      return canShowOdds ? (
         <div
           className="flex flex-col gap-1 sm:w-[280px] sm:shrink-0"
           onClick={stopCardOpen}
@@ -10557,6 +10658,7 @@ export default function Home({
           )}
         </div>
       ) : null;
+    };
 
     return (
       <div
@@ -10607,22 +10709,41 @@ export default function Home({
           {/* Teams + odds — side by side on sm+, stacked on mobile */}
           <div className="flex flex-col sm:flex-row sm:items-center gap-2">
             <div className="flex-1 min-w-0">
-              <div className="mb-1.5 flex items-center gap-1.5">
-                {homeFlag && (
-                  <img src={homeFlag} alt="" className="w-3.5 h-3.5 rounded-[2px] object-cover shrink-0" loading="lazy" />
-                )}
-                <span className={`text-[13px] font-black leading-tight truncate block ${isDarkTheme ? "text-white" : "text-zinc-900"}`}>
-                  {homeName}
-                </span>
-              </div>
-              <div className="flex items-center gap-1.5">
-                {awayFlag && (
-                  <img src={awayFlag} alt="" className="w-3.5 h-3.5 rounded-[2px] object-cover shrink-0" loading="lazy" />
-                )}
-                <span className={`text-[12px] font-semibold leading-tight truncate block ${isDarkTheme ? "text-zinc-400" : "text-zinc-600"}`}>
-                  {awayName}
-                </span>
-              </div>
+              {sport === "formula1" ? (
+                /* F1 pre-match: GP name + circuit • city */
+                <>
+                  <div className={`text-[13px] font-black leading-tight truncate ${isDarkTheme ? "text-white" : "text-zinc-900"}`}>
+                    {homeName}
+                  </div>
+                  <div className={`text-[11px] font-medium leading-tight truncate mt-0.5 ${isDarkTheme ? "text-zinc-500" : "text-zinc-400"}`}>
+                    🏁 {awayName}
+                  </div>
+                  {(match.date || match.time) && (
+                    <div className="mt-0.5 text-[11px] font-semibold text-zinc-500">
+                      {match.date ? formatMatchDate(match.date) : ""}{match.time ? ` · ${match.time}` : ""}
+                    </div>
+                  )}
+                </>
+              ) : (
+                <>
+                  <div className="mb-1.5 flex items-center gap-1.5">
+                    {homeFlag && (
+                      <img src={homeFlag} alt="" className="w-3.5 h-3.5 rounded-[2px] object-cover shrink-0" loading="lazy" />
+                    )}
+                    <span className={`text-[13px] font-black leading-tight truncate block ${isDarkTheme ? "text-white" : "text-zinc-900"}`}>
+                      {homeName}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    {awayFlag && (
+                      <img src={awayFlag} alt="" className="w-3.5 h-3.5 rounded-[2px] object-cover shrink-0" loading="lazy" />
+                    )}
+                    <span className={`text-[12px] font-semibold leading-tight truncate block ${isDarkTheme ? "text-zinc-400" : "text-zinc-600"}`}>
+                      {awayName}
+                    </span>
+                  </div>
+                </>
+              )}
             </div>
             <OddsRow />
           </div>
@@ -16839,6 +16960,13 @@ export default function Home({
   const getSelLabel = (sel: StoredSelection): string => {
     // For set-score bets, derive compact label directly from the selection key
     const rawSel = String(sel.selection ?? "");
+    // F1 race winner — "f1w-Lando Norris (GBR)" → driver name extracted
+    const f1wM = rawSel.match(/^f1w-(.+)$/);
+    if (f1wM) {
+      const driverFull = f1wM[1]!.trim();
+      const withoutCode = driverFull.replace(/\s*\([A-Z]{2,3}\)\s*$/, "").trim();
+      return withoutCode || driverFull;
+    }
     const scM = rawSel.match(/^sc([1-5])-(\d+)-(\d+)$/);
     if (scM) return `${scM[1]}Set ${scM[2]}-${scM[3]}`;
     // ses-X-Y: current-set exact score — try to get set num from stored label
@@ -24825,8 +24953,10 @@ export default function Home({
                                             </span>
                                           </div>
                                         )}
-                                        {/* Final score */}
-                                        {fs && (
+                                        {/* Final score — hidden for set-score markets (sc1-/sc2-/sc3-/ses-)
+                                            because fs.home/away is the match-level set count,
+                                            which is irrelevant and confusing for exact-set bets */}
+                                        {fs && !(/^sc[123]-|^ses-/.test(sel.selection ?? "")) && (
                                           <div
                                             className={`text-[11px] mt-1 font-semibold ${txtSub}`}
                                           >
