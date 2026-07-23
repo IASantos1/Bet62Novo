@@ -6,6 +6,7 @@ import { adminMiddleware, type AdminRequest } from "../middlewares/adminAuth.js"
 import { logger } from "../lib/logger.js";
 import { sendWithdrawalApproved, sendWithdrawalRejected } from "../lib/mailer.js";
 import { applyBalanceDelta } from "../lib/ledger.js";
+import { timingSafeEqualString } from "../lib/security.js";
 
 const router: IRouter = Router();
 
@@ -46,7 +47,7 @@ function isAdminWithdrawalStatus(value: string): value is (typeof ADMIN_WITHDRAW
   return (ADMIN_WITHDRAWAL_STATUSES as readonly string[]).includes(value);
 }
 
-function canTransitionWithdrawalStatus(from: string, to: (typeof ADMIN_WITHDRAWAL_STATUSES)[number]): boolean {
+export function canTransitionWithdrawalStatus(from: string, to: (typeof ADMIN_WITHDRAWAL_STATUSES)[number]): boolean {
   const transitions: Record<string, Array<(typeof ADMIN_WITHDRAWAL_STATUSES)[number]>> = {
     pending_review: ["approved", "rejected", "cancelled"],
     approved: ["processing", "paid", "failed", "rejected"],
@@ -56,11 +57,11 @@ function canTransitionWithdrawalStatus(from: string, to: (typeof ADMIN_WITHDRAWA
   return transitions[from]?.includes(to) ?? false;
 }
 
-function canUserCancelWithdrawalStatus(from: string): boolean {
+export function canUserCancelWithdrawalStatus(from: string): boolean {
   return (USER_CANCELLABLE_WITHDRAWAL_STATUSES as readonly string[]).includes(from);
 }
 
-function normalizeWebhookWithdrawalStatus(value: string): "processing" | "paid" | "failed" | null {
+export function normalizeWebhookWithdrawalStatus(value: string): "processing" | "paid" | "failed" | null {
   const normalized = String(value || "").trim().toLowerCase();
   if (!normalized) return null;
   if (["processing", "pending", "in_progress", "in-progress"].includes(normalized)) return "processing";
@@ -69,7 +70,7 @@ function normalizeWebhookWithdrawalStatus(value: string): "processing" | "paid" 
   return null;
 }
 
-function buildWithdrawalRiskFlags(args: {
+export function buildWithdrawalRiskFlags(args: {
   amount: number;
   userBalanceBefore: number;
   userCreatedAt: Date | string;
@@ -193,7 +194,7 @@ async function auditWithdrawalEvent(args: {
   }
 }
 
-function getWithdrawalWebhookSecret(req: AuthRequest | AdminRequest | { headers: Record<string, unknown> }): string {
+export function getWithdrawalWebhookSecret(req: AuthRequest | AdminRequest | { headers: Record<string, unknown> }): string {
   const headerValue = req.headers["x-withdrawal-webhook-secret"];
   if (typeof headerValue === "string") return headerValue;
   if (Array.isArray(headerValue) && typeof headerValue[0] === "string") return headerValue[0];
@@ -570,7 +571,7 @@ router.post("/webhook/payout", async (req: Request, res: Response): Promise<void
   }
 
   const secret = getWithdrawalWebhookSecret(req as { headers: Record<string, unknown> });
-  if (secret !== PAYOUT_WEBHOOK_SECRET) {
+  if (!timingSafeEqualString(secret, PAYOUT_WEBHOOK_SECRET)) {
     logger.warn({ ip: req.ip }, "Withdrawal payout webhook rejected: invalid secret");
     res.status(403).json({ error: "Forbidden" });
     return;

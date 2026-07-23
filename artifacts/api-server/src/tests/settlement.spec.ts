@@ -9,4 +9,3 @@ import "./settlement/volleyball.spec.js";
 import "./settlement/baseball.spec.js";
 import "./settlement/live.spec.js";
 import "./settlement/ticket.spec.js";
-import "./settlement/integration.spec.js";

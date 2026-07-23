@@ -18,6 +18,7 @@ import { rateLimit } from "../middlewares/rateLimit.js";
 import { logger } from "../lib/logger.js";
 import { applyBalanceDelta } from "../lib/ledger.js";
 import { getSettlementFallbackMetrics } from "../lib/settlementHelpers.js";
+import { timingSafeEqualString } from "../lib/security.js";
 import fs from "fs";
 import path from "path";
 import manualReviewRouter from "./manualReview.js";
@@ -265,6 +266,7 @@ if (!ADMIN_USERNAME || !ADMIN_PASSWORD || !ADMIN_EMAIL) {
 }
 
 const adminLoginRateLimit = rateLimit({
+  name: "admin-login",
   windowMs: 60_000,
   max: 5,
   message: "Muitas tentativas. Tente novamente em 1 minuto.",
@@ -292,7 +294,10 @@ router.post(
     const usernameMatch = loginId === ADMIN_USERNAME;
     const emailMatch = loginId === ADMIN_EMAIL;
 
-    if ((!usernameMatch && !emailMatch) || password !== ADMIN_PASSWORD) {
+    if (
+      (!usernameMatch && !emailMatch) ||
+      !timingSafeEqualString(password, ADMIN_PASSWORD)
+    ) {
       res.status(401).json({ error: "Credenciais inválidas" });
       return;
     }

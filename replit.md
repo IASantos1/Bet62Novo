@@ -53,6 +53,8 @@ The frontend proxies `/api` and `/ws` to the API server at port 8080.
 ## Database
 Replit's built-in PostgreSQL is used. Schema is auto-initialised on API server startup via `lib/db/src/init.ts` (all statements use `IF NOT EXISTS` — fully idempotent). No manual migration step needed in development.
 
+`lib/db/src/init.ts` is the single source of truth for the live schema, in both development and production. `lib/db/src/schema/*.ts` (Drizzle table definitions) are for type-safe query building only and are never applied to the database directly — do not run `drizzle-kit push`/`migrate` in any automated hook (the `post-merge.sh` git hook used to do this; it was removed because `push` can prompt interactively on ambiguous changes and hangs indefinitely without a TTY). When adding a column, add it to `init.ts` first, then mirror it in the matching `schema/*.ts` file.
+
 ## Notable quirks
 - The API server **must** be built before running (`esbuild` bundle); the dev script does this automatically.
 - `REDIS_URL` is optional — the settlement queue is gracefully disabled when not set.

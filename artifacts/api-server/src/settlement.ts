@@ -675,7 +675,7 @@ function inferSelectionSport(
     return "tennis";
   if (
     s.startsWith("b-") ||
-    /^q[1234]-/.test(s) ||
+    /^q[1234][ts]?-/.test(s) ||
     s === "h1-home" ||
     s === "h1-away"
   )
@@ -907,8 +907,10 @@ function scoreOutcomeForSelLastResort(
       if (!qScore) return null;
       const line = Number(qSpread[3]);
       const side = qSpread[2];
-      const adjustedHome = side === "home" ? qScore[0] + line : qScore[0];
-      const adjustedAway = side === "away" ? qScore[1] + line : qScore[1];
+      // "home -5" means home must win the quarter by more than 5, so the
+      // handicap is subtracted from the backed side, not added.
+      const adjustedHome = side === "home" ? qScore[0] - line : qScore[0];
+      const adjustedAway = side === "away" ? qScore[1] - line : qScore[1];
       if (adjustedHome === adjustedAway) return "void";
       if (side === "home") {
         return adjustedHome > qScore[1] ? "won" : "lost";
@@ -1174,7 +1176,7 @@ function describePendingSettlementReason(
   if (sport === "basketball") {
     const periods = getBasketballQuartersFromExtras(extra?.extras);
     if (
-      (/^q[1234]-/.test(s) ||
+      (/^q[1234][ts]?-/.test(s) ||
         /^b-anyq-/.test(s) ||
         /^b-allq-/.test(s) ||
         s === "h1-home" ||
@@ -1305,6 +1307,17 @@ export function resolveSelectionSettlement(
     winner?: "home" | "away" | null;
   },
 ): SelectionSettlementResolution {
+  // A status like "postponed"/"suspended" explicitly means "wait", not
+  // "resolve from whatever score happens to be on the record" (often 0-0
+  // for a match that never started). Short-circuit here so the naive
+  // fallback resolvers below never mistake that for a real result.
+  if (
+    resolveSettlementStatusOutcome(extra?.status, extra?.finishedAt) ===
+    "pending"
+  ) {
+    return { outcome: null, pendingReason: "status_pending" };
+  }
+
   const derivedHt =
     ht ?? getFootballHTScoreFromExtras(extra?.extras) ?? undefined;
   const primary = scoreOutcomeForSel(sel, ft, derivedHt, extra);
@@ -1675,13 +1688,13 @@ export function normalizeSettlementSelectionKey(selection: string): string {
     s = `sh${m![1]}-${side}`;
   }
   else if (/^gh-(home|away)\d*$/.test(s) || /^handicap-jogos-(home|away|casa|visitante|fora)$/.test(s)) {
-    const m = s.match(/^(?:gh|handicap-jogos-)(home|away|casa|visitante|fora)\d*$/);
+    const m = s.match(/^(?:gh-|handicap-jogos-)(home|away|casa|visitante|fora)\d*$/);
     const side = m![1] === "casa" ? "home" : (m![1] === "visitante" || m![1] === "fora") ? "away" : m![1];
     s = `gh-${side}`;
   }
   else if (/^tg-([ou][\d.]+)$/.test(s) || /^total-games-([ou])(\d+(?:\.\d+)?)$/.test(s)) {
     const m = s.match(/^(?:tg|total-games)-([ou])([\d.]+)$/);
-    s = m![1] + m![2].replace(".", "");
+    s = `tg-${m![1]}-${m![2]}`;
   }
   else if (/^s([12])g-([ou])-(\d+(?:\.\d+)?)$/.test(s) || /^games-set([12])-([ou])-(\d+(?:\.\d+)?)$/.test(s)) {
     const m = s.match(/^(?:s|games-set)([12])g?-([ou])-(\d+(?:\.\d+)?)$/);
@@ -1716,9 +1729,11 @@ export function normalizeSettlementSelectionKey(selection: string): string {
   }
 
   // Double Chance
-  else if (s === "dc-12" || s === "homeOrAway" || s === "dupla-chance-12" || s === "dupla-chance-casa-visitante") s = "homeOrAway";
-  else if (s === "dc-hd" || s === "homeOrDraw" || s === "dupla-chance-hd" || s === "dupla-chance-casa-empate") s = "dc-hd";
-  else if (s === "dc-da" || s === "awayOrDraw" || s === "dupla-chance-da" || s === "dupla-chance-visitante-empate") s = "dc-da";
+  // `s` is already lowercased above, so these must match the lowercase form
+  // of the camelCase keys the frontend sends ("homeOrAway" -> "homeoraway").
+  else if (s === "dc-12" || s === "homeoraway" || s === "dupla-chance-12" || s === "dupla-chance-casa-visitante") s = "dc-ha";
+  else if (s === "dc-hd" || s === "homeordraw" || s === "dupla-chance-hd" || s === "dupla-chance-casa-empate") s = "dc-hd";
+  else if (s === "dc-da" || s === "awayordraw" || s === "dupla-chance-da" || s === "dupla-chance-visitante-empate") s = "dc-da";
 
   // Exact Goals
   else if (s === "eg-0") s = "eg-g0";
@@ -1943,6 +1958,14 @@ function getHockeyShotsOnGoalTotalFromExtras(extras: unknown): number | null {
   return nestedTeamStats;
 }
 
+function hasVolleyballSetsExtras(extras: unknown): boolean {
+  if (!extras || typeof extras !== "object") return false;
+  const volleyball = (extras as Record<string, unknown>)["volleyball"] as
+    | Record<string, unknown>
+    | undefined;
+  return Array.isArray(volleyball?.["sets"]);
+}
+
 function getVolleyballSetPointsFromExtras(
   extras: unknown,
 ): Array<[number, number]> {
@@ -2063,6 +2086,19 @@ function getTennisSetsFromExtras(extras: unknown): Array<[number, number]> {
     sets.push([h!, a!]);
   }
   return sets;
+}
+
+function volleyballSetFinished(setScore: [number, number]): boolean {
+  if (!setScore || !Array.isArray(setScore) || setScore.length !== 2) return false;
+  const [homePoints, awayPoints] = setScore;
+  if (!Number.isFinite(homePoints) || !Number.isFinite(awayPoints)) return false;
+  if (homePoints < 0 || awayPoints < 0) return false;
+
+  const maxPoints = Math.max(homePoints, awayPoints);
+  const diff = Math.abs(homePoints - awayPoints);
+  // Volleyball sets 1-3 play to 25 points, win by 2 (set 5 plays to 15, not
+  // reachable here since the market only offers sets 1-3).
+  return maxPoints >= 25 && diff >= 2;
 }
 
 function tennisSetFinished(setScore: [number, number]): boolean {
@@ -2221,13 +2257,17 @@ export function scoreOutcomeForSel(
   }
   // ── Cards O/U (requires stats) ────────────────────────────────────────────
   else if (/^[ou]card\d+$/.test(s)) {
-    if (extra?.cardsTotal == null) return null;
+    // Fall back to counting individual card events when no aggregate
+    // cardsTotal was provided directly (e.g. provider only sends events).
+    const cardsTotal =
+      extra?.cardsTotal ??
+      getFootballCardEventsFromExtras(extra?.extras)?.length ??
+      null;
+    if (cardsTotal == null) return null;
     const line = decodeCompactLine(s.slice(5));
     if (!Number.isFinite(line)) return null;
-    if (extra.cardsTotal === line) voided = true;
-    else
-      winning =
-        s[0] === "o" ? extra.cardsTotal > line : extra.cardsTotal < line;
+    if (cardsTotal === line) voided = true;
+    else winning = s[0] === "o" ? cardsTotal > line : cardsTotal < line;
   }
   // ── Cards by half O/U (requires football card events with minutes) ────────
   else if (
@@ -2302,17 +2342,26 @@ export function scoreOutcomeForSel(
   }
   // ── Set winners (tennis/volleyball — requires per-period scores) ──────────
   else if (/^set[123]-(home|away)$/.test(s) || /^vs[123][ha]$/.test(s)) {
+    // "set1-home" is used for both tennis and volleyball; disambiguate by
+    // which sport's data is actually present in extras, not by key prefix.
+    const isVolleyball =
+      s.startsWith("vs") || hasVolleyballSetsExtras(extra?.extras);
     const setNum = s.startsWith("set")
       ? parseInt(s.slice(3, 4), 10)
       : parseInt(s.slice(2, 3), 10);
     const wantHome = s.endsWith("home") || s.endsWith("h");
     const wantAway = s.endsWith("away") || s.endsWith("a");
     if (!Number.isFinite(setNum) || setNum <= 0) return null;
-    const setScore = getTennisSetsFromExtras(extra?.extras)[setNum - 1] ?? null;
+    const setScore = isVolleyball
+      ? (getVolleyballSetPointsFromExtras(extra?.extras)[setNum - 1] ?? null)
+      : (getTennisSetsFromExtras(extra?.extras)[setNum - 1] ?? null);
     const h = setScore?.[0] ?? null;
     const a = setScore?.[1] ?? null;
     if (h === null || a === null) return null;
-    if (!tennisSetFinished([h, a])) return null;
+    const setFinished = isVolleyball
+      ? volleyballSetFinished([h, a])
+      : tennisSetFinished([h, a]);
+    if (!setFinished) return null;
     if (h === a) return "void";
     winning = wantHome ? h > a : wantAway ? a > h : null;
   }
@@ -2360,9 +2409,13 @@ export function scoreOutcomeForSel(
     const diff = homeSets - awaySets;
     if (diff === line) voided = true;
     else winning = m[2] === "home" ? diff > line : diff < line;
-  } else if (/^gh-(home|away)-(\d+(?:\.\d+)?)$/.test(s)) {
-    const m = s.match(/^gh-(home|away)-(\d+(?:\.\d+)?)$/)!;
-    const line = Number(m[2]!);
+  } else if (/^gh-(home|away)(?:-(\d+(?:\.\d+)?))?$/.test(s)) {
+    const m = s.match(/^gh-(home|away)(?:-(\d+(?:\.\d+)?))?$/)!;
+    // The line is normally embedded in the key ("gh-home-2.5"); some client
+    // aliases send a bare "gh-home" with the line only in the label instead.
+    const line = m[2] !== undefined
+      ? Number(m[2])
+      : Math.abs(readSelectionMarketLine(sel) ?? NaN);
     if (!Number.isFinite(line)) return null;
     const sets = getTennisSetsFromExtras(extra?.extras);
     if (sets.length === 0) return null;
@@ -2790,7 +2843,8 @@ export function scoreOutcomeForSel(
       s.match(/^mlb-([ou])(\d+(?:\.\d+)?)$/);
     if (tot) {
       const dir = tot[1]!;
-      const line = parseLine(tot[2])!;
+      const line = decodeCompactLine(tot[2]!);
+      if (!Number.isFinite(line)) return null;
       const t = ft.home + ft.away;
       if (t === line) voided = true;
       else winning = dir === "o" ? t > line : t < line;
@@ -3255,7 +3309,7 @@ function detectSportFromKey(normalizedKey: string): string {
     return "tennis";
   if (
     s.startsWith("b-") ||
-    /^q[1234]-/.test(s) ||
+    /^q[1234][ts]?-/.test(s) ||
     s === "h1-home" ||
     s === "h1-away"
   )
