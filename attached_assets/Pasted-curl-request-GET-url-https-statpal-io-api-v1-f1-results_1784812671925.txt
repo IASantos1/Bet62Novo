@@ -1,0 +1,128 @@
+curl --request GET \
+  --url 'https://statpal.io/api/v1/f1/results?access_key=b5b07a3f-b019-4a18-8969-6045169feda9' \ 
+  --header 'Accept: application/json'
+{
+  "resultados" : { 
+    "esporte" : "fórmula 1 " 
+    "torneio" : [ 
+      {
+        "id" : "821248" , 
+        "nome" : "Grande Prêmio da Austrália" , 
+        "corrida" : { 
+          "data" : "16.03.2025 " 
+          "distância" : "307,6" , 
+          "volta_mais_rápida" : "1:22.167" , 
+          "fastest_lap_id" : "3014" , 
+          "voltas_correndo" : "" , 
+          "status" : "Concluído" , 
+          "hora" : "04:00 " 
+          "total_voltas" : "55" , 
+          "pista" : "Circuito Albert Park" , 
+          "resultados" : { 
+            "motorista" : [ 
+              {
+                "driver_id" : "4513" , 
+                "grade" : "1" , 
+                "voltas" : "57" , 
+                "nome" : "Lando Norris (GBR)" , 
+                "poço" : "5" , 
+                "pos" : "1" , 
+                "equipe" : "McLaren " 
+                "team_id" : "1024" , 
+                "hora" : "1:42:06.304" 
+              }
+            ]
+          }
+        } ,
+        "qualificação" : [ 
+          {
+            "data" : "15.03.2025 " 
+            "número" : "1" , 
+            "estágio" : "" , 
+            "status" : "Concluído" , 
+            "hora" : "05:00 " 
+            "pista" : "Circuito Albert Park" , 
+            "resultados" : { 
+              "motorista" : [ 
+                {
+                  "driver_id" : "4513" , 
+                  "grade" : "" , 
+                  "voltas" : "20" , 
+                  "nome" : "Lando Norris (GBR)" , 
+                  "poço" : "" , 
+                  "pos" : "1" , 
+                  "equipe" : "McLaren " 
+                  "team_id" : "1024" , 
+                  "tempo" : "1:15.096" 
+                }
+              ]
+            }
+          }
+        ] ,
+        "último_treino" : { 
+          "data" : "15.03.2025 " 
+          "status" : "Concluído" , 
+          "hora" : "01:30 " 
+          "pista" : "Circuito Albert Park" , 
+          "resultados" : { 
+            "motorista" : [ 
+              {
+                "driver_id" : "5515" , 
+                "grade" : "" , 
+                "voltas" : "15" , 
+                "nome" : "Oscar Piastri (AUS)" , 
+                "poço" : "" , 
+                "pos" : "1" , 
+                "equipe" : "McLaren " 
+                "team_id" : "1024" , 
+                "tempo" : "1:15.921" 
+              }
+            ]
+          }
+        } ,
+        "segunda_prática" : { 
+          "data" : "14.03.2025 " 
+          "status" : "Concluído" , 
+          "hora" : "05:00 " 
+          "pista" : "Circuito Albert Park" , 
+          "resultados" : { 
+            "motorista" : [ 
+              {
+                "driver_id" : "4508" , 
+                "grade" : "" , 
+                "voltas" : "32" , 
+                "nome" : "Charles Leclerc (MON)" , 
+                "poço" : "" , 
+                "pos" : "1" , 
+                "equipe" : "Ferrari" , 
+                "team_id" : "1011" , 
+                "tempo" : "1:16.439" 
+              }
+            ]
+          }
+        } ,
+        "primeira_prática" : { 
+          "data" : "14.03.2025 " 
+          "status" : "Concluído" , 
+          "hora" : "01:30 " 
+          "pista" : "Circuito Albert Park" , 
+          "resultados" : { 
+            "motorista" : [ 
+              {
+                "driver_id" : "4513" , 
+                "grade" : "" , 
+                "voltas" : "21" , 
+                "nome" : "Lando Norris (GBR)" , 
+                "poço" : "" , 
+                "pos" : "1" , 
+                "equipe" : "McLaren " 
+                "team_id" : "1024" , 
+                "tempo" : "1:17.252" 
+              }
+            ]
+          }
+        }
+      }
+    ]
+  }
+}
