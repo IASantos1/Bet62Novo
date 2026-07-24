@@ -17136,19 +17136,19 @@ export default function Home({
       return withoutCode || driverFull;
     }
     const scM = rawSel.match(/^sc([1-5])-(\d+)-(\d+)$/);
-    if (scM) return `${scM[1]}Set ${scM[2]}-${scM[3]}`;
+    if (scM) return `${scM[2]}-${scM[3]} · ${scM[1]}º Set`;
     // ses-X-Y: current-set exact score — try to get set num from stored label
     const sesM = rawSel.match(/^ses-(\d+)-(\d+)$/);
     if (sesM) {
       const lbl = String(sel.label ?? "");
       const setNumM = lbl.match(/^(\d+)º?\s*[Ss]et/);
-      if (setNumM) return `${setNumM[1]}Set ${sesM[1]}-${sesM[2]}`;
+      if (setNumM) return `${sesM[1]}-${sesM[2]} · ${setNumM[1]}º Set`;
       return `${sesM[1]}-${sesM[2]}`;
     }
     if (sel.label && sel.label !== sel.selection) {
-      // Strip old "Xº Set — score" prefix and re-render as "XSet score"
+      // Strip old "Xº Set — score" prefix and re-render as "score · Xº Set"
       const oldFmt = String(sel.label).match(/^(\d+)º\s*Set\s*[—-]\s*(.+)$/);
-      if (oldFmt) return `${oldFmt[1]}Set ${oldFmt[2]}`;
+      if (oldFmt) return `${oldFmt[2]} · ${oldFmt[1]}º Set`;
       return sel.label;
     }
     const [home = "", away = ""] = (sel.matchTitle ?? "").split(" vs ");
