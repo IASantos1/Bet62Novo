@@ -1,7 +1,7 @@
 /**
  * BetBuilderPanel — Construtor de Same Game Combo / Bet Builder
  *
- * Permite ao utilizador selecionar 2 a 6 mercados do mesmo evento,
+ * Permite ao utilizador selecionar 2 a 3 mercados do mesmo evento,
  * valida combinações contraditórias e calcula a odd combinada em tempo real
  * com ajuste de correlação (espelhando o motor do backend).
  */
@@ -64,6 +64,8 @@ const PAIR_RHOS: PairRho[] = [
   { a: "cn-95",     b: "bts-yes",rho: 0.15 },
 ];
 
+const MAX_LEGS = 3;
+
 function getRho(a: string, b: string): number {
   for (const p of PAIR_RHOS) {
     if ((p.a === a && p.b === b) || (p.a === b && p.b === a)) return p.rho;
@@ -120,6 +122,51 @@ function findConflicts(
   return pairs;
 }
 
+// ── Ordenação lado a lado (mais/sim/casa à esquerda, menos/não/fora à
+// direita) — espelha o layout das linhas de mercado na aba "Mercados" ──────
+
+const KNOWN_PAIRS: Array<[string, string]> = [
+  ["home", "away"],
+  ["homeOrDraw", "awayOrDraw"],
+  ["bts-yes", "bts-no"],
+  ["ht-home", "ht-away"],
+];
+
+function orderForSideBySide(opts: BuilderMarket[]): BuilderMarket[] {
+  const byId = new Map(opts.map((m) => [m.id, m]));
+  const used = new Set<string>();
+  const rows: BuilderMarket[][] = [];
+
+  const takePair = (leftId: string, rightId: string) => {
+    const l = byId.get(leftId);
+    const r = byId.get(rightId);
+    if (!l && !r) return;
+    if (l) used.add(leftId);
+    if (r) used.add(rightId);
+    rows.push(l && r ? [l, r] : l ? [l] : [r!]);
+  };
+
+  for (const [leftId, rightId] of KNOWN_PAIRS) {
+    if (byId.has(leftId) || byId.has(rightId)) takePair(leftId, rightId);
+  }
+
+  // Over/Under numeric pairs (o15/u15, o25/u25, o35/u35, ...)
+  for (const m of opts) {
+    if (used.has(m.id)) continue;
+    const om = m.id.match(/^o(\d+)$/);
+    if (om) takePair(m.id, `u${om[1]}`);
+  }
+
+  // Anything left over (draw, homeOrAway, ht-draw, escanteios, etc.) — one per row
+  for (const m of opts) {
+    if (used.has(m.id)) continue;
+    used.add(m.id);
+    rows.push([m]);
+  }
+
+  return rows.flat();
+}
+
 // ── Componente ────────────────────────────────────────────────────────────
 
 const CAT_COLORS: Record<string, string> = {
@@ -146,21 +193,24 @@ export default function BetBuilderPanel({
   const hasConflict = conflicts.length > 0;
   const combinedOdd = useMemo(() => calcCombinedOdd(selected), [selected]);
 
-  // Category groups
+  // Category groups — dentro de cada categoria, mercados opostos (mais/menos,
+  // sim/não, casa/fora) ficam lado a lado, com "positivo" à esquerda.
   const categories = useMemo(() => {
     const map = new Map<string, BuilderMarket[]>();
     for (const m of markets) {
       if (!map.has(m.category)) map.set(m.category, []);
       map.get(m.category)!.push(m);
     }
-    return Array.from(map.entries());
+    return Array.from(map.entries()).map(
+      ([cat, opts]) => [cat, orderForSideBySide(opts)] as const,
+    );
   }, [markets]);
 
   const toggle = (market: BuilderMarket) => {
     setSelected((prev) => {
       const already = prev.find((s) => s.id === market.id);
       if (already) return prev.filter((s) => s.id !== market.id);
-      if (prev.length >= 6) return prev; // max 6 legs
+      if (prev.length >= MAX_LEGS) return prev;
       return [...prev, market];
     });
   };
@@ -252,33 +302,29 @@ export default function BetBuilderPanel({
               {opts.map((m) => {
                 const sel = isSelected(m.id);
                 const conflict = !sel && isConflicting(m.id);
-                const disabled = !sel && selected.length >= 6;
+                const disabled = !sel && selected.length >= MAX_LEGS;
 
                 return (
                   <button
                     key={m.id}
                     onClick={() => !disabled && toggle(m)}
                     disabled={disabled}
-                    className={`flex items-center justify-between px-2.5 py-2 rounded-xl border text-left transition-all ${
+                    className={`flex flex-col items-center justify-center min-w-0 h-[58px] px-1 rounded-xl border transition-all ${
                       sel
-                        ? "bg-red-600/20 border-red-500/60 shadow-[0_0_6px_rgba(220,38,38,0.2)]"
+                        ? "border-red-500 bg-red-600/20 shadow-sm shadow-red-900/30"
                         : conflict
                         ? "bg-zinc-900/40 border-red-900/50 opacity-40 cursor-not-allowed"
                         : disabled
                         ? "bg-zinc-900/30 border-zinc-800/40 opacity-30 cursor-not-allowed"
-                        : "bg-zinc-900 border-zinc-800/70 hover:border-zinc-600 hover:bg-zinc-800/60"
+                        : "border-zinc-700/60 bg-zinc-800/80 hover:border-zinc-600 hover:bg-zinc-800"
                     }`}
                   >
-                    <span
-                      className={`text-[10px] font-semibold leading-tight truncate ${
-                        sel ? "text-white" : "text-zinc-400"
-                      }`}
-                    >
+                    <span className="text-[10px] text-zinc-500 mb-1 leading-tight text-center truncate w-full px-0.5">
                       {m.label}
                     </span>
                     <span
-                      className={`text-[11px] font-black tabular-nums shrink-0 ml-1 ${
-                        sel ? "text-red-400" : "text-zinc-300"
+                      className={`text-sm font-black leading-none tabular-nums ${
+                        sel ? "text-red-400" : "text-white"
                       }`}
                     >
                       {m.odds.toFixed(2)}
@@ -390,7 +436,7 @@ export default function BetBuilderPanel({
 
       {selected.length === 0 && (
         <p className="text-[9px] text-zinc-700 mt-3 px-0.5 leading-relaxed">
-          Escolhe 2 a 6 mercados para construir o teu próprio combo. Combinações contraditórias são sinalizadas automaticamente.
+          Escolhe 2 a 3 mercados para construir o teu próprio combo. Combinações contraditórias são sinalizadas automaticamente.
         </p>
       )}
     </div>

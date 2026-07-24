@@ -6965,9 +6965,16 @@ export default function Home({
     return () => clearInterval(tid);
   }, [matchViewTab, expandedMatch?.id, !!expandedMatch?.isLive]);
 
-  // Fetch standings when standings tab is active
+  // Fetch standings when the standings tab is active, or when the stats tab
+  // is active (it embeds a "Classificação" sub-tab next to H2H so the data
+  // needs to be ready without the user having to navigate away first).
   useEffect(() => {
-    if (matchViewTab !== "standings" || !expandedMatch || standings) return;
+    if (
+      (matchViewTab !== "standings" && matchViewTab !== "stats") ||
+      !expandedMatch ||
+      standings
+    )
+      return;
     setStandingsLoading(true);
     const league = expandedMatch.league ?? "";
     setStandingsLeague(league);
@@ -17881,6 +17888,10 @@ export default function Home({
                     confrontosData={confrontosData}
                     onGoH2H={() => setMatchViewTab("confrontos")}
                     onGoLive={() => setMatchViewTab("live")}
+                    standings={standings}
+                    standingsGroups={standingsGroups}
+                    standingsLoading={standingsLoading}
+                    standingsLeague={standingsLeague}
                     onAddInsight={(market, odds) => {
                       if (!expandedMatch) return;
                       toggleBet(expandedMatch, market, odds, "insight", market);
@@ -17894,215 +17905,14 @@ export default function Home({
                 {/* Insight/Previsão panel */}
                 {matchViewTab === "insight" && (
                   <div className="mb-2 animate-in fade-in duration-200 space-y-3">
-                    <div className="flex items-center gap-2 px-1 mb-1">
-                      <span className="text-[15px] leading-none" style={{ filter: "drop-shadow(0 0 5px rgba(249,115,22,0.9)) drop-shadow(0 2px 4px rgba(239,68,68,0.8))" }}>🔥</span>
-                      <span className="text-[11px] font-black text-zinc-300">Análise baseada em dados e odds de mercado</span>
-                    </div>
-
                     {(() => {
                       if (!matchStats) return null;
-                      const { avgStats, winProb } = matchStats;
-
-                      const hscore = expandedMatch.homeScore ?? 0;
-                      const ascore = expandedMatch.awayScore ?? 0;
-                      const totalGoals = hscore + ascore;
-                      const bothScored = hscore > 0 && ascore > 0;
-                      const isLive = expandedMatch.isLive ?? false;
-
-                      // +5% boost applied to every preview odd
-                      const boosted = (odds: number) => Math.max(1.01, +(odds * 1.05).toFixed(2));
-
-                      type InsightEntry = {
-                        market: string;
-                        odds: string;
-                        baseOdds: string;
-                        confidence: number;
-                        reason: string;
-                        tag: string;
-                        tagColor: string;
-                        cascadeFrom?: string;
-                        settled?: boolean;
-                        settledLabel?: string;
-                      };
-
-                      const insights: InsightEntry[] = [];
-
-                      // ── Over / Under goals cascade ────────────────────────────
-                      const over15Settled = isLive && totalGoals >= 2;
-                      const over25Settled = isLive && totalGoals >= 3;
-                      const over35Settled = isLive && totalGoals >= 4;
-
-                      if (!over15Settled && avgStats.over15 >= 50) {
-                        const base = 1 / (avgStats.over15 / 100) * 0.95;
-                        insights.push({
-                          market: "Mais de 1.5 Golos",
-                          odds: boosted(base).toFixed(2),
-                          baseOdds: base.toFixed(2),
-                          confidence: avgStats.over15,
-                          reason: `Alta probabilidade de pelo menos 2 golos. Média H2H: ${avgStats.goalsScored.toFixed(1)} golos.`,
-                          tag: "ALTA",
-                          tagColor: "text-emerald-400",
-                        });
-                      } else if (over15Settled && !over25Settled && avgStats.over25 >= 40) {
-                        const base = 1 / (Math.max(35, avgStats.over25) / 100) * 0.95;
-                        insights.push({
-                          market: "Mais de 2.5 Golos",
-                          odds: boosted(base).toFixed(2),
-                          baseOdds: base.toFixed(2),
-                          confidence: Math.max(35, avgStats.over25),
-                          reason: `Mercado 1.5 liquidado (${totalGoals} golos). Próximo nível desbloqueado automaticamente.`,
-                          tag: "DESBLOQUEADO",
-                          tagColor: "text-orange-400",
-                          cascadeFrom: "Mais de 1.5",
-                        });
-                      }
-
-                      if (!over25Settled && avgStats.over25 >= 50) {
-                        const base = 1 / (avgStats.over25 / 100) * 0.95;
-                        insights.push({
-                          market: "Mais de 2.5 Golos",
-                          odds: boosted(base).toFixed(2),
-                          baseOdds: base.toFixed(2),
-                          confidence: avgStats.over25,
-                          reason: `Média de ${avgStats.goalsScored.toFixed(1)} golos nos H2H. BTTS em ${avgStats.btts}% das partidas.`,
-                          tag: avgStats.over25 >= 65 ? "VALOR" : "MODERADO",
-                          tagColor: avgStats.over25 >= 65 ? "text-emerald-400" : "text-yellow-400",
-                        });
-                      } else if (over25Settled && !over35Settled) {
-                        const conf = Math.max(30, avgStats.over25 - 20);
-                        const base = 1 / (conf / 100) * 0.95;
-                        insights.push({
-                          market: "Mais de 3.5 Golos",
-                          odds: boosted(base).toFixed(2),
-                          baseOdds: base.toFixed(2),
-                          confidence: conf,
-                          reason: `Mercado 2.5 liquidado (${totalGoals} golos). Mercado de 3.5 desbloqueado!`,
-                          tag: "DESBLOQUEADO",
-                          tagColor: "text-orange-400",
-                          cascadeFrom: "Mais de 2.5",
-                        });
-                      } else if (over35Settled) {
-                        const conf = Math.max(20, avgStats.over25 - 38);
-                        const base = 1 / (conf / 100) * 0.95;
-                        insights.push({
-                          market: "Mais de 4.5 Golos",
-                          odds: boosted(base).toFixed(2),
-                          baseOdds: base.toFixed(2),
-                          confidence: conf,
-                          reason: `Mercados 2.5 e 3.5 ambos liquidados (${totalGoals} golos). Jogo de muitos golos!`,
-                          tag: "DESBLOQUEADO",
-                          tagColor: "text-orange-400",
-                          cascadeFrom: "Mais de 3.5",
-                        });
-                      }
-
-                      // Under goals (only if not already liquidated above)
-                      if (!isLive && avgStats.over25 < 50) {
-                        const conf = 100 - avgStats.over25;
-                        const base = 1 / (conf / 100) * 0.95;
-                        insights.push({
-                          market: "Menos de 2.5 Golos",
-                          odds: boosted(base).toFixed(2),
-                          baseOdds: base.toFixed(2),
-                          confidence: conf,
-                          reason: `Baixa probabilidade de muitos golos neste encontro.`,
-                          tag: "MODERADO",
-                          tagColor: "text-yellow-400",
-                        });
-                      }
-
-                      // ── BTTS cascade ─────────────────────────────────────────
-                      if (!bothScored && avgStats.btts >= 50) {
-                        const base = 1 / (avgStats.btts / 100) * 0.95;
-                        insights.push({
-                          market: "Ambas Marcam — Sim",
-                          odds: boosted(base).toFixed(2),
-                          baseOdds: base.toFixed(2),
-                          confidence: avgStats.btts,
-                          reason: `Ambas as equipas marcaram em ${avgStats.btts}% dos jogos recentes. Média da liga: ${avgStats.leagueBtts}%.`,
-                          tag: avgStats.btts >= 60 ? "FAVORITO" : "MODERADO",
-                          tagColor: avgStats.btts >= 60 ? "text-blue-400" : "text-yellow-400",
-                        });
-                      } else if (bothScored && isLive) {
-                        // Ambas Marcam settled → cascade to Placar Exato + Cantos + Cartões
-                        const exactScore = `${hscore}-${ascore}`;
-                        insights.push({
-                          market: `Placar Exato ${exactScore}`,
-                          odds: boosted(7.50).toFixed(2),
-                          baseOdds: "7.50",
-                          confidence: 38,
-                          reason: `Ambas Marcam liquidada. Placar atual ${exactScore}. Mercado de placar exato desbloqueado!`,
-                          tag: "DESBLOQUEADO",
-                          tagColor: "text-orange-400",
-                          cascadeFrom: "Ambas Marcam — Sim",
-                        });
-                        insights.push({
-                          market: "Acima de 7.5 Cantos",
-                          odds: boosted(1.85).toFixed(2),
-                          baseOdds: "1.85",
-                          confidence: 54,
-                          reason: `Com ambas a marcar, o jogo é mais aberto e gera mais cantos. Mercado desbloqueado.`,
-                          tag: "DESBLOQUEADO",
-                          tagColor: "text-orange-400",
-                          cascadeFrom: "Ambas Marcam — Sim",
-                        });
-                        insights.push({
-                          market: "Acima de 3.5 Cartões",
-                          odds: boosted(1.70).toFixed(2),
-                          baseOdds: "1.70",
-                          confidence: 51,
-                          reason: `Jogos com golos de ambas as equipas tendem a ter mais faltas e cartões.`,
-                          tag: "DESBLOQUEADO",
-                          tagColor: "text-orange-400",
-                          cascadeFrom: "Ambas Marcam — Sim",
-                        });
-                      }
-
-                      if (!isLive && avgStats.btts < 50) {
-                        const conf = 100 - avgStats.btts;
-                        const base = 1 / (conf / 100) * 0.95;
-                        insights.push({
-                          market: "Ambas Marcam — Não",
-                          odds: boosted(base).toFixed(2),
-                          baseOdds: base.toFixed(2),
-                          confidence: conf,
-                          reason: `Baixa probabilidade de ambas as equipas marcarem.`,
-                          tag: "MODERADO",
-                          tagColor: "text-yellow-400",
-                        });
-                      }
-
-                      // ── Win prediction ────────────────────────────────────────
-                      const topProb = Math.max(winProb.home, winProb.draw, winProb.away);
-                      if (topProb === winProb.home && winProb.home >= 45) {
-                        const base = 1 / (winProb.home / 100) * 0.95;
-                        insights.push({
-                          market: `${expandedMatch.home} — Vitória`,
-                          odds: boosted(base).toFixed(2),
-                          baseOdds: base.toFixed(2),
-                          confidence: winProb.home,
-                          reason: `Probabilidade de ${winProb.home}% calculada a partir das odds. Vantagem em casa.`,
-                          tag: "SEGURO",
-                          tagColor: "text-yellow-400",
-                        });
-                      } else if (topProb === winProb.away && winProb.away >= 40) {
-                        const base = 1 / (winProb.away / 100) * 0.95;
-                        insights.push({
-                          market: `${expandedMatch.away} — Vitória`,
-                          odds: boosted(base).toFixed(2),
-                          baseOdds: base.toFixed(2),
-                          confidence: winProb.away,
-                          reason: `Probabilidade de ${winProb.away}% calculada a partir das odds.`,
-                          tag: "FAVORITO",
-                          tagColor: "text-blue-400",
-                        });
-                      }
+                      const { avgStats } = matchStats;
 
                       // ── Both-team market preview cards ────────────────────────
                       const mk = expandedMatch?.markets;
                       const homeOdd = expandedMatch.odds?.home ?? 0;
                       const awayOdd = expandedMatch.odds?.away ?? 0;
-                      const drawOdd = expandedMatch.odds?.draw ?? 0;
 
                       const bttsOdds = mk?.bothTeamsScore?.yes && mk.bothTeamsScore.yes > 1.01
                         ? mk.bothTeamsScore.yes
@@ -18119,45 +17929,6 @@ export default function Home({
                           </div>
                         );
                       }
-
-                      // Individual market cards — always show BOTH teams
-                      const marketCards = [
-                        {
-                          key: "home",
-                          label: `${teamNamePt(expandedMatch.home)} — Vitória`,
-                          sel: "home", mkt: "result", odds: homeOdd,
-                          prob: winProb.home, emoji: "🏠",
-                          color: "text-emerald-400", border: "border-emerald-500/20",
-                        },
-                        ...(drawOdd > 1.01 ? [{
-                          key: "draw",
-                          label: "Empate",
-                          sel: "draw", mkt: "result", odds: drawOdd,
-                          prob: winProb.draw, emoji: "🤝",
-                          color: "text-zinc-300", border: "border-zinc-600/30",
-                        }] : []),
-                        {
-                          key: "away",
-                          label: `${teamNamePt(expandedMatch.away)} — Vitória`,
-                          sel: "away", mkt: "result", odds: awayOdd,
-                          prob: winProb.away, emoji: "✈️",
-                          color: "text-blue-400", border: "border-blue-500/20",
-                        },
-                        {
-                          key: "btts",
-                          label: "Ambas Marcam — Sim",
-                          sel: "bts-yes", mkt: "dupla", odds: bttsOdds,
-                          prob: avgStats.btts, emoji: "⚽",
-                          color: "text-orange-400", border: "border-orange-500/20",
-                        },
-                        {
-                          key: "o25",
-                          label: "Acima de 2.5 Golos",
-                          sel: "o25", mkt: "gols", odds: o25Odds,
-                          prob: avgStats.over25, emoji: "📈",
-                          color: "text-red-400", border: "border-red-500/20",
-                        },
-                      ];
 
                       // ── Múltiplas de previsão — SEMPRE do mesmo evento (expandedMatch).
                       // Cada combo junta 2 mercados sobre a MESMA equipa (não pode
@@ -18236,42 +18007,6 @@ export default function Home({
 
                       return (
                         <div className="space-y-4">
-                          {/* ── Both-team market cards ─────────────────────────── */}
-                          <div>
-                            <div className="text-[9px] font-black text-zinc-500 uppercase tracking-widest mb-2 px-1">Previsão por Mercado</div>
-                            <div className="grid grid-cols-2 gap-2">
-                              {marketCards.map((c) => {
-                                const isSelected = bets.some(
-                                  (b) => String(b.matchId) === String(expandedMatch.id) && b.market === c.mkt && b.selection === c.sel,
-                                );
-                                return (
-                                  <button
-                                    key={c.key}
-                                    onClick={() => {
-                                      toggleBet(expandedMatch, c.sel, c.odds, c.mkt, c.label);
-                                      if (window.innerWidth < 1024) setBetSlipOpenMobile(true);
-                                    }}
-                                    className={`flex flex-col gap-1 p-3 rounded-xl border text-left transition-all ${
-                                      isSelected ? "bg-red-600/20 border-red-500/60" : `bg-zinc-900 ${c.border} hover:border-zinc-600`
-                                    }`}
-                                  >
-                                    <div className="flex items-center justify-between">
-                                      <span className="text-[11px]">{c.emoji}</span>
-                                      <span className={`text-[13px] font-black ${isSelected ? "text-red-400" : c.color}`}>{c.odds.toFixed(2)}</span>
-                                    </div>
-                                    <div className="text-[10px] font-bold text-white leading-tight">{c.label}</div>
-                                    <div className="flex items-center gap-1 mt-0.5">
-                                      <div className="flex-1 h-1 bg-zinc-800 rounded-full overflow-hidden">
-                                        <div className={`h-full rounded-full ${isSelected ? "bg-red-500" : "bg-zinc-500"}`} style={{ width: `${Math.min(100, c.prob)}%` }} />
-                                      </div>
-                                      <span className="text-[9px] text-zinc-500 shrink-0">{c.prob}%</span>
-                                    </div>
-                                  </button>
-                                );
-                              })}
-                            </div>
-                          </div>
-
                           {/* ── Múltiplas de previsão — sempre do mesmo evento ── */}
                           {combos.length > 0 && (
                             <div>
@@ -18406,7 +18141,11 @@ export default function Home({
                       const HT  = ["ht-home", "ht-draw", "ht-away"];
 
                       const conflictFor = (id: string): string[] => {
-                        const groups = [RES, DC, O15, O25, O35, BTS, HT];
+                        // Resultado e Dupla Chance tratados como um único grupo: Dupla
+                        // Chance é uma combinação dos mesmos 3 resultados (home/draw/away),
+                        // então misturar "home" com "awayOrDraw" é contraditório e misturar
+                        // "home" com "homeOrDraw" é redundante — a Dupla Chance já cobre isso.
+                        const groups = [[...RES, ...DC], O15, O25, O35, BTS, HT];
                         const out: string[] = [];
                         for (const g of groups) {
                           if (g.includes(id)) {

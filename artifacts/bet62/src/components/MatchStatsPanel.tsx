@@ -2,7 +2,7 @@ import { useState, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   BarChart2, Activity, Users, TrendingUp, Lightbulb,
-  Zap, Circle, ChevronRight, Loader2
+  Zap, Circle, ChevronRight, Loader2, ListOrdered
 } from "lucide-react";
 
 type MatchStatsData = {
@@ -28,6 +28,44 @@ type FormEntry = { result: "W" | "D" | "L"; score: string; opponent: string; hom
 type H2HMeeting = { date: string; team1: string; team2: string; score1: number; score2: number; league: string; country?: string };
 type ConfrontosData = { homeWins: number; awayWins: number; draws: number; recentMeetings: H2HMeeting[]; team1Name: string; team2Name: string; sport: string };
 type V2StatsGroup = { title: string; rows: Array<{ name: string; home: string; away: string }> };
+type StandingRow = {
+  pos: number;
+  name: string;
+  played: number;
+  won: number;
+  drawn: number;
+  lost: number;
+  gf: number;
+  ga: number;
+  pts: number;
+};
+type StandingsGroup = { name: string; rows: StandingRow[] };
+
+function rowMatchesTeam(rowName: string, teamName: string): boolean {
+  const norm = (s: string) =>
+    s.toLowerCase().normalize("NFD").replace(/\p{Mn}/gu, "").replace(/[^a-z0-9]+/g, " ").trim();
+  const row = norm(rowName);
+  const team = norm(teamName);
+  if (!row || !team) return false;
+  if (row === team) return true;
+  if (row.includes(team) || team.includes(row)) return true;
+  return row.includes(team.slice(0, Math.min(team.length, 8)));
+}
+
+function standingsMetaForSport(sport?: string) {
+  switch (sport) {
+    case "basketball":
+      return { played: "J", won: "V", drawn: "OT", lost: "D", gf: "PF", ga: "PA", pts: "Pts" };
+    case "hockey":
+      return { played: "J", won: "V", drawn: "OT", lost: "D", gf: "GM", ga: "GS", pts: "Pts" };
+    case "baseball":
+      return { played: "J", won: "V", drawn: "OT", lost: "D", gf: "RF", ga: "RA", pts: "Pct" };
+    case "volleyball":
+      return { played: "J", won: "V", drawn: "Pts", lost: "D", gf: "Sets+", ga: "Sets-", pts: "Pts" };
+    default:
+      return { played: "J", won: "V", drawn: "E", lost: "D", gf: "GF", ga: "GC", pts: "Pts" };
+  }
+}
 
 type GoalEvent = {
   team: "home" | "away";
@@ -90,6 +128,8 @@ type LiveExtra = {
   // Football per-team live stats (from /match/{id}/statistics)
   cornersTotal?: number;
   cardsTotal?: number;
+  cornersHome?: number;
+  cornersAway?: number;
   possessionHome?: number;
   possessionAway?: number;
   shotsTotalHome?: number;
@@ -140,6 +180,10 @@ type Props = {
   onAddInsight?: (market: string, odds: number) => void;
   liveExtra?: LiveExtra | null;
   storyline?: string | null;
+  standings?: StandingRow[] | null;
+  standingsGroups?: StandingsGroup[] | null;
+  standingsLoading?: boolean;
+  standingsLeague?: string;
 };
 
 // ── Momentum Chart ──────────────────────────────────────────────────────────
@@ -147,9 +191,9 @@ function seededBar(a: number, b: number): number {
   return Math.abs(Math.sin(a * 127.1 + b * 311.7) * 0.45 + Math.sin(a * 17.3 + b * 89.5) * 0.35 + 0.2);
 }
 
-function MomentumChart({ homeTeam, awayTeam, isLive, liveMinute, isHalfTime, goalEvents }: {
+function MomentumChart({ homeTeam, awayTeam, isLive, liveMinute, isHalfTime, goalEvents, cardEvents }: {
   homeTeam: string; awayTeam: string; isLive?: boolean; liveMinute?: number; isHalfTime?: boolean;
-  goalEvents?: GoalEvent[];
+  goalEvents?: GoalEvent[]; cardEvents?: CardEvent[];
 }) {
   const hs = homeTeam.split("").reduce((a, c) => a + c.charCodeAt(0), 7);
   const as_ = awayTeam.split("").reduce((a, c) => a + c.charCodeAt(0), 13);
@@ -174,6 +218,14 @@ function MomentumChart({ homeTeam, awayTeam, isLive, liveMinute, isHalfTime, goa
     const col = Math.max(0, Math.min(Math.floor(g.minute / 2), COLS - 1));
     if (!goalsByCol.has(col)) goalsByCol.set(col, []);
     goalsByCol.get(col)!.push(g);
+  }
+
+  // Card markers: one per yellow/red card
+  const cardsByCol = new Map<number, CardEvent[]>();
+  for (const c of cardEvents ?? []) {
+    const col = Math.max(0, Math.min(Math.floor(c.minute / 2), COLS - 1));
+    if (!cardsByCol.has(col)) cardsByCol.set(col, []);
+    cardsByCol.get(col)!.push(c);
   }
 
   const colW = W / COLS;
@@ -258,6 +310,46 @@ function MomentumChart({ homeTeam, awayTeam, isLive, liveMinute, isHalfTime, goa
           );
         })}
 
+        {/* Card markers (yellow/red) */}
+        {Array.from(cardsByCol.entries()).map(([col, colCards]) => {
+          const cx = col * colW + bw / 2 + 0.5;
+          const homeCards = colCards.filter((c) => c.team === "home");
+          const awayCards = colCards.filter((c) => c.team === "away");
+          const cardColor = (c: CardEvent) => (c.cardType === "red" ? "#ef4444" : "#facc15");
+          const minLabel = (c: CardEvent) =>
+            c.extraMinute ? `${c.minute}+${c.extraMinute}'` : `${c.minute}'`;
+          const labelAnchor = col >= 36 ? "end" : "start";
+          const labelX = col >= 36 ? cx - 9 : cx + 9;
+          return (
+            <g key={`cm-${col}`}>
+              {homeCards.map((c, ci) => {
+                const cy = 20 + ci * 11;
+                return (
+                  <g key={`cm-h-${col}-${ci}`}>
+                    <line x1={cx} y1={midY - 2} x2={cx} y2={cy + 5} stroke={cardColor(c)} strokeWidth="0.7" strokeDasharray="1.5,1.2" opacity={0.55} />
+                    <rect x={cx - 3.5} y={cy - 4.5} width="7" height="9" rx="1" fill={cardColor(c)} opacity={0.95} />
+                    <text x={labelX} y={cy + 1} textAnchor={labelAnchor} fontSize="5" fill={cardColor(c)} fontFamily="monospace" fontWeight="bold" opacity={0.9}>
+                      {minLabel(c)}
+                    </text>
+                  </g>
+                );
+              })}
+              {awayCards.map((c, ci) => {
+                const cy = H - 20 - ci * 11;
+                return (
+                  <g key={`cm-a-${col}-${ci}`}>
+                    <line x1={cx} y1={midY + 2} x2={cx} y2={cy - 5} stroke={cardColor(c)} strokeWidth="0.7" strokeDasharray="1.5,1.2" opacity={0.55} />
+                    <rect x={cx - 3.5} y={cy - 4.5} width="7" height="9" rx="1" fill={cardColor(c)} opacity={0.95} />
+                    <text x={labelX} y={cy + 1} textAnchor={labelAnchor} fontSize="5" fill={cardColor(c)} fontFamily="monospace" fontWeight="bold" opacity={0.9}>
+                      {minLabel(c)}
+                    </text>
+                  </g>
+                );
+              })}
+            </g>
+          );
+        })}
+
         <line x1={W / 2} y1="14" x2={W / 2} y2={H - 14} stroke="#3f3f46" strokeWidth="1" strokeDasharray="3,2" />
         <text x={W / 2 + 3} y={H - 3} fontSize="8" fill="#52525b" fontFamily="monospace">HT</text>
         <text x={W - 2} y={H - 3} fontSize="8" fill="#52525b" fontFamily="monospace" textAnchor="end">FT</text>
@@ -276,7 +368,7 @@ function MomentumChart({ homeTeam, awayTeam, isLive, liveMinute, isHalfTime, goa
   );
 }
 
-type TabId = "prob" | "stats" | "h2h" | "forma" | "eventos" | "insight";
+type TabId = "prob" | "stats" | "h2h" | "classificacao" | "forma" | "eventos" | "insight";
 
 function AnimatedBar({ pct, color, delay = 0 }: { pct: number; color: string; delay?: number }) {
   return (
@@ -427,6 +519,7 @@ export default function MatchStatsPanel({
   v2StatsGroups, v2StatsLoading,
   confrontosData, onGoH2H, onGoLive, onAddInsight,
   liveExtra, storyline,
+  standings, standingsGroups, standingsLoading, standingsLeague,
 }: Props) {
   const isFootball = !sport || sport === "football";
 
@@ -444,6 +537,9 @@ export default function MatchStatsPanel({
     if (confrontosData) {
       tabs.push({ id: "h2h", label: "H2H", icon: <Users size={12} /> });
     }
+    if (standingsLoading || (standings && standings.length > 0) || (standingsGroups && standingsGroups.length > 0)) {
+      tabs.push({ id: "classificacao", label: "Classificação", icon: <ListOrdered size={12} /> });
+    }
     if (isFootball && matchStats?.formIsReal) {
       tabs.push({ id: "forma", label: "Forma", icon: <TrendingUp size={12} /> });
     }
@@ -451,7 +547,7 @@ export default function MatchStatsPanel({
       tabs.push({ id: "insight", label: "Storyline", icon: <Lightbulb size={12} /> });
     }
     return tabs;
-  }, [isFootball, matchStats, confrontosData, hasEvents, storyline]);
+  }, [isFootball, matchStats, confrontosData, hasEvents, storyline, standings, standingsGroups, standingsLoading]);
 
   const defaultTab: TabId = isFootball && matchStats ? "prob" : "stats";
   const [tab, setTab] = useState<TabId>(defaultTab);
@@ -914,6 +1010,7 @@ export default function MatchStatsPanel({
                 liveMinute={liveMinute}
                 isHalfTime={isHalfTime}
                 goalEvents={liveExtra?.football?.goals}
+                cardEvents={liveExtra?.football?.cards}
               />}
 
               {/* Football live per-team stats — reference-image layout */}
@@ -938,15 +1035,22 @@ export default function MatchStatsPanel({
                 const aDanger  = liveExtra.dangerousAttacksAway;
                 const hSaves   = liveExtra.savesHome;
                 const aSaves   = liveExtra.savesAway;
-                const hCorners = liveExtra.corners?.[0];
-                const aCorners = liveExtra.corners?.[1];
+                const hCorners = liveExtra.cornersHome ?? liveExtra.corners?.[0];
+                const aCorners = liveExtra.cornersAway ?? liveExtra.corners?.[1];
 
                 const ratioPct = (h?: number, a?: number) => {
                   const t = (h ?? 0) + (a ?? 0);
                   return t > 0 ? Math.round(((h ?? 0) / t) * 100) : 50;
                 };
 
-                const hasAny = [hShots, aShots, hShotsOn, aShotsOn, hAttacks, aAttacks, hDanger, aDanger, hFouls, aFouls].some(v => v !== undefined);
+                // Gate on ANY per-team stat the provider might send — not just shots/attacks.
+                // Previously this only checked shots/attacks/fouls, so a match where the feed
+                // only supplied possession + corners + cards (common on lighter data tiers)
+                // hid the whole block, and only the separately-gated possession bar ever showed.
+                const hasAny = [
+                  hShots, aShots, hShotsOn, aShotsOn, hAttacks, aAttacks, hDanger, aDanger,
+                  hFouls, aFouls, hPoss, aPoss, hCorners, aCorners, hYellow, aYellow, hRed, aRed,
+                ].some(v => v !== undefined);
                 if (!hasAny) return null;
 
                 const iconSummary = [
@@ -1329,6 +1433,86 @@ export default function MatchStatsPanel({
                     );
                   })}
                 </div>
+              )}
+            </div>
+          )}
+
+          {/* ── CLASSIFICAÇÃO ── */}
+          {activeTab === "classificacao" && (
+            <div className="bg-zinc-900 rounded-xl border border-zinc-800 p-4">
+              {standingsLoading ? (
+                <div className="flex items-center justify-center py-12">
+                  <Loader2 className="animate-spin text-blue-400" size={28} />
+                </div>
+              ) : !standings || standings.length === 0 ? (
+                <div className="text-center text-zinc-500 py-8 text-sm">
+                  Classificação indisponível para esta liga.
+                </div>
+              ) : (
+                (() => {
+                  const cols = standingsMetaForSport(sport);
+                  const StandingsTable = ({ rows }: { rows: StandingRow[] }) => (
+                    <table className="w-full text-xs">
+                      <thead>
+                        <tr className="text-zinc-500 border-b border-zinc-800">
+                          <th className="text-left py-1.5 pr-2 font-bold w-6">#</th>
+                          <th className="text-left py-1.5 font-bold">Equipa</th>
+                          <th className="text-center py-1.5 px-1 font-bold">{cols.played}</th>
+                          <th className="text-center py-1.5 px-1 font-bold">{cols.won}</th>
+                          <th className="text-center py-1.5 px-1 font-bold">{cols.drawn}</th>
+                          <th className="text-center py-1.5 px-1 font-bold">{cols.lost}</th>
+                          <th className="text-center py-1.5 px-1 font-bold">{cols.gf}</th>
+                          <th className="text-center py-1.5 px-1 font-bold">{cols.ga}</th>
+                          <th className="text-center py-1.5 px-1 font-bold text-white">{cols.pts}</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {rows.map((row, ri) => {
+                          const isHome = rowMatchesTeam(row.name, homeTeam);
+                          const isAway = rowMatchesTeam(row.name, awayTeam);
+                          return (
+                            <tr key={ri} className={`border-b border-zinc-800/50 ${isHome ? "bg-blue-500/10" : isAway ? "bg-red-500/10" : ""}`}>
+                              <td className="py-2 pr-2 text-zinc-500">{row.pos}</td>
+                              <td className={`py-2 font-semibold truncate max-w-[120px] ${isHome || isAway ? "text-white" : "text-zinc-300"}`}>{row.name}</td>
+                              <td className="py-2 text-center text-zinc-400">{row.played}</td>
+                              <td className="py-2 text-center text-green-400">{row.won}</td>
+                              <td className="py-2 text-center text-yellow-400">{row.drawn}</td>
+                              <td className="py-2 text-center text-red-400">{row.lost}</td>
+                              <td className="py-2 text-center text-zinc-400">{row.gf}</td>
+                              <td className="py-2 text-center text-zinc-400">{row.ga}</td>
+                              <td className="py-2 text-center font-black text-white">{row.pts}</td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  );
+                  return (
+                    <div>
+                      <div className="text-[10px] font-black text-red-500 uppercase tracking-widest mb-3">
+                        {standingsLeague}
+                      </div>
+                      {standingsGroups && standingsGroups.length > 0 ? (
+                        <div className="space-y-4">
+                          {standingsGroups.map((group) => (
+                            <div key={group.name}>
+                              <div className="text-[9px] font-black text-zinc-400 uppercase tracking-widest bg-zinc-800/60 rounded px-2 py-1 mb-2">
+                                {group.name}
+                              </div>
+                              <div className="overflow-x-auto">
+                                <StandingsTable rows={group.rows} />
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="overflow-x-auto">
+                          <StandingsTable rows={standings} />
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()
               )}
             </div>
           )}
