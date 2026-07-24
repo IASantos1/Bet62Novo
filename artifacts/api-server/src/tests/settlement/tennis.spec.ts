@@ -430,6 +430,47 @@ const tennisCases: FinishedSettlementCase[] = [
     },
     expected: "won",
   },
+  {
+    // Regression: a set still in progress (5-4) must never be read as a
+    // loss just because it doesn't yet equal the backed exact score.
+    name: "tennis legacy exact set score stays pending while the set is still in progress",
+    selection: makeSelection("set-6-3"),
+    ft: { home: 0, away: 0 },
+    extra: {
+      extras: {
+        tennis: {
+          sets: [[5, 4]],
+        },
+      },
+    },
+    expected: null,
+  },
+  {
+    name: "tennis legacy exact set score is settled as won once the set finishes on that score",
+    selection: makeSelection("set-6-3"),
+    ft: { home: 1, away: 0 },
+    extra: {
+      extras: {
+        tennis: {
+          sets: [[6, 3]],
+        },
+      },
+    },
+    expected: "won",
+  },
+  {
+    name: "tennis legacy exact set score is settled as lost once the match is over without that score",
+    selection: makeSelection("set-6-3"),
+    ft: { home: 1, away: 0 },
+    extra: {
+      extras: {
+        tennis: {
+          sets: [[6, 4]],
+        },
+      },
+    },
+    expected: "lost",
+  },
 ];
 
 for (const tc of tennisCases) {

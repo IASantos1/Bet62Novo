@@ -108,3 +108,23 @@ test("multi-bet aggregation remains pending when any leg is unresolved", () => {
   assert.equal(decision.status, "pending");
   assert.equal(decision.payout, "0.00");
 });
+
+test("multi-bet aggregation settles as lost immediately even while another leg is still unresolved", () => {
+  // Reproduces the "tennis multiple never settles" bug: a leg that's
+  // already definitively lost must sink the ticket right away instead of
+  // waiting on a sibling leg (e.g. a tennis set that hasn't finished yet).
+  const decision = deriveSettlementDecision(
+    {
+      id: 16,
+      stake: "20.00",
+      matchId: "multi-7",
+    },
+    [
+      makeSelection("losing-leg", { odd: 1.7, outcome: "lost" }),
+      makeSelection("pending-leg", { odd: 2.0, outcome: null }),
+    ],
+  );
+
+  assert.equal(decision.status, "lost");
+  assert.equal(decision.payout, "0.00");
+});
