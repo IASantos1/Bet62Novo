@@ -7240,7 +7240,7 @@ type TennisStatsTournament = {
         player: TennisStatsPlayerRaw | TennisStatsPlayerRaw[];
       }>;
 };
-let tennisStatsCache: Map<string, [TennisStatData, TennisStatData]> | null =
+let tennisStatsCache: Map<string, Record<string, TennisStatData>> | null =
   null;
 let tennisStatsFetchedAt = 0;
 
@@ -11256,20 +11256,63 @@ function buildNBALiveMatches(tournaments: NBATournament[]): LiveMatchState[] {
   return result;
 }
 
+// Statpal has been observed returning these period/type/stat labels in
+// either English or Portuguese depending on the account/request — matching
+// only the English literal silently zeroed out every field for accounts
+// getting Portuguese labels, making the whole stats panel disappear on the
+// frontend (it's hidden whenever tennisStats is falsy/all-empty). Match
+// case-insensitively against every known alias instead of one exact string.
+const _norm = (s: string | undefined) =>
+  String(s ?? "")
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .trim()
+    .toLowerCase();
+
 function _parseTennisStat(
   raw: TennisStatsPlayerRaw | undefined,
 ): TennisStatData {
-  const matchPeriod = raw?.stats?.period?.find((p) => p.name === "match");
-  const get = (typeName: string, statName: string) =>
-    matchPeriod?.type
-      ?.find((t) => t.name === typeName)
-      ?.stat?.find((s) => s.name === statName)?.value ?? "";
+  const matchPeriod = raw?.stats?.period?.find(
+    (p) => _norm(p.name) === "match" || _norm(p.name) === "partida",
+  );
+  const get = (typeNames: string[], statNames: string[]) => {
+    const normTypes = typeNames.map(_norm);
+    const normStats = statNames.map(_norm);
+    const type = matchPeriod?.type?.find((t) =>
+      normTypes.includes(_norm(t.name)),
+    );
+    return (
+      type?.stat?.find((s) => normStats.includes(_norm(s.name)))?.value ?? ""
+    );
+  };
   return {
-    aces: parseInt(get("Service", "Aces")) || 0,
-    doubleFaults: parseInt(get("Service", "Double Faults")) || 0,
-    firstServePct: get("Service", "1st serve percentage") || "—",
-    winners: parseInt(get("Points", "Winners")) || 0,
-    unforcedErrors: parseInt(get("Points", "Unforced errors")) || 0,
+    aces: parseInt(get(["Service", "Serviço"], ["Aces", "Ás", "Ases"])) || 0,
+    doubleFaults:
+      parseInt(
+        get(
+          ["Service", "Serviço"],
+          ["Double Faults", "Duplas Faltas", "Erros Duplos"],
+        ),
+      ) || 0,
+    firstServePct:
+      get(
+        ["Service", "Serviço"],
+        [
+          "1st serve percentage",
+          "Porcentagem de primeiro serviço",
+          "% 1º Serviço",
+          "1º Serviço",
+        ],
+      ) || "—",
+    winners:
+      parseInt(get(["Points", "Pontos"], ["Winners", "Vencedores"])) || 0,
+    unforcedErrors:
+      parseInt(
+        get(
+          ["Points", "Pontos"],
+          ["Unforced errors", "Erros não forçados", "Erros Nao Forcados"],
+        ),
+      ) || 0,
   };
 }
 
@@ -11305,7 +11348,7 @@ async function getTennisLive(): Promise<TennisTournament[]> {
 }
 
 async function getTennisStatsMap(): Promise<
-  Map<string, [TennisStatData, TennisStatData]>
+  Map<string, Record<string, TennisStatData>>
 > {
   const now = Date.now();
   if (tennisStatsCache && now - tennisStatsFetchedAt < TENNIS_STATS_CACHE_TTL)
@@ -11322,15 +11365,26 @@ async function getTennisStatsMap(): Promise<
         tournament?: TennisStatsTournament | TennisStatsTournament[];
       };
     };
-    const map = new Map<string, [TennisStatData, TennisStatData]>();
+    const map = new Map<string, Record<string, TennisStatData>>();
     for (const tournament of statpalList(payload.livestats?.tournament)) {
       for (const match of statpalList(tournament.match)) {
         const players = statpalList(match.player);
         if (players.length < 2) continue;
-        map.set(match.id, [
-          _parseTennisStat(players[0]),
-          _parseTennisStat(players[1]),
-        ]);
+        // Keyed by player-name pair (not Statpal's own match id): the actual
+        // live tennis pipeline (buildTennisLiveV1) sources scores from a
+        // different provider (SportsAPI Pro) with its own id scheme, so the
+        // only reliable join between the two is by player name — the same
+        // approach already used for live-odds/serving caches in this file.
+        // Each player's stats are stored under their normalized surname
+        // (not a fixed [0]/[1] position) since Statpal's player order isn't
+        // guaranteed to match the other provider's home/away order.
+        const p0 = String(players[0]?.name ?? "").trim();
+        const p1 = String(players[1]?.name ?? "").trim();
+        if (!p0 || !p1) continue;
+        map.set(_tennisPairKey(p0, p1), {
+          [_tennisSurname(p0)]: _parseTennisStat(players[0]),
+          [_tennisSurname(p1)]: _parseTennisStat(players[1]),
+        });
       }
     }
     tennisStatsCache = map;
@@ -15885,13 +15939,14 @@ const _tennisPreMatchSetScoreOdds = new Map<
     score3rd?: Array<{ label: string; odds: number }>;
   }
 >();
+function _tennisSurname(n: string): string {
+  return n
+    .replace(/^([A-Z]\.\s*)+/, "")
+    .trim()
+    .toLowerCase();
+}
 function _tennisPairKey(n0: string, n1: string): string {
-  const sur = (n: string) =>
-    n
-      .replace(/^([A-Z]\.\s*)+/, "")
-      .trim()
-      .toLowerCase();
-  return [sur(n0), sur(n1)].sort().join("|");
+  return [_tennisSurname(n0), _tennisSurname(n1)].sort().join("|");
 }
 
 /**
@@ -19690,7 +19745,13 @@ router.get("/live-stream", (req: Request, res: Response) => {
 // Maps V1TennisGame to LiveMatchState. Set scores come from homeCompetitor.score.
 async function buildTennisLiveV1(): Promise<LiveMatchState[]> {
   try {
-    const games = await getTennisLiveV1();
+    const [games, statsMap] = await Promise.all([
+      getTennisLiveV1(),
+      // Match stats (aces, double faults, ...) — Statpal is the only
+      // provider that exposes these; scores/sets above still come from
+      // SportsAPI Pro, so the two are joined below by player name.
+      getTennisStatsMap(),
+    ]);
     const liveIds = games.map((g) => g.id).filter(Boolean) as number[];
     refreshTennisServing(liveIds);
     refreshTennisLiveOdds(liveIds);
@@ -19806,7 +19867,20 @@ async function buildTennisLiveV1(): Promise<LiveMatchState[]> {
           };
         })(),
         events: [],
-        _liveExtra: { sets, currentPoints, ...(serving ? { serving } : {}) },
+        _liveExtra: {
+          sets,
+          currentPoints,
+          ...(serving ? { serving } : {}),
+          ...(() => {
+            const byName = statsMap.get(pairKey);
+            if (!byName) return {};
+            const homeStat = byName[_tennisSurname(home)];
+            const awayStat = byName[_tennisSurname(away)];
+            return homeStat && awayStat
+              ? { tennisStats: [homeStat, awayStat] as [TennisStatData, TennisStatData] }
+              : {};
+          })(),
+        },
       };
       const rank = tier === 999 ? 5 : tier; // unknown-tier ATP/WTA → treat as 250 level
       primary.push({ r: rank, m: item });
