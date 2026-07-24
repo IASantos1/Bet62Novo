@@ -6174,6 +6174,8 @@ async function fetchFootballExtras(
       cardsTotal: maybeNum(cardsTotal),
       firstGoal,
       // Per-team stats
+      cornersHome: maybeNum(cornersHome),
+      cornersAway: maybeNum(cornersAway),
       possessionHome: maybeNum(possessionHome),
       possessionAway: maybeNum(possessionAway),
       shotsTotalHome: maybeNum(shotsTotalHome),
@@ -6408,6 +6410,8 @@ async function fetchStatpalMatchStats(
     const result: FootballExtras = {
       cornersTotal: cornersTotal > 0 ? cornersTotal : undefined,
       cardsTotal: cardsTotal > 0 ? maybeNum(cardsTotal) : undefined,
+      cornersHome: cornersH > 0 ? cornersH : undefined,
+      cornersAway: cornersA > 0 ? cornersA : undefined,
       possessionHome: maybeNum(possessionHome),
       possessionAway: maybeNum(possessionAway),
       shotsTotalHome: maybeNum(shotsTotalHome),
@@ -7167,6 +7171,8 @@ type FootballExtras = {
   cardsTotal?: number;
   firstGoal?: "home" | "away" | "none";
   // per-team live stats from /match/{id}/statistics
+  cornersHome?: number;
+  cornersAway?: number;
   possessionHome?: number;
   possessionAway?: number;
   shotsTotalHome?: number;

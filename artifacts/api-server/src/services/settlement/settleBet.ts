@@ -171,6 +171,21 @@ export function deriveSettlementDecision(
   const outcomes = finalResults.map((result) => result.outcome);
   const updatedSelections = finalResults.map((result) => result.updatedSel);
 
+  // A single leg that's already definitively lost sinks the whole multiple
+  // immediately — it must not wait on other legs that are still pending
+  // (e.g. a tennis "correct score per set" leg that stays unresolved until
+  // its set finishes). Checking this before the "any pending" branch below
+  // is what makes early-loss cascade actually happen for multiples.
+  if (outcomes.some((outcome) => outcome === "lost")) {
+    return {
+      status: "lost",
+      outcome: "lost",
+      updatedSelections,
+      payout: "0.00",
+      message: `engine-settled with losing leg(s): ${summarizeResolvedOutcomes(outcomes)}`,
+    };
+  }
+
   if (outcomes.some((outcome) => outcome === null)) {
     const pendingReasons = finalResults
       .filter((result) => result.outcome === null)
@@ -183,16 +198,6 @@ export function deriveSettlementDecision(
       updatedSelections,
       payout: "0.00",
       message: `Settlement pending: ${pendingReasons.join(", ") || "unresolved selections"}`,
-    };
-  }
-
-  if (outcomes.some((outcome) => outcome === "lost")) {
-    return {
-      status: "lost",
-      outcome: "lost",
-      updatedSelections,
-      payout: "0.00",
-      message: `engine-settled with losing leg(s): ${summarizeResolvedOutcomes(outcomes)}`,
     };
   }
 
