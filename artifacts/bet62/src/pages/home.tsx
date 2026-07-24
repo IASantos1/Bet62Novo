@@ -8297,11 +8297,11 @@ export default function Home({
                     : prevSel.htScore
                       ? { htScore: prevSel.htScore }
                       : {}),
-                  ...(sel.outcome != null
-                    ? {}
-                    : prevSel.outcome != null
-                      ? { outcome: prevSel.outcome }
-                      : {}),
+                  // Deliberately no fallback to prevSel.outcome here: this is
+                  // the authoritative /api/bets fetch, so a null outcome
+                  // means genuinely still pending and must not be masked by
+                  // a stale won/lost value from an earlier (possibly wrong)
+                  // preview cycle.
                   ...(sel.selExtras
                     ? {}
                     : prevSel.selExtras
@@ -8430,10 +8430,13 @@ export default function Home({
               ...(update.finalScore ? { finalScore: update.finalScore } : {}),
               ...(update.htScore ? { htScore: update.htScore } : {}),
               ...(update.selExtras ? { selExtras: update.selExtras } : {}),
-              outcome:
-                update.outcome === "pending"
-                  ? (sel.outcome ?? null)
-                  : update.outcome,
+              // Always reflect the server's latest preview. This is a live
+              // estimate on a still-pending bet, not the final settlement —
+              // sticking with a stale "lost"/"won" here would permanently
+              // show a wrong result if an earlier preview cycle guessed
+              // wrong (e.g. a fuzzy team-name match against the wrong
+              // fixture) and later corrected itself back to "pending".
+              outcome: update.outcome === "pending" ? null : update.outcome,
             };
           });
           return {
@@ -12199,8 +12202,89 @@ export default function Home({
     const isHockey = sport === "hockey";
     const isVolleyball = sport === "volleyball";
     const isBaseball = sport === "baseball";
+    const isF1 = sport === "formula1";
     const isFootball =
-      !isBasketball && !isTennis && !isHockey && !isVolleyball && !isBaseball;
+      !isBasketball &&
+      !isTennis &&
+      !isHockey &&
+      !isVolleyball &&
+      !isBaseball &&
+      !isF1;
+
+    // Formula 1 has its own markets (race winner / podium by driver) — it must
+    // never fall through to the football branch below, which used to render
+    // goals/corners/cards/handicap markets labelled with the Grand Prix name
+    // and circuit as if they were two football "teams".
+    if (isF1) {
+      const raceWinner = match.f1Extra?.raceWinner ?? [];
+      const podium = match.f1Extra?.podium ?? [];
+      return (
+        <div className="mt-4 space-y-5">
+          {raceWinner.length > 0 && (
+            <div>
+              <div className="mb-2 text-[11px] font-black uppercase tracking-widest text-zinc-500">
+                🏆 Vencedor da Corrida
+              </div>
+              <div className="space-y-1.5">
+                {raceWinner.map((d) => (
+                  <div
+                    key={`winner-${d.name}`}
+                    className="flex items-center justify-between rounded-lg bg-zinc-900 border border-zinc-800 px-3 py-2"
+                  >
+                    <div className="min-w-0">
+                      <span className="font-bold text-sm truncate">
+                        {d.shortName || d.name}
+                      </span>
+                      <span className="ml-2 text-[11px] text-zinc-500 truncate">
+                        {d.team}
+                      </span>
+                    </div>
+                    <span className="shrink-0 font-black text-red-500 tabular-nums">
+                      {d.odd.toFixed(2)}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+          {podium.length > 0 && (
+            <div>
+              <div className="mb-2 text-[11px] font-black uppercase tracking-widest text-zinc-500">
+                🥉 Pódio (Top 3)
+              </div>
+              <div className="space-y-1.5">
+                {podium.map((d) => (
+                  <div
+                    key={`podium-${d.name}`}
+                    className="flex items-center justify-between rounded-lg bg-zinc-900 border border-zinc-800 px-3 py-2"
+                  >
+                    <div className="min-w-0">
+                      <span className="font-bold text-sm truncate">
+                        {d.shortName || d.name}
+                      </span>
+                      <span className="ml-2 text-[11px] text-zinc-500 truncate">
+                        {d.team}
+                      </span>
+                    </div>
+                    <span className="shrink-0 font-black text-red-500 tabular-nums">
+                      {d.odd.toFixed(2)}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+          {raceWinner.length === 0 && podium.length === 0 && (
+            <div className="text-center py-10 text-zinc-500">
+              <div className="text-3xl mb-3">🏎️</div>
+              <div className="text-sm font-medium">
+                Mercados não disponíveis para esta corrida.
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    }
 
     // Parse current live period/set/quarter from status (0 = upcoming/unknown → show all markets)
     const currentSet =

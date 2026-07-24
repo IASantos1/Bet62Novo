@@ -3507,27 +3507,22 @@ function computeTennisFallbackLiveOdds(
   const gamesDiff = (currentSet[0] ?? 0) - (currentSet[1] ?? 0);
   const setsDiff = homeScore - awayScore;
 
-  const pointValue = (value: number | string | undefined): number => {
-    const normalized = String(value ?? "")
-      .trim()
-      .toUpperCase();
-    if (normalized === "AD" || normalized === "A") return 4;
-    if (normalized === "D" || normalized === "40A") return 3;
-    if (normalized === "40") return 3;
-    if (normalized === "30") return 2;
-    if (normalized === "15") return 1;
-    return 0;
-  };
+  // A flat per-game weight badly under-reacts once a player is close to
+  // converting the current set (e.g. leading 5-3): being 1 game from taking
+  // a set that would decide the match is worth far more than an early 2-0
+  // lead, even though both are "2 games ahead". Scale the game-lead term by
+  // how close the leader is to the 6-game threshold to capture that.
+  const leaderGames = Math.max(currentSet[0] ?? 0, currentSet[1] ?? 0);
+  const gamesToClose = Math.max(1, 6 - leaderGames);
+  const closingBoost = gamesDiff !== 0 ? 1 / gamesToClose : 0;
 
-  const hPt = pointValue(currentPoints?.[0]);
-  const aPt = pointValue(currentPoints?.[1]);
-  const ptDiff = hPt - aPt;
-  const servingBonus = serving?.[0] ? 0.5 : serving?.[1] ? -0.5 : 0;
-
-  // 1 set > several games > current points. This keeps live tennis prices moving
-  // on point-by-point progress without creating wild jumps every rally.
+  // Point/serve context is handled entirely by computeTennisPointAdjustedOdds
+  // (applied right after this), so it's intentionally not folded in here too
+  // — doing it in both places double-counted the same signal.
+  // 1 set > proximity-weighted games. This keeps live tennis prices moving
+  // on game-by-game progress without creating wild jumps every rally.
   const advantage =
-    setsDiff * 0.22 + gamesDiff * 0.042 + ptDiff * 0.012 + servingBonus * 0.008;
+    setsDiff * 0.22 + gamesDiff * 0.042 + gamesDiff * 0.1 * closingBoost;
   const factor = Math.min(0.55, Math.abs(advantage));
 
   if (factor <= 0) return baseOdds;
@@ -5149,6 +5144,26 @@ function makeBasketballMarketsFromTeams(
   } as unknown as AdvancedMarkets;
 }
 
+// Basketball moneyline, derived from the same margin model used for the
+// spread/quarter markets above (same seed, so it stays internally
+// consistent with them) — previously the moneyline reused the football
+// Elo/Poisson model via makeOddsFromTeams(), which doesn't know basketball
+// team names and produced near-random, badly-calibrated prices.
+function makeBasketballMoneylineFromTeams(
+  home: string,
+  away: string,
+): { home: number; away: number } {
+  const sr = seededRng(`bball-live:${home}:${away}`);
+  const marginMean = mc((sr(1) - 0.5) * 14 + 2, -18, 18);
+  const marginSd = mc(11 + sr(2) * 3, 9, 16);
+  const pHomeML = mc(1 - normalCdf(-marginMean / marginSd), 0.05, 0.95);
+  const [oddsHome, oddsAway] = probsToDecimalOdds(
+    [pHomeML, 1 - pHomeML],
+    1.06,
+  );
+  return { home: oddsHome, away: oddsAway };
+}
+
 function makeHockeyMarketsFromTeams(
   home: string,
   away: string,
@@ -5294,6 +5309,23 @@ function makeHockeyMarketsFromTeams(
       shotsOnGoal: { line: shotsLine, over: oShots!, under: uShots! },
     },
   } as unknown as AdvancedMarkets;
+}
+
+// Hockey moneyline — see makeBasketballMoneylineFromTeams above for why this
+// exists instead of reusing the football Elo/Poisson model.
+function makeHockeyMoneylineFromTeams(
+  home: string,
+  away: string,
+): { home: number; away: number } {
+  const sr = seededRng(`hockey-live:${home}:${away}`);
+  const marginMean = mc((sr(2) - 0.5) * 2.2 + 0.15, -2.5, 2.5);
+  const marginSd = mc(2.0 + sr(3) * 0.8, 1.6, 3.2);
+  const pHomeML = mc(1 - normalCdf(-marginMean / marginSd), 0.08, 0.92);
+  const [oddsHome, oddsAway] = probsToDecimalOdds(
+    [pHomeML, 1 - pHomeML],
+    1.05,
+  );
+  return { home: oddsHome, away: oddsAway };
 }
 
 // ─── MLB (Baseball) market builder ────────────────────────────────────────────
@@ -10537,9 +10569,13 @@ function resolveOdds(
   };
 }
 
+// Statpal /v1/nhl/livescores — was 30s; goals/shots update far more often
+// than period transitions, so 30s made live scores noticeably stale.
+const NHL_LIVE_TTL = 5_000;
+
 async function getNHLLive(): Promise<NHLTournament[]> {
   const now = Date.now();
-  if (nhlLiveCache && now - nhlLiveFetchedAt < 30_000) return nhlLiveCache;
+  if (nhlLiveCache && now - nhlLiveFetchedAt < NHL_LIVE_TTL) return nhlLiveCache;
   if (!CONFIG.STATPAL_API_KEY) return nhlLiveCache ?? [];
 
   try {
@@ -10665,9 +10701,12 @@ function buildNHLLiveMatches(tournaments: NHLTournament[]): LiveMatchState[] {
       };
       const minute = isNotStarted ? 0 : (periodMinutes[m.status] ?? 10);
 
-      const odds = makeOddsFromTeams(m.home.name, m.away.name);
+      const odds = makeHockeyMoneylineFromTeams(m.home.name, m.away.name);
       const diff = homeScore - awayScore;
-      let liveOdds = { ...odds };
+      let liveOdds: { home: number; draw: number; away: number } = {
+        ...odds,
+        draw: 0,
+      };
       if (diff !== 0 && isLive) {
         const factor = Math.min(0.4, Math.abs(diff) * 0.15);
         liveOdds =
@@ -10696,7 +10735,7 @@ function buildNHLLiveMatches(tournaments: NHLTournament[]): LiveMatchState[] {
         awayScore,
         minute,
         status: isNotStarted ? "Not Started" : m.status,
-        hasRealOdds: true,
+        hasRealOdds: false,
         odds: liveOdds,
         markets: makeHockeyMarketsFromTeams(m.home.name, m.away.name),
         events,
@@ -10710,7 +10749,9 @@ function buildNHLLiveMatches(tournaments: NHLTournament[]): LiveMatchState[] {
 // ─── MLB live feed ────────────────────────────────────────────────────────────
 // Statpal /v1/mlb/livescores — real-time MLB scores with inning-by-inning
 // breakdown, starting pitchers, venue info, hits, errors, outs.
-const MLB_LIVE_TTL = 15_000; // 15 s — inning transitions happen ~3–5 min apart
+// Runs/hits/outs change far more often than innings do, so tie the TTL to
+// scoring frequency rather than inning-transition frequency.
+const MLB_LIVE_TTL = 5_000;
 
 async function getMLBLive(): Promise<MLBTournament[]> {
   const now = Date.now();
@@ -11018,7 +11059,9 @@ function buildMLBLiveMatches(tournaments: MLBTournament[]): LiveMatchState[] {
 }
 
 // Statpal /v1/nba/livescores — quarter-by-quarter scores with OT support
-const NBA_LIVE_TTL = 15_000; // 15 s — quarter transitions happen every ~12 min
+// Points change on almost every possession, so tie the TTL to scoring
+// frequency rather than quarter-transition frequency.
+const NBA_LIVE_TTL = 5_000;
 
 async function getNBALive(): Promise<NBATournament[]> {
   const now = Date.now();
@@ -11169,7 +11212,7 @@ function buildNBALiveMatches(tournaments: NBATournament[]): LiveMatchState[] {
                 : `Q${qNum}`;
       const minute = isNotStarted ? 0 : isFinished ? 48 : (qNum - 1) * 12 + 6;
 
-      const odds = makeOddsFromTeams(m.home.name, m.away.name);
+      const odds = makeBasketballMoneylineFromTeams(m.home.name, m.away.name);
       const diff = homeScore - awayScore;
       let liveOdds = { ...odds, draw: 0 };
       if (diff !== 0 && isLive) {
@@ -11202,7 +11245,7 @@ function buildNBALiveMatches(tournaments: NBATournament[]): LiveMatchState[] {
         awayScore,
         minute,
         status: statusLabel,
-        hasRealOdds: true,
+        hasRealOdds: false,
         odds: liveOdds,
         markets: makeBasketballMarketsFromTeams(m.home.name, m.away.name),
         events: [],
@@ -12764,13 +12807,25 @@ function f1ShortName(nome: string): string {
 }
 
 /** Generate F1 race winner + podium markets from driver standings */
-function makeF1Markets(drivers: F1DriverEntry[]): F1ExtraData & { odds: { home: number; draw: number; away: number } } {
+function makeF1Markets(
+  drivers: F1DriverEntry[],
+  raceSeed: string,
+): F1ExtraData & { odds: { home: number; draw: number; away: number } } {
   const sorted = [...drivers]
     .sort((a, b) => Number(a.pos ?? 99) - Number(b.pos ?? 99))
     .slice(0, 10);
   const pts = sorted.map(d => Math.max(1, Number(d.pontos ?? 1)));
-  const total = pts.reduce((s, p) => s + p, 0) || 1;
-  const probs = pts.map(p => p / total);
+
+  // Championship points alone are identical for every race until the next
+  // one is run, so without this every Grand Prix would show bit-for-bit
+  // identical odds (real circuits do favor different drivers/cars — data
+  // this system doesn't have — but this at least keeps races numerically
+  // distinct instead of obviously duplicated, while keeping the ranking
+  // anchored to the real standings).
+  const sr = seededRng(`f1-race:${raceSeed}`);
+  const perturbedPts = pts.map((p, i) => p * (0.85 + sr(i + 1) * 0.3));
+  const total = perturbedPts.reduce((s, p) => s + p, 0) || 1;
+  const probs = perturbedPts.map(p => p / total);
   const margin = 1.18;
 
   const raceWinner: F1DriverOdd[] = sorted.map((d, i) => {
@@ -12848,7 +12903,7 @@ async function getF1DriverStandings(): Promise<F1DriverEntry[]> {
 
 function buildFormula1UpcomingFromTournaments(
   tournaments: F1StatpalTournament[],
-  f1MarketsData: ReturnType<typeof makeF1Markets>,
+  drivers: F1DriverEntry[],
 ): UpcomingMatch[] {
   return tournaments
     .map((tournament) => {
@@ -12859,6 +12914,9 @@ function buildFormula1UpcomingFromTournaments(
       const track = String(race.track ?? "").trim();
       const country = f1GpCountry(city, track);
       const away = track ? `${track}${city ? ` • ${city}` : ""}` : (city || "Grand Prix");
+      // Computed per race (not once for the whole schedule) so different
+      // Grands Prix don't show identical odds — see makeF1Markets.
+      const f1MarketsData = makeF1Markets(drivers, String(tournament.id));
       return {
         id: `formula1-statpal-${tournament.id}`,
         home: gpName,
@@ -12870,10 +12928,10 @@ function buildFormula1UpcomingFromTournaments(
         sport: "formula1",
         hasRealOdds: false,
         odds: { home: f1MarketsData.odds.home, draw: 0, away: f1MarketsData.odds.away },
-        markets: makeAdvancedMarketsFromTeams(
-          f1MarketsData.raceWinner[0]?.name ?? "F1 A",
-          f1MarketsData.raceWinner[1]?.name ?? "F1 B",
-        ),
+        // F1 has its own markets (race winner / podium, in f1Extra below) — it
+        // is not football, so it must not get a football markets object built
+        // from driver names standing in for "team" names.
+        markets: {} as unknown as AdvancedMarkets,
         f1Extra: { raceWinner: f1MarketsData.raceWinner, podium: f1MarketsData.podium },
       } satisfies UpcomingMatch;
     })
@@ -12882,7 +12940,7 @@ function buildFormula1UpcomingFromTournaments(
 
 function buildFormula1LiveFromTournaments(
   tournaments: F1StatpalTournament[],
-  f1MarketsData: ReturnType<typeof makeF1Markets>,
+  standings: F1DriverEntry[],
 ): LiveMatchState[] {
   const out: LiveMatchState[] = [];
   const now = Date.now();
@@ -12894,6 +12952,9 @@ function buildFormula1LiveFromTournaments(
     const normalized = normalizeProviderStatus(status);
     if (!normalized || normalized === "not started" || normalized === "finished" || normalized === "concluído" || normalized === "concluido") continue;
     const drivers = race.results?.driver ?? [];
+    // Computed per race (not once for the whole grid) so different Grands
+    // Prix don't show identical odds — see makeF1Markets.
+    const f1MarketsData = makeF1Markets(standings, String(tournament.id));
     // home = GP name, away = circuit (for consistent display)
     const gpName = String(tournament.name).trim();
     const city = String((race as Record<string, unknown>)["cidade"] ?? race.city ?? "").trim();
@@ -12915,10 +12976,7 @@ function buildFormula1LiveFromTournaments(
       status,
       hasRealOdds: false,
       odds: { home: f1MarketsData.odds.home, draw: 0, away: f1MarketsData.odds.away },
-      markets: makeAdvancedMarketsFromTeams(
-        f1MarketsData.raceWinner[0]?.name ?? "F1 A",
-        f1MarketsData.raceWinner[1]?.name ?? "F1 B",
-      ),
+      markets: {} as unknown as AdvancedMarkets,
       f1Extra: { raceWinner: f1MarketsData.raceWinner, podium: f1MarketsData.podium },
       events: [],
       date: race.date,
@@ -12956,10 +13014,9 @@ async function getFormula1Upcoming(): Promise<UpcomingMatch[]> {
     const payload = (await scheduleResp.json()) as Record<string, unknown>;
     const acessorios = payload["acessórios"] as Record<string, unknown> | undefined;
     const tournament = acessorios?.["torneio"] ?? (payload["fixtures"] as Record<string, unknown> | undefined)?.["tournament"];
-    const f1MarketsData = makeF1Markets(drivers);
     const matches = buildFormula1UpcomingFromTournaments(
       statpalTournamentList(tournament as F1StatpalTournament | F1StatpalTournament[]),
-      f1MarketsData,
+      drivers,
     );
     f1UpcomingCache = { matches, fetchedAt: now };
     return matches;
@@ -12986,10 +13043,9 @@ async function getFormula1Live(): Promise<LiveMatchState[]> {
     const payload = (await liveResp.json()) as Record<string, unknown>;
     const livescore = payload["livescore"] as Record<string, unknown> | undefined;
     const tournament = livescore?.["tournament"];
-    const f1MarketsData = makeF1Markets(drivers);
     const matches = buildFormula1LiveFromTournaments(
       statpalTournamentList(tournament as F1StatpalTournament | F1StatpalTournament[]),
-      f1MarketsData,
+      drivers,
     );
     f1LiveCache = { matches, fetchedAt: now };
     return matches;
