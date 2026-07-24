@@ -750,11 +750,19 @@ function scoreOutcomeForSelLastResort(
       const wantHome = Number(exactSetMatch[1]!);
       const wantAway = Number(exactSetMatch[2]!);
       if (sets.length === 0) return null;
-      // Check each set
-      const won = sets.some(
+      // Only a *finished* set can decide this market — a set still in
+      // progress (e.g. 5-4) must never be read as a loss just because it
+      // doesn't yet equal the backed score.
+      const finishedSets = sets.filter(tennisSetFinished);
+      if (finishedSets.length === 0) return null;
+      const won = finishedSets.some(
         ([setHome, setAway]) => setHome === wantHome && setAway === wantAway,
       );
-      return won ? "won" : "lost";
+      if (won) return "won";
+      // Not a match in any completed set yet. Only safe to call it lost
+      // once every set has finished (i.e. the match itself is over) —
+      // otherwise a later set could still land on the backed score.
+      return finishedSets.length === sets.length ? "lost" : null;
     }
   }
 
