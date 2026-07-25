@@ -14067,7 +14067,7 @@ export default function Home({
                             ? renderExactSetColumns(
                                 `${cur}º Set — Resultado Correto`,
                                 liveSetExactScore,
-                                "ses",
+                                `sc${cur}`,
                                 "sets",
                                 "setExactScore",
                               )
