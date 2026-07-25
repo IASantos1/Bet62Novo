@@ -19745,18 +19745,20 @@ router.get("/live-match/:id", async (req: Request, res: Response) => {
   }
 });
 
-// SportScore Match Tracker widget — resolves the SportScore match slug
+// SportScore Match Tracker — resolves the SportScore match identifiers
 // mapped to a Statpal match (see sportscoreMatchMapTable). Statpal stays
-// the source for games/odds/stats/events/settlement; SportScore is only
-// used to embed the visual tracker widget:
-//   https://sportscore.com/embed/tracker/{sport}/{home-team-vs-away-team}/
+// the source for games/odds/stats/events/settlement; SportScore only
+// supplies live position/animation data for the mini campo, via its free
+// REST API (no key, open CORS, ~10k req/day/IP): https://sportscore.com/developers/
+//   GET /api/widget/matches/?sport={sport}&limit=50 — live+recent fixtures
+//   GET /api/widget/tracker/?sport={sport}&id={trackerId} — position data
 //
-// There is no SportScore search/fixtures API available to us, so automatic
-// matching is done by guessing the slug from our own team names and
-// verifying the guess actually resolves on SportScore's site before trusting
-// it. This works for the common case (team names line up between
-// providers) but can miss reserve/youth teams or unusual spellings — a
-// manual mapping saved via the admin panel always wins over an auto guess.
+// Automatic matching fetches the real fixtures list and compares team
+// names (normalized, tried in both home/away orders since providers don't
+// always agree on which side is "home") — no more blind slug-guessing.
+// Falls back to nothing found (manual mapping via admin) when the fixture
+// isn't in the current live+recent window or the names don't line up
+// (e.g. reserve/youth teams with divergent spellings between providers).
 function slugifyTeamName(name: string): string {
   return name
     .normalize("NFD")
@@ -19766,37 +19768,87 @@ function slugifyTeamName(name: string): string {
     .replace(/^-+|-+$/g, "");
 }
 
-function guessSportscoreSlug(home: string, away: string): string | null {
-  const h = slugifyTeamName(home);
-  const a = slugifyTeamName(away);
-  if (!h || !a) return null;
-  return `${h}-vs-${a}`;
+// Negative-result cache so a fixture that isn't found isn't re-searched
+// against sportscore.com on every request for the same match.
+const sportscoreLookupFailCache = new Map<string, number>();
+const SPORTSCORE_LOOKUP_FAIL_TTL_MS = 30 * 60 * 1000;
+
+type SportscoreFixture = { id: string; slug: string };
+
+function pickStr(obj: Record<string, unknown>, keys: string[]): string | null {
+  for (const k of keys) {
+    const v = obj[k];
+    if (typeof v === "string" && v) return v;
+    if (typeof v === "number" && Number.isFinite(v)) return String(v);
+  }
+  return null;
 }
 
-// Negative-result cache so a guess that doesn't resolve isn't re-verified
-// against sportscore.com on every request for the same match.
-const sportscoreGuessFailCache = new Map<string, number>();
-const SPORTSCORE_GUESS_FAIL_TTL_MS = 6 * 60 * 60 * 1000;
+function pickTeamName(
+  obj: Record<string, unknown>,
+  side: "home" | "away",
+): string | null {
+  const direct = pickStr(obj, [
+    side,
+    `${side}Team`,
+    `${side}_team`,
+    `${side}Name`,
+    `${side}_name`,
+  ]);
+  if (direct) return direct;
+  const nested = obj["teams"] ?? obj["team"];
+  if (nested && typeof nested === "object") {
+    const sideObj = (nested as Record<string, unknown>)[side];
+    if (sideObj && typeof sideObj === "object") {
+      return pickStr(sideObj as Record<string, unknown>, ["name", "title"]);
+    }
+    if (typeof sideObj === "string") return sideObj;
+  }
+  const sideObjTop = obj[side];
+  if (sideObjTop && typeof sideObjTop === "object") {
+    return pickStr(sideObjTop as Record<string, unknown>, ["name", "title"]);
+  }
+  return null;
+}
 
-async function verifySportscoreSlug(
+async function findSportscoreFixture(
   sport: string,
-  slug: string,
-): Promise<boolean> {
+  homeTeam: string,
+  awayTeam: string,
+): Promise<SportscoreFixture | null> {
+  const wantedH = slugifyTeamName(homeTeam);
+  const wantedA = slugifyTeamName(awayTeam);
+  if (!wantedH || !wantedA) return null;
+
   try {
     const resp = await fetch(
-      `https://sportscore.com/embed/tracker/${encodeURIComponent(sport)}/${slug}/`,
-      {
-        signal: AbortSignal.timeout(5000),
-        headers: {
-          "User-Agent":
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-        },
-        redirect: "follow",
-      },
+      `https://sportscore.com/api/widget/matches/?sport=${encodeURIComponent(sport)}&limit=50&src=bet62.com`,
+      { signal: AbortSignal.timeout(6000) },
     );
-    return resp.ok;
+    if (!resp.ok) return null;
+    const data = (await resp.json()) as Record<string, unknown>;
+    const matches = Array.isArray(data["matches"])
+      ? (data["matches"] as Record<string, unknown>[])
+      : [];
+
+    for (const m of matches) {
+      const mHome = pickTeamName(m, "home");
+      const mAway = pickTeamName(m, "away");
+      if (!mHome || !mAway) continue;
+      const sH = slugifyTeamName(mHome);
+      const sA = slugifyTeamName(mAway);
+      const straight = sH === wantedH && sA === wantedA;
+      const swapped = sH === wantedA && sA === wantedH;
+      if (!straight && !swapped) continue;
+
+      const id = pickStr(m, ["id", "matchId", "match_id"]);
+      const slug = pickStr(m, ["slug", "matchSlug", "match_slug"]);
+      if (!id && !slug) continue;
+      return { id: id ?? "", slug: slug ?? (straight ? `${sH}-vs-${sA}` : `${sA}-vs-${sH}`) };
+    }
+    return null;
   } catch {
-    return false;
+    return null;
   }
 }
 
@@ -19812,12 +19864,15 @@ router.get(
     const homeTeam = String(req.query["homeTeam"] ?? "").trim();
     const awayTeam = String(req.query["awayTeam"] ?? "").trim();
     if (!sport || !matchId) {
-      res.json({ sportscoreId: null });
+      res.json({ sportscoreId: null, trackerId: null });
       return;
     }
     try {
       const rows = await db
-        .select({ sportscoreId: sportscoreMatchMapTable.sportscoreId })
+        .select({
+          sportscoreId: sportscoreMatchMapTable.sportscoreId,
+          trackerId: sportscoreMatchMapTable.trackerId,
+        })
         .from(sportscoreMatchMapTable)
         .where(
           and(
@@ -19828,41 +19883,29 @@ router.get(
         .limit(1);
 
       if (rows[0]?.sportscoreId) {
-        res.json({ sportscoreId: rows[0].sportscoreId });
+        res.json({
+          sportscoreId: rows[0].sportscoreId,
+          trackerId: rows[0].trackerId ?? null,
+        });
         return;
       }
 
       if (!homeTeam || !awayTeam) {
-        res.json({ sportscoreId: null });
+        res.json({ sportscoreId: null, trackerId: null });
         return;
       }
 
       const failKey = `${sport}:${matchId}`;
-      const failedAt = sportscoreGuessFailCache.get(failKey);
-      if (failedAt && Date.now() - failedAt < SPORTSCORE_GUESS_FAIL_TTL_MS) {
-        res.json({ sportscoreId: null });
+      const failedAt = sportscoreLookupFailCache.get(failKey);
+      if (failedAt && Date.now() - failedAt < SPORTSCORE_LOOKUP_FAIL_TTL_MS) {
+        res.json({ sportscoreId: null, trackerId: null });
         return;
       }
 
-      // Try home-vs-away first, then the swapped order — Statpal and
-      // SportScore don't always agree on which side is "home" for a given
-      // fixture (seen in practice on neutral-venue / lower-tier matches).
-      const candidates = [
-        guessSportscoreSlug(homeTeam, awayTeam),
-        guessSportscoreSlug(awayTeam, homeTeam),
-      ].filter((s): s is string => !!s);
-
-      let guess: string | null = null;
-      for (const candidate of candidates) {
-        if (await verifySportscoreSlug(sport, candidate)) {
-          guess = candidate;
-          break;
-        }
-      }
-
-      if (!guess) {
-        sportscoreGuessFailCache.set(failKey, Date.now());
-        res.json({ sportscoreId: null });
+      const fixture = await findSportscoreFixture(sport, homeTeam, awayTeam);
+      if (!fixture) {
+        sportscoreLookupFailCache.set(failKey, Date.now());
+        res.json({ sportscoreId: null, trackerId: null });
         return;
       }
 
@@ -19871,7 +19914,8 @@ router.get(
         .values({
           sport,
           statpalMatchId: matchId,
-          sportscoreId: guess,
+          sportscoreId: fixture.slug,
+          trackerId: fixture.id || null,
           homeTeam,
           awayTeam,
           source: "auto",
@@ -19881,13 +19925,19 @@ router.get(
             sportscoreMatchMapTable.sport,
             sportscoreMatchMapTable.statpalMatchId,
           ],
-          set: { sportscoreId: guess, homeTeam, awayTeam, updatedAt: new Date() },
+          set: {
+            sportscoreId: fixture.slug,
+            trackerId: fixture.id || null,
+            homeTeam,
+            awayTeam,
+            updatedAt: new Date(),
+          },
         });
 
-      res.json({ sportscoreId: guess });
+      res.json({ sportscoreId: fixture.slug, trackerId: fixture.id || null });
     } catch (err) {
       logger.error({ err }, "GET /api/matches/sportscore-id error");
-      res.json({ sportscoreId: null });
+      res.json({ sportscoreId: null, trackerId: null });
     }
   },
 );
