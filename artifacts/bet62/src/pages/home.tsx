@@ -5640,8 +5640,11 @@ export default function Home({
     if (!expandedMatch?.id) return;
     const sport = expandedMatch.sport || "football";
     const matchId = expandedMatch.id;
+    const qs = new URLSearchParams();
+    if (expandedMatch.home) qs.set("homeTeam", expandedMatch.home);
+    if (expandedMatch.away) qs.set("awayTeam", expandedMatch.away);
     let cancelled = false;
-    fetch(`/api/matches/sportscore-id/${encodeURIComponent(sport)}/${encodeURIComponent(String(matchId))}`)
+    fetch(`/api/matches/sportscore-id/${encodeURIComponent(sport)}/${encodeURIComponent(String(matchId))}?${qs.toString()}`)
       .then((r) => (r.ok ? r.json() : null))
       .then((data) => {
         if (!cancelled) setSportscoreId(data?.sportscoreId ?? null);
@@ -5652,7 +5655,7 @@ export default function Home({
     return () => {
       cancelled = true;
     };
-  }, [expandedMatch?.id, expandedMatch?.sport]);
+  }, [expandedMatch?.id, expandedMatch?.sport, expandedMatch?.home, expandedMatch?.away]);
   // Market sub-tab — lifted here so live refreshes don't unmount MatchModalMarkets and reset the selection
   const [modalTab, setModalTab] = useState("todos");
   const marketGroupSeqRef = useRef(0);

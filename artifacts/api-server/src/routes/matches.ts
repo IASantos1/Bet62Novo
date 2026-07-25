@@ -19745,11 +19745,61 @@ router.get("/live-match/:id", async (req: Request, res: Response) => {
   }
 });
 
-// SportScore Match Tracker widget — resolves the SportScore ID mapped to a
-// Statpal match (see sportscoreMatchMapTable). Returns null when no mapping
-// exists yet so the frontend can hide the tracker tab gracefully. Statpal
-// stays the source for games/odds/stats/events/settlement; SportScore is
-// only used to embed the visual tracker widget.
+// SportScore Match Tracker widget — resolves the SportScore match slug
+// mapped to a Statpal match (see sportscoreMatchMapTable). Statpal stays
+// the source for games/odds/stats/events/settlement; SportScore is only
+// used to embed the visual tracker widget:
+//   https://sportscore.com/embed/tracker/{sport}/{home-team-vs-away-team}/
+//
+// There is no SportScore search/fixtures API available to us, so automatic
+// matching is done by guessing the slug from our own team names and
+// verifying the guess actually resolves on SportScore's site before trusting
+// it. This works for the common case (team names line up between
+// providers) but can miss reserve/youth teams or unusual spellings — a
+// manual mapping saved via the admin panel always wins over an auto guess.
+function slugifyTeamName(name: string): string {
+  return name
+    .normalize("NFD")
+    .replace(/\p{Mn}/gu, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+function guessSportscoreSlug(home: string, away: string): string | null {
+  const h = slugifyTeamName(home);
+  const a = slugifyTeamName(away);
+  if (!h || !a) return null;
+  return `${h}-vs-${a}`;
+}
+
+// Negative-result cache so a guess that doesn't resolve isn't re-verified
+// against sportscore.com on every request for the same match.
+const sportscoreGuessFailCache = new Map<string, number>();
+const SPORTSCORE_GUESS_FAIL_TTL_MS = 6 * 60 * 60 * 1000;
+
+async function verifySportscoreSlug(
+  sport: string,
+  slug: string,
+): Promise<boolean> {
+  try {
+    const resp = await fetch(
+      `https://sportscore.com/embed/tracker/${encodeURIComponent(sport)}/${slug}/`,
+      {
+        signal: AbortSignal.timeout(5000),
+        headers: {
+          "User-Agent":
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        },
+        redirect: "follow",
+      },
+    );
+    return resp.ok;
+  } catch {
+    return false;
+  }
+}
+
 router.get(
   "/sportscore-id/:sport/:matchId",
   async (req: Request, res: Response) => {
@@ -19759,6 +19809,8 @@ router.get(
     );
     const sport = String(req.params["sport"] ?? "");
     const matchId = String(req.params["matchId"] ?? "");
+    const homeTeam = String(req.query["homeTeam"] ?? "").trim();
+    const awayTeam = String(req.query["awayTeam"] ?? "").trim();
     if (!sport || !matchId) {
       res.json({ sportscoreId: null });
       return;
@@ -19774,7 +19826,56 @@ router.get(
           ),
         )
         .limit(1);
-      res.json({ sportscoreId: rows[0]?.sportscoreId ?? null });
+
+      if (rows[0]?.sportscoreId) {
+        res.json({ sportscoreId: rows[0].sportscoreId });
+        return;
+      }
+
+      if (!homeTeam || !awayTeam) {
+        res.json({ sportscoreId: null });
+        return;
+      }
+
+      const failKey = `${sport}:${matchId}`;
+      const failedAt = sportscoreGuessFailCache.get(failKey);
+      if (failedAt && Date.now() - failedAt < SPORTSCORE_GUESS_FAIL_TTL_MS) {
+        res.json({ sportscoreId: null });
+        return;
+      }
+
+      const guess = guessSportscoreSlug(homeTeam, awayTeam);
+      if (!guess) {
+        res.json({ sportscoreId: null });
+        return;
+      }
+
+      const verified = await verifySportscoreSlug(sport, guess);
+      if (!verified) {
+        sportscoreGuessFailCache.set(failKey, Date.now());
+        res.json({ sportscoreId: null });
+        return;
+      }
+
+      await db
+        .insert(sportscoreMatchMapTable)
+        .values({
+          sport,
+          statpalMatchId: matchId,
+          sportscoreId: guess,
+          homeTeam,
+          awayTeam,
+          source: "auto",
+        })
+        .onConflictDoUpdate({
+          target: [
+            sportscoreMatchMapTable.sport,
+            sportscoreMatchMapTable.statpalMatchId,
+          ],
+          set: { sportscoreId: guess, homeTeam, awayTeam, updatedAt: new Date() },
+        });
+
+      res.json({ sportscoreId: guess });
     } catch (err) {
       logger.error({ err }, "GET /api/matches/sportscore-id error");
       res.json({ sportscoreId: null });
