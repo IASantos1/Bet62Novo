@@ -570,6 +570,12 @@ export type LiveMatchState = {
     shotsTotalAway?: number;
     shotsOnTargetHome?: number;
     shotsOnTargetAway?: number;
+    shotsOffTargetHome?: number;
+    shotsOffTargetAway?: number;
+    shotsBlockedHome?: number;
+    shotsBlockedAway?: number;
+    woodworkHome?: number;
+    woodworkAway?: number;
     foulsHome?: number;
     foulsAway?: number;
     yellowCardsHome?: number;
@@ -5911,6 +5917,34 @@ async function fetchFootballExtras(
       ["team_stats", "away", "shots", "on_target"],
       ["team_stats", "away", "shots_on_target"],
     ]);
+    const shotsOffTargetHome = getNum([
+      ["team_stats", "home", "shots", "offtarget"],
+      ["team_stats", "home", "shots", "off_target"],
+      ["team_stats", "home", "shots_off_target"],
+    ]);
+    const shotsOffTargetAway = getNum([
+      ["team_stats", "away", "shots", "offtarget"],
+      ["team_stats", "away", "shots", "off_target"],
+      ["team_stats", "away", "shots_off_target"],
+    ]);
+    const shotsBlockedHome = getNum([
+      ["team_stats", "home", "shots", "blocked"],
+      ["team_stats", "home", "shots_blocked"],
+    ]);
+    const shotsBlockedAway = getNum([
+      ["team_stats", "away", "shots", "blocked"],
+      ["team_stats", "away", "shots_blocked"],
+    ]);
+    const woodworkHome = getNum([
+      ["team_stats", "home", "shots", "woodwork"],
+      ["team_stats", "home", "hit_woodwork"],
+      ["team_stats", "home", "shots_woodwork"],
+    ]);
+    const woodworkAway = getNum([
+      ["team_stats", "away", "shots", "woodwork"],
+      ["team_stats", "away", "hit_woodwork"],
+      ["team_stats", "away", "shots_woodwork"],
+    ]);
 
     // Fouls
     const foulsHome = getNum([
@@ -6182,6 +6216,12 @@ async function fetchFootballExtras(
       shotsTotalAway: maybeNum(shotsTotalAway),
       shotsOnTargetHome: maybeNum(shotsOnTargetHome),
       shotsOnTargetAway: maybeNum(shotsOnTargetAway),
+      shotsOffTargetHome: maybeNum(shotsOffTargetHome),
+      shotsOffTargetAway: maybeNum(shotsOffTargetAway),
+      shotsBlockedHome: maybeNum(shotsBlockedHome),
+      shotsBlockedAway: maybeNum(shotsBlockedAway),
+      woodworkHome: maybeNum(woodworkHome),
+      woodworkAway: maybeNum(woodworkAway),
       foulsHome: maybeNum(foulsHome),
       foulsAway: maybeNum(foulsAway),
       yellowCardsHome: maybeNum(yellowCardsHome),
@@ -6310,6 +6350,40 @@ async function fetchStatpalMatchStats(
       ["team_stats", "away", "shots_on_target"],
       ["statistics", "away", "shots_on_target"],
     ]);
+    const shotsOffTargetHome = getNum([
+      ["team_stats", "home", "shots", "offtarget"],
+      ["team_stats", "home", "shots", "off_target"],
+      ["team_stats", "home", "shots_off_target"],
+      ["statistics", "home", "shots_off_target"],
+    ]);
+    const shotsOffTargetAway = getNum([
+      ["team_stats", "away", "shots", "offtarget"],
+      ["team_stats", "away", "shots", "off_target"],
+      ["team_stats", "away", "shots_off_target"],
+      ["statistics", "away", "shots_off_target"],
+    ]);
+    const shotsBlockedHome = getNum([
+      ["team_stats", "home", "shots", "blocked"],
+      ["team_stats", "home", "shots_blocked"],
+      ["statistics", "home", "shots_blocked"],
+    ]);
+    const shotsBlockedAway = getNum([
+      ["team_stats", "away", "shots", "blocked"],
+      ["team_stats", "away", "shots_blocked"],
+      ["statistics", "away", "shots_blocked"],
+    ]);
+    const woodworkHome = getNum([
+      ["team_stats", "home", "shots", "woodwork"],
+      ["team_stats", "home", "hit_woodwork"],
+      ["team_stats", "home", "shots_woodwork"],
+      ["statistics", "home", "shots_woodwork"],
+    ]);
+    const woodworkAway = getNum([
+      ["team_stats", "away", "shots", "woodwork"],
+      ["team_stats", "away", "hit_woodwork"],
+      ["team_stats", "away", "shots_woodwork"],
+      ["statistics", "away", "shots_woodwork"],
+    ]);
     const foulsHome = getNum([
       ["team_stats", "home", "fouls", "committed"],
       ["team_stats", "home", "fouls", "total"],
@@ -6418,6 +6492,12 @@ async function fetchStatpalMatchStats(
       shotsTotalAway: maybeNum(shotsTotalAway),
       shotsOnTargetHome: maybeNum(shotsOnTargetHome),
       shotsOnTargetAway: maybeNum(shotsOnTargetAway),
+      shotsOffTargetHome: maybeNum(shotsOffTargetHome),
+      shotsOffTargetAway: maybeNum(shotsOffTargetAway),
+      shotsBlockedHome: maybeNum(shotsBlockedHome),
+      shotsBlockedAway: maybeNum(shotsBlockedAway),
+      woodworkHome: maybeNum(woodworkHome),
+      woodworkAway: maybeNum(woodworkAway),
       foulsHome: maybeNum(foulsHome),
       foulsAway: maybeNum(foulsAway),
       yellowCardsHome: yellowCardsHome > 0 ? yellowCardsHome : undefined,
@@ -7203,6 +7283,12 @@ type FootballExtras = {
   passesAway?: number;
   passAccuracyHome?: number;
   passAccuracyAway?: number;
+  shotsOffTargetHome?: number;
+  shotsOffTargetAway?: number;
+  shotsBlockedHome?: number;
+  shotsBlockedAway?: number;
+  woodworkHome?: number;
+  woodworkAway?: number;
   football?: {
     goals?: Array<{
       team: "home" | "away";
@@ -15535,6 +15621,12 @@ async function buildLiveMatches(): Promise<LiveMatchState[]> {
             setIfDef("shotsTotalAway", extras.shotsTotalAway);
             setIfDef("shotsOnTargetHome", extras.shotsOnTargetHome);
             setIfDef("shotsOnTargetAway", extras.shotsOnTargetAway);
+            setIfDef("shotsOffTargetHome", extras.shotsOffTargetHome);
+            setIfDef("shotsOffTargetAway", extras.shotsOffTargetAway);
+            setIfDef("shotsBlockedHome", extras.shotsBlockedHome);
+            setIfDef("shotsBlockedAway", extras.shotsBlockedAway);
+            setIfDef("woodworkHome", extras.woodworkHome);
+            setIfDef("woodworkAway", extras.woodworkAway);
             setIfDef("foulsHome", extras.foulsHome);
             setIfDef("foulsAway", extras.foulsAway);
             setIfDef("yellowCardsHome", extras.yellowCardsHome);
@@ -16792,7 +16884,9 @@ async function buildFootballLiveV2(
         if (val !== undefined) (statsOverlay as Record<string, unknown>)[key] = val;
       };
       (["possessionHome","possessionAway","shotsTotalHome","shotsTotalAway",
-        "shotsOnTargetHome","shotsOnTargetAway","foulsHome","foulsAway",
+        "shotsOnTargetHome","shotsOnTargetAway","shotsOffTargetHome","shotsOffTargetAway",
+        "shotsBlockedHome","shotsBlockedAway","woodworkHome","woodworkAway",
+        "foulsHome","foulsAway",
         "yellowCardsHome","yellowCardsAway","redCardsHomeCount","redCardsAwayCount",
         "cornersTotal","cardsTotal","dangerousAttacksHome","dangerousAttacksAway",
         "attacksHome","attacksAway","xgHome","xgAway"] as const).forEach(mergeStatNum);
