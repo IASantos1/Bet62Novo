@@ -5621,7 +5621,6 @@ export default function Home({
     | "odds"
     | "lineups"
     | "confrontos"
-    | "tracker"
   >("markets");
   // Match header ↔ mini 2D field toggle
   const [showFieldView, setShowFieldView] = useState(false);
@@ -17811,29 +17810,55 @@ export default function Home({
                   <div className="px-4 pt-4 pb-3">
                     {showFieldView ? (
                       <div className="mb-3">
-                        <MiniFieldView
-                          sport={expandedMatch.sport}
-                          homeTeam={teamNamePt(expandedMatch.home)}
-                          awayTeam={teamNamePt(expandedMatch.away)}
-                          liveClockLabel={
-                            expandedMatch.isLive
-                              ? (() => {
-                                  const m = getDisplayMinute(expandedMatch);
-                                  const isFootballClock =
-                                    !expandedMatch.sport || expandedMatch.sport === "football";
-                                  const tag = isFootballClock
-                                    ? getFootballPhaseTag(expandedMatch, m)
-                                    : null;
-                                  if (m <= 0) return "AO VIVO";
-                                  if (tag === "HT") return "HT";
-                                  if (tag && isFootballClock)
-                                    return `${tag} · ${getFootballClockLabel(expandedMatch, m)}`;
-                                  if (tag) return `${m}' · ${tag}`;
-                                  return `${m}'`;
-                                })()
-                              : null
-                          }
-                        />
+                        {sportscoreId ? (
+                          <div className="flex flex-col items-center">
+                            <iframe
+                              key={sportscoreId}
+                              src={`https://sportscore.com/embed/tracker/${encodeURIComponent(expandedMatch.sport || "football")}/${sportscoreId.replace(/^\/+|\/+$/g, "")}/`}
+                              title="Match Tracker"
+                              width={320}
+                              height={420}
+                              className="border border-zinc-800/60 rounded-lg block max-w-full"
+                              loading="lazy"
+                              referrerPolicy="no-referrer-when-downgrade"
+                            />
+                            <div className="text-[11px] text-zinc-500 text-center py-1.5">
+                              Football live match tracker by{" "}
+                              <a
+                                href="https://sportscore.com/football/"
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="text-blue-400 font-semibold hover:underline"
+                              >
+                                SportScore
+                              </a>
+                            </div>
+                          </div>
+                        ) : (
+                          <MiniFieldView
+                            sport={expandedMatch.sport}
+                            homeTeam={teamNamePt(expandedMatch.home)}
+                            awayTeam={teamNamePt(expandedMatch.away)}
+                            liveClockLabel={
+                              expandedMatch.isLive
+                                ? (() => {
+                                    const m = getDisplayMinute(expandedMatch);
+                                    const isFootballClock =
+                                      !expandedMatch.sport || expandedMatch.sport === "football";
+                                    const tag = isFootballClock
+                                      ? getFootballPhaseTag(expandedMatch, m)
+                                      : null;
+                                    if (m <= 0) return "AO VIVO";
+                                    if (tag === "HT") return "HT";
+                                    if (tag && isFootballClock)
+                                      return `${tag} · ${getFootballClockLabel(expandedMatch, m)}`;
+                                    if (tag) return `${m}' · ${tag}`;
+                                    return `${m}'`;
+                                  })()
+                                : null
+                            }
+                          />
+                        )}
                       </div>
                     ) : (
                       <>
@@ -17892,15 +17917,6 @@ export default function Home({
                           <BarChart2 size={11} />
                           Stats
                         </button>
-                        {sportscoreId && (
-                          <button
-                            onClick={() => setMatchViewTab(matchViewTab === "tracker" ? "markets" : "tracker")}
-                            className={`flex items-center gap-1 px-2.5 py-1 rounded-full border text-[10px] font-black transition-all ${matchViewTab === "tracker" ? "bg-blue-900/40 border-blue-700/60 text-blue-300" : "bg-zinc-800/60 border-zinc-700/60 text-zinc-400 hover:text-white hover:border-zinc-600"}`}
-                          >
-                            <Activity size={11} />
-                            Tracker
-                          </button>
-                        )}
                       </div>
                     </div>
 
@@ -18040,37 +18056,6 @@ export default function Home({
                     awayScore={expandedMatch.awayScore}
                     storyline={matchStoryline}
                   />
-                )}
-
-                {/* Match Tracker (SportScore widget) — Statpal stays the data
-                    source for everything else; this only embeds the visual
-                    tracker once we have a mapped match slug for the game.
-                    Real SportScore embed format: /embed/tracker/{sport}/{slug}/
-                    (slug = "home-team-vs-away-team", not a numeric ID). */}
-                {matchViewTab === "tracker" && sportscoreId && (
-                  <div className="mb-3 flex flex-col items-center">
-                    <iframe
-                      key={sportscoreId}
-                      src={`https://sportscore.com/embed/tracker/${encodeURIComponent(expandedMatch.sport || "football")}/${sportscoreId.replace(/^\/+|\/+$/g, "")}/`}
-                      title="Match Tracker"
-                      width={320}
-                      height={420}
-                      className="border border-zinc-800/60 rounded-lg block max-w-full"
-                      loading="lazy"
-                      referrerPolicy="no-referrer-when-downgrade"
-                    />
-                    <div className="text-[11px] text-zinc-500 text-center py-1.5">
-                      Football live match tracker by{" "}
-                      <a
-                        href="https://sportscore.com/football/"
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-blue-400 font-semibold hover:underline"
-                      >
-                        SportScore
-                      </a>
-                    </div>
-                  </div>
                 )}
 
                 {/* Insight/Previsão panel */}
