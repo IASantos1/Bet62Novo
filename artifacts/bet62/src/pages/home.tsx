@@ -3732,6 +3732,8 @@ type StoredSelection = {
   settlementNote?: string;
   /** Per-selection extras stored at settlement (set scores etc.) for rich result display. */
   selExtras?: { tennis?: { sets: [number, number][] } };
+  /** Groups legs of a same-event combo (Bet Builder "builder-…" / prediction "pred-…"). */
+  comboTag?: string;
 };
 
 type OpenBetSelectionState = {
@@ -24623,6 +24625,32 @@ export default function Home({
                               {/* ── SELECTIONS LIST ── */}
                               <div className={`${selsBg} divide-y ${divider} mt-3`}>
                                 {sels.map((sel, i) => {
+                                  // Bet Builder same-game combos store the whole
+                                  // combined odd on their first leg and a 1.00
+                                  // placeholder on every other leg (so the ticket's
+                                  // total math still works) — those placeholders
+                                  // have no meaning on their own and shouldn't be
+                                  // shown; a connector bar down the left margin
+                                  // shows the legs belong to one combo instead.
+                                  const builderTag = (s: StoredSelection) =>
+                                    typeof s.comboTag === "string" &&
+                                    s.comboTag.startsWith("builder-")
+                                      ? s.comboTag
+                                      : null;
+                                  const comboTag = builderTag(sel);
+                                  const isComboMember = comboTag !== null;
+                                  const isFirstInGroup =
+                                    isComboMember &&
+                                    (i === 0 || builderTag(sels[i - 1]!) !== comboTag);
+                                  const isLastInGroup =
+                                    isComboMember &&
+                                    (i === sels.length - 1 ||
+                                      builderTag(sels[i + 1]!) !== comboTag);
+                                  const showComboConnector =
+                                    isComboMember && !(isFirstInGroup && isLastInGroup);
+                                  const hideOddPill =
+                                    isComboMember && Number(sel.odd) <= 1.001;
+
                                   const outcome = getSelOutcome(
                                     sel,
                                     bet.status,
@@ -24782,7 +24810,18 @@ export default function Home({
                                           : "Aguardando resultado";
 
                                   return (
-                                    <div key={i} className="px-5 py-4">
+                                    <div key={i} className="relative px-5 py-4">
+                                      {showComboConnector && (
+                                        <div
+                                          className={`absolute left-5 w-0.5 ${isDarkTheme ? "bg-red-600/40" : "bg-red-300"} ${
+                                            isFirstInGroup
+                                              ? "top-7 bottom-0"
+                                              : isLastInGroup
+                                                ? "top-0 h-7"
+                                                : "top-0 bottom-0"
+                                          }`}
+                                        />
+                                      )}
                                       {/* Market heading */}
                                       <div className="flex items-start justify-between gap-3 mb-3">
                                         <div className="flex items-center gap-2.5 min-w-0">
@@ -24800,11 +24839,13 @@ export default function Home({
                                             </div>
                                           </div>
                                         </div>
-                                        <div className="bg-red-600 text-white font-black text-[13px] px-3 py-1 rounded-lg tabular-nums shrink-0">
-                                          {Number.isFinite(displayedSelOdd)
-                                            ? displayedSelOdd.toFixed(2)
-                                            : "1.00"}
-                                        </div>
+                                        {!hideOddPill && (
+                                          <div className="bg-red-600 text-white font-black text-[13px] px-3 py-1 rounded-lg tabular-nums shrink-0">
+                                            {Number.isFinite(displayedSelOdd)
+                                              ? displayedSelOdd.toFixed(2)
+                                              : "1.00"}
+                                          </div>
+                                        )}
                                       </div>
 
                                       {/* Match / score box */}
