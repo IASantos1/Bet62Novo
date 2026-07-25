@@ -5631,11 +5631,17 @@ export default function Home({
   // SportScore Match Tracker widget — resolves lazily per match since it
   // needs a separate ID lookup (Statpal and SportScore use unrelated ID
   // spaces). null = looked up, no mapping yet; undefined = not looked up.
+  // sportscoreId = match slug (embed widget / API); trackerId = numeric id
+  // used specifically by the raw position-data tracker endpoint.
   const [sportscoreId, setSportscoreId] = useState<string | null | undefined>(
     undefined,
   );
+  const [sportscoreTrackerId, setSportscoreTrackerId] = useState<
+    string | null
+  >(null);
   useEffect(() => {
     setSportscoreId(undefined);
+    setSportscoreTrackerId(null);
     if (!expandedMatch?.id) return;
     const sport = expandedMatch.sport || "football";
     const matchId = expandedMatch.id;
@@ -5646,10 +5652,16 @@ export default function Home({
     fetch(`/api/matches/sportscore-id/${encodeURIComponent(sport)}/${encodeURIComponent(String(matchId))}?${qs.toString()}`)
       .then((r) => (r.ok ? r.json() : null))
       .then((data) => {
-        if (!cancelled) setSportscoreId(data?.sportscoreId ?? null);
+        if (!cancelled) {
+          setSportscoreId(data?.sportscoreId ?? null);
+          setSportscoreTrackerId(data?.trackerId ?? null);
+        }
       })
       .catch(() => {
-        if (!cancelled) setSportscoreId(null);
+        if (!cancelled) {
+          setSportscoreId(null);
+          setSportscoreTrackerId(null);
+        }
       });
     return () => {
       cancelled = true;
