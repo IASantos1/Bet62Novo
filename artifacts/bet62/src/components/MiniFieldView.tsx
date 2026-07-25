@@ -30,10 +30,10 @@ function FootballMarkings() {
       <path d="M 88.5 26.4 A 9.15 9.15 0 0 0 88.5 41.6" />
       <path d="M -2 30.34 L 0 30.34 L 0 37.66 L -2 37.66" />
       <path d="M 107 30.34 L 105 30.34 L 105 37.66 L 107 37.66" />
-      <path d="M 0 0 A 1.2 1.2 0 0 1 1.2 1.2" />
-      <path d="M 105 0 A 1.2 1.2 0 0 0 103.8 1.2" />
-      <path d="M 0 68 A 1.2 1.2 0 0 0 1.2 66.8" />
-      <path d="M 105 68 A 1.2 1.2 0 0 1 103.8 66.8" />
+      <path d="M 3.5 0 A 3.5 3.5 0 0 1 0 3.5" strokeWidth="0.8" />
+      <path d="M 105 3.5 A 3.5 3.5 0 0 1 101.5 0" strokeWidth="0.8" />
+      <path d="M 0 64.5 A 3.5 3.5 0 0 1 3.5 68" strokeWidth="0.8" />
+      <path d="M 101.5 68 A 3.5 3.5 0 0 1 105 64.5" strokeWidth="0.8" />
     </g>
   );
 }
@@ -125,10 +125,12 @@ export default function MiniFieldView({
   sport,
   homeTeam,
   awayTeam,
+  liveClockLabel,
 }: {
   sport?: string;
   homeTeam: string;
   awayTeam: string;
+  liveClockLabel?: string | null;
 }) {
   const kind = normalizeFieldSport(sport);
   const surface = SURFACE[kind];
@@ -141,22 +143,32 @@ export default function MiniFieldView({
           <span className="w-2 h-2 rounded-full bg-blue-500 shrink-0" />
           <span className="text-[10px] font-black text-zinc-300 truncate max-w-[110px]">{homeTeam}</span>
         </div>
-        <span
-          className="text-[9px] font-black uppercase tracking-widest"
-          style={{
-            backgroundImage: "linear-gradient(90deg,#facc15,#f97316,#dc2626)",
-            WebkitBackgroundClip: "text",
-            backgroundClip: "text",
-            color: "transparent",
-          }}
-        >
-          {kind === "football" && "Campo"}
-          {kind === "tennis" && "Quadra"}
-          {kind === "basketball" && "Quadra"}
-          {kind === "hockey" && "Pista"}
-          {kind === "volleyball" && "Quadra"}
-          {kind === "baseball" && "Diamante"}
-        </span>
+        {liveClockLabel ? (
+          <span className="flex items-center gap-1.5 text-[10px] font-black text-red-400">
+            <span className="relative flex h-1.5 w-1.5">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-500 opacity-75" />
+              <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-red-500" />
+            </span>
+            {liveClockLabel}
+          </span>
+        ) : (
+          <span
+            className="text-[9px] font-black uppercase tracking-widest"
+            style={{
+              backgroundImage: "linear-gradient(90deg,#facc15,#f97316,#dc2626)",
+              WebkitBackgroundClip: "text",
+              backgroundClip: "text",
+              color: "transparent",
+            }}
+          >
+            {kind === "football" && "Campo"}
+            {kind === "tennis" && "Quadra"}
+            {kind === "basketball" && "Quadra"}
+            {kind === "hockey" && "Pista"}
+            {kind === "volleyball" && "Quadra"}
+            {kind === "baseball" && "Diamante"}
+          </span>
+        )}
         <div className="flex items-center gap-1.5 min-w-0">
           <span className="text-[10px] font-black text-zinc-300 truncate max-w-[110px]">{awayTeam}</span>
           <span className="w-2 h-2 rounded-full bg-red-500 shrink-0" />
