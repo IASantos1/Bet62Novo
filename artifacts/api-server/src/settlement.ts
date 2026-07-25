@@ -2127,11 +2127,71 @@ function tennisSetFinished(setScore: [number, number]): boolean {
     return false;
   }
 
-  const maxGames = Math.max(homeGames, awayGames);
-  const diff = Math.abs(homeGames - awayGames);
-  const isFinished = maxGames >= 7 || (maxGames >= 6 && diff >= 2);
+  return isValidFinishedTennisSetScore(homeGames, awayGames);
+}
 
-  return isFinished;
+/**
+ * Validates a game score against the actual rules of a tennis set, rather
+ * than a loose "looks finished" heuristic. A provider glitch or transient
+ * bad frame can hand us a score like 7-4 or 8-1 — those satisfy a naive
+ * "maxGames >= 7" check but can never occur in a real set, since past 6-6
+ * the set is only won by a 2-game margin or, at exactly 7-6, a tiebreak.
+ * Treating those as a genuine finished result would settle bets against
+ * data that was never real.
+ *
+ *   6-0 .. 6-4  (and reverse)  — standard set, won by 2+
+ *   7-5         (and reverse)  — went past 6-6, won by 2
+ *   7-6         (and reverse)  — tiebreak set (score is always 7-6 on the
+ *                                game count regardless of the tiebreak's
+ *                                own point margin)
+ *   8-6, 9-7, … (and reverse)  — extended no-tiebreak advantage set, still
+ *                                used for some deciding sets; always a
+ *                                clean 2-game margin once past 7-5
+ */
+function isValidFinishedTennisSetScore(home: number, away: number): boolean {
+  const max = Math.max(home, away);
+  const min = Math.min(home, away);
+  const diff = max - min;
+
+  if (max === 6) return diff >= 2;
+  if (max === 7) return diff === 1 || diff === 2;
+  if (max >= 8) return diff === 2;
+  return false;
+}
+
+/**
+ * True only for game counts that can never occur in a tennis set, in any
+ * format and at any point (finished or still in progress) — a stricter,
+ * "definitely corrupt" cousin of isValidFinishedTennisSetScore. That
+ * function also rejects scores that are simply *not finished yet*, which
+ * covers the overwhelming majority of "invalid" scores during a live set
+ * (e.g. 4-3) — those are fine, just not over. This one only flags margins
+ * that are physically impossible.
+ *
+ * Below 6 games any gap is fine (a set can finish 6-0 through 6-4, so a
+ * wide margin alone means nothing — 6-2 is a perfectly normal score).
+ * Once the leader is past 6 games though, that's only reachable if the
+ * trailing player was already at 5 or 6 (a set ends the instant someone
+ * both reaches 6 and leads by 2, so 7+ games for the leader implies the
+ * trailer kept pace to at least 5). And from that point on the gap can
+ * never exceed 2, in either the tiebreak or advantage-set format — the
+ * set always ends the moment either side goes 2 games clear. A state
+ * that violates either of those (e.g. 7-4, 8-1) can only be a provider
+ * glitch, so it's safe to treat as corrupt data unconditionally.
+ */
+function isImpossibleTennisGameState(home: number, away: number): boolean {
+  if (
+    !Number.isFinite(home) ||
+    !Number.isFinite(away) ||
+    home < 0 ||
+    away < 0
+  ) {
+    return true;
+  }
+  const max = Math.max(home, away);
+  const min = Math.min(home, away);
+  if (max <= 6) return false;
+  return min < 5 || max - min > 2;
 }
 
 function calculateTotalGamesFromSets(sets: Array<[number, number]>): number {
@@ -2252,6 +2312,22 @@ export function scoreOutcomeForSel(
 
   let winning: boolean | null = null;
   let voided = false;
+
+  // ── Corrupt tennis set data → void, don't wait on it ────────────────────
+  // Only checked here, against the *final* result (never the live path):
+  // a bad live frame is usually transient and self-corrects on the next
+  // poll, so voiding mid-match on a single glitch would be too eager. Once
+  // the match has an official final result, a game count that's impossible
+  // in any tennis format (e.g. 7-4, 8-1 — more than a 2-game margin past 6)
+  // is a genuine provider error, not just a still-unsettled leg, and every
+  // market touching that set should void immediately instead of sitting
+  // pending until the 72h no-result timeout.
+  if (inferSelectionSport(sel.selection) === "tennis") {
+    const sets = getTennisSetsFromExtras(extra?.extras);
+    if (sets.some(([h, a]) => isImpossibleTennisGameState(h, a))) {
+      return "void";
+    }
+  }
 
   // ── Corners O/U (requires stats) ──────────────────────────────────────────
   if (/^[ou]c\d+$/.test(s)) {

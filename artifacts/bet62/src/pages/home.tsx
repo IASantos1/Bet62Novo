@@ -24809,18 +24809,36 @@ export default function Home({
                                           ? "Por começar"
                                           : "Aguardando resultado";
 
+                                  const comboLineCls = isDarkTheme
+                                    ? "bg-red-600/40"
+                                    : "bg-red-300";
                                   return (
                                     <div key={i} className="relative px-5 py-4">
                                       {showComboConnector && (
-                                        <div
-                                          className={`absolute left-5 w-0.5 ${isDarkTheme ? "bg-red-600/40" : "bg-red-300"} ${
-                                            isFirstInGroup
-                                              ? "top-7 bottom-0"
-                                              : isLastInGroup
-                                                ? "top-0 h-7"
-                                                : "top-0 bottom-0"
-                                          }`}
-                                        />
+                                        <>
+                                          {/* Vertical spine — "[" bracket, not a plain line */}
+                                          <div
+                                            className={`absolute left-5 w-0.5 ${comboLineCls} ${
+                                              isFirstInGroup
+                                                ? "top-7 bottom-0"
+                                                : isLastInGroup
+                                                  ? "top-0 h-7"
+                                                  : "top-0 bottom-0"
+                                            }`}
+                                          />
+                                          {/* Top cap of the bracket, pointing at the first leg's icon */}
+                                          {isFirstInGroup && (
+                                            <div
+                                              className={`absolute left-5 top-7 w-2.5 h-0.5 ${comboLineCls}`}
+                                            />
+                                          )}
+                                          {/* Bottom cap of the bracket, pointing at the last leg's icon */}
+                                          {isLastInGroup && (
+                                            <div
+                                              className={`absolute left-5 top-7 w-2.5 h-0.5 ${comboLineCls}`}
+                                            />
+                                          )}
+                                        </>
                                       )}
                                       {/* Market heading */}
                                       <div className="flex items-start justify-between gap-3 mb-3">
