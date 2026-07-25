@@ -5621,12 +5621,38 @@ export default function Home({
     | "odds"
     | "lineups"
     | "confrontos"
+    | "tracker"
   >("markets");
   // Match header ↔ mini 2D field toggle
   const [showFieldView, setShowFieldView] = useState(false);
   useEffect(() => {
     setShowFieldView(false);
   }, [expandedMatch?.id]);
+
+  // SportScore Match Tracker widget — resolves lazily per match since it
+  // needs a separate ID lookup (Statpal and SportScore use unrelated ID
+  // spaces). null = looked up, no mapping yet; undefined = not looked up.
+  const [sportscoreId, setSportscoreId] = useState<string | null | undefined>(
+    undefined,
+  );
+  useEffect(() => {
+    setSportscoreId(undefined);
+    if (!expandedMatch?.id) return;
+    const sport = expandedMatch.sport || "football";
+    const matchId = expandedMatch.id;
+    let cancelled = false;
+    fetch(`/api/matches/sportscore-id/${encodeURIComponent(sport)}/${encodeURIComponent(String(matchId))}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (!cancelled) setSportscoreId(data?.sportscoreId ?? null);
+      })
+      .catch(() => {
+        if (!cancelled) setSportscoreId(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [expandedMatch?.id, expandedMatch?.sport]);
   // Market sub-tab — lifted here so live refreshes don't unmount MatchModalMarkets and reset the selection
   const [modalTab, setModalTab] = useState("todos");
   const marketGroupSeqRef = useRef(0);
@@ -17863,6 +17889,15 @@ export default function Home({
                           <BarChart2 size={11} />
                           Stats
                         </button>
+                        {sportscoreId && (
+                          <button
+                            onClick={() => setMatchViewTab(matchViewTab === "tracker" ? "markets" : "tracker")}
+                            className={`flex items-center gap-1 px-2.5 py-1 rounded-full border text-[10px] font-black transition-all ${matchViewTab === "tracker" ? "bg-blue-900/40 border-blue-700/60 text-blue-300" : "bg-zinc-800/60 border-zinc-700/60 text-zinc-400 hover:text-white hover:border-zinc-600"}`}
+                          >
+                            <Activity size={11} />
+                            Tracker
+                          </button>
+                        )}
                       </div>
                     </div>
 
@@ -18002,6 +18037,23 @@ export default function Home({
                     awayScore={expandedMatch.awayScore}
                     storyline={matchStoryline}
                   />
+                )}
+
+                {/* Match Tracker (SportScore widget) — Statpal stays the data
+                    source for everything else; this only embeds the visual
+                    tracker once we have a mapped sportscoreId for the match. */}
+                {matchViewTab === "tracker" && sportscoreId && (
+                  <div className="rounded-2xl overflow-hidden border border-zinc-800/60 bg-zinc-900 mb-3">
+                    <iframe
+                      key={sportscoreId}
+                      src={`https://sportscore.com/api/widget/tracker/?sport=${encodeURIComponent(expandedMatch.sport || "football")}&id=${encodeURIComponent(sportscoreId)}`}
+                      title="Match Tracker"
+                      className="w-full border-0"
+                      style={{ aspectRatio: "16/9" }}
+                      loading="lazy"
+                      referrerPolicy="no-referrer-when-downgrade"
+                    />
+                  </div>
                 )}
 
                 {/* Insight/Previsão panel */}
