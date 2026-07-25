@@ -19844,14 +19844,23 @@ router.get(
         return;
       }
 
-      const guess = guessSportscoreSlug(homeTeam, awayTeam);
-      if (!guess) {
-        res.json({ sportscoreId: null });
-        return;
+      // Try home-vs-away first, then the swapped order — Statpal and
+      // SportScore don't always agree on which side is "home" for a given
+      // fixture (seen in practice on neutral-venue / lower-tier matches).
+      const candidates = [
+        guessSportscoreSlug(homeTeam, awayTeam),
+        guessSportscoreSlug(awayTeam, homeTeam),
+      ].filter((s): s is string => !!s);
+
+      let guess: string | null = null;
+      for (const candidate of candidates) {
+        if (await verifySportscoreSlug(sport, candidate)) {
+          guess = candidate;
+          break;
+        }
       }
 
-      const verified = await verifySportscoreSlug(sport, guess);
-      if (!verified) {
+      if (!guess) {
         sportscoreGuessFailCache.set(failKey, Date.now());
         res.json({ sportscoreId: null });
         return;
