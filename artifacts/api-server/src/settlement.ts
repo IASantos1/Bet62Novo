@@ -2159,6 +2159,41 @@ function isValidFinishedTennisSetScore(home: number, away: number): boolean {
   return false;
 }
 
+/**
+ * True only for game counts that can never occur in a tennis set, in any
+ * format and at any point (finished or still in progress) — a stricter,
+ * "definitely corrupt" cousin of isValidFinishedTennisSetScore. That
+ * function also rejects scores that are simply *not finished yet*, which
+ * covers the overwhelming majority of "invalid" scores during a live set
+ * (e.g. 4-3) — those are fine, just not over. This one only flags margins
+ * that are physically impossible.
+ *
+ * Below 6 games any gap is fine (a set can finish 6-0 through 6-4, so a
+ * wide margin alone means nothing — 6-2 is a perfectly normal score).
+ * Once the leader is past 6 games though, that's only reachable if the
+ * trailing player was already at 5 or 6 (a set ends the instant someone
+ * both reaches 6 and leads by 2, so 7+ games for the leader implies the
+ * trailer kept pace to at least 5). And from that point on the gap can
+ * never exceed 2, in either the tiebreak or advantage-set format — the
+ * set always ends the moment either side goes 2 games clear. A state
+ * that violates either of those (e.g. 7-4, 8-1) can only be a provider
+ * glitch, so it's safe to treat as corrupt data unconditionally.
+ */
+function isImpossibleTennisGameState(home: number, away: number): boolean {
+  if (
+    !Number.isFinite(home) ||
+    !Number.isFinite(away) ||
+    home < 0 ||
+    away < 0
+  ) {
+    return true;
+  }
+  const max = Math.max(home, away);
+  const min = Math.min(home, away);
+  if (max <= 6) return false;
+  return min < 5 || max - min > 2;
+}
+
 function calculateTotalGamesFromSets(sets: Array<[number, number]>): number {
   if (!sets || !Array.isArray(sets)) {
     logger.warn({ sets }, "calculateTotalGamesFromSets: Invalid sets input (not an array)");
@@ -2277,6 +2312,22 @@ export function scoreOutcomeForSel(
 
   let winning: boolean | null = null;
   let voided = false;
+
+  // ── Corrupt tennis set data → void, don't wait on it ────────────────────
+  // Only checked here, against the *final* result (never the live path):
+  // a bad live frame is usually transient and self-corrects on the next
+  // poll, so voiding mid-match on a single glitch would be too eager. Once
+  // the match has an official final result, a game count that's impossible
+  // in any tennis format (e.g. 7-4, 8-1 — more than a 2-game margin past 6)
+  // is a genuine provider error, not just a still-unsettled leg, and every
+  // market touching that set should void immediately instead of sitting
+  // pending until the 72h no-result timeout.
+  if (inferSelectionSport(sel.selection) === "tennis") {
+    const sets = getTennisSetsFromExtras(extra?.extras);
+    if (sets.some(([h, a]) => isImpossibleTennisGameState(h, a))) {
+      return "void";
+    }
+  }
 
   // ── Corners O/U (requires stats) ──────────────────────────────────────────
   if (/^[ou]c\d+$/.test(s)) {

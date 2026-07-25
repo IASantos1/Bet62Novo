@@ -515,6 +515,54 @@ const tennisCases: FinishedSettlementCase[] = [
     },
     expected: "won",
   },
+  // Regression: an impossible set score anywhere in the match (a wider
+  // margin than tennis allows once past 6 games) voids the ticket instead
+  // of leaving it stuck pending until the 72h no-result timeout.
+  {
+    name: "tennis exact set score voids when a later set in the match is corrupt",
+    selection: makeSelection("sc1-6-3"),
+    ft: { home: 2, away: 1 },
+    extra: {
+      extras: {
+        tennis: {
+          sets: [
+            [6, 3],
+            [7, 4], // impossible — can never occur in a real set
+          ],
+        },
+      },
+    },
+    expected: "void",
+  },
+  {
+    name: "tennis exact set score voids on an impossible 8-1 game count",
+    selection: makeSelection("sc1-6-3"),
+    ft: { home: 1, away: 0 },
+    extra: {
+      extras: {
+        tennis: {
+          sets: [[8, 1]],
+        },
+      },
+    },
+    expected: "void",
+  },
+  // A wide margin below 6 games is completely normal (6-0, 6-1, 6-2 are
+  // all real scores) — must not be confused with the "past 6, gap > 2"
+  // corruption check above.
+  {
+    name: "tennis exact set score settles normally on a clean 6-2 finish",
+    selection: makeSelection("sc1-6-2"),
+    ft: { home: 1, away: 0 },
+    extra: {
+      extras: {
+        tennis: {
+          sets: [[6, 2]],
+        },
+      },
+    },
+    expected: "won",
+  },
 ];
 
 for (const tc of tennisCases) {
