@@ -3853,15 +3853,34 @@ function liveDefinitiveOutcomeForSel(
         : "lost";
   }
 
-  if (/^sc([123])-(\d-\d)$/.test(s) || /^ses-(\d-\d)$/.test(s)) {
-    const match = s.match(/^sc([123])-(\d-\d)$/) || s.match(/^ses-(\d-\d)$/);
-    const setNum = s.startsWith("sc")
-      ? Number(match?.[1] ?? 0)
-      : tennisSets.length;
-    const wanted = s.startsWith("sc") ? match?.[2] : match?.[1];
+  if (/^sc([123])-(\d-\d)$/.test(s)) {
+    const match = s.match(/^sc([123])-(\d-\d)$/)!;
+    const setNum = Number(match[1]!);
+    const wanted = match[2]!;
     const setScore = tennisSets[setNum - 1] ?? null;
-    if (!wanted || !setScore || !tennisSetFinished(setScore)) return null;
+    if (!setScore || !tennisSetFinished(setScore)) return null;
     return `${setScore[0]}-${setScore[1]}` === wanted ? "won" : "lost";
+  }
+
+  if (/^ses-(\d-\d)$/.test(s)) {
+    // Legacy "current set" exact-score format — the key never recorded
+    // *which* set the bet was actually about (unlike sc1-/sc2-/sc3-
+    // above), so indexing into tennisSets[tennisSets.length - 1] here
+    // silently drifted to whatever set is live *right now* instead of
+    // the one the bet was placed against — a bet made on set 1 would
+    // start getting graded against set 3 once the match moved on. Same
+    // safe interpretation as the final-result resolver: does the backed
+    // score occur in any set that's actually finished, won as soon as
+    // one matches, and only call it lost once every set played so far
+    // has finished without a match.
+    const match = s.match(/^ses-(\d-\d)$/)!;
+    const wanted = match[1]!;
+    if (tennisSets.length === 0) return null;
+    const finishedSets = tennisSets.filter(tennisSetFinished);
+    if (finishedSets.length === 0) return null;
+    const won = finishedSets.some(([h, a]) => `${h}-${a}` === wanted);
+    if (won) return "won";
+    return finishedSets.length === tennisSets.length ? "lost" : null;
   }
 
   const qWinner = s.match(/^q([1234])-(home|away)$/);

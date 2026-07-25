@@ -16916,8 +16916,25 @@ export default function Home({
       if (/^ses-/.test(rawSel)) {
         const sesM = rawSel.match(/^ses-(\d+)-(\d+)$/);
         if (sesM && (Number(sesM[1]) > 3 || Number(sesM[2]) > 3)) {
-          // Game-score format (e.g. ses-6-3): show the most recent set's game score
-          // (the set being played when this bet was placed, or the last completed set)
+          // Game-score format (e.g. ses-6-3): the key itself never recorded
+          // which set this was about, so showing "whatever set is live
+          // right now" silently drifts away from the set the bet was
+          // placed on (a 1st-set bet starts showing 3rd-set scores once
+          // the match moves on). Prefer, in order: (1) the set number the
+          // stored label still remembers ("1º Set" / "4-6 · 1º Set"),
+          // (2) a finished set that actually matches the backed score,
+          // (3) the live/most recent set, only as a last resort.
+          const lbl = String(sel.label ?? "");
+          const setNumM = lbl.match(/(\d+)º\s*Set/i);
+          const wanted = `${sesM[1]}-${sesM[2]}`;
+          if (setNumM) {
+            const sv = sets[Number(setNumM[1]) - 1];
+            if (sv) return `${sv[0]}-${sv[1]}`;
+          }
+          const matchingSet = sets.find(
+            ([sh, sa]) => `${sh}-${sa}` === wanted,
+          );
+          if (matchingSet) return `${matchingSet[0]}-${matchingSet[1]}`;
           const sv = sets.length > 0 ? sets[sets.length - 1] : undefined;
           return sv ? `${sv[0]}-${sv[1]}` : "0-0";
         }
