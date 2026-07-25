@@ -2464,6 +2464,28 @@ export function scoreOutcomeForSel(
     if (!setScore || !tennisSetFinished(setScore)) return null;
     winning = setScore[0] === wantHome && setScore[1] === wantAway;
   }
+  // ── Legacy "current set" exact score (ses-H-A) ─────────────────────────────
+  // Placed while a specific set was live, but the key doesn't record *which*
+  // set that was — unlike sc1-/sc2-/sc3- above. Only the in-play settlement
+  // path (liveDefinitiveOutcomeForSel) can resolve this precisely (it knows
+  // which set was current at evaluation time); once the match has moved on
+  // this final-result path can only check whether the score occurred in any
+  // completed set, and only call it lost once every set is finished.
+  else if (/^ses-(\d+)-(\d+)$/.test(s)) {
+    const m = s.match(/^ses-(\d+)-(\d+)$/)!;
+    const wantHome = Number(m[1]!);
+    const wantAway = Number(m[2]!);
+    const sets = getTennisSetsFromExtras(extra?.extras);
+    if (sets.length === 0) return null;
+    const finishedSets = sets.filter(tennisSetFinished);
+    if (finishedSets.length === 0) return null;
+    const won = finishedSets.some(
+      ([h, a]) => h === wantHome && a === wantAway,
+    );
+    if (won) return "won";
+    if (finishedSets.length < sets.length) return null;
+    return "lost";
+  }
   // ── Total sets O/U (tennis) ───────────────────────────────────────────────
   else if (/^([ou])sets(35|25)?$/.test(s)) {
     const m = s.match(/^([ou])sets(35|25)?$/)!;

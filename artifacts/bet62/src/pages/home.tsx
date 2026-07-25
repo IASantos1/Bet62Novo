@@ -14067,7 +14067,7 @@ export default function Home({
                             ? renderExactSetColumns(
                                 `${cur}º Set — Resultado Correto`,
                                 liveSetExactScore,
-                                "ses",
+                                `sc${cur}`,
                                 "sets",
                                 "setExactScore",
                               )
@@ -24499,41 +24499,49 @@ export default function Home({
                             : null;
 
                           const isActivePending = isPending;
-                          // Card & text colours
-                          const cardBg = isLost ? "bg-[#7b1111]" : "bg-white";
-                          const selsBg = isLost ? "bg-[#8f1616]" : "bg-white";
-                          const divider = isLost
-                            ? "divide-[#a02020]/50"
-                            : "divide-gray-100";
-                          const txtMain = isLost
-                            ? "text-white"
-                            : "text-gray-900";
-                          const txtSub = isLost
-                            ? "text-red-200"
-                            : "text-gray-500";
-                          const summBg = isLost
-                            ? "bg-[#6b0f0f]/60 border-[#a02020]/40"
-                            : "bg-gray-50 border-gray-100";
-                          const summDiv = isLost
-                            ? "divide-[#a02020]/30"
-                            : "divide-gray-100";
-                          const summTxt = isLost
-                            ? "text-red-100"
-                            : "text-gray-600";
+                          // Card & text colours — dark card in every status (like
+                          // the big-house reference), status communicated via the
+                          // badge + accent glow + per-leg icons, not the whole card
+                          // flipping to a light background once resolved.
+                          const cardBg = "bg-zinc-900";
+                          const selsBg = "bg-zinc-900";
+                          const divider = "divide-zinc-800";
+                          const txtMain = "text-white";
+                          const txtSub = "text-zinc-400";
+                          const summBg = "bg-zinc-950/60 border-zinc-800";
+                          const summDiv = "divide-zinc-800/80";
+                          const summTxt = "text-zinc-400";
+                          const statusGlow = isWon
+                            ? "0 8px 28px rgba(16,185,129,0.28)"
+                            : isLost
+                              ? "0 8px 28px rgba(220,38,38,0.28)"
+                              : isCashedOut
+                                ? "0 8px 28px rgba(234,179,8,0.28)"
+                                : "0 4px 20px rgba(0,0,0,0.5)";
+                          const statusBadge = isWon
+                            ? { label: "Ganha", cls: "bg-emerald-500 text-white" }
+                            : isLost
+                              ? { label: "Perdida", cls: "bg-[#5c0f0f] text-white border border-red-900/60" }
+                              : isCashedOut
+                                ? { label: "Cash Out", cls: "bg-yellow-400 text-yellow-950" }
+                                : isVoided
+                                  ? { label: "Anulada", cls: "bg-zinc-600 text-white" }
+                                  : { label: "Pendente", cls: "bg-white/15 text-white border border-white/30" };
+                          // Compact per-leg status dots for multiples — mirrors the
+                          // little icon row the reference shows next to "Múltipla (N)".
+                          const legIcons = isMultiple
+                            ? sels.map((sel) => getSelOutcome(sel, bet.status))
+                            : [];
 
                           return (
                             <div
                               key={bet.id}
                               className={`rounded-2xl overflow-hidden shadow-xl ${cardBg}`}
-                              style={{
-                                boxShadow: isLost
-                                  ? "0 8px 32px rgba(120,0,0,0.5)"
-                                  : "0 4px 20px rgba(0,0,0,0.35)",
-                              }}
+                              style={{ boxShadow: statusGlow }}
                             >
                               {/* ── HEADER ── */}
-                              <div className="bg-red-700 px-5 py-4 flex items-center justify-between">
-                                <div className="flex items-center gap-3">
+                              <div className="bg-red-700 px-5 py-4 flex items-center justify-between gap-3">
+                                <div className="flex items-center gap-3 min-w-0">
                                   <div className="bg-white/20 rounded-xl p-2 shrink-0">
                                     <ListOrdered
                                       size={20}
@@ -24557,49 +24565,52 @@ export default function Home({
                                           : ""}
                                       </div>
                                     )}
+                                    {/* Per-leg status dots — same idea as the reference's
+                                        icon row next to "Múltipla (N)" */}
+                                    {isMultiple && (
+                                      <div className="flex items-center gap-1 mt-1.5">
+                                        <span className="text-[10px] font-black text-red-100 uppercase tracking-wide mr-0.5">
+                                          Múltipla ({sels.length})
+                                        </span>
+                                        {legIcons.map((oc, li) => (
+                                          <span
+                                            key={li}
+                                            className={`w-4 h-4 rounded-full flex items-center justify-center shrink-0 ${
+                                              oc === "green" || oc === "live-win"
+                                                ? "bg-emerald-500"
+                                                : oc === "red" || oc === "live-lose"
+                                                  ? "bg-white/25"
+                                                  : oc === "void"
+                                                    ? "bg-white/15"
+                                                    : oc === "cashout"
+                                                      ? "bg-yellow-400"
+                                                      : "bg-white/20 animate-pulse"
+                                            }`}
+                                          >
+                                            {(oc === "green" || oc === "live-win") && (
+                                              <Check size={9} className="text-white" strokeWidth={3.5} />
+                                            )}
+                                            {(oc === "red" || oc === "live-lose") && (
+                                              <X size={9} className="text-white" strokeWidth={3.5} />
+                                            )}
+                                            {oc === "void" && (
+                                              <span className="text-white text-[8px] font-black leading-none">—</span>
+                                            )}
+                                          </span>
+                                        ))}
+                                      </div>
+                                    )}
                                   </div>
                                 </div>
-                                {isActivePending && (
-                                  <div className="w-9 h-9 bg-white/25 border-2 border-white/60 rounded-full flex items-center justify-center shrink-0">
-                                    <Check
-                                      size={18}
-                                      className="text-white"
-                                      strokeWidth={3}
-                                    />
-                                  </div>
-                                )}
-                                {isWon && (
-                                  <div className="w-9 h-9 bg-white rounded-full flex items-center justify-center shrink-0 shadow-lg">
-                                    <Check
-                                      size={18}
-                                      className="text-red-600"
-                                      strokeWidth={3}
-                                    />
-                                  </div>
-                                )}
-                                {isLost && (
-                                  <div className="w-9 h-9 bg-white/20 border-2 border-white/40 rounded-full flex items-center justify-center shrink-0">
-                                    <X
-                                      size={18}
-                                      className="text-white"
-                                      strokeWidth={3}
-                                    />
-                                  </div>
-                                )}
-                                {isCashedOut && (
-                                  <div className="w-9 h-9 bg-yellow-400 rounded-full flex items-center justify-center shrink-0 shadow-lg">
-                                    <CircleDollarSign
-                                      size={18}
-                                      className="text-yellow-900"
-                                    />
-                                  </div>
-                                )}
+                                <span
+                                  className={`shrink-0 text-[11px] font-black uppercase tracking-wide px-3 py-1.5 rounded-full ${statusBadge.cls}`}
+                                >
+                                  {statusBadge.label}
+                                </span>
                               </div>
 
                               {/* ── SELECTIONS HEADER ── */}
-                              <div
-                                className={`px-5 pt-4 pb-2 flex items-center gap-2 ${isLost ? "bg-[#8f1616]" : "bg-gray-50 border-b border-gray-100"}`}
-                              >
+                              <div className="px-5 pt-4 pb-2 flex items-center gap-2 bg-zinc-950/40 border-b border-zinc-800/60">
                                 <ListOrdered size={13} className={txtSub} />
                                 <span
                                   className={`text-[11px] font-black uppercase tracking-widest ${txtSub}`}
@@ -24832,7 +24843,7 @@ export default function Home({
                                               Ao vivo{" "}
                                               <span className="inline-block w-1.5 h-1.5 rounded-full bg-white animate-pulse ml-0.5" />
                                             </span>
-                                            <span className="text-[11px] font-black text-gray-700 tabular-nums">
+                                            <span className="text-[11px] font-black text-zinc-300 tabular-nums">
                                               {displayMin} • {getContextualBetScore(sel, lm)}
                                             </span>
                                             {liveOdd !== null &&
@@ -24884,7 +24895,7 @@ export default function Home({
                                           return null;
                                         })()}
                                         {sel.settlementNote && (
-                                          <div className="mt-1.5 inline-flex max-w-full rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-[10px] font-bold leading-snug text-amber-700">
+                                          <div className="mt-1.5 inline-flex max-w-full rounded-lg border border-amber-800/50 bg-amber-950/40 px-2.5 py-1.5 text-[10px] font-bold leading-snug text-amber-300">
                                             {sel.settlementNote}
                                           </div>
                                         )}
@@ -24896,24 +24907,24 @@ export default function Home({
                                             : "1.00"}
                                         </div>
                                         {isWon && (
-                                          <span className="text-[10px] font-black text-green-600 flex items-center gap-0.5">
+                                          <span className="text-[10px] font-black text-green-400 flex items-center gap-0.5">
                                             {sportEmoji(sel.sport)} VENCIDO
                                           </span>
                                         )}
                                         {isActivePending &&
                                           outcome === "live-win" && (
-                                            <span className="text-[10px] font-black text-green-600">
+                                            <span className="text-[10px] font-black text-green-400">
                                               VENCIDO
                                             </span>
                                           )}
                                         {isActivePending &&
                                           outcome === "live-lose" && (
-                                            <span className="text-[10px] font-black text-red-600">
+                                            <span className="text-[10px] font-black text-red-400">
                                               PERDIDO
                                             </span>
                                           )}
                                         {outcome === "void" && (
-                                          <span className="text-[10px] font-black text-zinc-500">
+                                          <span className="text-[10px] font-black text-zinc-400">
                                             ANULADA
                                           </span>
                                         )}
@@ -24961,11 +24972,11 @@ export default function Home({
                                           ? `€${parseFloat(bet.cashoutValue).toFixed(2)}`
                                           : `€${parseFloat(bet.potentialWin).toFixed(2)}`,
                                     valueCls: isWon
-                                      ? "font-black text-green-600 text-base"
+                                      ? "font-black text-green-400 text-base"
                                       : isCashedOut
-                                        ? "font-black text-yellow-600 text-base"
+                                        ? "font-black text-yellow-400 text-base"
                                         : isLost
-                                          ? "font-bold text-red-100"
+                                          ? "font-bold text-red-300"
                                           : isVoided
                                             ? "font-black text-blue-300 text-base"
                                             : `font-black ${txtMain}`,
@@ -24982,11 +24993,11 @@ export default function Home({
                                         if (net === null) return [];
                                         const cls =
                                           net > 0
-                                            ? "font-black text-green-600 text-base"
+                                            ? "font-black text-green-400 text-base"
                                             : net < 0
                                               ? isLost
-                                                ? "font-black text-red-100 text-base"
-                                                : "font-black text-red-600 text-base"
+                                                ? "font-black text-red-300 text-base"
+                                                : "font-black text-red-400 text-base"
                                               : isVoided
                                                 ? "font-black text-blue-300 text-base"
                                                 : `font-black ${txtMain}`;
@@ -25065,7 +25076,7 @@ export default function Home({
                                     </button>
                                   )
                                 ) : bet.cashoutStatus === "suspended" ? (
-                                  <div className="mx-4 mb-4 bg-gray-100 text-gray-500 font-bold text-[14px] py-4 rounded-2xl flex items-center justify-center gap-2 cursor-not-allowed select-none">
+                                  <div className="mx-4 mb-4 bg-zinc-800/70 border border-zinc-700/60 text-zinc-400 font-bold text-[14px] py-4 rounded-2xl flex items-center justify-center gap-2 cursor-not-allowed select-none">
                                     <Lock size={15} />
                                     Cash Out suspenso
                                     {bet.cashoutReason
@@ -25073,13 +25084,13 @@ export default function Home({
                                       : ""}
                                   </div>
                                 ) : (
-                                  <div className="mx-4 mb-4 bg-gray-100 text-gray-400 font-bold text-[14px] py-4 rounded-2xl flex items-center justify-center gap-2 cursor-not-allowed select-none">
+                                  <div className="mx-4 mb-4 bg-zinc-800/70 border border-zinc-700/60 text-zinc-500 font-bold text-[14px] py-4 rounded-2xl flex items-center justify-center gap-2 cursor-not-allowed select-none">
                                     <Lock size={15} />
                                     Cash Out indisponível
                                   </div>
                                 )
                               ) : isCashedOut || isWon ? (
-                                <div className="mx-4 mb-4 bg-gray-100 text-gray-400 font-bold text-[14px] py-4 rounded-2xl flex items-center justify-center gap-2 cursor-not-allowed select-none">
+                                <div className="mx-4 mb-4 bg-zinc-800/70 border border-zinc-700/60 text-zinc-500 font-bold text-[14px] py-4 rounded-2xl flex items-center justify-center gap-2 cursor-not-allowed select-none">
                                   <Lock size={15} />
                                   Cash Out encerrado
                                 </div>
