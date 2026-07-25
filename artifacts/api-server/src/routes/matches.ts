@@ -19811,15 +19811,11 @@ function pickTeamName(
   return null;
 }
 
-async function findSportscoreFixture(
+async function findInLiveFixturesList(
   sport: string,
-  homeTeam: string,
-  awayTeam: string,
+  wantedH: string,
+  wantedA: string,
 ): Promise<SportscoreFixture | null> {
-  const wantedH = slugifyTeamName(homeTeam);
-  const wantedA = slugifyTeamName(awayTeam);
-  if (!wantedH || !wantedA) return null;
-
   try {
     const resp = await fetch(
       `https://sportscore.com/api/widget/matches/?sport=${encodeURIComponent(sport)}&limit=50&src=bet62.com`,
@@ -19850,6 +19846,63 @@ async function findSportscoreFixture(
   } catch {
     return null;
   }
+}
+
+// The live+recent list is capped at 50 results with no pagination, so a
+// lower-profile fixture can be live on SportScore but still miss the list
+// (buried behind 50 more prominent matches worldwide). Fall back to
+// guessing the slug from our team names and confirming it for real against
+// the single-match REST endpoint (which also gives us the numeric id) —
+// this is a genuine verification against real match data, not a blind
+// HTTP-status check against the HTML embed page.
+async function findByGuessedSlug(
+  sport: string,
+  wantedH: string,
+  wantedA: string,
+): Promise<SportscoreFixture | null> {
+  const candidates = [`${wantedH}-vs-${wantedA}`, `${wantedA}-vs-${wantedH}`];
+  for (const slug of candidates) {
+    try {
+      const resp = await fetch(
+        `https://sportscore.com/api/widget/match/?sport=${encodeURIComponent(sport)}&slug=${encodeURIComponent(slug)}&src=bet62.com`,
+        { signal: AbortSignal.timeout(6000) },
+      );
+      if (!resp.ok) continue;
+      const data = (await resp.json()) as Record<string, unknown>;
+      const m = (data["match"] ?? data) as Record<string, unknown>;
+      const mHome = pickTeamName(m, "home");
+      const mAway = pickTeamName(m, "away");
+      if (!mHome || !mAway) continue;
+      const sH = slugifyTeamName(mHome);
+      const sA = slugifyTeamName(mAway);
+      // Confirm the returned match actually is the fixture we asked for —
+      // a guessed slug that 404s or resolves to an unrelated match must
+      // not be trusted just because the request succeeded.
+      const confirmed =
+        (sH === wantedH && sA === wantedA) || (sH === wantedA && sA === wantedH);
+      if (!confirmed) continue;
+      const id = pickStr(m, ["id", "matchId", "match_id"]);
+      return { id: id ?? "", slug };
+    } catch {
+      continue;
+    }
+  }
+  return null;
+}
+
+async function findSportscoreFixture(
+  sport: string,
+  homeTeam: string,
+  awayTeam: string,
+): Promise<SportscoreFixture | null> {
+  const wantedH = slugifyTeamName(homeTeam);
+  const wantedA = slugifyTeamName(awayTeam);
+  if (!wantedH || !wantedA) return null;
+
+  const fromList = await findInLiveFixturesList(sport, wantedH, wantedA);
+  if (fromList) return fromList;
+
+  return findByGuessedSlug(sport, wantedH, wantedA);
 }
 
 router.get(
