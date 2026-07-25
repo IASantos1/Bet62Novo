@@ -17917,6 +17917,8 @@ export default function Home({
                       if (window.innerWidth < 1024) setBetSlipOpenMobile(true);
                     }}
                     liveExtra={(expandedMatch as any)._liveExtra}
+                    homeScore={expandedMatch.homeScore}
+                    awayScore={expandedMatch.awayScore}
                     storyline={matchStoryline}
                   />
                 )}

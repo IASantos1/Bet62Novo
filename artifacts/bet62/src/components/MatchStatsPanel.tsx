@@ -160,6 +160,12 @@ type LiveExtra = {
   passesAway?: number;
   passAccuracyHome?: number;
   passAccuracyAway?: number;
+  shotsOffTargetHome?: number;
+  shotsOffTargetAway?: number;
+  shotsBlockedHome?: number;
+  shotsBlockedAway?: number;
+  woodworkHome?: number;
+  woodworkAway?: number;
 };
 
 type Props = {
@@ -184,6 +190,8 @@ type Props = {
   standingsGroups?: StandingsGroup[] | null;
   standingsLoading?: boolean;
   standingsLeague?: string;
+  homeScore?: number;
+  awayScore?: number;
 };
 
 // ── Momentum Chart ──────────────────────────────────────────────────────────
@@ -520,6 +528,7 @@ export default function MatchStatsPanel({
   confrontosData, onGoH2H, onGoLive, onAddInsight,
   liveExtra, storyline,
   standings, standingsGroups, standingsLoading, standingsLeague,
+  homeScore, awayScore,
 }: Props) {
   const isFootball = !sport || sport === "football";
 
@@ -1037,6 +1046,14 @@ export default function MatchStatsPanel({
                 const aSaves   = liveExtra.savesAway;
                 const hCorners = liveExtra.cornersHome ?? liveExtra.corners?.[0];
                 const aCorners = liveExtra.cornersAway ?? liveExtra.corners?.[1];
+                const hGoals   = homeScore ?? liveExtra.goals?.[0];
+                const aGoals   = awayScore ?? liveExtra.goals?.[1];
+                const hShotsOff = liveExtra.shotsOffTargetHome;
+                const aShotsOff = liveExtra.shotsOffTargetAway;
+                const hShotsBlk = liveExtra.shotsBlockedHome;
+                const aShotsBlk = liveExtra.shotsBlockedAway;
+                const hWood     = liveExtra.woodworkHome;
+                const aWood     = liveExtra.woodworkAway;
 
                 const ratioPct = (h?: number, a?: number) => {
                   const t = (h ?? 0) + (a ?? 0);
@@ -1050,6 +1067,7 @@ export default function MatchStatsPanel({
                 const hasAny = [
                   hShots, aShots, hShotsOn, aShotsOn, hAttacks, aAttacks, hDanger, aDanger,
                   hFouls, aFouls, hPoss, aPoss, hCorners, aCorners, hYellow, aYellow, hRed, aRed,
+                  hShotsOff, aShotsOff, hShotsBlk, aShotsBlk, hWood, aWood,
                 ].some(v => v !== undefined);
                 if (!hasAny) return null;
 
@@ -1063,12 +1081,16 @@ export default function MatchStatsPanel({
                 ];
 
                 const atacanteRows = [
-                  { key: "shots",   label: "Total de Remates",    h: hShots,   a: aShots   },
-                  { key: "shotsOn", label: "Remates à Baliza",    h: hShotsOn, a: aShotsOn },
-                  { key: "corners", label: "Cantos no Jogo",      h: hCorners, a: aCorners },
-                  { key: "offs",    label: "Foras de Jogo",       h: hOff,     a: aOff     },
-                  { key: "attacks", label: "Ataques",             h: hAttacks, a: aAttacks },
-                  { key: "danger",  label: "Ataques Perigosos",   h: hDanger,  a: aDanger  },
+                  { key: "goals",     label: "Golos",                h: hGoals,    a: aGoals    },
+                  { key: "shots",     label: "Total de Remates",     h: hShots,    a: aShots    },
+                  { key: "shotsOn",   label: "Remates à Baliza",     h: hShotsOn,  a: aShotsOn  },
+                  { key: "shotsOff",  label: "Remates para Fora",    h: hShotsOff, a: aShotsOff },
+                  { key: "shotsBlk",  label: "Remates Bloqueados",   h: hShotsBlk, a: aShotsBlk },
+                  { key: "woodwork",  label: "Traves",               h: hWood,     a: aWood     },
+                  { key: "corners",   label: "Cantos no Jogo",       h: hCorners,  a: aCorners  },
+                  { key: "offs",      label: "Foras de Jogo",        h: hOff,      a: aOff      },
+                  { key: "attacks",   label: "Ataques",              h: hAttacks,  a: aAttacks  },
+                  { key: "danger",    label: "Ataques Perigosos",    h: hDanger,   a: aDanger   },
                 ].filter(r => r.h !== undefined || r.a !== undefined);
 
                 const defesaRows = [
@@ -1197,6 +1219,10 @@ export default function MatchStatsPanel({
                         })()}
                       </div>
                     )}
+
+                    <p className="text-center text-[9px] text-zinc-600 px-4 leading-relaxed">
+                      As estatísticas não são atualizadas em tempo real e destinam-se apenas ao uso informativo.
+                    </p>
                   </div>
                 );
               })()}
