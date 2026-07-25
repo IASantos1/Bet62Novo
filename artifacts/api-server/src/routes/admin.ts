@@ -8,6 +8,7 @@ import {
   paymentsTable,
   withdrawalsTable,
   settlementLogsTable,
+  sportscoreMatchMapTable,
 } from "@workspace/db/schema";
 import { eq, desc, count, sum, sql, gte, lte, and } from "drizzle-orm";
 import {
@@ -2113,6 +2114,90 @@ router.get("/statpal-usage", adminMiddleware, async (_req, res) => {
   } catch (err) {
     logger.error({ err }, "GET /api/admin/statpal-usage error");
     res.status(500).json({ error: "Erro ao consultar Statpal" });
+  }
+});
+
+// ── SportScore Match Tracker ID mapping ───────────────────────────────────────
+// Statpal stays the source for games/odds/stats/events/settlement. SportScore
+// is only used to embed its Match Tracker widget, which requires SportScore's
+// own match ID (unrelated to Statpal's). Until an automatic team/date
+// matching service is wired up against a real SportScore fixtures/search
+// endpoint, mappings are pasted in here manually per match.
+router.get("/sportscore-map", adminMiddleware, async (req: AdminRequest, res) => {
+  try {
+    const sport = String(req.query["sport"] ?? "").trim();
+    const rows = await db
+      .select()
+      .from(sportscoreMatchMapTable)
+      .where(sport ? eq(sportscoreMatchMapTable.sport, sport) : undefined)
+      .orderBy(desc(sportscoreMatchMapTable.updatedAt))
+      .limit(200);
+    res.json({ mappings: rows });
+  } catch (err) {
+    logger.error({ err }, "GET /api/admin/sportscore-map error");
+    res.status(500).json({ error: "Erro ao carregar mapeamentos do SportScore" });
+  }
+});
+
+router.post("/sportscore-map", adminMiddleware, async (req: AdminRequest, res) => {
+  try {
+    const sport = String(req.body?.sport ?? "").trim().toLowerCase();
+    const statpalMatchId = String(req.body?.statpalMatchId ?? "").trim();
+    const sportscoreId = String(req.body?.sportscoreId ?? "").trim();
+    const homeTeam = req.body?.homeTeam ? String(req.body.homeTeam).trim() : null;
+    const awayTeam = req.body?.awayTeam ? String(req.body.awayTeam).trim() : null;
+    const matchDate = req.body?.matchDate ? String(req.body.matchDate).trim() : null;
+
+    if (!sport || !statpalMatchId || !sportscoreId) {
+      res.status(400).json({
+        error: "sport, statpalMatchId e sportscoreId são obrigatórios",
+      });
+      return;
+    }
+
+    const existing = await db
+      .select({ id: sportscoreMatchMapTable.id })
+      .from(sportscoreMatchMapTable)
+      .where(
+        and(
+          eq(sportscoreMatchMapTable.sport, sport),
+          eq(sportscoreMatchMapTable.statpalMatchId, statpalMatchId),
+        ),
+      )
+      .limit(1);
+
+    if (existing[0]) {
+      await db
+        .update(sportscoreMatchMapTable)
+        .set({
+          sportscoreId,
+          homeTeam,
+          awayTeam,
+          matchDate,
+          source: "manual",
+          updatedAt: new Date(),
+        })
+        .where(eq(sportscoreMatchMapTable.id, existing[0].id));
+    } else {
+      await db.insert(sportscoreMatchMapTable).values({
+        sport,
+        statpalMatchId,
+        sportscoreId,
+        homeTeam,
+        awayTeam,
+        matchDate,
+        source: "manual",
+      });
+    }
+
+    logger.info(
+      { sport, statpalMatchId, sportscoreId, admin: req.admin!.username },
+      "Admin set SportScore match mapping",
+    );
+    res.json({ success: true });
+  } catch (err) {
+    logger.error({ err }, "POST /api/admin/sportscore-map error");
+    res.status(500).json({ error: "Erro ao salvar mapeamento do SportScore" });
   }
 });
 

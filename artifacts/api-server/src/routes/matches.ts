@@ -14,7 +14,7 @@ import {
   buildMatchSettlementJobId,
   enqueueMatchSettlement,
 } from "../lib/settlementQueue.js";
-import { db, matchResultsTable } from "@workspace/db";
+import { db, matchResultsTable, sportscoreMatchMapTable } from "@workspace/db";
 import { eq, and, gte, sql } from "drizzle-orm";
 import * as http from "http";
 import * as net from "net";
@@ -19744,6 +19744,43 @@ router.get("/live-match/:id", async (req: Request, res: Response) => {
     });
   }
 });
+
+// SportScore Match Tracker widget — resolves the SportScore ID mapped to a
+// Statpal match (see sportscoreMatchMapTable). Returns null when no mapping
+// exists yet so the frontend can hide the tracker tab gracefully. Statpal
+// stays the source for games/odds/stats/events/settlement; SportScore is
+// only used to embed the visual tracker widget.
+router.get(
+  "/sportscore-id/:sport/:matchId",
+  async (req: Request, res: Response) => {
+    res.setHeader(
+      "Cache-Control",
+      "no-store, no-cache, must-revalidate, max-age=0",
+    );
+    const sport = String(req.params["sport"] ?? "");
+    const matchId = String(req.params["matchId"] ?? "");
+    if (!sport || !matchId) {
+      res.json({ sportscoreId: null });
+      return;
+    }
+    try {
+      const rows = await db
+        .select({ sportscoreId: sportscoreMatchMapTable.sportscoreId })
+        .from(sportscoreMatchMapTable)
+        .where(
+          and(
+            eq(sportscoreMatchMapTable.sport, sport),
+            eq(sportscoreMatchMapTable.statpalMatchId, matchId),
+          ),
+        )
+        .limit(1);
+      res.json({ sportscoreId: rows[0]?.sportscoreId ?? null });
+    } catch (err) {
+      logger.error({ err }, "GET /api/matches/sportscore-id error");
+      res.json({ sportscoreId: null });
+    }
+  },
+);
 
 router.get("/feed-status", (_req: Request, res: Response) => {
   res.setHeader(
