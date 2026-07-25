@@ -2127,11 +2127,36 @@ function tennisSetFinished(setScore: [number, number]): boolean {
     return false;
   }
 
-  const maxGames = Math.max(homeGames, awayGames);
-  const diff = Math.abs(homeGames - awayGames);
-  const isFinished = maxGames >= 7 || (maxGames >= 6 && diff >= 2);
+  return isValidFinishedTennisSetScore(homeGames, awayGames);
+}
 
-  return isFinished;
+/**
+ * Validates a game score against the actual rules of a tennis set, rather
+ * than a loose "looks finished" heuristic. A provider glitch or transient
+ * bad frame can hand us a score like 7-4 or 8-1 — those satisfy a naive
+ * "maxGames >= 7" check but can never occur in a real set, since past 6-6
+ * the set is only won by a 2-game margin or, at exactly 7-6, a tiebreak.
+ * Treating those as a genuine finished result would settle bets against
+ * data that was never real.
+ *
+ *   6-0 .. 6-4  (and reverse)  — standard set, won by 2+
+ *   7-5         (and reverse)  — went past 6-6, won by 2
+ *   7-6         (and reverse)  — tiebreak set (score is always 7-6 on the
+ *                                game count regardless of the tiebreak's
+ *                                own point margin)
+ *   8-6, 9-7, … (and reverse)  — extended no-tiebreak advantage set, still
+ *                                used for some deciding sets; always a
+ *                                clean 2-game margin once past 7-5
+ */
+function isValidFinishedTennisSetScore(home: number, away: number): boolean {
+  const max = Math.max(home, away);
+  const min = Math.min(home, away);
+  const diff = max - min;
+
+  if (max === 6) return diff >= 2;
+  if (max === 7) return diff === 1 || diff === 2;
+  if (max >= 8) return diff === 2;
+  return false;
 }
 
 function calculateTotalGamesFromSets(sets: Array<[number, number]>): number {

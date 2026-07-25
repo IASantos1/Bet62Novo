@@ -471,6 +471,50 @@ const tennisCases: FinishedSettlementCase[] = [
     },
     expected: "lost",
   },
+  // Regression: a set score that superficially "looks finished" (reaches 7+
+  // games) but is not a combination a real tennis set can ever produce —
+  // e.g. a provider glitch handing us 7-4 — must not be read as a genuine
+  // result. Only 6-0..6-4, 7-5, 7-6 (tiebreak) and extended advantage sets
+  // (8-6, 9-7, ...) are valid finished scores.
+  {
+    name: "tennis correct set score stays pending on an impossible 7-4 game count",
+    selection: makeSelection("sc1-7-6"),
+    ft: { home: 1, away: 0 },
+    extra: {
+      extras: {
+        tennis: {
+          sets: [[7, 4]],
+        },
+      },
+    },
+    expected: null,
+  },
+  {
+    name: "tennis correct set score stays pending on an impossible 8-1 game count",
+    selection: makeSelection("sc1-6-3"),
+    ft: { home: 1, away: 0 },
+    extra: {
+      extras: {
+        tennis: {
+          sets: [[8, 1]],
+        },
+      },
+    },
+    expected: null,
+  },
+  {
+    name: "tennis correct set score settles as won on a valid extended advantage set",
+    selection: makeSelection("sc1-9-7"),
+    ft: { home: 1, away: 0 },
+    extra: {
+      extras: {
+        tennis: {
+          sets: [[9, 7]],
+        },
+      },
+    },
+    expected: "won",
+  },
 ];
 
 for (const tc of tennisCases) {
