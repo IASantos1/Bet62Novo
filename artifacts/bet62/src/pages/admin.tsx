@@ -1073,7 +1073,7 @@ export default function AdminPage() {
     const statpalMatchId = sportscoreForm.statpalMatchId.trim();
     const sportscoreId = sportscoreForm.sportscoreId.trim();
     if (!sport || !statpalMatchId || !sportscoreId) {
-      toast.error("Esporte, ID Statpal e ID SportScore são obrigatórios");
+      toast.error("Esporte, ID Statpal e slug SportScore são obrigatórios");
       return;
     }
     setSportscoreSaving(true);
@@ -5257,7 +5257,7 @@ export default function AdminPage() {
                       Match Tracker (SportScore)
                     </span>
                     <span className="text-xs text-zinc-600">
-                      liga o ID da partida da Statpal ao ID do SportScore para exibir o widget do tracker
+                      liga o ID da partida da Statpal ao slug do jogo na SportScore (ex: time-casa-vs-time-fora) para exibir o widget do tracker
                     </span>
                     <Button
                       onClick={fetchSportscoreMappings}
@@ -5298,7 +5298,7 @@ export default function AdminPage() {
                       className="bg-zinc-800 border-zinc-700 text-white h-9"
                     />
                     <Input
-                      placeholder="ID SportScore"
+                      placeholder="Slug SportScore (ex: toronto-fc-ii-vs-inter-miami-b)"
                       value={sportscoreForm.sportscoreId}
                       onChange={(e) =>
                         setSportscoreForm((f) => ({
