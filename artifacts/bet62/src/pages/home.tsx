@@ -17091,8 +17091,37 @@ export default function Home({
     const fs = sel.finalScore;
     const sets = (sel.selExtras as { tennis?: { sets: [number, number][] } } | undefined)?.tennis?.sets;
 
-    // Exact set-score / current-set markets — label is already self-explanatory
-    if (/^(sc[1-5]-|ses-)/.test(raw)) return null;
+    // Exact set-score markets (sc{N}-H-A): show the actual score of the
+    // specific set that was bet on, not the match's sets-won tally.
+    const scResM = raw.match(/^sc([1-5])-(\d+)-(\d+)$/);
+    if (scResM) {
+      const idx = Number(scResM[1]) - 1;
+      const sv = sets?.[idx];
+      if (sv) return `${sv[0]} - ${sv[1]}`;
+      return `${scResM[2]} - ${scResM[3]}`;
+    }
+    // Legacy "current set" exact-score markets (ses-H-A): the key itself
+    // never recorded which set this was about, so prefer, in order:
+    // (1) the set number the stored label still remembers ("Nº Set"),
+    // (2) a finished set that actually matches the backed score,
+    // (3) the last set played, only as a last resort.
+    const sesResM = raw.match(/^ses-(\d+)-(\d+)$/);
+    if (sesResM) {
+      const lbl = String(sel.label ?? "");
+      const setNumM = lbl.match(/(\d+)º\s*Set/i);
+      if (setNumM) {
+        const sv = sets?.[Number(setNumM[1]) - 1];
+        if (sv) return `${sv[0]} - ${sv[1]}`;
+      }
+      const wanted = `${sesResM[1]}-${sesResM[2]}`;
+      const matchingSet = sets?.find(([sh, sa]) => `${sh}-${sa}` === wanted);
+      if (matchingSet) return `${matchingSet[0]} - ${matchingSet[1]}`;
+      if (sets && sets.length > 0) {
+        const sv = sets[sets.length - 1]!;
+        return `${sv[0]} - ${sv[1]}`;
+      }
+      return `${sesResM[1]} - ${sesResM[2]}`;
+    }
 
     // Match winner (h, a, home, away and variants)
     if (/^(h|a|home|away|1|2|draw|homeOrDraw|awayOrDraw|homeOrAway)$/.test(raw)) {
@@ -17757,6 +17786,24 @@ export default function Home({
                           sport={expandedMatch.sport}
                           homeTeam={teamNamePt(expandedMatch.home)}
                           awayTeam={teamNamePt(expandedMatch.away)}
+                          liveClockLabel={
+                            expandedMatch.isLive
+                              ? (() => {
+                                  const m = getDisplayMinute(expandedMatch);
+                                  const isFootballClock =
+                                    !expandedMatch.sport || expandedMatch.sport === "football";
+                                  const tag = isFootballClock
+                                    ? getFootballPhaseTag(expandedMatch, m)
+                                    : null;
+                                  if (m <= 0) return "AO VIVO";
+                                  if (tag === "HT") return "HT";
+                                  if (tag && isFootballClock)
+                                    return `${tag} · ${getFootballClockLabel(expandedMatch, m)}`;
+                                  if (tag) return `${m}' · ${tag}`;
+                                  return `${m}'`;
+                                })()
+                              : null
+                          }
                         />
                       </div>
                     ) : (
