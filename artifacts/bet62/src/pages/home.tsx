@@ -18041,18 +18041,32 @@ export default function Home({
 
                 {/* Match Tracker (SportScore widget) — Statpal stays the data
                     source for everything else; this only embeds the visual
-                    tracker once we have a mapped sportscoreId for the match. */}
+                    tracker once we have a mapped match slug for the game.
+                    Real SportScore embed format: /embed/tracker/{sport}/{slug}/
+                    (slug = "home-team-vs-away-team", not a numeric ID). */}
                 {matchViewTab === "tracker" && sportscoreId && (
-                  <div className="rounded-2xl overflow-hidden border border-zinc-800/60 bg-zinc-900 mb-3">
+                  <div className="mb-3 flex flex-col items-center">
                     <iframe
                       key={sportscoreId}
-                      src={`https://sportscore.com/api/widget/tracker/?sport=${encodeURIComponent(expandedMatch.sport || "football")}&id=${encodeURIComponent(sportscoreId)}`}
+                      src={`https://sportscore.com/embed/tracker/${encodeURIComponent(expandedMatch.sport || "football")}/${sportscoreId.replace(/^\/+|\/+$/g, "")}/`}
                       title="Match Tracker"
-                      className="w-full border-0"
-                      style={{ aspectRatio: "16/9" }}
+                      width={320}
+                      height={420}
+                      className="border border-zinc-800/60 rounded-lg block max-w-full"
                       loading="lazy"
                       referrerPolicy="no-referrer-when-downgrade"
                     />
+                    <div className="text-[11px] text-zinc-500 text-center py-1.5">
+                      Football live match tracker by{" "}
+                      <a
+                        href="https://sportscore.com/football/"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-blue-400 font-semibold hover:underline"
+                      >
+                        SportScore
+                      </a>
+                    </div>
                   </div>
                 )}
 

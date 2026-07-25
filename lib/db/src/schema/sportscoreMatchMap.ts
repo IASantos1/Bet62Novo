@@ -1,14 +1,17 @@
 import { pgTable, serial, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core";
 
 // Maps a Statpal match (our primary data source for games/odds/stats/events/
-// settlement) to the corresponding SportScore match ID, which is required to
-// embed SportScore's Match Tracker widget:
-//   https://sportscore.com/api/widget/tracker/?sport={sport}&id={sportscoreId}
-// Statpal and SportScore use unrelated ID spaces, so this table is the only
-// bridge between "the match the user is looking at" and "the ID the tracker
+// settlement) to the corresponding SportScore match slug, which is required
+// to embed SportScore's Match Tracker widget:
+//   https://sportscore.com/embed/tracker/{sport}/{slug}/
+// (slug is e.g. "home-team-vs-away-team" — SportScore's own team-name-based
+// slug, not a numeric ID, and not derivable from our own team name strings
+// since spellings/abbreviations differ between providers.) Statpal and
+// SportScore use unrelated ID spaces, so this table is the only bridge
+// between "the match the user is looking at" and "the slug the tracker
 // widget needs". Populated manually via the admin endpoint until an
 // automatic team/date matching service is wired up against a real SportScore
-// fixtures/search endpoint.
+// fixtures/search endpoint. Column name kept as sportscoreId for stability.
 export const sportscoreMatchMapTable = pgTable("sportscore_match_map", {
   id: serial("id").primaryKey(),
   sport: text("sport").notNull(),
