@@ -58,6 +58,8 @@ import {
   CalendarDays,
   ListOrdered,
   Search,
+  LayoutGrid,
+  ArrowLeft,
 } from "lucide-react";
 import ProfileTab from "@/components/ProfileTab";
 import StableImage from "@/components/StableImage";
@@ -162,6 +164,7 @@ import parisFCBanner from "@assets/file_1779019459045_1779019658504.jpeg";
 import lorientBanner from "@assets/file_1779019450188_1779019658504.jpeg";
 import brestBanner from "@assets/file_1779019468348_1779019658504.jpeg";
 import MatchStatsPanel from "@/components/MatchStatsPanel";
+import MiniFieldView from "@/components/MiniFieldView";
 import SuggestedCombos from "@/components/SuggestedCombos";
 import BetBuilderPanel, { type BuilderMarket } from "@/components/BetBuilderPanel";
 
@@ -5619,6 +5622,11 @@ export default function Home({
     | "lineups"
     | "confrontos"
   >("markets");
+  // Match header ↔ mini 2D field toggle
+  const [showFieldView, setShowFieldView] = useState(false);
+  useEffect(() => {
+    setShowFieldView(false);
+  }, [expandedMatch?.id]);
   // Market sub-tab — lifted here so live refreshes don't unmount MatchModalMarkets and reset the selection
   const [modalTab, setModalTab] = useState("todos");
   const marketGroupSeqRef = useRef(0);
@@ -17743,6 +17751,16 @@ export default function Home({
                 <div className="relative overflow-hidden rounded-[28px] border border-zinc-800/60 bg-zinc-900 shadow-[0_4px_20px_rgba(0,0,0,0.4)] mb-3">
                   <div className="absolute top-0 left-0 right-0 h-[3px] bg-gradient-to-r from-yellow-400 via-orange-500 to-red-600" />
                   <div className="px-4 pt-4 pb-3">
+                    {showFieldView ? (
+                      <div className="mb-3">
+                        <MiniFieldView
+                          sport={expandedMatch.sport}
+                          homeTeam={teamNamePt(expandedMatch.home)}
+                          awayTeam={teamNamePt(expandedMatch.away)}
+                        />
+                      </div>
+                    ) : (
+                      <>
                     <div className="flex items-center justify-between gap-3 mb-4">
                       <div className="min-w-0 flex items-center gap-2">
                         <span className="text-sm leading-none shrink-0">
@@ -17886,7 +17904,23 @@ export default function Home({
                         );
                       })()}
                     </div>
+                      </>
+                    )}
 
+                    <div className="flex items-center">
+                      <button
+                        onClick={() => setShowFieldView((v) => !v)}
+                        className="w-8 h-8 rounded-lg bg-gradient-to-br from-orange-500 to-red-600 flex items-center justify-center shadow-md active:scale-95 transition-transform"
+                        aria-label={showFieldView ? "Ver detalhes do jogo" : "Ver campo"}
+                        title={showFieldView ? "Ver detalhes do jogo" : "Ver campo"}
+                      >
+                        {showFieldView ? (
+                          <ArrowLeft size={14} className="text-white" />
+                        ) : (
+                          <LayoutGrid size={14} className="text-white" />
+                        )}
+                      </button>
+                    </div>
                   </div>
                 </div>
 
