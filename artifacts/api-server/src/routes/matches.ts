@@ -19888,15 +19888,42 @@ export type SportscoreDiagStep = {
   detail: string;
 };
 
-// Tolerant name match: accepts either the plain normalization or the
-// suffix-stripped one, so "Levante UD" (ours) matches "Levante" (theirs)
-// or vice versa, without loosening things enough to confuse distinct clubs
-// that share a generic word (handled by keeping identity-bearing words like
-// "Real"/"United"/"City" out of the strip list).
+function levenshtein(a: string, b: string): number {
+  const m = a.length;
+  const n = b.length;
+  const dp: number[][] = Array.from({ length: m + 1 }, () => new Array<number>(n + 1).fill(0));
+  for (let i = 0; i <= m; i++) dp[i]![0] = i;
+  for (let j = 0; j <= n; j++) dp[0]![j] = j;
+  for (let i = 1; i <= m; i++) {
+    for (let j = 1; j <= n; j++) {
+      dp[i]![j] =
+        a[i - 1] === b[j - 1]
+          ? dp[i - 1]![j - 1]!
+          : 1 + Math.min(dp[i - 1]![j]!, dp[i]![j - 1]!, dp[i - 1]![j - 1]!);
+    }
+  }
+  return dp[m]![n]!;
+}
+function nameSimilarity(a: string, b: string): number {
+  const maxLen = Math.max(a.length, b.length);
+  return maxLen === 0 ? 1 : 1 - levenshtein(a, b) / maxLen;
+}
+
+// Tolerant name match: accepts the plain normalization, the suffix-stripped
+// one ("Levante UD" ↔ "Levante"), the abbreviation-expanded one ("Atl.
+// Tucuman" ↔ "Atletico Tucuman"), or — as a last, careful resort — a high
+// (>=0.82) fuzzy-similarity match on the stripped names, which catches
+// whatever spelling/abbreviation variety isn't covered by the explicit
+// rules above without loosening things enough to confuse distinct clubs
+// that share a word (verified against a battery of real near-miss pairs —
+// e.g. "Deportivo Cali" vs "Deportivo Pasto" scores 0.73, safely below the
+// 0.82 bar — including keeping identity-bearing words like "Real"/
+// "United"/"City" out of the strip list in the first place).
 function namesMatch(a: string, b: string): boolean {
   if (slugifyTeamName(a) === slugifyTeamName(b)) return true;
   if (slugifyTeamNameStripped(a) === slugifyTeamNameStripped(b)) return true;
-  return slugifyTeamNameExpanded(a) === slugifyTeamNameExpanded(b);
+  if (slugifyTeamNameExpanded(a) === slugifyTeamNameExpanded(b)) return true;
+  return nameSimilarity(slugifyTeamNameStripped(a), slugifyTeamNameStripped(b)) >= 0.82;
 }
 
 async function findInLiveFixturesList(
