@@ -393,6 +393,23 @@ export async function initDb(): Promise<void> {
         error         TEXT,
         created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
       );
+
+      CREATE TABLE IF NOT EXISTS sportscore_match_map (
+        id                SERIAL PRIMARY KEY,
+        sport             TEXT NOT NULL,
+        statpal_match_id  TEXT NOT NULL,
+        sportscore_id     TEXT NOT NULL,
+        tracker_id        TEXT,
+        home_team         TEXT,
+        away_team         TEXT,
+        match_date        TEXT,
+        source            TEXT NOT NULL DEFAULT 'manual',
+        created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+
+      CREATE UNIQUE INDEX IF NOT EXISTS sportscore_match_map_statpal_idx
+        ON sportscore_match_map (sport, statpal_match_id);
     `);
 
     console.info("[db/init] Schema initialisation complete.");
