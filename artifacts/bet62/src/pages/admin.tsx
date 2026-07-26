@@ -5390,8 +5390,7 @@ export default function AdminPage() {
                     <Button
                       onClick={handleTestSportscoreMatch}
                       disabled={sportscoreTesting}
-                      variant="outline"
-                      className="h-9 border-zinc-700 text-zinc-300"
+                      className="h-9 bg-zinc-700 hover:bg-zinc-600 text-white"
                     >
                       {sportscoreTesting ? (
                         <Loader2 size={14} className="animate-spin" />
@@ -5402,12 +5401,15 @@ export default function AdminPage() {
                   </div>
 
                   {sportscoreTestResult && (
-                    <div className="px-5 py-4 border-b border-zinc-800 bg-zinc-950/50">
+                    <div
+                      className="px-5 py-4"
+                      style={{ background: "#18181b", borderBottom: "1px solid #27272a" }}
+                    >
                       <div className="flex items-center gap-2 mb-3">
                         {sportscoreTestResult.result ? (
                           <>
-                            <CheckCircle size={15} className="text-emerald-400" />
-                            <span className="text-sm font-bold text-emerald-400">
+                            <CheckCircle size={15} style={{ color: "#34d399" }} />
+                            <span className="text-sm font-bold" style={{ color: "#34d399" }}>
                               Encontrado: slug "{sportscoreTestResult.result.slug}"
                               {sportscoreTestResult.result.id
                                 ? ` · trackerId ${sportscoreTestResult.result.id}`
@@ -5416,15 +5418,15 @@ export default function AdminPage() {
                           </>
                         ) : (
                           <>
-                            <XCircle size={15} className="text-red-400" />
-                            <span className="text-sm font-bold text-red-400">
+                            <XCircle size={15} style={{ color: "#f87171" }} />
+                            <span className="text-sm font-bold" style={{ color: "#f87171" }}>
                               {sportscoreTestResult.error || "Não encontrado"}
                             </span>
                           </>
                         )}
                       </div>
                       {sportscoreTestResult.detail && (
-                        <div className="text-xs text-zinc-500 mb-2 font-mono">
+                        <div className="text-xs mb-2 font-mono" style={{ color: "#a1a1aa" }}>
                           {sportscoreTestResult.detail}
                         </div>
                       )}
@@ -5433,14 +5435,19 @@ export default function AdminPage() {
                           {sportscoreTestResult.steps.map((s, i) => (
                             <div
                               key={i}
-                              className={`text-xs px-2.5 py-1.5 rounded border ${s.ok ? "border-emerald-900/60 bg-emerald-950/30 text-emerald-300" : "border-zinc-800 bg-zinc-900 text-zinc-400"}`}
+                              className="text-xs px-2.5 py-1.5 rounded"
+                              style={{
+                                background: s.ok ? "#052e21" : "#27272a",
+                                color: s.ok ? "#6ee7b7" : "#d4d4d8",
+                                border: `1px solid ${s.ok ? "#065f46" : "#3f3f46"}`,
+                              }}
                             >
                               <span className="font-bold uppercase mr-2">{s.step}</span>
                               {s.status != null && (
                                 <span className="font-mono mr-2">HTTP {s.status}</span>
                               )}
                               {s.detail}
-                              <div className="text-zinc-600 font-mono mt-0.5 break-all">
+                              <div className="font-mono mt-0.5 break-all" style={{ color: "#71717a" }}>
                                 {s.url}
                               </div>
                             </div>
