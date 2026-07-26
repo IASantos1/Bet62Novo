@@ -17829,7 +17829,7 @@ export default function Home({
                           // stops it before everything unwanted.
                           const isTennisSport = expandedMatch.sport === "tennis";
                           const topOffset = isTennisSport ? 70 : 0;
-                          const courtHeight = isTennisSport ? 115 : 190;
+                          const courtHeight = isTennisSport ? 145 : 225;
                           return (
                             <div className="flex flex-col items-center">
                               <div
