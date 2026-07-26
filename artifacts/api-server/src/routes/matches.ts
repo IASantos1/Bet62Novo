@@ -19799,10 +19799,41 @@ function slugifyTeamName(name: string): string {
 // "atlético" — those distinguish Real Madrid from Real Betis, Manchester
 // United from Manchester City, etc.; stripping them would cause wrong
 // matches, not just missed ones).
-const CLUB_TOKEN_RE = /\b(fc|cf|ud|sc|ac|cd|afc|sad|club|clube|futebol clube|f\.c\.)\b/gi;
+const CLUB_TOKEN_RE = /\b(fc|cf|ud|sc|ac|cd|afc|sad|club|clube|futebol clube|esporte clube|f\.c\.)\b/gi;
 function slugifyTeamNameStripped(name: string): string {
   const stripped = name.replace(CLUB_TOKEN_RE, " ").replace(/\s+/g, " ").trim();
   return slugifyTeamName(stripped || name);
+}
+
+// Statpal often abbreviates common Spanish/Portuguese football name
+// components to save space in lists ("Atl. Tucuman", "Ind. Rivadavia", "San
+// Martin S.J."). SportScore's own slugs use the name in full, so an
+// abbreviated name never matches by simple stripping — it needs expanding
+// into a separate guess. This only ever produces one more *candidate*; it's
+// never used to reject a match, so an over-eager or wrong expansion is
+// harmless — it just fails the real-API confirmation like any other bad
+// guess would.
+const ABBREVIATION_MAP: Record<string, string> = {
+  "atl.": "atletico",
+  atl: "atletico",
+  "ind.": "independiente",
+  ind: "independiente",
+  "dep.": "deportivo",
+  dep: "deportivo",
+  "nac.": "nacional",
+  "gral.": "general",
+  gral: "general",
+  "def.": "defensores",
+  def: "defensores",
+};
+function expandAbbreviations(name: string): string {
+  return name
+    .split(/\s+/)
+    .map((word) => ABBREVIATION_MAP[word.toLowerCase()] ?? word)
+    .join(" ");
+}
+function slugifyTeamNameExpanded(name: string): string {
+  return slugifyTeamName(expandAbbreviations(name));
 }
 
 type SportscoreFixture = { id: string; slug: string };
@@ -19864,7 +19895,8 @@ export type SportscoreDiagStep = {
 // "Real"/"United"/"City" out of the strip list).
 function namesMatch(a: string, b: string): boolean {
   if (slugifyTeamName(a) === slugifyTeamName(b)) return true;
-  return slugifyTeamNameStripped(a) === slugifyTeamNameStripped(b);
+  if (slugifyTeamNameStripped(a) === slugifyTeamNameStripped(b)) return true;
+  return slugifyTeamNameExpanded(a) === slugifyTeamNameExpanded(b);
 }
 
 async function findInLiveFixturesList(
@@ -19930,6 +19962,8 @@ async function findByGuessedSlug(
   const a = slugifyTeamName(awayTeam);
   const hStripped = slugifyTeamNameStripped(homeTeam);
   const aStripped = slugifyTeamNameStripped(awayTeam);
+  const hExpanded = slugifyTeamNameExpanded(homeTeam);
+  const aExpanded = slugifyTeamNameExpanded(awayTeam);
   const candidates = Array.from(
     new Set(
       [
@@ -19937,6 +19971,8 @@ async function findByGuessedSlug(
         `${a}-vs-${h}`,
         `${hStripped}-vs-${aStripped}`,
         `${aStripped}-vs-${hStripped}`,
+        `${hExpanded}-vs-${aExpanded}`,
+        `${aExpanded}-vs-${hExpanded}`,
       ].filter((s) => !s.startsWith("-vs-") && !s.endsWith("-vs-")),
     ),
   );
