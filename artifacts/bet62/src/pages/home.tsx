@@ -17813,14 +17813,24 @@ export default function Home({
                       <div className="mb-3">
                         {sportscoreId ? (
                           <div className="flex flex-col items-center">
-                            <div className="w-full max-w-[320px] overflow-hidden rounded-xl border border-zinc-800/70 bg-zinc-950">
+                            {/* The embed's own layout is header + field + score,
+                                then (below that) an events timeline and its own
+                                "Live tracker by sportscore.com" link — we only
+                                want the field/score part. The iframe keeps its
+                                natural height so its internal layout doesn't
+                                reflow/distort; the shorter wrapper just clips
+                                the extra timeline+link area below it. Our own
+                                small attribution link (kept below, unclipped)
+                                takes over since the iframe's own is cropped
+                                away. */}
+                            <div className="w-full max-w-[320px] h-[262px] overflow-hidden rounded-xl border border-zinc-800/70 bg-zinc-950">
                               <iframe
                                 key={sportscoreId}
                                 src={`https://sportscore.com/embed/tracker/${encodeURIComponent(expandedMatch.sport || "football")}/${sportscoreId.replace(/^\/+|\/+$/g, "")}/`}
                                 title="Match Tracker"
                                 width={320}
                                 height={420}
-                                className="block w-full"
+                                className="block w-[320px] max-w-none"
                                 loading="lazy"
                                 referrerPolicy="no-referrer-when-downgrade"
                               />
