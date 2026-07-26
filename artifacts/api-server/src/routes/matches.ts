@@ -19784,14 +19784,6 @@ function slugifyTeamNameStripped(name: string): string {
   return slugifyTeamName(stripped || name);
 }
 
-// Negative-result cache so a fixture that isn't found isn't re-searched
-// against sportscore.com on every request for the same match. Kept short —
-// long enough to avoid hammering SportScore on rapid re-renders, short
-// enough that a fixture appearing on their side (or a fixed guess) doesn't
-// stay silently blocked for the rest of the match.
-const sportscoreLookupFailCache = new Map<string, number>();
-const SPORTSCORE_LOOKUP_FAIL_TTL_MS = 3 * 60 * 1000;
-
 type SportscoreFixture = { id: string; slug: string };
 
 function pickStr(obj: Record<string, unknown>, keys: string[]): string | null {
@@ -20025,16 +20017,8 @@ router.get(
         return;
       }
 
-      const failKey = `${sport}:${matchId}`;
-      const failedAt = sportscoreLookupFailCache.get(failKey);
-      if (failedAt && Date.now() - failedAt < SPORTSCORE_LOOKUP_FAIL_TTL_MS) {
-        res.json({ sportscoreId: null, trackerId: null });
-        return;
-      }
-
       const fixture = await findSportscoreFixture(sport, homeTeam, awayTeam);
       if (!fixture) {
-        sportscoreLookupFailCache.set(failKey, Date.now());
         res.json({ sportscoreId: null, trackerId: null });
         return;
       }
